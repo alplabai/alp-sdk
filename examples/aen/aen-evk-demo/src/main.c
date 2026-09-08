@@ -1153,8 +1153,15 @@ static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
  * Vela-compiled person_detect_u85 model is ~263 KiB, which is precisely
  * why THAT app links into MRAM slot0 and boots via Flow D instead of
  * RAM-running. This demo is a Flow C ITCM RAM-run: ITCM is 256 KB total
- * and the demo already occupies 108552 B (41.41%) of it -- it was 95008 B
- * (36.24%) before phase 13, so the headroom is shrinking, not growing. A
+ * and the demo already occupies about 106 KB (41.41%) of it -- it was
+ * roughly 93 KB (36.24%) before phase 13, so the headroom is shrinking,
+ * not growing. Deliberately not a byte-exact figure: the size depends on
+ * which conf fragments the build layers, and a bench Flow C build
+ * (RAM console, scripts/bench/aen/aen-bench-shared.conf) and a plain
+ * scripts/bench/aen/build.sh differ by a few bytes. A byte count printed
+ * from a string literal also goes stale the moment anything else in this
+ * file changes -- it did exactly that, by 8 bytes, in the commit that
+ * introduced it. The argument does not need the precision. A
  * ~263 KiB model does not fit in what is left, by a wide margin and not
  * by a trimmable one. Adding NPU inference here therefore means relinking the whole
  * demo into MRAM slot0 and switching its boot flow -- a different unit of
@@ -1166,9 +1173,9 @@ static phase_verdict_t phase_npu_stub(demo_ctx_t *ctx)
 	ARG_UNUSED(ctx);
 	printf("[evkdemo] -- Phase: NPU inference -- SKIPPED (needs a boot-flow change, not a "
 	       "phase: aen-npu-inference-alp's person_detect_u85 model is ~263 KiB and this "
-	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, 108552 B (41.41%%) already "
-	       "used, so the model would have to move the whole image to MRAM slot0 / Flow D) "
-	       "--\n");
+	       "demo is a Flow C ITCM RAM-run -- 256 KB ITCM total, about 106 KB (41.41%%) "
+	       "already used, so the model would have to move the whole image to MRAM slot0 / "
+	       "Flow D) --\n");
 	return PHASE_SKIPPED;
 }
 
