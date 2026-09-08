@@ -120,10 +120,32 @@ soften the move -- data that used to hit single-cycle DTCM now goes to uncached
 global SRAM over the fabric. Nothing becomes incorrect; things become slower.
 The one phase with an inner loop tight enough to care is **phase 8**, whose
 SPI1 FIFO refill feeds a 25 MHz link and whose DW-SSI master deasserts its own
-chip-select if it underruns mid-frame. That is a hypothesis, not a measurement,
-and it is **loud rather than silent**: phase 8 prints its own verdict in the
-same transcript as phase 10, so a bench run that regresses it says so. If it
-does, phase 10 and this memory map back out together.
+chip-select if it underruns mid-frame. That is a hypothesis, not a measurement.
+
+**If phase 8 starts failing after this change, read it as a memory-placement
+regression first, not a CC3501E fault.** Phase 8 does print its own verdict, so
+a hard regression is visible — but an intermittent underrun costing one frame
+in fifty presents as a *flaky* phase 8 with nothing pointing at phase 10, and
+the bridge has enough genuine failure modes of its own (power, pinmux, the
+`READY` re-arm race, `RX_SAMPLE_DLY`) to absorb the blame. The cheap
+disambiguation is to rebuild with `zephyr,sram` back on `&dtcm` and phase 10
+dropped; if phase 8 goes solid, it is this memory map.
+
+The pre-change baseline, measured on silicon, is what a good phase 8 looks like:
+
+```
+CC3501E: bridge bring-up (WIFI_EN high, nRESET pulsed, SPI1 @ 25000000 Hz) -> 0
+CC3501E: PING (0x00) -> 0 after 1 attempt(s) of 25 (200 ms apart)
+CC3501E: GET_VERSION (0x01) -> 0 protocol v3.1 (host built for v3.1) match
+CC3501E: GET_MAC (0x03) -> 0  44:3e:8a:10:b6:a7
+CC3501E: GET_CAPABILITIES (0x06) -> 0 caps=0x00000fff
+CC3501E: WIFI_SCAN_START (0x10) -> 0  4 network(s) seen, 4 plausible  ok
+CC3501E: BLE_ENABLE (0x30) -> 0
+```
+
+`PING` needing more than one attempt, or a `GET_MAC` that comes back shifted by
+a leading `0x00`, are the two symptoms that would point at timing rather than
+at the coprocessor.
 
 ## Buses
 
@@ -268,7 +290,7 @@ DHCP server:
 [evkdemo] ETH: RMII refclk = EXTERNAL oscillator -- the PHY was powered before the probe (ETH_CTRL bit4=0)
 [evkdemo] ETH: net_if_up -> 0
 [evkdemo] ETH: MDIO PHY@0 id=2000a140 (DP83825 = 2000a140)
-[evkdemo] ETH: PHY regs ANAR=01e1 ANLPAR=45e1 PHYSTS=0000 RCSR=0081
+[evkdemo] ETH: PHY regs ANAR=01e1 ANLPAR=45e1 PHYSTS=0000 RCSR=0001
 [evkdemo] ETH: RCSR 0x0001 -> 0x0081 (REF_CLK_SEL = 50 MHz reference)
 [evkdemo] ETH: wire link UP after 2500 ms (BMSR=786d ANLPAR=45e1)
 [evkdemo] ETH: admin_up=1 carrier_ok=1(SYNTHETIC, not a link proof) tx_bytes=1188 rx_bytes=684 dhcp_bound=1
@@ -277,7 +299,10 @@ DHCP server:
 
 The addresses, register values and byte counts are **shape, not expected
 values**; the DP83825 identity `2000a140` and `ETH_CTRL bit4=0` are the two
-parts a reader should treat as characteristic. On a bench with nothing plugged
+parts a reader should treat as characteristic. Note the ordering: the `PHY
+regs` line is read *before* `RCSR` bit 7 is set, so it shows the pre-write
+value and the next line shows the write -- a transcript where both read `0081`
+is one that has been edited. On a bench with nothing plugged
 in, the same phase stops after `wire link DOWN` and reports
 `SKIPPED -- no carrier -- cable?`, which is a normal unattended run and not a
 failure.
@@ -316,10 +341,13 @@ it on both the per-phase line and in the summary table. A qualifier explains a
 verdict, it is never a fourth one and never changes what a phase counts as.
 Phase 8 sets one when its Wi-Fi scan comes back empty --
 `CC3501E Wi-Fi/BLE   PASS    scan UNCORROBORATED -- 0 networks seen` -- and
-phase 10 sets one on every non-`PASS` outcome, so a reader of the table alone
-can tell `Ethernet  SKIPPED  no carrier -- cable?` from
-`Ethernet  SKIPPED  link UP, TX ok, RX silent -- no DHCP server, or dead RX`
-without going back to the log.
+phase 10 sets one on **every** non-`PASS` outcome, `SKIPPED` and `FAIL` alike.
+That matters most for the `FAIL`s, which are otherwise indistinguishable in the
+table: `Ethernet  FAIL  no PHY answered on MDIO` and
+`Ethernet  FAIL  link UP but the MAC transmitted ZERO bytes` are different
+bench sessions, and so are
+`Ethernet  SKIPPED  no carrier -- cable?` and
+`Ethernet  SKIPPED  link UP, TX ok, RX silent -- no DHCP server, or dead RX`.
 
 ## Reference
 

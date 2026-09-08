@@ -93,6 +93,74 @@ The phase never joins anything it should not: DHCP is a lease request on the
 segment the operator plugged the board into, and the app carries no static
 address, no credentials and no route configuration.
 
+**Review found one claim in this change that was itself the kind of lie the app
+exists to refuse, and it is now corrected rather than softened.** `prj.conf`
+and `testcase.yaml` both said the `CONFIG_DCACHE=n` line was enforced at build
+time by `eth_dwmac_alif`'s `BUILD_ASSERT`. It is not. That assert is
+`IS_ENABLED(CONFIG_NOCACHE_MEMORY) || !IS_ENABLED(CONFIG_DCACHE)`, and
+`zephyr/kconfigs/vendor-alif-peripherals.kconfig` does
+`select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT`, which holds on this
+M55 — so the left operand is already true and the assert is satisfied
+unconditionally. Building this app with `CONFIG_DCACHE=y` added compiles clean
+with no diagnostic. Both files now say what is actually true: on this config
+`DCACHE=n` is protected by its comment and nothing else, and `NOCACHE_MEMORY`
+being on covers the driver's descriptor rings but not the `net_buf` pool or
+phase 13's `SRAM0` buffers. The invariant CI *does* hold — the `SRAM0` region
+overflowing if an oversized tagged buffer is added — is stated in its place.
+
+Eight smaller corrections from the same pass:
+
+* the overlay no longer re-declares `gpio11@4900b000`. The E8 dtsi already
+  declares `gpio11`..`gpio14` with their eight per-pin interrupts as
+  `status = "disabled"`, so this is now `&gpio11 { status = "okay"; }` —
+  restating `reg`/`ngpios` in an overlay silently dropped the dtsi's
+  `interrupts` and would drift. (`examples/aen/aen-ethernet-link`'s overlay
+  still carries the older "the dtsi does not declare it" claim; it predates
+  the dtsi gaining ports 11..14 and is worth a follow-up there.);
+* both MDIO helpers bounded their post-transaction wait but spun **unbounded**
+  on the busy bit at entry. In a standalone app that is survivable; as phase 10
+  of 14 a stuck `GB` bit would have eaten phases 11-14, the summary table and
+  the `RESULT` line. Now bounded, returning `0xFFFF`, which `eth_phy_find()`
+  already reads as "no device" — so a wedged bus degrades into a clean
+  `FAIL` with a reason instead of a hang;
+* all four `FAIL` paths now set a summary qualifier. Previously only the three
+  `SKIPPED` paths did, so every `FAIL` rendered identically in the table and a
+  reader could not tell "no PHY answered on MDIO" from "link UP but the MAC
+  transmitted ZERO bytes" — which is precisely the distinction the phase was
+  built to draw;
+* `eth_phy_power_init()` propagates the return of every `pinctrl_configure_pins`
+  and GPIO call instead of returning 0 unconditionally. A failed mux used to
+  surface later as "NO PHY answered … check E_PHY_PWRDWN drove high", pointing
+  a bench session at hardware for a software failure;
+* `CONFIG_NET_DHCPV4_INITIAL_DELAY_MAX` is pinned to its Kconfig minimum of 2.
+  At Zephyr's default of 10 the client's random RFC 2131 4.4.1 pre-DISCOVER
+  wait would consume two thirds of the phase's window, leaving a real
+  DISCOVER..ACK budget of about a third of what the code's comment claimed and
+  raising the odds of a spurious "no DHCP server" `SKIPPED`. No `FAIL` risk
+  either way — a DISCOVER always went out before the window closed, so the
+  `tx == 0` gate was never at stake;
+* the MDIO register addresses derive from `DT_REG_ADDR(DT_NODELABEL(ethernet))`
+  rather than repeating the GMAC base as a literal. The `ETH_CTRL` read is
+  still a literal and is now labelled as the genuine second copy it is: the
+  driver's `ALIF_ETH_CTRL_REG` is a private `#define` in its `.c` with no
+  header to include;
+* the `SYS_INIT` ordering comment said "after gpio_dw (40)", glossing the init
+  *level*. `gpio_dw` is `PRE_KERNEL_1` priority 40 — an earlier level, not just
+  a lower number — so the conclusion held but was weaker than the fact;
+* the README's sample transcript printed `RCSR=0081` on the PHY-regs line and
+  then reported the write as `0x0001 -> 0x0081`. The read happens first, so a
+  real transcript reads `0001`; the "shape, not expected values" disclaimer
+  does not cover an inconsistency a reader would use to sanity-check their run.
+
+**And a note for whoever runs this on the bench next.** The DCACHE-off cost to
+phase 8 is loud only if it is total. An intermittent SPI underrun costing one
+frame in fifty would present as a *flaky* phase 8 with nothing pointing at
+phase 10, and the bridge has enough genuine failure modes to absorb the blame.
+So the README's memory-map section now says to read any new phase-8 failure as
+a placement regression first, gives the one-step disambiguation (rebuild with
+`zephyr,sram` back on `&dtcm` and phase 10 dropped), and records the
+pre-change silicon transcript as the baseline to compare against.
+
 Builds clean for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`, still inside
 the Flow C ITCM budget with room to spare, and with the descriptor rings, the
 `net_buf` pools and phase 13's JPEG buffers verified by symbol address to land

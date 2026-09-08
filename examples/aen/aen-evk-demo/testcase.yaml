@@ -14,14 +14,21 @@
 # of a cable as well.
 #
 # WHAT THE COMPILE ALONE IS WORTH FOR PHASE 10, since it can never run here:
-# it holds the app's memory map to its invariant. The Ethernet phase forced
+# exactly one invariant, and it is a real one. The Ethernet phase forced
 # system RAM out of the M55 DTCM into a carved window of the global SRAM0
 # bank, disjoint from the SRAM0 linker region phase 13's JPEG buffers live
-# in -- and the overlay deliberately shrinks &sram0 so that an oversized
-# SRAM0-tagged buffer becomes a LINK ERROR here rather than a silent
-# overlap on the bench. It also compile-checks the eth_dwmac_alif glue's
-# BUILD_ASSERT that the GMAC's descriptor memory is coherent
-# (CONFIG_DCACHE=n on this image).
+# in -- and the overlay deliberately shrinks &sram0 to that window, so an
+# oversized SRAM0-tagged buffer added later fails HERE with
+# "region `SRAM0' overflowed" instead of silently aliasing system RAM on the
+# bench. Verified by adding one.
+#
+# WHAT IT IS NOT WORTH, so nobody reads more into a green run than is there:
+# it does NOT prove the GMAC's DMA memory is cache-coherent. The obvious
+# candidate for that, eth_dwmac_alif's BUILD_ASSERT, is satisfied
+# unconditionally on this config -- CONFIG_NOCACHE_MEMORY is select'ed on by
+# zephyr/kconfigs/vendor-alif-peripherals.kconfig, and the assert is an OR --
+# so a build with CONFIG_DCACHE=y passes this scenario clean. The
+# CONFIG_DCACHE=n line in prj.conf is protected by its comment, not by CI.
 
 sample:
   name: aen-evk-demo

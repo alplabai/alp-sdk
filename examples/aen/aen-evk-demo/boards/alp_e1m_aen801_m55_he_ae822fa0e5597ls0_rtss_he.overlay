@@ -297,22 +297,22 @@
 };
 
 /*
- * E_PHY_RESET = P11_6 lives on gpio11@4900b000, which the alp-sdk E8 dtsi does
- * not declare (it carries gpio0..gpio9 and lpgpio only), so the node is created
- * here -- reg/ngpios from the Alif fork dts. E_PHY_PWRDWN = P15_4 is on the
- * lpgpio island, which THIS overlay already enables further down for phase 8's
- * WIFI_EN / nRESET; phase 10 just borrows pin 4 of it. Both are ALIF pins per
- * the SoM TSV, NOT CC3501E lines as the reference app first assumed.
+ * E_PHY_RESET = P11_6 lives on gpio11, which the alp-sdk E8 dtsi ALREADY
+ * declares (gpio11..gpio14, with reg, ngpios and their eight per-pin
+ * interrupts) as status="disabled" -- so it only needs enabling here.
+ * Deliberately not re-declared: restating reg/ngpios in an overlay silently
+ * drops the dtsi's `interrupts` and drifts the moment the dtsi is corrected.
+ * (examples/aen/aen-ethernet-link's overlay still carries the older claim that
+ * the node has to be created; that predates the dtsi gaining ports 11..14 and
+ * is worth a follow-up there.)
+ *
+ * E_PHY_PWRDWN = P15_4 is on the lpgpio island, which THIS overlay already
+ * enables further down for phase 8's WIFI_EN / nRESET; phase 10 just borrows
+ * pin 4 of it. Both are ALIF pins per the SoM TSV, NOT CC3501E lines as the
+ * reference app first assumed.
  */
-&soc {
-	gpio11: gpio@4900b000 {
-		compatible = "snps,designware-gpio";
-		reg = <0x4900B000 0x1000>;
-		ngpios = <8>;
-		gpio-controller;
-		#gpio-cells = <2>;
-		status = "okay";
-	};
+&gpio11 {
+	status = "okay";
 };
 
 &ethernet {

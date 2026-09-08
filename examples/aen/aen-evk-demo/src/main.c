@@ -1665,7 +1665,13 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 #define ETH_LINK_POLL_MS 250
 #define ETH_LINK_POLLS   32 /* 32 x 250 ms = 8 s for auto-negotiation */
 #define ETH_DHCP_POLL_MS 500
-#define ETH_DHCP_POLLS   30 /* 30 x 500 ms = 15 s for DISCOVER..ACK */
+/* 30 x 500 ms = 15 s of WALL CLOCK, which is not the same as 15 s of DHCP: the
+ * client first waits a random RFC 2131 4.4.1 interval capped by
+ * CONFIG_NET_DHCPV4_INITIAL_DELAY_MAX. prj.conf pins that cap to its Kconfig
+ * minimum of 2 s for exactly this reason -- at the Zephyr default of 10 s the
+ * real DISCOVER..ACK budget would be 5 s, and a good segment could report "no
+ * DHCP server" purely on timing. */
+#define ETH_DHCP_POLLS 30
 
 /* Pad-mux states for the two PHY control lines. gpio_dw applies no mux of its
  * own, so the GPIO/LPGPIO function (function 0) has to be selected through the
@@ -1684,8 +1690,11 @@ static const pinctrl_soc_pin_t eth_phy_pwrdwn_mux[] = { PIN_P15_4__LPGPIO };
  * back before the phase runs: bench-observed as ETH_CTRL bit4 = 1.
  *
  * So this is a SYS_INIT at POST_KERNEL priority 50, which lands in the only
- * window that works: after gpio_dw (40) so the controllers exist, before
- * eth_dwmac (ETH_INIT_PRIORITY, 60) so the probe sees a clocked PHY.
+ * window that works. Both neighbours were read out of the produced artefacts,
+ * not assumed: gpio_dw initialises at PRE_KERNEL_1 priority 40 -- an EARLIER
+ * LEVEL, not merely a lower number, so the controllers are up with margin --
+ * and eth_dwmac at POST_KERNEL CONFIG_ETH_INIT_PRIORITY = 60, after us, so its
+ * ref-clock probe sees a PHY that is already powered.
  *
  * It runs on every boot, including runs where phase 10 is never reached --
  * unavoidable, and harmless: it touches two pads (P15_4, P11_6) that nothing
@@ -1700,16 +1709,37 @@ static int eth_phy_power_init(void)
 		return -ENODEV;
 	}
 
-	pinctrl_configure_pins(eth_phy_reset_mux, ARRAY_SIZE(eth_phy_reset_mux), 0U);
-	pinctrl_configure_pins(eth_phy_pwrdwn_mux, ARRAY_SIZE(eth_phy_pwrdwn_mux), 0U);
+	/*
+	 * EVERY rc below is propagated, and that is worth a line of explanation.
+	 * The phase's own failure message for a dead PHY points the operator at
+	 * hardware ("check E_PHY_PWRDWN drove high, E_PHY_RESET released, the
+	 * MDC/MDIO pinmux"). If a mux or a pin configure had quietly failed here,
+	 * that message would be aiming a bench session at a board fault that does
+	 * not exist. A non-zero return from a SYS_INIT hook is reported by the
+	 * kernel with this function's name, so the boot log names the real cause.
+	 */
+	int rc = pinctrl_configure_pins(eth_phy_reset_mux, ARRAY_SIZE(eth_phy_reset_mux), 0U);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = pinctrl_configure_pins(eth_phy_pwrdwn_mux, ARRAY_SIZE(eth_phy_pwrdwn_mux), 0U);
+	if (rc != 0) {
+		return rc;
+	}
 
 	/* E_PHY_PWRDWN gates a board power switch rather than the PHY's own
 	 * power-down input on this module -- the "needs a power enable" the bench
 	 * called out IS this pin -- so it is driven HIGH to turn the supply on.
 	 * The SoM TSV gives the pad, not the polarity; both were bench-tried and
 	 * this is the one that produced a clocked PHY. */
-	gpio_pin_configure(lpgpio, PHY_PWRDWN_PIN, GPIO_OUTPUT_ACTIVE);
-	gpio_pin_set(lpgpio, PHY_PWRDWN_PIN, 1);
+	rc = gpio_pin_configure(lpgpio, PHY_PWRDWN_PIN, GPIO_OUTPUT_ACTIVE);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = gpio_pin_set(lpgpio, PHY_PWRDWN_PIN, 1);
+	if (rc != 0) {
+		return rc;
+	}
 	k_busy_wait(50000); /* let the supply and its reference clock settle */
 
 	/* Conventional DP83825 RST_N (active-low): LOW asserts, HIGH releases.
@@ -1717,10 +1747,19 @@ static int eth_phy_power_init(void)
 	 * stable ACROSS the reset -- a clock that is not stable at deassert leaves
 	 * the analog front-end uninitialised, which presents as a PHY that answers
 	 * MDIO but never links. */
-	gpio_pin_configure(gpio11, PHY_RESET_PIN, GPIO_OUTPUT_ACTIVE);
-	gpio_pin_set(gpio11, PHY_RESET_PIN, 0);
+	rc = gpio_pin_configure(gpio11, PHY_RESET_PIN, GPIO_OUTPUT_ACTIVE);
+	if (rc != 0) {
+		return rc;
+	}
+	rc = gpio_pin_set(gpio11, PHY_RESET_PIN, 0);
+	if (rc != 0) {
+		return rc;
+	}
 	k_busy_wait(50000);
-	gpio_pin_set(gpio11, PHY_RESET_PIN, 1);
+	rc = gpio_pin_set(gpio11, PHY_RESET_PIN, 1);
+	if (rc != 0) {
+		return rc;
+	}
 	k_busy_wait(100000); /* DP83825 post-reset settle, >= 50 ms */
 	return 0;
 }
@@ -1743,13 +1782,47 @@ SYS_INIT(eth_phy_power_init, POST_KERNEL, 50);
  * (a bad ID makes alp_jpeg_open() return NULL with ALP_ERR_NOT_READY), so the
  * poke would add nothing. Here there is NO other source of the answer at all
  * -- the only alternative reading, carrier_ok, is the synthetic one.
+ *
+ * The BASE comes from devicetree rather than a literal, so this app holds one
+ * copy of the GMAC address, not a second one that can drift from the node it
+ * is talking to. (The ETH_CTRL register read further down still IS a literal:
+ * the driver's ALIF_ETH_CTRL_REG is a private #define in its .c with no header
+ * to include, so there is nothing to reuse. Noted rather than papered over --
+ * that one is genuinely a second copy.)
  */
-#define GMAC_MDIO_ADDR 0x48100200U
-#define GMAC_MDIO_DATA 0x48100204U
+#define GMAC_BASE      DT_REG_ADDR(DT_NODELABEL(ethernet))
+#define GMAC_MDIO_ADDR (GMAC_BASE + 0x200U)
+#define GMAC_MDIO_DATA (GMAC_BASE + 0x204U)
 
+/* Bounded spin on MAC_MDIO_ADDRESS.GB (bit 0 = busy). Returns false if the bit
+ * never cleared.
+ *
+ * BOUNDED ON PURPOSE, and this is the one place it differs from the standalone
+ * reference: aen-ethernet-link spins on GB unbounded before each transaction,
+ * which is survivable in an app that does nothing else. Here it is phase 10 of
+ * 14 -- a stuck GB bit would eat phases 11 to 14, the summary table and the
+ * RESULT line, so a hardware fault would present as a demo that prints nothing
+ * more, which is the least diagnosable outcome available. */
+static bool eth_mdio_wait_idle(void)
+{
+	for (int i = 0; i < 100000; i++) {
+		if ((sys_read32(GMAC_MDIO_ADDR) & BIT(0)) == 0U) {
+			return true;
+		}
+		k_busy_wait(1);
+	}
+	printf("[evkdemo] ETH: MDIO busy bit stuck -- the MAC is not answering its management "
+	       "interface\n");
+	return false;
+}
+
+/* Returns the register value, or 0xFFFF if the bus never went idle -- which
+ * eth_phy_find() already treats as "no device here", so a wedged bus degrades
+ * into a clean "no PHY answered" FAIL instead of a hang. */
 static uint16_t eth_mdio_read(uint8_t phy, uint8_t reg)
 {
-	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	if (!eth_mdio_wait_idle()) {
+		return 0xFFFFU;
 	}
 	uint32_t a =
 	    ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) | BIT(0);
@@ -1762,7 +1835,8 @@ static uint16_t eth_mdio_read(uint8_t phy, uint8_t reg)
 
 static void eth_mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
 {
-	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	if (!eth_mdio_wait_idle()) {
+		return;
 	}
 	sys_write32(val, GMAC_MDIO_DATA);
 	uint32_t a = ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(2) | BIT(0);
@@ -1841,6 +1915,7 @@ static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
 	if (iface == NULL) {
 		printf("[evkdemo] ETH: no default network interface -- the alif,ethernet node did "
 		       "not bind (check the overlay's &ethernet status and CONFIG_ETH_DWMAC_ALIF)\n");
+		ctx->note = "no network interface -- the MAC did not bind";
 		return PHASE_FAIL;
 	}
 
@@ -1877,6 +1952,7 @@ static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
 	printf("[evkdemo] ETH: net_if_up -> %d%s\n", rc, (rc == -EALREADY) ? " (already up)" : "");
 	if (rc != 0 && rc != -EALREADY) {
 		printf("[evkdemo] ETH: the interface refused to come up\n");
+		ctx->note = "net_if_up refused";
 		return PHASE_FAIL;
 	}
 
@@ -1886,6 +1962,7 @@ static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
 		       "is fitted on every E1M-AEN SoM, so this is on-module: check E_PHY_PWRDWN "
 		       "(P15_4) drove high, E_PHY_RESET (P11_6) released, and the MDC/MDIO pinmux "
 		       "(P11_2/P11_1)\n");
+		ctx->note = "no PHY answered on MDIO";
 		return PHASE_FAIL;
 	}
 
@@ -1945,6 +2022,7 @@ static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
 		printf("[evkdemo] ETH: link is UP but the MAC transmitted ZERO bytes -- no frame "
 		       "left the part. Suspect the descriptor rings / net_buf pool are not in "
 		       "DMA-reachable memory; see the placement block in this app's overlay\n");
+		ctx->note = "link UP but the MAC transmitted ZERO bytes";
 		return PHASE_FAIL;
 	}
 
