@@ -280,6 +280,58 @@ present, identifies the *carrier* revision and is independent of the
 SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 [`docs/board-id.md`](../board-id.md).
 
+## Rotary encoder (QEC0 / UTIMER channel 12) -- bench state {#rotary-encoder-qec0-bench-state}
+
+The E1M EVK's `PEC12R-4222F-S0024` (24 PPR) reaches the SoC as `ENC0_X` → E2
+`A10` → `P3_0` and `ENC0_Y` → E2 `B10` → `P3_1`
+(`metadata/e1m_modules/aen/from-alif.tsv`), decoded by **UTIMER channel 12** --
+QEC0 is channel 12, not channel 0.  Binding the qdec under `utimer0` reads a
+counter that never sees the encoder edges.
+
+**The decode path is not yet proven.**  Two defects were found on
+`E1M-AEN803` serial `2026W36-0002`; the first is fixed, the second is open.
+
+* **Fixed (#2037): the counter was configured and never started.**
+  `qdec_alif_utimer_init()` set `CNTR_CTRL` bit 0 `EN` but never issued the
+  global `UTIMER_GLB_CNTR_START` write, so every reading was a constant `0`
+  regardless of shaft motion.  Measured before and after the fix:
+
+  | register | address | before | after |
+  |---|---|---|---|
+  | `CNTR_CTRL` | `0x4800D080` | `0x00000021` | `0x00000023` |
+  | `GLB_CNTR_RUNNING` | `0x4800000C` | `0x00000000` | `0x00001000` |
+  | `GLB_CNTR_START` | `0x48000000` | `0x00000000` | `0x00000000` |
+
+  Bit 1 of `CNTR_CTRL` is `RUNNING` and bit 12 of `GLB_CNTR_RUNNING` is this
+  channel; both went from clear to set.  Every other channel register read
+  bit-identical across the two runs.
+
+* **Open (#2038): the counter advances on a stationary encoder.**  Five raw
+  `CNTR` (`0x4800D0A0`) reads over ~27 s with nobody touching the shaft:
+  `0x0000002D`, `0x0000001B`, `0x0000005F`, `0x00000039`, `0x0000003E`.  The
+  source is internal to the channel.  Ruled out on the bench, each at the cost
+  of a reservation: the pads (four configurations walked, including
+  `0x00290000` = AF 0, `P3_0`/`P3_1` deselected from the QEC entirely -- still
+  counting); the asymmetric input filter (`FILTER_CTRL_B` `0x4800D088` was
+  `0x00000000` against `FILTER_CTRL_A` `0x4800D084` = `0x00100101`; fixed, both
+  now read `0x00100101`, still counting); the trigger source (`UP_1_SRC`
+  `0x00000069` / `DOWN_1_SRC` `0x00000096` are a complete disjoint x4 decode);
+  and the channel driving its own input (`GLB_DRIVER_OEN` covers channels 0-11
+  only).  The leading remaining candidate is `CNTR_TYPE[4:2]` reading 0
+  (Sawtooth) where Alif's own QEC flow configures Triangle.
+
+**Two traps when you measure this.**  The counter wraps at its programmed
+reload (`CNTR_PTR` = `counts-per-revolution - 1` = `0x0000005F`), so neither
+the app's printed degrees nor a raw `CNTR` read can distinguish "static" from
+"advanced by exactly 96·k" -- no counts-per-second figure is derivable from
+either.  And while #2038 stands, **an attended run settles nothing**: a moving
+count appears whether or not anyone turns the shaft, so an operator cannot
+tell a working decoder from the spurious count.
+
+`counts-per-revolution` is **96** -- 24 PPR × 4 for the driver's x4 decode --
+and the qdec driver writes it into the hardware counter's reload register, so
+it sets the real wraparound rather than a display scale.
+
 ## Bring-up
 
 The general bring-up procedure in
