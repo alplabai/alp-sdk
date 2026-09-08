@@ -2065,21 +2065,51 @@ static phase_verdict_t phase_encoder_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* SD card: per DEMO-DESIGN.md's order constraint, the SDIO mux (EN/SEL on
- * CC35 GPIO_26/GPIO_30) hangs off the CC3501E's GPIO proxy, so it is not
- * reachable until phase 8 has powered and reset the coprocessor. Phase 8
- * now does exactly that and leaves `cc35_fw` bound and `cc35_link_up` set
- * (see that phase), so the blocker is gone -- what remains is the SD side
- * itself (the mux sequence, the SDIO host, a filesystem read), which is a
- * unit of work of its own and out of scope for this slice. NOTE for whoever
- * picks it up: driving the mux needs CONFIG_ALP_SDK_GPIO_CC3501E_PROXY plus
- * a cc3501e_gpio_routes[] table, neither of which this app carries yet --
- * see prj.conf's phase-8 block for why they are deliberately off today. */
+/* SD card. Two separate things stand between this stub and a real phase, and
+ * they are worth keeping apart because only one of them is software.
+ *
+ * 1. NO CARD IS FITTED on the bench this app is developed against
+ *    (maintainer, 2026-09-08). Nothing to enumerate, so a write/read/verify
+ *    round trip cannot be exercised here at all.
+ *
+ * 2. THE MUX SELECT IS NOT SOFTWARE-DRIVABLE ON r2. The microSD sits behind
+ *    a 74LVC157 pair with an ENABLE on E1M IO20 and a SELECT on E1M IO21.
+ *    IO20 reaches CC3501E GPIO_26 on both revisions, so the ENABLE is
+ *    drivable through the bridge's GPIO proxy. IO21 is the one that moved:
+ *    on r1 it reached CC3501E GPIO_30, and on r2 GPIO_30 was re-routed to
+ *    IO8 and IO21 was left open on the module -- it reaches neither chip
+ *    (metadata/e1m_modules/aen/hw-revisions.yaml, `pad_route_overrides`).
+ *
+ * That is NOT a dead end, and an earlier draft of this comment wrongly
+ * implied it was: the EVK brings the same net out to a header. From the
+ * 2626-R2 EVK netlist -- P18 pin 1 is +3V3 and pin 2 is `NetP18_2`, which
+ * reaches `MUX_SEL.SDIO` through R198 while R27 pulls it to 0V when the
+ * header is open. So a fitted jumper selects one mux position and an open
+ * header the other, with no firmware involved. The same net lands on both
+ * mux select inputs (U38 pin 1 `S`, U39 pin 1 `S`) and on E2 `L3` = IO21.
+ *
+ * CONTENTION WARNING for r1 boards: because `MUX_SEL.SDIO` reaches BOTH the
+ * P18 header and E2 IO21, an r1 module driving IO21 from firmware while a
+ * jumper is fitted on P18 puts a driven pin against the header rail. Fit the
+ * jumper OR drive the pin, not both. On r2 the module end is open, so the
+ * header is the only driver and there is nothing to contend with.
+ *
+ * What a real phase still needs, beyond a card and a mux position: the SDIO
+ * host bring-up, the ENABLE sequence over the proxy (which wants
+ * CONFIG_ALP_SDK_GPIO_CC3501E_PROXY plus a cc3501e_gpio_routes[] table --
+ * see prj.conf's phase-8 block for why both are off today), and a
+ * filesystem round trip confined to a file the demo owns. Writes are
+ * permitted; formatting the card is not -- a card in the slot is someone's.
+ */
 static phase_verdict_t phase_sdcard_stub(demo_ctx_t *ctx)
 {
 	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: SD card -- SKIPPED (the SDIO mux is behind the CC3501E "
-	       "bridge, deferred alongside it) --\n");
+	printf("[evkdemo] -- Phase: SD card -- SKIPPED (no card fitted on this bench, and the "
+	       "mux SELECT is not software-drivable on this module: E1M IO21 is unrouted on r2 "
+	       "where on r1 it reached CC3501E GPIO_30. Set the position on header P18 instead "
+	       "-- a jumper pulls MUX_SEL.SDIO high through R198, open lets R27 pull it to 0V; "
+	       "that net drives both mux selects, U38.S and U39.S. The ENABLE on IO20 stays "
+	       "drivable via CC3501E GPIO_26 on both revisions) --\n");
 	return PHASE_SKIPPED;
 }
 
