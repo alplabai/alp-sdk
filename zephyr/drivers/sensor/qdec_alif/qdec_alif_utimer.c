@@ -58,10 +58,19 @@
 #include "utimer.h"
 
 /*
- * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG, HWRM 13.2.6.3.26: "Set this bit if
- * incrementing or decrementing the counter via triggers."  hal_alif's
+ * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG, attributed to HWRM 13.2.6.3.26: "Set this
+ * bit if incrementing or decrementing the counter via triggers."  hal_alif's
  * utimer.h defines CNTR_CTRL bits 0, 1, 2, 4, 8 but not this one, and exposes
  * no setter for it (#1828).
+ *
+ * TREAT THAT CITATION AS UNCONFIRMED.  Neither the HWRM nor any document
+ * defining bit 5 is present in this tree, so nobody here has read the section
+ * being quoted; the Alif DFP header (drivers/include/utimer.h) likewise
+ * defines bits 0, 1, 2, 4 and 8 and no bit 5, and Alif's own QEC reference
+ * flow (Boards/Templates/Baremetal/demo_qec.c) never sets it.  Setting it is
+ * retained because #1828 measured a real behaviour change on silicon, not
+ * because the quoted text has been verified.  Anyone who gets the HWRM should
+ * check this section and either firm up the citation or delete it.
  */
 #define QDEC_CNTR_CTRL_TRIG_BIT 5U
 
@@ -212,7 +221,8 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	alif_utimer_config_qdec_triggers(timer_base);
 
 	/*
-	 * Put the channel in trigger-based counting.  HWRM 13.2.6.3.26
+	 * Put the channel in trigger-based counting.  Attributed to HWRM
+	 * 13.2.6.3.26 -- unconfirmed, see the QDEC_CNTR_CTRL_TRIG_BIT comment --
 	 * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG: "Set this bit if incrementing or
 	 * decrementing the counter via triggers.  0x0: Not in trigger based
 	 * increment/decrement mode.  0x1: Trigger based increment/decrement mode."
