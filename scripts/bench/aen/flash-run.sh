@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-run.sh <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-run.sh [--replace-atoc] [--] <build-dir> [post_boot_read_bytes_hex]
+#
+# A <build-dir> that itself begins with "-" needs the "--" above ahead of
+# it (standard getopt-style shape) -- without it, the flag parser below
+# rejects it as an unknown flag (exit 2).
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS over the SE-UART + JLinkExe, both Linux
@@ -21,6 +25,15 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
+REPLACE_ATOC=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--replace-atoc) REPLACE_ATOC=1; shift ;;
+	--) shift; break ;;
+	-*) echo "unknown flag: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 BD="$1"
 SIZE="${2:-0x500}"
 bench_require_setools || exit $?
@@ -39,13 +52,18 @@ NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
-# BUF would silently become the bare string "0x" and step 3's `mem8 $BUF,
+# BUF would silently become the bare string "0x" and step 4's `mem8 $BUF,
 # $SIZE` would run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block
-# indistinguishable from a boot failure. Step 3 below checks BUF_SYM directly.
+# indistinguishable from a boot failure. Step 4 below checks BUF_SYM directly.
 BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
 BUF=0x$BUF_SYM
 
-# 1. stage the image + a per-app signed-ATOC config (keeps the factory DEVICE cfg)
+# 1. stage the image + a per-app signed-ATOC config. app-write-mram -p REPLACES
+#    the device's ENTIRE ATOC with exactly what is in this JSON -- it is not a
+#    merge. Only "DEVICE" and "ALP-HE" below survive the write; any OTHER
+#    resident entry (a second core's app, MCUboot+slot0, an A32 Linux boot
+#    chain, ...) is silently delisted with no error and no SES warning. See
+#    the GUARD in step 2, alp-sdk#2025.
 #
 # THE ATOC SHAPE MUST MATCH HOW THE IMAGE IS LINKED (#1902).  Two shapes exist:
 #
@@ -100,11 +118,23 @@ JSON
 cd "$SET"
 echo ">>> FLASH $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 ./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
-# 2. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
+
+# 2. GUARD (alp-sdk#2025) -- app-write-mram -p below REPLACES the whole
+# resident ATOC, it does not merge (step 1 comment). One Flow A run on
+# e1m-aen-evk-01 (2026-09-07) silently delisted a live A32 Linux boot chain
+# (BOOTLOAD/A32_APP/HP_APP/HE_APP) down to just DEVICE + the freshly written
+# ALP-HE -- no error, no SES warning ("[SES] ATOC ok" prints either way).
+#
+# Shared with every other script that commits a fresh ATOC -- see
+# bench_atoc_replace_guard in bench-env.sh for the full rationale and the
+# `maintenance -opt gettoc` query it runs.
+bench_atoc_replace_guard "$REPLACE_ATOC" flash-run ALP-HE || exit $?
+
+# 3. write to MRAM over the SE-UART (SES auto-enters maintenance, burns, resets+boots)
 ./app-write-mram -c "$SE_UART" -p >/tmp/wrmram.log 2>&1 || true
 if grep -q "Done" /tmp/wrmram.log; then echo "MRAM write: Done ($(grep -oE '[0-9]+\.[0-9]+ seconds' /tmp/wrmram.log | tail -1))"; else echo "MRAM write FAILED:"; tail -5 /tmp/wrmram.log; exit 1; fi
 
-# 3. SES has booted the app; attach J-Link read-only and dump the RAM console
+# 4. SES has booted the app; attach J-Link read-only and dump the RAM console
 if [ -z "$BUF_SYM" ]; then
 	echo "----- $NAME RAM console: no 'ram_console_buf' in this image (UART-console app) -----" >&2
 	echo "      the MRAM write above still completed -- this is not a boot failure. Read the" >&2
