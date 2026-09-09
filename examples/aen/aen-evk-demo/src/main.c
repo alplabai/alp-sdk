@@ -137,7 +137,7 @@
 
 /*
  * Phase 9 only, and deliberate for the same reason the Ethernet headers above
- * are: the portable <alp/*.h> API publishes no block-device or filesystem
+ * are: the portable <alp/...> API publishes no block-device or filesystem
  * peripheral class at all, so there is nothing here to route through it. The
  * ONE thing phase 9 does reach for portably is the mux ENABLE pin, and that
  * IS opened through <alp/peripheral.h>'s alp_gpio_* on a portable E1M pin id
@@ -1761,8 +1761,12 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
  *   controller failed to init        -> FAIL. Any other non-zero from
  *        disk_access_init(): the card is detected and the SD handshake still
  *        did not complete. Our controller, pinmux or clocking.
- *   card present but no filesystem   -> SKIPPED. fs_mount() answers -ENODEV
- *        (FR_NO_FILESYSTEM, translated). See the no-format rule above.
+ *   card present but no filesystem   -> SKIPPED. fs_mount() answers -ENODEV,
+ *        which subsys/fs/fat_fs.c maps from THREE distinct ff.h causes alike
+ *        -- FR_INVALID_DRIVE, FR_NOT_ENABLED and FR_NO_FILESYSTEM -- so this
+ *        SKIP is also where this app's own disk-name/mount-point wiring
+ *        drifting would land, indistinguishably. See the no-format rule
+ *        above.
  *   write or verify mismatch         -> FAIL. The card enumerated and the
  *        filesystem mounted, and the data still did not survive the trip.
  *
@@ -1850,11 +1854,14 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 	}
 	k_msleep(SD_MUX_SETTLE_MS);
 
-	/* Closing the handle frees the proxy's slot; it does NOT undo the pad.
-	 * cc3501e_proxy.c's px_close() only releases host-side state for a
-	 * bridge pin, so the CC3501E keeps driving GPIO_26 low and the mux
-	 * stays enabled for the rest of this phase and the run. */
-	alp_gpio_close(mux_en);
+	/* From here on the mux stays ENABLED (GPIO_26 driven low) until this
+	 * function's single exit below, which de-asserts it and only then
+	 * closes the handle -- the same restore-to-idle-before-close idiom
+	 * phase 6 (RGB LED) uses for its PWM channels. Every step from here on
+	 * reports through `verdict` / `ctx->note` instead of returning
+	 * directly, so GPIO_26 never gets left driving the mux past this
+	 * function on ANY of the five outcomes -- PASS, FAIL or SKIPPED. */
+	phase_verdict_t verdict = PHASE_FAIL;
 
 	/* --- 2. Enumerate the card ---------------------------------------- */
 	/* disk_access_init() runs the whole SD initialisation on the vendored
@@ -1874,157 +1881,187 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		       "is NOT software-drivable on this module -- E1M IO21 is unrouted on r2. An empty "
 		       "slot is not a fault, so this is a SKIP\n");
 		ctx->note = "no card detected (or mux SELECT on P18 wrong)";
-		return PHASE_SKIPPED;
-	}
-	if (drc != 0) {
+		verdict   = PHASE_SKIPPED;
+	} else if (drc != 0) {
 		printf("[evkdemo] SD: the card IS detected and the SD handshake still failed (rc=%d) -- "
 		       "that is the controller, the pinmux (CLK P4_1 / CMD P4_2 / D0..D3 P6_0..P6_3) or "
 		       "the clock ramp, NOT a missing card. Not a skip\n",
 		       drc);
 		ctx->note = "SDHC init failed with a card present";
-		return PHASE_FAIL;
-	}
-
-	/* Geometry, printed VERBATIM -- reported because it is the first real
-	 * data the card ever hands back and it identifies which card is in the
-	 * slot, but deliberately NOT part of the verdict. "The geometry read
-	 * back" is a chip-ID read by another name. */
-	uint32_t sectors = 0u, ssize = 0u;
-	int      sc_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_COUNT, &sectors);
-	int      ss_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_SIZE, &ssize);
-	printf("[evkdemo] SD: geometry: %u sectors x %u B = %llu MiB (ioctl rc %d / %d)\n",
-	       (unsigned)sectors,
-	       (unsigned)ssize,
-	       (unsigned long long)(((uint64_t)sectors * ssize) / (1024u * 1024u)),
-	       sc_rc,
-	       ss_rc);
-
-	/* --- 3. Mount, read-only-until-proven ------------------------------ */
-	int mrc = fs_mount(&sd_mnt);
-	printf("[evkdemo] SD: fs_mount(FAT, \"%s\", NO_FORMAT) -> %d\n", SD_MOUNT_POINT, mrc);
-	if (mrc == -ENODEV) {
-		/* FR_NO_FILESYSTEM, translated by subsys/fs/fat_fs.c. The card
-		 * enumerated fine -- there is simply no FAT volume on it. */
-		printf("[evkdemo] SD: no FAT filesystem on this card. NOT formatted here, on purpose: "
-		       "the card belongs to whoever put it in the slot. FS_MOUNT_FLAG_NO_FORMAT is set "
-		       "AND CONFIG_FS_FATFS_MOUNT_MKFS=n keeps mkfs out of the image entirely, so there "
-		       "is no format path to take. Format it deliberately, elsewhere, if you want this "
-		       "phase to run\n");
-		ctx->note = "card present, no filesystem";
-		return PHASE_SKIPPED;
-	}
-	if (mrc != 0) {
-		printf("[evkdemo] SD: mount failed with a card that enumerated (rc=%d) -- a read of the "
-		       "boot sector did not complete, so this is the data path, not a missing volume\n",
-		       mrc);
-		ctx->note = "mount failed on an enumerated card";
-		return PHASE_FAIL;
-	}
-
-	/* --- 4. Write -> read -> VERIFY, in one file this demo owns -------- */
-	/* The nonce. k_cycle_get_32() at this point in the run -- after the
-	 * bridge bring-up, a Wi-Fi scan and a BLE enable, all of which take
-	 * wall-clock time that varies -- is not a value a previous run
-	 * reproduces, which is exactly the property needed to tell a fresh
-	 * write from last run's leftover file. */
-	uint32_t nonce = k_cycle_get_32();
-	char     payload[96];
-	int      len = snprintk(payload,
-	                        sizeof(payload),
-	                        "aen-evk-demo phase 9 nonce=%08x uptime=%lldms\n",
-	                        (unsigned)nonce,
-	                        (long long)k_uptime_get());
-	printf("[evkdemo] SD: writing %d B to %s, nonce=%08x (per-run, so a stale file from an "
-	       "earlier run cannot compare equal)\n",
-	       len,
-	       SD_DEMO_FILE,
-	       (unsigned)nonce);
-
-	struct fs_file_t f;
-	fs_file_t_init(&f);
-	phase_verdict_t verdict  = PHASE_FAIL;
-	const char     *fail_why = NULL;
-
-	/* FS_O_CREATE|FS_O_RDWR, NOT a create-exclusive open: this file is the
-	 * demo's own and every run rewrites it in place. */
-	int frc = fs_open(&f, SD_DEMO_FILE, FS_O_CREATE | FS_O_RDWR);
-	if (frc != 0) {
-		printf("[evkdemo] SD: fs_open(\"%s\", CREATE|RDWR) -> %d\n", SD_DEMO_FILE, frc);
-		fail_why = "cannot open the demo file";
+		verdict   = PHASE_FAIL;
 	} else {
-		ssize_t wrote = fs_write(&f, payload, (size_t)len);
-		/* Truncate to what was just written, so a longer leftover from an
-		 * earlier run cannot leave stale tail bytes behind a matching
-		 * prefix. */
-		int trc = (wrote == (ssize_t)len) ? fs_truncate(&f, (off_t)len) : 0;
-		/* SYNC BEFORE READ-BACK, and this is load-bearing. Without it the
-		 * read below could be served out of the FATFS cache and would
-		 * "verify" data that never reached the card -- the exact shape of
-		 * false pass this app exists to refuse. */
-		int syrc = (wrote == (ssize_t)len) ? fs_sync(&f) : 0;
-		printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate -> %d, fs_sync -> %d\n",
-		       (int)wrote,
-		       len,
-		       trc,
-		       syrc);
+		/* Geometry, printed VERBATIM -- reported because it is the first
+		 * real data the card ever hands back and it identifies which card
+		 * is in the slot, but deliberately NOT part of the verdict. "The
+		 * geometry read back" is a chip-ID read by another name. */
+		uint32_t sectors = 0u, ssize = 0u;
+		int      sc_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_COUNT, &sectors);
+		int      ss_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_SIZE, &ssize);
+		printf("[evkdemo] SD: geometry: %u sectors x %u B = %llu MiB (ioctl rc %d / %d)\n",
+		       (unsigned)sectors,
+		       (unsigned)ssize,
+		       (unsigned long long)(((uint64_t)sectors * ssize) / (1024u * 1024u)),
+		       sc_rc,
+		       ss_rc);
 
-		char    readback[sizeof(payload)] = { 0 };
-		ssize_t got                       = -1;
-		int     seek_rc                   = -1;
-		if (wrote == (ssize_t)len && trc == 0 && syrc == 0) {
-			seek_rc = fs_seek(&f, 0, FS_SEEK_SET);
-			if (seek_rc == 0) {
-				got = fs_read(&f, readback, sizeof(readback));
+		/* --- 3. Mount, read-only-until-proven -------------------------- */
+		int mrc = fs_mount(&sd_mnt);
+		printf("[evkdemo] SD: fs_mount(FAT, \"%s\", NO_FORMAT) -> %d\n", SD_MOUNT_POINT, mrc);
+		if (mrc == -ENODEV) {
+			/* subsys/fs/fat_fs.c maps THREE distinct ff.h causes onto
+			 * -ENODEV alike: FR_INVALID_DRIVE, FR_NOT_ENABLED and
+			 * FR_NO_FILESYSTEM. The card enumerated fine, but this return
+			 * code alone cannot tell "no FAT volume on the card" apart
+			 * from a disk-name / mount-point wiring drift in this file's
+			 * own SD_DISK_NAME / SD_MOUNT_POINT -- so the log below
+			 * states only what -ENODEV actually proves. */
+			printf("[evkdemo] SD: fs_mount -> -ENODEV -- either no FAT filesystem on this card, "
+			       "or a disk-name/mount-point mismatch (SD_DISK_NAME=\"%s\", "
+			       "SD_MOUNT_POINT=\"%s\"): subsys/fs/fat_fs.c maps both onto -ENODEV and this "
+			       "build cannot tell them apart from the return code alone. NOT formatted here "
+			       "regardless, on purpose -- the card belongs to whoever put it in the slot. "
+			       "FS_MOUNT_FLAG_NO_FORMAT is set AND CONFIG_FS_FATFS_MOUNT_MKFS=n keeps mkfs "
+			       "out of the image entirely, so there is no format path to take even by "
+			       "mistake\n",
+			       SD_DISK_NAME,
+			       SD_MOUNT_POINT);
+			ctx->note = "no filesystem, or a disk-name/mount-point mismatch -- see log";
+			verdict   = PHASE_SKIPPED;
+		} else if (mrc != 0) {
+			printf("[evkdemo] SD: mount failed with a card that enumerated (rc=%d) -- a read of "
+			       "the boot sector did not complete, so this is the data path, not a missing "
+			       "volume\n",
+			       mrc);
+			ctx->note = "mount failed on an enumerated card";
+			verdict   = PHASE_FAIL;
+		} else {
+			/* --- 4. Write -> read -> VERIFY, in one file this demo owns */
+			/* The nonce. k_cycle_get_32() at this point in the run -- after
+			 * the bridge bring-up, a Wi-Fi scan and a BLE enable, all of
+			 * which take wall-clock time that varies -- is not a value a
+			 * previous run reproduces, which is exactly the property
+			 * needed to tell a fresh write from last run's leftover file. */
+			uint32_t nonce = k_cycle_get_32();
+			char     payload[96];
+			int      len = snprintk(payload,
+			                        sizeof(payload),
+			                        "aen-evk-demo phase 9 nonce=%08x uptime=%lldms\n",
+			                        (unsigned)nonce,
+			                        (long long)k_uptime_get());
+			printf("[evkdemo] SD: writing %d B to %s, nonce=%08x (per-run, so a stale file from "
+			       "an earlier run cannot compare equal)\n",
+			       len,
+			       SD_DEMO_FILE,
+			       (unsigned)nonce);
+
+			struct fs_file_t f;
+			fs_file_t_init(&f);
+			const char *fail_why = NULL;
+
+			/* FS_O_CREATE|FS_O_RDWR, NOT a create-exclusive open: this
+			 * file is the demo's own and every run rewrites it in place. */
+			int frc = fs_open(&f, SD_DEMO_FILE, FS_O_CREATE | FS_O_RDWR);
+			if (frc != 0) {
+				printf("[evkdemo] SD: fs_open(\"%s\", CREATE|RDWR) -> %d\n", SD_DEMO_FILE, frc);
+				fail_why = "cannot open the demo file";
+			} else {
+				ssize_t wrote = fs_write(&f, payload, (size_t)len);
+				/* Truncate UNCONDITIONALLY, once the file is open --
+				 * never gated on a full write. Truncate to wherever this
+				 * write actually landed (0 on a hard error), not to
+				 * `len`: skipping this call on a short write is exactly
+				 * the case where it matters, because that is the one
+				 * that would otherwise leave a partial payload followed
+				 * by an earlier run's longer tail -- the stale-leftover
+				 * state this call exists to prevent. */
+				off_t trunc_len = (wrote > 0) ? (off_t)wrote : 0;
+				int   trc       = fs_truncate(&f, trunc_len);
+				/* SYNC BEFORE READ-BACK, and this is load-bearing. Without
+				 * it the read below could be served out of the FATFS
+				 * cache and would "verify" data that never reached the
+				 * card -- the exact shape of false pass this app exists
+				 * to refuse. Only meaningful once the intended bytes are
+				 * actually in place. */
+				int syrc = (wrote == (ssize_t)len && trc == 0) ? fs_sync(&f) : 0;
+				printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate(%ld) -> %d, "
+				       "fs_sync -> %d\n",
+				       (int)wrote,
+				       len,
+				       (long)trunc_len,
+				       trc,
+				       syrc);
+
+				char    readback[sizeof(payload)] = { 0 };
+				ssize_t got                       = -1;
+				int     seek_rc                   = -1;
+				if (wrote == (ssize_t)len && trc == 0 && syrc == 0) {
+					seek_rc = fs_seek(&f, 0, FS_SEEK_SET);
+					if (seek_rc == 0) {
+						got = fs_read(&f, readback, sizeof(readback));
+					}
+				}
+				int crc = fs_close(&f);
+				printf("[evkdemo] SD: fs_close -> %d\n", crc);
+
+				if (wrote != (ssize_t)len) {
+					fail_why = "short write";
+				} else if (trc != 0 || syrc != 0) {
+					fail_why = "truncate/sync failed";
+				} else if (seek_rc != 0 || got != (ssize_t)len) {
+					printf("[evkdemo] SD: fs_seek -> %d, fs_read -> %d (expected %d B)\n",
+					       seek_rc,
+					       (int)got,
+					       len);
+					fail_why = "short read-back";
+				} else if (memcmp(payload, readback, (size_t)len) != 0) {
+					/* Print both, not a verdict word: WHICH bytes differ
+					 * is the whole diagnostic and a bare "mismatch"
+					 * throws it away. */
+					printf("[evkdemo] SD: VERIFY MISMATCH\n[evkdemo] SD:   wrote: %.*s"
+					       "[evkdemo] SD:   read : %.*s",
+					       len,
+					       payload,
+					       len,
+					       readback);
+					fail_why = "read-back differs from what was written";
+				} else {
+					printf("[evkdemo] SD: read back %d B and they COMPARE EQUAL: %.*s",
+					       (int)got,
+					       len,
+					       readback);
+					verdict = PHASE_PASS;
+				}
+			}
+
+			/* Unmount either way -- a mounted volume with dirty FAT cache
+			 * left behind by a failing phase is how a card gets corrupted
+			 * for the next person, and phases 10-14 run after this one. */
+			int urc = fs_unmount(&sd_mnt);
+			printf("[evkdemo] SD: fs_unmount -> %d\n", urc);
+
+			if (verdict != PHASE_PASS) {
+				printf("[evkdemo] SD: RESULT FAIL -- %s. The card enumerated and the "
+				       "filesystem mounted, so this is the data path, not the slot and not "
+				       "the mux\n",
+				       fail_why);
+				ctx->note = fail_why;
+				verdict   = PHASE_FAIL;
+			} else {
+				printf("[evkdemo] SD: mux enabled, card enumerated, FAT mounted, %d B "
+				       "written -> read -> compared equal -> PASS\n",
+				       len);
 			}
 		}
-		(void)fs_close(&f);
-
-		if (wrote != (ssize_t)len) {
-			fail_why = "short write";
-		} else if (trc != 0 || syrc != 0) {
-			fail_why = "truncate/sync failed";
-		} else if (seek_rc != 0 || got != (ssize_t)len) {
-			printf("[evkdemo] SD: fs_seek -> %d, fs_read -> %d (expected %d B)\n",
-			       seek_rc,
-			       (int)got,
-			       len);
-			fail_why = "short read-back";
-		} else if (memcmp(payload, readback, (size_t)len) != 0) {
-			/* Print both, not a verdict word: WHICH bytes differ is the
-			 * whole diagnostic and a bare "mismatch" throws it away. */
-			printf("[evkdemo] SD: VERIFY MISMATCH\n[evkdemo] SD:   wrote: %.*s[evkdemo] SD:   "
-			       "read : %.*s",
-			       len,
-			       payload,
-			       len,
-			       readback);
-			fail_why = "read-back differs from what was written";
-		} else {
-			printf("[evkdemo] SD: read back %d B and they COMPARE EQUAL: %.*s",
-			       (int)got,
-			       len,
-			       readback);
-			verdict = PHASE_PASS;
-		}
 	}
 
-	/* Unmount either way -- a mounted volume with dirty FAT cache left
-	 * behind by a failing phase is how a card gets corrupted for the next
-	 * person, and phases 10-14 run after this one. */
-	int urc = fs_unmount(&sd_mnt);
-	printf("[evkdemo] SD: fs_unmount -> %d\n", urc);
-
-	if (verdict != PHASE_PASS) {
-		printf("[evkdemo] SD: RESULT FAIL -- %s. The card enumerated and the filesystem mounted, "
-		       "so this is the data path, not the slot and not the mux\n",
-		       fail_why);
-		ctx->note = fail_why;
-		return PHASE_FAIL;
-	}
-	printf("[evkdemo] SD: mux enabled, card enumerated, FAT mounted, %d B written -> read -> "
-	       "compared equal -> PASS\n",
-	       len);
-	return PHASE_PASS;
+	/* --- 5. Restore the mux to idle before returning --------------------
+	 * De-assert ENABLE (drive it back HIGH) and only then close the
+	 * handle, on every one of the five outcomes above -- matching phase
+	 * 6's restore-to-idle-before-close idiom. Without this, GPIO_26 stays
+	 * driven low through phases 10-14 and past the end of the run. */
+	(void)alp_gpio_write(mux_en, true);
+	alp_gpio_close(mux_en);
+	return verdict;
 }
 
 /* ==================================================================== */

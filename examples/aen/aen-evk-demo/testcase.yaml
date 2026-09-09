@@ -6,16 +6,22 @@
 # Ethernet and JPEG-encode phases -- plus the four not-yet-implemented
 # phases' SKIPPED stubs -- against the real board target.
 #
-# WHAT THE COMPILE ALONE IS WORTH FOR PHASE 9. Two things, and they are
-# worth naming because the phase's verdict itself needs a card nobody in
-# CI has. First, it proves the `fatfs` west module actually RESOLVES:
-# CONFIG_FAT_FILESYSTEM_ELM `depends on ZEPHYR_FATFS_MODULE`, so in a
-# workspace missing the module both it and CONFIG_FILE_SYSTEM are dropped
-# from the solve SILENTLY and this app fails on a missing <ff.h> -- which
-# is exactly how the gap was found. Second, it proves the image still fits
-# ITCM with an SDHC driver and a FAT filesystem in it; phase 14 is stubbed
-# precisely because that budget is finite, and a link that overflows FLASH
-# fails here rather than on the bench.
+# WHAT THIS CASE WILL BE WORTH FOR PHASE 9, once it can actually run --
+# west.yml:269 adds the `fatfs` module, but a west workspace's manifest
+# repo is whatever its own `.west/config` points at, and an already-
+# bootstrapped workspace keeps pointing at the checkout it was set up
+# against until that checkout picks up this entry and `west update` pulls
+# modules/fs/fatfs down. On a workspace still pointed at a checkout without
+# this entry, this case is not yet green -- it dies on a missing <ff.h>
+# today, same failure the gap was originally found by. Once the manifest
+# entry reaches the checkout in use, a green build here will prove two
+# things a CI-less card cannot: first, that the `fatfs` west module
+# actually RESOLVES (CONFIG_FAT_FILESYSTEM_ELM `depends on
+# ZEPHYR_FATFS_MODULE`, so a workspace missing the module drops it and
+# CONFIG_FILE_SYSTEM from the solve SILENTLY); second, that the image still
+# fits ITCM with an SDHC driver and a FAT filesystem in it -- phase 14 is
+# stubbed precisely because that budget is finite, and a link that
+# overflows FLASH should fail here, not on the bench.
 #
 # Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
 # board only): every phase needs real I2C/PWM/GMAC silicon to produce a
