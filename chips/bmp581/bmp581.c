@@ -25,11 +25,32 @@
 #define REG_ODR_CONF   0x37
 #define REG_TEMP_XLSB  0x1D /* T = [TEMP_MSB][TEMP_LSB][TEMP_XLSB] */
 #define REG_PRESS_XLSB 0x20 /* P = [PRESS_MSB][PRESS_LSB][PRESS_XLSB] */
+
+/* REG_ODR_CONF.deep_dis (bit 7): 1 disables re-entry into DEEP STANDBY.
+ * BST-BMP581-DS004-13 §4.3.2 (p.16) lists the conditions under which the
+ * part re-enters DEEP STANDBY on its own; setting this bit is the only
+ * way to keep a configured STANDBY/NORMAL/FORCED/CONTINUOUS mode sticky. */
+#define ODR_CONFIG_DEEP_DIS (1u << 7)
+
 #define REG_INT_CONFIG \
 	0x14 /* int_mode[0] | int_pol[1] | int_od[2] | int_en[3] | pad_int_drv[7:4] */
 #define REG_INT_SOURCE \
 	0x15 /* drdy_data_reg_en[0] | fifo_full_en[1] | fifo_ths_en[2] | oor_p_en[3] */
 #define REG_INT_STATUS 0x27 /* drdy_data_reg[0] | ... -- clear-on-read (whole register). */
+/* REG_STATUS (0x28) -- not read by this driver (see the "do not gate on
+ * core_rdy" note below); documented here only to head off a re-derivation
+ * mistake. BST-BMP581-DS004-13's own register-map summary table (p.50)
+ * labels bits 0/4/7 of 0x28 "reserved_0" / "reserved_4" / "reserved_7",
+ * which contradicts §7.22 (p.58) -- the per-register section, with explicit
+ * bit offsets, prose per field, and a reset value (0x02) that reproduces
+ * the map's own reset column -- which names those same bits
+ * status_core_rdy, status_boot_err_corrected, and st_crack_pass. Trust
+ * §7.22, not the p.50 summary table. 0x02 is 0x28's documented reset value;
+ * Bosch's own init treats it as healthy, so a part that reads 0x02 forever
+ * is a correctly-behaving part sitting in DEEP STANDBY, not a broken one --
+ * do NOT add a readiness gate on core_rdy: Bosch's BMP5_SensorAPI and
+ * upstream Zephyr's driver never wait on it, and the datasheet defines it
+ * in exactly one line and never uses it in any procedure. */
 
 #define CMD_SOFT_RESET 0xB6
 
@@ -100,7 +121,7 @@ alp_status_t bmp581_set_sampling(bmp581_t     *dev,
 
 	/* ODR is sparse -- BST-BMP581-DS004 defines all 32 codes of the
      * 5-bit field, but bmp581_odr_t only declares a curated subset
-     * (0x00, 0x01, 0x07, 0x0E, 0x14, 0x17, 0x1C).  An upper-bound / mask
+     * (0x00, 0x08, 0x0F, 0x14, 0x17, 0x18, 0x1C).  An upper-bound / mask
      * check would silently admit an undeclared-but-real ODR the API
      * doesn't expose, so switch-validate against the declared set. */
 	switch (odr) {
@@ -116,17 +137,42 @@ alp_status_t bmp581_set_sampling(bmp581_t     *dev,
 		return ALP_ERR_INVAL;
 	}
 
+	/* #2035: after startup/soft-reset the part is in DEEP STANDBY, and
+     * BST-BMP581-DS004-13 §4.3 (p.16) requires entering STANDBY first --
+     * "Transitions from one mode to another are only possible by entering
+     * Standby mode first" -- while §4.3.8 (p.18) says writes to OSR_CONFIG
+     * / ODR_CONFIG "in a mode other than STANDBY are lost". The old code
+     * wrote both registers straight out of DEEP STANDBY (power-on default:
+     * deep_dis=0, odr=1 Hz, no FIFO, no IIR -- exactly the §4.3.2
+     * conditions for staying in DEEP STANDBY), so the writes were silently
+     * discarded. Force STANDBY with deep_dis=1 (bit 7) before writing
+     * either config register, matching Bosch's own bmp5_set_power_mode()
+     * (BMP5_SensorAPI) and upstream Zephyr's set_power_mode()
+     * (drivers/sensor/bosch/bmp581/bmp581.c). deep_dis=1 is set on every
+     * ODR_CONFIG write from here on so the part doesn't fall back into
+     * DEEP STANDBY on its own once configured. */
+	uint8_t      standby_conf = (uint8_t)(ODR_CONFIG_DEEP_DIS | (((uint8_t)odr & 0x1Fu) << 2) |
+	                                      (uint8_t)BMP581_MODE_STANDBY);
+	alp_status_t s            = reg_write(dev, REG_ODR_CONF, standby_conf);
+	if (s != ALP_OK) return s;
+	/* tstandby = 2.5 ms typ (BST-BMP581-DS004-13 p.11); alp_delay_ms is
+     * ms-granular and "at least", so round up to 3 ms rather than
+     * truncate to 2. */
+	alp_delay_ms(3);
+
 	/* OSR_CONFIG: PRESS_EN[6] | OSR_P[5:3] | OSR_T[2:0].
      * Always enable pressure -- v0.2 doesn't expose temperature-only
      * mode (the chip can do it but apps that need just temperature
-     * usually don't pick a barometer). */
+     * usually don't pick a barometer). Now in STANDBY, so this write
+     * actually lands (see #2035 note above). */
 	uint8_t osr =
 	    (uint8_t)((1u << 6) | (((uint8_t)press_osr & 0x07u) << 3) | ((uint8_t)temp_osr & 0x07u));
-	alp_status_t s = reg_write(dev, REG_OSR_CONF, osr);
+	s = reg_write(dev, REG_OSR_CONF, osr);
 	if (s != ALP_OK) return s;
 
-	/* ODR_CONFIG: ODR[6:2] | PWR_MODE[1:0]. */
-	uint8_t conf = (uint8_t)((((uint8_t)odr & 0x1Fu) << 2) | ((uint8_t)mode & 0x03u));
+	/* ODR_CONFIG: DEEP_DIS[7] | ODR[6:2] | PWR_MODE[1:0]. */
+	uint8_t conf =
+	    (uint8_t)(ODR_CONFIG_DEEP_DIS | (((uint8_t)odr & 0x1Fu) << 2) | ((uint8_t)mode & 0x03u));
 	return reg_write(dev, REG_ODR_CONF, conf);
 }
 

@@ -134,6 +134,9 @@ uint8_t  fake_bmp581_get_reg(uint8_t reg);
 void     fake_bmp581_set_reg(uint8_t reg, uint8_t val);
 uint32_t fake_bmp581_write_count(uint8_t reg);
 void     fake_bmp581_reset(void);
+uint32_t fake_bmp581_log_len(void);
+uint8_t  fake_bmp581_log_reg(uint32_t idx);
+uint8_t  fake_bmp581_log_val(uint32_t idx);
 
 /* ------------------------------------------------------------------ */
 /* fake INA236                                                         */

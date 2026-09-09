@@ -2765,17 +2765,17 @@
           "kind": "enum"
         },
         "bmp581_odr_t": {
-          "definition": "typedef enum { BMP581_ODR_240_HZ = 0x00, BMP581_ODR_120_HZ = 0x01, BMP581_ODR_50_HZ = 0x07, BMP581_ODR_25_HZ = 0x0E, BMP581_ODR_10_HZ = 0x14, BMP581_ODR_5_HZ = 0x17, BMP581_ODR_1_HZ = 0x1C } bmp581_odr_t;",
+          "definition": "typedef enum { BMP581_ODR_240_HZ = 0x00, BMP581_ODR_120_HZ = 0x08, BMP581_ODR_50_HZ = 0x0F, BMP581_ODR_25_HZ = 0x14, BMP581_ODR_10_HZ = 0x17, BMP581_ODR_5_HZ = 0x18, BMP581_ODR_1_HZ = 0x1C } bmp581_odr_t;",
           "enumerators": [
             "BMP581_ODR_240_HZ = 0x00",
-            "BMP581_ODR_120_HZ = 0x01",
-            "BMP581_ODR_50_HZ = 0x07",
-            "BMP581_ODR_25_HZ = 0x0E",
-            "BMP581_ODR_10_HZ = 0x14",
-            "BMP581_ODR_5_HZ = 0x17",
+            "BMP581_ODR_120_HZ = 0x08",
+            "BMP581_ODR_50_HZ = 0x0F",
+            "BMP581_ODR_25_HZ = 0x14",
+            "BMP581_ODR_10_HZ = 0x17",
+            "BMP581_ODR_5_HZ = 0x18",
             "BMP581_ODR_1_HZ = 0x1C"
           ],
-          "hash": "52aa4bcbc99a8d06",
+          "hash": "5f4a5e87733d5879",
           "kind": "enum"
         },
         "bmp581_osr_t": {

@@ -60,14 +60,23 @@ typedef enum {
 	BMP581_OSR_X128 = 0x7
 } bmp581_osr_t;
 
-/** Output data rate (ODR_CONFIG bits[6:2]). */
+/** Output data rate (ODR_CONFIG bits[6:2]).
+ *  #2035: five of these seven codes were wrong -- picked as if the 32-code
+ *  field were a linear divider, when BST-BMP581-DS004-13 §7.34 (p.65)'s ODR
+ *  table is not. Cross-checked against Bosch's own BMP5-Sensor-API
+ *  `bmp5_defs.h` (BMP5_ODR_*), which is generated from the same table:
+ *  0x00=240.000, 0x08=120.000 (0x01 is actually 218.537), 0x0F=50.000
+ *  (0x07 is actually 129.855), 0x14=25.000 (0x0E is actually 60.000),
+ *  0x17=10.000 (0x14 is actually 25.005), 0x18=5.000 (0x17 is actually
+ *  10.000), 0x1C=1.000 (already correct). A consumer selecting
+ *  BMP581_ODR_5_HZ under the old value silently got 10 Hz. */
 typedef enum {
 	BMP581_ODR_240_HZ = 0x00,
-	BMP581_ODR_120_HZ = 0x01,
-	BMP581_ODR_50_HZ  = 0x07,
-	BMP581_ODR_25_HZ  = 0x0E,
-	BMP581_ODR_10_HZ  = 0x14,
-	BMP581_ODR_5_HZ   = 0x17,
+	BMP581_ODR_120_HZ = 0x08,
+	BMP581_ODR_50_HZ  = 0x0F,
+	BMP581_ODR_25_HZ  = 0x14,
+	BMP581_ODR_10_HZ  = 0x17,
+	BMP581_ODR_5_HZ   = 0x18,
 	BMP581_ODR_1_HZ   = 0x1C
 } bmp581_odr_t;
 
@@ -136,6 +145,13 @@ alp_status_t bmp581_read_id(bmp581_t *dev, uint8_t *id_out);
 
 /**
  * @brief Configure oversampling, ODR, and mode in one call.
+ *
+ * #2035: this always transitions the part through STANDBY first (with
+ * deep_dis set) before writing OSR_CONFIG / ODR_CONFIG, per
+ * BST-BMP581-DS004-13 §4.3 (p.16) / §4.3.8 (p.18) -- writing those
+ * registers straight out of DEEP STANDBY (the power-on default) is
+ * silently discarded, and the config would never take effect. The
+ * STANDBY step costs one extra register write plus a ~3 ms delay.
  *
  * A single-shot @ref BMP581_MODE_FORCED conversion is not complete the
  * instant this call returns -- the chip needs a real sampling window.

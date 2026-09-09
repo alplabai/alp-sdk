@@ -24,9 +24,19 @@
 
 #define REG_CHIP_ID 0x01
 
+/* #2035: bmp581_set_sampling() must transition through STANDBY before
+ * touching OSR_CONFIG/ODR_CONFIG (BST-BMP581-DS004-13 §4.3/§4.3.8, pp.16,18).
+ * write_count alone can't prove ordering (a call that wrote everything in
+ * one shot has the same counts as one that staged through STANDBY first),
+ * so also keep a bounded write-order log the test can walk. */
+#define FAKE_BMP581_LOG_CAP 16
+
 struct fake_bmp581_data {
 	uint8_t  regs[256];
 	uint32_t write_count[256];
+	uint8_t  log_reg[FAKE_BMP581_LOG_CAP];
+	uint8_t  log_val[FAKE_BMP581_LOG_CAP];
+	uint32_t log_len;
 };
 
 static struct fake_bmp581_data *g_fake_bmp581;
@@ -35,6 +45,9 @@ static void seed_defaults(struct fake_bmp581_data *d)
 {
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
+	memset(d->log_reg, 0, sizeof d->log_reg);
+	memset(d->log_val, 0, sizeof d->log_val);
+	d->log_len           = 0;
 	d->regs[REG_CHIP_ID] = 0x50u;
 }
 
@@ -51,6 +64,11 @@ fake_bmp581_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 			uint8_t r  = (uint8_t)(reg0 + i - 1);
 			d->regs[r] = msgs[0].buf[i];
 			d->write_count[r]++;
+			if (d->log_len < FAKE_BMP581_LOG_CAP) {
+				d->log_reg[d->log_len] = r;
+				d->log_val[d->log_len] = msgs[0].buf[i];
+				d->log_len++;
+			}
 		}
 		return 0;
 	}
@@ -110,4 +128,19 @@ uint32_t fake_bmp581_write_count(uint8_t reg)
 void fake_bmp581_reset(void)
 {
 	if (g_fake_bmp581) seed_defaults(g_fake_bmp581);
+}
+
+uint32_t fake_bmp581_log_len(void)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->log_len : 0u;
+}
+
+uint8_t fake_bmp581_log_reg(uint32_t idx)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->log_reg[idx] : 0u;
+}
+
+uint8_t fake_bmp581_log_val(uint32_t idx)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->log_val[idx] : 0u;
 }

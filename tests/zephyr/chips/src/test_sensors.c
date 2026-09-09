@@ -1220,6 +1220,121 @@ ZTEST(alp_chips, test_bmp581_set_sampling_accepts_every_declared_odr)
 /* bmp581 -- fake-backed register-protocol tests                      */
 /* ------------------------------------------------------------------ */
 
+#define REG_BMP581_ODR_CONF   0x37
+#define ODR_CONF_DEEP_DIS_BIT (1u << 7)
+#define ODR_CONF_MODE_MASK    0x03u
+#define ODR_CONF_MODE_STANDBY 0x00u
+
+/*
+ * #2035: bmp581_set_sampling() used to write OSR_CONFIG then ODR_CONFIG
+ * (with the target mode) directly out of DEEP STANDBY -- the power-on
+ * default -- even though BST-BMP581-DS004-13 §4.3 (p.16) requires entering
+ * STANDBY first, and §4.3.8 (p.18) says writes made outside STANDBY "are
+ * lost". Assert the actual write ORDER on the wire: the very first
+ * ODR_CONFIG write must carry pwr_mode=STANDBY (with deep_dis set), and it
+ * must happen before both the OSR_CONFIG write and the final ODR_CONFIG
+ * write that carries the caller's target mode.
+ *
+ * Mutation coverage: reverting bmp581_set_sampling() to write OSR_CONFIG
+ * then a single target-mode ODR_CONFIG (deleting the STANDBY pre-write)
+ * reddens this -- the log's first entry becomes OSR_CONFIG, and the only
+ * ODR_CONFIG entry carries pwr_mode=FORCED, not STANDBY.
+ */
+ZTEST(alp_chips, test_bmp581_set_sampling_enters_standby_before_target_mode)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	zassert_equal(bmp581_set_sampling(
+	                  &dev, BMP581_OSR_X4, BMP581_OSR_X1, BMP581_ODR_25_HZ, BMP581_MODE_FORCED),
+	              ALP_OK);
+
+	/* At least two ODR_CONFIG writes: the STANDBY staging write, then
+	 * the final target-mode write. */
+	uint32_t n = fake_bmp581_log_len();
+	zassert_true(n >= 2, "expected at least a STANDBY write and a target-mode write");
+
+	/* First register touched must be ODR_CONFIG (not OSR_CONFIG --
+	 * writing OSR_CONFIG before entering STANDBY is exactly the bug),
+	 * and it must select STANDBY with deep_dis set. */
+	zassert_equal(fake_bmp581_log_reg(0),
+	              REG_BMP581_ODR_CONF,
+	              "first write must be the STANDBY staging write to ODR_CONFIG");
+	uint8_t first_val = fake_bmp581_log_val(0);
+	zassert_equal(first_val & ODR_CONF_MODE_MASK,
+	              ODR_CONF_MODE_STANDBY,
+	              "first ODR_CONFIG write must select pwr_mode=STANDBY");
+	zassert_true((first_val & ODR_CONF_DEEP_DIS_BIT) != 0,
+	             "first ODR_CONFIG write must also set deep_dis");
+
+	/* The final write overall must be the target-mode ODR_CONFIG write
+	 * (FORCED), landing strictly after the STANDBY write. */
+	uint8_t last_val = fake_bmp581_log_val(n - 1);
+	zassert_equal(fake_bmp581_log_reg(n - 1),
+	              REG_BMP581_ODR_CONF,
+	              "last write must be the target-mode ODR_CONFIG write");
+	zassert_equal(last_val & ODR_CONF_MODE_MASK,
+	              (uint8_t)BMP581_MODE_FORCED,
+	              "final ODR_CONFIG write must select the caller's target mode");
+	zassert_true((last_val & ODR_CONF_DEEP_DIS_BIT) != 0,
+	             "final ODR_CONFIG write must keep deep_dis set");
+
+	/* Confirm on real hardware register state too: the chip's final
+	 * ODR_CONFIG value is the target-mode one, not the STANDBY one. */
+	zassert_equal(fake_bmp581_get_reg(REG_BMP581_ODR_CONF), last_val);
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
+}
+
+/*
+ * #2035: five of bmp581_odr_t's seven ODR_CONFIG codes were wrong.  Assert
+ * each declared enum value lands on the wire as the exact code
+ * BST-BMP581-DS004-13 §7.34 (p.65) assigns it -- cross-checked against
+ * Bosch's own BMP5-Sensor-API `bmp5_defs.h` (BMP5_ODR_*), which is
+ * generated from the same table.
+ *
+ * Mutation coverage: reverting any single enumerator in bmp581_odr_t back
+ * to its old (wrong) value reddens the corresponding case here.
+ */
+ZTEST(alp_chips, test_bmp581_set_sampling_writes_datasheet_odr_codes)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	static const struct {
+		bmp581_odr_t odr;
+		uint8_t      expect_code;
+	} cases[] = {
+		{ BMP581_ODR_240_HZ, 0x00 }, { BMP581_ODR_120_HZ, 0x08 }, { BMP581_ODR_50_HZ, 0x0F },
+		{ BMP581_ODR_25_HZ, 0x14 },  { BMP581_ODR_10_HZ, 0x17 },  { BMP581_ODR_5_HZ, 0x18 },
+		{ BMP581_ODR_1_HZ, 0x1C },
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		zassert_equal(bmp581_set_sampling(
+		                  &dev, BMP581_OSR_X1, BMP581_OSR_X1, cases[i].odr, BMP581_MODE_NORMAL),
+		              ALP_OK);
+		uint8_t got_code = (fake_bmp581_get_reg(REG_BMP581_ODR_CONF) >> 2) & 0x1Fu;
+		zassert_equal(
+		    got_code, cases[i].expect_code, "ODR enum %d wrote wrong code", (int)cases[i].odr);
+	}
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
+}
+
 ZTEST(alp_chips, test_fake_bmp581_data_ready_decodes_bit0)
 {
 	fake_bmp581_reset();
