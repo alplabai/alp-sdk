@@ -218,7 +218,15 @@ static cc3501e_t cc35_fw;
 /* Bounded PING retry after bridge bring-up, before the first proxied request
  * (#2035 GPIO-proxy race) -- same parameters as aen-evk-demo's phase 8
  * (examples/aen/aen-evk-demo/src/main.c: CC35_PING_RETRIES/CC35_PING_GAP_MS),
- * which measured needing 11 of 25 attempts, 200 ms apart, on this silicon. */
+ * which measured needing 11 of 25 attempts, 200 ms apart, on this silicon.
+ *
+ * MEASURED, TWO DATA POINTS ONLY -- margin visible, not a new budget: the
+ * demo's run above needed 11 of 25 (~2.2 s); a run of THIS app needed 15 of
+ * 25 (~3.0 s). That leaves only ~2 s of headroom over the worse of the two,
+ * and the count is variable run to run. Not enough data to justify raising
+ * (or trusting) a budget, so it stays 25/200 -- but the next person hitting
+ * exhaustion should know the margin is this thin before assuming a hard
+ * regression. */
 #define CC35_PING_RETRIES 25u
 #define CC35_PING_GAP_MS  200u
 
@@ -314,7 +322,34 @@ int main(void)
 	}
 
 	/*
-	 * --- 3. Assert the SDIO mux ENABLE over the GPIO proxy -------------
+	 * --- 3. Attach the bridge to the GPIO proxy -------------------------
+	 * cc3501e_bridge_bringup() already calls alp_gpio_cc3501e_attach()
+	 * internally (see cc3501e_bridge.c step 3) and ignores its return --
+	 * so the proxy is already routing by this point on a clean bring-up.
+	 * Call it again here, explicitly, and check it: alp_gpio_open() below
+	 * cannot tell an unattached proxy apart from a genuinely un-owned
+	 * pin_id -- both DELEGATE to the platform driver and fail with the
+	 * same ALP_ERR_INVAL (src/backends/gpio/cc3501e_proxy.c:199) -- so a
+	 * silent gap here would surface, if at all, as a confusing mux
+	 * failure three lines down instead of as what it is. That silent
+	 * fall-through is exactly what cost two bench loads before this app
+	 * had a PING wait; make the attach outcome visible too rather than
+	 * assume the implicit call inside bring-up covers it.
+	 */
+	alp_status_t attach_rc = alp_gpio_cc3501e_attach(&cc35_fw);
+	printf("[sd] alp_gpio_cc3501e_attach() -> %d\n", (int)attach_rc);
+	if (attach_rc != ALP_OK) {
+		printf("[sd] RESULT FAIL: the GPIO proxy did not attach to the bridge (rc=%d) -- "
+		       "every proxied pin, including the mux ENABLE below, would silently "
+		       "delegate to the Alif platform driver and fail. Not attempting the mux "
+		       "write: a failure there would look like a route-table or hardware fault "
+		       "instead of this\n",
+		       (int)attach_rc);
+		return -1;
+	}
+
+	/*
+	 * --- 4. Assert the SDIO mux ENABLE over the GPIO proxy -------------
 	 * alp_gpio_open() on a PORTABLE E1M pin id. The proxy backend looks
 	 * IO20 up in this app's cc3501e_gpio_routes[] table, finds raw
 	 * CC3501E GPIO_26, and sends the configure/write over the bridge just
@@ -382,7 +417,7 @@ int main(void)
 	k_msleep(SD_MUX_SETTLE_MS);
 
 	/*
-	 * --- 4. Enumerate the card, read-only ------------------------------
+	 * --- 5. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
