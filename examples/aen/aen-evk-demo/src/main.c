@@ -1178,18 +1178,50 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 
 	bool reads_ok = (before_rc == ALP_OK) && (pol_set_rc == ALP_OK) && (inverted_rc == ALP_OK) &&
 	                (pol_restore_rc == ALP_OK) && (restored_rc == ALP_OK);
-	/* Only the bits this chip is actually configured as inputs for (cfg,
-	 * bit=1) are required to invert -- the polarity register's effect on
-	 * an output-configured pin's read-back is not something this phase
-	 * asserts on, since it never claims those pins are safe to read
-	 * meaning from either way. */
-	bool inversion_took_effect = reads_ok && (((inverted ^ before) & cfg) == cfg);
-	bool restore_took_effect   = reads_ok && (restored == before);
-	bool valid                 = reads_ok && inversion_took_effect && restore_took_effect;
+
+	/* #2037: cfg==0 means every pin reads back as OUTPUT-configured (cfg
+	 * bit=1 means input -- see the comment above this phase), i.e. no bit
+	 * is required to invert at all. (x & 0) == 0 is true for ANY x, so
+	 * without this guard the mask check right below would PASS
+	 * vacuously on a wedged expander that always returns one constant
+	 * byte -- there would be no input-configured bit left to catch it.
+	 * Require cfg != 0 before the mask comparison is allowed to count as
+	 * evidence of anything. */
+	bool cfg_has_input_bits = (cfg != 0);
+	bool inversion_took_effect =
+	    reads_ok && cfg_has_input_bits && (((inverted ^ before) & cfg) == cfg);
+
+	/* #2037: P4-P7 (cfg bit=1, input-configured on the expected 0xF0
+	 * layout) are live sensor interrupt lines -- ICM42670 INT1/INT2/FSYNC
+	 * and BMP581 INT1 (EVK netlist, 2626-R2; see the comment above this
+	 * phase) -- that can genuinely flip between the `restored` and
+	 * `before` reads with no fault on this chip at all. Comparing all 8
+	 * bits would fail the phase on a real interrupt edge landing mid-test.
+	 * Compare only the pins that cannot move on their own: the
+	 * output-configured pins (cfg bit=0, P0-P3 on this netlist), which
+	 * this phase never drives and which the netlist says nothing else on
+	 * the board asynchronously toggles either. Uses the ACTUAL cfg read
+	 * back above, not the hardcoded 0xF0 expectation, so this still
+	 * excludes the right bits even when cfg_matches_wired is false. */
+	uint8_t static_pin_mask     = (uint8_t)(~cfg);
+	bool    restore_took_effect = reads_ok && (((restored ^ before) & static_pin_mask) == 0);
+
+	bool valid = reads_ok && inversion_took_effect && restore_took_effect;
+
+	const char *inversion_note = inversion_took_effect ? ""
+	                             : !reads_ok           ? " (a transfer failed)"
+	                             : !cfg_has_input_bits
+	                                 ? " (cfg(0x03)=0x00 -- no input-configured "
+	                                   "pins, inversion is unobservable)"
+	                                 : " (inverted bits didn't match the cfg mask)";
+	const char *restore_note   = restore_took_effect ? ""
+	                             : !reads_ok         ? " (a transfer failed)"
+	                                                 : " (restored != before outside the live "
+	                                                   "interrupt pins, P4-P7)";
 
 	printf("[evkdemo] IOEXP @0x%02x: before=0x%02x inverted=0x%02x restored=0x%02x "
 	       "irqstatus(0x46)=0x%02x before_rc=%d pol_set_rc=%d inverted_rc=%d "
-	       "pol_restore_rc=%d restored_rc=%d irq_rc=%d inverted=%s restored=%s %s\n",
+	       "pol_restore_rc=%d restored_rc=%d irq_rc=%d inverted=%s%s restored=%s%s %s\n",
 	       EVK_I2C_ADDR_TCAL9538_MAIN,
 	       before,
 	       inverted,
@@ -1202,7 +1234,9 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 	       (int)restored_rc,
 	       (int)irq_rc,
 	       inversion_took_effect ? "yes" : "NO",
+	       inversion_note,
 	       restore_took_effect ? "yes" : "NO",
+	       restore_note,
 	       valid ? "PASS" : "FAIL");
 
 	return valid ? PHASE_PASS : PHASE_FAIL;
