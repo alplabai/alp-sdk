@@ -19,6 +19,13 @@
  *     4-byte header (cmd | flags(0, solicited) | payload_len LE16) plus
  *     every payload byte except the trailer itself.
  *
+ * NARROWED CLAIM: cc3501e_model_stage_reply() below always pads. The real
+ * firmware only pads when the pad still fits the frame buffer -- otherwise it
+ * emits an unpadded odd-length payload with the CRC still last. None of the
+ * seven suites this header serves stage a reply anywhere near that buffer
+ * ceiling, so the gap is unreachable at the sizes in use today; it is NOT
+ * reproduced here, so do not treat this header as covering that edge case.
+ *
  * cc3501e_reply_verdict() (chips/cc3501e/cc3501e_core.c) requires this shape
  * for ANY reply whose status byte is ALP_CC3501E_RESP_OK (0x5A) -- even
  * before fw_proto_major is negotiated (fw_proto_major == 0), because 0x5A

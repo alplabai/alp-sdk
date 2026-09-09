@@ -127,7 +127,11 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint32_t       timeout_ms)
 {
 	if (data == NULL && len > 0u) return ALP_ERR_INVAL;
-	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_SEND_HDR)) return ALP_ERR_INVAL;
+	/* #2035: leave room for the MAJOR-4 CRC trailer cc3501e_request() appends
+	 * once this ctx has negotiated it -- see cc3501e_ble_gatt_register()'s
+	 * comment in cc3501e_ble.c. */
+	if (len > (size_t)(ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_SEND_HDR - ALP_CC3501E_CRC_BYTES))
+		return ALP_ERR_INVAL;
 	if (sent_out != NULL) *sent_out = 0u;
 
 	/* SOCK_SEND (0x22) wire = alp_cc3501e_sock_send_t (8 B) + inline data; reply

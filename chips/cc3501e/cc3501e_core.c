@@ -228,9 +228,11 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * yet) and makes cc3501e_reply_verdict() use its own
 	 * fw_proto_major==0 content-based shape detection, exactly like the
 	 * very first reset on a fresh ctx. */
-	ctx->initialised    = true;
-	ctx->fw_proto_major = 0u;
-	ctx->fw_proto_minor = 0u;
+	ctx->initialised          = true;
+	const uint8_t prior_major = ctx->fw_proto_major;
+	const uint8_t prior_minor = ctx->fw_proto_minor;
+	ctx->fw_proto_major       = 0u;
+	ctx->fw_proto_minor       = 0u;
 
 	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
@@ -262,9 +264,18 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
 	if (vs != ALP_OK) {
-		/* Transport hiccup reading the version, not a version disagreement: leave
-		 * the context as it was and let the caller retry (the soaks treat
-		 * GET_VERSION as a liveness probe, not a compat gate). */
+		/* Transport hiccup reading the version, not a version disagreement:
+		 * restore the prior fw_proto_major/minor (zeroed a few lines up for
+		 * GET_VERSION's own framing) so the context really is left as it was,
+		 * and let the caller retry (the soaks treat GET_VERSION as a liveness
+		 * probe, not a compat gate). Without this restore a healthy MAJOR-4
+		 * peer whose GET_VERSION round trip misses -- the common case
+		 * immediately after this reset -- is left with fw_proto_major == 0
+		 * and initialised == true: want_req_crc() then frames every later
+		 * request CRC-less, and that firmware rejects each one until some
+		 * later reset happens to get a version through. */
+		ctx->fw_proto_major = prior_major;
+		ctx->fw_proto_minor = prior_minor;
 		return ALP_OK;
 	}
 	/* MAJOR gates the link; MINOR does not (ADR 0033).
@@ -497,6 +508,21 @@ bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
 		 * usage, and seq legitimately starts at 0 -- len=0/flags=0/seq=0
 		 * is that reply, byte-identical to an all-zero dead phase. */
 		return true;
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
+		/* A genuine trade, not a free win like the cases above: the reply
+		 * IS the packed scan-record list itself (see cc3501e_wifi.c's
+		 * cc3501e_wifi_scan() / cc3501e_ble.c's scan walker), and "zero
+		 * networks/peripherals in range" is a legitimate, unremarkable
+		 * result -- an all-zero (i.e. empty) record list from a real scan
+		 * is byte-identical to a dead phase, and shape alone cannot tell
+		 * them apart.  Pre-fix, listing this opcode in
+		 * cc3501e_reply_carries_data() at all was missing, so a dead phase
+		 * here read as ALP_OK with a phantom "no networks found" -- the
+		 * failure this pair now trades for the opposite one (a real empty
+		 * scan can no longer be rejected as ALP_ERR_IO, which used to
+		 * happen before this opcode carried data at all). */
+		return true;
 	default:
 		return false;
 	}
@@ -524,8 +550,8 @@ bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
  * because that is what most opcodes in this table actually are -- PING, the
  * WIFI_*_STOP/DISCONNECT family, the SOCK_CONNECT/BIND/LISTEN/CLOSE family,
  * most BLE_* calls, GPIO_CONFIGURE/WRITE/SET_INTERRUPT, RESET,
- * WIFI_SCAN_START/STOP, WIFI_CONNECT_STA/AP_START (handled by the narrow
- * per-opcode check at the call site instead), OTA_BEGIN/WRITE/FINISH/ABORT/
+ * WIFI_SCAN_STOP, BLE_SCAN_STOP, WIFI_CONNECT_STA/AP_START (handled by the
+ * narrow per-opcode check at the call site instead), OTA_BEGIN/WRITE/FINISH/ABORT/
  * PROMOTE, STREAM_WRITE, SPI1_RELEASE, CAM_ENABLE/DISABLE, POWER_POLICY,
  * DIAG_LOG_LEVEL, and GET_PENDING_EVENTS (its DATA is genuinely optional --
  * "an empty list ... means nothing was queued", see the enum comment -- so
@@ -543,6 +569,7 @@ static bool cc3501e_reply_carries_data(alp_cc3501e_cmd_t cmd)
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
 	case ALP_CC3501E_CMD_WIFI_GET_IP:
 	case ALP_CC3501E_CMD_WIFI_STATUS:
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
 	case ALP_CC3501E_CMD_SOCK_OPEN:
 	case ALP_CC3501E_CMD_SOCK_SEND:
 	case ALP_CC3501E_CMD_SOCK_RECV:
@@ -551,7 +578,9 @@ static bool cc3501e_reply_carries_data(alp_cc3501e_cmd_t cmd)
 	case ALP_CC3501E_CMD_GPIO_READ:
 	case ALP_CC3501E_CMD_SPI1_CONFIGURE:
 	case ALP_CC3501E_CMD_SPI1_TRANSFER:
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
 	case ALP_CC3501E_CMD_BLE_GATT_READ:
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
 	case ALP_CC3501E_CMD_DIAG_GET_STATS:
 		return true;
 	default:
@@ -1324,9 +1353,14 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	 * to ALP_CC3501E_MAX_PAYLOAD would encode a wire length LARGER than the
 	 * protocol's own maximum into the header's length field.  Tighten the
 	 * ceiling by the trailer size whenever it is actually going to be
-	 * appended, matching cc3501e_ble_write_descriptor()'s own
-	 * ALP_CC3501E_MAX_PAYLOAD bound at chips/cc3501e/cc3501e_ble.c -- that
-	 * bound is now wrong against a major-4 peer without this. */
+	 * appended.  cc3501e_ble_gatt_register() (chips/cc3501e/cc3501e_ble.c),
+	 * cc3501e_ble_gatt_notify()/cc3501e_ble_gatt_write(), and
+	 * cc3501e_sock_send() (chips/cc3501e/cc3501e_sockets.c) each apply this
+	 * SAME ALP_CC3501E_CRC_BYTES subtraction to their own len bound so a
+	 * caller sized to their documented maximum does not get rejected here
+	 * one layer down -- keep them in lockstep with this ceiling; a wrapper
+	 * bound that skips the subtraction goes stale against a MAJOR-4 peer
+	 * without this. */
 	const uint16_t max_tx = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR)
 	                            ? (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES)
 	                            : (uint16_t)ALP_CC3501E_MAX_PAYLOAD;

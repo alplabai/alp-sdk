@@ -31,6 +31,15 @@
 #include "alp/protocol/cc3501e.h"
 #include "cc3501e_reply_model.h"
 
+/* #2035: what a real MAJOR-4 firmware actually reports as its SPI1 chunk cap
+ * in the SPI1_CONFIGURE reply -- ALP_CC3501E_SPI1_MAX_XFER (4088) minus the
+ * MAJOR-4 CRC trailer cc3501e_request() appends, i.e. CC3501E_SPI1_MAX_XFER_V4
+ * from the firmware's own protocol_meta.c.  This suite otherwise models
+ * MAJOR-4 replies throughout (see cc3501e_reply_model.h), so staging the bare
+ * macro here instead of the real reported value was the one inconsistent
+ * field -- see test_spi1_configure_encodes_request_and_decodes_reply below. */
+#define CC3501E_SPI1_MAX_XFER_V4 ((uint16_t)(ALP_CC3501E_SPI1_MAX_XFER - ALP_CC3501E_CRC_BYTES))
+
 /* ---- software model of the firmware slave ---------------------------------- */
 
 enum slave_phase {
@@ -197,6 +206,17 @@ static uint32_t g_get_mac_corrupt_remaining;
  * cc3501e_wifi_get_mac() is a fresh wire transaction, not a cached reply. */
 static uint32_t g_get_mac_serve_count;
 
+/* #2035 follow-up (the coverage gap that let two review findings ship): a
+ * dead phase on the LEGACY (wire MAJOR 3) wire for an opcode whose reply
+ * carries real data -- a valid reply HEADER followed by an ALL-ZERO payload
+ * phase, this repo's own silicon-measured dead-link shape.  When true,
+ * slave_dispatch() below stages exactly that (status 0x00 +
+ * ALP_CC3501E_REPLY_PAD-1 zero data bytes) for BLE_GATT_REGISTER,
+ * WIFI_SCAN_START, and BLE_SCAN_START regardless of their normal fixture --
+ * see test_ble_gatt_register_dead_phase_legacy_rejected_2035 and the two
+ * scan acceptance tests below it.  Cleared by slave_reset(). */
+static bool g_force_dead_phase_zero_payload;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -224,6 +244,7 @@ static void slave_reset(void)
 	g_get_mac_corrupt_remaining        = 0u;
 	g_get_mac_serve_count              = 0u;
 	g_bare_ok_legacy                   = false;
+	g_force_dead_phase_zero_payload    = false;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -347,6 +368,16 @@ static uint16_t build_ble_scan_ctx_b(uint8_t *p)
 /* Build the reply for the just-received request. */
 static void slave_dispatch(void)
 {
+	if (g_force_dead_phase_zero_payload && (slave.cmd == ALP_CC3501E_CMD_BLE_GATT_REGISTER ||
+	                                        slave.cmd == ALP_CC3501E_CMD_WIFI_SCAN_START ||
+	                                        slave.cmd == ALP_CC3501E_CMD_BLE_SCAN_START)) {
+		/* See g_force_dead_phase_zero_payload's comment above -- overrides
+		 * the normal per-opcode fixture below entirely. */
+		uint8_t zeros[ALP_CC3501E_REPLY_PAD] = { 0 };
+		slave.reply_len                      = cc3501e_model_stage_legacy_reply(
+		    slave.reply_pl, 0x00u, &zeros[1], (uint16_t)(ALP_CC3501E_REPLY_PAD - 1u));
+		return;
+	}
 	switch (slave.cmd) {
 	case ALP_CC3501E_CMD_PING:
 	case ALP_CC3501E_CMD_RESET:
@@ -608,8 +639,8 @@ static void slave_dispatch(void)
 			(uint8_t)((freq_hz >> 8) & 0xFFu),
 			(uint8_t)((freq_hz >> 16) & 0xFFu),
 			(uint8_t)((freq_hz >> 24) & 0xFFu),
-			(uint8_t)(ALP_CC3501E_SPI1_MAX_XFER & 0xFFu),
-			(uint8_t)((ALP_CC3501E_SPI1_MAX_XFER >> 8) & 0xFFu),
+			(uint8_t)(CC3501E_SPI1_MAX_XFER_V4 & 0xFFu),
+			(uint8_t)((CC3501E_SPI1_MAX_XFER_V4 >> 8) & 0xFFu),
 			slave.req_pl[5], /* bits_per_word echoed back */
 			0u,
 		};
@@ -986,6 +1017,81 @@ ZTEST(cc3501e_host_driver, test_ping_accepts_legacy_major3_bare_ok_shape_bilingu
 	g_bare_ok_legacy  = true;
 
 	zassert_equal(cc3501e_ping(&fw), ALP_OK, "a legacy 0x00 bare-OK reply decodes fine on MAJOR 3");
+}
+
+/* #2035 review follow-up: the coverage gap that let two blockers ship.  No
+ * test exercised a dead phase on the LEGACY wire for an opcode whose reply
+ * carries real data beyond the status byte -- exactly the shape a bus that
+ * dies mid-transaction clocks back (this repo's own silicon finding: a dead
+ * link reads 0x00000000).  Stage that shape directly at the transport layer
+ * via cc3501e_request(), same pattern as
+ * test_connect_sta_dead_phase_alias_rejected_at_transport_1378 above.
+ *
+ * BLE_GATT_REGISTER (0x38) must REJECT it: <alp/protocol/cc3501e.h>
+ * documents num_handles == num_chars, at least 1 on a real success, so
+ * num_handles == 0 is never legitimate -- this all-zero payload can only be
+ * the dead-phase alias.  Mutation check: removing
+ * ALP_CC3501E_CMD_BLE_GATT_REGISTER from cc3501e_reply_carries_data()
+ * (chips/cc3501e/cc3501e_core.c) reddens this test. */
+ZTEST(cc3501e_host_driver, test_ble_gatt_register_dead_phase_legacy_rejected_2035)
+{
+	fw.fw_proto_major               = (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	g_force_dead_phase_zero_payload = true;
+
+	const uint8_t descriptor[1] = { 0x01u };
+	uint8_t       reply[8]      = { 0 };
+	size_t        got           = 0u;
+	alp_status_t  s             = cc3501e_request(&fw,
+	                                              ALP_CC3501E_CMD_BLE_GATT_REGISTER,
+	                                              descriptor,
+	                                              sizeof(descriptor),
+	                                              reply,
+	                                              sizeof(reply),
+	                                              &got,
+	                                              100u);
+	zassert_not_equal(s,
+	                  ALP_OK,
+	                  "an all-zero padded BLE_GATT_REGISTER reply on the legacy wire must not "
+	                  "read as ALP_OK -- num_handles==0 is not a legitimate success shape (#2035)");
+	zassert_equal(s, ALP_ERR_IO, "rejected as a transport error, not silently accepted");
+}
+
+/* WIFI_SCAN_START (0x10) and BLE_SCAN_START (0x34) are the opposite trade,
+ * deliberately: the SAME all-zero padded reply must be ACCEPTED, because
+ * "zero networks/peripherals in range" is a legitimate, unremarkable scan
+ * result that reads back byte-identical to a dead phase -- shape alone
+ * cannot tell them apart (see cc3501e_reply_may_be_all_zero()'s comment on
+ * these two cases).  Mutation check: removing either opcode from
+ * cc3501e_reply_may_be_all_zero() reddens its matching test below with
+ * ALP_ERR_IO instead of ALP_OK. */
+ZTEST(cc3501e_host_driver, test_wifi_scan_start_empty_legacy_accepted_2035)
+{
+	fw.fw_proto_major               = (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	g_force_dead_phase_zero_payload = true;
+
+	uint8_t      reply[8] = { 0 };
+	size_t       got      = 0u;
+	alp_status_t s        = cc3501e_request(
+	    &fw, ALP_CC3501E_CMD_WIFI_SCAN_START, NULL, 0u, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s,
+	              ALP_OK,
+	              "an all-zero padded WIFI_SCAN_START reply is a legitimate empty-scan result, "
+	              "not the dead-phase alias (#2035)");
+}
+
+ZTEST(cc3501e_host_driver, test_ble_scan_start_empty_legacy_accepted_2035)
+{
+	fw.fw_proto_major               = (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	g_force_dead_phase_zero_payload = true;
+
+	uint8_t      reply[8] = { 0 };
+	size_t       got      = 0u;
+	alp_status_t s        = cc3501e_request(
+	    &fw, ALP_CC3501E_CMD_BLE_SCAN_START, NULL, 0u, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s,
+	              ALP_OK,
+	              "an all-zero padded BLE_SCAN_START reply is a legitimate empty-scan result, "
+	              "not the dead-phase alias (#2035)");
 }
 
 /* ---- ADR 0033: CMD_GET_CAPABILITIES (0x06) --------------------------------- */
@@ -2318,7 +2424,7 @@ ZTEST(cc3501e_host_driver, test_spi1_configure_encodes_request_and_decodes_reply
 	zassert_equal(slave.req_pl[5], 0x08u, "bits_per_word is pinned at 8, not a caller parameter");
 	zassert_equal(slave.req_pl[6], (uint8_t)ALP_CC3501E_SPI1_CS0, "cs");
 	zassert_equal(actual_freq_hz, 10000000u, "decoded actual SCK");
-	zassert_equal(max_xfer, (uint16_t)ALP_CC3501E_SPI1_MAX_XFER, "decoded peer chunk cap");
+	zassert_equal(max_xfer, CC3501E_SPI1_MAX_XFER_V4, "decoded peer chunk cap");
 }
 
 ZTEST(cc3501e_host_driver, test_spi1_transfer_encodes_request_matches_protocol_vector)

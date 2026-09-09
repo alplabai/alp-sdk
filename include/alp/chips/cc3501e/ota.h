@@ -132,16 +132,21 @@ alp_status_t cc3501e_ota_begin(cc3501e_t *ctx, uint32_t total_len, uint32_t time
  *
  * Preconditions (both enforced): @p offset MUST equal the device's running
  * write cursor -- out-of-order writes are rejected by the firmware -- and
- * @p len MUST be 1..ALP_CC3501E_OTA_MAX_CHUNK bytes (the wire frame is a
- * 4-byte LE offset + the raw bytes, bounded by ALP_CC3501E_MAX_PAYLOAD).
- * After a missed reply, re-sync to the device's actual cursor with
- * @ref cc3501e_ota_status instead of blindly re-sending.
+ * @p len MUST be 1..(ALP_CC3501E_OTA_MAX_CHUNK minus ALP_CC3501E_CRC_BYTES
+ * once this @p ctx has negotiated the MAJOR-4 wire) bytes -- the wire frame
+ * is a 4-byte LE offset + the raw bytes, bounded by ALP_CC3501E_MAX_PAYLOAD,
+ * and cc3501e_request()'s own tx_len ceiling already enforces the tighter
+ * bound once the CRC trailer it appends is accounted for.  After a missed
+ * reply, re-sync to the device's actual cursor with @ref cc3501e_ota_status
+ * instead of blindly re-sending.
  *
  * @param ctx         Initialised bridge handle.
  * @param offset      Absolute byte offset into the image; must equal the
  *                    device's write cursor (bytes_written so far).
  * @param data        Chunk bytes to append (must be non-NULL).
- * @param len         Chunk length: 1..ALP_CC3501E_OTA_MAX_CHUNK.
+ * @param len         Chunk length: 1..(ALP_CC3501E_OTA_MAX_CHUNK minus
+ *                    ALP_CC3501E_CRC_BYTES once negotiated MAJOR-4, see
+ *                    above).
  * @param timeout_ms  Per-request poll-by-repeat budget.
  * @return ALP_OK once the chunk is accepted; ALP_ERR_INVAL on a NULL @p data
  *         or an out-of-range @p len; otherwise the mapped error (a

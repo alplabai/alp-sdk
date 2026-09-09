@@ -582,8 +582,13 @@ alp_status_t cc3501e_spi1_configure(cc3501e_t            *ctx,
  * @param tx          Bytes to clock out, or NULL to clock @p tx_fill instead.
  * @param rx          Receives exactly @p len bytes on ALP_OK, or NULL to
  *                    discard MISO.
- * @param len         Bytes to clock, 0..@c ALP_CC3501E_SPI1_MAX_XFER (chunk at
- *                    the max_xfer the peer reported, see above).
+ * @param len         Bytes to clock, 0..(@c ALP_CC3501E_SPI1_MAX_XFER minus
+ *                    @c ALP_CC3501E_CRC_BYTES once this @p ctx has negotiated
+ *                    the MAJOR-4 wire -- cc3501e_request()'s own tx_len
+ *                    ceiling already enforces the tighter bound once the CRC
+ *                    trailer it appends is accounted for; chunk at the
+ *                    max_xfer the peer reported, see above, not at the bare
+ *                    macro).
  * @param tx_fill     Byte clocked out when @p tx is NULL.
  * @param cs_hold     Leave CS asserted after this chunk.
  * @param timeout_ms  Caller budget (worker-routed, so poll-by-repeat).
