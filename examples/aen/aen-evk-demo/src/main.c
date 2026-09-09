@@ -410,8 +410,13 @@ static alp_status_t bmi323_diag_read16(alp_i2c_t *bus, uint8_t reg, uint16_t *ou
  * that folds a soft-reset NAK, a CHIP_ID-read I/O error, and a CHIP_ID
  * mismatch into one indistinguishable ALP_ERR_IO (#2035). Re-reads
  * CHIP_ID, ERR_REG, and STATUS directly and names which one is implicated.
+ *
+ * Returns whether CHIP_ID itself was readable -- the caller uses this to
+ * tell BROKEN (registers readable, something else is wrong) apart from
+ * PHANTOM (the address ACKed but the register protocol doesn't answer at
+ * all, e.g. today's CHIP_ID (0x00) read failed rc=-5).
  */
-static void bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
+static bool bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
 {
 	printf("[evkdemo] BMI323 @0x%02x: init -> %d\n", EVK_I2C_ADDR_BMI323, (int)irc);
 
@@ -421,7 +426,7 @@ static void bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
 		printf("[evkdemo]   CHIP_ID  (0x00): read failed rc=%d -- the part isn't answering "
 		       "the register protocol at all (the soft-reset write likely NAK'd too)\n",
 		       (int)rc_id);
-		return;
+		return false;
 	}
 	printf("[evkdemo]   CHIP_ID  (0x00) = 0x%02x (expect 0x%02x)\n", (uint8_t)id, BMI323_CHIP_ID);
 
@@ -444,6 +449,7 @@ static void bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
 		             "landed (BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16)"
 		           : "");
 	}
+	return true;
 }
 
 /*
@@ -465,6 +471,72 @@ static void bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
 #define BMP581_DIAG_STATUS_NVM_RDY  0x02u /* bit1 */
 #define BMP581_DIAG_STATUS_NVM_ERR  0x04u /* bit2 */
 
+/*
+ * #2035: POPULATION IS PER-UNIT, NOT A BATCH TRAIT -- and conflating "not
+ * fitted on this board" with "fitted and broken" produced a misleading
+ * verdict on this exact phase and on phase_power_rails today. Per-unit BOM
+ * variance is real and documented (metadata/boards/e1m-evk.yaml:325: two
+ * different E1M-AEN803 units each missed a DIFFERENT INA236, and a third
+ * answered on all six), so a phase that judges a board must first find out
+ * what is actually on it, not assume the schematic.
+ *
+ * The fix is to PROBE before judging, and to keep three-plus-one outcomes
+ * distinct instead of collapsing them into one pass/fail bit:
+ *
+ *   ABSENT  -- the address NACKs. Not fitted on THIS unit. Reported, never
+ *              counted as a failure -- this is population, not a defect.
+ *   OK      -- the address ACKs and the driver initialises and reads valid
+ *              data. The normal path.
+ *   BROKEN  -- the address ACKs but the driver (init, or a read after a
+ *              clean init) fails. The part is THERE and it does not work.
+ *              This is the one state a verdict should FAIL on.
+ *   PHANTOM -- the address ACKs but a REGISTER read afterward also fails
+ *              (the BMI323 hit exactly this today: CHIP_ID (0x00) read
+ *              failed rc=-5 right after its address answered). Neither
+ *              cleanly absent nor cleanly working -- usually a part held in
+ *              reset, unpowered, or a phantom bus acknowledgement. Reported
+ *              distinctly rather than folded into ABSENT (it did answer)
+ *              or BROKEN (nothing on it could actually be read).
+ */
+typedef enum {
+	I2C_DEV_ABSENT,
+	I2C_DEV_OK,
+	I2C_DEV_BROKEN,
+	I2C_DEV_PHANTOM,
+} i2c_dev_state_t;
+
+static const char *i2c_dev_state_str(i2c_dev_state_t s)
+{
+	switch (s) {
+	case I2C_DEV_ABSENT:
+		return "ABSENT (not fitted on this unit)";
+	case I2C_DEV_OK:
+		return "OK";
+	case I2C_DEV_BROKEN:
+		return "BROKEN (fitted, driver failed)";
+	case I2C_DEV_PHANTOM:
+	default:
+		return "PHANTOM ACK (fitted, register access failed)";
+	}
+}
+
+/*
+ * PRESENCE PROBE -- a discarded 1-byte read. This is the SAME portable
+ * ACK-probe examples/peripheral-io/i2c-scanner and
+ * examples/aen/aen-brd-i2c-scan already use, for the same reason: this
+ * carrier bus runs over the upstream i2c_dw backend (Alif Ensemble
+ * DesignWare I2C controller), and i2c_dw does not universally honour a
+ * zero-length write as a probe -- nothing goes on the wire and every
+ * address looks absent. A 1-byte read always puts an address byte + R/W
+ * bit on the bus and reports the real ACK/NACK, so it is the one shape
+ * that works as a presence probe on this controller.
+ */
+static bool i2c_addr_acked(alp_i2c_t *bus, uint8_t addr)
+{
+	uint8_t scratch = 0;
+	return alp_i2c_read(bus, addr, &scratch, 1) == ALP_OK;
+}
+
 static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: sensors (BMI323 + ICM-42670 + BMP581) --\n");
@@ -473,178 +545,267 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	int attempted = 0, answered = 0;
+	int attempted = 0, answered = 0, absent = 0, broken = 0, phantom = 0;
 
 	/* --- BMI323 @0x68 ------------------------------------------------ */
 	attempted++;
 	{
-		bmi323_t     bmi;
-		alp_status_t irc = bmi323_init(&bmi, ctx->carrier_bus, EVK_I2C_ADDR_BMI323);
-		if (irc != ALP_OK) {
-			bmi323_report_init_failure(ctx->carrier_bus, irc);
-		} else {
-			uint8_t id = 0;
-			(void)bmi323_read_id(&bmi, &id);
-			alp_status_t cfg_rc = bmi323_set_accel(&bmi, BMI323_ODR_100_HZ, BMI323_ACCEL_FS_2G);
-
-			/* tA,SU = 2 ms typ FLOOR (BST-BMI323-DS000-13 Rev 1.7, Table 2
-			 * p.9), then poll STATUS.drdy_acc -- bench-measured still 0 at
-			 * ~17 ms, set by ~100 ms against a 10 ms configured ODR
-			 * period. 30x the ODR period (300 ms) is generous without
-			 * being unbounded; poll every half period (5 ms). */
-			k_msleep(2);
-			const uint32_t      poll_step_ms = 5, timeout_ms = 300;
-			bmi323_data_ready_t drdy  = { 0 };
-			bool                ready = false;
-			for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
-				if (bmi323_data_ready(&bmi, &drdy) == ALP_OK && drdy.accel) {
-					ready = true;
-					break;
-				}
-				k_msleep(poll_step_ms);
-			}
-
-			bmi323_axes_t a  = { 0 };
-			alp_status_t  rs = bmi323_read_accel(&bmi, &a);
-			bool          valid =
-			    (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !imu_axes_invalid(a.x, a.y, a.z);
-			printf("[evkdemo] BMI323 @0x%02x: id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d "
-			       "ready=%s %s\n",
+		bool present = i2c_addr_acked(ctx->carrier_bus, EVK_I2C_ADDR_BMI323);
+		printf("[evkdemo] BMI323 @0x%02x: presence probe %s\n",
+		       EVK_I2C_ADDR_BMI323,
+		       present ? "ACK" : "NO ACK");
+		if (!present) {
+			printf("[evkdemo] BMI323 @0x%02x: %s\n",
 			       EVK_I2C_ADDR_BMI323,
-			       id,
-			       a.x,
-			       a.y,
-			       a.z,
-			       (int)cfg_rc,
-			       (int)rs,
-			       ready ? "yes" : "TIMEOUT",
-			       valid ? "ok" : "INVALID");
-			if (valid) answered++;
+			       i2c_dev_state_str(I2C_DEV_ABSENT));
+			absent++;
+		} else {
+			bmi323_t     bmi;
+			alp_status_t irc = bmi323_init(&bmi, ctx->carrier_bus, EVK_I2C_ADDR_BMI323);
+			if (irc != ALP_OK) {
+				bool chip_id_readable = bmi323_report_init_failure(ctx->carrier_bus, irc);
+				if (chip_id_readable) {
+					printf("[evkdemo] BMI323 @0x%02x: %s\n",
+					       EVK_I2C_ADDR_BMI323,
+					       i2c_dev_state_str(I2C_DEV_BROKEN));
+					broken++;
+				} else {
+					printf("[evkdemo] BMI323 @0x%02x: %s\n",
+					       EVK_I2C_ADDR_BMI323,
+					       i2c_dev_state_str(I2C_DEV_PHANTOM));
+					phantom++;
+				}
+			} else {
+				uint8_t id = 0;
+				(void)bmi323_read_id(&bmi, &id);
+				alp_status_t cfg_rc = bmi323_set_accel(&bmi, BMI323_ODR_100_HZ, BMI323_ACCEL_FS_2G);
+
+				/* tA,SU = 2 ms typ FLOOR (BST-BMI323-DS000-13 Rev 1.7, Table 2
+				 * p.9), then poll STATUS.drdy_acc -- bench-measured still 0 at
+				 * ~17 ms, set by ~100 ms against a 10 ms configured ODR
+				 * period. 30x the ODR period (300 ms) is generous without
+				 * being unbounded; poll every half period (5 ms). */
+				k_msleep(2);
+				const uint32_t      poll_step_ms = 5, timeout_ms = 300;
+				bmi323_data_ready_t drdy  = { 0 };
+				bool                ready = false;
+				for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
+					if (bmi323_data_ready(&bmi, &drdy) == ALP_OK && drdy.accel) {
+						ready = true;
+						break;
+					}
+					k_msleep(poll_step_ms);
+				}
+
+				bmi323_axes_t a     = { 0 };
+				alp_status_t  rs    = bmi323_read_accel(&bmi, &a);
+				bool          valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready &&
+				                      !imu_axes_invalid(a.x, a.y, a.z);
+				printf("[evkdemo] BMI323 @0x%02x: id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d "
+				       "ready=%s %s (%s)\n",
+				       EVK_I2C_ADDR_BMI323,
+				       id,
+				       a.x,
+				       a.y,
+				       a.z,
+				       (int)cfg_rc,
+				       (int)rs,
+				       ready ? "yes" : "TIMEOUT",
+				       valid ? "ok" : "INVALID",
+				       i2c_dev_state_str(valid ? I2C_DEV_OK : I2C_DEV_BROKEN));
+				if (valid) {
+					answered++;
+				} else {
+					broken++;
+				}
+			}
 		}
 	}
 
 	/* --- ICM-42670 @0x69 ---------------------------------------------- */
 	attempted++;
 	{
-		icm42670_t   imu;
-		alp_status_t irc = icm42670_init(&imu, ctx->carrier_bus, EVK_I2C_ADDR_ICM42670);
-		if (irc != ALP_OK) {
-			printf("[evkdemo] ICM42670 @0x%02x: init -> %d\n", EVK_I2C_ADDR_ICM42670, (int)irc);
-		} else {
-			uint8_t id = 0;
-			(void)icm42670_read_id(&imu, &id);
-			alp_status_t cfg_rc =
-			    icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
-
-			/* 10 ms typ sleep-to-valid-sample FLOOR (TDK DS-000451 Rev
-			 * 1.0 p.11), then poll DATA_RDY_INT (p.67) the same
-			 * 5 ms / 300 ms shape as BMI323 above. */
-			k_msleep(10);
-			const uint32_t poll_step_ms = 5, timeout_ms = 300;
-			bool           ready = false;
-			for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
-				if (icm42670_data_ready(&imu, &ready) == ALP_OK && ready) break;
-				ready = false;
-				k_msleep(poll_step_ms);
-			}
-
-			icm42670_axes_t a  = { 0 };
-			alp_status_t    rs = icm42670_read_accel(&imu, &a);
-			bool            valid =
-			    (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !imu_axes_invalid(a.x, a.y, a.z);
-			printf("[evkdemo] ICM42670 @0x%02x: id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d "
-			       "ready=%s %s\n",
+		bool present = i2c_addr_acked(ctx->carrier_bus, EVK_I2C_ADDR_ICM42670);
+		printf("[evkdemo] ICM42670 @0x%02x: presence probe %s\n",
+		       EVK_I2C_ADDR_ICM42670,
+		       present ? "ACK" : "NO ACK");
+		if (!present) {
+			printf("[evkdemo] ICM42670 @0x%02x: %s\n",
 			       EVK_I2C_ADDR_ICM42670,
-			       id,
-			       a.x,
-			       a.y,
-			       a.z,
-			       (int)cfg_rc,
-			       (int)rs,
-			       ready ? "yes" : "TIMEOUT",
-			       valid ? "ok" : "INVALID");
-			if (valid) answered++;
+			       i2c_dev_state_str(I2C_DEV_ABSENT));
+			absent++;
+		} else {
+			icm42670_t   imu;
+			alp_status_t irc = icm42670_init(&imu, ctx->carrier_bus, EVK_I2C_ADDR_ICM42670);
+			if (irc != ALP_OK) {
+				printf("[evkdemo] ICM42670 @0x%02x: init -> %d (%s)\n",
+				       EVK_I2C_ADDR_ICM42670,
+				       (int)irc,
+				       i2c_dev_state_str(I2C_DEV_BROKEN));
+				broken++;
+			} else {
+				uint8_t id = 0;
+				(void)icm42670_read_id(&imu, &id);
+				alp_status_t cfg_rc =
+				    icm42670_set_accel(&imu, ICM42670_ODR_100_HZ, ICM42670_ACCEL_FS_2G);
+
+				/* 10 ms typ sleep-to-valid-sample FLOOR (TDK DS-000451 Rev
+				 * 1.0 p.11), then poll DATA_RDY_INT (p.67) the same
+				 * 5 ms / 300 ms shape as BMI323 above. */
+				k_msleep(10);
+				const uint32_t poll_step_ms = 5, timeout_ms = 300;
+				bool           ready = false;
+				for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
+					if (icm42670_data_ready(&imu, &ready) == ALP_OK && ready) break;
+					ready = false;
+					k_msleep(poll_step_ms);
+				}
+
+				icm42670_axes_t a     = { 0 };
+				alp_status_t    rs    = icm42670_read_accel(&imu, &a);
+				bool            valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready &&
+				                        !imu_axes_invalid(a.x, a.y, a.z);
+				printf("[evkdemo] ICM42670 @0x%02x: id=0x%02x accel{%d,%d,%d} cfg_rc=%d rs=%d "
+				       "ready=%s %s (%s)\n",
+				       EVK_I2C_ADDR_ICM42670,
+				       id,
+				       a.x,
+				       a.y,
+				       a.z,
+				       (int)cfg_rc,
+				       (int)rs,
+				       ready ? "yes" : "TIMEOUT",
+				       valid ? "ok" : "INVALID",
+				       i2c_dev_state_str(valid ? I2C_DEV_OK : I2C_DEV_BROKEN));
+				if (valid) {
+					answered++;
+				} else {
+					broken++;
+				}
+			}
 		}
 	}
 
 	/* --- BMP581 @0x47 --------------------------------------------------- */
 	attempted++;
 	{
-		bmp581_t     baro;
-		alp_status_t irc = bmp581_init(&baro, ctx->carrier_bus, EVK_I2C_ADDR_BMP581);
-		if (irc != ALP_OK) {
-			printf("[evkdemo] BMP581 @0x%02x: init -> %d\n", EVK_I2C_ADDR_BMP581, (int)irc);
-		} else {
-			uint8_t id = 0;
-			(void)bmp581_read_id(&baro, &id);
-
-			/*
-			 * #2035: id/p_raw/t_raw can all look fine while
-			 * bmp581_data_ready() below still times out -- the
-			 * driver's ready check only ever looks at INT_STATUS
-			 * (0x27) drdy_data_reg, never at this separate STATUS
-			 * register (0x28), so a part that stalls here (e.g. an
-			 * NVM fault) previously went completely unreported. Read
-			 * it directly (chips/bmp581/bmp581.c has no public
-			 * accessor for it, same reasoning as the BMI323 diag
-			 * above) and print all three of its documented bits
-			 * before deciding whether the timeout below has an
-			 * explanation.
-			 */
-			uint8_t      bstatus     = 0;
-			uint8_t      bstatus_reg = BMP581_DIAG_REG_STATUS;
-			alp_status_t rc_bstatus  = alp_i2c_write_read(
-			    ctx->carrier_bus, EVK_I2C_ADDR_BMP581, &bstatus_reg, 1, &bstatus, 1);
-			if (rc_bstatus == ALP_OK) {
-				printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) = 0x%02x "
-				       "(core_rdy=%u nvm_rdy=%u nvm_err=%u)\n",
-				       EVK_I2C_ADDR_BMP581,
-				       bstatus,
-				       (bstatus & BMP581_DIAG_STATUS_CORE_RDY) ? 1u : 0u,
-				       (bstatus & BMP581_DIAG_STATUS_NVM_RDY) ? 1u : 0u,
-				       (bstatus & BMP581_DIAG_STATUS_NVM_ERR) ? 1u : 0u);
-			} else {
-				printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) read failed rc=%d\n",
-				       EVK_I2C_ADDR_BMP581,
-				       (int)rc_bstatus);
-			}
-
-			/* FORCED: one conversion then back to standby, fitting a
-			 * single-read phase; init() alone leaves the part in
-			 * STANDBY with pressure OFF (BST-BMP581-DS004-13 Rev 1.13
-			 * pp.50,58). */
-			alp_status_t cfg_rc = bmp581_set_sampling(
-			    &baro, BMP581_OSR_X1, BMP581_OSR_X1, BMP581_ODR_50_HZ, BMP581_MODE_FORCED);
-
-			/* ~2 ms typ P+T conversion at OSR x1 (p.12); poll
-			 * drdy_data_reg (p.58, clear-on-read) up to 10x that. */
-			const uint32_t poll_step_ms = 2, timeout_ms = 20;
-			bool           ready = false;
-			for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
-				if (bmp581_data_ready(&baro, &ready) == ALP_OK && ready) break;
-				ready = false;
-				k_msleep(poll_step_ms);
-			}
-
-			bmp581_raw_t raw = { 0 };
-			alp_status_t rs  = bmp581_read_raw(&baro, &raw);
-			bool valid = (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !bmp581_raw_invalid(&raw);
-			printf("[evkdemo] BMP581 @0x%02x: id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d rs=%d "
-			       "ready=%s %s\n",
+		bool present = i2c_addr_acked(ctx->carrier_bus, EVK_I2C_ADDR_BMP581);
+		printf("[evkdemo] BMP581 @0x%02x: presence probe %s\n",
+		       EVK_I2C_ADDR_BMP581,
+		       present ? "ACK" : "NO ACK");
+		if (!present) {
+			printf("[evkdemo] BMP581 @0x%02x: %s\n",
 			       EVK_I2C_ADDR_BMP581,
-			       id,
-			       raw.pressure_raw,
-			       raw.temperature_raw,
-			       (int)cfg_rc,
-			       (int)rs,
-			       ready ? "yes" : "TIMEOUT",
-			       valid ? "ok" : "INVALID");
-			if (valid) answered++;
+			       i2c_dev_state_str(I2C_DEV_ABSENT));
+			absent++;
+		} else {
+			bmp581_t     baro;
+			alp_status_t irc = bmp581_init(&baro, ctx->carrier_bus, EVK_I2C_ADDR_BMP581);
+			if (irc != ALP_OK) {
+				printf("[evkdemo] BMP581 @0x%02x: init -> %d (%s)\n",
+				       EVK_I2C_ADDR_BMP581,
+				       (int)irc,
+				       i2c_dev_state_str(I2C_DEV_BROKEN));
+				broken++;
+			} else {
+				uint8_t id = 0;
+				(void)bmp581_read_id(&baro, &id);
+
+				/*
+				 * #2035: id/p_raw/t_raw can all look fine while
+				 * bmp581_data_ready() below still times out -- the
+				 * driver's ready check only ever looks at INT_STATUS
+				 * (0x27) drdy_data_reg, never at this separate STATUS
+				 * register (0x28), so a part that stalls here (e.g. an
+				 * NVM fault) previously went completely unreported. Read
+				 * it directly (chips/bmp581/bmp581.c has no public
+				 * accessor for it, same reasoning as the BMI323 diag
+				 * above) and print all three of its documented bits
+				 * before deciding whether the timeout below has an
+				 * explanation.
+				 */
+				uint8_t      bstatus     = 0;
+				uint8_t      bstatus_reg = BMP581_DIAG_REG_STATUS;
+				alp_status_t rc_bstatus  = alp_i2c_write_read(
+				    ctx->carrier_bus, EVK_I2C_ADDR_BMP581, &bstatus_reg, 1, &bstatus, 1);
+				if (rc_bstatus == ALP_OK) {
+					printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) = 0x%02x "
+					       "(core_rdy=%u nvm_rdy=%u nvm_err=%u)\n",
+					       EVK_I2C_ADDR_BMP581,
+					       bstatus,
+					       (bstatus & BMP581_DIAG_STATUS_CORE_RDY) ? 1u : 0u,
+					       (bstatus & BMP581_DIAG_STATUS_NVM_RDY) ? 1u : 0u,
+					       (bstatus & BMP581_DIAG_STATUS_NVM_ERR) ? 1u : 0u);
+				} else {
+					printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) read failed rc=%d\n",
+					       EVK_I2C_ADDR_BMP581,
+					       (int)rc_bstatus);
+				}
+
+				/* FORCED: one conversion then back to standby, fitting a
+				 * single-read phase; init() alone leaves the part in
+				 * STANDBY with pressure OFF (BST-BMP581-DS004-13 Rev 1.13
+				 * pp.50,58). */
+				alp_status_t cfg_rc = bmp581_set_sampling(
+				    &baro, BMP581_OSR_X1, BMP581_OSR_X1, BMP581_ODR_50_HZ, BMP581_MODE_FORCED);
+
+				/* ~2 ms typ P+T conversion at OSR x1 (p.12); poll
+				 * drdy_data_reg (p.58, clear-on-read) up to 10x that. */
+				const uint32_t poll_step_ms = 2, timeout_ms = 20;
+				bool           ready = false;
+				for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
+					if (bmp581_data_ready(&baro, &ready) == ALP_OK && ready) break;
+					ready = false;
+					k_msleep(poll_step_ms);
+				}
+
+				bmp581_raw_t raw = { 0 };
+				alp_status_t rs  = bmp581_read_raw(&baro, &raw);
+				bool         valid =
+				    (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !bmp581_raw_invalid(&raw);
+				printf("[evkdemo] BMP581 @0x%02x: id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d rs=%d "
+				       "ready=%s %s (%s)\n",
+				       EVK_I2C_ADDR_BMP581,
+				       id,
+				       raw.pressure_raw,
+				       raw.temperature_raw,
+				       (int)cfg_rc,
+				       (int)rs,
+				       ready ? "yes" : "TIMEOUT",
+				       valid ? "ok" : "INVALID",
+				       i2c_dev_state_str(valid ? I2C_DEV_OK : I2C_DEV_BROKEN));
+				if (valid) {
+					answered++;
+				} else {
+					broken++;
+				}
+			}
 		}
 	}
 
-	printf("[evkdemo] SENSORS: %d/%d answered\n", answered, attempted);
-	return (answered == attempted) ? PHASE_PASS : PHASE_FAIL;
+	printf("[evkdemo] SENSORS: %d/%d answered, %d absent, %d broken, %d phantom\n",
+	       answered,
+	       attempted,
+	       absent,
+	       broken,
+	       phantom);
+
+	/* FAIL only on a FITTED sensor that misbehaved (BROKEN or PHANTOM).
+	 * A sensor this unit simply doesn't have is ABSENT, never a failure
+	 * (see the state comment above phase_sensors). If every sensor is
+	 * absent there is nothing left to exercise -- SKIPPED, not a silent
+	 * PASS (the top-of-file verdict contract). */
+	if (broken > 0 || phantom > 0) {
+		ctx->note = "a FITTED sensor misbehaved -- see per-sensor log above";
+		return PHASE_FAIL;
+	}
+	if (answered == 0) {
+		ctx->note = "no sensor answered its presence probe on this unit";
+		return PHASE_SKIPPED;
+	}
+	if (absent > 0)
+		ctx->note = "some sensors absent on this unit -- per-unit population, not a fault";
+	return PHASE_PASS;
 }
 
 /* ==================================================================== */
@@ -660,7 +821,16 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
  * phase POLLS ina236_conversion_ready() rather than trusting a fixed
  * sleep, with a generous bound.
  *
- * Two things this phase must NOT do:
+ * Three things this phase must NOT do:
+ *   - Fail on an INA236 that doesn't ACK its address at all. Population
+ *     here is PER-UNIT, not a batch trait: metadata/boards/e1m-evk.yaml:325
+ *     records that two different E1M-AEN803 units each answered on all six
+ *     addresses except a DIFFERENT one apiece (0x4A / U30 missing on
+ *     2026W36-0001, 0x41 / U31 / +1V8 missing on 2026W36-0003), while a
+ *     third unit answered on all six. A miss here is what a bare-board
+ *     BOM variance looks like from I2C, not a defect -- this phase probes
+ *     each address before judging it and reports "not fitted on this
+ *     unit" as its own outcome, never a failure.
  *   - Fail on +VCAM0 / +VCAM1 reading 0 mV. Both rails are genuinely
  *     unpowered with no camera fitted on this bench -- that is correct
  *     reporting, not a fault (EVK-BRIEFING.md).
@@ -695,8 +865,23 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	int ok_count = 0;
+	int ok_count = 0, absent_count = 0, broken_count = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(INA_RAILS); i++) {
+		bool present = i2c_addr_acked(ctx->carrier_bus, INA_RAILS[i].addr);
+		printf("[evkdemo] INA236 %-6s @0x%02x: presence probe %s\n",
+		       INA_RAILS[i].name,
+		       INA_RAILS[i].addr,
+		       present ? "ACK" : "NO ACK");
+		if (!present) {
+			printf("[evkdemo] INA236 %-6s @0x%02x: %s (per-unit population, "
+			       "metadata/boards/e1m-evk.yaml:325)\n",
+			       INA_RAILS[i].name,
+			       INA_RAILS[i].addr,
+			       i2c_dev_state_str(I2C_DEV_ABSENT));
+			absent_count++;
+			continue;
+		}
+
 		ina236_t     mon;
 		alp_status_t rc = ina236_init(&mon,
 		                              ctx->carrier_bus,
@@ -705,11 +890,12 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		                              INA_RAILS[i].max_a,
 		                              INA236_ADCRANGE_81MV);
 		if (rc != ALP_OK) {
-			printf("[evkdemo] INA236 %-6s @0x%02x: init -> %d (all six are hard-populated on "
-			       "this EVK -- a miss is a real fault)\n",
+			printf("[evkdemo] INA236 %-6s @0x%02x: init -> %d (%s)\n",
 			       INA_RAILS[i].name,
 			       INA_RAILS[i].addr,
-			       (int)rc);
+			       (int)rc,
+			       i2c_dev_state_str(I2C_DEV_BROKEN));
+			broken_count++;
 			continue;
 		}
 
@@ -731,7 +917,7 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		bool         valid = ready && (mv_rc == ALP_OK) && (uv_rc == ALP_OK) && (ua_rc == ALP_OK);
 
 		printf("[evkdemo] INA236 %-6s @0x%02x: %ld mV  %ld uV(shunt)  %ld uA  ready=%s "
-		       "mv_rc=%d uv_rc=%d ua_rc=%d %s\n",
+		       "mv_rc=%d uv_rc=%d ua_rc=%d %s (%s)\n",
 		       INA_RAILS[i].name,
 		       INA_RAILS[i].addr,
 		       (long)mv,
@@ -741,12 +927,37 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		       (int)mv_rc,
 		       (int)uv_rc,
 		       (int)ua_rc,
-		       valid ? "ok" : "READ FAIL");
-		if (valid) ok_count++;
+		       valid ? "ok" : "READ FAIL",
+		       i2c_dev_state_str(valid ? I2C_DEV_OK : I2C_DEV_BROKEN));
+		if (valid) {
+			ok_count++;
+		} else {
+			broken_count++;
+		}
 	}
 
-	printf("[evkdemo] POWER: %d/%zu rails answered\n", ok_count, ARRAY_SIZE(INA_RAILS));
-	return (ok_count == (int)ARRAY_SIZE(INA_RAILS)) ? PHASE_PASS : PHASE_FAIL;
+	printf("[evkdemo] POWER: %d/%zu rails answered, %d absent, %d broken\n",
+	       ok_count,
+	       ARRAY_SIZE(INA_RAILS),
+	       absent_count,
+	       broken_count);
+
+	/* FAIL only on a FITTED rail's INA236 that misbehaved -- an absent
+	 * rail's monitor is per-unit population (see the phase header comment
+	 * and metadata/boards/e1m-evk.yaml:325), never a fault. If nothing on
+	 * the bus answered its presence probe at all there is nothing left to
+	 * exercise -- SKIPPED, not a silent PASS. */
+	if (broken_count > 0) {
+		ctx->note = "a FITTED rail's INA236 misbehaved -- see per-rail log above";
+		return PHASE_FAIL;
+	}
+	if (ok_count == 0) {
+		ctx->note = "no INA236 answered its presence probe on this unit";
+		return PHASE_SKIPPED;
+	}
+	if (absent_count > 0)
+		ctx->note = "some rails absent on this unit -- per-unit population, not a fault";
+	return PHASE_PASS;
 }
 
 /* ==================================================================== */
@@ -827,6 +1038,17 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 	 * silently reconciled, because a mismatch here is itself a finding:
 	 * either this reasoning about the netlist is wrong, or nothing has
 	 * configured the chip yet, and either way the reader should see it.
+	 *
+	 * #2035: DO NOT "fix" a reported MISMATCH here by calling
+	 * tcal9538_set_direction()/_directions() to force 0xF0. P0..P3 are
+	 * LCD_PWR_EN / LCD_RST / CAM_EN / CTP_RST -- carrier control lines
+	 * for the display and camera, not this SDK's to own. A SoM SDK
+	 * (alp-sdk targets any carrier a given SoM can sit on, not just this
+	 * EVK) has no business driving a CARRIER's peripherals on its own
+	 * initiative: on a different carrier those same expander pins could
+	 * be wired to something else entirely, or to nothing. Reporting the
+	 * divergence without acting on it -- exactly what this phase already
+	 * does -- is the correct behaviour, not a gap to close.
 	 */
 	uint8_t cfg               = io.cfg_cache;
 	uint8_t cfg_expected      = 0xF0u;
