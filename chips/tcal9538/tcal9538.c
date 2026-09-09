@@ -144,6 +144,12 @@ alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port)
 	return s;
 }
 
+alp_status_t tcal9538_set_polarity_inversion(tcal9538_t *ctx, uint8_t mask)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	return reg_write(ctx, TCAL9538_REG_POL, mask);
+}
+
 alp_status_t tcal9538_set_input_latch(tcal9538_t *ctx, uint8_t mask)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;

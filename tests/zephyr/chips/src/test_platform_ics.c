@@ -837,3 +837,53 @@ ZTEST(alp_chips, test_fake_tcal9538_alt_part_nosupport_issues_zero_bus_traffic)
 	tcal9538_deinit(&ctx);
 	alp_i2c_close(bus);
 }
+
+/* Proves tcal9538_set_polarity_inversion() lands its byte in register
+ * 0x02 specifically, not the adjacent output-port register (0x01) or
+ * configuration register (0x03) -- a one-register-off mistake here
+ * would drive an EVK output pin instead of just flipping a read-back
+ * bit, exactly the class of bug this accessor exists to make
+ * impossible to make by hand in the example. Mutation-verified:
+ * changing TCAL9538_REG_POL from 0x02u to 0x01u in tcal9538.c reddens
+ * this test (reg 0x02 stays 0x00, the zassert_equal on it fails). */
+ZTEST(alp_chips, test_fake_tcal9538_set_polarity_inversion_writes_reg02_only)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_BASE + 3u);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_BASE + 3u), ALP_OK);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0xFFu), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 0xFFu);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 1u);
+	/* The two neighbouring registers must be untouched. */
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x01u), 0u);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x03u), 0u);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0x00u), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 0x00u);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* Polarity inversion is a base register (0x00..0x03), shared with the
+ * TCA6408A/PCA9538 alt-population -- unlike the Agile-IO block, it
+ * must NOT return ALP_ERR_NOSUPPORT on the alt-strap address. */
+ZTEST(alp_chips, test_fake_tcal9538_set_polarity_inversion_works_on_alt_part)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_ALT_BASE);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_ALT_BASE), ALP_OK);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0xFFu), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_ALT_BASE, 0x02u), 0xFFu);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}

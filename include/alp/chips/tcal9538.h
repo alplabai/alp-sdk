@@ -207,6 +207,32 @@ alp_status_t tcal9538_read_all(tcal9538_t *ctx, uint8_t *port_out);
 alp_status_t tcal9538_write_all(tcal9538_t *ctx, uint8_t port);
 
 /**
+ * @brief Set the polarity-inversion mask (register 0x02).
+ *
+ * Base register -- shared with the TCA6408A/PCA9538 alt-population,
+ * unlike the 0x40+ Agile-IO block. Bit N of @p mask = 1 XORs pin N's
+ * electrical level before it lands in the input port register (0x00);
+ * bit N = 0 (the power-up default) passes the level through unchanged
+ * (SCPS280B Table 7-3, p.24).
+ *
+ * This never touches the output port register (0x01) or the
+ * configuration register (0x03) -- it is safe to call regardless of a
+ * pin's configured direction, because it only flips the bit a later
+ * @ref tcal9538_get / @ref tcal9538_read_all reports, never anything
+ * the chip drives. That makes it the one register on this part whose
+ * effect is both real (a genuine round-trip through the chip, not just
+ * an ACK) and observable on every pin without risking an output glitch
+ * -- see the I/O-expander phase in examples/aen/aen-evk-demo for why
+ * that property matters on a board where most pins are outputs a test
+ * must never touch.
+ *
+ * @param ctx  TCAL9538 driver context (must be initialised first).
+ * @param mask Bitmap, bit N = pin N's polarity-invert bit (1 = inverted).
+ * @return ALP_OK, or ALP_ERR_NOT_READY if @p ctx is uninitialised.
+ */
+alp_status_t tcal9538_set_polarity_inversion(tcal9538_t *ctx, uint8_t mask);
+
+/**
  * @brief Enable/disable per-pin input latching (register 0x42).
  *
  * TCAL9538-only.  Bit N of @p mask = 1 latches pin N's transition

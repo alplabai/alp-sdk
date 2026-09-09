@@ -754,18 +754,49 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 /* ==================================================================== */
 
 /*
- * Reads the configuration register (0x03) and the input port (0x00). Also
- * reads the interrupt-status register (0x46) once, READ-ONLY: nothing in
- * this phase unmasks any pin in 0x45 (all pins mask their own contribution
- * at power-up, SCPS280B p.26), so every bit of 0x46 is guaranteed 0
- * regardless of the physical pin state -- there is nothing pending to
- * acknowledge. This is deliberate: routing a real interrupt through this
- * expander belongs to a consumer that owns the source (see
- * examples/aen/aen-sensor-int-probe), not to a phase that's only proving
- * the Agile-IO block itself answers. The fact worth remembering if a
- * future phase DOES unmask 0x45: register 0x46 is NOT clear-on-read --
- * only a read of the input port (0x00) clears a latched condition
- * (SCPS280B p.26, Table 7-13).
+ * An earlier version of this phase read the config register, the input
+ * port and the interrupt status, checked none of the three came back as
+ * the 0xee sentinel these locals start at, and called that a pass. That
+ * distrust of a transfer that returns ALP_OK without actually writing
+ * anything was the right instinct -- but "the chip ACKed and the byte
+ * changed from 0xee" is still just "it answered", not "it works": a
+ * chip wedged into always returning the SAME real-looking byte would
+ * have sailed through unnoticed. This version extends that instinct
+ * into an actual round-trip: it WRITES the polarity-inversion register
+ * (0x02) and PROVES the write took effect by reading the input port
+ * before, after inverting, and after restoring, and checking the
+ * middle read is the bitwise complement of the outer two.
+ *
+ * Register 0x02 (polarity inversion), not 0x00/0x01/0x03, is the only
+ * safe register to hammer here. U35's pins are NOT symmetric (EVK
+ * netlist, 2626-R2): P0..P3 are LCD_PWR_EN / LCD_RST / CAM_EN /
+ * CTP_RST -- outputs that gate real hardware (display power, display
+ * reset, camera enable, touch-panel reset) -- and P4..P7 are sensor
+ * interrupt inputs (ICM42670 INT1/INT2/FSYNC, BMP581 INT1). This phase
+ * therefore never touches the output port (0x01) and never calls
+ * tcal9538_set_direction()/_directions() to touch the configuration
+ * register (0x03) -- cycling P0..P3 blind risks a display panel or the
+ * (out-of-scope-by-decision) camera module. Register 0x02 is exactly
+ * the escape hatch that has none of that risk: per SCPS280B Table 7-3
+ * (p.24) it only XORs the bit the input-port register reports back --
+ * it never drives a pin and never changes a pin's direction -- so
+ * writing it is a guaranteed, board-safe, observable effect on every
+ * pin's read-back, output-configured pins included, regardless of what
+ * (if anything) is actually driving them.
+ *
+ * The write is restored to 0x00 UNCONDITIONALLY before this function
+ * returns. There is no early return between the invert and the
+ * restore below -- deliberately: a failed invert still funnels through
+ * the same restore call rather than bailing out with the chip left
+ * inverted. Leaving polarity inverted would flip every bit every later
+ * reader of this port sees, silently, until the next warm boot
+ * re-inits the chip.
+ *
+ * The interrupt-status register (0x46) is still read but NOT acted on,
+ * same as before: nothing here unmasks a pin in 0x45 (power-up default
+ * masks every pin, SCPS280B p.26), so 0x46 reads 0 regardless of pin
+ * state. Routing a real interrupt through this expander belongs to a
+ * consumer that owns the source (examples/aen/aen-sensor-int-probe).
  */
 static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 {
@@ -785,33 +816,79 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	/* Both reads must ACK AND land a byte other than the 0xee sentinel
-	 * these locals start at -- an ALP_OK transfer that never actually
-	 * wrote the output byte is exactly the class of silent success
-	 * i2c-device-hub's bug taught us to distrust. */
-	uint8_t      cfg = 0xee, in0 = 0xee;
-	uint8_t      reg_cfg = 0x03, reg_in0 = 0x00;
-	alp_status_t cfg_rc =
-	    alp_i2c_write_read(ctx->carrier_bus, EVK_I2C_ADDR_TCAL9538_MAIN, &reg_cfg, 1, &cfg, 1);
-	alp_status_t in0_rc =
-	    alp_i2c_write_read(ctx->carrier_bus, EVK_I2C_ADDR_TCAL9538_MAIN, &reg_in0, 1, &in0, 1);
-
-	uint8_t      irq_status = 0xee;
-	alp_status_t irq_rc     = tcal9538_get_interrupt_status(&io, &irq_status);
-
-	bool valid = (cfg_rc == ALP_OK) && (in0_rc == ALP_OK) && (cfg != 0xee) && (in0 != 0xee);
-	printf("[evkdemo] IOEXP @0x%02x: config(0x03)=0x%02x input(0x00)=0x%02x irqstatus(0x46)=0x%02x "
-	       "cfg_rc=%d in0_rc=%d irq_rc=%d %s\n",
+	/* tcal9538_init() already read the config register back (it has to,
+	 * to seed cfg_cache) -- reuse that instead of spending a second
+	 * transaction on a register we're only reading to report. Expected
+	 * per the netlist: P0..P3 outputs (bit=0), P4..P7 inputs (bit=1) =
+	 * 0xF0. Nothing in this demo ever calls tcal9538_set_direction() /
+	 * _directions(), so on a board where no other phase has configured
+	 * the expander yet, this will legitimately still read the power-on
+	 * default (0xFF, all-input) -- that is reported as a mismatch, not
+	 * silently reconciled, because a mismatch here is itself a finding:
+	 * either this reasoning about the netlist is wrong, or nothing has
+	 * configured the chip yet, and either way the reader should see it.
+	 */
+	uint8_t cfg               = io.cfg_cache;
+	uint8_t cfg_expected      = 0xF0u;
+	bool    cfg_matches_wired = (cfg == cfg_expected);
+	printf("[evkdemo] IOEXP @0x%02x: config(0x03)=0x%02x expected=0x%02x (P0-3 out/P4-7 in) %s\n",
 	       EVK_I2C_ADDR_TCAL9538_MAIN,
 	       cfg,
-	       in0,
-	       irq_status,
-	       (int)cfg_rc,
-	       (int)in0_rc,
-	       (int)irq_rc,
-	       valid ? "ok" : "READ FAIL");
+	       cfg_expected,
+	       cfg_matches_wired ? "matches netlist" : "MISMATCH -- see comment above this phase");
+
+	/* Sentinel-init every local this phase reads back, same distrust as
+	 * before: a genuine ALP_OK with the byte still 0xee means the
+	 * transfer never actually landed anything. */
+	uint8_t before = 0xee, inverted = 0xee, restored = 0xee, irq_status = 0xee;
+
+	alp_status_t before_rc = tcal9538_read_all(&io, &before);
+
+	alp_status_t pol_set_rc = tcal9538_set_polarity_inversion(&io, 0xFFu);
+	alp_status_t inverted_rc =
+	    (pol_set_rc == ALP_OK) ? tcal9538_read_all(&io, &inverted) : pol_set_rc;
+
+	/* Restore FIRST, before this function does anything else with the
+	 * result -- including on the failure path above, where pol_set_rc
+	 * or inverted_rc already went wrong. A half-finished inversion left
+	 * in place would corrupt every later reader of this port. */
+	alp_status_t pol_restore_rc = tcal9538_set_polarity_inversion(&io, 0x00u);
+	alp_status_t restored_rc =
+	    (pol_restore_rc == ALP_OK) ? tcal9538_read_all(&io, &restored) : pol_restore_rc;
+
+	alp_status_t irq_rc = tcal9538_get_interrupt_status(&io, &irq_status);
 
 	tcal9538_deinit(&io);
+
+	bool reads_ok = (before_rc == ALP_OK) && (pol_set_rc == ALP_OK) && (inverted_rc == ALP_OK) &&
+	                (pol_restore_rc == ALP_OK) && (restored_rc == ALP_OK);
+	/* Only the bits this chip is actually configured as inputs for (cfg,
+	 * bit=1) are required to invert -- the polarity register's effect on
+	 * an output-configured pin's read-back is not something this phase
+	 * asserts on, since it never claims those pins are safe to read
+	 * meaning from either way. */
+	bool inversion_took_effect = reads_ok && (((inverted ^ before) & cfg) == cfg);
+	bool restore_took_effect   = reads_ok && (restored == before);
+	bool valid                 = reads_ok && inversion_took_effect && restore_took_effect;
+
+	printf("[evkdemo] IOEXP @0x%02x: before=0x%02x inverted=0x%02x restored=0x%02x "
+	       "irqstatus(0x46)=0x%02x before_rc=%d pol_set_rc=%d inverted_rc=%d "
+	       "pol_restore_rc=%d restored_rc=%d irq_rc=%d inverted=%s restored=%s %s\n",
+	       EVK_I2C_ADDR_TCAL9538_MAIN,
+	       before,
+	       inverted,
+	       restored,
+	       irq_status,
+	       (int)before_rc,
+	       (int)pol_set_rc,
+	       (int)inverted_rc,
+	       (int)pol_restore_rc,
+	       (int)restored_rc,
+	       (int)irq_rc,
+	       inversion_took_effect ? "yes" : "NO",
+	       restore_took_effect ? "yes" : "NO",
+	       valid ? "PASS" : "FAIL");
+
 	return valid ? PHASE_PASS : PHASE_FAIL;
 }
 
@@ -3115,7 +3192,7 @@ static const phase_t PHASES[] = {
 	{ "RTC + temperature (BRD_I2C)", phase_rtc_temp },
 	{ "Sensors (BMI323/ICM42670/BMP581)", phase_sensors },
 	{ "Power rails (6x INA236)", phase_power_rails },
-	{ "I/O expander answers (TCAL9538, read-only)", phase_io_expander },
+	{ "I/O expander polarity round-trip (TCAL9538)", phase_io_expander },
 	{ "EEPROM identity (24C128)", phase_eeprom_identity },
 	{ "RGB LED (PWM0/1/3)", phase_rgb_led },
 	{ "Rotary encoder", phase_encoder },

@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-08",
+  "generated": "2026-09-09",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7754,6 +7754,10 @@
         "tcal9538_set_interrupt_mask": {
           "hash": "009889980640bd89",
           "signature": "alp_status_t tcal9538_set_interrupt_mask(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_polarity_inversion": {
+          "hash": "b97b24bb3c8ffe20",
+          "signature": "alp_status_t tcal9538_set_polarity_inversion(tcal9538_t *ctx, uint8_t mask);"
         },
         "tcal9538_set_pull": {
           "hash": "0d1fbe830acfe580",
