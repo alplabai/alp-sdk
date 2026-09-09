@@ -30,6 +30,11 @@
  * than through bme280_init(). */
 #include "bme280_internal.h"
 
+/* #2035: examples/aen/aen-evk-demo's BMP581 health verdict, pulled into its
+ * own header precisely so it can be exercised here without a board -- see
+ * that header for the datasheet reasoning. */
+#include "bmp581_verdict.h"
+
 /* ------------------------------------------------------------------ */
 /* lsm6dso                                                             */
 /* ------------------------------------------------------------------ */
@@ -1421,6 +1426,51 @@ ZTEST(alp_chips, test_fake_bmp581_set_int_sources_writes_verbatim_and_rejects_ou
 
 	bmp581_deinit(&dev);
 	alp_i2c_close(bus);
+}
+
+/*
+ * #2035: a bench session once called a BMP581 BROKEN off STATUS (0x28)
+ * reading 0x02 -- its documented power-on/soft-reset value
+ * (BST-BMP581-DS004-13 Rev 1.13 §7.22 p.58), not a fault. This pins the
+ * fix: bmp581_status_is_healthy() must call 0x02 healthy (nvm_rdy set,
+ * nvm_err clear -- matching Bosch's own bmp5_init() and upstream Zephyr's
+ * bmp581 driver), and must still call nvm_err set a fault.
+ *
+ * Mutation coverage: flipping the function to `!= 0` on NVM_ERR (or to
+ * `== 0` on NVM_RDY), or folding CORE_RDY into the check, reddens one of
+ * the two asserts below.
+ */
+ZTEST(alp_chips, test_bmp581_status_is_healthy_matches_bosch_nvm_criterion)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	/* Documented reset value: core_rdy=0, nvm_rdy=1, nvm_err=0 -- a
+	 * healthy part that has never been touched. Read it through the
+	 * exact one-shot alp_i2c_write_read the demo itself uses. */
+	fake_bmp581_set_reg(BMP581_DIAG_REG_STATUS, 0x02u);
+	uint8_t      reg    = BMP581_DIAG_REG_STATUS;
+	uint8_t      status = 0;
+	alp_status_t rc     = alp_i2c_write_read(bus, BMP581_I2C_ADDR_LOW, &reg, 1, &status, 1);
+	zassert_equal(rc, ALP_OK);
+	zassert_equal(status, 0x02u);
+	zassert_true(bmp581_status_is_healthy(status), "STATUS=0x02 (reset value) must be healthy");
+
+	/* nvm_err set (bit2) alongside nvm_rdy -- a genuine fault, must
+	 * still be reported. */
+	fake_bmp581_set_reg(BMP581_DIAG_REG_STATUS, 0x06u);
+	status = 0;
+	zassert_equal(alp_i2c_write_read(bus, BMP581_I2C_ADDR_LOW, &reg, 1, &status, 1), ALP_OK);
+	zassert_false(bmp581_status_is_healthy(status), "nvm_err set must still fail the verdict");
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
 }
 
 /* ==================================================================== */

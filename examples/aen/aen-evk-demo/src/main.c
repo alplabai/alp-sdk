@@ -165,6 +165,7 @@
 #include "alp/chips/icm42670.h"
 #include "alp/chips/bmi323.h"
 #include "alp/chips/bmp581.h"
+#include "bmp581_verdict.h"
 #include "alp/chips/ina236.h"
 #include "alp/chips/tcal9538.h"
 #include "alp/chips/eeprom_24c128.h"
@@ -501,17 +502,21 @@ static bool bmi323_report_init_failure(const bmi323_t *dev, alp_status_t irc)
  * driver's own bmp581_data_ready() ever looks at (chips/bmp581/bmp581.c).
  * chips/bmp581/bmp581.c has no public accessor for it, same reasoning as
  * the BMI323 diag block above -- one demo's error message doesn't earn the
- * driver a new public register accessor. Bit layout per Bosch's BMP5
- * Sensor API reference (bmp5_defs.h) and BST-BMP581-DS004-13 Rev 1.13; not
- * independently re-verified against a page number in this tree, unlike the
- * BMI323 citations above -- treat the bit ASSIGNMENT as tentative until a
- * bench run confirms it, even though reading the register is harmless
- * either way.
+ * driver a new public register accessor. Bit layout per Bosch's public
+ * BMP5_SensorAPI (bmp5_defs.h field names status_core_rdy/nvm_rdy/nvm_err)
+ * and BST-BMP581-DS004-13 Rev 1.13 -- chips/bmp581/bmp581.c's own "do not
+ * gate on core_rdy" note already cross-checks bit0 and the register's
+ * documented reset value (0x02, §7.22 p.58) against that same datasheet;
+ * this reuses its constants (BMP581_DIAG_* in bmp581_verdict.h) rather than
+ * re-deriving them.
+ *
+ * A bench session once misread 0x02 -- that reset value, not a fault -- as
+ * BROKEN. #2035's fix: judge health on nvm_rdy/nvm_err (bmp581_status_
+ * is_healthy(), same two bits Bosch's own bmp5_init() and upstream
+ * Zephyr's bmp581 driver check), and stop treating core_rdy as a
+ * readiness signal anywhere below -- it is neither. See the printed line
+ * itself for why.
  */
-#define BMP581_DIAG_REG_STATUS      0x28u
-#define BMP581_DIAG_STATUS_CORE_RDY 0x01u /* bit0 */
-#define BMP581_DIAG_STATUS_NVM_RDY  0x02u /* bit1 */
-#define BMP581_DIAG_STATUS_NVM_ERR  0x04u /* bit2 */
 
 /*
  * #2035: POPULATION IS PER-UNIT, NOT A BATCH TRAIT -- and conflating "not
@@ -799,30 +804,35 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 				(void)bmp581_read_id(&baro, &id);
 
 				/*
-				 * #2035: id/p_raw/t_raw can all look fine while
-				 * bmp581_data_ready() below still times out -- the
-				 * driver's ready check only ever looks at INT_STATUS
-				 * (0x27) drdy_data_reg, never at this separate STATUS
-				 * register (0x28), so a part that stalls here (e.g. an
-				 * NVM fault) previously went completely unreported. Read
-				 * it directly (chips/bmp581/bmp581.c has no public
-				 * accessor for it, same reasoning as the BMI323 diag
-				 * above) and print all three of its documented bits
-				 * before deciding whether the timeout below has an
-				 * explanation.
+				 * #2035: this is the register the health verdict below is
+				 * actually decided on -- read it directly (chips/bmp581/
+				 * bmp581.c has no public accessor for it, same reasoning
+				 * as the BMI323 diag block above) and print all three of
+				 * its documented bits, but with core_rdy visibly called
+				 * out as NOT part of that decision: it is defined exactly
+				 * once in the whole datasheet, no Bosch or Zephyr
+				 * procedure anywhere waits on it, and 0 is its documented
+				 * reset value -- printing it bare (as an earlier version
+				 * of this line did) is what led a previous bench session
+				 * to call a healthy, resting part BROKEN off STATUS =
+				 * 0x02. nvm_rdy/nvm_err are the two bits that matter (see
+				 * bmp581_verdict.h).
 				 */
 				uint8_t      bstatus     = 0;
 				uint8_t      bstatus_reg = BMP581_DIAG_REG_STATUS;
 				alp_status_t rc_bstatus  = alp_i2c_write_read(
 				    ctx->carrier_bus, EVK_I2C_ADDR_BMP581, &bstatus_reg, 1, &bstatus, 1);
 				if (rc_bstatus == ALP_OK) {
-					printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) = 0x%02x "
-					       "(core_rdy=%u nvm_rdy=%u nvm_err=%u)\n",
+					printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) = 0x%02x -- "
+					       "nvm_rdy=%u nvm_err=%u (health verdict below is decided on "
+					       "these two bits); core_rdy=%u is NOT a readiness signal -- "
+					       "defined once in the datasheet, nothing waits on it, 0 is "
+					       "its reset value\n",
 					       EVK_I2C_ADDR_BMP581,
 					       bstatus,
-					       (bstatus & BMP581_DIAG_STATUS_CORE_RDY) ? 1u : 0u,
 					       (bstatus & BMP581_DIAG_STATUS_NVM_RDY) ? 1u : 0u,
-					       (bstatus & BMP581_DIAG_STATUS_NVM_ERR) ? 1u : 0u);
+					       (bstatus & BMP581_DIAG_STATUS_NVM_ERR) ? 1u : 0u,
+					       (bstatus & BMP581_DIAG_STATUS_CORE_RDY) ? 1u : 0u);
 				} else {
 					printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) read failed rc=%d\n",
 					       EVK_I2C_ADDR_BMP581,
@@ -836,8 +846,26 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 				alp_status_t cfg_rc = bmp581_set_sampling(
 				    &baro, BMP581_OSR_X1, BMP581_OSR_X1, BMP581_ODR_50_HZ, BMP581_MODE_FORCED);
 
+				/* #2035: enable drdy_data_reg as an INT_SOURCE before
+				 * polling INT_STATUS for it below -- INT_SOURCE (0x15)
+				 * resets to 0x00, and §7.6 (p.54) documents that value as
+				 * disabling interrupts other than power-on/soft-reset
+				 * completion. This follows Bosch's own
+				 * read_sensor_data_forced_mode example (BMP5_SensorAPI),
+				 * which calls bmp5_int_source_select() with data-ready
+				 * enabled before its poll -- it is NOT a confirmed
+				 * datasheet requirement: §4.7.2.2 (p.26) can also be read
+				 * as the status bit asserting regardless of the enable,
+				 * and nothing in the datasheet settles it either way.
+				 * Harmless to enable even if it turns out unnecessary. */
+				alp_status_t src_rc = bmp581_set_int_sources(&baro, BMP581_INT_SRC_DRDY);
+
 				/* ~2 ms typ P+T conversion at OSR x1 (p.12); poll
-				 * drdy_data_reg (p.58, clear-on-read) up to 10x that. */
+				 * drdy_data_reg (p.58, clear-on-read) up to 10x that.
+				 * `ready` is timing information only -- see the STATUS
+				 * print above for what actually decides `valid` below;
+				 * a timeout here does not by itself mean the part is
+				 * broken. */
 				const uint32_t poll_step_ms = 2, timeout_ms = 20;
 				bool           ready = false;
 				for (uint32_t w = 0; w < timeout_ms; w += poll_step_ms) {
@@ -848,17 +876,33 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 
 				bmp581_raw_t raw = { 0 };
 				alp_status_t rs  = bmp581_read_raw(&baro, &raw);
-				bool         valid =
-				    (cfg_rc == ALP_OK) && (rs == ALP_OK) && ready && !bmp581_raw_invalid(&raw);
-				printf("[evkdemo] BMP581 @0x%02x: id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d rs=%d "
-				       "ready=%s %s (%s)\n",
+
+				/*
+				 * #2035: the verdict -- nvm_rdy set and nvm_err clear
+				 * (bmp581_status_is_healthy(), matching Bosch's own
+				 * bmp5_init() and upstream Zephyr's bmp581 driver), a
+				 * clean set_sampling/read_raw, and a reading that isn't
+				 * the chip's own reset sentinel. Deliberately does NOT
+				 * require `ready` -- see the poll loop comment above --
+				 * so a part correctly reporting its documented resting
+				 * state (STATUS = 0x02) is never called BROKEN here. A
+				 * real fault -- nvm_err set, a bus failure on any of
+				 * cfg_rc/src_rc/rs/rc_bstatus, or the reset-sentinel
+				 * reading -- still fails this.
+				 */
+				bool nvm_ok = (rc_bstatus == ALP_OK) && bmp581_status_is_healthy(bstatus);
+				bool valid = (cfg_rc == ALP_OK) && (src_rc == ALP_OK) && (rs == ALP_OK) && nvm_ok &&
+				             !bmp581_raw_invalid(&raw);
+				printf("[evkdemo] BMP581 @0x%02x: id=0x%02x p_raw=%d t_raw=%d cfg_rc=%d "
+				       "src_rc=%d rs=%d drdy=%s %s (%s)\n",
 				       EVK_I2C_ADDR_BMP581,
 				       id,
 				       raw.pressure_raw,
 				       raw.temperature_raw,
 				       (int)cfg_rc,
+				       (int)src_rc,
 				       (int)rs,
-				       ready ? "yes" : "TIMEOUT",
+				       ready ? "yes" : "no",
 				       valid ? "ok" : "INVALID",
 				       i2c_dev_state_str(valid ? I2C_DEV_OK : I2C_DEV_BROKEN));
 				if (valid) {

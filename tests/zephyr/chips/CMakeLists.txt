@@ -15,9 +15,15 @@ project(alp_sdk_chips_test LANGUAGES C)
 # only so test_sensors.c can directly exercise bme280_unpack_h4_h5(),
 # the #797 H4/H5 shared-nibble unpack the disabled i2c-emul fake can't
 # reach (see the fake-fixtures note below).
+#
+# bmp581_verdict.h (examples/aen/aen-evk-demo/src/) is the pure BMP581
+# health-verdict logic pulled out of that example's main.c (#2035) so
+# test_sensors.c can exercise it here -- main.c itself only builds
+# against the real E1M-AEN801 board target.
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/aen/aen-evk-demo/src)
 
 target_sources(app PRIVATE
     src/main.c
