@@ -370,6 +370,101 @@ static bool bmp581_raw_invalid(const bmp581_raw_t *raw)
 	return raw->pressure_raw == 0x7F7F7F && raw->temperature_raw == 0x7F7F7F;
 }
 
+/*
+ * #2035 diagnostics -- BMI323 init failure.
+ *
+ * chips/bmi323/bmi323.c deliberately keeps its register map private (its
+ * whole job is to hide it), so when bmi323_init() fails this app
+ * duplicates the three registers Bosch's own start-up flow inspects
+ * (BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16) rather than growing the
+ * driver's public surface for one demo's error message -- the same call
+ * examples/aen/aen-bmi323-regcheck made for an earlier BMI323 failure
+ * (#2034). This runs AFTER bmi323_init() already returned, so if
+ * bmi323_init() itself failed at its own STATUS read (STATUS.por_detected
+ * is clear-on-read), that bit was already 0 the moment init() looked --
+ * init() returns immediately when it sees por_detected clear, before
+ * anything else runs that could have set it, so re-reading it here still
+ * reports the same fact, not a probe artefact.
+ */
+#define BMI323_DIAG_REG_CHIP_ID   0x00u
+#define BMI323_DIAG_REG_ERR_REG   0x01u
+#define BMI323_DIAG_REG_STATUS    0x02u
+#define BMI323_DIAG_ERR_FATAL_ERR 0x0001u /* ERR_REG bit0 (Rev 1.7 p.61 Table 36). */
+#define BMI323_DIAG_STATUS_POR    0x0001u /* STATUS bit0, por_detected (Rev 1.7 p.66). */
+
+/* One raw 16-bit register read, bypassing the driver entirely. Every
+ * BMI323 read returns 2 dummy bytes ahead of the real data
+ * (BST-BMI323-DS000-13 Rev 1.7, Table 53 p.204) -- see chips/bmi323/
+ * bmi323.c's reg_read16() for the driver's own copy of this shape. */
+static alp_status_t bmi323_diag_read16(alp_i2c_t *bus, uint8_t reg, uint16_t *out)
+{
+	uint8_t      buf[4] = { 0 }; /* [0..1] dummy prefix, [2..3] data LSB,MSB */
+	alp_status_t s      = alp_i2c_write_read(bus, EVK_I2C_ADDR_BMI323, &reg, 1, buf, sizeof buf);
+	if (s != ALP_OK) return s;
+	*out = (uint16_t)((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
+	return ALP_OK;
+}
+
+/*
+ * Explains a bmi323_init() failure instead of leaving a bare "init -> -5"
+ * that folds a soft-reset NAK, a CHIP_ID-read I/O error, and a CHIP_ID
+ * mismatch into one indistinguishable ALP_ERR_IO (#2035). Re-reads
+ * CHIP_ID, ERR_REG, and STATUS directly and names which one is implicated.
+ */
+static void bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
+{
+	printf("[evkdemo] BMI323 @0x%02x: init -> %d\n", EVK_I2C_ADDR_BMI323, (int)irc);
+
+	uint16_t     id    = 0;
+	alp_status_t rc_id = bmi323_diag_read16(bus, BMI323_DIAG_REG_CHIP_ID, &id);
+	if (rc_id != ALP_OK) {
+		printf("[evkdemo]   CHIP_ID  (0x00): read failed rc=%d -- the part isn't answering "
+		       "the register protocol at all (the soft-reset write likely NAK'd too)\n",
+		       (int)rc_id);
+		return;
+	}
+	printf("[evkdemo]   CHIP_ID  (0x00) = 0x%02x (expect 0x%02x)\n", (uint8_t)id, BMI323_CHIP_ID);
+
+	uint16_t     err_reg    = 0;
+	alp_status_t rc_err_reg = bmi323_diag_read16(bus, BMI323_DIAG_REG_ERR_REG, &err_reg);
+	if (rc_err_reg == ALP_OK) {
+		printf("[evkdemo]   ERR_REG  (0x01) = 0x%04x (fatal_err=%u)\n",
+		       err_reg,
+		       (err_reg & BMI323_DIAG_ERR_FATAL_ERR) ? 1u : 0u);
+	}
+
+	uint16_t     status    = 0;
+	alp_status_t rc_status = bmi323_diag_read16(bus, BMI323_DIAG_REG_STATUS, &status);
+	if (rc_status == ALP_OK) {
+		printf("[evkdemo]   STATUS   (0x02) = 0x%04x (por_detected=%u)%s\n",
+		       status,
+		       (status & BMI323_DIAG_STATUS_POR) ? 1u : 0u,
+		       (status & BMI323_DIAG_STATUS_POR) == 0
+		           ? " -- 0 here is why init() failed: the soft-reset write never actually "
+		             "landed (BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16)"
+		           : "");
+	}
+}
+
+/*
+ * #2035 diagnostics -- BMP581 STATUS (0x28): core_rdy / nvm_rdy / nvm_err.
+ *
+ * This is a DIFFERENT register from INT_STATUS (0x27), which is all the
+ * driver's own bmp581_data_ready() ever looks at (chips/bmp581/bmp581.c).
+ * chips/bmp581/bmp581.c has no public accessor for it, same reasoning as
+ * the BMI323 diag block above -- one demo's error message doesn't earn the
+ * driver a new public register accessor. Bit layout per Bosch's BMP5
+ * Sensor API reference (bmp5_defs.h) and BST-BMP581-DS004-13 Rev 1.13; not
+ * independently re-verified against a page number in this tree, unlike the
+ * BMI323 citations above -- treat the bit ASSIGNMENT as tentative until a
+ * bench run confirms it, even though reading the register is harmless
+ * either way.
+ */
+#define BMP581_DIAG_REG_STATUS      0x28u
+#define BMP581_DIAG_STATUS_CORE_RDY 0x01u /* bit0 */
+#define BMP581_DIAG_STATUS_NVM_RDY  0x02u /* bit1 */
+#define BMP581_DIAG_STATUS_NVM_ERR  0x04u /* bit2 */
+
 static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: sensors (BMI323 + ICM-42670 + BMP581) --\n");
@@ -386,7 +481,7 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 		bmi323_t     bmi;
 		alp_status_t irc = bmi323_init(&bmi, ctx->carrier_bus, EVK_I2C_ADDR_BMI323);
 		if (irc != ALP_OK) {
-			printf("[evkdemo] BMI323 @0x%02x: init -> %d\n", EVK_I2C_ADDR_BMI323, (int)irc);
+			bmi323_report_init_failure(ctx->carrier_bus, irc);
 		} else {
 			uint8_t id = 0;
 			(void)bmi323_read_id(&bmi, &id);
@@ -482,6 +577,38 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 		} else {
 			uint8_t id = 0;
 			(void)bmp581_read_id(&baro, &id);
+
+			/*
+			 * #2035: id/p_raw/t_raw can all look fine while
+			 * bmp581_data_ready() below still times out -- the
+			 * driver's ready check only ever looks at INT_STATUS
+			 * (0x27) drdy_data_reg, never at this separate STATUS
+			 * register (0x28), so a part that stalls here (e.g. an
+			 * NVM fault) previously went completely unreported. Read
+			 * it directly (chips/bmp581/bmp581.c has no public
+			 * accessor for it, same reasoning as the BMI323 diag
+			 * above) and print all three of its documented bits
+			 * before deciding whether the timeout below has an
+			 * explanation.
+			 */
+			uint8_t      bstatus     = 0;
+			uint8_t      bstatus_reg = BMP581_DIAG_REG_STATUS;
+			alp_status_t rc_bstatus  = alp_i2c_write_read(
+			    ctx->carrier_bus, EVK_I2C_ADDR_BMP581, &bstatus_reg, 1, &bstatus, 1);
+			if (rc_bstatus == ALP_OK) {
+				printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) = 0x%02x "
+				       "(core_rdy=%u nvm_rdy=%u nvm_err=%u)\n",
+				       EVK_I2C_ADDR_BMP581,
+				       bstatus,
+				       (bstatus & BMP581_DIAG_STATUS_CORE_RDY) ? 1u : 0u,
+				       (bstatus & BMP581_DIAG_STATUS_NVM_RDY) ? 1u : 0u,
+				       (bstatus & BMP581_DIAG_STATUS_NVM_ERR) ? 1u : 0u);
+			} else {
+				printf("[evkdemo] BMP581 @0x%02x: STATUS (0x28) read failed rc=%d\n",
+				       EVK_I2C_ADDR_BMP581,
+				       (int)rc_bstatus);
+			}
+
 			/* FORCED: one conversion then back to standby, fitting a
 			 * single-read phase; init() alone leaves the part in
 			 * STANDBY with pressure OFF (BST-BMP581-DS004-13 Rev 1.13

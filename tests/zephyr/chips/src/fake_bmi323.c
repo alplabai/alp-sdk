@@ -9,8 +9,10 @@
  * `uint16_t[256]`, not a raw byte array, and the transfer function
  * models exactly those two shapes: a 3-byte write `[reg, lo, hi]`,
  * and a `[reg]`-then-`(2 + words*2)`-byte read.  Pre-populated with
- * CHIP_ID (register 0x00, low byte) = 0x43 so bmi323_init()'s
- * soft-reset + ID probe succeeds.
+ * CHIP_ID (register 0x00, low byte) = 0x43 and STATUS (register
+ * 0x02) bit0 (por_detected) = 1 -- the "just reset" state -- so
+ * bmi323_init()'s soft-reset + device-initialisation status test +
+ * ID probe (chips/bmi323/bmi323.c) succeeds by default.
  */
 
 #define DT_DRV_COMPAT alp_fake_bmi323
@@ -27,6 +29,7 @@
 #include "fakes.h"
 
 #define REG_CHIP_ID 0x00
+#define REG_STATUS  0x02
 
 struct fake_bmi323_data {
 	uint16_t regs[256];
@@ -40,6 +43,7 @@ static void seed_defaults(struct fake_bmi323_data *d)
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
 	d->regs[REG_CHIP_ID] = 0x0043u; /* BMI323_CHIP_ID in the low byte. */
+	d->regs[REG_STATUS]  = 0x0001u; /* por_detected -- a fresh reset already happened. */
 }
 
 static int

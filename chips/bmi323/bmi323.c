@@ -25,8 +25,10 @@
 /* Register map (BST-BMI323-DS000)                                     */
 /* ------------------------------------------------------------------ */
 
-#define REG_CHIP_ID     0x00
-#define REG_STATUS      0x02 /* drdy_acc bit7 / drdy_gyr bit6, both R/C (Rev 1.7 p.66) */
+#define REG_CHIP_ID 0x00
+#define REG_ERR_REG 0x01 /* fatal_err bit0, acc_conf_err bit5 (Rev 1.7 p.61 Table 36) */
+#define REG_STATUS \
+	0x02 /* por_detected bit0 / drdy_gyr bit6 / drdy_acc bit7, all R/C (Rev 1.7 p.66) */
 #define REG_ACC_CONF    0x20
 #define REG_GYR_CONF    0x21
 #define REG_TEMP_DATA   0x09 /* 16-bit signed; LSB first on this reg */
@@ -39,6 +41,10 @@
 
 #define BMI323_CMD_SOFT_RESET 0xDEAFu /* Soft-reset command (BST-BMI323-DS000). */
 #define BMI323_SOFT_RESET_MS  3u      /* >= t_soft_reset (~1.5 ms) before CHIP_ID is valid. */
+
+/* STATUS bit0: set by a real POR/soft-reset event, nothing else; clear-on-read
+ * (Rev 1.7 p.66).  Used by bmi323_init()'s device-initialisation status test. */
+#define BMI323_STATUS_POR_DETECTED 0x0001u
 
 #define BMI323_DUMMY_BYTES 2 /* Read responses include 2 dummy bytes. */
 
@@ -114,6 +120,29 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	alp_status_t s = reg_write(dev, REG_CMD, BMI323_CMD_SOFT_RESET);
 	if (s != ALP_OK) return s;
 	alp_delay_ms(BMI323_SOFT_RESET_MS);
+
+	/*
+	 * Bosch's device-initialisation status test (BST-BMI323-DS000-13 Rev
+	 * 1.7, Figure 2 pp.15-16): read ERR_REG, then STATUS, before ever
+	 * trusting CHIP_ID.  This driver doesn't yet act on ERR_REG's
+	 * fatal_err/acc_conf_err bits (no v0.2 caller has a use for them),
+	 * but STATUS.por_detected (bit0, clear-on-read) is load-bearing:
+	 * it is set ONLY by a real POR/soft-reset event, whereas CHIP_ID's
+	 * reset value is 0x0043 and reads back correctly whether or not the
+	 * soft-reset write just above actually landed (see the big comment
+	 * above this function).  A part that ACKs the write without applying
+	 * it, or that never left its own prior POR state, reads por_detected
+	 * as 0 while CHIP_ID still matches -- catch that here instead of
+	 * reporting a false ALP_OK.
+	 */
+	uint16_t err_reg = 0;
+	s                = reg_read_u16(dev, REG_ERR_REG, &err_reg);
+	if (s != ALP_OK) return s;
+
+	uint16_t status = 0;
+	s               = reg_read_u16(dev, REG_STATUS, &status);
+	if (s != ALP_OK) return s;
+	if ((status & BMI323_STATUS_POR_DETECTED) == 0) return ALP_ERR_IO;
 
 	uint8_t id = 0;
 	s          = bmi323_read_id(dev, &id);

@@ -902,6 +902,40 @@ ZTEST(alp_chips, test_fake_bmi323_data_ready_decodes_status_bits_7_and_6)
 	alp_i2c_close(bus);
 }
 
+/*
+ * #2035: bmi323_init() used to trust CHIP_ID the instant the soft-reset
+ * write's own I2C transaction ACKed, even though CHIP_ID's reset value
+ * (0x0043) reads back correctly whether or not that write actually landed
+ * (see the comment above bmi323_init() in chips/bmi323/bmi323.c). Bosch's
+ * device-initialisation status test (BST-BMI323-DS000-13 Rev 1.7, Figure 2
+ * pp.15-16) catches exactly this: STATUS.por_detected (bit0) is set ONLY by
+ * a real POR/soft-reset event.  Simulate a part that ACKs the reset write
+ * but never truly reset -- por_detected stays 0 while CHIP_ID still
+ * matches -- and require bmi323_init() to fail rather than report a false
+ * ALP_OK.
+ *
+ * Mutation coverage: deleting the
+ * `if ((status & BMI323_STATUS_POR_DETECTED) == 0) return ALP_ERR_IO;` gate
+ * in bmi323_init() reddens this test (it falls through to the CHIP_ID
+ * check, which passes, and returns ALP_OK instead of ALP_ERR_IO).
+ */
+ZTEST(alp_chips, test_bmi323_init_rejects_missing_por_detected)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x02u, 0x0000u); /* STATUS: por_detected clear. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_IO);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
 /* ------------------------------------------------------------------ */
 /* bmp581 (Bosch barometer, on-board EVK pressure sensor)              */
 /* ------------------------------------------------------------------ */
