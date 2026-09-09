@@ -89,7 +89,7 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sdhc.h> /* sdhc_hw_reset() -- controller reset, see step 8 below */
+#include <zephyr/drivers/sdhc.h> /* sdhc_hw_reset() -- the bisecting probe, see main() below */
 #include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
 #include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, see below */
@@ -112,7 +112,7 @@
 
 /* sdhc0 -- the node label the board overlay gives the DWC SDHC controller
  * (examples/aen/aen-sdcard-readout/boards/..._rtss_he.overlay: `sdhc0: sdhc@48102000`).
- * Used only by main() step 8's explicit sdhc_hw_reset() call. */
+ * Used only by the bisecting probe at the very top of main() -- see below. */
 #define SDHC_DEV DEVICE_DT_GET(DT_NODELABEL(sdhc0))
 
 /*
@@ -254,32 +254,47 @@ static void sd_diag_print_static_regs(void)
  * DWC_SDHC_ERROR_INT_SIGNAL_EN_R @0x03A) -- READ ONLY, at four points in
  * main() below.
  *
- * WHY (#2035): the end of the last bench run sampled both STAT_EN registers
- * at 0x0000 -- with the status-enable bits clear, NORMAL_INT_STAT can never
- * latch command-complete (bit CC), so sdhc_dwc_wait_cmd_complete() times out
- * no matter what the card, clock, pads or mux do. That alone would explain
- * "CMD complete timeout" on every run today, independent of every other
- * theory this file's other diagnostics chase.
+ * RESOLVED (#2035): the previous revision's four samples answered the
+ * question this comment used to pose. main() entry read NORMAL_INT_STAT_EN
+ * = 0x7eff / ERROR_INT_STAT_EN = 0xffff -- sdhc_dwc_set_def_config() DID run
+ * at POST_KERNEL and DID arm both registers, and that value survived
+ * untouched right up to immediately before this app's own reset call. The
+ * 0x0000 seen at the end of that run was this app's own doing: a bare
+ * SW_RST_ALL (sdhc_dwc_reset()) does NOT re-run set_def_config(), so calling
+ * sdhc_hw_reset() from main() wiped both STAT_EN registers for nothing --
+ * disk_access_init() still returned -116 afterward. That call has been
+ * removed (it was harmful and fixed nothing). Two conclusions are now firm:
+ * the interrupt enables were never the root cause (they were armed
+ * correctly at boot in this run, and by implication in every earlier run
+ * that never itself called sdhc_hw_reset()), and a bare SW_RST_ALL issued
+ * after set_def_config() has already run is destructive, not diagnostic.
  *
- * BUT that end-of-run sample was taken AFTER a failed sdhc_hw_reset(), so it
- * cannot tell "our own reset cleared them" apart from "they were already
- * zero from boot". sdhc_dwc_set_def_config() (zephyr/drivers/sdhc/sdhc_dwc.c
- * :1126-1141) is supposed to set both STAT_EN registers (to
- * NORM_INTR_ALL_Msk / ERROR_INTR_ALL_Msk) during sdhc_dwc_init(), which runs
- * POST_KERNEL -- before main() is ever entered. Four labelled samples pin
- * down exactly where the value goes to zero, or prove it was never non-zero:
+ * THE NEW QUESTION (#2035): sdhc_dwc_init()'s own SW_RST_ALL, at boot,
+ * demonstrably SUCCEEDED -- we know this because set_def_config() runs
+ * immediately after it in that same POST_KERNEL call chain, and
+ * set_def_config() is what armed the 0x7eff/0xffff this app then measured.
+ * The IDENTICAL SW_RST_ALL, called from main() via sdhc_hw_reset(), timed
+ * out (-116, "SDHC reset timeout"). Same controller, same register, same
+ * reset value -- one succeeds, the other doesn't. Something between
+ * POST_KERNEL and that call in main() breaks the controller's ability to
+ * reset. main() now issues sdhc_hw_reset() as a bisecting PROBE at the very
+ * top, before the CC3501E bridge, the mux, SD_RST or the SE clock cycle:
+ * rc==0 there means the controller can still reset at the top of main(), so
+ * one of those four later steps is what breaks it; rc==-116 there means it
+ * is already broken at main() entry, a much smaller window between
+ * POST_KERNEL and main() and a very different problem. See the probe in
+ * main() below.
+ *
+ * Four labelled samples still bracket the run, now repurposed around that
+ * probe instead of around the deleted end-of-main reset call:
  *   1. main() entry, before ANYTHING else -- the boot-time POST_KERNEL
- *      value, untouched by this app. This is the sample that matters most:
- *      if it already reads 0x0000 here, set_def_config() either never ran
- *      or something cleared its work before main() started, and that is the
- *      root cause of six identical bench failures, not this app's own reset
- *      call in step 8 below.
- *   2. immediately before sdhc_hw_reset() (step 8) -- the value this app
- *      inherited, right before it does anything that could disturb it.
- *   3. immediately after sdhc_hw_reset() -- sdhc_dwc_reset() is a bare
- *      SW_RST_ALL and does NOT re-run set_def_config() (see step 8's KNOWN
- *      GAP comment below), so this sample is the direct test of that gap:
- *      if #2 was non-zero and #3 reads 0x0000, THIS call is what clears it.
+ *      value, untouched by this app. Already measured 0x7eff/0xffff; kept
+ *      so every run reconfirms it before the probe runs.
+ *   2. immediately before the probe sdhc_hw_reset() call -- expected to
+ *      read identical to #1, since nothing runs between them.
+ *   3. immediately after the probe -- shows whether the probe wiped the
+ *      enables the way the old end-of-main call did, independent of
+ *      whatever its return code says.
  *   4. immediately before disk_access_init() -- the value the card
  *      enumeration attempt actually runs against.
  */
@@ -577,6 +592,53 @@ int main(void)
 	 * app touches anything -- the very first thing main() does. See
 	 * sd_diag_print_int_enables() above for why this sample matters most. */
 	sd_diag_print_int_enables("main() entry, before bridge bring-up");
+
+	/* Sample point 2/4 (#2035): what this app inherited, right before the
+	 * bisecting probe below -- expected to read identical to sample 1/4,
+	 * since nothing runs between them. */
+	sd_diag_print_int_enables("before probe sdhc_hw_reset()");
+
+	/*
+	 * --- PROBE (#2035): bisect "boot-time SW_RST_ALL succeeds, main()'s
+	 * SW_RST_ALL times out" ------------------------------------------------
+	 * sdhc_dwc_init() ran this exact call (SW_RST_ALL via sdhc_dwc_reset())
+	 * at POST_KERNEL and it demonstrably SUCCEEDED -- proven by
+	 * set_def_config() running right after it in that same call chain and
+	 * arming NORMAL/ERROR_INT_STAT_EN to 0x7eff/0xffff (see sample 1/4
+	 * above and the block comment on sd_diag_print_int_enables()). Calling
+	 * the SAME reset from main(), after the CC3501E bridge, mux, SD_RST
+	 * pulse and SE clock cycle used to run below, returned -116 ("SDHC
+	 * reset timeout") on the last bench run. Same controller, same
+	 * register, same reset value -- one succeeds, the other doesn't. This
+	 * probe moves that call to the very top of main(), before any of those
+	 * four steps run, to bisect which side of main() the break is on:
+	 *   rc == 0    -- the controller can still reset here, so the bridge,
+	 *                 mux, SD_RST pulse or SE clock cycle below is what
+	 *                 breaks it -- bisect from there next.
+	 *   rc == -116 -- it is already broken at main() entry, meaning
+	 *                 whatever breaks it happens between POST_KERNEL and
+	 *                 main(), a much smaller window and a different
+	 *                 problem than anything this app's own steps do.
+	 * KNOWN COST: sdhc_dwc_reset() is a bare SW_RST_ALL and does not
+	 * re-run set_def_config(), so this call -- pass or fail -- is expected
+	 * to wipe NORMAL/ERROR_INT_STAT_EN back to 0x0000 regardless of its
+	 * return code (sample 3/4 below proves whether it did). No public
+	 * Zephyr SDHC API re-arms those bits: sdhc_enable_interrupt()
+	 * (sdhc_dwc.c:992-1022) only ever touches the CARD/CARD_INSRT/CARD_REM
+	 * hotplug bits, never CC/TC/DMA/BWR/BRR, so nothing reachable from
+	 * this app can restore them. This run accepts the wiped enables --
+	 * the return code is what this probe is for, and disk_access_init()
+	 * below is already expected to fail regardless.
+	 */
+	int probe_reset_rc = sdhc_hw_reset(SDHC_DEV);
+	printf("[sd] PROBE: sdhc_hw_reset(sdhc0) at the top of main(), before the bridge/mux/"
+	       "SD_RST/clock steps -> %d (0 = still resettable here; -116 = already broken "
+	       "before main() runs)\n",
+	       probe_reset_rc);
+
+	/* Sample point 3/4 (#2035): immediately after the probe -- shows
+	 * whether it wiped the enables, independent of its return code. */
+	sd_diag_print_int_enables("after probe sdhc_hw_reset()");
 
 	/*
 	 * --- 1. Bring the CC3501E bridge up -------------------------------
@@ -974,92 +1036,6 @@ int main(void)
 	}
 
 	/*
-	 * --- 8. Reset the SD host controller, now that the card is out of
-	 * reset and its clock has been requested -----------------------------
-	 * ORDERING BUG (#2035, found by a full comparison against Alif's own
-	 * reference flow): Alif's sd_host_init() runs, in this order, inside
-	 * ONE call chain -- enable_sd_periph_clk() (their clock-enable
-	 * equivalent of step 7 above), reset_cb() (their SD_RST pulse,
-	 * equivalent of step 6 above), THEN hc_reset(SW_RST_ALL)
-	 * (alif-dfp-ref/drivers/source/sd.c:172-186), and hc_identify_card()
-	 * does a second, narrower hc_reset(DAT|CMD) immediately before CMD0
-	 * (sd_host.c:531-538). The controller reset always comes AFTER the
-	 * card is out of reset and the clock has been asked for, by
-	 * construction of their single call chain.
-	 *
-	 * Zephyr's device model breaks that ordering apart: sdhc_dwc_init()
-	 * is registered POST_KERNEL (sdhc_dwc.c's DEVICE_DT_INST_DEFINE), so
-	 * its own SW_RST_ALL (sdhc_dwc_reset(), sdhc_dwc.c:627-629) runs
-	 * during kernel init -- BEFORE main() is ever entered, i.e. before
-	 * this app's SD_RST pulse (step 6) and before the SE clock request
-	 * (step 7) both exist. Nothing in this app or in
-	 * disk_access_init()'s own call chain reissues a controller reset
-	 * afterwards -- the bus-power toggle inside sd_init_io()
-	 * (subsys/sd/sd.c) is not one, it only power-cycles + reclocks via
-	 * sdhc_set_io(). So without this step, every prior bench run reset
-	 * the controller while the card was still held in reset, and (if the
-	 * clock hypothesis above holds) while its clock source was dead --
-	 * this call reaches the state Alif's flow reaches by construction.
-	 *
-	 * KNOWN GAP, reported rather than assumed: this call reaches
-	 * `sdhc_hw_reset()` -> `.reset` -> sdhc_dwc_reset() -> a bare
-	 * SW_RST_ALL (sdhc_dwc.c:505-522,627-629) -- it does NOT re-run
-	 * sdhc_dwc_set_def_config() (sdhc_dwc.c:1091-1145), which is `static`
-	 * and only ever called from sdhc_dwc_init() at boot
-	 * (sdhc_dwc.c:1208-1213). Of what set_def_config() configures, the
-	 * bus voltage, power and the initial 400 kHz clock ARE effectively
-	 * restored afterward by disk_access_init()'s own sd_init_io()
-	 * sequence (it toggles power off/on and sets clock=400 kHz via
-	 * sdhc_set_io(), which calls the same sdhc_dwc_set_voltage() /
-	 * sdhc_dwc_set_power() / sdhc_dwc_clock_set() paths). The interrupt
-	 * enables are NOT restored by anything reachable from this app:
-	 * NORMAL/ERROR_INT_STAT_EN_R and NORMAL/ERROR_INT_SIGNAL_EN_R
-	 * (sdhc_dwc.c:1109-1123) -- including the CC/TC bits the driver's own
-	 * command-completion k_event_wait() depends on -- are set exactly
-	 * once, only inside set_def_config(). The public sdhc_enable_interrupt()
-	 * op (sdhc_dwc.c:992-1022) does not cover them either: it only ever
-	 * touches the CARD/CARD_INSRT/CARD_REM (SDIO/hotplug) bits, never
-	 * CC/TC/DMA/BWR/BRR. Alif's own reference does not have this gap --
-	 * hc_config_interrupt() (sd_host.c) re-arms interrupts as part of the
-	 * SAME sd_host_init() call chain that resets the controller -- but
-	 * Zephyr's public SDHC API has no equivalent this app can call
-	 * without editing sdhc_dwc.c, which is out of scope here (see the
-	 * file header). If every command below now times out at the driver's
-	 * full ~1000 ms with zero interrupt activity, THIS reset is the
-	 * likely cause, not the clock or reset-pulse work above -- that would
-	 * point at sdhc_dwc.c needing its own reset-then-rearm path, not at
-	 * this app.
-	 *
-	 * A related, smaller mismatch worth recording here rather than
-	 * rediscovering later: this driver's own reset timeout is
-	 * DWC_SDHC_SW_RST_TIMEOUT (0xFFFF) iterations of k_busy_wait(1), i.e.
-	 * ~65 ms (sdhc_dwc.c:505-522), whereas Alif's equivalent loop
-	 * (SDMMC_MAX_TIMEOUT_16 = 0xFFFF iterations of a 100us busy-wait, i.e.
-	 * ~6.5 s) never actually checks the bit it claims to poll for a
-	 * narrow reset: hc_reset()'s loop condition is
-	 * `while ((curr_reset_val == 1) && timeout--)`
-	 * (alif-dfp-ref/drivers/source/sd_host.c:237-252) -- true only when
-	 * the whole register reads exactly 1, so a DAT|CMD reset (value 6)
-	 * fails that comparison on the very first check and the loop exits
-	 * immediately without ever truly waiting. If a genuine self-clear on
-	 * this part needs more than ~65 ms, this driver reports a timeout
-	 * exactly where Alif's own reference would have silently proceeded.
-	 */
-	/* Sample point 2/4 (#2035): what this app inherited, right before it
-	 * does anything that could disturb it. */
-	sd_diag_print_int_enables("before sdhc_hw_reset()");
-
-	int sdhc_reset_rc = sdhc_hw_reset(SDHC_DEV);
-	printf("[sd] sdhc_hw_reset(sdhc0) -> %d (SW_RST_ALL only -- see the KNOWN GAP note "
-	       "above about interrupt enables)\n",
-	       sdhc_reset_rc);
-
-	/* Sample point 3/4 (#2035): direct test of the KNOWN GAP above -- if
-	 * point 2 was non-zero and this reads 0x0000, sdhc_hw_reset() (a bare
-	 * SW_RST_ALL that never re-runs set_def_config()) is what clears it. */
-	sd_diag_print_int_enables("after sdhc_hw_reset()");
-
-	/*
 	 * --- 9. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
@@ -1086,17 +1062,18 @@ int main(void)
 		printf("[sd] RESULT PASS: SD card enumerated (%llu MB)\n", (unsigned long long)mb);
 	} else {
 		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SD_RST "
-		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), "
-		       "controller reset (sdhc_hw_reset -> %d); card still not reachable "
+		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), probe "
+		       "sdhc_hw_reset at main() entry -> %d; card still not reachable "
 		       "(disk_access_init rc=%d). The mux, the reset line and the clock request "
-		       "are no longer the open question -- all are proven driven -- so look at the "
-		       "controller/card handshake itself, at the KNOWN GAP note above (interrupt "
-		       "enables), or at the SELECT jumper on header P18 (see README.md)\n",
+		       "are no longer the open question -- all are proven driven -- so look at "
+		       "what the probe's return code says about controller reset (see the PROBE "
+		       "comment near the top of main()), or at the SELECT jumper on header P18 "
+		       "(see README.md)\n",
 		       (int)bridge_rc,
 		       (int)en_rc,
 		       (int)clk_dis_rc,
 		       (int)clk_en_rc,
-		       sdhc_reset_rc,
+		       probe_reset_rc,
 		       rc);
 	}
 	/* close() only frees the host-side GPIO proxy handle -- the CC3501E
