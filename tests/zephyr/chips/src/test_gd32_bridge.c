@@ -13,6 +13,25 @@
 #include "alp/chips/gd32g553.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/crc16.h"
+
+/* ------------------------------------------------------------------ */
+/* #2035 -- gd32g553.c's frame CRC-16 migrated off its own local        */
+/* crc16_ccitt_false() onto the shared alp_crc16_ccitt_false()          */
+/* (<alp/protocol/crc16.h>), the same helper already used on the        */
+/* CC3501E wire protocol.  This exercises the exact call gd32g553.c     */
+/* now makes, against the check vector its own removed comment quoted   */
+/* ("123456789" -> 0x29B1) -- so a future edit to the shared header     */
+/* that silently changes the algorithm reddens here, not just on the    */
+/* CC3501E side.                                                        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_frame_crc16_check_vector)
+{
+	uint16_t crc = alp_crc16_ccitt_false((const uint8_t *)"123456789", 9u);
+
+	zassert_equal(crc, 0x29B1u, "CRC-16/CCITT-FALSE check-vector mismatch: got 0x%04x", crc);
+}
 
 /* ------------------------------------------------------------------ */
 /* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */

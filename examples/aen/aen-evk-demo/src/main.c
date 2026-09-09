@@ -398,6 +398,21 @@ static bool bmp581_raw_invalid(const bmp581_raw_t *raw)
 #define BMI323_DIAG_REG_ERR_REG   0x01u
 #define BMI323_DIAG_ERR_FATAL_ERR 0x0001u /* ERR_REG bit0 (Rev 1.7 p.61 Table 36). */
 
+/* Interface idle floor this diagnostic must honour between back-to-back
+ * raw accesses -- the same restriction chips/bmi323/bmi323.c's
+ * access_idle() enforces for the driver itself (BST-BMI323-DS000-13
+ * Rev 1.7, section 7.3 "Communication Access Restriction" p.205; Table 41
+ * "tIDLE,rd" p.195): at least 450 us while the device is in suspend mode,
+ * which every POR/soft-reset leaves it in (section 5.4 p.20). This
+ * diagnostic only runs after bmi323_init() itself has already failed,
+ * before anything could have taken the device out of suspend, so the
+ * 450 us suspend figure -- not the 2 us normal-mode one -- is the only
+ * one that ever applies here. Skipping this (as an earlier version of
+ * this diagnostic did) reproduces the exact timing bug it exists to
+ * diagnose: a CHIP_ID read failing only because it followed the
+ * previous access too closely, misreported as PHANTOM (#2035). */
+#define BMI323_DIAG_TIDLE_SUSPEND_US 450u
+
 /* One raw 16-bit register read, bypassing the driver entirely. Every
  * BMI323 read returns 2 dummy bytes ahead of the real data
  * (BST-BMI323-DS000-13 Rev 1.7, Table 53 p.204) -- see chips/bmi323/
@@ -406,6 +421,10 @@ static alp_status_t bmi323_diag_read16(alp_i2c_t *bus, uint8_t reg, uint16_t *ou
 {
 	uint8_t      buf[4] = { 0 }; /* [0..1] dummy prefix, [2..3] data LSB,MSB */
 	alp_status_t s      = alp_i2c_write_read(bus, EVK_I2C_ADDR_BMI323, &reg, 1, buf, sizeof buf);
+	/* Applied regardless of the access's own result, same as
+	 * access_idle() in bmi323.c: the restriction is on interface timing
+	 * between consecutive accesses, not on whether this one succeeded. */
+	alp_delay_us(BMI323_DIAG_TIDLE_SUSPEND_US);
 	if (s != ALP_OK) return s;
 	*out = (uint16_t)((uint16_t)buf[2] | ((uint16_t)buf[3] << 8));
 	return ALP_OK;

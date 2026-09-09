@@ -957,13 +957,11 @@ ZTEST(alp_chips, test_bmi323_init_rejects_missing_por_detected)
  * Mutation coverage: removing the `dev->por_detected = ...` assignment in
  * bmi323_init() reddens this test's logic (the accessor then reports false
  * on a context whose init() just saw por_detected=1, failing the
- * zassert_true(seen) below).  ZEPHYR_BASE is unset in this worktree, so
- * twister/ztest can't execute here to confirm that directly; the same
- * assignment-removal mutation was instead confirmed against the real
- * chips/bmi323/bmi323.c through a standalone host harness (build it with
- * gcc against this file + a hand-rolled I2C fake modelling the same
- * clear-on-read behaviour) -- with the assignment, both cases below pass;
- * with it removed, both fail the same way this ztest would.
+ * zassert_true(seen) below).  Confirmed against the real chips/bmi323/
+ * bmi323.c through a standalone host harness (build it with gcc against
+ * this file + a hand-rolled I2C fake modelling the same clear-on-read
+ * behaviour) -- with the assignment, both cases below pass; with it
+ * removed, both fail the same way this ztest would.
  */
 ZTEST(alp_chips, test_bmi323_was_por_detected_survives_the_clear_on_read)
 {

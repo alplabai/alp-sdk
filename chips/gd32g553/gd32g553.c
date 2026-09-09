@@ -23,29 +23,18 @@
 #include <string.h>
 
 #include "alp/chips/gd32g553.h"
+#include "alp/protocol/crc16.h"
 
 /* ----------------------------------------------------------------- */
 /* CRC-16 / CCITT-FALSE  (poly 0x1021, init 0xFFFF, non-reflected,    */
 /* xor-out 0x0000).  Reference vector: "123456789" -> 0x29B1.         */
 /* Matches Zephyr's `crc16_itu_t(0xFFFF, ...)` and the matching       */
-/* gd32-bridge-firmware:src/protocol.c implementation byte-for-byte.           */
+/* gd32-bridge-firmware:src/protocol.c implementation byte-for-byte.  */
+/* alp_crc16_ccitt_false() (<alp/protocol/crc16.h>) is this exact     */
+/* bitwise algorithm, header-only and stddef/stdint-only, so pulling  */
+/* it in here does not add a Zephyr dependency to this deliberately   */
+/* Zephyr-agnostic file.                                              */
 /* ----------------------------------------------------------------- */
-
-static uint16_t crc16_ccitt_false(const uint8_t *buf, size_t len)
-{
-	uint16_t crc = 0xFFFFu;
-	for (size_t i = 0; i < len; ++i) {
-		crc ^= (uint16_t)buf[i] << 8;
-		for (unsigned b = 0; b < 8; ++b) {
-			if (crc & 0x8000u) {
-				crc = (uint16_t)((crc << 1) ^ 0x1021u);
-			} else {
-				crc <<= 1;
-			}
-		}
-	}
-	return crc;
-}
 
 /* ----------------------------------------------------------------- */
 /* Status-byte translation: wire encoding (unsigned) -> alp_status_t  */
@@ -209,7 +198,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
 		memcpy(&req[2], req_payload, req_payload_len);
 	}
 	const size_t   crc_covered = 2u + req_payload_len;
-	const uint16_t crc         = crc16_ccitt_false(req, crc_covered);
+	const uint16_t crc         = alp_crc16_ccitt_false(req, crc_covered);
 	req[crc_covered]           = (uint8_t)(crc & 0xFFu);
 	req[crc_covered + 1u]      = (uint8_t)((crc >> 8) & 0xFFu);
 
@@ -251,7 +240,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
 			if (s != ALP_OK) return s; /* transport-level error: fail loud */
 
 			if (reply[0] == GD32G553_BRIDGE_SOF) {
-				const uint16_t expect_crc = crc16_ccitt_false(reply, 2u + reply_payload_len);
+				const uint16_t expect_crc = alp_crc16_ccitt_false(reply, 2u + reply_payload_len);
 				const uint16_t got_crc    = (uint16_t)reply[2u + reply_payload_len] |
 				                            (uint16_t)reply[2u + reply_payload_len + 1u] << 8;
 				if (got_crc == expect_crc) {
@@ -272,7 +261,7 @@ static alp_status_t spi_xfer(gd32g553_t    *ctx,
                  * replies the host could not decode). */
 				if (reply_payload_len > 0u &&
 				    (reply[1] & GD32G553_STATUS_CODE_MASK) != 0x00u /* STATUS_OK */) {
-					const uint16_t err_crc = crc16_ccitt_false(reply, 2u);
+					const uint16_t err_crc = alp_crc16_ccitt_false(reply, 2u);
 					const uint16_t err_got = (uint16_t)reply[2] | ((uint16_t)reply[3] << 8);
 					if (err_got == err_crc) {
 						if (ctx->seq_enabled) {
@@ -362,7 +351,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
 	}
 	/* CRC covers CMD | PAYLOAD (NOT the reg byte, NOT the I2C address). */
 	const size_t   crc_covered      = 1u + req_payload_len;
-	const uint16_t crc              = crc16_ccitt_false(&wbuf[1], crc_covered);
+	const uint16_t crc              = alp_crc16_ccitt_false(&wbuf[1], crc_covered);
 	wbuf[2u + req_payload_len]      = (uint8_t)(crc & 0xFFu);
 	wbuf[2u + req_payload_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
 
@@ -379,7 +368,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
 	alp_status_t s = alp_i2c_write_read(ctx->i2c, ctx->i2c_addr, wbuf, wlen, rbuf, rlen);
 	if (s != ALP_OK) return s;
 
-	const uint16_t expect_crc = crc16_ccitt_false(rbuf, 1u + reply_payload_len);
+	const uint16_t expect_crc = alp_crc16_ccitt_false(rbuf, 1u + reply_payload_len);
 	const uint16_t got_crc =
 	    (uint16_t)rbuf[1u + reply_payload_len] | (uint16_t)rbuf[1u + reply_payload_len + 1u] << 8;
 	if (got_crc != expect_crc) {
@@ -388,7 +377,7 @@ static alp_status_t i2c_xfer(gd32g553_t    *ctx,
          * I2C), so the full-width CRC fails on a legitimate error.
          * Decode the short shape before declaring transport failure. */
 		if (reply_payload_len > 0u && rbuf[0] != 0x00u /* STATUS_OK */) {
-			const uint16_t err_crc = crc16_ccitt_false(rbuf, 1u);
+			const uint16_t err_crc = alp_crc16_ccitt_false(rbuf, 1u);
 			const uint16_t err_got = (uint16_t)rbuf[1] | ((uint16_t)rbuf[2] << 8);
 			if (err_got == err_crc) {
 				return status_from_wire(rbuf[0]);

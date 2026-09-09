@@ -137,10 +137,10 @@ uint32_t fake_bmp581_log_len(void)
 
 uint8_t fake_bmp581_log_reg(uint32_t idx)
 {
-	return g_fake_bmp581 ? g_fake_bmp581->log_reg[idx] : 0u;
+	return (g_fake_bmp581 && idx < FAKE_BMP581_LOG_CAP) ? g_fake_bmp581->log_reg[idx] : 0u;
 }
 
 uint8_t fake_bmp581_log_val(uint32_t idx)
 {
-	return g_fake_bmp581 ? g_fake_bmp581->log_val[idx] : 0u;
+	return (g_fake_bmp581 && idx < FAKE_BMP581_LOG_CAP) ? g_fake_bmp581->log_val[idx] : 0u;
 }

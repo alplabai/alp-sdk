@@ -63,13 +63,12 @@ typedef enum {
 /** Output data rate (ODR_CONFIG bits[6:2]).
  *  #2035: five of these seven codes were wrong -- picked as if the 32-code
  *  field were a linear divider, when BST-BMP581-DS004-13 §7.34 (p.65)'s ODR
- *  table is not. Cross-checked against Bosch's own BMP5-Sensor-API
- *  `bmp5_defs.h` (BMP5_ODR_*), which is generated from the same table:
- *  0x00=240.000, 0x08=120.000 (0x01 is actually 218.537), 0x0F=50.000
- *  (0x07 is actually 129.855), 0x14=25.000 (0x0E is actually 60.000),
- *  0x17=10.000 (0x14 is actually 25.005), 0x18=5.000 (0x17 is actually
- *  10.000), 0x1C=1.000 (already correct). A consumer selecting
- *  BMP581_ODR_5_HZ under the old value silently got 10 Hz. */
+ *  table is not. Verified against that table and cross-checked against
+ *  Bosch's own BMP5-Sensor-API `bmp5_defs.h` (BMP5_ODR_*), which is
+ *  generated from the same table. Actual rate for each code below:
+ *  0x00=240.000 Hz, 0x08=120.000 Hz, 0x0F=50.056 Hz, 0x14=25.005 Hz,
+ *  0x17=10.000 Hz, 0x18=5.000 Hz, 0x1C=1.000 Hz. A consumer selecting
+ *  BMP581_ODR_5_HZ under the old (wrong) code silently got 10 Hz instead. */
 typedef enum {
 	BMP581_ODR_240_HZ = 0x00,
 	BMP581_ODR_120_HZ = 0x08,
