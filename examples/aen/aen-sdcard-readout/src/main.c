@@ -35,6 +35,15 @@
  * see main()'s early-return paths below.  A card enumerating with the bridge
  * NOT brought up would be worthless as a measurement, so this app refuses to
  * even try disk_access_init() unless the bridge + mux both came up clean.
+ *
+ * SD_RST (#2035): P14_2 (SD_RST_B's pad) had never been driven by anything
+ * in this app or the board tree before this revision, and three independent
+ * vendor sources drive it as part of bringing an SDHC controller up on this
+ * exact pad -- see the reset-pulse block in main() below for the full
+ * citation. The same PASS/PARTIAL/FAIL gating now applies to it: a
+ * reset-pin fault is reported and this app stops before disk_access_init(),
+ * for the same reason a mux fault stops it -- a disk result measured with
+ * the reset line unproven would be meaningless.
  */
 
 #include <stdbool.h>
@@ -61,7 +70,11 @@
  * The card still does not enumerate even with the bridge/mux proven driven
  * (see the file header) and `disk_access_init` returns -116: `SW_RST_R` at
  * 0x4810202F stays 0x02, i.e. SW_RST_CMD never self-clears while SW_RST_DAT
- * does. Everything read on the bench so far was sampled AFTER the driver's
+ * does. As of this revision main() also pulses SD_RST (P14_2) before any of
+ * this runs -- see step 6 below -- so a persisting -116 is no longer
+ * explainable by an undriven reset line; whatever is captured here on the
+ * next load is measured with SD_RST proven asserted-then-released.
+ * Everything read on the bench so far was sampled AFTER the driver's
  * own timeout path had already written SW_RST_CMD|SW_RST_DAT (see
  * sdhc_dwc_wait_cmd_complete() in zephyr/drivers/sdhc/sdhc_dwc.c) -- which
  * clears command-complete -- so an "INT STATUS = 0x00000000" reading taken
@@ -214,6 +227,25 @@ static cc3501e_t cc35_fw;
  * Copied from aen-evk-demo's SD_MUX_SETTLE_MS (same board, same mux, same
  * settle requirement). */
 #define SD_MUX_SETTLE_MS 10u
+
+/* SD_RST (P14_2) -- index [3] in the board overlay's `alp,pin-array` node
+ * (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay). A native
+ * Alif GPIO, NOT a CC3501E-proxied one -- unlike the mux ENABLE above, this
+ * pin is reached through the ordinary Alif GPIO backend (gpio14), so it
+ * needs no bridge and no route-table entry. Raw index, not an
+ * ALP_E1M_GPIO_* macro, for the same reason CC3501E_BRIDGE_PIN_* are raw
+ * indices: this pin is SoM-internal, not an E1M edge pad. */
+#define SD_RST_PIN_ID 3u
+
+/* Reset-pulse timings, taken verbatim from vendor Linux's
+ * arch/arm/mach-ensemble/sdhci-alif-reset.c (an arch_initcall that runs
+ * BEFORE the SDHCI driver probes): drive the line low, sleep 1-2 ms, drive
+ * it high, sleep 2-3 ms. This app uses the upper bound of each range rather
+ * than inventing its own numbers -- see the pulse block in main() for the
+ * full three-source citation (vendor Linux + its devicetree binding +
+ * Alif's own baremetal DFP demo_sd.c). */
+#define SD_RST_ASSERT_MS         2u /* line held LOW */
+#define SD_RST_RELEASE_SETTLE_MS 3u /* line held HIGH before anything else touches the controller */
 
 /* Bounded PING retry after bridge bring-up, before the first proxied request
  * (#2035 GPIO-proxy race) -- same parameters as aen-evk-demo's phase 8
@@ -485,7 +517,83 @@ int main(void)
 	k_msleep(SD_MUX_SETTLE_MS);
 
 	/*
-	 * --- 6. Enumerate the card, read-only ------------------------------
+	 * --- 6. Pulse SD_RST before touching the controller ------------------
+	 * P14_2 (the SD_RST_B pad, muxed here as plain GPIO -- see the overlay's
+	 * pinctrl_sdmmc group2 comment) has never been driven by anything in
+	 * this app or the board tree before this revision. Three independent
+	 * vendor sources drive this exact line as part of bringing an SD host
+	 * controller up on this exact pad, and all three bit-bang it as a GPIO
+	 * rather than trusting it to the controller's own alternate function --
+	 * this app follows them rather than the alternate-function route:
+	 *   - vendor Linux `arch/arm/mach-ensemble/sdhci-alif-reset.c`, an
+	 *     `arch_initcall` that runs BEFORE the SDHCI driver probes: take the
+	 *     reset GPIO (defaulting high), drive it LOW, sleep 1-2 ms, drive it
+	 *     HIGH, sleep 2-3 ms;
+	 *   - its binding `Documentation/devicetree/bindings/mmc/
+	 *     alif,sdhci-alif-reset.yaml`, which lists `reset-gpios` under
+	 *     `required:`;
+	 *   - Alif's own baremetal DFP: `sd_host_init()` (`drivers/source/sd.c`)
+	 *     calls `sd_param.reset_cb` as the FIRST action inside init, and the
+	 *     demo's callback (`Boards/Templates/Baremetal/demo_sd.c`) drives
+	 *     the pin low, busy-waits, then high.
+	 * Never having driven this pin may have been holding the card in reset
+	 * the whole time this app has been failing to enumerate one -- that is
+	 * the mechanism under test on the next bench load. The hold/settle
+	 * timings are the upper bound of each vendor Linux range
+	 * (SD_RST_ASSERT_MS / SD_RST_RELEASE_SETTLE_MS above), not invented
+	 * values. This is a GPIO pulse, not a disk write, so it stays within
+	 * this app's read-only-by-construction contract (see the file header).
+	 */
+	alp_gpio_t *sd_rst = alp_gpio_open(SD_RST_PIN_ID);
+	printf("[sd] alp_gpio_open(SD_RST, P14_2) -> %s\n", (sd_rst != NULL) ? "ok" : "NULL");
+	if (sd_rst == NULL) {
+		printf("[sd] RESULT FAIL: SD_RST could not be opened (err=%d) -- the reset line "
+		       "cannot be driven, so a disk fault measured past this point could just be "
+		       "an undriven/undefined reset line. Check the board overlay carries gpio14 "
+		       "status=\"okay\" and a 4th entry in the alp,pin-array node\n",
+		       (int)alp_last_error());
+		alp_gpio_close(mux_en);
+		return -1;
+	}
+
+	alp_status_t rst_cfg_rc = alp_gpio_configure(sd_rst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	alp_status_t rst_lo_rc  = (rst_cfg_rc == ALP_OK) ? alp_gpio_write(sd_rst, false) : rst_cfg_rc;
+	printf("[sd] SD_RST configure -> %d, write LOW -> %s\n",
+	       (int)rst_cfg_rc,
+	       (rst_cfg_rc == ALP_OK) ? "ran" : "SKIPPED (configure failed)");
+	if (rst_lo_rc != ALP_OK) {
+		printf("[sd] RESULT FAIL: SD_RST could not be driven low (rc=%d) -- proceeding to "
+		       "disk_access_init() with an unproven reset line would be a meaningless "
+		       "measurement\n",
+		       (int)rst_lo_rc);
+		alp_gpio_close(sd_rst);
+		alp_gpio_close(mux_en);
+		return -1;
+	}
+	k_msleep(SD_RST_ASSERT_MS);
+
+	alp_status_t rst_hi_rc = alp_gpio_write(sd_rst, true);
+	printf("[sd] SD_RST write HIGH -> %d (held LOW for %u ms, now settling %u ms before the "
+	       "controller is touched)\n",
+	       (int)rst_hi_rc,
+	       (unsigned)SD_RST_ASSERT_MS,
+	       (unsigned)SD_RST_RELEASE_SETTLE_MS);
+	if (rst_hi_rc != ALP_OK) {
+		printf("[sd] RESULT FAIL: SD_RST could not be driven high (rc=%d) -- the card would "
+		       "be left held in reset\n",
+		       (int)rst_hi_rc);
+		alp_gpio_close(sd_rst);
+		alp_gpio_close(mux_en);
+		return -1;
+	}
+	k_msleep(SD_RST_RELEASE_SETTLE_MS);
+	/* close() only frees the host-side handle (see z_close() in
+	 * src/backends/gpio/zephyr_drv.c) -- it does not reconfigure the pad,
+	 * so P14_2 stays driven HIGH (released) for the rest of this run. */
+	alp_gpio_close(sd_rst);
+
+	/*
+	 * --- 7. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
@@ -506,11 +614,12 @@ int main(void)
 		printf("[sd] card: %u sectors x %u B = %llu MB\n", sectors, ssize, (unsigned long long)mb);
 		printf("[sd] RESULT PASS: SD card enumerated (%llu MB)\n", (unsigned long long)mb);
 	} else {
-		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SDHC "
-		       "controller built + inited; card still not reachable (disk_access_init "
-		       "rc=%d). The mux is no longer the open question -- it is proven driven --"
-		       " so look at the controller/card handshake itself, or at the SELECT "
-		       "jumper on header P18 (see README.md)\n",
+		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SD_RST "
+		       "pulsed low-then-high, SDHC controller built + inited; card still not "
+		       "reachable (disk_access_init rc=%d). The mux and the reset line are no "
+		       "longer the open question -- both are proven driven -- so look at the "
+		       "controller/card handshake itself, or at the SELECT jumper on header P18 "
+		       "(see README.md)\n",
 		       (int)bridge_rc,
 		       (int)en_rc,
 		       rc);

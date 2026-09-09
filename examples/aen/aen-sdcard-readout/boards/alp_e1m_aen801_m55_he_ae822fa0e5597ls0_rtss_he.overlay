@@ -53,6 +53,16 @@
  * EN (IO20) + SEL (IO21) are BOTH on the CC3501E side (driven over the SPI
  * bridge), so no card is reachable until that bridge routes the mux.  cd-gpios is
  * omitted (the driver falls back to controller card-detect).
+ *
+ * SD_RST (#2035) -- P14_2 (SD_RST_B's pad) is muxed here as plain GPIO, not
+ * as its SD_RST_B alternate function, and driven by main() as a bit-banged
+ * reset pulse before disk_access_init() -- see the `pinctrl_sdmmc` group2
+ * comment below for the three independent vendor sources that all bit-bang
+ * this line rather than trust it to the controller. Until this revision the
+ * line was never driven at all, which may have been holding the card in
+ * reset; a card that still does not enumerate after the pulse means the
+ * `SW_RST_CMD` question described above is a separate, still-open fault, not
+ * this one.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -86,7 +96,40 @@
 			drive-strength = <8>;
 			input-enable;
 		};
+		/*
+		 * P14_2 -- SD_RST, muxed as plain GPIO (function 0), NOT as the
+		 * SD_RST_B alternate function (function 5) the SoC also offers on
+		 * this pad. Three independent vendor sources bit-bang this line as
+		 * a GPIO rather than trusting it to the controller's own alt
+		 * function, and this overlay follows them rather than the
+		 * alternate-function route:
+		 *   - vendor Linux `arch/arm/mach-ensemble/sdhci-alif-reset.c`
+		 *     (an `arch_initcall` that runs BEFORE the SDHCI driver
+		 *     probes: drives its reset GPIO low, sleeps 1-2 ms, drives it
+		 *     high, sleeps 2-3 ms) plus its binding
+		 *     `Documentation/devicetree/bindings/mmc/
+		 *     alif,sdhci-alif-reset.yaml`, which lists `reset-gpios` under
+		 *     `required:`;
+		 *   - Alif's own baremetal DFP: `sd_host_init()`
+		 *     (`drivers/source/sd.c`) calls `sd_param.reset_cb` as the
+		 *     FIRST action, and the demo's callback
+		 *     (`Boards/Templates/Baremetal/demo_sd.c`) drives the pin low,
+		 *     busy-waits, then drives it high.
+		 * Muxing to SD_RST_B (AF5) instead would hand the pin to the SDHC
+		 * controller, which is free to hold it however it likes -- neither
+		 * vendor does that. main() opens this as
+		 * `alp_gpio_open()`/configure/write, matching the pattern.
+		 */
+		group2 {
+			pinmux = <PIN_P14_2__GPIO>;
+		};
 	};
+};
+
+&gpio14 {
+	/* Owns P14_2 (SD_RST), among others. Disabled by default in the base
+	 * dtsi like every other unused GPIO bank on this SoC. */
+	status = "okay";
 };
 
 &{/soc} {
@@ -283,11 +326,12 @@
 	};
 
 	/*
-	 * Compact 3-entry control array for the SoM-internal CC3501E nets, in
-	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
-	 * These are NOT E1M edge pads, so this app does not use the 52-slot
-	 * positional E1M map; a production board file appends SoM-internal
-	 * control nets after the E1M pad slots.
+	 * Compact 4-entry control array: the 3 SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect,
+	 * plus SD_RST (index [3], native Alif GPIO -- see SD_RST_PIN_ID in
+	 * src/main.c). None of these are E1M edge pads, so this app does not
+	 * use the 52-slot positional E1M map; a production board file appends
+	 * SoM-internal control nets after the E1M pad slots.
 	 *
 	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
 	 * one broke pin resolution outright on the bench (2026-08-26): the
@@ -298,6 +342,7 @@
 		compatible = "alp,pin-array";
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
 			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>,    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+			<&gpio14 2 GPIO_ACTIVE_HIGH>;   /* [3] SD_RST      (P14_2, native Alif GPIO, bit-banged) */
 	};
 };
