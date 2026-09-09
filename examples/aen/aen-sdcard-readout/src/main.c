@@ -67,6 +67,21 @@
  * 10 MHz (CAPABILITIES1[5:0] = 0x0a) with CLK10M (bit 9) already set;
  * enabling an unidentified clock is not a risk this diagnostic needs.
  *
+ * CLKCTL_PER_MST bit 16, mux or enable? (#2035, revised): the paragraph above
+ * states bit 16 is a source-select, following vendor Linux's clk-ensemble.c
+ * model (a 1-bit mux between syst_hclk and 100m_clk). Alif's own DFP header
+ * disagrees: sys_ctrl_sd.h names the same bit PERIPH_CLK_ENA_SDC_CKEN,
+ * "Enable clock supply for SDMMC" -- an enable, not a mux. The two vendor
+ * sources contradict each other and this app cannot resolve that from
+ * reading code alone. main()'s clock-flip probe below clears the bit,
+ * re-applies the 400 kHz config through sdhc_set_io(), and reads the bit
+ * back before restoring it to whatever it measured going in -- if Linux is
+ * right the controller should still reset on syst_hclk; if Alif is right,
+ * clearing the bit turns the SD clock off entirely and the reset should
+ * fail harder, not better. Bit 16 is restored unconditionally at the end of
+ * that probe regardless of which way the result reads, so the board is left
+ * as found either way.
+ *
  * SE clock service reliability (#2035): with the hdr_error_code fix above
  * applied, a full bench sample now reads hdr_error_code=0 and
  * hdr_flags=0x0000 -- dispatch-layer "success" -- for a SERVICE_CLOCK_GET_CLOCKS
@@ -89,7 +104,8 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
-#include <zephyr/drivers/sdhc.h> /* sdhc_hw_reset() -- the bisecting probe, see main() below */
+#include <zephyr/drivers/sdhc.h> /* sdhc_request(), sdhc_set_io(), sdhc_hw_reset() -- the three
+                                   * register-level probes at the top of main() below */
 #include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
 #include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, see below */
@@ -117,23 +133,50 @@
 
 /*
  * ============================================================================
- * SD register-level diagnostics (#2035) -- SW_RST_CMD investigation
+ * SD register-level diagnostics (#2035) -- three decisive probes
  * ============================================================================
  * The card still does not enumerate even with the bridge/mux proven driven
  * (see the file header) and `disk_access_init` returns -116: `SW_RST_R` at
- * 0x4810202F stays 0x02, i.e. SW_RST_CMD never self-clears while SW_RST_DAT
- * does. As of this revision main() also pulses SD_RST (P14_2) before any of
- * this runs -- see step 6 below -- so a persisting -116 is no longer
- * explainable by an undriven reset line; whatever is captured here on the
- * next load is measured with SD_RST proven asserted-then-released.
- * Everything read on the bench so far was sampled AFTER the driver's
- * own timeout path had already written SW_RST_CMD|SW_RST_DAT (see
- * sdhc_dwc_wait_cmd_complete() in zephyr/drivers/sdhc/sdhc_dwc.c) -- which
- * clears command-complete -- so an "INT STATUS = 0x00000000" reading taken
- * that way carries no information: it cannot distinguish "the command never
- * completed" from "it completed and the reset wiped the evidence". This
- * section exists to stop guessing and start measuring, on the NEXT load
- * either way -- SW_RST_CMD fixed or not.
+ * 0x4810202F stays 0x02.
+ *
+ * THE CORRECTED READING: 0x02 is bit 1 (SW_RST_CMD) ALONE. Bit 0
+ * (SW_RST_ALL, the register-file reset) reads clear, i.e. it DOES
+ * self-clear -- an earlier revision of this investigation misread bit 0 as
+ * SW_RST_DAT and concluded the reset logic itself was stuck. It is not: the
+ * register-file reset completes, and only the command-circuit handshake
+ * (bit 1) never acknowledges. That distinction is why the probes below
+ * target the CMD circuit specifically rather than the reset controller as a
+ * whole.
+ *
+ * THE PROPOSED MECHANISM: sdhc_dwc_set_def_config() writes CLK_CTRL = 0x7d0f,
+ * and INTERNAL_CLK_EN (bit 0 of CLK_CTRL) is believed to ARM a reset
+ * handshake into the CMD/DAT circuits that runs on the card clock, not the
+ * host clock. At POST_KERNEL, before that write, CLK_CTRL is 0x0000 -- the
+ * handshake is not armed -- so SW_RST_ALL at boot completes on the host
+ * clock alone, which is why the boot-time reset succeeds while a later one,
+ * issued after set_def_config() has already run, does not: the CMD circuit
+ * is then waiting for a clock edge that never arrives. This is a proposed
+ * reason, not yet a proven one -- see the probes below.
+ *
+ * As of this revision main() also pulses SD_RST (P14_2) before any of this
+ * runs -- see step 6 below -- so a persisting -116 is no longer explainable
+ * by an undriven reset line; whatever is captured here on the next load is
+ * measured with SD_RST proven asserted-then-released.
+ *
+ * The three probes at the top of main(), in order:
+ *   1. CMD0 with NO reset call in front of it -- does the card clock exist
+ *      at all, independent of SW_RST? A completing CMD0 disproves the
+ *      dead-clock theory outright; a timeout with SW_RST_R settling back to
+ *      0x02 corroborates it. Touches no clock register.
+ *   2. An enclave-free clock-source flip on CLKCTL_PER_MST bit 16 -- see
+ *      the CLKCTL_PER_MST bit 16 paragraph in the file header above for why
+ *      this bit's meaning (mux vs enable) is itself disputed between vendor
+ *      Linux and Alif's own DFP header, and why it is restored unconditionally
+ *      afterwards.
+ *   3. An SE transport sanity check (se_service_get_se_revision()) -- settles
+ *      whether the all-zero SERVICE_CLOCK_GET_CLOCKS responses seen elsewhere
+ *      in this investigation (see the SE clock service reliability paragraph
+ *      in the file header) mean a dead transport or a per-service refusal.
  *
  * NOT a driver modification: this app has no hook into sdhc_dwc.c's own
  * command path, so "before any SW_RST write" is approximated by watching
@@ -156,6 +199,23 @@
 
 #define SD_PSTATE_CMD_INHIBIT_Msk 0x00000001u /* bit0: a command is in flight */
 #define SD_PSTATE_DAT_INHIBIT_Msk 0x00000002u /* bit1 */
+
+/* CLK_CTRL_R (uint16_t @0x02C) and SW_RST_R (uint8_t @0x02F) sit in the same
+ * 32-bit-aligned word (sdhc_dwc.h:37-39: ..._CLK_CTRL_R @0x02C,
+ * ..._TOUT_CTRL_R @0x02E, ..._SW_RST_R @0x02F), so one sys_read32() at the
+ * word's base covers both -- little-endian, so SW_RST_R lands in byte 3
+ * (bits[31:24]) and CLK_CTRL_R in bytes 0-1 (bits[15:0]). */
+#define SD_REG_CLK_SWRST_WORD (SD_REG_BASE + 0x02Cu)
+#define SD_CLK_CTRL_Msk       0x0000FFFFu
+#define SD_SW_RST_R_Pos       24u
+#define SD_SW_RST_ALL_Msk     0x01u /* bit0 of the SW_RST_R byte: register-file reset */
+#define SD_SW_RST_CMD_Msk     0x02u /* bit1: command-circuit reset */
+#define SD_SW_RST_DAT_Msk     0x04u /* bit2: data-circuit reset */
+
+/* CLK_CTRL_R bit0 -- believed to ARM a reset handshake into the CMD/DAT
+ * circuits that runs on the card clock rather than the host clock; see the
+ * "PROPOSED MECHANISM" paragraph above the diagnostics banner below. */
+#define SD_CLK_CTRL_INTERNAL_CLK_EN_Msk 0x0001u
 
 /* Alif E8 pinmux registers for the SD "B" route's CLK/CMD pads (P14_1/P14_0).
  * Pad config lives at bits[23:16]; bit 16 of that byte is PADCTRL_READ_ENABLE
@@ -247,6 +307,30 @@ static void sd_diag_print_static_regs(void)
 	       caps);
 }
 
+/* Read SW_RST_R and CLK_CTRL_R together (one aligned 32-bit read, see
+ * SD_REG_CLK_SWRST_WORD above) and decode SW_RST_R's three reset bits plus
+ * CLK_CTRL_R's INTERNAL_CLK_EN individually. Called around each of the
+ * three probes in main() -- `label` tags each line so a bench log can tell
+ * them apart. */
+static void sd_diag_print_clk_swrst(const char *label)
+{
+	uint32_t word     = sys_read32(SD_REG_CLK_SWRST_WORD);
+	uint32_t clk_ctrl = word & SD_CLK_CTRL_Msk;
+	uint32_t sw_rst   = (word >> SD_SW_RST_R_Pos) & 0xFFu;
+
+	printf("[sd][diag] SW_RST_R(%s) @0x%08x = 0x%02x  ALL(bit0)=%u CMD(bit1)=%u DAT(bit2)=%u -- "
+	       "CLK_CTRL_R @0x%08x = 0x%04x INTERNAL_CLK_EN(bit0)=%u\n",
+	       label,
+	       (unsigned)(SD_REG_BASE + 0x02Fu),
+	       sw_rst,
+	       (unsigned)((sw_rst & SD_SW_RST_ALL_Msk) != 0u),
+	       (unsigned)((sw_rst & SD_SW_RST_CMD_Msk) != 0u),
+	       (unsigned)((sw_rst & SD_SW_RST_DAT_Msk) != 0u),
+	       (unsigned)(SD_REG_BASE + 0x02Cu),
+	       clk_ctrl,
+	       (unsigned)((clk_ctrl & SD_CLK_CTRL_INTERNAL_CLK_EN_Msk) != 0u));
+}
+
 /*
  * Read NORMAL_INT_STAT_EN / ERROR_INT_STAT_EN, plus the two SIGNAL_EN
  * registers next to them (sdhc_dwc.h: DWC_SDHC_NORMAL_INT_STAT_EN_R @0x034,
@@ -269,32 +353,35 @@ static void sd_diag_print_static_regs(void)
  * that never itself called sdhc_hw_reset()), and a bare SW_RST_ALL issued
  * after set_def_config() has already run is destructive, not diagnostic.
  *
- * THE NEW QUESTION (#2035): sdhc_dwc_init()'s own SW_RST_ALL, at boot,
- * demonstrably SUCCEEDED -- we know this because set_def_config() runs
+ * THE NEW QUESTION (#2035, revised): sdhc_dwc_init()'s own SW_RST_ALL, at
+ * boot, demonstrably SUCCEEDED -- we know this because set_def_config() runs
  * immediately after it in that same POST_KERNEL call chain, and
  * set_def_config() is what armed the 0x7eff/0xffff this app then measured.
- * The IDENTICAL SW_RST_ALL, called from main() via sdhc_hw_reset(), timed
- * out (-116, "SDHC reset timeout"). Same controller, same register, same
- * reset value -- one succeeds, the other doesn't. Something between
- * POST_KERNEL and that call in main() breaks the controller's ability to
- * reset. main() now issues sdhc_hw_reset() as a bisecting PROBE at the very
- * top, before the CC3501E bridge, the mux, SD_RST or the SE clock cycle:
- * rc==0 there means the controller can still reset at the top of main(), so
- * one of those four later steps is what breaks it; rc==-116 there means it
- * is already broken at main() entry, a much smaller window between
- * POST_KERNEL and main() and a very different problem. See the probe in
- * main() below.
+ * The IDENTICAL SW_RST_ALL, called later via sdhc_hw_reset(), timed out
+ * (-116, "SDHC reset timeout"). The PROPOSED MECHANISM (see the diagnostics
+ * banner above SD_REG_BASE) is that set_def_config()'s own CLK_CTRL write
+ * arms INTERNAL_CLK_EN, which puts the CMD/DAT circuits' reset handshake on
+ * the card clock instead of the host clock -- so a reset issued before that
+ * write (at boot) rides the host clock and succeeds, and one issued after
+ * (from main()) waits on a card clock edge that may never come. main() no
+ * longer uses sdhc_hw_reset() as its first probe (a bare SW_RST_ALL there
+ * only proves the reset controller can still be *asked*, and wipes these
+ * very STAT_EN registers doing it -- see RESOLVED above); instead its FIRST
+ * probe is a CMD0 request with no reset in front of it at all, which asks
+ * the more direct question -- does the card clock exist -- without touching
+ * a reset bit or a clock register. See the three probes listed in the
+ * diagnostics banner above SD_REG_BASE.
  *
- * Four labelled samples still bracket the run, now repurposed around that
- * probe instead of around the deleted end-of-main reset call:
+ * Four labelled samples still bracket the run, now repurposed around the
+ * CMD0 probe instead of around the deleted end-of-main reset call:
  *   1. main() entry, before ANYTHING else -- the boot-time POST_KERNEL
  *      value, untouched by this app. Already measured 0x7eff/0xffff; kept
  *      so every run reconfirms it before the probe runs.
- *   2. immediately before the probe sdhc_hw_reset() call -- expected to
- *      read identical to #1, since nothing runs between them.
- *   3. immediately after the probe -- shows whether the probe wiped the
- *      enables the way the old end-of-main call did, independent of
- *      whatever its return code says.
+ *   2. immediately before the CMD0 probe -- expected to read identical to
+ *      #1, since nothing runs between them.
+ *   3. immediately after the CMD0 probe -- shows whether a bare CMD0 (no
+ *      SW_RST_ALL in front of it) disturbs these registers at all, which a
+ *      reset call always does.
  *   4. immediately before disk_access_init() -- the value the card
  *      enumeration attempt actually runs against.
  */
@@ -586,6 +673,29 @@ static alp_status_t sd_se_set_clock_enable(uint32_t clock_type, uint32_t enable,
 	return (pkt.resp_error_code == 0) ? ALP_OK : ALP_ERR_IO;
 }
 
+/* CMD0 timeout for the probes below -- short on purpose: this is a probe of
+ * whether the command clocks out AT ALL, not a real enumeration attempt, so
+ * there is no reason to wait anywhere near the driver's own 1000 ms default
+ * (sdhc_dwc_wait_cmd_complete()). */
+#define SD_DIAG_CMD0_TIMEOUT_MS 100
+
+/* Issue CMD0 (GO_IDLE_STATE) directly through the public sdhc_request() API,
+ * with NO reset call in front of it -- the entire point of PROBE 1 below.
+ * SD_RSP_TYPE_NONE / no data phase: CMD0 carries no response and moves no
+ * bytes, so this is a bare command-clock test, nothing else. */
+static int sd_diag_send_cmd0(void)
+{
+	struct sdhc_command cmd = {
+		.opcode        = SD_GO_IDLE_STATE,
+		.arg           = 0u,
+		.response_type = SD_RSP_TYPE_NONE,
+		.retries       = 0u,
+		.timeout_ms    = SD_DIAG_CMD0_TIMEOUT_MS,
+	};
+
+	return sdhc_request(SDHC_DEV, &cmd, NULL);
+}
+
 int main(void)
 {
 	/* Sample point 1/4 (#2035): the boot-time POST_KERNEL value, before this
@@ -593,52 +703,143 @@ int main(void)
 	 * sd_diag_print_int_enables() above for why this sample matters most. */
 	sd_diag_print_int_enables("main() entry, before bridge bring-up");
 
-	/* Sample point 2/4 (#2035): what this app inherited, right before the
-	 * bisecting probe below -- expected to read identical to sample 1/4,
-	 * since nothing runs between them. */
-	sd_diag_print_int_enables("before probe sdhc_hw_reset()");
+	/* Sample point 2/4 (#2035): what this app inherited, right before
+	 * PROBE 1 below -- expected to read identical to sample 1/4, since
+	 * nothing runs between them. */
+	sd_diag_print_int_enables("before PROBE 1 (CMD0, no reset)");
 
 	/*
-	 * --- PROBE (#2035): bisect "boot-time SW_RST_ALL succeeds, main()'s
-	 * SW_RST_ALL times out" ------------------------------------------------
-	 * sdhc_dwc_init() ran this exact call (SW_RST_ALL via sdhc_dwc_reset())
-	 * at POST_KERNEL and it demonstrably SUCCEEDED -- proven by
-	 * set_def_config() running right after it in that same call chain and
-	 * arming NORMAL/ERROR_INT_STAT_EN to 0x7eff/0xffff (see sample 1/4
-	 * above and the block comment on sd_diag_print_int_enables()). Calling
-	 * the SAME reset from main(), after the CC3501E bridge, mux, SD_RST
-	 * pulse and SE clock cycle used to run below, returned -116 ("SDHC
-	 * reset timeout") on the last bench run. Same controller, same
-	 * register, same reset value -- one succeeds, the other doesn't. This
-	 * probe moves that call to the very top of main(), before any of those
-	 * four steps run, to bisect which side of main() the break is on:
-	 *   rc == 0    -- the controller can still reset here, so the bridge,
-	 *                 mux, SD_RST pulse or SE clock cycle below is what
-	 *                 breaks it -- bisect from there next.
-	 *   rc == -116 -- it is already broken at main() entry, meaning
-	 *                 whatever breaks it happens between POST_KERNEL and
-	 *                 main(), a much smaller window and a different
-	 *                 problem than anything this app's own steps do.
-	 * KNOWN COST: sdhc_dwc_reset() is a bare SW_RST_ALL and does not
-	 * re-run set_def_config(), so this call -- pass or fail -- is expected
-	 * to wipe NORMAL/ERROR_INT_STAT_EN back to 0x0000 regardless of its
-	 * return code (sample 3/4 below proves whether it did). No public
-	 * Zephyr SDHC API re-arms those bits: sdhc_enable_interrupt()
-	 * (sdhc_dwc.c:992-1022) only ever touches the CARD/CARD_INSRT/CARD_REM
-	 * hotplug bits, never CC/TC/DMA/BWR/BRR, so nothing reachable from
-	 * this app can restore them. This run accepts the wiped enables --
-	 * the return code is what this probe is for, and disk_access_init()
-	 * below is already expected to fail regardless.
+	 * --- PROBE 1 (#2035): CMD0 with NO reset call in front of it -------
+	 * The decisive test named in the diagnostics banner above SD_REG_BASE:
+	 * does the card clock exist at all? sdhc_hw_reset() (a bare
+	 * SW_RST_ALL) used to run here first, but a reset call answers a
+	 * different question (can the reset controller be asked) and, per the
+	 * PROPOSED MECHANISM in that same banner, may itself be the thing
+	 * that stalls if INTERNAL_CLK_EN really does gate the CMD circuit's
+	 * reset handshake on a dead card clock. CMD0 sidesteps that: it needs
+	 * the card clock to complete but touches no SW_RST bit, so a
+	 * completing CMD0 here proves the clock is alive independent of
+	 * anything reset-related.
+	 *   CMD0 completes                -- the card clock is alive; the
+	 *                                    dead-clock theory is WRONG, and
+	 *                                    the stall is a reset-ordering
+	 *                                    property of this IP instead.
+	 *   CMD0 times out AND SW_RST_R
+	 *   settles back to 0x02 after    -- no card clock; the theory holds.
+	 * Neither outcome touches a clock register.
 	 */
-	int probe_reset_rc = sdhc_hw_reset(SDHC_DEV);
-	printf("[sd] PROBE: sdhc_hw_reset(sdhc0) at the top of main(), before the bridge/mux/"
-	       "SD_RST/clock steps -> %d (0 = still resettable here; -116 = already broken "
-	       "before main() runs)\n",
-	       probe_reset_rc);
+	sd_diag_print_clk_swrst("PROBE 1, before CMD0");
 
-	/* Sample point 3/4 (#2035): immediately after the probe -- shows
-	 * whether it wiped the enables, independent of its return code. */
-	sd_diag_print_int_enables("after probe sdhc_hw_reset()");
+	int cmd0a_rc = sd_diag_send_cmd0();
+	printf("[sd] PROBE 1: CMD0 (GO_IDLE_STATE) with no reset in front of it -> %d "
+	       "(0 = clocked out and completed; -116 = timed out -- see SW_RST_R/CLK_CTRL_R "
+	       "below and PSTATE/NORMAL_INT_STAT for what the controller saw)\n",
+	       cmd0a_rc);
+
+	uint32_t probe1_int_stat = sys_read32(SD_REG_NORMAL_INT_STAT);
+	uint32_t probe1_pstate   = sys_read32(SD_REG_PSTATE);
+	printf("[sd] PROBE 1: NORMAL_INT_STAT @0x%08x = 0x%04x  PSTATE @0x%08x = 0x%08x "
+	       "CMD_INHIBIT(bit0)=%u\n",
+	       (unsigned)SD_REG_NORMAL_INT_STAT,
+	       (unsigned)(probe1_int_stat & 0xFFFFu),
+	       (unsigned)SD_REG_PSTATE,
+	       probe1_pstate,
+	       (unsigned)((probe1_pstate & SD_PSTATE_CMD_INHIBIT_Msk) != 0u));
+	sd_diag_print_clk_swrst("PROBE 1, after CMD0");
+
+	/* Sample point 3/4 (#2035): immediately after PROBE 1 -- shows
+	 * whether a bare CMD0 (no SW_RST_ALL in front of it) disturbs the
+	 * interrupt enables the way a reset call always does. */
+	sd_diag_print_int_enables("after PROBE 1 (CMD0, no reset)");
+
+	/*
+	 * --- PROBE 2 (#2035): enclave-free clock-source flip ----------------
+	 * See the "CLKCTL_PER_MST bit 16, mux or enable?" paragraph in the
+	 * file header above: vendor Linux models this bit as a 1-bit mux
+	 * (syst_hclk / 100m_clk); Alif's own DFP header (sys_ctrl_sd.h:30,
+	 * PERIPH_CLK_ENA_SDC_CKEN) calls the SAME bit an enable. The two
+	 * disagree and this app cannot resolve that from reading code -- only
+	 * from a run. CAUTION: if Alif is right, clearing this bit turns the
+	 * SD clock supply off entirely rather than switching its source, so
+	 * the bit is SAVED and restored unconditionally at the end of this
+	 * probe regardless of what the CMD0 retry below shows.
+	 */
+	uint32_t clkctl_orig = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd] PROBE 2: CLKCTL_PER_MST @0x%08x = 0x%08x before the flip (saved for restore)\n",
+	       (unsigned)SD_CLKCTL_PER_MST,
+	       clkctl_orig);
+
+	sys_write32(clkctl_orig & ~SD_CLKCTL_PER_MST_SD_EN_Msk, SD_CLKCTL_PER_MST);
+	uint32_t clkctl_cleared = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd] PROBE 2: CLKCTL_PER_MST bit 16 cleared -> read back 0x%08x (%s)\n",
+	       clkctl_cleared,
+	       ((clkctl_cleared & SD_CLKCTL_PER_MST_SD_EN_Msk) == 0u)
+	           ? "clear, as written"
+	           : "STILL SET -- write did not land");
+
+	/* Re-run the 400 kHz identification-clock config through the public
+	 * sdhc_set_io() API -- never a hand-written CLK_CTRL -- so whatever
+	 * source bit 16 now selects (or gates) gets a fresh divider program
+	 * against it, not whatever set_def_config() left behind. */
+	struct sdhc_io io_400khz = {
+		.clock          = SDMMC_CLOCK_400KHZ,
+		.bus_mode       = SDHC_BUSMODE_PUSHPULL,
+		.power_mode     = SDHC_POWER_ON,
+		.bus_width      = SDHC_BUS_WIDTH1BIT,
+		.timing         = SDHC_TIMING_LEGACY,
+		.driver_type    = SD_DRIVER_TYPE_B,
+		.signal_voltage = SD_VOL_3_3_V,
+	};
+	int set_io_rc = sdhc_set_io(SDHC_DEV, &io_400khz);
+	printf("[sd] PROBE 2: sdhc_set_io(400 kHz, legacy, 1-bit) -> %d\n", set_io_rc);
+
+	int hwreset2_rc = sdhc_hw_reset(SDHC_DEV);
+	sd_diag_print_clk_swrst("PROBE 2, after sdhc_hw_reset()");
+	printf("[sd] PROBE 2: sdhc_hw_reset(sdhc0) on the flipped clock source -> %d\n", hwreset2_rc);
+
+	int cmd0b_rc = sd_diag_send_cmd0();
+	sd_diag_print_clk_swrst("PROBE 2, after CMD0");
+	printf("[sd] PROBE 2: CMD0 (GO_IDLE_STATE) on the flipped clock source -> %d\n", cmd0b_rc);
+
+	/* RESTORE, unconditionally -- the whole point of saving clkctl_orig
+	 * above. Whatever bit 16 turns out to mean, the board is left as
+	 * found either way, pass or fail. */
+	sys_write32(clkctl_orig, SD_CLKCTL_PER_MST);
+	uint32_t clkctl_restored = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd] PROBE 2: CLKCTL_PER_MST restored -> read back 0x%08x (%s)\n",
+	       clkctl_restored,
+	       (clkctl_restored == clkctl_orig)
+	           ? "matches the saved value"
+	           : "MISMATCH -- restore did not land, check before trusting anything after this "
+	             "point");
+	printf("[sd] PROBE 2 VERDICT: SW_RST_R -> 0x00 and CMD0 completing on the flipped source "
+	       "supports the Linux MUX model (bit 16 selects; syst_hclk works without the "
+	       "enclave). A reset that still sticks (or gets WORSE) supports the Alif ENABLE "
+	       "model (bit 16 gates the clock supply; clearing it only turned the SD clock off) "
+	       "-- read hwreset2_rc/cmd0b_rc together with the SW_RST_R samples above, not in "
+	       "isolation\n");
+
+	/*
+	 * --- PROBE 3 (#2035): SE transport sanity check ---------------------
+	 * se_service_get_se_revision() is known to populate on this silicon
+	 * (src/backends/soc_info/alif_se.c:19,80) and is a READ-ONLY query --
+	 * this settles whether the all-zero cgu_clk_ena responses this
+	 * investigation has been getting out of SERVICE_CLOCK_GET_CLOCKS (see
+	 * the SE clock service reliability paragraph in the file header) mean
+	 * the enclave transport itself is dead, or that services 702/716
+	 * specifically are being refused or mismatched. The returned string
+	 * IS the SES version banner (e.g. "SES A0 v1.110.0 Mar 4 2026"), so
+	 * printing it also answers whether this firmware build predates
+	 * 702/716 entirely.
+	 */
+	uint8_t se_rev[VERSION_RESPONSE_LENGTH] = { 0 };
+	int     se_rev_rc                       = se_service_get_se_revision(se_rev);
+	printf("[sd] PROBE 3: se_service_get_se_revision() -> %d  \"%.*s\" (empty/garbage = dead "
+	       "transport; a populated \"SES ...\" banner = transport alive, so 702/716 are being "
+	       "refused or mismatched specifically -- the banner's own version IS the SES version)\n",
+	       se_rev_rc,
+	       (int)sizeof(se_rev),
+	       (const char *)se_rev);
 
 	/*
 	 * --- 1. Bring the CC3501E bridge up -------------------------------
@@ -1062,18 +1263,20 @@ int main(void)
 		printf("[sd] RESULT PASS: SD card enumerated (%llu MB)\n", (unsigned long long)mb);
 	} else {
 		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SD_RST "
-		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), probe "
-		       "sdhc_hw_reset at main() entry -> %d; card still not reachable "
-		       "(disk_access_init rc=%d). The mux, the reset line and the clock request "
-		       "are no longer the open question -- all are proven driven -- so look at "
-		       "what the probe's return code says about controller reset (see the PROBE "
-		       "comment near the top of main()), or at the SELECT jumper on header P18 "
-		       "(see README.md)\n",
+		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), CMD0 probes "
+		       "(no-reset -> %d, flipped-clock -> %d), enclave-free reset (rc=%d); card still "
+		       "not reachable (disk_access_init rc=%d). The mux, the reset line and the clock "
+		       "request are no longer the open question -- all are proven driven -- so look at "
+		       "what the three PROBE blocks near the top of main() showed (CMD0 no-reset, the "
+		       "clock-source flip, the SE transport check), or at the SELECT jumper on header "
+		       "P18 (see README.md)\n",
 		       (int)bridge_rc,
 		       (int)en_rc,
 		       (int)clk_dis_rc,
 		       (int)clk_en_rc,
-		       probe_reset_rc,
+		       cmd0a_rc,
+		       cmd0b_rc,
+		       hwreset2_rc,
 		       rc);
 	}
 	/* close() only frees the host-side GPIO proxy handle -- the CC3501E
