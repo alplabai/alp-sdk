@@ -48,8 +48,9 @@ Once CMD0 succeeds, the SD subsystem would otherwise attempt CMD11 and try a
 1.8V I/O signaling switch through the 74LVC157 SDIO mux, which runs at 3.3V
 and was never designed to pass a 1.8V logic level. `no-1-8-v;` is added to
 both overlays' `sdhc0` node — this driver actually reads it
-(`sdhc_dwc.c:972`: `props->host_caps.vol_180_support = config->no_1_8_v ? 0 :
-...`), so it is a real behavioural change, not a documentation-only one.
+(`zephyr/drivers/sdhc/sdhc_dwc.c:972`: `props->host_caps.vol_180_support =
+config->no_1_8_v ? 0 : ...`), so it is a real behavioural change, not a
+documentation-only one.
 `max-bus-freq` drops from `<50000000>` to `<25000000>`, this binding's
 equivalent of vendor Linux's `max-frequency`. Vendor Linux additionally sets
 `no-hispeed`; recorded rather than applied — `zephyr/drivers/sdhc/sdhc_dwc.c`
@@ -71,8 +72,8 @@ line this driver prints, was a computed number at 2x the real base clock, not
 a measured one. Fixed the shift to use `DWC_SDHC_FREQ_SEL_Pos`, and removed
 the now-fully-unused, misleadingly-named `DWC_SDHC_BASE_CLK_FREQ_Pos` constant
 so the bug cannot be silently reintroduced. Not build-verified against this
-worktree's own twister run: the worktree's West module resolution compiles
-`/home/caner/alp-sdk/zephyr/drivers/sdhc/sdhc_dwc.c` (the main checkout), not
+worktree's own twister run: this worktree's West module resolution compiles
+`zephyr/drivers/sdhc/sdhc_dwc.c` from the primary alp-sdk checkout rather than
 this worktree's own copy, for reasons unrelated to this change — read
 `0x48102040` on hardware (now printed by the diagnostics above) to confirm the
 real base clock once this fix reaches a build that actually compiles it.
