@@ -22,17 +22,18 @@ nobody at the bench) never reads as a failed run.
 
 ## Scope of this slice
 
-Fourteen phases run in a fixed order. Ten are fully implemented against
-bench-proven drivers -- the first six, plus phase 8 (the CC3501E Wi-Fi 6 /
-BLE 5.4 coprocessor over the inter-chip SPI bridge), phase 9 (the microSD
-card, behind its SDIO mux, with a real write -> read -> verify round trip),
-phase 10 (RMII Ethernet through the GMAC and the on-module DP83825 PHY) and
-phase 13 (JPEG encode on the Hantro VC9000E); the remaining four are stubs
-that always report `SKIPPED`, each with its own reason (see `src/main.c`'s
-"STUBS" section) -- an attended-run requirement, a larger deferred unit of
-work, "no panel on this bench", and code that does not fit in ITCM are
-different kinds of gaps and are described as such, not collapsed into one
-generic "not implemented".
+Fourteen phases run in a fixed order. Eleven are fully implemented against
+bench-proven drivers -- the first six, phase 7 (the rotary encoder, an
+attended three-way verdict), phase 8 (the CC3501E Wi-Fi 6 / BLE 5.4
+coprocessor over the inter-chip SPI bridge), phase 9 (the microSD card,
+behind its SDIO mux, with a real write -> read -> verify round trip), phase
+10 (RMII Ethernet through the GMAC and the on-module DP83825 PHY) and phase
+13 (JPEG encode on the Hantro VC9000E); the remaining three (sound, screen,
+NPU) are stubs that always report `SKIPPED`, each with its own reason (see
+`src/main.c`'s "STUBS" section) -- a larger deferred unit of work, "no panel
+on this bench", and code that does not fit in ITCM are different kinds of
+gaps and are described as such, not collapsed into one generic "not
+implemented".
 
 Phase 9 is the newest of those and depends on phase 8 having run: the SD
 mux's ENABLE rides the CC3501E GPIO proxy, so the coprocessor has to be
@@ -50,12 +51,12 @@ input. No camera module is required by, or in scope for, either.
 | # | Phase | Bus / hardware | Asserts | Cannot assert |
 |---|---|---|---|---|
 | 1 | RTC + temperature | BRD_I2C (SoC I2C0) | RV-3028-C7 `init`/`was_cold_start`/`get_time`; seconds advance across a 1 s gap. TMP112 reading inside a plausible indoor band. | RTC accuracy/drift; TMP112 absolute accuracy (plausibility only). |
-| 2 | Sensors | carrier bus (SoC I2C2) | BMI323 / ICM-42670 / BMP581: documented startup floor, then a **bounded poll** of the chip's own data-ready flag, then a read; rejects the documented invalid/reset sentinels (`0x8000` per axis, `0x7f7f7f` raw). | Sensor calibration/accuracy; motion content of the sample. |
-| 3 | Power rails | carrier bus | All six INA236: bus voltage, **shunt microvolts**, current, gated on `ina236_conversion_ready()` having been observed set. | Whether a 0 mV/0 uV reading is "correct" for a given rail -- `+VCAM0`/`+VCAM1` are expected 0 (no camera fitted) and `+1V8`'s 0 uV shunt is an open question this demo reports but does not resolve. |
-| 4 | I/O expander answers | carrier bus | TCAL9538 configuration (0x03) and input port (0x00) register reads; also reads interrupt status (0x46) read-only (nothing here unmasks 0x45, so nothing is pending to acknowledge). | Any interrupt actually routing through a sensor -- see `aen-sensor-int-probe` for that. |
+| 2 | Sensors | carrier bus (SoC I2C2) | Each of BMI323 / ICM-42670 / BMP581 is **presence-probed** first (a bounded-retry 1-byte ACK read, per #2037 -- a NACK and a transient bus fault are indistinguishable at this layer, so a single failed read is never trusted); a part that ACKs then goes through its documented startup floor, a **bounded poll** of its own data-ready flag, and a read, rejecting the documented invalid/reset sentinels (`0x8000` per axis, `0x7f7f7f` raw). Verdict is per-part `ABSENT` / `OK` / `BROKEN` / `PHANTOM` (address ACKs but a register read afterward also fails) -- only `BROKEN`/`PHANTOM` fail the phase; `ABSENT` is per-unit population, never a fault. | Sensor calibration/accuracy; motion content of the sample. |
+| 3 | Power rails | carrier bus | Each of the six INA236 is presence-probed the same way as phase 2, then bus voltage, **shunt microvolts**, current, gated on `ina236_conversion_ready()` having been observed set. Same `ABSENT`/`OK`/`BROKEN`/`PHANTOM` verdict as phase 2 -- a rail this unit doesn't have fitted is reported, never counted as a failure (metadata/boards/e1m-evk.yaml:325 records real per-unit BOM variance across three E1M-AEN803 units). | Whether a 0 mV/0 uV reading is "correct" for a given rail -- `+VCAM0`/`+VCAM1` are expected 0 (no camera fitted) and `+1V8`'s 0 uV shunt is an open question this demo reports but does not resolve. |
+| 4 | I/O expander polarity round-trip | carrier bus | TCAL9538: reads configuration (0x03, cached from init); then a real round trip that **writes** the polarity-inversion register (0x02) twice -- once to invert every input-configured pin's read-back, once to restore it -- and proves the write took effect by comparing the input-port (0x00) read before/during/after. Never touches the output port (0x01) or the configuration register (0x03) itself: P0-P3 gate real carrier hardware (`LCD_PWR_EN`/`LCD_RST`/`CAM_EN`/`CTP_RST`), so this phase never drives or reconfigures them. Also reads interrupt status (0x46) read-only. | Any interrupt actually routing through a sensor -- see `aen-sensor-int-probe` for that. |
 | 5 | EEPROM identity | carrier bus | 24C128 read-only: `"ALPH"` magic + `"aen"` family string at the start of the manifest. | Manifest field accuracy beyond magic/family (see `aen-eeprom-manifest` for the full CRC/field decode). |
 | 6 | RGB LED | PWM0 (red) / PWM3 (green) / PWM1 (blue) | Drives each channel via `<alp/pwm.h>`, then asserts the UTIMER **register** the driver programmed (driver-enable + compare-enable bits, clock gate, run bit, a real fractional duty), then holds the colour lit for 1500 ms and names the colour it expects -- restores each channel to idle before returning (phase 9's SD-card mux departs from this idiom on purpose -- see its row). | That the LED visibly lit, and which colour it lit. The hold makes that checkable **by an operator watching the board**; the verdict itself is still the register read-back, and every channel programs identically, so a wrong `EVK_PWM_LED_*` colour mapping would still PASS. Only the eye settles the mapping. |
-| 7 | Rotary encoder | -- | Nothing (stub). | Needs an attended run (someone turning the knob) -- see `EVK-BRIEFING.md`'s open question about whether the driver can even distinguish "no motion" from "not counting". |
+| 7 | Rotary encoder | QEC0 / UTIMER channel 12 (P3_0 `ENC0_X`, P3_1 `ENC0_Y`, push switch P4_3) | An **attended**, three-way verdict (`ab2a71dc3`): asks the operator to turn the knob, then samples the raw quadrature pads and the UTIMER's own `CNTR` register in parallel for `ENCODER_ATTEND_MS`. Pads toggled AND `CNTR` moved -> `PASS`. Pads toggled, `CNTR` static -> `FAIL`, further split by `CNTR_CTRL` into "never correctly armed" vs. "armed but not counting". Pads never toggled -> `SKIPPED`, not `FAIL` -- genuinely indistinguishable from here between "nobody turned the knob" and "the signal never reaches the SoC". | Whether "armed but not counting" is a QEC-channel-12 silicon limitation (Alif's own CMSIS driver refuses `SRC_1` for QEC channels 12-15) -- noted, not chased, from an app. |
 | 8 | CC3501E Wi-Fi/BLE | inter-chip SPI1 (P14_6/5/4 + hardware SS0 P14_7), WIFI_EN P15_5, nRESET P15_1_FLEX, READY P2_6 | Powers (`WIFI_EN` high) and resets the coprocessor -- **nothing answers before this**, its supply is host-gated -- then `PING` (`0x00`) with a bounded 25 x 200 ms retry, `GET_VERSION` (`0x01`) **compared on `ALP_CC3501E_PROTOCOL_MAJOR` only** (per ADR 0033 a MINOR delta is additive and safe -- it is reported, not gated), `GET_MAC` (`0x03`) checked for a structurally valid station address **and issued twice, with the two replies required to match** (structure alone cannot tell a bit-flipped MAC from a real one, and the right value is per-part so it cannot be hard-coded), `GET_CAPABILITIES` (`0x06`), a passive `WIFI_SCAN_START` (`0x10`), and `BLE_ENABLE` (`0x30`). Every return code is printed. `PASS` requires **all five** of major-version match, valid MAC, capabilities readable, scan round-tripped, BLE up -- a `PING` alone is explicitly not enough. | Signal quality, throughput, or that any network is reachable -- it never associates. An **empty scan is `PASS`-but-`UNCORROBORATED`**: zero networks is a statement about the RF environment, not about this board, so the gate is that the scan *round-tripped*, not that it found anything. Which colour of failure a dead link is (power / pinmux / firmware) -- the log names the three to check. |
 | 9 | SD card | SDIO 74LVC157 mux (ENABLE = E1M `IO20` -> CC3501E `GPIO_26`, over the phase-8 bridge) -> SD Host Controller `sdhc@48102000` (`snps,dwc-sdhc`, CLK `P4_1` / CMD `P4_2` / D0..D3 `P6_0`..`P6_3`) -> Zephyr SDMMC disk `"SD"` -> FAT | Drives the mux ENABLE **low** through the portable `alp_gpio_*` API on `ALP_E1M_GPIO_IO20` (the CC3501E GPIO proxy turns it into a bridge transaction; the raw `GPIO_26` index lives in the route table, not in app code), then `disk_access_init("SD")`, then the geometry verbatim (sector count, sector size), then **a real write -> read -> verify round trip**: it writes a per-run payload to `/ALPDEMO.TXT`, `fs_truncate`s the file to what the write landed (when it landed anything), `fs_sync`s so the read-back cannot be served from cache, seeks to 0, reads it back and `memcmp`s it. `PASS` requires that compare to succeed -- `disk_access_init` returning 0, or the geometry reading back, is explicitly **not** a pass. The payload carries a `k_cycle_get_32()` nonce so last run's leftover file cannot compare equal. The five outcomes are kept apart in the reported reason, because they send you to different places: mux ENABLE not drivable (`FAIL` -- `IO20` is routed on both revisions and phase 8 leaves the bridge up), no card detected (`SKIPPED`, `DISK_STATUS_NOMEDIA`), controller init failed with a card present (`FAIL`), card present but the mount failed for one of three indistinguishable FatFs causes (`SKIPPED`, `-ENODEV`), write/verify mismatch (`FAIL`). Unlike phase 6, this phase does **not** restore the mux to idle on exit: `IO20`/`GPIO_26` is left driven low (asserted) through phases 10-14 and past the end of the run, on the maintainer's instruction that low is this mux's working state on this EVK, not a resource this phase borrows and hands back. | Whether the mux **SELECT** is in the right position -- it is not software-drivable and cannot be read back. `IO21` reached CC3501E `GPIO_30` on r1 but is left open on the module for r2, so the position is set by a jumper on header **P18**: fitted pulls `MUX_SEL.SDIO` high through `R198`, open lets `R27` pull it to `0V`, and that net drives both mux selects (`U38.S`, `U39.S`). A wrong position therefore surfaces as `DISK_STATUS_NOMEDIA`, indistinguishable from an empty slot -- the log names both causes. **On r1, do not fit the jumper while firmware drives `IO21`**: the net reaches both P18 and E2 `L3`, so that is a driven pin against the header rail. Fit the jumper or drive the pin, never both; this phase never drives `IO21` on any revision. Also not asserted: card health, wear, or anything outside the one file the demo owns -- it **never formats**, never `mkfs`, never writes outside `/ALPDEMO.TXT` and never touches the partition table (`FS_MOUNT_FLAG_NO_FORMAT` at the mount site **and** `CONFIG_FS_FATFS_MOUNT_MKFS=n`, which keeps the format code out of the image entirely). |
 | 10 | Ethernet | RMII GMAC `ethernet@48100000` + on-module TI DP83825 PHY (REFCLK P11_0, RXD0 P11_3, RXD1 P1_1, CRS_DV P6_7, TXD0 P10_4, TXD1 P10_5, TXEN P1_5, MDC/MDIO P11_2/P11_1); PHY power `E_PHY_PWRDWN` P15_4, reset `E_PHY_RESET` P11_6 | Powers and resets the PHY from a `SYS_INIT` hook that runs **before the Ethernet driver's own init** -- the RMII ref-clock AUTO probe only finds the module's external 50 MHz oscillator if the PHY is already powered when it runs, so the phase reports which source `ETH_CTRL` bit 4 latched. Then reads the PHY's real status **over MDIO** (fixed-link does no MDIO of its own), sets `RCSR` bit 7 for 50 MHz-reference RMII, restarts auto-negotiation, and gates `PASS` on **a DHCPv4 lease** -- DISCOVER/OFFER/REQUEST/ACK completes only over a genuinely bidirectional link. Prints `tx_bytes`/`rx_bytes` throughout. | That `net_if_is_carrier_ok()` means anything: with an unmanaged fixed-link PHY it is **synthetic**, it reports what devicetree hard-codes, and it reads true with the cable in your hand. It is printed labelled as such and is never gated on. Also: link speed/throughput, and whether a segment that sends us nothing is quiet or broken -- see the verdict table below. |
@@ -360,19 +361,22 @@ create one:
 [evkdemo] SD: fs_mount -> -ENODEV -- subsys/fs/fat_fs.c maps three FatFs causes (FR_INVALID_DRIVE, FR_NOT_ENABLED, FR_NO_FILESYSTEM) onto the same code: either no FAT filesystem on this card, or SD_MOUNT_POINT="/SD:" does not match this build's FF_VOLUME_STRS entry. disk_access_init("SD") already returned 0 above, which rules out the disk name ...
 ```
 
-The summary, from a run with a cable, a DHCP server, and a FAT-formatted
-card in the slot with the P18 mux-select jumper fitted. Phase 9's `PASS` here
-is the **expected** result on that hardware, not one that has been captured
-on silicon yet -- see the note above its transcript:
+The summary below is **ILLUSTRATIVE, not a captured run** -- it is hand-built
+from `PHASES[]`'s real names and the `"phase %2zu/%2zu: %-34s %s"` format
+string in `src/main.c`, for a hypothetical bench with a cable, a DHCP server,
+a FAT-formatted card in the slot with the P18 mux-select jumper fitted, and
+an operator who turned the rotary encoder when prompted. It has not been
+captured end to end on silicon (phase 9 and phase 7 in particular -- see the
+note above phase 9's own transcript):
 
 ```
 [evkdemo] phase  1/14: RTC + temperature (BRD_I2C)        PASS
 [evkdemo] phase  2/14: Sensors (BMI323/ICM42670/BMP581)   PASS
 [evkdemo] phase  3/14: Power rails (6x INA236)            PASS
-[evkdemo] phase  4/14: I/O expander answers (TCAL9538, read-only) PASS
+[evkdemo] phase  4/14: I/O expander polarity round-trip (TCAL9538) PASS
 [evkdemo] phase  5/14: EEPROM identity (24C128)           PASS
 [evkdemo] phase  6/14: RGB LED (PWM0/1/3)                 PASS
-[evkdemo] phase  7/14: Rotary encoder                     SKIPPED
+[evkdemo] phase  7/14: Rotary encoder                     PASS
 [evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                  PASS
 [evkdemo] phase  9/14: SD card                            PASS
 [evkdemo] phase 10/14: Ethernet                           PASS
@@ -381,9 +385,14 @@ on silicon yet -- see the note above its transcript:
 [evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)       PASS
 [evkdemo] phase 14/14: NPU inference                      SKIPPED
 ...
-[evkdemo] RESULT: 10 PASS, 4 SKIPPED, 0 FAIL
+[evkdemo] RESULT: 11 PASS, 3 SKIPPED, 0 FAIL
 [evkdemo] done
 ```
+
+On an UNATTENDED bench -- the more common case, nobody at the knob -- phase 7
+reads `Rotary encoder   SKIPPED   pads never toggled -- unattended, or signal
+not reaching the SoC` instead, and the tally drops to `10 PASS, 4 SKIPPED,
+0 FAIL`.
 
 With no cable in the port, phase 10 reads
 `Ethernet   SKIPPED  no carrier -- cable?` and the tally is
