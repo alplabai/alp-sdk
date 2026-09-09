@@ -20,6 +20,10 @@ project(alp_sdk_chips_test LANGUAGES C)
 # health-verdict logic pulled out of that example's main.c (#2035) so
 # test_sensors.c can exercise it here -- main.c itself only builds
 # against the real E1M-AEN801 board target.
+#
+# cc3501e_link_verdict.h (examples/aen/aen-evk-demo/src/) is the same
+# example's GET_VERSION link verdict, pulled out for the same reason
+# (#2035) so test_cc3501e.c can exercise it here.
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280

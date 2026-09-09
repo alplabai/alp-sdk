@@ -170,6 +170,7 @@
 #include "alp/chips/tcal9538.h"
 #include "alp/chips/eeprom_24c128.h"
 #include "alp/chips/cc3501e.h"
+#include "cc3501e_link_verdict.h"
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
 
@@ -2049,30 +2050,38 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	 * cc3501e_get_version() deliberately does not compare it (its callers
 	 * include liveness soaks), so the comparison is made here.
 	 *
-	 * MAJOR ONLY, per ADR 0033 and the driver's own policy
-	 * (chips/cc3501e/cc3501e_core.c). MAJOR means "an unchanged host would be
-	 * MISREAD" -- reused reserved bytes, changed struct layout, changed
-	 * framing -- so it is the only difference that makes the replies below
-	 * untrustworthy. MINOR is defined as purely ADDITIVE, and connecting
-	 * across it is safe precisely because of that: this host never sends an
-	 * opcode it does not know, and the firmware never spontaneously emits an
-	 * event nobody armed. Demanding an exact match would fail a firmware ADR
-	 * 0033 declares compatible, which is a false FAIL on a good board.
+	 * Per ADR 0033 and the driver's own policy (chips/cc3501e/cc3501e_core.c,
+	 * cc3501e_fw_major_is_acceptable()), the host is deliberately BILINGUAL
+	 * during the v3->v4 migration window: it accepts a firmware MAJOR equal
+	 * to either ALP_CC3501E_PROTOCOL_MAJOR (this host's own wire) or
+	 * ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (the pre-4.0 predecessor). A MAJOR
+	 * outside that pair means "an unchanged host would be MISREAD" -- reused
+	 * reserved bytes, changed struct layout, changed framing -- so it is the
+	 * only case that makes the replies below untrustworthy. See
+	 * cc3501e_link_verdict.h (cc3501e_classify_link()) for the four-way
+	 * outcome this settles into; that header is also what this demo's tests
+	 * exercise, since main.c only builds against the real board target.
 	 *
-	 * A minor delta is INFORMATION, printed and not gated: lower than this
-	 * host's minor means the firmware lacks newer features (GET_CAPABILITIES
-	 * below is the better question about that anyway), higher means it has
+	 * MINOR is defined as purely ADDITIVE, and connecting across it is safe
+	 * precisely because of that: this host never sends an opcode it does not
+	 * know, and the firmware never spontaneously emits an event nobody
+	 * armed. Demanding an exact match would fail a firmware ADR 0033
+	 * declares compatible, which is a false FAIL on a good board. A minor
+	 * delta is INFORMATION, printed and not gated: lower than this host's
+	 * minor means the firmware lacks newer features (GET_CAPABILITIES below
+	 * is the better question about that anyway), higher means it has
 	 * features this phase does not use.
 	 *
 	 * Note this line is not where a MAJOR skew is normally caught -- the
 	 * bring-up above already refused and returned. It stays gated as a
 	 * backstop for a firmware that somehow changes its answer afterwards.
 	 */
-	uint16_t     version  = 0u;
-	alp_status_t ver_rc   = cc3501e_get_version(&cc35_fw, &version);
-	unsigned     fw_major = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version);
-	unsigned     fw_minor = ALP_CC3501E_PROTOCOL_VERSION_MINOR(version);
-	bool         ver_ok = (ver_rc == ALP_OK) && (fw_major == (unsigned)ALP_CC3501E_PROTOCOL_MAJOR);
+	uint16_t               version     = 0u;
+	alp_status_t           ver_rc      = cc3501e_get_version(&cc35_fw, &version);
+	unsigned               fw_major    = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(version);
+	unsigned               fw_minor    = ALP_CC3501E_PROTOCOL_VERSION_MINOR(version);
+	cc3501e_link_verdict_t ver_verdict = cc3501e_classify_link(ver_rc, fw_major, fw_minor);
+	bool                   ver_ok      = cc3501e_link_verdict_ok(ver_verdict);
 	printf(
 	    "[evkdemo] CC3501E: GET_VERSION (0x01) -> %d protocol v%u.%u (host built for v%u.%u) %s\n",
 	    (int)ver_rc,
@@ -2080,11 +2089,15 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	    fw_minor,
 	    (unsigned)ALP_CC3501E_PROTOCOL_MAJOR,
 	    (unsigned)ALP_CC3501E_PROTOCOL_MINOR,
-	    !ver_ok ? "MAJOR MISMATCH -- replies below are parsed against the host's layout"
-	    : (fw_minor == (unsigned)ALP_CC3501E_PROTOCOL_MINOR)
-	        ? "match"
-	        : "major match, minor differs -- additive by definition (ADR 0033), so the link is "
-	          "compatible; not gated on");
+	    ver_verdict == CC3501E_LINK_VERDICT_MATCH ? "match"
+	    : ver_verdict == CC3501E_LINK_VERDICT_MINOR_AHEAD
+	        ? "major match, minor differs -- additive by definition (ADR 0033), so the link is "
+	          "compatible; not gated on"
+	    : ver_verdict == CC3501E_LINK_VERDICT_LEGACY
+	        ? "LEGACY MAJOR -- this board has not been reflashed to the v4.0 wire yet; the host is "
+	          "deliberately speaking the old (v3) protocol to it per the ADR 0033 migration "
+	          "window, so this is the migration working, not a mismatch; not gated on"
+	        : "MAJOR MISMATCH -- replies below are parsed against the host's layout");
 
 	/* GET_MAC (0x03) -- poll-by-repeat, so an OK here also proves the
 	 * firmware's worker seam (submit -> worker -> reply), not just META
@@ -2269,9 +2282,11 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	 * back" -- which is the bug this app was built around. PASS additionally
 	 * requires ALL of:
 	 *
-	 *   ver_ok   -- the firmware agrees on the MAJOR wire contract, so every
-	 *               other reply below was parsed against the right layout. A
-	 *               MINOR delta is additive and deliberately not gated.
+	 *   ver_ok   -- the firmware's MAJOR is one this bilingual host accepts
+	 *               (current or the ADR 0033 legacy predecessor), so every
+	 *               other reply below was parsed against a layout it
+	 *               actually speaks. A MINOR delta, and a legacy MAJOR, are
+	 *               both deliberately not gated -- see cc3501e_link_verdict.h.
 	 *   mac_ok   -- the radio produced its own identity, that identity is
 	 *               structurally a station MAC rather than a zeroed field,
 	 *               and a second GET_MAC round-trip returned the same bytes.

@@ -33,6 +33,13 @@
  * this app's CMakeLists.txt). */
 #include "../../../../chips/cc3501e/cc3501e_internal.h"
 
+/* #2035: examples/aen/aen-evk-demo's GET_VERSION link verdict, pulled into
+ * its own header precisely so it can be exercised here without a board --
+ * see that header for the bilingual-host reasoning. Reachable via this
+ * app's existing examples/aen/aen-evk-demo/src include dir (see
+ * bmp581_verdict.h's comment in this app's CMakeLists.txt). */
+#include "cc3501e_link_verdict.h"
+
 ZTEST(alp_chips, test_cc3501e_init_null_args)
 {
 	cc3501e_t  ctx;
@@ -371,4 +378,74 @@ ZTEST(alp_chips, test_cc3501e_reply_verdict_major4_legacy_status_byte_rejected)
 	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 4u, hdr, payload, len),
 	              ALP_ERR_IO,
 	              "a major-4 peer's status byte must never be read as the legacy 0x00 OK");
+}
+
+/*
+ * #2035: a bench session on a board running 3.1 firmware saw this demo print
+ * "MAJOR MISMATCH" -> phase FAIL while every functional sub-check (ping,
+ * MAC, caps, scan, BLE) passed. The host driver is deliberately bilingual
+ * (cc3501e_fw_major_is_acceptable() above), so a legacy-major reply is the
+ * v3->v4 migration working, not a mismatch. These four pin the fix's four
+ * outcomes; each one exercises cc3501e_classify_link() and
+ * cc3501e_link_verdict_ok() exactly as main.c's phase_cc3501e() does.
+ *
+ * Mutation coverage: widening the old two-way ver_ok boolean back to
+ * `fw_major == MAJOR` alone (dropping the LEGACY branch) reddens
+ * test_cc3501e_classify_link_legacy_major_is_ok; dropping the
+ * ver_rc != ALP_OK guard reddens test_cc3501e_classify_link_bad_rc_is_mismatch;
+ * collapsing MATCH and MINOR_AHEAD into one outcome reddens
+ * test_cc3501e_classify_link_minor_ahead_is_not_match; and accepting a
+ * fw_major that is neither current nor legacy reddens
+ * test_cc3501e_classify_link_wrong_major_is_mismatch.
+ */
+ZTEST(alp_chips, test_cc3501e_classify_link_exact_match)
+{
+	cc3501e_link_verdict_t v = cc3501e_classify_link(
+	    ALP_OK, (unsigned)ALP_CC3501E_PROTOCOL_MAJOR, (unsigned)ALP_CC3501E_PROTOCOL_MINOR);
+	zassert_equal(v, CC3501E_LINK_VERDICT_MATCH, "major+minor both equal must be MATCH");
+	zassert_true(cc3501e_link_verdict_ok(v), "an exact match must be an OK link");
+}
+
+ZTEST(alp_chips, test_cc3501e_classify_link_minor_ahead_is_not_match)
+{
+	cc3501e_link_verdict_t v = cc3501e_classify_link(
+	    ALP_OK, (unsigned)ALP_CC3501E_PROTOCOL_MAJOR, (unsigned)ALP_CC3501E_PROTOCOL_MINOR + 1u);
+	zassert_equal(
+	    v, CC3501E_LINK_VERDICT_MINOR_AHEAD, "major match + minor delta must be MINOR_AHEAD");
+	zassert_true(cc3501e_link_verdict_ok(v), "a minor delta is additive (ADR 0033) -- must be ok");
+}
+
+ZTEST(alp_chips, test_cc3501e_classify_link_legacy_major_is_ok)
+{
+	/* This is the exact scenario from the bench report: v3.1 firmware,
+	 * a v4.0 host. It must be LEGACY, and it must be an OK link -- not
+	 * FAIL, which is the bug this fix closes. */
+	cc3501e_link_verdict_t v =
+	    cc3501e_classify_link(ALP_OK, (unsigned)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY, 1u);
+	zassert_equal(
+	    v, CC3501E_LINK_VERDICT_LEGACY, "the migration-window predecessor must be LEGACY");
+	zassert_true(cc3501e_link_verdict_ok(v),
+	             "a bilingual host must treat its accepted legacy MAJOR as an OK link, not a FAIL");
+}
+
+ZTEST(alp_chips, test_cc3501e_classify_link_wrong_major_is_mismatch)
+{
+	/* Neither the current nor the legacy MAJOR -- a genuine
+	 * incompatibility, must still fail. */
+	cc3501e_link_verdict_t v =
+	    cc3501e_classify_link(ALP_OK, (unsigned)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY - 1u, 0u);
+	zassert_equal(v, CC3501E_LINK_VERDICT_MISMATCH, "an unaccepted major must be MISMATCH");
+	zassert_false(cc3501e_link_verdict_ok(v), "a genuine major mismatch must not be an OK link");
+}
+
+ZTEST(alp_chips, test_cc3501e_classify_link_bad_rc_is_mismatch)
+{
+	/* A transport/parse failure must never be read as a link outcome --
+	 * ALP_ERR_TIMEOUT here, even against an otherwise-accepted major,
+	 * must still be MISMATCH. */
+	cc3501e_link_verdict_t v = cc3501e_classify_link(ALP_ERR_TIMEOUT,
+	                                                 (unsigned)ALP_CC3501E_PROTOCOL_MAJOR,
+	                                                 (unsigned)ALP_CC3501E_PROTOCOL_MINOR);
+	zassert_equal(v, CC3501E_LINK_VERDICT_MISMATCH, "a failed GET_VERSION call must be MISMATCH");
+	zassert_false(cc3501e_link_verdict_ok(v), "a failed GET_VERSION call must not be an OK link");
 }
