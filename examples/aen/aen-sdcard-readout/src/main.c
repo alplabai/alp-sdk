@@ -230,6 +230,11 @@ static cc3501e_t cc35_fw;
 #define CC35_PING_RETRIES 25u
 #define CC35_PING_GAP_MS  200u
 
+/* GET_MAC timeout for the meta-handshake below -- same value as
+ * aen-evk-demo's CC35_MAC_TIMEOUT_MS (examples/aen/aen-evk-demo/src/main.c),
+ * copied rather than shared because these are two separate example apps. */
+#define CC35_MAC_TIMEOUT_MS 2000u
+
 int main(void)
 {
 	/*
@@ -322,7 +327,70 @@ int main(void)
 	}
 
 	/*
-	 * --- 3. Attach the bridge to the GPIO proxy -------------------------
+	 * --- 3. Meta handshake: VERSION, MAC, CAPABILITIES ------------------
+	 * NOT here for their own sake -- this app has no use for the protocol
+	 * version, the station MAC, or the capability bitmap. They are issued
+	 * because, measured on this silicon, the mux ENABLE request below
+	 * (the first PROXIED GPIO request this app makes) came back
+	 * ALP_ERR_INVAL -- traced all the way to the coprocessor's own
+	 * RESP_ERR_INVALID reply, not a host-side rejection (#2035) -- when it
+	 * was the first request sent after PING. examples/aen/aen-evk-demo's
+	 * phase 8 never hits that: it always runs this exact three-command
+	 * sequence before phase 9 touches any GPIO. Mirroring it here is the
+	 * cheapest way to test whether the coprocessor requires this
+	 * handshake before it will service a proxied GPIO configure -- same
+	 * three opcodes, same order, same driver calls as the demo. If that
+	 * turns out not to be the fix, this block still earns its keep as the
+	 * demo's identity check; it is not being deleted either way.
+	 *
+	 * Deliberately NOT issued: WIFI_SCAN_START / BLE_ENABLE. Those bring
+	 * up radios this app has no business touching, cost real seconds
+	 * apiece, and are far less likely to be a GPIO-proxy precondition
+	 * than the capability handshake below -- see the task instructions
+	 * for this change. Adding them is a later, deliberate step if this
+	 * block alone does not clear the INVALID.
+	 */
+	uint16_t     cc35_version  = 0u;
+	alp_status_t version_rc    = cc3501e_get_version(&cc35_fw, &cc35_version);
+	unsigned     cc35_fw_major = ALP_CC3501E_PROTOCOL_VERSION_MAJOR(cc35_version);
+	unsigned     cc35_fw_minor = ALP_CC3501E_PROTOCOL_VERSION_MINOR(cc35_version);
+	printf("[sd] CC3501E: GET_VERSION (0x01) -> %d protocol v%u.%u (host built for v%u.%u) %s\n",
+	       (int)version_rc,
+	       cc35_fw_major,
+	       cc35_fw_minor,
+	       (unsigned)ALP_CC3501E_PROTOCOL_MAJOR,
+	       (unsigned)ALP_CC3501E_PROTOCOL_MINOR,
+	       (version_rc == ALP_OK && cc35_fw_major == (unsigned)ALP_CC3501E_PROTOCOL_MAJOR)
+	           ? "match"
+	           : "MAJOR MISMATCH or no reply");
+
+	uint8_t      cc35_mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t mac_rc = cc3501e_wifi_get_mac(&cc35_fw, cc35_mac, CC35_MAC_TIMEOUT_MS);
+	printf("[sd] CC3501E: GET_MAC (0x03) -> %d  %02x:%02x:%02x:%02x:%02x:%02x\n",
+	       (int)mac_rc,
+	       cc35_mac[0],
+	       cc35_mac[1],
+	       cc35_mac[2],
+	       cc35_mac[3],
+	       cc35_mac[4],
+	       cc35_mac[5]);
+
+	uint32_t     cc35_caps    = 0u;
+	alp_status_t caps_rc      = cc3501e_get_capabilities(&cc35_fw, &cc35_caps);
+	bool         cap_gpio_prx = (cc35_caps & ALP_CC3501E_CAP_GPIO_PROXY) != 0u;
+	printf("[sd] CC3501E: GET_CAPABILITIES (0x06) -> %d caps=0x%08x gpio_proxy=%s%s\n",
+	       (int)caps_rc,
+	       (unsigned)cc35_caps,
+	       cap_gpio_prx ? "yes" : "no",
+	       (caps_rc == ALP_ERR_INVAL)
+	           ? " (INVAL = firmware predates the opcode: no capability information)"
+	       : (caps_rc == ALP_OK && !cap_gpio_prx)
+	           ? " -- firmware itself reports GPIO proxying unavailable; that alone would "
+	             "explain the mux ENABLE INVALID below, independent of command ordering"
+	           : "");
+
+	/*
+	 * --- 4. Attach the bridge to the GPIO proxy -------------------------
 	 * cc3501e_bridge_bringup() already calls alp_gpio_cc3501e_attach()
 	 * internally (see cc3501e_bridge.c step 3) and ignores its return --
 	 * so the proxy is already routing by this point on a clean bring-up.
@@ -349,7 +417,7 @@ int main(void)
 	}
 
 	/*
-	 * --- 4. Assert the SDIO mux ENABLE over the GPIO proxy -------------
+	 * --- 5. Assert the SDIO mux ENABLE over the GPIO proxy -------------
 	 * alp_gpio_open() on a PORTABLE E1M pin id. The proxy backend looks
 	 * IO20 up in this app's cc3501e_gpio_routes[] table, finds raw
 	 * CC3501E GPIO_26, and sends the configure/write over the bridge just
@@ -417,7 +485,7 @@ int main(void)
 	k_msleep(SD_MUX_SETTLE_MS);
 
 	/*
-	 * --- 5. Enumerate the card, read-only ------------------------------
+	 * --- 6. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
