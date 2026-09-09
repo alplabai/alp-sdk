@@ -66,6 +66,20 @@
  * is unknowable from the host side, and this SD path is already clocked at
  * 10 MHz (CAPABILITIES1[5:0] = 0x0a) with CLK10M (bit 9) already set;
  * enabling an unidentified clock is not a risk this diagnostic needs.
+ *
+ * SE clock service reliability (#2035): with the hdr_error_code fix above
+ * applied, a full bench sample now reads hdr_error_code=0 and
+ * hdr_flags=0x0000 -- dispatch-layer "success" -- for a SERVICE_CLOCK_GET_CLOCKS
+ * request, while that SAME response's own cgu_clk_ena field reports
+ * 0x00000000. That is an impossible value: a direct hardware read of the
+ * same register never comes back all-zero on this silicon (0xFE03FF71
+ * measured, see above). A register that cannot read zero reading zero
+ * through the enclave's own query means these requests are being
+ * acknowledged but not actually serviced. Until that gap is understood, the
+ * SE's clock service should not be trusted on this board -- any "success" it
+ * reports needs cross-checking against a direct hardware read, which is
+ * exactly what sd_diag_print_cgu_clk_ena() below does and what
+ * sd_se_get_cgu_clk_ena() cannot substitute for.
  */
 
 #include <stdbool.h>
@@ -133,7 +147,11 @@
 #define SD_REG_BASE   0x48102000u
 #define SD_REG_PSTATE (SD_REG_BASE + 0x024u) /* Present State */
 #define SD_REG_NORMAL_INT_STAT \
-	(SD_REG_BASE + 0x030u)                          /* Normal + Error Interrupt Status (32b read) */
+	(SD_REG_BASE + 0x030u) /* Normal + Error Interrupt Status (32b read) */
+#define SD_REG_NORMAL_INT_STAT_EN \
+	(SD_REG_BASE + 0x034u) /* Normal + Error Int Status Enable (32b read) -- #2035, see below */
+#define SD_REG_NORMAL_INT_SIGNAL_EN \
+	(SD_REG_BASE + 0x038u) /* Normal + Error Int Signal Enable (32b read) */
 #define SD_REG_CAPABILITIES1 (SD_REG_BASE + 0x040u) /* Capabilities 1 -- base clock field, Task 4 */
 
 #define SD_PSTATE_CMD_INHIBIT_Msk 0x00000001u /* bit0: a command is in flight */
@@ -227,6 +245,62 @@ static void sd_diag_print_static_regs(void)
 	       "zephyr/drivers/sdhc/sdhc_dwc.c)\n",
 	       (unsigned)SD_REG_CAPABILITIES1,
 	       caps);
+}
+
+/*
+ * Read NORMAL_INT_STAT_EN / ERROR_INT_STAT_EN, plus the two SIGNAL_EN
+ * registers next to them (sdhc_dwc.h: DWC_SDHC_NORMAL_INT_STAT_EN_R @0x034,
+ * DWC_SDHC_ERROR_INT_STAT_EN_R @0x036, DWC_SDHC_NORMAL_INT_SIGNAL_EN_R @0x038,
+ * DWC_SDHC_ERROR_INT_SIGNAL_EN_R @0x03A) -- READ ONLY, at four points in
+ * main() below.
+ *
+ * WHY (#2035): the end of the last bench run sampled both STAT_EN registers
+ * at 0x0000 -- with the status-enable bits clear, NORMAL_INT_STAT can never
+ * latch command-complete (bit CC), so sdhc_dwc_wait_cmd_complete() times out
+ * no matter what the card, clock, pads or mux do. That alone would explain
+ * "CMD complete timeout" on every run today, independent of every other
+ * theory this file's other diagnostics chase.
+ *
+ * BUT that end-of-run sample was taken AFTER a failed sdhc_hw_reset(), so it
+ * cannot tell "our own reset cleared them" apart from "they were already
+ * zero from boot". sdhc_dwc_set_def_config() (zephyr/drivers/sdhc/sdhc_dwc.c
+ * :1126-1141) is supposed to set both STAT_EN registers (to
+ * NORM_INTR_ALL_Msk / ERROR_INTR_ALL_Msk) during sdhc_dwc_init(), which runs
+ * POST_KERNEL -- before main() is ever entered. Four labelled samples pin
+ * down exactly where the value goes to zero, or prove it was never non-zero:
+ *   1. main() entry, before ANYTHING else -- the boot-time POST_KERNEL
+ *      value, untouched by this app. This is the sample that matters most:
+ *      if it already reads 0x0000 here, set_def_config() either never ran
+ *      or something cleared its work before main() started, and that is the
+ *      root cause of six identical bench failures, not this app's own reset
+ *      call in step 8 below.
+ *   2. immediately before sdhc_hw_reset() (step 8) -- the value this app
+ *      inherited, right before it does anything that could disturb it.
+ *   3. immediately after sdhc_hw_reset() -- sdhc_dwc_reset() is a bare
+ *      SW_RST_ALL and does NOT re-run set_def_config() (see step 8's KNOWN
+ *      GAP comment below), so this sample is the direct test of that gap:
+ *      if #2 was non-zero and #3 reads 0x0000, THIS call is what clears it.
+ *   4. immediately before disk_access_init() -- the value the card
+ *      enumeration attempt actually runs against.
+ */
+static void sd_diag_print_int_enables(const char *label)
+{
+	uint32_t stat_en   = sys_read32(SD_REG_NORMAL_INT_STAT_EN);
+	uint32_t signal_en = sys_read32(SD_REG_NORMAL_INT_SIGNAL_EN);
+
+	printf("[sd][diag] INT enables (%s): NORMAL_INT_STAT_EN@0x%08x=0x%04x "
+	       "ERROR_INT_STAT_EN@0x%08x=0x%04x NORMAL_INT_SIGNAL_EN@0x%08x=0x%04x "
+	       "ERROR_INT_SIGNAL_EN@0x%08x=0x%04x -- both STAT_EN zero means command-complete "
+	       "cannot latch, full stop\n",
+	       label,
+	       (unsigned)SD_REG_NORMAL_INT_STAT_EN,
+	       (unsigned)(stat_en & 0xFFFFu),
+	       (unsigned)(SD_REG_NORMAL_INT_STAT_EN + 2u),
+	       (unsigned)(stat_en >> 16),
+	       (unsigned)SD_REG_NORMAL_INT_SIGNAL_EN,
+	       (unsigned)(signal_en & 0xFFFFu),
+	       (unsigned)(SD_REG_NORMAL_INT_SIGNAL_EN + 2u),
+	       (unsigned)(signal_en >> 16));
 }
 
 /* Read CGU CLK_ENA (the HARDWARE register) back around each step of main()'s
@@ -499,6 +573,11 @@ static alp_status_t sd_se_set_clock_enable(uint32_t clock_type, uint32_t enable,
 
 int main(void)
 {
+	/* Sample point 1/4 (#2035): the boot-time POST_KERNEL value, before this
+	 * app touches anything -- the very first thing main() does. See
+	 * sd_diag_print_int_enables() above for why this sample matters most. */
+	sd_diag_print_int_enables("main() entry, before bridge bring-up");
+
 	/*
 	 * --- 1. Bring the CC3501E bridge up -------------------------------
 	 * One call: opens SPI1 (hardware SS0, ALP_SPI_NO_CS) and the WIFI_EN /
@@ -966,10 +1045,19 @@ int main(void)
 	 * this part needs more than ~65 ms, this driver reports a timeout
 	 * exactly where Alif's own reference would have silently proceeded.
 	 */
+	/* Sample point 2/4 (#2035): what this app inherited, right before it
+	 * does anything that could disturb it. */
+	sd_diag_print_int_enables("before sdhc_hw_reset()");
+
 	int sdhc_reset_rc = sdhc_hw_reset(SDHC_DEV);
 	printf("[sd] sdhc_hw_reset(sdhc0) -> %d (SW_RST_ALL only -- see the KNOWN GAP note "
 	       "above about interrupt enables)\n",
 	       sdhc_reset_rc);
+
+	/* Sample point 3/4 (#2035): direct test of the KNOWN GAP above -- if
+	 * point 2 was non-zero and this reads 0x0000, sdhc_hw_reset() (a bare
+	 * SW_RST_ALL that never re-runs set_def_config()) is what clears it. */
+	sd_diag_print_int_enables("after sdhc_hw_reset()");
 
 	/*
 	 * --- 9. Enumerate the card, read-only ------------------------------
@@ -979,6 +1067,10 @@ int main(void)
 	 * a resource this app must hand back.
 	 */
 	sd_diag_print_static_regs();
+
+	/* Sample point 4/4 (#2035): the value the card enumeration attempt
+	 * below actually runs against. */
+	sd_diag_print_int_enables("before disk_access_init()");
 
 	printf("[sd] disk_access_init(\"%s\") on the E8 DWC SDHC\n", DISK_NAME);
 
