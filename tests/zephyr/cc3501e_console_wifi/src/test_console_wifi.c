@@ -36,6 +36,7 @@
 
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_reply_model.h"
 
 /* ---- what the two RSSI sources report ------------------------------------- *
  * FIX_RSSI_MEASURED is the real reading WIFI_GET_RSSI hands back.  The latch
@@ -98,13 +99,17 @@ static void slave_reset(void)
 	slave.ip_resp          = ALP_CC3501E_RESP_OK;
 }
 
+/* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
+ * shape cc3501e_reply_verdict() accepts for a 0x5A status, see
+ * cc3501e_reply_model.h); any ALP_CC3501E_RESP_ERR_* code keeps the plain
+ * legacy shape, which the reply-verdict decode also accepts pre-negotiation. */
 static void stage_reply(uint8_t st, const uint8_t *data, uint16_t n)
 {
-	slave.reply_pl[0] = st;
-	if (n > 0u) {
-		memcpy(&slave.reply_pl[1], data, n);
+	if (st == ALP_CC3501E_RESP_OK) {
+		slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, st, data, n);
+	} else {
+		slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, data, n);
 	}
-	slave.reply_len = (uint16_t)(1u + n);
 }
 
 static void slave_dispatch(void)

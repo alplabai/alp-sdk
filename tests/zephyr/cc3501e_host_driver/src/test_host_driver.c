@@ -29,6 +29,7 @@
 
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_reply_model.h"
 
 /* ---- software model of the firmware slave ---------------------------------- */
 
@@ -122,16 +123,27 @@ static struct {
 static bool g_scan_stage_ctx_b;
 
 /* #1378 mutant control: when true, the WIFI_CONNECT_STA / WIFI_AP_START
- * submit handler stages a literal RESP_OK (0x00) status byte instead of the
- * real firmware's unconditional RESP_ERR_BUSY submit ack -- reproducing "a
- * valid header followed by an all-zero payload phase" (this repo's own
- * silicon finding: a dead bus phase reads back 0x00000000, which happens to
- * equal RESP_OK).  Cleared by slave_reset(). */
+ * submit handler stages a literal ALP_CC3501E_RESP_OK_LEGACY (0x00) status
+ * byte instead of the real firmware's unconditional RESP_ERR_BUSY submit ack
+ * -- reproducing "a valid header followed by an all-zero payload phase"
+ * (this repo's own silicon finding: a dead bus phase reads back
+ * 0x00000000).  MUST stay the LEGACY 0x00 value, not ALP_CC3501E_RESP_OK
+ * (0x5A since wire MAJOR 4, #2035): the dead-phase byte a broken link
+ * actually clocks back never changed, only which status code means success
+ * did -- staging the new RESP_OK here would model a real, CRC-verifiable
+ * success reply, not the all-zero alias this control exists to reproduce.
+ * Cleared by slave_reset(). */
 static bool g_connect_submit_force_ok;
 /* Radio role GET_DIAG_INFO reports.  cc3501e_wifi_ap_start() confirms its
  * submit against this field (#1696), so a test can drive the AP up by setting
  * it to ALP_CC3501E_ROLE_WIFI_AP.  Defaults to STA = 'AP not up'. */
 static uint8_t g_diag_role = ALP_CC3501E_ROLE_WIFI_STA;
+
+/* Bilingual-decode control: when true, the shared bare-OK bucket in
+ * slave_dispatch() stages ALP_CC3501E_RESP_OK_LEGACY (0x00, unpadded, no
+ * CRC) instead of ALP_CC3501E_RESP_OK -- the shape a real pre-4.0 (MAJOR 3)
+ * firmware actually sends.  Cleared by slave_reset(). */
+static bool g_bare_ok_legacy;
 
 /* FLASH-derived pending image reported in OTA_STATUS byte [12].
  * cc3501e_ota_promote() refuses to commit unless this says STAGED (#1123),
@@ -211,22 +223,31 @@ static void slave_reset(void)
 	g_caps_reply_short                 = false;
 	g_get_mac_corrupt_remaining        = 0u;
 	g_get_mac_serve_count              = 0u;
+	g_bare_ok_legacy                   = false;
 }
 
+/* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
+ * shape cc3501e_reply_verdict() accepts for a 0x5A status, see
+ * cc3501e_reply_model.h); any ALP_CC3501E_RESP_ERR_* code keeps the plain
+ * legacy shape, which the reply-verdict decode also accepts pre-negotiation. */
 static void stage_status(uint8_t st)
 {
-	slave.reply_pl[0] = st;
-	slave.reply_len   = 1u;
+	if (st == ALP_CC3501E_RESP_OK) {
+		slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, st, NULL, 0u);
+	} else {
+		slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, NULL, 0u);
+	}
 }
 
-/* status(1) + @n data bytes copied from @data. */
+/* status(1) + @n data bytes copied from @data -- same shape rule as
+ * stage_status() above. */
 static void stage_reply(uint8_t st, const uint8_t *data, uint16_t n)
 {
-	slave.reply_pl[0] = st;
-	if (n > 0u) {
-		memcpy(&slave.reply_pl[1], data, n);
+	if (st == ALP_CC3501E_RESP_OK) {
+		slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, st, data, n);
+	} else {
+		slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, data, n);
 	}
-	slave.reply_len = (uint16_t)(1u + n);
 }
 
 /* ---- canned decode fixtures (the values the DECODE tests assert on) -------- */
@@ -363,8 +384,11 @@ static void slave_dispatch(void)
 	 * reply.  Modelled here so test_ota_promote_bare_ok_still_accepted_1385
 	 * fences the #1385 check against being over-extended onto it. */
 	case ALP_CC3501E_CMD_OTA_PROMOTE:
-		/* Argless / write-only ops: success is the bare OK status. */
-		stage_status(ALP_CC3501E_RESP_OK);
+		/* Argless / write-only ops: success is the bare OK status.
+		 * g_bare_ok_legacy opts into the MAJOR-3 shape (RESP_OK_LEGACY,
+		 * unpadded, no CRC) instead -- see
+		 * test_ping_accepts_legacy_major3_bare_ok_shape_bilingual. */
+		stage_status(g_bare_ok_legacy ? ALP_CC3501E_RESP_OK_LEGACY : ALP_CC3501E_RESP_OK);
 		break;
 
 	case ALP_CC3501E_CMD_OTA_STATUS: {
@@ -390,7 +414,8 @@ static void slave_dispatch(void)
 		slave.connect_last_req_len = slave.req_len;
 		memcpy(slave.connect_last_req_pl, slave.req_pl, slave.req_len);
 		slave.connect_submit_count++;
-		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK : ALP_CC3501E_RESP_ERR_BUSY);
+		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK_LEGACY
+		                                       : ALP_CC3501E_RESP_ERR_BUSY);
 		break;
 
 	case ALP_CC3501E_CMD_WIFI_AP_START:
@@ -406,7 +431,8 @@ static void slave_dispatch(void)
 		slave.ap_start_last_req_len = slave.req_len;
 		memcpy(slave.ap_start_last_req_pl, slave.req_pl, slave.req_len);
 		slave.ap_start_submit_count++;
-		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK : ALP_CC3501E_RESP_ERR_BUSY);
+		stage_status(g_connect_submit_force_ok ? ALP_CC3501E_RESP_OK_LEGACY
+		                                       : ALP_CC3501E_RESP_ERR_BUSY);
 		break;
 
 	case ALP_CC3501E_CMD_GET_VERSION: {
@@ -512,8 +538,18 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_BLE_GATT_READ: {
-		const uint8_t val[2] = { 0xAB, 0xCD }; /* attribute value bytes */
-		stage_reply(ALP_CC3501E_RESP_OK, val, 2u);
+		/* attribute value bytes -- deliberately the LEGACY (RESP_OK_LEGACY,
+		 * unpadded) shape: GATT_READ's reply DATA is the raw attribute value
+		 * with NO length field of its own (chips/cc3501e/cc3501e_ble.c),
+		 * self-delimited only by the wire's declared payload_len. Under
+		 * MAJOR-4 every reply is padded to an ALP_CC3501E_REPLY_PAD multiple
+		 * (cc3501e_reply_model.h), so a genuinely short attribute value would
+		 * arrive with trailing pad+CRC bytes indistinguishable from more
+		 * attribute data -- a real firmware can never send an exact 2-byte
+		 * MAJOR-4 reply here. The legacy shape is the only one that can still
+		 * assert an exact decoded length. */
+		const uint8_t val[2] = { 0xAB, 0xCD };
+		stage_reply(ALP_CC3501E_RESP_OK_LEGACY, val, 2u);
 		break;
 	}
 	case ALP_CC3501E_CMD_SOCK_OPEN: {
@@ -615,9 +651,15 @@ static void slave_dispatch(void)
 		/* reply DATA = alp_cc3501e_capabilities_t { caps(LE32) | reserved(LE32) }. */
 		if (g_caps_reply_short) {
 			/* Fewer than 4 data bytes -- the host must treat this as a wire
-			 * gap (ALP_ERR_IO), not decode a truncated bitmap. */
+			 * gap (ALP_ERR_IO), not decode a truncated bitmap.  Deliberately
+			 * the LEGACY (RESP_OK_LEGACY, unpadded) shape: a real MAJOR-4
+			 * reply is ALWAYS padded to an ALP_CC3501E_REPLY_PAD multiple
+			 * (cc3501e_reply_model.h), so a genuinely short wire reply -- data
+			 * narrower than the 4-byte bitmap -- is not a shape a MAJOR-4
+			 * firmware can produce at all; this case tests the SHORT-DATA
+			 * guard, not CRC framing. */
 			const uint8_t d[2] = { 0xAAu, 0xBBu };
-			stage_reply(ALP_CC3501E_RESP_OK, d, 2u);
+			stage_reply(ALP_CC3501E_RESP_OK_LEGACY, d, 2u);
 			break;
 		}
 		const uint8_t d[8] = {
@@ -869,9 +911,16 @@ ZTEST(cc3501e_host_driver, test_reset_accepts_lower_minor_0033)
 	 * firmware that simply lacks a newer feature.  The pre-0033 flat-integer
 	 * gate refused on ANY difference; this is the exact case that gate cost a
 	 * customer a needless reflash for. */
+	/* The minor byte must be truncated to uint8_t BEFORE the OR: MINOR is
+	 * currently 0, so MINOR - 1 done at uint16_t width is 0xFFFF, which
+	 * clobbers the MAJOR byte this composes it with too (0x0400 | 0xFFFF ==
+	 * 0xFFFF, decoding MAJOR 0xFF -- an unrelated pre-existing bug this test
+	 * never actually ran against real twister to catch). Truncating first
+	 * gives the intended byte-wise wrap (0x00FF), composing cleanly with
+	 * MAJOR into 0x04FF. */
 	g_get_version_override_active = true;
 	g_get_version_override_value  = (uint16_t)(((uint16_t)ALP_CC3501E_PROTOCOL_MAJOR << 8) |
-	                                           (uint16_t)(ALP_CC3501E_PROTOCOL_MINOR - 1));
+	                                           (uint16_t)(uint8_t)(ALP_CC3501E_PROTOCOL_MINOR - 1));
 
 	zassert_equal(
 	    cc3501e_reset(&fw), ALP_OK, "a lower MINOR, same MAJOR, must not refuse the link");
@@ -920,6 +969,23 @@ ZTEST(cc3501e_host_driver, test_reset_refuses_legacy_raw_integer_0033)
 	zassert_false(fw.initialised, "a refused context is left uninitialised");
 	zassert_equal(
 	    fw.fw_proto_major, 0u, "MAJOR 0 marks 'older than the versioning scheme', not corrupt");
+}
+
+/* v4.0 (#2035): THE HOST IS BILINGUAL, deliberately -- a board still on 3.1
+ * firmware must keep working until its own OTA (which rides this same host)
+ * gets it to 4.0 (<alp/protocol/cc3501e.h>'s migration-order note above
+ * ALP_CC3501E_PROTOCOL_MAJOR).  Poke ctx->fw_proto_major to the LEGACY value
+ * directly (as if a prior cc3501e_reset() had already negotiated it) and
+ * drive a real opcode against a reply in the actual MAJOR-3 shape --
+ * ALP_CC3501E_RESP_OK_LEGACY (0x00), unpadded, no CRC trailer -- the frame a
+ * real 3.1 firmware sends, not the MAJOR-4 shape every other test in this
+ * file exercises. */
+ZTEST(cc3501e_host_driver, test_ping_accepts_legacy_major3_bare_ok_shape_bilingual)
+{
+	fw.fw_proto_major = (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	g_bare_ok_legacy  = true;
+
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "a legacy 0x00 bare-OK reply decodes fine on MAJOR 3");
 }
 
 /* ---- ADR 0033: CMD_GET_CAPABILITIES (0x06) --------------------------------- */

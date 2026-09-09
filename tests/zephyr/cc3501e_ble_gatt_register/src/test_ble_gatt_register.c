@@ -37,6 +37,7 @@
 #include <alp/peripheral.h>
 
 #include "backends/ble/ble_ops.h"
+#include "cc3501e_reply_model.h"
 
 /* This test does NOT link src/ble_dispatch.c (see CMakeLists.txt comment),
  * so it instantiates the ble class-range entry itself -- the one thing
@@ -77,31 +78,42 @@ static void slave_reset(void)
 	slave.phase = PH_REQ_HDR;
 	/* Default: every request bare-OKs (covers BLE_ENABLE, fired by the
 	 * backend's open()) until a test stages something else for the request
-	 * it is about to issue. */
-	slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-	slave.reply_len   = 1u;
+	 * it is about to issue.  Staged here, before any request has landed, so
+	 * the cmd the CRC trailer covers (cc3501e_reply_model.h) is the
+	 * EXPLICIT opcode this reply is known in advance to answer -- BLE_ENABLE
+	 * -- not `slave.cmd`, which is still whatever a PRIOR request left it as. */
+	slave.reply_len = cc3501e_model_stage_reply(
+	    slave.reply_pl, ALP_CC3501E_CMD_BLE_ENABLE, ALP_CC3501E_RESP_OK, NULL, 0u);
 }
 
+/* An ALP_CC3501E_RESP_ERR_* frame-level reject -- the legacy (unpadded,
+ * no-CRC) shape is fine here: cc3501e_reply_verdict() only demands the
+ * MAJOR-4 trailer for a 0x5A status (see cc3501e_reply_model.h). */
 static void stage_status(uint8_t st)
 {
-	slave.reply_pl[0] = st;
-	slave.reply_len   = 1u;
+	slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, NULL, 0u);
 }
 
 /* BLE_GATT_REGISTER success reply.  Two layers, per <alp/protocol/cc3501e.h>:
  * byte 0 is the FRAME-level resp (cc3501e_request's resp_to_status() input,
  * stripped before the driver ever sees it); bytes 1.. are the reply DATA the
- * driver decodes -- in_status(1)=0 | num_handles(1) | attr_handle(LE16)*n. */
+ * driver decodes -- in_status(1)=0 | num_handles(1) | attr_handle(LE16)*n.
+ * Staged before the request lands (same reasoning as slave_reset() above),
+ * so the cmd is the explicit BLE_GATT_REGISTER opcode, not `slave.cmd`. */
 static void stage_register_ok(const uint16_t *handles, uint8_t num_handles)
 {
-	slave.reply_pl[0] = ALP_CC3501E_RESP_OK; /* frame-level resp */
-	slave.reply_pl[1] = 0u;                  /* in-payload status: OK */
-	slave.reply_pl[2] = num_handles;
+	uint8_t data[2u + 2u * 8u]; /* in-payload status(1) + num_handles(1) + up to 8 handles */
+	data[0] = 0u;               /* in-payload status: OK */
+	data[1] = num_handles;
 	for (uint8_t i = 0; i < num_handles; i++) {
-		slave.reply_pl[3u + 2u * i]      = (uint8_t)(handles[i] & 0xFFu);
-		slave.reply_pl[3u + 2u * i + 1u] = (uint8_t)((handles[i] >> 8) & 0xFFu);
+		data[2u + 2u * i]      = (uint8_t)(handles[i] & 0xFFu);
+		data[2u + 2u * i + 1u] = (uint8_t)((handles[i] >> 8) & 0xFFu);
 	}
-	slave.reply_len = (uint16_t)(3u + 2u * (uint16_t)num_handles);
+	slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl,
+	                                            ALP_CC3501E_CMD_BLE_GATT_REGISTER,
+	                                            ALP_CC3501E_RESP_OK,
+	                                            data,
+	                                            (uint16_t)(2u + 2u * (uint16_t)num_handles));
 }
 
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)

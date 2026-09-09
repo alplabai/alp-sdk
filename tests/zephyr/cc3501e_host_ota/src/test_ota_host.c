@@ -31,6 +31,7 @@
 
 #include "alp/chips/cc3501e.h"
 #include "alp/protocol/cc3501e.h"
+#include "cc3501e_reply_model.h"
 
 /* ---- software model of the firmware OTA slave ------------------------------ */
 
@@ -105,10 +106,17 @@ static void slave_reset(void)
 	slave.diag_uptime_ms = 12345u; /* non-zero: a LIVE link, not a dead phase */
 }
 
+/* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
+ * shape cc3501e_reply_verdict() accepts for a 0x5A status, see
+ * cc3501e_reply_model.h); any ALP_CC3501E_RESP_ERR_* code keeps the plain
+ * legacy shape, which the reply-verdict decode also accepts pre-negotiation. */
 static void stage_status(uint8_t st)
 {
-	slave.reply_pl[0] = st;
-	slave.reply_len   = 1u;
+	if (st == ALP_CC3501E_RESP_OK) {
+		slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, st, NULL, 0u);
+	} else {
+		slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, NULL, 0u);
+	}
 }
 
 /* Build the reply for the just-received request (called at the end of the
@@ -199,26 +207,28 @@ static void slave_dispatch(void)
 		/* status(1) + alp_cc3501e_ota_status_t on the wire (16 bytes):
 		 * state, reserved[3], bytes_written(LE32), total_len(LE32),
 		 * pending(1), reserved2(3). */
-		slave.reply_pl[0]  = ALP_CC3501E_RESP_OK;
-		slave.reply_pl[1]  = slave.ota_state;
-		slave.reply_pl[2]  = 0u;
-		slave.reply_pl[3]  = slave.flush_pending; /* reserved[1] = flush pending */
-		slave.reply_pl[4]  = 0u;
-		slave.reply_pl[5]  = (uint8_t)(slave.ota_cursor & 0xFFu);
-		slave.reply_pl[6]  = (uint8_t)((slave.ota_cursor >> 8) & 0xFFu);
-		slave.reply_pl[7]  = (uint8_t)((slave.ota_cursor >> 16) & 0xFFu);
-		slave.reply_pl[8]  = (uint8_t)((slave.ota_cursor >> 24) & 0xFFu);
-		slave.reply_pl[9]  = (uint8_t)(slave.ota_total & 0xFFu);
-		slave.reply_pl[10] = (uint8_t)((slave.ota_total >> 8) & 0xFFu);
-		slave.reply_pl[11] = (uint8_t)((slave.ota_total >> 16) & 0xFFu);
-		slave.reply_pl[12] = (uint8_t)((slave.ota_total >> 24) & 0xFFu);
-		/* [13] = alp_cc3501e_ota_status_t::pending, appended after total_len
-		 * (payload byte 12; +1 here for the leading status byte). */
-		slave.reply_pl[13] = slave.ota_pending;
-		slave.reply_pl[14] = 0u;
-		slave.reply_pl[15] = 0u;
-		slave.reply_pl[16] = 0u;
-		slave.reply_len    = 17u;
+		const uint8_t data[16] = {
+			slave.ota_state,
+			0u,
+			slave.flush_pending, /* reserved[1] = flush pending */
+			0u,
+			(uint8_t)(slave.ota_cursor & 0xFFu),
+			(uint8_t)((slave.ota_cursor >> 8) & 0xFFu),
+			(uint8_t)((slave.ota_cursor >> 16) & 0xFFu),
+			(uint8_t)((slave.ota_cursor >> 24) & 0xFFu),
+			(uint8_t)(slave.ota_total & 0xFFu),
+			(uint8_t)((slave.ota_total >> 8) & 0xFFu),
+			(uint8_t)((slave.ota_total >> 16) & 0xFFu),
+			(uint8_t)((slave.ota_total >> 24) & 0xFFu),
+			/* [12] = alp_cc3501e_ota_status_t::pending, appended after
+			 * total_len (payload byte 12; +1 for the leading status byte). */
+			slave.ota_pending,
+			0u,
+			0u,
+			0u,
+		};
+		slave.reply_len = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, data, sizeof(data));
 		break;
 	}
 	case ALP_CC3501E_CMD_GET_DIAG_INFO: {
@@ -232,13 +242,13 @@ static void slave_dispatch(void)
 		 * Reply = the 16-byte packed alp_cc3501e_diag_info_t:
 		 * fw_version(LE16) | reset_cause | role | uptime_ms(LE32) |
 		 * free_heap_bytes(LE32) | last_error | reserved(3). */
-		memset(slave.reply_pl, 0, 17u);
-		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-		slave.reply_pl[5] = (uint8_t)(slave.diag_uptime_ms & 0xFFu);
-		slave.reply_pl[6] = (uint8_t)((slave.diag_uptime_ms >> 8) & 0xFFu);
-		slave.reply_pl[7] = (uint8_t)((slave.diag_uptime_ms >> 16) & 0xFFu);
-		slave.reply_pl[8] = (uint8_t)((slave.diag_uptime_ms >> 24) & 0xFFu);
-		slave.reply_len   = 17u; /* status byte + 16 */
+		uint8_t data[16] = { 0 };
+		data[4]          = (uint8_t)(slave.diag_uptime_ms & 0xFFu);
+		data[5]          = (uint8_t)((slave.diag_uptime_ms >> 8) & 0xFFu);
+		data[6]          = (uint8_t)((slave.diag_uptime_ms >> 16) & 0xFFu);
+		data[7]          = (uint8_t)((slave.diag_uptime_ms >> 24) & 0xFFu);
+		slave.reply_len  = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, data, sizeof(data));
 		break;
 	}
 	case ALP_CC3501E_CMD_OTA_UPDATE_MODE: {
@@ -250,12 +260,14 @@ static void slave_dispatch(void)
 		 * (update_mode_reads_as()) reads want == want and settles without
 		 * a poll.  No test exercises the multi-poll confirm / reboot path,
 		 * so that shape is deliberately not modelled. */
-		slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-		slave.reply_pl[1] = slave.req_pl[0]; /* mode == what was requested */
-		slave.reply_pl[2] = slave.ota_state;
-		slave.reply_pl[3] = 0u; /* reserved[0], MBZ */
-		slave.reply_pl[4] = 0u; /* reserved[1], MBZ */
-		slave.reply_len   = 5u;
+		const uint8_t data[4] = {
+			slave.req_pl[0], /* mode == what was requested */
+			slave.ota_state,
+			0u, /* reserved[0], MBZ */
+			0u, /* reserved[1], MBZ */
+		};
+		slave.reply_len = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, data, sizeof(data));
 		break;
 	}
 	default:

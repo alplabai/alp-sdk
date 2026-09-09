@@ -28,6 +28,7 @@
 #include <alp/peripheral.h>
 
 #include "backends/wifi/wifi_ops.h"
+#include "cc3501e_reply_model.h"
 
 /* This test does NOT link src/wifi_dispatch.c (see CMakeLists.txt comment),
  * so it instantiates the wifi class-range entry itself -- the one thing
@@ -58,12 +59,47 @@ static struct {
 	 * reflects the trailing WIFI_STATUS poll, not the CONNECT_STA submit
 	 * this test's assertions care about. */
 	uint8_t connect_cmd_seen;
+
+	uint8_t  reply_pl[ALP_CC3501E_MAX_PAYLOAD]; /* staged reply: status + data */
+	uint16_t reply_len;
 } slave;
 
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
 	slave.phase = PH_REQ_HDR;
+}
+
+/* Build the reply for the just-received request (mirrors every sibling
+ * suite's slave_dispatch(), see e.g. tests/zephyr/cc3501e_host_driver). */
+static void slave_dispatch(void)
+{
+	if (slave.cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
+		/* The real firmware's WORKER_IDLE submit ack is UNCONDITIONALLY
+		 * RESP_ERR_BUSY (see cc3501e-bridge-firmware:src/protocol.c) -- never a
+		 * synchronous OK -- and cc3501e_request_locked() now refuses to
+		 * hand back OK for this opcode's bare-ack shape either way (see
+		 * cc3501e_core.c, issue #1378).  Model the real ack so
+		 * cc3501e_wifi_connect() falls through to polling WIFI_STATUS
+		 * below, exactly as it does on real silicon.  RESP_ERR_BUSY keeps
+		 * the plain legacy shape -- only a 0x5A status needs the MAJOR-4
+		 * trailer (cc3501e_reply_model.h). */
+		slave.connect_cmd_seen = slave.cmd;
+		slave.reply_len =
+		    cc3501e_model_stage_legacy_reply(slave.reply_pl, ALP_CC3501E_RESP_ERR_BUSY, NULL, 0u);
+	} else if (slave.cmd == ALP_CC3501E_CMD_WIFI_STATUS) {
+		/* Immediately CONNECTED -- this test cares about the on-wire
+		 * `security` byte the CONNECT_STA submit carried, not the
+		 * connect state machine, so resolve it on the first poll. */
+		const uint8_t data[4] = {
+			ALP_CC3501E_WIFI_CONNECTED, ALP_CC3501E_WIFI_FAIL_NONE, (uint8_t)(-50), 0u
+		};
+		slave.reply_len = cc3501e_model_stage_reply(
+		    slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, data, sizeof(data));
+	} else {
+		slave.reply_len =
+		    cc3501e_model_stage_reply(slave.reply_pl, slave.cmd, ALP_CC3501E_RESP_OK, NULL, 0u);
+	}
 }
 
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)
@@ -79,48 +115,30 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
 		}
-		slave.phase = (slave.req_len > 0u) ? PH_REQ_PL : PH_REPLY_HDR;
+		if (slave.req_len > 0u) {
+			slave.phase = PH_REQ_PL;
+		} else {
+			slave_dispatch();
+			slave.phase = PH_REPLY_HDR;
+		}
 		break;
 	case PH_REQ_PL:
 		memcpy(slave.req_pl, tx, len);
 		if (rx != NULL) {
 			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
 		}
+		slave_dispatch();
 		slave.phase = PH_REPLY_HDR;
 		break;
 	case PH_REPLY_HDR:
-		rx[0] = slave.cmd; /* echo cmd */
-		rx[1] = 0x00u;
-		/* WIFI_STATUS carries a real 4-byte payload (state | fail_reason |
-		 * rssi_dbm | reserved); every other opcode this test drives is a
-		 * bare status byte. */
-		rx[2]       = (slave.cmd == ALP_CC3501E_CMD_WIFI_STATUS) ? 5u : 1u;
-		rx[3]       = 0x00u;
+		rx[0]       = slave.cmd; /* echo cmd */
+		rx[1]       = 0x00u;
+		rx[2]       = (uint8_t)(slave.reply_len & 0xFFu);
+		rx[3]       = (uint8_t)((slave.reply_len >> 8) & 0xFFu);
 		slave.phase = PH_REPLY_PL;
 		break;
 	case PH_REPLY_PL:
-		if (slave.cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA) {
-			/* The real firmware's WORKER_IDLE submit ack is UNCONDITIONALLY
-			 * RESP_ERR_BUSY (see cc3501e-bridge-firmware:src/protocol.c) -- never a
-			 * synchronous OK -- and cc3501e_request_locked() now refuses to
-			 * hand back OK for this opcode's bare-ack shape either way (see
-			 * cc3501e_core.c, issue #1378).  Model the real ack so
-			 * cc3501e_wifi_connect() falls through to polling WIFI_STATUS
-			 * below, exactly as it does on real silicon. */
-			slave.connect_cmd_seen = slave.cmd;
-			rx[0]                  = ALP_CC3501E_RESP_ERR_BUSY;
-		} else if (slave.cmd == ALP_CC3501E_CMD_WIFI_STATUS) {
-			/* Immediately CONNECTED -- this test cares about the on-wire
-			 * `security` byte the CONNECT_STA submit carried, not the
-			 * connect state machine, so resolve it on the first poll. */
-			rx[0] = ALP_CC3501E_RESP_OK;
-			rx[1] = ALP_CC3501E_WIFI_CONNECTED;
-			rx[2] = ALP_CC3501E_WIFI_FAIL_NONE;
-			rx[3] = (uint8_t)(-50);
-			rx[4] = 0u;
-		} else {
-			rx[0] = ALP_CC3501E_RESP_OK;
-		}
+		memcpy(rx, slave.reply_pl, len);
 		slave.phase = PH_REQ_HDR;
 		break;
 	}
