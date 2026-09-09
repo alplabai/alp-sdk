@@ -1763,10 +1763,12 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
  *        did not complete. Our controller, pinmux or clocking.
  *   card present but no filesystem   -> SKIPPED. fs_mount() answers -ENODEV,
  *        which subsys/fs/fat_fs.c maps from THREE distinct ff.h causes alike
- *        -- FR_INVALID_DRIVE, FR_NOT_ENABLED and FR_NO_FILESYSTEM -- so this
- *        SKIP is also where this app's own disk-name/mount-point wiring
- *        drifting would land, indistinguishably. See the no-format rule
- *        above.
+ *        -- FR_INVALID_DRIVE, FR_NOT_ENABLED and FR_NO_FILESYSTEM --
+ *        disk_access_init() already returning 0 above rules out this app's
+ *        SD_DISK_NAME, so this SKIP is also where SD_MOUNT_POINT drifting
+ *        against this build's FF_VOLUME_STRS entry would land,
+ *        indistinguishably from a genuinely blank card. See the no-format
+ *        rule above.
  *   write or verify mismatch         -> FAIL. The card enumerated and the
  *        filesystem mounted, and the data still did not survive the trip.
  *
@@ -1803,9 +1805,11 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
  * Guarded, not a bare define: MUX_EN (E1M IO20 -> CC3501E GPIO_26) has no
  * pull and is not observable from the SoC side at all, so the only way to
  * confirm the pad is actually low is a multimeter on U38 pin 15 / U39 pin 15
- * against 0V -- and 10 ms cannot be caught by hand. A bench build overrides
- * this with -DSD_MUX_SETTLE_MS=600000 to hold /E asserted long enough to
- * meter it; the default here is unchanged for a normal run. */
+ * against 0V -- and 10 ms cannot be caught by hand. That no longer requires a
+ * long override, though: this phase leaves /E asserted for the rest of the
+ * run instead of restoring it (see the close() comment below), so U38 pin 15
+ * / U39 pin 15 can be metered at any time after this phase, not only inside
+ * this settle window. The default here is unchanged for a normal run. */
 #ifndef SD_MUX_SETTLE_MS
 #define SD_MUX_SETTLE_MS 10u
 #endif
@@ -1846,35 +1850,48 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 	alp_status_t cfg_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. */
-	alp_status_t en_rc = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
-	/* Read the pin back rather than trusting the write return code alone --
-	 * the GPIO proxy's read path is reachable over the same bridge phase 8
-	 * left up (route-table detail, not named here -- see the open() comment
-	 * above). A LOW read-back is only CORROBORATION that the pad is
-	 * asserted, not proof: depending on bridge firmware this may report
-	 * the far-side output register rather than the pad itself. It does not
-	 * gate anything below -- disagreement is printed and the run falls
-	 * through to disk_access_init() either way, so the log still shows
-	 * what the controller sees. */
+	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. Skip
+	 * both the write and the read-back below when configure() itself already
+	 * failed -- driving, and then reading back, a pin that was never
+	 * configured as an output would report on calls that never ran. */
+	alp_status_t en_rc     = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
 	bool         mux_level = true;
-	alp_status_t rd_rc     = alp_gpio_read(mux_en, &mux_level);
-	/* level=? rather than a fabricated sample on a failed read: mux_level
-	 * is seeded true and alp_gpio_read()/cc3501e_gpio_read() leaves the
-	 * output untouched on every error path, so printing it unconditionally
-	 * would make a failed read print "level=HIGH" -- indistinguishable
-	 * from a genuine high reading, in the one field whose entire purpose
-	 * is answering whether the pad actually moved. */
-	const char *level_str = (rd_rc == ALP_OK) ? (mux_level ? "HIGH" : "LOW") : "?";
-	printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
-	       "low, driven LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, "
-	       "corroboration only -- may reflect the bridge's output register rather than the "
-	       "pad, not proof the line moved), settle=%u ms\n",
-	       (int)cfg_rc,
-	       (int)en_rc,
-	       (int)rd_rc,
-	       level_str,
-	       (unsigned)SD_MUX_SETTLE_MS);
+	alp_status_t rd_rc     = ALP_OK;
+	const char  *level_str = "?";
+	if (cfg_rc == ALP_OK) {
+		/* Read the pin back rather than trusting the write return code alone
+		 * -- the GPIO proxy's read path is reachable over the same bridge
+		 * phase 8 left up (route-table detail, not named here -- see the
+		 * open() comment above). A LOW read-back is only CORROBORATION that
+		 * the pad is asserted, not proof: depending on bridge firmware this
+		 * may report the far-side output register rather than the pad
+		 * itself. It does not gate anything below -- disagreement is
+		 * printed and the run falls through to disk_access_init() either
+		 * way, so the log still shows what the controller sees. */
+		rd_rc = alp_gpio_read(mux_en, &mux_level);
+		/* level=? rather than a fabricated sample on a failed read: mux_level
+		 * is seeded true and alp_gpio_read()/cc3501e_gpio_read() leaves the
+		 * output untouched on every error path, so printing it unconditionally
+		 * would make a failed read print "level=HIGH" -- indistinguishable
+		 * from a genuine high reading, in the one field whose entire purpose
+		 * is answering whether the pad actually moved. */
+		level_str = (rd_rc == ALP_OK) ? (mux_level ? "HIGH" : "LOW") : "?";
+		printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
+		       "low, driven LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, "
+		       "corroboration only -- may reflect the bridge's output register rather than the "
+		       "pad, not proof the line moved), settle=%u ms\n",
+		       (int)cfg_rc,
+		       (int)en_rc,
+		       (int)rd_rc,
+		       level_str,
+		       (unsigned)SD_MUX_SETTLE_MS);
+	} else {
+		printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
+		       "low, driven LOW): configure -> %d, write -> SKIPPED (configure failed), "
+		       "read-back -> SKIPPED, settle=%u ms\n",
+		       (int)cfg_rc,
+		       (unsigned)SD_MUX_SETTLE_MS);
+	}
 	if (en_rc != ALP_OK) {
 		printf("[evkdemo] SD: the mux ENABLE could not be driven -- every step below would run "
 		       "against a card that is not connected to the SoC. Check that phase 8 passed "
@@ -2043,31 +2060,42 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 				/* A skipped call must not print the same as a successful
 				 * one -- "-> 0" either way would be indistinguishable
 				 * from a real pass in a phase whose whole thesis is that
-				 * every return code is printed. */
-				char trc_field[16];
+				 * every return code is printed. The truncate clause omits
+				 * the length argument entirely when SKIPPED, rather than
+				 * printing "fs_truncate(0) -> SKIPPED" -- that would quote
+				 * an argument for a call that never happened. */
+				char trunc_clause[40];
 				char syrc_field[16];
 				if (did_truncate) {
-					snprintk(trc_field, sizeof(trc_field), "%d", trc);
+					snprintk(trunc_clause,
+					         sizeof(trunc_clause),
+					         "fs_truncate(%ld) -> %d",
+					         (long)trunc_len,
+					         trc);
 				} else {
-					snprintk(trc_field, sizeof(trc_field), "SKIPPED");
+					snprintk(trunc_clause, sizeof(trunc_clause), "fs_truncate SKIPPED");
 				}
 				if (did_sync) {
 					snprintk(syrc_field, sizeof(syrc_field), "%d", syrc);
 				} else {
 					snprintk(syrc_field, sizeof(syrc_field), "SKIPPED");
 				}
-				printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate(%ld) -> %s, "
-				       "fs_sync -> %s\n",
+				printf("[evkdemo] SD: fs_write -> %d of %d B, %s, fs_sync -> %s\n",
 				       (int)wrote,
 				       len,
-				       (long)trunc_len,
-				       trc_field,
+				       trunc_clause,
 				       syrc_field);
 
 				char    readback[sizeof(payload)] = { 0 };
 				ssize_t got                       = -1;
 				int     seek_rc                   = -1;
-				if (wrote == (ssize_t)len && trc == 0 && syrc == 0) {
+				/* Gate on did_sync/syrc, not on re-deriving the same
+				 * condition from wrote/trc -- did_sync already IS "the
+				 * write landed in full AND the truncate ran and returned
+				 * 0"; re-deriving it here would let a read-back run
+				 * whenever that re-derivation happens to agree, rather
+				 * than because fs_sync() actually ran and passed. */
+				if (did_sync && syrc == 0) {
 					seek_rc = fs_seek(&f, 0, FS_SEEK_SET);
 					if (seek_rc == 0) {
 						got = fs_read(&f, readback, sizeof(readback));
