@@ -183,6 +183,12 @@
 		alp-pwm0 = &evk_rgb_red;
 		alp-pwm1 = &evk_rgb_blue;
 		alp-pwm3 = &evk_rgb_green;
+
+		/* Phase 7 -- src/main.c's phase_encoder() resolves this via
+		 * DT_ALIAS(alp_qenc0), the same alias name aen-qenc-readout uses.
+		 * Binding it is what ARMS UTIMER channel 12 (see utimer12/qdec
+		 * below): the phase itself only reads raw registers afterwards. */
+		alp-qenc0 = &utimer12_qdec;
 	};
 };
 
@@ -220,6 +226,73 @@
 		status = "okay";
 		pinctrl-0 = <&pinctrl_pwm10_rgb>;
 		pinctrl-names = "default";
+	};
+};
+
+/*
+ * Phase 7 -- rotary encoder, UTIMER channel 12 / QEC0.
+ *
+ * The E1M EVK's PEC12R-4222F-S0024 (24 PPR) reaches the SoC as
+ * ENC0_X -> E2 A10 -> P3_0 and ENC0_Y -> E2 B10 -> P3_1
+ * (metadata/e1m_modules/aen/from-alif.tsv), decoded by UTIMER channel 12 --
+ * QEC0 is channel 12, not channel 0 (DFP QEC0_CMPA_IRQn = 369, "Channel 12
+ * interrupt request at driver A"). Channel 12 is NOT defined in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi (only 0/3/6/10/11 are), so
+ * the full parent node is declared here, identical in shape to
+ * examples/aen/aen-qenc-readout's overlay -- see that file for the base
+ * address derivation (0x4800d000 = UTIMER_BASE + (12+1)*0x1000).
+ *
+ * NOTE the phase-A/phase-B correction versus aen-qenc-readout's file header,
+ * which has this backwards: per the netlist, quadrature PHASE A is ENC0_Y
+ * (P3_1), PHASE B is ENC0_X (P3_0) -- not "X = channel A, Y = channel B" as
+ * that file's header currently reads. It does not change this group's
+ * pinmux (both pads are muxed identically either way), only which pad a
+ * future direction-aware reader should call "A".
+ *
+ * `input-enable` on BOTH pads is load-bearing twice over: it is what lets
+ * UTIMER channel 12 sense the quadrature edges at all, AND it is what makes
+ * GPIO3's EXT_PORTA (0x49003050) read the real pad level for
+ * src/main.c's phase_encoder() even though the pins are muxed to QEC0, not
+ * GPIO -- the pad's REN bit is orthogonal to which peripheral the AF mux
+ * selects. Without it, EXT_PORTA reads 0 forever regardless of motion (the
+ * PADCTRL_READ_ENABLE trap the SD CMD/CLK group and the RMII RX group in
+ * this file both call out).
+ *
+ * counts-per-revolution = 96 (24 PPR x4 decode) programs the hardware
+ * counter's real reload/wraparound, not a display scale -- see
+ * aen-qenc-readout's file header for the full derivation. phase_encoder()
+ * never reads it (it watches raw CNTR, not degrees), but a wrong value here
+ * would still corrupt the counter's wrap behaviour, so it stays correct.
+ */
+&pinctrl {
+	pinctrl_qec0: pinctrl_qec0 {
+		group0 {
+			pinmux = <PIN_P3_0__QEC0_X_A>, <PIN_P3_1__QEC0_Y_A>;
+			input-enable;
+		};
+	};
+};
+
+&soc {
+	utimer12: utimer@4800d000 {
+		compatible = "alif,utimer";
+		reg = <0x4800D000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		timer-id = <12>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "okay";
+
+		utimer12_qdec: qdec {
+			compatible = "alif,utimer-qdec";
+			counts-per-revolution = <96>; /* 24 PPR * x4 decode -- see comment above */
+			input-filter-enable;
+			filter-prescaler = <16>;
+			filter-taps = <1>;
+			pinctrl-0 = <&pinctrl_qec0>;
+			pinctrl-names = "default";
+			status = "okay";
+		};
 	};
 };
 

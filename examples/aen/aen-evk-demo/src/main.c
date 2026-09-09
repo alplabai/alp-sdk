@@ -30,14 +30,16 @@
  *
  * SCOPE OF THIS SLICE
  * --------------------
- * Fourteen phases are registered below, run in a fixed order. Nine have
+ * Fourteen phases are registered below, run in a fixed order. Ten have
  * real, bench-proven drivers behind them and are fully implemented: the
- * first six, plus phase 8 (the CC3501E Wi-Fi 6 / BLE 5.4 coprocessor over
- * the inter-chip SPI bridge), phase 10 (RMII Ethernet through the GMAC and
- * the on-module DP83825 PHY) and phase 13 (JPEG encode on the Hantro
- * VC9000E). The remaining five (encoder, SD card, sound, screen, NPU) are
- * stubs that always report SKIPPED with a phase-specific reason
- * -- see the "STUBS" section below for why each one differs (an
+ * first six (including phase 7, the rotary encoder -- an ATTENDED phase,
+ * not a stub; see its own header comment for why an unattended run reports
+ * SKIPPED rather than PASS/FAIL), plus phase 8 (the CC3501E Wi-Fi 6 / BLE
+ * 5.4 coprocessor over the inter-chip SPI bridge), phase 10 (RMII Ethernet
+ * through the GMAC and the on-module DP83825 PHY) and phase 13 (JPEG
+ * encode on the Hantro VC9000E). The remaining four (SD card, sound,
+ * screen, NPU) are stubs that always report SKIPPED with a phase-specific
+ * reason -- see the "STUBS" section below for why each one differs (an
  * attended-run requirement is not the same kind of gap as hardware
  * genuinely out of scope, a larger unit of work deferred to the next
  * slice, or -- for NPU -- an image that would have to change BOOT FLOW to
@@ -2647,24 +2649,259 @@ static phase_verdict_t phase_ethernet(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
-/* STUBS -- phases not in this slice.  Each reason differs; see below.  */
+/* Phase 7 -- Rotary encoder (QEC0 / UTIMER channel 12), attended run    */
 /* ==================================================================== */
 
-/* Rotary encoder: wiring is netlist-proven (UTIMER channel 12) but count
- * still reads 0 on the bench, and the maintainer's own open question is
- * whether the driver can tell "nobody is turning the knob" apart from
- * "not counting at all" -- an unattended bench run cannot supply the
- * physical input either check needs. Implementing this phase without a
- * human at the bench would only ever print SKIPPED or a FAIL this app
- * cannot distinguish from "the knob wasn't touched" -- worse than being
- * honest about the gap. Needs an attended run; out of THIS slice. */
-static phase_verdict_t phase_encoder_stub(demo_ctx_t *ctx)
+/*
+ * The open question this phase used to be stubbed on: can an app tell
+ * "nobody turned the knob" apart from "the counter is not counting"? An
+ * unattended run can never supply the physical input either verdict needs.
+ * This IS the attended run -- it asks a human to turn the shaft and samples
+ * BOTH sides of the question over the window, so all three outcomes below
+ * are distinguishable from the transcript alone, without a debugger.
+ *
+ * HARDWARE, netlist-proven, not re-derived here. ENC0_X -> E2 A10 -> P3_0,
+ * ENC0_Y -> E2 B10 -> P3_1 (metadata/e1m_modules/aen/from-alif.tsv), decoded
+ * by UTIMER channel 12 (QEC0 -- DFP QEC0_CMPA_IRQn = "Channel 12 interrupt
+ * request"). The push switch reaches E2 AG16 = carrier IO4 = SoC P4_3, a
+ * plain GPIO with no QEC involvement. NOTE the direction correction versus
+ * examples/aen/aen-qenc-readout's file header, which has this backwards: per
+ * the netlist, quadrature PHASE A is ENC0_Y (P3_1), PHASE B is ENC0_X
+ * (P3_0). This phase watches both pads for ANY toggle rather than a signed
+ * direction, so the correction changes nothing it measures -- only what a
+ * future direction-aware reader should call "A".
+ *
+ * WHAT ARMS THE CHANNEL, AND WHAT THIS PHASE NEVER DOES. Binding the
+ * DT_ALIAS(alp_qenc0) node (the overlay's utimer12/qdec child, driven by the
+ * vendored "alif,utimer-qdec" driver) is what arms channel 12: at its own
+ * init it applies the QEC0 pinctrl state -- input-enable on both pads, the
+ * PADCTRL_READ_ENABLE this phase's own GPIO reads also depend on -- programs
+ * the x4 trigger matrix, and leaves CNTR_CTRL (0x4800D080) at the resting
+ * 0x00000021 (CNTR_EN | CNTR_TRIG, bit 1 RUNNING clear). That resting value
+ * is CORRECT for a trigger-counting channel: a GLB_CNTR_START write (the
+ * only thing that sets bit 1) instead puts the channel into a measured
+ * 400,010,738 counts/s free-run on the peripheral clock, uncorrelated with
+ * the pads (#2037, withdrawn after causing #2038). THIS PHASE NEVER WRITES
+ * GLB_CNTR_START, under any circumstance -- it only reads.
+ *
+ * WHY RAW REGISTER READS, NOT THE SENSOR API. The bound driver's
+ * sensor_driver_api is {sample_fetch, channel_get} only, reporting degrees
+ * -- no attribute and no second channel exposes the raw counter or
+ * CNTR_CTRL, so the one thing this phase exists to show is not reachable
+ * through the portable sensor API at all. CNTR (0x4800D0A0) and CNTR_CTRL
+ * (0x4800D080) are read directly via sys_read32() for exactly that reason,
+ * and only that -- everything that CONFIGURES the channel still goes
+ * through the DT-bound driver, never a hand-rolled register sequence here.
+ *
+ * THE PADCTRL_READ_ENABLE TRAP. A pad whose READ_ENABLE (REN) bit is clear
+ * returns 0 FOREVER on every GPIO EXT_PORTA read, indistinguishable from a
+ * genuinely idle pad -- the same trap the SD CMD/CLK group and the RMII RX
+ * group in this app's overlay call out. The overlay's QEC0 pinctrl group
+ * sets `input-enable` on P3_0/P3_1, which is what makes GPIO3's EXT_PORTA
+ * (0x49003050) read the real pad level even though the pins are muxed to
+ * QEC0, not GPIO -- REN is orthogonal to which peripheral the AF mux
+ * selects. The switch pad P4_3 is muxed below with the same REN bit set, so
+ * GPIO4's EXT_PORTA (0x49004050) bit 3 is live too. Both are load-bearing;
+ * without either, "nobody turned the knob" and "the pad can never be read"
+ * would print identically.
+ *
+ * THE THREE-WAY VERDICT IS THE POINT OF THIS PHASE. A count that never
+ * moves is the CORRECT, EXPECTED output of both a healthy idle decoder and
+ * a broken one, so the verdict does not gate on the count alone -- it gates
+ * on the count TOGETHER WITH whether the raw pads moved, because the pads
+ * are the only signal here that proves a human actually turned the shaft:
+ *
+ *   - pads toggled AND CNTR changed  -> PASS. Quadrature decode works.
+ *   - pads toggled, CNTR did not     -> FAIL. The signal reaches the SoC
+ *     and the counter still didn't move -- further split by CNTR_CTRL,
+ *     printed before and after either way, into "never correctly armed"
+ *     (CNTR_CTRL != 0x00000021 -- a configuration defect, fix the arm
+ *     sequence) versus "armed but not counting" (CNTR_CTRL == 0x00000021 --
+ *     the trigger path itself is the suspect, the defect #2037 has been
+ *     trying to reach since the free-run withdrawal). Different bugs, and
+ *     folding them into one FAIL line would send the next person at the
+ *     wrong register.
+ *   - pads never toggled             -> SKIPPED, not FAIL. Genuinely
+ *     indistinguishable between "nobody turned the knob" and "the signal
+ *     never reaches the SoC" -- this phase does not guess which, and
+ *     neither should its reader.
+ *
+ * OPEN SILICON QUESTION, noted and NOT chased here (not actionable from an
+ * app): Alif's own CMSIS driver refuses SRC_1 (the trigger-source register
+ * this channel's x4 matrix is programmed on) for QEC channels 12-15, and the
+ * SVD gives UP_0_SRC/DOWN_0_SRC explicit "For QEC channels" wording that
+ * UP_1_SRC/DOWN_1_SRC lack -- channels 12-15 have no A/B drivers either. If
+ * "channel input A/B" on a QEC channel is not the QEC pads at all, a
+ * hardware direction-aware decode on channel 12 may not exist. See
+ * qdec_alif_utimer.c's file header for the full derivation.
+ */
+
+#ifndef ENCODER_ATTEND_MS
+#define ENCODER_ATTEND_MS 20000u /* several seconds to react + turn; a bench build can override */
+#endif
+#ifndef ENCODER_POLL_MS
+#define ENCODER_POLL_MS 50u /* fast enough to catch a detent transition */
+#endif
+#define ENCODER_SAMPLES (ENCODER_ATTEND_MS / ENCODER_POLL_MS)
+
+#define QEC0_NODE DT_ALIAS(alp_qenc0)
+#define QEC0_CNTR 0x4800D0A0U /* UTIMER ch12 raw quadrature count -- no sensor-API equivalent */
+#define QEC0_CNTR_CTRL 0x4800D080U /* UTIMER ch12 control -- no sensor-API equivalent */
+#define QEC0_CNTR_CTRL_RESTING \
+	0x00000021U /* CNTR_EN | CNTR_TRIG, RUNNING clear -- see comment above */
+
+#define ENC_GPIO3_EXT_PORTA 0x49003050U /* bit0 = P3_0 = ENC0_X, bit1 = P3_1 = ENC0_Y */
+#define ENC_PAD_X           BIT(0)
+#define ENC_PAD_Y           BIT(1)
+
+#define ENC_GPIO4_EXT_PORTA 0x49004050U /* bit3 = P4_3 = push switch */
+#define ENC_SW_BIT          BIT(3)
+
+/* REN_BIT_POS, soc/alif/ensemble/pinctrl_soc.h -- the pad-config word's
+ * receiver-enable bit, the same one `input-enable` sets in devicetree. P4_3
+ * carries no QEC/peripheral use in this app, so it is muxed straight to
+ * GPIO here (gpio_dw applies no pad mux of its own) rather than through the
+ * overlay, mirroring examples/aen/aen-gpio-bench's ALIF_PAD_REN pattern. */
+#define ENC_SW_PAD_REN (1U << 16)
+static const pinctrl_soc_pin_t encoder_switch_mux[] = { PIN_P4_3__GPIO | ENC_SW_PAD_REN };
+
+static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
 {
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: rotary encoder -- SKIPPED (needs an attended run; "
-	       "see EVK-BRIEFING.md's open question) --\n");
-	return PHASE_SKIPPED;
+	printf("[evkdemo] -- Phase: rotary encoder (QEC0 / UTIMER channel 12) --\n");
+
+	const struct device *qec = DEVICE_DT_GET(QEC0_NODE);
+	if (!device_is_ready(qec)) {
+		printf("[evkdemo] ENCODER: qec0 device not ready -- the channel was never armed\n");
+		ctx->note = "qec0 device not ready";
+		return PHASE_FAIL;
+	}
+
+	int rc = pinctrl_configure_pins(encoder_switch_mux, ARRAY_SIZE(encoder_switch_mux), 0U);
+	if (rc != 0) {
+		printf("[evkdemo] ENCODER: pinctrl_configure_pins(P4_3->GPIO) rc=%d\n", rc);
+		ctx->note = "switch pin mux failed";
+		return PHASE_FAIL;
+	}
+
+	uint32_t cntr_ctrl_pre = sys_read32(QEC0_CNTR_CTRL);
+	uint32_t cntr_pre      = sys_read32(QEC0_CNTR);
+	printf("[evkdemo] ENCODER: pre-run CNTR=0x%08x CNTR_CTRL=0x%08x (resting=0x%08x)\n",
+	       (unsigned)cntr_pre,
+	       (unsigned)cntr_ctrl_pre,
+	       (unsigned)QEC0_CNTR_CTRL_RESTING);
+
+	printf("\n"
+	       "[evkdemo] ============================================================\n"
+	       "[evkdemo]   TURN THE ROTARY ENCODER KNOB NOW.\n"
+	       "[evkdemo]\n"
+	       "[evkdemo]   You have %u seconds. Turn it back and forth a few times;\n"
+	       "[evkdemo]   pressing the knob (push switch) is optional and reported\n"
+	       "[evkdemo]   separately below.\n"
+	       "[evkdemo] ============================================================\n\n",
+	       (unsigned)(ENCODER_ATTEND_MS / 1000u));
+
+	uint32_t x_prev    = sys_read32(ENC_GPIO3_EXT_PORTA) & ENC_PAD_X;
+	uint32_t y_prev    = sys_read32(ENC_GPIO3_EXT_PORTA) & ENC_PAD_Y;
+	uint32_t sw_init   = sys_read32(ENC_GPIO4_EXT_PORTA) & ENC_SW_BIT;
+	uint32_t cntr_prev = cntr_pre;
+
+	bool     pads_toggled     = false;
+	bool     count_changed    = false;
+	bool     sw_pressed       = false;
+	uint32_t pad_transitions  = 0;
+	uint32_t cntr_transitions = 0;
+
+	for (uint32_t i = 0; i < ENCODER_SAMPLES; i++) {
+		uint32_t p3   = sys_read32(ENC_GPIO3_EXT_PORTA);
+		uint32_t p4   = sys_read32(ENC_GPIO4_EXT_PORTA);
+		uint32_t cntr = sys_read32(QEC0_CNTR);
+		uint32_t x    = p3 & ENC_PAD_X;
+		uint32_t y    = p3 & ENC_PAD_Y;
+		uint32_t sw   = p4 & ENC_SW_BIT;
+
+		if ((x != x_prev) || (y != y_prev)) {
+			pads_toggled = true;
+			pad_transitions++;
+		}
+		if (cntr != cntr_prev) {
+			count_changed = true;
+			cntr_transitions++;
+		}
+		if (sw != sw_init) {
+			sw_pressed = true;
+		}
+
+		/* Print every early sample (fast feedback for the operator), every
+		 * transition in full, then thin out -- 400 identical lines bury the
+		 * one that matters, and the RAM console is a fixed-size ring buffer. */
+		if ((i < 10) || (x != x_prev) || (y != y_prev) || (cntr != cntr_prev) || ((i % 20) == 0)) {
+			printf("[evkdemo] ENCODER: t=%ums X=%u Y=%u SW=%u CNTR=0x%08x  [%u s left]\n",
+			       (unsigned)(i * ENCODER_POLL_MS),
+			       (unsigned)(x ? 1 : 0),
+			       (unsigned)(y ? 1 : 0),
+			       (unsigned)(sw ? 1 : 0),
+			       (unsigned)cntr,
+			       (unsigned)(((ENCODER_SAMPLES - i) * ENCODER_POLL_MS) / 1000u));
+		}
+
+		x_prev    = x;
+		y_prev    = y;
+		cntr_prev = cntr;
+		k_msleep(ENCODER_POLL_MS);
+	}
+
+	uint32_t cntr_post      = sys_read32(QEC0_CNTR);
+	uint32_t cntr_ctrl_post = sys_read32(QEC0_CNTR_CTRL);
+
+	printf("[evkdemo] ENCODER: post-run CNTR=0x%08x (pre 0x%08x) CNTR_CTRL=0x%08x (pre 0x%08x)\n",
+	       (unsigned)cntr_post,
+	       (unsigned)cntr_pre,
+	       (unsigned)cntr_ctrl_post,
+	       (unsigned)cntr_ctrl_pre);
+	printf("[evkdemo] ENCODER: pad transitions=%u count transitions=%u switch pressed=%s\n",
+	       (unsigned)pad_transitions,
+	       (unsigned)cntr_transitions,
+	       sw_pressed ? "yes" : "no");
+
+	if (!pads_toggled) {
+		printf("[evkdemo] ENCODER: RESULT SKIPPED -- the raw pads (P3_0/P3_1) never toggled. "
+		       "This is genuinely indistinguishable from here between \"nobody turned the "
+		       "knob\" and \"the signal never reaches the SoC\" -- this phase does not guess "
+		       "which. Rerun with a hand on the shaft to settle it either way.\n");
+		ctx->note = "pads never toggled -- unattended, or signal not reaching the SoC";
+		return PHASE_SKIPPED;
+	}
+
+	if (count_changed) {
+		printf("[evkdemo] ENCODER: RESULT PASS -- the pads toggled AND CNTR moved. Quadrature "
+		       "decode works.\n");
+		return PHASE_PASS;
+	}
+
+	if (cntr_ctrl_post != QEC0_CNTR_CTRL_RESTING) {
+		printf("[evkdemo] ENCODER: RESULT FAIL -- the pads toggled but CNTR never moved, AND "
+		       "CNTR_CTRL reads 0x%08x, not the resting 0x%08x (CNTR_EN|CNTR_TRIG) a "
+		       "trigger-counting channel needs. The channel was never correctly armed -- fix "
+		       "the arm sequence (qdec_alif_utimer_init()) before chasing the decode logic "
+		       "itself.\n",
+		       (unsigned)cntr_ctrl_post,
+		       (unsigned)QEC0_CNTR_CTRL_RESTING);
+		ctx->note = "pads toggled, CNTR static, channel never correctly armed";
+		return PHASE_FAIL;
+	}
+
+	printf("[evkdemo] ENCODER: RESULT FAIL -- the pads toggled but CNTR never moved, even "
+	       "though CNTR_CTRL correctly reads 0x%08x (armed, trigger mode, not free-running) "
+	       "both before and after. The signal reaches the SoC and the counter is not "
+	       "counting -- this is the defect #2037 has been trying to reach.\n",
+	       (unsigned)cntr_ctrl_post);
+	ctx->note = "pads toggled, CNTR static, channel correctly armed -- not counting";
+	return PHASE_FAIL;
 }
+
+/* ==================================================================== */
+/* STUBS -- phases not in this slice.  Each reason differs; see below.  */
+/* ==================================================================== */
 
 /* Sound out -> PDM-in loopback: the maintainer has confirmed speakers ARE
  * connected to both TAS2563 amps, so a real tone-out + mic-capture
@@ -2754,7 +2991,7 @@ static const phase_t PHASES[] = {
 	{ "I/O expander answers (TCAL9538, read-only)", phase_io_expander },
 	{ "EEPROM identity (24C128)", phase_eeprom_identity },
 	{ "RGB LED (PWM0/1/3)", phase_rgb_led },
-	{ "Rotary encoder", phase_encoder_stub },
+	{ "Rotary encoder", phase_encoder },
 	{ "CC3501E Wi-Fi/BLE", phase_cc3501e },
 	{ "SD card", phase_sdcard },
 	{ "Ethernet", phase_ethernet },
