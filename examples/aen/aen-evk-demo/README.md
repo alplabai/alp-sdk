@@ -330,12 +330,12 @@ every run, which is exactly the point of it.
 [evkdemo] SD: disk_access_init("SD") -> 0
 [evkdemo] SD: geometry: 31116288 sectors x 512 B = 15193 MiB (ioctl rc 0 / 0)
 [evkdemo] SD: fs_mount(FAT, "/SD:", NO_FORMAT) -> 0
-[evkdemo] SD: writing 47 B to /SD:/ALPDEMO.TXT, nonce=1f3a90c4 (per-run, so a stale file from an earlier run cannot compare equal)
-[evkdemo] SD: fs_write -> 47 of 47 B, fs_truncate(47) -> 0, fs_sync -> 0
+[evkdemo] SD: writing 51 B to /SD:/ALPDEMO.TXT, nonce=1f3a90c4 (per-run, so a stale file from an earlier run cannot compare equal)
+[evkdemo] SD: fs_write -> 51 of 51 B, fs_truncate(51) -> 0, fs_sync -> 0
 [evkdemo] SD: fs_close -> 0
-[evkdemo] SD: read back 47 B and they COMPARE EQUAL: aen-evk-demo phase 9 nonce=1f3a90c4 uptime=14882ms
+[evkdemo] SD: read back 51 B and they COMPARE EQUAL: aen-evk-demo phase 9 nonce=1f3a90c4 uptime=14882ms
 [evkdemo] SD: fs_unmount -> 0
-[evkdemo] SD: mux enabled, card enumerated, FAT mounted, 47 B written -> read -> compared equal -> PASS
+[evkdemo] SD: mux enabled, card enumerated, FAT mounted, 51 B written -> read -> compared equal -> PASS
 ```
 
 The geometry line is **printed, not gated**: which card is in the slot is
@@ -366,20 +366,20 @@ is the **expected** result on that hardware, not one that has been captured
 on silicon yet -- see the note above its transcript:
 
 ```
-[evkdemo] phase  1/14: RTC + temperature (BRD_I2C)         PASS
-[evkdemo] phase  2/14: Sensors (BMI323/ICM42670/BMP581)     PASS
-[evkdemo] phase  3/14: Power rails (6x INA236)              PASS
+[evkdemo] phase  1/14: RTC + temperature (BRD_I2C)        PASS
+[evkdemo] phase  2/14: Sensors (BMI323/ICM42670/BMP581)   PASS
+[evkdemo] phase  3/14: Power rails (6x INA236)            PASS
 [evkdemo] phase  4/14: I/O expander answers (TCAL9538, read-only) PASS
-[evkdemo] phase  5/14: EEPROM identity (24C128)             PASS
-[evkdemo] phase  6/14: RGB LED (PWM0/1/3)                   PASS
-[evkdemo] phase  7/14: Rotary encoder                       SKIPPED
-[evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                    PASS
-[evkdemo] phase  9/14: SD card                              PASS
-[evkdemo] phase 10/14: Ethernet                             PASS
-[evkdemo] phase 11/14: Sound out -> PDM in                  SKIPPED
-[evkdemo] phase 12/14: Screen (DSI)                         SKIPPED
-[evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)         PASS
-[evkdemo] phase 14/14: NPU inference                        SKIPPED
+[evkdemo] phase  5/14: EEPROM identity (24C128)           PASS
+[evkdemo] phase  6/14: RGB LED (PWM0/1/3)                 PASS
+[evkdemo] phase  7/14: Rotary encoder                     SKIPPED
+[evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                  PASS
+[evkdemo] phase  9/14: SD card                            PASS
+[evkdemo] phase 10/14: Ethernet                           PASS
+[evkdemo] phase 11/14: Sound out -> PDM in                SKIPPED
+[evkdemo] phase 12/14: Screen (DSI)                       SKIPPED
+[evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)       PASS
+[evkdemo] phase 14/14: NPU inference                      SKIPPED
 ...
 [evkdemo] RESULT: 10 PASS, 4 SKIPPED, 0 FAIL
 [evkdemo] done
