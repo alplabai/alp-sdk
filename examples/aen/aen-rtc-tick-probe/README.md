@@ -24,6 +24,55 @@ clean success.
 
 ## What each test discriminates
 
+### TEST 0 -- which core, and what clock (#2037 follow-up)
+
+A later bench run of this exact image measured the SysTick at 400.0 MHz
+against a build that declares 160 MHz. 160 MHz is the M55-HE's documented
+rate; 400 MHz is not on the HE's clock menu at all (HWRM AHRM0012NDA v0.3
+S8.3.2.3.4 -- `ESCLK_SEL[ES1_PLL]` only ever selects 80 or 160 MHz) -- it is
+the M55-HP's `ES0_PLL` default. So either this image is executing on the HP
+while believed to be on the HE, or this HE unit genuinely self-clocks at
+400 MHz -- and every observable this app used before now (UART, I2C, ITCM at
+local address 0, DTCM at `0x20000000`) is identical on both cores. TEST 0
+runs first, before TEST A/B, and answers this directly.
+
+**TEST 0a -- core identity.** Writes a magic value to a local DTCM variable,
+then reads it back through both cores' "external access" global aliases
+(HE: `0x5880_0000`+offset, HP: `0x5080_0000`+offset -- HWRM Table 10-2,
+p.326). The obvious-looking premise -- "whichever alias shows the magic is
+your core" -- does **not** hold once the actual access matrix is checked:
+Table 10-2 lists a core's *own* external alias as access-blocked for that
+same core; only the *other* core and the A32 can reach it. So per the
+manual, **the alias that faults identifies the executing core**, and the
+alias that succeeds reads a different, physically foreign SRAM that was
+never written -- the inverse of what a first read of the two addresses
+suggests. This test checks both signals (which read faults, which read
+shows the magic) and prints a verdict built from whichever signal the data
+actually supports, falling back to `INCONCLUSIVE` with the raw values if
+neither pattern matches. A read that might fault runs in a disposable
+worker thread, so a fault here is reported, not fatal to the rest of the
+run -- see the source comment on `k_sys_fatal_error_handler()` for how.
+
+**TEST 0b -- CGU registers (read-only).** Prints `PLL_LOCK_CTRL`
+(`0x1A602004`), `PLL_CLK_SEL` (`0x1A602008`), `ESCLK_SEL` (`0x1A602010`),
+and `CLK_ENA` (`0x1A602014`) in raw hex, and decodes the fields that matter:
+`PLL_CLK_SEL` bit 20 (`ES1`, the HE's oscillator-vs-PLL select) and bit 16
+(`ES0`, the HP's), and `ESCLK_SEL`'s `ES1_PLL`/`ES1_OSC`/`ES0_PLL` rate
+fields. These are reads only -- this app never writes any CGU register, and
+never writes `CLK_ENA` in particular (it gates clocks for both cores).
+
+**TEST 0c -- SysTick/RTC ratio at ~2 s / ~10 s / ~60 s after boot.** Samples
+the RTC's UNIX Time counter against the SysTick cycle counter three times
+(not once, so a rate that changes mid-run is caught), printing the implied
+frequency at each point alongside `CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC`.
+Reuses this app's own `read_burst()`/`burst_unix_time()` rather than a
+second RTC read path. Guards the exact wrap that cost real analysis time
+in the original investigation: `k_cycle_get_32()` wraps every ~10.7 s at
+400 MHz, so a naive before/after subtraction across a 60 s window silently
+loses several wraps. This test uses `k_cycle_get_64()` where the platform
+provides a real 64-bit counter, and otherwise folds every 32-bit wrap in
+explicitly by polling more often than the fastest plausible wrap period.
+
 ### TEST A -- host timebase vs the RTC
 
 Reads the RTC's UNIX Time counter (`0x1B`..`0x1E`), `k_msleep(30000)`, reads
@@ -75,6 +124,31 @@ back identical when it should not have).
 ## Reading the output
 
 ```
+=== TEST 0a: core identity -- DTCM global-alias readback ===
+local DTCM var   @ 0x20001234 = 0xc0de1d01 (written)
+HE global alias  @ 0x58801234 -> FAULT/TIMEOUT (reason=2) -- not readable from the executing core
+HP global alias  @ 0x50801234 -> 0x00000000 (no magic)
+core identity verdict: M55-HE -- HE's own external DTCM alias faulted, HP's didn't (HWRM Table 10-2 p.326: a core cannot reach its own external alias, only the OTHER core/A32 can)
+
+=== TEST 0b: CGU registers (read-only) -- HWRM AHRM0012NDA v0.3 S8.3.2.3.3/.4 ===
+PLL_CLK_SEL   (0x1A602008) = 0x00100000
+ESCLK_SEL     (0x1A602010) = 0x00003032
+  PLL_CLK_SEL: ES1(HE src)=1 ES0(HP src)=0
+  ESCLK_SEL:   ES1_PLL=3 (160 MHz)  ES1_OSC=0 (76.8 MHz ring-osc)  ES0_PLL=2 (400 MHz)
+  -> HE (RTSS_HE_CLK) active source: PLL -> 160 MHz
+
+=== TEST 0c: SysTick/RTC ratio at 2 s / 10 s / 60 s -- CONFIG_SYS_CLOCK_HW_CYCLES_PER_SEC=160000000 (declared) ===
+  [t=2000 ms] rtc_delta=2 s  cyc_delta=800000000 cycles  implied=400000000 Hz (declared 160000000 Hz)
+```
+
+`TEST 0a`'s verdict names the executing core from the HWRM's own access
+matrix, not a guess. If `TEST 0b` shows `ES1_PLL=3` (160 MHz) selected but
+`TEST 0c` still measures ~400 MHz on an `M55-HE` verdict, the mismatch is
+real and needs its own follow-up -- trust the raw register/counter values
+printed above the verdict lines over any one-line summary, this app's own
+included.
+
+```
 === TEST A: host timebase vs RV-3028-C7 over a real 30000 ms window ===
 RTC unix-time delta:    30 s  (before=... after=...)
 k_uptime_get() delta:   30000 ms
@@ -115,6 +189,11 @@ with TEST A having already shown a kernel-timebase mismatch.
 - **Respect the 950 ms register-blocking window.** One I2C transaction per
   sample point, covering everything needed (`0x00`..`0x1E` is one
   contiguous register block); sample points stay >= 1100 ms apart.
+- **Never write any CGU register (TEST 0b).** `PLL_LOCK_CTRL`,
+  `PLL_CLK_SEL`, `ESCLK_SEL`, and `CLK_ENA` are read-only in this app --
+  `CLK_ENA` in particular gates clocks for both cores and other blocks on
+  this bus, and a bad write there can silently kill a clock this app, or
+  the other core, depends on.
 
 ## Build
 
@@ -132,5 +211,6 @@ RAM-run over J-Link (no MRAM programming needed -- the overlay retargets
 `zephyr,flash` to ITCM); read `ram_console_buf` over SWD, or the E1M edge
 UART0 console if the bench has one wired.
 
-Run time: TEST A's 30 s window plus TEST B's 55 x 1100 ms intervals -- about
-95 s total, plus I2C/printk overhead.
+Run time: TEST 0c's own 60 s of checkpoints, plus TEST A's 30 s window, plus
+TEST B's 55 x 1100 ms intervals -- about 155 s total, plus I2C/printk
+overhead. TEST 0a/0b add negligible time (a handful of register/DTCM reads).
