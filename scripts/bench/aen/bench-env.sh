@@ -406,3 +406,39 @@ bench_require_setools() {
 	fi
 	return 0
 }
+
+# --------------------------------------------------------------------
+# OpenOCD (M55-HE core selection -- see scripts/bench/aen/openocd-ram-run.sh)
+# --------------------------------------------------------------------
+
+# AEN_OPENOCD_CFG -- the board-farm's shared SWD config for this bench. It
+# declares BOTH E8 M55 cores as separate CoreSight-AP OpenOCD targets
+# (alif.m55he @ AP 0x00300000, alif.m55hp @ AP 0x00200000, HP created last so
+# it stays OpenOCD's default/current target -- bench-verified 2026-09-09,
+# alp-sdk#2037). NO default: like SE_UART/SETOOLS_DIR above, it lives outside
+# this repo on the bench host. Export it before running openocd-ram-run.sh,
+# e.g. AEN_OPENOCD_CFG=<board-farm>/debug/openocd-alif-e8-swd.cfg.
+export AEN_OPENOCD_CFG="${AEN_OPENOCD_CFG:-}"
+
+# bench_require_openocd [cfg-override] — guard for openocd-ram-run.sh. Errors
+# (exit 2) if the resolved config path (arg, else AEN_OPENOCD_CFG) is unset
+# or missing, or the `openocd` binary itself is not on PATH. Same enforcement
+# shape as bench_require_setools above.
+bench_require_openocd() {
+	local cfg="${1:-${AEN_OPENOCD_CFG:-}}"
+	if [ -z "$cfg" ]; then
+		echo "bench-env: AEN_OPENOCD_CFG is unset. This is the board-farm's" >&2
+		echo "           shared SWD config (outside this repo, host-specific)." >&2
+		echo "           export AEN_OPENOCD_CFG=<board-farm>/debug/openocd-alif-e8-swd.cfg" >&2
+		return 2
+	fi
+	if [ ! -f "$cfg" ]; then
+		echo "bench-env: AEN_OPENOCD_CFG='$cfg' does not exist." >&2
+		return 2
+	fi
+	if ! command -v openocd >/dev/null 2>&1; then
+		echo "bench-env: 'openocd' not found on PATH -- install OpenOCD." >&2
+		return 2
+	fi
+	return 0
+}
