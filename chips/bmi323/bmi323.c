@@ -27,6 +27,13 @@
 
 #define REG_CHIP_ID 0x00
 #define REG_ERR_REG 0x01 /* fatal_err bit0, acc_conf_err bit5 (Rev 1.7 p.61 Table 36) */
+/* fatal_err (bit0): "an unrecoverable error occurred" (Rev 1.7 p.61 Table 36)
+ * -- no field-specific caveat, unlike acc_conf_err (bit5), which flags a bad
+ * ACC_CONF encoding and is meaningless at init() time: this driver hasn't
+ * written ACC_CONF yet (bmi323_set_accel() does that later).  Acting on
+ * acc_conf_err here would mean asserting what makes it fire before ACC_CONF
+ * has ever been touched, which this driver isn't in a position to claim. */
+#define BMI323_ERR_REG_FATAL_ERR 0x0001u
 #define REG_STATUS \
 	0x02 /* por_detected bit0 / drdy_gyr bit6 / drdy_acc bit7, all R/C (Rev 1.7 p.66) */
 #define REG_ACC_CONF    0x20
@@ -96,11 +103,12 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (dev == NULL || bus == NULL) return ALP_ERR_INVAL;
 	if (i2c_addr == 0) return ALP_ERR_INVAL;
 
-	dev->bus         = bus;
-	dev->addr        = i2c_addr;
-	dev->accel_fs    = BMI323_ACCEL_FS_2G;
-	dev->gyro_fs     = BMI323_GYRO_FS_2000_DPS;
-	dev->initialised = false;
+	dev->bus          = bus;
+	dev->addr         = i2c_addr;
+	dev->accel_fs     = BMI323_ACCEL_FS_2G;
+	dev->gyro_fs      = BMI323_GYRO_FS_2000_DPS;
+	dev->initialised  = false;
+	dev->por_detected = false; /* Overwritten below once STATUS is actually read. */
 
 	/* Power-up / I2C-interface bring-up.  The soft reset (CMD <- 0xDEAF) is the
 	 * first I2C transaction, which also selects the I2C interface (the part
@@ -124,25 +132,37 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	/*
 	 * Bosch's device-initialisation status test (BST-BMI323-DS000-13 Rev
 	 * 1.7, Figure 2 pp.15-16): read ERR_REG, then STATUS, before ever
-	 * trusting CHIP_ID.  This driver doesn't yet act on ERR_REG's
-	 * fatal_err/acc_conf_err bits (no v0.2 caller has a use for them),
-	 * but STATUS.por_detected (bit0, clear-on-read) is load-bearing:
-	 * it is set ONLY by a real POR/soft-reset event, whereas CHIP_ID's
-	 * reset value is 0x0043 and reads back correctly whether or not the
-	 * soft-reset write just above actually landed (see the big comment
-	 * above this function).  A part that ACKs the write without applying
-	 * it, or that never left its own prior POR state, reads por_detected
-	 * as 0 while CHIP_ID still matches -- catch that here instead of
-	 * reporting a false ALP_OK.
+	 * trusting CHIP_ID.  ERR_REG.fatal_err (bit0) is acted on below --
+	 * see BMI323_ERR_REG_FATAL_ERR's comment for why acc_conf_err
+	 * (bit5) is not.  STATUS.por_detected (bit0, clear-on-read) is
+	 * load-bearing: it is set ONLY by a real POR/soft-reset event,
+	 * whereas CHIP_ID's reset value is 0x0043 and reads back correctly
+	 * whether or not the soft-reset write just above actually landed
+	 * (see the big comment above this function).  A part that ACKs the
+	 * write without applying it, or that never left its own prior POR
+	 * state, reads por_detected as 0 while CHIP_ID still matches --
+	 * catch that here instead of reporting a false ALP_OK.
 	 */
 	uint16_t err_reg = 0;
 	s                = reg_read_u16(dev, REG_ERR_REG, &err_reg);
 	if (s != ALP_OK) return s;
+	if ((err_reg & BMI323_ERR_REG_FATAL_ERR) != 0) return ALP_ERR_IO;
 
 	uint16_t status = 0;
 	s               = reg_read_u16(dev, REG_STATUS, &status);
 	if (s != ALP_OK) return s;
-	if ((status & BMI323_STATUS_POR_DETECTED) == 0) return ALP_ERR_IO;
+	/* Store before deciding whether to fail on it -- see
+	 * bmi323_was_por_detected(): once this read happens the bit is
+	 * gone from the device (R/C), so this is the only chance to keep
+	 * it anywhere a later caller, including one downstream of the
+	 * `return` right below, can still see it. */
+	dev->por_detected = (status & BMI323_STATUS_POR_DETECTED) != 0;
+	/* Distinct from the ALP_ERR_IO below (CHIP_ID mismatch/read
+	 * failure) and from the ALP_ERR_IO above (ERR_REG.fatal_err): this
+	 * is neither a bus fault nor a bad chip, it's "the reset this
+	 * function just issued was never confirmed", which is a
+	 * not-ready-yet condition, not an IO or identity error (#2035). */
+	if (!dev->por_detected) return ALP_ERR_NOT_READY;
 
 	uint8_t id = 0;
 	s          = bmi323_read_id(dev, &id);
@@ -150,6 +170,17 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	if (id != BMI323_CHIP_ID) return ALP_ERR_IO;
 
 	dev->initialised = true;
+	return ALP_OK;
+}
+
+alp_status_t bmi323_was_por_detected(const bmi323_t *dev, bool *out)
+{
+	/* No dev->initialised gate, unlike this driver's other accessors --
+	 * see the doc comment in the header.  The failing bmi323_init()
+	 * paths (POR gate rejected, or a later CHIP_ID mismatch/read
+	 * error) are exactly what this exists to report. */
+	if (dev == NULL || out == NULL) return ALP_ERR_INVAL;
+	*out = dev->por_detected;
 	return ALP_OK;
 }
 

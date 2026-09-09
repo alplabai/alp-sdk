@@ -150,6 +150,14 @@ typedef struct {
 	bmi323_accel_fs_t accel_fs;
 	bmi323_gyro_fs_t  gyro_fs;
 	bool              initialised;
+	/* STATUS.por_detected (bit0) as last seen -- and cleared, it's
+     * R/C (BST-BMI323-DS000-13 Rev 1.7 p.66) -- by bmi323_init().
+     * Stored here because the bit is gone from the device after that
+     * one read: every later reader, including a diagnostic that runs
+     * after init() fails, would otherwise always see 0 regardless of
+     * what init() actually observed (#2035).  Query via
+     * bmi323_was_por_detected(). */
+	bool por_detected;
 } bmi323_t;
 
 /**
@@ -159,9 +167,42 @@ typedef struct {
  * register index (not 16-bit addressing).  Reads return a 2-byte
  * dummy prefix that the wrapper strips internally.
  *
- * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_IO (wrong CHIP_ID).
+ * Call @ref bmi323_was_por_detected afterwards -- including after a
+ * non-ALP_OK return -- to learn what STATUS.por_detected read as; see
+ * that function for why this can't just be re-read later.
+ *
+ * @return ALP_OK / ALP_ERR_INVAL (`dev`/`bus` NULL or `i2c_addr` 0) /
+ *   ALP_ERR_NOT_READY (STATUS.por_detected was clear -- the soft
+ *   reset never demonstrably landed) / ALP_ERR_IO (CHIP_ID read
+ *   failed or mismatched, or ERR_REG.fatal_err was set) / whatever
+ *   the underlying bus returns.
  */
 alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr);
+
+/**
+ * @brief Report STATUS.por_detected as observed by the last
+ *   @ref bmi323_init call on this context.
+ *
+ * STATUS.por_detected (bit0, BST-BMI323-DS000-13 Rev 1.7 p.66) is
+ * read/clear: bmi323_init() has to read it to gate on it, and that
+ * read consumes it, so it reads back 0 to any caller from then on.
+ * This reports what init() saw before that happened.
+ *
+ * Deliberately usable even when the last @ref bmi323_init call
+ * returned an error -- init() stores the bit the moment it reads
+ * STATUS, before deciding whether to fail on it, so the failing paths
+ * (POR gate rejected, or a later CHIP_ID mismatch/read error) are
+ * exactly the callers this exists for.  Unlike this driver's other
+ * accessors, this does not require `dev->initialised`.
+ *
+ * @param dev Context previously passed to @ref bmi323_init (that call
+ *   must have reached its STATUS read; a dev whose init() failed
+ *   before then -- e.g. ALP_ERR_INVAL on the arguments themselves --
+ *   reports false).
+ * @param out Set to true if STATUS.por_detected was set.
+ * @return ALP_OK / ALP_ERR_INVAL (`dev` or `out` NULL).
+ */
+alp_status_t bmi323_was_por_detected(const bmi323_t *dev, bool *out);
 
 /** Read CHIP_ID for liveness checks. */
 alp_status_t bmi323_read_id(bmi323_t *dev, uint8_t *id_out);

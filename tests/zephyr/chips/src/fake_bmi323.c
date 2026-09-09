@@ -13,6 +13,14 @@
  * 0x02) bit0 (por_detected) = 1 -- the "just reset" state -- so
  * bmi323_init()'s soft-reset + device-initialisation status test +
  * ID probe (chips/bmi323/bmi323.c) succeeds by default.
+ *
+ * STATUS also models the datasheet's read/clear behaviour
+ * (BST-BMI323-DS000-13 Rev 1.7 p.66: por_detected bit0 / drdy_gyr
+ * bit6 / drdy_acc bit7 all clear on read) -- any read that covers
+ * register 0x02 zeroes those three bits afterwards.  #2035 shipped
+ * because this wasn't modelled: bmi323_init() consumed por_detected
+ * and every later reader silently saw 0, and no fake in this suite
+ * caught it because none of them cleared anything on read.
  */
 
 #define DT_DRV_COMPAT alp_fake_bmi323
@@ -30,6 +38,9 @@
 
 #define REG_CHIP_ID 0x00
 #define REG_STATUS  0x02
+/* por_detected (bit0) / drdy_gyr (bit6) / drdy_acc (bit7), the three
+ * clear-on-read STATUS bits (BST-BMI323-DS000-13 Rev 1.7 p.66). */
+#define STATUS_CLEAR_ON_READ_MASK 0x00C1u
 
 struct fake_bmi323_data {
 	uint16_t regs[256];
@@ -70,9 +81,15 @@ fake_bmi323_transfer(const struct emul *target, struct i2c_msg *msgs, int num_ms
 		msgs[1].buf[0]      = 0x00; /* dummy prefix */
 		msgs[1].buf[1]      = 0x00;
 		for (size_t w = 0; w < words; w++) {
-			uint16_t v                 = d->regs[(uint8_t)(reg0 + w)];
+			const uint8_t reg          = (uint8_t)(reg0 + w);
+			uint16_t      v            = d->regs[reg];
 			msgs[1].buf[2 + 2 * w]     = (uint8_t)(v & 0xFFu);
 			msgs[1].buf[2 + 2 * w + 1] = (uint8_t)(v >> 8);
+			/* Clear-on-read: consume por_detected/drdy_gyr/drdy_acc the
+			 * same way real silicon does, so a driver bug that reads
+			 * STATUS and forgets to keep the bit (#2035) reddens a test
+			 * instead of silently passing. */
+			if (reg == REG_STATUS) d->regs[reg] = (uint16_t)(v & ~STATUS_CLEAR_ON_READ_MASK);
 		}
 		return 0;
 	}

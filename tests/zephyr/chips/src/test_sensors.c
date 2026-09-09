@@ -912,12 +912,14 @@ ZTEST(alp_chips, test_fake_bmi323_data_ready_decodes_status_bits_7_and_6)
  * a real POR/soft-reset event.  Simulate a part that ACKs the reset write
  * but never truly reset -- por_detected stays 0 while CHIP_ID still
  * matches -- and require bmi323_init() to fail rather than report a false
- * ALP_OK.
+ * ALP_OK.  It must fail with ALP_ERR_NOT_READY specifically, not the
+ * ALP_ERR_IO a CHIP_ID mismatch/read-error also returns -- conflating the
+ * two was itself named as a defect in #2035's fix.
  *
  * Mutation coverage: deleting the
- * `if ((status & BMI323_STATUS_POR_DETECTED) == 0) return ALP_ERR_IO;` gate
- * in bmi323_init() reddens this test (it falls through to the CHIP_ID
- * check, which passes, and returns ALP_OK instead of ALP_ERR_IO).
+ * `if (!dev->por_detected) return ALP_ERR_NOT_READY;` gate in bmi323_init()
+ * reddens this test (it falls through to the CHIP_ID check, which passes,
+ * and returns ALP_OK instead of ALP_ERR_NOT_READY).
  */
 ZTEST(alp_chips, test_bmi323_init_rejects_missing_por_detected)
 {
@@ -927,6 +929,109 @@ ZTEST(alp_chips, test_bmi323_init_rejects_missing_por_detected)
 	zassert_not_null(bus);
 
 	fake_bmi323_set_reg(0x02u, 0x0000u); /* STATUS: por_detected clear. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_NOT_READY);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * #2035 regression: STATUS.por_detected is clear-on-read (BST-BMI323-DS000-13
+ * Rev 1.7 p.66) and bmi323_init() has to read it to gate on it -- so without
+ * bmi323_was_por_detected() stashing the bit somewhere, every caller
+ * downstream of init() reads 0 regardless of what init() actually saw.  This
+ * is exactly what shipped: init() consumed the bit and the two examples that
+ * report it downstream (aen-evk-demo, aen-bmi323-regcheck) always printed 0.
+ *
+ * Covers both halves of the fix: (1) the accessor reports what init() saw
+ * on the ALP_OK path, where a raw re-read of STATUS would now read 0 because
+ * init() already consumed the bit; (2) the fake's clear-on-read modelling
+ * (fake_bmi323.c) actually clears the register, so a driver that forgot to
+ * stash the bit before the STATUS read returns would fail case (1) here
+ * rather than passing by accident because the fake never cleared anything.
+ *
+ * Mutation coverage: removing the `dev->por_detected = ...` assignment in
+ * bmi323_init() reddens this test's logic (the accessor then reports false
+ * on a context whose init() just saw por_detected=1, failing the
+ * zassert_true(seen) below).  ZEPHYR_BASE is unset in this worktree, so
+ * twister/ztest can't execute here to confirm that directly; the same
+ * assignment-removal mutation was instead confirmed against the real
+ * chips/bmi323/bmi323.c through a standalone host harness (build it with
+ * gcc against this file + a hand-rolled I2C fake modelling the same
+ * clear-on-read behaviour) -- with the assignment, both cases below pass;
+ * with it removed, both fail the same way this ztest would.
+ */
+ZTEST(alp_chips, test_bmi323_was_por_detected_survives_the_clear_on_read)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	/* init() already consumed the bit -- the fake's clear-on-read
+	 * modelling means a raw re-read now sees 0, same as real silicon. */
+	zassert_equal(fake_bmi323_get_reg(0x02u) & 0x0001u, 0u);
+
+	/* ... but the accessor still reports what init() saw before that
+	 * read cleared it. */
+	bool seen = false;
+	zassert_equal(bmi323_was_por_detected(&dev, &seen), ALP_OK);
+	zassert_true(seen);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * The accessor's whole point is to still work on a context whose init()
+ * call failed -- POR gate rejected here.  Confirms it does not gate on
+ * dev->initialised the way this driver's other accessors do.
+ */
+ZTEST(alp_chips, test_bmi323_was_por_detected_usable_after_init_failure)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x02u, 0x0000u); /* STATUS: por_detected clear. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_NOT_READY);
+
+	bool seen = true;
+	zassert_equal(bmi323_was_por_detected(&dev, &seen), ALP_OK);
+	zassert_false(seen);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * ERR_REG.fatal_err (bit0, BST-BMI323-DS000-13 Rev 1.7 p.61 Table 36) is now
+ * acted on: previously read and discarded.
+ *
+ * Mutation coverage: deleting
+ * `if ((err_reg & BMI323_ERR_REG_FATAL_ERR) != 0) return ALP_ERR_IO;` in
+ * bmi323_init() reddens this test (falls through to the POR/CHIP_ID checks,
+ * which pass, and returns ALP_OK instead of ALP_ERR_IO).
+ */
+ZTEST(alp_chips, test_bmi323_init_rejects_fatal_err)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x01u, 0x0001u); /* ERR_REG: fatal_err set. */
 
 	bmi323_t dev;
 	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_IO);
