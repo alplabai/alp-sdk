@@ -33,14 +33,36 @@ order, before ever touching the data registers:
 
 1. `ACC_CONF` (0x20) -- the discriminator: did the acc_mode write land?
 2. `ERR_REG` (0x01) -- bit0 `fatal_err`, bit5 `acc_conf_err`.
-3. `STATUS` (0x02) -- bit7 `drdy_acc`, bit0 `por_detected`.
+3. `STATUS` (0x02) -- bit7 `drdy_acc`. bit0 (`por_detected`) reads 0 here,
+   always -- see below, that's expected, not a bug in this app.
 4. Only *then* `bmi323_read_accel()`.
 
-**Order is not negotiable.** `STATUS` bits are clear-on-read (Rev 1.7 p.66),
-and reading `ACC_DATA_X..Z` *also* clears `drdy_acc`, independently of a
-`STATUS` read (Rev 1.7 p.23: "The flag STATUS.drdy_acc is cleared when any
-of the registers ACC_DATA_X to ACC_DATA_Z is read."). Reading the data
-registers first would destroy the evidence this app exists to capture.
+**Order is not negotiable -- for `drdy_acc`.** `STATUS` bits are
+clear-on-read (Rev 1.7 p.66), and reading `ACC_DATA_X..Z` *also* clears
+`drdy_acc`, independently of a `STATUS` read (Rev 1.7 p.23: "The flag
+STATUS.drdy_acc is cleared when any of the registers ACC_DATA_X to
+ACC_DATA_Z is read."). Reading the data registers first would destroy the
+evidence this app exists to capture.
+
+`por_detected` (`STATUS` bit0) is a different story. It is *not* this app's
+own `STATUS` read that consumes it: `bmi323_init()`
+(`chips/bmi323/bmi323.c`, #2035) already runs Bosch's own
+device-initialisation status test and reads `STATUS` itself, before this
+app ever gets a turn. The bit is clear-on-read (BST-BMI323-DS000-13
+Rev 1.7 p.66), so it is gone from the part the moment `init()` reads it --
+this app's own `STATUS` reads only ever see it as 0, whatever `init()`
+actually observed. (Measured on this bus: one raw `STATUS` read came back
+`0x0021`, bit0 set; the next came back `0x00a0`, bit0 clear -- clear-on-read
+caught in the act.) What `init()` saw is still available, because `init()`
+stashes it before deciding whether to fail on it: `bmi323_was_por_detected()`
+reports that stashed value, and this app calls it right after
+`bmi323_init()` -- that printed line, not `STATUS`'s own bit0, is the
+trustworthy `por_detected` reading.
+
+`bmi323_init()`'s return code is also split (#2035): `ALP_ERR_NOT_READY`
+means its own `por_detected` read came back clear (the soft reset was never
+confirmed); `ALP_ERR_IO` means a `CHIP_ID` read failure/mismatch or
+`ERR_REG.fatal_err`. This app decodes both.
 
 `ACC_CONF` is also sampled once *before* `bmi323_set_accel()` runs (a
 genuine before/after), and `STATUS` is sampled a second time ~100 ms after

@@ -37,18 +37,34 @@
  *
  *   1. ACC_CONF (0x20) -- the discriminator: did the acc_mode write land?
  *   2. ERR_REG  (0x01) -- bit0 fatal_err, bit5 acc_conf_err.
- *   3. STATUS   (0x02) -- bit7 drdy_acc, bit0 por_detected.
+ *   3. STATUS   (0x02) -- bit7 drdy_acc. bit0 (por_detected) reads 0 here,
+ *      always -- see below, this is not a bug in this app.
  *   4. Only THEN bmi323_read_accel() -- the accelerometer data itself.
  *
- * This order is NOT negotiable. STATUS bits are clear-on-read (Rev 1.7
- * p.66, "This flag is clear-on-read" on every STATUS field), and reading
- * ACC_DATA_X..Z ALSO clears drdy_acc, independently of a STATUS read (Rev
- * 1.7 p.23, "Accelerometer Data Ready Notification": "The flag
- * STATUS.drdy_acc is cleared when any of the registers ACC_DATA_X to
+ * This order is NOT negotiable -- for drdy_acc. STATUS bits are
+ * clear-on-read (Rev 1.7 p.66, "This flag is clear-on-read" on every STATUS
+ * field), and reading ACC_DATA_X..Z ALSO clears drdy_acc, independently of a
+ * STATUS read (Rev 1.7 p.23, "Accelerometer Data Ready Notification": "The
+ * flag STATUS.drdy_acc is cleared when any of the registers ACC_DATA_X to
  * ACC_DATA_Z is read."). Reading the data registers first would silently
  * destroy the very evidence (drdy_acc) this app exists to capture -- so
  * ACC_CONF and ERR_REG (which have no read side effect) come first, STATUS
  * next, and the data registers last, always.
+ *
+ * por_detected (STATUS bit0) is a DIFFERENT story, and this is where an
+ * earlier version of this comment was wrong: it isn't this app's own STATUS
+ * read that consumes por_detected -- bmi323_init() (chips/bmi323/bmi323.c,
+ * #2035) already ran Bosch's device-initialisation status test and read
+ * STATUS itself, long before this app's step 3 above ever executes. The bit
+ * is clear-on-read (BST-BMI323-DS000-13 Rev 1.7 p.66) and it is gone from
+ * the device the moment init() reads it -- this app's own STATUS reads
+ * below only ever see it as 0, no matter what init() actually observed.
+ * (Measured on this same bus: a raw STATUS read returned 0x0021, bit0 set;
+ * the very next read returned 0x00a0, bit0 clear -- clear-on-read, caught
+ * in the act.) What init() saw is still available, because init() stashes
+ * it in dev->por_detected before deciding whether to fail on it; retrieve
+ * it via bmi323_was_por_detected() -- see the printk right after
+ * bmi323_init() below.
  *
  * ACC_CONF is also sampled once BEFORE bmi323_set_accel() runs, so the log
  * shows a genuine before/after, and STATUS is sampled a SECOND time ~100 ms
@@ -196,7 +212,11 @@ int main(void)
 
 	/* --- bmi323_init(): the same soft-reset + CHIP_ID bring-up i2c-device-hub
 	 * uses. A correct CHIP_ID here proves the READ path only -- see the file
-	 * header for why it says nothing about whether writes land. */
+	 * header for why it says nothing about whether writes land. init()'s
+	 * return codes are split (#2035): ALP_ERR_NOT_READY means its own
+	 * device-init STATUS read found por_detected clear (the soft reset was
+	 * never confirmed); ALP_ERR_IO means a CHIP_ID read failure/mismatch, or
+	 * ERR_REG.fatal_err. */
 	bmi323_t     bmi;
 	alp_status_t init_rc = bmi323_init(&bmi, bus, EVK_I2C_ADDR_BMI323);
 	uint8_t      id      = 0;
@@ -204,9 +224,29 @@ int main(void)
 	printk("bmi323_init() -> rc=%d  CHIP_ID=0x%02x (reset value is ALSO 0x43 -- see file header)\n",
 	       (int)init_rc,
 	       id);
+
+	/* --- The por_detected bit as init() actually observed it, via the
+	 * dedicated accessor rather than a re-read of STATUS -- see the file
+	 * header for why this app's own STATUS read (below) can no longer show
+	 * it. Deliberately called even if init_rc != ALP_OK:
+	 * bmi323_was_por_detected() has no dev->initialised gate, and init()
+	 * stashes the bit before deciding whether to fail on it, so a rejected
+	 * POR gate is exactly the case this call exists to report. */
+	bool         por_detected_at_init = false;
+	alp_status_t por_rc               = bmi323_was_por_detected(&bmi, &por_detected_at_init);
+	printk("bmi323_was_por_detected() -> rc=%d por_detected=%u (THIS is the trustworthy "
+	       "reading -- STATUS's own copy of this bit is gone by the time this app reads it)\n",
+	       (int)por_rc,
+	       por_detected_at_init ? 1u : 0u);
+
 	if (init_rc != ALP_OK) {
-		printk("RESULT FAIL: bmi323_init rc=%d -- part not answering at 0x%02x\n",
+		const char *why = (init_rc == ALP_ERR_NOT_READY)
+		                      ? "POR gate rejected, por_detected read 0 above"
+		                      : "CHIP_ID read/mismatch or ERR_REG.fatal_err";
+		printk("RESULT FAIL: bmi323_init rc=%d (%s) -- part not answering as expected at "
+		       "0x%02x\n",
 		       (int)init_rc,
+		       why,
 		       EVK_I2C_ADDR_BMI323);
 		alp_i2c_close(bus);
 		return 0;
@@ -236,7 +276,9 @@ int main(void)
 	 * order documented in the file header: ACC_CONF, then ERR_REG, then
 	 * STATUS. Neither ACC_CONF nor ERR_REG has a read side effect; STATUS
 	 * does (clear-on-read), so it must come after them and before any data
-	 * register read. */
+	 * register read -- for drdy_acc. por_detected (STATUS bit0) is already
+	 * gone by now, consumed by bmi323_init()'s own STATUS read; see the
+	 * file header and the bmi323_was_por_detected() call above. */
 	uint16_t     acc_conf_after = 0;
 	alp_status_t rc_conf_after  = read_reg16(bus, BMI323_REG_ACC_CONF, &acc_conf_after);
 	print_acc_conf("after", acc_conf_after);
@@ -280,7 +322,8 @@ int main(void)
 
 	uint16_t     status_1   = 0;
 	alp_status_t rc_status1 = read_reg16(bus, BMI323_REG_STATUS, &status_1);
-	printk("STATUS    (0x02) @~17ms : 0x%04x (drdy_acc=%u por_detected=%u)\n",
+	printk("STATUS    (0x02) @~17ms : 0x%04x (drdy_acc=%u por_detected=%u -- expect 0 here, "
+	       "bmi323_init() already consumed it; see bmi323_was_por_detected() above)\n",
 	       status_1,
 	       (status_1 & BMI323_STATUS_DRDY_ACC) ? 1 : 0,
 	       (status_1 & BMI323_STATUS_POR_DETECTED) ? 1 : 0);
@@ -294,7 +337,8 @@ int main(void)
 	k_msleep(83);
 	uint16_t     status_2   = 0;
 	alp_status_t rc_status2 = read_reg16(bus, BMI323_REG_STATUS, &status_2);
-	printk("STATUS    (0x02) @~100ms: 0x%04x (drdy_acc=%u por_detected=%u)\n",
+	printk("STATUS    (0x02) @~100ms: 0x%04x (drdy_acc=%u por_detected=%u -- expect 0 here, "
+	       "same reason as the ~17ms sample above)\n",
 	       status_2,
 	       (status_2 & BMI323_STATUS_DRDY_ACC) ? 1 : 0,
 	       (status_2 & BMI323_STATUS_POR_DETECTED) ? 1 : 0);
@@ -326,13 +370,14 @@ int main(void)
 
 	if (all_reads_ok) {
 		printk("RESULT PASS: all read-backs obtained -- ACC_CONF before=0x%04x after=0x%04x, "
-		       "ERR_REG=0x%04x, STATUS@17ms=0x%04x STATUS@100ms=0x%04x, "
+		       "ERR_REG=0x%04x, STATUS@17ms=0x%04x STATUS@100ms=0x%04x, por_detected(init)=%u, "
 		       "accel{%d,%d,%d}\n",
 		       acc_conf_before,
 		       acc_conf_after,
 		       err_reg,
 		       status_1,
 		       status_2,
+		       por_detected_at_init ? 1u : 0u,
 		       axes.x,
 		       axes.y,
 		       axes.z);
