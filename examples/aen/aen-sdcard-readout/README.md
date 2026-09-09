@@ -54,11 +54,14 @@ cleanly. No card enumerates because the SD slot is not reachable on this bench:
 >    and the GPIO proxy is PASS in `cc3501e-bridge-firmware:BRINGUP_STATUS.md`), but this
 >    example never calls `cc3501e_bridge_bringup()`, so no `GPIO_WRITE` reaches the
 >    mux. See [`aen-cc3501e-gpio`](../aen-cc3501e-gpio/) for the proxy path.
-> 3. **SD pad route + DMA translate:** this overlay wires the **D** route (CLK=P4_1,
->    CMD=P4_2, D0..D3=P6_0..P6_3) as a documented default (confirm vs schematic; data
->    pads also want `input-enable`), and correct ADMA2 transfers need
->    `CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE` + the `itcm/dtcm` `global_base` dtsi props
->    ([[project_pending_hw_configs]]).
+> 3. **SD pad route + DMA translate:** this overlay wires the **B** route (CLK=P14_1,
+>    CMD=P14_0, D0..D3=P13_0..P13_3), confirmed against the module schematic and
+>    corroborated by five metadata sources plus two netlists (see the overlay's
+>    header comment) -- a prior revision wired the unconfirmed **D** route
+>    (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3), which was wrong (P4_2 is not an SD
+>    pin, and D0..D3 landed on on-module PDM/OSPI0 pads). Correct ADMA2 transfers
+>    still need `CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE` + the `itcm/dtcm` `global_base`
+>    dtsi props ([[project_pending_hw_configs]]).
 
 So on this bench the SDHC **controller + driver are proven** (builds, inits,
 `disk_access_init` runs cleanly) but the card is **unreachable until this example

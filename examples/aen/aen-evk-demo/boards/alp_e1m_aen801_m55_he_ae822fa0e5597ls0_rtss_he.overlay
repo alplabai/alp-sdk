@@ -337,8 +337,25 @@
  * overlay does -- that app is this phase's SDHC bring-up reference and the two
  * nodes are deliberately identical.
  *
- * PADS: CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3, the SD "D" pad route from the
- * upstream alif-ensemble-pinctrl.h.
+ * PADS: CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3, the SD "B" pad route, which is
+ * how the E1M-AEN module is actually wired. A previous revision of this overlay
+ * wired the "D" route (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3) copied from the
+ * upstream alif-ensemble-pinctrl.h as an unverified placeholder -- it was never
+ * checked against the module schematic, and it was wrong: P4_2 carries no SD
+ * signal at all (it is QEC3_Y_A, a rotary encoder input on the EVK, with no SD
+ * pull-up), the D-route CLK on P4_1 lands on E1M A7 ENC3_X, D0/D1 on P6_0/P6_1
+ * land on E1M AA2 PDM_D0 / AA1 PDM_C0, and D2/D3 on P6_2/P6_3 -- with
+ * input-enable set -- land on on-module OSPI0_D2/OSPI0_D3
+ * (metadata/e1m_modules/aen/alif-ospi.tsv:4-5), which the resident BL32 owns,
+ * so the old route risked contending with boot flash whenever this phase ran.
+ * The B route is corroborated by five independent metadata sources
+ * (metadata/pinmux/aen.yaml:49-64, metadata/e1m_modules/aen/from-alif.tsv:36-48
+ * -- the vendor's own mapping, metadata/e1m_modules/aen/inter-chip.tsv:41-46,
+ * docs/cc3501e-bridge.md:74) plus the EVK netlist, which closes the chain at
+ * U39 pin 12 carrying E1M_CMD to E2 AH11. P14_0, P14_1 and P13_0..P13_3 also
+ * run through unpopulated zero-ohm links to the CC3501E SDIO
+ * (docs/cc3501e-bridge.md:71-75), with no conflict observed on any board built
+ * to date.
  *
  * `input-enable` ON CMD + D0..D3, AND IT IS LOAD-BEARING. Those five lines are
  * bidirectional, and the pad input buffer is a PADCTRL bit only pinctrl sets;
@@ -367,14 +384,14 @@
 	pinctrl_sdmmc: pinctrl_sdmmc {
 		/* CLK is push-pull output only -- no pad input buffer needed. */
 		group0 {
-			pinmux = <PIN_P4_1__SD_CLK_D>;
+			pinmux = <PIN_P14_1__SD_CLK_B>;
 			drive-strength = <8>;
 		};
 		/* CMD + D0..D3 are bidirectional; see the input-enable note above. */
 		group1 {
-			pinmux = <PIN_P4_2__SD_CMD_D>,
-				 <PIN_P6_0__SD_D0_D>, <PIN_P6_1__SD_D1_D>,
-				 <PIN_P6_2__SD_D2_D>, <PIN_P6_3__SD_D3_D>;
+			pinmux = <PIN_P14_0__SD_CMD_B>,
+				 <PIN_P13_0__SD_D0_B>, <PIN_P13_1__SD_D1_B>,
+				 <PIN_P13_2__SD_D2_B>, <PIN_P13_3__SD_D3_B>;
 			drive-strength = <8>;
 			input-enable;
 		};
