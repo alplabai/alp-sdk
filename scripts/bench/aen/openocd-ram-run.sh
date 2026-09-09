@@ -40,13 +40,40 @@
 # persistent MRAM write like Flow A/D -- but it is not undone by this script,
 # so the warning below is printed every time, not just the first.
 #
-# UNEXERCISED ON HARDWARE as of this change (alp-sdk#2037) -- shellcheck +
-# check_local_paths.py only, no board run. A real bench run should print,
-# BEFORE any OpenOCD output:
+# SAFETY GATE (alp-sdk#2037) -- this script landed today invoking OpenOCD
+# directly with no USB path, no labgrid, and no DPIDR check: exactly the
+# `ram-run.sh` hazard #1312/#1318 already fixed for JLinkExe, reintroduced
+# here because OpenOCD is a different tool with no shared preflight. Three
+# probes on alplab-gw answer the SAME cloned serial (AEN E8 3-4.4.3, the
+# GD32 bridge 3-4.2, both `603000869`); with nothing pinning the path,
+# OpenOCD picks one arbitrarily, and this script's first hardware actions
+# are `halt` then `load_image ... 0x0` -- on the wrong board, that halts and
+# overwrites a target this reservation does not cover. Caught before any
+# hardware ran. Two independent layers now gate that, same as every MRAM
+# writer in this directory:
+#   1. AEN_OPENOCD_USB_LOCATION (bench-env.sh, bench_require_openocd) pins
+#      the probe by labgrid-resolved USB path -- `adapter usb location`,
+#      prepended on the command line per the shared config's own header
+#      (that file must NOT hardcode it; labgrid's OpenOCDDriver supplies it
+#      for a real run, a by-hand exporter run prepends it here instead).
+#   2. A read-only preflight `init; shutdown` (before ANY halt/load_image)
+#      captures OpenOCD's own DPIDR line and checks it with the SAME
+#      bench_jlink_assert_aen_dpidr() the JLink flows use (bench-env.sh) --
+#      the AEN E8 answers 0x4C013477, the GD32 bridge 0x0BE12477. Either
+#      gate failing aborts before the probe is touched again.
+#
+# UNEXERCISED ON HARDWARE as of this change -- shellcheck + check_local_paths.py
+# only, no board run. A real bench run should print, in order:
+#   >>> openocd-ram-run preflight (M55-HE / M55-HP)  usb=<AEN_OPENOCD_USB_LOCATION>
+# then OpenOCD's own DPIDR line containing 0x4c013477 (lower/upper-case
+# either way -- the gate matches case-insensitively), THEN:
 #   >>> openocd-ram-run <name>  core=M55-HE (AP 0x00300000)  msp=0x... pc=0x...
 # (or M55-HP / AP 0x00200000 for the default), and OpenOCD's own transcript
 # should show "target halted" after `resume` is issued -- the app then runs
 # from ITCM exactly as a Flow C JLinkExe run would, just on the SELECTED core.
+# A wrong-board probe should instead print the ABORT from
+# bench_jlink_assert_aen_dpidr and exit 4, with no halt/load_image line ever
+# appearing in the transcript.
 set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh
@@ -129,6 +156,22 @@ fi
 # one thing that is unambiguous.
 echo ">>> openocd-ram-run $NAME  core=$NAMEFMT (AP $AP)  msp=$MSP pc=$PC" >&2
 
-CMDS="init; ${SELECT_CMDS}halt; load_image $BIN 0x0 bin; reg msplim_s 0x00000000; reg msplim_ns 0x00000000; reg msp $MSP; reg pc $PC; resume; shutdown"
+# `adapter usb location` pins the probe to the labgrid-resolved USB path --
+# it must run before `init` opens the adapter, and it is prepended here per
+# the shared config's own header (never hardcoded into that file). See the
+# SAFETY GATE comment at the top of this file.
+USB_LOC_CMD="adapter usb location $AEN_OPENOCD_USB_LOCATION; "
+
+# SAFETY GATE step 2/2 -- read-only preflight (init + shutdown, no halt, no
+# load_image) BEFORE touching the probe for real. DPIDR is a per-SW-DP
+# register, so examining the default target (HP, since only HE carries
+# -defer-examine) is enough to surface it regardless of which core CORE
+# ultimately selects.
+echo ">>> openocd-ram-run preflight ($NAMEFMT)  usb=$AEN_OPENOCD_USB_LOCATION" >&2
+PREFLIGHT_OUT=/tmp/openocd-ram-run-preflight.out
+openocd -f "$CFG" -c "${USB_LOC_CMD}init; shutdown" >"$PREFLIGHT_OUT" 2>&1 || true
+bench_jlink_assert_aen_dpidr "$PREFLIGHT_OUT" "openocd-ram-run preflight ($NAMEFMT)" || exit 4
+
+CMDS="${USB_LOC_CMD}init; ${SELECT_CMDS}halt; load_image $BIN 0x0 bin; reg msplim_s 0x00000000; reg msplim_ns 0x00000000; reg msp $MSP; reg pc $PC; resume; shutdown"
 
 openocd -f "$CFG" -c "$CMDS"
