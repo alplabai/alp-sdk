@@ -49,12 +49,23 @@
  * always picked the SD controller's 100 MHz source, not an enable -- and the
  * gate for that source, CGU CLK_ENA bit 7 (CLK100M), read 0xFE03FF71 on
  * silicon (bit 7 CLEAR) with the resident Linux chain fully up, meaning the
- * source feeding the mux had never been switched on. main() now asks the
- * Secure Enclave to enable it (and CLKEN_CLK_20M alongside, per Alif's own
- * baremetal demo) before the controller is touched, and reads CGU CLK_ENA
- * back afterwards to prove the bit actually flipped on silicon rather than
- * just that the service call returned success -- see sd_se_enable_clock()
- * below for the full citation.
+ * source feeding the mux had never been switched on. An earlier revision
+ * asked the Secure Enclave to enable it and printed "se_resp=0" as if that
+ * were success -- but that field is the WRONG one: it is the body-level
+ * resp_error_code, which a request the SE refuses at dispatch never touches,
+ * so it reads back as the zero this app's own memset put there. This
+ * revision reads the field Alif's own baremetal demo actually checks
+ * (service_header_t.hdr_error_code), adds a SERVICE_CLOCK_GET_CLOCKS
+ * cross-check of the enclave's OWN view of the register, and cycles
+ * CLKEN_CLK_100M disable-then-enable to rule out a short-circuited
+ * "already enabled" no-op -- see sd_se_set_clock_enable() and
+ * sd_se_get_cgu_clk_ena() below for the full citations, and main() step 7
+ * for the sequence. The CLKEN_CLK_20M request the DFP demo issues alongside
+ * CLKEN_CLK_100M has been dropped from this app entirely -- there is no
+ * 20 MHz gate in the E8 SVD, so which bit that enum value actually maps to
+ * is unknowable from the host side, and this SD path is already clocked at
+ * 10 MHz (CAPABILITIES1[5:0] = 0x0a) with CLK10M (bit 9) already set;
+ * enabling an unidentified clock is not a risk this diagnostic needs.
  */
 
 #include <stdbool.h>
@@ -62,6 +73,9 @@
 #include <stdio.h>
 #include <string.h> /* memset() for the SE clock-enable request packet, see below */
 
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/sdhc.h> /* sdhc_hw_reset() -- controller reset, see step 8 below */
 #include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
 #include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, see below */
@@ -73,13 +87,19 @@
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template,
                               * copied verbatim from examples/aen/aen-evk-demo. */
 
-/* SE clock-enable request (#2035): clk_set_enable_svc_t, SERVICE_CLOCK_SET_ENABLE and
- * CLKEN_CLK_100M/CLKEN_CLK_20M come transitively via se_service.h (services_lib_api.h +
- * services_lib_ids.h) -- the same pattern src/backends/security/se_cryptocell.c documents
- * for its own direct SE requests. No DFP include needed. */
+/* SE clock-enable/get-clocks requests (#2035): clk_set_enable_svc_t, clk_get_clocks_svc_t,
+ * SERVICE_CLOCK_SET_ENABLE, SERVICE_CLOCK_GET_CLOCKS and CLKEN_CLK_100M come transitively via
+ * se_service.h (services_lib_api.h + services_lib_ids.h) -- the same pattern
+ * src/backends/security/se_cryptocell.c documents for its own direct SE requests. No DFP
+ * include needed. */
 #include <se_service.h>
 
 #define DISK_NAME "SD"
+
+/* sdhc0 -- the node label the board overlay gives the DWC SDHC controller
+ * (examples/aen/aen-sdcard-readout/boards/..._rtss_he.overlay: `sdhc0: sdhc@48102000`).
+ * Used only by main() step 8's explicit sdhc_hw_reset() call. */
+#define SDHC_DEV DEVICE_DT_GET(DT_NODELABEL(sdhc0))
 
 /*
  * ============================================================================
@@ -149,9 +169,30 @@
  * THE SE OWNS THIS REGISTER -- it is firewalled on this part, and a direct
  * write to it is the class of action that has bricked boards on this bench.
  * This app only ever READS it (sd_diag_print_cgu_clk_ena() below), to prove
- * the SERVICE_CLOCK_SET_ENABLE request in sd_se_enable_clock() actually
+ * the SERVICE_CLOCK_SET_ENABLE request in sd_se_set_clock_enable() actually
  * reached silicon; the enable itself goes through se_service_send_request(),
- * never a direct write to this address. */
+ * never a direct write to this address.
+ *
+ * THE FINGERPRINT (#2035): this register's SVD reset default is 0x7F33F7F1.
+ * The 0xFE03FF71 measured on silicon has bit 7 (100m_clk), bit 20
+ * (160m_clk), bit 21 (266m_clk) and bit 23 (hfosc_clk) all reading 0 --
+ * exactly the four gates vendor Linux registers at cgu_base + 0x14, each via
+ * a plain clk_hw_gate(name, parent, cgu_base + 0x14, bit) call
+ * (/home/caner/linux_alif/drivers/clk/clk-ensemble.c:323-330). Four gates
+ * Linux itself names, all simultaneously off, is the fingerprint of Linux's
+ * clk_disable_unused late-initcall -- it marks only camera_pixclk
+ * CLK_IGNORE_UNUSED, so every other gate with no enabled consumer, including
+ * this SD source, gets dropped once probe finishes. Not a hardware default
+ * and not something this app broke; it is why the clock is off by the time
+ * this app's RAM-run image loads over an already-booted system.
+ *
+ * THE ENUM IS OPAQUE, NOT BIT POSITIONS: CLKEN_* (services_lib_api.h) is a
+ * request-side service ID the SE maps internally -- it is NOT the CGU
+ * CLK_ENA bit number, and reading it as one is an easy, silent mistake.
+ * CLKEN_CLK_100M is enum index 6 but gates bit 7 here; CLKEN_CLK_25M is
+ * index 13 but gates bit 5; CLKEN_CLK_50M is index 14 but gates bit 6;
+ * CLKEN_CLK_160M is index 5 but gates bit 20 (confirmed above). Only
+ * CLKEN_SYSPLL (index 0, bit 0) coincides, and only by accident. */
 #define SD_CGU_CLK_ENA             0x1A602014u
 #define SD_CGU_CLK_ENA_SYSPLL_Msk  (1u << 0)
 #define SD_CGU_CLK_ENA_CLK100M_Msk (1u << 7)
@@ -188,24 +229,60 @@ static void sd_diag_print_static_regs(void)
 	       caps);
 }
 
-/* Read CGU CLK_ENA back AFTER the SE clock-enable request in main() runs, so a
- * bench run shows whether CLK100M (bit 7) actually flipped on silicon, not just
- * that the service call returned success. Read-only, like the function above --
- * see the SD_CGU_CLK_ENA comment for why this register is never written
- * directly. */
-static void sd_diag_print_cgu_clk_ena(void)
+/* Read CGU CLK_ENA (the HARDWARE register) back around each step of main()'s
+ * clock-enable cycle, so a bench run shows whether CLK100M (bit 7) actually
+ * flipped on silicon, not just that a service call returned success. Called
+ * several times now (before/after the disable, before/after the enable) --
+ * `label` tags each printed line so a bench log can tell them apart.
+ * Read-only, like the function above -- see the SD_CGU_CLK_ENA comment for
+ * why this register is never written directly. */
+static void sd_diag_print_cgu_clk_ena(const char *label)
 {
 	uint32_t clk_ena = sys_read32(SD_CGU_CLK_ENA);
 
-	printf("[sd][diag] CGU CLK_ENA @0x%08x = 0x%08x  SYSPLL(bit0)=%u CLK100M(bit7)=%u "
-	       "CLK10M(bit9)=%u usb_clk(bit22)=%u -- CLK100M gates the SD controller's clock "
-	       "source; 1 here means the SE enable request took effect\n",
+	printf("[sd][diag] CGU CLK_ENA (HARDWARE, %s) @0x%08x = 0x%08x  SYSPLL(bit0)=%u "
+	       "CLK100M(bit7)=%u CLK10M(bit9)=%u usb_clk(bit22)=%u -- CLK100M gates the SD "
+	       "controller's clock source; 1 here means the SE request actually reached silicon\n",
+	       label,
 	       (unsigned)SD_CGU_CLK_ENA,
 	       clk_ena,
 	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_SYSPLL_Msk) != 0u),
 	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_CLK100M_Msk) != 0u),
 	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_CLK10M_Msk) != 0u),
 	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_USBCLK_Msk) != 0u));
+}
+
+/* Ask the Secure Enclave for its OWN view of the clock registers
+ * (SERVICE_CLOCK_GET_CLOCKS, service ID 716, clk_get_clocks_svc_t --
+ * services_lib_protocol.h:868-876) and print cgu_clk_ena from the response,
+ * alongside the same dispatch-layer / body-level fields sd_se_set_clock_enable()
+ * below prints. This is a QUERY, not a mutation: the packet carries no send_*
+ * fields, only header + the returned register snapshot + resp_error_code, so
+ * memset-then-set-hdr_service_id is the whole request. Comparing this to
+ * sd_diag_print_cgu_clk_ena()'s HARDWARE read is the point: if the SE echoes
+ * 0xFE03FF71 while still claiming CLOCK_SET_ENABLE succeeded, the SE is not
+ * driving CLK100M at all; if the SE reports bit 7 SET here while the hardware
+ * read stays clear, the SE is keeping a stale software shadow instead of the
+ * real gate. */
+static void sd_se_get_cgu_clk_ena(const char *label)
+{
+	clk_get_clocks_svc_t pkt;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.header.hdr_service_id = SERVICE_CLOCK_GET_CLOCKS;
+
+	int transport_rc = se_service_send_request((uint32_t *)&pkt, sizeof(pkt));
+	printf("[sd] SE CLOCK_GET_CLOCKS(%s) -> transport=%d "
+	       "hdr_error_code(DISPATCH-layer, see sd_se_set_clock_enable() comment)=%u "
+	       "hdr_flags=0x%04x body_resp_error_code=%d "
+	       "cgu_clk_ena(SE's OWN VIEW, not hardware)=0x%08x CLK100M(bit7)=%u\n",
+	       label,
+	       transport_rc,
+	       (unsigned)pkt.header.hdr_error_code,
+	       (unsigned)pkt.header.hdr_flags,
+	       (int)pkt.resp_error_code,
+	       pkt.cgu_clk_ena,
+	       (unsigned)((pkt.cgu_clk_ena & SD_CGU_CLK_ENA_CLK100M_Msk) != 0u));
 }
 
 #define SD_DIAG_MAX_CMD_SAMPLES   4u  /* covers CMD0, CMD8, ACMD41 (or its first retry), CMD2/3 */
@@ -330,24 +407,49 @@ static cc3501e_t cc35_fw;
 #define CC35_MAC_TIMEOUT_MS 2000u
 
 /*
- * SE clock-enable request wrapper (#2035) -- CLKCTL_PER_MST_SD_EN_Msk earlier
- * in this file confirms the SD peripheral clock is gated ON, and CLKCTL_PER_MST
- * bit 16 is a source-select that has always picked the 100 MHz leg (vendor
- * Linux clk-ensemble.c models sdhci_clk as exactly that 1-bit mux, forced to
- * 100m_clk) -- but nothing in this app, the board tree, or vendor Linux's own
- * devicetree (mmc@48102000 is `disabled` there) had ever asked the Secure
- * Enclave to switch that 100 MHz source on. Alif's own baremetal DFP demo
- * does, right before its own sd_host_init(): SERVICES_clocks_enable_clock(...,
- * CLKEN_CLK_100M, true, ...) (demo_sd.c), and enables CLKEN_CLK_20M alongside
- * -- their DFP treats a 20 MHz clock as required for SD too, though which CGU
- * bit it gates has not been established (unlike CLK100M/bit7, confirmed by the
- * E8 SVD). hal_alif's Zephyr layer has no clock-enable wrapper of its own
- * (only se_service_clock_set_divider()), so this builds the same
- * SERVICE_CLOCK_SET_ENABLE request the DFP's SERVICES_clocks_enable_clock()
- * sends (services_host_clocks.c) and posts it with the generic
- * se_service_send_request() transport -- the same one
+ * SE clock-enable/disable request wrapper (#2035) -- CLKCTL_PER_MST_SD_EN_Msk
+ * earlier in this file confirms the SD peripheral clock is gated ON, and
+ * CLKCTL_PER_MST bit 16 is a source-select that has always picked the 100 MHz
+ * leg (vendor Linux clk-ensemble.c models sdhci_clk as exactly that 1-bit mux,
+ * forced to 100m_clk) -- but nothing in this app, the board tree, or vendor
+ * Linux's own devicetree (mmc@48102000 is `disabled` there) had ever asked
+ * the Secure Enclave to switch that 100 MHz source on. Alif's own baremetal
+ * DFP demo does, right before its own sd_host_init(): SERVICES_clocks_enable_clock(...,
+ * CLKEN_CLK_100M, true, ...) (demo_sd.c). hal_alif's Zephyr layer has no
+ * clock-enable wrapper of its own (only se_service_clock_set_divider()), so
+ * this builds the same SERVICE_CLOCK_SET_ENABLE request the DFP's
+ * SERVICES_clocks_enable_clock() sends (services_host_clocks.c) and posts it
+ * with the generic se_service_send_request() transport -- the same one
  * src/backends/security/se_cryptocell.c and src/backends/ext/alif/storage.c
  * already use for their own direct SE requests.
+ *
+ * THE FIELD-CONFUSION FIX (#2035, this revision): an earlier revision of this
+ * function printed pkt.resp_error_code as "se_resp" and treated 0 as success.
+ * That field is BODY-level -- it belongs to the service payload, not the
+ * transport header, and a request the SE refuses AT DISPATCH (before the
+ * clock service handler ever runs) never touches it, so it reads back
+ * whatever this function's own memset put there: zero, indistinguishable
+ * from a genuine success. The field that actually carries the dispatch
+ * verdict is service_header_t.hdr_error_code (services_lib_protocol.h:84-89:
+ * `{hdr_service_id, hdr_flags, hdr_error_code, hdr_padding}`). Proof, read
+ * top to bottom:
+ *   - the vendor DFP's own transport, SERVICES_send_request(), *returns*
+ *     `p_header->hdr_error_code` as its function result
+ *     (se_services/source/services_host_handler.c:251, confirmed by reading
+ *     it directly: `return p_header->hdr_error_code;`);
+ *   - Alif's own demo checks exactly that return value and bails on it
+ *     (Boards/Templates/Baremetal/demo_sd.c:286);
+ *   - but Zephyr's se_service_send_request() (se_services/zephyr/src/se_service.c:1618-1647)
+ *     returns ONLY send_msg_to_se()'s transport-layer status (MHUv2 round
+ *     trip / SE-busy / timeout) -- it never surfaces hdr_error_code back to
+ *     the caller.
+ * So on this platform hdr_error_code has to be read out of the packet by the
+ * caller, after the call returns, same as resp_error_code always was -- this
+ * function now prints BOTH header fields (hdr_error_code, hdr_flags) AND the
+ * body-level resp_error_code, clearly labelled, so nobody repeats the
+ * mistake of trusting resp_error_code alone. A "success" reported by the old
+ * code could have been exactly this: a dispatch-layer refusal with a
+ * still-zero body.
  *
  * ORDERING MATTERS: the 0xFE03FF71 reading cited above was taken with the
  * resident Linux chain fully up. Vendor Linux's clk_disable_unused late-
@@ -359,29 +461,37 @@ static cc3501e_t cc35_fw;
  * naturally; moving this call into an early init hook that runs before Linux
  * finishes booting would silently break it again.
  *
- * Reports BOTH return codes rather than one collapsed bool: the transport
- * layer (se_service_send_request() -- MHUv2 round trip / SE busy / timeout)
- * fails differently from the SE itself rejecting the request
- * (pkt.resp_error_code) -- collapsing them would hide which one happened, and
- * a silent clock request that fails is exactly the defect class this slice
- * has spent all day removing.
+ * `enable` lets main() cycle the clock off-then-on (see step 7): a stale
+ * software shadow in the SE would report success for BOTH the disable and
+ * the enable while never touching silicon, so a request that only ever
+ * enables can't tell "the SE drove the bit" apart from "the SE short-
+ * circuited an already-enabled no-op".
  */
-static alp_status_t sd_se_enable_clock(uint32_t clock_type, const char *name)
+static alp_status_t sd_se_set_clock_enable(uint32_t clock_type, uint32_t enable, const char *name)
 {
 	clk_set_enable_svc_t pkt;
 
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.header.hdr_service_id = SERVICE_CLOCK_SET_ENABLE;
 	pkt.send_clock_type       = clock_type;
-	pkt.send_enable           = 1u;
+	pkt.send_enable           = enable;
 
 	int transport_rc = se_service_send_request((uint32_t *)&pkt, sizeof(pkt));
-	printf("[sd] SE CLOCK_SET_ENABLE(%s) -> transport=%d se_resp=%d\n",
+	printf("[sd] SE CLOCK_SET_ENABLE(%s, enable=%u) -> transport=%d "
+	       "hdr_error_code(DISPATCH-layer verdict, the field the vendor demo actually "
+	       "checks)=%u hdr_flags=0x%04x body_resp_error_code(BODY-level, only meaningful "
+	       "when hdr_error_code==0)=%d\n",
 	       name,
+	       enable,
 	       transport_rc,
+	       (unsigned)pkt.header.hdr_error_code,
+	       (unsigned)pkt.header.hdr_flags,
 	       (int)pkt.resp_error_code);
 
 	if (transport_rc != 0) {
+		return ALP_ERR_IO;
+	}
+	if (pkt.header.hdr_error_code != 0) {
 		return ALP_ERR_IO;
 	}
 	return (pkt.resp_error_code == 0) ? ALP_OK : ALP_ERR_IO;
@@ -713,39 +823,156 @@ int main(void)
 	alp_gpio_close(sd_rst);
 
 	/*
-	 * --- 7. Ask the Secure Enclave to enable the SD controller's clock
+	 * --- 7. Ask the Secure Enclave to cycle the SD controller's clock
 	 * source, BEFORE the SD host is touched -----------------------------
-	 * See sd_se_enable_clock() above for the full citation. Short version:
-	 * CLKCTL_PER_MST bit 16 only SELECTS the 100 MHz source -- it has
-	 * never enabled it -- and the gate for that source, CGU CLK_ENA bit 7
-	 * (CLK100M), measured 0 (0xFE03FF71) on silicon with Linux fully up.
-	 * A command circuit with no clock cannot complete SW_RST_CMD, which is
-	 * exactly what this app's own diagnostics have been showing. Requests
-	 * both clocks Alif's own demo enables for SD (100 MHz + 20 MHz) and
-	 * reports every return code -- neither request gates the rest of this
-	 * app: even a failed request should still be visible in the CGU
-	 * read-back and in disk_access_init()'s own result below, rather than
+	 * See sd_se_set_clock_enable() above for the full citation of the
+	 * header-vs-body field fix, and sd_se_get_cgu_clk_ena() above for the
+	 * SERVICE_CLOCK_GET_CLOCKS cross-check. Short version of the clock
+	 * problem: CLKCTL_PER_MST bit 16 only SELECTS the 100 MHz source -- it
+	 * has never enabled it -- and the gate for that source, CGU CLK_ENA
+	 * bit 7 (CLK100M), measured 0 (0xFE03FF71) on silicon with Linux fully
+	 * up. A command circuit with no clock cannot complete SW_RST_CMD,
+	 * which is exactly what this app's own diagnostics have been showing.
+	 *
+	 * DISABLE THEN ENABLE, not a bare enable: an earlier revision only
+	 * ever sent CLKEN_CLK_100M with enable=1 and read "success" off the
+	 * wrong field (see above). Even reading the right field, a single
+	 * enable request cannot distinguish "the SE drove the gate" from "the
+	 * SE saw the gate already on in its own shadow state and short-
+	 * circuited to success without touching silicon" -- both look
+	 * identical from one enable call alone. Requesting disable=0 first
+	 * forces a real transition either way: if the hardware bit tracks the
+	 * disable request, the SE is genuinely driving the gate (and the
+	 * following enable request proves it again, this time turning SD's
+	 * own clock ON for real); if the hardware bit does NOT move on either
+	 * request, the SE was never driving this gate at all, full stop. This
+	 * is safe on THIS bench: the gate is already measured disabled
+	 * (bit 7 clear) before this app ever runs, and vendor Linux has no
+	 * enabled consumer of the 100 MHz SD source (mmc@48102000 is
+	 * `disabled` in its devicetree), so briefly re-requesting "disabled"
+	 * changes nothing that was not already the case.
+	 *
+	 * Every step below is cross-checked THREE ways: the body/header
+	 * fields the request itself returns (sd_se_set_clock_enable()), the
+	 * SE's OWN view of the register (sd_se_get_cgu_clk_ena(),
+	 * SERVICE_CLOCK_GET_CLOCKS), and the actual HARDWARE register
+	 * (sd_diag_print_cgu_clk_ena()). None of these steps gate the rest of
+	 * this app -- even a failed request should still be visible in every
+	 * read-back and in disk_access_init()'s own result later, rather than
 	 * stopping this run before that evidence is captured.
+	 *
+	 * CLKEN_CLK_20M is deliberately NOT requested here (dropped entirely
+	 * from this revision, unlike an earlier one that mirrored Alif's demo
+	 * and sent it alongside CLKEN_CLK_100M): there is no 20 MHz gate in
+	 * the E8 SVD -- bit 9 is named CLK10M with a self-contradictory
+	 * "Enable 20MHz PLL clock" description, and bit 8 has no field at
+	 * all -- so which CGU bit the SE actually maps CLKEN_CLK_20M's opaque
+	 * service-ID onto is unknowable from the host side (see the
+	 * SD_CGU_CLK_ENA comment above: the CLKEN_* enum is opaque IDs, not
+	 * bit positions, and guessing one wrong is exactly the mistake that
+	 * comment exists to prevent). This SD path is already clocked at
+	 * 10 MHz per CAPABILITIES1[5:0] = 0x0a, and CLK10M (bit 9) already
+	 * reads set on this silicon -- so there is nothing this diagnostic
+	 * gains from enabling an unidentified clock, only risk.
 	 */
-	alp_status_t clk100_rc = sd_se_enable_clock(CLKEN_CLK_100M, "CLKEN_CLK_100M");
-	alp_status_t clk20_rc  = sd_se_enable_clock(CLKEN_CLK_20M, "CLKEN_CLK_20M");
+	sd_se_get_cgu_clk_ena("before enable-cycle");
 
-	/* Read CGU CLK_ENA back now, not just after the requests print their own
-	 * rc -- proves the effect on silicon rather than only the service's
-	 * verdict (see sd_diag_print_cgu_clk_ena()'s own comment). */
-	sd_diag_print_cgu_clk_ena();
+	alp_status_t clk_dis_rc = sd_se_set_clock_enable(CLKEN_CLK_100M, 0u, "CLKEN_CLK_100M disable");
+	sd_diag_print_cgu_clk_ena("after disable request");
 
-	if (clk100_rc != ALP_OK || clk20_rc != ALP_OK) {
-		printf("[sd] WARNING: at least one SE clock-enable request did not return OK "
-		       "(CLKEN_CLK_100M -> %d, CLKEN_CLK_20M -> %d) -- check the CGU CLK_ENA "
-		       "read-back above before trusting whatever disk_access_init() reports "
-		       "next\n",
-		       (int)clk100_rc,
-		       (int)clk20_rc);
+	alp_status_t clk_en_rc = sd_se_set_clock_enable(CLKEN_CLK_100M, 1u, "CLKEN_CLK_100M enable");
+	sd_diag_print_cgu_clk_ena("after enable request");
+
+	sd_se_get_cgu_clk_ena("after enable-cycle");
+
+	if (clk_dis_rc != ALP_OK || clk_en_rc != ALP_OK) {
+		printf("[sd] WARNING: at least one SE CLOCK_SET_ENABLE request did not return OK "
+		       "(disable -> %d, enable -> %d) -- check the hdr_error_code fields printed "
+		       "above and the CGU CLK_ENA read-backs before trusting whatever "
+		       "disk_access_init() reports next\n",
+		       (int)clk_dis_rc,
+		       (int)clk_en_rc);
 	}
 
 	/*
-	 * --- 8. Enumerate the card, read-only ------------------------------
+	 * --- 8. Reset the SD host controller, now that the card is out of
+	 * reset and its clock has been requested -----------------------------
+	 * ORDERING BUG (#2035, found by a full comparison against Alif's own
+	 * reference flow): Alif's sd_host_init() runs, in this order, inside
+	 * ONE call chain -- enable_sd_periph_clk() (their clock-enable
+	 * equivalent of step 7 above), reset_cb() (their SD_RST pulse,
+	 * equivalent of step 6 above), THEN hc_reset(SW_RST_ALL)
+	 * (alif-dfp-ref/drivers/source/sd.c:172-186), and hc_identify_card()
+	 * does a second, narrower hc_reset(DAT|CMD) immediately before CMD0
+	 * (sd_host.c:531-538). The controller reset always comes AFTER the
+	 * card is out of reset and the clock has been asked for, by
+	 * construction of their single call chain.
+	 *
+	 * Zephyr's device model breaks that ordering apart: sdhc_dwc_init()
+	 * is registered POST_KERNEL (sdhc_dwc.c's DEVICE_DT_INST_DEFINE), so
+	 * its own SW_RST_ALL (sdhc_dwc_reset(), sdhc_dwc.c:627-629) runs
+	 * during kernel init -- BEFORE main() is ever entered, i.e. before
+	 * this app's SD_RST pulse (step 6) and before the SE clock request
+	 * (step 7) both exist. Nothing in this app or in
+	 * disk_access_init()'s own call chain reissues a controller reset
+	 * afterwards -- the bus-power toggle inside sd_init_io()
+	 * (subsys/sd/sd.c) is not one, it only power-cycles + reclocks via
+	 * sdhc_set_io(). So without this step, every prior bench run reset
+	 * the controller while the card was still held in reset, and (if the
+	 * clock hypothesis above holds) while its clock source was dead --
+	 * this call reaches the state Alif's flow reaches by construction.
+	 *
+	 * KNOWN GAP, reported rather than assumed: this call reaches
+	 * `sdhc_hw_reset()` -> `.reset` -> sdhc_dwc_reset() -> a bare
+	 * SW_RST_ALL (sdhc_dwc.c:505-522,627-629) -- it does NOT re-run
+	 * sdhc_dwc_set_def_config() (sdhc_dwc.c:1091-1145), which is `static`
+	 * and only ever called from sdhc_dwc_init() at boot
+	 * (sdhc_dwc.c:1208-1213). Of what set_def_config() configures, the
+	 * bus voltage, power and the initial 400 kHz clock ARE effectively
+	 * restored afterward by disk_access_init()'s own sd_init_io()
+	 * sequence (it toggles power off/on and sets clock=400 kHz via
+	 * sdhc_set_io(), which calls the same sdhc_dwc_set_voltage() /
+	 * sdhc_dwc_set_power() / sdhc_dwc_clock_set() paths). The interrupt
+	 * enables are NOT restored by anything reachable from this app:
+	 * NORMAL/ERROR_INT_STAT_EN_R and NORMAL/ERROR_INT_SIGNAL_EN_R
+	 * (sdhc_dwc.c:1109-1123) -- including the CC/TC bits the driver's own
+	 * command-completion k_event_wait() depends on -- are set exactly
+	 * once, only inside set_def_config(). The public sdhc_enable_interrupt()
+	 * op (sdhc_dwc.c:992-1022) does not cover them either: it only ever
+	 * touches the CARD/CARD_INSRT/CARD_REM (SDIO/hotplug) bits, never
+	 * CC/TC/DMA/BWR/BRR. Alif's own reference does not have this gap --
+	 * hc_config_interrupt() (sd_host.c) re-arms interrupts as part of the
+	 * SAME sd_host_init() call chain that resets the controller -- but
+	 * Zephyr's public SDHC API has no equivalent this app can call
+	 * without editing sdhc_dwc.c, which is out of scope here (see the
+	 * file header). If every command below now times out at the driver's
+	 * full ~1000 ms with zero interrupt activity, THIS reset is the
+	 * likely cause, not the clock or reset-pulse work above -- that would
+	 * point at sdhc_dwc.c needing its own reset-then-rearm path, not at
+	 * this app.
+	 *
+	 * A related, smaller mismatch worth recording here rather than
+	 * rediscovering later: this driver's own reset timeout is
+	 * DWC_SDHC_SW_RST_TIMEOUT (0xFFFF) iterations of k_busy_wait(1), i.e.
+	 * ~65 ms (sdhc_dwc.c:505-522), whereas Alif's equivalent loop
+	 * (SDMMC_MAX_TIMEOUT_16 = 0xFFFF iterations of a 100us busy-wait, i.e.
+	 * ~6.5 s) never actually checks the bit it claims to poll for a
+	 * narrow reset: hc_reset()'s loop condition is
+	 * `while ((curr_reset_val == 1) && timeout--)`
+	 * (alif-dfp-ref/drivers/source/sd_host.c:237-252) -- true only when
+	 * the whole register reads exactly 1, so a DAT|CMD reset (value 6)
+	 * fails that comparison on the very first check and the loop exits
+	 * immediately without ever truly waiting. If a genuine self-clear on
+	 * this part needs more than ~65 ms, this driver reports a timeout
+	 * exactly where Alif's own reference would have silently proceeded.
+	 */
+	int sdhc_reset_rc = sdhc_hw_reset(SDHC_DEV);
+	printf("[sd] sdhc_hw_reset(sdhc0) -> %d (SW_RST_ALL only -- see the KNOWN GAP note "
+	       "above about interrupt enables)\n",
+	       sdhc_reset_rc);
+
+	/*
+	 * --- 9. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
@@ -767,13 +994,17 @@ int main(void)
 		printf("[sd] RESULT PASS: SD card enumerated (%llu MB)\n", (unsigned long long)mb);
 	} else {
 		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SD_RST "
-		       "pulsed low-then-high, SDHC controller built + inited; card still not "
-		       "reachable (disk_access_init rc=%d). The mux and the reset line are no "
-		       "longer the open question -- both are proven driven -- so look at the "
-		       "controller/card handshake itself, or at the SELECT jumper on header P18 "
-		       "(see README.md)\n",
+		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), "
+		       "controller reset (sdhc_hw_reset -> %d); card still not reachable "
+		       "(disk_access_init rc=%d). The mux, the reset line and the clock request "
+		       "are no longer the open question -- all are proven driven -- so look at the "
+		       "controller/card handshake itself, at the KNOWN GAP note above (interrupt "
+		       "enables), or at the SELECT jumper on header P18 (see README.md)\n",
 		       (int)bridge_rc,
 		       (int)en_rc,
+		       (int)clk_dis_rc,
+		       (int)clk_en_rc,
+		       sdhc_reset_rc,
 		       rc);
 	}
 	/* close() only frees the host-side GPIO proxy handle -- the CC3501E
