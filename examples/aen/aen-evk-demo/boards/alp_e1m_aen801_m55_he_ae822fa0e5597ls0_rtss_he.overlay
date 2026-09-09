@@ -357,14 +357,28 @@
  * (docs/cc3501e-bridge.md:71-75), with no conflict observed on any board built
  * to date.
  *
- * `input-enable` ON CMD + D0..D3, AND IT IS LOAD-BEARING. Those five lines are
- * bidirectional, and the pad input buffer is a PADCTRL bit only pinctrl sets;
- * without it the SoC cannot sample what the card drives on CMD/DATA and
- * enumeration can never complete -- the same trap the RMII RX group and the
- * SPI1 MISO group in this file call out. CLK is push-pull output only and
- * correctly omits it. Note the spelling: the pinned Zephyr v4.4 alif,pinctrl
- * binding allowlists `input-enable`, NOT `read-enable`; the wrong one fails
- * devicetree validation rather than merely doing nothing.
+ * `input-enable` ON CMD + D0..D3 + CLK, AND IT IS LOAD-BEARING ON ALL SIX. The
+ * pad input buffer is a PADCTRL bit only pinctrl sets; without it on CMD/DATA
+ * the SoC cannot sample what the card drives, and enumeration can never
+ * complete -- the same trap the RMII RX group and the SPI1 MISO group in this
+ * file call out. CLK NEEDS IT TOO, despite being a push-pull SoC output: this
+ * controller's DWC_mshc command/data state machines run on a card clock
+ * LOOPED BACK FROM THE PAD, not off the pre-pad internal signal, so an
+ * earlier revision of this comment reasoned "CLK is output-only, omit it" and
+ * was wrong -- it silently killed that loopback while leaving every
+ * asynchronous signal (PSTATE's CMD/DAT level bits, INTERNAL_CLK_STABLE)
+ * reading correctly, which is exactly why it went unnoticed: `SW_RST_ALL`
+ * completes, the transmit clock comes up, CMD/DAT levels read right, but the
+ * command circuit never reaches idle and `SW_RST_CMD` never self-clears while
+ * `SW_RST_DAT` does (DAT's circuit was already idle). Both Alif's DFP
+ * (`demo_sd.c`, `demo_sdio.c`, `demo_sd_fatfs.c`,
+ * `demo_mci_mdk_cmsisrtos2.c` all set `PADCTRL_READ_ENABLE` on SD CLK) and the
+ * vendor Linux dts (pad config `0x23` on CLK -- the same read-enable, Schmitt,
+ * 8 mA byte as CMD/DATA) agree. Do not remove this again -- see also the
+ * rotary-encoder pad that hit the identical PADCTRL_READ_ENABLE trap. Note
+ * the spelling: the pinned Zephyr v4.4 alif,pinctrl binding allowlists
+ * `input-enable`, NOT `read-enable`; the wrong one fails devicetree
+ * validation rather than merely doing nothing.
  *
  * NO cd-gpios, ON PURPOSE. The driver then falls back to the controller's own
  * PSTATE CARD_INSRT bit (sdhc_dwc_get_card_present()), which is what the phase
@@ -382,10 +396,13 @@
  */
 &pinctrl {
 	pinctrl_sdmmc: pinctrl_sdmmc {
-		/* CLK is push-pull output only -- no pad input buffer needed. */
+		/* CLK needs the pad input buffer too -- the controller's receive
+		 * path clocks off the pad, not the pre-pad signal. See the
+		 * file header for the full derivation; do not drop this again. */
 		group0 {
 			pinmux = <PIN_P14_1__SD_CLK_B>;
 			drive-strength = <8>;
+			input-enable;
 		};
 		/* CMD + D0..D3 are bidirectional; see the input-enable note above. */
 		group1 {
