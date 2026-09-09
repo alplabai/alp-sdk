@@ -12,7 +12,7 @@ struct device *dev)`:
 ld.bfd: modules/alp-sdk/libalp_sdk.a(tmp112.c.obj): in function `tmp112_init':
   chips/tmp112/tmp112.c:53: multiple definition of `tmp112_init';
   zephyr/drivers/sensor/ti/tmp112/libdrivers__sensor__ti__tmp112.a(tmp112.c.obj):
-  /home/caner/zephyr/drivers/sensor/ti/tmp112/tmp112.c:203: first defined here
+  <zephyr>/drivers/sensor/ti/tmp112/tmp112.c:203: first defined here
 ```
 
 `examples/aen/aen-evk-demo/prj.conf` now sets `CONFIG_TMP112=n`. This is
