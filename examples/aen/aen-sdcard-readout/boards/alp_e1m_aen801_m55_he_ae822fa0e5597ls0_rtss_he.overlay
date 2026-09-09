@@ -132,6 +132,30 @@
 	status = "okay";
 };
 
+/*
+ * SE SERVICE transport (#2035) -- the RTSS-HE <-> SE MHUv2 mailbox pair
+ * (seservice0r/seservice0s) plus the se_service root node that ties them,
+ * all status="disabled" by default in the SoC dtsi (zephyr/dts/alif/
+ * ensemble_e8_peripherals.dtsi). main() asks the SE to enable the SD
+ * controller's 100 MHz clock source (CGU CLK_ENA bit 7) before touching the
+ * controller -- see sd_se_enable_clock() in src/main.c -- which needs this
+ * transport up. Same three-node enable examples/aen/aen-se-service-info's
+ * overlay uses; itcm/dtcm global_base (for se_service.c's own
+ * local_to_global() on the request packet) is already set in the board
+ * dts, so nothing extra is needed here.
+ */
+&seservice0r {
+	status = "okay";
+};
+
+&seservice0s {
+	status = "okay";
+};
+
+&se_service {
+	status = "okay";
+};
+
 &{/soc} {
 	sdhc0: sdhc@48102000 {
 		compatible = "snps,dwc-sdhc";

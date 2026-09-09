@@ -44,11 +44,23 @@
  * reset-pin fault is reported and this app stops before disk_access_init(),
  * for the same reason a mux fault stops it -- a disk result measured with
  * the reset line unproven would be meaningless.
+ *
+ * SD clock gate (#2035): CLKCTL_PER_MST bit 16 is a SOURCE-SELECT that has
+ * always picked the SD controller's 100 MHz source, not an enable -- and the
+ * gate for that source, CGU CLK_ENA bit 7 (CLK100M), read 0xFE03FF71 on
+ * silicon (bit 7 CLEAR) with the resident Linux chain fully up, meaning the
+ * source feeding the mux had never been switched on. main() now asks the
+ * Secure Enclave to enable it (and CLKEN_CLK_20M alongside, per Alif's own
+ * baremetal demo) before the controller is touched, and reads CGU CLK_ENA
+ * back afterwards to prove the bit actually flipped on silicon rather than
+ * just that the service call returned success -- see sd_se_enable_clock()
+ * below for the full citation.
  */
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h> /* memset() for the SE clock-enable request packet, see below */
 
 #include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
@@ -60,6 +72,12 @@
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template,
                               * copied verbatim from examples/aen/aen-evk-demo. */
+
+/* SE clock-enable request (#2035): clk_set_enable_svc_t, SERVICE_CLOCK_SET_ENABLE and
+ * CLKEN_CLK_100M/CLKEN_CLK_20M come transitively via se_service.h (services_lib_api.h +
+ * services_lib_ids.h) -- the same pattern src/backends/security/se_cryptocell.c documents
+ * for its own direct SE requests. No DFP include needed. */
+#include <se_service.h>
 
 #define DISK_NAME "SD"
 
@@ -116,6 +134,30 @@
 #define SD_CLKCTL_PER_MST           0x4903F00Cu
 #define SD_CLKCTL_PER_MST_SD_EN_Msk (1u << 16)
 
+/* CGU (Clock Generation Unit) CLK_ENA -- the actual ENABLE gate for the 100 MHz
+ * source CLKCTL_PER_MST bit 16 above only SELECTS: vendor Linux models sdhci_clk
+ * as a 1-bit mux between syst_hclk and 100m_clk and forces the latter
+ * (drivers/clk/clk-ensemble.c), and CLK100M here is the gate for that 100 MHz
+ * leg's PLL output (Alif's own E8 SVD: "Enable 100MHz PLL clock"). MEASURED on
+ * silicon, three reads, identical, with the resident Linux chain fully booted:
+ * 0xFE03FF71 -- bit0 SYSPLL=1, bit7 CLK100M=0, bit9 CLK10M=1, bit22 usb_clk=0.
+ * Bits 4-6 are all set, so bit7 reading clear is a genuine single gap, not part
+ * of a blank region -- and a command circuit with no clock cannot complete
+ * SW_RST_CMD or clock out CMD0, exactly what this app's own SW_RST_R
+ * diagnostics above have been showing.
+ *
+ * THE SE OWNS THIS REGISTER -- it is firewalled on this part, and a direct
+ * write to it is the class of action that has bricked boards on this bench.
+ * This app only ever READS it (sd_diag_print_cgu_clk_ena() below), to prove
+ * the SERVICE_CLOCK_SET_ENABLE request in sd_se_enable_clock() actually
+ * reached silicon; the enable itself goes through se_service_send_request(),
+ * never a direct write to this address. */
+#define SD_CGU_CLK_ENA             0x1A602014u
+#define SD_CGU_CLK_ENA_SYSPLL_Msk  (1u << 0)
+#define SD_CGU_CLK_ENA_CLK100M_Msk (1u << 7)
+#define SD_CGU_CLK_ENA_CLK10M_Msk  (1u << 9)
+#define SD_CGU_CLK_ENA_USBCLK_Msk  (1u << 22)
+
 /* Print the four "before" registers: does the pad setting, the clock gate and
  * the capability field this app depends on actually look right on THIS
  * silicon, before disk_access_init() even runs. */
@@ -144,6 +186,26 @@ static void sd_diag_print_static_regs(void)
 	       "zephyr/drivers/sdhc/sdhc_dwc.c)\n",
 	       (unsigned)SD_REG_CAPABILITIES1,
 	       caps);
+}
+
+/* Read CGU CLK_ENA back AFTER the SE clock-enable request in main() runs, so a
+ * bench run shows whether CLK100M (bit 7) actually flipped on silicon, not just
+ * that the service call returned success. Read-only, like the function above --
+ * see the SD_CGU_CLK_ENA comment for why this register is never written
+ * directly. */
+static void sd_diag_print_cgu_clk_ena(void)
+{
+	uint32_t clk_ena = sys_read32(SD_CGU_CLK_ENA);
+
+	printf("[sd][diag] CGU CLK_ENA @0x%08x = 0x%08x  SYSPLL(bit0)=%u CLK100M(bit7)=%u "
+	       "CLK10M(bit9)=%u usb_clk(bit22)=%u -- CLK100M gates the SD controller's clock "
+	       "source; 1 here means the SE enable request took effect\n",
+	       (unsigned)SD_CGU_CLK_ENA,
+	       clk_ena,
+	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_SYSPLL_Msk) != 0u),
+	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_CLK100M_Msk) != 0u),
+	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_CLK10M_Msk) != 0u),
+	       (unsigned)((clk_ena & SD_CGU_CLK_ENA_USBCLK_Msk) != 0u));
 }
 
 #define SD_DIAG_MAX_CMD_SAMPLES   4u  /* covers CMD0, CMD8, ACMD41 (or its first retry), CMD2/3 */
@@ -266,6 +328,64 @@ static cc3501e_t cc35_fw;
  * aen-evk-demo's CC35_MAC_TIMEOUT_MS (examples/aen/aen-evk-demo/src/main.c),
  * copied rather than shared because these are two separate example apps. */
 #define CC35_MAC_TIMEOUT_MS 2000u
+
+/*
+ * SE clock-enable request wrapper (#2035) -- CLKCTL_PER_MST_SD_EN_Msk earlier
+ * in this file confirms the SD peripheral clock is gated ON, and CLKCTL_PER_MST
+ * bit 16 is a source-select that has always picked the 100 MHz leg (vendor
+ * Linux clk-ensemble.c models sdhci_clk as exactly that 1-bit mux, forced to
+ * 100m_clk) -- but nothing in this app, the board tree, or vendor Linux's own
+ * devicetree (mmc@48102000 is `disabled` there) had ever asked the Secure
+ * Enclave to switch that 100 MHz source on. Alif's own baremetal DFP demo
+ * does, right before its own sd_host_init(): SERVICES_clocks_enable_clock(...,
+ * CLKEN_CLK_100M, true, ...) (demo_sd.c), and enables CLKEN_CLK_20M alongside
+ * -- their DFP treats a 20 MHz clock as required for SD too, though which CGU
+ * bit it gates has not been established (unlike CLK100M/bit7, confirmed by the
+ * E8 SVD). hal_alif's Zephyr layer has no clock-enable wrapper of its own
+ * (only se_service_clock_set_divider()), so this builds the same
+ * SERVICE_CLOCK_SET_ENABLE request the DFP's SERVICES_clocks_enable_clock()
+ * sends (services_host_clocks.c) and posts it with the generic
+ * se_service_send_request() transport -- the same one
+ * src/backends/security/se_cryptocell.c and src/backends/ext/alif/storage.c
+ * already use for their own direct SE requests.
+ *
+ * ORDERING MATTERS: the 0xFE03FF71 reading cited above was taken with the
+ * resident Linux chain fully up. Vendor Linux's clk_disable_unused late-
+ * initcall drops every CGU gate that has no enabled consumer (it marks only
+ * camera_pixclk CLK_IGNORE_UNUSED), and mmc@48102000 is disabled in the
+ * resident device tree -- so this request MUST run after that late-initcall
+ * has already fired, or the gate gets dropped again a moment later. This
+ * app's RAM-run image loading over an already-booted system satisfies that
+ * naturally; moving this call into an early init hook that runs before Linux
+ * finishes booting would silently break it again.
+ *
+ * Reports BOTH return codes rather than one collapsed bool: the transport
+ * layer (se_service_send_request() -- MHUv2 round trip / SE busy / timeout)
+ * fails differently from the SE itself rejecting the request
+ * (pkt.resp_error_code) -- collapsing them would hide which one happened, and
+ * a silent clock request that fails is exactly the defect class this slice
+ * has spent all day removing.
+ */
+static alp_status_t sd_se_enable_clock(uint32_t clock_type, const char *name)
+{
+	clk_set_enable_svc_t pkt;
+
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.header.hdr_service_id = SERVICE_CLOCK_SET_ENABLE;
+	pkt.send_clock_type       = clock_type;
+	pkt.send_enable           = 1u;
+
+	int transport_rc = se_service_send_request((uint32_t *)&pkt, sizeof(pkt));
+	printf("[sd] SE CLOCK_SET_ENABLE(%s) -> transport=%d se_resp=%d\n",
+	       name,
+	       transport_rc,
+	       (int)pkt.resp_error_code);
+
+	if (transport_rc != 0) {
+		return ALP_ERR_IO;
+	}
+	return (pkt.resp_error_code == 0) ? ALP_OK : ALP_ERR_IO;
+}
 
 int main(void)
 {
@@ -593,7 +713,39 @@ int main(void)
 	alp_gpio_close(sd_rst);
 
 	/*
-	 * --- 7. Enumerate the card, read-only ------------------------------
+	 * --- 7. Ask the Secure Enclave to enable the SD controller's clock
+	 * source, BEFORE the SD host is touched -----------------------------
+	 * See sd_se_enable_clock() above for the full citation. Short version:
+	 * CLKCTL_PER_MST bit 16 only SELECTS the 100 MHz source -- it has
+	 * never enabled it -- and the gate for that source, CGU CLK_ENA bit 7
+	 * (CLK100M), measured 0 (0xFE03FF71) on silicon with Linux fully up.
+	 * A command circuit with no clock cannot complete SW_RST_CMD, which is
+	 * exactly what this app's own diagnostics have been showing. Requests
+	 * both clocks Alif's own demo enables for SD (100 MHz + 20 MHz) and
+	 * reports every return code -- neither request gates the rest of this
+	 * app: even a failed request should still be visible in the CGU
+	 * read-back and in disk_access_init()'s own result below, rather than
+	 * stopping this run before that evidence is captured.
+	 */
+	alp_status_t clk100_rc = sd_se_enable_clock(CLKEN_CLK_100M, "CLKEN_CLK_100M");
+	alp_status_t clk20_rc  = sd_se_enable_clock(CLKEN_CLK_20M, "CLKEN_CLK_20M");
+
+	/* Read CGU CLK_ENA back now, not just after the requests print their own
+	 * rc -- proves the effect on silicon rather than only the service's
+	 * verdict (see sd_diag_print_cgu_clk_ena()'s own comment). */
+	sd_diag_print_cgu_clk_ena();
+
+	if (clk100_rc != ALP_OK || clk20_rc != ALP_OK) {
+		printf("[sd] WARNING: at least one SE clock-enable request did not return OK "
+		       "(CLKEN_CLK_100M -> %d, CLKEN_CLK_20M -> %d) -- check the CGU CLK_ENA "
+		       "read-back above before trusting whatever disk_access_init() reports "
+		       "next\n",
+		       (int)clk100_rc,
+		       (int)clk20_rc);
+	}
+
+	/*
+	 * --- 8. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
