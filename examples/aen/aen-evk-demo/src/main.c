@@ -1880,26 +1880,31 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		       "against a card that is not connected to the SoC. Check that phase 8 passed "
 		       "(the proxy needs its bridge attached) and that this build carries the IO20 "
 		       "route\n");
-		/* Restore idle before closing, same as the single exit below --
-		 * cfg_rc == ALP_OK means the pin WAS configured as an output, so
-		 * skipping this would leave GPIO_26 in whatever state the failed
-		 * write left it at, for the rest of the run. Ignoring the return
-		 * matches the main exit: best-effort restore on an already-
-		 * failing path, not a second gate. */
-		(void)alp_gpio_write(mux_en, true);
+		/* No restore-to-idle here (nor at the phase's single exit below),
+		 * on the maintainer's instruction: /E LOW is this board's working
+		 * state, not a transient this phase borrows and must give back
+		 * on the way out. Whatever GPIO_26 was left driving by the failed
+		 * configure/write above stays as-is; close() only frees the
+		 * host-side proxy handle. */
 		alp_gpio_close(mux_en);
 		ctx->note = "mux ENABLE not drivable";
 		return PHASE_FAIL;
 	}
 	k_msleep(SD_MUX_SETTLE_MS);
 
-	/* From here on the mux stays ENABLED (GPIO_26 driven low) until this
-	 * function's single exit below, which de-asserts it and only then
-	 * closes the handle -- the same restore-to-idle-before-close idiom
-	 * phase 6 (RGB LED) uses for its PWM channels. Every step from here on
+	/* From here on the mux stays ENABLED (GPIO_26 driven low) through this
+	 * function's single exit below AND past it, for the rest of the run --
+	 * deliberately NOT the restore-to-idle-before-close idiom phase 6 (RGB
+	 * LED) uses for its PWM channels. /E LOW is this board's working
+	 * state, not a resource this phase borrows: leaving it asserted is
+	 * what keeps CLK/CMD/D0..D3 connected through the mux to the card,
+	 * on the maintainer's instruction. (If this reads like the "restore
+	 * on every exit" bug that used to live here -- it isn't; that
+	 * discipline was removed on purpose.) Every step from here on still
 	 * reports through `verdict` / `ctx->note` instead of returning
-	 * directly, so GPIO_26 never gets left driving the mux past this
-	 * function on ANY of the five outcomes -- PASS, FAIL or SKIPPED. */
+	 * directly, so the outcome bookkeeping below stays coherent across all
+	 * five outcomes -- PASS, FAIL or SKIPPED -- even though pin state no
+	 * longer varies by exit. */
 	phase_verdict_t verdict = PHASE_FAIL;
 
 	/* --- 2. Enumerate the card ---------------------------------------- */
@@ -2110,9 +2115,10 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 			if (verdict == PHASE_PASS && urc != 0) {
 				/* The write/read/verify round trip proved the data path,
 				 * but a failed unmount leaves this volume mounted in
-				 * FATFS's own view while the mux de-assert below
-				 * electrically disconnects the card out from under it --
-				 * that is not a PASS. */
+				 * FATFS's own view with a cache that was never flushed --
+				 * that is not a PASS on its own, independent of mux
+				 * state (which stays asserted after this phase either
+				 * way; see the close() below). */
 				fail_why = "fs_unmount failed after a passing verify";
 				verdict  = PHASE_FAIL;
 			}
@@ -2132,12 +2138,19 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		}
 	}
 
-	/* --- 5. Restore the mux to idle before returning --------------------
-	 * De-assert ENABLE (drive it back HIGH) and only then close the
-	 * handle, on every one of the five outcomes above -- matching phase
-	 * 6's restore-to-idle-before-close idiom. Without this, GPIO_26 stays
-	 * driven low through phases 10-14 and past the end of the run. */
-	(void)alp_gpio_write(mux_en, true);
+	/* --- 5. Close the handle -- leave the mux asserted -------------------
+	 * No de-assert here, on the maintainer's instruction: /E LOW is this
+	 * board's working state, not a transient this phase must restore on
+	 * exit -- unlike phase 6's restore-to-idle-before-close idiom for its
+	 * PWM channels, which this phase deliberately does NOT follow. GPIO_26
+	 * stays driven low through phases 10-14 and past the end of the run;
+	 * that is the desired resting state, not a leak. Closing only frees
+	 * the host-side GPIO proxy handle -- the CC3501E keeps driving GPIO_26
+	 * low afterwards regardless. One consequence worth knowing: with the
+	 * pin left asserted, MUX_EN can now be metered at U38 pin 15 / U39
+	 * pin 15 at any time after this phase runs, not only inside the
+	 * settle window above (several bench sessions were burned probing it
+	 * after the phase had already restored it to HIGH). */
 	alp_gpio_close(mux_en);
 	return verdict;
 }
