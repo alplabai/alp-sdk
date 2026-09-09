@@ -273,18 +273,38 @@ static phase_verdict_t phase_rtc_temp(demo_ctx_t *ctx)
 			/* A full second, plus margin, so a same-second race (read
 			 * lands right before a rollover) can't read as "not
 			 * advancing" -- 1100 ms guarantees at least one seconds
-			 * tick has elapsed by the second read. */
+			 * tick has elapsed by the second read.
+			 *
+			 * Log the uptime delta across this sleep. An all-zero
+			 * t0/t1 pair with advanced=no is ambiguous between two very
+			 * different failures -- a stopped/misread clock, or a sleep
+			 * that returned instantly and never gave the clock a second
+			 * to advance -- and nothing before this line distinguished
+			 * them. */
+			int64_t before_ms = k_uptime_get();
 			k_msleep(1100);
-			alp_status_t rc1 = rv3028c7_get_time(&rtc, &t1);
+			int64_t      slept_ms = k_uptime_get() - before_ms;
+			alp_status_t rc1      = rv3028c7_get_time(&rtc, &t1);
 
 			/* Handle the 59 -> 00 rollover: "advancing" means the
 			 * absolute second-of-minute changed, in either direction
 			 * a wrap can present it. */
 			bool advanced = (rc0 == ALP_OK) && (rc1 == ALP_OK) && (t0.second != t1.second);
 
-			printf("[evkdemo] RTC: init ok, cold_start=%s, t0=%02u:%02u:%02u "
+			/* rc0/rc1 printed explicitly: the decoded t0/t1 fields
+			 * below are only meaningful if their read succeeded --
+			 * a failed rv3028c7_get_time() leaves t0/t1 at their {0}
+			 * initialiser, which prints as a perfectly plausible
+			 * (but entirely fake) 00:00:00 midnight. Without rc0/rc1
+			 * on the line, that failure is indistinguishable from a
+			 * genuinely stopped clock. */
+			printf("[evkdemo] RTC: init ok, cold_start=%s, rc0=%d rc1=%d, "
+			       "slept_ms=%lld, t0=%02u:%02u:%02u "
 			       "t1=%02u:%02u:%02u advanced=%s\n",
 			       cold ? "true" : "false",
+			       (int)rc0,
+			       (int)rc1,
+			       (long long)slept_ms,
 			       t0.hour,
 			       t0.minute,
 			       t0.second,

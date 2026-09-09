@@ -146,12 +146,25 @@ static uint8_t bin_to_bcd(uint8_t bin)
 /* Shared field bounds for a decoded rv3028c7_time_t, used both to
  * reject an out-of-range set_time() request and to reject a garbage
  * get_time() decode (see rv3028c7_get_time()'s p.53 bus-timeout
- * note). */
+ * note).
+ *
+ * WEEKDAY (03h) is a raw 3-bit counter -- 0..6, wrapping 6 -> 0, with
+ * NO datasheet-fixed day mapping (Application Manual Rev. 1.4 Sec.
+ * 3.4 "03h -- Weekday", p.16).  0 is that register's own POR RESET
+ * value ("Weekday 1 -- Default value" = 0b000, same page), not a
+ * fault code -- a board with no VBACKUP (every power cycle is a cold
+ * start, PORF always set) legitimately reads weekday=0 while seconds/
+ * minutes/hours are perfectly valid and advancing.  A prior version
+ * of this check required weekday in 1..7, which rejected that exact
+ * POR-default reading as if it were the same p.53 bus-timeout garbage
+ * this function exists to catch -- see aen-evk-demo phase_rtc_temp()
+ * (examples/aen/aen-evk-demo), where a bench run on real E1M-AEN803
+ * silicon showed get_time() failing both calls (rc0/rc1 both
+ * ALP_ERR_IO) while the seconds register measurably advanced. */
 static bool time_fields_in_range(const rv3028c7_time_t *t)
 {
-	return t->second <= 59 && t->minute <= 59 && t->hour <= 23 && t->weekday >= 1 &&
-	       t->weekday <= 7 && t->day >= 1 && t->day <= 31 && t->month >= 1 && t->month <= 12 &&
-	       t->year >= 2000 && t->year <= 2099;
+	return t->second <= 59 && t->minute <= 59 && t->hour <= 23 && t->weekday <= 6 && t->day >= 1 &&
+	       t->day <= 31 && t->month >= 1 && t->month <= 12 && t->year >= 2000 && t->year <= 2099;
 }
 
 static alp_status_t rv3028_read(rv3028c7_t *ctx, uint8_t reg, uint8_t *buf, size_t len)

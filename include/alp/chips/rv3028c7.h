@@ -54,7 +54,9 @@ typedef struct {
 	uint8_t  second;  /**< 0..59 */
 	uint8_t  minute;  /**< 0..59 */
 	uint8_t  hour;    /**< 0..23 */
-	uint8_t  weekday; /**< 1..7 (1 = Sunday by convention) */
+	uint8_t  weekday; /**< 0..6, raw WEEKDAY (03h) counter value -- resets to 0 at
+	                    *   POR, no fixed day mapping (App. Manual Rev. 1.4 Sec.
+	                    *   3.4 "03h -- Weekday", p.16). */
 	uint8_t  day;     /**< 1..31 */
 	uint8_t  month;   /**< 1..12 */
 	uint16_t year;    /**< Full year 2000..2099 */
