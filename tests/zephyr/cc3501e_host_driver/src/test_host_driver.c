@@ -634,7 +634,7 @@ static void slave_dispatch(void)
 		const uint32_t freq_hz = (uint32_t)slave.req_pl[0] | ((uint32_t)slave.req_pl[1] << 8) |
 		                         ((uint32_t)slave.req_pl[2] << 16) |
 		                         ((uint32_t)slave.req_pl[3] << 24);
-		const uint8_t  d[8]    = {
+		const uint8_t d[8] = {
 			(uint8_t)(freq_hz & 0xFFu),
 			(uint8_t)((freq_hz >> 8) & 0xFFu),
 			(uint8_t)((freq_hz >> 16) & 0xFFu),
