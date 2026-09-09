@@ -375,22 +375,28 @@ static bool bmp581_raw_invalid(const bmp581_raw_t *raw)
  *
  * chips/bmi323/bmi323.c deliberately keeps its register map private (its
  * whole job is to hide it), so when bmi323_init() fails this app
- * duplicates the three registers Bosch's own start-up flow inspects
+ * duplicates the two registers Bosch's own start-up flow inspects
  * (BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16) rather than growing the
  * driver's public surface for one demo's error message -- the same call
  * examples/aen/aen-bmi323-regcheck made for an earlier BMI323 failure
- * (#2034). This runs AFTER bmi323_init() already returned, so if
- * bmi323_init() itself failed at its own STATUS read (STATUS.por_detected
- * is clear-on-read), that bit was already 0 the moment init() looked --
- * init() returns immediately when it sees por_detected clear, before
- * anything else runs that could have set it, so re-reading it here still
- * reports the same fact, not a probe artefact.
+ * (#2034).
+ *
+ * STATUS (0x02) itself is deliberately NOT re-read here: bit0
+ * (por_detected) is clear-on-read (Rev 1.7 p.66), and bmi323_init()
+ * already consumed it before returning -- a re-read here would always see
+ * 0, whether the actual failure was the POR gate, a CHIP_ID mismatch, or a
+ * CHIP_ID read error, and print the same blame text for all three. That
+ * was the bug in an earlier version of this diagnostic (#2035): it named
+ * "the soft-reset write never landed" on every init() failure, including
+ * ones where the POR gate had already passed. Use
+ * bmi323_was_por_detected() instead, which reports what init() itself saw
+ * before that bit was consumed, and bmi323_init()'s own split return codes
+ * (ALP_ERR_NOT_READY for the POR gate, ALP_ERR_IO for CHIP_ID/ERR_REG) to
+ * say which of the three actually happened.
  */
 #define BMI323_DIAG_REG_CHIP_ID   0x00u
 #define BMI323_DIAG_REG_ERR_REG   0x01u
-#define BMI323_DIAG_REG_STATUS    0x02u
 #define BMI323_DIAG_ERR_FATAL_ERR 0x0001u /* ERR_REG bit0 (Rev 1.7 p.61 Table 36). */
-#define BMI323_DIAG_STATUS_POR    0x0001u /* STATUS bit0, por_detected (Rev 1.7 p.66). */
 
 /* One raw 16-bit register read, bypassing the driver entirely. Every
  * BMI323 read returns 2 dummy bytes ahead of the real data
@@ -407,47 +413,64 @@ static alp_status_t bmi323_diag_read16(alp_i2c_t *bus, uint8_t reg, uint16_t *ou
 
 /*
  * Explains a bmi323_init() failure instead of leaving a bare "init -> -5"
- * that folds a soft-reset NAK, a CHIP_ID-read I/O error, and a CHIP_ID
- * mismatch into one indistinguishable ALP_ERR_IO (#2035). Re-reads
- * CHIP_ID, ERR_REG, and STATUS directly and names which one is implicated.
+ * that folds a POR-gate rejection, a CHIP_ID-read I/O error, a CHIP_ID
+ * mismatch, and ERR_REG.fatal_err into one indistinguishable code (#2035).
+ * bmi323_init() splits these across ALP_ERR_NOT_READY (POR gate only) and
+ * ALP_ERR_IO (CHIP_ID/ERR_REG) -- see the header's bmi323_init() doc
+ * comment -- so `irc` alone already answers the POR-gate question; this
+ * only needs to work out which of the two ALP_ERR_IO causes applies.
  *
  * Returns whether CHIP_ID itself was readable -- the caller uses this to
  * tell BROKEN (registers readable, something else is wrong) apart from
  * PHANTOM (the address ACKed but the register protocol doesn't answer at
- * all, e.g. today's CHIP_ID (0x00) read failed rc=-5).
+ * all).
  */
-static bool bmi323_report_init_failure(alp_i2c_t *bus, alp_status_t irc)
+static bool bmi323_report_init_failure(const bmi323_t *dev, alp_status_t irc)
 {
 	printf("[evkdemo] BMI323 @0x%02x: init -> %d\n", EVK_I2C_ADDR_BMI323, (int)irc);
 
 	uint16_t     id    = 0;
-	alp_status_t rc_id = bmi323_diag_read16(bus, BMI323_DIAG_REG_CHIP_ID, &id);
+	alp_status_t rc_id = bmi323_diag_read16(dev->bus, BMI323_DIAG_REG_CHIP_ID, &id);
 	if (rc_id != ALP_OK) {
 		printf("[evkdemo]   CHIP_ID  (0x00): read failed rc=%d -- the part isn't answering "
-		       "the register protocol at all (the soft-reset write likely NAK'd too)\n",
+		       "the register protocol at all\n",
 		       (int)rc_id);
 		return false;
 	}
 	printf("[evkdemo]   CHIP_ID  (0x00) = 0x%02x (expect 0x%02x)\n", (uint8_t)id, BMI323_CHIP_ID);
 
 	uint16_t     err_reg    = 0;
-	alp_status_t rc_err_reg = bmi323_diag_read16(bus, BMI323_DIAG_REG_ERR_REG, &err_reg);
+	alp_status_t rc_err_reg = bmi323_diag_read16(dev->bus, BMI323_DIAG_REG_ERR_REG, &err_reg);
+	bool         fatal_err  = (rc_err_reg == ALP_OK) && (err_reg & BMI323_DIAG_ERR_FATAL_ERR) != 0;
 	if (rc_err_reg == ALP_OK) {
-		printf("[evkdemo]   ERR_REG  (0x01) = 0x%04x (fatal_err=%u)\n",
-		       err_reg,
-		       (err_reg & BMI323_DIAG_ERR_FATAL_ERR) ? 1u : 0u);
+		printf(
+		    "[evkdemo]   ERR_REG  (0x01) = 0x%04x (fatal_err=%u)\n", err_reg, fatal_err ? 1u : 0u);
 	}
 
-	uint16_t     status    = 0;
-	alp_status_t rc_status = bmi323_diag_read16(bus, BMI323_DIAG_REG_STATUS, &status);
-	if (rc_status == ALP_OK) {
-		printf("[evkdemo]   STATUS   (0x02) = 0x%04x (por_detected=%u)%s\n",
-		       status,
-		       (status & BMI323_DIAG_STATUS_POR) ? 1u : 0u,
-		       (status & BMI323_DIAG_STATUS_POR) == 0
-		           ? " -- 0 here is why init() failed: the soft-reset write never actually "
-		             "landed (BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16)"
-		           : "");
+	/* STATUS.por_detected as init() itself saw it, not a re-read (see the
+	 * big comment above this block for why a re-read always lies). */
+	bool         por_detected = false;
+	alp_status_t rc_por       = bmi323_was_por_detected(dev, &por_detected);
+
+	if (irc == ALP_ERR_NOT_READY) {
+		printf("[evkdemo]   init() rejected at the POR gate -- STATUS.por_detected was clear "
+		       "when init() read it, meaning the soft-reset write never demonstrably landed "
+		       "(BST-BMI323-DS000-13 Rev 1.7, Figure 2 pp.15-16). CHIP_ID above is not "
+		       "evidence either way: its POR reset value (0x0043) reads back correctly "
+		       "whether or not the reset actually landed.\n");
+	} else if (fatal_err && rc_por == ALP_OK && !por_detected) {
+		/* fatal_err is checked before STATUS is ever read (bmi323.c), so
+		 * por_detected being unset here is consistent with this path,
+		 * not just coincidence. */
+		printf("[evkdemo]   init() failed on ERR_REG.fatal_err -- an unrecoverable device "
+		       "error, reported before the POR gate was even reached\n");
+	} else if (rc_por == ALP_OK && por_detected) {
+		printf("[evkdemo]   init() failed on the CHIP_ID mismatch/read check -- the POR gate "
+		       "had already passed by then, so this is neither a reset problem nor a "
+		       "fatal device error\n");
+	} else {
+		printf("[evkdemo]   init() failed before this diagnostic can fully attribute why -- "
+		       "see irc, ERR_REG, and CHIP_ID above\n");
 	}
 	return true;
 }
@@ -563,7 +586,7 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 			bmi323_t     bmi;
 			alp_status_t irc = bmi323_init(&bmi, ctx->carrier_bus, EVK_I2C_ADDR_BMI323);
 			if (irc != ALP_OK) {
-				bool chip_id_readable = bmi323_report_init_failure(ctx->carrier_bus, irc);
+				bool chip_id_readable = bmi323_report_init_failure(&bmi, irc);
 				if (chip_id_readable) {
 					printf("[evkdemo] BMI323 @0x%02x: %s\n",
 					       EVK_I2C_ADDR_BMI323,
