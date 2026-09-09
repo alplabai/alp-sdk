@@ -4111,6 +4111,10 @@
           "hash": "3e9432999dc2e14a",
           "signature": "alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx, gd32g553_ota_state_info_t *out);"
         },
+        "gd32g553_ota_image_crc32": {
+          "hash": "9af8edb6f67a92f0",
+          "signature": "alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t *out_crc32);"
+        },
         "gd32g553_ota_rollback": {
           "hash": "65fc166bfce1cfcd",
           "signature": "alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);"
@@ -12074,6 +12078,10 @@
           "hash": "6c6c1cc020705b8b",
           "value": "0x80u"
         },
+        "ALP_CC3501E_CRC_BYTES": {
+          "hash": "b27c82868f9c54ac",
+          "value": "2u"
+        },
         "ALP_CC3501E_EVENT_HDR_BYTES": {
           "hash": "ca97663d60bb61a4",
           "value": "2u"
@@ -12115,12 +12123,16 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_MAJOR": {
-          "hash": "5b29aa6688e2f1e3",
+          "hash": "670459f7ff11038a",
+          "value": "4"
+        },
+        "ALP_CC3501E_PROTOCOL_MAJOR_LEGACY": {
+          "hash": "ef1c8a5e78656163",
           "value": "3"
         },
         "ALP_CC3501E_PROTOCOL_MINOR": {
-          "hash": "693c3687ba0ff621",
-          "value": "1"
+          "hash": "8659f250584c792e",
+          "value": "0"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
           "hash": "055edcb287050a28",
@@ -12134,6 +12146,10 @@
           "hash": "0aeceeaf85a9783e",
           "value": "(v) ((v) & 0xFFu)"
         },
+        "ALP_CC3501E_REPLY_PAD": {
+          "hash": "bc551a3550d55c12",
+          "value": "8u"
+        },
         "ALP_CC3501E_REQ_SEQ_LAST": {
           "hash": "7d52e8185ae5e8b7",
           "value": "31u"
@@ -12145,6 +12161,10 @@
         "ALP_CC3501E_REQ_SEQ_NONE": {
           "hash": "fafe93c51ebdfab2",
           "value": "0u"
+        },
+        "ALP_CC3501E_RESP_OK_LEGACY": {
+          "hash": "f7d7d600f98e1030",
+          "value": "0x00u"
         },
         "ALP_CC3501E_SPI1_MAX_XFER": {
           "hash": "23d881a20f05388a",
@@ -12536,9 +12556,9 @@
           "kind": "enum"
         },
         "alp_cc3501e_resp_t": {
-          "definition": "typedef enum { ALP_CC3501E_RESP_OK = 0x00, ALP_CC3501E_RESP_ERR_INVALID = 0x01, ALP_CC3501E_RESP_ERR_BUSY = 0x02, ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03, ALP_CC3501E_RESP_ERR_NO_MEM = 0x04, ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, ALP_CC3501E_RESP_ERR_RADIO = 0x06, ALP_CC3501E_RESP_ERR_PROTOCOL = 0x07, ALP_CC3501E_RESP_ERR_VERSION = 0x08, ALP_CC3501E_RESP_ERR_STATE = 0x09, ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF } alp_cc3501e_resp_t;",
+          "definition": "typedef enum { ALP_CC3501E_RESP_OK = 0x5A, ALP_CC3501E_RESP_ERR_INVALID = 0x01, ALP_CC3501E_RESP_ERR_BUSY = 0x02, ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03, ALP_CC3501E_RESP_ERR_NO_MEM = 0x04, ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, ALP_CC3501E_RESP_ERR_RADIO = 0x06, ALP_CC3501E_RESP_ERR_PROTOCOL = 0x07, ALP_CC3501E_RESP_ERR_VERSION = 0x08, ALP_CC3501E_RESP_ERR_STATE = 0x09, ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF } alp_cc3501e_resp_t;",
           "enumerators": [
-            "ALP_CC3501E_RESP_OK = 0x00",
+            "ALP_CC3501E_RESP_OK = 0x5A",
             "ALP_CC3501E_RESP_ERR_INVALID = 0x01",
             "ALP_CC3501E_RESP_ERR_BUSY = 0x02",
             "ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03",
@@ -12550,7 +12570,7 @@
             "ALP_CC3501E_RESP_ERR_STATE = 0x09",
             "ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF"
           ],
-          "hash": "a1d6e7380eb9984a",
+          "hash": "9cde38b200d4b3b5",
           "kind": "enum"
         },
         "alp_cc3501e_role_t": {
@@ -12818,6 +12838,26 @@
           "kind": "struct"
         }
       },
+      "variables": {}
+    },
+    "alp/protocol/crc16.h": {
+      "functions": {
+        "alp_crc16_ccitt_false": {
+          "hash": "39657e6680627570",
+          "signature": "static inline uint16_t alp_crc16_ccitt_false(const uint8_t *buf, size_t len);"
+        },
+        "alp_crc16_ccitt_false_update": {
+          "hash": "94bccf5caa13bd1a",
+          "signature": "static inline uint16_t alp_crc16_ccitt_false_update(uint16_t crc, const uint8_t *buf, size_t len);"
+        }
+      },
+      "macros": {
+        "ALP_CRC16_CCITT_FALSE_INIT": {
+          "hash": "5106af79c2fa1a32",
+          "value": "0xFFFFu"
+        }
+      },
+      "typedefs": {},
       "variables": {}
     },
     "alp/pwm.h": {
