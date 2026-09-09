@@ -1849,28 +1849,44 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. */
 	alp_status_t en_rc = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
 	/* Read the pin back rather than trusting the write return code alone --
-	 * the bridge's GPIO_READ opcode (0x52, cc3501e_proxy.c px_read()) is
-	 * reachable over the same bridge phase 8 left up. A LOW read-back is
-	 * only CORROBORATION that the pad is asserted, not proof: depending on
-	 * bridge firmware this may report the far-side output register rather
-	 * than the pad itself. It does not gate anything below -- disagreement
-	 * is printed and the run falls through to disk_access_init() either
-	 * way, so the log still shows what the controller sees. */
+	 * the GPIO proxy's read path is reachable over the same bridge phase 8
+	 * left up (route-table detail, not named here -- see the open() comment
+	 * above). A LOW read-back is only CORROBORATION that the pad is
+	 * asserted, not proof: depending on bridge firmware this may report
+	 * the far-side output register rather than the pad itself. It does not
+	 * gate anything below -- disagreement is printed and the run falls
+	 * through to disk_access_init() either way, so the log still shows
+	 * what the controller sees. */
 	bool         mux_level = true;
 	alp_status_t rd_rc     = alp_gpio_read(mux_en, &mux_level);
+	/* level=? rather than a fabricated sample on a failed read: mux_level
+	 * is seeded true and alp_gpio_read()/cc3501e_gpio_read() leaves the
+	 * output untouched on every error path, so printing it unconditionally
+	 * would make a failed read print "level=HIGH" -- indistinguishable
+	 * from a genuine high reading, in the one field whose entire purpose
+	 * is answering whether the pad actually moved. */
+	const char *level_str = (rd_rc == ALP_OK) ? (mux_level ? "HIGH" : "LOW") : "?";
 	printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
 	       "low, driven LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, "
 	       "corroboration only -- may reflect the bridge's output register rather than the "
-	       "pad, not proof the line moved)\n",
+	       "pad, not proof the line moved), settle=%u ms\n",
 	       (int)cfg_rc,
 	       (int)en_rc,
 	       (int)rd_rc,
-	       mux_level ? "HIGH" : "LOW");
+	       level_str,
+	       (unsigned)SD_MUX_SETTLE_MS);
 	if (en_rc != ALP_OK) {
 		printf("[evkdemo] SD: the mux ENABLE could not be driven -- every step below would run "
 		       "against a card that is not connected to the SoC. Check that phase 8 passed "
 		       "(the proxy needs its bridge attached) and that this build carries the IO20 "
 		       "route\n");
+		/* Restore idle before closing, same as the single exit below --
+		 * cfg_rc == ALP_OK means the pin WAS configured as an output, so
+		 * skipping this would leave GPIO_26 in whatever state the failed
+		 * write left it at, for the rest of the run. Ignoring the return
+		 * matches the main exit: best-effort restore on an already-
+		 * failing path, not a second gate. */
+		(void)alp_gpio_write(mux_en, true);
 		alp_gpio_close(mux_en);
 		ctx->note = "mux ENABLE not drivable";
 		return PHASE_FAIL;
@@ -1933,22 +1949,26 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		if (mrc == -ENODEV) {
 			/* subsys/fs/fat_fs.c maps THREE distinct ff.h causes onto
 			 * -ENODEV alike: FR_INVALID_DRIVE, FR_NOT_ENABLED and
-			 * FR_NO_FILESYSTEM. The card enumerated fine, but this return
-			 * code alone cannot tell "no FAT volume on the card" apart
-			 * from a disk-name / mount-point wiring drift in this file's
-			 * own SD_DISK_NAME / SD_MOUNT_POINT -- so the log below
-			 * states only what -ENODEV actually proves. */
-			printf("[evkdemo] SD: fs_mount -> -ENODEV -- either no FAT filesystem on this card, "
-			       "or a disk-name/mount-point mismatch (SD_DISK_NAME=\"%s\", "
-			       "SD_MOUNT_POINT=\"%s\"): subsys/fs/fat_fs.c maps both onto -ENODEV and this "
-			       "build cannot tell them apart from the return code alone. NOT formatted here "
+			 * FR_NO_FILESYSTEM. disk_access_init(SD_DISK_NAME) already
+			 * returned 0 above, which proves the "SD" disk itself is
+			 * registered -- so SD_DISK_NAME is cleared, not an open
+			 * suspect. What -ENODEV still cannot separate is "no FAT
+			 * volume on the card" from SD_MOUNT_POINT not matching this
+			 * build's FF_VOLUME_STRS entry, so the log below states only
+			 * what -ENODEV actually proves. */
+			printf("[evkdemo] SD: fs_mount -> -ENODEV -- subsys/fs/fat_fs.c maps three FatFs "
+			       "causes (FR_INVALID_DRIVE, FR_NOT_ENABLED, FR_NO_FILESYSTEM) onto the same "
+			       "code: either no FAT filesystem on this card, or SD_MOUNT_POINT=\"%s\" does "
+			       "not match this build's FF_VOLUME_STRS entry. disk_access_init(\"%s\") "
+			       "already returned 0 above, which rules out the disk name -- only the "
+			       "mount-point volume string is still an open question. NOT formatted here "
 			       "regardless, on purpose -- the card belongs to whoever put it in the slot. "
 			       "FS_MOUNT_FLAG_NO_FORMAT is set AND CONFIG_FS_FATFS_MOUNT_MKFS=n keeps mkfs "
 			       "out of the image entirely, so there is no format path to take even by "
 			       "mistake\n",
-			       SD_DISK_NAME,
-			       SD_MOUNT_POINT);
-			ctx->note = "no filesystem, or a disk-name/mount-point mismatch -- see log";
+			       SD_MOUNT_POINT,
+			       SD_DISK_NAME);
+			ctx->note = "no filesystem, or a mount-point/FF_VOLUME_STRS mismatch -- see log";
 			verdict   = PHASE_SKIPPED;
 		} else if (mrc != 0) {
 			printf("[evkdemo] SD: mount failed with a card that enumerated (rc=%d) -- a read of "
@@ -1989,30 +2009,55 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 				fail_why = "cannot open the demo file";
 			} else {
 				ssize_t wrote = fs_write(&f, payload, (size_t)len);
-				/* Truncate UNCONDITIONALLY, once the file is open --
-				 * never gated on a full write. Truncate to wherever this
-				 * write actually landed (0 on a hard error), not to
-				 * `len`: skipping this call on a short write is exactly
-				 * the case where it matters, because that is the one
-				 * that would otherwise leave a partial payload followed
-				 * by an earlier run's longer tail -- the stale-leftover
-				 * state this call exists to prevent. */
-				off_t trunc_len = (wrote > 0) ? (off_t)wrote : 0;
-				int   trc       = fs_truncate(&f, trunc_len);
+				/* Truncate ONLY when fs_write() actually landed bytes
+				 * (wrote > 0) -- never on a hard error (wrote < 0). A
+				 * hard write error can leave the file in an
+				 * indeterminate state; truncating anyway still frees
+				 * the FAT chain and rewrites the dirent, on exactly the
+				 * path that just failed a write -- destroying the one
+				 * artifact (the previous run's leftover file) that
+				 * would show what happened. A SHORT write (0 < wrote <
+				 * len) still truncates, to wherever it actually landed:
+				 * that is the case this call exists for, shedding an
+				 * earlier run's longer tail rather than leaving a
+				 * partial payload followed by stale bytes. */
+				bool  did_truncate = (wrote > 0);
+				off_t trunc_len    = did_truncate ? (off_t)wrote : 0;
+				int   trc          = did_truncate ? fs_truncate(&f, trunc_len) : 0;
 				/* SYNC BEFORE READ-BACK, and this is load-bearing. Without
 				 * it the read below could be served out of the FATFS
 				 * cache and would "verify" data that never reached the
 				 * card -- the exact shape of false pass this app exists
-				 * to refuse. Only meaningful once the intended bytes are
-				 * actually in place. */
-				int syrc = (wrote == (ssize_t)len && trc == 0) ? fs_sync(&f) : 0;
-				printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate(%ld) -> %d, "
-				       "fs_sync -> %d\n",
+				 * to refuse. Only run once the write was full AND the
+				 * truncate actually ran and returned 0 -- a skipped or
+				 * failed truncate is not a clean state to sync from
+				 * either. */
+				bool did_sync = (wrote == (ssize_t)len && did_truncate && trc == 0);
+				int  syrc     = did_sync ? fs_sync(&f) : 0;
+
+				/* A skipped call must not print the same as a successful
+				 * one -- "-> 0" either way would be indistinguishable
+				 * from a real pass in a phase whose whole thesis is that
+				 * every return code is printed. */
+				char trc_field[16];
+				char syrc_field[16];
+				if (did_truncate) {
+					snprintk(trc_field, sizeof(trc_field), "%d", trc);
+				} else {
+					snprintk(trc_field, sizeof(trc_field), "SKIPPED");
+				}
+				if (did_sync) {
+					snprintk(syrc_field, sizeof(syrc_field), "%d", syrc);
+				} else {
+					snprintk(syrc_field, sizeof(syrc_field), "SKIPPED");
+				}
+				printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate(%ld) -> %s, "
+				       "fs_sync -> %s\n",
 				       (int)wrote,
 				       len,
 				       (long)trunc_len,
-				       trc,
-				       syrc);
+				       trc_field,
+				       syrc_field);
 
 				char    readback[sizeof(payload)] = { 0 };
 				ssize_t got                       = -1;
@@ -2061,6 +2106,16 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 			 * for the next person, and phases 10-14 run after this one. */
 			int urc = fs_unmount(&sd_mnt);
 			printf("[evkdemo] SD: fs_unmount -> %d\n", urc);
+
+			if (verdict == PHASE_PASS && urc != 0) {
+				/* The write/read/verify round trip proved the data path,
+				 * but a failed unmount leaves this volume mounted in
+				 * FATFS's own view while the mux de-assert below
+				 * electrically disconnects the card out from under it --
+				 * that is not a PASS. */
+				fail_why = "fs_unmount failed after a passing verify";
+				verdict  = PHASE_FAIL;
+			}
 
 			if (verdict != PHASE_PASS) {
 				printf("[evkdemo] SD: RESULT FAIL -- %s. The card enumerated and the "
