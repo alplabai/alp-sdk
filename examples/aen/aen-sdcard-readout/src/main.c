@@ -215,6 +215,13 @@ static cc3501e_t cc35_fw;
  * settle requirement). */
 #define SD_MUX_SETTLE_MS 10u
 
+/* Bounded PING retry after bridge bring-up, before the first proxied request
+ * (#2035 GPIO-proxy race) -- same parameters as aen-evk-demo's phase 8
+ * (examples/aen/aen-evk-demo/src/main.c: CC35_PING_RETRIES/CC35_PING_GAP_MS),
+ * which measured needing 11 of 25 attempts, 200 ms apart, on this silicon. */
+#define CC35_PING_RETRIES 25u
+#define CC35_PING_GAP_MS  200u
+
 int main(void)
 {
 	/*
@@ -251,7 +258,63 @@ int main(void)
 	}
 
 	/*
-	 * --- 2. Assert the SDIO mux ENABLE over the GPIO proxy -------------
+	 * --- 2. Wait for the bridge to be READY, not just electrically up --
+	 * cc3501e_bridge_bringup() returning ALP_OK means the reset sequence
+	 * finished -- rails up, nRESET released, the ~900 ms boot budget
+	 * waited out -- NOT that the coprocessor is parsing requests yet.
+	 * chips/cc3501e/cc3501e_core.c's cc3501e_reset() says so explicitly:
+	 * its own GET_VERSION probe treats a round trip that never completes
+	 * as "let the caller retry", not as a reset failure, precisely
+	 * because protocol readiness is documented as the CALLER's job (see
+	 * the comment block above that call, which names this app's own
+	 * bringup helper as one of the two callers required to retry).
+	 *
+	 * Without this wait, the very next proxied GPIO configure below raced
+	 * the coprocessor and lost: measured on hardware as `configure -> -4`
+	 * (ALP_ERR_TIMEOUT), immediately after a clean `bridge_bringup() -> 0`.
+	 * aen-evk-demo's phase 8 hits the identical gap before its own first
+	 * request and closes it with a bounded PING retry loop -- mirrored
+	 * here with the same parameters (25 attempts, 200 ms apart) rather
+	 * than an invented timeout, because 200 ms apart is what was actually
+	 * measured needing 11 of 25 attempts on this silicon (see the PING
+	 * log line in examples/aen/aen-evk-demo/src/main.c).
+	 */
+	alp_status_t ping_rc  = ALP_ERR_TIMEOUT;
+	unsigned     attempts = 0u;
+	for (; attempts < CC35_PING_RETRIES; ++attempts) {
+		ping_rc = cc3501e_ping(&cc35_fw);
+		if (ping_rc == ALP_OK) {
+			attempts++; /* count the one that succeeded, not the ones before it */
+			break;
+		}
+		k_msleep(CC35_PING_GAP_MS);
+	}
+	printf("[sd] CC3501E: PING (0x00) -> %d after %u attempt(s) of %u (%u ms apart)\n",
+	       (int)ping_rc,
+	       attempts,
+	       CC35_PING_RETRIES,
+	       CC35_PING_GAP_MS);
+	if (ping_rc != ALP_OK) {
+		/*
+		 * Distinguish "the coprocessor never became ready" from "the GPIO
+		 * request failed" -- the mux ENABLE write below was never reached,
+		 * so a reader must not mistake this for a mux/route-table fault.
+		 * The figure below is the SLEEP budget only, same caveat as the
+		 * demo: each attempt also spends its own transport timeout inside
+		 * cc3501e_ping(), so real elapsed time is longer.
+		 */
+		printf("[sd] RESULT FAIL: the CC3501E bridge came up electrically (rc=0) but never "
+		       "became ready to serve requests -- no PING answer after %u ms of retry gaps "
+		       "(plus each attempt's own transport timeout, so longer in wall-clock). This is "
+		       "NOT a mux/GPIO failure: the proxied mux ENABLE request below was never "
+		       "attempted. Not attempting disk_access_init: a disk error measured with the "
+		       "mux undriven would be meaningless\n",
+		       (unsigned)(CC35_PING_RETRIES * CC35_PING_GAP_MS));
+		return -1;
+	}
+
+	/*
+	 * --- 3. Assert the SDIO mux ENABLE over the GPIO proxy -------------
 	 * alp_gpio_open() on a PORTABLE E1M pin id. The proxy backend looks
 	 * IO20 up in this app's cc3501e_gpio_routes[] table, finds raw
 	 * CC3501E GPIO_26, and sends the configure/write over the bridge just
@@ -319,7 +382,7 @@ int main(void)
 	k_msleep(SD_MUX_SETTLE_MS);
 
 	/*
-	 * --- 3. Enumerate the card, read-only ------------------------------
+	 * --- 4. Enumerate the card, read-only ------------------------------
 	 * From here on the mux stays ENABLED (GPIO_26 driven low), including
 	 * past this app's exit -- deliberately not restored to idle. /E LOW
 	 * is this board's working state, on the maintainer's instruction, not
