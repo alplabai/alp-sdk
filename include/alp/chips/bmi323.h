@@ -158,6 +158,14 @@ typedef struct {
      * what init() actually observed (#2035).  Query via
      * bmi323_was_por_detected(). */
 	bool por_detected;
+	/* Communication access restriction state (BST-BMI323-DS000-13
+     * Rev 1.7, section 7.3 p.205; section 5.4 p.20): true from
+     * bmi323_init() (every POR/soft-reset leaves the device in
+     * suspend) until bmi323_set_accel() or bmi323_set_gyro() first
+     * takes a sensor to normal/high-performance mode.  Selects the
+     * post-access idle time -- 450 us suspended, 2 us not -- applied
+     * after every register access; see access_idle() in bmi323.c. */
+	bool comm_suspend;
 } bmi323_t;
 
 /**

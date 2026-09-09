@@ -55,13 +55,48 @@
 
 #define BMI323_DUMMY_BYTES 2 /* Read responses include 2 dummy bytes. */
 
+/* Communication access restriction (BST-BMI323-DS000-13 Rev 1.7, section 7.3
+ * "Communication Access Restriction", p.205; Table 41 "tIDLE,rd", p.195):
+ * consecutive write accesses, or a write/read sequence, over I2C/I3C/SPI
+ * need an interface idle time of at least 2 us in high-performance or
+ * normal mode, or at least 450 us in suspend mode.  Section 5.4 (p.20)
+ * states every power-on reset or soft reset leaves the device in suspend,
+ * so the 450 us figure -- not 2 us -- is the one that applies for the
+ * whole of bmi323_init(): every access there follows the soft-reset write.
+ *
+ * Neither reference implementation checked against this honours the 450 us
+ * suspend figure.  Bosch's own BMI3XY_SensorAPI (bmi3.c:1901, bmi3.c:1940)
+ * and Alif's upstream Zephyr driver (bmi323_i2c.c, Copyright (c) 2025 Alif
+ * Semiconductor, Apache-2.0 -- our own SoC vendor's code for this exact
+ * part) both hardcode a flat 2 us after every access, including the
+ * accesses that immediately follow their own soft-reset call.  This
+ * driver is deliberately stricter than both: a BMI323 on our bench has
+ * been failing bmi323_init() with -5 five cycles running (#2035), and an
+ * access issued before the device has finished processing the *previous*
+ * suspend-mode access is a plausible cause neither flat-2us
+ * implementation can rule out for itself. */
+#define BMI323_TIDLE_NORMAL_US  2u   /* tIDLE,rd, high-performance/normal mode. */
+#define BMI323_TIDLE_SUSPEND_US 450u /* tIDLE,rd, suspend mode (post-reset default). */
+
+/* Wait the mode-appropriate interface idle time after a completed access,
+ * per dev->comm_suspend -- see the block comment above.  Applied
+ * regardless of the access's own result: the restriction is on interface
+ * timing between consecutive accesses, not on whether the one that just
+ * finished succeeded. */
+static void access_idle(bmi323_t *dev)
+{
+	alp_delay_us(dev->comm_suspend ? BMI323_TIDLE_SUSPEND_US : BMI323_TIDLE_NORMAL_US);
+}
+
 static alp_status_t reg_write(bmi323_t *dev, uint8_t reg, uint16_t val)
 {
 	/* 16-bit write: [reg, dummy?, val_lo, val_hi].
      * Bosch's SPI mode prefixes a "address-write" stage but on I²C
      * the wire format is reg + LE-16 data byte. */
-	uint8_t buf[3] = { reg, (uint8_t)(val & 0xFFu), (uint8_t)(val >> 8) };
-	return alp_i2c_write(dev->bus, dev->addr, buf, sizeof buf);
+	uint8_t      buf[3] = { reg, (uint8_t)(val & 0xFFu), (uint8_t)(val >> 8) };
+	alp_status_t s      = alp_i2c_write(dev->bus, dev->addr, buf, sizeof buf);
+	access_idle(dev);
+	return s;
 }
 
 static alp_status_t reg_read16(bmi323_t *dev, uint8_t reg, uint8_t *out, size_t words)
@@ -72,6 +107,7 @@ static alp_status_t reg_read16(bmi323_t *dev, uint8_t reg, uint8_t *out, size_t 
 	if (total > 32) return ALP_ERR_INVAL; /* sanity bound */
 	uint8_t      scratch[32];
 	alp_status_t s = alp_i2c_write_read(dev->bus, dev->addr, &reg, 1, scratch, total);
+	access_idle(dev);
 	if (s != ALP_OK) return s;
 	/* Skip the dummy prefix; copy the rest into the caller's buffer. */
 	memcpy(out, scratch + BMI323_DUMMY_BYTES, words * 2u);
@@ -109,6 +145,11 @@ alp_status_t bmi323_init(bmi323_t *dev, alp_i2c_t *bus, uint8_t i2c_addr)
 	dev->gyro_fs      = BMI323_GYRO_FS_2000_DPS;
 	dev->initialised  = false;
 	dev->por_detected = false; /* Overwritten below once STATUS is actually read. */
+	/* Section 5.4 (p.20): every POR/soft-reset leaves the device in
+	 * suspend.  Set before the reset write below so that write's own
+	 * post-access idle (in reg_write(), via access_idle()) already
+	 * uses the 450 us suspend figure. */
+	dev->comm_suspend = true;
 
 	/* Power-up / I2C-interface bring-up.  The soft reset (CMD <- 0xDEAF) is the
 	 * first I2C transaction, which also selects the I2C interface (the part
@@ -230,6 +271,11 @@ alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t
 	alp_status_t s = reg_write(dev, REG_ACC_CONF, v);
 	if (s != ALP_OK) return s;
 	dev->accel_fs = fs;
+	/* acc_mode is now 0b100 (normal) -- section 7.3 (p.205)'s "operation
+	 * mode of the device" is out of suspend from here, so later accesses
+	 * only need the shorter 2 us idle (BMI323_TIDLE_NORMAL_US) rather than
+	 * the 450 us suspend figure this driver used up to this point. */
+	dev->comm_suspend = false;
 	/* tA,SU (BST-BMI323-DS000-13 Rev 1.7, Table 2 p.9): accelerometer
      * start-up from suspend is 2 ms typ.  Wait here so a caller that
      * reads immediately after configuring never races an unready
@@ -260,6 +306,10 @@ alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t f
 	alp_status_t s = reg_write(dev, REG_GYR_CONF, v);
 	if (s != ALP_OK) return s;
 	dev->gyro_fs = fs;
+	/* gyr_mode is now 0b100 (normal) -- see the matching comment in
+	 * bmi323_set_accel(); either sensor being taken out of suspend
+	 * clears the device-wide idle-time flag. */
+	dev->comm_suspend = false;
 	/* tG,SU (BST-BMI323-DS000-13 Rev 1.7, Table 5 p.10): gyroscope
      * start-up from suspend to high-performance mode, including filter
      * settling, is 30 ms typ -- 15x the accelerometer's tA,SU (2 ms).

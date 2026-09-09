@@ -9,6 +9,7 @@
  * fake_lsm6dso.c / fake_bme280.c.
  */
 
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include "alp/chips/bme280.h"
@@ -1035,6 +1036,46 @@ ZTEST(alp_chips, test_bmi323_init_rejects_fatal_err)
 
 	bmi323_t dev;
 	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_IO);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * #2035: BST-BMI323-DS000-13 Rev 1.7 section 7.3 "Communication Access
+ * Restriction" (p.205; tIDLE,rd, Table 41 p.195) requires an interface
+ * idle time of at least 450 us between consecutive I2C/I3C/SPI accesses
+ * while the device is in suspend mode -- and section 5.4 (p.20) puts a
+ * device fresh out of POR/soft-reset in suspend, which is exactly
+ * bmi323_init()'s state for all four of its accesses (the CMD soft-reset
+ * write, then the ERR_REG/STATUS/CHIP_ID reads).  The pre-fix driver
+ * issued none of this.
+ *
+ * fake_bmi323.c's i2c-emul target doesn't model bus timing, so this
+ * can't assert against register-write ordering the way the tests above
+ * do -- it measures bmi323_init()'s real elapsed wall time instead.
+ * With the fix that floors at 4 accesses x >=450 us of idle plus the
+ * existing 3 ms post-reset settle (BMI323_SOFT_RESET_MS), ~4.8 ms;
+ * without it (the pre-#2035 driver) the floor is the 3 ms settle alone.
+ * The 4 ms threshold sits with clear margin on both sides of that gap. */
+ZTEST(alp_chips, test_bmi323_init_honours_suspend_mode_communication_idle)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	int64_t  before_us = k_ticks_to_us_floor64(k_uptime_ticks());
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+	int64_t elapsed_us = k_ticks_to_us_floor64(k_uptime_ticks()) - before_us;
+
+	zassert_true(elapsed_us >= 4000,
+	             "bmi323_init() took %lld us, want >= 4000 us (4 accesses x >= 450 us "
+	             "suspend-mode tIDLE,rd idle + the 3 ms reset settle) -- looks like the "
+	             "post-access idle was dropped",
+	             (long long)elapsed_us);
 
 	bmi323_deinit(&dev);
 	alp_i2c_close(bus);
