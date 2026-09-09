@@ -95,10 +95,28 @@
 		reg = <0x48102000 0xF70>;
 		interrupts = <102 3>, <103 3>;
 		interrupt-names = "sdmmc", "sdmmc_wakeup";
-		max-bus-freq = <50000000>;
+		/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
+		 * signaling (#2035): once CMD0 succeeds the SD subsystem would
+		 * otherwise attempt CMD11 and switch to 1.8V I/O signaling through
+		 * the 74LVC157 SDIO mux, which runs at 3.3V and was never designed
+		 * to pass a 1.8V logic level -- vendor Linux sets the equivalent
+		 * `no-1-8-v` + `max-frequency = <25000000>` for this exact block.
+		 * `no-1-8-v` IS read by this driver (DT_INST_PROP_OR(n, no_1_8_v,
+		 * ...) -> props->host_caps.vol_180_support = 0, sdhc_dwc.c:972),
+		 * so this is a real behavioural change, not a documentation-only
+		 * one. `max-bus-freq` is this Zephyr binding's equivalent of
+		 * vendor Linux's `max-frequency` (there is no `max-frequency`
+		 * property on snps,dwc-sdhc.yaml). Vendor Linux also sets
+		 * `no-hispeed`; THIS DRIVER HAS NO EQUIVALENT DT PROPERTY --
+		 * checked zephyr/drivers/sdhc/sdhc_dwc.c: high_spd_support is
+		 * read straight off DWC_SDHC_CAP1_HIGH_SPEED_Msk in hardware with
+		 * no DT override, so that one setting is recorded here, not
+		 * applied. */
+		max-bus-freq = <25000000>;
 		min-bus-freq = <400000>;
 		power-delay-ms = <500>;
 		bus-width = <4>;
+		no-1-8-v;
 		pinctrl-0 = <&pinctrl_sdmmc>;
 		pinctrl-names = "default";
 		status = "okay";

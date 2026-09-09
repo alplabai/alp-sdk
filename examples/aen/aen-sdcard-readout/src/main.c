@@ -43,6 +43,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/storage/disk_access.h>
+#include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, see below */
 
 #include "alp/peripheral.h"    /* alp_gpio_*, alp_status_t */
 #include "alp/e1m_pinout.h"    /* ALP_E1M_GPIO_IO20 */
@@ -52,6 +53,151 @@
                               * copied verbatim from examples/aen/aen-evk-demo. */
 
 #define DISK_NAME "SD"
+
+/*
+ * ============================================================================
+ * SD register-level diagnostics (#2035) -- SW_RST_CMD investigation
+ * ============================================================================
+ * The card still does not enumerate even with the bridge/mux proven driven
+ * (see the file header) and `disk_access_init` returns -116: `SW_RST_R` at
+ * 0x4810202F stays 0x02, i.e. SW_RST_CMD never self-clears while SW_RST_DAT
+ * does. Everything read on the bench so far was sampled AFTER the driver's
+ * own timeout path had already written SW_RST_CMD|SW_RST_DAT (see
+ * sdhc_dwc_wait_cmd_complete() in zephyr/drivers/sdhc/sdhc_dwc.c) -- which
+ * clears command-complete -- so an "INT STATUS = 0x00000000" reading taken
+ * that way carries no information: it cannot distinguish "the command never
+ * completed" from "it completed and the reset wiped the evidence". This
+ * section exists to stop guessing and start measuring, on the NEXT load
+ * either way -- SW_RST_CMD fixed or not.
+ *
+ * NOT a driver modification: this app has no hook into sdhc_dwc.c's own
+ * command path, so "before any SW_RST write" is approximated by watching
+ * PSTATE's CMD_INHIBIT bit (bit 0) for its 0->1 rising edge -- the
+ * externally-observable side effect of the driver's own CMD_R write -- from a
+ * low-priority background thread that only gets the CPU while main() is
+ * blocked inside the driver's own k_event_wait(). The driver's own
+ * command-complete timeout defaults to 1000 ms (sdhc_dwc_wait_cmd_complete()),
+ * so a sample taken 10 ms after the rising edge is comfortably pre-reset.
+ */
+#define SD_REG_BASE   0x48102000u
+#define SD_REG_PSTATE (SD_REG_BASE + 0x024u) /* Present State */
+#define SD_REG_NORMAL_INT_STAT \
+	(SD_REG_BASE + 0x030u)                          /* Normal + Error Interrupt Status (32b read) */
+#define SD_REG_CAPABILITIES1 (SD_REG_BASE + 0x040u) /* Capabilities 1 -- base clock field, Task 4 */
+
+#define SD_PSTATE_CMD_INHIBIT_Msk 0x00000001u /* bit0: a command is in flight */
+#define SD_PSTATE_DAT_INHIBIT_Msk 0x00000002u /* bit1 */
+
+/* Alif E8 pinmux registers for the SD "B" route's CLK/CMD pads (P14_1/P14_0).
+ * Pad config lives at bits[23:16]; bit 16 of that byte is PADCTRL_READ_ENABLE
+ * -- the exact bit Task 1's fix turns on for CLK. Printing it here proves the
+ * setting reached silicon, not just the devicetree. */
+#define SD_PINMUX_P14_1_CLK       0x1A6031C4u
+#define SD_PINMUX_P14_0_CMD       0x1A6031C0u
+#define SD_PINMUX_PADCFG_Pos      16u
+#define SD_PINMUX_PADCFG_Msk      (0xFFu << SD_PINMUX_PADCFG_Pos)
+#define SD_PINMUX_READ_ENABLE_Msk (1u << SD_PINMUX_PADCFG_Pos)
+
+/* CLKCTL_PER_MST -- bit 16 gates the SD peripheral clock at the SoC clock-tree
+ * level, upstream of anything the SDHC's own Clock Control Register does. */
+#define SD_CLKCTL_PER_MST           0x4903F00Cu
+#define SD_CLKCTL_PER_MST_SD_EN_Msk (1u << 16)
+
+/* Print the four "before" registers: does the pad setting, the clock gate and
+ * the capability field this app depends on actually look right on THIS
+ * silicon, before disk_access_init() even runs. */
+static void sd_diag_print_static_regs(void)
+{
+	uint32_t p14_1  = sys_read32(SD_PINMUX_P14_1_CLK);
+	uint32_t p14_0  = sys_read32(SD_PINMUX_P14_0_CMD);
+	uint32_t clkctl = sys_read32(SD_CLKCTL_PER_MST);
+	uint32_t caps   = sys_read32(SD_REG_CAPABILITIES1);
+
+	printf("[sd][diag] P14_1 pinmux (CLK) @0x%08x = 0x%08x  padcfg=0x%02x read-enable=%u\n",
+	       (unsigned)SD_PINMUX_P14_1_CLK,
+	       p14_1,
+	       (unsigned)((p14_1 & SD_PINMUX_PADCFG_Msk) >> SD_PINMUX_PADCFG_Pos),
+	       (unsigned)((p14_1 & SD_PINMUX_READ_ENABLE_Msk) != 0u));
+	printf("[sd][diag] P14_0 pinmux (CMD) @0x%08x = 0x%08x  padcfg=0x%02x read-enable=%u\n",
+	       (unsigned)SD_PINMUX_P14_0_CMD,
+	       p14_0,
+	       (unsigned)((p14_0 & SD_PINMUX_PADCFG_Msk) >> SD_PINMUX_PADCFG_Pos),
+	       (unsigned)((p14_0 & SD_PINMUX_READ_ENABLE_Msk) != 0u));
+	printf("[sd][diag] CLKCTL_PER_MST     @0x%08x = 0x%08x  SD_CLK_EN(bit16)=%u\n",
+	       (unsigned)SD_CLKCTL_PER_MST,
+	       clkctl,
+	       (unsigned)((clkctl & SD_CLKCTL_PER_MST_SD_EN_Msk) != 0u));
+	printf("[sd][diag] CAPABILITIES1      @0x%08x = 0x%08x  (base-clock field: see Task 4's fix in "
+	       "zephyr/drivers/sdhc/sdhc_dwc.c)\n",
+	       (unsigned)SD_REG_CAPABILITIES1,
+	       caps);
+}
+
+#define SD_DIAG_MAX_CMD_SAMPLES   4u  /* covers CMD0, CMD8, ACMD41 (or its first retry), CMD2/3 */
+#define SD_DIAG_POST_CMD_DELAY_MS 10u /* well inside the driver's >=1000 ms own timeout */
+#define SD_DIAG_POLL_INTERVAL_MS  1u  /* k_msleep, not k_busy_wait -- see thread note below */
+#define SD_DIAG_RISE_TIMEOUT_MS \
+	3000u /* give up watching for a further command after this long idle */
+
+/*
+ * Background watcher, NOT the driver's own thread. Runs at a LOWER priority
+ * than main() (a higher numeric value) so main always preempts it -- it only
+ * gets the CPU while main is blocked inside the driver's k_event_wait(),
+ * which is exactly when there is something worth polling for. k_msleep(),
+ * never k_busy_wait(), for the same reason: a non-yielding poll loop at a
+ * priority that could starve main would stop the very command it is trying
+ * to observe from ever completing.
+ */
+static void sd_diag_thread_fn(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+
+	for (unsigned sample = 0; sample < SD_DIAG_MAX_CMD_SAMPLES; sample++) {
+		uint32_t waited_ms = 0u;
+		bool     saw_idle  = false;
+
+		/* Wait for CMD_INHIBIT's 0->1 edge: idle observed first, THEN
+		 * inhibited, so a sample thread starting mid-command never
+		 * mistakes an already-in-flight command for a fresh one. */
+		while (waited_ms < SD_DIAG_RISE_TIMEOUT_MS) {
+			uint32_t pstate    = sys_read32(SD_REG_PSTATE);
+			bool     inhibited = (pstate & SD_PSTATE_CMD_INHIBIT_Msk) != 0u;
+
+			if (!saw_idle) {
+				saw_idle = !inhibited;
+			} else if (inhibited) {
+				break;
+			}
+			k_msleep(SD_DIAG_POLL_INTERVAL_MS);
+			waited_ms += SD_DIAG_POLL_INTERVAL_MS;
+		}
+		if (waited_ms >= SD_DIAG_RISE_TIMEOUT_MS) {
+			printf("[sd][diag] cmd#%u: no further command register write observed within "
+			       "%u ms -- stopping\n",
+			       sample,
+			       (unsigned)SD_DIAG_RISE_TIMEOUT_MS);
+			return;
+		}
+
+		k_msleep(SD_DIAG_POST_CMD_DELAY_MS);
+
+		uint32_t int_stat_raw = sys_read32(SD_REG_NORMAL_INT_STAT);
+		uint32_t pstate       = sys_read32(SD_REG_PSTATE);
+		printf("[sd][diag] cmd#%u +%u ms (BEFORE any SW_RST write): NORMAL_INT_STAT=0x%04x "
+		       "ERROR_INT_STAT=0x%04x PSTATE=0x%08x CMD_INHIBIT=%u DAT_INHIBIT=%u\n",
+		       sample,
+		       (unsigned)SD_DIAG_POST_CMD_DELAY_MS,
+		       (unsigned)(int_stat_raw & 0xFFFFu),
+		       (unsigned)(int_stat_raw >> 16),
+		       pstate,
+		       (unsigned)((pstate & SD_PSTATE_CMD_INHIBIT_Msk) != 0u),
+		       (unsigned)((pstate & SD_PSTATE_DAT_INHIBIT_Msk) != 0u));
+	}
+}
+
+K_THREAD_DEFINE(sd_diag_tid, 1024, sd_diag_thread_fn, NULL, NULL, NULL, 7, 0, 0);
 
 /*
  * FILE-STATIC, not a main() local: cc3501e_t is ~32 KB (the driver's own
@@ -179,6 +325,8 @@ int main(void)
 	 * is this board's working state, on the maintainer's instruction, not
 	 * a resource this app must hand back.
 	 */
+	sd_diag_print_static_regs();
+
 	printf("[sd] disk_access_init(\"%s\") on the E8 DWC SDHC\n", DISK_NAME);
 
 	int rc = disk_access_init(DISK_NAME);

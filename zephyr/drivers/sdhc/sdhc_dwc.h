@@ -187,7 +187,11 @@ typedef uint64_t adma2_desc_t;
 #define DWC_SDHC_CLK_GEN_SEL_Msk             (DWC_SDHC_DIV_CLK_MODE << DWC_SDHC_CLK_GEN_SEL_Pos)
 #define DWC_SDHC_UPPER_FREQ_SEL_Pos          6U
 #define DWC_SDHC_FREQ_SEL_Pos                8U
-#define DWC_SDHC_BASE_CLK_FREQ_Pos           7U
+/* Base Clock Frequency field in DWC_SDHC_CAPABILITIES1_R sits at the SAME bit
+ * position as FREQ_SEL_Pos above (0xFFU << 8) -- there is no separate _Pos
+ * for it. #2035 removed a DWC_SDHC_BASE_CLK_FREQ_Pos=7U that was one bit
+ * short of this mask's own position and silently doubled every base-clock
+ * reading; do not reintroduce a distinct _Pos constant for this field. */
 #define DWC_SDHC_BASE_CLK_FREQ_Msk           (0xFFU << DWC_SDHC_FREQ_SEL_Pos)
 #define DWC_SDHC_DEFAULT_BASE_CLK_MHZ        100U
 #define DWC_SDHC_CLK_STABLE_TIMEOUT_US       100000U
