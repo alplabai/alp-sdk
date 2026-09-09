@@ -553,11 +553,27 @@ static const char *i2c_dev_state_str(i2c_dev_state_t s)
  * address looks absent. A 1-byte read always puts an address byte + R/W
  * bit on the bus and reports the real ACK/NACK, so it is the one shape
  * that works as a presence probe on this controller.
+ *
+ * #2037: bounded retry, not one shot. alp_i2c_read()'s documented return
+ * set (include/alp/peripheral.h) has exactly one failure code for a probe
+ * like this, ALP_ERR_IO, covering BOTH "the address NACKed" (genuinely not
+ * fitted) and "the transfer itself failed" (a transient bus fault on a
+ * part that IS fitted) -- this portable layer cannot tell them apart, so
+ * neither can a single call here; do not pretend otherwise by reporting
+ * ABSENT off one failed read. A genuinely absent address NACKs every
+ * attempt, so the retry only costs time on the rarer transient-fault case
+ * it exists to rescue -- and this phase never gates on ABSENT anyway, so a
+ * transient fault misclassified as ABSENT would otherwise vanish silently.
  */
+#define I2C_PRESENCE_PROBE_ATTEMPTS 3
+
 static bool i2c_addr_acked(alp_i2c_t *bus, uint8_t addr)
 {
-	uint8_t scratch = 0;
-	return alp_i2c_read(bus, addr, &scratch, 1) == ALP_OK;
+	for (int attempt = 0; attempt < I2C_PRESENCE_PROBE_ATTEMPTS; attempt++) {
+		uint8_t scratch = 0;
+		if (alp_i2c_read(bus, addr, &scratch, 1) == ALP_OK) return true;
+	}
+	return false;
 }
 
 static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
@@ -661,11 +677,28 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 			icm42670_t   imu;
 			alp_status_t irc = icm42670_init(&imu, ctx->carrier_bus, EVK_I2C_ADDR_ICM42670);
 			if (irc != ALP_OK) {
+				/* #2037: PHANTOM (address ACKs, register access fails) was
+				 * previously only reachable via the dedicated BMI323 diag
+				 * block above, but nothing makes that fact BMI323-specific
+				 * -- it can happen to any part held in reset, unpowered,
+				 * or answering with a phantom bus ACK. icm42670_read_id()
+				 * has no `initialised` gate and icm42670_init() sets
+				 * dev->bus/addr before its own first register access, so
+				 * it is safe to call again here even after init() failed
+				 * -- re-probe WHO_AM_I directly and let a second failure
+				 * name PHANTOM instead of folding it into BROKEN. */
+				uint8_t         id2    = 0;
+				alp_status_t    rc_id2 = icm42670_read_id(&imu, &id2);
+				i2c_dev_state_t st     = (rc_id2 == ALP_OK) ? I2C_DEV_BROKEN : I2C_DEV_PHANTOM;
 				printf("[evkdemo] ICM42670 @0x%02x: init -> %d (%s)\n",
 				       EVK_I2C_ADDR_ICM42670,
 				       (int)irc,
-				       i2c_dev_state_str(I2C_DEV_BROKEN));
-				broken++;
+				       i2c_dev_state_str(st));
+				if (st == I2C_DEV_PHANTOM) {
+					phantom++;
+				} else {
+					broken++;
+				}
 			} else {
 				uint8_t id = 0;
 				(void)icm42670_read_id(&imu, &id);
@@ -725,11 +758,23 @@ static phase_verdict_t phase_sensors(demo_ctx_t *ctx)
 			bmp581_t     baro;
 			alp_status_t irc = bmp581_init(&baro, ctx->carrier_bus, EVK_I2C_ADDR_BMP581);
 			if (irc != ALP_OK) {
+				/* #2037: same PHANTOM-reachability fix as the ICM42670
+				 * branch above -- bmp581_read_id() is ungated and
+				 * bmp581_init() sets dev->bus/addr before its own first
+				 * register access, so a second CHIP_ID read here is safe
+				 * even after init() failed. */
+				uint8_t         id2    = 0;
+				alp_status_t    rc_id2 = bmp581_read_id(&baro, &id2);
+				i2c_dev_state_t st     = (rc_id2 == ALP_OK) ? I2C_DEV_BROKEN : I2C_DEV_PHANTOM;
 				printf("[evkdemo] BMP581 @0x%02x: init -> %d (%s)\n",
 				       EVK_I2C_ADDR_BMP581,
 				       (int)irc,
-				       i2c_dev_state_str(I2C_DEV_BROKEN));
-				broken++;
+				       i2c_dev_state_str(st));
+				if (st == I2C_DEV_PHANTOM) {
+					phantom++;
+				} else {
+					broken++;
+				}
 			} else {
 				uint8_t id = 0;
 				(void)bmp581_read_id(&baro, &id);
@@ -880,6 +925,25 @@ static const struct {
 	{ "+5V", EVK_I2C_ADDR_INA236_5V, EVK_INA236_SHUNT_5V_OHMS, EVK_INA236_MAX_5V_A },
 };
 
+/*
+ * #2037: PHANTOM-reachability for INA236, same reasoning as the ICM42670
+ * and BMP581 branches in phase_sensors above. ina236_init() has no
+ * standalone register accessor usable on a context whose init() already
+ * failed (a failed MFG_ID probe folds straight into ALP_ERR_NOT_READY --
+ * chips/ina236/ina236.c -- there's no ina236_read_id() to fall back on),
+ * so re-implement the ONE read this needs directly: MFG_ID at register
+ * 0x3E, documented in include/alp/chips/ina236.h's register-map comment
+ * (0x3E = Manufacturer ID, expect 0x5449 = "TI"). The value itself is not
+ * checked here -- only whether the transfer answers at all.
+ */
+static bool ina236_diag_reg_readable(alp_i2c_t *bus, uint8_t addr)
+{
+	uint8_t      reg    = 0x3Eu;
+	uint8_t      buf[2] = { 0 };
+	alp_status_t s      = alp_i2c_write_read(bus, addr, &reg, 1, buf, sizeof buf);
+	return s == ALP_OK;
+}
+
 static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: power rails (6x INA236) --\n");
@@ -888,7 +952,7 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	int ok_count = 0, absent_count = 0, broken_count = 0;
+	int ok_count = 0, absent_count = 0, broken_count = 0, phantom_count = 0;
 	for (size_t i = 0; i < ARRAY_SIZE(INA_RAILS); i++) {
 		bool present = i2c_addr_acked(ctx->carrier_bus, INA_RAILS[i].addr);
 		printf("[evkdemo] INA236 %-6s @0x%02x: presence probe %s\n",
@@ -913,12 +977,18 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		                              INA_RAILS[i].max_a,
 		                              INA236_ADCRANGE_81MV);
 		if (rc != ALP_OK) {
+			bool reg_readable  = ina236_diag_reg_readable(ctx->carrier_bus, INA_RAILS[i].addr);
+			i2c_dev_state_t st = reg_readable ? I2C_DEV_BROKEN : I2C_DEV_PHANTOM;
 			printf("[evkdemo] INA236 %-6s @0x%02x: init -> %d (%s)\n",
 			       INA_RAILS[i].name,
 			       INA_RAILS[i].addr,
 			       (int)rc,
-			       i2c_dev_state_str(I2C_DEV_BROKEN));
-			broken_count++;
+			       i2c_dev_state_str(st));
+			if (st == I2C_DEV_PHANTOM) {
+				phantom_count++;
+			} else {
+				broken_count++;
+			}
 			continue;
 		}
 
@@ -959,18 +1029,19 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
 		}
 	}
 
-	printf("[evkdemo] POWER: %d/%zu rails answered, %d absent, %d broken\n",
+	printf("[evkdemo] POWER: %d/%zu rails answered, %d absent, %d broken, %d phantom\n",
 	       ok_count,
 	       ARRAY_SIZE(INA_RAILS),
 	       absent_count,
-	       broken_count);
+	       broken_count,
+	       phantom_count);
 
 	/* FAIL only on a FITTED rail's INA236 that misbehaved -- an absent
 	 * rail's monitor is per-unit population (see the phase header comment
 	 * and metadata/boards/e1m-evk.yaml:325), never a fault. If nothing on
 	 * the bus answered its presence probe at all there is nothing left to
 	 * exercise -- SKIPPED, not a silent PASS. */
-	if (broken_count > 0) {
+	if (broken_count > 0 || phantom_count > 0) {
 		ctx->note = "a FITTED rail's INA236 misbehaved -- see per-rail log above";
 		return PHASE_FAIL;
 	}
