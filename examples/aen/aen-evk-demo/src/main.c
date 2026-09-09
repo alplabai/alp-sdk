@@ -1798,8 +1798,17 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 /* The mux is a 74LVC157 -- combinational, ns-scale. This is settle time for
  * the CC3501E driving its pad and the card seeing its lines, not for the mux
  * itself; it costs 10 ms once and removes a whole class of "the first
- * enumeration attempt raced the mux" run. */
+ * enumeration attempt raced the mux" run.
+ *
+ * Guarded, not a bare define: MUX_EN (E1M IO20 -> CC3501E GPIO_26) has no
+ * pull and is not observable from the SoC side at all, so the only way to
+ * confirm the pad is actually low is a multimeter on U38 pin 15 / U39 pin 15
+ * against 0V -- and 10 ms cannot be caught by hand. A bench build overrides
+ * this with -DSD_MUX_SETTLE_MS=600000 to hold /E asserted long enough to
+ * meter it; the default here is unchanged for a normal run. */
+#ifndef SD_MUX_SETTLE_MS
 #define SD_MUX_SETTLE_MS 10u
+#endif
 
 /* FATFS work area. FILE-STATIC, not a local: fs_mount() keeps the pointer for
  * as long as the volume is mounted, so a stack-local would be dangling the
@@ -1839,10 +1848,24 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 	alp_status_t cfg_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. */
 	alp_status_t en_rc = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
+	/* Read the pin back rather than trusting the write return code alone --
+	 * the bridge's GPIO_READ opcode (0x52, cc3501e_proxy.c px_read()) is
+	 * reachable over the same bridge phase 8 left up. A LOW read-back is
+	 * only CORROBORATION that the pad is asserted, not proof: depending on
+	 * bridge firmware this may report the far-side output register rather
+	 * than the pad itself. It does not gate anything below -- disagreement
+	 * is printed and the run falls through to disk_access_init() either
+	 * way, so the log still shows what the controller sees. */
+	bool         mux_level = true;
+	alp_status_t rd_rc     = alp_gpio_read(mux_en, &mux_level);
 	printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
-	       "low, driven LOW): configure -> %d, write -> %d\n",
+	       "low, driven LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, "
+	       "corroboration only -- may reflect the bridge's output register rather than the "
+	       "pad, not proof the line moved)\n",
 	       (int)cfg_rc,
-	       (int)en_rc);
+	       (int)en_rc,
+	       (int)rd_rc,
+	       mux_level ? "HIGH" : "LOW");
 	if (en_rc != ALP_OK) {
 		printf("[evkdemo] SD: the mux ENABLE could not be driven -- every step below would run "
 		       "against a card that is not connected to the SoC. Check that phase 8 passed "
