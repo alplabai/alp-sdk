@@ -14,11 +14,12 @@
  * in-tree as a VENDORED FORK-DRIVER COPY WITH LOCAL FIXES, not a verbatim
  * vendor file.  It started as a verbatim copy; #1828 open-coded the filter
  * programming, added the CNTR_TRIG write and a BUILD_ASSERT bound, and #2037
- * added the missing GLB_CNTR_START write and the FILTER_CTRL_B write that
- * makes the two quadrature inputs filter alike.  Anything that repoints this
- * node onto the opt-in sdk-alif fork compatible MUST carry those five forward or
- * silently reintroduce the defects; retire onto the fork only once the node is
- * repointed AND bench-verified.
+ * added the FILTER_CTRL_B write that makes the two quadrature inputs filter
+ * alike and established that a trigger-counting channel must NEVER be started
+ * (see the DO-NOT-START block at the end of qdec_alif_initialize()).  Anything
+ * that repoints this node onto the opt-in sdk-alif fork compatible MUST carry
+ * those forward or silently reintroduce the defects; retire onto the fork only
+ * once the node is repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
@@ -243,8 +244,9 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	 * old alif_utimer_disable_soft_counter_ctrl() here cleared it (#1828).  This
 	 * only ARMS the programmatic start/stop/clear sources (the helper sets
 	 * CNTR_SRC1_PGM_EN on START_1_SRC, STOP_1_SRC and CLEAR_1_SRC) -- it does
-	 * not start anything; the
-	 * GLB_CNTR_START write that does is at the end of this function (#2037).
+	 * not start anything, and nothing later in this function does either --
+	 * see the DO-NOT-START block at the end, which is a measured invariant this
+	 * driver depends on, not an omission (#2037).
 	 */
 	alif_utimer_enable_soft_counter_ctrl(timer_base);
 	alif_utimer_set_up_counter(timer_base);
