@@ -256,7 +256,7 @@
  * (160m_clk), bit 21 (266m_clk) and bit 23 (hfosc_clk) all reading 0 --
  * exactly the four gates vendor Linux registers at cgu_base + 0x14, each via
  * a plain clk_hw_gate(name, parent, cgu_base + 0x14, bit) call
- * (/home/caner/linux_alif/drivers/clk/clk-ensemble.c:323-330). Four gates
+ * (<linux_alif>/drivers/clk/clk-ensemble.c:323-330). Four gates
  * Linux itself names, all simultaneously off, is the fingerprint of Linux's
  * clk_disable_unused late-initcall -- it marks only camera_pixclk
  * CLK_IGNORE_UNUSED, so every other gate with no enabled consumer, including
@@ -838,7 +838,7 @@ int main(void)
 	       "transport; a populated \"SES ...\" banner = transport alive, so 702/716 are being "
 	       "refused or mismatched specifically -- the banner's own version IS the SES version)\n",
 	       se_rev_rc,
-	       (int)sizeof(se_rev),
+	       (int)strnlen((const char *)se_rev, sizeof(se_rev)),
 	       (const char *)se_rev);
 
 	/*
