@@ -340,6 +340,93 @@ static alp_status_t resp_to_status(uint8_t resp)
 	}
 }
 
+/* #2035: whether a MULTI-BYTE reply (resp_payload_len > 1, i.e. the status
+ * byte plus real data) is allowed to read back ALL-ZERO without that being
+ * the #1378 dead-phase alias (a dead bus phase clocks back literal 0x00 for
+ * every byte, and 0x00 is also ALP_CC3501E_RESP_OK -- see the caller).
+ *
+ * STRUCTURAL DEFAULT: an opcode NOT listed here is assumed UNABLE to
+ * legitimately reply all-zero, so the caller below treats an all-zero reply
+ * from it as the dead-phase alias.  This inverts the old shape (a
+ * hand-maintained list of PROTECTED opcodes, which left every new opcode
+ * unprotected until someone remembered to add it -- exactly how GET_MAC
+ * shipped able to hand back a false 00:00:00:00:00:00 "success").  A new
+ * opcode is now safe by construction; it only loses that protection by
+ * earning a place below, and it earns that place only with a documented,
+ * positive reason its reply CAN legitimately be all-zero -- reading the
+ * struct definitions in <alp/protocol/cc3501e.h>, not a guess.
+ *
+ * Deliberately NOT consulted for single-byte (bare-status) replies: RESP_OK
+ * alone IS the entire legitimate success reply for most opcodes in this
+ * protocol (PING, the WIFI_*_STOP/DISCONNECT family, the SOCK_CONNECT/BIND/
+ * LISTEN/CLOSE family, most BLE_* calls, GPIO_CONFIGURE/WRITE/SET_INTERRUPT,
+ * ...), so a bare RESP_OK is structurally indistinguishable from the
+ * dead-phase alias for THOSE opcodes -- defaulting to "protected" there
+ * would reject the ordinary success case of nearly every opcode in the
+ * table.  Telling the two apart needs a firmware fact that ONE PARTICULAR
+ * opcode's handler can never legitimately answer bare OK, which is why that
+ * check stays its own narrow, explicitly-per-opcode mechanism (see the
+ * WIFI_CONNECT_STA / WIFI_AP_START handling at the call site) instead of
+ * folding into this one. */
+bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
+{
+	switch (cmd) {
+	case ALP_CC3501E_CMD_WIFI_STATUS:
+		/* alp_cc3501e_wifi_status_t: state=DISCONNECTED(0), fail_reason=
+		 * NONE(0), rssi_dbm=0 (documented "@warning NOT A MEASUREMENT...
+		 * always 0 on the wire", <alp/protocol/cc3501e.h>), reserved=0.
+		 * "Never connected since boot" is a real, common device state and
+		 * reads back byte-identical to this. */
+		return true;
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
+		/* 0 dBm is a LEGAL int8 RSSI reading (see the wifi_status_t
+		 * rssi_dbm doc comment) -- there is no in-band sentinel to tell it
+		 * apart from a dead phase. */
+		return true;
+	case ALP_CC3501E_CMD_WIFI_GET_IP:
+		/* 0.0.0.0 legitimately means "no IP assigned yet" (STA not
+		 * associated / AP not started). */
+		return true;
+	case ALP_CC3501E_CMD_DIAG_GET_STATS:
+		/* Zero counters right after boot are a real state, not a dead
+		 * link. */
+		return true;
+	case ALP_CC3501E_CMD_SOCK_RECV:
+		/* alp_cc3501e_sock_recv_resp_t is explicit: "data_len == 0 means
+		 * no data was available (non-blocking semantics; the status is
+		 * still ALP_CC3501E_RESP_OK)", and `from` is genuinely zeroed for
+		 * a STREAM socket. */
+		return true;
+	case ALP_CC3501E_CMD_OTA_STATUS:
+		/* alp_cc3501e_ota_status_t: state=IDLE(0), bytes_written=0,
+		 * total_len=0, pending=NONE(0) is the real, common "no OTA
+		 * session has ever run on this device" state. */
+		return true;
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE:
+		/* alp_cc3501e_ota_update_mode_t: mode==0 ("left/never entered
+		 * update mode") is documented in <alp/protocol/cc3501e.h> as
+		 * byte-identical to the dead-phase alias and NOT structurally
+		 * defeatable here -- mode==1 IS proof (a dead phase can never
+		 * forge it), so the host confirm loop already treats mode==0 as
+		 * needing corroboration, not as proof either way.  Do not add a
+		 * canary here; the header explains why this needs a wire-level
+		 * fix instead (#1696). */
+		return true;
+	case ALP_CC3501E_CMD_GPIO_READ:
+		/* GPIO level 0 (pad sampled LOW) is an ordinary reading, not a
+		 * fault. */
+		return true;
+	case ALP_CC3501E_CMD_SPI1_TRANSFER:
+		/* alp_cc3501e_spi1_transfer_resp_t: "a len == 0 transfer with
+		 * flags == 0 is a standalone CS deassert" is documented normal
+		 * usage, and seq legitimately starts at 0 -- len=0/flags=0/seq=0
+		 * is that reply, byte-identical to an all-zero dead phase. */
+		return true;
+	default:
+		return false;
+	}
+}
+
 /* ---- transport-transaction lock (issue #1116) -----------------------------
  *
  * cc3501e_request() is the ONLY place the 4-phase SPI exchange runs, and
@@ -859,78 +946,98 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 			memcpy(rx_buf, &ctx->rx_scratch[1], n);
 			if (rx_len != NULL) *rx_len = n;
 		}
-		/* #1378: a dead bus phase reads back literal 0x00 for every byte it
-		 * clocks -- this repo's own silicon finding (see
+		/* #1378 / #2035: a dead bus phase reads back literal 0x00 for every
+		 * byte it clocks -- this repo's own silicon finding (see
 		 * hal/ti/cc3501e_hw_ti_wifi.c's cc3501e_hw_wifi_lazy_start(), "the
 		 * host then reads 0x00000000 from a dead link").  0x00 is ALSO
 		 * ALP_CC3501E_RESP_OK, so a header that read intact (hdr_ok above --
 		 * genuinely alive) followed by a payload phase that dies in the
 		 * inter-phase gap (cc3501e_reply_gate above, CC3501E_PHASE_SETTLE_US)
-		 * is silently indistinguishable from a real, successful bare-status
+		 * is silently indistinguishable from a real, successful all-zero
 		 * reply: ALP_OK must require positive evidence the device framed a
 		 * reply, not merely the absence of evidence that it did not.
 		 *
-		 * A content-based check cannot be applied generally here: several
-		 * bare-OK replies legitimately ARE all-zero (WIFI_STATUS's
-		 * disconnected-and-never-attempted state, DIAG_GET_STATS' zero
-		 * counters right after boot, SOCK_RECV's zero-bytes-pending) --
-		 * flagging those would trade a rare false ALP_OK for a routine false
-		 * ALP_ERR_IO on paths that are correct today.  The check is therefore
-		 * PER-OPCODE, and an opcode earns its place on the list below only by
-		 * a firmware fact: its handler cannot EVER frame a synchronous bare
-		 * RESP_OK, so seeing one here is self-evidently the dead-phase alias,
-		 * not a value this driver has merely decided is improbable.
+		 * Two shapes, two mechanisms (a single content-based check cannot
+		 * cover both -- see cc3501e_reply_may_be_all_zero()'s doc comment):
 		 *
-		 * WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
-		 * (handle_worker_routed_payload's WORKER_IDLE case,
-		 * cc3501e-bridge-firmware:src/protocol.c) UNCONDITIONALLY acks a fresh
-		 * submit with RESP_ERR_BUSY.  Rejecting the alias here avoids handing
-		 * the caller a false "submitted", which is exactly the #1376
-		 * false-connect mechanism.  cc3501e_wifi_connect() no longer trusts
-		 * this ack in either direction (it only trusts the independent
-		 * WIFI_STATUS latch -- see cc3501e_wifi.c), so for that opcode this
-		 * is defense in depth.
+		 *  1. resp_payload_len == 1 (bare status, no data).  RESP_OK alone
+		 *     is the legitimate success reply for most opcodes here, so
+		 *     "all-zero" carries no signal by itself; only a firmware fact
+		 *     that ONE opcode's handler can never legitimately answer bare
+		 *     OK makes it self-evidently the dead-phase alias.  Still a
+		 *     narrow, per-opcode allowlist for exactly that reason:
 		 *
-		 * WIFI_AP_START (0x14) -- #1385.  Same handler, same unconditional
-		 * BUSY submit ack, AND the ONE path that could otherwise return a
-		 * bare RESP_OK for this opcode is unreachable to the host: the drain
-		 * (cc3501e-bridge-firmware:src/worker.c's worker_run_pending()) calls
-		 * worker_reset() for exactly CONNECT_STA and AP_START *before*
-		 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
-		 * that would reply RESP_OK is wiped while the host is still held off
-		 * and can never be collected.  Unlike CONNECT_STA this is NOT defense
-		 * in depth: this rejection was cc3501e_wifi_ap_start()'s ONLY route to
-		 * ALP_OK, so that wrapper no longer polls it -- it submits
-		 * WIFI_AP_START exactly once and reports ALP_ERR_TIMEOUT
-		 * unconditionally (see cc3501e_wifi.c), since there is no reply this
-		 * opcode can ever frame as success.  Restoring a real success path
-		 * still needs the same submit-once-then-confirm restructure
-		 * cc3501e_wifi_connect() got, which firmware v4 cannot yet support
-		 * (cc3501e_hw_wifi_ap_start() never writes the g_wifi_conn latch that
-		 * WIFI_STATUS reads, so there is no independent AP channel to confirm
-		 * against).  Tracked in #1696 -- the wire is v5 now, so re-check whether
-		 * an AP-side latch can be added.  (#1385, cited here before, is CLOSED.)
+		 *     WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
+		 *     (handle_worker_routed_payload's WORKER_IDLE case,
+		 *     cc3501e-bridge-firmware:src/protocol.c) UNCONDITIONALLY acks a
+		 *     fresh submit with RESP_ERR_BUSY.  Rejecting the alias here
+		 *     avoids handing the caller a false "submitted", which is
+		 *     exactly the #1376 false-connect mechanism.
+		 *     cc3501e_wifi_connect() no longer trusts this ack in either
+		 *     direction (it only trusts the independent WIFI_STATUS latch --
+		 *     see cc3501e_wifi.c), so for that opcode this is defense in
+		 *     depth.
 		 *
-		 * OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
-		 * the sharpest case named in #1378/#1385: handle_ota_promote()
-		 * (cc3501e-bridge-firmware:src/protocol_ota.c) returns
-		 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
-		 * cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
-		 * deferred swap-reboot and returns CC3501E_HW_OK UNCONDITIONALLY --
-		 * a bare RESP_OK (reply_data_len 0 -> payload len 1) is that opcode's
-		 * ONLY success reply.  Rejecting it here would make
-		 * cc3501e_ota_promote() always report ALP_ERR_IO and break firmware
-		 * promotion outright.  Closing the alias for OTA_PROMOTE needs either
-		 * a wire-level CRC/canary (a protocol version bump touching host and
-		 * firmware) or host-side confirmation against OTA_STATUS (0x44) --
-		 * neither is a transport-layer change.  Tracked in #1696; weigh against
-		 * #1123, which is also OTA state confirmation.  (#1385 is CLOSED.) */
-		if (resp == ALP_CC3501E_RESP_OK && resp_payload_len == 1u &&
-		    (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA || cmd == ALP_CC3501E_CMD_WIFI_AP_START)) {
-			s = ALP_ERR_IO;
-		} else {
-			s = resp_to_status(resp);
+		 *     WIFI_AP_START (0x14) -- #1385.  Same handler, same
+		 *     unconditional BUSY submit ack, AND the ONE path that could
+		 *     otherwise return a bare RESP_OK for this opcode is
+		 *     unreachable to the host: the drain
+		 *     (cc3501e-bridge-firmware:src/worker.c's worker_run_pending())
+		 *     calls worker_reset() for exactly CONNECT_STA and AP_START
+		 *     *before* cc3501e_bridge_ready() re-arms the link, so the
+		 *     WORKER_DONE branch that would reply RESP_OK is wiped while the
+		 *     host is still held off and can never be collected.  Unlike
+		 *     CONNECT_STA this is NOT defense in depth: this rejection was
+		 *     cc3501e_wifi_ap_start()'s ONLY route to ALP_OK, so that
+		 *     wrapper no longer polls it -- it submits WIFI_AP_START exactly
+		 *     once and reports ALP_ERR_TIMEOUT unconditionally (see
+		 *     cc3501e_wifi.c), since there is no reply this opcode can ever
+		 *     frame as success.  Tracked in #1696 -- the wire is v5 now, so
+		 *     re-check whether an AP-side latch can be added.  (#1385 is
+		 *     CLOSED.)
+		 *
+		 *     OTA_PROMOTE (0x46) is deliberately NOT on this list, despite
+		 *     being the sharpest case named in #1378/#1385:
+		 *     handle_ota_promote() (cc3501e-bridge-firmware:
+		 *     src/protocol_ota.c) returns
+		 *     hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
+		 *     cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
+		 *     deferred swap-reboot and returns CC3501E_HW_OK
+		 *     UNCONDITIONALLY -- a bare RESP_OK (reply_data_len 0 -> payload
+		 *     len 1) is that opcode's ONLY success reply.  Rejecting it here
+		 *     would make cc3501e_ota_promote() always report ALP_ERR_IO and
+		 *     break firmware promotion outright.  Closing the alias for
+		 *     OTA_PROMOTE needs either a wire-level CRC/canary (a protocol
+		 *     version bump touching host and firmware) or host-side
+		 *     confirmation against OTA_STATUS (0x44) -- neither is a
+		 *     transport-layer change.  Tracked in #1696; weigh against
+		 *     #1123, which is also OTA state confirmation.
+		 *
+		 *  2. resp_payload_len > 1 (status + real data).  Requiring the
+		 *     status byte AND every data byte to be simultaneously zero is
+		 *     a much rarer coincidence than a bare zero status alone, so
+		 *     THIS shape defaults to PROTECTED -- see
+		 *     cc3501e_reply_may_be_all_zero() for the (deliberately small,
+		 *     each individually justified) list of opcodes exempted from
+		 *     that default.  This is the shape #2035's cc3501e_wifi_get_mac()
+		 *     bug lived in: GET_MAC's reply is 1 status byte + 6 MAC bytes,
+		 *     so the old bare-status-only allowlist above never even looked
+		 *     at it. */
+		bool all_zero = true;
+		for (uint16_t i = 0; i < resp_payload_len; i++) {
+			if (ctx->rx_scratch[i] != 0x00u) {
+				all_zero = false;
+				break;
+			}
 		}
+		bool dead_phase;
+		if (resp_payload_len == 1u) {
+			dead_phase = all_zero && (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA ||
+			                          cmd == ALP_CC3501E_CMD_WIFI_AP_START);
+		} else {
+			dead_phase = all_zero && !cc3501e_reply_may_be_all_zero(cmd);
+		}
+		s = dead_phase ? ALP_ERR_IO : resp_to_status(resp);
 	}
 
 out:

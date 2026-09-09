@@ -58,4 +58,20 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
+/* #2035: whether opcode @p cmd is allowed to reply all-zero (status byte +
+ * data) without cc3501e_request_locked() treating that as the #1378
+ * dead-phase alias.  Not `static` -- and declared here, not just in
+ * cc3501e_core.c -- purely so tests/zephyr/chips/src/test_cc3501e.c can
+ * exercise the classification directly (see cc3501e_core.c for the full
+ * rationale and the per-opcode justifications). */
+bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd);
+
+/* #2035: whether @p mac is a plausible station address -- rejects an
+ * all-zero address and one with the IEEE group/multicast bit set (mac[0]
+ * bit 0), neither of which a real CC3501E station MAC can be.  Not
+ * `static` for the same test-visibility reason as
+ * cc3501e_reply_may_be_all_zero() above; used by cc3501e_wifi_get_mac()
+ * in cc3501e_wifi.c. */
+bool cc3501e_mac_is_valid(const uint8_t mac[CC3501E_MAC_LEN]);
+
 #endif /* CC3501E_INTERNAL_H */
