@@ -89,3 +89,176 @@
 		};
 	};
 };
+
+/*
+ * ============================================================================
+ * The SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge -- needed to REACH the
+ * card, not to read it
+ * ============================================================================
+ *
+ * The SD pads above are necessary but not sufficient: the microSD sits behind
+ * a 74LVC157 mux whose ENABLE is driven from the CC3501E side (E1M IO20 ->
+ * CC3501E GPIO_26), so without this block main() would be probing a
+ * controller with the card electrically disconnected. Transcribed verbatim
+ * from examples/aen/aen-evk-demo's overlay (its phase 8), the silicon-proven
+ * host-side bring-up; read that file for the full derivation behind every
+ * value here.
+ *
+ * Everything below is a SoM-INTERNAL fact (metadata/e1m_modules/aen/
+ * inter-chip.tsv), not an E1M edge pad, which is why it lives in an app
+ * overlay rather than in the board tree -- the board layer publishes only the
+ * customer-facing edge peripherals.
+ *
+ *     net          Alif pad       dir   CC3501E pad
+ *     ----------   ------------   ---   ---------------------
+ *     WIFI_EN      P15_5          out   (supply gate)
+ *     E_WIFI.NRST  P15_1_FLEX     out   (reset)
+ *     SPI1.SCK     P14_6          out   GPIO_27 (CC35 SPI0 slave)
+ *     SPI1.MOSI    P14_5          out   GPIO_28
+ *     SPI1.MISO    P14_4          in    GPIO_29
+ *     SPI1.SS0     P14_7          out   CC35 SPI0 CSN
+ *     READY        P2_6           in    GPIO_17
+ *
+ * WHAT THIS OVERLAY DELIBERATELY OMITS versus aen-cc3501e-bringup's: the
+ * host-side peripheral-DMA wiring (dma0 / evtrtr0 / the `dmas` property, and
+ * the itcm/dtcm `global_base` windows the PL330 needs to reach TCM buffers).
+ * This app issues only short control frames -- PING, GET_VERSION, GET_MAC,
+ * GET_CAPABILITIES, one scan, BLE_ENABLE, then the mux GPIO write -- every one
+ * of them far below CONFIG_SPI_DW_ALIF_DMA_MIN_LEN, so the DMA path would
+ * never be taken even if it were wired. The `dmas` cells are optional to the
+ * driver (spi_dw_alif.c gates them behind DT_INST_DMAS_HAS_NAME), so omitting
+ * them costs nothing here.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO), plus the
+	 * hardware SS0 chip-select on P14_7. SS0 is the dwc-ssi peripheral's OWN
+	 * select -- not a GPIO bodge, not CS-less, not static-low: the master
+	 * asserts and deasserts it per transfer, and that is exactly what frames
+	 * each phase of the bridge's request/reply exchange. Do NOT add cs-gpios
+	 * here; that installs a software CS and breaks the framing the firmware
+	 * side is built around.
+	 *
+	 * input-enable on MISO because on this SoC a pad's INPUT BUFFER is a
+	 * PADCTRL bit that only pinctrl sets -- without it the pad never senses
+	 * what the slave drives.
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+
+		/*
+		 * P2_6 = the CC3501E READY / host-IRQ input (CC35 GPIO_17). Its mux
+		 * default already IS GPIO, but the pad input buffer still has to be
+		 * enabled here or alp_gpio_read(P2_6) reads 0 forever whatever the
+		 * CC35 drives -- and the host then silently falls back to fixed
+		 * settle gaps instead of gating each reply phase on the slave's
+		 * actual re-arm, which is the race that produces byte-shifted
+		 * replies.
+		 *
+		 * It lives inside THIS state rather than a standalone one applied at
+		 * runtime because P2_6's alternate function is SPI1_SCLK_A: a second
+		 * pinctrl pass after SPI1 is up killed the bridge on silicon. Applied
+		 * in the SPI driver's single init pass it is inert.
+		 */
+		group2 {
+			pinmux = <PIN_P2_6__GPIO>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
+ * in ensemble_e8_peripherals.dtsi (which declares only the customer-facing
+ * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1 base
+ * (+0x1000 per instance from spi0's 0x48103000).
+ *
+ * BENCH-TBD on interrupts: <138 3> follows the consecutive pattern from spi0's
+ * IRQ 137 -- it is INFERRED, not read out of a document. "Confirm" therefore
+ * means: check SPI1_IRQ against the AE822 TRM (or the alifsemi/zephyr_alif
+ * fork's e1.dtsi) before relying on the interrupt-driven path on silicon.
+ *
+ * clock-frequency is REQUIRED, not decorative: without it spi_dw_alif's
+ * configure takes the clock-control path, which fails -EINVAL for the gateless
+ * dummy ALIF_SPI_CLK, and every transceive then returns ALP_ERR_INVAL at zero
+ * SCLK. 200 MHz is the real SSI functional clock (E8 HWRM); BAUDR =
+ * clock-frequency / freq_hz, and cc3501e_bridge.h asks for 25 MHz = /8.
+ *
+ * rx-delay: NOT what clocks the link -- src/cc3501e_bridge.c pokes
+ * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY right after
+ * alp_spi_open() returns, which overwrites whatever this property set. See
+ * cc3501e_bridge.h and examples/aen/aen-evk-demo's overlay for the full
+ * derivation (silicon-measured on E1M-AEN803 serial 2026W36-0002 at 25 MHz).
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		rx-delay = <2>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * The LP-GPIO island carries WIFI_EN (P15_5) and E_WIFI.NRST (P15_1_FLEX). No
+ * pinctrl group is needed for their mux: P15_x function 0 -- the reset default
+ * -- already IS LPGPIO. Turning the pads' OUTPUT DRIVERS on is a separate
+ * matter and not a devicetree fact at all; see the raw PADCTRL write in
+ * src/cc3501e_bridge.c and the comment above it.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/* gpio2 carries the READY input (CC35 GPIO_17 -> Alif P2_6). */
+&gpio2 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 3-entry control array for the SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
+	 * These are NOT E1M edge pads, so this app does not use the 52-slot
+	 * positional E1M map; a production board file appends SoM-internal
+	 * control nets after the E1M pad slots.
+	 *
+	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
+	 * one broke pin resolution outright on the bench (2026-08-26): the
+	 * bridge failed as if WIFI_EN were absent, which reads like a hardware
+	 * fault and is not one.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+	};
+};

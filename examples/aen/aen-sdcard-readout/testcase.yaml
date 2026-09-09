@@ -6,7 +6,7 @@
 #
 # Compile-checks the driver + DT node on the real E8 board target; filtered OUT
 # of the native_sim PR gate (platform_allow = the AEN801 HE board only -- the
-# SD "D" pad route in boards/*.overlay is HE-only, see the overlay header).
+# SD "B" pad route in boards/*.overlay is HE-only, see the overlay header).
 #
 # This is the regression coverage for #1097: CONFIG_SDHC_DWC_ADMA=y (default)
 # used to place the ADMA descriptor table in an empty-named linker section
@@ -31,4 +31,4 @@ tests:
       - aen
       - sdhc
       - sdmmc
-    build_only: true   # no card is reachable (EVK SD mux is CC3501E-side); bench flash, not a CI run.
+    build_only: true   # needs a real card + the P18 mux-select jumper set by hand; bench flash, not a CI run.

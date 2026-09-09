@@ -28,42 +28,65 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sd
 
 ## What it shows
 
-1. `disk_access_init("SD")` → SDHC controller + SD card enumeration.
-2. On success, read the card geometry (`GET_SECTOR_COUNT` / `GET_SECTOR_SIZE`).
+1. `cc3501e_bridge_bringup()` → power up the on-module CC3501E coprocessor and
+   bring the inter-chip SPI1 bridge up (~900 ms).
+2. Assert the SDIO mux ENABLE (E1M `IO20` → CC3501E `GPIO_26`, active-low)
+   over the CC3501E GPIO proxy, so the card is actually connected to the SoC.
+3. `disk_access_init("SD")` → SDHC controller + SD card enumeration.
+4. On success, read the card geometry (`GET_SECTOR_COUNT` / `GET_SECTOR_SIZE`).
 
-`RESULT PASS` requires a card to enumerate. A clean controller bring-up where the
-card is simply not reachable is reported **PARTIAL**.
+This app is now self-sufficient: it no longer needs `aen-evk-demo`'s other
+phases to reach the card, only steps 1-2 above, run before step 3. **Still
+read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*` call, no
+`disk_access_write`, no `mkfs` anywhere in this app.
+
+`RESULT PASS` requires a card to enumerate. A bridge or mux failure is its own
+`RESULT FAIL`, reported before `disk_access_init` is even attempted — a disk
+error measured with the mux undriven is not a real measurement. A clean
+bridge + mux + controller bring-up where the card still does not enumerate is
+reported **PARTIAL**.
 
 ## Status
 
-**Controller/driver path PROVEN on E8 (RESULT PARTIAL):** the `snps,dwc-sdhc`
-driver builds, the device inits, and `disk_access_init` runs and returns "no card"
-cleanly. No card enumerates because the SD slot is not reachable on this bench:
+**Controller/driver path PROVEN on E8, and the bridge + mux path now runs
+too (RESULT PARTIAL):** `cc3501e_bridge_bringup()` powers the coprocessor and
+brings SPI1 up; the mux ENABLE write + read-back both run over the GPIO
+proxy; the `snps,dwc-sdhc` driver builds, the device inits, and
+`disk_access_init` runs. No card enumerates, for a different and still-open
+reason (see below) — not because the mux is undriven any more.
 
-> **For a card to enumerate (BENCH-BLOCKED) — NOT a driver bug, and not something
-> this example does today.** The EVK microSD sits behind a 74LVC157 SDIO mux
-> whose `EN`=**IO20**→CC3501E **GPIO_26** and `SEL`=**IO21**→CC3501E **GPIO_30** are
-> *both on the CC3501E*. Reaching the card needs all of:
-> 1. **A CC3501E GPIO-proxy write that routes the mux** — the coprocessor firmware
->    *does* implement the opcode: `CMD_GPIO_WRITE` 0x51 dispatches to
->    `handle_gpio_write` in `cc3501e-bridge-firmware:src/protocol.c` (firmware `0.4.0`,
->    protocol version `5`), and `ALP_E1M_GPIO_IO20` → raw CC35 `GPIO_26` (`MUX_EN`)
->    is in the proxy route table. What is missing is a *caller*, not firmware.
-> 2. **The inter-chip SPI1 link brought up in this app** — the link itself is
->    bench-validated (`include/alp/chips/cc3501e.h` is marked `[BENCH-VERIFIED]`,
->    and the GPIO proxy is PASS in `cc3501e-bridge-firmware:BRINGUP_STATUS.md`), but this
->    example never calls `cc3501e_bridge_bringup()`, so no `GPIO_WRITE` reaches the
->    mux. See [`aen-cc3501e-gpio`](../aen-cc3501e-gpio/) for the proxy path.
-> 3. **SD pad route + DMA translate:** this overlay wires the **B** route (CLK=P14_1,
->    CMD=P14_0, D0..D3=P13_0..P13_3), confirmed against the module schematic and
->    corroborated by five metadata sources plus two netlists (see the overlay's
->    header comment) -- a prior revision wired the unconfirmed **D** route
->    (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3), which was wrong (P4_2 is not an SD
->    pin, and D0..D3 landed on on-module PDM/OSPI0 pads). Correct ADMA2 transfers
->    still need `CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE` + the `itcm/dtcm` `global_base`
->    dtsi props ([[project_pending_hw_configs]]).
+> **What used to block a card from being reachable at all, and is now
+> resolved by this app itself:**
+> 1. ~~A CC3501E GPIO-proxy write that routes the mux~~ — the coprocessor
+>    firmware always implemented the opcode (`CMD_GPIO_WRITE` 0x51 →
+>    `handle_gpio_write` in `cc3501e-bridge-firmware:src/protocol.c`,
+>    firmware `0.4.0`, protocol version `5`); this app now calls it via
+>    `alp_gpio_write(ALP_E1M_GPIO_IO20, false)` over the proxy.
+> 2. ~~The inter-chip SPI1 link brought up in this app~~ — `main()` now calls
+>    `cc3501e_bridge_bringup()` (copied verbatim from `aen-evk-demo`'s
+>    `src/cc3501e_bridge.{c,h}`) before touching the disk at all.
+> 3. **SD pad route** — this overlay wires the **B** route (`CLK=P14_1`,
+>    `CMD=P14_0`, `D0..D3=P13_0..P13_3`), confirmed against the module
+>    schematic and corroborated by five metadata sources plus two netlists
+>    (see the overlay's header comment). Unchanged by this revision.
+>
+> **What is STILL bench-set by hand, not by this app:** the mux **SELECT**
+> (E1M `IO21`) is not software-drivable on this module at all — on r2 it is
+> physically open, on r1 driving it would contend with the P18 header
+> jumper — so it is set by a jumper on header **P18** (see
+> `aen-evk-demo`'s phase 9 header comment for the full netlist trace). A
+> wrong or missing jumper still reads as `DISK_STATUS_NOMEDIA` from this app,
+> indistinguishable from an empty slot.
+>
+> **What is open now that the bridge and mux are proven driven, and is NOT
+> this app's job to fix:** the card still does not enumerate. `SW_RST_R` at
+> `0x4810202F` stays `0x02`, so `SW_RST_CMD` never self-clears and
+> `disk_access_init` returns `-116`. That is a controller/card-handshake
+> question, under separate investigation, not a mux or bridge one — this
+> app's job was to stop measuring that question with the card electrically
+> disconnected, which it now has.
 
-So on this bench the SDHC **controller + driver are proven** (builds, inits,
-`disk_access_init` runs cleanly) but the card is **unreachable until this example
-brings the CC3501E bridge up and drives the mux over the GPIO proxy**. Tier-2
-retires onto the opt-in fork once a card is actually read.
+So on this bench the SDHC **controller + driver are proven**, the **bridge +
+mux path is proven driven by this app alone**, and the remaining gap to a
+card actually enumerating is the `SW_RST_CMD` handshake above. Tier-2 retires
+onto the opt-in fork once a card is actually read.

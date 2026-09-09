@@ -1965,8 +1965,8 @@ static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 		verdict   = PHASE_SKIPPED;
 	} else if (drc != 0) {
 		printf("[evkdemo] SD: the card IS detected and the SD handshake still failed (rc=%d) -- "
-		       "that is the controller, the pinmux (CLK P4_1 / CMD P4_2 / D0..D3 P6_0..P6_3) or "
-		       "the clock ramp, NOT a missing card. Not a skip\n",
+		       "that is the controller, the pinmux (CLK P14_1 / CMD P14_0 / D0..D3 "
+		       "P13_0..P13_3) or the clock ramp, NOT a missing card. Not a skip\n",
 		       drc);
 		ctx->note = "SDHC init failed with a card present";
 		verdict   = PHASE_FAIL;
