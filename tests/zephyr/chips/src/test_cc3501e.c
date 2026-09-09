@@ -25,6 +25,7 @@
 #include "alp/chips/cc3501e.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/crc16.h"
 
 /* Relative include, not a new -I: chips/cc3501e/'s own internal header,
  * the same "expose one internal helper for testing" pattern already used
@@ -151,4 +152,197 @@ ZTEST(alp_chips, test_cc3501e_mac_is_valid_accepts_real_unicast_mac)
 	const uint8_t real_mac[CC3501E_MAC_LEN] = { 0x00, 0x18, 0x02, 0xAA, 0xBB, 0xCC };
 
 	zassert_true(cc3501e_mac_is_valid(real_mac), "a real unicast MAC must be accepted");
+}
+
+/* ------------------------------------------------------------------ */
+/* v4.0 (#2035): the wire-MAJOR-bump gate + reply decode.  Both
+ * cc3501e_fw_major_is_acceptable() and cc3501e_reply_verdict() are pure
+ * (no ctx, no I/O), so -- like cc3501e_reply_may_be_all_zero() above --
+ * they are directly testable with fabricated frames and no SPI bus.
+ * ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_cc3501e_fw_major_gate_accepts_3_and_4_refuses_rest)
+{
+	zassert_true(cc3501e_fw_major_is_acceptable(3u),
+	             "MAJOR 3 (legacy, migration window) must pass");
+	zassert_true(cc3501e_fw_major_is_acceptable(4u), "MAJOR 4 (this driver's own wire) must pass");
+	zassert_false(cc3501e_fw_major_is_acceptable(0u),
+	              "MAJOR 0 (pre-ADR-0033 raw-integer legacy) must be refused");
+	zassert_false(cc3501e_fw_major_is_acceptable(1u), "MAJOR 1 was never a real wire MAJOR");
+	zassert_false(cc3501e_fw_major_is_acceptable(2u), "MAJOR 2 was never a real wire MAJOR");
+	zassert_false(cc3501e_fw_major_is_acceptable(5u), "MAJOR 5 does not exist yet");
+	zassert_false(cc3501e_fw_major_is_acceptable(255u),
+	              "an arbitrary garbage MAJOR must be refused");
+}
+
+/* Fill @p out[0..3] with a reply header for @p cmd; the reply payload_len
+ * field (bytes 2..3, LE) is not consulted by cc3501e_reply_verdict() -- only
+ * the header's role as CRC-covered bytes matters here -- so it is left 0. */
+static void fill_reply_hdr(uint8_t out[ALP_CC3501E_HEADER_BYTES], alp_cc3501e_cmd_t cmd)
+{
+	out[0] = (uint8_t)cmd;
+	out[1] = ALP_CC3501E_FLAG_RESP_REQUIRED;
+	out[2] = 0u;
+	out[3] = 0u;
+}
+
+/* Append a valid CRC-16/CCITT-FALSE trailer to @p payload (which already
+ * holds @p unpadded_len real bytes) and return the total length.  Uses the
+ * SAME shared alp_crc16_ccitt_false() the production code calls -- this
+ * proves cc3501e_reply_verdict() accepts a CORRECTLY computed trailer, not
+ * that it accepts some independently-invented value. */
+static uint16_t append_valid_crc(const uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                 uint8_t      *payload,
+                                 uint16_t      unpadded_len)
+{
+	uint16_t crc               = alp_crc16_ccitt_false(reply_hdr, ALP_CC3501E_HEADER_BYTES);
+	crc                        = alp_crc16_ccitt_false_update(crc, payload, unpadded_len);
+	payload[unpadded_len]      = (uint8_t)(crc & 0xFFu);
+	payload[unpadded_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
+	return (uint16_t)(unpadded_len + ALP_CC3501E_CRC_BYTES);
+}
+
+/* Shape-tolerant GET_VERSION: the LEGACY wire shape (status
+ * ALP_CC3501E_RESP_OK_LEGACY, 2 data bytes, no CRC) must decode to ALP_OK at
+ * fw_proto_major == 0 -- the state cc3501e_get_version() runs in from inside
+ * cc3501e_reset(), before the gate has run. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_get_version_legacy_shape)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_GET_VERSION);
+	uint8_t payload[3] = { ALP_CC3501E_RESP_OK_LEGACY, 3u, 1u }; /* legacy MAJOR.MINOR = 3.1 */
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_GET_VERSION, 0u, hdr, payload, 3u),
+	              ALP_OK,
+	              "legacy (0x00, no CRC) GET_VERSION reply must decode OK pre-gate");
+}
+
+/* Shape-tolerant GET_VERSION: the 4.0 wire shape (status ALP_CC3501E_RESP_OK,
+ * 2 data bytes, valid CRC) must ALSO decode to ALP_OK at fw_proto_major == 0
+ * -- same pre-gate call, opposite dialect. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_get_version_v4_shape)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_GET_VERSION);
+	uint8_t  payload[5] = { ALP_CC3501E_RESP_OK, 4u, 0u, 0u, 0u }; /* MAJOR.MINOR = 4.0 */
+	uint16_t len        = append_valid_crc(hdr, payload, 3u);
+
+	zassert_equal(len, 5u, "3 real bytes + 2 CRC bytes");
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_GET_VERSION, 0u, hdr, payload, len),
+	              ALP_OK,
+	              "4.0 (0x5A + valid CRC) GET_VERSION reply must decode OK pre-gate");
+}
+
+/* THE LANDMINE (see <alp/protocol/cc3501e.h> and cc3501e_core.c): an
+ * all-zero dead SPI phase on GET_VERSION, seen with fw_proto_major still 0
+ * (i.e. from inside cc3501e_reset(), before the gate runs), must NOT decode
+ * as a legitimate legacy MAJOR-0 reply.  If it did, cc3501e_reset() would
+ * read fw_major == 0, permanently clear ctx->initialised and report
+ * ALP_ERR_VERSION for a transient transport hiccup -- stranding the fleet
+ * silently, exactly the failure the task calls out. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_get_version_dead_phase_is_not_major_zero)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_GET_VERSION);
+	uint8_t payload[3] = { 0x00u, 0x00u, 0x00u }; /* dead phase: every byte reads back 0x00 */
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_GET_VERSION, 0u, hdr, payload, 3u),
+	              ALP_ERR_IO,
+	              "an all-zero GET_VERSION reply must be rejected as a dead phase, "
+	              "never accepted as legacy MAJOR 0");
+}
+
+/* A major-3 (legacy) firmware round trip: bare RESP_OK_LEGACY, no CRC, on an
+ * ALREADY-GATED (fw_proto_major == 3) context. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_major3_round_trip)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_PING);
+	uint8_t payload[1] = { ALP_CC3501E_RESP_OK_LEGACY };
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 3u, hdr, payload, 1u),
+	              ALP_OK,
+	              "a major-3 peer's bare legacy OK must decode OK");
+}
+
+/* A major-4 firmware round trip: RESP_OK plus a valid CRC trailer, on an
+ * already-gated (fw_proto_major == 4) context. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_major4_round_trip_valid_crc)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_PING);
+	uint8_t  payload[3] = { ALP_CC3501E_RESP_OK, 0u, 0u };
+	uint16_t len        = append_valid_crc(hdr, payload, 1u);
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 4u, hdr, payload, len),
+	              ALP_OK,
+	              "a major-4 peer's OK + valid CRC must decode OK");
+}
+
+/* A corrupted CRC trailer must be rejected, even though the status byte
+ * itself claims success. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_major4_corrupted_crc_rejected)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_PING);
+	uint8_t  payload[3] = { ALP_CC3501E_RESP_OK, 0u, 0u };
+	uint16_t len        = append_valid_crc(hdr, payload, 1u);
+	payload[len - 1u] ^= 0xFFu; /* flip the CRC's high byte */
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 4u, hdr, payload, len),
+	              ALP_ERR_IO,
+	              "a corrupted CRC must be rejected even with resp == RESP_OK");
+}
+
+/* An all-zero dead phase on a PROTECTED multi-byte opcode (GET_MAC is not on
+ * cc3501e_reply_may_be_all_zero()'s exemption list) must be rejected on the
+ * LEGACY (major-3) branch via the pre-existing all-zero heuristic -- no CRC
+ * exists on that wire to catch it any other way. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_dead_phase_rejected_major3)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_GET_MAC);
+	uint8_t payload[7] = { 0 }; /* status=0x00 + 6 all-zero MAC bytes */
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_GET_MAC, 3u, hdr, payload, 7u),
+	              ALP_ERR_IO,
+	              "an all-zero legacy GET_MAC reply must be rejected as a dead phase");
+}
+
+/* The same all-zero dead phase on the 4.0 (major-4) branch: the CRC check
+ * catches it independently of the all-zero heuristic (the CRC of a real,
+ * non-zero header plus an all-zero payload span is never the wire's
+ * all-zero "CRC"), so this must reject too -- via a different mechanism than
+ * the major-3 case above, which is exactly what "rejected under both
+ * branches" means. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_dead_phase_rejected_major4)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_GET_MAC);
+	uint8_t payload[9] = { 0 }; /* status + 6 MAC bytes + 2 (also-zero) CRC bytes */
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_GET_MAC, 4u, hdr, payload, 9u),
+	              ALP_ERR_IO,
+	              "an all-zero 4.0 GET_MAC reply must be rejected -- the CRC of the real "
+	              "(non-zero) header can never equal the wire's zero trailer");
+}
+
+/* A NON-all-zero major-4 reply whose status byte is the LEGACY OK (0x00),
+ * not ALP_CC3501E_RESP_OK (0x5A), must still be rejected even with a valid
+ * CRC over exactly those bytes -- a real fw_proto_major-4 peer's status byte
+ * is always 0x5A on success, so 0x00 reaching here is never legitimate.
+ * Guards against a narrower reintroduction of #1378: making resp_to_status()
+ * accept legacy 0x00 unconditionally (instead of gating it on fw_major) would
+ * NOT be caught by the all-zero dead-phase tests above, since this payload is
+ * deliberately not all-zero. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_major4_legacy_status_byte_rejected)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_PING);
+	uint8_t  payload[4] = { ALP_CC3501E_RESP_OK_LEGACY, 0xABu, 0u, 0u }; /* not all-zero */
+	uint16_t len        = append_valid_crc(hdr, payload, 2u);
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 4u, hdr, payload, len),
+	              ALP_ERR_IO,
+	              "a major-4 peer's status byte must never be read as the legacy 0x00 OK");
 }

@@ -313,16 +313,28 @@ static bool update_mode_reads_as(cc3501e_t *ctx, uint8_t want, uint32_t timeout_
 	if (want != 0u) {
 		return true; /* 0x00 cannot forge a 1 -- the readback IS the proof. */
 	}
-	/* want == 0 is the direction the mode byte CANNOT defend (see the comment
-	 * above): a dead payload phase clocks literal 0x00, which is byte-identical
-	 * to a genuine "normal bridge, OTA idle" reply, so reply[0] == 0 alone is
-	 * the absence of evidence, not evidence.  This function is what the public
-	 * ALP_OK of cc3501e_ota_update_mode(ctx, false, ...) rests on, and both
-	 * include/alp/protocol/cc3501e.h and docs/cc3501e-bridge.md instruct hosts
-	 * to corroborate here -- so corroborate: require a diag reply carrying a
-	 * NON-ZERO uptime_ms.  A dead phase reads uptime_ms as 0; a live device
-	 * that has run far enough to service this frame never does.  reset_cause is
-	 * deliberately NOT used: the HAL hardcodes it to 0. */
+	/* want == 0 is the direction the mode byte alone could never defend (see
+	 * the comment above): a dead payload phase clocks literal 0x00, which used
+	 * to be byte-identical to a genuine "normal bridge, OTA idle" reply.
+	 *
+	 * v4.0 (#2035) closes that for a fw_proto_major-4 peer: cc3501e_request()
+	 * (via cc3501e_reply_verdict(), cc3501e_core.c) now requires a valid
+	 * CRC-16/CCITT-FALSE trailer on every reply from such a peer, and the CRC
+	 * of a genuinely dead (all-zero) frame is never the wire's all-zero "CRC"
+	 * -- so a dead phase is rejected ALP_ERR_IO before this function's `s !=
+	 * ALP_OK` check above even sees it, and reply[0] == 0 reaching here at all
+	 * already IS positive evidence, on that wire.  Uptime corroboration is
+	 * therefore redundant for fw_proto_major 4 and is skipped.
+	 *
+	 * A fw_proto_major-3 peer carries no CRC (byte-identical-to-3.1 wire, see
+	 * the migration-order note in <alp/protocol/cc3501e.h>), so the alias is
+	 * still live there and the original corroboration stays: require a diag
+	 * reply carrying a NON-ZERO uptime_ms.  A dead phase reads uptime_ms as 0;
+	 * a live device that has run far enough to service this frame never does.
+	 * reset_cause is deliberately NOT used: the HAL hardcodes it to 0. */
+	if (ctx->fw_proto_major >= 4u) {
+		return true;
+	}
 	alp_cc3501e_diag_info_t info = { 0 };
 	return cc3501e_diag_info(ctx, &info) == ALP_OK && info.uptime_ms != 0u;
 }
@@ -601,7 +613,28 @@ cc3501e_ota_update(cc3501e_t *ctx, const uint8_t *image, size_t len, uint32_t ti
 				/* The STATUS read itself can fail here -- while the slave re-arms
 				 * its SPI the link is DOWN, so header-only polls return IO too.
 				 * That is the expected shape of a flush window, not an error:
-				 * keep polling until the device answers again. */
+				 * keep polling until the device answers again.
+				 *
+				 * v4.0 (#2035): this ALP_OK is what the #1378 dead-phase alias used
+				 * to be able to forge -- a dead payload phase reads back status OK
+				 * with an all-zero alp_cc3501e_ota_status_t, so reserved[1] == 0
+				 * (flush not pending) passes and state == IDLE (0) != WRITING fires
+				 * cc3501e_ota_abort() on a session that was actually healthy.
+				 * OTA_STATUS stays on cc3501e_reply_may_be_all_zero()'s exemption
+				 * list (a genuine "no session ever run" reply IS legitimately
+				 * all-zero), so that alone still cannot tell the two apart.
+				 *
+				 * Against a fw_proto_major-4 peer this is now closed at the
+				 * transport: cc3501e_reply_verdict() (cc3501e_core.c) requires a
+				 * valid CRC-16/CCITT-FALSE trailer on every reply from such a
+				 * peer, and the CRC of an all-zero frame is never the wire's
+				 * all-zero "CRC" -- a dead phase is rejected ALP_ERR_IO before
+				 * `cc3501e_ota_status() == ALP_OK` here can ever be true.  Against
+				 * a fw_proto_major-3 peer (no CRC, byte-identical-to-3.1 wire) the
+				 * alias is unchanged and still live -- this loop has no extra
+				 * corroboration for that case, matching the "keep today's
+				 * exemption-list behaviour for the legacy branch" rule the rest of
+				 * this change follows. */
 				if (cc3501e_ota_status(ctx, &fs, fpoll_ms) == ALP_OK && fs.reserved[1] == 0u) {
 					/* A device that has latched ERROR (or dropped out of the
 					 * session entirely) will never take another chunk, so
