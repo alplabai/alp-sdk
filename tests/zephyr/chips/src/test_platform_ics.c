@@ -299,6 +299,85 @@ ZTEST(alp_chips, test_fake_rv3028c7_get_time_all_ff_is_bus_timeout)
 	alp_i2c_close(bus);
 }
 
+ZTEST(alp_chips, test_fake_rv3028c7_get_time_accepts_por_default_weekday)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* Application Manual Rev. 1.4 Sec. 3.4 "03h -- Weekday", p.16:
+	 * WEEKDAY is a raw 0..6 counter, and 0 is that register's OWN
+	 * POR-reset default -- not a fault code.  A board with no
+	 * VBACKUP is a cold start on every power cycle (PORF always
+	 * latched), so weekday genuinely reads 0 while seconds/minutes/
+	 * hours are perfectly valid and advancing.  A prior 1..7 bound
+	 * on this check rejected exactly this reading and threw away
+	 * the whole 7-byte decode -- on real E1M-AEN803 silicon that
+	 * looked like a stopped clock (aen-evk-demo phase_rtc_temp()
+	 * reported "t0=00:00:00 t1=00:00:00 advanced=no") while a
+	 * direct I2C census on the same board watched the raw seconds
+	 * register measurably advance from 0x20 to 0x21.  Assert on the
+	 * DECODED FIELDS below, not just the return code: the bug's
+	 * signature was a caller struct left untouched while
+	 * get_time() still reported success -- a bare ALP_OK check
+	 * would pass against that broken driver too. */
+	fake_rv3028c7_set_reg(0x00u, 0x12u); /* seconds = 12 (BCD) */
+	fake_rv3028c7_set_reg(0x01u, 0x34u); /* minutes = 34 (BCD) */
+	fake_rv3028c7_set_reg(0x02u, 0x05u); /* hours   = 5  (BCD) */
+	fake_rv3028c7_set_reg(0x03u, 0x00u); /* weekday = 0  (raw, POR default) */
+	fake_rv3028c7_set_reg(0x04u, 0x09u); /* day     = 9  (BCD) */
+	fake_rv3028c7_set_reg(0x05u, 0x03u); /* month   = 3  (BCD) */
+	fake_rv3028c7_set_reg(0x06u, 0x26u); /* year    = 26 (BCD) -> 2026 */
+
+	rv3028c7_time_t out = { 0 };
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_OK);
+	zassert_equal(out.second, 12u);
+	zassert_equal(out.minute, 34u);
+	zassert_equal(out.hour, 5u);
+	zassert_equal(out.weekday, 0u);
+	zassert_equal(out.day, 9u);
+	zassert_equal(out.month, 3u);
+	zassert_equal(out.year, 2026u);
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_get_time_weekday_bound_is_0_to_6)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* Same Sec. 3.4 p.16 bound, the other end of the range: 6 is
+	 * the counter's last legal value and must be accepted; 7 can
+	 * never occur on real silicon (the retired 1..7 bound let it
+	 * through) and must still be rejected. */
+	fake_rv3028c7_set_reg(0x00u, 0x12u);
+	fake_rv3028c7_set_reg(0x01u, 0x34u);
+	fake_rv3028c7_set_reg(0x02u, 0x05u);
+	fake_rv3028c7_set_reg(0x04u, 0x09u);
+	fake_rv3028c7_set_reg(0x05u, 0x03u);
+	fake_rv3028c7_set_reg(0x06u, 0x26u);
+
+	fake_rv3028c7_set_reg(0x03u, 0x06u);
+	rv3028c7_time_t out = { 0 };
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_OK);
+	zassert_equal(out.weekday, 6u);
+
+	fake_rv3028c7_set_reg(0x03u, 0x07u);
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_ERR_IO);
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
 /* ------------------------------------------------------------------ */
 /* tmp112 -- TI temperature sensor                                    */
 /* ------------------------------------------------------------------ */
