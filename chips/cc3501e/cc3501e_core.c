@@ -209,8 +209,28 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * `POWER OFF -> 0  while-off PING -> -2  reset -> 0  PING -> -2`.
 	 *
 	 * The mismatch path below still clears it, so a genuine wire disagreement is
-	 * unchanged -- this only removes the deadlock on the way back up. */
-	ctx->initialised = true;
+	 * unchanged -- this only removes the deadlock on the way back up.
+	 *
+	 * Also re-arm fw_proto_major/fw_proto_minor to 0 here, not just
+	 * initialised.  Leaving a PREVIOUS peer's major latched means the
+	 * GET_VERSION call two lines down would frame ITS OWN request in that
+	 * stale dialect (cc3501e_request_locked()'s want_req_crc reads
+	 * ctx->fw_proto_major), and cc3501e_reply_verdict() would decode the
+	 * reply against it too -- both wrong for a peer this reset has not
+	 * identified yet.  Concretely: a stale major 4 latched from a PRIOR
+	 * session, reset against a 3.1 peer whose first GET_VERSION reply is
+	 * merely garbled (nothing protects that wire) -- the request now
+	 * wrongly carries a CRC trailer the 3.1 firmware rejects, GET_VERSION
+	 * never completes, and the transport-hiccup branch below returns
+	 * ALP_OK with initialised=true and the bad major still latched: a
+	 * permanently wedged link that reports reset as successful.  Zeroing
+	 * here makes GET_VERSION go out CRC-less (correct: no major is known
+	 * yet) and makes cc3501e_reply_verdict() use its own
+	 * fw_proto_major==0 content-based shape detection, exactly like the
+	 * very first reset on a fresh ctx. */
+	ctx->initialised    = true;
+	ctx->fw_proto_major = 0u;
+	ctx->fw_proto_minor = 0u;
 
 	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
@@ -482,6 +502,63 @@ bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
 	}
 }
 
+/* Blocker-1 fix (#2035 follow-up): whether opcode @p cmd's reply carries real
+ * payload data beyond the status byte -- i.e. whether its UNPADDED reply
+ * length is > 1.  This is what cc3501e_reply_verdict() below actually needs
+ * to know to pick the right dead-phase mechanism, and it is a fixed fact of
+ * the wire format documented in <alp/protocol/cc3501e.h>, NOT something the
+ * wire's declared payload_len can tell it: EVERY reply, bare-status or not,
+ * is zero-padded up to an @ref ALP_CC3501E_REPLY_PAD (8 B) multiple with the
+ * pad folded into that declared length (see cc3501e_events.c's
+ * cc3501e_events_poll() for the sibling host-side consequence), so a real
+ * bare-status reply (unpadded length 1) and a real short-data reply (e.g.
+ * WIFI_GET_RSSI's unpadded length 2) both show up on the wire as
+ * payload_len == 8 -- indistinguishable by length alone.  Using payload_len
+ * itself to choose the mechanism (the pre-fix code) therefore always took
+ * the "has data" branch for every real reply, which silently starved every
+ * bare-status opcode of its own, more permissive heuristic -- see the
+ * dead_phase dispatch below for the concrete failure.
+ *
+ * STRUCTURAL DEFAULT, same polarity as cc3501e_reply_may_be_all_zero() above:
+ * an opcode NOT listed here is assumed bare-status (unpadded length 1),
+ * because that is what most opcodes in this table actually are -- PING, the
+ * WIFI_*_STOP/DISCONNECT family, the SOCK_CONNECT/BIND/LISTEN/CLOSE family,
+ * most BLE_* calls, GPIO_CONFIGURE/WRITE/SET_INTERRUPT, RESET,
+ * WIFI_SCAN_START/STOP, WIFI_CONNECT_STA/AP_START (handled by the narrow
+ * per-opcode check at the call site instead), OTA_BEGIN/WRITE/FINISH/ABORT/
+ * PROMOTE, STREAM_WRITE, SPI1_RELEASE, CAM_ENABLE/DISABLE, POWER_POLICY,
+ * DIAG_LOG_LEVEL, and GET_PENDING_EVENTS (its DATA is genuinely optional --
+ * "an empty list ... means nothing was queued", see the enum comment -- so
+ * an all-zero reply is its ordinary "nothing pending" case, not evidence of
+ * a dead phase).  A new opcode earns a place below only by carrying a real,
+ * documented reply struct wider than the status byte -- read the struct
+ * definitions in <alp/protocol/cc3501e.h>, not a guess. */
+static bool cc3501e_reply_carries_data(alp_cc3501e_cmd_t cmd)
+{
+	switch (cmd) {
+	case ALP_CC3501E_CMD_GET_VERSION:
+	case ALP_CC3501E_CMD_GET_MAC:
+	case ALP_CC3501E_CMD_GET_DIAG_INFO:
+	case ALP_CC3501E_CMD_GET_CAPABILITIES:
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
+	case ALP_CC3501E_CMD_WIFI_GET_IP:
+	case ALP_CC3501E_CMD_WIFI_STATUS:
+	case ALP_CC3501E_CMD_SOCK_OPEN:
+	case ALP_CC3501E_CMD_SOCK_SEND:
+	case ALP_CC3501E_CMD_SOCK_RECV:
+	case ALP_CC3501E_CMD_OTA_STATUS:
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE:
+	case ALP_CC3501E_CMD_GPIO_READ:
+	case ALP_CC3501E_CMD_SPI1_CONFIGURE:
+	case ALP_CC3501E_CMD_SPI1_TRANSFER:
+	case ALP_CC3501E_CMD_BLE_GATT_READ:
+	case ALP_CC3501E_CMD_DIAG_GET_STATS:
+		return true;
+	default:
+		return false;
+	}
+}
+
 /* v4.0 (#2035): verify a reply's CRC-16/CCITT-FALSE trailer.
  *
  * Span per <alp/protocol/cc3501e.h>: the reply's own 4 header bytes (already
@@ -564,14 +641,29 @@ alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
 	 * above already passed) rather than being gated on !major4_shape.
 	 *
 	 * Two shapes, two mechanisms (a single content-based check cannot cover
-	 * both -- see cc3501e_reply_may_be_all_zero()'s doc comment):
+	 * both -- see cc3501e_reply_may_be_all_zero()'s doc comment).  Dispatched
+	 * on cc3501e_reply_carries_data(cmd), NOT on payload_len: the firmware
+	 * zero-pads every reply's payload up to an ALP_CC3501E_REPLY_PAD (8 B)
+	 * multiple with the pad folded INTO the declared payload_len (see
+	 * cc3501e_reply_carries_data()'s doc comment and cc3501e_events.c), so a
+	 * genuine bare-status reply and a genuine short-data reply both arrive
+	 * with the SAME wire payload_len -- payload_len cannot tell them apart.
+	 * (This used to be gated on `payload_len == 1u`, which no real reply
+	 * from real firmware is ever declared as -- always >= REPLY_PAD -- so
+	 * that branch was dead against the wire and every bare-status opcode
+	 * fell into shape 2 below and was wrongly treated as PROTECTED, i.e. a
+	 * real legacy RESP_OK_LEGACY (0x00) reply from e.g. PING or
+	 * GET_PENDING_EVENTS read back as all-zero and was rejected as a dead
+	 * phase.  Fixed here; test_cc3501e_reply_verdict_major3_bare_status_is_padded
+	 * in tests/zephyr/chips/src/test_cc3501e.c fabricates the real 8-byte
+	 * padded shape a bridge actually sends and pins this down.)
 	 *
-	 *  1. payload_len == 1 (bare status, no data).  RESP_OK alone is the
-	 *     legitimate success reply for most opcodes here, so "all-zero"
-	 *     carries no signal by itself; only a firmware fact that ONE opcode's
-	 *     handler can never legitimately answer bare OK makes it
-	 *     self-evidently the dead-phase alias.  Still a narrow, per-opcode
-	 *     allowlist for exactly that reason:
+	 *  1. !cc3501e_reply_carries_data(cmd) (bare status, no real data).
+	 *     RESP_OK alone is the legitimate success reply for most opcodes
+	 *     here, so "all-zero" carries no signal by itself; only a firmware
+	 *     fact that ONE opcode's handler can never legitimately answer bare
+	 *     OK makes it self-evidently the dead-phase alias.  Still a narrow,
+	 *     per-opcode allowlist for exactly that reason:
 	 *
 	 *     WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
 	 *     (handle_worker_routed_payload's WORKER_IDLE case,
@@ -614,12 +706,12 @@ alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
 	 *     opcode, so the residual risk here is legacy-only.  Tracked in
 	 *     #1696; weigh against #1123, which is also OTA state confirmation.
 	 *
-	 *  2. payload_len > 1 (status + real data).  Requiring the status byte
-	 *     AND every data byte to be simultaneously zero is a much rarer
-	 *     coincidence than a bare zero status alone, so THIS shape defaults
-	 *     to PROTECTED -- see cc3501e_reply_may_be_all_zero() for the
-	 *     (deliberately small, each individually justified) list of opcodes
-	 *     exempted from that default.  This is the shape #2035's
+	 *  2. cc3501e_reply_carries_data(cmd) (status + real data).  Requiring
+	 *     the status byte AND every data byte to be simultaneously zero is a
+	 *     much rarer coincidence than a bare zero status alone, so THIS
+	 *     shape defaults to PROTECTED -- see cc3501e_reply_may_be_all_zero()
+	 *     for the (deliberately small, each individually justified) list of
+	 *     opcodes exempted from that default.  This is the shape #2035's
 	 *     cc3501e_wifi_get_mac() bug lived in: GET_MAC's reply is 1 status
 	 *     byte + 6 MAC bytes, so the old bare-status-only allowlist above
 	 *     never even looked at it. */
@@ -631,7 +723,7 @@ alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
 		}
 	}
 	bool dead_phase;
-	if (payload_len == 1u) {
+	if (!cc3501e_reply_carries_data(cmd)) {
 		dead_phase = all_zero && (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA ||
 		                          cmd == ALP_CC3501E_CMD_WIFI_AP_START);
 	} else {
@@ -1225,7 +1317,20 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* MAJOR-4 fix: the request-build below (cc3501e_request_locked()'s
+	 * want_req_crc) appends a 2-byte CRC trailer once this ctx has negotiated
+	 * fw_proto_major 4, so wire_tx_len there becomes tx_len +
+	 * ALP_CC3501E_CRC_BYTES -- a tx_len this check let through all the way up
+	 * to ALP_CC3501E_MAX_PAYLOAD would encode a wire length LARGER than the
+	 * protocol's own maximum into the header's length field.  Tighten the
+	 * ceiling by the trailer size whenever it is actually going to be
+	 * appended, matching cc3501e_ble_write_descriptor()'s own
+	 * ALP_CC3501E_MAX_PAYLOAD bound at chips/cc3501e/cc3501e_ble.c -- that
+	 * bound is now wrong against a major-4 peer without this. */
+	const uint16_t max_tx = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR)
+	                            ? (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES)
+	                            : (uint16_t)ALP_CC3501E_MAX_PAYLOAD;
+	if (tx_len > max_tx) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
 	/* Serialise the whole exchange (issue #1116): every phase in
@@ -1334,7 +1439,11 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	 * wrapper per iteration -- see the sentinel-race comment below. */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* Same MAJOR-4 ceiling as cc3501e_request() above -- see its comment. */
+	const uint16_t max_tx = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR)
+	                            ? (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES)
+	                            : (uint16_t)ALP_CC3501E_MAX_PAYLOAD;
+	if (tx_len > max_tx) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
 	/* Budget is coarse-grained in CC3501E_POLL_GAP_MS slices; always make at

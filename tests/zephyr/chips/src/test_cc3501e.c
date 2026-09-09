@@ -265,6 +265,32 @@ ZTEST(alp_chips, test_cc3501e_reply_verdict_major3_round_trip)
 	              "a major-3 peer's bare legacy OK must decode OK");
 }
 
+/* Blocker-1 regression (#2035 follow-up): a REAL major-3 bridge reply is
+ * NEVER declared payload_len == 1 on the wire -- the firmware zero-pads
+ * every reply up to an ALP_CC3501E_REPLY_PAD (8 B) multiple with the pad
+ * folded INTO the declared length (see cc3501e_events.c's poll comment and
+ * <alp/protocol/cc3501e.h>'s ALP_CC3501E_REPLY_PAD doc comment), so a bare
+ * RESP_OK_LEGACY reply for a real bare-status opcode like PING arrives here
+ * as payload_len == 8, all eight bytes 0x00 (status 0x00 + 7 pad bytes).
+ * test_cc3501e_reply_verdict_major3_round_trip above fabricates payload_len
+ * == 1, a shape a real bridge never produces -- it let the pre-fix
+ * `payload_len == 1u` dispatch look correct while being dead code against
+ * the wire; every real bare-status reply fell through to the "has data"
+ * branch instead and was wrongly rejected as a dead phase.  This is the
+ * real shape.  Before the blocker-1 fix this asserted ALP_ERR_IO, not
+ * ALP_OK -- see the task's mutation-evidence run. */
+ZTEST(alp_chips, test_cc3501e_reply_verdict_major3_bare_status_is_padded)
+{
+	uint8_t hdr[ALP_CC3501E_HEADER_BYTES];
+	fill_reply_hdr(hdr, ALP_CC3501E_CMD_PING);
+	uint8_t payload[8] = { ALP_CC3501E_RESP_OK_LEGACY, 0u, 0u, 0u, 0u, 0u, 0u, 0u };
+
+	zassert_equal(cc3501e_reply_verdict(ALP_CC3501E_CMD_PING, 3u, hdr, payload, 8u),
+	              ALP_OK,
+	              "a real, pad-shaped major-3 bare-status reply must decode OK, not "
+	              "be mistaken for a dead phase");
+}
+
 /* A major-4 firmware round trip: RESP_OK plus a valid CRC trailer, on an
  * already-gated (fw_proto_major == 4) context. */
 ZTEST(alp_chips, test_cc3501e_reply_verdict_major4_round_trip_valid_crc)

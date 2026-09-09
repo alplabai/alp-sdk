@@ -38,6 +38,19 @@
 
 #if defined(CONFIG_ALP_SDK_CHIP_GD32G553)
 
+/* DT_HAS_COMPAT_STATUS_OKAY() below needs this -- the only includes above it
+ * are <stddef.h>/<stdint.h>/alp/chips/gd32g553.h, which are Zephyr-free by
+ * design (see the file header), so nothing else pulls it in.  Without it the
+ * preprocessor macro-expands DT_HAS_COMPAT_STATUS_OKAY(alif_crc) to nothing
+ * (undefined identifiers evaluate to 0 in a #if, but the now-bare `(alif_crc)`
+ * that's left behind is not a valid constant-expression token sequence) --
+ * `#if defined(CONFIG_CRC_ALIF) && DT_HAS_COMPAT_STATUS_OKAY(alif_crc)` is a
+ * hard `missing binary operator before token "("` error on EVERY Zephyr
+ * build, `&&` short-circuiting notwithstanding: macro expansion runs over the
+ * whole line before the expression is evaluated, so the right operand is
+ * expanded (and breaks) even when CONFIG_CRC_ALIF is unset. */
+#include <zephyr/devicetree.h>
+
 #if defined(CONFIG_CRC_ALIF) && DT_HAS_COMPAT_STATUS_OKAY(alif_crc)
 #include <zephyr/device.h>
 #include <zephyr/drivers/crc.h>
@@ -53,9 +66,15 @@
  * calling that internal helper: this file's Kconfig gate
  * (CONFIG_ALP_SDK_CHIP_GD32G553) is independent of hw_info's
  * (CONFIG_ALP_SDK_HW_INFO), so a build could enable one without the
- * other -- mirrors the existing local crc16_ccitt_false() in
- * chips/gd32g553/gd32g553.c (frame CRC, always software; see the
- * "why hardware here and not on the wire" rationale in that file).
+ * other.  Unrelated to, and a different algorithm from, the per-frame
+ * CRC-16/CCITT-FALSE trailer: chips/gd32g553/gd32g553.c and
+ * chips/cc3501e/cc3501e_core.c both now share ONE implementation of that
+ * (alp_crc16_ccitt_false(), <alp/protocol/crc16.h>) -- the unification
+ * that header's own doc comment claims is real, not aspirational -- but
+ * this file computes the OTA IMAGE's CRC-32/ISO-HDLC checksum, a
+ * different algorithm entirely, and stays self-contained here for the
+ * Kconfig-independence reason above, not because no shared helper
+ * exists.
  */
 static uint32_t gd32g553_ota_crc32_sw(const uint8_t *buf, size_t len)
 {

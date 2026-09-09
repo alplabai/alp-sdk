@@ -314,7 +314,14 @@ whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 `ALP_CC3501E_PROTOCOL_VERSION`.
 
 **The wire version is `MAJOR.MINOR`, and only MAJOR gates the link** (ADR
-0033). The current wire is **3.1**. MAJOR moves only when an unchanged host
+0033). The current wire is **4.0** (`ALP_CC3501E_PROTOCOL_MAJOR` / `_MINOR`,
+`<alp/protocol/cc3501e.h>`) — MAJOR 4 adds a CRC-16/CCITT-FALSE trailer to
+every frame except a CRC-less `GET_VERSION` request (see the normative rule
+below). The host is bilingual during the migration window: it also still
+accepts a MAJOR-**3** peer (`ALP_CC3501E_PROTOCOL_MAJOR_LEGACY`), because a
+board still on 3.1 firmware can only reach 4.0 by OTA, and that OTA has to
+run *through* this host — see "MIGRATION ORDER" above
+`ALP_CC3501E_PROTOCOL_MAJOR`. MAJOR moves only when an unchanged host
 would be *misread* — reusing a previously-reserved byte or flag bit, changing
 framing, changing a struct layout, changing what an existing field means.
 Everything additive is MINOR: new opcodes, new optional request fields whose
@@ -403,7 +410,7 @@ first three with the fourth has repeatedly cost bench time:
 | Axis | Where | Bumps when |
 |------|-------|-----------|
 | **Firmware release** | `cc3501e-bridge-firmware:firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
-| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host's MAJOR gate is **bilingual**, not a strict mismatch refusal — it accepts exactly `ALP_CC3501E_PROTOCOL_MAJOR` (4) and `ALP_CC3501E_PROTOCOL_MAJOR_LEGACY` (3), and refuses only anything else, so the OTA path from 3.x to 4.x always has a host that can still talk to the peer it is upgrading |
 | **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
 | **GPE anti-rollback stamp** | the `--version` the image is signed with (4-part, `major = 0`) | every flashed image — burned **irreversibly** into the part as a monotonic floor; it is *not* the SemVer |
 
@@ -705,12 +712,17 @@ Wire contract:
   it still reads `0` on the entry ack.  Confirm by **re-issuing `0x47` until the
   reply's `mode` matches**; the handler is idempotent and does not reboot for a
   request that matches the current mode.
-* The 4-byte reply is not decoration.  A dead bus phase clocks back literal
-  `0x00` for every byte and `0x00` is also `ALP_CC3501E_RESP_OK`, so a bare-OK
-  reply to the one opcode whose job is to be the last frame before a blackout
-  would be byte-identical to a link that just died.  Note the asymmetry: only
-  `mode == 1` is real proof — an all-zero dead phase is indistinguishable from a
-  genuine "normal bridge, OTA idle" reply, so corroborate the **leave** poll
+* The 4-byte reply is not decoration.  On the legacy (MAJOR 3) wire a dead bus
+  phase clocks back literal `0x00` for every byte, and `0x00` is also
+  `ALP_CC3501E_RESP_OK_LEGACY` — **not** `ALP_CC3501E_RESP_OK`, which is
+  `0x5A` from MAJOR 4 on precisely so it can no longer alias a dead phase —
+  so on that wire a bare-OK reply to the one opcode whose job is to be the
+  last frame before a blackout would be byte-identical to a link that just
+  died.  MAJOR 4 also appends a CRC-16/CCITT-FALSE trailer, which a
+  genuinely dead all-zero phase fails, so this aliasing is a legacy-wire
+  concern.  Note the asymmetry that survives either way: only `mode == 1` is
+  real proof — an all-zero dead phase is indistinguishable from a genuine
+  "normal bridge, OTA idle" reply, so corroborate the **leave** poll
   (e.g. `GET_DIAG_INFO`'s moving `uptime_ms`, or the next live command).
 * **Enter BEFORE `OTA_BEGIN`.**  The OTA session is RAM-only, so entering
   mid-session throws the write cursor away and forces a full re-`BEGIN` — another

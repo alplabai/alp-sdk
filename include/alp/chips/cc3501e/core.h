@@ -48,13 +48,19 @@ struct cc3501e {
 	/* Wire version the FIRMWARE reported at the last @ref cc3501e_reset
 	 * (ADR 0033).  Both are 0 before the first successful GET_VERSION.
 	 *
-	 * fw_proto_major always equals ALP_CC3501E_PROTOCOL_MAJOR on a usable
-	 * context -- a mismatch refuses the link -- so the field that carries
-	 * information is fw_proto_minor: LOWER than this host's minor means the
-	 * firmware lacks newer additive features.  These are also set on the
-	 * REFUSAL path, so a caller that got ALP_ERR_VERSION can report what the
-	 * firmware actually claimed; a fw_proto_major of 0 there means the
-	 * firmware predates the scheme and answered with a raw v1..v9 integer.
+	 * v4.0 (#2035): the host is BILINGUAL, so fw_proto_major on a usable
+	 * context is @ref ALP_CC3501E_PROTOCOL_MAJOR (4) OR
+	 * @ref ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (3) -- 3 refuses NOTHING; it is
+	 * every bit as usable as 4, just talking the no-CRC 3.1 dialect (see the
+	 * migration-order paragraph above ALP_CC3501E_PROTOCOL_MAJOR in
+	 * <alp/protocol/cc3501e.h>).  A caller MUST branch on this field before
+	 * relying on anything major-4-only (e.g. assuming a CRC trailer on every
+	 * reply) -- do not assume it is pinned to PROTOCOL_MAJOR.  Only a value
+	 * outside {3, 4} refuses the link (@ref ALP_ERR_VERSION).  These are also
+	 * set on that REFUSAL path, so a caller that got ALP_ERR_VERSION can
+	 * report what the firmware actually claimed; a fw_proto_major of 0 there
+	 * means the firmware predates the scheme and answered with a raw v1..v9
+	 * integer.
 	 *
 	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
 	 * reports what the build IMPLEMENTS, not what its number implies. */

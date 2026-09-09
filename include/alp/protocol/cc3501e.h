@@ -210,7 +210,26 @@ extern "C" {
  * this renames the contract, it does not change a frame. */
 
 /* v4.0 (#2035) moves ALP_CC3501E_RESP_OK off 0x00 and adds a CRC-16/CCITT-FALSE
- * trailer to every frame, both directions.  MAJOR by definition: an unchanged
+ * trailer to every frame, both directions --
+ *
+ * NORMATIVE RULE, stated here up front because a firmware that gets this
+ * ONE carve-out wrong deadlocks the whole migration with no way out (see
+ * "THE HOST IS BILINGUAL" below for why): a CMD_GET_VERSION REQUEST MUST be
+ * accepted by the firmware WITH OR WITHOUT a CRC trailer.  Every other
+ * opcode, request and reply alike, requires one under MAJOR 4.  The reason
+ * is ordering: the host cannot know a peer's major before GET_VERSION has
+ * answered, so cc3501e_reset()'s very first request to a 4.0 peer is
+ * necessarily sent CRC-less (fw_proto_major is still 0 at that point) --
+ * see cc3501e_core.c's cc3501e_request_locked(), `want_req_crc`.  A
+ * firmware that rejects a CRC-less GET_VERSION literally, because it read
+ * "every frame, both directions" and stopped there, can never let a host
+ * learn its major, so the host can never negotiate up to 4 and OTA (which
+ * rides the same gated calls) has no path to run.  GET_VERSION REPLIES are
+ * likewise decoded shape-tolerantly, not CRC-required, for the same
+ * before-the-major-is-known reason (see cc3501e_reply_verdict()'s
+ * fw_proto_major == 0 branch, cc3501e_core.c).
+ *
+ * MAJOR by definition: an unchanged
  * 3.1 host reading a 4.0 reply would misread the status byte on every call (a
  * REAL error code -- ERR_INVALID is 0x01, etc. -- looks no different from
  * before, but a 4.0 SUCCESS reply now carries 0x5A where a 3.1 host expects
