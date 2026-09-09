@@ -30,3 +30,12 @@ target_sources(app PRIVATE src/main.c)
 # -gatt-register -- copied rather than reached across into, because an example
 # that reads its sources out of a sibling example is not a copyable template.
 target_sources(app PRIVATE src/cc3501e_bridge.c)
+# Phase 9's one proxied pad: the E1M IO20 -> raw CC3501E GPIO_26 route the SDIO
+# mux ENABLE rides. Strong override of the WEAK cc3501e_gpio_routes[] in
+# src/backends/gpio/cc3501e_proxy_routes_weak.c. Built unconditionally; only
+# consulted when CONFIG_ALP_SDK_GPIO_CC3501E_PROXY is set (prj.conf). Unlike
+# the sibling CC3501E examples this file is hand-written rather than emitted by
+# scripts/gen_cc3501e_gpio_routes.py -- that generator keys off a board.yaml
+# this standalone app does not have; see the file's own header for how it is
+# pinned to metadata instead.
+target_sources(app PRIVATE src/cc3501e_gpio_routes.c)

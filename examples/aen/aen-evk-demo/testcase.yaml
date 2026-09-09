@@ -2,9 +2,20 @@
 #
 # Build-only regression for the aen-evk-demo phased bench app on the
 # E1M-AEN801 (Ensemble E8, M55-HE): compiles the RTC/temperature, sensor,
-# power-rail, I/O-expander, EEPROM, RGB-LED, CC3501E Wi-Fi/BLE, Ethernet and
-# JPEG-encode phases -- plus the five not-yet-implemented phases' SKIPPED
-# stubs -- against the real board target.
+# power-rail, I/O-expander, EEPROM, RGB-LED, CC3501E Wi-Fi/BLE, SD-card,
+# Ethernet and JPEG-encode phases -- plus the four not-yet-implemented
+# phases' SKIPPED stubs -- against the real board target.
+#
+# WHAT THE COMPILE ALONE IS WORTH FOR PHASE 9. Two things, and they are
+# worth naming because the phase's verdict itself needs a card nobody in
+# CI has. First, it proves the `fatfs` west module actually RESOLVES:
+# CONFIG_FAT_FILESYSTEM_ELM `depends on ZEPHYR_FATFS_MODULE`, so in a
+# workspace missing the module both it and CONFIG_FILE_SYSTEM are dropped
+# from the solve SILENTLY and this app fails on a missing <ff.h> -- which
+# is exactly how the gap was found. Second, it proves the image still fits
+# ITCM with an SDHC driver and a FAT filesystem in it; phase 14 is stubbed
+# precisely because that budget is finite, and a link that overflows FLASH
+# fails here rather than on the bench.
 #
 # Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
 # board only): every phase needs real I2C/PWM/GMAC silicon to produce a
@@ -37,7 +48,7 @@ sample:
     the E1M EVK carrier. Runs fourteen named phases in a fixed order, each
     reporting PASS, SKIPPED, or FAIL -- never counting an absent part or an
     unimplemented phase as PASS -- and finishes with a summary table plus a
-    single RESULT line. This slice implements the framework plus the nine
+    single RESULT line. This slice implements the framework plus the ten
     phases whose drivers are bench-proven: RTC + temperature (BRD_I2C),
     sensors (BMI323/ICM-42670/BMP581), power rails (six INA236), the
     TCAL9538 I/O expander, the 24C128 EEPROM identity (read-only), the
@@ -48,7 +59,19 @@ sample:
     transient single-bit corruption cannot pass as a plausible one,
     GET_CAPABILITIES, a
     passive Wi-Fi scan that never associates, and BLE_ENABLE, with a PING
-    alone explicitly not sufficient for PASS -- RMII Ethernet through the
+    alone explicitly not sufficient for PASS -- the microSD card behind
+    its 74LVC157 SDIO mux, which drives the mux ENABLE (E1M IO20 ->
+    CC3501E GPIO_26) over that same bridge via the portable alp_gpio_*
+    API, enumerates the card through the vendored snps,dwc-sdhc
+    controller, reports its geometry, and gates PASS on a REAL write ->
+    read -> verify round trip through one file the demo owns
+    (/ALPDEMO.TXT) -- never on disk_access_init returning 0 and never on
+    the geometry reading back; it never formats the card, never writes
+    outside that file and keeps mkfs out of the image entirely
+    (CONFIG_FS_FATFS_MOUNT_MKFS=n plus FS_MOUNT_FLAG_NO_FORMAT), and it
+    reports no card, no filesystem, a failed controller init, an
+    undrivable mux ENABLE and a verify mismatch as five DISTINCT reasons
+    -- RMII Ethernet through the
     GMAC and the on-module TI DP83825 PHY, which powers the PHY from a
     SYS_INIT hook ahead of the driver's ref-clock probe, reads the real
     wire state over MDIO because a fixed-link PHY's carrier_ok is
@@ -56,8 +79,8 @@ sample:
     the MAC merely initialising -- and JPEG encode on the
     Alif Hantro VC9000E: a synthetic 64x64 NV12 frame through
     <alp/jpeg.h>, verified by the SOI/EOI markers and a plausible encoded
-    length, never by the return code alone. The remaining five phases
-    (encoder, SD card, sound, screen, NPU) are stubs
+    length, never by the return code alone. The remaining four phases
+    (encoder, sound, screen, NPU) are stubs
     that report SKIPPED with a phase-specific reason.
 
 tests:
@@ -76,6 +99,9 @@ tests:
       - spi
       - wifi
       - ble
+      - sdhc
+      - disk
+      - filesystem
       - ethernet
       - dwmac
       - net

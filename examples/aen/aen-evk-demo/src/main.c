@@ -135,6 +135,23 @@
 #include <zephyr/net/dhcpv4.h>
 #include <zephyr/net/net_ip.h>
 
+/*
+ * Phase 9 only, and deliberate for the same reason the Ethernet headers above
+ * are: the portable <alp/*.h> API publishes no block-device or filesystem
+ * peripheral class at all, so there is nothing here to route through it. The
+ * ONE thing phase 9 does reach for portably is the mux ENABLE pin, and that
+ * IS opened through <alp/peripheral.h>'s alp_gpio_* on a portable E1M pin id
+ * (ALP_E1M_GPIO_IO20) -- the CC3501E proxy backend turns it into a bridge
+ * transaction without this file naming a raw coprocessor GPIO index.
+ *
+ * <ff.h> is the ELM FatFs work-area type (FATFS), needed because fs_mount()
+ * takes a caller-owned one; it is not otherwise called into.
+ */
+#include <zephyr/storage/disk_access.h>
+#include <zephyr/drivers/disk.h> /* DISK_STATUS_NOMEDIA -- the no-card fork */
+#include <zephyr/fs/fs.h>
+#include <ff.h>
+
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/jpeg.h"
@@ -1652,6 +1669,365 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
+/* Phase 9 -- SD card (74LVC157 SDIO mux -> DWC SDHC -> FAT round trip) */
+/* ==================================================================== */
+
+/*
+ * WHAT HAS TO BE TRUE BEFORE THIS PHASE CAN DO ANYTHING
+ * ------------------------------------------------------
+ * The EVK microSD is not wired straight to the SoC. It sits behind a pair of
+ * 74LVC157 muxes with two controls, and BOTH have to be in the right state
+ * before the SD lines reach the card at all:
+ *
+ *   ENABLE -- E1M IO20 -> CC3501E GPIO_26 on BOTH module revisions, so it is
+ *             drivable in software, over the coprocessor's GPIO proxy. The
+ *             part is ACTIVE LOW (`/E`): drive it LOW to enable the mux.
+ *             That is what step 1 below does.
+ *   SELECT -- E1M IO21. NOT drivable in software on this bench. On r1 it
+ *             reached CC3501E GPIO_30; on r2 GPIO_30 was re-routed to IO8 and
+ *             IO21 was left OPEN on the module -- it reaches neither chip
+ *             (metadata/e1m_modules/aen/hw-revisions.yaml
+ *             `pad_route_overrides:`). The bench module is hw_rev 2626-r2.
+ *
+ * The SELECT is set BY HAND, on the carrier, and this phase cannot read it
+ * back. From the 2626-R2 EVK netlist: header P18 pin 1 is +3V3, pin 2 is
+ * `NetP18_2`, which reaches `MUX_SEL.SDIO` through R198 while R27 pulls that
+ * net to 0V when the header is open. So a FITTED jumper pulls the select
+ * high, an open header lets it sit low, and no firmware is involved either
+ * way. The same net drives both mux select inputs (U38 pin 1 `S`, U39 pin 1
+ * `S`) and also lands on E2 `L3` = IO21. The jumper is fitted on the bench
+ * this phase was written against (maintainer, 2026-09-09).
+ *
+ * CONTENTION WARNING, and it matters on r1 BOARDS ONLY. Because
+ * `MUX_SEL.SDIO` reaches BOTH the P18 header and E2 IO21, an r1 module that
+ * drives IO21 from firmware while a jumper is fitted on P18 puts a driven pin
+ * against the header rail. FIT THE JUMPER OR DRIVE THE PIN, NEVER BOTH. On r2
+ * the module end is open, so the header is the only driver and there is
+ * nothing to contend with -- which is why this phase never touches IO21, on
+ * any revision: there is no revision on which driving it is both useful and
+ * safe.
+ *
+ * PHASE 8 MUST HAVE RUN, and the phase table already guarantees that. The
+ * ENABLE rides the CC3501E GPIO proxy, and the proxy only routes a pin once
+ * cc3501e_bridge_bringup() has powered the coprocessor, reset it, and called
+ * alp_gpio_cc3501e_attach() -- which phase 8 does, and deliberately does NOT
+ * undo (see its "WHAT IT LEAVES BEHIND" note). This phase therefore re-uses
+ * the live bridge rather than re-initialising it; a second bring-up would
+ * re-run the ~900 ms power/reset sequence and drop the link phase 8 proved.
+ * With no attached bridge the proxy DELEGATES IO20 to the platform GPIO
+ * driver instead of refusing it -- so a phase 8 that failed does not produce
+ * a clean error here, it produces a write to an Alif pad that goes nowhere
+ * and then a card that never enumerates. The log below prints the ENABLE
+ * result on its own line so that case is at least visible.
+ *
+ * WHAT COUNTS AS A PASS
+ * ----------------------
+ * A full write -> read -> VERIFY round trip, and nothing weaker. This app
+ * exists because an earlier example counted a successful ID read as a pass;
+ * `disk_access_init` returning 0, or geometry reading back, is that same
+ * claim wearing an SD-shaped hat. Data has to move, come back, and compare
+ * equal. Geometry is printed because it is useful, not because it is gated.
+ *
+ * WHAT THIS PHASE IS NOT ALLOWED TO DO -- A CARD IN THE SLOT IS SOMEONE'S
+ * -----------------------------------------------------------------------
+ * It writes exactly ONE file it owns, /ALPDEMO.TXT, and touches nothing else:
+ * no partition table, no other file, and NO FORMATTING, ever. That is
+ * enforced twice over, at two different layers, because one layer's mistake
+ * would silently destroy a stranger's card:
+ *
+ *   - FS_MOUNT_FLAG_NO_FORMAT on the mount below, so fs_mount() reports a
+ *     missing filesystem instead of creating one;
+ *   - CONFIG_FS_FATFS_MOUNT_MKFS=n in prj.conf, which leaves the mkfs code
+ *     OUT OF THE IMAGE entirely -- there is no format path to reach even by
+ *     mistake, from this phase or any other.
+ *
+ * A card with no filesystem is a SKIPPED with that reason. It is not an
+ * invitation to make one.
+ *
+ * THE FIVE OUTCOMES, KEPT APART ON PURPOSE
+ * -----------------------------------------
+ * Collapsing these into one line would send the next person to the wrong
+ * place, so each gets its own verdict and its own printed reason:
+ *
+ *   mux ENABLE could not be driven   -> FAIL. IO20 is routed on BOTH module
+ *        revisions and phase 8 left the bridge up, so nothing about this
+ *        board justifies the ENABLE failing. Points at the bridge or the
+ *        proxy route table, not at the card.
+ *   no card detected                 -> SKIPPED. disk_access_init() answers
+ *        DISK_STATUS_NOMEDIA, straight from the controller's PSTATE
+ *        CARD_INSRT bit. An empty slot is not a fault -- but note the mux
+ *        sits between the card and that bit, so a wrong P18 jumper position
+ *        also lands here. The log says so.
+ *   controller failed to init        -> FAIL. Any other non-zero from
+ *        disk_access_init(): the card is detected and the SD handshake still
+ *        did not complete. Our controller, pinmux or clocking.
+ *   card present but no filesystem   -> SKIPPED. fs_mount() answers -ENODEV
+ *        (FR_NO_FILESYSTEM, translated). See the no-format rule above.
+ *   write or verify mismatch         -> FAIL. The card enumerated and the
+ *        filesystem mounted, and the data still did not survive the trip.
+ *
+ * HOW A STALE FILE IS MADE IMPOSSIBLE TO MISTAKE FOR A FRESH WRITE
+ * -----------------------------------------------------------------
+ * /ALPDEMO.TXT is left on the card after the run, so the NEXT run opens a
+ * file that already has a plausible-looking payload in it. If the payload
+ * were fixed text, a write that silently did nothing would still read back
+ * byte-identical and pass -- the file from last time would be indistinguish-
+ * able from a fresh one, which is exactly the "it looked right" failure this
+ * app refuses everywhere else.
+ *
+ * So the payload carries a PER-RUN NONCE: k_cycle_get_32() sampled at write
+ * time, printed in the log and embedded in the line. The verify compares the
+ * read-back bytes against the buffer THIS run built in RAM, so last run's
+ * file fails the compare on the nonce alone. A cycle counter sampled this
+ * deep into a run that has already spent DHCP and scan timeouts is not
+ * something a previous run reproduces. The file is also truncated to the
+ * bytes just written, so a longer leftover cannot leave a matching prefix
+ * with stale tail bytes hiding behind it.
+ */
+
+#define SD_DISK_NAME   "SD"
+#define SD_MOUNT_POINT "/SD:"
+/* 8.3 name on purpose: CONFIG_FS_FATFS_LFN is off (it costs image for
+ * nothing here), so a long name would be rejected by the filesystem. */
+#define SD_DEMO_FILE SD_MOUNT_POINT "/ALPDEMO.TXT"
+
+/* The mux is a 74LVC157 -- combinational, ns-scale. This is settle time for
+ * the CC3501E driving its pad and the card seeing its lines, not for the mux
+ * itself; it costs 10 ms once and removes a whole class of "the first
+ * enumeration attempt raced the mux" run. */
+#define SD_MUX_SETTLE_MS 10u
+
+/* FATFS work area. FILE-STATIC, not a local: fs_mount() keeps the pointer for
+ * as long as the volume is mounted, so a stack-local would be dangling the
+ * moment this function returned -- and sizeof(FATFS) is a few hundred bytes
+ * against a 4096-byte main stack. */
+static FATFS sd_fat_fs;
+
+static struct fs_mount_t sd_mnt = {
+	.type      = FS_FATFS,
+	.fs_data   = &sd_fat_fs,
+	.mnt_point = SD_MOUNT_POINT,
+	/* Half of the two-layer no-format guarantee; the other half is
+	 * CONFIG_FS_FATFS_MOUNT_MKFS=n. See the header above. */
+	.flags = FS_MOUNT_FLAG_NO_FORMAT,
+};
+
+static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
+{
+	printf("[evkdemo] -- Phase: SD card (74LVC157 SDIO mux -> DWC SDHC -> FAT) --\n");
+
+	/* --- 1. Enable the SDIO mux over the CC3501E GPIO proxy ------------ */
+	/* alp_gpio_open() on a PORTABLE E1M pin id. The proxy backend looks
+	 * IO20 up in this app's cc3501e_gpio_routes[] table, finds raw CC3501E
+	 * GPIO_26, and sends the configure/write over the bridge phase 8 left
+	 * bound. Nothing here names GPIO_26 -- the raw index belongs in the
+	 * route table, which is derived from the SoM pad map, not in app code. */
+	alp_gpio_t *mux_en = alp_gpio_open(ALP_E1M_GPIO_IO20);
+	if (mux_en == NULL) {
+		printf("[evkdemo] SD: alp_gpio_open(E1M IO20 = SDIO mux /E) -> NULL, err=%d -- the mux "
+		       "cannot be enabled, so the card is electrically disconnected. IO20 reaches "
+		       "CC3501E GPIO_26 on BOTH module revisions and phase 8 leaves the bridge up, so "
+		       "this is a build/bridge fault, not an absent card\n",
+		       (int)alp_last_error());
+		ctx->note = "mux ENABLE not drivable";
+		return PHASE_FAIL;
+	}
+	alp_status_t cfg_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. */
+	alp_status_t en_rc = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
+	printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
+	       "low, driven LOW): configure -> %d, write -> %d\n",
+	       (int)cfg_rc,
+	       (int)en_rc);
+	if (en_rc != ALP_OK) {
+		printf("[evkdemo] SD: the mux ENABLE could not be driven -- every step below would run "
+		       "against a card that is not connected to the SoC. Check that phase 8 passed "
+		       "(the proxy needs its bridge attached) and that this build carries the IO20 "
+		       "route\n");
+		alp_gpio_close(mux_en);
+		ctx->note = "mux ENABLE not drivable";
+		return PHASE_FAIL;
+	}
+	k_msleep(SD_MUX_SETTLE_MS);
+
+	/* Closing the handle frees the proxy's slot; it does NOT undo the pad.
+	 * cc3501e_proxy.c's px_close() only releases host-side state for a
+	 * bridge pin, so the CC3501E keeps driving GPIO_26 low and the mux
+	 * stays enabled for the rest of this phase and the run. */
+	alp_gpio_close(mux_en);
+
+	/* --- 2. Enumerate the card ---------------------------------------- */
+	/* disk_access_init() runs the whole SD initialisation on the vendored
+	 * snps,dwc-sdhc controller: card-present, power/clock ramp, CMD0/CMD8,
+	 * ACMD41, CID/CSD, bus width. Its return value is the fork between two
+	 * of the five outcomes and is therefore read, not just printed. */
+	int drc = disk_access_init(SD_DISK_NAME);
+	printf("[evkdemo] SD: disk_access_init(\"%s\") -> %d\n", SD_DISK_NAME, drc);
+	if (drc == DISK_STATUS_NOMEDIA) {
+		/* Straight from the controller's PSTATE CARD_INSRT bit (no cd-gpios
+		 * on this overlay). The mux sits between the card and that bit, so
+		 * say both causes -- an operator who only reads "no card" will not
+		 * think to check a jumper. */
+		printf("[evkdemo] SD: NOMEDIA -- the controller sees no card. Either the slot is empty, "
+		       "or the 74LVC157 mux is not passing the card through: the SELECT is header P18 "
+		       "(jumper = MUX_SEL.SDIO pulled high through R198, open = R27 pulls it to 0V) and "
+		       "is NOT software-drivable on this module -- E1M IO21 is unrouted on r2. An empty "
+		       "slot is not a fault, so this is a SKIP\n");
+		ctx->note = "no card detected (or mux SELECT on P18 wrong)";
+		return PHASE_SKIPPED;
+	}
+	if (drc != 0) {
+		printf("[evkdemo] SD: the card IS detected and the SD handshake still failed (rc=%d) -- "
+		       "that is the controller, the pinmux (CLK P4_1 / CMD P4_2 / D0..D3 P6_0..P6_3) or "
+		       "the clock ramp, NOT a missing card. Not a skip\n",
+		       drc);
+		ctx->note = "SDHC init failed with a card present";
+		return PHASE_FAIL;
+	}
+
+	/* Geometry, printed VERBATIM -- reported because it is the first real
+	 * data the card ever hands back and it identifies which card is in the
+	 * slot, but deliberately NOT part of the verdict. "The geometry read
+	 * back" is a chip-ID read by another name. */
+	uint32_t sectors = 0u, ssize = 0u;
+	int      sc_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_COUNT, &sectors);
+	int      ss_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_SIZE, &ssize);
+	printf("[evkdemo] SD: geometry: %u sectors x %u B = %llu MiB (ioctl rc %d / %d)\n",
+	       (unsigned)sectors,
+	       (unsigned)ssize,
+	       (unsigned long long)(((uint64_t)sectors * ssize) / (1024u * 1024u)),
+	       sc_rc,
+	       ss_rc);
+
+	/* --- 3. Mount, read-only-until-proven ------------------------------ */
+	int mrc = fs_mount(&sd_mnt);
+	printf("[evkdemo] SD: fs_mount(FAT, \"%s\", NO_FORMAT) -> %d\n", SD_MOUNT_POINT, mrc);
+	if (mrc == -ENODEV) {
+		/* FR_NO_FILESYSTEM, translated by subsys/fs/fat_fs.c. The card
+		 * enumerated fine -- there is simply no FAT volume on it. */
+		printf("[evkdemo] SD: no FAT filesystem on this card. NOT formatted here, on purpose: "
+		       "the card belongs to whoever put it in the slot. FS_MOUNT_FLAG_NO_FORMAT is set "
+		       "AND CONFIG_FS_FATFS_MOUNT_MKFS=n keeps mkfs out of the image entirely, so there "
+		       "is no format path to take. Format it deliberately, elsewhere, if you want this "
+		       "phase to run\n");
+		ctx->note = "card present, no filesystem";
+		return PHASE_SKIPPED;
+	}
+	if (mrc != 0) {
+		printf("[evkdemo] SD: mount failed with a card that enumerated (rc=%d) -- a read of the "
+		       "boot sector did not complete, so this is the data path, not a missing volume\n",
+		       mrc);
+		ctx->note = "mount failed on an enumerated card";
+		return PHASE_FAIL;
+	}
+
+	/* --- 4. Write -> read -> VERIFY, in one file this demo owns -------- */
+	/* The nonce. k_cycle_get_32() at this point in the run -- after the
+	 * bridge bring-up, a Wi-Fi scan and a BLE enable, all of which take
+	 * wall-clock time that varies -- is not a value a previous run
+	 * reproduces, which is exactly the property needed to tell a fresh
+	 * write from last run's leftover file. */
+	uint32_t nonce = k_cycle_get_32();
+	char     payload[96];
+	int      len = snprintk(payload,
+	                        sizeof(payload),
+	                        "aen-evk-demo phase 9 nonce=%08x uptime=%lldms\n",
+	                        (unsigned)nonce,
+	                        (long long)k_uptime_get());
+	printf("[evkdemo] SD: writing %d B to %s, nonce=%08x (per-run, so a stale file from an "
+	       "earlier run cannot compare equal)\n",
+	       len,
+	       SD_DEMO_FILE,
+	       (unsigned)nonce);
+
+	struct fs_file_t f;
+	fs_file_t_init(&f);
+	phase_verdict_t verdict  = PHASE_FAIL;
+	const char     *fail_why = NULL;
+
+	/* FS_O_CREATE|FS_O_RDWR, NOT a create-exclusive open: this file is the
+	 * demo's own and every run rewrites it in place. */
+	int frc = fs_open(&f, SD_DEMO_FILE, FS_O_CREATE | FS_O_RDWR);
+	if (frc != 0) {
+		printf("[evkdemo] SD: fs_open(\"%s\", CREATE|RDWR) -> %d\n", SD_DEMO_FILE, frc);
+		fail_why = "cannot open the demo file";
+	} else {
+		ssize_t wrote = fs_write(&f, payload, (size_t)len);
+		/* Truncate to what was just written, so a longer leftover from an
+		 * earlier run cannot leave stale tail bytes behind a matching
+		 * prefix. */
+		int trc = (wrote == (ssize_t)len) ? fs_truncate(&f, (off_t)len) : 0;
+		/* SYNC BEFORE READ-BACK, and this is load-bearing. Without it the
+		 * read below could be served out of the FATFS cache and would
+		 * "verify" data that never reached the card -- the exact shape of
+		 * false pass this app exists to refuse. */
+		int syrc = (wrote == (ssize_t)len) ? fs_sync(&f) : 0;
+		printf("[evkdemo] SD: fs_write -> %d of %d B, fs_truncate -> %d, fs_sync -> %d\n",
+		       (int)wrote,
+		       len,
+		       trc,
+		       syrc);
+
+		char    readback[sizeof(payload)] = { 0 };
+		ssize_t got                       = -1;
+		int     seek_rc                   = -1;
+		if (wrote == (ssize_t)len && trc == 0 && syrc == 0) {
+			seek_rc = fs_seek(&f, 0, FS_SEEK_SET);
+			if (seek_rc == 0) {
+				got = fs_read(&f, readback, sizeof(readback));
+			}
+		}
+		(void)fs_close(&f);
+
+		if (wrote != (ssize_t)len) {
+			fail_why = "short write";
+		} else if (trc != 0 || syrc != 0) {
+			fail_why = "truncate/sync failed";
+		} else if (seek_rc != 0 || got != (ssize_t)len) {
+			printf("[evkdemo] SD: fs_seek -> %d, fs_read -> %d (expected %d B)\n",
+			       seek_rc,
+			       (int)got,
+			       len);
+			fail_why = "short read-back";
+		} else if (memcmp(payload, readback, (size_t)len) != 0) {
+			/* Print both, not a verdict word: WHICH bytes differ is the
+			 * whole diagnostic and a bare "mismatch" throws it away. */
+			printf("[evkdemo] SD: VERIFY MISMATCH\n[evkdemo] SD:   wrote: %.*s[evkdemo] SD:   "
+			       "read : %.*s",
+			       len,
+			       payload,
+			       len,
+			       readback);
+			fail_why = "read-back differs from what was written";
+		} else {
+			printf("[evkdemo] SD: read back %d B and they COMPARE EQUAL: %.*s",
+			       (int)got,
+			       len,
+			       readback);
+			verdict = PHASE_PASS;
+		}
+	}
+
+	/* Unmount either way -- a mounted volume with dirty FAT cache left
+	 * behind by a failing phase is how a card gets corrupted for the next
+	 * person, and phases 10-14 run after this one. */
+	int urc = fs_unmount(&sd_mnt);
+	printf("[evkdemo] SD: fs_unmount -> %d\n", urc);
+
+	if (verdict != PHASE_PASS) {
+		printf("[evkdemo] SD: RESULT FAIL -- %s. The card enumerated and the filesystem mounted, "
+		       "so this is the data path, not the slot and not the mux\n",
+		       fail_why);
+		ctx->note = fail_why;
+		return PHASE_FAIL;
+	}
+	printf("[evkdemo] SD: mux enabled, card enumerated, FAT mounted, %d B written -> read -> "
+	       "compared equal -> PASS\n",
+	       len);
+	return PHASE_PASS;
+}
+
+/* ==================================================================== */
 /* Phase 10 -- Ethernet (RMII GMAC + on-module TI DP83825 PHY)          */
 /* ==================================================================== */
 
@@ -2114,54 +2490,6 @@ static phase_verdict_t phase_encoder_stub(demo_ctx_t *ctx)
 	return PHASE_SKIPPED;
 }
 
-/* SD card. Two separate things stand between this stub and a real phase, and
- * they are worth keeping apart because only one of them is software.
- *
- * 1. NO CARD IS FITTED on the bench this app is developed against
- *    (maintainer, 2026-09-08). Nothing to enumerate, so a write/read/verify
- *    round trip cannot be exercised here at all.
- *
- * 2. THE MUX SELECT IS NOT SOFTWARE-DRIVABLE ON r2. The microSD sits behind
- *    a 74LVC157 pair with an ENABLE on E1M IO20 and a SELECT on E1M IO21.
- *    IO20 reaches CC3501E GPIO_26 on both revisions, so the ENABLE is
- *    drivable through the bridge's GPIO proxy. IO21 is the one that moved:
- *    on r1 it reached CC3501E GPIO_30, and on r2 GPIO_30 was re-routed to
- *    IO8 and IO21 was left open on the module -- it reaches neither chip
- *    (metadata/e1m_modules/aen/hw-revisions.yaml, `pad_route_overrides`).
- *
- * That is NOT a dead end, and an earlier draft of this comment wrongly
- * implied it was: the EVK brings the same net out to a header. From the
- * 2626-R2 EVK netlist -- P18 pin 1 is +3V3 and pin 2 is `NetP18_2`, which
- * reaches `MUX_SEL.SDIO` through R198 while R27 pulls it to 0V when the
- * header is open. So a fitted jumper selects one mux position and an open
- * header the other, with no firmware involved. The same net lands on both
- * mux select inputs (U38 pin 1 `S`, U39 pin 1 `S`) and on E2 `L3` = IO21.
- *
- * CONTENTION WARNING for r1 boards: because `MUX_SEL.SDIO` reaches BOTH the
- * P18 header and E2 IO21, an r1 module driving IO21 from firmware while a
- * jumper is fitted on P18 puts a driven pin against the header rail. Fit the
- * jumper OR drive the pin, not both. On r2 the module end is open, so the
- * header is the only driver and there is nothing to contend with.
- *
- * What a real phase still needs, beyond a card and a mux position: the SDIO
- * host bring-up, the ENABLE sequence over the proxy (which wants
- * CONFIG_ALP_SDK_GPIO_CC3501E_PROXY plus a cc3501e_gpio_routes[] table --
- * see prj.conf's phase-8 block for why both are off today), and a
- * filesystem round trip confined to a file the demo owns. Writes are
- * permitted; formatting the card is not -- a card in the slot is someone's.
- */
-static phase_verdict_t phase_sdcard_stub(demo_ctx_t *ctx)
-{
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: SD card -- SKIPPED (no card fitted on this bench, and the "
-	       "mux SELECT is not software-drivable on this module: E1M IO21 is unrouted on r2 "
-	       "where on r1 it reached CC3501E GPIO_30. Set the position on header P18 instead "
-	       "-- a jumper pulls MUX_SEL.SDIO high through R198, open lets R27 pull it to 0V; "
-	       "that net drives both mux selects, U38.S and U39.S. The ENABLE on IO20 stays "
-	       "drivable via CC3501E GPIO_26 on both revisions) --\n");
-	return PHASE_SKIPPED;
-}
-
 /* Sound out -> PDM-in loopback: the maintainer has confirmed speakers ARE
  * connected to both TAS2563 amps, so a real tone-out + mic-capture
  * end-to-end check is possible in a future slice -- but the I2S bring-up
@@ -2252,7 +2580,7 @@ static const phase_t PHASES[] = {
 	{ "RGB LED (PWM0/1/3)", phase_rgb_led },
 	{ "Rotary encoder", phase_encoder_stub },
 	{ "CC3501E Wi-Fi/BLE", phase_cc3501e },
-	{ "SD card", phase_sdcard_stub },
+	{ "SD card", phase_sdcard },
 	{ "Ethernet", phase_ethernet },
 	{ "Sound out -> PDM in", phase_sound_stub },
 	{ "Screen (DSI)", phase_screen_stub },

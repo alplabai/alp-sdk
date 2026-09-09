@@ -327,6 +327,86 @@
 };
 
 /*
+ * ======================================================================
+ * PHASE 9 -- SD Host Controller (snps,dwc-sdhc) + the Zephyr SDMMC disk
+ * ======================================================================
+ *
+ * Created here rather than inherited: the alp-sdk E8 SoC dtsi does not carry
+ * an sdhc node, so this block transcribes it (sdhc@48102000, IRQ 102/103) from
+ * the Apache-2.0 zephyr_alif fork exactly as examples/aen/aen-sdcard-readout's
+ * overlay does -- that app is this phase's SDHC bring-up reference and the two
+ * nodes are deliberately identical.
+ *
+ * PADS: CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3, the SD "D" pad route from the
+ * upstream alif-ensemble-pinctrl.h.
+ *
+ * `input-enable` ON CMD + D0..D3, AND IT IS LOAD-BEARING. Those five lines are
+ * bidirectional, and the pad input buffer is a PADCTRL bit only pinctrl sets;
+ * without it the SoC cannot sample what the card drives on CMD/DATA and
+ * enumeration can never complete -- the same trap the RMII RX group and the
+ * SPI1 MISO group in this file call out. CLK is push-pull output only and
+ * correctly omits it. Note the spelling: the pinned Zephyr v4.4 alif,pinctrl
+ * binding allowlists `input-enable`, NOT `read-enable`; the wrong one fails
+ * devicetree validation rather than merely doing nothing.
+ *
+ * NO cd-gpios, ON PURPOSE. The driver then falls back to the controller's own
+ * PSTATE CARD_INSRT bit (sdhc_dwc_get_card_present()), which is what the phase
+ * reads as "is a card there" -- and because the 74LVC157 mux sits between the
+ * card and that bit, it also reports "the mux is not passing the card
+ * through". Both causes reach the phase as one DISK_STATUS_NOMEDIA, which is
+ * why its log names both. A cd-gpios line would have to name an EVK net that
+ * does not exist on this carrier.
+ *
+ * THE MUX IS NOT IN THIS FILE, and cannot be. Its ENABLE is E1M IO20 ->
+ * CC3501E GPIO_26, driven at runtime over the inter-chip bridge (see phase 9
+ * in src/main.c); its SELECT is set by a jumper on header P18 and is not
+ * software-drivable on this module revision at all. Devicetree describes
+ * neither.
+ */
+&pinctrl {
+	pinctrl_sdmmc: pinctrl_sdmmc {
+		/* CLK is push-pull output only -- no pad input buffer needed. */
+		group0 {
+			pinmux = <PIN_P4_1__SD_CLK_D>;
+			drive-strength = <8>;
+		};
+		/* CMD + D0..D3 are bidirectional; see the input-enable note above. */
+		group1 {
+			pinmux = <PIN_P4_2__SD_CMD_D>,
+				 <PIN_P6_0__SD_D0_D>, <PIN_P6_1__SD_D1_D>,
+				 <PIN_P6_2__SD_D2_D>, <PIN_P6_3__SD_D3_D>;
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	sdhc0: sdhc@48102000 {
+		compatible = "snps,dwc-sdhc";
+		reg = <0x48102000 0xF70>;
+		interrupts = <102 3>, <103 3>;
+		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		max-bus-freq = <50000000>;
+		min-bus-freq = <400000>;
+		power-delay-ms = <500>;
+		bus-width = <4>;
+		pinctrl-0 = <&pinctrl_sdmmc>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		/* The Zephyr SDMMC disk. `disk-name = "SD"` is the string phase 9
+		 * passes to disk_access_init() and the string the FAT mount's
+		 * "/SD:" volume prefix resolves through. */
+		sdmmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};
+
+/*
  * ============================================================================
  * Phase 8 -- the SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge
  * ============================================================================
