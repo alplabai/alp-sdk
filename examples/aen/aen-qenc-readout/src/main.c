@@ -173,10 +173,25 @@ int main(void)
 		 * (0x002B0005), and AF=0 with the pads deselected from the QEC
 		 * altogether (0x00290000).  A floating-input mechanism has to stop
 		 * when the pin no longer drives the peripheral.  This does not, so the
-		 * count source is internal to the channel.  Still being diagnosed; the
-		 * open lead is that UP_1_SRC/DOWN_1_SRC carry the right x4 trigger
-		 * masks (0x69/0x96) with PGM_EN (bit 31) CLEAR, where
-		 * START_1_SRC/STOP_1_SRC/CLEAR_1_SRC all have it set.
+		 * count source was internal to the channel.
+		 *
+		 * RESOLVED, and this branch is now near-unreachable: that free-run was
+		 * caused by a GLB_CNTR_START write added under #2037 and since
+		 * WITHDRAWN.  Starting a trigger-counting channel puts it in
+		 * free-running clocked mode -- it advanced at 400,010,738 counts/s with
+		 * UP_1_SRC and DOWN_1_SRC both zeroed -- and GLB_CNTR_STOP froze it
+		 * instantly.  With the start call gone, CNTR reads a stable 0x00000000.
+		 *
+		 * RETRACTED, and the retraction matters because it sent a bench run
+		 * chasing a phantom: this comment used to name "UP_1_SRC/DOWN_1_SRC
+		 * carry the x4 masks with PGM_EN (bit 31) CLEAR" as the open lead.
+		 * There is no bit 31 in those registers.  Per the AE822 SVD,
+		 * UTIMER_UP_1_SRC (0x1C) and UTIMER_DOWN_1_SRC (0x24) define eight
+		 * fields in bits [7:0] and nothing else; PGM_EN [31:31] belongs to
+		 * START_1_SRC, STOP_1_SRC and CLEAR_1_SRC alone, gating the
+		 * PROGRAMMATIC start/stop/clear -- and there is no programmatic
+		 * up/down to gate.  The driver's own header was corrected in
+		 * 818ad54af; this copy was missed.
 		 *
 		 * This app cannot tell spurious counts from real ones -- it has no
 		 * operator input to correlate against.  So it reports what it can
