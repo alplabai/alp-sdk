@@ -1104,6 +1104,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pi3dbs12212/pi3dbs12212.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32g553/gd32g553.c)
+# gd32g553_ota_image_crc32() -- kept out of the Zephyr-agnostic chip driver
+# TU above; HW (Alif E8 CRC engine, CONFIG_CRC_ALIF) + SW dual path, SW
+# always available.  See src/zephyr/gd32g553_ota_crc_zephyr.c.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32g553_ota_crc_zephyr.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RTL8211FDI
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rtl8211fdi/rtl8211fdi.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CLK_5L35023B
