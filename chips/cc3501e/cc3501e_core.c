@@ -1490,9 +1490,45 @@ alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t le
  * where the device answers from an ISR the flash op has stopped, so every frame
  * clocked in that window goes into a dead slave.  Backing off to 50 ms keeps
  * the blackout frame count essentially unchanged (a 600 s hold-off gains ~6
- * extra frames in total) while collecting a ready result in ~1 ms. */
-#define CC3501E_POLL_GAP_MIN_MS 1u
+ * extra frames in total) while collecting a ready result in ~1 ms.
+ *
+ * CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS (issue #2035 bench work) is a
+ * host-side diagnostic/mitigation knob for a suspected link-wedge mechanism:
+ * the firmware appears to tear down and re-open its SPI slave (SPI_close /
+ * SPI_open / re-arm) on its own task after certain worker-routed ops, with no
+ * interlock against the host still clocking -- bytes clocked into that
+ * window are absorbed by the freshly armed transfer and the slave ends up
+ * permanently one transfer behind.  Risk scales with how densely the host
+ * polls when the teardown lands, so this floor -- which controls exactly the
+ * early, densely-spaced retries -- can be raised (e.g. to the 50 ms ceiling,
+ * flattening the backoff into a fixed cadence) to make that dense window
+ * disappear WITHOUT touching the wire protocol.  It is a mitigation, not a
+ * fix: it changes host timing, nothing about the race itself.  Same
+ * "portable constant, Zephyr-overridable" shape as
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS above -- see its comment.
+ * Default (1) is today's unchanged behaviour. */
+#ifndef CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS
+#define CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS 1u
+#endif
+#define CC3501E_POLL_GAP_MIN_MS CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS
 #define CC3501E_POLL_GAP_MS     50u
+
+/* CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS (issue #2035 bench work):
+ * companion knob to CC3501E_POLL_GAP_MIN_MS above, applied where a
+ * worker-routed request COMPLETES rather than where it retries.  Same
+ * suspected teardown-vs-clocking-host race: a success reply can land right
+ * as the firmware re-opens its SPI slave on its own task, and the very next
+ * request the host issues is what gets absorbed by the freshly armed
+ * transfer.  A non-zero guard gives that teardown a chance to finish into an
+ * idle bus before the next request goes out.  Scoped to poll_by_repeat()
+ * (the worker-routed request path -- see the "single biggest cost on every
+ * worker-routed op" comment above) rather than cc3501e_request(), so it does
+ * not tax the fast, non-worker-routed path (GET_VERSION, GET_CAPABILITIES,
+ * STREAM_WRITE) for no reason.  Mitigation/diagnostic only, not a fix.
+ * Default (0) is today's unchanged behaviour: no delay. */
+#ifndef CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS
+#define CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS 0u
+#endif
 
 alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             alp_cc3501e_cmd_t cmd,
@@ -1637,6 +1673,15 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 			return s; /* terminal reject / decoded device-side failure -- do not retry */
 		}
 		if (s != ALP_ERR_BUSY && s != ALP_ERR_IO) {
+			/* Guard delay applies to SUCCESS only, not to every
+			 * non-retryable outcome -- an ALP_ERR_INVAL/ALP_ERR_NOT_READY
+			 * return means no worker-routed op actually ran on the
+			 * device, so there is no teardown to wait out.  See
+			 * CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS's comment above
+			 * the loop for the race this guards against. */
+			if (s == ALP_OK && CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS > 0u) {
+				alp_delay_ms(CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS);
+			}
 			return s; /* OK or a non-retryable error -- done. */
 		}
 		if (remaining == 0u) {
