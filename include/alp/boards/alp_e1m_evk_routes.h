@@ -38,7 +38,7 @@ extern "C" {
 #define EVK_PIN_ENCODER_SW     ALP_E1M_GPIO_IO4  /**< Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce. Active-low. */
 #define EVK_PIN_CAM_RST        ALP_E1M_GPIO_IO5  /**< Camera reset (active-low). Active-low. */
 #define EVK_PIN_PCIE_IOEXP_INT ALP_E1M_GPIO_IO7  /**< INT input from the PCIe IO expander. */
-#define EVK_PIN_I2S_MUX_EN     ALP_E1M_GPIO_IO8  /**< I2S0 74LVC157 /E; drive low to enable mux. NOT an Alif pin -- E1M_GPIO_IO8 dispatches to CC3501E GPIO_30 (metadata/e1m_modules/E1M-AEN801.yaml pad_routes), so driving it is a bridge transaction and needs the CC3501E link up first. An older doc string here claimed 'Alif side P7.1'; that was wrong. Active-low. */
+#define EVK_PIN_I2S_MUX_EN     ALP_E1M_GPIO_IO8  /**< I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin. Active-low. */
 #define EVK_PIN_PCIE_IOEXP_RST ALP_E1M_GPIO_IO9  /**< Reset output to the PCIe IO expander. */
 #define EVK_PIN_PCIE0_I2C_EN   ALP_E1M_GPIO_IO10  /**< Drive high to enable I2C mux to the PCIe slot. */
 #define EVK_PIN_USB2_MUX_SEL   ALP_E1M_GPIO_IO11  /**< USB2 TMUXHS221 select: 0 = USB connector, 1 = M.2 E-key USB. */

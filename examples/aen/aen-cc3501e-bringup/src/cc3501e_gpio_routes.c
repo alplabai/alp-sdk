@@ -30,8 +30,8 @@
 #include <alp/e1m_pinout.h>
 
 const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
-	{ ALP_E1M_GPIO_IO8, 30u },  /* I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux. */
-	{ ALP_E1M_GPIO_IO9, 12u },  /* Reset output to the PCIe IO expander. */
+	{ ALP_E1M_GPIO_IO8, 30u }, /* I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin. */
+	{ ALP_E1M_GPIO_IO9, 12u }, /* Reset output to the PCIe IO expander. */
 	{ ALP_E1M_GPIO_IO10, 35u }, /* Drive high to enable I2C mux to the PCIe slot. */
 	{ ALP_E1M_GPIO_IO11, 2u },  /* USB2 TMUXHS221 select: 0 = USB connector, 1 = M.2 E-key USB. */
 	{ ALP_E1M_GPIO_IO13, 13u }, /* I2S0 74LVC157 S; 0 = TAS2563 amps, 1 = M.2 E-key I2S. */
