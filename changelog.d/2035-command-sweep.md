@@ -25,6 +25,38 @@ single sample. `SOCK_SEND`/`SOCK_RECV` throughput is explicitly not
 measured — no Wi-Fi association exists on this run, so there is no real
 peer to measure a rate against.
 
+Part 2's throughput sweep now runs immediately after bring-up and the META
+family, **before** the rest of Part 1's opcode coverage, not after it. A
+first bench run put coverage first and measured nothing: coverage
+deliberately provokes refusals (`SOCK_CONNECT` at an unroutable test
+address, `BLE_CONNECT` at a dummy peer), each refusal burns a timeout, and
+one such timeout (`SOCK_CONNECT`, 3.05 s) left the link answering every
+later opcode with a mapped error, including opcodes that had themselves
+succeeded moments earlier — so Part 2 ran against an already-wedged link and
+derived no rate at any size. Reordering means throughput measures against a
+link proven live by bring-up + META, before coverage's own refusals can put
+it at risk; coverage still accounts for all 55 opcodes exactly once
+afterward, and `sweep_self_check()`'s `opcodes_missing` count is unaffected
+by which half runs first.
+
+Every invoked opcode's line now also prints `elapsed_ms=<n>`
+(`k_uptime_get()` deltas, not `k_cycle_get_32()` — this core is 160 MHz and
+that counter wraps roughly every 10.7 s at 400 MHz), the datum the first
+bench run's diagnosis had to reconstruct from capture timestamps outside
+the app. `sweep_report()` also now tracks consecutive genuine `FAIL`
+verdicts (never `REFUSED` — coverage provokes those on purpose) and, at 3 in
+a row, prints one `** SUSPECTED LINK WEDGE **` line naming the last opcode
+that succeeded and the elapsed time of the operation immediately before the
+first failure in the streak — the long/refused operation, not the failures
+that follow it, is the diagnostic signal the first bench run's trace
+pointed at. Every result after the trip is tagged `[post-wedge]` so it
+reads as a consequence, not an independent measurement; this app never
+resets the bridge mid-sweep to try to recover, since that would change what
+is being measured. `SOCK_CONNECT`'s own timeout is also cut from 2000 ms to
+100 ms — long enough to still exercise the opcode against a healthy link,
+short enough that the refusal it deliberately provokes no longer costs the
+rest of the sweep a multi-second wedge risk.
+
 Build-only bench app for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`
 (same target, overlay memory placement and `CONFIG_DCACHE=n` as its sibling
 `aen-cc3501e-handshake-probe`, for the same reason: the SPI1 FIFO-refill

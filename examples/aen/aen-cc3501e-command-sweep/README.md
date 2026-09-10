@@ -61,20 +61,68 @@ reach) a real destination.
 
 ### Ordering
 
-Bring-up first, then META, then the remaining families in ascending opcode
-order (Wi-Fi → sockets → BLE → OTA → stream → GPIO → SPI1 → camera/power →
-diagnostics, run **last** so its frame counters tally the whole sweep, not
-just one family's traffic). Where a family has an enable/disable pair, the
-disable half runs before the next family starts — e.g. `BLE_GATT_REGISTER`
-runs **before** `BLE_ADV_START` (NimBLE refuses to re-run
-`ble_gatts_start()` while advertising) and `BLE_DISABLE` is BLE's last call,
-so no family inherits radio/session state a sibling left armed.
+Bring-up first, then META — both just to prove the link is alive. **Part 2
+(throughput) then runs immediately**, before any of the remaining Part 1
+families. Only after that does the rest of Part 1's coverage sweep continue,
+in ascending opcode order (Wi-Fi → sockets → BLE → OTA → stream → GPIO →
+SPI1 → camera/power → diagnostics, run **last** so its frame counters tally
+the whole sweep — including Part 2's own traffic, since Part 2 now runs
+before it, not just this one family's). Where a family has an
+enable/disable pair, the disable half runs before the next family starts —
+e.g. `BLE_GATT_REGISTER` runs **before** `BLE_ADV_START` (NimBLE refuses to
+re-run `ble_gatts_start()` while advertising) and `BLE_DISABLE` is BLE's last
+call, so no family inherits radio/session state a sibling left armed.
+
+**Why throughput runs first:** coverage's own job is to deliberately provoke
+refusals — `SOCK_CONNECT` at an unroutable test address, `BLE_CONNECT` at a
+dummy peer, `WIFI_GET_RSSI` while unassociated — and each refusal spends a
+real timeout proving what is already expected. On the bench run this app was
+built from, one such timeout (`SOCK_CONNECT`, 3.05 s against a RFC 5737
+address) left the link answering a mapped error to **every** opcode after
+it, including `SOCK_CLOSE`, which had itself returned `ALP_OK` 20 ms earlier.
+`aen-evk-demo` independently hit the identical shape behind a 10.6 s
+`GET_MAC`. A long or timed-out operation, not a failing one, precedes this
+link's wedge in both cases — so throughput (this app's headline number) runs
+while the link is still known good, and coverage's own refusal-provoking
+opcodes run after, where a wedge they trigger cannot cost Part 2 anything.
 
 Like its sibling, this app **never stops early** on a failed step — a failed
 step's own return code is the data it exists to collect. If bring-up itself
 fails, every later opcode reports `ALP_ERR_NOT_READY` as a direct
 consequence; STEP 1's own line is printed as the root cause so a reader does
 not have to re-derive that from 55 repeated lines.
+
+### Per-opcode timing
+
+Every invoked opcode's line prints `elapsed_ms=<n>` alongside its `rc` —
+`k_uptime_get()` deltas around the actual driver call, never
+`k_cycle_get_32()` (this core runs at 160 MHz, and that counter wraps
+roughly every 10.7 s at 400 MHz — the wrong clock for anything this sweep's
+per-family runtime approaches). This is the datum that let the bench finding
+above get made at all: without it, a 3 s `SOCK_CONNECT` and a 30 ms one print
+an identical `REFUSED` line.
+
+### Wedge detection
+
+`sweep_report()` tracks consecutive **genuine `FAIL`** verdicts — never
+`REFUSED`, since coverage provokes those on purpose and a refusal is not a
+link symptom. At `SWEEP_WEDGE_FAIL_THRESHOLD` (3) FAILs in a row it prints
+one `** SUSPECTED LINK WEDGE **` line naming the last opcode that returned
+`OK` and the elapsed time of the operation that ran immediately before the
+first failure in the streak — that operation, not the failures after it, is
+the diagnostic signal per the bench finding above. This app does **not**
+try to recover the link (no mid-sweep bridge reset — that would change what
+is being measured, and the failure shape is worth capturing intact); it
+keeps going and still accounts for every opcode.
+
+**How to read a result after the trip:** every coverage line from that point
+on is prefixed `[post-wedge]`. Read a `[post-wedge]` result as a
+**consequence** of whatever operation the banner named, not as an
+independent measurement of that opcode — a `[post-wedge] FAIL` on, say,
+`GPIO_WRITE` says nothing about `GPIO_WRITE` itself; it says the link was
+still wedged when `GPIO_WRITE` happened to run. The self-check at the end
+(Part 3) still requires every opcode to be accounted for regardless, wedge
+or not.
 
 ## Part 2: throughput
 
@@ -112,8 +160,9 @@ since there is no real peripheral to read back from.
 `SOCK_SEND` / `SOCK_RECV` throughput is **not measured**. `WIFI_CONNECT_STA`
 and `WIFI_AP_START` are deliberately never invoked (see above), so no Wi-Fi
 association exists on this run and the firmware IP stack has no route to a
-real peer — Part 1's SOCKETS coverage already shows `SOCK_CONNECT` /
-`SOCK_SEND` / `SOCK_RECV` refused for exactly that reason. A throughput
+real peer — Part 1's SOCKETS coverage (which now runs AFTER this section —
+see Ordering above) shows `SOCK_CONNECT` / `SOCK_SEND` / `SOCK_RECV` refused
+for exactly that reason. A throughput
 number over a connection that was never established would not be a
 measurement of anything, so this app prints an explicit note instead of a
 number.
