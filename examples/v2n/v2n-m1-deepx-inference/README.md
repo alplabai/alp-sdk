@@ -37,13 +37,15 @@ customer-only licence -- see
    [`chips/deepx_dxm1/`](../../../chips/deepx_dxm1/) host
    driver wraps the PI3DBS12212 PCIe mux routing + the
    Renesas `PA6` `M1_RESET` release into one
-   `deepx_dxm1_bring_up()` call.
+   `deepx_dxm1_bring_up()` call.  This example does not call it.
 3. **Inference handle open via the portable `<alp/inference.h>`
    surface.**  `backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1` +
-   `format = ALP_INFERENCE_MODEL_DXNN`.  Under the hood the
-   SDK dispatches to the DEEPX `dx_rt` runtime via header
-   bindings; the runtime itself is pulled in by the customer
-   per the licence story above.
+   `format = ALP_INFERENCE_MODEL_DXNN`.  The real DEEPX backend
+   is on the A55 Yocto image (`src/yocto/inference_deepx.cpp`,
+   against `dx_rt`, which the customer pulls in per the licence
+   story above); this `m33_sm` Zephyr image has no DEEPX
+   backend, so the open fails here as it does under native_sim
+   (see the output below).
 4. **One inference invoke + result print.**
 
 ## Build
@@ -68,6 +70,12 @@ host-emulated path; the example reports the failure cleanly):
 ```
 
 ### Real V2N-M1 silicon
+
+This `m33_sm` image does not run DEEPX inference on silicon: it does
+not bring the DEEPX rail up (#2045), does not call
+`deepx_dxm1_bring_up()`, and has no Zephyr DEEPX backend.  Real DEEPX
+inference runs on the A55 Yocto image against `dx_rt`.  The steps
+below build and flash the `m33_sm` image only.
 
 ```bash
 # Pull in the DEEPX runtime per the customer-licence story
