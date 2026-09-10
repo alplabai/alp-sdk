@@ -31,12 +31,23 @@
  *     a clean boundary right after the op, so a retry lands cleanly -- treat IO
  *     as transient here and keep polling for the whole budget.
  *
- * EXCEPTION: ALP_CC3501E_RESP_ERR_STATE (a deterministic firmware reject, e.g.
- * BLE_GATT_REGISTER's NimBLE ble_gatts_mutable() ordering guard) also maps to
- * ALP_ERR_BUSY, but is NOT retried -- it will not resolve without the caller
- * changing state (stop advertising / disconnect), so retrying it would just
- * burn the whole budget on the same answer.  See the ctx->rx_scratch[0] peek
- * in the implementation.
+ * EXCEPTION 1: ALP_CC3501E_RESP_ERR_STATE (a deterministic firmware reject,
+ * e.g. BLE_GATT_REGISTER's NimBLE ble_gatts_mutable() ordering guard) also
+ * maps to ALP_ERR_BUSY, but is NOT retried -- it will not resolve without the
+ * caller changing state (stop advertising / disconnect), so retrying it would
+ * just burn the whole budget on the same answer.  See the ctx->rx_scratch[0]
+ * peek in the implementation.
+ *
+ * EXCEPTION 2 (#2035): a DECODED ALP_CC3501E_RESP_ERR_RADIO,
+ * ALP_CC3501E_RESP_ERR_PROTOCOL, or ALP_CC3501E_RESP_ERR_INTERNAL reply also
+ * maps to ALP_ERR_IO, but is likewise NOT retried -- the firmware's per-seq
+ * retry latch (proto v8) answers a repeat of this exact request from its
+ * latch without re-executing the op, so a repeat can only ever replay the
+ * SAME decoded failure. Retrying it to budget would burn the whole poll
+ * window and report ALP_ERR_TIMEOUT, the wrong error class. Disambiguated
+ * from a genuine transient transport ALP_ERR_IO (bad header, failed
+ * transceive) by the same ctx->rx_scratch[0] peek mechanism -- see
+ * ALP_CC3501E_RX_SCRATCH_NO_STATUS (<alp/chips/cc3501e/core.h>).
  *
  * Returns the final cc3501e_request status; ALP_ERR_TIMEOUT if it never
  * resolved within the budget.  The caller's budget must therefore cover the

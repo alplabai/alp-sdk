@@ -43,6 +43,22 @@ typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t l
  *  @ref ALP_ERR_NOMEM rather than silently dropping one past this. */
 #define CC3501E_EVENT_SUBSCRIBERS 4
 
+/** Value cc3501e_request_locked() (cc3501e_core.c) writes into
+ *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed
+ *  transceive, the in-band armed-check reject, a bad reply header -- so
+ *  that byte means "a status byte was actually decoded" whenever it equals
+ *  a real @c ALP_CC3501E_RESP_ERR_* code, never a coincidence of leftover
+ *  wire residue (#2035: 0x06 is ALSO @ref ALP_CC3501E_CMD_GET_CAPABILITIES,
+ *  so an un-poisoned residue byte could misread as a decoded RESP_ERR_RADIO).
+ *  Public (not just an internal cc3501e_core.c constant) because a caller
+ *  legitimately reading @ref cc3501e::rx_scratch directly for diagnostics
+ *  (see examples/aen/aen-evk-demo/src/main.c's BLE_ENABLE failure probe)
+ *  needs to recognise it too, rather than misreport it as real wire data.
+ *  One of the eight documented RESERVED bit-flip neighbours of
+ *  @ref ALP_CC3501E_RESP_OK in <alp/protocol/cc3501e.h> -- guaranteed never
+ *  to become a real status code, unlike an arbitrary unused byte. */
+#define ALP_CC3501E_RX_SCRATCH_NO_STATUS 0xDAu
+
 struct cc3501e {
 	bool initialised;
 	/* Wire version the FIRMWARE reported at the last @ref cc3501e_reset
@@ -98,8 +114,25 @@ struct cc3501e {
 	 * function-local `static` pattern the scan/event buffers below used
 	 * to have) and their lifetime was already bounded to a single
 	 * cc3501e_request() call -- filled, consumed by the caller-supplied
-	 * rx_buf memcpy, and never read back across calls -- so they carry
-	 * none of the #740 aliasing risk and needed no change here. */
+	 * rx_buf memcpy, and never read back across calls BY THE DRIVER ITSELF
+	 * -- so they carry none of the #740 aliasing risk and needed no change
+	 * here.
+	 *
+	 * #2035 follow-up: a caller MAY also read ctx->rx_scratch[] directly, as
+	 * diagnostic evidence, immediately after a single-shot request-family
+	 * call (cc3501e_ping(), cc3501e_request()) returns -- see the BLE_ENABLE
+	 * failure probe in examples/aen/aen-evk-demo/src/main.c, which snapshots
+	 * it right after cc3501e_ping() to classify the wire-level failure
+	 * shape.  That is a legitimate, SEPARATE use of this field from the
+	 * driver's own internal one above, with its own, narrower lifetime rule:
+	 * valid only until the NEXT request-family call on this SAME ctx (the
+	 * very next transceive overwrites it, and cc3501e_request_locked()'s
+	 * out: label -- cc3501e_core.c -- always writes SOMETHING into byte 0
+	 * specifically, a real decoded status or @ref ALP_CC3501E_RX_SCRATCH_NO_STATUS,
+	 * before that call returns), and only meaningful for the call that just
+	 * returned -- a caller that wants to compare two probes' raw bytes must
+	 * snapshot this into its own buffer between them, not hold a pointer
+	 * across a second call. */
 	uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
