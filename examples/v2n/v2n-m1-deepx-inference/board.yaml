@@ -32,9 +32,12 @@ chips:
   - da9292        # PMIC for the DEEPX 0.75 V rail
   - pi3dbs12212   # PCIe mux
 
-# v2n_power_mgmt (§C.28) auto-brings-up the 0.75 V DEEPX rail
-# on P65 IRQ via the V2N supervisor's SYS_INIT hook -- no
-# board.yaml-level wiring needed.
+# v2n_power_mgmt (§C.28) is meant to bring up the 0.75 V DEEPX rail
+# on the P65 IRQ from its own SYS_INIT hook (v2n_power_mgmt.c), but
+# it is NOT wired on alp_e1m_v2m101_m33_sm today: the board DT has
+# no v2n-deepx-pwr-en-req / v2n-deepx-core-0p75-en aliases and
+# CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID stays -1, so the module
+# compiles to a NOSUPPORT stub.  Tracked in #2045 and #2044.
 
 diagnostics:
   log_level: info

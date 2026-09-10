@@ -82,12 +82,14 @@ int main(void)
 {
 	printf("[deepx] v2n-m1-deepx-inference flagship\n");
 	printf("[deepx] stage 1: PCIe mux + power_mgmt bring-up (supervisor-side)\n");
-	/* On real V2N-M1 silicon the supervisor's v2n_power_mgmt.c
-     * (§C.28) brings up the 0.75 V DEEPX rail as soon as the
-     * P65 IRQ fires; the PCIe mux + M1_RESET release ride the
-     * deepx_dxm1_bring_up() helper below.  Under native_sim the
-     * supervisor's NOSUPPORT path runs instead -- the example
-     * still validates the framing all the way through. */
+	/* v2n_power_mgmt.c (§C.28) is written to bring up the 0.75 V
+     * DEEPX rail when the P65 IRQ fires, but on the in-tree
+     * alp_e1m_v2m101_m33_sm board it compiles to a NOSUPPORT
+     * stub: no v2n-deepx-* DT aliases, and
+     * CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID stays -1.  The PCIe
+     * mux + M1_RESET release ride the deepx_dxm1_bring_up() helper
+     * below.  Under native_sim the example still validates the
+     * framing all the way through. (#2045, #2044) */
 
 	printf("[deepx] stage 2: opening DEEPX inference handle\n");
 	alp_inference_config_t cfg = {

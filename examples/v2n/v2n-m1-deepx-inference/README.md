@@ -15,12 +15,17 @@ customer-only licence -- see
 
 1. **PCIe mux + DEEPX power rail bring-up.**  The V2N
    supervisor's [`v2n_power_mgmt.c`](../../../src/zephyr/v2n_power_mgmt.c)
-   module (landed in §C.28) responds to the board's
-   `DEEPX_PWR_EN_REQ` rising edge on `P65`, brings up the
-   DA9292 CH2 = 0.75 V DEEPX rail, then drives
-   `DEEPX_CORE_0P75_EN` (`P64`) high.  This happens
-   automatically on SYS_INIT before this example's `main()`
-   runs.
+   module (landed in §C.28) is written to respond to the board's
+   `DEEPX_PWR_EN_REQ` rising edge on `P65`, bring up the
+   DA9292 CH2 = 0.75 V DEEPX rail, then drive
+   `DEEPX_CORE_0P75_EN` (`P64`) high from its own SYS_INIT hook.
+   **It is not active on `alp_e1m_v2m101_m33_sm` today:** the
+   board devicetree defines neither the `v2n-deepx-pwr-en-req`
+   nor the `v2n-deepx-core-0p75-en` alias, and
+   `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` stays `-1`, so the
+   module compiles to its `ALP_ERR_NOSUPPORT` stub and nothing
+   brings the rail up before `main()` runs.  Tracked in #2045
+   (DT aliases) and #2044 (I2C bus ID).
 2. **PCIe mux + `M1_RESET` release.**  The
    [`chips/deepx_dxm1/`](../../../chips/deepx_dxm1/) host
    driver wraps the PI3DBS12212 PCIe mux routing + the

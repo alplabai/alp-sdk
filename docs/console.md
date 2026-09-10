@@ -291,9 +291,13 @@ rebooting...
 ### V2N (RZ/V2N + GD32 supervisor)
 
 The GD32 supervisor is a **singleton** managed inside the SDK.  When
-`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs),
+`CONFIG_ALP_SDK_V2N_SUPERVISOR=y` is set (auto-enabled for V2N SoMs) **and**
+`CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` and / or
+`CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` names the bridge bus,
 `alp companion ver` / `alp companion ping` / `alp companion gpio *` work
-without any application code.
+without any application code.  Both bus IDs default to `-1` and no in-tree
+board sets them yet, so on a stock build these commands fail with
+`supervisor acquire failed (-2)` (`ALP_ERR_NOT_READY`).  Tracked in #2044.
 
 ### Alif (AEN801 + CC3501E)
 
