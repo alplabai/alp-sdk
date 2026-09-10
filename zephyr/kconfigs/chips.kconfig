@@ -302,7 +302,7 @@ config ALP_SDK_CHIP_DA9292
 	depends on I2C
 	help
 	  Compile chips/da9292/da9292.c.  DA9292 is the secondary
-	  PMIC on V2N + V2N-M1, populated at 7-bit I2C address 0x1C
+	  PMIC on V2N + V2N-M1, populated at 7-bit I2C address 0x1E
 	  on BRD_I2C in 2-channel dual-phase mode.  CH1 (phases 1+2)
 	  drives the 0.8 V Renesas rail and is enabled by hardware
 	  strap at boot; CH2 (phases 3+4) drives the 0.75 V DEEPX
