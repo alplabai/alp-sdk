@@ -229,6 +229,8 @@ alp_status_t icm42670_configure_int_pin(icm42670_t                      *dev,
  * it, so pass the OR of every ::icm42670_int_src_t the caller wants
  * live on `pin`.
  *
+ * @param dev Initialised device handle.
+ * @param pin Which physical interrupt pin to route to.
  * @param source_mask OR of ::icm42670_int_src_t members; 0 disables
  *   routing to `pin` entirely.
  * @return ALP_OK / ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_INVAL
