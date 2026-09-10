@@ -32,6 +32,7 @@
 #include <stdint.h>
 
 #include "alp/peripheral.h"
+#include "alp/protocol/crc16.h"
 #include "cc3501e_internal.h"
 
 static void
@@ -106,6 +107,21 @@ alp_status_t cc3501e_power_off(cc3501e_t *ctx)
 	 * sequence and re-arms this flag. */
 	ctx->initialised = false;
 	return ALP_OK;
+}
+
+/* v4.0 (#2035): pure gate decision -- is @p fw_major a MAJOR this bilingual
+ * host will talk to?  Exactly ALP_CC3501E_PROTOCOL_MAJOR (4, this driver's
+ * own wire) and ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (3, the migration-window
+ * predecessor -- see the paragraph above ALP_CC3501E_PROTOCOL_MAJOR in
+ * <alp/protocol/cc3501e.h>).  Everything else is refused, INCLUDING 0 (the
+ * pre-ADR-0033 raw-integer legacy this scheme was built to distinguish from a
+ * genuine disagreement -- see ALP_CC3501E_PROTOCOL_VERSION's doc comment).
+ * Pulled out of cc3501e_reset() as its own function, with no ctx and no I/O,
+ * so it is testable directly (cc3501e_internal.h) without a live link. */
+bool cc3501e_fw_major_is_acceptable(uint8_t fw_major)
+{
+	return fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR ||
+	       fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
 }
 
 alp_status_t cc3501e_reset(cc3501e_t *ctx)
@@ -193,8 +209,30 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	 * `POWER OFF -> 0  while-off PING -> -2  reset -> 0  PING -> -2`.
 	 *
 	 * The mismatch path below still clears it, so a genuine wire disagreement is
-	 * unchanged -- this only removes the deadlock on the way back up. */
-	ctx->initialised = true;
+	 * unchanged -- this only removes the deadlock on the way back up.
+	 *
+	 * Also re-arm fw_proto_major/fw_proto_minor to 0 here, not just
+	 * initialised.  Leaving a PREVIOUS peer's major latched means the
+	 * GET_VERSION call two lines down would frame ITS OWN request in that
+	 * stale dialect (cc3501e_request_locked()'s want_req_crc reads
+	 * ctx->fw_proto_major), and cc3501e_reply_verdict() would decode the
+	 * reply against it too -- both wrong for a peer this reset has not
+	 * identified yet.  Concretely: a stale major 4 latched from a PRIOR
+	 * session, reset against a 3.1 peer whose first GET_VERSION reply is
+	 * merely garbled (nothing protects that wire) -- the request now
+	 * wrongly carries a CRC trailer the 3.1 firmware rejects, GET_VERSION
+	 * never completes, and the transport-hiccup branch below returns
+	 * ALP_OK with initialised=true and the bad major still latched: a
+	 * permanently wedged link that reports reset as successful.  Zeroing
+	 * here makes GET_VERSION go out CRC-less (correct: no major is known
+	 * yet) and makes cc3501e_reply_verdict() use its own
+	 * fw_proto_major==0 content-based shape detection, exactly like the
+	 * very first reset on a fresh ctx. */
+	ctx->initialised          = true;
+	const uint8_t prior_major = ctx->fw_proto_major;
+	const uint8_t prior_minor = ctx->fw_proto_minor;
+	ctx->fw_proto_major       = 0u;
+	ctx->fw_proto_minor       = 0u;
 
 	/* Wire-protocol compatibility gate (issue #1371): cc3501e-bridge-firmware:DESIGN.md
      * has always documented "host refuses a mismatch" for GET_VERSION, but
@@ -226,9 +264,18 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	uint16_t     fw_version = 0u;
 	alp_status_t vs         = cc3501e_get_version(ctx, &fw_version);
 	if (vs != ALP_OK) {
-		/* Transport hiccup reading the version, not a version disagreement: leave
-		 * the context as it was and let the caller retry (the soaks treat
-		 * GET_VERSION as a liveness probe, not a compat gate). */
+		/* Transport hiccup reading the version, not a version disagreement:
+		 * restore the prior fw_proto_major/minor (zeroed a few lines up for
+		 * GET_VERSION's own framing) so the context really is left as it was,
+		 * and let the caller retry (the soaks treat GET_VERSION as a liveness
+		 * probe, not a compat gate). Without this restore a healthy MAJOR-4
+		 * peer whose GET_VERSION round trip misses -- the common case
+		 * immediately after this reset -- is left with fw_proto_major == 0
+		 * and initialised == true: want_req_crc() then frames every later
+		 * request CRC-less, and that firmware rejects each one until some
+		 * later reset happens to get a version through. */
+		ctx->fw_proto_major = prior_major;
+		ctx->fw_proto_minor = prior_minor;
 		return ALP_OK;
 	}
 	/* MAJOR gates the link; MINOR does not (ADR 0033).
@@ -248,7 +295,17 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
 	const uint8_t fw_major = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MAJOR(fw_version);
 	const uint8_t fw_minor = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MINOR(fw_version);
 
-	if (fw_major != (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR) {
+	/* v4.0 (#2035): the host is BILINGUAL during the migration window -- accepts
+	 * this driver's own ALP_CC3501E_PROTOCOL_MAJOR (4) AND the previous
+	 * ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (3), never anything else.  See the
+	 * migration-order paragraph above ALP_CC3501E_PROTOCOL_MAJOR in
+	 * <alp/protocol/cc3501e.h>: a board still on 3.1 firmware needs the OTA
+	 * itself to get to 4.0, and that OTA has to run THROUGH this host, so a host
+	 * that refused major 3 outright could never reach a board that needed it.
+	 * cc3501e_reply_verdict() below (and cc3501e_request_locked()'s TX side)
+	 * key their legacy-vs-4.0 wire decode off ctx->fw_proto_major, recorded a
+	 * few lines down. */
+	if (!cc3501e_fw_major_is_acceptable(fw_major)) {
 		/* Permanent, not transient: retrying cannot reconcile two binaries
          * that disagree about the wire, so unlike the transport-timeout case
          * above this clears initialised -- every later call on this ctx now
@@ -305,12 +362,41 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 }
 
 /* Map a CC3501E response status byte (first reply-payload byte, per
- * <alp/protocol/cc3501e.h>) onto the SDK's alp_status_t. */
-static alp_status_t resp_to_status(uint8_t resp)
+ * <alp/protocol/cc3501e.h>) onto the SDK's alp_status_t.
+ *
+ * BILINGUAL (v4.0, #2035): @p fw_major selects which byte means success.
+ * fw_major == ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (3, the pre-4.0 wire) treats
+ * ALP_CC3501E_RESP_OK_LEGACY (0x00) as OK, matching every firmware still on
+ * the migration path (see the migration-order note in <alp/protocol/
+ * cc3501e.h>).  Any OTHER major -- 4, or 0 meaning "the version gate has not
+ * run yet" -- treats ONLY ALP_CC3501E_RESP_OK (0x5A) as OK; 0x00 from a
+ * fw_major-4 peer is never legitimate (real 4.0 success is always 0x5A), so
+ * it is left unmapped and falls through to the IO default below -- which is
+ * exactly right, because the only way a 4.0 peer emits a literal 0x00 is the
+ * #1378 dead-phase alias this whole change exists to close.  fw_major == 0
+ * (unknown, pre-gate) getting the STRICT branch here is deliberate too: the
+ * one caller that runs before the major is known (cc3501e_get_version(), via
+ * cc3501e_reply_verdict() below) does its OWN shape detection off the raw
+ * status byte before ever reaching this function, so by the time resp_to_
+ * status() sees a 0x00 with fw_major still 0, that 0x00 has already been
+ * classified as the LEGACY shape and resp_to_status() is called with
+ * ALP_CC3501E_PROTOCOL_MAJOR_LEGACY, not 0 -- see cc3501e_reply_verdict(). */
+static alp_status_t resp_to_status(uint8_t resp, uint8_t fw_major)
 {
-	switch (resp) {
-	case ALP_CC3501E_RESP_OK:
+	if (resp == ALP_CC3501E_RESP_OK) return ALP_OK;
+	/* fw_major MUST gate this -- a fw_proto_major-4 peer's real success byte is
+	 * ALWAYS 0x5A (matched above), so 0x00 reaching here from that peer is
+	 * never legitimate and must fall through to the IO default, NOT be
+	 * accepted unconditionally.  Dropping the fw_major check here would widen
+	 * the #1378 alias from "an all-zero reply" to "any reply whose status
+	 * byte happens to be 0x00", covering strictly more cases than the CRC
+	 * check alone defends -- see
+	 * test_cc3501e_reply_verdict_major4_legacy_status_byte_rejected. */
+	if (resp == ALP_CC3501E_RESP_OK_LEGACY &&
+	    fw_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY) {
 		return ALP_OK;
+	}
+	switch (resp) {
 	case ALP_CC3501E_RESP_ERR_INVALID:
 		return ALP_ERR_INVAL;
 	case ALP_CC3501E_RESP_ERR_BUSY:
@@ -338,6 +424,351 @@ static alp_status_t resp_to_status(uint8_t resp)
 	default:
 		return ALP_ERR_IO;
 	}
+}
+
+/* #2035: whether a MULTI-BYTE reply (resp_payload_len > 1, i.e. the status
+ * byte plus real data) is allowed to read back ALL-ZERO without that being
+ * the #1378 dead-phase alias (a dead bus phase clocks back literal 0x00 for
+ * every byte, and 0x00 is also ALP_CC3501E_RESP_OK -- see the caller).
+ *
+ * STRUCTURAL DEFAULT: an opcode NOT listed here is assumed UNABLE to
+ * legitimately reply all-zero, so the caller below treats an all-zero reply
+ * from it as the dead-phase alias.  This inverts the old shape (a
+ * hand-maintained list of PROTECTED opcodes, which left every new opcode
+ * unprotected until someone remembered to add it -- exactly how GET_MAC
+ * shipped able to hand back a false 00:00:00:00:00:00 "success").  A new
+ * opcode is now safe by construction; it only loses that protection by
+ * earning a place below, and it earns that place only with a documented,
+ * positive reason its reply CAN legitimately be all-zero -- reading the
+ * struct definitions in <alp/protocol/cc3501e.h>, not a guess.
+ *
+ * Deliberately NOT consulted for single-byte (bare-status) replies: RESP_OK
+ * alone IS the entire legitimate success reply for most opcodes in this
+ * protocol (PING, the WIFI_*_STOP/DISCONNECT family, the SOCK_CONNECT/BIND/
+ * LISTEN/CLOSE family, most BLE_* calls, GPIO_CONFIGURE/WRITE/SET_INTERRUPT,
+ * ...), so a bare RESP_OK is structurally indistinguishable from the
+ * dead-phase alias for THOSE opcodes -- defaulting to "protected" there
+ * would reject the ordinary success case of nearly every opcode in the
+ * table.  Telling the two apart needs a firmware fact that ONE PARTICULAR
+ * opcode's handler can never legitimately answer bare OK, which is why that
+ * check stays its own narrow, explicitly-per-opcode mechanism (see the
+ * WIFI_CONNECT_STA / WIFI_AP_START handling at the call site) instead of
+ * folding into this one. */
+bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
+{
+	switch (cmd) {
+	case ALP_CC3501E_CMD_WIFI_STATUS:
+		/* alp_cc3501e_wifi_status_t: state=DISCONNECTED(0), fail_reason=
+		 * NONE(0), rssi_dbm=0 (documented "@warning NOT A MEASUREMENT...
+		 * always 0 on the wire", <alp/protocol/cc3501e.h>), reserved=0.
+		 * "Never connected since boot" is a real, common device state and
+		 * reads back byte-identical to this. */
+		return true;
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
+		/* 0 dBm is a LEGAL int8 RSSI reading (see the wifi_status_t
+		 * rssi_dbm doc comment) -- there is no in-band sentinel to tell it
+		 * apart from a dead phase. */
+		return true;
+	case ALP_CC3501E_CMD_WIFI_GET_IP:
+		/* 0.0.0.0 legitimately means "no IP assigned yet" (STA not
+		 * associated / AP not started). */
+		return true;
+	case ALP_CC3501E_CMD_DIAG_GET_STATS:
+		/* Zero counters right after boot are a real state, not a dead
+		 * link. */
+		return true;
+	case ALP_CC3501E_CMD_SOCK_RECV:
+		/* alp_cc3501e_sock_recv_resp_t is explicit: "data_len == 0 means
+		 * no data was available (non-blocking semantics; the status is
+		 * still ALP_CC3501E_RESP_OK)", and `from` is genuinely zeroed for
+		 * a STREAM socket. */
+		return true;
+	case ALP_CC3501E_CMD_OTA_STATUS:
+		/* alp_cc3501e_ota_status_t: state=IDLE(0), bytes_written=0,
+		 * total_len=0, pending=NONE(0) is the real, common "no OTA
+		 * session has ever run on this device" state. */
+		return true;
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE:
+		/* alp_cc3501e_ota_update_mode_t: mode==0 ("left/never entered
+		 * update mode") is documented in <alp/protocol/cc3501e.h> as
+		 * byte-identical to the dead-phase alias and NOT structurally
+		 * defeatable here -- mode==1 IS proof (a dead phase can never
+		 * forge it), so the host confirm loop already treats mode==0 as
+		 * needing corroboration, not as proof either way.  Do not add a
+		 * canary here; the header explains why this needs a wire-level
+		 * fix instead (#1696). */
+		return true;
+	case ALP_CC3501E_CMD_GPIO_READ:
+		/* GPIO level 0 (pad sampled LOW) is an ordinary reading, not a
+		 * fault. */
+		return true;
+	case ALP_CC3501E_CMD_SPI1_TRANSFER:
+		/* alp_cc3501e_spi1_transfer_resp_t: "a len == 0 transfer with
+		 * flags == 0 is a standalone CS deassert" is documented normal
+		 * usage, and seq legitimately starts at 0 -- len=0/flags=0/seq=0
+		 * is that reply, byte-identical to an all-zero dead phase. */
+		return true;
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
+		/* A genuine trade, not a free win like the cases above: the reply
+		 * IS the packed scan-record list itself (see cc3501e_wifi.c's
+		 * cc3501e_wifi_scan() / cc3501e_ble.c's scan walker), and "zero
+		 * networks/peripherals in range" is a legitimate, unremarkable
+		 * result -- an all-zero (i.e. empty) record list from a real scan
+		 * is byte-identical to a dead phase, and shape alone cannot tell
+		 * them apart.  Pre-fix, listing this opcode in
+		 * cc3501e_reply_carries_data() at all was missing, so a dead phase
+		 * here read as ALP_OK with a phantom "no networks found" -- the
+		 * failure this pair now trades for the opposite one (a real empty
+		 * scan can no longer be rejected as ALP_ERR_IO, which used to
+		 * happen before this opcode carried data at all). */
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* Blocker-1 fix (#2035 follow-up): whether opcode @p cmd's reply carries real
+ * payload data beyond the status byte -- i.e. whether its UNPADDED reply
+ * length is > 1.  This is what cc3501e_reply_verdict() below actually needs
+ * to know to pick the right dead-phase mechanism, and it is a fixed fact of
+ * the wire format documented in <alp/protocol/cc3501e.h>, NOT something the
+ * wire's declared payload_len can tell it: EVERY reply, bare-status or not,
+ * is zero-padded up to an @ref ALP_CC3501E_REPLY_PAD (8 B) multiple with the
+ * pad folded into that declared length (see cc3501e_events.c's
+ * cc3501e_events_poll() for the sibling host-side consequence), so a real
+ * bare-status reply (unpadded length 1) and a real short-data reply (e.g.
+ * WIFI_GET_RSSI's unpadded length 2) both show up on the wire as
+ * payload_len == 8 -- indistinguishable by length alone.  Using payload_len
+ * itself to choose the mechanism (the pre-fix code) therefore always took
+ * the "has data" branch for every real reply, which silently starved every
+ * bare-status opcode of its own, more permissive heuristic -- see the
+ * dead_phase dispatch below for the concrete failure.
+ *
+ * STRUCTURAL DEFAULT, same polarity as cc3501e_reply_may_be_all_zero() above:
+ * an opcode NOT listed here is assumed bare-status (unpadded length 1),
+ * because that is what most opcodes in this table actually are -- PING, the
+ * WIFI_*_STOP/DISCONNECT family, the SOCK_CONNECT/BIND/LISTEN/CLOSE family,
+ * most BLE_* calls, GPIO_CONFIGURE/WRITE/SET_INTERRUPT, RESET,
+ * WIFI_SCAN_STOP, BLE_SCAN_STOP, WIFI_CONNECT_STA/AP_START (handled by the
+ * narrow per-opcode check at the call site instead), OTA_BEGIN/WRITE/FINISH/ABORT/
+ * PROMOTE, STREAM_WRITE, SPI1_RELEASE, CAM_ENABLE/DISABLE, POWER_POLICY,
+ * DIAG_LOG_LEVEL, and GET_PENDING_EVENTS (its DATA is genuinely optional --
+ * "an empty list ... means nothing was queued", see the enum comment -- so
+ * an all-zero reply is its ordinary "nothing pending" case, not evidence of
+ * a dead phase).  A new opcode earns a place below only by carrying a real,
+ * documented reply struct wider than the status byte -- read the struct
+ * definitions in <alp/protocol/cc3501e.h>, not a guess. */
+static bool cc3501e_reply_carries_data(alp_cc3501e_cmd_t cmd)
+{
+	switch (cmd) {
+	case ALP_CC3501E_CMD_GET_VERSION:
+	case ALP_CC3501E_CMD_GET_MAC:
+	case ALP_CC3501E_CMD_GET_DIAG_INFO:
+	case ALP_CC3501E_CMD_GET_CAPABILITIES:
+	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
+	case ALP_CC3501E_CMD_WIFI_GET_IP:
+	case ALP_CC3501E_CMD_WIFI_STATUS:
+	case ALP_CC3501E_CMD_WIFI_SCAN_START:
+	case ALP_CC3501E_CMD_SOCK_OPEN:
+	case ALP_CC3501E_CMD_SOCK_SEND:
+	case ALP_CC3501E_CMD_SOCK_RECV:
+	case ALP_CC3501E_CMD_OTA_STATUS:
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE:
+	case ALP_CC3501E_CMD_GPIO_READ:
+	case ALP_CC3501E_CMD_SPI1_CONFIGURE:
+	case ALP_CC3501E_CMD_SPI1_TRANSFER:
+	case ALP_CC3501E_CMD_BLE_SCAN_START:
+	case ALP_CC3501E_CMD_BLE_GATT_READ:
+	case ALP_CC3501E_CMD_BLE_GATT_REGISTER:
+	case ALP_CC3501E_CMD_DIAG_GET_STATS:
+		return true;
+	default:
+		return false;
+	}
+}
+
+/* v4.0 (#2035): verify a reply's CRC-16/CCITT-FALSE trailer.
+ *
+ * Span per <alp/protocol/cc3501e.h>: the reply's own 4 header bytes (already
+ * read and saved into @p reply_hdr before the payload phase overwrites the
+ * scratch buffer it was read into) plus every payload byte EXCEPT the
+ * trailing @ref ALP_CC3501E_CRC_BYTES, which the wire carries as the CRC
+ * itself, LE16, at the last 2 bytes of the (possibly padded) payload.
+ *
+ * A payload too short to even hold a CRC (@p payload_len < CRC_BYTES) is
+ * rejected outright -- a real 4.0 reply always has room, so an underlength
+ * one is itself evidence of desync, not a shape this function should try to
+ * make sense of. */
+static bool cc3501e_reply_crc_ok(const uint8_t  reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                 const uint8_t *payload,
+                                 uint16_t       payload_len)
+{
+	if (payload == NULL || payload_len < ALP_CC3501E_CRC_BYTES) return false;
+	const uint16_t covered  = (uint16_t)(payload_len - ALP_CC3501E_CRC_BYTES);
+	uint16_t       crc      = alp_crc16_ccitt_false(reply_hdr, ALP_CC3501E_HEADER_BYTES);
+	crc                     = alp_crc16_ccitt_false_update(crc, payload, covered);
+	const uint16_t wire_crc = (uint16_t)payload[covered] | ((uint16_t)payload[covered + 1u] << 8);
+	return crc == wire_crc;
+}
+
+/* v4.0 (#2035): the pure reply-decision -- given an ALREADY-READ reply header
+ * and payload, decide the alp_status_t this reply represents.  No I/O, no
+ * transport lock: cc3501e_request_locked() below is the only real caller, and
+ * pulling the decision out into its own function is what lets
+ * tests/zephyr/chips/src/test_cc3501e.c exercise every wire shape (legacy
+ * major-3, 4.0-with-valid-CRC, 4.0-with-corrupted-CRC, an all-zero dead
+ * phase under each) directly with fabricated frames, with no SPI bus needed
+ * -- declared non-static in cc3501e_internal.h for exactly that reason, same
+ * pattern as cc3501e_reply_may_be_all_zero() above.
+ *
+ * SHAPE DETECTION.  Which wire dialect a reply uses is keyed off @p
+ * fw_proto_major, EXCEPT at fw_proto_major == 0 (the version gate has not
+ * run yet -- the one caller here is cc3501e_get_version() from inside
+ * cc3501e_reset() itself, per the migration-order note in
+ * <alp/protocol/cc3501e.h>): there, the status byte decides its own shape,
+ * because that is the one piece of information available before the major is
+ * known.  resp == ALP_CC3501E_RESP_OK (0x5A) can only mean "this is a 4.0
+ * reply" -- 0x5A is not a legacy status byte at all -- and anything else
+ * (0x00 or any legacy error code) is read as the legacy, no-CRC shape. */
+alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
+                                   uint8_t           fw_proto_major,
+                                   const uint8_t     reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                   const uint8_t    *payload,
+                                   uint16_t          payload_len)
+{
+	if (payload == NULL || payload_len < 1u) return ALP_ERR_IO; /* always >= 1 status byte */
+	const uint8_t resp = payload[0];
+
+	bool major4_shape;
+	if (fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR) {
+		major4_shape = true;
+	} else if (fw_proto_major == (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY) {
+		major4_shape = false;
+	} else {
+		major4_shape = (resp == ALP_CC3501E_RESP_OK);
+	}
+
+	if (major4_shape && !cc3501e_reply_crc_ok(reply_hdr, payload, payload_len)) {
+		/* Covers a corrupted trailer AND a dead all-zero payload phase: the
+		 * CRC of an all-zero span is never the wire's all-zero "CRC", so this
+		 * alone already defeats #1378 for every 4.0 reply, on top of (not
+		 * instead of) the all-zero heuristic below. */
+		return ALP_ERR_IO;
+	}
+
+	/* #1378 / #2035: a dead bus phase reads back literal 0x00 for every byte
+	 * it clocks -- this repo's own silicon finding (see hal/ti/
+	 * cc3501e_hw_ti_wifi.c's cc3501e_hw_wifi_lazy_start(), "the host then
+	 * reads 0x00000000 from a dead link").  0x00 is ALSO the legacy
+	 * ALP_CC3501E_RESP_OK_LEGACY, so on the legacy (fw_proto_major 3) wire a
+	 * header that read intact followed by a payload phase that dies in the
+	 * inter-phase gap is silently indistinguishable from a real, successful
+	 * all-zero reply: ALP_OK must require positive evidence the device framed
+	 * a reply, not merely the absence of evidence that it did not.  Kept even
+	 * on the major4_shape path (belt and braces, costs nothing once the CRC
+	 * above already passed) rather than being gated on !major4_shape.
+	 *
+	 * Two shapes, two mechanisms (a single content-based check cannot cover
+	 * both -- see cc3501e_reply_may_be_all_zero()'s doc comment).  Dispatched
+	 * on cc3501e_reply_carries_data(cmd), NOT on payload_len: the firmware
+	 * zero-pads every reply's payload up to an ALP_CC3501E_REPLY_PAD (8 B)
+	 * multiple with the pad folded INTO the declared payload_len (see
+	 * cc3501e_reply_carries_data()'s doc comment and cc3501e_events.c), so a
+	 * genuine bare-status reply and a genuine short-data reply both arrive
+	 * with the SAME wire payload_len -- payload_len cannot tell them apart.
+	 * (This used to be gated on `payload_len == 1u`, which no real reply
+	 * from real firmware is ever declared as -- always >= REPLY_PAD -- so
+	 * that branch was dead against the wire and every bare-status opcode
+	 * fell into shape 2 below and was wrongly treated as PROTECTED, i.e. a
+	 * real legacy RESP_OK_LEGACY (0x00) reply from e.g. PING or
+	 * GET_PENDING_EVENTS read back as all-zero and was rejected as a dead
+	 * phase.  Fixed here; test_cc3501e_reply_verdict_major3_bare_status_is_padded
+	 * in tests/zephyr/chips/src/test_cc3501e.c fabricates the real 8-byte
+	 * padded shape a bridge actually sends and pins this down.)
+	 *
+	 *  1. !cc3501e_reply_carries_data(cmd) (bare status, no real data).
+	 *     RESP_OK alone is the legitimate success reply for most opcodes
+	 *     here, so "all-zero" carries no signal by itself; only a firmware
+	 *     fact that ONE opcode's handler can never legitimately answer bare
+	 *     OK makes it self-evidently the dead-phase alias.  Still a narrow,
+	 *     per-opcode allowlist for exactly that reason:
+	 *
+	 *     WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
+	 *     (handle_worker_routed_payload's WORKER_IDLE case,
+	 *     cc3501e-bridge-firmware:src/protocol.c) UNCONDITIONALLY acks a
+	 *     fresh submit with RESP_ERR_BUSY.  Rejecting the alias here avoids
+	 *     handing the caller a false "submitted", which is exactly the #1376
+	 *     false-connect mechanism.  cc3501e_wifi_connect() no longer trusts
+	 *     this ack in either direction (it only trusts the independent
+	 *     WIFI_STATUS latch -- see cc3501e_wifi.c), so for that opcode this
+	 *     is defense in depth.
+	 *
+	 *     WIFI_AP_START (0x14) -- #1385.  Same handler, same unconditional
+	 *     BUSY submit ack, AND the ONE path that could otherwise return a
+	 *     bare RESP_OK for this opcode is unreachable to the host: the drain
+	 *     (cc3501e-bridge-firmware:src/worker.c's worker_run_pending()) calls
+	 *     worker_reset() for exactly CONNECT_STA and AP_START *before*
+	 *     cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
+	 *     that would reply RESP_OK is wiped while the host is still held off
+	 *     and can never be collected.  Unlike CONNECT_STA this is NOT defense
+	 *     in depth: this rejection was cc3501e_wifi_ap_start()'s ONLY route to
+	 *     ALP_OK, so that wrapper no longer polls it -- it submits
+	 *     WIFI_AP_START exactly once and reports ALP_ERR_TIMEOUT
+	 *     unconditionally (see cc3501e_wifi.c), since there is no reply this
+	 *     opcode can ever frame as success.  Tracked in #1696 -- re-check
+	 *     whether an AP-side latch can be added now the wire has a CRC.
+	 *     (#1385 is CLOSED.)
+	 *
+	 *     OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
+	 *     the sharpest case named in #1378/#1385: handle_ota_promote()
+	 *     (cc3501e-bridge-firmware:src/protocol_ota.c) returns
+	 *     hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
+	 *     cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
+	 *     deferred swap-reboot and returns CC3501E_HW_OK UNCONDITIONALLY -- a
+	 *     bare RESP_OK (reply_data_len 0 -> payload len 1) is that opcode's
+	 *     ONLY success reply.  Rejecting it here would make
+	 *     cc3501e_ota_promote() always report ALP_ERR_IO and break firmware
+	 *     promotion outright.  On the legacy wire this alias is still only
+	 *     closeable by host-side confirmation against OTA_STATUS (0x44); on
+	 *     the 4.0 wire the CRC check above now covers it like every other
+	 *     opcode, so the residual risk here is legacy-only.  Tracked in
+	 *     #1696; weigh against #1123, which is also OTA state confirmation.
+	 *
+	 *  2. cc3501e_reply_carries_data(cmd) (status + real data).  Requiring
+	 *     the status byte AND every data byte to be simultaneously zero is a
+	 *     much rarer coincidence than a bare zero status alone, so THIS
+	 *     shape defaults to PROTECTED -- see cc3501e_reply_may_be_all_zero()
+	 *     for the (deliberately small, each individually justified) list of
+	 *     opcodes exempted from that default.  This is the shape #2035's
+	 *     cc3501e_wifi_get_mac() bug lived in: GET_MAC's reply is 1 status
+	 *     byte + 6 MAC bytes, so the old bare-status-only allowlist above
+	 *     never even looked at it. */
+	bool all_zero = true;
+	for (uint16_t i = 0; i < payload_len; i++) {
+		if (payload[i] != 0x00u) {
+			all_zero = false;
+			break;
+		}
+	}
+	bool dead_phase;
+	if (!cc3501e_reply_carries_data(cmd)) {
+		dead_phase = all_zero && (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA ||
+		                          cmd == ALP_CC3501E_CMD_WIFI_AP_START);
+	} else {
+		dead_phase = all_zero && !cc3501e_reply_may_be_all_zero(cmd);
+	}
+	if (dead_phase) return ALP_ERR_IO;
+
+	/* The status byte's OWN major for resp_to_status(): at fw_proto_major==0
+	 * this reply already told us its shape above, so hand resp_to_status() the
+	 * major THAT shape implies (LEGACY for a 0x00 reply, this driver's own
+	 * PROTOCOL_MAJOR for a 0x5A reply) rather than the still-unknown 0 --
+	 * otherwise a legitimate legacy 0x00 OK would fall through resp_to_status's
+	 * strict (non-legacy) branch and misreport ALP_ERR_IO. */
+	const uint8_t status_major = major4_shape ? (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR
+	                                          : (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	return resp_to_status(resp, status_major);
 }
 
 /* ---- transport-transaction lock (issue #1116) -----------------------------
@@ -761,7 +1192,17 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint8_t flags =
 	    (uint8_t)(ALP_CC3501E_FLAG_RESP_REQUIRED | (uint8_t)((req_seq & ALP_CC3501E_REQ_SEQ_MASK)
 	                                                         << ALP_CC3501E_FLAG_REQ_SEQ_SHIFT));
-	encode_header(ctx->tx_scratch, cmd, flags, (uint16_t)tx_len);
+	/* v4.0 (#2035): append a CRC-16/CCITT-FALSE trailer to the REQUEST too,
+	 * but ONLY once this ctx has negotiated fw_proto_major 4 -- a request
+	 * built before the gate has run (fw_proto_major 0) or against a
+	 * fw_proto_major-3 peer stays BYTE-IDENTICAL to 3.1, no trailer, because
+	 * legacy firmware validates `HEADER + payload_len == req_len` per-handler
+	 * and rejects an unexpected trailer with RESP_ERR_INVALID (see the
+	 * migration-order note in <alp/protocol/cc3501e.h>). */
+	const bool     want_req_crc = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR);
+	const uint16_t wire_tx_len =
+	    (uint16_t)(tx_len + (want_req_crc ? (size_t)ALP_CC3501E_CRC_BYTES : 0u));
+	encode_header(ctx->tx_scratch, cmd, flags, wire_tx_len);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
 
@@ -798,21 +1239,37 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = ALP_ERR_IO;
 		goto out;
 	}
-	if (tx_len > 0) {
+	if (wire_tx_len > 0) {
 		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
 		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
 		 * the payload back-to-back (no gap) races that re-arm -> the payload bytes are
-		 * dropped + the frame desyncs.  Header-only requests (PING / the argless worker
-		 * ops) have no payload phase so they were fine; payload requests (OTA_WRITE,
-		 * CONNECT, GPIO_WRITE) need this gap (root-caused on silicon 2026-06-19, where
-		 * OTA streaming timed out per-chunk without it).
+		 * dropped + the frame desyncs.  Header-only 3.1-shaped requests (PING / the
+		 * argless worker ops) have no payload phase so they were fine; payload
+		 * requests (OTA_WRITE, CONNECT, GPIO_WRITE) need this gap (root-caused on
+		 * silicon 2026-06-19, where OTA streaming timed out per-chunk without it).
+		 * Under a fw_proto_major-4 peer EVERY request has a payload phase now (at
+		 * minimum the 2-byte CRC trailer, want_req_crc above), so this gate applies
+		 * unconditionally on that wire even to what used to be argless.
 		 *
 		 * This was the ONE phase still on a bare fixed delay while phases 1, 3 and 4
 		 * consult READY.  It is also the phase that clocks the most bytes (a 260 B
 		 * OTA_WRITE), so it is the worst one to send blind at a slave that has not
 		 * re-armed.  Gate it like the others; the delay stays as the fallback. */
 		cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
-		s = alp_spi_transceive(ctx->bus, tx_payload, ctx->rx_scratch, tx_len);
+		const uint8_t *tx_ptr = tx_payload;
+		if (want_req_crc) {
+			/* Build payload+CRC as one contiguous buffer.  ctx->tx_scratch[0..3]
+			 * still holds the header this exchange just sent -- alp_spi_transceive
+			 * does not touch its own TX buffer -- so the CRC is computed from it
+			 * BEFORE this reuses the same scratch to carry the payload phase. */
+			uint16_t crc = alp_crc16_ccitt_false(ctx->tx_scratch, ALP_CC3501E_HEADER_BYTES);
+			crc          = alp_crc16_ccitt_false_update(crc, tx_payload, tx_len);
+			if (tx_len > 0) memcpy(ctx->tx_scratch, tx_payload, tx_len);
+			ctx->tx_scratch[tx_len]      = (uint8_t)(crc & 0xFFu);
+			ctx->tx_scratch[tx_len + 1u] = (uint8_t)((crc >> 8) & 0xFFu);
+			tx_ptr                       = ctx->tx_scratch;
+		}
+		s = alp_spi_transceive(ctx->bus, tx_ptr, ctx->rx_scratch, wire_tx_len);
 		if (s != ALP_OK) goto out;
 	}
 
@@ -843,6 +1300,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = ALP_ERR_IO;
 		goto out;
 	}
+	/* v4.0 (#2035): save the reply's own header bytes NOW -- the payload-phase
+	 * transceive below reuses ctx->rx_scratch and overwrites them -- so
+	 * cc3501e_reply_verdict() can still CRC the header + payload together
+	 * afterwards (span per <alp/protocol/cc3501e.h>: the 4 header bytes plus
+	 * every payload byte except the trailing 2 CRC bytes). */
+	uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES];
+	memcpy(reply_hdr, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 
 	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
 	 * its ISR only after the reply-header transfer completes). */
@@ -852,85 +1316,18 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	if (s != ALP_OK) goto out;
 
 	{
-		const uint8_t resp     = ctx->rx_scratch[0];
-		const size_t  data_len = (size_t)resp_payload_len - 1u;
+		const size_t data_len = (size_t)resp_payload_len - 1u;
 		if (data_len > 0u && rx_buf != NULL) {
 			const size_t n = (data_len > rx_cap) ? rx_cap : data_len;
 			memcpy(rx_buf, &ctx->rx_scratch[1], n);
 			if (rx_len != NULL) *rx_len = n;
 		}
-		/* #1378: a dead bus phase reads back literal 0x00 for every byte it
-		 * clocks -- this repo's own silicon finding (see
-		 * hal/ti/cc3501e_hw_ti_wifi.c's cc3501e_hw_wifi_lazy_start(), "the
-		 * host then reads 0x00000000 from a dead link").  0x00 is ALSO
-		 * ALP_CC3501E_RESP_OK, so a header that read intact (hdr_ok above --
-		 * genuinely alive) followed by a payload phase that dies in the
-		 * inter-phase gap (cc3501e_reply_gate above, CC3501E_PHASE_SETTLE_US)
-		 * is silently indistinguishable from a real, successful bare-status
-		 * reply: ALP_OK must require positive evidence the device framed a
-		 * reply, not merely the absence of evidence that it did not.
-		 *
-		 * A content-based check cannot be applied generally here: several
-		 * bare-OK replies legitimately ARE all-zero (WIFI_STATUS's
-		 * disconnected-and-never-attempted state, DIAG_GET_STATS' zero
-		 * counters right after boot, SOCK_RECV's zero-bytes-pending) --
-		 * flagging those would trade a rare false ALP_OK for a routine false
-		 * ALP_ERR_IO on paths that are correct today.  The check is therefore
-		 * PER-OPCODE, and an opcode earns its place on the list below only by
-		 * a firmware fact: its handler cannot EVER frame a synchronous bare
-		 * RESP_OK, so seeing one here is self-evidently the dead-phase alias,
-		 * not a value this driver has merely decided is improbable.
-		 *
-		 * WIFI_CONNECT_STA (0x12) -- #1378.  Its firmware handler
-		 * (handle_worker_routed_payload's WORKER_IDLE case,
-		 * cc3501e-bridge-firmware:src/protocol.c) UNCONDITIONALLY acks a fresh
-		 * submit with RESP_ERR_BUSY.  Rejecting the alias here avoids handing
-		 * the caller a false "submitted", which is exactly the #1376
-		 * false-connect mechanism.  cc3501e_wifi_connect() no longer trusts
-		 * this ack in either direction (it only trusts the independent
-		 * WIFI_STATUS latch -- see cc3501e_wifi.c), so for that opcode this
-		 * is defense in depth.
-		 *
-		 * WIFI_AP_START (0x14) -- #1385.  Same handler, same unconditional
-		 * BUSY submit ack, AND the ONE path that could otherwise return a
-		 * bare RESP_OK for this opcode is unreachable to the host: the drain
-		 * (cc3501e-bridge-firmware:src/worker.c's worker_run_pending()) calls
-		 * worker_reset() for exactly CONNECT_STA and AP_START *before*
-		 * cc3501e_bridge_ready() re-arms the link, so the WORKER_DONE branch
-		 * that would reply RESP_OK is wiped while the host is still held off
-		 * and can never be collected.  Unlike CONNECT_STA this is NOT defense
-		 * in depth: this rejection was cc3501e_wifi_ap_start()'s ONLY route to
-		 * ALP_OK, so that wrapper no longer polls it -- it submits
-		 * WIFI_AP_START exactly once and reports ALP_ERR_TIMEOUT
-		 * unconditionally (see cc3501e_wifi.c), since there is no reply this
-		 * opcode can ever frame as success.  Restoring a real success path
-		 * still needs the same submit-once-then-confirm restructure
-		 * cc3501e_wifi_connect() got, which firmware v4 cannot yet support
-		 * (cc3501e_hw_wifi_ap_start() never writes the g_wifi_conn latch that
-		 * WIFI_STATUS reads, so there is no independent AP channel to confirm
-		 * against).  Tracked in #1696 -- the wire is v5 now, so re-check whether
-		 * an AP-side latch can be added.  (#1385, cited here before, is CLOSED.)
-		 *
-		 * OTA_PROMOTE (0x46) is deliberately NOT on this list, despite being
-		 * the sharpest case named in #1378/#1385: handle_ota_promote()
-		 * (cc3501e-bridge-firmware:src/protocol_ota.c) returns
-		 * hw_to_resp(cc3501e_hw_ota_promote()), and the TI HAL's
-		 * cc3501e_hw_ota_promote() (hal/ti/cc3501e_hw_ti_ota.c) arms the
-		 * deferred swap-reboot and returns CC3501E_HW_OK UNCONDITIONALLY --
-		 * a bare RESP_OK (reply_data_len 0 -> payload len 1) is that opcode's
-		 * ONLY success reply.  Rejecting it here would make
-		 * cc3501e_ota_promote() always report ALP_ERR_IO and break firmware
-		 * promotion outright.  Closing the alias for OTA_PROMOTE needs either
-		 * a wire-level CRC/canary (a protocol version bump touching host and
-		 * firmware) or host-side confirmation against OTA_STATUS (0x44) --
-		 * neither is a transport-layer change.  Tracked in #1696; weigh against
-		 * #1123, which is also OTA state confirmation.  (#1385 is CLOSED.) */
-		if (resp == ALP_CC3501E_RESP_OK && resp_payload_len == 1u &&
-		    (cmd == ALP_CC3501E_CMD_WIFI_CONNECT_STA || cmd == ALP_CC3501E_CMD_WIFI_AP_START)) {
-			s = ALP_ERR_IO;
-		} else {
-			s = resp_to_status(resp);
-		}
+		/* v4.0 (#2035): the actual verdict -- major-aware status decode, the
+		 * CRC check on a fw_proto_major-4 wire, and the #1378 dead-phase
+		 * guard -- is cc3501e_reply_verdict(), a pure function with no I/O so
+		 * it is independently unit-testable (see cc3501e_internal.h). */
+		s = cc3501e_reply_verdict(
+		    cmd, ctx->fw_proto_major, reply_hdr, ctx->rx_scratch, resp_payload_len);
 	}
 
 out:
@@ -949,7 +1346,25 @@ alp_status_t cc3501e_request(cc3501e_t        *ctx,
 	(void)timeout_ms; /* Reserved for a future IRQ-driven wait (next HW rev). */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* MAJOR-4 fix: the request-build below (cc3501e_request_locked()'s
+	 * want_req_crc) appends a 2-byte CRC trailer once this ctx has negotiated
+	 * fw_proto_major 4, so wire_tx_len there becomes tx_len +
+	 * ALP_CC3501E_CRC_BYTES -- a tx_len this check let through all the way up
+	 * to ALP_CC3501E_MAX_PAYLOAD would encode a wire length LARGER than the
+	 * protocol's own maximum into the header's length field.  Tighten the
+	 * ceiling by the trailer size whenever it is actually going to be
+	 * appended.  cc3501e_ble_gatt_register() (chips/cc3501e/cc3501e_ble.c),
+	 * cc3501e_ble_gatt_notify()/cc3501e_ble_gatt_write(), and
+	 * cc3501e_sock_send() (chips/cc3501e/cc3501e_sockets.c) each apply this
+	 * SAME ALP_CC3501E_CRC_BYTES subtraction to their own len bound so a
+	 * caller sized to their documented maximum does not get rejected here
+	 * one layer down -- keep them in lockstep with this ceiling; a wrapper
+	 * bound that skips the subtraction goes stale against a MAJOR-4 peer
+	 * without this. */
+	const uint16_t max_tx = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR)
+	                            ? (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES)
+	                            : (uint16_t)ALP_CC3501E_MAX_PAYLOAD;
+	if (tx_len > max_tx) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
 	/* Serialise the whole exchange (issue #1116): every phase in
@@ -1058,7 +1473,11 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	 * wrapper per iteration -- see the sentinel-race comment below. */
 	if (rx_len != NULL) *rx_len = 0;
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	if (tx_len > ALP_CC3501E_MAX_PAYLOAD) return ALP_ERR_INVAL;
+	/* Same MAJOR-4 ceiling as cc3501e_request() above -- see its comment. */
+	const uint16_t max_tx = (ctx->fw_proto_major >= (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR)
+	                            ? (uint16_t)(ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_CRC_BYTES)
+	                            : (uint16_t)ALP_CC3501E_MAX_PAYLOAD;
+	if (tx_len > max_tx) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
 	/* Budget is coarse-grained in CC3501E_POLL_GAP_MS slices; always make at

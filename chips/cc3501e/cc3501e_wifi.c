@@ -34,6 +34,27 @@
  * caller timeout can't give up inside the down-window before the radio is up. */
 #define CC3501E_WIFI_DOWN_WINDOW_MS 10000u
 
+/* See <alp/protocol/cc3501e.h> for the wire shape and cc3501e_internal.h for
+ * why this is not `static` (test visibility). */
+bool cc3501e_mac_is_valid(const uint8_t mac[CC3501E_MAC_LEN])
+{
+	bool all_zero = true;
+	for (size_t i = 0; i < CC3501E_MAC_LEN; i++) {
+		if (mac[i] != 0x00u) {
+			all_zero = false;
+			break;
+		}
+	}
+	if (all_zero) return false;
+
+	/* IEEE 802.1: bit 0 of the first octet is the group/multicast bit.  A
+	 * real station's individually-assigned (unicast) address always has it
+	 * clear; a garbled-but-nonzero dead-phase reply is not bound by that. */
+	if ((mac[0] & 0x01u) != 0u) return false;
+
+	return true;
+}
+
 alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], uint32_t timeout_ms)
 {
 	if (mac == NULL) return ALP_ERR_INVAL;
@@ -52,6 +73,24 @@ alp_status_t cc3501e_wifi_get_mac(cc3501e_t *ctx, uint8_t mac[CC3501E_MAC_LEN], 
 	    poll_by_repeat(ctx, ALP_CC3501E_CMD_GET_MAC, NULL, 0, reply, sizeof(reply), &got, budget);
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_MAC_LEN) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
+
+	/* #2035: cc3501e_reply_may_be_all_zero() (cc3501e_core.c) already treats an
+	 * all-zero GET_MAC reply as the #1378 dead-phase alias -- GET_MAC is not on
+	 * its exemption list, so a header that read intact followed by an all-zero
+	 * payload phase never reaches here as ALP_OK at all.  But that transport-
+	 * level guard only sees BYTES; it cannot know a MAC is invalid unless every
+	 * one of them is 0x00.  A dead phase that returns a NON-zero garbage
+	 * pattern -- or, in principle, a genuinely corrupted-but-nonzero reply --
+	 * would sail through it and land here.  cc3501e_mac_is_valid() catches the
+	 * one thing this driver DOES know about a real station address regardless
+	 * of byte pattern: the IEEE group/multicast bit (mac[0] bit 0) is never set
+	 * on an individual (unicast) station address.  Reject here, at the driver,
+	 * with the same loud ALP_ERR_IO -- not silently retried, and not left for
+	 * every caller to reinvent (this was previously caught only by a demo that
+	 * happened to read the MAC twice and compare:
+	 * examples/aen/aen-evk-demo's cc35_mac_plausible()). */
+	if (!cc3501e_mac_is_valid(reply)) return ALP_ERR_IO;
+
 	memcpy(mac, reply, CC3501E_MAC_LEN);
 	return ALP_OK;
 }

@@ -47,7 +47,7 @@ class TestHwInfoHEmit(unittest.TestCase):
         # turns a disagreement into k_panic().  See sdk_compat.board_designator().
         self.assertIn('#define ALP_HW_BUILD_SOM_HW_REV      "2626-r2"', out)
         self.assertIn('#define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"', out)
-        self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r1"', out)
+        self.assertIn('#define ALP_HW_BUILD_BOARD_HW_REV    "r2"', out)
         self.assertIn('#define ALP_HW_BUILD_OS              "zephyr"', out)
 
     def test_no_board_skips_board_macros(self) -> None:

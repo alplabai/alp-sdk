@@ -11,8 +11,15 @@
  * ships no Alif qdec driver and hal_alif exposes no Zephyr device for the
  * quadrature block -- only the register-helper library (drivers/utimer/include/
  * utimer.h, alif_utimer_*) this file calls -- so the qdec source is carried
- * in-tree VERBATIM so it survives a `west update`.  Retire onto the opt-in
- * sdk-alif fork compatible once the qdec node is repointed AND bench-verified.
+ * in-tree as a VENDORED FORK-DRIVER COPY WITH LOCAL FIXES, not a verbatim
+ * vendor file.  It started as a verbatim copy; #1828 open-coded the filter
+ * programming, added the CNTR_TRIG write and a BUILD_ASSERT bound, and #2037
+ * added the FILTER_CTRL_B write that makes the two quadrature inputs filter
+ * alike and established that a trigger-counting channel must NEVER be started
+ * (see the DO-NOT-START block at the end of qdec_alif_initialize()).  Anything
+ * that repoints this node onto the opt-in sdk-alif fork compatible MUST carry
+ * those forward or silently reintroduce the defects; retire onto the fork only
+ * once the node is repointed AND bench-verified.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
@@ -25,8 +32,81 @@
  * value (sensor_sample_fetch); the driver registers no ISR.  The reported
  * SENSOR_CHAN_ROTATION value is scaled to DEGREES
  * (counter * 360 / counts-per-revolution), not raw counts.
- * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the live
- * quadrature decode / filter / clock programming are bench follow-ups).
+ * vendor-ext.  BENCH-VERIFIED for the counter-start path on E1M-AEN803 serial
+ * 2026W36-0002 (2026-09-08): after init, CNTR_CTRL (0x4800D080) reads
+ * 0x00000023 -- EN | RUNNING | CNTR_TRIG -- and GLB_CNTR_RUNNING (0x4800000C)
+ * reads 0x00001000, bit 12 for QEC0's channel.  Both were clear before #2037.
+ * STILL UNVERIFIED, and do not read the above as covering it: whether the
+ * counter is advancing on real quadrature edges.  In that same run, with
+ * nobody touching the shaft, the count advanced steadily -- which no
+ * stationary encoder should do.  The RATE is NOT known: the app polls a
+ * mod-96 counter every ~300 ms, so the observable is only
+ * (rate * 0.3) mod 96, and a whole family of rates share that residue.  Do
+ * not quote a counts/s figure from that run; several 32.768 kHz-derived
+ * rates fit it as well as any other.  The source is INTERNAL to the channel,
+ * not the pads: a later run walked four pad configurations -- no bias
+ * (0x00210005), pull-up (0x00290005), pull-up + Schmitt (0x002B0005), and
+ * AF=0 with P3_0/P3_1 deselected from the QEC entirely (0x00290000) -- and
+ * the counter kept advancing through all four.  That measurement stands on
+ * its own and is unaffected by everything below.
+ *
+ * BENCH CRITERION for "the spurious count is gone", because nobody will be
+ * turning the shaft: read CNTR (0x4800D0A0) RAW over SWD at three
+ * well-separated intervals; all three must be BIT-IDENTICAL.  Any change is a
+ * FAIL.  Do not substitute the app's printed degrees -- it polls a mod-96
+ * counter, so it cannot tell "static" from "advanced by exactly 96*k".  What
+ * this criterion can NEVER show is that the counter tracks real quadrature
+ * edges; that needs a hand on the shaft (one detent = +-4 raw counts, one
+ * revolution CW = +96 back to the start, then CCW).
+ *
+ * RETRACTED (was an open lead here until #2037): "UP_1_SRC/DOWN_1_SRC hold
+ * the x4 masks with PGM_EN (bit 31) CLEAR while START/STOP/CLEAR_1_SRC have
+ * it set."  There is no bit 31 in those registers to be clear.  AE822 SVD,
+ * peripheral UTIMER: UTIMER_UP_1_SRC (addressOffset 0x1C) and
+ * UTIMER_DOWN_1_SRC (0x24) define eight fields in bits [7:0] and nothing
+ * else; PGM_EN [31:31] is a field of UTIMER_START_1_SRC (0x04),
+ * UTIMER_STOP_1_SRC and UTIMER_CLEAR_1_SRC ONLY -- it gates the PROGRAMMATIC
+ * start/stop/clear, and there is no programmatic up/down to gate.  For the
+ * same reason UP_0_SRC (0x18) and DOWN_0_SRC (0x20) reading 0x00000000 is
+ * not a PGM_EN defect.  Whether it is a defect at all is OPEN (#2038), and an
+ * earlier version of this comment got the reason wrong -- read the retraction
+ * below before relying on it.
+ *
+ * RETRACTED, and the misreading is worth stating so it is not repeated: this
+ * comment used to claim "the SVD annotates UP_0_SRC with eight 'For QEC
+ * channels: Reserved, not used' notes and UP_1_SRC with none, so SRC_1 is the
+ * path intended for QEC channels".  Those eight annotations sit on bits
+ * [31:24] ONLY (TRIG12..TRIG15).  The other 24 fields, bits [23:0], read "For
+ * QEC channels: Rising/Falling edge of QEC_TRIGGER0..11 causes counter to
+ * increment" -- so SRC_0 IS a QEC-channel input path, and reading the top
+ * eight bits as if they governed the whole register inverted the conclusion.
+ *
+ * What is still true: UP_1_SRC 0x69 / DOWN_1_SRC 0x96 form a complete,
+ * disjoint x4 matrix over (A,B) -- walk 00->10->11->01->00 and all four
+ * transitions land in the up mask, all four reverse transitions in the down
+ * mask.  What is NOT established is that "channel input A/B" on a QEC channel
+ * (12-15) is the encoder's X/Y pads at all.  Alif bind this same qdec driver
+ * only under lputimer0/1/2 in their own tree, where A/B are that channel's
+ * real pads; their channel-12 QEC flow counts through SRC_0 with
+ * QEC_TRIGGER0/1/2 and never touches SRC_1.  That would explain why
+ * deselecting P3_0/P3_1 (AF=0) changes nothing about the spurious count.
+ * counts-per-revolution stays 96 (24 PPR x4) while the x4 matrix is
+ * programmed; it must be revisited if the input path changes.
+ *
+ * NEXT STEP, not yet tried: CNTR_TYPE.  Measured CNTR_CTRL 0x00000023
+ * decodes (SVD UTIMER_CNTR_CTRL, 0x80) as CNTR_EN[0]=1, CNTR_RUNNING[1]=1,
+ * CNTR_TYPE[4:2]=0 = Sawtooth, CNTR_TRIG[5]=1, CNTR_DIR[8]=0 = Up.  Alif's
+ * own QEC flow configures TRIANGLE instead (demo_qec.c qec0_app() passes
+ * ARM_UTIMER_COUNTER_TRIANGLE, which utimer_config_direction() turns into
+ * CNTR_CTRL_TRIANGLE_BUF_TROUGH = 0x10).  Whether a sawtooth-UP channel
+ * honours a DECREMENT trigger at all is stated nowhere we can find; worth one
+ * bench comparison before anything more elaborate.
+ *
+ * DEAD END, documented so nobody spends a bench slot on it: the "channel
+ * drives its own input" theory.  SVD UTIMER_GLB_DRIVER_OEN (0x10) defines
+ * DRIVER_OEN_0..DRIVER_OEN_11 across bits [23:0] and nothing above -- QEC
+ * channels 12-15 have NO driver outputs, so there is no output to loop back,
+ * and Alif's utimer_glb_driver_output_disable() on channel 12 writes nothing.
  */
 
 #define DT_DRV_COMPAT alif_utimer_qdec
@@ -43,10 +123,17 @@
 #include "utimer.h"
 
 /*
- * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG, HWRM 13.2.6.3.26: "Set this bit if
- * incrementing or decrementing the counter via triggers."  hal_alif's
+ * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG, attributed to HWRM 13.2.6.3.26: "Set this
+ * bit if incrementing or decrementing the counter via triggers."  hal_alif's
  * utimer.h defines CNTR_CTRL bits 0, 1, 2, 4, 8 but not this one, and exposes
  * no setter for it (#1828).
+ *
+ * CONFIRMED against the AE822 SVD, which is in this tree: peripheral UTIMER,
+ * register UTIMER_CNTR_CTRL (addressOffset 0x80), field CNTR_TRIG at bit 5 --
+ * "Set this bit if incrementing or decrementing the counter via triggers",
+ * the exact wording attributed to the HWRM above.  (hal_alif's utimer.h and
+ * the Alif DFP header both omit bit 5, and Alif's own QEC reference flow
+ * never sets it, which is why this looked unsourced for a while.)
  */
 #define QDEC_CNTR_CTRL_TRIG_BIT 5U
 
@@ -153,11 +240,13 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	/*
 	 * ENABLE the software counter control, do not disable it.  HWRM 13.2.6.3.8
 	 * defines START_1_SRC[31] PGM_EN as "0x0: Global programmatic start is
-	 * disabled", and 13.2.5 step 2 names exactly the global START/STOP/CLEAR
-	 * writes as how a channel is turned on.  The old
-	 * alif_utimer_disable_soft_counter_ctrl() here cleared that enable and
-	 * nothing ever wrote GLB_CNTR_START, so the counter had no start source at
-	 * all (#1828).
+	 * disabled": with it cleared, the global START write below is ignored.  The
+	 * old alif_utimer_disable_soft_counter_ctrl() here cleared it (#1828).  This
+	 * only ARMS the programmatic start/stop/clear sources (the helper sets
+	 * CNTR_SRC1_PGM_EN on START_1_SRC, STOP_1_SRC and CLEAR_1_SRC) -- it does
+	 * not start anything, and nothing later in this function does either --
+	 * see the DO-NOT-START block at the end, which is a measured invariant this
+	 * driver depends on, not an omission (#2037).
 	 */
 	alif_utimer_enable_soft_counter_ctrl(timer_base);
 	alif_utimer_set_up_counter(timer_base);
@@ -190,13 +279,37 @@ static int qdec_alif_utimer_init(const struct device *dev)
 		        << CHAN_FILTER_CTRL_FILTER_TAPS_BIT;
 		filt |= CHAN_FILTER_CTRL_FILTER_EN;
 
+		/*
+		 * BOTH inputs, identically -- the quadrature decode is
+		 * level-qualified ACROSS the pair, so filtering one phase and not
+		 * the other skews them relative to each other.  AE822 SVD, peripheral
+		 * UTIMER: UTIMER_FILTER_CTRL_A (addressOffset 0x84) "Allows the input
+		 * A to be sampled periodically", UTIMER_FILTER_CTRL_B (0x88) the same
+		 * for input B; UTIMER_UP_1_SRC (0x1C) bit 0 DRIVE_A_RISING_B_0 is
+		 * "channel input A is rising AND channel input B = 0 causes counter
+		 * to increment", and its seven siblings are qualified the same way.
+		 * Delaying A by the filter's sample depth while B arrives raw
+		 * therefore lets a transition be sampled against the OTHER phase's
+		 * stale level and be classified into the wrong direction -- exactly
+		 * how contact bounce on a mechanical encoder nets counts.  This
+		 * driver wrote only FILTER_CTRL_A, so B sat at its 0x00000000 reset
+		 * (unfiltered) whenever the board asked for a filter; measured
+		 * FILTER_CTRL_A 0x00100101 / FILTER_CTRL_B 0x00000000 on E1M-AEN803
+		 * 2026W36-0002.
+		 *
+		 * UNPROVEN AS A CURE: this is reasoned from the SVD, not measured.
+		 * It is a candidate for the spurious count, not a demonstrated fix --
+		 * see the file header for what the bench must show.
+		 */
 		sys_write32(filt, UTIMER_FILTER_CTRL_A(timer_base));
+		sys_write32(filt, UTIMER_FILTER_CTRL_B(timer_base));
 	}
 
 	alif_utimer_config_qdec_triggers(timer_base);
 
 	/*
-	 * Put the channel in trigger-based counting.  HWRM 13.2.6.3.26
+	 * Put the channel in trigger-based counting.  HWRM 13.2.6.3.26, and
+	 * confirmed by the AE822 SVD -- see the QDEC_CNTR_CTRL_TRIG_BIT comment --
 	 * UTIMERn_CNTR_CTRL bit 5 CNTR_TRIG: "Set this bit if incrementing or
 	 * decrementing the counter via triggers.  0x0: Not in trigger based
 	 * increment/decrement mode.  0x1: Trigger based increment/decrement mode."
@@ -207,6 +320,45 @@ static int qdec_alif_utimer_init(const struct device *dev)
 	 * still returned success (#1828).
 	 */
 	sys_set_bit(UTIMER_CNTR_CTRL(timer_base), QDEC_CNTR_CTRL_TRIG_BIT);
+
+	/*
+	 * DO NOT START THE COUNTER HERE.  This is deliberate, it is the opposite of
+	 * what an earlier version of this driver did, and the reason is measured.
+	 *
+	 * A trigger-counting channel must NOT be started.  GLB_CNTR_START puts the
+	 * channel into free-running clocked mode, where the counter advances on the
+	 * peripheral clock rather than on quadrature events.  Measured on
+	 * E1M-AEN803 serial 2026W36-0002 with an untouched encoder: after
+	 * alif_utimer_start_counter() the counter advanced at 400,010,738 counts/s
+	 * -- with UP_1_SRC and DOWN_1_SRC BOTH ZEROED, so no quadrature transition
+	 * of any polarity could have contributed.  Writing GLB_CNTR_STOP froze it
+	 * instantly and completely: three CNTR reads 5 s apart, bit-identical.
+	 *
+	 * With the shipped reload (CNTR_PTR = counts-per-revolution - 1 = 0x5F) that
+	 * free-run wraps a whole revolution every 240 ns, so the reported angle was
+	 * uncorrelated noise -- strictly worse than the stuck-at-zero symptom the
+	 * start call was added to fix (#2037, cause of #2038).
+	 *
+	 * Alif's own QEC flow agrees and never starts the channel: qec0_app() in
+	 * Boards/Templates/Baremetal/demo_qec.c calls ConfigCounter(TRIGGERING,
+	 * TRIANGLE), SetCount, three ConfigTrigger calls, then reads GetCount and
+	 * finally Stop -- there is no Start() anywhere in it.  Their MODE_TRIGGERING
+	 * performs exactly one hardware action, utimer_glb_driver_output_disable().
+	 * The counter increments from triggers alone.
+	 *
+	 * So CNTR_CTRL reading 0x00000021 here -- EN and CNTR_TRIG set, bit 1
+	 * RUNNING clear -- and GLB_CNTR_RUNNING reading 0x00000000 are the CORRECT
+	 * resting state for this channel, not evidence of a defect.  Note bit 1 is
+	 * status, not control: it is set by GLB_CNTR_START and cleared by
+	 * GLB_CNTR_STOP, and writing it into CNTR_CTRL does not take (measured --
+	 * a write of 0x00000023 reads back 0x00000021).
+	 *
+	 * STILL OPEN (#2038): whether the counter increments on real quadrature
+	 * edges in this resting state has never been observed, because no run has
+	 * had a hand on the shaft.  The stuck-at-zero reading that started all of
+	 * this is unexplained, and "the counter was never started" was the wrong
+	 * explanation for it.
+	 */
 
 	return 0;
 }

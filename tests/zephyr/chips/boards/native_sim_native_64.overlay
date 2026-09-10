@@ -49,6 +49,50 @@
              *     reg = <0x76>;
              * };
              */
+
+            /* Fake targets for the 2026-09 chip-driver session's new
+             * register-protocol coverage (rv3028c7, tcal9538,
+             * icm42670, bmi323, bmp581, ina236, tas2563) -- unlike the
+             * lsm6dso/ssd1306/bme280 fakes above, these stay ACTIVE:
+             * there is no real-silicon substitute test for these
+             * functions yet (see tests/zephyr/chips/src/fake_*.c file
+             * headers). */
+            fake_rv3028c7: fake_rv3028c7@52 {
+                compatible = "alp,fake-rv3028c7";
+                reg = <0x52>;
+            };
+            fake_tcal9538_main: fake_tcal9538_main@73 {
+                compatible = "alp,fake-tcal9538";
+                reg = <0x73>;
+            };
+            fake_tcal9538_alt: fake_tcal9538_alt@20 {
+                compatible = "alp,fake-tcal9538";
+                reg = <0x20>;
+            };
+            fake_icm42670: fake_icm42670@68 {
+                compatible = "alp,fake-icm42670";
+                reg = <0x68>;
+            };
+            fake_bmi323: fake_bmi323@69 {
+                compatible = "alp,fake-bmi323";
+                reg = <0x69>;
+            };
+            fake_bmp581: fake_bmp581@46 {
+                compatible = "alp,fake-bmp581";
+                reg = <0x46>;
+            };
+            fake_ina236: fake_ina236@40 {
+                compatible = "alp,fake-ina236";
+                reg = <0x40>;
+            };
+            /* 0x4D = the AD0/SPICLK "10k to GND" strap (SLASET3D
+             * Table 7-3, p.30), which is U27 on the E1M-X EVK.  One
+             * instance is enough: nothing this driver does is
+             * per-instance stateful across two amps. */
+            fake_tas2563: fake_tas2563@4d {
+                compatible = "alp,fake-tas2563";
+                reg = <0x4d>;
+            };
         };
     };
 
@@ -62,10 +106,18 @@
         ngpios = <8>;
     };
 
-    /* Two pins: index 0 = button (with pull-up), index 1 = LED. */
+    /* Pin ids passed to alp_gpio_open(): 0 = button (with pull-up),
+     * 1 = LED, 2 = TAS2563 IRQ_N (AMP.FAULT), 3 = TAS2563 SD_N
+     * (AMP.ENABLE).  Pins 2 and 3 are declared ACTIVE_HIGH so the
+     * test drives raw levels and the DRIVER owns the active-low
+     * interpretation of IRQ_N -- inverting in the overlay instead
+     * would hide exactly the polarity bug the test is there to
+     * catch. */
     alp_pins: alp-pins {
         compatible = "alp,pin-array";
         gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
-                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>;
+                <&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 2 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 3 GPIO_ACTIVE_HIGH>;
     };
 };

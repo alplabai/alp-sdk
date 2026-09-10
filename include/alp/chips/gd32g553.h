@@ -1029,6 +1029,11 @@ alp_status_t gd32g553_adc_spectrum_read(gd32g553_t *ctx,
 /* bridge long enough that the reply transaction can miss -- treat    */
 /* ALP_ERR_IO from those as "issued, confirm via GET_STATE" (or, for  */
 /* COMMIT/ROLLBACK, by re-initialising against the rebooted bridge).  */
+/*                                                                    */
+/* gd32g553_ota_image_crc32() computes the expected_crc32 BEGIN wants */
+/* (and the value to cross-check computed_crc32 against) -- Zephyr    */
+/* implementation in src/zephyr/gd32g553_ota_crc_zephyr.c, HW/SW dual */
+/* path, this header does not include <zephyr/...> to stay portable.  */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -1146,6 +1151,35 @@ alp_status_t gd32g553_ota_write_chunk(gd32g553_t    *ctx,
  * @param computed_crc32  Out: the CRC32 the bridge actually saw.
  */
 alp_status_t gd32g553_ota_verify(gd32g553_t *ctx, bool *verified, uint32_t *computed_crc32);
+
+/**
+ * @brief Compute the CRC32 of an OTA image candidate the way the wire
+ *        protocol expects it: IEEE 802.3 reflected, zlib-compatible
+ *        (docs/gd32-bridge-protocol.md §10 -- the same value @ref
+ *        gd32g553_ota_begin's `expected_crc32` and @ref
+ *        gd32g553_ota_verify's `computed_crc32` both speak).
+ *
+ * Hardware-accelerated (Alif Ensemble E8 CRC engine, ADR 0017 Tier-1.5,
+ * `zephyr/drivers/crc/crc_alif.c`) on a platform that instantiates it and
+ * has it ready.  Every other case -- the accelerator absent from this
+ * build, not `status = "okay"` in the active devicetree, not
+ * `device_is_ready()` (PD-6 is not available in STANDBY/STOP, per HWRM
+ * Table 15-26; this call never blocks on that -- it just falls back), or
+ * an image length the engine's 32-bit word path cannot consume whole
+ * (HWRM 15.2.5.3.5/.6: `CRC_DATA_IN_32_n` only takes whole 4-byte
+ * words) -- computes the identical value in portable software instead.
+ * OTA image verification therefore never hard-depends on the
+ * accelerator being present or powered.
+ *
+ * @param image      Image bytes.
+ * @param len        Image length in bytes (need not be a multiple of 4;
+ *                   only the hardware fast path requires that).
+ * @param out_crc32  Out: CRC32 of @p image.
+ *
+ * @return ALP_OK, or ALP_ERR_INVAL if @p out_crc32 is NULL, or if
+ *         @p image is NULL while @p len is nonzero.
+ */
+alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t *out_crc32);
 
 /**
  * @brief Stage a metadata-page flip and reset the bridge.

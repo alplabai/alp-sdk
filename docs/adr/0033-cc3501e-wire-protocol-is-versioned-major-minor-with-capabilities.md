@@ -144,6 +144,7 @@ and the last row must always equal `ALP_CC3501E_PROTOCOL_MAJOR`.`MINOR` in
 2.0 = MAJOR = v7: alp_cc3501e_sock_send_t::reserved (offset 3) reinterpreted as a retry seq -- an old host writes 0 there, which a v7 firmware reads as a valid seq and may answer from a stale cache; an old host would be misread
 3.0 = MAJOR = v8: frame-header flags bits 3..7 reinterpreted as a 5-bit retry seq -- same shape as v7, at the header instead of one struct; an old host would be misread the same way
 3.1 = MINOR = v9: added SOCK_BIND/SOCK_LISTEN/EVT_SOCK_ACCEPTED, optional WIFI_GET_IP iface byte
+4.0 = MAJOR = #2035: RESP_OK moved 0x00 -> 0x5A and every frame gained a CRC-16/CCITT-FALSE trailer -- an unchanged 3.1 host reads a real 4.0 SUCCESS reply's status byte as garbage (0x5A is not 0x00), misreading every successful 4.0 reply; an old host would be misread
 ```
 
 ## Consequences

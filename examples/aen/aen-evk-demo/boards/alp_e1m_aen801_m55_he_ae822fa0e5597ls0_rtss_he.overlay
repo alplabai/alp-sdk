@@ -1,0 +1,720 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-evk-demo -- app overlay for the E1M-AEN801 (Alif Ensemble E8, M55-HE),
+ * bench RAM-run via J-Link.
+ *
+ * THIS OVERLAY CARRIES THE HARDWARE THE BOARD LAYER DOES NOT ALREADY ENABLE:
+ * the mandatory bench ITCM retarget, the SYSTEM-RAM RELOCATION phase 10 forces
+ * (read that block before changing anything about memory), the RGB LED's three
+ * UTIMER/PWM channels, phase 13's JPEG block, phase 10's RMII Ethernet route +
+ * PHY control GPIOs, and (at the end of the file) the SoM-internal Alif <->
+ * CC3501E bridge phase 8 drives -- SPI1 with its hardware SS0, the LP-GPIO
+ * island carrying WIFI_EN / nRESET, and the READY input.
+ *
+ * NOT here: BRD_I2C (SoC I2C0, alp-i2c2) and the carrier bus (SoC I2C2,
+ * alp-i2c0) are both SoM/board facts already wired by the board tree
+ * (metadata/e1m_modules/aen/on-module-links.yaml `brd_i2c` entry;
+ * metadata/pinmux/aen.yaml `e1m_i2c0` row) -- every AEN801 app gets them for
+ * free. Re-declaring either here would duplicate a board fact one layer too
+ * high; see examples/aen/aen-rtc-control2-probe's overlay for the same
+ * argument made in full for BRD_I2C, and aen-sensor-int-probe's for the
+ * carrier bus.
+ *
+ * RGB LED PWM routing (E1M-EVK, bench-measured -- the netlist net labels for
+ * this LED are WRONG, see metadata/boards/e1m-evk.yaml `pwm:`/`gpio:`
+ * blocks and <alp/boards/alp_e1m_evk_routes.h>'s EVK_PWM_LED_* macros, which
+ * already carry the corrected mapping):
+ *
+ *     EVK_PWM_LED_RED   = ALP_E1M_PWM0 = UT11_T1_C (utimer11, driver B) -> P12_7
+ *     EVK_PWM_LED_BLUE  = ALP_E1M_PWM1 = UT11_T0_C (utimer11, driver A) -> P12_6
+ *     EVK_PWM_LED_GREEN = ALP_E1M_PWM3 = UT10_T0_A (utimer10, driver A) -> P2_4
+ *
+ * (metadata/pinmux/aen.yaml pwm rows; zephyr/drivers/pwm/pwm_alif_utimer.c's
+ * file-header E1M-PWM map agrees exactly.) RED and BLUE share ONE physical
+ * UTIMER block (utimer11) on its two independent driver outputs; GREEN is a
+ * separate block (utimer10). Three `pwm-leds` consumer children below each
+ * carry the `pwms` phandle the alp_pwm portable backend's `alp-pwmN` alias
+ * needs to point at directly (src/backends/pwm/zephyr_drv.c) -- channel 0 =
+ * driver A, channel 1 = driver B, per the pwm child node's `#pwm-cells`.
+ *
+ * The PWM driver itself is marked INTERIM / BENCH-UNVERIFIED in its own file
+ * header -- this is the first app to load it on real silicon. The demo's RGB
+ * LED phase treats that as reason to verify by register readback rather than
+ * assume, exactly like examples/aen/aen-pwm-utimer-pwmleds.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/*
+ * ============================================================================
+ * SYSTEM-RAM PLACEMENT -- read this before touching anything about memory
+ * ============================================================================
+ *
+ * THE WHOLE IMAGE'S SYSTEM RAM LIVES IN GLOBAL SRAM0, NOT IN THE M55 DTCM.
+ * Phase 10 (Ethernet) forces that, and the two nodes below are what keep the
+ * move from silently destroying phase 13.
+ *
+ * WHY THE MOVE IS UNAVOIDABLE. The GMAC is a DMA bus master: it fetches its
+ * descriptor rings and reads/writes the net_buf packet pool over its own AXI
+ * master, and the upstream DWMAC core hands it the RAW CPU POINTER (no
+ * local_to_global translation -- see zephyr/drivers/ethernet/
+ * eth_dwmac_alif_ensemble.c's header). The board default is
+ * `zephyr,sram = &dtcm`, and the M55 DTCM (CPU-local alias 0x20000000) is
+ * tightly-coupled and NOT on the GMAC's AXI path, so rings and buffers left
+ * there are invisible to the DMA and ZERO frames move in either direction even
+ * with the wire link up -- bench-observed on both sides at once (SoM
+ * rx_bytes=0 AND the server NIC RX=0). examples/aen/aen-ethernet-link
+ * root-caused that and calls the fix its DECISIVE one.
+ *
+ * There is no narrower fix available to an application. The descriptor rings
+ * are file-static in the Ethernet driver and the net_buf pool is file-static
+ * in the net subsystem; neither can be section-tagged from here the way phase
+ * 13's JPEG buffers are, and the driver's own header states the requirement is
+ * enforced "at the board/SoC layer, not in this glue". So system RAM moves.
+ *
+ * WHY NOT JUST `zephyr,sram = &sram0` LIKE aen-ethernet-link DOES. Because
+ * this app, unlike that one, already puts buffers in the SRAM0 LINKER REGION.
+ * The SoC dtsi's sram0 node is BOTH a `zephyr,memory-region` (which emits a
+ * linker MEMORY region named SRAM0, the one phase 13's
+ * __attribute__((section("SRAM0"))) buffers land in) AND, if chosen, the
+ * source of the main RAM region. Choose it and both regions start at
+ * 0x02000000, the linker allocates into them INDEPENDENTLY, and it does not
+ * warn: measured on this tree, .data/.bss/.noinit were placed on top of
+ * jpeg_out and jpeg_src, i.e. phase 13 writing its gradient would have
+ * scribbled over the whole image's static state. Silent, and exactly the class
+ * of regression this app exists to refuse.
+ *
+ * THE FIX: give the two consumers disjoint windows of the same 4 MiB bank.
+ * SRAM0 is one physical global on-chip SRAM at 0x02000000 -- the bank the GMAC
+ * DMA proof was measured against, and the bank phase 13's Hantro AXI master is
+ * already proven to reach -- so both windows inherit that reachability; only
+ * the offsets differ.
+ *
+ *     0x0200_0000 +64 KiB   SRAM0 linker region  -- phase 13's JPEG buffers
+ *                                                   (~14 KiB of it used), at
+ *                                                   the same addresses as
+ *                                                   before this phase existed
+ *     0x0201_0000 +512 KiB  system RAM           -- .data/.bss/.noinit, all
+ *                                                   stacks, the GMAC rings and
+ *                                                   the net_buf pool
+ *     0x0209_0000 ..        unused remainder of the bank
+ *
+ * Shrinking &sram0's reg to the 64 KiB window is deliberate and is the safety
+ * property, not a cosmetic tidy-up: it makes a future oversized SRAM0-tagged
+ * buffer a LINK ERROR ("region SRAM0 overflowed") instead of a silent walk
+ * into system RAM. Do not widen it back to the bank without moving the system
+ * RAM window out of the way first.
+ *
+ * WHAT THIS COSTS THE OTHER PHASES, stated plainly because it cannot be
+ * checked off the bench: CONFIG_DCACHE is off on this silicon (see prj.conf),
+ * so there is no cache to soften the move -- every data access that used to
+ * hit single-cycle DTCM now goes to uncached global SRAM over the fabric.
+ * Nothing becomes incorrect; things become slower. The one phase with an inner
+ * loop tight enough to care is phase 8, whose SPI1 FIFO refill feeds a 25 MHz
+ * link to the CC3501E, and a DW-SSI master that underruns its TX FIFO
+ * deasserts its own chip-select mid-frame -- which is the framing phase 8 is
+ * built around. That is a hypothesis, not a measurement. It is also LOUD
+ * rather than silent: phase 8 prints its own verdict in the same transcript as
+ * phase 10, so a bench run that regresses it says so. If it does, this block
+ * and phase 10 back out together.
+ */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_K(64)>;
+};
+
+&soc {
+	/*
+	 * System RAM, above phase 13's window in the SAME global SRAM0 bank.
+	 * Plain "mmio-sram", NOT "zephyr,memory-region": a second memory-region
+	 * compatible here would emit a second linker MEMORY region overlapping
+	 * this one and reintroduce exactly the aliasing described above.
+	 * 512 KiB is twice the DTCM this image used to have; the build uses
+	 * well under a fifth of it.
+	 */
+	sram0_sys: sram@2010000 {
+		compatible = "mmio-sram";
+		reg = <0x02010000 DT_SIZE_K(512)>;
+	};
+};
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ * PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form -- the
+ * phandle-array form yields CONFIG_FLASH_SIZE=0 and the image overflows the
+ * (empty) FLASH region at link time.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+		zephyr,sram = &sram0_sys; /* see the placement block above */
+	};
+
+	evk_rgb_led: pwm-leds {
+		compatible = "pwm-leds";
+
+		/* ALP_E1M_PWM0: utimer11 driver B (channel 1). */
+		evk_rgb_red: led_red {
+			label = "evk-rgb-red";
+			pwms = <&pwm11 1 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+
+		/* ALP_E1M_PWM1: utimer11 driver A (channel 0). */
+		evk_rgb_blue: led_blue {
+			label = "evk-rgb-blue";
+			pwms = <&pwm11 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+
+		/* ALP_E1M_PWM3: utimer10 driver A (channel 0). */
+		evk_rgb_green: led_green {
+			label = "evk-rgb-green";
+			pwms = <&pwm10 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	aliases {
+		/* alp_pwm_open(ALP_E1M_PWM0/1/3) resolves these via
+		 * src/backends/pwm/zephyr_drv.c -> DT_ALIAS(alp_pwmN). Each alias
+		 * points DIRECTLY at a consumer node carrying a `pwms` phandle
+		 * (the canonical pwm-leds pattern), not at the controller node. */
+		alp-pwm0 = &evk_rgb_red;
+		alp-pwm1 = &evk_rgb_blue;
+		alp-pwm3 = &evk_rgb_green;
+
+		/* Phase 7 -- src/main.c's phase_encoder() resolves this via
+		 * DT_ALIAS(alp_qenc0), the same alias name aen-qenc-readout uses.
+		 * Binding it is what ARMS UTIMER channel 12 (see utimer12/qdec
+		 * below): the phase itself only reads raw registers afterwards. */
+		alp-qenc0 = &utimer12_qdec;
+	};
+};
+
+&pinctrl {
+	/* Both RED (P12_7, driver B) and BLUE (P12_6, driver A) live on the
+	 * SAME utimer11/pwm11 controller node, so both pads are muxed together
+	 * in the one pinctrl state that node's pinctrl-0 applies. */
+	pinctrl_pwm11_rgb: pinctrl_pwm11_rgb {
+		group0 {
+			pinmux = <PIN_P12_6__UT11_T0_C>, <PIN_P12_7__UT11_T1_C>;
+		};
+	};
+
+	pinctrl_pwm10_rgb: pinctrl_pwm10_rgb {
+		group0 {
+			pinmux = <PIN_P2_4__UT10_T0_A>;
+		};
+	};
+};
+
+&utimer11 {
+	status = "okay";
+
+	pwm11 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm11_rgb>;
+		pinctrl-names = "default";
+	};
+};
+
+&utimer10 {
+	status = "okay";
+
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10_rgb>;
+		pinctrl-names = "default";
+	};
+};
+
+/*
+ * Phase 7 -- rotary encoder, UTIMER channel 12 / QEC0.
+ *
+ * The E1M EVK's PEC12R-4222F-S0024 (24 PPR) reaches the SoC as
+ * ENC0_X -> E2 A10 -> P3_0 and ENC0_Y -> E2 B10 -> P3_1
+ * (metadata/e1m_modules/aen/from-alif.tsv), decoded by UTIMER channel 12 --
+ * QEC0 is channel 12, not channel 0 (DFP QEC0_CMPA_IRQn = 369, "Channel 12
+ * interrupt request at driver A"). Channel 12 is NOT defined in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi (only 0/3/6/10/11 are), so
+ * the full parent node is declared here, identical in shape to
+ * examples/aen/aen-qenc-readout's overlay -- see that file for the base
+ * address derivation (0x4800d000 = UTIMER_BASE + (12+1)*0x1000).
+ *
+ * NOTE the phase-A/phase-B correction versus aen-qenc-readout's file header,
+ * which has this backwards: per the netlist, quadrature PHASE A is ENC0_Y
+ * (P3_1), PHASE B is ENC0_X (P3_0) -- not "X = channel A, Y = channel B" as
+ * that file's header currently reads. It does not change this group's
+ * pinmux (both pads are muxed identically either way), only which pad a
+ * future direction-aware reader should call "A".
+ *
+ * `input-enable` on BOTH pads is load-bearing twice over: it is what lets
+ * UTIMER channel 12 sense the quadrature edges at all, AND it is what makes
+ * GPIO3's EXT_PORTA (0x49003050) read the real pad level for
+ * src/main.c's phase_encoder() even though the pins are muxed to QEC0, not
+ * GPIO -- the pad's REN bit is orthogonal to which peripheral the AF mux
+ * selects. Without it, EXT_PORTA reads 0 forever regardless of motion (the
+ * PADCTRL_READ_ENABLE trap the SD CMD/CLK group and the RMII RX group in
+ * this file both call out).
+ *
+ * counts-per-revolution = 96 (24 PPR x4 decode) programs the hardware
+ * counter's real reload/wraparound, not a display scale -- see
+ * aen-qenc-readout's file header for the full derivation. phase_encoder()
+ * never reads it (it watches raw CNTR, not degrees), but a wrong value here
+ * would still corrupt the counter's wrap behaviour, so it stays correct.
+ */
+&pinctrl {
+	pinctrl_qec0: pinctrl_qec0 {
+		group0 {
+			pinmux = <PIN_P3_0__QEC0_X_A>, <PIN_P3_1__QEC0_Y_A>;
+			input-enable;
+		};
+	};
+};
+
+&soc {
+	utimer12: utimer@4800d000 {
+		compatible = "alif,utimer";
+		reg = <0x4800D000 0x1000 0x48000000 0x24>;
+		reg-names = "timer", "global";
+		timer-id = <12>;
+		counter-direction = <ALIF_UTIMER_COUNTER_DIRECTION_UP>;
+		clocks = <&clockctrl ALIF_UTIMER_CLK>;
+		status = "okay";
+
+		utimer12_qdec: qdec {
+			compatible = "alif,utimer-qdec";
+			counts-per-revolution = <96>; /* 24 PPR * x4 decode -- see comment above */
+			input-filter-enable;
+			filter-prescaler = <16>;
+			filter-taps = <1>;
+			pinctrl-0 = <&pinctrl_qec0>;
+			pinctrl-names = "default";
+			status = "okay";
+		};
+	};
+};
+
+/*
+ * Phase 13's JPEG encoder: the Alif Hantro VC9000E block
+ * (verisilicon,hantro-vc9000e-jpeg @ 0x49044000, IRQ 360). Disabled in the
+ * SoC dtsi by default, so it has to be enabled here for the driver to bind
+ * and for alp_jpeg_open() to reach hardware -- mirrors
+ * examples/aen/aen-jpeg-regcheck's overlay. No pinctrl: the block is
+ * internal to the SoC, it drives no pad.
+ */
+&jpeg0 {
+	status = "okay";
+};
+
+/*
+ * ============================================================================
+ * Phase 10 -- RMII Ethernet (GMAC) + the on-module TI DP83825 PHY
+ * ============================================================================
+ *
+ * The MAC itself (ethernet@48100000, the upstream eth_dwmac core under the
+ * alp-sdk `alif,ethernet` Tier-1.5 glue, with a fixed-link RMII PHY child)
+ * already lives in zephyr/dts/alif/ensemble_e8_peripherals.dtsi as
+ * status="disabled". Everything below is what turns it on: the RMII pin group,
+ * the MDIO pair, and the PHY's two control lines. Transcribed from
+ * examples/aen/aen-ethernet-link's overlay -- the BENCH-VERIFIED reference
+ * that pulled a real DHCP lease off the bench switch -- so read that file for
+ * the full derivation behind every value here. The system-RAM half of that
+ * app's fix lives at the top of THIS file, not down here, because it is an
+ * image-wide fact rather than an Ethernet one.
+ *
+ * RMII PADS are the AUTHORITATIVE E1M-AEN801 route from
+ * metadata/e1m_modules/aen/alif-ethernet-phy.tsv (NOT the Alif fork's
+ * reference route, which an earlier cut of the reference app wrongly used):
+ *
+ *     REFCLK P11_0 | RXD0 P11_3 | RXD1 P1_1 | CRS_DV P6_7   (inputs)
+ *     TXD0   P10_4 | TXD1 P10_5 | TXEN  P1_5                (outputs)
+ *     MDC    P11_2 | MDIO P11_1                             (management)
+ *
+ * None of those pads collides with anything else this app drives (the PWM
+ * trio P12_6/P12_7/P2_4, the SPI1 quad P14_4..P14_7, WIFI_EN P15_5, nRESET
+ * P15_1, READY P2_6, the carrier I2C pair P5_6/P5_7, the console P3_4/P3_5).
+ *
+ * `input-enable` on the input group is NOT decoration: on this SoC a pad's
+ * INPUT BUFFER is a PADCTRL bit that only pinctrl sets, so without it the RMII
+ * RX pads and MDIO never sense what the PHY drives -- the same trap the SPI1
+ * MISO group at the bottom of this file calls out.
+ *
+ * MDC/MDIO ARE MUXED EVEN THOUGH THE PHY IS UNMANAGED. The `alif,ethernet`
+ * node keeps its fixed-link child (no Zephyr MDIO bus, no managed PHY driver),
+ * which is the configuration bench-proven end to end -- the mdio-managed
+ * variant in aen-ethernet-link/mdio-managed.overlay is compile-proof only. But
+ * fixed-link means net_if_is_carrier_ok() is SYNTHETIC: it reports the DT's
+ * hard-coded link, not the wire. The phase therefore reads the PHY's own
+ * status registers directly over these two pads, which is the only way this
+ * configuration can tell "cable in a live switch port" from "nothing plugged
+ * in". See the phase's comment block in src/main.c.
+ */
+&pinctrl {
+	/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, driven by the PHY
+	 * during a read) -- input-enable sets the pad REN bit so they sense. */
+	pinctrl_eth: pinctrl_eth {
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		/* RMII outputs (TX) + MDC (the management clock, master-driven). */
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+};
+
+/*
+ * E_PHY_RESET = P11_6 lives on gpio11, which the alp-sdk E8 dtsi ALREADY
+ * declares (gpio11..gpio14, with reg, ngpios and their eight per-pin
+ * interrupts) as status="disabled" -- so it only needs enabling here.
+ * Deliberately not re-declared: restating reg/ngpios in an overlay silently
+ * drops the dtsi's `interrupts` and drifts the moment the dtsi is corrected.
+ * (examples/aen/aen-ethernet-link's overlay still carries the older claim that
+ * the node has to be created; that predates the dtsi gaining ports 11..14 and
+ * is worth a follow-up there.)
+ *
+ * E_PHY_PWRDWN = P15_4 is on the lpgpio island, which THIS overlay already
+ * enables further down for phase 8's WIFI_EN / nRESET; phase 10 just borrows
+ * pin 4 of it. Both are ALIF pins per the SoM TSV, NOT CC3501E lines as the
+ * reference app first assumed.
+ */
+&gpio11 {
+	status = "okay";
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi (a
+	 * per-boot random locally-administered 02:01:56:xx:xx:xx). DHCP does not
+	 * care which MAC asks, and a random one means two demo boards on the same
+	 * bench switch never collide. To pin a fixed per-unit MAC instead, delete
+	 * the flag here and supply local-mac-address = [ .. ]. */
+	status = "okay";
+};
+
+/*
+ * ======================================================================
+ * PHASE 9 -- SD Host Controller (snps,dwc-sdhc) + the Zephyr SDMMC disk
+ * ======================================================================
+ *
+ * Created here rather than inherited: the alp-sdk E8 SoC dtsi does not carry
+ * an sdhc node, so this block transcribes it (sdhc@48102000, IRQ 102/103) from
+ * the Apache-2.0 zephyr_alif fork exactly as examples/aen/aen-sdcard-readout's
+ * overlay does -- that app is this phase's SDHC bring-up reference and the two
+ * nodes are deliberately identical.
+ *
+ * PADS: CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3, the SD "B" pad route, which is
+ * how the E1M-AEN module is actually wired. A previous revision of this overlay
+ * wired the "D" route (CLK=P4_1, CMD=P4_2, D0..D3=P6_0..P6_3) copied from the
+ * upstream alif-ensemble-pinctrl.h as an unverified placeholder -- it was never
+ * checked against the module schematic, and it was wrong: P4_2 carries no SD
+ * signal at all (it is QEC3_Y_A, a rotary encoder input on the EVK, with no SD
+ * pull-up), the D-route CLK on P4_1 lands on E1M A7 ENC3_X, D0/D1 on P6_0/P6_1
+ * land on E1M AA2 PDM_D0 / AA1 PDM_C0, and D2/D3 on P6_2/P6_3 -- with
+ * input-enable set -- land on on-module OSPI0_D2/OSPI0_D3
+ * (metadata/e1m_modules/aen/alif-ospi.tsv:4-5), which the resident BL32 owns,
+ * so the old route risked contending with boot flash whenever this phase ran.
+ * The B route is corroborated by five independent metadata sources
+ * (metadata/pinmux/aen.yaml:49-64, metadata/e1m_modules/aen/from-alif.tsv:36-48
+ * -- the vendor's own mapping, metadata/e1m_modules/aen/inter-chip.tsv:41-46,
+ * docs/cc3501e-bridge.md:74) plus the EVK netlist, which closes the chain at
+ * U39 pin 12 carrying E1M_CMD to E2 AH11. P14_0, P14_1 and P13_0..P13_3 also
+ * run through unpopulated zero-ohm links to the CC3501E SDIO
+ * (docs/cc3501e-bridge.md:71-75), with no conflict observed on any board built
+ * to date.
+ *
+ * `input-enable` ON CMD + D0..D3 + CLK, AND IT IS LOAD-BEARING ON ALL SIX. The
+ * pad input buffer is a PADCTRL bit only pinctrl sets; without it on CMD/DATA
+ * the SoC cannot sample what the card drives, and enumeration can never
+ * complete -- the same trap the RMII RX group and the SPI1 MISO group in this
+ * file call out. CLK NEEDS IT TOO, despite being a push-pull SoC output: this
+ * controller's DWC_mshc command/data state machines run on a card clock
+ * LOOPED BACK FROM THE PAD, not off the pre-pad internal signal, so an
+ * earlier revision of this comment reasoned "CLK is output-only, omit it" and
+ * was wrong -- it silently killed that loopback while leaving every
+ * asynchronous signal (PSTATE's CMD/DAT level bits, INTERNAL_CLK_STABLE)
+ * reading correctly, which is exactly why it went unnoticed: `SW_RST_ALL`
+ * completes, the transmit clock comes up, CMD/DAT levels read right, but the
+ * command circuit never reaches idle and `SW_RST_CMD` never self-clears while
+ * `SW_RST_DAT` does (DAT's circuit was already idle). Both Alif's DFP
+ * (`demo_sd.c`, `demo_sdio.c`, `demo_sd_fatfs.c`,
+ * `demo_mci_mdk_cmsisrtos2.c` all set `PADCTRL_READ_ENABLE` on SD CLK) and the
+ * vendor Linux dts (pad config `0x23` on CLK -- the same read-enable, Schmitt,
+ * 8 mA byte as CMD/DATA) agree. Do not remove this again -- see also the
+ * rotary-encoder pad that hit the identical PADCTRL_READ_ENABLE trap. Note
+ * the spelling: the pinned Zephyr v4.4 alif,pinctrl binding allowlists
+ * `input-enable`, NOT `read-enable`; the wrong one fails devicetree
+ * validation rather than merely doing nothing.
+ *
+ * NO cd-gpios, ON PURPOSE. The driver then falls back to the controller's own
+ * PSTATE CARD_INSRT bit (sdhc_dwc_get_card_present()), which is what the phase
+ * reads as "is a card there" -- and because the 74LVC157 mux sits between the
+ * card and that bit, it also reports "the mux is not passing the card
+ * through". Both causes reach the phase as one DISK_STATUS_NOMEDIA, which is
+ * why its log names both. A cd-gpios line would have to name an EVK net that
+ * does not exist on this carrier.
+ *
+ * THE MUX IS NOT IN THIS FILE, and cannot be. Its ENABLE is E1M IO20 ->
+ * CC3501E GPIO_26, driven at runtime over the inter-chip bridge (see phase 9
+ * in src/main.c); its SELECT is set by a jumper on header P18 and is not
+ * software-drivable on this module revision at all. Devicetree describes
+ * neither.
+ */
+&pinctrl {
+	pinctrl_sdmmc: pinctrl_sdmmc {
+		/* CLK needs the pad input buffer too -- the controller's receive
+		 * path clocks off the pad, not the pre-pad signal. See the
+		 * file header for the full derivation; do not drop this again. */
+		group0 {
+			pinmux = <PIN_P14_1__SD_CLK_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+		/* CMD + D0..D3 are bidirectional; see the input-enable note above. */
+		group1 {
+			pinmux = <PIN_P14_0__SD_CMD_B>,
+				 <PIN_P13_0__SD_D0_B>, <PIN_P13_1__SD_D1_B>,
+				 <PIN_P13_2__SD_D2_B>, <PIN_P13_3__SD_D3_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	sdhc0: sdhc@48102000 {
+		compatible = "snps,dwc-sdhc";
+		reg = <0x48102000 0xF70>;
+		interrupts = <102 3>, <103 3>;
+		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
+		 * signaling (#2035): once CMD0 succeeds the SD subsystem would
+		 * otherwise attempt CMD11 and switch to 1.8V I/O signaling through
+		 * the 74LVC157 SDIO mux, which runs at 3.3V and was never designed
+		 * to pass a 1.8V logic level -- vendor Linux sets the equivalent
+		 * `no-1-8-v` + `max-frequency = <25000000>` for this exact block.
+		 * `no-1-8-v` IS read by this driver (DT_INST_PROP_OR(n, no_1_8_v,
+		 * ...) -> props->host_caps.vol_180_support = 0, sdhc_dwc.c:972),
+		 * so this is a real behavioural change, not a documentation-only
+		 * one. `max-bus-freq` is this Zephyr binding's equivalent of
+		 * vendor Linux's `max-frequency` (there is no `max-frequency`
+		 * property on snps,dwc-sdhc.yaml). Vendor Linux also sets
+		 * `no-hispeed`; THIS DRIVER HAS NO EQUIVALENT DT PROPERTY --
+		 * checked zephyr/drivers/sdhc/sdhc_dwc.c: high_spd_support is
+		 * read straight off DWC_SDHC_CAP1_HIGH_SPEED_Msk in hardware with
+		 * no DT override, so that one setting is recorded here, not
+		 * applied. */
+		max-bus-freq = <25000000>;
+		min-bus-freq = <400000>;
+		power-delay-ms = <500>;
+		bus-width = <4>;
+		no-1-8-v;
+		pinctrl-0 = <&pinctrl_sdmmc>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		/* The Zephyr SDMMC disk. `disk-name = "SD"` is the string phase 9
+		 * passes to disk_access_init() and the string the FAT mount's
+		 * "/SD:" volume prefix resolves through. */
+		sdmmc {
+			compatible = "zephyr,sdmmc-disk";
+			disk-name = "SD";
+			status = "okay";
+		};
+	};
+};
+
+/*
+ * ============================================================================
+ * Phase 8 -- the SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge
+ * ============================================================================
+ *
+ * Everything below is a SoM-INTERNAL fact (metadata/e1m_modules/aen/
+ * inter-chip.tsv), not an E1M edge pad, which is why it lives in an app
+ * overlay rather than in the board tree -- the board layer publishes only the
+ * customer-facing edge peripherals. This block is transcribed from
+ * examples/aen/aen-cc3501e-bringup's overlay, the silicon-proven host-side
+ * bring-up; read that file for the full derivation behind every value here.
+ *
+ *     net          Alif pad       dir   CC3501E pad
+ *     ----------   ------------   ---   ---------------------
+ *     WIFI_EN      P15_5          out   (supply gate)
+ *     E_WIFI.NRST  P15_1_FLEX     out   (reset)
+ *     SPI1.SCK     P14_6          out   GPIO_27 (CC35 SPI0 slave)
+ *     SPI1.MOSI    P14_5          out   GPIO_28
+ *     SPI1.MISO    P14_4          in    GPIO_29
+ *     SPI1.SS0     P14_7          out   CC35 SPI0 CSN
+ *     READY        P2_6           in    GPIO_17
+ *
+ * WHAT THIS OVERLAY DELIBERATELY OMITS versus aen-cc3501e-bringup's: the
+ * host-side peripheral-DMA wiring (dma0 / evtrtr0 / the `dmas` property, and
+ * the itcm/dtcm `global_base` windows the PL330 needs to reach TCM buffers).
+ * Phase 8 issues only short control frames -- PING, GET_VERSION, GET_MAC,
+ * GET_CAPABILITIES, one scan, BLE_ENABLE -- every one of them far below
+ * CONFIG_SPI_DW_ALIF_DMA_MIN_LEN, so the DMA path would never be taken even if
+ * it were wired. The `dmas` cells are optional to the driver (spi_dw_alif.c
+ * gates them behind DT_INST_DMAS_HAS_NAME), so omitting them costs this phase
+ * nothing and keeps ITCM budget for the phases that need it.
+ */
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO), plus the
+	 * hardware SS0 chip-select on P14_7. SS0 is the dwc-ssi peripheral's OWN
+	 * select -- not a GPIO bodge, not CS-less, not static-low: the master
+	 * asserts and deasserts it per transfer, and that is exactly what frames
+	 * each phase of the bridge's request/reply exchange. Do NOT add cs-gpios
+	 * here; that installs a software CS and breaks the framing the firmware
+	 * side is built around.
+	 *
+	 * input-enable on MISO because on this SoC a pad's INPUT BUFFER is a
+	 * PADCTRL bit that only pinctrl sets -- without it the pad never senses
+	 * what the slave drives.
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+
+		/*
+		 * P2_6 = the CC3501E READY / host-IRQ input (CC35 GPIO_17). Its mux
+		 * default already IS GPIO, but the pad input buffer still has to be
+		 * enabled here or alp_gpio_read(P2_6) reads 0 forever whatever the
+		 * CC35 drives -- and the host then silently falls back to fixed
+		 * settle gaps instead of gating each reply phase on the slave's
+		 * actual re-arm, which is the race that produces byte-shifted
+		 * replies.
+		 *
+		 * It lives inside THIS state rather than a standalone one applied at
+		 * runtime because P2_6's alternate function is SPI1_SCLK_A: a second
+		 * pinctrl pass after SPI1 is up killed the bridge on silicon. Applied
+		 * in the SPI driver's single init pass it is inert.
+		 */
+		group2 {
+			pinmux = <PIN_P2_6__GPIO>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
+ * in ensemble_e8_peripherals.dtsi (which declares only the customer-facing
+ * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1 base
+ * (+0x1000 per instance from spi0's 0x48103000).
+ *
+ * BENCH-TBD on interrupts: <138 3> follows the consecutive pattern from spi0's
+ * IRQ 137 -- it is INFERRED, not read out of a document. "Confirm" therefore
+ * means: check SPI1_IRQ against the AE822 TRM (or the alifsemi/zephyr_alif
+ * fork's e1.dtsi) before relying on the interrupt-driven path on silicon.
+ *
+ * clock-frequency is REQUIRED, not decorative: without it spi_dw_alif's
+ * configure takes the clock-control path, which fails -EINVAL for the gateless
+ * dummy ALIF_SPI_CLK, and every transceive then returns ALP_ERR_INVAL at zero
+ * SCLK. 200 MHz is the real SSI functional clock (E8 HWRM); BAUDR =
+ * clock-frequency / freq_hz, and cc3501e_bridge.h asks for 25 MHz = /8.
+ *
+ * rx-delay: THIS VALUE IS NOT WHAT CLOCKS THE LINK. Read this before "fixing"
+ * it.
+ *
+ * The MISO capture delay is real and necessary -- at a 40 ns bit period the
+ * pad + on-SoM trace round-trip does not return the slave's bit by the SCLK
+ * edge. But spi_dw_alif.c writes RX_SAMPLE_DLY (0xf0) from this property in
+ * exactly two places, its init and its PM resume, and CONFIG_PM_DEVICE is off
+ * in this image; spi_dw_configure never touches the register. So this <2>
+ * lands once at init and is then OVERWRITTEN: src/cc3501e_bridge.c pokes
+ * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY right after alp_spi_open()
+ * returns. That constant is what the bridge actually runs at.
+ *
+ * The <2> is kept anyway, for one reason: the poke is wrapped in
+ * `#if CC3501E_BRIDGE_RX_SAMPLE_DLY > 0`, so setting the constant to 0 does not
+ * mean "no delay" -- it means this property is what survives. Of the seven
+ * examples that share the bridge template only this one and
+ * aen-cc3501e-bringup declare rx-delay at all, so a sweep point of 0 measures 2
+ * here and 0 in the other five. Read 0x481040F0 back rather than trusting
+ * either number.
+ *
+ * The constant is now silicon-measured against this app, on E1M-AEN803 serial
+ * 2026W36-0002 at 25 MHz, N swept 0..10 with 0x481040F0 read back each time:
+ * 0..7 all pass, 8 hard-fails 3 runs of 3, 9 and 10 pass again. The full table
+ * and the reasoning for the value chosen are in src/cc3501e_bridge.h. The two
+ * comments that used to disagree here are both retired: the "4..8 clean window"
+ * was an evk-01 measurement at ~14.3 MHz and does not carry over, and the
+ * sibling overlay's "0 fails, 4 fails" is contradicted outright -- both passed.
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		rx-delay = <2>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * The LP-GPIO island carries WIFI_EN (P15_5) and E_WIFI.NRST (P15_1_FLEX). No
+ * pinctrl group is needed for their mux: P15_x function 0 -- the reset default
+ * -- already IS LPGPIO. Turning the pads' OUTPUT DRIVERS on is a separate
+ * matter and not a devicetree fact at all; see the raw PADCTRL write in
+ * src/cc3501e_bridge.c and the comment above it.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/* gpio2 carries the READY input (CC35 GPIO_17 -> Alif P2_6). */
+&gpio2 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 3-entry control array for the SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
+	 * These are NOT E1M edge pads, so this app does not use the 52-slot
+	 * positional E1M map; a production board file appends SoM-internal
+	 * control nets after the E1M pad slots.
+	 *
+	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
+	 * one broke pin resolution outright on the bench (2026-08-26): the
+	 * bridge failed as if WIFI_EN were absent, which reads like a hardware
+	 * fault and is not one.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+	};
+};

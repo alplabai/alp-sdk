@@ -32,6 +32,9 @@
 #define INA236_CFG_RST           0x8000u /* Soft reset.            */
 #define INA236_CFG_ADCRANGE_20MV 0x1000u /* 0 = 81.92 mV, 1 = 20.48 mV. */
 
+/* MASK_ENABLE bit fields (TI SBOSA81D table 7-10, reg 0x06). */
+#define INA236_MASK_ENABLE_CVRF 0x0008u /* Bit 3: Conversion Ready Flag (RO, clear-on-read). */
+
 /* Shunt-voltage LSB depends on ADCRANGE (datasheet section 7.5.2). */
 #define INA236_SHUNT_LSB_NV_RANGE_81MV 2500 /* 2.5 uV */
 #define INA236_SHUNT_LSB_NV_RANGE_20MV 625  /* 0.625 uV */
@@ -205,6 +208,20 @@ alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out)
 	s = ina236_read_current_ua(ctx, &sample_out->current_ua);
 	if (s != ALP_OK) return s;
 	return ina236_read_power_uw(ctx, &sample_out->power_uw);
+}
+
+alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (ready_out == NULL) return ALP_ERR_INVAL;
+
+	uint16_t     mask_enable;
+	alp_status_t s = reg_read16(ctx, INA236_REG_MASK_ENABLE, &mask_enable);
+	if (s != ALP_OK) return s;
+	/* NOTE: this read just cleared CVRF -- see the clear-on-read
+     * warning on this function's Doxygen in the header. */
+	*ready_out = (mask_enable & INA236_MASK_ENABLE_CVRF) != 0;
+	return ALP_OK;
 }
 
 alp_status_t ina236_reset(ina236_t *ctx)

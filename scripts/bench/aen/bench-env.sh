@@ -407,6 +407,67 @@ bench_require_setools() {
 	return 0
 }
 
+# --------------------------------------------------------------------
+# OpenOCD (M55-HE core selection -- see scripts/bench/aen/openocd-ram-run.sh)
+# --------------------------------------------------------------------
+
+# AEN_OPENOCD_CFG -- the board-farm's shared SWD config for this bench. It
+# declares BOTH E8 M55 cores as separate CoreSight-AP OpenOCD targets
+# (alif.m55he @ AP 0x00300000, alif.m55hp @ AP 0x00200000, HP created last so
+# it stays OpenOCD's default/current target -- bench-verified 2026-09-09,
+# alp-sdk#2037). NO default: like SE_UART/SETOOLS_DIR above, it lives outside
+# this repo on the bench host. Export it before running openocd-ram-run.sh,
+# e.g. AEN_OPENOCD_CFG=<board-farm>/debug/openocd-alif-e8-swd.cfg.
+export AEN_OPENOCD_CFG="${AEN_OPENOCD_CFG:-}"
+
+# AEN_OPENOCD_USB_LOCATION -- the labgrid-pinned USB path for the AEN E8's
+# J-Link (on alplab-gw: 3-4.4.3 -- see the DP-ID safety gate comment above
+# for why a bare serial can't disambiguate the three same-serial probes on
+# this bench; OpenOCD, unlike JLinkExe, CAN select by USB path). Resolve it
+# from `labgrid-client -p e1m-aen-evk-01 show`'s swd resource -- NEVER
+# hardcode a path here or in the shared config (that file's own header says
+# so: it is loaded by labgrid's OpenOCDDriver, which supplies this itself
+# when driving the board for real; a by-hand run on the exporter is expected
+# to prepend the flag on the command line instead of editing it in). NO
+# default: host-specific, like SE_UART/AEN_OPENOCD_CFG above.
+export AEN_OPENOCD_USB_LOCATION="${AEN_OPENOCD_USB_LOCATION:-}"
+
+# bench_require_openocd [cfg-override] — guard for openocd-ram-run.sh. Errors
+# (exit 2) if the resolved config path (arg, else AEN_OPENOCD_CFG) is unset
+# or missing, if AEN_OPENOCD_USB_LOCATION is unset (the labgrid-pinned probe
+# path -- with three same-serial J-Links on this bench, an unpinned OpenOCD
+# run picks one arbitrarily, see the DP-ID safety gate comment above), or if
+# the `openocd` binary itself is not on PATH. Same enforcement shape as
+# bench_require_setools above -- fail CLOSED, not a warning.
+bench_require_openocd() {
+	local cfg="${1:-${AEN_OPENOCD_CFG:-}}"
+	if [ -z "$cfg" ]; then
+		echo "bench-env: AEN_OPENOCD_CFG is unset. This is the board-farm's" >&2
+		echo "           shared SWD config (outside this repo, host-specific)." >&2
+		echo "           export AEN_OPENOCD_CFG=<board-farm>/debug/openocd-alif-e8-swd.cfg" >&2
+		return 2
+	fi
+	if [ ! -f "$cfg" ]; then
+		echo "bench-env: AEN_OPENOCD_CFG='$cfg' does not exist." >&2
+		return 2
+	fi
+	if [ -z "${AEN_OPENOCD_USB_LOCATION:-}" ]; then
+		echo "bench-env: AEN_OPENOCD_USB_LOCATION is unset. This bench has THREE" >&2
+		echo "           J-Links and two share a cloned OEM serial -- with no USB" >&2
+		echo "           path pinned, OpenOCD picks a probe arbitrarily, and its" >&2
+		echo "           first actions are halt + load_image (alp-sdk#2037)." >&2
+		echo "           Resolve it from: labgrid-client -p e1m-aen-evk-01 show" >&2
+		echo "           (the swd resource's USB path) and export it, e.g.:" >&2
+		echo "               export AEN_OPENOCD_USB_LOCATION=3-4.4.3" >&2
+		return 2
+	fi
+	if ! command -v openocd >/dev/null 2>&1; then
+		echo "bench-env: 'openocd' not found on PATH -- install OpenOCD." >&2
+		return 2
+	fi
+	return 0
+}
+
 # bench_atoc_replace_guard <replace-atoc 0|1> <tag> [allowed-entry ...]
 #
 # GUARD (alp-sdk#2025) against the ATOC-replace hazard, shared by every

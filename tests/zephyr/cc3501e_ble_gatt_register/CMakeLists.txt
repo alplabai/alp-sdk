@@ -30,4 +30,5 @@ target_sources(app PRIVATE
 # headers; src/ gives the backend its private src/backends/ble/ble_ops.h.
 target_include_directories(app PRIVATE
     ${REPO_ROOT}/include
-    ${REPO_ROOT}/src)
+    ${REPO_ROOT}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cc3501e_common)

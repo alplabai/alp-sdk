@@ -513,21 +513,27 @@ typedef enum {
 /* of truth is the `i2c_devices:` block in                            */
 /* metadata/boards/e1m-evk.yaml -- do not hand-edit the generated      */
 /* macros below:                                                       */
-/*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  *** COLLISION, see note ***  */
-/*   - BMI323       (U13) SDO -> VIO   -> 0x69  *** COLLISION, see note ***  */
+/*   - ICM-42670-P  (U12) AD0 -> VIO   -> 0x69  (pre-respin only: collided) */
+/*   - BMI323       (U13) SDO -> GND   -> 0x68  (pre-respin: mis-strapped)  */
 /*   - BMP581       (U14) SDO -> VIO   -> 0x47  (SDO must not float)    */
 /*   - TCAL9538 MAIN  (U35) A1=1, A0=1  -> 0x73                          */
 /*   - TCAL9538 PCIE  (U37) A0=1, A1=0  -> 0x71  NOT ASSEMBLED (#1974)   */
 /* ================================================================== */
 
-/* BENCH-CONFIRMED (2026-06-16, E1M-AEN801): U12 (ICM-42670) and U13 (BMI323) BOTH
- * have their address pins tied to VIO, so both answer at 0x69 and COLLIDE on the bus
- * -- each ACKs with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
- * so a read returns wired-AND garbage (seen: 0x0001) and neither IMU is individually
- * addressable. Nothing answers at 0x68. The next batch must re-strap ONE of them -- e.g.
- * tie the BMI323 SDO pin to GND -> 0x68 (its datasheet default). The macros carry
- * that de-conflicted target so firmware is correct post-respin; on the pre-respin batch
- * the IMUs cannot be read (HW conflict, not a driver bug).
+/* THE RESPIN HAPPENED -- the IMU collision below is HISTORY, not the current board.
+ * BENCH-CONFIRMED (2026-09-07, E1M-AEN803 serial 2026W36-0002): U12 answers 0x69 with
+ * WHO_AM_I(0x75) = 0x67 and U13 answers 0x68 SEPARATELY. Both are individually
+ * addressable; the macros below are correct as written. (U13's chip ID was not read on
+ * that pass: BMI323 reg 0x00 returns 0x0000 until a soft-reset CMD <- 0xDEAF, and the
+ * census was read-only.)
+ *
+ * PRE-RESPIN BOARDS ONLY (bench-confirmed 2026-06-16, E1M-AEN801): U12 and U13 BOTH had
+ * their address pins tied to VIO, so both answered at 0x69 and COLLIDED on the bus --
+ * each ACKing with a different read framing (ICM 8-bit direct vs BMI323 2-dummy-byte),
+ * so a read returned wired-AND garbage (seen: 0x0001) and neither IMU was individually
+ * addressable, with nothing at 0x68. The fix shipped: BMI323 SDO is now tied to GND ->
+ * 0x68 (its datasheet default). On a pre-respin board the IMUs still cannot be read --
+ * that is the HW conflict, not a driver bug.
  *
  * EVK_I2C_ADDR_ICM42670, EVK_I2C_ADDR_BMI323 and EVK_I2C_ADDR_BMP581 are
  * defined in the generated routes header. */

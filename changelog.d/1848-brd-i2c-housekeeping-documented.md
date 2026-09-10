@@ -28,13 +28,25 @@ bench, because each of them surprises people:
 * **`RTC_CLKOUT` reaches only the E1M edge connector (pin `AH16`)**, not the
   SoC, so it is a carrier-designer's clock and firmware cannot consume it.
 * **`MODULE_STBY`/`EVI` (edge pin `O2`) is a carrier-driven event input.**
-* **One bench module answered at `0x40` instead of `0x48`.** `0x40` is not a
-  legal TMP112 address, and that part fingerprinted as a genuine TMP112 on
-  three of three registers (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH`
-  `0x5000` — the datasheet power-on defaults), so its ADD0 is not actually at
-  GND: check **U20 pin 3 continuity to GND** on that unit. A per-module
-  defect, so the devicetree keeps the design address `0x48` and the examples,
-  not the DT, tolerate and report the anomaly.
+* **One bench module answered at `0x40` instead of `0x48`.** At the time,
+  `0x40` looked like it could not be a legal TMP112 address at all, and that
+  part fingerprinted as a genuine TMP112 on three of three registers
+  (`CONFIG` `0x60a0`, `T_LOW` `0x4b00`, `T_HIGH` `0x5000` — the datasheet
+  power-on defaults), so the working theory was that its ADD0 was not
+  actually at GND: check **U20 pin 3 continuity to GND** on that unit.
+  **Later correction (alp-sdk#1978):** per TI SBOS473L p.44, the BOM's exact
+  orderable MPN for U20, `TMP112DIDPWR`, is X2SON (DPW), 5 pins ONLY — no
+  SOT563-6 orderable carries that MPN — and per SBOS473L Table 7-4 the
+  X2SON-5 "Address Variant Only" row straps ADD0→GND to `0x40`, so `0x40` is
+  the DESIGN address for the part this board specifies, not an anomaly the
+  open-joint theory needs to explain; the fingerprint matches that design.
+  What is *not* established is *as-built*: nobody has confirmed the fitted
+  package marking on a physical module, and BOM is not as-built. The anomaly
+  is since confirmed on 2 of 2 modules tested, so it reads as a **batch**
+  property, not the per-module defect first suspected. The devicetree still
+  keeps `0x48`, unchanged here — it now contradicts the `0x40` design
+  address above, a separate decision left visible rather than silently
+  resolved; the examples, not the DT, tolerate and report the anomaly.
 
 ### Fixed — a bench verdict measured on r1 hardware was recorded as a property of the bus, and said it was unusable (#1848)
 
@@ -64,3 +76,10 @@ comment is corrected too: nothing electrical blocks `rv3028c7` from backing
 the AEN calendar any more, only a deliberate backend-selection change
 (#1814) — and that is not a free upgrade, since with no `VBACKUP` supply the
 external RTC loses the time on a cold boot exactly as the LPRTC does.
+
+**Later correction:** the `0x28` = `0x44` reading above reads like a full
+identity confirmation; it is only a partial one. Per the RV-3028-C7
+Application Manual Rev. 1.4 §3.14, register `0x28` splits into an HID
+nibble (hardware identity) and a VID nibble (production-line version) —
+only HID `0x4` is documented as an identity check, VID `0x4` is a separate,
+production-line-scoped field.

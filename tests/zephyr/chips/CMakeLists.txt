@@ -15,9 +15,19 @@ project(alp_sdk_chips_test LANGUAGES C)
 # only so test_sensors.c can directly exercise bme280_unpack_h4_h5(),
 # the #797 H4/H5 shared-nibble unpack the disabled i2c-emul fake can't
 # reach (see the fake-fixtures note below).
+#
+# bmp581_verdict.h (examples/aen/aen-evk-demo/src/) is the pure BMP581
+# health-verdict logic pulled out of that example's main.c (#2035) so
+# test_sensors.c can exercise it here -- main.c itself only builds
+# against the real E1M-AEN801 board target.
+#
+# cc3501e_link_verdict.h (examples/aen/aen-evk-demo/src/) is the same
+# example's GET_VERSION link verdict, pulled out for the same reason
+# (#2035) so test_cc3501e.c can exercise it here.
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../examples/aen/aen-evk-demo/src)
 
 target_sources(app PRIVATE
     src/main.c
@@ -51,3 +61,20 @@ target_sources(app PRIVATE
 #     src/fake_ssd1306.c
 #     src/fake_bme280.c
 # )
+
+# Fake i2c-emul fixtures for the 2026-09 chip-driver session's new
+# register-protocol coverage -- these stay ACTIVE (their overlay DT
+# nodes are NOT commented out): there is no real-silicon substitute
+# test for rv3028c7 / tcal9538 / icm42670 / bmi323 / bmp581 / ina236 /
+# tas2563 yet, unlike the three chips retired above.  Do not fold these into
+# the dormant block above -- see each fake_*.c file header for the
+# protocol it models.
+target_sources(app PRIVATE
+    src/fake_rv3028c7.c
+    src/fake_tcal9538.c
+    src/fake_icm42670.c
+    src/fake_bmi323.c
+    src/fake_bmp581.c
+    src/fake_ina236.c
+    src/fake_tas2563.c
+)

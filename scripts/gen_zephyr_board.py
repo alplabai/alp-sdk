@@ -930,19 +930,24 @@ def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
     authority for pads that reach no E1M edge pin: `metadata/pinmux/aen.yaml`
     is a generated projection of the EDGE pad TSVs and carries no row for
     P7_0 / P7_1 (BRD_I2C) or P15_0 (RTC_ALARM), which run SoC <-> on-module
-    chip and never leave the module.  Family-scoped -- one file backs every
-    AEN SKU and both M55 cores.
+    chip and never leave the module.  `e1m_i2c0` (SoC I2C2) is the one
+    exception -- its pads DO have an edge row (it also reaches the EVK
+    carrier's sensor bus), but its DT-node shape lives here too because the
+    SoM's own 24C128 manifest EEPROM sits on the same physical bus (see the
+    `e1m_i2c0` entry's own comment in on-module-links.yaml).  Family-scoped
+    -- one file backs every AEN SKU and both M55 cores.
     """
     path = metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml"
     if not path.is_file():
         raise ZephyrBoardEmitError(
             f"no {path} -- the AEN pinctrl.dtsi/.dts emitters need the "
-            "on-module pad + device source (BRD_I2C, the RV-3028 alarm)")
+            "on-module pad + device source (BRD_I2C, e1m_i2c0, the RV-3028 "
+            "alarm)")
     doc = _load_yaml(path)
     links = doc.get("on_module_links")
     if not isinstance(links, dict):
         raise ZephyrBoardEmitError(f"{path} has no on_module_links: block")
-    for key in ("brd_i2c", "rtc_alarm"):
+    for key in ("brd_i2c", "e1m_i2c0", "rtc_alarm"):
         if key not in links:
             raise ZephyrBoardEmitError(
                 f"{path} on_module_links: is missing {key!r}")
@@ -1055,6 +1060,12 @@ def _aen_pinctrl_dtsi(
         " * board layer rather than in each consumer's overlay.  Pads, macros and pad\n"
         " * config come from metadata/e1m_modules/aen/on-module-links.yaml.\n"
         " *\n"
+        " * SoC I2C2 (function C, portable alp-i2c0) is wired here too, for the same\n"
+        " * reason: the SoM's own 24C128 manifest EEPROM is bridge/DNP-selected onto\n"
+        " * it, so every board built from this SoM needs the controller enabled --\n"
+        " * even though the same pads also carry the EVK carrier's sensor bus once\n"
+        " * they leave the module (docs/bring-up-aen.md Sec 5.1).\n"
+        " *\n"
         " * Remaining GPIO / SPI / Ethernet pin groups are added alongside their\n"
         " * drivers (the alp-sdk Alif peripheral drivers).\n"
         " */\n"
@@ -1074,6 +1085,8 @@ def _aen_pinctrl_dtsi(
         "\t};\n"
         "\n"
         + _aen_i2c_pinctrl_group(links) +
+        "\n"
+        + _aen_e1m_i2c0_pinctrl_group(links) +
         "};\n"
     )
 
@@ -1144,6 +1157,52 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
         "\t};\n"
     )
 
+
+def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any]) -> str:
+    """The `e1m_i2c0` (SoC I2C2) pinctrl group, from metadata.
+
+    Unlike `_aen_i2c_pinctrl_group()` this bus carries NO alarm-style
+    passenger pad and gets NO device child nodes in `_aen_e1m_i2c0_dts()`
+    below (its only genuinely on-module device, the 24C128 EEPROM, is
+    addressed by 7-bit address over the bus, not a DT device node -- see
+    the `e1m_i2c0` entry's own comment in on-module-links.yaml).
+
+    `bias-pull-down` here is intentional and matches Alif's own reference
+    I2C pinctrl (metadata says why); `bias-pull-up` looks more natural but
+    gives a DEAD bus (upstream pinctrl_soc.h's pull-direction encoding
+    reads inverted vs the Alif pad hardware) -- do not "fix" it.
+    """
+    bus = links["e1m_i2c0"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C2_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C2_SCL_C")
+    return (
+        "\t/*\n"
+        f"\t * e1m_i2c0 = SoC {bus['peripheral']} function C: {sda['silicon_pad']} SDA / "
+        f"{scl['silicon_pad']} SCL,\n"
+        "\t * portable alp-i2c0 (E1M edge bus 0 -- ALP_E1M_I2C0 /\n"
+        "\t * EVK_I2C_BUS_SENSORS).  Carries the SoM's own 24C128 manifest EEPROM;\n"
+        "\t * the same pads also reach the EVK carrier's sensor bus once they leave\n"
+        "\t * the module (docs/bring-up-aen.md Sec 5.1 -- two separate buses).\n"
+        "\t *\n"
+        "\t * input-enable + bias-pull-down: bench-validated 2026-06-15 on the E8,\n"
+        "\t * matching Alif's own reference I2C pinctrl and the identical group in\n"
+        "\t * examples/aen/aen-i2c2-eeprom-regcheck / aen-eeprom-manifest.  Do NOT\n"
+        "\t * change bias-pull-down to bias-pull-up: upstream pinctrl_soc.h's\n"
+        "\t * driver-state-control encoding reads inverted vs the Alif pad hardware,\n"
+        "\t * and bias-pull-up gives a DEAD bus.\n"
+        "\t */\n"
+        f"\t{bus['pinctrl_group_label']}: {bus['pinctrl_group_label']} {{\n"
+        "\t\tgroup0 {\n"
+        # SCL, SDA -- matches the bench-validated overlay's own pinmux
+        # order verbatim (examples/aen/aen-i2c2-eeprom-regcheck and
+        # aen-eeprom-manifest), not the SDA-first order the BRD_I2C group
+        # above happens to use.
+        f"\t\t\tpinmux = <{_pin_macro(scl)}>, <{_pin_macro(sda)}>;\n"
+        "\t\t\tinput-enable;\n"
+        "\t\t\tbias-pull-down;\n"
+        "\t\t};\n"
+        "\t};\n"
+    )
 
 
 def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
@@ -1238,6 +1297,55 @@ def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
         "",
     ]
     return lines
+
+
+def _aen_e1m_i2c0_dts(links: dict[str, Any]) -> list[str]:
+    """`&i2c2` (e1m_i2c0, portable alp-i2c0) + its bus alias.
+
+    No device child nodes (see `_aen_e1m_i2c0_pinctrl_group()`'s
+    docstring): the only genuinely on-module part on this bus, the 24C128
+    manifest EEPROM, is addressed by 7-bit address over the bus rather
+    than a DT device node, the same way
+    examples/aen/aen-i2c2-eeprom-regcheck and
+    examples/aen/aen-eeprom-manifest already open it.  The EVK carrier's
+    sensor/IO-expander/INA236 parts that also ride this bus once it
+    leaves the module are the EVK board layer's concern, not this SoM
+    board layer's.
+    """
+    bus = links["e1m_i2c0"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C2_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C2_SCL_C")
+
+    return [
+        "/*",
+        f" * e1m_i2c0 -- SoC {bus['peripheral']} in its function-C muxing "
+        f"({sda['silicon_pad']} SDA / {scl['silicon_pad']} SCL), portable",
+        f" * {bus['alias']} (E1M edge bus 0).  Carries the SoM's own 24C128 manifest",
+        " * EEPROM; the same physical bus also reaches the EVK carrier's sensor bus",
+        " * once the pads leave the module (docs/bring-up-aen.md Sec 5.1).  Driven by",
+        ' * UPSTREAM Zephyr i2c_dw ("snps,designware-i2c"), ADR 0017 Tier-1 -- no',
+        " * vendored code.",
+        " */",
+        f"&{bus['dt_label']} {{",
+        '\tstatus = "okay";',
+        f"\tpinctrl-0 = <&{bus['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        f"\tclock-frequency = <{bus['clock_frequency_macro']}>;",
+        "};",
+        "",
+        "/*",
+        " * Portable alias for e1m_i2c0.  alp_i2c_open(.bus_id = ALP_E1M_I2C0)",
+        " * resolves this via src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2c0);",
+        " * matches the EEPROM manifest reader's own",
+        " * CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0 convention.",
+        " */",
+        "/ {",
+        "\taliases {",
+        f"\t\t{bus['alias']} = &{bus['dt_label']};",
+        "\t};",
+        "};",
+        "",
+    ]
 
 
 def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
@@ -1711,6 +1819,7 @@ def _aen_dts(
         "",
     ]
     lines += _aen_brd_i2c_dts(links, part)
+    lines += _aen_e1m_i2c0_dts(links)
 
     if ethos_u is not None:
         _accel, node = ethos_u

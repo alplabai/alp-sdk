@@ -48,9 +48,11 @@
  * ALIF_SPI_CLK is a frequency-only dummy in the dtsi with no divider control,
  * so there is no software knob for it here.
  *
- * REQUIRES rx-delay = <2> on the SPI node (see the board overlay).  At a 40 ns
- * bit period the MISO capture needs the delay; with rx-delay 0 the link fails
- * outright, and 4 is too much.
+ * REQUIRES an RX sample delay: at a 40 ns bit period the MISO capture does not
+ * land on its own.  That delay comes from CC3501E_BRIDGE_RX_SAMPLE_DLY below --
+ * NOT from the SPI node's `rx-delay` property, which the poke in
+ * cc3501e_bridge.c overwrites.  The measured working span is in that constant's
+ * comment.
  *
  * It does not raise throughput -- silicon-measured
  * 2026-08-24: 682 kB/s at 25 MHz vs 678 kB/s at 14.29 MHz on PIO, 704 vs 701 on
@@ -97,17 +99,43 @@
 #endif
 
 /* DW SSI SPI1 base (0x48104000) + RX_SAMPLE_DLY to run the bridge SCLK above
- * 1 MHz.  spi_dw never writes RX_SAMPLE_DLY (0xf0) so it defaults to 0 -> the
- * master samples MISO at the SCLK edge, before the on-SoM trace + crossed-data
- * round-trip returns the CC35's bit, so >1 MHz mis-samples.  Setting it delays
- * the capture by N ssi_clk (200 MHz) cycles.  6 is silicon-tuned for ~14.3 MHz on
- * e1m-aen-evk-01 with a WIDE window (4..8 all clean cold+warm).  0 disables it
- * (falls back to 1 MHz).  Re-sweep if the SoM trace lengths change. */
+ * 1 MHz.  spi_dw_configure never writes RX_SAMPLE_DLY (0xf0), so without the
+ * poke in cc3501e_bridge.c the master samples MISO at the SCLK edge, before the
+ * on-SoM trace + crossed-data round-trip returns the CC35's bit, and anything
+ * above 1 MHz mis-samples.  Setting it delays the capture by N ssi_clk
+ * (200 MHz) cycles -- 5 ns per step.
+ *
+ * 4 is silicon-measured at the 25 MHz working point (40 ns bit period) on
+ * E1M-AEN803 serial 2026W36-0002.  N was swept 0..10 with 0x481040F0 read back
+ * each time to confirm the value took, using aen-evk-demo phase 8 as the
+ * workload:
+ *
+ *   N = 0..7   PASS, 2-3 runs each: bring-up 0, PING on attempt 1 of 25,
+ *              byte-exact MAC, scan 0, BLE 0.
+ *   N = 8      FAIL, 3 runs of 3: bring-up still returns 0, but the link never
+ *              answers -- PING -> -5 after all 25 attempts.
+ *   N = 9      PASS, 2 runs of 2.
+ *   N = 10     PASS, 3 runs of 3, but one run returned a MAC with a single bit
+ *              flipped in byte 0.
+ *
+ * 4 is the centre of the measured-good 0..7 span: +4 steps (20 ns, half a bit
+ * period) below the failure, and the low side is not a cliff at all since 0
+ * itself is clean.  Do NOT read 8/9/10 as a monotone upper boundary -- 8
+ * hard-fails while 9 and 10 pass, which this sweep did not explain.  Treat
+ * everything above 7 as unqualified, not as graded margin.
+ *
+ * The "4..8 all clean cold+warm" window this comment used to claim was taken on
+ * e1m-aen-evk-01 at ~14.3 MHz -- a different board at roughly half the clock,
+ * so it is not comparable and is not evidence for 25 MHz on this one.
+ *
+ * 0 does NOT mean "no delay": it compiles the poke out, leaving whatever the
+ * SPI node's `rx-delay` property put there (see cc3501e_bridge.c).  Re-sweep if
+ * the SoM trace lengths or the SCLK change. */
 #ifndef CC3501E_BRIDGE_SPI1_BASE
 #define CC3501E_BRIDGE_SPI1_BASE 0x48104000u
 #endif
 #ifndef CC3501E_BRIDGE_RX_SAMPLE_DLY
-#define CC3501E_BRIDGE_RX_SAMPLE_DLY 6u
+#define CC3501E_BRIDGE_RX_SAMPLE_DLY 4u
 #endif
 
 /**

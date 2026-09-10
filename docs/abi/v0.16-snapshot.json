@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-06",
+  "generated": "2026-09-09",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2388,6 +2388,14 @@
     },
     "alp/chips/bmi323.h": {
       "functions": {
+        "bmi323_configure_int_pin": {
+          "hash": "b87fc6fa5ba949be",
+          "signature": "alp_status_t bmi323_configure_int_pin(bmi323_t *dev, bmi323_int_pin_t pin, const bmi323_int_pin_config_t *cfg);"
+        },
+        "bmi323_data_ready": {
+          "hash": "1da1e3bc2ae2fdbf",
+          "signature": "alp_status_t bmi323_data_ready(bmi323_t *dev, bmi323_data_ready_t *out);"
+        },
         "bmi323_deinit": {
           "hash": "f847424a6ccc6523",
           "signature": "void bmi323_deinit(bmi323_t *dev);"
@@ -2412,6 +2420,10 @@
           "hash": "a22c9c7ec2a0e184",
           "signature": "alp_status_t bmi323_read_temp(bmi323_t *dev, int16_t *temp_raw);"
         },
+        "bmi323_route_data_ready_int": {
+          "hash": "20c8b927b23f702f",
+          "signature": "alp_status_t bmi323_route_data_ready_int(bmi323_t *dev, bmi323_int_route_t accel_route, bmi323_int_route_t gyro_route);"
+        },
         "bmi323_set_accel": {
           "hash": "680dedb877dff022",
           "signature": "alp_status_t bmi323_set_accel(bmi323_t *dev, bmi323_odr_t odr, bmi323_accel_fs_t fs);"
@@ -2419,6 +2431,14 @@
         "bmi323_set_gyro": {
           "hash": "4f306713dabbe8f7",
           "signature": "alp_status_t bmi323_set_gyro(bmi323_t *dev, bmi323_odr_t odr, bmi323_gyro_fs_t fs);"
+        },
+        "bmi323_set_int_latch": {
+          "hash": "0df10317193dc183",
+          "signature": "alp_status_t bmi323_set_int_latch(bmi323_t *dev, bmi323_int_latch_t mode);"
+        },
+        "bmi323_was_por_detected": {
+          "hash": "4bf58dd8d8bc546d",
+          "signature": "alp_status_t bmi323_was_por_detected(const bmi323_t *dev, bool *out);"
         }
       },
       "macros": {
@@ -2457,6 +2477,15 @@
           "hash": "4b98c6aaeed4d9ae",
           "kind": "struct"
         },
+        "bmi323_data_ready_t": {
+          "definition": "typedef struct { bool accel; bool gyro; } bmi323_data_ready_t;",
+          "fields": [
+            "bool accel",
+            "bool gyro"
+          ],
+          "hash": "452dc3b3cc4d5aca",
+          "kind": "struct"
+        },
         "bmi323_gyro_fs_t": {
           "definition": "typedef enum { BMI323_GYRO_FS_125_DPS = 0x0, BMI323_GYRO_FS_250_DPS = 0x1, BMI323_GYRO_FS_500_DPS = 0x2, BMI323_GYRO_FS_1000_DPS = 0x3, BMI323_GYRO_FS_2000_DPS = 0x4 } bmi323_gyro_fs_t;",
           "enumerators": [
@@ -2467,6 +2496,63 @@
             "BMI323_GYRO_FS_2000_DPS = 0x4"
           ],
           "hash": "b8415dc8294230af",
+          "kind": "enum"
+        },
+        "bmi323_int_drive_t": {
+          "definition": "typedef enum { BMI323_INT_DRIVE_PUSH_PULL = 0, BMI323_INT_DRIVE_OPEN_DRAIN = 1 } bmi323_int_drive_t;",
+          "enumerators": [
+            "BMI323_INT_DRIVE_PUSH_PULL = 0",
+            "BMI323_INT_DRIVE_OPEN_DRAIN = 1"
+          ],
+          "hash": "fe574be1773697a9",
+          "kind": "enum"
+        },
+        "bmi323_int_latch_t": {
+          "definition": "typedef enum { BMI323_INT_LATCH_NON_LATCHED = 0, BMI323_INT_LATCH_PERMANENT = 1 } bmi323_int_latch_t;",
+          "enumerators": [
+            "BMI323_INT_LATCH_NON_LATCHED = 0",
+            "BMI323_INT_LATCH_PERMANENT = 1"
+          ],
+          "hash": "7e451c3e2afdbb36",
+          "kind": "enum"
+        },
+        "bmi323_int_level_t": {
+          "definition": "typedef enum { BMI323_INT_LEVEL_ACTIVE_LOW = 0, BMI323_INT_LEVEL_ACTIVE_HIGH = 1 } bmi323_int_level_t;",
+          "enumerators": [
+            "BMI323_INT_LEVEL_ACTIVE_LOW = 0",
+            "BMI323_INT_LEVEL_ACTIVE_HIGH = 1"
+          ],
+          "hash": "b8edfe4993101ddb",
+          "kind": "enum"
+        },
+        "bmi323_int_pin_config_t": {
+          "definition": "typedef struct { bmi323_int_level_t level; bmi323_int_drive_t drive; bool output_enable; } bmi323_int_pin_config_t;",
+          "fields": [
+            "bmi323_int_level_t level",
+            "bmi323_int_drive_t drive",
+            "bool output_enable"
+          ],
+          "hash": "3fd1415c69ab3c23",
+          "kind": "struct"
+        },
+        "bmi323_int_pin_t": {
+          "definition": "typedef enum { BMI323_INT_PIN1 = 0, BMI323_INT_PIN2 = 1 } bmi323_int_pin_t;",
+          "enumerators": [
+            "BMI323_INT_PIN1 = 0",
+            "BMI323_INT_PIN2 = 1"
+          ],
+          "hash": "8ac8db2153887ddf",
+          "kind": "enum"
+        },
+        "bmi323_int_route_t": {
+          "definition": "typedef enum { BMI323_INT_ROUTE_DISABLED = 0x0, BMI323_INT_ROUTE_INT1 = 0x1, BMI323_INT_ROUTE_INT2 = 0x2, BMI323_INT_ROUTE_I3C_IBI = 0x3 } bmi323_int_route_t;",
+          "enumerators": [
+            "BMI323_INT_ROUTE_DISABLED = 0x0",
+            "BMI323_INT_ROUTE_INT1 = 0x1",
+            "BMI323_INT_ROUTE_INT2 = 0x2",
+            "BMI323_INT_ROUTE_I3C_IBI = 0x3"
+          ],
+          "hash": "c32639f74d7e9635",
           "kind": "enum"
         },
         "bmi323_odr_t": {
@@ -2491,15 +2577,17 @@
           "kind": "enum"
         },
         "bmi323_t": {
-          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr; bmi323_accel_fs_t accel_fs; bmi323_gyro_fs_t gyro_fs; bool initialised; } bmi323_t;",
+          "definition": "typedef struct { alp_i2c_t *bus; uint8_t addr; bmi323_accel_fs_t accel_fs; bmi323_gyro_fs_t gyro_fs; bool initialised; bool por_detected; bool comm_suspend; } bmi323_t;",
           "fields": [
             "alp_i2c_t *bus",
             "uint8_t addr",
             "bmi323_accel_fs_t accel_fs",
             "bmi323_gyro_fs_t gyro_fs",
-            "bool initialised"
+            "bool initialised",
+            "bool por_detected",
+            "bool comm_suspend"
           ],
-          "hash": "a88ec8f0e729e71b",
+          "hash": "e08ec6b4313a7f7b",
           "kind": "struct"
         }
       },
@@ -2562,6 +2650,14 @@
           "hash": "e0479df9386046eb",
           "signature": "alp_status_t bmp581_compensate(const bmp581_raw_t *raw, bmp581_compensated_t *out);"
         },
+        "bmp581_configure_int_pin": {
+          "hash": "6cb67449378147e2",
+          "signature": "alp_status_t bmp581_configure_int_pin(bmp581_t *dev, bool enable, bmp581_int_drive_t drive, bmp581_int_polarity_t polarity, bmp581_int_mode_t mode);"
+        },
+        "bmp581_data_ready": {
+          "hash": "597597888e8722fe",
+          "signature": "alp_status_t bmp581_data_ready(bmp581_t *dev, bool *ready_out);"
+        },
         "bmp581_deinit": {
           "hash": "16a459462d245e59",
           "signature": "void bmp581_deinit(bmp581_t *dev);"
@@ -2577,6 +2673,10 @@
         "bmp581_read_raw": {
           "hash": "6a8a7715cfceb859",
           "signature": "alp_status_t bmp581_read_raw(bmp581_t *dev, bmp581_raw_t *out);"
+        },
+        "bmp581_set_int_sources": {
+          "hash": "56d81ebc9d3f0edd",
+          "signature": "alp_status_t bmp581_set_int_sources(bmp581_t *dev, uint8_t source_mask);"
         },
         "bmp581_set_sampling": {
           "hash": "caab90f19ee2303a",
@@ -2599,6 +2699,22 @@
         "BMP581_I2C_ADDR_LOW": {
           "hash": "1a6f08e1d9b59ae6",
           "value": "0x46"
+        },
+        "BMP581_INT_SRC_DRDY": {
+          "hash": "264a859b68f6abda",
+          "value": "(1u << 0)"
+        },
+        "BMP581_INT_SRC_FIFO_FULL": {
+          "hash": "7afa4a26f9090736",
+          "value": "(1u << 1)"
+        },
+        "BMP581_INT_SRC_FIFO_THS": {
+          "hash": "11c00c35d24391f2",
+          "value": "(1u << 2)"
+        },
+        "BMP581_INT_SRC_OOR_P": {
+          "hash": "8b691e4f726ecb29",
+          "value": "(1u << 3)"
         }
       },
       "typedefs": {
@@ -2610,6 +2726,33 @@
           ],
           "hash": "82988bedbfe85471",
           "kind": "struct"
+        },
+        "bmp581_int_drive_t": {
+          "definition": "typedef enum { BMP581_INT_PUSH_PULL = 0x0, BMP581_INT_OPEN_DRAIN = 0x1 } bmp581_int_drive_t;",
+          "enumerators": [
+            "BMP581_INT_PUSH_PULL = 0x0",
+            "BMP581_INT_OPEN_DRAIN = 0x1"
+          ],
+          "hash": "f976628356eec71c",
+          "kind": "enum"
+        },
+        "bmp581_int_mode_t": {
+          "definition": "typedef enum { BMP581_INT_PULSED = 0x0, BMP581_INT_LATCHED = 0x1 } bmp581_int_mode_t;",
+          "enumerators": [
+            "BMP581_INT_PULSED = 0x0",
+            "BMP581_INT_LATCHED = 0x1"
+          ],
+          "hash": "0601a4f606fce96d",
+          "kind": "enum"
+        },
+        "bmp581_int_polarity_t": {
+          "definition": "typedef enum { BMP581_INT_ACTIVE_LOW = 0x0, BMP581_INT_ACTIVE_HIGH = 0x1 } bmp581_int_polarity_t;",
+          "enumerators": [
+            "BMP581_INT_ACTIVE_LOW = 0x0",
+            "BMP581_INT_ACTIVE_HIGH = 0x1"
+          ],
+          "hash": "99b36989fdce4ad0",
+          "kind": "enum"
         },
         "bmp581_mode_t": {
           "definition": "typedef enum { BMP581_MODE_STANDBY = 0x0, BMP581_MODE_NORMAL = 0x1, BMP581_MODE_FORCED = 0x2, BMP581_MODE_CONTINUOUS = 0x3 } bmp581_mode_t;",
@@ -2623,17 +2766,17 @@
           "kind": "enum"
         },
         "bmp581_odr_t": {
-          "definition": "typedef enum { BMP581_ODR_240_HZ = 0x00, BMP581_ODR_120_HZ = 0x01, BMP581_ODR_50_HZ = 0x07, BMP581_ODR_25_HZ = 0x0E, BMP581_ODR_10_HZ = 0x14, BMP581_ODR_5_HZ = 0x17, BMP581_ODR_1_HZ = 0x1C } bmp581_odr_t;",
+          "definition": "typedef enum { BMP581_ODR_240_HZ = 0x00, BMP581_ODR_120_HZ = 0x08, BMP581_ODR_50_HZ = 0x0F, BMP581_ODR_25_HZ = 0x14, BMP581_ODR_10_HZ = 0x17, BMP581_ODR_5_HZ = 0x18, BMP581_ODR_1_HZ = 0x1C } bmp581_odr_t;",
           "enumerators": [
             "BMP581_ODR_240_HZ = 0x00",
-            "BMP581_ODR_120_HZ = 0x01",
-            "BMP581_ODR_50_HZ = 0x07",
-            "BMP581_ODR_25_HZ = 0x0E",
-            "BMP581_ODR_10_HZ = 0x14",
-            "BMP581_ODR_5_HZ = 0x17",
+            "BMP581_ODR_120_HZ = 0x08",
+            "BMP581_ODR_50_HZ = 0x0F",
+            "BMP581_ODR_25_HZ = 0x14",
+            "BMP581_ODR_10_HZ = 0x17",
+            "BMP581_ODR_5_HZ = 0x18",
             "BMP581_ODR_1_HZ = 0x1C"
           ],
-          "hash": "52aa4bcbc99a8d06",
+          "hash": "5f4a5e87733d5879",
           "kind": "enum"
         },
         "bmp581_osr_t": {
@@ -3968,6 +4111,10 @@
           "hash": "3e9432999dc2e14a",
           "signature": "alp_status_t gd32g553_ota_get_state(gd32g553_t *ctx, gd32g553_ota_state_info_t *out);"
         },
+        "gd32g553_ota_image_crc32": {
+          "hash": "9af8edb6f67a92f0",
+          "signature": "alp_status_t gd32g553_ota_image_crc32(const uint8_t *image, size_t len, uint32_t *out_crc32);"
+        },
         "gd32g553_ota_rollback": {
           "hash": "65fc166bfce1cfcd",
           "signature": "alp_status_t gd32g553_ota_rollback(gd32g553_t *ctx);"
@@ -4448,6 +4595,14 @@
     },
     "alp/chips/icm42670.h": {
       "functions": {
+        "icm42670_configure_int_pin": {
+          "hash": "4c92ee49515ae86d",
+          "signature": "alp_status_t icm42670_configure_int_pin(icm42670_t *dev, icm42670_int_pin_t pin, const icm42670_int_pin_config_t *cfg);"
+        },
+        "icm42670_data_ready": {
+          "hash": "00fedfa728af25f7",
+          "signature": "alp_status_t icm42670_data_ready(icm42670_t *dev, bool *ready);"
+        },
         "icm42670_deinit": {
           "hash": "3b7526348f1b63e6",
           "signature": "void icm42670_deinit(icm42670_t *dev);"
@@ -4471,6 +4626,10 @@
         "icm42670_read_temp": {
           "hash": "cf1c3bea7bb63c4b",
           "signature": "alp_status_t icm42670_read_temp(icm42670_t *dev, int16_t *temp_raw);"
+        },
+        "icm42670_route_int": {
+          "hash": "01b841dea34da906",
+          "signature": "alp_status_t icm42670_route_int(icm42670_t *dev, icm42670_int_pin_t pin, uint8_t source_mask);"
         },
         "icm42670_set_accel": {
           "hash": "7bf97f9ee364674e",
@@ -4528,8 +4687,69 @@
           "hash": "77f36aac45970aa8",
           "kind": "enum"
         },
+        "icm42670_int_drive_t": {
+          "definition": "typedef enum { ICM42670_INT_DRIVE_OPEN_DRAIN = 0, ICM42670_INT_DRIVE_PUSH_PULL = 1 } icm42670_int_drive_t;",
+          "enumerators": [
+            "ICM42670_INT_DRIVE_OPEN_DRAIN = 0",
+            "ICM42670_INT_DRIVE_PUSH_PULL = 1"
+          ],
+          "hash": "2e338b9e67ba3621",
+          "kind": "enum"
+        },
+        "icm42670_int_mode_t": {
+          "definition": "typedef enum { ICM42670_INT_MODE_PULSED = 0, ICM42670_INT_MODE_LATCHED = 1 } icm42670_int_mode_t;",
+          "enumerators": [
+            "ICM42670_INT_MODE_PULSED = 0",
+            "ICM42670_INT_MODE_LATCHED = 1"
+          ],
+          "hash": "fc8dd4cf5ecc0b55",
+          "kind": "enum"
+        },
+        "icm42670_int_pin_config_t": {
+          "definition": "typedef struct { icm42670_int_mode_t mode; icm42670_int_drive_t drive; icm42670_int_polarity_t polarity; } icm42670_int_pin_config_t;",
+          "fields": [
+            "icm42670_int_mode_t mode",
+            "icm42670_int_drive_t drive",
+            "icm42670_int_polarity_t polarity"
+          ],
+          "hash": "c085002aeae904c9",
+          "kind": "struct"
+        },
+        "icm42670_int_pin_t": {
+          "definition": "typedef enum { ICM42670_INT_PIN1 = 0, ICM42670_INT_PIN2 = 1 } icm42670_int_pin_t;",
+          "enumerators": [
+            "ICM42670_INT_PIN1 = 0",
+            "ICM42670_INT_PIN2 = 1"
+          ],
+          "hash": "6703c8d58b19b62c",
+          "kind": "enum"
+        },
+        "icm42670_int_polarity_t": {
+          "definition": "typedef enum { ICM42670_INT_POLARITY_ACTIVE_LOW = 0, ICM42670_INT_POLARITY_ACTIVE_HIGH = 1 } icm42670_int_polarity_t;",
+          "enumerators": [
+            "ICM42670_INT_POLARITY_ACTIVE_LOW = 0",
+            "ICM42670_INT_POLARITY_ACTIVE_HIGH = 1"
+          ],
+          "hash": "c70f75782bce7aa2",
+          "kind": "enum"
+        },
+        "icm42670_int_src_t": {
+          "definition": "typedef enum { ICM42670_INT_SRC_AGC_RDY = 1u << 0, ICM42670_INT_SRC_FIFO_FULL = 1u << 1, ICM42670_INT_SRC_FIFO_THS = 1u << 2, ICM42670_INT_SRC_DATA_RDY = 1u << 3, ICM42670_INT_SRC_RESET_DONE = 1u << 4, ICM42670_INT_SRC_PLL_RDY = 1u << 5, ICM42670_INT_SRC_FSYNC = 1u << 6, ICM42670_INT_SRC_ST_DONE = 1u << 7 } icm42670_int_src_t;",
+          "enumerators": [
+            "ICM42670_INT_SRC_AGC_RDY = 1u << 0",
+            "ICM42670_INT_SRC_FIFO_FULL = 1u << 1",
+            "ICM42670_INT_SRC_FIFO_THS = 1u << 2",
+            "ICM42670_INT_SRC_DATA_RDY = 1u << 3",
+            "ICM42670_INT_SRC_RESET_DONE = 1u << 4",
+            "ICM42670_INT_SRC_PLL_RDY = 1u << 5",
+            "ICM42670_INT_SRC_FSYNC = 1u << 6",
+            "ICM42670_INT_SRC_ST_DONE = 1u << 7"
+          ],
+          "hash": "043e448954a4a957",
+          "kind": "enum"
+        },
         "icm42670_odr_t": {
-          "definition": "typedef enum { ICM42670_ODR_OFF = 0x0, ICM42670_ODR_1_5625_HZ = 0xF, ICM42670_ODR_3_125_HZ = 0xE, ICM42670_ODR_6_25_HZ = 0xD, ICM42670_ODR_12_5_HZ = 0xC, ICM42670_ODR_25_HZ = 0xB, ICM42670_ODR_50_HZ = 0xA, ICM42670_ODR_100_HZ = 0x8, ICM42670_ODR_200_HZ = 0x7, ICM42670_ODR_400_HZ = 0x6, ICM42670_ODR_800_HZ = 0x5, ICM42670_ODR_1600_HZ = 0x4 } icm42670_odr_t;",
+          "definition": "typedef enum { ICM42670_ODR_OFF = 0x0, ICM42670_ODR_1_5625_HZ = 0xF, ICM42670_ODR_3_125_HZ = 0xE, ICM42670_ODR_6_25_HZ = 0xD, ICM42670_ODR_12_5_HZ = 0xC, ICM42670_ODR_25_HZ = 0xB, ICM42670_ODR_50_HZ = 0xA, ICM42670_ODR_100_HZ = 0x9, ICM42670_ODR_200_HZ = 0x8, ICM42670_ODR_400_HZ = 0x7, ICM42670_ODR_800_HZ = 0x6, ICM42670_ODR_1600_HZ = 0x5 } icm42670_odr_t;",
           "enumerators": [
             "ICM42670_ODR_OFF = 0x0",
             "ICM42670_ODR_1_5625_HZ = 0xF",
@@ -4538,13 +4758,13 @@
             "ICM42670_ODR_12_5_HZ = 0xC",
             "ICM42670_ODR_25_HZ = 0xB",
             "ICM42670_ODR_50_HZ = 0xA",
-            "ICM42670_ODR_100_HZ = 0x8",
-            "ICM42670_ODR_200_HZ = 0x7",
-            "ICM42670_ODR_400_HZ = 0x6",
-            "ICM42670_ODR_800_HZ = 0x5",
-            "ICM42670_ODR_1600_HZ = 0x4"
+            "ICM42670_ODR_100_HZ = 0x9",
+            "ICM42670_ODR_200_HZ = 0x8",
+            "ICM42670_ODR_400_HZ = 0x7",
+            "ICM42670_ODR_800_HZ = 0x6",
+            "ICM42670_ODR_1600_HZ = 0x5"
           ],
-          "hash": "6327802ed331266f",
+          "hash": "7d94aa2a7423f312",
           "kind": "enum"
         },
         "icm42670_t": {
@@ -4845,6 +5065,10 @@
     },
     "alp/chips/ina236.h": {
       "functions": {
+        "ina236_conversion_ready": {
+          "hash": "610691cc52d5ecfc",
+          "signature": "alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);"
+        },
         "ina236_deinit": {
           "hash": "071e9b37aebdc9d8",
           "signature": "void ina236_deinit(ina236_t *ctx);"
@@ -6814,6 +7038,10 @@
         "rv3028c7_set_time": {
           "hash": "fbe619f222d9b13d",
           "signature": "alp_status_t rv3028c7_set_time(rv3028c7_t *ctx, const rv3028c7_time_t *t);"
+        },
+        "rv3028c7_was_cold_start": {
+          "hash": "6b9757bb5af7441f",
+          "signature": "alp_status_t rv3028c7_was_cold_start(rv3028c7_t *ctx, bool *out);"
         }
       },
       "macros": {
@@ -6870,14 +7098,15 @@
           "kind": "enum"
         },
         "rv3028c7_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; void *src_user[7]; void *src_handler[7]; } rv3028c7_t;",
+          "definition": "typedef struct { bool initialised; bool cold_start; alp_i2c_t *bus; void *src_user[7]; void *src_handler[7]; } rv3028c7_t;",
           "fields": [
             "bool initialised",
+            "bool cold_start",
             "alp_i2c_t *bus",
             "void *src_user[7]",
             "void *src_handler[7]"
           ],
-          "hash": "6ecc6d488239ce6f",
+          "hash": "5e25cba0723b92b4",
           "kind": "struct"
         },
         "rv3028c7_time_t": {
@@ -7255,17 +7484,49 @@
     },
     "alp/chips/tas2563.h": {
       "functions": {
+        "tas2563_clear_faults": {
+          "hash": "4107d72fd135ed12",
+          "signature": "alp_status_t tas2563_clear_faults(tas2563_t *ctx);"
+        },
+        "tas2563_configure_fault_pin": {
+          "hash": "eecc6fe0c44ecc68",
+          "signature": "alp_status_t tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_internal_pullup);"
+        },
+        "tas2563_configure_i2s": {
+          "hash": "4bad2f9fd02f5901",
+          "signature": "alp_status_t tas2563_configure_i2s(tas2563_t *ctx, const alp_i2s_config_t *host_cfg, tas2563_rx_channel_t channel);"
+        },
+        "tas2563_configure_iv_sense": {
+          "hash": "2fa289a2a1418990",
+          "signature": "alp_status_t tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t i_slot);"
+        },
         "tas2563_deinit": {
           "hash": "253d74a9f5743f51",
           "signature": "void tas2563_deinit(tas2563_t *ctx);"
+        },
+        "tas2563_fault_asserted": {
+          "hash": "97696172dd8a11bf",
+          "signature": "alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);"
         },
         "tas2563_init": {
           "hash": "cb3ab5964e8c2026",
           "signature": "alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);"
         },
+        "tas2563_load_tuning": {
+          "hash": "5c5062e39f3472ab",
+          "signature": "alp_status_t tas2563_load_tuning(tas2563_t *ctx, const tas2563_tuning_reg_t *records, size_t count, size_t *failed_index_out);"
+        },
+        "tas2563_read_faults": {
+          "hash": "c8d8ce05ed13619a",
+          "signature": "alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);"
+        },
         "tas2563_read_revision": {
           "hash": "42548fad01644ebf",
           "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
+        },
+        "tas2563_set_amp_level": {
+          "hash": "bf594748f4b3a17c",
+          "signature": "alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code);"
         },
         "tas2563_set_hw_enable": {
           "hash": "fa19bbf771113c0a",
@@ -7277,6 +7538,122 @@
         }
       },
       "macros": {
+        "TAS2563_AMP_LEVEL_MAX": {
+          "hash": "188603200b261e33",
+          "value": "0x1Cu"
+        },
+        "TAS2563_AMP_LEVEL_MIN": {
+          "hash": "7c9fddaa16d33432",
+          "value": "0x01u"
+        },
+        "TAS2563_AMP_LEVEL_POR": {
+          "hash": "cf78694e711924cc",
+          "value": "0x10u"
+        },
+        "TAS2563_FAULT_ASI2_CLOCK": {
+          "hash": "5c8f3d774eb3e61b",
+          "value": "(1u << 27)"
+        },
+        "TAS2563_FAULT_BOOST_CLOCK": {
+          "hash": "c71abe91248393e2",
+          "value": "(1u << 22)"
+        },
+        "TAS2563_FAULT_BOOST_OV_CLAMP": {
+          "hash": "87b0adfe92d66a00",
+          "value": "(1u << 18)"
+        },
+        "TAS2563_FAULT_BROWNOUT_ACTIVE": {
+          "hash": "cb2ebfc8e07df406",
+          "value": "(1u << 9)"
+        },
+        "TAS2563_FAULT_BROWNOUT_SHUTDOWN": {
+          "hash": "4a29005cdc60c5c7",
+          "value": "(1u << 10)"
+        },
+        "TAS2563_FAULT_CP_PG": {
+          "hash": "df1b0b6b3487ec82",
+          "value": "(1u << 17)"
+        },
+        "TAS2563_FAULT_DAC_MOD_CLOCK": {
+          "hash": "61c60f850fc28c83",
+          "value": "(1u << 23)"
+        },
+        "TAS2563_FAULT_DC_DETECT": {
+          "hash": "61a2ac3e64abf441",
+          "value": "(1u << 19)"
+        },
+        "TAS2563_FAULT_DEVICE_POWER_DOWN": {
+          "hash": "733d8c20a4dd10e0",
+          "value": "(1u << 31)"
+        },
+        "TAS2563_FAULT_DEVICE_POWER_UP": {
+          "hash": "bd817407dc168dd7",
+          "value": "(1u << 16)"
+        },
+        "TAS2563_FAULT_LIMITER_ACTIVE": {
+          "hash": "ae9a86f85373f808",
+          "value": "(1u << 3)"
+        },
+        "TAS2563_FAULT_LIMITER_INF_HOLD": {
+          "hash": "522dc5a8b9d64399",
+          "value": "(1u << 6)"
+        },
+        "TAS2563_FAULT_LIMITER_MAX_ATTN": {
+          "hash": "c296c13c4c404a07",
+          "value": "(1u << 5)"
+        },
+        "TAS2563_FAULT_LIMITER_MUTE": {
+          "hash": "7884e6035c90674f",
+          "value": "(1u << 7)"
+        },
+        "TAS2563_FAULT_LOAD_DIAG_DONE": {
+          "hash": "c020a73cc29fa762",
+          "value": "(1u << 13)"
+        },
+        "TAS2563_FAULT_OVER_CURRENT": {
+          "hash": "505f6120a2a1c6d6",
+          "value": "(1u << 1)"
+        },
+        "TAS2563_FAULT_OVER_TEMP": {
+          "hash": "a696aab3b538e62c",
+          "value": "(1u << 0)"
+        },
+        "TAS2563_FAULT_PDM_MIC_CLOCK": {
+          "hash": "72f46b7e360273d0",
+          "value": "(1u << 28)"
+        },
+        "TAS2563_FAULT_PLL_LOCK": {
+          "hash": "3cf687409ff772f3",
+          "value": "(1u << 20)"
+        },
+        "TAS2563_FAULT_SHUTDOWN_CAUSES": {
+          "hash": "38ef18a2493e255f",
+          "value": "(TAS2563_FAULT_OVER_TEMP | TAS2563_FAULT_OVER_CURRENT | TAS2563_FAULT_TDM_CLOCK | TAS2563_FAULT_BROWNOUT_SHUTDOWN)"
+        },
+        "TAS2563_FAULT_SPK_OPEN_LOAD": {
+          "hash": "6e3696671dc65896",
+          "value": "(1u << 11)"
+        },
+        "TAS2563_FAULT_SPK_SHORT_LOAD": {
+          "hash": "cbadd0251b0e5579",
+          "value": "(1u << 12)"
+        },
+        "TAS2563_FAULT_TDM_CLOCK": {
+          "hash": "ac58463674286c8e",
+          "value": "(1u << 2)"
+        },
+        "TAS2563_FAULT_VBAT_BELOW_INFL": {
+          "hash": "1a23cba54b015dbf",
+          "value": "(1u << 4)"
+        },
+        "TAS2563_FAULT_VBAT_BROWNOUT": {
+          "hash": "76078b4e6174332c",
+          "value": "(1u << 8)"
+        },
+        "TAS2563_FAULT_VBAT_POR": {
+          "hash": "868be70c4dba80bc",
+          "value": "(1u << 21)"
+        },
         "TAS2563_I2C_ADDR_BROADCAST": {
           "hash": "d8b3307d25146bc9",
           "value": "0x48u"
@@ -7309,15 +7686,38 @@
           "hash": "d8683e4a9903ac6b",
           "kind": "enum"
         },
+        "tas2563_rx_channel_t": {
+          "definition": "typedef enum { TAS2563_RX_SLOT_FROM_ADDR = 0x0, TAS2563_RX_LEFT = 0x1, TAS2563_RX_RIGHT = 0x2, TAS2563_RX_DOWNMIX = 0x3, } tas2563_rx_channel_t;",
+          "enumerators": [
+            "TAS2563_RX_SLOT_FROM_ADDR = 0x0",
+            "TAS2563_RX_LEFT = 0x1",
+            "TAS2563_RX_RIGHT = 0x2",
+            "TAS2563_RX_DOWNMIX = 0x3"
+          ],
+          "hash": "c8b46522be8ce4bc",
+          "kind": "enum"
+        },
         "tas2563_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; alp_gpio_t *sd_n; } tas2563_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; alp_gpio_t *sd_n; alp_gpio_t *irq_n; } tas2563_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
-            "alp_gpio_t *sd_n"
+            "alp_gpio_t *sd_n",
+            "alp_gpio_t *irq_n"
           ],
-          "hash": "20cb3182222a4d3b",
+          "hash": "ff7d0ed9de3791da",
+          "kind": "struct"
+        },
+        "tas2563_tuning_reg_t": {
+          "definition": "typedef struct { uint8_t book; uint8_t page; uint8_t reg; uint8_t val; } tas2563_tuning_reg_t;",
+          "fields": [
+            "uint8_t book",
+            "uint8_t page",
+            "uint8_t reg",
+            "uint8_t val"
+          ],
+          "hash": "f663544c140cfd59",
           "kind": "struct"
         }
       },
@@ -7332,6 +7732,10 @@
         "tcal9538_get": {
           "hash": "6ca6bc37d3b5fb6e",
           "signature": "alp_status_t tcal9538_get(tcal9538_t *ctx, uint8_t pin, bool *level_out);"
+        },
+        "tcal9538_get_interrupt_status": {
+          "hash": "ac273a15cd9fb410",
+          "signature": "alp_status_t tcal9538_get_interrupt_status(tcal9538_t *ctx, uint8_t *status_out);"
         },
         "tcal9538_init": {
           "hash": "e9e0fb5e12998f2b",
@@ -7352,6 +7756,22 @@
         "tcal9538_set_directions": {
           "hash": "5bb8ed02d8bbbeb3",
           "signature": "alp_status_t tcal9538_set_directions(tcal9538_t *ctx, uint8_t mask, uint8_t value);"
+        },
+        "tcal9538_set_input_latch": {
+          "hash": "24f2c1d1d38aadce",
+          "signature": "alp_status_t tcal9538_set_input_latch(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_interrupt_mask": {
+          "hash": "009889980640bd89",
+          "signature": "alp_status_t tcal9538_set_interrupt_mask(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_polarity_inversion": {
+          "hash": "b97b24bb3c8ffe20",
+          "signature": "alp_status_t tcal9538_set_polarity_inversion(tcal9538_t *ctx, uint8_t mask);"
+        },
+        "tcal9538_set_pull": {
+          "hash": "0d1fbe830acfe580",
+          "signature": "alp_status_t tcal9538_set_pull(tcal9538_t *ctx, uint8_t pin, tcal9538_pull_t pull);"
         },
         "tcal9538_write_all": {
           "hash": "f29c77f487f65612",
@@ -7378,16 +7798,27 @@
           "hash": "8afc0894ea2cf926",
           "kind": "enum"
         },
+        "tcal9538_pull_t": {
+          "definition": "typedef enum { TCAL9538_PULL_NONE = 0, TCAL9538_PULL_DOWN = 1, TCAL9538_PULL_UP = 2, } tcal9538_pull_t;",
+          "enumerators": [
+            "TCAL9538_PULL_NONE = 0",
+            "TCAL9538_PULL_DOWN = 1",
+            "TCAL9538_PULL_UP = 2"
+          ],
+          "hash": "5a9b1c66d07c3964",
+          "kind": "enum"
+        },
         "tcal9538_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t cfg_cache; uint8_t out_cache; } tcal9538_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t cfg_cache; uint8_t out_cache; bool has_latched_irq; } tcal9538_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
             "uint8_t cfg_cache",
-            "uint8_t out_cache"
+            "uint8_t out_cache",
+            "bool has_latched_irq"
           ],
-          "hash": "54e1b7eccc94e4d0",
+          "hash": "73e248f4063f5b56",
           "kind": "struct"
         }
       },
@@ -7563,6 +7994,22 @@
         }
       },
       "macros": {
+        "TMP112_I2C_ADDR_ADDRVAR_GND": {
+          "hash": "c8923582b2972ad7",
+          "value": "0x40u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_SCL": {
+          "hash": "fcff4b383b80b178",
+          "value": "0x43u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_SDA": {
+          "hash": "a0926584addc7eab",
+          "value": "0x42u"
+        },
+        "TMP112_I2C_ADDR_ADDRVAR_VPLUS": {
+          "hash": "18a20a4479b85b8f",
+          "value": "0x41u"
+        },
         "TMP112_I2C_ADDR_GND": {
           "hash": "f3e4ec52b97bf968",
           "value": "0x48u"
@@ -11631,6 +12078,10 @@
           "hash": "6c6c1cc020705b8b",
           "value": "0x80u"
         },
+        "ALP_CC3501E_CRC_BYTES": {
+          "hash": "b27c82868f9c54ac",
+          "value": "2u"
+        },
         "ALP_CC3501E_EVENT_HDR_BYTES": {
           "hash": "ca97663d60bb61a4",
           "value": "2u"
@@ -11672,12 +12123,16 @@
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
         },
         "ALP_CC3501E_PROTOCOL_MAJOR": {
-          "hash": "5b29aa6688e2f1e3",
+          "hash": "670459f7ff11038a",
+          "value": "4"
+        },
+        "ALP_CC3501E_PROTOCOL_MAJOR_LEGACY": {
+          "hash": "ef1c8a5e78656163",
           "value": "3"
         },
         "ALP_CC3501E_PROTOCOL_MINOR": {
-          "hash": "693c3687ba0ff621",
-          "value": "1"
+          "hash": "8659f250584c792e",
+          "value": "0"
         },
         "ALP_CC3501E_PROTOCOL_VERSION": {
           "hash": "055edcb287050a28",
@@ -11691,6 +12146,10 @@
           "hash": "0aeceeaf85a9783e",
           "value": "(v) ((v) & 0xFFu)"
         },
+        "ALP_CC3501E_REPLY_PAD": {
+          "hash": "bc551a3550d55c12",
+          "value": "8u"
+        },
         "ALP_CC3501E_REQ_SEQ_LAST": {
           "hash": "7d52e8185ae5e8b7",
           "value": "31u"
@@ -11702,6 +12161,10 @@
         "ALP_CC3501E_REQ_SEQ_NONE": {
           "hash": "fafe93c51ebdfab2",
           "value": "0u"
+        },
+        "ALP_CC3501E_RESP_OK_LEGACY": {
+          "hash": "f7d7d600f98e1030",
+          "value": "0x00u"
         },
         "ALP_CC3501E_SPI1_MAX_XFER": {
           "hash": "23d881a20f05388a",
@@ -12093,9 +12556,9 @@
           "kind": "enum"
         },
         "alp_cc3501e_resp_t": {
-          "definition": "typedef enum { ALP_CC3501E_RESP_OK = 0x00, ALP_CC3501E_RESP_ERR_INVALID = 0x01, ALP_CC3501E_RESP_ERR_BUSY = 0x02, ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03, ALP_CC3501E_RESP_ERR_NO_MEM = 0x04, ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, ALP_CC3501E_RESP_ERR_RADIO = 0x06, ALP_CC3501E_RESP_ERR_PROTOCOL = 0x07, ALP_CC3501E_RESP_ERR_VERSION = 0x08, ALP_CC3501E_RESP_ERR_STATE = 0x09, ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF } alp_cc3501e_resp_t;",
+          "definition": "typedef enum { ALP_CC3501E_RESP_OK = 0x5A, ALP_CC3501E_RESP_ERR_INVALID = 0x01, ALP_CC3501E_RESP_ERR_BUSY = 0x02, ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03, ALP_CC3501E_RESP_ERR_NO_MEM = 0x04, ALP_CC3501E_RESP_ERR_NOT_READY = 0x05, ALP_CC3501E_RESP_ERR_RADIO = 0x06, ALP_CC3501E_RESP_ERR_PROTOCOL = 0x07, ALP_CC3501E_RESP_ERR_VERSION = 0x08, ALP_CC3501E_RESP_ERR_STATE = 0x09, ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF } alp_cc3501e_resp_t;",
           "enumerators": [
-            "ALP_CC3501E_RESP_OK = 0x00",
+            "ALP_CC3501E_RESP_OK = 0x5A",
             "ALP_CC3501E_RESP_ERR_INVALID = 0x01",
             "ALP_CC3501E_RESP_ERR_BUSY = 0x02",
             "ALP_CC3501E_RESP_ERR_TIMEOUT = 0x03",
@@ -12107,7 +12570,7 @@
             "ALP_CC3501E_RESP_ERR_STATE = 0x09",
             "ALP_CC3501E_RESP_ERR_INTERNAL = 0xFF"
           ],
-          "hash": "a1d6e7380eb9984a",
+          "hash": "9cde38b200d4b3b5",
           "kind": "enum"
         },
         "alp_cc3501e_role_t": {
@@ -12375,6 +12838,26 @@
           "kind": "struct"
         }
       },
+      "variables": {}
+    },
+    "alp/protocol/crc16.h": {
+      "functions": {
+        "alp_crc16_ccitt_false": {
+          "hash": "39657e6680627570",
+          "signature": "static inline uint16_t alp_crc16_ccitt_false(const uint8_t *buf, size_t len);"
+        },
+        "alp_crc16_ccitt_false_update": {
+          "hash": "94bccf5caa13bd1a",
+          "signature": "static inline uint16_t alp_crc16_ccitt_false_update(uint16_t crc, const uint8_t *buf, size_t len);"
+        }
+      },
+      "macros": {
+        "ALP_CRC16_CCITT_FALSE_INIT": {
+          "hash": "5106af79c2fa1a32",
+          "value": "0xFFFFu"
+        }
+      },
+      "typedefs": {},
       "variables": {}
     },
     "alp/pwm.h": {

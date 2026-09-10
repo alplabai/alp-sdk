@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-rtc-tick-probe bench app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the burst-read + TEST A/B
+# loops against the real board target.
+#
+# Compile-checks the driver + raw-register path on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- the electrical settlement needs the real BRD_I2C bus and a
+# multi-minute bench run (TEST A's 30 s window + TEST B's 55 x 1100 ms
+# intervals).
+
+sample:
+  name: aen-rtc-tick-probe
+  description: |
+    Settles whether an intermittent RV-3028-C7 seconds-field stall (#2037)
+    is the RTC, the I2C read, or the host's kernel timebase, on the
+    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE). TEST A measures the
+    kernel timebase against the RTC (+-5 ppm) across a real 30 s window --
+    the single load-bearing number. TEST B runs 55 x 1100 ms intervals (the
+    demo's own cadence) and, on any interval where the seconds byte does
+    not change, cross-checks STATUS UF (0x0E bit 4) and the UNIX Time
+    counter (0x1B..0x1E) as independent witnesses for whether the counter
+    ticked anyway. Never writes register 0x00 (Seconds) or CONTROL_2's
+    RESET bit; only write this app performs on its own account is a plain
+    STATUS write to disarm UF between samples.
+
+tests:
+  alp_sdk.examples.aen.rtc_tick_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - rtc
+    build_only: true   # electrical outcome needs the real bench; not a CI run.

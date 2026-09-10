@@ -13,6 +13,25 @@
 #include "alp/chips/gd32g553.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
+#include "alp/protocol/crc16.h"
+
+/* ------------------------------------------------------------------ */
+/* #2035 -- gd32g553.c's frame CRC-16 migrated off its own local        */
+/* crc16_ccitt_false() onto the shared alp_crc16_ccitt_false()          */
+/* (<alp/protocol/crc16.h>), the same helper already used on the        */
+/* CC3501E wire protocol.  This exercises the exact call gd32g553.c     */
+/* now makes, against the check vector its own removed comment quoted   */
+/* ("123456789" -> 0x29B1) -- so a future edit to the shared header     */
+/* that silently changes the algorithm reddens here, not just on the    */
+/* CC3501E side.                                                        */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_frame_crc16_check_vector)
+{
+	uint16_t crc = alp_crc16_ccitt_false((const uint8_t *)"123456789", 9u);
+
+	zassert_equal(crc, 0x29B1u, "CRC-16/CCITT-FALSE check-vector mismatch: got 0x%04x", crc);
+}
 
 /* ------------------------------------------------------------------ */
 /* gd32g553 -- V2N supervisor MCU host driver, NULL-arg validation     */
@@ -395,4 +414,60 @@ ZTEST(alp_chips, test_gd32g553_ota_ops_reject_pre_v06_peer)
 	zassert_equal(gd32g553_ota_write_chunk(&v05, 0u, data, sizeof(data), &rx),
 	              ALP_ERR_NOSUPPORT,
 	              "ota_write_chunk must refuse a v0.5 peer");
+}
+
+/* ------------------------------------------------------------------ */
+/* #2035 -- gd32g553_ota_image_crc32() (src/zephyr/gd32g553_ota_crc_    */
+/* zephyr.c).  native_sim never selects CONFIG_CRC_ALIF (no Alif        */
+/* devicetree node exists there), so every case below exercises the     */
+/* portable software fallback -- exactly the path every real board      */
+/* takes today too, since no shipping board enables crc0 by default     */
+/* (opt-in per board/example overlay, matching crc_alif's own DT        */
+/* binding convention).  Reference values cross-checked against         */
+/* Python's zlib.crc32 (the wire protocol's own "zlib-compatible"       */
+/* contract, docs/gd32-bridge-protocol.md).                             */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_null_args)
+{
+	uint32_t      crc     = 0u;
+	const uint8_t data[1] = { 0u };
+
+	zassert_equal(gd32g553_ota_image_crc32(data, sizeof(data), NULL), ALP_ERR_INVAL);
+	zassert_equal(gd32g553_ota_image_crc32(NULL, 1u, &crc), ALP_ERR_INVAL);
+
+	/* NULL image with a zero length is not an error -- the empty buffer. */
+	zassert_equal(gd32g553_ota_image_crc32(NULL, 0u, &crc), ALP_OK);
+	zassert_equal(crc, 0x00000000u, "CRC32 of the empty buffer is 0");
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_check_vector)
+{
+	/* The standard CRC-32/ISO-HDLC check value: 9 ASCII bytes, deliberately
+	 * NOT a multiple of 4 -- the hardware's 32-bit word path (HWRM
+	 * 15.2.5.3.6) cannot consume this length whole, so this also proves
+	 * the length-based HW/SW split falls back correctly rather than
+	 * mis-computing or rejecting the call. */
+	uint32_t crc = 0u;
+
+	zassert_equal(gd32g553_ota_image_crc32((const uint8_t *)"123456789", 9u, &crc), ALP_OK);
+	zassert_equal(crc, 0xCBF43926u, "check-vector CRC32 mismatch: got 0x%08x", crc);
+}
+
+ZTEST(alp_chips, test_gd32g553_ota_image_crc32_longer_buffer)
+{
+	/* 256 bytes, a 4-byte-aligned length (the shape a real OTA image chunk
+	 * takes and the shape the hardware word path would consume), cross-
+	 * checked against zlib.crc32(bytes(range(256))) computed independently
+	 * on the host. */
+	uint8_t buf[256];
+
+	for (size_t i = 0; i < sizeof(buf); i++) {
+		buf[i] = (uint8_t)i;
+	}
+
+	uint32_t crc = 0u;
+
+	zassert_equal(gd32g553_ota_image_crc32(buf, sizeof(buf), &crc), ALP_OK);
+	zassert_equal(crc, 0x29058C73u, "256-byte buffer CRC32 mismatch: got 0x%08x", crc);
 }

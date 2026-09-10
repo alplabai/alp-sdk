@@ -284,9 +284,21 @@ static int sdhc_dwc_clock_set(struct dwc_sdhc_regs *regs, uint32_t freq_hz)
 	uint32_t base_clk_hz;
 	uint32_t timeout = DWC_SDHC_CLK_STABLE_TIMEOUT_US;
 
-	/* Read base clock from capabilities */
+	/*
+	 * Read base clock from capabilities.
+	 *
+	 * PATCH vs the fork (#2035): this shifted by DWC_SDHC_BASE_CLK_FREQ_Pos
+	 * (7), one bit short of where DWC_SDHC_BASE_CLK_FREQ_Msk actually puts
+	 * the field -- the mask is built from DWC_SDHC_FREQ_SEL_Pos (8)
+	 * (0xFFU << 8), so the extracted byte sits at bit 8, not bit 7. Shifting
+	 * by one less than a field's own bit position always doubles its value
+	 * (the field's own top bit becomes an extra low bit instead of being
+	 * shifted out), so this silently reported the SD base clock at 2x its
+	 * real value on every board -- a computed number, not a measured one.
+	 * Shift by DWC_SDHC_FREQ_SEL_Pos, the same position the mask uses.
+	 */
 	base_clk_mhz = (regs->DWC_SDHC_CAPABILITIES1_R & DWC_SDHC_BASE_CLK_FREQ_Msk)
-			>> DWC_SDHC_BASE_CLK_FREQ_Pos;
+			>> DWC_SDHC_FREQ_SEL_Pos;
 	if (base_clk_mhz == 0) {
 		base_clk_mhz = DWC_SDHC_DEFAULT_BASE_CLK_MHZ;
 	}

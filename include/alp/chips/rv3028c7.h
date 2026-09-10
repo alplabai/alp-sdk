@@ -54,7 +54,9 @@ typedef struct {
 	uint8_t  second;  /**< 0..59 */
 	uint8_t  minute;  /**< 0..59 */
 	uint8_t  hour;    /**< 0..23 */
-	uint8_t  weekday; /**< 1..7 (1 = Sunday by convention) */
+	uint8_t  weekday; /**< 0..6, raw WEEKDAY (03h) counter value -- resets to 0 at
+	                    *   POR, no fixed day mapping (App. Manual Rev. 1.4 Sec.
+	                    *   3.4 "03h -- Weekday", p.16). */
 	uint8_t  day;     /**< 1..31 */
 	uint8_t  month;   /**< 1..12 */
 	uint16_t year;    /**< Full year 2000..2099 */
@@ -69,7 +71,13 @@ typedef struct {
 } rv3028c7_alarm_match_t;
 
 typedef struct {
-	bool       initialised;
+	bool initialised;
+	/* PORF (Power-On-Reset Flag, STATUS bit 0) as last seen -- and
+     * cleared -- by rv3028c7_init().  This part has no separate
+     * oscillator-stop flag; PORF is the datasheet's authoritative
+     * "is the stored time trustworthy" indicator (Application
+     * Manual Rev. 1.4 p.22).  Query via rv3028c7_was_cold_start(). */
+	bool       cold_start;
 	alp_i2c_t *bus;
 	/* Per-source handler table.  Indexed by rv3028c7_src_t.  NULL
      * means "source not registered -- ignore on dispatch".  Default
@@ -82,11 +90,41 @@ typedef struct {
 	void *src_handler[7]; /* rv3028c7_src_handler_t */
 } rv3028c7_t;
 
-/** @brief Probe the RTC, clear the oscillator-stop flag (set on
- *         power-on), and configure 24-hour mode. */
+/** @brief Probe the RTC, record + clear PORF (Power-On-Reset Flag --
+ *         this part has no separate oscillator-stop flag; PORF is
+ *         set at every power-on and stays latched until firmware
+ *         clears it, Application Manual Rev. 1.4 p.22), and force
+ *         24-hour mode.
+ *
+ *  Call @ref rv3028c7_was_cold_start afterwards to learn whether
+ *  PORF was set going in, i.e. whether the time this RTC is holding
+ *  should be treated as trustworthy. */
 alp_status_t rv3028c7_init(rv3028c7_t *ctx, alp_i2c_t *bus);
 
-/** @brief Read the current wall-clock time. */
+/** @brief Report whether PORF was set at the most recent
+ *         @ref rv3028c7_init call.
+ *
+ *  rv3028c7_init() always clears PORF as part of bring-up, so this
+ *  accessor is the only way to learn whether it was set going in --
+ *  i.e. whether this is a cold start (RTC just powered up, time not
+ *  yet trustworthy) or a warm one (RTC has been running, time is
+ *  whatever was last set).
+ *
+ *  @param ctx  RV-3028-C7 driver context (must be initialised).
+ *  @param out  Output: true if PORF was set at init time.
+ *  @return ALP_OK, ALP_ERR_INVAL (@p out NULL), or ALP_ERR_NOT_READY. */
+alp_status_t rv3028c7_was_cold_start(rv3028c7_t *ctx, bool *out);
+
+/** @brief Read the current wall-clock time.
+ *
+ *  @return ALP_OK, ALP_ERR_NOT_READY, ALP_ERR_INVAL, or ALP_ERR_IO.
+ *          ALP_ERR_IO also covers a stalled-bus read: Application
+ *          Manual Rev. 1.4 p.53 -- a transaction slower than 950 ms
+ *          trips the part's internal bus timeout and a subsequent
+ *          read returns all 0xFF; this function range-checks the
+ *          decoded fields and reports that condition as ALP_ERR_IO
+ *          rather than handing back a bogus but well-formed-looking
+ *          time. */
 alp_status_t rv3028c7_get_time(rv3028c7_t *ctx, rv3028c7_time_t *out);
 
 /** @brief Write a wall-clock time (24-hour mode). */
@@ -172,10 +210,14 @@ alp_status_t rv3028c7_register_handler(rv3028c7_t            *ctx,
 alp_status_t rv3028c7_dispatch_irq(rv3028c7_t *ctx, uint8_t *status_seen);
 
 /** Source selector for the `CLKOUT` pin.  These map to the
- *  `CLKOUT_FD[2:0]` field in `EEPROM_CLKOUT` (0x35); writing the
- *  EEPROM image takes effect after the next refresh.  Subset of the
- *  full table -- the practical "use CLKOUT as a second IRQ line"
- *  modes are the periodic-timer + countdown-timer routes. */
+ *  `CLKOUT_FD[2:0]` field in `EEPROM_CLKOUT` (0x35).
+ *  `rv3028c7_route_clkout()` writes the RAM mirror first, and the RAM
+ *  mirror -- not the EEPROM backing store -- is the active zone
+ *  (Application Manual Rev. 1.4 section 4.6.9, p.57), so the new
+ *  source takes effect immediately; the EEPROM commit only makes it
+ *  survive the next refresh.  Subset of the full table -- the
+ *  practical "use CLKOUT as a second IRQ line" modes are the
+ *  periodic-timer + countdown-timer routes. */
 typedef enum {
 	RV3028C7_CLKOUT_32_768_HZ = 0,
 	RV3028C7_CLKOUT_8192_HZ   = 1,
@@ -183,7 +225,8 @@ typedef enum {
 	RV3028C7_CLKOUT_64_HZ     = 3,
 	RV3028C7_CLKOUT_32_HZ     = 4,
 	RV3028C7_CLKOUT_1_HZ      = 5,
-	RV3028C7_CLKOUT_PERIODIC  = 6, /**< Pulses on Periodic-update (= bit 4 of STATUS) */
+	RV3028C7_CLKOUT_PERIODIC  = 6, /**< Pulses on the predefined periodic countdown-timer
+	                                 *   interrupt (TF, STATUS bit 3) -- not UF/bit 4 (p.37). */
 	RV3028C7_CLKOUT_LOW       = 7, /**< CLKOUT driven low (effectively disabled). */
 } rv3028c7_clkout_src_t;
 

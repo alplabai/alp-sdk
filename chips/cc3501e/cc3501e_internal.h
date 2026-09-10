@@ -58,4 +58,40 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
+/* #2035: whether opcode @p cmd is allowed to reply all-zero (status byte +
+ * data) without cc3501e_request_locked() treating that as the #1378
+ * dead-phase alias.  Not `static` -- and declared here, not just in
+ * cc3501e_core.c -- purely so tests/zephyr/chips/src/test_cc3501e.c can
+ * exercise the classification directly (see cc3501e_core.c for the full
+ * rationale and the per-opcode justifications). */
+bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd);
+
+/* v4.0 (#2035): pure version-gate decision cc3501e_reset() defers to -- see
+ * cc3501e_core.c for the full rationale.  Not `static`, same test-visibility
+ * reason as its neighbours in this header. */
+bool cc3501e_fw_major_is_acceptable(uint8_t fw_major);
+
+/* v4.0 (#2035): the pure reply-decision cc3501e_request_locked() defers to --
+ * major-aware status decode (legacy 0x00 vs 4.0 0x5A), the CRC-16/CCITT-FALSE
+ * check on a fw_proto_major-4 wire, and the #1378 dead-phase guard, all in one
+ * place.  Not `static`, for the same test-visibility reason as
+ * cc3501e_reply_may_be_all_zero() above: it takes no ctx and does no I/O, so
+ * tests/zephyr/chips/src/test_cc3501e.c can drive every wire shape (legacy,
+ * 4.0-valid-CRC, 4.0-corrupted-CRC, an all-zero dead phase under each) with
+ * fabricated frames and no SPI bus.  See cc3501e_core.c for the full
+ * rationale. */
+alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
+                                   uint8_t           fw_proto_major,
+                                   const uint8_t     reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                   const uint8_t    *payload,
+                                   uint16_t          payload_len);
+
+/* #2035: whether @p mac is a plausible station address -- rejects an
+ * all-zero address and one with the IEEE group/multicast bit set (mac[0]
+ * bit 0), neither of which a real CC3501E station MAC can be.  Not
+ * `static` for the same test-visibility reason as
+ * cc3501e_reply_may_be_all_zero() above; used by cc3501e_wifi_get_mac()
+ * in cc3501e_wifi.c. */
+bool cc3501e_mac_is_valid(const uint8_t mac[CC3501E_MAC_LEN]);
+
 #endif /* CC3501E_INTERNAL_H */

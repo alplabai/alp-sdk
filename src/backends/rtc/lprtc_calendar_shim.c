@@ -84,8 +84,11 @@
  *
  * The bus is no longer the blocker.  BENCH-SETTLED 2026-09-05 on 2626-R2
  * silicon: BRD_I2C works on the SoC pad's internal pull-up alone, the rv3028c7
- * ACKs at 0x52, its ID register 0x28 reads 0x44 and its seconds register
- * advances (0x01 -> 0x02), so the oscillator runs.  The earlier verdict here --
+ * ACKs at 0x52, its ID register 0x28 reads 0x44 (per RV-3028-C7 Application
+ * Manual Rev. 1.4 Sec. 3.14, only the high nibble -- HID 0x4 -- is a
+ * documented identity field; the low VID nibble is production-line, not
+ * identity) and its seconds register advances (0x01 -> 0x02), so the
+ * oscillator runs.  The earlier verdict here --
  * "no usable pull-up, needs R93/R94 stuffed", bench-settled 2026-08-31 on the
  * r1 module (serial 2617-0001) -- was measured on hardware where the rv3028c7
  * sits on LPI2C0 (P7_4/P7_5) and NOTHING is attached to P7_0/P7_1, so it

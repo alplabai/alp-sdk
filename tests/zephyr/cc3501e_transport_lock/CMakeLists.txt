@@ -17,4 +17,5 @@ target_sources(app PRIVATE
     ${CC3501E_DRIVER_SOURCES}
 )
 target_include_directories(app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cc3501e_common)

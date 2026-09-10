@@ -346,7 +346,7 @@ pull-up alone.**
 
 | Address | Part | Result |
 |---|---|---|
-| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44`; seconds `0x01` -> `0x02` (oscillator running) |
+| `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44` (HID nibble `0x4` matches; VID nibble is production-line, not identity, per RV-3028-C7 Application Manual Rev. 1.4 §3.14); seconds `0x01` -> `0x02` (oscillator running) |
 | `0x48` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
 | `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
 

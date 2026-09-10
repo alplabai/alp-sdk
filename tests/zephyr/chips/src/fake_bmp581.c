@@ -1,0 +1,146 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Fake Bosch BMP581 i2c-emul target.  Byte-register echo (same shape
+ * as fake_lsm6dso.c) pre-populated with CHIP_ID = 0x50 so
+ * bmp581_init() succeeds, plus a per-register write counter so the
+ * chips ztest can pin exact register writes for the interrupt-config
+ * / data-ready paths without a real chip.
+ */
+
+#define DT_DRV_COMPAT alp_fake_bmp581
+
+#include <errno.h>
+#include <string.h>
+
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/emul.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/i2c_emul.h>
+
+#include "fakes.h"
+
+#define REG_CHIP_ID 0x01
+
+/* #2035: bmp581_set_sampling() must transition through STANDBY before
+ * touching OSR_CONFIG/ODR_CONFIG (BST-BMP581-DS004-13 §4.3/§4.3.8, pp.16,18).
+ * write_count alone can't prove ordering (a call that wrote everything in
+ * one shot has the same counts as one that staged through STANDBY first),
+ * so also keep a bounded write-order log the test can walk. */
+#define FAKE_BMP581_LOG_CAP 16
+
+struct fake_bmp581_data {
+	uint8_t  regs[256];
+	uint32_t write_count[256];
+	uint8_t  log_reg[FAKE_BMP581_LOG_CAP];
+	uint8_t  log_val[FAKE_BMP581_LOG_CAP];
+	uint32_t log_len;
+};
+
+static struct fake_bmp581_data *g_fake_bmp581;
+
+static void seed_defaults(struct fake_bmp581_data *d)
+{
+	memset(d->regs, 0, sizeof d->regs);
+	memset(d->write_count, 0, sizeof d->write_count);
+	memset(d->log_reg, 0, sizeof d->log_reg);
+	memset(d->log_val, 0, sizeof d->log_val);
+	d->log_len           = 0;
+	d->regs[REG_CHIP_ID] = 0x50u;
+}
+
+static int
+fake_bmp581_transfer(const struct emul *target, struct i2c_msg *msgs, int num_msgs, int addr)
+{
+	(void)addr;
+	struct fake_bmp581_data *d = target->data;
+
+	if (num_msgs == 1 && (msgs[0].flags & I2C_MSG_READ) == 0) {
+		if (msgs[0].len < 1) return -EIO;
+		const uint8_t reg0 = msgs[0].buf[0];
+		for (uint32_t i = 1; i < msgs[0].len; i++) {
+			uint8_t r  = (uint8_t)(reg0 + i - 1);
+			d->regs[r] = msgs[0].buf[i];
+			d->write_count[r]++;
+			if (d->log_len < FAKE_BMP581_LOG_CAP) {
+				d->log_reg[d->log_len] = r;
+				d->log_val[d->log_len] = msgs[0].buf[i];
+				d->log_len++;
+			}
+		}
+		return 0;
+	}
+	if (num_msgs == 2 && (msgs[0].flags & I2C_MSG_READ) == 0 &&
+	    (msgs[1].flags & I2C_MSG_READ) != 0) {
+		if (msgs[0].len < 1) return -EIO;
+		const uint8_t reg0 = msgs[0].buf[0];
+		for (uint32_t i = 0; i < msgs[1].len; i++) {
+			msgs[1].buf[i] = d->regs[(uint8_t)(reg0 + i)];
+		}
+		return 0;
+	}
+	return -EIO;
+}
+
+static const struct i2c_emul_api fake_bmp581_api = {
+	.transfer = fake_bmp581_transfer,
+};
+
+static int fake_bmp581_init(const struct emul *target, const struct device *parent)
+{
+	(void)parent;
+	struct fake_bmp581_data *d = target->data;
+	g_fake_bmp581              = d;
+	seed_defaults(d);
+	return 0;
+}
+
+/* See fake_rv3028c7.c's comment above its FAKE_RV3028C7_DEFINE for
+ * why this bare placeholder device is needed. */
+#define FAKE_BMP581_DEFINE(n) \
+	static struct fake_bmp581_data fake_bmp581_data_##n; \
+	DEVICE_DT_INST_DEFINE(n, NULL, NULL, NULL, NULL, POST_KERNEL, 90, NULL); \
+	EMUL_DT_INST_DEFINE(n, fake_bmp581_init, &fake_bmp581_data_##n, NULL, &fake_bmp581_api, NULL);
+
+DT_INST_FOREACH_STATUS_OKAY(FAKE_BMP581_DEFINE)
+
+/* ------------------------------------------------------------------ */
+/* Test-side inspection API                                             */
+/* ------------------------------------------------------------------ */
+
+uint8_t fake_bmp581_get_reg(uint8_t reg)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->regs[reg] : 0u;
+}
+
+void fake_bmp581_set_reg(uint8_t reg, uint8_t val)
+{
+	if (g_fake_bmp581) g_fake_bmp581->regs[reg] = val;
+}
+
+uint32_t fake_bmp581_write_count(uint8_t reg)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->write_count[reg] : 0u;
+}
+
+void fake_bmp581_reset(void)
+{
+	if (g_fake_bmp581) seed_defaults(g_fake_bmp581);
+}
+
+uint32_t fake_bmp581_log_len(void)
+{
+	return g_fake_bmp581 ? g_fake_bmp581->log_len : 0u;
+}
+
+uint8_t fake_bmp581_log_reg(uint32_t idx)
+{
+	return (g_fake_bmp581 && idx < FAKE_BMP581_LOG_CAP) ? g_fake_bmp581->log_reg[idx] : 0u;
+}
+
+uint8_t fake_bmp581_log_val(uint32_t idx)
+{
+	return (g_fake_bmp581 && idx < FAKE_BMP581_LOG_CAP) ? g_fake_bmp581->log_val[idx] : 0u;
+}
