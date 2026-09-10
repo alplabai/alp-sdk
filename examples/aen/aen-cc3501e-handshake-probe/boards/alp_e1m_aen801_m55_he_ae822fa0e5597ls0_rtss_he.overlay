@@ -1,0 +1,231 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-cc3501e-handshake-probe -- app overlay for the E1M-AEN801 (Alif
+ * Ensemble E8, M55-HE), bench RAM-run via J-Link.
+ *
+ * Everything below is transcribed from aen-evk-demo's phase-8 overlay block
+ * (see that file's own header for the full derivation behind every value
+ * here) -- this app reproduces the SAME bring-up so the -5 it is chasing is
+ * measured on the identical hardware path, not a different one. Trimmed to
+ * exactly what phase 8 needs: the SoM-internal Alif <-> CC3501E bridge (SPI1
+ * hardware SS0, the LP-GPIO island carrying WIFI_EN/nRESET, and the READY
+ * input), the mandatory bench ITCM retarget, AND (see the block below,
+ * deliberately kept even though no other phase's hardware needs it here)
+ * the SRAM0 system-RAM placement -- phase 8's own SPI1 FIFO-refill timing is
+ * the reason that placement exists, so a probe re-exercising that exact
+ * link cannot drop it. None of aen-evk-demo's other thirteen phases' OWN
+ * hardware (PWM LED, SD, Ethernet, I2S/PDM, JPEG) is declared here -- this
+ * app touches none of it, and carrying it would only risk a pad conflict
+ * with the bridge pins.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/*
+ * ============================================================================
+ * SYSTEM-RAM PLACEMENT -- MATCHES aen-evk-demo's phase 8, deliberately
+ * ============================================================================
+ *
+ * This app trims aen-evk-demo's overlay down to exactly the SoM-internal
+ * CC3501E bridge (see the block below) -- EXCEPT for this one piece, which
+ * it keeps even though nothing else here needs it.
+ *
+ * aen-evk-demo's own overlay (see ITS header for the full derivation, which
+ * this app does not repeat) documents that phase 8's SPI1 FIFO refill --
+ * the exact link this app re-exercises step for step -- is the one phase
+ * sensitive to cache-on vs cache-off timing on this silicon: a DesignWare
+ * SSI master that underruns its TX FIFO deasserts its own chip-select
+ * mid-frame, and the demo runs from uncached global SRAM0 with
+ * CONFIG_DCACHE=n (see prj.conf) rather than the M55's tightly-coupled
+ * DTCM specifically to keep that FIFO-refill loop on the same timing this
+ * silicon was bench-validated against.
+ *
+ * A probe built to explain that demo's own failure cannot measure a link
+ * that is FASTER than the demo's on precisely the axis the demo's own
+ * comment calls out -- that would not be a controlled comparison, it would
+ * be a different experiment. So this app carries the same retarget, even
+ * though (unlike the demo) it has no Ethernet DMA rings or JPEG buffers
+ * that need SRAM0 for their own reasons -- one disjoint 512 KiB window is
+ * more than this app's own footprint needs, but a narrower carve-out would
+ * only add a second constant to keep in sync with the demo for no
+ * behavioural benefit.
+ */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_K(64)>;
+};
+
+&soc {
+	/* Plain "mmio-sram", NOT "zephyr,memory-region" -- see aen-evk-demo's
+	 * overlay for why a second memory-region-compatible node here would
+	 * alias the linker region instead of extending it. */
+	sram0_sys: sram@2010000 {
+		compatible = "mmio-sram";
+		reg = <0x02010000 DT_SIZE_K(512)>;
+	};
+};
+
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ * PATH-REFERENCE form (&itcm), NOT the <&itcm> phandle-array form -- the
+ * phandle-array form yields CONFIG_FLASH_SIZE=0 and the image overflows the
+ * (empty) FLASH region at link time. System RAM (zephyr,sram) is retargeted
+ * separately, to &sram0_sys above -- see that block's header.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+		zephyr,sram = &sram0_sys;
+	};
+};
+
+/*
+ * ============================================================================
+ * The SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge
+ * ============================================================================
+ *
+ *     net          Alif pad       dir   CC3501E pad
+ *     ----------   ------------   ---   ---------------------
+ *     WIFI_EN      P15_5          out   (supply gate)
+ *     E_WIFI.NRST  P15_1_FLEX     out   (reset)
+ *     SPI1.SCK     P14_6          out   GPIO_27 (CC35 SPI0 slave)
+ *     SPI1.MOSI    P14_5          out   GPIO_28
+ *     SPI1.MISO    P14_4          in    GPIO_29
+ *     SPI1.SS0     P14_7          out   CC35 SPI0 CSN
+ *     READY        P2_6           in    GPIO_17
+ *
+ * SoM-INTERNAL fact (metadata/e1m_modules/aen/inter-chip.tsv), not an E1M
+ * edge pad -- hence an app overlay, not the board tree.
+ */
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO), plus the
+	 * hardware SS0 chip-select on P14_7. SS0 is the dwc-ssi peripheral's
+	 * OWN select -- not a GPIO bodge, not CS-less, not static-low: the
+	 * master asserts and deasserts it per transfer, which is exactly what
+	 * frames each phase of the bridge's request/reply exchange. Do NOT
+	 * add cs-gpios here; that installs a software CS and breaks the
+	 * framing the firmware side is built around.
+	 *
+	 * input-enable on MISO because on this SoC a pad's INPUT BUFFER is a
+	 * PADCTRL bit that only pinctrl sets -- without it the pad never
+	 * senses what the slave drives.
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+
+		/*
+		 * P2_6 = the CC3501E READY / host-IRQ input (CC35 GPIO_17). Its
+		 * mux default already IS GPIO, but the pad input buffer still
+		 * has to be enabled here or alp_gpio_read(P2_6) reads 0 forever
+		 * whatever the CC35 drives -- and the host then silently falls
+		 * back to fixed settle gaps instead of gating each reply phase
+		 * on the slave's actual re-arm.
+		 *
+		 * Lives inside THIS state rather than a standalone one applied
+		 * at runtime because P2_6's alternate function is SPI1_SCLK_A:
+		 * a second pinctrl pass after SPI1 is up killed the bridge on
+		 * silicon (aen-evk-demo, bench-measured). Applied in the SPI
+		 * driver's single init pass it is inert.
+		 */
+		group2 {
+			pinmux = <PIN_P2_6__GPIO>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
+ * in ensemble_e8_peripherals.dtsi (which declares only the customer-facing
+ * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1
+ * base (+0x1000 per instance from spi0's 0x48103000).
+ *
+ * clock-frequency is REQUIRED, not decorative: without it spi_dw_alif's
+ * configure takes the clock-control path, which fails -EINVAL for the
+ * gateless dummy ALIF_SPI_CLK, and every transceive then returns
+ * ALP_ERR_INVAL at zero SCLK. 200 MHz is the real SSI functional clock (E8
+ * HWRM); BAUDR = clock-frequency / freq_hz, and cc3501e_bridge.h asks for
+ * 25 MHz = /8.
+ *
+ * rx-delay: NOT what clocks the link -- src/cc3501e_bridge.c pokes
+ * 0x48104000+0xf0 with CC3501E_BRIDGE_RX_SAMPLE_DLY right after
+ * alp_spi_open() returns, and that constant (silicon-measured, see that
+ * file's header) is what the bridge actually runs at. Kept at <2> anyway
+ * because the poke is wrapped in `#if CC3501E_BRIDGE_RX_SAMPLE_DLY > 0` --
+ * setting the constant to 0 does not mean "no delay", it means this
+ * property is what survives.
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>; /* BENCH-TBD: confirm SPI1 IRQ, same as aen-evk-demo */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		rx-delay = <2>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * The LP-GPIO island carries WIFI_EN (P15_5) and E_WIFI.NRST (P15_1_FLEX).
+ * No pinctrl group is needed for their mux: P15_x function 0 -- the reset
+ * default -- already IS LPGPIO. Turning the pads' OUTPUT DRIVERS on is a
+ * separate matter and not a devicetree fact at all; see the raw PADCTRL
+ * write in src/cc3501e_bridge.c and the comment above it.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/* gpio2 carries the READY input (CC35 GPIO_17 -> Alif P2_6). */
+&gpio2 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 3-entry control array for the SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
+	 * These are NOT E1M edge pads, so this app does not use the 52-slot
+	 * positional E1M map; a production board file appends SoM-internal
+	 * control nets after the E1M pad slots.
+	 *
+	 * There must be exactly ONE "alp,pin-array" node in the tree -- a
+	 * second one broke pin resolution outright on the aen-evk-demo bench
+	 * (2026-08-26): the bridge failed as if WIFI_EN were absent, which
+	 * reads like a hardware fault and is not one.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>, /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio2 6 GPIO_ACTIVE_HIGH>;  /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+	};
+};
