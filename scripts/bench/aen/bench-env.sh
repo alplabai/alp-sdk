@@ -421,15 +421,17 @@ bench_require_setools() {
 export AEN_OPENOCD_CFG="${AEN_OPENOCD_CFG:-}"
 
 # AEN_OPENOCD_USB_LOCATION -- the labgrid-pinned USB path for the AEN E8's
-# J-Link (on alplab-gw: 3-4.4.3 -- see the DP-ID safety gate comment above
-# for why a bare serial can't disambiguate the three same-serial probes on
-# this bench; OpenOCD, unlike JLinkExe, CAN select by USB path). Resolve it
-# from `labgrid-client -p e1m-aen-evk-01 show`'s swd resource -- NEVER
-# hardcode a path here or in the shared config (that file's own header says
-# so: it is loaded by labgrid's OpenOCDDriver, which supplies this itself
-# when driving the board for real; a by-hand run on the exporter is expected
-# to prepend the flag on the command line instead of editing it in). NO
-# default: host-specific, like SE_UART/AEN_OPENOCD_CFG above.
+# J-Link (see the DP-ID safety gate comment above for why a bare serial can't
+# disambiguate the three same-serial probes on this bench -- all three E8s
+# answer the same SW-DP 0x4c013477, so the USB path is the ONLY thing that
+# selects which physical board you talk to; OpenOCD, unlike JLinkExe, CAN
+# select by USB path). Resolve it per-board from
+# `labgrid-client -p <place> show`'s swd resource -- NEVER hardcode a path
+# here or in the shared config (that file's own header says so: it is loaded
+# by labgrid's OpenOCDDriver, which supplies this itself when driving the
+# board for real; a by-hand run on the exporter is expected to prepend the
+# flag on the command line instead of editing it in). NO default:
+# host-specific, like SE_UART/AEN_OPENOCD_CFG above.
 export AEN_OPENOCD_USB_LOCATION="${AEN_OPENOCD_USB_LOCATION:-}"
 
 # bench_require_openocd [cfg-override] — guard for openocd-ram-run.sh. Errors
@@ -456,9 +458,13 @@ bench_require_openocd() {
 		echo "           J-Links and two share a cloned OEM serial -- with no USB" >&2
 		echo "           path pinned, OpenOCD picks a probe arbitrarily, and its" >&2
 		echo "           first actions are halt + load_image (alp-sdk#2037)." >&2
-		echo "           Resolve it from: labgrid-client -p e1m-aen-evk-01 show" >&2
-		echo "           (the swd resource's USB path) and export it, e.g.:" >&2
-		echo "               export AEN_OPENOCD_USB_LOCATION=3-4.4.3" >&2
+		echo "           All three E8 boards answer the same SW-DP 0x4c013477," >&2
+		echo "           so the USB path is the ONLY thing that selects the" >&2
+		echo "           board -- resolve YOUR board's from:" >&2
+		echo "               labgrid-client -p e1m-aen-evk-01 show" >&2
+		echo "           (the swd resource's USB path) and export exactly that" >&2
+		echo "           value, e.g.:" >&2
+		echo "               export AEN_OPENOCD_USB_LOCATION=<path from the show above>" >&2
 		return 2
 	fi
 	if ! command -v openocd >/dev/null 2>&1; then

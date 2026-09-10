@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-09",
+  "generated": "2026-09-10",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -3008,6 +3008,10 @@
         }
       },
       "macros": {
+        "ALP_CC3501E_RX_SCRATCH_NO_STATUS": {
+          "hash": "8a6b1ef78d1c9029",
+          "value": "0xDAu"
+        },
         "CC3501E_EVENT_SUBSCRIBERS": {
           "hash": "00515043b2f6006c",
           "value": "4"

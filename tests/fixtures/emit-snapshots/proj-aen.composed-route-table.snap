@@ -43,7 +43,7 @@
       "board_category": "gpio",
       "board_macro": "EVK_PIN_I2S_MUX_EN",
       "board_role": null,
-      "board_doc": "I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux.",
+      "board_doc": "I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin.",
       "active_low": true,
       "dispatch": "cc3501e",
       "dispatch_pin": 30,

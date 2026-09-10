@@ -718,3 +718,128 @@
 			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
 	};
 };
+
+/*
+ * ============================================================================
+ * Phase 11 -- sound out (I2S3 -> TAS2563 x2) and PDM mic capture
+ * ============================================================================
+ *
+ * Two SEPARATE peripherals, both undeclared by the upstream SoC dtsi and both
+ * silicon-proven by dedicated reference apps this block transcribes from:
+ *
+ *   - I2S3 (i2s3@49017000), examples/aen/aen-i2s-amp-alif's overlay. The
+ *     board's I2S0_* signals route to I2S3_*_A on P9_3 (SDO) / P9_4 (SCLK) /
+ *     P9_5 (WS) -- per metadata/e1m_modules/aen/from-alif.tsv, NOT i2s0, which
+ *     an earlier cut of that app wrongly used. SDI (P9_2) is not declared:
+ *     this phase only plays, it never reads back over I2S.
+ *   - the HP PDM (pdm@4902d000), examples/aen/aen-pdm-mic-alif's overlay. The
+ *     EVK's 4x MP34DT05 mics reach it as PDM_C0/PDM_D0 on P6_1/P6_0 (clock 0 /
+ *     data -> channels 0,1) and PDM_C2/PDM_D2 on P11_4/P5_4 (clock 2 / data ->
+ *     channels 4,5). This overlay declares ONLY the first pair:
+ *     <alp/audio.h>'s Zephyr backend caps channels at 2
+ *     (src/backends/audio/zephyr_drv.c), so channels 4/5 are unreachable
+ *     through the portable surface this phase uses regardless of whether
+ *     their pads are declared -- two mics is already enough to prove the
+ *     loop closed.
+ *
+ * CLOCKING -- the load-bearing fix BOTH reference apps needed, already folded
+ * in here for free. I2S and the HP PDM both derive their functional clock
+ * from the CGU 76.8 MHz (HFOSCx2) master source, which the upstream
+ * clock_control_alif.c driver never enables on its own (it only flips
+ * per-peripheral gates) -- and the HP PDM additionally needs the
+ * EXPMST0_CTRL IPCLK/PCLK force bits. Both reference apps originally poked
+ * those registers by hand from application code; that hand-poke is GONE from
+ * both apps' CURRENT src/main.c (checked, not assumed -- their READMEs still
+ * describe the old hand-poke and are stale on this point), superseded by
+ * zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch,
+ * which folds both into clock_control_alif.c's .on path (a no-op for every
+ * non-audio clock) plus an I2S bit-clock .set_rate. This overlay needs
+ * nothing beyond the `clocks = <&clockctrl ALIF_I2S3_76M8_CLK>` /
+ * `ALIF_PDM_76M8_CLK` properties below -- i2s_configure()/dmic_configure()
+ * calling clock_control_on()/set_rate() is what triggers the patched enable.
+ *
+ * gpio5 -- EVK_PIN_AMP_ENABLE (SPI0_CS0 = P5_2, active-high SD_N) and
+ * EVK_PIN_AMP_FAULT (SPI0_MISO = P5_0, open-drain IRQ_N). Both are "overlay
+ * pins" (metadata/boards/e1m-evk.yaml's overlay_pins: block,
+ * EVK_PIN_OVERLAY_BASE + 3 / + 2) -- past the standard 52-slot E1M map this
+ * standalone app does not carry (see the alp,pin-array comment above: "these
+ * are NOT E1M edge pads, so this app does not use the 52-slot positional E1M
+ * map"). Extending that array to reach index 55 for two pins would mean
+ * ~50 placeholder entries with no other use in this app, so src/main.c
+ * instead reaches these two pads the same way it already reaches the
+ * Ethernet PHY's power/reset pins (eth_phy_power_init()) and the rotary
+ * encoder's push switch (phase_encoder()): pinctrl_configure_pins() with a
+ * raw PIN_Pxx__GPIO mux, then the standard Zephyr gpio_pin_* API against
+ * DEVICE_DT_GET(DT_NODELABEL(gpio5)) directly -- no alp,pin-array entry
+ * needed. This node only needs status = "okay"; gpio_dw applies no pad mux
+ * of its own (same note as the encoder switch's pinctrl comment above).
+ *
+ * The I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30) and SELECT (E1M IO13 ->
+ * CC3501E GPIO_13) are NOT in this file -- like phase 9's SD mux ENABLE,
+ * both are CC3501E-proxied pads driven at runtime over the inter-chip
+ * bridge phase 8 leaves up (src/cc3501e_gpio_routes.c). Devicetree describes
+ * neither.
+ */
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+
+&pinctrl {
+	pinctrl_i2s3: pinctrl_i2s3 {
+		/* TX only: SDO + SCLK + WS. SDI (P9_2) is not declared -- this
+		 * phase never reads back over I2S. */
+		group0 {
+			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
+				 <PIN_P9_5__I2S3_WS_A>;
+		};
+	};
+
+	pinctrl_pdm0: pinctrl_pdm0 {
+		/* Clock (output) -- no input-enable needed. C0 = P6_1. */
+		group0 {
+			pinmux = <PIN_P6_1__PDM_C0_C>;
+		};
+		/* Data (input) -- input-enable sets the pad REN, the same trap
+		 * called out for the SD CMD/CLK group and the QEC0 group above.
+		 * D0 = P6_0. */
+		group1 {
+			pinmux = <PIN_P6_0__PDM_D0_C>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	i2s3: i2s3@49017000 {
+		compatible = "snps,designware-i2s";
+		reg = <0x49017000 0x1000>;
+		interrupts = <144 3>;
+		pinctrl-0 = <&pinctrl_i2s3>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
+		status = "okay";
+	};
+
+	pdm: pdm@4902d000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x4902d000 0x1000>;
+		interrupts = <145 3>, <146 3>, <147 3>;
+		interrupt-names = "warning_intr", "error_intr", "audio_det_intr";
+		pinctrl-0 = <&pinctrl_pdm0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		status = "okay";
+	};
+};
+
+/* AMP_ENABLE (P5_2) / AMP_FAULT (P5_0) -- see the file-header comment above. */
+&gpio5 {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		alp-i2s0 = &i2s3;
+		alp-pdm0 = &pdm;
+	};
+};

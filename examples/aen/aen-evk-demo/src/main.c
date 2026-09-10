@@ -30,23 +30,27 @@
  *
  * SCOPE OF THIS SLICE
  * --------------------
- * Fourteen phases are registered below, run in a fixed order. Ten have
- * real, bench-proven drivers behind them and are fully implemented: the
- * first six (including phase 7, the rotary encoder -- an ATTENDED phase,
- * not a stub; see its own header comment for why an unattended run reports
- * SKIPPED rather than PASS/FAIL), plus phase 8 (the CC3501E Wi-Fi 6 / BLE
- * 5.4 coprocessor over the inter-chip SPI bridge), phase 10 (RMII Ethernet
- * through the GMAC and the on-module DP83825 PHY) and phase 13 (JPEG
- * encode on the Hantro VC9000E). The remaining four (SD card, sound,
- * screen, NPU) are stubs that always report SKIPPED with a phase-specific
- * reason -- see the "STUBS" section below for why each one differs (an
- * attended-run requirement is not the same kind of gap as hardware
- * genuinely out of scope, a larger unit of work deferred to the next
- * slice, or -- for NPU -- an image that would have to change BOOT FLOW to
- * hold the model). Attempting all eleven-plus phases of the full design in
- * one drop would have meant shipping several of them unverified against
- * real silicon; a working core that others can extend safely is worth more
- * than an unverifiable giant one.
+ * Fourteen phases are registered below, run in a fixed order. Twelve have
+ * real, bench-proven-or-hardware-exercising drivers behind them: the first
+ * six (including phase 7, the rotary encoder -- an ATTENDED phase, not a
+ * stub; see its own header comment for why an unattended run reports
+ * SKIPPED rather than PASS/FAIL), phase 8 (the CC3501E Wi-Fi 6 / BLE 5.4
+ * coprocessor over the inter-chip SPI bridge), phase 9 (the microSD card,
+ * a real write -> read -> verify round trip), phase 10 (RMII Ethernet
+ * through the GMAC and the on-module DP83825 PHY), phase 11 (sound out over
+ * I2S3 to both TAS2563 amps, PDM mic capture, an energy-correlation
+ * verdict -- see its own header for the amp-safety sequencing this phase
+ * exists to get right) and phase 13 (JPEG encode on the Hantro VC9000E).
+ * Phase 12 (screen/DSI) is not a blind stub either: it calls
+ * alp_display_open() for real and reports the grounded reason no
+ * alp-display* alias can resolve on this SoC (see its own header). Only
+ * phase 14 (NPU) is still a blind stub -- see phase_npu_stub()'s header for
+ * why it is a different kind of gap (an image that would have to change
+ * BOOT FLOW to hold the model, not hardware absence or a deferred slice).
+ * Attempting all fourteen phases of the full design in one drop would have
+ * meant shipping several of them unverified against real silicon; a
+ * working core that others can extend safely is worth more than an
+ * unverifiable giant one.
  *
  * MEMORY: phase 10 moved the whole image's SYSTEM RAM out of the M55 DTCM
  * into the global on-chip SRAM0 bank, because the GMAC DMA cannot reach
@@ -157,6 +161,9 @@
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/jpeg.h"
+#include "alp/audio.h"   /* Phase 11 only -- alp_audio_in/out_*. */
+#include "alp/i2s.h"     /* Phase 11 only -- alp_i2s_config_t, passed to tas2563_configure_i2s(). */
+#include "alp/display.h" /* Phase 12 only -- alp_display_open(); see that phase's comment. */
 #include "alp/hw_info.h" /* alp_hw_info_eeprom_t, ALP_HW_INFO_MAGIC -- manifest layout only */
 #include "alp/boards/alp_e1m_evk.h"
 
@@ -171,6 +178,8 @@
 #include "alp/chips/eeprom_24c128.h"
 #include "alp/chips/cc3501e.h"
 #include "cc3501e_link_verdict.h"
+#include "alp/chips/tas2563.h" /* Phase 11 only. */
+#include "sound_verdict.h"     /* Phase 11 only -- the energy-correlation verdict. */
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
 
@@ -1836,10 +1845,27 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
 
 /* Bounded retry for the first PING. cc3501e_reset() has already waited out
  * the boot budget, so attempt 1 usually lands; this only absorbs residual
- * ramp/boot jitter. 25 x 200 ms = 5 s, which is a bound, not a hope: a part
- * that has not answered in five seconds is not late, it is not there. */
-#define CC35_PING_RETRIES 25u
-#define CC35_PING_GAP_MS  200u
+ * ramp/boot jitter. 16 x 320 ms = 5.1 s, which is a bound, not a hope: a
+ * part that has not answered in five seconds is not late, it is not there.
+ *
+ * THE GAP MUST EXCEED THE SLAVE'S REPLY-STALL WATCHDOG, which is
+ * CC3501E_REPLY_STALL_MS = 250 in the bridge firmware's
+ * hal/ti/transport_hw_ti_spi.c.  That watchdog is the link's ONLY recovery
+ * from a phase desync -- there is no chip-select to resynchronise on, and
+ * byte-walking to realign provably parks the slave (see the cc3501e_sync()
+ * warning in chips/cc3501e/cc3501e_core.c).
+ *
+ * At the old 200 ms this retry loop was STARVING that recovery: every
+ * attempt re-stamped the slave's deadline before it could expire, so a link
+ * that desynced once stayed desynced for all 25 attempts and reported a
+ * dead part.  Measured on silicon 2026-09-10 -- 25 of 25 at -5, with a
+ * valid reply header for the PREVIOUS request sitting in the host's
+ * rx_scratch, which is what a one-transfer MISO lag looks like from here.
+ *
+ * 320 ms clears 250 ms with margin for the host's own per-attempt transport
+ * time. Attempt count drops so the five-second bound is unchanged. */
+#define CC35_PING_RETRIES 16u
+#define CC35_PING_GAP_MS  320u
 
 /* Poll-by-repeat budgets. GET_MAC, WIFI_SCAN_START and BLE_ENABLE are all
  * worker-routed on the firmware side: it answers BUSY while its worker runs
@@ -1950,6 +1976,73 @@ static bool cc35_scan_record_plausible(const cc3501e_scan_record_t *r)
 		if (r->bssid[i] != 0x00u) bssid_zero = false;
 	}
 	return !bssid_zero && (r->rssi_dbm < 0) && (r->rssi_dbm > -110);
+}
+
+/* Classify a captured 4-byte cc35_fw.rx_scratch[0..3] snapshot into words a
+ * bench log can be read without chips/cc3501e/cc3501e_core.c open beside it
+ * -- used by the BLE_ENABLE failure probe below. Order matters:
+ *
+ *   1. The driver's OWN marker first -- it is an authoritative fact
+ *      (cc3501e_request_locked() asserts it), not a guess from raw bytes,
+ *      so it must win over every pattern-match below it.
+ *   2. The two "nothing is really there" patterns -- SYNC_IDLE (a clean
+ *      parked boundary) and all-zero / all-0xFF (two DIFFERENT failure
+ *      modes that used to share one string: 0x00 is the #1378 dead-phase
+ *      alias the driver explicitly guards against; 0xFF is a line nothing
+ *      is driving at all -- conflating them hid which one a bench operator
+ *      was actually looking at).
+ *   3. The new case this probe was missing entirely: a header-SHAPED
+ *      4 bytes that is neither of the above. That is what a one-transfer
+ *      MISO lag looks like -- the slave answering from its PREVIOUS
+ *      request, not this one -- and it used to fall into the generic
+ *      "structured data" bucket below, the most reassuring of the old
+ *      three strings, for the one pattern that actually means the link is
+ *      wedged (measured on silicon 2026-09-10, see CC35_PING_GAP_MS's
+ *      comment above).
+ *   4. Only once nothing more specific matched: genuinely unclassified
+ *      "structured data". */
+static const char *cc35_describe_rx_scratch(const uint8_t rs[ALP_CC3501E_HEADER_BYTES])
+{
+	if (rs[0] == ALP_CC3501E_RX_SCRATCH_NO_STATUS) {
+		return "driver marker (0xDA) -- the call that filled this did NOT decode a status byte "
+		       "(a pre-decode transport/framing failure); see ALP_CC3501E_RX_SCRATCH_NO_STATUS "
+		       "in <alp/chips/cc3501e/core.h>";
+	}
+
+	bool all_a5 = (rs[0] == ALP_CC3501E_SYNC_IDLE) && (rs[1] == ALP_CC3501E_SYNC_IDLE) &&
+	              (rs[2] == ALP_CC3501E_SYNC_IDLE) && (rs[3] == ALP_CC3501E_SYNC_IDLE);
+	if (all_a5) {
+		return "all 0xA5 -- slave parked at a clean frame boundary on the idle marker";
+	}
+
+	bool all_00 = (rs[0] == 0x00u) && (rs[1] == 0x00u) && (rs[2] == 0x00u) && (rs[3] == 0x00u);
+	if (all_00) {
+		return "all 0x00 -- the #1378 dead-phase alias the driver guards against explicitly (a "
+		       "dead bus phase clocks back 0x00 for every byte it touches)";
+	}
+
+	bool all_ff = (rs[0] == 0xFFu) && (rs[1] == 0xFFu) && (rs[2] == 0xFFu) && (rs[3] == 0xFFu);
+	if (all_ff) {
+		return "all 0xFF -- an undriven line (distinct from all-0x00: nothing is pulling it low "
+		       "either, not even a dead phase)";
+	}
+
+	/* A "plausible header" mirrors cc3501e_request_locked()'s own hdr_ok shape
+	 * check (chips/cc3501e/cc3501e_core.c): the first byte sits in the
+	 * assigned opcode range, and the LE16 at bytes[2..3] is a payload length
+	 * in [1, ALP_CC3501E_MAX_PAYLOAD]. Deliberately NOT requiring the opcode
+	 * to differ from whatever this snapshot's own call just sent -- the
+	 * caller prints the raw bytes right beside this string, so a bench
+	 * operator can compare the two for themselves. */
+	uint16_t declared_len    = (uint16_t)rs[2] | ((uint16_t)rs[3] << 8);
+	bool looks_like_a_header = (rs[0] < ALP_CC3501E_CMD_RESERVED_VENDOR_BASE) &&
+	                           (declared_len >= 1u) && (declared_len <= ALP_CC3501E_MAX_PAYLOAD);
+	if (looks_like_a_header) {
+		return "a STALE REPLY HEADER -- the slave is answering from ONE TRANSFER BEHIND (a real "
+		       "header, just not this request's)";
+	}
+
+	return "structured data -- the slave answered something, but not a recognised shape";
 }
 
 static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
@@ -2274,6 +2367,191 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	        ? "(NOT_READY = BLE is not built into this firmware -- every shipped SoM carries it, "
 	          "so this is a real deviation, not an absent feature)"
 	        : "");
+
+	/*
+	 * Boot witness -- read UNCONDITIONALLY, on pass and on fail alike.
+	 *
+	 * This used to live inside the failure branch below, which made it
+	 * self-defeating: the one number that says whether a power cycle was
+	 * genuinely cold was obtainable only on a run that had already failed. A
+	 * seven-run bench matrix on 2026-09-10 was commissioned specifically to
+	 * read it, passed 7/7, and therefore never read it once.
+	 *
+	 * GET_DIAG_INFO's reply byte 15 (decoded to reserved[2] by
+	 * chips/cc3501e/cc3501e_diag.c) is the coprocessor's boot mark: bit 7 set
+	 * means that boot is running the polled update mode, bits 6..0 are a
+	 * warm-boot counter mod 128. It exists to distinguish a true power-on
+	 * reset from a warm restart in which RAM was never scrubbed -- the
+	 * question behind an observed 17s-power-cycle-fails / 61s-passes
+	 * asymmetry.
+	 *
+	 * Do NOT read the counter as "1 means cold". The demo warm-resets the part
+	 * during bring-up on every run (WIFI_EN high + nRESET pulsed, plus
+	 * cc3501e_reset()'s Puya double-boot), so a genuinely cold cycle reads
+	 * some fixed small offset, not 1. What discriminates cold from warm is the
+	 * value RELATIVE to that offset across runs, which is why this prints the
+	 * raw byte as well as the decoded halves.
+	 *
+	 * reset_cause is a second, independent witness for the same question and
+	 * is printed alongside rather than derived from it.
+	 */
+	{
+		alp_cc3501e_diag_info_t boot_info;
+		memset(&boot_info, 0, sizeof(boot_info));
+		const alp_status_t boot_rc = cc3501e_diag_info(&cc35_fw, &boot_info);
+		if (boot_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: boot witness: boot_mark=0x%02X (update_mode=%u "
+			       "boots_mod128=%u) reset_cause=%u last_error=0x%02X\n",
+			       boot_info.reserved[2],
+			       (unsigned)(boot_info.reserved[2] >> 7),
+			       (unsigned)(boot_info.reserved[2] & 0x7Fu),
+			       boot_info.reset_cause,
+			       boot_info.last_error);
+		} else {
+			printf("[evkdemo] CC3501E: boot witness UNREAD -- GET_DIAG_INFO (0x04) -> %d, so "
+			       "no boot_mark and no reset_cause were measured this run\n",
+			       (int)boot_rc);
+		}
+	}
+
+	if (ble_rc != ALP_OK) {
+		/* --- BLE_ENABLE failure probe: separate "link wedged" from "radio
+		 * op genuinely failed" ------------------------------------------ */
+		/*
+		 * A bare non-zero ble_rc is ambiguous by construction (see
+		 * chips/cc3501e/cc3501e_core.c's resp_to_status()): a DECODED, correctly
+		 * received terminal radio failure from the device and a raw transport
+		 * desync both surface as the same error class, and BLE_ENABLE's own
+		 * poll-by-repeat budget (CC35_BLE_TIMEOUT_MS, 10 s) burns the same
+		 * whichever it was. Do not just fail the phase -- collect the evidence
+		 * that tells the two apart, before anything else touches the link and
+		 * disturbs it, and print it so a bench log carries the diagnosis, not
+		 * just the symptom.
+		 *
+		 * Snapshot BLE_ENABLE's OWN leftover rx_scratch bytes FIRST, before
+		 * issuing anything else. cc3501e_ping() below runs its OWN 4-phase
+		 * exchange, and its phase-1 transceive unconditionally clocks fresh
+		 * bytes into ctx->rx_scratch the instant it starts -- so this is the
+		 * ONLY point at which "whatever BLE_ENABLE itself left behind" is
+		 * still readable. (An earlier version of this probe claimed the PING
+		 * reply below might still show BLE_ENABLE's residue; that claim was
+		 * false for exactly this reason -- fixed by capturing it here,
+		 * explicitly, instead of guessing at it afterwards.)
+		 */
+		uint8_t ble_enable_rs[ALP_CC3501E_HEADER_BYTES];
+		memcpy(ble_enable_rs, cc35_fw.rx_scratch, sizeof(ble_enable_rs));
+		printf("[evkdemo] CC3501E: rx_scratch[0..3] left by BLE_ENABLE's last attempt = %02X %02X "
+		       "%02X %02X (%s)\n",
+		       ble_enable_rs[0],
+		       ble_enable_rs[1],
+		       ble_enable_rs[2],
+		       ble_enable_rs[3],
+		       cc35_describe_rx_scratch(ble_enable_rs));
+
+		/*
+		 * Issue ONE single-shot cc3501e_ping() next: it costs one 4-phase
+		 * exchange with no retry budget of its own, so it is cheap even
+		 * immediately after a 10 s BLE_ENABLE timeout.
+		 *
+		 * EVERY host transceive on this link -- including a probe call that
+		 * FAILS -- re-stamps the firmware's CC3501E_REPLY_STALL_MS (250 ms)
+		 * reply-stall watchdog, the link's ONLY self-heal from a desync (see
+		 * CC35_PING_GAP_MS's comment above -- this is the exact mechanism
+		 * that was silently starving that watchdog before it was fixed
+		 * there). Issued back to back with no gap, THIS probe would make the
+		 * identical mistake: suppressing recovery at the one moment a
+		 * wedged link needs it. So every probe call below is followed by a
+		 * CC35_PING_GAP_MS sleep before the next one, trading a little
+		 * wall-clock time for not being the reason the link stays wedged.
+		 */
+		alp_status_t probe_ping_rc = cc3501e_ping(&cc35_fw);
+		printf("[evkdemo] CC3501E: BLE_ENABLE failed -- probing the link: PING (0x00) -> %d\n",
+		       (int)probe_ping_rc);
+
+		const uint8_t *rs = cc35_fw.rx_scratch;
+		printf("[evkdemo] CC3501E: rx_scratch[0..3] after PING = %02X %02X %02X %02X (%s)\n",
+		       rs[0],
+		       rs[1],
+		       rs[2],
+		       rs[3],
+		       cc35_describe_rx_scratch(rs));
+		k_msleep(
+		    CC35_PING_GAP_MS); /* let the reply-stall watchdog clear before the next probe call */
+
+		/*
+		 * DIAG_GET_STATS / GET_DIAG_INFO next. Only trust a field if its OWN
+		 * call returned ALP_OK -- a previous diagnostic app here printed a
+		 * zeroed initialiser as though it were a real measurement on a failed
+		 * call and drew a confidently wrong conclusion from it. Mark each
+		 * block UNREAD rather than repeat that mistake.
+		 */
+		cc3501e_diag_stats_t stats;
+		memset(&stats, 0, sizeof(stats));
+		alp_status_t stats_rc = cc3501e_diag_stats(&cc35_fw, &stats);
+		if (stats_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) -> 0 frames_ok=%u frames_err=%u\n",
+			       (unsigned)stats.frames_ok,
+			       (unsigned)stats.frames_err);
+			/* worker_execs / retry_latch_hits are meaningless unless
+			 * has_worker_counters is true (a short v7-shaped reply leaves
+			 * them zeroed, not measured) -- the UNREAD discipline above
+			 * applies to these two fields individually, not just to the
+			 * call as a whole, so gate them the same way instead of
+			 * printing them unconditionally with the disqualifier tacked
+			 * on the end of the same line. */
+			if (stats.has_worker_counters) {
+				printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) worker counters: "
+				       "worker_execs=%u retry_latch_hits=%u\n",
+				       (unsigned)stats.worker_execs,
+				       (unsigned)stats.retry_latch_hits);
+			} else {
+				printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) worker counters UNAVAILABLE "
+				       "(short v7-shaped reply, has_worker_counters=false -- worker_execs / "
+				       "retry_latch_hits are NOT real measurements)\n");
+			}
+		} else {
+			printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) -> %d (UNREAD -- the call itself "
+			       "failed, so the counters above this line are NOT real measurements)\n",
+			       (int)stats_rc);
+		}
+		k_msleep(CC35_PING_GAP_MS); /* same watchdog reason as above */
+
+		alp_cc3501e_diag_info_t info;
+		memset(&info, 0, sizeof(info));
+		alp_status_t info_rc = cc3501e_diag_info(&cc35_fw, &info);
+		if (info_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: GET_DIAG_INFO (0x04) -> 0 last_error=0x%02X uptime_ms=%u "
+			       "free_heap_bytes=%u role=%u reset_cause=%u\n",
+			       info.last_error,
+			       (unsigned)info.uptime_ms,
+			       (unsigned)info.free_heap_bytes,
+			       info.role,
+			       info.reset_cause);
+		} else {
+			printf("[evkdemo] CC3501E: GET_DIAG_INFO (0x04) -> %d (UNREAD -- the call itself "
+			       "failed, so last_error above is NOT a real measurement)\n",
+			       (int)info_rc);
+		}
+
+		/*
+		 * WHAT THIS EVIDENCE MEANS (the two explanations this probe exists to
+		 * separate):
+		 *   - probe_ping_rc == ALP_ERR_IO (-5) together with EITHER rx_scratch
+		 *     snapshot classifying as "parked on the idle marker" or "a STALE
+		 *     REPLY HEADER" (cc35_describe_rx_scratch() above) means the LINK
+		 *     IS WEDGED, one transfer behind -- phases 9 and 11 failing the
+		 *     same way below is a CASCADE of this one fault, not three
+		 *     independent ones.
+		 *   - probe_ping_rc == ALP_OK (0) with last_error == 0x06
+		 *     (ALP_CC3501E_RESP_ERR_RADIO) means the RADIO OPERATION FAILED ON
+		 *     THE DEVICE and the link is healthy -- PING answered cleanly
+		 *     right after.
+		 *   - probe_ping_rc == ALP_OK (0) with last_error == 0x07
+		 *     (ALP_CC3501E_RESP_ERR_PROTOCOL) and a climbing frames_err count
+		 *     means frames are being rejected for a protocol violation, not a
+		 *     radio fault.
+		 */
+	}
 
 	/* --- Verdict ------------------------------------------------------ */
 	/*
@@ -3532,31 +3810,469 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
 }
 
 /* ==================================================================== */
-/* STUBS -- phases not in this slice.  Each reason differs; see below.  */
+/* STUBS -- phases not in this slice.  See phase_npu_stub()'s own header for
+ * why NPU is a different kind of gap than phases 11/12 below it, which are
+ * now real (11) or a grounded SKIPPED (12) rather than blind stubs.        */
 /* ==================================================================== */
 
-/* Sound out -> PDM-in loopback: the maintainer has confirmed speakers ARE
- * connected to both TAS2563 amps, so a real tone-out + mic-capture
- * end-to-end check is possible in a future slice -- but the I2S bring-up
- * this needs isn't in this slice, and the amp is a ~15 W class-D part: a
- * rushed first attempt at the volume ramp is exactly the kind of thing
- * that should not be the first time this code runs. Deferred, not
- * skipped for lack of hardware. */
-static phase_verdict_t phase_sound_stub(demo_ctx_t *ctx)
+/*
+ * ======================================================================
+ * Phase 11 -- sound out (I2S3 -> TAS2563 x2) -> PDM mic capture
+ * ======================================================================
+ *
+ * THE SAFETY CONSTRAINT THIS PHASE EXISTS TO RESPECT. Both TAS2563 amps can
+ * drive ~10 W peak into 4 ohm (SLASET3D Table 7-105) -- the datasheet's own
+ * @warning on chips/tas2563/tas2563.c says the power-on AMP_LEVEL (16.0 dBV)
+ * is "roughly 9.9 W peak... near the top of the part's range, and only 6 dB
+ * below... maximum". A rushed first write to that is the one failure here
+ * that is not recoverable in software, so this phase uses BOTH of the
+ * independent levers the driver + <alp/audio.h> expose, and sets the
+ * quieter one FIRST, before either amp is ever told to switch:
+ *
+ *   1. tas2563_set_amp_level(TAS2563_AMP_LEVEL_MIN) over I2C -- the amp's
+ *      OWN analog gain, set on both chips while they are still in software
+ *      shutdown (tas2563_init() parks them there and never lets a caller
+ *      skip that). This bounds the output at the amp regardless of what the
+ *      digital stream ever contains.
+ *   2. alp_audio_out_set_volume(SOUND_VOL_START) -- a small fraction of
+ *      unity (SOUND_VOL_START/255) on the digital PCM side, opened and
+ *      STARTED before tas2563_set_mode(ACTIVE) is ever called on either
+ *      amp, so the amp comes out of shutdown already receiving a
+ *      near-silent, not undefined, stream. The volume is only ever
+ *      ramped UP after that, in small steps, capped at SOUND_VOL_CEILING
+ *      (well under half of unity) -- see the two #defines below for the
+ *      actual numbers.
+ *
+ * FULL BRING-UP / TEARDOWN ORDER, so the whole sequence is reviewable in one
+ * place rather than reconstructed from call sites:
+ *   1. 74LVC157 mux ENABLE (E1M IO8 -> CC3501E GPIO_30) + SELECT (E1M IO13 ->
+ *      CC3501E GPIO_13, 0 = TAS2563 amps) over the bridge phase 8 leaves up --
+ *      same CC3501E-proxy mechanism phase 9 uses for the SD mux, see
+ *      src/cc3501e_gpio_routes.c. Without this nothing downstream of I2S3
+ *      reaches a speaker at all.
+ *   2. AMP_ENABLE (SD_N, P5_2) driven HIGH -- releases HARDWARE shutdown.
+ *      Raw gpio5, not alp_gpio_open(): see the overlay's Phase-11 header for
+ *      why this pad does not go through the portable EVK_PIN_* path.
+ *   3. tas2563_init() on BOTH amps (0x4D, 0x4E -- EVK_I2C_ADDR_TAS2563_LOW/
+ *      HIGH), sd_n=NULL because step 2 already drove SD_N -- init leaves
+ *      each amp in SOFTWARE shutdown regardless (SLASET3D reset value).
+ *   4. tas2563_set_amp_level(MIN) on every initialised amp -- lever 1 above.
+ *   5. tas2563_configure_i2s() on every initialised amp, from the SAME
+ *      alp_i2s_config_t fields the audio_out config below opens with, so the
+ *      amp and the host agree on rate/width/framing. TAS2563_RX_SLOT_FROM_ADDR
+ *      on both (the driver's own suggestion for a stereo pair that does not
+ *      need to hard-code which is L/R).
+ *   6. Fault baseline: tas2563_read_faults() on every amp (I2C, richer than
+ *      the pin -- see AMP_FAULT below) plus one read of the raw AMP_FAULT pin
+ *      (P5_0), both printed. Neither gates anything by itself here; they are
+ *      the "before" half of the "did ACTIVE cause a fault" comparison after
+ *      the tone.
+ *   7. alp_audio_in_open() (PDM, peripheral 0) + start -- capture
+ *      SOUND_BASELINE_BLOCKS of room noise BEFORE the tone starts. This is
+ *      also simply free time: it overlaps with nothing else, so it costs
+ *      the phase no extra wall clock against the bring-up above.
+ *   8. alp_audio_out_open() (I2S3, peripheral 0) + set_volume(SOUND_VOL_START)
+ *      + start -- lever 2 above, BEFORE either amp goes ACTIVE.
+ *   9. tas2563_set_mode(ACTIVE) on every initialised amp -- ONLY now, with
+ *      both levers already at their quiet settings and a live low-volume
+ *      stream already running.
+ *  10. The tone: SOUND_TONE_BLOCKS blocks of a square wave, interleaved one
+ *      alp_audio_out_write() with one alp_audio_in_read() per iteration
+ *      (no threads needed -- both calls block for real wall-clock time, so
+ *      alternating them samples the mic DURING playback), volume ramped
+ *      linearly from SOUND_VOL_START to SOUND_VOL_CEILING across the blocks.
+ *  11. Teardown, amp-mute FIRST: tas2563_set_mode(SHUTDOWN) on every
+ *      initialised amp, THEN audio_out stop+close, THEN audio_in stop+close.
+ *  12. Fault re-read (I2C + pin) on every amp -- the "after" half. A
+ *      TAS2563_FAULT_SHUTDOWN_CAUSES bit set here is a FAIL, not swallowed.
+ *  13. Idle restore, on EVERY exit path including every failure above,
+ *      mirroring phase 6 (RGB LED) and NOT phase 9 (SD mux, which leaves its
+ *      mux asserted on purpose -- see that phase's header for why): AMP_ENABLE
+ *      driven LOW, both amp contexts deinitialised, mux SELECT+ENABLE driven
+ *      back to their inactive levels. Nothing after phase 11 needs the audio
+ *      path connected, and an amplifier is a higher-risk-if-left-on part than
+ *      an SD bus, so idle-restore is the safer default here.
+ *
+ * WHAT THIS PHASE ASSERTS, AND WHAT IT DOES NOT -- see sound_verdict.h's file
+ * header for the full reasoning. In short: PASS requires BOTH amps to have
+ * initialised, no TAS2563_FAULT_SHUTDOWN_CAUSES bit set after the tone, AND
+ * sound_pdm_capture_correlated() to say the PDM capture during the tone
+ * carried more energy than the pre-tone baseline. That is an energy check,
+ * not a frequency or amplitude one -- it cannot tell a 1 kHz tone from a
+ * door slam, and does not claim to. If the correlation check is what fails,
+ * the phase says so by name rather than folding it into a generic FAIL, the
+ * same discipline phase 10 uses for its qualifiers.
+ */
+
+#define AMP_ENABLE_PIN 2 /* SPI0_CS0 = P5_2 (gpio5), active-high SD_N. */
+#define AMP_FAULT_PIN  0 /* SPI0_MISO = P5_0 (gpio5), open-drain IRQ_N, active-low. */
+
+/* Pad-mux states for the two amp control lines. gpio_dw applies no mux of
+ * its own (same note as eth_phy_power_init() and phase_encoder() above), so
+ * function 0 (GPIO) has to be selected through the Alif pinctrl driver
+ * before either pin will do anything. AMP_FAULT is an input: REN_BIT_POS
+ * (see phase_encoder()'s ENC_SW_PAD_REN) is load-bearing here the same way. */
+static const pinctrl_soc_pin_t amp_enable_mux[] = { PIN_P5_2__GPIO };
+#define AMP_FAULT_PAD_REN (1U << 16)
+static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
+
+#define SOUND_MUX_SETTLE_MS    10u
+#define SOUND_SAMPLE_RATE_HZ   16000u
+#define SOUND_FRAMES_PER_BLOCK 256u
+#define SOUND_TONE_HZ          1000u
+#define SOUND_TONE_AMPLITUDE   20000 /* int16, leaves headroom below INT16_MAX */
+#define SOUND_TONE_BLOCKS      16u   /* 16 * 256 / 16000 Hz = 256 ms -- "keep it short". */
+#define SOUND_BASELINE_BLOCKS  8u    /* room-noise capture before the tone starts */
+/* Both well under half of unity (255) -- "cap the level well below maximum". */
+#define SOUND_VOL_START   4u
+#define SOUND_VOL_CEILING 40u
+
+#define AMP_COUNT 2u
+static const uint8_t amp_addrs[AMP_COUNT] = {
+	TAS2563_I2C_ADDR_GND_PULL, /* U27, EVK_I2C_ADDR_TAS2563_LOW  (0x4D) */
+	TAS2563_I2C_ADDR_VDD_PULL, /* U28, EVK_I2C_ADDR_TAS2563_HIGH (0x4E) */
+};
+
+/* Sum of |sample| across every channel of one captured block -- the whole of
+ * this phase's "did the mic hear something" evidence. See sound_verdict.h
+ * for why this is an energy check and not a frequency one. */
+static uint32_t pdm_block_energy(const int16_t *buf, size_t n_samples)
 {
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: sound out -> PDM in -- SKIPPED (I2S bring-up + the "
-	       "low-volume ramp policy deferred to the next slice) --\n");
-	return PHASE_SKIPPED;
+	uint32_t sum = 0;
+	for (size_t i = 0; i < n_samples; i++) {
+		int32_t s = buf[i];
+		sum += (uint32_t)(s < 0 ? -s : s);
+	}
+	return sum;
 }
 
-/* Screen (DSI): no panel is attached on this bench and a clean DSI init
- * would not prove one is -- deferred to the next slice regardless. */
-static phase_verdict_t phase_screen_stub(demo_ctx_t *ctx)
+static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 {
-	ARG_UNUSED(ctx);
-	printf("[evkdemo] -- Phase: screen (DSI) -- SKIPPED (no panel on this bench; "
-	       "deferred to the next slice) --\n");
+	printf("[evkdemo] -- Phase: sound out (I2S3 -> TAS2563 x2) -> PDM mic capture --\n");
+
+	tas2563_t amps[AMP_COUNT];
+	bool      amp_up[AMP_COUNT] = { false, false };
+	int       ok_amps           = 0;
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[evkdemo] SOUND: gpio5 device not ready -- AMP_ENABLE/AMP_FAULT "
+		       "(P5_2/P5_0) unreachable; check &gpio5 status in the overlay\n");
+		ctx->note = "gpio5 not ready";
+		return PHASE_FAIL;
+	}
+
+	/* --- 1. I2S mux ENABLE + SELECT over the CC3501E proxy ------------- */
+	alp_gpio_t  *mux_en  = alp_gpio_open(ALP_E1M_GPIO_IO8);
+	alp_gpio_t  *mux_sel = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
+	alp_status_t mux_rc  = ALP_ERR_NOT_READY;
+	if (mux_en != NULL && mux_sel != NULL) {
+		/* /E active low: false asserts and connects I2S3 to the amps. */
+		mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+		/* S = 0 selects EVK_I2S_AMP (metadata/boards/e1m-evk.yaml evk_i2s_select_t). */
+		if (mux_rc == ALP_OK)
+			mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	}
+	printf("[evkdemo] SOUND: I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30) + SELECT (E1M "
+	       "IO13 -> CC3501E GPIO_13, 0=amps) -> %d\n",
+	       (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		printf("[evkdemo] SOUND: mux not drivable -- check phase 8 passed (the proxy "
+		       "needs its bridge attached) and this build carries the IO8/IO13 routes. "
+		       "Both are fitted on every E1M-AEN SoM, so this is a build/bridge fault, "
+		       "not absent hardware\n");
+		if (mux_sel != NULL) alp_gpio_close(mux_sel);
+		if (mux_en != NULL) alp_gpio_close(mux_en);
+		ctx->note = "I2S mux not drivable";
+		return PHASE_FAIL;
+	}
+	k_msleep(SOUND_MUX_SETTLE_MS);
+
+	/* --- 2. AMP_ENABLE (SD_N) high -- release HARDWARE shutdown -------- */
+	int rc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (rc == 0) rc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[evkdemo] SOUND: AMP_ENABLE (SD_N, P5_2) high -> %d\n", rc);
+	if (rc != 0) {
+		printf("[evkdemo] SOUND: AMP_ENABLE could not be driven -- neither amp can leave "
+		       "hardware shutdown\n");
+		alp_gpio_close(mux_sel);
+		alp_gpio_close(mux_en);
+		ctx->note = "AMP_ENABLE not drivable";
+		return PHASE_FAIL;
+	}
+
+	/* --- 3. AMP_FAULT (IRQ_N) as a plain input -------------------------- */
+	rc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	printf("[evkdemo] SOUND: AMP_FAULT (IRQ_N, P5_0) configured as input -> %d\n", rc);
+
+	/* --- 4. tas2563_init() on both amps, sd_n=NULL (step 2 drove it) --- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t init_rc = tas2563_init(&amps[i], ctx->carrier_bus, amp_addrs[i], NULL);
+		printf("[evkdemo] SOUND: tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)init_rc);
+		if (init_rc == ALP_OK) {
+			amp_up[i] = true;
+			ok_amps++;
+		}
+	}
+	if (ok_amps == 0) {
+		printf("[evkdemo] SOUND: neither amp answered -- tas2563 is fitted (both U27 "
+		       "and U28) on every E1M-EVK, so this is a real fault, not absent hardware\n");
+		gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		alp_gpio_close(mux_sel);
+		alp_gpio_close(mux_en);
+		ctx->note = "no TAS2563 answered";
+		return PHASE_FAIL;
+	}
+
+	/* --- 5. Lever 1: quietest AMP_LEVEL, on every amp that came up ----- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (!amp_up[i]) continue;
+		alp_status_t lvl_rc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[evkdemo] SOUND: tas2563_set_amp_level(0x%02x, MIN) -> %d\n",
+		       amp_addrs[i],
+		       (int)lvl_rc);
+	}
+
+	/* --- 6. Tell each amp what the host I2S bus will do ----------------- */
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 1,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (!amp_up[i]) continue;
+		alp_status_t cfg_rc =
+		    tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, TAS2563_RX_SLOT_FROM_ADDR);
+		printf("[evkdemo] SOUND: tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)cfg_rc);
+	}
+
+	/* --- 7. Fault baseline: I2C word + the raw pin --------------------- */
+	uint32_t faults_before[AMP_COUNT] = { 0 };
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (!amp_up[i]) continue;
+		(void)tas2563_read_faults(&amps[i], &faults_before[i]);
+		printf("[evkdemo] SOUND: tas2563_read_faults(0x%02x) baseline -> 0x%08x\n",
+		       amp_addrs[i],
+		       faults_before[i]);
+	}
+	int fault_pin_before = gpio_pin_get(gpio5, AMP_FAULT_PIN);
+	printf("[evkdemo] SOUND: AMP_FAULT pin baseline -> %s\n",
+	       (fault_pin_before == 0)   ? "high (no fault)"
+	       : (fault_pin_before == 1) ? "LOW (asserted!)"
+	                                 : "read failed");
+
+	/* --- 8. PDM: open + start, capture the pre-tone baseline ------------ */
+	alp_audio_in_t *mic    = alp_audio_in_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t    mic_rc = (mic != NULL) ? alp_audio_in_start(mic) : alp_last_error();
+	printf("[evkdemo] SOUND: alp_audio_in_open+start(PDM) -> %d\n", (int)mic_rc);
+
+	uint32_t baseline_energy = 0;
+	int16_t  mic_buf[SOUND_FRAMES_PER_BLOCK * 2];
+	if (mic != NULL && mic_rc == ALP_OK) {
+		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS; b++) {
+			size_t       got = 0;
+			alp_status_t r   = alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+			if (r == ALP_OK) baseline_energy += pdm_block_energy(mic_buf, got * 2u);
+		}
+	}
+	printf("[evkdemo] SOUND: baseline (pre-tone) PDM energy = %u\n", baseline_energy);
+
+	/* --- 9. I2S3: open at the quiet starting volume, THEN start -------- */
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 1,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = ALP_ERR_NOT_READY;
+	if (spk != NULL) {
+		spk_rc = alp_audio_out_set_volume(spk, SOUND_VOL_START);
+		if (spk_rc == ALP_OK) spk_rc = alp_audio_out_start(spk);
+	} else {
+		spk_rc = alp_last_error();
+	}
+	printf("[evkdemo] SOUND: alp_audio_out_open+set_volume(%u)+start(I2S3) -> %d\n",
+	       SOUND_VOL_START,
+	       (int)spk_rc);
+
+	uint32_t during_energy = 0;
+	if (spk != NULL && spk_rc == ALP_OK) {
+		/* --- 10. ONLY NOW: both amps ACTIVE -- a quiet stream is already
+		 * running. --------------------------------------------------- */
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			if (!amp_up[i]) continue;
+			alp_status_t act_rc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
+			printf("[evkdemo] SOUND: tas2563_set_mode(0x%02x, ACTIVE) -> %d\n",
+			       amp_addrs[i],
+			       (int)act_rc);
+		}
+
+		/* --- 11. The tone, ramped, interleaved with mic reads --------- */
+		int16_t        tone_buf[SOUND_FRAMES_PER_BLOCK];
+		uint32_t       phase_acc         = 0;
+		const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
+		for (unsigned b = 0; b < SOUND_TONE_BLOCKS; b++) {
+			uint8_t vol =
+			    (uint8_t)(SOUND_VOL_START + (uint32_t)(SOUND_VOL_CEILING - SOUND_VOL_START) * b /
+			                                    (SOUND_TONE_BLOCKS - 1u));
+			(void)alp_audio_out_set_volume(spk, vol);
+
+			for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+				tone_buf[f] = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
+				                  ? SOUND_TONE_AMPLITUDE
+				                  : -SOUND_TONE_AMPLITUDE;
+				phase_acc++;
+			}
+			(void)alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+
+			if (mic != NULL && mic_rc == ALP_OK) {
+				size_t       got = 0;
+				alp_status_t r =
+				    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+				if (r == ALP_OK) during_energy += pdm_block_energy(mic_buf, got * 2u);
+			}
+		}
+	}
+	printf("[evkdemo] SOUND: during-tone PDM energy = %u\n", during_energy);
+
+	/* --- 12. Teardown -- mute BEFORE anything else stops --------------- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (!amp_up[i]) continue;
+		(void)tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+	}
+	if (spk != NULL) {
+		alp_audio_out_stop(spk);
+		alp_audio_out_close(spk);
+	}
+	if (mic != NULL) {
+		alp_audio_in_stop(mic);
+		alp_audio_in_close(mic);
+	}
+
+	/* --- 13. Fault re-read: the "after" half ---------------------------- */
+	bool new_shutdown_fault = false;
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (!amp_up[i]) continue;
+		uint32_t faults_after = 0;
+		(void)tas2563_read_faults(&amps[i], &faults_after);
+		printf("[evkdemo] SOUND: tas2563_read_faults(0x%02x) after -> 0x%08x\n",
+		       amp_addrs[i],
+		       faults_after);
+		if ((faults_after & TAS2563_FAULT_SHUTDOWN_CAUSES) != 0u) new_shutdown_fault = true;
+	}
+	int fault_pin_after = gpio_pin_get(gpio5, AMP_FAULT_PIN);
+	printf("[evkdemo] SOUND: AMP_FAULT pin after -> %s\n",
+	       (fault_pin_after == 0)   ? "high (no fault)"
+	       : (fault_pin_after == 1) ? "LOW (asserted!)"
+	                                : "read failed");
+
+	/* --- 14. Idle restore, unconditionally (mirrors phase 6, not 9) ---- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (amp_up[i]) tas2563_deinit(&amps[i]);
+	}
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	(void)alp_gpio_write(mux_en, true); /* /E high = mux disabled. */
+	alp_gpio_close(mux_sel);
+	alp_gpio_close(mux_en);
+
+	bool correlated = sound_pdm_capture_correlated(baseline_energy, during_energy);
+	printf("[evkdemo] SOUND: %d/%zu amp(s) up, %s, PDM %s (baseline=%u during=%u)\n",
+	       ok_amps,
+	       (size_t)AMP_COUNT,
+	       new_shutdown_fault ? "FAULT ASSERTED" : "no fault",
+	       correlated ? "correlated" : "NOT correlated",
+	       baseline_energy,
+	       during_energy);
+
+	if (new_shutdown_fault) {
+		ctx->note = "amp reported a shutdown-cause fault";
+		return PHASE_FAIL;
+	}
+	if (mic == NULL || mic_rc != ALP_OK || spk == NULL || spk_rc != ALP_OK) {
+		ctx->note = "audio_in/audio_out did not open -- see the printed rc";
+		return PHASE_FAIL;
+	}
+	if (!correlated) {
+		ctx->note = "PDM capture not correlated with playback";
+		return PHASE_FAIL;
+	}
+	return PHASE_PASS;
+}
+
+/*
+ * ======================================================================
+ * Phase 12 -- screen (DSI)
+ * ======================================================================
+ *
+ * NO PANEL ON THIS BENCH, and a clean controller init would not prove one is
+ * attached -- so this phase does not fake a PASS. What it DOES do, instead
+ * of the blind stub this used to be: it actually calls alp_display_open()
+ * and reports the concrete, grounded reason it cannot succeed.
+ *
+ * CHECKED, NOT ASSUMED. <alp/display.h>'s Zephyr backend
+ * (src/backends/display/zephyr_drv.c) wraps Zephyr's PANEL-level
+ * <zephyr/drivers/display.h> API via an alp-display0..3 DT alias -- it needs
+ * a bound panel driver (SSD1306, ILI9341, ST7789V, ...), not a raw
+ * controller register set. This SoC's peripherals dtsi
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi) declares only the shared
+ * CSI/DSI D-PHY node (d-phy@49033000, "snps,designware-dphy") -- the
+ * physical layer the camera path uses -- and that block's own comment marks
+ * it a "FLAGGED PLACEHOLDER... BENCH-UNVERIFIED" with a dummy clock, status
+ * "disabled". There is no separate DSI protocol-layer host-controller node
+ * or driver anywhere in this tree (checked: no "snps,designware-dsi"
+ * compatible, no alif-named file under drivers/mipi_dsi/) -- only a
+ * camera-side D-PHY that is itself not bench-ready. So no alp-display*
+ * alias can ever resolve on this SoC as this tree stands, panel or no
+ * panel, and this app declares none.
+ *
+ * This app also does NOT enable CONFIG_DISPLAY -- there is nothing for it to
+ * link against -- so alp_display_open() resolves to the wildcard
+ * NOT_IMPLEMENTED stub (src/backends/display/zephyr_stub.c, priority 0,
+ * always linked), a deliberately honest degrade rather than a silent one.
+ *
+ * LCD_PWR_EN / LCD_RST (TCAL9538 P0/P1): NOT driven, on purpose. Phase 4
+ * already decided never to touch them because they gate real carrier
+ * hardware; this phase has an even weaker reason to reach for them than
+ * phase 4 would -- there is no controller downstream that could do anything
+ * with a powered panel, so toggling the rail would prove nothing and only
+ * add carrier-hardware risk for no evidence gained.
+ */
+static phase_verdict_t phase_screen(demo_ctx_t *ctx)
+{
+	printf("[evkdemo] -- Phase: screen (DSI) --\n");
+
+	alp_display_t *disp = alp_display_open(&ALP_DISPLAY_CONFIG_DEFAULT(0));
+	alp_status_t   rc   = (disp == NULL) ? alp_last_error() : ALP_OK;
+	printf("[evkdemo] SCREEN: alp_display_open(0) -> %p, err=%d (%s)\n",
+	       (void *)disp,
+	       (int)rc,
+	       IS_ENABLED(CONFIG_DISPLAY) ? "CONFIG_DISPLAY=y but no alp-display0 alias resolved"
+	                                  : "CONFIG_DISPLAY not linked -- no panel, no DSI host "
+	                                    "driver in this tree");
+	printf("[evkdemo] SCREEN: DSI host-controller register evidence -- none available: the "
+	       "SoC dtsi's only DSI-adjacent node is the shared CSI/DSI D-PHY "
+	       "(d-phy@49033000), status=\"disabled\", BENCH-UNVERIFIED placeholder clock "
+	       "(zephyr/dts/alif/ensemble_e8_peripherals.dtsi); there is no separate DSI "
+	       "protocol-layer host controller node or driver in this tree to read a real "
+	       "register from\n");
+	if (disp != NULL) alp_display_close(disp);
+
+	ctx->note = "no DSI host-controller driver in this tree (checked, not assumed)";
 	return PHASE_SKIPPED;
 }
 
@@ -3627,8 +4343,8 @@ static const phase_t PHASES[] = {
 	{ "CC3501E Wi-Fi/BLE", phase_cc3501e },
 	{ "SD card", phase_sdcard },
 	{ "Ethernet", phase_ethernet },
-	{ "Sound out -> PDM in", phase_sound_stub },
-	{ "Screen (DSI)", phase_screen_stub },
+	{ "Sound out -> PDM in", phase_sound },
+	{ "Screen (DSI)", phase_screen },
 	{ "JPEG encode (Hantro VC9000E)", phase_jpeg_encode },
 	{ "NPU inference", phase_npu_stub },
 };

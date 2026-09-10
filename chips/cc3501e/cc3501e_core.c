@@ -1146,6 +1146,28 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 	alp_delay_us(fallback_us);
 }
 
+/* Marker cc3501e_request_locked() writes into ctx->rx_scratch[0] on every
+ * PRE-DECODE exit (see the `out:` label below) so a caller peeking at
+ * rx_scratch[0] afterwards -- poll_by_repeat() does, to tell a genuine
+ * decoded device error from a raw transport/framing failure -- can trust
+ * that "rx_scratch[0] equals some real ALP_CC3501E_RESP_ERR_* code" means a
+ * status byte was ACTUALLY DECODED, never a coincidence of leftover wire
+ * residue (an echoed request opcode, a stale reply header, a dead-phase
+ * 0xA5A5A5A5 run).  #2035 review: the previous version of this fix reused
+ * that same peek against a single opcode (0x06 / RESP_ERR_RADIO) without
+ * this guarantee, and 0x06 is ALSO ALP_CC3501E_CMD_GET_CAPABILITIES -- a
+ * pre-decode failure's rx_scratch[0] legitimately holds an echoed opcode
+ * (the in-band armed check and the !hdr_ok branch below both leave one
+ * there), so that collision was structurally likely, not a 1-in-256 fluke.
+ *
+ * ALP_CC3501E_RX_SCRATCH_NO_STATUS (0xDA) is PUBLIC (<alp/chips/cc3501e/
+ * core.h>, beside ctx->rx_scratch itself), not a private constant here --
+ * see that header for the full choice-of-0xDA rationale (deliberately not
+ * 0xFF, which collides with a real decoded ALP_CC3501E_RESP_ERR_INTERNAL).
+ * Exported so a caller reading ctx->rx_scratch directly for diagnostics
+ * (examples/aen/aen-evk-demo/src/main.c's BLE_ENABLE failure probe) can
+ * recognise the marker too, instead of misreporting it as wire data. */
+
 /* The actual 4-phase exchange, WITHOUT taking ctx's transport lock -- the
  * caller must already hold it.  Split out of cc3501e_request() (issue
  * #1116 follow-up) so poll_by_repeat() below can bracket its OWN extra
@@ -1164,6 +1186,11 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
                                            uint8_t           req_seq)
 {
 	alp_status_t s;
+	/* Set true only immediately after cc3501e_reply_verdict() below actually
+	 * runs -- every goto out; above that point leaves this false, so the
+	 * out: label knows whether rx_scratch[0] holds a real decoded status
+	 * byte or needs poisoning to ALP_CC3501E_RX_SCRATCH_NO_STATUS. */
+	bool decoded = false;
 
 	/*
      * 3-wire deterministic framing (this HW rev wires only SCLK/MOSI/MISO
@@ -1328,9 +1355,18 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * it is independently unit-testable (see cc3501e_internal.h). */
 		s = cc3501e_reply_verdict(
 		    cmd, ctx->fw_proto_major, reply_hdr, ctx->rx_scratch, resp_payload_len);
+		decoded = true;
 	}
 
 out:
+	/* Close the WHOLE pre-decode residue surface, not just the one opcode a
+	 * prior version of this fix special-cased (see the comment above this
+	 * function).  Every early `goto out;` above -- the header transceive, the
+	 * in-band armed check, the request-payload transceive, the reply-header
+	 * transceive, the !hdr_ok reject, the reply-payload transceive -- lands
+	 * here with decoded still false, so rx_scratch[0] gets overwritten
+	 * REGARDLESS of which one fired or what wire byte it left behind. */
+	if (!decoded) ctx->rx_scratch[0] = ALP_CC3501E_RX_SCRATCH_NO_STATUS;
 	return s;
 }
 
@@ -1454,9 +1490,45 @@ alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t le
  * where the device answers from an ISR the flash op has stopped, so every frame
  * clocked in that window goes into a dead slave.  Backing off to 50 ms keeps
  * the blackout frame count essentially unchanged (a 600 s hold-off gains ~6
- * extra frames in total) while collecting a ready result in ~1 ms. */
-#define CC3501E_POLL_GAP_MIN_MS 1u
+ * extra frames in total) while collecting a ready result in ~1 ms.
+ *
+ * CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS (issue #2035 bench work) is a
+ * host-side diagnostic/mitigation knob for a suspected link-wedge mechanism:
+ * the firmware appears to tear down and re-open its SPI slave (SPI_close /
+ * SPI_open / re-arm) on its own task after certain worker-routed ops, with no
+ * interlock against the host still clocking -- bytes clocked into that
+ * window are absorbed by the freshly armed transfer and the slave ends up
+ * permanently one transfer behind.  Risk scales with how densely the host
+ * polls when the teardown lands, so this floor -- which controls exactly the
+ * early, densely-spaced retries -- can be raised (e.g. to the 50 ms ceiling,
+ * flattening the backoff into a fixed cadence) to make that dense window
+ * disappear WITHOUT touching the wire protocol.  It is a mitigation, not a
+ * fix: it changes host timing, nothing about the race itself.  Same
+ * "portable constant, Zephyr-overridable" shape as
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS above -- see its comment.
+ * Default (1) is today's unchanged behaviour. */
+#ifndef CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS
+#define CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS 1u
+#endif
+#define CC3501E_POLL_GAP_MIN_MS CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS
 #define CC3501E_POLL_GAP_MS     50u
+
+/* CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS (issue #2035 bench work):
+ * companion knob to CC3501E_POLL_GAP_MIN_MS above, applied where a
+ * worker-routed request COMPLETES rather than where it retries.  Same
+ * suspected teardown-vs-clocking-host race: a success reply can land right
+ * as the firmware re-opens its SPI slave on its own task, and the very next
+ * request the host issues is what gets absorbed by the freshly armed
+ * transfer.  A non-zero guard gives that teardown a chance to finish into an
+ * idle bus before the next request goes out.  Scoped to poll_by_repeat()
+ * (the worker-routed request path -- see the "single biggest cost on every
+ * worker-routed op" comment above) rather than cc3501e_request(), so it does
+ * not tax the fast, non-worker-routed path (GET_VERSION, GET_CAPABILITIES,
+ * STREAM_WRITE) for no reason.  Mitigation/diagnostic only, not a fix.
+ * Default (0) is today's unchanged behaviour: no delay. */
+#ifndef CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS
+#define CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS 0u
+#endif
 
 alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             alp_cc3501e_cmd_t cmd,
@@ -1513,12 +1585,13 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * otherwise leave that stale count visible to a caller who reads
 		 * *rx_len after this function finally returns TIMEOUT. */
 		if (rx_len != NULL) *rx_len = 0;
-		/* Sentinel: pre-set rx_scratch[0] to a byte the peek below never
-		 * matches (0xFF).  Only a real reply payload overwrites it with the
-		 * resp byte; a BUSY that comes from the transport (alp_spi_transceive
-		 * -EBUSY) rather than resp_to_status() then leaves the sentinel, so it
-		 * can never masquerade as RESP_ERR_STATE. */
-		ctx->rx_scratch[0] = 0xFFu;
+		/* No pre-set sentinel needed here any more (#2035 follow-up):
+		 * cc3501e_request_locked() itself now guarantees ctx->rx_scratch[0]
+		 * is EITHER a genuinely decoded ALP_CC3501E_RESP_* status byte OR
+		 * ALP_CC3501E_RX_SCRATCH_NO_STATUS on every return -- never leftover wire
+		 * residue -- see that function's out: label and the comment above
+		 * it.  The peeks below trust an exact match against a real status
+		 * code as proof a status was actually decoded. */
 		s = cc3501e_request_locked(ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, req_seq);
 		/* resp_to_status() maps BOTH RESP_ERR_BUSY (worker still running --
 		 * genuinely retryable) and RESP_ERR_STATE (a deterministic firmware
@@ -1527,17 +1600,88 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * both.  But only the FORMER is worth re-polling: retrying the
 		 * latter just repeats the same reject until the budget is gone
 		 * (register-while-advertising must fail promptly, not after burning
-		 * the whole poll window).  Only a RESP_ERR_STATE reply writes 0x09
-		 * into rx_scratch[0] (the sentinel above rules out a transport BUSY),
-		 * so the peek disambiguates safely -- read here, still under the
-		 * lock, not after release. */
+		 * the whole poll window).  Only a genuinely decoded RESP_ERR_STATE
+		 * reply leaves 0x09 in rx_scratch[0] (see the guarantee above), so
+		 * the peek disambiguates safely -- read here, still under the lock,
+		 * not after release. */
 		const bool terminal_reject =
 		    (s == ALP_ERR_BUSY && ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_STATE);
+		/* #2035 bench finding (BLE_ENABLE -> -4 after burning the whole 10 s
+		 * poll budget): resp_to_status() maps THREE distinct decoded,
+		 * correctly-CRC'd device-side failures onto the SAME ALP_ERR_IO it
+		 * also returns for a raw transport hiccup -- a failed
+		 * alp_spi_transceive, a misaligned reply header:
+		 *
+		 *   - ALP_CC3501E_RESP_ERR_RADIO (0x06)    -- RF / antenna failure.
+		 *   - ALP_CC3501E_RESP_ERR_PROTOCOL (0x07) -- the DEVICE's own
+		 *     frame-mis-parse verdict (distinct from this host's OWN
+		 *     desync detection above, which never reaches resp_to_status).
+		 *   - ALP_CC3501E_RESP_ERR_INTERNAL (0xFF) -- firmware-side fault.
+		 *
+		 * so this loop's `s == ALP_ERR_IO` retry branch below cannot tell "the
+		 * device answered a terminal failure" from "the wire glitched, try
+		 * again" and retries every one of them to the full budget.
+		 *
+		 * That is wrong on its own merits, independent of any single code:
+		 * this loop pre-allocates ONE req_seq before the loop and resends it
+		 * unchanged on every attempt (see the comment above the loop) so the
+		 * firmware's per-seq retry latch (proto v8, cc3501e-bridge-firmware
+		 * #102) can answer a repeat from its latch WITHOUT RE-EXECUTING the
+		 * op -- so a repeat of any one of these three can only ever replay
+		 * that SAME answer, never spontaneously turn into success. Retrying
+		 * to budget therefore (a) costs the full poll window for nothing --
+		 * 10 s for BLE_ENABLE's CC35_BLE_TIMEOUT_MS -- and (b) reports
+		 * ALP_ERR_TIMEOUT to the caller, the WRONG error class: what actually
+		 * happened is ALP_ERR_IO (a real, decoded device-side failure), not a
+		 * transport that never answered.
+		 *
+		 * All three checked here, not just RESP_ERR_RADIO (the original
+		 * #2035 fix this replaces): the retry-latch argument above applies
+		 * identically to all three, nothing in it is radio-specific.
+		 * Extending to RESP_ERR_INTERNAL (0xFF) specifically requires Fix 1
+		 * (ALP_CC3501E_RX_SCRATCH_NO_STATUS, see its comment above
+		 * cc3501e_request_locked): before that fix, a pre-decode failure
+		 * could leave arbitrary wire residue in rx_scratch[0], and
+		 * poll_by_repeat's OWN pre-call sentinel used to be 0xFFu too -- so a
+		 * peek for 0xFF here would have matched almost every pre-decode IO
+		 * failure, not just a genuine decoded RESP_ERR_INTERNAL.
+		 * cc3501e_request_locked() now poisons that byte to
+		 * ALP_CC3501E_RX_SCRATCH_NO_STATUS (0xDA, deliberately NOT 0xFF) on every
+		 * pre-decode exit, so 0xFF read here can only mean a genuine decode.
+		 *
+		 * Residual, pre-existing risk this does NOT close (out of scope for
+		 * a rx_scratch-sentinel fix -- would need a decode-succeeded flag out
+		 * of cc3501e_reply_verdict() itself, which #1116 already declined):
+		 * a WELL-FRAMED reply (valid header, so cc3501e_request_locked DID
+		 * reach cc3501e_reply_verdict()) whose CRC trailer fails, or whose
+		 * payload trips the #1378 dead-phase alias, also returns ALP_ERR_IO
+		 * with rx_scratch[0] holding that reply's raw, UNVERIFIED payload
+		 * byte -- not a marker, because from cc3501e_request_locked's own
+		 * point of view a reply WAS decoded (reply_verdict ran), it is only
+		 * reply_verdict's internal CRC/dead-phase logic that rejected it.
+		 * If that raw byte happens to equal 0x06/0x07/0xFF this peek treats
+		 * it as terminal and loses one retry -- same bounded, accepted cost
+		 * the original RESP_ERR_RADIO version of this comment already
+		 * carried, now scoped precisely to reply_verdict()'s two internal
+		 * rejection branches instead of the whole pre-decode surface. */
+		const bool terminal_decoded_io =
+		    (s == ALP_ERR_IO) && (ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_RADIO ||
+		                          ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_PROTOCOL ||
+		                          ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_INTERNAL);
 		cc3501e_lock_release(ctx);
-		if (terminal_reject) {
-			return s; /* terminal reject -- do not retry */
+		if (terminal_reject || terminal_decoded_io) {
+			return s; /* terminal reject / decoded device-side failure -- do not retry */
 		}
 		if (s != ALP_ERR_BUSY && s != ALP_ERR_IO) {
+			/* Guard delay applies to SUCCESS only, not to every
+			 * non-retryable outcome -- an ALP_ERR_INVAL/ALP_ERR_NOT_READY
+			 * return means no worker-routed op actually ran on the
+			 * device, so there is no teardown to wait out.  See
+			 * CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS's comment above
+			 * the loop for the race this guards against. */
+			if (s == ALP_OK && CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS > 0u) {
+				alp_delay_ms(CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS);
+			}
 			return s; /* OK or a non-retryable error -- done. */
 		}
 		if (remaining == 0u) {

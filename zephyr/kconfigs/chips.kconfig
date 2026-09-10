@@ -150,6 +150,47 @@ config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
 	  cannot see this Kconfig value and fall back to the same 100 ms
 	  default compiled into chips/cc3501e/cc3501e_core.c.
 
+config ALP_SDK_CC3501E_POLL_GAP_MIN_MS
+	int "poll_by_repeat() initial retry gap floor (ms)"
+	default 1
+	range 1 50
+	help
+	  Floor of poll_by_repeat()'s exponential backoff (issue #2035
+	  bench work), which starts at this value and doubles up to the
+	  50 ms ceiling on every BUSY/IO repeat of a worker-routed
+	  request.  Diagnostic/mitigation for a suspected link-wedge
+	  mechanism: the firmware appears to tear down and re-open its
+	  SPI slave (SPI_close / SPI_open / re-arm) on its own task after
+	  certain worker-routed ops, with no interlock against the host
+	  still clocking -- bytes clocked into that window are absorbed
+	  by the freshly armed transfer and the slave ends up permanently
+	  one transfer behind.  Risk scales with how densely the host is
+	  polling when the teardown lands, so the early, densely-spaced
+	  retries this floor controls are exactly the highest-risk window.
+	  Raising the floor (e.g. to 50, flattening the backoff into a
+	  fixed cadence) trades poll throughput for a wider gap around
+	  that window; it does not fix the race, it only makes the host
+	  less likely to be clocking when it happens.  Default (1) is
+	  today's unchanged behaviour.
+
+config ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS
+	int "poll_by_repeat() post-success guard delay (ms)"
+	default 0
+	range 0 1000
+	help
+	  Extra delay poll_by_repeat() inserts after a worker-routed
+	  request returns success, before returning control to the
+	  caller (issue #2035 bench work).  Same suspected link-wedge
+	  mechanism as CONFIG_ALP_SDK_CC3501E_POLL_GAP_MIN_MS above: a
+	  worker-routed op's success reply can race the firmware's own
+	  SPI slave teardown/re-arm on its own task, with no interlock.
+	  A non-zero guard gives that teardown a chance to complete into
+	  an idle bus before the next request goes out, instead of racing
+	  it.  This is a mitigation and a way to confirm the mechanism on
+	  hardware, not a fix -- it does not touch the wire protocol or
+	  resynchronise anything.  Default (0) is today's unchanged
+	  behaviour: no delay, no throughput cost.
+
 endif # ALP_SDK_CHIP_CC3501E
 
 config ALP_SDK_CHIP_TMP112

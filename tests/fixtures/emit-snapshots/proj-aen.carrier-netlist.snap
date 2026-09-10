@@ -107,7 +107,7 @@
           "pin": 30
         }
       ],
-      "board_doc": "I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux.",
+      "board_doc": "I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin.",
       "active_low": true,
       "dispatch_pin": 30,
       "som_doc": "CC3501E GPIO_30 (board 2626-R2; GPIO30 moved here from IO21)."
