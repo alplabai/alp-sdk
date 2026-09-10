@@ -467,3 +467,238 @@ bench_require_openocd() {
 	fi
 	return 0
 }
+
+# bench_atoc_replace_guard <replace-atoc 0|1> <tag> [allowed-entry ...]
+#
+# GUARD (alp-sdk#2025) against the ATOC-replace hazard, shared by every
+# helper that burns a freshly-generated `app-gen-toc` package: that package
+# always contains exactly the app entries named in the JSON handed to it, and
+# writing it -- whether over the SE-UART (`app-write-mram -c $SE_UART -p`,
+# Flow A) or directly over SWD (`loadbin $PKG $ATOC_ADDR`, Flow D) -- burns
+# the SAME signed ATOC structure at the SAME MRAM location either way (see
+# docs/debugging-aen.md and docs/aen-bench-bringup.md: both call it "the
+# signed ATOC the SE reads at boot"). `DEVICE` is the one entry SETOOLS is
+# documented to preserve when a JSON omits it (docs/aen-provisioning.md
+# section 4, "write an app-only ATOC ... don't overwrite the device config");
+# every OTHER resident app entry NOT in the JSON you are about to burn is
+# gone the instant the write lands -- no error, no SES warning (`[SES] ATOC
+# ok` prints either way). This destroyed a live A32 Linux boot chain
+# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on `e1m-aen-evk-01`, 2026-09-07.
+#
+# Originally written into flash-run.sh alone for its own single ALP-HE entry
+# (#2025); factored out here so every script that commits a TOC shares one
+# guard instead of drifting copies. <allowed-entry ...> is the set of app
+# entries THIS run is itself about to (re)write -- e.g. flash-run.sh passes
+# ALP-HE, flash-run-dualcore.sh passes ALP-HP ALP-HE (its own legitimate
+# two-entry write) -- so the guard fires only on a GENUINELY foreign resident
+# entry, never on the script's own output.
+#
+# Queries resident state with SETOOLS' `maintenance -c $SE_UART -opt gettoc`
+# -- a documented non-destructive TOC read (AUGD0005 Alif Security Toolkit
+# User Guide v1.110.0, "Command line options (-opt)": gettoc "Returns the TOC
+# information"), never a merge engine. Dumps it unconditionally, even under
+# replace-atoc=1, so a run always leaves a record of what was resident
+# immediately before a destructive write.
+#
+# Returns 0 to proceed, 5 to abort (could not verify what is resident, or a
+# foreign entry would be delisted) unless replace-atoc=1 was passed.
+bench_atoc_replace_guard() {
+	local replace_atoc="$1" tag="$2"
+	shift 2
+	local allowed=("$@")
+
+	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
+	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
+	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
+	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# SAME script against DIFFERENT boards a real scenario, and a fixed path
+	# let run A's write land between run B's redirect and B's read, so B
+	# parsed A's board (reproduced: B printed A's clean table and returned
+	# GUARD_RC=0 on a board that actually carried A32_APP + HE_APP -- the
+	# exact #2025 loss through a new door). `mktemp` both makes the path
+	# run-unique (its own randomised suffix, no two callers can collide) and
+	# creates the file atomically (O_CREAT|O_EXCL under the hood), closing
+	# the rm-then-open symlink-race window a predictable rm -f/`>` pair
+	# leaves open. A directory `mktemp` cannot create in (unwritable TMPDIR)
+	# fails here, which is the same "abort, do not guess" outcome the old
+	# rm -f/existence-check pair gave for an unremovable stale file.
+	#
+	# RETENTION IS DELIBERATE, NOT A LEAK: this file is never removed on
+	# any exit path (success or abort) -- it is the "always leaves a record
+	# of what was resident immediately before a destructive write" audit
+	# trail this guard exists to provide (see the function's own header
+	# comment), and a run that PASSED is exactly the run whose pre-write
+	# state you may later need to prove. Each run leaves one more
+	# ${TMPDIR:-/tmp}/<tag>-atoc-before.<random>; periodically clean
+	# TMPDIR by hand (see README.md's Quick start / troubleshooting).
+	#
+	# The X's MUST be trailing, no suffix after them (no ".log" here).
+	# BSD/macOS mktemp requires the placeholder to be the literal end of
+	# the template and fails EVERY call with a misleading "File exists"
+	# on a mid-template placeholder (`...XXXXXX.log`) that GNU mktemp
+	# tolerates -- measured on macOS CI: the guard aborted (exit 5) on
+	# every single run, silently dead on that platform, fail-closed. GNU
+	# mktemp's own --suffix flag is not the fix either: it does not exist
+	# on BSD/macOS mktemp, so it would only move the same break.
+	local before
+	before=$(mktemp "${TMPDIR:-/tmp}/${tag}-atoc-before.XXXXXX") || {
+		echo "!! ABORT ($tag): cannot create the pre-write ATOC transcript in ${TMPDIR:-/tmp}" >&2
+		return 5
+	}
+
+	# rc tracks whether the query itself succeeded -- defaults to failed
+	# (1) so the SE_UART-unset and maintenance-missing branches, which never
+	# run a real query, fall straight into "unverified" below rather than
+	# silently defaulting to a pass. A query that exits non-zero after
+	# emitting partial table rows (e.g. a serial timeout mid-read) must also
+	# land here, not decode as "ok" from the transcript text alone.
+	local rc=1
+	if [ -z "${SE_UART:-}" ]; then
+		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before" || return 5
+	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
+		# Confirm the serial device that answers is actually the SES, not the
+		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
+		# /dev/ttyUSB1 is the app console). BENCH-VERIFIED: a real
+		# `getbanner` capture off e1m-aen-evk-01 (2026-09-07) reads
+		# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping --
+		# docs/debugging-aen.md:548 is only a doc placeholder
+		# ("SES <rev> v<version> <build date>"), not a transcript, and is
+		# NOT the proof. A gettoc read off the wrong device is not a safe
+		# verdict, so a missing/garbled banner also forces the query
+		# unverified below.
+		local banner banner_ok=1 banner_rc
+		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
+		banner_rc=$?
+		# Real capture off e1m-aen-evk-01 (2026-09-07), ANSI intact:
+		#   ^[[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 ^[[0m
+		# Strip the ANSI FIRST, then match -- and the stripped line has a
+		# LEADING SPACE (SETOOLS' own padding, not a terminal artifact), so
+		# a bare `^SES` anchor rejects every real banner and aborts every
+		# run on real hardware. Tolerate leading whitespace.
+		printf '%s\n' "$banner" | sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' \
+			| grep -qE '^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+' || banner_ok=0
+		# getbanner exiting non-zero while still printing a well-formed
+		# banner line must not read as ok -- same class as the gettoc rc fix
+		# above (measured: getbanner rc=3 with a valid banner -> GUARD_RC=0
+		# before this).
+		[ "$banner_rc" -eq 0 ] || banner_ok=0
+		( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt gettoc ) >"$before" 2>&1
+		rc=$?
+		[ "$banner_ok" -eq 1 ] || rc=1
+	else
+		echo "GUARD: SETOOLS 'maintenance' tool not found in $SETOOLS_DIR -- cannot query the resident ATOC" >"$before" || return 5
+	fi
+	[ -f "$before" ] || return 5
+	echo ">>> resident ATOC before this write ($before):" >&2
+	cat "$before" >&2
+
+	# SETOOLS emits ANSI codes on some terminals/versions -- not just SGR
+	# colour (`...m`): a real capture also carries a cursor-show sequence
+	# (`^[[?25h`), and an erase-in-line (`^[[K`) landing inside a Name cell
+	# would otherwise survive an SGR-only strip and read as a foreign entry
+	# (false-alarm direction). Strip any CSI sequence (ESC [ ... final-byte),
+	# not just the `m`-terminated ones, before the awk table parse (also
+	# matches read-update-log-proof.sh:150's own maintenance-read strip).
+	# Also drop a trailing CR: SETOOLS on some hosts emits CRLF, and
+	# `grep -qix "no atoc found on target device."` below is anchored with
+	# `$`, so an untouched CR would make a genuinely blank board's "No ATOC"
+	# line fail to match and read as unverified (GUARD_RC=5) instead.
+	local stripped
+	stripped=$(sed -E 's/\x1b\[[0-9;?]*[a-zA-Z]//g' "$before" | tr -d '\r')
+
+	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
+	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
+	# BENCH-VERIFIED against a real 9-row getbanner+gettoc capture off
+	# e1m-aen-evk-01 (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
+	# (`^[[94m |    DEVICE|...|`), not just the cell text, so the
+	# ANSI-stripped row keeps a LEADING SPACE before the pipe. A bare `/^\|/`
+	# anchor (no synthetic test fixture ever exercised this -- the test's
+	# ANSI table colours only the cell, not the line) never matched a single
+	# real row: `resident` silently computed empty on EVERY real coloured
+	# transcript, aborting every run as "unverified" rather than ever
+	# actually detecting -- or clearing -- a foreign entry.
+	# Carries the CPU column (field 3, e.g. "CM0+"/"M55-HE"/"A32_0") alongside
+	# the name, tab-separated -- the DEVICE/SERAM0/SERAM1 baseline exemption
+	# below cross-checks it (a same-named row on the wrong CPU is never
+	# baseline SE state, just a coincidentally-named app entry).
+	local resident=()
+	while IFS= read -r n; do
+		resident+=("$n")
+	done < <(printf '%s\n' "$stripped" | awk -F'|' '
+		/^[ \t]*\|/ {
+			name = $2; cpu = $3
+			gsub(/^[ \t]+|[ \t]+$/, "", name)
+			gsub(/^[ \t]+|[ \t]+$/, "", cpu)
+			if (name != "" && name != "Name" && name !~ /^-+$/) print name "\t" cpu
+		}')
+
+	# Only trust the transcript's text when the query itself actually
+	# succeeded (rc=0) -- an error line containing "no atoc" (e.g. "no ATOC
+	# response from target") must not read as a genuinely empty board, and
+	# anchor to SETOOLS' exact message rather than a bare substring match.
+	local query_status=unverified
+	if [ "$rc" -eq 0 ]; then
+		if printf '%s\n' "$stripped" | grep -qix "no atoc found on target device."; then
+			query_status=empty
+		elif [ "${#resident[@]}" -gt 0 ]; then
+			query_status=ok
+		fi
+	fi
+
+	# DEVICE plus the two SE firmware banks (SERAM0/SERAM1 -- one marked
+	# "* SERAM0" as the currently-booted bank, docs/aen-se-services.md:194)
+	# are baseline SE state, never touched by app-write-mram -p: only a
+	# System Package update rewrites SERAM (docs/aen-se-services.md
+	# section 0.1). Both real captures above show SERAM0/SERAM1 resident
+	# alongside completely different app entries, confirming they are
+	# independent of whatever app ATOC was last written -- without this
+	# exemption the guard flags them as "extra" on EVERY real board,
+	# unconditionally, which trains the operator to always pass
+	# --replace-atoc (discovered validating the parser against the real
+	# gettoc-BEFORE-2entry.txt capture, which must pass clean and instead
+	# aborted before this fix).
+	#
+	# Cross-check the CPU column (both real captures show all three
+	# baseline rows as "CM0+", and no app entry ever is): the exemption is
+	# on (name, CPU), not name alone -- a row that merely happens to share
+	# one of these names on a DIFFERENT core (measured: a synthesized
+	# "SERAM1 | M55-HE | ..." row) is an app entry with a colliding name,
+	# not SE firmware, and must still trip the guard.
+	local extra=() entry name cpu a hit nbase
+	for entry in "${resident[@]}"; do
+		name="${entry%%$'\t'*}"
+		cpu="${entry#*$'\t'}"
+		nbase="${name#\* }"
+		case "$nbase" in
+		DEVICE | SERAM0 | SERAM1)
+			[ "$cpu" = "CM0+" ] && continue
+			;;
+		esac
+		hit=0
+		for a in "${allowed[@]}"; do
+			[ "$name" = "$a" ] && { hit=1; break; }
+		done
+		[ "$hit" -eq 0 ] && extra+=("$name")
+	done
+
+	if [ "$replace_atoc" -ne 1 ]; then
+		if [ "$query_status" = unverified ]; then
+			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
+			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
+			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
+			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
+			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			return 5
+		fi
+		if [ "${#extra[@]}" -gt 0 ]; then
+			echo "!! ABORT ($tag): this write REPLACES every app ATOC entry not in it -- it does NOT merge." >&2
+			echo "   This board also carries: ${extra[*]}" >&2
+			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
+			echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
+			echo "   losing them is genuinely intended." >&2
+			return 5
+		fi
+	fi
+	return 0
+}

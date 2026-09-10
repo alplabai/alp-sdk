@@ -62,13 +62,51 @@ def _make_validator(schema_path: Path) -> jsonschema.Draft202012Validator:
         schema, format_checker=jsonschema.FormatChecker())
 
 
+def _join_errors(doc) -> list[str]:
+    """The `memory[]` name join JSON Schema cannot express (#1365 item 3).
+
+    `ipc[].carve_out_region` and `storage[].flash_device` each name a
+    `memory[].name`.  The join is PARTIAL BY CONSTRUCTION on the storage
+    side: an `on_module.ospi_memories:` key is a legal `flash_device`
+    target but is a controller-instance name carrying a `capacity_mbit`
+    and no base, so it lies outside every aperture and gets no region row.
+    A `flash_device` naming neither a region nor a known controller cannot
+    be told apart from a typo here -- the loader already refuses that case
+    eagerly (`_known_flash_devices`), so this gate enforces only the half
+    it can prove: a `carve_out_region` that names no region at all.
+
+    Skipped entirely when `memory:` is absent -- that means a producer
+    older than #1365 item 3, or a SoM whose layout is still pending, and
+    neither is a join failure.
+    """
+    if not isinstance(doc, dict) or not isinstance(doc.get("memory"), list):
+        return []
+    names = {
+        r.get("name") for r in doc["memory"]
+        if isinstance(r, dict) and isinstance(r.get("name"), str)
+    }
+    out: list[str] = []
+    for link in doc.get("ipc") or []:
+        if not isinstance(link, dict):
+            continue
+        region = link.get("carve_out_region")
+        if isinstance(region, str) and region not in names:
+            out.append(
+                f"ipc/{link.get('name')}: carve_out_region '{region}' names "
+                f"no memory[] region.  Known regions: {sorted(names) or '[]'}")
+    return out
+
+
 def _validate_doc(label: str, doc, validator: jsonschema.Draft202012Validator) -> int:
     errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.absolute_path))
-    if errors:
+    joins = _join_errors(doc)
+    if errors or joins:
         print(f"FAIL {label}")
         for err in errors:
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             print(f"  · {loc}: {err.message}")
+        for msg in joins:
+            print(f"  · {msg}")
         return 1
     print(f"OK   {label}")
     return 0

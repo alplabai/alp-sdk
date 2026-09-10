@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-update-log-dual.sh [--package-only] <hp-build-dir> <he-build-dir>
+# scripts/bench/aen/flash-update-log-dual.sh [--package-only] [--replace-atoc] <hp-build-dir> <he-build-dir>
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives the Alif SETOOLS + JLinkExe over the labgrid-held AEN bench).
@@ -10,11 +10,17 @@
 #   - HP owner:  M55_HP, loadAddress 0x50000000, flags ["load", "boot"]
 #   - HE client: M55_HE, loadAddress 0x58000000, flags ["load"]
 #
-# The default package is app-only so it preserves the board's existing
-# DEVICE/firewall policy. Set ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when
-# intentionally replacing that policy. The package is written to MRAM only when
-# ALP_CONFIRM_DESTRUCTIVE_FLASH=yes is present. Use --package-only to validate
-# the SETOOLS package without touching the board.
+# The default package is app-only so it preserves the board's existing DEVICE
+# policy (SETOOLS keeps DEVICE when a JSON omits it, docs/aen-provisioning.md
+# section 4). Set ALP_AEN_INCLUDE_DEVICE_CONFIG=yes only when intentionally
+# replacing that policy. Every OTHER resident app entry NOT named HP-OWNER/
+# HE-CLIENT is a different matter: the `loadbin` below writes the SAME signed
+# ATOC structure `app-write-mram -p` would (docs/debugging-aen.md), which
+# REPLACES rather than merges, so a foreign app entry (e.g. an A32 Linux boot
+# chain) is silently delisted unless --replace-atoc is passed (alp-sdk#2025 --
+# see the GUARD before the write, below). The package is written to MRAM only
+# when ALP_CONFIRM_DESTRUCTIVE_FLASH=yes is present. Use --package-only to
+# validate the SETOOLS package without touching the board.
 set -e
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -22,13 +28,19 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$HERE/bench-env.sh"
 
 PACKAGE_ONLY=0
-if [ "${1:-}" = "--package-only" ]; then
-	PACKAGE_ONLY=1
-	shift
-fi
+REPLACE_ATOC=0
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--package-only) PACKAGE_ONLY=1; shift ;;
+	--replace-atoc) REPLACE_ATOC=1; shift ;;
+	--) shift; break ;;
+	-*) echo "unknown flag: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 
 if [ "$#" -ne 2 ]; then
-	echo "usage: $0 [--package-only] <hp-build-dir> <he-build-dir>" >&2
+	echo "usage: $0 [--package-only] [--replace-atoc] <hp-build-dir> <he-build-dir>" >&2
 	exit 2
 fi
 
@@ -127,6 +139,16 @@ if [ "${ALP_CONFIRM_DESTRUCTIVE_FLASH:-}" != "yes" ]; then
 	echo "refusing destructive MRAM flash: set ALP_CONFIRM_DESTRUCTIVE_FLASH=yes for this run" >&2
 	exit 4
 fi
+
+# GUARD (alp-sdk#2025) -- see bench_atoc_replace_guard in bench-env.sh.
+# HP-OWNER and HE-CLIENT are what THIS run itself is about to (re)write, so
+# they are the allowed set -- the guard fires only on a genuinely foreign
+# resident entry (e.g. an A32 Linux boot chain), never on this script's own
+# output. This helper has no other SE_UART dependency (its write goes over
+# JLinkExe, not app-write-mram) -- the guard needs SE_UART only for its own
+# read-only `maintenance -opt gettoc` query and reports "unverified" (abort
+# unless --replace-atoc) if it is unset, same as any other missing input.
+bench_atoc_replace_guard "$REPLACE_ATOC" flash-update-log-dual HP-OWNER HE-CLIENT || exit $?
 
 cat > /tmp/firmware-update-log-dual-write.jlink <<EOF
 si SWD
