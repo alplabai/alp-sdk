@@ -30,10 +30,10 @@ bridge health. Two diagnostic ways in:
 > The same `alp companion` group binds the **GD32** supervisor on V2N SoMs
 > (`CONFIG_ALP_SDK_V2N_SUPERVISOR`, plus a non-negative
 > `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` or
-> `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` -- both default `-1`, which no
-> in-tree board overrides yet) instead of the CC3501E; there it exposes
-> `companion gpio read/write` rather than the Wi-Fi/BLE tree below. This page
-> documents the **CC3501E (Alif)** binding.  Tracked in #2044.
+> `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` — both default `-1`, which no
+> in-tree board overrides yet (tracked in #2044)) instead of the CC3501E;
+> there it exposes `companion gpio read/write` rather than the Wi-Fi/BLE
+> tree below. This page documents the **CC3501E (Alif)** binding.
 
 ---
 

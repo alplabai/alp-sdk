@@ -13,19 +13,25 @@ customer-only licence -- see
 
 ## What this shows
 
-1. **PCIe mux + DEEPX power rail bring-up.**  The V2N
-   supervisor's [`v2n_power_mgmt.c`](../../../src/zephyr/v2n_power_mgmt.c)
+1. **PCIe mux + DEEPX power rail bring-up.**  The
+   [`v2n_power_mgmt.c`](../../../src/zephyr/v2n_power_mgmt.c)
    module (landed in §C.28) is written to respond to the board's
    `DEEPX_PWR_EN_REQ` rising edge on `P65`, bring up the
    DA9292 CH2 = 0.75 V DEEPX rail, then drive
    `DEEPX_CORE_0P75_EN` (`P64`) high from its own SYS_INIT hook.
    **It is not active on `alp_e1m_v2m101_m33_sm` today:** the
    board devicetree defines neither the `v2n-deepx-pwr-en-req`
-   nor the `v2n-deepx-core-0p75-en` alias, and
-   `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` stays `-1`, so the
-   module compiles to its `ALP_ERR_NOSUPPORT` stub and nothing
-   brings the rail up before `main()` runs.  Tracked in #2045
-   (DT aliases) and #2044 (I2C bus ID).
+   nor the `v2n-deepx-core-0p75-en` alias, so the module compiles
+   to its `ALP_ERR_NOSUPPORT` stub and nothing brings the rail up
+   before `main()` runs (#2045).  Separately, this board's
+   `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` stays `-1`, the
+   in-tree default, which would fail init at runtime with
+   `ALP_ERR_NOSUPPORT` before P65 is armed even if the aliases
+   were added (#2044).  **Do not wire or flash this onto an
+   E1M-V2M101 without the bench-safety section of #2045:** the
+   DA9292-AROVx OTP variant boots `PMC_CTRL_01 = 0x80`
+   (`CH2_VSTEP=1`), so a naive VSTEP=0 write of the 0.75 V byte
+   (`0x96`) decodes as 1.50 V on the DEEPX rail.
 2. **PCIe mux + `M1_RESET` release.**  The
    [`chips/deepx_dxm1/`](../../../chips/deepx_dxm1/) host
    driver wraps the PI3DBS12212 PCIe mux routing + the

@@ -36,13 +36,12 @@ config ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID
 	int "alp_spi bus_id carrying the GD32 SPI fast path (-1 = disabled)"
 	default -1
 	help
-	  alp_spi_open()'s bus_id field.  Resolves to the SCI7 Simple-SPI
-	  on V2N pads P76/P77/P96 with P97 as GPIO chip-select (DT alias
-	  alp-spi1 = &gd32_spi, i.e. bus 1 on the in-tree boards) -- typically E1M SPI1
-	  (per the studio's gd32-io-mcu-map.tsv routing) but board
-	  files may override.  Set to -1 to disable the SPI path; the
-	  I2C management path alone is fast enough for low-rate
-	  telemetry but loses the dedicated-link latency win.
+	  alp_spi_open()'s bus_id field.  When set to 1 (DT alias
+	  alp-spi1 = &gd32_spi on the in-tree boards), resolves to the
+	  SCI7 Simple-SPI on V2N pads P76/P77/P96 with P97 as GPIO
+	  chip-select.  Set to -1 to disable the SPI path; the I2C
+	  management path alone is fast enough for low-rate telemetry
+	  but loses the dedicated-link latency win.
 
 config ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID
 	int "alp_i2c bus_id carrying the GD32 I2C management path (-1 = disabled)"
