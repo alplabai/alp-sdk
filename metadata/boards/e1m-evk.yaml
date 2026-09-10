@@ -114,7 +114,7 @@ e1m_routes:
     - { e1m: E1M_GPIO_IO7,  macro: EVK_PIN_PCIE_IOEXP_INT,
         doc: "INT input from the PCIe IO expander." }
     - { e1m: E1M_GPIO_IO8,  macro: EVK_PIN_I2S_MUX_EN,    active_low: true,
-        doc: "I2S0 74LVC157 /E (Alif side P7.1); drive low to enable mux." }
+        doc: "I2S0 74LVC157 /E; drive low to enable mux. NOT an Alif pin -- E1M_GPIO_IO8 dispatches to CC3501E GPIO_30 (metadata/e1m_modules/E1M-AEN801.yaml pad_routes), so driving it is a bridge transaction and needs the CC3501E link up first. An older doc string here claimed 'Alif side P7.1'; that was wrong." }
     - { e1m: E1M_GPIO_IO9,  macro: EVK_PIN_PCIE_IOEXP_RST,
         doc: "Reset output to the PCIe IO expander." }
     - { e1m: E1M_GPIO_IO10, macro: EVK_PIN_PCIE0_I2C_EN,
