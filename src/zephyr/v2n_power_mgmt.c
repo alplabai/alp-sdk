@@ -6,11 +6,11 @@
  * for the contract.
  *
  * Compiled in only when CONFIG_ALP_SDK_V2N_POWER_MGMT=y AND
- * CONFIG_ALP_SDK_V2N_SUPERVISOR=y, and only wired live when the
- * board devicetree also defines both v2n-deepx-* aliases (see the
- * DT-alias guard below).  See the DT-alias-missing stub just below
- * that guard, and the !V2N stub at the bottom, for the two
- * NOSUPPORT fallbacks.
+ * CONFIG_ALP_SDK_V2N_SUPERVISOR=y; the implementation, SYS_INIT
+ * included, also needs both v2n-deepx-* DT aliases, and at runtime
+ * a BRD_I2C borrow (CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID >= 0).
+ * NOSUPPORT fallbacks: the DT-alias guard's #else stub, and the
+ * !V2N stub at the bottom.
  *
  * Concurrency model:
  *
@@ -236,11 +236,11 @@ SYS_INIT(v2n_pwr_sys_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 alp_status_t alp_z_v2n_power_mgmt_init(void)
 {
-	/* DT aliases not both okay -- either this board genuinely has
-     * no DEEPX rail (a V2N base SoM), or it has one but the board
-     * DT hasn't wired it yet (alp_e1m_v2m101_m33_sm today, #2045).
-     * Surface NOSUPPORT either way so a misconfigured board
-     * doesn't silently look "fine". */
+	/* DT aliases not both okay: either no DEEPX rail (V2N base) or
+     * the board DT does not wire one (alp_e1m_v2m101_m33_sm today;
+     * rail architecture open in #2045).  Nothing in-tree calls this
+     * stub and no SYS_INIT is registered, so an unwired board logs
+     * nothing. */
 	return ALP_ERR_NOSUPPORT;
 }
 

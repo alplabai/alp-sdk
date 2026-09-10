@@ -298,9 +298,10 @@ The GD32 supervisor is a **singleton** managed inside the SDK.  When
 without any application code.  Both bus IDs default to `-1` and no in-tree
 board sets them yet, so on a stock build these commands would fail with
 `supervisor acquire failed (-2)` (`ALP_ERR_NOT_READY`, per
-`src/zephyr/console/alp_console_companion.c`; derived from source, not
-observed on silicon -- the in-tree M33 boards also ship with no CM33
-shell console by default).  Tracked in #2044.
+`src/zephyr/console/alp_console_companion.c` and
+`alp_console_companion_gpio.c`; derived from source, not observed on
+silicon -- the in-tree M33 boards also ship with no CM33 shell
+console by default).  Tracked in #2044.
 
 ### Alif (AEN801 + CC3501E)
 

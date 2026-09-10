@@ -30,8 +30,9 @@ customer-only licence -- see
    were added (#2044).  **Do not wire or flash this onto an
    E1M-V2M101 without the bench-safety section of #2045:** the
    DA9292-AROVx OTP variant boots `PMC_CTRL_01 = 0x80`
-   (`CH2_VSTEP=1`), so a naive VSTEP=0 write of the 0.75 V byte
-   (`0x96`) decodes as 1.50 V on the DEEPX rail.
+   (`CH2_VSTEP=1`), so writing the VSTEP=0-range 0.75 V byte
+   (`0x96`) while `CH2_VSTEP` is still 1 yields 1.50 V on the
+   DEEPX rail.
 2. **PCIe mux + `M1_RESET` release.**  The
    [`chips/deepx_dxm1/`](../../../chips/deepx_dxm1/) host
    driver wraps the PI3DBS12212 PCIe mux routing + the
