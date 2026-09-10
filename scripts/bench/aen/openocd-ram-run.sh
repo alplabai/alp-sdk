@@ -44,8 +44,16 @@
 # directly with no USB path, no labgrid, and no DPIDR check: exactly the
 # `ram-run.sh` hazard #1312/#1318 already fixed for JLinkExe, reintroduced
 # here because OpenOCD is a different tool with no shared preflight. Three
-# probes on alplab-gw answer the SAME cloned serial (AEN E8 3-4.4.3, the
-# GD32 bridge 3-4.2, both `603000869`); with nothing pinning the path,
+# probes on alplab-gw answer the SAME cloned serial `603000869` -- and this
+# farm holds MULTIPLE AEN E8 boards (e.g. evk-01, evk-03), each its own
+# probe at its own USB path, plus the GD32 bridge probe sharing the clone.
+# All three answer the SAME SWD DPIDR too (0x4c013477), so a mis-pinned path
+# still "looks healthy" all the way through -- the USB path is the ONLY
+# thing that selects the board. Resolve YOUR board's path fresh from
+# labgrid (`labgrid-client -p <place> show`'s swd resource) every time --
+# never hardcode one board's path here as if it were "the" AEN E8 example;
+# a copy-pasted path naming a different board than the one you are holding
+# is a silently wrong flash waiting to happen. With nothing pinning the path,
 # OpenOCD picks one arbitrarily, and this script's first hardware actions
 # are `halt` then `load_image ... 0x0` -- on the wrong board, that halts and
 # overwrites a target this reservation does not cover. Caught before any
@@ -62,8 +70,15 @@
 #      the AEN E8 answers 0x4C013477, the GD32 bridge 0x0BE12477. Either
 #      gate failing aborts before the probe is touched again.
 #
-# UNEXERCISED ON HARDWARE as of this change -- shellcheck + check_local_paths.py
-# only, no board run. A real bench run should print, in order:
+# BENCH-VERIFIED 2026-09-10 on e1m-aen-evk-01, with the USB path resolved
+# fresh from `labgrid-client -p e1m-aen-evk-01 show` (never copied from a
+# doc -- all three EVK boards answer the same DPIDR, so the USB path is the
+# only board selector). The run printed the transcript below, including
+# "113960 bytes written at address 0x00000000" and all four register echoes
+# -- which is the point: those lines are command_print output, and they were
+# SUPPRESSED until this script stopped joining its whole chain into a single
+# -c argument. Without them a transcript cannot tell a failed load from a
+# successful one. A real bench run prints, in order:
 #   >>> openocd-ram-run preflight (M55-HE / M55-HP)  usb=<AEN_OPENOCD_USB_LOCATION>
 # then OpenOCD's own DPIDR line containing 0x4c013477 (lower/upper-case
 # either way -- the gate matches case-insensitively), THEN:
@@ -133,7 +148,7 @@ NAME=$(basename "$BD")
 if [ "$CORE" = "he" ]; then
 	AP="0x00300000"
 	NAMEFMT="M55-HE"
-	SELECT_CMDS="targets alif.m55he; alif.m55he arp_examine; "
+	SELECT_CMDS=(-c "targets alif.m55he" -c "alif.m55he arp_examine")
 	cat >&2 <<-EOF
 	!! core=he: this OVERWRITES evk-01's resident HE ITCM stub (the ~4.6 KB
 	!! Secure-Enclave park stub, MSP=0x20040000, reset vector 0x00000B58) via
@@ -145,7 +160,7 @@ if [ "$CORE" = "he" ]; then
 else
 	AP="0x00200000"
 	NAMEFMT="M55-HP"
-	SELECT_CMDS=""
+	SELECT_CMDS=()
 fi
 
 # Print which core, explicitly and unambiguously, BEFORE touching the probe.
@@ -167,11 +182,47 @@ USB_LOC_CMD="adapter usb location $AEN_OPENOCD_USB_LOCATION; "
 # register, so examining the default target (HP, since only HE carries
 # -defer-examine) is enough to surface it regardless of which core CORE
 # ultimately selects.
-echo ">>> openocd-ram-run preflight ($NAMEFMT)  usb=$AEN_OPENOCD_USB_LOCATION" >&2
-PREFLIGHT_OUT=/tmp/openocd-ram-run-preflight.out
+# A fixed shared path here let two concurrent runs (routine on this farm --
+# multiple boards, multiple operators) clobber each other's transcript, so an
+# operator reading it after an abort could be reading a DIFFERENT board's
+# preflight. mktemp gives each run its own file; the path is echoed below
+# and also named by bench_jlink_assert_aen_dpidr's own abort message on
+# failure, since that is exactly when someone needs to go read it.
+PREFLIGHT_OUT=$(mktemp "${TMPDIR:-/tmp}/openocd-ram-run-preflight.XXXXXX") || {
+	echo "openocd-ram-run: could not create a preflight transcript file in ${TMPDIR:-/tmp}" >&2
+	exit 1
+}
+echo ">>> openocd-ram-run preflight ($NAMEFMT)  usb=$AEN_OPENOCD_USB_LOCATION  transcript=$PREFLIGHT_OUT" >&2
 openocd -f "$CFG" -c "${USB_LOC_CMD}init; shutdown" >"$PREFLIGHT_OUT" 2>&1 || true
 bench_jlink_assert_aen_dpidr "$PREFLIGHT_OUT" "openocd-ram-run preflight ($NAMEFMT)" || exit 4
+# Preflight passed -- the transcript has done its job, and everything past
+# this point re-touches the probe for real, so clean up on this (success)
+# path only. A failing preflight exits 4 above BEFORE this line runs, which
+# is exactly when the operator needs the file left behind to read.
+rm -f "$PREFLIGHT_OUT"
 
-CMDS="${USB_LOC_CMD}init; ${SELECT_CMDS}halt; load_image $BIN 0x0 bin; reg msplim_s 0x00000000; reg msplim_ns 0x00000000; reg msp $MSP; reg pc $PC; resume; shutdown"
+# One command per -c, NOT one semicolon-joined string on a single -c: OpenOCD
+# suppresses its own command_print output (the "NNN bytes written at address
+# ..." line from load_image, and the register echoes from `reg`) when a whole
+# chain rides one -c. That leaves a transcript that cannot distinguish a
+# successful load from a silent one -- bench-reproduced by running this exact
+# sequence with each command on its own -c and getting the full evidence back
+# (msplim_s/msplim_ns/msp/pc echoes, "210684 bytes written at address
+# 0x00000000"). Order matches the original semicolon chain exactly -- in
+# particular SELECT_CMDS (he only: `targets alif.m55he` THEN `arp_examine`)
+# still lands between `init` and `halt`, which is load-bearing.
+CMDS=(
+	-c "adapter usb location $AEN_OPENOCD_USB_LOCATION"
+	-c "init"
+	"${SELECT_CMDS[@]}"
+	-c "halt"
+	-c "load_image $BIN 0x0 bin"
+	-c "reg msplim_s 0x00000000"
+	-c "reg msplim_ns 0x00000000"
+	-c "reg msp $MSP"
+	-c "reg pc $PC"
+	-c "resume"
+	-c "shutdown"
+)
 
-openocd -f "$CFG" -c "$CMDS"
+openocd -f "$CFG" "${CMDS[@]}"
