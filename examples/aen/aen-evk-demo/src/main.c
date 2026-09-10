@@ -1845,10 +1845,27 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
 
 /* Bounded retry for the first PING. cc3501e_reset() has already waited out
  * the boot budget, so attempt 1 usually lands; this only absorbs residual
- * ramp/boot jitter. 25 x 200 ms = 5 s, which is a bound, not a hope: a part
- * that has not answered in five seconds is not late, it is not there. */
-#define CC35_PING_RETRIES 25u
-#define CC35_PING_GAP_MS  200u
+ * ramp/boot jitter. 16 x 320 ms = 5.1 s, which is a bound, not a hope: a
+ * part that has not answered in five seconds is not late, it is not there.
+ *
+ * THE GAP MUST EXCEED THE SLAVE'S REPLY-STALL WATCHDOG, which is
+ * CC3501E_REPLY_STALL_MS = 250 in the bridge firmware's
+ * hal/ti/transport_hw_ti_spi.c.  That watchdog is the link's ONLY recovery
+ * from a phase desync -- there is no chip-select to resynchronise on, and
+ * byte-walking to realign provably parks the slave (see the cc3501e_sync()
+ * warning in chips/cc3501e/cc3501e_core.c).
+ *
+ * At the old 200 ms this retry loop was STARVING that recovery: every
+ * attempt re-stamped the slave's deadline before it could expire, so a link
+ * that desynced once stayed desynced for all 25 attempts and reported a
+ * dead part.  Measured on silicon 2026-09-10 -- 25 of 25 at -5, with a
+ * valid reply header for the PREVIOUS request sitting in the host's
+ * rx_scratch, which is what a one-transfer MISO lag looks like from here.
+ *
+ * 320 ms clears 250 ms with margin for the host's own per-attempt transport
+ * time. Attempt count drops so the five-second bound is unchanged. */
+#define CC35_PING_RETRIES 16u
+#define CC35_PING_GAP_MS  320u
 
 /* Poll-by-repeat budgets. GET_MAC, WIFI_SCAN_START and BLE_ENABLE are all
  * worker-routed on the firmware side: it answers BUSY while its worker runs
@@ -1959,6 +1976,73 @@ static bool cc35_scan_record_plausible(const cc3501e_scan_record_t *r)
 		if (r->bssid[i] != 0x00u) bssid_zero = false;
 	}
 	return !bssid_zero && (r->rssi_dbm < 0) && (r->rssi_dbm > -110);
+}
+
+/* Classify a captured 4-byte cc35_fw.rx_scratch[0..3] snapshot into words a
+ * bench log can be read without chips/cc3501e/cc3501e_core.c open beside it
+ * -- used by the BLE_ENABLE failure probe below. Order matters:
+ *
+ *   1. The driver's OWN marker first -- it is an authoritative fact
+ *      (cc3501e_request_locked() asserts it), not a guess from raw bytes,
+ *      so it must win over every pattern-match below it.
+ *   2. The two "nothing is really there" patterns -- SYNC_IDLE (a clean
+ *      parked boundary) and all-zero / all-0xFF (two DIFFERENT failure
+ *      modes that used to share one string: 0x00 is the #1378 dead-phase
+ *      alias the driver explicitly guards against; 0xFF is a line nothing
+ *      is driving at all -- conflating them hid which one a bench operator
+ *      was actually looking at).
+ *   3. The new case this probe was missing entirely: a header-SHAPED
+ *      4 bytes that is neither of the above. That is what a one-transfer
+ *      MISO lag looks like -- the slave answering from its PREVIOUS
+ *      request, not this one -- and it used to fall into the generic
+ *      "structured data" bucket below, the most reassuring of the old
+ *      three strings, for the one pattern that actually means the link is
+ *      wedged (measured on silicon 2026-09-10, see CC35_PING_GAP_MS's
+ *      comment above).
+ *   4. Only once nothing more specific matched: genuinely unclassified
+ *      "structured data". */
+static const char *cc35_describe_rx_scratch(const uint8_t rs[ALP_CC3501E_HEADER_BYTES])
+{
+	if (rs[0] == ALP_CC3501E_RX_SCRATCH_NO_STATUS) {
+		return "driver marker (0xDA) -- the call that filled this did NOT decode a status byte "
+		       "(a pre-decode transport/framing failure); see ALP_CC3501E_RX_SCRATCH_NO_STATUS "
+		       "in <alp/chips/cc3501e/core.h>";
+	}
+
+	bool all_a5 = (rs[0] == ALP_CC3501E_SYNC_IDLE) && (rs[1] == ALP_CC3501E_SYNC_IDLE) &&
+	              (rs[2] == ALP_CC3501E_SYNC_IDLE) && (rs[3] == ALP_CC3501E_SYNC_IDLE);
+	if (all_a5) {
+		return "all 0xA5 -- slave parked at a clean frame boundary on the idle marker";
+	}
+
+	bool all_00 = (rs[0] == 0x00u) && (rs[1] == 0x00u) && (rs[2] == 0x00u) && (rs[3] == 0x00u);
+	if (all_00) {
+		return "all 0x00 -- the #1378 dead-phase alias the driver guards against explicitly (a "
+		       "dead bus phase clocks back 0x00 for every byte it touches)";
+	}
+
+	bool all_ff = (rs[0] == 0xFFu) && (rs[1] == 0xFFu) && (rs[2] == 0xFFu) && (rs[3] == 0xFFu);
+	if (all_ff) {
+		return "all 0xFF -- an undriven line (distinct from all-0x00: nothing is pulling it low "
+		       "either, not even a dead phase)";
+	}
+
+	/* A "plausible header" mirrors cc3501e_request_locked()'s own hdr_ok shape
+	 * check (chips/cc3501e/cc3501e_core.c): the first byte sits in the
+	 * assigned opcode range, and the LE16 at bytes[2..3] is a payload length
+	 * in [1, ALP_CC3501E_MAX_PAYLOAD]. Deliberately NOT requiring the opcode
+	 * to differ from whatever this snapshot's own call just sent -- the
+	 * caller prints the raw bytes right beside this string, so a bench
+	 * operator can compare the two for themselves. */
+	uint16_t declared_len    = (uint16_t)rs[2] | ((uint16_t)rs[3] << 8);
+	bool looks_like_a_header = (rs[0] < ALP_CC3501E_CMD_RESERVED_VENDOR_BASE) &&
+	                           (declared_len >= 1u) && (declared_len <= ALP_CC3501E_MAX_PAYLOAD);
+	if (looks_like_a_header) {
+		return "a STALE REPLY HEADER -- the slave is answering from ONE TRANSFER BEHIND (a real "
+		       "header, just not this request's)";
+	}
+
+	return "structured data -- the slave answered something, but not a recognised shape";
 }
 
 static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
@@ -2283,6 +2367,191 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	        ? "(NOT_READY = BLE is not built into this firmware -- every shipped SoM carries it, "
 	          "so this is a real deviation, not an absent feature)"
 	        : "");
+
+	/*
+	 * Boot witness -- read UNCONDITIONALLY, on pass and on fail alike.
+	 *
+	 * This used to live inside the failure branch below, which made it
+	 * self-defeating: the one number that says whether a power cycle was
+	 * genuinely cold was obtainable only on a run that had already failed. A
+	 * seven-run bench matrix on 2026-09-10 was commissioned specifically to
+	 * read it, passed 7/7, and therefore never read it once.
+	 *
+	 * GET_DIAG_INFO's reply byte 15 (decoded to reserved[2] by
+	 * chips/cc3501e/cc3501e_diag.c) is the coprocessor's boot mark: bit 7 set
+	 * means that boot is running the polled update mode, bits 6..0 are a
+	 * warm-boot counter mod 128. It exists to distinguish a true power-on
+	 * reset from a warm restart in which RAM was never scrubbed -- the
+	 * question behind an observed 17s-power-cycle-fails / 61s-passes
+	 * asymmetry.
+	 *
+	 * Do NOT read the counter as "1 means cold". The demo warm-resets the part
+	 * during bring-up on every run (WIFI_EN high + nRESET pulsed, plus
+	 * cc3501e_reset()'s Puya double-boot), so a genuinely cold cycle reads
+	 * some fixed small offset, not 1. What discriminates cold from warm is the
+	 * value RELATIVE to that offset across runs, which is why this prints the
+	 * raw byte as well as the decoded halves.
+	 *
+	 * reset_cause is a second, independent witness for the same question and
+	 * is printed alongside rather than derived from it.
+	 */
+	{
+		alp_cc3501e_diag_info_t boot_info;
+		memset(&boot_info, 0, sizeof(boot_info));
+		const alp_status_t boot_rc = cc3501e_diag_info(&cc35_fw, &boot_info);
+		if (boot_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: boot witness: boot_mark=0x%02X (update_mode=%u "
+			       "boots_mod128=%u) reset_cause=%u last_error=0x%02X\n",
+			       boot_info.reserved[2],
+			       (unsigned)(boot_info.reserved[2] >> 7),
+			       (unsigned)(boot_info.reserved[2] & 0x7Fu),
+			       boot_info.reset_cause,
+			       boot_info.last_error);
+		} else {
+			printf("[evkdemo] CC3501E: boot witness UNREAD -- GET_DIAG_INFO (0x04) -> %d, so "
+			       "no boot_mark and no reset_cause were measured this run\n",
+			       (int)boot_rc);
+		}
+	}
+
+	if (ble_rc != ALP_OK) {
+		/* --- BLE_ENABLE failure probe: separate "link wedged" from "radio
+		 * op genuinely failed" ------------------------------------------ */
+		/*
+		 * A bare non-zero ble_rc is ambiguous by construction (see
+		 * chips/cc3501e/cc3501e_core.c's resp_to_status()): a DECODED, correctly
+		 * received terminal radio failure from the device and a raw transport
+		 * desync both surface as the same error class, and BLE_ENABLE's own
+		 * poll-by-repeat budget (CC35_BLE_TIMEOUT_MS, 10 s) burns the same
+		 * whichever it was. Do not just fail the phase -- collect the evidence
+		 * that tells the two apart, before anything else touches the link and
+		 * disturbs it, and print it so a bench log carries the diagnosis, not
+		 * just the symptom.
+		 *
+		 * Snapshot BLE_ENABLE's OWN leftover rx_scratch bytes FIRST, before
+		 * issuing anything else. cc3501e_ping() below runs its OWN 4-phase
+		 * exchange, and its phase-1 transceive unconditionally clocks fresh
+		 * bytes into ctx->rx_scratch the instant it starts -- so this is the
+		 * ONLY point at which "whatever BLE_ENABLE itself left behind" is
+		 * still readable. (An earlier version of this probe claimed the PING
+		 * reply below might still show BLE_ENABLE's residue; that claim was
+		 * false for exactly this reason -- fixed by capturing it here,
+		 * explicitly, instead of guessing at it afterwards.)
+		 */
+		uint8_t ble_enable_rs[ALP_CC3501E_HEADER_BYTES];
+		memcpy(ble_enable_rs, cc35_fw.rx_scratch, sizeof(ble_enable_rs));
+		printf("[evkdemo] CC3501E: rx_scratch[0..3] left by BLE_ENABLE's last attempt = %02X %02X "
+		       "%02X %02X (%s)\n",
+		       ble_enable_rs[0],
+		       ble_enable_rs[1],
+		       ble_enable_rs[2],
+		       ble_enable_rs[3],
+		       cc35_describe_rx_scratch(ble_enable_rs));
+
+		/*
+		 * Issue ONE single-shot cc3501e_ping() next: it costs one 4-phase
+		 * exchange with no retry budget of its own, so it is cheap even
+		 * immediately after a 10 s BLE_ENABLE timeout.
+		 *
+		 * EVERY host transceive on this link -- including a probe call that
+		 * FAILS -- re-stamps the firmware's CC3501E_REPLY_STALL_MS (250 ms)
+		 * reply-stall watchdog, the link's ONLY self-heal from a desync (see
+		 * CC35_PING_GAP_MS's comment above -- this is the exact mechanism
+		 * that was silently starving that watchdog before it was fixed
+		 * there). Issued back to back with no gap, THIS probe would make the
+		 * identical mistake: suppressing recovery at the one moment a
+		 * wedged link needs it. So every probe call below is followed by a
+		 * CC35_PING_GAP_MS sleep before the next one, trading a little
+		 * wall-clock time for not being the reason the link stays wedged.
+		 */
+		alp_status_t probe_ping_rc = cc3501e_ping(&cc35_fw);
+		printf("[evkdemo] CC3501E: BLE_ENABLE failed -- probing the link: PING (0x00) -> %d\n",
+		       (int)probe_ping_rc);
+
+		const uint8_t *rs = cc35_fw.rx_scratch;
+		printf("[evkdemo] CC3501E: rx_scratch[0..3] after PING = %02X %02X %02X %02X (%s)\n",
+		       rs[0],
+		       rs[1],
+		       rs[2],
+		       rs[3],
+		       cc35_describe_rx_scratch(rs));
+		k_msleep(
+		    CC35_PING_GAP_MS); /* let the reply-stall watchdog clear before the next probe call */
+
+		/*
+		 * DIAG_GET_STATS / GET_DIAG_INFO next. Only trust a field if its OWN
+		 * call returned ALP_OK -- a previous diagnostic app here printed a
+		 * zeroed initialiser as though it were a real measurement on a failed
+		 * call and drew a confidently wrong conclusion from it. Mark each
+		 * block UNREAD rather than repeat that mistake.
+		 */
+		cc3501e_diag_stats_t stats;
+		memset(&stats, 0, sizeof(stats));
+		alp_status_t stats_rc = cc3501e_diag_stats(&cc35_fw, &stats);
+		if (stats_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) -> 0 frames_ok=%u frames_err=%u\n",
+			       (unsigned)stats.frames_ok,
+			       (unsigned)stats.frames_err);
+			/* worker_execs / retry_latch_hits are meaningless unless
+			 * has_worker_counters is true (a short v7-shaped reply leaves
+			 * them zeroed, not measured) -- the UNREAD discipline above
+			 * applies to these two fields individually, not just to the
+			 * call as a whole, so gate them the same way instead of
+			 * printing them unconditionally with the disqualifier tacked
+			 * on the end of the same line. */
+			if (stats.has_worker_counters) {
+				printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) worker counters: "
+				       "worker_execs=%u retry_latch_hits=%u\n",
+				       (unsigned)stats.worker_execs,
+				       (unsigned)stats.retry_latch_hits);
+			} else {
+				printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) worker counters UNAVAILABLE "
+				       "(short v7-shaped reply, has_worker_counters=false -- worker_execs / "
+				       "retry_latch_hits are NOT real measurements)\n");
+			}
+		} else {
+			printf("[evkdemo] CC3501E: DIAG_GET_STATS (0x70) -> %d (UNREAD -- the call itself "
+			       "failed, so the counters above this line are NOT real measurements)\n",
+			       (int)stats_rc);
+		}
+		k_msleep(CC35_PING_GAP_MS); /* same watchdog reason as above */
+
+		alp_cc3501e_diag_info_t info;
+		memset(&info, 0, sizeof(info));
+		alp_status_t info_rc = cc3501e_diag_info(&cc35_fw, &info);
+		if (info_rc == ALP_OK) {
+			printf("[evkdemo] CC3501E: GET_DIAG_INFO (0x04) -> 0 last_error=0x%02X uptime_ms=%u "
+			       "free_heap_bytes=%u role=%u reset_cause=%u\n",
+			       info.last_error,
+			       (unsigned)info.uptime_ms,
+			       (unsigned)info.free_heap_bytes,
+			       info.role,
+			       info.reset_cause);
+		} else {
+			printf("[evkdemo] CC3501E: GET_DIAG_INFO (0x04) -> %d (UNREAD -- the call itself "
+			       "failed, so last_error above is NOT a real measurement)\n",
+			       (int)info_rc);
+		}
+
+		/*
+		 * WHAT THIS EVIDENCE MEANS (the two explanations this probe exists to
+		 * separate):
+		 *   - probe_ping_rc == ALP_ERR_IO (-5) together with EITHER rx_scratch
+		 *     snapshot classifying as "parked on the idle marker" or "a STALE
+		 *     REPLY HEADER" (cc35_describe_rx_scratch() above) means the LINK
+		 *     IS WEDGED, one transfer behind -- phases 9 and 11 failing the
+		 *     same way below is a CASCADE of this one fault, not three
+		 *     independent ones.
+		 *   - probe_ping_rc == ALP_OK (0) with last_error == 0x06
+		 *     (ALP_CC3501E_RESP_ERR_RADIO) means the RADIO OPERATION FAILED ON
+		 *     THE DEVICE and the link is healthy -- PING answered cleanly
+		 *     right after.
+		 *   - probe_ping_rc == ALP_OK (0) with last_error == 0x07
+		 *     (ALP_CC3501E_RESP_ERR_PROTOCOL) and a climbing frames_err count
+		 *     means frames are being rejected for a protocol violation, not a
+		 *     radio fault.
+		 */
+	}
 
 	/* --- Verdict ------------------------------------------------------ */
 	/*
