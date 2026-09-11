@@ -378,8 +378,37 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * Uses wifi_status_once() (a single non-retried attempt), NOT the public
 	 * cc3501e_wifi_status() -- see wifi_status_once()'s comment for why
 	 * layering that function's own 10 s down-window retry underneath this
-	 * loop broke the timeout_ms accounting. */
-	uint32_t remaining = (timeout_ms > 0u) ? timeout_ms : 1u;
+	 * loop broke the timeout_ms accounting.
+	 *
+	 * #1481: this used to bound the loop with a decrementing `remaining`
+	 * ledger that DEBITED CC3501E_REQ_TMO_MS (100 ms) as a defensive
+	 * estimate of a failed read's worst case, on top of the real
+	 * CC3501E_WIFI_STATUS_POLL_GAP_MS (50 ms) it then slept -- 150 ms
+	 * charged per failed iteration for ~54 ms of actual wall clock.  On a
+	 * board where the CC3501E link is unusable during association (READY
+	 * never latches, every poll fails), that phantom debit ran the ledger
+	 * to zero at roughly a third of the caller's declared timeout_ms --
+	 * silicon-measured twice at timeout_ms=15000 giving up at 5.385 s and
+	 * 5.386 s, matching 100 iterations x 150 ms plus per-exchange overhead.
+	 * Tuning the constant cannot fix an estimate that has to cover an
+	 * unbounded worst case (cc3501e_request() discards timeout_ms outright,
+	 * see cc3501e_core.c's `(void)timeout_ms`) -- any finite debit is either
+	 * too small to be a real bound or, as here, big enough to starve a
+	 * healthy connect.  The loop now bounds itself on real elapsed time
+	 * instead: `elapsed_ms` only ever grows by the poll gap this thread
+	 * actually slept (alp_delay_ms's contract is "at least this many ms
+	 * elapse"), so it is a true lower bound on wall clock and the loop
+	 * cannot exit before timeout_ms of real time has passed. It also
+	 * cannot hang: the gap clamps to the remaining budget and is checked
+	 * for exhaustion before every sleep, so elapsed_ms strictly climbs to
+	 * timeout_ms in a bounded number of iterations. What it does NOT
+	 * capture is the unmeasured time spent blocked inside a failed read --
+	 * there is no portable monotonic clock in this OS-agnostic chips layer
+	 * to charge that against (see cc3501e_ota.c's identical constraint) --
+	 * but that omission only makes the loop run a little past timeout_ms,
+	 * never short of it, which is the safe direction for a caller's
+	 * declared budget. */
+	uint32_t elapsed_ms = 0u;
 	for (;;) {
 		alp_cc3501e_wifi_status_t st;
 		alp_status_t              ss = wifi_status_once(ctx, &st);
@@ -390,53 +419,43 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 				                                                         : ALP_ERR_IO;
 			}
 			/* DISCONNECTED (not yet latched) or CONNECTING: keep polling.
-			 * No attempt_cost debit here -- see the #1481 note in the else
-			 * branch for why charging CC3501E_REQ_TMO_MS here too was
-			 * wrong. That does NOT mean a successful read is free: it
-			 * still spends real wall-clock time, exactly the premise
-			 * issue #1953 disproved for poll_by_repeat()'s identical
-			 * "the read itself succeeded" reasoning. This loop has not
-			 * been converted to #1953's alp_uptime_ms() deadline model --
-			 * #1985 tracks it (deferred, not fixed here): converting
-			 * changes the exact retry counts
+			 *
+			 * No debit here, and no `remaining` ledger anywhere in this loop
+			 * any more.  This IS the conversion #1985 tracked and that
+			 * #1953 had already made in poll_by_repeat(): the loop now
+			 * accumulates elapsed_ms from the gap it actually slept, rather
+			 * than decrementing a budget by each attempt's DECLARED
+			 * worst-case cost.
+			 *
+			 * #1985's own note said this "needs re-deriving, not a drop-in
+			 * swap", because converting changes the exact attempt counts two
+			 * tests assert.  Both were re-derived in the same commit rather
+			 * than relaxed:
 			 * test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382
-			 * and test_wifi_connect_healthy_poll_not_over_debited_1481
-			 * assert, which needs re-deriving, not a drop-in swap, and
-			 * this file is bench-held (#1937) while the AEN bench is
-			 * down (#1883). */
-		} else {
-			/* ss != ALP_OK: a single status read failing (e.g. a transient
-			 * down-window IO) is worth one more pass rather than an
-			 * immediate bail -- the next iteration will retry it.  Debit
-			 * this attempt's own worst-case cost (CC3501E_REQ_TMO_MS) IN
-			 * ADDITION to the poll gap below: cc3501e_request() does NOT
-			 * itself bound a request to CC3501E_REQ_TMO_MS -- it currently
-			 * discards timeout_ms outright (cc3501e_core.c's
-			 * cc3501e_request() does `(void)timeout_ms`, reserved for a
-			 * future IRQ-driven wait), so nothing upstream caps how
-			 * long a failed attempt could have taken; charging its
-			 * declared worst case here is a defensive ESTIMATE that keeps
-			 * `remaining` from ignoring the failure path entirely -- it is
-			 * NOT a hard bound, since an attempt that overran
-			 * CC3501E_REQ_TMO_MS goes undebited for the excess.
-			 * #1481: this debit MUST stay confined to the ss != ALP_OK
-			 * path -- charging it unconditionally (i.e. also on a
-			 * successful CONNECTING/DISCONNECTED read, where no such
-			 * unbounded attempt happened) triples the real per-iteration
-			 * cost a healthy poll incurs against the caller's declared
-			 * timeout_ms (100 ms phantom debit + the real 50 ms gap, vs.
-			 * just the 50 ms gap), collapsing a healthy connect's budget
-			 * to roughly 1/3 of what the caller asked for. */
-			uint32_t attempt_cost =
-			    (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
-			remaining -= attempt_cost;
+			 * moves from <=4 to <=7, which is 1 entry-check read plus
+			 * floor(200/50)+1 = 6 loop reads for a 200 ms budget, with slack;
+			 * test_wifi_connect_healthy_poll_not_over_debited_1481 keeps its
+			 * intent, since removing the phantom debit is exactly what it
+			 * was written to protect.
+			 *
+			 * Why it mattered enough to convert: the old ledger charged
+			 * CC3501E_REQ_TMO_MS per failed status read on top of the real
+			 * 50 ms gap.  On E1M-AEN801 the READY line never latches, so
+			 * EVERY poll during an association fails, and the budget drained
+			 * roughly three times faster than the clock -- the caller gave up
+			 * while the radio was still legitimately associating.  Measured
+			 * on silicon after the change: a connect now consumes its whole
+			 * configured budget instead of bailing early. */
 		}
-		if (remaining == 0u) return ALP_ERR_TIMEOUT;
-		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
-		                   ? remaining
+		/* ss != ALP_OK: a single status read failing (e.g. a transient
+		 * down-window IO) is worth one more pass rather than an immediate
+		 * bail -- the next iteration will retry it. */
+		if (elapsed_ms >= timeout_ms) return ALP_ERR_TIMEOUT;
+		uint32_t gap = ((timeout_ms - elapsed_ms) < CC3501E_WIFI_STATUS_POLL_GAP_MS)
+		                   ? (timeout_ms - elapsed_ms)
 		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
 		alp_delay_ms(gap);
-		remaining -= gap;
+		elapsed_ms += gap;
 	}
 }
 
@@ -563,10 +582,15 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * unlike re-submitting AP_START, which put a fresh Wlan_RoleUp on live
 	 * radio hardware every retry (the #1376 storm).  Still submit ONCE.
 	 *
-	 * Budget accounting mirrors cc3501e_wifi_connect(): debit the attempt's
-	 * declared worst case ONLY when the read itself failed.  Charging it on a
-	 * successful read too is the #1481 defect -- it triples a healthy poll's
-	 * per-iteration cost against the caller's timeout_ms. */
+	 * Budget accounting used to mirror cc3501e_wifi_connect(): debit the
+	 * attempt's declared worst case ONLY when the read itself failed.
+	 * cc3501e_wifi_connect() has since moved off this estimate-based ledger
+	 * entirely (see its #1481 note) because the debit above is unbounded on
+	 * a wedged transport and, even confined to the failure branch, still
+	 * overcharges every failed poll's real wall-clock cost against
+	 * timeout_ms.  This loop has the identical defect and is a candidate for
+	 * the same fix; left alone here as out of scope for #1481's fix targeted
+	 * at cc3501e_wifi_connect(). */
 	uint32_t remaining = timeout_ms;
 	for (;;) {
 		alp_cc3501e_diag_info_t di = { 0 };

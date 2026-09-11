@@ -1574,7 +1574,7 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_never_confirmed_times_out_1376)
 
 /* #1382 timeout-accounting regression: cc3501e_wifi_connect()'s poll loop
  * must OWN the retry budget, not delegate it to an inner call that retries
- * on its own.  Before the fix, the loop called the public
+ * on its own.  Before the #1382 fix, the loop called the public
  * cc3501e_wifi_status(), whose own poll_by_repeat rides out an IO fault for
  * up to CC3501E_WIFI_DOWN_WINDOW_MS (10 s) per call, while the outer loop's
  * `remaining -= gap` only ever debited its own 50 ms sleep -- so a
@@ -1587,16 +1587,28 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_never_confirmed_times_out_1376)
  * as test_wifi_status_gives_up_after_the_down_window_1377 does for a direct
  * cc3501e_wifi_status() call) and assert the number of WIFI_STATUS attempts
  * cc3501e_wifi_connect() makes stays in the ballpark ITS OWN cadence
- * predicts -- ceil(timeout_ms / CC3501E_REQ_TMO_MS) + 1 -- not the
- * 1005-attempt blowup the un-fixed nesting produced for the same budget. */
+ * predicts.
+ *
+ * #1481's later fix replaced the poll loop's decrementing `remaining` ledger
+ * (which also, on the ss != ALP_OK path exercised here, phantom-debited
+ * CC3501E_REQ_TMO_MS per failed read on top of the real poll gap -- see
+ * cc3501e_wifi_connect()'s #1481 note) with an `elapsed_ms` accumulator that
+ * only ever grows by the real CC3501E_WIFI_STATUS_POLL_GAP_MS (50 ms) it
+ * slept.  On an always-failing transport every iteration takes that branch,
+ * so the loop now runs floor(timeout_ms / 50) + 1 reads before elapsed_ms
+ * reaches timeout_ms, plus the one WIFI_STATUS read cc3501e_wifi_connect()'s
+ * entry stale-association check always makes regardless of outcome: for
+ * timeout_ms=200 that is 1 + (200 / 50 + 1) = 6 attempts. */
 ZTEST(cc3501e_host_driver, test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382)
 {
 	g_status_io_down_remaining = UINT32_MAX;
 	alp_status_t s             = cc3501e_wifi_connect(&fw, "wedgednet", 1u, "pw", 200u);
 	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently wedged transport -> bounded TIMEOUT");
-	zassert_true(slave.wifi_status_attempt_count <= 4u,
-	             "WIFI_STATUS attempts must stay bounded by connect()'s own 200 ms budget, not "
-	             "an inner down-window retry loop it doesn't account for (got %u attempts)",
+	zassert_true(slave.wifi_status_attempt_count <= 7u,
+	             "WIFI_STATUS attempts must stay bounded by connect()'s own 200 ms budget "
+	             "(1 entry-check read + floor(200/50)+1 = 6 loop reads expected, some slack "
+	             "allowed), not an inner down-window retry loop it doesn't account for (got %u "
+	             "attempts)",
 	             slave.wifi_status_attempt_count);
 }
 
