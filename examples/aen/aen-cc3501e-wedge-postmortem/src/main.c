@@ -87,13 +87,20 @@
  * nothing to recover from.
  *
  * PHASE C -- the payload, reached only when PHASE B's confirming PING
- * (above) did NOT answer, i.e. the wedge actually reproduced this run.
- * Captures, in the wedged state, BEFORE any recovery is attempted:
- *   - the receive scratch buffer left by a PING (only when ping_rc proves
- *     the driver's request path was actually entered -- see
- *     WEDGEPM_REPORT_SCRATCH below), reported against the known wire-level
- *     patterns WITH each pattern's genuinely ambiguous origin spelled out
- *     rather than a single mechanism guessed from a tail alone;
+ * (above) did NOT answer, i.e. the wedge actually reproduced this run. Its
+ * OWN first PING is a SECOND, INDEPENDENT confirmation before anything else
+ * runs -- PHASE B's confirming PING is single-shot and can fail spuriously
+ * on a healthy board, so a success HERE stops the run as WEDGE NOT
+ * REPRODUCED too, exactly like PHASE B's own success path (this app's own
+ * review record, third pass, #2035, Fix 3). Only once BOTH pings have
+ * failed does PHASE C capture, in the wedged state, BEFORE any recovery is
+ * attempted:
+ *   - the receive scratch buffer left by that PING (only when ping_rc
+ *     proves the driver's request path was actually entered -- see
+ *     WEDGEPM_REPORT_SCRATCH below), reported against the wire-level
+ *     patterns THIS REPOSITORY DOCUMENTS, each with its genuinely ambiguous
+ *     origin(s) spelled out rather than a single mechanism guessed from a
+ *     tail alone -- not a claim that the list is exhaustive;
  *   - the READY pin level, read directly as a GPIO input and printed for
  *     completeness only -- this repo documents that exact pad as an OPEN
  *     CONNECTION on the bench unit, so it carries NO evidentiary weight and
@@ -102,7 +109,12 @@
  *   - a full power-off, a hold of >= WEDGEPM_POWER_OFF_HOLD_MS (2000, see
  *     that macro's own comment for why 2 seconds is the floor, not a round
  *     number), then a power-on + reset, then a PING -- reports whether it
- *     answered, and whether the power cycle even reached the wire.
+ *     answered, and whether the power cycle even reached the wire. A single
+ *     failed PING here gets WEDGEPM_COLD_BOOT_REBOOTS extra hard-reset
+ *     attempts before this app concludes anything from it -- the same
+ *     healthy-path allowance aen-cc3501e-gpio's own gpio_wait_for_link()
+ *     uses, because a healthy cold boot on this part can need a second hard
+ *     reset (this app's own review record, third pass, #2035, Fix 2).
  * Finally prints ONE verdict line naming which of the three mechanisms
  * above the combined PHASE A + PHASE C evidence points to.
  *
@@ -289,6 +301,20 @@
  * own comment warns about. */
 #define WEDGEPM_POWER_OFF_HOLD_MS 2000u
 
+/* Extra hard-reset attempts PHASE C's own full power-cycle step gets before
+ * concluding anything from a failed PING (Fix 2, this app's own review
+ * record, third pass, #2035) -- mirrors aen-cc3501e-gpio's own
+ * GPIO_LINK_REBOOTS exactly. A single cold boot failing on this part is a
+ * KNOWN-BENIGN outcome, not evidence for mechanism 3: chips/cc3501e/
+ * cc3501e_core.c's COLD-BOOT POWER SEQUENCE comment documents the Puya-flash
+ * cold-boot bug, where the FIRST boot after a cold power-on can mis-read
+ * flash and never launch the vendor image, and a SECOND boot (rails kept
+ * up, same as a plain hard reset) then comes up clean. This app's own PHASE
+ * C power-cycle step IS the first cold boot; a failed PING after it gets the
+ * same extra-attempts budget aen-cc3501e-gpio's gpio_wait_for_link() treats
+ * as the healthy-path allowance before it draws any conclusion. */
+#define WEDGEPM_COLD_BOOT_REBOOTS 3u
+
 /*
  * ======================================================================
  * PING + rx_scratch capture -- see the file header's PHASE C for what this
@@ -312,6 +338,31 @@ static bool wedgepm_ping_wait(cc3501e_t *fw, const char *label)
 	}
 	printk("%s: PING never answered after %u attempts\n", label, (unsigned)WEDGEPM_PING_RETRIES);
 	return false;
+}
+
+/**
+ * Extra hard-reset ladder for PHASE C's post-power-cycle recovery step
+ * (Fix 2, this app's own review record, third pass, #2035) -- mirrors
+ * aen-cc3501e-gpio's own gpio_wait_for_link(): see WEDGEPM_COLD_BOOT_REBOOTS'
+ * own comment for why a single failed PING after a cold boot cannot support
+ * a conclusion on this part. The caller has already issued the FIRST reset
+ * (cc3501e_reset()'s own cold power-on) and already tried one PING round --
+ * this only runs the EXTRA rounds, one @ref cc3501e_hard_reset per round,
+ * up to WEDGEPM_COLD_BOOT_REBOOTS times. Returns true once a PING succeeds.
+ */
+static bool wedgepm_cold_boot_retry(cc3501e_t *fw)
+{
+	bool revived = false;
+	for (unsigned reboot = 0u; !revived && reboot < WEDGEPM_COLD_BOOT_REBOOTS; ++reboot) {
+		printk("PHASE C: PING never answered after the power-cycle reset -- a single cold "
+		       "boot failing is KNOWN-BENIGN on this part (see WEDGEPM_COLD_BOOT_REBOOTS's "
+		       "own comment), issuing hard reset %u/%u and retrying\n",
+		       reboot + 1u,
+		       (unsigned)WEDGEPM_COLD_BOOT_REBOOTS);
+		(void)cc3501e_hard_reset(fw);
+		revived = wedgepm_ping_wait(fw, "PHASE C (after power-cycle retry)");
+	}
+	return revived;
 }
 
 /*
@@ -346,14 +397,18 @@ static void wedgepm_print_tail_a5(uint8_t rs1, uint8_t rs2, uint8_t rs3)
 }
 
 /* Same shape as wedgepm_print_tail_a5() -- see its doc comment -- for an
- * rx_scratch[1..3] == 0xFFFFFF tail. Both origins below are innocuous or
- * host-side; NEITHER is a hung firmware task, unlike the previous revision
- * of this file, which mapped this pattern to "lockstep drift" and
- * mechanism 1. */
+ * rx_scratch[1..3] == 0xFFFFFF tail. This app's own review record (third
+ * pass, #2035, Fix 4) adds origin (c): examples/aen/aen-evk-demo/src/main.c's
+ * own cc35_describe_rx_scratch() documents a THIRD origin for an all-0xFF
+ * read this file's earlier revisions omitted -- an undriven line. None of
+ * the three below is a hung firmware task, unlike the previous revision of
+ * this file, which mapped this pattern to "lockstep drift" and mechanism 1
+ * -- but see this file's own list-completeness caveat (wedgepm_report_
+ * scratch()'s doc comment) before treating that as exhaustive. */
 static void wedgepm_print_tail_ff(uint8_t rs1, uint8_t rs2, uint8_t rs3)
 {
-	printk("PHASE C:   tail = %02X %02X %02X (0xFFFFFF pattern) -- at least TWO known "
-	       "origins produce this, and NEITHER is a hung firmware task. This single snapshot "
+	printk("PHASE C:   tail = %02X %02X %02X (0xFFFFFF pattern) -- at least THREE documented "
+	       "origins produce this, none of them a hung firmware task. This single snapshot "
 	       "cannot choose between them:\n",
 	       rs1,
 	       rs2,
@@ -366,6 +421,9 @@ static void wedgepm_print_tail_ff(uint8_t rs1, uint8_t rs2, uint8_t rs3)
 	       "capture point (docs/cc3501e-bridge.md's RX_SAMPLE_DLY note: 'over the on-SoM "
 	       "traces mis-samples') -- a HOST-SIDE timing fault, unrelated to CC3501E firmware "
 	       "state entirely.\n");
+	printk("PHASE C:     (c) an UNDRIVEN line (examples/aen/aen-evk-demo/src/main.c's own "
+	       "cc35_describe_rx_scratch()) -- distinct from an all-0x00 read: nothing is "
+	       "pulling the line low either, not even a dead phase.\n");
 }
 
 /* Same shape again for an rx_scratch[1..3] == 0x000000 tail -- the ONE
@@ -386,6 +444,49 @@ static void wedgepm_print_tail_00(uint8_t rs1, uint8_t rs2, uint8_t rs3)
 	printk("PHASE C:     (b) the #1378 dead-phase alias (cc3501e_core.c): a dead bus phase "
 	       "clocks back literal 0x00 for every byte. This snapshot alone cannot tell it "
 	       "apart from (a).\n");
+}
+
+/*
+ * Fix 4, this app's own review record, third pass, #2035: the ONE pattern
+ * examples/aen/aen-evk-demo/src/main.c's own cc35_describe_rx_scratch()
+ * documents as actually MEANING the link is wedged -- a STALE REPLY HEADER,
+ * the slave answering from ONE TRANSFER BEHIND (a real header, just not
+ * this request's) -- and the one this file's earlier revisions had no
+ * branch for at all, falling through to "no further classification"
+ * instead. That sibling check reads rs[0] as an opcode AND rs[2..3] as a
+ * declared payload length; here rs[0] is unavailable -- it is the driver's
+ * own 0xDA poison, not wire data (see wedgepm_report_scratch()'s own doc
+ * comment) -- so only the length field is checkable. @p rs2 / @p rs3 are
+ * rx_scratch[2] / [3], the LE16 declared-length field the sibling check
+ * also reads; a value that decodes to a plausible payload length is still
+ * meaningful evidence on its own, just not a full confirmation of the
+ * sibling's stricter two-field check. */
+static bool wedgepm_tail_looks_like_stale_header(uint8_t rs2, uint8_t rs3)
+{
+	uint16_t declared_len = (uint16_t)rs2 | ((uint16_t)rs3 << 8);
+	return declared_len >= 1u && declared_len <= ALP_CC3501E_MAX_PAYLOAD;
+}
+
+/** Prints the stale-reply-header interpretation -- see
+ *  wedgepm_tail_looks_like_stale_header()'s own doc comment for what this
+ *  checks and why it is narrower than the sibling check it is adapted
+ *  from. */
+static void wedgepm_print_tail_stale_header(uint8_t rs1, uint8_t rs2, uint8_t rs3)
+{
+	uint16_t declared_len = (uint16_t)rs2 | ((uint16_t)rs3 << 8);
+	printk("PHASE C:   tail = %02X %02X %02X -- bytes [2..3] decode as a PLAUSIBLE reply "
+	       "length field (declared_len=%u, in range [1, %u]) -- examples/aen/aen-evk-demo's "
+	       "own cc35_describe_rx_scratch() documents this shape as the ONE pattern that "
+	       "actually MEANS the link is wedged: a STALE REPLY HEADER, the slave answering "
+	       "from ONE TRANSFER BEHIND. Byte 0 is unavailable here (the driver's own 0xDA "
+	       "poison, not wire data), so this cannot confirm the opcode field the sibling "
+	       "check also reads -- the length field alone is still the strongest single "
+	       "signal any of this app's tail patterns print.\n",
+	       rs1,
+	       rs2,
+	       rs3,
+	       (unsigned)declared_len,
+	       (unsigned)ALP_CC3501E_MAX_PAYLOAD);
 }
 
 /*
@@ -414,8 +515,13 @@ static void wedgepm_print_tail_00(uint8_t rs1, uint8_t rs2, uint8_t rs3)
  * which a failed PING against a wedged link always is. Bytes [1..3] then
  * carry whatever raw wire pattern SOME earlier phase actually read -- but,
  * per Blocker 2 above, not uniquely WHICH phase; wedgepm_print_tail_a5() /
- * _ff() / _00() each list every known origin for their pattern explicitly,
- * instead of naming one mechanism from a tail alone. */
+ * _ff() / _00() / _stale_header() each list every origin THIS REPOSITORY
+ * DOCUMENTS for their pattern explicitly, instead of naming one mechanism
+ * from a tail alone. These are the origins alp-sdk and its sibling examples
+ * happen to document, not a claim that the list is complete -- a pattern
+ * with no branch below falls through to the generic "no further
+ * classification" line, which is a statement about this app's own
+ * knowledge, not proof that no wire-level explanation exists. */
 static void wedgepm_report_scratch(const uint8_t rs[ALP_CC3501E_HEADER_BYTES], alp_status_t ping_rc)
 {
 	printk("PHASE C: rx_scratch[0..3] = %02X %02X %02X %02X\n", rs[0], rs[1], rs[2], rs[3]);
@@ -452,18 +558,25 @@ static void wedgepm_report_scratch(const uint8_t rs[ALP_CC3501E_HEADER_BYTES], a
 		wedgepm_print_tail_ff(rs[1], rs[2], rs[3]);
 	} else if (tail_00) {
 		wedgepm_print_tail_00(rs[1], rs[2], rs[3]);
+	} else if (wedgepm_tail_looks_like_stale_header(rs[2], rs[3])) {
+		wedgepm_print_tail_stale_header(rs[1], rs[2], rs[3]);
 	} else {
-		printk("PHASE C:   tail bytes do not match any of the three known repeated-byte "
-		       "patterns (0xA5A5A5 / 0x000000 / 0xFFFFFF) -- no further classification.\n");
+		printk("PHASE C:   tail bytes do not match any of the repeated-byte patterns "
+		       "(0xA5A5A5 / 0x000000 / 0xFFFFFF) or a plausible stale-header length field -- "
+		       "no classification in THIS APP'S list applies. That is a statement about "
+		       "what this app and its sibling examples document, not proof no wire-level "
+		       "explanation exists.\n");
 	}
 }
 
 /*
  * ======================================================================
- * PHASE A helpers -- reset_cause corroboration (this app's own review
- * record, second pass, #2035, Fix 3). See the call site's own comment for
- * why reset_cause matters here: it is an INDEPENDENT signal from the
- * uptime_ms arithmetic, not a restatement of it.
+ * PHASE A helpers -- reset_cause name lookup, still printed in every PHASE
+ * A GET_DIAG_INFO line for the transcript (see the file header's PHASE A
+ * paragraph), plus the frames_ok cross-check that REPLACED the reset_cause
+ * cross-check the second pass added (this app's own review record, third
+ * pass, #2035, Fix 1) -- see that fix's own comment at the call site for
+ * why reset_cause cannot do the discriminating job on this firmware.
  * ======================================================================
  */
 
@@ -557,14 +670,32 @@ int main(void)
 	       have_before ? "" : " -- uptime_ms UNKNOWN (v1 firmware, or a link fault)");
 	if (have_before) {
 		printk("PHASE A: uptime_ms BEFORE host reset = %u\n", (unsigned)diag_before.uptime_ms);
-		/* fw_version + reset_cause -- see the PHASE A helpers block above and
-		 * this app's own review record (Fix 3): reset_cause is INDEPENDENT
-		 * corroboration for exactly the question PHASE A asks, not a
-		 * restatement of the uptime_ms arithmetic. */
+		/* fw_version -- printed so a future operator on a DIFFERENT firmware
+		 * image can tell which one they have (this app itself assumes the
+		 * current bench image, see the file header's "one thing you do not
+		 * need to worry about" note). reset_cause is printed too, but see
+		 * the frames_ok cross-check further down for why it is NOT used as
+		 * a discriminator here: on this firmware a pin reset and a
+		 * power-on reset both read back POWER_ON. */
 		printk("PHASE A: fw_version BEFORE = 0x%04X, reset_cause BEFORE = %s (%u)\n",
 		       (unsigned)diag_before.fw_version,
 		       wedgepm_reset_cause_name(diag_before.reset_cause),
 		       (unsigned)diag_before.reset_cause);
+	}
+
+	/* frames_ok cross-check for the uptime_ms arithmetic below -- see the
+	 * comment at cause_disagrees_with_uptime's computation, further down,
+	 * for the full reasoning (this app's own review record, third pass,
+	 * #2035, Fix 1). Read BEFORE the reset here; read again AFTER it,
+	 * alongside PHASE A's own post-reset PING, further down. */
+	cc3501e_diag_stats_t stats_before      = { 0 };
+	alp_status_t         stats_rc_before   = cc3501e_diag_stats(&fw, &stats_before);
+	bool                 have_stats_before = (stats_rc_before == ALP_OK);
+	printk("PHASE A: DIAG_GET_STATS (before reset) -> %d%s\n",
+	       (int)stats_rc_before,
+	       have_stats_before ? "" : " -- frames_ok UNKNOWN (v1 firmware, or a link fault)");
+	if (have_stats_before) {
+		printk("PHASE A: frames_ok BEFORE host reset = %u\n", (unsigned)stats_before.frames_ok);
 	}
 
 	printk("PHASE A: issuing a host hard reset (nRESET pulse, rails up) -- no wedge has "
@@ -581,8 +712,10 @@ int main(void)
 
 	bool healthy_ping_after = wedgepm_ping_wait(&fw, "PHASE A (after reset)");
 
-	alp_cc3501e_diag_info_t diag_after = { 0 };
-	bool                    have_after = false;
+	alp_cc3501e_diag_info_t diag_after       = { 0 };
+	bool                    have_after       = false;
+	cc3501e_diag_stats_t    stats_after      = { 0 };
+	bool                    have_stats_after = false;
 	if (healthy_ping_after) {
 		diag_rc    = cc3501e_diag_info(&fw, &diag_after);
 		have_after = (diag_rc == ALP_OK);
@@ -595,6 +728,15 @@ int main(void)
 			       (unsigned)diag_after.fw_version,
 			       wedgepm_reset_cause_name(diag_after.reset_cause),
 			       (unsigned)diag_after.reset_cause);
+		}
+
+		alp_status_t stats_rc_after = cc3501e_diag_stats(&fw, &stats_after);
+		have_stats_after            = (stats_rc_after == ALP_OK);
+		printk("PHASE A: DIAG_GET_STATS (after reset) -> %d%s\n",
+		       (int)stats_rc_after,
+		       have_stats_after ? "" : " -- frames_ok UNKNOWN (v1 firmware, or a link fault)");
+		if (have_stats_after) {
+			printk("PHASE A: frames_ok AFTER host reset  = %u\n", (unsigned)stats_after.frames_ok);
 		}
 	}
 	int64_t  host_ms_after_reset = k_uptime_get();
@@ -615,37 +757,40 @@ int main(void)
 	    (diag_after.uptime_ms + WEDGEPM_RESET_PROOF_MARGIN_MS < predicted_if_no_reboot_ms);
 
 	/*
-	 * reset_cause cross-check (Fix 3, this app's own review record, second
-	 * pass, #2035) -- INDEPENDENT of the uptime_ms arithmetic above: the
-	 * firmware can only move reset_cause by actually executing its
-	 * reset-cause-recording code on a genuine reset, so a CHANGE in that
-	 * field is direct proof a reset fired between the two reads, and
-	 * cc3501e_hard_reset() (PHASE A's own reset call) is the only event
-	 * that could fire one in this window.
+	 * frames_ok cross-check (Fix 1, this app's own review record, third
+	 * pass, #2035) -- REPLACES the reset_cause cross-check the second pass
+	 * added. That check is UNSATISFIABLE on this firmware: verified in
+	 * cc3501e-bridge-firmware's hal/ti/cc3501e_hw_ti_log.c, around the
+	 * PowerWFF3_RESET_PIN_POR case -- a pin reset and a power-on reset are
+	 * FOLDED into the SAME ALP_CC3501E_RESET_POWER_ON value there, per the
+	 * firmware's own comment ("pin reset and POR are indistinguishable
+	 * here"), and nothing in the firmware ever emits a distinct pin-reset
+	 * code. PHASE A's own reset is an nRESET pulse, so reset_cause reads
+	 * POWER_ON both BEFORE and AFTER on every single healthy run -- the old
+	 * check treated that UNCHANGED reading as a disagreement, which cleared
+	 * phase_a_comparable on every healthy board and made mechanisms 1 and 3
+	 * below unreachable. reset_cause is still printed above (worth having
+	 * in the transcript) but is no longer used as a discriminator.
 	 *
-	 * Only flag a DISAGREEMENT where the cross-check can actually speak:
-	 *   - uptime says NO reboot, but reset_cause visibly CHANGED -- the
-	 *     field cannot change without a real reset, so the uptime math is
-	 *     wrong here.
-	 *   - uptime says a reboot DID happen, PHASE A's own reset is an
-	 *     nRESET pulse (which should land reset_cause on NRST_PIN), but
-	 *     reset_cause stayed at its BEFORE value AND that value was not
-	 *     already NRST_PIN -- so a change was expected and did not occur.
-	 * If diag_before was ALREADY NRST_PIN (e.g. STEP 1's own bring-up also
-	 * pulses nRESET), an unchanged AFTER value is INCONCLUSIVE, not a
-	 * contradiction -- a genuine PHASE A reboot would read back the exact
-	 * same value, so silence here proves nothing either way.
+	 * frames_ok (DIAG_GET_STATS, cc3501e_diag_stats()) does work as one: it
+	 * is the firmware's own count of frames it has answered, and collapses
+	 * to a handful after a genuine reboot, while a chip that never
+	 * rebooted keeps counting upward through every PING this app has
+	 * already issued (bring-up's STEP 2, PHASE A's own pre-reset
+	 * diagnostics). Read on both sides of PHASE A's reset (above), it is
+	 * INDEPENDENT corroboration for the same question the uptime
+	 * arithmetic asks -- if the two genuinely disagree, that IS a real
+	 * conflict and UNDETERMINED is the right call.
+	 *
+	 * Deliberately NOT the warm-boot counter in GET_DIAG_INFO's reserved
+	 * field: that field is documented for a SOFTWARE-triggered reset and
+	 * is not proven for a pin reset (this app's own review record, third
+	 * pass, #2035).
 	 */
-	bool cause_disagrees_with_uptime = false;
-	if (have_before && have_after) {
-		bool cause_changed = (diag_after.reset_cause != diag_before.reset_cause);
-		if (!phase_a_reset_proven && cause_changed) {
-			cause_disagrees_with_uptime = true;
-		} else if (phase_a_reset_proven && !cause_changed &&
-		           diag_before.reset_cause != (uint8_t)ALP_CC3501E_RESET_NRST_PIN) {
-			cause_disagrees_with_uptime = true;
-		}
-	}
+	bool stats_comparable = have_stats_before && have_stats_after;
+	bool frames_collapsed = stats_comparable && (stats_after.frames_ok < stats_before.frames_ok);
+	bool cause_disagrees_with_uptime =
+	    stats_comparable && (phase_a_reset_proven != frames_collapsed);
 	/* Whether PHASE A actually proved anything -- used below AND by the
 	 * final VERDICT block (Fix 2, this app's own review record, second
 	 * pass, #2035): missing readings or a disagreeing corroboration signal
@@ -676,15 +821,17 @@ int main(void)
 	} else if (have_before && have_after) {
 		/* cause_disagrees_with_uptime: two independent signals disagree.
 		 * Pick NEITHER -- see this block's own comment above. */
-		printk("\nPHASE A VERDICT: UNDETERMINED -- reset_cause and the uptime_ms arithmetic "
-		       "DISAGREE about whether the host's reset reached the chip (reset_cause BEFORE "
-		       "= %s, AFTER = %s; the uptime arithmetic alone said %s). reset_cause can only "
-		       "change via a genuine reset, so this is a real conflict between two "
+		printk("\nPHASE A VERDICT: UNDETERMINED -- frames_ok and the uptime_ms arithmetic "
+		       "DISAGREE about whether the host's reset reached the chip (frames_ok BEFORE = "
+		       "%u, AFTER = %u -- %s; the uptime arithmetic alone said %s). frames_ok can "
+		       "only collapse via a genuine reboot, so this is a real conflict between two "
 		       "independent signals, not a rounding difference -- this app picks NEITHER "
 		       "rather than assert a confident but possibly wrong verdict. Every 'reset did "
 		       "not revive it' observation below should be treated with that uncertainty.\n",
-		       wedgepm_reset_cause_name(diag_before.reset_cause),
-		       wedgepm_reset_cause_name(diag_after.reset_cause),
+		       (unsigned)stats_before.frames_ok,
+		       (unsigned)stats_after.frames_ok,
+		       frames_collapsed ? "collapsed, a reboot happened"
+		                        : "did NOT collapse, no reboot happened",
 		       phase_a_reset_proven ? "a reboot happened" : "no reboot happened");
 	} else {
 		printk("\nPHASE A VERDICT: could not compare uptime_ms (before=%s, after=%s) -- "
@@ -769,9 +916,29 @@ int main(void)
 
 	/* 1. rx_scratch after a PING request-header transceive. This PING is
 	 *    EXPECTED to fail (the link is wedged) -- its return code is
-	 *    printed but is not itself the evidence; ctx->rx_scratch is. */
+	 *    printed but is not itself the evidence; ctx->rx_scratch is.
+	 *
+	 *    Fix 3, this app's own review record, third pass, #2035: PHASE B's
+	 *    OWN confirming PING (above) is single-shot, and a healthy board
+	 *    can fail it SPURIOUSLY -- if that happens, this PING is the first
+	 *    chance to notice the board was never actually wedged. Two
+	 *    INDEPENDENT pings both have to fail before this app diagnoses
+	 *    anything; a success HERE must terminate the run exactly like a
+	 *    success at PHASE B's own confirming PING does, not fall through
+	 *    into the recovery ladder and an ambiguous mechanism-1 verdict
+	 *    against a board that was never wedged. */
 	alp_status_t ping_rc = cc3501e_ping(&fw);
-	uint8_t      scratch[ALP_CC3501E_HEADER_BYTES];
+	if (ping_rc == ALP_OK) {
+		printk("PHASE C: PING -> %d (answered)\n", (int)ping_rc);
+		printk("\n=== WEDGE NOT REPRODUCED ===\n"
+		       "PHASE C's own first PING answered -- PHASE B's confirming PING must have "
+		       "failed SPURIOUSLY, not because the link was actually wedged. Two independent "
+		       "pings both have to fail before this app diagnoses anything (this app's own "
+		       "review record, third pass, #2035, Fix 3). Stopping HERE, before the recovery "
+		       "ladder runs against a board that was never wedged.\n");
+		return 0;
+	}
+	uint8_t scratch[ALP_CC3501E_HEADER_BYTES];
 	memcpy(scratch, fw.rx_scratch, sizeof(scratch));
 	printk("PHASE C: PING -> %d\n", (int)ping_rc);
 	wedgepm_report_scratch(scratch, ping_rc);
@@ -882,19 +1049,29 @@ int main(void)
 				       (int)off_rc,
 				       (int)power_cycle_on_rc);
 			} else {
+				/* Fix 5, this app's own review record, third pass, #2035: no
+				 * ALP_ERR_BUSY sub-case here -- cc3501e_reset() (cc3501e_core.c)
+				 * returns only ALP_ERR_NOT_READY, ALP_ERR_NOSUPPORT, ALP_OK, or
+				 * ALP_ERR_VERSION (handled above); a lock-acquire miss inside its
+				 * own GET_VERSION read is restored and reported as ALP_OK, not
+				 * surfaced to this caller. A branch documenting an unreachable
+				 * code is dead sub-text, not a real case. */
 				printk("PHASE C: ** power cycle NOT ATTEMPTED ON THE WIRE (off_rc=%d, "
-				       "on_rc=%d%s) -- the PING below, if it fails, short-circuits "
+				       "on_rc=%d) -- the PING below, if it fails, short-circuits "
 				       "before clocking the bus and proves nothing **\n",
 				       (int)off_rc,
-				       (int)power_cycle_on_rc,
-				       (power_cycle_on_rc == ALP_ERR_BUSY)
-				           ? " -- ALP_ERR_BUSY: the driver's own request-lock acquire "
-				             "timed out before a single byte was clocked, a host-side "
-				             "contention, not a chip response"
-				           : "");
+				       (int)power_cycle_on_rc);
 			}
 		}
 		cold_revived = wedgepm_ping_wait(&fw, "PHASE C (after power-cycle)");
+		/* Fix 2, this app's own review record, third pass, #2035: only retry
+		 * when the reset genuinely reached the wire (power_cycle_attempted)
+		 * -- retrying a reset that never landed (ALP_ERR_VERSION / a lock
+		 * contention, see the ** prints above) would not be a SECOND cold
+		 * boot, it would just repeat the same non-attempt. */
+		if (!cold_revived && power_cycle_attempted) {
+			cold_revived = wedgepm_cold_boot_retry(&fw);
+		}
 		printk("PHASE C: full power-cycle %s the link\n",
 		       cold_revived ? "REVIVED" : "did NOT revive");
 	} else {
@@ -921,7 +1098,7 @@ int main(void)
 		       "UNINTERPRETABLE until this is fixed; re-run this app once PHASE A itself "
 		       "passes cleanly.\n",
 		       (have_before && have_after)
-		           ? "reset_cause and the uptime arithmetic disagreed"
+		           ? "frames_ok and the uptime arithmetic disagreed"
 		           : "GET_DIAG_INFO could not be read before and/or after the reset");
 	} else if (!phase_a_reset_proven) {
 		printk("MECHANISM 2 (the host's own reset sequence never actually reboots the chip) "
