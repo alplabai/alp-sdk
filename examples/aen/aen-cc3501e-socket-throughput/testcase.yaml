@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E socket-throughput app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles both the no-credentials
+# (networked steps skipped) and the placeholder-credentials shape against
+# the real board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
+# AP, and a server actually answering with a large body; a compile check
+# here only proves the build, not the measured rate.
+
+sample:
+  name: aen-cc3501e-socket-throughput
+  description: |
+    Measures CC3501E end-to-end TCP socket throughput over a correctly
+    sized window (SOCKTP_BYTE_BUDGET, at least 4 MiB by default -- see
+    src/main.c's file header for why). Associates to Wi-Fi, opens a TCP
+    socket, issues an HTTP GET, and reads the response body until the
+    transfer completes or the byte budget is reached, timing the whole
+    window once with k_uptime_get() instead of averaging per-transfer
+    samples the way an earlier, wrong measurement did. Skips every
+    networked step when SOCKTP_WIFI_SSID is empty (the build default) --
+    no SSID/passphrase/server address is embedded in this app.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_socket_throughput.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+    build_only: true # the measured rate needs the real bench + a live AP + server.
