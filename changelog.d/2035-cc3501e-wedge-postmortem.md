@@ -1,0 +1,69 @@
+### Added — `aen-cc3501e-wedge-postmortem` reproduces the CC3501E `WIFI_CONNECT_STA` wedge and captures forensic evidence while it is still down (#2035)
+
+Issuing `WIFI_CONNECT_STA` over the CC3501E SPI bridge wedges the link: a
+`PING` one second earlier answers on the first attempt, the connect itself
+gets no reply at all, and the link then stays dead through a host-driven
+reset pulse — only a full carrier power cycle revives it, reproduced three
+of three on bench. Three mechanisms were still live: a hung firmware task
+(chip otherwise alive), a host reset sequence that never actually reaches
+the chip (which would make every "reset did not revive it" observation
+meaningless), or a fault outside CC3501E firmware state entirely (Alif
+SPI1/DMA, or an always-on power domain `WIFI_EN` cannot gate).
+
+This new bench app separates them in a fixed, load-bearing order. PHASE A
+is a positive control taken in a healthy session, **before** anything is
+wedged: it reads `GET_DIAG_INFO`'s `uptime_ms`, `fw_version`, and
+`reset_cause`, brackets a host hard reset with the host's own
+`k_uptime_get()`, and reads all three again — proving a real reboot by
+comparing the second `uptime_ms` reading against uptime-before-plus-host-
+measured-elapsed (a margin of ~3.5 s), not against uptime-before alone
+(which a single failed PING retry can flip to false in a healthy session),
+then cross-checking that verdict against `reset_cause` (which can only
+change via a genuine reset) and calling the whole control `UNDETERMINED` —
+never a silent "mechanism 2 confirmed" — whenever either reading is
+missing or the two signals disagree. This is the one line every later
+"reset did/did not revive it" claim depends on. PHASE B then issues the
+wedging `WIFI_CONNECT_STA` (expected to fail) with build-time `WEDGEPM_*`
+credential defines (empty default, no SSID/passphrase committed or ever
+printed to the console, same convention as every `aen-cc3501e-*` sibling
+but its own macro prefix so a combined build cannot collide) and a
+deliberately short 2 s connect budget — unlike every sibling's ~55 s,
+chosen to stop the connect's own poll loop re-framing the link while the
+firmware works. That short budget alone is not enough, so PHASE B then
+waits **silently** (issuing nothing on the bus) for the firmware's own
+worst-case association+DHCP window plus a reinitialisation margin (55 s,
+derived the same way as the siblings' own connect budget), and issues
+exactly one confirming `PING`: if it answers, the app prints
+`=== WEDGE NOT REPRODUCED ===` and stops before any recovery step runs,
+rather than characterising a healthy board as a hung firmware task. PHASE
+C is the payload, reached only once the wedge is confirmed to have
+reproduced, captured entirely in the wedged state before any recovery: the
+receive scratch buffer after a `PING` request-header transceive — only
+interpreted when the PING's return code proves the driver's request path
+was actually entered, and, for the driver's `0xDA` pre-decode poison byte
+(`rx_scratch[0]` on every failed request), reported against **every**
+known wire-level origin for whichever repeated-byte tail pattern it left
+(two or three per pattern) rather than naming one mechanism from a tail
+alone — the `READY` pin level (read directly as a GPIO input but labelled
+as carrying no evidentiary weight, since this repo documents that exact
+pad as an open connection on the bench unit), a host hard reset alone plus
+`PING` (a revival here is reported against BOTH of its documented origins
+— a cleared hung task, or the bench-proven case where a warm reset only
+re-syncs the host's own SPI framing state while the firmware stayed
+healthy throughout — never asserted as a hung task from the revival
+alone), then a full power-off held for at least 2 seconds
+(`cc3501e_reset()`'s own built-in discharge gate is only 50 ms, and its own
+comment warns a short gate risks a brown-out that skips chain-of-trust
+re-init) followed by power-on + reset plus `PING` — with the power cycle's
+own return codes checked so a failed reset cannot masquerade as a wire-
+proven "did not revive", and `ALP_ERR_VERSION` (the chip DID answer
+`GET_VERSION`, only its protocol major was refused) reported as having
+reached the wire rather than as a no-wire failure. It prints one verdict
+line naming which of the three mechanisms the combined evidence points to,
+or that the verdict is undetermined when a required step never actually
+reached the chip or PHASE A's own two signals disagreed.
+
+Build-only bench app for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`
+(same target, overlay memory placement, and `CONFIG_DCACHE=n` as
+`aen-cc3501e-command-sweep`, for the same SPI1 FIFO-refill timing reason).
+See `examples/aen/aen-cc3501e-wedge-postmortem/README.md`.
