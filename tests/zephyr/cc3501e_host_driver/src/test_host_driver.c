@@ -1598,17 +1598,31 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_never_confirmed_times_out_1376)
  * so the loop now runs floor(timeout_ms / 50) + 1 reads before elapsed_ms
  * reaches timeout_ms, plus the one WIFI_STATUS read cc3501e_wifi_connect()'s
  * entry stale-association check always makes regardless of outcome: for
- * timeout_ms=200 that is 1 + (200 / 50 + 1) = 6 attempts. */
+ * timeout_ms=200 that is 1 + (200 / 50 + 1) = 6 attempts.
+ *
+ * Asserted EXACTLY, not as an upper bound, and that is deliberate.  A `<= 7`
+ * bound passes at both 6 and 7, so it would hide the loop gaining or losing an
+ * iteration -- which is precisely the kind of drift this test exists to catch.
+ *
+ * 6 is cross-validated: a second, independent conversion of this loop (issue
+ * #1985, a different shape -- an alp_uptime_ms() deadline rather than this
+ * elapsed_ms accumulator) measured the same 6 under the same parameters, and
+ * its first pass predicted 5 before the real run corrected it.  Both shapes
+ * land on the same off-by-one for the same reason: cc3501e_wifi_connect()
+ * makes one unconditional wifi_status_once() read at entry -- the #1435
+ * stale-association clear -- before the loop or its budget exist at all.
+ *
+ * If this ever fails at 5 or 7, do not relax it.  The entry read or the loop
+ * shape changed, and the derivation above is what needs revisiting. */
 ZTEST(cc3501e_host_driver, test_wifi_connect_bounds_status_attempts_on_wedged_transport_1382)
 {
 	g_status_io_down_remaining = UINT32_MAX;
 	alp_status_t s             = cc3501e_wifi_connect(&fw, "wedgednet", 1u, "pw", 200u);
 	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently wedged transport -> bounded TIMEOUT");
-	zassert_true(slave.wifi_status_attempt_count <= 7u,
-	             "WIFI_STATUS attempts must stay bounded by connect()'s own 200 ms budget "
-	             "(1 entry-check read + floor(200/50)+1 = 6 loop reads expected, some slack "
-	             "allowed), not an inner down-window retry loop it doesn't account for (got %u "
-	             "attempts)",
+	zassert_equal(slave.wifi_status_attempt_count, 6u,
+	             "WIFI_STATUS attempts must be EXACTLY 1 entry-check read + floor(200/50)+1 "
+	             "= 6 loop reads, bounded by connect()'s own 200 ms budget and not by an inner "
+	             "down-window retry loop it doesn't account for (got %u attempts)",
 	             slave.wifi_status_attempt_count);
 }
 
