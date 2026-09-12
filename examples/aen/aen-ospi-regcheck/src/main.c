@@ -37,45 +37,51 @@
  *        driver's file-header MEASURED block) -- a real bus read, not merely
  *        "the call returned".
  *
- * WHAT IS HW-BLOCKED ON THIS BATCH, AND WHY IT IS A SKIP NOT AN
- * ATTEMPT-AND-TOLERATE: XiP setup (alif_hal_ospi_xip_enable()) is not called
- * here at all.  OSPI_XIP_SER (offset 0x10C), the register that call touches,
- * DOES NOT EXIST on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0, AE822-specific --
- * see flash_ospi_alif.c's file-header FOURTH section for the full citation
- * chain) -- calling it bus-faults every time, unconditionally, regardless of
- * whether any part is populated.  There is no rc to catch: hal_alif's
+ * WHY XiP IS SKIPPED, NOT ATTEMPTED: XiP setup (alif_hal_ospi_xip_enable())
+ * is not called here at all.  OSPI_XIP_SER (offset 0x10C), the register that
+ * call touches, DOES NOT EXIST on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0,
+ * AE822-specific -- see flash_ospi_alif.c's file-header FOURTH section for
+ * the full citation chain) -- calling it bus-faults every time,
+ * unconditionally, on every AE822 board regardless of what any OSPI chip
+ * select carries.  There is no rc to catch: hal_alif's
  * alif_hal_ospi_xip_enable() (ospi_hal.c:397-416) returns OSPI_ERR_NONE
  * unconditionally after its register writes -- the ONLY failure mode is the
  * fault itself, so a prior version of this app that called it and "tolerated
  * a nonzero rc" was testing a premise that could never fail on its own terms
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
- * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless, and the reason has TWO layers that must not be
- * collapsed into one (#915):
+ * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  This one die-level reason is
+ * sufficient on its own and needs no premise about what's populated.
  *
- *   - As DESIGNED on board rev 2626-R2, the OSPI memory is not a hole in the
- *     schematic: the module netlist carries a Macronix MX25UM25645GXDI00
- *     (256 Mbit octal NOR, SPI Octal I/O DTR) wired to OSPI0_D0..D7 / SCLK /
- *     SS1 / RXDS, and its BOM line is marked populated (DNP = 0).
- *   - As ASSEMBLED, the bench unit has NO OSPI memory fitted (maintainer,
- *     2026-08-30).  DNP = 0 is a build-intent field; it does not promise that
- *     any particular physical module was stuffed with the part.
+ * CORRECTED PREMISE (#2041): a prior version of this header also justified
+ * the skip with a second, board-population layer -- "the bench unit has NO
+ * OSPI memory fitted (maintainer, 2026-08-30)", against a design-intent
+ * Macronix MX25UM25645GXDI00 at SS1 per the module BOM.  That premise is now
+ * known WRONG.  OSPI0 SS1 (CS1) on E1M-AEN803, serial 2026W36-0002, answers
+ * a JEDEC ID read (opcode 0x9F, and again on the alternate ISSI opcode 0x9E)
+ * with `9d 5b 19 10` -- 0x9d = ISSI, 5b 19 = the IS25WX256 type/capacity
+ * pair -- i.e. a populated ISSI IS25WX256-JHLE, not a Macronix part, and not
+ * empty.  See metadata/e1m_modules/E1M-AEN801.yaml (NOR now mapped to SS1 to
+ * match) and metadata/e1m_modules/aen/alif-ospi.tsv, the shared AEN-family
+ * OSPI0 pinout both that measurement and this app's pinctrl group (see the
+ * board overlay) derive from.
  *
- * So on THIS board a live XiP read is blocked by an empty footprint, exactly
- * as the original comment said, and no amount of DT or driver work will make
- * the XiP step pass here.  The design-level fact only means a future
- * fully-stuffed module would not need a board respin to run it.  Do not read
- * the BOM as evidence about the unit on your desk -- confirm the part is
- * physically there before treating an OSPI failure as a software defect.
+ * That measurement was taken on E1M-AEN803, not this app's own target
+ * (E1M-AEN801/M55-HE) -- and, critically, NOT through this app: everything
+ * below is a controller-register proof (DT bind, reg/aes-reg/irq match,
+ * CTRLR0 readback) with ZERO device-level transfers -- no opcode is ever
+ * shifted out to a chip select.  So "the OSPI memories are silent" was never
+ * actually tested at the device level by anything in this repo; this app's
+ * PASS has never been, and still is not, evidence either way about whether a
+ * part answers on ITS specific board.
  *
- * This example has caught three real, distinct silicon/build bugs on a board
- * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
- * regression, and the OSPI_XIP_SER fault above) -- it is a regression
- * sentinel, not a formality.  The clock-gate, MPU, and register-file checks
- * below MUST still surface as loud device_is_ready()/init/readback failures
- * if any of those three regress; only the XiP step is a deliberate,
- * explained skip.
+ * This example has caught three real, distinct silicon/build bugs (the
+ * clock-gate fault, the MPU Device-mapping regression, and the OSPI_XIP_SER
+ * fault above) purely at the controller-register level -- it is a
+ * regression sentinel, not a formality.  The clock-gate, MPU, and
+ * register-file checks below MUST still surface as loud
+ * device_is_ready()/init/readback failures if any of those three regress;
+ * only the XiP step is a deliberate, explained skip.
  */
 
 #include <stdbool.h>
@@ -272,16 +278,17 @@ int main(void)
 	 * AND alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
 	 * both from the driver's own init and directly from this app -- AND the
 	 * register file reads back its documented CTRLR0 reset value. XiP setup
-	 * is out of scope for this gate (see the module header SKIP note); a
-	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * populated this batch).
+	 * is out of scope for this gate (see the module header SKIP note --
+	 * OSPI_XIP_SER does not exist on AE822, independent of what any chip
+	 * select carries); this app makes no device-level transfer either way,
+	 * so its PASS says nothing about whether a NOR/HyperBus part answers.
 	 */
 	if (node_ok && hal_init_ok && ctrlr0_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
-		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated this batch)\n");
+		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die); "
+		       "no device-level transfer attempted (controller-register proof only)\n");
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
 		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
