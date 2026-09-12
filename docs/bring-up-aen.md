@@ -9,7 +9,7 @@ adapter.
 > Peer docs: [`bring-up-v2n.md`](bring-up-v2n.md),
 > [`bring-up-v2n-m1.md`](bring-up-v2n-m1.md),
 > [`bring-up-imx93.md`](bring-up-imx93.md).  This guide covers the
-> AEN family specifically (AEN301..801, Alif Ensemble silicon).
+> AEN family specifically (AEN301..801 plus AEN803, Alif Ensemble silicon).
 
 ## 0. Pre-flight
 
@@ -41,13 +41,37 @@ Inventory check before powering anything:
   (Carrier parts ride **I2C2** (`ALP_E1M_I2C0`) / the EVK headers, not
   the SoM's BRD_I2C trio -- see the bus table in §5.1.)
 
-> **This batch: the SoM's OSPI memories are NOT populated.** The
-> OSPI0 octal bus (BOM-optional NOR flash on CS0 + HyperRAM on CS1,
-> both `assembled: optional` in the SKU preset) is un-stuffed on the
-> AEN801 modules on the bench, so boot **and** app storage run from
-> on-die **MRAM only** (5.5 MB on `AE822FA0E5597LS0`).  Don't expect
-> an external flash / XIP device on this hardware; MCUboot slots and
-> any storage partition must target MRAM, not OSPI.
+> **OSPI0 population is SKU-scoped, not a blanket "this batch" fact.**
+> On the **E1M-AEN801** SKU both OSPI0 devices are DNI
+> (`ospi_memories.ospi0.assembled: false` and `hyperram.assembled: false`
+> in [`E1M-AEN801.yaml`](../metadata/e1m_modules/E1M-AEN801.yaml)), so
+> boot **and** app storage on an AEN801 module run from on-die **MRAM
+> only** (5.5 MB on `AE822FA0E5597LS0`). The **E1M-AEN803** SKU fits
+> **both** external memories -- the `IS25WX256-JHLE` NOR on CS1 and the
+> `S80KS5122GABHM02` HyperRAM on CS0, both `assembled: true` in
+> [`E1M-AEN803.yaml`](../metadata/e1m_modules/E1M-AEN803.yaml) -- and on
+> the **AEN803** bench module serial `2026W36-0002` the NOR answers a
+> JEDEC ID read on OSPI0 **CS1** with `9d 5b 19 10` (ISSI, IS25WX256) at
+> a 20 MHz test rate (`ser` is a **bitmask**: `0x00000002` selects CS1,
+> not the index `1`). The same read at the driver's 100 MHz DT-derived
+> default comes back `4e ad 8c 88` with `RISR=0x00000001` -- a sampling
+> error, not silence -- so headroom above 20 MHz is unmeasured
+> (alp-sdk#2041). This corrects an earlier version of this same
+> paragraph, which had the chip-select mapping backwards (NOR on CS0,
+> HyperRAM on CS1) -- a probe wired from that wording would aim a NOR
+> opcode at CS0 and could misread a live NOR as dead. That CS1 result
+> says nothing about the HyperRAM's own behaviour. The reason nothing
+> can boot or XIP from either device yet is
+> `zephyr/drivers/flash/flash_ospi_alif.c` having **no pinctrl support
+> at all** (`grep -ci pinctrl` on that file returns `0`) -- no consumer
+> can apply OSPI0's pad configuration, which is also why
+> `examples/aen/aen-ospi-regcheck`'s own overlay pinctrl silently never
+> took effect (alp-sdk#2041). That example's PASS banner also still
+> prints a stale "no part populated this batch" claim, contradicted by
+> everything above; alp-sdk#2041 owns fixing it, not this doc. Keep
+> MCUboot slots and any storage partition on MRAM regardless of SKU
+> until the OSPI0 pinctrl work tracked in alp-sdk#2041 lands -- recheck
+> this paragraph when that issue closes.
 
 ## 1. First-power smoke test
 
@@ -273,11 +297,14 @@ this bus actually measured.
 >   TCA6408ARSVR alternative (R112 fitted, R145 DNP) — register-compatible,
 >   so `chips/tcal9538` drives it unchanged (`metadata/boards/e1m-evk.yaml:297-298`).
 
-> **This bench batch (2026-06-15):** the **OPTIGA Trust M (`0x30`) is not
-> populated**, and that is *expected*, not a fault. OPTIGA is in the
-> E1M-AEN801 SoM design (`on_module`); the absence is a current-batch
-> population fact (like the un-stuffed OSPI memories). Skip §5.2 on these
-> boards. Note the evidence is the population record, **not** a scan miss --
+> **The OPTIGA Trust M (`0x30`) is not populated**, and that is
+> *expected*, not a fault. OPTIGA is in the E1M-AEN801 SoM design
+> (`on_module`); the absence is a population fact that holds across
+> **both** AEN SKUs on the bench -- `optiga_trust_m` is `assembled:
+> false` in both `metadata/e1m_modules/E1M-AEN801.yaml:123` and
+> `metadata/e1m_modules/E1M-AEN803.yaml:129` (unlike OSPI0 in §0, this
+> population fact is not SKU-differentiated). Skip §5.2 on these boards.
+> Note the evidence is the population record, **not** a scan miss --
 > OPTIGA sits on BRD_I2C, a working bus as of the 2026-09-05 R2 run (§5.1)
 > that is deliberately not blind-scanned here regardless (a scan is a real transaction against a
 > secure element); the driver's targeted `optiga_trust_m_init` probe is the
