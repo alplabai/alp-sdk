@@ -22,8 +22,9 @@
  * Backend-owned state:
  *   - struct mqtt_be (per-handle; mqtt_client, sockaddr_storage,
  *     rx/tx scratch, topic scratch, msg_cb/user pair, connected flag,
- *     msg-id counter and the client_id / username / password copies
- *     so reconnects survive the customer's source-cfg lifetime).
+ *     msg-id counter, the client_id / username / password copies so
+ *     reconnects survive the customer's source-cfg lifetime, and the
+ *     resumable PUBLISH-payload drain state, issue #1938).
  *
  * Allocated from a fixed-size per-handle pool (sized by
  * CONFIG_ALP_SDK_MAX_MQTT_HANDLES) and indexed by slot lookup at
@@ -94,6 +95,23 @@ struct mqtt_be {
 	struct mqtt_utf8        username_utf8;
 	struct mqtt_utf8        password_utf8;
 	uint16_t                next_msg_id; /* monotonic, wraps past 0xFFFF */
+
+	/* Resumable PUBLISH-payload drain (issue #1938) -- see
+	 * mqtt_drain_step()'s doc comment.  A drain can span more than one
+	 * alp_mqtt_loop()/alp_mqtt_connect() call, so its progress has to
+	 * live here rather than on any one call's stack. */
+	uint32_t drain_deadline; /* spanning lifetime bound; stamped once, when the drain starts */
+	uint32_t call_deadline;  /* the CURRENT loop()/connect() call's own deadline */
+	size_t   drain_total;    /* the PUBLISH's advertised payload length */
+	size_t   drain_owed;     /* payload bytes not yet off the wire */
+	size_t   drain_rx_got;   /* bytes placed into rx_buf so far (drain_deliver only) */
+	uint16_t drain_msg_id;
+	uint8_t  drain_qos;
+	bool     drain_pending; /* a drain is in progress, possibly spanning calls */
+	bool     drain_deliver; /* false: pure discard (msg_cb == NULL).  A payload past
+	                         * rx_buf's cap stays drain_deliver == true -- mqtt_drain_step()
+	                         * just redirects the overflow into a scratch buffer instead. */
+
 	/* Moved to the last member (was first) so the atomic-claim zeroing
 	 * below (memset up to offsetof(..., in_use)) still resets every
 	 * other field, matching the pre-fix full-struct memset -- issue
@@ -208,23 +226,221 @@ static int resolve_broker_addr(const char *host, uint16_t port, struct sockaddr_
 #endif
 }
 
-/* Read + discard `remaining` bytes of an inbound PUBLISH payload the
- * caller isn't keeping, so Zephyr's mqtt_client::internal.remaining_payload
- * reaches 0 -- left non-zero, client_read() returns -EBUSY on every
- * subsequent mqtt_input(), wedging the connection permanently (issue
- * #1645).  Shared by both MQTT_EVT_PUBLISH branches in
- * alp_mqtt_evt_cb() below: the no-callback branch draining the whole
- * payload, and the callback branch draining what didn't fit rx_buf. */
-static void mqtt_drain_remaining(struct mqtt_client *client, size_t remaining)
+/* Pull the active socket fd out of the mqtt client.  Path differs
+ * between non-secure (transport.tcp) and TLS (transport.tls) variants;
+ * v0.2 only ships non-secure (TLS lands with security.h in v0.3) but
+ * the helper is shaped to extend cleanly.  Moved above the payload-read
+ * helper below (was originally defined after alp_mqtt_evt_cb) so that
+ * helper can poll the socket fd while waiting on -EAGAIN (issue #1938). */
+static int alp_mqtt_get_fd(struct mqtt_client *c)
 {
-	uint8_t scratch[64];
-	while (remaining > 0) {
-		int n = mqtt_read_publish_payload(client, scratch, MIN(remaining, sizeof(scratch)));
-		if (n <= 0) {
-			break;
-		}
-		remaining -= (size_t)n;
+#if defined(CONFIG_MQTT_LIB_TLS)
+	if (c->transport.type == MQTT_TRANSPORT_SECURE) {
+		return c->transport.tls.sock;
 	}
+#endif
+	return c->transport.tcp.sock;
+}
+
+/* A drain that never receives another byte must not hold the connection
+ * open forever -- this is the SPANNING lifetime bound (issue #1938): once
+ * a drain becomes pending, it has this long in total, across as many
+ * alp_mqtt_loop() calls as it takes, before mqtt_drain_step() gives up and
+ * tears the connection down.  Same budget PR #1658 used for #1645. */
+#define ALP_MQTT_DRAIN_TIMEOUT_MS 5000u
+
+/* Clamps a caller-supplied timeout to a value k_uptime_get_32() + timeout_ms
+ * can safely subtract back out of.  A wraparound-safe "time left" check
+ * elsewhere in this file casts (deadline - now) to int32_t; a timeout_ms
+ * above INT32_MAX would make that cast lie (issue #1938). */
+static uint32_t mqtt_clamp_timeout_ms(uint32_t timeout_ms)
+{
+	return (timeout_ms > (uint32_t)INT32_MAX) ? (uint32_t)INT32_MAX : timeout_ms;
+}
+
+/* True when a POSITIVE zsock_poll() return means the fd itself is torn
+ * down or errored, not that data is ready.  Zephyr reports a torn-down/
+ * invalid fd as POLLNVAL/POLLERR in revents with a POSITIVE poll() return
+ * -- never rc < 0 -- so every zsock_poll() call in this file (the drain's
+ * own, plus z_connect()'s and z_loop()'s connection-wide polls) has to
+ * check revents in addition to rc, or a dead socket hot-spins at 100% CPU
+ * for the rest of whatever deadline is in play (issue #1938 item 4). */
+static bool mqtt_poll_fd_is_dead(short revents)
+{
+	return (revents & (ZSOCK_POLLNVAL | ZSOCK_POLLERR)) != 0;
+}
+
+/* Advances the pending PUBLISH-payload drain in `be` by whatever the
+ * socket has ready before `until` (a k_uptime_get_32() timestamp -- the
+ * CURRENT alp_mqtt_loop()/alp_mqtt_connect() call's own deadline, never
+ * the drain's full spanning lifetime) elapses.
+ *
+ * mqtt_rx.c sets internal.remaining_payload from the PUBLISH's advertised
+ * header length the instant the header is decoded -- before the payload
+ * bytes have necessarily all arrived on the wire.  mqtt_read_publish_payload()
+ * is the non-blocking variant and returns -EAGAIN verbatim once the socket
+ * has no more buffered bytes right now, which for a payload spanning more
+ * than one TCP segment is not a hard failure, just "not here yet".  Leaving
+ * remaining_payload > 0 makes client_read() answer -EBUSY on every
+ * subsequent mqtt_input() -- the connection is wedged until torn down
+ * (issue #1645).
+ *
+ * Bounding the retry to the CALLER's own budget (rather than blocking here
+ * for up to ALP_MQTT_DRAIN_TIMEOUT_MS, as earlier revisions of this fix
+ * did) is the point of #1938: a customer's short poll interval must not
+ * abort a perfectly healthy connection that just hasn't finished
+ * delivering one publish yet.  Running out of THIS call's budget with
+ * bytes still owed is not a failure -- be->drain_pending stays true and a
+ * later call resumes exactly where this one left off.  Only running out of
+ * the drain's own spanning lifetime (be->drain_deadline, stamped once when
+ * the drain first became pending) is a real failure, because at that point
+ * the peer itself has gone silent for ALP_MQTT_DRAIN_TIMEOUT_MS, not just
+ * the caller's poll interval.
+ *
+ * Returns true once be->drain_owed reaches 0 (drain complete -- the caller
+ * must still finish delivery via mqtt_drain_finish()).  Returns false
+ * otherwise; the caller tells "try again later" apart from "connection is
+ * gone" via be->drain_pending (left true vs. cleared) -- a hard read/poll
+ * error or the spanning deadline both call mqtt_abort() themselves and
+ * clear it. */
+static bool mqtt_drain_step(struct mqtt_be *be, uint32_t until)
+{
+	struct mqtt_client *client = &be->client;
+	uint8_t             scratch[64];
+
+	while (be->drain_owed > 0) {
+		uint8_t *dst;
+		size_t   chunk;
+		if (be->drain_deliver && be->drain_rx_got < sizeof(be->rx_buf)) {
+			dst   = be->rx_buf + be->drain_rx_got;
+			chunk = MIN(be->drain_owed, sizeof(be->rx_buf) - be->drain_rx_got);
+		} else {
+			dst   = scratch;
+			chunk = MIN(be->drain_owed, sizeof(scratch));
+		}
+
+		int n = mqtt_read_publish_payload(client, dst, chunk);
+		if (n > 0) {
+			if (dst != scratch) be->drain_rx_got += (size_t)n;
+			be->drain_owed -= (size_t)n;
+			continue;
+		}
+		if (n != -EAGAIN) {
+			LOG_WRN("mqtt: publish read failed (%d) with %zu of %zu bytes still owed; "
+			        "aborting the connection rather than leaving it wedged at -EBUSY",
+			        n,
+			        be->drain_owed,
+			        be->drain_total);
+			goto tear_down;
+		}
+
+		/* -EAGAIN: nothing buffered right now.  Poll bounded by whichever
+		 * of this call's own budget or the drain's spanning lifetime
+		 * comes first -- never past either. */
+		uint32_t bound   = ((int32_t)(be->drain_deadline - until) < 0) ? be->drain_deadline : until;
+		int32_t  left_ms = (int32_t)(bound - k_uptime_get_32());
+		if (left_ms <= 0) {
+			if ((int32_t)(be->drain_deadline - k_uptime_get_32()) <= 0) {
+				LOG_WRN("mqtt: publish drain exceeded its %u ms lifetime with %zu of "
+				        "%zu bytes still owed; aborting the connection",
+				        ALP_MQTT_DRAIN_TIMEOUT_MS,
+				        be->drain_owed,
+				        be->drain_total);
+				goto tear_down;
+			}
+			return false; /* this call's own budget is spent -- resume later */
+		}
+
+		struct zsock_pollfd pfd = { .fd = alp_mqtt_get_fd(client), .events = ZSOCK_POLLIN };
+		int                 rc  = zsock_poll(&pfd, 1, left_ms);
+		if (rc < 0) {
+			if (errno == EINTR) continue; /* benign, retryable -- not a real failure */
+			LOG_WRN("mqtt: publish drain poll failed (errno %d) with %zu of %zu bytes "
+			        "still owed; aborting the connection",
+			        errno,
+			        be->drain_owed,
+			        be->drain_total);
+			goto tear_down;
+		}
+		/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4):
+		 * a torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+		if (rc > 0 && mqtt_poll_fd_is_dead(pfd.revents)) {
+			LOG_WRN("mqtt: publish drain socket torn down (revents 0x%x) with %zu of "
+			        "%zu bytes still owed; aborting the connection",
+			        pfd.revents,
+			        be->drain_owed,
+			        be->drain_total);
+			goto tear_down;
+		}
+		/* rc == 0 (this poll slice timed out) or POLLIN is ready either
+		 * way: loop back up -- the left_ms <= 0 check above is what
+		 * actually detects running out of time. */
+	}
+
+	be->drain_pending = false;
+	return true;
+
+tear_down:
+	(void)mqtt_abort(client);
+	/* mqtt_abort() does not itself run the MQTT_EVT_DISCONNECT path, so
+	 * be->connected would otherwise still read true -- flip it here so
+	 * z_loop()/z_connect() can tell the caller their connection is gone
+	 * (issue #1938 item 1) instead of returning ALP_OK on the very call
+	 * that tore it down. */
+	be->connected     = false;
+	be->drain_pending = false;
+	return false;
+}
+
+/* Finishes a drain mqtt_drain_step() has just reported complete: the QoS-1
+ * PUBACK (withheld until now -- see mqtt_drain_step()'s doc comment on
+ * issue #1645) and the user's msg_cb, if this drain was for a bound
+ * subscription rather than a background discard.
+ *
+ * The PUBACK is unconditional on QoS, never on drain_deliver: a discarded
+ * PUBLISH (msg_cb == NULL) is still a PUBLISH the broker is owed an ack
+ * for, or it redelivers forever.  Returning before it here was issue
+ * #1938 item 5's regression -- pre-restructure, every drain path acked
+ * before this function existed at all. */
+static void mqtt_drain_finish(struct mqtt_be *be)
+{
+	if (be->drain_qos == MQTT_QOS_1_AT_LEAST_ONCE) {
+		const struct mqtt_puback_param ack = { .message_id = be->drain_msg_id };
+		(void)mqtt_publish_qos1_ack(&be->client, &ack);
+	}
+
+	if (!be->drain_deliver) return;
+
+	if (be->drain_rx_got < be->drain_total) {
+		/* alp_mqtt_msg_cb_t (<alp/iot.h>) has no channel to report a
+		 * truncated delivery to the caller -- drain_rx_got below is
+		 * silently short.  Log it so the drop is at least visible;
+		 * widening the callback signature is a public-API change out
+		 * of scope for this fix. */
+		LOG_WRN("mqtt: payload %u B truncated to rx_buf's %u B",
+		        (unsigned)be->drain_total,
+		        (unsigned)be->drain_rx_got);
+	}
+
+	be->msg_cb((const char *)be->topic_buf, be->rx_buf, be->drain_rx_got, be->msg_user);
+}
+
+/* Resumes a drain an earlier alp_mqtt_loop()/alp_mqtt_connect() call left
+ * pending, spending up to THIS call's own budget on it before returning --
+ * never the drain's whole spanning lifetime in one shot.  Called before
+ * touching any new event: mqtt_input() itself won't produce another
+ * MQTT_EVT_PUBLISH (or process anything else) while Zephyr's own
+ * internal.remaining_payload is still non-zero (see mqtt_drain_step()'s
+ * doc comment), so resuming here first is the only way forward. */
+static alp_status_t mqtt_drain_resume(struct mqtt_be *be, uint32_t call_deadline)
+{
+	bool was_connected = be->connected;
+
+	if (mqtt_drain_step(be, call_deadline)) {
+		mqtt_drain_finish(be);
+	}
+	if (was_connected && !be->connected) return ALP_ERR_IO;
+	return ALP_OK;
 }
 
 /* Event handler -- called from mqtt_input() in the user's loop
@@ -243,70 +459,41 @@ static void alp_mqtt_evt_cb(struct mqtt_client *client, const struct mqtt_evt *e
 		break;
 	case MQTT_EVT_PUBLISH: {
 		const struct mqtt_publish_param *pub = &evt->param.publish;
-		if (be->msg_cb == NULL) {
-			/* Drop the payload off the wire so the broker doesn't
-             * stall on QoS-1+ acknowledgement -- but keep the
-             * topic-string and length for callers that subscribed
-             * without binding a callback. */
-			mqtt_drain_remaining(client, pub->message.payload.len);
-			break;
+
+		/* Starts a fresh drain (issue #1938) -- be->drain_pending is
+		 * always false on entry here: mqtt_input() cannot deliver
+		 * another MQTT_EVT_PUBLISH while an earlier one's
+		 * remaining_payload is still non-zero, and z_loop()/z_connect()
+		 * resume any pending drain before ever calling mqtt_input(). */
+		be->drain_deliver  = (be->msg_cb != NULL);
+		be->drain_total    = pub->message.payload.len;
+		be->drain_owed     = pub->message.payload.len;
+		be->drain_rx_got   = 0;
+		be->drain_qos      = (uint8_t)pub->message.topic.qos;
+		be->drain_msg_id   = pub->message_id;
+		be->drain_deadline = k_uptime_get_32() + ALP_MQTT_DRAIN_TIMEOUT_MS;
+		be->drain_pending  = true;
+
+		if (be->drain_deliver) {
+			/* Copy the topic into our scratch buffer so we can
+             * NUL-terminate it for the public callback (the wire form
+             * is length-delimited). */
+			size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(be->topic_buf) - 1);
+			memcpy(be->topic_buf, pub->message.topic.topic.utf8, topic_len);
+			be->topic_buf[topic_len] = '\0';
 		}
 
-		/* Copy the topic into our scratch buffer so we can NUL-terminate
-         * it for the public callback (the wire form is length-delimited). */
-		size_t topic_len = MIN(pub->message.topic.topic.size, sizeof(be->topic_buf) - 1);
-		memcpy(be->topic_buf, pub->message.topic.topic.utf8, topic_len);
-		be->topic_buf[topic_len] = '\0';
-
-		/* Read payload directly into rx_buf -- bounded by buffer size. */
-		size_t want = MIN(pub->message.payload.len, sizeof(be->rx_buf));
-		size_t got  = 0;
-		while (got < want) {
-			int n = mqtt_read_publish_payload(client, be->rx_buf + got, want - got);
-			if (n <= 0) break;
-			got += (size_t)n;
+		if (mqtt_drain_step(be, be->call_deadline)) {
+			mqtt_drain_finish(be);
 		}
-
-		/* A payload bigger than rx_buf leaves the excess unread on the
-		 * wire; drain it (same helper as the msg_cb == NULL branch above)
-		 * BEFORE the PUBACK below, so the broker isn't told delivery
-		 * succeeded while the connection is left wedged (issue #1645). */
-		if (got < pub->message.payload.len) {
-			/* alp_mqtt_msg_cb_t (<alp/iot.h>) has no channel to report a
-			 * truncated delivery to the caller -- got below is silently
-			 * short.  Log it so the drop is at least visible; widening
-			 * the callback signature is a public-API change out of scope
-			 * for this fix. */
-			LOG_WRN("mqtt: payload %u B truncated to rx_buf's %u B",
-			        (unsigned)pub->message.payload.len,
-			        (unsigned)got);
-		}
-		mqtt_drain_remaining(client, pub->message.payload.len - got);
-
-		if (pub->message.topic.qos == MQTT_QOS_1_AT_LEAST_ONCE) {
-			const struct mqtt_puback_param ack = { .message_id = pub->message_id };
-			(void)mqtt_publish_qos1_ack(client, &ack);
-		}
-		be->msg_cb((const char *)be->topic_buf, be->rx_buf, got, be->msg_user);
+		/* Else: be->drain_pending tells z_loop()/z_connect() apart --
+		 * still true means "resume next call", cleared (by
+		 * mqtt_drain_step() itself) means the connection is gone. */
 		break;
 	}
 	default:
 		break;
 	}
-}
-
-/* Pull the active socket fd out of the mqtt client.  Path differs
- * between non-secure (transport.tcp) and TLS (transport.tls) variants;
- * v0.2 only ships non-secure (TLS lands with security.h in v0.3) but
- * the helper is shaped to extend cleanly. */
-static int alp_mqtt_get_fd(struct mqtt_client *c)
-{
-#if defined(CONFIG_MQTT_LIB_TLS)
-	if (c->transport.type == MQTT_TRANSPORT_SECURE) {
-		return c->transport.tls.sock;
-	}
-#endif
-	return c->transport.tcp.sock;
 }
 #endif /* CONFIG_ALP_SDK_IOT_MQTT */
 
@@ -413,6 +600,20 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
+	/* A drain left pending by a PREVIOUS session (a caller that just
+	 * retries alp_mqtt_connect() on the same handle per
+	 * docs/tutorials/11-mqtt-tls-publish.md:219) must not resume against
+	 * the FRESH socket mqtt_connect() is about to open below -- its
+	 * spanning deadline is stale and mqtt_drain_step() would abort the
+	 * brand-new connection the instant it next runs.  Clear it before
+	 * connecting so the wait loop's mqtt_drain_resume() call never sees
+	 * state from before this connect (issue #1938 item 3). */
+	be->drain_pending  = false;
+	be->drain_deadline = 0;
+	be->drain_owed     = 0;
+	be->drain_rx_got   = 0;
+	be->topic_buf[0]   = '\0';
+
 	int err = mqtt_connect(&be->client);
 	if (err != 0) {
 		return errno_to_alp(err);
@@ -421,13 +622,30 @@ static alp_status_t z_connect(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	/* Pump input until we get CONNACK (which the evt cb sets) or the
      * timeout expires.  poll() with a short slice keeps the wait
      * responsive without busy-spinning. */
+	timeout_ms        = mqtt_clamp_timeout_ms(timeout_ms);
 	uint32_t deadline = k_uptime_get_32() + timeout_ms;
+	be->call_deadline = deadline; /* bounds a stray PUBLISH's drain during connect (#1938) */
 	while ((int32_t)(deadline - k_uptime_get_32()) > 0) {
+		if (be->drain_pending) {
+			/* Resume before anything else -- see mqtt_drain_resume()'s
+			 * doc comment; mqtt_input() below won't make progress on a
+			 * fresh event until this clears. */
+			alp_status_t rc = mqtt_drain_resume(be, deadline);
+			if (rc != ALP_OK) return rc;
+			continue;
+		}
+
 		struct zsock_pollfd fds[1] = { 0 };
 		fds[0].fd                  = alp_mqtt_get_fd(&be->client);
 		fds[0].events              = ZSOCK_POLLIN;
 		int rc                     = zsock_poll(fds, 1, 200);
 		if (rc < 0) return errno_to_alp(-errno);
+		/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4):
+		 * a torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+		if (rc > 0 && mqtt_poll_fd_is_dead(fds[0].revents)) {
+			be->connected = false;
+			return ALP_ERR_IO;
+		}
 		if (rc > 0) {
 			err = mqtt_input(&be->client);
 			if (err != 0) return errno_to_alp(err);
@@ -526,17 +744,54 @@ static alp_status_t z_loop(alp_mqtt_backend_state_t *st, uint32_t timeout_ms)
 	struct mqtt_be *be = (struct mqtt_be *)st->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
 
+	timeout_ms             = mqtt_clamp_timeout_ms(timeout_ms);
+	uint32_t call_deadline = k_uptime_get_32() + timeout_ms;
+
+	if (be->drain_pending) {
+		/* Resumable drain (issue #1938): a caller's short timeout_ms
+		 * must never abort a payload that just hasn't fully arrived yet
+		 * -- finish what an earlier call left owed, bounded by THIS
+		 * call's own budget, before touching anything new. See
+		 * mqtt_drain_resume()'s doc comment. */
+		return mqtt_drain_resume(be, call_deadline);
+	}
+
+	bool was_connected = be->connected;
+	be->call_deadline  = call_deadline; /* bounds any drain a fresh PUBLISH starts below */
+
+	int32_t remaining_ms = (int32_t)(call_deadline - k_uptime_get_32());
+	if (remaining_ms < 0) remaining_ms = 0;
+
 	struct zsock_pollfd fds[1] = { 0 };
 	fds[0].fd                  = alp_mqtt_get_fd(&be->client);
 	fds[0].events              = ZSOCK_POLLIN;
-	int rc                     = zsock_poll(fds, 1, (int)timeout_ms);
+	int rc                     = zsock_poll(fds, 1, remaining_ms);
 	if (rc < 0) return errno_to_alp(-errno);
+	/* See mqtt_poll_fd_is_dead()'s doc comment (issue #1938 item 4): a
+	 * torn-down/invalid fd reports here as rc > 0, not rc < 0. */
+	if (rc > 0 && mqtt_poll_fd_is_dead(fds[0].revents)) {
+		be->connected = false;
+		return ALP_ERR_IO;
+	}
 	if (rc > 0) {
 		int err = mqtt_input(&be->client);
 		if (err != 0) return errno_to_alp(err);
 	}
+	/* A broker disconnect (graceful MQTT_EVT_DISCONNECT, or our own
+	 * mqtt_abort() from a drain that gave up) must surface as
+	 * ALP_ERR_IO on the very call that tore the connection down --
+	 * docs/tutorials/11-mqtt-tls-publish.md documents exactly this
+	 * contract, "no separate is-connected query" (issue #1938 item 1).
+	 * Without this check, mqtt_input() answers 0 (the abort's own
+	 * packet, if any, still parsed cleanly) and mqtt_live() answers
+	 * -EAGAIN whenever no keepalive is due, so the caller would see
+	 * ALP_OK on the exact call that just lost the link. */
+	if (was_connected && !be->connected) return ALP_ERR_IO;
+	if (be->drain_pending) return ALP_OK; /* a fresh drain above is still owed */
+
 	int err = mqtt_live(&be->client);
 	if (err != 0 && err != -EAGAIN) return errno_to_alp(err);
+	if (was_connected && !be->connected) return ALP_ERR_IO;
 	return ALP_OK;
 #else
 	(void)st;
