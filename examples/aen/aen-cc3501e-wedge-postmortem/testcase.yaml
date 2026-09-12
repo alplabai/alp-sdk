@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E wedge-postmortem app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the no-credentials build shape
+# (WEDGEPM_WIFI_SSID empty -- the wedge phase, and therefore the whole
+# reproduction, is skipped) against the real board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
+# AP that will refuse or ignore the connect, and physical control of the
+# bench power rail (power-cycle phase); a compile check here only proves the
+# build, never reproduces the wedge or captures real evidence.
+
+sample:
+  name: aen-cc3501e-wedge-postmortem
+  description: |
+    Reproduces the CC3501E WIFI_CONNECT_STA wedge (a PING that answers on
+    the first attempt, immediately followed by a connect that gets no
+    reply at all and leaves the link dead through a host reset) and
+    captures forensic evidence in the wedged state, before any recovery is
+    attempted: a positive control proving the host's own reset actually
+    reaches the chip (uptime_ms falls after a host hard reset in a healthy
+    session), the wedge itself, then -- while still wedged -- the receive
+    scratch buffer after a PING request-header transceive, the READY pin
+    level, a warm host reset + PING, and a full power-off/hold/power-on +
+    PING. Prints a verdict naming which of three mechanisms (a hung
+    firmware task, a host reset that never reaches the chip, or a fault
+    outside CC3501E firmware state entirely) the evidence points to. Skips
+    the wedge (and everything after it) when WEDGEPM_WIFI_SSID is empty (the
+    build default) -- no SSID/passphrase is embedded in this app.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_wedge_postmortem.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+    build_only: true # the wedge + power-cycle phases need the real bench.

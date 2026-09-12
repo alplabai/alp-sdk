@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E connect-twice probe on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the no-credentials build shape
+# (CONNTWICE_WIFI_SSID empty -- the whole probe is skipped) against the real
+# board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- this app needs the real inter-chip SPI1 link and a CC3501E
+# actually running the bridge firmware; a compile check here only proves the
+# build, not the hypothesis this app exists to test.
+
+sample:
+  name: aen-cc3501e-connect-twice-probe
+  description: |
+    Tests whether the CC3501E vendor SDK's WLAN_IF_DISCONNECT_IN_PROGRESS
+    bit clears when Wlan_Disconnect is asked to disconnect a station that
+    never associated. Scans first (load-bearing -- see src/main.c), connects
+    twice with the same credentials, and reads WIFI_STATUS's state and
+    fail_reason after each attempt, decoded to names. If attempt one reports
+    FAIL_TIMEOUT and attempt two reports FAIL_KICK, the bit sticks. If both
+    report the same reason, it does not. If attempt one succeeds, the run
+    says nothing about the hypothesis. Skips the whole probe when
+    CONNTWICE_WIFI_SSID is empty (the build default) -- no SSID/passphrase
+    is embedded in this app.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_connect_twice_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+    build_only: true   # the hypothesis needs the real bench + a real AP.

@@ -155,6 +155,15 @@ typedef uint64_t adma2_desc_t;
 #define DWC_SDHC_CMD_LINE_LVL_Pos         24U
 #define DWC_SDHC_CMD_LINE_LVL_Msk         BIT(DWC_SDHC_CMD_LINE_LVL_Pos)
 #define DWC_SDHC_CMD_DATA_LINE_STATUS_Msk (DWC_SDHC_DAT_LINE_LVL_Msk | DWC_SDHC_CMD_LINE_LVL_Msk)
+/*
+ * DAT0 (bit 20, the low bit of the DAT_LINE_LVL field above) is the SD
+ * busy-signalling line on its own -- SD Physical Layer Specification
+ * 4.2.4.2 defines card-busy (R1b response, write programming) as DAT0
+ * held low, not the whole DAT[3:0]+CMD group. Give it its own accessor
+ * so a busy check can test DAT0 alone instead of the five-bit group
+ * meant for the CMD11 voltage-switch low-phase check (#2057).
+ */
+#define DWC_SDHC_DAT0_LINE_LVL_Msk        BIT(DWC_SDHC_DAT_LINE_LVL_Pos)
 
 /*
  * ===========================================================

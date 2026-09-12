@@ -957,6 +957,13 @@ def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
             f"{path} on_module_links.rtc_alarm.risk must be a map keyed by "
             "SoC `part` designator (e.g. {\"E8\": \"...\"}), not a bare "
             "string -- a part-scoped risk note needs the part key (#1988)")
+    bench_validation = links["e1m_i2c0"].get("bench_validation")
+    if bench_validation is not None and not isinstance(bench_validation, dict):
+        raise ZephyrBoardEmitError(
+            f"{path} on_module_links.e1m_i2c0.bench_validation must be a map "
+            "keyed by SoC `part` designator (e.g. {\"E8\": \"...\"}), not a "
+            "bare string -- a part-scoped bench note needs the part key "
+            "(#2046, following #1988's pattern)")
     return links
 
 
@@ -1021,7 +1028,7 @@ def _aen_i2c_device_nodes(
 
 def _aen_pinctrl_dtsi(
     role: str, sku_display: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
-    family_display: str, links: dict[str, Any],
+    family_display: str, links: dict[str, Any], part: str,
 ) -> str:
     other_role = "he" if role == "hp" else "hp"
     rx_macro, tx_macro = _pin_macro(rx_row), _pin_macro(tx_row)
@@ -1086,7 +1093,7 @@ def _aen_pinctrl_dtsi(
         "\n"
         + _aen_i2c_pinctrl_group(links) +
         "\n"
-        + _aen_e1m_i2c0_pinctrl_group(links) +
+        + _aen_e1m_i2c0_pinctrl_group(links, part) +
         "};\n"
     )
 
@@ -1119,12 +1126,16 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
         "\t * i2c_dw controller cannot SENSE SCL (clock-stretch detect / arbitration)\n"
         "\t * and NACKs every address for a reason that looks electrical but is not.\n"
         "\t *\n"
-        "\t * bias-pull-up is DSC=1, a REAL pull-up (soc/alif/ensemble/pinctrl_soc.h\n"
-        "\t * encodes bits 19:20 [DSC] as 0=high-Z, 1=pull-up, 2=pull-down,\n"
-        "\t * 3=bus-keeper).  Do NOT copy the I2C2/EEPROM overlay's bias-pull-down:\n"
-        "\t * DSC=2 is a pull-DOWN, harmless there only because that bus has external\n"
-        "\t * carrier pull-ups (R137/R144).  This net has NO external pull-up at all,\n"
-        "\t * so a pull-down would park both lines low and look like a busy bus.\n"
+        "\t * bias-pull-up is DSC=1, a REAL pull-up: pinctrl_soc.h's field comment\n"
+        "\t * (soc/alif/ensemble/pinctrl_soc.h:24) and its ALIF_PINCTRL_BIAS_CFG()\n"
+        "\t * macro (:44-48) both map bias-pull-up -> DSC=1 unconditionally -- there\n"
+        "\t * is NO inversion between the devicetree property and the DSC field, on\n"
+        "\t * this bus or the e1m_i2c0 one below (#2046 corrected that group's\n"
+        "\t * comment, which used to claim the opposite).  Do NOT copy the\n"
+        "\t * I2C2/EEPROM overlay's bias-pull-down: DSC=2 is a pull-DOWN, harmless\n"
+        "\t * there only because that bus has external carrier pull-ups (R137/R144).\n"
+        "\t * This net has NO external pull-up at all, so a pull-down would park both\n"
+        "\t * lines low and look like a busy bus.\n"
         "\t *\n"
         "\t * drive-open-drain is deliberately NOT set, so bit 23 [DRV] stays 0 =\n"
         "\t * PUSH-PULL: the pad actively drives the high phase instead of relying on\n"
@@ -1158,7 +1169,7 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
     )
 
 
-def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any]) -> str:
+def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any], part: str) -> str:
     """The `e1m_i2c0` (SoC I2C2) pinctrl group, from metadata.
 
     Unlike `_aen_i2c_pinctrl_group()` this bus carries NO alarm-style
@@ -1168,13 +1179,42 @@ def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any]) -> str:
     the `e1m_i2c0` entry's own comment in on-module-links.yaml).
 
     `bias-pull-down` here is intentional and matches Alif's own reference
-    I2C pinctrl (metadata says why); `bias-pull-up` looks more natural but
-    gives a DEAD bus (upstream pinctrl_soc.h's pull-direction encoding
-    reads inverted vs the Alif pad hardware) -- do not "fix" it.
+    I2C pinctrl (metadata says why).  `part` (the Ensemble part designator
+    this board tree is for, e.g. "E8") picks which of on_module_links'
+    `e1m_i2c0.bench_validation` map's citations -- if any -- this comment
+    carries: the only bench run on record is against the E8, and #2046
+    found that citation being emitted unqualified into every OTHER AEN
+    part's board tree (E3 included) as the same class of leak #1988 fixed
+    for `rtc_alarm.risk`.  Unlike that fix, a part with no entry here does
+    NOT get silence -- #2046 is explicit that the citation must not be
+    silently dropped, only qualified, because the emitted PAD VALUE
+    (bias-pull-down) is unchanged and still correct for every part.
     """
     bus = links["e1m_i2c0"]
     sda = _pin_by_peripheral(bus["pins"], "I2C2_SDA_C")
     scl = _pin_by_peripheral(bus["pins"], "I2C2_SCL_C")
+    bench = (bus.get("bench_validation") or {})
+    this_part_bench = bench.get(part)
+    if this_part_bench:
+        bench_text = f"input-enable + bias-pull-down: {this_part_bench}"
+    else:
+        e8_bench = bench.get("E8", "")
+        bench_text = (
+            "input-enable + bias-pull-down: bench-validated ONLY on the E8 "
+            f"-- {e8_bench} This board tree is for the {part}; that bench "
+            f"run has NOT been independently repeated on the {part}'s own "
+            "silicon (#2046, following the #1988 per-part-evidence "
+            "pattern).  The config below is still what this board tree "
+            "emits -- on_module_links.yaml is one file for every AEN SKU "
+            f"and no {part}-specific bench run exists yet to confirm or "
+            "override it -- but that silence is not proof either way."
+        )
+    # Reflowed to house-style comment width (metadata prose has no line
+    # breaks of its own to preserve, unlike the hand-wrapped paragraphs
+    # below) -- the raw bench_validation string can run well past 79
+    # columns unwrapped, same reason _c_comment() exists for evidence/risk
+    # strings elsewhere in this file.
+    bench_lines = [line + "\n" for line in _c_comment(bench_text, "\t")[1:-1]]
     return (
         "\t/*\n"
         f"\t * e1m_i2c0 = SoC {bus['peripheral']} function C: {sda['silicon_pad']} SDA / "
@@ -1184,12 +1224,25 @@ def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any]) -> str:
         "\t * the same pads also reach the EVK carrier's sensor bus once they leave\n"
         "\t * the module (docs/bring-up-aen.md Sec 5.1 -- two separate buses).\n"
         "\t *\n"
-        "\t * input-enable + bias-pull-down: bench-validated 2026-06-15 on the E8,\n"
-        "\t * matching Alif's own reference I2C pinctrl and the identical group in\n"
-        "\t * examples/aen/aen-i2c2-eeprom-regcheck / aen-eeprom-manifest.  Do NOT\n"
-        "\t * change bias-pull-down to bias-pull-up: upstream pinctrl_soc.h's\n"
-        "\t * driver-state-control encoding reads inverted vs the Alif pad hardware,\n"
-        "\t * and bias-pull-up gives a DEAD bus.\n"
+        + "".join(bench_lines) +
+        "\t *\n"
+        "\t * bias-pull-down really is a pull-down (DSC=2), and bias-pull-up really\n"
+        "\t * would be a pull-up (DSC=1) -- pinctrl_soc.h does NOT invert the two.\n"
+        "\t * Its ALIF_PINCTRL_BIAS_CFG() macro (soc/alif/ensemble/pinctrl_soc.h:44-48)\n"
+        "\t * maps bias-pull-up -> DSC=1 and bias-pull-down -> DSC=2 unconditionally,\n"
+        "\t * exactly as the field's own comment at :24 describes.  An earlier version\n"
+        "\t * of this comment (and of examples/aen/aen-eeprom-manifest's overlay) blamed\n"
+        "\t * bias-pull-up's reported dead bus on that encoding \"reading inverted vs\n"
+        "\t * the Alif pad hardware\" -- pinctrl_soc.h has no such inversion, so that\n"
+        "\t * explanation is RETRACTED (#2046), and the dead-bus report it was invented\n"
+        "\t * to explain is UNCONFIRMED, not disproven: nobody has re-run bias-pull-up\n"
+        "\t * here in a controlled bench trial since.  What IS established, matching\n"
+        "\t * the BRD_I2C group's own reasoning above: this bus, unlike BRD_I2C, has\n"
+        "\t * the EVK carrier's R137/R144 pull-ups stuffed, so a real internal\n"
+        "\t * pull-down is harmless -- the strong external pull-up dominates a weak\n"
+        "\t * internal one -- which is why bias-pull-down is bench-proven correct as\n"
+        "\t * emitted.  Do NOT change it to bias-pull-up on the strength of either\n"
+        "\t * reading; that needs a fresh register-level bench comparison, not a theory.\n"
         "\t */\n"
         f"\t{bus['pinctrl_group_label']}: {bus['pinctrl_group_label']} {{\n"
         "\t\tgroup0 {\n"
@@ -1508,6 +1561,36 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
         "# MCUboot itself builds with BOOTLOADER_MCUBOOT=n.)\n"
         "config ROM_START_OFFSET\n"
         "\tdefault 0x800 if BOOTLOADER_MCUBOOT\n"
+        "\n"
+        "# alp-sdk's own chips/tmp112/tmp112.c defines tmp112_init(), and upstream\n"
+        "# Zephyr's zephyr/drivers/sensor/ti/tmp112/tmp112.c defines the SAME symbol\n"
+        "# for the SAME part.  The two only collide at LINK time, and only when an\n"
+        "# app pulls in both -- which CONFIG_SENSOR=y does for free on this board,\n"
+        "# because the ti,tmp112 devicetree node below auto-selects upstream's\n"
+        "# driver regardless of whether the app uses it (#2043).  Board-scope the\n"
+        "# fix instead of leaving every app to rediscover it: default the upstream\n"
+        "# driver OFF here.  This is not a permanent no -- Kconfig.zephyr sources a\n"
+        "# board's Kconfig.defconfig ahead of subsys/Kconfig (see the LOG_MODE\n"
+        "# comment below for the same precedence fact), so this default only\n"
+        "# supplies a value when nothing else assigns the symbol.  An app that\n"
+        "# genuinely wants the upstream driver is therefore expected to win by\n"
+        "# setting CONFIG_TMP112=y explicitly in its own prj.conf -- ordinary\n"
+        "# Kconfig behaviour for a user assignment versus a `default` -- and that\n"
+        "# is exactly why examples/aen/aen-temp-sensor sets it by name.\n"
+        "#\n"
+        "# CONFIRMED ON THE REAL BOARD TARGET, not just by mechanism.  `west build\n"
+        "# -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "# examples/aen/aen-temp-sensor` links\n"
+        "# zephyr/drivers/sensor/ti/tmp112/libdrivers__sensor__ti__tmp112.a (step\n"
+        "# 139/148), and the resolved .config carries CONFIG_TMP112=y,\n"
+        "# CONFIG_SENSOR=y and CONFIG_DT_HAS_TI_TMP112_ENABLED=y with this board's\n"
+        "# `default n` in force -- the explicit CONFIG_TMP112=y in\n"
+        "# examples/aen/aen-temp-sensor/prj.conf really does win, on silicon-\n"
+        "# targeted Kconfig, not only in theory.  If that build ever fails on\n"
+        "# CONFIG_TMP112, this derivation is what needs revisiting, not the\n"
+        "# build.\n"
+        "config TMP112\n"
+        "\tdefault n\n"
         "\n"
         + _AEN_LOG_MODE_DEFAULT +
         f"endif # BOARD_{board_sym}\n"
@@ -2595,7 +2678,7 @@ def emit_zephyr_board(
         aen_dts_relpath = f"{dir_name}/{basename}.dts"
         files[aen_pinctrl_relpath] = _aen_pinctrl_dtsi(
             role, sku, rx_row, tx_row, _aen_family_display(soc_spec),
-            on_module_links)
+            on_module_links, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(
             uart_node, rx_row, tx_row, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
