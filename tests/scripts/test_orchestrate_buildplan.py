@@ -43,6 +43,45 @@ from alp_orchestrate import load_board_yaml  # noqa: E402
 # ---------------------------------------------------------------------
 
 
+# Top-level `emit_build_plan` envelope keys whose value is read from ambient
+# process/repository state AT CALL TIME rather than derived from the
+# `project` / `board_yaml` / `build_root` inputs a comparison test varies.
+# Verified by tracing `emit_build_plan`'s full call graph (buildplan.py plus
+# every helper it reaches in headers.py / kconfig.py / secure.py /
+# orchestrator.py) for subprocess/time/env/hostname reads -- the only such
+# call site in the whole reachable set is `buildplan._sdk_commit`.
+#
+#   * `sdkCommit` -- `_sdk_commit()` shells out to a live `git -C <repo>
+#     rev-parse --short HEAD` on every single call.  Any concurrent commit,
+#     rebase, or branch switch in the same worktree between two calls moves
+#     it, with nothing to do with either call's inputs -- this is the exact
+#     2026-09-06 failure (issue #2014):
+#     `{'sdkCommit': '3dadd4584'} != {'sdkCommit': 'a284f7647'}`, every other
+#     key byte-identical.  Whole-envelope equality across two calls
+#     therefore asserts a property ("nothing else touched the checkout
+#     meanwhile") this test was never meant to guard.
+#
+# `sdkVersion` (`_sdk_commit`'s neighbour, `_sdk_version()`) is deliberately
+# NOT in this set even though it is also a call-time repository read: it
+# comes from `metadata/sdk_version.yaml` and only moves on a deliberate
+# release-version bump (`scripts/bump_version.py`), never as a side effect
+# of ordinary concurrent commit/rebase/branch-switch activity -- the same
+# asymmetry `scripts/check_emit_snapshots.py::_normalize_provenance` already
+# encodes for the golden-snapshot gate (it tokenises `sdkCommit` but
+# "deliberately left [sdkVersion] real"). Adding it here too would be an
+# over-broad exclusion, not a verified one: it would mask a real regression
+# where `sdkVersion` genuinely goes wrong.
+_ENV_DERIVED_ENVELOPE_FIELDS = frozenset({"sdkCommit"})
+
+
+def _without_env_derived_fields(plan: dict) -> dict:
+    """A copy of a parsed build-plan envelope minus `_ENV_DERIVED_ENVELOPE_
+    FIELDS` -- the single helper every whole-envelope comparison test in
+    this file must route through, so the exclusion can never silently
+    drift out of lockstep between call sites."""
+    return {k: v for k, v in plan.items() if k not in _ENV_DERIVED_ENVELOPE_FIELDS}
+
+
 V2N_BOOT_MCUBOOT = """
 som:
   sku: E1M-V2N101
@@ -262,7 +301,12 @@ cores:
 
 
 def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
-    """Spec parity with the other emits: byte-identical re-runs."""
+    """Spec parity with the other emits: byte-identical re-runs, minus
+    `_ENV_DERIVED_ENVELOPE_FIELDS` (issue #2014) -- a concurrent commit
+    landing in the same worktree between the two calls below legitimately
+    moves `sdkCommit`, which has nothing to do with THIS emitter's own
+    determinism for a fixed set of inputs, the property under test."""
+    import json as _json
     from alp_orchestrate import emit_build_plan
 
     path = _write_board(tmp_path, V2N_HAPPY)
@@ -270,7 +314,8 @@ def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
                             build_root=Path("build"))
     out_b = emit_build_plan(load_board_yaml(path), board_yaml=path,
                             build_root=Path("build"))
-    assert out_a == out_b
+    assert (_without_env_derived_fields(_json.loads(out_a))
+            == _without_env_derived_fields(_json.loads(out_b)))
 
 
 def test_emit_build_plan_writes_nothing(
@@ -667,7 +712,15 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     directory the emitting process happens to be running from --
     the #596 repro (`west build`'s target used to fall back to the
     repo root because the CWD-anchored resolve missed the app dir and
-    the parent CMakeLists.txt fallback silently matched the root)."""
+    the parent CMakeLists.txt fallback silently matched the root).
+
+    Compared minus `_ENV_DERIVED_ENVELOPE_FIELDS` (issue #2014): those keys
+    read live process/repository state (see that constant's comment) that a
+    concurrent commit/rebase/branch-switch in the same worktree can change
+    between the two `emit_build_plan()` calls below, for reasons that have
+    nothing to do with CWD -- the property this test exists to pin. Every
+    path, token, and slice this test actually cares about is still compared
+    byte-for-byte via plain dict equality."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -689,7 +742,14 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     plan_other_dir = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=Path("build")))
 
-    assert plan_same_dir == plan_other_dir
+    assert (_without_env_derived_fields(plan_same_dir)
+            == _without_env_derived_fields(plan_other_dir))
+    # The excluded field is narrowly checked instead: present (a short hex
+    # commit or None), in both envelopes -- never asserted equal, since a
+    # legitimate concurrent commit between the two calls is exactly the
+    # case this exclusion exists to tolerate.
+    for plan in (plan_same_dir, plan_other_dir):
+        assert plan["sdkCommit"] is None or isinstance(plan["sdkCommit"], str)
 
     m33 = next(s for s in plan_other_dir["slices"] if s["coreId"] == "m33_sm")
     # Correctly anchored on the project dir -- NOT the unrelated CWD, and
