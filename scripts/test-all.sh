@@ -86,10 +86,13 @@
 #   --quick           skip twister + Doxygen (the slow stages)
 #
 # Environment:
-#   ALP_TWISTER_JOBS  cap twister's concurrent BUILD jobs (passed through as
-#                     `-j`).  Unset = twister's own default, which is one job
-#                     per core.  Set this on a shared or memory-tight machine:
-#                     see the OOM note on stage_twister below.
+#   ALP_TWISTER_JOBS  cap twister's concurrent TEST INSTANCES (passed through
+#                     as `-j`).  Unset = twister's own default, one per core.
+#                     NOTE this alone is NOT enough -- each instance runs its
+#                     own ninja at full core parallelism underneath, so the
+#                     real compiler count is this value TIMES the core count.
+#                     The stage caps that inner build too; see the OOM note on
+#                     stage_twister below.
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
@@ -349,7 +352,22 @@ stage_twister() {
     twister_jobs=()
     if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
         twister_jobs=(-j "${ALP_TWISTER_JOBS}")
-        echo "stage_twister: capping twister at ${ALP_TWISTER_JOBS} concurrent build job(s) (ALP_TWISTER_JOBS)"
+
+        # Capping twister ALONE IS NOT ENOUGH, and believing it was cost a
+        # second near-OOM.  `-j` bounds concurrent TEST INSTANCES; each instance
+        # then runs its own ninja, which defaults to the full core count.  So
+        # the real concurrent-compiler count is ALP_TWISTER_JOBS x nproc.
+        # Measured on this 20-core host with ALP_TWISTER_JOBS=4: 78 live cc1plus
+        # processes, 27 of 31 GB consumed, load average 152 -- the run had to be
+        # killed to avoid repeating the OOM reboot the cap was added to prevent.
+        #
+        # CMAKE_BUILD_PARALLEL_LEVEL is what bounds the inner build (it is also
+        # what the bench runner uses for the same reason).  Default it to 2 so
+        # the product stays modest, and let a caller override it deliberately.
+        export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+        echo "stage_twister: capping twister at ${ALP_TWISTER_JOBS} concurrent test instance(s) (ALP_TWISTER_JOBS)," \
+             "each building with CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL}" \
+             "-- up to $((ALP_TWISTER_JOBS * CMAKE_BUILD_PARALLEL_LEVEL)) concurrent compilers"
     fi
 
     python3 "${ZEPHYR_BASE}/scripts/twister" \
