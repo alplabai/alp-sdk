@@ -63,6 +63,31 @@ _NEEDS_BASH = pytest.mark.skipif(
            "shell and cannot be exercised here",
 )
 
+def _dir_still_accepts_a_new_file(directory: Path) -> bool:
+    """True when `directory` takes a new entry despite having been chmod'ed
+    read-only -- i.e. the "unwritable directory" precondition did NOT hold.
+
+    Same discipline as _bash_can_run_a_script() above: probe by DOING the
+    thing, never by trusting the platform to honour the mode bits. On
+    Windows `os.chmod` only toggles FILE_ATTRIBUTE_READONLY, and that
+    attribute does not stop a directory from accepting new entries -- a
+    `chmod(0o500)` directory there reads back 0o555, `os.access(W_OK)`
+    returns True, and `mktemp` inside it succeeds. A test that needs the
+    directory to refuse a write has no precondition on such a host and must
+    skip, not fail (alp-sdk#2055).
+    """
+    probe = directory / ".alp-writability-probe"
+    try:
+        probe.touch()
+    except OSError:
+        return False
+    try:
+        probe.unlink()
+    except OSError:
+        pass
+    return True
+
+
 # The verbatim JLinkExe transcript from the real bench failure (alp-sdk#1318),
 # trimmed. Note it ends "Script processing completed." and JLinkExe exits 0 --
 # that is exactly why the exit status could not be used.
@@ -1016,11 +1041,21 @@ def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
     code (101368cdf, fixed path + `rm -f`: also rc=5, via a bare "Permission
     denied" from bash's own `>` redirect, never this guard's own message).
     Assert the CAUSE: this fix's specific `mktemp`-failure abort message,
-    not present in either of those."""
+    not present in either of those.
+
+    Only runs where an unwritable directory can actually be created: see
+    _dir_still_accepts_a_new_file() and alp-sdk#2055 for why Windows cannot
+    establish that precondition and skips instead."""
     unwritable = tmp_path / "unwritable-tmp"
     unwritable.mkdir()
     unwritable.chmod(0o500)
     try:
+        if _dir_still_accepts_a_new_file(unwritable):
+            pytest.skip(
+                "chmod cannot make a directory refuse a new entry on this "
+                f"host (os.name={os.name!r}), so this test's unwritable-TMPDIR "
+                "precondition does not hold here -- alp-sdk#2055"
+            )
         res = _call_atoc_guard(
             tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC, tmpdir=unwritable
         )
