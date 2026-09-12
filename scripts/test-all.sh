@@ -84,6 +84,12 @@
 #                     (No --target = the historical "full" run: every stage
 #                     except the main-only ABI strict diff.)
 #   --quick           skip twister + Doxygen (the slow stages)
+#
+# Environment:
+#   ALP_TWISTER_JOBS  cap twister's concurrent BUILD jobs (passed through as
+#                     `-j`).  Unset = twister's own default, which is one job
+#                     per core.  Set this on a shared or memory-tight machine:
+#                     see the OOM note on stage_twister below.
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
@@ -329,7 +335,25 @@ stage_twister() {
     # a warning like -Werror=comment ('/*' inside a comment) fails there;
     # forcing CONFIG_COMPILER_WARNINGS_AS_ERRORS=y here catches that class
     # locally instead of on the PR (bit examples/.../u8g2 main.c, #650).
+    # Concurrency cap.  Twister defaults to ONE BUILD JOB PER CORE and each build
+    # runs its own parallel ninja underneath, so the real compiler count is well
+    # above the core count.  Measured on the 20-core / 31 GB bench gateway: a
+    # default-parallelism run OOM-killed the machine, the kernel reaping cc1plus
+    # repeatedly ("Out of memory: Killed process ... (cc1plus) ...
+    # anon-rss:425060kB") until the box had to be rebooted -- which on THAT
+    # machine also takes the attached board farm down with it.
+    #
+    # Unset keeps twister's default, so CI is unchanged.  Set ALP_TWISTER_JOBS
+    # on a shared or memory-tight host; roughly one job per 2 GB of RAM is a
+    # safe starting point, and lower still if anything else heavy is running.
+    twister_jobs=()
+    if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
+        twister_jobs=(-j "${ALP_TWISTER_JOBS}")
+        echo "stage_twister: capping twister at ${ALP_TWISTER_JOBS} concurrent build job(s) (ALP_TWISTER_JOBS)"
+    fi
+
     python3 "${ZEPHYR_BASE}/scripts/twister" \
+        "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
         --testsuite-root "${REPO_ROOT}/tests/console" \
