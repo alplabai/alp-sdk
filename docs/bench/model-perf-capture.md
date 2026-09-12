@@ -2,7 +2,7 @@
 # Capturing a tier-2 model-perf point
 
 How to add one bench-measured performance point to
-`metadata/model_perf/` once the three blockers listed below (see
+`metadata/model_perf/` once the two blockers listed below (see
 "Blockers -- read this before you spend bench time") clear. Written
 **before** any bench time is spent on tier 2
 (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
@@ -21,9 +21,12 @@ under the published tree (`scripts/validate_metadata.py` refuses any
 
 ## Blockers — read this before you spend bench time
 
-Three open questions gate the *data*, not the contract landed here.
+Two open questions gate the *data*, not the contract landed here.
 None is solved by this doc; each is called out so a capture session
-doesn't discover it mid-bench.
+doesn't discover it mid-bench. (A third blocker, the lack of a
+latency accessor, used to be listed here; it closed when
+`alp_inference_last_invoke_latency_us()` landed in #1541 — see the
+Recipe's step 4 below for how a capture uses it.)
 
 1. **The vela profile question.** `vela` picks its OWN built-in
    default system/memory profile (`Ethos_U85_SYS_DRAM_Mid` /
@@ -42,14 +45,6 @@ doesn't discover it mid-bench.
    that region is SRAM- rather than MRAM/flash-resident. A bench point
    captured before this is resolved is recording a real number, just
    not the whole SRAM picture; note that in `capture.notes`.
-3. **No timing harness.** No AEN example times an inference, and
-   `<alp/inference.h>` exposes no latency accessor — the first capture
-   campaign has to lift one (start an inference, stop it, read a
-   monotonic timer around the call) before it can fill any
-   `perf.latency_ms` field. Until then, a point may legitimately omit
-   `perf.latency_ms` entirely and record fit/SRAM alone; the schema
-   allows this on purpose (see `model-perf-v1.schema.json`'s
-   description on that field).
 
 ## What a point is keyed on
 
@@ -105,11 +100,79 @@ different measurements and get two different files; see
    (`scripts/alp_model/adapters/ethos_u.py`'s `_parse_vela_summary()`
    does `sram_bytes // 1024`), so pasting either straight into
    `perf.req_sram_kib` reproduces this exact rejection on real data.
-4. **Flash + run the timed harness** (once it exists — blocker 3) on
-   the real SoM, ≥ 30 back-to-back inferences after any warm-up runs
-   are discarded, and compute `mean` / `p50` / `p95` / `stdev` /
-   `runs` from that sample. `scripts/validate_metadata.py` refuses
+4. **Flash the target and time it with `alp_inference_last_invoke_latency_us()`**
+   (declared in `include/alp/inference.h`) on the real SoM. For each
+   timed run, call `alp_inference_invoke()` and check ITS OWN return
+   first — proceed to read the accessor only when `alp_inference_invoke()`
+   itself returned `ALP_OK`. On `ALP_ERR_TIMEOUT` (NPU stuck) or
+   `ALP_ERR_IO` (NPU error) the invoke did NOT succeed, and the
+   accessor's stored value is UNCHANGED: `alp_inference_last_invoke_latency_us()`
+   still reports `ALP_OK`, but with the PREVIOUS successful invoke's
+   duration, not this run's (`include/alp/inference.h`'s doc on the
+   accessor: a failed invoke "does not update the stored value").
+   Recording that reading as this run's sample silently duplicates an
+   old value and drops exactly the invoke that blew its timing budget —
+   the one `p95` exists to catch — biasing `p95` low, and neither the
+   run-count floor nor the `p95 >= mean` check can see it. Discard a
+   failed invoke instead (it does not count toward the sample) and
+   re-run it rather than recording anything for it.
+
+   Once `alp_inference_invoke()` has returned `ALP_OK`, read
+   `alp_inference_last_invoke_latency_us(inf, &out_us)` immediately —
+   the accessor reports only the LAST successful invoke (no history, no
+   accumulated statistics), so read it once per invoke before calling
+   `alp_inference_invoke()` again. Run a handful of warm-up invokes
+   first and discard their readings, then take ≥ 30 back-to-back GOOD
+   (`ALP_OK` invoke, `ALP_OK` accessor read) timed invokes and compute
+   `mean` / `p50` / `p95` / `stdev` / `runs` from that sample.
+
+   `out_us` is a `uint64_t` in whole MICROSECONDS, rounded to nearest.
+   Convert to the schema's `latency_ms.*` fields (MILLISECONDS) with a
+   **floating-point** division by `1000.0`, and keep the fractional
+   result — do NOT integer-divide `out_us / 1000` in C, which truncates
+   to whole milliseconds. Worked example, matching step 3's standard of
+   care above: a 1500 us invoke is `1500 / 1000.0 = 1.5` ms, recorded as
+   `1.5`; the same value integer-divided is `1500 / 1000 = 1` (C's
+   `uint64_t` division truncates), a 33% under-report that still passes
+   every gate — `mean` / `p50` / `p95` are schema-typed `number` with
+   only a positivity floor and `stdev` a `number` with only a
+   non-negativity floor (`metadata/schemas/model-perf-v1.schema.json`'s
+   `latency_ms` block), so a whole-millisecond value validates cleanly,
+   and a tight distribution that quantizes to one repeated integer
+   collapses `stdev` to `0`, still schema-valid; only a sub-millisecond
+   invoke fails loudly (rounding to `0`, which the fields' positivity
+   floor rejects). Keep every `latency_ms.*` value as the true
+   fractional-millisecond quotient, never rounded to a whole
+   millisecond.
+
+   Check `alp_inference_last_invoke_latency_us()`'s own `alp_status_t`
+   return too: `ALP_ERR_NOT_READY` means the handle is closed or no
+   invoke has yet completed with `ALP_OK` (a warm-up/setup bug, not a
+   real measurement of 0); `ALP_ERR_NOSUPPORT` means the target is a
+   stub build with no inference backend compiled in at all;
+   `ALP_ERR_INVAL` means `out_us` itself was NULL (harmless in this
+   recipe, which always passes `&out_us`). None of the three is a value
+   to record. `ALP_OK` is NECESSARY but NOT SUFFICIENT for a
+   trustworthy reading: on a target compiled at 60 MHz or below under
+   stock Kconfig, or any target without
+   `CONFIG_TIMER_HAS_64BIT_CYCLE_COUNTER`, the underlying hardware cycle
+   counter wraps modulo 2^32 and the accessor has no way to detect that
+   wrap — it reports `ALP_OK` with a plausible-looking but too-small
+   duration, not an error (`include/alp/inference.h`'s doc on the
+   accessor). This recipe's own targets (`ethos_u` / `dxcom` / DRP-AI /
+   `cpu`, not specifically the AEN M55 at 400 MHz with the 64-bit
+   counter) should confirm which case applies before trusting a
+   suspiciously fast reading. `scripts/validate_metadata.py` refuses
    fewer than 30 runs and refuses a `p95` below `mean`.
+
+   Do not copy the timing pattern in
+   `examples/camera-vision/ai-object-detection-realtime/src/main.c:227-232`
+   or `examples/camera-vision/ai-camera-viewer/src/inference_loop.c:112-122`
+   as a model for this step — both predate this accessor, hand-roll
+   `k_cycle_get_32()` / `k_cyc_to_us_floor32()` (the floor-truncation
+   bias #1541 removes), and both discard `alp_inference_invoke()`'s
+   status via `(void)alp_inference_invoke(inf)`, which is exactly the
+   discarded-status defect this step exists to avoid.
 5. **Fill `capture`**: `date` (ISO-8601, the day of the run),
    `operator`, `bench_id` (the physical rig, e.g. `e1m-aen-evk-01`),
    and `notes` for anything a reader trusting the number should know
