@@ -107,6 +107,13 @@ static struct {
 	 * (#1382 timeout-accounting regression). */
 	uint32_t wifi_status_attempt_count;
 
+	/* Every GET_DIAG_INFO request-header phase clocked, fault-injected or
+	 * not -- the cc3501e_wifi_ap_start() analogue of wifi_status_attempt_
+	 * count above, lets a test count how many role-confirmation attempts
+	 * that loop made for a given timeout_ms (#1985 timeout-accounting
+	 * regression, the AP_START sibling of #1382). */
+	uint32_t diag_info_attempt_count;
+
 	/* #1435 entry-clean ordering: every opcode dispatched, in order.
 	 * slave.cmd alone only ever holds the LAST opcode dispatched, which
 	 * cannot prove WIFI_DISCONNECT landed BEFORE WIFI_CONNECT_STA -- this
@@ -168,6 +175,14 @@ static uint8_t g_ota_pending = ALP_CC3501E_OTA_PENDING_STAGED;
  * (models a transport-level fault, not a framing desync needing a resync).
  * Cleared by slave_reset(). */
 static uint32_t g_status_io_down_remaining;
+
+/* #1985 mutant control, the GET_DIAG_INFO analogue of
+ * g_status_io_down_remaining above: while > 0, a whole GET_DIAG_INFO
+ * transaction's REQUEST HEADER phase fails outright, letting a test wedge
+ * cc3501e_wifi_ap_start()'s role-confirmation poll exactly like
+ * g_status_io_down_remaining wedges cc3501e_wifi_connect()'s WIFI_STATUS
+ * poll.  Cleared by slave_reset(). */
+static uint32_t g_diag_io_down_remaining;
 
 /* #1371 mutant controls for cc3501e_reset()'s wire-protocol compatibility
  * gate.  Both cleared by slave_reset() so every other test keeps seeing the
@@ -234,6 +249,7 @@ static void slave_reset(void)
 	g_diag_role                        = ALP_CC3501E_ROLE_WIFI_STA;
 	g_ota_pending                      = ALP_CC3501E_OTA_PENDING_STAGED;
 	g_status_io_down_remaining         = 0u;
+	g_diag_io_down_remaining           = 0u;
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
@@ -726,6 +742,14 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS &&
 	    g_status_io_down_remaining > 0u) {
 		g_status_io_down_remaining--;
+		return ALP_ERR_IO;
+	}
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_GET_DIAG_INFO) {
+		slave.diag_info_attempt_count++;
+	}
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_GET_DIAG_INFO &&
+	    g_diag_io_down_remaining > 0u) {
+		g_diag_io_down_remaining--;
 		return ALP_ERR_IO;
 	}
 	/* #1371: fail a GET_VERSION transaction outright -- models the CC3501E's
@@ -1849,6 +1873,35 @@ ZTEST(cc3501e_host_driver, test_wifi_ap_start_confirms_via_diag_role_1696)
 	zassert_equal(slave.ap_start_submit_count,
 	              1u,
 	              "confirmation must poll a non-disturbing opcode, never re-submit AP_START");
+}
+
+/* #1985: cc3501e_wifi_ap_start()'s role-confirmation loop replaces its
+ * manual `remaining -=` budget with a real alp_uptime_ms() deadline (same
+ * shape as poll_by_repeat()'s #1953 fix). Wedge GET_DIAG_INFO permanently
+ * (g_diag_io_down_remaining = UINT32_MAX, the ap_start analogue of
+ * g_status_io_down_remaining above) and assert the EXACT number of
+ * GET_DIAG_INFO attempts the confirmation loop makes over a 200 ms budget:
+ * ceil(200 / CC3501E_WIFI_STATUS_POLL_GAP_MS) + 1 = ceil(200/50)+1 = 5 --
+ * this loop makes no read before entering the loop (unlike
+ * cc3501e_wifi_connect()'s separate #1435 entry-clean check), so its count
+ * has a clean closed form with no off-by-one.
+ *
+ * This is the mutation-proof for this fix: reverting the loop to its
+ * pre-fix `remaining -= attempt_cost` / `remaining -= gap` shape (100 ms
+ * phantom CC3501E_REQ_TMO_MS debit per failed read, on top of the 50 ms
+ * real gap) makes only 2 attempts for this same 200 ms budget, which
+ * reddens this assertion. */
+ZTEST(cc3501e_host_driver, test_wifi_ap_start_bounds_diag_attempts_on_wedged_transport_1985)
+{
+	g_diag_io_down_remaining = UINT32_MAX;
+	alp_status_t s           = cc3501e_wifi_ap_start(&fw, "AP", 0u, "", 200u);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently wedged GET_DIAG_INFO -> bounded TIMEOUT");
+	zassert_equal(slave.diag_info_attempt_count,
+	              5u,
+	              "GET_DIAG_INFO attempts must match ap_start()'s own real-deadline cadence over "
+	              "its 200 ms budget (ceil(200/50)+1 = 5), not the pre-#1985 phantom-debited count "
+	              "(got %u attempts)",
+	              slave.diag_info_attempt_count);
 }
 
 /* #1385 at the transport layer, the direct analogue of
