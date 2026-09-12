@@ -333,6 +333,145 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 	    fw, TOUR_WIFI_SSID, (uint8_t)TOUR_WIFI_SECURITY, TOUR_WIFI_PASS, TOUR_CONNECT_TIMEOUT);
 	if (s != ALP_OK) {
 		printf("[tour] WIFI_CONNECT -> %d (no AP in range? wrong PSK?)\n", (int)s);
+
+		/*
+		 * ISSUE #2035 -- the decisive read, and the reason this branch got
+		 * three extra reads instead of just a `return`.
+		 *
+		 * The bridge firmware has TWO writers of ALP_CC3501E_WIFI_FAIL_TIMEOUT
+		 * and the host cannot tell them apart -- both latch the identical
+		 * status, which maps here to the identical ALP_ERR_TIMEOUT:
+		 *   1. the 30 s association wait expiring (a genuine L2 failure), and
+		 *   2. a 10 s DHCP-lease gate that runs AFTER a successful
+		 *      WLAN_EVENT_CONNECT, when the interface still has no address
+		 *      (present in the shipped v0.8.0 image: two FAIL_TIMEOUT sites,
+		 *      the second right after a 50-iteration/200 ms DHCP poll).
+		 * Bench-measured: this call returned -4 at 14.45-16.87 s against a
+		 * 70 s budget that verifiably reached the driver -- ~5 s of
+		 * association plus the fixed 10 s DHCP poll fits that bracket
+		 * exactly; the 30 s path does not.  So the radio may well have
+		 * associated and the real failure is layer 3 -- plausible at
+		 * -75 dBm on an on-board antenna, where the DHCP retransmit backoff
+		 * (0, 2, 6, 14 s) only fits three attempts inside a 10 s window.
+		 *
+		 * These reads change NO behaviour and NO timeout -- they only look
+		 * harder at what already happened:
+		 *   1. Signal strength: a plausible dBm means the radio associated
+		 *      at L2 (the failure is L3); unavailable means it never did.
+		 *   2. Address, polled once a second for ~30 s: a lease arriving
+		 *      late is the single most informative outcome -- it would mean
+		 *      the firmware's 10 s DHCP gate is simply too short at this
+		 *      link budget, and that the association works.
+		 *   3. The diagnostic reply's reserved[0] byte: the last Wi-Fi event
+		 *      ID the firmware's callback saw.  CONNECTED supports the
+		 *      address-lease reading; DISCONNECTED means it associated and
+		 *      then dropped; SCAN_RESULT means the wait was released by a
+		 *      stray event and the association never happened.
+		 */
+
+		/* 1. Signal strength.  Wait at least 1 s before reading -- the
+		 * firmware's own comment warns this read can block if issued
+		 * immediately after associating -- and by now the 10 s DHCP window
+		 * has already closed too, so this is never read inside it either. */
+		alp_delay_ms(1000u);
+		int8_t       rssi       = 0;
+		alp_status_t rssi_s     = cc3501e_wifi_rssi(fw, &rssi);
+		bool         associated = (rssi_s == ALP_OK);
+		if (associated) {
+			printf("[tour] POST-FAIL RSSI -> %d dBm (status %d) -- radio IS associated at L2\n",
+			       (int)rssi,
+			       (int)rssi_s);
+		} else {
+			printf("[tour] POST-FAIL RSSI -> status %d (no reading) -- radio likely never "
+			       "associated\n",
+			       (int)rssi_s);
+		}
+
+		/* 2. Address, polled once a second for ~30 s.  A late lease is the
+		 * single most informative outcome available -- see the comment
+		 * above. */
+		bool late_lease = false;
+		for (unsigned i = 0u; i < 30u; ++i) {
+			uint8_t      ip[4] = { 0 };
+			alp_status_t ip_s  = cc3501e_wifi_get_ip(fw, ALP_CC3501E_WIFI_IFACE_STA, ip);
+			if (ip_s == ALP_OK) {
+				printf("[tour] POST-FAIL IP poll [%u s] -> %u.%u.%u.%u -- LATE LEASE\n",
+				       i + 1u,
+				       ip[0],
+				       ip[1],
+				       ip[2],
+				       ip[3]);
+				late_lease = true;
+				break;
+			}
+			printf("[tour] POST-FAIL IP poll [%u s] -> status %d\n", i + 1u, (int)ip_s);
+			alp_delay_ms(1000u);
+		}
+
+		/* 3. The diagnostic reply's reserved[0] -- low byte of the last
+		 * Wi-Fi event ID the firmware's callback saw (0 = none since reset).
+		 * tour_diag() above already calls this opcode but never prints this
+		 * byte -- print it raw and decoded here. */
+		alp_cc3501e_diag_info_t diag;
+		alp_status_t            diag_s   = cc3501e_diag_info(fw, &diag);
+		bool                    have_evt = (diag_s == ALP_OK);
+		uint8_t                 evt      = have_evt ? diag.reserved[0] : 0u;
+		if (have_evt) {
+			const char *evt_name;
+			switch (evt) {
+			case 0u:
+				evt_name = "none since reset";
+				break;
+			case ALP_CC3501E_EVT_WIFI_SCAN_RESULT:
+				evt_name = "SCAN_RESULT";
+				break;
+			case ALP_CC3501E_EVT_WIFI_CONNECTED:
+				evt_name = "CONNECTED";
+				break;
+			case ALP_CC3501E_EVT_WIFI_DISCONNECTED:
+				evt_name = "DISCONNECTED";
+				break;
+			default:
+				evt_name = "other/non-Wi-Fi";
+				break;
+			}
+			printf("[tour] POST-FAIL diag reserved[0] -> 0x%02x (%s)\n", evt, evt_name);
+		} else {
+			printf("[tour] POST-FAIL diag read -> status %d (no event byte available)\n",
+			       (int)diag_s);
+		}
+
+		/* Plain reading.  Any leg that itself failed to read makes the run
+		 * inconclusive -- never inferred from a read that did not happen. */
+		if (!associated && !late_lease && !have_evt) {
+			printf("[tour] POST-FAIL READING -> inconclusive: the reads themselves failed\n");
+		} else if (late_lease) {
+			printf("[tour] POST-FAIL READING -> a DHCP lease arrived after the connect call "
+			       "gave up: the firmware's 10 s DHCP gate is too short at this link budget, "
+			       "association DOES work\n");
+		} else if (associated && have_evt && evt == ALP_CC3501E_EVT_WIFI_CONNECTED) {
+			printf("[tour] POST-FAIL READING -> radio associated (RSSI %d dBm, last event "
+			       "CONNECTED) and no lease arrived in the poll window: an L3/DHCP failure, "
+			       "not an association failure\n",
+			       (int)rssi);
+		} else if (associated && have_evt && evt == ALP_CC3501E_EVT_WIFI_DISCONNECTED) {
+			printf("[tour] POST-FAIL READING -> radio associated then dropped (RSSI reading + "
+			       "last event DISCONNECTED): an association that did not hold, not one that "
+			       "never happened\n");
+		} else if (!associated && have_evt && evt == ALP_CC3501E_EVT_WIFI_SCAN_RESULT) {
+			printf("[tour] POST-FAIL READING -> no RSSI and the last event was a stray "
+			       "SCAN_RESULT: the wait was released by that event, association never "
+			       "happened\n");
+		} else if (!associated) {
+			printf("[tour] POST-FAIL READING -> no RSSI reading: consistent with a genuine L2 "
+			       "association failure\n");
+		} else {
+			printf("[tour] POST-FAIL READING -> mixed signals (RSSI %d dBm, event 0x%02x): "
+			       "inconclusive\n",
+			       (int)rssi,
+			       evt);
+		}
+
 		return;
 	}
 	printf("[tour] WIFI_CONNECT -> associated\n");
