@@ -240,8 +240,17 @@ static int sdhc_dwc_set_voltage(const struct device *dev,
 		regs->DWC_SDHC_CLK_CTRL_R |= DWC_SDHC_CLK_EN_Msk;
 		k_busy_wait(1000);
 
-		while (!(regs->DWC_SDHC_PSTATE_REG & DWC_SDHC_CMD_LINE_LVL_UP_Msk) &&
-				--timeout) {
+		/*
+		 * Per the SD Host Controller voltage-switch sequence, success is
+		 * confirmed by ALL FOUR of DAT[3:0] reading high -- not CMD, and
+		 * not just one of the four (#2042). A prior version of this poll
+		 * used a macro named for the CMD line that actually pointed at
+		 * bit 23 (DAT3 alone), so it accepted a switch where DAT0..DAT2
+		 * never came up.
+		 */
+		while (((regs->DWC_SDHC_PSTATE_REG & DWC_SDHC_DAT_LINE_LVL_Msk) !=
+		        DWC_SDHC_DAT_LINE_LVL_Msk) &&
+		       --timeout) {
 			k_busy_wait(1);
 		}
 		if (!timeout) {
