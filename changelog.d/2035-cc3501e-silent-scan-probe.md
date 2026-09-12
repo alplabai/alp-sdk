@@ -32,6 +32,30 @@ starts, rather than let a silent bus after a failed submit be misread as
 evidence either way. Needs no Wi-Fi credentials — a scan takes none, and
 that is part of why it is the right probe.
 
+**Measured on silicon, and it answered the question it was built for.** Run
+against the image carrying the role-up quiesce bracket: the submit was
+acknowledged, and after the 25 s of silence the confirming `PING` never
+answered — the bus stayed dead through roughly 70 s in total. So a silent
+host does not rescue that build, which rules out a race against host
+traffic as the whole story. Run against the published v0.8.0 image, same
+app, same host build, same core, same steps: the submit was acknowledged,
+the `PING` answered on the first attempt after the silence, and the second
+scan returned records.
+
+| | with the role-up quiesce bracket | published v0.8.0 |
+|---|---|---|
+| `PING` after the 25 s silence | never answered | ok, first attempt |
+| second scan | no records | `ALP_OK`, records returned |
+
+Scanning is stable on the published image: five networks, identical set and
+ordering across four cold-booted runs, per-network signal spread no worse
+than 3 dB. Two cautions from those runs, both worth more than the count. A
+**single** scan is not enough to conclude a network is absent — one run
+returned four records and omitted a fifth that four later runs all reported
+at a stable level. And the **channel** field is the least trustworthy part
+of a record: it moved between cold-identical runs while the matching signal
+strength moved 2 dB.
+
 Build-only bench app for `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`
 (same target, overlay memory placement, and `CONFIG_DCACHE=n` as
 `aen-cc3501e-command-sweep`, for the same SPI1 FIFO-refill timing reason).
