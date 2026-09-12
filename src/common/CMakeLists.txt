@@ -42,14 +42,19 @@ if(NOT DEFINED ZEPHYR_BASE)
         # link-complete alp_hw_info_read/alp_hw_info_assert_matches_build
         # surface Zephyr has (#593).
         ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr/hw_info_zephyr.c
-        # <alp/temperature.h> -- on-module ambient-temperature read.
-        # Despite the `_zephyr` filename it is OS-agnostic like the
-        # hw_info reader just above: every Zephyr symbol is behind
-        # `#if defined(CONFIG_SENSOR)`, which plain CMake never defines,
-        # so this takes the documented ALP_ERR_NOSUPPORT branch here too
-        # (#2066).
-        ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr/temperature_zephyr.c
     )
+    # <alp/temperature.h>'s plain-CMake (baremetal/Yocto) NOSUPPORT stub.
+    # UNLIKE the hw_info reader just above, the real implementation
+    # (src/zephyr/temperature_zephyr.c) is genuinely Zephyr-only -- it
+    # binds through the upstream Zephyr sensor API against a devicetree
+    # alias, which plain CMake has no equivalent of at all -- so this
+    # class gets a real per-OS split instead of one shared TU (#2066
+    # review: a `_zephyr`-suffixed file compiled everywhere "by accident"
+    # is exactly the trap a stub avoids). Each OS backend
+    # (src/baremetal/CMakeLists.txt, src/yocto/CMakeLists.txt) lists this
+    # stub alongside its siblings (stub_rtc.c, stub_wdt.c, ...); it is
+    # NOT added here so a future OS backend must opt in explicitly, same
+    # as every other stub_*.c.
     target_include_directories(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
     )

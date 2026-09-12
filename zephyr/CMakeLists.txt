@@ -1029,10 +1029,14 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/hw_info_zephyr.c)
 
 # <alp/temperature.h> -- on-module ambient-temperature read.  No dedicated
-# Kconfig: unlike hw_info this file gates itself internally on
-# CONFIG_SENSOR + the `alp-temp0` DT alias's own status, so it ships
-# unconditionally (issue #2066) and every build without that alias just
-# takes the ALP_ERR_NOSUPPORT branch.
+# Kconfig: this file gates itself internally on CONFIG_SENSOR + the
+# `alp-temp0` DT alias's own status, so it ships unconditionally on
+# Zephyr (issue #2066) and every build without that alias just takes the
+# ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
+# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
+# src/common/stub/stub_temperature.c instead (see that file + this one's
+# header comment for why this differs from hw_info_zephyr.c above, which
+# IS shared with plain CMake).
 zephyr_library_sources(
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/temperature_zephyr.c)
 

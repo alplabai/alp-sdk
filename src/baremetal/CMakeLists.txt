@@ -38,6 +38,7 @@ target_sources(alp_sdk PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_i2s.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_can.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_temperature.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_wdt.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_display.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/stub/stub_camera.c
