@@ -54,7 +54,10 @@
  * WHY SCAN FIRST -- load-bearing, not decoration
  * --------------------------------------------------
  * On the scan-first ordering the link survives a failed connect --
- * measured, 2 of 2. Connect-first wedges it and nothing afterwards can be
+ * measured 2 of 2 in a firmware-side A/B, NOT by any app in this tree --
+ * no example here issues a scan before a connect, so do not go looking
+ * for the run that produced it. Connect-first wedges it and nothing
+ * afterwards can be
  * read. Without the scan this app cannot report anything at all: STEP 3
  * below runs cc3501e_wifi_scan() and prints the record count BEFORE either
  * connect attempt, precisely because skipping it would risk losing the

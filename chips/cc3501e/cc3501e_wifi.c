@@ -42,9 +42,21 @@
  *
  * A caller budget below that gives up on a HEALTHY board mid-scan, and this is
  * not hypothetical: a 15 s budget produced `WIFI_SCAN_START rc=-4
- * elapsed_ms=15062` on silicon, 1062 ms inside the firmware's own bound, and it
- * was read as a link wedge rather than as the caller's clock running out.  A
- * budget that cannot express a healthy outcome manufactures failures.
+ * elapsed_ms=15062` on silicon, 1062 ms inside the firmware's own bound.
+ *
+ * Be careful what that proves.  It was read at the time as the caller's clock
+ * running out, and this floor was written on that reading.  It is equally
+ * consistent with the link having been down for the whole radio op -- the
+ * first-radio-op behaviour, where a polled scan issued as the first radio
+ * operation of a boot never recovers.  Bench-measured later: the same scan
+ * shape returns records when it is NOT the first polled radio op (6 records,
+ * and 5 across four earlier cold-booted runs), and fails when it is.
+ *
+ * So this floor is NOT claimed to fix that failure.  It is the narrower,
+ * defensible thing: a caller budget below the firmware's own bound cannot
+ * express a healthy outcome at all, so a timeout at that budget tells you
+ * nothing about the radio.  Removing an uninformative failure mode is worth
+ * doing on its own.
  *
  * 20 s = the 16 s bound plus margin for the reply round trip and host
  * scheduling, the same shape the 55 s connect budget uses over its own 40 s. */

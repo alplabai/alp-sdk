@@ -8,12 +8,23 @@ operation of a boot pays the STA role-up first, so the firmware's own
 bounded worst case is `CC3501E_WIFI_ROLE_TIMEOUT_MS` = 10 s for the
 `Wlan_RoleUp` plus a 6 s wait on the scan result, 16 s in total.
 
-This is not hypothetical. A 15 s caller budget produced
-`WIFI_SCAN_START rc=-4 elapsed_ms=15062` on silicon — 1062 ms **inside**
-the firmware's own bound — and every opcode after it in that sweep was
-tagged as post-wedge. The scan had not failed and the link was not
-necessarily wedged; the caller's clock ran out first, and the resulting
-timeout is indistinguishable from a dead link at the call site.
+A 15 s caller budget produced `WIFI_SCAN_START rc=-4 elapsed_ms=15062` on
+silicon — 1062 ms **inside** the firmware's own bound — and every opcode
+after it in that sweep was tagged as post-wedge.
+
+**Be careful what that proves**, because this fix was first written on a
+reading of it that later evidence weakened. It was read as the caller's
+clock running out. It is equally consistent with the link having been down
+for the whole radio op: a polled scan issued as the *first* radio operation
+of a boot does not recover, while the same scan returns records when it is
+not first — 6 records in one run, and 5 across four earlier cold-booted
+runs.
+
+So this floor is **not** claimed to fix that failure. It does the narrower,
+defensible thing: a caller budget below the firmware's own bound cannot
+express a healthy outcome at all, so a timeout at that budget tells you
+nothing about the radio. Removing an uninformative failure mode is worth
+doing on its own.
 
 Floored at `CC3501E_WIFI_SCAN_WINDOW_MS` = 20 s: the 16 s bound plus
 margin for the reply round trip and host scheduling, the same shape the
