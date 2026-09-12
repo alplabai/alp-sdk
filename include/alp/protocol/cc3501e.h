@@ -747,21 +747,32 @@ typedef enum {
  *  callback last saw it (`hal/ti/cc3501e_hw_ti_wifi.c`,
  *  `wifi_cb_last_id = (uint32_t)event->Id;`).
  *
- *  THIS IS NOT AN @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT-FAMILY OPCODE.  The
- *  alp async-event-ring opcodes (EVT_WIFI_* 0x18..0x1A) and these radio-event
- *  ids are two unrelated namespaces that happen to share a byte width -- a
- *  reader who decodes reserved[0] against EVT_WIFI_CONNECTED (0x19) instead
- *  of ALP_CC3501E_RADIO_EVT_CONNECT (1) will never match a real value: every
- *  genuine vendor id is below 0x18, so it always falls through to "unknown"
- *  (alp-sdk#2035).  These constants exist so a host can act on the byte
- *  without that confusion; the `ALP_CC3501E_RADIO_EVT_` prefix is deliberately
- *  distinct from `ALP_CC3501E_EVT_`.
+ *  THIS IS NOT AN @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT and its family
+ *  opcode.  The alp async-event-ring opcodes (EVT_WIFI_* 0x18..0x1A) and
+ *  these radio-event ids are two unrelated namespaces that DO COLLIDE --
+ *  they are NOT segregated by range.  The vendor's `WlanEventId_e`
+ *  (`wlan_if.h`, simplelink_wifi_sdk_10_10_01_08) assigns genuine ids
+ *  1..31 (`WLAN_EVENT_CONNECT` = 1 .. `WLAN_EVENT_ERROR` = 31, then
+ *  `WLAN_EVENT_MAX` = 0xFFFF), and three of those genuine ids --
+ *  `WLAN_EVENT_P2P_PEER_NOT_FOUND` = 24 (0x18), `_PERIODIC_SCAN_COMPLETE`
+ *  = 25 (0x19), `WLAN_EVENT_FW_CRASH` = 26 (0x1A) -- alias
+ *  EVT_WIFI_SCAN_RESULT / _CONNECTED / _DISCONNECTED exactly.  A reader who
+ *  decodes reserved[0] against the opcode namespace can land on a real,
+ *  wrong match: a genuine `WLAN_EVENT_FW_CRASH` (0x1A) reads as
+ *  EVT_WIFI_DISCONNECTED, reporting a radio firmware crash as "associated
+ *  then dropped" (alp-sdk#2035).  The two namespaces must never be decoded
+ *  against each other.  These constants exist so a host can act on the byte
+ *  without that confusion; the `ALP_CC3501E_RADIO_EVT_` prefix is
+ *  deliberately distinct from `ALP_CC3501E_EVT_`.
  *
- *  This list mirrors the subset of the vendor's `WlanEvent_t` enum
- *  (`wlan_if.h`) that a host can usefully branch on.  It is NOT exhaustive --
- *  the vendor enum has more members, and a value not listed here is a LEGAL
- *  radio event that this header simply does not name; treat it as "some
- *  other radio event", not as corruption. */
+ *  This list mirrors the subset of the vendor's `WlanEventId_e` enum
+ *  (`wlan_if.h`, simplelink_wifi_sdk_10_10_01_08) that a host can usefully
+ *  branch on.  It is NOT exhaustive -- the vendor enum runs 1..31 before
+ *  `WLAN_EVENT_MAX`, and a value not listed here is a LEGAL radio event
+ *  that this header simply does not name; treat it as "some other radio
+ *  event", not as corruption.  Pin the SDK version above if you re-derive
+ *  this list: the enum is positional, so an upstream release that inserts a
+ *  member silently renumbers everything after it. */
 typedef enum {
 	ALP_CC3501E_RADIO_EVT_CONNECT                 = 1u,
 	ALP_CC3501E_RADIO_EVT_DISCONNECT              = 2u,
@@ -771,6 +782,13 @@ typedef enum {
 	ALP_CC3501E_RADIO_EVT_ASSOCIATION_REJECTED    = 8u,
 	ALP_CC3501E_RADIO_EVT_ASSOCIATED              = 10u,
 	ALP_CC3501E_RADIO_EVT_EXTENDED_SCAN_RESULT    = 19u,
+	/* Radio-fault events: the firmware's Wi-Fi stack faulted, not that it
+	 * failed to associate.  A host reading one of these alongside a failed
+	 * RSSI read must not conclude "L2 association failure" -- see the
+	 * companion-tour verdict ladder. */
+	ALP_CC3501E_RADIO_EVT_FW_CRASH        = 26u,
+	ALP_CC3501E_RADIO_EVT_COMMAND_TIMEOUT = 27u,
+	ALP_CC3501E_RADIO_EVT_ERROR           = 31u,
 } alp_cc3501e_radio_evt_t;
 
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
@@ -801,8 +819,10 @@ typedef enum {
  *     since last reset.
  *   - reserved[0]: the bridge radio's OWN event id -- the low byte of the
  *     vendor TI SDK's `WlanEvent_t.Id` that the firmware's Wi-Fi callback
- *     last saw.  It is NOT an @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT-family
- *     opcode; decode it with @ref alp_cc3501e_radio_evt_t
+ *     last saw.  It is NOT @ref ALP_CC3501E_EVT_WIFI_SCAN_RESULT and its
+ *     family; those alp opcodes and this vendor id DO COLLIDE numerically
+ *     (0x18..0x1A) and must never be decoded against each other -- decode
+ *     this byte only with @ref alp_cc3501e_radio_evt_t
  *     (`ALP_CC3501E_RADIO_EVT_*`), which mirrors the vendor enum and
  *     documents which values a host can act on.  0 = none since reset (also
  *     what pre-#1562 firmware put here, so an old host reading 0 is not

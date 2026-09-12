@@ -18,10 +18,34 @@ after a 1 s wait, past the RSSI read's own after-associate block window and
 past the 10 s DHCP window), `cc3501e_wifi_get_ip()` polled once a second for
 ~30 s (a late-arriving lease is the single most informative outcome — it
 means the 10 s DHCP gate is too short at this link budget and the
-association works), and the `alp_cc3501e_diag_info_t::reserved[0]` byte
-(the last Wi-Fi event ID the firmware's callback saw), which the tour's
-existing `GET_DIAG_INFO` call already fetched but never printed. A short
-plain-language verdict follows, stated only when the reads themselves
-succeeded — a failed read is reported as inconclusive rather than inferred.
+association works), and the `alp_cc3501e_diag_info_t::reserved[0]` byte (the
+last Wi-Fi event ID the firmware's callback saw), which the tour's existing
+`GET_DIAG_INFO` call already fetched but never printed.
 
-No timeout, no success-path behaviour, and no other file changed.
+`reserved[0]` carries the **vendor TI SDK's** `WlanEvent_t.Id`
+(`hal/ti/cc3501e_hw_ti_wifi.c`: `wifi_cb_last_id = (uint32_t)event->Id;`),
+not an alp protocol event opcode — and the two namespaces actually **collide**:
+the vendor's `WlanEventId_e` (`wlan_if.h`, `simplelink_wifi_sdk_10_10_01_08`)
+assigns genuine ids `1..31`, and three of those — `24`/`25`/`26`
+(`0x18`/`0x19`/`0x1A`) — alias `ALP_CC3501E_EVT_WIFI_SCAN_RESULT` /
+`_CONNECTED` / `_DISCONNECTED` exactly. Decoding the byte against those
+opcodes doesn't just miss; it can land on a real, wrong match, e.g. a
+`WLAN_EVENT_FW_CRASH` (`26` = `0x1A`) reading as `EVT_WIFI_DISCONNECTED` — a
+radio firmware crash reported as an association that dropped.
+`include/alp/protocol/cc3501e.h` documents `reserved[0]` explicitly against
+this collision and adds a named `alp_cc3501e_radio_evt_t` enum
+(`ALP_CC3501E_RADIO_EVT_CONNECT`/`DISCONNECT`/`SCAN_RESULT`/
+`AUTHENTICATION_REJECTED`/`CONNECTING`/`ASSOCIATION_REJECTED`/`ASSOCIATED`/
+`EXTENDED_SCAN_RESULT`/`FW_CRASH`/`COMMAND_TIMEOUT`/`ERROR`) mirroring the
+subset of the vendor enum a host can usefully act on; an unlisted value is
+documented as a legal "some other radio event", not corruption.
+
+A short plain-language verdict follows the three reads, stated only when the
+reads themselves succeeded — a failed or contradicted read (e.g. no RSSI
+alongside a `CONNECT`/`ASSOCIATED` radio event) is reported as inconclusive
+rather than inferred, and a `FW_CRASH`/`COMMAND_TIMEOUT`/`ERROR` radio event
+reads as a radio fault rather than an association failure.
+
+No wire behaviour changes and no timeout changes anywhere —
+`ALP_CC3501E_PROTOCOL_MINOR` is not bumped; this only reads, documents, and
+names what the firmware has always sent.
