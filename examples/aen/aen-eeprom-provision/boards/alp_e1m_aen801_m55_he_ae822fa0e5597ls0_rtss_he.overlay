@@ -24,12 +24,25 @@
 			 *                      this the EEPROM never responds.
 			 *   bias-pull-down  -> upstream pinctrl_soc.h encodes the pad
 			 *                      driver-state-control (DSC) field as DSC=2
-			 *                      from bias-pull-down -- which is exactly the
-			 *                      value Alif's reference uses for I2C. (DSC=1
-			 *                      via bias-pull-up does NOT work -> dead bus;
-			 *                      the upstream binding's pull naming is
-			 *                      effectively inverted vs the Alif pad HW.)
-			 * Do NOT "correct" bias-pull-down to bias-pull-up.
+			 *                      from bias-pull-down, a REAL pull-down --
+			 *                      exactly Alif's reference value for I2C, and
+			 *                      NOT an inverted encoding: pinctrl_soc.h's
+			 *                      ALIF_PINCTRL_BIAS_CFG() macro (lines 44-48)
+			 *                      maps bias-pull-up -> DSC=1 and
+			 *                      bias-pull-down -> DSC=2 unconditionally,
+			 *                      matching the field comment at line 24.  A
+			 *                      real pull-down is harmless here because the
+			 *                      EVK carrier's R137/R144 pull-ups are stuffed
+			 *                      on this bus and dominate a weak internal
+			 *                      one.  Switching to bias-pull-up was earlier
+			 *                      reported to give a dead bus, blamed on that
+			 *                      (nonexistent) inversion -- the dead-bus
+			 *                      report is therefore UNCONFIRMED, not
+			 *                      disproven, absent a fresh bench trial; it is
+			 *                      not evidence either way.
+			 * Do NOT "correct" bias-pull-down to bias-pull-up: it is the
+			 * bench-validated, correct-as-emitted value regardless of which
+			 * reading is right (alp-sdk#2046).
 			 */
 			input-enable;
 			bias-pull-down;

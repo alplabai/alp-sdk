@@ -52,12 +52,16 @@
 	 * i2c_dw controller cannot SENSE SCL (clock-stretch detect / arbitration)
 	 * and NACKs every address for a reason that looks electrical but is not.
 	 *
-	 * bias-pull-up is DSC=1, a REAL pull-up (soc/alif/ensemble/pinctrl_soc.h
-	 * encodes bits 19:20 [DSC] as 0=high-Z, 1=pull-up, 2=pull-down,
-	 * 3=bus-keeper).  Do NOT copy the I2C2/EEPROM overlay's bias-pull-down:
-	 * DSC=2 is a pull-DOWN, harmless there only because that bus has external
-	 * carrier pull-ups (R137/R144).  This net has NO external pull-up at all,
-	 * so a pull-down would park both lines low and look like a busy bus.
+	 * bias-pull-up is DSC=1, a REAL pull-up: pinctrl_soc.h's field comment
+	 * (soc/alif/ensemble/pinctrl_soc.h:24) and its ALIF_PINCTRL_BIAS_CFG()
+	 * macro (:44-48) both map bias-pull-up -> DSC=1 unconditionally -- there
+	 * is NO inversion between the devicetree property and the DSC field, on
+	 * this bus or the e1m_i2c0 one below (#2046 corrected that group's
+	 * comment, which used to claim the opposite).  Do NOT copy the
+	 * I2C2/EEPROM overlay's bias-pull-down: DSC=2 is a pull-DOWN, harmless
+	 * there only because that bus has external carrier pull-ups (R137/R144).
+	 * This net has NO external pull-up at all, so a pull-down would park both
+	 * lines low and look like a busy bus.
 	 *
 	 * drive-open-drain is deliberately NOT set, so bit 23 [DRV] stays 0 =
 	 * PUSH-PULL: the pad actively drives the high phase instead of relying on
@@ -96,11 +100,28 @@
 	 * the module (docs/bring-up-aen.md Sec 5.1 -- two separate buses).
 	 *
 	 * input-enable + bias-pull-down: bench-validated 2026-06-15 on the E8,
-	 * matching Alif's own reference I2C pinctrl and the identical group in
-	 * examples/aen/aen-i2c2-eeprom-regcheck / aen-eeprom-manifest.  Do NOT
-	 * change bias-pull-down to bias-pull-up: upstream pinctrl_soc.h's
-	 * driver-state-control encoding reads inverted vs the Alif pad hardware,
-	 * and bias-pull-up gives a DEAD bus.
+	 * matching Alif's own reference I2C pinctrl -- see the identical, verbatim-
+	 * copied group in examples/aen/aen-i2c2-eeprom-regcheck's board overlay and
+	 * examples/aen/aen-eeprom-manifest's overlay, both of which cite the same
+	 * date.
+	 *
+	 * bias-pull-down really is a pull-down (DSC=2), and bias-pull-up really
+	 * would be a pull-up (DSC=1) -- pinctrl_soc.h does NOT invert the two.
+	 * Its ALIF_PINCTRL_BIAS_CFG() macro (soc/alif/ensemble/pinctrl_soc.h:44-48)
+	 * maps bias-pull-up -> DSC=1 and bias-pull-down -> DSC=2 unconditionally,
+	 * exactly as the field's own comment at :24 describes.  An earlier version
+	 * of this comment (and of examples/aen/aen-eeprom-manifest's overlay) blamed
+	 * bias-pull-up's reported dead bus on that encoding "reading inverted vs
+	 * the Alif pad hardware" -- pinctrl_soc.h has no such inversion, so that
+	 * explanation is RETRACTED (#2046), and the dead-bus report it was invented
+	 * to explain is UNCONFIRMED, not disproven: nobody has re-run bias-pull-up
+	 * here in a controlled bench trial since.  What IS established, matching
+	 * the BRD_I2C group's own reasoning above: this bus, unlike BRD_I2C, has
+	 * the EVK carrier's R137/R144 pull-ups stuffed, so a real internal
+	 * pull-down is harmless -- the strong external pull-up dominates a weak
+	 * internal one -- which is why bias-pull-down is bench-proven correct as
+	 * emitted.  Do NOT change it to bias-pull-up on the strength of either
+	 * reading; that needs a fresh register-level bench comparison, not a theory.
 	 */
 	pinctrl_i2c2: pinctrl_i2c2 {
 		group0 {
