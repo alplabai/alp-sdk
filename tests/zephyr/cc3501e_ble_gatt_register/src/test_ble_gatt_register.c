@@ -192,16 +192,26 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
-/* Delays are no-ops under the sim; the GPIO seams are inert (the fixture's ctx
- * leaves reset/enable/ready pins unset, so the wrappers under test never call
- * them). */
+/* alp_delay_us is a no-op under the sim; the GPIO seams are inert (the
+ * fixture's ctx leaves reset/enable/ready pins unset, so the wrappers under
+ * test never call them). alp_delay_ms and alp_uptime_ms share one fake
+ * millisecond counter (same pattern as tests/zephyr/cc3501e_poll_deadline):
+ * poll_by_repeat()'s deadline (issue #1953) is measured against it, so the
+ * genuine-radio-fault test's retry budget still elapses deterministically,
+ * without any real sleeping. */
+static uint64_t g_fake_now_ms;
+
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
 }
 void alp_delay_ms(uint32_t ms)
 {
-	(void)ms;
+	g_fake_now_ms += ms;
+}
+uint64_t alp_uptime_ms(void)
+{
+	return g_fake_now_ms;
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {

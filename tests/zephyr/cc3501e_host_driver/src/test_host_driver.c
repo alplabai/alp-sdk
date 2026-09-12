@@ -782,16 +782,27 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
-/* Delays are no-ops under the sim; the GPIO seams are inert (the fixture's ctx
- * leaves reset/enable/ready pins unset, so the wrappers under test never call
- * them -- they exercise cc3501e_request, not the reset-pin pulse). */
+/* alp_delay_us is a no-op under the sim; the GPIO seams are inert (the
+ * fixture's ctx leaves reset/enable/ready pins unset, so the wrappers under
+ * test never call them -- they exercise cc3501e_request, not the reset-pin
+ * pulse). alp_delay_ms and alp_uptime_ms share one fake millisecond counter
+ * (same pattern as tests/zephyr/cc3501e_poll_deadline): poll_by_repeat()'s
+ * deadline (issue #1953) is what bounds test_wifi_status_gives_up_after_
+ * the_down_window_1377's retry to a real ALP_ERR_TIMEOUT rather than an
+ * infinite spin, without any real sleeping. */
+static uint64_t g_fake_now_ms;
+
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
 }
 void alp_delay_ms(uint32_t ms)
 {
-	(void)ms;
+	g_fake_now_ms += ms;
+}
+uint64_t alp_uptime_ms(void)
+{
+	return g_fake_now_ms;
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {

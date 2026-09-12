@@ -1552,11 +1552,20 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	if (tx_len > max_tx) return ALP_ERR_INVAL;
 	if (tx_payload == NULL && tx_len > 0) return ALP_ERR_INVAL;
 
-	/* Budget is coarse-grained in CC3501E_POLL_GAP_MS slices; always make at
-	 * least one attempt even with a zero timeout. */
-	uint32_t     remaining   = (timeout_ms > 0u) ? timeout_ms : 1u;
-	uint32_t     next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
-	alp_status_t s;
+	/* Deadline read ONCE at entry from a real monotonic clock (issue #1953):
+	 * a plain sleep-budget only ever charged its own back-off gaps against
+	 * timeout_ms, so the time spent inside cc3501e_request_locked() below --
+	 * up to four SPI transfers, plus whatever the transport waits on a
+	 * stalled link -- was free, making timeout_ms a FLOOR on wall time
+	 * instead of a bound.  alp_uptime_ms() is a uint64_t millisecond count
+	 * that wraps only after ~584 million years, so `now >= deadline_ms`
+	 * below never needs wraparound-safe subtraction.  The loop always makes
+	 * at least one attempt regardless of timeout_ms (including 0): the first
+	 * attempt below runs unconditionally, before the deadline is ever
+	 * checked. */
+	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
+	uint32_t       next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
+	alp_status_t   s;
 	/* ONE seq for this whole logical command, allocated BEFORE the loop and
 	 * re-sent unchanged on every attempt below -- that constancy is what lets
 	 * the firmware answer a repeat from its latch instead of re-executing the
@@ -1684,12 +1693,16 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 			}
 			return s; /* OK or a non-retryable error -- done. */
 		}
-		if (remaining == 0u) {
+		const uint64_t now_ms = alp_uptime_ms();
+		if (now_ms >= deadline_ms) {
 			return ALP_ERR_TIMEOUT;
 		}
-		uint32_t gap = (remaining < next_gap_ms) ? remaining : next_gap_ms;
+		/* Safe cast: now_ms < deadline_ms was just checked, and deadline_ms
+		 * == entry-time + timeout_ms, so the difference cannot exceed
+		 * timeout_ms (a uint32_t) regardless of how long entry-time was. */
+		const uint32_t remaining_ms = (uint32_t)(deadline_ms - now_ms);
+		uint32_t       gap          = (remaining_ms < next_gap_ms) ? remaining_ms : next_gap_ms;
 		alp_delay_ms(gap);
-		remaining -= gap;
 		/* Double until the ceiling: fast for a result that is already staged,
 		 * unchanged for a device that is genuinely away. */
 		if (next_gap_ms < CC3501E_POLL_GAP_MS) {

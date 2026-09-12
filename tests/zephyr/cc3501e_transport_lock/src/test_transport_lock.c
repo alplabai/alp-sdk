@@ -190,6 +190,13 @@ void alp_delay_ms(uint32_t ms)
 {
 	k_msleep((int32_t)ms);
 }
+/* This suite genuinely sleeps (above), so the real Zephyr monotonic clock
+ * answers poll_by_repeat()'s alp_uptime_ms() deadline (issue #1953) exactly
+ * as the production Zephyr backend does -- no fake clock needed here. */
+uint64_t alp_uptime_ms(void)
+{
+	return (uint64_t)k_uptime_get();
+}
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
 	ARG_UNUSED(pin_id);
