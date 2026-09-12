@@ -2,7 +2,7 @@
 # Capturing a tier-2 model-perf point
 
 How to add one bench-measured performance point to
-`metadata/model_perf/` once the three blockers listed below (see
+`metadata/model_perf/` once the two blockers listed below (see
 "Blockers -- read this before you spend bench time") clear. Written
 **before** any bench time is spent on tier 2
 (docs/superpowers/specs/2026-07-24-edge-ai-lifecycle-roadmap.md
@@ -21,9 +21,12 @@ under the published tree (`scripts/validate_metadata.py` refuses any
 
 ## Blockers — read this before you spend bench time
 
-Three open questions gate the *data*, not the contract landed here.
+Two open questions gate the *data*, not the contract landed here.
 None is solved by this doc; each is called out so a capture session
-doesn't discover it mid-bench.
+doesn't discover it mid-bench. (A third blocker, the lack of a
+latency accessor, used to be listed here; it closed when
+`alp_inference_last_invoke_latency_us()` landed in #1541 — see the
+Recipe's step 4 below for how a capture uses it.)
 
 1. **The vela profile question.** `vela` picks its OWN built-in
    default system/memory profile (`Ethos_U85_SYS_DRAM_Mid` /
@@ -42,14 +45,6 @@ doesn't discover it mid-bench.
    that region is SRAM- rather than MRAM/flash-resident. A bench point
    captured before this is resolved is recording a real number, just
    not the whole SRAM picture; note that in `capture.notes`.
-3. **No timing harness.** No AEN example times an inference, and
-   `<alp/inference.h>` exposes no latency accessor — the first capture
-   campaign has to lift one (start an inference, stop it, read a
-   monotonic timer around the call) before it can fill any
-   `perf.latency_ms` field. Until then, a point may legitimately omit
-   `perf.latency_ms` entirely and record fit/SRAM alone; the schema
-   allows this on purpose (see `model-perf-v1.schema.json`'s
-   description on that field).
 
 ## What a point is keyed on
 
@@ -105,11 +100,25 @@ different measurements and get two different files; see
    (`scripts/alp_model/adapters/ethos_u.py`'s `_parse_vela_summary()`
    does `sram_bytes // 1024`), so pasting either straight into
    `perf.req_sram_kib` reproduces this exact rejection on real data.
-4. **Flash + run the timed harness** (once it exists — blocker 3) on
-   the real SoM, ≥ 30 back-to-back inferences after any warm-up runs
-   are discarded, and compute `mean` / `p50` / `p95` / `stdev` /
-   `runs` from that sample. `scripts/validate_metadata.py` refuses
-   fewer than 30 runs and refuses a `p95` below `mean`.
+4. **Flash the target and time it with `alp_inference_last_invoke_latency_us()`**
+   (`include/alp/inference.h:481`) on the real SoM. Bracket each
+   timed run with a single `alp_inference_invoke()` call followed
+   immediately by `alp_inference_last_invoke_latency_us(inf, &out_us)`
+   — the accessor reports only the LAST successful invoke (no
+   history, no accumulated statistics), so read it once per invoke
+   before calling `alp_inference_invoke()` again. Run a handful of
+   warm-up invokes first and discard their readings, then take
+   ≥ 30 back-to-back timed invokes and compute `mean` / `p50` / `p95`
+   / `stdev` / `runs` from that sample. `out_us` is in whole
+   MICROSECONDS, rounded to nearest; divide by 1000 before writing
+   the schema's `latency_ms.*` fields (MILLISECONDS) — the accessor
+   does no unit conversion itself. Check the `alp_status_t` return:
+   `ALP_ERR_NOT_READY` means the handle is closed or no invoke has
+   yet completed with `ALP_OK` (a warm-up/setup bug, not a real
+   measurement of 0), and `ALP_ERR_NOSUPPORT` means the target is a
+   stub build with no inference backend compiled in at all — neither
+   is a value to record. `scripts/validate_metadata.py` refuses fewer
+   than 30 runs and refuses a `p95` below `mean`.
 5. **Fill `capture`**: `date` (ISO-8601, the day of the run),
    `operator`, `bench_id` (the physical rig, e.g. `e1m-aen-evk-01`),
    and `notes` for anything a reader trusting the number should know
