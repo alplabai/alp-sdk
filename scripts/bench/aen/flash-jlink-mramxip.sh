@@ -68,18 +68,38 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 # `maintenance -c $SE_UART -opt gettoc` itself reset the target? If it does,
 # AP[3] (APAddr 0x00300000) disappears (see the #1902 note below on this
 # script's pre-programming `h` gate) between the guard's query and step 3's
-# halt-before-programming check. The guard call below runs first, straight
-# after arg parsing and BEFORE this script's own first J-Link touch (step 0b),
-# specifically so any reset the query might trigger has the most possible
-# real time (SETOOLS invocation, staging, app-gen-toc) to complete its
-# reboot before step 3 tries to halt -- but that is a mitigation, not a proof.
-# If it is NOT enough and the interaction is real, the documented failure
-# mode is the existing "!! HALT FAILED before programming" abort (exit 5,
-# below): NOTHING is written and slot0 keeps its previous contents -- a safe,
-# explicit abort, not a silent one and not MRAM corruption. If this fires
-# specifically on a bench with $SE_UART exported, that is the signal this
-# open question needs answering on real silicon, not a bug to route around
-# with a bigger sleep.
+# halt-before-programming check. The guard call sits right after the
+# reset-vector sanity check (below, "0. SANITY") -- which needs only the
+# local .bin and no probe -- and still well before this script's own first
+# J-Link touch (step 0b) or either `loadbin`, specifically so any reset the
+# query might trigger has the most possible real time (SETOOLS invocation,
+# staging, app-gen-toc) to complete its reboot before step 3 tries to halt --
+# but that is a mitigation, not a proof. If it is NOT enough and the
+# interaction is real, the documented failure mode is the existing
+# "!! HALT FAILED before programming" abort (exit 5, below): NOTHING is
+# written and slot0 keeps its previous contents -- a safe, explicit abort,
+# not a silent one and not MRAM corruption. Exit 5 is NOT by itself the
+# signal that this open question is real, though: bench_flowd_atoc_guard's
+# OWN abort (an unverified or foreign-entry resident-ATOC query) also
+# returns 5, propagated straight through from below -- with $SE_UART
+# exported, both causes report exit 5. Distinguish them by the stderr text
+# ("!! ABORT (flash-jlink-mramxip): could not read the resident ATOC" /
+# "this write REPLACES" for the guard, vs "!! HALT FAILED before
+# programming" for the halt gate), not by the exit code alone.
+#
+# PARSER SHAPE (review MINOR 5, alp-sdk#2027) -- deliberately kept as the
+# whole-argv `for` scan #2029 already used for --atoc-unqueryable, NOT
+# flash-run.sh's `while`/`shift` loop. That means `--replace-atoc` is
+# recognised no matter where it lands in argv (e.g. `<build-dir>
+# --replace-atoc` still enables it here), where flash-run.sh's parser stops
+# honouring flags at the first non-option token -- the SAME invocation shape
+# does NOT enable it there. This is MORE permissive than Flow A on the one
+# flag that disables the resident-ATOC check entirely. Kept this way, not
+# fixed, so both Flow D flags share ONE parsing convention in this loop
+# rather than splitting the unchanged --atoc-unqueryable from a newly
+# stricter --replace-atoc; if this permissiveness is ever exploited by
+# accident (a flag landing after <build-dir> unintentionally), switch this
+# whole loop to flash-run.sh's while/shift shape, not just this one flag.
 REPLACE_ATOC=0
 ATOC_UNQUERYABLE=0
 POSITIONAL=()
@@ -95,10 +115,6 @@ set -- "${POSITIONAL[@]}"
 BD="$1"
 SIZE="${2:-0x800}"
 bench_require_setools || exit $?
-
-# GUARD (alp-sdk#2027) -- see the open-question note above for why this sits
-# as early as possible, before ANY J-Link connect in this script.
-bench_flowd_atoc_guard "$REPLACE_ATOC" "$ATOC_UNQUERYABLE" flash-jlink-mramxip ALP-HE || exit $?
 
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
@@ -145,6 +161,18 @@ case "$RV" in
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."
      exit 3 ;;
 esac
+
+# GUARD (alp-sdk#2027) -- see the open-question note above for why this sits
+# as early as possible: right after the reset-vector sanity check above
+# (which needs only the local `.bin`, no probe and no SETOOLS query, and
+# rejects a base-linked/HP-linked image with exit 3 for free) and still well
+# before step 0b's first J-Link touch below. Review MINOR 4: putting the
+# guard BEFORE that sanity check meant a bad build (or a `--help` typo) paid
+# for two real SE-UART round-trips -- `maintenance -opt getbanner` then
+# `-opt gettoc` -- and risked whatever the still-open gettoc-reset question
+# above implies, for a failure this script could already detect for free
+# from the local file alone.
+bench_flowd_atoc_guard "$REPLACE_ATOC" "$ATOC_UNQUERYABLE" flash-jlink-mramxip ALP-HE || exit $?
 
 # 0b. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
 # on the bench, BEFORE any MRAM write. The AEN E8 SW-DP IDR is 0x4C013477

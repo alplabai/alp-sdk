@@ -1353,19 +1353,104 @@ def test_flowd_guard_aborts_when_maintenance_tool_is_missing_despite_se_uart(tmp
     """SE_UART set but no `maintenance` binary in SETOOLS_DIR: the query
     cannot actually run, so this must land in bench_atoc_replace_guard's own
     unverified path (exit 5), not silently pass as if SE_UART merely being
-    set were the whole check."""
+    set were the whole check.
+
+    Review MINOR 2: `bench_atoc_replace_guard` returns 5 from FIVE distinct
+    sites (the `mktemp` failure, two `echo ... >"$before" || return 5`
+    writes, the `[ -f "$before" ]` check, and the intended unverified-query
+    abort) -- `test_atoc_guard_aborts_when_tmpdir_is_unwritable` above already
+    demonstrates the `mktemp` path firing on this host for an UNRELATED
+    reason. Asserting only `returncode == 5` here cannot tell "the guard
+    correctly refused because `maintenance` is absent" from "mktemp failed
+    for some other reason" -- assert the actual cause text too.
+    """
     res = _call_flowd_guard(
         tmp_path, "0", "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
     )
     assert res.returncode == 5, res.stderr
+    assert "could not read the resident ATOC" in res.stderr, (
+        f"exit 5 for the wrong reason -- expected the unverified-query abort, "
+        f"got:\n{res.stderr}"
+    )
+    assert "SETOOLS 'maintenance' tool not found" in res.stderr, (
+        f"the transcript must record why the query was unverified "
+        f"(no maintenance binary), got:\n{res.stderr}"
+    )
+
+
+# The exact call bench_flowd_atoc_guard is invoked with in all three Flow D
+# writers -- anchored to the literal argument shape, not merely the function
+# name. Review MAJOR 1: a bare `"bench_flowd_atoc_guard" in body` substring
+# check SURVIVES deleting the actual call from a script, because each
+# script's own header comment (added by this same change) also names the
+# function in prose. `grep -v '^bench_flowd_atoc_guard '` strips the real
+# call and left the old assertion green -- a later refactor or bad merge
+# could drop the call entirely with CI staying green, and the next
+# flash-jlink-mramxip.sh run would silently delist a resident A32 Linux boot
+# chain exactly as on 2026-09-07. Anchor to the call line itself.
+_FLOWD_GUARD_CALL_RE = re.compile(
+    r'^bench_flowd_atoc_guard "\$REPLACE_ATOC" "\$ATOC_UNQUERYABLE" '
+)
+
+# A REAL J-Link touch: either an actual `loadbin` command (a CommanderScript
+# body line written into a heredoc, not a comment that merely mentions the
+# word) or the JLinkExe invocation itself (every JLinkExe call in these three
+# scripts carries `-CommanderScript`). Comments are excluded because this
+# change's own new header comments say "loadbin" and "JLinkExe" in prose --
+# e.g. flash-jlink.sh:36's "`loadbin` REPLACES it" -- well before the guard
+# call, and a bare substring match would misdate the "first touch" to a hint
+# line instead of a real invocation, making the ordering assertion below
+# vacuous or wrong in the wrong direction.
+_JLINK_TOUCH_RE = re.compile(r'(?:^|[^A-Za-z0-9_])loadbin[^A-Za-z0-9_]|-CommanderScript\b')
+
+
+def _first_jlink_touch_line(body: str) -> int | None:
+    """1-based line number of a script's first real J-Link touch, or None."""
+    for i, line in enumerate(body.splitlines(), start=1):
+        if line.lstrip().startswith("#"):
+            continue
+        if _JLINK_TOUCH_RE.search(line):
+            return i
+    return None
 
 
 def test_every_flowd_atoc_writer_calls_the_flowd_guard() -> None:
     """The three SE-UART-less-by-design Flow D writers (alp-sdk#2027) must
     route through bench_flowd_atoc_guard specifically -- not a hand-rolled
-    copy of its SE_UART-gated decision, and not a bare
-    bench_atoc_replace_guard call (which would make SE_UART a hard
-    requirement of Flow D, the one thing #2027 exists to avoid)."""
+    copy of its SE_UART-gated decision, not a bare bench_atoc_replace_guard
+    call (which would make SE_UART a hard requirement of Flow D, the one
+    thing #2027 exists to avoid), and not merely a comment that NAMES the
+    function while the actual call has rotted away.
+
+    Two things are pinned, both load-bearing:
+      1. the LITERAL call line exists (anchored on its exact argument
+         shape) -- a bare substring check on the function name alone does
+         NOT prove the call still exists, see `_FLOWD_GUARD_CALL_RE` above;
+      2. that call line precedes this script's own first real J-Link touch
+         -- the whole point of alp-sdk#2027 is that the check runs before
+         ANY write, not merely that it runs somewhere in the file.
+    """
     for script in ("flash-jlink.sh", "flash-jlink-hp.sh", "flash-jlink-mramxip.sh"):
         body = (BENCH / script).read_text(encoding="utf-8")
-        assert "bench_flowd_atoc_guard" in body, f"{script} does not call bench_flowd_atoc_guard"
+        lines = body.splitlines()
+        guard_line = next(
+            (
+                i for i, line in enumerate(lines, start=1)
+                if _FLOWD_GUARD_CALL_RE.match(line.strip())
+            ),
+            None,
+        )
+        assert guard_line is not None, (
+            f'{script} does not call bench_flowd_atoc_guard with its documented '
+            f'arguments ("$REPLACE_ATOC" "$ATOC_UNQUERYABLE" ...) -- a bare '
+            f"mention of the function name (e.g. in a comment) does not count"
+        )
+        touch_line = _first_jlink_touch_line(body)
+        assert touch_line is not None, (
+            f"{script}: could not locate a loadbin/-CommanderScript line to "
+            f"compare the guard's position against"
+        )
+        assert guard_line < touch_line, (
+            f"{script}: bench_flowd_atoc_guard call at line {guard_line} does "
+            f"not precede the first J-Link touch at line {touch_line}"
+        )

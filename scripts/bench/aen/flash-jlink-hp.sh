@@ -44,6 +44,20 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 # bench slot that DOES have an SE-UART wired -- see bench_flowd_atoc_guard
 # in bench-env.sh, which runs the real shared guard whenever $SE_UART is
 # exported and usable instead of requiring a blind acknowledgement here.
+#
+# PARSER SHAPE (review MINOR 5, alp-sdk#2027) -- deliberately kept as the
+# whole-argv `for` scan #2029 already used for --atoc-unqueryable, NOT
+# flash-run.sh's `while`/`shift` loop. That means `--replace-atoc` is
+# recognised no matter where it lands in argv (e.g. `<build-dir>
+# --replace-atoc` still enables it here), where flash-run.sh's parser stops
+# honouring flags at the first non-option token -- the SAME invocation shape
+# does NOT enable it there. This is MORE permissive than Flow A on the one
+# flag that disables the resident-ATOC check entirely. Kept this way, not
+# fixed, so both Flow D flags share ONE parsing convention in this loop
+# rather than splitting the unchanged --atoc-unqueryable from a newly
+# stricter --replace-atoc; if this permissiveness is ever exploited by
+# accident (a flag landing after <build-dir> unintentionally), switch this
+# whole loop to flash-run.sh's while/shift shape, not just this one flag.
 REPLACE_ATOC=0
 ATOC_UNQUERYABLE=0
 POSITIONAL=()
