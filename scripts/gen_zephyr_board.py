@@ -1339,7 +1339,7 @@ def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
         " * Portable aliases.  The bus alias is what alp_i2c_open(.bus_id = N)",
         " * resolves (src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2cN)), matching",
         " * the on-module EEPROM's own convention on i2c2; the device aliases let an",
-        " * example say DT_ALIAS(rtc) / DT_ALIAS(ambient_temp0) instead of hardcoding",
+        " * example say DT_ALIAS(rtc) / DT_ALIAS(alp_temp0) instead of hardcoding",
         " * this board's node labels.",
         " */",
         "/ {",

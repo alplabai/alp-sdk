@@ -63,7 +63,12 @@ fault. It must not appear in a shipped devicetree.
 ### Using it from an application
 
 Both parts are driven by **upstream Zephyr drivers** -- alp-sdk vendors no
-code for either, and neither part needs an `<alp/*>` detour.
+code for either.  The RTC has no `<alp/*>` entry point yet (repointing
+`alp_rtc_open()` at the on-module part is #1814); the temperature sensor
+does, as of alp-sdk#2066 -- `alp_temperature_read_milli_c()`
+(`<alp/temperature.h>`) binds the same DT alias below through the upstream
+sensor API and is the portable, SoM-swap-safe way to read it.  This
+section documents the direct/upstream route both parts still support.
 
 The bus, both device nodes and their aliases are **generated into the
 E1M-AEN801 board devicetree** from
@@ -71,7 +76,7 @@ E1M-AEN801 board devicetree** from
 so an application does not have to wire any of it: `i2c0` comes up enabled
 with its pinctrl group, the RV-3028 and the TMP112 appear as child nodes, and
 the aliases `alp-i2c2` (the portable bus index -- `0` and `1` are the E1M
-*edge* buses), `rtc` and `ambient-temp0` point at them. Each example also
+*edge* buses), `rtc` and `alp-temp0` point at them. Each example also
 carries the same wiring in its own `boards/` overlay, which is the readable
 reference for what those nodes contain and why.
 

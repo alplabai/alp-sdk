@@ -13,7 +13,16 @@ datasheet:
 bus:              i2c
 i2c:
   addresses:
-    - { addr_7bit: 0x48, scope: "ADD0 = GND (default on E1M-AEN + E1M-V2N)" }
+    # E1M-AEN's fitted part is TMP112DIDPWR (X2SON-5), whose ADD0=GND row
+    # straps 0x40, not 0x48 -- measured 2026-09-12 at 0x40 (reg 0x00 =
+    # 1c 10 = 28.0625 degC) with 0x48 a clean NACK on 3 of 3 modules; see
+    # metadata/e1m_modules/aen/on-module-links.yaml and alp-sdk#1978 for
+    # the full derivation.  The stale 0x48 here is the same class of bug
+    # that kept the stock CONFIG_TMP112 driver from ever binding.
+    - { addr_7bit: 0x40, scope: "ADD0 = GND (E1M-AEN, TMP112DIDPWR X2SON-5)" }
+    # E1M-V2N101.yaml still carries 0x48 pending bench verification on
+    # real silicon -- do not assume it matches AEN without measuring it.
+    - { addr_7bit: 0x48, scope: "ADD0 = GND (E1M-V2N, unverified on silicon)" }
   address_strap_range: "0x48..0x4B (ADD0 strap)"
   max_clock_hz:   400000          # Fast-mode
 

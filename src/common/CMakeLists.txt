@@ -42,6 +42,13 @@ if(NOT DEFINED ZEPHYR_BASE)
         # link-complete alp_hw_info_read/alp_hw_info_assert_matches_build
         # surface Zephyr has (#593).
         ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr/hw_info_zephyr.c
+        # <alp/temperature.h> -- on-module ambient-temperature read.
+        # Despite the `_zephyr` filename it is OS-agnostic like the
+        # hw_info reader just above: every Zephyr symbol is behind
+        # `#if defined(CONFIG_SENSOR)`, which plain CMake never defines,
+        # so this takes the documented ALP_ERR_NOSUPPORT branch here too
+        # (#2066).
+        ${CMAKE_CURRENT_SOURCE_DIR}/../zephyr/temperature_zephyr.c
     )
     target_include_directories(alp_sdk PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
