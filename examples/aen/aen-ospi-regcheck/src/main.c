@@ -25,17 +25,26 @@
  *     2. the reg base + aes-reg base + IRQ the node carries match the fork
  *        e1.dtsi (reg 0x83000000, aes-reg 0x83001000, IRQ 96),
  *     3. the flash_ospi_alif.c driver TU is built AND linked
- *        (CONFIG_OSPI_ALIF), the device INSTANTIATES, and
+ *        (CONFIG_OSPI_ALIF), the device INSTANTIATES, and its init path
+ *        actually MUXES the OSPI0 pads (pinctrl_apply_state(), #2041 -- a
+ *        prior revision of the overlay set pinctrl-0 but the driver never
+ *        applied it, so the pads were never wired regardless of anything
+ *        else below),
  *     4. alif_hal_ospi_initialize() -- the one hal_alif entry point the
- *        driver calls -- compiles, links, and is REACHABLE when called a
- *        second time directly from application code (LTO can't dead-strip a
- *        called symbol), AND
+ *        driver calls at init -- compiles, links, and is REACHABLE when
+ *        called a second time directly from application code (LTO can't
+ *        dead-strip a called symbol), AND
  *     5. the OSPI register file is genuinely LIVE and readable: CTRLR0 (the
  *        controller's power-on-reset register) reads back its documented
  *        reset value 0x00C00407 (SVD
  *        AE822FA0E5597BS0_CM55_HE_View.svd:75097, cross-checked in the
  *        driver's file-header MEASURED block) -- a real bus read, not merely
- *        "the call returned".
+ *        "the call returned", AND
+ *     6. (#2041/#915) on a populated part (E1M-AEN803, OSPI0 CS1), the
+ *        device itself ANSWERS: flash_read_jedec_id() -- the standard
+ *        Zephyr flash API, routed to this driver's ospi_alif_read_jedec_id()
+ *        (flash_ospi_alif.c) -- reads back the IS25WX256-JHLE's JEDEC ID.
+ *        See the RESULT line at the bottom of main() for the exact bytes.
  *
  * WHAT IS HW-BLOCKED ON THIS BATCH, AND WHY IT IS A SKIP NOT AN
  * ATTEMPT-AND-TOLERATE: XiP setup (alif_hal_ospi_xip_enable()) is not called
@@ -50,24 +59,31 @@
  * a nonzero rc" was testing a premise that could never fail on its own terms
  * while the real failure (a crash before the RESULT line) went unreported.
  * This app instead states the SKIP explicitly: "no XiP slave in DT;
- * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  A live XiP read stays additionally
- * unverifiable regardless, and the reason has TWO layers that must not be
- * collapsed into one (#915):
+ * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  This is a silicon fact, independent
+ * of what is populated on the bus -- see #2041's resolution just below,
+ * which is a SEPARATE question (whether a part answers at all):
  *
  *   - As DESIGNED on board rev 2626-R2, the OSPI memory is not a hole in the
- *     schematic: the module netlist carries a Macronix MX25UM25645GXDI00
- *     (256 Mbit octal NOR, SPI Octal I/O DTR) wired to OSPI0_D0..D7 / SCLK /
- *     SS1 / RXDS, and its BOM line is marked populated (DNP = 0).
- *   - As ASSEMBLED, the bench unit has NO OSPI memory fitted (maintainer,
- *     2026-08-30).  DNP = 0 is a build-intent field; it does not promise that
- *     any particular physical module was stuffed with the part.
+ *     schematic: metadata/e1m_modules/E1M-AEN803.yaml records U10 as the
+ *     IS25WX256-JHLE (256 Mbit ISSI xSPI NOR) on OSPI0 CS1, and U9 as a
+ *     512 Mbit HyperRAM (S80KS5122GABHM02) on OSPI0 CS0, both on the shared
+ *     OSPI0 octal bus.
+ *   - RESOLVED (#2041): an earlier note here (maintainer, 2026-08-30) said
+ *     the bench unit had NO OSPI memory fitted "as assembled" -- that
+ *     observation is SUPERSEDED.  OSPI0 CS1 (the NOR) DOES answer on
+ *     E1M-AEN803 real silicon: a JEDEC ID read returned "9d 5b 19 10" (0x9d
+ *     = ISSI, "5b 19" = the IS25WX256 type/capacity pair), measured through
+ *     this driver's flash_driver_api once (a) its pinctrl was actually
+ *     applied -- see flash_ospi_alif.c's #2041/#915 provenance blocks. The
+ *     2026-08-30 note was an observation about one physical unit at one
+ *     point in time, not a schematic/BOM fact; it was never authoritative
+ *     over the netlist above, and is corrected here rather than deleted so
+ *     the reversal is traceable.
  *
- * So on THIS board a live XiP read is blocked by an empty footprint, exactly
- * as the original comment said, and no amount of DT or driver work will make
- * the XiP step pass here.  The design-level fact only means a future
- * fully-stuffed module would not need a board respin to run it.  Do not read
- * the BOM as evidence about the unit on your desk -- confirm the part is
- * physically there before treating an OSPI failure as a software defect.
+ * XiP setup remains a SKIP regardless of population, unconditionally:
+ * OSPI_XIP_SER does not exist on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0), so
+ * alif_hal_ospi_xip_enable() bus-faults no matter what is populated on
+ * OSPI0 -- that part of the original reasoning stands unchanged by #2041.
  *
  * This example has caught three real, distinct silicon/build bugs on a board
  * with nothing on the OSPI bus (the clock-gate fault, the MPU Device-mapping
@@ -78,12 +94,14 @@
  * explained skip.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #include <cmsis_core.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -181,13 +199,13 @@ int main(void)
 	 * Step 3: the flash_ospi_alif.c driver TU is always built under this
 	 * app's prj.conf (CONFIG_OSPI_ALIF=y), so DEVICE_DT_GET is safe here --
 	 * unlike aen-isp-regcheck, there is no link-blocked driver TU on this
-	 * batch. ospi_alif_init() writes the OSPI0 clock-enable (CLKCTL_PER_SLV
-	 * ->OSPI_CTRL bit 0) before calling alif_hal_ospi_initialize(), and the
-	 * OSPI register window is mapped MPU Device -- both fixes for real,
-	 * previously-reproduced bus faults, see flash_ospi_alif.c's file
-	 * header. device_is_ready() reading false here is a genuine RESULT FAIL
-	 * of this app's own contract: it means one of those fixes has
-	 * regressed, not that the missing external part is at fault (the
+	 * batch. ospi_alif_init() applies pinctrl-0 (pinctrl_apply_state(),
+	 * #2041), writes the OSPI0 clock-enable (CLKCTL_PER_SLV->OSPI_CTRL bit
+	 * 0), and the OSPI register window is mapped MPU Device -- three fixes
+	 * for real, previously-reproduced faults/gaps, see flash_ospi_alif.c's
+	 * file header. device_is_ready() reading false here is a genuine
+	 * RESULT FAIL of this app's own contract: it means one of those fixes
+	 * has regressed, not that the missing external part is at fault (the
 	 * missing part only ever excused the removed XiP-enable step, never
 	 * anything upstream of it).
 	 */
@@ -256,7 +274,32 @@ int main(void)
 	printk("hal   : CTRLR0=0x%08x (exp reset value 0x%08x)\n", ctrlr0, OSPI_CTRLR0_RESET_VALUE);
 
 	/*
-	 * Step 6: XiP is an explicit, stated SKIP -- not attempted. See the
+	 * Step 6 (#2041/#915): JEDEC ID readback through flash_driver_api --
+	 * the standard Zephyr flash_read_jedec_id() call, routed to this
+	 * driver's ospi_alif_read_jedec_id() (flash_ospi_alif.c). This is a
+	 * REAL device-level transaction against whatever sits on OSPI0 CS1
+	 * (the board overlay sets cs-pin=1, bus-speed=20MHz to match the
+	 * bench-proven register state) -- unlike Steps 1-5 above, a wrong
+	 * answer here means the controller talked to the bus but the DEVICE
+	 * didn't answer as expected (wrong part, no part, or a real bus
+	 * problem), not a driver/build regression. Only exercised if the
+	 * device came up ready in Step 3; flash_read_jedec_id() itself returns
+	 * -ENOSYS via a NULL check if CONFIG_FLASH_JESD216_API is disabled or
+	 * the driver has no read_jedec_id (neither is true in this app's
+	 * prj.conf, but the rc is checked regardless of build assumptions).
+	 */
+	uint8_t jedec_id[3] = { 0 };
+	int  jedec_rc = device_is_ready(ospi_dev) ? flash_read_jedec_id(ospi_dev, jedec_id) : -ENODEV;
+	bool jedec_ok = (jedec_rc == 0) && (jedec_id[0] == 0x9D);
+
+	printk("hal   : flash_read_jedec_id() rc=%d id=%02x %02x %02x (exp mfr 0x9d ISSI)\n",
+	       jedec_rc,
+	       jedec_id[0],
+	       jedec_id[1],
+	       jedec_id[2]);
+
+	/*
+	 * Step 7: XiP is an explicit, stated SKIP -- not attempted. See the
 	 * module header for why: OSPI_XIP_SER (offset 0x10C) does not exist on
 	 * AE822 (SOC_FEAT_OSPI_HAS_XIP_SER=0), so alif_hal_ospi_xip_enable()
 	 * bus-faults unconditionally; there is no rc that could report this as a
@@ -270,29 +313,38 @@ int main(void)
 	 * PASS gate: the ospi0 node BINDS -- ospi0@83000000 binds to
 	 * "snps,designware-ospi" at the fork reg/aes-reg base with IRQ 96 --
 	 * AND alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
-	 * both from the driver's own init and directly from this app -- AND the
-	 * register file reads back its documented CTRLR0 reset value. XiP setup
-	 * is out of scope for this gate (see the module header SKIP note); a
-	 * live XiP read stays HW-blocked regardless (no octal-NOR/HyperBus part
-	 * populated this batch).
+	 * both from the driver's own init (pinctrl applied) and directly from
+	 * this app -- AND the register file reads back its documented CTRLR0
+	 * reset value -- AND (#2041/#915) the OSPI0 CS1 NOR itself answers a
+	 * JEDEC ID read with the ISSI manufacturer byte. XiP setup is out of
+	 * scope for this gate (see the module header SKIP note); a live XiP
+	 * read stays HW-blocked unconditionally (OSPI_XIP_SER does not exist
+	 * on this die, independent of population).
 	 */
-	if (node_ok && hal_init_ok && ctrlr0_ok) {
+	if (node_ok && hal_init_ok && ctrlr0_ok && jedec_ok) {
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
-		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die), "
-		       "live XiP HW-blocked (no part populated this batch)\n");
+		       "its documented reset value; JEDEC ID readback = %02x %02x %02x "
+		       "(0x9d ISSI, IS25WX256 type/capacity); XiP SKIPPED (no XIP_SER on "
+		       "this die)\n",
+		       jedec_id[0],
+		       jedec_id[1],
+		       jedec_id[2]);
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
-		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
-		       "missing, disabled, bound to the wrong compatible/reg/irq, the "
-		       "hal_alif init call did not return OSPI_ERR_NONE, or the register "
-		       "file did not read back its reset value)\n",
+		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d "
+		       "jedec_ok=%d jedec_rc=%d -- node missing, disabled, bound to the "
+		       "wrong compatible/reg/irq, the hal_alif init call did not return "
+		       "OSPI_ERR_NONE, the register file did not read back its reset "
+		       "value, or the OSPI0 CS1 device did not answer its JEDEC ID)\n",
 		       (int)OSPI_BOUND,
 		       (int)(ospi_base == OSPI_BASE_EXPECTED && ospi_aes_base == OSPI_AES_BASE_EXPECTED),
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
 		       (int)hal_init_ok,
-		       (int)ctrlr0_ok);
+		       (int)ctrlr0_ok,
+		       (int)jedec_ok,
+		       jedec_rc);
 	}
 
 	return 0;

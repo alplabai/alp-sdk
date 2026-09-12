@@ -6,13 +6,22 @@
  * ============================== STATUS ==============================
  * ADR 0017 Tier-1.5 (in-tree thin driver over the Apache-2.0 hal_alif OSPI
  * register library, modules/hal/alif drivers/ospi/{include,src}/ospi*.{c,h})
- * -- HW-BLOCKED, BUILD-ONLY this batch.  The fork ships no Zephyr OSPI
- * class driver either (only the DT binding), so this thin shell -- authored
- * here against the documented hal_alif API, no offset/bitfield open-coded --
+ * -- BUILD-VERIFIED and, on E1M-AEN803, SILICON-VERIFIED (#2041): the ospi0
+ * node's pinctrl-0 is now actually APPLIED (see pinctrl_apply_state() in
+ * ospi_alif_init() below -- a prior revision of this driver declared the
+ * property but never called pinctrl_apply_state(), so the OSPI0 pads were
+ * never muxed regardless of what the controller's register program did),
+ * and OSPI0 CS1 (the IS25WX256-JHLE NOR, U10 footprint) answers a live
+ * JEDEC ID read through this driver's flash_driver_api -- see
+ * ospi_alif_read_jedec_id() and its provenance block below (#915).  The
+ * fork ships no Zephyr OSPI class driver either (only the DT binding), so
+ * this thin shell -- authored against the documented hal_alif API, no
+ * offset/bitfield open-coded beyond what #915's own block below cites --
  * is the only path to AEN OSPI.  See docs/adr/0017.
  *
- * The E1M-AEN801 (Ensemble E8) has no octal-NOR/HyperBus part populated this
- * hardware batch, so there is nothing on the bus to silicon-verify: this
+ * E1M-AEN801 (as opposed to E1M-AEN803, above) has no octal-NOR/HyperBus
+ * part populated -- on THAT SKU there is nothing on the bus to
+ * silicon-verify beyond the controller-side register program below.  This
  * driver's init reads its `struct ospi_init` straight out of the devicetree
  * node (reg/aes-reg/cs-pin/rx-ds-delay/ddr-drive-edge/bus-speed) and calls
  * alif_hal_ospi_initialize() ONCE at POST_KERNEL -- exercising the
@@ -21,11 +30,12 @@
  * see that block) and proving that hal_alif entry point compiles + links.
  * It does NOT call alif_hal_ospi_xip_enable() -- see the FOURTH section
  * below, that call bus-faults on AE822 and init must not fault regardless of
- * whether an app wants XiP -- and does NOT implement flash_driver_api
- * (read/write/erase/SFDP) -- that is a larger silicon-gated follow-up once a
- * part is populated, not this batch.  See examples/aen/aen-ospi-regcheck,
+ * whether an app wants XiP -- and implements only ONE flash_driver_api op,
+ * read_jedec_id() -- see the #915 provenance block below for exactly which
+ * ops remain unimplemented and why.  See examples/aen/aen-ospi-regcheck,
  * which exercises alif_hal_ospi_initialize() directly from application code
- * as an independent compile+link+reachability proof.
+ * as an independent compile+link+reachability proof, and now also calls
+ * flash_read_jedec_id() through this driver as a real device-level proof.
  *
  * core_clk: PREVIOUSLY a placeholder that fell back to the node's `bus-speed`
  * (100 MHz) when `clock-frequency` was unset. This value feeds
@@ -352,6 +362,8 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
+#include <zephyr/drivers/pinctrl.h>
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
@@ -359,6 +371,17 @@
 #include <ospi_hal.h>
 
 LOG_MODULE_REGISTER(flash_ospi_alif, CONFIG_FLASH_LOG_LEVEL);
+
+/* JEDEC READ ID (SPI_NOR_CMD_RDID, zephyr/drivers/flash/spi_nor.h) -- see
+ * ospi_alif_read_jedec_id() below. 3 bytes (manufacturer + memory-type +
+ * capacity) matches the Zephyr flash_read_jedec_id() / SPI_NOR_MAX_ID_LEN
+ * convention, not the 4th byte the reporter's bench capture also saw. */
+#define OSPI_ALIF_JEDEC_ID_LEN 3
+
+/* alif_hal_ospi_irq_handler() is polled here (see ospi_alif_read_jedec_id())
+ * because this driver does not wire an NVIC IRQ_CONNECT for OSPI0 -- bound
+ * so an unmet assumption in that polling fails as -ETIMEDOUT, never a hang. */
+#define OSPI_ALIF_JEDEC_POLL_ITERATIONS 100000
 
 struct ospi_alif_config {
 	uint32_t *base_regs;
@@ -369,10 +392,12 @@ struct ospi_alif_config {
 	uint32_t  rx_ds_delay;
 	uint32_t  ddr_drive_edge;
 	uint16_t  xip_wait_cycles;
+	const struct pinctrl_dev_config *pcfg;
 };
 
 struct ospi_alif_data {
 	HAL_OSPI_Handle_T handle;
+	volatile bool      xfer_done;
 };
 
 /* CLKCTL_PER_SLV->OSPI_CTRL; see the file-header provenance block for the
@@ -418,6 +443,15 @@ static int alif_ospi_clk_enable(uint32_t base_regs)
 	return 0;
 }
 
+static void ospi_alif_xfer_done_cb(uint32_t event, void *user_data)
+{
+	struct ospi_alif_data *data = user_data;
+
+	if (event & OSPI_EVENT_TRANSFER_COMPLETE) {
+		data->xfer_done = true;
+	}
+}
+
 static int ospi_alif_init(const struct device *dev)
 {
 	const struct ospi_alif_config *config = dev->config;
@@ -432,9 +466,23 @@ static int ospi_alif_init(const struct device *dev)
 		.base_regs       = config->base_regs,
 		.aes_regs        = config->aes_regs,
 		.xip_wait_cycles = config->xip_wait_cycles,
+		.event_cb        = ospi_alif_xfer_done_cb,
+		.user_data       = data,
 	};
 	int32_t rc;
 	int     clk_rc;
+	int     pinctrl_rc;
+
+	/* (#2041) Mux the OSPI0 pads BEFORE the clock-enable / first register
+	 * touch below -- pinctrl-0 was previously declared on the DT node
+	 * (snps,designware-ospi.yaml includes pinctrl-device.yaml) and never
+	 * applied by this driver, so the controller was never actually wired
+	 * to its pads regardless of how correct its register program was. */
+	pinctrl_rc = pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT);
+	if (pinctrl_rc != 0) {
+		LOG_ERR("pinctrl_apply_state failed: %d", pinctrl_rc);
+		return pinctrl_rc;
+	}
 
 	/* Must happen before the first OSPI register touch inside
 	 * alif_hal_ospi_initialize() -- see the file-header provenance block. */
@@ -492,8 +540,107 @@ static int ospi_alif_init(const struct device *dev)
 		     "ospi" STRINGIFY(inst) ": resulting OSPI_SCLK exceeds the 200 MHz HEXSPI "  \
 		     "controller cap (HWRM S10.5)")
 
+/*
+ * ====== #915: flash_driver_api -- PARTIAL, HONEST ======
+ * flash_driver_api was NULL at DEVICE_DT_INST_DEFINE (nothing implemented).
+ * With pinctrl now applied (#2041 above), this driver's init path can
+ * actually reach a populated part -- read_jedec_id() below is the ONE op
+ * this batch implements, because it is the ONE op with a live bench capture
+ * to write it honestly against: E1M-AEN803 OSPI0 CS1 (IS25WX256-JHLE)
+ * answered "9d 5b 19 10" (0x9d ISSI, "5b 19" the IS25WX256 type/capacity
+ * pair) through this exact register state -- ser=0x00000002 (cs-pin=1),
+ * opcode 0x9F, single-lane SDR, OSPI_BAUDR=20 (see the example overlay,
+ * examples/aen/aen-ospi-regcheck).
+ *
+ * Mechanics: alif_hal_ospi_receive() is an unimplemented stub in the
+ * vendored hal_alif library (modules/hal/alif drivers/ospi/src/ospi_hal.c,
+ * ~line 397: "/-* TODO *-/ return OSPI_ERR_NONE;", no dashes in the actual
+ * source) -- it cannot be used. alif_hal_ospi_transfer() is the functional
+ * TX+RX path, but its FIFO pump (reading/writing OSPI_DR0) only runs inside
+ * alif_hal_ospi_irq_handler(), reacting to the real OSPI_ISR hardware status
+ * register -- this driver does not wire an NVIC IRQ_CONNECT for OSPI0 (IRQ
+ * 96), so ospi_alif_read_jedec_id() below polls that handler directly
+ * instead. This is safe because alif_hal_ospi_transfer() unmasks OSPI_IMR
+ * (TX_INTR_MASK | RX_INTR_MASK) unconditionally, and OSPI_ISR reflects live
+ * FIFO state regardless of whether the interrupt line is wired to the NVIC
+ * -- IMR only gates whether that line asserts, not whether the status
+ * register updates. Bounded by OSPI_ALIF_JEDEC_POLL_ITERATIONS so an unmet
+ * assumption here reports -ETIMEDOUT, never a hang.
+ *
+ * NOT implemented -- left NULL rather than guessed, per #915:
+ *   read() (offset-based Read Data, opcode 0x03/0x0B): needs a live capture
+ *     of an ADDRESSED transfer. alif_hal_ospi_transfer()'s tx_total_cnt
+ *     derivation for a nonzero addr_len looks internally inconsistent (4
+ *     for OSPI_ADDR_LENGTH_24_BITS, 2 for OSPI_ADDR_LENGTH_32_BITS --
+ *     ospi_hal.c) and is unverified here, unlike the addr_len=0 case above
+ *     that the bench capture actually exercises.
+ *   write() / erase(): need WREN (0x06) + status-poll (0x05) +
+ *     Page-Program/Sector-Erase opcodes -- none bench-proven. The OSPI0 bus
+ *     is SHARED with the HyperRAM device (CS0, see
+ *     metadata/e1m_modules/E1M-AEN803.yaml) and carries a live XiP window
+ *     reservation at 0xA0000000 -- a wrong factory-mode or erase sequence
+ *     risks the shared bus, not just this device.  A capture of a real
+ *     WREN+PP (or WREN+SE) cycle against this exact part would close this.
+ *   get_size(): the controller binding (snps,designware-ospi.yaml) carries
+ *     no DT size property -- capacity is a per-populated-part metadata fact
+ *     (metadata/e1m_modules/E1M-AEN803.yaml
+ *     on_module.ospi_memories.ospi0.capacity_mbit), not a controller-node
+ *     fact. Wiring it needs a new DT property, out of scope this batch.
+ *   get_parameters(): would describe write_block_size/erase_value for ops
+ *     this driver does not implement -- publishing invented values for an
+ *     unimplemented write/erase path is worse than leaving it NULL.
+ * ==========================================================
+ */
+#if defined(CONFIG_FLASH_JESD216_API)
+static int ospi_alif_read_jedec_id(const struct device *dev, uint8_t *id)
+{
+	struct ospi_alif_data   *data = dev->data;
+	struct ospi_trans_config trans_conf = {
+		.frame_size   = OSPI_DFS_BITS_8,
+		.frame_format = OSPI_FRF_STANDRAD,
+		.addr_len     = OSPI_ADDR_LENGTH_0_BITS,
+		.inst_len     = OSPI_INST_LENGTH_8_BITS,
+		.wait_cycles  = 0,
+		.ddr_enable   = OSPI_DDR_DISABLE,
+	};
+	uint8_t opcode = 0x9F; /* JEDEC READ ID -- SPI_NOR_CMD_RDID */
+	int     spin;
+
+	if (id == NULL) {
+		return -EINVAL;
+	}
+
+	alif_hal_ospi_prepare_transfer(data->handle, &trans_conf);
+	alif_hal_ospi_cs_enable(data->handle, 1);
+
+	data->xfer_done = false;
+	alif_hal_ospi_transfer(data->handle, &opcode, id, OSPI_ALIF_JEDEC_ID_LEN);
+
+	for (spin = 0; spin < OSPI_ALIF_JEDEC_POLL_ITERATIONS && !data->xfer_done; spin++) {
+		alif_hal_ospi_irq_handler(data->handle);
+	}
+
+	alif_hal_ospi_cs_enable(data->handle, 0);
+
+	if (!data->xfer_done) {
+		LOG_ERR("read_jedec_id: transfer did not complete after %d polls (#915)",
+			OSPI_ALIF_JEDEC_POLL_ITERATIONS);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+#endif /* CONFIG_FLASH_JESD216_API */
+
+static const struct flash_driver_api ospi_alif_api = {
+#if defined(CONFIG_FLASH_JESD216_API)
+	.read_jedec_id = ospi_alif_read_jedec_id,
+#endif
+};
+
 #define OSPI_ALIF_INIT(inst)                                                                      \
 	OSPI_ALIF_CHECK_SCLK(inst);                                                                   \
+	PINCTRL_DT_INST_DEFINE(inst);                                                                 \
 	static struct ospi_alif_data         ospi_alif_data_##inst;                                  \
 	static const struct ospi_alif_config ospi_alif_config_##inst = {                             \
 		.base_regs       = (uint32_t *)DT_INST_REG_ADDR(inst),                                   \
@@ -503,9 +650,11 @@ static int ospi_alif_init(const struct device *dev)
 		.cs_pin          = DT_INST_PROP(inst, cs_pin),                                           \
 		.rx_ds_delay     = DT_INST_PROP(inst, rx_ds_delay),                                       \
 		.ddr_drive_edge  = DT_INST_PROP(inst, ddr_drive_edge),                                    \
+		.pcfg            = PINCTRL_DT_INST_DEV_CONFIG_GET(inst),                                 \
 		.xip_wait_cycles = DT_INST_PROP(inst, xip_wait_cycles),                                   \
 	};                                                                                             \
 	DEVICE_DT_INST_DEFINE(inst, ospi_alif_init, NULL, &ospi_alif_data_##inst,                    \
-			       &ospi_alif_config_##inst, POST_KERNEL, CONFIG_FLASH_INIT_PRIORITY, NULL);
+			       &ospi_alif_config_##inst, POST_KERNEL, CONFIG_FLASH_INIT_PRIORITY,     \
+			       &ospi_alif_api);
 
 DT_INST_FOREACH_STATUS_OKAY(OSPI_ALIF_INIT)

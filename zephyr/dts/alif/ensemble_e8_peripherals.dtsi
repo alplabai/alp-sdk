@@ -758,11 +758,16 @@
 	 * disabled, a dead bus, not the overclock an earlier revision of this
 	 * fix claimed (HWRM S16.1.5.3.5; see flash_ospi_alif.c:30-80).
 	 *
-	 * HW-BLOCKED, BUILD-ONLY this batch: no octal-NOR/HyperBus part is
-	 * populated on the E1M-AEN801, so this proves the node BINDS + the
-	 * hal_alif init/XiP-enable entry points compile and link -- not a live
-	 * XiP read.  No pinctrl-0: the enabling board/example overlay supplies it
-	 * (the eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
+	 * BUILD-ONLY in CI (compile+link gate, not a HIL run).  E1M-AEN801 has
+	 * no octal-NOR/HyperBus part populated, so on that SKU this only proves
+	 * the node BINDS + the hal_alif init entry point compiles and links --
+	 * not a live device read.  E1M-AEN803 (populated OSPI0 CS0 HyperRAM +
+	 * CS1 NOR) is bench-verified answering a JEDEC ID read on CS1 through
+	 * flash_driver_api -- see #2041/#915.  A live XiP read stays
+	 * unconditionally unverifiable regardless of population: OSPI_XIP_SER
+	 * does not exist on this die.  No pinctrl-0: the enabling board/example
+	 * overlay supplies it (the eth/isp precedent) -- see
+	 * examples/aen/aen-ospi-regcheck.
 	 */
 	ospi0: ospi0@83000000 {
 		compatible = "snps,designware-ospi";

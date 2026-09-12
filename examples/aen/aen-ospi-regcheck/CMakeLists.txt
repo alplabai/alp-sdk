@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# aen-ospi-regcheck -- compile + DT-bind proof of the Alif Ensemble OSPI/HexSPI
-# controller (Synopsys DesignWare OSPI, zephyr/drivers/flash/flash_ospi_alif.c,
-# compatible "snps,designware-ospi") staging on the E1M-AEN801 (Ensemble E8,
-# M55-HE), via the bench RAM-run + RAM-console flow.
+# aen-ospi-regcheck -- compile + DT-bind + device proof of the Alif Ensemble
+# OSPI/HexSPI controller (Synopsys DesignWare OSPI, zephyr/drivers/flash/
+# flash_ospi_alif.c, compatible "snps,designware-ospi") staging on the
+# E1M-AEN801/E1M-AEN803 board target (Ensemble E8, M55-HE), via the bench
+# RAM-run + RAM-console flow.
 #
-# Plain prj.conf app (no alp_project.py board.yaml emit). HW-BLOCKED,
-# BUILD-ONLY this batch: no octal-NOR/HyperBus part is populated, so this
-# proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
-# and the register file reads back live -- not a live XiP read (XiP setup is
-# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822). See src/main.c +
-# the board overlay.
+# Plain prj.conf app (no alp_project.py board.yaml emit). BUILD-ONLY in CI
+# (compile+link gate, not a HIL run): proves the ospi0 node BINDS +
+# alif_hal_ospi_initialize() compiles, links, and the register file reads
+# back live, AND (bench-verified on E1M-AEN803, #2041/#915) that OSPI0 CS1
+# answers a JEDEC ID read through flash_driver_api -- not a live XiP read
+# (XiP setup is a deliberate, unconditional SKIP: OSPI_XIP_SER does not
+# exist on AE822). See src/main.c + the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 
