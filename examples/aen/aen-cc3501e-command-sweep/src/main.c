@@ -736,8 +736,17 @@ int main(void)
 		cc3501e_scan_record_t scan_records[4];
 		size_t                scan_count = 0u;
 		int64_t               t0         = k_uptime_get();
-		alp_status_t          r =
-		    cc3501e_wifi_scan(&fw, scan_records, ARRAY_SIZE(scan_records), &scan_count, 15000u);
+		/* 25 s, not the 15 s this used to pass.  The firmware's bounded worst
+		 * case for a scan that is the first Wi-Fi op of a boot is 16 s (a 10 s
+		 * STA role-up, then a 6 s wait on the result), so 15 s could not express
+		 * a healthy outcome -- it produced rc=-4 at elapsed_ms=15062 on silicon,
+		 * INSIDE the firmware's own bound, and this sweep then tagged every
+		 * later opcode post-wedge off the back of it.  cc3501e_wifi_scan() now
+		 * floors the budget at 20 s regardless; this call asks for more than the
+		 * floor so the literal here means what it says rather than being
+		 * silently corrected. */
+		alp_status_t r =
+		    cc3501e_wifi_scan(&fw, scan_records, ARRAY_SIZE(scan_records), &scan_count, 25000u);
 		sweep_report(ALP_CC3501E_CMD_WIFI_SCAN_START,
 		             "WIFI_SCAN_START",
 		             r,

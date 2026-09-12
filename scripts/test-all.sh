@@ -84,6 +84,15 @@
 #                     (No --target = the historical "full" run: every stage
 #                     except the main-only ABI strict diff.)
 #   --quick           skip twister + Doxygen (the slow stages)
+#
+# Environment:
+#   ALP_TWISTER_JOBS  cap twister's concurrent TEST INSTANCES (passed through
+#                     as `-j`).  Unset = twister's own default, one per core.
+#                     NOTE this alone is NOT enough -- each instance runs its
+#                     own ninja at full core parallelism underneath, so the
+#                     real compiler count is this value TIMES the core count.
+#                     The stage caps that inner build too; see the OOM note on
+#                     stage_twister below.
 #   --yocto-only      run only stage 1 + format + metadata
 #   --zephyr-only     run only stage 3 (requires ZEPHYR_BASE)
 #   --no-clean        keep build directories between runs (faster)
@@ -329,7 +338,40 @@ stage_twister() {
     # a warning like -Werror=comment ('/*' inside a comment) fails there;
     # forcing CONFIG_COMPILER_WARNINGS_AS_ERRORS=y here catches that class
     # locally instead of on the PR (bit examples/.../u8g2 main.c, #650).
+    # Concurrency cap.  Twister defaults to ONE BUILD JOB PER CORE and each build
+    # runs its own parallel ninja underneath, so the real compiler count is well
+    # above the core count.  Measured on the 20-core / 31 GB bench gateway: a
+    # default-parallelism run OOM-killed the machine, the kernel reaping cc1plus
+    # repeatedly ("Out of memory: Killed process ... (cc1plus) ...
+    # anon-rss:425060kB") until the box had to be rebooted -- which on THAT
+    # machine also takes the attached board farm down with it.
+    #
+    # Unset keeps twister's default, so CI is unchanged.  Set ALP_TWISTER_JOBS
+    # on a shared or memory-tight host; roughly one job per 2 GB of RAM is a
+    # safe starting point, and lower still if anything else heavy is running.
+    twister_jobs=()
+    if [ -n "${ALP_TWISTER_JOBS:-}" ]; then
+        twister_jobs=(-j "${ALP_TWISTER_JOBS}")
+
+        # Capping twister ALONE IS NOT ENOUGH, and believing it was cost a
+        # second near-OOM.  `-j` bounds concurrent TEST INSTANCES; each instance
+        # then runs its own ninja, which defaults to the full core count.  So
+        # the real concurrent-compiler count is ALP_TWISTER_JOBS x nproc.
+        # Measured on this 20-core host with ALP_TWISTER_JOBS=4: 78 live cc1plus
+        # processes, 27 of 31 GB consumed, load average 152 -- the run had to be
+        # killed to avoid repeating the OOM reboot the cap was added to prevent.
+        #
+        # CMAKE_BUILD_PARALLEL_LEVEL is what bounds the inner build (it is also
+        # what the bench runner uses for the same reason).  Default it to 2 so
+        # the product stays modest, and let a caller override it deliberately.
+        export CMAKE_BUILD_PARALLEL_LEVEL="${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
+        echo "stage_twister: capping twister at ${ALP_TWISTER_JOBS} concurrent test instance(s) (ALP_TWISTER_JOBS)," \
+             "each building with CMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL}" \
+             "-- up to $((ALP_TWISTER_JOBS * CMAKE_BUILD_PARALLEL_LEVEL)) concurrent compilers"
+    fi
+
     python3 "${ZEPHYR_BASE}/scripts/twister" \
+        "${twister_jobs[@]+"${twister_jobs[@]}"}" \
         --testsuite-root "${REPO_ROOT}/tests/unit" \
         --testsuite-root "${REPO_ROOT}/tests/zephyr" \
         --testsuite-root "${REPO_ROOT}/tests/console" \
