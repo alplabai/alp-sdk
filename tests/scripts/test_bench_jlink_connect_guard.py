@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -63,26 +64,41 @@ _NEEDS_BASH = pytest.mark.skipif(
            "shell and cannot be exercised here",
 )
 
+
 def _dir_still_accepts_a_new_file(directory: Path) -> bool:
-    """True when `directory` takes a new entry despite having been chmod'ed
+    """True when `directory` took a new entry despite having been chmod'ed
     read-only -- i.e. the "unwritable directory" precondition did NOT hold.
 
     Same discipline as _bash_can_run_a_script() above: probe by DOING the
-    thing, never by trusting the platform to honour the mode bits. On
-    Windows `os.chmod` only toggles FILE_ATTRIBUTE_READONLY, and that
-    attribute does not stop a directory from accepting new entries -- a
-    `chmod(0o500)` directory there reads back 0o555, `os.access(W_OK)`
-    returns True, and `mktemp` inside it succeeds. A test that needs the
-    directory to refuse a write has no precondition on such a host and must
-    skip, not fail (alp-sdk#2055).
+    thing, never by trusting the platform to honour the mode bits. Two hosts
+    hand back a writable directory after a restrictive chmod, for different
+    reasons, and only a real create tells them apart from a genuinely
+    refusing one:
+
+      * Windows -- `os.chmod` only toggles FILE_ATTRIBUTE_READONLY, which
+        does not stop a directory accepting new entries. A `chmod(0o500)`
+        directory reads back 0o555, `os.access(W_OK)` returns True, and
+        `mktemp` inside it succeeds.
+      * POSIX as root (or with CAP_DAC_OVERRIDE) -- the chmod DID take, and
+        the caller bypasses it anyway.
+
+    A test that needs the directory to refuse a write has no precondition on
+    either host and must skip, not fail (alp-sdk#2055).
+
+    Probe with `tempfile.mkstemp(dir=...)` rather than `Path.touch()`: touch
+    defaults to `exist_ok=True`, whose fast path is a bare `os.utime` on an
+    existing file -- and a file's own mtime does not need the DIRECTORY's
+    write bit, so a leftover probe would report "writable" without ever
+    attempting a create. mkstemp always creates, and creates with the same
+    syscall shape as the `mktemp` under test.
     """
-    probe = directory / ".alp-writability-probe"
     try:
-        probe.touch()
+        fd, made = tempfile.mkstemp(dir=directory, prefix=".alp-writability-probe")
     except OSError:
         return False
+    os.close(fd)
     try:
-        probe.unlink()
+        os.unlink(made)
     except OSError:
         pass
     return True
@@ -1051,10 +1067,16 @@ def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
     unwritable.chmod(0o500)
     try:
         if _dir_still_accepts_a_new_file(unwritable):
+            _euid = getattr(os, "geteuid", lambda: None)()
             pytest.skip(
-                "chmod cannot make a directory refuse a new entry on this "
-                f"host (os.name={os.name!r}), so this test's unwritable-TMPDIR "
-                "precondition does not hold here -- alp-sdk#2055"
+                "this directory did not refuse a new entry after chmod(0o500) "
+                f"(os.name={os.name!r}, euid={_euid!r}), so the unwritable-TMPDIR "
+                "precondition does not hold here -- on Windows because chmod "
+                "cannot make a directory refuse an entry at all, under a POSIX "
+                "root/CAP_DAC_OVERRIDE caller because the mode took and was "
+                "bypassed. See alp-sdk#2055; "
+                "test_atoc_guard_aborts_when_tmpdir_does_not_exist covers the "
+                "same mktemp-failure branch on every host."
             )
         res = _call_atoc_guard(
             tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC, tmpdir=unwritable
@@ -1069,6 +1091,37 @@ def test_atoc_guard_aborts_when_tmpdir_is_unwritable(tmp_path):
         )
     finally:
         unwritable.chmod(0o700)
+
+
+@_NEEDS_BASH
+def test_atoc_guard_aborts_when_tmpdir_does_not_exist(tmp_path):
+    """The same `mktemp`-failure branch as the unwritable-TMPDIR test above,
+    reached by a precondition that holds on EVERY host.
+
+    That test can only build its precondition where `chmod` actually makes a
+    directory refuse an entry, so it skips on Windows and under a POSIX root
+    caller (alp-sdk#2055). A TMPDIR that does not exist drives the identical
+    `mktemp ... || return 5` line in bench-env.sh's
+    bench_atoc_replace_guard(), needs no mode bits to do it, and therefore
+    keeps that branch covered on hosts where the chmod route is unavailable.
+    Assert the same CAUSE, not merely `returncode == 5`: this guard's own
+    mktemp-failure message, which neither a mutated `|| true` on the mktemp
+    line nor the pre-mktemp fixed-path code ever printed.
+    """
+    missing = tmp_path / "no-such-dir" / "nor-this-one"
+    assert not missing.exists(), "the precondition is that this path is absent"
+
+    res = _call_atoc_guard(
+        tmp_path, "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC, tmpdir=missing
+    )
+    assert res.returncode == 5, (
+        f"a TMPDIR that does not exist must abort, not silently skip the "
+        f"transcript, got {res.returncode}\n{res.stdout}{res.stderr}"
+    )
+    assert "cannot create the pre-write ATOC transcript" in res.stderr, (
+        f"must abort specifically because mktemp itself failed, not some "
+        f"unrelated downstream cause -- {res.stderr}"
+    )
 
 
 # --- validated against REAL silicon captures off e1m-aen-evk-01 (2026-09-07),
