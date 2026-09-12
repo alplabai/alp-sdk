@@ -60,13 +60,41 @@
 /* Poll-by-repeat budgets.  Several companion ops kick off a firmware worker
  * (scan / association / BLE bring-up) and answer BUSY until it finishes; the
  * driver re-issues the request until OK or the budget elapses.  These are the
- * *upper bounds* on that wait, generous enough for a real radio op. */
-#define TOUR_PING_RETRIES    25u
-#define TOUR_PING_GAP_MS     200u
-#define TOUR_SCAN_TIMEOUT    8000u
+ * *upper bounds* on that wait, generous enough for a real radio op.
+ *
+ * Every one is -D-overridable.  They were bare #defines, which silently WON
+ * over a command-line -D and cost a bench run: a run built with
+ * -DTOUR_CONNECT_TIMEOUT=60000u got 15000u anyway, and the resulting failure
+ * could not be told apart from a real one.  A bare #define beside the
+ * #ifndef-guarded credentials right below it is a trap, so they now match.
+ *
+ * TOUR_CONNECT_TIMEOUT's default is deliberately BELOW the firmware's own
+ * worst case for a station connect -- 30 s of association plus 50 DHCP polls
+ * at 200 ms, so 40 s -- because this app is a quick full-surface tour, not a
+ * connection test, and a tour that parks for 40 s on one step is not a tour.
+ * Override it for a real association attempt; the sibling
+ * aen-cc3501e-socket-throughput budgets 55000u for exactly that reason.
+ * TOUR_SCAN_TIMEOUT is likewise below cc3501e_wifi_scan()'s own 20 s floor,
+ * which simply raises it -- see that floor's comment for why 15 s could not
+ * express a healthy scan. */
+#ifndef TOUR_PING_RETRIES
+#define TOUR_PING_RETRIES 25u
+#endif
+#ifndef TOUR_PING_GAP_MS
+#define TOUR_PING_GAP_MS 200u
+#endif
+#ifndef TOUR_SCAN_TIMEOUT
+#define TOUR_SCAN_TIMEOUT 8000u
+#endif
+#ifndef TOUR_CONNECT_TIMEOUT
 #define TOUR_CONNECT_TIMEOUT 15000u
-#define TOUR_BLE_TIMEOUT     30000u
-#define TOUR_SOCK_TIMEOUT    5000u
+#endif
+#ifndef TOUR_BLE_TIMEOUT
+#define TOUR_BLE_TIMEOUT 30000u
+#endif
+#ifndef TOUR_SOCK_TIMEOUT
+#define TOUR_SOCK_TIMEOUT 5000u
+#endif
 
 /* How many scan records the witness arrays hold (bounded -- a busy band can
  * report dozens of APs; we print the first handful). */
