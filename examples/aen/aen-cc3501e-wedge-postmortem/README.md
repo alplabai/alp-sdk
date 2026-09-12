@@ -11,10 +11,18 @@ build-time-credential convention is copied from it).
 ## Why this app exists
 
 Issuing `WIFI_CONNECT_STA` over the CC3501E SPI bridge wedges the link. A
-`PING` one second earlier answers on the first attempt; the connect itself
-gets no reply at all, and the link then stays dead through a host-driven
-reset pulse. Only a full carrier power cycle revives it. Reproduced three
-times out of three.
+`PING` one second earlier answers on the first attempt, and the connect
+itself gets no reply at all. Reproduced three times out of three.
+
+An earlier version of this file said the link then stayed dead through a
+host-driven reset pulse, and that only a full carrier power cycle revived
+it. **That was wrong and is retracted.** It came from a run where a fresh
+Flow C image was loaded over an already-running app, which double-faults the
+host core into lockup before a single console byte is emitted (`clearing
+lockup after double fault`, `pc: 0xeffffffe`). The host core was dead, not
+the link. A later run from a verifiably cleared buffer had a warm `nRESET`
+pulse revive the link on the first attempt. Cold-cycle between Flow C runs,
+or this trap reads exactly like a dead bridge — it has now done so twice.
 
 Three mechanisms are still live, and this app exists to separate them:
 

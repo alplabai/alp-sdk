@@ -1,10 +1,20 @@
 ### Added — `aen-cc3501e-wedge-postmortem` reproduces the CC3501E `WIFI_CONNECT_STA` wedge and captures forensic evidence while it is still down (#2035)
 
 Issuing `WIFI_CONNECT_STA` over the CC3501E SPI bridge wedges the link: a
-`PING` one second earlier answers on the first attempt, the connect itself
-gets no reply at all, and the link then stays dead through a host-driven
-reset pulse — only a full carrier power cycle revives it, reproduced three
-of three on bench. Three mechanisms were still live: a hung firmware task
+`PING` one second earlier answers on the first attempt and the connect
+itself gets no reply at all, reproduced three of three on bench.
+
+An earlier version of this text added "and the link then stays dead through
+a host-driven reset pulse — only a full carrier power cycle revives it".
+**That was wrong and is retracted.** It came from a run where a fresh Flow C
+image was loaded over an already-running app, which double-faults the host
+core into lockup before a single console byte (`clearing lockup after double
+fault`, `pc: 0xeffffffe`) — the host core was dead, not the link. A later
+run from a cleared buffer had a warm `nRESET` pulse revive the link on the
+first attempt. Cold-cycle between Flow C runs, or this trap reads exactly
+like a dead bridge.
+
+Three mechanisms were still live: a hung firmware task
 (chip otherwise alive), a host reset sequence that never actually reaches
 the chip (which would make every "reset did not revive it" observation
 meaningless), or a fault outside CC3501E firmware state entirely (Alif
