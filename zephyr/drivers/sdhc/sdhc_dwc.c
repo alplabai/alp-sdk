@@ -230,18 +230,54 @@ static int sdhc_dwc_set_voltage(const struct device *dev,
 		}
 #endif
 
-		regs->DWC_SDHC_PWR_CTRL_R = DWC_SDHC_PC_BUS_VSEL_1V8_Msk;
+		/*
+		 * Bus power (Vdd1) stays applied for the whole voltage-switch
+		 * sequence -- only the signalling level changes; the SD Host
+		 * Controller Simplified Specification's switch procedure
+		 * (3.6.1) never has the host drop Vdd here. The entry to this
+		 * function clears DWC_SDHC_PC_BUS_PWR_VDD1_Msk unconditionally
+		 * (above), and the previous code did not restore it until
+		 * after the >=5ms gate below, so Vdd1 was off for the whole
+		 * gate -- on a carrier where sd_vdd1_on gates a load switch,
+		 * that power-cycles the card mid-CMD11 (#2058 defect 3). Fold
+		 * the restore into this write, before the gate starts.
+		 */
+		regs->DWC_SDHC_PWR_CTRL_R = DWC_SDHC_PC_BUS_VSEL_1V8_Msk | DWC_SDHC_PC_BUS_PWR_VDD1_Msk;
 		regs->DWC_SDHC_HOST_CTRL2_R |= DWC_SDHC_HOST_CTRL2_SIGNALING_EN_Msk;
 		k_busy_wait(DWC_SDHC_1P8V_TIMEOUT_US);
 
-		regs->DWC_SDHC_PWR_CTRL_R |= DWC_SDHC_PC_BUS_PWR_VDD1_Msk;
-
-		/* Re-enable clock and wait 1ms before checking line levels */
-		regs->DWC_SDHC_CLK_CTRL_R |= DWC_SDHC_CLK_EN_Msk;
+		/*
+		 * Restart SDCLK -- INCLUDING the internal clock -- before
+		 * polling the line levels below. Per the SD Host Controller
+		 * Simplified Specification's Clock Control register, SD Clock
+		 * Enable must not be set before Internal Clock Stable reads 1,
+		 * and SDCLK is derived from the internal clock; per SD
+		 * Physical Layer Specification 4.2.4.2 the card only releases
+		 * CMD/DAT[3:0] high within 1ms of SDCLK appearing at the new
+		 * voltage. The previous code set only DWC_SDHC_CLK_EN_Msk
+		 * here and left the internal clock stopped -- whichever
+		 * earlier sdhc_dwc_disable_clock() call had cleared it, via
+		 * the ios->clock == 0 branch of sdhc_dwc_set_io() -- until
+		 * sdhc_dwc_enable_clock() ran AFTER this function returned, so
+		 * the poll below could never see the lines go high (#2058
+		 * defect 1, the reason this switch cannot complete today).
+		 */
+		if (!sdhc_dwc_enable_clock(regs)) {
+			return -EIO;
+		}
 		k_busy_wait(1000);
 
-		while (!(regs->DWC_SDHC_PSTATE_REG & DWC_SDHC_CMD_LINE_LVL_UP_Msk) &&
-				--timeout) {
+		/*
+		 * Per the SD Host Controller voltage-switch sequence, success is
+		 * confirmed by ALL FOUR of DAT[3:0] reading high -- not CMD, and
+		 * not just one of the four (#2042). A prior version of this poll
+		 * used a macro named for the CMD line that actually pointed at
+		 * bit 23 (DAT3 alone), so it accepted a switch where DAT0..DAT2
+		 * never came up.
+		 */
+		while (((regs->DWC_SDHC_PSTATE_REG & DWC_SDHC_DAT_LINE_LVL_Msk) !=
+		        DWC_SDHC_DAT_LINE_LVL_Msk) &&
+		       --timeout) {
 			k_busy_wait(1);
 		}
 		if (!timeout) {
@@ -899,7 +935,20 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 
 	if (ios->clock != data->ios.clock) {
 		if (ios->clock == 0) {
-			sdhc_dwc_disable_clock(regs);
+			/*
+			 * sdhc_dwc_disable_clock() (above) returns false when
+			 * CMD or DAT inhibit is set -- exactly the state the
+			 * controller may report while a card holds DAT[3:0]
+			 * low after CMD11. Previously that return was
+			 * discarded, so the gate could silently not happen
+			 * while data->ios.clock was recorded as 0 anyway,
+			 * leaving the driver's clock-state bookkeeping and the
+			 * hardware disagreeing with no error anywhere (#2058
+			 * defect 2).
+			 */
+			if (!sdhc_dwc_disable_clock(regs)) {
+				return -EIO;
+			}
 			data->ios = *ios;
 			return 0;
 		}
@@ -938,19 +987,30 @@ static int sdhc_dwc_card_busy(const struct device *dev)
 {
 	const struct sdhc_dwc_config *config = dev->config;
 	struct dwc_sdhc_regs *regs = config->regs;
-	uint32_t pstate, dat_line_status;
+	uint32_t pstate, dat0_level;
 
 	uint32_t reg = regs->DWC_SDHC_PSTATE_REG;
 
+	/*
+	 * SD busy signalling (R1b response, write programming) is DAT0 held
+	 * low -- SD Physical Layer Specification 4.2.4.2 -- not the combined
+	 * DAT[3:0]+CMD group. The previous check tested
+	 * DWC_SDHC_CMD_DATA_LINE_STATUS_Msk (bits 20-24) for any-bit-high, so
+	 * an ordinary busy card (DAT0 low, DAT1..DAT3 and CMD high) read back
+	 * non-zero and this function reported not-busy while the card was
+	 * busy (#2057). That five-bit group is still correct for the CMD11
+	 * voltage-switch low-phase check in sdhc_dwc_set_voltage(), which
+	 * genuinely wants all five lines low; it is wrong here.
+	 */
 	pstate = reg & (DWC_SDHC_DAT_INHIBIT_Msk | DWC_SDHC_CMD_INHIBIT_Msk);
-	dat_line_status = reg & DWC_SDHC_CMD_DATA_LINE_STATUS_Msk;
+	dat0_level = reg & DWC_SDHC_DAT0_LINE_LVL_Msk;
 
 	if (pstate) {
 		return true;        /* CMD or DAT inhibit set -> busy */
-	} else if (!dat_line_status) {
-		return true;        /* DAT lines low -> card is busy */
+	} else if (!dat0_level) {
+		return true;        /* DAT0 low -> card is busy */
 	} else {
-		return false;        /* DAT lines high -> not busy */
+		return false;        /* DAT0 high -> not busy */
 	}
 }
 

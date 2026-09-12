@@ -43,6 +43,59 @@ from alp_orchestrate import load_board_yaml  # noqa: E402
 # ---------------------------------------------------------------------
 
 
+# Top-level `emit_build_plan` envelope keys whose value is read from ambient
+# process/repository state AT CALL TIME rather than derived from the
+# `project` / `board_yaml` / `build_root` inputs a comparison test varies.
+# Verified by tracing `emit_build_plan`'s full call graph (buildplan.py plus
+# every helper it reaches in headers.py / kconfig.py / secure.py /
+# orchestrator.py) for subprocess/time/env/hostname reads -- the only such
+# call site in the whole reachable set is `buildplan._sdk_commit`.
+#
+#   * `sdkCommit` -- `_sdk_commit()` shells out to a live `git -C <repo>
+#     rev-parse --short HEAD` on every single call.  Any concurrent commit,
+#     rebase, or branch switch in the same worktree between two calls moves
+#     it, with nothing to do with either call's inputs -- this is the exact
+#     2026-09-06 failure (issue #2014):
+#     `{'sdkCommit': '3dadd4584'} != {'sdkCommit': 'a284f7647'}`, every other
+#     key byte-identical.  Whole-envelope equality across two calls
+#     therefore asserts a property ("nothing else touched the checkout
+#     meanwhile") this test was never meant to guard.
+#
+# `sdkVersion` (`_sdk_commit`'s neighbour, `_sdk_version()`) is deliberately
+# NOT in this set even though it is also a call-time repository read: it
+# comes from `metadata/sdk_version.yaml` and only moves on a deliberate
+# release-version bump (`scripts/bump_version.py`), never as a side effect
+# of ordinary concurrent commit/rebase/branch-switch activity -- the same
+# asymmetry `scripts/check_emit_snapshots.py::_normalize_provenance` already
+# encodes for the golden-snapshot gate (it tokenises `sdkCommit` but
+# "deliberately left [sdkVersion] real"). Adding it here too would be an
+# over-broad exclusion, not a verified one: it would mask a real regression
+# where `sdkVersion` genuinely goes wrong.
+#
+# `tests/parity/seam1_field_diff.py:350-355` drops `sdkVersion` too, which
+# looks like a contradiction of the paragraph above until the comparison it
+# is doing is named: that harness diffs a FROZEN cross-release oracle
+# (`tests/parity/oracle/*.json`, pinned to whatever SDK version was checked
+# out when the oracle was captured, e.g. 0.11.1) against a fresh emit from
+# THIS checkout's version (e.g. 0.16.0) -- `sdkVersion` is GUARANTEED to
+# differ there, by construction, on every version-bump PR since the oracle
+# was last regenerated, with zero shape change. Dropping it is correct for
+# that comparison for exactly the opposite reason `sdkVersion` stays in
+# THIS file's comparisons: here both calls run back-to-back against the
+# SAME checkout, so `sdkVersion` differing would be a real signal, not
+# guaranteed noise.
+_ENV_DERIVED_ENVELOPE_FIELDS = frozenset({"sdkCommit"})
+
+
+def _without_env_derived_fields(plan: dict) -> dict:
+    """A copy of a parsed build-plan envelope minus
+    `_ENV_DERIVED_ENVELOPE_FIELDS` -- the single helper every
+    whole-envelope comparison test in this file must route through, so the
+    exclusion can never silently drift out of lockstep between call
+    sites."""
+    return {k: v for k, v in plan.items() if k not in _ENV_DERIVED_ENVELOPE_FIELDS}
+
+
 V2N_BOOT_MCUBOOT = """
 som:
   sku: E1M-V2N101
@@ -168,8 +221,24 @@ def test_emit_build_plan_carries_sdk_provenance(tmp_path: Path) -> None:
     """The envelope's `sdkVersion`/`sdkCommit` (additive, ADR 0014 -- no
     schemaVersion bump) trace a plan back to the planner that produced it:
     `sdkVersion` matches metadata/sdk_version.yaml's `version:` verbatim,
-    and `sdkCommit` is either a short git commit or null (never a crash)
-    when git is unavailable."""
+    and `sdkCommit` is either a lowercase-hex git commit or null.
+
+    This is the ONE place in the file that checks `sdkCommit`'s shape --
+    `test_emit_build_plan_app_paths_independent_of_cwd` (#2014) excludes
+    the field from its whole-envelope comparison rather than re-asserting
+    its shape here a second time.
+
+    `None` IS a legitimate value, not a swallowed failure: `_sdk_commit()`
+    (`buildplan.py:337-354`) returns it only when the `git` subprocess call
+    itself raises (`CalledProcessError`/`OSError` -- no `git` binary, no
+    `.git` dir, e.g. a wheel-installed CLI with no checkout), never as a
+    silent fallback from a call that actually ran. That degrade path has
+    its own dedicated, isolated test --
+    `test_sdk_commit_degrades_to_none_when_git_unavailable` monkeypatches
+    `subprocess.run` to raise and asserts `_sdk_commit() is None` directly
+    -- so tolerating `None` here does not hide a regression in that path;
+    it just means this end-to-end test doesn't re-assert which of the two
+    documented outcomes a real git checkout happens to produce."""
     import json as _json
     import re
     from alp_orchestrate import emit_build_plan
@@ -184,7 +253,8 @@ def test_emit_build_plan_carries_sdk_provenance(tmp_path: Path) -> None:
     want_version = re.search(
         r"^version:\s*(\S+)", sdk_version_yaml, re.MULTILINE).group(1)
     assert plan["sdkVersion"] == want_version
-    assert plan["sdkCommit"] is None or isinstance(plan["sdkCommit"], str)
+    assert plan["sdkCommit"] is None or re.fullmatch(
+        r"[0-9a-f]+", plan["sdkCommit"])
 
 
 def test_sdk_commit_degrades_to_none_when_git_unavailable(monkeypatch) -> None:
@@ -261,16 +331,30 @@ cores:
                for a in m33["configArtefacts"])
 
 
-def test_emit_build_plan_deterministic(tmp_path: Path) -> None:
-    """Spec parity with the other emits: byte-identical re-runs."""
-    from alp_orchestrate import emit_build_plan
+def test_emit_build_plan_deterministic(tmp_path: Path, monkeypatch) -> None:
+    """Spec parity with the other emits: byte-identical re-runs -- the
+    actual serialized bytes (key order, `indent=2`, the trailing newline
+    `emit_build_plan` appends), not just the parsed fields. `_sdk_commit`
+    is pinned to a constant (issue #2014) rather than excluded from the
+    comparison: a concurrent commit landing in the same worktree between
+    the two calls below would otherwise move `sdkCommit` for a reason that
+    has nothing to do with THIS emitter's own determinism for a fixed set
+    of inputs, the property under test -- but pinning beats excluding here,
+    for free: unlike the CWD-independence test below, this test owns both
+    calls back-to-back with no real work in between, so one monkeypatched
+    return value covers both and the byte-identity claim stays intact for
+    every field, `sdkCommit` included."""
+    import json as _json
+    from alp_orchestrate import buildplan, emit_build_plan
 
+    monkeypatch.setattr(buildplan, "_sdk_commit", lambda: "0000000")
     path = _write_board(tmp_path, V2N_HAPPY)
     out_a = emit_build_plan(load_board_yaml(path), board_yaml=path,
                             build_root=Path("build"))
     out_b = emit_build_plan(load_board_yaml(path), board_yaml=path,
                             build_root=Path("build"))
     assert out_a == out_b
+    assert _json.loads(out_a)["sdkCommit"] == "0000000"
 
 
 def test_emit_build_plan_writes_nothing(
@@ -667,7 +751,15 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     directory the emitting process happens to be running from --
     the #596 repro (`west build`'s target used to fall back to the
     repo root because the CWD-anchored resolve missed the app dir and
-    the parent CMakeLists.txt fallback silently matched the root)."""
+    the parent CMakeLists.txt fallback silently matched the root).
+
+    Compared minus `_ENV_DERIVED_ENVELOPE_FIELDS` (issue #2014): those keys
+    read live process/repository state (see that constant's comment) that a
+    concurrent commit/rebase/branch-switch in the same worktree can change
+    between the two `emit_build_plan()` calls below, for reasons that have
+    nothing to do with CWD -- the property this test exists to pin. Every
+    path, token, and slice this test actually cares about is still compared
+    byte-for-byte via plain dict equality."""
     import json as _json
     from alp_orchestrate import emit_build_plan
 
@@ -689,7 +781,13 @@ def test_emit_build_plan_app_paths_independent_of_cwd(
     plan_other_dir = _json.loads(emit_build_plan(
         load_board_yaml(path), board_yaml=path, build_root=Path("build")))
 
-    assert plan_same_dir == plan_other_dir
+    assert (_without_env_derived_fields(plan_same_dir)
+            == _without_env_derived_fields(plan_other_dir))
+    # The excluded field's own shape (lowercase-hex-or-None, never a crash)
+    # is not re-asserted here -- that would be a verbatim duplicate of
+    # `test_emit_build_plan_carries_sdk_provenance`, which already owns it
+    # and adds no coverage repeated a second time in a test whose subject
+    # is CWD-independence, not `sdkCommit`'s shape.
 
     m33 = next(s for s in plan_other_dir["slices"] if s["coreId"] == "m33_sm")
     # Correctly anchored on the project dir -- NOT the unrelated CWD, and

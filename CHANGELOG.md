@@ -1860,7 +1860,7 @@ unattested-`0x0BE12477` claim still stands, uncorrected, in:
   — fix the source, not this file)
 - `metadata/chips/gd32_swd.yaml:49` (`target_expected_idcode:
   "0x6BA02477"`)
-- `docs/bring-up-aen.md:87` (calls `0x6BA02477` "the generic ...
+- `docs/bring-up-aen.md:111` (calls `0x6BA02477` "the generic ...
   [value] this repo reads for the GD32/Cortex-M33")
 - `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md:34,84,160,187`
 - `docs/superpowers/plans/2026-06-01-gd32-flash-release.md:544,703`

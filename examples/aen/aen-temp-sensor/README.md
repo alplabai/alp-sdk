@@ -25,9 +25,17 @@ it from the board layer rather than each one re-declaring it. The file still
 has to exist under its fully-qualified name, because that is the only name
 Zephyr auto-applies.
 
-`CONFIG_TMP112` is not written into `prj.conf`: upstream declares it
-`default y depends on DT_HAS_TI_TMP112_ENABLED`, so the enabled DT node turns
-the driver on and `select I2C` pulls the bus in behind it.
+`CONFIG_TMP112=y` **is** written into `prj.conf`, explicitly, as of
+[alplabai/alp-sdk#2043](https://github.com/alplabai/alp-sdk/issues/2043).
+Upstream still declares it `default y depends on DT_HAS_TI_TMP112_ENABLED`,
+but the E1M-AEN801 board's own `Kconfig.defconfig` now defaults TMP112 to
+`n` board-wide -- alp-sdk's own `chips/tmp112/tmp112.c` and upstream's
+`zephyr/drivers/sensor/ti/tmp112/tmp112.c` both define `tmp112_init`, and an
+app that links both collides at LINK time, so the board no longer turns the
+upstream driver on for free. This app is the one AEN801 app that genuinely
+wants the upstream driver, so it asks for it by name; the explicit `y` still
+overrides the board's `default n` and still pulls `CONFIG_I2C` in behind it
+(`select I2C`).
 
 ## Build
 

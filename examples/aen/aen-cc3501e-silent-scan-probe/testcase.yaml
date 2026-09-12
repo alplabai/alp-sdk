@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E silent-scan probe on the E1M-AEN801
+# (Ensemble E8, M55-HE): compiles the raw single-submit WIFI_SCAN_START path,
+# the 25-second load-bearing silence, and the normal cc3501e_wifi_scan()
+# wrapper call against the real board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- this app needs the real inter-chip SPI1 link and a
+# CC3501E actually running its firmware; a compile check here only proves
+# the build, not whether the link survives the silence.
+
+sample:
+  name: aen-cc3501e-silent-scan-probe
+  description: |
+    Submits WIFI_SCAN_START exactly once through the raw cc3501e_request()
+    path (no polling), then issues nothing at all on the SPI1 bus for 25
+    seconds, then a single confirming PING, then a normal scan through the
+    ordinary cc3501e_wifi_scan() wrapper. Tests whether a completely silent
+    host bus during the firmware's radio work lets a WIFI_SCAN_START-wedged
+    link recover on its own -- see src/main.c's file header for the two
+    mechanisms this separates. Declares the run VOID and stops rather than
+    continue into the silence if the submit itself does not get its
+    expected busy-style acknowledgement.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_silent_scan_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+    build_only: true   # the silence result needs the real bench.

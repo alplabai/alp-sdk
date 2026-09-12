@@ -36,16 +36,27 @@
 # Workspace + Zephyr
 # --------------------------------------------------------------------
 
-# BENCH_ROOT — where build outputs live. Defaults to the alp-sdk repo
-# root (git toplevel); override to keep build dirs outside the tree.
+# BENCH_ROOT — where build outputs live. Derived from this file's own
+# location (scripts/bench/aen/.. -> repo root); override to keep build dirs
+# outside the tree.
+#
+# Deliberately does NOT shell out to `git rev-parse --show-toplevel`, which is
+# what this used to do. In a worktree-isolated session the harness does not
+# merely make that call FAIL -- it KILLS it, so the `2>/dev/null` and the
+# empty-string fallback below never got a chance to run: sourcing this file
+# aborted the caller with rc=128 and NO OUTPUT AT ALL.
+#
+# That is the exact silent-failure mode openocd-ram-run.sh's own SAFETY GATE
+# comment exists to prevent, and it cost a bench cold-cycle on 2026-09-11
+# before an operator worked it out and exported BENCH_ROOT by hand.
+#
+# The path derivation was already here as the fallback and is strictly better
+# for this purpose: this file lives at a fixed depth inside the repo, so it is
+# deterministic, needs no subprocess, and works in a worktree, a plain
+# checkout, and an extracted archive alike.
 if [ -z "${BENCH_ROOT:-}" ]; then
-	BENCH_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
-	# Fall back to two levels up from this file (scripts/bench/aen/..)
-	# if we're not inside a git checkout for some reason.
-	if [ -z "$BENCH_ROOT" ]; then
-		_self="${BASH_SOURCE[0]:-$0}"
-		BENCH_ROOT="$(cd "$(dirname "$_self")/../../.." && pwd)"
-	fi
+	_self="${BASH_SOURCE[0]:-$0}"
+	BENCH_ROOT="$(cd "$(dirname "$_self")/../../.." && pwd)"
 fi
 export BENCH_ROOT
 

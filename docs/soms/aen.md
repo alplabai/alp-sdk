@@ -117,13 +117,30 @@ CONFIG_RTC_RV3028=y
 
 # Thermometer
 CONFIG_SENSOR=y
+CONFIG_TMP112=y
 ```
 
-`CONFIG_RTC_RV3028` and `CONFIG_TMP112` are both `default y` off their
-devicetree nodes, and `CONFIG_TMP112` additionally `select`s I2C. Naming
-`CONFIG_TMP112` by hand is a mistake, not a belt-and-braces: on any target
-without a `ti,tmp112` node the assignment has an unmet dependency and the
-build warns. Let the devicetree drive it.
+`CONFIG_RTC_RV3028` is `default y` off its devicetree node -- naming it by
+hand is a mistake, not a belt-and-braces: on any target without the
+`microcrystal,rv3028` node the assignment has an unmet dependency and the
+build warns, so let the devicetree drive it.
+
+`CONFIG_TMP112` is different, as of
+[alplabai/alp-sdk#2043](https://github.com/alplabai/alp-sdk/issues/2043):
+upstream still declares it `default y depends on DT_HAS_TI_TMP112_ENABLED`
+and it still `select`s I2C, but the E1M-AEN801 board's own
+`Kconfig.defconfig` now ALSO defaults TMP112 to `n` board-wide, because
+alp-sdk's own `chips/tmp112/tmp112.c` and upstream's
+`zephyr/drivers/sensor/ti/tmp112/tmp112.c` both define `tmp112_init` and an
+app linking both collides at LINK time. An app that wants the upstream
+driver now names `CONFIG_TMP112=y` explicitly -- the board default only
+supplies the value nothing else assigns, so the explicit `y` still wins over
+it. Confirmed on the real board target: `west build -p always -b
+alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-temp-sensor`
+links `zephyr/drivers/sensor/ti/tmp112/libdrivers__sensor__ti__tmp112.a`,
+and the resolved `.config` carries `CONFIG_TMP112=y` with the board's
+`default n` in force. The unmet-dependency warning above still applies on
+any board with no `ti,tmp112` node.
 
 Worked examples:
 
