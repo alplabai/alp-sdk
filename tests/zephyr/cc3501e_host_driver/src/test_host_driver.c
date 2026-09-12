@@ -1677,11 +1677,12 @@ ZTEST(cc3501e_host_driver, test_wifi_connect_bounds_status_attempts_on_wedged_tr
 	g_status_io_down_remaining = UINT32_MAX;
 	alp_status_t s             = cc3501e_wifi_connect(&fw, "wedgednet", 1u, "pw", 200u);
 	zassert_equal(s, ALP_ERR_TIMEOUT, "permanently wedged transport -> bounded TIMEOUT");
-	zassert_equal(slave.wifi_status_attempt_count, 6u,
-	             "WIFI_STATUS attempts must be EXACTLY 1 entry-check read + floor(200/50)+1 "
-	             "= 6 loop reads, bounded by connect()'s own 200 ms budget and not by an inner "
-	             "down-window retry loop it doesn't account for (got %u attempts)",
-	             slave.wifi_status_attempt_count);
+	zassert_equal(slave.wifi_status_attempt_count,
+	              6u,
+	              "WIFI_STATUS attempts must be EXACTLY 1 entry-check read + floor(200/50)+1 "
+	              "= 6 loop reads, bounded by connect()'s own 200 ms budget and not by an inner "
+	              "down-window retry loop it doesn't account for (got %u attempts)",
+	              slave.wifi_status_attempt_count);
 }
 
 /* #1481 regression: a HEALTHY poll (every WIFI_STATUS read returns ALP_OK,
