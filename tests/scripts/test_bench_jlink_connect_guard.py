@@ -1199,3 +1199,173 @@ def test_every_atoc_committing_script_calls_the_shared_guard() -> None:
     ):
         body = (BENCH / script).read_text(encoding="utf-8")
         assert "bench_atoc_replace_guard" in body, f"{script} does not call the shared ATOC guard"
+
+
+# --- alp-sdk#2027: bench_flowd_atoc_guard, the Flow D (no-SE-UART-by-design)
+# follow-up to bench_atoc_replace_guard above -----------------------------
+#
+# flash-jlink.sh / flash-jlink-hp.sh / flash-jlink-mramxip.sh write the same
+# replacing ATOC over SWD that Flow A writes over $SE_UART, but Flow D's
+# whole premise is "J-Link only, no serial device required" (#2025/#2026),
+# so PR #2029 made an EXPLICIT --atoc-unqueryable acknowledgement the interim
+# fix instead of wiring the SE_UART-only guard in unconditionally (which
+# would have made SE_UART a hard requirement of Flow D -- the one thing this
+# issue exists to avoid). bench_flowd_atoc_guard is the follow-up that closes
+# the other half: when $SE_UART happens to be exported and usable, it is no
+# longer optional whether the resident ATOC gets checked.
+
+
+def _call_flowd_guard(
+    tmp_path: Path,
+    replace_atoc: str,
+    unqueryable: str,
+    allowed: list[str],
+    se_uart: str | None,
+    gettoc_output: str | None,
+    setools_has_maintenance: bool = True,
+    tag: str = "flowd-test",
+    tmpdir: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run bench_flowd_atoc_guard (bench-env.sh, alp-sdk#2027) against a
+    synthetic `maintenance -opt gettoc` transcript, without touching any
+    real bench, SETOOLS install, or probe.
+
+    Same file-based-script / stub-maintenance discipline as
+    `_call_atoc_guard` above -- a compliant `getbanner` is hardcoded into the
+    stub (this suite's SE_UART-present cases care about the gettoc table,
+    not the banner-parsing edge cases `_call_atoc_guard`'s own tests already
+    cover in isolation).
+    """
+    workdir = tmp_path
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    setools_dir = workdir / "setools-flowd"
+    setools_dir.mkdir(exist_ok=True)
+    if setools_has_maintenance:
+        maint = setools_dir / "maintenance"
+        maint.write_text(
+            '#!/usr/bin/env bash\n'
+            'opt=""\n'
+            'prev=""\n'
+            'for a in "$@"; do\n'
+            '\t[ "$prev" = "-opt" ] && opt="$a"\n'
+            '\tprev="$a"\n'
+            'done\n'
+            'if [ "$opt" = "getbanner" ]; then\n'
+            '\tprintf "%s\\n" "SES A1 v1.110.0 Mar  4 2026 19:06:23"\n'
+            '\texit 0\n'
+            'fi\n'
+            'cat "$ATOC_STUB_FILE"\n'
+            'exit 0\n',
+            encoding="utf-8",
+        )
+        maint.chmod(0o755)
+    stub = workdir / "flowd-gettoc.out"
+    stub.write_text(gettoc_output or "", encoding="utf-8")
+
+    se_uart_line = f'export SE_UART="{se_uart}"\n' if se_uart is not None else ""
+    tmpdir_line = f'export TMPDIR="{tmpdir}"\n' if tmpdir is not None else ""
+    gate = workdir / "flowd-gate.sh"
+    gate.write_bytes(
+        (
+            f"{tmpdir_line}"
+            f'export SETOOLS_DIR="{setools_dir.name}"\n'
+            f"{se_uart_line}"
+            "source ./bench-env.sh\n"
+            f'export ATOC_STUB_FILE="{stub}"\n'
+            f'bench_flowd_atoc_guard "{replace_atoc}" "{unqueryable}" {tag} {" ".join(allowed)}\n'
+            "exit $?\n"
+        ).encode("utf-8")
+    )
+    return subprocess.run(
+        ["bash", "flowd-gate.sh"], cwd=workdir, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_flowd_guard_with_se_uart_runs_the_shared_guard_and_refuses(tmp_path):
+    """SE_UART exported: alp-sdk#2027's whole point -- Flow D must run the
+    SAME query-based guard Flow A uses, not a second, weaker one. A resident
+    A32 Linux boot chain not in the caller's allowed set must abort exactly
+    like Flow A does (exit 5), naming what would be delisted. Passing
+    --atoc-unqueryable alongside must NOT be a way around this -- it is the
+    no-SE-UART acknowledgement, and a real check just ran."""
+    res = _call_flowd_guard(
+        tmp_path, "0", "1", ["ALP-HE"], "fake-uart", _REAL_MULTI_ENTRY_ATOC
+    )
+    assert res.returncode == 5, res.stderr
+    assert "this write REPLACES" in res.stderr
+    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
+        assert entry in res.stderr, f"guard did not name {entry} as a delisted entry"
+    assert "proceeding WITHOUT the resident-ATOC check" not in res.stderr, (
+        "--atoc-unqueryable must not silence a real, SE_UART-backed check"
+    )
+
+
+@_NEEDS_BASH
+def test_flowd_guard_with_se_uart_and_clean_board_proceeds(tmp_path):
+    """SE_UART exported and the board carries only DEVICE + the caller's own
+    entry: the real query passes, exactly as it would for Flow A."""
+    res = _call_flowd_guard(
+        tmp_path, "0", "0", ["ALP-HE"], "fake-uart", _ONLY_ALLOWED_ATOC
+    )
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_flowd_guard_with_se_uart_replace_atoc_bypasses_a_foreign_entry(tmp_path):
+    """--replace-atoc still works as the explicit override in the SE_UART
+    branch, exactly as it does for Flow A: Flow D gains the SAME capability
+    Flow A has here, not a separate one."""
+    res = _call_flowd_guard(
+        tmp_path, "1", "0", ["ALP-HE"], "fake-uart", _REAL_MULTI_ENTRY_ATOC
+    )
+    assert res.returncode == 0, res.stderr
+
+
+@_NEEDS_BASH
+def test_flowd_guard_without_se_uart_and_without_flag_aborts(tmp_path):
+    """SE_UART unset, no --atoc-unqueryable: the #2029 interim behaviour must
+    be unchanged -- abort (exit 8), not fail some other way and not silently
+    proceed. The message must name BOTH ways forward (export SE_UART so the
+    guard above can run for real, or pass the flag), never just one."""
+    res = _call_flowd_guard(tmp_path, "0", "0", ["ALP-HE"], None, None)
+    assert res.returncode == 8, res.stderr
+    assert "REFUSING TO WRITE" in res.stderr
+    assert "export SE_UART=" in res.stderr, "must name exporting SE_UART as a way forward"
+    assert "--atoc-unqueryable" in res.stderr, "must name the flag as the other way forward"
+
+
+@_NEEDS_BASH
+def test_flowd_guard_without_se_uart_and_with_flag_proceeds_and_says_so(tmp_path):
+    """SE_UART unset, --atoc-unqueryable passed: proceed (exit 0), and print
+    the one-line statement that the resident-ATOC check did NOT run and why
+    -- a skipped check must never read like a passed one."""
+    res = _call_flowd_guard(tmp_path, "0", "1", ["ALP-HE"], None, None)
+    assert res.returncode == 0, res.stderr
+    assert "SE_UART is unset -- proceeding WITHOUT the resident-ATOC check" in res.stderr
+    assert "--atoc-unqueryable" in res.stderr
+
+
+@_NEEDS_BASH
+def test_flowd_guard_aborts_when_maintenance_tool_is_missing_despite_se_uart(tmp_path):
+    """SE_UART set but no `maintenance` binary in SETOOLS_DIR: the query
+    cannot actually run, so this must land in bench_atoc_replace_guard's own
+    unverified path (exit 5), not silently pass as if SE_UART merely being
+    set were the whole check."""
+    res = _call_flowd_guard(
+        tmp_path, "0", "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+
+
+def test_every_flowd_atoc_writer_calls_the_flowd_guard() -> None:
+    """The three SE-UART-less-by-design Flow D writers (alp-sdk#2027) must
+    route through bench_flowd_atoc_guard specifically -- not a hand-rolled
+    copy of its SE_UART-gated decision, and not a bare
+    bench_atoc_replace_guard call (which would make SE_UART a hard
+    requirement of Flow D, the one thing #2027 exists to avoid)."""
+    for script in ("flash-jlink.sh", "flash-jlink-hp.sh", "flash-jlink-mramxip.sh"):
+        body = (BENCH / script).read_text(encoding="utf-8")
+        assert "bench_flowd_atoc_guard" in body, f"{script} does not call bench_flowd_atoc_guard"
