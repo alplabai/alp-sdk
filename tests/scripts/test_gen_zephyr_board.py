@@ -28,6 +28,7 @@ either board's claim set.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -594,6 +595,63 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("on-module-links.yaml", str(ctx.exception))
         self.assertIn("rtc_alarm.risk", str(ctx.exception))
+
+    def test_e1m_i2c0_bench_validation_is_scoped_to_the_part_it_was_measured_on(
+            self) -> None:
+        """`on_module_links.e1m_i2c0.bench_validation` is a per-part map,
+        same pattern as `rtc_alarm.risk` (#1988) -- its only entry (`E8`) is
+        evidenced against an E8 bench run, so a board tree for any OTHER
+        part must say so instead of inheriting the E8 citation unqualified
+        (#2046).  Unlike `rtc_alarm.risk`, the citation itself must still
+        appear (not be silently dropped) because the emitted pad VALUE is
+        unchanged and correct for every part -- only the claim of WHICH
+        part it was bench-validated on must not overreach."""
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E3")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            pinctrl = files[
+                "alp_e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp-pinctrl.dtsi"]
+        # Comment prose is reflowed to house-style width, so match on text
+        # with the `\n\t * ` line-continuation markers collapsed out rather
+        # than a literal substring that could straddle a wrapped line break.
+        flat = " ".join(
+            re.sub(r"\n\s*\*\s?", " ", pinctrl).split())
+        self.assertIn("bench-validated ONLY on the E8", flat)
+        self.assertIn("NOT been", flat)
+        self.assertIn("independently repeated on the E3", flat)
+        # Still bias-pull-down: #2046 is explicit that the emitted pad VALUE
+        # never changes on the strength of either part-scoping or either
+        # pull-direction reading.
+        self.assertIn("bias-pull-down;", pinctrl)
+        self.assertNotIn("Ensemble E8", pinctrl)
+        self.assertNotIn("Alif E8", pinctrl)
+
+        # The genuine, unmutated E8 board must still cite its own bench run
+        # plainly, without the "NOT been independently repeated" hedge.
+        real_files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
+        real_pinctrl = real_files[
+            "alp_e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp-pinctrl.dtsi"]
+        self.assertIn(
+            "input-enable + bias-pull-down: bench-validated 2026-06-15 on "
+            "the E8,", real_pinctrl)
+        self.assertNotIn("bench-validated ONLY on the E8", real_pinctrl)
+
+    def test_e1m_i2c0_bench_validation_must_be_a_part_keyed_map(self) -> None:
+        """`_load_aen_on_module_links()` shape-checks
+        `e1m_i2c0.bench_validation` the same way it already shape-checks
+        `rtc_alarm.risk` (#1988, #2046): reverting the YAML to a flat-string
+        form must raise `ZephyrBoardEmitError`, naming the file, rather than
+        an uncaught `AttributeError` from the `.get(part)` lookup deep in
+        `_aen_e1m_i2c0_pinctrl_group()`."""
+        with _MutatedMetadata() as mm:
+            mm.sub(
+                "e1m_modules/aen/on-module-links.yaml",
+                "    bench_validation:\n      E8: >-\n",
+                "    bench_validation: >-\n")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("on-module-links.yaml", str(ctx.exception))
+        self.assertIn("e1m_i2c0.bench_validation", str(ctx.exception))
 
     def test_peripherals_overlay_is_read_from_the_soc_json(self) -> None:
         with _MutatedMetadata() as mm:

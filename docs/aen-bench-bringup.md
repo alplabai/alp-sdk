@@ -503,8 +503,15 @@ secure-boot verification — always write both consistent blobs.
   **`input-enable`** (sets the pad REN bit so `i2c_dw` can read SDA/SCL — ACK
   detect + clock-stretch) and **`bias-pull-down`** (upstream `pinctrl_soc.h`
   encodes this as the pad driver-state-control field **DSC=2**, exactly Alif's
-  I2C value — `bias-pull-up` gives DSC=1 and a dead bus; the upstream binding's
-  pull naming is effectively inverted vs the Alif pad HW). With that,
+  I2C value). This is a REAL pull-down, not an inverted encoding:
+  `pinctrl_soc.h`'s `ALIF_PINCTRL_BIAS_CFG()` macro
+  (`soc/alif/ensemble/pinctrl_soc.h:44-48`) maps `bias-pull-up` → DSC=1 and
+  `bias-pull-down` → DSC=2 unconditionally, matching the field comment at line
+  24. It is harmless here because the EVK carrier's R137/R144 pull-ups
+  dominate a weak internal pull-down. Switching to `bias-pull-up` was earlier
+  reported to give a dead bus, blamed on a nonexistent encoding inversion —
+  that report is unconfirmed, not disproven, absent a fresh bench trial
+  (alp-sdk#2046). With that,
   `examples/aen/aen-eeprom-manifest` reads the EEPROM at 0x50 — which ACKs and
   returns a **populated Alp manifest** (not blank): magic `ALPH`, SKU, serial,
   mfg date, and a matching CRC-32 all decode (the EEPROM is one of 12 devices on

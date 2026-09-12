@@ -168,6 +168,25 @@ on_module_links:
     # 100 kHz standard mode, matching the bench-validated
     # aen-i2c2-eeprom-regcheck / aen-eeprom-manifest overlays.
     clock_frequency_macro: I2C_BITRATE_STANDARD
+    # Pad config (input-enable + bias-pull-down) is bench-validated ONLY on
+    # the part(s) keyed below -- same per-part-map pattern rtc_alarm.risk
+    # uses (#1988).  Keyed by the SoC's own `part` designator ("E8", "E3",
+    # ...), NOT by family: this file's `families: [aen]` scope covers every
+    # AEN SKU, but a bench run against one part's silicon is not evidence
+    # for another's.  Unlike rtc_alarm.risk, a part with no key here does
+    # NOT get silence in the generated comment -- gen_zephyr_board.py's
+    # `_aen_e1m_i2c0_pinctrl_group()` still cites the E8 run and states
+    # explicitly that it was not repeated on that part, because the
+    # emitted pad VALUE is unchanged and still correct for every part
+    # (#2046).  Do not add an entry without an actual bench run against
+    # that part's own silicon.
+    bench_validation:
+      E8: >-
+        bench-validated 2026-06-15 on the E8, matching Alif's own
+        reference I2C pinctrl -- see the identical, verbatim-copied group
+        in examples/aen/aen-i2c2-eeprom-regcheck's board overlay and
+        examples/aen/aen-eeprom-manifest's overlay, both of which cite
+        the same date.
     pins:
       - silicon_peripheral: "I2C2_SDA_C"
         silicon_pad: "P5_7"
@@ -175,14 +194,12 @@ on_module_links:
           metadata/e1m_modules/aen/from-alif.tsv row AD2 I2C0_SDA
           I2C2_SDA_C P5_7 (projected, byte-for-byte, into
           metadata/pinmux/aen.yaml's e1m_pad "AD2" row) gives the AE822
-          DFP alt-function assignment P5_7 = I2C2_SDA_C.  Pad config
-          (input-enable + bias-pull-down) bench-validated 2026-06-15 on
-          the E8 -- see the identical, verbatim-copied group in
-          examples/aen/aen-i2c2-eeprom-regcheck's board overlay and
-          examples/aen/aen-eeprom-manifest's overlay, both of which cite
-          the same date.  NO E1M-AEN-2626-R2 netlist net name has been
-          read for this ball yet (unlike BRD_I2C_SDA/SCL above) -- do
-          not infer one; add it only from an actual netlist row.
+          DFP alt-function assignment P5_7 = I2C2_SDA_C.  NO
+          E1M-AEN-2626-R2 netlist net name has been read for this ball
+          yet (unlike BRD_I2C_SDA/SCL above) -- do not infer one; add it
+          only from an actual netlist row.  Pad-config bench evidence is
+          this entry's own `bench_validation:` map above, not here
+          (#2046).
       - silicon_peripheral: "I2C2_SCL_C"
         silicon_pad: "P5_6"
         evidence: >-
@@ -190,8 +207,9 @@ on_module_links:
           I2C2_SCL_C P5_6 (projected, byte-for-byte, into
           metadata/pinmux/aen.yaml's e1m_pad "AE2" row) gives the AE822
           DFP alt-function assignment P5_6 = I2C2_SCL_C.  Same
-          2026-06-15 bench-validated pad config and same netlist-net-name
-          caveat as I2C2_SDA_C above.
+          netlist-net-name caveat as I2C2_SDA_C above; same
+          `bench_validation:` map for the pad-config bench evidence
+          (#2046).
 
   # RV-3028 /INT (U21 pin 2) -> net RTC_ALARM -> SoC pad P15_0_FLEX.
   rtc_alarm:
