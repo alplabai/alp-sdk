@@ -142,9 +142,19 @@ typedef uint64_t adma2_desc_t;
 #define DWC_SDHC_CMD_INHIBIT_Msk             1U
 #define DWC_SDHC_DAT_INHIBIT_Msk             2U
 #define DWC_SDHC_CARD_INSRT_Msk              0x00010000U
-#define DWC_SDHC_CMD_LINE_LVL_UP_Pos         23U
-#define DWC_SDHC_CMD_LINE_LVL_UP_Msk         BIT(DWC_SDHC_CMD_LINE_LVL_UP_Pos)
-#define DWC_SDHC_CMD_DATA_LINE_STATUS_Msk    0x01F00000U
+/*
+ * DAT[3:0] Line Signal Level occupies bits [23:20]; CMD Line Signal Level is
+ * the single bit above it, bit 24. This was previously misnamed
+ * DWC_SDHC_CMD_LINE_LVL_UP_Pos = 23U, which is DAT3, not CMD (#2042) -- the
+ * two macros below give each signal its own accessor, and
+ * DWC_SDHC_CMD_DATA_LINE_STATUS_Msk stays defined in terms of both so the
+ * three can't drift apart again.
+ */
+#define DWC_SDHC_DAT_LINE_LVL_Pos         20U
+#define DWC_SDHC_DAT_LINE_LVL_Msk         (0x0FU << DWC_SDHC_DAT_LINE_LVL_Pos)
+#define DWC_SDHC_CMD_LINE_LVL_Pos         24U
+#define DWC_SDHC_CMD_LINE_LVL_Msk         BIT(DWC_SDHC_CMD_LINE_LVL_Pos)
+#define DWC_SDHC_CMD_DATA_LINE_STATUS_Msk (DWC_SDHC_DAT_LINE_LVL_Msk | DWC_SDHC_CMD_LINE_LVL_Msk)
 
 /*
  * ===========================================================
