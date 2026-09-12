@@ -377,10 +377,17 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  * @param ctx    Initialised driver context.
  * @param iface  One of @ref alp_cc3501e_wifi_iface_t.
  * @param ip     Receives the 4 IPv4 octets, network order (ip[0] = MSB).
- * @return ALP_OK with @p ip filled; ALP_ERR_NOT_READY if that interface has no
- *         address yet -- no DHCP lease for STA, or the AP role not up for AP
- *         (firmware RESP_ERR_NOT_READY); ALP_ERR_IO on a short reply; or the
- *         mapped error.
+ * @return ALP_OK with @p ip filled.
+ *         ALP_ERR_NOT_READY -- the firmware decoded the request and answered
+ *         @c ALP_CC3501E_RESP_ERR_RADIO, its only status for "no address on
+ *         this interface yet" (network stack not up, address lookup failed,
+ *         or a genuine 0.0.0.0 lease): STA has associated but has no DHCP
+ *         lease yet, or the AP role isn't up.  Poll again.
+ *         ALP_ERR_IO -- the transport itself failed, or the reply was
+ *         malformed/short: a failed SPI transceive, a bad reply header, or
+ *         @c got @c < @c 4.  This is a genuine wire fault, not "no address
+ *         yet" -- do not treat it as retryable in the same way.
+ *         Any other mapped error from @ref cc3501e_request otherwise.
  *
  * @note WIRE: GET_IP has an opcode but NO reply payload struct in the
  *       protocol header; this helper assumes the reply data is 4 IPv4

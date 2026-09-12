@@ -217,6 +217,20 @@ static uint32_t g_get_mac_serve_count;
  * scan acceptance tests below it.  Cleared by slave_reset(). */
 static bool g_force_dead_phase_zero_payload;
 
+/* #2035 mutant controls for cc3501e_wifi_get_ip()'s ALP_ERR_IO/ALP_ERR_NOT_READY
+ * split. Cleared by slave_reset().
+ *   - g_get_ip_no_address: the firmware DECODES the request and answers
+ *     ALP_CC3501E_RESP_ERR_RADIO -- its real "no address on this interface
+ *     yet" status on this opcode -- so ctx->rx_scratch[0] holds a genuine
+ *     decoded status byte.  Must map to ALP_ERR_NOT_READY.
+ *   - g_get_ip_io_down_remaining: the REQUEST HEADER phase transceive fails
+ *     outright, exactly like g_status_io_down_remaining above -- no status is
+ *     ever decoded, so rx_scratch[0] is left poisoned to
+ *     ALP_CC3501E_RX_SCRATCH_NO_STATUS.  Must stay ALP_ERR_IO -- proves the
+ *     fix does not reclassify every failure. */
+static bool     g_get_ip_no_address;
+static uint32_t g_get_ip_io_down_remaining;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -245,6 +259,8 @@ static void slave_reset(void)
 	g_get_mac_serve_count              = 0u;
 	g_bare_ok_legacy                   = false;
 	g_force_dead_phase_zero_payload    = false;
+	g_get_ip_no_address                = false;
+	g_get_ip_io_down_remaining         = 0u;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -530,6 +546,12 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_IP: {
+		if (g_get_ip_no_address) {
+			/* #2035: the real firmware's only status for "no address on this
+			 * interface yet" -- see hal/ti/cc3501e_hw_ti_wifi.c. */
+			stage_status(ALP_CC3501E_RESP_ERR_RADIO);
+			break;
+		}
 		/* On the wire the octets arrive REVERSED (the firmware extracts the lwIP
 		 * network-order u32 MSB-first); the host reverses them back.  Stage the
 		 * wire order for 192.168.1.14 (0xC0A8010E) = {0x0E,0x01,0xA8,0xC0}. */
@@ -726,6 +748,15 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS &&
 	    g_status_io_down_remaining > 0u) {
 		g_status_io_down_remaining--;
+		return ALP_ERR_IO;
+	}
+	/* #2035: same shape as g_status_io_down_remaining above, for
+	 * WIFI_GET_IP -- fails the transaction PRE-DECODE, so no status byte is
+	 * ever decoded and rx_scratch[0] is left poisoned to
+	 * ALP_CC3501E_RX_SCRATCH_NO_STATUS. */
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_GET_IP &&
+	    g_get_ip_io_down_remaining > 0u) {
+		g_get_ip_io_down_remaining--;
 		return ALP_ERR_IO;
 	}
 	/* #1371: fail a GET_VERSION transaction outright -- models the CC3501E's
@@ -1340,6 +1371,33 @@ ZTEST(cc3501e_host_driver, test_wifi_get_ip_byte_order)
 	zassert_equal(ip[1], 168, "ip[1]");
 	zassert_equal(ip[2], 1, "ip[2]");
 	zassert_equal(ip[3], 14, "ip[3] -- 0xC0A8010E -> 192.168.1.14");
+}
+
+/* #2035: the firmware's only status for "no address on this interface yet"
+ * is RESP_ERR_RADIO (see hal/ti/cc3501e_hw_ti_wifi.c) -- a genuinely decoded
+ * reply, so ctx->rx_scratch[0] holds the real status byte.  The host must
+ * disambiguate this from a broken transport and report it distinctly. */
+ZTEST(cc3501e_host_driver, test_wifi_get_ip_no_address_is_not_ready_2035)
+{
+	g_get_ip_no_address = true;
+	uint8_t ip[4]       = { 0xAA, 0xAA, 0xAA, 0xAA };
+	zassert_equal(cc3501e_wifi_get_ip(&fw, ALP_CC3501E_WIFI_IFACE_STA, ip),
+	              ALP_ERR_NOT_READY,
+	              "decoded RESP_ERR_RADIO -> ALP_ERR_NOT_READY, not ALP_ERR_IO");
+}
+
+/* The case that matters (#2035): a genuine transport-level failure -- the
+ * REQUEST HEADER transceive itself fails, so NO status is ever decoded and
+ * ctx->rx_scratch[0] is left at ALP_CC3501E_RX_SCRATCH_NO_STATUS -- must stay
+ * ALP_ERR_IO.  Proves the fix disambiguates rather than reclassifying every
+ * get_ip failure as ALP_ERR_NOT_READY. */
+ZTEST(cc3501e_host_driver, test_wifi_get_ip_transport_failure_stays_io_2035)
+{
+	g_get_ip_io_down_remaining = 1u;
+	uint8_t ip[4]              = { 0xAA, 0xAA, 0xAA, 0xAA };
+	zassert_equal(cc3501e_wifi_get_ip(&fw, ALP_CC3501E_WIFI_IFACE_STA, ip),
+	              ALP_ERR_IO,
+	              "no decoded status -> stays ALP_ERR_IO, not ALP_ERR_NOT_READY");
 }
 
 ZTEST(cc3501e_host_driver, test_wifi_status_decodes_fields)

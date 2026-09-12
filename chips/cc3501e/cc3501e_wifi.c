@@ -719,7 +719,38 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4])
 	                                        sizeof(reply),
 	                                        &got,
 	                                        CC3501E_REQ_TMO_MS);
-	if (s != ALP_OK) return s;
+	if (s != ALP_OK) {
+		/* #2035: WIFI_GET_IP's own firmware handler (hal/ti/cc3501e_hw_ti_wifi.c)
+		 * answers ALP_CC3501E_RESP_ERR_RADIO for THREE distinct "there is no
+		 * address" conditions on this opcode -- the network stack not up, the
+		 * address lookup failing, or a genuine 0.0.0.0 lease -- because it has
+		 * no dedicated "not-ready" status of its own on this path.  Left as
+		 * plain ALP_ERR_IO, that is INDISTINGUISHABLE at the call site from a
+		 * transport that is actually broken (a failed transceive, a malformed
+		 * reply) -- both come back as the same code.  That ambiguity is exactly
+		 * what cost a multi-week bench investigation (#2035): the radio had
+		 * associated (RSSI read -75 dBm right after the "failed" connect,
+		 * corroborated by the scan's identical reading), yet thirty 1 Hz
+		 * get_ip polls all came back ALP_ERR_IO and were read as "the
+		 * instrument did not read" rather than "there is no address" -- because
+		 * the code genuinely could not say which.
+		 *
+		 * The disambiguator is the poisoning guarantee documented on
+		 * ALP_CC3501E_RX_SCRATCH_NO_STATUS and cc3501e_request_locked()'s out:
+		 * label: ctx->rx_scratch[0] holds a real decoded ALP_CC3501E_RESP_ERR_*
+		 * code ONLY when a status byte was genuinely decoded off the wire --
+		 * never leftover residue from a pre-decode failure.  So a RESP_ERR_RADIO
+		 * seen here means the firmware answered and told us it has no address;
+		 * report that distinctly as ALP_ERR_NOT_READY ("poll again").  Any other
+		 * failure -- including this cc3501e_request() call itself returning
+		 * ALP_ERR_IO for a reason OTHER than RESP_ERR_RADIO, or the short-reply
+		 * check below -- is a genuine wire fault and stays ALP_ERR_IO.  Do not
+		 * collapse these back together: that is the bug this fixes. */
+		if (s == ALP_ERR_IO && ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_RADIO) {
+			return ALP_ERR_NOT_READY;
+		}
+		return s;
+	}
 	if (got < 4u) return ALP_ERR_IO;
 	/* Byte-order normalise (host-only): the firmware derives these 4 bytes from the
 	 * lwIP netif address -- a NETWORK-order u32 (netif_ip4_addr()->addr) -- but extracts
