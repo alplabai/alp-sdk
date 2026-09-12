@@ -34,6 +34,22 @@
  * caller timeout can't give up inside the down-window before the radio is up. */
 #define CC3501E_WIFI_DOWN_WINDOW_MS 10000u
 
+/* Minimum budget for a SCAN, which is strictly larger than the plain radio
+ * down-window above because a scan issued as the first Wi-Fi op of a boot pays
+ * the STA role-up first.  The firmware's own bounded worst case, read off
+ * hal/ti/cc3501e_hw_ti_wifi.c: CC3501E_WIFI_ROLE_TIMEOUT_MS = 10 s for the
+ * Wlan_RoleUp, then a 6 s osi_SyncObjWait for the Wlan_Scan result = 16 s.
+ *
+ * A caller budget below that gives up on a HEALTHY board mid-scan, and this is
+ * not hypothetical: a 15 s budget produced `WIFI_SCAN_START rc=-4
+ * elapsed_ms=15062` on silicon, 1062 ms inside the firmware's own bound, and it
+ * was read as a link wedge rather than as the caller's clock running out.  A
+ * budget that cannot express a healthy outcome manufactures failures.
+ *
+ * 20 s = the 16 s bound plus margin for the reply round trip and host
+ * scheduling, the same shape the 55 s connect budget uses over its own 40 s. */
+#define CC3501E_WIFI_SCAN_WINDOW_MS 20000u
+
 /* See <alp/protocol/cc3501e.h> for the wire shape and cc3501e_internal.h for
  * why this is not `static` (test visibility). */
 bool cc3501e_mac_is_valid(const uint8_t mac[CC3501E_MAC_LEN])
@@ -157,16 +173,24 @@ alp_status_t cc3501e_wifi_scan(cc3501e_t             *ctx,
 	 * context's own scratch buffer (per-instance -- see cc3501e_t's
 	 * wifi_scan_buf comment; keeps cc3501e_request's rx_scratch free for
 	 * the framing, and no longer aliases across cc3501e_t instances). */
-	uint8_t     *scan_buf = ctx->wifi_scan_buf;
-	size_t       got      = 0;
-	alp_status_t s        = poll_by_repeat(ctx,
-	                                       ALP_CC3501E_CMD_WIFI_SCAN_START,
-	                                       NULL,
-	                                       0,
-	                                       scan_buf,
-	                                       sizeof(ctx->wifi_scan_buf),
-	                                       &got,
-	                                       timeout_ms);
+	uint8_t *scan_buf = ctx->wifi_scan_buf;
+	size_t   got      = 0;
+
+	/* Floor the budget at the firmware's own worst case -- see
+	 * CC3501E_WIFI_SCAN_WINDOW_MS.  A caller asking for less is asking for an
+	 * answer the firmware cannot give in time, and the resulting timeout looks
+	 * exactly like a dead link. */
+	uint32_t budget = timeout_ms;
+	if (budget < CC3501E_WIFI_SCAN_WINDOW_MS) budget = CC3501E_WIFI_SCAN_WINDOW_MS;
+
+	alp_status_t s = poll_by_repeat(ctx,
+	                                ALP_CC3501E_CMD_WIFI_SCAN_START,
+	                                NULL,
+	                                0,
+	                                scan_buf,
+	                                sizeof(ctx->wifi_scan_buf),
+	                                &got,
+	                                budget);
 	if (s != ALP_OK) {
 		ctx->wifi_scan_busy = false;
 		return s;

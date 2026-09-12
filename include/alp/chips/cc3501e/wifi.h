@@ -117,7 +117,14 @@ const char *cc3501e_wifi_sec_name(uint16_t security_info);
  * @param out_records Caller array of @p cap @ref cc3501e_scan_record_t.
  * @param cap         Capacity of @p out_records.
  * @param count       Receives the number of records parsed (may be NULL).
- * @param timeout_ms  Upper bound on the poll-by-repeat budget.
+ * @param timeout_ms  Upper bound on the poll-by-repeat budget. FLOORED
+ *                    internally to 20 s, because the firmware's own bounded
+ *                    worst case for a scan issued as the first Wi-Fi op of a
+ *                    boot is 16 s (a 10 s STA role-up, then a 6 s wait on the
+ *                    scan result). A smaller budget cannot express a healthy
+ *                    outcome: 15 s produced a timeout at 15062 ms on silicon,
+ *                    1062 ms inside the firmware's own bound, and it read as a
+ *                    dead link rather than as the caller's clock running out.
  * @return ALP_OK once the scan completed (even with zero records);
  *         @ref ALP_ERR_NOT_READY if @p ctx is NULL or not initialised;
  *         @ref ALP_ERR_BUSY if a scan is already decoding on this SAME
