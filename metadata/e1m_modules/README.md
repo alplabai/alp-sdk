@@ -154,11 +154,16 @@ same shape (`recovery_only`, no `flash_method`).
 
 The GD32's SW-DP ID remains unsettled and `metadata/chips/gd32_swd.yaml`
 deliberately does not carry a `target_expected_idcode` for it — same
-stance this file's own `debug.expect_dpidr` guidance takes above: an
-unmeasured value reads worse than an absent one. `0x6BA02477`
-(`CHANGELOG.md` records it as a measurement of the **V2N CM33 DAP**, not
-the GD32) and `0x0BE12477` (unattributed) both circulate elsewhere in
-this repo; neither is a confirmed GD32 reading — see #1440, #1369.
+stance `metadata/schemas/soc-spec-v1.schema.json`'s own `expect_dpidr`
+field guidance takes for every Alif Ensemble SoC variant (#1355): an
+absent key is the correct published "unknown", and a guessed value is
+strictly worse than absent (see `metadata/socs/alif/ensemble/e8.json`'s
+`expect_dpidr` note for the live, actually-measured instance of that
+stance). `0x6BA02477` (`CHANGELOG.md` records it as a measurement of
+the **V2N CM33 DAP**, not the GD32) and `0x0BE12477` (no attribution at
+all — no bench transcript, no datasheet reference, no commit message)
+both circulate elsewhere in this repo; neither is a confirmed GD32
+reading — see #1440, #1369.
 
 See `metadata/schemas/som-preset-v1.schema.json`
 `$defs/helper_firmware_entry` for the full contract.

@@ -3966,10 +3966,6 @@
           "hash": "31d33160e0148fa7",
           "value": "4u"
         },
-        "GD32_SWD_EXPECTED_IDCODE": {
-          "hash": "a6d11bb50f7ee27d",
-          "value": "0x6BA02477u"
-        },
         "GD32_SWD_FMC_FLASH_BASE": {
           "hash": "37487daca310bd65",
           "value": "0x08000000u"
@@ -3981,6 +3977,10 @@
         "GD32_SWD_FMC_SRAM_BASE": {
           "hash": "7fc23683f5251981",
           "value": "0x20000000u"
+        },
+        "GD32_SWD_GENERIC_CM33_R0P1_IDCODE": {
+          "hash": "6fd21d0cd37c6730",
+          "value": "0x6BA02477u"
         },
         "GD32_SWD_MAX_WAIT_RETRIES": {
           "hash": "56e35d5e27b7f2ad",
