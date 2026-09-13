@@ -447,6 +447,20 @@ already-authored customer `memory_map:` on schema upgrade —
 `scripts/validate_metadata.py` enforces its presence semantically
 instead, and v2 promotes it to `required`.
 
+Three independent consumers enforce this (`scripts/validate_metadata.py`
+at author time is the fourth, upstream of all three): `carveout.py`'s
+`resolve_carve_outs()` refuses an IPC entry from landing on a region with
+the wrong (or absent-on-Alif) authority; `partition.py`'s
+`resolve_storage_partitions()` refuses a `storage[].flash_device:`
+naming one directly, the same way, including a `composite` whole-device
+alias whose contained rows can't all be verified (alp-sdk#2088) — a row
+this can't account for refuses the whole alias rather than resolve
+permissively around the gap; `check_atoc_reservation.py` refuses a
+`customer_runtime` row from owning the SE-anchored top of the on-die
+MRAM window in CI (alp-sdk#2086). All three read the SAME six values and
+the SAME absent-means-unresolved rule described above — a value one of
+them would refuse is not sometimes eligible through a different door.
+
 ---
 
 ## 6. Step 3 — Update the schema `sku` pattern

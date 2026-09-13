@@ -300,17 +300,25 @@ class TestReservedBytesLessThanCapacity:
       - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
     """))
         project = load_board_yaml(path)
-        # A synthetic second device.  `base: "TBD"` keeps it out of
-        # `_reserved_spans()`'s address-window derivation for `mram_main`
-        # (only integer bases enter that computation), while it still
-        # resolves via `_resolve_flash_device()` since `size_kib` is an int.
+        # A synthetic second device, resolved OUTSIDE E1M-AEN801's
+        # declared MRAM aperture (0x90000000, well past its
+        # 0x80000000..0x80580000 window) so it stays out of
+        # `_reserved_spans()`'s address-window derivation for
+        # `mram_main` AND out of alp-sdk#2088's composite-consult
+        # completeness walk for `mram_main` (containment, not mere
+        # co-listing in the same `memory_map:`, is what makes a row
+        # that guard's business) while still resolving via
+        # `_resolve_flash_device()` itself -- which #2088 now also
+        # requires an explicit `write_authority` for, since the
+        # aperture resolves for this SoM.
         project.som_preset["memory_map"] = list(
             project.som_preset["memory_map"]) + [{
                 "name": "test_alt_device",
-                "base": "TBD",
+                "base": 0x90000000,
                 "size_kib": 64,
                 "accessible_from": ["m55_he", "m55_hp"],
                 "cacheable": True,
+                "write_authority": "customer_runtime",
                 "dt_label": "test_alt_device",
             }]
         parts = resolve_storage_partitions(project)

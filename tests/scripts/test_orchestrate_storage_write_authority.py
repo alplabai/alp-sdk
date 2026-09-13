@@ -4,18 +4,29 @@
 
 Mirrors `check_atoc_reservation._check_top_write_authority()`
 (alp-sdk#2086): same vocabulary (`customer_runtime` is the only value a
-runtime mount/carve-out may land on, absent means unresolved and stays
-legal today per the deferred-to-required field, alp-sdk#2024), opposite
-direction -- that gate refuses a row that IS `customer_runtime` at the
-ATOC band; this refuses a row that is NOT `customer_runtime` (and not the
-`composite` whole-device-alias exemption) anywhere it is named directly as
-a `flash_device:`.
+runtime mount/carve-out may land on directly), opposite direction -- that
+gate refuses a row that IS `customer_runtime` at the ATOC band; this
+refuses a row that is NOT `customer_runtime` (and not a verifiably-safe
+`composite` whole-device alias) anywhere it is named directly as a
+`flash_device:`.
 
-Every case here is exercised directly against `_resolve_flash_device()`
-with a hand-built `som_preset` -- `resolve_memory_map()` returns a
-preset's own `memory_map:` verbatim (alp_project_loader.py:533-536)
-without touching `metadata_root`, so no real SoM YAML or SoC JSON needs to
-exist on disk for this file to run standalone.
+Two families of case here:
+
+  - `TestRefusesWrongAuthority` / `TestAllowsCustomerRuntime` /
+    `TestAbsentWriteAuthority` exercise `_resolve_flash_device()` directly
+    against a hand-built, single-region `som_preset` --
+    `resolve_memory_map()` returns a preset's own `memory_map:` verbatim
+    (alp_project_loader.py:533-536) without touching `metadata_root`, so
+    no real SoM YAML or SoC JSON needs to exist on disk for those cases.
+
+  - `TestCompositeConsultsContainedRows` deepcopies the REAL, committed
+    E1M-AEN801 preset and swaps only `memory_map:` -- the technique
+    review round 1 on #2088 required: a single-region synthetic preset
+    carries no `silicon:`/SoC data, so `resolve_aperture()` returns
+    `None` and the composite-consult path this class exists to pin never
+    even runs. `mram_main`'s `write_authority: composite` is the only
+    whole-device alias any committed preset declares (every AEN SKU), so
+    these cases are the literal #2088 hazard shape, not a contrived one.
 
 Run locally:
 
@@ -24,12 +35,46 @@ Run locally:
 
 from __future__ import annotations
 
-from alp_orchestrate.paths import METADATA_ROOT
-from alp_orchestrate.partition import _resolve_flash_device
+import copy
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from _orchestrate_support import _write_board  # noqa: E402
+
+from alp_orchestrate import load_board_yaml  # noqa: E402
+from alp_orchestrate.paths import METADATA_ROOT  # noqa: E402
+from alp_orchestrate.partition import _resolve_flash_device  # noqa: E402
 
 
 def _preset(region: dict) -> dict:
+    """A single-region preset with NO `silicon:` -- `resolve_aperture()`
+    returns `None` for it, so this is the OFF-Alif shape (V2N/V2M/NX9101
+    today): the deferred-to-required absent-write_authority leniency
+    applies here, and the composite-consult completeness walk in
+    `TestCompositeConsultsContainedRows` below never runs against it."""
     return {"sku": "TEST-SOM", "memory_map": [region]}
+
+
+def _aen801_memory_map(tmp_path):
+    """The real, committed E1M-AEN801 `memory_map:`, deepcopied so a test
+    can freely mutate it without touching the loader's cached preset
+    dict (shared across a process if any other test loaded the same
+    SKU first)."""
+    path = _write_board(tmp_path, """
+    name: test-2088-aen801
+    som:
+      sku: E1M-AEN801
+      hw_rev: r2
+    cores:
+      m55_hp:
+        os: zephyr
+        app: ./m55_hp
+    storage: []
+    """)
+    project = load_board_yaml(path)
+    return project.som_preset, copy.deepcopy(project.som_preset["memory_map"])
 
 
 class TestRefusesWrongAuthority:
@@ -86,34 +131,53 @@ class TestAllowsCustomerRuntime:
         assert descriptor is not None
         assert descriptor["name"] == "storage"
 
-    def test_composite_whole_device_alias_still_resolves(self):
-        """`composite` ("consult the contained rows", the schema's own
-        words) is NOT the #2088 hazard by itself -- it is the documented
-        shape a whole-device alias carries (`mram_main` on every AEN
-        preset; examples/connectivity/production-deployment/board.yaml
-        names `flash_device: mram_main` directly). Refusing it here would
-        break that example and every AEN storage test that targets
-        mram_main, for a row that defers rather than claims runtime-write
-        for itself; per-placement safety inside it is `_reserved_spans()`'s
-        job, not this guard's."""
+
+class TestAbsentWriteAuthority:
+    """#2024: `write_authority` is deferred-to-required for som-preset v1.
+    But ADR-0034 clause 4 and the schema both say absent means
+    UNRESOLVED, never `customer_runtime` -- and `carveout.py`'s own
+    equivalent guard already REFUSES this exact shape wherever an
+    on-die MRAM aperture resolves (review round 1 on #2088: the
+    original WARNING-only behaviour here was wrong, corrected to match).
+    The rule is Alif-gated the same way `carveout.py`'s is: a no-op
+    (silent, still legal) on a SoM that declares no aperture at all,
+    since none of those presets author `write_authority` anywhere today
+    and none could act on a refusal they have no `silicon:`-scoped
+    aperture to justify."""
+
+    def test_absent_write_authority_refuses_when_an_aperture_resolves(
+            self, tmp_path):
+        """The Alif case: an aperture resolves for this SoM (E1M-AEN801),
+        so a region named directly as a `flash_device:` with no
+        write_authority is refused, not merely warned about. The new row
+        sits OUTSIDE the SoC's declared MRAM aperture (0x90000000, well
+        past E8's window) so `_is_flash_sub_partition()` calls it a
+        DEVICE, not a sub-partition -- every real `memory_map:` row that
+        resolves as a device on AEN801 today is `mram_main` itself
+        (`write_authority: composite`, covered by
+        `TestCompositeConsultsContainedRows`), so isolating the
+        directly-named absent-value path needs a second, out-of-aperture
+        device; the SoM-level aperture still resolves regardless of
+        where this one row's own extent lands, which is what the guard
+        actually gates on (mirrors `carveout.py`'s own SoM-level gate)."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        som_preset["memory_map"] = memory_map + [{
+            "name": "sram_extra", "base": 0x90000000, "size_kib": 64,
+            "accessible_from": ["m55_he", "m55_hp"], "cacheable": True,
+            # write_authority deliberately omitted.
+        }]
         descriptor, reason = _resolve_flash_device(
-            "mram_main", _preset({
-                "name": "mram_main", "base": 0x80000000, "size_kib": 5632,
-                "write_authority": "composite",
-            }),
-            METADATA_ROOT)
-        assert reason is None, reason
-        assert descriptor is not None
+            "sram_extra", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "no write_authority" in reason, reason
+        assert "sram_extra" in reason, reason
+        assert "ADR-0034" in reason, reason
 
-
-class TestMissingWriteAuthorityStaysLegal:
-    def test_absent_write_authority_still_resolves(self):
-        """#2024: `write_authority` is deferred-to-required for som-preset
-        v1 -- a customer preset authored before the field existed must not
-        be hard-refused by this guard. Absent is "unresolved" per the
-        schema, not "customer_runtime", but it is legal today, only
-        flagged (#2088 requirements: decide deliberately, don't hard-fail
-        every existing preset)."""
+    def test_absent_write_authority_stays_legal_with_no_aperture(self):
+        """The non-Alif case (V2N/V2M/NX9101 today): no `silicon:` on
+        this synthetic preset, so `resolve_aperture()` returns `None`
+        and the absent-value refusal never applies -- mirrors
+        `carveout.py`'s own `aperture is None` short-circuit."""
         descriptor, reason = _resolve_flash_device(
             "storage", _preset({
                 "name": "storage", "base": 0x80560000, "size_kib": 96,
@@ -123,15 +187,132 @@ class TestMissingWriteAuthorityStaysLegal:
         assert descriptor is not None
         assert descriptor["name"] == "storage"
 
-    def test_absent_write_authority_warns_on_stderr(self, capsys):
-        """Legal is not silent: the schema says a consumer must "say so"
-        for an absent value (ADR-0034 clause 4, quoted verbatim in
-        check_atoc_reservation.py's own absent-value branch)."""
-        _resolve_flash_device(
-            "storage", _preset({
-                "name": "storage", "base": 0x80560000, "size_kib": 96,
-            }),
-            METADATA_ROOT)
-        captured = capsys.readouterr()
-        assert "no write_authority" in captured.err, captured.err
-        assert "storage" in captured.err, captured.err
+
+class TestCompositeConsultsContainedRows:
+    """`write_authority: composite` ("consult the contained rows
+    instead", the schema's own words) must not be an unconditional pass
+    -- review round 1 on #2088 reproduced three ways (below) that the
+    original blanket exemption let a runtime mount land in the
+    Secure-Enclave-owned `atoc` band. Every CASE here is the reviewer's
+    own repro, ported verbatim onto the real E1M-AEN801 preset."""
+
+    def test_unmodified_real_preset_still_resolves(self, tmp_path):
+        """The control: the real, byte-for-byte committed E1M-AEN801
+        `memory_map:` -- every row resolved, authorized, and fully
+        tiling `mram_main`'s capacity -- must still resolve `mram_main`
+        as a flash device (placement safety inside it, i.e. that every
+        byte is ALSO reserved by name, is `_reserved_spans()`'s job and
+        is covered by `test_fully_tiled_device_blocks_with_an_actionable_reason`
+        in test_orchestrate_storage_region_bounds.py, not this guard's)."""
+        som_preset, _ = _aen801_memory_map(tmp_path)
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert reason is None, reason
+        assert descriptor is not None
+        assert descriptor["name"] == "mram_main"
+
+    def test_case_2_sibling_with_unresolved_base_is_refused(self, tmp_path):
+        """CASE 2 (review round 1): `mram_main` resolves its own base
+        (0x80000000, legal -- a SoM CAN author one), and `atoc` --
+        the row that owns the address range `mram_main`'s own
+        `size_kib` says it spans up to -- has an unresolved base. Before
+        this fix, `_reserved_spans()`'s `self_region has a base` branch
+        trusted `mram_main`'s own base directly and never verified the
+        siblings tiled it, so a storage[] entry landed at 0x80578000 --
+        inside the live SE ATOC band (`carveout.py:100-104`,
+        bench-observed `ckBS` magic there)."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        new_map = []
+        for r in memory_map:
+            if r["name"] == "mram_main":
+                r = dict(r, base=0x80000000)
+            elif r["name"] == "atoc":
+                r = dict(r, base="TBD")
+            new_map.append(r)
+        som_preset["memory_map"] = new_map
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "atoc" in reason, reason
+        assert "unresolved base" in reason, reason
+        assert "#2088" in reason, reason
+
+    def test_case_4_missing_sibling_leaves_an_unaccounted_gap(
+            self, tmp_path):
+        """CASE 4 (review round 1): `atoc` isn't declared AT ALL (not
+        merely unresolved) -- the same live-ATOC-band hazard as CASE 2,
+        reached a different way: nothing here can even name the row
+        that's missing, only that `mram_main`'s declared capacity
+        exceeds what its remaining siblings account for."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        new_map = [dict(r, base=0x80000000) if r["name"] == "mram_main"
+                   else r for r in memory_map if r["name"] != "atoc"]
+        som_preset["memory_map"] = new_map
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "gap" in reason, reason
+        assert "32" in reason, reason  # the missing 32 KiB atoc band.
+        assert "#2088" in reason, reason
+
+    def test_case_5_own_base_unresolved_and_a_sibling_gap_is_refused(
+            self, tmp_path):
+        """CASE 5 (review round 1): `mram_main` carries its REAL shape
+        (`base: "TBD"` -- every committed AEN preset ships this), and
+        `atoc` is also unresolved. Pre-fix, `_reserved_spans()`'s
+        min/max-derived identity check (`origin + capacity ==
+        window_top`) failed here, and the code DEGRADED to sibling-only
+        checking with a stderr warning -- not a refusal -- so a
+        storage[] entry auto-allocated straight to offset 0 (0x80000000,
+        MCUboot's own `vendor_image` band). This is the case review
+        round 1 called out by name: an alias whose contained rows can't
+        be evaluated must refuse, not resolve permissively."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        new_map = [dict(r, base="TBD") if r["name"] == "atoc" else r
+                   for r in memory_map]
+        som_preset["memory_map"] = new_map
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "atoc" in reason, reason
+        assert "#2088" in reason, reason
+
+    def test_sibling_with_no_write_authority_is_refused_on_alif(
+            self, tmp_path):
+        """A sibling with a resolved base+size but NO write_authority is
+        just as unverifiable as one with an unresolved base -- the
+        aperture resolves for E1M-AEN801, so this is the same Alif-gated
+        rule `TestAbsentWriteAuthority` pins for the directly-named
+        case, applied to a row `mram_main` defers to instead."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        new_map = []
+        for r in memory_map:
+            if r["name"] == "atoc":
+                r = dict(r)
+                del r["write_authority"]
+            new_map.append(r)
+        som_preset["memory_map"] = new_map
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "atoc" in reason, reason
+        assert "no write_authority" in reason, reason
+
+    def test_unrelated_disjoint_device_does_not_block_the_alias(
+            self, tmp_path):
+        """A row that merely shares the same `memory_map:` list but
+        resolves to an address range OUTSIDE `mram_main`'s window is not
+        `mram_main`'s business -- containment, not co-listing, is what
+        makes a row relevant to the alias's own completeness check.
+        Regression pin for review round 1's own `test_alt_device`
+        finding in test_orchestrate_storage_region_bounds.py."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        som_preset["memory_map"] = memory_map + [{
+            "name": "unrelated_device", "base": 0x90000000, "size_kib": 64,
+            "accessible_from": ["m55_he", "m55_hp"], "cacheable": True,
+            "write_authority": "customer_runtime",
+        }]
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert reason is None, reason
+        assert descriptor is not None
