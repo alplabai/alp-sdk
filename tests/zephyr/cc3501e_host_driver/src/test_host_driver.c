@@ -859,9 +859,26 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
  * infinite spin, without any real sleeping. */
 static uint64_t g_fake_now_ms;
 
+/* Fake delay accounting for the reply-header gate (rx_cap-scaled since the
+ * "size the reply-header gate by the expected reply length" fix): every
+ * alp_delay_us() call this run is logged in order, so a test can find its
+ * own gate's fallback_us without a real clock.  Cleared by delay_log_reset()
+ * at the top of each test that inspects it. */
+#define DELAY_LOG_CAP 8u
+static uint32_t g_delay_us_log[DELAY_LOG_CAP];
+static size_t   g_delay_us_count;
+
+static void delay_log_reset(void)
+{
+	g_delay_us_count = 0u;
+}
+
 void alp_delay_us(uint32_t us)
 {
-	(void)us;
+	if (g_delay_us_count < DELAY_LOG_CAP) {
+		g_delay_us_log[g_delay_us_count] = us;
+	}
+	g_delay_us_count++;
 }
 void alp_delay_ms(uint32_t ms)
 {
@@ -914,6 +931,69 @@ ZTEST(cc3501e_host_driver, test_soft_reset_encodes_opcode)
 {
 	zassert_equal(cc3501e_soft_reset(&fw), ALP_OK, "RESET -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_RESET, "opcode 0x02 reached the slave");
+}
+
+/* ---- reply-header gate scaled by rx_cap (sock-recv 4 KB link wedge) -------- *
+ *
+ * cc3501e_reply_header_gate_us() (cc3501e_core.c) replaced the reply-header
+ * phase's flat 200 us wait with one scaled by rx_cap -- the reply capacity
+ * THIS request offers -- because a fixed 200 us wedged a 4071 B SOCK_RECV on
+ * the very first call (run8, e1m-aen-evk-01) while 512 B recvs were fine; a
+ * 2000 us gate fixed 4071 B 3/3 (run9). ctx->ready_pin is NULL in this fixture
+ * (alp_gpio_open stub always returns NULL), so cc3501e_reply_gate() takes its
+ * unconditional alp_delay_us(fallback_us) fallback path with no GPIO polling
+ * in between -- exactly the path a CS-less r1 board runs -- so the logged
+ * alp_delay_us() calls line up 1:1 with the gate's phases.  PING is a
+ * header-only request (no TX payload phase), so the sequence is exactly
+ * [request-header gate, reply-header gate, reply-payload gate]; index 1 is
+ * the one under test. Real reply shape is independent of rx_cap here -- the
+ * slave model always stages a legacy bare-OK PING reply -- so rx_cap can be
+ * driven arbitrarily without touching what actually crosses the wire. */
+ZTEST(cc3501e_host_driver, test_reply_gate_small_reply_cap_stays_at_proven_floor)
+{
+	uint8_t reply[8] = { 0 };
+	size_t  got      = 0u;
+	delay_log_reset();
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s, ALP_OK, "PING with an 8 B reply cap -> OK");
+	zassert_equal(g_delay_us_count, 3u, "3 gated phases for a header-only (no TX payload) request");
+	zassert_equal(
+	    g_delay_us_log[1], 200u, "rx_cap 8 B (<= 512 B) stays at the proven 200 us floor");
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_max_payload_reply_cap_reaches_proven_2000us)
+{
+	static uint8_t reply[ALP_CC3501E_MAX_PAYLOAD];
+	size_t         got = 0u;
+	memset(reply, 0, sizeof(reply));
+	delay_log_reset();
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s, ALP_OK, "PING with a 4096 B (MAX_PAYLOAD) reply cap -> OK");
+	zassert_equal(g_delay_us_count, 3u, "3 gated phases for a header-only (no TX payload) request");
+	zassert_equal(g_delay_us_log[1],
+	              2000u,
+	              "rx_cap == ALP_CC3501E_MAX_PAYLOAD clamps exactly at the proven 2000 us point, "
+	              "not extrapolated past it");
+}
+
+ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured_points)
+{
+	/* 2304 B sits exactly halfway between the 512 B floor and the 4096 B
+	 * ceiling this driver was actually measured at -- expect the gate exactly
+	 * halfway between 200 us and 2000 us (1100 us).  This size was never
+	 * bench-measured; the formula interpolates it linearly (see
+	 * cc3501e_reply_header_gate_us()'s comment). */
+	static uint8_t reply[2304];
+	size_t         got = 0u;
+	memset(reply, 0, sizeof(reply));
+	delay_log_reset();
+	alp_status_t s =
+	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
+	zassert_equal(s, ALP_OK, "PING with a 2304 B reply cap -> OK");
+	zassert_equal(
+	    g_delay_us_log[1], 1100u, "the exact rx_cap midpoint interpolates to the gate midpoint");
 }
 
 ZTEST(cc3501e_host_driver, test_get_version_decodes_le16)

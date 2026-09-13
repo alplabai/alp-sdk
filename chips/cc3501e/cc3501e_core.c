@@ -986,10 +986,13 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * from 167 kB/s to 231 kB/s with the link healthy throughout.
  *
  * 20 is TOO LOW -- it gives 0 B/s.  And note the gate before the REPLY HEADER is
- * deliberately NOT this constant: it is a hardcoded 200 us because it waits for
- * the slave to DISPATCH and stage its reply, which is a different and much
- * longer job than re-arming the next phase.  Folding it into this constant was
- * tried and killed the link outright (PING -> -5). */
+ * deliberately NOT this constant: it waits for the slave to DISPATCH and stage
+ * its reply, which is a different and much longer job than re-arming the next
+ * phase -- and, unlike this constant, is now SCALED by the reply capacity the
+ * caller offered (cc3501e_reply_header_gate_us(), floor 200 us, up to 2000 us
+ * for a >512 B reply; see that function's comment for why a flat 200 us wedges
+ * a 4071 B SOCK_RECV).  Folding it into this constant was tried and killed the
+ * link outright (PING -> -5). */
 /* 250 us, not 40.  This is the blind fallback gap cc3501e_reply_gate() uses
  * when READY is unusable -- and on the measured unit it always is: READY is
  * CC3501E GPIO_17 -> Alif P2_6, and P2_6 is SPI1_SCLK_A, so enabling its input
@@ -1097,6 +1100,44 @@ void cc3501e_set_peer_polled(bool on)
  * re-arm, which this file's own comment describes as "microseconds".  At 5000us
  * it cost 4 gates x 5 ms = 20 ms per frame, ~2 frames per 256 B chunk. */
 #define CC3501E_POLLED_SETTLE_US 200u
+
+/* Reply-header gate, scaled by the reply capacity THIS request offers (rx_cap):
+ * the fixed 200 us this used to be blindly waited on cc3501e_request_locked()'s
+ * caller to have staged a reply the bridge can build inside that window, and
+ * for a >512 B reply it cannot -- the bridge composes the reply (ring copy,
+ * ~4100 B CRC, ~4100 B memcpy, all inside its SPI transfer-complete ISR;
+ * cc3501e-bridge-firmware src/protocol_sockets.c, src/protocol.c:996-1003,
+ * hal/ti/transport_hw_ti_spi.c:605) before it re-arms, and that composition
+ * cost is what this gate exists to cover.  Widening it for EVERY request
+ * would tax every small-reply op (PING, GET_VERSION, most of this driver) for
+ * a cost only large-reply ops pay, so it is scaled per request instead.
+ *
+ * Data points (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0):
+ *   -  512 B SOCK_RECV: 200 us  -> 3/3 end-to-end (unchanged floor).
+ *   - 4071 B SOCK_RECV: 200 us  -> wedged the link on the FIRST recv, 2/2.
+ *   - 4071 B SOCK_RECV: 2000 us -> 3/3 end-to-end, CRC-clean at 262144 B.
+ * Only those two sizes were measured; every rx_cap strictly between them is
+ * LINEARLY INTERPOLATED, not measured, and the same shape is used above
+ * ALP_CC3501E_MAX_PAYLOAD-sized (4096 B) rx_cap, clamped to the 4071 B point
+ * rather than extrapolated past it. */
+#define CC3501E_REPLY_GATE_FLOOR_US    200u  /* proven at rx_cap <= 512 B */
+#define CC3501E_REPLY_GATE_SMALL_CAP_B 512u  /* proven-floor boundary */
+#define CC3501E_REPLY_GATE_LARGE_CAP_B 4096u /* ALP_CC3501E_MAX_PAYLOAD */
+#define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4071 B */
+
+static uint32_t cc3501e_reply_header_gate_us(size_t rx_cap)
+{
+	if (rx_cap <= CC3501E_REPLY_GATE_SMALL_CAP_B) {
+		return CC3501E_REPLY_GATE_FLOOR_US;
+	}
+	if (rx_cap >= CC3501E_REPLY_GATE_LARGE_CAP_B) {
+		return CC3501E_REPLY_GATE_LARGE_US;
+	}
+	const uint32_t span_bytes = CC3501E_REPLY_GATE_LARGE_CAP_B - CC3501E_REPLY_GATE_SMALL_CAP_B;
+	const uint32_t span_us    = CC3501E_REPLY_GATE_LARGE_US - CC3501E_REPLY_GATE_FLOOR_US;
+	const uint32_t over_bytes = (uint32_t)rx_cap - CC3501E_REPLY_GATE_SMALL_CAP_B;
+	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
+}
 
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
@@ -1301,8 +1342,10 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	}
 
 	/* Wait for the slave to dispatch + arm its reply before we read: the
-	 * READY gate tracks it via the host-IRQ line when wired, else a fixed gap. */
-	cc3501e_reply_gate(ctx, 200u);
+	 * READY gate tracks it via the host-IRQ line when wired, else a gap sized
+	 * to rx_cap -- the reply capacity THIS request offers -- via
+	 * cc3501e_reply_header_gate_us() above (see its comment for the data). */
+	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(rx_cap));
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
