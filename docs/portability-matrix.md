@@ -221,10 +221,20 @@ lines — are hand-maintained against the swap-test evidence under
 ### E1M family
 
 After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
-comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
-example.**  That is the load-bearing intra-AEN portability proof, and
-it is a claim about the *emitted Kconfig content*, unaffected by the
-paragraph below. E1M-NX9101 is currently NOT buildable at all
+comment, **6 of the 7 AEN SKUs produce byte-identical `alp.conf` for
+every example; E1M-AEN803 additionally emits two lines,
+`CONFIG_ALP_SDK_SOM_DRAM_MBIT=512` and `CONFIG_ALP_SDK_SOM_FLASH_MBIT=256`**
+(measured via the Method's steps against `examples/peripheral-io/i2c-scanner`,
+`m55_hp`) — a legitimate, silicon-population-derived diff, the same class
+as the U85 lines in Gap G-1 below: E1M-AEN803 is the only AEN SKU whose
+external OSPI0 memories are `assembled: true` (both external
+`hyperram`/`ospi_memories.ospi0` fitted; #2084), so it is the only one
+whose `memory:` block resolves non-TBD `dram_mbit`/`flash_mbit` for the
+loader to emit. Stripping those two lines alongside the existing two
+exceptions restores byte-identity across all 7. That is still the
+load-bearing intra-AEN portability proof, and it is a claim about the
+*emitted Kconfig content*, unaffected by the paragraph below. E1M-NX9101
+is currently NOT buildable at all
 (`partial_hw_config: true` — see the generated Notes column — and, as
 of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
 hw_rev-buildable gate refuses outright); the diff-family rows below

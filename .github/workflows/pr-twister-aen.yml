@@ -271,8 +271,11 @@ jobs:
           "$HOME/zephyr-sdk/setup.sh" -t arm-zephyr-eabi -c
           echo "ZEPHYR_SDK_INSTALL_DIR=$HOME/zephyr-sdk" >> "$GITHUB_ENV"
 
-      # Run twister against both AEN801 board targets, scoped to
-      # examples/aen -- the 52 testcase.yaml files whose platform_allow
+      # Run twister against both AEN801 board targets plus both AEN803
+      # board targets (alp-sdk#2084 -- AEN803's generated tree gets no
+      # real CI coverage without a -p flag AND a matching platform_allow
+      # entry; a testcase.yaml change alone selects nothing here), scoped
+      # to examples/aen -- the testcase.yaml files whose platform_allow
       # names an AEN target are the entire point; nothing outside that
       # tree is in scope for this job. examples/connectivity/
       # firmware-update-log is a second, bounded root (issue #1101): it
@@ -280,8 +283,10 @@ jobs:
       # entries, kept as its own --testsuite-root rather than widened to
       # all of examples/ (this job's stated disk-budget concern, see the
       # header comment) or moved under examples/aen (it is a portable
-      # <alp/update_log.h> demo, not AEN-only).
-      - name: twister · AEN801 (M55-HE + M55-HP) on examples/aen + firmware-update-log
+      # <alp/update_log.h> demo, not AEN-only). AEN803 is only build_only:
+      # true today (examples/aen/aen-adc-regcheck), so this adds two
+      # compile scenarios, not two bench-run scenarios.
+      - name: twister · AEN801 + AEN803 (M55-HE + M55-HP) on examples/aen + firmware-update-log
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -290,12 +295,16 @@ jobs:
         # sampled runs (corrected from a 3-run sample that understated
         # this at 1055s/17.6min and a resulting 25min cap). 30min =
         # ~1.54x that real worst case, kept under the job's own 41min
-        # ceiling (see that job-level comment).
+        # ceiling (see that job-level comment). Not re-measured for the
+        # two added AEN803 compile-only scenarios (alp-sdk#2084); revisit
+        # this budget if they push the job close to the ceiling.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
             -p alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
             -p alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp \
+            -p alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+            -p alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --inline-logs \

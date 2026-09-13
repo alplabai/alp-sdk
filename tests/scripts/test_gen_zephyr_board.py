@@ -123,8 +123,10 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
         files = emit_zephyr_board(sku, core_id, METADATA_ROOT)
         self.assertTrue(files, f"generator produced no files for {sku}/{core_id}")
         committed_dir = BOARDS_ROOT / board_dir
+        claimed_names: set[str] = set()
         for relpath, content in files.items():
             _, fname = relpath.split("/", 1)
+            claimed_names.add(fname)
             committed_path = committed_dir / fname
             self.assertTrue(
                 committed_path.is_file(),
@@ -135,6 +137,22 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 committed, content,
                 f"generated {fname} for {sku}/{core_id} drifted from the "
                 f"committed {committed_path} -- regenerate or fix the source")
+        # Reverse direction: every committed file NOT in HAND_MAINTAINED must
+        # be something the generator actually claims. Only forward-checking
+        # (generated -> committed, above) would miss a hand-added file
+        # quietly sitting in a generated board directory -- exactly the kind
+        # of drift this byte-equivalence gate exists to catch. Runs for
+        # every PARITY_COVERED board (AEN801, AEN803, V2N101, V2M101 today),
+        # not just one hardcoded directory.
+        for committed_path in committed_dir.iterdir():
+            if not committed_path.is_file() or committed_path.name in HAND_MAINTAINED:
+                continue
+            self.assertIn(
+                committed_path.name, claimed_names,
+                f"{committed_path} is committed under {board_dir} but the "
+                f"generator for {sku}/{core_id} never claims it, and it is "
+                f"not in HAND_MAINTAINED -- either the generator is missing "
+                f"this file or it is a stray hand-added file")
 
     def _parity(self, board_dir: str) -> None:
         sku, core_id = PARITY_COVERED[board_dir]
