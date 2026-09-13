@@ -247,6 +247,11 @@ ZTEST(alp_chips, test_tas2563_init_parks_amp_in_software_shutdown)
 {
 	tas2563_t  ctx;
 	alp_i2c_t *bus = tas_init(&ctx, 0x00u, NULL);
+	/* Close right here: everything below reads the fake's own register
+	 * model directly (fake_tas2563_get_reg()), not through the bus
+	 * handle, so nothing after this point needs it open -- and closing
+	 * now means a failing assertion below can't leak it. */
+	alp_i2c_close(bus);
 
 	/* init's own unconditional SW_RESET (SLASET3D §7.5.3) now wipes the
 	 * 0x00u seed back to the POR default 0x0Eu (fake_tas2563.c models
@@ -259,8 +264,6 @@ ZTEST(alp_chips, test_tas2563_init_parks_amp_in_software_shutdown)
 	              0x0Eu,
 	              "init must leave PWR_CTL at its POR default 0x0Eu regardless of "
 	              "what a previous firmware left it at");
-
-	alp_i2c_close(bus);
 }
 
 /* PWR_CTL.MODE is bits 1..0 ONLY; bits 3..2 are ISNS_PD/VSNS_PD
@@ -327,10 +330,12 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	tas2563_t  ctx;
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
-	/* Close right after, before any assertion below can abort this test
-	 * and leak the handle -- see tas_init()'s comment for why. */
 	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
-	if (init_rc != ALP_OK) alp_i2c_close(bus);
+	/* Close unconditionally, success or failure, right here: every check
+	 * below reads the fake's own register/paging model directly, not
+	 * through the bus handle, so nothing after this point needs it open
+	 * -- and closing now means a failing assertion below can't leak it. */
+	alp_i2c_close(bus);
 
 	zassert_not_null(bus);
 	zassert_equal(init_rc, ALP_OK);
@@ -341,8 +346,6 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	              0x0Eu,
 	              "the park write must have landed on book 0 / page 0, not in "
 	              "whatever page the previous firmware left selected");
-
-	alp_i2c_close(bus);
 }
 
 /* #2077 (SW-reset addition): tas2563_init() must issue the software

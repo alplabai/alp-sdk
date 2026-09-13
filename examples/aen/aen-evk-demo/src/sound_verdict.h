@@ -27,6 +27,18 @@
  * has to clear regardless of how small baseline_energy was, so a capture
  * that stayed silent throughout (mic dead, or nothing ever played) still
  * fails even when the ratio alone would have looked infinite.
+ *
+ * #2077-follow-up: main.c's Phase 11 used to configure both TAS2563 amps
+ * with TAS2563_RX_SLOT_FROM_ADDR on a mono I2S stream, which left BOTH
+ * amps silent (one muted by an out-of-frame slot, the other fed a
+ * hardcoded-zero right channel by the Alif DW I2S driver's mono path) --
+ * see tas2563_rx_channel_t's @warning (include/alp/chips/tas2563.h) and
+ * main.c's Phase 11 step 5 comment for the full mechanism. This module's
+ * ratio/floor math is agnostic to how many amps or channels are actually
+ * driven -- it only sums whatever the PDM mic picked up -- so fixing that
+ * bug can only ever RAISE during_energy relative to before (silence ->
+ * one or two real speakers), never lower it. SOUND_ENERGY_RATIO_NUM/DEN
+ * and SOUND_ENERGY_FLOOR did not need to change for this fix.
  */
 #ifndef ALP_EVK_DEMO_SOUND_VERDICT_H
 #define ALP_EVK_DEMO_SOUND_VERDICT_H

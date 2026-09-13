@@ -16,9 +16,12 @@
  *   `metadata/chips/tas2563.yaml`.
  *
  * @par Why an in-tree driver, not the upstream one: an upstream Zephyr
- *   TAS2563 driver exists (zephyrproject-rtos/zephyr#103148, merged
- *   2026-05-01) but is not present in this repo's pinned Zephyr
- *   revision (`west.yml`, v4.4.x) -- that PR landed after the pin.  By
+ *   TAS2563 driver exists (zephyrproject-rtos/zephyr#103148, merge
+ *   commit `95bcb74aa`, merged 2026-05-01) but is not present in this
+ *   repo's pinned Zephyr revision (`west.yml`, `v4.4.1`, tagged
+ *   2026-06-10) -- `95bcb74aa` is not an ancestor of `v4.4.1`
+ *   (`git merge-base --is-ancestor 95bcb74aa v4.4.1` fails), so it is
+ *   main-only and was never backported to the v4.4 release branch.  By
  *   maintainer decision (#2077), this repo keeps its own portable
  *   `<alp/chips>` driver over `alp_i2c`/`alp_gpio` for now rather than
  *   adopting the upstream one.
@@ -291,8 +294,24 @@ typedef enum {
  * Which TDM/I2S receive slot the amp takes its playback audio from --
  * `TDM_CFG2.RX_SCFG[5:4]` (SLASET3D §7.5.10 Table 7-110, p.70).  The
  * part is mono, so a stereo host stream has to be told which half this
- * chip plays; a stereo pair (the EVK's U27 at 0x4D and U28 at 0x4E)
- * uses one LEFT and one RIGHT, or SLOT_FROM_ADDR on both.
+ * chip plays.
+ *
+ * @warning @ref TAS2563_RX_SLOT_FROM_ADDR is NOT a safe default for a
+ *   stereo pair on a minimal (2-slot) I2S/TDM frame.  SLASET3D §7.4.2
+ *   (p.42) states the default source is "mono from the time slot equal
+ *   to the I2C base address offset," and Table 7-3 (p.29) gives that
+ *   offset as `address - 0x4C` (0x4C=0, 0x4D=1, 0x4E=2, 0x4F=3).  A
+ *   2-slot frame only has slots 0 and 1: address 0x4C lands on slot 0
+ *   (the left slot), 0x4D on slot 1 (the right slot), and 0x4E/0x4F
+ *   fall entirely outside the frame -- §7.4.2 (p.42) again: "If time
+ *   slot selections places reception either partially or fully beyond
+ *   the frame boundary, the receiver will return a null sample
+ *   equivalent to a digitally muted sample."  So on a 2-slot frame with
+ *   the EVK's U27 (0x4D) / U28 (0x4E) pair, `FROM_ADDR` puts U27 on the
+ *   right slot and leaves U28 permanently muted -- explicit @ref
+ *   TAS2563_RX_LEFT / @ref TAS2563_RX_RIGHT is what a stereo pair on a
+ *   2-slot frame needs; `FROM_ADDR` only works as-is on a frame with at
+ *   least (address offset + 1) slots.
  */
 typedef enum {
 	TAS2563_RX_SLOT_FROM_ADDR = 0x0, /**< Slot = I2C address offset. */

@@ -3859,9 +3859,17 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *   4. tas2563_set_amp_level(MIN) on every initialised amp -- lever 1 above.
  *   5. tas2563_configure_i2s() on every initialised amp, from the SAME
  *      alp_i2s_config_t fields the audio_out config below opens with, so the
- *      amp and the host agree on rate/width/framing. TAS2563_RX_SLOT_FROM_ADDR
- *      on both (the driver's own suggestion for a stereo pair that does not
- *      need to hard-code which is L/R).
+ *      amp and the host agree on rate/width/framing. Explicit TAS2563_RX_LEFT
+ *      on U27 (0x4D) and TAS2563_RX_RIGHT on U28 (0x4E) -- per the 2626-R2
+ *      netlist U27 drives J14/LEFT_P/LEFT_N and U28 drives J21/RIGHT_P/
+ *      RIGHT_N (metadata/boards/e1m-evk.yaml). NOT TAS2563_RX_SLOT_FROM_ADDR:
+ *      on this 2-slot (L/R) I2S frame that would put U27 (I2C offset 1) on
+ *      the RIGHT slot and leave U28 (offset 2) entirely outside the frame,
+ *      i.e. permanently muted (SLASET3D §7.4.2, p.42 -- see the @warning on
+ *      tas2563_rx_channel_t for the full citation). The host stream below is
+ *      genuinely 2-channel so both slots carry real, non-zero samples --
+ *      a mono stream would leave the RIGHT slot always zero regardless of
+ *      which amp is told to listen to it.
  *   6. Fault baseline: tas2563_read_faults() on every amp (I2C, richer than
  *      the pin -- see AMP_FAULT below) plus one read of the raw AMP_FAULT pin
  *      (P5_0), both printed. Neither gates anything by itself here; they are
@@ -3946,6 +3954,16 @@ static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PA
 static const uint8_t amp_addrs[AMP_COUNT] = {
 	TAS2563_I2C_ADDR_GND_PULL, /* U27, EVK_I2C_ADDR_TAS2563_LOW  (0x4D) */
 	TAS2563_I2C_ADDR_VDD_PULL, /* U28, EVK_I2C_ADDR_TAS2563_HIGH (0x4E) */
+};
+/* Parallel to amp_addrs[] above.  Per the 2626-R2 netlist
+ * (metadata/boards/e1m-evk.yaml, EVK_I2C_ADDR_TAS2563_LOW/HIGH's doc),
+ * U27 drives J14 (LEFT_P/LEFT_N) and U28 drives J21 (RIGHT_P/RIGHT_N) --
+ * explicit LEFT/RIGHT, not TAS2563_RX_SLOT_FROM_ADDR; see the @warning
+ * on tas2563_rx_channel_t (include/alp/chips/tas2563.h) for why FROM_ADDR
+ * is wrong on this board's 2-slot I2S frame. */
+static const tas2563_rx_channel_t amp_rx_channel[AMP_COUNT] = {
+	TAS2563_RX_LEFT,  /* U27 -> J14, LEFT */
+	TAS2563_RX_RIGHT, /* U28 -> J21, RIGHT */
 };
 
 /* Sum of |sample| across every channel of one captured block -- the whole of
@@ -4075,19 +4093,22 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 
 	/* --- 6. Tell each amp what the host I2S bus will do ----------------- */
+	/* channels = 2: a genuine stereo I2S frame, matching the 2-channel
+	 * alp_audio_out_open() below -- see amp_rx_channel[]'s comment for
+	 * why FROM_ADDR (and a mono host stream) does not work on this
+	 * board. */
 	const alp_i2s_config_t amp_i2s_cfg = {
 		.bus_id         = 0,
 		.direction      = ALP_I2S_DIR_TX,
 		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
-		.channels       = 1,
+		.channels       = 2,
 		.word_bits      = 16,
 		.format         = ALP_I2S_FMT_I2S,
 		.block_frames   = SOUND_FRAMES_PER_BLOCK,
 	};
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		if (!amp_up[i]) continue;
-		alp_status_t cfg_rc =
-		    tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, TAS2563_RX_SLOT_FROM_ADDR);
+		alp_status_t cfg_rc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
 		printf("[evkdemo] SOUND: tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)cfg_rc);
 	}
 
@@ -4129,10 +4150,16 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	printf("[evkdemo] SOUND: baseline (pre-tone) PDM energy = %u\n", baseline_energy);
 
 	/* --- 9. I2S3: open at the quiet starting volume, THEN start -------- */
+	/* channels = 2, genuinely stereo: the Alif DW I2S driver's mono path
+	 * (zephyr/drivers/i2s/i2s_dw.c) writes the sample to the LEFT slot and
+	 * a hardcoded 0 to the RIGHT slot -- with a mono stream, U28 (RIGHT)
+	 * would receive nothing but zeros no matter what TAS2563_RX_* it is
+	 * configured for. Both slots need real samples, so both speakers need
+	 * both channels driven -- see amp_rx_channel[]'s comment. */
 	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
 	    .peripheral_id    = 0,
 	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
-	    .channels         = 1,
+	    .channels         = 2,
 	    .format           = ALP_AUDIO_FMT_S16_LE,
 	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
 	});
@@ -4160,7 +4187,13 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		}
 
 		/* --- 11. The tone, ramped, interleaved with mic reads --------- */
-		int16_t        tone_buf[SOUND_FRAMES_PER_BLOCK];
+		/* Frames are interleaved across channels (<alp/audio.h>), so a
+		 * 2-channel, SOUND_FRAMES_PER_BLOCK-frame block needs 2x the
+		 * samples -- [L0,R0,L1,R1,...] -- not 2x the frame count passed
+		 * to alp_audio_out_write() below, which still takes FRAMES.
+		 * Both channels get the identical sample: this is the same
+		 * tone played out of both speakers, not a stereo mix. */
+		int16_t        tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
 		uint32_t       phase_acc         = 0;
 		const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
 		for (unsigned b = 0; b < SOUND_TONE_BLOCKS; b++) {
@@ -4170,9 +4203,11 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 			(void)alp_audio_out_set_volume(spk, vol);
 
 			for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
-				tone_buf[f] = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
-				                  ? SOUND_TONE_AMPLITUDE
-				                  : -SOUND_TONE_AMPLITUDE;
+				int16_t sample       = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
+				                           ? SOUND_TONE_AMPLITUDE
+				                           : -SOUND_TONE_AMPLITUDE;
+				tone_buf[2u * f]     = sample; /* L -> U27 (TAS2563_RX_LEFT) */
+				tone_buf[2u * f + 1] = sample; /* R -> U28 (TAS2563_RX_RIGHT) */
 				phase_acc++;
 			}
 			(void)alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
