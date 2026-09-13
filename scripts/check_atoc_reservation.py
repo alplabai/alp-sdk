@@ -463,10 +463,10 @@ def _check_class_disagreement(
     flash, so `carveout` must be exactly `False` there. Outside the
     aperture proves NOTHING -- Ensemble's OSPI XIP windows sit outside
     `[soc_flash_base, ...)` and are still flash, and the same OSPI0
-    controller also carries a HyperRAM (W958D8NBYA5I on E1M-AEN801,
-    S80KS5122GABHM02 on E1M-AEN803) on `chip_select: 0`, so a row
-    outside the aperture with `carveout: false` is a legitimate RAM
-    reservation (the schema's own
+    controller also carries the OSPI0 HyperRAM on `chip_select: 0` (see
+    `on_module.hyperram` -- the fitted part is per-SKU, not named here),
+    so a row outside the aperture with `carveout: false` is a legitimate
+    RAM reservation (the schema's own
     text: reserving SRAM for a hardware secure enclave), not a defect --
     the symmetric direction is never asserted. A region with an
     unresolved base is skipped, never classified -- returned as a
@@ -562,14 +562,13 @@ def _check_preset(path: Path) -> "list[str]":
 
     if aperture is not None:
         full_lo, full_hi = aperture
-        # Participating rows are the ones the aperture actually contains,
-        # by the SAME intersection predicate 4b/4c already use (`hi >
-        # full_lo and lo < full_hi`) -- reused, not re-derived, so a future
-        # change to "what counts as inside" can't drift between the two.
-        participating = [(lo, hi, name) for lo, hi, name in spans
-                          if hi > full_lo and lo < full_hi]
+        # The rows ENDING exactly at the aperture top decide who owns it.
+        # `hi > lo` excludes a zero-size row: an authored `{name: atoc,
+        # base: <full_hi>, size_kib: 0}` reserves nothing and must not be
+        # able to satisfy this rule by merely existing at the right
+        # address (#2069 review round 1, finding 6).
         at_top = sorted((hi - lo, lo, hi, name)
-                        for lo, hi, name in participating if hi == full_hi)
+                        for lo, hi, name in spans if hi == full_hi and hi > lo)
         if not at_top:
             out.append(
                 f"{rel}: no region in the declared memory_map ends at "

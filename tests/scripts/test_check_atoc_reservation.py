@@ -32,6 +32,27 @@ _tiling_mod = importlib.util.module_from_spec(_TILING_SPEC)
 _TILING_SPEC.loader.exec_module(_tiling_mod)
 _SILICON_HEADER = _tiling_mod._SILICON_HEADER
 
+# The new (#2069) top-anchor rule's own two message shapes -- asserted
+# verbatim below instead of a substring like '0x80580000' or "'storage'"
+# that 4b/4c also happen to emit, so a test can't pass for the wrong
+# reason (review round 1, finding 1/8).
+_NOT_ATOC_MSG = "reaches the top of the SoC's declared MRAM aperture"
+_NO_ROW_MSG = "no region in the declared memory_map ends at"
+
+# A fully-tiled E8 aperture (mcuboot/he_slot0/hp_slot0/reserved/storage,
+# summing to exactly 5632 KiB) with 'storage' -- not 'atoc' -- reaching
+# the aperture top, and every row carrying `carveout: false`: this is
+# the pre-#1289 hazard shape with NOTHING else for 4b (gaps/overlaps) or
+# 4c (carveout disagreement) to say, so a failure against it can only be
+# the new rule (review round 1, finding 1).
+_TILED_STORAGE_AT_TOP = (
+    "  - { name: mcuboot,  base: 0x80000000, size_kib: 64,   carveout: false }\n"
+    "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, carveout: false }\n"
+    "  - { name: hp_slot0, base: 0x802b0000, size_kib: 2688, carveout: false }\n"
+    "  - { name: reserved, base: 0x80550000, size_kib: 64,   carveout: false }\n"
+    "  - { name: storage,  base: 0x80560000, size_kib: 128,  carveout: false }\n"
+)
+
 
 def _dts(partitions: "list[tuple[str, int, int]]") -> str:
     """Render a minimal fixed-partitions .dts. (label, offset, size_kib)."""
@@ -190,40 +211,38 @@ class TestPresetCheckApertureTopRule(unittest.TestCase):
         return p
 
     def test_storage_at_the_top_fails_aperture_resolving(self):
-        """Aperture-resolving twin of test_storage_at_the_top_fails."""
-        p = self._preset(
-            _SILICON_HEADER + "memory_map:\n"
-            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
-            "  - { name: storage, base: 0x80560000, size_kib: 128 }\n")
+        """Aperture-resolving twin of test_storage_at_the_top_fails, on a
+        FULLY TILED, all-`carveout: false` layout so 4b/4c stay silent and
+        the single failure can only be the new rule (finding 1)."""
+        p = self._preset(_SILICON_HEADER + "memory_map:\n" + _TILED_STORAGE_AT_TOP)
         failures = atoc._check_preset(p)
-        joined = "\n".join(failures)
-        self.assertIn("'storage'", joined)
-        self.assertIn("0x80580000", joined)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn(_NOT_ATOC_MSG, failures[0])
+        self.assertIn("'storage'", failures[0])
+        self.assertIn("0x80580000", failures[0])
 
     def test_storage_at_the_top_fails_with_hyperram_row_present(self):
         """KEY regression test: an out-of-aperture HyperRAM row must not
-        make the gate skip the rule -- it must still refuse 'storage' at
-        the aperture top, exactly as without the HyperRAM row."""
+        make the gate skip the rule, and must add zero failures of its
+        own -- the count stays 1, same as without the row."""
         p = self._preset(
-            _SILICON_HEADER + "memory_map:\n"
-            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
-            "  - { name: storage,  base: 0x80560000, size_kib: 128 }\n"
+            _SILICON_HEADER + "memory_map:\n" + _TILED_STORAGE_AT_TOP +
             "  - { name: hyperram, base: 0xA0000000, size_mib: 64 }\n")
         failures = atoc._check_preset(p)
-        joined = "\n".join(failures)
-        self.assertIn("'storage'", joined)
-        self.assertIn("0x80580000", joined)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn(_NOT_ATOC_MSG, failures[0])
+        self.assertIn("'storage'", failures[0])
+        self.assertIn("0x80580000", failures[0])
 
     def test_atoc_authored_outside_the_aperture_does_not_satisfy_the_rule(self):
         p = self._preset(
-            _SILICON_HEADER + "memory_map:\n"
-            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
-            "  - { name: storage, base: 0x80560000, size_kib: 128 }\n"
-            "  - { name: atoc,    base: 0xA3FF8000, size_kib: 32 }\n")
+            _SILICON_HEADER + "memory_map:\n" + _TILED_STORAGE_AT_TOP +
+            "  - { name: atoc, base: 0xA3FF8000, size_kib: 32 }\n")
         failures = atoc._check_preset(p)
-        joined = "\n".join(failures)
-        self.assertIn("'storage'", joined)
-        self.assertIn("0x80580000", joined)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn(_NOT_ATOC_MSG, failures[0])
+        self.assertIn("'storage'", failures[0])
+        self.assertIn("0x80580000", failures[0])
 
     def test_short_tiling_with_nothing_at_the_top_fails(self):
         p = self._preset(
@@ -232,18 +251,39 @@ class TestPresetCheckApertureTopRule(unittest.TestCase):
             "  - { name: storage, base: 0x80010000, size_kib: 5504 }\n")
         failures = atoc._check_preset(p)
         joined = "\n".join(failures)
+        self.assertIn(_NO_ROW_MSG, joined)
         self.assertIn("0x80580000", joined)
-        self.assertIn("no region", joined)
 
     def test_atoc_straddling_the_top_fails(self):
+        """atoc starts at the aperture top's natural offset but overruns
+        it by 32 KiB, so no row ends exactly at full_hi -- the anchor
+        point is left unowned, the same failure branch as a short tiling
+        (finding 8: asserts the new rule's own message, not '0x80580000'
+        alone, which 4b's own overflow message also carries)."""
         p = self._preset(
             _SILICON_HEADER + "memory_map:\n"
             "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
             "  - { name: storage, base: 0x80010000, size_kib: 5536 }\n"
             "  - { name: atoc,    base: 0x80578000, size_kib: 64 }\n")
         failures = atoc._check_preset(p)
-        self.assertTrue(failures)
-        self.assertTrue(any("0x80580000" in f for f in failures))
+        joined = "\n".join(failures)
+        self.assertIn(_NO_ROW_MSG, joined)
+        self.assertIn("0x80580000", joined)
+
+    def test_zero_size_row_at_the_top_is_not_treated_as_reserving_it(self):
+        """finding 6: a zero-size `atoc` row AT the aperture top reserves
+        nothing -- it must not satisfy the rule by merely existing at the
+        right address. Without the `hi > lo` guard this preset would pass
+        with zero failures, masking the hazard."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage, base: 0x80010000, size_kib: 5504 }\n"
+            "  - { name: atoc,    base: 0x80580000, size_kib: 0 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn(_NO_ROW_MSG, joined)
+        self.assertIn("0x80580000", joined)
 
     def test_no_silicon_falls_back_to_file_wide_max_and_still_fails(self):
         """Pins the fail-closed fallback: no `silicon:` resolves no
@@ -262,14 +302,17 @@ class TestPresetCheckApertureTopRule(unittest.TestCase):
 
     def test_whole_device_region_does_not_mask_the_top_owner_aperture_resolving(self):
         """Aperture-resolving twin of
-        test_whole_device_region_does_not_mask_the_top_owner."""
+        test_whole_device_region_does_not_mask_the_top_owner, on the same
+        fully-tiled, all-`carveout: false` layout so the whole-device
+        alias's own presence adds no 4b/4c noise (finding 1/8)."""
         p = self._preset(
             _SILICON_HEADER + "memory_map:\n"
-            "  - { name: mram_main, base: 0x80000000, size_kib: 5632 }\n"
-            "  - { name: storage,   base: 0x80560000, size_kib: 128 }\n")
+            "  - { name: mram_main, base: 0x80000000, size_kib: 5632 }\n" +
+            _TILED_STORAGE_AT_TOP)
         failures = atoc._check_preset(p)
-        joined = "\n".join(failures)
-        self.assertIn("'storage'", joined)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn(_NOT_ATOC_MSG, failures[0])
+        self.assertIn("'storage'", failures[0])
 
     def test_six_band_layout_with_hyperram_above_passes(self):
         p = self._preset(
