@@ -187,6 +187,7 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
 /* Register addresses re-declared here (they are private to
  * chips/tas2563/tas2563.c) so an assertion reads as the datasheet
  * register it checks.  SLASET3D section 7.5.1, p.64-65. */
+#define TAS_REG_PAGE      0x00u
 #define TAS_REG_PWR_CTL   0x02u
 #define TAS_REG_PB_CFG1   0x03u
 #define TAS_REG_MISC_CFG1 0x04u
@@ -314,6 +315,31 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	              0x02u,
 	              "the park write must have landed on book 0 / page 0, not in "
 	              "whatever page the previous firmware left selected");
+
+	alp_i2c_close(bus);
+}
+
+/* #2077: the connectivity probe must propagate the bus's own status
+ * instead of remapping every failure to a hardcoded ALP_ERR_NOT_READY.
+ * Arm the fake to NACK the very first bus write init issues -- the
+ * PAGE=0 write inside select_book0_page0() -- and confirm the NACK
+ * surfaces as ALP_ERR_IO, the code alp_i2c_write() documents for
+ * "NACK / bus fault" (include/alp/peripheral.h). */
+ZTEST(alp_chips, test_tas2563_init_propagates_bus_status_on_probe_failure)
+{
+	fake_tas2563_reset();
+	fake_tas2563_fail_write_at(0u, 0u, TAS_REG_PAGE);
+
+	tas2563_t  ctx;
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL),
+	              ALP_ERR_IO,
+	              "a NACK on the probe's first write must surface as ALP_ERR_IO, the "
+	              "status the bus call actually returned -- not a hardcoded "
+	              "ALP_ERR_NOT_READY");
 
 	alp_i2c_close(bus);
 }

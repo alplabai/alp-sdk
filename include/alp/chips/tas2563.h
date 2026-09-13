@@ -277,13 +277,29 @@ typedef struct {
  *                       elsewhere (or if the pin is tied permanently
  *                       to V+).
  *
- * @return ALP_OK on a successful probe.
- * @retval ALP_ERR_INVAL     ctx or bus is NULL, or addr_7bit is not
- *                           one of the four strap constants.
- * @retval ALP_ERR_NOT_READY The I2C connectivity probe failed.
+ * @pre If the caller (not this function) is the one releasing SDZ --
+ *      i.e. @p sd_n is NULL and SD_N is driven elsewhere -- at least
+ *      100 us must have elapsed since that release before calling
+ *      this function.  I2C is disabled for the whole time the part is
+ *      in Hardware Shutdown (SLASET3D §7.3.11.1), and once SDZ goes
+ *      high, "additional commands to the device should be delayed for
+ *      100 uS to allow the OTP to load" (SLASET3D §9.2) before any I2C
+ *      operation.  This function does not add that wait itself: it
+ *      has no way to know when SD_N was actually released by a caller
+ *      who owns the pin externally.
  *
- * sd_n configure/write failures pass their own status straight
- * through instead of being folded into ALP_ERR_NOT_READY.
+ * @return ALP_OK on a successful probe.
+ * @retval ALP_ERR_INVAL  ctx or bus is NULL, or addr_7bit is not one
+ *                        of the four strap constants.
+ * @retval (other)        Whatever status the I2C connectivity probe's
+ *                        bus call returned, propagated verbatim --
+ *                        typically ALP_ERR_IO (NACK / bus fault),
+ *                        ALP_ERR_NOT_READY (bus handle closed) or
+ *                        ALP_ERR_NOSUPPORT.  See @ref alp_i2c_write
+ *                        and @ref alp_i2c_write_read for the full set.
+ *
+ * sd_n configure/write failures also pass their own status straight
+ * through, same as the connectivity probe.
  *
  * After the probe succeeds, init writes `PWR_CTL.MODE = 10b`
  * (software shutdown) rather than assuming it.  Releasing SD_N does

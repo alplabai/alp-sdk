@@ -192,10 +192,10 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 	 * non-zero, and REVID/PWR_CTL would then address coefficient
 	 * space instead of the control registers. */
 	alp_status_t s = select_book0_page0(ctx);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
 	uint8_t rev = 0;
 	s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
 
 	/* Park the amplifier in software shutdown before handing the
 	 * context back.  This is the part's own reset value (PWR_CTL
@@ -208,7 +208,7 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 	 * one write is cheap insurance against handing back a context
 	 * that is already driving a speaker. */
 	s = reg_update(ctx, TAS2563_REG_PWR_CTL, TAS2563_PWR_CTL_MODE_MASK, TAS2563_MODE_SHUTDOWN);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
 
 	ctx->initialised = true;
 	return ALP_OK;
