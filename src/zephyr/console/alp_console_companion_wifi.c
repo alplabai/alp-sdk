@@ -99,7 +99,20 @@ static void companion_conn_thread(void *a, void *b, void *c)
 			uint8_t last_reason = 0u;
 			if (s != ALP_ERR_INVAL) {
 				alp_cc3501e_wifi_status_t fst = { 0 };
-				if (cc3501e_wifi_status_once(companion_cc3501e, &fst) == ALP_OK) {
+				/* Trust last_reason only when the latch itself confirms THIS
+				 * was a terminal FAILED outcome.  A DISCONNECTED (or
+				 * CONNECTING) state here means no failure of THIS attempt
+				 * ever landed on the latch -- e.g. the CONNECT_STA submit was
+				 * bounced BUSY by a concurrent worker op, or lost to a
+				 * transport IO fault, and cc3501e_wifi_connect()'s own loop
+				 * simply ran out its timeout_ms without ever seeing
+				 * CONN_FAILED.  The byte then still holds whatever an
+				 * UNRELATED prior attempt left there (see last_reason's own
+				 * "persists through later publishes" contract) -- printing
+				 * it here would misattribute a stale reason to an attempt
+				 * that never actually started. */
+				if (cc3501e_wifi_status_once(companion_cc3501e, &fst) == ALP_OK &&
+				    fst.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 					last_reason = fst.last_reason;
 				}
 			}

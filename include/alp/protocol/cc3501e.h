@@ -1137,11 +1137,22 @@ typedef struct {
 	 *
 	 *  Recorded ONLY while that attempt's state is CONNECTING; frozen at its
 	 *  terminal result and PERSISTS through every later state publish --
-	 *  including a subsequent host `wifi disconnect`, which republishes this
-	 *  same frozen value rather than a fresh one -- until the NEXT connect
-	 *  attempt starts and clears it back to 0.  0 means NOTHING WAS RECORDED
-	 *  for that attempt, not "no cause": a clean success, or a bare TIMEOUT
-	 *  with no DISCONNECT/REJECTED event of its own, also reads 0.
+	 *  including a subsequent @ref cc3501e_wifi_disconnect() call
+	 *  (WIFI_DISCONNECT, 0x13), which republishes this same frozen value
+	 *  rather than a fresh one -- until the NEXT connect attempt starts and
+	 *  clears it back to 0.  0 means NOTHING WAS RECORDED for that attempt,
+	 *  not "no cause": a clean success, or a bare TIMEOUT with no DISCONNECT/
+	 *  REJECTED event of its own, also reads 0.  Note @ref cc3501e_wifi_connect
+	 *  itself issues that same disconnect at ENTRY, before submitting the new
+	 *  attempt, whenever the latch it reads first still shows a FAILED
+	 *  attempt (#1435/#1437 stale-association cleanup) -- so that internal
+	 *  disconnect can republish the OLD attempt's value too, same as an
+	 *  explicit one would.
+	 *
+	 *  CONNECTED always publishes 0, unconditionally -- even if a since-
+	 *  succeeded retry (below) recorded a transient rejection earlier in the
+	 *  same attempt -- and clears the underlying live value too, so it stays
+	 *  0 for any later republish of that same session.
 	 *
 	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED) -- a
 	 *  vendor placeholder, not a real 802.11 code.
@@ -1154,7 +1165,13 @@ typedef struct {
 	 *  the new one (any reason/status code, not one in particular).  The
 	 *  converse also holds: a reject arriving after an attempt has already
 	 *  been declared TIMEOUT is lost, because the attempt is already
-	 *  terminal by then.
+	 *  terminal by then.  The firmware also runs one bounded, transparent
+	 *  retry when the FIRST pass rejects with status 30 (an AP-issued
+	 *  comeback-time hint): the retry normally reports its OWN outcome (the
+	 *  value is reset again before the retry's own connect call), but if the
+	 *  retry's own connect call is itself refused, the byte instead reports
+	 *  the FIRST pass's outcome (e.g. REJECTED/30) rather than a generic
+	 *  KICK/0.
 	 *
 	 *  Scope is the connect attempt only: a deauth AFTER a successful
 	 *  CONNECTED is not recorded, because the state is no longer CONNECTING.

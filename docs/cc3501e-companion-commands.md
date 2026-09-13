@@ -81,12 +81,22 @@ the wire says which one, so `fail: 2` (REJECTED) does not tell you which
 table `<N>` came from. It is recorded only while that attempt was
 CONNECTING, then frozen and **persists through later state publishes** --
 including a later `wifi disconnect`, which republishes this same frozen
-value rather than clearing it -- until the next connect attempt starts. `0`
-means nothing was recorded for that attempt, not "no cause": a clean success
-or a bare timeout also reads `0`. It never holds vendor reason 200
-(`WLAN_DISCONNECT_USER_INITIATED`). Known residual: a late event from the
+value rather than clearing it -- until the next connect attempt starts. A
+successful connect (`CONNECTED`) always publishes `0`, even over an earlier
+transient rejection in the same attempt that a firmware-internal retry then
+overcame. `0` means nothing was recorded for that attempt, not "no cause": a
+clean success or a bare timeout also reads `0`. It never holds vendor reason
+200 (`WLAN_DISCONNECT_USER_INITIATED`). Known residual: a late event from the
 PREVIOUS attempt landing in the brief window right before the new attempt's
 own connect call can still be recorded against the new one.
+
+`wifi connect`'s printed `reason: <N>` is only ever the CURRENT attempt's own
+failure: the console checks that the fetched status latch's `state` itself
+reads `CONN_FAILED` before trusting `<N>` -- a plain `timed out` with the
+latch still `DISCONNECTED`/`CONNECTING` (the submit was bounced busy by a
+concurrent worker op, or lost to a transport fault) never got far enough to
+record anything of its own, and printing a leftover value there would blame
+an unrelated earlier attempt.
 
 `wifi ap` cannot report a confirmed "up" against CC3501E firmware protocol
 v4: `cc3501e_wifi_ap_start()` submits the request once and returns

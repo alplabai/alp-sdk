@@ -257,8 +257,20 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
 
 /* Single, non-retried WIFI_STATUS read (opcode 0x1B) -- decodes the same
  * fixed 4-byte wire layout as cc3501e_wifi_status() below, but WITHOUT its
- * down-window poll_by_repeat, so a caller gets a bounded ~CC3501E_REQ_TMO_MS
- * (100 ms) attempt instead of up to CC3501E_WIFI_DOWN_WINDOW_MS (10 s).
+ * down-window poll_by_repeat, so ONE call cannot itself balloon to
+ * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) the way that retrying call can.
+ *
+ * The CC3501E_REQ_TMO_MS passed to cc3501e_request() below is NOT an
+ * enforced per-call bound -- cc3501e_request() takes `timeout_ms` and
+ * discards it unconditionally (`(void)timeout_ms;`, cc3501e_core.c), same as
+ * every other single-shot request in this file.  The REAL bound on a single
+ * call here is two-part: acquiring the shared request lock is itself capped
+ * at CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS (default 100 ms,
+ * cc3501e_core.c) and returns ALP_ERR_BUSY on expiry (e.g. another thread's
+ * connect holds it); once granted, each SPI phase this opcode's exchange
+ * takes waits up to CC3501E_READY_WAIT_US (250 ms, cc3501e_core.c) for the
+ * slave's READY edge once the line is proven, and times out ALP_ERR_IO /
+ * ALP_ERR_NOT_READY rather than retrying if the slave never re-arms.
  *
  * Originally file-private, used only by cc3501e_wifi_connect()'s own loop
  * below, which already re-polls on its own cadence (CC3501E_WIFI_STATUS_
@@ -271,12 +283,10 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
  * harness: connect(timeout_ms=200) made 1005 WIFI_STATUS attempts = 50250 ms
  * (251x the declared budget) before giving up.
  *
- * A single non-retried attempt here (nominally CC3501E_REQ_TMO_MS, the same
- * per-attempt budget every other single-shot request in this file passes --
- * but cc3501e_request() does NOT enforce it, see the #1481 note in
- * cc3501e_wifi_connect() below) keeps the outer loop the SOLE owner of the
- * retry budget, matching <alp/chips/cc3501e/wifi.h>'s documented contract
- * for cc3501e_wifi_connect ("Upper bound on the WIFI_STATUS poll budget").
+ * A single non-retried attempt here keeps the outer loop the SOLE owner of
+ * the retry budget, matching <alp/chips/cc3501e/wifi.h>'s documented
+ * contract for cc3501e_wifi_connect ("Upper bound on the WIFI_STATUS poll
+ * budget").
  *
  * Exposed publicly (alp-sdk#2099) so a caller who wants @c last_reason as a
  * best-effort diagnostic on a failure path -- e.g. the console's `wifi

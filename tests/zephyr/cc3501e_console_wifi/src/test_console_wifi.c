@@ -86,6 +86,56 @@ static struct {
 	uint8_t connect_result_fail_reason;
 	uint8_t connect_result_last_reason;
 
+	/* Response status CONNECT_STA's own submit exchange acks with.  The real
+	 * firmware answers this worker-routed opcode RESP_ERR_BUSY (the drain
+	 * runs the seconds-long connect body off THIS exchange; the host never
+	 * collects the real outcome through the submit's own ack -- see
+	 * cc3501e_wifi_connect()'s "SUBMIT ONCE" comment) -- default here matches
+	 * that, so a test that leaves this unset still exercises the ack the
+	 * driver actually has to tolerate.  Set to ALP_CC3501E_RESP_ERR_INVALID
+	 * to model a synchronous reject (bad payload) instead, the one ack value
+	 * cc3501e_wifi_connect() DOES trust and short-circuits on. */
+	uint8_t connect_sta_resp;
+
+	/* When true, CONNECT_STA's dispatch acks connect_sta_resp WITHOUT
+	 * committing connect_result_* into the live latch fields -- models a
+	 * submit that a concurrent worker op bounced BUSY, or that a transport
+	 * IO fault lost, without ever actually queuing a new attempt: the latch
+	 * is left exactly as it was (state, fail_reason, and last_reason all
+	 * whatever an EARLIER, unrelated attempt left there). */
+	bool connect_sta_skip_commit;
+
+	/* Set true the moment CONNECT_STA's dispatch commits connect_result_*
+	 * (see above) -- this fake slave's model of "the connect body just
+	 * published a terminal outcome".  Used to isolate the WIFI_STATUS
+	 * dispatch(es) that happen AFTER that point: the first is
+	 * cc3501e_wifi_connect()'s own loop discovering the terminal state (must
+	 * succeed normally, or the loop cannot return), every one after that is
+	 * the CONSOLE's own separate diagnostic re-fetch. */
+	bool connect_terminal_committed;
+
+	/* Total WIFI_STATUS dispatches after connect_terminal_committed went
+	 * true.  A test that arms wifi_status_fail_after_terminal below and
+	 * asserts this stops at 2 (the loop's own terminal read, plus exactly
+	 * ONE diagnostic re-fetch) fails if the diagnostic fetch is swapped back
+	 * to the retrying cc3501e_wifi_status() -- that call would keep
+	 * incrementing this on every retry instead of failing once. */
+	unsigned int wifi_status_calls_after_terminal;
+
+	/* When true, every WIFI_STATUS REQUEST-HEADER phase transceive AFTER the
+	 * first one following connect_terminal_committed fails OUTRIGHT (as if
+	 * the shared bridge transport itself were down) instead of ever reaching
+	 * a decoded reply -- same shape as tests/zephyr/cc3501e_host_driver's
+	 * g_status_io_down_remaining, and DELIBERATELY not a decoded
+	 * RESP_ERR_RADIO/PROTOCOL/INTERNAL reply: cc3501e_core.c's poll_by_repeat
+	 * treats THOSE as a terminal, non-retried decode failure, so they would
+	 * not tell a bounded single attempt apart from a retrying one.  A
+	 * pre-decode transport fault IS genuinely retryable, which is the whole
+	 * point here -- models a transport fault landing in the gap between the
+	 * connect loop's own terminal read and the console's separate diagnostic
+	 * fetch. */
+	bool wifi_status_fail_after_terminal;
+
 	/* Response status WIFI_GET_RSSI answers with -- RESP_OK stages the real
 	 * measurement, anything else models a radio read that could not be
 	 * served (e.g. the radio went back down between the two requests). */
@@ -100,6 +150,12 @@ static struct {
 	 * opcode seen, so it cannot tell "no radio read was issued" from "a radio
 	 * read was issued and then something else ran after it". */
 	unsigned int get_rssi_count;
+
+	/* Total WIFI_STATUS dispatches, ever -- the entry-clean pre-check inside
+	 * cc3501e_wifi_connect() issues one of these before every submit, so a
+	 * test proving "no [additional] status fetch happened" needs the total,
+	 * not an implicit zero. */
+	unsigned int wifi_status_count;
 } slave;
 
 static void slave_reset(void)
@@ -109,6 +165,7 @@ static void slave_reset(void)
 	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONNECTED;
 	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_NONE;
 	slave.wifi_conn_rssi   = FIX_RSSI_LATCHED;
+	slave.connect_sta_resp = ALP_CC3501E_RESP_ERR_BUSY;
 	slave.rssi_resp        = ALP_CC3501E_RESP_OK;
 	slave.ip_resp          = ALP_CC3501E_RESP_OK;
 }
@@ -130,6 +187,13 @@ static void slave_dispatch(void)
 {
 	switch (slave.cmd) {
 	case ALP_CC3501E_CMD_WIFI_STATUS: {
+		/* Attempt counting + transport-fault injection for this opcode both
+		 * live in alp_spi_transceive()'s PH_REQ_HDR case below, matching
+		 * tests/zephyr/cc3501e_host_driver's g_status_io_down_remaining shape
+		 * -- a genuine transport-level fault must fail BEFORE any status
+		 * byte is decoded (so poll_by_repeat's retry gate treats it as
+		 * retryable), which this dispatch (reached only once the exchange
+		 * already succeeded) is too late to model. */
 		const uint8_t st[4] = {
 			slave.wifi_conn_state,
 			slave.wifi_fail_reason,
@@ -150,16 +214,21 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_CONNECT_STA: {
-		/* The submit's own ack is untrusted by the driver (see
-		 * cc3501e_wifi_connect()'s comment) -- a bare RESP_OK with no
-		 * payload is enough.  Commit the configured outcome into the live
-		 * latch fields the SAME exchange, so the very next WIFI_STATUS poll
+		/* The submit's own ack is untrusted by the driver for anything other
+		 * than ALP_ERR_INVAL (see cc3501e_wifi_connect()'s comment) -- ack
+		 * with connect_sta_resp (RESP_ERR_BUSY by default, matching the real
+		 * firmware).  Commit the configured outcome into the live latch
+		 * fields the SAME exchange, so the very next WIFI_STATUS poll
 		 * (cc3501e_wifi_connect()'s own loop) reads it straight back with no
-		 * simulated worker delay to wait out. */
-		slave.wifi_conn_state  = slave.connect_result_state;
-		slave.wifi_fail_reason = slave.connect_result_fail_reason;
-		slave.wifi_last_reason = slave.connect_result_last_reason;
-		stage_reply(ALP_CC3501E_RESP_OK, NULL, 0u);
+		 * simulated worker delay to wait out -- unless connect_sta_skip_commit
+		 * is set, modelling a submit that never actually queued an attempt. */
+		if (!slave.connect_sta_skip_commit) {
+			slave.wifi_conn_state            = slave.connect_result_state;
+			slave.wifi_fail_reason           = slave.connect_result_fail_reason;
+			slave.wifi_last_reason           = slave.connect_result_last_reason;
+			slave.connect_terminal_committed = true;
+		}
+		stage_reply(slave.connect_sta_resp, NULL, 0u);
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_IP: {
@@ -186,6 +255,20 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	(void)bus;
 	if (len == 0u) {
 		return ALP_OK;
+	}
+	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS) {
+		slave.wifi_status_count++;
+		if (slave.connect_terminal_committed) {
+			slave.wifi_status_calls_after_terminal++;
+			if (slave.wifi_status_fail_after_terminal &&
+			    slave.wifi_status_calls_after_terminal > 1u) {
+				/* Genuine transport-level fault, injected BEFORE
+				 * slave.phase advances (so the next attempt starts clean) --
+				 * see wifi_status_fail_after_terminal's own comment for why
+				 * this must be pre-decode, not a staged RESP_ERR_* reply. */
+				return ALP_ERR_IO;
+			}
+		}
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
@@ -304,8 +387,15 @@ static const char *run(const char *line)
  * result line -- identified by @p must_appear, a substring every outcome of
  * that line carries (`"failed ("` / `"timed out"`), so this helper works for
  * both the failure and timeout shapes without hardcoding the poll interval.
- * Returns the full captured shell output including that async print; the
- * caller asserts on the `reason:` suffix (present or absent) from there. */
+ *
+ * FAILS THE TEST (via zassert) if @p must_appear never shows up in the
+ * bounded window, rather than silently returning whatever was captured.
+ * Without this, a caller asserting on the ABSENCE of something (e.g. no
+ * "reason:" suffix) would pass vacuously if the result line never printed at
+ * all -- the missing "reason:" and the missing line itself are
+ * indistinguishable to a plain strstr()-is-NULL check.  Requiring
+ * must_appear to have actually shown up is what makes the absence assertion
+ * meaningful. */
 static const char *run_wifi_connect_and_wait(const char *line, const char *must_appear)
 {
 	const struct shell *sh = shell_backend_dummy_get_ptr();
@@ -313,12 +403,14 @@ static const char *run_wifi_connect_and_wait(const char *line, const char *must_
 	shell_backend_dummy_clear_output(sh);
 	(void)shell_execute_cmd(sh, line);
 
-	size_t      len = 0;
-	const char *out = shell_backend_dummy_get_output(sh, &len);
-	WAIT_FOR((out = shell_backend_dummy_get_output(sh, &len)) != NULL &&
-	             strstr(out, must_appear) != NULL,
-	         2000000,
-	         k_msleep(20));
+	size_t      len  = 0;
+	const char *out  = shell_backend_dummy_get_output(sh, &len);
+	bool        seen = WAIT_FOR((out = shell_backend_dummy_get_output(sh, &len)) != NULL &&
+	                                strstr(out, must_appear) != NULL,
+	                            2000000,
+	                            k_msleep(20));
+	zassert_true(
+	    seen, "result line containing \"%s\" never printed: %s", must_appear, out ? out : "(null)");
 	/* companion_conn_thread clears conn_pending in the statement right AFTER
 	 * the print WAIT_FOR just observed -- give it a short margin so the NEXT
 	 * test's own `wifi connect` does not race a conn_pending that is still
@@ -484,11 +576,13 @@ ZTEST(cc3501e_console_wifi, test_connect_omits_reason_when_zero_2099)
 	zassert_is_null(strstr(out, "reason:"), "no reason line when nothing was recorded: %s", out);
 }
 
-/* The "timed out" shape gets the same fetch: the firmware's own DHCP-lease
- * timeout after a successful association still publishes FAILED/TIMEOUT with
- * whatever reason it had already recorded (e.g. during the association
- * phase), so the timeout line must surface it too, not just the generic
- * failure line. */
+/* The "timed out" shape gets the same fetch.  An event during ASSOCIATION
+ * ends the attempt REJECTED, not TIMEOUT -- a TIMEOUT carrying a non-zero
+ * last_reason instead comes from a DISCONNECT landing during the POST-
+ * ASSOCIATION DHCP poll (the attempt is still open/CONNECTING at that point,
+ * so the gate that records last_reason has not closed yet, even though the
+ * overall connect ultimately times out waiting on the lease).  The timeout
+ * line must surface that reason too, not just the generic failure line. */
 ZTEST(cc3501e_console_wifi, test_connect_timeout_prints_reason_when_recorded_2099)
 {
 	slave.connect_result_state       = ALP_CC3501E_WIFI_CONN_FAILED;
@@ -499,6 +593,80 @@ ZTEST(cc3501e_console_wifi, test_connect_timeout_prints_reason_when_recorded_209
 	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "timed out");
 
 	zassert_not_null(strstr(out, "reason: 7"), "reason line missing on timeout: %s", out);
+}
+
+/* Round-2 review (#2099): attempt A fails and leaves last_reason=15 on the
+ * latch.  Attempt B's own CONNECT_STA submit is bounced BUSY by a concurrent
+ * worker op (modelled here by connect_sta_skip_commit -- the ack is BUSY,
+ * same as always, but no new outcome is ever queued), so B's own status poll
+ * loop never sees CONN_FAILED and simply runs out its timeout_ms.  The stale
+ * last_reason=15 from attempt A must NOT be printed against attempt B, which
+ * never actually started -- the console only trusts last_reason when the
+ * fetched latch's own state reads CONN_FAILED. */
+ZTEST(cc3501e_console_wifi, test_connect_timeout_omits_stale_reason_from_unstarted_attempt_2099)
+{
+	slave.wifi_conn_state         = ALP_CC3501E_WIFI_DISCONNECTED;
+	slave.wifi_fail_reason        = ALP_CC3501E_WIFI_FAIL_NONE;
+	slave.wifi_last_reason        = 15u; /* stale, left by an earlier, unrelated attempt */
+	slave.connect_sta_skip_commit = true;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "timed out");
+
+	zassert_is_null(strstr(out, "reason:"),
+	                "must not print an unrelated prior attempt's stale reason: %s",
+	                out);
+}
+
+/* CONNECT_STA's own submit exchange rejecting RESP_ERR_INVALID (bad payload)
+ * is the ONE ack cc3501e_wifi_connect() trusts and short-circuits on -- no
+ * attempt is ever queued, so the console must not fetch WIFI_STATUS at all
+ * for its diagnostic reason (it would only ever read a PRIOR, unrelated
+ * attempt's value).  The entry-clean pre-check inside cc3501e_wifi_connect()
+ * still issues its own single WIFI_STATUS read before every submit
+ * regardless of outcome, so the total count here is exactly 1, not 0. */
+ZTEST(cc3501e_console_wifi, test_connect_invalid_skips_status_fetch_2099)
+{
+	slave.connect_sta_resp = ALP_CC3501E_RESP_ERR_INVALID;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "failed (");
+
+	zassert_is_null(strstr(out, "reason:"), "no reason line on a synchronous reject: %s", out);
+	zassert_equal(slave.wifi_status_count,
+	              1u,
+	              "only the entry-clean pre-check's WIFI_STATUS read should have "
+	              "happened, no diagnostic fetch on top of it: got %u",
+	              slave.wifi_status_count);
+}
+
+/* A transport fault landing in the gap between cc3501e_wifi_connect()'s own
+ * terminal WIFI_STATUS read and the console's separate diagnostic re-fetch
+ * must cost exactly ONE extra WIFI_STATUS attempt, not a down-window's worth
+ * of retries -- proving the console's fetch is cc3501e_wifi_status_once()
+ * (bounded, non-retried), not the retrying cc3501e_wifi_status(). */
+ZTEST(cc3501e_console_wifi, test_connect_diagnostic_fetch_is_not_retried_2099)
+{
+	slave.connect_result_state            = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.connect_result_fail_reason      = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.connect_result_last_reason      = 15u;
+	slave.wifi_status_fail_after_terminal = true;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "failed (");
+
+	/* The diagnostic fetch itself failed (IO), so no reason line -- this
+	 * assertion alone would also pass if the fetch retried and eventually
+	 * gave up, which is exactly why the call-count assertion below is the
+	 * one that actually proves the bound. */
+	zassert_is_null(
+	    strstr(out, "reason:"), "diagnostic fetch failed -- no reason to print: %s", out);
+	zassert_equal(slave.wifi_status_calls_after_terminal,
+	              2u,
+	              "exactly one WIFI_STATUS attempt should follow the loop's own terminal "
+	              "read (a bounded cc3501e_wifi_status_once() call) -- got %u; a value "
+	              "far above 2 means the diagnostic fetch is retrying (cc3501e_wifi_status())",
+	              slave.wifi_status_calls_after_terminal);
 }
 
 ZTEST_SUITE(cc3501e_console_wifi, NULL, suite_setup, reset_before, NULL, NULL);
