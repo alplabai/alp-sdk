@@ -100,7 +100,11 @@
  * CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
  * (metadata/e1m_modules/aen/from-cc3501e.tsv).  cc3501e_bridge_bringup()
  * below does not open this pin on that board -- see its comment for the
- * bench evidence -- so this macro currently has no live consumer here. */
+ * bench evidence -- so this macro currently has no live consumer here.
+ * THIS APP'S OWN overlay never declares an `alp_pins` index [2] at all
+ * (unlike the sibling AEN examples this template is copied from, whose
+ * alp_pins[2] does point at &gpio2 6): alp_gpio_open(CC3501E_BRIDGE_PIN_READY)
+ * would fail to resolve here even if something tried to call it. */
 #ifndef CC3501E_BRIDGE_PIN_READY
 #define CC3501E_BRIDGE_PIN_READY 2u
 #endif

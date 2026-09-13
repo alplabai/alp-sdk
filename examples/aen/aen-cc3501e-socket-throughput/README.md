@@ -11,6 +11,18 @@ build-time-credential convention is copied from it).
 
 ## What this measures, and why it exists
 
+> **Erratum.** Every `~980 KB/s` figure in this section was measured (or
+> derived) against a bridge that trusted a level-only READY gate --
+> effectively near-zero inter-phase settles.  With the fixed edge-proving
+> gate (chips/cc3501e/cc3501e_core.c) and this app's own READY-off default
+> on the R2 module (see the section below), each frame instead pays
+> `CC3501E_PHASE_SETTLE_US`-class fixed settles (>= ~950 us/frame), which
+> `~980 KB/s` is arithmetically incompatible with.  **run9** measured
+> **469 KB/s at a 4 KiB `SOCK_RECV`** with the READY gate off -- that is
+> the number to trust until this section is re-measured and rewritten
+> against the current default.  It is left below for its account of the
+> `k_uptime_get()` timer-floor artifact, which is still correct.
+
 A previous sweep (`aen-cc3501e-command-sweep`'s Part 2) reported
 `STREAM_WRITE` throughput as **104 KB/s at 64 bytes** and **250 KB/s at 256
 bytes**. Those numbers were never rates — they were an artifact of the

@@ -85,10 +85,13 @@ struct cc3501e {
 	alp_spi_t  *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
-	alp_gpio_t *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
-	                                *   HIGH when the SPI slave is armed+idle.  When populated,
+	alp_gpio_t *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17): HIGH
+	                                *   when the SPI slave is armed+idle.  When populated,
 	                                *   cc3501e_request() waits on it before each reply phase
-	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
+	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap.
+	                                *   NOT Alif P2_6 on every board -- see
+	                                *   chips/cc3501e/cc3501e_core.c's g_ready_line_proven
+	                                *   comment for the per-revision pin-routing fact. */
 	/* Async-event SUBSCRIBERS (issue #1723), not one callback slot.
 	 *
 	 * This used to be a single { event_cb, event_user } pair, and the last

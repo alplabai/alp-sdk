@@ -18,6 +18,21 @@
  * poll_by_repeat().  Shared across every cc3501e_<subsystem>.c file. */
 #define CC3501E_REQ_TMO_MS 100u
 
+/* How many CONSECUTIVE agreeing reads confirm a single READY-line sample
+ * while unproven -- see cc3501e_reply_gate()'s cc3501e_ready_debounced_read()
+ * in cc3501e_core.c for the full rationale.  Declared here (not `static` in
+ * that file alone) purely for test-visibility, same reason as
+ * cc3501e_reply_may_be_all_zero() below: tests/zephyr/cc3501e_host_driver's
+ * READY-gate fixtures queue exactly this many agreeing reads per confirmed
+ * sample, so the test and the driver must share one symbol instead of the
+ * test guessing the driver's constant. */
+#define CC3501E_READY_CONFIRM_READS 8u
+
+/* Tight spin count for the READY busy-LOW drop, once proven -- see
+ * cc3501e_reply_gate() in cc3501e_core.c.  Declared here for the same
+ * test-visibility reason as CC3501E_READY_CONFIRM_READS above. */
+#define CC3501E_READY_LOW_SPINS 64u
+
 /* Re-issue one request while the firmware is unavailable, until it resolves
  * (OK / hard error) or the budget elapses.  Two retryable conditions:
  *
@@ -71,20 +86,25 @@ bool cc3501e_peer_is_polled(void);
 
 /* True once cc3501e_reply_gate() has ever un-proven a previously-proven READY
  * line for missing its expected busy LOW CC3501E_READY_STUCK_STREAK gates in a
- * row.  Production code never resets this once it latches; lets a caller
- * (bench diagnostics, bring-up apps) report the degrade once.  See
- * g_ready_line_was_stuck in cc3501e_core.c for why this driver uses a
- * latch+getter instead of logging directly. */
+ * row.  Production code never resets this once it latches.  NOT a log call --
+ * chips/cc3501e has no logging facility of its own -- a caller (bench
+ * diagnostics, a bring-up app) has to poll this and print it itself if it
+ * wants the degrade reported anywhere.  See g_ready_line_was_stuck in
+ * cc3501e_core.c for the full rationale. */
 bool cc3501e_ready_line_was_stuck(void);
 
+#ifdef CONFIG_ZTEST
 /* TEST-ONLY: reset every cc3501e_reply_gate() READY-gate static (proven
- * latch, last-sample, stuck-streak, was-stuck latch) to its zero state.
- * Production code never calls this -- those statics are meant to persist for
- * the whole boot -- but tests/zephyr/cc3501e_host_driver drives multiple
- * READY-line fixtures (stuck-high, stuck-low, toggling) through the SAME
- * test binary, and file-static state would otherwise leak from one fixture
- * into the next depending on run order. */
+ * latch, last-sample, edge-agree count, stuck-streak, was-stuck latch) to
+ * its zero state.  Compiled only under CONFIG_ZTEST -- never linked into a
+ * non-test build -- because production code never calls this: those statics
+ * are meant to persist for the whole boot.  tests/zephyr/cc3501e_host_driver
+ * drives multiple READY-line fixtures (stuck-high, stuck-low, toggling,
+ * noisy, glitching) through the SAME test binary, and file-static state
+ * would otherwise leak from one fixture into the next depending on run
+ * order. */
 void cc3501e_ready_gate_reset_for_test(void);
+#endif
 
 /* #2035: whether opcode @p cmd is allowed to reply all-zero (status byte +
  * data) without cc3501e_request_locked() treating that as the #1378

@@ -36,9 +36,12 @@ static void aen_lp_pads_enable_output(void)
  *       the SPI peripheral asserts/deasserts it per transfer (no software GPIO CS,
  *       not CS-less).  The host opens ALP_SPI_NO_CS so the alp_spi backend leaves
  *       cs_present=false and spi_dw takes the hardware SER/SS0 branch.
- * READY = CC35 GPIO17 (E1M IO16) -> Alif P2_6 (gpio2.6): HIGH = bridge ready to
- *       clock, LOW = mid-radio-op (SPI-slave DMA dead).  Gates cc3501e_request.
- *       This READY line is a rev-1 EVK wire, read as a GPIO input below.
+ * READY = CC35 GPIO17, gates cc3501e_request() reply phases (HIGH = bridge
+ *       ready to clock, LOW = mid-radio-op).  NOT Alif P2_6 (gpio2.6): that is
+ *       E1M pad AH7 / I2S1_SCLK, a DIFFERENT net from CC35 GPIO17 (E1M pad
+ *       G3 / IO16) -- see chips/cc3501e/cc3501e_core.c's g_ready_line_proven
+ *       comment. The P2_6 mux below is read-enabled but not otherwise used
+ *       by this file -- see aen_bodge_init()'s own comment.
  */
 /* READY is a bodge GPIO input (P2_6 = gpio2.6); guard on gpio2 (still in the overlay).
  * CS needs no node here -- it is driven by the SPI peripheral's hardware SS0. */
@@ -53,17 +56,9 @@ static const pinctrl_soc_pin_t bodge_pins[] = {
 static void aen_bodge_init(void)
 {
 	(void)pinctrl_configure_pins(bodge_pins, ARRAY_SIZE(bodge_pins), PINCTRL_REG_NONE);
-	/* READY (P2_6 = gpio2.6) is muxed as a GPIO input, read-enabled, here --
-	 * but nothing in this file reads it back: cc3501e_bus_ready() and its
-	 * bodge_ready_raw() helper (raw DW EXT_PORTA peek) used to be a "strong
-	 * override" of a weak cc3501e_bus_ready() the comment claimed lived in
-	 * chips/cc3501e.c -- no such weak symbol exists there (the real driver
-	 * gates on ctx->ready_pin, a GPIO handle this bringup never sets), so
-	 * both functions were dead code with zero callers.  Removed rather than
-	 * kept as an unused "just in case" -- see chips/cc3501e/cc3501e_core.c's
-	 * cc3501e_reply_gate() for the real, ctx->ready_pin-based mechanism, and
-	 * the AEN example bridges' cc3501e_bridge.c for how it is actually wired
-	 * up (or, on e1m-aen-evk-01, deliberately left unwired). */
+	/* READY (P2_6 = gpio2.6) is muxed as a GPIO input, read-enabled, here, but
+	 * nothing in this file reads it back -- see chips/cc3501e/cc3501e_core.c's
+	 * cc3501e_reply_gate() for the real, ctx->ready_pin-based READY mechanism. */
 }
 /* No CS hooks here: CS is the dwc-ssi hardware SS0 (peripheral-driven per transfer); the
  * host driver does not bracket transactions with any software chip-select. */
