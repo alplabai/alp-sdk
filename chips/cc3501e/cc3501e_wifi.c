@@ -618,43 +618,34 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * unlike re-submitting AP_START, which put a fresh Wlan_RoleUp on live
 	 * radio hardware every retry (the #1376 storm).  Still submit ONCE.
 	 *
-	 * Budget accounting used to mirror cc3501e_wifi_connect(): debit the
-	 * attempt's declared worst case ONLY when the read itself failed.
-	 * cc3501e_wifi_connect() has since moved off this estimate-based ledger
-	 * entirely (see its #1481 note) because the debit above is unbounded on
-	 * a wedged transport and, even confined to the failure branch, still
-	 * overcharges every failed poll's real wall-clock cost against
-	 * timeout_ms.  This loop has the identical defect and is a candidate for
-	 * the same fix; left alone here as out of scope for #1481's fix targeted
-	 * at cc3501e_wifi_connect(). */
-	uint32_t remaining = timeout_ms;
+	 * Budget accounting: deadline read ONCE at entry from a real monotonic
+	 * clock (issue #1985, same shape as poll_by_repeat()'s own #1953 fix in
+	 * cc3501e_core.c), not a manual `remaining -=` estimate.  The estimate
+	 * this replaces charged nothing on a successful-but-not-yet-AP read and
+	 * an ESTIMATE (CC3501E_REQ_TMO_MS) on a failed one, so it deliberately
+	 * OVER-charged every failing iteration relative to real time (100 ms
+	 * phantom + 50 ms real gap = 150 ms accounted per ~50 ms actually
+	 * elapsed) -- see changelog.d/1985.md for the measured attempt counts
+	 * under a wedged transport. `now >= deadline_ms` after every attempt
+	 * charges exactly what elapsed instead, uniformly for both branches. */
+	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
 	for (;;) {
 		alp_cc3501e_diag_info_t di = { 0 };
 		const alp_status_t      ds = cc3501e_diag_info(ctx, &di);
 
-		if (ds == ALP_OK) {
-			if (di.role == (uint8_t)ALP_CC3501E_ROLE_WIFI_AP) {
-				return ALP_OK;
-			}
-			/* Role not up yet: no attempt_cost debit here, same #1481
-			 * reasoning as cc3501e_wifi_connect() above -- but a
-			 * successful read is not actually free wall-clock time, the
-			 * same premise issue #1953 disproved for poll_by_repeat().
-			 * Deferred, not fixed here: #1985. */
-		} else {
-			/* One failed read is worth another pass, but charge its declared
-			 * worst case so `remaining` cannot ignore the failure path --
-			 * cc3501e_request() does not itself bound an attempt. */
-			uint32_t attempt_cost =
-			    (CC3501E_REQ_TMO_MS < remaining) ? CC3501E_REQ_TMO_MS : remaining;
-			remaining -= attempt_cost;
+		if (ds == ALP_OK && di.role == (uint8_t)ALP_CC3501E_ROLE_WIFI_AP) {
+			return ALP_OK;
 		}
-		if (remaining == 0u) return ALP_ERR_TIMEOUT;
-		uint32_t gap = (remaining < CC3501E_WIFI_STATUS_POLL_GAP_MS)
-		                   ? remaining
-		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
+		/* Role not up yet, or the read itself failed: either way this
+		 * attempt made no progress -- keep polling until the deadline
+		 * below, which is what bounds it now (not a per-branch debit). */
+		const uint64_t now_ms = alp_uptime_ms();
+		if (now_ms >= deadline_ms) return ALP_ERR_TIMEOUT;
+		const uint32_t remaining_ms = (uint32_t)(deadline_ms - now_ms);
+		const uint32_t gap          = (remaining_ms < CC3501E_WIFI_STATUS_POLL_GAP_MS)
+		                                  ? remaining_ms
+		                                  : CC3501E_WIFI_STATUS_POLL_GAP_MS;
 		alp_delay_ms(gap);
-		remaining -= gap;
 	}
 }
 
