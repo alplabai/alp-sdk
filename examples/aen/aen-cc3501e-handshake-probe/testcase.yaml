@@ -1,0 +1,41 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E handshake probe on the E1M-AEN801
+# (Ensemble E8, M55-HE): compiles the bring-up + GET_VERSION/PING/diag
+# sequence against the real board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- the verdict needs the real inter-chip SPI1 link and a
+# CC3501E actually reflashed to the v4.0 image; a compile check here only
+# proves the build, not the hypothesis.
+
+sample:
+  name: aen-cc3501e-handshake-probe
+  description: |
+    Discriminates a CC3501E PING -5 seen on real silicon today into one of
+    nine states (BRIDGE_ABSENT, VERSION_SKEW, HYPOTHESIS_C, LINK_ALIVE_
+    UNPARSED, HYPOTHESIS_A, HYPOTHESIS_A_PLUS_B, HYPOTHESIS_B, LEGACY_3_1_
+    ACTIVE, HANDSHAKE_HEALTHY -- see src/main.c's file header). Runs the
+    same bring-up as aen-evk-demo phase 8, then: prints fw_proto_major
+    before its own direct GET_VERSION call; synthetically latches the
+    decoded major/minor (and says so on the console); runs a bounded,
+    retried PING against that dialect; reads GET_DIAG_INFO/DIAG_GET_STATS'
+    last_error and frame counters; and, after any failing step, dumps the
+    raw wire bytes and classifies them as undriven, parked-idle, or
+    structured -- the evidence a first version of this app lacked, which is
+    why that version misclassified a demonstrably alive part as dead (see
+    the changelog and src/main.c's file header for the full story). Never
+    stops early on a failed step.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_handshake_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+      - ble
+    build_only: true   # verdict needs the real bench + a v4.0-reflashed CC3501E.

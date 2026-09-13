@@ -121,7 +121,7 @@
               "description": "Inference count backing mean/p50/p95. scripts/validate_metadata.py enforces a floor (30) below which a p95 is noise, not a percentile."
             }
           },
-          "description": "Timing stats for this target. Deliberately OPTIONAL at the schema level: no AEN example times an inference today and `<alp/inference.h>` exposes no latency accessor (issue #1520 blocker), so the first capture campaign can record fit/SRAM alone until a timing harness exists. Once present, every field below is required together -- a partial latency block is worse than none."
+          "description": "Timing stats for this target. Deliberately OPTIONAL at the schema level: `<alp/inference.h>`'s `alp_inference_last_invoke_latency_us()` (landed #1541) supplies the reading, but no bench capture has run yet, so a point may still record fit/SRAM alone until one does -- see docs/bench/model-perf-capture.md's recipe step 4. Once present, every field below is required together -- a partial latency block is worse than none."
         }
       }
     },

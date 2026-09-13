@@ -15,7 +15,7 @@
 #define ALP_HW_BUILD_SOM_FAMILY      "aen"
 #define ALP_HW_BUILD_SOM_HW_REV      "2626-r2"
 #define ALP_HW_BUILD_BOARD_NAME      "E1M-EVK"
-#define ALP_HW_BUILD_BOARD_HW_REV    "r1"
+#define ALP_HW_BUILD_BOARD_HW_REV    "r2"
 #define ALP_HW_BUILD_OS              "zephyr"
 
 #define ALP_HW_BUILD_CORES           "a32_cluster,m55_he,m55_hp"

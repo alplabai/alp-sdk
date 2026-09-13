@@ -20,4 +20,6 @@ target_sources(app PRIVATE
     ${REPO_ROOT}/src/zephyr/console/alp_console_companion_wifi.c
     ${CC3501E_DRIVER_SOURCES}
 )
-target_include_directories(app PRIVATE ${REPO_ROOT}/include)
+target_include_directories(app PRIVATE
+    ${REPO_ROOT}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cc3501e_common)

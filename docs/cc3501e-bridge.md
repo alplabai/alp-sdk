@@ -119,25 +119,33 @@ work (see "Bench-validated" below) with no settle-gap dependence.
 
 #### Link speed
 
-The four AEN bridge examples request **14 MHz**, which is just under the
-**CC35 slave ceiling of ~15 MHz**.  Silicon-validated cold + warm on the
-E1M-AEN801 EVK, concurrently with Wi-Fi/BLE traffic.
+The AEN bridge examples request **25 MHz**, under the CC3501E's
+peripheral-mode maximum of **30 MHz** (SWRS343A §6.14.2.3.3).  Their
+predecessor ran at ~14.3 MHz, and that earlier rate is what the older
+silicon validation cold + warm on the E1M-AEN801 EVK, concurrently with
+Wi-Fi/BLE traffic, was taken at.
 
 The actual SCLK is the request quantised by the BAUDR divider, which
-`spi_dw` computes as an integer truncation of the SSI functional clock
-over the requested rate (`SPI_DW_CLK_DIVIDER`).  The overlay sets that
-functional clock to 200 MHz, so a 14 MHz request divides to 14 and the
-link runs at 200/14 ≈ **14.3 MHz** — slightly *above* the request, because
-truncating the divider rounds the clock up.  Treat that as derived from
-the driver's arithmetic, not as a scope measurement: no captured SCLK
-figure is recorded in-tree.
+`spi_dw` computes from the SSI functional clock over the requested rate.
+The overlay sets that functional clock to 200 MHz, and the divisor must be
+even, so a 25 MHz request lands exactly on `BAUDR = 0x00000008`.  The
+~14.3 MHz predecessor was scope-confirmed, which is what validates the
+200 MHz functional-clock figure the divider assumes; the 25 MHz step is
+derived from that arithmetic, not separately captured on a scope.
 
-Reaching that rate required tuning the master, not the slave: `spi_dw`
+Reaching those rates required tuning the master, not the slave: `spi_dw`
 leaves `RX_SAMPLE_DLY = 0`, and at 8 MHz and above the MISO round-trip
-over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY = 6` shifts
-the capture point past the round-trip, and the link then samples clean up
-to the slave ceiling — roughly 14× the throughput of the original 1 MHz
-bring-up setting.  The value is silicon-tuned, not derived; see
+over the on-SoM traces mis-samples.  Setting `RX_SAMPLE_DLY` shifts the
+capture point past the round-trip, and the link then samples clean up to
+the slave ceiling — roughly 14× the throughput of the original 1 MHz
+bring-up setting.  The value is silicon-tuned, not derived.  The current
+setting is **4**, chosen from a `0..10` sweep run at the examples' 25 MHz
+working point on `E1M-AEN803` serial `2026W36-0002`: `0..7` all passed,
+`8` hard-failed every run, and `9`/`10` passed again — so `4` sits in the
+middle of the measured-good span rather than near either edge, and
+anything above `7` is treated as unqualified.  A `RX_SAMPLE_DLY` set to
+`0` does not disable the delay, it hands the setting back to the SPI
+node's `rx-delay` devicetree property.  See
 `CC3501E_BRIDGE_SPI_FREQ_HZ` and the `RX_SAMPLE_DLY` note in the AEN
 bridge examples' `cc3501e_bridge.h` (e.g.
 [`examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h`](../examples/aen/aen-cc3501e-bringup/src/cc3501e_bridge.h)).
@@ -306,7 +314,14 @@ whose `ALP_CC3501E_CMD_GET_VERSION` reply doesn't match the compile-time
 `ALP_CC3501E_PROTOCOL_VERSION`.
 
 **The wire version is `MAJOR.MINOR`, and only MAJOR gates the link** (ADR
-0033). The current wire is **3.1**. MAJOR moves only when an unchanged host
+0033). The current wire is **4.0** (`ALP_CC3501E_PROTOCOL_MAJOR` / `_MINOR`,
+`<alp/protocol/cc3501e.h>`) — MAJOR 4 adds a CRC-16/CCITT-FALSE trailer to
+every frame except a CRC-less `GET_VERSION` request (see the normative rule
+below). The host is bilingual during the migration window: it also still
+accepts a MAJOR-**3** peer (`ALP_CC3501E_PROTOCOL_MAJOR_LEGACY`), because a
+board still on 3.1 firmware can only reach 4.0 by OTA, and that OTA has to
+run *through* this host — see "MIGRATION ORDER" above
+`ALP_CC3501E_PROTOCOL_MAJOR`. MAJOR moves only when an unchanged host
 would be *misread* — reusing a previously-reserved byte or flag bit, changing
 framing, changing a struct layout, changing what an existing field means.
 Everything additive is MINOR: new opcodes, new optional request fields whose
@@ -395,7 +410,7 @@ first three with the fourth has repeatedly cost bench time:
 | Axis | Where | Bumps when |
 |------|-------|-----------|
 | **Firmware release** | `cc3501e-bridge-firmware:firmware-version.txt` (semver) | each firmware release — names the tag + the `cc3501e-vX.Y.Z.bin` prebuilt blob; the device reports it as `fw_version` via `GET_VERSION` / `GET_DIAG_INFO` |
-| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host refuses a mismatched version |
+| **Wire protocol** | `ALP_CC3501E_PROTOCOL_VERSION` (`<alp/protocol/cc3501e.h>`) + `cc3501e-bridge-firmware:protocol-version.txt` | the wire format changes; the host's MAJOR gate is **bilingual**, not a strict mismatch refusal — it accepts exactly `ALP_CC3501E_PROTOCOL_MAJOR` (4) and `ALP_CC3501E_PROTOCOL_MAJOR_LEGACY` (3), and refuses only anything else, so the OTA path from 3.x to 4.x always has a host that can still talk to the peer it is upgrading |
 | **Build / signature** | the signed binary's `.sha256` in `prebuilt/` | every build — pins the exact image |
 | **GPE anti-rollback stamp** | the `--version` the image is signed with (4-part, `major = 0`) | every flashed image — burned **irreversibly** into the part as a monotonic floor; it is *not* the SemVer |
 
@@ -697,12 +712,17 @@ Wire contract:
   it still reads `0` on the entry ack.  Confirm by **re-issuing `0x47` until the
   reply's `mode` matches**; the handler is idempotent and does not reboot for a
   request that matches the current mode.
-* The 4-byte reply is not decoration.  A dead bus phase clocks back literal
-  `0x00` for every byte and `0x00` is also `ALP_CC3501E_RESP_OK`, so a bare-OK
-  reply to the one opcode whose job is to be the last frame before a blackout
-  would be byte-identical to a link that just died.  Note the asymmetry: only
-  `mode == 1` is real proof — an all-zero dead phase is indistinguishable from a
-  genuine "normal bridge, OTA idle" reply, so corroborate the **leave** poll
+* The 4-byte reply is not decoration.  On the legacy (MAJOR 3) wire a dead bus
+  phase clocks back literal `0x00` for every byte, and `0x00` is also
+  `ALP_CC3501E_RESP_OK_LEGACY` — **not** `ALP_CC3501E_RESP_OK`, which is
+  `0x5A` from MAJOR 4 on precisely so it can no longer alias a dead phase —
+  so on that wire a bare-OK reply to the one opcode whose job is to be the
+  last frame before a blackout would be byte-identical to a link that just
+  died.  MAJOR 4 also appends a CRC-16/CCITT-FALSE trailer, which a
+  genuinely dead all-zero phase fails, so this aliasing is a legacy-wire
+  concern.  Note the asymmetry that survives either way: only `mode == 1` is
+  real proof — an all-zero dead phase is indistinguishable from a genuine
+  "normal bridge, OTA idle" reply, so corroborate the **leave** poll
   (e.g. `GET_DIAG_INFO`'s moving `uptime_ms`, or the next live command).
 * **Enter BEFORE `OTA_BEGIN`.**  The OTA session is RAM-only, so entering
   mid-session throws the write cursor away and forces a full re-`BEGIN` — another

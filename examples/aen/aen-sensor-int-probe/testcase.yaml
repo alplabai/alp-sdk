@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-sensor-int-probe bench app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the ICM-42670 / BMP581 /
+# TCAL9538 interrupt-routing chain against the real board target.
+#
+# Compile-checks the driver calls + carrier-bus path on the real E8 board
+# target; filtered OUT of the native_sim PR gate (platform_allow = the
+# AEN801 HE board only) -- the electrical assert/clear proof needs the real
+# ALP_E1M_I2C0 carrier bus and its populated sensors/expander.
+
+sample:
+  name: aen-sensor-int-probe
+  description: |
+    Exercise the ICM-42670 / BMP581 / TCAL9538 interrupt-routing chain end to
+    end on the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE) carrier bus
+    (ALP_E1M_I2C0): configure a data-ready interrupt source on the ICM-42670
+    (INT1 -> TCAL9538 U35 P4) and the BMP581 (INT -> P7), open the
+    expander's interrupt mask (0x45, all bits masked at power-up) and input
+    latch (0x42), then poll tcal9538_get_interrupt_status() (0x46, NOT
+    clear-on-read per SCPS280B p.26 Table 7-13) and acknowledge via a read
+    of the input port (0x00), the only register that clears the condition.
+    BMI323 INT1 goes to a direct SoC pad (E1M IO15), not this expander, and
+    is out of scope here.
+
+tests:
+  alp_sdk.examples.aen.sensor_int_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - interrupt
+      - sensors
+    build_only: true   # electrical assert/clear needs the real bench; not a CI run.

@@ -1028,6 +1028,18 @@ add_subdirectory(${ZEPHYR_CURRENT_MODULE_DIR}/src/lib/gfx_compat
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_HW_INFO
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/hw_info_zephyr.c)
 
+# <alp/temperature.h> -- on-module ambient-temperature read.  No dedicated
+# Kconfig: this file gates itself internally on CONFIG_SENSOR + the
+# `alp-temp0` DT alias's own status, so it ships unconditionally on
+# Zephyr (issue #2066) and every build without that alias just takes the
+# ALP_ERR_NOSUPPORT branch.  Zephyr-ONLY -- it binds through Zephyr's own
+# devicetree/sensor API with no portable fallback, so baremetal/Yocto get
+# src/common/stub/stub_temperature.c instead (see that file + this one's
+# header comment for why this differs from hw_info_zephyr.c above, which
+# IS shared with plain CMake).
+zephyr_library_sources(
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/temperature_zephyr.c)
+
 # SoC-identity class ("soc_info" -- the alp_soc_info_read /
 # alp_soc_secure_fw_ping half of <alp/hw_info.h>).  Dispatcher +
 # wildcard sw_fallback ship unconditionally: the dispatcher stamps the
@@ -1104,6 +1116,11 @@ zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_PI3DBS12212
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/pi3dbs12212/pi3dbs12212.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/gd32g553/gd32g553.c)
+# gd32g553_ota_image_crc32() -- kept out of the Zephyr-agnostic chip driver
+# TU above; HW (Alif E8 CRC engine, CONFIG_CRC_ALIF) + SW dual path, SW
+# always available.  See src/zephyr/gd32g553_ota_crc_zephyr.c.
+zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_GD32G553
+    ${ZEPHYR_CURRENT_MODULE_DIR}/src/zephyr/gd32g553_ota_crc_zephyr.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_RTL8211FDI
     ${ZEPHYR_CURRENT_MODULE_DIR}/chips/rtl8211fdi/rtl8211fdi.c)
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_CHIP_CLK_5L35023B

@@ -226,7 +226,13 @@ measurement.
 
 **Required step on the alplab-gw bench: read the DPIDR by hand before
 flashing, and abort on a match to either of two known-wrong boards.**
-The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (`3-4.4.3`)
+The GD32 probe (USB path `3-4.2`) and the AEN E8 probe (USB path
+resolved per-board from labgrid, e.g. `labgrid-client -p e1m-aen-evk-01
+show` -- **do not hardcode a path here**: all three AEN EVK boards on
+this bench answer the same DPIDR `0x4c013477`, so the USB path is the
+only thing that tells them apart, and it is per-board, not a fixed
+"AEN E8" constant; `3-4.4.3` was observed on `e1m-aen-evk-03`
+specifically and is NOT `e1m-aen-evk-01`'s path)
 enumerate the same J-Link serial `603000869`, and `JLinkExe` selects
 an adapter only by serial -- with no port selector and no armed
 DPIDR guard on this out-of-`tan` path, probe choice for the cloned
@@ -256,11 +262,15 @@ cloned-serial ambiguity for every invocation that follows:
    ambiguity for every invocation from here on.
 
    Identify the two probes at the connector before pulling either
-   one: run `lsusb -t` and match USB path `3-4.4.3` to the AEN E8
-   against `3-4.2` for the GD32 (both enumerate under the shared
-   J-Link serial `603000869`; those USB paths are recorded at
-   `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, not in
-   `bench-env.sh`).  After detaching, re-run `lsusb -t` and confirm
+   one: run `lsusb -t` and match the AEN E8's USB path -- resolved for
+   the specific board on the bench via `labgrid-client -p
+   e1m-aen-evk-01 show` (never a hardcoded path: with three AEN EVK
+   boards sharing DPIDR `0x4c013477`, the USB path is the only board
+   selector, and it is per-board, not a fixed constant -- `3-4.4.3`,
+   as recorded at `CHANGELOG.md:2736` and `CHANGELOG.md:3339`, is
+   `e1m-aen-evk-03`'s path, not `e1m-aen-evk-01`'s) -- against `3-4.2`
+   for the GD32 (both enumerate under the shared J-Link serial
+   `603000869`).  After detaching, re-run `lsusb -t` and confirm
    exactly one `603000869` probe still enumerates before moving on to
    step 2.
 

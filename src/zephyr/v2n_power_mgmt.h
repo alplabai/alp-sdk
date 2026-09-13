@@ -29,8 +29,11 @@
  * and the module is a no-op.
  *
  * This header is SDK-internal.  Application code does not call
- * the API directly -- the supervisor's SYS_INIT hook attaches
- * the IRQ during boot.
+ * the API directly: this module registers its own SYS_INIT hook
+ * (v2n_pwr_sys_init) when both v2n-deepx-* DT aliases are okay,
+ * and that hook attaches the P65 IRQ only if the BRD_I2C borrow
+ * succeeds, which needs CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID >= 0
+ * (#2044).
  */
 
 #ifndef ALP_INTERNAL_ZEPHYR_V2N_POWER_MGMT_H_
@@ -62,8 +65,10 @@ extern "C" {
  * supervisor invalidate/restore path clean).
  *
  * @return ALP_OK on success;
- *         ALP_ERR_NOSUPPORT if the supervisor is not compiled in
- *           or the V2N power-mgmt DT nodes are missing;
+ *         ALP_ERR_NOSUPPORT if the supervisor is not compiled in,
+ *           the V2N power-mgmt DT nodes are missing, or the
+ *           BRD_I2C borrow fails because
+ *           CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID < 0;
  *         ALP_ERR_NOT_READY if a GPIO controller could not bind
  *           or the DA9292 base-init failed (board ordering,
  *           PMIC not present);

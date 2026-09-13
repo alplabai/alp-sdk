@@ -142,9 +142,28 @@ typedef uint64_t adma2_desc_t;
 #define DWC_SDHC_CMD_INHIBIT_Msk             1U
 #define DWC_SDHC_DAT_INHIBIT_Msk             2U
 #define DWC_SDHC_CARD_INSRT_Msk              0x00010000U
-#define DWC_SDHC_CMD_LINE_LVL_UP_Pos         23U
-#define DWC_SDHC_CMD_LINE_LVL_UP_Msk         BIT(DWC_SDHC_CMD_LINE_LVL_UP_Pos)
-#define DWC_SDHC_CMD_DATA_LINE_STATUS_Msk    0x01F00000U
+/*
+ * DAT[3:0] Line Signal Level occupies bits [23:20]; CMD Line Signal Level is
+ * the single bit above it, bit 24. This was previously misnamed
+ * DWC_SDHC_CMD_LINE_LVL_UP_Pos = 23U, which is DAT3, not CMD (#2042) -- the
+ * two macros below give each signal its own accessor, and
+ * DWC_SDHC_CMD_DATA_LINE_STATUS_Msk stays defined in terms of both so the
+ * three can't drift apart again.
+ */
+#define DWC_SDHC_DAT_LINE_LVL_Pos         20U
+#define DWC_SDHC_DAT_LINE_LVL_Msk         (0x0FU << DWC_SDHC_DAT_LINE_LVL_Pos)
+#define DWC_SDHC_CMD_LINE_LVL_Pos         24U
+#define DWC_SDHC_CMD_LINE_LVL_Msk         BIT(DWC_SDHC_CMD_LINE_LVL_Pos)
+#define DWC_SDHC_CMD_DATA_LINE_STATUS_Msk (DWC_SDHC_DAT_LINE_LVL_Msk | DWC_SDHC_CMD_LINE_LVL_Msk)
+/*
+ * DAT0 (bit 20, the low bit of the DAT_LINE_LVL field above) is the SD
+ * busy-signalling line on its own -- SD Physical Layer Specification
+ * 4.2.4.2 defines card-busy (R1b response, write programming) as DAT0
+ * held low, not the whole DAT[3:0]+CMD group. Give it its own accessor
+ * so a busy check can test DAT0 alone instead of the five-bit group
+ * meant for the CMD11 voltage-switch low-phase check (#2057).
+ */
+#define DWC_SDHC_DAT0_LINE_LVL_Msk        BIT(DWC_SDHC_DAT_LINE_LVL_Pos)
 
 /*
  * ===========================================================
@@ -187,7 +206,11 @@ typedef uint64_t adma2_desc_t;
 #define DWC_SDHC_CLK_GEN_SEL_Msk             (DWC_SDHC_DIV_CLK_MODE << DWC_SDHC_CLK_GEN_SEL_Pos)
 #define DWC_SDHC_UPPER_FREQ_SEL_Pos          6U
 #define DWC_SDHC_FREQ_SEL_Pos                8U
-#define DWC_SDHC_BASE_CLK_FREQ_Pos           7U
+/* Base Clock Frequency field in DWC_SDHC_CAPABILITIES1_R sits at the SAME bit
+ * position as FREQ_SEL_Pos above (0xFFU << 8) -- there is no separate _Pos
+ * for it. #2035 removed a DWC_SDHC_BASE_CLK_FREQ_Pos=7U that was one bit
+ * short of this mask's own position and silently doubled every base-clock
+ * reading; do not reintroduce a distinct _Pos constant for this field. */
 #define DWC_SDHC_BASE_CLK_FREQ_Msk           (0xFFU << DWC_SDHC_FREQ_SEL_Pos)
 #define DWC_SDHC_DEFAULT_BASE_CLK_MHZ        100U
 #define DWC_SDHC_CLK_STABLE_TIMEOUT_US       100000U

@@ -23,11 +23,23 @@ noticed.
   modules** (alp-sdk#1978) — a batch property of the 2026W36 build, not the
   per-unit solder defect the example, its overlay and `docs/soms/aen.md` all
   described. That framing sent readers to inspect a board that has nothing wrong
-  with it. The devicetree deliberately still declares `tmp112@48`: `0x40` is not
-  a legal TMP112 strap address at all, so whatever answers there has not been
-  shown to be the TMP112, and re-addressing the node would encode a guess. The
-  consequence is now stated plainly — the stock `CONFIG_TMP112` driver does not
-  bind on these modules.
+  with it. The devicetree deliberately still declares `tmp112@48`: at the time
+  of this sweep, `0x40` looked like it could not be a legal TMP112 strap
+  address at all, so whatever answered there had not been shown to be the
+  TMP112, and re-addressing the node would have encoded a guess. **Later
+  correction:** per TI SBOS473L p.44, the BOM's exact orderable MPN for U20,
+  `TMP112DIDPWR`, is X2SON (DPW), 5 pins ONLY — no SOT563-6 orderable carries
+  that MPN — and per SBOS473L Table 7-4 the X2SON-5 "Address Variant Only"
+  row straps ADD0→GND to `0x40`, so `0x40` is the DESIGN address for the
+  part this board specifies, and the responder's TMP112-shaped register
+  fingerprint matches that design rather than merely being consistent with a
+  legal strap. What remains open is only *as-built*: nobody has confirmed
+  the fitted package marking on a physical module against a current
+  netlist, and BOM is not as-built. Either way the consequence stands — the
+  stock `CONFIG_TMP112` driver does not bind on these modules, since it
+  looks for the declared `0x48`, which now contradicts the `0x40` design
+  address above — a separate decision, deliberately left visible here
+  rather than silently resolved.
 
 `XEVK_I2C_ADDR_TCAL9538` (E1M-X-EVK) is deliberately left at `0x72`: that is a
 different board and no measurement covers its strap. Changing it to match the

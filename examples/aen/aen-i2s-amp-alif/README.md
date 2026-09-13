@@ -44,10 +44,13 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 
 > **For AUDIBLE amplifier output (bench-pending — not driver bugs):**
 > 1. **74LVC157 mux → TAS2563:** the I2S3 signal reaches the two TAS2563 amps
->    through a 2:1 mux. `/E` = IO8 → **Alif P7.1** (drivable via GPIO); `S` = IO13 →
->    **CC3501E GPIO13**, over the inter-chip SPI bridge whose v0.1 firmware doesn't
->    implement the GPIO-proxy opcode (same block as the SD card / I2S SELECT). The
->    mux must route to the amps.
+>    through a 2:1 mux. **Both mux pins are CC3501E-proxied, not Alif pins** —
+>    `/E` = IO8 → **CC3501E GPIO_30** and `S` = IO13 → **CC3501E GPIO_13**, per
+>    `metadata/e1m_modules/E1M-AEN801.yaml`'s `pad_routes`. Driving either is a
+>    bridge transaction, so the CC3501E link has to be up first. (An earlier
+>    version of this line called `/E` "Alif P7.1, drivable via GPIO"; that was
+>    wrong, and it mattered — it implied the mux could be enabled without the
+>    bridge.) The mux must route to the amps.
 > 2. **TAS2563 config:** the amps need their I2C ACTIVE-mode config (done by
 >    `examples/peripheral-io/i2c-device-hub`) + a speaker on the output.
 > 3. **Exact sample rate:** the bit-clock divider (`CLKCTL_PER_SLV` `I2S3_CTRL`) is

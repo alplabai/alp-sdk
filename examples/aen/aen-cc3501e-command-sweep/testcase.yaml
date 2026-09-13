@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the CC3501E command sweep + throughput app on the
+# E1M-AEN801 (Ensemble E8, M55-HE): compiles the full 55-opcode command sweep
+# plus the STREAM_WRITE / SPI1_TRANSFER throughput sweep against the real
+# board target.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- this app needs the real inter-chip SPI1 link and a
+# CC3501E actually running wire-protocol-4.0 firmware; a compile check here
+# only proves the build, not the coverage or the throughput numbers.
+
+sample:
+  name: aen-cc3501e-command-sweep
+  description: |
+    Exercises every ALP_CC3501E_CMD_* opcode the protocol header defines
+    (see src/main.c's file header for the full family list) and measures
+    STREAM_WRITE / SPI1_TRANSFER link throughput across a sweep of frame
+    sizes. Never invokes OTA_BEGIN/WRITE/FINISH/PROMOTE/UPDATE_MODE, RESET,
+    WIFI_CONNECT_STA, or WIFI_AP_START -- see the safety-boundary comments
+    in src/main.c. Every opcode is either invoked (with its return code
+    classified as success / expected refusal / genuine failure) or
+    explicitly skipped with a printed reason; a self-check at the end
+    confirms none was silently missed.
+
+tests:
+  alp_sdk.examples.aen.cc3501e_command_sweep.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - spi
+      - wifi
+      - ble
+    build_only: true   # coverage + throughput numbers need the real bench.

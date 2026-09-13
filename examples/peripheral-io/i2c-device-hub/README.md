@@ -30,7 +30,51 @@ matches the `e1m-evk` board preset.
 Each device is independent: a missing / DNP part is reported and
 skipped, never fatal.  The final `RESULT` line states how many of
 the attempted devices answered (`PASS` when all did, `PARTIAL`
-otherwise).
+otherwise).  "Answered" means a live, validated reading, not just a
+successful ID read or a bare `ALP_OK` -- every one of the seven
+device blocks gates its tally on the return code of the operation
+that produced the data it reports, plus whatever data-validity check
+that device actually supports:
+
+* **IMUs (ICM-42670, BMI323)** -- waited their documented startup
+  floor, then *polled the chip's own data-ready flag* (a bounded
+  timeout, not a second guessed sleep) before reading, and gated on
+  the config-write and read return codes, the drdy flag actually
+  having asserted, *and* the chip's own invalid/reset sentinel
+  (`0x8000` on every accel axis at once) as a backstop. A bench
+  read-back on real E1M-AEN803 silicon found the config write ACKs
+  well before the chip has produced a sample -- an ACK is not a
+  sample, and this example now checks each one separately. A device
+  that never signals ready reports `DRDY TIMEOUT`, distinct from one
+  that signals ready but still returns the invalid pattern.
+* **BMP581** -- put into `BMP581_MODE_FORCED`, then polled
+  `drdy_data_reg` (same bounded-timeout approach) before reading, and
+  gated on the sampling-config and read return codes, the drdy flag
+  having asserted, *and* the chip's power-on-reset sentinel
+  (`0x7F7F7F` on both raw pressure and temperature) as a backstop.
+* **INA236 x6** -- gated on all three read return codes (bus
+  voltage, shunt voltage, current). There is no documented
+  invalid/reset encoding for these registers -- a genuinely idle
+  rail can legitimately read 0 -- so return-code coverage is the
+  full check here, not a shortcut.
+* **TAS2563 x2** -- gated on the `set_mode()` return code *and* a
+  `MODE_CTRL` readback: the register's operating-mode field must
+  read back the mode just written, not the `0xee` sentinel the
+  example primes it with (which would mean the write never actually
+  landed even though the transfer reported success). The revision
+  read is printed but is not part of the gate -- it has no fixed
+  value to check against, so it proves only that the chip is still
+  on the bus.
+* **I/O expander** -- gated on both raw register-read return codes
+  *and* neither the config nor the input-port byte staying at the
+  `0xee` sentinel they're primed with.
+* **EEPROM** -- gated on the read return code. Stored content has no
+  invalid/reset pattern to check (an erased array legitimately reads
+  `0xFF`), so the return code is the whole check.
+
+A part that never leaves its power-on-reset state, or a transfer
+that reports success without actually landing a byte, now shows up
+as `PARTIAL`, not `PASS`.
 
 Note the pre-respin EVK batch quirk the source documents: on those
 boards the ICM-42670 and BMI323 both strap to 0x69 and collide, so
@@ -48,6 +92,16 @@ both IMU rows fail until the respin.
   continues.
 * `alp_i2c_write_read()` used directly for the small raw readbacks
   (amp MODE_CTRL, expander config/input).
+* Real bring-up sequencing, not just an ID check: the BMP581 is put
+  into `BMP581_MODE_FORCED` via `bmp581_set_sampling()` before its raw
+  read (the driver never starts sampling on its own), the INA236 reads
+  wait out one full post-calibration conversion cycle before trusting
+  `CURRENT`, and all three sensors (both IMUs + the barometer) wait
+  their documented startup floor and then *poll the chip's own
+  data-ready flag* (`icm42670_data_ready()` / `bmi323_data_ready()` /
+  `bmp581_data_ready()`, each with a bounded timeout) instead of
+  guessing a second fixed delay -- every floor and timeout is sized
+  off the part's own datasheet, cited in `src/main.c`.
 
 ## Build
 

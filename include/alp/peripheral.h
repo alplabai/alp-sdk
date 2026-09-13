@@ -228,6 +228,39 @@ void alp_delay_us(uint32_t us);
  */
 void alp_delay_ms(uint32_t ms);
 
+/**
+ * @brief Milliseconds since an arbitrary fixed epoch (usually boot).
+ *
+ * Monotonic and unaffected by wall-clock / RTC adjustments -- backends
+ * source it from the platform's own monotonic clock (Zephyr's
+ * @c k_uptime_get(), Yocto's @c clock_gettime(CLOCK_MONOTONIC), a
+ * calibrated running total on the clockless baremetal fallback).  Two
+ * epochs need not agree across backends, or even across two runs of the
+ * same backend -- only subtraction between two readings taken by the
+ * SAME process is meaningful, e.g. bounding a retry loop to a deadline:
+ *
+ * @code
+ * uint64_t deadline_ms = alp_uptime_ms() + timeout_ms;
+ * while (alp_uptime_ms() < deadline_ms) { ... }
+ * @endcode
+ *
+ * Exists so OS-agnostic code (e.g. the `chips/cc3501e/` core, which
+ * deliberately includes no Zephyr/vendor header) can measure real
+ * elapsed time -- @ref alp_delay_ms alone lets a retry loop charge its
+ * own back-off sleeps against a budget, but not the time spent in
+ * between them (issue #1953).
+ *
+ * @par Wraparound: a @c uint64_t millisecond count wraps after roughly
+ *      584 million years -- never, in practice.  Callers may compare two
+ *      readings directly instead of needing wraparound-safe unsigned
+ *      subtraction.
+ *
+ * @return Milliseconds since the epoch.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL] -- v0.17 new.
+ */
+uint64_t alp_uptime_ms(void);
+
 /* ------------------------------------------------------------------ */
 /* GPIO                                                                */
 /* ------------------------------------------------------------------ */

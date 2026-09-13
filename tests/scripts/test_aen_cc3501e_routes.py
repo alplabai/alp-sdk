@@ -40,6 +40,8 @@ EXAMPLE_BRIDGE_HELPERS = (
     REPO / "examples" / "aen" / "aen-cc3501e-gpio" / "src" / "cc3501e_bridge.h",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.c",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.h",
+    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.c",
+    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.h",
 )
 
 
@@ -178,3 +180,58 @@ def test_example_bridge_helpers_stay_in_sync(suffix):
     for path in EXAMPLE_BRIDGE_HELPERS:
         if path.name == suffix:
             assert path.read_text(encoding="utf-8") == reference, f"{path} drifted"
+
+
+# aen-evk-demo and aen-sdcard-readout are the standalone apps whose route
+# table is hand-written rather than emitted by
+# scripts/gen_cc3501e_gpio_routes.py: that generator discovers its targets by
+# looking for a board.yaml beside a proxy-enabling prj.conf, and both are
+# standalone Zephyr apps with no board.yaml, so both are correctly skipped.
+# Their tables are therefore pinned HERE instead -- against the same TSV the
+# generator resolves through -- so they cannot drift the way the triplicated
+# tables #1859 removed did. aen-sdcard-readout's table (#2035) declares the
+# SAME single entry as aen-evk-demo's (it drives the identical mux ENABLE),
+# so both are checked by the same two assertions below.
+STANDALONE_APP_ROUTE_TABLES = (
+    REPO / "examples" / "aen" / "aen-evk-demo" / "src" / "cc3501e_gpio_routes.c",
+    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_gpio_routes.c",
+)
+
+
+@pytest.mark.parametrize("path", STANDALONE_APP_ROUTE_TABLES)
+def test_standalone_app_route_table_is_a_metadata_backed_subset(path):
+    routes = _example_gpio_routes(path)
+    tsv = _tsv_gpio_routes()
+
+    # SUBSET, not equality: each app declares only the pads it actually
+    # drives (the SDIO mux ENABLE), so a full-map comparison would be wrong.
+    # Every entry it does declare must match metadata exactly.
+    assert routes, f"{path} declares no proxied route at all"
+    assert routes.items() <= tsv.items(), (
+        f"{path}'s hand-written route table disagrees with "
+        f"from-cc3501e.tsv: {routes} vs {tsv}"
+    )
+
+    # The mux ENABLE is the reason the table exists; naming it explicitly
+    # means deleting the entry fails here rather than silently turning
+    # alp_gpio_open(IO20) into a write to an unconnected Alif pad.
+    assert routes.get("E1M_GPIO_IO20") == 26
+
+    # IO21 -- the mux SELECT -- must NEVER appear.  It is physically open on
+    # r2, and on r1 driving it would contend with a fitted P18 jumper on the
+    # shared MUX_SEL.SDIO net.  See the app's main.c mux-enable comment.
+    assert "E1M_GPIO_IO21" not in routes
+
+
+@pytest.mark.parametrize("path", STANDALONE_APP_ROUTE_TABLES)
+def test_standalone_app_route_table_never_targets_a_reserved_pad(path):
+    reserved = _tsv_reserved_pads()
+    hits = {
+        e1m: pin
+        for e1m, pin in _example_gpio_routes(path).items()
+        if pin in reserved
+    }
+    assert not hits, (
+        f"{path} routes a bridge-reserved CC3501E pad: {hits} -- "
+        f"the firmware's gpio_pad_reserved() would refuse it at runtime"
+    )

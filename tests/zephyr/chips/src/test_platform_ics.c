@@ -19,6 +19,8 @@
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
+#include "fakes.h"
+
 /* ------------------------------------------------------------------ */
 /* rv3028c7 -- Micro Crystal RV-3028-C7 RTC                           */
 /* ------------------------------------------------------------------ */
@@ -68,6 +70,312 @@ ZTEST(alp_chips, test_rv3028c7_register_handler_validates_src)
 	/* NULL handler is documented as "unregister" -- must NOT be an
      * INVAL.  A valid source + NULL handler should succeed. */
 	zassert_equal(rv3028c7_register_handler(&ctx, RV3028C7_SRC_ALARM, NULL, NULL), ALP_OK);
+}
+
+/* ------------------------------------------------------------------ */
+/* rv3028c7 -- fake-backed register-protocol tests                    */
+/* ------------------------------------------------------------------ */
+/* fake_rv3028c7.c models the EEADDR(0x25)/EEDATA(0x26)/EECMD(0x27)
+ * EEPROM-commit protocol plus an ordered write log -- see that file's
+ * header comment.  These exercise rv3028c7_route_clkout()'s endurance
+ * guard (rv3028c7.c) end-to-end, which a last-value-only register
+ * echo cannot: the guard's whole point is to compare the EEPROM
+ * readback against the RAM mirror, not the mirror against itself. */
+
+static alp_i2c_t *open_rv3028c7_bus(void)
+{
+	return alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_route_clkout_skips_commit_when_ee_already_matches)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* EEPROM_CLKOUT (0x35) RAM mirror starts at 0 -> masked new value
+	 * for RV3028C7_CLKOUT_8192_HZ (1) is 1.  Pre-seed the EEPROM
+	 * backing store (NOT the RAM mirror) to already hold that byte, so
+	 * the endurance guard's readback compare finds no difference. */
+	fake_rv3028c7_set_eeprom(0x35u, 0x01u);
+	fake_rv3028c7_wlog_reset();
+
+	zassert_equal(rv3028c7_route_clkout(&ctx, RV3028C7_CLKOUT_8192_HZ), ALP_OK);
+
+	/* No EECMD=WRITE (0x21) anywhere in the log -- the commit that
+	 * would burn an EEPROM write cycle was skipped.  (The readback
+	 * protocol itself still touches 0x27 with 0x00/0x22 -- that part
+	 * costs no write-cycle endurance per the driver's own comment --
+	 * so this checks specifically for the commit opcode, not "0x27
+	 * untouched".) */
+	for (size_t i = 0; i < fake_rv3028c7_wlog_len(); i++) {
+		zassert_false(fake_rv3028c7_wlog_reg(i) == 0x27u && fake_rv3028c7_wlog_val(i) == 0x21u,
+		              "EECMD=WRITE must not be issued when the EEPROM already matches");
+	}
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_route_clkout_commits_differing_mirror_in_order)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* EEPROM backing store left at its reset default (0) -- differs
+	 * from the RV3028C7_CLKOUT_8192_HZ (1) target, so the guard must
+	 * commit. */
+	fake_rv3028c7_wlog_reset();
+	zassert_equal(rv3028c7_route_clkout(&ctx, RV3028C7_CLKOUT_8192_HZ), ALP_OK);
+
+	/* Locate the commit opcode (0x27=0x21) and assert the exact
+	 * 4-transaction ordered sequence that precedes it:
+	 * 0x25=0x35 (EEADDR), 0x26=<value> (EEDATA), 0x27=0x00 (arm),
+	 * 0x27=0x21 (commit). */
+	size_t commit_idx = SIZE_MAX;
+	for (size_t i = 0; i < fake_rv3028c7_wlog_len(); i++) {
+		if (fake_rv3028c7_wlog_reg(i) == 0x27u && fake_rv3028c7_wlog_val(i) == 0x21u) {
+			commit_idx = i;
+			break;
+		}
+	}
+	zassert_true(commit_idx != SIZE_MAX && commit_idx >= 3, "EECMD=WRITE never issued");
+
+	zassert_equal(fake_rv3028c7_wlog_reg(commit_idx - 3), 0x25u);
+	zassert_equal(fake_rv3028c7_wlog_val(commit_idx - 3), 0x35u);
+	zassert_equal(fake_rv3028c7_wlog_reg(commit_idx - 2), 0x26u);
+	zassert_equal(fake_rv3028c7_wlog_val(commit_idx - 2), 0x01u);
+	zassert_equal(fake_rv3028c7_wlog_reg(commit_idx - 1), 0x27u);
+	zassert_equal(fake_rv3028c7_wlog_val(commit_idx - 1), 0x00u);
+	zassert_equal(fake_rv3028c7_wlog_reg(commit_idx), 0x27u);
+	zassert_equal(fake_rv3028c7_wlog_val(commit_idx), 0x21u);
+
+	zassert_equal(
+	    fake_rv3028c7_get_eeprom(0x35u), 0x01u, "commit must land in the EEPROM backing store");
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_route_clkout_eebusy_held_times_out_never_writes_eecmd)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* STATUS bit 7 (EEbusy) held set for every read -- the FIRST
+	 * busy-wait (right after CONTROL_1's EERD is set, before the RAM
+	 * mirror is even read) must time out and short-circuit the whole
+	 * EEPROM path. */
+	fake_rv3028c7_set_reg(0x0Eu, 0x80u);
+	fake_rv3028c7_wlog_reset();
+
+	zassert_equal(rv3028c7_route_clkout(&ctx, RV3028C7_CLKOUT_8192_HZ), ALP_ERR_TIMEOUT);
+
+	for (size_t i = 0; i < fake_rv3028c7_wlog_len(); i++) {
+		zassert_not_equal(
+		    fake_rv3028c7_wlog_reg(i), 0x27u, "EECMD must never be written while EEbusy is held");
+	}
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_route_clkout_retries_commit_after_failure)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* Fail exactly the commit write (EECMD=0x21) on the first attempt.
+	 * The RAM mirror write (0x35) still succeeds -- if the endurance
+	 * guard wrongly compared against the RAM mirror instead of an
+	 * EEPROM readback, this failed-then-retried call would silently
+	 * skip the commit forever (the mirror already "matches" on the
+	 * retry, even though the EEPROM backing store never got the new
+	 * byte). */
+	fake_rv3028c7_fail_next_write(0x27u, 0x21u);
+	fake_rv3028c7_wlog_reset();
+
+	zassert_not_equal(rv3028c7_route_clkout(&ctx, RV3028C7_CLKOUT_8192_HZ), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_eeprom(0x35u), 0x00u, "failed commit must not land in EEPROM");
+
+	/* Retry with the same target -- no fault armed this time. */
+	fake_rv3028c7_wlog_reset();
+	zassert_equal(rv3028c7_route_clkout(&ctx, RV3028C7_CLKOUT_8192_HZ), ALP_OK);
+
+	size_t commit_idx = SIZE_MAX;
+	for (size_t i = 0; i < fake_rv3028c7_wlog_len(); i++) {
+		if (fake_rv3028c7_wlog_reg(i) == 0x27u && fake_rv3028c7_wlog_val(i) == 0x21u) {
+			commit_idx = i;
+			break;
+		}
+	}
+	zassert_true(commit_idx != SIZE_MAX, "retry must re-issue the EECMD=WRITE commit");
+	zassert_equal(fake_rv3028c7_get_eeprom(0x35u), 0x01u, "retry must land the byte in EEPROM");
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_init_forces_24h_mode)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	/* CONTROL_2 bit 1 (12_24) set going in -- init must clear it
+	 * (0 = 24h). */
+	fake_rv3028c7_set_reg(0x10u, 0x02u);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+	zassert_equal(fake_rv3028c7_get_reg(0x10u), 0x00u, "12_24 bit must be cleared by init");
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_was_cold_start_reports_latched_porf)
+{
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	/* Cold-start case: PORF (STATUS bit 0) set going in. */
+	fake_rv3028c7_reset();
+	fake_rv3028c7_set_reg(0x0Eu, 0x01u);
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+	bool cold = false;
+	zassert_equal(rv3028c7_was_cold_start(&ctx, &cold), ALP_OK);
+	zassert_true(cold, "PORF was set at init -- must report a cold start");
+	zassert_equal(fake_rv3028c7_get_reg(0x0Eu) & 0x01u, 0u, "PORF must be cleared by init");
+	rv3028c7_deinit(&ctx);
+
+	/* Warm-start case: PORF clear going in. */
+	fake_rv3028c7_reset();
+	fake_rv3028c7_set_reg(0x0Eu, 0x00u);
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+	cold = true;
+	zassert_equal(rv3028c7_was_cold_start(&ctx, &cold), ALP_OK);
+	zassert_false(cold, "PORF was clear at init -- must not report a cold start");
+	rv3028c7_deinit(&ctx);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_get_time_all_ff_is_bus_timeout)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* p.53: a stalled transaction reports back all-0xFF, which
+	 * decodes to a well-formed-looking but bogus time (second=85). */
+	for (uint8_t r = 0x00u; r <= 0x06u; r++) {
+		fake_rv3028c7_set_reg(r, 0xFFu);
+	}
+
+	rv3028c7_time_t out;
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_ERR_IO);
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_get_time_accepts_por_default_weekday)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* Application Manual Rev. 1.4 Sec. 3.4 "03h -- Weekday", p.16:
+	 * WEEKDAY is a raw 0..6 counter, and 0 is that register's OWN
+	 * POR-reset default -- not a fault code.  A board with no
+	 * VBACKUP is a cold start on every power cycle (PORF always
+	 * latched), so weekday genuinely reads 0 while seconds/minutes/
+	 * hours are perfectly valid and advancing.  A prior 1..7 bound
+	 * on this check rejected exactly this reading and threw away
+	 * the whole 7-byte decode -- on real E1M-AEN803 silicon that
+	 * looked like a stopped clock (aen-evk-demo phase_rtc_temp()
+	 * reported "t0=00:00:00 t1=00:00:00 advanced=no") while a
+	 * direct I2C census on the same board watched the raw seconds
+	 * register measurably advance from 0x20 to 0x21.  Assert on the
+	 * DECODED FIELDS below, not just the return code: the bug's
+	 * signature was a caller struct left untouched while
+	 * get_time() still reported success -- a bare ALP_OK check
+	 * would pass against that broken driver too. */
+	fake_rv3028c7_set_reg(0x00u, 0x12u); /* seconds = 12 (BCD) */
+	fake_rv3028c7_set_reg(0x01u, 0x34u); /* minutes = 34 (BCD) */
+	fake_rv3028c7_set_reg(0x02u, 0x05u); /* hours   = 5  (BCD) */
+	fake_rv3028c7_set_reg(0x03u, 0x00u); /* weekday = 0  (raw, POR default) */
+	fake_rv3028c7_set_reg(0x04u, 0x09u); /* day     = 9  (BCD) */
+	fake_rv3028c7_set_reg(0x05u, 0x03u); /* month   = 3  (BCD) */
+	fake_rv3028c7_set_reg(0x06u, 0x26u); /* year    = 26 (BCD) -> 2026 */
+
+	rv3028c7_time_t out = { 0 };
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_OK);
+	zassert_equal(out.second, 12u);
+	zassert_equal(out.minute, 34u);
+	zassert_equal(out.hour, 5u);
+	zassert_equal(out.weekday, 0u);
+	zassert_equal(out.day, 9u);
+	zassert_equal(out.month, 3u);
+	zassert_equal(out.year, 2026u);
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_rv3028c7_get_time_weekday_bound_is_0_to_6)
+{
+	fake_rv3028c7_reset();
+	alp_i2c_t *bus = open_rv3028c7_bus();
+	zassert_not_null(bus);
+
+	rv3028c7_t ctx;
+	zassert_equal(rv3028c7_init(&ctx, bus), ALP_OK);
+
+	/* Same Sec. 3.4 p.16 bound, the other end of the range: 6 is
+	 * the counter's last legal value and must be accepted; 7 can
+	 * never occur on real silicon (the retired 1..7 bound let it
+	 * through) and must still be rejected. */
+	fake_rv3028c7_set_reg(0x00u, 0x12u);
+	fake_rv3028c7_set_reg(0x01u, 0x34u);
+	fake_rv3028c7_set_reg(0x02u, 0x05u);
+	fake_rv3028c7_set_reg(0x04u, 0x09u);
+	fake_rv3028c7_set_reg(0x05u, 0x03u);
+	fake_rv3028c7_set_reg(0x06u, 0x26u);
+
+	fake_rv3028c7_set_reg(0x03u, 0x06u);
+	rv3028c7_time_t out = { 0 };
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_OK);
+	zassert_equal(out.weekday, 6u);
+
+	fake_rv3028c7_set_reg(0x03u, 0x07u);
+	zassert_equal(rv3028c7_get_time(&ctx, &out), ALP_ERR_IO);
+
+	rv3028c7_deinit(&ctx);
+	alp_i2c_close(bus);
 }
 
 /* ------------------------------------------------------------------ */
@@ -190,6 +498,40 @@ ZTEST(alp_chips, test_ina236_init_validates_address_and_numeric_edges)
 	              ALP_ERR_INVAL,
 	              "Inf max_current_a must be rejected");
 
+	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* ina236 -- fake-backed register-protocol test                       */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_fake_ina236_conversion_ready_issues_a_fresh_read_each_call)
+{
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV), ALP_OK);
+
+	/* CVRF (Mask/Enable bit 3) set -- and clears on the READ ITSELF on
+	 * real silicon, so this fake models that by having the test flip
+	 * it, not the driver. */
+	fake_ina236_set_reg(0x06u, 0x0008u);
+	bool ready = false;
+	zassert_equal(ina236_conversion_ready(&ctx, &ready), ALP_OK);
+	zassert_true(ready);
+
+	fake_ina236_set_reg(0x06u, 0x0000u);
+	zassert_equal(ina236_conversion_ready(&ctx, &ready), ALP_OK);
+	zassert_false(ready, "second call must see the post-clear value, not a cached true");
+
+	/* Two separate reads of 0x06 -- proves no caching papered over the
+	 * clear-on-read semantics. */
+	zassert_equal(fake_ina236_read_count(0x06u), 2u);
+
+	ina236_deinit(&ctx);
 	alp_i2c_close(bus);
 }
 
@@ -352,4 +694,196 @@ ZTEST(alp_chips, test_tcal9538_pin_index_validation)
 	zassert_equal(tcal9538_set(&ctx, 99u, true), ALP_ERR_INVAL);
 	bool level;
 	zassert_equal(tcal9538_get(&ctx, 99u, &level), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* tcal9538 -- fake-backed register-protocol tests                    */
+/* ------------------------------------------------------------------ */
+/* fake_tcal9538.c wires TWO instances: 0x73 (TCAL9538 strap, Agile IO
+ * block present -> has_latched_irq = true) and 0x20 (TCA6408A
+ * alt-strap, no Agile IO block -> has_latched_irq = false). */
+
+static alp_i2c_t *open_tcal9538_bus(void)
+{
+	return alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+}
+
+ZTEST(alp_chips, test_fake_tcal9538_set_input_latch_writes_reg42)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_BASE + 3u);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_BASE + 3u), ALP_OK);
+
+	zassert_equal(tcal9538_set_input_latch(&ctx, 0xF0u), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x42u), 0xF0u);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x42u), 1u);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_tcal9538_set_interrupt_mask_writes_reg45)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_BASE + 3u);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_BASE + 3u), ALP_OK);
+
+	zassert_equal(tcal9538_set_interrupt_mask(&ctx, 0x0Fu), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x45u), 0x0Fu);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x45u), 1u);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_tcal9538_get_interrupt_status_does_not_auto_clear)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_BASE + 3u);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_BASE + 3u), ALP_OK);
+
+	fake_tcal9538_set_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x46u, 0xABu);
+
+	uint8_t status = 0;
+	zassert_equal(tcal9538_get_interrupt_status(&ctx, &status), ALP_OK);
+	zassert_equal(status, 0xABu);
+
+	/* Exactly one read of 0x46, and no follow-up read of the input
+	 * port (0x00) -- a driver that "helpfully" auto-clears status by
+	 * also reading 0x00 breaks a caller relying on it persisting. */
+	zassert_equal(fake_tcal9538_read_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x46u), 1u);
+	zassert_equal(fake_tcal9538_read_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x00u), 0u);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_tcal9538_set_pull_bit_order)
+{
+	const uint8_t addr = TCAL9538_I2C_ADDR_BASE + 3u;
+	alp_i2c_t    *bus  = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	/* UP: EN gets pin 4's bit set (0x10); SEL's POR default is 0xFF
+	 * (datasheet default, see fake_tcal9538.c) so selecting "up" for a
+	 * bit already 1 there writes 0x44 back UNCHANGED at 0xFF -- this
+	 * is what pins the EN/SEL bit-order down: a swapped pair would
+	 * write a different pattern to one of the two registers. */
+	fake_tcal9538_reset(addr);
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, addr), ALP_OK);
+	zassert_equal(tcal9538_set_pull(&ctx, 4u, TCAL9538_PULL_UP), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x43u), 0x10u);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x44u), 0xFFu);
+	tcal9538_deinit(&ctx);
+
+	/* DOWN: EN still gets bit 4 set (0x10); SEL clears bit 4 out of
+	 * its 0xFF default -> 0xEF. */
+	fake_tcal9538_reset(addr);
+	zassert_equal(tcal9538_init(&ctx, bus, addr), ALP_OK);
+	zassert_equal(tcal9538_set_pull(&ctx, 4u, TCAL9538_PULL_DOWN), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x43u), 0x10u);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x44u), 0xEFu);
+	tcal9538_deinit(&ctx);
+
+	/* NONE: EN clears bit 4 -> 0x00.  The driver always issues a
+	 * read-modify-write on BOTH registers (it never conditionally
+	 * skips the 0x44 transaction), so SEL is still written here -- but
+	 * with the SAME value it already held (0xFF), i.e. NONE never
+	 * changes which pins are pull-up-vs-pull-down-selected, only
+	 * whether the pull is enabled at all. */
+	fake_tcal9538_reset(addr);
+	zassert_equal(tcal9538_init(&ctx, bus, addr), ALP_OK);
+	zassert_equal(tcal9538_set_pull(&ctx, 4u, TCAL9538_PULL_NONE), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x43u), 0x00u);
+	zassert_equal(fake_tcal9538_get_reg(addr, 0x44u), 0xFFu, "SEL value must be left unchanged");
+	tcal9538_deinit(&ctx);
+
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_tcal9538_alt_part_nosupport_issues_zero_bus_traffic)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_ALT_BASE);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_ALT_BASE), ALP_OK);
+
+	uint32_t baseline = fake_tcal9538_total_transactions(TCAL9538_I2C_ADDR_ALT_BASE);
+
+	uint8_t status;
+	bool    level;
+	zassert_equal(tcal9538_set_input_latch(&ctx, 0xFFu), ALP_ERR_NOSUPPORT);
+	zassert_equal(tcal9538_set_interrupt_mask(&ctx, 0xFFu), ALP_ERR_NOSUPPORT);
+	zassert_equal(tcal9538_get_interrupt_status(&ctx, &status), ALP_ERR_NOSUPPORT);
+	zassert_equal(tcal9538_set_pull(&ctx, 0u, TCAL9538_PULL_UP), ALP_ERR_NOSUPPORT);
+	(void)level;
+
+	/* Zero NEW bus transactions -- catches a NOSUPPORT guard placed
+	 * after the bus write instead of before it. */
+	zassert_equal(fake_tcal9538_total_transactions(TCAL9538_I2C_ADDR_ALT_BASE), baseline);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* Proves tcal9538_set_polarity_inversion() lands its byte in register
+ * 0x02 specifically, not the adjacent output-port register (0x01) or
+ * configuration register (0x03) -- a one-register-off mistake here
+ * would drive an EVK output pin instead of just flipping a read-back
+ * bit, exactly the class of bug this accessor exists to make
+ * impossible to make by hand in the example. Mutation-verified:
+ * changing TCAL9538_REG_POL from 0x02u to 0x01u in tcal9538.c reddens
+ * this test (reg 0x02 stays 0x00, the zassert_equal on it fails). */
+ZTEST(alp_chips, test_fake_tcal9538_set_polarity_inversion_writes_reg02_only)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_BASE + 3u);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_BASE + 3u), ALP_OK);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0xFFu), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 0xFFu);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 1u);
+	/* The two neighbouring registers must be untouched. */
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x01u), 0u);
+	zassert_equal(fake_tcal9538_write_count(TCAL9538_I2C_ADDR_BASE + 3u, 0x03u), 0u);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0x00u), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_BASE + 3u, 0x02u), 0x00u);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* Polarity inversion is a base register (0x00..0x03), shared with the
+ * TCA6408A/PCA9538 alt-population -- unlike the Agile-IO block, it
+ * must NOT return ALP_ERR_NOSUPPORT on the alt-strap address. */
+ZTEST(alp_chips, test_fake_tcal9538_set_polarity_inversion_works_on_alt_part)
+{
+	fake_tcal9538_reset(TCAL9538_I2C_ADDR_ALT_BASE);
+	alp_i2c_t *bus = open_tcal9538_bus();
+	zassert_not_null(bus);
+
+	tcal9538_t ctx;
+	zassert_equal(tcal9538_init(&ctx, bus, TCAL9538_I2C_ADDR_ALT_BASE), ALP_OK);
+
+	zassert_equal(tcal9538_set_polarity_inversion(&ctx, 0xFFu), ALP_OK);
+	zassert_equal(fake_tcal9538_get_reg(TCAL9538_I2C_ADDR_ALT_BASE, 0x02u), 0xFFu);
+
+	tcal9538_deinit(&ctx);
+	alp_i2c_close(bus);
 }

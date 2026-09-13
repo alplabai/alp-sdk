@@ -3,12 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Shared core of the split stub backend for the Alp SDK: the one
- * canonical last-error slot and the delay primitives.  Split out of
- * the former src/common/stub_backend.c monolith (issue #673) --
- * every sibling `stub_<class>.c` in this directory owns the
- * NOSUPPORT body for one public API class; this TU owns the two
- * pieces of shared state/behaviour every backend needs regardless of
- * class: `alp_last_error()` and `alp_delay_us`/`alp_delay_ms`.
+ * canonical last-error slot and the delay/uptime primitives.  Split
+ * out of the former src/common/stub_backend.c monolith (issue #673)
+ * -- every sibling `stub_<class>.c` in this directory owns the
+ * NOSUPPORT body for one public API class; this TU owns the pieces
+ * of shared state/behaviour every backend needs regardless of class:
+ * `alp_last_error()`, `alp_delay_us`/`alp_delay_ms`, and
+ * `alp_uptime_ms` (issue #1953).
  *
  * Backends that do real work (currently `src/zephyr/`) override
  * selectively via per-class Kconfig and CMake gating; backends
@@ -97,6 +98,17 @@ void alp_delay_ms(uint32_t ms)
 	z_delay_clock_nanosleep((long)(ms / 1000u), (long)(ms % 1000u) * 1000000L);
 }
 
+/* Yocto's alp_uptime_ms (issue #1953): CLOCK_MONOTONIC read straight
+ * through, same clock the delay primitives above measure against, so
+ * `alp_uptime_ms()` readings and `alp_delay_ms()` waits agree with each
+ * other. */
+uint64_t alp_uptime_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
 #else /* !__linux__ -- no OS clock; fall back to an over-provisioned spin */
 
 /* Deliberately large: chosen so even a multi-GHz core still spins for
@@ -104,6 +116,29 @@ void alp_delay_ms(uint32_t ms)
  * by construction -- the multiplication is bounded to one us worth of
  * spins per outer-loop pass instead of `us * SPINS_PER_US` in one shot. */
 #define ALP_DELAY_STUB_SPINS_PER_US 100000u
+
+/* ponytail: no real timer exists on this path, so alp_uptime_ms() can only
+ * total the durations THIS backend has itself spun for via alp_delay_us/ms
+ * below -- it cannot see time spent anywhere else (a raw vendor-HAL wait
+ * that bypasses these calls, e.g.).  That is still monotonic and internally
+ * consistent, which is all chips/cc3501e/cc3501e_core.c's poll_by_repeat()
+ * deadline math (issue #1953) needs from THIS backend: every wait it takes
+ * is one of the alp_delay_ms() calls below.  Ceiling: a target with real
+ * hardware-timing work outside alp_delay_* would need a genuine cycle-
+ * counter read (SysTick / DWT->CYCCNT / core timer) once a vendor HAL
+ * bring-up lands -- same upgrade path the delay spin above already notes.
+ * No non-Linux target builds this file today (the plain-CMake baremetal
+ * config compiles + runs on the Linux CI host absent a cross toolchain, so
+ * it hits the __linux__ branch above instead) -- this is the dormant path
+ * a genuine bare-metal port will exercise first.
+ *
+ * Accumulated in MICROSECONDS, not milliseconds: cc3501e_core.c's
+ * cc3501e_reply_gate() settles on sub-millisecond alp_delay_us() calls
+ * (e.g. CC3501E_READY_POLL_US), and a millisecond-granularity counter would
+ * truncate every one of those to zero -- an unbounded undercount over a
+ * long poll, not a rounding nit, since a caller that never sleeps a whole
+ * millisecond at once would see alp_uptime_ms() stand still forever. */
+static uint64_t z_uptime_stub_us;
 
 void alp_delay_us(uint32_t us)
 {
@@ -113,6 +148,12 @@ void alp_delay_us(uint32_t us)
 			--spin;
 		}
 	}
+	/* Non-atomic read-modify-write on z_uptime_stub_us: fine on this
+	 * dormant, single-core-assumed path (no non-Linux target builds this
+	 * file today, so nothing else can call alp_delay_us() concurrently);
+	 * a real multi-core bring-up on this backend would need an atomic or
+	 * a lock here. */
+	z_uptime_stub_us += us;
 }
 
 void alp_delay_ms(uint32_t ms)
@@ -121,6 +162,11 @@ void alp_delay_ms(uint32_t ms)
 	for (uint32_t i = 0u; i < ms; i++) {
 		alp_delay_us(1000u);
 	}
+}
+
+uint64_t alp_uptime_ms(void)
+{
+	return z_uptime_stub_us / 1000u;
 }
 
 #endif /* __linux__ */

@@ -49,10 +49,24 @@
  *   0x03  Power           (RO)  16-bit unsigned, LSB = 32 * CURRENT_LSB.
  *   0x04  Current         (RO)  16-bit signed, LSB = CURRENT_LSB.
  *   0x05  Calibration     (RW)  16-bit; sets current LSB scaling.
- *   0x06  Mask/Enable     (RW)  Alert config.
+ *   0x06  Mask/Enable     (RW)  Alert config; also carries CVRF (bit 3),
+ *                               the conversion-ready flag this driver
+ *                               polls via ina236_conversion_ready().
  *   0x07  Alert limit     (RW)  Alert threshold.
  *   0x3E  Manufacturer ID (RO)  0x5449 ('TI').
  *   0x3F  Device ID       (RO)  0xA080 (INA236).
+ *
+ * Hardware fact -- ALERT is intentionally not wired up here:
+ *   The Mask/Enable (0x06) / Alert limit (0x07) alert-function pair
+ *   (SOL/SUL/BOL/BUL/POL) is unimplemented in this driver, and that is
+ *   correct for the E1M EVK, not a gap to "fix" -- the EVK schematic
+ *   netlist leaves the ALERT pin unrouted on all six on-board INA236
+ *   instances (each `NetU*_A1` appears exactly once in the whole
+ *   pinmap, i.e. it terminates at the package ball and goes nowhere on
+ *   the board). This is a statement about the E1M-EVK's PCB routing,
+ *   not about the INA236 part -- a future board that does route ALERT
+ *   is free to add the API. Do not wire up an alert handler against
+ *   this pin on the EVK; there is no trace for it to signal over.
  */
 
 #ifndef ALP_CHIPS_INA236_H
@@ -157,6 +171,37 @@ typedef struct {
 
 /** @brief Read shunt voltage + bus voltage + current + power into one struct. */
 alp_status_t ina236_read_all(ina236_t *ctx, ina236_sample_t *sample_out);
+
+/**
+ * @brief Check whether the current conversion cycle has completed.
+ *
+ * Reads MASK_ENABLE (reg 0x06) and reports CVRF (bit 3). TI SBOSA81D
+ * §7.6.1.7 (p.22): CVRF is set once the conversion, averaging, and
+ * current/power multiplication are complete; at the CONFIG reset
+ * defaults (VBUSCT=VSHCT=100b=1100 us each) a full bus+shunt cycle is
+ * ~2.2 ms.  CURRENT (and POWER, which derives from it) is only
+ * meaningful once CVRF has been observed set at least once after the
+ * CALIBRATION write -- current is *"calculated following a shunt
+ * voltage measurement"* (SBOSA81D §8.1.2, p.25, eq. 3), so a read
+ * before the first completed conversion returns stale power-on-reset
+ * zeros, not an error.
+ *
+ * @warning **Clear-on-read hazard.** SBOSA81D §7.6.1.7 (p.22): CVRF
+ *   clears on (1) any write to CONFIG (except selecting Power-Down),
+ *   and (2) *any read of MASK_ENABLE itself* -- including this call.
+ *   A second caller that polls CVRF (directly, or indirectly by also
+ *   calling this function) after this one already observed it set
+ *   will see it cleared and read a false "not ready" -- MASK_ENABLE
+ *   does not stay latched for multiple readers. Have exactly one
+ *   owner poll this predicate per conversion, or cache the result.
+ *
+ * @param[in]  ctx        Initialised driver context.
+ * @param[out] ready_out  Set to true if CVRF was set (and has now been
+ *                        cleared by this read), false otherwise.
+ * @return ALP_OK on success, ALP_ERR_NOT_READY if @p ctx isn't
+ *         initialised, ALP_ERR_INVAL if @p ready_out is NULL.
+ */
+alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);
 
 /** @brief Soft-reset the chip and rerun the calibration step.
  *  Useful after a brown-out or detected bus-voltage glitch. */

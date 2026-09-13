@@ -19,4 +19,5 @@ target_sources(app PRIVATE
 # The repo-root include/ gives the driver the CANONICAL public headers
 # (<alp/chips/cc3501e.h>, <alp/protocol/cc3501e.h>, <alp/peripheral.h>).
 target_include_directories(app PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../cc3501e_common)

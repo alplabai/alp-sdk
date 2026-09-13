@@ -1115,7 +1115,12 @@ firmware in `gd32-bridge-firmware:src/ota.c`):
 Value encodings: `state` = 0 IDLE / 1 READY / 2 BUSY / 3 VERIFIED /
 4 ERROR; slot bytes = 0 A / 1 B / `0xFF` none-pending.  `WRITE_CHUNK`
 offsets must land on 8-byte (FMC doubleword) boundaries; the image
-CRC-32 is IEEE 802.3 reflected (zlib-compatible).  `WRITE_CHUNK` and
+CRC-32 is IEEE 802.3 reflected (zlib-compatible) -- host code computes
+the `expected_crc32` BEGIN wants (and cross-checks VERIFY's
+`computed_crc32`) with `gd32g553_ota_image_crc32()`
+(`<alp/chips/gd32g553.h>`), which is hardware-accelerated on a build
+that instantiates the Alif Ensemble E8 CRC engine and otherwise falls
+back to portable software producing the same value.  `WRITE_CHUNK` and
 `VERIFY` without a BEGIN-opened session answer `STATUS_NOT_READY`
 (0x02), as does `COMMIT` before a successful `VERIFY`.
 

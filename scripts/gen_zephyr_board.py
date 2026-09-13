@@ -107,6 +107,7 @@ from typing import Any
 
 from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
 from sentinels import is_tbd
+from whole_device_alias import is_whole_device_alias
 
 _COPYRIGHT_C = (
     "/*\n"
@@ -681,9 +682,28 @@ def _aen_check_map_overlaps(
 
     The sibling core's `<role>_slot0` window is not a partition here, so
     _aen_check_extents cannot see a map that overlaps it; this can.
-    Regions with a non-integer `base` (a `TBD` sentinel, or the
-    whole-window `mram_main` alias) are skipped -- they are declarations
-    of intent, not placements.
+    Regions with a non-integer `base` (a `TBD` sentinel) are skipped --
+    they are declarations of intent, not placements.
+
+    A region whose resolved extent equals the App MRAM window EXACTLY
+    (the whole-device alias, e.g. `mram_main` once its `base` stops
+    being `"TBD"`) is excluded from the pairwise overlap comparison
+    below -- it deliberately spans the same window `mcuboot` /
+    `he_slot0` / `hp_slot0` / `reserved` / `storage` / `atoc` subdivide,
+    so comparing it against its own partitions would flag every one of
+    them. `whole_device_alias.is_whole_device_alias()` carries the
+    identical "extent == aperture exactly" predicate `classify_region()`
+    (`alp_orchestrate/aperture.py`) already uses for this same case --
+    imported by both from one flat, dependency-free module, so those two
+    can't drift (#2073). `check_atoc_reservation.py`'s own 4b/4c aperture
+    checks still hand-write this same comparison independently rather
+    than importing it -- a known, separate gap, not closed here. The
+    exclusion is bounds-checked like every other row and applies to
+    nothing looser than an exact match: a region that merely CONTAINS
+    another without matching the aperture exactly still overlaps and is
+    still refused below; and more than one row matching the aperture
+    exactly is refused outright, not silently allowed to co-exist
+    unchecked against each other.
     """
     placed = [
         (str(r.get("name")), r["base"], int(r["size_kib"]))
@@ -691,6 +711,7 @@ def _aen_check_map_overlaps(
         if isinstance(r.get("base"), int) and isinstance(r.get("size_kib"), int)
     ]
     limit = mram_base + total_kib * 1024
+    aperture = (mram_base, limit)
     for name, base, size_kib in placed:
         end = base + size_kib * 1024
         if base < mram_base or end > limit:
@@ -699,8 +720,22 @@ def _aen_check_map_overlaps(
                 f"0x{base:x}..0x{end:x}, outside the {total_kib} KiB App "
                 f"MRAM window 0x{mram_base:x}..0x{limit:x} declared by this "
                 "variant's mram_mb")
-    placed.sort(key=lambda r: r[1])
-    for (a_name, a_base, a_kib), (b_name, b_base, _b_kib) in zip(placed, placed[1:]):
+    aliases = [
+        (name, base, size_kib) for name, base, size_kib in placed
+        if is_whole_device_alias((base, base + size_kib * 1024), aperture)
+    ]
+    if len(aliases) > 1:
+        alias_names = ", ".join(repr(name) for name, _b, _s in aliases)
+        raise ZephyrBoardEmitError(
+            f"AEN memory_map declares {len(aliases)} regions ({alias_names}) "
+            f"whose extent equals the {total_kib} KiB App MRAM window "
+            f"0x{mram_base:x}..0x{limit:x} exactly -- only one whole-device "
+            "alias to the App MRAM window is allowed; rename or remove the "
+            "duplicate(s).")
+    overlap_candidates = [row for row in placed if row not in aliases]
+    overlap_candidates.sort(key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b_kib) in zip(
+            overlap_candidates, overlap_candidates[1:]):
         a_end = a_base + a_kib * 1024
         if b_base < a_end:
             raise ZephyrBoardEmitError(
@@ -930,19 +965,24 @@ def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
     authority for pads that reach no E1M edge pin: `metadata/pinmux/aen.yaml`
     is a generated projection of the EDGE pad TSVs and carries no row for
     P7_0 / P7_1 (BRD_I2C) or P15_0 (RTC_ALARM), which run SoC <-> on-module
-    chip and never leave the module.  Family-scoped -- one file backs every
-    AEN SKU and both M55 cores.
+    chip and never leave the module.  `e1m_i2c0` (SoC I2C2) is the one
+    exception -- its pads DO have an edge row (it also reaches the EVK
+    carrier's sensor bus), but its DT-node shape lives here too because the
+    SoM's own 24C128 manifest EEPROM sits on the same physical bus (see the
+    `e1m_i2c0` entry's own comment in on-module-links.yaml).  Family-scoped
+    -- one file backs every AEN SKU and both M55 cores.
     """
     path = metadata_root / "e1m_modules" / "aen" / "on-module-links.yaml"
     if not path.is_file():
         raise ZephyrBoardEmitError(
             f"no {path} -- the AEN pinctrl.dtsi/.dts emitters need the "
-            "on-module pad + device source (BRD_I2C, the RV-3028 alarm)")
+            "on-module pad + device source (BRD_I2C, e1m_i2c0, the RV-3028 "
+            "alarm)")
     doc = _load_yaml(path)
     links = doc.get("on_module_links")
     if not isinstance(links, dict):
         raise ZephyrBoardEmitError(f"{path} has no on_module_links: block")
-    for key in ("brd_i2c", "rtc_alarm"):
+    for key in ("brd_i2c", "e1m_i2c0", "rtc_alarm"):
         if key not in links:
             raise ZephyrBoardEmitError(
                 f"{path} on_module_links: is missing {key!r}")
@@ -952,6 +992,13 @@ def _load_aen_on_module_links(metadata_root: Path) -> dict[str, Any]:
             f"{path} on_module_links.rtc_alarm.risk must be a map keyed by "
             "SoC `part` designator (e.g. {\"E8\": \"...\"}), not a bare "
             "string -- a part-scoped risk note needs the part key (#1988)")
+    bench_validation = links["e1m_i2c0"].get("bench_validation")
+    if bench_validation is not None and not isinstance(bench_validation, dict):
+        raise ZephyrBoardEmitError(
+            f"{path} on_module_links.e1m_i2c0.bench_validation must be a map "
+            "keyed by SoC `part` designator (e.g. {\"E8\": \"...\"}), not a "
+            "bare string -- a part-scoped bench note needs the part key "
+            "(#2046, following #1988's pattern)")
     return links
 
 
@@ -1016,7 +1063,7 @@ def _aen_i2c_device_nodes(
 
 def _aen_pinctrl_dtsi(
     role: str, sku_display: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
-    family_display: str, links: dict[str, Any],
+    family_display: str, links: dict[str, Any], part: str,
 ) -> str:
     other_role = "he" if role == "hp" else "hp"
     rx_macro, tx_macro = _pin_macro(rx_row), _pin_macro(tx_row)
@@ -1055,6 +1102,12 @@ def _aen_pinctrl_dtsi(
         " * board layer rather than in each consumer's overlay.  Pads, macros and pad\n"
         " * config come from metadata/e1m_modules/aen/on-module-links.yaml.\n"
         " *\n"
+        " * SoC I2C2 (function C, portable alp-i2c0) is wired here too, for the same\n"
+        " * reason: the SoM's own 24C128 manifest EEPROM is bridge/DNP-selected onto\n"
+        " * it, so every board built from this SoM needs the controller enabled --\n"
+        " * even though the same pads also carry the EVK carrier's sensor bus once\n"
+        " * they leave the module (docs/bring-up-aen.md Sec 5.1).\n"
+        " *\n"
         " * Remaining GPIO / SPI / Ethernet pin groups are added alongside their\n"
         " * drivers (the alp-sdk Alif peripheral drivers).\n"
         " */\n"
@@ -1074,6 +1127,8 @@ def _aen_pinctrl_dtsi(
         "\t};\n"
         "\n"
         + _aen_i2c_pinctrl_group(links) +
+        "\n"
+        + _aen_e1m_i2c0_pinctrl_group(links, part) +
         "};\n"
     )
 
@@ -1106,12 +1161,16 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
         "\t * i2c_dw controller cannot SENSE SCL (clock-stretch detect / arbitration)\n"
         "\t * and NACKs every address for a reason that looks electrical but is not.\n"
         "\t *\n"
-        "\t * bias-pull-up is DSC=1, a REAL pull-up (soc/alif/ensemble/pinctrl_soc.h\n"
-        "\t * encodes bits 19:20 [DSC] as 0=high-Z, 1=pull-up, 2=pull-down,\n"
-        "\t * 3=bus-keeper).  Do NOT copy the I2C2/EEPROM overlay's bias-pull-down:\n"
-        "\t * DSC=2 is a pull-DOWN, harmless there only because that bus has external\n"
-        "\t * carrier pull-ups (R137/R144).  This net has NO external pull-up at all,\n"
-        "\t * so a pull-down would park both lines low and look like a busy bus.\n"
+        "\t * bias-pull-up is DSC=1, a REAL pull-up: pinctrl_soc.h's field comment\n"
+        "\t * (soc/alif/ensemble/pinctrl_soc.h:24) and its ALIF_PINCTRL_BIAS_CFG()\n"
+        "\t * macro (:44-48) both map bias-pull-up -> DSC=1 unconditionally -- there\n"
+        "\t * is NO inversion between the devicetree property and the DSC field, on\n"
+        "\t * this bus or the e1m_i2c0 one below (#2046 corrected that group's\n"
+        "\t * comment, which used to claim the opposite).  Do NOT copy the\n"
+        "\t * I2C2/EEPROM overlay's bias-pull-down: DSC=2 is a pull-DOWN, harmless\n"
+        "\t * there only because that bus has external carrier pull-ups (R137/R144).\n"
+        "\t * This net has NO external pull-up at all, so a pull-down would park both\n"
+        "\t * lines low and look like a busy bus.\n"
         "\t *\n"
         "\t * drive-open-drain is deliberately NOT set, so bit 23 [DRV] stays 0 =\n"
         "\t * PUSH-PULL: the pad actively drives the high phase instead of relying on\n"
@@ -1144,6 +1203,94 @@ def _aen_i2c_pinctrl_group(links: dict[str, Any]) -> str:
         "\t};\n"
     )
 
+
+def _aen_e1m_i2c0_pinctrl_group(links: dict[str, Any], part: str) -> str:
+    """The `e1m_i2c0` (SoC I2C2) pinctrl group, from metadata.
+
+    Unlike `_aen_i2c_pinctrl_group()` this bus carries NO alarm-style
+    passenger pad and gets NO device child nodes in `_aen_e1m_i2c0_dts()`
+    below (its only genuinely on-module device, the 24C128 EEPROM, is
+    addressed by 7-bit address over the bus, not a DT device node -- see
+    the `e1m_i2c0` entry's own comment in on-module-links.yaml).
+
+    `bias-pull-down` here is intentional and matches Alif's own reference
+    I2C pinctrl (metadata says why).  `part` (the Ensemble part designator
+    this board tree is for, e.g. "E8") picks which of on_module_links'
+    `e1m_i2c0.bench_validation` map's citations -- if any -- this comment
+    carries: the only bench run on record is against the E8, and #2046
+    found that citation being emitted unqualified into every OTHER AEN
+    part's board tree (E3 included) as the same class of leak #1988 fixed
+    for `rtc_alarm.risk`.  Unlike that fix, a part with no entry here does
+    NOT get silence -- #2046 is explicit that the citation must not be
+    silently dropped, only qualified, because the emitted PAD VALUE
+    (bias-pull-down) is unchanged and still correct for every part.
+    """
+    bus = links["e1m_i2c0"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C2_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C2_SCL_C")
+    bench = (bus.get("bench_validation") or {})
+    this_part_bench = bench.get(part)
+    if this_part_bench:
+        bench_text = f"input-enable + bias-pull-down: {this_part_bench}"
+    else:
+        e8_bench = bench.get("E8", "")
+        bench_text = (
+            "input-enable + bias-pull-down: bench-validated ONLY on the E8 "
+            f"-- {e8_bench} This board tree is for the {part}; that bench "
+            f"run has NOT been independently repeated on the {part}'s own "
+            "silicon (#2046, following the #1988 per-part-evidence "
+            "pattern).  The config below is still what this board tree "
+            "emits -- on_module_links.yaml is one file for every AEN SKU "
+            f"and no {part}-specific bench run exists yet to confirm or "
+            "override it -- but that silence is not proof either way."
+        )
+    # Reflowed to house-style comment width (metadata prose has no line
+    # breaks of its own to preserve, unlike the hand-wrapped paragraphs
+    # below) -- the raw bench_validation string can run well past 79
+    # columns unwrapped, same reason _c_comment() exists for evidence/risk
+    # strings elsewhere in this file.
+    bench_lines = [line + "\n" for line in _c_comment(bench_text, "\t")[1:-1]]
+    return (
+        "\t/*\n"
+        f"\t * e1m_i2c0 = SoC {bus['peripheral']} function C: {sda['silicon_pad']} SDA / "
+        f"{scl['silicon_pad']} SCL,\n"
+        "\t * portable alp-i2c0 (E1M edge bus 0 -- ALP_E1M_I2C0 /\n"
+        "\t * EVK_I2C_BUS_SENSORS).  Carries the SoM's own 24C128 manifest EEPROM;\n"
+        "\t * the same pads also reach the EVK carrier's sensor bus once they leave\n"
+        "\t * the module (docs/bring-up-aen.md Sec 5.1 -- two separate buses).\n"
+        "\t *\n"
+        + "".join(bench_lines) +
+        "\t *\n"
+        "\t * bias-pull-down really is a pull-down (DSC=2), and bias-pull-up really\n"
+        "\t * would be a pull-up (DSC=1) -- pinctrl_soc.h does NOT invert the two.\n"
+        "\t * Its ALIF_PINCTRL_BIAS_CFG() macro (soc/alif/ensemble/pinctrl_soc.h:44-48)\n"
+        "\t * maps bias-pull-up -> DSC=1 and bias-pull-down -> DSC=2 unconditionally,\n"
+        "\t * exactly as the field's own comment at :24 describes.  An earlier version\n"
+        "\t * of this comment (and of examples/aen/aen-eeprom-manifest's overlay) blamed\n"
+        "\t * bias-pull-up's reported dead bus on that encoding \"reading inverted vs\n"
+        "\t * the Alif pad hardware\" -- pinctrl_soc.h has no such inversion, so that\n"
+        "\t * explanation is RETRACTED (#2046), and the dead-bus report it was invented\n"
+        "\t * to explain is UNCONFIRMED, not disproven: nobody has re-run bias-pull-up\n"
+        "\t * here in a controlled bench trial since.  What IS established, matching\n"
+        "\t * the BRD_I2C group's own reasoning above: this bus, unlike BRD_I2C, has\n"
+        "\t * the EVK carrier's R137/R144 pull-ups stuffed, so a real internal\n"
+        "\t * pull-down is harmless -- the strong external pull-up dominates a weak\n"
+        "\t * internal one -- which is why bias-pull-down is bench-proven correct as\n"
+        "\t * emitted.  Do NOT change it to bias-pull-up on the strength of either\n"
+        "\t * reading; that needs a fresh register-level bench comparison, not a theory.\n"
+        "\t */\n"
+        f"\t{bus['pinctrl_group_label']}: {bus['pinctrl_group_label']} {{\n"
+        "\t\tgroup0 {\n"
+        # SCL, SDA -- matches the bench-validated overlay's own pinmux
+        # order verbatim (examples/aen/aen-i2c2-eeprom-regcheck and
+        # aen-eeprom-manifest), not the SDA-first order the BRD_I2C group
+        # above happens to use.
+        f"\t\t\tpinmux = <{_pin_macro(scl)}>, <{_pin_macro(sda)}>;\n"
+        "\t\t\tinput-enable;\n"
+        "\t\t\tbias-pull-down;\n"
+        "\t\t};\n"
+        "\t};\n"
+    )
 
 
 def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
@@ -1227,7 +1374,7 @@ def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
         " * Portable aliases.  The bus alias is what alp_i2c_open(.bus_id = N)",
         " * resolves (src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2cN)), matching",
         " * the on-module EEPROM's own convention on i2c2; the device aliases let an",
-        " * example say DT_ALIAS(rtc) / DT_ALIAS(ambient_temp0) instead of hardcoding",
+        " * example say DT_ALIAS(rtc) / DT_ALIAS(alp_temp0) instead of hardcoding",
         " * this board's node labels.",
         " */",
         "/ {",
@@ -1238,6 +1385,55 @@ def _aen_brd_i2c_dts(links: dict[str, Any], part: str) -> list[str]:
         "",
     ]
     return lines
+
+
+def _aen_e1m_i2c0_dts(links: dict[str, Any]) -> list[str]:
+    """`&i2c2` (e1m_i2c0, portable alp-i2c0) + its bus alias.
+
+    No device child nodes (see `_aen_e1m_i2c0_pinctrl_group()`'s
+    docstring): the only genuinely on-module part on this bus, the 24C128
+    manifest EEPROM, is addressed by 7-bit address over the bus rather
+    than a DT device node, the same way
+    examples/aen/aen-i2c2-eeprom-regcheck and
+    examples/aen/aen-eeprom-manifest already open it.  The EVK carrier's
+    sensor/IO-expander/INA236 parts that also ride this bus once it
+    leaves the module are the EVK board layer's concern, not this SoM
+    board layer's.
+    """
+    bus = links["e1m_i2c0"]
+    sda = _pin_by_peripheral(bus["pins"], "I2C2_SDA_C")
+    scl = _pin_by_peripheral(bus["pins"], "I2C2_SCL_C")
+
+    return [
+        "/*",
+        f" * e1m_i2c0 -- SoC {bus['peripheral']} in its function-C muxing "
+        f"({sda['silicon_pad']} SDA / {scl['silicon_pad']} SCL), portable",
+        f" * {bus['alias']} (E1M edge bus 0).  Carries the SoM's own 24C128 manifest",
+        " * EEPROM; the same physical bus also reaches the EVK carrier's sensor bus",
+        " * once the pads leave the module (docs/bring-up-aen.md Sec 5.1).  Driven by",
+        ' * UPSTREAM Zephyr i2c_dw ("snps,designware-i2c"), ADR 0017 Tier-1 -- no',
+        " * vendored code.",
+        " */",
+        f"&{bus['dt_label']} {{",
+        '\tstatus = "okay";',
+        f"\tpinctrl-0 = <&{bus['pinctrl_group_label']}>;",
+        '\tpinctrl-names = "default";',
+        f"\tclock-frequency = <{bus['clock_frequency_macro']}>;",
+        "};",
+        "",
+        "/*",
+        " * Portable alias for e1m_i2c0.  alp_i2c_open(.bus_id = ALP_E1M_I2C0)",
+        " * resolves this via src/backends/i2c/zephyr_drv.c -> DT_ALIAS(alp_i2c0);",
+        " * matches the EEPROM manifest reader's own",
+        " * CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0 convention.",
+        " */",
+        "/ {",
+        "\taliases {",
+        f"\t\t{bus['alias']} = &{bus['dt_label']};",
+        "\t};",
+        "};",
+        "",
+    ]
 
 
 def _aen_ethos_u(soc_spec: dict[str, Any]) -> tuple[str, str] | None:
@@ -1401,13 +1597,225 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
         "config ROM_START_OFFSET\n"
         "\tdefault 0x800 if BOOTLOADER_MCUBOOT\n"
         "\n"
+        "# alp-sdk's own chips/tmp112/tmp112.c defines tmp112_init(), and upstream\n"
+        "# Zephyr's zephyr/drivers/sensor/ti/tmp112/tmp112.c defines the SAME symbol\n"
+        "# for the SAME part.  The two only collide at LINK time, and only when an\n"
+        "# app pulls in both -- which CONFIG_SENSOR=y does for free on this board,\n"
+        "# because the ti,tmp112 devicetree node below auto-selects upstream's\n"
+        "# driver regardless of whether the app uses it (#2043).  Board-scope the\n"
+        "# fix instead of leaving every app to rediscover it: default the upstream\n"
+        "# driver OFF here.  This is not a permanent no -- Kconfig.zephyr sources a\n"
+        "# board's Kconfig.defconfig ahead of subsys/Kconfig (see the LOG_MODE\n"
+        "# comment below for the same precedence fact), so this default only\n"
+        "# supplies a value when nothing else assigns the symbol.  An app that\n"
+        "# genuinely wants the upstream driver is therefore expected to win by\n"
+        "# setting CONFIG_TMP112=y explicitly in its own prj.conf -- ordinary\n"
+        "# Kconfig behaviour for a user assignment versus a `default` -- and that\n"
+        "# is exactly why examples/aen/aen-temp-sensor sets it by name.\n"
+        "#\n"
+        "# CONFIRMED ON THE REAL BOARD TARGET, not just by mechanism.  `west build\n"
+        "# -p always -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "# examples/aen/aen-temp-sensor` links\n"
+        "# zephyr/drivers/sensor/ti/tmp112/libdrivers__sensor__ti__tmp112.a (step\n"
+        "# 139/148), and the resolved .config carries CONFIG_TMP112=y,\n"
+        "# CONFIG_SENSOR=y and CONFIG_DT_HAS_TI_TMP112_ENABLED=y with this board's\n"
+        "# `default n` in force -- the explicit CONFIG_TMP112=y in\n"
+        "# examples/aen/aen-temp-sensor/prj.conf really does win, on silicon-\n"
+        "# targeted Kconfig, not only in theory.  If that build ever fails on\n"
+        "# CONFIG_TMP112, this derivation is what needs revisiting, not the\n"
+        "# build.\n"
+        "config TMP112\n"
+        "\tdefault n\n"
+        "\n"
         + _AEN_LOG_MODE_DEFAULT +
         f"endif # BOARD_{board_sym}\n"
     )
 
 
+#: Per-device state -> the singular ("is ...") / plural ("are ...") verb
+#: phrase both `_aen_ospi_device_clause()` and `_aen_ospi_population_clause()`
+#: read, so the two forms can't drift apart (#2062 review round 4).
+_AEN_OSPI_STATE_PHRASE = {
+    "populated": "populated",
+    "not_populated": "not populated",
+    "optional": "BOM-optional, not assumed populated",
+}
+
+#: Why this SDK's AEN board never uses the OSPI0 NOR/HyperRAM for XIP boot,
+#: EVEN when a preset populates (or might populate) them -- #2062 review
+#: round 3: "OSPI_XIP_SER does not exist on this die" is a true, cited fact
+#: (Alif `soc_features.h` `SOC_FEAT_OSPI_HAS_XIP_SER 0` for AE822), but it is
+#: NOT proof XIP is impossible on this silicon -- Alif's own
+#: `ospi_psram_xip.c` compiles `ospi_control_xip_ss()` out under that same
+#: guard and STILL calls `aes_enable_xip()`; `flash_ospi_alif.c` documents
+#: AE822 doing XiP "through a single FIFO location". The real reasons this
+#: driver stack never attempts it: hal_alif's OWN `alif_hal_ospi_xip_enable()`
+#: unconditionally targets the absent `XIP_SER` register (a bus fault, not a
+#: graceful no-op), and `flash_ospi_alif.c` ships no `flash_driver_api` at all
+#: (#915) -- so there is no in-tree driver path that would use OSPI0 for XIP
+#: today regardless of population. Never follow the die-level fact alone with
+#: a "so" -- always cite this instead.
+_AEN_OSPI_XIP_GAP = (
+    "hal_alif's alif_hal_ospi_xip_enable() targets the XIP_SER register, "
+    "absent on this die, and flash_ospi_alif.c ships no flash_driver_api "
+    "-- #915")
+
+
+def _aen_ospi_device_state(
+        dev: "dict[str, Any] | None") -> tuple[str, "str | None"]:
+    """(state, chip-or-None) for one `on_module` OSPI-family device dict
+    (`ospi_memories.ospi0` or `hyperram`).  *dev* is `None` when the block
+    itself is ABSENT from the preset -- the schema only requires
+    `on_module.silicon`, so omitting `ospi_memories:`/`hyperram:` entirely
+    is valid, a different fact from a declared-but-empty block (#2062
+    review round 4: the old code collapsed both to `{}` via `... or {}`,
+    so an undeclared device hit the `assembled` default same as a
+    declared one with the key merely omitted, and got printed as
+    "populated"). `state` is `"absent"` for that case; callers must leave
+    an absent device out of the clause text entirely.
+
+    For a DECLARED block, `state` is one of `"populated"`, `"not_populated"`,
+    `"optional"` (#2062 review round 2 -- `assembled` is a TRI-STATE field,
+    not a bool: `"optional"` is Python-truthy, so a naive
+    `bool(dev.get("assembled"))` printed "populated" for the AEN301-701
+    SKUs' genuinely-unresolved BOM question; a MISSING `assembled` key on a
+    DECLARED device means populated per the schema default `true` (see the
+    bug that default itself caused, documented at `metadata/e1m_modules/
+    E1M-AEN801.yaml`'s own `hyperram:` comment), not "not populated"). `chip`
+    is `None` when the field is `TBD`/absent so callers never print a
+    placeholder part name -- `is_tbd()` is the same helper `alp_orchestrate`
+    uses for this."""
+    if dev is None:
+        return "absent", None
+    chip = dev.get("chip")
+    if not chip or is_tbd(chip):
+        chip = None
+    assembled = dev.get("assembled", True)
+    if assembled == "optional":
+        return "optional", chip
+    return ("populated" if assembled else "not_populated"), chip
+
+
+def _aen_ospi_device_clause(label: str, state: str, chip: "str | None") -> str:
+    """One device's own clause, e.g. `"OSPI0 NOR (IS25WX256-JHLE) is
+    populated"` / `"HyperRAM is not populated"` / `"OSPI0 NOR is
+    BOM-optional, not assumed populated"`.  Never called with `state ==
+    "absent"` -- callers exclude an absent device before reaching here."""
+    named = f"{label} ({chip})" if chip else label
+    return f"{named} is {_AEN_OSPI_STATE_PHRASE[state]}"
+
+
+def _aen_ospi_population_clause(
+        sku_preset: dict[str, Any]) -> tuple[str, str, int]:
+    """Return `(clause, category, populated_count)` describing the SoM
+    preset's own OSPI0 NOR + HyperRAM population, read from `on_module.
+    ospi_memories.ospi0` / `on_module.hyperram` rather than a hardcoded
+    claim (#2062: this used to hardcode Macronix/Winbond as "BOM-optional
+    and NOT populated on the current batch" for every AEN SKU alike --
+    both the board-header banner and the MRAM-partition-map comment now
+    call THIS one function, so they cannot disagree with each other or
+    with the real preset the way a board emitted for a from-scratch
+    "populated" preset showed they could: the old banner said populated,
+    the old partition-map comment still said "not populated on this
+    batch" two paragraphs later in the SAME file).
+
+    An ABSENT device block (see `_aen_ospi_device_state()`) is left out of
+    *clause* entirely -- it is never named "not populated", since there is
+    no declared device to describe.
+
+    `category` is `"populated"` if either device is definitely populated,
+    `"optional"` if neither is definite but at least one MIGHT be
+    (`assembled: "optional"`), else `"not_populated"` (every declared
+    device is `assembled: false`, and an absent block contributes
+    nothing).  `populated_count` is how many of the (present) devices are
+    definitely `"populated"` -- callers need it for singular/plural
+    agreement when exactly one of two declared devices is populated."""
+    on_module = sku_preset.get("on_module") or {}
+    ospi_memories = on_module.get("ospi_memories")
+    ospi0 = ospi_memories.get("ospi0") if ospi_memories else None
+    hyperram = on_module.get("hyperram")
+    nor_state, nor_chip = _aen_ospi_device_state(ospi0)
+    ram_state, ram_chip = _aen_ospi_device_state(hyperram)
+
+    devices = [(label, state, chip) for label, state, chip in (
+        ("OSPI0 NOR", nor_state, nor_chip), ("HyperRAM", ram_state, ram_chip))
+        if state != "absent"]
+    populated_count = sum(1 for _, state, _ in devices if state == "populated")
+
+    if not devices:
+        return ("no OSPI0 NOR or HyperRAM is declared on this SoM preset",
+                 "not_populated", 0)
+
+    states = {state for _, state, _ in devices}
+    if "populated" in states:
+        category = "populated"
+    elif "optional" in states:
+        category = "optional"
+    else:
+        category = "not_populated"
+
+    if len(devices) == 2 and devices[0][1] == devices[1][1]:
+        (nor_label, state, nchip), (ram_label, _, rchip) = devices
+        nor_named = f"{nor_label} ({nchip})" if nchip else nor_label
+        ram_named = f"{ram_label} ({rchip})" if rchip else ram_label
+        clause = f"{nor_named} + {ram_named} are {_AEN_OSPI_STATE_PHRASE[state]}"
+    else:
+        clause = "; ".join(_aen_ospi_device_clause(label, state, chip)
+                             for label, state, chip in devices)
+    return clause, category, populated_count
+
+
+def _aen_ospi_storage_banner_lines(sku_preset: dict[str, Any]) -> list[str]:
+    """Describe the SoM's OSPI0 NOR + HyperRAM for the board-header banner
+    -- see `_aen_ospi_population_clause()`, the shared source this and the
+    MRAM-partition-map comment both read, and `_AEN_OSPI_XIP_GAP` for why
+    a populated (or possibly-populated) device still never sees XIP boot
+    here."""
+    clause, category, populated_count = _aen_ospi_population_clause(sku_preset)
+    if category == "populated":
+        # Singular/plural: "neither" only holds when BOTH declared devices
+        # are actually populated (#2062 review round 4) -- a mixed preset
+        # (one populated, one not/absent) gets the singular form instead.
+        who = "neither is" if populated_count == 2 else "the populated device is not"
+        tail = f"{clause}; {who} used for XIP boot here ({_AEN_OSPI_XIP_GAP});"
+    elif category == "optional":
+        tail = (f"{clause}, so no external XIP / flash device is assumed -- "
+                 f"even if fitted, the same gap applies ({_AEN_OSPI_XIP_GAP});")
+    else:
+        tail = f"{clause}, so there is no external XIP / flash device;"
+    wrapped = textwrap.wrap(tail, width=68, break_on_hyphens=False)
+    return [
+        " *   - runs boot + storage from on-die MRAM only.  The SoM's",
+        *(f" *     {line}" for line in wrapped),
+    ]
+
+
+def _aen_mram_only_comment_lines(sku_preset: dict[str, Any], tail: str) -> list[str]:
+    """The MRAM partition-map comment's own "why MRAM-only" sentence,
+    from the same `_aen_ospi_population_clause()` the banner reads (#2062
+    review round 2: this used to hardcode "the SoM OSPI NOR + HyperRAM
+    are not populated on this batch" unconditionally, so a preset that
+    DOES populate them got a board tree contradicting its own banner two
+    paragraphs up). *tail* is the caller's own ending clause (what lives
+    in MRAM as a result); MRAM-only itself holds regardless of population
+    -- see `_AEN_OSPI_XIP_GAP`; the die-level XIP_SER absence alone does
+    NOT imply it (round 3)."""
+    clause, category, _populated_count = _aen_ospi_population_clause(sku_preset)
+    if category == "populated":
+        sentence = (f"MRAM-only regardless: {clause}; {_AEN_OSPI_XIP_GAP} "
+                     f"(see the banner above), so {tail}")
+    elif category == "optional":
+        sentence = (f"MRAM-only: {clause}; even if fitted, the same gap "
+                     f"applies ({_AEN_OSPI_XIP_GAP}, see the banner above), "
+                     f"so {tail}")
+    else:
+        sentence = f"MRAM-only: {clause}, so {tail}"
+    return [f" * {line}" for line in textwrap.wrap(sentence, width=76, break_on_hyphens=False)]
+
+
 def _aen_dts(
-    sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
+    sku: str, sku_preset: dict[str, Any], core_id: str, soc_spec: dict[str, Any],
+    variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
     metadata_root: Path, links: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
@@ -1455,9 +1863,7 @@ def _aen_dts(
         f" * Reuses the upstream Alif {part} SoC + RTSS-{role_u} cluster devicetree and:",
         " *   - retargets the console from the DevKit's UART2 to the E1M carrier console",
         f" *     (Alif {uart_node.upper()}, {rx_row['silicon_pad']}/{tx_row['silicon_pad']} -- the E1M edge \"UART0\");",
-        " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
-        " *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated",
-        " *     on the current batch, so there is no external XIP / flash device;",
+        *_aen_ospi_storage_banner_lines(sku_preset),
         " *   - lays down a production MCUboot partition map in MRAM.",
     ]
     if disjoint_slot0:
@@ -1620,16 +2026,20 @@ def _aen_dts(
         lines += [
             f" *                      = {partitions_total_kib} KiB (of {total_kib} KiB App MRAM total)",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
-            f" * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.",
+            *_aen_mram_only_comment_lines(
+                sku_preset,
+                "boot, this core's own slot0, reserved headroom, and "
+                "storage all live in MRAM."),
             " */",
         ]
     else:
         lines += [
             f" *                      = {total_kib} KiB",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
-            " * all of boot, both image slots, scratch, and storage live in MRAM.",
+            *_aen_mram_only_comment_lines(
+                sku_preset,
+                "all of boot, both image slots, scratch, and storage live "
+                "in MRAM."),
             " */",
         ]
     lines += [
@@ -1711,6 +2121,7 @@ def _aen_dts(
         "",
     ]
     lines += _aen_brd_i2c_dts(links, part)
+    lines += _aen_e1m_i2c0_dts(links)
 
     if ethos_u is not None:
         _accel, node = ethos_u
@@ -2486,14 +2897,15 @@ def emit_zephyr_board(
         aen_dts_relpath = f"{dir_name}/{basename}.dts"
         files[aen_pinctrl_relpath] = _aen_pinctrl_dtsi(
             role, sku, rx_row, tx_row, _aen_family_display(soc_spec),
-            on_module_links)
+            on_module_links, _aen_part(soc_spec))
         files[f"{dir_name}/{basename}_defconfig"] = _aen_defconfig(
             uart_node, rx_row, tx_row, slot0_base)
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
             dir_name, role, _aen_part(soc_spec))
         files[aen_dts_relpath] = _aen_dts(
-            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            metadata_root, on_module_links, _aen_ethos_u(soc_spec), memory_map)
+            sku, sku_preset, core_id, soc_spec, variant, dir_name, basename,
+            rx_row, tx_row, metadata_root, on_module_links,
+            _aen_ethos_u(soc_spec), memory_map)
         banner_extra_source.update(dict.fromkeys(
             (aen_pinctrl_relpath, aen_dts_relpath),
             "metadata/e1m_modules/aen/on-module-links.yaml"))

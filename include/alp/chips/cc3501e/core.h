@@ -43,18 +43,40 @@ typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t l
  *  @ref ALP_ERR_NOMEM rather than silently dropping one past this. */
 #define CC3501E_EVENT_SUBSCRIBERS 4
 
+/** Value cc3501e_request_locked() (cc3501e_core.c) writes into
+ *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed
+ *  transceive, the in-band armed-check reject, a bad reply header -- so
+ *  that byte means "a status byte was actually decoded" whenever it equals
+ *  a real @c ALP_CC3501E_RESP_ERR_* code, never a coincidence of leftover
+ *  wire residue (#2035: 0x06 is ALSO @ref ALP_CC3501E_CMD_GET_CAPABILITIES,
+ *  so an un-poisoned residue byte could misread as a decoded RESP_ERR_RADIO).
+ *  Public (not just an internal cc3501e_core.c constant) because a caller
+ *  legitimately reading @ref cc3501e::rx_scratch directly for diagnostics
+ *  (see examples/aen/aen-evk-demo/src/main.c's BLE_ENABLE failure probe)
+ *  needs to recognise it too, rather than misreport it as real wire data.
+ *  One of the eight documented RESERVED bit-flip neighbours of
+ *  @ref ALP_CC3501E_RESP_OK in <alp/protocol/cc3501e.h> -- guaranteed never
+ *  to become a real status code, unlike an arbitrary unused byte. */
+#define ALP_CC3501E_RX_SCRATCH_NO_STATUS 0xDAu
+
 struct cc3501e {
 	bool initialised;
 	/* Wire version the FIRMWARE reported at the last @ref cc3501e_reset
 	 * (ADR 0033).  Both are 0 before the first successful GET_VERSION.
 	 *
-	 * fw_proto_major always equals ALP_CC3501E_PROTOCOL_MAJOR on a usable
-	 * context -- a mismatch refuses the link -- so the field that carries
-	 * information is fw_proto_minor: LOWER than this host's minor means the
-	 * firmware lacks newer additive features.  These are also set on the
-	 * REFUSAL path, so a caller that got ALP_ERR_VERSION can report what the
-	 * firmware actually claimed; a fw_proto_major of 0 there means the
-	 * firmware predates the scheme and answered with a raw v1..v9 integer.
+	 * v4.0 (#2035): the host is BILINGUAL, so fw_proto_major on a usable
+	 * context is @ref ALP_CC3501E_PROTOCOL_MAJOR (4) OR
+	 * @ref ALP_CC3501E_PROTOCOL_MAJOR_LEGACY (3) -- 3 refuses NOTHING; it is
+	 * every bit as usable as 4, just talking the no-CRC 3.1 dialect (see the
+	 * migration-order paragraph above ALP_CC3501E_PROTOCOL_MAJOR in
+	 * <alp/protocol/cc3501e.h>).  A caller MUST branch on this field before
+	 * relying on anything major-4-only (e.g. assuming a CRC trailer on every
+	 * reply) -- do not assume it is pinned to PROTOCOL_MAJOR.  Only a value
+	 * outside {3, 4} refuses the link (@ref ALP_ERR_VERSION).  These are also
+	 * set on that REFUSAL path, so a caller that got ALP_ERR_VERSION can
+	 * report what the firmware actually claimed; a fw_proto_major of 0 there
+	 * means the firmware predates the scheme and answered with a raw v1..v9
+	 * integer.
 	 *
 	 * Prefer @ref cc3501e_get_capabilities over reasoning from the minor: it
 	 * reports what the build IMPLEMENTS, not what its number implies. */
@@ -92,8 +114,25 @@ struct cc3501e {
 	 * function-local `static` pattern the scan/event buffers below used
 	 * to have) and their lifetime was already bounded to a single
 	 * cc3501e_request() call -- filled, consumed by the caller-supplied
-	 * rx_buf memcpy, and never read back across calls -- so they carry
-	 * none of the #740 aliasing risk and needed no change here. */
+	 * rx_buf memcpy, and never read back across calls BY THE DRIVER ITSELF
+	 * -- so they carry none of the #740 aliasing risk and needed no change
+	 * here.
+	 *
+	 * #2035 follow-up: a caller MAY also read ctx->rx_scratch[] directly, as
+	 * diagnostic evidence, immediately after a single-shot request-family
+	 * call (cc3501e_ping(), cc3501e_request()) returns -- see the BLE_ENABLE
+	 * failure probe in examples/aen/aen-evk-demo/src/main.c, which snapshots
+	 * it right after cc3501e_ping() to classify the wire-level failure
+	 * shape.  That is a legitimate, SEPARATE use of this field from the
+	 * driver's own internal one above, with its own, narrower lifetime rule:
+	 * valid only until the NEXT request-family call on this SAME ctx (the
+	 * very next transceive overwrites it, and cc3501e_request_locked()'s
+	 * out: label -- cc3501e_core.c -- always writes SOMETHING into byte 0
+	 * specifically, a real decoded status or @ref ALP_CC3501E_RX_SCRATCH_NO_STATUS,
+	 * before that call returns), and only meaningful for the call that just
+	 * returned -- a caller that wants to compare two probes' raw bytes must
+	 * snapshot this into its own buffer between them, not hold a pointer
+	 * across a second call. */
 	uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD];
 	/* Per-context decode scratch for the scan/event helpers (issue #740).
@@ -345,6 +384,39 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx);
  * re-boot after the cold power-up; call this again (e.g. from a soak/retry loop) if
  * a single re-boot has not brought the link up.  Remove once TI ships the flash fix.
  *
+ * @note **Issue #2035 -- the first-radio-op wedge.**  Roughly 2 in 16 cold boots,
+ * the FIRST worker-routed radio opcode of a boot (a Wi-Fi scan, a BLE enable, a
+ * connect -- not @ref cc3501e_ping / @ref cc3501e_get_version / diag, which are
+ * not worker-routed and succeed regardless) times out (@ref ALP_ERR_TIMEOUT),
+ * and the link then reads @ref ALP_ERR_IO until a cold cycle.  The bridge
+ * firmware deliberately does NOT fix this in-band -- every candidate firmware
+ * move has a demonstrated wedge/brick precedent, recorded in
+ * cc3501e-bridge-firmware's `prebuilt/CHANGELOG.md` -- so the sanctioned
+ * response is host-side: if the FIRST radio op of a boot fails with
+ * @ref ALP_ERR_TIMEOUT, call this function ONCE and retry that same op ONCE.
+ * That takes 2 in 16 to roughly 1 in 128. A second failure is a real failure
+ * and must be surfaced, not retried again; a LATER op failing the same way is
+ * not this condition and must not be papered over the same way.
+ *
+ * DELIBERATELY @ref ALP_ERR_TIMEOUT ONLY -- never @ref ALP_ERR_IO, even though
+ * a caller who remembers the spoken "-4 or -5" form of this condition will be
+ * tempted to widen the trigger.  poll_by_repeat() (cc3501e_core.c) treats a
+ * bare ALP_ERR_IO as retryable and loops it to the deadline, so a wedged link
+ * cannot surface as -5 out of a worker-routed call -- it surfaces as -4 once
+ * the budget elapses.  The only way -5 emerges from that loop is its
+ * `terminal_decoded_io` check: a well-framed, CRC-valid reply the device
+ * itself decoded as RESP_ERR_RADIO / RESP_ERR_PROTOCOL / RESP_ERR_INTERNAL.
+ * The link is ALIVE in that case -- it answered, just with a real fault --
+ * so hard-resetting it on a -5 would destroy a genuine RF/firmware
+ * diagnostic instead of recovering a wedge.
+ *
+ * This is app-level policy, not driver behaviour -- do not fold it into any op
+ * function in this driver, because a caller mid-association or mid-BLE-link
+ * must not silently lose that state to a reset it never asked for.  This
+ * function only pulses the line and blind-settles; it does not confirm the
+ * link itself (no PING, no version check), so the retried op is what proves
+ * recovery, not this call's return value.
+ *
  * @param ctx Initialised driver context (must have @c reset_pin populated).
  * @return ALP_OK after the re-boot budget elapses; ALP_ERR_NOSUPPORT if no reset pin.
  */
@@ -576,8 +648,13 @@ alp_status_t cc3501e_spi1_configure(cc3501e_t            *ctx,
  * @param tx          Bytes to clock out, or NULL to clock @p tx_fill instead.
  * @param rx          Receives exactly @p len bytes on ALP_OK, or NULL to
  *                    discard MISO.
- * @param len         Bytes to clock, 0..@c ALP_CC3501E_SPI1_MAX_XFER (chunk at
- *                    the max_xfer the peer reported, see above).
+ * @param len         Bytes to clock, 0..(@c ALP_CC3501E_SPI1_MAX_XFER minus
+ *                    @c ALP_CC3501E_CRC_BYTES once this @p ctx has negotiated
+ *                    the MAJOR-4 wire -- cc3501e_request()'s own tx_len
+ *                    ceiling already enforces the tighter bound once the CRC
+ *                    trailer it appends is accounted for; chunk at the
+ *                    max_xfer the peer reported, see above, not at the bare
+ *                    macro).
  * @param tx_fill     Byte clocked out when @p tx is NULL.
  * @param cs_hold     Leave CS asserted after this chunk.
  * @param timeout_ms  Caller budget (worker-routed, so poll-by-repeat).

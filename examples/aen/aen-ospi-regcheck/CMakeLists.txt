@@ -5,12 +5,13 @@
 # compatible "snps,designware-ospi") staging on the E1M-AEN801 (Ensemble E8,
 # M55-HE), via the bench RAM-run + RAM-console flow.
 #
-# Plain prj.conf app (no alp_project.py board.yaml emit). HW-BLOCKED,
-# BUILD-ONLY this batch: no octal-NOR/HyperBus part is populated, so this
+# Plain prj.conf app (no alp_project.py board.yaml emit). BUILD-ONLY: this
 # proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
 # and the register file reads back live -- not a live XiP read (XiP setup is
-# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822). See src/main.c +
-# the board overlay.
+# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822, independent of
+# what's populated on the bus -- see src/main.c's CORRECTED PREMISE note,
+# #2041) and not a device-level transfer of any kind (controller-register
+# proof only). See src/main.c + the board overlay.
 
 cmake_minimum_required(VERSION 3.20)
 

@@ -5,11 +5,11 @@ MRAM aperture and compares it with the authored `carveout`. Containment
 is a ONE-DIRECTIONAL test: inside the aperture proves flash (so
 `carveout` must be exactly `False`); outside proves NOTHING, because
 Ensemble's OSPI XIP windows are flash outside the aperture and the same
-OSPI0 controller also carries the W958D8NBYA5I HyperRAM on
-`chip_select: 1` -- a RAM row with `carveout: false` outside the
-aperture is a legitimate hardware secure-enclave reservation, not a
-defect. A region with an unresolved base is skipped, never classified
-(ADR-0034 clause 4)."""
+OSPI0 controller also carries the OSPI0 HyperRAM on `chip_select: 0`
+(see `on_module.hyperram` -- the fitted part is per-SKU) -- a RAM row
+with `carveout: false` outside the aperture is a legitimate hardware
+secure-enclave reservation, not a defect. A region with an unresolved
+base is skipped, never classified (ADR-0034 clause 4)."""
 
 import importlib.util
 from pathlib import Path
@@ -168,6 +168,13 @@ def test_row_outside_aperture_with_carveout_true_also_passes():
 
 
 def test_whole_device_alias_exempt_regardless_of_carveout():
+    """4c itself does not look at `write_authority` at all -- a
+    runtime-writable whole-device alias is refused once, by
+    `_check_preset()`'s top-of-window rule
+    (test_check_atoc_reservation.py::TestPresetCheckTopRowWriteAuthority),
+    since the alias's extent always reaches that top too. This fixture's
+    `composite` stays exempt from BOTH: not runtime-writable, so neither
+    4c nor the top-of-window rule fires, regardless of `carveout`."""
     cr = _load_cr()
     p = _write_fixture(
         cr, "class-whole-device-alias",

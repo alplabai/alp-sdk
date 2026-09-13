@@ -28,12 +28,12 @@ separately removed the two pointless bridge-SPI teardowns an already-enabled
 `@p timeout_ms` is now the budget, as the parameter always claimed to be. No
 wire change, no ABI change.
 
-**Known limitation, unchanged by this fix and tracked separately:**
-`poll_by_repeat()`'s budget counts only the back-off sleeps it performs, not the
-time spent inside each attempt, so `timeout_ms` is a floor on wall time rather
-than a bound. Making it a true wall-clock bound needs a portable monotonic
-millisecond clock, and `chips/cc3501e/*.c` is deliberately OS-agnostic (no
-Zephyr/vendor headers) so it has none available today.
+**Known limitation, unchanged by this fix, fixed separately by #1953:**
+`poll_by_repeat()`'s budget counted only the back-off sleeps it performs, not the
+time spent inside each attempt, so `timeout_ms` was a floor on wall time rather
+than a bound. Fixing that needed a portable monotonic millisecond clock, and
+`chips/cc3501e/*.c` is deliberately OS-agnostic (no Zephyr/vendor headers) so it
+had none available -- see the new `alp_uptime_ms()` entry below.
 
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 
@@ -1860,7 +1860,7 @@ unattested-`0x0BE12477` claim still stands, uncorrected, in:
   — fix the source, not this file)
 - `metadata/chips/gd32_swd.yaml:49` (`target_expected_idcode:
   "0x6BA02477"`)
-- `docs/bring-up-aen.md:87` (calls `0x6BA02477` "the generic ...
+- `docs/bring-up-aen.md:111` (calls `0x6BA02477` "the generic ...
   [value] this repo reads for the GD32/Cortex-M33")
 - `docs/superpowers/specs/2026-06-01-gd32-flash-release-design.md:34,84,160,187`
 - `docs/superpowers/plans/2026-06-01-gd32-flash-release.md:544,703`

@@ -9,17 +9,19 @@
  * =======================
  *
  * The V2N-M1 SoM pairs the Renesas RZ/V2N (Cortex-A55 + DRP-AI)
- * with a DEEPX DX-M1 NPU over PCIe.  This example walks the full
- * bring-up sequence for the M1 side:
+ * with a DEEPX DX-M1 NPU over PCIe.  The M1 bring-up sequence is
+ * below; this m33_sm image performs none of steps 1-4 itself and
+ * only exercises steps 5-6 through <alp/inference.h>:
  *
- *   1. Configure the PCIe mux (PI3DBS12212) to route the Renesas
- *      PCIe controller to the M1.
- *   2. Bring up the DEEPX 0.75 V rail (DA9292 CH2) -- handled by
- *      the V2N supervisor's `v2n_power_mgmt.c` module landed in
- *      §C.28.
- *   3. Release `M1_RESET` (Renesas PA6) via the
- *      `chips/deepx_dxm1/` host driver's `bring_up` sequencer.
- *   4. Wait for the PCIe link-up event.
+ *   1. Bring up the DEEPX 0.75 V rail (DA9292 CH2).
+ *      `v2n_power_mgmt.c` is written to do this from the P65 IRQ,
+ *      but it is not wired on the in-tree `alp_e1m_v2m101_m33_sm`
+ *      board (#2045, #2044).
+ *   2. ACK-probe the DEEPX TPS628640 bucks (see docs/soms/v2n-m1.md).
+ *   3. Route the PCIe mux (PI3DBS12212) to the M1.
+ *   4. Release `M1_RESET` (Renesas PA6) and wait for DEEPX firmware.
+ *      `deepx_dxm1_bring_up()` in `chips/deepx_dxm1/` runs steps 3-4;
+ *      this example does not call it.
  *   5. Open an inference handle through `<alp/inference.h>` with
  *      `backend = ALP_INFERENCE_BACKEND_DEEPX_DXM1` -- the
  *      Renesas-side Linux PCIe driver + the DEEPX runtime (both
@@ -46,11 +48,14 @@
  *     integration time.  See `docs/vendor-partnerships.md`
  *     §DEEPX for the licence text.
  *
- * Without a DEEPX NPU + the matching runtime, this example
- * compiles + runs its bring-up phase under native_sim (every
- * step returns NOSUPPORT / NOT_READY) but the inference call
- * lands on the documented NOSUPPORT contract.  Real silicon
- * runs the full path.
+ * Under native_sim this example compiles and runs, and the
+ * inference call lands on the documented NOSUPPORT contract.
+ * On E1M-V2M101 silicon this m33_sm image does not bring up
+ * the DEEPX rail (#2045) and does not call
+ * `deepx_dxm1_bring_up()`; `ALP_INFERENCE_BACKEND_DEEPX_DXM1`
+ * has no Zephyr backend either.  Real DEEPX inference runs on
+ * the A55 Yocto image (`src/yocto/inference_deepx.cpp`, via
+ * dx_rt).
  */
 
 #include <stdio.h>
@@ -61,14 +66,15 @@
 #include "alp/inference.h"
 #include "alp/peripheral.h"
 
-/* No boot-wait constant here: this example does not sequence the
- * DEEPX itself -- the supervisor's SYS_INIT drives bring-up.  Code
- * that does sequence it passes DEEPX_DXM1_DEFAULT_BOOT_US to
- * deepx_dxm1_bring_up(); that is the single source for the delay.
- * (A dead `M1_BOOT_US 5000u` used to sit here claiming a
- * DX-M1-datasheet figure -- <alp/chips/deepx_dxm1.h> states the
- * datasheet's POR-to-PCIe-link-up number has not been read out yet,
- * so the claim was unfounded as well as unused.) */
+/* No boot-wait constant here: this example does not call
+ * deepx_dxm1_bring_up().  Code that does passes
+ * DEEPX_DXM1_DEFAULT_BOOT_US as its post-M1_RESET-release wait;
+ * that is the single source for the delay.  (The DEEPX rail is
+ * v2n_power_mgmt.c's job, not deepx_dxm1_bring_up()'s -- see
+ * #2045 / #2044.)  (A dead `M1_BOOT_US 5000u` used to sit here
+ * claiming a DX-M1-datasheet figure -- <alp/chips/deepx_dxm1.h>
+ * states the datasheet's POR-to-PCIe-link-up number has not been
+ * read out yet, so the claim was unfounded as well as unused.) */
 
 /* Placeholder model buffer -- on real hardware this is the
  * DXNN-compiled model byte stream.  Sized for the example only;
@@ -82,12 +88,16 @@ int main(void)
 {
 	printf("[deepx] v2n-m1-deepx-inference flagship\n");
 	printf("[deepx] stage 1: PCIe mux + power_mgmt bring-up (supervisor-side)\n");
-	/* On real V2N-M1 silicon the supervisor's v2n_power_mgmt.c
-     * (§C.28) brings up the 0.75 V DEEPX rail as soon as the
-     * P65 IRQ fires; the PCIe mux + M1_RESET release ride the
-     * deepx_dxm1_bring_up() helper below.  Under native_sim the
-     * supervisor's NOSUPPORT path runs instead -- the example
-     * still validates the framing all the way through. */
+	/* v2n_power_mgmt.c (§C.28) is written to bring up the 0.75 V
+     * DEEPX rail when the P65 IRQ fires, but on the in-tree
+     * alp_e1m_v2m101_m33_sm board it compiles to a NOSUPPORT stub:
+     * no v2n-deepx-* DT aliases (#2045).  Even with the aliases
+     * added, CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID stays -1,
+     * which would fail init at runtime before P65 is armed
+     * (#2044).  This example also does not route the PCIe mux or
+     * release M1_RESET: deepx_dxm1_bring_up() would, and it is not
+     * called here.  Under native_sim the example still validates
+     * the framing all the way through. */
 
 	printf("[deepx] stage 2: opening DEEPX inference handle\n");
 	alp_inference_config_t cfg = {

@@ -9,6 +9,7 @@
  * fake_lsm6dso.c / fake_bme280.c.
  */
 
+#include <zephyr/kernel.h>
 #include <zephyr/ztest.h>
 
 #include "alp/chips/bme280.h"
@@ -20,12 +21,19 @@
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
-#include "fakes.h"
+#include "fakes.h" /* fake_lsm6dso.c / fake_bme280.c inspection API (dormant fake-emul
+                     * block below) + fake_icm42670.c / fake_bmi323.c / fake_bmp581.c
+                     * (active -- see each file's header). */
 
 /* Not part of the public bme280 API -- see chips/bme280/bme280_internal.h
  * for why the H4/H5 calibration unpack is tested directly here rather
  * than through bme280_init(). */
 #include "bme280_internal.h"
+
+/* #2035: examples/aen/aen-evk-demo's BMP581 health verdict, pulled into its
+ * own header precisely so it can be exercised here without a board -- see
+ * that header for the datasheet reasoning. */
+#include "bmp581_verdict.h"
 
 /* ------------------------------------------------------------------ */
 /* lsm6dso                                                             */
@@ -560,6 +568,137 @@ ZTEST(alp_chips, test_icm42670_init_null_args)
 	alp_i2c_close(bus);
 }
 
+/* ------------------------------------------------------------------ */
+/* icm42670 -- fake-backed register-protocol tests                    */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_chips, test_fake_icm42670_configure_int_pin1_preserves_int2_field)
+{
+	fake_icm42670_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	icm42670_t dev;
+	zassert_equal(icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW), ALP_OK);
+
+	/* INT2's field (bits[5:3]) seeded nonzero; INT1's field (bits[2:0])
+	 * starts clear. */
+	fake_icm42670_set_reg(0x06u, 0x38u);
+
+	icm42670_int_pin_config_t cfg = {
+		.mode     = ICM42670_INT_MODE_LATCHED,
+		.drive    = ICM42670_INT_DRIVE_PUSH_PULL,
+		.polarity = ICM42670_INT_POLARITY_ACTIVE_HIGH,
+	};
+	zassert_equal(icm42670_configure_int_pin(&dev, ICM42670_INT_PIN1, &cfg), ALP_OK);
+
+	/* (1<<2)|(1<<1)|1 = 0x07 in bits[2:0]; INT2's seeded 0x38 must
+	 * survive untouched. */
+	zassert_equal(fake_icm42670_get_reg(0x06u), 0x3Fu);
+	zassert_equal(fake_icm42670_write_count(0x06u), 1u);
+
+	icm42670_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_icm42670_configure_int_pin2_preserves_int1_field)
+{
+	fake_icm42670_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	icm42670_t dev;
+	zassert_equal(icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW), ALP_OK);
+
+	/* INT1's field (bits[2:0]) seeded nonzero this time. */
+	fake_icm42670_set_reg(0x06u, 0x07u);
+
+	icm42670_int_pin_config_t cfg = {
+		.mode     = ICM42670_INT_MODE_LATCHED,
+		.drive    = ICM42670_INT_DRIVE_PUSH_PULL,
+		.polarity = ICM42670_INT_POLARITY_ACTIVE_HIGH,
+	};
+	zassert_equal(icm42670_configure_int_pin(&dev, ICM42670_INT_PIN2, &cfg), ALP_OK);
+
+	/* 0x07 shifted into bits[5:3] = 0x38; INT1's seeded 0x07 must
+	 * survive.  A shift/mask mix-up between PIN1 and PIN2 would land
+	 * on a different byte than this. */
+	zassert_equal(fake_icm42670_get_reg(0x06u), 0x3Fu);
+
+	icm42670_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_icm42670_route_int_writes_the_pin_specific_register)
+{
+	fake_icm42670_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	icm42670_t dev;
+	zassert_equal(icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW), ALP_OK);
+
+	zassert_equal(icm42670_route_int(&dev, ICM42670_INT_PIN1, ICM42670_INT_SRC_DATA_RDY), ALP_OK);
+	zassert_equal(fake_icm42670_get_reg(0x2Bu), 0x08u, "INT_SOURCE0 must get the DATA_RDY bit");
+	zassert_equal(fake_icm42670_write_count(0x2Du), 0u, "INT_SOURCE3 must be untouched by PIN1");
+
+	zassert_equal(icm42670_route_int(&dev, ICM42670_INT_PIN2, ICM42670_INT_SRC_DATA_RDY), ALP_OK);
+	zassert_equal(fake_icm42670_get_reg(0x2Du), 0x08u, "INT_SOURCE3 must get the DATA_RDY bit");
+
+	icm42670_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_icm42670_data_ready_decodes_bit0)
+{
+	fake_icm42670_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	icm42670_t dev;
+	zassert_equal(icm42670_init(&dev, bus, ICM42670_I2C_ADDR_LOW), ALP_OK);
+
+	fake_icm42670_set_reg(0x39u, 0x01u);
+	bool ready = false;
+	zassert_equal(icm42670_data_ready(&dev, &ready), ALP_OK);
+	zassert_true(ready);
+
+	fake_icm42670_set_reg(0x39u, 0x00u);
+	zassert_equal(icm42670_data_ready(&dev, &ready), ALP_OK);
+	zassert_false(ready);
+
+	icm42670_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_icm42670_uninitialised_issues_zero_bus_traffic)
+{
+	fake_icm42670_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* Never initialised -- dev.initialised stays false. */
+	icm42670_t dev = { .bus = bus, .addr = ICM42670_I2C_ADDR_LOW, .initialised = false };
+
+	icm42670_int_pin_config_t cfg = { 0 };
+	bool                      ready;
+	zassert_equal(icm42670_configure_int_pin(&dev, ICM42670_INT_PIN1, &cfg), ALP_ERR_NOT_READY);
+	zassert_equal(icm42670_route_int(&dev, ICM42670_INT_PIN1, ICM42670_INT_SRC_DATA_RDY),
+	              ALP_ERR_NOT_READY);
+	zassert_equal(icm42670_data_ready(&dev, &ready), ALP_ERR_NOT_READY);
+
+	zassert_equal(fake_icm42670_write_count(0x06u), 0u);
+	zassert_equal(fake_icm42670_write_count(0x2Bu), 0u);
+	zassert_equal(fake_icm42670_write_count(0x2Du), 0u);
+
+	alp_i2c_close(bus);
+}
+
 ZTEST(alp_chips, test_icm42670_post_init_calls_reject_uninitialised)
 {
 	/* Without a real ICM-42670 on the emul controller, init's
@@ -617,6 +756,333 @@ ZTEST(alp_chips, test_bmi323_post_init_calls_reject_uninitialised)
 
 	bmi323_deinit(&dev);
 	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* bmi323 -- fake-backed register-protocol tests                      */
+/* ------------------------------------------------------------------ */
+/* fake_bmi323.c is wired at 0x69 in the overlay (not BMI323_I2C_ADDR_LOW
+ * == 0x68, the E1M EVK's real strap -- 0x68 is already used by
+ * fake_icm42670 in this same suite's shared bus, and the driver
+ * doesn't validate the address against any strap table, so any
+ * nonzero value works). */
+#define FAKE_BMI323_ADDR 0x69u
+
+ZTEST(alp_chips, test_fake_bmi323_configure_int_pin1_preserves_int2_field)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	/* INT2's field (bits[10:8]) seeded nonzero; INT1's field
+	 * (bits[2:0]) starts clear. */
+	fake_bmi323_set_reg(0x38u, 0x0700u);
+
+	bmi323_int_pin_config_t cfg = {
+		.level         = BMI323_INT_LEVEL_ACTIVE_HIGH,
+		.drive         = BMI323_INT_DRIVE_OPEN_DRAIN,
+		.output_enable = true,
+	};
+	zassert_equal(bmi323_configure_int_pin(&dev, BMI323_INT_PIN1, &cfg), ALP_OK);
+
+	/* (1<<2)|(1<<1)|1 = 0x07 in bits[2:0]; INT2's seeded 0x700 must
+	 * survive untouched. */
+	zassert_equal(fake_bmi323_get_reg(0x38u), 0x0707u);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmi323_configure_int_pin2_preserves_int1_field)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	/* INT1's field (bits[2:0]) seeded nonzero this time. */
+	fake_bmi323_set_reg(0x38u, 0x0007u);
+
+	bmi323_int_pin_config_t cfg = {
+		.level         = BMI323_INT_LEVEL_ACTIVE_HIGH,
+		.drive         = BMI323_INT_DRIVE_OPEN_DRAIN,
+		.output_enable = true,
+	};
+	zassert_equal(bmi323_configure_int_pin(&dev, BMI323_INT_PIN2, &cfg), ALP_OK);
+
+	/* 0x07 shifted into bits[10:8] = 0x700; INT1's seeded 0x07 must
+	 * survive.  Catches a PIN1/PIN2 shift mix-up. */
+	zassert_equal(fake_bmi323_get_reg(0x38u), 0x0707u);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmi323_set_int_latch_permanent_writes_int_conf)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	zassert_equal(bmi323_set_int_latch(&dev, BMI323_INT_LATCH_PERMANENT), ALP_OK);
+	zassert_equal(fake_bmi323_get_reg(0x39u), 0x0001u);
+	zassert_equal(fake_bmi323_write_count(0x39u), 1u);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmi323_route_data_ready_int_preserves_other_fields)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	/* INT_MAP2 also carries fields this driver doesn't manage (temp,
+	 * FIFO, tap, i3c, err_status) -- seed a value with bits set both
+	 * above and below the accel/gyro [11:8] field this call touches. */
+	fake_bmi323_set_reg(0x3Bu, 0x1234u);
+
+	zassert_equal(bmi323_route_data_ready_int(&dev, BMI323_INT_ROUTE_INT2, BMI323_INT_ROUTE_INT1),
+	              ALP_OK);
+
+	/* 0x1234 & ~0x0F00 = 0x1034; accel(INT2=2)<<10 = 0x0800;
+	 * gyro(INT1=1)<<8 = 0x0100 -> 0x1034 | 0x0800 | 0x0100 = 0x1934.
+	 * Top nibble (0x1) and bottom byte (0x34) of the seed survive
+	 * untouched; a swapped accel/gyro shift would land on a different
+	 * byte (0x1634). */
+	zassert_equal(fake_bmi323_get_reg(0x3Bu), 0x1934u);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmi323_data_ready_decodes_status_bits_7_and_6)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	bmi323_data_ready_t rdy;
+
+	fake_bmi323_set_reg(0x02u, 0x0080u); /* bit7 only -> accel */
+	zassert_equal(bmi323_data_ready(&dev, &rdy), ALP_OK);
+	zassert_true(rdy.accel);
+	zassert_false(rdy.gyro);
+
+	fake_bmi323_set_reg(0x02u, 0x0040u); /* bit6 only -> gyro */
+	zassert_equal(bmi323_data_ready(&dev, &rdy), ALP_OK);
+	zassert_false(rdy.accel);
+	zassert_true(rdy.gyro);
+
+	fake_bmi323_set_reg(0x02u, 0x00C0u); /* both */
+	zassert_equal(bmi323_data_ready(&dev, &rdy), ALP_OK);
+	zassert_true(rdy.accel);
+	zassert_true(rdy.gyro);
+
+	fake_bmi323_set_reg(0x02u, 0x0000u); /* neither */
+	zassert_equal(bmi323_data_ready(&dev, &rdy), ALP_OK);
+	zassert_false(rdy.accel);
+	zassert_false(rdy.gyro);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+/*
+ * #2035: bmi323_init() used to trust CHIP_ID the instant the soft-reset
+ * write's own I2C transaction ACKed, even though CHIP_ID's reset value
+ * (0x0043) reads back correctly whether or not that write actually landed
+ * (see the comment above bmi323_init() in chips/bmi323/bmi323.c). Bosch's
+ * device-initialisation status test (BST-BMI323-DS000-13 Rev 1.7, Figure 2
+ * pp.15-16) catches exactly this: STATUS.por_detected (bit0) is set ONLY by
+ * a real POR/soft-reset event.  Simulate a part that ACKs the reset write
+ * but never truly reset -- por_detected stays 0 while CHIP_ID still
+ * matches -- and require bmi323_init() to fail rather than report a false
+ * ALP_OK.  It must fail with ALP_ERR_NOT_READY specifically, not the
+ * ALP_ERR_IO a CHIP_ID mismatch/read-error also returns -- conflating the
+ * two was itself named as a defect in #2035's fix.
+ *
+ * Mutation coverage: deleting the
+ * `if (!dev->por_detected) return ALP_ERR_NOT_READY;` gate in bmi323_init()
+ * reddens this test (it falls through to the CHIP_ID check, which passes,
+ * and returns ALP_OK instead of ALP_ERR_NOT_READY).
+ */
+ZTEST(alp_chips, test_bmi323_init_rejects_missing_por_detected)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x02u, 0x0000u); /* STATUS: por_detected clear. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_NOT_READY);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * #2035 regression: STATUS.por_detected is clear-on-read (BST-BMI323-DS000-13
+ * Rev 1.7 p.66) and bmi323_init() has to read it to gate on it -- so without
+ * bmi323_was_por_detected() stashing the bit somewhere, every caller
+ * downstream of init() reads 0 regardless of what init() actually saw.  This
+ * is exactly what shipped: init() consumed the bit and the two examples that
+ * report it downstream (aen-evk-demo, aen-bmi323-regcheck) always printed 0.
+ *
+ * Covers both halves of the fix: (1) the accessor reports what init() saw
+ * on the ALP_OK path, where a raw re-read of STATUS would now read 0 because
+ * init() already consumed the bit; (2) the fake's clear-on-read modelling
+ * (fake_bmi323.c) actually clears the register, so a driver that forgot to
+ * stash the bit before the STATUS read returns would fail case (1) here
+ * rather than passing by accident because the fake never cleared anything.
+ *
+ * Mutation coverage: removing the `dev->por_detected = ...` assignment in
+ * bmi323_init() reddens this test's logic (the accessor then reports false
+ * on a context whose init() just saw por_detected=1, failing the
+ * zassert_true(seen) below).  Confirmed against the real chips/bmi323/
+ * bmi323.c through a standalone host harness (build it with gcc against
+ * this file + a hand-rolled I2C fake modelling the same clear-on-read
+ * behaviour) -- with the assignment, both cases below pass; with it
+ * removed, both fail the same way this ztest would.
+ */
+ZTEST(alp_chips, test_bmi323_was_por_detected_survives_the_clear_on_read)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+
+	/* init() already consumed the bit -- the fake's clear-on-read
+	 * modelling means a raw re-read now sees 0, same as real silicon. */
+	zassert_equal(fake_bmi323_get_reg(0x02u) & 0x0001u, 0u);
+
+	/* ... but the accessor still reports what init() saw before that
+	 * read cleared it. */
+	bool seen = false;
+	zassert_equal(bmi323_was_por_detected(&dev, &seen), ALP_OK);
+	zassert_true(seen);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * The accessor's whole point is to still work on a context whose init()
+ * call failed -- POR gate rejected here.  Confirms it does not gate on
+ * dev->initialised the way this driver's other accessors do.
+ */
+ZTEST(alp_chips, test_bmi323_was_por_detected_usable_after_init_failure)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x02u, 0x0000u); /* STATUS: por_detected clear. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_NOT_READY);
+
+	bool seen = true;
+	zassert_equal(bmi323_was_por_detected(&dev, &seen), ALP_OK);
+	zassert_false(seen);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * ERR_REG.fatal_err (bit0, BST-BMI323-DS000-13 Rev 1.7 p.61 Table 36) is now
+ * acted on: previously read and discarded.
+ *
+ * Mutation coverage: deleting
+ * `if ((err_reg & BMI323_ERR_REG_FATAL_ERR) != 0) return ALP_ERR_IO;` in
+ * bmi323_init() reddens this test (falls through to the POR/CHIP_ID checks,
+ * which pass, and returns ALP_OK instead of ALP_ERR_IO).
+ */
+ZTEST(alp_chips, test_bmi323_init_rejects_fatal_err)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	fake_bmi323_set_reg(0x01u, 0x0001u); /* ERR_REG: fatal_err set. */
+
+	bmi323_t dev;
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_ERR_IO);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
+}
+
+/*
+ * #2035: BST-BMI323-DS000-13 Rev 1.7 section 7.3 "Communication Access
+ * Restriction" (p.205; tIDLE,rd, Table 41 p.195) requires an interface
+ * idle time of at least 450 us between consecutive I2C/I3C/SPI accesses
+ * while the device is in suspend mode -- and section 5.4 (p.20) puts a
+ * device fresh out of POR/soft-reset in suspend, which is exactly
+ * bmi323_init()'s state for all four of its accesses (the CMD soft-reset
+ * write, then the ERR_REG/STATUS/CHIP_ID reads).  The pre-fix driver
+ * issued none of this.
+ *
+ * fake_bmi323.c's i2c-emul target doesn't model bus timing, so this
+ * can't assert against register-write ordering the way the tests above
+ * do -- it measures bmi323_init()'s real elapsed wall time instead.
+ * With the fix that floors at 4 accesses x >=450 us of idle plus the
+ * existing 3 ms post-reset settle (BMI323_SOFT_RESET_MS), ~4.8 ms;
+ * without it (the pre-#2035 driver) the floor is the 3 ms settle alone.
+ * The 4 ms threshold sits with clear margin on both sides of that gap. */
+ZTEST(alp_chips, test_bmi323_init_honours_suspend_mode_communication_idle)
+{
+	fake_bmi323_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmi323_t dev;
+	int64_t  before_us = k_ticks_to_us_floor64(k_uptime_ticks());
+	zassert_equal(bmi323_init(&dev, bus, FAKE_BMI323_ADDR), ALP_OK);
+	int64_t elapsed_us = k_ticks_to_us_floor64(k_uptime_ticks()) - before_us;
+
+	zassert_true(elapsed_us >= 4000,
+	             "bmi323_init() took %lld us, want >= 4000 us (4 accesses x >= 450 us "
+	             "suspend-mode tIDLE,rd idle + the 3 ms reset settle) -- looks like the "
+	             "post-access idle was dropped",
+	             (long long)elapsed_us);
+
+	bmi323_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmi323_reset();
 }
 
 /* ------------------------------------------------------------------ */
@@ -751,6 +1217,260 @@ ZTEST(alp_chips, test_bmp581_set_sampling_accepts_every_declared_odr)
 	}
 
 	alp_i2c_close(bus);
+}
+
+/* ------------------------------------------------------------------ */
+/* bmp581 -- fake-backed register-protocol tests                      */
+/* ------------------------------------------------------------------ */
+
+#define REG_BMP581_ODR_CONF   0x37
+#define ODR_CONF_DEEP_DIS_BIT (1u << 7)
+#define ODR_CONF_MODE_MASK    0x03u
+#define ODR_CONF_MODE_STANDBY 0x00u
+
+/*
+ * #2035: bmp581_set_sampling() used to write OSR_CONFIG then ODR_CONFIG
+ * (with the target mode) directly out of DEEP STANDBY -- the power-on
+ * default -- even though BST-BMP581-DS004-13 §4.3 (p.16) requires entering
+ * STANDBY first, and §4.3.8 (p.18) says writes made outside STANDBY "are
+ * lost". Assert the actual write ORDER on the wire: the very first
+ * ODR_CONFIG write must carry pwr_mode=STANDBY (with deep_dis set), and it
+ * must happen before both the OSR_CONFIG write and the final ODR_CONFIG
+ * write that carries the caller's target mode.
+ *
+ * Mutation coverage: reverting bmp581_set_sampling() to write OSR_CONFIG
+ * then a single target-mode ODR_CONFIG (deleting the STANDBY pre-write)
+ * reddens this -- the log's first entry becomes OSR_CONFIG, and the only
+ * ODR_CONFIG entry carries pwr_mode=FORCED, not STANDBY.
+ */
+ZTEST(alp_chips, test_bmp581_set_sampling_enters_standby_before_target_mode)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	zassert_equal(bmp581_set_sampling(
+	                  &dev, BMP581_OSR_X4, BMP581_OSR_X1, BMP581_ODR_25_HZ, BMP581_MODE_FORCED),
+	              ALP_OK);
+
+	/* At least two ODR_CONFIG writes: the STANDBY staging write, then
+	 * the final target-mode write. */
+	uint32_t n = fake_bmp581_log_len();
+	zassert_true(n >= 2, "expected at least a STANDBY write and a target-mode write");
+
+	/* First register touched must be ODR_CONFIG (not OSR_CONFIG --
+	 * writing OSR_CONFIG before entering STANDBY is exactly the bug),
+	 * and it must select STANDBY with deep_dis set. */
+	zassert_equal(fake_bmp581_log_reg(0),
+	              REG_BMP581_ODR_CONF,
+	              "first write must be the STANDBY staging write to ODR_CONFIG");
+	uint8_t first_val = fake_bmp581_log_val(0);
+	zassert_equal(first_val & ODR_CONF_MODE_MASK,
+	              ODR_CONF_MODE_STANDBY,
+	              "first ODR_CONFIG write must select pwr_mode=STANDBY");
+	zassert_true((first_val & ODR_CONF_DEEP_DIS_BIT) != 0,
+	             "first ODR_CONFIG write must also set deep_dis");
+
+	/* The final write overall must be the target-mode ODR_CONFIG write
+	 * (FORCED), landing strictly after the STANDBY write. */
+	uint8_t last_val = fake_bmp581_log_val(n - 1);
+	zassert_equal(fake_bmp581_log_reg(n - 1),
+	              REG_BMP581_ODR_CONF,
+	              "last write must be the target-mode ODR_CONFIG write");
+	zassert_equal(last_val & ODR_CONF_MODE_MASK,
+	              (uint8_t)BMP581_MODE_FORCED,
+	              "final ODR_CONFIG write must select the caller's target mode");
+	zassert_true((last_val & ODR_CONF_DEEP_DIS_BIT) != 0,
+	             "final ODR_CONFIG write must keep deep_dis set");
+
+	/* Confirm on real hardware register state too: the chip's final
+	 * ODR_CONFIG value is the target-mode one, not the STANDBY one. */
+	zassert_equal(fake_bmp581_get_reg(REG_BMP581_ODR_CONF), last_val);
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
+}
+
+/*
+ * #2035: five of bmp581_odr_t's seven ODR_CONFIG codes were wrong.  Assert
+ * each declared enum value lands on the wire as the exact code
+ * BST-BMP581-DS004-13 §7.34 (p.65) assigns it -- cross-checked against
+ * Bosch's own BMP5-Sensor-API `bmp5_defs.h` (BMP5_ODR_*), which is
+ * generated from the same table.
+ *
+ * Mutation coverage: reverting any single enumerator in bmp581_odr_t back
+ * to its old (wrong) value reddens the corresponding case here.
+ */
+ZTEST(alp_chips, test_bmp581_set_sampling_writes_datasheet_odr_codes)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	static const struct {
+		bmp581_odr_t odr;
+		uint8_t      expect_code;
+	} cases[] = {
+		{ BMP581_ODR_240_HZ, 0x00 }, { BMP581_ODR_120_HZ, 0x08 }, { BMP581_ODR_50_HZ, 0x0F },
+		{ BMP581_ODR_25_HZ, 0x14 },  { BMP581_ODR_10_HZ, 0x17 },  { BMP581_ODR_5_HZ, 0x18 },
+		{ BMP581_ODR_1_HZ, 0x1C },
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		zassert_equal(bmp581_set_sampling(
+		                  &dev, BMP581_OSR_X1, BMP581_OSR_X1, cases[i].odr, BMP581_MODE_NORMAL),
+		              ALP_OK);
+		uint8_t got_code = (fake_bmp581_get_reg(REG_BMP581_ODR_CONF) >> 2) & 0x1Fu;
+		zassert_equal(
+		    got_code, cases[i].expect_code, "ODR enum %d wrote wrong code", (int)cases[i].odr);
+	}
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
+}
+
+ZTEST(alp_chips, test_fake_bmp581_data_ready_decodes_bit0)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	bool ready = false;
+	fake_bmp581_set_reg(0x27u, 0x01u);
+	zassert_equal(bmp581_data_ready(&dev, &ready), ALP_OK);
+	zassert_true(ready);
+
+	/* Only bit 0 (drdy_data_reg) counts -- an unrelated INT_STATUS bit
+	 * set (e.g. fifo_full, bit 1) must not read as "ready". */
+	fake_bmp581_set_reg(0x27u, 0x02u);
+	zassert_equal(bmp581_data_ready(&dev, &ready), ALP_OK);
+	zassert_false(ready);
+
+	fake_bmp581_set_reg(0x27u, 0x00u);
+	zassert_equal(bmp581_data_ready(&dev, &ready), ALP_OK);
+	zassert_false(ready);
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmp581_configure_int_pin_writes_expected_byte)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	static const struct {
+		bool                  enable;
+		bmp581_int_drive_t    drive;
+		bmp581_int_polarity_t polarity;
+		bmp581_int_mode_t     mode;
+		uint8_t               expect;
+	} cases[] = {
+		/* pad_int_drv[7:4]=0x3 fixed | int_en[3] | int_od[2] | int_pol[1] | int_mode[0]. */
+		{ false, BMP581_INT_PUSH_PULL, BMP581_INT_ACTIVE_LOW, BMP581_INT_PULSED, 0x30u },
+		{ true, BMP581_INT_PUSH_PULL, BMP581_INT_ACTIVE_LOW, BMP581_INT_PULSED, 0x38u },
+		{ true, BMP581_INT_OPEN_DRAIN, BMP581_INT_ACTIVE_LOW, BMP581_INT_PULSED, 0x3Cu },
+		{ true, BMP581_INT_OPEN_DRAIN, BMP581_INT_ACTIVE_HIGH, BMP581_INT_PULSED, 0x3Eu },
+		{ true, BMP581_INT_OPEN_DRAIN, BMP581_INT_ACTIVE_HIGH, BMP581_INT_LATCHED, 0x3Fu },
+	};
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		zassert_equal(bmp581_configure_int_pin(
+		                  &dev, cases[i].enable, cases[i].drive, cases[i].polarity, cases[i].mode),
+		              ALP_OK);
+		zassert_equal(fake_bmp581_get_reg(0x14u),
+		              cases[i].expect,
+		              "case %u: INT_CONFIG mismatch",
+		              (unsigned)i);
+	}
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_bmp581_set_int_sources_writes_verbatim_and_rejects_out_of_range)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	zassert_equal(bmp581_set_int_sources(&dev, 0x0Fu), ALP_OK);
+	zassert_equal(fake_bmp581_get_reg(0x15u), 0x0Fu);
+	zassert_equal(fake_bmp581_write_count(0x15u), 1u);
+
+	/* Bit 4 is outside the four defined source bits -- must be
+	 * rejected before it ever reaches the bus. */
+	zassert_equal(bmp581_set_int_sources(&dev, 0x10u), ALP_ERR_INVAL);
+	zassert_equal(fake_bmp581_write_count(0x15u), 1u, "rejected value must not reach the bus");
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+}
+
+/*
+ * #2035: a bench session once called a BMP581 BROKEN off STATUS (0x28)
+ * reading 0x02 -- its documented power-on/soft-reset value
+ * (BST-BMP581-DS004-13 Rev 1.13 §7.22 p.58), not a fault. This pins the
+ * fix: bmp581_status_is_healthy() must call 0x02 healthy (nvm_rdy set,
+ * nvm_err clear -- matching Bosch's own bmp5_init() and upstream Zephyr's
+ * bmp581 driver), and must still call nvm_err set a fault.
+ *
+ * Mutation coverage: flipping the function to `!= 0` on NVM_ERR (or to
+ * `== 0` on NVM_RDY), or folding CORE_RDY into the check, reddens one of
+ * the two asserts below.
+ */
+ZTEST(alp_chips, test_bmp581_status_is_healthy_matches_bosch_nvm_criterion)
+{
+	fake_bmp581_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	bmp581_t dev;
+	zassert_equal(bmp581_init(&dev, bus, BMP581_I2C_ADDR_LOW), ALP_OK);
+
+	/* Documented reset value: core_rdy=0, nvm_rdy=1, nvm_err=0 -- a
+	 * healthy part that has never been touched. Read it through the
+	 * exact one-shot alp_i2c_write_read the demo itself uses. */
+	fake_bmp581_set_reg(BMP581_DIAG_REG_STATUS, 0x02u);
+	uint8_t      reg    = BMP581_DIAG_REG_STATUS;
+	uint8_t      status = 0;
+	alp_status_t rc     = alp_i2c_write_read(bus, BMP581_I2C_ADDR_LOW, &reg, 1, &status, 1);
+	zassert_equal(rc, ALP_OK);
+	zassert_equal(status, 0x02u);
+	zassert_true(bmp581_status_is_healthy(status), "STATUS=0x02 (reset value) must be healthy");
+
+	/* nvm_err set (bit2) alongside nvm_rdy -- a genuine fault, must
+	 * still be reported. */
+	fake_bmp581_set_reg(BMP581_DIAG_REG_STATUS, 0x06u);
+	status = 0;
+	zassert_equal(alp_i2c_write_read(bus, BMP581_I2C_ADDR_LOW, &reg, 1, &status, 1), ALP_OK);
+	zassert_false(bmp581_status_is_healthy(status), "nvm_err set must still fail the verdict");
+
+	bmp581_deinit(&dev);
+	alp_i2c_close(bus);
+	fake_bmp581_reset();
 }
 
 /* ==================================================================== */
@@ -1068,10 +1788,13 @@ ZTEST(alp_chips, test_icm42670_set_accel_rejects_undeclared_odr)
 	icm42670_t dev  = { 0 };
 	dev.initialised = true;
 
-	/* icm42670_odr_t is genuinely sparse: it declares 0x0, 0x4..0x8 and
-     * 0xA..0xF.  0x1/0x2/0x3/0x9 sit inside the 4-bit field but are not
-     * declared members, so a bitmask alone cannot reject them. */
-	static const uint8_t bad[] = { 0x1, 0x2, 0x3, 0x9 };
+	/* icm42670_odr_t is shared by ACCEL_ODR and GYRO_ODR but their
+     * legal sets differ (TDK DS-000451 Rev 1.0).  ACCEL_CONFIG0 p.57:
+     * 0x0 and 0x1..0x4 reserved, 0x5..0xF valid.  0x0 (ODR_OFF) is a
+     * declared enum member, not a stray bit pattern -- it is reserved,
+     * not "disable via ODR" (that's PWR_MGMT0's job), so it must be
+     * rejected explicitly alongside the undeclared 0x1..0x4. */
+	static const uint8_t bad[] = { 0x0, 0x1, 0x2, 0x3, 0x4 };
 
 	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
 		zassert_equal(icm42670_set_accel(&dev, (icm42670_odr_t)bad[i], ICM42670_ACCEL_FS_2G),
@@ -1086,7 +1809,12 @@ ZTEST(alp_chips, test_icm42670_set_gyro_rejects_undeclared_odr)
 	icm42670_t dev  = { 0 };
 	dev.initialised = true;
 
-	static const uint8_t bad[] = { 0x1, 0x2, 0x3, 0x9 };
+	/* GYRO_CONFIG0 p.56 is narrower than ACCEL_CONFIG0: 0x0 and
+     * 0x1..0x4 reserved (same as accel), but ALSO 0xD/0xE/0xF
+     * reserved -- the gyro has no sub-12.5 Hz low-power rates, even
+     * though those codes are valid, declared ODR_6_25_HZ/ODR_3_125_HZ/
+     * ODR_1_5625_HZ members on the accel side. */
+	static const uint8_t bad[] = { 0x0, 0x1, 0x2, 0x3, 0x4, 0xD, 0xE, 0xF };
 
 	for (size_t i = 0; i < ARRAY_SIZE(bad); i++) {
 		zassert_equal(icm42670_set_gyro(&dev, (icm42670_odr_t)bad[i], ICM42670_GYRO_FS_250_DPS),
@@ -1098,26 +1826,32 @@ ZTEST(alp_chips, test_icm42670_set_gyro_rejects_undeclared_odr)
 
 ZTEST(alp_chips, test_icm42670_set_accel_gyro_accept_declared_odr)
 {
-	/* Control -- every declared member must survive, including the ones
-     * either side of each sparse gap. */
+	/* Control -- every code legal for each field must survive.  The two
+     * good lists differ: accel accepts 0x5..0xF, gyro only 0x5..0xC. */
 	icm42670_t dev  = { 0 };
 	dev.initialised = true;
 
-	static const icm42670_odr_t good[] = {
-		ICM42670_ODR_OFF,     ICM42670_ODR_1600_HZ, ICM42670_ODR_800_HZ,   ICM42670_ODR_400_HZ,
-		ICM42670_ODR_200_HZ,  ICM42670_ODR_100_HZ,  ICM42670_ODR_50_HZ,    ICM42670_ODR_25_HZ,
-		ICM42670_ODR_12_5_HZ, ICM42670_ODR_6_25_HZ, ICM42670_ODR_3_125_HZ, ICM42670_ODR_1_5625_HZ
+	static const icm42670_odr_t accel_good[] = {
+		ICM42670_ODR_1600_HZ, ICM42670_ODR_800_HZ,   ICM42670_ODR_400_HZ,   ICM42670_ODR_200_HZ,
+		ICM42670_ODR_100_HZ,  ICM42670_ODR_50_HZ,    ICM42670_ODR_25_HZ,    ICM42670_ODR_12_5_HZ,
+		ICM42670_ODR_6_25_HZ, ICM42670_ODR_3_125_HZ, ICM42670_ODR_1_5625_HZ
 	};
+	static const icm42670_odr_t gyro_good[] = { ICM42670_ODR_1600_HZ, ICM42670_ODR_800_HZ,
+		                                        ICM42670_ODR_400_HZ,  ICM42670_ODR_200_HZ,
+		                                        ICM42670_ODR_100_HZ,  ICM42670_ODR_50_HZ,
+		                                        ICM42670_ODR_25_HZ,   ICM42670_ODR_12_5_HZ };
 
-	for (size_t i = 0; i < ARRAY_SIZE(good); i++) {
-		zassert_equal(icm42670_set_accel(&dev, good[i], ICM42670_ACCEL_FS_2G),
+	for (size_t i = 0; i < ARRAY_SIZE(accel_good); i++) {
+		zassert_equal(icm42670_set_accel(&dev, accel_good[i], ICM42670_ACCEL_FS_2G),
 		              ALP_ERR_NOT_READY,
 		              "declared accel odr 0x%x must reach the bus, not be rejected",
-		              (unsigned)good[i]);
-		zassert_equal(icm42670_set_gyro(&dev, good[i], ICM42670_GYRO_FS_250_DPS),
+		              (unsigned)accel_good[i]);
+	}
+	for (size_t i = 0; i < ARRAY_SIZE(gyro_good); i++) {
+		zassert_equal(icm42670_set_gyro(&dev, gyro_good[i], ICM42670_GYRO_FS_250_DPS),
 		              ALP_ERR_NOT_READY,
 		              "declared gyro odr 0x%x must reach the bus, not be rejected",
-		              (unsigned)good[i]);
+		              (unsigned)gyro_good[i]);
 	}
 }
 

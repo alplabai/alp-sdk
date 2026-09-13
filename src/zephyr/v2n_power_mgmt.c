@@ -6,7 +6,11 @@
  * for the contract.
  *
  * Compiled in only when CONFIG_ALP_SDK_V2N_POWER_MGMT=y AND
- * CONFIG_ALP_SDK_V2N_SUPERVISOR=y.  See the !V2N stub at the bottom.
+ * CONFIG_ALP_SDK_V2N_SUPERVISOR=y; the implementation, SYS_INIT
+ * included, also needs both v2n-deepx-* DT aliases, and at runtime
+ * a BRD_I2C borrow (CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID >= 0).
+ * NOSUPPORT fallbacks: the DT-alias guard's #else stub, and the
+ * !V2N stub at the bottom.
  *
  * Concurrency model:
  *
@@ -44,16 +48,18 @@
 
 LOG_MODULE_REGISTER(alp_v2n_power_mgmt, CONFIG_LOG_DEFAULT_LEVEL);
 
-/* DT spec aliases.  The Zephyr device tree for an E1M-V2N101 board
- * is expected to publish:
+/* DT aliases.  A Zephyr devicetree that wires the DEEPX rail must
+ * publish two aliases, each pointing at a status-okay node that
+ * carries a `gpios` property:
  *
- *   v2n-deepx-pwr-en-req-gpios   = <&renesas_gpioN PORT_BIT GPIO_ACTIVE_HIGH>;
- *   v2n-deepx-core-0p75-en-gpios = <&renesas_gpioN PORT_BIT GPIO_ACTIVE_HIGH>;
+ *   v2n-deepx-pwr-en-req   -> node whose gpios = P65 (input, A55 request)
+ *   v2n-deepx-core-0p75-en -> node whose gpios = P64 (output)
  *
- * If either alias is absent the module compiles to no-ops + the
- * init function returns NOSUPPORT.  Board boards that don't have
- * the DEEPX rail (V2N base SoMs without the M1 DEEPX add-on)
- * legitimately don't populate these aliases. */
+ * The GPIO controller those specs reference must be enabled too.
+ * If either alias is absent the whole implementation below --
+ * SYS_INIT included -- compiles out, and alp_z_v2n_power_mgmt_init()
+ * is a NOSUPPORT stub that nothing calls.  V2N base SoMs without the
+ * M1 DEEPX add-on legitimately leave these aliases unpopulated. */
 #define V2N_PWR_EN_REQ_NODE DT_ALIAS(v2n_deepx_pwr_en_req)
 #define V2N_CORE_0P75_NODE  DT_ALIAS(v2n_deepx_core_0p75_en)
 
@@ -226,13 +232,15 @@ static int v2n_pwr_sys_init(void)
 }
 SYS_INIT(v2n_pwr_sys_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
-#else /* DT aliases missing -- board doesn't wire DEEPX */
+#else /* v2n-deepx-* DT aliases not both okay */
 
 alp_status_t alp_z_v2n_power_mgmt_init(void)
 {
-	/* DT aliases not populated -- this board doesn't have the
-     * DEEPX rail.  Surface NOSUPPORT so a misconfigured board
-     * doesn't silently look "fine". */
+	/* DT aliases not both okay: either no DEEPX rail (V2N base) or
+     * the board DT does not wire one (alp_e1m_v2m101_m33_sm today;
+     * rail architecture open in #2045).  Nothing in-tree calls this
+     * stub and no SYS_INIT is registered, so an unwired board logs
+     * nothing. */
 	return ALP_ERR_NOSUPPORT;
 }
 

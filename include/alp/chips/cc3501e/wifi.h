@@ -117,7 +117,14 @@ const char *cc3501e_wifi_sec_name(uint16_t security_info);
  * @param out_records Caller array of @p cap @ref cc3501e_scan_record_t.
  * @param cap         Capacity of @p out_records.
  * @param count       Receives the number of records parsed (may be NULL).
- * @param timeout_ms  Upper bound on the poll-by-repeat budget.
+ * @param timeout_ms  Upper bound on the poll-by-repeat budget. FLOORED
+ *                    internally to 20 s, because the firmware's own bounded
+ *                    worst case for a scan issued as the first Wi-Fi op of a
+ *                    boot is 16 s (a 10 s STA role-up, then a 6 s wait on the
+ *                    scan result). A smaller budget cannot express a healthy
+ *                    outcome: 15 s produced a timeout at 15062 ms on silicon,
+ *                    1062 ms inside the firmware's own bound, and it read as a
+ *                    dead link rather than as the caller's clock running out.
  * @return ALP_OK once the scan completed (even with zero records);
  *         @ref ALP_ERR_NOT_READY if @p ctx is NULL or not initialised;
  *         @ref ALP_ERR_BUSY if a scan is already decoding on this SAME
@@ -370,10 +377,17 @@ alp_status_t cc3501e_wifi_rssi(cc3501e_t *ctx, int8_t *rssi);
  * @param ctx    Initialised driver context.
  * @param iface  One of @ref alp_cc3501e_wifi_iface_t.
  * @param ip     Receives the 4 IPv4 octets, network order (ip[0] = MSB).
- * @return ALP_OK with @p ip filled; ALP_ERR_NOT_READY if that interface has no
- *         address yet -- no DHCP lease for STA, or the AP role not up for AP
- *         (firmware RESP_ERR_NOT_READY); ALP_ERR_IO on a short reply; or the
- *         mapped error.
+ * @return ALP_OK with @p ip filled.
+ *         ALP_ERR_NOT_READY -- the firmware decoded the request and answered
+ *         @c ALP_CC3501E_RESP_ERR_RADIO, its only status for "no address on
+ *         this interface yet" (network stack not up, address lookup failed,
+ *         or a genuine 0.0.0.0 lease): STA has associated but has no DHCP
+ *         lease yet, or the AP role isn't up.  Poll again.
+ *         ALP_ERR_IO -- the transport itself failed, or the reply was
+ *         malformed/short: a failed SPI transceive, a bad reply header, or
+ *         @c got @c < @c 4.  This is a genuine wire fault, not "no address
+ *         yet" -- do not treat it as retryable in the same way.
+ *         Any other mapped error from @ref cc3501e_request otherwise.
  *
  * @note WIRE: GET_IP has an opcode but NO reply payload struct in the
  *       protocol header; this helper assumes the reply data is 4 IPv4

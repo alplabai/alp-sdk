@@ -28,9 +28,12 @@ bridge health. Two diagnostic ways in:
   sequence).
 
 > The same `alp companion` group binds the **GD32** supervisor on V2N SoMs
-> (`CONFIG_ALP_SDK_V2N_SUPERVISOR`) instead of the CC3501E; there it exposes
-> `companion gpio read/write` rather than the Wi-Fi/BLE tree below. This page
-> documents the **CC3501E (Alif)** binding.
+> (`CONFIG_ALP_SDK_V2N_SUPERVISOR`, plus a non-negative
+> `CONFIG_ALP_SDK_V2N_SUPERVISOR_SPI_BUS_ID` or
+> `CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID` — both default `-1`, which no
+> in-tree board overrides yet (tracked in #2044)) instead of the CC3501E;
+> there it exposes `companion gpio read/write` rather than the Wi-Fi/BLE
+> tree below. This page documents the **CC3501E (Alif)** binding.
 
 ---
 
@@ -100,7 +103,7 @@ immediately, with no independent AP-status channel to confirm against
 
 | Command | What it does |
 |---|---|
-| `diag info` | Firmware version / reset cause / uptime / active role / free heap. |
+| `diag info` | Firmware version / reset cause / uptime / active role / free heap / lwIP DHCP state / netif up-link-tries. |
 | `diag stats` | Frame counters (frames answered OK / with an error). |
 | `diag loglevel <0..255>` | Set the firmware log verbosity. |
 

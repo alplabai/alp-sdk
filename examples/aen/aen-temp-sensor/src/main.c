@@ -24,8 +24,8 @@
  * What it does, in order
  * ----------------------
  *   1. Resolve the DT-bound TMP112 and check it initialised.  A TMP112 that
- *      does not ACK fails here (upstream tmp112_init() writes CONFIG, T_LOW
- *      and T_HIGH), which is where the address diagnostic below fires.
+ *      does not ACK fails here -- upstream tmp112_init() writes CONFIG, T_LOW
+ *      and T_HIGH, so a no-ACK part never reaches device_is_ready().
  *   2. Take TMP112_SAMPLES readings TMP112_PERIOD_MS apart, so a reader sees
  *      the poll shape rather than a single lucky fetch.
  *   3. Sanity-BAND each reading against an indoor range.  This is a
@@ -47,29 +47,16 @@
  */
 #if DT_HAS_COMPAT_STATUS_OKAY(ti_tmp112)
 #define TMP112_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(ti_tmp112)
-/* The devicetree's OWN address, printed rather than assumed: if a board file
- * ever bakes in something other than the design 0x48, the diagnostic below
- * says so out loud instead of quietly contradicting this file's comments. */
+/* The devicetree's OWN address, printed rather than assumed: U20 is
+ * TMP112DIDPWR, whose exact orderable MPN is X2SON (DPW), 5 pins (TI
+ * SBOS473L p.44) -- the X2SON-5 "Address Variant Only" row of SBOS473L
+ * Table 7-4 straps ADD0->GND to 0x40. */
 #define TMP112_DT_ADDR ((unsigned int)DT_REG_ADDR(TMP112_NODE))
 static const struct device *const tmp112 = DEVICE_DT_GET(TMP112_NODE);
 #else
 #define TMP112_DT_ADDR 0u
 static const struct device *const tmp112 = NULL;
 #endif
-
-/* Design address, from the E1M-AEN-2626-R2 netlist: U20 = TMP112DIDPWR with
- * ADD0 tied to 0V.  TI SBOS397 maps ADD0 -> GND = 0x48 (-> V+ = 0x49,
- * -> SDA = 0x4A, -> SCL = 0x4B).  Used for prose only; the real address comes
- * from the devicetree above. */
-#define TMP112_DESIGN_ADDR 0x48u
-
-/* The address something answers at instead of the declared 0x48 -- confirmed
- * on 2 of 2 modules tested (2026W36-0001, 2026W36-0003), so this is a BATCH
- * property of the 2026W36 E1M-AEN803 build, not a one-off.  0x40 is not a
- * legal TMP112 strap address, so what answers here has not been proven to be
- * the TMP112 at all -- open work under alp-sdk#1978.  Never probed by this
- * example -- see print_address_anomaly_hint(). */
-#define TMP112_OBSERVED_ANOMALY_ADDR 0x40u
 
 /* Poll shape: 8 samples 500 ms apart is ~4 s of console output -- long enough
  * to show a customer the loop and to catch an intermittent bus, short enough
@@ -95,56 +82,6 @@ static const struct device *const tmp112 = NULL;
  */
 #define TMP112_PLAUSIBLE_LO_MILLI_C 15000
 #define TMP112_PLAUSIBLE_HI_MILLI_C 35000
-
-/*
- * The actionable diagnostic for "the sensor is in the devicetree but does not
- * answer".  Printed instead of silently probing somewhere else: 0x40 has not
- * been proven to be the TMP112 -- it is not even a legal TMP112 strap address
- * -- so firmware quietly falling back to it would be guessing at a device's
- * identity instead of reporting the real, still-open question (alp-sdk#1978).
- */
-static void print_address_anomaly_hint(void)
-{
-	printk("\n"
-	       "  The TMP112 did not respond at its devicetree address 0x%02x.\n"
-	       "\n"
-	       "  0x%02x is the DESIGN address and is correct: the E1M-AEN-2626-R2\n"
-	       "  netlist ties U20 pin 3 (ADD0) to 0V, and the TMP112 strap table\n"
-	       "  (TI SBOS397) maps ADD0 -> GND = 0x48, -> V+ = 0x49, -> SDA = 0x4A,\n"
-	       "  -> SCL = 0x4B.\n"
-	       "\n"
-	       "  BATCH FINDING, alp-sdk#1978 -- confirmed on 2 of 2 modules tested\n"
-	       "  (2026W36-0001, 2026W36-0003): nothing answers at 0x%02x, and\n"
-	       "  something answers at 0x%02x instead.  Whatever is at 0x%02x\n"
-	       "  fingerprints TMP112-shaped -- CONFIG=0x60a0, T_LOW=0x4b00,\n"
-	       "  T_HIGH=0x5000 against the datasheet power-on defaults -- and\n"
-	       "  reads back a plausible temperature.\n"
-	       "\n"
-	       "  0x%02x is NOT a legal TMP112 address (the part only straps to\n"
-	       "  0x48/0x49/0x4A/0x4B), so that fingerprint does NOT prove the part\n"
-	       "  at 0x%02x is actually a TMP112.  This is a BATCH property of the\n"
-	       "  2026W36 E1M-AEN803 build, not a per-unit board defect, and one\n"
-	       "  consequence is that the stock CONFIG_TMP112 driver does not bind\n"
-	       "  on these modules.\n"
-	       "\n"
-	       "  WHAT TO DO\n"
-	       "    1. This is open work under alp-sdk#1978, not a settled per-board\n"
-	       "       fault -- do not go hunting a solder defect on this module.\n"
-	       "    2. See what is actually on the bus with\n"
-	       "       examples/aen/aen-brd-i2c-scan -- it scans every 7-bit address\n"
-	       "       and fingerprints whatever answers.\n"
-	       "    3. Do NOT change the devicetree to 0x%02x -- it is not a legal\n"
-	       "       TMP112 address, so that would tell the driver to treat an\n"
-	       "       unidentified device as a TMP112 before its identity is known.\n",
-	       TMP112_DT_ADDR,
-	       TMP112_DESIGN_ADDR,
-	       TMP112_DESIGN_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR,
-	       TMP112_OBSERVED_ANOMALY_ADDR);
-}
 
 /*
  * Fetch one ambient-temperature reading as integer milli-degrees C.
@@ -190,8 +127,7 @@ int main(void)
 
 	/* 1a. Is the sensor in this build's devicetree at all?  If not, the fault
 	 * is the board/overlay layer, not the wiring -- say exactly that instead
-	 * of emitting the address diagnostic, which would send a reader chasing a
-	 * soldering iron over a missing DT node. */
+	 * of sending a reader chasing a soldering iron over a missing DT node. */
 	if (tmp112 == NULL) {
 		printk("no enabled \"ti,tmp112\" node in this build's devicetree.\n"
 		       "  The E1M-AEN801 board files are what declare the on-module\n"
@@ -205,22 +141,21 @@ int main(void)
 
 	/* 1b. The node exists, so the driver ran tmp112_init() -- which WRITES the
 	 * CONFIG, T_LOW and T_HIGH registers.  A part that does not ACK therefore
-	 * fails init and leaves the device un-ready.  This is the branch the
-	 * observed-0x40 module lands in. */
+	 * fails init and leaves the device un-ready. */
 	if (!device_is_ready(tmp112)) {
 		printk("TMP112 \"%s\" @0x%02x failed to initialise "
 		       "(upstream tmp112_init() writes CONFIG/T_LOW/T_HIGH; no ACK).\n",
 		       tmp112->name,
 		       TMP112_DT_ADDR);
-		print_address_anomaly_hint();
-		printk("RESULT FAIL: TMP112 @0x%02x not ready -- see the address "
-		       "diagnostic above\n",
+		printk("RESULT FAIL: TMP112 @0x%02x not ready -- check the bus wiring; "
+		       "examples/aen/aen-brd-i2c-scan scans every 7-bit address and "
+		       "fingerprints whatever answers\n",
 		       TMP112_DT_ADDR);
 		return 0;
 	}
 
-	printk("TMP112 \"%s\" ready at devicetree address 0x%02x (design address, "
-	       "U20 ADD0 tied to 0V)\n",
+	printk("TMP112 \"%s\" ready at devicetree address 0x%02x (U20's X2SON-5 "
+	       "package, ADD0 tied to 0V -- SBOS473L Table 7-4)\n",
 	       tmp112->name,
 	       TMP112_DT_ADDR);
 	printk("taking %d samples %d ms apart ...\n", TMP112_SAMPLES, TMP112_PERIOD_MS);
@@ -288,9 +223,7 @@ int main(void)
 		       n_in_band);
 	} else {
 		printk("TMP112 @0x%02x initialised but every fetch failed.\n", TMP112_DT_ADDR);
-		print_address_anomaly_hint();
-		printk("RESULT FAIL: 0/%u TMP112 samples read at 0x%02x -- see the address "
-		       "diagnostic above\n",
+		printk("RESULT FAIL: 0/%u TMP112 samples read at 0x%02x\n",
 		       (unsigned int)TMP112_SAMPLES,
 		       TMP112_DT_ADDR);
 	}

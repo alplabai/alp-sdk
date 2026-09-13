@@ -135,9 +135,20 @@
 		clock-frequency = <200000000>; /* real SSI functional clock (was mis-set 400M; proven via BAUDR scaling) */
 		dwc-ssi;
 		fifo-depth = <16>;
-		/* MISO capture delay in SSI clocks.  Needed at 25 MHz (40 ns bit period):
-		 * silicon-measured on e1m-aen-evk-01, rx-delay 0 fails outright and 4
-		 * fails too; 2 is the working point.  Harmless at 14.29 MHz. */
+		/* MISO capture delay in SSI clocks -- INERT here, and NOT what the link
+		 * runs at.  spi_dw_alif.c writes RX_SAMPLE_DLY (0xf0) from this property
+		 * at init and at PM resume only; spi_dw_configure never touches the
+		 * register, so src/cc3501e_bridge.c's poke right after alp_spi_open()
+		 * overwrites this value with CC3501E_BRIDGE_RX_SAMPLE_DLY.
+		 *
+		 * It is kept because that poke is guarded on the constant being non-zero:
+		 * set the constant to 0 and this property is what survives.
+		 *
+		 * The earlier claim here -- that 0 "fails outright" and 4 "fails too" --
+		 * is contradicted by the N = 0..10 sweep on E1M-AEN803 serial
+		 * 2026W36-0002 at 25 MHz: 0 and 4 each passed 3 runs of 3, and 8 is the
+		 * value that hard-fails.  Sweep the constant, not this property; the
+		 * measurements are recorded in src/cc3501e_bridge.h. */
 		rx-delay = <2>;
 		pinctrl-0 = <&pinctrl_spi1>;
 		pinctrl-names = "default";

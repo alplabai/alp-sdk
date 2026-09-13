@@ -84,7 +84,9 @@ is `ALIF_PINMUX(15, 0, 0)` — function 0, the pad's reset default.
    running clock; only a second read separated in time proves the 32.768 kHz
    oscillator is oscillating. (Bench 2026-09-05 already confirmed it does: the
    Seconds register advanced `0x01` → `0x02`, and ID register `0x28` reads
-   `0x44`.)
+   `0x44` -- the HID nibble `0x4` matches; the VID nibble is a
+   production-line code, not part of the identity check, per RV-3028-C7
+   Application Manual Rev. 1.4 §3.14.)
 3. **Arms an alarm and waits for the callback**, with a **bounded 90 s timeout**
    so a dead interrupt line ends the run instead of hanging it.
 4. **Disarms and clears the flag**, so a re-run behaves identically.
@@ -164,7 +166,9 @@ ignored, and the app then builds with no RTC node at all.
 
 **BUILD-VERIFIED**, bench-run pending. The bus and the part are already
 bench-proven on E1M-AEN801 2626-R2 (2026-09-05, Flow A, cold-cycle proven): the
-RV-3028 ACKs at `0x52`, ID register `0x28` = `0x44`, and the seconds register
-advanced — the oscillator runs. The **alarm interrupt path** (P15_0 → IRQ 171)
+RV-3028 ACKs at `0x52`, ID register `0x28` = `0x44` (HID nibble matches; VID
+nibble is a production-line code, not identity -- RV-3028-C7 Application
+Manual Rev. 1.4 §3.14), and the seconds register advanced — the oscillator
+runs. The **alarm interrupt path** (P15_0 → IRQ 171)
 has **not** been exercised on silicon yet; that is what the `PARTIAL` verdict
 and its port-15 note above exist for.

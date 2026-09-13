@@ -28,6 +28,7 @@ either board's claim set.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -595,6 +596,63 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         self.assertIn("on-module-links.yaml", str(ctx.exception))
         self.assertIn("rtc_alarm.risk", str(ctx.exception))
 
+    def test_e1m_i2c0_bench_validation_is_scoped_to_the_part_it_was_measured_on(
+            self) -> None:
+        """`on_module_links.e1m_i2c0.bench_validation` is a per-part map,
+        same pattern as `rtc_alarm.risk` (#1988) -- its only entry (`E8`) is
+        evidenced against an E8 bench run, so a board tree for any OTHER
+        part must say so instead of inheriting the E8 citation unqualified
+        (#2046).  Unlike `rtc_alarm.risk`, the citation itself must still
+        appear (not be silently dropped) because the emitted pad VALUE is
+        unchanged and correct for every part -- only the claim of WHICH
+        part it was bench-validated on must not overreach."""
+        with _MutatedMetadata() as mm:
+            mm.json_set(E8_SOC, "part", "E3")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            pinctrl = files[
+                "alp_e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp-pinctrl.dtsi"]
+        # Comment prose is reflowed to house-style width, so match on text
+        # with the `\n\t * ` line-continuation markers collapsed out rather
+        # than a literal substring that could straddle a wrapped line break.
+        flat = " ".join(
+            re.sub(r"\n\s*\*\s?", " ", pinctrl).split())
+        self.assertIn("bench-validated ONLY on the E8", flat)
+        self.assertIn("NOT been", flat)
+        self.assertIn("independently repeated on the E3", flat)
+        # Still bias-pull-down: #2046 is explicit that the emitted pad VALUE
+        # never changes on the strength of either part-scoping or either
+        # pull-direction reading.
+        self.assertIn("bias-pull-down;", pinctrl)
+        self.assertNotIn("Ensemble E8", pinctrl)
+        self.assertNotIn("Alif E8", pinctrl)
+
+        # The genuine, unmutated E8 board must still cite its own bench run
+        # plainly, without the "NOT been independently repeated" hedge.
+        real_files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
+        real_pinctrl = real_files[
+            "alp_e1m_aen801_m55_hp/alp_e1m_aen801_m55_hp-pinctrl.dtsi"]
+        self.assertIn(
+            "input-enable + bias-pull-down: bench-validated 2026-06-15 on "
+            "the E8,", real_pinctrl)
+        self.assertNotIn("bench-validated ONLY on the E8", real_pinctrl)
+
+    def test_e1m_i2c0_bench_validation_must_be_a_part_keyed_map(self) -> None:
+        """`_load_aen_on_module_links()` shape-checks
+        `e1m_i2c0.bench_validation` the same way it already shape-checks
+        `rtc_alarm.risk` (#1988, #2046): reverting the YAML to a flat-string
+        form must raise `ZephyrBoardEmitError`, naming the file, rather than
+        an uncaught `AttributeError` from the `.get(part)` lookup deep in
+        `_aen_e1m_i2c0_pinctrl_group()`."""
+        with _MutatedMetadata() as mm:
+            mm.sub(
+                "e1m_modules/aen/on-module-links.yaml",
+                "    bench_validation:\n      E8: >-\n",
+                "    bench_validation: >-\n")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("on-module-links.yaml", str(ctx.exception))
+        self.assertIn("e1m_i2c0.bench_validation", str(ctx.exception))
+
     def test_peripherals_overlay_is_read_from_the_soc_json(self) -> None:
         with _MutatedMetadata() as mm:
             mm.json_set(E8_SOC, "zephyr_peripherals_dtsi",
@@ -688,6 +746,235 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         self.assertIn('(E1M edge "UART0", P7_0/P7_1)', defconfig)
         self.assertNotIn("P3_4", defconfig)
 
+    # Anchors for the two `_MutatedMetadata.sub()` calls below -- the real,
+    # unmutated E1M-AEN801.yaml text for the ospi0/hyperram `chip:` +
+    # `assembled:` pair, kept in one place so all four tests below share it.
+    _OSPI0_BLOCK = (
+        "      chip:           IS25WX256-JHLE      # ISSI xSPI NOR, "
+        "U10 footprint (same part E1M-AEN803 fits, #2041)\n"
+        "      # NOT populated on this SKU.  E1M-AEN803 is the SKU "
+        "that fits both external\n"
+        "      # memories; E1M-AEN801 fits neither and runs from "
+        "the SoC's on-die MRAM.\n"
+        "      # The footprint exists on the shared PCB -- see the "
+        "R2 netlist -- which is\n"
+        "      # why the part is still described here.\n"
+        "      assembled:      false")
+    _HYPERRAM_BLOCK = (
+        "    chip:           S80KS5122GABHM02  # Infineon/Cypress HyperRAM, "
+        "U9 footprint (same part E1M-AEN803 fits, #2041)\n"
+        "    # NOT populated on this SKU -- see the ospi0 note above.  "
+        "This key is\n"
+        "    # load-bearing: `assembled` defaults to TRUE, so omitting it "
+        "made every\n"
+        "    # consumer treat the HyperRAM as fitted, and the boot banner "
+        "advertised\n"
+        "    # 256 Mbit of external RAM on a module that has none.\n"
+        "    assembled:      false")
+
+    def test_ospi0_storage_banner_names_are_read_from_the_som_preset(self) -> None:
+        """The boot/storage banner's OSPI0 NOR + HyperRAM part names used to
+        be generator constants (Macronix `MX25UM25645` + Winbond `W958D8NB`)
+        applied to every AEN SKU -- #2062: E1M-AEN803 fits the same U10/U9
+        footprint with a different, measured part (ISSI NOR, Infineon/
+        Cypress HyperRAM). The real, unmutated E1M-AEN801 board must name
+        its own preset's parts, not the old hardcoded ones, say NOT
+        populated (its real `assembled: false` state on BOTH devices), and
+        the MRAM-partition-map comment further down must say the same thing
+        -- not the old, separately-hardcoded "not populated on this batch"
+        that could (and did) disagree with the banner above it."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        # Comment prose is reflowed to house-style width, so match on text
+        # with the `\n *  ` line-continuation markers collapsed out.
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("IS25WX256-JHLE", flat)
+        self.assertIn("S80KS5122GABHM02", flat)
+        self.assertIn(
+            "OSPI0 NOR (IS25WX256-JHLE) + HyperRAM (S80KS5122GABHM02) are "
+            "not populated, so there is no external XIP / flash device",
+            flat)
+        self.assertIn(
+            "MRAM-only: OSPI0 NOR (IS25WX256-JHLE) + HyperRAM "
+            "(S80KS5122GABHM02) are not populated, so boot", flat)
+        self.assertNotIn("not populated on this batch", flat)
+        self.assertNotIn("MX25UM25645", flat)
+        self.assertNotIn("W958D8NB", flat)
+
+    def test_ospi0_storage_banner_reflects_a_populated_preset(self) -> None:
+        """A SoM preset that DOES populate OSPI0 must get banner prose
+        (and the MRAM-partition-map comment) that says so, naming whatever
+        parts its own preset declares for BOTH devices independently --
+        mutating only `ospi0` (leaving `hyperram`'s real chip: string
+        untouched) would let a hardcoded HyperRAM name pass this test
+        unnoticed, which is exactly the shape of bug this fix exists for
+        (mutated off E1M-AEN801, since no shipped SKU with a real board
+        tree populates it today)."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TEST-NOR-PART\n"
+                    "      assembled:      true")
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._HYPERRAM_BLOCK,
+                    "    chip:           TEST-RAM-PART\n"
+                    "    assembled:      true")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("TEST-NOR-PART", flat)
+        self.assertIn("TEST-RAM-PART", flat)
+        # #2062 review round 3: a true die-level fact ("OSPI_XIP_SER does
+        # not exist") does not prove XIP is impossible here -- Alif's own
+        # ospi_psram_xip.c still calls aes_enable_xip() under that same
+        # guard.  The real, non-overreaching reason: hal_alif's OWN XIP
+        # enable path targets that absent register, and flash_ospi_alif.c
+        # ships no flash_driver_api at all (#915) -- true regardless of
+        # silicon capability.
+        self.assertIn(
+            "OSPI0 NOR (TEST-NOR-PART) + HyperRAM (TEST-RAM-PART) are "
+            "populated; neither is used for XIP boot here (hal_alif's "
+            "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
+            "absent on this die, and flash_ospi_alif.c ships no "
+            "flash_driver_api -- #915)", flat)
+        self.assertIn(
+            "MRAM-only regardless: OSPI0 NOR (TEST-NOR-PART) + HyperRAM "
+            "(TEST-RAM-PART) are populated; hal_alif's "
+            "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
+            "absent on this die, and flash_ospi_alif.c ships no "
+            "flash_driver_api -- #915", flat)
+        self.assertNotIn("not populated", flat)
+        # The die-level fact must never stand alone as the "why" -- if a
+        # future edit reintroduces "so" right after it, this is the wrong
+        # conclusion the fact alone does not support (round 3 finding).
+        self.assertNotIn("does not exist on this die -- so", flat)
+        self.assertNotIn("XIP_SER does not exist on this die, so", flat)
+
+    def test_ospi0_storage_banner_describes_mixed_population_per_device(
+            self) -> None:
+        """NOR populated, HyperRAM not -- issue #2062 review round 2: a
+        naive `bool(ospi0.assembled) or bool(hyperram.assembled)` printed
+        "OSPI0 NOR + HyperRAM are populated" for this case, false for the
+        HyperRAM half.  Each device must be described on its own instead
+        of merged into one shared verb once they disagree, and (round 4)
+        the XIP sentence must say "the populated device is not used" --
+        not "neither", which implies both declared devices agree when
+        only one of the two actually does."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TEST-NOR-PART\n"
+                    "      assembled:      true")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn(
+            "OSPI0 NOR (TEST-NOR-PART) is populated; HyperRAM "
+            "(S80KS5122GABHM02) is not populated; the populated device is "
+            "not used for XIP boot here", flat)
+        self.assertNotIn("NOR + HyperRAM are populated", flat)
+        self.assertNotIn("neither is used", flat)
+
+    def test_ospi0_storage_banner_describes_bom_optional(self) -> None:
+        """`assembled: "optional"` (the real state of every
+        E1M-AEN{301,401,501,601,701} preset, per changelog.d/2062.md) is
+        Python-truthy -- `bool("optional")` -- so a naive check printed
+        "are populated on this SKU" for the exact BOM question that field
+        exists to leave open.  Mutated off E1M-AEN801 because every SKU
+        that carries `"optional"` for real fails earlier in
+        `emit_zephyr_board()` (see NOT_EMITTABLE) and so can't reach this
+        code any other way today.
+
+        Round 2 finding: "BOM-optional, not assumed populated" followed
+        by an unqualified "there is no external XIP / flash device"
+        contradicts itself -- a BOM-optional part MAY be fitted.  The
+        sentence must hedge with "assumed" on both halves."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TEST-NOR-PART\n"
+                    "      assembled:      optional")
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._HYPERRAM_BLOCK,
+                    "    chip:           TEST-RAM-PART\n"
+                    "    assembled:      optional")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn(
+            "OSPI0 NOR (TEST-NOR-PART) + HyperRAM (TEST-RAM-PART) are "
+            "BOM-optional, not assumed populated, so no external XIP / "
+            "flash device is assumed", flat)
+        self.assertNotIn("are populated", flat)
+        self.assertNotIn("there is no external XIP / flash device;", flat)
+
+    def test_ospi0_storage_banner_assembled_key_absent_reads_as_populated(
+            self) -> None:
+        """A DECLARED device block with no `assembled:` key at all reads
+        as populated (schema default `true`) -- distinct from an entirely
+        ABSENT block (next test), which must NOT.  Mutation-checked:
+        changing `dev.get("assembled", True)` to `dev.get("assembled")`
+        turns this test red (the key-absent NOR would read as
+        `not_populated` instead); restoring makes it green again."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TEST-NOR-PART")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("OSPI0 NOR (TEST-NOR-PART) is populated", flat)
+
+    def test_ospi0_storage_banner_chip_tbd_prints_no_part_name(self) -> None:
+        """`chip: TBD` on an otherwise-populated device must not print a
+        literal "(TBD)" part name.  Mutation-checked: deleting the
+        `is_tbd()` guard (`if not chip or is_tbd(chip): chip = None`)
+        turns this test red ("(TBD)" would appear); restoring makes it
+        green again."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TBD\n"
+                    "      assembled:      true")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("OSPI0 NOR is populated", flat)
+        self.assertNotIn("(TBD)", flat)
+
+    def test_ospi0_storage_banner_omits_an_undeclared_device_block(self) -> None:
+        """The schema only requires `on_module.silicon` -- omitting
+        `hyperram:` (or `ospi_memories:`) entirely is valid, and is a
+        DIFFERENT fact from a declared-but-key-omitted block: the old
+        code's `on_module.get("hyperram") or {}` collapsed both to `{}`,
+        so an undeclared HyperRAM hit the same `assembled` default as a
+        declared-with-omitted-key one and was printed as "populated"
+        (round 4).  An undeclared device must be left out of the clause
+        entirely -- never named "not populated" either, since there is no
+        declared device to describe.  Mutation-checked: reverting
+        `hyperram = on_module.get("hyperram")` to `... or {}` turns this
+        test red ("HyperRAM is populated" would appear); restoring makes
+        it green again."""
+        with _MutatedMetadata() as mm:
+            mm.sub("e1m_modules/E1M-AEN801.yaml", self._OSPI0_BLOCK,
+                    "      chip:           TEST-NOR-PART\n"
+                    "      assembled:      true")
+            mm.sub(
+                "e1m_modules/E1M-AEN801.yaml",
+                "  # External HyperRAM -- volatile XIP / scratch RAM, "
+                "separate from the\n"
+                "  # NOR flash above.  Shares the OSPI0 octal controller "
+                "with the flash,\n"
+                "  # separated only by chip-select (HyperRAM = CS0, NOR = "
+                "CS1).\n"
+                "  hyperram:\n"
+                f"{self._HYPERRAM_BLOCK}\n"
+                "    capacity_mbit:  512             # 512 Mbit (64 MiB) "
+                "-- the part, if fitted\n"
+                "    interface:      ospi0\n"
+                "    chip_select:    0                 # OSPI0 CS0 -- U9 "
+                "-> OSPI0_SS0 per the R2 netlist\n",
+                "")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("OSPI0 NOR (TEST-NOR-PART) is populated", flat)
+        self.assertNotIn("HyperRAM", flat)
+        self.assertNotIn("not populated", flat)
+
 
 class TestAenMemoryMapValidation(unittest.TestCase):
     """The disjoint-slot0 branch copies `base` / `size_kib` straight out of
@@ -749,6 +1036,89 @@ class TestAenMemoryMapValidation(unittest.TestCase):
             mm.sub(AEN801_PRESET,
                    "name: hp_slot0,  base: 0x802b0000",
                    "name: hp_slot0,  base: 0x802a0000")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("overlap", str(ctx.exception))
+
+    def test_whole_device_alias_does_not_overlap_its_own_partitions(self) -> None:
+        """`mram_main` deliberately spans the same 5632 KiB window that
+        `mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`/`atoc`
+        subdivide (#2073) -- once its `base` resolves to a real address
+        it must NOT be reported as overlapping every region inside it.
+        `alp_orchestrate.aperture.classify_region()` already carries this
+        exact "extent == aperture exactly" exception; this pins that
+        `_aen_check_map_overlaps()` now agrees with it instead of
+        refusing the very shape the SoM presets declare on purpose."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("alp_e1m_aen801_m55_hp/board.yml", files)
+
+    def test_whole_device_alias_exception_does_not_swallow_a_real_overlap(self) -> None:
+        """The whole-device-alias exception must be narrow: a genuine
+        overlap between two ordinary partitions is still refused even
+        while `mram_main` (also spanning the whole window) sits in the
+        same `memory_map:`."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            mm.sub(AEN801_PRESET,
+                   "name: hp_slot0,  base: 0x802b0000",
+                   "name: hp_slot0,  base: 0x802a0000")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("overlap", str(ctx.exception))
+
+    def test_two_whole_device_aliases_raise_instead_of_going_uncompared(self) -> None:
+        """The whole-device-alias exclusion drops matching rows from the
+        pairwise overlap comparison entirely -- so two rows that BOTH
+        match the aperture exactly would otherwise never be compared
+        against each other at all, silently accepting a duplicate alias.
+        `classify_region()` would call both `flash`, so neither becomes
+        an IPC carve-out target either way, but a duplicate whole-device
+        alias is still a bad input and must be refused, not passed
+        through quietly (review of #2073)."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            mm.sub(
+                AEN801_PRESET,
+                "- { name: mram_main, base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: composite }",
+                "- { name: mram_main, base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: composite }\n"
+                "  - { name: mram_dup,  base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: customer_runtime }")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("'mram_main'", message)
+        self.assertIn("'mram_dup'", message)
+        self.assertIn("only one whole-device alias", message)
+
+    def test_same_base_smaller_size_is_not_a_whole_device_alias(self) -> None:
+        """A region flush with the aperture's low edge but one KiB short
+        of its full extent is a genuine (mis-sized) partition, not the
+        whole-device alias -- it must still overlap `mcuboot` at the
+        same base and be refused. This is the one test that still
+        catches a predicate loosened to `lo == full_lo` alone (dropping
+        the `hi == full_hi` half) IF the duplicate-whole-device-alias
+        guard above is ever removed -- today that loosening also makes
+        `mcuboot` match as a second "alias", so the duplicate-alias
+        refusal fires first and two other tests in this class go red
+        too; this test is what still fails on the loosening alone
+        (review of #2073)."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5631")
             with self.assertRaises(ZephyrBoardEmitError) as ctx:
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("overlap", str(ctx.exception))

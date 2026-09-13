@@ -22,10 +22,32 @@
  *       (ALP_CC3501E_RESP_ERR_STATE) -> ALP_ERR_BUSY, returned on the FIRST
  *       poll (not a confusing IO/timeout, and not retried for the whole
  *       budget -- see cc3501e_ble_gatt_register's @note on the NimBLE
- *       ble_gatts_mutable() constraint); a GENUINE, persistent radio/protocol
- *       fault (ALP_CC3501E_RESP_ERR_RADIO) is retried for the whole budget and
- *       surfaces ALP_ERR_TIMEOUT, unmasked -- NOT folded into ALP_ERR_BUSY the
- *       way the old IO||TIMEOUT->BUSY remap used to do (#480/#892).
+ *       ble_gatts_mutable() constraint).
+ *
+ *       #2035 follow-up -- REVISED CONTRACT (was: retried to budget,
+ *       surfaced ALP_ERR_TIMEOUT): a DECODED ALP_CC3501E_RESP_ERR_RADIO /
+ *       ERR_PROTOCOL / ERR_INTERNAL reply is now ALSO terminal, like
+ *       ERR_STATE above, and for the identical reason -- poll_by_repeat
+ *       resends the SAME req_seq unchanged on every attempt so the
+ *       firmware's per-seq retry latch (proto v8) answers a repeat from its
+ *       latch WITHOUT re-executing the op, so retrying a genuine decoded
+ *       device-side failure can only ever replay that SAME failure. Burning
+ *       the whole poll budget on a guaranteed-unchanging answer was itself
+ *       the bug (BLE_ENABLE cost the full CC35_BLE_TIMEOUT_MS, ~10 s, for a
+ *       radio fault the FIRST reply already told us about) and it reported
+ *       the wrong error class (ALP_ERR_TIMEOUT, "never answered", instead of
+ *       ALP_ERR_IO, "answered with a real fault").  See
+ *       cc3501e_internal.h's poll_by_repeat EXCEPTION 2.
+ *
+ *       This is still UN-MASKED (#480/#892) in the sense that matters: a
+ *       decoded device-side fault is never folded into ALP_ERR_BUSY the way
+ *       the old IO||TIMEOUT->BUSY remap used to do -- it now surfaces its
+ *       real ALP_ERR_IO, promptly, instead of ALP_ERR_TIMEOUT eventually.
+ *       A genuinely UNDECODED, PRE-DECODE ALP_ERR_IO (the bridge link
+ *       transport itself down for this transaction -- no reply ever framed)
+ *       is a different thing again and is NOT covered by this carve-out: it
+ *       still retries to the full budget, same as before this change -- see
+ *       test_register_pre_decode_io_fault_still_retries.
  */
 
 #include <string.h>
@@ -37,6 +59,7 @@
 #include <alp/peripheral.h>
 
 #include "backends/ble/ble_ops.h"
+#include "cc3501e_reply_model.h"
 
 /* This test does NOT link src/ble_dispatch.c (see CMakeLists.txt comment),
  * so it instantiates the ble class-range entry itself -- the one thing
@@ -71,37 +94,57 @@ static struct {
 	                         * NOT) retry a given command. */
 } slave;
 
+/* Set by test_register_pre_decode_io_fault_still_retries to force every
+ * transceive to fail at the TRANSPORT level -- no bytes exchanged, slave.phase
+ * untouched -- simulating "the bridge link was DOWN for this transaction"
+ * (cc3501e_internal.h) rather than a decoded device-side reply. */
+static bool     force_transport_fail;
+static uint32_t transport_fail_calls;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
-	slave.phase = PH_REQ_HDR;
+	slave.phase          = PH_REQ_HDR;
+	force_transport_fail = false;
+	transport_fail_calls = 0u;
 	/* Default: every request bare-OKs (covers BLE_ENABLE, fired by the
 	 * backend's open()) until a test stages something else for the request
-	 * it is about to issue. */
-	slave.reply_pl[0] = ALP_CC3501E_RESP_OK;
-	slave.reply_len   = 1u;
+	 * it is about to issue.  Staged here, before any request has landed, so
+	 * the cmd the CRC trailer covers (cc3501e_reply_model.h) is the
+	 * EXPLICIT opcode this reply is known in advance to answer -- BLE_ENABLE
+	 * -- not `slave.cmd`, which is still whatever a PRIOR request left it as. */
+	slave.reply_len = cc3501e_model_stage_reply(
+	    slave.reply_pl, ALP_CC3501E_CMD_BLE_ENABLE, ALP_CC3501E_RESP_OK, NULL, 0u);
 }
 
+/* An ALP_CC3501E_RESP_ERR_* frame-level reject -- the legacy (unpadded,
+ * no-CRC) shape is fine here: cc3501e_reply_verdict() only demands the
+ * MAJOR-4 trailer for a 0x5A status (see cc3501e_reply_model.h). */
 static void stage_status(uint8_t st)
 {
-	slave.reply_pl[0] = st;
-	slave.reply_len   = 1u;
+	slave.reply_len = cc3501e_model_stage_legacy_reply(slave.reply_pl, st, NULL, 0u);
 }
 
 /* BLE_GATT_REGISTER success reply.  Two layers, per <alp/protocol/cc3501e.h>:
  * byte 0 is the FRAME-level resp (cc3501e_request's resp_to_status() input,
  * stripped before the driver ever sees it); bytes 1.. are the reply DATA the
- * driver decodes -- in_status(1)=0 | num_handles(1) | attr_handle(LE16)*n. */
+ * driver decodes -- in_status(1)=0 | num_handles(1) | attr_handle(LE16)*n.
+ * Staged before the request lands (same reasoning as slave_reset() above),
+ * so the cmd is the explicit BLE_GATT_REGISTER opcode, not `slave.cmd`. */
 static void stage_register_ok(const uint16_t *handles, uint8_t num_handles)
 {
-	slave.reply_pl[0] = ALP_CC3501E_RESP_OK; /* frame-level resp */
-	slave.reply_pl[1] = 0u;                  /* in-payload status: OK */
-	slave.reply_pl[2] = num_handles;
+	uint8_t data[2u + 2u * 8u]; /* in-payload status(1) + num_handles(1) + up to 8 handles */
+	data[0] = 0u;               /* in-payload status: OK */
+	data[1] = num_handles;
 	for (uint8_t i = 0; i < num_handles; i++) {
-		slave.reply_pl[3u + 2u * i]      = (uint8_t)(handles[i] & 0xFFu);
-		slave.reply_pl[3u + 2u * i + 1u] = (uint8_t)((handles[i] >> 8) & 0xFFu);
+		data[2u + 2u * i]      = (uint8_t)(handles[i] & 0xFFu);
+		data[2u + 2u * i + 1u] = (uint8_t)((handles[i] >> 8) & 0xFFu);
 	}
-	slave.reply_len = (uint16_t)(3u + 2u * (uint16_t)num_handles);
+	slave.reply_len = cc3501e_model_stage_reply(slave.reply_pl,
+	                                            ALP_CC3501E_CMD_BLE_GATT_REGISTER,
+	                                            ALP_CC3501E_RESP_OK,
+	                                            data,
+	                                            (uint16_t)(2u + 2u * (uint16_t)num_handles));
 }
 
 alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, size_t len)
@@ -109,6 +152,13 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	(void)bus;
 	if (len == 0u) {
 		return ALP_OK;
+	}
+	if (force_transport_fail) {
+		/* Deliberately does NOT touch rx or slave.phase: a real transceive
+		 * failure exchanges no bytes and the fake slave never advanced, so
+		 * the next attempt starts the same clean 4-phase cycle. */
+		transport_fail_calls++;
+		return ALP_ERR_IO;
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
@@ -142,16 +192,26 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
-/* Delays are no-ops under the sim; the GPIO seams are inert (the fixture's ctx
- * leaves reset/enable/ready pins unset, so the wrappers under test never call
- * them). */
+/* alp_delay_us is a no-op under the sim; the GPIO seams are inert (the
+ * fixture's ctx leaves reset/enable/ready pins unset, so the wrappers under
+ * test never call them). alp_delay_ms and alp_uptime_ms share one fake
+ * millisecond counter (same pattern as tests/zephyr/cc3501e_poll_deadline):
+ * poll_by_repeat()'s deadline (issue #1953) is measured against it, so the
+ * genuine-radio-fault test's retry budget still elapses deterministically,
+ * without any real sleeping. */
+static uint64_t g_fake_now_ms;
+
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
 }
 void alp_delay_ms(uint32_t ms)
 {
-	(void)ms;
+	g_fake_now_ms += ms;
+}
+uint64_t alp_uptime_ms(void)
+{
+	return g_fake_now_ms;
 }
 alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 {
@@ -341,15 +401,25 @@ ZTEST(cc3501e_ble_gatt_register, test_register_firmware_ordering_guard_maps_to_b
 	state.ops->close(&state);
 }
 
-/* (c) UN-MASKING (#480/#892): a GENUINE radio/protocol failure -- distinct
- * from the ordering-guard reject above -- still reports RESP_ERR_RADIO on the
- * wire.  resp_to_status() maps that to ALP_ERR_IO, which poll_by_repeat
- * (unchanged for this code -- only RESP_ERR_STATE got the terminal carve-out)
- * keeps retrying as a possibly-transient bridge desync; the fake slave never
- * clears the fault, so the budget (CC3501E_BLE_OP_TIMEOUT_MS) elapses and the
- * call surfaces ALP_ERR_TIMEOUT -- MANY round trips, not the single one the
- * ordering-guard reject gets, and (the actual regression check) NOT
- * ALP_ERR_BUSY the way the old IO||TIMEOUT->BUSY remap used to fold it. */
+/* (c) UN-MASKING (#480/#892), REVISED (#2035 follow-up): a GENUINE, DECODED
+ * radio failure -- distinct from the ordering-guard reject above -- still
+ * reports RESP_ERR_RADIO on the wire, and resp_to_status() still maps that to
+ * ALP_ERR_IO.  What changed is poll_by_repeat's handling of it: 0x06 is
+ * ALSO ALP_CC3501E_CMD_GET_CAPABILITIES, and BLE_ENABLE's own req/reply cycle
+ * sits four opcodes downstream of it in the phase-8 EVK sequence, so the OLD
+ * "retry every ALP_ERR_IO to budget" behaviour was reviewed and found unsafe
+ * -- see cc3501e_internal.h's poll_by_repeat EXCEPTION 2 and
+ * ALP_CC3501E_RX_SCRATCH_NO_STATUS's comment in cc3501e_core.c.  A decoded
+ * RESP_ERR_RADIO is now TERMINAL, exactly like the STATE reject above and for
+ * the identical retry-latch reason (a repeat of the SAME req_seq can only
+ * ever replay the SAME decoded failure, never spontaneously succeed): ONE
+ * round trip, ALP_ERR_IO returned promptly -- not ALP_ERR_TIMEOUT after
+ * burning the whole poll budget. Still un-masked in the sense #480/#892
+ * cared about: never folded into ALP_ERR_BUSY the way the old
+ * IO||TIMEOUT->BUSY remap used to. The OPPOSITE case -- a genuinely
+ * UNDECODED pre-decode ALP_ERR_IO, which must still retry -- is
+ * test_register_pre_decode_io_fault_still_retries below; there was no
+ * coverage of that branch at all before this change. */
 ZTEST(cc3501e_ble_gatt_register, test_register_genuine_radio_fault_stays_unmasked)
 {
 	alp_ble_radio_state_t state = open_cc3501e_state();
@@ -367,10 +437,53 @@ ZTEST(cc3501e_ble_gatt_register, test_register_genuine_radio_fault_stays_unmaske
 	slave.req_hdr_count = 0u; /* BLE_ENABLE from open() already ran; count only this call */
 
 	alp_status_t rc = state.ops->gatt_register_service(&state, &def, handles_out);
-	zassert_equal(rc, ALP_ERR_TIMEOUT, "persistent genuine radio fault -> ALP_ERR_TIMEOUT");
+	zassert_equal(rc, ALP_ERR_IO, "decoded genuine radio fault -> ALP_ERR_IO, terminal");
 	zassert_not_equal(rc, ALP_ERR_BUSY, "un-masked -- no longer folded into ALP_ERR_BUSY");
-	zassert_true(slave.req_hdr_count > 1u, "genuine fault IS retried (unlike the STATE reject)");
+	zassert_equal(slave.req_hdr_count,
+	              1u,
+	              "terminal decoded fault -- exactly one round trip, no retry-to-budget");
 
+	state.ops->close(&state);
+}
+
+/* (c) NEW (#2035 follow-up): the OPPOSITE of the case above -- a genuinely
+ * UNDECODED, pre-decode ALP_ERR_IO (the bridge link transport itself down
+ * for this transaction, no reply ever framed) is NOT the retry-latch case
+ * cc3501e_internal.h's poll_by_repeat EXCEPTION 2 carves out, so it must
+ * still retry to the full budget exactly like before this change -- only a
+ * genuinely DECODED device-side status is terminal now, never a raw
+ * transport hiccup. This also pins down that ALP_CC3501E_RX_SCRATCH_NO_STATUS
+ * (cc3501e_core.c) is doing its job: alp_spi_transceive below returns
+ * ALP_ERR_IO without writing ANY bytes into rx, so if
+ * cc3501e_request_locked() did not explicitly poison ctx->rx_scratch[0] on
+ * this path, it would carry over whatever the PRIOR successful decode
+ * (BLE_ENABLE's bare RESP_OK, 0x5A) left there -- harmless by luck here, but
+ * exactly the residue class the reworked fix exists to close everywhere,
+ * not just for the one opcode (0x06) the unsafe original version special-
+ * cased. No test before this one exercised a goto-out / pre-decode branch at
+ * all. */
+ZTEST(cc3501e_ble_gatt_register, test_register_pre_decode_io_fault_still_retries)
+{
+	alp_ble_radio_state_t state = open_cc3501e_state();
+
+	const alp_ble_char_def_t chars[1] = {
+		{ .properties = ALP_BLE_GATT_PROP_READ, .initial_value = NULL, .initial_len = 0u },
+	};
+	const alp_ble_service_def_t def = {
+		.chars     = chars,
+		.num_chars = 1u,
+	};
+	alp_ble_attr_handle_t handles_out[1] = { 0 };
+
+	force_transport_fail = true;
+	transport_fail_calls = 0u;
+
+	alp_status_t rc = state.ops->gatt_register_service(&state, &def, handles_out);
+	zassert_equal(rc, ALP_ERR_TIMEOUT, "persistent pre-decode transport fault -> ALP_ERR_TIMEOUT");
+	zassert_true(transport_fail_calls > 1u,
+	             "pre-decode IO fault IS retried, unlike a decoded device-side one");
+
+	force_transport_fail = false;
 	state.ops->close(&state);
 }
 

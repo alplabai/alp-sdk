@@ -1,0 +1,34 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the aen-rtc-control2-probe read-only bench app on
+# the E1M-AEN801 (Ensemble E8, M55-HE): compiles the raw CONTROL_2 / STATUS /
+# ID register reads + the rv3028c7_init() call against the real board target.
+#
+# Compile-checks the driver + raw-register path on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
+# board only) -- the electrical settlement needs the real BRD_I2C bus.
+
+sample:
+  name: aen-rtc-control2-probe
+  description: |
+    Read-only RV-3028-C7 CONTROL_2 bench settlement for the E1M-AEN801 (Alif
+    Ensemble E8, Cortex-M55-HE). Reads CONTROL_2 (0x10) raw before and after
+    rv3028c7_init(), and confirms bit 0x02 -- the real 12_24 hour-format
+    field, not the 0x40 CLKIE bit a previous driver revision mislabelled
+    "24H" and cleared instead -- reads 0 (24-hour mode) afterwards. Also
+    reports PORF (STATUS 0x0E) via rv3028c7_was_cold_start() and the ID
+    register (0x28) HID/VID split. Makes no EEPROM commit: read-only by
+    design, per the RV-3028-C7 Application Manual Rev. 1.4 p.98 100-cycle
+    hot-corner endurance floor.
+
+tests:
+  alp_sdk.examples.aen.rtc_control2_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - rtc
+    build_only: true   # electrical outcome needs the real bench; not a CI run.

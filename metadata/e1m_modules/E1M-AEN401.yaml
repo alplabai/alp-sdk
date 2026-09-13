@@ -98,8 +98,8 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,             address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30" }
-        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48",
-            notes: "Declared design address. On the 2026W36 E1M-AEN803 batch nothing answers here and something answers at 0x40 instead, on 2 of 2 modules tested -- a batch property, not a per-unit defect (alp-sdk#1978). 0x40 is NOT a legal TMP112 strap address (the part straps only to 0x48/0x49/0x4A/0x4B), so the responder is unidentified and this entry deliberately keeps the design address rather than encoding a guess. Consequence: the stock CONFIG_TMP112 driver does not bind on these modules." }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x40",
+            notes: "Address per TI SBOS473L. The BOM's exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins only (SBOS473L p.44) -- no SOT563-6 orderable carries that MPN (those are TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR). Per SBOS473L Table 7-4 the X2SON-5 'Address Variant Only' TMP112D row straps ADD0->GND to 0x40, so 0x40 is the design address for the part this board specifies. Bench agrees on 3 of 3 modules: 0x48 silent, 0x40 answering with the three-of-three TMP112 register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the datasheet power-on defaults) and a plausible temperature. The earlier declared 0x48 was an error in this metadata, and it is why the stock CONFIG_TMP112 driver never bound -- the emitted devicetree node sat at an address nothing answers (alp-sdk#1978)." }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
     # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
     # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a

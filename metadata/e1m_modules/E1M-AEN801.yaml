@@ -59,7 +59,7 @@ on_module:
   # fitted) for the same corrected mapping.
   ospi_memories:
     ospi0:
-      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
+      chip:           IS25WX256-JHLE      # ISSI xSPI NOR, U10 footprint (same part E1M-AEN803 fits, #2041)
       # NOT populated on this SKU.  E1M-AEN803 is the SKU that fits both external
       # memories; E1M-AEN801 fits neither and runs from the SoC's on-die MRAM.
       # The footprint exists on the shared PCB -- see the R2 netlist -- which is
@@ -77,13 +77,13 @@ on_module:
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
   # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
-    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    chip:           S80KS5122GABHM02  # Infineon/Cypress HyperRAM, U9 footprint (same part E1M-AEN803 fits, #2041)
     # NOT populated on this SKU -- see the ospi0 note above.  This key is
     # load-bearing: `assembled` defaults to TRUE, so omitting it made every
     # consumer treat the HyperRAM as fitted, and the boot banner advertised
     # 256 Mbit of external RAM on a module that has none.
     assembled:      false
-    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
+    capacity_mbit:  512             # 512 Mbit (64 MiB) -- the part, if fitted
     interface:      ospi0
     chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
@@ -121,8 +121,8 @@ on_module:
         # reach a shipped devicetree.  `assembled` defaults to true, so the
         # key is load-bearing, not decorative.
         - { chip: optiga_trust_m,   role: secure_element,  address_7bit: "0x30", assembled: false }
-        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x48",
-            notes: "Declared design address. On the 2026W36 E1M-AEN803 batch nothing answers here and something answers at 0x40 instead, on 2 of 2 modules tested -- a batch property, not a per-unit defect (alp-sdk#1978). 0x40 is NOT a legal TMP112 strap address (the part straps only to 0x48/0x49/0x4A/0x4B), so the responder is unidentified and this entry deliberately keeps the design address rather than encoding a guess. Consequence: the stock CONFIG_TMP112 driver does not bind on these modules." }
+        - { chip: tmp112,           role: temp_sensor,     address_7bit: "0x40",
+            notes: "Address per TI SBOS473L. The BOM's exact orderable MPN TMP112DIDPWR is X2SON (DPW), 5 pins only (SBOS473L p.44) -- no SOT563-6 orderable carries that MPN (those are TMP112AIDRLR / TMP112BIDRLR / TMP112NAIDRLR). Per SBOS473L Table 7-4 the X2SON-5 'Address Variant Only' TMP112D row straps ADD0->GND to 0x40, so 0x40 is the design address for the part this board specifies. Bench agrees on 3 of 3 modules: 0x48 silent, 0x40 answering with the three-of-three TMP112 register fingerprint (CONFIG=0x60a0, T_LOW=0x4b00, T_HIGH=0x5000, the datasheet power-on defaults) and a plausible temperature. The earlier declared 0x48 was an error in this metadata, and it is why the stock CONFIG_TMP112 driver never bound -- the emitted devicetree node sat at an address nothing answers (alp-sdk#1978)." }
     # SoC I2C2, bridge/DNP-selected onto the E1M portable I2C0 pads -- the
     # SoM-manifest EEPROM only, a SEPARATE bus from the trio above (see
     # docs/bring-up-aen.md §5.1: "Two separate buses -- don't assume a
@@ -143,11 +143,11 @@ on_module:
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
-#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
-#                 (per-BOM variant), so a single number would be wrong
-#                 for the DNI variant.
+#   dram_mbit  <- on_module.hyperram.capacity_mbit when assembled,
+#                 else 0 (unpopulated on this SKU -- see below).
+#   flash_mbit <- on_module.ospi_memories.ospi0.capacity_mbit when
+#                 assembled, else 0 (unpopulated on this SKU -- see
+#                 below).
 memory:
   # E1M-AEN801 populates NEITHER external memory (both `assembled: false`
   # above); it runs from the SoC's on-die MRAM.  E1M-AEN803 is the SKU with
@@ -262,18 +262,34 @@ topology:
 # metadata/schemas/som-preset-v1.schema.json `memory_region.carveout`)
 # while leaving their `base` available for the DTS/partition-table use above.
 #
-# `mram_main` is kept alongside the six fine-grained regions above,
-# `base: TBD` and unchanged from the auto-derived shape it replaces
-# (whole-MRAM, all three cores, cacheable) -- this is the coarse
-# generic-storage-carve-out device name (`board.yaml storage[].flash_device:
-# mram_main`, e.g. examples/connectivity/production-deployment/board.yaml)
-# that predates this fine-grained MCUboot map and isn't part of the
-# sysbuild/aen boot chain.  Since `resolve_storage_partitions()` only reads
-# `size_kib` (never `base`) it keeps resolving; `base: TBD` deliberately
-# keeps it BLOCKED for `ipc:` carve-out allocation (which does read `base`)
-# too, belt-and-suspenders alongside `carveout: false` above.  Bottom line:
-# every `ipc:` entry on this SoM stays `status: blocked` until a real SRAM
-# region with a real `base` exists in this table.
+# `mram_main` is kept alongside the six fine-grained regions above -- this
+# is the coarse generic-storage-carve-out device name (`board.yaml
+# storage[].flash_device: mram_main`, e.g. examples/connectivity/
+# production-deployment/board.yaml) that predates this fine-grained
+# MCUboot map and isn't part of the sysbuild/aen boot chain.  `base` stays
+# the literal string "TBD" (#2053 tried resolving it to 0x80000000 --
+# same address as `mcuboot`, correct per `write_authority: composite`'s
+# own "whole-window alias" definition -- and reverted it).  The blocker is
+# NOT the IPC-carve-out path: `scripts/alp_orchestrate/aperture.py`'s
+# `classify_region()` already has a whole-device-alias case (extent ==
+# aperture exactly) that correctly calls a resolved `mram_main` `"flash"`
+# regardless of `base`. The blocker is
+# `scripts/gen_zephyr_board.py::_aen_check_map_overlaps()`, which has NO
+# such exception: it filters `memory_map:` rows by `isinstance(base, int)`
+# alone, so a resolved `mram_main.base` enters its pairwise-overlap check
+# and trips "AEN memory_map regions 'mcuboot' (ends 0x80010000) and
+# 'mram_main' (starts 0x80000000) overlap" -- a REAL collision this
+# function's own docstring silently relied on `mram_main.base` staying
+# non-integer to avoid ("Regions with a non-integer base (a TBD sentinel,
+# or the whole-window mram_main alias) are skipped"), not a false
+# positive. `tests/scripts/test_gen_zephyr_board.py`'s
+# TestGenZephyrBoardByteEquivalence suite (11 tests) reproduces this the
+# moment `base` resolves, independent of anything else in the file.
+# Needs a whole-device-alias exception in `_aen_check_map_overlaps()`
+# mirroring `classify_region()`'s existing one before this can move;
+# tracked as a follow-up (not #2069, which is the external-memory/ATOC
+# top-anchor gap -- this is a third, separate invariant). Do not resolve
+# this `base` again without that fix landing first.
 memory_map:
   - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false, write_authority: vendor_image }
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
@@ -282,6 +298,16 @@ memory_map:
   - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
   - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+
+# No `hyperram` row here (#2053): `on_module.hyperram.assembled: false`
+# above -- the HyperRAM footprint (Winbond W958D8NBYA5I on this SKU's
+# BOM) is not populated on E1M-AEN801, so this SKU has no external-RAM
+# aperture to describe.  A row at 0xa0000000 would claim an address this
+# module does not answer at, the same invented-value hazard the
+# `assembled: false` key on `on_module.hyperram` above already exists to
+# prevent (see that key's own comment).  See E1M-AEN803.yaml for the
+# populated case (both external memories fitted) and its `hyperram` row
+# + the OSPI0-NOR-sharing note.
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
 # fork DTS (dts/arm/alif/ensemble/common/e1.dtsi plus ensemble_rtss_{hp,he}.dtsi),
