@@ -216,9 +216,12 @@
 
 /* PHASE B's own connect timeout budget -- DELIBERATELY SHORT, unlike every
  * other aen-cc3501e-* sibling's own connect call (which floors comfortably
- * above the firmware's worst-case 30 s L2 association + 10 s DHCP = 40 s
- * budget -- see aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS,
- * derived from hal/ti/cc3501e_hw_ti_wifi.c).
+ * above the firmware's worst case -- a 10 s Wlan_RoleUp inside the connect body
+ * plus 30 s L2 association plus a 20 s DHCP-lease poll, so about 60 s; see
+ * aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS, derived from
+ * hal/ti/cc3501e_hw_ti_wifi.c.  An earlier version of this comment said 40 s,
+ * from before the DHCP poll was widened and before the role-up term was
+ * counted).
  *
  * This app is NOT trying to let the association succeed -- see the file
  * header's WHAT THIS APP DOES NOT DO -- it is trying to let PHASE C observe
@@ -255,10 +258,13 @@
  * (aen-cc3501e-socket-throughput's own sibling budget, see that app's own
  * comment): the firmware's own worst case for one connect is 30 s of L2
  * association (hal/ti/cc3501e_hw_ti_wifi.c's `osi_SyncObjWait(&wifi_event_
- * sync, 30u * OSI_WAIT_FOR_SECOND)`) plus 10 s of DHCP
- * (`CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 50 * 200 ms) = 40 s
- * total. This app deliberately reuses the SAME 15 s reinitialisation margin
- * the sibling budget adds on top of that 40 s (55 s - 40 s = 15 s), rather
+ * sync, 30u * OSI_WAIT_FOR_SECOND)`) plus 20 s of DHCP
+ * (`CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 100 * 200 ms) plus a
+ * 10 s Wlan_RoleUp carried INSIDE the connect body on the first radio op of a
+ * boot = 60 s total.  (An earlier version of this comment said 40 s, from
+ * before the DHCP poll was widened to cover lwIP's fourth DISCOVER and from
+ * before the role-up term was counted.)  This app deliberately reuses the SAME
+ * 15 s reinitialisation margin the sibling budget adds on top, rather
  * than inventing a fresh number, because the underlying question is
  * identical: how long does a HEALTHY board need before it is fair to call
  * it unresponsive. The difference from the sibling budget is not the total,
@@ -266,8 +272,16 @@
  * cc3501e_wifi_connect() call polls WIFI_STATUS every 50 ms for the whole
  * span; this app's wait issues nothing at all, so this app never hands a
  * wedging link the extra re-framing traffic WEDGEPM_CONNECT_TIMEOUT_MS
- * exists to avoid. */
-#define WEDGEPM_QUIET_WAIT_MS 55000u
+ * exists to avoid.
+ *
+ * Raised 55000u -> 75000u with the worst case above: 60 s of firmware plus the
+ * same 15 s margin. This value is load-bearing for THIS app in a way the
+ * sibling budgets are not -- the whole phase rests on having waited past the
+ * point a healthy board could still be working, so a wait that no longer
+ * exceeds the firmware's own bound would let a merely-slow board be reported
+ * as wedged. That is precisely the false conclusion this app was written to
+ * refuse. */
+#define WEDGEPM_QUIET_WAIT_MS 75000u
 
 /*
  * Wi-Fi STA credentials for the wedging CONNECT in PHASE B. DELIBERATELY

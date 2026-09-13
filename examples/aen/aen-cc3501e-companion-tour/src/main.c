@@ -69,11 +69,26 @@
  * #ifndef-guarded credentials right below it is a trap, so they now match.
  *
  * TOUR_CONNECT_TIMEOUT's default is deliberately BELOW the firmware's own
- * worst case for a station connect -- 30 s of association plus 50 DHCP polls
- * at 200 ms, so 40 s -- because this app is a quick full-surface tour, not a
- * connection test, and a tour that parks for 40 s on one step is not a tour.
- * Override it for a real association attempt; the sibling
- * aen-cc3501e-socket-throughput budgets 55000u for exactly that reason.
+ * worst case for a station connect, because this app is a quick full-surface
+ * tour rather than a connection test, and a tour that parks for a minute on one
+ * step is not a tour.
+ *
+ * That worst case is now about 60 s, not the 40 s an earlier version of this
+ * comment gave: up to 10 s of Wlan_RoleUp (a connect issued as the first radio
+ * op of a boot carries the role-up inside the connect body), up to 30 s of
+ * association, and a 20 s DHCP-lease poll -- CC3501E_STA_DHCP_TRIES went from 50
+ * to 100 so the poll covers lwIP's fourth DISCOVER at t=14 s instead of stopping
+ * four seconds short of it.
+ *
+ * WHY THAT NUMBER MATTERS RATHER THAN BEING TRIVIA: a run budgeted below the
+ * firmware's bound reports failures the radio never suffered, and it does not
+ * look wrong while doing it -- the call simply returns -4 with the association
+ * still in progress.  Two bench sessions in this campaign were hard to compare
+ * for exactly that reason.  **If you are MEASURING connect or DHCP success,
+ * override this to 70000u** (the sibling aen-cc3501e-socket-throughput budgets
+ * 55000u, which predates the 20 s DHCP poll and is now marginal).  The tour's
+ * own default is for touring, and a -4 at this default means "did not finish
+ * inside a tour's patience", not "the radio failed".
  * TOUR_SCAN_TIMEOUT is likewise below cc3501e_wifi_scan()'s own 20 s floor,
  * which simply raises it -- see that floor's comment for why 15 s could not
  * express a healthy scan. */
@@ -342,26 +357,35 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 		 * and the host cannot tell them apart -- both latch the identical
 		 * status, which maps here to the identical ALP_ERR_TIMEOUT:
 		 *   1. the 30 s association wait expiring (a genuine L2 failure), and
-		 *   2. a 10 s DHCP-lease gate that runs AFTER a successful
+		 *   2. a DHCP-lease gate that runs AFTER a successful
 		 *      WLAN_EVENT_CONNECT, when the interface still has no address
-		 *      (present in the shipped v0.8.0 image: two FAIL_TIMEOUT sites,
-		 *      the second right after a 50-iteration/200 ms DHCP poll).
-		 * Bench-measured: this call returned -4 at 14.45-16.87 s against a
+		 *      (two FAIL_TIMEOUT sites, the second right after the lease poll).
+		 *      That gate was 10 s in the ORIGINAL v0.8.0 image and is 20 s in
+		 *      the re-cut, which covers lwIP's fourth DISCOVER at t=14 s
+		 *      instead of stopping four seconds short of it.
+		 * Bench-measured AGAINST THE ORIGINAL v0.8.0 IMAGE, whose DHCP gate
+		 * really was 10 s: this call returned -4 at 14.45-16.87 s against a
 		 * 70 s budget that verifiably reached the driver -- ~5 s of
-		 * association plus the fixed 10 s DHCP poll fits that bracket
-		 * exactly; the 30 s path does not.  So the radio may well have
-		 * associated and the real failure is layer 3 -- plausible at
-		 * -75 dBm on an on-board antenna, where the DHCP retransmit backoff
-		 * (0, 2, 6, 14 s) only fits three attempts inside a 10 s window.
+		 * association plus that fixed 10 s poll fits the bracket exactly,
+		 * and the 30 s path does not.  So the radio had associated and the
+		 * failure was layer 3.  The reasoning held: lwIP's DISCOVER backoff
+		 * lands at 0, 2, 6, 14 s, so a 10 s window only ever fit three
+		 * attempts.
+		 *
+		 * SINCE CONFIRMED AND FIXED.  The gate is 20 s in the re-cut, the
+		 * station no longer enters power save across DHCP, and a stalled
+		 * client is restarted rather than left in an exponential backoff.
+		 * Address acquisition went from roughly 1 in 4 to 14 of 16.
 		 *
 		 * These reads change NO behaviour and NO timeout -- they only look
 		 * harder at what already happened:
 		 *   1. Signal strength: a plausible dBm means the radio associated
 		 *      at L2 (the failure is L3); unavailable means it never did.
 		 *   2. Address, polled once a second for ~30 s: a lease arriving
-		 *      late is the single most informative outcome -- it would mean
-		 *      the firmware's 10 s DHCP gate is simply too short at this
-		 *      link budget, and that the association works.
+		 *      late is the single most informative outcome -- it means the
+		 *      firmware's DHCP gate is too short at this link budget, and
+		 *      that the association works.  Measured both ways: late leases
+		 *      landed at 12 s before the fixes and at 1 s after them.
 		 *   3. The diagnostic reply's reserved[0] byte: the last Wi-Fi event
 		 *      ID the firmware's callback saw.  CONNECTED supports the
 		 *      address-lease reading; DISCONNECTED means it associated and
@@ -371,8 +395,8 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 
 		/* 1. Signal strength.  Wait at least 1 s before reading -- the
 		 * firmware's own comment warns this read can block if issued
-		 * immediately after associating -- and by now the 10 s DHCP window
-		 * has already closed too, so this is never read inside it either. */
+		 * immediately after associating -- and by now the firmware's DHCP
+		 * window has already closed too, so this is never read inside it. */
 		alp_delay_ms(1000u);
 		int8_t       rssi       = 0;
 		alp_status_t rssi_s     = cc3501e_wifi_rssi(fw, &rssi);
@@ -499,7 +523,7 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 			printf("[tour] POST-FAIL READING -> inconclusive: the reads themselves failed\n");
 		} else if (late_lease) {
 			printf("[tour] POST-FAIL READING -> a DHCP lease arrived after the connect call "
-			       "gave up: the firmware's 10 s DHCP gate is too short at this link budget, "
+			       "gave up: the firmware's DHCP gate is too short at this link budget, "
 			       "association DOES work\n");
 		} else if (radio_rejected) {
 			printf("[tour] POST-FAIL READING -> radio event 0x%02x is a genuine L2 failure: "
