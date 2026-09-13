@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-sdcard-readout -- register-level bring-up probes for the Ensemble E8
+ * aen-sdhc-probe -- register-level bring-up probes for the Ensemble E8
  * SD Host Controller (`snps,dwc-sdhc`) on the E1M-AEN801 (M55-HE).
  *
  * SD IS DISABLED ENTIRELY ON THE E1M-EVK 2626-R2 (#2051). The maintainer

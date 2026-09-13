@@ -425,7 +425,8 @@
  * push-pull SoC output, since this controller's command/data state
  * machines clock off CLK LOOPED BACK FROM THE PAD. None of this is applied
  * while sdhc0 is disabled -- git blame this file for the last revision
- * that wired it live, and examples/aen/aen-sdcard-readout's overlay for
+ * that wired it live, and examples/aen/aen-sdhc-probe's overlay (renamed
+ * from aen-sdcard-readout, #2051) for
  * the fuller derivation.
  */
 /*

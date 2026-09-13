@@ -87,7 +87,7 @@ card in the current product. **On the E1M-EVK 2626-R2 the microSD side of
 that same mux is additionally hardware-defective (#2051): this 74LVC157
 has no high-impedance state, so its SoC-facing outputs are held low
 whenever the mux is powered, regardless of `SDIO_MUX_EN`** -- see
-`docs/boards/e1m-evk.md` and `examples/aen/aen-sdcard-readout`'s README.
+`docs/boards/e1m-evk.md` and `examples/aen/aen-sdhc-probe`'s README.
 The SD host controller stays disabled in the devicetree on this board
 revision as a result, independent of the "committed to the SD card"
 statement above.
@@ -523,8 +523,10 @@ firmware should drive its proxied mux-control pins to states
 that leave the downstream buses in their normal-idle position:
 
 - `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1). **NOT Hi-Z (#2051):
-  this part has no high-impedance state at all** -- the datasheet's
-  function table gives no Hi-Z condition, unlike parts (e.g. 74LVC257)
+  this part has no high-impedance state at all** -- the 74LVC157 function
+  table gives no Hi-Z condition (no manufacturer is recorded for this part
+  in `metadata/boards/e1m-evk.yaml`, so this is the part family's own
+  function table, not a specific vendor's datasheet), unlike parts (e.g. 74LVC257)
   that add a genuine output-enable. /E HIGH forces every Y output LOW
   while the mux is powered; it does not isolate or disconnect either
   downstream bus. "HIGH" here is still the correct default (it is the

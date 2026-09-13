@@ -144,7 +144,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   confirmed hardware defect on this board revision, pending a component
   change. `sdhc0` stays `status = "disabled"` in the shared SoC dtsi
   rather than fight those held-low pads with the SoC's own drivers; see
-  `examples/aen/aen-sdcard-readout`'s README and
+  `examples/aen/aen-sdhc-probe`'s README and
   `include/alp/boards/alp_e1m_evk.h` for the corrected part behavior.
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via

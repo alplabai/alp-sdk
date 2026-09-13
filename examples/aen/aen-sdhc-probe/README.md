@@ -1,14 +1,19 @@
-# aen-sdcard-readout
+# aen-sdhc-probe
 
 Register-level bring-up probes for the Ensemble **E8 SD Host Controller**
-(`snps,dwc-sdhc`) on the E1M-AEN801 (M55-HE).
+(`snps,dwc-sdhc`) on the E1M-AEN801 (M55-HE). Renamed from
+`aen-sdcard-readout` (#2051) — the name now says what this app actually
+is: inert register-level probes, not a working card-readout path (see
+below for why).
 
 ## SD is disabled entirely on the E1M-EVK 2626-R2 (#2051)
 
 The board's SDIO 74LVC157 mux (`U38`/`U39`) has **no high-impedance state**:
 with its `/E` ENABLE input HIGH, the part's Y outputs are forced LOW, not
-released — ON Semiconductor's datasheet gives no Hi-Z condition in the
-function table for this part, unlike parts (e.g. 74LVC257) that add a
+released — the 74LVC157 function table gives no Hi-Z condition for this
+part (no manufacturer is recorded for it in
+`metadata/boards/e1m-evk.yaml`, so this is the part family's own function
+table, not a specific vendor's datasheet), unlike parts (e.g. 74LVC257) that add a
 genuine output-enable. `U38`/`U39`'s Y outputs are the **SoC-facing** SDIO
 nets (`E1M_CLK`, `E1M_CMD`, `E1M_D3..D0`, `E1M_SDIO_RST`), so those nets are
 actively held low by the mux **whenever it is powered, regardless of
@@ -51,7 +56,7 @@ call, no `disk_access_write`, no `mkfs` anywhere in this app; none of that
 machinery is even linked in any more (see the CHANGELOG).
 
 ```bash
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sdcard-readout
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sdhc-probe
 # flash + run per docs/aen-bench-bringup.md, then read ram_console_buf over SWD.
 ```
 

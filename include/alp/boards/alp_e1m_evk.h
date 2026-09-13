@@ -105,9 +105,12 @@ extern "C" {
  *   /E = 0, S = 0  ->  M.2 E-key SDIO routed to SoM
  *   /E = 0, S = 1  ->  microSD card slot routed to SoM
  *   /E = 1         ->  outputs FORCED LOW, NOT Hi-Z (#2051): the 74LVC157
- *                       has no high-impedance state at all -- ON
- *                       Semiconductor's datasheet gives no Hi-Z condition
- *                       in the function table, unlike parts (e.g. 74LVC257)
+ *                       has no high-impedance state at all -- the 74LVC157
+ *                       function table gives no Hi-Z condition (the BOM
+ *                       records only "74LVC157" with no manufacturer,
+ *                       metadata/boards/e1m-evk.yaml, so this is the part
+ *                       family's own function table, not a specific
+ *                       vendor's datasheet), unlike parts (e.g. 74LVC257)
  *                       that add a genuine output-enable. /E HIGH just
  *                       forces every Y output low while the device stays
  *                       powered, so the "isolated; safe-default" claim
