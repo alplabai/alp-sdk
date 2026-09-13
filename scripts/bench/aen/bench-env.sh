@@ -719,3 +719,64 @@ bench_atoc_replace_guard() {
 	fi
 	return 0
 }
+
+# bench_flowd_atoc_guard <replace-atoc 0|1> <atoc-unqueryable 0|1> <tag> [allowed-entry ...]
+#
+# GUARD (alp-sdk#2027) -- the Flow D follow-up to bench_atoc_replace_guard
+# above. flash-jlink.sh / flash-jlink-hp.sh / flash-jlink-mramxip.sh write
+# the SAME replacing ATOC over SWD (`loadbin`) that Flow A writes over
+# $SE_UART, but Flow D's whole premise is "J-Link only, no serial device
+# required" (alp-sdk#2025/#2026) -- PR #2029 made that an EXPLICIT tradeoff
+# instead of a silent one by requiring --atoc-unqueryable before writing when
+# there is truly no way to check (see changelog.d/2025.md). This closes the
+# other half of that tradeoff, without ever making $SE_UART a hard
+# requirement of Flow D:
+#
+#   $SE_UART exported  -> the resident ATOC genuinely IS queryable on this
+#                          bench slot (some are wired for one even though
+#                          Flow D never NEEDS it) -- call the SAME shared
+#                          guard, never a second, weaker copy of its logic.
+#                          Its own internal checks (maintenance binary
+#                          present, a well-formed banner, gettoc's own exit
+#                          status) still apply: an exported-but-broken
+#                          $SE_UART lands in bench_atoc_replace_guard's own
+#                          "unverified" path exactly as it would for Flow A,
+#                          and needs --replace-atoc to override, same as
+#                          Flow A. --atoc-unqueryable is IGNORED in this
+#                          branch -- it is an acknowledgement that no check
+#                          ran, and one just did.
+#   $SE_UART unset      -> unchanged from #2029: --atoc-unqueryable is
+#                          required (abort, exit 8, if it is missing), and
+#                          either way this prints a one-line statement that
+#                          the resident-ATOC check did NOT run and why -- a
+#                          skipped check must never look like a passed one.
+#
+# Returns 0 to proceed; whatever bench_atoc_replace_guard returns (5 on its
+# own abort) when $SE_UART is exported; 8 when $SE_UART is unset and
+# --atoc-unqueryable was not passed.
+bench_flowd_atoc_guard() {
+	local replace_atoc="$1" unqueryable="$2" tag="$3"
+	shift 3
+	if [ -n "${SE_UART:-}" ]; then
+		echo "GUARD ($tag): SE_UART is exported -- querying the resident ATOC before writing (alp-sdk#2027)." >&2
+		bench_atoc_replace_guard "$replace_atoc" "$tag" "$@"
+		return $?
+	fi
+	if [ "$unqueryable" = "1" ]; then
+		echo "GUARD ($tag): SE_UART is unset -- proceeding WITHOUT the resident-ATOC check (--atoc-unqueryable, alp-sdk#2027)." >&2
+		return 0
+	fi
+	echo "!! REFUSING TO WRITE ($tag): this Flow D write REPLACES the entire ATOC." >&2
+	echo "   SE_UART is not exported, so this script cannot enumerate what is" >&2
+	echo "   currently resident before it writes -- any resident boot entry not" >&2
+	echo "   named in the config below (an A32 boot chain, an HP app, a diagnostic" >&2
+	echo "   image) is silently DELISTED, and the SES prints '[SES] ATOC ok'" >&2
+	echo "   afterwards with no warning (issue #2025)." >&2
+	echo "   Two ways forward:" >&2
+	echo "     1. export SE_UART=<device> if this bench slot has one wired -- the" >&2
+	echo "        guard above then queries the resident ATOC automatically (#2027)," >&2
+	echo "        exactly like Flow A." >&2
+	echo "     2. pass --atoc-unqueryable to acknowledge there is no SE-UART on" >&2
+	echo "        this bench slot and proceed without the check." >&2
+	return 8
+}

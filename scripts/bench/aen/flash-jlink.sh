@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-jlink.sh [--atoc-unqueryable] <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-jlink.sh [--replace-atoc] [--atoc-unqueryable] <build-dir> [post_boot_read_bytes_hex]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives JLinkExe + the Alif SETOOLS, both Linux binaries on this
@@ -30,38 +30,54 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
-# #2025 -- Flow D has no SE-UART, so it cannot query the resident ATOC the way
-# the Flow A guard (bench_atoc_replace_guard, scripts/bench/aen/bench-env.sh)
-# does before `app-write-mram -p` / a J-Link `loadbin` REPLACES it. This flag
-# is a deliberate, differently-named acknowledgement, NOT the Flow A
-# `--replace-atoc` opt-out: an operator on a no-SE-UART slot (e.g.
-# e1m-aen-evk-03) will pass this on every single Flow D run, and that habit
-# must never also silence Flow A's guard on a board where the resident TOC
-# genuinely can be read. Do not merge or alias the two flags.
+# #2025/#2027 -- Flow D has no SE-UART BY DESIGN ("J-Link only, no serial
+# device required"), so when one is not exported it cannot query the
+# resident ATOC the way the Flow A guard (bench_atoc_replace_guard,
+# scripts/bench/aen/bench-env.sh) does before a J-Link `loadbin` REPLACES it.
+# --atoc-unqueryable is a deliberate, differently-named acknowledgement for
+# THAT case, NOT the Flow A `--replace-atoc` opt-out: an operator on a
+# no-SE-UART slot (e.g. e1m-aen-evk-03) will pass this on every single Flow D
+# run, and that habit must never also silence Flow A's guard on a board
+# where the resident TOC genuinely can be read. Do not merge or alias the
+# two flags. --replace-atoc is also accepted here, for the OTHER case: a
+# bench slot that DOES have an SE-UART wired -- see bench_flowd_atoc_guard
+# in bench-env.sh, which runs the real shared guard whenever $SE_UART is
+# exported and usable instead of requiring a blind acknowledgement here.
+#
+# PARSER SHAPE (review MINOR 5, alp-sdk#2027) -- deliberately kept as the
+# whole-argv `for` scan #2029 already used for --atoc-unqueryable, NOT
+# flash-run.sh's `while`/`shift` loop. That means `--replace-atoc` is
+# recognised no matter where it lands in argv (e.g. `<build-dir>
+# --replace-atoc` still enables it here), where flash-run.sh's parser stops
+# honouring flags at the first non-option token -- the SAME invocation shape
+# does NOT enable it there. This is MORE permissive than Flow A on the one
+# flag that disables the resident-ATOC check entirely. Kept this way, not
+# fixed, so both Flow D flags share ONE parsing convention in this loop
+# rather than splitting the unchanged --atoc-unqueryable from a newly
+# stricter --replace-atoc; if this permissiveness is ever exploited by
+# accident (a flag landing after <build-dir> unintentionally), switch this
+# whole loop to flash-run.sh's while/shift shape, not just this one flag.
+REPLACE_ATOC=0
 ATOC_UNQUERYABLE=0
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
+    --replace-atoc) REPLACE_ATOC=1 ;;
     --atoc-unqueryable) ATOC_UNQUERYABLE=1 ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
 set -- "${POSITIONAL[@]}"
 
-if [ "$ATOC_UNQUERYABLE" != "1" ]; then
-  echo "!! REFUSING TO WRITE: this Flow D write REPLACES the entire ATOC." >&2
-  echo "   Flow D has no SE-UART channel, so this script cannot enumerate what" >&2
-  echo "   is currently resident before it writes -- any resident boot entry not" >&2
-  echo "   named in the config below (an A32 boot chain, an HP app, a diagnostic" >&2
-  echo "   image) is silently DELISTED, and the SES prints '[SES] ATOC ok'" >&2
-  echo "   afterwards with no warning (issue #2025)." >&2
-  echo "   Pass --atoc-unqueryable to acknowledge this and proceed anyway." >&2
-  exit 8
-fi
-
 BD="$1"
 SIZE="${2:-0x500}"
 bench_require_setools || exit $?
+
+# GUARD (alp-sdk#2027) -- resolved over $SE_UART alone, well before this
+# script's own first J-Link touch (step 0 below), so the query (and any
+# reset it might trigger) has settled before the probe is involved at all.
+bench_flowd_atoc_guard "$REPLACE_ATOC" "$ATOC_UNQUERYABLE" flash-jlink ALP-HE || exit $?
+
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
 JLINK="$(bench_jlink_exe)" || exit $?
