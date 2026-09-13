@@ -282,33 +282,46 @@ def _composite_alias_coverage_gap(
     """#2088: what "`write_authority: composite` means consult the
     contained rows" actually has to DO, not just claim.
 
-    Returns `None` when every `memory_map:` row CONTAINED in
-    `alias_name`'s own `[origin, origin+capacity_bytes)` window resolves
-    to a concrete span, declares its own `write_authority`, and together
-    they fully tile that window (no byte unaccounted for) -- the
-    precondition under which `_reserved_spans()` protecting every
-    non-`customer_runtime` sibling by name is actually a complete
-    answer, not a permissive guess around a hole it can't see. A row
-    whose resolved extent lies OUTSIDE the window (a genuinely unrelated
-    device that merely happens to share this SoM's `memory_map:` list)
-    is ignored -- containment, not mere co-listing, is what makes a row
-    this alias's business. Returns a refusal reason otherwise.
+    Returns `None` when the `memory_map:` rows CONTAINED in
+    `alias_name`'s own `[origin, origin+capacity_bytes)` window --
+    resolved, `write_authority`-bearing, non-overlapping -- CONTIGUOUSLY
+    tile that window with no gap (review round 2, Major 1: an earlier
+    version of this function summed sizes rather than walking spans, so
+    an overlap of N bytes plus a hole of N bytes passed the sum check
+    while the hole itself stayed unprotected -- reproduced by deleting
+    `atoc` and widening `he_slot0` by exactly `atoc`'s size). Returns a
+    refusal reason otherwise, naming the gap or the overlapping pair.
 
-    `origin` is `alias_base` when the alias's own base has resolved,
-    else the lowest resolved base among sibling rows (mirrors
-    `_reserved_spans()`'s own fallback -- `mram_main` itself carries
-    `base: "TBD"` on every AEN preset today, so this is the common
-    case, not the exception).
+    A row whose resolved extent lies OUTSIDE the window (a genuinely
+    unrelated device that merely happens to share this SoM's
+    `memory_map:` list) is ignored -- containment, not mere co-listing,
+    is what makes a row this alias's business.
 
-    A row whose OWN base is unresolved cannot be proven disjoint from
-    the window (that is exactly `atoc`'s shape before a SoM is
-    HW-mapped: base `"TBD"`, and it very much lives inside `mram_main`'s
-    window once resolved) -- ADR-0034 clause 4 says never guess, so an
-    unresolved-base row always blocks rather than being assumed
-    unrelated. (ponytail: this can over-refuse a truly unrelated row
-    that happens to carry a TBD base alongside a composite alias --
-    no SoM ships that shape today; narrow it with a real "this row
-    belongs to that alias" link in the schema if one ever does.)
+    A row whose base or size DOESN'T resolve is not immediately fatal on
+    its own (review round 2, Major 3: an earlier version refused for
+    ANY such row unconditionally, which also refused a genuinely
+    unrelated device parked at a TBD-but-clearly-different address
+    purely because its address wasn't resolved yet -- indistinguishable
+    from `atoc`'s real pre-HW-mapped shape without more information).
+    Instead: walk only the rows that DO resolve; if they alone already
+    tile the window with no gap, an unresolved-base sibling can only be
+    something else entirely (resolving it into an overlap would be a
+    SEPARATE metadata bug for a different gate to catch, not evidence
+    this alias is unsafe today) -- but if a gap remains, an unresolved
+    sibling is named as a candidate that might explain it (never ruled
+    out, per ADR-0034 clause 4), while an alias with NO unresolved
+    sibling AND a gap has nothing left to blame but a genuinely missing
+    row.
+
+    `origin` is `alias_base` when the alias's own base has resolved;
+    else `aperture[0]` when an aperture resolves for this SoM (`mram_main`
+    itself carries `base: "TBD"` on every AEN preset today, so this is
+    the common case, not the exception -- using the SoC's own declared
+    aperture start here, rather than the lowest resolved sibling base,
+    avoids anchoring the window at a fabricated address when a resolved
+    but genuinely-unrelated sibling happens to sit below every real
+    contained row, review round 2 Minor); else the lowest resolved base
+    among sibling rows, for a non-Alif SoM with no aperture to anchor to.
 
     Without this whole function, a sibling with an unresolved `base` or
     a sibling missing from `memory_map:` altogether contributes NO span
@@ -329,6 +342,8 @@ def _composite_alias_coverage_gap(
 
     if _resolved_int(alias_base):
         origin = alias_base
+    elif aperture is not None:
+        origin = aperture[0]
     else:
         resolved_bases = [r["base"] for r in siblings if _resolved_int(r.get("base"))]
         if not resolved_bases:
@@ -338,51 +353,33 @@ def _composite_alias_coverage_gap(
                 f"{som_preset.get('sku', '<unknown>')}, which defers "
                 f"eligibility to its contained memory_map rows -- but "
                 f"neither '{alias_name}' itself nor any sibling row has a "
-                f"resolved base, so its window cannot be anchored to "
-                f"verify anything inside it. Resolve at least one "
-                f"memory_map row's base before targeting '{alias_name}' "
-                f"with a storage[].flash_device: (#2088)")
+                f"resolved base, and no SoC aperture resolves either, so "
+                f"its window cannot be anchored to verify anything inside "
+                f"it. Resolve at least one memory_map row's base before "
+                f"targeting '{alias_name}' with a storage[].flash_device: "
+                f"(#2088)")
         origin = min(resolved_bases)
     top = origin + capacity_bytes
 
-    covered_bytes = 0
+    contained: "list[tuple[int, int, str]]" = []
+    ambiguous_names: "list[str]" = []
     for region in siblings:
         name = region.get("name")
         base = region.get("base")
         if not _resolved_int(base):
-            return (
-                f"flash device '{alias_name}' declares "
-                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
-                f"{som_preset.get('sku', '<unknown>')}, which defers "
-                f"eligibility to its contained memory_map rows -- but "
-                f"region {name!r} has an unresolved base ({base!r}), so "
-                f"whether it lies inside '{alias_name}'s "
-                f"0x{origin:x}..0x{top:x} window (and therefore whether "
-                f"a runtime mount could land unprotected there) cannot "
-                f"be ruled out. Resolve {name!r}'s base before targeting "
-                f"'{alias_name}' with a storage[].flash_device: (#2088)")
+            ambiguous_names.append(str(name))
+            continue
         size_bytes = _region_size_bytes(region)
         if size_bytes is None:
-            # Unresolved SIZE means the region's extent -- and so its
-            # containment in the window -- can't be computed either;
-            # same "can't rule it out" refusal as an unresolved base.
-            return (
-                f"flash device '{alias_name}' declares "
-                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
-                f"{som_preset.get('sku', '<unknown>')}, which defers "
-                f"eligibility to its contained memory_map rows -- but "
-                f"region {name!r} has an unresolved size, so whether it "
-                f"lies inside '{alias_name}'s window cannot be ruled "
-                f"out. Resolve {name!r}'s size_mib / size_kib before "
-                f"targeting '{alias_name}' with a storage[].flash_device: "
-                f"(#2088)")
+            ambiguous_names.append(str(name))
+            continue
         hi = base + size_bytes
         if base >= top or hi <= origin:
             continue  # Disjoint -- a different device, not this alias's business.
         if not (base >= origin and hi <= top):
-            # Partial overlap -- neither cleanly inside nor cleanly
-            # outside. Rare/malformed; refuse rather than guess which
-            # side of the boundary the overlapping bytes belong to.
+            # Partial overlap with the WINDOW boundary -- neither cleanly
+            # inside nor cleanly outside. Rare/malformed; refuse rather
+            # than guess which side of the boundary the bytes belong to.
             return (
                 f"flash device '{alias_name}' declares "
                 f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
@@ -405,21 +402,52 @@ def _composite_alias_coverage_gap(
                 f"runtime mount cannot be verified. Author "
                 f"write_authority: on {name!r} before targeting "
                 f"'{alias_name}' with a storage[].flash_device: (#2088)")
-        covered_bytes += size_bytes
+        contained.append((base, hi, str(name)))
 
-    if covered_bytes != capacity_bytes:
+    # Walk the CONTAINED, resolved spans in address order and require
+    # exact contiguity -- an overlap of N bytes plus a hole of N bytes
+    # must not cancel out in a sum (review round 2, Major 1).
+    contained.sort()
+    cursor = origin
+    prev_name = None
+    for lo, hi, name in contained:
+        if lo < cursor:
+            return (
+                f"flash device '{alias_name}' declares "
+                f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which defers "
+                f"eligibility to its contained memory_map rows -- but "
+                f"region {name!r} [0x{lo:x}, 0x{hi:x}) overlaps "
+                f"{prev_name!r}, which ends at 0x{cursor:x}, by "
+                f"{(cursor - lo) // 1024} KiB. Two rows claiming the same "
+                f"bytes means at most one of their `write_authority` "
+                f"values actually applies there; fix the addresses before "
+                f"targeting '{alias_name}' with a storage[].flash_device: "
+                f"(#2088)")
+        if lo > cursor:
+            break  # Gap -- reported below, naming any candidate that might fill it.
+        cursor = hi
+        prev_name = name
+
+    if cursor < top:
+        gap_lo, gap_hi = cursor, top
+        candidate_note = (
+            f" -- {', '.join(sorted(ambiguous_names))} carries an "
+            f"unresolved base or size and cannot be ruled out as the "
+            f"row that belongs there"
+            if ambiguous_names else
+            f" and no memory_map row with an unresolved base or size "
+            f"exists either, so this is a genuinely undeclared row")
         return (
             f"flash device '{alias_name}' declares "
             f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on SoM "
             f"{som_preset.get('sku', '<unknown>')} "
             f"({capacity_bytes // 1024} KiB, window 0x{origin:x}.."
-            f"0x{top:x}), but the memory_map rows contained in that "
-            f"window only account for {covered_bytes // 1024} KiB -- a "
-            f"{(capacity_bytes - covered_bytes) // 1024} KiB gap this "
-            f"alias's contained rows do not cover, and whose "
-            f"write_authority (and address range) is therefore unknown. "
-            f"Declare the missing row(s) before targeting '{alias_name}' "
-            f"with a storage[].flash_device: (#2088)")
+            f"0x{top:x}), but its contained memory_map rows leave a gap "
+            f"at 0x{gap_lo:x}..0x{gap_hi:x} ({(gap_hi - gap_lo) // 1024} "
+            f"KiB) unaccounted for{candidate_note}. Declare the missing "
+            f"row(s) before targeting '{alias_name}' with a "
+            f"storage[].flash_device: (#2088)")
     return None
 
 
@@ -550,6 +578,35 @@ def _resolve_flash_device(
                 metadata_root, aperture)
             if gap_reason is not None:
                 return None, gap_reason
+            # #2088 review round 2, Major 2: the coverage-gap walk above
+            # proves the CONTAINED rows are individually sound, but
+            # placement itself runs through `_reserved_spans()` --  a
+            # SEPARATE, older function with its own (weaker) origin/
+            # window derivation. An out-of-window sibling (correctly
+            # ignored as disjoint above) can still push
+            # `_reserved_spans()`'s own `window_top = max(hi for sized)`
+            # past this alias's real top, failing its
+            # `origin + capacity == window_top` identity check and
+            # degrading it to `([], reason)` -- silently reserving
+            # NOTHING, including `mcuboot`, for any caller that placed a
+            # storage[] entry here. An alias whose contained rows can't
+            # actually be RESERVED is exactly as unconsultable as one
+            # whose rows can't be VERIFIED (the same principle already
+            # applied to an unresolved base above) -- refuse rather than
+            # let a caller believe the window this function just proved
+            # safe stays protected at placement time.
+            _reserved_probe, reserved_degraded_reason = _reserved_spans(
+                flash_device, size_bytes, som_preset, metadata_root)
+            if reserved_degraded_reason is not None:
+                return None, (
+                    f"flash device '{flash_device}' declares "
+                    f"write_authority: {_DEFERRING_ALIAS_AUTHORITY!r} on "
+                    f"SoM {som_preset.get('sku', '<unknown>')} -- its "
+                    f"contained memory_map rows verify safe, but "
+                    f"{reserved_degraded_reason}, so placement cannot "
+                    f"actually reserve them: an alias whose contained "
+                    f"rows can't be reserved can't be consulted either "
+                    f"(#2088)")
         dt_label = (region.get("dt_label")
                     if isinstance(region.get("dt_label"), str)
                     else flash_device)

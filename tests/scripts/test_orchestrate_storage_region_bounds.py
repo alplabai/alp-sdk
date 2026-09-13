@@ -51,6 +51,7 @@ from alp_orchestrate.models import StorageEntry  # noqa: E402
 from alp_orchestrate.partition import (  # noqa: E402
     _is_flash_sub_partition,
     _known_flash_devices,
+    _reserved_spans,
     _resolve_flash_device,
 )
 from alp_orchestrate.paths import METADATA_ROOT  # noqa: E402
@@ -300,29 +301,50 @@ class TestReservedBytesLessThanCapacity:
       - { name: logs, size_kib: 32, fs: littlefs, flash_device: mram_main, offset_kib: 0, mount: /lfs/logs }
     """))
         project = load_board_yaml(path)
-        # A synthetic second device, resolved OUTSIDE E1M-AEN801's
-        # declared MRAM aperture (0x90000000, well past its
-        # 0x80000000..0x80580000 window) so it stays out of
-        # `_reserved_spans()`'s address-window derivation for
-        # `mram_main` AND out of alp-sdk#2088's composite-consult
-        # completeness walk for `mram_main` (containment, not mere
-        # co-listing in the same `memory_map:`, is what makes a row
-        # that guard's business) while still resolving via
-        # `_resolve_flash_device()` itself -- which #2088 now also
-        # requires an explicit `write_authority` for, since the
-        # aperture resolves for this SoM.
-        project.som_preset["memory_map"] = list(
-            project.som_preset["memory_map"]) + [{
+        # `mram_main` is given its OWN resolved base (0x80000000, same
+        # as `mcuboot`'s -- legal: a SoM CAN author one) so
+        # `_reserved_spans()` takes the `self_region has a base` branch
+        # directly and reserves every sibling with a resolved base by
+        # name (6 spans: mcuboot/he_slot0/hp_slot0/reserved/storage/
+        # atoc) WITHOUT computing the fragile `origin + capacity ==
+        # window_top` identity a synthetic out-of-window sibling would
+        # otherwise poison (alp-sdk#2088 review round 2, Major 3: an
+        # earlier version of this fixture instead resolved
+        # `test_alt_device`'s own base, which pushed it into that
+        # identity check and degraded `_reserved_spans()` to `[]` --
+        # losing this test's actual target, the reserved-overlap-with-
+        # a-verified-alternative branch, since NOTHING was reserved to
+        # overlap). `test_alt_device` keeps its ORIGINAL `base: "TBD"`,
+        # which is what keeps it OUT of `_reserved_spans()`'s `sized`
+        # list (only integer bases enter that computation) while still
+        # resolving via `_resolve_flash_device()` since `size_kib` is an
+        # int; `write_authority: customer_runtime` is required for that
+        # resolve now that the aperture resolves for this SoM
+        # (alp-sdk#2088 round 1).
+        project.som_preset["memory_map"] = [
+            dict(r, base=0x80000000) if r["name"] == "mram_main" else r
+            for r in project.som_preset["memory_map"]] + [{
                 "name": "test_alt_device",
-                "base": 0x90000000,
+                "base": "TBD",
                 "size_kib": 64,
                 "accessible_from": ["m55_he", "m55_hp"],
                 "cacheable": True,
                 "write_authority": "customer_runtime",
                 "dt_label": "test_alt_device",
             }]
+        # Regression pin for review round 2, Major 3: `_reserved_spans()`
+        # must actually reserve `mram_main`'s 6 real siblings here, not
+        # degrade to `[]` -- the overlap-with-a-verified-alternative
+        # branch this test targets has zero coverage if nothing is
+        # reserved for `offset_kib: 0` to collide with.
+        spans, spans_reason = _reserved_spans(
+            "mram_main", 5632 * 1024, project.som_preset,
+            project.effective_metadata_root())
+        assert spans_reason is None, spans_reason
+        assert len(spans) == 6, spans
         parts = resolve_storage_partitions(project)
         reason = _by_name(parts)["logs"].reason or ""
+        assert "mcuboot" in reason, reason
         assert "use a different flash_device:" in reason, reason
         assert "test_alt_device" in reason, reason
 

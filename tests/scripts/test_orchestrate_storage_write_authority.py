@@ -44,8 +44,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _orchestrate_support import _write_board  # noqa: E402
 
 from alp_orchestrate import load_board_yaml  # noqa: E402
+from alp_orchestrate.aperture import resolve_aperture  # noqa: E402
 from alp_orchestrate.paths import METADATA_ROOT  # noqa: E402
-from alp_orchestrate.partition import _resolve_flash_device  # noqa: E402
+from alp_orchestrate.partition import (  # noqa: E402
+    _composite_alias_coverage_gap,
+    _resolve_flash_device,
+)
 
 
 def _preset(region: dict) -> dict:
@@ -255,6 +259,35 @@ class TestCompositeConsultsContainedRows:
         assert "32" in reason, reason  # the missing 32 KiB atoc band.
         assert "#2088" in reason, reason
 
+    def test_major1_overlap_plus_hole_of_equal_size_is_refused(
+            self, tmp_path):
+        """Review round 2, Major 1: delete `atoc` AND widen `he_slot0`
+        by exactly `atoc`'s size (2688 -> 2720 KiB, +32 KiB). A SUM
+        check alone passes this -- the missing 32 KiB from `atoc` is
+        cancelled out by the 32 KiB `he_slot0` now double-claims from
+        `hp_slot0` -- while `0x80578000..0x80580000`, the live SE ATOC
+        band, stays completely undeclared and unreserved. Only a walk
+        that requires actual CONTIGUITY (no overlap, no hole) catches
+        this; a sum-of-sizes check cannot, by construction."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        new_map = []
+        for r in memory_map:
+            if r["name"] == "mram_main":
+                r = dict(r, base=0x80000000)
+            elif r["name"] == "he_slot0":
+                r = dict(r, size_kib=2720)
+            if r["name"] == "atoc":
+                continue
+            new_map.append(r)
+        som_preset["memory_map"] = new_map
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "overlaps" in reason, reason
+        assert "he_slot0" in reason, reason
+        assert "hp_slot0" in reason, reason
+        assert "#2088" in reason, reason
+
     def test_case_5_own_base_unresolved_and_a_sibling_gap_is_refused(
             self, tmp_path):
         """CASE 5 (review round 1): `mram_main` carries its REAL shape
@@ -298,20 +331,73 @@ class TestCompositeConsultsContainedRows:
         assert "atoc" in reason, reason
         assert "no write_authority" in reason, reason
 
-    def test_unrelated_disjoint_device_does_not_block_the_alias(
-            self, tmp_path):
-        """A row that merely shares the same `memory_map:` list but
-        resolves to an address range OUTSIDE `mram_main`'s window is not
-        `mram_main`'s business -- containment, not co-listing, is what
-        makes a row relevant to the alias's own completeness check.
-        Regression pin for review round 1's own `test_alt_device`
-        finding in test_orchestrate_storage_region_bounds.py."""
+    def test_coverage_walk_itself_ignores_a_disjoint_device(self, tmp_path):
+        """`_composite_alias_coverage_gap()` in isolation: a row outside
+        `mram_main`'s window is not the alias's business -- containment,
+        not co-listing, is what makes a row relevant to its own
+        completeness check. Called directly (not through
+        `_resolve_flash_device()`) to isolate this from Major 2's
+        `_reserved_spans()` degradation below, which is a SEPARATE
+        concern the coverage walk alone cannot see."""
         som_preset, memory_map = _aen801_memory_map(tmp_path)
         som_preset["memory_map"] = memory_map + [{
             "name": "unrelated_device", "base": 0x90000000, "size_kib": 64,
             "accessible_from": ["m55_he", "m55_hp"], "cacheable": True,
             "write_authority": "customer_runtime",
         }]
+        gap_reason = _composite_alias_coverage_gap(
+            "mram_main", "TBD", 5632 * 1024, som_preset, METADATA_ROOT,
+            resolve_aperture(som_preset, METADATA_ROOT))
+        assert gap_reason is None, gap_reason
+
+    def test_reserved_spans_degradation_is_a_refusal_not_a_warning(
+            self, tmp_path):
+        """Review round 2, Major 2: `_reserved_spans()` is a SEPARATE,
+        older function with its own weaker origin/window derivation --
+        proving the contained rows individually safe
+        (`_composite_alias_coverage_gap()`, pinned above) is not enough,
+        because PLACEMENT routes through `_reserved_spans()`, not this
+        guard. With `mram_main`'s own base unresolved (its real shape on
+        every committed AEN preset) and an out-of-window sibling added,
+        `_reserved_spans()`'s `window_top = max(hi for sized)` includes
+        that sibling's `0x90010000`, failing its
+        `origin + capacity == window_top` identity and degrading to
+        `([], reason)` -- silently reserving NOTHING, not even `mcuboot`
+        (`write_authority: vendor_image`), for whatever placement runs
+        next. Pre-Major-2 this returned `status: ok` from
+        `_resolve_flash_device()` because the coverage walk alone
+        cannot see `_reserved_spans()`'s own derivation fail."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        som_preset["memory_map"] = memory_map + [{
+            "name": "unrelated_device", "base": 0x90000000, "size_kib": 64,
+            "accessible_from": ["m55_he", "m55_hp"], "cacheable": True,
+            "write_authority": "customer_runtime",
+        }]
+        descriptor, reason = _resolve_flash_device(
+            "mram_main", som_preset, METADATA_ROOT)
+        assert descriptor is None, descriptor
+        assert "can't be reserved" in reason, reason
+        assert "#2088" in reason, reason
+
+    def test_reserved_spans_does_not_degrade_when_the_alias_has_its_own_base(
+            self, tmp_path):
+        """The SAME out-of-window sibling does NOT degrade
+        `_reserved_spans()` when `mram_main` carries its own resolved
+        base: that branch (`self_region has a base`) uses the alias's
+        OWN base as origin directly and never computes the fragile
+        `window_top = max(hi for sized)` identity the unrelated sibling
+        would otherwise poison. This is the shape
+        test_orchestrate_storage_region_bounds.py's
+        `test_a_named_alternative_with_a_real_dt_label_round_trips`
+        fixture relies on (review round 2, Major 3 remedy)."""
+        som_preset, memory_map = _aen801_memory_map(tmp_path)
+        som_preset["memory_map"] = [
+            dict(r, base=0x80000000) if r["name"] == "mram_main" else r
+            for r in memory_map] + [{
+                "name": "unrelated_device", "base": 0x90000000,
+                "size_kib": 64, "accessible_from": ["m55_he", "m55_hp"],
+                "cacheable": True, "write_authority": "customer_runtime",
+            }]
         descriptor, reason = _resolve_flash_device(
             "mram_main", som_preset, METADATA_ROOT)
         assert reason is None, reason

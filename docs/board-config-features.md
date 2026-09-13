@@ -338,19 +338,28 @@ identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
 NX9101), none of which author `write_authority` on a derived region in
 the first place. `composite` -- the tag a whole-device alias like
 `mram_main` carries, meaning "consult the contained rows instead" -- is
-not an unconditional pass either: every OTHER `memory_map:` row
-CONTAINED in the alias's own address window must resolve a concrete
-base+size, declare its own `write_authority`, and together fully tile
-the alias's capacity before the alias is accepted; a row this can't
-account for (an unresolved base -- `atoc`'s `base: "TBD"` before a SoM
-is HW-mapped is exactly this shape -- an unresolved size, a missing
-`write_authority`, or a gap none of the contained rows cover) refuses
-the whole alias rather than let a `storage:` entry land unprotected in
-whatever band the metadata didn't account for (potentially the
-Secure-Enclave-owned `atoc` window). A row whose resolved extent lies
-OUTSIDE the alias's window is not the alias's business and is ignored,
-so an unrelated device sharing the same `memory_map:` list does not
-block it.
+not an unconditional pass either: every OTHER `memory_map:` row that
+resolves to an address CONTAINED in the alias's own window must declare
+its own `write_authority`, and together the contained rows must
+CONTIGUOUSLY tile the alias's capacity -- no gap, no overlap -- before
+the alias is accepted; summing sizes is not enough, since an overlap of
+N bytes plus a hole of N bytes sums correctly while the hole itself
+stays unprotected. A resolved row that can't be attributed (a gap none
+of the contained rows cover, or two rows overlapping) refuses the whole
+alias rather than let a `storage:` entry land unprotected in whatever
+band the metadata didn't account for (potentially the
+Secure-Enclave-owned `atoc` window). A row whose base or size DOESN'T
+resolve at all (`atoc`'s `base: "TBD"` before a SoM is HW-mapped is
+exactly this shape) is not immediately fatal on its own: only rows that
+DO resolve are walked for the contiguity check, and an unresolved row
+is named as a candidate ONLY when a gap remains for it to plausibly
+explain. A row whose resolved extent lies OUTSIDE the alias's window is
+not the alias's business and is ignored, so an unrelated device sharing
+the same `memory_map:` list does not block it -- but if that unrelated
+row also confuses `_reserved_spans()`'s own (separate, older) window
+derivation into degrading to zero reserved spans, the alias is refused
+on that basis too: contained rows that verify safe are worthless if
+placement can't actually reserve them.
 
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:
