@@ -38,6 +38,30 @@ from .models import BoardProject, ResolvedPartition, StorageEntry
 # unchanged behaviour, just no longer redundant inside one resolve.
 _APERTURE_UNSET: Any = object()
 
+# `write_authority` value that means "writable by the application at
+# runtime" -- the ONLY value a `memory_map` row may itself claim for a
+# runtime mount (#2088). Same value, same rationale, as
+# `check_atoc_reservation._RUNTIME_WRITABLE_AUTHORITY` (#2086); duplicated
+# rather than imported since the two live in separate top-level scripts.
+_RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
+
+# `write_authority` value meaning "whole-device alias spanning contained
+# rows of DIFFERENT authority -- consult the contained rows" (the schema's
+# own words for `memory_region.write_authority`, `mram_main`'s tag today).
+# A composite row does NOT claim customer-runtime-writable for itself, but
+# it is not a wrong-authority refusal either: it is a CONTAINER, and the
+# rows inside it (`storage`, `mcuboot`, `atoc`, ...) carry their own
+# authority that `_reserved_spans()` / the overlap check already keep a
+# storage[] entry off of. Treating `composite` the same as
+# `customer_image`/`vendor_image`/`secure_enclave`/`none` here would refuse
+# every board that names its top-level device this way -- e.g.
+# examples/connectivity/production-deployment/board.yaml's
+# `flash_device: mram_main` -- which is the documented, intended shape
+# (docs/adr/0027-storage-regions-are-declared-by-role.md), not the #2088
+# hazard (an alias mis-tagged `customer_runtime` itself, or a genuinely
+# non-writable row like `atoc`/`mcuboot`/`he_slot0`/`reserved`).
+_DEFERRING_ALIAS_AUTHORITY = "composite"
+
 
 def _resolve_aperture_arg(
     som_preset: dict[str, Any],
@@ -293,6 +317,47 @@ def _resolve_flash_device(
                 f"{som_preset.get('sku', '<unknown>')}, not a flash device "
                 f"of its own -- it has no Devicetree label and cannot take "
                 f"a `partitions {{ }}` child")
+        # #2088: a resolved memory_map region is not automatically
+        # customer-writable at runtime -- that includes a whole-device
+        # alias (e.g. `mram_main`), which `_is_flash_sub_partition()`
+        # above correctly does NOT treat as a sub-partition, so it would
+        # otherwise fall straight through to a resolved descriptor. Per
+        # the schema (`memory_region.write_authority`), a row may take a
+        # runtime mount only when it claims `customer_runtime` directly
+        # OR defers as a `composite` alias (see `_DEFERRING_ALIAS_AUTHORITY`
+        # above) -- every other AUTHORED value (customer_image/
+        # vendor_image/secure_enclave/none) means something else owns
+        # writes to this region and refuses outright. An ABSENT value is
+        # different again: the schema says it means "unresolved", not
+        # "customer_runtime", and the field is still deferred-to-required
+        # (alp-sdk#2024) -- every preset authored before it existed would
+        # otherwise be hard-refused for metadata that predates the rule,
+        # so absence is a WARNING, not a refusal, here.
+        wa = region.get("write_authority")
+        if wa is not None and wa not in (
+                _RUNTIME_WRITABLE_AUTHORITY, _DEFERRING_ALIAS_AUTHORITY):
+            return None, (
+                f"flash device '{flash_device}' declares "
+                f"write_authority: {wa!r} on SoM "
+                f"{som_preset.get('sku', '<unknown>')}, which is not "
+                f"customer-writable at runtime -- only a region declaring "
+                f"write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} (or "
+                f"{_DEFERRING_ALIAS_AUTHORITY!r} for a whole-device alias "
+                f"that defers to contained rows) may take a runtime mount "
+                f"(storage[].flash_device:). Either give '{flash_device}' "
+                f"write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} if it "
+                f"truly is the customer's runtime storage, or point "
+                f"flash_device: at the region that is (#2088)")
+        if wa is None:
+            print(
+                f"alp_orchestrate.partition: WARNING: flash device "
+                f"'{flash_device}' on SoM "
+                f"{som_preset.get('sku', '<unknown>')} carries no "
+                f"write_authority -- treated as ineligible for a future "
+                f"stricter check but allowed to resolve today (the field "
+                f"is deferred-to-required, alp-sdk#2024); author "
+                f"write_authority: {_RUNTIME_WRITABLE_AUTHORITY!r} on "
+                f"'{flash_device}' to make this explicit", file=sys.stderr)
         size_bytes = _region_size_bytes(region)
         if size_bytes is None:
             return None, (
