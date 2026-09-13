@@ -300,13 +300,43 @@ static unsigned tour_portable_wireless_checkpoint(void)
  * poll-by-repeat (the firmware runs Wlan_Scan on a worker and answers BUSY
  * until it finishes); a success proves the whole submit -> worker -> reply
  * seam from the host.  cc3501e_wifi_sec_name() decodes each record's raw TI
- * SecurityInfo into a human bucket (open/wpa2/wpa3/...). */
+ * SecurityInfo into a human bucket (open/wpa2/wpa3/...).
+ *
+ * THIS CALL IS THE TOUR'S FIRST RADIO OP OF THE BOOT (PING/GET_VERSION/
+ * GET_DIAG_INFO above are not worker-routed and don't count), which makes it
+ * the one call site issue #2035's known first-radio-op wedge can hit: roughly
+ * 2 in 16 cold boots, the first worker-routed radio opcode times out (-4) and
+ * the link then reads -5 until a cold cycle. The bridge firmware deliberately
+ * does not fix this in-band (see @ref cc3501e_hard_reset's doc for why), so
+ * the sanctioned response lives here, host-side, and ONLY here -- every later
+ * radio call in this tour (connect, BLE enable/scan, ...) is left alone,
+ * because a failure THERE is a real failure, not this boot-time condition. */
 static void tour_wifi_scan(cc3501e_t *fw)
 {
 	static cc3501e_scan_record_t recs[TOUR_SCAN_MAX];
 	size_t                       n = 0u;
 	alp_status_t s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
-	if (s != ALP_OK) {
+
+	if (s == ALP_ERR_TIMEOUT) {
+		/* The known wedge's signature: -4 on this, the first radio op of the
+		 * boot. Recover with exactly ONE cc3501e_hard_reset() + ONE retry --
+		 * never loop -- and say so out loud, so this statistic stays visible
+		 * instead of hiding behind a silent retry. cc3501e_hard_reset() only
+		 * pulses the line and blind-settles; it does not itself confirm the
+		 * link, so the retried scan below is what proves recovery. */
+		printf("[tour] WIFI_SCAN -> -4 (first radio op of this boot) -- known issue #2035 "
+		       "wedge (~2 in 16 cold boots); issuing ONE cc3501e_hard_reset() + ONE retry\n");
+		(void)cc3501e_hard_reset(fw);
+		s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
+		if (s != ALP_OK) {
+			/* A second failure is a real failure -- surface it, don't retry again. */
+			printf("[tour] WIFI_SCAN retry after hard reset -> %d (not the known wedge; "
+			       "a genuine failure)\n",
+			       (int)s);
+			return;
+		}
+		printf("[tour] WIFI_SCAN recovered after one cc3501e_hard_reset() + retry\n");
+	} else if (s != ALP_OK) {
 		printf("[tour] WIFI_SCAN -> %d\n", (int)s);
 		return;
 	}
