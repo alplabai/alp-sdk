@@ -16,8 +16,16 @@ this, but the guard is kept for the same reason its `mram_mb` sibling
 already had one -- moved and hardened, not moved unchanged.
 
 Depends only downward -- `alp_project_loader` (`resolve_soc_path`,
-`_resolve_silicon_variant`) and `memregion` (`_region_size_bytes`); nothing
-calls back into the `alp_orchestrate` package.
+`_resolve_silicon_variant`), `memregion` (`_region_size_bytes`), and the
+flat top-level `whole_device_alias` (`is_whole_device_alias`, #2073);
+nothing calls back into the `alp_orchestrate` package. That last one is
+flat on purpose: `gen_zephyr_board.py` needs the same predicate and is
+outside the package, so it imports `whole_device_alias` too rather than
+`from alp_orchestrate.aperture import ...` -- the latter would pull in
+the whole orchestrator package (jsonschema, alp_project, alp_cli) just
+for one predicate, AND create a package-to-generator import loop with
+`alp_orchestrate/loader.py` / `secure.py`'s existing (and still
+necessary) deferred import of `gen_zephyr_board` going the other way.
 """
 
 from __future__ import annotations
@@ -27,6 +35,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from alp_project_loader import _resolve_silicon_variant, resolve_soc_path
+from whole_device_alias import is_whole_device_alias
 
 from .memregion import _region_size_bytes
 
@@ -154,7 +163,7 @@ def classify_region(
         return "unresolved"
     lo, hi = ext
     full_lo, full_hi = aperture
-    if lo == full_lo and hi == full_hi:
+    if is_whole_device_alias(ext, aperture):
         return "flash"  # whole-device alias -- the device itself
     if lo >= full_lo and hi <= full_hi:
         return "flash"  # strictly contained -- a partition inside the device
@@ -200,7 +209,7 @@ def is_partition_inside_aperture(
         return None
     lo, hi = ext
     full_lo, full_hi = aperture
-    if lo == full_lo and hi == full_hi:
+    if is_whole_device_alias(ext, aperture):
         return False  # the device itself -- extent equals the aperture exactly
     if lo >= full_lo and hi <= full_hi:
         return True  # proper subset -- a partition inside the device
