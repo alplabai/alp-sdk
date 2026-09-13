@@ -201,13 +201,21 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  * size); larger buffers must be split by the caller.  Worker-routed
  * poll-by-repeat, looped.
  *
- * If @p timeout_ms elapses while a frame's own retry is genuinely in flight
- * (the firmware has accepted it but not finished), this function does not
- * simply abandon it: it re-polls that SAME frame for a short additional
- * bounded grace to collect the outcome before giving up, so a completed job
- * cannot leak into and corrupt a LATER, unrelated call. If even that grace
+ * If a frame's own attempt times out, or hits a transport-lock timeout on a
+ * retry, while the firmware may genuinely have accepted it and not finished,
+ * this function does not simply abandon it: it re-polls that SAME frame for
+ * a short additional bounded grace to collect the outcome before giving up.
+ * Without that grace, the firmware's opcode-keyed worker slot could hand an
+ * abandoned-but-later-completed job to the NEXT, unrelated call instead --
+ * this closes that window for a host built against firmware that has not yet
+ * added its own stale-seq discard; against firmware that has, the job is
+ * simply dropped rather than misattributed either way. If even the grace
  * expires, @p sent_out is a LOWER BOUND, not an exact count -- the frame may
- * still complete and be collected by a future call.
+ * still complete and be collected by a later, unrelated call (or be dropped,
+ * depending on the firmware version). If the grace instead collects a
+ * genuine, definitive non-OK status (e.g. a decoded device-side error), that
+ * status is returned directly and @p sent_out is EXACT, not a lower bound --
+ * that frame is done, not merely timed out.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
@@ -217,7 +225,9 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  *                    iteration (may be NULL) -- @p len on ALP_OK; on
  *                    ALP_ERR_TIMEOUT, an EXACT partial count if the last
  *                    in-flight frame's outcome was collected (see above), or
- *                    a LOWER BOUND if even the collection grace expired.
+ *                    a LOWER BOUND if even the collection grace expired; on
+ *                    any other error, EXACT (that frame will not resolve
+ *                    differently).
  * @param timeout_ms  Upper bound on the total send budget, across every
  *                    iteration -- may be modestly exceeded by one bounded
  *                    collection grace (see above) to avoid leaving a job

@@ -134,28 +134,47 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  * link on a peer that simply isn't reading; a short, budget-bounded sleep
  * between zero-progress attempts keeps this a poll, not a hot loop.
  *
- * Reused below as the MINIMUM remaining budget worth starting a new iteration
- * over (review finding 1): less than one back-off's worth of time left is not
- * enough to plausibly get a fresh frame answered before the deadline anyway,
- * so starting one would just walk straight into the collection-grace path
- * below for no benefit -- stopping a little earlier is strictly better. */
+ * Also reused below as the MINIMUM remaining budget worth starting a new
+ * iteration over (alp-sdk#2035): less than one back-off's worth of time left
+ * is not enough to plausibly get a fresh frame answered before the deadline
+ * anyway, so starting one would just walk straight into the collection-grace
+ * path below for no benefit -- stopping a little earlier is strictly better.
+ * Checked at the TOP of every iteration but the first (which always runs
+ * regardless of budget, matching poll_by_repeat()'s own "at least one
+ * attempt" contract) -- specifically INCLUDING right after this back-off's
+ * own sleep, not just before it: checking only beforehand and then sleeping
+ * the full amount unconditionally could hand the next iteration a sliver as
+ * small as zero (a tick landed exactly on the deadline) or a few ms (this
+ * back-off ran right up against it), and firmware answers BUSY to any new
+ * frame's first poll -- so that sliver would routinely time out into the
+ * grace window below, making an overrun of timeout_ms the NORMAL ending
+ * under backpressure instead of a rare edge. */
 #define CC3501E_SOCK_SEND_BACKOFF_MS 20u
 
 /* Bounded grace window used ONLY to COLLECT an already-submitted SOCK_SEND
  * frame's outcome after this function's own per-iteration poll_by_repeat()
- * call reports ALP_ERR_TIMEOUT (review finding 1, MAJOR): that status does
- * not mean nothing happened on the wire.  A shrinking per-iteration budget
- * can hit a window where the firmware has already accepted this exact frame
- * (answered RESP_ERR_BUSY -- a genuinely retryable "still running", not a
- * reject) and, thanks to #107's now-non-blocking send, would resolve it
- * almost immediately -- but poll_by_repeat()'s OWN deadline (derived from
- * OUR shrunk budget) expires first and it gives up. Abandoning the frame
- * there would leave that completed job sitting uncollected in the firmware's
- * single-slot worker-poll cache, which matches PENDING REPLIES BY OPCODE
- * ALONE (cc3501e-bridge-firmware src/worker.c:614) -- so the NEXT,
- * completely unrelated cc3501e_sock_send() call (a different seq, different
- * data) would collect THIS stale reply as its own, reporting ALP_OK having
- * queued nothing of its own data.
+ * call reports ALP_ERR_TIMEOUT, or ALP_ERR_BUSY from a transport-lock
+ * acquire timing out on a retry attempt (cc3501e_lock_acquire() inside
+ * poll_by_repeat(), returned straight through with no retry of its own --
+ * cc3501e_core.c) (alp-sdk#2035): neither status means nothing happened on
+ * the wire. A shrinking per-iteration budget, or contention on the shared
+ * per-ctx transport lock, can hit a window where the firmware has already
+ * accepted this exact frame (answered RESP_ERR_BUSY -- a genuinely
+ * retryable "still running", not a reject) and, thanks to #107's now-non-
+ * blocking send, would resolve it almost immediately -- but this function's
+ * OWN per-iteration deadline (or the lock) gives up first. Abandoning the
+ * frame there would leave that completed job sitting uncollected in the
+ * firmware's single-slot worker-poll cache, which matches PENDING REPLIES BY
+ * OPCODE ALONE (cc3501e-bridge-firmware's `src/worker.c`, around line 614)
+ * -- so the NEXT, completely unrelated cc3501e_sock_send() call (a different
+ * seq, different data) would collect THIS stale reply as its own, reporting
+ * ALP_OK having queued nothing of ITS OWN data (the abandoned frame's bytes
+ * were still genuinely sent to the peer -- this is a host-side bookkeeping
+ * bug, not data loss on the wire). A planned firmware change
+ * (cc3501e-bridge-firmware#107 follow-up) adds a seq check so a stale
+ * completion is discarded rather than collected by a mismatched seq; this
+ * fix is correct either way -- with that check, an unresolved job here is
+ * simply dropped by the firmware instead of misattributed.
  *
  * Re-issuing the SAME frame (same seq, same remaining bytes -- see the seq
  * comment inside the loop below) for this bounded grace either (a) collects
@@ -172,8 +191,10 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  * report, needs only to be polled a handful more times to be collected --
  * this does not need to cover a fresh worst-case op, only the tail of one
  * already in flight. If even this expires, cc3501e_sock_send() returns
- * ALP_ERR_TIMEOUT with *sent_out as a LOWER BOUND, not an exact count -- see
- * <alp/chips/cc3501e/sockets.h>. */
+ * ALP_ERR_TIMEOUT with *sent_out as a LOWER BOUND, not an exact count; if it
+ * instead collects a genuine, definitive non-OK status (e.g. a decoded
+ * device-side error), that status is returned directly and *sent_out is
+ * exact, not a lower bound -- see <alp/chips/cc3501e/sockets.h>. */
 #define CC3501E_SOCK_SEND_COLLECT_GRACE_MS 250u
 
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
@@ -229,8 +250,25 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 	 * budgets whatever is genuinely left of it. */
 	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
 	alp_status_t   s;
+	bool           first_iteration = true;
 
 	for (;;) {
+		if (!first_iteration) {
+			/* alp-sdk#2035: do not start a new iteration once less than one
+			 * back-off's worth of budget remains -- see
+			 * CC3501E_SOCK_SEND_BACKOFF_MS's comment above. Checked here, at
+			 * the TOP of every iteration but the first, so it re-reads the
+			 * clock AFTER this iteration's own back-off sleep (below) too,
+			 * not just before it. */
+			uint64_t now_top  = alp_uptime_ms();
+			uint64_t left_top = (now_top >= deadline_ms) ? 0u : (deadline_ms - now_top);
+			if (left_top < (uint64_t)CC3501E_SOCK_SEND_BACKOFF_MS) {
+				s = ALP_ERR_TIMEOUT;
+				break;
+			}
+		}
+		first_iteration = false;
+
 		uint8_t *p = ctx->sock_buf;
 		p[0]       = (uint8_t)(handle & 0xFFu);
 		p[1]       = (uint8_t)((handle >> 8) & 0xFFu);
@@ -278,13 +316,16 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		                                  &got,
 		                                  budget);
 
-		if (s == ALP_ERR_TIMEOUT) {
-			/* Review finding 1 (MAJOR): do not abandon a frame poll_by_repeat()
-			 * may have already gotten a genuine RESP_ERR_BUSY for -- collect it
-			 * first.  See CC3501E_SOCK_SEND_COLLECT_GRACE_MS's comment above for
-			 * the full why.  Re-sends the IDENTICAL `p` buffer untouched, so the
-			 * seq (p[3]) and remaining_len are unchanged -- this is a retry of
-			 * THIS iteration, not a new one. */
+		if (s == ALP_ERR_TIMEOUT || s == ALP_ERR_BUSY) {
+			/* alp-sdk#2035: do not abandon a frame this attempt may have
+			 * already gotten a genuine RESP_ERR_BUSY for -- collect it first.
+			 * See CC3501E_SOCK_SEND_COLLECT_GRACE_MS's comment above for the
+			 * full why, including why ALP_ERR_BUSY (a transport-lock timeout
+			 * on a retry attempt, returned straight through by
+			 * poll_by_repeat() with no retry of its own) is routed here too,
+			 * not just ALP_ERR_TIMEOUT. Re-sends the IDENTICAL `p` buffer
+			 * untouched, so the seq (p[3]) and remaining_len are unchanged --
+			 * this is a retry of THIS iteration, not a new one. */
 			uint8_t      grace_reply[2] = { 0 };
 			size_t       grace_got      = 0;
 			alp_status_t grace_s        = poll_by_repeat(ctx,
@@ -309,20 +350,31 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 					/* Collected -- the caller's timeout_ms already elapsed to get
 					 * here, so ALP_OK is only warranted if that collection
 					 * happened to finish the whole send; otherwise this is still
-					 * a (now exact, not a lower bound) TIMEOUT. */
+					 * a (now exact, not a lower bound -- the collected count is
+					 * final) TIMEOUT. */
 					s = (remaining_len == 0u) ? ALP_OK : ALP_ERR_TIMEOUT;
 				}
+			} else if (grace_s != ALP_ERR_TIMEOUT && grace_s != ALP_ERR_BUSY) {
+				/* Grace decoded a genuine, definitive non-OK status -- e.g.
+				 * ALP_ERR_IO for a real device-side error such as a peer
+				 * reset. This frame is DONE, not merely timed out: surface
+				 * the real status to the caller instead of masking it as
+				 * ALP_ERR_TIMEOUT, and *sent_out (below) is exact, not a
+				 * lower bound -- this frame will never resolve differently. */
+				s = grace_s;
+			} else {
+				/* Grace itself timed out, or hit ANOTHER lock-acquire
+				 * timeout, or replayed the SAME transient condition the
+				 * original attempt saw -- none of those are distinguishable
+				 * from here, and none of them resolve this frame. Report the
+				 * caller's declared budget as exceeded either way; *sent_out
+				 * (below) is a LOWER BOUND -- the job may still complete and
+				 * be collected by some later, unrelated call (or, once
+				 * cc3501e-bridge-firmware's SOCK_SEND stale-seq discard
+				 * ships, simply be dropped by the firmware instead). See
+				 * <alp/chips/cc3501e/sockets.h>. */
+				s = ALP_ERR_TIMEOUT;
 			}
-			/* grace_s != ALP_OK: the grace window ALSO could not resolve this
-			 * frame (still busy, or a transport/firmware error). `s` keeps
-			 * poll_by_repeat()'s original ALP_ERR_TIMEOUT (or, if grace_s
-			 * decoded a terminal reject/error, that IS a genuine resolution --
-			 * but this function's contract to ITS caller is still "the
-			 * declared timeout_ms was exceeded", so TIMEOUT is what
-			 * propagates either way); total_sent is a LOWER BOUND -- the job
-			 * may still complete and be collected by some later, unrelated
-			 * call. Documented on ALP_ERR_TIMEOUT in
-			 * <alp/chips/cc3501e/sockets.h>. */
 			break;
 		}
 		if (s != ALP_OK) break; /* terminal transport/firmware error -- return it now, as today */
@@ -344,20 +396,10 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		if (remaining_len == 0u) break; /* every byte of len is now queued */
 		if (queued > 0u) remaining += queued;
 
-		now           = alp_uptime_ms();
-		uint64_t left = (now >= deadline_ms) ? 0u : (deadline_ms - now);
-		if (left < (uint64_t)CC3501E_SOCK_SEND_BACKOFF_MS) {
-			/* Review finding 1 (MAJOR): not enough budget left to make another
-			 * iteration worth starting -- see CC3501E_SOCK_SEND_BACKOFF_MS's
-			 * comment above. Stop now rather than submit a new frame almost
-			 * certain to need the collection grace above anyway. */
-			s = ALP_ERR_TIMEOUT;
-			break;
-		}
 		if (queued == 0u) {
-			/* Zero progress this iteration: back off before the next one.
-			 * `left >= CC3501E_SOCK_SEND_BACKOFF_MS` was just proven above, so
-			 * this fixed sleep can never overshoot the deadline. */
+			/* Zero progress this iteration: back off before the next one --
+			 * the next loop iteration's own top-of-loop check (above) re-reads
+			 * the clock AFTER this sleep and stops there if it now overshoots. */
 			alp_delay_ms(CC3501E_SOCK_SEND_BACKOFF_MS);
 		}
 		/* Partial progress: loop again immediately -- no back-off needed, the

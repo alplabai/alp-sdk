@@ -32,36 +32,45 @@ queued or `timeout_ms` elapses:
 - Zero-progress iterations back off a fixed 20 ms before retrying, so a peer
   that never reads cannot turn this into a hot loop hammering the SPI link;
   partial-progress iterations continue immediately. A new iteration is never
-  started once less than that 20 ms remains -- it would almost certainly need
-  the collection grace below anyway, so stopping proactively is strictly
-  better.
+  started once less than that 20 ms remains -- checked fresh at the top of
+  every iteration but the first, specifically INCLUDING right after the
+  back-off's own sleep, not just before it (checking only beforehand could
+  hand the next iteration a sliver too small to plausibly get a fresh frame
+  answered, making an overrun of `timeout_ms` the normal ending under
+  backpressure instead of a rare edge).
 - `sent_out` now reports the **total** queued across every iteration: the
   full `len` on `ALP_OK`, or a partial count on `ALP_ERR_TIMEOUT` so a caller
-  that does check it can recover. A non-`ALP_OK` status from
-  `poll_by_repeat()` itself still returns immediately, unchanged.
-- **Review follow-up, MAJOR.** A `timeout_ms` that runs out while a frame's
-  own `poll_by_repeat()` retry is genuinely in flight (the firmware answered
-  `RESP_ERR_BUSY` -- it accepted the job but has not finished) used to
-  abandon that frame outright on `ALP_ERR_TIMEOUT`. Because the firmware's
-  worker-poll cache matches a pending completion by **opcode alone**
-  (cc3501e-bridge-firmware's `src/worker.c`, around line 614), an abandoned-but-later-
-  completed job would sit there uncollected and get handed to the **next**,
-  completely unrelated `cc3501e_sock_send()` call as if it were that call's
-  own reply -- reporting `ALP_OK` having queued nothing of the new data.
-  Fixed with a bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`, 250 ms) post-
-  timeout re-poll of the SAME frame (same seq, same remaining bytes) to
-  collect its outcome before giving up: if that collects the queued count,
-  it is folded into `sent_out` (exact, not a lower bound); if the grace also
-  expires, `sent_out` is documented as a LOWER bound -- the job may still
+  that does check it can recover.
+- **Review follow-up.** A `timeout_ms` that runs out while a frame's own
+  `poll_by_repeat()` retry is genuinely in flight (the firmware answered
+  `RESP_ERR_BUSY` -- it accepted the job but has not finished), or a
+  transport-lock acquire timing out on a retry attempt (`poll_by_repeat()`
+  returns that straight through with no retry of its own), used to abandon
+  that frame outright. Because the firmware's worker-poll cache matches a
+  pending completion by **opcode alone** (cc3501e-bridge-firmware's
+  `src/worker.c`, around line 614), an abandoned-but-later-completed job
+  would sit there uncollected and get handed to the **next**, completely
+  unrelated `cc3501e_sock_send()` call as if it were that call's own reply --
+  reporting `ALP_OK` having queued nothing of the new data (a planned
+  firmware-side stale-seq discard makes that job get dropped instead of
+  misattributed, but the fix here is correct either way). Fixed with a
+  bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`, 250 ms) post-timeout re-poll
+  of the SAME frame (same seq, same remaining bytes) to collect its outcome
+  before giving up: if that collects the queued count, it is folded into
+  `sent_out` (exact, not a lower bound); if the grace instead collects a
+  genuine, definitive non-OK status (e.g. a decoded device-side error), that
+  status is returned directly and `sent_out` is exact -- that frame is done,
+  not merely timed out; if the grace itself times out or hits another lock
+  timeout, `sent_out` is documented as a LOWER bound -- the job may still
   complete and be collected by a later, unrelated call.
-- **Review follow-up, minor.** A decoded `ALP_OK` reply with fewer than 2
-  data bytes (a firmware/wire gap, not backpressure) used to fold silently
-  into "0 queued" and retry to the whole budget; it now returns `ALP_ERR_IO`
+- **Review follow-up.** A decoded `ALP_OK` reply with fewer than 2 data bytes
+  (a firmware/wire gap, not backpressure) used to fold silently into "0
+  queued" and retry to the whole budget; it now returns `ALP_ERR_IO`
   immediately, same as the equivalent short-reply guard in
   `cc3501e_sock_open()`.
 
 `<alp/chips/cc3501e/sockets.h>`'s `cc3501e_sock_send()` doc comment is updated
 to state the new contract, including the exact-vs-lower-bound `sent_out`
-distinction on `ALP_ERR_TIMEOUT`. No caller changes needed -- this is what
-makes every existing `NULL`-`sent_out` caller correct again under the
-firmware change instead of only by accident.
+distinction on `ALP_ERR_TIMEOUT` and on any other error. No caller changes
+needed -- this is what makes every existing `NULL`-`sent_out` caller correct
+again under the firmware change instead of only by accident.
