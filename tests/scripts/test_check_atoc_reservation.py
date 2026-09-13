@@ -10,7 +10,9 @@ logic is removed, and the real `origin/dev` board tree reproduces exactly the
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -52,6 +54,32 @@ _TILED_STORAGE_AT_TOP = (
     "  - { name: reserved, base: 0x80550000, size_kib: 64,   carveout: false }\n"
     "  - { name: storage,  base: 0x80560000, size_kib: 128,  carveout: false }\n"
 )
+
+# Same shape as _TILED_STORAGE_AT_TOP but split into a `reserved` + 96 KiB
+# `storage` + 32 KiB `atoc` tail (96 + 32 == 128, so the aperture math is
+# unchanged) with every `write_authority` authored, atoc correctly at the
+# top with a NON-runtime-writable authority (#2086 review round 2): the
+# safe baseline case (e) -- storage's own `customer_runtime` sits well
+# below the top and must not trip the new guard.
+_TILED_SAFE_ATOC_AT_TOP = (
+    "  - { name: mcuboot,  base: 0x80000000, size_kib: 64,   carveout: false, "
+    "write_authority: vendor_image }\n"
+    "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, carveout: false, "
+    "write_authority: customer_image }\n"
+    "  - { name: hp_slot0, base: 0x802b0000, size_kib: 2688, carveout: false, "
+    "write_authority: customer_image }\n"
+    "  - { name: reserved, base: 0x80550000, size_kib: 64,   carveout: false, "
+    "write_authority: none }\n"
+    "  - { name: storage,  base: 0x80560000, size_kib: 96,   carveout: false, "
+    "write_authority: customer_runtime }\n"
+    "  - { name: atoc,     base: 0x80578000, size_kib: 32,   carveout: false, "
+    "write_authority: secure_enclave }\n"
+)
+
+# Same as _TILED_SAFE_ATOC_AT_TOP but the top row itself (`atoc`) is
+# runtime-writable -- case (a): a CORRECTLY-NAMED top row is not enough.
+_TILED_RUNTIME_ATOC_AT_TOP = _TILED_SAFE_ATOC_AT_TOP.replace(
+    "write_authority: secure_enclave }\n", "write_authority: customer_runtime }\n")
 
 
 def _dts(partitions: "list[tuple[str, int, int]]") -> str:
@@ -339,6 +367,123 @@ class TestPresetCheckApertureTopRule(unittest.TestCase):
             "  - { name: atoc,      base: 0x80578000, size_kib: 32,   carveout: false }\n"
             "  - { name: hyperram,  base: 0xa0000000, size_mib: 64 }\n"
             "  - { name: ospi0_nor, base: 0xa0000000, size_mib: 32 }\n")
+        self.assertEqual(atoc._check_preset(p), [])
+
+
+class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
+    """#2086 review round 1: the top-of-window rule must refuse ANY row
+    ending at the declared window top that is runtime-writable, not just
+    one mis-named. ONE guard (`_check_top_write_authority`, called from
+    both the aperture branch and the no-aperture fallback) replaces the
+    two per-site 4b/4c copies removed by this round -- these cases are
+    what that consolidation must still catch, split out from
+    TestPresetCheckApertureTopRule because they exercise the guard, not
+    the aperture-scoping fix #2069 already covers."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+        self._orig_repo = atoc.REPO
+        atoc.REPO = self.tmp
+
+    def tearDown(self):
+        atoc.REPO = self._orig_repo
+        self._tmpdir.cleanup()
+
+    def _preset(self, body: str) -> Path:
+        p = self.tmp / "E1M-TEST.yaml"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_a_correctly_named_atoc_row_with_customer_runtime_fails(self):
+        """Case (a): naming the top row 'atoc' is not enough. Fully
+        tiled with every other row's authority non-runtime-writable, so
+        the single failure can only be the new guard."""
+        p = self._preset(_SILICON_HEADER + "memory_map:\n" + _TILED_RUNTIME_ATOC_AT_TOP)
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("'atoc'", failures[0])
+        self.assertIn("customer_runtime", failures[0])
+
+    def test_b_whole_device_alias_with_customer_runtime_fails_aperture_resolving(self):
+        """Case (b): a whole-device alias's extent always reaches the
+        aperture top too, so the SAME guard catches it -- no separate
+        4b/4c copy needed. Exactly one failure: the safe six-band layout
+        underneath contributes none of its own (4b tiles exactly, 4c's
+        rows all carry carveout: false)."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+            "carveout: false, write_authority: customer_runtime }\n"
+            + _TILED_SAFE_ATOC_AT_TOP)
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("mram_alias", failures[0])
+        self.assertIn("customer_runtime", failures[0])
+
+    def test_c_whole_device_alias_with_customer_runtime_fails_no_aperture_fallback(self):
+        """Case (c): same as (b) but no `silicon:` resolves -- no
+        aperture, so 4b/4c are skipped entirely (`_check_preset`'s own
+        `if aperture is not None:` guard) and the ONLY thing that can
+        fire is the no-aperture fallback branch's copy of this guard
+        (review round 1, finding 2)."""
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+            "carveout: false, write_authority: customer_runtime }\n"
+            + _TILED_SAFE_ATOC_AT_TOP)
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("mram_alias", failures[0])
+        self.assertIn("customer_runtime", failures[0])
+
+    def test_d_composite_stays_exempt(self):
+        """Case (d), value 1 of 3: `composite` -- mram_main's real
+        value -- is the whole-device alias's OWN tag today and must stay
+        exempt."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+            "carveout: false, write_authority: composite }\n"
+            + _TILED_SAFE_ATOC_AT_TOP)
+        self.assertEqual(atoc._check_preset(p), [])
+
+    def test_d_none_stays_exempt(self):
+        """Case (d), value 2 of 3: `none` (nobody writes it) stays exempt."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+            "carveout: false, write_authority: none }\n"
+            + _TILED_SAFE_ATOC_AT_TOP)
+        self.assertEqual(atoc._check_preset(p), [])
+
+    def test_d_absent_authority_stays_exempt_but_is_skip_noted(self):
+        """Case (d), value 3 of 3: an ABSENT `write_authority` is
+        unresolved, never `customer_runtime` (ADR-0034 clause 4), so it
+        must stay exempt too -- but the schema also says a consumer must
+        treat it as ineligible for runtime write "and say so" (review
+        round 1, finding 6): asserts the checker's existing SKIP-note
+        channel actually fires, naming the row, not silence."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+            "carveout: false }\n"
+            + _TILED_SAFE_ATOC_AT_TOP)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            failures = atoc._check_preset(p)
+        self.assertEqual(failures, [])
+        printed = buf.getvalue()
+        self.assertIn("SKIP", printed)
+        self.assertIn("mram_alias", printed)
+
+    def test_e_runtime_writable_row_not_at_the_top_is_unaffected(self):
+        """Case (e): `storage`'s own `write_authority: customer_runtime`
+        in the safe baseline sits well below the declared top (`atoc`
+        owns it, non-runtime-writable) -- the guard must not fire just
+        because SOME row in the file is runtime-writable."""
+        p = self._preset(_SILICON_HEADER + "memory_map:\n" + _TILED_SAFE_ATOC_AT_TOP)
         self.assertEqual(atoc._check_preset(p), [])
 
 
