@@ -843,6 +843,18 @@ static void slave_dispatch(void)
 		uint16_t dl  = (uint16_t)slave.req_pl[4] | ((uint16_t)slave.req_pl[5] << 8);
 		uint8_t  seq = slave.req_pl[3];
 
+		/* alp-sdk#2035 review follow-up: the seqguard firmware
+		 * (cc3501e-bridge-firmware#134) rejects a frame whose actual length
+		 * does not match its OWN declared data_len (protocol_sockets.c
+		 * ~236: req_len != 8 + data_len -> RESP_ERR_INVALID) -- catching a
+		 * host that offers a shrunk/grown data_len but still ships the OLD
+		 * (or a wrong) byte count. Checked before anything else, same as
+		 * the real handler. */
+		if (slave.req_len != (uint16_t)(8u + dl)) { /* 8 == the SOCK_SEND wire header */
+			stage_status(ALP_CC3501E_RESP_ERR_INVALID);
+			break;
+		}
+
 		if (g_sock_send_short_reply) {
 			/* Malformed reply: ALP_OK with only 1 data byte, not the 2 a real
 			 * queued-count needs (alp-sdk#2035). RESP_OK_LEGACY (the unpadded
@@ -2778,7 +2790,8 @@ ZTEST(cc3501e_host_driver,
 	              "still exactly one execution -- call 2 never got to submit its own body");
 }
 
-/* alp-sdk#2035 review follow-up: the shipping bridge's per-seq reply cache is
+/* alp-sdk#2035 review follow-up: a bridge with cc3501e-bridge-firmware#107
+ * (PR #134)'s per-seq reply cache is
  * invalidated the instant a DIFFERENT seq is dispatched (cache_valid=false
  * as soon as an incoming seq mismatches it -- BEFORE anything else), so a
  * host seq that later wraps back to a value the cache once held finds

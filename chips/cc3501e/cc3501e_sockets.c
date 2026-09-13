@@ -159,8 +159,9 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  * (answered RESP_ERR_BUSY -- a genuinely retryable "still running", not a
  * reject) and, thanks to #107's now-non-blocking send, would resolve it
  * almost immediately -- but this function's OWN per-iteration deadline gives
- * up first. The shipping bridge (cc3501e-bridge-firmware
- * fix/107-bound-sock-send-seqguard) bounds, but does not close, what
+ * up first. A bridge with cc3501e-bridge-firmware#107 (PR #134,
+ * fix/107-bound-sock-send-seqguard -- not yet merged/released) bounds, but
+ * does not close, what
  * abandoning that frame here would risk: it discards a finished-but-
  * uncollected job outright once a request with a DIFFERENT seq arrives, so a
  * stale completion is never handed to the wrong caller as if it were that
@@ -295,16 +296,19 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		 * WRAP: sock_send_seq is a uint8_t, so it wraps 255 -> 0 after 256
 		 * increments (defined unsigned overflow, not UB). That CAN alias a
 		 * stale cache entry -- contrary to what this comment used to claim.
-		 * The shipping bridge (cc3501e-bridge-firmware
-		 * fix/107-bound-sock-send-seqguard) invalidates its reply cache the
-		 * instant a DIFFERENT seq is DISPATCHED, which narrows the window to
-		 * 255 consecutive frames whose seq increments but which never reach
-		 * that dispatch at all -- e.g. this driver reporting NOT_READY, a
-		 * cc3501e_lock_acquire() timeout (nothing sent), or the link being
-		 * down the whole time -- not any 255 frames. It does NOT close the
-		 * window: if that happens, the 256th attempt's seq wraps back to a
-		 * value the cache still holds, and that new send is answered with
-		 * the stale cached count instead of executing. */
+		 * (Firmware without #107 at all has no seq-vs-cache check either, so
+		 * it can answer a brand-new send with a previous send's cached
+		 * count on far less than a full wrap.) A bridge with
+		 * cc3501e-bridge-firmware#107 (PR #134, fix/107-bound-sock-send-
+		 * seqguard -- not yet merged/released) invalidates its reply cache
+		 * the instant a DIFFERENT seq is DISPATCHED, which narrows the
+		 * window to 255 consecutive frames whose seq increments but which
+		 * never reach that dispatch at all -- e.g. this driver reporting
+		 * NOT_READY, a cc3501e_lock_acquire() timeout (nothing sent), or the
+		 * link being down the whole time -- not any 255 frames. It does NOT
+		 * close the window: if that happens, the 256th attempt's seq wraps
+		 * back to a value the cache still holds, and that new send is
+		 * answered with the stale cached count instead of executing. */
 		p[3] = ++ctx->sock_send_seq;
 		p[4] = (uint8_t)(remaining_len & 0xFFu);
 		p[5] = (uint8_t)((remaining_len >> 8) & 0xFFu);

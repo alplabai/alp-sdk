@@ -209,17 +209,23 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  * reached the bridge at all, an unambiguous @c ALP_ERR_BUSY returned
  * directly). Without the grace, the bridge's single worker slot could hand
  * an abandoned-but-later-completed job to the NEXT, unrelated call instead;
- * the shipping bridge discards such a job once a different-seq request
- * arrives, so a later call is never handed a stale count, but that job's
+ * a bridge with cc3501e-bridge-firmware#107 (PR #134) discards such a job
+ * once a different-seq request arrives, so a later call is never handed a
+ * stale count, but that job's
  * bytes were still queued -- this grace is the only way left to learn how
  * many. If even the grace expires, @p sent_out is a LOWER BOUND, not an
  * exact count, and the socket's stream position from here on is UNKNOWN:
  * do not resume from a lower bound -- retrying assuming it is exact
  * duplicates bytes the bridge already queued. Close the socket instead. If
  * the grace instead collects a genuine, definitive non-OK status (e.g. a
- * decoded device-side error), that status is returned directly and
- * @p sent_out is EXACT, not a lower bound -- that frame is done, not merely
- * timed out.
+ * decoded device-side error), that status is returned directly -- but
+ * @p sent_out is NOT exact even then: the bridge's own lwIP stack can queue
+ * bytes and still fail the send afterwards (tcp_write() succeeding, a later
+ * tcp_output() returning an error), so a decoded device error on THIS frame
+ * means @p sent_out only covers the earlier, already-collected frames, this
+ * frame's own byte count is unknowable, and the stream position from here on
+ * is just as unknown as the lower-bound case above -- close the socket
+ * instead of resuming.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
@@ -230,9 +236,12 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  *                    ALP_ERR_TIMEOUT, an EXACT partial count if the last
  *                    in-flight frame's outcome was collected (see above), or
  *                    a LOWER BOUND -- safe only to report, NOT to resume
- *                    from -- if even the collection grace expired; on any
- *                    other error, EXACT (that frame will not resolve
- *                    differently).
+ *                    from -- if even the collection grace expired; on a
+ *                    decoded device error, covers only the earlier frames
+ *                    already collected -- the failing frame's own count is
+ *                    unknowable (the bridge's lwIP stack can queue bytes and
+ *                    still fail the send), so treat it like the LOWER BOUND
+ *                    case: safe to report, not to resume from.
  * @param timeout_ms  Upper bound on the total send budget, across every
  *                    iteration -- may be modestly exceeded by one bounded
  *                    collection grace (see above) to avoid leaving a job
@@ -245,7 +254,8 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  *         timeout on the very first attempt meant nothing was sent;
  *         ALP_ERR_IO if a decoded reply's queued-byte count is malformed;
  *         ALP_ERR_INVAL if @p len exceeds one frame; ALP_ERR_NOT_READY on
- *         the stub build; mapped error otherwise.
+ *         the stub build; mapped error otherwise, with @p sent_out again only
+ *         a LOWER BOUND -- close the socket, do not resume.
  */
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,

@@ -443,10 +443,15 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);
  * Thread-safe (issue #1116): the byte-walk clocks the same CS-less bus as
  * @ref cc3501e_request, so it runs under the same transport lock and holds
  * it for the whole walk — re-aligning to the slave's header boundary is
- * only meaningful if nothing else moves the bus underneath it.  A request
- * issued concurrently therefore gets @ref ALP_ERR_BUSY from its own bounded
- * acquire, which is the honest answer: the link is by definition unusable
- * until the re-sync completes.
+ * only meaningful if nothing else moves the bus underneath it.  A direct
+ * cc3501e_request() call issued concurrently gets @ref ALP_ERR_BUSY from its
+ * own bounded acquire, which is the honest answer: the link is by
+ * definition unusable until the re-sync completes.  A poll_by_repeat()
+ * caller (alp-sdk#2035) only gets that same @ref ALP_ERR_BUSY on its very
+ * FIRST lock attempt; past that, it instead waits out the sync within its
+ * own deadline (retrying the lock acquire like any other retryable BUSY),
+ * so it can block up to its own timeout_ms plus one more lock wait before
+ * giving up.
  *
  * @param ctx         Initialised driver context.
  * @param timeout_ms  Coarse upper bound on re-sync effort (each ~ms covers

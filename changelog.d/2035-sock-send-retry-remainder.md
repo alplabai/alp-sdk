@@ -49,40 +49,43 @@ queued or `timeout_ms` elapses:
   duplicates whatever the bridge already queued for the abandoned frame.
   After a lower-bound `ALP_ERR_TIMEOUT`, close the socket instead of
   resuming.
-- **Review follow-up.** A `timeout_ms` that runs out while a frame's own
-  `poll_by_repeat()` retry is genuinely in flight (the firmware answered
-  `RESP_ERR_BUSY` -- it accepted the job but has not finished) used to
-  abandon that frame outright. The shipping bridge
-  (cc3501e-bridge-firmware `fix/107-bound-sock-send-seqguard`) discards a
-  finished-but-uncollected job once a request with a different seq arrives,
-  so a later, unrelated `cc3501e_sock_send()` call is never handed a stale
-  count as if it were its own reply -- but that job's bytes were still
-  queued, and once discarded, that count is gone for good. Fixed with a
-  bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`, 250 ms) post-timeout re-poll
-  of the SAME frame (same seq, same remaining bytes) to collect its outcome
-  before giving up: if that collects the queued count, it is folded into
-  `sent_out` (exact, not a lower bound); if the grace instead collects a
-  genuine, definitive non-OK status (e.g. a decoded device-side error), that
-  status is returned directly and `sent_out` is exact -- that frame is done,
-  not merely timed out; if the grace itself cannot resolve it, `sent_out` is
-  documented as a LOWER bound.
-- **Review follow-up.** `ALP_ERR_BUSY` does NOT enter that grace: a
-  transport-lock-acquire timeout on `poll_by_repeat()`'s very FIRST attempt
-  means no frame reached the bridge at all, so it is unambiguous and is
-  returned directly. `poll_by_repeat()` itself now also retries a
-  lock-acquire timeout on a LATER attempt within its own deadline instead of
-  returning `ALP_ERR_BUSY` immediately, since by then an earlier attempt
-  already reached the bridge and that status would misreport "nothing
-  sent". This is a small behaviour change for every `poll_by_repeat()`
-  caller: a rare, concurrent-lock-contention `ALP_ERR_BUSY` that used to be
-  indistinguishable from (for `cc3501e_ble_gatt_register()`) a genuine
-  terminal firmware reject now correctly comes back as `ALP_ERR_TIMEOUT`
-  instead once the whole budget is exhausted contended.
-- **Review follow-up.** A decoded `ALP_OK` reply with fewer than 2 data bytes
-  (a firmware/wire gap, not backpressure) used to fold silently into "0
-  queued" and retry to the whole budget; it now returns `ALP_ERR_IO`
-  immediately, same as the equivalent short-reply guard in
-  `cc3501e_sock_open()`.
+- A `timeout_ms` that runs out while a frame's own `poll_by_repeat()` retry
+  is genuinely in flight (the firmware answered `RESP_ERR_BUSY` -- it
+  accepted the job but has not finished) used to abandon that frame
+  outright. A bridge with cc3501e-bridge-firmware#107 (PR #134, not yet
+  merged/released) discards a finished-but-uncollected job once a request
+  with a different seq arrives, so a later, unrelated `cc3501e_sock_send()`
+  call is never handed a stale count as if it were its own reply -- but
+  that job's bytes were still queued, and once discarded, that count is
+  gone for good. Fixed with a bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`,
+  250 ms) post-timeout re-poll of the SAME frame (same seq, same remaining
+  bytes) to collect its outcome before giving up: if that collects the
+  queued count, it is folded into `sent_out` (exact, not a lower bound); if
+  the grace instead collects a genuine, definitive non-OK status (e.g. a
+  decoded device-side error), that status is returned directly, but
+  `sent_out` is NOT exact even then -- the bridge's lwIP stack can queue
+  bytes and still fail the send afterwards, so `sent_out` covers only the
+  earlier, already-collected frames and the stream position from here on is
+  just as unknown as a LOWER bound; if the grace itself cannot resolve it,
+  `sent_out` is likewise documented as a LOWER bound.
+- `ALP_ERR_BUSY` does NOT enter that grace: a transport-lock-acquire timeout
+  on `poll_by_repeat()`'s very FIRST attempt means no frame reached the
+  bridge at all, so it is unambiguous and is returned directly.
+  `poll_by_repeat()` itself now also retries a lock-acquire timeout on a
+  LATER attempt within its own deadline instead of returning `ALP_ERR_BUSY`
+  immediately, since by then an earlier attempt already reached the bridge
+  and that status would misreport "nothing sent". This is a small behaviour
+  change for every `poll_by_repeat()` caller: a rare, concurrent-lock-
+  contention `ALP_ERR_BUSY` that used to be indistinguishable from (for
+  `cc3501e_ble_gatt_register()`) a genuine terminal firmware reject now
+  correctly comes back as `ALP_ERR_TIMEOUT` instead once the whole budget
+  is exhausted contended; more generally, any `poll_by_repeat()` caller can
+  now block up to its own `timeout_ms` plus one more lock wait instead of
+  returning `ALP_ERR_BUSY` on a lock timeout past the first attempt.
+- A decoded `ALP_OK` reply with fewer than 2 data bytes (a firmware/wire gap,
+  not backpressure) used to fold silently into "0 queued" and retry to the
+  whole budget; it now returns `ALP_ERR_IO` immediately, same as the
+  equivalent short-reply guard in `cc3501e_sock_open()`.
 
 `<alp/chips/cc3501e/sockets.h>`'s `cc3501e_sock_send()` doc comment is updated
 to state the new contract, including the exact-vs-lower-bound `sent_out`
