@@ -16,6 +16,40 @@
  * DT-bound path here inherits the bus's own `clock-frequency` instead.
  * See issue #2066.
  *
+ * The device handle is resolved at RUNTIME, never via `DEVICE_DT_GET()`.
+ * `DEVICE_DT_GET()` emits a link-time reference to the generated
+ * `__device_dts_ord_N` object for that node -- which exists only if some
+ * driver actually instantiated it.  The `alp-temp0` node can be present
+ * and `okay`, with `CONFIG_SENSOR=y`, while no driver binds it:
+ * `scripts/gen_zephyr_board.py` emits `config TMP112` / `default n` into
+ * the AEN801 board `Kconfig.defconfig` (issue #2043) because
+ * `chips/tmp112/tmp112.c` and upstream `zephyr/drivers/sensor/ti/tmp112`
+ * both define `tmp112_init()` and collide at link time; an app that does
+ * not opt back in with its own `CONFIG_TMP112=y` (as
+ * `examples/aen/aen-temp-sensor` does) builds with the node
+ * un-instantiated.  `DEVICE_DT_GET()` there is an undefined reference --
+ * but only in that exact combination, `CONFIG_SENSOR=y` AND the alias
+ * present/`okay` AND no driver bound: the `#if` gate below already keeps
+ * the reference out of any build failing one of the first two conditions
+ * (that guard is necessary, just not sufficient); it is the third
+ * condition this file has no compile-time way to see (issue #2066
+ * follow-up).
+ *
+ * Nor is plain `device_get_binding()` a full fix by itself: Zephyr's own
+ * `z_impl_device_get_binding()` (kernel/device.c) returns NULL both when
+ * no device matches the name AND when a device matches but never became
+ * ready -- e.g. a TMP112 that IS instantiated but whose init failed
+ * because it NACKs at its configured address (the #1978 failure mode).
+ * Folding that into the same `ALP_ERR_NOSUPPORT` as "no sensor on this
+ * SoM" would make a fitted-but-dead sensor look identical, on the boot
+ * banner -- the one place a human reads this -- to a SoM with no sensor
+ * at all.  So this file scans the static device table itself and calls
+ * `device_is_ready()` separately, keeping "not found" and "found but not
+ * ready" distinguishable.  See `find_temp_dev()` below for the how/why of
+ * that scan.  This deliberately does NOT gate on any vendor/MPN Kconfig
+ * symbol (e.g. `CONFIG_TMP112`) -- that would pin the portable surface to
+ * one part; see <alp/temperature.h>.
+ *
  * UNLIKE its `hw_info_zephyr.c` sibling, this file is Zephyr-ONLY --
  * registered solely in zephyr/CMakeLists.txt, never in
  * src/common/CMakeLists.txt.  hw_info's EEPROM reader is built entirely
@@ -38,6 +72,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
@@ -59,13 +94,43 @@
  * "alias may not exist at all" case.  Gated on BOTH CONFIG_SENSOR and
  * the alias's own DT status: an app that never turns on the sensor
  * subsystem, or a board whose alias node is absent/disabled, both
- * collapse to the NOSUPPORT branch below.
+ * collapse to the NOSUPPORT branch below.  This is necessary but not
+ * sufficient for a device to actually exist at runtime -- see the device
+ * lookup in the function body below.
  */
 #if defined(CONFIG_SENSOR) && DT_HAS_ALIAS(alp_temp0) && \
     DT_NODE_HAS_STATUS_OKAY(DT_ALIAS(alp_temp0))
 #include <zephyr/drivers/sensor.h>
 #define ALP_TEMPERATURE_SENSOR_ENABLED 1
-static const struct device *const _temp_dev = DEVICE_DT_GET(DT_ALIAS(alp_temp0));
+
+/*
+ * Find the device by name without DEVICE_DT_GET()'s link-time ordinal
+ * reference, and without folding "no such device" and "device not
+ * ready" into one outcome the way device_get_binding() does -- see the
+ * file header for why both of those matter here.
+ *
+ * z_device_get_all_static() and STRUCT_SECTION_FOREACH(device, ...) are
+ * both underscore-private; there is no public Zephyr API for "does this
+ * DT node have a device at all, ready or not".  z_device_get_all_static()
+ * is used because it is the exact function z_impl_device_get_binding()
+ * itself calls (kernel/device.c) to get the array it then scans -- this
+ * does the identical by-name scan, just keeping the not-found and
+ * not-ready outcomes apart instead of collapsing them to NULL.  Zephyr's
+ * own device shell and PM subsystem call the same private function for
+ * the same reason (subsys/shell/modules/device_service.c,
+ * subsys/pm/device.c) -- this is not a first use of it.
+ */
+static const struct device *find_temp_dev(void)
+{
+	const char          *name = DEVICE_DT_NAME(DT_ALIAS(alp_temp0));
+	const struct device *devlist;
+	size_t               devcnt = z_device_get_all_static(&devlist);
+
+	for (size_t i = 0; i < devcnt; i++) {
+		if (strcmp(devlist[i].name, name) == 0) return &devlist[i];
+	}
+	return NULL;
+}
 #else
 #define ALP_TEMPERATURE_SENSOR_ENABLED 0
 #endif
@@ -82,12 +147,20 @@ alp_status_t alp_temperature_read_milli_c(int32_t *milli_c)
      * CONFIG_SENSOR. */
 	return ALP_ERR_NOSUPPORT;
 #else
-	if (!device_is_ready(_temp_dev)) return ALP_ERR_NOT_READY;
+	/* find_temp_dev() (above) covers "no driver ever instantiated the
+	 * node" (e.g. CONFIG_TMP112=n, #2043's board default); the explicit
+	 * device_is_ready() below covers "a driver did, but it never came
+	 * up" (e.g. the TMP112 NACKs at its configured address, #1978) --
+	 * kept separate on purpose so a fitted-but-dead sensor doesn't read
+	 * as "no sensor on this SoM" on the banner. */
+	const struct device *dev = find_temp_dev();
+	if (dev == NULL) return ALP_ERR_NOSUPPORT;
+	if (!device_is_ready(dev)) return ALP_ERR_NOT_READY;
 
 	struct sensor_value val;
-	int                 rc = sensor_sample_fetch_chan(_temp_dev, SENSOR_CHAN_AMBIENT_TEMP);
+	int                 rc = sensor_sample_fetch_chan(dev, SENSOR_CHAN_AMBIENT_TEMP);
 	if (rc == 0) {
-		rc = sensor_channel_get(_temp_dev, SENSOR_CHAN_AMBIENT_TEMP, &val);
+		rc = sensor_channel_get(dev, SENSOR_CHAN_AMBIENT_TEMP, &val);
 	}
 	if (rc != 0) return ALP_ERR_IO;
 

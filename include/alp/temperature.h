@@ -77,9 +77,12 @@ extern "C" {
  *          @ref ALP_ERR_INVAL when @p milli_c is NULL.
  *          @ref ALP_ERR_NOSUPPORT when this build has no on-module
  *                                 temperature sensor (e.g. E1M-NX9101, or
- *                                 any non-AEN target today).
- *          @ref ALP_ERR_NOT_READY when a sensor is declared but the
- *                                 device did not come up.
+ *                                 any non-AEN target today), or when a
+ *                                 sensor is declared but no driver ever
+ *                                 bound the device at all.
+ *          @ref ALP_ERR_NOT_READY when a sensor is declared and a driver
+ *                                 bound the device, but it did not come
+ *                                 up (e.g. it NACKs on its bus at boot).
  *          @ref ALP_ERR_IO on a transfer fault while reading.
  */
 alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);
