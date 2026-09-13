@@ -21,14 +21,45 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-i2
 ```
 
 The overlay creates `i2s3@49017000`, wires `pinctrl_i2s3` (SDO=P9_3, SCLK=P9_4,
-WS=P9_5), gates `ALIF_I2S3_76M8_CLK`, and aliases `alp-i2s0 → &i2s3`.
+WS=P9_5), gates `ALIF_I2S3_76M8_CLK`, and aliases `alp-i2s0 → &i2s3` — **but ships
+the node `status = "disabled"` by default on EVK rev 2626-R2**, see SAFETY below.
 
-## Status
+## SAFETY: `i2s3` is DISABLED by default on EVK rev 2626-R2
+
+`I2S0_SDO`/`SCLK`/`WS` (P9_3/4/5) run through **U46, a 74LVC157 2:1 mux with no
+Hi-Z state**: with `/E` high its `Y` outputs are forced **LOW**, not floated.
+Those `Y` outputs are wired **backwards** for this direction — confirmed
+against the netlist, they drive the SoC's own `I2S0_*` pads, not the amps or
+the M.2 slot — so the moment this node's pinctrl muxes P9_3/4/5 to the I2S3
+alternate function and the controller drives them, the SoC fights U46's
+forced-low outputs on the same pads, **whether or not `/E` is ever asserted**.
+Unlike the mux-enable-only hazard on the `aen-evk-demo` example, there is no
+GPIO this app can hold to avoid it: the contention exists purely because the
+node is enabled and driving.
+
+The board overlay therefore ships `&i2s3 { status = "disabled"; };` — a
+disabled node gets no `pinctrl-0` applied and no clock enabled at driver
+init, so nothing drives P9_3/4/5 at all. `main.c` detects this at compile
+time (`DT_NODE_HAS_STATUS(I2S_NODE, okay)`) and prints why, then exits with
+`RESULT SKIPPED` instead of touching the Zephyr I2S API.
+
+**To exercise this node once U46 has actually been reworked** on the
+physical board under test, the single documented switch:
+
+```bash
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/aen/aen-i2s-amp-alif -- \
+    -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
+```
+
+## Status (with the node re-enabled post-rework)
 
 **TX path WORKING on E8 (RESULT PASS):** `i2s_configure(TX)` / `i2s_write` ×4 /
 `i2s_trigger(START)` / `i2s_trigger(DRAIN)` all return 0 and the FIFO drains **with
 the 76.8 MHz audio clock ON** — the controller genuinely generates SCLK/WS/SDO and
-clocks the tone out (`i2s3`, P9_3/4/5).
+clocks the tone out (`i2s3`, P9_3/4/5). This was the behaviour of every build of
+this app before U46's backwards wiring was found; it is still correct, now gated
+behind the switch above rather than run by default.
 
 The load-bearing fix (shared with the now-working PDM mics): the **76.8 MHz audio
 source (HFOSCx2)** must be enabled at the CGU — the upstream Alif clockctrl only

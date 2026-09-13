@@ -4403,6 +4403,16 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		ctx->note = "amp reported a shutdown-cause fault";
 		return PHASE_FAIL;
 	}
+	/* Gate on BOTH amps, not just "at least one": with playback off, the
+	 * I2C bring-up of both U27 and U28 IS the phase -- a single amp
+	 * answering is not the board working, it is half the board working.
+	 * The ok_amps==0 return at step 4 above already covers "neither
+	 * answered" with its own diagnostic; this covers "only one did". */
+	if (ok_amps != (int)AMP_COUNT) {
+		ctx->note = "not every TAS2563 answered -- both U27 and U28 are fitted "
+		            "on every E1M-EVK, so a partial count is a real fault";
+		return PHASE_FAIL;
+	}
 #if AEN_EVKDEMO_SOUND_PLAYBACK
 	if (mic == NULL || mic_rc != ALP_OK || spk == NULL || spk_rc != ALP_OK) {
 		ctx->note = "audio_in/audio_out did not open -- see the printed rc";

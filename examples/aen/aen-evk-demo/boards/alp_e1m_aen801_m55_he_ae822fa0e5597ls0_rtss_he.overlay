@@ -779,6 +779,26 @@
  * both are CC3501E-proxied pads driven at runtime over the inter-chip
  * bridge phase 8 leaves up (src/cc3501e_gpio_routes.c). Devicetree describes
  * neither.
+ *
+ * SAFETY, i2s3 node DISABLED BY DEFAULT: U46 (the 74LVC157 mux above) has NO
+ * Hi-Z state -- with /E high its Y outputs are forced LOW, not floated -- and
+ * those Y outputs (I2S0_SDO/SCLK/WS on P9_3/4/5) are wired BACKWARDS for this
+ * direction (confirmed against the netlist: they drive the SoC's own I2S0_*
+ * pads, not the amps). So the SoC's own I2S3 TX fights U46's forced-low
+ * outputs on P9_3/4/5 the instant this node's pinctrl is applied and the
+ * controller drives, REGARDLESS of whether IO8/mux ENABLE is ever asserted --
+ * phase_sound()'s AEN_EVKDEMO_SOUND_PLAYBACK gate (src/main.c) only skips the
+ * app-level i2s_configure()/i2s_write() calls, and pinctrl-0 below is applied
+ * at driver init unconditionally whenever this node is "okay", independent of
+ * whether the app ever calls into it. The i2s3 node below therefore ships
+ * "disabled": a disabled node gets no pinctrl-0 applied and no clock enabled
+ * at all, which is the point (see aen-i2s-amp-alif's overlay for the same
+ * fact, hit first there since that example has no mux-enable GPIO to hide
+ * behind). The HP PDM node stays enabled -- it is a wholly separate bus
+ * (P6_0/P6_1), input-only, and never touches U46. To turn playback on once
+ * U46 has been reworked: set AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c
+ * AND pass `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * (relative to this app's own source dir) -- both switches, not either alone.
  */
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
 
@@ -815,7 +835,8 @@
 		pinctrl-0 = <&pinctrl_i2s3>;
 		pinctrl-names = "default";
 		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
-		status = "okay";
+		/* "disabled" by default -- see the SAFETY note above. */
+		status = "disabled";
 	};
 
 	pdm: pdm@4902d000 {
