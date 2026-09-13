@@ -10,6 +10,19 @@
  * mkfs anywhere in this app -- disk_access_init() plus the geometry ioctls,
  * and nothing that could touch a byte on whatever card is in the slot.
  *
+ * UPDATE (#2051): the E1M-EVK 2626-R2's SD mux STAGE (the 74LVC157 IC,
+ * U38/U39) has a confirmed HARDWARE defect (maintainer, 2026-09-13) and
+ * needs a component change before it will pass the SD signals correctly.
+ * This is separate from the mux CONTROL lines this app drives (ENABLE over
+ * the CC3501E GPIO proxy, SELECT via the P18 jumper) -- those are driven
+ * correctly, as the rest of this file documents; it is the mux chip itself
+ * that is faulty on this board revision. So a card cannot enumerate end to
+ * end on a 2626-R2 EVK no matter what firmware does, and RESULT PARTIAL
+ * here is not evidence of a remaining controller/driver bug beyond what
+ * `#2051` already found and fixed (the SD peripheral clock gate, plus
+ * reset-path hardening -- see the CHANGELOG). See README.md's Status
+ * section for the full note.
+ *
  * EVK ROUTING: on the E1M EVK the microSD sits on the SDIO bus behind a
  * 74LVC157 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21), and BOTH
  * are CC3501E-side on this module (metadata/e1m_modules/aen/
@@ -353,21 +366,16 @@ static void sd_diag_print_clk_swrst(const char *label)
  * that never itself called sdhc_hw_reset()), and a bare SW_RST_ALL issued
  * after set_def_config() has already run is destructive, not diagnostic.
  *
- * UPDATE (#2051): that last clause no longer holds on this driver.
- * sdhc_dwc_reset() now re-runs sdhc_dwc_set_def_config() itself whenever
- * the SW_RST_ALL poll actually completes, and invalidates the driver's
- * cached bus I/O state so the next sdhc_set_io() reprograms the hardware
- * instead of silently no-op'ing against a stale cache (zephyr/drivers/
- * sdhc/sdhc_dwc.c). So the PROBE 2 sdhc_hw_reset() call below no longer
- * wipes NORMAL/ERROR_INT_STAT_EN etc. for nothing when hwreset2_rc reads 0
- * -- it leaves the controller in the same armed state set_def_config()
- * establishes at boot, same as this RESOLVED paragraph already measured
- * for the boot-time reset. It is still a genuine SW_RST_ALL: if the
- * clock-domain theory below is right and the reset itself still times
- * out, sdhc_dwc_reset() returns -ETIMEDOUT without restoring anything (a
- * reset that never completed leaves the controller's state untrustworthy
- * either way), so this probe is still a fair test of that theory, not
- * something the #2051 driver fix pre-empts.
+ * UPDATE (#2051): that last clause no longer holds on this driver --
+ * `sdhc_dwc_reset()` ("re-runs `sdhc_dwc_set_def_config()`
+ * itself whenever the SW_RST_ALL poll completes" -- see
+ * `zephyr/drivers/sdhc/sdhc_dwc.c`) now reconfigures and syncs its cached
+ * bus I/O state after every reset -- even a timed-out one -- so a bare
+ * SW_RST_ALL issued after boot is secondary hardening now, not a fresh
+ * source of -116 the way it was when this RESOLVED paragraph was written.
+ * This is NOT what actually closed #2051, though: see the RESOLVED note
+ * after the clock-domain theory below for the real root cause bench
+ * evidence found.
  *
  * THE NEW QUESTION (#2035, revised): sdhc_dwc_init()'s own SW_RST_ALL, at
  * boot, demonstrably SUCCEEDED -- we know this because set_def_config() runs
@@ -387,6 +395,27 @@ static void sd_diag_print_clk_swrst(const char *label)
  * the more direct question -- does the card clock exist -- without touching
  * a reset bit or a clock register. See the three probes listed in the
  * diagnostics banner above SD_REG_BASE.
+ *
+ * RESOLVED (#2051): the PROPOSED MECHANISM above was never it. evk-03
+ * bench readback (E1M-AEN803, 2026-09-13) found CLKCTL_PER_MST.
+ * PERIPH_CLK_ENA at 0x4903F00C = 0x00000000, and with it clear EVERY SDHC
+ * register -- including read-only CAPABILITIES1 -- read 0x00000000.
+ * Nothing in this driver or in this SoC's devicetree ever set bit 16
+ * (SDC_CKEN); the Alif DFP always does, first thing, before touching the
+ * controller at all (alif-dfp-ref drivers/source/sd.c:161
+ * `enable_sd_periph_clk()`, defined drivers/include/sys_ctrl_sd.h:30
+ * `PERIPH_CLK_ENA_SDC_CKEN`, `|=` at :40). An unclocked block explains
+ * every measurement this file made without needing an INTERNAL_CLK_EN
+ * routing theory: reads are 0 regardless of what ran before, a `SW_RST_R`
+ * write is a no-op so its poll trivially "succeeds", and set_def_config()'s
+ * own clock_set() is the first call that actually depends on the block
+ * responding, which is why it -- not the reset -- is what returned -EIO.
+ * Fixed by wiring `clocks = <&clockctrl ALIF_SDC_CLK>;` onto the sdhc0
+ * node above plus a `clock_control_on()` call in `sdhc_dwc_init()`
+ * (zephyr/drivers/sdhc/sdhc_dwc.c), not by touching CGU (0x1A602014,
+ * Secure-Enclave-owned, and already measured with its CLK100M source bit
+ * on) or any pinmux/clock-source-mux register. PROBE 2 below no longer
+ * writes CLKCTL_PER_MST at all -- see its own comment.
  *
  * Four labelled samples still bracket the run, now repurposed around the
  * CMD0 probe instead of around the deleted end-of-main reset call:
@@ -769,71 +798,35 @@ int main(void)
 	sd_diag_print_int_enables("after PROBE 1 (CMD0, no reset)");
 
 	/*
-	 * --- PROBE 2 (#2035): enclave-free clock-source flip ----------------
-	 * See the "CLKCTL_PER_MST bit 16, mux or enable?" paragraph in the
-	 * file header above: vendor Linux models this bit as a 1-bit mux
-	 * (syst_hclk / 100m_clk); Alif's own DFP header (sys_ctrl_sd.h:30,
-	 * PERIPH_CLK_ENA_SDC_CKEN) calls the SAME bit an enable. The two
-	 * disagree and this app cannot resolve that from reading code -- only
-	 * from a run. CAUTION: if Alif is right, clearing this bit turns the
-	 * SD clock supply off entirely rather than switching its source, so
-	 * the bit is SAVED and restored unconditionally at the end of this
-	 * probe regardless of what the CMD0 retry below shows.
+	 * --- PROBE 2 (#2051): confirm the SD peripheral clock gate, READ-ONLY
+	 * An earlier revision of this probe WROTE CLKCTL_PER_MST bit 16 here to
+	 * test whether it is a clock-SOURCE MUX (a vendor Linux reading) or a
+	 * plain ENABLE (Alif's own DFP header, sys_ctrl_sd.h:30
+	 * PERIPH_CLK_ENA_SDC_CKEN, set with `|=` at :40). Bench evidence
+	 * (evk-03, E1M-AEN803, 2026-09-13) settled that question: with the bit
+	 * clear, EVERY SDHC register -- including read-only CAPABILITIES1 --
+	 * read back 0x00000000. It is an enable, not a mux, and clearing it
+	 * here used to DISABLE the very block this app is trying to enumerate
+	 * through. sdhc_dwc_init() now sets this bit itself, via the sdhc0
+	 * overlay node's `clocks` property and clock_control_on()
+	 * (zephyr/drivers/sdhc/sdhc_dwc.c), before this probe ever runs -- so
+	 * this only reads the gate back rather than writing it.
 	 */
-	uint32_t clkctl_orig = sys_read32(SD_CLKCTL_PER_MST);
-	printf("[sd] PROBE 2: CLKCTL_PER_MST @0x%08x = 0x%08x before the flip (saved for restore)\n",
+	uint32_t clkctl_now = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd] PROBE 2: CLKCTL_PER_MST @0x%08x = 0x%08x -- bit 16 (SDC_CKEN) %s\n",
 	       (unsigned)SD_CLKCTL_PER_MST,
-	       clkctl_orig);
-
-	sys_write32(clkctl_orig & ~SD_CLKCTL_PER_MST_SD_EN_Msk, SD_CLKCTL_PER_MST);
-	uint32_t clkctl_cleared = sys_read32(SD_CLKCTL_PER_MST);
-	printf("[sd] PROBE 2: CLKCTL_PER_MST bit 16 cleared -> read back 0x%08x (%s)\n",
-	       clkctl_cleared,
-	       ((clkctl_cleared & SD_CLKCTL_PER_MST_SD_EN_Msk) == 0u)
-	           ? "clear, as written"
-	           : "STILL SET -- write did not land");
-
-	/* Re-run the 400 kHz identification-clock config through the public
-	 * sdhc_set_io() API -- never a hand-written CLK_CTRL -- so whatever
-	 * source bit 16 now selects (or gates) gets a fresh divider program
-	 * against it, not whatever set_def_config() left behind. */
-	struct sdhc_io io_400khz = {
-		.clock          = SDMMC_CLOCK_400KHZ,
-		.bus_mode       = SDHC_BUSMODE_PUSHPULL,
-		.power_mode     = SDHC_POWER_ON,
-		.bus_width      = SDHC_BUS_WIDTH1BIT,
-		.timing         = SDHC_TIMING_LEGACY,
-		.driver_type    = SD_DRIVER_TYPE_B,
-		.signal_voltage = SD_VOL_3_3_V,
-	};
-	int set_io_rc = sdhc_set_io(SDHC_DEV, &io_400khz);
-	printf("[sd] PROBE 2: sdhc_set_io(400 kHz, legacy, 1-bit) -> %d\n", set_io_rc);
+	       clkctl_now,
+	       (clkctl_now & SD_CLKCTL_PER_MST_SD_EN_Msk)
+	           ? "SET (clocked)"
+	           : "CLEAR (unclocked -- the driver's clock enable did not take)");
 
 	int hwreset2_rc = sdhc_hw_reset(SDHC_DEV);
 	sd_diag_print_clk_swrst("PROBE 2, after sdhc_hw_reset()");
-	printf("[sd] PROBE 2: sdhc_hw_reset(sdhc0) on the flipped clock source -> %d\n", hwreset2_rc);
+	printf("[sd] PROBE 2: sdhc_hw_reset(sdhc0) -> %d\n", hwreset2_rc);
 
 	int cmd0b_rc = sd_diag_send_cmd0();
 	sd_diag_print_clk_swrst("PROBE 2, after CMD0");
-	printf("[sd] PROBE 2: CMD0 (GO_IDLE_STATE) on the flipped clock source -> %d\n", cmd0b_rc);
-
-	/* RESTORE, unconditionally -- the whole point of saving clkctl_orig
-	 * above. Whatever bit 16 turns out to mean, the board is left as
-	 * found either way, pass or fail. */
-	sys_write32(clkctl_orig, SD_CLKCTL_PER_MST);
-	uint32_t clkctl_restored = sys_read32(SD_CLKCTL_PER_MST);
-	printf("[sd] PROBE 2: CLKCTL_PER_MST restored -> read back 0x%08x (%s)\n",
-	       clkctl_restored,
-	       (clkctl_restored == clkctl_orig)
-	           ? "matches the saved value"
-	           : "MISMATCH -- restore did not land, check before trusting anything after this "
-	             "point");
-	printf("[sd] PROBE 2 VERDICT: SW_RST_R -> 0x00 and CMD0 completing on the flipped source "
-	       "supports the Linux MUX model (bit 16 selects; syst_hclk works without the "
-	       "enclave). A reset that still sticks (or gets WORSE) supports the Alif ENABLE "
-	       "model (bit 16 gates the clock supply; clearing it only turned the SD clock off) "
-	       "-- read hwreset2_rc/cmd0b_rc together with the SW_RST_R samples above, not in "
-	       "isolation\n");
+	printf("[sd] PROBE 2: CMD0 (GO_IDLE_STATE) -> %d\n", cmd0b_rc);
 
 	/*
 	 * --- PROBE 3 (#2035): SE transport sanity check ---------------------
@@ -1280,12 +1273,14 @@ int main(void)
 	} else {
 		printf("[sd] RESULT PARTIAL: bridge up (rc=%d), mux ENABLE asserted (rc=%d), SD_RST "
 		       "pulsed low-then-high, clock cycled (disable -> %d, enable -> %d), CMD0 probes "
-		       "(no-reset -> %d, flipped-clock -> %d), enclave-free reset (rc=%d); card still "
-		       "not reachable (disk_access_init rc=%d). The mux, the reset line and the clock "
-		       "request are no longer the open question -- all are proven driven -- so look at "
-		       "what the three PROBE blocks near the top of main() showed (CMD0 no-reset, the "
-		       "clock-source flip, the SE transport check), or at the SELECT jumper on header "
-		       "P18 (see README.md)\n",
+		       "(no-reset -> %d, post-clock-fix -> %d), enclave-free reset (rc=%d); card still "
+		       "not reachable (disk_access_init rc=%d). The mux control lines, the reset line "
+		       "and the SD peripheral clock gate are all proven driven -- this is NOT an open "
+		       "software question on this board: the E1M-EVK 2626-R2 SD mux STAGE (74LVC157 "
+		       "U38/U39) has a confirmed hardware defect and needs a component change before a "
+		       "card can enumerate here at all (see README.md). Check the SELECT jumper on "
+		       "header P18 is present regardless, but do not expect PASS on this board "
+		       "revision\n",
 		       (int)bridge_rc,
 		       (int)en_rc,
 		       (int)clk_dis_rc,

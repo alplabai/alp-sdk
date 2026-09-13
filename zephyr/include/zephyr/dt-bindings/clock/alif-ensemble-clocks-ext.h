@@ -67,6 +67,23 @@
 	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 12U, 1U, 0U, 0U, 0U,       \
 		     ALIF_PARENT_CLK_SYST_HCLK)
 
+/* ALP-SDK DELTA (#2051), not upstream: SD/SDMMC peripheral clock gate --
+ * bit 16 of PERIPH_CLK_ENA in CLKCTL_PER_MST -> sets bit 16 of 0x4903F00C
+ * (SDC_CKEN). Same register/module as ALIF_ETHERNET_CLK above, different bit.
+ * Register offset + bit carried from the fork's alif_ensemble_clocks.h
+ * (ALIF_SDC_CLK) and cross-checked against the DFP's own
+ * PERIPH_CLK_ENA_SDC_CKEN (drivers/include/sys_ctrl_sd.h:30, `(1U << 16)`,
+ * set with `|=` at :40). Bench-confirmed the gate this ID sets is really
+ * off by default: on evk-03 (E1M-AEN803) CLKCTL_PER_MST.PERIPH_CLK_ENA at
+ * 0x4903F00C read 0x00000000 and EVERY SDHC register -- including
+ * read-only CAPABILITIES1 -- read back 0x00000000 until this gate is set.
+ * parent_clk is unused (SDC has no src_field in this encoding; the SD bus
+ * clock divider is programmed separately by sdhc_dwc_clock_set()), so
+ * SYST_HCLK is a safe filler, matching ALIF_ETHERNET_CLK's choice. */
+#define ALIF_SDC_CLK                                                          \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 16U, 1U, 0U, 0U, 0U,       \
+		     ALIF_PARENT_CLK_SYST_HCLK)
+
 /* Regular SPI0-3 (DesignWare SSI on the AHB) -- frequency-only dummy clock. */
 #define ALIF_SPI_CLK ALIF_CLK(2U)
 

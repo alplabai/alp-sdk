@@ -65,6 +65,7 @@
  * this one.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
 
 / {
 	chosen {
@@ -162,6 +163,22 @@
 		reg = <0x48102000 0xF70>;
 		interrupts = <102 3>, <103 3>;
 		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		/* ALP-SDK DELTA (#2051), not upstream: the real root cause behind
+		 * this issue was never in sdhc_dwc.c -- it's that nothing ever
+		 * gated the SD peripheral clock on. evk-03 bench readback
+		 * (E1M-AEN803, 2026-09-13): CLKCTL_PER_MST.PERIPH_CLK_ENA at
+		 * 0x4903F00C = 0x00000000 (bit 16, SDC_CKEN, clear), and with it
+		 * clear EVERY SDHC register -- including read-only CAPABILITIES1
+		 * at 0x48102040 -- read back 0x00000000. Neither this node nor
+		 * the driver ever set bit 16. The Alif DFP always enables it
+		 * first, before anything else touches the controller
+		 * (drivers/source/sd.c:161 `enable_sd_periph_clk()`, defined
+		 * drivers/include/sys_ctrl_sd.h:30/:40). `clocks` here plus
+		 * sdhc_dwc_init()'s new clock_control_on() call reproduce that.
+		 * Does NOT touch CGU CLK_ENA (0x1A602014, Secure-Enclave-owned) --
+		 * that's a different gate (the 100 MHz source select) already
+		 * measured ON (bit 7 set) and out of scope here. */
+		clocks = <&clockctrl ALIF_SDC_CLK>;
 		/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
 		 * signaling (#2035): once CMD0 succeeds the SD subsystem would
 		 * otherwise attempt CMD11 and switch to 1.8V I/O signaling through

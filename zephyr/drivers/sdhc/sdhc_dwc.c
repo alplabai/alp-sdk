@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include <zephyr/cache.h>
+#include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/drivers/regulator.h>
@@ -82,6 +83,14 @@ struct sdhc_dwc_config {
 	const struct device *vqmmc;
 #endif
 	struct gpio_dt_spec cd_gpio;
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: the peripheral clock gate
+	 * (`clocks` DT property, e.g. Alif's SDC_CKEN). NULL when the node
+	 * declares no `clocks` -- e.g. a SoC where this gate is always-on --
+	 * so every user of this field must NULL-check, not assume it is set.
+	 */
+	const struct device *clock_dev;
+	clock_control_subsys_t clock_subsys;
 };
 
 struct sdhc_dwc_data {
@@ -546,8 +555,16 @@ static int sdhc_dwc_hw_reset(const struct device *dev, uint8_t reset_mask)
 	uint32_t reset_timeout = DWC_SDHC_SW_RST_TIMEOUT;
 	uint8_t stuck;
 
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: poll only the bits THIS call
+	 * wrote, not the whole register -- matching both references: the DFP
+	 * hc_reset() (alif-dfp-ref drivers/source/sd_host.c:246) and Linux
+	 * sdhci_reset() (drivers/mmc/host/sdhci.c:222, `& mask`). The old
+	 * `!= 0` check could never converge if some OTHER bit of SW_RST_R
+	 * ever reads set for a reason unrelated to reset_mask.
+	 */
 	regs->DWC_SDHC_SW_RST_R = reset_mask;
-	while (regs->DWC_SDHC_SW_RST_R != 0 && --reset_timeout) {
+	while ((regs->DWC_SDHC_SW_RST_R & reset_mask) != 0 && --reset_timeout) {
 		k_busy_wait(1);
 	}
 
@@ -565,21 +582,6 @@ static int sdhc_dwc_hw_reset(const struct device *dev, uint8_t reset_mask)
 			(stuck & DWC_SDHC_SW_RST_CMD_Msk) ? "CMD " : "",
 			(stuck & DWC_SDHC_SW_RST_DAT_Msk) ? "DAT " : "");
 		return -ETIMEDOUT;
-	}
-
-	/*
-	 * ALP-SDK DELTA (#2051), not upstream: clear a stale Command
-	 * Complete after any CMD-line reset. Vendor Linux carries the same
-	 * quirk for this IP -- ensemble_sdhci_reset()
-	 * (drivers/mmc/host/sdhci-of-dwcmshc.c:1099-1106) clears
-	 * SDHCI_INT_RESPONSE whenever the reset mask includes
-	 * SDHCI_RESET_CMD, because the controller can leave CC latched in
-	 * NORMAL_INT_STAT_R across a CMD reset. An uncleared stale CC would
-	 * let a *later* command's sdhc_dwc_wait_cmd_complete() return
-	 * success on the old event instead of waiting for its own.
-	 */
-	if (reset_mask & DWC_SDHC_SW_RST_CMD_Msk) {
-		regs->DWC_SDHC_NORMAL_INT_STAT_R = DWC_SDHC_INTR_CC_Msk;
 	}
 
 	return 0;
@@ -690,56 +692,79 @@ static int sdhc_dwc_send_cmd(const struct device *dev, struct sdhc_dwc_data *dat
 
 static int sdhc_dwc_reset(const struct device *dev)
 {
+	const struct sdhc_dwc_config *config = dev->config;
+	struct dwc_sdhc_regs *regs = config->regs;
 	struct sdhc_dwc_data *data = dev->data;
+	int reset_ret;
 	int ret;
 
-	ret = sdhc_dwc_hw_reset(dev, DWC_SDHC_SW_RST_ALL_Msk);
-	if (ret) {
-		return ret;
-	}
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: serialize against
+	 * sdhc_dwc_request() (the only other data->lock holder). reset() is
+	 * reachable two ways -- sdhc_dwc_init() before the lock is ever
+	 * contended, and the public sdhc_hw_reset() syscall from app code,
+	 * which never runs from inside an already-locked request(); neither
+	 * path can deadlock on itself.
+	 */
+	k_sem_take(&data->lock, K_FOREVER);
+
+	reset_ret = sdhc_dwc_hw_reset(dev, DWC_SDHC_SW_RST_ALL_Msk);
 
 	/*
-	 * ALP-SDK DELTA (#2051), not upstream: SW_RST_ALL clears every
-	 * register sdhc_dwc_set_def_config() programmed at init -- including
-	 * NORMAL/ERROR_INT_STAT_EN, HOST_CTRL2, PWR_CTRL and CLK_CTRL -- back
-	 * to POR (0), confirmed on the bench
-	 * (examples/aen/aen-sdcard-readout/src/main.c:340-354). With
-	 * *_INT_STAT_EN == 0 the controller can never latch a
-	 * command-complete event, so every sdhc_dwc_wait_cmd_complete()
-	 * times out and disk_access_init() fails with -ETIMEDOUT before it
-	 * ever reaches a real card access -- masking whatever the actual SD
-	 * enumeration defect is.
+	 * ALP-SDK DELTA (#2051), not upstream: reconfigure and sync the
+	 * cache below EVEN ON A RESET TIMEOUT (reset_ret != 0), matching
+	 * both references -- the DFP's sd_host_init() never checks
+	 * hc_reset()'s return before continuing to configure, and Linux's
+	 * sdhci_reset() (drivers/mmc/host/sdhci.c) is void, used the same
+	 * fire-and-forget way. SW_RST_ALL clears every register
+	 * sdhc_dwc_set_def_config() programs -- including NORMAL/ERROR_
+	 * INT_STAT_EN, HOST_CTRL2, PWR_CTRL and CLK_CTRL, back to POR (0) --
+	 * regardless of whether the reset-bit poll itself converges, so
+	 * leaving the controller unconfigured on a timeout is strictly
+	 * worse than reconfiguring it: this is secondary hardening for
+	 * whatever caused the timeout, not a fix for it. The real root
+	 * cause #2051 ran into on the bench (the SD peripheral clock never
+	 * being gated on) is fixed separately, in sdhc_dwc_init() and the
+	 * `clocks` DT property.
 	 *
 	 * Zephyr's sdhc_hw_reset() contract (zephyr/include/zephyr/drivers/
 	 * sdhc.h) only promises resetting clears errors; it explicitly does
 	 * NOT require I/O settings to come back to boot state, so
-	 * re-applying the default config here is within contract. This
-	 * also matches the Alif DFP reference model: SW_RST_ALL immediately
-	 * followed by re-configuring power/timeout/interrupts/DMA/clock
-	 * (alif-dfp-ref drivers/source/sd.c:186-246, sd_host.c:237-249),
-	 * rather than the alternative of only ever resetting CMD|DAT after
-	 * init and never touching SW_RST_ALL again.
+	 * re-applying the default config here is within contract.
 	 */
 	ret = sdhc_dwc_set_def_config(dev);
 	if (ret) {
+		k_sem_give(&data->lock);
 		return ret;
 	}
 
 	/*
 	 * ALP-SDK DELTA (#2051), not upstream: sdhc_dwc_set_io() only
 	 * reprograms a field when it differs from the cached data->ios, so
-	 * an un-invalidated cache would make the SD stack's next
-	 * sdhc_set_io(card->sdhc, &card->bus_io) call (subsys/sd/*.c never
+	 * a stale cache would make the SD stack's next
+	 * sdhc_set_io(card->sdhc, &card->bus_io) call (subsys/sd/ never
 	 * calls sdhc_hw_reset() itself, so it has no reason to think
-	 * anything changed) a silent no-op -- leaving the bus at the
-	 * hardware's post-reset 1-bit / clock-disabled / non-1.8V state
-	 * while both the driver's and the SD stack's cached view still
-	 * claim it's already configured. Force every field to miscompare so
-	 * the next set_io actually reprograms the hardware.
+	 * anything changed) a silent no-op for whichever fields happen to
+	 * already match. Sync the cache to exactly what set_def_config()
+	 * above just programmed -- clock/bus-width/voltage/timing -- rather
+	 * than an all-1s sentinel, so the next set_io() call reprograms
+	 * only the fields that genuinely differ from real hardware state.
+	 * power_mode is left as the caller last set it: set_def_config()
+	 * unconditionally powers the rail ON, so a caller that had powered
+	 * off before calling reset() gets it turned back off below --
+	 * matching the model Linux uses (drivers/mmc/host/sdhci.c:209).
 	 */
-	memset(&data->ios, 0xff, sizeof(data->ios));
+	data->ios.clock = SDMMC_CLOCK_400KHZ;
+	data->ios.bus_width = SDHC_BUS_WIDTH1BIT;
+	data->ios.signal_voltage = SD_VOL_3_3_V;
+	data->ios.timing = SDHC_TIMING_LEGACY;
+	if (data->ios.power_mode == SDHC_POWER_OFF) {
+		sdhc_dwc_set_power(regs, SDHC_POWER_OFF);
+	}
 
-	return 0;
+	k_sem_give(&data->lock);
+
+	return reset_ret;
 }
 
 static int sdhc_dwc_dma_init(struct dwc_sdhc_regs *regs, struct sdhc_dwc_data *data,
@@ -1291,6 +1316,29 @@ static int sdhc_dwc_init(const struct device *dev)
 
 	int ret;
 
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: Step 0 -- the peripheral clock
+	 * gate, before ANYTHING else touches a controller register (matching
+	 * the Alif DFP's own sd_host_init(), where enable_sd_periph_clk() is
+	 * the very first action -- alif-dfp-ref drivers/source/sd.c:161).
+	 * Without this the block is entirely unclocked: bench-confirmed on
+	 * evk-03 (E1M-AEN803, 2026-09-13) every SDHC register, including the
+	 * read-only CAPABILITIES1, reads 0x00000000. See the `clocks`
+	 * property on the sdhc DT node for the id and citations.
+	 */
+	if (config->clock_dev != NULL) {
+		if (!device_is_ready(config->clock_dev)) {
+			LOG_ERR("SD clock controller not ready");
+			return -ENODEV;
+		}
+
+		ret = clock_control_on(config->clock_dev, config->clock_subsys);
+		if (ret != 0) {
+			LOG_ERR("failed to enable SD peripheral clock (%d)", ret);
+			return ret;
+		}
+	}
+
 #ifdef CONFIG_REGULATOR
 	/* Step 1: Card power supply */
 	if (config->vmmc != NULL) {
@@ -1341,13 +1389,14 @@ static int sdhc_dwc_init(const struct device *dev)
 		LOG_DBG("cd-gpios not available, using PSTATE register for card detect");
 	}
 
-	/* Software reset all */
+	/*
+	 * Software reset all. sdhc_dwc_reset() (#2051) already runs
+	 * sdhc_dwc_set_def_config() itself once the reset completes -- a
+	 * second call here used to reconfigure (and re-sleep through
+	 * sdhc_dwc_set_power()'s power_delay_ms and sdhc_dwc_set_voltage())
+	 * TWICE at boot for nothing.
+	 */
 	ret = sdhc_dwc_reset(dev);
-	if (ret) {
-		return ret;
-	}
-
-	ret = sdhc_dwc_set_def_config(dev);
 	if (ret) {
 		return ret;
 	}
@@ -1471,6 +1520,20 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
 		(DEVICE_DT_GET(DT_PHANDLE(node_id, prop))), \
 		(NULL))
 
+/*
+ * ALP-SDK DELTA (#2051), not upstream: the peripheral clock gate is
+ * optional -- a board with no `clocks` property (the gate is always-on,
+ * or this SoC has none) gets NULL/0 here, and sdhc_dwc_init() skips the
+ * clock_control_on() call entirely when clock_dev is NULL.
+ */
+#define SDHC_DWC_CLOCK_DEV_OR_NULL(n)                                             \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, clocks),                                 \
+		(DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n))), (NULL))
+
+#define SDHC_DWC_CLOCK_SUBSYS_OR_ZERO(n)                                          \
+	COND_CODE_1(DT_INST_NODE_HAS_PROP(n, clocks),                                 \
+		((clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid)), (NULL))
+
 #define SDHC_DWC_INIT(n)                                                           \
 	PINCTRL_DT_INST_DEFINE(n);                                                     \
                                                                                    \
@@ -1514,6 +1577,8 @@ static void sdhc_dwc_wakeup_isr(const struct device *dev)
 			.vqmmc = SDHC_DWC_REGULATOR_GET_OR_NULL(DT_DRV_INST(n), vqmmc_supply),\
 		))                                                                         \
 		.cd_gpio = SDHC_DWC_GPIO_OR_ZERO(n, cd_gpios),                             \
+		.clock_dev = SDHC_DWC_CLOCK_DEV_OR_NULL(n),                                \
+		.clock_subsys = SDHC_DWC_CLOCK_SUBSYS_OR_ZERO(n),                          \
 	};                                                                             \
                                                                                    \
 	DEVICE_DT_INST_DEFINE(n, sdhc_dwc_init, NULL, &sdhc_dwc_data_##n,             \
