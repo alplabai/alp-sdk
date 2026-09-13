@@ -3951,6 +3951,12 @@
     },
     {
       "functions": [
+        "alp_temperature_read_milli_c"
+      ],
+      "header": "include/alp/temperature.h"
+    },
+    {
+      "functions": [
         "alp_tmu_atan",
         "alp_tmu_atan2",
         "alp_tmu_cos",

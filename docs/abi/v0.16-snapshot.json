@@ -13640,6 +13640,17 @@
       },
       "variables": {}
     },
+    "alp/temperature.h": {
+      "functions": {
+        "alp_temperature_read_milli_c": {
+          "hash": "0c80f66773e1c9a3",
+          "signature": "alp_status_t alp_temperature_read_milli_c(int32_t *milli_c);"
+        }
+      },
+      "macros": {},
+      "typedefs": {},
+      "variables": {}
+    },
     "alp/tmu.h": {
       "functions": {
         "alp_tmu_atan": {
@@ -14013,6 +14024,10 @@
         },
         "ALP_ABI_STATUS_STORAGE": {
           "hash": "b8b927d20bb4e6f3",
+          "value": "ALP_ABI_EXPERIMENTAL"
+        },
+        "ALP_ABI_STATUS_TEMPERATURE": {
+          "hash": "2e0f782d9daafdc5",
           "value": "ALP_ABI_EXPERIMENTAL"
         },
         "ALP_ABI_STATUS_TMU": {

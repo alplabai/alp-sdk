@@ -112,7 +112,10 @@ on_module_links:
         node_name: "tmp112@40"
         compatible: "ti,tmp112"
         address_7bit: 0x40
-        alias: ambient-temp0
+        # alp-prefixed to join the existing portable-alias namespace
+        # (alp-i2c2 above, alp-lprtc-counter) -- <alp/temperature.h>'s
+        # Zephyr backend resolves DT_ALIAS(alp_temp0) (alp-sdk#2066).
+        alias: alp-temp0
         evidence: >-
           E1M-AEN-2626-R2 components CSV: U20 = TMP112DIDPWR, DNP=0 fitted,
           ADD0 tied to 0V.  Per TI SBOS473L p.44 (package option addendum),

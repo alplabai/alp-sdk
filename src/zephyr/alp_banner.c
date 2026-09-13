@@ -30,10 +30,11 @@
  * hyperram.assembled so absence can be stated rather than implied.
  *
  * The last two lines (CONFIG_ALP_SDK_BANNER_HOUSEKEEPING, on by default) are
- * REPORT ONLY: an on-module RTC (compatible "microcrystal,rv3028") and/or
- * ambient-temperature sensor (compatible "ti,tmp112"), whichever the
- * devicetree enables -- absent on a SoM without one, e.g. native_sim.  A
- * missing/failing device prints one line and never fails the boot; see
+ * REPORT ONLY: an on-module RTC (compatible "microcrystal,rv3028", bound by
+ * devicetree compatible directly) and/or ambient-temperature sensor (read
+ * through the portable <alp/temperature.h> -- alp-sdk#2066), whichever is
+ * present -- absent on a SoM without one, e.g. native_sim.  A missing/failing
+ * device prints one line and never fails the boot; see
  * alp_print_housekeeping() below.
  *
  * Identity field (the SoM column), in priority order:
@@ -65,6 +66,8 @@
  * Uses printk so it lands on whatever console backend the app wired.
  */
 
+#include <stdint.h>
+
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/devicetree.h>
@@ -78,36 +81,37 @@
 #endif
 
 /*
- * On-module housekeeping devices (RTC, ambient temperature).  Bound by
- * DEVICETREE COMPATIBLE, never by node label or alias -- the board layer
- * that owns these nodes is free to name/relabel them, and "microcrystal,
- * rv3028" / "ti,tmp112" are the stable contracts (same choice
- * examples/aen/aen-temp-sensor already makes for TMP112).
+ * On-module RTC.  Bound by DEVICETREE COMPATIBLE, never by node label or
+ * alias -- the board layer that owns the node is free to name/relabel it,
+ * and "microcrystal,rv3028" is the stable contract.
  *
  * A node's DT status alone is NOT enough to gate DEVICE_DT_GET(): the
- * AEN801 board layer enables both nodes UNCONDITIONALLY, but upstream only
- * compiles rtc_rv3028.c / the TMP112 sensor driver in when the app itself
- * also turns on the driver subsystem (CONFIG_RTC / CONFIG_SENSOR) --
- * RTC_RV3028 and TMP112 both live inside an `if RTC` / `if SENSOR` Kconfig
+ * AEN801 board layer enables the node UNCONDITIONALLY, but upstream only
+ * compiles rtc_rv3028.c in when the app itself also turns on the driver
+ * subsystem (CONFIG_RTC) -- RTC_RV3028 lives inside an `if RTC` Kconfig
  * block upstream, `default y` only once that parent is on.  Gating on the
  * DT status alone linked clean but failed at the FINAL link step with
  * "undefined reference to __device_dts_ord_*" on any AEN801 app that
- * enables ALP_SDK without also enabling RTC/SENSOR (e.g.
+ * enables ALP_SDK without also enabling RTC (e.g.
  * examples/aen/aen-can-regcheck) -- caught by this file's own build
- * verification, not by inspection.  So: each block additionally requires
- * its driver's own Kconfig symbol, and quietly compiles to nothing (no
- * link reference at all) on a build that has the DT node but never opted
- * into the driver -- same "absent" reporting as a SoM with neither part.
+ * verification, not by inspection.  So this block additionally requires
+ * CONFIG_RTC_RV3028, and quietly compiles to nothing (no link reference at
+ * all) on a build that has the DT node but never opted into the driver --
+ * same "absent" reporting as a SoM with none.
+ *
+ * The ambient-temperature half used to follow this identical pattern here
+ * (bind "ti,tmp112" by compatible, gate on CONFIG_TMP112) -- a SECOND,
+ * vendor-bound truth about presence that could disagree with the
+ * metadata-derived one <alp/temperature.h> now owns.  It goes through
+ * alp_temperature_read_milli_c() instead (alp-sdk#2066); see
+ * alp_print_housekeeping() below.
  */
 #if defined(CONFIG_ALP_SDK_BANNER_HOUSEKEEPING)
 #include <errno.h>
+#include <alp/temperature.h>
 #if DT_HAS_COMPAT_STATUS_OKAY(microcrystal_rv3028) && defined(CONFIG_RTC_RV3028)
 #include <zephyr/drivers/rtc.h>
 #define ALP_BANNER_HAS_RTC 1
-#endif
-#if DT_HAS_COMPAT_STATUS_OKAY(ti_tmp112) && defined(CONFIG_TMP112)
-#include <zephyr/drivers/sensor.h>
-#define ALP_BANNER_HAS_TEMP 1
 #endif
 #endif /* CONFIG_ALP_SDK_BANNER_HOUSEKEEPING */
 
@@ -341,27 +345,29 @@ static void alp_print_housekeeping(void)
 	}
 #endif
 
-#if defined(ALP_BANNER_HAS_TEMP)
-	const struct device *const temp = DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_tmp112));
+	/*
+	 * One call, one switch -- alp_temperature_read_milli_c() already owns
+	 * the DT-alias/CONFIG_SENSOR gating this file used to duplicate.
+	 * NOSUPPORT (no on-module sensor on this build) prints nothing, the
+	 * same "absent" reporting the RTC block above gets from its own
+	 * compiled-out ALP_BANNER_HAS_RTC guard.
+	 */
+	int32_t      milli_c;
+	alp_status_t temp_status = alp_temperature_read_milli_c(&milli_c);
 
-	if (!device_is_ready(temp)) {
+	switch (temp_status) {
+	case ALP_OK:
+		printk("  Temp: %d milli-degC\n", (int)milli_c);
+		break;
+	case ALP_ERR_NOT_READY:
 		printk("  Temp: present, not ready\n");
-	} else {
-		struct sensor_value val;
-		int                 rc = sensor_sample_fetch_chan(temp, SENSOR_CHAN_AMBIENT_TEMP);
-
-		if (rc == 0) {
-			rc = sensor_channel_get(temp, SENSOR_CHAN_AMBIENT_TEMP, &val);
-		}
-		if (rc == 0) {
-			/* Integer milli-degrees C, no float printf -- same
-			 * conversion + format as examples/aen/aen-temp-sensor. */
-			printk("  Temp: %d milli-degC\n", (int)sensor_value_to_milli(&val));
-		} else {
-			printk("  Temp: read failed (rc=%d)\n", rc);
-		}
+		break;
+	case ALP_ERR_NOSUPPORT:
+		break;
+	default:
+		printk("  Temp: read failed (rc=%d)\n", (int)temp_status);
+		break;
 	}
-#endif
 }
 #endif /* CONFIG_ALP_SDK_BANNER_HOUSEKEEPING */
 
