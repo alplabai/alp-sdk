@@ -382,7 +382,7 @@ this shape of caller:
 ospi_write_key_svc_t pkt;
 memset(&pkt, 0, sizeof(pkt));
 pkt.header.hdr_service_id = SERVICE_APPLICATION_OSPI_WRITE_KEY_ID;
-pkt.send_command          = OSPI_WRITE_EXTERNAL_KEY_OSPI0; /* R2 BOM: OSPI0 only */
+pkt.send_command          = OSPI_WRITE_EXTERNAL_KEY_OSPI0; /* no AEN SoM wires OSPI1 */
 memcpy((void *)pkt.send_key, key, sizeof(pkt.send_key));   /* fixed 16 B -- AES-128 only */
 pkt.resp_error_code       = UINT32_MAX;                    /* sentinel -- see below */
 int rc = se_service_send_request((uint32_t *)&pkt, (uint32_t)sizeof(pkt));

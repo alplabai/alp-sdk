@@ -12,8 +12,8 @@
  *   - retargets the console from the DevKit's UART2 to the E1M carrier console
  *     (Alif UART5, P3_4/P3_5 -- the E1M edge "UART0");
  *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR
- *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated
- *     on the current batch, so there is no external XIP / flash device;
+ *     (IS25WX256-JHLE) + HyperRAM (S80KS5122GABHM02) are not populated on
+ *     this SKU, so there is no external XIP / flash device;
  *   - lays down a production MCUboot partition map in MRAM.
  *
  * NOTE (AMP, #1069): HE's slot0 lives in its OWN disjoint MRAM window,

@@ -192,8 +192,8 @@ on this shared PCB that populates OSPI0 (E1M-AEN801 populates neither
 device — `assembled: false` on both — and runs from on-die MRAM instead):
 the NOR footprint `U10`, measured in #2041 as an ISSI `IS25WX256-JHLE` (not
 the Macronix `MX25UM25645GXDI00` this paragraph originally named), sits on
-`chip_select: 1`, and the HyperRAM `W958D8NBYA5I` (Winbond OctalRAM,
-HyperBus) `U9` sits on `chip_select: 0` — the reverse of this paragraph's
+`chip_select: 1`, and the HyperRAM `S80KS5122GABHM02` (Infineon/Cypress
+HyperRAM) `U9` sits on `chip_select: 0` — the reverse of this paragraph's
 original CS mapping (corrected in `44200cab`, #1944/#1990/PR #2007). Either
 way, byte-addressable RAM and flash sit behind the **same OSPI0
 controller**. A controller-scoped or XIP-window-scoped aperture would

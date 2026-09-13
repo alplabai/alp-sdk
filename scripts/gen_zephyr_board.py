@@ -1597,8 +1597,38 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     )
 
 
+def _aen_ospi_storage_banner_lines(sku_preset: dict[str, Any]) -> list[str]:
+    """Describe the SoM's OSPI0 NOR + HyperRAM for the board-header banner,
+    read from the SoM preset's own `on_module.ospi_memories.ospi0` /
+    `on_module.hyperram` fields rather than a hardcoded part name (#2062:
+    this banner used to hardcode Macronix/Winbond for every AEN SKU,
+    silently contradicting whichever preset's real `chip:` fields named a
+    different part -- e.g. E1M-AEN803's measured ISSI NOR + Infineon/
+    Cypress HyperRAM on this same U10/U9 footprint, issue #2041)."""
+    on_module = sku_preset.get("on_module") or {}
+    ospi0 = (on_module.get("ospi_memories") or {}).get("ospi0") or {}
+    hyperram = on_module.get("hyperram") or {}
+    nor_chip = ospi0.get("chip") or "TBD"
+    ram_chip = hyperram.get("chip") or "TBD"
+    populated = bool(ospi0.get("assembled")) or bool(hyperram.get("assembled"))
+    if populated:
+        tail = (f"({nor_chip}) + HyperRAM ({ram_chip}) are populated on this "
+                 "SKU, but neither is used for XIP boot here (OSPI_XIP_SER "
+                 "does not exist on this die -- see "
+                 "examples/aen/aen-ospi-regcheck);")
+    else:
+        tail = (f"({nor_chip}) + HyperRAM ({ram_chip}) are not populated on "
+                 "this SKU, so there is no external XIP / flash device;")
+    wrapped = textwrap.wrap(tail, width=68)
+    return [
+        " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
+        *(f" *     {line}" for line in wrapped),
+    ]
+
+
 def _aen_dts(
-    sku: str, core_id: str, soc_spec: dict[str, Any], variant: dict[str, Any],
+    sku: str, sku_preset: dict[str, Any], core_id: str, soc_spec: dict[str, Any],
+    variant: dict[str, Any],
     dir_name: str, basename: str, rx_row: dict[str, Any], tx_row: dict[str, Any],
     metadata_root: Path, links: dict[str, Any],
     ethos_u: tuple[str, str] | None = None,
@@ -1646,9 +1676,7 @@ def _aen_dts(
         f" * Reuses the upstream Alif {part} SoC + RTSS-{role_u} cluster devicetree and:",
         " *   - retargets the console from the DevKit's UART2 to the E1M carrier console",
         f" *     (Alif {uart_node.upper()}, {rx_row['silicon_pad']}/{tx_row['silicon_pad']} -- the E1M edge \"UART0\");",
-        " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
-        " *     (MX25UM25645) + HyperRAM (W958D8NB) are BOM-optional and NOT populated",
-        " *     on the current batch, so there is no external XIP / flash device;",
+        *_aen_ospi_storage_banner_lines(sku_preset),
         " *   - lays down a production MCUboot partition map in MRAM.",
     ]
     if disjoint_slot0:
@@ -2684,8 +2712,9 @@ def emit_zephyr_board(
         files[f"{dir_name}/Kconfig.defconfig"] = _aen_kconfig_defconfig(
             dir_name, role, _aen_part(soc_spec))
         files[aen_dts_relpath] = _aen_dts(
-            sku, core_id, soc_spec, variant, dir_name, basename, rx_row, tx_row,
-            metadata_root, on_module_links, _aen_ethos_u(soc_spec), memory_map)
+            sku, sku_preset, core_id, soc_spec, variant, dir_name, basename,
+            rx_row, tx_row, metadata_root, on_module_links,
+            _aen_ethos_u(soc_spec), memory_map)
         banner_extra_source.update(dict.fromkeys(
             (aen_pinctrl_relpath, aen_dts_relpath),
             "metadata/e1m_modules/aen/on-module-links.yaml"))

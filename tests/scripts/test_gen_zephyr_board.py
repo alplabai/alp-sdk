@@ -746,6 +746,52 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         self.assertIn('(E1M edge "UART0", P7_0/P7_1)', defconfig)
         self.assertNotIn("P3_4", defconfig)
 
+    def test_ospi0_storage_banner_names_are_read_from_the_som_preset(self) -> None:
+        """The boot/storage banner's OSPI0 NOR + HyperRAM part names used to
+        be generator constants (Macronix `MX25UM25645` + Winbond `W958D8NB`)
+        applied to every AEN SKU -- #2062: E1M-AEN803 fits the same U10/U9
+        footprint with a different, measured part (ISSI NOR, Infineon/
+        Cypress HyperRAM). The real, unmutated E1M-AEN801 board must name
+        its own preset's parts, not the old hardcoded ones, and say NOT
+        populated (its real `assembled: false` state)."""
+        files = emit_zephyr_board("E1M-AEN801", "m55_hp", METADATA_ROOT)
+        dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        # Comment prose is reflowed to house-style width, so match on text
+        # with the `\n *  ` line-continuation markers collapsed out.
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("IS25WX256-JHLE", flat)
+        self.assertIn("S80KS5122GABHM02", flat)
+        self.assertIn("are not populated on this SKU", flat)
+        self.assertNotIn("MX25UM25645", flat)
+        self.assertNotIn("W958D8NB", flat)
+
+    def test_ospi0_storage_banner_reflects_a_populated_preset(self) -> None:
+        """A SoM preset that DOES populate OSPI0 must get banner prose that
+        says so, naming whatever part its own preset declares -- not the
+        "not populated" phrasing (mutated off E1M-AEN801, since no shipped
+        SKU with a real board tree populates it today)."""
+        with _MutatedMetadata() as mm:
+            mm.sub(
+                "e1m_modules/E1M-AEN801.yaml",
+                "      chip:           IS25WX256-JHLE      # ISSI xSPI NOR, "
+                "U10 footprint (same part E1M-AEN803 fits, #2041)\n"
+                "      # NOT populated on this SKU.  E1M-AEN803 is the SKU "
+                "that fits both external\n"
+                "      # memories; E1M-AEN801 fits neither and runs from "
+                "the SoC's on-die MRAM.\n"
+                "      # The footprint exists on the shared PCB -- see the "
+                "R2 netlist -- which is\n"
+                "      # why the part is still described here.\n"
+                "      assembled:      false",
+                "      chip:           TEST-NOR-PART\n"
+                "      assembled:      true")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+            dts = next(v for k, v in files.items() if k.endswith(".dts"))
+        flat = " ".join(re.sub(r"\n\s*\*\s?", " ", dts).split())
+        self.assertIn("TEST-NOR-PART", flat)
+        self.assertIn("are populated on this SKU", flat)
+        self.assertIn("OSPI_XIP_SER does not exist on this die", flat)
+
 
 class TestAenMemoryMapValidation(unittest.TestCase):
     """The disjoint-slot0 branch copies `base` / `size_kib` straight out of

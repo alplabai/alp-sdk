@@ -59,7 +59,7 @@ on_module:
   # fitted) for the same corrected mapping.
   ospi_memories:
     ospi0:
-      chip:           MX25UM25645GXDI00   # Macronix OctaFlash (xSPI NOR)
+      chip:           IS25WX256-JHLE      # ISSI xSPI NOR, U10 footprint (same part E1M-AEN803 fits, #2041)
       # NOT populated on this SKU.  E1M-AEN803 is the SKU that fits both external
       # memories; E1M-AEN801 fits neither and runs from the SoC's on-die MRAM.
       # The footprint exists on the shared PCB -- see the R2 netlist -- which is
@@ -77,7 +77,7 @@ on_module:
   # NOR flash above.  Shares the OSPI0 octal controller with the flash,
   # separated only by chip-select (HyperRAM = CS0, NOR = CS1).
   hyperram:
-    chip:           W958D8NBYA5I    # Winbond OctalRAM (HyperBus)
+    chip:           S80KS5122GABHM02  # Infineon/Cypress HyperRAM, U9 footprint (same part E1M-AEN803 fits, #2041)
     # NOT populated on this SKU -- see the ospi0 note above.  This key is
     # load-bearing: `assembled` defaults to TRUE, so omitting it made every
     # consumer treat the HyperRAM as fitted, and the boot banner advertised
