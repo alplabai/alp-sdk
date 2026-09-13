@@ -12,7 +12,7 @@ Every other register checked matched the correctly-configured resting state
 already documented in the driver:
 
 - `UTIMER_CNTR_CTRL` (`0x4800D080`) read `0x00000021` (EN and CNTR_TRIG set,
-  RUNNING clear). `zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c:432`
+  RUNNING clear). `zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c:474`
   ("So CNTR_CTRL reading 0x00000021 here") documents that as the CORRECT
   resting state for a trigger-counting channel -- do not "fix" this by
   starting the counter, which caused the withdrawn #2038 free-run.
@@ -36,17 +36,20 @@ this bench run could not tell them apart from the decoded angle alone.
 `examples/aen/aen-qenc-readout/src/main.c` now samples the raw pad levels of
 `P3_0`/`P3_1` directly off the GPIO3 controller's external-port register
 alongside every decoded-angle sample,
-`examples/aen/aen-qenc-readout/src/main.c:104` (`0x49003050u`), and prints
+`examples/aen/aen-qenc-readout/src/main.c:140` (`0x49003050u`), and prints
 the pad-control (mux + electrical) register values for both pins once at
-start-up, `examples/aen/aen-qenc-readout/src/main.c:121`
+start-up, `examples/aen/aen-qenc-readout/src/main.c:157`
 (`AEN_PINCTRL_BASE`), so a missing input-enable is visible without a
-debugger. The verdict now distinguishes three outcomes instead of two: pads
-and angle both changing means the decoder works; pads changing but the angle
-staying put is the #2037 defect reproduced under a hand,
-`examples/aen/aen-qenc-readout/src/main.c:302`
-("signal reaches the SoC pins and the UTIMER QEC0 channel does not count it");
-pads never changing at all means nothing reached the pads, which cannot tell
-an absent or unfitted encoder from a broken one.
+debugger. The verdict at the time distinguished three outcomes instead of
+two: pads and angle both changing meant the decoder works; pads changing but
+the angle staying put was the #2037 defect reproduced under a hand,
+`examples/aen/aen-qenc-readout/src/main.c:391`
+("the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder");
+pads never changing at all meant nothing reached the pads, which could not
+tell an absent or unfitted encoder from a broken one. **Superseded**: the
+verdict criteria changed again in a later round (`changelog.d/
+2037-src0-triggers.md`) once the hardware "angle" was measured to be an
+edge count, not a decode.
 
 **Open**: the next attended run with this build settles which of those three
 it is. No decoder configuration, mux, or counter-start behaviour changed

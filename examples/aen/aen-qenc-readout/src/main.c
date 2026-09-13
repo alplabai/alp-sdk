@@ -2,31 +2,52 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-qenc-readout -- read a quadrature encoder on the Ensemble E8 UTIMER via the
- * vendored alif,utimer-qdec sensor driver, on the E1M-AEN801 (M55-HE).  Drives the
- * standard Zephyr sensor API (sensor_sample_fetch / sensor_channel_get) on
- * DT_ALIAS(alp_qenc0) and reports SENSOR_CHAN_ROTATION.  The driver scales the
- * raw UTIMER counter to DEGREES (val1 = counter * 360 / counts-per-revolution),
- * so the value ranges 0..359, not raw counts -- the sensor API has no separate
- * channel or attribute for the raw counter, so degrees is the only number this
- * app (or any app using this driver) can ever read.
+ * aen-qenc-readout -- measure a quadrature encoder on the E1M-AEN801 (M55-HE)
+ * through TWO independent paths, neither of which is bench-proven yet:
  *
- * The UTIMER runs in quadrature-decoder mode on P3_0/P3_1 (QEC0_X_A/QEC0_Y_A).
- * These are QEC_TRIGGER0/1 inputs on the SRC_0 trigger-source registers, NOT
- * "channel input A/B" on SRC_1 -- that SRC_1 naming belongs to the
- * lputimer0/1/2 instances Alif's own tree binds this same driver to, and its
- * x4-decode arming (hal_alif's alif_utimer_config_qdec_triggers(), both
- * rising and falling edges of A and B) never counted a single QEC0 edge on
- * this bench (#2037: pads toggled, UTIMER_CNTR stayed 0x00000000).  See
- * zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c for the SRC_0 fix.  The
- * decode ratio under SRC_0 is unproven -- see the board overlay's comment and
- * this example's README.md for the predicted per-build raw-count deltas.
- * counts-per-revolution stays 96 (24-PPR encoder * the old x4 SRC_1 decode)
- * pending that bench confirmation: the hardware reload wraps the counter at
- * (counts-per-revolution - 1), so a wrong (too large) value doesn't just
- * misreport a bit -- it stretches one real revolution across only a fraction
- * of the 0-359 range, AND makes a single genuine encoder tick integer-
- * truncate to 0 degrees ("moved a little" reads identical to "never moved").
+ *  1. HARDWARE: the Ensemble E8 UTIMER QEC0 channel, via the vendored
+ *     alif,utimer-qdec sensor driver (sensor_sample_fetch/channel_get on
+ *     DT_ALIAS(alp_qenc0), SENSOR_CHAN_ROTATION).  MEASURED (#2037,
+ *     2026-09-13, 120000 unaliased CNTR reads over 25 s of continuous hand
+ *     motion): this channel counts QEC_TRIGGER0 rising edges up and
+ *     QEC_TRIGGER1 rising edges down with NO qualification of the other
+ *     input -- an edge counter, not a quadrature decoder.  A genuine
+ *     quadrature pair nets 0 per revolution at any speed under this mapping;
+ *     the bench instead measured net +654 (up +2385, down -1731) with 293 of
+ *     734 non-zero steps |step| >= 2 inside 0.21 ms -- contact bounce, not
+ *     motion.  See zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c and
+ *     the board overlay for the full register/vendor-source evidence. The
+ *     driver still scales its raw counter to a 0..359 "degrees" value
+ *     (counter * 360 / counts-per-revolution) -- this app prints that value
+ *     labelled as what it now is, an unqualified edge count, NOT a position.
+ *
+ *  2. SOFTWARE (added this round): Zephyr's gpio-qdec input driver
+ *     (zephyr/drivers/input/input_gpio_qdec.c upstream), a debounced
+ *     Gray-code state machine over the SAME P3_0/P3_1 pads, reached through
+ *     &gpio3 instead of the UTIMER -- see the board overlay's SOFTWARE
+ *     DECODE paragraph for exactly how it is wired and its own open
+ *     assumption (GPIO3's interrupt path working while the pads stay muxed
+ *     to QEC0_X_A/QEC0_Y_A).  This DOES decode direction, unlike path 1 --
+ *     it only posts an event every steps-per-period=4 real phase
+ *     transitions.  NOT bench-verified: the operator left the bench before
+ *     this path existed.
+ *
+ * A portable surface DOES exist -- <alp/counter.h>'s alp_qenc_open() /
+ * alp_qenc_get_position(), resolving the SAME alp-qenc0 alias this file's
+ * board overlay declares, backed by src/backends/qenc/zephyr_drv.c -- but
+ * this app does not call it, for two different reasons per path. Path 1:
+ * that backend IS the sensor_sample_fetch/SENSOR_CHAN_ROTATION pair path 1
+ * already binds directly, so going through the wrapper would only hide the
+ * raw register access this bench tool exists to show (pad levels, the
+ * hw/sw split, register dumps) -- exactly why examples/peripheral-io/
+ * qenc-readout, the portable-API demo, is a SEPARATE example and has no
+ * AEN801 overlay of its own. Path 2: the wrapper's only backend speaks
+ * SENSOR_CHAN_ROTATION, not INPUT_REL_* events, so gpio-qdec does not fit
+ * it without new backend code -- code the backend's own comment already
+ * anticipates ("Real pulse counts come via the v0.3 input-subsystem
+ * fast-path") but that does not exist yet. Whether to build that backend,
+ * and have this app (or its successor) migrate onto alp_qenc_open() once it
+ * does, is a design decision this branch does NOT make -- see #2095.
  *
  * PASS / SKIPPED / FAIL, not PASS / PARTIAL: a bench run with nobody at the
  * knob produces N clean reads that never change -- that is the CORRECT output
@@ -34,35 +55,39 @@
  * that never counts also prints.  The old binary verdict called both of those
  * "PARTIAL", which taught nothing.
  *
- * A prior version of this app could not tell a live decode from spurious
- * internal counts on an unattended run -- it had no operator input to
- * correlate the decoded angle against.  This version reads the RAW pad
- * levels of P3_0/P3_1 (QEC0 X/Y) straight off the GPIO3 controller
- * (GPIO_EXT_PORTA, bits 0/1), independent of the qdec driver and the sensor
- * API entirely, and tracks whether either one ever CHANGED across the
- * window.  That gives three outcomes instead of two:
- *   - pad levels changed AND the decoded angle changed -> PASS (the decoder
- *     works: edges reach the pad and the channel counts them)
- *   - pad levels changed BUT the decoded angle never changed -> FAIL, and
- *     specifically the #2037 defect: signal reaches the SoC pins and the
- *     channel still does not count it
+ * The verdict is now keyed ONLY on the software decoder (path 2), the one
+ * capable of establishing a real position -- path 1's "moved" is printed but
+ * can NEVER produce PASS by itself, because it is an edge count, not a
+ * decode (see #2037 above; an earlier version of this app treated "pads
+ * moved and the hardware angle moved" as PASS, which the bounce measurement
+ * refutes).  This version still reads the RAW pad levels of P3_0/P3_1 off
+ * the GPIO3 controller (GPIO_EXT_PORTA, bits 0/1), independent of both
+ * decoders, and tracks whether either the pads or the software decoder's
+ * tick count ever CHANGED across the window:
+ *   - pad levels changed AND the software decoder registered net ticks ->
+ *     PASS: a debounced quadrature decode observed real motion
+ *   - pad levels changed BUT the software decoder never ticked -> FAIL:
+ *     either gpio-qdec's GPIO3 interrupt path did not fire (see the board
+ *     overlay's UNVERIFIED assumption) or the motion never cleared one
+ *     x4 step; the hardware edge count (path 1) is printed for reference
+ *     but is explicitly NOT evidence either way -- it counts bounce as
+ *     readily as motion (#2037)
  *   - pad levels never changed at all -> SKIPPED: nothing reached the pads.
  *     This does NOT distinguish an absent/unfitted encoder from a broken or
  *     disconnected one -- it only says no edges arrived at P3_0/P3_1.
  *   - any sample_fetch/channel_get in the window returned an error -> FAIL
  *     regardless of the above (the driver itself is failing reads)
  *
- * What none of this says: that the decoder is armed and running when idle.
- * The sensor API this driver registers is {sample_fetch, channel_get} only --
- * no attr_get, no raw-counter channel -- so there is no way from here to see
- * the counter's run state (UTIMERn_CNTR_CTRL bit 1 RUNNING).  Clean reads of a
- * stopped counter look exactly like clean reads of an idle running one, and
- * the raw pad read added here does not change that -- it tells you whether
- * edges arrived, not whether the channel would have counted them if the
- * decoder were otherwise dead.  That is precisely how #2037 (the counter was
+ * What none of this says: that either decoder is armed and running when
+ * idle.  The hardware sensor API this driver registers is {sample_fetch,
+ * channel_get} only -- no attr_get, no raw-counter channel -- so there is no
+ * way from here to see the counter's run state (UTIMERn_CNTR_CTRL bit 1
+ * RUNNING).  Clean reads of a stopped counter look exactly like clean reads
+ * of an idle running one.  That is precisely how #2037 (the counter was
  * configured but never started) survived a bench run whose SKIPPED line
- * claimed "decoder armed as configured".  Confirming the run state needs a
- * debugger read of CNTR_CTRL / GLB_CNTR_RUNNING, not a print from this app.
+ * claimed "decoder armed as configured".  Confirming the hardware run state
+ * needs a debugger read of CNTR_CTRL / GLB_CNTR_RUNNING, not a print from
+ * this app.
  */
 
 #include <stdio.h>
@@ -70,6 +95,9 @@
 #include <alp/peripheral.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/input/input.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/sys_io.h>
 
 #define QENC_NODE DT_ALIAS(alp_qenc0)
@@ -80,14 +108,22 @@
  * dead/unwired/miswired pad and a wired-but-not-counted pad print
  * differently instead of both showing a stuck angle.
  *
- * GPIO3 GPIO_EXT_PORTA: there is no `alif,gpio` (or any GPIO) devicetree
- * node anywhere in this Zephyr tree for the Alif Ensemble family (checked:
- * no gpio0..17 node under dts/arm/alif), so there is nothing DT-derived to
- * point at -- this is defined here from the Alif DFP AE822FA0E5597 SoC
- * header, Device/soc/AE822FA0E5597/include/rtss_he/soc.h: `GPIO3_BASE`
- * 0x49003000UL, and `GPIO_EXT_PORTA` (an __IM "GPIO External Port Read
- * Register") sits at offset 0x50 within `GPIO_Type` -> 0x49003050, bit N =
- * pin N within the port, so bit 0 = P3_0 and bit 1 = P3_1.
+ * GPIO3 GPIO_EXT_PORTA: a `snps,designware-gpio` node for GPIO3 DOES exist
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi, label `gpio3`, `status =
+ * "disabled"` there, enabled by this example's board overlay for the
+ * software decoder below) -- an earlier version of this comment claimed no
+ * GPIO node existed anywhere in this tree, which was simply not checked
+ * thoroughly enough. This raw MMIO read predates that overlay change and is
+ * kept as a hardcoded constant rather than rebased onto the DT node: it
+ * needs no `gpio_dw` device bind (works before device_is_ready() on gpio3
+ * would even pass) and this driver's own read/write path is not the thing
+ * under test -- adding a dependency on it here would make a raw-pad check
+ * depend on the very peripheral driver it exists to double-check.  Defined
+ * here from the Alif DFP AE822FA0E5597 SoC header, Device/soc/AE822FA0E5597/
+ * include/rtss_he/soc.h: `GPIO3_BASE` 0x49003000UL, and `GPIO_EXT_PORTA` (an
+ * __IM "GPIO External Port Read Register") sits at offset 0x50 within
+ * `GPIO_Type` -> 0x49003050, bit N = pin N within the port, so bit 0 = P3_0
+ * and bit 1 = P3_1.
  *
  * This register reads the pad's physical level continuously, independent of
  * which peripheral function (if any) is muxed onto the pin, gated only by
@@ -120,6 +156,38 @@
  */
 #define AEN_PINCTRL_BASE       DT_REG_ADDR_BY_NAME(DT_NODELABEL(pinctrl), pinctrl)
 #define AEN_PAD_REG(port, pin) (AEN_PINCTRL_BASE + (uint32_t)(port) * 32u + (uint32_t)(pin) * 4u)
+
+/*
+ * Software quadrature decoder (#2037) -- see the file header path 2 and the
+ * board overlay's SOFTWARE DECODE paragraph for how `qdec_sw` is wired
+ * (same P3_0/P3_1 pads, reached through &gpio3, no pinctrl change). The
+ * portable <alp/counter.h> alp_qenc_* surface exists but its only backend
+ * speaks SENSOR_CHAN_ROTATION, not INPUT_REL_* events -- see the file
+ * header -- so it is bound here as a raw Zephyr
+ * device + input callback, the same way path 1 (the sensor API) already is.
+ *
+ * INPUT_CALLBACK_DEFINE registers a callback invoked on the input
+ * subsystem's own thread (CONFIG_INPUT_MODE_THREAD, the default) whenever
+ * qdec_sw posts an event -- asynchronously with respect to main()'s polling
+ * loop below, hence the atomic accumulator rather than a plain int32_t.
+ * gpio-qdec posts one INPUT_EV_REL / INPUT_REL_WHEEL event per
+ * steps-per-period (4, one mechanical detent on this 24-PPR part) real
+ * phase transitions, signed by direction -- unlike the hardware UTIMER
+ * channel, this driver's Gray-code state machine (QDEC_LL_LH / QDEC_HH_HL /
+ * ... in zephyr/drivers/input/input_gpio_qdec.c) genuinely decodes
+ * direction, it does not just count edges.
+ */
+static atomic_t qdec_sw_ticks = ATOMIC_INIT(0);
+
+static void qdec_sw_on_event(struct input_event *evt, void *user_data)
+{
+	ARG_UNUSED(user_data);
+	if ((evt->type == INPUT_EV_REL) && (evt->code == INPUT_REL_WHEEL)) {
+		atomic_add(&qdec_sw_ticks, evt->value);
+	}
+}
+INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(DT_NODELABEL(qdec_sw)), qdec_sw_on_event, NULL);
+
 /*
  * 200 * 300 ms = 60 s.  This was 30 samples = 9 s, described in this very
  * comment as "comfortably long enough to grab the knob" -- it is not.  Nine
@@ -136,11 +204,25 @@ int main(void)
 {
 	const struct device *qenc = DEVICE_DT_GET(QENC_NODE);
 
-	printf("[qenc] open %s (UTIMER quadrature decoder)\n", qenc->name);
+	const struct device *qdec_sw = DEVICE_DT_GET(DT_NODELABEL(qdec_sw));
+
+	printf("[qenc] open %s (UTIMER hardware edge counter, NOT a decoder -- see #2037)\n",
+	       qenc->name);
 	if (!device_is_ready(qenc)) {
 		printf("[qenc] RESULT FAIL: device not ready\n[qenc] done\n");
 		return 0;
 	}
+
+	/* qdec_sw not being ready is NOT fatal to the run: the hardware path
+	 * above still produces its (now honestly-labelled) diagnostic, and a
+	 * missing/failed software decoder is itself useful bench information --
+	 * see the board overlay's UNVERIFIED GPIO3-interrupt-path assumption.
+	 * A dead qdec_sw makes sw_moved permanently false below, which the
+	 * verdict already treats as "FAIL, edges reached the pads but nothing
+	 * decoded them" -- the correct outcome, not a special case.
+	 */
+	bool qdec_sw_ready = device_is_ready(qdec_sw);
+	printf("[qenc] open %s (software gpio-qdec decoder) ready=%d\n", qdec_sw->name, qdec_sw_ready);
 
 	/* This is the whole state dump available: the sensor_driver_api this
 	 * driver registers is {sample_fetch, channel_get} only -- no attr_get, no
@@ -175,24 +257,28 @@ int main(void)
 	       "[qenc]   TURN THE ENCODER SHAFT NOW.\n"
 	       "[qenc]\n"
 	       "[qenc]   You have %d seconds.  Do this, in order:\n"
-	       "[qenc]     1. one detent (one click) -- expect about 15 deg, which\n"
-	       "[qenc]        is 4 raw counts at x4 decode\n"
+	       "[qenc]     1. one detent (one click) -- expect 1 software tick\n"
+	       "[qenc]        (steps-per-period=4); the hardware edge count is\n"
+	       "[qenc]        NOT a position, ignore its magnitude (#2037)\n"
 	       "[qenc]     2. one full revolution clockwise\n"
 	       "[qenc]     3. one full revolution anticlockwise\n"
 	       "[qenc]\n"
-	       "[qenc]   If the angle never changes while you are turning it, that\n"
-	       "[qenc]   is the open defect reproduced under a hand (#2037) -- and\n"
-	       "[qenc]   it is the measurement nobody has taken yet.\n"
+	       "[qenc]   The software decoder ('sw ticks' below) is what actually\n"
+	       "[qenc]   decodes direction -- if it never moves while you turn the\n"
+	       "[qenc]   shaft, that is a live #2037 finding on its own path, not\n"
+	       "[qenc]   the already-confirmed hardware defect.\n"
 	       "[qenc] ============================================================\n\n",
 	       (SAMPLES * POLL_MS) / 1000);
 
 	int      ok_reads    = 0;
-	bool     moved       = false;
+	bool     hw_moved    = false;
+	bool     sw_moved    = false;
 	int32_t  first       = 0;
+	int32_t  first_sw    = (int32_t)atomic_get(&qdec_sw_ticks);
 	bool     pad_moved   = false;
 	uint32_t first_porta = sys_read32(AEN_GPIO3_EXT_PORTA) & AEN_GPIO3_P3_MASK;
 	for (int i = 0; i < SAMPLES; i++) {
-		/* Raw pad read: independent of the qdec driver, never errors, so it
+		/* Raw pad read: independent of both decoders, never errors, so it
 		 * is taken every sample regardless of the sensor calls below. */
 		uint32_t porta    = sys_read32(AEN_GPIO3_EXT_PORTA) & AEN_GPIO3_P3_MASK;
 		bool     pad_x    = (porta & AEN_GPIO3_P3_0_BIT) != 0;
@@ -202,16 +288,35 @@ int main(void)
 			pad_moved = true;
 		}
 
+		/* Software decoder tick count: updated asynchronously by
+		 * qdec_sw_on_event() on the input subsystem's own thread, read here
+		 * every sample regardless of the hardware sensor calls below. */
+		int32_t sw_ticks = (int32_t)atomic_get(&qdec_sw_ticks);
+		bool    sw_diff  = (sw_ticks != first_sw);
+		if (sw_diff) {
+			sw_moved = true;
+		}
+
 		int rc = sensor_sample_fetch(qenc);
 		if (rc != 0) {
-			printf("[qenc] sample_fetch[%d] -> %d  P3_0=%d P3_1=%d\n", i, rc, pad_x, pad_y);
+			printf("[qenc] sample_fetch[%d] -> %d  P3_0=%d P3_1=%d sw_ticks=%d\n",
+			       i,
+			       rc,
+			       pad_x,
+			       pad_y,
+			       sw_ticks);
 			alp_delay_ms(POLL_MS);
 			continue;
 		}
 		struct sensor_value v = { 0 };
 		rc                    = sensor_channel_get(qenc, SENSOR_CHAN_ROTATION, &v);
 		if (rc != 0) {
-			printf("[qenc] channel_get[%d] -> %d  P3_0=%d P3_1=%d\n", i, rc, pad_x, pad_y);
+			printf("[qenc] channel_get[%d] -> %d  P3_0=%d P3_1=%d sw_ticks=%d\n",
+			       i,
+			       rc,
+			       pad_x,
+			       pad_y,
+			       sw_ticks);
 			alp_delay_ms(POLL_MS);
 			continue;
 		}
@@ -219,21 +324,24 @@ int main(void)
 		if (ok_reads == 1) {
 			first = v.val1;
 		} else if (v.val1 != first) {
-			moved = true;
+			hw_moved = true;
 		}
 		/* Print every sample early (so a fast operator sees feedback), then
-		 * thin out -- 200 lines of unchanging angle buries the interesting
+		 * thin out -- 200 lines of an unchanging read buries the interesting
 		 * part, and the RAM console is a fixed-size buffer that wraps.  A pad
-		 * transition always prints, even outside that thinning window: it is
-		 * the one event that discriminates the #2037 defect (pad moves,
-		 * angle doesn't) from a dead pad, and thinning it out would hide it.
+		 * or software-tick transition always prints, even outside that
+		 * thinning window: those are the events that discriminate a real
+		 * decode from a dead or bounce-only path, and thinning them out
+		 * would hide it.
 		 */
-		if ((i < 20) || (v.val1 != first) || pad_diff || ((i % 10) == 0)) {
-			printf("[qenc] angle[%d] = %d deg (0-359)  P3_0=%d P3_1=%d  [%d s left]\n",
+		if ((i < 20) || (v.val1 != first) || pad_diff || sw_diff || ((i % 10) == 0)) {
+			printf("[qenc] hw_edges[%d]=%d (mod 96, NOT degrees/position -- #2037)  "
+			       "P3_0=%d P3_1=%d  sw_ticks=%d  [%d s left]\n",
 			       i,
 			       v.val1,
 			       pad_x,
 			       pad_y,
+			       sw_ticks,
 			       ((SAMPLES - i) * POLL_MS) / 1000);
 		}
 		alp_delay_ms(POLL_MS);
@@ -246,78 +354,73 @@ int main(void)
 	 * that), so do not name it "armed" and do not print it as such.
 	 */
 	bool        all_clean = (ok_reads == SAMPLES);
+	int32_t     sw_net    = (int32_t)atomic_get(&qdec_sw_ticks) - first_sw;
 	const char *result;
 	const char *reason;
 
 	if (!all_clean) {
 		result = "FAIL";
 		reason = "at least one read in the window returned an error -- the driver is failing "
-		         "calls it should not, independent of whether the pads or the count moved";
-	} else if (moved && pad_moved) {
+		         "calls it should not, independent of whether the pads or either decoder moved";
+	} else if (pad_moved && sw_moved) {
 		/*
 		 * The raw pad read is what makes this branch trustworthy: P3_0/P3_1
-		 * actually transitioned, AND the decoded angle tracked it.  A count
-		 * that moves with nobody touching the shaft used to be
-		 * indistinguishable from a live decode from inside this app alone --
-		 * see the #2038 history below -- but spurious internal counts cannot
-		 * make the GPIO3 EXT_PORTA pad bits move too, since those come
-		 * straight off the physical pin, upstream of the UTIMER channel
-		 * entirely.  Correlated motion on both sides is the decoder working.
+		 * actually transitioned, AND the SOFTWARE decoder registered net
+		 * ticks. This is the only branch that can claim PASS: gpio-qdec's
+		 * Gray-code state machine genuinely decodes direction (unlike the
+		 * hardware UTIMER channel, which is a measured edge counter -- see
+		 * the file header and #2037). Spurious internal counts on the
+		 * hardware path cannot make BOTH the GPIO3 pad bits AND an
+		 * independent software state machine move together the same way a
+		 * single free-running register could fool one channel alone.
 		 */
 		result = "PASS";
-		reason = "the raw P3_0/P3_1 pad levels changed AND the decoded angle changed with "
-		         "them -- edges reach the pad and the channel counts them: the decoder works";
-	} else if (moved) {
-		/*
-		 * The angle moved but the raw pads did not -- exactly the spurious-
-		 * count signature this app could not previously rule out.  Measured
-		 * on E1M-AEN803 2026W36-0002 (2026-09-08): with the counter running
-		 * and the encoder untouched, the count advanced steadily the whole
-		 * window while UP_1_SRC and DOWN_1_SRC were both zeroed, so no
-		 * quadrature edge of any polarity could have contributed -- the count
-		 * source was internal to the channel, not the pads.
-		 *
-		 * RESOLVED: that free-run was caused by a GLB_CNTR_START write added
-		 * under #2037 and since WITHDRAWN.  Starting a trigger-counting
-		 * channel puts it into free-running clocked mode -- it advanced at
-		 * 400,010,738 counts/s -- and GLB_CNTR_STOP froze it instantly.  With
-		 * the start call gone, CNTR reads a stable 0x00000000, so this branch
-		 * is now near-unreachable; if it reproduces, the free-run is back.
-		 */
-		result = "FAIL";
-		reason = "the decoded angle moved but the raw P3_0/P3_1 pad levels never did -- "
-		         "spurious counts internal to the UTIMER channel, not real quadrature edges.  "
-		         "A free-run at the peripheral clock caused exactly this and was withdrawn "
-		         "(#2038); if it recurs, read CNTR (0x4800D0A0) over SWD with CNTR_PTR "
-		         "widened to 0xFFFFFFFF -- the shipped reload wraps a revolution every 240 ns "
-		         "and hides the rate";
+		reason = "the raw P3_0/P3_1 pad levels changed AND the software gpio-qdec decoder "
+		         "registered net ticks with them -- a debounced quadrature decode observed "
+		         "real motion. The hardware UTIMER channel is diagnostic only (see hw_edges "
+		         "above) and is NOT part of this verdict -- it is a measured edge counter, "
+		         "not a decoder (#2037)";
 	} else if (pad_moved) {
-		/* This is the #2037 defect, reproduced under a hand on the shaft: the
-		 * signal is proven to reach the SoC pins (the pad bits transitioned),
-		 * and the channel still reports zero motion.  Not the pads, not an
-		 * absent encoder -- the decode path itself.
+		/*
+		 * This is the live #2037 question on the SOFTWARE path: the signal
+		 * is proven to reach the SoC pins (the pad bits transitioned), but
+		 * qdec_sw never ticked. Two candidate explanations, both open: (a)
+		 * the board overlay's UNVERIFIED assumption that GPIO3's interrupt
+		 * path fires while P3_0/P3_1 stay muxed to QEC0_X_A/QEC0_Y_A is
+		 * wrong, so qdec_sw never even wakes; (b) it does wake but the
+		 * motion never cleared one steps-per-period=4 threshold (less
+		 * than one detent). The hardware edge count is explicitly NOT
+		 * corroborating evidence either way -- it counts contact bounce as
+		 * readily as real motion, which is the whole reason this verdict no
+		 * longer keys on it.
 		 */
 		result = "FAIL";
-		reason = "the raw P3_0/P3_1 pad levels changed but the decoded angle never did -- "
-		         "signal reaches the SoC pins and the UTIMER QEC0 channel does not count it.  "
-		         "This is the #2037 defect, reproduced under a hand on the shaft";
+		reason = "the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder "
+		         "never registered a net tick -- either its GPIO3 interrupt path did not "
+		         "fire (see the board overlay's UNVERIFIED assumption) or the motion never "
+		         "cleared one x4 step. The hardware UTIMER edge count is not evidence here "
+		         "either way -- see #2037";
 	} else {
 		result = "SKIPPED";
-		reason = "neither the decoded angle nor the raw P3_0/P3_1 pad levels ever changed -- "
-		         "nothing reached the pads.  This does NOT distinguish an absent/unfitted "
-		         "encoder from a broken or disconnected one; it only says no edges arrived at "
-		         "P3_0/P3_1.  Do NOT read CNTR_CTRL bit 1 RUNNING as a fault: bit 1 clear "
-		         "(CNTR_CTRL 0x00000021) is the CORRECT resting state for a trigger-counting "
-		         "channel, and starting the counter to 'fix' it makes it free-run on the "
-		         "peripheral clock instead (#2038)";
+		reason = "neither the raw P3_0/P3_1 pad levels nor the software decoder's tick count "
+		         "ever changed -- nothing reached the pads. This does NOT distinguish an "
+		         "absent/unfitted encoder from a broken or disconnected one; it only says no "
+		         "edges arrived at P3_0/P3_1. Do NOT read CNTR_CTRL bit 1 RUNNING as a fault: "
+		         "bit 1 clear (CNTR_CTRL 0x00000021) is the CORRECT resting state for a "
+		         "trigger-counting channel, and starting the counter to 'fix' it makes it "
+		         "free-run on the peripheral clock instead (#2038)";
 	}
 
-	printf("[qenc] RESULT %s: %s (%d/%d clean reads, pad moved=%d)\n",
+	printf("[qenc] RESULT %s: %s (%d/%d clean reads, pad moved=%d, hw edges moved=%d "
+	       "[diagnostic only, NOT part of this verdict], sw ticks moved=%d, sw net=%d)\n",
 	       result,
 	       reason,
 	       ok_reads,
 	       SAMPLES,
-	       pad_moved);
+	       pad_moved,
+	       hw_moved,
+	       sw_moved,
+	       sw_net);
 	printf("[qenc] done\n");
 	return 0;
 }

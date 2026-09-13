@@ -1,13 +1,12 @@
-### Fixed — root cause identified: the UTIMER QEC0 channel was armed on the wrong trigger-source registers (#2037)
+### Fixed — the UTIMER QEC0 channel was armed on the wrong trigger-source registers; measured to be an edge counter, not a quadrature decoder (#2037)
 
-**Measured, not yet bench-confirmed.** An attended run on `e1m-aen-evk-03`
-(E1M-AEN803 `2026W36-0002`), maintainer turning the shaft continuously for the
-whole 60 s window: GPIO3 `EXT_PORTA` (`0x49003050`, bits 0/1) showed all four
-quadrature states across 189 sample lines (128x `11`, 44x `10`, 15x `01`, 2x
-`00`) -- the encoder is fitted, wired, and live -- while `UTIMER_CNTR`
-(`0x4800D0A0`) read `0x00000000` at four points spread across the motion
-window and once after. The signal reaches the SoC and the channel never
-counts it.
+**Round 1 (2026-09-13, pre-fix build): signal reaches the SoC, the channel
+never counts it.** An attended run on `e1m-aen-evk-03` (E1M-AEN803
+`2026W36-0002`), maintainer turning the shaft continuously for the whole 60 s
+window: GPIO3 `EXT_PORTA` (`0x49003050`, bits 0/1) showed all four quadrature
+states across 189 sample lines (128x `11`, 44x `10`, 15x `01`, 2x `00`) -- the
+encoder is fitted, wired, and live -- while `UTIMER_CNTR` (`0x4800D0A0`) read
+`0x00000000` at four points spread across the motion window and once after.
 
 **Root cause: `qdec_alif_utimer_init()` armed `SRC_1` ("channel input A/B"),
 not `SRC_0`.** hal_alif's `alif_utimer_config_qdec_triggers()` (`drivers/
@@ -32,29 +31,81 @@ confirm this:
   covering the whole register (an earlier reading in this issue's history) was
   the mistake that rejected this fix once already.
 
-**The fix.** `zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c` now branches
-on `timer_id`: QEC channels (`>= 12`) write `UTIMER_UP_0_SRC` /
+`zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c` now branches on
+`timer_id`: QEC channels (`>= 12`) write `UTIMER_UP_0_SRC` /
 `UTIMER_DOWN_0_SRC` with `TRIG0_RISING` up / `TRIG1_RISING` down, matching
 Alif's own demo; channels below 12 keep calling
 `alif_utimer_config_qdec_triggers()` (`SRC_1`) unchanged -- that path is
 correct for the `lputimer0/1/2` instances, and is not touched by this fix.
 
-**A bench-triage alternative**, behind `#ifdef
-QDEC_ALIF_UTIMER_SRC0_X_EDGES` (default off, not a Kconfig/DT knob), programs
-`UP_0_SRC = 0x00000003` (both edges of `QEC_TRIGGER0`) and
-`DOWN_0_SRC = 0x00000000` instead -- it answers "does SRC_0 count at all"
-independent of the up/down trigger assignment.
+**Round 2 (2026-09-13, same day, attended, same board): the SRC_0 arming is
+live, and it is NOT a quadrature decode.** 120000 unaliased `CNTR` reads over
+25 s of continuous hand motion: up `+2385`, down `-1731`, net `+654`,
+unwrapped range `-33..+710`, and 293 of 734 non-zero steps were `|step| >= 2`
+inside a single 0.21 ms sample window. `UTIMER_UP_0_SRC`/`UTIMER_DOWN_0_SRC`
+bits `[23:0]` are described in the AE822 SVD (`:29960-29967`, `:30254-30261`)
+only as "Rising/Falling edge of `QEC_TRIGGERn` causes counter to
+increment/decrement" -- no level qualification of the other trigger input
+anywhere in that description. The only level-qualified matrix in the whole
+register map ("input A rising AND input B = 0") is `SRC_1`, which round 1
+measured not to reach these channels at all. Alif's own `demo_qec.c`, lines
+306/317/328, drives X, Y and Z as three **independent** GPIOs and describes
+counting their edges -- it is an edge-count test, not a quadrature test, and
+nothing in the DFP's utimer sources ever mentions "decode" or "quadrature".
+For a genuine quadrature pair, this trigger mapping counts 24 X-rising and 24
+Y-rising edges per revolution in EITHER direction, so a clean signal must net
+0 per revolution at any speed and stay within +-1 of its start forever -- the
+measured drift is contact bounce accumulating on an unqualified, undirected
+edge counter, not motion. **The round-1 `RESULT PASS` this branch's example
+reported (pads moved, hardware "angle" moved) is withdrawn as evidence of a
+working decoder**; see below for how the example's verdict changed.
 
-**Decode ratio is unproven, and `counts-per-revolution` (96 in
-`examples/aen/aen-qenc-readout`'s board overlay) is NOT changed here** --
-it was derived from the old SRC_1 x4 matrix, which is not what the SRC_0 path
-arms. The advisor's predicted raw-count deltas, from vendor evidence, not yet
-measured: default (DFP mapping) build, one full revolution should net +24 one
-direction and back down (-24) the other; diagnostic build, one detent should
-net +2 and one revolution +48 in either direction (`DOWN_0_SRC` is unarmed in
-that build, so the count can only increase). See the example's README.md for
-the full table and `examples/aen/aen-qenc-readout/boards/
-alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` for the citations.
+**`counts-per-revolution` (96 in `examples/aen/aen-qenc-readout`'s board
+overlay) is left UNCHANGED, deliberately** -- there is no reload value that
+turns an unqualified, undirected edge counter into a position, so 96 is kept
+as the pre-existing baseline rather than replaced with a new guess. The round
+1 predicted raw-count deltas ("+24 one direction, back down the other" for
+the default mapping) are **withdrawn**: they assumed a working decode, which
+round 2 refutes. The `QDEC_ALIF_UTIMER_SRC0_X_EDGES` diagnostic build's own
+prediction (one detent +2, one revolution +48, unsigned since `DOWN_0_SRC` is
+left unarmed) still holds AS A LIVENESS CHECK -- it was never a decode claim,
+only "does SRC_0 count at all", which round 2 also confirms, inflated by the
+same bounce.
+
+**Gap, recorded not resolved**: whether `FILTER_CTRL_A`/`FILTER_CTRL_B`
+(`0x84`/`0x88`, "input A"/"input B") affect the `QEC_TRIGGER` inputs at all on
+these channels is unproven. If they do not, the `0x00100101` filter this
+driver programs is inert on channel 12 and fully explains the bounce (raw
+contact bounce hitting an unqualified edge counter); if they do, but
+asymmetrically between the two inputs, that is a second bias candidate. Not
+chased further this round -- see the driver comment.
+
+**Software decoder added, NOT bench-verified.** Zephyr's `gpio-qdec` input
+driver (`zephyr/drivers/input/input_gpio_qdec.c`), a debounced Gray-code
+state machine, is now bound to the SAME `P3_0`/`P3_1` pads via `&gpio3`
+(`examples/aen/aen-qenc-readout`'s board overlay adds a `qdec-sw` node and
+enables `gpio3`) instead of the hardware UTIMER channel -- no pinctrl change,
+the pads stay muxed to `QEC0_X_A`/`QEC0_Y_A`. This relies on an UNVERIFIED
+assumption that GPIO3's interrupt/`EXT_PORTA` sampling network sees the pad
+regardless of which peripheral function enabled its input buffer, the same
+way this example's own raw-pad read already does (a prior bench session read
+a pin over GPIO while muxed to UART and saw live UART-driven transitions).
+The example's `main.c` consumes it via `INPUT_CALLBACK_DEFINE()` -- the first
+use of Zephyr's input subsystem anywhere in alp-sdk -- and the verdict is now
+keyed ONLY on this software path: `RESULT PASS` requires the raw pads AND the
+software decoder's tick count to both move; the hardware UTIMER edge count is
+printed for reference but can no longer produce `PASS` on its own.
+
+**A portable `<alp/counter.h>` incremental-encoder surface (`alp_qenc_open()`
+et al.) already exists**, backed by `src/backends/qenc/zephyr_drv.c` --
+which calls the exact same `sensor_sample_fetch`/`SENSOR_CHAN_ROTATION` pair
+this issue measures broken, so it would be equally affected on this SoM if
+anything in this repo wired it to AEN801's QEC0 (nothing currently does).
+That backend's own comment already anticipates a "v0.3 input-subsystem
+fast-path"; whether to build a `gpio-qdec`-backed variant of it, and have
+this example migrate onto `alp_qenc_open()` once it exists, is a design
+decision this branch does not make -- filed as
+[alplabai/alp-sdk#2095](https://github.com/alplabai/alp-sdk/issues/2095).
 
 `tests/scripts/test_qdec_alif_utimer_start.py` gained
 `QdecUsesSrc0ForQecChannels`, asserting the QEC path writes
@@ -62,8 +113,10 @@ alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` for the citations.
 `timer_id < 12`); its module docstring no longer headlines the withdrawn
 "never started" theory.
 
-**What this fragment does NOT claim**: that the fix works. Both the default
-and diagnostic images build; neither has been run on the bench yet. See
+**What this fragment does NOT claim**: that the software decoder works. It
+builds (`-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y`, zero warnings); nobody has
+run it on the bench yet -- the operator left before this path existed. See
 `changelog.d/2037.md` for the full history of the withdrawn counter-start
 "fix" (#2038) and the filter-register hygiene change, both unaffected by this
-fragment.
+fragment, and `changelog.d/2037-raw-pad-sample.md` for the raw-pad-sampling
+groundwork this fragment builds on.

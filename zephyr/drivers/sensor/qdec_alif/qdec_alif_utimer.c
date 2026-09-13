@@ -107,19 +107,43 @@
  * deselecting P3_0/P3_1 (AF=0) changed nothing about the earlier spurious
  * count under the counter-start bug (#2038): SRC_1 was armed and SRC_0 was
  * not, so neither path was the encoder's real route into the counter.
- * counts-per-revolution stays 96 (24 PPR x4, unchanged by this SRC_0/SRC_1
- * swap) pending an attended bench measurement of the new decode ratio -- see
- * the board overlay and README for the per-build predicted counts.
  *
- * STILL OPEN if the SRC_0 fix does not resolve the stuck-at-zero symptom:
- * CNTR_TYPE.  Measured CNTR_CTRL 0x00000021 decodes (SVD UTIMER_CNTR_CTRL,
- * 0x80) as CNTR_EN[0]=1, CNTR_RUNNING[1]=0, CNTR_TYPE[4:2]=0 = Sawtooth,
- * CNTR_TRIG[5]=1, CNTR_DIR[8]=0 = Up.  Alif's own QEC flow configures
- * TRIANGLE instead (demo_qec.c qec0_app() passes
- * ARM_UTIMER_COUNTER_TRIANGLE, which utimer_config_direction() turns into
- * CNTR_CTRL_TRIANGLE_BUF_TROUGH = 0x10).  Whether a sawtooth-UP channel
- * honours a DECREMENT trigger at all is stated nowhere we can find; worth one
- * bench comparison if SRC_0 alone is not sufficient.
+ * SUPERSEDED (#2037, 2026-09-13, 120000 unaliased CNTR reads over 25 s of
+ * continuous hand motion): the SRC_0 fix above IS live -- the stuck-at-zero
+ * symptom this whole issue opened on is resolved, CNTR moves where it
+ * never did before -- but the channel counts QEC_TRIGGER0/1 edges WITHOUT
+ * qualifying the other trigger input, so it is an edge counter, not a
+ * quadrature decoder: net +654 over the window (up +2385, down -1731),
+ * unwrapped range -33..+710, 293 of 734 non-zero steps |step| >= 2 inside a
+ * single 0.21 ms sample -- contact bounce, not motion; a real quadrature
+ * pair must net 0 per revolution under this mapping at any speed. Confirmed
+ * against the register map (AE822 SVD UTIMER_UP_0_SRC/UTIMER_DOWN_0_SRC
+ * bits [23:0] describe ONLY "edge causes counter to increment/decrement",
+ * no level qualification of the other input anywhere) and against Alif's
+ * own demo_qec.c:306,317,328, which drives X/Y/Z as three independent GPIOs
+ * and counts their edges -- an edge-count test, not a quadrature test. So
+ * counts-per-revolution (96 in the example overlay) is NOT bench-confirmed
+ * for this hardware channel and there is no reload value that would make
+ * it one -- see the board overlay's MEASURED paragraph for the full
+ * evidence, and #2037's changelog fragment for the software decoder added
+ * in response (Zephyr's gpio-qdec input driver, over the same pads, which
+ * DOES qualify both phases).
+ *
+ * GAP, recorded not resolved: whether FILTER_CTRL_A/FILTER_CTRL_B (0x84/
+ * 0x88) do anything to the QEC_TRIGGER0..2 inputs on these channels at all
+ * is UNPROVEN -- see the filter-write comment lower in this file and the
+ * board overlay for the two candidate explanations this leaves open.
+ *
+ * MOOT for the stuck-at-zero question, possibly still relevant to the
+ * decode question: CNTR_TYPE.  Measured CNTR_CTRL 0x00000021 decodes (SVD
+ * UTIMER_CNTR_CTRL, 0x80) as CNTR_EN[0]=1, CNTR_RUNNING[1]=0,
+ * CNTR_TYPE[4:2]=0 = Sawtooth, CNTR_TRIG[5]=1, CNTR_DIR[8]=0 = Up.  Alif's
+ * own QEC flow configures TRIANGLE instead (demo_qec.c qec0_app() passes
+ * ARM_UTIMER_COUNTER_TRIANGLE).  Not chased further: the measured defect is
+ * a missing level-qualification in the TRIGGER SOURCE registers themselves
+ * (SRC_0's bit descriptions never mention the other input at all, at any
+ * CNTR_TYPE), so a counter-waveform-shape change would not add the
+ * qualification SRC_0 simply does not have.
  *
  * DEAD END, documented so nobody spends a bench slot on it: the "channel
  * drives its own input" theory.  SVD UTIMER_GLB_DRIVER_OEN (0x10) defines
@@ -183,15 +207,20 @@
  * Bench-triage alternative, OFF by default.  Programs SRC_0 to count BOTH
  * edges of QEC_TRIGGER0 only (TRIG0_RISING | TRIG0_FALLING = 0x00000003)
  * and leaves DOWN_0_SRC at 0x00000000, instead of the up/down split above.
- * This answers "does the channel count through SRC_0 at all", independent
- * of whether the up/down trigger MAPPING (which of TRIG0/1/2 is up vs
- * down, and whether it is really this driver's X/Y pads at all) is right --
- * a build with this defined that still reads CNTR == 0 under a turning
- * shaft means SRC_0 itself is not the fix, not just the mapping; a build
- * that counts (in one direction only, since DOWN_0_SRC is unarmed) confirms
- * SRC_0 is live and only the up/down assignment needs revisiting.  Not a
- * Kconfig/DT knob on purpose -- this is a diagnostic build flag for one
- * bench session, not a shipped configuration (#2037).
+ *
+ * This is a LIVENESS check of SRC_0, nothing more, and was already answered
+ * once (#2037, 2026-09-13): it counts. It is unsigned by construction --
+ * DOWN_0_SRC unarmed means CNTR can only ever increase -- so at x1 edge
+ * decode (both edges of one trigger only) it reads 48 counts per mechanical
+ * revolution of this 24-PPR part, NOT direction-decoded, and inflated by
+ * contact bounce the same way the default (up/down) mapping is measured to
+ * be: see the MEASURED paragraph in the board overlay's file header for the
+ * 120000-read bounce measurement, which used the default mapping but
+ * applies here too -- neither mapping qualifies the other trigger input, so
+ * neither can reject a bounced edge. Do not read a run of this build as
+ * evidence of a decode; its only question is "does SRC_0 count at all",
+ * which is settled. Not a Kconfig/DT knob on purpose -- this is a
+ * diagnostic build flag for one bench session, not a shipped configuration.
  */
 #ifdef QDEC_ALIF_UTIMER_SRC0_X_EDGES
 #define QDEC_SRC0_UP_VALUE   0x00000003U
@@ -364,6 +393,19 @@ static int qdec_alif_utimer_init(const struct device *dev)
 		 * UNPROVEN AS A CURE: this is reasoned from the SVD, not measured.
 		 * It is a candidate for the spurious count, not a demonstrated fix --
 		 * see the file header for what the bench must show.
+		 *
+		 * GAP, still open after the SRC_0 fix landed and was measured
+		 * (#2037): whether FILTER_CTRL_A/FILTER_CTRL_B affect the
+		 * QEC_TRIGGER0..2 inputs on a QEC channel AT ALL is unproven either
+		 * way. FILTER_CTRL_A/B (0x84/0x88) are documented in terms of
+		 * "input A"/"input B", the same SRC_1-flavoured naming that turned
+		 * out not to apply to these channels (see the RESOLVED note in the
+		 * file header) -- so it is equally plausible that this write is
+		 * inert on channel 12 and the 293-of-734 large-step bounce measured
+		 * there is simply unfiltered contact bounce hitting an unqualified
+		 * edge counter, OR that it does apply but asymmetrically between
+		 * QEC_TRIGGER0 and QEC_TRIGGER1, which would be a second bias
+		 * candidate. Not chased further this round.
 		 */
 		sys_write32(filt, UTIMER_FILTER_CTRL_A(timer_base));
 		sys_write32(filt, UTIMER_FILTER_CTRL_B(timer_base));
