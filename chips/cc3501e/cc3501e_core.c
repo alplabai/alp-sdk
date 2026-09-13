@@ -1129,18 +1129,28 @@ void cc3501e_set_peer_polled(bool on)
  * opcode from (cmd, tx_payload, tx_len) instead.
  *
  * Data points -- ONLY these two sizes were bench-measured, both SOCK_RECV
- * (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0), reply size =
- * sizeof(alp_cc3501e_sock_recv_resp_t) (24 B) + want:
- *   - want  512 (reply 536 B):  200 us -> 3/3 end-to-end (the existing floor).
- *   - want 4071 (reply 4095 B): 200 us -> wedged the link on the FIRST recv,
- *     2/2, at both 1 MHz and 25 MHz.
- *   - want 4071 (reply 4095 B): 2000 us -> 3/3 end-to-end, CRC-clean at a
- *     streamed 262144 B (~469 kB/s).
- * A THIRD, independent data point on the REQUEST side (not reply size) is in
- * examples/aen/aen-cc3501e-socket-throughput/README.md ~159-165: STREAM_WRITE
- * at a 512 B request was clean 4/4 at the old flat 200 us gate, while 1024 B
- * and 4092 B requests both failed rc=-5, 3/3 each -- the same boundary this
- * gate now closes from the request side via wire_tx_len (see the call site).
+ * (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0):
+ *   - want  512 (reply 536 B, sizeof(alp_cc3501e_sock_recv_resp_t) (24 B) +
+ *     want): 200 us -> 3/3 end-to-end (the existing floor).
+ *   - want 4071: 200 us -> wedged the link on the FIRST recv, 2/2, at both
+ *     1 MHz and 25 MHz.
+ *   - want 4071: 2000 us -> 3/3 end-to-end, CRC-clean at a streamed 262144 B
+ *     (~469 kB/s).
+ * The want-4071 reply is NOT 24 + 4071 = 4095 B: a bridge command handler's
+ * writable capacity is the 4100 B frame minus its own 5 B header minus the
+ * 2 B CRC trailer = 4093 B (cc3501e-bridge-firmware protocol.c ~925), so the
+ * actual wire reply the firmware produced was capped at 4093 B, 2 B short of
+ * the naive header-plus-want arithmetic.
+ *
+ * A THIRD data point exists on the REQUEST side (not reply size), but it is
+ * INFERRED, not directly measured for this fix: examples/aen/aen-cc3501e-
+ * socket-throughput/README.md ~159-165 records a 512 B STREAM_WRITE request
+ * clean 4/4 at the old flat 200 us gate, while 1024 B and 4092 B requests
+ * both failed rc=-5, 3/3 each. No run has measured what gate value actually
+ * fixes the request side -- this fix's max(expected_reply, wire_tx_len) is
+ * CONSISTENT WITH that failure boundary (a 1024+ B request now gets more than
+ * 200 us), not proven to close it the way the reply-side fix was proven on
+ * SOCK_RECV.
  *
  * Every byte count strictly between the measured floor and ceiling is
  * LINEARLY INTERPOLATED, not measured.  The ceiling anchor
@@ -1148,33 +1158,34 @@ void cc3501e_set_peer_polled(bool on)
  * ALP_CC3501E_HEADER_BYTES (4092 B) -- the largest single-frame byte count
  * ANY opcode in this driver can ever present in either direction (it is also
  * SPI1_TRANSFER's own worst case, sizeof(resp header) + ALP_CC3501E_SPI1_MAX_
- * XFER) -- rather than at the measured 4095 B point itself, so the plateau
- * starts 3 B earlier than proven.  That is conservative, not risky: it only
+ * XFER) -- rather than at the measured 4093 B point itself, so the plateau
+ * starts 1 B earlier than proven.  That is conservative, not risky: it only
  * ever hands out the full, already-proven 2000 us slightly sooner, never
  * less delay than the interpolation would otherwise give at 4092 B. */
 #define CC3501E_REPLY_GATE_FLOOR_US 200u /* proven at bytes <= 536 (SOCK_RECV want 512) */
 #define CC3501E_REPLY_GATE_SMALL_BYTES \
 	536u /* sizeof(alp_cc3501e_sock_recv_resp_t) + 512 -- proven-floor boundary */
 #define CC3501E_REPLY_GATE_LARGE_BYTES (ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
-#define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4095 B (SOCK_RECV want 4071) */
-
-/* GET_PENDING_EVENTS' rx_cap (sizeof(ctx->evt_buf), ALP_CC3501E_MAX_PAYLOAD)
- * is the same kind of oversized defensive staging buffer as sock_buf above --
- * the firmware's own event ring is a hard, fixed 16 entries
- * (cc3501e-bridge-firmware src/event_ring.h) of at most ALP_CC3501E_EVENT_HDR
- * _BYTES + ALP_CC3501E_EVENT_PAYLOAD_MAX (18 B) each, so the true worst-case
- * reply is 16 * 18 = 288 B, well under the 536 B floor -- keying this op off
- * rx_cap instead would tax every poll with the large-reply gate for no
- * reason. */
-#define CC3501E_EVENT_RING_DEPTH 16u
+#define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4093 B (SOCK_RECV want 4071) */
 
 /* Reconstruct the reply size THIS request actually asks for, from (cmd,
  * tx_payload, tx_len) rather than the caller's rx_cap staging buffer -- see
- * the gate's own comment above for why rx_cap is the wrong key.  Falls back
- * to rx_cap for every opcode not specifically known to over-report it; that
- * stays exactly as conservative as the gate was before this function existed
- * for the many small, fixed-shape replies (GET_VERSION, GET_DIAG_INFO, the
- * BLE/GPIO/power control acks, ...) where rx_cap IS already a tight bound. */
+ * the gate's own comment above for why rx_cap is the wrong key for SOCK_RECV
+ * and SPI1_TRANSFER, whose rx_cap is a fixed-size scratch buffer unrelated to
+ * the wire reply they actually request. Falls back to rx_cap for every other
+ * opcode, GET_PENDING_EVENTS included.
+ *
+ * GET_PENDING_EVENTS was DELIBERATELY special-cased in an earlier version of
+ * this fix (to the firmware's real 16-entry ring, 288 B) and that case was
+ * removed: it depends on a firmware-internal constant (cc3501e-bridge-
+ * firmware src/event_ring.h) this driver has no way to verify stays 16, so a
+ * silent ring-depth change would silently under-gate this poll again -- the
+ * exact class of bug this whole fix exists to close. rx_cap here is
+ * sizeof(ctx->evt_buf) == ALP_CC3501E_MAX_PAYLOAD, so this poll pays the
+ * full ~2000 us ceiling: measured at roughly 1.8 ms added per poll, which
+ * against a realistic 2 polls/s callback cadence is about 0.36% additional
+ * transport-lock hold -- a cost worth paying to stay correct if the ring
+ * ever grows, rather than trusting a number this file cannot verify. */
 static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
                                              const uint8_t    *tx_payload,
                                              size_t            tx_len,
@@ -1183,10 +1194,23 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
 	/* SOCK_RECV (0x23) wire = alp_cc3501e_sock_recv_t { handle(LE16) |
 	 * max_len(LE16) } -- max_len ("want") is the wire field the bridge
 	 * actually sizes its reply from.  Reply DATA =
-	 * alp_cc3501e_sock_recv_resp_t (24 B header) + want data bytes. */
+	 * alp_cc3501e_sock_recv_resp_t (24 B header) + want data bytes.
+	 *
+	 * want == 0 is NOT "expect nothing back": the bridge (cc3501e-bridge-
+	 * firmware protocol_sockets.c) clamps the reply to max_len only when
+	 * max_len != 0 -- a 0 means "no limit", and the reply can be as large as
+	 * the frame allows (up to ~4093 B, see CC3501E_REPLY_GATE_LARGE_BYTES's
+	 * own comment).  cc3501e_sock_recv() sends max_len == cap literally with
+	 * no floor, so a caller-supplied cap of 0 reaches the wire as exactly
+	 * that "no limit" value.  Fall back to rx_cap -- the most this request
+	 * could ever be asked to hold -- rather than treating want == 0 as a
+	 * tiny, header-only reply. */
 	if (cmd == ALP_CC3501E_CMD_SOCK_RECV && tx_payload != NULL &&
 	    tx_len == sizeof(alp_cc3501e_sock_recv_t)) {
 		const uint16_t want = (uint16_t)tx_payload[2] | ((uint16_t)tx_payload[3] << 8);
+		if (want == 0u) {
+			return (uint32_t)rx_cap;
+		}
 		return (uint32_t)sizeof(alp_cc3501e_sock_recv_resp_t) + want;
 	}
 	/* SPI1_TRANSFER (0x56) wire = alp_cc3501e_spi1_transfer_t { len(LE16) |
@@ -1200,12 +1224,6 @@ static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
 		}
 		const uint16_t len = (uint16_t)tx_payload[0] | ((uint16_t)tx_payload[1] << 8);
 		return (uint32_t)sizeof(alp_cc3501e_spi1_transfer_resp_t) + len;
-	}
-	/* GET_PENDING_EVENTS (0x05): fixed 16-entry ring, see the constant's own
-	 * comment above -- NOT the oversized evt_buf rx_cap. */
-	if (cmd == ALP_CC3501E_CMD_GET_PENDING_EVENTS) {
-		return CC3501E_EVENT_RING_DEPTH *
-		       ((uint32_t)ALP_CC3501E_EVENT_HDR_BYTES + ALP_CC3501E_EVENT_PAYLOAD_MAX);
 	}
 	return (uint32_t)rx_cap;
 }
