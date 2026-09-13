@@ -103,7 +103,7 @@ immediately, with no independent AP-status channel to confirm against
 
 | Command | What it does |
 |---|---|
-| `diag info` | Firmware version / reset cause / uptime / active role / free heap. |
+| `diag info` | Firmware version / reset cause / uptime / active role / free heap / lwIP DHCP state / netif up-link-tries. |
 | `diag stats` | Frame counters (frames answered OK / with an error). |
 | `diag loglevel <0..255>` | Set the firmware log verbosity. |
 

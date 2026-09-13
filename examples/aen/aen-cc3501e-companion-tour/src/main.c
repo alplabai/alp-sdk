@@ -197,9 +197,30 @@ static bool tour_ping(cc3501e_t *fw)
 	return false;
 }
 
+/* Map lwIP's dhcp_state (PLUS ONE on the wire) to a name for this printout --
+ * same small allowlist alp_console_companion_diag.c's `diag info` uses; an
+ * unlisted nonzero value is a legal in-progress lwIP state this tour doesn't
+ * bother spelling out. */
+static const char *tour_dhcp_state_name(uint8_t dhcp_state)
+{
+	switch (dhcp_state) {
+	case ALP_CC3501E_DHCP_STATE_NOT_REPORTED:
+		return "not-reported";
+	case ALP_CC3501E_DHCP_STATE_OFF:
+		return "off";
+	case ALP_CC3501E_DHCP_STATE_SELECTING:
+		return "selecting";
+	case ALP_CC3501E_DHCP_STATE_BOUND:
+		return "bound";
+	default:
+		return "other";
+	}
+}
+
 /* Step: protocol version + extended diagnostics.  GET_VERSION returns the wire
- * *protocol* version (the host compat gate); GET_DIAG_INFO decodes the 16-byte
- * firmware snapshot (release version, reset cause, active role, uptime, heap). */
+ * *protocol* version (the host compat gate); GET_DIAG_INFO decodes the
+ * firmware snapshot (release version, reset cause, active role, uptime, heap,
+ * plus the lwIP DHCP state / netif flags #2035 appended). */
 static void tour_diag(cc3501e_t *fw)
 {
 	uint16_t     version = 0u;
@@ -227,6 +248,17 @@ static void tour_diag(cc3501e_t *fw)
 		       diag.uptime_ms,
 		       diag.free_heap_bytes,
 		       diag.last_error);
+		/* dhcp_state == NOT_REPORTED is ambiguous by design (see
+		 * alp_cc3501e_diag_info_t's doc comment): it means EITHER DHCP never
+		 * started on this netif OR the bridge predates #2035 and never sends
+		 * these two bytes at all -- fw_version above, not this field, is what
+		 * tells the two apart. */
+		printf("[tour] diag: dhcp=%s(%u) netif=%s%s dhcp_tries=%u\n",
+		       tour_dhcp_state_name(diag.dhcp_state),
+		       diag.dhcp_state,
+		       (diag.netif_status & ALP_CC3501E_NETIF_UP) ? "up" : "down",
+		       (diag.netif_status & ALP_CC3501E_NETIF_LINK_UP) ? "+link" : "",
+		       (unsigned int)ALP_CC3501E_NETIF_DHCP_TRIES(diag.netif_status));
 	} else if (s == ALP_ERR_INVAL) {
 		printf("[tour] GET_DIAG_INFO -> rejected (v0.1 firmware; v2-only) -- expected\n");
 	} else {

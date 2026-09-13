@@ -791,11 +791,63 @@ typedef enum {
 	ALP_CC3501E_RADIO_EVT_ERROR           = 31u,
 } alp_cc3501e_radio_evt_t;
 
+/** lwIP DHCP client state codes for @ref alp_cc3501e_diag_info_t::dhcp_state.
+ *
+ *  These are the WIRE values -- lwIP's `dhcp->state` PLUS ONE.  0 is
+ *  reserved to mean "not reported" (no lwIP linked, or the netif has no
+ *  `dhcp` struct because DHCP never started -- itself the interesting case,
+ *  which must not be misread as a real @ref ALP_CC3501E_DHCP_STATE_OFF, the
+ *  whole reason for the offset).  Compare the raw byte against these names
+ *  directly; do not subtract 1.
+ *
+ *  Named `ALP_CC3501E_DHCP_STATE_*`, deliberately distinct from the
+ *  `ALP_CC3501E_RADIO_EVT_*` family above -- these mirror lwIP's
+ *  `prot/dhcp.h` `dhcp_state_enum_t`, NOT the vendor TI `WlanEvent_t` ids
+ *  that RADIO_EVT decodes.  Not exhaustive: lwIP defines more states
+ *  (REQUESTING, RENEWING, REBINDING, ...); only the ones a host commonly
+ *  branches on are named here.  An unlisted nonzero value is a legal DHCP
+ *  state this header simply does not name. */
+typedef enum {
+	ALP_CC3501E_DHCP_STATE_NOT_REPORTED = 0u,
+	ALP_CC3501E_DHCP_STATE_OFF          = 1u,  /**< lwIP DHCP_STATE_OFF (0) + 1 */
+	ALP_CC3501E_DHCP_STATE_SELECTING    = 7u,  /**< lwIP DHCP_STATE_SELECTING (6) + 1 */
+	ALP_CC3501E_DHCP_STATE_BOUND        = 11u, /**< lwIP DHCP_STATE_BOUND (10) + 1 */
+} alp_cc3501e_dhcp_state_t;
+
+/** Bit flags for @ref alp_cc3501e_diag_info_t::netif_status (byte 17 on the
+ *  wire).  Bits 2..7 are `dhcp->tries` saturated at 63 -- not a bitmask
+ *  member, so it is extracted with @ref ALP_CC3501E_NETIF_DHCP_TRIES rather
+ *  than listed as a flag here. */
+#define ALP_CC3501E_NETIF_UP      (1u << 0) /**< netif_is_up()      */
+#define ALP_CC3501E_NETIF_LINK_UP (1u << 1) /**< netif_is_link_up() */
+
+/** Extract `dhcp->tries` (saturated at 63) from @ref
+ *  alp_cc3501e_diag_info_t::netif_status. */
+#define ALP_CC3501E_NETIF_DHCP_TRIES(netif_status) ((uint8_t)((netif_status) >> 2))
+
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
  *  populates these fields once per request from its in-RAM
  *  bookkeeping; reading is non-disturbing (no side effects on
- *  the radio state).  Sized at 16 bytes (one cache line on the
- *  M33) so the SPI reply fits in a single short envelope.
+ *  the radio state).  Was 16 WIRE bytes (one cache line on the M33) through
+ *  v2 firmware; grew to 18 WIRE bytes ADDITIVELY when dhcp_state/netif_status
+ *  were appended (alp-sdk#2035) -- NOTE: `sizeof(alp_cc3501e_diag_info_t)` is
+ *  20, not 18, because of 4-byte tail padding after this pair; 18 is the wire
+ *  byte count, not the in-memory struct size.  A v2-firmware reply is still a
+ *  complete, valid answer, just without the two new fields (see
+ *  cc3501e_diag_info() for the backward-compat decode, and its own doc
+ *  comment for why NEITHER firmware can be told apart by wire length -- both
+ *  frame the identical padded 24-byte payload).
+ *
+ *  Deliberately NOT a PROTOCOL_MINOR bump: a host disambiguates "talking to
+ *  old firmware" from "DHCP never started" (both read dhcp_state as 0, see
+ *  the field-level note below) by `fw_version`, ALSO in this same reply, not
+ *  by the new fields' own value -- so no version check is needed to use them
+ *  safely. A MINOR bump would force a lockstep change in the firmware's
+ *  `protocol-version.txt` -- and because that job checks out alp-sdk's
+ *  DEFAULT BRANCH, a bump on `dev` would not even redden firmware PRs until
+ *  the next `dev`-to-`main` release, not immediately as originally
+ *  estimated -- for no behavioural gain either way; do not "fix" this into
+ *  a bump.
  *  Field-level meanings:
  *   - fw_version: the firmware *release* version the device reports
  *     (its own semver from firmware-version.txt; tracked separately
@@ -829,7 +881,24 @@ typedef enum {
  *     misled).  An ap_start that leaves this at 0 never received a WLAN
  *     event at all.  A value outside @ref alp_cc3501e_radio_evt_t is legal
  *     and simply means some other vendor radio event fired.
- *   - reserved[1..2]: still reserved, always 0. */
+ *   - reserved[1]: low byte of the `psa_status_t` from the last OTA flush
+ *     fault (#1610); 0 if no OTA flush has failed since last reset.  Already
+ *     surfaced by the console as `diag info`'s `otafault:` line.
+ *   - reserved[2]: update-mode boot mark -- bit7 set means the firmware is
+ *     currently running because it booted into UPDATE_MODE (see @ref
+ *     ALP_CC3501E_CMD_OTA_UPDATE_MODE); bits[6:0] are a warm-boot counter,
+ *     modulo 128.
+ *   - dhcp_state: one of @ref alp_cc3501e_dhcp_state_t, i.e. lwIP's
+ *     `dhcp->state` PLUS ONE.  0 means "not reported" -- no lwIP linked, or
+ *     the netif has no `dhcp` struct because DHCP never started; that case
+ *     must not be read as @ref ALP_CC3501E_DHCP_STATE_OFF, which is exactly
+ *     why 0 is reserved rather than aliasing the real OFF state.  Absent on
+ *     a v2-firmware 16-byte reply, in which case cc3501e_diag_info() sets
+ *     this to 0 (not-reported), same as the "never started" case.
+ *   - netif_status: bit 0 = netif UP, bit 1 = netif LINK_UP (see @ref
+ *     ALP_CC3501E_NETIF_UP / @ref ALP_CC3501E_NETIF_LINK_UP), bits 2..7 =
+ *     `dhcp->tries` saturated at 63 (see @ref ALP_CC3501E_NETIF_DHCP_TRIES).
+ *     Also 0 on a v2-firmware 16-byte reply. */
 typedef struct {
 	uint16_t fw_version;
 	uint8_t  reset_cause;
@@ -838,6 +907,8 @@ typedef struct {
 	uint32_t free_heap_bytes;
 	uint8_t  last_error;
 	uint8_t  reserved[3];
+	uint8_t  dhcp_state;
+	uint8_t  netif_status;
 } alp_cc3501e_diag_info_t;
 
 /* ------------------------------------------------------------------ */
