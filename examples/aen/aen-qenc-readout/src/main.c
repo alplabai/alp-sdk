@@ -21,16 +21,22 @@
  *     (counter * 360 / counts-per-revolution) -- this app prints that value
  *     labelled as what it now is, an unqualified edge count, NOT a position.
  *
- *  2. SOFTWARE (added this round): Zephyr's gpio-qdec input driver
- *     (zephyr/drivers/input/input_gpio_qdec.c upstream), a debounced
- *     Gray-code state machine over the SAME P3_0/P3_1 pads, reached through
- *     &gpio3 instead of the UTIMER -- see the board overlay's SOFTWARE
- *     DECODE paragraph for exactly how it is wired and its own open
- *     assumption (GPIO3's interrupt path working while the pads stay muxed
- *     to QEC0_X_A/QEC0_Y_A).  This DOES decode direction, unlike path 1 --
- *     it only posts an event every steps-per-period=4 real phase
- *     transitions.  NOT bench-verified: the operator left the bench before
- *     this path existed.
+ *  2. SOFTWARE: Zephyr's gpio-qdec input driver (zephyr/drivers/input/
+ *     input_gpio_qdec.c upstream), a debounced Gray-code state machine over
+ *     the SAME P3_0/P3_1 pads, reached through &gpio3 instead of the UTIMER
+ *     -- see the board overlay's SOFTWARE DECODE paragraph for exactly how
+ *     it is wired. Configured to POLL (idle-poll-time-us set), not to use
+ *     GPIO interrupts: snps,designware-gpio (gpio3's compatible) cannot
+ *     deliver the GPIO_INT_EDGE_BOTH this driver's interrupt mode requires
+ *     (gpio_dw.c returns -ENOTSUP for that combination) -- a driver-
+ *     capability mismatch, not a question only a bench can answer. Polling
+ *     reads through gpio_pin_get_dt() -> gpio_dw_port_get_raw() ->
+ *     EXT_PORTA (0x49003050), the SAME register this file's own raw-pad
+ *     read below already measures live under the QEC0 mux, so THAT part is
+ *     bench-proven already. This DOES decode direction, unlike path 1 -- it
+ *     only posts an event every steps-per-period=4 real phase transitions.
+ *     What is NOT yet bench-run: the decode itself, under a hand on the
+ *     shaft -- the operator left the bench before this path existed.
  *
  * A portable surface DOES exist -- <alp/counter.h>'s alp_qenc_open() /
  * alp_qenc_get_position(), resolving the SAME alp-qenc0 alias this file's
@@ -62,21 +68,30 @@
  * moved and the hardware angle moved" as PASS, which the bounce measurement
  * refutes).  This version still reads the RAW pad levels of P3_0/P3_1 off
  * the GPIO3 controller (GPIO_EXT_PORTA, bits 0/1), independent of both
- * decoders, and tracks whether either the pads or the software decoder's
- * tick count ever CHANGED across the window:
- *   - pad levels changed AND the software decoder registered net ticks ->
+ * decoders, and tracks whether EITHER the pads OR the software decoder's
+ * tick count ever CHANGED across the window -- "changed", not "net
+ * nonzero": the bench prompt below asks for a detent, a full CW revolution
+ * and a full CCW revolution, which nets back toward the start, so gating on
+ * a nonzero FINAL delta would fail a working decoder that returned to where
+ * it began. `sw_moved` folds in one read taken right after the sample loop
+ * ends, closing a race where the last ~POLL_MS of motion would otherwise
+ * never be sampled by the loop itself:
+ *   - pad levels changed AND the software decoder's tick count changed ->
  *     PASS: a debounced quadrature decode observed real motion
- *   - pad levels changed BUT the software decoder never ticked -> FAIL:
- *     either gpio-qdec's GPIO3 interrupt path did not fire (see the board
- *     overlay's UNVERIFIED assumption) or the motion never cleared one
- *     x4 step; the hardware edge count (path 1) is printed for reference
- *     but is explicitly NOT evidence either way -- it counts bounce as
- *     readily as motion (#2037)
+ *   - pad levels changed BUT the software decoder's tick count never did ->
+ *     FAIL: either the polling path never sampled a transition (unexpected
+ *     -- see the board overlay, this read path is bench-proven under this
+ *     exact pad mux) or the motion never cleared one x4 step; the hardware
+ *     edge count (path 1) is printed for reference but is explicitly NOT
+ *     evidence either way -- it counts bounce as readily as motion (#2037)
  *   - pad levels never changed at all -> SKIPPED: nothing reached the pads.
  *     This does NOT distinguish an absent/unfitted encoder from a broken or
  *     disconnected one -- it only says no edges arrived at P3_0/P3_1.
  *   - any sample_fetch/channel_get in the window returned an error -> FAIL
  *     regardless of the above (the driver itself is failing reads)
+ *   - the software decoder ticked without the pads ever registering a
+ *     change -> FAIL, and worth a bench look: gpio-qdec samples the SAME
+ *     pads this app reads raw, so this combination should not be reachable
  *
  * What none of this says: that either decoder is armed and running when
  * idle.  The hardware sensor API this driver registers is {sample_fetch,
@@ -215,8 +230,7 @@ int main(void)
 
 	/* qdec_sw not being ready is NOT fatal to the run: the hardware path
 	 * above still produces its (now honestly-labelled) diagnostic, and a
-	 * missing/failed software decoder is itself useful bench information --
-	 * see the board overlay's UNVERIFIED GPIO3-interrupt-path assumption.
+	 * missing/failed software decoder is itself useful bench information.
 	 * A dead qdec_sw makes sw_moved permanently false below, which the
 	 * verdict already treats as "FAIL, edges reached the pads but nothing
 	 * decoded them" -- the correct outcome, not a special case.
@@ -353,8 +367,21 @@ int main(void)
 	 * counter is running (see the file header: nothing in this API can see
 	 * that), so do not name it "armed" and do not print it as such.
 	 */
-	bool        all_clean = (ok_reads == SAMPLES);
-	int32_t     sw_net    = (int32_t)atomic_get(&qdec_sw_ticks) - first_sw;
+	bool    all_clean = (ok_reads == SAMPLES);
+	int32_t sw_net    = (int32_t)atomic_get(&qdec_sw_ticks) - first_sw;
+
+	/* Close the race the in-loop sw_diff tracking above cannot: the last
+	 * sample point is up to POLL_MS before this line runs (the final
+	 * alp_delay_ms(POLL_MS) happens AFTER the last in-loop read), so a
+	 * tick that lands in that last gap sets sw_net without ever being
+	 * seen by sw_diff. OR the two together rather than replacing one with
+	 * the other: sw_diff still catches ticks that occurred mid-window and
+	 * later cancelled back to sw_net == 0 (see the file header -- gating
+	 * on sw_net != 0 alone would fail a run that did a detent, a full CW
+	 * revolution and a full CCW revolution, exactly what the prompt below
+	 * asks for, and which nets back toward zero by design). */
+	sw_moved = sw_moved || (sw_net != 0);
+
 	const char *result;
 	const char *reason;
 
@@ -365,42 +392,52 @@ int main(void)
 	} else if (pad_moved && sw_moved) {
 		/*
 		 * The raw pad read is what makes this branch trustworthy: P3_0/P3_1
-		 * actually transitioned, AND the SOFTWARE decoder registered net
-		 * ticks. This is the only branch that can claim PASS: gpio-qdec's
+		 * actually transitioned, AND the SOFTWARE decoder's tick count
+		 * changed. This is the only branch that can claim PASS: gpio-qdec's
 		 * Gray-code state machine genuinely decodes direction (unlike the
 		 * hardware UTIMER channel, which is a measured edge counter -- see
 		 * the file header and #2037). Spurious internal counts on the
 		 * hardware path cannot make BOTH the GPIO3 pad bits AND an
 		 * independent software state machine move together the same way a
 		 * single free-running register could fool one channel alone.
+		 *
+		 * Says "tick count CHANGED", not "net ticks": sw_moved is true on
+		 * any observed change, not a nonzero FINAL sw_net -- see the
+		 * comment above sw_moved's computation for why (the bench prompt's
+		 * own CW-then-CCW sequence nets back toward zero by design; sw_net
+		 * printed below is informational, not the gate).
 		 */
 		result = "PASS";
-		reason = "the raw P3_0/P3_1 pad levels changed AND the software gpio-qdec decoder "
-		         "registered net ticks with them -- a debounced quadrature decode observed "
-		         "real motion. The hardware UTIMER channel is diagnostic only (see hw_edges "
-		         "above) and is NOT part of this verdict -- it is a measured edge counter, "
-		         "not a decoder (#2037)";
+		reason = "the raw P3_0/P3_1 pad levels changed AND the software gpio-qdec decoder's "
+		         "tick count changed with them -- a debounced quadrature decode observed real "
+		         "motion. The hardware UTIMER channel is diagnostic only (see hw_edges above) "
+		         "and is NOT part of this verdict -- it is a measured edge counter, not a "
+		         "decoder (#2037)";
 	} else if (pad_moved) {
 		/*
 		 * This is the live #2037 question on the SOFTWARE path: the signal
 		 * is proven to reach the SoC pins (the pad bits transitioned), but
-		 * qdec_sw never ticked. Two candidate explanations, both open: (a)
-		 * the board overlay's UNVERIFIED assumption that GPIO3's interrupt
-		 * path fires while P3_0/P3_1 stay muxed to QEC0_X_A/QEC0_Y_A is
-		 * wrong, so qdec_sw never even wakes; (b) it does wake but the
-		 * motion never cleared one steps-per-period=4 threshold (less
-		 * than one detent). The hardware edge count is explicitly NOT
-		 * corroborating evidence either way -- it counts contact bounce as
-		 * readily as real motion, which is the whole reason this verdict no
-		 * longer keys on it.
+		 * qdec_sw's tick count never changed. The board overlay's
+		 * idle-poll-time-us makes this driver poll gpio_pin_get_dt() on a
+		 * timer rather than rely on a GPIO interrupt snps,designware-gpio
+		 * cannot deliver in this driver's edge-triggered mode -- that read
+		 * path is bench-proven live under this exact pad mux (same
+		 * EXT_PORTA register this app's own raw-pad read uses), so an
+		 * unreachable read is not the expected explanation here. More
+		 * likely: the motion never cleared one steps-per-period=4 threshold
+		 * (less than one detent), or sample-time-us (500 us) still missed a
+		 * transition at an unusually fast flick. The hardware edge count is
+		 * explicitly NOT corroborating evidence either way -- it counts
+		 * contact bounce as readily as real motion, which is the whole
+		 * reason this verdict no longer keys on it.
 		 */
 		result = "FAIL";
-		reason = "the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder "
-		         "never registered a net tick -- either its GPIO3 interrupt path did not "
-		         "fire (see the board overlay's UNVERIFIED assumption) or the motion never "
+		reason = "the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder's "
+		         "tick count never did -- its read path is bench-proven live under this pad "
+		         "mux (see the board overlay), so the likelier explanation is the motion never "
 		         "cleared one x4 step. The hardware UTIMER edge count is not evidence here "
 		         "either way -- see #2037";
-	} else {
+	} else if (!sw_moved) {
 		result = "SKIPPED";
 		reason = "neither the raw P3_0/P3_1 pad levels nor the software decoder's tick count "
 		         "ever changed -- nothing reached the pads. This does NOT distinguish an "
@@ -409,6 +446,15 @@ int main(void)
 		         "bit 1 clear (CNTR_CTRL 0x00000021) is the CORRECT resting state for a "
 		         "trigger-counting channel, and starting the counter to 'fix' it makes it "
 		         "free-run on the peripheral clock instead (#2038)";
+	} else {
+		/* pad_moved == false but sw_moved == true: should not be reachable
+		 * -- gpio-qdec samples the SAME P3_0/P3_1 pads this app reads raw,
+		 * so a tick with no observed pad transition is an anomaly, not a
+		 * decode. Worth a bench look if this branch ever prints. */
+		result = "FAIL";
+		reason = "the software decoder's tick count changed without the raw P3_0/P3_1 pad "
+		         "levels ever differing -- unexpected, since gpio-qdec samples the same pads "
+		         "this app reads raw; worth a bench look if this ever prints";
 	}
 
 	printf("[qenc] RESULT %s: %s (%d/%d clean reads, pad moved=%d, hw edges moved=%d "

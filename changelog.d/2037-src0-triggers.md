@@ -80,28 +80,43 @@ contact bounce hitting an unqualified edge counter); if they do, but
 asymmetrically between the two inputs, that is a second bias candidate. Not
 chased further this round -- see the driver comment.
 
-**Software decoder added, NOT bench-verified.** Zephyr's `gpio-qdec` input
-driver (`zephyr/drivers/input/input_gpio_qdec.c`), a debounced Gray-code
-state machine, is now bound to the SAME `P3_0`/`P3_1` pads via `&gpio3`
+**Software decoder added; the decode itself is not yet bench-run, but its
+read path is bench-proven.** Zephyr's `gpio-qdec` input driver
+(`zephyr/drivers/input/input_gpio_qdec.c`), a debounced Gray-code state
+machine, is now bound to the SAME `P3_0`/`P3_1` pads via `&gpio3`
 (`examples/aen/aen-qenc-readout`'s board overlay adds a `qdec-sw` node and
 enables `gpio3`) instead of the hardware UTIMER channel -- no pinctrl change,
-the pads stay muxed to `QEC0_X_A`/`QEC0_Y_A`. This relies on an UNVERIFIED
-assumption that GPIO3's interrupt/`EXT_PORTA` sampling network sees the pad
-regardless of which peripheral function enabled its input buffer, the same
-way this example's own raw-pad read already does (a prior bench session read
-a pin over GPIO while muxed to UART and saw live UART-driven transitions).
-The example's `main.c` consumes it via `INPUT_CALLBACK_DEFINE()` -- the first
-use of Zephyr's input subsystem anywhere in alp-sdk -- and the verdict is now
-keyed ONLY on this software path: `RESULT PASS` requires the raw pads AND the
-software decoder's tick count to both move; the hardware UTIMER edge count is
-printed for reference but can no longer produce `PASS` on its own.
+the pads stay muxed to `QEC0_X_A`/`QEC0_Y_A`. **Fixed in review: the node
+must set `idle-poll-time-us`, or it never fires at all.** Without it,
+`gpio-qdec` runs interrupt-driven and requests `GPIO_INT_EDGE_BOTH` (vendor
+`input_gpio_qdec.c`, line 67), which `snps,designware-gpio` (`gpio3`'s
+compatible) refuses outright (vendor `gpio_dw.c`, lines 204-208, `-ENOTSUP`,
+"Does not support both edges") -- silently: `gpio_qdec_irq_setup()` returns `void`
+and only `LOG_ERR`s (this example has no `CONFIG_LOG=y`), `gpio_qdec_init()`
+still returns 0, `device_is_ready()` still reads true, and `sw_ticks` would
+have stayed 0 forever, making `RESULT PASS` unreachable and any bench slot
+a statically predetermined `FAIL`. With `idle-poll-time-us` set, the driver
+polls through `gpio_pin_get_dt()` -> `gpio_dw_port_get_raw()` -> `EXT_PORTA`
+(`0x49003050`) instead -- the SAME register this example's own raw-pad read
+already measures live under the QEC0 mux, so that read path is bench-proven,
+not an assumption. What remains unverified is the decode itself, under a
+real hand on the shaft. The example's `main.c` consumes the driver's events
+via `INPUT_CALLBACK_DEFINE()` -- the first use of Zephyr's input subsystem
+anywhere in alp-sdk -- and the verdict is now keyed ONLY on this software
+path: `RESULT PASS` requires the raw pads AND the software decoder's tick
+count to both CHANGE (not a nonzero final net -- the bench prompt's
+detent+CW+CCW sequence nets back toward zero by design); the hardware
+UTIMER edge count is printed for reference but can no longer produce `PASS`
+on its own.
 
 **A portable `<alp/counter.h>` incremental-encoder surface (`alp_qenc_open()`
-et al.) already exists**, backed by `src/backends/qenc/zephyr_drv.c` --
-which calls the exact same `sensor_sample_fetch`/`SENSOR_CHAN_ROTATION` pair
-this issue measures broken, so it would be equally affected on this SoM if
-anything in this repo wired it to AEN801's QEC0 (nothing currently does).
-That backend's own comment already anticipates a "v0.3 input-subsystem
+et al.) already exists**, backed by `src/backends/qenc/zephyr_drv.c`, which
+resolves this same example's own `alp-qenc0` alias and calls the exact same
+`sensor_sample_fetch`/`SENSOR_CHAN_ROTATION` pair this issue measures
+broken, so it would be equally affected on this SoM if anything called
+`alp_qenc_open()` against it -- nothing in this repo currently does (this
+example binds the raw Zephyr sensor device directly instead). That
+backend's own comment already anticipates a "v0.3 input-subsystem
 fast-path"; whether to build a `gpio-qdec`-backed variant of it, and have
 this example migrate onto `alp_qenc_open()` once it exists, is a design
 decision this branch does not make -- filed as

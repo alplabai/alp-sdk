@@ -193,14 +193,50 @@ class QdecUsesSrc0ForQecChannels(unittest.TestCase):
             "channels (timer_id >= 12) -- see test_qec_channel_path_writes_up_0_src",
         )
 
-    def test_src1_path_is_still_reachable_for_non_qec_channels(self):
-        """Alif's own lputimer0/1/2 usage must not be dropped by the QEC fix."""
+    def test_src1_path_is_only_reachable_for_non_qec_channels(self):
+        """Alif's own lputimer0/1/2 usage must not be dropped by the QEC fix --
+        and the SRC_1 call must sit in the `else` of the `timer_id >= 12`
+        branch, not merely exist somewhere in the function. An earlier
+        version of this test only checked the call's TEXT was present
+        anywhere in init_body(), which would still pass on a dead call
+        placed outside the else (e.g. after the whole if/else, unconditional,
+        or inside the if-branch by mistake) -- structurally wrong in a way
+        the old assertion could not catch.
+        """
+        body = init_body()
+        match = re.search(
+            r"if\s*\(\s*cfg->timer_id\s*>=\s*12\s*\)\s*\{(?P<if_block>.*?)\}\s*"
+            r"else\s*\{(?P<else_block>.*?)\}",
+            body,
+            re.S,
+        )
+        self.assertIsNotNone(
+            match,
+            "expected an `if (cfg->timer_id >= 12) { ... } else { ... }` "
+            "structure in qdec_alif_utimer_init() -- see "
+            "test_qec_channel_path_writes_up_0_src for the if-branch, this "
+            "test for the else",
+        )
+        self.assertIn(
+            "UTIMER_UP_0_SRC",
+            match.group("if_block"),
+            "UTIMER_UP_0_SRC must be armed inside the `timer_id >= 12` "
+            "if-branch, not merely somewhere in the function",
+        )
+        self.assertIn(
+            "UTIMER_DOWN_0_SRC",
+            match.group("if_block"),
+            "UTIMER_DOWN_0_SRC must be armed inside the `timer_id >= 12` "
+            "if-branch, not merely somewhere in the function",
+        )
         self.assertIn(
             "alif_utimer_config_qdec_triggers",
-            init_body(),
-            "the SRC_1 path (alif_utimer_config_qdec_triggers()) must stay "
-            "reachable for timer_id < 12 -- that is Alif's own lputimer0/1/2 "
-            "usage, unaffected by the QEC (timer_id >= 12) SRC_0 fix",
+            match.group("else_block"),
+            "the SRC_1 path (alif_utimer_config_qdec_triggers()) must sit in "
+            "the `else` of the `timer_id >= 12` branch -- that is Alif's own "
+            "lputimer0/1/2 usage, unaffected by the QEC SRC_0 fix, and a call "
+            "anywhere else in the function (unconditional, or inside the "
+            "if-branch) is a defect this structural check exists to catch",
         )
 
 

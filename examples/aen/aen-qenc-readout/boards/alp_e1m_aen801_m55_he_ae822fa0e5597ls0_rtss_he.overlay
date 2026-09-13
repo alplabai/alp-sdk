@@ -95,25 +95,35 @@
  * between the two inputs, that is a second candidate for the +654 bias. Not
  * chased further here -- see qdec_alif_utimer.c.
  *
- * SOFTWARE DECODE (added this round, NOT bench-verified -- the operator left
- * the bench before this branch existed): the hardware channel's own defect
- * is exactly what Zephyr's gpio-qdec input driver is built to fix -- a
- * sampled state machine over the SAME two physical pads, debounced by
- * construction (idle/active sampling with a timeout, not raw edge counting).
- * `qdec_sw` below binds it to &gpio3 pins 0/1 -- the SAME P3_0/P3_1 pads,
- * with NO pinctrl change: `pinctrl_qec0` above still muxes them to
- * QEC0_X_A/QEC0_Y_A, not GPIO. This relies on an UNVERIFIED assumption: that
- * GPIO3's EXT_PORTA/interrupt sampling network sees the pad's physical level
- * regardless of which peripheral function REN-enabled it, the same way this
- * example's own raw-pad read (main.c, GPIO_EXT_PORTA) already does -- a
- * prior bench session (recorded in main.c's own AEN_GPIO3_EXT_PORTA comment)
- * read P3_4 over GPIO while it was muxed to UART and saw live UART-driven
- * transitions, not a fixed idle level, which is the basis for that
- * assumption but is not itself a proof for THIS controller's INTERRUPT path
- * specifically (only its plain register read). If the assumption is wrong,
- * gpio3's interrupts simply never fire and qdec_sw reports a static 0 --
- * a silent-but-safe failure mode, not a false position, and the next
- * attended run is what confirms or refutes it either way.
+ * SOFTWARE DECODE: the hardware channel's own defect is exactly what
+ * Zephyr's gpio-qdec input driver is built to fix -- a sampled state
+ * machine over the SAME two physical pads, debounced by construction
+ * (idle/active sampling with a timeout, not raw edge counting). `qdec_sw`
+ * below binds it to &gpio3 pins 0/1 -- the SAME P3_0/P3_1 pads, with NO
+ * pinctrl change: `pinctrl_qec0` above still muxes them to
+ * QEC0_X_A/QEC0_Y_A, not GPIO. It samples through gpio_pin_get_dt ->
+ * gpio_dw_port_get_raw -> EXT_PORTA (0x49003050) -- the same register this
+ * example's own raw-pad read already measures live under the QEC0 mux, so
+ * this is NOT an unverified assumption about a separate interrupt path.
+ *
+ * `idle-poll-time-us` below is load-bearing, not a tuning knob: WITHOUT it,
+ * this driver runs interrupt-driven (gpio_qdec_idle_mode(),
+ * zephyr/drivers/input/input_gpio_qdec.c:114-116, calls
+ * gpio_qdec_irq_setup(dev, true), which requests GPIO_INT_EDGE_BOTH,
+ * :67) -- and `snps,designware-gpio` (zephyr/drivers/gpio/gpio_dw.c:204-208)
+ * returns -ENOTSUP for that exact combination ("Does not support both
+ * edges"). `gpio_qdec_irq_setup()` returns void and only LOG_ERRs the
+ * failure, this example's prj.conf has no CONFIG_LOG=y, and
+ * gpio_qdec_init() still returns 0 regardless -- so device_is_ready() reads
+ * true, the app prints "ready=1", and the sample timer that would ever call
+ * gpio_pin_get_dt() simply never starts: sw_ticks stays 0 forever, RESULT
+ * PASS becomes unreachable, and an attended bench slot would produce a
+ * statically predetermined FAIL. WITH idle-poll-time-us set,
+ * gpio_qdec_idle_polling_mode() is true, gpio_qdec_irq_setup() is never
+ * called at all (:97-99,114-116), the callback registration this would
+ * otherwise need is skipped (:281-283), and the driver polls through
+ * gpio_pin_get_dt() on a k_timer instead -- the read path this example's
+ * own raw-pad read already proved live under this exact pad mux.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -139,16 +149,31 @@
 	 * real x4 quadrature decode (unlike the hardware channel's
 	 * unqualified edge count): the driver only posts an event every 4
 	 * phase transitions, i.e. once per mechanical detent on this 24-PPR
-	 * encoder. sample-time-us/idle-timeout-ms match the driver's own
-	 * example (dts/bindings/input/gpio-qdec.yaml) -- both comfortably
-	 * fast/slow for a hand-turned knob, not yet tuned against this part.
+	 * encoder.
+	 *
+	 * idle-poll-time-us is REQUIRED, not a tuning knob -- see the SOFTWARE
+	 * DECODE paragraph above: without it this node is interrupt-driven,
+	 * and snps,designware-gpio (gpio3's compatible) cannot deliver the
+	 * GPIO_INT_EDGE_BOTH this driver's interrupt path requires, silently
+	 * (device_is_ready() still reads true). Its own value (2000 us, 500
+	 * Hz idle-poll rate) is not the sensitive one; sample-time-us is.
+	 *
+	 * sample-time-us = 500, not the gpio-qdec binding example's 2000: at
+	 * 2000 us (500 Hz) the sample period is 2.08 ms, wider than the
+	 * 2.08 ms edge spacing a 5 rev/s flick of this 24-PPR part produces
+	 * (96 edges/rev), so a fast flick can lose a state transition --
+	 * input_gpio_qdec.c's decode table treats an unrecognised transition
+	 * as an undercount, never a wrong direction (it cannot invent a
+	 * direction it didn't sample), but it can still miss real detents.
+	 * 500 us (2 kHz) gives better than 4x margin at that speed.
 	 */
 	qdec_sw: qdec-sw {
 		compatible = "gpio-qdec";
 		gpios = <&gpio3 0 GPIO_ACTIVE_HIGH>, <&gpio3 1 GPIO_ACTIVE_HIGH>;
 		steps-per-period = <4>;
 		zephyr,axis = <INPUT_REL_WHEEL>;
-		sample-time-us = <2000>;
+		sample-time-us = <500>;
+		idle-poll-time-us = <2000>;
 		idle-timeout-ms = <200>;
 	};
 };

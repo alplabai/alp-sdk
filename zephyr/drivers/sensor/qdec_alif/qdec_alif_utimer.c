@@ -200,8 +200,8 @@
  * other triggerSrc on a QEC_MODE_ENABLE channel (:612-618,
  * ARM_DRIVER_ERROR_PARAMETER unless triggerSrc == ARM_UTIMER_SRC_0).
  */
-#define QDEC_SRC0_TRIG0_RISING	0x00000001U
-#define QDEC_SRC0_TRIG1_RISING	0x00000004U
+#define QDEC_SRC0_TRIG0_RISING 0x00000001U
+#define QDEC_SRC0_TRIG1_RISING 0x00000004U
 
 /*
  * Bench-triage alternative, OFF by default.  Programs SRC_0 to count BOTH
@@ -373,7 +373,8 @@ static int qdec_alif_utimer_init(const struct device *dev)
 		filt |= CHAN_FILTER_CTRL_FILTER_EN;
 
 		/*
-		 * BOTH inputs, identically -- the quadrature decode is
+		 * BOTH inputs, identically -- SCOPED TO SRC_1 / lputimer0/1/2
+		 * (timer_id < 12): on THOSE channels the quadrature decode is
 		 * level-qualified ACROSS the pair, so filtering one phase and not
 		 * the other skews them relative to each other.  AE822 SVD, peripheral
 		 * UTIMER: UTIMER_FILTER_CTRL_A (addressOffset 0x84) "Allows the input
@@ -388,7 +389,10 @@ static int qdec_alif_utimer_init(const struct device *dev)
 		 * driver wrote only FILTER_CTRL_A, so B sat at its 0x00000000 reset
 		 * (unfiltered) whenever the board asked for a filter; measured
 		 * FILTER_CTRL_A 0x00100101 / FILTER_CTRL_B 0x00000000 on E1M-AEN803
-		 * 2026W36-0002.
+		 * 2026W36-0002. On QEC channels (timer_id >= 12) this
+		 * level-qualification claim does NOT hold -- SRC_0 has no A-AND-B
+		 * qualification of any kind (measured, #2037; see the GAP note
+		 * below), so do not read this paragraph as applying there.
 		 *
 		 * UNPROVEN AS A CURE: this is reasoned from the SVD, not measured.
 		 * It is a candidate for the spurious count, not a demonstrated fix --

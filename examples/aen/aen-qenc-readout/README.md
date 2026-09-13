@@ -131,41 +131,50 @@ candidate. See the driver comment.
 The `RESULT PASS` this app reported before this round (pads moved, hardware
 angle moved) is **withdrawn** as evidence of a working decoder.
 
-## Software decoder (added this round, NOT bench-verified)
+## Software decoder
 
 Zephyr's `gpio-qdec` input driver (`zephyr/drivers/input/
 input_gpio_qdec.c` upstream) is a debounced Gray-code state machine, bound
 in the board overlay to the SAME `P3_0`/`P3_1` pads via `&gpio3` (the SoC's
 GPIO controller) instead of the UTIMER — with **no pinctrl change**:
-`pinctrl_qec0` keeps muxing the pads to `QEC0_X_A`/`QEC0_Y_A`, not GPIO.
-`steps-per-period = 4` is a real x4 quadrature decode (unlike the hardware
-channel's unqualified edge count): it posts one signed `INPUT_REL_WHEEL`
-event per mechanical detent on this 24-PPR part, consumed in `main.c` via
-`INPUT_CALLBACK_DEFINE()` into an atomic tick accumulator — the first use of
-Zephyr's input subsystem anywhere in alp-sdk.
+`pinctrl_qec0` keeps muxing the pads to `QEC0_X_A`/`QEC0_Y_A`, not GPIO. It
+samples through `gpio_pin_get_dt` → `gpio_dw_port_get_raw` → `EXT_PORTA`
+(`0x49003050`) — the SAME register this example's own raw-pad read already
+measures live under the QEC0 mux, so reaching the pad through `&gpio3` at
+all is bench-proven, not an assumption. `steps-per-period = 4` is a real x4
+quadrature decode (unlike the hardware channel's unqualified edge count):
+it posts one signed `INPUT_REL_WHEEL` event per mechanical detent on this
+24-PPR part, consumed in `main.c` via `INPUT_CALLBACK_DEFINE()` into an
+atomic tick accumulator — the first use of Zephyr's input subsystem
+anywhere in alp-sdk.
 
-**This relies on an UNVERIFIED assumption**: that GPIO3's interrupt/
-`EXT_PORTA` sampling network sees the pad's physical level regardless of
-which peripheral function enabled its input buffer, the same way this
-example's own raw-pad read already does (a prior bench session read a pin
-over GPIO while it was muxed to UART and saw live UART-driven transitions,
-not a fixed idle level — evidence for the read path, not proof for THIS
-controller's interrupt path specifically). If the assumption is wrong,
-GPIO3's interrupts simply never fire and `sw_ticks` reports a static 0 — a
-silent-but-safe failure mode, not a false position. The next attended run is
-what confirms or refutes it.
+**`idle-poll-time-us` is required, not a tuning knob.** Without it this
+driver runs interrupt-driven: `gpio_qdec_irq_setup()` requests
+`GPIO_INT_EDGE_BOTH`, and `snps,designware-gpio` (`gpio3`'s compatible)
+returns `-ENOTSUP` for that exact combination — a driver-capability
+mismatch readable from two in-tree files, not a question only a bench can
+answer. `gpio_qdec_irq_setup()` returns `void` and only `LOG_ERR`s the
+failure (this example has no `CONFIG_LOG=y`), so nothing prints, the sample
+timer that would call `gpio_pin_get_dt()` never starts, `device_is_ready()`
+still reads true, and `sw_ticks` stays 0 forever — `RESULT PASS` would be
+unreachable. With `idle-poll-time-us` set, `gpio_qdec_irq_setup()` is never
+called at all; the driver polls through `gpio_pin_get_dt()` on a `k_timer`
+instead, the same read path already proven live above.
 
 ## Portable API
 
 alp-sdk already has a portable incremental-encoder surface —
 `<alp/counter.h>`'s `alp_qenc_open()` / `alp_qenc_get_position()`, resolving
 `cfg->encoder_id` via the same `alp-qenc0` devicetree alias this board
-overlay declares, backed by `src/backends/qenc/zephyr_drv.c`. That backend
-is the SAME `sensor_sample_fetch`/`SENSOR_CHAN_ROTATION` pair measured
-broken above, so it would be equally affected on this SoM if anything wired
-it to AEN801's QEC0 — nothing in this repo currently does (this example
-binds the raw Zephyr sensor device directly, and the portable-API demo
-`examples/peripheral-io/qenc-readout` has no AEN801 overlay).
+overlay declares (`aliases { alp-qenc0 = &utimer12_qdec; };`), backed by
+`src/backends/qenc/zephyr_drv.c`, which binds `_devs[0]` from exactly that
+alias. That backend is the SAME `sensor_sample_fetch`/`SENSOR_CHAN_ROTATION`
+pair measured broken above, so it would be equally affected on this SoM if
+anything called it here — the alias and the backend both already resolve to
+the real hardware, it is specifically `alp_qenc_open()` that nothing in this
+repo calls against this board (this example binds the raw Zephyr sensor
+device directly instead, and the portable-API demo
+`examples/peripheral-io/qenc-readout` has no AEN801 overlay of its own).
 `zephyr_drv.c`'s own comment already anticipates a "v0.3 input-subsystem
 fast-path"; whether to build a `gpio-qdec`-backed variant of it, and have
 this example migrate onto `alp_qenc_open()` once it exists, is tracked in
