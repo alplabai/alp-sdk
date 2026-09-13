@@ -183,37 +183,50 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 		s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> chip out of HW shutdown */
 		if (s != ALP_OK) return s;
 		/* SLASET3D §7.3.11.1 / §9.2: I2C is disabled in Hardware Shutdown,
-		 * and SDZ needs TAS2563_SDZ_RELEASE_WAIT_US to settle (OTP load)
+		 * and SDZ needs TAS2563_RESET_SETTLE_US to settle (OTP load)
 		 * before the first I2C access below.  We just drove SDZ high
 		 * ourselves, so -- unlike the sd_n == NULL case, where a caller
 		 * owns the pin and this function has no way to know when it went
 		 * high -- we know exactly when to start counting. */
-		alp_delay_us(TAS2563_SDZ_RELEASE_WAIT_US);
+		alp_delay_us(TAS2563_RESET_SETTLE_US);
 	}
 
-	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0.  Page 0
-	 * alone is not enough: BOOK survives software shutdown along
-	 * with the rest of the register state (§7.3.11.2, p.34), which
-	 * is exactly the warm-restart case the park-write below exists
-	 * for -- a previous firmware left mid-tuning would leave BOOK
-	 * non-zero, and REVID/PWR_CTL would then address coefficient
-	 * space instead of the control registers. */
+	/* Select book 0 / page 0 first: BOOK survives both hardware AND
+	 * software shutdown (§7.3.11.2, p.34), so a device left mid-tuning
+	 * by previous firmware could have BOOK non-zero, and SW_RESET (like
+	 * every other control register this driver touches) only lives at
+	 * book 0 / page 0. */
 	alp_status_t s = select_book0_page0(ctx);
 	if (s != ALP_OK) return s;
+
+	/* Software reset (SLASET3D §7.5.3, p.65): bit 0 of SW_RESET,
+	 * self-clearing, resets every register to its POR default.  SLAA954
+	 * "TAS2563 End System Integration Guide" §3.1 Case 1 recommends
+	 * BOTH a hardware reset (above, when this function owns sd_n) and a
+	 * software reset before initialization, for reliable operation.
+	 * This runs before anything else init configures, since it wipes
+	 * whatever came before it -- including, incidentally, PAGE/BOOK
+	 * back to 0, which is already where the select above left them.
+	 * SLASET3D does not call out any special ACK behaviour for this
+	 * write; it is a normal single-byte write like every other one in
+	 * this driver.  §9.2's 100 us OTP-load floor applies here exactly
+	 * as it does after a hardware reset. */
+	s = reg_write(ctx, TAS2563_REG_SW_RESET, 0x01u);
+	if (s != ALP_OK) return s;
+	alp_delay_us(TAS2563_RESET_SETTLE_US);
+
+	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0. */
 	uint8_t rev = 0;
 	s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
 	if (s != ALP_OK) return s;
 
 	/* Park the amplifier in software shutdown before handing the
-	 * context back.  This is the part's own reset value (PWR_CTL
-	 * reset = Eh, MODE = 10b -- §7.5.4 Table 7-104, p.66) and
-	 * releasing SD_N also lands there (§7.3.11.1, p.34), but a warm
-	 * restart with SD_N board-tied high never went through either:
-	 * software shutdown preserves register state (§7.3.11.2, p.34),
-	 * so the previous firmware's ACTIVE would survive into this
-	 * init.  For a part rated to ~10 W peak into 4 ohm (§1, p.1),
-	 * one write is cheap insurance against handing back a context
-	 * that is already driving a speaker. */
+	 * context back.  The software reset above already restores PWR_CTL
+	 * to its POR default (Eh, MODE = 10b -- §7.5.4 Table 7-104, p.66),
+	 * so this write is redundant on every path that reaches it today --
+	 * kept anyway as an explicit, cheap statement of the state this
+	 * function hands back, in case a future change ever makes the reset
+	 * above conditional again. */
 	s = reg_update(ctx, TAS2563_REG_PWR_CTL, TAS2563_PWR_CTL_MODE_MASK, TAS2563_MODE_SHUTDOWN);
 	if (s != ALP_OK) return s;
 

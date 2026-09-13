@@ -51,6 +51,10 @@
  *       shutdown, reset away the caller's configuration, invert the
  *       fault pin under @ref tas2563_fault_asserted, or arm the tone
  *       generator behind the caller's back.
+ *     - The IV-sense blocks are also powered down at reset
+ *       (`PWR_CTL.VSNS_PD`/`ISNS_PD`, both `1h` -- SLASET3D §7.5.4
+ *       Table 7-104, p.66); @ref tas2563_configure_iv_sense powers
+ *       them up explicitly.
  *
  *   @warning The output level is NOT low by default, and this is the
  *   one place a caller with speakers attached has to act.
@@ -64,6 +68,37 @@
  *   register -- deliberately, since output level is what a smart-amp
  *   tuning is for -- so set the level AFTER
  *   @ref tas2563_load_tuning, not before, if you use both.
+ *
+ * @par Shared SD_N / IRQZ nets -- a real board, not a driver bug.
+ *   This context and its API model ONE physical chip, but a board is
+ *   free to tie AMP.ENABLE and/or AMP.FAULT together across two amps
+ *   (the E1M-EVK does: `metadata/boards/e1m-evk.yaml`, both nets
+ *   shared between U27 and U28).  This driver does not detect or guard
+ *   that sharing -- doing so across independent @ref tas2563_t
+ *   instances would need a registry this driver does not keep.
+ *   Instead, the contract is on the caller:
+ *     - Pass @p sd_n to **at most one** instance per physical SD_N net.
+ *       Every other instance on that net passes NULL and leaves SD_N
+ *       ownership -- including @ref tas2563_deinit and
+ *       @ref tas2563_set_hw_enable, both of which toggle the pin -- to
+ *       the caller or to the one instance that owns it.  Driving a
+ *       shared SD_N low resets EVERY amp on that net (SLASET3D
+ *       §7.3.11.1: "All registers loose state in this mode").
+ *     - A shared IRQZ pin tells you *that* one of the amps on it
+ *       faulted, never *which*.  Disambiguating requires reading each
+ *       instance's own @ref tas2563_read_faults over I2C.
+ *
+ * @par Register-level output for a newly-configured GPIO output.
+ *   `alp_gpio_configure(..., ALP_GPIO_OUTPUT, ...)` sets direction
+ *   only; Zephyr's `GPIO_OUTPUT` flag is documented (upstream, not in
+ *   this repo) as "no change to the output state," so the call itself
+ *   should not force a level.  Whatever the SoC's GPIO controller
+ *   latches for that pin at reset becomes visible the instant
+ *   direction flips to output; that reset-time value is silicon- and
+ *   board-specific and outside this driver's (or @ref alp_gpio's)
+ *   control.  @ref tas2563_init configures then writes high as two
+ *   back-to-back calls, which closes that window as far as this
+ *   driver can, but not to zero width.
  *
  * v0.3 driver scope:
  *   - I2C connectivity probe (read CHIP_ID).
@@ -133,18 +168,24 @@ extern "C" {
  *  direction. */
 #define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
-/** Minimum settle time between SDZ (AMP.ENABLE/SD_N) going high and the
- *  first I2C access, in microseconds.  SLASET3D §9.2 "Power Supply
- *  Sequencing": "After a hardware or software reset additional commands
- *  to the device should be delayed for 100 uS to allow the OTP to load.
- *  The above sequence should be completed before any I2C operation."
- *  I2C is disabled for the whole time the part sits in Hardware Shutdown
+/** Minimum settle time after EITHER a hardware reset (SDZ going high) OR
+ *  a software reset (the self-clearing `SW_RESET` bit, SLASET3D §7.5.3),
+ *  before the next I2C access, in microseconds.  One constant for both
+ *  because SLASET3D §9.2 "Power Supply Sequencing" states one floor for
+ *  both: "After a hardware or software reset additional commands to the
+ *  device should be delayed for 100 uS to allow the OTP to load. The
+ *  above sequence should be completed before any I2C operation."  I2C is
+ *  disabled for the whole time the part sits in Hardware Shutdown
  *  (§7.3.11.1).  This value is chosen deliberately above that 100 us
- *  floor.  @ref tas2563_init applies it itself when it owns @c sd_n; a
- *  caller that owns SD_N externally (passes @c sd_n as NULL) must wait
- *  at least this long, after releasing SDZ, before calling @ref
- *  tas2563_init -- see that function's precondition below. */
-#define TAS2563_SDZ_RELEASE_WAIT_US 200u
+ *  floor.
+ *
+ *  @ref tas2563_init applies it twice when it owns @c sd_n (once after
+ *  driving SDZ high, once after its own software reset) and once when it
+ *  does not (software reset only).  A caller that owns SD_N externally
+ *  (passes @c sd_n as NULL) must additionally wait at least this long,
+ *  after releasing SDZ, before calling @ref tas2563_init -- see that
+ *  function's precondition below. */
+#define TAS2563_RESET_SETTLE_US 200u
 
 /** Operating-mode enum mapped onto the chip's `PWR_CTL.MODE[1:0]`
  *  field (SLASET3D §7.5.4 Table 7-104, p.66; §7.3.11.6 Table 7-8,
@@ -269,8 +310,19 @@ typedef struct {
 } tas2563_t;
 
 /**
- * @brief Probe the chip, drive SD_N high if we own it, and leave the
- *        amp in software shutdown.
+ * @brief Probe the chip, drive SD_N high if we own it, software-reset
+ *        it, and leave the amp in software shutdown.
+ *
+ * Also performs a software reset (`SW_RESET`, SLASET3D §7.5.3) after
+ * book 0 / page 0 is selected and before anything else is configured --
+ * SLAA954 "TAS2563 End System Integration Guide" §3.1 Case 1
+ * recommends both a hardware AND a software reset before
+ * initialization for reliable operation.  `SW_RESET` returns every
+ * register to its POR default, so this runs before any other write in
+ * this function, followed by the @ref TAS2563_RESET_SETTLE_US wait
+ * §9.2 requires.  Nothing in SLASET3D says the write itself is NACKed
+ * or otherwise handled specially -- it is a normal single-byte write
+ * like any other register write in this driver.
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the amp sits on.
@@ -288,15 +340,25 @@ typedef struct {
  * @param[in]  sd_n      Open GPIO handle bound to AMP.ENABLE.  May
  *                       be NULL if the caller drives SD_N
  *                       elsewhere (or if the pin is tied permanently
- *                       to V+).
+ *                       to V+).  @b Must not be passed to more than
+ *                       one @ref tas2563_t instance that shares the
+ *                       same physical SD_N net -- see "Shared SD_N /
+ *                       IRQZ nets" in this file's overview.
  *
  * @pre SDZ must have been high for at least @ref
- *      TAS2563_SDZ_RELEASE_WAIT_US before the first I2C access (SLASET3D
+ *      TAS2563_RESET_SETTLE_US before the first I2C access (SLASET3D
  *      §7.3.11.1 / §9.2).  If @p sd_n is non-NULL, this function drives
  *      SDZ and applies that wait itself.  If @p sd_n is NULL, SD_N is
  *      owned elsewhere and the CALLER must have released it at least
  *      that long ago before calling this function -- it has no way to
  *      know when an externally-owned pin actually went high.
+ *
+ * @note This does not select, and cannot report, ROM vs Smart
+ *   Amp/Tuning mode (see @ref tas2563_set_amp_level's note) --
+ *   SLASET3D names no register for that distinction.  It only sets
+ *   `PWR_CTL.MODE` = software shutdown; whichever of the two modes the
+ *   part boots into is governed by registers this function does not
+ *   touch.
  *
  * @return ALP_OK on a successful probe.
  * @retval ALP_ERR_INVAL  ctx or bus is NULL, or addr_7bit is not one
@@ -351,6 +413,10 @@ alp_status_t tas2563_set_mode(tas2563_t *ctx, tas2563_mode_t mode);
  * Bypasses MODE_CTRL -- when SD_N is low, the chip is in HW
  * shutdown regardless of MODE_CTRL.  Useful for fast power-down
  * during a fault or for staging the boot sequence.
+ *
+ * @warning If this instance's @p sd_n net is shared with another amp
+ *   (see "Shared SD_N / IRQZ nets" above), this also puts THAT amp
+ *   into hardware shutdown.
  */
 alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 
@@ -369,6 +435,21 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *
  * Read-modify-write of bits 5..1 only; `DIS_DC_BLOCKER` (bit 6) and
  * the reserved bits keep their values.
+ *
+ * @note @b Mode-dependent, per TI's application notes (not SLASET3D
+ *   itself): SLAA953 §1.9 (p.9) states "Amplifier Level cannot be
+ *   changed in Smart Amp/Tuning Mode. In order to change it, user must
+ *   enter ROM mode."  This function does not, and cannot, enforce or
+ *   even detect that: SLASET3D's register map has no field this
+ *   driver could read to tell ROM mode from Smart Amp/Tuning mode
+ *   (searched exhaustively -- see @ref tas2563_load_tuning's write
+ *   verification note for the same kind of gap; the one register whose
+ *   name suggests it, `DSP Mode & TDM_DET` at 0x11 / §7.5.19, is
+ *   read-only TDM clock-detection readback (`FS_RATIO`/`FS_RATE`)
+ *   despite its title and has no mode-select field).  A caller in
+ *   Smart Amp/Tuning mode that calls this and gets `ALP_OK` should not
+ *   assume the level actually changed -- confirm per TI's guidance for
+ *   entering ROM mode first, outside this driver's knowledge.
  *
  * @param[in] ctx         Initialised context.
  * @param[in] level_code  Datasheet `AMP_LEVEL[4:0]` code,
@@ -527,6 +608,11 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  *                                 already fits an external pull-up on
  *                                 IRQ_N.
  *
+ * @note If @p irq_n's net is shared with another amp (see "Shared
+ *   SD_N / IRQZ nets" above), a pin assertion means only that ONE of
+ *   the amps on it faulted -- read each instance's own @ref
+ *   tas2563_read_faults over I2C to find out which.
+ *
  * @return ALP_OK, or the underlying bus/GPIO status.
  * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
  * @retval ALP_ERR_INVAL     @p irq_n is NULL.
@@ -611,10 +697,15 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  * (book, page, register, value) writes: it tracks the currently
  * selected book and page and only re-selects them when a record
  * changes them, then writes each register with a single-byte write
- * (SLASET3D §7.3.6 Figure 7-6, p.33).  One transaction per register
- * is deliberate -- the datasheet's multi-byte write section does not
- * state the register address auto-increments, and this driver has no
- * silicon on which to establish that it does.
+ * (SLASET3D §7.3.6 Figure 7-6, p.33).  One transaction per register is
+ * DELIBERATE CONSERVATISM, not an undocumented behaviour: SLASET3D
+ * §7.3.5 "Single-Byte and Multiple-Byte Transfers" (p.32) does state
+ * that "the register issued then serves as the starting point, and
+ * the amount of data subsequently transmitted... determines to how
+ * many registers are written," i.e. sequential addressing does
+ * auto-increment.  This driver has no silicon on which to have
+ * exercised that path, so it stays on the single-byte write it has
+ * verified against the fake, pending that confirmation.
  *
  * @par Not included: parsing TI's PPC3 export container.
  *   Converting a PPC3 `.bin`/`.cfg` export into a
@@ -622,13 +713,32 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   this driver: the export format is a TI tool format, described
  *   nowhere in SLASET3D, and writing a parser for it without a real
  *   export to check against would be guesswork.  Feed this function
- *   an array your build produced from the export.
+ *   an array your build produced from the export.  Per-unit speaker
+ *   calibration (measuring each assembled unit's actual speaker
+ *   parameters and provisioning a matching tuning) is a separate,
+ *   out-of-scope concern this function has no part in either -- it
+ *   only replays whatever @ref tas2563_tuning_reg_t array the caller's
+ *   provisioning step already produced.
  *
  * @par Cost.  Four bytes of storage per register written.  A large
  *   DSP tuning is thousands of registers, so a big blob is expensive
  *   in flash in this form; a packed encoding is the follow-up, and it
  *   depends on first confirming incremental multi-byte writes on real
  *   silicon.
+ *
+ * @par Write verification: not implemented, and not guessed at.
+ *   TI's application notes (SLAA765 §16, p.25) show reading back
+ *   `I2C_CKSUM` (0x7E) after a write sequence to verify it landed.
+ *   SLASET3D §7.5.61 (p.93) documents the register -- 8 bits, RW,
+ *   "updated on writes to other registers on all books and pages,"
+ *   writing it resets it to the written value -- but nowhere specifies
+ *   the checksum ALGORITHM: not what it sums (register address, data,
+ *   both?), not whether `PAGE`/`BOOK` select writes count as "other
+ *   registers," not an initial value beyond the POR `0h`.  Without
+ *   that, a host-side expected value cannot be computed, only guessed,
+ *   so this function does not attempt it.  A future implementation
+ *   needs the algorithm from TI support or from reading it back
+ *   against known writes on real silicon.
  *
  * Book and page are restored to 0 before returning, on both the
  * success and the failure path, because every other function in this
@@ -677,6 +787,11 @@ alp_status_t tas2563_load_tuning(tas2563_t                  *ctx,
  * When no SD_N pin was supplied there is no hardware line to drop, so
  * deinit falls back to writing software shutdown instead of leaving a
  * possibly-active amplifier behind.
+ *
+ * @warning If this instance's @p sd_n net is shared with another amp
+ *   (see "Shared SD_N / IRQZ nets" above), this also puts THAT amp
+ *   into hardware shutdown -- do not call with a shared @p sd_n while
+ *   another instance on the same net needs to keep running.
  */
 void tas2563_deinit(tas2563_t *ctx);
 

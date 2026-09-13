@@ -3991,6 +3991,14 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	k_msleep(SOUND_MUX_SETTLE_MS);
 
 	/* --- 2. AMP_ENABLE (SD_N) high -- release HARDWARE shutdown -------- */
+	/* SD_N has a 10 kOhm pull-up to +VIO on this board (R138), so both
+	 * amps are already out of hardware shutdown by the time this phase
+	 * runs.  GPIO_OUTPUT_INACTIVE below is therefore not a no-op: it
+	 * actively drives the shared SD_N net LOW before the gpio_pin_set()
+	 * that follows drives it back HIGH -- a deliberate hardware reset of
+	 * BOTH amps (TI SLAA954 "TAS2563 End System Integration Guide" §3.1
+	 * Case 1 recommends a hardware reset before initialization), not an
+	 * incidental side effect of configuring the pin. */
 	int rc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
 	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
 	if (rc == 0) rc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
@@ -4009,11 +4017,14 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
 	printf("[evkdemo] SOUND: AMP_FAULT (IRQ_N, P5_0) configured as input -> %d\n", rc);
 
-	/* SDZ (AMP_ENABLE) just went high above, and tas2563_init() is called
-	 * below with sd_n=NULL -- WE own SD_N here, not the driver, so it is
-	 * on us to honour TAS2563_SDZ_RELEASE_WAIT_US
-	 * (include/alp/chips/tas2563.h) before its first I2C access. */
-	k_usleep(TAS2563_SDZ_RELEASE_WAIT_US);
+	/* SDZ (AMP_ENABLE) just went high above -- the hardware reset the
+	 * comment at step 2 calls out -- and tas2563_init() is called below
+	 * with sd_n=NULL -- WE own SD_N here, not the driver, so it is on us
+	 * to honour TAS2563_RESET_SETTLE_US (include/alp/chips/tas2563.h)
+	 * before its first I2C access.  tas2563_init() also performs its own
+	 * software reset + settle unconditionally, so this wait covers only
+	 * the hardware reset this phase just did. */
+	k_usleep(TAS2563_RESET_SETTLE_US);
 
 	/* --- 4. tas2563_init() on both amps, sd_n=NULL (step 2 drove it) --- */
 	for (size_t i = 0; i < AMP_COUNT; i++) {

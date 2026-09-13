@@ -128,8 +128,18 @@ of being quietly picked:
   per register written, which is expensive for a large DSP tuning. A packed
   form needs the register address to auto-increment across a multi-byte
   write; §7.3.7 (p.33) titles itself "Multiple-Byte Write and Incremental
-  Multiple-Byte Write" but never states that it does, and there is no silicon
-  here to establish it. Single-byte writes only, for now.
+  Multiple-Byte Write" but never restates that it does -- it only describes
+  the electrical framing (each data byte gets its own ACK). **Correction,
+  #2077:** §7.3.5 "Single-Byte and Multiple-Byte Transfers" (p.32), the
+  section immediately before it, does state it in prose: "the register
+  issued then serves as the starting point, and the amount of data
+  subsequently transmitted... determines to how many registers are
+  written." So auto-increment IS documented, just not in §7.3.7 specifically
+  -- there is still no silicon here to have exercised that path, so this
+  driver stays on single-byte writes for now regardless. #2077 makes the
+  same correction where the driver's own code comment repeated this
+  fragment's imprecise framing (`chips/tas2563/tas2563.c`,
+  `include/alp/chips/tas2563.h`).
 - **A 20-bit `RX_WLEN` mapping.** Table 7-110 encodes it, but `<alp/i2s.h>`
   documents `alp_i2s_config_t.word_bits` as 16/24/32, so no host bus this
   function pairs with can be opened at 20 bits. A mapping unreachable through

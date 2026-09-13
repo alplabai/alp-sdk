@@ -189,6 +189,7 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
  * chips/tas2563/tas2563.c) so an assertion reads as the datasheet
  * register it checks.  SLASET3D section 7.5.1, p.64-65. */
 #define TAS_REG_PAGE      0x00u
+#define TAS_REG_SW_RESET  0x01u
 #define TAS_REG_PWR_CTL   0x02u
 #define TAS_REG_PB_CFG1   0x03u
 #define TAS_REG_MISC_CFG1 0x04u
@@ -316,6 +317,78 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	              0x02u,
 	              "the park write must have landed on book 0 / page 0, not in "
 	              "whatever page the previous firmware left selected");
+
+	alp_i2c_close(bus);
+}
+
+/* #2077 (SW-reset addition): tas2563_init() must issue the software
+ * reset (SW_RESET, SLASET3D §7.5.3) after selecting book 0 / page 0
+ * and before any other configuration write -- SLAA954 "TAS2563 End
+ * System Integration Guide" §3.1 Case 1.  Pin the whole write sequence
+ * a clean init issues via the fake's ordered log: PAGE=0, BOOK=0
+ * (paging), SW_RESET=1 (this fix), PWR_CTL park -- SW_RESET strictly
+ * between the paging writes and the park write. */
+ZTEST(alp_chips, test_tas2563_init_issues_sw_reset_before_other_configuration)
+{
+	fake_tas2563_reset();
+
+	tas2563_t  ctx;
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+	fake_tas2563_log_reset();
+
+	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+
+	static const struct fake_tas2563_write expected[] = {
+		{ 0u, 0u, TAS_REG_PAGE, 0x00u },     /* select_book0_page0(): PAGE = 0 */
+		{ 0u, 0u, 0x7Fu, 0x00u },            /* select_book0_page0(): BOOK = 0 */
+		{ 0u, 0u, TAS_REG_SW_RESET, 0x01u }, /* the software reset this fix adds */
+		{ 0u, 0u, TAS_REG_PWR_CTL, 0x0Eu },  /* park write, RMW over the POR-default
+						        0x0Eu seed_defaults() leaves in PWR_CTL --
+						        ISNS_PD/VSNS_PD (already 1) survive the
+						        mask, only MODE[1:0] changes (already 10b) */
+	};
+	zassert_equal(fake_tas2563_log_len(),
+	              ARRAY_SIZE(expected),
+	              "unexpected write count during init -- SW_RESET missing or extra "
+	              "writes appeared");
+	for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
+		const struct fake_tas2563_write *w = fake_tas2563_log(i);
+		zassert_not_null(w, "log[%zu] missing", i);
+		zassert_equal(w->book, expected[i].book, "log[%zu].book", i);
+		zassert_equal(w->page, expected[i].page, "log[%zu].page", i);
+		zassert_equal(w->reg, expected[i].reg, "log[%zu].reg", i);
+		zassert_equal(w->val, expected[i].val, "log[%zu].val", i);
+	}
+
+	alp_i2c_close(bus);
+}
+
+/* #2077 (SW-reset addition): the settle wait after SW_RESET runs
+ * unconditionally, even with sd_n == NULL, where there is no
+ * hardware-reset wait at all -- this is the ONLY wait on that path, so
+ * its floor is exactly 1x TAS2563_RESET_SETTLE_US, unlike the 2x floor
+ * of the sd_n-owned test above. */
+ZTEST(alp_chips, test_tas2563_init_settles_after_sw_reset_when_sd_n_not_owned)
+{
+	fake_tas2563_reset();
+
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	tas2563_t ctx;
+	uint32_t  t0 = k_cycle_get_32();
+	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+	uint64_t elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+
+	zassert_true(elapsed_us >= TAS2563_RESET_SETTLE_US,
+	             "tas2563_init() with sd_n == NULL took %llu us, want >= %u us "
+	             "(TAS2563_RESET_SETTLE_US after the mandatory software reset) -- "
+	             "looks like the settle wait was dropped",
+	             (unsigned long long)elapsed_us,
+	             TAS2563_RESET_SETTLE_US);
 
 	alp_i2c_close(bus);
 }
@@ -836,20 +909,22 @@ ZTEST(alp_chips, test_tas2563_deinit_drops_sd_n_when_owned)
 	alp_i2c_close(bus);
 }
 
-/* #2077: when tas2563_init() owns sd_n it must wait
- * TAS2563_SDZ_RELEASE_WAIT_US after driving SDZ high and before its first
- * I2C access (SLASET3D §7.3.11.1 "I2C communication is disabled" in
- * Hardware Shutdown, §9.2's 100 us OTP-load floor) -- unlike the sd_n ==
- * NULL case, this function drove the pin itself, so it knows exactly
- * when to start counting instead of trusting an external caller.
+/* #2077: when tas2563_init() owns sd_n it waits TAS2563_RESET_SETTLE_US
+ * TWICE on this path -- once after driving SDZ high (hardware reset)
+ * and once after its own unconditional software reset -- before its
+ * first I2C access (SLASET3D §7.3.11.1 "I2C communication is disabled"
+ * in Hardware Shutdown, §9.2's 100 us OTP-load floor, which applies to
+ * both reset kinds).  Asserting >= 2x the floor, not just >= 1x, is
+ * what makes this test able to catch EITHER wait being dropped alone --
+ * at >= 1x a regression that drops one of the two would still pass.
  *
  * fake_tas2563.c's i2c-emul target does not model bus timing (the same
  * limitation test_bmi323_init_honours_suspend_mode_communication_idle
- * above documents for fake_bmi323.c), so this cannot assert the wait's
- * POSITION relative to the first bus write -- only that tas2563_init()'s
- * real wall-clock time is at least the documented floor when it owns
- * sd_n.  That is still enough to catch the wait being dropped: nothing
- * else on this path takes measurable time. */
+ * above documents for fake_bmi323.c), so this cannot assert either
+ * wait's POSITION relative to a bus access -- only that tas2563_init()'s
+ * real wall-clock time is at least the combined floor.  That is still
+ * enough to catch a wait being dropped: nothing else on this path takes
+ * measurable time. */
 ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned)
 {
 	fake_tas2563_reset();
@@ -869,12 +944,13 @@ ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_own
 	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n), ALP_OK);
 	uint64_t elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
 
-	zassert_true(elapsed_us >= TAS2563_SDZ_RELEASE_WAIT_US,
+	zassert_true(elapsed_us >= 2u * TAS2563_RESET_SETTLE_US,
 	             "tas2563_init() with sd_n owned took %llu us, want >= %u us "
-	             "(TAS2563_SDZ_RELEASE_WAIT_US) -- looks like the SDZ settle wait "
+	             "(2x TAS2563_RESET_SETTLE_US: hardware-reset settle + "
+	             "software-reset settle) -- looks like one of the two waits "
 	             "was dropped",
 	             (unsigned long long)elapsed_us,
-	             TAS2563_SDZ_RELEASE_WAIT_US);
+	             2u * TAS2563_RESET_SETTLE_US);
 
 	alp_gpio_close(sd_n);
 	alp_i2c_close(bus);
