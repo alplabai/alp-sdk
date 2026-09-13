@@ -2,12 +2,21 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-CI gate: if an example ships >=1 board-qualified overlay/conf under
-`boards/`, then every core its `board.yaml` declares via
-`cores.<core>.app:` must have its OWN matching qualified overlay
-there too -- a declared core with no matching file, while qualified
-overlays exist for other core(s), means the core the app actually
-builds silently loses its overlay.
+CI gate covering two related silent-overlay-drop defects:
+
+1. (issue #1009) If an example ships >=1 board-qualified overlay/conf
+   under `boards/`, then every core its `board.yaml` declares via
+   `cores.<core>.app:` must have its OWN matching qualified overlay
+   there too -- a declared core with no matching file, while qualified
+   overlays exist for other core(s), means the core the app actually
+   builds silently loses its overlay.
+
+2. (issue #2101) If an example's `testcase.yaml` ships >=1
+   `alp_e1m_*`-qualified `.overlay` under `boards/`, then every
+   `alp_e1m_*` `platform_allow` entry across its scenarios must have its
+   own matching `.overlay` too -- same silent-drop shape, keyed off
+   `platform_allow` instead of `board.yaml` so it also covers apps
+   (`*-regcheck` bench checks) that have no `board.yaml` at all.
 
 Why this exists (issue #1009): `examples/aen/edgeai-vision-aen` declared
 `cores.m55_hp.app:` (and its `CMakeLists.txt` builds with `--core
@@ -86,6 +95,74 @@ Run locally:
     python3 scripts/check_example_board_overlay_parity.py
 
 CI wires this in `pr-metadata-validate.yml`.
+
+Extension (issue #2101): platform_allow vs boards/ parity
+-----------------------------------------------------------
+A second, independent check in this same script covers the sibling defect
+issue #2101 describes: an example's `testcase.yaml` can declare a
+`platform_allow` entry for a real E1M SoM board target for which the
+example ships no matching overlay at all, while shipping one for a
+*different* E1M target in the very same file. Zephyr's board-overlay
+auto-apply silently finds nothing for the un-covered target and the build
+proceeds with no error and no warning -- unlike the first check above,
+this one does not require a `board.yaml` (`*-regcheck` bench apps like
+`examples/aen/aen-adc-regcheck` have a `testcase.yaml` but no `board.yaml`,
+and are exactly the shape #2101 is about).
+
+Measured on the AEN803 board-tree branch (`feat/2084-aen803-board-tree`):
+82 examples ship an AEN801-qualified overlay under `boards/`; only 2 ship
+an AEN803 one, and only one example's `testcase.yaml` even lists an
+AEN803 `platform_allow` entry -- so building any of the other ~80 for
+`alp_e1m_aen803_m55_he/...` silently drops the overlay entirely.
+
+Filename-stem transform (the "right key" this check compares against) --
+confirmed by reading Zephyr's own CMake board-resolution code in a real
+`zephyr` v4.4 checkout, not inferred from this repo's filenames:
+
+  - `cmake/modules/boards.cmake:300`:
+    `string(REPLACE "/" "_" NORMALIZED_BOARD_TARGET "${BOARD}/${BOARD_QUALIFIERS}")`
+    -- the canonical underscored form of a fully-qualified board target.
+  - An app's own `boards/` subdirectory is what actually gets scanned for
+    a matching `.overlay`: `cmake/modules/configuration_files.cmake:72`
+    calls `zephyr_file(CONF_FILES ${APPLICATION_CONFIG_DIR}/boards DTS
+    DTC_OVERLAY_FILE ...)`, which (`cmake/modules/extensions.cmake`,
+    `zephyr_file()` CONF_FILES mode, ~line 2892) builds its candidate
+    filename via `zephyr_build_string()`:
+      `string(REPLACE "/" ";" str_segment_list "${BOARD_QUALIFIERS}")`
+      `string(JOIN "_" ${outvar} ${BOARD} ${str_segment_list} ${revision})`
+    then appends `.overlay` (`extensions.cmake:2909`,
+    `list(TRANSFORM dts_filename_list APPEND ".overlay")`).
+  Both sites reduce to the same transform this check applies: join the
+  board name and every `/`-separated qualifier segment with `_`, i.e.
+  replace every `/` in the qualified target string with `_`.
+
+Scope, and why (avoiding the "worse than no check" false-positive trap):
+this check only compares `platform_allow` entries that name a real E1M
+SoM board target (`alp_e1m_*`). A full sweep of `origin/dev` shows ~40
+examples whose only `boards/` content is a `native_sim_*` overlay/conf
+(native_sim frequently needs one to stub a simulated DT node that has no
+physical counterpart) alongside a `platform_allow` entry for a vendor
+reference board (e.g. `ensemble_e8_dk`) that ships no overlay of its own
+-- on purpose, those examples never touch alp-owned board customization
+at all. Requiring an overlay there would be exactly the false-positive
+the issue warns against. Scoping to `alp_e1m_*` targets keeps the check
+to the class #2101 actually describes: two SKUs of the *same* SoM family
+declared in the *same* `testcase.yaml`, one with an overlay and one
+without.
+
+Within that `alp_e1m_*` scope: if an example's `boards/` ships zero
+`alp_e1m_*`-qualified `.overlay` files at all, it is legitimately
+board-agnostic for that family (e.g. `examples/ai/cold-chain-monitor`
+lists an `alp_e1m_aen801_m55_hp` `platform_allow` entry for a bench
+build_only scenario but ships only a `native_sim` overlay -- nothing to
+compare against, so it is not flagged). Only once >=1 `alp_e1m_*`
+overlay exists does every other `alp_e1m_*` `platform_allow` entry in
+that same file need its own matching one.
+
+On `origin/dev` today (no AEN803 board tree yet) this finds 0 problems --
+expected, since #2101 is only reachable once a second SKU's
+`platform_allow` entries land. It exists so that landing is loud instead
+of silent.
 """
 from __future__ import annotations
 
@@ -96,6 +173,7 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent
+_SOM_BOARD_PREFIX = "alp_e1m_"
 
 
 def _topology_stems(preset_path: Path) -> dict[str, str]:
@@ -128,7 +206,9 @@ def _declared_app_cores(board_yaml: Path) -> set[str]:
     }
 
 
-def find_problems(root: Path) -> list[str]:
+def _declared_core_overlay_problems(root: Path) -> list[str]:
+    """Issue #1009 class: a `board.yaml`-driven example's declared core has
+    no matching `boards/` overlay while another declared core does."""
     problems: list[str] = []
     presets_dir = root / "metadata" / "e1m_modules"
     examples_dir = root / "examples"
@@ -189,6 +269,91 @@ def find_problems(root: Path) -> list[str]:
     return problems
 
 
+def _qualified_target_to_stem(target: str) -> str:
+    """Fully-qualified Zephyr board target -> the overlay filename stem
+    Zephyr's own CMake resolves against an app's `boards/` directory.  See
+    the module docstring for the citation in Zephyr's CMake sources."""
+    return target.strip().replace("/", "_")
+
+
+def _platform_allow_entries(testcase_yaml: Path) -> set[str]:
+    with testcase_yaml.open(encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+    tests = doc.get("tests") or {}
+    entries: set[str] = set()
+    if not isinstance(tests, dict):
+        return entries
+    for scenario in tests.values():
+        if not isinstance(scenario, dict):
+            continue
+        allow = scenario.get("platform_allow") or []
+        if isinstance(allow, str):
+            allow = allow.split()
+        entries.update(str(e) for e in allow)
+    return entries
+
+
+def _platform_allow_overlay_problems(root: Path) -> list[str]:
+    """Issue #2101 class: a `testcase.yaml` `platform_allow` entry for a
+    real E1M SoM board target (`alp_e1m_*`) has no matching `boards/`
+    overlay while a *different* `alp_e1m_*` target in the same file does.
+    Unlike `_declared_core_overlay_problems`, this needs no `board.yaml` --
+    it covers `*-regcheck` bench apps too."""
+    problems: list[str] = []
+    examples_dir = root / "examples"
+    if not examples_dir.is_dir():
+        return problems
+
+    for testcase_yaml in sorted(examples_dir.glob("*/*/testcase.yaml")):
+        example_dir = testcase_yaml.parent
+        rel = example_dir.relative_to(root)
+
+        som_entries = {
+            e for e in _platform_allow_entries(testcase_yaml)
+            if e.startswith(_SOM_BOARD_PREFIX)
+        }
+        if not som_entries:
+            continue
+
+        boards_dir = example_dir / "boards"
+        if not boards_dir.is_dir():
+            continue
+
+        overlay_stems = {
+            f.stem for f in boards_dir.iterdir()
+            if f.is_file() and f.suffix == ".overlay"
+        }
+        entry_stems = {e: _qualified_target_to_stem(e) for e in som_entries}
+        present = {e: s for e, s in entry_stems.items() if s in overlay_stems}
+        if not present:
+            # Zero alp_e1m_*-qualified overlays at all: this example is
+            # legitimately board-agnostic for this SoM family (e.g. a
+            # native_sim-only boards/ dir). Nothing to compare against.
+            continue
+
+        others = sorted(present.values())
+        for entry in sorted(som_entries):
+            if entry in present:
+                continue
+            stem = entry_stems[entry]
+            problems.append(
+                f"{rel}: testcase.yaml platform_allow entry '{entry}' has "
+                f"no matching boards/{stem}.overlay, while boards/ ships a "
+                f"qualified overlay for other alp_e1m_* target(s) in the "
+                f"same testcase.yaml ({', '.join(others)}) -- the build "
+                f"for '{entry}' silently drops its board overlay "
+                f"(issue #2101 class)"
+            )
+
+    return problems
+
+
+def find_problems(root: Path) -> list[str]:
+    problems = _declared_core_overlay_problems(root)
+    problems.extend(_platform_allow_overlay_problems(root))
+    return problems
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--root", type=Path, default=REPO)
@@ -200,7 +365,8 @@ def main() -> int:
         for p in problems:
             print(f"  {p}", file=sys.stderr)
         return 1
-    print("OK: every example board.yaml core with an app: key has a matching "
+    print("OK: every example board.yaml core with an app: key, and every "
+          "testcase.yaml alp_e1m_* platform_allow entry, has a matching "
           "boards/ overlay wherever the example ships qualified overlays.")
     return 0
 
