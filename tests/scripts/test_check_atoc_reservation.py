@@ -502,6 +502,28 @@ class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
         p = self._preset(_SILICON_HEADER + "memory_map:\n" + _TILED_SAFE_ATOC_AT_TOP)
         self.assertEqual(atoc._check_preset(p), [])
 
+    def test_f_single_resolved_atoc_row_fallback_not_treated_as_alias(self):
+        """No-aperture fallback, `floor`/`top` are the file-wide min/max
+        over rows with a RESOLVED base -- if `atoc` is the only such row
+        (e.g. `mram_main` is still `base: "TBD"`), its own extent
+        trivially equals floor..top, so the exact-extent test alone
+        would misidentify it as the whole-device alias and suggest
+        `composite`. Retagging it `composite` would then pass the gate.
+        The remedy must still say `secure_enclave`, named by 'atoc',
+        because it IS named 'atoc' regardless of the extent match."""
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: mram_main, base: \"TBD\", size_kib: 5632, "
+            "write_authority: composite }\n"
+            "  - { name: atoc, base: 0x80578000, size_kib: 32, "
+            "write_authority: customer_runtime }\n")
+        failures = atoc._check_preset(p)
+        self.assertEqual(len(failures), 1, failures)
+        self.assertIn("'atoc'", failures[0])
+        self.assertIn("customer_runtime", failures[0])
+        self.assertIn("secure_enclave", failures[0])
+        self.assertNotIn("composite", failures[0])
+
 
 class TestSlot0AddressCheck(unittest.TestCase):
     """alp-sdk#1482: zephyr,code-partition must match the preset's slot0."""
