@@ -123,7 +123,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
 | Item             | Description                                                             |
 |------------------|-------------------------------------------------------------------------|
-| Rotary encoder   | PEC12R-4222F-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
+| Rotary encoder   | PEC11R-4215K-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
 | RGB LED          | 150505M173300, transistor-driven, on a `+5V` rail.                      |
 | DAC outputs      | `DAC0_OUT` and `DAC1_OUT` buffered through OPA189 op-amps to header J15.|
 | Comparator       | `CMP0`, `CMP1` exposed on header J18.                                   |
@@ -180,7 +180,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`).
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
-  the PEC12R-4222F-S0024 quadrature signals.  The push-switch
+  the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
 
 ## Bring-up checklist (firmware perspective)

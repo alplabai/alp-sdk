@@ -10,9 +10,11 @@
  *     - NOT the console (UART5 P3_4/P3_5), NOT a boot/strap, NOT the EEPROM bus
  *       (I2C2 P5_6/P5_7), NOT the BRD_I2C LPI2C0 (P7_4/P7_5).
  *     - P8_0's only non-GPIO alternate functions are OSPI1_SCLKN / AUDIO_CLK /
- *       FAULT0 / LPCAM_D0 / SD_D0 / CDC_D0 / CAM_D0 -- the SoM's OSPI1 HyperRAM
- *       (W958D8NB) is BOM-optional and NOT populated on this batch, and no
- *       camera / SD / display is wired, so the pad is free and uncontended.
+ *       FAULT0 / LPCAM_D0 / SD_D0 / CDC_D0 / CAM_D0 -- there is no OSPI1 bus
+ *       device on this SoM (chip: TBD; the NOR + HyperRAM both live on the
+ *       separate OSPI0 bus -- though the netlist's OSPI1_RESETn/OSPI1_INTn
+ *       net names DO reach U10, the NOR, on other pads), and no camera / SD /
+ *       display is wired, so the pad is free and uncontended.
  *     - We do NOT touch port 4 (P4_x AF1 = JTAG0 trace) so SWD/JTAG debug is
  *       undisturbed.
  *

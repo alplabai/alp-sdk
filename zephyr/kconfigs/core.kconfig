@@ -221,7 +221,7 @@ config ALP_SDK_SOM_DRAM_MBIT
 	  Off-SoC RAM the SoM SKU actually populates (som-preset `memory.
 	  dram_mbit`, e.g. the AEN HyperRAM on OSPI0 CS0) -- this is a MODULE
 	  fact, not a SoC one: two SKUs on the same PCB/silicon can differ
-	  here (E1M-AEN803 populates 512 Mbit, E1M-AEN801 256 Mbit).  0 means
+	  here (E1M-AEN803 populates 512 Mbit, E1M-AEN801 populates none).  0 means
 	  the preset declares none or leaves it TBD; the banner omits the
 	  line entirely rather than print a false zero.
 

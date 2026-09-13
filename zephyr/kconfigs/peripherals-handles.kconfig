@@ -194,8 +194,9 @@ config ALP_SDK_STORAGE_ALIF_SECAES
 	  (which defaults ON because that path bench-PASSED,
 	  docs/aen-bench-bringup.md): this one is UNVERIFIED ON SILICON --
 	  no bench unit reachable at implementation time has an OSPI
-	  SecAES-relevant part populated (R2 BOM only; see the file
-	  header).  About eight in-tree AEN examples set
+	  SecAES-relevant part populated (E1M-AEN801 populates neither
+	  external OSPI memory on any revision; see the file header for
+	  which SKU does).  About eight in-tree AEN examples set
 	  CONFIG_HAS_ALIF_SE_SERVICES=y (aen-aipm-read, aen-alp-rpc,
 	  aen-dualcore-doorbell/-ipc/-master/-he-master, aen-rpc-pingpong,
 	  aen-se-service-*), so this stays an opt-in gate -- flipping the

@@ -108,7 +108,7 @@ e1m_routes:
         doc: "PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626." }
     - { e1m: E1M_GPIO_IO4,  macro: EVK_PIN_ENCODER_SW,    active_low: true,
         board_alias: BOARD_PIN_ENCODER_SW,
-        doc: "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce." }
+        doc: "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce." }
     - { e1m: E1M_GPIO_IO5,  macro: EVK_PIN_CAM_RST,       active_low: true,
         doc: "Camera reset (active-low)." }
     - { e1m: E1M_GPIO_IO7,  macro: EVK_PIN_PCIE_IOEXP_INT,
@@ -255,7 +255,7 @@ e1m_routes:
   qenc:
     - { e1m: E1M_ENC0, macro: EVK_ENC_ROTARY,
         board_alias: BOARD_ENC_ROTARY,
-        doc: "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)." }
+        doc: "PEC11R-4215K-S0024 rotary encoder (designator E1, 2626-R2 EVK schematic netlist): ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4)." }
 
 # On-board I2C device instances (all on ALP_E1M_I2C0, the sensor bus).
 # Strap values per the EVK schematic UG-E1M-001 + user-supplied
