@@ -105,6 +105,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
+from alp_orchestrate.aperture import is_whole_device_alias
 from alp_project_loader import _load_yaml, _resolve_sku, resolve_soc_path
 from sentinels import is_tbd
 
@@ -681,9 +682,22 @@ def _aen_check_map_overlaps(
 
     The sibling core's `<role>_slot0` window is not a partition here, so
     _aen_check_extents cannot see a map that overlaps it; this can.
-    Regions with a non-integer `base` (a `TBD` sentinel, or the
-    whole-window `mram_main` alias) are skipped -- they are declarations
-    of intent, not placements.
+    Regions with a non-integer `base` (a `TBD` sentinel) are skipped --
+    they are declarations of intent, not placements.
+
+    A region whose resolved extent equals the App MRAM window EXACTLY
+    (the whole-device alias, e.g. `mram_main` once its `base` stops
+    being `"TBD"`) is excluded from the pairwise overlap comparison
+    below -- it deliberately spans the same window `mcuboot` /
+    `he_slot0` / `hp_slot0` / `reserved` / `storage` / `atoc` subdivide,
+    so comparing it against its own partitions would flag every one of
+    them. `alp_orchestrate.aperture.is_whole_device_alias()` carries the
+    identical "extent == aperture exactly" predicate `classify_region()`
+    already uses for this same case -- imported, not re-derived, so the
+    two can't drift (#2073). The exclusion is bounds-checked like every
+    other row and applies to nothing looser than an exact match: a
+    region that merely CONTAINS another without matching the aperture
+    exactly still overlaps and is still refused below.
     """
     placed = [
         (str(r.get("name")), r["base"], int(r["size_kib"]))
@@ -691,6 +705,7 @@ def _aen_check_map_overlaps(
         if isinstance(r.get("base"), int) and isinstance(r.get("size_kib"), int)
     ]
     limit = mram_base + total_kib * 1024
+    aperture = (mram_base, limit)
     for name, base, size_kib in placed:
         end = base + size_kib * 1024
         if base < mram_base or end > limit:
@@ -699,8 +714,13 @@ def _aen_check_map_overlaps(
                 f"0x{base:x}..0x{end:x}, outside the {total_kib} KiB App "
                 f"MRAM window 0x{mram_base:x}..0x{limit:x} declared by this "
                 "variant's mram_mb")
-    placed.sort(key=lambda r: r[1])
-    for (a_name, a_base, a_kib), (b_name, b_base, _b_kib) in zip(placed, placed[1:]):
+    overlap_candidates = [
+        (name, base, size_kib) for name, base, size_kib in placed
+        if not is_whole_device_alias((base, base + size_kib * 1024), aperture)
+    ]
+    overlap_candidates.sort(key=lambda r: r[1])
+    for (a_name, a_base, a_kib), (b_name, b_base, _b_kib) in zip(
+            overlap_candidates, overlap_candidates[1:]):
         a_end = a_base + a_kib * 1024
         if b_base < a_end:
             raise ZephyrBoardEmitError(

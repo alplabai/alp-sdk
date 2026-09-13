@@ -94,6 +94,26 @@ def region_extent(region: dict[str, Any]) -> Optional[tuple[int, int]]:
     return base, base + size_bytes
 
 
+def is_whole_device_alias(
+    ext: tuple[int, int], aperture: tuple[int, int],
+) -> bool:
+    """True when *ext* equals *aperture* exactly -- the whole-device alias
+    case (e.g. `mram_main`, once its `base` stops being `"TBD"`), not a
+    partition inside the device.
+
+    `classify_region()` and `is_partition_inside_aperture()` below both
+    test this FIRST, before the subset-containment check, because the
+    alias's own extent also satisfies `lo >= full_lo and hi <= full_hi`
+    -- order matters, not just the predicate.
+    `gen_zephyr_board.py::_aen_check_map_overlaps()` (#2073) imports this
+    too, so "extent == aperture exactly" has exactly one copy across the
+    generator and the orchestrator rather than two that could drift.
+    """
+    lo, hi = ext
+    full_lo, full_hi = aperture
+    return lo == full_lo and hi == full_hi
+
+
 def classify_region(
     region: dict[str, Any],
     aperture: Optional[tuple[int, int]],
@@ -154,7 +174,7 @@ def classify_region(
         return "unresolved"
     lo, hi = ext
     full_lo, full_hi = aperture
-    if lo == full_lo and hi == full_hi:
+    if is_whole_device_alias(ext, aperture):
         return "flash"  # whole-device alias -- the device itself
     if lo >= full_lo and hi <= full_hi:
         return "flash"  # strictly contained -- a partition inside the device
@@ -200,7 +220,7 @@ def is_partition_inside_aperture(
         return None
     lo, hi = ext
     full_lo, full_hi = aperture
-    if lo == full_lo and hi == full_hi:
+    if is_whole_device_alias(ext, aperture):
         return False  # the device itself -- extent equals the aperture exactly
     if lo >= full_lo and hi <= full_hi:
         return True  # proper subset -- a partition inside the device

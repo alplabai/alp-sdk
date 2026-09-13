@@ -811,6 +811,38 @@ class TestAenMemoryMapValidation(unittest.TestCase):
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("overlap", str(ctx.exception))
 
+    def test_whole_device_alias_does_not_overlap_its_own_partitions(self) -> None:
+        """`mram_main` deliberately spans the same 5632 KiB window that
+        `mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`/`atoc`
+        subdivide (#2073) -- once its `base` resolves to a real address
+        it must NOT be reported as overlapping every region inside it.
+        `alp_orchestrate.aperture.classify_region()` already carries this
+        exact "extent == aperture exactly" exception; this pins that
+        `_aen_check_map_overlaps()` now agrees with it instead of
+        refusing the very shape the SoM presets declare on purpose."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("alp_e1m_aen801_m55_hp/board.yml", files)
+
+    def test_whole_device_alias_exception_does_not_swallow_a_real_overlap(self) -> None:
+        """The whole-device-alias exception must be narrow: a genuine
+        overlap between two ordinary partitions is still refused even
+        while `mram_main` (also spanning the whole window) sits in the
+        same `memory_map:`."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            mm.sub(AEN801_PRESET,
+                   "name: hp_slot0,  base: 0x802b0000",
+                   "name: hp_slot0,  base: 0x802a0000")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("overlap", str(ctx.exception))
+
     def test_mcuboot_off_the_mram_base_raises(self) -> None:
         """`mcuboot`'s base anchors the soc-nv-flash child's offset-0
         origin, but the child's own address was a hardcoded 0x80000000:
