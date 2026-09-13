@@ -353,6 +353,22 @@ static void sd_diag_print_clk_swrst(const char *label)
  * that never itself called sdhc_hw_reset()), and a bare SW_RST_ALL issued
  * after set_def_config() has already run is destructive, not diagnostic.
  *
+ * UPDATE (#2051): that last clause no longer holds on this driver.
+ * sdhc_dwc_reset() now re-runs sdhc_dwc_set_def_config() itself whenever
+ * the SW_RST_ALL poll actually completes, and invalidates the driver's
+ * cached bus I/O state so the next sdhc_set_io() reprograms the hardware
+ * instead of silently no-op'ing against a stale cache (zephyr/drivers/
+ * sdhc/sdhc_dwc.c). So the PROBE 2 sdhc_hw_reset() call below no longer
+ * wipes NORMAL/ERROR_INT_STAT_EN etc. for nothing when hwreset2_rc reads 0
+ * -- it leaves the controller in the same armed state set_def_config()
+ * establishes at boot, same as this RESOLVED paragraph already measured
+ * for the boot-time reset. It is still a genuine SW_RST_ALL: if the
+ * clock-domain theory below is right and the reset itself still times
+ * out, sdhc_dwc_reset() returns -ETIMEDOUT without restoring anything (a
+ * reset that never completed leaves the controller's state untrustworthy
+ * either way), so this probe is still a fair test of that theory, not
+ * something the #2051 driver fix pre-empts.
+ *
  * THE NEW QUESTION (#2035, revised): sdhc_dwc_init()'s own SW_RST_ALL, at
  * boot, demonstrably SUCCEEDED -- we know this because set_def_config() runs
  * immediately after it in that same POST_KERNEL call chain, and

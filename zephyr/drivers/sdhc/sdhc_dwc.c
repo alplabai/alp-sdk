@@ -99,6 +99,7 @@ struct sdhc_dwc_data {
 #define ERR_INTR_STATUS_EVENT(bits) ((uint32_t)(bits) << 16)
 
 static int sdhc_dwc_hw_reset(const struct device *dev, uint8_t reset_mask);
+static int sdhc_dwc_set_def_config(const struct device *dev);
 
 static void sdhc_dwc_clear_interrupts(const struct device *dev)
 {
@@ -543,6 +544,7 @@ static int sdhc_dwc_hw_reset(const struct device *dev, uint8_t reset_mask)
 	const struct sdhc_dwc_config *config = dev->config;
 	struct dwc_sdhc_regs *regs = config->regs;
 	uint32_t reset_timeout = DWC_SDHC_SW_RST_TIMEOUT;
+	uint8_t stuck;
 
 	regs->DWC_SDHC_SW_RST_R = reset_mask;
 	while (regs->DWC_SDHC_SW_RST_R != 0 && --reset_timeout) {
@@ -550,8 +552,34 @@ static int sdhc_dwc_hw_reset(const struct device *dev, uint8_t reset_mask)
 	}
 
 	if (!reset_timeout) {
-		LOG_ERR("SDHC reset timeout");
+		/*
+		 * ALP-SDK DELTA (#2051), not upstream: name which SW_RST_R
+		 * bit(s) are still set instead of a bare timeout -- e.g.
+		 * #2051 observed SW_RST_R stuck at 0x02 (SW_RST_CMD only)
+		 * at register 0x4810202F, which is a different symptom from
+		 * SW_RST_ALL or SW_RST_DAT never clearing.
+		 */
+		stuck = regs->DWC_SDHC_SW_RST_R;
+		LOG_ERR("SDHC reset timeout: SW_RST_R stuck at 0x%02x (%s%s%s)", stuck,
+			(stuck & DWC_SDHC_SW_RST_ALL_Msk) ? "ALL " : "",
+			(stuck & DWC_SDHC_SW_RST_CMD_Msk) ? "CMD " : "",
+			(stuck & DWC_SDHC_SW_RST_DAT_Msk) ? "DAT " : "");
 		return -ETIMEDOUT;
+	}
+
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: clear a stale Command
+	 * Complete after any CMD-line reset. Vendor Linux carries the same
+	 * quirk for this IP -- ensemble_sdhci_reset()
+	 * (drivers/mmc/host/sdhci-of-dwcmshc.c:1099-1106) clears
+	 * SDHCI_INT_RESPONSE whenever the reset mask includes
+	 * SDHCI_RESET_CMD, because the controller can leave CC latched in
+	 * NORMAL_INT_STAT_R across a CMD reset. An uncleared stale CC would
+	 * let a *later* command's sdhc_dwc_wait_cmd_complete() return
+	 * success on the old event instead of waiting for its own.
+	 */
+	if (reset_mask & DWC_SDHC_SW_RST_CMD_Msk) {
+		regs->DWC_SDHC_NORMAL_INT_STAT_R = DWC_SDHC_INTR_CC_Msk;
 	}
 
 	return 0;
@@ -662,7 +690,56 @@ static int sdhc_dwc_send_cmd(const struct device *dev, struct sdhc_dwc_data *dat
 
 static int sdhc_dwc_reset(const struct device *dev)
 {
-	return sdhc_dwc_hw_reset(dev, DWC_SDHC_SW_RST_ALL_Msk);
+	struct sdhc_dwc_data *data = dev->data;
+	int ret;
+
+	ret = sdhc_dwc_hw_reset(dev, DWC_SDHC_SW_RST_ALL_Msk);
+	if (ret) {
+		return ret;
+	}
+
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: SW_RST_ALL clears every
+	 * register sdhc_dwc_set_def_config() programmed at init -- including
+	 * NORMAL/ERROR_INT_STAT_EN, HOST_CTRL2, PWR_CTRL and CLK_CTRL -- back
+	 * to POR (0), confirmed on the bench
+	 * (examples/aen/aen-sdcard-readout/src/main.c:340-354). With
+	 * *_INT_STAT_EN == 0 the controller can never latch a
+	 * command-complete event, so every sdhc_dwc_wait_cmd_complete()
+	 * times out and disk_access_init() fails with -ETIMEDOUT before it
+	 * ever reaches a real card access -- masking whatever the actual SD
+	 * enumeration defect is.
+	 *
+	 * Zephyr's sdhc_hw_reset() contract (zephyr/include/zephyr/drivers/
+	 * sdhc.h) only promises resetting clears errors; it explicitly does
+	 * NOT require I/O settings to come back to boot state, so
+	 * re-applying the default config here is within contract. This
+	 * also matches the Alif DFP reference model: SW_RST_ALL immediately
+	 * followed by re-configuring power/timeout/interrupts/DMA/clock
+	 * (alif-dfp-ref drivers/source/sd.c:186-246, sd_host.c:237-249),
+	 * rather than the alternative of only ever resetting CMD|DAT after
+	 * init and never touching SW_RST_ALL again.
+	 */
+	ret = sdhc_dwc_set_def_config(dev);
+	if (ret) {
+		return ret;
+	}
+
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: sdhc_dwc_set_io() only
+	 * reprograms a field when it differs from the cached data->ios, so
+	 * an un-invalidated cache would make the SD stack's next
+	 * sdhc_set_io(card->sdhc, &card->bus_io) call (subsys/sd/*.c never
+	 * calls sdhc_hw_reset() itself, so it has no reason to think
+	 * anything changed) a silent no-op -- leaving the bus at the
+	 * hardware's post-reset 1-bit / clock-disabled / non-1.8V state
+	 * while both the driver's and the SD stack's cached view still
+	 * claim it's already configured. Force every field to miscompare so
+	 * the next set_io actually reprograms the hardware.
+	 */
+	memset(&data->ios, 0xff, sizeof(data->ios));
+
+	return 0;
 }
 
 static int sdhc_dwc_dma_init(struct dwc_sdhc_regs *regs, struct sdhc_dwc_data *data,
