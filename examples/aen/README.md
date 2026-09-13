@@ -76,7 +76,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 | [`aen-cc3501e-companion-tour`](aen-cc3501e-companion-tour/) | **capstone** -- full-surface tour of the CC3501E companion API: init -> ping -> diag -> Wi-Fi scan/connect/IP -> TCP socket -> BLE enable/scan -> proxied-GPIO read. |
 | [`aen-cc3501e-ble-gatt`](aen-cc3501e-ble-gatt/)    | **bench** -- CC3501E BLE GATT-SERVER path (#480) through the portable `<alp/ble.h>` surface: register/advertise/gatt read-write-notify, server-only, no live central peer. |
 | [`aen-can-regcheck`](aen-can-regcheck/)            | **staging** -- Alif CAN-FD controller bind-only staging check (bus wiring HW-blocked). |
-| [`aen-sdhc-probe`](aen-sdhc-probe/)        | Register-level bring-up probes for the E8 SD Host Controller (`snps,dwc-sdhc`) -- **on the E1M-EVK 2626-R2, `sdhc0` stays disabled and the probes compile out to a SKIPPED message** (#2051, SD mux hardware defect); see the example's own README. Renamed from `aen-sdcard-readout` (#2051). |
+| [`aen-sdhc-probe`](aen-sdhc-probe/)        | Register-level bring-up probes for the E8 SD Host Controller (`snps,dwc-sdhc`) -- **on the E1M-EVK 2626-R2, `sdhc0` stays disabled; the card-path probes compile out to a pad-free clock-gate proof instead** (#2051, SD mux hardware defect); see the example's own README. Renamed from `aen-sdcard-readout` (#2051). |
 | [`aen-spi-regcheck`](aen-spi-regcheck/)            | **bench** -- Alif DWC_ssi SPI driver (`alif,dwc-ssi-spi`, spi0 @ 0x48103000) register validation. |
 | [`aen-uart-ns16550-loopback`](aen-uart-ns16550-loopback/) | **bench** -- upstream ns16550 UART (Alif uart3 @ 0x4901b000) loopback validation. |
 

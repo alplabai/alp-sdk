@@ -3,8 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * ALP-SDK DELTA (#2051), not upstream: BUILD-ONLY driver-coverage overlay.
- * NOT FOR FLASHING on an E1M-EVK 2626-R2 -- see the board overlay and
- * README.md for why sdhc0 stays disabled on that board.
+ * NEVER FLASH THIS on an E1M-EVK 2626-R2. It sets sdhc0 to "okay", which
+ * applies SD pinctrl and emits SDCLK onto E1M_CLK, E1M_CMD and
+ * E1M_D3..D0. On carrier 2626-R2 the 74LVC157s U38/U39 hold exactly
+ * those nets LOW whenever powered, with no high-impedance state, so the
+ * SoC would be driving HIGH into a part driving LOW on six pads at once.
+ * This configuration is build-only and MUST stay build-only -- see the
+ * board overlay and README.md for why sdhc0 stays disabled on the real,
+ * flashable configuration.
  *
  * With sdhc0 disabled in the board overlay (the real, flashable
  * configuration), nothing in this app's normal build exercises

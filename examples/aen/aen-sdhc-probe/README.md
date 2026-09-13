@@ -33,10 +33,45 @@ corrected part behavior (an earlier revision of both incorrectly described
 
 ## What it shows
 
-With `sdhc0` disabled, `main()` compiles out to a one-line `RESULT SKIPPED`
-message and exits 0 — no SD pin is opened, configured, or driven; no
-CC3501E bridge is brought up (nothing downstream needs it any more, since
-the mux is never touched); no `disk_access_init()` is attempted.
+With `sdhc0` disabled, `main()` compiles out to a **clock-gate proof**
+instead of the full probe set below — no SD pin is opened, configured, or
+driven; no CC3501E bridge is brought up (nothing downstream needs it any
+more, since the mux is never touched); no `disk_access_init()` is
+attempted.
+
+### Clock-gate proof (this board, `sdhc0` disabled)
+
+`CLKCTL_PER_MST` (`0x4903F00C`, a SoC-level system-control register) and
+`CAPABILITIES1` (`0x48102040`, the SDHC block's own read-only capability
+word) are both plain memory-mapped registers. Reading them, and gating
+the clock, touches no pad and needs no pinctrl — pinctrl is only ever
+applied by the SDHC driver's own init, and that driver is never built or
+run while `sdhc0` is disabled. `main()` therefore:
+
+1. reads `CLKCTL_PER_MST` and prints the word plus bit 16 (`SDC_CKEN`);
+2. reads `CAPABILITIES1` and prints the word (expected `0x00000000`
+   while the gate above is clear);
+3. calls `clock_control_on()` for `ALIF_SDC_CLK` against the `clockctrl`
+   device, and prints the return status;
+4. re-reads both registers and prints them again;
+5. prints an explicit, grep-able verdict line stating whether bit 16
+   went clear→set and whether `CAPABILITIES1` went `0x00000000`→non-zero.
+
+`CAPABILITIES1` is read-only, so a non-zero value after step 3 and
+`0x00000000` before it is direct silicon evidence that the peripheral
+clock gate — not a reset-logic defect — was what left the controller
+inert, and that `sdhc_dwc_init()`'s first action (this same
+`clock_control_on()` call) is what fixes it. No expected capability word
+is asserted anywhere in this code; the silicon's own value is printed and
+left to stand as the evidence.
+
+**This proves the controller becomes addressable. It does NOT prove a
+card enumerates** — that needs SD pinctrl and a driven identification
+clock, which this board cannot safely apply (see above). No SD pin is
+opened, configured, or driven by this proof; `sdhc0` stays disabled
+throughout.
+
+### The full probe set (a board where `sdhc0` is enabled)
 
 The full register-probe logic stays in the source, guarded behind
 `#if DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)`, so a future board whose

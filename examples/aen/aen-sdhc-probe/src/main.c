@@ -21,15 +21,25 @@
  * README.md and docs/boards/e1m-evk.md.
  *
  * WHAT THIS APP DOES NOW: with `sdhc0` disabled, `#if
- * DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)` below compiles out to
- * nothing but a one-line SKIPPED message and an early exit -- no SD pin is
- * opened, configured, or driven; no CC3501E bridge is brought up (nothing
+ * DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)` below compiles out to a
+ * CLOCK-GATE PROOF instead of the full probe set -- no SD pin is opened,
+ * configured, or driven; no CC3501E bridge is brought up (nothing
  * downstream needs it any more, since the SD mux is never touched); no
- * `disk_access_init()` is attempted. The full register-probe logic stays
- * in the source, guarded, so a future board whose overlay re-enables
- * `sdhc0` (a working mux, or a carrier with none at all) gets the same
- * controller-level bring-up test this app has always been for, without a
- * second app to maintain.
+ * `disk_access_init()` is attempted. `CLKCTL_PER_MST` (the peripheral
+ * clock gate) and `CAPABILITIES1` (the SDHC block's own read-only
+ * capability word) are both plain memory-mapped registers -- reading and
+ * gating them touches no pad and needs no pinctrl, which is only ever
+ * applied by the SDHC driver's own init, itself never built or run while
+ * `sdhc0` is disabled. The proof: read both registers, call
+ * `clock_control_on()` for the gate, read both again, and print whether
+ * the gate went clear->set and `CAPABILITIES1` went zero->non-zero --
+ * see `sd_diag_prove_clock_gate()` below. This proves the controller
+ * becomes addressable; it does NOT prove a card enumerates, which needs
+ * pinctrl and a driven clock this board cannot safely apply (see above).
+ * The full register-probe logic stays in the source too, guarded, so a
+ * future board whose overlay re-enables `sdhc0` (a working mux, or a
+ * carrier with none at all) gets the same controller-level bring-up test
+ * this app has always been for, without a second app to maintain.
  *
  * THE PROBES (only compiled/run when `sdhc0` is enabled):
  *   PROBE 1 -- a bare CMD0 (GO_IDLE_STATE) with NO reset call in front of
@@ -69,18 +79,36 @@
 
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, both branches below */
+
+/*
+ * ALP-SDK DELTA (#2051), not upstream: registers used by BOTH branches
+ * below -- the full sdhc0-enabled probe set (further down) and the
+ * disabled-board clock-gate proof (the #else branch) both need
+ * CAPABILITIES1 and CLKCTL_PER_MST, so these four are defined once, here,
+ * rather than twice inside two mutually-exclusive #if/#else arms (which
+ * would compile fine either way but could silently drift apart).
+ * CLKCTL_PER_MST is a SoC-level system-control register, NOT part of the
+ * SDHC register block itself (it sits at a different base address
+ * entirely) -- gating its bit 16 clocks the DWC SDHC block internally and
+ * routes to no pad; SD pinctrl is applied only by the SDHC driver's own
+ * init, which is never built or run while sdhc0 is disabled.
+ */
+#define SD_REG_BASE 0x48102000u
+#define SD_REG_CAPABILITIES1 \
+	(SD_REG_BASE + 0x040u)            /* Capabilities 1 -- base clock field, read-only */
+#define SD_CLKCTL_PER_MST 0x4903F00Cu /* CLKCTL_PER_MST.PERIPH_CLK_ENA -- routes to no pad */
+#define SD_CLKCTL_PER_MST_SD_EN_Msk (1u << 16) /* bit 16, SDC_CKEN */
 
 #if DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)
 
 #include <zephyr/drivers/sdhc.h> /* sdhc_request(), sdhc_hw_reset() -- the register-level probes
                                    * below */
 #include <zephyr/kernel.h>
-#include <zephyr/sys/sys_io.h> /* sys_read32() -- raw diagnostic register reads, see below */
 
 /* sdhc0 -- the node label the board overlay gives the DWC SDHC controller. */
 #define SDHC_DEV DEVICE_DT_GET(DT_NODELABEL(sdhc0))
 
-#define SD_REG_BASE   0x48102000u
 #define SD_REG_PSTATE (SD_REG_BASE + 0x024u) /* Present State */
 #define SD_REG_NORMAL_INT_STAT \
 	(SD_REG_BASE + 0x030u) /* Normal + Error Interrupt Status (32b read) */
@@ -88,7 +116,6 @@
 	(SD_REG_BASE + 0x034u) /* Normal + Error Int Status Enable (32b read) -- #2035, see below */
 #define SD_REG_NORMAL_INT_SIGNAL_EN \
 	(SD_REG_BASE + 0x038u) /* Normal + Error Int Signal Enable (32b read) */
-#define SD_REG_CAPABILITIES1 (SD_REG_BASE + 0x040u) /* Capabilities 1 -- base clock field, Task 4 */
 
 #define SD_PSTATE_CMD_INHIBIT_Msk 0x00000001u /* bit0: a command is in flight */
 #define SD_PSTATE_DAT_INHIBIT_Msk 0x00000002u /* bit1 */
@@ -119,10 +146,10 @@
 #define SD_PINMUX_PADCFG_Msk      (0xFFu << SD_PINMUX_PADCFG_Pos)
 #define SD_PINMUX_READ_ENABLE_Msk (1u << SD_PINMUX_PADCFG_Pos)
 
-/* CLKCTL_PER_MST -- bit 16 gates the SD peripheral clock at the SoC clock-tree
- * level, upstream of anything the SDHC's own Clock Control Register does. */
-#define SD_CLKCTL_PER_MST           0x4903F00Cu
-#define SD_CLKCTL_PER_MST_SD_EN_Msk (1u << 16)
+/* SD_CLKCTL_PER_MST / SD_CLKCTL_PER_MST_SD_EN_Msk -- bit 16 gates the SD
+ * peripheral clock at the SoC clock-tree level, upstream of anything the
+ * SDHC's own Clock Control Register does; defined once, above the #if, so
+ * the disabled-board clock-gate proof (the #else branch) shares it. */
 
 /* Print the four "before" registers: does the pad setting, the clock gate and
  * the capability field this app depends on actually look right on THIS
@@ -358,6 +385,96 @@ int main(void)
 
 #else /* !DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay) */
 
+#include <errno.h> /* -ENODEV, the CLOCKCTRL_DEV-not-ready fallback below */
+#include <zephyr/drivers/clock_control.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h> /* ALIF_SDC_CLK */
+#include <zephyr/kernel.h> /* pulls in the arch-specific sys_read32() implementation --
+                              * zephyr/sys/sys_io.h above is doxygen-only declarations */
+
+/*
+ * clockctrl -- the SoC-wide clock-controller node ("alif,clockctrl",
+ * zephyr/dts/arm/alif/ensemble/common/ensemble_common.dtsi, upstream
+ * Zephyr), present and "okay" on every Alif Ensemble board REGARDLESS of
+ * sdhc0's own status: it is the parent clock-gate block, not the SD
+ * controller itself. CONFIG_CLOCK_CONTROL=y in prj.conf pulls its driver
+ * in explicitly, since CONFIG_SDHC_DWC's own `select CLOCK_CONTROL` never
+ * fires while sdhc0 is disabled (see prj.conf's comment).
+ */
+#define CLOCKCTRL_DEV DEVICE_DT_GET(DT_NODELABEL(clockctrl))
+
+/*
+ * ALP-SDK DELTA (#2051), not upstream: CLOCK-GATE PROOF. sdhc0 stays
+ * disabled while this runs -- no pinctrl is ever applied and no SD pad is
+ * ever touched by anything below. CLKCTL_PER_MST and CAPABILITIES1 are
+ * both plain memory-mapped registers, reachable with a bare
+ * sys_read32()/clock_control_on() regardless of whether the SDHC
+ * *device* (which exists only when sdhc0 is "okay") is instantiated.
+ * CLKCTL_PER_MST is a SoC-level clock gate, not the SD controller
+ * itself: setting its bit 16 clocks the DWC SDHC block internally and
+ * routes to NO pad. This is the read-only-before / write-the-gate /
+ * read-only-after sequence that proves the gate, not a reset defect, is
+ * what leaves the controller inert -- see the PR discussion for #2051
+ * for why this is the only proof that can run without enabling SD
+ * pinctrl or driving a single SD pad.
+ */
+static void sd_diag_prove_clock_gate(void)
+{
+	uint32_t clkctl_before = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd][gate] CLKCTL_PER_MST @0x%08x = 0x%08x  bit16(SDC_CKEN)=%u (before)\n",
+	       (unsigned)SD_CLKCTL_PER_MST,
+	       clkctl_before,
+	       (unsigned)((clkctl_before & SD_CLKCTL_PER_MST_SD_EN_Msk) != 0u));
+
+	uint32_t caps_before = sys_read32(SD_REG_CAPABILITIES1);
+	printf("[sd][gate] CAPABILITIES1  @0x%08x = 0x%08x  (before -- read-only; 0x00000000 "
+	       "expected while the gate above is clear)\n",
+	       (unsigned)SD_REG_CAPABILITIES1,
+	       caps_before);
+
+	int ret = -ENODEV;
+	if (device_is_ready(CLOCKCTRL_DEV)) {
+		ret = clock_control_on(CLOCKCTRL_DEV, (clock_control_subsys_t)ALIF_SDC_CLK);
+	}
+	printf("[sd][gate] clock_control_on(clockctrl, ALIF_SDC_CLK) -> %d\n", ret);
+
+	uint32_t clkctl_after = sys_read32(SD_CLKCTL_PER_MST);
+	printf("[sd][gate] CLKCTL_PER_MST @0x%08x = 0x%08x  bit16(SDC_CKEN)=%u (after)\n",
+	       (unsigned)SD_CLKCTL_PER_MST,
+	       clkctl_after,
+	       (unsigned)((clkctl_after & SD_CLKCTL_PER_MST_SD_EN_Msk) != 0u));
+
+	uint32_t caps_after = sys_read32(SD_REG_CAPABILITIES1);
+	printf("[sd][gate] CAPABILITIES1  @0x%08x = 0x%08x  (after)\n",
+	       (unsigned)SD_REG_CAPABILITIES1,
+	       caps_after);
+
+	/*
+	 * The verdict below checks TRANSITIONS (clear->set, zero->non-zero),
+	 * never a specific expected word -- CAPABILITIES1's exact value is
+	 * silicon fact this app has never had a bench-verified constant for
+	 * (see the file header), and asserting a guessed one here would turn
+	 * a real measurement into a self-fulfilling one. Whatever the
+	 * silicon returns stands as the evidence, printed above.
+	 */
+	bool gate_went_clear_to_set = ((clkctl_before & SD_CLKCTL_PER_MST_SD_EN_Msk) == 0u) &&
+	                              ((clkctl_after & SD_CLKCTL_PER_MST_SD_EN_Msk) != 0u);
+	bool caps_went_zero_to_live = (caps_before == 0u) && (caps_after != 0u);
+
+	printf("[sd][gate] RESULT %s: bit16 clear->set=%s CAPABILITIES1 0x00000000->non-zero=%s "
+	       "-- %s\n",
+	       (gate_went_clear_to_set && caps_went_zero_to_live) ? "PASS" : "INCONCLUSIVE",
+	       gate_went_clear_to_set ? "yes" : "no",
+	       caps_went_zero_to_live ? "yes" : "no",
+	       (gate_went_clear_to_set && caps_went_zero_to_live)
+	           ? "the peripheral clock gate was what left the controller inert, and "
+	             "clock_control_on() is what clears it (#2051)"
+	           : "does not confirm the gate was the (only) problem on this run -- see "
+	             "the raw register values above");
+	printf("[sd] This proves the controller becomes ADDRESSABLE -- it does NOT prove a "
+	       "card enumerates. No SD pin was opened, configured, or driven above; sdhc0 "
+	       "stays disabled and no pinctrl was ever applied.\n");
+}
+
 int main(void)
 {
 	printf("[sd] SD host controller (sdhc0) is DISABLED on this board -- the E1M-EVK "
@@ -367,8 +484,11 @@ int main(void)
 	       "pinctrl and the identification clock and fight those held-low pads. This is "
 	       "a hardware defect pending a component change, not a firmware gap -- see "
 	       "README.md. Nothing in this build opens, configures, or drives an SD pin.\n");
-	printf("[sd] RESULT SKIPPED: SD host controller disabled on this board (hardware "
-	       "defect, rework pending)\n");
+
+	sd_diag_prove_clock_gate();
+
+	printf("[sd] RESULT SKIPPED: card path not exercised on this board (hardware defect, "
+	       "rework pending) -- see the clock-gate proof above\n");
 	return 0;
 }
 
