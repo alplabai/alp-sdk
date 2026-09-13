@@ -11,17 +11,22 @@
  * channel or attribute for the raw counter, so degrees is the only number this
  * app (or any app using this driver) can ever read.
  *
- * The UTIMER runs in quadrature-decoder mode: two phase inputs (X = channel A,
- * Y = channel B) advance/retreat the counter on every edge of both phases (x4
- * decode -- see hal_alif's alif_utimer_config_qdec_triggers(), which arms both
- * rising and falling edges of A and B).  For the carrier's 24-PPR encoder that
- * is 24*4 = 96 counts per mechanical revolution, which is what
- * counts-per-revolution must equal for degrees to mean what they say: the
- * hardware reload wraps the counter at (counts-per-revolution - 1), so a wrong
- * (too large) value doesn't just misreport a bit -- it stretches one real
- * revolution across only a fraction of the 0-359 range, AND makes a single
- * genuine encoder tick integer-truncate to 0 degrees ("moved a little" reads
- * identical to "never moved").  See the board overlay for the corrected value.
+ * The UTIMER runs in quadrature-decoder mode on P3_0/P3_1 (QEC0_X_A/QEC0_Y_A).
+ * These are QEC_TRIGGER0/1 inputs on the SRC_0 trigger-source registers, NOT
+ * "channel input A/B" on SRC_1 -- that SRC_1 naming belongs to the
+ * lputimer0/1/2 instances Alif's own tree binds this same driver to, and its
+ * x4-decode arming (hal_alif's alif_utimer_config_qdec_triggers(), both
+ * rising and falling edges of A and B) never counted a single QEC0 edge on
+ * this bench (#2037: pads toggled, UTIMER_CNTR stayed 0x00000000).  See
+ * zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c for the SRC_0 fix.  The
+ * decode ratio under SRC_0 is unproven -- see the board overlay's comment and
+ * this example's README.md for the predicted per-build raw-count deltas.
+ * counts-per-revolution stays 96 (24-PPR encoder * the old x4 SRC_1 decode)
+ * pending that bench confirmation: the hardware reload wraps the counter at
+ * (counts-per-revolution - 1), so a wrong (too large) value doesn't just
+ * misreport a bit -- it stretches one real revolution across only a fraction
+ * of the 0-359 range, AND makes a single genuine encoder tick integer-
+ * truncate to 0 degrees ("moved a little" reads identical to "never moved").
  *
  * PASS / SKIPPED / FAIL, not PASS / PARTIAL: a bench run with nobody at the
  * knob produces N clean reads that never change -- that is the CORRECT output
