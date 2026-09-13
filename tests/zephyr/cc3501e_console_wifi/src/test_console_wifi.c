@@ -71,6 +71,8 @@ static struct {
 	uint8_t wifi_conn_state;
 	uint8_t wifi_fail_reason;
 	int8_t  wifi_conn_rssi;
+	/* Wire byte 3 -- alp_cc3501e_wifi_status_t::last_reason (#2099). */
+	uint8_t wifi_last_reason;
 
 	/* Response status WIFI_GET_RSSI answers with -- RESP_OK stages the real
 	 * measurement, anything else models a radio read that could not be
@@ -120,7 +122,7 @@ static void slave_dispatch(void)
 			slave.wifi_conn_state,
 			slave.wifi_fail_reason,
 			(uint8_t)slave.wifi_conn_rssi,
-			0u,
+			slave.wifi_last_reason,
 		};
 		stage_reply(ALP_CC3501E_RESP_OK, st, 4u);
 		break;
@@ -365,6 +367,36 @@ ZTEST(cc3501e_console_wifi, test_status_disconnected_reports_no_rssi)
 	 * WIFI_GET_RSSI would make slave.cmd that trailing opcode and pass this
 	 * assertion vacuously while a radio read WAS issued. */
 	zassert_equal(slave.get_rssi_count, 0, "no radio read should be issued when not associated");
+}
+
+/* #2099: a failed connect whose WIFI_STATUS latch carries a non-zero
+ * last_reason must print it, after the existing `fail:` line. */
+ZTEST(cc3501e_console_wifi, test_status_prints_reason_when_recorded_2099)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.wifi_last_reason = 15u;
+
+	const char *out = run("alp companion wifi status");
+
+	zassert_not_null(strstr(out, "fail:  2"), "fail line missing: %s", out);
+	zassert_not_null(strstr(out, "reason: 15"), "reason line missing: %s", out);
+}
+
+/* The zero side of the same contract: older bridge firmware (or a failure
+ * mode that never recorded one) sends last_reason == 0, and the console must
+ * NOT print a "reason: 0" line that looks like a recorded-but-meaningless
+ * code. */
+ZTEST(cc3501e_console_wifi, test_status_omits_reason_when_zero_2099)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_TIMEOUT;
+	slave.wifi_last_reason = 0u;
+
+	const char *out = run("alp companion wifi status");
+
+	zassert_not_null(strstr(out, "fail:  1"), "fail line missing: %s", out);
+	zassert_is_null(strstr(out, "reason:"), "no reason line when nothing was recorded: %s", out);
 }
 
 ZTEST_SUITE(cc3501e_console_wifi, NULL, suite_setup, reset_before, NULL, NULL);

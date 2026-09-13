@@ -1109,7 +1109,7 @@ typedef enum {
 /** Reply payload of CMD_WIFI_STATUS (opcode 0x1B): a NON-BLOCKING snapshot of the
  *  STA connection state, read off a firmware latch (no radio op, ISR-safe) -- how
  *  the host collects an async connect result without blocking.  Fixed 4-byte wire
- *  layout (no padding): state | fail_reason | rssi_dbm | reserved. */
+ *  layout (no padding): state | fail_reason | rssi_dbm | last_reason. */
 typedef struct {
 	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
 	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
@@ -1120,12 +1120,25 @@ typedef struct {
 	 *  blocks that worker), so the byte has only ever held 0.  0 dBm is a LEGAL
 	 *  int8 RSSI, so there is no in-band sentinel a reader can test to tell
 	 *  "unmeasured" from a real 0 -- do NOT report this byte as a signal level
-	 *  (issue #1387).  A real reading comes only from CMD_WIFI_GET_RSSI (0x16),
-	 *  a worker-routed radio read.  Populating this byte honestly needs either a
-	 *  bench answer on whether the post-DHCP read is safe, or a validity flag on
-	 *  the wire (the @c reserved byte) -- both open; neither is decided here. */
-	int8_t  rssi_dbm;
-	uint8_t reserved;
+	 *  (issue #1387, closed with the gap itself still undecided).  A real
+	 *  reading comes only from CMD_WIFI_GET_RSSI (0x16), a worker-routed radio
+	 *  read.  Populating this byte honestly still needs a bench answer on
+	 *  whether the post-DHCP read is safe -- the wire slot that would have
+	 *  carried a validity flag (the byte formerly named @c reserved) is now
+	 *  @ref alp_cc3501e_wifi_status_t::last_reason, so a validity flag is no
+	 *  longer an available option on THIS reply; no replacement channel is
+	 *  decided here. */
+	int8_t rssi_dbm;
+	/** Low byte of the IEEE 802.11 reason code, or the association /
+	 *  authentication status code, that ended or rejected the MOST RECENT
+	 *  connect attempt.  0 when none was recorded.  Scope is the connect
+	 *  attempt only: a deauth that arrives AFTER a successful CONNECTED is
+	 *  NOT reflected here, and a disconnect the bridge itself requested
+	 *  (@ref cc3501e_wifi_disconnect) is excluded.  Formerly an unused
+	 *  @c reserved byte, always 0 -- older bridge firmware that never
+	 *  populates it still sends 0 here, so this is purely additive and
+	 *  needs no wire-version bump (alp-sdk#2099). */
+	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */

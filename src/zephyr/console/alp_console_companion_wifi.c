@@ -81,7 +81,23 @@ static void companion_conn_thread(void *a, void *b, void *c)
 		} else if (s == ALP_ERR_TIMEOUT) {
 			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
 		} else {
-			shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
+			/* cc3501e_wifi_connect() itself only returns a mapped alp_status_t
+			 * (ALP_ERR_IO here), not the WIFI_STATUS latch's own last_reason --
+			 * fetch it with an independent status read, same pattern as the
+			 * RSSI query above on the success path.  Best-effort: a failed
+			 * fetch here just means the line prints without a reason, same as
+			 * before this byte existed. */
+			alp_cc3501e_wifi_status_t fst = { 0 };
+			(void)cc3501e_wifi_status(companion_cc3501e, &fst);
+			if (fst.last_reason != 0u) {
+				shell_error(conn_sh,
+				            "wifi connect to \"%s\" failed (%d)  reason: %u",
+				            conn_ssid,
+				            (int)s,
+				            (unsigned int)fst.last_reason);
+			} else {
+				shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
+			}
 		}
 		conn_pending = false;
 	}
@@ -415,6 +431,13 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		}
 	} else if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 		shell_print(sh, "fail:  %u", (unsigned int)st.fail_reason);
+		if (st.last_reason != 0u) {
+			/* IEEE 802.11 reason / status code that ended or rejected the
+			 * attempt -- see alp_cc3501e_wifi_status_t::last_reason.  0 means
+			 * none recorded (or bridge firmware too old to populate it), so
+			 * it is only printed when non-zero. */
+			shell_print(sh, "reason: %u", (unsigned int)st.last_reason);
+		}
 	}
 	return 0;
 }

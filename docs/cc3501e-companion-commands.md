@@ -71,7 +71,7 @@ commands report the bridge is not ready. See
 | `wifi disconnect` | Tear down the STA association. |
 | `wifi ap <ssid> [pass] [wpa3]` | Start a soft-AP (omit `pass` for an open AP). |
 | `wifi ap-stop` | Stop the soft-AP. |
-| `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). |
+| `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). On a failed connect, also prints `reason: <N>` (the IEEE 802.11 reason/status code, low byte) when the bridge recorded one; `wifi connect`'s own failure line prints the same `reason: <N>` when non-zero. |
 
 `wifi ap` cannot report a confirmed "up" against CC3501E firmware protocol
 v4: `cc3501e_wifi_ap_start()` submits the request once and returns

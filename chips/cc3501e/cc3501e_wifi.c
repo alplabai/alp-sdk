@@ -287,7 +287,7 @@ static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *
 	out->state       = reply[0];
 	out->fail_reason = reply[1];
 	out->rssi_dbm    = (int8_t)reply[2];
-	out->reserved    = reply[3];
+	out->last_reason = reply[3];
 	return ALP_OK;
 }
 
@@ -771,7 +771,7 @@ alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 	if (out == NULL) return ALP_ERR_INVAL;
 
 	/* Reply is the fixed 4-byte alp_cc3501e_wifi_status_t wire layout (no
-	 * padding): state | fail_reason | rssi_dbm | reserved.  The FIRMWARE-side
+	 * padding): state | fail_reason | rssi_dbm | last_reason.  The FIRMWARE-side
 	 * handler (handle_wifi_status) is a genuine non-blocking latch read -- no
 	 * radio op, ISR-safe, always replies RESP_OK -- but the shared bridge
 	 * TRANSPORT is briefly down whenever ANY radio op is in flight (Wlan_Start
@@ -802,6 +802,6 @@ alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 	out->state       = reply[0];
 	out->fail_reason = reply[1];
 	out->rssi_dbm    = (int8_t)reply[2];
-	out->reserved    = reply[3];
+	out->last_reason = reply[3];
 	return ALP_OK;
 }

@@ -12878,14 +12878,14 @@
           "kind": "enum"
         },
         "alp_cc3501e_wifi_status_t": {
-          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t reserved; } alp_cc3501e_wifi_status_t;",
+          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t last_reason; } alp_cc3501e_wifi_status_t;",
           "fields": [
             "uint8_t state",
             "uint8_t fail_reason",
             "int8_t rssi_dbm",
-            "uint8_t reserved"
+            "uint8_t last_reason"
           ],
-          "hash": "fa9eb3a293fd5021",
+          "hash": "4cecc8cdac50e208",
           "kind": "struct"
         }
       },
