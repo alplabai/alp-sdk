@@ -859,22 +859,27 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
  * infinite spin, without any real sleeping. */
 static uint64_t g_fake_now_ms;
 
-/* Fake delay accounting for the reply-header gate (rx_cap-scaled since the
- * "size the reply-header gate by the expected reply length" fix): every
- * alp_delay_us() call this run is logged in order, so a test can find its
- * own gate's fallback_us without a real clock.  Cleared by delay_log_reset()
- * at the top of each test that inspects it. */
+/* Fake delay accounting for the reply-header gate (scaled by the real
+ * expected byte count since the "size the reply-header gate by the expected
+ * reply length" fix): every alp_delay_us() call this run is logged in order,
+ * so a test can find its own gate's fallback_us without a real clock, plus a
+ * running total (g_fake_delay_us_total) for a test that only cares about the
+ * sum. Cleared by delay_log_reset() at the top of each test that inspects
+ * either. */
 #define DELAY_LOG_CAP 8u
 static uint32_t g_delay_us_log[DELAY_LOG_CAP];
 static size_t   g_delay_us_count;
+static uint64_t g_fake_delay_us_total;
 
 static void delay_log_reset(void)
 {
-	g_delay_us_count = 0u;
+	g_delay_us_count      = 0u;
+	g_fake_delay_us_total = 0u;
 }
 
 void alp_delay_us(uint32_t us)
 {
+	g_fake_delay_us_total += us;
 	if (g_delay_us_count < DELAY_LOG_CAP) {
 		g_delay_us_log[g_delay_us_count] = us;
 	}
@@ -933,24 +938,44 @@ ZTEST(cc3501e_host_driver, test_soft_reset_encodes_opcode)
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_RESET, "opcode 0x02 reached the slave");
 }
 
-/* ---- reply-header gate scaled by rx_cap (sock-recv 4 KB link wedge) -------- *
+/* ---- reply-header gate scaled by the real expected byte count ------------- *
  *
  * cc3501e_reply_header_gate_us() (cc3501e_core.c) replaced the reply-header
- * phase's flat 200 us wait with one scaled by rx_cap -- the reply capacity
- * THIS request offers -- because a fixed 200 us wedged a 4071 B SOCK_RECV on
- * the very first call (run8, e1m-aen-evk-01) while 512 B recvs were fine; a
- * 2000 us gate fixed 4071 B 3/3 (run9). ctx->ready_pin is NULL in this fixture
- * (alp_gpio_open stub always returns NULL), so cc3501e_reply_gate() takes its
- * unconditional alp_delay_us(fallback_us) fallback path with no GPIO polling
- * in between -- exactly the path a CS-less r1 board runs -- so the logged
- * alp_delay_us() calls line up 1:1 with the gate's phases.  PING is a
- * header-only request (no TX payload phase), so the sequence is exactly
- * [request-header gate, reply-header gate, reply-payload gate]; index 1 is
- * the one under test. Real reply shape is independent of rx_cap here -- the
- * slave model always stages a legacy bare-OK PING reply -- so rx_cap can be
- * driven arbitrarily without touching what actually crosses the wire. */
-ZTEST(cc3501e_host_driver, test_reply_gate_small_reply_cap_stays_at_proven_floor)
+ * phase's flat 200 us wait with one scaled by max(expected reply,
+ * wire_tx_len) -- NOT by rx_cap, which is a defensive local staging-buffer
+ * size, not the bridge's own reply size (cc3501e_sock_recv() always passes
+ * rx_cap == sizeof(ctx->sock_buf) == ALP_CC3501E_MAX_PAYLOAD no matter how
+ * few bytes it actually asked for). See cc3501e_expected_reply_bytes()'s own
+ * comment in cc3501e_core.c for the full derivation and the bench data:
+ * SOCK_RECV want 512 (reply 536 B) proven fine at 200 us; want 4071 (reply
+ * 4095 B) wedged the link at 200 us and was proven fine at 2000 us; a
+ * STREAM_WRITE *request* of 512 B was clean at 200 us while 1024 B and
+ * 4092 B both failed (examples/aen/aen-cc3501e-socket-throughput/README.md
+ * ~159-165) -- which is why large REQUESTS gate too, via wire_tx_len.
+ *
+ * ctx->ready_pin is NULL in this fixture (alp_gpio_open stub always returns
+ * NULL), so cc3501e_reply_gate() takes its unconditional
+ * alp_delay_us(fallback_us) fallback path with no GPIO polling in between --
+ * exactly the path a CS-less r1 board, or any board whose READY pin never
+ * proves itself, runs -- so the logged alp_delay_us() calls line up 1:1 with
+ * the gate's phases.  (On dev without alp-sdk#2105, a READY pin that reads
+ * CONSTANT HIGH -- a stuck-high pad, not a wired-and-idle one -- proves
+ * itself on the very first read and then bypasses this fallback gate
+ * entirely, level-gating instead; this fix only changes behaviour on the
+ * fixed-wait path exercised here, until #2105 lands.)
+ *
+ * A request with NO TX payload phase (tx_len == 0, e.g. PING or
+ * GET_PENDING_EVENTS) logs exactly 3 delays: [request-header, reply-header,
+ * reply-payload] -- index 1 is the reply-header gate under test.  A request
+ * WITH a payload phase (tx_len > 0, e.g. SOCK_RECV, STREAM_WRITE,
+ * SPI1_TRANSFER) logs 4: [request-header, request-payload, reply-header,
+ * reply-payload] -- index 2 is the one under test. */
+
+ZTEST(cc3501e_host_driver, test_reply_gate_ping_small_reply_cap_stays_at_proven_floor)
 {
+	/* PING isn't SOCK_RECV/SPI1_TRANSFER/GET_PENDING_EVENTS, so
+	 * cc3501e_expected_reply_bytes() falls back to rx_cap here -- exercising
+	 * that conservative default path, not the special-cased ones below. */
 	uint8_t reply[8] = { 0 };
 	size_t  got      = 0u;
 	delay_log_reset();
@@ -959,10 +984,10 @@ ZTEST(cc3501e_host_driver, test_reply_gate_small_reply_cap_stays_at_proven_floor
 	zassert_equal(s, ALP_OK, "PING with an 8 B reply cap -> OK");
 	zassert_equal(g_delay_us_count, 3u, "3 gated phases for a header-only (no TX payload) request");
 	zassert_equal(
-	    g_delay_us_log[1], 200u, "rx_cap 8 B (<= 512 B) stays at the proven 200 us floor");
+	    g_delay_us_log[1], 200u, "rx_cap 8 B (<= 536 B) stays at the proven 200 us floor");
 }
 
-ZTEST(cc3501e_host_driver, test_reply_gate_max_payload_reply_cap_reaches_proven_2000us)
+ZTEST(cc3501e_host_driver, test_reply_gate_ping_max_payload_reply_cap_reaches_proven_2000us)
 {
 	static uint8_t reply[ALP_CC3501E_MAX_PAYLOAD];
 	size_t         got = 0u;
@@ -974,26 +999,149 @@ ZTEST(cc3501e_host_driver, test_reply_gate_max_payload_reply_cap_reaches_proven_
 	zassert_equal(g_delay_us_count, 3u, "3 gated phases for a header-only (no TX payload) request");
 	zassert_equal(g_delay_us_log[1],
 	              2000u,
-	              "rx_cap == ALP_CC3501E_MAX_PAYLOAD clamps exactly at the proven 2000 us point, "
-	              "not extrapolated past it");
+	              "rx_cap 4096 B is above the 4092 B clamp point, so it reaches the proven "
+	              "2000 us ceiling");
 }
 
 ZTEST(cc3501e_host_driver, test_reply_gate_interpolates_between_the_two_measured_points)
 {
-	/* 2304 B sits exactly halfway between the 512 B floor and the 4096 B
-	 * ceiling this driver was actually measured at -- expect the gate exactly
-	 * halfway between 200 us and 2000 us (1100 us).  This size was never
-	 * bench-measured; the formula interpolates it linearly (see
-	 * cc3501e_reply_header_gate_us()'s comment). */
-	static uint8_t reply[2304];
+	/* 2314 B sits exactly halfway between the 536 B floor and the 4092 B
+	 * ceiling anchors -- expect the gate exactly halfway between 200 us and
+	 * 2000 us (1100 us).  This size was never bench-measured; the formula
+	 * interpolates it linearly (see cc3501e_expected_reply_bytes()'s and
+	 * cc3501e_reply_header_gate_us()'s comments in cc3501e_core.c). */
+	static uint8_t reply[2314];
 	size_t         got = 0u;
 	memset(reply, 0, sizeof(reply));
 	delay_log_reset();
 	alp_status_t s =
 	    cc3501e_request(&fw, ALP_CC3501E_CMD_PING, NULL, 0, reply, sizeof(reply), &got, 100u);
-	zassert_equal(s, ALP_OK, "PING with a 2304 B reply cap -> OK");
+	zassert_equal(s, ALP_OK, "PING with a 2314 B reply cap -> OK");
+	zassert_equal(g_delay_us_log[1],
+	              1100u,
+	              "the exact byte-count midpoint interpolates to the gate midpoint");
+}
+
+/* ---- the real key: SOCK_RECV's `want`, not its fixed rx_cap ---------------- *
+ *
+ * Mutation check: reverting cc3501e_expected_reply_bytes()'s SOCK_RECV
+ * special case (falling back to rx_cap, which cc3501e_sock_recv() always
+ * sets to sizeof(ctx->sock_buf) == 4096) turns the want-512 test below RED --
+ * it would see the 2000 us ceiling instead of the 200 us floor. */
+ZTEST(cc3501e_host_driver, test_sock_recv_want_512_gates_floor)
+{
+	uint8_t buf[512];
+	size_t  recv_len = 0u;
+	delay_log_reset();
+	alp_status_t s = cc3501e_sock_recv(&fw, 1u, buf, sizeof(buf), &recv_len, 100u);
+	zassert_equal(s, ALP_OK, "SOCK_RECV want=512 -> OK");
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_RECV, "opcode 0x23 reached the slave");
 	zassert_equal(
-	    g_delay_us_log[1], 1100u, "the exact rx_cap midpoint interpolates to the gate midpoint");
+	    g_delay_us_count, 4u, "4 gated phases (SOCK_RECV always carries a request payload)");
+	zassert_equal(g_delay_us_log[2],
+	              200u,
+	              "want=512 -> expected reply 536 B (24 B header + 512), the proven floor -- NOT "
+	              "the 2000 us the buggy rx_cap key would have given");
+}
+
+ZTEST(cc3501e_host_driver, test_sock_recv_want_4071_gates_ceiling)
+{
+	static uint8_t buf[4071];
+	size_t         recv_len = 0u;
+	delay_log_reset();
+	alp_status_t s = cc3501e_sock_recv(&fw, 1u, buf, sizeof(buf), &recv_len, 100u);
+	zassert_equal(s, ALP_OK, "SOCK_RECV want=4071 -> OK");
+	zassert_equal(
+	    g_delay_us_count, 4u, "4 gated phases (SOCK_RECV always carries a request payload)");
+	zassert_true(g_delay_us_log[2] >= 2000u,
+	             "want=4071 -> expected reply 4095 B reaches the proven 2000 us ceiling");
+}
+
+/* ---- large REQUESTS need the long gate too (dispatch_frame CRCs + handles
+ * the request in the SAME ISR before arming the reply header) --------------- *
+ *
+ * Mutation check: reverting the call site to gate on cc3501e_expected_
+ * reply_bytes() alone (dropping the max() against wire_tx_len) turns this
+ * test RED -- STREAM_WRITE's own expected reply is 0 (rx_cap 0, no special
+ * case), so it would see the 200 us floor instead of the 2000 us ceiling a
+ * 4092 B request needs. */
+ZTEST(cc3501e_host_driver, test_stream_write_large_request_gates_ceiling)
+{
+	static uint8_t data[ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES]; /* 4092 B, the max
+	                                                                          * cc3501e_stream_write
+	                                                                          * accepts. */
+	memset(data, 0xAA, sizeof(data));
+	delay_log_reset();
+	alp_status_t s = cc3501e_stream_write(&fw, data, sizeof(data));
+	zassert_equal(slave.cmd, ALP_CC3501E_CMD_STREAM_WRITE, "opcode reached the slave");
+	zassert_equal(g_delay_us_count, 4u, "4 gated phases (a 4092 B request has a payload phase)");
+	zassert_true(g_delay_us_log[2] >= 2000u,
+	             "a 4092 B request reaches the proven 2000 us ceiling via wire_tx_len");
+	(void)s; /* STREAM_WRITE isn't modelled by slave_dispatch's switch (falls to its
+	          * default RESP_ERR_INVALID); only the gate timing is under test here. */
+}
+
+/* ---- SPI1_TRANSFER: expected reply is derived from len/NO_RX, not rx_cap -- */
+ZTEST(cc3501e_host_driver, test_spi1_transfer_large_no_rx_tx_gates_by_tx_size)
+{
+	zassert_equal(cc3501e_spi1_configure(&fw, 1000000u, 0u, ALP_CC3501E_SPI1_CS0, NULL, NULL, 100u),
+	              ALP_OK,
+	              "CONFIGURE before TRANSFER");
+	static uint8_t tx[ALP_CC3501E_SPI1_MAX_XFER]; /* 4088 B, the max single chunk. */
+	memset(tx, 0x55, sizeof(tx));
+	delay_log_reset();
+	/* rx == NULL sets the NO_RX flag: expected reply collapses to the 4 B
+	 * resp header alone, so only wire_tx_len (8 B header + 4088 B TX = 4096)
+	 * can be what pushes this to the ceiling. */
+	alp_status_t s = cc3501e_spi1_transfer(&fw, tx, NULL, (uint16_t)sizeof(tx), 0u, false, 100u);
+	zassert_equal(s, ALP_OK, "SPI1_TRANSFER (NO_RX, 4088 B TX) -> OK");
+	zassert_equal(
+	    g_delay_us_count, 4u, "4 gated phases (a TX-bearing transfer has a payload phase)");
+	zassert_true(g_delay_us_log[2] >= 2000u,
+	             "a 4096 B request (8 B header + 4088 B TX) reaches the proven 2000 us ceiling "
+	             "even though the reply itself is NO_RX-tiny");
+}
+
+ZTEST(cc3501e_host_driver, test_spi1_transfer_small_read_gates_floor)
+{
+	zassert_equal(cc3501e_spi1_configure(&fw, 1000000u, 0u, ALP_CC3501E_SPI1_CS0, NULL, NULL, 100u),
+	              ALP_OK,
+	              "CONFIGURE before TRANSFER");
+	uint8_t tx[8] = { 0 };
+	uint8_t rx[8] = { 0 };
+	delay_log_reset();
+	alp_status_t s = cc3501e_spi1_transfer(&fw, tx, rx, sizeof(tx), 0u, false, 100u);
+	zassert_equal(s, ALP_OK, "SPI1_TRANSFER (8 B, RX wanted) -> OK");
+	zassert_equal(g_delay_us_count, 4u, "4 gated phases (an 8 B TX has a payload phase)");
+	zassert_equal(g_delay_us_log[2],
+	              200u,
+	              "expected reply 12 B (4 B header + 8 B RX), wire_tx_len 16 B -- both well under "
+	              "the 536 B floor");
+}
+
+/* ---- GET_PENDING_EVENTS: the ring's real 288 B ceiling, not evt_buf's rx_cap */
+static void gate_test_evt_cb(uint8_t opcode, const uint8_t *payload, size_t len, void *user)
+{
+	(void)opcode;
+	(void)payload;
+	(void)len;
+	(void)user;
+}
+
+ZTEST(cc3501e_host_driver, test_poll_events_gates_floor)
+{
+	zassert_equal(
+	    cc3501e_add_event_callback(&fw, gate_test_evt_cb, NULL), ALP_OK, "register a sink");
+	delay_log_reset();
+	alp_status_t s = cc3501e_poll_events(&fw);
+	zassert_equal(
+	    g_delay_us_count, 3u, "3 gated phases (GET_PENDING_EVENTS carries no request payload)");
+	zassert_equal(g_delay_us_log[1],
+	              200u,
+	              "the ring's true 288 B ceiling (16 * 18 B) stays at the proven floor, unlike "
+	              "evt_buf's oversized 4096 B rx_cap");
+	(void)s; /* GET_PENDING_EVENTS isn't modelled by slave_dispatch's switch (falls to its
+	          * default RESP_ERR_INVALID); only the gate timing is under test here. */
 }
 
 ZTEST(cc3501e_host_driver, test_get_version_decodes_le16)
