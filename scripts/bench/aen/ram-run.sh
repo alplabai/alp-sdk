@@ -2,9 +2,10 @@
 # scripts/bench/aen/ram-run.sh <build-dir> [sleep_ms] [bufsize_hex] [preload_jlink_file]
 #
 # Requires BENCH_PLACE (the labgrid-client place name whose probe to use, e.g.
-# "e1m-aen-evk-02" -- you must already hold that place's reservation) and,
-# unless the board-farm wrapper lives at the default $HOME/board-farm
-# location, AEN_JLINK_RUN. See the BENCH_PLACE/AEN_JLINK_RUN comments below.
+# "e1m-aen-evk-02" -- you must already hold that place's reservation) AND
+# AEN_JLINK_RUN (the board-farm's jlink-run.sh wrapper path -- no default;
+# see the comments below for why). See the BENCH_PLACE/AEN_JLINK_RUN
+# comments below.
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives JLinkExe via the board-farm's jlink-run.sh wrapper). Runs under
@@ -53,10 +54,11 @@ fi
 
 # BENCH_PLACE -- the labgrid-client place name whose probe this run uses, routed
 # through the board-farm's jlink-run.sh wrapper (alp-sdk#2076 review,
-# alp-sdk#2064) instead of a bare -SelectEmuBySN. Five probes on this bench
-# share OEM serial 000603000869; JLINK_SN alone cannot tell them apart, and
-# the DPIDR preflight below only checks WHICH board answered THAT session --
-# it does not stop session 1 loading one board while session 2 reads a
+# alp-sdk#2064) instead of a bare -SelectEmuBySN. Several probes on this
+# bench share one OEM serial (the exact count enumerated has drifted before
+# and is not repeated here); JLINK_SN alone cannot tell them apart, and the
+# DPIDR preflight below only checks WHICH board answered THAT session -- it
+# does not stop session 1 loading one board while session 2 reads a
 # DIFFERENT one under the same shared serial. jlink-run.sh instead resolves
 # the named place's probe from labgrid and USB-masks every other probe so
 # only it can be opened, closing that gap structurally rather than by
@@ -65,9 +67,9 @@ fi
 # draft #2033 both touch that file).
 BENCH_PLACE="${BENCH_PLACE:-}"
 if [ -z "$BENCH_PLACE" ]; then
-	echo "ram-run: BENCH_PLACE is unset. This bench has five J-Links sharing" >&2
-	echo "         OEM serial 000603000869 -- a bare -SelectEmuBySN cannot tell" >&2
-	echo "         them apart, so ram-run.sh requires the labgrid-client PLACE NAME" >&2
+	echo "ram-run: BENCH_PLACE is unset. Several J-Links on this bench share" >&2
+	echo "         one OEM serial -- a bare -SelectEmuBySN cannot tell them" >&2
+	echo "         apart, so ram-run.sh requires the labgrid-client PLACE NAME" >&2
 	echo "         whose probe to use, e.g.:" >&2
 	echo "             export BENCH_PLACE=e1m-aen-evk-02" >&2
 	echo "         (you must already hold that place's labgrid reservation)." >&2
@@ -76,17 +78,39 @@ fi
 
 # AEN_JLINK_RUN -- the board-farm's per-probe isolation wrapper (labgrid
 # reservation check + USB-namespace masking + firmware-safe JLinkExe
-# selection). Defaults under $HOME, never hardcoded to one operator's home
-# directory (scripts/check_public_private.py enforces this -- same
-# discipline as bench_jlink_exe()'s $HOME/segger-latest default in
-# bench-env.sh). Override to point at a fake sharing the wrapper's own
-# "<place> [JLinkExe args...]" contract, e.g. in a test.
-AEN_JLINK_RUN="${AEN_JLINK_RUN:-$HOME/board-farm/bin/jlink-run.sh}"
-if [ ! -x "$AEN_JLINK_RUN" ]; then
-	echo "ram-run: '$AEN_JLINK_RUN' not found or not executable -- install the" >&2
-	echo "         board-farm tooling or export AEN_JLINK_RUN to point at it." >&2
+# selection). NO default, matching AEN_OPENOCD_CFG's own "error-if-unset"
+# shape in bench-env.sh, NOT bench_jlink_exe()'s $HOME/segger-latest
+# default: on a real bench host the natural default IS the real wrapper, so
+# a dev/test run that forgot to override this would silently drive a real
+# probe instead of failing closed (alp-sdk#2076 review). Export it
+# explicitly, or point it at a fake sharing the wrapper's own "<place>
+# [JLinkExe args...]" contract in a test.
+AEN_JLINK_RUN="${AEN_JLINK_RUN:-}"
+if [ -z "$AEN_JLINK_RUN" ]; then
+	echo "ram-run: AEN_JLINK_RUN is unset. This is the board-farm's per-probe" >&2
+	echo "         isolation wrapper (host-specific, not shipped). Export it, e.g.:" >&2
+	echo "             export AEN_JLINK_RUN=\$HOME/board-farm/bin/jlink-run.sh" >&2
 	exit 2
 fi
+if [ ! -x "$AEN_JLINK_RUN" ]; then
+	echo "ram-run: '$AEN_JLINK_RUN' not found or not executable." >&2
+	exit 2
+fi
+
+# JLINK_SN selection -- for the SIX sibling scripts in this directory that
+# still select their probe this way and point HERE for the explanation
+# (flash-jlink.sh, flash-jlink-hp.sh, flash-jlink-mramxip.sh, flash-run.sh,
+# flash-all-flowd.sh, erase-storage.sh, reread.sh): WHY their
+# `-SelectEmuBySN` is added only when JLINK_SN is set, never unconditionally.
+# Leaving JLINK_SN unset is NOT a no-op -- alplab-gw carries multiple
+# J-Links, some sharing a cloned OEM serial, and an unselected JLinkExe run
+# there fails every command with "Cannot connect to the probe/programmer"
+# (alp-sdk#1318) or silently attaches the wrong one; forcing an EMPTY
+# -SelectEmuBySN unconditionally would be worse than omitting the flag, so
+# those scripts guard it with `[ -n "${JLINK_SN:-}" ]`. ram-run.sh ITSELF no
+# longer selects by JLINK_SN -- see BENCH_PLACE/AEN_JLINK_RUN above, which
+# route through jlink-run.sh's USB masking instead, closing the wrong-board
+# gap a bare serial select cannot (alp-sdk#2076 review, alp-sdk#2064).
 
 # jlink_run <JLinkExe args...> -- one isolated JLinkExe session against
 # BENCH_PLACE's probe. Kept as one small function (rather than inlining the
@@ -106,18 +130,51 @@ jlink_run() {
 	"$AEN_JLINK_RUN" "$BENCH_PLACE" "$@"
 }
 
+# _connect_or_exit <transcript> <context> -- bench_jlink_assert_connected
+# (bench-env.sh), plus a ram-run-specific correction. bench-env.sh's own
+# hint on a failed connect says `export JLINK_SN=<serial>`, which this
+# script now ignores (BENCH_PLACE/AEN_JLINK_RUN above select the probe
+# instead) -- bench-env.sh is off limits (PR #2080/#2033 both touch it), so
+# the correction is appended here rather than editing that hint in place.
+_connect_or_exit() {
+	local out="$1" ctx="$2"
+	if ! bench_jlink_assert_connected "$out" "$ctx"; then
+		echo "ram-run: (the JLINK_SN hint above is stale for this script --" >&2
+		echo "         set BENCH_PLACE to a held labgrid-client place name" >&2
+		echo "         instead; AEN_JLINK_RUN routes through it.)" >&2
+		exit 7
+	fi
+}
+
 # WORKDIR -- every JLinkExe transcript and generated CommandFile for this run
-# lives under one mktemp -d directory, not fixed /tmp names. Fixed names
-# (the old /tmp/jlink.out, /tmp/ram-run-preflight.out) let one run's
-# transcript be overwritten by a CONCURRENT run on this same host moments
-# before it is decoded -- reproduced running this script's own test suite
-# against a real bench session: a pytest run's fake transcript was still
-# sitting at /tmp/jlink-read.out after the test process exited. `trap ...
-# EXIT` cleans it up on every exit path, including a `set -e` abort (e.g. a
-# missing preload file) that used to leave a stray jlink-load.XXXX.jlink
-# behind.
-WORKDIR=$(mktemp -d /tmp/ram-run.XXXXXX)
-trap 'rm -rf "$WORKDIR"' EXIT
+# lives under one mktemp -d directory (under $TMPDIR, matching
+# openocd-ram-run.sh's own preflight-transcript mktemp), not fixed /tmp
+# names. Fixed names (the old /tmp/jlink.out, /tmp/ram-run-preflight.out)
+# let one run's transcript be overwritten by a CONCURRENT run on this same
+# host moments before it is decoded -- reproduced running this script's own
+# test suite against a real bench session: a pytest run's fake transcript
+# was still sitting at /tmp/jlink-read.out after the test process exited.
+#
+# Removed only on a SUCCESSFUL exit (rc=0). Any non-zero exit -- including a
+# `set -e` abort, e.g. a missing preload file -- leaves WORKDIR in place and
+# says so: every "Transcript: ..." message this script or
+# bench_jlink_assert_connected prints is worthless if the file it names is
+# already gone by the time an operator reads it -- reproduced in review, a
+# session-2 failure cited a path an unconditional trap had already deleted
+# before the message was ever seen. Stale WORKDIRs from failed runs
+# therefore accumulate under $TMPDIR and need periodic manual cleanup, the
+# same tradeoff bench_atoc_replace_guard's own retained transcripts make
+# (bench-env.sh).
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/ram-run.XXXXXX")
+_ram_run_cleanup() {
+	local rc=$?
+	if [ "$rc" -eq 0 ]; then
+		rm -rf "$WORKDIR"
+	else
+		echo "ram-run: leaving transcripts under $WORKDIR (exit $rc) for inspection." >&2
+	fi
+}
+trap _ram_run_cleanup EXIT
 
 OBJ="$(bench_tool_prefix)" || exit $?
 ELF="$BD/zephyr/zephyr.elf"
@@ -223,7 +280,7 @@ exit
 EOF
 jlink_run -nogui 1 -CommandFile "$WORKDIR/preflight.jlink" \
   > "$WORKDIR/preflight.out" 2>&1 || true
-bench_jlink_assert_connected "$WORKDIR/preflight.out" "RAM-run preflight" || exit 7
+_connect_or_exit "$WORKDIR/preflight.out" "RAM-run preflight"
 bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exit 4
 
 # --- Session 1: LOAD + START the app, then disconnect leaving it RUNNING --
@@ -267,28 +324,54 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
   echo exit
 } > "$WORKDIR/load.jlink"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms  place=$BENCH_PLACE" >&2
-jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/load.jlink" 2>"$WORKDIR/load.err" > "$WORKDIR/load.out" || true
+# stderr merged into the same transcript as the preflight already does --
+# jlink-run.sh reports every one of ITS OWN refusals (place not held, board
+# unpowered, USB mask failure, a failed labgrid `show`) on stderr only, and
+# a separate, silently-dropped .err file turned those into a misleading
+# "produced no J-Link output at all" from bench_jlink_assert_connected
+# instead of the wrapper's own, more specific message (alp-sdk#2076 review).
+jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/load.jlink" > "$WORKDIR/load.out" 2>&1 || true
 # Same alp-sdk#1318 hazard as the read session below: a load+go that never
 # reached the probe must not fall through into a session-2 read that then
 # reports an EMPTY console and reads as a crashed app.
-bench_jlink_assert_connected "$WORKDIR/load.out" "RAM-run $(basename "$BD") (load+go)" || exit 7
+_connect_or_exit "$WORKDIR/load.out" "RAM-run $(basename "$BD") (load+go)"
 # A CONNECTED session can still fail the `loadbin` itself (e.g. a target RAM
 # access rejected, a bus fault mid-write) -- DTCM survives the SYSRESETREQ
 # `loadbin` triggers, so a stale image from an EARLIER run can boot instead
 # and its console would be read as if THIS load had succeeded.
 #
-# POSITIVE check, not a "fail"/"error" substring scan: bench-measured
-# 2026-09-13 (examples/peripheral-io/blink, 6 of 6 clean runs) that a
-# successful RAM loadbin's transcript reads `loadbin ... O.K.` immediately
-# after the command echo. A negative keyword scan was tried and dropped --
-# `$BIN`/`$BD` is an operator-chosen path and a build directory legitimately
-# named e.g. "ci-failover-build" makes the `loadbin <path> ...` echo itself
-# match "fail", failing a load that actually succeeded.
-if ! grep -A3 -i "^J-Link>loadbin " "$WORKDIR/load.out" | grep -qi "O\.K\."; then
+# POSITIVE check, scoped to an EXACT window, not a whole-transcript
+# substring scan -- both were bench-measured wrong on evk-02/evk-03
+# (2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
+#   - too narrow: a real successful loadbin puts SIX lines (the implicit-
+#     reset banner + "Downloading file [...]...") between the echoed
+#     command and "O.K.", not "immediately after" as an earlier draft of
+#     this comment claimed -- a fixed `grep -A3` window missed it and
+#     exited 8 on every one of 6 clean runs across both boards.
+#   - too loose: a case-insensitive `fail|error` scan (or an unscoped
+#     "any O.K. after any loadbin" check) matches the OPERATOR'S OWN PATH
+#     ($BIN/$BD are chosen by the caller, e.g. a directory named
+#     "demo.k.build" or "ci-failover-build") or a DIFFERENT loadbin
+#     entirely (an unrelated one in $PRELOAD) -- either direction reports
+#     a stale/failed load as this run's own success or failure.
+# Anchored on the EXACT echoed command for THIS image (`$BIN $BASE`, not a
+# pattern), scanning only the lines up to the NEXT `J-Link>` prompt, and
+# requiring one of them to be the line `O.K.` verbatim (case-sensitive,
+# not a substring) -- the real success marker JLinkExe itself prints,
+# nothing weaker.
+if ! awk -v echo_line="J-Link>loadbin $BIN $BASE" '
+  found && /^J-Link>/ { exit }
+  found { print }
+  $0 == echo_line { found = 1 }
+' "$WORKDIR/load.out" | grep -qx 'O\.K\.'; then
 	echo "!! ram-run: loadbin did not report 'O.K.' -- refusing to treat this as a" >&2
 	echo "   fresh load (a STALE image already resident in ITCM/DTCM can otherwise" >&2
 	echo "   boot and be read back as if this run's image had loaded)." >&2
-	grep -A3 -i "^J-Link>loadbin " "$WORKDIR/load.out" | head -6 >&2
+	awk -v echo_line="J-Link>loadbin $BIN $BASE" '
+	  found && /^J-Link>/ { exit }
+	  found { print }
+	  $0 == echo_line { print; found = 1 }
+	' "$WORKDIR/load.out" >&2
 	exit 8
 fi
 
@@ -317,12 +400,13 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/read.jlink" 2>"$WORKDIR/read.err" > "$WORKDIR/read.out" || true
+# stderr merged, same reason as session 1 above.
+jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommandFile "$WORKDIR/read.jlink" > "$WORKDIR/read.out" 2>&1 || true
 # JLinkExe exits 0 even when it never opened the probe, so the `|| true` above
 # cannot be relied on. Without this the decoder below prints an EMPTY console
 # block for a pure infrastructure failure, which reads as a crashed app
 # (alp-sdk#1318). Fail before decoding, not after.
-bench_jlink_assert_connected "$WORKDIR/read.out" "RAM-run $(basename "$BD") (read)" || exit 7
+_connect_or_exit "$WORKDIR/read.out" "RAM-run $(basename "$BD") (read)"
 # A CONNECTED session can still fail the READ itself with no root cause
 # established for why (the very defect this file fixes) -- `mem8` can
 # report "Could not read memory." while every prior command in the same

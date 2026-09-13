@@ -66,6 +66,8 @@ bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
     "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
 
 # 3. Write it.
+export BENCH_PLACE=e1m-aen-evk-01
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 
 labgrid-client -p e1m-aen-evk-01 release
@@ -112,6 +114,8 @@ Trust the reader, not this app's own read-back — a different binary exercising
 different code path is the stronger check:
 
 ```sh
+export BENCH_PLACE=e1m-aen-evk-01
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 bash scripts/bench/aen/ram-run.sh "$PWD/build/aen-eeprom-manifest"
 ```
 
