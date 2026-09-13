@@ -82,35 +82,30 @@ enumeration-order-assigned and not stable across a reboot/replug) — it is
 still honoured, just no longer silent. `LG_PLACE` wins whenever both are set:
 a raw `SE_UART` exported alongside it is ignored, with a note saying so.
 
-### Known limitation: J-Link probe selection is not yet routed through labgrid
+### J-Link probe selection is routed through labgrid (alp-sdk#2064)
 
-**The hazard, plainly: every `JLinkExe` invocation in this directory still
-selects its probe with `-SelectEmuBySN`, which CANNOT tell this bench's three
-J-Link probes apart — all three answer the same cloned OEM serial
-(`000603000869`). A script on this path can silently attach to a DIFFERENT
-board than the one you hold the labgrid reservation for**, with no error —
-the only thing standing between that and a wrong-board MRAM write or RAM-run
-is the SW-DP IDR safety gate (`bench_jlink_assert_aen_dpidr`, below), which
-catches it only after the fact (probe already opened) and only for the boards
-its DPIDR table knows about.
+**The hazard, plainly: `-SelectEmuBySN` alone CANNOT tell this bench's J-Link
+probes apart — five of them answer the same cloned OEM serial
+(`000603000869`). Selecting by serial alone can silently attach to a
+DIFFERENT board than the one you hold the labgrid reservation for**, with no
+error — the SW-DP IDR safety gate (`bench_jlink_assert_aen_dpidr`, below)
+catches only a wrong-CHIP attach (an AEN vs a GD32 vs a V2N CM33), never a
+wrong-BOARD attach among the three physically-identical AEN places.
 
-`board-farm/bin/jlink-run.sh <place>` is the safe way to drive a probe by
-PLACE NAME directly (labgrid-resolved) — it resolves the probe's real USB path from
-`labgrid-client show` (`bench-env.sh`'s resolver above follows the same
-parsing approach) and masks the bench's other J-Links in a private mount
-namespace before invoking `JLinkExe`, which is the only way to disambiguate
-probes that share a cloned OEM serial. The helpers in **this directory** do
-**not** route their own `JLinkExe` invocations through it yet: every one of
-them calls `JLinkExe ... -CommanderScript <file>`, a flag `jlink-run.sh`
-does not recognise (it looks for `-CommandFile` to inject a firmware-update
-suppression ahead of it), and each helper issues several separate `JLinkExe`
-calls per run (preflight / write / boot / read) rather than the single
-pass-through invocation `jlink-run.sh` wraps. Converting all of that is a
-larger, separate change (tracked as follow-up) — until then, these helpers
-keep relying on `JLINK_SN` plus the SW-DP IDR safety gate
-(`bench_jlink_assert_aen_dpidr`, below) to catch a wrong-board attach, and
-`bench-env.sh` exports `LG_SWD_PATH` (the labgrid-resolved probe USB path,
-e.g. `3-4.1`) for anyone driving `jlink-run.sh` by hand in the meantime.
+Every `JLinkExe` invocation in this directory therefore goes through
+`bench_jlink_run()` (`bench-env.sh`), the in-tree port of
+`board-farm/bin/jlink-run.sh`'s isolation mechanism: it resolves the target
+probe's real USB path from `LG_SWD_PATH` (labgrid-resolved, see
+`bench_labgrid_resolve` above), masks every OTHER probe's `/dev/bus/usb` node
+AND its sysfs device directory out of view inside a private, unprivileged
+mount+net+ipc namespace, brings the namespace's own loopback up, then selects
+by the (now-unambiguous) serial. It **refuses** rather than guesses when
+`LG_SWD_PATH` is not resolved — callers must `export LG_PLACE=<labgrid
+place>` (and `LG_COORDINATOR`) before running any helper here. See
+`bench_jlink_run`'s own header comment in `bench-env.sh` for why all four
+parts of the mechanism are load-bearing and what was deliberately left out
+(the firmware-update-suppression dance `jlink-run.sh` also does — a separate,
+unrelated hazard).
 
 ## Scripts
 
@@ -152,12 +147,12 @@ by exporting before you invoke a helper.
 | `LG_COORDINATOR` | *(none, error-if-unset when `LG_PLACE` is set)* | labgrid coordinator address (`<host>:<port>`) used to resolve `LG_PLACE`. No default — a coordinator address is bench-specific, not a portable SDK value. |
 | `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. |
 | `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
-| `LG_SWD_PATH` | *(none)* | Read-only, `LG_PLACE`-resolved: the SWD probe's real USB path (e.g. `3-4.1`) from labgrid's `swd` resource — the safe input to `board-farm/bin/jlink-run.sh "$LG_PLACE"` (see "Known limitation" above). Not yet consumed by the `JLinkExe` invocations in this directory. |
+| `LG_SWD_PATH` | *(none)* | Read-only, `LG_PLACE`-resolved: the SWD probe's real USB path (e.g. `3-4.1`) from labgrid's `swd` resource. Consumed by `bench_jlink_run()` (`bench-env.sh`) to mask every other probe before selecting by serial (alp-sdk#2064) — every `JLinkExe` invocation in this directory routes through it. |
 | `SETOOLS_DIR` | *(none, error-if-unset)* | Alif SETOOLS `app-release-exec-linux` dir. **License-gated, not shipped.** |
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
-| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. **Cannot disambiguate on this bench** — all three probes share one cloned OEM serial; see "Known limitation" above and the DP-ID safety gate in `bench-env.sh`. |
+| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Legacy SEGGER probe serial selector, no longer consumed by the `JLinkExe` invocations in this directory (see `bench_jlink_run()` above) — kept only as a documented historical name. **Cannot disambiguate on this bench** — five probes share one cloned OEM serial; that is exactly why `bench_jlink_run()` resolves the probe from `LG_SWD_PATH`'s USB topology instead. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
 | `TMPDIR` | `/tmp` | Where `bench_atoc_replace_guard()` (#2025) writes its pre-write `gettoc` transcript, `<tag>-atoc-before.<random>`. **Retention is deliberate, not a leak:** every run leaves its file, whether the run passed or aborted — it is the record of what was resident immediately before the write. Never auto-cleaned; sweep `$TMPDIR` by hand periodically. |
 

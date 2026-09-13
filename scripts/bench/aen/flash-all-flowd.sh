@@ -22,13 +22,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 source "$HERE/bench-env.sh"
 
 OBJNM="$(bench_tool_prefix)-nm" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
-# See ram-run.sh for why the selector is conditional on JLINK_SN. The MRAM
-# write itself happens inside flash-jlink.sh (invoked below), which now
-# selects by the same JLINK_SN; this array is only for the read_console()
-# probe here.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns. The MRAM write
+# itself happens inside flash-jlink.sh (invoked below), which now routes the
+# same way; this array is only for the read_console() probe here.
+JLINK_ARGS=(bench_jlink_run)
 SIZE=0xB00
 
 # App list: argv wins; otherwise read apps.txt (prefer the committed list).

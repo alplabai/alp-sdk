@@ -296,21 +296,25 @@ export JLINK_DEVICE_READ="${JLINK_DEVICE_READ:-Cortex-M55}"
 # JLINK_SPEED — SWD clock in kHz.
 export JLINK_SPEED="${JLINK_SPEED:-4000}"
 
-# JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector. Leave unset
-# on a single-probe bench; set it when multiple J-Links are visible on the host.
+# JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector, used only
+# by the off-labgrid single-probe escape hatch (see bench_jlink_run below).
 #
-# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- all three
-# probes answer the SAME cloned OEM serial (see "DP-ID safety gate"
-# below). When LG_PLACE is set, LG_SWD_PATH above is the labgrid-known
-# USB path (e.g. "3-4.1") for the probe this place actually owns; the
-# safe way to drive it directly is `board-farm/bin/jlink-run.sh
-# "$LG_PLACE" ...`, which masks the other probes in a private mount
-# namespace before invoking JLinkExe. The AEN scripts in THIS directory
-# do not route their own JLinkExe invocations through it yet -- see
-# README.md ("Known limitation") for why (they pass `-CommanderScript`,
-# which jlink-run.sh does not recognise, and each issues several
-# JLinkExe calls per run) -- so this bench continues to rely on the
-# DPIDR safety gate below for those, not on JLINK_SN alone.
+# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- FIVE probes
+# answer the SAME cloned OEM serial 000603000869 (see "DP-ID safety gate"
+# below and alp-sdk#2064). JLinkExe selects only by serial and has no
+# USB-path selector, so under any concurrency or enumeration-order change
+# JLINK_SN alone can silently attach the wrong board. Every JLinkExe
+# invocation in this directory therefore goes through bench_jlink_run()
+# below, which resolves the probe's USB topology from LG_SWD_PATH (set by
+# bench_labgrid_resolve() when LG_PLACE is acquired) and masks every OTHER
+# probe out of a private mount namespace before selecting by serial -- at
+# that point the shared serial is unambiguous because only one probe is
+# visible. bench_jlink_run refuses rather than guessing when LG_SWD_PATH is
+# not resolved. This bench also keeps the DPIDR safety gate below for every
+# helper that touches a target -- that gate answers a DIFFERENT question
+# (which chip answered: AEN E8 vs GD32 vs V2N CM33), not which of the three
+# physically-identical AEN boards a shared-serial probe belongs to, which
+# is what the masking in bench_jlink_run alone proves.
 export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 
 # --------------------------------------------------------------------
@@ -474,6 +478,120 @@ bench_jlink_exe() {
 		return 1
 	fi
 	echo "$exe"
+}
+
+# bench_jlink_run <JLinkExe args...> — run JLinkExe against ONLY the probe
+# belonging to LG_PLACE (alp-sdk#2064). Drop-in replacement for invoking
+# `$(bench_jlink_exe)` directly: callers build JLINK_ARGS=(bench_jlink_run)
+# instead of JLINK_ARGS=("$JLINK") and call "${JLINK_ARGS[@]}" exactly as
+# before.
+#
+# alplab-gw has FIVE J-Link probes and all of them answer the SAME cloned
+# OEM serial 000603000869. JLinkExe selects ONLY by serial with no USB-path
+# selector, so `-SelectEmuBySN` alone takes whichever same-serial probe it
+# happens to enumerate first -- not necessarily the one on the board this
+# invocation's labgrid reservation actually covers. The four parts below are
+# ALL load-bearing; each was found only after a simpler theory failed on the
+# real bench (alp-sdk#2064), and dropping any one silently reintroduces the
+# wrong-board hazard:
+#
+#   1. -SelectEmuBySN is explicit and REQUIRED -- JLinkExe does not
+#      auto-select an emulator even when exactly one is visible.
+#   2. BOTH the /dev/bus/usb/<bus>/<dev> node AND the sysfs device directory
+#      of every OTHER probe are `mount --bind`-masked out of view. Masking
+#      only the usbfs node is not enough: the device still ENUMERATES from
+#      sysfs, so JLINK_EMU_SelectByUSBSN finds the first match for the
+#      (shared) serial there and never falls back to a working one.
+#   3. --net and --ipc namespaces. When a probe is already open in one
+#      process, a second JLinkExe does not even reach USB -- SEGGER shares
+#      an in-use J-Link over loopback, so the second instance attaches to
+#      THAT probe regardless of any USB masking. No amount of USB-node
+#      masking substitutes for this.
+#   4. `ip link set lo up` inside the fresh network namespace -- a new netns
+#      starts with loopback DOWN, and the J-Link DLL segfaults on it.
+#
+# The mask is PROCESS-LOCAL (an unprivileged `unshare -rm`, no sudo needed):
+# it exists only inside this invocation and vanishes with the process, even
+# on SIGKILL, so two sessions targeting two different places can run
+# concurrently without disturbing each other.
+#
+# REFUSES rather than guesses -- the stated #2064 expected behaviour --
+# when it cannot establish which probe belongs to LG_PLACE: LG_SWD_PATH is
+# unresolved (LG_PLACE unset, or bench_labgrid_resolve above failed) or the
+# sysfs path it named has since vanished.
+#
+# Deliberately NOT ported from board-farm/bin/jlink-run.sh: that script also
+# pre-reads the probe's running firmware via OpenOCD and injects `exec
+# DisableAutoUpdateFW` to dodge a firmware-update prompt on a clone (which
+# would be unrecoverable). That is a separate hazard (bricking a probe, not
+# attaching to the wrong board) and none of alp-sdk#2064's four load-bearing
+# parts above depend on it; out of scope here.
+#
+# Kept SEPARATE from the DPIDR safety gate (bench_jlink_assert_aen_dpidr
+# below) -- do not delete that gate as "now redundant". It answers a
+# different question (which CHIP answered: AEN E8 vs GD32 vs V2N CM33), not
+# which of the three physically-identical AEN boards a shared-serial probe
+# belongs to -- only the USB-topology masking here answers that one.
+bench_jlink_run() {
+	local jlink port target_sn busnum devnum target_node
+	local mask_args="" sysmask_args="" mask_empty p leaf vendor node sysreal
+
+	jlink="$(bench_jlink_exe)" || return $?
+
+	if [ -z "${LG_SWD_PATH:-}" ]; then
+		echo "bench-env: bench_jlink_run: LG_SWD_PATH is unresolved -- export LG_PLACE=<labgrid" >&2
+		echo "           place> (and LG_COORDINATOR) so the probe can be identified by USB" >&2
+		echo "           topology. Refusing to guess which of the identically-serialised" >&2
+		echo "           J-Link probes on this bench belongs to your reservation (alp-sdk#2064)." >&2
+		return 9
+	fi
+	port="$LG_SWD_PATH"
+	if [ ! -d "/sys/bus/usb/devices/$port" ]; then
+		echo "bench-env: bench_jlink_run: no USB device at sysfs path '$port' (from LG_SWD_PATH) --" >&2
+		echo "           the probe may have been unplugged/re-enumerated since LG_PLACE was resolved." >&2
+		return 9
+	fi
+	target_sn=$(cat "/sys/bus/usb/devices/$port/serial" 2>/dev/null || true)
+	if [ -z "$target_sn" ]; then
+		echo "bench-env: bench_jlink_run: cannot read a serial for USB device '$port'" >&2
+		return 9
+	fi
+	busnum=$(cat "/sys/bus/usb/devices/$port/busnum" 2>/dev/null || true)
+	devnum=$(cat "/sys/bus/usb/devices/$port/devnum" 2>/dev/null || true)
+	if [ -z "$busnum" ] || [ -z "$devnum" ]; then
+		echo "bench-env: bench_jlink_run: cannot read busnum/devnum for '$port'" >&2
+		return 9
+	fi
+	target_node=$(printf '/dev/bus/usb/%03d/%03d' "$busnum" "$devnum")
+
+	# Mask every OTHER SEGGER (USB vendor 1366) probe: usbfs node + sysfs dir.
+	for p in /sys/bus/usb/devices/*-*; do
+		leaf="${p##*/}"
+		case "$leaf" in *:*) continue ;; esac
+		vendor="$(cat "$p/idVendor" 2>/dev/null || true)"
+		[ "$vendor" = "1366" ] || continue
+		[ "$leaf" = "$port" ] && continue
+		node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$p/busnum" 2>/dev/null)" "$(cat "$p/devnum" 2>/dev/null)")
+		[ -e "$node" ] || continue
+		sysreal=$(readlink -f "$p")
+		mask_args="$mask_args $node"
+		sysmask_args="$sysmask_args $sysreal"
+	done
+	mask_empty=$(mktemp -d) || return 9
+
+	JLINK_BIN="$jlink" JLINK_TARGET_NODE="$target_node" JLINK_MASKS="$mask_args" \
+		JLINK_SYSMASKS="$sysmask_args" JLINK_EMPTY="$mask_empty" JLINK_SEL="-SelectEmuBySN $target_sn" \
+		unshare -rm --net --ipc --propagation private /bin/bash -c '
+			set -e
+			ip link set lo up 2>/dev/null || true
+			for n in $JLINK_MASKS; do mount --bind /dev/null "$n"; done
+			for s in $JLINK_SYSMASKS; do mount --bind "$JLINK_EMPTY" "$s"; done
+			[ -c "$JLINK_TARGET_NODE" ] || {
+				echo "bench_jlink_run: target node $JLINK_TARGET_NODE vanished under the mask" >&2
+				exit 9
+			}
+			exec "$JLINK_BIN" $JLINK_SEL "$@"
+		' -- "$@"
 }
 
 # bench_jlink_assert_connected <jlink-output-file> [context] — fail when

@@ -35,23 +35,18 @@ SLEEP="${2:-1500}"
 SIZE="${3:-0x600}"
 PRELOAD="${4:-}"
 OBJ="$(bench_tool_prefix)" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
-# Select the AEN probe by serial when JLINK_SN is set (bench-env.sh resolves it
-# from JLINK_SN/JLINK_SERIAL) -- on alplab-gw, JLinkExe otherwise picks an
-# arbitrary probe among the V2N CM33 DAP / AEN E8 / GD32 bridge and either
-# fails to connect or attaches the wrong one.
-#
-# Leaving JLINK_SN unset is NOT a no-op: an earlier revision of this comment
-# claimed it "preserves today's single-probe behaviour exactly", which was true
-# when only one probe was attached and is false now. alplab-gw carries three,
-# two sharing a cloned OEM serial, and an unselected run there fails every
-# command with "Cannot connect to the probe/programmer" (alp-sdk#1318). That is
-# why the connect assertion below is mandatory rather than advisory.
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns -- alplab-gw has five
+# probes and all of them answer the same cloned OEM serial, so an unselected
+# or unmasked run can attach to a board this reservation does not cover, not
+# just fail to connect (alp-sdk#1318 was the failure-to-connect case; #2064
+# is the silently-wrong-board case). That is why the connect assertion below
+# is still mandatory in addition to this routing, not a substitute for it.
 #
 # NOTE: this is read/RAM-run only (no MRAM write) and this script does not
 # confirm the SW-DP ID the way flash-jlink-mramxip.sh does before a write.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+JLINK_ARGS=(bench_jlink_run)
 ELF="$BD/zephyr/zephyr.elf"
 BIN="$BD/zephyr/zephyr.bin"
 ENTRY_RAW=$($OBJ-readelf -h "$ELF" | awk '/Entry point/{print $NF}')
