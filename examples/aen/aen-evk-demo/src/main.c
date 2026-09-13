@@ -1162,6 +1162,19 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
  * pin's read-back, output-configured pins included, regardless of what
  * (if anything) is actually driving them.
  *
+ * #2098: even though the register write above is electrically harmless
+ * for EVERY pin, this phase only ever asks for it on P4..P7
+ * (IOEXP_POLARITY_TEST_MASK below) -- the same four sensor-interrupt
+ * pins examples/aen/aen-sensor-int-probe already legitimately drives
+ * (its main.c:163). P0..P3 are still not this SDK's to touch (#2035),
+ * ownership, not just electrical safety, is the bar. The config
+ * register (0x03) is read and PRINTED so a reader can see the
+ * direction the chip is actually in, but that reading is never
+ * compared against an expected value and never gates PASS/FAIL: on a
+ * fresh board nothing has configured P0..P3 yet (0xFF, all-input,
+ * power-on default) and that is not a fault, just this app not being
+ * the one that owns setting it.
+ *
  * The write is restored to 0x00 UNCONDITIONALLY before this function
  * returns. There is no early return between the invert and the
  * restore below -- deliberately: a failed invert still funnels through
@@ -1176,6 +1189,16 @@ static phase_verdict_t phase_power_rails(demo_ctx_t *ctx)
  * state. Routing a real interrupt through this expander belongs to a
  * consumer that owns the source (examples/aen/aen-sensor-int-probe).
  */
+
+/* P4-P7 -- sensor-interrupt inputs, the same four pins
+ * examples/aen/aen-sensor-int-probe/src/main.c:163 legitimately drives.
+ * P0-P3 (LCD_PWR_EN/LCD_RST/CAM_EN/CTP_RST) are carrier control lines
+ * this SDK does not own (#2035) -- this phase never asks the polarity
+ * round-trip to touch a bit outside this mask, in either direction. */
+#define IOEXP_POLARITY_TEST_MASK \
+	(BIT(EVK_IOEXP_ICM42670_INT1) | BIT(EVK_IOEXP_ICM42670_INT2) | BIT(EVK_IOEXP_ICM42670_FSYNC) | \
+	 BIT(EVK_IOEXP_BMP581_INT1))
+
 static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: I/O expander (TCAL9538 @0x%02x) --\n", EVK_I2C_ADDR_TCAL9538_MAIN);
@@ -1196,35 +1219,26 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 
 	/* tcal9538_init() already read the config register back (it has to,
 	 * to seed cfg_cache) -- reuse that instead of spending a second
-	 * transaction on a register we're only reading to report. Expected
-	 * per the netlist: P0..P3 outputs (bit=0), P4..P7 inputs (bit=1) =
-	 * 0xF0. Nothing in this demo ever calls tcal9538_set_direction() /
-	 * _directions(), so on a board where no other phase has configured
-	 * the expander yet, this will legitimately still read the power-on
-	 * default (0xFF, all-input) -- that is reported as a mismatch, not
-	 * silently reconciled, because a mismatch here is itself a finding:
-	 * either this reasoning about the netlist is wrong, or nothing has
-	 * configured the chip yet, and either way the reader should see it.
-	 *
-	 * #2035: DO NOT "fix" a reported MISMATCH here by calling
-	 * tcal9538_set_direction()/_directions() to force 0xF0. P0..P3 are
-	 * LCD_PWR_EN / LCD_RST / CAM_EN / CTP_RST -- carrier control lines
-	 * for the display and camera, not this SDK's to own. A SoM SDK
-	 * (alp-sdk targets any carrier a given SoM can sit on, not just this
-	 * EVK) has no business driving a CARRIER's peripherals on its own
-	 * initiative: on a different carrier those same expander pins could
-	 * be wired to something else entirely, or to nothing. Reporting the
-	 * divergence without acting on it -- exactly what this phase already
-	 * does -- is the correct behaviour, not a gap to close.
-	 */
-	uint8_t cfg               = io.cfg_cache;
-	uint8_t cfg_expected      = 0xF0u;
-	bool    cfg_matches_wired = (cfg == cfg_expected);
-	printf("[evkdemo] IOEXP @0x%02x: config(0x03)=0x%02x expected=0x%02x (P0-3 out/P4-7 in) %s\n",
+	 * transaction on a register we're only reading to report. This is
+	 * REPORTED, not asserted (#2098): nothing in this demo ever calls
+	 * tcal9538_set_direction()/_directions(), so on a board where no
+	 * other phase/boot has configured the expander yet this will
+	 * legitimately still read the power-on default (0xFF, all-input) --
+	 * that is not a mismatch to flag, just the direction the chip
+	 * happens to be in right now. See the #2035 comment above this
+	 * phase for why this SDK never forces P0-P3 (LCD_PWR_EN/LCD_RST/
+	 * CAM_EN/CTP_RST) to the netlist's own 0xF0 (P0-3 out/P4-7 in). */
+	uint8_t cfg = io.cfg_cache;
+	printf("[evkdemo] IOEXP @0x%02x: config(0x03)=0x%02x (found, not asserted -- P0-3=%s "
+	       "P4-7=%s, this SDK never configures P0-3)\n",
 	       EVK_I2C_ADDR_TCAL9538_MAIN,
 	       cfg,
-	       cfg_expected,
-	       cfg_matches_wired ? "matches netlist" : "MISMATCH -- see comment above this phase");
+	       ((cfg & 0x0Fu) == 0x0Fu)   ? "input"
+	       : ((cfg & 0x0Fu) == 0x00u) ? "output"
+	                                  : "mixed",
+	       ((cfg & 0xF0u) == 0xF0u)   ? "input"
+	       : ((cfg & 0xF0u) == 0x00u) ? "output"
+	                                  : "mixed");
 
 	/* Sentinel-init every local this phase reads back, same distrust as
 	 * before: a genuine ALP_OK with the byte still 0xee means the
@@ -1233,14 +1247,22 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 
 	alp_status_t before_rc = tcal9538_read_all(&io, &before);
 
-	alp_status_t pol_set_rc = tcal9538_set_polarity_inversion(&io, 0xFFu);
+	/* Only ever ask for polarity inversion on IOEXP_POLARITY_TEST_MASK
+	 * (P4-P7) -- see the comment above this phase (#2098): those are
+	 * the bits this SDK may legitimately exercise, matching what
+	 * examples/aen/aen-sensor-int-probe already drives. P0-P3 are never
+	 * named in either write below. */
+	alp_status_t pol_set_rc = tcal9538_set_polarity_inversion(&io, IOEXP_POLARITY_TEST_MASK);
 	alp_status_t inverted_rc =
 	    (pol_set_rc == ALP_OK) ? tcal9538_read_all(&io, &inverted) : pol_set_rc;
 
 	/* Restore FIRST, before this function does anything else with the
 	 * result -- including on the failure path above, where pol_set_rc
 	 * or inverted_rc already went wrong. A half-finished inversion left
-	 * in place would corrupt every later reader of this port. */
+	 * in place would corrupt every later reader of this port. Writing
+	 * the whole register back to 0x00 (register POR default, and no
+	 * other code in this tree ever writes 0x02) is equivalent to
+	 * restoring just IOEXP_POLARITY_TEST_MASK here. */
 	alp_status_t pol_restore_rc = tcal9538_set_polarity_inversion(&io, 0x00u);
 	alp_status_t restored_rc =
 	    (pol_restore_rc == ALP_OK) ? tcal9538_read_all(&io, &restored) : pol_restore_rc;
@@ -1252,49 +1274,42 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 	bool reads_ok = (before_rc == ALP_OK) && (pol_set_rc == ALP_OK) && (inverted_rc == ALP_OK) &&
 	                (pol_restore_rc == ALP_OK) && (restored_rc == ALP_OK);
 
-	/* #2037: cfg==0 means every pin reads back as OUTPUT-configured (cfg
-	 * bit=1 means input -- see the comment above this phase), i.e. no bit
-	 * is required to invert at all. (x & 0) == 0 is true for ANY x, so
-	 * without this guard the mask check right below would PASS
-	 * vacuously on a wedged expander that always returns one constant
-	 * byte -- there would be no input-configured bit left to catch it.
-	 * Require cfg != 0 before the mask comparison is allowed to count as
-	 * evidence of anything. */
-	bool cfg_has_input_bits = (cfg != 0);
+	/* The only bits this phase ever asked the chip to invert are
+	 * IOEXP_POLARITY_TEST_MASK (P4-P7) -- a fixed, nonzero, compile-time
+	 * mask, so (unlike a mask derived from the chip's own live cfg
+	 * read-back) this can never pass vacuously the way #2037 found: a
+	 * wedged expander returning one constant byte on every read fails
+	 * this XOR outright. Require exactly those bits to have flipped. */
 	bool inversion_took_effect =
-	    reads_ok && cfg_has_input_bits && (((inverted ^ before) & cfg) == cfg);
+	    reads_ok && (((inverted ^ before) & IOEXP_POLARITY_TEST_MASK) == IOEXP_POLARITY_TEST_MASK);
 
-	/* #2037: P4-P7 (cfg bit=1, input-configured on the expected 0xF0
-	 * layout) are live sensor interrupt lines -- ICM42670 INT1/INT2/FSYNC
-	 * and BMP581 INT1 (EVK netlist, 2626-R2; see the comment above this
-	 * phase) -- that can genuinely flip between the `restored` and
-	 * `before` reads with no fault on this chip at all. Comparing all 8
-	 * bits would fail the phase on a real interrupt edge landing mid-test.
-	 * Compare only the pins that cannot move on their own: the
-	 * output-configured pins (cfg bit=0, P0-P3 on this netlist), which
-	 * this phase never drives and which the netlist says nothing else on
-	 * the board asynchronously toggles either. Uses the ACTUAL cfg read
-	 * back above, not the hardcoded 0xF0 expectation, so this still
-	 * excludes the right bits even when cfg_matches_wired is false. */
-	uint8_t static_pin_mask     = (uint8_t)(~cfg);
-	bool    restore_took_effect = reads_ok && (((restored ^ before) & static_pin_mask) == 0);
+	/* Restore-equality is checked OUTSIDE IOEXP_POLARITY_TEST_MASK only
+	 * (P0-P3): those bits were never written by this phase in either
+	 * direction, so a genuine difference there is real evidence of
+	 * something else touching the expander concurrently, not this
+	 * phase's own doing. P4-P7 are excluded from this comparison
+	 * because they are live sensor-interrupt lines (ICM42670
+	 * INT1/INT2/FSYNC, BMP581 INT1) that can genuinely flip between the
+	 * `restored` and `before` reads with no fault at all (#2035/#2037)
+	 * -- that is a real interrupt firing, not this phase mis-restoring
+	 * anything. */
+	bool restore_took_effect =
+	    reads_ok && (((restored ^ before) & (uint8_t)~IOEXP_POLARITY_TEST_MASK) == 0);
 
 	bool valid = reads_ok && inversion_took_effect && restore_took_effect;
 
 	const char *inversion_note = inversion_took_effect ? ""
 	                             : !reads_ok           ? " (a transfer failed)"
-	                             : !cfg_has_input_bits
-	                                 ? " (cfg(0x03)=0x00 -- no input-configured "
-	                                   "pins, inversion is unobservable)"
-	                                 : " (inverted bits didn't match the cfg mask)";
+	                                                   : " (P4-P7 didn't flip on invert)";
 	const char *restore_note   = restore_took_effect ? ""
 	                             : !reads_ok         ? " (a transfer failed)"
-	                                                 : " (restored != before outside the live "
-	                                                   "interrupt pins, P4-P7)";
+	                                                 : " (P0-P3 changed, and this phase never "
+	                                                   "wrote them)";
 
 	printf("[evkdemo] IOEXP @0x%02x: before=0x%02x inverted=0x%02x restored=0x%02x "
 	       "irqstatus(0x46)=0x%02x before_rc=%d pol_set_rc=%d inverted_rc=%d "
-	       "pol_restore_rc=%d restored_rc=%d irq_rc=%d inverted=%s%s restored=%s%s %s\n",
+	       "pol_restore_rc=%d restored_rc=%d irq_rc=%d "
+	       "exercised(P4-7 polarity round-trip)=%s%s observed-only(P0-3)=%s%s %s\n",
 	       EVK_I2C_ADDR_TCAL9538_MAIN,
 	       before,
 	       inverted,
@@ -1308,7 +1323,7 @@ static phase_verdict_t phase_io_expander(demo_ctx_t *ctx)
 	       (int)irq_rc,
 	       inversion_took_effect ? "yes" : "NO",
 	       inversion_note,
-	       restore_took_effect ? "yes" : "NO",
+	       restore_took_effect ? "unchanged" : "NO",
 	       restore_note,
 	       valid ? "PASS" : "FAIL");
 
@@ -4217,10 +4232,20 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		       amp_addrs[i],
 		       faults_before[i]);
 	}
+	/* AMP_FAULT_PIN is configured plain GPIO_INPUT above -- no
+	 * GPIO_ACTIVE_LOW -- so gpio_pin_get() returns the raw electrical
+	 * level (zephyr/include/zephyr/drivers/gpio.h), not IRQ_N's logical
+	 * sense. IRQ_N is open-drain, active-low (AMP_FAULT_PIN's own
+	 * #define comment above), so raw 1 (pad pulled high by R124) is
+	 * IDLE and raw 0 is the fault. Print the raw level AND the verdict
+	 * derived from it, rather than only the verdict, so a reader can
+	 * always tell which one is which -- this printf used to invert the
+	 * mapping (#2097). */
 	int fault_pin_before = gpio_pin_get(gpio5, AMP_FAULT_PIN);
-	printf("[evkdemo] SOUND: AMP_FAULT pin baseline -> %s\n",
-	       (fault_pin_before == 0)   ? "high (no fault)"
-	       : (fault_pin_before == 1) ? "LOW (asserted!)"
+	printf("[evkdemo] SOUND: AMP_FAULT pin baseline -> raw=%d (%s)\n",
+	       fault_pin_before,
+	       (fault_pin_before == 1)   ? "high, no fault (IRQ_N idle)"
+	       : (fault_pin_before == 0) ? "LOW, fault asserted (IRQ_N active-low)"
 	                                 : "read failed");
 
 	/* mic/spk stay NULL, *_rc stay ALP_ERR_NOSUPPORT, and both energy
@@ -4367,10 +4392,13 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		       faults_after);
 		if ((faults_after & TAS2563_FAULT_SHUTDOWN_CAUSES) != 0u) new_shutdown_fault = true;
 	}
+	/* Same raw-level convention as the baseline read above -- see that
+	 * comment for the polarity derivation. */
 	int fault_pin_after = gpio_pin_get(gpio5, AMP_FAULT_PIN);
-	printf("[evkdemo] SOUND: AMP_FAULT pin after -> %s\n",
-	       (fault_pin_after == 0)   ? "high (no fault)"
-	       : (fault_pin_after == 1) ? "LOW (asserted!)"
+	printf("[evkdemo] SOUND: AMP_FAULT pin after -> raw=%d (%s)\n",
+	       fault_pin_after,
+	       (fault_pin_after == 1)   ? "high, no fault (IRQ_N idle)"
+	       : (fault_pin_after == 0) ? "LOW, fault asserted (IRQ_N active-low)"
 	                                : "read failed");
 
 	/* --- 14. Idle restore, unconditionally (mirrors phase 6, not 9) ---- */
