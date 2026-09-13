@@ -76,6 +76,22 @@ to `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
 `TestUnresolvedLegOrdering`, proven to fail under a mutation that always
 grants eligibility on that branch.
 
+**Coverage gap this leaves, not silently absorbed.** Resolving the last
+`"TBD"` base removed the only shipped preset that ever authored an
+unresolved `memory_map:` base, so it also removed the only end-to-end
+path through the unresolved-base legs of `memory.py::_resolved_row()`
+and `carveout.py::_region_ipc_eligibility()`'s `cls == "unresolved"`
+tail. The three tests above now pin those legs by calling the private
+helpers directly instead of through a real preset, which proves the
+legs themselves still behave correctly but no longer proves the WIRING
+that routes an unresolved row into them — a future change that filtered
+unresolved rows out earlier (e.g. in `carveout.py::_candidate_regions()`,
+before `_region_ipc_eligibility()` is ever reached) would leave every
+current pin green while the guard on a live preset went dead. alp-sdk#2096
+proposes a synthetic *preset* fixture (not a synthetic row) that keeps an
+unresolved base in the tree purely to exercise that routing again,
+without reintroducing a real unresolved sentinel into any shipped SoM.
+
 Regenerated and diffed rather than assumed cosmetic: the `rpmsg-aen` and
 `mproc-mailbox` `system-manifest` and `build-plan` `--emit` snapshots
 (`tests/fixtures/emit-snapshots/`) are the only four of the gate's 37
