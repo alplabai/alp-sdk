@@ -26,3 +26,11 @@ see the overlay's Phase-11 header for why `AMP_FAULT`/`AMP_ENABLE` reach
 `gpio5` directly instead of through that array). Extending the array to
 reach this pad was explicitly avoided when the phase was written, to skip
 ~50 unused placeholder entries; this fix does not reverse that.
+
+Review follow-up: the mapping itself is pulled into a new
+`examples/aen/aen-evk-demo/src/amp_fault_verdict.h` (`amp_fault_pin_verdict()`),
+same pure-predicate-in-a-header pattern as `bmp581_verdict.h`/
+`sound_verdict.h` in that directory, with three new cases in
+`tests/zephyr/chips/src/test_audio.c` (`raw=1` idle, `raw=0` asserted, a
+negative-errno read failure counted as neither) -- this exact ternary was
+inverted once already; a unit test now fails before a bench run does.
