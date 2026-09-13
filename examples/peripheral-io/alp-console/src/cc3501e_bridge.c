@@ -53,33 +53,17 @@ static const pinctrl_soc_pin_t bodge_pins[] = {
 static void aen_bodge_init(void)
 {
 	(void)pinctrl_configure_pins(bodge_pins, ARRAY_SIZE(bodge_pins), PINCTRL_REG_NONE);
-	/* READY (P2_6 = gpio2.6) is read via the RAW DesignWare GPIO input register
-	 * (EXT_PORTA), bypassing the flaky snps gpio2 driver init (its 8 IRQs).  The
-	 * pad mux (GPIO + read-enable) was already applied by pinctrl_configure_pins
-	 * above, so the input register reflects the pad. */
-}
-
-#define ALIF_GPIO2_BASE   0x49002000u
-#define DW_GPIO_EXT_PORTA 0x50u
-#define CC3501E_READY_PIN 6u
-
-static int bodge_ready_raw(void)
-{
-	uint32_t v = sys_read32(ALIF_GPIO2_BASE + DW_GPIO_EXT_PORTA);
-	return (v >> CC3501E_READY_PIN) & 1u;
-}
-
-/* Strong override of the generic weak cc3501e_bus_ready() (chips/cc3501e.c).
- * Reads the CC35 READY/host-IRQ line (GPIO17 -> P2_6) via the raw DW input
- * register: HIGH = bridge ready to clock, LOW = mid-radio-op (DMA dead, don't
- * clock).  Returning false makes cc3501e_request answer BUSY -> poll_by_repeat
- * retries until READY (no clocking into a dead slave -> no desync). */
-bool cc3501e_bus_ready(void)
-{
-	/* The DW EXT_PORTA first read after an idle gap can return a stale/pre-sync
-	 * value (observed "0 1 1"); discard it and use the settled read. */
-	(void)bodge_ready_raw();
-	return bodge_ready_raw() == 1;
+	/* READY (P2_6 = gpio2.6) is muxed as a GPIO input, read-enabled, here --
+	 * but nothing in this file reads it back: cc3501e_bus_ready() and its
+	 * bodge_ready_raw() helper (raw DW EXT_PORTA peek) used to be a "strong
+	 * override" of a weak cc3501e_bus_ready() the comment claimed lived in
+	 * chips/cc3501e.c -- no such weak symbol exists there (the real driver
+	 * gates on ctx->ready_pin, a GPIO handle this bringup never sets), so
+	 * both functions were dead code with zero callers.  Removed rather than
+	 * kept as an unused "just in case" -- see chips/cc3501e/cc3501e_core.c's
+	 * cc3501e_reply_gate() for the real, ctx->ready_pin-based mechanism, and
+	 * the AEN example bridges' cc3501e_bridge.c for how it is actually wired
+	 * up (or, on e1m-aen-evk-01, deliberately left unwired). */
 }
 /* No CS hooks here: CS is the dwc-ssi hardware SS0 (peripheral-driven per transfer); the
  * host driver does not bracket transactions with any software chip-select. */

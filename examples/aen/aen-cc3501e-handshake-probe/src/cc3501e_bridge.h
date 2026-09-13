@@ -91,9 +91,16 @@
 #ifndef CC3501E_BRIDGE_PIN_NRST
 #define CC3501E_BRIDGE_PIN_NRST 1u
 #endif
-/* OPTIONAL host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).  When
- * the board wires it, cc3501e_request() gates reply phases on it (HIGH = slave
- * armed) instead of a fixed delay.  Absent -> ready_pin NULL -> legacy gap. */
+/* OPTIONAL host-IRQ/READY input (CC35 GPIO17, alp_pins[2]).  When the board
+ * wires it, cc3501e_request() gates reply phases on it (HIGH = slave armed)
+ * instead of a fixed delay.  Absent -> ready_pin NULL -> legacy gap.
+ *
+ * NOT the same net as Alif P2_6: on e1m-aen-evk-01, P2_6 is E1M pad AH7 /
+ * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and the
+ * CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv).  cc3501e_bridge_bringup()
+ * below does not open this pin on that board -- see its comment for the
+ * bench evidence -- so this macro currently has no live consumer here. */
 #ifndef CC3501E_BRIDGE_PIN_READY
 #define CC3501E_BRIDGE_PIN_READY 2u
 #endif

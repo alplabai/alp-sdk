@@ -103,14 +103,21 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
-	/* Optional host-IRQ/READY line (r2 SS0+IRQ bridge): CC35 GPIO17 -> Alif P2_6.
-	 * Open + configure as input; if the board doesn't wire it (alp_pins[2] absent),
-	 * alp_gpio_open returns NULL and the driver keeps the fixed-gap fallback. */
-	alp_gpio_t *ready = alp_gpio_open(CC3501E_BRIDGE_PIN_READY);
-	if (ready != NULL) {
-		(void)alp_gpio_configure(ready, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		fw->ready_pin = ready;
-	}
+	/* READY (r2 SS0+IRQ bridge, CC35 GPIO17) is NOT wired here: on
+	 * e1m-aen-evk-01 Alif P2_6 (CC3501E_BRIDGE_PIN_READY / alp_pins[2]) is E1M
+	 * pad AH7 / I2S1_SCLK, which the EVK carrier repurposes as the Arduino
+	 * header's CK_RST (metadata/boards/e1m-evk.yaml) -- NOT the CC3501E
+	 * GPIO17 READY net, which lands on E1M pad G3 / IO16 instead
+	 * (metadata/e1m_modules/aen/from-cc3501e.tsv, from-alif.tsv). Reading
+	 * CK_RST as READY returns a constant 1 (its reset line idles high), which
+	 * the old level-only READY gate mistook for an armed slave on every call.
+	 * Bench evidence (run8, e1m-aen-evk-01): 4/4 boots failed to associate
+	 * with the gate trusting that line; 5/7 associated with fw->ready_pin
+	 * left NULL, as here. cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c)
+	 * degrades safely even if a future board wires this pin wrong again --
+	 * see its g_ready_line_proven comment -- but this app does not need that
+	 * safety net exercised: it just leaves the line unopened, so every gate
+	 * pays the fixed-gap fallback unconditionally. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif

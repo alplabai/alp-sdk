@@ -69,6 +69,23 @@ void cc3501e_set_peer_polled(bool on);
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
 
+/* True once cc3501e_reply_gate() has ever un-proven a previously-proven READY
+ * line for missing its expected busy LOW CC3501E_READY_STUCK_STREAK gates in a
+ * row.  Production code never resets this once it latches; lets a caller
+ * (bench diagnostics, bring-up apps) report the degrade once.  See
+ * g_ready_line_was_stuck in cc3501e_core.c for why this driver uses a
+ * latch+getter instead of logging directly. */
+bool cc3501e_ready_line_was_stuck(void);
+
+/* TEST-ONLY: reset every cc3501e_reply_gate() READY-gate static (proven
+ * latch, last-sample, stuck-streak, was-stuck latch) to its zero state.
+ * Production code never calls this -- those statics are meant to persist for
+ * the whole boot -- but tests/zephyr/cc3501e_host_driver drives multiple
+ * READY-line fixtures (stuck-high, stuck-low, toggling) through the SAME
+ * test binary, and file-static state would otherwise leak from one fixture
+ * into the next depending on run order. */
+void cc3501e_ready_gate_reset_for_test(void);
+
 /* #2035: whether opcode @p cmd is allowed to reply all-zero (status byte +
  * data) without cc3501e_request_locked() treating that as the #1378
  * dead-phase alias.  Not `static` -- and declared here, not just in

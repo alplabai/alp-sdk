@@ -1035,15 +1035,67 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
  * fixed gap.  See project_cc3501e_link_topology. */
 
-/* Latched the first time READY is ever observed HIGH.  Until that happens -- and
- * permanently on a board that never asserts it -- the gate keeps its historical
- * behaviour (short burst, then the fixed gap), so an unwired line cannot stall
- * every phase.  Once the line has proven itself wired AND driven, the gate
+/* Latched only after a real EDGE on the READY line -- a LOW then a HIGH, or the
+ * HIGH-to-LOW busy transition the bridge drives around a radio op -- never off
+ * a single level read.  A level alone cannot tell "the slave just drove this
+ * HIGH" from "this pad is driven HIGH by something else entirely and has never
+ * moved" -- see the pin-routing bench evidence below, which is exactly the
+ * latter.  Until an edge is seen -- and permanently on a board where one never
+ * comes -- the gate pays cc3501e_reply_gate()'s full fixed fallback on every
+ * call, so an unwired (or mis-wired) line cannot masquerade as an armed slave
+ * and skip the settle that keeps the link alive.  Once proven, the gate
  * becomes AUTHORITATIVE and waits for the slave to re-arm however long the
- * device op takes.  That is the difference between surviving a flash blackout
- * and clocking into a dead slave: a burst of 64 reads is ~microseconds, while a
- * psa_fwu erase/write is orders of magnitude longer. */
+ * device op takes -- a burst of 64 reads is ~microseconds, while a psa_fwu
+ * erase/write is orders of magnitude longer -- but see g_ready_stuck_streak
+ * below: a line that later stops toggling gets UN-proven rather than trusted
+ * forever on stale evidence.
+ *
+ * PIN-ROUTING FACT (bench evidence, run8, e1m-aen-evk-01, advisor root-cause):
+ * Alif P2_6 -- the pad several AEN example bridges open as
+ * CC3501E_BRIDGE_PIN_READY -- is E1M pad AH7 / I2S1_SCLK, which the EVK
+ * carrier repurposes as the Arduino header's CK_RST (metadata/boards/
+ * e1m-evk.yaml), NOT the CC3501E GPIO17 READY net -- that lands on E1M pad
+ * G3 / IO16 instead (metadata/e1m_modules/aen/from-cc3501e.tsv,
+ * from-alif.tsv).  Enabling P2_6's input buffer therefore reads CK_RST, which
+ * idles high, i.e. a constant 1 -- exactly the level a naive proof mistakes
+ * for an armed slave on the very first call.  With the OLD level-only version
+ * of this gate trusting that pad, station connect never associated in 4 of 4
+ * boots (get_version then returned -5); with the READY gate disabled on the
+ * same firmware, 5 of 7 boots associated.  This function's edge requirement --
+ * not the example fix in cc3501e_bridge.c -- is what makes wiring that pad
+ * harmless: a level that never moves never proves, so it always pays the full
+ * settle instead of racing the slave. */
 static bool g_ready_line_proven;
+/* Level this ctx-wide gate last sampled, valid only once g_ready_have_sample
+ * is set -- lets an UNPROVEN call detect a transition against a PRIOR call's
+ * sample instead of needing to spot one within its own single read. */
+static bool g_ready_last_level;
+static bool g_ready_have_sample;
+/* Consecutive proven-mode gates that failed to observe the busy LOW a proven
+ * line is expected to drop before every reply phase (see the LOW-spin below).
+ * See CC3501E_READY_STUCK_STREAK for why 3. */
+static uint32_t g_ready_stuck_streak;
+/* Latches true the first (and only) time a proven line gets un-proven for
+ * going stuck -- chips/cc3501e has no logging facility of its own (it is
+ * backend-portable; no LOG_* macro is available here), so this reuses the
+ * same internal latch+getter idiom as g_peer_polled/cc3501e_peer_is_polled()
+ * just below, letting a caller (bench diagnostics, bring-up apps) report the
+ * degrade once instead of the driver printing anything itself. */
+static bool g_ready_line_was_stuck;
+
+bool cc3501e_ready_line_was_stuck(void)
+{
+	return g_ready_line_was_stuck;
+}
+
+void cc3501e_ready_gate_reset_for_test(void)
+{
+	g_ready_line_proven    = false;
+	g_ready_last_level     = false;
+	g_ready_have_sample    = false;
+	g_ready_stuck_streak   = 0u;
+	g_ready_line_was_stuck = false;
+}
 
 /* Set while the peer is in OTA update mode (polled slave).  A polled slave only
  * re-arms when its service loop next enters SPI_transfer, so READY is still HIGH
@@ -1080,6 +1132,14 @@ void cc3501e_set_peer_polled(bool on)
 #define CC3501E_READY_EDGE_US 20000u
 /* Tight spin for the READY drop; see cc3501e_reply_gate(). */
 #define CC3501E_READY_LOW_SPINS 64u
+/* Consecutive proven-mode gates allowed to miss the expected busy LOW before
+ * the line is treated as stuck and un-proven back to the blind fallback (see
+ * g_ready_stuck_streak / g_ready_line_proven above).  A real busy slave drops
+ * READY on EVERY reply phase, so one miss could just be a scheduling hiccup --
+ * but a genuinely stuck (or mis-wired, see the pin-routing bench evidence
+ * above) line misses EVERY gate from the first one, so 3 catches that within
+ * a handful of requests without over-reacting to a single coincidence. */
+#define CC3501E_READY_STUCK_STREAK 3u
 
 /* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
  * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
@@ -1104,9 +1164,8 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 		fallback_us = CC3501E_POLLED_SETTLE_US;
 	}
 	if (ctx->ready_pin != NULL) {
-		bool           level     = false;
-		const uint32_t budget_us = g_ready_line_proven ? CC3501E_READY_WAIT_US : 0u;
-		uint32_t       waited_us = 0u;
+		bool level;
+
 		if (g_ready_line_proven) {
 			/* Edge, not level -- and NOT only in polled mode.  The slave drops
 			 * READY in its transfer-complete ISR and raises it again once the
@@ -1122,25 +1181,58 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 			 * than the full CC3501E_READY_EDGE_US bound.  The count is WALL-TIME
 			 * sensitive -- it was retuned to 160 when the same build ran on the
 			 * 400 MHz M55-HP, and 8 is too few even at 160 MHz. */
+			bool saw_low = false;
 			for (uint32_t i = 0; i < CC3501E_READY_LOW_SPINS; ++i) {
 				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && !level) {
+					saw_low = true;
 					break;
 				}
 			}
+			/* Tolerate a line that stops toggling: see CC3501E_READY_STUCK_STREAK
+			 * for why 3, and g_ready_line_proven's header comment for the bench
+			 * case (a mis-wired pad) this exists to catch even if it somehow got
+			 * proven in the first place. */
+			if (saw_low) {
+				g_ready_stuck_streak = 0u;
+			} else if (++g_ready_stuck_streak >= CC3501E_READY_STUCK_STREAK) {
+				g_ready_line_proven    = false;
+				g_ready_stuck_streak   = 0u;
+				g_ready_line_was_stuck = true;
+			}
 		}
-		for (;;) {
-			/* Opportunistic burst: catches an already-armed slave with no delay. */
-			for (uint32_t i = 0; i < 64u; ++i) {
-				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
-					g_ready_line_proven = true;
-					return;
+
+		if (g_ready_line_proven) {
+			uint32_t waited_us = 0u;
+			for (;;) {
+				/* Opportunistic burst: catches an already-armed slave with no delay. */
+				for (uint32_t i = 0; i < 64u; ++i) {
+					if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+						return;
+					}
 				}
+				if (waited_us >= CC3501E_READY_WAIT_US) {
+					break;
+				}
+				alp_delay_us(CC3501E_READY_POLL_US);
+				waited_us += CC3501E_READY_POLL_US;
 			}
-			if (waited_us >= budget_us) {
-				break;
+		} else {
+			/* Not yet proven (or just un-proven above): sample once so a real
+			 * transition can still be caught across calls (g_ready_last_level
+			 * persists ctx-wide), but never act on a bare level -- and always
+			 * fall through to the full alp_delay_us(fallback_us) below no
+			 * matter what this read shows.  This is the actual bug fix: the
+			 * previous version proved the line -- and RETURNED without that
+			 * delay -- off the very first HIGH read, which a level that is
+			 * simply stuck high (pin-routing bench evidence above) satisfies
+			 * on gate #1 and every gate after. */
+			if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK) {
+				if (g_ready_have_sample && level != g_ready_last_level) {
+					g_ready_line_proven = true;
+				}
+				g_ready_last_level  = level;
+				g_ready_have_sample = true;
 			}
-			alp_delay_us(CC3501E_READY_POLL_US);
-			waited_us += CC3501E_READY_POLL_US;
 		}
 	}
 	alp_delay_us(fallback_us);
