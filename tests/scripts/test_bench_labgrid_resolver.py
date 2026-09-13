@@ -35,6 +35,7 @@ for that shape, not a second real capture.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -63,6 +64,19 @@ _NEEDS_BASH = pytest.mark.skipif(
     not _bash_can_run_a_script(),
     reason="no working `bash` on this host; bench-env.sh is POSIX shell",
 )
+
+
+def _sanitized_env() -> dict[str, str]:
+    """See test_bench_jlink_connect_guard.py's identical helper -- a unit
+    test must never be able to reach real bench infrastructure. LG_PLACE and
+    LG_COORDINATOR are NOT stripped here: every script this file builds sets
+    both explicitly (or explicitly leaves LG_PLACE unset), so an inherited
+    value is always overridden -- this covers LG_SWD_PATH/
+    ALP_JLINK_SEARCH_ROOT, which are not."""
+    env = dict(os.environ)
+    for var in ("LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+    return env
 
 
 def _who_i_am() -> str:
@@ -288,7 +302,7 @@ def _resolve(tmp_path: Path, place: str, captures: dict[str, str], extra_env: st
         ).encode("utf-8")
     )
     return subprocess.run(
-        ["bash", "run.sh"], cwd=workdir, capture_output=True,
+        ["bash", "run.sh"], cwd=workdir, env=_sanitized_env(), capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=60,
     )
 
@@ -381,9 +395,15 @@ def test_no_lg_place_and_no_se_uart_stays_empty_and_quiet(tmp_path: Path) -> Non
     warning noise (this is the ordinary "not doing bench work right now"
     shape, not the off-labgrid escape hatch)."""
     (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
+    # alp-sdk#2064 review, Major 1: this test's whole premise is "LG_PLACE is
+    # not set" -- an INHERITED one (an operator's shell profile) would make
+    # bench-env.sh resolve against the REAL labgrid coordinator the moment
+    # it is sourced, and the test would then be asserting nothing about the
+    # actual "neither set" case. `unset` in-script, not just `env=` below
+    # (see test_bench_jlink_connect_guard.py's _sanitized_env() for why).
     res = subprocess.run(
-        ["bash", "-c", "source ./bench-env.sh; echo \"SE_UART=[$SE_UART]\""],
-        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        ["bash", "-c", "unset LG_PLACE LG_COORDINATOR; source ./bench-env.sh; echo \"SE_UART=[$SE_UART]\""],
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, timeout=60,
     )
     assert res.returncode == 0, res.stderr
     assert "SE_UART=[]" in res.stdout
@@ -396,9 +416,12 @@ def test_raw_se_uart_without_lg_place_is_the_warned_escape_hatch(tmp_path: Path)
     documents a genuinely off-labgrid case) but must warn about the exact
     hazard that caused the incident: stale/unstable ttyUSBn paths."""
     (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
+    # Same "LG_PLACE must actually be absent" reasoning as the test above.
     res = subprocess.run(
-        ["bash", "-c", 'export SE_UART=/dev/ttyUSB9; source ./bench-env.sh; echo "SE_UART=[$SE_UART]"'],
-        cwd=tmp_path, capture_output=True, text=True, timeout=60,
+        ["bash", "-c",
+         'unset LG_PLACE LG_COORDINATOR; export SE_UART=/dev/ttyUSB9; '
+         'source ./bench-env.sh; echo "SE_UART=[$SE_UART]"'],
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, timeout=60,
     )
     assert res.returncode == 0, res.stderr
     assert "SE_UART=[/dev/ttyUSB9]" in res.stdout

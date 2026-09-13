@@ -81,9 +81,9 @@ board.
 
 ### The raw device-path variables are an escape hatch, not the normal path
 
-`SE_UART` (and `JLINK_SN`) can still be exported directly for genuinely
-off-labgrid work — `erase-storage.sh`'s BENCH-VERIFIED run documents exactly
-that case. Doing so **without** `LG_PLACE` set now prints an explicit warning
+`SE_UART` can still be exported directly for genuinely off-labgrid work —
+`erase-storage.sh`'s BENCH-VERIFIED run documents exactly that case. Doing
+so **without** `LG_PLACE` set now prints an explicit warning
 naming the hazard (stale paths, wrong board, `/dev/ttyUSBn` numbering is
 enumeration-order-assigned and not stable across a reboot/replug) — it is
 still honoured, just no longer silent. `LG_PLACE` wins whenever both are set:
@@ -174,7 +174,6 @@ by exporting before you invoke a helper.
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
-| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Legacy SEGGER probe serial selector, no longer consumed by the `JLinkExe` invocations in this directory (see `bench_jlink_run()` above) — kept only as a documented historical name. **Cannot disambiguate on this bench** — multiple probes share one cloned OEM serial; that is exactly why `bench_jlink_run()` resolves the probe from `LG_SWD_PATH`'s USB topology instead. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
 | `AEN_OPENOCD_CFG` | *(none, error-if-unset)* | Board-farm's shared OpenOCD SWD config (declares both M55 cores as CoreSight-AP targets). Host-specific, not shipped. `openocd-ram-run.sh` only. |
 | `AEN_OPENOCD_USB_LOCATION` | *(none, error-if-unset)* | Labgrid-pinned USB path for the AEN E8's J-Link — all three E8 boards on this bench answer the same SW-DP (`0x4c013477`), so the USB path is the only thing that selects which physical board you talk to; resolve it per-board from `labgrid-client -p <place> show`'s swd resource, e.g. `labgrid-client -p e1m-aen-evk-01 show`, never hardcode a path copied from another board. Passed as `adapter usb location <value>`, prepended on the OpenOCD command line. `openocd-ram-run.sh` only. |

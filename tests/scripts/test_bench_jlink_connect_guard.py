@@ -30,6 +30,22 @@ BENCH = REPO / "scripts" / "bench" / "aen"
 ENV = BENCH / "bench-env.sh"
 
 
+def _sanitized_env() -> dict[str, str]:
+    """alp-sdk#2064 review, Major 1: a unit test must NEVER be able to reach
+    real bench infrastructure. Every call site below sources bench-env.sh,
+    which -- if LG_PLACE is set (an operator's own shell profile, exported
+    for OTHER work in the same session) -- eagerly resolves it against the
+    REAL labgrid coordinator the moment it is sourced, live, over the
+    network, regardless of what the test itself goes on to do. Strip every
+    input that could route bench-env.sh/bench_jlink_run() at real
+    infrastructure or a real probe; inheriting os.environ verbatim is
+    exactly what would otherwise leak these in."""
+    env = dict(os.environ)
+    for var in ("LG_PLACE", "LG_COORDINATOR", "LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+    return env
+
+
 def _bash_can_run_a_script() -> bool:
     """True only when `bash` on PATH can actually execute something.
 
@@ -147,12 +163,17 @@ def _call_guard(out_file: Path) -> subprocess.CompletedProcess[str]:
     workdir = out_file.parent
     (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
     script = (
+        # `unset`, not just the `env=` kwarg below -- see _sanitized_env()'s
+        # docstring and the AEN_DPIDR override test further down, which
+        # documents `env=` not reliably reaching an MSYS bash on some hosts.
+        "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT; "
         'source ./bench-env.sh; '
         f'bench_jlink_assert_connected "{out_file.name}" "unit-test"'
     )
     return subprocess.run(
         ["bash", "-c", script],
         cwd=workdir,
+        env=_sanitized_env(),
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -327,11 +348,12 @@ def _call_dpidr(out_file, text):
     (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
     out_file.write_text(text, encoding="utf-8")
     script = (
+        "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT; "
         'source ./bench-env.sh; '
         f'bench_jlink_assert_aen_dpidr "{out_file.name}" "unit-test"'
     )
     return subprocess.run(
-        ["bash", "-c", script], cwd=workdir, capture_output=True,
+        ["bash", "-c", script], cwd=workdir, env=_sanitized_env(), capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=60,
     )
 
@@ -403,13 +425,20 @@ def test_aen_dpidr_is_not_environment_overridable(tmp_path):
     gate = workdir / "gate.sh"
     gate.write_bytes(
         (
+            # alp-sdk#2064 review, Major 1: `unset` inside the script itself,
+            # not just the `env=` kwarg below -- this test's own docstring
+            # above documents `env=` NOT reliably reaching this host's MSYS
+            # bash at all, so a literal `unset` is the only reliable way to
+            # keep an inherited LG_PLACE from making bench-env.sh resolve
+            # against a real coordinator the moment it is sourced.
+            "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT\n"
             'AEN_DPIDR="DEADBEEF"\n'          # the attempted override
             "source ./bench-env.sh\n"
             f'bench_jlink_assert_aen_dpidr "{out.name}" "unit-test"\n'
         ).encode("utf-8")
     )
     res = subprocess.run(
-        ["bash", "gate.sh"], cwd=workdir, capture_output=True,
+        ["bash", "gate.sh"], cwd=workdir, env=_sanitized_env(), capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=60,
     )
     assert res.returncode == 4, (
@@ -873,6 +902,7 @@ def _call_atoc_guard(
     gate = workdir / "gate.sh"
     gate.write_bytes(
         (
+            "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT\n"
             f"{tmpdir_line}"
             f'export SETOOLS_DIR="{setools_dir.name}"\n'
             f"{se_uart_line}"
@@ -886,7 +916,7 @@ def _call_atoc_guard(
         ).encode("utf-8")
     )
     return subprocess.run(
-        ["bash", "gate.sh"], cwd=workdir, capture_output=True,
+        ["bash", "gate.sh"], cwd=workdir, env=_sanitized_env(), capture_output=True,
         text=True, encoding="utf-8", errors="replace", timeout=60,
     )
 

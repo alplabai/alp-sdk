@@ -334,28 +334,22 @@ export JLINK_DEVICE_READ="${JLINK_DEVICE_READ:-Cortex-M55}"
 # JLINK_SPEED — SWD clock in kHz.
 export JLINK_SPEED="${JLINK_SPEED:-4000}"
 
-# JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector, used only
-# by the off-labgrid single-probe escape hatch (see bench_jlink_run below).
-#
-# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- multiple probes
-# answer the SAME cloned OEM serial 000603000869 (the exact count enumerated
-# has drifted before and is not repeated here, see bench_jlink_run's own
-# header comment; see also "DP-ID safety gate"
-# below and alp-sdk#2064). JLinkExe selects only by serial and has no
-# USB-path selector, so under any concurrency or enumeration-order change
-# JLINK_SN alone can silently attach the wrong board. Every JLinkExe
-# invocation in this directory therefore goes through bench_jlink_run()
-# below, which resolves the probe's USB topology from LG_SWD_PATH (set by
-# bench_labgrid_resolve() when LG_PLACE is acquired) and masks every OTHER
-# probe out of a private mount namespace before selecting by serial -- at
-# that point the shared serial is unambiguous because only one probe is
-# visible. bench_jlink_run refuses rather than guessing when LG_SWD_PATH is
-# not resolved. This bench also keeps the DPIDR safety gate below for every
-# helper that touches a target -- that gate answers a DIFFERENT question
-# (which chip answered: AEN E8 vs GD32 vs V2N CM33), not which of the three
-# physically-identical AEN boards a shared-serial probe belongs to, which
-# is what the masking in bench_jlink_run alone proves.
-export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
+# JLINK_SN / JLINK_SERIAL — RETIRED (alp-sdk#2064). No longer exported and
+# no longer consumed anywhere in this directory: on THIS bench multiple
+# J-Links answer the SAME cloned OEM serial 000603000869 (the exact count
+# enumerated has drifted before and is not repeated here), so a bare serial
+# selector could never disambiguate them. Every JLinkExe invocation here now
+# goes through bench_jlink_run() below, which resolves the probe's USB
+# topology from LG_SWD_PATH (set by bench_labgrid_resolve() when LG_PLACE is
+# acquired) and masks every OTHER probe out of a private mount namespace
+# before selecting by serial -- at that point the shared serial is
+# unambiguous because only one probe is visible. bench_jlink_run refuses
+# rather than guessing when LG_SWD_PATH is not resolved; there is no
+# off-labgrid single-probe fallback. This bench also keeps the DPIDR safety
+# gate below for every helper that touches a target -- that gate answers a
+# DIFFERENT question (which chip answered: AEN E8 vs GD32 vs V2N CM33), not
+# which of the three physically-identical AEN boards a shared-serial probe
+# belongs to, which is what the masking in bench_jlink_run alone proves.
 
 # --------------------------------------------------------------------
 # DP-ID safety gate (every helper that touches a target)
@@ -456,7 +450,9 @@ bench_jlink_assert_aen_dpidr() {
 	fi
 	if ! grep -qi "$AEN_DPIDR" "$out" 2>/dev/null; then
 		echo "!! ABORT ($ctx): expected AEN E8 SW-DP IDR 0x$AEN_DPIDR, not seen." >&2
-		echo "   Check JLINK_SN / wiring / probe selection. Transcript: $out" >&2
+		echo "   Check wiring, or that LG_PLACE names the board you actually hold" >&2
+		echo "   (export LG_PLACE=<labgrid place> -- see bench_jlink_run above)." >&2
+		echo "   Transcript: $out" >&2
 		return 4
 	fi
 	return 0
@@ -642,6 +638,13 @@ bench_jlink_run() {
 	# Probe-brick guard (see header): find the -CommandFile/-CommanderScript
 	# argument and rewrite it to point at a copy with the DisableAutoUpdateFW
 	# prelude prepended. Refuse if neither flag is present.
+	#
+	# NOT guarded: a SECOND -CommandFile/-CommanderScript in one argv would
+	# overwrite $prelude and leak the first mktemp (only the last one gets
+	# cleaned up below). No caller in this repo ever passes more than one --
+	# JLinkExe itself only honours the last anyway -- so this is left as a
+	# known, inert edge case rather than added complexity for a shape
+	# nothing here produces.
 	argv=("$@")
 	newargs=()
 	i=0
@@ -655,7 +658,18 @@ bench_jlink_run() {
 					echo "bench-env: bench_jlink_run: cannot create the DisableAutoUpdateFW prelude file" >&2
 					return 10
 				}
-				{ printf 'exec DisableAutoUpdateFW\n'; cat "$cmdfile"; } >"$prelude"
+				# Check `cat`'s own exit status (the compound command's
+				# status is its LAST command's) -- an unreadable/missing
+				# $cmdfile must not silently hand JLinkExe a guard-only
+				# script (just the exec line, no caller commands at all),
+				# which would open the probe, do nothing, and report success.
+				if ! { printf 'exec DisableAutoUpdateFW\n'; cat "$cmdfile"; } >"$prelude"; then
+					echo "bench-env: bench_jlink_run: cannot read '$cmdfile' -- refusing to open" >&2
+					echo "           a probe with a guard-only script (none of the caller's own" >&2
+					echo "           commands would run)." >&2
+					rm -f "$prelude"
+					return 10
+				fi
 				newargs+=("$a" "$prelude")
 				i=$((i + 2))
 				continue

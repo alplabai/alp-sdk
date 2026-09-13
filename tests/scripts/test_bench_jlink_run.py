@@ -22,6 +22,7 @@ path, so production behaviour is unchanged.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -30,6 +31,19 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 BENCH = REPO / "scripts" / "bench" / "aen"
 ENV = BENCH / "bench-env.sh"
+
+
+def _sanitized_env() -> dict[str, str]:
+    """See test_bench_jlink_connect_guard.py's identical helper -- a unit
+    test must never be able to reach real bench infrastructure. LG_SWD_PATH
+    is deliberately NOT stripped here (unlike that file): this file's own
+    `_run()` always explicitly sets or unsets it itself as the variable
+    under test, so its presence/absence in the inherited environment does
+    not matter once `_run()`'s own export/unset line runs."""
+    env = dict(os.environ)
+    for var in ("LG_PLACE", "LG_COORDINATOR", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+    return env
 
 
 def _bash_can_run_a_script() -> bool:
@@ -74,13 +88,29 @@ def _run(
     dry_run: bool = True,
     extra_args: list[str] | None = None,
     with_commandfile: bool = True,
+    commandfile_path: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
-    cmdfile = tmp_path / "fake.jlink"
-    cmdfile.write_text("si SWD\nconnect\nexit\n", encoding="utf-8")
+    if commandfile_path is not None:
+        # Deliberately NOT created -- exercises the unreadable-CommandFile
+        # refusal path (alp-sdk#2064 review, Major 3).
+        cmdfile = commandfile_path
+    else:
+        cmdfile = tmp_path / "fake.jlink"
+        cmdfile.write_text("si SWD\nconnect\nexit\n", encoding="utf-8")
 
     lines = [
         "set -e",
+        # alp-sdk#2064 review, Major 1: an INHERITED LG_PLACE would make
+        # bench-env.sh's eager resolve (triggered the moment it is sourced
+        # below) hit the REAL labgrid coordinator and OVERWRITE the
+        # LG_SWD_PATH this test is about to set/unset on the next line --
+        # silently making test_refuses_when_lg_swd_path_is_unresolved assert
+        # against a resolved REAL probe path instead of proving anything.
+        # `unset` here, not just the `env=` kwarg below, because `env=` was
+        # measured NOT to reliably reach an MSYS bash on some hosts (see
+        # test_bench_jlink_connect_guard.py's _sanitized_env()).
+        "unset LG_PLACE LG_COORDINATOR ALP_JLINK_SEARCH_ROOT",
         f'export TMPDIR="{tmp_path}"',
         # A real JLinkExe binary resolution is irrelevant under DRY_RUN (it
         # is never exec'd) -- point JLINK_EXE at any executable so
@@ -109,8 +139,8 @@ def _run(
     script = tmp_path / "run.sh"
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return subprocess.run(
-        ["bash", str(script)], cwd=tmp_path, capture_output=True,
-        text=True, timeout=60,
+        ["bash", str(script)], cwd=tmp_path, env=_sanitized_env(),
+        capture_output=True, text=True, timeout=60,
     )
 
 
@@ -244,3 +274,29 @@ def test_injects_disableautoupdatefw_ahead_of_the_callers_script(tmp_path: Path)
         f"the probe-brick guard must be the FIRST line JLinkExe would see: {content}"
     )
     assert "si SWD" in content, "the caller's own CommandFile content must survive"
+
+
+@_NEEDS_BASH
+def test_refuses_when_the_commandfile_cannot_be_read(tmp_path: Path) -> None:
+    """alp-sdk#2064 review, Major 3: the compound command that builds the
+    prelude (`{ printf ...; cat "$cmdfile"; } >"$prelude"`) did not check
+    `cat`'s own exit status. An unreadable/missing CommandFile silently
+    produced a prelude containing ONLY the guard line -- JLinkExe would then
+    open the probe, run nothing of the caller's, and report success. Must
+    refuse instead, before any masking."""
+    sysfs = tmp_path / "sysfs"
+    dev = tmp_path / "dev"
+    _make_probe(sysfs, "3-4.1", vendor="1366", bus=3, dev=17, serial="000603000869")
+    _make_dev_node(dev, 3, 17)
+
+    missing = tmp_path / "does-not-exist.jlink"
+    assert not missing.exists()
+
+    res = _run(
+        tmp_path, sysfs_root=sysfs, dev_root=dev, lg_swd_path="3-4.1",
+        commandfile_path=missing,
+    )
+    assert res.returncode != 0
+    assert "cannot read" in res.stderr, res.stderr
+    assert "JLINK_MASKS=" not in res.stdout, "must refuse before computing any mask"
+    assert "JLINK_PRELUDE=" not in res.stdout, "must never report success with a guard-only script"

@@ -69,11 +69,12 @@ fi
 # isolation wrapper (labgrid reservation check + USB-namespace masking +
 # firmware-safe JLinkExe selection). When exported, jlink_run() below routes
 # through IT instead of the in-tree bench_jlink_run() -- an operator opt-in
-# for a bench host that has it installed (it ALSO suppresses a
-# probe-firmware-update prompt, which bench_jlink_run() deliberately does
-# not, see that function's own header comment in bench-env.sh). NO default:
-# an unset AEN_JLINK_RUN falls through to bench_jlink_run(), it never
-# silently drives a real probe with no isolation at all.
+# for a bench host that has it installed. Both suppress the same
+# probe-firmware-update prompt (bench_jlink_run() ports that guard itself,
+# see its own header comment in bench-env.sh) -- picking one over the other
+# is not a safety tradeoff. NO default: an unset AEN_JLINK_RUN falls through
+# to bench_jlink_run(), it never silently drives a real probe with no
+# isolation at all.
 AEN_JLINK_RUN="${AEN_JLINK_RUN:-}"
 if [ -n "$AEN_JLINK_RUN" ]; then
 	if [ ! -x "$AEN_JLINK_RUN" ]; then
@@ -126,8 +127,10 @@ fi
 # are the same JLinkExe option (confirmed against the real JLinkExe binary on
 # this host: `-CommandFile` and `-CommanderScript` produce identical
 # transcripts), but only `-CommandFile` is what that wrapper recognizes;
-# bench_jlink_run() (the default path) does not care either way -- it passes
-# every argument straight through to JLinkExe unmodified.
+# bench_jlink_run() (the default path) accepts either flag too, and rewrites
+# whichever one is present to point at its own DisableAutoUpdateFW-prepended
+# copy of the file (see its header comment in bench-env.sh) -- every other
+# argument passes through unmodified.
 jlink_run() {
 	if [ -n "$AEN_JLINK_RUN" ]; then
 		"$AEN_JLINK_RUN" "$BENCH_PLACE" "$@"
