@@ -3343,7 +3343,7 @@
       "script": "scripts/check_emit_snapshots.py"
     },
     {
-      "purpose": "CI gate: if an example ships >=1 board-qualified overlay/conf under `boards/`, then every core its `board.yaml` declares via `cores.<core>.app:` must have its OWN matching qualified overlay there too -- a declared core with no matching file, while qualified overlays exist for other core(s), means the core the app actually builds silently loses its overlay.",
+      "purpose": "CI gate covering two related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
     {
