@@ -224,6 +224,45 @@ struct cc3501e {
 	 * hidden; see the s_retry_latch comment in the firmware's protocol.c. */
 	uint8_t req_seq;
 
+	/* CMD_SOCK_RECV's OWN request-seq counter (alp-sdk#2108) -- deliberately
+	 * NOT drawn from req_seq above, unlike every other worker-routed opcode.
+	 *
+	 * cc3501e-bridge-firmware's receive-ring advance is lazy-committed: a
+	 * SOCK_RECV whose header seq AND socket handle match the immediately
+	 * preceding recv on that handle is a REPLAY of the same bytes (the ring
+	 * does not advance again); any other recv commits and serves the next
+	 * chunk. That is only safe if two DIFFERENT consecutive recvs on one
+	 * handle never share a seq -- and req_seq is shared with EVERY other
+	 * worker-routed opcode (event polls, WIFI_STATUS, BLE ops, ...) and wraps
+	 * every 31 allocations (see req_seq's comment above), so two recvs
+	 * separated by exactly 31 unrelated commands would draw the identical
+	 * req_seq value. The bridge would then answer the second, genuinely NEW
+	 * recv as a replay of the first: it does not re-advance its ring, and the
+	 * host silently receives the FIRST recv's bytes again -- both calls
+	 * report ALP_OK, so nothing observes the loss. Bench evidence (#2108):
+	 * one run downloaded 262144 B over 4071 B recv calls, every call
+	 * returned OK, and exactly one 4069 B block never arrived, sitting
+	 * exactly on a reply boundary.
+	 *
+	 * A dedicated counter here removes SOCK_RECV from req_seq's shared space
+	 * entirely, so no unrelated command's traffic can ever push two of ITS
+	 * OWN recvs into a collision -- see cc3501e_sock_recv()'s assignment site
+	 * in cc3501e_sockets.c.
+	 *
+	 * Same free-running shape as sock_send_seq / req_seq / spi1_seq: 1..31
+	 * (ALP_CC3501E_REQ_SEQ_LAST), skipping 0 (ALP_CC3501E_REQ_SEQ_NONE),
+	 * pre-incremented so a fresh ctx's first recv is seq 1. A retry of one
+	 * cc3501e_sock_recv() call (e.g. the reply failing CRC on the wire and
+	 * poll_by_repeat() re-issuing the identical frame) keeps this SAME seq
+	 * across every attempt -- that constancy is what lets a genuinely
+	 * CRC-corrupted-in-transit reply be re-collected from the bridge's cache
+	 * instead of being misread as "commit the next chunk".
+	 *
+	 * Older firmware without this replay logic simply ignores the seq bits
+	 * for SOCK_RECV, exactly as it already does for every opcode that never
+	 * checks them -- this counter is harmless against it. */
+	uint8_t sock_recv_seq;
+
 	/* SPI1 host-passthrough staging (proto v6, opcodes 0x55..0x57).  Same rule
 	 * as sock_buf above, for the same reason: one TRANSFER chunk is
 	 * ALP_CC3501E_SPI1_MAX_XFER (4088) data bytes plus its header, so a local

@@ -492,17 +492,32 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	/* Per-context scratch, NOT a 4 KB stack frame -- see the note in
 	 * cc3501e_sock_send() above and cc3501e_t's sock_buf comment. */
 	if (ctx->sock_busy) return ALP_ERR_BUSY;
-	ctx->sock_busy     = true;
+	ctx->sock_busy = true;
+
+	/* alp-sdk#2108: SOCK_RECV allocates its retry seq from its OWN
+	 * ctx->sock_recv_seq counter, NOT the shared ctx->req_seq every other
+	 * worker-routed opcode draws from via plain poll_by_repeat() -- see
+	 * ctx->sock_recv_seq's comment in <alp/chips/cc3501e/core.h> for why
+	 * sharing that counter let two DIFFERENT, both-successful recvs alias
+	 * into the SAME seq and silently lose a block. Pre-increment, skip 0,
+	 * same shape as every other seq counter here. poll_by_repeat_seq() below
+	 * re-sends this exact value unchanged across its own internal BUSY/IO
+	 * retries, so a reply that fails CRC on the wire is re-collected from the
+	 * bridge's replay cache rather than misread as "commit the next chunk". */
+	ctx->sock_recv_seq =
+	    (ctx->sock_recv_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->sock_recv_seq + 1u);
+
 	uint8_t     *reply = ctx->sock_buf;
 	size_t       got   = 0;
-	alp_status_t s     = poll_by_repeat(ctx,
-	                                    ALP_CC3501E_CMD_SOCK_RECV,
-	                                    p,
-	                                    sizeof(p),
-	                                    reply,
-	                                    sizeof(ctx->sock_buf),
-	                                    &got,
-	                                    timeout_ms);
+	alp_status_t s     = poll_by_repeat_seq(ctx,
+	                                        ALP_CC3501E_CMD_SOCK_RECV,
+	                                        p,
+	                                        sizeof(p),
+	                                        reply,
+	                                        sizeof(ctx->sock_buf),
+	                                        &got,
+	                                        timeout_ms,
+	                                        ctx->sock_recv_seq);
 	ctx->sock_busy     = false;
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_SOCK_RECV_RESP_HDR) return ALP_ERR_IO; /* short reply header */

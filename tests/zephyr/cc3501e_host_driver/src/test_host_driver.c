@@ -52,6 +52,11 @@ enum slave_phase {
 static struct {
 	enum slave_phase phase;
 	uint8_t          cmd;     /* opcode of the in-flight request (0 = none clocked) */
+	uint8_t          flags;   /* header flags byte of the in-flight request (bits 3..7
+	                          * carry the proto v8 retry seq) -- alp-sdk#2108's SOCK_RECV
+	                          * ring model reads this to key its replay cache, since
+	                          * flags_log below only ever holds HISTORY, not the current
+	                          * in-flight request a dispatch function is deciding for. */
 	uint16_t         req_len; /* declared request payload length                    */
 	uint8_t          req_pl[ALP_CC3501E_MAX_PAYLOAD]; /* captured request payload    */
 
@@ -413,6 +418,50 @@ static bool     g_lock_contention_arm_on_submit;
 static bool     g_lock_contention_pending;
 static uint64_t g_lock_contention_release_at_ms;
 
+/* alp-sdk#2108 CMD_SOCK_RECV lazy-commit replay model, gated by
+ * g_sock_recv_use_ring_model (default false keeps the whole suite's existing
+ * fixed 5-byte "hello" SOCK_RECV reply -- see the default case in
+ * slave_dispatch() below -- completely unchanged). This mirrors the
+ * cc3501e-bridge-firmware receive-ring design that motivates
+ * ctx->sock_recv_seq: the ring advance is LAZY-COMMITTED, so
+ *
+ *   - a request whose header seq (flags bits 3..7) AND socket handle match
+ *     the IMMEDIATELY PRECEDING recv on that handle is a REPLAY -- served the
+ *     exact same bytes again, the ring does NOT advance;
+ *   - any other request (different seq, different handle, or the very first
+ *     recv) COMMITS: the ring advances and the next g_sock_recv_chunk_len
+ *     bytes of g_sock_recv_source are served.
+ *
+ * A bare clock/counter fake cannot fail a mutation that re-allocates a fresh
+ * seq per RETRY (it would make a genuine retry look like a brand-new recv,
+ * skipping bytes) or one that shares the seq counter across two DIFFERENT
+ * recvs (it would make two genuinely different recvs alias into one replay,
+ * losing a whole block) -- this model can, because it actually keys its
+ * decision on (seq, handle) exactly as the real firmware does. */
+static bool     g_sock_recv_use_ring_model;
+static uint8_t  g_sock_recv_source[64]; /* bytes available to serve, in order */
+static size_t   g_sock_recv_source_len;
+static size_t   g_sock_recv_chunk_len = 5u; /* bytes served per COMMIT */
+static size_t   g_sock_recv_ring_pos;       /* bytes already committed off the source */
+static bool     g_sock_recv_last_valid;
+static uint8_t  g_sock_recv_last_seq;
+static uint16_t g_sock_recv_last_handle;
+static uint8_t  g_sock_recv_last_reply[64];
+static size_t   g_sock_recv_last_reply_len;
+static uint32_t g_sock_recv_commit_count; /* # of times the ring actually advanced */
+/* Corrupts the CRC trailer of the NEXT staged SOCK_RECV reply, once, then
+ * clears itself -- models a genuine reply that the firmware committed and
+ * sent correctly, but which arrived on the wire with a bad CRC (a real
+ * transport bit-flip, not a firmware bug), so the host must reject THIS
+ * transmission and rely on a retry re-collecting the SAME committed bytes. */
+static bool g_sock_recv_corrupt_crc_once;
+
+/* Worker-routed BUSY acks before the real reply, same pattern as
+ * slave.rssi_busy_polls_remaining -- lets a test drive SOCK_RECV through
+ * poll_by_repeat_seq()'s OWN internal retry loop (independent of the ring
+ * model above) to prove the retry re-sends the SAME seq every attempt. */
+static uint32_t g_sock_recv_busy_polls_remaining;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -460,10 +509,23 @@ static void slave_reset(void)
 	g_sock_send_worker_ready_ms         = 0u;
 	g_sock_send_worker_dl               = 0u;
 	memset(g_sock_send_worker_payload, 0, sizeof(g_sock_send_worker_payload));
-	g_sock_send_cache_valid  = false;
-	g_sock_send_cache_seq    = 0u;
-	g_sock_send_cache_status = 0u;
-	g_sock_send_cache_queued = 0u;
+	g_sock_send_cache_valid    = false;
+	g_sock_send_cache_seq      = 0u;
+	g_sock_send_cache_status   = 0u;
+	g_sock_send_cache_queued   = 0u;
+	g_sock_recv_use_ring_model = false;
+	memset(g_sock_recv_source, 0, sizeof(g_sock_recv_source));
+	g_sock_recv_source_len  = 0u;
+	g_sock_recv_chunk_len   = 5u;
+	g_sock_recv_ring_pos    = 0u;
+	g_sock_recv_last_valid  = false;
+	g_sock_recv_last_seq    = 0u;
+	g_sock_recv_last_handle = 0u;
+	memset(g_sock_recv_last_reply, 0, sizeof(g_sock_recv_last_reply));
+	g_sock_recv_last_reply_len       = 0u;
+	g_sock_recv_commit_count         = 0u;
+	g_sock_recv_corrupt_crc_once     = false;
+	g_sock_recv_busy_polls_remaining = 0u;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -1000,14 +1062,58 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_SOCK_RECV: {
-		/* reply DATA = sock_addr(20) | data_len(LE16) | reserved(2) | data[]. */
-		static const uint8_t payload[5] = { 'h', 'e', 'l', 'l', 'o' };
-		uint8_t              d[24 + 5];
+		if (g_sock_recv_busy_polls_remaining > 0u) {
+			g_sock_recv_busy_polls_remaining--;
+			stage_status(ALP_CC3501E_RESP_ERR_BUSY);
+			break;
+		}
+		if (!g_sock_recv_use_ring_model) {
+			/* reply DATA = sock_addr(20) | data_len(LE16) | reserved(2) | data[]. */
+			static const uint8_t payload[5] = { 'h', 'e', 'l', 'l', 'o' };
+			uint8_t              d[24 + 5];
+			memset(d, 0, sizeof(d));
+			d[20] = (uint8_t)sizeof(payload); /* data_len lo */
+			d[21] = 0u;                       /* data_len hi */
+			memcpy(&d[24], payload, sizeof(payload));
+			stage_reply(ALP_CC3501E_RESP_OK, d, (uint16_t)sizeof(d));
+			break;
+		}
+		/* alp-sdk#2108 lazy-commit replay model -- see the mutant-control
+		 * globals' own comment above slave_reset() for the full algorithm. */
+		const uint16_t handle = (uint16_t)slave.req_pl[0] | ((uint16_t)slave.req_pl[1] << 8);
+		const uint8_t  seq =
+		    (uint8_t)((slave.flags >> ALP_CC3501E_FLAG_REQ_SEQ_SHIFT) & ALP_CC3501E_REQ_SEQ_MASK);
+		const bool is_replay = g_sock_recv_last_valid && seq == g_sock_recv_last_seq &&
+		                       handle == g_sock_recv_last_handle;
+		uint8_t    data[sizeof(g_sock_recv_last_reply)];
+		size_t     data_len;
+		if (is_replay) {
+			data_len = g_sock_recv_last_reply_len;
+			memcpy(data, g_sock_recv_last_reply, data_len);
+		} else {
+			size_t remaining = g_sock_recv_source_len - g_sock_recv_ring_pos;
+			size_t chunk     = g_sock_recv_chunk_len;
+			if (chunk > remaining) chunk = remaining;
+			memcpy(data, &g_sock_recv_source[g_sock_recv_ring_pos], chunk);
+			data_len = chunk;
+			g_sock_recv_ring_pos += chunk;
+			g_sock_recv_commit_count++;
+			g_sock_recv_last_valid  = true;
+			g_sock_recv_last_seq    = seq;
+			g_sock_recv_last_handle = handle;
+			memcpy(g_sock_recv_last_reply, data, data_len);
+			g_sock_recv_last_reply_len = data_len;
+		}
+		uint8_t d[24 + sizeof(g_sock_recv_last_reply)];
 		memset(d, 0, sizeof(d));
-		d[20] = (uint8_t)sizeof(payload); /* data_len lo */
-		d[21] = 0u;                       /* data_len hi */
-		memcpy(&d[24], payload, sizeof(payload));
-		stage_reply(ALP_CC3501E_RESP_OK, d, (uint16_t)sizeof(d));
+		d[20] = (uint8_t)(data_len & 0xFFu);
+		d[21] = (uint8_t)((data_len >> 8) & 0xFFu);
+		memcpy(&d[24], data, data_len);
+		stage_reply(ALP_CC3501E_RESP_OK, d, (uint16_t)(24u + data_len));
+		if (g_sock_recv_corrupt_crc_once) {
+			g_sock_recv_corrupt_crc_once = false;
+			slave.reply_pl[slave.reply_len - 1u] ^= 0xFFu; /* flip the CRC trailer's high byte */
+		}
 		break;
 	}
 	case ALP_CC3501E_CMD_GPIO_CONFIGURE:
@@ -1036,7 +1142,7 @@ static void slave_dispatch(void)
 		const uint32_t freq_hz = (uint32_t)slave.req_pl[0] | ((uint32_t)slave.req_pl[1] << 8) |
 		                         ((uint32_t)slave.req_pl[2] << 16) |
 		                         ((uint32_t)slave.req_pl[3] << 24);
-		const uint8_t d[8] = {
+		const uint8_t  d[8]    = {
 			(uint8_t)(freq_hz & 0xFFu),
 			(uint8_t)((freq_hz >> 8) & 0xFFu),
 			(uint8_t)((freq_hz >> 16) & 0xFFu),
@@ -1150,7 +1256,8 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
-		slave.cmd = tx[0];
+		slave.cmd   = tx[0];
+		slave.flags = tx[1];
 		if (slave.cmd_log_count < sizeof(slave.cmd_log)) {
 			slave.cmd_log[slave.cmd_log_count] = slave.cmd;
 		}
@@ -3017,6 +3124,118 @@ ZTEST(cc3501e_host_driver, test_sock_recv_encodes_maxlen_and_decodes_data)
 	zassert_equal(slave.req_pl[2], 32u, "max_len lo (= cap, bounded)");
 	zassert_equal(got, 5u, "decoded data_len from the 24-byte resp header");
 	zassert_mem_equal(buf, "hello", 5u, "inline received bytes copied out");
+}
+
+/* ---- alp-sdk#2108: SOCK_RECV's dedicated retry-seq counter ----------------
+ *
+ * cc3501e_sock_recv() must draw its wire-header retry seq from its OWN
+ * ctx->sock_recv_seq, never from the ctx->req_seq every other worker-routed
+ * opcode shares -- see ctx->sock_recv_seq's comment in
+ * <alp/chips/cc3501e/core.h> for the full aliasing mechanism this guards
+ * against. */
+
+/* Two DIFFERENT, both-successful recvs must never share a seq, no matter how
+ * many unrelated commands (each consuming ctx->req_seq, which SOCK_RECV must
+ * NOT be drawing from) run in between. 30 intervening allocations is the
+ * exact step count that walks the SHARED 31-wide counter (1..31, skipping 0)
+ * through one full cycle back to its starting value: if cc3501e_sock_recv()
+ * regressed to sharing ctx->req_seq, the first RECV would be that counter's
+ * allocation #1 and, with 30 more allocations from the intervening commands,
+ * the second RECV would land on allocation #32 -- the same value as
+ * allocation #1 -- aliasing the two recvs. A dedicated counter is immune
+ * regardless of how many intervening commands there are; this pins the exact
+ * count that would expose a reversion. */
+ZTEST(cc3501e_host_driver, test_sock_recv_seq_does_not_alias_across_intervening_commands)
+{
+	uint8_t buf[8] = { 0 };
+	size_t  got    = 0u;
+
+	zassert_equal(
+	    cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 100u), ALP_OK, "first RECV");
+	const uint8_t first_seq = seq_of(slave.flags);
+	zassert_not_equal(first_seq,
+	                  ALP_CC3501E_REQ_SEQ_NONE,
+	                  "a retryable command must carry a real seq, not the reserved 0");
+
+	int8_t rssi = 0;
+	for (uint32_t i = 0; i < 30u; i++) {
+		zassert_equal(
+		    cc3501e_wifi_rssi(&fw, &rssi), ALP_OK, "intervening command consumes ctx->req_seq");
+	}
+
+	zassert_equal(
+	    cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 100u), ALP_OK, "second RECV");
+	const uint8_t second_seq = seq_of(slave.flags);
+	zassert_not_equal(second_seq,
+	                  first_seq,
+	                  "two DIFFERENT recvs on the same handle must never share a seq, or the "
+	                  "firmware's lazy-commit ring would replay the FIRST recv's bytes instead of "
+	                  "advancing (alp-sdk#2108)");
+}
+
+/* A retry of ONE cc3501e_sock_recv() call (poll_by_repeat_seq()'s own
+ * internal BUSY retry loop) must re-send the SAME seq on every attempt --
+ * exactly the property test_retry_seq_is_constant_across_one_commands_retries
+ * already pins for the generic req_seq path, mirrored here for the dedicated
+ * sock_recv_seq path. */
+ZTEST(cc3501e_host_driver, test_sock_recv_retry_within_one_call_reuses_seq)
+{
+	g_sock_recv_busy_polls_remaining = 3u; /* 3 BUSY acks, then the real reply */
+	uint8_t buf[8]                   = { 0 };
+	size_t  got                      = 0u;
+
+	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	              ALP_OK,
+	              "RECV -> OK after riding out BUSY");
+	zassert_true(slave.flags_log_count >= 4u, "3 BUSY attempts + the collect were clocked");
+
+	const uint8_t seq = seq_of(slave.flags_log[0]);
+	zassert_not_equal(
+	    seq, ALP_CC3501E_REQ_SEQ_NONE, "a retryable command must carry a real seq, not 0");
+	for (uint32_t i = 1u; i < slave.flags_log_count && i < ARRAY_SIZE(slave.flags_log); i++) {
+		zassert_equal(seq_of(slave.flags_log[i]),
+		              seq,
+		              "every retry of ONE cc3501e_sock_recv() call re-sends the SAME seq");
+	}
+}
+
+/* End-to-end proof of the bug alp-sdk#2108 fixes: a SOCK_RECV reply that
+ * fails CRC on the wire (a real transport bit-flip, modelling the firmware
+ * having already committed the ring advance and sent the correct bytes) must
+ * be re-collected from the bridge's lazy-commit replay cache by the retry --
+ * not misread as a request for the NEXT chunk. Uses the ring model
+ * (g_sock_recv_use_ring_model) to actually exercise the (seq, handle)-keyed
+ * cache the real firmware implements, not just a bare clock/counter fake. */
+ZTEST(cc3501e_host_driver, test_sock_recv_crc_fail_then_retry_yields_correct_bytes_no_gap_no_dup)
+{
+	static const uint8_t source[10] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+	memcpy(g_sock_recv_source, source, sizeof(source));
+	g_sock_recv_source_len       = sizeof(source);
+	g_sock_recv_chunk_len        = 5u;
+	g_sock_recv_use_ring_model   = true;
+	g_sock_recv_corrupt_crc_once = true; /* the FIRST reply's CRC fails on the wire */
+
+	uint8_t buf[8] = { 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu };
+	size_t  got    = 0u;
+	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	              ALP_OK,
+	              "the internal retry re-collects the committed reply");
+	zassert_equal(got, 5u, "no gap: the full first chunk arrived");
+	zassert_mem_equal(buf, &source[0], 5u, "no gap, no duplicate: exactly chunk 1's bytes");
+	zassert_equal(g_sock_recv_commit_count,
+	              1u,
+	              "the ring advanced exactly ONCE for this one logical recv -- the retry replayed "
+	              "the cache, it did not commit a second time");
+
+	/* A second, genuinely NEW recv must get the NEXT chunk, not a replay of
+	 * the first (proves the dedicated counter also keeps two back-to-back
+	 * real recvs from aliasing under the ring model itself). */
+	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	              ALP_OK,
+	              "second RECV -> OK");
+	zassert_equal(got, 5u, "second chunk is also 5 bytes");
+	zassert_mem_equal(buf, &source[5], 5u, "no gap, no duplicate: exactly chunk 2's bytes");
+	zassert_equal(g_sock_recv_commit_count, 2u, "the ring advanced a second time for the new recv");
 }
 
 ZTEST(cc3501e_host_driver, test_sock_close_encodes_handle)
