@@ -74,6 +74,18 @@ static struct {
 	/* Wire byte 3 -- alp_cc3501e_wifi_status_t::last_reason (#2099). */
 	uint8_t wifi_last_reason;
 
+	/* CMD_WIFI_CONNECT_STA is worker-routed in the real firmware (the
+	 * connect body runs off-ISR and mirrors its outcome into the WIFI_STATUS
+	 * latch above once it finishes) -- this fake slave has no worker delay,
+	 * so its CONNECT_STA case COMMITS these three configured values into the
+	 * wifi_conn_state/wifi_fail_reason/wifi_last_reason fields above the
+	 * moment the submit is dispatched.  Set these before running `wifi
+	 * connect` to control what cc3501e_wifi_connect()'s own status poll (and
+	 * so the console's async result line) reads back. */
+	uint8_t connect_result_state;
+	uint8_t connect_result_fail_reason;
+	uint8_t connect_result_last_reason;
+
 	/* Response status WIFI_GET_RSSI answers with -- RESP_OK stages the real
 	 * measurement, anything else models a radio read that could not be
 	 * served (e.g. the radio went back down between the two requests). */
@@ -135,6 +147,19 @@ static void slave_dispatch(void)
 			break;
 		}
 		stage_reply(ALP_CC3501E_RESP_OK, &r, 1u);
+		break;
+	}
+	case ALP_CC3501E_CMD_WIFI_CONNECT_STA: {
+		/* The submit's own ack is untrusted by the driver (see
+		 * cc3501e_wifi_connect()'s comment) -- a bare RESP_OK with no
+		 * payload is enough.  Commit the configured outcome into the live
+		 * latch fields the SAME exchange, so the very next WIFI_STATUS poll
+		 * (cc3501e_wifi_connect()'s own loop) reads it straight back with no
+		 * simulated worker delay to wait out. */
+		slave.wifi_conn_state  = slave.connect_result_state;
+		slave.wifi_fail_reason = slave.connect_result_fail_reason;
+		slave.wifi_last_reason = slave.connect_result_last_reason;
+		stage_reply(ALP_CC3501E_RESP_OK, NULL, 0u);
 		break;
 	}
 	case ALP_CC3501E_CMD_WIFI_GET_IP: {
@@ -274,6 +299,34 @@ static const char *run(const char *line)
 	return out;
 }
 
+/* Run an async `wifi connect`, then wait (bounded, polling) for the
+ * background companion_conn_thread to notice conn_pending and print its
+ * result line -- identified by @p must_appear, a substring every outcome of
+ * that line carries (`"failed ("` / `"timed out"`), so this helper works for
+ * both the failure and timeout shapes without hardcoding the poll interval.
+ * Returns the full captured shell output including that async print; the
+ * caller asserts on the `reason:` suffix (present or absent) from there. */
+static const char *run_wifi_connect_and_wait(const char *line, const char *must_appear)
+{
+	const struct shell *sh = shell_backend_dummy_get_ptr();
+
+	shell_backend_dummy_clear_output(sh);
+	(void)shell_execute_cmd(sh, line);
+
+	size_t      len = 0;
+	const char *out = shell_backend_dummy_get_output(sh, &len);
+	WAIT_FOR((out = shell_backend_dummy_get_output(sh, &len)) != NULL &&
+	             strstr(out, must_appear) != NULL,
+	         2000000,
+	         k_msleep(20));
+	/* companion_conn_thread clears conn_pending in the statement right AFTER
+	 * the print WAIT_FOR just observed -- give it a short margin so the NEXT
+	 * test's own `wifi connect` does not race a conn_pending that is still
+	 * (briefly) true and get rejected as "already in progress". */
+	k_msleep(20);
+	return out;
+}
+
 static void *suite_setup(void)
 {
 	const struct shell *sh = shell_backend_dummy_get_ptr();
@@ -397,6 +450,55 @@ ZTEST(cc3501e_console_wifi, test_status_omits_reason_when_zero_2099)
 
 	zassert_not_null(strstr(out, "fail:  1"), "fail line missing: %s", out);
 	zassert_is_null(strstr(out, "reason:"), "no reason line when nothing was recorded: %s", out);
+}
+
+/* ============================ #2099 (wifi connect) ========================= */
+
+/* A failed `wifi connect` whose WIFI_STATUS latch carries a non-zero
+ * last_reason must print it on the async result line, fetched via the
+ * bounded cc3501e_wifi_status_once() rather than the down-window-retrying
+ * cc3501e_wifi_status(). */
+ZTEST(cc3501e_console_wifi, test_connect_prints_reason_when_recorded_2099)
+{
+	slave.connect_result_state       = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.connect_result_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.connect_result_last_reason = 15u;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "failed (");
+
+	zassert_not_null(strstr(out, "reason: 15"), "reason line missing: %s", out);
+}
+
+/* The zero side of the same contract: nothing recorded must print no reason
+ * suffix at all -- not "reason: 0". */
+ZTEST(cc3501e_console_wifi, test_connect_omits_reason_when_zero_2099)
+{
+	slave.connect_result_state       = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.connect_result_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.connect_result_last_reason = 0u;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "failed (");
+
+	zassert_is_null(strstr(out, "reason:"), "no reason line when nothing was recorded: %s", out);
+}
+
+/* The "timed out" shape gets the same fetch: the firmware's own DHCP-lease
+ * timeout after a successful association still publishes FAILED/TIMEOUT with
+ * whatever reason it had already recorded (e.g. during the association
+ * phase), so the timeout line must surface it too, not just the generic
+ * failure line. */
+ZTEST(cc3501e_console_wifi, test_connect_timeout_prints_reason_when_recorded_2099)
+{
+	slave.connect_result_state       = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.connect_result_fail_reason = ALP_CC3501E_WIFI_FAIL_TIMEOUT;
+	slave.connect_result_last_reason = 7u;
+
+	const char *out =
+	    run_wifi_connect_and_wait("alp companion wifi connect myssid mypass wpa3", "timed out");
+
+	zassert_not_null(strstr(out, "reason: 7"), "reason line missing on timeout: %s", out);
 }
 
 ZTEST_SUITE(cc3501e_console_wifi, NULL, suite_setup, reset_before, NULL, NULL);

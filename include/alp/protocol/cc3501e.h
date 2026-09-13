@@ -1129,28 +1129,38 @@ typedef struct {
 	 *  longer an available option on THIS reply; no replacement channel is
 	 *  decided here. */
 	int8_t rssi_dbm;
-	/** Low byte of the 802.11 reason code from a DISCONNECT event, or the
-	 *  status code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
-	 *  event.  Recorded ONLY while a connect attempt is in progress -- between
-	 *  the attempt's start and its terminal result -- then frozen at the
-	 *  terminal result and cleared at the start of the NEXT attempt.  0 when
-	 *  nothing was recorded for the current/most recent attempt.
+	/** The reason/status code for the MOST RECENT connect attempt: the low
+	 *  byte of the 802.11 REASON code from a DISCONNECT event, or the 802.11
+	 *  STATUS code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
+	 *  event -- two DIFFERENT code tables, and nothing on the wire says
+	 *  which one, so @c fail_reason == REJECTED does NOT disambiguate them.
 	 *
-	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED).  A
-	 *  bridge-initiated cleanup disconnect after a failure, and a host
-	 *  WIFI_DISCONNECT while connected, both happen OUTSIDE the attempt
-	 *  window and are not recorded either.
+	 *  Recorded ONLY while that attempt's state is CONNECTING; frozen at its
+	 *  terminal result and PERSISTS through every later state publish --
+	 *  including a subsequent host `wifi disconnect`, which republishes this
+	 *  same frozen value rather than a fresh one -- until the NEXT connect
+	 *  attempt starts and clears it back to 0.  0 means NOTHING WAS RECORDED
+	 *  for that attempt, not "no cause": a clean success, or a bare TIMEOUT
+	 *  with no DISCONNECT/REJECTED event of its own, also reads 0.
 	 *
-	 *  @warning KNOWN RESIDUAL: a host disconnect immediately followed by a
-	 *  connect can let the disconnect's own reason 3 (DEAUTH_LEAVING) land
-	 *  inside the new attempt's window and be recorded as 3 -- a 3 may be
-	 *  self-inflicted rather than the AP's doing.
+	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED) -- a
+	 *  vendor placeholder, not a real 802.11 code.
+	 *
+	 *  @warning KNOWN RESIDUAL: the value is cleared to 0 twice for a new
+	 *  attempt -- at submit and again immediately before the vendor connect
+	 *  call -- but neither reset is the exact instant the vendor begins
+	 *  processing that attempt.  A late event from the PREVIOUS attempt
+	 *  landing in the narrow remaining window can still be recorded against
+	 *  the new one (any reason/status code, not one in particular).  The
+	 *  converse also holds: a reject arriving after an attempt has already
+	 *  been declared TIMEOUT is lost, because the attempt is already
+	 *  terminal by then.
 	 *
 	 *  Scope is the connect attempt only: a deauth AFTER a successful
-	 *  CONNECTED is not reflected.  Formerly an unused @c reserved byte,
-	 *  always 0 -- older bridge firmware that never populates it still sends
-	 *  0, so this is purely additive and needs no wire-version bump
-	 *  (alp-sdk#2099). */
+	 *  CONNECTED is not recorded, because the state is no longer CONNECTING.
+	 *  Formerly an unused @c reserved byte, always 0 -- older bridge
+	 *  firmware that never populates it still sends 0, so this is purely
+	 *  additive and needs no wire-version bump (alp-sdk#2099). */
 	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 

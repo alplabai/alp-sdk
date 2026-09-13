@@ -78,23 +78,47 @@ static void companion_conn_thread(void *a, void *b, void *c)
 				shell_print(
 				    conn_sh, "wifi connected \"%s\"  rssi=unavailable (%d)", conn_ssid, (int)rs);
 			}
-		} else if (s == ALP_ERR_TIMEOUT) {
-			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
 		} else {
-			/* cc3501e_wifi_connect() itself only returns a mapped alp_status_t
-			 * (ALP_ERR_IO here), not the WIFI_STATUS latch's own last_reason --
-			 * fetch it with an independent status read, same pattern as the
-			 * RSSI query above on the success path.  Best-effort: a failed
-			 * fetch here just means the line prints without a reason, same as
-			 * before this byte existed. */
-			alp_cc3501e_wifi_status_t fst = { 0 };
-			(void)cc3501e_wifi_status(companion_cc3501e, &fst);
-			if (fst.last_reason != 0u) {
+			/* cc3501e_wifi_connect() itself only returns a mapped alp_status_t,
+			 * not the WIFI_STATUS latch's own last_reason -- fetch it
+			 * separately, best-effort, with the single-shot, BOUNDED
+			 * cc3501e_wifi_status_once() rather than cc3501e_wifi_status():
+			 * the latter's own down-window poll_by_repeat can retry for up to
+			 * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) while the firmware worker is
+			 * still in its post-body re-init, which would delay this result
+			 * line and keep conn_pending held for that whole extra window.
+			 * A failed fetch here just means the line prints without a
+			 * reason, same as before this byte existed.
+			 *
+			 * Skip the fetch entirely on ALP_ERR_INVAL: that means
+			 * cc3501e_wifi_connect() rejected the request before anything was
+			 * submitted (oversize ssid/psk), so no attempt ever opened the
+			 * capture window -- the latch still holds whatever the PREVIOUS
+			 * attempt left there, and fetching it here would mislabel that
+			 * stale value as this (non-existent) attempt's reason. */
+			uint8_t last_reason = 0u;
+			if (s != ALP_ERR_INVAL) {
+				alp_cc3501e_wifi_status_t fst = { 0 };
+				if (cc3501e_wifi_status_once(companion_cc3501e, &fst) == ALP_OK) {
+					last_reason = fst.last_reason;
+				}
+			}
+
+			if (s == ALP_ERR_TIMEOUT) {
+				if (last_reason != 0u) {
+					shell_warn(conn_sh,
+					           "wifi connect to \"%s\": timed out  reason: %u",
+					           conn_ssid,
+					           (unsigned int)last_reason);
+				} else {
+					shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
+				}
+			} else if (last_reason != 0u) {
 				shell_error(conn_sh,
 				            "wifi connect to \"%s\" failed (%d)  reason: %u",
 				            conn_ssid,
 				            (int)s,
-				            (unsigned int)fst.last_reason);
+				            (unsigned int)last_reason);
 			} else {
 				shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
 			}

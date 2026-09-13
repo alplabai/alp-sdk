@@ -435,18 +435,41 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);
  *             caller cannot tell it apart from a real reading (issue #1387).
  *             Use @ref cc3501e_wifi_rssi for a signal level, and report it as
  *             unavailable when that call fails rather than printing a 0.
- *             @c last_reason is the low byte of the 802.11 reason/status
- *             code recorded ONLY while a connect attempt is in progress,
- *             frozen at that attempt's terminal result (0 = nothing
- *             recorded, or older bridge firmware); see
+ *             @c last_reason is the reason/status code for the MOST RECENT
+ *             connect attempt, recorded only while that attempt was
+ *             CONNECTING and then persisting through later state publishes
+ *             (including a later `wifi disconnect`) until the next attempt
+ *             starts (0 = nothing recorded, or older bridge firmware); see
  *             @ref alp_cc3501e_wifi_status_t::last_reason for the exact
- *             capture window, exclusions, and the reason-3 residual.
+ *             capture window, the reason-vs-status ambiguity, and the
+ *             known residual.
  * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
  *         ALP_ERR_TIMEOUT if the transport stayed down for the whole
  *         down-window; ALP_ERR_IO on a short reply; otherwise the mapped
  *         error.
  */
 alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
+
+/**
+ * @brief Single, non-retried WIFI_STATUS read -- a bounded alternative to
+ *        @ref cc3501e_wifi_status for a best-effort fetch on a failure path.
+ *
+ * Decodes the same fixed 4-byte wire layout as @ref cc3501e_wifi_status, but
+ * without its down-window `poll_by_repeat` -- one attempt, bounded to a short
+ * fixed timeout, instead of up to `CC3501E_WIFI_DOWN_WINDOW_MS` (10 s) on a
+ * wedged transport.  Intended for callers that want @ref
+ * alp_cc3501e_wifi_status_t::last_reason as a diagnostic after a connect
+ * already failed or timed out, where blocking the caller for up to 10 s just
+ * to fetch a reason code is worse than sometimes missing it.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded status snapshot; same field semantics as
+ *             @ref cc3501e_wifi_status.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
+ *         ALP_ERR_IO on a short reply or a transport fault; otherwise the
+ *         mapped error.  A non-ALP_OK return means @p out was NOT written.
+ */
+alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
 
 /**
  * @brief Attach the live bridge handle to the portable Wi-Fi backend.

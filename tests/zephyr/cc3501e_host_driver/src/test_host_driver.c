@@ -1559,6 +1559,29 @@ ZTEST(cc3501e_host_driver, test_wifi_status_null_out_invalid)
 	zassert_equal(slave.cmd, 0u, "no transfer clocked");
 }
 
+/* #2099: cc3501e_wifi_status_once() -- the internal single-shot helper made
+ * public so a caller (the console's `wifi connect` result line) can fetch
+ * last_reason without risking cc3501e_wifi_status()'s own down-window retry.
+ * Same wire decode, no retry-specific behaviour to prove here beyond that. */
+ZTEST(cc3501e_host_driver, test_wifi_status_once_decodes_fields_2099)
+{
+	slave.wifi_conn_state  = ALP_CC3501E_WIFI_CONN_FAILED;
+	slave.wifi_fail_reason = ALP_CC3501E_WIFI_FAIL_REJECTED;
+	slave.wifi_last_reason = 15u;
+
+	alp_cc3501e_wifi_status_t st;
+	memset(&st, 0xA5, sizeof(st));
+	zassert_equal(cc3501e_wifi_status_once(&fw, &st), ALP_OK, "WIFI_STATUS -> OK");
+	zassert_equal(st.state, ALP_CC3501E_WIFI_CONN_FAILED, "state");
+	zassert_equal(st.last_reason, 15u, "last_reason decoded off reply[3]");
+}
+
+ZTEST(cc3501e_host_driver, test_wifi_status_once_null_out_invalid_2099)
+{
+	zassert_equal(cc3501e_wifi_status_once(&fw, NULL), ALP_ERR_INVAL, "NULL out -> INVAL");
+	zassert_equal(slave.cmd, 0u, "no transfer clocked");
+}
+
 /* #1377: `alp companion wifi status` returned -5 (ALP_ERR_IO) repeatedly right
  * after a healthy ver/scan/connect sequence -- the shared bridge transport is
  * briefly down whenever a radio op is in flight, and a status read landing in

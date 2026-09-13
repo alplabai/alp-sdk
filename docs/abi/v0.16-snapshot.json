@@ -3326,6 +3326,10 @@
         "cc3501e_wifi_status": {
           "hash": "2a5d4b86bb0e805c",
           "signature": "alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
+        },
+        "cc3501e_wifi_status_once": {
+          "hash": "12f14a4f28afda65",
+          "signature": "alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
         }
       },
       "macros": {
