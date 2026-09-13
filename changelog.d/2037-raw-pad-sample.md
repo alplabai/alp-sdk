@@ -36,14 +36,14 @@ this bench run could not tell them apart from the decoded angle alone.
 `examples/aen/aen-qenc-readout/src/main.c` now samples the raw pad levels of
 `P3_0`/`P3_1` directly off the GPIO3 controller's external-port register
 alongside every decoded-angle sample,
-`examples/aen/aen-qenc-readout/src/main.c:155` (`0x49003050u`), and prints
+`examples/aen/aen-qenc-readout/src/main.c:162` (`0x49003050u`), and prints
 the pad-control (mux + electrical) register values for both pins once at
-start-up, `examples/aen/aen-qenc-readout/src/main.c:172`
+start-up, `examples/aen/aen-qenc-readout/src/main.c:179`
 (`AEN_PINCTRL_BASE`), so a missing input-enable is visible without a
 debugger. The verdict at the time distinguished three outcomes instead of
 two: pads and angle both changing meant the decoder works; pads changing but
 the angle staying put was the #2037 defect reproduced under a hand,
-`examples/aen/aen-qenc-readout/src/main.c:435`
+`examples/aen/aen-qenc-readout/src/main.c:442`
 ("the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder");
 pads never changing at all meant nothing reached the pads, which could not
 tell an absent or unfitted encoder from a broken one. **Superseded**: the

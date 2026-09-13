@@ -90,8 +90,15 @@
  *   - any sample_fetch/channel_get in the window returned an error -> FAIL
  *     regardless of the above (the driver itself is failing reads)
  *   - the software decoder ticked without the pads ever registering a
- *     change -> FAIL, and worth a bench look: gpio-qdec samples the SAME
- *     pads this app reads raw, so this combination should not be reachable
+ *     change -> FAIL, but most likely benign sample-rate aliasing, not an
+ *     anomaly: this app polls the raw pads once per POLL_MS (300 ms) while
+ *     gpio-qdec samples every 500-2000 us, so a knob turned through one or
+ *     more full quadrature cycles between two 300 ms pad samples can tick
+ *     the decoder without the slower raw-pad read ever catching a
+ *     mid-transition level -- the FAIL still reports it (SW ticked but the
+ *     app's own pad evidence did not corroborate it within the window),
+ *     but the reason names the likely cause instead of sending a bench
+ *     operator chasing a phantom (#2038's own history is the warning)
  *
  * What none of this says: that either decoder is armed and running when
  * idle.  The hardware sensor API this driver registers is {sample_fetch,
@@ -447,14 +454,28 @@ int main(void)
 		         "trigger-counting channel, and starting the counter to 'fix' it makes it "
 		         "free-run on the peripheral clock instead (#2038)";
 	} else {
-		/* pad_moved == false but sw_moved == true: should not be reachable
-		 * -- gpio-qdec samples the SAME P3_0/P3_1 pads this app reads raw,
-		 * so a tick with no observed pad transition is an anomaly, not a
-		 * decode. Worth a bench look if this branch ever prints. */
+		/* pad_moved == false but sw_moved == true: IS reachable, by plain
+		 * sample-rate aliasing, not an anomaly -- this app's raw-pad read
+		 * runs once per POLL_MS (300 ms), while gpio-qdec samples every
+		 * 500-2000 us (sample-time-us / idle-poll-time-us). A knob turned
+		 * through one or more whole quadrature cycles between two of this
+		 * app's 300 ms samples can leave `porta` reading the SAME level at
+		 * both samples (pad_diff false) while gpio-qdec, sampling ~150-600x
+		 * faster, caught the intervening edges and ticked. The same gap
+		 * that motivated folding the post-loop sw_net read into sw_moved
+		 * above (real ticks landing after the last in-loop pad sample) is
+		 * a second, narrower instance of this same asymmetry. Report the
+		 * likely-benign explanation, not "worth a bench look" -- a bench
+		 * operator chasing this as a fault would be chasing exactly the
+		 * kind of phantom this issue's own history (#2038) already warns
+		 * about. */
 		result = "FAIL";
 		reason = "the software decoder's tick count changed without the raw P3_0/P3_1 pad "
-		         "levels ever differing -- unexpected, since gpio-qdec samples the same pads "
-		         "this app reads raw; worth a bench look if this ever prints";
+		         "levels ever differing between two samples -- most likely sample-rate "
+		         "aliasing, not a fault: this app polls the raw pads once per 300 ms while "
+		         "gpio-qdec samples every 500-2000 us, so a knob turned through one or more "
+		         "full quadrature cycles between two 300 ms pad samples can tick the software "
+		         "decoder without ever being caught mid-transition by the slower raw-pad read";
 	}
 
 	printf("[qenc] RESULT %s: %s (%d/%d clean reads, pad moved=%d, hw edges moved=%d "
