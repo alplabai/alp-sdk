@@ -8,6 +8,7 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio/gpio_emul.h>
+#include <zephyr/sys/time_units.h>
 #include <zephyr/ztest.h>
 
 #include "alp/blocks/pdm_mic.h"
@@ -830,6 +831,50 @@ ZTEST(alp_chips, test_tas2563_deinit_drops_sd_n_when_owned)
 
 	tas2563_deinit(&ctx);
 	zassert_equal(gpio_emul_output_get(tas_gpio_dev(), TAS_PIN_SD_N), 0, "deinit asserts SD_N low");
+
+	alp_gpio_close(sd_n);
+	alp_i2c_close(bus);
+}
+
+/* #2077: when tas2563_init() owns sd_n it must wait
+ * TAS2563_SDZ_RELEASE_WAIT_US after driving SDZ high and before its first
+ * I2C access (SLASET3D §7.3.11.1 "I2C communication is disabled" in
+ * Hardware Shutdown, §9.2's 100 us OTP-load floor) -- unlike the sd_n ==
+ * NULL case, this function drove the pin itself, so it knows exactly
+ * when to start counting instead of trusting an external caller.
+ *
+ * fake_tas2563.c's i2c-emul target does not model bus timing (the same
+ * limitation test_bmi323_init_honours_suspend_mode_communication_idle
+ * above documents for fake_bmi323.c), so this cannot assert the wait's
+ * POSITION relative to the first bus write -- only that tas2563_init()'s
+ * real wall-clock time is at least the documented floor when it owns
+ * sd_n.  That is still enough to catch the wait being dropped: nothing
+ * else on this path takes measurable time. */
+ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned)
+{
+	fake_tas2563_reset();
+	alp_gpio_t *sd_n = alp_gpio_open(TAS_PIN_SD_N);
+	zassert_not_null(sd_n);
+
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* k_uptime_ticks() is tick-resolution (too coarse to see a 200 us
+	 * spin land inside one system tick); k_cycle_get_32() tracks the
+	 * same HW cycle counter k_busy_wait() itself spins against, so it
+	 * actually resolves a sub-tick busy-wait. */
+	tas2563_t ctx;
+	uint32_t  t0 = k_cycle_get_32();
+	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n), ALP_OK);
+	uint64_t elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+
+	zassert_true(elapsed_us >= TAS2563_SDZ_RELEASE_WAIT_US,
+	             "tas2563_init() with sd_n owned took %llu us, want >= %u us "
+	             "(TAS2563_SDZ_RELEASE_WAIT_US) -- looks like the SDZ settle wait "
+	             "was dropped",
+	             (unsigned long long)elapsed_us,
+	             TAS2563_SDZ_RELEASE_WAIT_US);
 
 	alp_gpio_close(sd_n);
 	alp_i2c_close(bus);

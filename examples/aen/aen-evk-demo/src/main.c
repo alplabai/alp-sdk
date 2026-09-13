@@ -3916,20 +3916,13 @@ static const pinctrl_soc_pin_t amp_enable_mux[] = { PIN_P5_2__GPIO };
 #define AMP_FAULT_PAD_REN (1U << 16)
 static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
 
-#define SOUND_MUX_SETTLE_MS 10u
-/* SLASET3D §9.2 "Power Supply Sequencing": once SDZ is released, "additional
- * commands to the device should be delayed for 100 uS to allow the OTP to
- * load," and I2C is disabled entirely while HW shutdown holds (§7.3.11.1) --
- * so the first bus access after AMP_ENABLE (SD_N) goes high must wait past
- * that floor. k_usleep() is tick-rounded and may sleep longer than asked;
- * this value is chosen deliberately above the 100 us floor either way. */
-#define TAS2563_SDZ_RELEASE_WAIT_US 200u
-#define SOUND_SAMPLE_RATE_HZ        16000u
-#define SOUND_FRAMES_PER_BLOCK      256u
-#define SOUND_TONE_HZ               1000u
-#define SOUND_TONE_AMPLITUDE        20000 /* int16, leaves headroom below INT16_MAX */
-#define SOUND_TONE_BLOCKS           16u   /* 16 * 256 / 16000 Hz = 256 ms -- "keep it short". */
-#define SOUND_BASELINE_BLOCKS       8u    /* room-noise capture before the tone starts */
+#define SOUND_MUX_SETTLE_MS    10u
+#define SOUND_SAMPLE_RATE_HZ   16000u
+#define SOUND_FRAMES_PER_BLOCK 256u
+#define SOUND_TONE_HZ          1000u
+#define SOUND_TONE_AMPLITUDE   20000 /* int16, leaves headroom below INT16_MAX */
+#define SOUND_TONE_BLOCKS      16u   /* 16 * 256 / 16000 Hz = 256 ms -- "keep it short". */
+#define SOUND_BASELINE_BLOCKS  8u    /* room-noise capture before the tone starts */
 /* Both well under half of unity (255) -- "cap the level well below maximum". */
 #define SOUND_VOL_START   4u
 #define SOUND_VOL_CEILING 40u
@@ -4016,9 +4009,10 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
 	printf("[evkdemo] SOUND: AMP_FAULT (IRQ_N, P5_0) configured as input -> %d\n", rc);
 
-	/* SDZ (AMP_ENABLE) just went high above -- SLASET3D §9.2 requires
-	 * >= 100 us before the first I2C access, so wait before tas2563_init()
-	 * issues one. */
+	/* SDZ (AMP_ENABLE) just went high above, and tas2563_init() is called
+	 * below with sd_n=NULL -- WE own SD_N here, not the driver, so it is
+	 * on us to honour TAS2563_SDZ_RELEASE_WAIT_US
+	 * (include/alp/chips/tas2563.h) before its first I2C access. */
 	k_usleep(TAS2563_SDZ_RELEASE_WAIT_US);
 
 	/* --- 4. tas2563_init() on both amps, sd_n=NULL (step 2 drove it) --- */

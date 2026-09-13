@@ -182,6 +182,13 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 		if (s != ALP_OK) return s;
 		s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> chip out of HW shutdown */
 		if (s != ALP_OK) return s;
+		/* SLASET3D §7.3.11.1 / §9.2: I2C is disabled in Hardware Shutdown,
+		 * and SDZ needs TAS2563_SDZ_RELEASE_WAIT_US to settle (OTP load)
+		 * before the first I2C access below.  We just drove SDZ high
+		 * ourselves, so -- unlike the sd_n == NULL case, where a caller
+		 * owns the pin and this function has no way to know when it went
+		 * high -- we know exactly when to start counting. */
+		alp_delay_us(TAS2563_SDZ_RELEASE_WAIT_US);
 	}
 
 	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0.  Page 0

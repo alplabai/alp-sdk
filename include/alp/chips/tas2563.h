@@ -133,6 +133,19 @@ extern "C" {
  *  direction. */
 #define TAS2563_I2C_ADDR_BROADCAST 0x48u
 
+/** Minimum settle time between SDZ (AMP.ENABLE/SD_N) going high and the
+ *  first I2C access, in microseconds.  SLASET3D §9.2 "Power Supply
+ *  Sequencing": "After a hardware or software reset additional commands
+ *  to the device should be delayed for 100 uS to allow the OTP to load.
+ *  The above sequence should be completed before any I2C operation."
+ *  I2C is disabled for the whole time the part sits in Hardware Shutdown
+ *  (§7.3.11.1).  This value is chosen deliberately above that 100 us
+ *  floor.  @ref tas2563_init applies it itself when it owns @c sd_n; a
+ *  caller that owns SD_N externally (passes @c sd_n as NULL) must wait
+ *  at least this long, after releasing SDZ, before calling @ref
+ *  tas2563_init -- see that function's precondition below. */
+#define TAS2563_SDZ_RELEASE_WAIT_US 200u
+
 /** Operating-mode enum mapped onto the chip's `PWR_CTL.MODE[1:0]`
  *  field (SLASET3D §7.5.4 Table 7-104, p.66; §7.3.11.6 Table 7-8,
  *  p.35).  The fourth documented encoding, `11b` "Load Diagnostics
@@ -277,16 +290,13 @@ typedef struct {
  *                       elsewhere (or if the pin is tied permanently
  *                       to V+).
  *
- * @pre If the caller (not this function) is the one releasing SDZ --
- *      i.e. @p sd_n is NULL and SD_N is driven elsewhere -- at least
- *      100 us must have elapsed since that release before calling
- *      this function.  I2C is disabled for the whole time the part is
- *      in Hardware Shutdown (SLASET3D §7.3.11.1), and once SDZ goes
- *      high, "additional commands to the device should be delayed for
- *      100 uS to allow the OTP to load" (SLASET3D §9.2) before any I2C
- *      operation.  This function does not add that wait itself: it
- *      has no way to know when SD_N was actually released by a caller
- *      who owns the pin externally.
+ * @pre SDZ must have been high for at least @ref
+ *      TAS2563_SDZ_RELEASE_WAIT_US before the first I2C access (SLASET3D
+ *      §7.3.11.1 / §9.2).  If @p sd_n is non-NULL, this function drives
+ *      SDZ and applies that wait itself.  If @p sd_n is NULL, SD_N is
+ *      owned elsewhere and the CALLER must have released it at least
+ *      that long ago before calling this function -- it has no way to
+ *      know when an externally-owned pin actually went high.
  *
  * @return ALP_OK on a successful probe.
  * @retval ALP_ERR_INVAL  ctx or bus is NULL, or addr_7bit is not one
