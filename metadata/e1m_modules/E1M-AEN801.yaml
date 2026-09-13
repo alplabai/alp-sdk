@@ -83,7 +83,7 @@ on_module:
     # consumer treat the HyperRAM as fitted, and the boot banner advertised
     # 256 Mbit of external RAM on a module that has none.
     assembled:      false
-    capacity_mbit:  256             # 256 Mbit (32 MiB) -- the part, if fitted
+    capacity_mbit:  512             # 512 Mbit (64 MiB) -- the part, if fitted
     interface:      ospi0
     chip_select:    0                 # OSPI0 CS0 -- U9 -> OSPI0_SS0 per the R2 netlist
 
@@ -143,11 +143,11 @@ on_module:
 # Off-SoC module memory in the canonical cross-family shape (see
 # som-preset-v1.schema.json `memory:`).  Values are DERIVED from the
 # on_module facts above, never invented:
-#   dram_mbit  <- on_module.hyperram.capacity_mbit (populated on every
-#                 AEN BOM variant).
-#   flash_mbit <- TBD: the OSPI0 NOR (256 Mbit) is `assembled: optional`
-#                 (per-BOM variant), so a single number would be wrong
-#                 for the DNI variant.
+#   dram_mbit  <- on_module.hyperram.capacity_mbit when assembled,
+#                 else 0 (unpopulated on this SKU -- see below).
+#   flash_mbit <- on_module.ospi_memories.ospi0.capacity_mbit when
+#                 assembled, else 0 (unpopulated on this SKU -- see
+#                 below).
 memory:
   # E1M-AEN801 populates NEITHER external memory (both `assembled: false`
   # above); it runs from the SoC's on-die MRAM.  E1M-AEN803 is the SKU with

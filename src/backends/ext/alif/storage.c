@@ -164,8 +164,8 @@ static alp_status_t _do_key_provision(const uint8_t *key)
 	/* E1M-AEN803 is the SKU that populates OSPI0 on this shared PCB
 	 * (measured as an ISSI IS25WX256-JHLE on CS1, not Macronix --
 	 * issue #2041); E1M-AEN801 populates neither OSPI0 nor OSPI1.
-	 * No SoM in scope wires OSPI1 at all.  Revisit (add a bus
-	 * selector) if that changes -- see the file header. */
+	 * No SoM in scope wires an OSPI1 bus device.  Revisit (add a
+	 * bus selector) if that changes -- see the file header. */
 	ospi_write_key_svc_t pkt;
 
 	memset(&pkt, 0, sizeof(pkt));

@@ -1597,33 +1597,109 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     )
 
 
-def _aen_ospi_storage_banner_lines(sku_preset: dict[str, Any]) -> list[str]:
-    """Describe the SoM's OSPI0 NOR + HyperRAM for the board-header banner,
-    read from the SoM preset's own `on_module.ospi_memories.ospi0` /
-    `on_module.hyperram` fields rather than a hardcoded part name (#2062:
-    this banner used to hardcode Macronix/Winbond for every AEN SKU,
-    silently contradicting whichever preset's real `chip:` fields named a
-    different part -- e.g. E1M-AEN803's measured ISSI NOR + Infineon/
-    Cypress HyperRAM on this same U10/U9 footprint, issue #2041)."""
+def _aen_ospi_device_state(dev: dict[str, Any]) -> tuple[str, "str | None"]:
+    """(state, chip-or-None) for one `on_module` OSPI-family device dict
+    (`ospi_memories.ospi0` or `hyperram`).  `state` is one of `"populated"`,
+    `"not_populated"`, `"optional"` (#2062 review round 2 -- `assembled` is
+    a TRI-STATE field, not a bool: `"optional"` is Python-truthy, so a
+    naive `bool(dev.get("assembled"))` printed "populated" for the AEN301-
+    701 SKUs' genuinely-unresolved BOM question; a MISSING `assembled` key
+    means populated per the schema default `true` (see the bug that default
+    itself caused, documented at `metadata/e1m_modules/E1M-AEN801.yaml`'s
+    own `hyperram:` comment), not "not populated"). `chip` is `None` when
+    the field is `TBD`/absent so callers never print a placeholder part
+    name -- `is_tbd()` is the same helper `alp_orchestrate` uses for this."""
+    chip = dev.get("chip")
+    if not chip or is_tbd(chip):
+        chip = None
+    assembled = dev.get("assembled", True)
+    if assembled == "optional":
+        return "optional", chip
+    return ("populated" if assembled else "not_populated"), chip
+
+
+def _aen_ospi_device_clause(label: str, state: str, chip: "str | None") -> str:
+    """One device's own clause, e.g. `"OSPI0 NOR (IS25WX256-JHLE) is
+    populated"` / `"HyperRAM is not populated"` / `"OSPI0 NOR is
+    BOM-optional, not assumed populated"`."""
+    named = f"{label} ({chip})" if chip else label
+    verb = {"populated": "is populated",
+            "not_populated": "is not populated",
+            "optional": "is BOM-optional, not assumed populated"}[state]
+    return f"{named} {verb}"
+
+
+def _aen_ospi_population_clause(sku_preset: dict[str, Any]) -> tuple[str, bool]:
+    """Return `(clause, all_unpopulated)` describing the SoM preset's own
+    OSPI0 NOR + HyperRAM population, read from `on_module.
+    ospi_memories.ospi0` / `on_module.hyperram` rather than a hardcoded
+    claim (#2062: this used to hardcode Macronix/Winbond as "BOM-optional
+    and NOT populated on the current batch" for every AEN SKU alike --
+    both the board-header banner and the MRAM-partition-map comment now
+    call THIS one function, so they cannot disagree with each other or
+    with the real preset the way a board emitted for a from-scratch
+    "populated" preset showed they could: the old banner said populated,
+    the old partition-map comment still said "not populated on this
+    batch" two paragraphs later in the SAME file).
+
+    `all_unpopulated` is True only when NEITHER device is ever populated
+    (`not_populated` or `optional` for both) -- the one fact the
+    partition-map comment needs to decide its own wording."""
     on_module = sku_preset.get("on_module") or {}
     ospi0 = (on_module.get("ospi_memories") or {}).get("ospi0") or {}
     hyperram = on_module.get("hyperram") or {}
-    nor_chip = ospi0.get("chip") or "TBD"
-    ram_chip = hyperram.get("chip") or "TBD"
-    populated = bool(ospi0.get("assembled")) or bool(hyperram.get("assembled"))
-    if populated:
-        tail = (f"({nor_chip}) + HyperRAM ({ram_chip}) are populated on this "
-                 "SKU, but neither is used for XIP boot here (OSPI_XIP_SER "
-                 "does not exist on this die -- see "
-                 "examples/aen/aen-ospi-regcheck);")
+    nor_state, nor_chip = _aen_ospi_device_state(ospi0)
+    ram_state, ram_chip = _aen_ospi_device_state(hyperram)
+    all_unpopulated = "populated" not in (nor_state, ram_state)
+
+    if nor_state == ram_state:
+        nor_named = f"OSPI0 NOR ({nor_chip})" if nor_chip else "OSPI0 NOR"
+        ram_named = f"HyperRAM ({ram_chip})" if ram_chip else "HyperRAM"
+        verb = {"populated": "are populated",
+                "not_populated": "are not populated",
+                "optional": "are BOM-optional, not assumed populated"}[nor_state]
+        clause = f"{nor_named} + {ram_named} {verb}"
     else:
-        tail = (f"({nor_chip}) + HyperRAM ({ram_chip}) are not populated on "
-                 "this SKU, so there is no external XIP / flash device;")
-    wrapped = textwrap.wrap(tail, width=68)
+        clause = (f"{_aen_ospi_device_clause('OSPI0 NOR', nor_state, nor_chip)}; "
+                   f"{_aen_ospi_device_clause('HyperRAM', ram_state, ram_chip)}")
+    return clause, all_unpopulated
+
+
+def _aen_ospi_storage_banner_lines(sku_preset: dict[str, Any]) -> list[str]:
+    """Describe the SoM's OSPI0 NOR + HyperRAM for the board-header banner
+    -- see `_aen_ospi_population_clause()`, the shared source this and the
+    MRAM-partition-map comment both read."""
+    clause, all_unpopulated = _aen_ospi_population_clause(sku_preset)
+    if all_unpopulated:
+        tail = f"{clause}, so there is no external XIP / flash device;"
+    else:
+        tail = (f"{clause}; neither is used for XIP boot here "
+                 "(OSPI_XIP_SER does not exist on this die -- see "
+                 "examples/aen/aen-ospi-regcheck);")
+    wrapped = textwrap.wrap(tail, width=68, break_on_hyphens=False)
     return [
-        " *   - runs boot + storage from on-die MRAM only.  The SoM's OSPI0 NOR",
+        " *   - runs boot + storage from on-die MRAM only.  The SoM's",
         *(f" *     {line}" for line in wrapped),
     ]
+
+
+def _aen_mram_only_comment_lines(sku_preset: dict[str, Any], tail: str) -> list[str]:
+    """The MRAM partition-map comment's own "why MRAM-only" sentence,
+    from the same `_aen_ospi_population_clause()` the banner reads (#2062
+    review round 2: this used to hardcode "the SoM OSPI NOR + HyperRAM
+    are not populated on this batch" unconditionally, so a preset that
+    DOES populate them got a board tree contradicting its own banner two
+    paragraphs up). *tail* is the caller's own ending clause (what lives
+    in MRAM as a result); MRAM-only itself holds regardless of population
+    -- OSPI_XIP_SER does not exist on this die (see the banner above), so
+    boot never uses OSPI0 for XIP even when a SKU populates it."""
+    clause, all_unpopulated = _aen_ospi_population_clause(sku_preset)
+    if all_unpopulated:
+        sentence = f"MRAM-only: {clause}, so {tail}"
+    else:
+        sentence = (f"MRAM-only regardless: {clause}; OSPI_XIP_SER does not "
+                     f"exist on this die (see the banner above), so {tail}")
+    return [f" * {line}" for line in textwrap.wrap(sentence, width=76, break_on_hyphens=False)]
 
 
 def _aen_dts(
@@ -1839,16 +1915,20 @@ def _aen_dts(
         lines += [
             f" *                      = {partitions_total_kib} KiB (of {total_kib} KiB App MRAM total)",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
-            f" * boot, this core's own slot0, reserved headroom, and storage all live in MRAM.",
+            *_aen_mram_only_comment_lines(
+                sku_preset,
+                "boot, this core's own slot0, reserved headroom, and "
+                "storage all live in MRAM."),
             " */",
         ]
     else:
         lines += [
             f" *                      = {total_kib} KiB",
             " *",
-            " * MRAM-only: the SoM OSPI NOR + HyperRAM are not populated on this batch, so",
-            " * all of boot, both image slots, scratch, and storage live in MRAM.",
+            *_aen_mram_only_comment_lines(
+                sku_preset,
+                "all of boot, both image slots, scratch, and storage live "
+                "in MRAM."),
             " */",
         ]
     lines += [
