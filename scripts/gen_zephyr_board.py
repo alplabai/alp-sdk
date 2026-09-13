@@ -1597,18 +1597,61 @@ def _aen_kconfig_defconfig(dir_name: str, role: str, part: str) -> str:
     )
 
 
-def _aen_ospi_device_state(dev: dict[str, Any]) -> tuple[str, "str | None"]:
+#: Per-device state -> the singular ("is ...") / plural ("are ...") verb
+#: phrase both `_aen_ospi_device_clause()` and `_aen_ospi_population_clause()`
+#: read, so the two forms can't drift apart (#2062 review round 4).
+_AEN_OSPI_STATE_PHRASE = {
+    "populated": "populated",
+    "not_populated": "not populated",
+    "optional": "BOM-optional, not assumed populated",
+}
+
+#: Why this SDK's AEN board never uses the OSPI0 NOR/HyperRAM for XIP boot,
+#: EVEN when a preset populates (or might populate) them -- #2062 review
+#: round 3: "OSPI_XIP_SER does not exist on this die" is a true, cited fact
+#: (Alif `soc_features.h` `SOC_FEAT_OSPI_HAS_XIP_SER 0` for AE822), but it is
+#: NOT proof XIP is impossible on this silicon -- Alif's own
+#: `ospi_psram_xip.c` compiles `ospi_control_xip_ss()` out under that same
+#: guard and STILL calls `aes_enable_xip()`; `flash_ospi_alif.c` documents
+#: AE822 doing XiP "through a single FIFO location". The real reasons this
+#: driver stack never attempts it: hal_alif's OWN `alif_hal_ospi_xip_enable()`
+#: unconditionally targets the absent `XIP_SER` register (a bus fault, not a
+#: graceful no-op), and `flash_ospi_alif.c` ships no `flash_driver_api` at all
+#: (#915) -- so there is no in-tree driver path that would use OSPI0 for XIP
+#: today regardless of population. Never follow the die-level fact alone with
+#: a "so" -- always cite this instead.
+_AEN_OSPI_XIP_GAP = (
+    "hal_alif's alif_hal_ospi_xip_enable() targets the XIP_SER register, "
+    "absent on this die, and flash_ospi_alif.c ships no flash_driver_api "
+    "-- #915")
+
+
+def _aen_ospi_device_state(
+        dev: "dict[str, Any] | None") -> tuple[str, "str | None"]:
     """(state, chip-or-None) for one `on_module` OSPI-family device dict
-    (`ospi_memories.ospi0` or `hyperram`).  `state` is one of `"populated"`,
-    `"not_populated"`, `"optional"` (#2062 review round 2 -- `assembled` is
-    a TRI-STATE field, not a bool: `"optional"` is Python-truthy, so a
-    naive `bool(dev.get("assembled"))` printed "populated" for the AEN301-
-    701 SKUs' genuinely-unresolved BOM question; a MISSING `assembled` key
-    means populated per the schema default `true` (see the bug that default
-    itself caused, documented at `metadata/e1m_modules/E1M-AEN801.yaml`'s
-    own `hyperram:` comment), not "not populated"). `chip` is `None` when
-    the field is `TBD`/absent so callers never print a placeholder part
-    name -- `is_tbd()` is the same helper `alp_orchestrate` uses for this."""
+    (`ospi_memories.ospi0` or `hyperram`).  *dev* is `None` when the block
+    itself is ABSENT from the preset -- the schema only requires
+    `on_module.silicon`, so omitting `ospi_memories:`/`hyperram:` entirely
+    is valid, a different fact from a declared-but-empty block (#2062
+    review round 4: the old code collapsed both to `{}` via `... or {}`,
+    so an undeclared device hit the `assembled` default same as a
+    declared one with the key merely omitted, and got printed as
+    "populated"). `state` is `"absent"` for that case; callers must leave
+    an absent device out of the clause text entirely.
+
+    For a DECLARED block, `state` is one of `"populated"`, `"not_populated"`,
+    `"optional"` (#2062 review round 2 -- `assembled` is a TRI-STATE field,
+    not a bool: `"optional"` is Python-truthy, so a naive
+    `bool(dev.get("assembled"))` printed "populated" for the AEN301-701
+    SKUs' genuinely-unresolved BOM question; a MISSING `assembled` key on a
+    DECLARED device means populated per the schema default `true` (see the
+    bug that default itself caused, documented at `metadata/e1m_modules/
+    E1M-AEN801.yaml`'s own `hyperram:` comment), not "not populated"). `chip`
+    is `None` when the field is `TBD`/absent so callers never print a
+    placeholder part name -- `is_tbd()` is the same helper `alp_orchestrate`
+    uses for this."""
+    if dev is None:
+        return "absent", None
     chip = dev.get("chip")
     if not chip or is_tbd(chip):
         chip = None
@@ -1621,17 +1664,16 @@ def _aen_ospi_device_state(dev: dict[str, Any]) -> tuple[str, "str | None"]:
 def _aen_ospi_device_clause(label: str, state: str, chip: "str | None") -> str:
     """One device's own clause, e.g. `"OSPI0 NOR (IS25WX256-JHLE) is
     populated"` / `"HyperRAM is not populated"` / `"OSPI0 NOR is
-    BOM-optional, not assumed populated"`."""
+    BOM-optional, not assumed populated"`.  Never called with `state ==
+    "absent"` -- callers exclude an absent device before reaching here."""
     named = f"{label} ({chip})" if chip else label
-    verb = {"populated": "is populated",
-            "not_populated": "is not populated",
-            "optional": "is BOM-optional, not assumed populated"}[state]
-    return f"{named} {verb}"
+    return f"{named} is {_AEN_OSPI_STATE_PHRASE[state]}"
 
 
-def _aen_ospi_population_clause(sku_preset: dict[str, Any]) -> tuple[str, bool]:
-    """Return `(clause, all_unpopulated)` describing the SoM preset's own
-    OSPI0 NOR + HyperRAM population, read from `on_module.
+def _aen_ospi_population_clause(
+        sku_preset: dict[str, Any]) -> tuple[str, str, int]:
+    """Return `(clause, category, populated_count)` describing the SoM
+    preset's own OSPI0 NOR + HyperRAM population, read from `on_module.
     ospi_memories.ospi0` / `on_module.hyperram` rather than a hardcoded
     claim (#2062: this used to hardcode Macronix/Winbond as "BOM-optional
     and NOT populated on the current batch" for every AEN SKU alike --
@@ -1642,40 +1684,70 @@ def _aen_ospi_population_clause(sku_preset: dict[str, Any]) -> tuple[str, bool]:
     the old partition-map comment still said "not populated on this
     batch" two paragraphs later in the SAME file).
 
-    `all_unpopulated` is True only when NEITHER device is ever populated
-    (`not_populated` or `optional` for both) -- the one fact the
-    partition-map comment needs to decide its own wording."""
+    An ABSENT device block (see `_aen_ospi_device_state()`) is left out of
+    *clause* entirely -- it is never named "not populated", since there is
+    no declared device to describe.
+
+    `category` is `"populated"` if either device is definitely populated,
+    `"optional"` if neither is definite but at least one MIGHT be
+    (`assembled: "optional"`), else `"not_populated"` (every declared
+    device is `assembled: false`, and an absent block contributes
+    nothing).  `populated_count` is how many of the (present) devices are
+    definitely `"populated"` -- callers need it for singular/plural
+    agreement when exactly one of two declared devices is populated."""
     on_module = sku_preset.get("on_module") or {}
-    ospi0 = (on_module.get("ospi_memories") or {}).get("ospi0") or {}
-    hyperram = on_module.get("hyperram") or {}
+    ospi_memories = on_module.get("ospi_memories")
+    ospi0 = ospi_memories.get("ospi0") if ospi_memories else None
+    hyperram = on_module.get("hyperram")
     nor_state, nor_chip = _aen_ospi_device_state(ospi0)
     ram_state, ram_chip = _aen_ospi_device_state(hyperram)
-    all_unpopulated = "populated" not in (nor_state, ram_state)
 
-    if nor_state == ram_state:
-        nor_named = f"OSPI0 NOR ({nor_chip})" if nor_chip else "OSPI0 NOR"
-        ram_named = f"HyperRAM ({ram_chip})" if ram_chip else "HyperRAM"
-        verb = {"populated": "are populated",
-                "not_populated": "are not populated",
-                "optional": "are BOM-optional, not assumed populated"}[nor_state]
-        clause = f"{nor_named} + {ram_named} {verb}"
+    devices = [(label, state, chip) for label, state, chip in (
+        ("OSPI0 NOR", nor_state, nor_chip), ("HyperRAM", ram_state, ram_chip))
+        if state != "absent"]
+    populated_count = sum(1 for _, state, _ in devices if state == "populated")
+
+    if not devices:
+        return ("no OSPI0 NOR or HyperRAM is declared on this SoM preset",
+                 "not_populated", 0)
+
+    states = {state for _, state, _ in devices}
+    if "populated" in states:
+        category = "populated"
+    elif "optional" in states:
+        category = "optional"
     else:
-        clause = (f"{_aen_ospi_device_clause('OSPI0 NOR', nor_state, nor_chip)}; "
-                   f"{_aen_ospi_device_clause('HyperRAM', ram_state, ram_chip)}")
-    return clause, all_unpopulated
+        category = "not_populated"
+
+    if len(devices) == 2 and devices[0][1] == devices[1][1]:
+        (nor_label, state, nchip), (ram_label, _, rchip) = devices
+        nor_named = f"{nor_label} ({nchip})" if nchip else nor_label
+        ram_named = f"{ram_label} ({rchip})" if rchip else ram_label
+        clause = f"{nor_named} + {ram_named} are {_AEN_OSPI_STATE_PHRASE[state]}"
+    else:
+        clause = "; ".join(_aen_ospi_device_clause(label, state, chip)
+                             for label, state, chip in devices)
+    return clause, category, populated_count
 
 
 def _aen_ospi_storage_banner_lines(sku_preset: dict[str, Any]) -> list[str]:
     """Describe the SoM's OSPI0 NOR + HyperRAM for the board-header banner
     -- see `_aen_ospi_population_clause()`, the shared source this and the
-    MRAM-partition-map comment both read."""
-    clause, all_unpopulated = _aen_ospi_population_clause(sku_preset)
-    if all_unpopulated:
-        tail = f"{clause}, so there is no external XIP / flash device;"
+    MRAM-partition-map comment both read, and `_AEN_OSPI_XIP_GAP` for why
+    a populated (or possibly-populated) device still never sees XIP boot
+    here."""
+    clause, category, populated_count = _aen_ospi_population_clause(sku_preset)
+    if category == "populated":
+        # Singular/plural: "neither" only holds when BOTH declared devices
+        # are actually populated (#2062 review round 4) -- a mixed preset
+        # (one populated, one not/absent) gets the singular form instead.
+        who = "neither is" if populated_count == 2 else "the populated device is not"
+        tail = f"{clause}; {who} used for XIP boot here ({_AEN_OSPI_XIP_GAP});"
+    elif category == "optional":
+        tail = (f"{clause}, so no external XIP / flash device is assumed -- "
+                 f"even if fitted, the same gap applies ({_AEN_OSPI_XIP_GAP});")
     else:
-        tail = (f"{clause}; neither is used for XIP boot here "
-                 "(OSPI_XIP_SER does not exist on this die -- see "
-                 "examples/aen/aen-ospi-regcheck);")
+        tail = f"{clause}, so there is no external XIP / flash device;"
     wrapped = textwrap.wrap(tail, width=68, break_on_hyphens=False)
     return [
         " *   - runs boot + storage from on-die MRAM only.  The SoM's",
@@ -1691,14 +1763,18 @@ def _aen_mram_only_comment_lines(sku_preset: dict[str, Any], tail: str) -> list[
     DOES populate them got a board tree contradicting its own banner two
     paragraphs up). *tail* is the caller's own ending clause (what lives
     in MRAM as a result); MRAM-only itself holds regardless of population
-    -- OSPI_XIP_SER does not exist on this die (see the banner above), so
-    boot never uses OSPI0 for XIP even when a SKU populates it."""
-    clause, all_unpopulated = _aen_ospi_population_clause(sku_preset)
-    if all_unpopulated:
-        sentence = f"MRAM-only: {clause}, so {tail}"
+    -- see `_AEN_OSPI_XIP_GAP`; the die-level XIP_SER absence alone does
+    NOT imply it (round 3)."""
+    clause, category, _populated_count = _aen_ospi_population_clause(sku_preset)
+    if category == "populated":
+        sentence = (f"MRAM-only regardless: {clause}; {_AEN_OSPI_XIP_GAP} "
+                     f"(see the banner above), so {tail}")
+    elif category == "optional":
+        sentence = (f"MRAM-only: {clause}; even if fitted, the same gap "
+                     f"applies ({_AEN_OSPI_XIP_GAP}, see the banner above), "
+                     f"so {tail}")
     else:
-        sentence = (f"MRAM-only regardless: {clause}; OSPI_XIP_SER does not "
-                     f"exist on this die (see the banner above), so {tail}")
+        sentence = f"MRAM-only: {clause}, so {tail}"
     return [f" * {line}" for line in textwrap.wrap(sentence, width=76, break_on_hyphens=False)]
 
 
