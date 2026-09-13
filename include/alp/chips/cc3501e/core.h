@@ -396,8 +396,21 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx);
  * @ref ALP_ERR_TIMEOUT, call this function ONCE and retry that same op ONCE.
  * That takes 2 in 16 to roughly 1 in 128. A second failure is a real failure
  * and must be surfaced, not retried again; a LATER op failing the same way is
- * not this condition and must not be papered over the same way.  This is
- * app-level policy, not driver behaviour -- do not fold it into any op
+ * not this condition and must not be papered over the same way.
+ *
+ * DELIBERATELY @ref ALP_ERR_TIMEOUT ONLY -- never @ref ALP_ERR_IO, even though
+ * a caller who remembers the spoken "-4 or -5" form of this condition will be
+ * tempted to widen the trigger.  poll_by_repeat() (cc3501e_core.c) treats a
+ * bare ALP_ERR_IO as retryable and loops it to the deadline, so a wedged link
+ * cannot surface as -5 out of a worker-routed call -- it surfaces as -4 once
+ * the budget elapses.  The only way -5 emerges from that loop is its
+ * `terminal_decoded_io` check: a well-framed, CRC-valid reply the device
+ * itself decoded as RESP_ERR_RADIO / RESP_ERR_PROTOCOL / RESP_ERR_INTERNAL.
+ * The link is ALIVE in that case -- it answered, just with a real fault --
+ * so hard-resetting it on a -5 would destroy a genuine RF/firmware
+ * diagnostic instead of recovering a wedge.
+ *
+ * This is app-level policy, not driver behaviour -- do not fold it into any op
  * function in this driver, because a caller mid-association or mid-BLE-link
  * must not silently lose that state to a reset it never asked for.  This
  * function only pulses the line and blind-settles; it does not confirm the
