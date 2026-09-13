@@ -177,20 +177,32 @@ O.K."""
 # this lets one test prove the success/failure check is anchored on the
 # SPECIFIC main-image command, not "any loadbin, anywhere".
 #
-# Review round 3, finding 1 -- three more knobs, each reproducing a distinct
-# way session 1 can end without a clean `exit`/`Script processing
-# completed.`:
+# `go`'s default reply is the real one-line "Memory map ... is active"
+# banner (verbatim from all 5 real captures) -- `setpc`'s default reply is
+# nothing at all (also verbatim: real successful transcripts never print
+# anything for `setpc`), so the ordinary happy-path tests below exercise
+# the real empty-setpc/one-line-go shape, not a simplified one.
+#
+# Review round 3, finding 1/3/4 -- knobs, each reproducing a distinct way
+# session 1 can end without a clean `exit`/`Script processing completed.`,
+# or a distinct real JLinkExe V9.74 rejection string:
 #   CRASH_BEFORE_LOADBIN -- prints a literal "Segmentation fault" and the
 #     wrapper process itself exits (139, SIGSEGV's conventional code) right
 #     after echoing `halt`, BEFORE `loadbin` is ever reached -- the real
-#     bench evidence shape (JLinkExe segfaulting inside jlink-run.sh's
-#     `unshare` mid-session, before loadbin).
+#     bench evidence shape (JLinkExe crashing mid-session, around the
+#     `S/N`/`License(s)` banner just after `connect`).
 #   TRUNCATE_AFTER_LOADBIN_OK -- after the MAIN loadbin's real success
 #     block, `exit 0` immediately -- no `setpc`/`go`/`exit` echo, no
 #     "Script processing completed." -- simulating a transcript cut off
 #     right after a genuine `O.K.`.
-#   FAIL_SETPC -- `setpc` is echoed as normal but followed by a rejection
-#     line, simulating the entry point being refused.
+#   TRUNCATE_AFTER_GO -- after `go`'s real success line, `exit 0`
+#     immediately -- no `exit` echo, no "Script processing completed." --
+#     simulating a crash/kill AFTER the app is already running.
+#   FAIL_SETPC -- `setpc` replies with JLinkExe's REAL rejection string
+#     (`Syntax: SetPC <addr>`, a malformed/missing argument -- V9.74's OTHER
+#     real one is `CPU is not halted !`) instead of the made-up "Unknown
+#     command: 'setpc'." a review round found JLinkExe never actually
+#     prints.
 _FAKE_JLINK_RUN = f"""\
 #!/usr/bin/env bash
 place="$1"; shift
@@ -247,7 +259,16 @@ LOADBIN_OK_EOF
 		;;
 	setpc*)
 		if [ -n "${{FAIL_SETPC:-}}" ]; then
-			echo "Unknown command: 'setpc'."
+			echo "Syntax: SetPC <addr>"
+		fi
+		;;
+	go)
+		echo "Memory map 'after startup completion point' is active"
+		if [ -n "${{FAIL_GO_EXTRA:-}}" ]; then
+			echo "CPU is not halted !"
+		fi
+		if [ -n "${{TRUNCATE_AFTER_GO:-}}" ]; then
+			exit 0
 		fi
 		;;
 	mem8*)
@@ -627,13 +648,15 @@ def test_a_same_path_preload_loadbin_success_does_not_mask_the_main_loadbin_fail
 
 @_needs_e2e
 def test_session_one_crash_before_loadbin_names_the_crash_not_loadbin(tmp_path: Path) -> None:
-    """Review finding 1 (MAJOR), real bench evidence
-    (/tmp/ram-run.OQ2QgD/load.out:25): JLinkExe segfaulting inside
-    jlink-run.sh's `unshare` BEFORE `loadbin` ever ran must not be reported
-    as "loadbin did not report 'O.K.'" -- the session never attempted the
-    load, so that message would send an operator chasing the wrong thing
-    (and, on silicon, risks reading a stale prior console as this run's
-    output). The message must name the crash/truncation instead."""
+    """Review finding 1 (MAJOR), real bench evidence: a JLinkExe process
+    crashing mid-session -- around the 'S/N:'/'License(s):' banner lines,
+    just after 'Connecting to J-Link ...O.K.' and BEFORE the 'halt' echo,
+    let alone 'loadbin' -- must not be reported as "loadbin did not report
+    'O.K.'" -- the session never attempted the load, so that message would
+    send an operator chasing the wrong thing (and, on silicon, risks
+    reading a stale prior console as this run's output). The message must
+    name the crash/truncation instead (review round 3 finding 5: no local
+    path, no claim about how far the session got)."""
     res, calls, sandbox_tmpdir = _run_ram_run(
         tmp_path, extra_env={"CRASH_BEFORE_LOADBIN": "1"}
     )
@@ -642,13 +665,34 @@ def test_session_one_crash_before_loadbin_names_the_crash_not_loadbin(tmp_path: 
     assert "loadbin did not report" not in res.stderr, (
         f"a pre-loadbin crash must not be blamed on loadbin:\n{res.stderr}"
     )
-    assert "CRASHED" in res.stderr or "crashed" in res.stderr
+    assert "crashed" in res.stderr
     assert "RAM console (decoded)" not in res.stdout
     # Session 2 must never run after session 1 crashed.
     call_files = list(calls.glob("call-*.jlink"))
     assert len(call_files) == 2, (
         f"session 2 must never run after a session-1 crash, got "
         f"{len(call_files)} calls"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
+
+
+@_needs_e2e
+def test_session_one_truncated_right_after_go_is_a_hard_error(tmp_path: Path) -> None:
+    """Review finding 3 (MAJOR): a transcript cut right after the real
+    `J-Link>go` echo (and its "Memory map ... is active" line) -- no `exit`
+    echoed, no 'Script processing completed.' -- must not pass just because
+    loadbin/setpc/go all individually looked fine. This is the exact shape
+    a teardown crash (JLinkExe killed right after starting the app) leaves,
+    and pre-fix it exited 0 and decoded a stale console."""
+    res, calls, sandbox_tmpdir = _run_ram_run(tmp_path, extra_env={"TRUNCATE_AFTER_GO": "1"})
+
+    assert res.returncode == 10, f"expected exit 10:\n{res.stdout}\n{res.stderr}"
+    assert "RAM console (decoded)" not in res.stdout
+    call_files = list(calls.glob("call-*.jlink"))
+    assert len(call_files) == 2, (
+        f"session 2 must never run after a session-1 truncated right after "
+        f"go, got {len(call_files)} calls"
     )
     left = _workdirs(sandbox_tmpdir)
     assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
@@ -684,9 +728,12 @@ def test_session_one_truncated_right_after_loadbin_ok_is_a_hard_error(tmp_path: 
 
 @_needs_e2e
 def test_session_one_setpc_rejected_is_a_hard_error(tmp_path: Path) -> None:
-    """Review finding 1 (MAJOR): loadbin succeeding is not enough --
+    """Review finding 1/4 (MAJOR): loadbin succeeding is not enough --
     `setpc $ENTRY` itself can be rejected, and judging success on the
-    loadbin window alone let this pass silently."""
+    loadbin window alone let this pass silently. Uses JLinkExe V9.74's REAL
+    rejection string (`Syntax: SetPC <addr>`) -- an earlier version of this
+    check used a made-up `Unknown command: 'setpc'.` that real JLinkExe
+    never prints, so it could never actually fire."""
     res, calls, sandbox_tmpdir = _run_ram_run(tmp_path, extra_env={"FAIL_SETPC": "1"})
 
     assert res.returncode == 11, f"expected exit 11:\n{res.stdout}\n{res.stderr}"
@@ -695,6 +742,25 @@ def test_session_one_setpc_rejected_is_a_hard_error(tmp_path: Path) -> None:
     call_files = list(calls.glob("call-*.jlink"))
     assert len(call_files) == 2, (
         f"session 2 must never run after a rejected setpc, got "
+        f"{len(call_files)} calls"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
+
+
+@_needs_e2e
+def test_session_one_go_with_unexpected_output_is_a_hard_error(tmp_path: Path) -> None:
+    """Review finding 4 (MAJOR): `go`'s window must contain ONLY the real
+    'Memory map ... is active' banner line(s) -- any other content (e.g.
+    JLinkExe's real 'CPU is not halted !' rejection, appearing here as
+    trailing noise after the banner) is a rejection, not a pass."""
+    res, calls, sandbox_tmpdir = _run_ram_run(tmp_path, extra_env={"FAIL_GO_EXTRA": "1"})
+
+    assert res.returncode == 11, f"expected exit 11:\n{res.stdout}\n{res.stderr}"
+    assert "RAM console (decoded)" not in res.stdout
+    call_files = list(calls.glob("call-*.jlink"))
+    assert len(call_files) == 2, (
+        f"session 2 must never run after a rejected go, got "
         f"{len(call_files)} calls"
     )
     left = _workdirs(sandbox_tmpdir)
@@ -726,15 +792,57 @@ def test_missing_build_dir_names_itself_not_the_uart_console_advice(tmp_path: Pa
 
 
 @_needs_e2e
-def test_a_signal_during_the_inter_session_sleep_keeps_the_workdir(tmp_path: Path) -> None:
-    """Review finding 3 (minor): SIGTERM during the host-side sleep between
-    sessions must not reach the EXIT trap with $?=0 and silently delete
+def _descendants_comm(pid: int) -> list[str]:
+    """`comm` of every process (in)directly rooted at `pid`, via /proc --
+    used to confirm the script is actually blocked in the host-side `sleep`
+    (not just that session 1 finished) before signalling it."""
+    out: list[str] = []
+    try:
+        kids = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+    except OSError:
+        return out
+    for k in kids:
+        try:
+            out.append(Path(f"/proc/{k}/comm").read_text().strip())
+        except OSError:
+            pass
+        out += _descendants_comm(int(k))
+    return out
+
+
+def test_a_sigterm_to_the_pid_during_the_inter_session_sleep_keeps_the_workdir(
+    tmp_path: Path,
+) -> None:
+    """Review finding 3 (minor)/round-3-followup finding 1 (BLOCKER)/finding 2
+    (minor): SIGTERM during the host-side sleep between sessions must not
+    reach the EXIT trap with an unexamined `$?=0` and silently delete
     WORKDIR -- that loses the transcript of exactly the hung/killed session
-    an operator most needs it for. Deterministic: poll for session 1's
-    CommandFile (call-2.jlink) to appear before signalling, so the process
-    is known to be in (or past) the inter-session sleep, then require an
-    explicit 143 exit (the script's own `trap 'exit 143' TERM`, not a bare
-    signal death) and a kept WORKDIR."""
+    an operator most needs it for.
+
+    An earlier version of this test used a 20s sleep with a 10s
+    `communicate` timeout and flaked ~5/10 runs with `TimeoutExpired`:
+    MEASURED (this script's own signal harness, and a bare two-line `sleep`
+    script with no traps at all) that bash defers an untrapped SIGTERM sent
+    to just its own pid (not process group -- e.g. `kill <pid>`, as here)
+    until the CURRENT foreground command -- here, the inter-session `sleep`
+    -- returns; this is bash's own signal-checking granularity, present
+    with or without a trap on this script's part, and is why an EARLIER fix
+    round's `trap 'exit N' INT/TERM` didn't actually help (it still waited
+    out the sleep) while regressing a calling loop's own Ctrl-C-abort logic
+    (a `trap ... INT` that just calls `exit 130` looks like an ordinary
+    non-signal exit to a `for` loop watching for a SIGINT-killed child, so
+    the loop didn't stop) and misrouting a mid-`jlink_run` signal's
+    "leaving transcripts" message into that call's own redirected output.
+    Fixed by dropping the INT/TERM traps entirely (signals keep bash's
+    default behaviour) and keying WORKDIR retention off a `$RUN_OK` flag
+    set just before the final success output, not `$?`.
+
+    Deterministic without depending on wall-clock luck: use a SHORT
+    sleep_ms (the script's own second positional arg) so the unavoidable
+    wait-for-the-foreground-`sleep` latency is short and bounded, poll
+    `/proc` for the actual `sleep` child (not just that session 1 finished)
+    before signalling, and use a `communicate` timeout comfortably above
+    the sleep itself."""
     import signal
     import time as _time
 
@@ -764,21 +872,32 @@ def test_a_signal_during_the_inter_session_sleep_keeps_the_workdir(tmp_path: Pat
     env["AEN_JLINK_RUN"] = str(wrapper)
     env.pop("FAIL_CALL", None)
 
+    SLEEP_MS = 3000
     proc = subprocess.Popen(
-        ["bash", str(RAM_RUN), str(bd), "20000", "0x10"],
+        ["bash", str(RAM_RUN), str(bd), str(SLEEP_MS), "0x10"],
         env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
     )
     deadline = _time.time() + 20
-    while _time.time() < deadline and not (calls / "call-2.jlink").exists():
-        _time.sleep(0.05)
-    assert (calls / "call-2.jlink").exists(), "session 1 never ran within 20s"
+    while _time.time() < deadline and "sleep" not in _descendants_comm(proc.pid):
+        _time.sleep(0.02)
+    assert "sleep" in _descendants_comm(proc.pid), "never entered the inter-session sleep within 20s"
 
     proc.send_signal(signal.SIGTERM)
-    stdout, stderr = proc.communicate(timeout=10)
+    # Comfortably above SLEEP_MS -- bash won't act on a pid-targeted signal
+    # until the running `sleep` returns on its own (see docstring).
+    stdout, stderr = proc.communicate(timeout=SLEEP_MS / 1000 + 15)
 
-    assert proc.returncode == 143, (
-        f"expected the script's own 'trap exit 143 TERM', got "
-        f"{proc.returncode}:\n{stdout}\n{stderr}"
+    # Untrapped SIGTERM kills bash BY the signal (no explicit `exit N`) --
+    # Python reports that as a negative returncode, not an ordinary exit
+    # code. This is also what proves the loop-Ctrl-C regression is gone:
+    # a calling loop's SIGINT-killed-child check needs exactly this shape.
+    assert proc.returncode == -signal.SIGTERM, (
+        f"expected the process to die BY SIGTERM itself (no INT/TERM trap):"
+        f" got {proc.returncode}\n{stdout}\n{stderr}"
+    )
+    assert "leaving transcripts" in stderr, (
+        f"the EXIT trap's keep-message must still reach stderr on a signal "
+        f"death:\n{stderr}"
     )
     left = _workdirs(sandbox_tmpdir)
     assert len(left) == 1, (

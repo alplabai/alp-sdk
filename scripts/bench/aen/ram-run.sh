@@ -37,6 +37,13 @@
 #     address slipping through here is exactly the bug this guards against.
 set -e
 
+# fd 3 -- a private copy of the ORIGINAL stderr, taken before anything else
+# redirects the real fd 2. The EXIT trap's "leaving transcripts" message
+# below writes here, not `>&2`, so it still reaches the terminal even if
+# delivered while a `jlink_run ... > file 2>&1` call's own redirection is
+# active (alp-sdk#2076 review round 3, finding 2).
+exec 3>&2
+
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
@@ -280,34 +287,49 @@ fi
 # under ..." message with nothing under it to inspect (alp-sdk#2076 review
 # round 3, finding 6).
 #
-# Removed only on a SUCCESSFUL exit (rc=0). Any non-zero exit -- including a
-# `set -e` abort, e.g. a missing preload file -- leaves WORKDIR in place and
-# says so: every "Transcript: ..." message this script or
-# bench_jlink_assert_connected prints is worthless if the file it names is
-# already gone by the time an operator reads it -- reproduced in review, a
-# session-2 failure cited a path an unconditional trap had already deleted
-# before the message was ever seen. Stale WORKDIRs from failed runs
-# therefore accumulate under $TMPDIR and need periodic manual cleanup, the
-# same tradeoff bench_atoc_replace_guard's own retained transcripts make
-# (bench-env.sh).
+# Removed only when $RUN_OK is set (just before the final success output,
+# near the bottom of this script) -- NOT keyed off $? (rc=0). An earlier
+# version of this fix added `trap 'exit N' INT/TERM` so a killed run would
+# still reach this EXIT trap with a known-good `$?`; review round 3
+# MEASURED (this script's own signal harness, plus a bare `sleep 20` with
+# no traps at all) that this regressed things and fixed nothing real:
+#   - a signal to the whole PROCESS GROUP -- a terminal Ctrl-C, or a
+#     `kill`/`pkill` targeting the group, the realistic case -- reaches the
+#     running child directly and kills this script (EXIT trap included)
+#     within milliseconds, trap or no trap. But `trap 'exit 130' INT` turns
+#     that into an ORDINARY `exit 130` as far as a calling `for i in 1 2; do
+#     ram-run.sh ...; done` loop is concerned -- its own Ctrl-C-abort check
+#     fires only on a child actually KILLED BY SIGINT, not one that merely
+#     exited 130, so it didn't stop (iteration 2 still ran a real load+go).
+#     Dropping the trap fixes this: this script now dies BY the signal like
+#     any other untrapped command (confirmed: a group SIGINT during a
+#     loop's first iteration now stops it before iteration 2).
+#   - a signal landing mid `jlink_run` wrote the "leaving transcripts" line
+#     into THAT call's own `> load.out 2>&1` redirection, not the terminal
+#     -- unrelated to the trap itself; fixed by fd 3 above regardless.
+#   - bash still runs the EXIT trap on an untrapped, signal-terminated exit
+#     (measured: WORKDIR is correctly retained with no INT/TERM trap at
+#     all), so no INT/TERM trap is needed for that either.
+# NOT fixed by any trap policy, because it isn't caused by one: a signal
+# sent to ONLY this script's own pid (`kill <pid>`, not through job
+# control) while it is blocked on a foreground child is deferred BY BASH
+# ITSELF until that child returns -- measured ~6s against a 6s foreground
+# `sleep`/`jlink_run` call, identical with the trap present or absent, and
+# reproduced with a bare two-line `sleep 20` script carrying no traps
+# whatsoever. Fixing that needs a background watcher forwarding the signal
+# to the actual child -- real machinery this script chooses not to add; a
+# real Ctrl-C or a process-group kill, the normal ways to stop a bench
+# script, are unaffected. `$?` at EXIT time has no well-defined "success"
+# value when the shell died from a signal -- checking $RUN_OK instead of
+# `$?` is what makes retention correct either way.
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/ram-run.XXXXXX")
 _ram_run_cleanup() {
-	local rc=$?
-	if [ "$rc" -eq 0 ]; then
+	if [ -n "${RUN_OK:-}" ]; then
 		rm -rf "$WORKDIR"
 	else
-		echo "ram-run: leaving transcripts under $WORKDIR (exit $rc) for inspection." >&2
+		echo "ram-run: leaving transcripts under $WORKDIR for inspection." >&3
 	fi
 }
-# SIGINT/SIGTERM must not reach _ram_run_cleanup with $?=0 -- an unhandled
-# INT/TERM during e.g. the inter-session `sleep` below otherwise let the
-# EXIT trap see a zero status and silently delete WORKDIR, losing the
-# transcript of exactly the hung/killed session an operator most needs it
-# for (contradicts the "leave it behind on failure" contract above;
-# alp-sdk#2076 review round 3, finding 3). Map both to their conventional
-# 128+signal exit codes explicitly.
-trap 'exit 130' INT
-trap 'exit 143' TERM
 trap _ram_run_cleanup EXIT
 
 # SAFETY GATE -- confirm the AEN E8 is on the other end BEFORE loadbin+go.
@@ -381,31 +403,45 @@ jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -C
 # reports an EMPTY console and reads as a crashed app.
 _connect_or_exit "$WORKDIR/load.out" "RAM-run $(basename "$BD") (load+go)"
 
-# Session-1 COMPLETENESS gate (alp-sdk#2076 review round 3, finding 1) --
+# Session-1 COMPLETENESS gate (alp-sdk#2076 review round 3, finding 1/3) --
 # _connect_or_exit above only proves the J-Link session reached SOME
-# command prompt; it does not prove `loadbin`, `setpc`, and `go` all ran to
-# completion, and judging success on the `loadbin` window alone let a
-# crashed or truncated session pass. Real bench evidence
-# (/tmp/ram-run.OQ2QgD/load.out:25): JLinkExe segfaulting inside
-# jlink-run.sh's `unshare` BEFORE `loadbin` ever ran still had echoed
-# `connect`/`halt` already, so it passed _connect_or_exit and fell into the
-# old loadbin-only check below, which reported the misleading "loadbin did
-# not report 'O.K.'" for a session that never attempted the load at all. On
-# silicon the core stays halted after `loadbin`'s own reset when that load
-# never happens, DTCM/`ram_console_buf` survives it, and session 2 then
-# reads the PREVIOUS run's console as this run's output -- the exact
-# stale-console case exit 8 exists to prevent; a crashed/truncated
-# session-1 transcript must fail just as hard, with an honest message that
-# names the crash/truncation instead of blaming `loadbin`.
-if grep -q 'Segmentation fault' "$WORKDIR/load.out"; then
-	echo "!! ram-run: session 1's J-Link process CRASHED (segmentation fault) --" >&2
-	echo "   the transcript is incomplete. This is NOT a loadbin/setpc/go" >&2
-	echo "   failure, it never got that far." >&2
+# command prompt; it does not prove `loadbin`, `setpc`, `go`, and `exit` all
+# ran to completion, and judging success on the `loadbin` window alone let a
+# crashed or truncated session pass (real bench evidence: a JLinkExe process
+# crashing mid-session, around the `S/N`/`License(s)` banner just after
+# `connect`, produced a transcript with no `loadbin` line at all -- the
+# pre-fix check reported that as "loadbin did not report 'O.K.'", which is
+# wrong: the session never reached loadbin). On silicon the core stays
+# halted at whatever `loadbin`/`setpc`/`go` last reached before a crash,
+# DTCM/`ram_console_buf` survives it, and session 2 then reads the PREVIOUS
+# run's console as this run's output -- the exact stale-console case exit 8
+# exists to prevent.
+#
+# JLinkExe prints one line -- `Script processing completed.` -- and ONLY
+# once it has finished running every command in the CommandFile, including
+# the final `exit`; nothing that happens to the process afterwards changes
+# that. Verified against 5 real V9.74 transcripts (present, verbatim, in
+# every one) and against the crash/truncation shapes review round 3
+# measured: a transcript cut right after `O.K.`, a transcript cut right
+# after `go` (with or without the calling shell's own "Aborted (core
+# dumped)"/"Killed" appended), and a crash before `loadbin` ever ran -- NONE
+# of them print this line, no matter where the crash lands, so this one
+# check replaces separately hunting a `Segmentation fault` string (which
+# only one crash shape produces) and separately confirming each of
+# `loadbin`/`setpc`/`go` was individually echoed (implied by this line's
+# presence -- JLinkExe cannot print it without having processed all of
+# them).
+if ! grep -qF 'Script processing completed.' "$WORKDIR/load.out"; then
+	echo "!! ram-run: session 1's transcript has no 'Script processing" >&2
+	echo "   completed.' line -- the J-Link process crashed, was killed, or" >&2
+	echo "   was truncated before finishing (this can happen at any point," >&2
+	echo "   including right after 'go'); this is NOT a reported" >&2
+	echo "   loadbin/setpc/go failure, just an incomplete session." >&2
 	echo "   Full transcript: $WORKDIR/load.out" >&2
 	exit 10
 fi
 
-# _session1_last_window <exact-echo-line> <transcript> -- print the lines
+# _session1_window <exact-echo-line> <transcript> -- print the lines
 # between the LAST occurrence of the exact echoed command and the next
 # `J-Link>` prompt. LAST, not first: a preload file that loads the SAME
 # $BIN at the SAME $BASE ahead of the main load (a legitimate use) would
@@ -414,7 +450,7 @@ fi
 # literal backslash/tab byte sequence in $BIN would otherwise be
 # awk-interpreted by `-v` (review finding 7, nit). Relies on gawk (checked
 # above), but does not itself need strtonum().
-_session1_last_window() {
+_session1_window() {
 	local echo_line="$1" transcript="$2"
 	ECHO_LINE="$echo_line" awk '
 	  $0 == ENVIRON["ECHO_LINE"] { f = 1; win = ""; next }
@@ -424,10 +460,14 @@ _session1_last_window() {
 	' "$transcript"
 }
 
-# A CONNECTED session can still fail the `loadbin` itself (e.g. a target RAM
-# access rejected, a bus fault mid-write) -- DTCM survives the SYSRESETREQ
-# `loadbin` triggers, so a stale image from an EARLIER run can boot instead
-# and its console would be read as if THIS load had succeeded.
+# A session that completed can still fail `loadbin` ITSELF (e.g. a target
+# RAM access rejected, a bus fault mid-write) -- DTCM survives the
+# SYSRESETREQ `loadbin` triggers, so a stale image from an EARLIER run can
+# boot instead and its console would be read as if THIS load had succeeded.
+# JLinkExe does not abort the rest of the CommandFile on a failed `loadbin`
+# either (it still runs `setpc`/`go`/`exit` and prints "Script processing
+# completed." regardless), so the completeness gate above can't catch this
+# -- it needs its own check.
 #
 # POSITIVE check, scoped to an EXACT window, not a whole-transcript
 # substring scan -- both were bench-measured wrong on evk-02/evk-03
@@ -449,50 +489,36 @@ _session1_last_window() {
 # not a substring) -- the real success marker JLinkExe itself prints,
 # nothing weaker.
 LOADBIN_ECHO="J-Link>loadbin $BIN $BASE"
-if ! grep -qF "$LOADBIN_ECHO" "$WORKDIR/load.out"; then
-	echo "!! ram-run: session 1's transcript never echoed the loadbin command --" >&2
-	echo "   the session looks crashed or was truncated before it got there," >&2
-	echo "   this is NOT a loadbin failure." >&2
-	echo "   Full transcript: $WORKDIR/load.out" >&2
-	exit 10
-fi
-if ! _session1_last_window "$LOADBIN_ECHO" "$WORKDIR/load.out" | grep -qx 'O\.K\.'; then
+if ! _session1_window "$LOADBIN_ECHO" "$WORKDIR/load.out" | grep -qx 'O\.K\.'; then
 	echo "!! ram-run: loadbin did not report 'O.K.' -- refusing to treat this as a" >&2
 	echo "   fresh load (a STALE image already resident in ITCM/DTCM can otherwise" >&2
 	echo "   boot and be read back as if this run's image had loaded)." >&2
-	_session1_last_window "$LOADBIN_ECHO" "$WORKDIR/load.out" >&2
+	_session1_window "$LOADBIN_ECHO" "$WORKDIR/load.out" >&2
 	exit 8
 fi
 
-# setpc/go must ALSO have run to completion -- judging success on the
-# loadbin window alone (the pre-fix shape) let a transcript truncated right
-# after loadbin's "O.K." (JLinkExe killed/crashed before setpc/go) exit 0
-# and read back a stale console exactly like the crash-before-loadbin case
-# above (review finding 1). No "O.K." marker exists for setpc/go
-# themselves, so each check is: the command was echoed at all (else
-# crashed/truncated, exit 10), and its window carries no rejection wording
-# (else exit 11).
-#
-# ponytail: the rejection-wording scan is a heuristic -- no real
-# rejected-setpc/go JLinkExe transcript was available to anchor an exact
-# string on. Tighten to a literal match if one surfaces.
-_check_session1_not_rejected() {
-	local label="$1" echo_line="$2"
-	if ! grep -qF "$echo_line" "$WORKDIR/load.out"; then
-		echo "!! ram-run: session 1's transcript ended before it echoed '$label' --" >&2
-		echo "   the session looks crashed or was truncated right before it, this" >&2
-		echo "   is NOT a reported '$label' failure." >&2
-		echo "   Full transcript: $WORKDIR/load.out" >&2
-		exit 10
-	fi
-	if _session1_last_window "$echo_line" "$WORKDIR/load.out" | grep -qiE 'unknown command|invalid|cannot|fail'; then
-		echo "!! ram-run: '$label' was rejected:" >&2
-		_session1_last_window "$echo_line" "$WORKDIR/load.out" >&2
-		exit 11
-	fi
-}
-_check_session1_not_rejected "setpc $ENTRY" "J-Link>setpc $ENTRY"
-_check_session1_not_rejected "go" "J-Link>go"
+# setpc/go succeed SILENTLY on real JLinkExe V9.74, verified against 5 real
+# transcripts: `setpc`'s own window is EMPTY (it prints nothing), and
+# `go`'s window contains ONLY the one-line "Memory map '...' is active"
+# banner -- ANYTHING else is a rejection. This replaces an earlier
+# generic-keyword heuristic (`unknown command|invalid|cannot|fail`) that
+# never fired on either of JLinkExe's REAL rejection strings -- `Syntax:
+# SetPC <addr>` (bad/missing argument) and `CPU is not halted !` (setpc
+# issued against a running core) -- because neither contains any of those
+# words (review round 3, finding 4).
+SETPC_WINDOW="$(_session1_window "J-Link>setpc $ENTRY" "$WORKDIR/load.out")"
+if [ -n "$SETPC_WINDOW" ]; then
+	echo "!! ram-run: 'setpc $ENTRY' was rejected:" >&2
+	printf '%s\n' "$SETPC_WINDOW" >&2
+	exit 11
+fi
+GO_WINDOW="$(_session1_window "J-Link>go" "$WORKDIR/load.out")"
+if printf '%s\n' "$GO_WINDOW" | grep -vqE "^\$|^Memory map '.*' is active\$"; then
+	echo "!! ram-run: 'go' did not report the expected 'Memory map ... is" >&2
+	echo "   active' banner -- treating as rejected:" >&2
+	printf '%s\n' "$GO_WINDOW" >&2
+	exit 11
+fi
 
 # Host-side wait -- Sleep no longer runs inside a JLinkExe session, so the
 # host waits the same $SLEEP milliseconds between the two sessions instead.
@@ -541,6 +567,7 @@ if ! grep -qE '^[0-9A-Fa-f]+ = ' "$WORKDIR/read.out"; then
 	echo "!! ram-run: no memory dump line in the read session's transcript -- refusing to decode an empty read as a console." >&2
 	exit 9
 fi
+RUN_OK=1
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.
 awk '
