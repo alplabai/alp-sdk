@@ -262,8 +262,10 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 #   ****** Error: Verification failed @ address 0x80010000
 # This is a RACE between the SES re-booting slot0 and J-Link's program/verify,
 # which is why the SAME app passed and failed under identical settings and why
-# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout doing
-# long I/O) failed far more often than one that idles quickly.  It is NOT flaky
+# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout --
+# renamed aen-sdhc-probe, #2051, and no longer doing any I/O at all now that
+# sdhc0 is disabled on this board -- doing long I/O at the time) failed far
+# more often than one that idles quickly.  It is NOT flaky
 # MRAM and NOT a probe-firmware limit.  `noreset` keeps the single explicit
 # reset+halt below as the only reset in the sequence, so nothing is executing
 # from MRAM while MRAM is being written.
