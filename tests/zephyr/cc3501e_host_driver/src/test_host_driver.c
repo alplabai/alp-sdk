@@ -231,6 +231,14 @@ static bool g_force_dead_phase_zero_payload;
 static bool     g_get_ip_no_address;
 static uint32_t g_get_ip_io_down_remaining;
 
+/* #2035 GET_DIAG_INFO reply length dial. The bridge firmware appended
+ * dhcp_state (byte 16) + netif_status (byte 17) ADDITIVELY, growing the reply
+ * 16 -> 18; this lets a test stage the pre-#2035 16-byte shape (backward
+ * compat: must still succeed, new fields read as "not reported") or a
+ * malformed <16-byte shape (must fail). Cleared by slave_reset(), so the
+ * default across the suite is the full 18-byte reply. */
+static uint8_t g_diag_info_reply_len = 18u;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -261,6 +269,7 @@ static void slave_reset(void)
 	g_force_dead_phase_zero_payload    = false;
 	g_get_ip_no_address                = false;
 	g_get_ip_io_down_remaining         = 0u;
+	g_diag_info_reply_len              = 18u;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -502,9 +511,12 @@ static void slave_dispatch(void)
 	}
 
 	case ALP_CC3501E_CMD_GET_DIAG_INFO: {
-		/* 16-byte alp_cc3501e_diag_info_t: fw_version(LE16) | reset_cause |
-		 * role | uptime_ms(LE32) | free_heap(LE32) | last_error | reserved[3]. */
-		uint8_t d[16] = { 0 };
+		/* alp_cc3501e_diag_info_t: fw_version(LE16) | reset_cause | role |
+		 * uptime_ms(LE32) | free_heap(LE32) | last_error | reserved[3] |
+		 * dhcp_state | netif_status.  The last two bytes grew ADDITIVELY
+		 * (alp-sdk#2035); g_diag_info_reply_len dials how many the slave
+		 * actually sends, per the pre/post-#2035 tests below. */
+		uint8_t d[18] = { 0 };
 		d[0]          = 0x02u; /* fw_version = 0x0102 */
 		d[1]          = 0x01u;
 		d[2]          = ALP_CC3501E_RESET_POWER_ON;
@@ -517,8 +529,10 @@ static void slave_dispatch(void)
 		d[9]          = 0x23u;
 		d[10]         = 0x01u;
 		d[11]         = 0x00u;
-		d[12]         = ALP_CC3501E_RESP_OK; /* last_error */
-		stage_reply(ALP_CC3501E_RESP_OK, d, 16u);
+		d[12]         = ALP_CC3501E_RESP_OK;          /* last_error */
+		d[16]         = ALP_CC3501E_DHCP_STATE_BOUND; /* dhcp_state */
+		d[17]         = 0x17u;                        /* netif_status: UP|LINK_UP + dhcp->tries=5 */
+		stage_reply(ALP_CC3501E_RESP_OK, d, g_diag_info_reply_len);
 		break;
 	}
 	case ALP_CC3501E_CMD_DIAG_GET_STATS: {
@@ -1183,6 +1197,43 @@ ZTEST(cc3501e_host_driver, test_diag_info_decodes_all_fields)
 	zassert_equal(d.uptime_ms, 0x00ABCDEFu, "uptime_ms LE32");
 	zassert_equal(d.free_heap_bytes, 0x00012340u, "free_heap_bytes LE32");
 	zassert_equal(d.last_error, ALP_CC3501E_RESP_OK, "last_error");
+	/* #2035: the 18-byte reply's two new bytes. */
+	zassert_equal(d.dhcp_state, ALP_CC3501E_DHCP_STATE_BOUND, "dhcp_state byte 16");
+	zassert_equal(d.netif_status & ALP_CC3501E_NETIF_UP, ALP_CC3501E_NETIF_UP, "netif UP bit");
+	zassert_equal(
+	    d.netif_status & ALP_CC3501E_NETIF_LINK_UP, ALP_CC3501E_NETIF_LINK_UP, "netif LINK_UP bit");
+	zassert_equal(ALP_CC3501E_NETIF_DHCP_TRIES(d.netif_status), 5u, "dhcp->tries bits 2..7");
+}
+
+/* #2035: an OLDER bridge firmware that only ever answers the pre-#2035
+ * 16-byte shape must NOT start failing -- growing reply[] to 18 bytes on the
+ * host side is additive, not a floor. The two new fields read as
+ * "not reported" (0), not as garbage or a decode error. */
+ZTEST(cc3501e_host_driver, test_diag_info_16byte_reply_reports_new_fields_not_reported)
+{
+	g_diag_info_reply_len = 16u;
+	alp_cc3501e_diag_info_t d;
+	memset(&d, 0xA5, sizeof(d));
+	zassert_equal(cc3501e_diag_info(&fw, &d), ALP_OK, "16-byte reply is still a SUCCESS");
+	zassert_equal(d.fw_version, 0x0102u, "the original 16 bytes still decode");
+	zassert_equal(d.last_error, ALP_CC3501E_RESP_OK, "the original 16 bytes still decode");
+	zassert_equal(d.dhcp_state,
+	              ALP_CC3501E_DHCP_STATE_NOT_REPORTED,
+	              "no lwIP dhcp_state byte -> not-reported, never DHCP_STATE_OFF");
+	zassert_equal(d.netif_status, 0u, "no netif_status byte -> not-reported");
+}
+
+/* A reply shorter than the original 16-byte shape is still a genuine fault.
+ * 8, not some other short length: the wire zero-pads every reply to an
+ * ALP_CC3501E_REPLY_PAD (8 B) multiple, so a data_len between 9 and 15 would
+ * round-trip padded up to 16 and defeat this test -- 8 is the largest
+ * data_len that still arrives as 8 bytes. */
+ZTEST(cc3501e_host_driver, test_diag_info_short_reply_fails)
+{
+	g_diag_info_reply_len = 8u;
+	alp_cc3501e_diag_info_t d;
+	memset(&d, 0xA5, sizeof(d));
+	zassert_equal(cc3501e_diag_info(&fw, &d), ALP_ERR_IO, "<16 bytes -> ALP_ERR_IO");
 }
 
 ZTEST(cc3501e_host_driver, test_diag_info_null_out_invalid)

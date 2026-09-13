@@ -36,10 +36,14 @@ alp_status_t cc3501e_soft_reset(cc3501e_t *ctx)
 alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 {
 	if (out == NULL) return ALP_ERR_INVAL;
-	/* GET_DIAG_INFO (0x04) reply = the 16-byte packed alp_cc3501e_diag_info_t:
+	/* GET_DIAG_INFO (0x04) reply = the packed alp_cc3501e_diag_info_t:
 	 * fw_version(LE16) | reset_cause(1) | role(1) | uptime_ms(LE32) |
-	 * free_heap_bytes(LE32) | last_error(1) | reserved(3). */
-	uint8_t      reply[16] = { 0 };
+	 * free_heap_bytes(LE32) | last_error(1) | reserved(3) | dhcp_state(1) |
+	 * netif_status(1).  The last two bytes grew ADDITIVELY (alp-sdk#2035);
+	 * a v2-firmware reply is only the first 16 bytes, so require at least 16
+	 * and treat the trailing two as "not reported" (0) when they are absent
+	 * -- a short-but-complete v2 reply must stay a SUCCESS, not ALP_ERR_IO. */
+	uint8_t      reply[18] = { 0 };
 	size_t       got       = 0;
 	alp_status_t s         = cc3501e_request(ctx,
 	                                         ALP_CC3501E_CMD_GET_DIAG_INFO,
@@ -50,7 +54,7 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	                                         &got,
 	                                         CC3501E_REQ_TMO_MS);
 	if (s != ALP_OK) return s;
-	if (got < sizeof(reply)) return ALP_ERR_IO;
+	if (got < 16u) return ALP_ERR_IO;
 	out->fw_version  = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
 	out->reset_cause = reply[2];
 	out->role        = reply[3];
@@ -62,6 +66,8 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	out->reserved[0]     = reply[13];
 	out->reserved[1]     = reply[14];
 	out->reserved[2]     = reply[15];
+	out->dhcp_state      = (got >= 18u) ? reply[16] : 0u;
+	out->netif_status    = (got >= 18u) ? reply[17] : 0u;
 	return ALP_OK;
 }
 

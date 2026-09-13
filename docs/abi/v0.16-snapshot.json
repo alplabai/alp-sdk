@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-12",
+  "generated": "2026-09-13",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -12126,6 +12126,18 @@
           "hash": "4b1fd73f861cdc40",
           "value": "4096"
         },
+        "ALP_CC3501E_NETIF_DHCP_TRIES": {
+          "hash": "19c93cb9e84ce9ba",
+          "value": "(netif_status) ((uint8_t)((netif_status) >> 2))"
+        },
+        "ALP_CC3501E_NETIF_LINK_UP": {
+          "hash": "2c284be9460e2712",
+          "value": "(1u << 1)"
+        },
+        "ALP_CC3501E_NETIF_UP": {
+          "hash": "edabda2057771112",
+          "value": "(1u << 0)"
+        },
         "ALP_CC3501E_OTA_MAX_CHUNK": {
           "hash": "e3084f25bfd8ee65",
           "value": "(ALP_CC3501E_MAX_PAYLOAD - 4u)"
@@ -12366,8 +12378,19 @@
           "hash": "ba0ab7217b4de85a",
           "kind": "enum"
         },
+        "alp_cc3501e_dhcp_state_t": {
+          "definition": "typedef enum { ALP_CC3501E_DHCP_STATE_NOT_REPORTED = 0u, ALP_CC3501E_DHCP_STATE_OFF = 1u, ALP_CC3501E_DHCP_STATE_SELECTING = 7u, ALP_CC3501E_DHCP_STATE_BOUND = 11u, } alp_cc3501e_dhcp_state_t;",
+          "enumerators": [
+            "ALP_CC3501E_DHCP_STATE_NOT_REPORTED = 0u",
+            "ALP_CC3501E_DHCP_STATE_OFF = 1u",
+            "ALP_CC3501E_DHCP_STATE_SELECTING = 7u",
+            "ALP_CC3501E_DHCP_STATE_BOUND = 11u"
+          ],
+          "hash": "084222293b5eb848",
+          "kind": "enum"
+        },
         "alp_cc3501e_diag_info_t": {
-          "definition": "typedef struct { uint16_t fw_version; uint8_t reset_cause; uint8_t role; uint32_t uptime_ms; uint32_t free_heap_bytes; uint8_t last_error; uint8_t reserved[3]; } alp_cc3501e_diag_info_t;",
+          "definition": "typedef struct { uint16_t fw_version; uint8_t reset_cause; uint8_t role; uint32_t uptime_ms; uint32_t free_heap_bytes; uint8_t last_error; uint8_t reserved[3]; uint8_t dhcp_state; uint8_t netif_status; } alp_cc3501e_diag_info_t;",
           "fields": [
             "uint16_t fw_version",
             "uint8_t reset_cause",
@@ -12375,9 +12398,11 @@
             "uint32_t uptime_ms",
             "uint32_t free_heap_bytes",
             "uint8_t last_error",
-            "uint8_t reserved[3]"
+            "uint8_t reserved[3]",
+            "uint8_t dhcp_state",
+            "uint8_t netif_status"
           ],
-          "hash": "8014e695418b0261",
+          "hash": "ded31dda0f1df3e6",
           "kind": "struct"
         },
         "alp_cc3501e_event_entry_t": {
