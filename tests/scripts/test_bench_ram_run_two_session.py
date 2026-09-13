@@ -791,7 +791,6 @@ def test_missing_build_dir_names_itself_not_the_uart_console_advice(tmp_path: Pa
     )
 
 
-@_needs_e2e
 def _descendants_comm(pid: int) -> list[str]:
     """`comm` of every process (in)directly rooted at `pid`, via /proc --
     used to confirm the script is actually blocked in the host-side `sleep`
@@ -810,6 +809,7 @@ def _descendants_comm(pid: int) -> list[str]:
     return out
 
 
+@_needs_e2e
 def test_a_sigterm_to_the_pid_during_the_inter_session_sleep_keeps_the_workdir(
     tmp_path: Path,
 ) -> None:
