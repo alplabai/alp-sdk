@@ -201,19 +201,32 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  * size); larger buffers must be split by the caller.  Worker-routed
  * poll-by-repeat, looped.
  *
+ * If @p timeout_ms elapses while a frame's own retry is genuinely in flight
+ * (the firmware has accepted it but not finished), this function does not
+ * simply abandon it: it re-polls that SAME frame for a short additional
+ * bounded grace to collect the outcome before giving up, so a completed job
+ * cannot leak into and corrupt a LATER, unrelated call. If even that grace
+ * expires, @p sent_out is a LOWER BOUND, not an exact count -- the frame may
+ * still complete and be collected by a future call.
+ *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
  * @param data        Payload bytes to send.
  * @param len         Number of bytes in @p data.
  * @param sent_out    Receives the TOTAL accepted byte count across every
- *                    iteration (may be NULL) -- @p len on ALP_OK, a partial
- *                    count on ALP_ERR_TIMEOUT.
+ *                    iteration (may be NULL) -- @p len on ALP_OK; on
+ *                    ALP_ERR_TIMEOUT, an EXACT partial count if the last
+ *                    in-flight frame's outcome was collected (see above), or
+ *                    a LOWER BOUND if even the collection grace expired.
  * @param timeout_ms  Upper bound on the total send budget, across every
- *                    iteration.
+ *                    iteration -- may be modestly exceeded by one bounded
+ *                    collection grace (see above) to avoid leaving a job
+ *                    uncollected.
  * @return ALP_OK only once all @p len bytes are queued; ALP_ERR_TIMEOUT with
- *         a partial @p sent_out if @p timeout_ms elapses first;
- *         ALP_ERR_INVAL if @p len exceeds one frame; ALP_ERR_NOT_READY on the
- *         stub build; mapped error otherwise.
+ *         @p sent_out as described above if the budget (plus at most one
+ *         grace) elapses first; ALP_ERR_IO if a decoded reply's queued-byte
+ *         count is malformed; ALP_ERR_INVAL if @p len exceeds one frame;
+ *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
  */
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,

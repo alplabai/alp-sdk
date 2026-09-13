@@ -187,13 +187,17 @@ struct cc3501e {
 	 * transport-level retry (poll_by_repeat re-issuing the identical frame on BUSY
 	 * or IO) comes back from the firmware's cached reply instead of re-submitting
 	 * -- and for CMD_SOCK_SEND, re-submitting means re-TRANSMITTING the payload,
-	 * not just re-clocking a read.  cc3501e_sock_send() assigns it ONCE, before
-	 * the poll_by_repeat() call, so it stays constant across that call's retries;
-	 * see the assignment site for why that constancy is what makes the fix work.
-	 * uint8_t: wraps 255 -> 0 (defined unsigned overflow) after 256 sends, which
-	 * cannot collide with the firmware's single-entry cache -- it only ever holds
-	 * the immediately-preceding completed send's seq, never one from 256 sends
-	 * back. */
+	 * not just re-clocking a read.  cc3501e_sock_send() assigns it ONCE per FRAME
+	 * (cc3501e-bridge-firmware#107: one chunk of a logical send -- one iteration
+	 * of its remainder-retry loop, including that iteration's own bounded
+	 * post-timeout collection grace), before each poll_by_repeat() call, so it
+	 * stays constant across that frame's retries but changes for the next chunk's
+	 * different remaining bytes; see the assignment site for why that constancy
+	 * is what makes the fix work.
+	 * uint8_t: wraps 255 -> 0 (defined unsigned overflow) after 256 increments,
+	 * which cannot collide with the firmware's single-entry cache -- it only ever
+	 * holds the immediately-preceding completed frame's seq, never one from 256
+	 * increments back. */
 	uint8_t sock_send_seq;
 
 	/* Generic request retry seq (proto v8, cc3501e-bridge-firmware#102).
