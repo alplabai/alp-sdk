@@ -172,9 +172,11 @@ def test_failed_connect_is_a_hard_error(tmp_path: Path) -> None:
     # The operator must be told it was infrastructure, not a silent app.
     assert "could NOT connect" in res.stderr
     assert "not because the app was silent" in res.stderr
-    # ...and be given the actionable next step, verbatim.
-    assert "export JLINK_SN=" in res.stderr
-    assert "0x4C013477" in res.stderr, "must name the AEN E8 SW-DP IDR to disambiguate the probes"
+    # ...and be given the actionable next step, verbatim (alp-sdk#2064: the
+    # hint now names LG_PLACE -- the actual selector every helper routes
+    # through via bench_jlink_run() -- not the dead JLINK_SN).
+    assert "export LG_PLACE=" in res.stderr
+    assert "JLINK_SN" not in res.stderr, "must not send operators back to the dead serial-only selector"
 
 
 @_NEEDS_BASH

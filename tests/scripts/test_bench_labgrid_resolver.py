@@ -8,23 +8,29 @@ and the app console were taken from a stale table instead of from a live
 `labgrid-client -p <place> show` -- the stale table had them SWAPPED
 (SES/SETOOLS pointed at the app console's device).
 
-These tests feed `bench_labgrid_resolve` (bench-env.sh) REAL captured
-`labgrid-client -p <place> show` output -- not synthesised text. That
-matters: PR #2026's review found synthesised fixtures passing while the
-real SETOOLS-output format failed the anchors it wrote against, because
+These tests feed `bench_labgrid_resolve` (bench-env.sh) SANITISED captures
+of real `labgrid-client -p <place> show` output -- not hand-typed text.
+That matters: PR #2026's review found synthesised fixtures passing while
+the real SETOOLS-output format failed the anchors it wrote against, because
 real captures carry details (leading whitespace inside a pformat'd nested
-dict, and CRLF line endings under a real pty) a hand-typed fixture doesn't
-reproduce.
+dict) a hand-typed fixture doesn't reproduce.
 
-The `comment:` line real `show` output prints for each place (an
-operational narrative -- bench state, incident history, an internal-repo
-issue reference) is stripped from these fixtures: bench-env.sh's resolver
-never reads it, so keeping it would only bloat this file with unrelated
-free text. Every remaining line -- the `matches:`/`acquired:`/resource
-blocks the resolver actually parses -- is byte-for-byte what
-`labgrid-client -p <place> show` printed against the real coordinator
-(203.0.113.1:20408) on 2026-09-07, including the exact device paths, USB
-bus/port and ports below.
+SANITISED, not byte-for-byte: the place names below (`test-place-01..03`)
+replace the real `e1m-aen-evk-01..03`, the coordinator address
+(`203.0.113.1:20408`, RFC 5737 TEST-NET-3) replaces the real one, and the
+`comment:` line real `show` output prints for each place (an operational
+narrative -- bench state, incident history, an internal-repo issue
+reference) is stripped entirely -- bench-env.sh's resolver never reads it,
+so keeping it would only bloat this file with unrelated free text. The
+device paths, USB bus/port and ports below are verbatim from the real
+capture, taken 2026-09-07.
+
+There is no real interactive-pty capture in this file: REAL_EVK01_ACQUIRED_PTY
+is REAL_EVK01_ACQUIRED with every "\\n" mechanically replaced by "\\r\\n" in
+Python, not a `script -qc "labgrid-client ... show" /dev/null` transcript.
+It still exercises the real hazard (a real pty run emits CRLF line endings;
+labgrid-client itself prints no ANSI/SGR codes) -- it is a synthesised stand-in
+for that shape, not a second real capture.
 """
 
 from __future__ import annotations
@@ -57,6 +63,18 @@ _NEEDS_BASH = pytest.mark.skipif(
     not _bash_can_run_a_script(),
     reason="no working `bash` on this host; bench-env.sh is POSIX shell",
 )
+
+
+def _who_i_am() -> str:
+    """Exactly what bench_labgrid_resolve()'s `me="$(hostname)/$(whoami)"`
+    (alp-sdk#2064) computes -- shelled out the same way, not
+    socket.gethostname()/getpass.getuser(), so this can never drift from
+    what the real bash builtins print on a host where they disagree with
+    Python's own idea of hostname/user."""
+    host = subprocess.run(["hostname"], capture_output=True, text=True, timeout=30).stdout.strip()
+    user = subprocess.run(["whoami"], capture_output=True, text=True, timeout=30).stdout.strip()
+    return f"{host}/{user}"
+
 
 # --- real captures, `comment:` line stripped (see module docstring) --------
 
@@ -114,16 +132,27 @@ Acquired resource 'swd' (test-farm/test-place-01/NetworkUSBDebugger/swd):
               'vendor_id': 4966}}
 """
 
-# The identical capture, run through a real pty (`script -qc "labgrid-client
-# ... show" /dev/null`). Measured 2026-09-07: labgrid-client itself prints no
-# ANSI/SGR codes, but a real interactive run DOES emit CRLF line endings --
-# that CR is the actual "real output doesn't match a hand-typed fixture"
-# hazard for THIS command (distinct from, but same class as, the SETOOLS
-# ANSI-colour traps `test_bench_jlink_connect_guard.py` pins for `maintenance`
-# output). Built from REAL_EVK01_ACQUIRED by re-joining on "\\r\\n" -- the
-# content is identical, only the line-ending convention differs, which is
-# exactly the axis this fixture exists to cover.
+# NOT a real pty capture -- see the module docstring. A real interactive run
+# (`script -qc "labgrid-client ... show" /dev/null`) DOES emit CRLF line
+# endings (measured 2026-09-07; labgrid-client itself prints no ANSI/SGR
+# codes), which is the actual "real output doesn't match a hand-typed
+# fixture" hazard for THIS command (distinct from, but same class as, the
+# SETOOLS ANSI-colour traps `test_bench_jlink_connect_guard.py` pins for
+# `maintenance` output). This is a synthesised stand-in for that CRLF shape,
+# built from REAL_EVK01_ACQUIRED by re-joining on "\\r\\n" in Python.
 REAL_EVK01_ACQUIRED_PTY = REAL_EVK01_ACQUIRED.replace("\n", "\r\n")
+
+# alp-sdk#2064: bench_labgrid_resolve() now checks WHO holds the place, not
+# just whether anyone does -- "test-farm/operator" above is a real capture of
+# a DIFFERENT operator's reservation, so tests that need a SUCCESSFUL resolve
+# use this variant instead, with the place-level `acquired:` line replaced by
+# THIS test process's own "$(hostname)/$(whoami)" (computed the same way
+# bench_labgrid_resolve() itself does). REAL_EVK01_ACQUIRED is kept
+# unmodified and reused for the "held by someone else -> refuse" test below.
+REAL_EVK01_ACQUIRED_BY_US = REAL_EVK01_ACQUIRED.replace(
+    "acquired: test-farm/operator", f"acquired: {_who_i_am()}"
+)
+REAL_EVK01_ACQUIRED_BY_US_PTY = REAL_EVK01_ACQUIRED_BY_US.replace("\n", "\r\n")
 
 # test-place-02: NOT acquired (`acquired: None`), and -- for real, not as a
 # test contrivance -- this place has no `seuart` resource registered in
@@ -266,7 +295,7 @@ def _resolve(tmp_path: Path, place: str, captures: dict[str, str], extra_env: st
 
 @_NEEDS_BASH
 def test_resolves_all_four_values_from_a_real_acquired_capture(tmp_path: Path) -> None:
-    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED})
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
     assert res.returncode == 0, res.stderr
     assert "SE_UART=/dev/ttyUSB0" in res.stdout
     assert "LG_CONSOLE_DEV=/dev/ttyUSB1" in res.stdout
@@ -279,7 +308,7 @@ def test_resolves_all_four_values_from_a_real_acquired_capture(tmp_path: Path) -
 def test_resolves_correctly_under_real_pty_crlf_output(tmp_path: Path) -> None:
     """CRLF line endings from a real interactive run must not break the
     parser -- see module docstring."""
-    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_PTY})
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US_PTY})
     assert res.returncode == 0, res.stderr
     assert "SE_UART=/dev/ttyUSB0" in res.stdout
     assert "LG_SWD_PATH=3-4.1" in res.stdout
@@ -296,12 +325,25 @@ def test_lapsed_reservation_fails_loudly_not_silently(tmp_path: Path) -> None:
 
 
 @_NEEDS_BASH
+def test_reservation_held_by_someone_else_refuses(tmp_path: Path) -> None:
+    """alp-sdk#2064: a non-empty, non-'None' `acquired:` is not enough -- it
+    must be held by US. REAL_EVK01_ACQUIRED's 'test-farm/operator' is a real
+    capture of a DIFFERENT operator's reservation; resolving it must refuse
+    exactly like a lapsed reservation, never drive that board anyway."""
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED})
+    assert res.returncode == 1
+    assert "test-farm/operator" in res.stderr
+    assert "not you" in res.stderr
+    assert "SE_UART=/dev/ttyUSB0" not in res.stdout
+
+
+@_NEEDS_BASH
 def test_place_missing_the_seuart_resource_fails_loudly(tmp_path: Path) -> None:
     """Real state, not synthesised: test-place-02 has no `seuart` resource
-    registered in labgrid at all yet. Even if it were acquired, the resolver
-    must refuse rather than resolve an empty SE_UART."""
+    registered in labgrid at all yet. Even if it were acquired BY US, the
+    resolver must refuse rather than resolve an empty SE_UART."""
     acquired_but_no_seuart = REAL_EVK02_UNACQUIRED.replace(
-        "  acquired: None", "  acquired: test-farm/operator"
+        "  acquired: None", f"  acquired: {_who_i_am()}"
     ).replace("Matching resource", "Acquired resource")
     res = _resolve(tmp_path, "test-place-02", {"test-place-02": acquired_but_no_seuart})
     assert res.returncode == 1
@@ -316,7 +358,7 @@ def test_swd_path_is_scoped_to_its_own_resource_block(tmp_path: Path) -> None:
     'NetworkUSBDebugger/swd' appears in `matches:` AND `acquired resources:`
     before the real 'swd' resource block does -- and must still resolve the
     swd block's own path (3-4.1), not something scraped from the list."""
-    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED})
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
     assert res.returncode == 0, res.stderr
     assert "LG_SWD_PATH=3-4.1" in res.stdout
 
@@ -327,7 +369,7 @@ def test_seuart_and_console_paths_are_not_swapped(tmp_path: Path) -> None:
     (NetworkSerialPort) in one block each -- a resolver that grabbed the
     FIRST 'path' key in the whole document regardless of resource name would
     return the console's device (/dev/ttyUSB1) for seuart, or vice versa."""
-    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED})
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US})
     assert res.returncode == 0, res.stderr
     assert "SE_UART=/dev/ttyUSB0" in res.stdout, "seuart resolved to the wrong device"
     assert "LG_CONSOLE_DEV=/dev/ttyUSB1" in res.stdout, "console resolved to the wrong device"
@@ -367,7 +409,7 @@ def test_raw_se_uart_without_lg_place_is_the_warned_escape_hatch(tmp_path: Path)
 @_NEEDS_BASH
 def test_lg_place_wins_over_a_simultaneously_exported_raw_se_uart(tmp_path: Path) -> None:
     res = _resolve(
-        tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED},
+        tmp_path, "test-place-01", {"test-place-01": REAL_EVK01_ACQUIRED_BY_US},
         extra_env='export SE_UART=/dev/ttyUSB9\n',
     )
     assert res.returncode == 0, res.stderr

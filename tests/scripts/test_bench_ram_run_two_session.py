@@ -349,6 +349,21 @@ def _run_ram_run(
     env["ZEPHYR_SDK_INSTALL_DIR"] = ""
     env.pop("JLINK_SN", None)
     env.pop("JLINK_EXE", None)
+    # alp-sdk#2064 review, Major 1: a unit test must NEVER be able to reach
+    # real hardware. With AEN_JLINK_RUN unset (the fallback-to-in-tree-
+    # bench_jlink_run path some tests exercise), an operator's OWN shell
+    # profile exporting LG_PLACE/LG_COORDINATOR would otherwise make
+    # bench-env.sh's `source` resolve a REAL labgrid reservation and a REAL
+    # LG_SWD_PATH, and this script would then exec the REAL JLinkExe against
+    # held hardware to `loadbin` this test's fake 16-byte zephyr.bin. Strip
+    # every input that could route bench_jlink_run() at a real probe --
+    # inheriting os.environ (above) is exactly what would otherwise leak
+    # these in from whoever's shell runs pytest.
+    env.pop("LG_PLACE", None)
+    env.pop("LG_COORDINATOR", None)
+    env.pop("LG_SWD_PATH", None)
+    env.pop("ALP_JLINK_SEARCH_ROOT", None)
+    env.pop("BENCH_JLINK_SYSFS_ROOT", None)
     if bench_place is None:
         env.pop("BENCH_PLACE", None)
     else:
@@ -485,9 +500,10 @@ def test_session_two_connect_failure_is_a_hard_error_not_an_empty_console(tmp_pa
         "infrastructure reason, exactly the alp-sdk#1318 defect"
     )
     assert "could NOT connect" in res.stderr
-    # The stale bench-env.sh JLINK_SN hint is corrected, not left dangling
-    # (review finding 5).
-    assert "BENCH_PLACE" in res.stderr
+    # bench-env.sh's own hint is accurate now (alp-sdk#2064 review) -- no
+    # local ram-run.sh correction/dangling JLINK_SN advice needed any more.
+    assert "export LG_PLACE=" in res.stderr
+    assert "JLINK_SN" not in res.stderr
 
     # A failing run KEEPS its WORKDIR (review finding 2/11) -- exactly one.
     left = _workdirs(sandbox_tmpdir)
@@ -868,6 +884,21 @@ def test_a_sigterm_to_the_pid_during_the_inter_session_sleep_keeps_the_workdir(
     env["ZEPHYR_SDK_INSTALL_DIR"] = ""
     env.pop("JLINK_SN", None)
     env.pop("JLINK_EXE", None)
+    # alp-sdk#2064 review, Major 1: a unit test must NEVER be able to reach
+    # real hardware. With AEN_JLINK_RUN unset (the fallback-to-in-tree-
+    # bench_jlink_run path some tests exercise), an operator's OWN shell
+    # profile exporting LG_PLACE/LG_COORDINATOR would otherwise make
+    # bench-env.sh's `source` resolve a REAL labgrid reservation and a REAL
+    # LG_SWD_PATH, and this script would then exec the REAL JLinkExe against
+    # held hardware to `loadbin` this test's fake 16-byte zephyr.bin. Strip
+    # every input that could route bench_jlink_run() at a real probe --
+    # inheriting os.environ (above) is exactly what would otherwise leak
+    # these in from whoever's shell runs pytest.
+    env.pop("LG_PLACE", None)
+    env.pop("LG_COORDINATOR", None)
+    env.pop("LG_SWD_PATH", None)
+    env.pop("ALP_JLINK_SEARCH_ROOT", None)
+    env.pop("BENCH_JLINK_SYSFS_ROOT", None)
     env["BENCH_PLACE"] = "test-place"
     env["AEN_JLINK_RUN"] = str(wrapper)
     env.pop("FAIL_CALL", None)
@@ -916,15 +947,27 @@ def test_missing_bench_place_refuses_before_any_probe_access(tmp_path: Path) -> 
 
 
 @_needs_bash_and_linux
-def test_missing_aen_jlink_run_refuses_before_any_probe_access(tmp_path: Path) -> None:
-    """Review finding 6: AEN_JLINK_RUN has NO default -- unlike a forgotten
-    override that would fall back to bench_jlink_exe()'s real-install
-    search on an actual bench host, this must refuse closed."""
+def test_missing_aen_jlink_run_falls_back_to_bench_jlink_run(tmp_path: Path) -> None:
+    """alp-sdk#2064: AEN_JLINK_RUN is now OPTIONAL -- an operator opt-in for
+    the board-farm's external wrapper (which also suppresses a probe
+    firmware-update prompt). Omitting it no longer errors on this gate; it
+    falls through to the in-tree bench_jlink_run() (bench-env.sh) instead,
+    which has its own independent refuse-don't-guess gate (LG_SWD_PATH /
+    JLinkExe resolution) -- neither path ever reaches this fake wrapper or
+    touches a probe when the environment can't prove which one to use."""
     res, calls, _ = _run_ram_run(tmp_path, aen_jlink_run=None)
 
-    assert res.returncode == 2, f"expected exit 2:\n{res.stdout}\n{res.stderr}"
-    assert "AEN_JLINK_RUN" in res.stderr
-    assert not list(calls.glob("call-*.jlink")), "no probe access without AEN_JLINK_RUN"
+    assert res.returncode != 0, f"expected a non-zero refusal:\n{res.stdout}\n{res.stderr}"
+    # The SPECIFIC refusal, not just any non-zero exit: bench_jlink_run()'s
+    # own "cannot establish which probe" gate, reached because _run_ram_run
+    # strips LG_PLACE/LG_COORDINATOR/LG_SWD_PATH (Major 1) -- never
+    # AEN_JLINK_RUN's old message (that path is not taken at all) and never
+    # a real JLinkExe connect attempt.
+    assert "bench_jlink_run: LG_SWD_PATH is unresolved" in res.stderr, res.stderr
+    assert "AEN_JLINK_RUN" not in res.stderr
+    assert not list(calls.glob("call-*.jlink")), (
+        "no probe access via the fake AEN_JLINK_RUN wrapper once it is unset"
+    )
 
 
 @_needs_bash_and_linux

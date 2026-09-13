@@ -180,12 +180,16 @@ for ln in lines:
 # bench_labgrid_resolve <place> — resolve SE_UART, LG_CONSOLE_DEV,
 # LG_CONSOLE_HOST, LG_CONSOLE_PORT and LG_SWD_PATH from a live
 # `labgrid-client -p <place> show`, after confirming the reservation is
-# actually held (show's place-level `acquired:` non-empty) -- a lapsed
-# reservation fails loudly here rather than silently resolving whatever
-# labgrid last remembered. Returns non-zero on ANY resolution failure;
-# callers must treat that as fatal, not fall back to a guess.
+# actually held BY US (show's place-level `acquired:` equals
+# "$(hostname)/$(whoami)", the same identity labgrid-client itself uses) --
+# a lapsed reservation, or one held by a DIFFERENT operator, fails loudly
+# here rather than silently resolving whatever labgrid last remembered or
+# driving a board this invocation does not hold (alp-sdk#2064: a non-empty,
+# non-"None" `acquired:` alone is NOT enough -- it must name us, not just
+# name someone). Returns non-zero on ANY resolution failure; callers must
+# treat that as fatal, not fall back to a guess.
 bench_labgrid_resolve() {
-	local place="$1" out acquired se_path console_dev console_host console_port swd_path
+	local place="$1" out acquired me se_path console_dev console_host console_port swd_path
 
 	if ! command -v labgrid-client >/dev/null 2>&1; then
 		echo "bench-env: LG_PLACE=$place set but 'labgrid-client' is not on PATH" >&2
@@ -213,10 +217,25 @@ bench_labgrid_resolve() {
 		return 1
 	fi
 
+	# WHO holds it, not just whether anyone does (alp-sdk#2064). labgrid
+	# itself records a reservation as "<hostname>/<username>" (see
+	# board-farm/bin/jlink-run.sh's identical `ME="$(hostname)/$(whoami)"`) --
+	# match that exactly. A place held by another operator resolving
+	# cleanly here would let this invocation drive THEIR board; that is
+	# verbatim the failure #2064 exists to prevent.
+	me="$(hostname)/$(whoami)"
+	if [ "$acquired" != "$me" ]; then
+		echo "bench-env: LG_PLACE=$place is held by '$acquired', not you ('$me') --" >&2
+		echo "           refusing to drive a board someone else's reservation covers." >&2
+		echo "           Acquire it yourself first: labgrid-client -p $place acquire" >&2
+		return 1
+	fi
+
 	se_path=$(bench_labgrid_resource_field "$out" seuart path)
 	console_dev=$(bench_labgrid_resource_field "$out" console path)
 	console_host=$(bench_labgrid_resource_field "$out" console host)
 	console_port=$(bench_labgrid_resource_field "$out" console port)
+	[ "$console_port" = "None" ] && console_port=""
 	swd_path=$(bench_labgrid_resource_field "$out" swd path)
 
 	if [ -z "$se_path" ]; then
@@ -255,7 +274,15 @@ bench_labgrid_resolve() {
 # reboot/replug, and this bench carries three AEN boards whose SE-UART
 # and app-console paths have been measured swapped in a stale table --
 # the exact mistake behind the 2026-09-07 incident.
-if [ -n "${LG_PLACE:-}" ]; then
+# BENCH_ENV_NO_PROBE — set by a caller that never touches a probe or the
+# SE-UART (build.sh: a pure `west build` wrapper) to skip the eager LG_PLACE
+# resolve below entirely. Without this, sourcing bench-env.sh with LG_PLACE
+# exported (e.g. an operator's own shell profile, set for OTHER helpers in
+# the same session) aborts a compile-only invocation on a labgrid/reservation
+# problem that has nothing to do with compiling. Every helper that DOES
+# touch SE_UART or a J-Link probe leaves this unset, so the abort below still
+# applies to them.
+if [ -n "${LG_PLACE:-}" ] && [ -z "${BENCH_ENV_NO_PROBE:-}" ]; then
 	if [ -n "${SE_UART:-}" ]; then
 		echo "bench-env: LG_PLACE=$LG_PLACE is set; ignoring the raw SE_UART=$SE_UART" >&2
 		echo "           you also exported -- LG_PLACE wins, resolving live instead." >&2
@@ -310,8 +337,10 @@ export JLINK_SPEED="${JLINK_SPEED:-4000}"
 # JLINK_SN / JLINK_SERIAL — optional SEGGER probe serial selector, used only
 # by the off-labgrid single-probe escape hatch (see bench_jlink_run below).
 #
-# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- FIVE probes
-# answer the SAME cloned OEM serial 000603000869 (see "DP-ID safety gate"
+# NOTE: on THIS bench JLINK_SN cannot disambiguate at all -- multiple probes
+# answer the SAME cloned OEM serial 000603000869 (the exact count enumerated
+# has drifted before and is not repeated here, see bench_jlink_run's own
+# header comment; see also "DP-ID safety gate"
 # below and alp-sdk#2064). JLinkExe selects only by serial and has no
 # USB-path selector, so under any concurrency or enumeration-order change
 # JLINK_SN alone can silently attach the wrong board. Every JLinkExe
@@ -331,12 +360,14 @@ export JLINK_SN="${JLINK_SN:-${JLINK_SERIAL:-}}"
 # --------------------------------------------------------------------
 # DP-ID safety gate (every helper that touches a target)
 # --------------------------------------------------------------------
-# This bench has THREE J-Links, and two of them share OEM serial 603000869,
-# differing only by USB path:
+# This bench has multiple J-Links (the exact count has drifted before, see
+# bench_jlink_run's own header comment above -- not repeated here). The AEN
+# E8 and the GD32 bridge share the same cloned OEM serial 000603000869,
+# differing only by USB path; the V2N CM33 DAP answers a different serial:
 #
-#   AEN E8        603000869          the AEN board
-#   GD32 bridge   603000869 (clone)  the other board
-#   V2N CM33 DAP  600107451          the other board
+#   AEN E8        000603000869          the AEN board
+#   GD32 bridge   000603000869 (clone)  the other board
+#   V2N CM33 DAP  600107451             the other board
 #
 # JLinkExe selects ONLY by serial and has no USB-path selector, so JLINK_SN
 # narrows probe choice but cannot prove which board is on the other end --
@@ -497,14 +528,16 @@ bench_jlink_exe() {
 # instead of JLINK_ARGS=("$JLINK") and call "${JLINK_ARGS[@]}" exactly as
 # before.
 #
-# alplab-gw has FIVE J-Link probes and all of them answer the SAME cloned
-# OEM serial 000603000869. JLinkExe selects ONLY by serial with no USB-path
-# selector, so `-SelectEmuBySN` alone takes whichever same-serial probe it
-# happens to enumerate first -- not necessarily the one on the board this
-# invocation's labgrid reservation actually covers. The four parts below are
-# ALL load-bearing; each was found only after a simpler theory failed on the
-# real bench (alp-sdk#2064), and dropping any one silently reintroduces the
-# wrong-board hazard:
+# Multiple J-Link probes on this bench answer the SAME cloned OEM serial
+# 000603000869 -- the exact count enumerated has drifted before (measured
+# three and five on different days) and is not repeated here; treat "more
+# than one" as the standing fact, not a specific number. JLinkExe selects
+# ONLY by serial with no USB-path selector, so `-SelectEmuBySN` alone takes
+# whichever same-serial probe it happens to enumerate first -- not
+# necessarily the one on the board this invocation's labgrid reservation
+# actually covers. The four parts below are ALL load-bearing; each was
+# found only after a simpler theory failed on the real bench (alp-sdk#2064),
+# and dropping any one silently reintroduces the wrong-board hazard:
 #
 #   1. -SelectEmuBySN is explicit and REQUIRED -- JLinkExe does not
 #      auto-select an emulator even when exactly one is visible.
@@ -528,15 +561,34 @@ bench_jlink_exe() {
 #
 # REFUSES rather than guesses -- the stated #2064 expected behaviour --
 # when it cannot establish which probe belongs to LG_PLACE: LG_SWD_PATH is
-# unresolved (LG_PLACE unset, or bench_labgrid_resolve above failed) or the
-# sysfs path it named has since vanished.
+# unresolved (LG_PLACE unset, or bench_labgrid_resolve above failed), the
+# sysfs path it named has since vanished, a sibling probe's own busnum/devnum
+# can't be read (an incompletely masked bench is not a safe one to proceed
+# on), or -- after masking -- more than one vendor-1366 device is still
+# visible in sysfs (the mask did not fully take).
 #
-# Deliberately NOT ported from board-farm/bin/jlink-run.sh: that script also
-# pre-reads the probe's running firmware via OpenOCD and injects `exec
-# DisableAutoUpdateFW` to dodge a firmware-update prompt on a clone (which
-# would be unrecoverable). That is a separate hazard (bricking a probe, not
-# attaching to the wrong board) and none of alp-sdk#2064's four load-bearing
-# parts above depend on it; out of scope here.
+# PROBE-BRICK GUARD, ported from board-farm/bin/jlink-run.sh: these probes
+# are CLONES and a SEGGER firmware-update write to one is unrecoverable.
+# JLinkExe offers that update the moment it OPENS the probe, before any
+# CommandFile/CommanderScript command runs, so `exec DisableAutoUpdateFW`
+# is injected as the FIRST line of the caller's script (Commander opens the
+# emulator LAZILY -- a script containing only this exec triggers no
+# connection, confirmed by the reference this was ported from). Refuses
+# (does not proceed) when the caller passed neither `-CommandFile` nor
+# `-CommanderScript` -- there is then nowhere to inject the guard, and
+# opening a probe without it is never acceptable.
+#
+# BENCH_JLINK_SYSFS_ROOT overrides the sysfs root (default
+# /sys/bus/usb/devices) -- test-only, so a unit test can point this at a
+# fake probe tree instead of the real one.
+#
+# BENCH_JLINK_RUN_DRY_RUN, if non-empty, computes JLINK_TARGET_NODE,
+# JLINK_MASKS, JLINK_SYSMASKS and JLINK_SEL and prints them to stdout
+# instead of masking/exec-ing anything -- test-only, so the mask/selection
+# computation and both refusal paths can be asserted without a real USB
+# topology, `unshare`, or JLinkExe. Never set this on a real bench host; it
+# makes every call a safe no-op (nothing is opened or masked), not a
+# shortcut past the guard.
 #
 # Kept SEPARATE from the DPIDR safety gate (bench_jlink_assert_aen_dpidr
 # below) -- do not delete that gate as "now redundant". It answers a
@@ -544,8 +596,20 @@ bench_jlink_exe() {
 # which of the three physically-identical AEN boards a shared-serial probe
 # belongs to -- only the USB-topology masking here answers that one.
 bench_jlink_run() {
-	local jlink port target_sn busnum devnum target_node
-	local mask_args="" sysmask_args="" mask_empty p leaf vendor node sysreal
+	local jlink port target_sn busnum devnum target_node sysfs_root dev_root
+	local mask_args="" sysmask_args="" mask_empty p leaf vendor node pbus pdev sysreal
+	local cmdfile="" prelude rc
+	local -a argv newargs
+	local i a
+
+	sysfs_root="${BENCH_JLINK_SYSFS_ROOT:-/sys/bus/usb/devices}"
+	# BENCH_JLINK_DEV_ROOT overrides where the usbfs device-node PATHS below
+	# are computed from -- test-only, same reason as BENCH_JLINK_SYSFS_ROOT:
+	# a unit test can point this at a fake tmp-dir tree of touched files
+	# (mimicking /dev/bus/usb/<bus>/<dev>) and exercise real, non-empty mask
+	# computation without CAP_MKNOD/root to create real device nodes. Default
+	# is the real kernel path; production behaviour is unchanged.
+	dev_root="${BENCH_JLINK_DEV_ROOT:-/dev/bus/usb}"
 
 	jlink="$(bench_jlink_exe)" || return $?
 
@@ -557,41 +621,119 @@ bench_jlink_run() {
 		return 9
 	fi
 	port="$LG_SWD_PATH"
-	if [ ! -d "/sys/bus/usb/devices/$port" ]; then
+	if [ ! -d "$sysfs_root/$port" ]; then
 		echo "bench-env: bench_jlink_run: no USB device at sysfs path '$port' (from LG_SWD_PATH) --" >&2
 		echo "           the probe may have been unplugged/re-enumerated since LG_PLACE was resolved." >&2
 		return 9
 	fi
-	target_sn=$(cat "/sys/bus/usb/devices/$port/serial" 2>/dev/null || true)
+	target_sn=$(cat "$sysfs_root/$port/serial" 2>/dev/null || true)
 	if [ -z "$target_sn" ]; then
 		echo "bench-env: bench_jlink_run: cannot read a serial for USB device '$port'" >&2
 		return 9
 	fi
-	busnum=$(cat "/sys/bus/usb/devices/$port/busnum" 2>/dev/null || true)
-	devnum=$(cat "/sys/bus/usb/devices/$port/devnum" 2>/dev/null || true)
+	busnum=$(cat "$sysfs_root/$port/busnum" 2>/dev/null || true)
+	devnum=$(cat "$sysfs_root/$port/devnum" 2>/dev/null || true)
 	if [ -z "$busnum" ] || [ -z "$devnum" ]; then
 		echo "bench-env: bench_jlink_run: cannot read busnum/devnum for '$port'" >&2
 		return 9
 	fi
-	target_node=$(printf '/dev/bus/usb/%03d/%03d' "$busnum" "$devnum")
+	target_node=$(printf '%s/%03d/%03d' "$dev_root" "$busnum" "$devnum")
 
-	# Mask every OTHER SEGGER (USB vendor 1366) probe: usbfs node + sysfs dir.
-	for p in /sys/bus/usb/devices/*-*; do
+	# Probe-brick guard (see header): find the -CommandFile/-CommanderScript
+	# argument and rewrite it to point at a copy with the DisableAutoUpdateFW
+	# prelude prepended. Refuse if neither flag is present.
+	argv=("$@")
+	newargs=()
+	i=0
+	while [ $i -lt ${#argv[@]} ]; do
+		a="${argv[$i]}"
+		case "$a" in
+		-CommandFile | -CommanderScript)
+			if [ $((i + 1)) -lt ${#argv[@]} ]; then
+				cmdfile="${argv[$((i + 1))]}"
+				prelude=$(mktemp "${TMPDIR:-/tmp}/bench-jlink-run-XXXXXX.jlink") || {
+					echo "bench-env: bench_jlink_run: cannot create the DisableAutoUpdateFW prelude file" >&2
+					return 10
+				}
+				{ printf 'exec DisableAutoUpdateFW\n'; cat "$cmdfile"; } >"$prelude"
+				newargs+=("$a" "$prelude")
+				i=$((i + 2))
+				continue
+			fi
+			;;
+		esac
+		newargs+=("$a")
+		i=$((i + 1))
+	done
+	if [ -z "$cmdfile" ]; then
+		echo "bench-env: bench_jlink_run: refusing -- no -CommandFile/-CommanderScript in the" >&2
+		echo "           arguments, so 'exec DisableAutoUpdateFW' cannot be injected ahead of" >&2
+		echo "           it. These probes are CLONES and a SEGGER firmware-update write to one" >&2
+		echo "           is unrecoverable -- never open a probe without this suppression." >&2
+		return 10
+	fi
+	set -- "${newargs[@]}"
+
+	echo "bench-env: bench_jlink_run: place=${LG_PLACE:-?} port=$port -> $target_node serial=$target_sn" >&2
+
+	# Mask every OTHER SEGGER (USB vendor 1366) probe: usbfs node + sysfs
+	# dir. A sibling probe whose busnum/devnum can't be read, or whose node
+	# doesn't exist, means it CANNOT be masked -- abort rather than silently
+	# proceed with a bench that still has it enumerable (that asymmetry
+	# depended purely on enumeration order in the reference this was ported
+	# from, and is exactly the hole the post-mask visible-count check below
+	# also guards).
+	for p in "$sysfs_root"/*-*; do
 		leaf="${p##*/}"
 		case "$leaf" in *:*) continue ;; esac
 		vendor="$(cat "$p/idVendor" 2>/dev/null || true)"
 		[ "$vendor" = "1366" ] || continue
 		[ "$leaf" = "$port" ] && continue
-		node=$(printf '/dev/bus/usb/%03d/%03d' "$(cat "$p/busnum" 2>/dev/null)" "$(cat "$p/devnum" 2>/dev/null)")
-		[ -e "$node" ] || continue
+		pbus="$(cat "$p/busnum" 2>/dev/null || true)"
+		pdev="$(cat "$p/devnum" 2>/dev/null || true)"
+		if [ -z "$pbus" ] || [ -z "$pdev" ]; then
+			echo "bench-env: bench_jlink_run: cannot read busnum/devnum for sibling probe '$leaf' --" >&2
+			echo "           refusing to proceed with a bench that can't be fully masked." >&2
+			rm -f "$prelude"
+			return 9
+		fi
+		node=$(printf '%s/%03d/%03d' "$dev_root" "$pbus" "$pdev")
+		if [ ! -e "$node" ]; then
+			echo "bench-env: bench_jlink_run: sibling probe '$leaf' resolved to '$node', which" >&2
+			echo "           does not exist -- refusing to proceed with a bench that can't be" >&2
+			echo "           fully masked." >&2
+			rm -f "$prelude"
+			return 9
+		fi
 		sysreal=$(readlink -f "$p")
 		mask_args="$mask_args $node"
 		sysmask_args="$sysmask_args $sysreal"
+		echo "bench-env: bench_jlink_run: masking sibling probe $leaf ($node)" >&2
 	done
-	mask_empty=$(mktemp -d) || return 9
+	mask_empty=$(mktemp -d) || {
+		rm -f "$prelude"
+		return 9
+	}
+
+	if [ -n "${BENCH_JLINK_RUN_DRY_RUN:-}" ]; then
+		echo "JLINK_TARGET_NODE=$target_node"
+		echo "JLINK_MASKS=$mask_args"
+		echo "JLINK_SYSMASKS=$sysmask_args"
+		echo "JLINK_SEL=-SelectEmuBySN $target_sn"
+		# Left behind deliberately (not rm'd) -- a test asserts the injected
+		# prelude's CONTENT (the probe-brick guard, alp-sdk#2064 review
+		# Blocker 1) without needing a real char device to reach the real
+		# unshare/exec path below. $TMPDIR is a test's own sandboxed tmp_path
+		# in every caller of this branch; nothing leaks on a real bench host
+		# because BENCH_JLINK_RUN_DRY_RUN is never set on one.
+		echo "JLINK_PRELUDE=$prelude"
+		rmdir "$mask_empty" 2>/dev/null || true
+		return 0
+	fi
 
 	JLINK_BIN="$jlink" JLINK_TARGET_NODE="$target_node" JLINK_MASKS="$mask_args" \
 		JLINK_SYSMASKS="$sysmask_args" JLINK_EMPTY="$mask_empty" JLINK_SEL="-SelectEmuBySN $target_sn" \
+		JLINK_SYSFS_ROOT="$sysfs_root" \
 		unshare -rm --net --ipc --propagation private /bin/bash -c '
 			set -e
 			ip link set lo up 2>/dev/null || true
@@ -601,8 +743,33 @@ bench_jlink_run() {
 				echo "bench_jlink_run: target node $JLINK_TARGET_NODE vanished under the mask" >&2
 				exit 9
 			}
+			# Prove the mask actually took, before launching anything. /dev/null
+			# is a char device too, so "is it a chardev" alone proves nothing --
+			# the decisive check is the SAME major:minor as /dev/null.
+			nulldev=$(stat -c "%t:%T" /dev/null)
+			for n in $JLINK_MASKS; do
+				[ "$(stat -c "%t:%T" "$n")" = "$nulldev" ] || {
+					echo "bench_jlink_run: mask did NOT take on $n" >&2
+					exit 9
+				}
+			done
+			# And the decisive one: exactly one J-Link may remain visible in
+			# sysfs, because that is what -SelectEmuBySN enumerates.
+			vis=0
+			for p in "$JLINK_SYSFS_ROOT"/*-*; do
+				case "${p##*/}" in *:*) continue ;; esac
+				[ "$(cat "$p/idVendor" 2>/dev/null || true)" = "1366" ] && vis=$((vis + 1))
+			done
+			[ "$vis" = "1" ] || {
+				echo "bench_jlink_run: $vis J-Links still enumerate in sysfs, expected 1 -- -SelectEmuBySN would be ambiguous" >&2
+				exit 9
+			}
 			exec "$JLINK_BIN" $JLINK_SEL "$@"
 		' -- "$@"
+	rc=$?
+	rm -f "$prelude"
+	rm -rf "$mask_empty"
+	return $rc
 }
 
 # bench_jlink_assert_connected <jlink-output-file> [context] — fail when
@@ -646,10 +813,14 @@ bench_jlink_assert_connected() {
 		echo >&2
 		grep -iE "$pat" "$out" | head -3 >&2
 		echo >&2
-		echo "           alplab-gw has THREE J-Link probes attached and two share a cloned" >&2
-		echo "           OEM serial, so an unselected JLinkExe can fail outright or attach" >&2
-		echo "           the wrong board. Export the probe serial and retry:" >&2
-		echo "               export JLINK_SN=<serial>     # the AEN E8 answers SW-DP IDR 0x4C013477" >&2
+		echo "           alplab-gw has multiple J-Link probes attached and several share a" >&2
+		echo "           cloned OEM serial, so an unselected/unmasked JLinkExe can fail" >&2
+		echo "           outright or attach the wrong board. Every helper here already routes" >&2
+		echo "           through bench_jlink_run() (bench-env.sh, alp-sdk#2064), which resolves" >&2
+		echo "           the probe from LG_PLACE and masks every other one -- confirm LG_PLACE" >&2
+		echo "           is exported and its reservation is held by you:" >&2
+		echo "               export LG_PLACE=<labgrid place>" >&2
+		echo "               labgrid-client -p <place> show      # acquired: must be you" >&2
 		echo "           Full J-Link transcript: $out" >&2
 		return 7
 	fi
@@ -690,8 +861,14 @@ bench_jlink_assert_connected() {
 		echo >&2
 		head -5 "$out" >&2
 		echo >&2
-		echo "           A rejected command line does this (see alp-sdk#1478: a stray" >&2
-		echo "           argument gave 'Unknown command line option n.' and nothing else)." >&2
+		if grep -q 'bench_jlink_run:' "$out" 2>/dev/null; then
+			echo "           bench_jlink_run() itself refused before opening any probe (see its" >&2
+			echo "           own message above) -- this is NOT alp-sdk#1478's rejected-command-" >&2
+			echo "           line case below; JLinkExe never even ran." >&2
+		else
+			echo "           A rejected command line does this (see alp-sdk#1478: a stray" >&2
+			echo "           argument gave 'Unknown command line option n.' and nothing else)." >&2
+		fi
 		echo "           Full J-Link transcript: $out" >&2
 		return 7
 	fi

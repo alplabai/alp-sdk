@@ -137,19 +137,13 @@ jlink_run() {
 }
 
 # _connect_or_exit <transcript> <context> -- bench_jlink_assert_connected
-# (bench-env.sh), plus a ram-run-specific correction. bench-env.sh's own
-# hint on a failed connect says `export JLINK_SN=<serial>`, which this
-# script now ignores (jlink_run() above selects the probe instead) --
-# bench-env.sh is off limits (PR #2080/#2033 both touch it), so the
-# correction is appended here rather than editing that hint in place.
+# (bench-env.sh), exit 7 on failure. bench-env.sh's own failure hint now
+# names LG_PLACE directly (alp-sdk#2064 review), so no local correction is
+# needed here any more -- this wrapper exists only so every call site below
+# stays a one-liner.
 _connect_or_exit() {
 	local out="$1" ctx="$2"
-	if ! bench_jlink_assert_connected "$out" "$ctx"; then
-		echo "ram-run: (the JLINK_SN hint above is stale for this script --" >&2
-		echo "         set LG_PLACE, or BENCH_PLACE + AEN_JLINK_RUN for the" >&2
-		echo "         external wrapper; see the jlink_run() comment above.)" >&2
-		exit 7
-	fi
+	bench_jlink_assert_connected "$out" "$ctx" || exit 7
 }
 
 OBJ="$(bench_tool_prefix)" || exit $?
