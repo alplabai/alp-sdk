@@ -21,6 +21,14 @@
  * cc3501e_sock_send()'s seq assignment below for the host half; the
  * firmware caches (seq, reply) and serves a matching retry without
  * re-submitting.
+ *
+ * cc3501e_sock_send() additionally loops over its OWN remaining-bytes budget
+ * (cc3501e-bridge-firmware#107): with the firmware's SOCK_SEND now
+ * non-blocking (MSG_DONTWAIT), a short queue is the normal outcome under
+ * backpressure, not the near-impossible case it used to be.  That loop is
+ * layered on top of, not instead of, the poll-by-repeat retry described
+ * above -- see the seq comment inside cc3501e_sock_send() for how the two
+ * stay disambiguated.
  */
 
 #include <string.h>
@@ -119,6 +127,14 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
 	    ctx, ALP_CC3501E_CMD_SOCK_LISTEN, p, sizeof(p), NULL, 0, NULL, timeout_ms);
 }
 
+/* Zero-progress back-off for the remainder loop below (cc3501e-bridge-firmware
+ * #107): once the firmware's SOCK_SEND moved from a blocking lwip_send() to
+ * MSG_DONTWAIT, a full peer receive buffer now reports RESP_OK with 0 bytes
+ * queued instead of blocking.  Retrying that instantly would hammer the SPI
+ * link on a peer that simply isn't reading; a short, budget-bounded sleep
+ * between zero-progress attempts keeps this a poll, not a hot loop. */
+#define CC3501E_SOCK_SEND_BACKOFF_MS 20u
+
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,
                                const uint8_t *data,
@@ -135,7 +151,22 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 	if (sent_out != NULL) *sent_out = 0u;
 
 	/* SOCK_SEND (0x22) wire = alp_cc3501e_sock_send_t (8 B) + inline data; reply
-	 * DATA = uint16_t LE queued-byte count. */
+	 * DATA = uint16_t LE queued-byte count.
+	 *
+	 * cc3501e-bridge-firmware#107: the firmware's SOCK_SEND handler moved from
+	 * a blocking lwip_send() to MSG_DONTWAIT, because the blocking form parked
+	 * the worker -- and READY along with it -- for as long as a peer declined
+	 * to read, wedging every opcode on the bridge for that whole span.
+	 * MSG_DONTWAIT never blocks: a full send buffer now reports 0 bytes
+	 * queued, ALP_OK, immediately, where the old firmware would eventually
+	 * have blocked until it could report the full count. Callers that never
+	 * checked *sent_out (e.g.
+	 * src/zephyr/console/alp_console_companion_sock.c) relied on a short
+	 * queue being effectively impossible; it is now the normal case under
+	 * backpressure. So THIS function absorbs it: it keeps issuing the
+	 * remainder as its own short transaction -- never parking the firmware --
+	 * until every byte of @p len is queued or @p timeout_ms elapses, which
+	 * keeps every existing caller's assumption true without touching them. */
 	/* Per-context scratch, NOT a 4 KB stack frame.  This was
 	 * `uint8_t p[ALP_CC3501E_MAX_PAYLOAD]` -- 4096 bytes on the caller's stack.
 	 * The Zephyr shell thread is CONFIG_SHELL_STACK_SIZE=2048, so
@@ -144,49 +175,102 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 	 * buffers off the stack for this exact reason; the socket path was missed. */
 	if (ctx->sock_busy) return ALP_ERR_BUSY;
 	ctx->sock_busy = true;
-	uint8_t *p     = ctx->sock_buf;
-	p[0]           = (uint8_t)(handle & 0xFFu);
-	p[1]           = (uint8_t)((handle >> 8) & 0xFFu);
-	p[2]           = 0u; /* flags (MORE bit unused here) */
-	/* p[3] is alp_cc3501e_sock_send_t.seq (formerly reserved, always 0 through
-	 * v6) -- a retry seq (proto v7, alp-sdk#1746 / cc3501e-bridge-firmware#88).
-	 * poll_by_repeat() re-sends THIS EXACT buffer on every BUSY/IO retry, so
-	 * assigning the seq ONCE here, before the call, is what makes it constant
-	 * across every retry of one logical send -- that constancy is the whole
-	 * mechanism: the firmware serves its cached reply for a repeated seq
-	 * instead of re-submitting (and re-transmitting) the payload.
-	 * Pre-increment, exactly like spi1_seq above: a fresh ctx's first send is
-	 * seq 1, and the counter free-runs from there.
-	 *
-	 * WRAP: sock_send_seq is a uint8_t, so it wraps 255 -> 0 after 256 sends
-	 * (defined unsigned overflow, not UB).  That cannot collide with the
-	 * firmware's cache: the cache is a SINGLE entry holding only the
-	 * immediately-preceding completed send's seq, never anything from 256
-	 * sends ago, so a wrapped-around repeat is never mistaken for a retry of
-	 * an old send. */
-	p[3] = ++ctx->sock_send_seq;
-	p[4] = (uint8_t)(len & 0xFFu);
-	p[5] = (uint8_t)((len >> 8) & 0xFFu);
-	p[6] = 0u;
-	p[7] = 0u;
-	if (len > 0u) memcpy(&p[CC3501E_SOCK_SEND_HDR], data, len);
 
-	uint8_t      reply[2] = { 0 };
-	size_t       got      = 0;
-	alp_status_t s        = poll_by_repeat(ctx,
-	                                       ALP_CC3501E_CMD_SOCK_SEND,
-	                                       p,
-	                                       CC3501E_SOCK_SEND_HDR + len,
-	                                       reply,
-	                                       sizeof(reply),
-	                                       &got,
-	                                       timeout_ms);
-	ctx->sock_busy        = false;
-	if (s != ALP_OK) return s;
-	if (sent_out != NULL && got >= 2u) {
-		*sent_out = (size_t)((uint16_t)reply[0] | ((uint16_t)reply[1] << 8));
+	const uint8_t *remaining     = data;
+	size_t         remaining_len = len;
+	size_t         total_sent    = 0u;
+	/* Real elapsed time, not a declared per-attempt cost -- the same #2035 bug
+	 * already fixed once in cc3501e_wifi_connect()'s status-poll loop (see its
+	 * `elapsed_ms` comment): a ledger debited by a fixed per-attempt estimate
+	 * drains faster than the clock whenever an attempt actually costs less
+	 * than its estimate. Here the deadline is read ONCE off the same
+	 * monotonic clock poll_by_repeat() itself uses, and every iteration below
+	 * budgets whatever is genuinely left of it. */
+	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
+	alp_status_t   s;
+
+	for (;;) {
+		uint8_t *p = ctx->sock_buf;
+		p[0]       = (uint8_t)(handle & 0xFFu);
+		p[1]       = (uint8_t)((handle >> 8) & 0xFFu);
+		p[2]       = 0u; /* flags (MORE bit unused here) */
+		/* p[3] is alp_cc3501e_sock_send_t.seq (formerly reserved, always 0
+		 * through v6) -- a retry seq (proto v7, alp-sdk#1746 /
+		 * cc3501e-bridge-firmware#88). ONE seq per ITERATION of this loop, not
+		 * per call: each iteration carries different remaining bytes, so it is
+		 * a NEW logical send and must get a NEW seq -- reusing the previous
+		 * iteration's seq for different data would make the firmware serve its
+		 * stale cached reply instead of submitting the new bytes, silently
+		 * dropping them. poll_by_repeat() below re-sends THIS EXACT buffer,
+		 * unmodified, on every one of its OWN internal BUSY/IO retries of one
+		 * iteration -- that keeps the seq constant across THOSE retries
+		 * automatically, which is what lets the firmware serve a repeated poll
+		 * of the SAME iteration from its cache instead of re-submitting (and
+		 * re-transmitting) the payload. Pre-increment, exactly like spi1_seq:
+		 * a fresh ctx's first send is seq 1, and the counter free-runs from
+		 * there.
+		 *
+		 * WRAP: sock_send_seq is a uint8_t, so it wraps 255 -> 0 after 256
+		 * increments (defined unsigned overflow, not UB). That cannot collide
+		 * with the firmware's cache: the cache is a SINGLE entry holding only
+		 * the immediately-preceding completed send's seq, never anything from
+		 * 256 increments ago, so a wrapped-around repeat is never mistaken for
+		 * a retry of an old send. */
+		p[3] = ++ctx->sock_send_seq;
+		p[4] = (uint8_t)(remaining_len & 0xFFu);
+		p[5] = (uint8_t)((remaining_len >> 8) & 0xFFu);
+		p[6] = 0u;
+		p[7] = 0u;
+		if (remaining_len > 0u) memcpy(&p[CC3501E_SOCK_SEND_HDR], remaining, remaining_len);
+
+		uint64_t now    = alp_uptime_ms();
+		uint32_t budget = (now >= deadline_ms) ? 0u : (uint32_t)(deadline_ms - now);
+
+		uint8_t reply[2] = { 0 };
+		size_t  got      = 0;
+		s                = poll_by_repeat(ctx,
+		                                  ALP_CC3501E_CMD_SOCK_SEND,
+		                                  p,
+		                                  CC3501E_SOCK_SEND_HDR + remaining_len,
+		                                  reply,
+		                                  sizeof(reply),
+		                                  &got,
+		                                  budget);
+		if (s != ALP_OK) break; /* transport/firmware error -- return it now, as today */
+
+		size_t queued = (got >= 2u) ? (size_t)((uint16_t)reply[0] | ((uint16_t)reply[1] << 8)) : 0u;
+		if (queued > remaining_len) queued = remaining_len; /* defensive clamp */
+		total_sent += queued;
+		remaining_len -= queued;
+		if (remaining_len == 0u) break; /* every byte of len is now queued */
+		if (queued > 0u) remaining += queued;
+
+		now = alp_uptime_ms();
+		if (now >= deadline_ms) {
+			s = ALP_ERR_TIMEOUT;
+			break;
+		}
+		if (queued == 0u) {
+			/* Zero progress this iteration: back off before the next one,
+			 * bounded to whatever budget remains so the sleep itself cannot
+			 * blow the caller's timeout_ms. */
+			uint64_t left    = deadline_ms - now;
+			uint32_t backoff = (left < (uint64_t)CC3501E_SOCK_SEND_BACKOFF_MS)
+			                       ? (uint32_t)left
+			                       : CC3501E_SOCK_SEND_BACKOFF_MS;
+			alp_delay_ms(backoff);
+			if (alp_uptime_ms() >= deadline_ms) {
+				s = ALP_ERR_TIMEOUT;
+				break;
+			}
+		}
+		/* Partial progress: loop again immediately -- no back-off needed, the
+		 * peer just demonstrated it is reading. */
 	}
-	return ALP_OK;
+
+	ctx->sock_busy = false;
+	if (sent_out != NULL) *sent_out = total_sent;
+	return s;
 }
 
 alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,

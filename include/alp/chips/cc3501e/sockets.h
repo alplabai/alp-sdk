@@ -192,19 +192,28 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
 /**
  * @brief Send bytes on a socket (SOCK_SEND, opcode 0x22).
  *
- * Queues @p len bytes on the socket and reports how many the stack accepted in
- * @p sent_out.  @p len is bounded by one frame
- * (<= ALP_CC3501E_MAX_PAYLOAD - 8, the send-header size); larger buffers must be
- * split by the caller.  Worker-routed poll-by-repeat.
+ * Queues @p len bytes on the socket, re-issuing the remainder as its own
+ * short transaction until every byte is queued or @p timeout_ms elapses --
+ * the firmware's SOCK_SEND is non-blocking (MSG_DONTWAIT), so a full peer
+ * receive buffer reports 0 bytes queued rather than blocking, and a short
+ * queue is the normal outcome under backpressure, not an edge case. @p len is
+ * bounded by one frame (<= ALP_CC3501E_MAX_PAYLOAD - 8, the send-header
+ * size); larger buffers must be split by the caller.  Worker-routed
+ * poll-by-repeat, looped.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
  * @param data        Payload bytes to send.
  * @param len         Number of bytes in @p data.
- * @param sent_out    Receives the accepted byte count (may be NULL).
- * @param timeout_ms  Upper bound on the send poll budget.
- * @return ALP_OK once queued; ALP_ERR_INVAL if @p len exceeds one frame;
- *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
+ * @param sent_out    Receives the TOTAL accepted byte count across every
+ *                    iteration (may be NULL) -- @p len on ALP_OK, a partial
+ *                    count on ALP_ERR_TIMEOUT.
+ * @param timeout_ms  Upper bound on the total send budget, across every
+ *                    iteration.
+ * @return ALP_OK only once all @p len bytes are queued; ALP_ERR_TIMEOUT with
+ *         a partial @p sent_out if @p timeout_ms elapses first;
+ *         ALP_ERR_INVAL if @p len exceeds one frame; ALP_ERR_NOT_READY on the
+ *         stub build; mapped error otherwise.
  */
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,

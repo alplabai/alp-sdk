@@ -124,6 +124,18 @@ static struct {
 	 * Same capacity + drop-past-capacity rule as cmd_log above. */
 	uint8_t  flags_log[16];
 	uint32_t flags_log_count;
+
+	/* alp-sdk#107 (cc3501e-bridge-firmware#107) remainder-retry coverage: every
+	 * CMD_SOCK_SEND dispatch's payload seq (byte [3], NOT the wire-header
+	 * flags -- see cc3501e_sock_send()'s seq comment) and declared data_len
+	 * (bytes [4..5]), in order.  slave.req_pl/req_len alone only ever hold the
+	 * LAST dispatch, which cannot prove a multi-iteration send used a
+	 * DISTINCT seq per iteration with only the remaining bytes -- this log
+	 * can.  Same drop-past-capacity rule as cmd_log above; no test here drives
+	 * more than a handful of iterations. */
+	uint8_t  sock_send_seq_log[8];
+	uint16_t sock_send_datalen_log[8];
+	uint32_t sock_send_log_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -253,6 +265,23 @@ static uint8_t g_diag_info_reply_len = 18u;
  * unfalsifiable against it. Cleared by slave_reset(). */
 static bool g_diag_info_legacy_unpadded;
 
+/* alp-sdk#107 (cc3501e-bridge-firmware#107) mutant controls for
+ * cc3501e_sock_send()'s remainder-retry loop.  Both cleared by slave_reset(),
+ * so the default across the suite is the pre-#107 behaviour every other
+ * SOCK_SEND test relies on: queue the whole declared data_len in one shot.
+ *
+ *   - g_sock_send_queue_plan / _len: per-dispatch queued-byte counts to
+ *     report, in order (indexed by how many CMD_SOCK_SEND dispatches have
+ *     landed so far); once the plan is exhausted, dispatch falls back to
+ *     echoing the full data_len, same as the default.
+ *   - g_sock_send_always_zero: every dispatch reports 0 bytes queued,
+ *     regardless of the plan above -- models a peer that never reads, so the
+ *     loop must give up on ITS OWN elapsed-time budget rather than hang. */
+static uint16_t g_sock_send_queue_plan[4];
+static uint32_t g_sock_send_queue_plan_len;
+static bool     g_sock_send_always_zero;
+static uint32_t g_sock_send_dispatch_count;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -285,6 +314,10 @@ static void slave_reset(void)
 	g_get_ip_io_down_remaining         = 0u;
 	g_diag_info_reply_len              = 18u;
 	g_diag_info_legacy_unpadded        = false;
+	memset(g_sock_send_queue_plan, 0, sizeof(g_sock_send_queue_plan));
+	g_sock_send_queue_plan_len = 0u;
+	g_sock_send_always_zero    = false;
+	g_sock_send_dispatch_count = 0u;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -649,9 +682,24 @@ static void slave_dispatch(void)
 	}
 	case ALP_CC3501E_CMD_SOCK_SEND: {
 		/* Echo the inline data_len (bytes [4..5] of the send header) as the
-		 * accepted count -- the firmware queues everything in this model. */
-		uint16_t      dl   = (uint16_t)slave.req_pl[4] | ((uint16_t)slave.req_pl[5] << 8);
-		const uint8_t c[2] = { (uint8_t)(dl & 0xFFu), (uint8_t)((dl >> 8) & 0xFFu) };
+		 * accepted count by default -- alp-sdk#107 mutant controls above can
+		 * override that per dispatch to model backpressure (a partial or zero
+		 * queue). */
+		uint16_t dl     = (uint16_t)slave.req_pl[4] | ((uint16_t)slave.req_pl[5] << 8);
+		uint16_t queued = dl;
+		if (g_sock_send_always_zero) {
+			queued = 0u;
+		} else if (g_sock_send_dispatch_count < g_sock_send_queue_plan_len) {
+			queued = g_sock_send_queue_plan[g_sock_send_dispatch_count];
+			if (queued > dl) queued = dl;
+		}
+		if (slave.sock_send_log_count < ARRAY_SIZE(slave.sock_send_seq_log)) {
+			slave.sock_send_seq_log[slave.sock_send_log_count]     = slave.req_pl[3];
+			slave.sock_send_datalen_log[slave.sock_send_log_count] = dl;
+			slave.sock_send_log_count++;
+		}
+		g_sock_send_dispatch_count++;
+		const uint8_t c[2] = { (uint8_t)(queued & 0xFFu), (uint8_t)((queued >> 8) & 0xFFu) };
 		stage_reply(ALP_CC3501E_RESP_OK, c, 2u);
 		break;
 	}
@@ -2225,6 +2273,72 @@ ZTEST(cc3501e_host_driver, test_sock_send_encodes_header_and_data)
 	zassert_equal(slave.req_pl[5], 0u, "data_len hi");
 	zassert_mem_equal(&slave.req_pl[8], data, 5u, "inline data after the header");
 	zassert_equal(sent, 5u, "decoded accepted byte count");
+}
+
+/* alp-sdk#107 (cc3501e-bridge-firmware#107): a slave that queues everything on
+ * the first reply -- the pre-#107 case -- must still resolve in exactly ONE
+ * SOCK_SEND dispatch. Guards against a remainder-retry rewrite that always
+ * loops at least twice regardless of progress. */
+ZTEST(cc3501e_host_driver, test_sock_send_full_queue_first_try_one_iteration_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 0u;
+
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
+	zassert_equal(sent, 5u, "all 5 bytes reported queued");
+	zassert_equal(slave.sock_send_log_count, 1u, "one dispatch -- no remainder to retry");
+}
+
+/* alp-sdk#107: a slave that queues a PARTIAL count, then the rest on the next
+ * poll -- the MSG_DONTWAIT backpressure case the firmware change (#107)
+ * introduces. cc3501e_sock_send() must loop, report the FULL count once
+ * everything is queued, and -- the property #1746's cache mechanism depends
+ * on -- each iteration must carry a DISTINCT seq (payload byte [3]) with only
+ * the REMAINING bytes, not the original 5. */
+ZTEST(cc3501e_host_driver, test_sock_send_partial_then_rest_retries_with_new_seq_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 0u;
+
+	g_sock_send_queue_plan[0]  = 2u; /* 1st dispatch: queue 2 of 5 */
+	g_sock_send_queue_plan[1]  = 3u; /* 2nd dispatch: queue the remaining 3 */
+	g_sock_send_queue_plan_len = 2u;
+
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u), ALP_OK, "SEND -> OK");
+	zassert_equal(sent, 5u, "total queued across both iterations == len");
+	zassert_equal(slave.sock_send_log_count, 2u, "exactly two iterations");
+	zassert_equal(slave.sock_send_datalen_log[0], 5u, "1st iteration offers all 5 remaining");
+	zassert_equal(slave.sock_send_datalen_log[1], 3u, "2nd iteration offers only what's left (3)");
+	zassert_not_equal(slave.sock_send_seq_log[0],
+	                  slave.sock_send_seq_log[1],
+	                  "each iteration is a NEW logical send -- distinct seq");
+}
+
+/* alp-sdk#107: a slave that NEVER queues anything (a peer that never reads)
+ * must not hang cc3501e_sock_send() -- it must give up within its OWN
+ * timeout_ms budget, reporting ALP_ERR_TIMEOUT with whatever partial count
+ * was queued (0 here), and it must back off between attempts rather than
+ * hammering the link. The fake alp_delay_ms()/alp_uptime_ms() pair (see the
+ * fixture above) makes this deterministic without any real sleeping: time
+ * only ever advances by what the driver itself asks alp_delay_ms() to sleep. */
+ZTEST(cc3501e_host_driver, test_sock_send_never_queued_times_out_and_backs_off_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 123u; /* poison -- must come back 0, not left untouched */
+
+	g_sock_send_always_zero = true;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u),
+	              ALP_ERR_TIMEOUT,
+	              "a peer that never reads -> ALP_ERR_TIMEOUT within the budget");
+	zassert_equal(sent, 0u, "partial (zero) progress reported, not left poisoned");
+	/* Backed off, not hot-looped: at 20 ms/back-off and a 100 ms budget this is
+	 * a handful of dispatches, not hundreds. */
+	zassert_true(slave.sock_send_log_count >= 2u && slave.sock_send_log_count <= 10u,
+	             "bounded, back-off-paced retry count (got %u)",
+	             slave.sock_send_log_count);
 }
 
 /* RECV requests up to @cap bytes and decodes the 24-byte recv-resp header +
