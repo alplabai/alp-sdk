@@ -131,6 +131,14 @@ def test_row_outside_aperture_not_reported_as_gap():
 
 
 def test_whole_device_alias_spanning_full_aperture_not_reported_as_overlap():
+    """4b itself no longer looks at `write_authority` at all (#2086
+    review round 1, finding 1 removed the per-site guard here) -- a
+    runtime-writable whole-device alias is refused once, by
+    `_check_preset()`'s top-of-window rule
+    (test_check_atoc_reservation.py::TestPresetCheckApertureTopRule),
+    since the alias's extent always reaches that top too. This fixture's
+    `composite` stays exempt from BOTH: not runtime-writable, so neither
+    4b nor the top-of-window rule fires."""
     cr = _load_cr()
     p = _write_fixture(
         cr, "aperture-whole-device-alias",
@@ -139,59 +147,6 @@ def test_whole_device_alias_spanning_full_aperture_not_reported_as_overlap():
         # not counted as overlapping the regions it aliases.
         "  - { name: mram_main, base: 0x80000000, size_kib: 5632, "
         "accessible_from: [m55_he], carveout: false, write_authority: composite }\n"
-        "  - { name: mcuboot, base: 0x80000000, size_kib: 64,   "
-        "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
-        "  - { name: storage, base: 0x80010000, size_kib: 5536, "
-        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
-        "  - { name: atoc,    base: 0x80578000, size_kib: 32,   "
-        "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n",
-    )
-    try:
-        failures = cr._check_preset(p)
-    finally:
-        p.unlink(missing_ok=True)
-    assert not failures
-
-
-def test_whole_device_alias_with_customer_runtime_authority_fails():
-    """#2086: a whole-device alias marked `write_authority:
-    customer_runtime` covers the atoc band and IS runtime-writable -- the
-    extent-only exemption must not pass it. Fails against the pre-#2086
-    code (which reads only `lo == full_lo and hi == full_hi`)."""
-    cr = _load_cr()
-    p = _write_fixture(
-        cr, "aperture-alias-runtime-writable",
-        _SILICON_HEADER + "memory_map:\n"
-        "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
-        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
-        "  - { name: mcuboot, base: 0x80000000, size_kib: 64,   "
-        "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
-        "  - { name: storage, base: 0x80010000, size_kib: 5536, "
-        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
-        "  - { name: atoc,    base: 0x80578000, size_kib: 32,   "
-        "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n",
-    )
-    try:
-        failures = cr._check_preset(p)
-    finally:
-        p.unlink(missing_ok=True)
-    assert failures
-    joined = "\n".join(failures)
-    assert "mram_alias" in joined
-    assert "customer_runtime" in joined
-
-
-def test_whole_device_alias_with_absent_authority_stays_exempt():
-    """#2086: ABSENT `write_authority` is unresolved, never
-    `customer_runtime` (ADR-0034 clause 4) -- the schema says a consumer
-    must treat it as ineligible for runtime write, so the whole-device
-    alias exemption must still apply, same as before this fix."""
-    cr = _load_cr()
-    p = _write_fixture(
-        cr, "aperture-alias-absent-authority",
-        _SILICON_HEADER + "memory_map:\n"
-        "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
-        "accessible_from: [m55_he], carveout: false }\n"
         "  - { name: mcuboot, base: 0x80000000, size_kib: 64,   "
         "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
         "  - { name: storage, base: 0x80010000, size_kib: 5536, "
