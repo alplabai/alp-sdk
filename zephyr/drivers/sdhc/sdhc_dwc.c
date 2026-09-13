@@ -771,6 +771,18 @@ static int sdhc_dwc_reset(const struct device *dev)
 	 */
 	if (reset_ret != 0 || ret != 0) {
 		memset(&data->ios, 0, sizeof(data->ios));
+		/*
+		 * ALP-SDK DELTA (#2051), not upstream: leaving data->ios.clock
+		 * at the memset's 0 is itself a real, requestable value
+		 * (sdhc_dwc_set_io()'s own `if (ios->clock == 0)` branch means
+		 * "disable the clock"), so a later request that ALSO asks for
+		 * 0 would compare equal to this "invalidated" cache and get
+		 * silently skipped -- exactly the stale-cache bug this failure
+		 * path exists to avoid, just on one field. Force a value no
+		 * real caller can ever request instead, so any real request
+		 * (0 included) is guaranteed to differ and reprogram it.
+		 */
+		data->ios.clock = UINT32_MAX;
 		k_sem_give(&data->lock);
 		return reset_ret ? reset_ret : ret;
 	}

@@ -1,25 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build-only regression for the vendored DWC SDHC driver (Tier-2) on the
-# E1M-AEN801 (Ensemble E8, M55-HE): initializes the SoC SD Host Controller and
-# reads back the SDMMC disk over the ADMA2 descriptor path.
+# ALP-SDK DELTA (#2051), not upstream: sdhc0 is DISABLED in this app's real
+# board overlay now (the E1M-EVK 2626-R2's SD mux hardware defect -- see
+# README.md), so the default scenario below no longer builds
+# CONFIG_SDHC_DWC at all -- it compile-checks the app source with the SD
+# probes compiled OUT (the DT_NODE_HAS_STATUS guard in src/main.c takes
+# the disabled branch). Driver build coverage, including the #1097
+# regression below, moved to the second scenario,
+# `.sdhc_build_coverage`, which layers `sdhc-build-coverage.overlay` on
+# top of the real board overlay to re-enable sdhc0 for THAT scenario
+# only -- build_only, never flashed, same pattern
+# examples/aen/aen-ethernet-link's `.mdio_managed` scenario uses for its
+# own alternate-DT-state coverage.
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only -- the
-# SD "B" pad route in boards/*.overlay is HE-only, see the overlay header).
-#
-# This is the regression coverage for #1097: CONFIG_SDHC_DWC_ADMA=y (default)
-# used to place the ADMA descriptor table in an empty-named linker section
-# (CONFIG_SDHC_DESCRIPTOR_SECTION default ""), which is a hard orphan-section
-# link error under -Wl,--fatal-warnings. Building this scenario proves the
-# link succeeds.
+# #1097 regression coverage (now carried by `.sdhc_build_coverage`):
+# CONFIG_SDHC_DWC_ADMA=y (default) used to place the ADMA descriptor table
+# in an empty-named linker section (CONFIG_SDHC_DESCRIPTOR_SECTION default
+# ""), which is a hard orphan-section link error under
+# -Wl,--fatal-warnings. Building that scenario proves the link still
+# succeeds.
 
 sample:
   name: aen-sdcard-readout
   description: |
-    Bench RAM-run SD Host Controller proof for the E1M-AEN801 (Alif Ensemble
-    E8, Cortex-M55-HE): brings up the DesignWare SDHC controller and the
-    SDMMC disk over ADMA2, printing a PASS/FAIL line.
+    Register-level SD Host Controller bring-up probes for the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE). sdhc0 is disabled on the E1M-EVK
+    2626-R2 (SD mux hardware defect, #2051); see README.md.
 
 tests:
   alp_sdk.examples.aen.sdcard_readout.aen:
@@ -31,4 +37,28 @@ tests:
       - aen
       - sdhc
       - sdmmc
-    build_only: true   # needs a real card + the P18 mux-select jumper set by hand; bench flash, not a CI run.
+    build_only: true   # sdhc0 is disabled on this board; nothing here reaches hardware.
+
+  # Driver build coverage only -- see the file header. NOT the app's real
+  # configuration: this re-enables sdhc0 (disabled in the real board
+  # overlay) so CONFIG_SDHC_DWC, its ADMA descriptor placement (#1097),
+  # and this app's guarded SD-probe code path still get a compile check.
+  alp_sdk.examples.aen.sdcard_readout.aen.sdhc_build_coverage:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    # extra_dtc_overlay_files REPLACES CMake's own board-default-overlay
+    # auto-discovery rather than supplementing it, so the board's default
+    # overlay must be listed explicitly here too (same trap
+    # aen-ethernet-link's .mdio_managed scenario documents) or this build
+    # silently loses the SE-service/CC3501E-bridge nodes the real overlay
+    # also carries.
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - sdhc-build-coverage.overlay
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - sdmmc
+    build_only: true   # driver/ADMA build coverage only -- see sdhc-build-coverage.overlay; never flashed.

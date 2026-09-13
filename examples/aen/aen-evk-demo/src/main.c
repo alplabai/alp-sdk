@@ -142,22 +142,12 @@
 #include <zephyr/net/net_ip.h>
 
 /*
- * Phase 9 only, and deliberate for the same reason the Ethernet headers above
- * are: the portable <alp/...> API publishes no block-device or filesystem
- * peripheral class at all, so there is nothing here to route through it. The
- * ONE thing phase 9 does reach for portably is the mux ENABLE pin, and that
- * IS opened through <alp/peripheral.h>'s alp_gpio_* on a portable E1M pin id
- * (ALP_E1M_GPIO_IO20) -- the CC3501E proxy backend turns it into a bridge
- * transaction without this file naming a raw coprocessor GPIO index.
- *
- * <ff.h> is the ELM FatFs work-area type (FATFS), needed because fs_mount()
- * takes a caller-owned one; it is not otherwise called into.
+ * ALP-SDK DELTA (#2051), not upstream: the disk-access/FatFs includes that
+ * used to live here (<zephyr/storage/disk_access.h>, <zephyr/drivers/disk.h>,
+ * <zephyr/fs/fs.h>, <ff.h>) are gone. Phase 9 (SD card) never reaches
+ * disk_access_init()/fs_mount() any more -- see phase_sdcard()'s SAFETY
+ * comment -- so nothing in this file calls into any of them.
  */
-#include <zephyr/storage/disk_access.h>
-#include <zephyr/drivers/disk.h> /* DISK_STATUS_NOMEDIA -- the no-card fork */
-#include <zephyr/fs/fs.h>
-#include <ff.h>
-
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/jpeg.h"
