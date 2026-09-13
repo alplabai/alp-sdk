@@ -46,11 +46,18 @@ machinery:
      recognised.
 
   2. Preset check -- every SoM preset declaring an explicit `memory_map:`:
-     the region reaching the highest `base + size` must be named `atoc`, and
-     no other region may intersect it.
+     the region reaching the top of the SoC's declared MRAM aperture must be
+     named `atoc`. Where no aperture resolves for that preset (a non-Alif
+     SoC, or a fixture with no `silicon:`), the fallback is the region
+     reaching the highest `base + size` in the whole table (#2069) -- see
+     `_check_preset()` for why an aperture-scoped top is the correct read:
+     a row above the App MRAM window (e.g. an OSPI0 HyperRAM at its own,
+     much higher, XIP base) must never win this comparison just for being
+     highest.
 
-The window top is DERIVED per board/preset (the highest partition/region end
-in that same table), never hardcoded: the AEN SKUs do not share an MRAM size,
+The window top is DERIVED per board/preset -- the SoC's declared MRAM
+aperture end where one resolves, else the highest partition/region end in
+that same table -- never hardcoded: the AEN SKUs do not share an MRAM size,
 and a hardcoded 0x80580000 would pass vacuously on every part that isn't the
 E8.
 
@@ -456,9 +463,10 @@ def _check_class_disagreement(
     flash, so `carveout` must be exactly `False` there. Outside the
     aperture proves NOTHING -- Ensemble's OSPI XIP windows sit outside
     `[soc_flash_base, ...)` and are still flash, and the same OSPI0
-    controller also carries the W958D8NBYA5I HyperRAM on
-    `chip_select: 1`, so a row outside the aperture with
-    `carveout: false` is a legitimate RAM reservation (the schema's own
+    controller also carries the OSPI0 HyperRAM on `chip_select: 0` (see
+    `on_module.hyperram` -- the fitted part is per-SKU, not named here),
+    so a row outside the aperture with `carveout: false` is a legitimate
+    RAM reservation (the schema's own
     text: reserving SRAM for a hardware secure enclave), not a defect --
     the symmetric direction is never asserted. A region with an
     unresolved base is skipped, never classified -- returned as a
@@ -544,19 +552,63 @@ def _check_preset(path: Path) -> "list[str]":
                     "mramAddress entry could be accepted inside the "
                     "SE-owned boot table (#1289, #1981).")
 
-    window_top = max(hi for _, hi, _ in spans)
-    # A whole-device region (e.g. `mram_main`) legitimately spans the window;
-    # the check is about the SMALLEST region owning the top.
-    at_top = sorted((hi - lo, lo, hi, name)
-                    for lo, hi, name in spans if hi == window_top)
-    _, _, _, top_name = at_top[0]
-    if top_name not in _ATOC_NAMES:
-        out.append(
-            f"{rel}: region {top_name!r} reaches the top of the declared "
-            f"window (0x{window_top:x}) but is not named 'atoc'.\n"
-            f"    That band is where SETOOLS top-anchors the ATOC "
-            f"application table (#1289); a region there that reads as "
-            f"customer storage is the boot table in disguise.")
+    # Resolve the aperture BEFORE deciding what "the top" means (#2069): the
+    # hazard is defined by where SETOOLS anchors the ATOC -- the SoC
+    # variant's declared MRAM aperture end -- not by the highest row someone
+    # happened to author. Without this, an OSPI0 HyperRAM row (base
+    # 0xA0000000, well above the MRAM window) becomes the file-wide max and
+    # gets refused as "the boot table in disguise" purely for being highest.
+    aperture = _resolve_aperture(doc)
+
+    if aperture is not None:
+        full_lo, full_hi = aperture
+        # The rows ENDING exactly at the aperture top decide who owns it.
+        # `hi > lo` excludes a zero-size row: an authored `{name: atoc,
+        # base: <full_hi>, size_kib: 0}` reserves nothing and must not be
+        # able to satisfy this rule by merely existing at the right
+        # address (#2069 review round 1, finding 6).
+        at_top = sorted((hi - lo, lo, hi, name)
+                        for lo, hi, name in spans if hi == full_hi and hi > lo)
+        if not at_top:
+            out.append(
+                f"{rel}: no region in the declared memory_map ends at "
+                f"0x{full_hi:x}, the top of the SoC's declared MRAM "
+                f"aperture.\n"
+                f"    SETOOLS top-anchors the ATOC application table at "
+                f"that exact address regardless of what the authored "
+                f"table says (#1289); a short tiling or a straddling "
+                f"`atoc` both leave that anchor point unowned. Reserve a "
+                f"region named 'atoc' ending at 0x{full_hi:x}.")
+        else:
+            _, _, _, top_name = at_top[0]
+            if top_name not in _ATOC_NAMES:
+                out.append(
+                    f"{rel}: region {top_name!r} reaches the top of the "
+                    f"SoC's declared MRAM aperture (0x{full_hi:x}) but is "
+                    f"not named 'atoc'.\n"
+                    f"    That band is where SETOOLS top-anchors the ATOC "
+                    f"application table (#1289); a region there that reads "
+                    f"as customer storage is the boot table in disguise.")
+    else:
+        # No aperture resolves (a non-Alif SoC, or an Ensemble variant/
+        # fixture that omits `silicon:`/`soc_flash_base`) -- fall back to
+        # today's file-wide-max behaviour VERBATIM. Deliberately
+        # fail-closed: losing aperture resolution must still refuse an
+        # out-of-window row loudly, never silently pass it.
+        window_top = max(hi for _, hi, _ in spans)
+        # A whole-device region (e.g. `mram_main`) legitimately spans the
+        # window; the check is about the SMALLEST region owning the top.
+        at_top = sorted((hi - lo, lo, hi, name)
+                        for lo, hi, name in spans if hi == window_top)
+        _, _, _, top_name = at_top[0]
+        if top_name not in _ATOC_NAMES:
+            out.append(
+                f"{rel}: region {top_name!r} reaches the top of the "
+                f"declared window (0x{window_top:x}) but is not named "
+                f"'atoc'.\n"
+                f"    That band is where SETOOLS top-anchors the ATOC "
+                f"application table (#1289); a region there that reads as "
+                f"customer storage is the boot table in disguise.")
 
     # 4b/4c (#1365 split A): where the SoC declares an on-die MRAM
     # aperture, the contained regions must tile it and agree with it on
@@ -567,7 +619,6 @@ def _check_preset(path: Path) -> "list[str]":
     # e.g. `mram_main`'s `"TBD"`) is not silently absorbed either: both
     # checks hand back a non-failing skip note, printed here so the
     # gate says so instead of a docstring nobody reads at gate-run time.
-    aperture = _resolve_aperture(doc)
     if aperture is not None:
         tiling_failures, tiling_skips = _check_aperture_tiling(
             path, doc, memory_map, aperture)
