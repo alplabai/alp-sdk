@@ -174,18 +174,18 @@ topology:
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    # No generated Zephyr board tree yet -- board bring-up for this SKU has
-    # not happened (same precedent as E1M-V2M102/E1M-V2N102: a larger/
-    # differing-memory BOM variant of an already-shipping PCB, awaiting its
-    # own tree). Bare (unqualified) name, per scripts/check_board_target_
-    # tree_parity.py's _NOT_YET_SUPPORTED convention -- do NOT qualify with
-    # a <soc>/<cpucluster> suffix until the tree actually exists (#720).
-    board: alp_e1m_aen803_m55_hp
+    # Qualified Zephyr board target: the Ensemble E8 die is multi-cluster
+    # (RTSS-HE + RTSS-HP), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers -- the bare name is ambiguous and fails to resolve under
+    # Zephyr 4.4 (#720). Must match the generated board tree's twister
+    # identifier (zephyr/boards/alp/e1m_aen803_m55_hp/...). Generated
+    # #2084 -- same silicon/variant as E1M-AEN801, dual-external-memory BOM.
+    board: alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
-    board: alp_e1m_aen803_m55_he
+    board: alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HE carrier"
 

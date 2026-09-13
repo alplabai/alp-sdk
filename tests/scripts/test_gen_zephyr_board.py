@@ -73,6 +73,10 @@ METADATA_ROOT = REPO / "metadata"
 PARITY_COVERED: dict[str, tuple[str, str]] = {
     "e1m_aen801_m55_hp": ("E1M-AEN801", "m55_hp"),
     "e1m_aen801_m55_he": ("E1M-AEN801", "m55_he"),
+    # E1M-AEN803 (#2084): same E8 silicon/variant as AEN801, dual-external-
+    # memory BOM (both OSPI0 memories fitted); generated the same way.
+    "e1m_aen803_m55_hp": ("E1M-AEN803", "m55_hp"),
+    "e1m_aen803_m55_he": ("E1M-AEN803", "m55_he"),
     # V2N/V2M: `emit_zephyr_board()` now also claims the pinctrl.dtsi,
     # _defconfig (#655 slice 1) and the board `.dts` (#655 slice 2), all
     # sourced from metadata/e1m_modules/v2n/supervisor-links.yaml plus the
@@ -141,6 +145,12 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
 
     def test_aen801_m55_he_full_tree(self) -> None:
         self._parity("e1m_aen801_m55_he")
+
+    def test_aen803_m55_hp_full_tree(self) -> None:
+        self._parity("e1m_aen803_m55_hp")
+
+    def test_aen803_m55_he_full_tree(self) -> None:
+        self._parity("e1m_aen803_m55_he")
 
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2n101_m33_sm")
