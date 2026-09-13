@@ -174,14 +174,19 @@ def _runtime_writable_top_failure(
     real window, same as the aperture-scoped rule above guards against)
     -- so the message must not claim SETOOLS anchors there.
 
-    `floor == lo and top == hi` (the same exact-extent test 4b/4c use
-    for their whole-device-alias exemption) decides which
-    `write_authority` value the remedy names: `composite` for a
-    whole-device alias (`mram_main`'s own tag today), `secure_enclave`
-    for the atoc band itself -- suggesting `composite` for a
-    correctly-named `atoc` row would let an author retag a
-    mis-authored one `composite` and pass, since that value is itself
-    exempt."""
+    `name not in _ATOC_NAMES and floor == lo and top == hi` (the same
+    exact-extent test 4b/4c use for their whole-device-alias exemption,
+    plus a name check) decides which `write_authority` value the remedy
+    names: `composite` for a whole-device alias (`mram_main`'s own tag
+    today), `secure_enclave` for the atoc band itself -- suggesting
+    `composite` for a correctly-named `atoc` row would let an author
+    retag a mis-authored one `composite` and pass, since that value is
+    itself exempt. The name check matters on its own, not just as a
+    belt-and-braces: in the no-aperture fallback, `floor`/`top` are the
+    file-wide min/max over rows with a RESOLVED base -- if `atoc` is the
+    only such row (e.g. `mram_main` is still `base: "TBD"`), the extent
+    test alone is trivially true for `atoc` itself, since it IS the
+    only resolved row spanning floor..top (#2086 follow-up)."""
     if aperture_resolved:
         why = (
             f"SETOOLS top-anchors the ATOC application table at that "
@@ -197,7 +202,7 @@ def _runtime_writable_top_failure(
             f"fail-closed, and a row there that the application can "
             f"write at runtime is refused on the same grounds as a "
             f"confirmed aperture top.")
-    if lo == floor and hi == top:
+    if name not in _ATOC_NAMES and lo == floor and hi == top:
         remedy = (
             f"give it a non-runtime-writable write_authority -- "
             f"'composite' is the value a whole-device alias like this "
