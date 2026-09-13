@@ -262,18 +262,34 @@ topology:
 # metadata/schemas/som-preset-v1.schema.json `memory_region.carveout`)
 # while leaving their `base` available for the DTS/partition-table use above.
 #
-# `mram_main` is kept alongside the six fine-grained regions above,
-# `base: TBD` and unchanged from the auto-derived shape it replaces
-# (whole-MRAM, all three cores, cacheable) -- this is the coarse
-# generic-storage-carve-out device name (`board.yaml storage[].flash_device:
-# mram_main`, e.g. examples/connectivity/production-deployment/board.yaml)
-# that predates this fine-grained MCUboot map and isn't part of the
-# sysbuild/aen boot chain.  Since `resolve_storage_partitions()` only reads
-# `size_kib` (never `base`) it keeps resolving; `base: TBD` deliberately
-# keeps it BLOCKED for `ipc:` carve-out allocation (which does read `base`)
-# too, belt-and-suspenders alongside `carveout: false` above.  Bottom line:
-# every `ipc:` entry on this SoM stays `status: blocked` until a real SRAM
-# region with a real `base` exists in this table.
+# `mram_main` is kept alongside the six fine-grained regions above -- this
+# is the coarse generic-storage-carve-out device name (`board.yaml
+# storage[].flash_device: mram_main`, e.g. examples/connectivity/
+# production-deployment/board.yaml) that predates this fine-grained
+# MCUboot map and isn't part of the sysbuild/aen boot chain.  `base` stays
+# the literal string "TBD" (#2053 tried resolving it to 0x80000000 --
+# same address as `mcuboot`, correct per `write_authority: composite`'s
+# own "whole-window alias" definition -- and reverted it).  The blocker is
+# NOT the IPC-carve-out path: `scripts/alp_orchestrate/aperture.py`'s
+# `classify_region()` already has a whole-device-alias case (extent ==
+# aperture exactly) that correctly calls a resolved `mram_main` `"flash"`
+# regardless of `base`. The blocker is
+# `scripts/gen_zephyr_board.py::_aen_check_map_overlaps()`, which has NO
+# such exception: it filters `memory_map:` rows by `isinstance(base, int)`
+# alone, so a resolved `mram_main.base` enters its pairwise-overlap check
+# and trips "AEN memory_map regions 'mcuboot' (ends 0x80010000) and
+# 'mram_main' (starts 0x80000000) overlap" -- a REAL collision this
+# function's own docstring silently relied on `mram_main.base` staying
+# non-integer to avoid ("Regions with a non-integer base (a TBD sentinel,
+# or the whole-window mram_main alias) are skipped"), not a false
+# positive. `tests/scripts/test_gen_zephyr_board.py`'s
+# TestGenZephyrBoardByteEquivalence suite (11 tests) reproduces this the
+# moment `base` resolves, independent of anything else in the file.
+# Needs a whole-device-alias exception in `_aen_check_map_overlaps()`
+# mirroring `classify_region()`'s existing one before this can move;
+# tracked as a follow-up (not #2069, which is the external-memory/ATOC
+# top-anchor gap -- this is a third, separate invariant). Do not resolve
+# this `base` again without that fix landing first.
 memory_map:
   - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false, write_authority: vendor_image }
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
@@ -282,6 +298,16 @@ memory_map:
   - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
   - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+
+# No `hyperram` row here (#2053): `on_module.hyperram.assembled: false`
+# above -- the HyperRAM footprint (Winbond W958D8NBYA5I on this SKU's
+# BOM) is not populated on E1M-AEN801, so this SKU has no external-RAM
+# aperture to describe.  A row at 0xa0000000 would claim an address this
+# module does not answer at, the same invented-value hazard the
+# `assembled: false` key on `on_module.hyperram` above already exists to
+# prevent (see that key's own comment).  See E1M-AEN803.yaml for the
+# populated case (both external memories fitted) and its `hyperram` row
+# + the OSPI0-NOR-sharing note.
 
 # Inter-core mailbox IP: ARM MHUv2.  Confirmed via the alifsemi/zephyr_alif
 # fork DTS (dts/arm/alif/ensemble/common/e1.dtsi plus ensemble_rtss_{hp,he}.dtsi),
