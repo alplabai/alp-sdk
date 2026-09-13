@@ -167,6 +167,60 @@ def test_row_outside_aperture_with_carveout_true_also_passes():
     assert not failures
 
 
+def test_whole_device_alias_with_customer_runtime_authority_fails():
+    """#2086: same hazard as 4b's alias exemption -- a whole-device alias
+    marked `write_authority: customer_runtime` covers the atoc band and
+    IS runtime-writable, regardless of its `carveout` flag. Fails against
+    the pre-#2086 code (which reads only `lo == full_lo and hi ==
+    full_hi`)."""
+    cr = _load_cr()
+    p = _write_fixture(
+        cr, "class-alias-runtime-writable",
+        _SILICON_HEADER + "memory_map:\n"
+        "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
+        "  - { name: mcuboot, base: 0x80000000, size_kib: 64,   "
+        "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
+        "  - { name: storage, base: 0x80010000, size_kib: 5536, "
+        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
+        "  - { name: atoc,    base: 0x80578000, size_kib: 32,   "
+        "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n",
+    )
+    try:
+        failures = cr._check_preset(p)
+    finally:
+        p.unlink(missing_ok=True)
+    assert failures
+    joined = "\n".join(failures)
+    assert "mram_alias" in joined
+    assert "customer_runtime" in joined
+
+
+def test_whole_device_alias_with_absent_authority_stays_exempt():
+    """#2086: ABSENT `write_authority` is unresolved, never
+    `customer_runtime` (ADR-0034 clause 4) -- treated as ineligible for
+    runtime write, so the whole-device alias exemption must still apply,
+    same as before this fix."""
+    cr = _load_cr()
+    p = _write_fixture(
+        cr, "class-alias-absent-authority",
+        _SILICON_HEADER + "memory_map:\n"
+        "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
+        "accessible_from: [m55_he], carveout: true }\n"
+        "  - { name: mcuboot, base: 0x80000000, size_kib: 64,   "
+        "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
+        "  - { name: storage, base: 0x80010000, size_kib: 5536, "
+        "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
+        "  - { name: atoc,    base: 0x80578000, size_kib: 32,   "
+        "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n",
+    )
+    try:
+        failures = cr._check_preset(p)
+    finally:
+        p.unlink(missing_ok=True)
+    assert not failures
+
+
 def test_whole_device_alias_exempt_regardless_of_carveout():
     cr = _load_cr()
     p = _write_fixture(

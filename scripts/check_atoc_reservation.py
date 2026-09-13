@@ -128,6 +128,42 @@ SOCS = METADATA_ROOT / "socs"
 # rename is a one-line change here instead of a regex tweak.
 _ATOC_NAMES = {"atoc"}
 
+# `write_authority` values a whole-device alias may carry and still be
+# exempt from 4b/4c (#2086). Per `write_authority`'s description
+# (metadata/schemas/som-preset-v1.schema.json), `customer_runtime` is THE
+# ONLY value meaning "writable by the application at runtime" -- every
+# other declared value (`customer_image`/`vendor_image`: flash-tool only;
+# `secure_enclave`: SE at provisioning; `none`: nobody; `composite`: a
+# whole-device alias spanning contained rows of DIFFERENT authority,
+# deferring to them -- `mram_main`'s own tag today) is not runtime-writable
+# by the row itself. ABSENT means unresolved, and the schema says a
+# consumer must treat an absent `write_authority` as ineligible for
+# runtime write (ADR-0034 clause 4) -- so absent is exempt too, same as
+# today: not defaulting permissively means never treating it AS
+# `customer_runtime`, not refusing it as though it were.
+_RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
+
+
+def _alias_write_authority_failure(
+    rel: str, sku: str, name: str, lo: int, hi: int, wa: Any, check: str,
+) -> str:
+    """A whole-device-alias row (extent == full aperture) that IS
+    runtime-writable is exactly the hazard #1289/#2086 exist to refuse:
+    it necessarily covers the SE-owned atoc band while the application
+    can write it.  Named the row and its authority so a preset author
+    sees why the exemption didn't apply."""
+    return (
+        f"{rel}: preset {sku} -- whole-device alias region {name!r} "
+        f"[0x{lo:x}, 0x{hi:x}) spans the full declared MRAM aperture "
+        f"(covering the SE-owned atoc band) and carries "
+        f"write_authority={wa!r}, which IS runtime-writable by the "
+        f"application ({check}).\n"
+        f"    A whole-device alias is exempt from this check only when "
+        f"it cannot be written at runtime -- give it a non-runtime-"
+        f"writable write_authority (e.g. 'composite', as mram_main "
+        f"carries) or scope the row so it no longer spans the aperture "
+        f"top (#2086, #1289).")
+
 # `partition@<hex> { ... label = "<name>"; reg = <0x<hex> DT_SIZE_K(<n>)>; }`
 _PARTITION_RE = re.compile(
     r'partition@(?P<at>[0-9a-fA-F]+)\s*\{'
@@ -386,6 +422,13 @@ def _check_aperture_tiling(
     unresolved base is skipped -- returned as a non-failing entry in the
     second tuple element so the caller can print it -- never guessed at.
 
+    A whole-device alias is exempt only when its `write_authority` cannot
+    be written at runtime (#2086) -- otherwise it is precisely the hazard
+    check 2/4b exist to refuse (a runtime-writable row that necessarily
+    covers the atoc band), and it fails naming the row and its authority
+    instead of silently passing or falling into a confusing "overlaps
+    every sibling partition" report.
+
     Returns `(failures, skips)`. `skips` must never make the gate red.
     """
     rel = path.relative_to(REPO).as_posix()
@@ -393,6 +436,7 @@ def _check_aperture_tiling(
     full_lo, full_hi = aperture
     contained: "list[tuple[int, int, str]]" = []
     skips: "list[str]" = []
+    out: "list[str]" = []
     for region in memory_map:
         if not isinstance(region, dict):
             continue
@@ -406,16 +450,19 @@ def _check_aperture_tiling(
             continue
         lo, hi = ext
         if lo == full_lo and hi == full_hi:
-            continue  # whole-device alias -- the device, not a partition.
+            wa = region.get("write_authority")
+            if wa == _RUNTIME_WRITABLE_AUTHORITY:
+                out.append(_alias_write_authority_failure(
+                    rel, sku, name, lo, hi, wa, "aperture tiling, 4b"))
+            continue  # else: whole-device alias -- the device, not a partition.
         if hi <= full_lo or lo >= full_hi:
             continue  # entirely outside the aperture -- not a gap.
         contained.append((lo, hi, name))
 
     if not contained:
-        return [], skips
+        return out, skips
 
     contained.sort()
-    out: "list[str]" = []
     cursor = full_lo
     for lo, hi, name in contained:
         if lo < full_lo:
@@ -472,7 +519,9 @@ def _check_class_disagreement(
     unresolved base is skipped, never classified -- returned as a
     non-failing entry in the second tuple element so the caller can
     print it. The whole-device alias (extent == full aperture) is
-    exempt, same as 4b.
+    exempt, same as 4b -- but ONLY when its `write_authority` cannot be
+    written at runtime (#2086): otherwise it fails naming the row and
+    its authority instead of silently passing.
 
     Returns `(failures, skips)`. `skips` must never make the gate red.
     """
@@ -494,7 +543,11 @@ def _check_class_disagreement(
             continue
         lo, hi = ext
         if lo == full_lo and hi == full_hi:
-            continue  # whole-device alias -- exempt, same as 4b.
+            wa = region.get("write_authority")
+            if wa == _RUNTIME_WRITABLE_AUTHORITY:
+                out.append(_alias_write_authority_failure(
+                    rel, sku, name, lo, hi, wa, "flash-class agreement, 4c"))
+            continue  # else: whole-device alias -- exempt, same as 4b.
         contained = lo >= full_lo and hi <= full_hi
         if not contained:
             continue  # outside proves nothing -- one-directional (#1365).
