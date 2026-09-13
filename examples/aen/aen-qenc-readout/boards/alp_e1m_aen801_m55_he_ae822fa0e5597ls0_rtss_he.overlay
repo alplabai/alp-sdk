@@ -43,7 +43,7 @@
  * decode -- and the qdec driver programs this value straight into the
  * hardware counter's reload register, so it sets the real per-revolution
  * wraparound, not just a display scale factor. The carrier's rotary encoder
- * is 24 PPR (metadata/boards/e1m-evk.yaml: "PEC12R-4222F-S0024 ... 24 PPR"),
+ * is 24 PPR (metadata/boards/e1m-evk.yaml: "PEC11R-4215K-S0024 ... 24 PPR"),
  * so one mechanical revolution is 24 * 4 = 96 raw counts. The previous 1000
  * was an arbitrary round number: it stretched one real revolution across
  * only ~35 of the 0-359 reported degrees, and truncated any count below

@@ -60,14 +60,15 @@ static reading here is not proof of an unwired shaft; per the app's own verdict
 logic it is exactly the `SKIPPED` case (idle, not proven dead) until someone
 turns it by hand.
 
-One more thing the netlist surfaced: it calls the fitted part
-`PEC11R-4215K-S0024`, while `metadata/boards/e1m-evk.yaml` calls the same
-position `PEC12R-4222F-S0024`. Both are 24-PPR Bourns encoders (`S0024` = 24
+One more thing the netlist surfaced (RESOLVED by issue #2065):
+`metadata/boards/e1m-evk.yaml` used to call the fitted part
+`PEC12R-4222F-S0024`, disagreeing with the netlist's `PEC11R-4215K-S0024` for
+the same position `E1`. Both are 24-PPR Bourns encoders (`S0024` = 24
 pulses/rev in Bourns's own part numbering, which is why `counts-per-revolution`
-above is derived from 24 PPR either way) — but the family/suffix disagreement
-between the as-built netlist and our metadata is unresolved and worth a look
-before trusting anything finer than PPR count (e.g. detent torque, switch
-debounce spec). Not fixed here — metadata is out of scope for this change.
+above is derived from 24 PPR either way), so the mismatch never affected this
+example's PPR math, but the family/suffix disagreement (detent torque, switch
+debounce spec) was real. `metadata/boards/e1m-evk.yaml` now agrees with the
+netlist: `PEC11R-4215K-S0024`.
 
 > **The real open question, now that wiring is confirmed:** if a hand-on-the-knob
 > bench run still reports `SKIPPED`/`FAIL` instead of `PASS`, the next suspect

@@ -10,10 +10,9 @@
 # E1M-AEN803 is the SAME E1M-AEN-2626 PCB and silicon as E1M-AEN801 (Alif
 # Ensemble E8, AE822FA0E5597LS0) -- it is the BOM variant with BOTH external
 # OSPI0 memories populated: the 512 Mbit HyperRAM (S80KS5122GABHM02) AND the
-# 256 Mbit xSPI NOR (IS25WX256-JHLE), where E1M-AEN801 leaves the NOR
-# DNI/optional and carries only the HyperRAM. This population -- both parts
-# fitted, these exact MPNs -- IS the E1M-AEN803 SKU contract, not merely
-# what happens to be on one bench unit.
+# 256 Mbit xSPI NOR (IS25WX256-JHLE), where E1M-AEN801 populates neither.
+# This population -- both parts fitted, these exact MPNs -- IS the
+# E1M-AEN803 SKU contract, not merely what happens to be on one bench unit.
 #
 # Per the project memory note, any SKU-specific hardware value not
 # supplied authoritatively stays TBD rather than being inferred.

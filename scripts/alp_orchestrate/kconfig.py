@@ -654,8 +654,8 @@ def _emit_soc_summary(project: "BoardProject", slice_: "Slice") -> list[str]:
     the SoM preset's `memory:` block (off-SoC OSPI RAM/flash the SKU's
     BOM actually populates -- distinct from the SoC facts above: two SKUs
     on the identical PCB/silicon can differ here, e.g. E1M-AEN803's 512
-    Mbit HyperRAM + 256 Mbit NOR vs E1M-AEN801's 256 Mbit HyperRAM only,
-    NOR left DNI/optional) for CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT.
+    Mbit HyperRAM + 256 Mbit NOR vs E1M-AEN801, which populates neither)
+    for CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT.
 
     `alp_banner.c` prefers these over its devicetree fallback (one
     image's chosen sram/flash REGION size, not the SoM's actual

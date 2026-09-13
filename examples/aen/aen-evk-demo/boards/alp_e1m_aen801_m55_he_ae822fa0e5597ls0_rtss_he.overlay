@@ -232,7 +232,7 @@
 /*
  * Phase 7 -- rotary encoder, UTIMER channel 12 / QEC0.
  *
- * The E1M EVK's PEC12R-4222F-S0024 (24 PPR) reaches the SoC as
+ * The E1M EVK's PEC11R-4215K-S0024 (24 PPR) reaches the SoC as
  * ENC0_X -> E2 A10 -> P3_0 and ENC0_Y -> E2 B10 -> P3_1
  * (metadata/e1m_modules/aen/from-alif.tsv), decoded by UTIMER channel 12 --
  * QEC0 is channel 12, not channel 0 (DFP QEC0_CMPA_IRQn = 369, "Channel 12

@@ -17,8 +17,9 @@
  * across every E1M-conformant SoM.
  *
  * Runs on both EVKs: BOARD_ENC_ROTARY (from <alp/board.h>) resolves
- * to ALP_E1M_ENC0 on E1M EVK (PEC12R-4222F-S0024, 24 PPR) and
- * ALP_E1M_X_ENC0 on E1M-X EVK (PEC12R-4222F, same form factor).
+ * to ALP_E1M_ENC0 on E1M EVK (PEC11R-4215K-S0024, 24 PPR) and
+ * ALP_E1M_X_ENC0 on E1M-X EVK (PEC12R-4222F, same form factor --
+ * unverified: no netlist evidence has been reviewed for this carrier).
  */
 
 #include <stdio.h>

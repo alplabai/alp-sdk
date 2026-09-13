@@ -35,7 +35,7 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 #define EVK_PIN_CAM_MUX_SEL    ALP_E1M_GPIO_IO2  /**< PI3WVR626 SEL pin; see `evk_cam_select_*` enum + chips/cam_mux_pi3wvr626. */
-#define EVK_PIN_ENCODER_SW     ALP_E1M_GPIO_IO4  /**< Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce. Active-low. */
+#define EVK_PIN_ENCODER_SW     ALP_E1M_GPIO_IO4  /**< Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce. Active-low. */
 #define EVK_PIN_CAM_RST        ALP_E1M_GPIO_IO5  /**< Camera reset (active-low). Active-low. */
 #define EVK_PIN_PCIE_IOEXP_INT ALP_E1M_GPIO_IO7  /**< INT input from the PCIe IO expander. */
 #define EVK_PIN_I2S_MUX_EN     ALP_E1M_GPIO_IO8  /**< I2S0 74LVC157 /E, active low. CC3501E-proxied, not an Alif pin. Active-low. */
@@ -117,7 +117,7 @@ extern "C" {
 /* Quadrature encoder channels (ALP_E1M_ENC<N> -> board-side encoder) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
+#define EVK_ENC_ROTARY ALP_E1M_ENC0  /**< PEC11R-4215K-S0024 rotary encoder (designator E1, 2626-R2 EVK schematic netlist): ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4). */
 
 /* ------------------------------------------------------------------ */
 /* On-board I2C device addresses (from `i2c_devices:`) */
