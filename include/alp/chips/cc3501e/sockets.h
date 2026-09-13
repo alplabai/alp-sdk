@@ -201,25 +201,25 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  * size); larger buffers must be split by the caller.  Worker-routed
  * poll-by-repeat, looped.
  *
- * If a frame's own attempt times out, or hits a transport-lock timeout on a
- * retry, while the firmware may genuinely have accepted it and not finished,
- * this function does not simply abandon it: it re-polls that SAME frame for
- * a short additional bounded grace to collect the outcome before giving up.
- * Without that grace, the firmware's opcode-keyed worker slot could hand an
- * abandoned-but-later-completed job to the NEXT, unrelated call instead --
- * this closes that window for a host built against firmware that has not yet
- * added its own stale-seq discard. A bridge with cc3501e-bridge-firmware#107
- * discards a finished-but-uncollected job outright once a request with a
- * different seq arrives, so a later call is never handed a stale count --
- * but that job's bytes were still queued, which is exactly why this grace
- * still matters: it is the only way left to learn how many. If even the
- * grace expires, @p sent_out is a LOWER BOUND, not an exact count -- the
- * frame may still complete and be collected by a later, unrelated call
- * (older firmware) or simply be discarded once a new seq arrives
- * (cc3501e-bridge-firmware#107). If the grace instead collects a genuine,
- * definitive non-OK status (e.g. a decoded device-side error), that status
- * is returned directly and @p sent_out is EXACT, not a lower bound -- that
- * frame is done, not merely timed out.
+ * If a frame's own attempt times out while the firmware may genuinely have
+ * accepted it and not finished, this function does not simply abandon it:
+ * it re-polls that SAME frame for a short additional bounded grace to
+ * collect the outcome before giving up (this grace is NOT entered for a
+ * lock-acquire timeout on the very first attempt -- that means no frame
+ * reached the bridge at all, an unambiguous @c ALP_ERR_BUSY returned
+ * directly). Without the grace, the bridge's single worker slot could hand
+ * an abandoned-but-later-completed job to the NEXT, unrelated call instead;
+ * the shipping bridge discards such a job once a different-seq request
+ * arrives, so a later call is never handed a stale count, but that job's
+ * bytes were still queued -- this grace is the only way left to learn how
+ * many. If even the grace expires, @p sent_out is a LOWER BOUND, not an
+ * exact count, and the socket's stream position from here on is UNKNOWN:
+ * do not resume from a lower bound -- retrying assuming it is exact
+ * duplicates bytes the bridge already queued. Close the socket instead. If
+ * the grace instead collects a genuine, definitive non-OK status (e.g. a
+ * decoded device-side error), that status is returned directly and
+ * @p sent_out is EXACT, not a lower bound -- that frame is done, not merely
+ * timed out.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.
@@ -229,8 +229,9 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  *                    iteration (may be NULL) -- @p len on ALP_OK; on
  *                    ALP_ERR_TIMEOUT, an EXACT partial count if the last
  *                    in-flight frame's outcome was collected (see above), or
- *                    a LOWER BOUND if even the collection grace expired; on
- *                    any other error, EXACT (that frame will not resolve
+ *                    a LOWER BOUND -- safe only to report, NOT to resume
+ *                    from -- if even the collection grace expired; on any
+ *                    other error, EXACT (that frame will not resolve
  *                    differently).
  * @param timeout_ms  Upper bound on the total send budget, across every
  *                    iteration -- may be modestly exceeded by one bounded
@@ -238,9 +239,13 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  *                    uncollected.
  * @return ALP_OK only once all @p len bytes are queued; ALP_ERR_TIMEOUT with
  *         @p sent_out as described above if the budget (plus at most one
- *         grace) elapses first; ALP_ERR_IO if a decoded reply's queued-byte
- *         count is malformed; ALP_ERR_INVAL if @p len exceeds one frame;
- *         ALP_ERR_NOT_READY on the stub build; mapped error otherwise.
+ *         grace) elapses first -- only resume sending from an EXACT
+ *         @p sent_out; a LOWER BOUND means the stream position is unknown,
+ *         so close the socket instead; ALP_ERR_BUSY if a transport-lock
+ *         timeout on the very first attempt meant nothing was sent;
+ *         ALP_ERR_IO if a decoded reply's queued-byte count is malformed;
+ *         ALP_ERR_INVAL if @p len exceeds one frame; ALP_ERR_NOT_READY on
+ *         the stub build; mapped error otherwise.
  */
 alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
                                uint16_t       handle,
