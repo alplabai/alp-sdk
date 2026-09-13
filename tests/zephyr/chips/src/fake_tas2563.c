@@ -52,6 +52,8 @@
 #include "fakes.h"
 
 #define REG_PAGE       0x00u
+#define REG_SW_RESET   0x01u
+#define SW_RESET_BIT   0x01u
 #define REG_BOOK       0x7Fu
 #define REG_INT_CLK    0x30u
 #define INT_CLK_CLR    0x04u
@@ -77,25 +79,50 @@ static struct fake_tas2563_data *g_fake_tas2563;
 
 /* Reset values, SLASET3D §7.5.x "[reset=..]" headings, p.65-94.  Only
  * the registers this driver reads back matter; the rest stay 0. */
+static void seed_reg_defaults(uint8_t *regs)
+{
+	memset(regs, 0, 256);
+	regs[0x02u] = 0x0Eu; /* PWR_CTL     §7.5.4  p.65 */
+	regs[0x03u] = 0x20u; /* PB_CFG1     §7.5.5  p.66 */
+	regs[0x04u] = 0xC6u; /* MISC_CFG1   §7.5.6  p.67 */
+	regs[0x05u] = 0x22u; /* MISC_CFG2   §7.5.7  p.68 */
+	regs[0x06u] = 0x09u; /* TDM_CFG0    §7.5.8  p.68 */
+	regs[0x07u] = 0x02u; /* TDM_CFG1    §7.5.9  p.69 */
+	regs[0x08u] = 0x4Au; /* TDM_CFG2    §7.5.10 p.69 */
+	regs[0x09u] = 0x10u; /* TDM_CFG3    §7.5.11 p.70 */
+	regs[0x0Au] = 0x13u; /* TDM_CFG4    §7.5.12 p.70 */
+	regs[0x0Bu] = 0x02u; /* TDM_CFG5    §7.5.13 p.71 */
+	regs[0x0Cu] = 0x00u; /* TDM_CFG6    §7.5.14 p.71 */
+	regs[0x1Au] = 0xFCu; /* INT_MASK0   §7.5.28 p.77 */
+	regs[0x1Bu] = 0xA6u; /* INT_MASK1   §7.5.29 p.78 */
+	regs[0x1Cu] = 0xDFu; /* INT_MASK2   §7.5.30 p.79 */
+	regs[0x1Du] = 0xFFu; /* INT_MASK3   §7.5.31 p.79 */
+	regs[0x30u] = 0x19u; /* INT&CLK CFG §7.5.43 p.86 */
+}
+
+/* Boot-time reset: the whole struct, including the test-harness-only
+ * write log / write_count[] / fault-injection arming -- there is
+ * nothing yet worth preserving. */
 static void seed_defaults(struct fake_tas2563_data *d)
 {
 	memset(d, 0, sizeof *d);
-	d->regs[0x02u] = 0x0Eu; /* PWR_CTL     §7.5.4  p.65 */
-	d->regs[0x03u] = 0x20u; /* PB_CFG1     §7.5.5  p.66 */
-	d->regs[0x04u] = 0xC6u; /* MISC_CFG1   §7.5.6  p.67 */
-	d->regs[0x05u] = 0x22u; /* MISC_CFG2   §7.5.7  p.68 */
-	d->regs[0x06u] = 0x09u; /* TDM_CFG0    §7.5.8  p.68 */
-	d->regs[0x07u] = 0x02u; /* TDM_CFG1    §7.5.9  p.69 */
-	d->regs[0x08u] = 0x4Au; /* TDM_CFG2    §7.5.10 p.69 */
-	d->regs[0x09u] = 0x10u; /* TDM_CFG3    §7.5.11 p.70 */
-	d->regs[0x0Au] = 0x13u; /* TDM_CFG4    §7.5.12 p.70 */
-	d->regs[0x0Bu] = 0x02u; /* TDM_CFG5    §7.5.13 p.71 */
-	d->regs[0x0Cu] = 0x00u; /* TDM_CFG6    §7.5.14 p.71 */
-	d->regs[0x1Au] = 0xFCu; /* INT_MASK0   §7.5.28 p.77 */
-	d->regs[0x1Bu] = 0xA6u; /* INT_MASK1   §7.5.29 p.78 */
-	d->regs[0x1Cu] = 0xDFu; /* INT_MASK2   §7.5.30 p.79 */
-	d->regs[0x1Du] = 0xFFu; /* INT_MASK3   §7.5.31 p.79 */
-	d->regs[0x30u] = 0x19u; /* INT&CLK CFG §7.5.43 p.86 */
+	seed_reg_defaults(d->regs);
+}
+
+/* Software reset (SLASET3D §7.5.3, p.65): writing bit 0 of SW_RESET
+ * returns every register to its POR default and, per §9.2's paired
+ * "before any I2C operation" framing, control of the map returns to
+ * book 0 / page 0 too (PAGE/BOOK are registers like any other, and
+ * their POR default is 0).  Unlike seed_defaults() at boot, this must
+ * NOT touch the write log, write_count[] or fault-injection arming --
+ * none of that is modelled silicon state, and a mid-test reset wiping
+ * a test's own bookkeeping would make the reset unobservable rather
+ * than observable. */
+static void apply_sw_reset(struct fake_tas2563_data *d)
+{
+	seed_reg_defaults(d->regs);
+	d->cur_book = 0u;
+	d->cur_page = 0u;
 }
 
 static void log_write(struct fake_tas2563_data *d, uint8_t reg, uint8_t val)
@@ -151,6 +178,14 @@ static int apply_write(struct fake_tas2563_data *d, uint8_t reg, uint8_t val)
 	}
 	d->regs[reg] = val;
 	d->write_count[reg]++;
+
+	if (reg == REG_SW_RESET && (val & SW_RESET_BIT) != 0u) {
+		/* Self clearing: apply_sw_reset() overwrites regs[REG_SW_RESET]
+		 * back to its own POR default (0) along with everything else,
+		 * so a readback after this returns 0 -- matching real
+		 * silicon's "Bit is self clearing" (§7.5.3 Table 7-103). */
+		apply_sw_reset(d);
+	}
 	return 0;
 }
 

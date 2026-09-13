@@ -87,18 +87,44 @@
  *     - A shared IRQZ pin tells you *that* one of the amps on it
  *       faulted, never *which*.  Disambiguating requires reading each
  *       instance's own @ref tas2563_read_faults over I2C.
+ *     - Initialise the instance that owns @p sd_n FIRST.  @ref
+ *       tas2563_init releases hardware shutdown for every amp on a
+ *       shared net the moment it drives SD_N high, so an instance
+ *       initialised with @p sd_n = NULL on that same net must not run
+ *       before the owning instance's @ref tas2563_init has already
+ *       done so.
  *
- * @par Register-level output for a newly-configured GPIO output.
- *   `alp_gpio_configure(..., ALP_GPIO_OUTPUT, ...)` sets direction
- *   only; Zephyr's `GPIO_OUTPUT` flag is documented (upstream, not in
- *   this repo) as "no change to the output state," so the call itself
- *   should not force a level.  Whatever the SoC's GPIO controller
- *   latches for that pin at reset becomes visible the instant
- *   direction flips to output; that reset-time value is silicon- and
- *   board-specific and outside this driver's (or @ref alp_gpio's)
- *   control.  @ref tas2563_init configures then writes high as two
- *   back-to-back calls, which closes that window as far as this
- *   driver can, but not to zero width.
+ * @par GPIO write-before-AND-after-configure ordering matters here.
+ *   `alp_gpio_configure(sd_n, ALP_GPIO_OUTPUT, ...)` sets direction
+ *   only -- Zephyr's `GPIO_OUTPUT` flag is documented upstream (not in
+ *   this repo) as "no change to the output state." That is true of the
+ *   FLAG, but not of every backend's data register: on the AEN801 EVK,
+ *   SD_N is a `snps,designware-gpio` pin, and that backend's
+ *   `dw_pin_config()` (`drivers/gpio/gpio_dw.c`) switches direction to
+ *   output BEFORE touching the data register, and only touches it at
+ *   all for `GPIO_OUTPUT_INIT_HIGH`/`_LOW` -- neither of which
+ *   `ALP_GPIO_OUTPUT` alone carries.  Configuring before writing at all
+ *   would therefore expose the data register's DesignWare POR default
+ *   (0) as an output level the instant direction flips, before any
+ *   write ever runs -- an unplanned LOW pulse on a pin that may be
+ *   shared with another amp (see above).  @ref tas2563_init writes
+ *   high BEFORE configuring to close that window on gpio_dw:
+ *   `alp_gpio_write()` has no dependency on the pin already being
+ *   configured, and `gpio_dw_port_set_bits_raw()` writes the data
+ *   register unconditionally, independent of direction.  That first
+ *   write is not sufficient on every backend, though: Zephyr's
+ *   `gpio_emul` masks a write against the pins CURRENTLY configured as
+ *   output, so a write issued before configure is silently DROPPED
+ *   there rather than redundant -- the opposite failure mode.  @ref
+ *   tas2563_init therefore writes high a SECOND time, after
+ *   configuring, so the final state is correct on both kinds of
+ *   backend; the second write costs one redundant register access on
+ *   gpio_dw, where the first already landed.  Verified against the
+ *   Zephyr/DesignWare and `gpio_emul` backends only -- the
+ *   `sw_fallback` and `testing` GPIO backends have no real pin to
+ *   glitch either way, but the CC3501E GPIO proxy's behaviour on a
+ *   write issued before its remote side has ever been configured is
+ *   UNVERIFIED.
  *
  * v0.3 driver scope:
  *   - I2C connectivity probe (read CHIP_ID).
@@ -310,19 +336,36 @@ typedef struct {
 } tas2563_t;
 
 /**
- * @brief Probe the chip, drive SD_N high if we own it, software-reset
- *        it, and leave the amp in software shutdown.
+ * @brief Probe the chip, release hardware shutdown if we own SD_N,
+ *        software-reset it, and leave the amp in software shutdown.
  *
- * Also performs a software reset (`SW_RESET`, SLASET3D §7.5.3) after
- * book 0 / page 0 is selected and before anything else is configured --
- * SLAA954 "TAS2563 End System Integration Guide" §3.1 Case 1
- * recommends both a hardware AND a software reset before
- * initialization for reliable operation.  `SW_RESET` returns every
- * register to its POR default, so this runs before any other write in
- * this function, followed by the @ref TAS2563_RESET_SETTLE_US wait
- * §9.2 requires.  Nothing in SLASET3D says the write itself is NACKed
- * or otherwise handled specially -- it is a normal single-byte write
- * like any other register write in this driver.
+ * This RELEASES hardware shutdown when it owns @p sd_n -- it does not
+ * perform a hardware reset.  If SDZ was already high (R138's pull-up
+ * on the E1M-EVK, or a warm restart that never asserted it), driving
+ * it high again is a no-op electrically; SLAA954 "TAS2563 End System
+ * Integration Guide" §3.1 Case 1's recommended hardware reset (an
+ * actual low-then-high pulse) is then the CALLER's responsibility, not
+ * this function's -- pulsing a pin this function may not exclusively
+ * own (see "Shared SD_N / IRQZ nets" above) is not this function's
+ * call to make.
+ *
+ * This DOES unconditionally perform a software reset (`SW_RESET`,
+ * SLASET3D §7.5.3) after book 0 / page 0 is selected and before
+ * anything else is configured -- the other half of SLAA954 §3.1 Case
+ * 1's recommendation, and the one part of it this function can always
+ * do regardless of what it does or does not own.  `SW_RESET` returns
+ * every register to its POR default, so this runs before any other
+ * write in this function, followed by the @ref TAS2563_RESET_SETTLE_US
+ * wait §9.2 requires.  Nothing in SLASET3D says the write itself is
+ * NACKed or otherwise handled specially -- it is a normal single-byte
+ * write like any other register write in this driver, though whether
+ * it actually ACKs on real silicon is unverified.
+ *
+ * @warning Calling this again on an already-initialised amp wipes any
+ *   tuning (@ref tas2563_load_tuning), I2S configuration (@ref
+ *   tas2563_configure_i2s) and IV-sense configuration (@ref
+ *   tas2563_configure_iv_sense) already loaded -- the software reset
+ *   above returns every register to its POR default, unconditionally.
  *
  * @param[out] ctx       Driver context (output; populated on success).
  * @param[in]  bus       Open I2C bus handle the amp sits on.
@@ -354,11 +397,11 @@ typedef struct {
  *      know when an externally-owned pin actually went high.
  *
  * @note This does not select, and cannot report, ROM vs Smart
- *   Amp/Tuning mode (see @ref tas2563_set_amp_level's note) --
- *   SLASET3D names no register for that distinction.  It only sets
- *   `PWR_CTL.MODE` = software shutdown; whichever of the two modes the
- *   part boots into is governed by registers this function does not
- *   touch.
+ *   Amp/Tuning mode (see @ref tas2563_set_amp_level's note) -- not
+ *   because it avoids touching the relevant registers (the software
+ *   reset above touches every register), but because SLASET3D names
+ *   no register for that distinction at all, so there is nothing this
+ *   function could set even if it tried.
  *
  * @return ALP_OK on a successful probe.
  * @retval ALP_ERR_INVAL  ctx or bus is NULL, or addr_7bit is not one
@@ -374,12 +417,13 @@ typedef struct {
  * through, same as the connectivity probe.
  *
  * After the probe succeeds, init writes `PWR_CTL.MODE = 10b`
- * (software shutdown) rather than assuming it.  Releasing SD_N does
- * land the part in software shutdown (SLASET3D §7.3.11.1, p.34) --
- * but on a warm restart where SD_N is board-tied high and never
- * dropped, register state survives (§7.3.11.2, p.34) and the amp
- * could still be ACTIVE from the previous firmware.  One write buys a
- * known-quiet starting point either way.
+ * (software shutdown) rather than assuming it.  The unconditional
+ * software reset above already restores `PWR_CTL` to its POR default
+ * (`Eh`, `MODE = 10b` -- SLASET3D §7.5.4 Table 7-104, p.66), so this
+ * write is redundant on every path that reaches it today -- kept
+ * anyway as an explicit, cheap statement of the state this function
+ * hands back, in case a future change ever makes the software reset
+ * above conditional again.
  */
 alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp_gpio_t *sd_n);
 
@@ -437,19 +481,24 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  * the reserved bits keep their values.
  *
  * @note @b Mode-dependent, per TI's application notes (not SLASET3D
- *   itself): SLAA953 §1.9 (p.9) states "Amplifier Level cannot be
- *   changed in Smart Amp/Tuning Mode. In order to change it, user must
- *   enter ROM mode."  This function does not, and cannot, enforce or
- *   even detect that: SLASET3D's register map has no field this
- *   driver could read to tell ROM mode from Smart Amp/Tuning mode
- *   (searched exhaustively -- see @ref tas2563_load_tuning's write
- *   verification note for the same kind of gap; the one register whose
- *   name suggests it, `DSP Mode & TDM_DET` at 0x11 / §7.5.19, is
- *   read-only TDM clock-detection readback (`FS_RATIO`/`FS_RATE`)
- *   despite its title and has no mode-select field).  A caller in
- *   Smart Amp/Tuning mode that calls this and gets `ALP_OK` should not
- *   assume the level actually changed -- confirm per TI's guidance for
- *   entering ROM mode first, outside this driver's knowledge.
+ *   itself): SLAA953 §1.9 (p.9), a note box, states in full: "Amplifier
+ *   Level cannot be changed in Smart Amp/Tuning Mode. In order to
+ *   change it, user must enter ROM mode in Test and Measurement panel
+ *   in the Device Home page."  "Test and Measurement panel" and
+ *   "Device Home page" are PPC3 GUI elements -- this is a PPC3-tool
+ *   workflow note, not a documented register-level rule, and SLASET3D
+ *   itself never mentions ROM mode or this restriction at all.  This
+ *   function does not, and cannot, enforce or even detect it: SLASET3D's
+ *   register map has no field this driver could read to tell ROM mode
+ *   from Smart Amp/Tuning mode (searched exhaustively -- see @ref
+ *   tas2563_load_tuning's write verification note for the same kind of
+ *   gap; the one register whose name suggests it, `DSP Mode & TDM_DET`
+ *   at 0x11 / §7.5.19, is read-only TDM clock-detection readback
+ *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title) and
+ *   has no mode-select field).  A caller in Smart Amp/Tuning mode that
+ *   calls this and gets `ALP_OK` should not assume the level actually
+ *   changed on the part -- confirm via PPC3, outside this driver's
+ *   knowledge, per SLAA953's workflow note above.
  *
  * @param[in] ctx         Initialised context.
  * @param[in] level_code  Datasheet `AMP_LEVEL[4:0]` code,
@@ -691,6 +740,12 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
 /**
  * @brief Replay a tuning register stream into the chip.
  *
+ * @warning Calling @ref tas2563_init again on an already-tuned amp
+ *   wipes whatever this function loaded -- @ref tas2563_init's
+ *   unconditional software reset returns every register to its POR
+ *   default, tuning coefficients included.  Reload the tuning after
+ *   any re-init, not just the first init.
+ *
  * Smart-amp tuning (EQ, DRC, excursion and thermal models) lives in
  * on-chip DSP coefficient pages that TI's PPC3 host tool produces.
  * This function applies such a tuning as an explicit sequence of
@@ -727,9 +782,14 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   silicon.
  *
  * @par Write verification: not implemented, and not guessed at.
- *   TI's application notes (SLAA765 §16, p.25) show reading back
- *   `I2C_CKSUM` (0x7E) after a write sequence to verify it landed.
- *   SLASET3D §7.5.61 (p.93) documents the register -- 8 bits, RW,
+ *   SLASET3D §7.3.2 "Device Mode and Address Selection" (p.29) itself
+ *   calls `I2C_CKSUM` a CRC and says it should be checked, over each
+ *   device's own local address, after writing multiple devices via the
+ *   global broadcast address (where individual ACK/NACK cannot be used
+ *   since every device on the bus answers at once).  TI's application
+ *   notes (SLAA765 §16, p.25) separately show the command syntax for
+ *   reading it back -- examples only, no algorithm.  SLASET3D §7.5.61
+ *   (p.93) documents the register -- 8 bits, RW,
  *   "updated on writes to other registers on all books and pages,"
  *   writing it resets it to the written value -- but nowhere specifies
  *   the checksum ALGORITHM: not what it sums (register address, data,

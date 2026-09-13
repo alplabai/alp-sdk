@@ -3916,13 +3916,22 @@ static const pinctrl_soc_pin_t amp_enable_mux[] = { PIN_P5_2__GPIO };
 #define AMP_FAULT_PAD_REN (1U << 16)
 static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
 
-#define SOUND_MUX_SETTLE_MS    10u
-#define SOUND_SAMPLE_RATE_HZ   16000u
-#define SOUND_FRAMES_PER_BLOCK 256u
-#define SOUND_TONE_HZ          1000u
-#define SOUND_TONE_AMPLITUDE   20000 /* int16, leaves headroom below INT16_MAX */
-#define SOUND_TONE_BLOCKS      16u   /* 16 * 256 / 16000 Hz = 256 ms -- "keep it short". */
-#define SOUND_BASELINE_BLOCKS  8u    /* room-noise capture before the tone starts */
+#define SOUND_MUX_SETTLE_MS 10u
+/* SLASET3D §7.3.11.1 "Hardware Shutdown", Table 7-6: SDZ_MODE defaults to
+ * "Normal Shutdown with Timer" -- asserting SDZ low does not reach Hardware
+ * Shutdown immediately, only after SDZ_TIMEOUT expires (Table 7-7: 2 / 4 /
+ * 6 (default) / 23.8 ms, whichever this part's register currently holds --
+ * unknown here, since a previous session could have left it non-default).
+ * To guarantee an actual hardware reset regardless of that setting, SD_N
+ * is held low for at least the worst case. UNVERIFIED on real silicon
+ * whether this length actually reaches Hardware Shutdown. */
+#define AMP_ENABLE_RESET_HOLD_MS 24u /* >= 23.8 ms max SDZ_TIMEOUT, Table 7-7 */
+#define SOUND_SAMPLE_RATE_HZ     16000u
+#define SOUND_FRAMES_PER_BLOCK   256u
+#define SOUND_TONE_HZ            1000u
+#define SOUND_TONE_AMPLITUDE     20000 /* int16, leaves headroom below INT16_MAX */
+#define SOUND_TONE_BLOCKS        16u   /* 16 * 256 / 16000 Hz = 256 ms -- "keep it short". */
+#define SOUND_BASELINE_BLOCKS    8u    /* room-noise capture before the tone starts */
 /* Both well under half of unity (255) -- "cap the level well below maximum". */
 #define SOUND_VOL_START   4u
 #define SOUND_VOL_CEILING 40u
@@ -3990,19 +3999,24 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 	k_msleep(SOUND_MUX_SETTLE_MS);
 
-	/* --- 2. AMP_ENABLE (SD_N) high -- release HARDWARE shutdown -------- */
+	/* --- 2. AMP_ENABLE (SD_N) low-then-high -- an ACTUAL hardware reset - */
 	/* SD_N has a 10 kOhm pull-up to +VIO on this board (R138), so both
 	 * amps are already out of hardware shutdown by the time this phase
-	 * runs.  GPIO_OUTPUT_INACTIVE below is therefore not a no-op: it
-	 * actively drives the shared SD_N net LOW before the gpio_pin_set()
-	 * that follows drives it back HIGH -- a deliberate hardware reset of
-	 * BOTH amps (TI SLAA954 "TAS2563 End System Integration Guide" §3.1
-	 * Case 1 recommends a hardware reset before initialization), not an
-	 * incidental side effect of configuring the pin. */
+	 * runs.  GPIO_OUTPUT_INACTIVE drives the shared SD_N net LOW; it is
+	 * then HELD low for AMP_ENABLE_RESET_HOLD_MS (see that macro's
+	 * comment for why a mere microsecond-scale pulse would not reach
+	 * Hardware Shutdown) before being released HIGH -- a deliberate
+	 * hardware reset of BOTH amps (TI SLAA954 "TAS2563 End System
+	 * Integration Guide" §3.1 Case 1 recommends a hardware reset before
+	 * initialization), not an incidental side effect of configuring the
+	 * pin.  TAS2563_RESET_SETTLE_US (include/alp/chips/tas2563.h) is
+	 * still waited separately, below, after release. */
 	int rc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
 	if (rc == 0) rc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	printf("[evkdemo] SOUND: AMP_ENABLE (SD_N, P5_2) held low for hardware reset -> %d\n", rc);
+	if (rc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
 	if (rc == 0) rc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
-	printf("[evkdemo] SOUND: AMP_ENABLE (SD_N, P5_2) high -> %d\n", rc);
+	printf("[evkdemo] SOUND: AMP_ENABLE (SD_N, P5_2) released high -> %d\n", rc);
 	if (rc != 0) {
 		printf("[evkdemo] SOUND: AMP_ENABLE could not be driven -- neither amp can leave "
 		       "hardware shutdown\n");

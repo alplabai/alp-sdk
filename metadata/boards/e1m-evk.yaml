@@ -341,7 +341,7 @@ overlay_pins:
   - { macro: EVK_PIN_IO_EXP_RST,
       doc: "SPI0_CS1 pad (E1M N1 / Alif P3_6) repurposed as the I/O expander reset line. When SPI0 is used with two chip-selects this pin can't double as IO_EXP_RST -- the EVK assumes SPI0 is in single-CS mode at most." }
   - { macro: EVK_PIN_AMP_FAULT,
-      doc: "SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp)." }
+      doc: "SPI0_MISO pad (E1M L1 / Alif P5_0) repurposed as the audio amplifier fault output (open-drain input from the amp). Shared: per the authoritative 2626-R2 netlist, this single net is E2.L1 + R124.1 + U27.18 + U28.18 -- IRQZ on BOTH U27 and U28 -- with R124 a fitted 10 kOhm pull-up to +VIO (see EVK_I2C_ADDR_TAS2563_LOW's doc for the SD_N-side facts)." }
   - { macro: EVK_PIN_AMP_ENABLE,
       doc: "SPI0_CS0 pad (E1M M1 / Alif P5_2) repurposed as the audio amplifier enable input (active-high). Shared: this single net is SD_N on BOTH U27 and U28 (see EVK_I2C_ADDR_TAS2563_LOW's doc for the netlist facts and the R138 pull-up), so driving it low resets both amps together." }
   - { macro: EVK_PIN_MB_INT,

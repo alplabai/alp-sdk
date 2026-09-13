@@ -232,18 +232,27 @@ static alp_i2c_t *tas_init(tas2563_t *ctx, uint8_t pwr_ctl_seed, alp_gpio_t *sd_
 
 /* PWR_CTL's reset value is Eh -- MODE is already 10b (software
  * shutdown), SLASET3D 7.5.4 Table 7-104 p.66.  Seeding MODE = 00b
- * (ACTIVE) makes "init forced it back" observable; that is the
- * warm-restart case, where SD_N was never dropped and register state
- * survived from the previous firmware. */
+ * (ACTIVE) simulates a previous firmware having left the part running;
+ * init's own unconditional SW_RESET (SLASET3D §7.5.3) is what forces
+ * it back now, not the explicit park write that follows -- see that
+ * write's own comment in chips/tas2563/tas2563.c for why it is kept
+ * anyway. */
 ZTEST(alp_chips, test_tas2563_init_parks_amp_in_software_shutdown)
 {
 	tas2563_t  ctx;
 	alp_i2c_t *bus = tas_init(&ctx, 0x00u, NULL);
 
+	/* init's own unconditional SW_RESET (SLASET3D §7.5.3) now wipes the
+	 * 0x00u seed back to the POR default 0x0Eu (fake_tas2563.c models
+	 * this) before the explicit park write ever runs, so the park write
+	 * lands on an already-correct register on every path that reaches
+	 * it -- the observable this test proves is that the SEED does not
+	 * survive init at all, regardless of what a previous firmware left
+	 * behind. */
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
-	              0x02u,
-	              "init must leave PWR_CTL.MODE = 10b (software shutdown) and touch "
-	              "nothing else in the byte");
+	              0x0Eu,
+	              "init must leave PWR_CTL at its POR default 0x0Eu regardless of "
+	              "what a previous firmware left it at");
 
 	alp_i2c_close(bus);
 }
@@ -296,9 +305,13 @@ ZTEST(alp_chips, test_tas2563_set_mode_refuses_load_diagnostics_encoding)
 /* BOOK survives software shutdown along with the rest of the register
  * state (7.3.11.2, p.34), so a device left mid-tuning by a previous
  * firmware comes up with a non-zero BOOK.  init must select book 0 as
- * well as page 0, or REVID and PWR_CTL address coefficient space.
- * The fake gives book 0 / page 0 a backing store and nowhere else, so
- * "the park write actually landed" is the observable that proves it. */
+ * well as page 0, or SW_RESET, REVID and PWR_CTL would all address
+ * coefficient space instead of the control registers.  The fake gives
+ * book 0 / page 0 a backing store and nowhere else, so "the park write
+ * actually landed [there]" is the observable that proves it -- now at
+ * the POR default 0x0Eu, since init's SW_RESET wipes the 0x00u seed
+ * before the park write ever runs (see
+ * test_tas2563_init_parks_amp_in_software_shutdown above). */
 ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 {
 	fake_tas2563_reset();
@@ -314,7 +327,7 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	zassert_equal(fake_tas2563_cur_book(), 0u, "init must select book 0");
 	zassert_equal(fake_tas2563_cur_page(), 0u, "init must select page 0");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
-	              0x02u,
+	              0x0Eu,
 	              "the park write must have landed on book 0 / page 0, not in "
 	              "whatever page the previous firmware left selected");
 
@@ -335,10 +348,19 @@ ZTEST(alp_chips, test_tas2563_init_issues_sw_reset_before_other_configuration)
 	tas2563_t  ctx;
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
-	zassert_not_null(bus);
 	fake_tas2563_log_reset();
 
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+	/* Close right after the last bus-consuming call, BEFORE any assertion
+	 * below can abort this test (zassert_* longjmps out on failure): the
+	 * i2c backend's handle pool is small and fixed, and a leaked bus from
+	 * one failed assertion turns into cascading "bus is NULL" failures in
+	 * every later test that opens one -- a real fixed-pool handle, not a
+	 * ztest-fixture-cleaned resource, so nothing else closes it for us. */
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	alp_i2c_close(bus);
+
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
 
 	static const struct fake_tas2563_write expected[] = {
 		{ 0u, 0u, TAS_REG_PAGE, 0x00u },     /* select_book0_page0(): PAGE = 0 */
@@ -361,8 +383,6 @@ ZTEST(alp_chips, test_tas2563_init_issues_sw_reset_before_other_configuration)
 		zassert_equal(w->reg, expected[i].reg, "log[%zu].reg", i);
 		zassert_equal(w->val, expected[i].val, "log[%zu].val", i);
 	}
-
-	alp_i2c_close(bus);
 }
 
 /* #2077 (SW-reset addition): the settle wait after SW_RESET runs
@@ -376,21 +396,23 @@ ZTEST(alp_chips, test_tas2563_init_settles_after_sw_reset_when_sd_n_not_owned)
 
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	tas2563_t    ctx;
+	uint32_t     t0         = k_cycle_get_32();
+	alp_status_t init_rc    = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	uint64_t     elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+	/* Close right after, before any assertion below can abort this test
+	 * and leak the handle -- see the sibling test above for why. */
+	alp_i2c_close(bus);
+
 	zassert_not_null(bus);
-
-	tas2563_t ctx;
-	uint32_t  t0 = k_cycle_get_32();
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
-	uint64_t elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
-
+	zassert_equal(init_rc, ALP_OK);
 	zassert_true(elapsed_us >= TAS2563_RESET_SETTLE_US,
 	             "tas2563_init() with sd_n == NULL took %llu us, want >= %u us "
 	             "(TAS2563_RESET_SETTLE_US after the mandatory software reset) -- "
 	             "looks like the settle wait was dropped",
 	             (unsigned long long)elapsed_us,
 	             TAS2563_RESET_SETTLE_US);
-
-	alp_i2c_close(bus);
 }
 
 /* #2077: the connectivity probe must propagate the bus's own status
@@ -407,15 +429,19 @@ ZTEST(alp_chips, test_tas2563_init_propagates_bus_status_on_probe_failure)
 	tas2563_t  ctx;
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
-	zassert_not_null(bus);
 
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL),
+	/* Close right after, before any assertion below can abort this test
+	 * and leak the handle -- see test_tas2563_init_issues_sw_reset_
+	 * before_other_configuration's comment for why. */
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	alp_i2c_close(bus);
+
+	zassert_not_null(bus);
+	zassert_equal(init_rc,
 	              ALP_ERR_IO,
 	              "a NACK on the probe's first write must surface as ALP_ERR_IO, the "
 	              "status the bus call actually returned -- not a hardcoded "
 	              "ALP_ERR_NOT_READY");
-
-	alp_i2c_close(bus);
 }
 
 /* AMP_LEVEL is PB_CFG1 bits 5..1, reset 10h = 16.0 dBV / 8.92 Vpk;
@@ -922,28 +948,37 @@ ZTEST(alp_chips, test_tas2563_deinit_drops_sd_n_when_owned)
  * limitation test_bmi323_init_honours_suspend_mode_communication_idle
  * above documents for fake_bmi323.c), so this cannot assert either
  * wait's POSITION relative to a bus access -- only that tas2563_init()'s
- * real wall-clock time is at least the combined floor.  That is still
- * enough to catch a wait being dropped: nothing else on this path takes
- * measurable time. */
+ * measured time (native_sim's simulated clock, which both the cycle
+ * counter and alp_delay_us()'s underlying arch_busy_wait() advance in
+ * lockstep -- not host wall-clock time) is at least the combined floor.
+ * That is still enough to catch a wait being dropped: nothing else on
+ * this path takes measurable simulated time. */
 ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned)
 {
 	fake_tas2563_reset();
 	alp_gpio_t *sd_n = alp_gpio_open(TAS_PIN_SD_N);
-	zassert_not_null(sd_n);
-
-	alp_i2c_t *bus =
+	alp_i2c_t  *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
-	zassert_not_null(bus);
 
 	/* k_uptime_ticks() is tick-resolution (too coarse to see a 200 us
 	 * spin land inside one system tick); k_cycle_get_32() tracks the
-	 * same HW cycle counter k_busy_wait() itself spins against, so it
-	 * actually resolves a sub-tick busy-wait. */
-	tas2563_t ctx;
-	uint32_t  t0 = k_cycle_get_32();
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n), ALP_OK);
-	uint64_t elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+	 * same HW cycle counter k_busy_wait() itself spins against on
+	 * native_sim's simulated clock, so it actually resolves a sub-tick
+	 * busy-wait -- real wall-clock time only in the sense that it is
+	 * what the code under test itself spun against, not host wall time. */
+	tas2563_t    ctx;
+	uint32_t     t0         = k_cycle_get_32();
+	alp_status_t init_rc    = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n);
+	uint64_t     elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+	/* Close both handles right after, before any assertion below can
+	 * abort this test and leak them -- see the earlier tests' comments
+	 * for why (this one holds a GPIO slot too, on top of the I2C bus). */
+	alp_gpio_close(sd_n);
+	alp_i2c_close(bus);
 
+	zassert_not_null(sd_n);
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
 	zassert_true(elapsed_us >= 2u * TAS2563_RESET_SETTLE_US,
 	             "tas2563_init() with sd_n owned took %llu us, want >= %u us "
 	             "(2x TAS2563_RESET_SETTLE_US: hardware-reset settle + "
@@ -951,9 +986,6 @@ ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_own
 	             "was dropped",
 	             (unsigned long long)elapsed_us,
 	             2u * TAS2563_RESET_SETTLE_US);
-
-	alp_gpio_close(sd_n);
-	alp_i2c_close(bus);
 }
 
 #endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_tas2563)) */

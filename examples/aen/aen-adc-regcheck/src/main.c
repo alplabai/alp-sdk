@@ -165,9 +165,11 @@ int main(void)
 
 	/* #2083: seq.buffer points at `sample`, so every further adc_read(adc,
 	 * &seq) call -- including the #1823 timing loop below -- overwrites it.
-	 * Capture the gated single-shot value now, while it is still the one
-	 * the PASS gate below actually validated, so the RESULT line reports
-	 * that reading instead of whatever the timing loop left behind. */
+	 * Capture the value from THIS gated single-shot read now, before the
+	 * timing loop runs, so the RESULT line reports that reading instead
+	 * of whatever the timing loop's last iteration left behind.  The
+	 * value itself is still REPORTED only, not part of the PASS gate --
+	 * see the note at the PASS-gate block below. */
 	uint32_t gated_sample = sample;
 
 	/*
