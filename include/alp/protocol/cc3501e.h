@@ -1129,15 +1129,28 @@ typedef struct {
 	 *  longer an available option on THIS reply; no replacement channel is
 	 *  decided here. */
 	int8_t rssi_dbm;
-	/** Low byte of the IEEE 802.11 reason code, or the association /
-	 *  authentication status code, that ended or rejected the MOST RECENT
-	 *  connect attempt.  0 when none was recorded.  Scope is the connect
-	 *  attempt only: a deauth that arrives AFTER a successful CONNECTED is
-	 *  NOT reflected here, and a disconnect the bridge itself requested
-	 *  (@ref cc3501e_wifi_disconnect) is excluded.  Formerly an unused
-	 *  @c reserved byte, always 0 -- older bridge firmware that never
-	 *  populates it still sends 0 here, so this is purely additive and
-	 *  needs no wire-version bump (alp-sdk#2099). */
+	/** Low byte of the 802.11 reason code from a DISCONNECT event, or the
+	 *  status code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
+	 *  event.  Recorded ONLY while a connect attempt is in progress -- between
+	 *  the attempt's start and its terminal result -- then frozen at the
+	 *  terminal result and cleared at the start of the NEXT attempt.  0 when
+	 *  nothing was recorded for the current/most recent attempt.
+	 *
+	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED).  A
+	 *  bridge-initiated cleanup disconnect after a failure, and a host
+	 *  WIFI_DISCONNECT while connected, both happen OUTSIDE the attempt
+	 *  window and are not recorded either.
+	 *
+	 *  @warning KNOWN RESIDUAL: a host disconnect immediately followed by a
+	 *  connect can let the disconnect's own reason 3 (DEAUTH_LEAVING) land
+	 *  inside the new attempt's window and be recorded as 3 -- a 3 may be
+	 *  self-inflicted rather than the AP's doing.
+	 *
+	 *  Scope is the connect attempt only: a deauth AFTER a successful
+	 *  CONNECTED is not reflected.  Formerly an unused @c reserved byte,
+	 *  always 0 -- older bridge firmware that never populates it still sends
+	 *  0, so this is purely additive and needs no wire-version bump
+	 *  (alp-sdk#2099). */
 	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 

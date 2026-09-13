@@ -435,11 +435,12 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);
  *             caller cannot tell it apart from a real reading (issue #1387).
  *             Use @ref cc3501e_wifi_rssi for a signal level, and report it as
  *             unavailable when that call fails rather than printing a 0.
- *             @c last_reason is the low byte of the IEEE 802.11 reason /
- *             status code that ended or rejected the most recent connect
- *             attempt (0 = none recorded, or older bridge firmware); see
- *             @ref alp_cc3501e_wifi_status_t::last_reason for its exact
- *             scope.
+ *             @c last_reason is the low byte of the 802.11 reason/status
+ *             code recorded ONLY while a connect attempt is in progress,
+ *             frozen at that attempt's terminal result (0 = nothing
+ *             recorded, or older bridge firmware); see
+ *             @ref alp_cc3501e_wifi_status_t::last_reason for the exact
+ *             capture window, exclusions, and the reason-3 residual.
  * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
  *         ALP_ERR_TIMEOUT if the transport stayed down for the whole
  *         down-window; ALP_ERR_IO on a short reply; otherwise the mapped
