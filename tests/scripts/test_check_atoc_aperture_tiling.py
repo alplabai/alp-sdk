@@ -111,8 +111,10 @@ def test_row_outside_aperture_not_reported_as_gap():
         "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
         "  - { name: atoc,     base: 0x80578000, size_kib: 32,   "
         "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n"
-        # Entirely outside the aperture -- must not be treated as a gap.
-        "  - { name: ospi_xip, base: 0x70000000, size_kib: 1024, "
+        # ABOVE the aperture (OSPI0 XIP window, #2069) -- must not be
+        # treated as a gap, and must not win the top-of-window rule
+        # checked in check_atoc_reservation.py just for being highest.
+        "  - { name: ospi_xip, base: 0xA0000000, size_kib: 1024, "
         "accessible_from: [m55_he], carveout: false, write_authority: none }\n",
     )
     try:

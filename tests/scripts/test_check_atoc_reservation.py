@@ -22,6 +22,16 @@ atoc = importlib.util.module_from_spec(_SPEC)
 sys.modules["check_atoc_reservation"] = atoc
 _SPEC.loader.exec_module(atoc)
 
+# Reuse the E8 silicon header from test_check_atoc_aperture_tiling.py instead
+# of a second copy that could drift from it (#2069) -- loaded under a name
+# distinct from pytest's own collected module name for that file.
+_TILING_SPEC = importlib.util.spec_from_file_location(
+    "_atoc_aperture_tiling_header_src",
+    REPO / "tests" / "scripts" / "test_check_atoc_aperture_tiling.py")
+_tiling_mod = importlib.util.module_from_spec(_TILING_SPEC)
+_TILING_SPEC.loader.exec_module(_tiling_mod)
+_SILICON_HEADER = _tiling_mod._SILICON_HEADER
+
 
 def _dts(partitions: "list[tuple[str, int, int]]") -> str:
     """Render a minimal fixed-partitions .dts. (label, offset, size_kib)."""
@@ -154,6 +164,138 @@ class TestPresetCheck(unittest.TestCase):
 
     def test_preset_with_no_memory_map_is_skipped(self):
         p = self._preset("som:\n  sku: E1M-TEST\n")
+        self.assertEqual(atoc._check_preset(p), [])
+
+
+class TestPresetCheckApertureTopRule(unittest.TestCase):
+    """#2069: the top-anchor check must be scoped to the SoC's declared
+    MRAM aperture, not the file-wide max of every authored row -- an
+    OSPI0 HyperRAM/NOR row above the window must never win the "top of
+    window" comparison just for being highest."""
+
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmpdir.name)
+        self._orig_repo = atoc.REPO
+        atoc.REPO = self.tmp
+
+    def tearDown(self):
+        atoc.REPO = self._orig_repo
+        self._tmpdir.cleanup()
+
+    def _preset(self, body: str) -> Path:
+        p = self.tmp / "E1M-TEST.yaml"
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_storage_at_the_top_fails_aperture_resolving(self):
+        """Aperture-resolving twin of test_storage_at_the_top_fails."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage, base: 0x80560000, size_kib: 128 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("'storage'", joined)
+        self.assertIn("0x80580000", joined)
+
+    def test_storage_at_the_top_fails_with_hyperram_row_present(self):
+        """KEY regression test: an out-of-aperture HyperRAM row must not
+        make the gate skip the rule -- it must still refuse 'storage' at
+        the aperture top, exactly as without the HyperRAM row."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage,  base: 0x80560000, size_kib: 128 }\n"
+            "  - { name: hyperram, base: 0xA0000000, size_mib: 64 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("'storage'", joined)
+        self.assertIn("0x80580000", joined)
+
+    def test_atoc_authored_outside_the_aperture_does_not_satisfy_the_rule(self):
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage, base: 0x80560000, size_kib: 128 }\n"
+            "  - { name: atoc,    base: 0xA3FF8000, size_kib: 32 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("'storage'", joined)
+        self.assertIn("0x80580000", joined)
+
+    def test_short_tiling_with_nothing_at_the_top_fails(self):
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage, base: 0x80010000, size_kib: 5504 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("0x80580000", joined)
+        self.assertIn("no region", joined)
+
+    def test_atoc_straddling_the_top_fails(self):
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot, base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage, base: 0x80010000, size_kib: 5536 }\n"
+            "  - { name: atoc,    base: 0x80578000, size_kib: 64 }\n")
+        failures = atoc._check_preset(p)
+        self.assertTrue(failures)
+        self.assertTrue(any("0x80580000" in f for f in failures))
+
+    def test_no_silicon_falls_back_to_file_wide_max_and_still_fails(self):
+        """Pins the fail-closed fallback: no `silicon:` resolves no
+        aperture, so today's file-wide-max behaviour applies VERBATIM --
+        an out-of-window OSPI row still wins the top comparison and the
+        gate still refuses it loudly, even with a correct 'atoc' band."""
+        p = self._preset(
+            "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64 }\n"
+            "  - { name: storage,  base: 0x80010000, size_kib: 5504 }\n"
+            "  - { name: atoc,     base: 0x80570000, size_kib: 64 }\n"
+            "  - { name: ospi_row, base: 0xA0000000, size_mib: 64 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("'ospi_row'", joined)
+
+    def test_whole_device_region_does_not_mask_the_top_owner_aperture_resolving(self):
+        """Aperture-resolving twin of
+        test_whole_device_region_does_not_mask_the_top_owner."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mram_main, base: 0x80000000, size_kib: 5632 }\n"
+            "  - { name: storage,   base: 0x80560000, size_kib: 128 }\n")
+        failures = atoc._check_preset(p)
+        joined = "\n".join(failures)
+        self.assertIn("'storage'", joined)
+
+    def test_six_band_layout_with_hyperram_above_passes(self):
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot,  base: 0x80000000, size_kib: 64,   carveout: false }\n"
+            "  - { name: he_slot0, base: 0x80010000, size_kib: 2688, carveout: false }\n"
+            "  - { name: hp_slot0, base: 0x802b0000, size_kib: 2688, carveout: false }\n"
+            "  - { name: storage,  base: 0x80550000, size_kib: 96,   carveout: false }\n"
+            "  - { name: scratch,  base: 0x80568000, size_kib: 64,   carveout: false }\n"
+            "  - { name: atoc,     base: 0x80578000, size_kib: 32,   carveout: false }\n"
+            "  - { name: hyperram, base: 0xa0000000, size_mib: 64 }\n")
+        self.assertEqual(atoc._check_preset(p), [])
+
+    def test_six_band_layout_with_hyperram_and_ospi0_nor_above_passes(self):
+        """The top rule must be indifferent to what sits above the
+        aperture -- adding a second out-of-window row changes nothing."""
+        p = self._preset(
+            _SILICON_HEADER + "memory_map:\n"
+            "  - { name: mcuboot,   base: 0x80000000, size_kib: 64,   carveout: false }\n"
+            "  - { name: he_slot0,  base: 0x80010000, size_kib: 2688, carveout: false }\n"
+            "  - { name: hp_slot0,  base: 0x802b0000, size_kib: 2688, carveout: false }\n"
+            "  - { name: storage,   base: 0x80550000, size_kib: 96,   carveout: false }\n"
+            "  - { name: scratch,   base: 0x80568000, size_kib: 64,   carveout: false }\n"
+            "  - { name: atoc,      base: 0x80578000, size_kib: 32,   carveout: false }\n"
+            "  - { name: hyperram,  base: 0xa0000000, size_mib: 64 }\n"
+            "  - { name: ospi0_nor, base: 0xa0000000, size_mib: 32 }\n")
         self.assertEqual(atoc._check_preset(p), [])
 
 
