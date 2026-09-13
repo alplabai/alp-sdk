@@ -374,17 +374,25 @@ def _check_aperture_tiling(
     """4b: the authored regions CONTAINED IN the declared aperture must
     tile it exactly -- no gaps, no overlaps (#1365 split A).
 
-    Anchors on the SoC aperture, never on `mram_main`: that region's
-    `base` is the string `"TBD"` while its children are concrete, so
-    anchoring there would collapse the check. Rows that fall entirely
-    OUTSIDE the aperture are ignored, not counted as gaps -- Ensemble's
-    OSPI XIP windows and the E1M-AEN801 SRAM row an IPC carve-out might
-    one day author both live outside `[soc_flash_base, ...)` legitimately
-    (E1M-AEN801.yaml:241-243). A region whose extent equals the FULL
-    aperture (`mram_main`, once its `base` stops being `"TBD"`) is the
-    whole-device alias, not a partition, and is exempt. A region with an
-    unresolved base is skipped -- returned as a non-failing entry in the
-    second tuple element so the caller can print it -- never guessed at.
+    Anchors on the SoC aperture, never on `mram_main`: on every AEN
+    preset today `mram_main`'s `base` is concrete (`0x80000000`,
+    resolved by #2053), but anchoring on it would still be wrong -- it
+    is the whole-device alias, not one of the fine-grained children it
+    sums to, so tiling against it directly would compare the sum against
+    itself. Before #2053, `mram_main`'s `base` was the string `"TBD"`
+    while its children were concrete, which made this doubly true: an
+    unresolved anchor would have collapsed the check outright. Rows that
+    fall entirely OUTSIDE the aperture are ignored, not counted as gaps
+    -- Ensemble's OSPI XIP windows and the E1M-AEN801 SRAM row an IPC
+    carve-out might one day author both live outside
+    `[soc_flash_base, ...)` legitimately (E1M-AEN801.yaml:241-243). A
+    region whose extent equals the FULL aperture (`mram_main`, on every
+    AEN preset since #2053) is the whole-device alias, not a partition,
+    and is exempt. A region with an unresolved base is skipped --
+    returned as a non-failing entry in the second tuple element so the
+    caller can print it -- never guessed at; no shipped AEN preset
+    authors one today, but the skip path stays live for any future
+    region (or preset) that does.
 
     Returns `(failures, skips)`. `skips` must never make the gate red.
     """
@@ -615,10 +623,12 @@ def _check_preset(path: Path) -> "list[str]":
     # flash/RAM class. Skipped entirely when no aperture resolves (a
     # non-Alif SoC, or an Alif SoC/variant that omits the field) --
     # never guessed at (ADR-0034 clause 4). A region skipped WITHIN an
-    # aperture that DID resolve (an unresolved `base:` on that region,
-    # e.g. `mram_main`'s `"TBD"`) is not silently absorbed either: both
-    # checks hand back a non-failing skip note, printed here so the
-    # gate says so instead of a docstring nobody reads at gate-run time.
+    # aperture that DID resolve (an unresolved `base:` on that region --
+    # no shipped AEN preset authors one today; `mram_main`'s `"TBD"` was
+    # the standing example until #2053 resolved it on all seven) is not
+    # silently absorbed either: both checks hand back a non-failing skip
+    # note, printed here so the gate says so instead of a docstring
+    # nobody reads at gate-run time.
     if aperture is not None:
         tiling_failures, tiling_skips = _check_aperture_tiling(
             path, doc, memory_map, aperture)
