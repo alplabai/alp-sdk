@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _orchestrate_support import (              # noqa: E402
     REPO,
     V2N_HAPPY,
+    _synthetic_aen_unresolved_base_root,
     _synthetic_nx9101_root,
     _write_board,
 )
@@ -209,6 +210,60 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
     assert (
         "'mram_main' (region 'mram_main' [0x80000000, 0x80580000) is "
         "flash-class" in entry.reason)
+
+
+# ---------------------------------------------------------------------
+# Wiring coverage (#2096): `_region_ipc_eligibility()`'s `cls ==
+# "unresolved"` tail above is reached through the FULL pipeline
+# (load_board_yaml -> resolve_carve_outs), not a direct call into the
+# private helper. #2053 removed the only shipped preset (mram_main
+# across all seven AEN SKUs) that used to exercise this routing, so a
+# synthetic AEN-shaped preset (`_synthetic_aen_unresolved_base_root`)
+# keeps it covered independent of whether any real
+# metadata/e1m_modules/E1M-AEN*.yaml still carries a "TBD" base. A
+# future change that filtered unresolved rows out earlier -- say in
+# `_candidate_regions()`, before `_region_ipc_eligibility()` is ever
+# called -- would leave the direct-call leg pins green while this test
+# alone catches the dead wiring.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_AEN_UNRESOLVED_BASE = """
+som:
+  sku: E1M-AEN899
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+ipc:
+  - kind: rpmsg
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_test_rpmsg
+"""
+
+
+def test_resolve_carve_outs_routes_an_unresolved_base_through_the_full_pipeline(
+        tmp_path: Path) -> None:
+    import alp_orchestrate
+
+    meta = _synthetic_aen_unresolved_base_root(tmp_path)
+    path = _write_board(tmp_path, SYNTHETIC_AEN_UNRESOLVED_BASE)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
+    resolved = resolve_carve_outs(project)         # must not raise
+
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "E1M-AEN899" in entry.reason
+    assert "ineligible for an IPC carve-out" in entry.reason
+    assert "mram_main" in entry.reason
+    assert "write_authority is 'composite'" in entry.reason
 
 
 def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(

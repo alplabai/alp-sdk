@@ -31,7 +31,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, _write_board   # noqa: E402
+from _orchestrate_support import (                     # noqa: E402
+    REPO,
+    _synthetic_aen_unresolved_base_root,
+    _write_board,
+)
 
 from alp_orchestrate import memory                      # noqa: E402
 from alp_orchestrate import (                          # noqa: E402
@@ -415,6 +419,48 @@ def test_an_unresolved_row_never_carries_a_base() -> None:
         {"name": "pending", "base": "TBD", "size_kib": 64},
         _AEN_APERTURE, True, "som_preset")
 
+    assert row["status"] == "unresolved"
+    assert "base" not in row
+    assert row["reason"]
+
+
+# ---------------------------------------------------------------------
+# Wiring coverage (#2096): the unresolved-base leg above is reached
+# through the FULL pipeline (load_board_yaml -> resolve_memory_regions),
+# not a direct call into `memory._resolved_row()`. #2053 removed the
+# only shipped preset (mram_main across all seven AEN SKUs) that used to
+# exercise this routing, so a synthetic AEN-shaped preset
+# (`_synthetic_aen_unresolved_base_root`) keeps it covered independent
+# of whether any real metadata/e1m_modules/E1M-AEN*.yaml still carries a
+# "TBD" base. A future change that filtered unresolved rows out earlier
+# would leave every direct-call pin above green while this test alone
+# catches the dead wiring.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_AEN_BOARD = """
+name: test-synthetic-aen-memory
+som:
+  sku: E1M-AEN899
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+"""
+
+
+def test_a_synthetic_aen_preset_routes_an_unresolved_base_through_the_full_pipeline(
+        tmp_path: Path) -> None:
+    meta = _synthetic_aen_unresolved_base_root(tmp_path)
+    path = _write_board(tmp_path, SYNTHETIC_AEN_BOARD)
+    project = load_board_yaml(path, metadata_root=meta)
+
+    row = _row(resolve_memory_regions(project), "mram_main")
+
+    assert row["kind"] == "unresolved"
     assert row["status"] == "unresolved"
     assert "base" not in row
     assert row["reason"]
