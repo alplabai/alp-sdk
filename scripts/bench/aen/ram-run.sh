@@ -163,7 +163,29 @@ EOF
 bench_jlink_assert_connected /tmp/ram-run-preflight.out "RAM-run preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/ram-run-preflight.out "RAM-run preflight" || exit 4
 
-SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
+# --- Session 1: LOAD + START the app, then disconnect leaving it RUNNING --
+#
+# Split from the read-back into a SEPARATE JLinkExe session (alp-sdk#2076).
+# Bench-measured on e1m-aen-evk-02/-03 (2026-09-13): an in-session second
+# `halt` issued after `go` + `Sleep` returned an INCOHERENT core
+# (SP=0x00000030, FAULTMASK=378E, the FPS registers mirroring R0-R14, no
+# MSPLIM block at all) and the `mem8` that followed it failed outright
+# ("Could not read memory") -- on an app a SEPARATE, read-only attach
+# proved seconds later was still running cleanly (fault-free core,
+# IPSR=0/CFSR=0/BFAR=0, buffer read fine). No root cause is established
+# (SE gating a running core, J-Link sequencing, or something else) -- this
+# only avoids the shape measured broken and matches the shape measured to
+# work.
+#
+# Ending on a plain `exit` after `go` -- not `qc`, and no `halt`/`r` first
+# -- leaves the target running: the same ending this bench already ships
+# and bench-verifies for a live app in flash-jlink.sh (`RSetType 2` / `r` /
+# `g` / `exit`, then a SEPARATE session reads a live console 3 seconds
+# later -- scripts/bench/aen/flash-jlink.sh:128-131,167-187) and in
+# docs/aen-bench-bringup.md:439-440 ("read a witness back over the generic
+# device" after that same r/g sequence, "memory reads work while the CPU
+# runs; register reads error out harmlessly").
+LOAD_SCRIPT=$(mktemp /tmp/jlink-load.XXXX.jlink)
 {
   echo connect
   echo halt
@@ -171,18 +193,45 @@ SCRIPT=$(mktemp /tmp/jlink.XXXX.jlink)
   echo "loadbin $BIN $BASE"
   echo "setpc $ENTRY"
   echo go
-  echo "Sleep $SLEEP"
-  echo halt
-  echo "mem8 $BUF, $SIZE"
-  echo qc
-} > "$SCRIPT"
+  echo exit
+} > "$LOAD_SCRIPT"
 echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms" >&2
-"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$SCRIPT" 2>/tmp/jlink.err > /tmp/jlink.out || true
+"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$LOAD_SCRIPT" 2>/tmp/jlink-load.err > /tmp/jlink-load.out || true
+# Same alp-sdk#1318 hazard as the read session below: a load+go that never
+# reached the probe must not fall through into a session-2 read that then
+# reports an EMPTY console and reads as a crashed app.
+bench_jlink_assert_connected /tmp/jlink-load.out "RAM-run $(basename "$BD") (load+go)" || { rm -f "$LOAD_SCRIPT"; exit 7; }
+rm -f "$LOAD_SCRIPT"
+
+# Host-side wait -- Sleep no longer runs inside a JLinkExe session, so the
+# host waits the same $SLEEP milliseconds between the two sessions instead.
+SLEEP_S=$(awk -v ms="$SLEEP" 'BEGIN { printf "%.3f", ms / 1000 }')
+sleep "$SLEEP_S"
+
+# --- Session 2: a FRESH, read-only attach ----------------------------------
+#
+# Not a halt-then-read inside session 1 -- that is exactly the shape
+# measured broken above. No `halt` before `mem8` either: this bench's own
+# Flow D read-back already reads `ram_console_buf` off a LIVE M55 core with
+# a bare `connect` + `mem8`, no halt, bench-verified working
+# (scripts/bench/aen/flash-jlink.sh:175-187, "attach read-only with the
+# GENERIC device and dump the RAM console (the part-number profile can't
+# re-halt the running secure core)"; docs/aen-bench-bringup.md:439-440,
+# "memory reads work while the CPU runs; register reads error out
+# harmlessly"). Adding a halt here would reintroduce the in-session halt
+# this fix removes, just moved into the second session.
+READ_SCRIPT=$(mktemp /tmp/jlink-read.XXXX.jlink)
+{
+  echo connect
+  echo "mem8 $BUF, $SIZE"
+  echo exit
+} > "$READ_SCRIPT"
+"${JLINK_ARGS[@]}" -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -CommanderScript "$READ_SCRIPT" 2>/tmp/jlink-read.err > /tmp/jlink-read.out || true
 # JLinkExe exits 0 even when it never opened the probe, so the `|| true` above
 # cannot be relied on. Without this the decoder below prints an EMPTY console
 # block for a pure infrastructure failure, which reads as a crashed app
 # (alp-sdk#1318). Fail before decoding, not after.
-bench_jlink_assert_connected /tmp/jlink.out "RAM-run $(basename "$BD")" || { rm -f "$SCRIPT"; exit 7; }
+bench_jlink_assert_connected /tmp/jlink-read.out "RAM-run $(basename "$BD") (read)" || { rm -f "$READ_SCRIPT"; exit 7; }
 echo "----- RAM console (decoded) -----"
 # Decode the 'ADDR = HH HH ...' mem8 lines into ASCII; stop at first NUL run.
 awk '
@@ -195,7 +244,7 @@ awk '
     if (b == 10 || b == 13) { printf "\n"; continue }
     if (b >= 32 && b < 127) printf "%c", b
   }
-}' /tmp/jlink.out
+}' /tmp/jlink-read.out
 echo
 echo "---------------------------------"
-rm -f "$SCRIPT"
+rm -f "$READ_SCRIPT"
