@@ -17,7 +17,7 @@
       "board_category": "gpio",
       "board_macro": "EVK_PIN_ENCODER_SW",
       "board_role": null,
-      "board_doc": "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce.",
+      "board_doc": "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce.",
       "active_low": true,
       "dispatch": "direct"
     },
@@ -425,7 +425,7 @@
       "board_category": "qenc",
       "board_macro": "EVK_ENC_ROTARY",
       "board_role": null,
-      "board_doc": "PEC12R-4222F-S0024 rotary encoder: ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4).",
+      "board_doc": "PEC11R-4215K-S0024 rotary encoder (designator E1, 2626-R2 EVK schematic netlist): ENC0_X = A phase, ENC0_Y = B phase, 24 PPR; push switch on EVK_PIN_ENCODER_SW (E1M_GPIO_IO4).",
       "dispatch": "direct"
     }
   ]
