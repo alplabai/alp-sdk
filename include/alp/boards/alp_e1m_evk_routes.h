@@ -104,7 +104,7 @@ extern "C" {
 /* I2S instances (ALP_E1M_I2S<N> -> board-side codec / mic role) */
 /* ------------------------------------------------------------------ */
 
-#define EVK_I2S_AUDIO_CODEC ALP_E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. */
+#define EVK_I2S_AUDIO_CODEC ALP_E1M_I2S0  /**< Routed through the 74LVC157 mux to either the TAS2563 amps (default select) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. On EVK rev 2626-R2 the mux is wired backwards for this direction regardless of SEL -- confirmed against the netlist, I2S0_WS/SCLK/SDO are the mux's Y OUTPUTS, not inputs, so enabling it (EVK_PIN_I2S_MUX_EN low) cannot route audio out to either destination and instead contends with the SoC's own I2S3 TX pads; alp-sdk#2077. */
 #define EVK_I2S_PDM_MIC     ALP_E1M_I2S1  /**< PDM mic capture (4x MP34DT05 mics). */
 
 /* ------------------------------------------------------------------ */

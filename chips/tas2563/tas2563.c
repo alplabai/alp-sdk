@@ -402,11 +402,34 @@ static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
 	}
 }
 
-/* RX_WLEN[1:0] and RX_SLEN[1:0] -- §7.5.10 Table 7-110, p.70.  Slot
- * length is derived from word length because alp_i2s_config_t has no
- * separate slot field: 16-bit words in 16-bit slots, 24 in 24, 32 in
- * 32.  A frame carrying narrow words in wider slots needs a direct
- * TDM_CFG2 write, not this helper.
+/* RX_WLEN[1:0] and RX_SLEN[1:0] -- §7.5.10 Table 7-110, p.70.
+ *
+ * Slot length is NOT simply word length.  SLASET3D §7.4.2 "TDM Port"
+ * (p.39) states outright: "The device supports 2 time slots at 32
+ * bits in width and 4 or 8 time slots at 16, 24 or 32 bits in width."
+ * A 2-slot frame has exactly ONE legal slot width, 32 bits, no matter
+ * how narrow the WORD inside it is (the word sits left-justified
+ * within the slot by default, RX_JUSTIFY, §7.5.9).  This is not
+ * academic for `channels == 2`: the Alif DW I2S3 peripheral
+ * (zephyr/drivers/i2s/i2s_dw.c) hardcodes a 32-cycle word-select
+ * length (`.cfg.wss_len = WSS_LEN`) and derives its bit clock as
+ * `sclk = 2 * 32 * sample_rate` -- SBCLK/FSYNC is always 64, a 2-slot
+ * frame, independent of @ref alp_i2s_config_t.word_bits.  Mapping a
+ * 16-bit word to a 16-bit slot there (the old word-equals-slot rule)
+ * put `RX_SLOT_R` (TDM_CFG3 reset `10h`, §7.5.11) on the PADDING half
+ * of a 64-bit frame, not the actual right-channel word.  (The Alif
+ * I2S3 bit-clock divider this depends on is itself BENCH-UNVERIFIED --
+ * see i2s_dw.c's own alp-sdk comment on `clock_control_set_rate` -- so
+ * the SBCLK/FSYNC ratio actually achieved on real silicon has not been
+ * measured either; this fix corrects the register programming for the
+ * ratio the driver source says it configures.)
+ *
+ * For any other channel count, §7.4.2 allows 16/24/32-bit slots at
+ * every word width (4- or 8-slot TDM), so word-equals-slot stays the
+ * default there.  This driver has no host bus that has ever opened
+ * more than 2 channels, so `channels == 2` is the narrowest rule that
+ * fixes the one case this driver actually exercises, not a general
+ * TDM slot-width policy for frame widths nothing here uses yet.
  *
  * Table 7-110 also encodes 20-bit words (RX_WLEN = 01b).  It is
  * deliberately NOT mapped here: <alp/i2s.h> documents
@@ -415,23 +438,38 @@ static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
  * that cannot be reached through the real API is a mapping that
  * cannot be tested.  20-bit lands in the ALP_ERR_OUT_OF_RANGE arm
  * with every other unencodable width. */
-static alp_status_t word_len_codes(uint8_t bits, uint8_t *wlen_out, uint8_t *slen_out)
+static alp_status_t
+word_len_codes(uint8_t bits, uint8_t channels, uint8_t *wlen_out, uint8_t *slen_out)
 {
 	switch (bits) {
 	case 16u:
 		*wlen_out = 0u;
+		break;
+	case 24u:
+		*wlen_out = 2u;
+		break;
+	case 32u:
+		*wlen_out = 3u;
+		break;
+	default:
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+
+	if (channels == 2u) {
+		*slen_out = 2u; /* 32-bit slot: the only one a 2-slot frame supports. */
+		return ALP_OK;
+	}
+
+	switch (bits) {
+	case 16u:
 		*slen_out = 0u;
 		return ALP_OK;
 	case 24u:
-		*wlen_out = 2u;
 		*slen_out = 1u;
 		return ALP_OK;
-	case 32u:
-		*wlen_out = 3u;
-		*slen_out = 2u;
-		return ALP_OK;
 	default:
-		return ALP_ERR_OUT_OF_RANGE;
+		*slen_out = 2u; /* 32u, already validated above. */
+		return ALP_OK;
 	}
 }
 
@@ -484,7 +522,7 @@ alp_status_t tas2563_configure_i2s(tas2563_t              *ctx,
 	if (s != ALP_OK) return s;
 
 	uint8_t wlen = 0, slen = 0;
-	s = word_len_codes(host_cfg->word_bits, &wlen, &slen);
+	s = word_len_codes(host_cfg->word_bits, host_cfg->channels, &wlen, &slen);
 	if (s != ALP_OK) return s;
 
 	s = select_page(ctx, 0);

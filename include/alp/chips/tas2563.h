@@ -297,20 +297,26 @@ typedef enum {
  * chip plays.
  *
  * @warning @ref TAS2563_RX_SLOT_FROM_ADDR is NOT a safe default for a
- *   stereo pair on a minimal (2-slot) I2S/TDM frame.  SLASET3D §7.4.2
- *   (p.42) states the default source is "mono from the time slot equal
- *   to the I2C base address offset," and Table 7-3 (p.29) gives that
- *   offset as `address - 0x4C` (0x4C=0, 0x4D=1, 0x4E=2, 0x4F=3).  A
- *   2-slot frame only has slots 0 and 1: address 0x4C lands on slot 0
- *   (the left slot), 0x4D on slot 1 (the right slot), and 0x4E/0x4F
- *   fall entirely outside the frame -- §7.4.2 (p.42) again: "If time
- *   slot selections places reception either partially or fully beyond
- *   the frame boundary, the receiver will return a null sample
- *   equivalent to a digitally muted sample."  So on a 2-slot frame with
- *   the EVK's U27 (0x4D) / U28 (0x4E) pair, `FROM_ADDR` puts U27 on the
- *   right slot and leaves U28 permanently muted -- explicit @ref
- *   TAS2563_RX_LEFT / @ref TAS2563_RX_RIGHT is what a stereo pair on a
- *   2-slot frame needs; `FROM_ADDR` only works as-is on a frame with at
+ *   stereo pair on a minimal (2-slot, 2x 32-bit) I2S/TDM frame -- see
+ *   @ref tas2563_configure_i2s / `word_len_codes()`
+ *   (`chips/tas2563/tas2563.c`) for why a `channels == 2` host bus is
+ *   always programmed with 32-bit slots regardless of word width.
+ *   SLASET3D §7.4.2 (p.42) states the default source is "mono from the
+ *   time slot equal to the I2C base address offset," and Table 7-3
+ *   (p.30) gives four (address, strap) rows; `offset = address -
+ *   0x4C` (0x4C=0, 0x4D=1, 0x4E=2, 0x4F=3) is INFERRED from those four
+ *   rows, not a formula the datasheet states outright.  A 2-slot frame
+ *   only has slots 0 and 1: address 0x4C lands on slot 0 (the left
+ *   slot), 0x4D on slot 1 (the right slot), and 0x4E/0x4F fall
+ *   entirely outside the frame -- §7.4.2 (p.42) again: "If time slot
+ *   selections places reception either partially or fully beyond the
+ *   frame boundary, the receiver will return a null sample equivalent
+ *   to a digitally muted sample."  So on a CORRECTLY 32-bit-slotted
+ *   2-slot frame with the EVK's U27 (0x4D) / U28 (0x4E) pair,
+ *   `FROM_ADDR` puts U27 on the right slot and leaves U28 permanently
+ *   muted -- explicit @ref TAS2563_RX_LEFT / @ref TAS2563_RX_RIGHT is
+ *   what a stereo pair on a 2-slot frame needs; `FROM_ADDR` only works
+ *   as-is on a frame with at
  *   least (address offset + 1) slots.
  */
 typedef enum {

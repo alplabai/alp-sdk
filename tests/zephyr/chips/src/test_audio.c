@@ -499,10 +499,14 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	tas2563_t  ctx;
 	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
 
-	/* 16 kHz, 16-bit, standard I2S, right channel.
+	/* 16 kHz, 16-bit, standard I2S, right channel, ALP_I2S_CONFIG_DEFAULT's
+     * channels=2 (stereo) -- SLASET3D §7.4.2 (p.39) supports only 32-bit
+     * slots on a 2-slot frame, so RX_SLEN is 10b (32-bit) regardless of
+     * the 16-bit RX_WLEN word width; see word_len_codes() in
+     * chips/tas2563/tas2563.c for the channels==2 rule this locks in.
      *   TDM_CFG0 = (09h & ~0Eh) | (001b << 1) = 03h
      *   TDM_CFG1 = (02h & ~7Eh) | (1    << 1) = 02h  (I2S: 1 SBCLK offset)
-     *   TDM_CFG2 = (4Ah & ~3Fh) | (10b<<4)|(00b<<2)|00b = 60h
+     *   TDM_CFG2 = (4Ah & ~3Fh) | (10b<<4)|(00b<<2)|10b = 62h
      *              (IVMON_LEN in bits 7..6 preserved as 01b) */
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
 	cfg.sample_rate_hz   = 16000u;
@@ -512,13 +516,16 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x03u, "SAMP_RATE in bits 3..1");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x02u, "RX_OFFSET = 1 for I2S");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
-	              0x60u,
-	              "RX_SCFG=10b (right), RX_WLEN=00b, RX_SLEN=00b, IVMON_LEN untouched");
+	              0x62u,
+	              "RX_SCFG=10b (right), RX_WLEN=00b, RX_SLEN=10b (2-slot frame forces "
+	              "32-bit slot), IVMON_LEN untouched");
 
-	/* 96 kHz, 32-bit, left-justified, left channel.
+	/* 96 kHz, 32-bit, left-justified, left channel.  Already a 32-bit
+     * word, so RX_SLEN=10b here regardless of whether the channels==2
+     * rule applies -- unchanged from the word-equals-slot mapping.
      *   TDM_CFG0 = (03h & ~0Eh) | (101b << 1) = 0Bh
      *   TDM_CFG1 = (02h & ~7Eh) | (0    << 1) = 00h  (no offset)
-     *   TDM_CFG2 = (60h & ~3Fh) | (01b<<4)|(11b<<2)|10b = 5Eh */
+     *   TDM_CFG2 = (62h & ~3Fh) | (01b<<4)|(11b<<2)|10b = 5Eh */
 	cfg.sample_rate_hz = 96000u;
 	cfg.word_bits      = 32u;
 	cfg.format         = ALP_I2S_FMT_LEFT_JUSTIFIED;
@@ -530,11 +537,12 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x5Eu);
 
 	/* 44.1 kHz, 24-bit, I2S, stereo downmix -- the width that pins
-     * RX_WLEN=10b against RX_SLEN=01b (both 24-bit, but different
-     * encodings, so a slot/word mix-up shows here and nowhere else).
+     * RX_WLEN=10b (24-bit word) against RX_SLEN=10b (32-bit slot, forced
+     * by channels==2): both fields differ from the word width, so a
+     * slot/word mix-up shows here and nowhere else.
      *   TDM_CFG0 = (0Bh & ~0Eh) | (100b << 1) = 09h
      *   TDM_CFG1 = (00h & ~7Eh) | (1    << 1) = 02h
-     *   TDM_CFG2 = (5Eh & ~3Fh) | (11b<<4)|(10b<<2)|01b = 79h */
+     *   TDM_CFG2 = (5Eh & ~3Fh) | (11b<<4)|(10b<<2)|10b = 7Ah */
 	cfg.sample_rate_hz = 44100u;
 	cfg.word_bits      = 24u;
 	cfg.format         = ALP_I2S_FMT_I2S;
@@ -543,21 +551,40 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	    fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x09u, "44.1 and 48 kHz share the 100b encoding");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x02u);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
-	              0x79u,
-	              "RX_WLEN=10b (24-bit word) with RX_SLEN=01b (24-bit slot)");
+	              0x7Au,
+	              "RX_WLEN=10b (24-bit word) with RX_SLEN=10b (32-bit slot, channels==2)");
 
 	/* 8 kHz, 16-bit, right-justified, slot from I2C address.
      * Right-justified is the RX_JUSTIFY bit, not an offset.
      *   TDM_CFG0 = (09h & ~0Eh) | (000b << 1) = 01h
      *   TDM_CFG1 = (02h & ~7Eh) | 40h         = 40h
-     *   TDM_CFG2 = (79h & ~3Fh) | 0            = 40h */
+     *   TDM_CFG2 = (7Ah & ~3Fh) | (00b<<4)|(00b<<2)|10b = 42h */
 	cfg.sample_rate_hz = 8000u;
 	cfg.word_bits      = 16u;
 	cfg.format         = ALP_I2S_FMT_RIGHT_JUSTIFIED;
 	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_SLOT_FROM_ADDR), ALP_OK);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x01u);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x40u, "RX_JUSTIFY set, RX_OFFSET zero");
-	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x40u);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
+	              0x42u,
+	              "RX_SLEN=10b (32-bit slot, channels==2) even at a 16-bit word");
+
+	/* channels=1 (mono): the channels==2 rule in word_len_codes() must NOT
+     * fire here -- §7.4.2 (p.39) allows 16/24/32-bit slots on a 4- or
+     * 8-slot TDM frame, so a mono host bus keeps the word-equals-slot
+     * mapping.  16-bit word -> RX_SLEN=00b, not the 10b a 2-channel bus
+     * would get; this is what distinguishes "channels==2 forces 32-bit"
+     * from "always force 32-bit".
+     *   TDM_CFG2 = (42h & ~3Fh) | (00b<<4)|(00b<<2)|00b = 40h */
+	cfg.channels       = 1u;
+	cfg.sample_rate_hz = 16000u;
+	cfg.word_bits      = 16u;
+	cfg.format         = ALP_I2S_FMT_I2S;
+	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_SLOT_FROM_ADDR), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
+	              0x40u,
+	              "channels=1: RX_SLEN=00b (word-equals-slot), the channels==2 rule "
+	              "must not apply to a mono bus");
 
 	alp_i2c_close(bus);
 }
