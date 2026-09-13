@@ -12,18 +12,22 @@
  * sequence, as living documentation of the hand-written-firmware path:
  *
  *     init  ->  ping  ->  diag info
+ *           ->  Wi-Fi scan
  *           ->  portable Wi-Fi open  ->  portable BLE open + scan
- *           ->  Wi-Fi scan  ->  Wi-Fi connect  ->  get IP
+ *           ->  Wi-Fi connect  ->  get IP
  *           ->  TCP socket: open -> connect -> send -> recv -> close
  *           ->  Wi-Fi disconnect
  *           ->  BLE enable  ->  BLE scan  ->  BLE disable
  *           ->  proxied-GPIO read
  *
- * The first radio checkpoint goes through the application-level portable APIs
- * in <alp/iot.h> and <alp/ble.h>.  The longer tour that follows stays on
- * <alp/chips/cc3501e.h> so developers still have a diagnostic surface for
- * firmware-version, scan-record, socket, and bridge-level bring-up work.  The
- * app never touches the raw wire protocol.
+ * The Wi-Fi scan is the tour's first genuine radio op (see tour_wifi_scan()'s
+ * header comment for how that was verified) and carries issue #2035's known
+ * first-radio-op wedge recovery; the portable checkpoint right after it goes
+ * through the application-level portable APIs in <alp/iot.h> and <alp/ble.h>.
+ * The longer tour that follows stays on <alp/chips/cc3501e.h> so developers
+ * still have a diagnostic surface for firmware-version, scan-record, socket,
+ * and bridge-level bring-up work.  The app never touches the raw wire
+ * protocol.
  *
  * WHY IT IS A DEMO, NOT A GATE.  Every step is guarded and NON-FATAL: a step
  * that fails prints the status and the tour continues to the next.  On a bench
@@ -285,6 +289,17 @@ static void portable_ble_scan_cb(const alp_ble_scan_result_t *r, void *user)
  * same live CC3501E bridge.  cc3501e_bridge_bringup() attached @p fw to the
  * portable Wi-Fi and BLE backends; this checkpoint verifies the public handles
  * open and that BLE can run a real scan through <alp/ble.h>.
+ *
+ * alp_wifi_open() below does not touch the wire (backends/wifi/cc3501e.c's
+ * cc35_open() only binds the already-live bridge handle), but alp_ble_open()
+ * DOES -- it reaches cc3501e_ble_enable() -> poll_by_repeat(), a worker-routed
+ * radio op, same as tour_wifi_scan()'s CMD_WIFI_SCAN_START.  This checkpoint
+ * runs AFTER tour_wifi_scan() in main() for exactly that reason: the scan is
+ * the tour's genuinely first radio op and carries issue #2035's wedge-recovery
+ * guard, so by the time alp_ble_open() runs here the link has already been
+ * proven (or recovered).  Do not reorder this ahead of the scan, and do not
+ * add a new radio-touching call ahead of either without re-checking which one
+ * is now first.
  */
 /* Returns the fail count so main() can fold this checkpoint's own tally
  * into the RESULT verdict -- see the header comment on RESULT below for
@@ -332,13 +347,59 @@ static unsigned tour_portable_wireless_checkpoint(void)
  * poll-by-repeat (the firmware runs Wlan_Scan on a worker and answers BUSY
  * until it finishes); a success proves the whole submit -> worker -> reply
  * seam from the host.  cc3501e_wifi_sec_name() decodes each record's raw TI
- * SecurityInfo into a human bucket (open/wpa2/wpa3/...). */
+ * SecurityInfo into a human bucket (open/wpa2/wpa3/...).
+ *
+ * THIS CALL IS THE TOUR'S FIRST RADIO OP OF THE BOOT -- verified by tracing
+ * every call main() makes ahead of it: cc3501e_bridge_bringup() only opens the
+ * SPI bus + control pins and does not touch the wire, tour_ping()/tour_diag()
+ * are plain request/reply (PING/GET_VERSION/GET_DIAG_INFO are not
+ * worker-routed and don't count), and this step now runs BEFORE
+ * tour_portable_wireless_checkpoint() precisely so it stays first -- that
+ * checkpoint's alp_ble_open() is ALSO a worker-routed radio op
+ * (cc3501e_ble_enable() -> poll_by_repeat()) and used to run ahead of this
+ * scan, making the scan the tour's THIRD radio op instead of its first (a bug
+ * this file used to state as fact without re-checking). If you add or reorder
+ * a step ahead of this one, re-trace the same way rather than trust this
+ * comment. Being first makes this the one call site issue #2035's known
+ * first-radio-op wedge can hit: roughly 2 in 16 cold boots, the first
+ * worker-routed radio opcode times out (-4) and the link then reads -5 until
+ * a cold cycle. The bridge firmware deliberately does not fix this in-band
+ * (see @ref cc3501e_hard_reset's doc for why), so the sanctioned response
+ * lives here, host-side, and ONLY here -- every later radio call in this tour
+ * (the checkpoint's BLE open, connect, BLE enable/scan, ...) is left alone,
+ * because a failure THERE is a real failure, not this boot-time condition. */
 static void tour_wifi_scan(cc3501e_t *fw)
 {
 	static cc3501e_scan_record_t recs[TOUR_SCAN_MAX];
 	size_t                       n = 0u;
 	alp_status_t s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
-	if (s != ALP_OK) {
+
+	if (s == ALP_ERR_TIMEOUT) {
+		/* The known wedge's signature: -4 on this, the first radio op of the
+		 * boot. Recover with exactly ONE cc3501e_hard_reset() + ONE retry --
+		 * never loop -- and say so out loud, so this statistic stays visible
+		 * instead of hiding behind a silent retry. cc3501e_hard_reset() only
+		 * pulses the line and blind-settles; it does not itself confirm the
+		 * link, so the retried scan below is what proves recovery. */
+		printf("[tour] WIFI_SCAN -> -4 (first radio op of this boot) -- known issue #2035 "
+		       "wedge (~2 in 16 cold boots); issuing ONE cc3501e_hard_reset() + ONE retry\n");
+		/* Print the reset's OWN status -- it can return ALP_ERR_NOSUPPORT (no
+		 * reset_pin) or ALP_ERR_NOT_READY (ctx/bus not ready), meaning no reset
+		 * was actually issued despite the line above already announcing one.
+		 * Without this, a retry failure below reads as "not the known wedge; a
+		 * genuine failure" even when no reset ran at all. */
+		alp_status_t reset_s = cc3501e_hard_reset(fw);
+		printf("[tour] cc3501e_hard_reset() -> %d\n", (int)reset_s);
+		s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
+		if (s != ALP_OK) {
+			/* A second failure is a real failure -- surface it, don't retry again. */
+			printf("[tour] WIFI_SCAN retry after hard reset -> %d (not the known wedge; "
+			       "a genuine failure)\n",
+			       (int)s);
+			return;
+		}
+		printf("[tour] WIFI_SCAN recovered after one cc3501e_hard_reset() + retry\n");
+	} else if (s != ALP_OK) {
 		printf("[tour] WIFI_SCAN -> %d\n", (int)s);
 		return;
 	}
@@ -789,14 +850,17 @@ int main(void)
 	/* Step 3 -- version + diagnostics. */
 	tour_diag(&fw);
 
-	/* Step 4 -- portable Wi-Fi/BLE dispatch checkpoint.  This is the one step
+	/* Step 4 -- Wi-Fi scan (poll-by-repeat worker seam).  This is the tour's
+	 * FIRST radio op -- see tour_wifi_scan()'s own header comment for how that
+	 * was verified -- so it runs before the portable checkpoint below and
+	 * carries the #2035 wedge-recovery guard. */
+	tour_wifi_scan(&fw);
+
+	/* Step 5 -- portable Wi-Fi/BLE dispatch checkpoint.  This is the one step
 	 * in the tour with its own pass/fail tally (PORTABLE_WIRELESS: SUMMARY);
 	 * everything else here is deliberately non-fatal narration (see the file
 	 * header), so this checkpoint's fail count is what RESULT gates on. */
 	unsigned wireless_fail = tour_portable_wireless_checkpoint();
-
-	/* Step 5 -- Wi-Fi scan (poll-by-repeat worker seam). */
-	tour_wifi_scan(&fw);
 
 	/* Step 6 -- Wi-Fi connect + a TCP socket round-trip + disconnect
 	 * (skipped when no credentials are built in). */

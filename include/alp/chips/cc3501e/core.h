@@ -384,6 +384,39 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx);
  * re-boot after the cold power-up; call this again (e.g. from a soak/retry loop) if
  * a single re-boot has not brought the link up.  Remove once TI ships the flash fix.
  *
+ * @note **Issue #2035 -- the first-radio-op wedge.**  Roughly 2 in 16 cold boots,
+ * the FIRST worker-routed radio opcode of a boot (a Wi-Fi scan, a BLE enable, a
+ * connect -- not @ref cc3501e_ping / @ref cc3501e_get_version / diag, which are
+ * not worker-routed and succeed regardless) times out (@ref ALP_ERR_TIMEOUT),
+ * and the link then reads @ref ALP_ERR_IO until a cold cycle.  The bridge
+ * firmware deliberately does NOT fix this in-band -- every candidate firmware
+ * move has a demonstrated wedge/brick precedent, recorded in
+ * cc3501e-bridge-firmware's `prebuilt/CHANGELOG.md` -- so the sanctioned
+ * response is host-side: if the FIRST radio op of a boot fails with
+ * @ref ALP_ERR_TIMEOUT, call this function ONCE and retry that same op ONCE.
+ * That takes 2 in 16 to roughly 1 in 128. A second failure is a real failure
+ * and must be surfaced, not retried again; a LATER op failing the same way is
+ * not this condition and must not be papered over the same way.
+ *
+ * DELIBERATELY @ref ALP_ERR_TIMEOUT ONLY -- never @ref ALP_ERR_IO, even though
+ * a caller who remembers the spoken "-4 or -5" form of this condition will be
+ * tempted to widen the trigger.  poll_by_repeat() (cc3501e_core.c) treats a
+ * bare ALP_ERR_IO as retryable and loops it to the deadline, so a wedged link
+ * cannot surface as -5 out of a worker-routed call -- it surfaces as -4 once
+ * the budget elapses.  The only way -5 emerges from that loop is its
+ * `terminal_decoded_io` check: a well-framed, CRC-valid reply the device
+ * itself decoded as RESP_ERR_RADIO / RESP_ERR_PROTOCOL / RESP_ERR_INTERNAL.
+ * The link is ALIVE in that case -- it answered, just with a real fault --
+ * so hard-resetting it on a -5 would destroy a genuine RF/firmware
+ * diagnostic instead of recovering a wedge.
+ *
+ * This is app-level policy, not driver behaviour -- do not fold it into any op
+ * function in this driver, because a caller mid-association or mid-BLE-link
+ * must not silently lose that state to a reset it never asked for.  This
+ * function only pulses the line and blind-settles; it does not confirm the
+ * link itself (no PING, no version check), so the retried op is what proves
+ * recovery, not this call's return value.
+ *
  * @param ctx Initialised driver context (must have @c reset_pin populated).
  * @return ALP_OK after the re-boot budget elapses; ALP_ERR_NOSUPPORT if no reset pin.
  */
