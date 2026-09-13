@@ -20,13 +20,31 @@ distinctly from the unrelated `ALP_CC3501E_RADIO_EVT_*` family and mirroring
 lwIP's `prot/dhcp.h`) and the `ALP_CC3501E_NETIF_UP` /
 `ALP_CC3501E_NETIF_LINK_UP` / `ALP_CC3501E_NETIF_DHCP_TRIES()` bit helpers.
 
-Backward compatibility is the load-bearing part: `cc3501e_diag_info()` now
-reads up to 18 bytes but only *requires* 16 -- an older bridge that still
-answers 16 bytes is a SUCCESS with both new fields reported as `0`
-("not reported"), not an `ALP_ERR_IO` regression. A reply shorter than the
-original 16 bytes still fails.
+Backward compatibility is the load-bearing part, and it works by accident of
+the wire's own padding, not a length check: the firmware zero-pads every
+reply to an 8-byte multiple and folds pad + CRC into the declared
+`payload_len`, so an 18-byte-firmware reply and a pre-#2035 16-byte-firmware
+reply both frame the identical 24-byte wire payload -- `cc3501e_diag_info()`
+sees the same byte count either way and simply reads `dhcp_state`/
+`netif_status` directly; against old firmware those two bytes land on the
+firmware's zero pad ahead of the CRC trailer, which is exactly the
+"not reported" encoding. A reply shorter than the original 16 bytes still
+fails. `chips/cc3501e/cc3501e_diag.c`'s comment and
+`tests/zephyr/cc3501e_host_driver/src/test_host_driver.c` now spell this out,
+with a second backward-compat test staged through the genuinely-unpadded
+legacy wire shape (the one case that actually falls below the guard) so the
+property is pinned by mutation, not just by a passing assertion.
 
-This is deliberately NOT a `PROTOCOL_MINOR` bump -- the encoding is
-self-describing per field, and a bump would force a lockstep change in the
-firmware's `protocol-version.txt` that would redden every firmware PR until
-both sides landed.
+`diag info` (both the `alp companion` console command and the
+`aen-cc3501e-companion-tour` example) now prints the decoded DHCP state name
+and netif up/link/retry-count line; `docs/cc3501e-companion-commands.md`'s
+table lists it.
+
+This is deliberately NOT a `PROTOCOL_MINOR` bump. A host disambiguates
+"talking to old firmware" from "DHCP never started" -- both read
+`dhcp_state` as 0 -- by the reply's own `fw_version` field, not by the new
+fields' value, so no version check is needed to use them safely. A MINOR
+bump would still force a lockstep change in the firmware's
+`protocol-version.txt`, but since that job checks out alp-sdk's *default*
+branch, a bump on `dev` would not redden firmware PRs until the next
+`dev`-to-`main` release, not immediately.

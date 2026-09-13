@@ -828,18 +828,26 @@ typedef enum {
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
  *  populates these fields once per request from its in-RAM
  *  bookkeeping; reading is non-disturbing (no side effects on
- *  the radio state).  Was 16 bytes (one cache line on the M33) through v2
- *  firmware; grew to 18 bytes ADDITIVELY when dhcp_state/netif_status were
- *  appended (alp-sdk#2035) -- a v2-firmware 16-byte reply is still a
+ *  the radio state).  Was 16 WIRE bytes (one cache line on the M33) through
+ *  v2 firmware; grew to 18 WIRE bytes ADDITIVELY when dhcp_state/netif_status
+ *  were appended (alp-sdk#2035) -- NOTE: `sizeof(alp_cc3501e_diag_info_t)` is
+ *  20, not 18, because of 4-byte tail padding after this pair; 18 is the wire
+ *  byte count, not the in-memory struct size.  A v2-firmware reply is still a
  *  complete, valid answer, just without the two new fields (see
- *  cc3501e_diag_info() for the backward-compat decode).
+ *  cc3501e_diag_info() for the backward-compat decode, and its own doc
+ *  comment for why NEITHER firmware can be told apart by wire length -- both
+ *  frame the identical padded 24-byte payload).
  *
- *  Deliberately NOT a PROTOCOL_MINOR bump: the two new fields are
- *  self-describing per-field (0 means "not reported"), so an old host
- *  reading a new firmware, or a new host reading old firmware, both work
- *  with no version check.  A MINOR bump would force a lockstep change in
- *  the firmware's `protocol-version.txt` for no behavioural gain -- do not
- *  "fix" this into a bump.
+ *  Deliberately NOT a PROTOCOL_MINOR bump: a host disambiguates "talking to
+ *  old firmware" from "DHCP never started" (both read dhcp_state as 0, see
+ *  the field-level note below) by `fw_version`, ALSO in this same reply, not
+ *  by the new fields' own value -- so no version check is needed to use them
+ *  safely. A MINOR bump would force a lockstep change in the firmware's
+ *  `protocol-version.txt` -- and because that job checks out alp-sdk's
+ *  DEFAULT BRANCH, a bump on `dev` would not even redden firmware PRs until
+ *  the next `dev`-to-`main` release, not immediately as originally
+ *  estimated -- for no behavioural gain either way; do not "fix" this into
+ *  a bump.
  *  Field-level meanings:
  *   - fw_version: the firmware *release* version the device reports
  *     (its own semver from firmware-version.txt; tracked separately
@@ -873,7 +881,13 @@ typedef enum {
  *     misled).  An ap_start that leaves this at 0 never received a WLAN
  *     event at all.  A value outside @ref alp_cc3501e_radio_evt_t is legal
  *     and simply means some other vendor radio event fired.
- *   - reserved[1..2]: still reserved, always 0.
+ *   - reserved[1]: low byte of the `psa_status_t` from the last OTA flush
+ *     fault (#1610); 0 if no OTA flush has failed since last reset.  Already
+ *     surfaced by the console as `diag info`'s `otafault:` line.
+ *   - reserved[2]: update-mode boot mark -- bit7 set means the firmware is
+ *     currently running because it booted into UPDATE_MODE (see @ref
+ *     ALP_CC3501E_CMD_OTA_UPDATE_MODE); bits[6:0] are a warm-boot counter,
+ *     modulo 128.
  *   - dhcp_state: one of @ref alp_cc3501e_dhcp_state_t, i.e. lwIP's
  *     `dhcp->state` PLUS ONE.  0 means "not reported" -- no lwIP linked, or
  *     the netif has no `dhcp` struct because DHCP never started; that case

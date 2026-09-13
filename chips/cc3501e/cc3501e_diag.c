@@ -42,7 +42,19 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	 * netif_status(1).  The last two bytes grew ADDITIVELY (alp-sdk#2035);
 	 * a v2-firmware reply is only the first 16 bytes, so require at least 16
 	 * and treat the trailing two as "not reported" (0) when they are absent
-	 * -- a short-but-complete v2 reply must stay a SUCCESS, not ALP_ERR_IO. */
+	 * -- a short-but-complete v2 reply must stay a SUCCESS, not ALP_ERR_IO.
+	 *
+	 * A length test cannot pick between the two firmwares, though: the
+	 * firmware zero-pads every reply payload to an ALP_CC3501E_REPLY_PAD (8 B)
+	 * multiple and folds pad + CRC into the wire payload_len, so BOTH the
+	 * v2 (16-byte) and current (18-byte) replies frame an IDENTICAL 24-byte
+	 * padded payload, and cc3501e_request() clamps `got` to this call's
+	 * rx_cap (18) -- `got` is only ever 7, 15 or 18, never 16 or 17. Once
+	 * the got<16 guard below passes, got==18 always. Backward compatibility
+	 * with a v2 bridge therefore works by accident of the pad: reply[16]/
+	 * reply[17] land on the firmware's zero-pad bytes ahead of the CRC
+	 * trailer, which is exactly the "not reported" encoding, so no explicit
+	 * length branch on 16 vs 18 is needed -- or even possible -- here. */
 	uint8_t      reply[18] = { 0 };
 	size_t       got       = 0;
 	alp_status_t s         = cc3501e_request(ctx,
@@ -66,8 +78,8 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	out->reserved[0]     = reply[13];
 	out->reserved[1]     = reply[14];
 	out->reserved[2]     = reply[15];
-	out->dhcp_state      = (got >= 18u) ? reply[16] : 0u;
-	out->netif_status    = (got >= 18u) ? reply[17] : 0u;
+	out->dhcp_state      = reply[16];
+	out->netif_status    = reply[17];
 	return ALP_OK;
 }
 

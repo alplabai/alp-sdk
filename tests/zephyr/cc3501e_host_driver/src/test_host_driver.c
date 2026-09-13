@@ -239,6 +239,20 @@ static uint32_t g_get_ip_io_down_remaining;
  * default across the suite is the full 18-byte reply. */
 static uint8_t g_diag_info_reply_len = 18u;
 
+/* #2035 review follow-up: stage the GET_DIAG_INFO reply as a genuinely
+ * UNPADDED 16-byte-data wire frame (via cc3501e_model_stage_legacy_reply(),
+ * no CRC trailer, no REPLY_PAD rounding) instead of the padded model every
+ * other diag_info test uses -- see
+ * test_diag_info_legacy_unpadded_16byte_reply_reports_new_fields_not_reported
+ * for why this is the ONE shape that actually distinguishes the got<16u
+ * guard from a got<18u regression: every reply staged through the padded
+ * model (cc3501e_model_stage_reply(), including
+ * test_diag_info_16byte_reply_reports_new_fields_not_reported above) rounds
+ * up to a 24-byte wire payload regardless of whether 16 or 18 data bytes
+ * were staged, so `got` is 18 either way and a got<16u vs got<18u guard is
+ * unfalsifiable against it. Cleared by slave_reset(). */
+static bool g_diag_info_legacy_unpadded;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -270,6 +284,7 @@ static void slave_reset(void)
 	g_get_ip_no_address                = false;
 	g_get_ip_io_down_remaining         = 0u;
 	g_diag_info_reply_len              = 18u;
+	g_diag_info_legacy_unpadded        = false;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -532,7 +547,14 @@ static void slave_dispatch(void)
 		d[12]         = ALP_CC3501E_RESP_OK;          /* last_error */
 		d[16]         = ALP_CC3501E_DHCP_STATE_BOUND; /* dhcp_state */
 		d[17]         = 0x17u;                        /* netif_status: UP|LINK_UP + dhcp->tries=5 */
-		stage_reply(ALP_CC3501E_RESP_OK, d, g_diag_info_reply_len);
+		if (g_diag_info_legacy_unpadded) {
+			/* Genuinely 16 data bytes on the wire, no pad, no CRC -- see
+			 * g_diag_info_legacy_unpadded's doc comment above. */
+			slave.reply_len =
+			    cc3501e_model_stage_legacy_reply(slave.reply_pl, ALP_CC3501E_RESP_OK, d, 16u);
+		} else {
+			stage_reply(ALP_CC3501E_RESP_OK, d, g_diag_info_reply_len);
+		}
 		break;
 	}
 	case ALP_CC3501E_CMD_DIAG_GET_STATS: {
@@ -1223,11 +1245,56 @@ ZTEST(cc3501e_host_driver, test_diag_info_16byte_reply_reports_new_fields_not_re
 	zassert_equal(d.netif_status, 0u, "no netif_status byte -> not-reported");
 }
 
+/* #2035 review follow-up: test_diag_info_16byte_reply_reports_new_fields_not_reported
+ * above stages its 16-byte reply through the PADDED wire model, so it rounds
+ * up to the identical 24-byte frame the full 18-byte reply also produces --
+ * `got` is 18 in both, meaning that test cannot distinguish the intended
+ * got<16u guard from a got<18u regression (a reviewer mutated the guard to
+ * got<18u and the suite stayed green). Stage the reply through the UNPADDED
+ * legacy model instead: a real 16-data-byte reply with no pad and no CRC
+ * gives got=16 exactly, which DOES fall on the wrong side of a got<18u
+ * guard -- this is the property that actually needs pinning.
+ *
+ * Mutation check (verified by hand, not just asserted here): change the
+ * `if (got < 16u) return ALP_ERR_IO;` guard in cc3501e_diag_info()
+ * (chips/cc3501e/cc3501e_diag.c) to `if (got < 18u) return ALP_ERR_IO;` --
+ * this test goes RED (ALP_ERR_IO instead of ALP_OK), while
+ * test_diag_info_16byte_reply_reports_new_fields_not_reported above and
+ * test_diag_info_decodes_all_fields stay green either way, exactly because
+ * their padded-model got is always 18. Revert the guard after checking. */
+ZTEST(cc3501e_host_driver,
+      test_diag_info_legacy_unpadded_16byte_reply_reports_new_fields_not_reported)
+{
+	fw.fw_proto_major           = (uint8_t)ALP_CC3501E_PROTOCOL_MAJOR_LEGACY;
+	g_diag_info_legacy_unpadded = true;
+
+	alp_cc3501e_diag_info_t d;
+	memset(&d, 0xA5, sizeof(d));
+	zassert_equal(cc3501e_diag_info(&fw, &d),
+	              ALP_OK,
+	              "a genuinely unpadded 16-byte wire reply (got=16, not 18) is still a SUCCESS");
+	zassert_equal(d.fw_version, 0x0102u, "the original 16 bytes still decode");
+	zassert_equal(d.dhcp_state,
+	              ALP_CC3501E_DHCP_STATE_NOT_REPORTED,
+	              "no dhcp_state byte on the wire -> not-reported, never DHCP_STATE_OFF");
+	zassert_equal(d.netif_status, 0u, "no netif_status byte on the wire -> not-reported");
+}
+
 /* A reply shorter than the original 16-byte shape is still a genuine fault.
- * 8, not some other short length: the wire zero-pads every reply to an
- * ALP_CC3501E_REPLY_PAD (8 B) multiple, so a data_len between 9 and 15 would
- * round-trip padded up to 16 and defeat this test -- 8 is the largest
- * data_len that still arrives as 8 bytes. */
+ * 8, not some other short length: cc3501e_request()'s `got` this host call
+ * ever sees is `min(payload_len - 1, rx_cap=18)`, and payload_len is always
+ * padded to an ALP_CC3501E_REPLY_PAD (8 B) multiple, so measured behaviour is
+ * got IN {7, 15, 18} ONLY -- never anything else. A data_len (this fixture's
+ * g_diag_info_reply_len) of 1..8 pads to payload_len 16 -> got=15 (rejected,
+ * below the got<16u guard); 9..15 ALSO pads to payload_len 24 -> got=18
+ * (accepted, same as the full 16/18-byte replies -- NOT "rounded up to 16 and
+ * passed spuriously" as an earlier version of this comment claimed, which
+ * described a length that cannot occur on this wire). The effective floor
+ * this guard enforces is payload_len >= 24 (got >= 16), not "16 data bytes";
+ * a genuinely short reply in the data_len 9..15 range is NOT caught by it --
+ * that hole predates this change and is not a regression this fix owns, but
+ * this comment must not claim it is rejected. 8 is chosen here only because
+ * it is the largest data_len that still arrives as got=15. */
 ZTEST(cc3501e_host_driver, test_diag_info_short_reply_fails)
 {
 	g_diag_info_reply_len = 8u;
