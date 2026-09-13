@@ -190,11 +190,13 @@ programming header and flash an Alp Lab-supplied binary with
 `flash_args` block removed by #1439 used to carry (partitioned images
 also need the factory A/B metadata record at `0x08008000` -- see
 [`gd32-bridge-firmware:README.md`](https://github.com/alplabai/gd32-bridge-firmware#readme)).
-Note the SW-DP ID guard is **unarmed** on that
-procedure: `metadata/chips/gd32_swd.yaml` currently arms its
-wrong-board guard with `0x6BA02477`, but that value is not a GD32
-reading -- it is the bench-measured SW-DP ID of the V2N CM33 DAP, a
-third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
+Note the SW-DP ID guard is **unarmed** on that procedure, and on the
+on-SoM path too: `metadata/chips/gd32_swd.yaml`'s `target_expected_idcode`
+is deliberately absent, same stance the V2N/V2M SoM presets take on
+`debug.expect_dpidr` -- an unmeasured value reads worse than no value.
+The manifest previously carried `0x6BA02477` there, but that value is
+not a GD32 reading -- it is the bench-measured SW-DP ID of the V2N CM33
+DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
 measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An

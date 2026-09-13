@@ -68,7 +68,14 @@ extern "C" {
  *  fails a comparison against this macro, so do NOT make a mismatch fatal
  *  (`gd32_swd_connect()` deliberately does not). Settling it needs a probe
  *  on a GD32: alp-sdk#1440, #1369. A production test that wants to refuse
- *  on a mismatch should match against a value measured on its own board. */
+ *  on a mismatch should match against a value measured on its own board.
+ *
+ *  `metadata/chips/gd32_swd.yaml` does NOT mirror this macro --
+ *  `target_expected_idcode` is deliberately absent there (same stance the
+ *  V2N/V2M SoM presets take on `debug.expect_dpidr`: an unmeasured value
+ *  reads worse than no value). This macro stays only as the informational
+ *  generic-architecture reference that the driver comment and the
+ *  v2n-gd32-swd-flash example log, and neither gates on. */
 #define GD32_SWD_EXPECTED_IDCODE 0x6BA02477u
 
 /** Default clock-delay loop count.  Higher = slower SWCLK. */
