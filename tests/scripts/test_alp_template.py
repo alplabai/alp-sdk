@@ -1371,13 +1371,13 @@ def test_derive_pin_doc_renames_copies_the_target_boards_own_doc():
     actively wrong once the physical pad has changed."""
     pins = [{
         "e1m": "E1M_GPIO_IO4", "macro": "EVK_PIN_ENCODER_SW",
-        "doc": "Rotary encoder push switch (PEC12R-4222F-S0024), "
+        "doc": "Rotary encoder push switch (PEC11R-4215K-S0024), "
                "10k pull-up + 0.1uF debounce",
     }]
     renames = alp_template._derive_pin_doc_renames(
         pins, "E1M-V2N101", "e1m-evk", alp_template.METADATA_ROOT)
     assert renames == {
-        "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + "
+        "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + "
         "0.1uF debounce":
             "Rotary encoder (PEC12R-4222F) push switch; pull-up + "
             "RC debounce.",
@@ -1594,7 +1594,7 @@ def test_render_to_envelope_peripheral_v2n101_has_no_stale_e1m_evk_pad_mentions(
     for old_macro in ("EVK_PIN_ENCODER_SW", "EVK_PIN_LED_RED"):
         assert not re.search(rf"\b{old_macro}\b", envelope["board.yaml"]), \
             (old_macro, envelope["board.yaml"])
-    assert "PEC12R-4222F-S0024" not in envelope["board.yaml"]  # stale e1m-evk doc
+    assert "PEC11R-4215K-S0024" not in envelope["board.yaml"]  # stale e1m-evk doc
 
 
 # --------------------------------------------------------------------------

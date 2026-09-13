@@ -299,7 +299,7 @@ SoM revision; it is not yet wired into `alp_hw_info_read()`.  See
 
 ## Rotary encoder (QEC0 / UTIMER channel 12) -- bench state {#rotary-encoder-qec0-bench-state}
 
-The E1M EVK's `PEC12R-4222F-S0024` (24 PPR) reaches the SoC as `ENC0_X` → E2
+The E1M EVK's `PEC11R-4215K-S0024` (24 PPR) reaches the SoC as `ENC0_X` → E2
 `A10` → `P3_0` and `ENC0_Y` → E2 `B10` → `P3_1`
 (`metadata/e1m_modules/aen/from-alif.tsv`), decoded by **UTIMER channel 12** --
 QEC0 is channel 12, not channel 0.  Binding the qdec under `utimer0` reads a
