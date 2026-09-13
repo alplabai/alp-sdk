@@ -43,7 +43,7 @@ start-up, `examples/aen/aen-qenc-readout/src/main.c:157`
 debugger. The verdict at the time distinguished three outcomes instead of
 two: pads and angle both changing meant the decoder works; pads changing but
 the angle staying put was the #2037 defect reproduced under a hand,
-`examples/aen/aen-qenc-readout/src/main.c:391`
+`examples/aen/aen-qenc-readout/src/main.c:398`
 ("the raw P3_0/P3_1 pad levels changed but the software gpio-qdec decoder");
 pads never changing at all meant nothing reached the pads, which could not
 tell an absent or unfitted encoder from a broken one. **Superseded**: the
