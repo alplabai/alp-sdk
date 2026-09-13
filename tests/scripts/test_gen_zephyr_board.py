@@ -843,6 +843,52 @@ class TestAenMemoryMapValidation(unittest.TestCase):
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("overlap", str(ctx.exception))
 
+    def test_two_whole_device_aliases_raise_instead_of_going_uncompared(self) -> None:
+        """The whole-device-alias exclusion drops matching rows from the
+        pairwise overlap comparison entirely -- so two rows that BOTH
+        match the aperture exactly would otherwise never be compared
+        against each other at all, silently accepting a duplicate alias.
+        `classify_region()` would call both `flash`, so neither becomes
+        an IPC carve-out target either way, but a duplicate whole-device
+        alias is still a bad input and must be refused, not passed
+        through quietly (review of #2073)."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632")
+            mm.sub(
+                AEN801_PRESET,
+                "- { name: mram_main, base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: composite }",
+                "- { name: mram_main, base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: composite }\n"
+                "  - { name: mram_dup,  base: 0x80000000, size_kib: 5632, "
+                "accessible_from: [a32_cluster, m55_he, m55_hp], "
+                "cacheable: true, write_authority: customer_runtime }")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        message = str(ctx.exception)
+        self.assertIn("'mram_main'", message)
+        self.assertIn("'mram_dup'", message)
+        self.assertIn("only one whole-device alias", message)
+
+    def test_same_base_smaller_size_is_not_a_whole_device_alias(self) -> None:
+        """A region flush with the aperture's low edge but one KiB short
+        of its full extent is a genuine (mis-sized) partition, not the
+        whole-device alias -- it must still overlap `mcuboot` at the
+        same base and be refused. Catches a predicate loosened to `lo ==
+        full_lo` alone (dropping the `hi == full_hi` half), which every
+        other case in this class passes unchanged (review of #2073)."""
+        with _MutatedMetadata() as mm:
+            mm.sub(AEN801_PRESET,
+                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5631")
+            with self.assertRaises(ZephyrBoardEmitError) as ctx:
+                emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
+        self.assertIn("overlap", str(ctx.exception))
+
     def test_mcuboot_off_the_mram_base_raises(self) -> None:
         """`mcuboot`'s base anchors the soc-nv-flash child's offset-0
         origin, but the child's own address was a hardcoded 0x80000000:
