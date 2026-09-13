@@ -51,10 +51,14 @@ queued or `timeout_ms` elapses:
   `src/worker.c`, around line 614), an abandoned-but-later-completed job
   would sit there uncollected and get handed to the **next**, completely
   unrelated `cc3501e_sock_send()` call as if it were that call's own reply --
-  reporting `ALP_OK` having queued nothing of the new data (a planned
-  firmware-side stale-seq discard makes that job get dropped instead of
-  misattributed, but the fix here is correct either way). Fixed with a
-  bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`, 250 ms) post-timeout re-poll
+  reporting `ALP_OK` having queued nothing of the new data. A bridge with
+  cc3501e-bridge-firmware#107 (not yet merged) instead caches each
+  `SOCK_SEND`'s final outcome -- success or a decoded error -- by seq at
+  completion, and discards a finished-but-uncollected job as soon as a
+  different seq arrives, so a later call is never handed a stale count; that
+  job's bytes were still queued, though, which is why this grace matters
+  either way. Fixed with a bounded (`CC3501E_SOCK_SEND_COLLECT_GRACE_MS`, 250
+  ms) post-timeout re-poll
   of the SAME frame (same seq, same remaining bytes) to collect its outcome
   before giving up: if that collects the queued count, it is folded into
   `sent_out` (exact, not a lower bound); if the grace instead collects a

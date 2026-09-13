@@ -208,14 +208,18 @@ alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *paylo
  * Without that grace, the firmware's opcode-keyed worker slot could hand an
  * abandoned-but-later-completed job to the NEXT, unrelated call instead --
  * this closes that window for a host built against firmware that has not yet
- * added its own stale-seq discard; against firmware that has, the job is
- * simply dropped rather than misattributed either way. If even the grace
- * expires, @p sent_out is a LOWER BOUND, not an exact count -- the frame may
- * still complete and be collected by a later, unrelated call (or be dropped,
- * depending on the firmware version). If the grace instead collects a
- * genuine, definitive non-OK status (e.g. a decoded device-side error), that
- * status is returned directly and @p sent_out is EXACT, not a lower bound --
- * that frame is done, not merely timed out.
+ * added its own stale-seq discard. A bridge with cc3501e-bridge-firmware#107
+ * discards a finished-but-uncollected job outright once a request with a
+ * different seq arrives, so a later call is never handed a stale count --
+ * but that job's bytes were still queued, which is exactly why this grace
+ * still matters: it is the only way left to learn how many. If even the
+ * grace expires, @p sent_out is a LOWER BOUND, not an exact count -- the
+ * frame may still complete and be collected by a later, unrelated call
+ * (older firmware) or simply be discarded once a new seq arrives
+ * (cc3501e-bridge-firmware#107). If the grace instead collects a genuine,
+ * definitive non-OK status (e.g. a decoded device-side error), that status
+ * is returned directly and @p sent_out is EXACT, not a lower bound -- that
+ * frame is done, not merely timed out.
  *
  * @param ctx         Initialised driver context.
  * @param handle      Socket handle from @ref cc3501e_sock_open.

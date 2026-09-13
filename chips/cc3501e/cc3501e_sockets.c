@@ -290,11 +290,19 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		 * there.
 		 *
 		 * WRAP: sock_send_seq is a uint8_t, so it wraps 255 -> 0 after 256
-		 * increments (defined unsigned overflow, not UB). That cannot collide
-		 * with the firmware's cache: the cache is a SINGLE entry holding only
-		 * the immediately-preceding completed send's seq, never anything from
-		 * 256 increments ago, so a wrapped-around repeat is never mistaken for
-		 * a retry of an old send. */
+		 * increments (defined unsigned overflow, not UB). That CAN alias a
+		 * stale cache entry -- contrary to what this comment used to claim.
+		 * The firmware's cache holds one entry, refreshed on each COMPLETION,
+		 * so it stays safe only as long as completions keep happening: if 255
+		 * frames in a row fail, are rejected, or never execute (e.g. an app
+		 * retrying while Wi-Fi is down), that entry sits untouched, and the
+		 * 256th attempt's seq wraps back to exactly the value it still holds.
+		 * On firmware without cc3501e-bridge-firmware#107, that new send is
+		 * answered with the OLD cached count and never actually executed. A
+		 * bridge with cc3501e-bridge-firmware#107 closes it: any SOCK_SEND
+		 * carrying a seq different from the cached one invalidates that entry
+		 * immediately, so a later wrapped-around seq executes instead of
+		 * aliasing. */
 		p[3] = ++ctx->sock_send_seq;
 		p[4] = (uint8_t)(remaining_len & 0xFFu);
 		p[5] = (uint8_t)((remaining_len >> 8) & 0xFFu);
