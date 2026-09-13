@@ -168,11 +168,10 @@ def test_row_outside_aperture_with_carveout_true_also_passes():
 
 
 def test_whole_device_alias_exempt_regardless_of_carveout():
-    """4c itself no longer looks at `write_authority` at all (#2086
-    review round 1, finding 1 removed the per-site guard here) -- a
+    """4c itself does not look at `write_authority` at all -- a
     runtime-writable whole-device alias is refused once, by
     `_check_preset()`'s top-of-window rule
-    (test_check_atoc_reservation.py::TestPresetCheckApertureTopRule),
+    (test_check_atoc_reservation.py::TestPresetCheckTopRowWriteAuthority),
     since the alias's extent always reaches that top too. This fixture's
     `composite` stays exempt from BOTH: not runtime-writable, so neither
     4c nor the top-of-window rule fires, regardless of `carveout`."""

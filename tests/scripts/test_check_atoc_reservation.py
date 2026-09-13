@@ -58,9 +58,9 @@ _TILED_STORAGE_AT_TOP = (
 # Same shape as _TILED_STORAGE_AT_TOP but split into a `reserved` + 96 KiB
 # `storage` + 32 KiB `atoc` tail (96 + 32 == 128, so the aperture math is
 # unchanged) with every `write_authority` authored, atoc correctly at the
-# top with a NON-runtime-writable authority (#2086 review round 2): the
-# safe baseline case (e) -- storage's own `customer_runtime` sits well
-# below the top and must not trip the new guard.
+# top with a NON-runtime-writable authority (#2086): the safe baseline
+# case (e) -- storage's own `customer_runtime` sits well below the top
+# and must not trip the new guard.
 _TILED_SAFE_ATOC_AT_TOP = (
     "  - { name: mcuboot,  base: 0x80000000, size_kib: 64,   carveout: false, "
     "write_authority: vendor_image }\n"
@@ -371,14 +371,14 @@ class TestPresetCheckApertureTopRule(unittest.TestCase):
 
 
 class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
-    """#2086 review round 1: the top-of-window rule must refuse ANY row
-    ending at the declared window top that is runtime-writable, not just
-    one mis-named. ONE guard (`_check_top_write_authority`, called from
-    both the aperture branch and the no-aperture fallback) replaces the
-    two per-site 4b/4c copies removed by this round -- these cases are
-    what that consolidation must still catch, split out from
-    TestPresetCheckApertureTopRule because they exercise the guard, not
-    the aperture-scoping fix #2069 already covers."""
+    """#2086: the top-of-window rule must refuse ANY row ending at the
+    declared window top that is runtime-writable, not just one
+    mis-named -- ONE guard (`_check_top_write_authority`), called from
+    both the aperture branch and the no-aperture fallback, since a
+    whole-device alias's extent always reaches the same top a
+    correctly-named 'atoc' row would. Split out from
+    TestPresetCheckApertureTopRule because these cases exercise the
+    write_authority guard, not the aperture-scoping fix #2069 covers."""
 
     def setUp(self):
         import tempfile
@@ -399,19 +399,28 @@ class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
     def test_a_correctly_named_atoc_row_with_customer_runtime_fails(self):
         """Case (a): naming the top row 'atoc' is not enough. Fully
         tiled with every other row's authority non-runtime-writable, so
-        the single failure can only be the new guard."""
+        the single failure can only be the new guard. The remedy must
+        suggest 'secure_enclave' (the atoc band's own value), NOT
+        'composite' -- 'composite' is reserved for a whole-device alias
+        and is itself exempt, so suggesting it for a mis-authored 'atoc'
+        row would let an author retag it and pass."""
         p = self._preset(_SILICON_HEADER + "memory_map:\n" + _TILED_RUNTIME_ATOC_AT_TOP)
         failures = atoc._check_preset(p)
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("'atoc'", failures[0])
         self.assertIn("customer_runtime", failures[0])
+        self.assertIn("secure_enclave", failures[0])
+        self.assertNotIn("composite", failures[0])
+        # Aperture resolved -- must claim the confirmed SETOOLS anchor.
+        self.assertIn("SETOOLS top-anchors", failures[0])
 
     def test_b_whole_device_alias_with_customer_runtime_fails_aperture_resolving(self):
         """Case (b): a whole-device alias's extent always reaches the
         aperture top too, so the SAME guard catches it -- no separate
         4b/4c copy needed. Exactly one failure: the safe six-band layout
         underneath contributes none of its own (4b tiles exactly, 4c's
-        rows all carry carveout: false)."""
+        rows all carry carveout: false). The remedy must suggest
+        'composite' -- this row IS the whole-device alias."""
         p = self._preset(
             _SILICON_HEADER + "memory_map:\n"
             "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
@@ -421,13 +430,17 @@ class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("mram_alias", failures[0])
         self.assertIn("customer_runtime", failures[0])
+        self.assertIn("composite", failures[0])
+        self.assertIn("SETOOLS top-anchors", failures[0])
 
     def test_c_whole_device_alias_with_customer_runtime_fails_no_aperture_fallback(self):
         """Case (c): same as (b) but no `silicon:` resolves -- no
         aperture, so 4b/4c are skipped entirely (`_check_preset`'s own
         `if aperture is not None:` guard) and the ONLY thing that can
-        fire is the no-aperture fallback branch's copy of this guard
-        (review round 1, finding 2)."""
+        fire is the no-aperture fallback branch's copy of this guard.
+        Since no aperture resolved, the message must NOT claim a
+        confirmed SETOOLS anchor point -- the file-wide max is a
+        fail-closed stand-in only, not a proven anchor address."""
         p = self._preset(
             "memory_map:\n"
             "  - { name: mram_alias, base: 0x80000000, size_kib: 5632, "
@@ -437,6 +450,9 @@ class TestPresetCheckTopRowWriteAuthority(unittest.TestCase):
         self.assertEqual(len(failures), 1, failures)
         self.assertIn("mram_alias", failures[0])
         self.assertIn("customer_runtime", failures[0])
+        self.assertIn("composite", failures[0])
+        self.assertNotIn("SETOOLS top-anchors", failures[0])
+        self.assertIn("fail-closed", failures[0])
 
     def test_d_composite_stays_exempt(self):
         """Case (d), value 1 of 3: `composite` -- mram_main's real

@@ -133,12 +133,12 @@ SOCS = METADATA_ROOT / "socs"
 _ATOC_NAMES = {"atoc"}
 
 # `write_authority` value that means "writable by the application at
-# runtime" -- read only by `_check_preset()`'s top-of-window rule (#2086
-# review round 1: a single guard there, not one per 4b/4c site, since
-# EVERY row ending at the declared window top covers the SE-owned atoc
-# band -- SETOOLS top-anchors the ATOC there and grows it DOWNWARD -- so
-# checking the top-of-window row already covers the whole-device-alias
-# case too). Per `write_authority`'s description
+# runtime" -- read only by `_check_preset()`'s top-of-window rule (#2086):
+# ONE guard there, not one per 4b/4c site, since EVERY row ending at the
+# declared window top covers the SE-owned atoc band -- SETOOLS
+# top-anchors the ATOC there and grows it DOWNWARD -- so checking the
+# top-of-window row already covers the whole-device-alias case too. Per
+# `write_authority`'s description
 # (metadata/schemas/som-preset-v1.schema.json), `customer_runtime` is THE
 # ONLY value meaning "writable by the application at runtime" -- every
 # other declared value (`customer_image`/`vendor_image`: flash-tool only;
@@ -155,28 +155,65 @@ _RUNTIME_WRITABLE_AUTHORITY = "customer_runtime"
 
 
 def _runtime_writable_top_failure(
-    rel: str, sku: str, name: str, lo: int, hi: int, wa: Any, top: int,
+    rel: str, sku: str, name: str, lo: int, hi: int, wa: Any,
+    floor: int, top: int, aperture_resolved: bool,
 ) -> str:
     """A region ending exactly at the declared window top IS the ATOC
-    band, regardless of its own name or extent: SETOOLS top-anchors the
-    ATOC application table there and grows it DOWNWARD (#1289). A row
-    there that the application can write at runtime is exactly the
-    hazard this gate exists to refuse -- whether it is a partition
-    mis-named something other than 'atoc' (caught here since #2069) or a
-    whole-device alias spanning the entire window (caught here since
-    #2086; previously only checked in 4b/4c, which missed a correctly-
-    named 'atoc' row and a composite alias's runtime-writable child)."""
+    band, regardless of its own name or extent. A row there that the
+    application can write at runtime is exactly the hazard this gate
+    exists to refuse -- whether it is a partition mis-named something
+    other than 'atoc' (#2069) or a whole-device alias spanning the
+    entire window (#2086).
+
+    `aperture_resolved` selects the justification: where the SoC's
+    on-die MRAM aperture resolved, `top` IS the confirmed ATOC anchor
+    point (SETOOLS top-anchors there and grows the table DOWNWARD,
+    #1289). Where no aperture resolved, `top` is only the file-wide
+    max standing in fail-closed -- it is NOT a confirmed SETOOLS anchor
+    point (an out-of-window OSPI0 HyperRAM row can sit far above the
+    real window, same as the aperture-scoped rule above guards against)
+    -- so the message must not claim SETOOLS anchors there.
+
+    `floor == lo and top == hi` (the same exact-extent test 4b/4c use
+    for their whole-device-alias exemption) decides which
+    `write_authority` value the remedy names: `composite` for a
+    whole-device alias (`mram_main`'s own tag today), `secure_enclave`
+    for the atoc band itself -- suggesting `composite` for a
+    correctly-named `atoc` row would let an author retag a
+    mis-authored one `composite` and pass, since that value is itself
+    exempt."""
+    if aperture_resolved:
+        why = (
+            f"SETOOLS top-anchors the ATOC application table at that "
+            f"exact address and grows it DOWNWARD (#1289); a row there "
+            f"that the application can write at runtime is the hazard "
+            f"this gate exists to refuse, whatever the row is named or "
+            f"however wide it is.")
+    else:
+        why = (
+            f"no SoC aperture resolves for this preset, so this gate "
+            f"cannot confirm where SETOOLS would anchor the ATOC -- the "
+            f"highest declared address stands in for the top, "
+            f"fail-closed, and a row there that the application can "
+            f"write at runtime is refused on the same grounds as a "
+            f"confirmed aperture top.")
+    if lo == floor and hi == top:
+        remedy = (
+            f"give it a non-runtime-writable write_authority -- "
+            f"'composite' is the value a whole-device alias like this "
+            f"should carry (mram_main's own tag today)")
+    else:
+        remedy = (
+            f"give it a non-runtime-writable write_authority -- "
+            f"'secure_enclave' is the value the atoc band itself should "
+            f"carry")
     return (
         f"{rel}: preset {sku} -- region {name!r} [0x{lo:x}, 0x{hi:x}) "
         f"reaches the top of the declared window (0x{top:x}) and carries "
         f"write_authority={wa!r}, which IS runtime-writable by the "
         f"application.\n"
-        f"    SETOOLS top-anchors the ATOC application table at that "
-        f"exact address and grows it DOWNWARD (#1289); a row there that "
-        f"the application can write at runtime is the hazard this gate "
-        f"exists to refuse, whatever the row is named or however wide it "
-        f"is. Give it a non-runtime-writable write_authority (e.g. "
-        f"'composite') or move it out of the top band (#2086).")
+        f"    {why} {remedy[0].upper()}{remedy[1:]} or move it out of "
+        f"the top band (#2086).")
 
 # `partition@<hex> { ... label = "<name>"; reg = <0x<hex> DT_SIZE_K(<n>)>; }`
 _PARTITION_RE = re.compile(
@@ -440,7 +477,7 @@ def _check_aperture_tiling(
     `_check_preset()`'s top-of-window rule, not here -- an alias's
     extent always reaches the aperture top, so that single guard already
     covers this case; a second copy here would just duplicate the
-    failure (#2086 review round 1, finding 1).
+    failure (#2086).
 
     Returns `(failures, skips)`. `skips` must never make the gate red.
     """
@@ -530,7 +567,7 @@ def _check_class_disagreement(
     print it. The whole-device alias (extent == full aperture) is
     exempt, same as 4b. Its `write_authority` is checked once by
     `_check_preset()`'s top-of-window rule, not here -- see 4b's
-    docstring (#2086 review round 1, finding 1).
+    docstring (#2086).
 
     Returns `(failures, skips)`. `skips` must never make the gate red.
     """
@@ -568,26 +605,32 @@ def _check_class_disagreement(
 
 
 def _check_top_write_authority(
-    at_top: "list[tuple[int, int, int, str, Any]]", rel: str, sku: str, top: int,
+    at_top: "list[tuple[int, int, int, str, Any]]", rel: str, sku: str,
+    floor: int, top: int, aperture_resolved: bool,
 ) -> "list[str]":
     """Refuse any row in `at_top` (every row ending exactly at the
     declared window top) that IS runtime-writable -- that top band is
     the ATOC band regardless of the row's name or whether it is a
     partition or a whole-device alias.  ONE guard, called from both the
-    aperture-scoped top rule and the no-aperture fallback, instead of
-    the two 4b/4c per-site copies this replaces (#2086 review round 1,
-    finding 1; finding 2 is the same call from the fallback branch).
+    aperture-scoped top rule and the no-aperture fallback (#2086):
+    naming the top row 'atoc' is not sufficient on its own, and a
+    whole-device alias's extent always reaches the same top, so one
+    check over `at_top` covers both shapes instead of two per-check
+    copies.  `floor`/`aperture_resolved` are passed straight through to
+    `_runtime_writable_top_failure()` -- see that function for what they
+    select.
 
     A row with NO `write_authority` at all stays exempt -- the schema
     says absent means unresolved, never `customer_runtime` (ADR-0034
     clause 4) -- but is SKIP-noted rather than silent: the schema also
     says a consumer must treat it as ineligible for runtime write "and
-    say so" (#2086 review round 1, finding 6).
+    say so".
     """
     out: "list[str]" = []
     for _, lo, hi, name, wa in at_top:
         if wa == _RUNTIME_WRITABLE_AUTHORITY:
-            out.append(_runtime_writable_top_failure(rel, sku, name, lo, hi, wa, top))
+            out.append(_runtime_writable_top_failure(
+                rel, sku, name, lo, hi, wa, floor, top, aperture_resolved))
         elif wa is None:
             print(
                 f"SKIP {rel}: preset {sku} -- region {name!r} "
@@ -683,18 +726,23 @@ def _check_preset(path: Path) -> "list[str]":
             # Naming it 'atoc' is not enough -- ANY row ending at the
             # aperture top (a correctly-named partition or a whole-device
             # alias) must also not be runtime-writable (#2086).
-            out += _check_top_write_authority(at_top, rel, sku, full_hi)
+            out += _check_top_write_authority(
+                at_top, rel, sku, full_lo, full_hi, aperture_resolved=True)
     else:
         # No aperture resolves (a non-Alif SoC, or an Ensemble variant/
         # fixture that omits `silicon:`/`soc_flash_base`) -- fall back to
         # today's file-wide-max behaviour for the name check. Deliberately
-        # fail-closed: losing aperture resolution must still refuse an
-        # out-of-window row loudly, never silently pass it -- and that
-        # includes the runtime-writable-top guard below, which applies
-        # here too (#2086 review round 1, finding 2) since SETOOLS
-        # top-anchors the ATOC at the highest declared address regardless
-        # of whether this gate could resolve a SoC aperture for it.
+        # fail-closed -- NOT because SETOOLS is known to anchor the ATOC
+        # at the highest declared address: it does not, an out-of-window
+        # OSPI0 HyperRAM row can sit far above the real window (see the
+        # aperture-scoped comment above, #2069). With no aperture to scope
+        # "the top" to, the file-wide max is the only stand-in this gate
+        # has, so it refuses loudly there for lack of a confirmed anchor
+        # point rather than silently pass -- and that includes the
+        # runtime-writable-top guard below (#2086), whose own message
+        # must not claim a confirmed SETOOLS anchor point either.
         window_top = max(hi for _, hi, _, _ in spans)
+        window_lo = min(lo for lo, _, _, _ in spans)
         # A whole-device region (e.g. `mram_main`) legitimately spans the
         # window; the check is about the SMALLEST region owning the top.
         at_top = sorted((hi - lo, lo, hi, name, wa)
@@ -708,7 +756,8 @@ def _check_preset(path: Path) -> "list[str]":
                 f"    That band is where SETOOLS top-anchors the ATOC "
                 f"application table (#1289); a region there that reads as "
                 f"customer storage is the boot table in disguise.")
-        out += _check_top_write_authority(at_top, rel, sku, window_top)
+        out += _check_top_write_authority(
+            at_top, rel, sku, window_lo, window_top, aperture_resolved=False)
 
     # 4b/4c (#1365 split A): where the SoC declares an on-die MRAM
     # aperture, the contained regions must tile it and agree with it on
