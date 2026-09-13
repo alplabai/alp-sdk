@@ -73,9 +73,45 @@ _NEEDS_LINUX = pytest.mark.skipif(
            "this drives the real script end-to-end, which needs a Linux awk",
 )
 
-def _needs_e2e(func):
-    """Both guards: a working bash AND a Linux host (see _NEEDS_LINUX)."""
+
+def _awk_has_strtonum() -> bool:
+    """Probe by RUNNING it, same discipline as _bash_can_run_a_script -- a
+    platform check alone is not enough (Linux ships mawk as `/usr/bin/awk`
+    on some distros/containers, and mawk has no strtonum())."""
+    try:
+        probe = subprocess.run(
+            ["awk", 'BEGIN{strtonum("0")}'],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0
+
+
+# ram-run.sh's own LOAD-segment derivation (BASE_RAW) needs gawk's
+# strtonum() -- an awk lacking it (mawk) fails with "function strtonum
+# never defined" and, pre-fix, that surfaced as the misleading "could not
+# find a LOAD segment" (exit 4). Gate every test that reaches that
+# derivation on a REAL strtonum probe, not just "this is Linux" (review
+# round 3, finding 4).
+_NEEDS_STRTONUM_AWK = pytest.mark.skipif(
+    not _awk_has_strtonum(),
+    reason="awk on this host has no strtonum() (e.g. mawk) -- ram-run.sh "
+           "requires gawk; skip tests that reach the LOAD-segment parsing",
+)
+
+
+def _needs_bash_and_linux(func):
+    """The six early-refusal tests (BENCH_PLACE/AEN_JLINK_RUN/sleep_ms) exit
+    before ram-run.sh ever touches awk's strtonum() -- they must NOT be
+    skipped just because this host's `awk` happens to be mawk (review round
+    3, finding 4). Bash + Linux only, no strtonum probe."""
     return _NEEDS_BASH(_NEEDS_LINUX(func))
+
+
+def _needs_e2e(func):
+    """Every other test: bash + Linux + a real strtonum-capable awk."""
+    return _NEEDS_BASH(_NEEDS_LINUX(_NEEDS_STRTONUM_AWK(func)))
 
 
 # A fake mem8 dump line whose bytes ASCII-decode to "hi" -- proves the
@@ -140,6 +176,21 @@ O.K."""
 # always precedes the script's main one in the generated CommandFile, so
 # this lets one test prove the success/failure check is anchored on the
 # SPECIFIC main-image command, not "any loadbin, anywhere".
+#
+# Review round 3, finding 1 -- three more knobs, each reproducing a distinct
+# way session 1 can end without a clean `exit`/`Script processing
+# completed.`:
+#   CRASH_BEFORE_LOADBIN -- prints a literal "Segmentation fault" and the
+#     wrapper process itself exits (139, SIGSEGV's conventional code) right
+#     after echoing `halt`, BEFORE `loadbin` is ever reached -- the real
+#     bench evidence shape (JLinkExe segfaulting inside jlink-run.sh's
+#     `unshare` mid-session, before loadbin).
+#   TRUNCATE_AFTER_LOADBIN_OK -- after the MAIN loadbin's real success
+#     block, `exit 0` immediately -- no `setpc`/`go`/`exit` echo, no
+#     "Script processing completed." -- simulating a transcript cut off
+#     right after a genuine `O.K.`.
+#   FAIL_SETPC -- `setpc` is echoed as normal but followed by a rejection
+#     line, simulating the entry point being refused.
 _FAKE_JLINK_RUN = f"""\
 #!/usr/bin/env bash
 place="$1"; shift
@@ -175,6 +226,12 @@ idx=0
 while IFS= read -r line; do
 	echo "J-Link>$line"
 	case "$line" in
+	halt)
+		if [ -n "${{CRASH_BEFORE_LOADBIN:-}}" ]; then
+			echo "Segmentation fault"
+			exit 139
+		fi
+		;;
 	loadbin*)
 		idx=$((idx + 1))
 		if [ "$idx" = "$total_loadbins" ] && [ -n "${{FAIL_LOADBIN:-}}" ]; then
@@ -183,6 +240,14 @@ while IFS= read -r line; do
 			cat <<'LOADBIN_OK_EOF'
 {_REAL_LOADBIN_OK_BLOCK}
 LOADBIN_OK_EOF
+			if [ "$idx" = "$total_loadbins" ] && [ -n "${{TRUNCATE_AFTER_LOADBIN_OK:-}}" ]; then
+				exit 0
+			fi
+		fi
+		;;
+	setpc*)
+		if [ -n "${{FAIL_SETPC:-}}" ]; then
+			echo "Unknown command: 'setpc'."
 		fi
 		;;
 	mem8*)
@@ -218,6 +283,7 @@ def _run_ram_run(
     bd_name: str = "build",
     preload: str | None = None,
     extra_env: dict[str, str] | None = None,
+    create_elf: bool = True,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     """Run the real ram-run.sh against a fake AEN_JLINK_RUN wrapper + fake
     toolchain.
@@ -251,8 +317,9 @@ def _run_ram_run(
 
     bd = tmp_path / bd_name
     (bd / "zephyr").mkdir(parents=True, exist_ok=True)
-    (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
-    (bd / "zephyr" / "zephyr.bin").write_bytes(b"\x00" * 16)
+    if create_elf:
+        (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
+        (bd / "zephyr" / "zephyr.bin").write_bytes(b"\x00" * 16)
 
     env = dict(os.environ)
     env["PATH"] = f"{toolsdir}{os.pathsep}{env.get('PATH', '')}"
@@ -530,6 +597,197 @@ def test_a_preload_loadbin_success_does_not_mask_the_main_loadbin_failure(tmp_pa
 
 
 @_needs_e2e
+def test_a_same_path_preload_loadbin_success_does_not_mask_the_main_loadbin_failure(
+    tmp_path: Path,
+) -> None:
+    """Review finding 2 (minor): the existing preload test above uses a
+    DIFFERENT preload path (`/some/other/preload.bin`), so it can't see a
+    FIRST-match bug -- its preload window never matches the main image's
+    exact echo line at all. This test's preload loads the SAME $BIN at the
+    SAME $BASE the main image does (a real-world preload use, e.g. warming
+    a cache) and succeeds; the main load then genuinely fails. A
+    first-match check would lock onto the preload's own successful window
+    (same echo line) and wrongly pass; the fix scans the LAST matching
+    window instead."""
+    bin_path = tmp_path / "build" / "zephyr" / "zephyr.bin"
+    preload_file = tmp_path / "preload.jlink"
+    preload_file.write_text(f"loadbin {bin_path} 0x0\n", encoding="utf-8")
+
+    res, calls, _ = _run_ram_run(
+        tmp_path, preload=str(preload_file), extra_env={"FAIL_LOADBIN": "1"}
+    )
+    assert res.returncode == 8, (
+        f"a same-path preload's own successful loadbin masked the main "
+        f"image's failure:\n{res.stdout}\n{res.stderr}"
+    )
+    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text().splitlines()
+    n_loadbins = sum(1 for ln in load_lines if ln.strip().startswith("loadbin "))
+    assert n_loadbins == 2, f"expected exactly 2 loadbin lines (preload + main): {load_lines}"
+
+
+@_needs_e2e
+def test_session_one_crash_before_loadbin_names_the_crash_not_loadbin(tmp_path: Path) -> None:
+    """Review finding 1 (MAJOR), real bench evidence
+    (/tmp/ram-run.OQ2QgD/load.out:25): JLinkExe segfaulting inside
+    jlink-run.sh's `unshare` BEFORE `loadbin` ever ran must not be reported
+    as "loadbin did not report 'O.K.'" -- the session never attempted the
+    load, so that message would send an operator chasing the wrong thing
+    (and, on silicon, risks reading a stale prior console as this run's
+    output). The message must name the crash/truncation instead."""
+    res, calls, sandbox_tmpdir = _run_ram_run(
+        tmp_path, extra_env={"CRASH_BEFORE_LOADBIN": "1"}
+    )
+
+    assert res.returncode == 10, f"expected exit 10:\n{res.stdout}\n{res.stderr}"
+    assert "loadbin did not report" not in res.stderr, (
+        f"a pre-loadbin crash must not be blamed on loadbin:\n{res.stderr}"
+    )
+    assert "CRASHED" in res.stderr or "crashed" in res.stderr
+    assert "RAM console (decoded)" not in res.stdout
+    # Session 2 must never run after session 1 crashed.
+    call_files = list(calls.glob("call-*.jlink"))
+    assert len(call_files) == 2, (
+        f"session 2 must never run after a session-1 crash, got "
+        f"{len(call_files)} calls"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
+
+
+@_needs_e2e
+def test_session_one_truncated_right_after_loadbin_ok_is_a_hard_error(tmp_path: Path) -> None:
+    """Review finding 1 (MAJOR): a transcript that genuinely got a real
+    'O.K.' for loadbin, then ends (no `setpc`/`go`/`exit` echoed, no
+    'Script processing completed.') must NOT be judged a success just
+    because the loadbin window alone looked fine -- on silicon the core
+    never receives setpc/go, stays halted at the reset vector, and
+    session 2's read-back would decode whatever was ALREADY in
+    ram_console_buf from a previous run as if this run had produced it."""
+    res, calls, sandbox_tmpdir = _run_ram_run(
+        tmp_path, extra_env={"TRUNCATE_AFTER_LOADBIN_OK": "1"}
+    )
+
+    assert res.returncode == 10, f"expected exit 10:\n{res.stdout}\n{res.stderr}"
+    assert "loadbin did not report" not in res.stderr, (
+        f"a session truncated AFTER a genuine 'O.K.' must not be blamed on "
+        f"loadbin itself:\n{res.stderr}"
+    )
+    assert "RAM console (decoded)" not in res.stdout
+    call_files = list(calls.glob("call-*.jlink"))
+    assert len(call_files) == 2, (
+        f"session 2 must never run after a truncated session 1, got "
+        f"{len(call_files)} calls"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
+
+
+@_needs_e2e
+def test_session_one_setpc_rejected_is_a_hard_error(tmp_path: Path) -> None:
+    """Review finding 1 (MAJOR): loadbin succeeding is not enough --
+    `setpc $ENTRY` itself can be rejected, and judging success on the
+    loadbin window alone let this pass silently."""
+    res, calls, sandbox_tmpdir = _run_ram_run(tmp_path, extra_env={"FAIL_SETPC": "1"})
+
+    assert res.returncode == 11, f"expected exit 11:\n{res.stdout}\n{res.stderr}"
+    assert "setpc" in res.stderr.lower()
+    assert "RAM console (decoded)" not in res.stdout
+    call_files = list(calls.glob("call-*.jlink"))
+    assert len(call_files) == 2, (
+        f"session 2 must never run after a rejected setpc, got "
+        f"{len(call_files)} calls"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, f"expected exactly one WORKDIR kept on failure, got {left}"
+
+
+@_needs_e2e
+def test_missing_build_dir_names_itself_not_the_uart_console_advice(tmp_path: Path) -> None:
+    """Review finding 9 (nit): a missing/mistyped build dir must say so
+    plainly, not fall through to exit 3's 'rebuild with the RAM console'
+    advice -- `readelf -h` on a nonexistent ELF fails, but under this
+    script's `set -e` (no `pipefail`) the pipeline's exit status is awk's
+    (0, empty output), so BUF_SYM comes back empty too and pre-fix this hit
+    the UART-console message for a build that was never built at all.
+    Also exercises review finding 6: this exit must leave NO WORKDIR behind
+    (it fires before WORKDIR is ever created)."""
+    res, calls, sandbox_tmpdir = _run_ram_run(tmp_path, create_elf=False)
+
+    assert res.returncode == 1, f"expected exit 1:\n{res.stdout}\n{res.stderr}"
+    assert "does not exist" in res.stderr
+    assert "ram_console_buf" not in res.stderr, (
+        f"a missing build dir must not be reported as a UART-console build:"
+        f"\n{res.stderr}"
+    )
+    assert not list(calls.glob("call-*.jlink")), "no probe access for a missing build dir"
+    assert _workdirs(sandbox_tmpdir) == [], (
+        f"a pre-WORKDIR exit must leave no WORKDIR behind: {_workdirs(sandbox_tmpdir)}"
+    )
+
+
+@_needs_e2e
+def test_a_signal_during_the_inter_session_sleep_keeps_the_workdir(tmp_path: Path) -> None:
+    """Review finding 3 (minor): SIGTERM during the host-side sleep between
+    sessions must not reach the EXIT trap with $?=0 and silently delete
+    WORKDIR -- that loses the transcript of exactly the hung/killed session
+    an operator most needs it for. Deterministic: poll for session 1's
+    CommandFile (call-2.jlink) to appear before signalling, so the process
+    is known to be in (or past) the inter-session sleep, then require an
+    explicit 143 exit (the script's own `trap 'exit 143' TERM`, not a bare
+    signal death) and a kept WORKDIR."""
+    import signal
+    import time as _time
+
+    toolsdir = tmp_path / "tools"
+    toolsdir.mkdir(exist_ok=True)
+    _write_exe(toolsdir / "arm-zephyr-eabi-readelf", _FAKE_READELF)
+    _write_exe(toolsdir / "arm-zephyr-eabi-nm", _FAKE_NM)
+    wrapper = tmp_path / "jlink-run.sh"
+    _write_exe(wrapper, _FAKE_JLINK_RUN)
+    calls = tmp_path / "calls"
+    calls.mkdir(exist_ok=True)
+    sandbox_tmpdir = tmp_path / "tmpdir"
+    sandbox_tmpdir.mkdir(exist_ok=True)
+    bd = tmp_path / "build"
+    (bd / "zephyr").mkdir(parents=True, exist_ok=True)
+    (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
+    (bd / "zephyr" / "zephyr.bin").write_bytes(b"\x00" * 16)
+
+    env = dict(os.environ)
+    env["PATH"] = f"{toolsdir}{os.pathsep}{env.get('PATH', '')}"
+    env["CALL_LOG_DIR"] = str(calls)
+    env["TMPDIR"] = str(sandbox_tmpdir)
+    env["ZEPHYR_SDK_INSTALL_DIR"] = ""
+    env.pop("JLINK_SN", None)
+    env.pop("JLINK_EXE", None)
+    env["BENCH_PLACE"] = "test-place"
+    env["AEN_JLINK_RUN"] = str(wrapper)
+    env.pop("FAIL_CALL", None)
+
+    proc = subprocess.Popen(
+        ["bash", str(RAM_RUN), str(bd), "20000", "0x10"],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    deadline = _time.time() + 20
+    while _time.time() < deadline and not (calls / "call-2.jlink").exists():
+        _time.sleep(0.05)
+    assert (calls / "call-2.jlink").exists(), "session 1 never ran within 20s"
+
+    proc.send_signal(signal.SIGTERM)
+    stdout, stderr = proc.communicate(timeout=10)
+
+    assert proc.returncode == 143, (
+        f"expected the script's own 'trap exit 143 TERM', got "
+        f"{proc.returncode}:\n{stdout}\n{stderr}"
+    )
+    left = _workdirs(sandbox_tmpdir)
+    assert len(left) == 1, (
+        f"SIGTERM during the inter-session sleep must leave WORKDIR behind, "
+        f"got {left}"
+    )
+
+
+@_needs_bash_and_linux
 def test_missing_bench_place_refuses_before_any_probe_access(tmp_path: Path) -> None:
     res, calls, _ = _run_ram_run(tmp_path, bench_place=None)
 
@@ -538,7 +796,7 @@ def test_missing_bench_place_refuses_before_any_probe_access(tmp_path: Path) -> 
     assert not list(calls.glob("call-*.jlink")), "no probe access without BENCH_PLACE"
 
 
-@_needs_e2e
+@_needs_bash_and_linux
 def test_missing_aen_jlink_run_refuses_before_any_probe_access(tmp_path: Path) -> None:
     """Review finding 6: AEN_JLINK_RUN has NO default -- unlike a forgotten
     override that would fall back to bench_jlink_exe()'s real-install
@@ -550,7 +808,7 @@ def test_missing_aen_jlink_run_refuses_before_any_probe_access(tmp_path: Path) -
     assert not list(calls.glob("call-*.jlink")), "no probe access without AEN_JLINK_RUN"
 
 
-@_needs_e2e
+@_needs_bash_and_linux
 @pytest.mark.parametrize("bad_sleep", ["0x10", "abc", "-5", "1.5"])
 def test_invalid_sleep_ms_refuses_before_any_probe_access(tmp_path: Path, bad_sleep: str) -> None:
     res, calls, _ = _run_ram_run(tmp_path, sleep_ms=bad_sleep)

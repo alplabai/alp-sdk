@@ -10,7 +10,10 @@
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives JLinkExe via the board-farm's jlink-run.sh wrapper). Runs under
 # WSL2 on Windows. No SETOOLS/SE-UART -- this flow never writes MRAM. See
-# docs/aen-bench-bringup.md.
+# docs/aen-bench-bringup.md. Requires gawk (GNU awk) -- the LOAD-segment
+# address derivation below uses strtonum(), a gawk extension mawk/BSD awk
+# lack; checked explicitly before it's needed (see the "requires gawk"
+# exit below).
 #
 # FLOW C -- RAM-run a Zephyr ITCM image on the E8 (M55-HE) over J-Link and
 # ASCII-decode the CONFIG_RAM_CONSOLE buffer ('ram_console_buf') read back over SWD.
@@ -99,9 +102,11 @@ fi
 
 # JLINK_SN selection -- for the SIX sibling scripts in this directory that
 # still select their probe this way and point HERE for the explanation
-# (flash-jlink.sh, flash-jlink-hp.sh, flash-jlink-mramxip.sh, flash-run.sh,
-# flash-all-flowd.sh, erase-storage.sh, reread.sh): WHY their
-# `-SelectEmuBySN` is added only when JLINK_SN is set, never unconditionally.
+# (flash-jlink.sh, flash-jlink-hp.sh, flash-run.sh, flash-all-flowd.sh,
+# erase-storage.sh, reread.sh; NOT flash-jlink-mramxip.sh -- it cites this
+# file only for the #935 BUF_SYM guard and uses its own `${JLINK_SN:+...}`
+# pattern, not this one): WHY their `-SelectEmuBySN` is added only when
+# JLINK_SN is set, never unconditionally.
 # Leaving JLINK_SN unset is NOT a no-op -- alplab-gw carries multiple
 # J-Links, some sharing a cloned OEM serial, and an unselected JLinkExe run
 # there fails every command with "Cannot connect to the probe/programmer"
@@ -146,39 +151,33 @@ _connect_or_exit() {
 	fi
 }
 
-# WORKDIR -- every JLinkExe transcript and generated CommandFile for this run
-# lives under one mktemp -d directory (under $TMPDIR, matching
-# openocd-ram-run.sh's own preflight-transcript mktemp), not fixed /tmp
-# names. Fixed names (the old /tmp/jlink.out, /tmp/ram-run-preflight.out)
-# let one run's transcript be overwritten by a CONCURRENT run on this same
-# host moments before it is decoded -- reproduced running this script's own
-# test suite against a real bench session: a pytest run's fake transcript
-# was still sitting at /tmp/jlink-read.out after the test process exited.
-#
-# Removed only on a SUCCESSFUL exit (rc=0). Any non-zero exit -- including a
-# `set -e` abort, e.g. a missing preload file -- leaves WORKDIR in place and
-# says so: every "Transcript: ..." message this script or
-# bench_jlink_assert_connected prints is worthless if the file it names is
-# already gone by the time an operator reads it -- reproduced in review, a
-# session-2 failure cited a path an unconditional trap had already deleted
-# before the message was ever seen. Stale WORKDIRs from failed runs
-# therefore accumulate under $TMPDIR and need periodic manual cleanup, the
-# same tradeoff bench_atoc_replace_guard's own retained transcripts make
-# (bench-env.sh).
-WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/ram-run.XXXXXX")
-_ram_run_cleanup() {
-	local rc=$?
-	if [ "$rc" -eq 0 ]; then
-		rm -rf "$WORKDIR"
-	else
-		echo "ram-run: leaving transcripts under $WORKDIR (exit $rc) for inspection." >&2
-	fi
-}
-trap _ram_run_cleanup EXIT
-
 OBJ="$(bench_tool_prefix)" || exit $?
+# gawk required -- the LOAD-segment derivation below (BASE_RAW) uses
+# strtonum(), a GNU-awk extension absent from mawk/BSD awk; those instead
+# fail with "function strtonum never defined" and, pre-this-check, that
+# fell through to the misleading "could not find a LOAD segment" (exit 4)
+# below (alp-sdk#2076 review round 3, finding 4). Checked here (after the
+# BENCH_PLACE/AEN_JLINK_RUN/sleep_ms gates above, all of which must keep
+# exiting 2 on their own bad input regardless of which awk is installed)
+# and before the first strtonum() call.
+if ! awk 'BEGIN{strtonum("0")}' </dev/null >/dev/null 2>&1; then
+	echo "ram-run: the system 'awk' has no strtonum() (e.g. mawk) -- this" >&2
+	echo "         script requires gawk (GNU awk) for the LOAD-segment" >&2
+	echo "         address parsing below. Install/select gawk and retry." >&2
+	exit 1
+fi
 ELF="$BD/zephyr/zephyr.elf"
 BIN="$BD/zephyr/zephyr.bin"
+# A missing/mistyped build-dir must say so plainly, not fall through to the
+# UART-console message below. Without this check, `readelf -h` on a
+# nonexistent ELF fails but the pipeline's exit status is awk's (0, empty
+# output) -- BUF_SYM then comes back empty too and exit 3's "rebuild with
+# the RAM console" advice fires for a build that was never built at all
+# (alp-sdk#2076 review round 3, finding 9).
+if [ ! -f "$ELF" ]; then
+	echo "ram-run: '$ELF' does not exist -- is '$BD' a real build dir (west build -d <build-dir>)?" >&2
+	exit 1
+fi
 ENTRY_RAW=$($OBJ-readelf -h "$ELF" | awk '/Entry point/{print $NF}')
 ENTRY=$(printf '0x%X' $(( ENTRY_RAW & ~1 )))         # clear thumb bit
 BUF_SYM=$($OBJ-nm "$ELF" | awk '/ ram_console_buf$/{print $1}')
@@ -265,6 +264,52 @@ if (( BASE_RAW != 0x0 && BASE_RAW != 0x50000000 && BASE_RAW != 0x58000000 &&
 	exit 6
 fi
 
+# WORKDIR -- every JLinkExe transcript and generated CommandFile for this run
+# lives under one mktemp -d directory (under $TMPDIR, matching
+# openocd-ram-run.sh's own preflight-transcript mktemp), not fixed /tmp
+# names. Fixed names (the old /tmp/jlink.out, /tmp/ram-run-preflight.out)
+# let one run's transcript be overwritten by a CONCURRENT run on this same
+# host moments before it is decoded -- reproduced running this script's own
+# test suite against a real bench session: a pytest run's fake transcript
+# was still sitting at /tmp/jlink-read.out after the test process exited.
+#
+# Created here, right before the FIRST transcript write, not up near the top
+# of the script -- every earlier exit (1/2/3/4/5/6 above) fires before any
+# transcript exists, so creating WORKDIR that early only left an empty
+# ram-run.XXXXXX dir behind on those paths, plus a "leaving transcripts
+# under ..." message with nothing under it to inspect (alp-sdk#2076 review
+# round 3, finding 6).
+#
+# Removed only on a SUCCESSFUL exit (rc=0). Any non-zero exit -- including a
+# `set -e` abort, e.g. a missing preload file -- leaves WORKDIR in place and
+# says so: every "Transcript: ..." message this script or
+# bench_jlink_assert_connected prints is worthless if the file it names is
+# already gone by the time an operator reads it -- reproduced in review, a
+# session-2 failure cited a path an unconditional trap had already deleted
+# before the message was ever seen. Stale WORKDIRs from failed runs
+# therefore accumulate under $TMPDIR and need periodic manual cleanup, the
+# same tradeoff bench_atoc_replace_guard's own retained transcripts make
+# (bench-env.sh).
+WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/ram-run.XXXXXX")
+_ram_run_cleanup() {
+	local rc=$?
+	if [ "$rc" -eq 0 ]; then
+		rm -rf "$WORKDIR"
+	else
+		echo "ram-run: leaving transcripts under $WORKDIR (exit $rc) for inspection." >&2
+	fi
+}
+# SIGINT/SIGTERM must not reach _ram_run_cleanup with $?=0 -- an unhandled
+# INT/TERM during e.g. the inter-session `sleep` below otherwise let the
+# EXIT trap see a zero status and silently delete WORKDIR, losing the
+# transcript of exactly the hung/killed session an operator most needs it
+# for (contradicts the "leave it behind on failure" contract above;
+# alp-sdk#2076 review round 3, finding 3). Map both to their conventional
+# 128+signal exit codes explicitly.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap _ram_run_cleanup EXIT
+
 # SAFETY GATE -- confirm the AEN E8 is on the other end BEFORE loadbin+go.
 #
 # Flow C is not a read: it writes an AEN-linked image into ITCM and executes
@@ -335,6 +380,50 @@ jlink_run -device "$JLINK_DEVICE_READ" -if SWD -speed "$JLINK_SPEED" -nogui 1 -C
 # reached the probe must not fall through into a session-2 read that then
 # reports an EMPTY console and reads as a crashed app.
 _connect_or_exit "$WORKDIR/load.out" "RAM-run $(basename "$BD") (load+go)"
+
+# Session-1 COMPLETENESS gate (alp-sdk#2076 review round 3, finding 1) --
+# _connect_or_exit above only proves the J-Link session reached SOME
+# command prompt; it does not prove `loadbin`, `setpc`, and `go` all ran to
+# completion, and judging success on the `loadbin` window alone let a
+# crashed or truncated session pass. Real bench evidence
+# (/tmp/ram-run.OQ2QgD/load.out:25): JLinkExe segfaulting inside
+# jlink-run.sh's `unshare` BEFORE `loadbin` ever ran still had echoed
+# `connect`/`halt` already, so it passed _connect_or_exit and fell into the
+# old loadbin-only check below, which reported the misleading "loadbin did
+# not report 'O.K.'" for a session that never attempted the load at all. On
+# silicon the core stays halted after `loadbin`'s own reset when that load
+# never happens, DTCM/`ram_console_buf` survives it, and session 2 then
+# reads the PREVIOUS run's console as this run's output -- the exact
+# stale-console case exit 8 exists to prevent; a crashed/truncated
+# session-1 transcript must fail just as hard, with an honest message that
+# names the crash/truncation instead of blaming `loadbin`.
+if grep -q 'Segmentation fault' "$WORKDIR/load.out"; then
+	echo "!! ram-run: session 1's J-Link process CRASHED (segmentation fault) --" >&2
+	echo "   the transcript is incomplete. This is NOT a loadbin/setpc/go" >&2
+	echo "   failure, it never got that far." >&2
+	echo "   Full transcript: $WORKDIR/load.out" >&2
+	exit 10
+fi
+
+# _session1_last_window <exact-echo-line> <transcript> -- print the lines
+# between the LAST occurrence of the exact echoed command and the next
+# `J-Link>` prompt. LAST, not first: a preload file that loads the SAME
+# $BIN at the SAME $BASE ahead of the main load (a legitimate use) would
+# otherwise let ITS successful window satisfy the check for the main
+# image's own (review finding 2). Passed through ENVIRON, not awk `-v`: a
+# literal backslash/tab byte sequence in $BIN would otherwise be
+# awk-interpreted by `-v` (review finding 7, nit). Relies on gawk (checked
+# above), but does not itself need strtonum().
+_session1_last_window() {
+	local echo_line="$1" transcript="$2"
+	ECHO_LINE="$echo_line" awk '
+	  $0 == ENVIRON["ECHO_LINE"] { f = 1; win = ""; next }
+	  f && /^J-Link>/ { f = 0 }
+	  f { win = win $0 "\n" }
+	  END { printf "%s", win }
+	' "$transcript"
+}
+
 # A CONNECTED session can still fail the `loadbin` itself (e.g. a target RAM
 # access rejected, a bus fault mid-write) -- DTCM survives the SYSRESETREQ
 # `loadbin` triggers, so a stale image from an EARLIER run can boot instead
@@ -359,21 +448,51 @@ _connect_or_exit "$WORKDIR/load.out" "RAM-run $(basename "$BD") (load+go)"
 # requiring one of them to be the line `O.K.` verbatim (case-sensitive,
 # not a substring) -- the real success marker JLinkExe itself prints,
 # nothing weaker.
-if ! awk -v echo_line="J-Link>loadbin $BIN $BASE" '
-  found && /^J-Link>/ { exit }
-  found { print }
-  $0 == echo_line { found = 1 }
-' "$WORKDIR/load.out" | grep -qx 'O\.K\.'; then
+LOADBIN_ECHO="J-Link>loadbin $BIN $BASE"
+if ! grep -qF "$LOADBIN_ECHO" "$WORKDIR/load.out"; then
+	echo "!! ram-run: session 1's transcript never echoed the loadbin command --" >&2
+	echo "   the session looks crashed or was truncated before it got there," >&2
+	echo "   this is NOT a loadbin failure." >&2
+	echo "   Full transcript: $WORKDIR/load.out" >&2
+	exit 10
+fi
+if ! _session1_last_window "$LOADBIN_ECHO" "$WORKDIR/load.out" | grep -qx 'O\.K\.'; then
 	echo "!! ram-run: loadbin did not report 'O.K.' -- refusing to treat this as a" >&2
 	echo "   fresh load (a STALE image already resident in ITCM/DTCM can otherwise" >&2
 	echo "   boot and be read back as if this run's image had loaded)." >&2
-	awk -v echo_line="J-Link>loadbin $BIN $BASE" '
-	  found && /^J-Link>/ { exit }
-	  found { print }
-	  $0 == echo_line { print; found = 1 }
-	' "$WORKDIR/load.out" >&2
+	_session1_last_window "$LOADBIN_ECHO" "$WORKDIR/load.out" >&2
 	exit 8
 fi
+
+# setpc/go must ALSO have run to completion -- judging success on the
+# loadbin window alone (the pre-fix shape) let a transcript truncated right
+# after loadbin's "O.K." (JLinkExe killed/crashed before setpc/go) exit 0
+# and read back a stale console exactly like the crash-before-loadbin case
+# above (review finding 1). No "O.K." marker exists for setpc/go
+# themselves, so each check is: the command was echoed at all (else
+# crashed/truncated, exit 10), and its window carries no rejection wording
+# (else exit 11).
+#
+# ponytail: the rejection-wording scan is a heuristic -- no real
+# rejected-setpc/go JLinkExe transcript was available to anchor an exact
+# string on. Tighten to a literal match if one surfaces.
+_check_session1_not_rejected() {
+	local label="$1" echo_line="$2"
+	if ! grep -qF "$echo_line" "$WORKDIR/load.out"; then
+		echo "!! ram-run: session 1's transcript ended before it echoed '$label' --" >&2
+		echo "   the session looks crashed or was truncated right before it, this" >&2
+		echo "   is NOT a reported '$label' failure." >&2
+		echo "   Full transcript: $WORKDIR/load.out" >&2
+		exit 10
+	fi
+	if _session1_last_window "$echo_line" "$WORKDIR/load.out" | grep -qiE 'unknown command|invalid|cannot|fail'; then
+		echo "!! ram-run: '$label' was rejected:" >&2
+		_session1_last_window "$echo_line" "$WORKDIR/load.out" >&2
+		exit 11
+	fi
+}
+_check_session1_not_rejected "setpc $ENTRY" "J-Link>setpc $ENTRY"
+_check_session1_not_rejected "go" "J-Link>go"
 
 # Host-side wait -- Sleep no longer runs inside a JLinkExe session, so the
 # host waits the same $SLEEP milliseconds between the two sessions instead.
