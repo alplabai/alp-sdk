@@ -192,11 +192,19 @@
  * ~15 s in and WPA3-SAE, with its extra SAE commit/confirm exchange + PMF,
  * running slower still, which is why the wait was widened from 15 s to 30 s
  * after a bench-seen WPA3 timeout), and DHCP afterward is bounded by
- * `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 50 * 200 ms = 10 s.
- * 30 s + 10 s = 40 s is the firmware's own worst case for one connect; a
+ * `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 100 * 200 ms = 20 s.
+ *
+ * There is a THIRD term the original derivation missed: this image does not
+ * call cc3501e_hw_wifi_boot_start(), so a connect issued as the first radio op
+ * of a boot carries Wlan_Start, a Wlan_Set and a 10 s Wlan_RoleUp INSIDE the
+ * connect body, before the association wait even begins.
+ *
+ * 10 s + 30 s + 20 s = 60 s is the firmware's own worst case for one connect; a
  * caller budget below that races a healthy association even with perfectly
- * accurate host-side accounting. */
-#define SOCKTP_CONNECT_TIMEOUT_MS 55000u
+ * accurate host-side accounting.  55000u -- this file's previous value, derived
+ * when DHCP was 10 s and the role-up term was missed -- no longer clears it, so
+ * by this app's own rule it was buying failures the radio never suffered. */
+#define SOCKTP_CONNECT_TIMEOUT_MS 75000u
 #define SOCKTP_SOCK_TIMEOUT_MS    5000u
 #define SOCKTP_RECV_TIMEOUT_MS    3000u
 
@@ -714,7 +722,7 @@ int main(void)
 		 * the association actually succeeded and only the host's accounting
 		 * was wrong; CONN_FAILED/FAIL_REJECTED (or FAIL_KICK) means a real
 		 * credentials/security-type/role failure; CONN_FAILED/FAIL_TIMEOUT
-		 * means the firmware's own 30 s L2 wait or 10 s DHCP budget expired
+		 * means the firmware's own 30 s L2 wait or 20 s DHCP budget expired
 		 * for real. */
 		printk("STEP 3: WIFI_CONNECT -> %d (host accounting gave up, or the radio genuinely "
 		       "failed -- can't tell yet). Waiting %u ms for the firmware's own connect "
