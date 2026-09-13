@@ -186,28 +186,41 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 	 * -- `ALP_GPIO_OUTPUT` alone carries neither flag (see
 	 * `_to_gpio_flags()`, `src/backends/gpio/zephyr_drv.c`), so
 	 * configuring before writing at all would switch direction to
-	 * output while the data register still held its DesignWare POR
-	 * default of 0, driving an unplanned LOW pulse onto SD_N -- a net
-	 * shared with U28 on this board (see "Shared SD_N / IRQZ nets"
-	 * above) -- for however long the two calls take.  The first write,
-	 * before configure, closes that glitch window on real gpio_dw
-	 * silicon: `alp_gpio_write()` has no dependency on the pin already
-	 * being configured (`src/gpio_dispatch.c` gates only on the
-	 * handle's open/closed lifecycle), and `gpio_dw_port_set_bits_raw()`
-	 * writes the data register unconditionally, independent of
-	 * direction.  It is NOT sufficient by itself on every backend,
-	 * though: Zephyr's `gpio_emul` (native_sim, this test suite) masks
-	 * `port_set_bits_raw()`'s write against the pins CURRENTLY
-	 * configured as output, so a write issued before configure is
-	 * silently dropped there instead of merely being redundant -- the
-	 * opposite failure mode from gpio_dw's.  The second write, after
-	 * configure, is what makes the final state correct on backends
-	 * like that one; it costs one redundant register write on gpio_dw,
-	 * where the first write already landed.  Verified against the
-	 * Zephyr/DesignWare and gpio_emul backends only: the sw_fallback
-	 * and testing GPIO backends have no real pin to glitch either way,
-	 * but the CC3501E GPIO proxy's behaviour on a write before its
-	 * remote side has ever been configured is UNVERIFIED. */
+	 * output while the data register still held its reset-time level
+	 * (not verified as 0 on this board's actual AE822 silicon -- the
+	 * DesignWare IP's data-register reset value is a synthesis
+	 * parameter; the fix below does not depend on which it is), driving
+	 * an unplanned pulse onto SD_N -- a net shared with U28 on this
+	 * board (see "Shared SD_N / IRQZ nets" above) -- for however long
+	 * the two calls take.  The first write, before configure, closes
+	 * that glitch window on real gpio_dw silicon: `alp_gpio_write()` has
+	 * no dependency on the pin already being configured
+	 * (`src/gpio_dispatch.c` gates only on the handle's open/closed
+	 * lifecycle), and `gpio_dw_port_set_bits_raw()` writes the data
+	 * register unconditionally, independent of direction -- but ONLY if
+	 * sd_n is declared GPIO_ACTIVE_HIGH (see
+	 * include/alp/chips/tas2563.h's "sd_n must be declared
+	 * GPIO_ACTIVE_HIGH" note; no in-tree board passes a non-NULL sd_n
+	 * today, so this precondition is currently unexercised, not
+	 * unverified-and-live).  It is NOT sufficient by itself on every
+	 * backend, though: Zephyr's `gpio_emul` (native_sim, this test
+	 * suite) masks `port_set_bits_raw()`'s write against the pins
+	 * CURRENTLY configured as output, so a write issued before
+	 * configure is silently dropped there IF the pin is not already
+	 * configured as output from an earlier state (rather than
+	 * redundant, as on gpio_dw) -- the opposite failure mode, and one
+	 * this fake's shared per-device state makes order-dependent across
+	 * test cases (see test_tas2563_init_writes_sd_n_before_configuring_it,
+	 * tests/zephyr/chips/src/test_audio.c, which pre-arms the pin so the
+	 * drop is guaranteed rather than incidental).  The
+	 * second write, after configure, is what makes the final state
+	 * correct on backends like that one; it costs one redundant
+	 * register write on gpio_dw, where the first write already landed.
+	 * Verified against the Zephyr/DesignWare and gpio_emul backends
+	 * only: the sw_fallback and testing GPIO backends have no real pin
+	 * to glitch either way, but the CC3501E GPIO proxy's behaviour on a
+	 * write before its remote side has ever been configured is
+	 * UNVERIFIED. */
 	if (sd_n != NULL) {
 		alp_status_t s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> release HW shutdown */
 		if (s != ALP_OK) return s;

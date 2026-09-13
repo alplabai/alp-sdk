@@ -3917,14 +3917,20 @@ static const pinctrl_soc_pin_t amp_enable_mux[] = { PIN_P5_2__GPIO };
 static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PAD_REN };
 
 #define SOUND_MUX_SETTLE_MS 10u
-/* SLASET3D §7.3.11.1 "Hardware Shutdown", Table 7-6: SDZ_MODE defaults to
- * "Normal Shutdown with Timer" -- asserting SDZ low does not reach Hardware
- * Shutdown immediately, only after SDZ_TIMEOUT expires (Table 7-7: 2 / 4 /
- * 6 (default) / 23.8 ms, whichever this part's register currently holds --
- * unknown here, since a previous session could have left it non-default).
- * To guarantee an actual hardware reset regardless of that setting, SD_N
- * is held low for at least the worst case. UNVERIFIED on real silicon
- * whether this length actually reaches Hardware Shutdown. */
+/* SLASET3D §7.3.11.1 "Hardware Shutdown": with SDZ_MODE at its default
+ * 00b ("Normal Shutdown with Timer", Table 7-6), asserting SDZ low ramps
+ * down any playing audio, stops Class-D switching, powers down the
+ * analog/digital blocks, and THEN enters Hardware Shutdown once that
+ * graceful sequence completes -- SDZ_TIMEOUT (Table 7-7: 2 / 4 / 6
+ * (default) / 23.8 ms) is a BACKSTOP that forces a hard shutdown only
+ * if the graceful sequence has not finished by then, not the sole path
+ * to Hardware Shutdown.  Holding SD_N low for at least the worst-case
+ * 23.8 ms therefore guarantees Hardware Shutdown is reached -- but only
+ * assuming SDZ_MODE's default (00b) or 01b ("Immediate Shutdown");
+ * SDZ_MODE = 10b ("Normal Shutdown", no timer at all, Table 7-6) has NO
+ * time limit, and this demo has no way to know which mode a previous
+ * session left the part in.  UNVERIFIED on real silicon whether this
+ * length actually reaches Hardware Shutdown. */
 #define AMP_ENABLE_RESET_HOLD_MS 24u /* >= 23.8 ms max SDZ_TIMEOUT, Table 7-7 */
 #define SOUND_SAMPLE_RATE_HZ     16000u
 #define SOUND_FRAMES_PER_BLOCK   256u

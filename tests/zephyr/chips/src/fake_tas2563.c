@@ -110,10 +110,11 @@ static void seed_defaults(struct fake_tas2563_data *d)
 }
 
 /* Software reset (SLASET3D §7.5.3, p.65): writing bit 0 of SW_RESET
- * returns every register to its POR default and, per §9.2's paired
- * "before any I2C operation" framing, control of the map returns to
- * book 0 / page 0 too (PAGE/BOOK are registers like any other, and
- * their POR default is 0).  Unlike seed_defaults() at boot, this must
+ * returns every register to its POR default, and per §7.3.10 "Register
+ * Organization" (p.34) book 0 / page 0 is explicitly "the default
+ * setting at power up (and after a software reset)" -- not merely an
+ * inference from PAGE/BOOK's own POR default of 0.  Unlike
+ * seed_defaults() at boot, this must
  * NOT touch the write log, write_count[] or fault-injection arming --
  * none of that is modelled silicon state, and a mid-test reset wiping
  * a test's own bookkeeping would make the reset unobservable rather

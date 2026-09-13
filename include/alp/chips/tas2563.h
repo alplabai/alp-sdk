@@ -7,6 +7,22 @@
  * @file tas2563.h
  * @brief Texas Instruments TAS2563 smart Class-D mono speaker amp.
  *
+ * @par Driver status: [partial-impl] -- connectivity probe + reset
+ *   sequencing, mode control, output level, tuning-blob replay, I2S/
+ *   IV-sense configuration, fault-pin handling.  Not implemented:
+ *   PPC3 export parsing (by design, see @ref tas2563_load_tuning) and
+ *   write verification via `I2C_CKSUM` (algorithm undocumented, see
+ *   the same function's doc).  Matches `driver_status: partial` in
+ *   `metadata/chips/tas2563.yaml`.
+ *
+ * @par Why an in-tree driver, not the upstream one: an upstream Zephyr
+ *   TAS2563 driver exists (zephyrproject-rtos/zephyr#103148, merged
+ *   2026-05-01) but is not present in this repo's pinned Zephyr
+ *   revision (`west.yml`, v4.4.x) -- that PR landed after the pin.  By
+ *   maintainer decision (#2077), this repo keeps its own portable
+ *   `<alp/chips>` driver over `alp_i2c`/`alp_gpio` for now rather than
+ *   adopting the upstream one.
+ *
  * @par Verification status: [UNTESTED] -- driver compiles, passes NULL-arg
  *   smokes, and passes register-protocol ZTests against a fake that
  *   models this part's paged register map from the datasheet
@@ -104,18 +120,29 @@
  *   output BEFORE touching the data register, and only touches it at
  *   all for `GPIO_OUTPUT_INIT_HIGH`/`_LOW` -- neither of which
  *   `ALP_GPIO_OUTPUT` alone carries.  Configuring before writing at all
- *   would therefore expose the data register's DesignWare POR default
- *   (0) as an output level the instant direction flips, before any
- *   write ever runs -- an unplanned LOW pulse on a pin that may be
- *   shared with another amp (see above).  @ref tas2563_init writes
- *   high BEFORE configuring to close that window on gpio_dw:
- *   `alp_gpio_write()` has no dependency on the pin already being
- *   configured, and `gpio_dw_port_set_bits_raw()` writes the data
- *   register unconditionally, independent of direction.  That first
- *   write is not sufficient on every backend, though: Zephyr's
+ *   would therefore expose the data register's reset-time level as an
+ *   output the instant direction flips, before any write ever runs --
+ *   an unplanned pulse on a pin that may be shared with another amp
+ *   (see above).  That reset-time level is not verified as `0` on this
+ *   board's actual silicon (AE822): the DesignWare GPIO IP's data
+ *   register reset value is a synthesis-time parameter, not something
+ *   read back here, so it is possible in principle for it to reset
+ *   `1` instead -- the fix below is correct regardless of which, since
+ *   it never relies on the reset value being any particular level.
+ *   @ref tas2563_init writes high BEFORE configuring to close that
+ *   window on gpio_dw: `alp_gpio_write()` has no dependency on the pin
+ *   already being configured, and `gpio_dw_port_set_bits_raw()` writes
+ *   the data register unconditionally, independent of direction.  That
+ *   first write is not sufficient on every backend, though: Zephyr's
  *   `gpio_emul` masks a write against the pins CURRENTLY configured as
  *   output, so a write issued before configure is silently DROPPED
- *   there rather than redundant -- the opposite failure mode.  @ref
+ *   there IF the pin is not already configured as output from some
+ *   earlier state (rather than redundant, as on gpio_dw) -- the
+ *   opposite failure mode, and one this fake's shared per-device state
+ *   makes order-dependent across test cases (see
+ *   `test_tas2563_init_writes_sd_n_before_configuring_it` in
+ *   `tests/zephyr/chips/src/test_audio.c`, which pre-arms the pin so
+ *   the drop is guaranteed rather than incidental).  @ref
  *   tas2563_init therefore writes high a SECOND time, after
  *   configuring, so the final state is correct on both kinds of
  *   backend; the second write costs one redundant register access on
@@ -125,6 +152,23 @@
  *   glitch either way, but the CC3501E GPIO proxy's behaviour on a
  *   write issued before its remote side has ever been configured is
  *   UNVERIFIED.
+ *
+ * @par @p sd_n must be declared GPIO_ACTIVE_HIGH in its devicetree
+ *   pin-array entry, matching SD_N's real polarity (high = enabled).
+ *   Zephyr only applies a `GPIO_ACTIVE_LOW` pin-array entry's
+ *   inversion inside `gpio_pin_configure()` (it updates the driver's
+ *   `invert` bitmask there, not before) -- so on an ACTIVE_LOW entry,
+ *   the pre-configure write above would go out at the RAW (uninverted)
+ *   level while the post-configure write would correctly invert,
+ *   blipping the physical pin from one level to the other and ending
+ *   on the wrong one.  This is not a live bug on the E1M-EVK: no
+ *   in-tree board declares `P5_2` (AMP_ENABLE) in its `alp,pin-array`
+ *   at all today (both in-tree callers of @ref tas2563_init pass
+ *   `sd_n = NULL`, per "Shared SD_N / IRQZ nets" above), and this
+ *   header's own test overlay declares its `sd_n` test pin
+ *   `GPIO_ACTIVE_HIGH` (`tests/zephyr/chips/boards/native_sim_native_64.overlay`).
+ *   It is a real precondition on any future caller that DOES pass a
+ *   real `sd_n`, recorded here rather than left implicit.
  *
  * v0.3 driver scope:
  *   - I2C connectivity probe (read CHIP_ID).
@@ -386,7 +430,10 @@ typedef struct {
  *                       to V+).  @b Must not be passed to more than
  *                       one @ref tas2563_t instance that shares the
  *                       same physical SD_N net -- see "Shared SD_N /
- *                       IRQZ nets" in this file's overview.
+ *                       IRQZ nets" in this file's overview.  Must be
+ *                       declared `GPIO_ACTIVE_HIGH` in its devicetree
+ *                       pin-array entry -- see "sd_n must be declared
+ *                       GPIO_ACTIVE_HIGH" in this file's overview.
  *
  * @pre SDZ must have been high for at least @ref
  *      TAS2563_RESET_SETTLE_US before the first I2C access (SLASET3D

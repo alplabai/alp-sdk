@@ -214,18 +214,24 @@ static const struct device *tas_gpio_dev(void)
 }
 
 /* Reset the fake, pre-seed PWR_CTL, init the driver, then clear the
- * write log so each test sees only its own bus traffic. */
+ * write log so each test sees only its own bus traffic.
+ *
+ * Close-before-assert on the failure path: this helper backs roughly
+ * 15 tests, and a plain zassert_* here would abort every one of them
+ * with the bus still open on a real failure, leaking a fixed-pool
+ * handle into every later test that opens one instead of reporting
+ * just the one real failure. */
 static alp_i2c_t *tas_init(tas2563_t *ctx, uint8_t pwr_ctl_seed, alp_gpio_t *sd_n)
 {
 	fake_tas2563_reset();
 	fake_tas2563_set_reg(TAS_REG_PWR_CTL, pwr_ctl_seed);
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	alp_status_t init_rc = tas2563_init(ctx, bus, TAS_FAKE_ADDR, sd_n);
+	if (init_rc != ALP_OK) alp_i2c_close(bus);
+
 	zassert_not_null(bus);
-	zassert_equal(tas2563_init(ctx, bus, TAS_FAKE_ADDR, sd_n),
-	              ALP_OK,
-	              "init must succeed against the fake at 0x%02x",
-	              TAS_FAKE_ADDR);
+	zassert_equal(init_rc, ALP_OK, "init must succeed against the fake at 0x%02x", TAS_FAKE_ADDR);
 	fake_tas2563_log_reset();
 	return bus;
 }
@@ -321,8 +327,13 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	tas2563_t  ctx;
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	/* Close right after, before any assertion below can abort this test
+	 * and leak the handle -- see tas_init()'s comment for why. */
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	if (init_rc != ALP_OK) alp_i2c_close(bus);
+
 	zassert_not_null(bus);
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+	zassert_equal(init_rc, ALP_OK);
 
 	zassert_equal(fake_tas2563_cur_book(), 0u, "init must select book 0");
 	zassert_equal(fake_tas2563_cur_page(), 0u, "init must select page 0");
@@ -986,6 +997,93 @@ ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_own
 	             "was dropped",
 	             (unsigned long long)elapsed_us,
 	             2u * TAS2563_RESET_SETTLE_US);
+}
+
+/* gpio_emul fires every registered callback on BOTH a configure() call
+ * (drivers/gpio/gpio_emul.c:474, gpio_emul_pin_configure(), unconditional,
+ * no interrupt needed) AND a successful write (:602,
+ * gpio_emul_port_set_bits_raw()'s own trailing gpio_fire_callbacks() "for
+ * output-wiring, so the user can take action based on output") -- so a
+ * single capture-the-latest-level callback cannot tell "the write already
+ * landed by the time configure ran" apart from "the LAST event, whichever
+ * it was, happened to be high": logging just the most recent level made
+ * this test pass identically whether tas2563_init() wrote before or after
+ * configuring, since the trailing (always-correct) write's own callback
+ * overwrites whatever configure()'s callback saw.  Logging every firing,
+ * in order, and requiring ALL of them to read high is what distinguishes
+ * the two orderings -- see the test below. */
+#define SD_N_PROBE_LOG_MAX 8u
+static int    g_sd_n_probe_log[SD_N_PROBE_LOG_MAX];
+static size_t g_sd_n_probe_log_len;
+
+static void
+sd_n_configure_probe_cb(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
+{
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+	if (g_sd_n_probe_log_len < SD_N_PROBE_LOG_MAX) {
+		g_sd_n_probe_log[g_sd_n_probe_log_len++] = (int)gpio_emul_output_get(port, TAS_PIN_SD_N);
+	}
+}
+
+/* #2077: prove tas2563_init() writes SD_N high BEFORE configuring it as
+ * output, not only after -- the real defect on gpio_dw silicon (see "GPIO
+ * write-before-AND-after-configure ordering" in
+ * include/alp/chips/tas2563.h).  With the fix, the very FIRST
+ * configure/write event this test observes is already the pre-configure
+ * write landing high; with the bug (configure-then-write-once), the FIRST
+ * event is configure() itself, observed while the pin is still low from
+ * this test's own pre-arm below -- so asserting every logged level is
+ * high, not just the last one, is what makes this test distinguish the
+ * two orderings (see the comment above the log itself for why "only the
+ * last event" cannot).
+ *
+ * Pre-arming the pin as GPIO_OUTPUT_LOW (not the default input) before
+ * tas2563_init() runs is required to make the early write observable at
+ * all: gpio_emul masks the underlying port_set_bits_raw() write against
+ * the pins CURRENTLY marked output, so a write while the pin is still
+ * input is silently dropped -- pre-arming as output-low mimics gpio_dw's
+ * data register already being a writable output latched low, the
+ * real-hardware condition this fix protects against.  Without the
+ * pre-arm, whether the drop happens would depend on which earlier test
+ * left this shared fake device's pin 3 configured -- see
+ * test_tas2563_deinit_drops_sd_n_when_owned above, which does leave it
+ * an output, but this test does not rely on that incidental ordering. */
+ZTEST(alp_chips, test_tas2563_init_writes_sd_n_before_configuring_it)
+{
+	fake_tas2563_reset();
+	g_sd_n_probe_log_len = 0;
+
+	zassert_ok(gpio_pin_configure(tas_gpio_dev(), TAS_PIN_SD_N, GPIO_OUTPUT_LOW));
+
+	struct gpio_callback cb;
+	gpio_init_callback(&cb, sd_n_configure_probe_cb, BIT(TAS_PIN_SD_N));
+	zassert_ok(gpio_add_callback(tas_gpio_dev(), &cb));
+
+	alp_gpio_t *sd_n = alp_gpio_open(TAS_PIN_SD_N);
+	alp_i2c_t  *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	tas2563_t    ctx;
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n);
+
+	/* Remove the callback and close both handles before any assertion
+	 * below can abort this test and leak them. */
+	gpio_remove_callback(tas_gpio_dev(), &cb);
+	alp_gpio_close(sd_n);
+	alp_i2c_close(bus);
+
+	zassert_not_null(sd_n);
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
+	zassert_true(g_sd_n_probe_log_len > 0u, "no configure/write callback fired for SD_N at all");
+	for (size_t i = 0; i < g_sd_n_probe_log_len; ++i) {
+		zassert_equal(g_sd_n_probe_log[i],
+		              1,
+		              "SD_N read 0 at configure/write event #%zu -- the write before "
+		              "configure did not land first",
+		              i);
+	}
 }
 
 #endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_tas2563)) */
