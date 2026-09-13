@@ -878,9 +878,14 @@ class TestAenMemoryMapValidation(unittest.TestCase):
         """A region flush with the aperture's low edge but one KiB short
         of its full extent is a genuine (mis-sized) partition, not the
         whole-device alias -- it must still overlap `mcuboot` at the
-        same base and be refused. Catches a predicate loosened to `lo ==
-        full_lo` alone (dropping the `hi == full_hi` half), which every
-        other case in this class passes unchanged (review of #2073)."""
+        same base and be refused. This is the one test that still
+        catches a predicate loosened to `lo == full_lo` alone (dropping
+        the `hi == full_hi` half) IF the duplicate-whole-device-alias
+        guard above is ever removed -- today that loosening also makes
+        `mcuboot` match as a second "alias", so the duplicate-alias
+        refusal fires first and two other tests in this class go red
+        too; this test is what still fails on the loosening alone
+        (review of #2073)."""
         with _MutatedMetadata() as mm:
             mm.sub(AEN801_PRESET,
                    'name: mram_main, base: "TBD",      size_kib: 5632',
