@@ -427,14 +427,21 @@ def test_an_unresolved_row_never_carries_a_base() -> None:
 # ---------------------------------------------------------------------
 # Wiring coverage (#2096): the unresolved-base leg above is reached
 # through the FULL pipeline (load_board_yaml -> resolve_memory_regions),
-# not a direct call into `memory._resolved_row()`. #2053 removed the
-# only shipped preset (mram_main across all seven AEN SKUs) that used to
-# exercise this routing, so a synthetic AEN-shaped preset
-# (`_synthetic_aen_unresolved_base_root`) keeps it covered independent
-# of whether any real metadata/e1m_modules/E1M-AEN*.yaml still carries a
-# "TBD" base. A future change that filtered unresolved rows out earlier
-# would leave every direct-call pin above green while this test alone
-# catches the dead wiring.
+# not a direct call into `memory._resolved_row()`. #2053 (open as PR
+# #2102, not yet merged at the time this landed) will resolve
+# `mram_main.base` from `"TBD"` to a real address on all seven AEN
+# presets -- once it does, those presets stop being the only thing that
+# exercises this routing end to end, and the two AEN_BOARD-driven tests
+# above (`test_a_region_whose_base_does_not_resolve_is_kind_unresolved`,
+# `test_an_unresolved_base_carries_status_and_reason_but_no_base`) are
+# expected to get re-pointed at direct calls into `memory._resolved_row()`
+# as part of that same PR. This synthetic AEN-shaped preset
+# (`_synthetic_aen_unresolved_base_root`) keeps the routing covered
+# independent of that -- whether or not any real
+# metadata/e1m_modules/E1M-AEN*.yaml still carries a "TBD" base. A
+# future change that filtered unresolved rows out earlier would leave
+# every direct-call pin above green while this test alone catches the
+# dead wiring.
 # ---------------------------------------------------------------------
 
 SYNTHETIC_AEN_BOARD = """

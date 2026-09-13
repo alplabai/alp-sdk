@@ -22,8 +22,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import (              # noqa: E402
-    REPO,
     V2N_HAPPY,
+    _scratch_metadata_root,
     _synthetic_aen_unresolved_base_root,
     _synthetic_nx9101_root,
     _write_board,
@@ -216,11 +216,16 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 # Wiring coverage (#2096): `_region_ipc_eligibility()`'s `cls ==
 # "unresolved"` tail above is reached through the FULL pipeline
 # (load_board_yaml -> resolve_carve_outs), not a direct call into the
-# private helper. #2053 removed the only shipped preset (mram_main
-# across all seven AEN SKUs) that used to exercise this routing, so a
+# private helper. #2053 (open as PR #2102, not yet merged at the time
+# this landed) will resolve `mram_main.base` from `"TBD"` to a real
+# address on all seven AEN presets -- once it does, those presets stop
+# being the only thing that exercises this routing end to end, and the
+# tests that cover it today (`test_resolve_carve_outs_blocks_on_unmapped_base`
+# above, and E1M-AEN801's own test below) are expected to get re-pointed
+# at direct calls into the private helper as part of that same PR. This
 # synthetic AEN-shaped preset (`_synthetic_aen_unresolved_base_root`)
-# keeps it covered independent of whether any real
-# metadata/e1m_modules/E1M-AEN*.yaml still carries a "TBD" base. A
+# keeps the routing covered independent of that -- whether or not any
+# real metadata/e1m_modules/E1M-AEN*.yaml still carries a "TBD" base. A
 # future change that filtered unresolved rows out earlier -- say in
 # `_candidate_regions()`, before `_region_ipc_eligibility()` is ever
 # called -- would leave the direct-call leg pins green while this test
@@ -228,6 +233,7 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 # ---------------------------------------------------------------------
 
 SYNTHETIC_AEN_UNRESOLVED_BASE = """
+name: test-synthetic-aen-carveout
 som:
   sku: E1M-AEN899
 
@@ -333,26 +339,8 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
     """
     import alp_orchestrate
 
-    # Compose the synthetic SoM preset on a scratch metadata root.
-    meta = tmp_path / "metadata"
-    e1m = meta / "e1m_modules"
-    socs = meta / "socs" / "renesas" / "rzv2n"
-    schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
-        d.mkdir(parents=True)
-
-    # Symlink / copy the v2 board-config schema + SoC + som-preset
-    # schemas from the real repo so the validator finds them.
-    import shutil
-    real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board.schema.json",
-                schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
-    shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
-                schemas / "soc-spec-v1.schema.json")
-    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
-                socs / "n44.json")
+    meta, e1m = _scratch_metadata_root(
+        tmp_path, ("renesas", "rzv2n", "n44.json"))
 
     preset = e1m / "E1M-V2N101.yaml"
     preset.write_text(textwrap.dedent("""
