@@ -733,10 +733,6 @@ static int sdhc_dwc_reset(const struct device *dev)
 	 * re-applying the default config here is within contract.
 	 */
 	ret = sdhc_dwc_set_def_config(dev);
-	if (ret) {
-		k_sem_give(&data->lock);
-		return ret;
-	}
 
 	/*
 	 * ALP-SDK DELTA (#2051), not upstream: sdhc_dwc_set_io() only
@@ -745,15 +741,40 @@ static int sdhc_dwc_reset(const struct device *dev)
 	 * sdhc_set_io(card->sdhc, &card->bus_io) call (subsys/sd/ never
 	 * calls sdhc_hw_reset() itself, so it has no reason to think
 	 * anything changed) a silent no-op for whichever fields happen to
-	 * already match. Sync the cache to exactly what set_def_config()
-	 * above just programmed -- clock/bus-width/voltage/timing -- rather
-	 * than an all-1s sentinel, so the next set_io() call reprograms
-	 * only the fields that genuinely differ from real hardware state.
-	 * power_mode is left as the caller last set it: set_def_config()
-	 * unconditionally powers the rail ON, so a caller that had powered
-	 * off before calling reset() gets it turned back off below --
-	 * matching the model Linux uses (drivers/mmc/host/sdhci.c:209).
+	 * already match.
+	 *
+	 * On SUCCESS (reset_ret == 0 AND ret == 0), sync the cache to
+	 * exactly what set_def_config() above just programmed --
+	 * clock/bus-width/voltage/timing -- rather than an all-1s sentinel,
+	 * so the next set_io() call reprograms only the fields that
+	 * genuinely differ from real hardware state. power_mode is left as
+	 * the caller last set it: set_def_config() unconditionally powers
+	 * the rail ON, so a caller that had powered off before calling
+	 * reset() gets it turned back off below -- matching the model Linux
+	 * uses (drivers/mmc/host/sdhci.c:209).
+	 *
+	 * On EITHER FAILURE, do NOT assume those specific values -- a review
+	 * finding on an earlier revision of this function caught two bugs
+	 * here: (1) a failed set_def_config() used to return before the sync
+	 * ran at all, leaving data->ios at PRE-reset values while the
+	 * registers sat at POR (bench image B saw -5 down this exact path),
+	 * and the early return also discarded reset_ret; (2) on a bare
+	 * SW_RST_ALL TIMEOUT specifically, the register file never finished
+	 * settling, so HOST_CTRL1's bus-width bits are NOT reliably POR
+	 * (1-bit) either -- set_def_config() never writes them itself either
+	 * way (nothing else does after a reset), so "assume 1-bit" is a
+	 * guess about un-settled hardware, not a fact. Zero the cache
+	 * instead on any failure, so the next set_io() reprograms every
+	 * field rather than trusting an unverified one, and report whichever
+	 * failure is more fundamental: a reset that never completed, over a
+	 * reconfigure failure that only matters if the reset DID complete.
 	 */
+	if (reset_ret != 0 || ret != 0) {
+		memset(&data->ios, 0, sizeof(data->ios));
+		k_sem_give(&data->lock);
+		return reset_ret ? reset_ret : ret;
+	}
+
 	data->ios.clock = SDMMC_CLOCK_400KHZ;
 	data->ios.bus_width = SDHC_BUS_WIDTH1BIT;
 	data->ios.signal_voltage = SD_VOL_3_3_V;
@@ -764,7 +785,7 @@ static int sdhc_dwc_reset(const struct device *dev)
 
 	k_sem_give(&data->lock);
 
-	return reset_ret;
+	return 0;
 }
 
 static int sdhc_dwc_dma_init(struct dwc_sdhc_regs *regs, struct sdhc_dwc_data *data,
@@ -964,6 +985,18 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 	struct dwc_sdhc_regs *regs = config->regs;
 	int ret;
 
+	/*
+	 * ALP-SDK DELTA (#2051), not upstream: take data->lock for the whole
+	 * read-modify-write of both the hardware and data->ios -- without it
+	 * a concurrent sdhc_dwc_reset() could land mid-clock-change and read
+	 * or write data->ios while this function is still comparing it
+	 * against `ios`, or reset the registers this function just
+	 * programmed out from under it. set_io() has no caller inside this
+	 * driver that already holds the lock (only the public sdhc_set_io()
+	 * syscall reaches it), so this cannot self-deadlock.
+	 */
+	k_sem_take(&data->lock, K_FOREVER);
+
 	if (ios->bus_width != data->ios.bus_width) {
 		uint8_t hc1 = regs->DWC_SDHC_HOST_CTRL1_R;
 
@@ -980,7 +1013,8 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 			hc1 |= DWC_SDHC_HOST_CTRL1_EXT_DATA_WIDTH_Msk;
 			break;
 		default:
-			return -ENOTSUP;
+			ret = -ENOTSUP;
+			goto out;
 		}
 
 		regs->DWC_SDHC_HOST_CTRL1_R = hc1;
@@ -1001,7 +1035,7 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 				LOG_ERR("vmmc regulator %s failed: %d",
 					ios->power_mode == SDHC_POWER_OFF ?
 					"disable" : "enable", ret);
-				return ret;
+				goto out;
 			}
 		}
 		if (config->vqmmc) {
@@ -1014,7 +1048,7 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 				LOG_ERR("vqmmc regulator %s failed: %d",
 					ios->power_mode == SDHC_POWER_OFF ?
 					"disable" : "enable", ret);
-				return ret;
+				goto out;
 			}
 		}
 #endif
@@ -1029,7 +1063,7 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 
 		ret = sdhc_dwc_set_voltage(dev, ios->signal_voltage);
 		if (ret) {
-			return ret;
+			goto out;
 		}
 
 		sdhc_dwc_enable_clock(regs);
@@ -1049,22 +1083,28 @@ static int sdhc_dwc_set_io(const struct device *dev, struct sdhc_io *ios)
 			 * defect 2).
 			 */
 			if (!sdhc_dwc_disable_clock(regs)) {
-				return -EIO;
+				ret = -EIO;
+				goto out;
 			}
 			data->ios = *ios;
-			return 0;
+			ret = 0;
+			goto out;
 		}
 
 		ret = sdhc_dwc_clock_set(regs, ios->clock);
 
 		if (ret) {
 			LOG_ERR("Failed to set clock to %u Hz", ios->clock);
-			return ret;
+			goto out;
 		}
 	}
 
 	data->ios = *ios;
-	return 0;
+	ret = 0;
+
+out:
+	k_sem_give(&data->lock);
+	return ret;
 }
 
 static int sdhc_dwc_get_card_present(const struct device *dev)
@@ -1391,9 +1431,11 @@ static int sdhc_dwc_init(const struct device *dev)
 
 	/*
 	 * Software reset all. sdhc_dwc_reset() (#2051) already runs
-	 * sdhc_dwc_set_def_config() itself once the reset completes -- a
-	 * second call here used to reconfigure (and re-sleep through
-	 * sdhc_dwc_set_power()'s power_delay_ms and sdhc_dwc_set_voltage())
+	 * sdhc_dwc_set_def_config() itself once the reset completes -- an
+	 * explicit second call here would reconfigure (and re-run
+	 * sdhc_dwc_set_power(SDHC_POWER_ON)'s fixed k_msleep(5) VDD1-toggle
+	 * delay -- NOT config->power_delay_ms, which only ever feeds
+	 * props->power_delay, an informational field, never a sleep)
 	 * TWICE at boot for nothing.
 	 */
 	ret = sdhc_dwc_reset(dev);

@@ -404,11 +404,11 @@
  * PHASE 9 -- SD Host Controller (snps,dwc-sdhc) + the Zephyr SDMMC disk
  * ======================================================================
  *
- * Created here rather than inherited: the alp-sdk E8 SoC dtsi does not carry
- * an sdhc node, so this block transcribes it (sdhc@48102000, IRQ 102/103) from
- * the Apache-2.0 zephyr_alif fork exactly as examples/aen/aen-sdcard-readout's
- * overlay does -- that app is this phase's SDHC bring-up reference and the two
- * nodes are deliberately identical.
+ * sdhc0 itself (reg/IRQ/clocks) lives in the shared SoC dtsi
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi, #2051), next to
+ * ethernet@48100000; this overlay only enables it and supplies what is
+ * carrier/app-specific, exactly as examples/aen/aen-sdcard-readout's overlay
+ * does -- that app is this phase's SDHC bring-up reference.
  *
  * PADS: CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3, the SD "B" pad route, which is
  * how the E1M-AEN module is actually wired. A previous revision of this overlay
@@ -488,46 +488,40 @@
 	};
 };
 
-&{/soc} {
-	sdhc0: sdhc@48102000 {
-		compatible = "snps,dwc-sdhc";
-		reg = <0x48102000 0xF70>;
-		interrupts = <102 3>, <103 3>;
-		interrupt-names = "sdmmc", "sdmmc_wakeup";
-		/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
-		 * signaling (#2035): once CMD0 succeeds the SD subsystem would
-		 * otherwise attempt CMD11 and switch to 1.8V I/O signaling through
-		 * the 74LVC157 SDIO mux, which runs at 3.3V and was never designed
-		 * to pass a 1.8V logic level -- vendor Linux sets the equivalent
-		 * `no-1-8-v` + `max-frequency = <25000000>` for this exact block.
-		 * `no-1-8-v` IS read by this driver (DT_INST_PROP_OR(n, no_1_8_v,
-		 * ...) -> props->host_caps.vol_180_support = 0, sdhc_dwc.c:972),
-		 * so this is a real behavioural change, not a documentation-only
-		 * one. `max-bus-freq` is this Zephyr binding's equivalent of
-		 * vendor Linux's `max-frequency` (there is no `max-frequency`
-		 * property on snps,dwc-sdhc.yaml). Vendor Linux also sets
-		 * `no-hispeed`; THIS DRIVER HAS NO EQUIVALENT DT PROPERTY --
-		 * checked zephyr/drivers/sdhc/sdhc_dwc.c: high_spd_support is
-		 * read straight off DWC_SDHC_CAP1_HIGH_SPEED_Msk in hardware with
-		 * no DT override, so that one setting is recorded here, not
-		 * applied. */
-		max-bus-freq = <25000000>;
-		min-bus-freq = <400000>;
-		power-delay-ms = <500>;
-		bus-width = <4>;
-		no-1-8-v;
-		pinctrl-0 = <&pinctrl_sdmmc>;
-		pinctrl-names = "default";
-		status = "okay";
+&sdhc0 {
+	/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
+	 * signaling (#2035): once CMD0 succeeds the SD subsystem would
+	 * otherwise attempt CMD11 and switch to 1.8V I/O signaling through
+	 * the 74LVC157 SDIO mux, which runs at 3.3V and was never designed
+	 * to pass a 1.8V logic level -- vendor Linux sets the equivalent
+	 * `no-1-8-v` + `max-frequency = <25000000>` for this exact block.
+	 * `no-1-8-v` IS read by this driver (DT_INST_PROP_OR(n, no_1_8_v,
+	 * ...) -> props->host_caps.vol_180_support = 0, sdhc_dwc.c:972),
+	 * so this is a real behavioural change, not a documentation-only
+	 * one. `max-bus-freq` is this Zephyr binding's equivalent of
+	 * vendor Linux's `max-frequency` (there is no `max-frequency`
+	 * property on snps,dwc-sdhc.yaml). Vendor Linux also sets
+	 * `no-hispeed`; THIS DRIVER HAS NO EQUIVALENT DT PROPERTY --
+	 * checked zephyr/drivers/sdhc/sdhc_dwc.c: high_spd_support is
+	 * read straight off DWC_SDHC_CAP1_HIGH_SPEED_Msk in hardware with
+	 * no DT override, so that one setting is recorded here, not
+	 * applied. */
+	max-bus-freq = <25000000>;
+	min-bus-freq = <400000>;
+	power-delay-ms = <500>;
+	bus-width = <4>;
+	no-1-8-v;
+	pinctrl-0 = <&pinctrl_sdmmc>;
+	pinctrl-names = "default";
+	status = "okay";
 
-		/* The Zephyr SDMMC disk. `disk-name = "SD"` is the string phase 9
-		 * passes to disk_access_init() and the string the FAT mount's
-		 * "/SD:" volume prefix resolves through. */
-		sdmmc {
-			compatible = "zephyr,sdmmc-disk";
-			disk-name = "SD";
-			status = "okay";
-		};
+	/* The Zephyr SDMMC disk. `disk-name = "SD"` is the string phase 9
+	 * passes to disk_access_init() and the string the FAT mount's
+	 * "/SD:" volume prefix resolves through. */
+	sdmmc {
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "okay";
 	};
 };
 

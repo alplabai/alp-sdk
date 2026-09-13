@@ -630,6 +630,36 @@
 	};
 
 	/*
+	 * ALP-SDK DELTA (#2051), not upstream: SD Host Controller
+	 * (snps,dwc-sdhc, IRQ 102/103), promoted here from per-example overlay
+	 * copies -- examples/aen/aen-sdcard-readout and examples/aen/aen-evk-demo
+	 * each used to declare an IDENTICAL sdhc0 node from scratch, the same
+	 * duplication pattern the header comment above already calls out for
+	 * dma0/evtrtr0. reg/IRQ transcribed from the Apache-2.0 zephyr_alif fork
+	 * (dts/arm/alif/ensemble/common/e1.dtsi, sdhc@48102000), same as every
+	 * other node in this file.
+	 *
+	 * `clocks = <&clockctrl ALIF_SDC_CLK>` is the fix for #2051's actual root
+	 * cause: CLKCTL_PER_MST.PERIPH_CLK_ENA bit 16 (SDC_CKEN) gates this block
+	 * and is off by default -- with it off, every SDHC register (including
+	 * read-only CAPABILITIES1) reads 0x00000000. See alif-ensemble-clocks-ext.h
+	 * for the id and its own citations, and sdhc_dwc_init() (zephyr/drivers/
+	 * sdhc/sdhc_dwc.c) for where it gets enabled.
+	 *
+	 * A board overlay enables this node (status="okay") and supplies
+	 * pinctrl-0/pinctrl-names (the SD pad route is carrier-specific) plus
+	 * bus-width/max-bus-freq/no-1-8-v/power-delay-ms as its wiring needs.
+	 */
+	sdhc0: sdhc@48102000 {
+		compatible = "snps,dwc-sdhc";
+		reg = <0x48102000 0xF70>;
+		interrupts = <102 3>, <103 3>;
+		interrupt-names = "sdmmc", "sdmmc_wakeup";
+		clocks = <&clockctrl ALIF_SDC_CLK>;
+		status = "disabled";
+	};
+
+	/*
 	 * DesignWare DWC_ssi SPI0 (AHB, always-on domain).  Driven by the alp-sdk
 	 * vendored DWC-SSI driver (drivers/spi/spi_dw_alif.c, compatible
 	 * "alif,dwc-ssi-spi") -- NOT upstream's "snps,designware-spi" spi_dw, which

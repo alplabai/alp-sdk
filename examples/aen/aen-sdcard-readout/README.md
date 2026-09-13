@@ -29,109 +29,71 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-sd
 ## What it shows
 
 1. `cc3501e_bridge_bringup()` → power up the on-module CC3501E coprocessor and
-   bring the inter-chip SPI1 bridge up (~900 ms).
-2. Assert the SDIO mux ENABLE (E1M `IO20` → CC3501E `GPIO_26`, active-low)
-   over the CC3501E GPIO proxy, so the card is actually connected to the SoC.
-3. Pulse `SD_RST` (native Alif GPIO, `P14_2`) low then high — see `main()`'s
-   step 6 comment for the three vendor sources (vendor Linux
-   `sdhci-alif-reset.c` + its devicetree binding, and Alif's own baremetal
-   DFP `demo_sd.c`) that all drive this exact line before touching an SD host
-   controller on this pad. Never driven before this revision.
-4. `disk_access_init("SD")` → SDHC controller + SD card enumeration.
-5. On success, read the card geometry (`GET_SECTOR_COUNT` / `GET_SECTOR_SIZE`).
+   bring the inter-chip SPI1 bridge up (~900 ms), then a meta handshake
+   (VERSION/MAC/CAPABILITIES) and GPIO proxy attach — proves the bridge link
+   itself, independent of the SD card path below.
+2. Three controller-level probes, none of which touch an SD pin: a bare CMD0
+   (does the card clock exist at all), a read-only check that the SD
+   peripheral clock gate (`CLKCTL_PER_MST` bit 16, `SDC_CKEN`) is set plus a
+   real `sdhc_hw_reset()` + CMD0, and an SE transport sanity check.
+3. **SAFETY (#2051): does NOT assert the SDIO mux ENABLE, does NOT drive
+   `SD_RST`, and does NOT attempt `disk_access_init()`.** See Status below —
+   this board's mux hardware makes all three unsafe or pointless.
 
-This app is now self-sufficient: it no longer needs `aen-evk-demo`'s other
-phases to reach the card, only steps 1-3 above, run before step 4. **Still
-read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*` call, no
-`disk_access_write`, no `mkfs` anywhere in this app; the `SD_RST` pulse is a
-GPIO write, not a disk write.
+**Still read-only by construction** — no `CONFIG_FILE_SYSTEM`, no `fs_*`
+call, no `disk_access_write`, no `mkfs` anywhere in this app.
 
-`RESULT PASS` requires a card to enumerate. A bridge or mux failure is its own
-`RESULT FAIL`, reported before `disk_access_init` is even attempted — a disk
-error measured with the mux undriven is not a real measurement. A clean
-bridge + mux + controller bring-up where the card still does not enumerate is
-reported **PARTIAL**.
+This app prints `RESULT SKIPPED` and exits 0: not a failure, the expected
+outcome on this board revision (see Status).
 
 ## Status
 
-> **UPDATE (#2051) — the EVK SD mux hardware itself is broken; a card cannot
-> enumerate end to end on this board, whatever the firmware does.** The
-> maintainer confirmed (2026-09-13) the E1M-EVK 2626-R2 SDIO mux stage
-> (74LVC157, `U38`/`U39`) has a hardware defect and needs a component change
-> before it will pass the SD signals correctly. This is separate from, and on
-> top of, the mux **control lines** below (`IO20` ENABLE, the `IO21` SELECT
-> jumper) — those are driven correctly; it is the mux chip itself that is
-> faulty on this board revision. `#2051` also found and fixed a real
-> **driver** bug (the SD peripheral clock gate, `SDC_CKEN`, was never enabled
-> — see the CHANGELOG) plus secondary reset-path hardening; both are verified
-> up to the controller on this same bench (`SDC_CKEN` set, `CAPABILITIES1`
-> non-zero, reset bits self-clear, interrupt enables armed) but neither of
-> them — nor anything else in software — can make a card enumerate through a
-> physically broken mux. Do not read a `-116` or `DISK_STATUS_NOMEDIA` from
-> this app on a 2626-R2 EVK as a controller or driver defect beyond that
-> point; it is expected until the mux hardware is replaced.
+> **SAFETY (#2051) — this app no longer drives the SD mux ENABLE or
+> `SD_RST` on the E1M-EVK 2626-R2, and does not attempt
+> `disk_access_init()`.** The board's netlist
+> (`metadata/boards/e1m-evk/netlists/E1M-EVK-2626-R2_pinmap.csv`, `U38`/`U39`)
+> shows every 74LVC157 mux OUTPUT drives a SoC-facing net: `E1M_D3/D2/D1/D0`,
+> `E1M_SDIO_RST`, `E1M_CLK`, `E1M_CMD`. The maintainer confirmed (2026-09-13)
+> this mux stage has a hardware defect and needs a component change. With
+> `MUX_EN` asserted, a mux whose outputs are stuck driving fights the SoC's
+> own drivers on those pads — SD CLK/CMD/DAT and `SD_RST` — which is driver
+> contention on live pads, not a benign "no card" failure. So this app leaves
+> `MUX_EN` disabled/undriven (its safe idle state) and stops before ever
+> reaching the card path. Do not read `RESULT SKIPPED`, or the absence of a
+> `-116`/`DISK_STATUS_NOMEDIA` reading, as evidence the card path works —
+> it was never attempted.
 
-**Controller/driver path PROVEN on E8, and the bridge + mux-control + reset
-path now runs too (RESULT PARTIAL):** `cc3501e_bridge_bringup()` powers the
-coprocessor and brings SPI1 up; the mux ENABLE write + read-back both run
-over the GPIO proxy; `SD_RST` (`P14_2`) is pulsed low then high over the
-native Alif GPIO backend; the `snps,dwc-sdhc` driver builds, the device
-inits, and `disk_access_init` runs. No card enumerates. Part of that was a
-driver bug (`#2051`, now fixed); the rest is the mux hardware defect above,
-which no firmware change can work around.
+`#2051` also found and fixed a real **driver** bug unrelated to the mux: the
+SD peripheral clock gate (`SDC_CKEN`, `CLKCTL_PER_MST` bit 16) was never
+enabled, so the whole SDHC block read back all-zero (see the CHANGELOG),
+plus secondary reset-path hardening. **Neither has been run on real hardware
+as of this head** — the fix is expected, not bench-confirmed, on this
+specific commit; the evidence for the ORIGINAL bug (the all-zero readback)
+was bench-confirmed on an earlier revision, which is a different claim.
+`SDC_CKEN` explains that all-zero evk-03 readback only. It does **not**
+explain, and does not close, this file's original open question: a
+`SW_RST_CMD`=1 reading on a **clocked** block (`SW_RST_R` at `0x4810202F`
+stayed `0x02`, alongside `CAPABILITIES1[5:0]=0x0a` and
+`NORMAL_INT_STAT_EN=0x7eff`/`ERROR_INT_STAT_EN=0xffff` — values an unclocked
+block cannot give back). That question is still open and is not this app's
+job to fix; see `main()`'s own header comments for the full history.
 
-> **What used to block a card from being reachable at all, and is now
-> resolved by this app itself:**
-> 1. ~~A CC3501E GPIO-proxy write that routes the mux~~ — the coprocessor
->    firmware always implemented the opcode (`CMD_GPIO_WRITE` 0x51 →
->    `handle_gpio_write` in `cc3501e-bridge-firmware:src/protocol.c`,
->    firmware `0.4.0`, protocol version `5`); this app now calls it via
->    `alp_gpio_write(ALP_E1M_GPIO_IO20, false)` over the proxy.
-> 2. ~~The inter-chip SPI1 link brought up in this app~~ — `main()` now calls
->    `cc3501e_bridge_bringup()` (copied verbatim from `aen-evk-demo`'s
->    `src/cc3501e_bridge.{c,h}`) before touching the disk at all.
-> 3. **SD pad route** — this overlay wires the **B** route (`CLK=P14_1`,
->    `CMD=P14_0`, `D0..D3=P13_0..P13_3`), confirmed against the module
->    schematic and corroborated by five metadata sources plus two netlists
->    (see the overlay's header comment). Unchanged by this revision.
-> 4. ~~`SD_RST` (`P14_2`) never driven~~ — three independent vendor sources
->    (vendor Linux `sdhci-alif-reset.c` + its devicetree binding, and Alif's
->    own baremetal DFP `demo_sd.c`) drive this exact line before an SD host
->    controller probes on this pad; `main()` now pulses it low then high
->    (see its step 6 comment) before `disk_access_init`.
->
-> **What is STILL bench-set by hand, not by this app:** the mux **SELECT**
-> (E1M `IO21`) is not software-drivable on this module at all — on r2 it is
+> **The mux CONTROL lines — separate from the mux STAGE above.** ENABLE
+> (E1M `IO20` → CC3501E `GPIO_26`) was, in an earlier revision of this app,
+> proven driven by a write + read-back over the GPIO proxy — but per the
+> SAFETY note above, this app no longer drives it at all. SELECT (E1M
+> `IO21`) is not software-drivable on this module at all — on r2 it is
 > physically open, on r1 driving it would contend with the P18 header
-> jumper — so it is set by a jumper on header **P18** (see
-> `aen-evk-demo`'s phase 9 header comment for the full netlist trace). A
-> wrong or missing jumper still reads as `DISK_STATUS_NOMEDIA` from this app,
-> indistinguishable from an empty slot.
->
-> **What is open now that the bridge, mux and reset line are all proven
-> driven, and is NOT this app's job to fix:** the card still does not
-> enumerate. `SW_RST_R` at `0x4810202F` stays `0x02`, so `SW_RST_CMD` never
-> self-clears and `disk_access_init` returns `-116`. As of this revision
-> that reading is taken with `SD_RST` proven pulsed beforehand, so it is no
-> longer explainable by an undriven/undefined reset line either — this is a
-> controller/card-handshake question, under separate investigation, not a
-> mux, bridge or reset one — this app's job was to stop measuring that
-> question with the card electrically disconnected or its reset line
-> floating, which it now has.
->
-> **UPDATE (#2051):** the `SW_RST_CMD`-stuck reading above turned out to be a
-> real driver bug (the SD peripheral clock, `SDC_CKEN`, was never gated on —
-> see the CHANGELOG), now fixed and verified up to the controller. It was
-> **not**, and was never going to be, the whole story: the maintainer has
-> since confirmed the 2626-R2 EVK's SD mux stage itself (`U38`/`U39`) is
-> hardware-defective and needs a component change. So "wiring `SD_RST` into
-> `sdhc_dwc.c` proper" below, and the `SW_RST_CMD` clearing that a clean
-> reset pulse was expected to produce, are necessary but not sufficient —
-> fixing them does not make a card enumerate on this board revision.
+> jumper — so it is set by a jumper on header **P18**, and unlike ENABLE it
+> has never been read back or otherwise verified by any app: "driven
+> correctly" was never an accurate description of SELECT, only of ENABLE,
+> and ENABLE is not driven any more either.
 
-So on this bench the SDHC **controller + driver are proven** and a real
-driver bug in the reset/clock path is now fixed (`#2051`), but a card still
-cannot enumerate end to end on a 2626-R2 EVK: the mux **stage** (not its
-control lines) is hardware-broken and needs a component change, per the
-maintainer. Tier-2 retires onto the opt-in fork once a card is actually
+So on this bench: the SDHC **controller + driver build and init**, a real
+clock-gate + reset-path driver bug is fixed (`#2051`, expected but not yet
+bench-verified on this head), and the SD **card path is intentionally not
+attempted at all** on a 2626-R2 EVK — the mux **stage** (not its control
+lines) is hardware-broken and needs a component change, per the maintainer,
+and no firmware change can work around driver contention on a physically
+broken mux. Tier-2 retires onto the opt-in fork once a card is actually
 read on hardware where that is possible.

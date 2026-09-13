@@ -22,11 +22,20 @@ nobody at the bench) never reads as a failed run.
 
 ## Scope of this slice
 
+> **SAFETY (#2051): phase 9 (SD card) always returns `SKIPPED` on the
+> E1M-EVK 2626-R2 now** -- the maintainer confirmed this board's SDIO mux
+> stage (74LVC157 `U38`/`U39`) has a hardware defect, and its outputs face
+> the SoC on CLK/CMD/DAT, so this phase no longer asserts the mux ENABLE or
+> attempts `disk_access_init()`/`fs_mount()` at all. The description below
+> (write -> read -> verify round trip) describes what this phase did before
+> that defect was confirmed; see `src/main.c`'s `phase_sdcard()` and its
+> file-header SAFETY note for the current, always-skip behaviour.
+
 Fourteen phases run in a fixed order. Twelve are fully implemented against
 bench-proven-or-hardware-exercising drivers -- the first six, phase 7 (the
 rotary encoder, an attended three-way verdict), phase 8 (the CC3501E Wi-Fi 6
 / BLE 5.4 coprocessor over the inter-chip SPI bridge), phase 9 (the microSD
-card, behind its SDIO mux, with a real write -> read -> verify round trip),
+card, behind its SDIO mux -- SKIPPED on 2626-R2, see the SAFETY note above),
 phase 10 (RMII Ethernet through the GMAC and the on-module DP83825 PHY),
 phase 11 (sound out over I2S3 to both TAS2563 amps, PDM mic capture, an
 energy-correlation verdict -- see its own row below for the safety
@@ -62,7 +71,7 @@ input. No camera module is required by, or in scope for, either.
 | 6 | RGB LED | PWM0 (red) / PWM3 (green) / PWM1 (blue) | Drives each channel via `<alp/pwm.h>`, then asserts the UTIMER **register** the driver programmed (driver-enable + compare-enable bits, clock gate, run bit, a real fractional duty), then holds the colour lit for 1500 ms and names the colour it expects -- restores each channel to idle before returning (phase 9's SD-card mux departs from this idiom on purpose -- see its row). | That the LED visibly lit, and which colour it lit. The hold makes that checkable **by an operator watching the board**; the verdict itself is still the register read-back, and every channel programs identically, so a wrong `EVK_PWM_LED_*` colour mapping would still PASS. Only the eye settles the mapping. |
 | 7 | Rotary encoder | QEC0 / UTIMER channel 12 (P3_0 `ENC0_X`, P3_1 `ENC0_Y`, push switch P4_3) | An **attended**, three-way verdict (`ab2a71dc3`): asks the operator to turn the knob, then samples the raw quadrature pads and the UTIMER's own `CNTR` register in parallel for `ENCODER_ATTEND_MS`. Pads toggled AND `CNTR` moved -> `PASS`. Pads toggled, `CNTR` static -> `FAIL`, further split by `CNTR_CTRL` into "never correctly armed" vs. "armed but not counting". Pads never toggled -> `SKIPPED`, not `FAIL` -- genuinely indistinguishable from here between "nobody turned the knob" and "the signal never reaches the SoC". | Whether "armed but not counting" is a QEC-channel-12 silicon limitation (Alif's own CMSIS driver refuses `SRC_1` for QEC channels 12-15) -- noted, not chased, from an app. |
 | 8 | CC3501E Wi-Fi/BLE | inter-chip SPI1 (P14_6/5/4 + hardware SS0 P14_7), WIFI_EN P15_5, nRESET P15_1_FLEX, READY P2_6 | Powers (`WIFI_EN` high) and resets the coprocessor -- **nothing answers before this**, its supply is host-gated -- then `PING` (`0x00`) with a bounded 25 x 200 ms retry, `GET_VERSION` (`0x01`) **compared on MAJOR only, accepting either `ALP_CC3501E_PROTOCOL_MAJOR` or the ADR 0033 migration-window `ALP_CC3501E_PROTOCOL_MAJOR_LEGACY`** (a MINOR delta is additive and safe, and a legacy MAJOR means this board has not been reflashed to the new wire yet -- both are reported, neither is gated), `GET_MAC` (`0x03`) checked for a structurally valid station address **and issued twice, with the two replies required to match** (structure alone cannot tell a bit-flipped MAC from a real one, and the right value is per-part so it cannot be hard-coded), `GET_CAPABILITIES` (`0x06`), a passive `WIFI_SCAN_START` (`0x10`), and `BLE_ENABLE` (`0x30`). Every return code is printed. `PASS` requires **all five** of an accepted major version, valid MAC, capabilities readable, scan round-tripped, BLE up -- a `PING` alone is explicitly not enough. | Signal quality, throughput, or that any network is reachable -- it never associates. An **empty scan is `PASS`-but-`UNCORROBORATED`**: zero networks is a statement about the RF environment, not about this board, so the gate is that the scan *round-tripped*, not that it found anything. Which colour of failure a dead link is (power / pinmux / firmware) -- the log names the three to check. |
-| 9 | SD card | SDIO 74LVC157 mux (ENABLE = E1M `IO20` -> CC3501E `GPIO_26`, over the phase-8 bridge) -> SD Host Controller `sdhc@48102000` (`snps,dwc-sdhc`, CLK `P4_1` / CMD `P4_2` / D0..D3 `P6_0`..`P6_3`) -> Zephyr SDMMC disk `"SD"` -> FAT | Drives the mux ENABLE **low** through the portable `alp_gpio_*` API on `ALP_E1M_GPIO_IO20` (the CC3501E GPIO proxy turns it into a bridge transaction; the raw `GPIO_26` index lives in the route table, not in app code), then `disk_access_init("SD")`, then the geometry verbatim (sector count, sector size), then **a real write -> read -> verify round trip**: it writes a per-run payload to `/ALPDEMO.TXT`, `fs_truncate`s the file to what the write landed (when it landed anything), `fs_sync`s so the read-back cannot be served from cache, seeks to 0, reads it back and `memcmp`s it. `PASS` requires that compare to succeed -- `disk_access_init` returning 0, or the geometry reading back, is explicitly **not** a pass. The payload carries a `k_cycle_get_32()` nonce so last run's leftover file cannot compare equal. The five outcomes are kept apart in the reported reason, because they send you to different places: mux ENABLE not drivable (`FAIL` -- `IO20` is routed on both revisions and phase 8 leaves the bridge up), no card detected (`SKIPPED`, `DISK_STATUS_NOMEDIA`), controller init failed with a card present (`FAIL`), card present but the mount failed for one of three indistinguishable FatFs causes (`SKIPPED`, `-ENODEV`), write/verify mismatch (`FAIL`). Unlike phase 6, this phase does **not** restore the mux to idle on exit: `IO20`/`GPIO_26` is left driven low (asserted) through phases 10-14 and past the end of the run, on the maintainer's instruction that low is this mux's working state on this EVK, not a resource this phase borrows and hands back. | Whether the mux **SELECT** is in the right position -- it is not software-drivable and cannot be read back. `IO21` reached CC3501E `GPIO_30` on r1 but is left open on the module for r2, so the position is set by a jumper on header **P18**: fitted pulls `MUX_SEL.SDIO` high through `R198`, open lets `R27` pull it to `0V`, and that net drives both mux selects (`U38.S`, `U39.S`). A wrong position therefore surfaces as `DISK_STATUS_NOMEDIA`, indistinguishable from an empty slot -- the log names both causes. **On r1, do not fit the jumper while firmware drives `IO21`**: the net reaches both P18 and E2 `L3`, so that is a driven pin against the header rail. Fit the jumper or drive the pin, never both; this phase never drives `IO21` on any revision. Also not asserted: card health, wear, or anything outside the one file the demo owns -- it **never formats**, never `mkfs`, never writes outside `/ALPDEMO.TXT` and never touches the partition table (`FS_MOUNT_FLAG_NO_FORMAT` at the mount site **and** `CONFIG_FS_FATFS_MOUNT_MKFS=n`, which keeps the format code out of the image entirely). |
+| 9 | SD card | SDIO 74LVC157 mux (ENABLE = E1M `IO20` -> CC3501E `GPIO_26`, over the phase-8 bridge) -> SD Host Controller `sdhc@48102000` (`snps,dwc-sdhc`) -> Zephyr SDMMC disk `"SD"` -> FAT | **SAFETY (#2051): always `SKIPPED` on the 2626-R2 EVK.** The mux stage (`U38`/`U39`) has a confirmed hardware defect -- its outputs face the SoC on CLK/CMD/DAT, so asserting `MUX_EN` would fight the SoC's own drivers on those pads. This phase no longer drives `IO20`/`GPIO_26`, and never reaches `disk_access_init()`, `fs_mount()`, or the old `/ALPDEMO.TXT` write -> read -> verify round trip described in earlier revisions of this row -- see `phase_sdcard()`'s SAFETY comment in `src/main.c` and README's own SD-card example (`examples/aen/aen-sdcard-readout`) for the full derivation. | The mux **SELECT** (header **P18**) was already unverifiable (not software-readable) before this change; now ENABLE is not driven either, so nothing about mux position is asserted by this phase at all. Card health, filesystem content, and anything past the mux stage remain untouched, same as always. |
 | 10 | Ethernet | RMII GMAC `ethernet@48100000` + on-module TI DP83825 PHY (REFCLK P11_0, RXD0 P11_3, RXD1 P1_1, CRS_DV P6_7, TXD0 P10_4, TXD1 P10_5, TXEN P1_5, MDC/MDIO P11_2/P11_1); PHY power `E_PHY_PWRDWN` P15_4, reset `E_PHY_RESET` P11_6 | Powers and resets the PHY from a `SYS_INIT` hook that runs **before the Ethernet driver's own init** -- the RMII ref-clock AUTO probe only finds the module's external 50 MHz oscillator if the PHY is already powered when it runs, so the phase reports which source `ETH_CTRL` bit 4 latched. Then reads the PHY's real status **over MDIO** (fixed-link does no MDIO of its own), sets `RCSR` bit 7 for 50 MHz-reference RMII, restarts auto-negotiation, and gates `PASS` on **a DHCPv4 lease** -- DISCOVER/OFFER/REQUEST/ACK completes only over a genuinely bidirectional link. Prints `tx_bytes`/`rx_bytes` throughout. | That `net_if_is_carrier_ok()` means anything: with an unmanaged fixed-link PHY it is **synthetic**, it reports what devicetree hard-codes, and it reads true with the cable in your hand. It is printed labelled as such and is never gated on. Also: link speed/throughput, and whether a segment that sends us nothing is quiet or broken -- see the verdict table below. |
 | 11 | Sound out -> PDM in | I2S3 (`i2s3@49017000`, P9_3/4/5) -> 74LVC157 mux (CC3501E-proxied ENABLE = E1M `IO8` -> `GPIO_30`, SELECT = E1M `IO13` -> `GPIO_13`) -> two TAS2563 amps (`0x4D`/`0x4E`, `EVK_PIN_AMP_ENABLE`/`EVK_PIN_AMP_FAULT`); HP PDM (`pdm@4902d000`, P6_0/P6_1, 2 of the EVK's 4 MP34DT05 mics) via `<alp/audio.h>` | Two independent safety levers, both set to their quietest value **before either amp is ever told to switch**: `tas2563_set_amp_level(TAS2563_AMP_LEVEL_MIN)` over I2C on both amps while still in software shutdown, and `alp_audio_out_set_volume()` opened and started at a small fraction of unity before `tas2563_set_mode(ACTIVE)` is called on either amp -- volume is only ramped up afterwards, capped well below half of unity, for one ~250 ms tone. Both amps' fault words are read over I2C before and after (a `TAS2563_FAULT_SHUTDOWN_CAUSES` bit set after is a real `FAIL`, never swallowed) plus the raw `EVK_PIN_AMP_FAULT` pin as corroboration. `PASS` requires both amps to have initialised, no shutdown-cause fault, and `sound_pdm_capture_correlated()` (`src/sound_verdict.h`) to say the PDM energy captured *during* the tone cleared both a 2x ratio and an absolute floor over a pre-tone room-noise baseline. Idle-restored on every exit path including every failure -- mirrors phase 6, not phase 9's deliberate non-restore, since nothing after phase 11 needs the audio path connected and an amplifier is a higher-risk-if-left-on part than an SD bus. | A specific amplitude or frequency response -- this is an energy check (sum of `\|sample\|` over a fixed capture window), not a spectral one: it cannot tell a 1 kHz tone from a door slam, and does not try to. Also not asserted: the second PDM mic pair (`IO`s `P11_4`/`P5_4`, channels 4/5) -- `<alp/audio.h>`'s Zephyr backend caps at 2 channels, so only the first pair is reachable through the portable surface this phase uses. |
 | 12 | Screen (DSI) | -- (no controller reachable; see Cannot assert) | `alp_display_open()` is called for real and its concrete failure is reported, rather than skipped without trying. | A display of any kind. `<alp/display.h>`'s Zephyr backend needs a bound Zephyr *panel* driver via an `alp-display0..3` DT alias; this SoC's peripherals dtsi declares only the CSI/DSI D-PHY it shares with the (also unpopulated) camera path, itself `status = "disabled"` with a flagged BENCH-UNVERIFIED placeholder clock -- there is no separate DSI protocol-layer host-controller node or driver anywhere in this tree, checked directly rather than assumed from "no panel is fitted". `LCD_PWR_EN`/`LCD_RST` (TCAL9538 `P0`/`P1`) are still never driven, for a stronger reason than phase 4's: there is no controller downstream that could do anything with a powered panel. |
@@ -327,57 +336,24 @@ in, the same phase stops after `wire link DOWN` and reports
 `SKIPPED -- no carrier -- cable?`, which is a normal unattended run and not a
 failure.
 
-Phase 9's own lines, on a bench with a card in the slot and the P18 jumper
-fitted. **This transcript is ILLUSTRATIVE, not a captured run** -- the phase
-has not yet been run against a card on real silicon, so the shape of the
-lines is authoritative (it is transcribed from the `printf`s) but the
-geometry, `nonce` and `uptime` values are placeholders. The `nonce` differs
-every run, which is exactly the point of it.
+Phase 9's own lines. **SAFETY (#2051): this is the ONLY transcript phase 9
+can produce on a 2626-R2 EVK now** -- it never reaches the mux, the
+controller, or the card, regardless of what is in the slot or the P18
+jumper position:
 
 ```
 [evkdemo] -- Phase: SD card (74LVC157 SDIO mux -> DWC SDHC -> FAT) --
-[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active low, driven LOW): configure -> 0, write -> 0, read-back -> 0 (level=LOW, corroboration only -- may reflect the bridge's output register rather than the pad, not proof the line moved), settle=10 ms
-[evkdemo] SD: disk_access_init("SD") -> 0
-[evkdemo] SD: geometry: 31116288 sectors x 512 B = 15193 MiB (ioctl rc 0 / 0)
-[evkdemo] SD: fs_mount(FAT, "/SD:", NO_FORMAT) -> 0
-[evkdemo] SD: writing 51 B to /SD:/ALPDEMO.TXT, nonce=1f3a90c4 (per-run, so a stale file from an earlier run cannot compare equal)
-[evkdemo] SD: fs_write -> 51 of 51 B, fs_truncate(51) -> 0, fs_sync -> 0
-[evkdemo] SD: fs_close -> 0
-[evkdemo] SD: read back 51 B and they COMPARE EQUAL: aen-evk-demo phase 9 nonce=1f3a90c4 uptime=14882ms
-[evkdemo] SD: fs_unmount -> 0
-[evkdemo] SD: mux enabled, card enumerated, FAT mounted, 51 B written -> read -> compared equal -> PASS
-```
-
-The geometry line is **printed, not gated**: which card is in the slot is
-useful, but "the geometry read back" is a chip-ID read by another name, and
-this app does not count those as passes. The gate is the `COMPARE EQUAL`
-line, and nothing weaker.
-
-With an empty slot -- or with the P18 jumper in the wrong position, which the
-controller cannot tell apart from an empty slot -- the phase stops at
-`disk_access_init` and names both causes:
-
-```
-[evkdemo] SD: disk_access_init("SD") -> 2
-[evkdemo] SD: NOMEDIA -- the controller sees no card. Either the slot is empty, or the 74LVC157 mux is not passing the card through: ...
-```
-
-With a card that carries no FAT volume it stops at the mount, and does **not**
-create one:
-
-```
-[evkdemo] SD: fs_mount(FAT, "/SD:", NO_FORMAT) -> -19
-[evkdemo] SD: fs_mount -> -ENODEV -- subsys/fs/fat_fs.c maps three FatFs causes (FR_INVALID_DRIVE, FR_NOT_ENABLED, FR_NO_FILESYSTEM) onto the same code: either no FAT filesystem on this card, or SD_MOUNT_POINT="/SD:" does not match this build's FF_VOLUME_STRS entry. disk_access_init("SD") already returned 0 above, which rules out the disk name ...
+[evkdemo] SD: SKIPPED -- E1M-EVK 2626-R2's SD mux (74LVC157 U38/U39) has a confirmed hardware defect; its outputs face the SoC on CLK/CMD/DAT, so driving MUX_EN would fight the SoC's own drivers on those pads. Not attempting disk_access_init()/fs_mount(); rework pending (component change). See README.md.
 ```
 
 The summary below is **ILLUSTRATIVE, not a captured run** -- it is hand-built
 from `PHASES[]`'s real names and the `"phase %2zu/%2zu: %-34s %s"` format
 string in `src/main.c`, for a hypothetical bench with a cable, a DHCP server,
-a FAT-formatted card in the slot with the P18 mux-select jumper fitted, an
-operator who turned the rotary encoder when prompted, and speakers + mics
-that closed the sound loop. It has not been captured end to end on silicon
-(phase 9, phase 7 and phase 11 in particular -- see the note above phase 9's
-own transcript):
+an operator who turned the rotary encoder when prompted, and speakers + mics
+that closed the sound loop. Phase 9 is fixed at `SKIPPED` per the SAFETY note
+above, not hypothetical. It has not been captured end to end on silicon
+(phase 7 and phase 11 in particular -- see the note above phase 9's own
+transcript):
 
 ```
 [evkdemo] phase  1/14: RTC + temperature (BRD_I2C)        PASS
@@ -388,28 +364,25 @@ own transcript):
 [evkdemo] phase  6/14: RGB LED (PWM0/1/3)                 PASS
 [evkdemo] phase  7/14: Rotary encoder                     PASS
 [evkdemo] phase  8/14: CC3501E Wi-Fi/BLE                  PASS
-[evkdemo] phase  9/14: SD card                            PASS
+[evkdemo] phase  9/14: SD card                            SKIPPED
 [evkdemo] phase 10/14: Ethernet                           PASS
 [evkdemo] phase 11/14: Sound out -> PDM in                PASS
 [evkdemo] phase 12/14: Screen (DSI)                       SKIPPED
 [evkdemo] phase 13/14: JPEG encode (Hantro VC9000E)       PASS
 [evkdemo] phase 14/14: NPU inference                      SKIPPED
 ...
-[evkdemo] RESULT: 12 PASS, 2 SKIPPED, 0 FAIL
+[evkdemo] RESULT: 11 PASS, 3 SKIPPED, 0 FAIL
 [evkdemo] done
 ```
 
 On an UNATTENDED bench -- the more common case, nobody at the knob -- phase 7
 reads `Rotary encoder   SKIPPED   pads never toggled -- unattended, or signal
-not reaching the SoC` instead, and the tally drops to `11 PASS, 3 SKIPPED,
+not reaching the SoC` instead, and the tally drops to `10 PASS, 4 SKIPPED,
 0 FAIL`.
 
 With no cable in the port, phase 10 reads
 `Ethernet   SKIPPED  no carrier -- cable?` and the tally is
-`10 PASS, 4 SKIPPED, 0 FAIL` -- still not a failed run. With an empty SD
-slot as well, phase 9 reads
-`SD card   SKIPPED  no card detected (or mux SELECT on P18 wrong)` and it
-is `9 PASS, 5 SKIPPED, 0 FAIL`. Neither is a failure.
+`9 PASS, 5 SKIPPED, 0 FAIL` -- still not a failed run.
 
 A run with skips is not a failed run -- the three counts are always
 reported together.
