@@ -459,9 +459,15 @@ adds a bench PASS row.
 
 **UNVERIFIED ON SILICON.** No bench unit reachable at implementation time has
 an OSPI SecAES-relevant part populated -- the bench module is board rev r1
-(EEPROM manifest "E1M-AEN801 r1", serial `2617-0001`); the Macronix
-`MX25UM25645GXDI00` this targets is populated (`DNP = 0`) only on the R2 BOM
-(#915). The transport half of this call reuses the identical
+(EEPROM manifest "E1M-AEN801 r1", serial `2617-0001`), and E1M-AEN801
+populates NEITHER external OSPI memory on any revision
+(`metadata/e1m_modules/E1M-AEN801.yaml`:
+`on_module.ospi_memories.ospi0.assembled: false`) -- it runs from the SoC's
+on-die MRAM instead.  This call targets OSPI0 because that is the only OSPI
+bus any AEN SKU wires at all; E1M-AEN803 is the SKU that populates OSPI0 on
+this shared PCB, and issue #2041 measured that part as an ISSI
+`IS25WX256-JHLE` on CS1 -- not the Macronix `MX25UM25645GXDI00` this section
+previously named. The transport half of this call reuses the identical
 `se_service_send_request()` path already bench-proven for SE CryptoCell
 (`aen-se-crypto`: SHA-256 + AES-128-GCM MATCH); the OSPI write-key
 round-trip itself has not been run against real SE firmware.
