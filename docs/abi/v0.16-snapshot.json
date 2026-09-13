@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-12",
+  "generated": "2026-09-13",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7677,6 +7677,10 @@
         "TAS2563_I2C_ADDR_VDD_PULL": {
           "hash": "a456a298adafb48b",
           "value": "0x4Eu"
+        },
+        "TAS2563_RESET_SETTLE_US": {
+          "hash": "1f6673afe76038a7",
+          "value": "200u"
         }
       },
       "typedefs": {

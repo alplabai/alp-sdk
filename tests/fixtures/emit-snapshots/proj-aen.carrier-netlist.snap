@@ -974,7 +974,7 @@
           "ref": "EVK_I2S_AUDIO_CODEC"
         }
       ],
-      "board_doc": "Routed through the 74LVC157 mux to either the TAS2563 amps (default) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL."
+      "board_doc": "Routed through the 74LVC157 mux to either the TAS2563 amps (default select) or the M.2 E-key I2S; see EVK_PIN_I2S_MUX_SEL. On EVK rev 2626-R2 the mux is wired backwards for this direction regardless of SEL -- confirmed against the netlist, I2S0_WS/SCLK/SDO are the mux's Y OUTPUTS, not inputs, so enabling it (EVK_PIN_I2S_MUX_EN low) cannot route audio out to either destination and instead contends with the SoC's own I2S3 TX pads; alp-sdk#2077."
     },
     {
       "net_id": "EVK_I2S_PDM_MIC",
