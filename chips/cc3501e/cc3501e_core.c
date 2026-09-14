@@ -1575,14 +1575,16 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
 	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
 	uint32_t       next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
 	alp_status_t   s;
-	/* req_seq is the caller's to allocate (see the two callers below): ONE
-	 * value for this whole logical command, re-sent unchanged on every
-	 * attempt of THIS function's own retry loop -- that constancy is what
-	 * lets the firmware answer a repeat from its latch instead of
-	 * re-executing the operation (proto v8, cc3501e-bridge-firmware#102).
-	 * This function never re-allocates it internally; doing so per-iteration
-	 * would make every retry look like a new command, i.e. exactly the bug
-	 * this exists to fix. */
+	/* req_seq is the caller's to allocate -- poll_by_repeat() below (this
+	 * file) and cc3501e_sock_recv() (cc3501e_sockets.c) are the two callers,
+	 * each from its own counter (ctx->req_seq / ctx->sock_recv_seq
+	 * respectively). ONE value for this whole logical command, re-sent
+	 * unchanged on every attempt of THIS function's own retry loop -- that
+	 * constancy is what lets the firmware answer a repeat from its latch
+	 * instead of re-executing the operation (proto v8,
+	 * cc3501e-bridge-firmware#102). This function never re-allocates it
+	 * internally; doing so per-iteration would make every retry look like a
+	 * new command, i.e. exactly the bug this exists to fix. */
 	bool first_lock_attempt = true;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
@@ -1671,8 +1673,8 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
 		 * again" and retries every one of them to the full budget.
 		 *
 		 * That is wrong on its own merits, independent of any single code:
-		 * this loop pre-allocates ONE req_seq before the loop and resends it
-		 * unchanged on every attempt (see the comment above the loop) so the
+		 * this loop is handed ONE req_seq value that stays constant across
+		 * the whole call (see the comment above the loop) so the
 		 * firmware's per-seq retry latch (proto v8, cc3501e-bridge-firmware
 		 * #102) can answer a repeat from its latch WITHOUT RE-EXECUTING the
 		 * op -- so a repeat of any one of these three can only ever replay
@@ -1754,7 +1756,19 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
 /* Public wrapper: allocates the retry seq from the SHARED ctx->req_seq
  * counter, exactly as this function always has, then delegates to
  * poll_by_repeat_seq() above. Every caller except cc3501e_sock_recv()
- * (alp-sdk#2108) goes through this one. */
+ * (alp-sdk#2108) goes through this one.
+ *
+ * Deliberately NO ctx==NULL/!initialised check of its own (alp-sdk#2108
+ * review): poll_by_repeat_seq() below already runs that exact check, and
+ * runs it FIRST -- *rx_len is zeroed before it, matching this function's
+ * body before it split in two. A second, earlier check right here would
+ * return ALP_ERR_NOT_READY without ever reaching that zeroing, silently
+ * changing this error path's behaviour (a caller's *rx_len would keep
+ * whatever it held on entry instead of reading 0). Guard ONLY the
+ * ctx->req_seq access THIS wrapper itself needs to do before the call: an
+ * invalid ctx falls through with req_seq left at 0, a value
+ * poll_by_repeat_seq() never reads because its own check returns before
+ * touching it. */
 alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             alp_cc3501e_cmd_t cmd,
                             const uint8_t    *tx_payload,
@@ -1764,11 +1778,18 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             size_t           *rx_len,
                             uint32_t          timeout_ms)
 {
-	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
-	/* Skips 0, which is reserved for "no identity": the space is 1..31 and
-	 * this pre-increments, so a fresh ctx's first retryable command is seq 1
-	 * (same shape as sock_send_seq / sock_recv_seq / spi1_seq). */
-	ctx->req_seq = (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+	uint8_t req_seq = 0u;
+	if (ctx != NULL && ctx->initialised) {
+		/* Skips 0, which is reserved for "no identity": the space is 1..31
+		 * and this pre-increments, so a fresh ctx's first retryable command
+		 * is seq 1 -- the same 5-bit, skip-0 shape as its sibling
+		 * ctx->sock_recv_seq (NOT sock_send_seq / spi1_seq, which are full
+		 * 8-bit counters that wrap through 0; see req_seq's own comment in
+		 * <alp/chips/cc3501e/core.h> for why this field's space is narrower). */
+		ctx->req_seq =
+		    (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+		req_seq = ctx->req_seq;
+	}
 	return poll_by_repeat_seq(
-	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, ctx->req_seq);
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq);
 }
