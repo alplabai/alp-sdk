@@ -166,7 +166,7 @@ int main(void)
 		 *
 		 * The cause is NOT the pads, though it looked like it.  Floating
 		 * inputs were the leading theory -- the pad word 0x00210005 gives
-		 * AF 5, REN=1, DSC=0 (no bias), SMT=0 (no Schmitt), and the PEC12R's
+		 * AF 5, REN=1, DSC=0 (no bias), SMT=0 (no Schmitt), and the PEC11R's
 		 * A/B contacts are open at a detent -- but a bench run walked four pad
 		 * configurations and the counter kept advancing through all of them:
 		 * no-bias (0x00210005), pull-up (0x00290005), pull-up + Schmitt

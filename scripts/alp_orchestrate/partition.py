@@ -161,13 +161,22 @@ def _reserved_spans(
     The device base is DERIVED, then VERIFIED, never assumed:
 
       - If the device is itself a `memory_map:` region with an integer
-        `base`, that base is the origin.
-      - Otherwise (a whole-window alias like `mram_main`, which declares
-        `base: TBD` deliberately) take the lowest integer base among the
-        sibling regions and require `lowest + capacity == highest region
-        top`. That identity is what proves the alias really spans the same
-        window the fine-grained regions tile; if it does not hold, refuse to
-        convert.
+        `base`, that base is the origin -- authoritative, no further check
+        needed. On every AEN preset today this is the branch `mram_main`
+        takes: #2053 resolved its `base` to `0x80000000`, an ordinary
+        integer like any other region's.
+      - Otherwise (a device with no `base` of its own, e.g. a whole-window
+        alias whose `base:` is still an unresolved `"TBD"` placeholder --
+        no shipped AEN preset has this shape today; `mram_main` was the
+        standing example before #2053) take the lowest integer base among
+        the sibling regions and require `lowest + capacity == highest
+        region top`. That identity is what proves the alias really spans
+        the same window the fine-grained regions tile; if it does not
+        hold, refuse to convert. This is the ONLY leg that ever ran the
+        identity check -- it exists to substitute for a missing origin,
+        so it is unreachable (and its absence is safe, not a gap) once
+        the device carries a real `base` and takes the branch above
+        instead.
 
     `_resolve_flash_device`'s descriptor deliberately carries no physical
     base (Zephyr's flash-mapping layer derives it from the DT controller

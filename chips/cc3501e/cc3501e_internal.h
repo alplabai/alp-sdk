@@ -49,6 +49,16 @@
  * transceive) by the same ctx->rx_scratch[0] peek mechanism -- see
  * ALP_CC3501E_RX_SCRATCH_NO_STATUS (<alp/chips/cc3501e/core.h>).
  *
+ * EXCEPTION 3 (alp-sdk#2035 review follow-up): cc3501e_lock_acquire()'s OWN
+ * timeout is NOT one of the two retryable conditions above -- it means no
+ * request even got a chance to reach the bridge, and only on the FIRST
+ * attempt: it is returned immediately (unambiguous ALP_ERR_BUSY, nothing
+ * sent). A lock timeout on a LATER attempt is different -- an EARLIER
+ * attempt already reached the bridge (this loop only revisits the lock
+ * after a retryable BUSY/IO from that attempt) -- so it is folded into the
+ * SAME retry-within-budget treatment as BUSY/IO above instead, and can
+ * still end in ALP_ERR_TIMEOUT if the whole budget elapses contended.
+ *
  * Returns the final cc3501e_request status; ALP_ERR_TIMEOUT if it never
  * resolved within the budget.  The caller's budget must therefore cover the
  * longest down-window (Wlan_Start/op, seconds) -- see cc3501e_wifi_get_mac.
@@ -61,6 +71,23 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
                             size_t            rx_cap,
                             size_t           *rx_len,
                             uint32_t          timeout_ms);
+
+/* Same retry loop as poll_by_repeat() above, but the caller supplies the
+ * retry seq instead of it being allocated from the shared ctx->req_seq
+ * (alp-sdk#2108) -- SOCK_RECV uses this with ctx->sock_recv_seq so its seq
+ * space can never collide with any other opcode's. See ctx->sock_recv_seq's
+ * comment in <alp/chips/cc3501e/core.h> and cc3501e_sock_recv()'s assignment
+ * site in cc3501e_sockets.c. Implemented in cc3501e_core.c, beside
+ * poll_by_repeat(), which now wraps it. */
+alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
+                                alp_cc3501e_cmd_t cmd,
+                                const uint8_t    *tx_payload,
+                                size_t            tx_len,
+                                uint8_t          *rx_buf,
+                                size_t            rx_cap,
+                                size_t           *rx_len,
+                                uint32_t          timeout_ms,
+                                uint8_t           req_seq);
 
 /* Tell the transport the peer is a POLLED slave (OTA update mode): the READY
  * gate then waits for a LOW->HIGH edge instead of a level. */

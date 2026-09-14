@@ -123,6 +123,13 @@
  * string) -- 1 KiB is generous. */
 #define MANIFEST_MAX_BYTES 1024u
 
+/* On E1M-AEN801 with the CC3501E bridge attached, alp_wifi_connect() routes
+ * to the CC3501E backend (src/backends/wifi/cc3501e.c), and the bridge's own
+ * worst case for one STA connect is 10s Wlan_RoleUp + 30s L2 association +
+ * a 30s DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s. On other Wi-Fi
+ * backends this value is only an upper bound, not a derived worst case. */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
+
 /* ----------------------------------------------------------------- */
 /* Stage 1: connect to the Mender server                              */
 /* ----------------------------------------------------------------- */
@@ -151,7 +158,7 @@ static bool fleet_wifi_up(void)
 		.ssid = "fleet-ssid",
 		.psk  = "fleet-psk",
 	};
-	const alp_status_t rc = alp_wifi_connect(w, &creds, 10000u);
+	const alp_status_t rc = alp_wifi_connect(w, &creds, WIFI_CONNECT_TIMEOUT_MS);
 	if (rc != ALP_OK) {
 		printf("[ota]   alp_wifi_connect -> %d\n", (int)rc);
 		alp_wifi_close(w);

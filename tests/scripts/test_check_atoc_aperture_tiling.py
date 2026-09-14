@@ -101,18 +101,26 @@ def test_overlapping_regions_fail_naming_the_region():
 
 
 def test_row_outside_aperture_not_reported_as_gap():
+    """Both directions of "entirely outside the aperture" in one preset:
+    a row entirely BELOW it (`ospi_below`, `hi <= full_lo`) and a row
+    entirely ABOVE it (`ospi_xip`, `lo >= full_hi`, an OSPI0 XIP window,
+    #2069). Neither may be reported as a gap by 4b, and the above-aperture
+    row must not win check_atoc_reservation.py's top-of-window rule just
+    for being highest (review round 1, finding 7 -- the below-aperture row
+    was dropped when the above-aperture one was added; both belong)."""
     cr = _load_cr()
     p = _write_fixture(
         cr, "aperture-outside-row",
         _SILICON_HEADER + "memory_map:\n"
+        "  - { name: ospi_below, base: 0x70000000, size_kib: 1024, "
+        "accessible_from: [m55_he], carveout: false, write_authority: none }\n"
         "  - { name: mcuboot,  base: 0x80000000, size_kib: 64,   "
         "accessible_from: [m55_he], carveout: false, write_authority: vendor_image }\n"
         "  - { name: storage,  base: 0x80010000, size_kib: 5536, "
         "accessible_from: [m55_he], carveout: false, write_authority: customer_runtime }\n"
         "  - { name: atoc,     base: 0x80578000, size_kib: 32,   "
         "accessible_from: [m55_he], carveout: false, write_authority: secure_enclave }\n"
-        # Entirely outside the aperture -- must not be treated as a gap.
-        "  - { name: ospi_xip, base: 0x70000000, size_kib: 1024, "
+        "  - { name: ospi_xip, base: 0xA0000000, size_kib: 1024, "
         "accessible_from: [m55_he], carveout: false, write_authority: none }\n",
     )
     try:
@@ -123,6 +131,13 @@ def test_row_outside_aperture_not_reported_as_gap():
 
 
 def test_whole_device_alias_spanning_full_aperture_not_reported_as_overlap():
+    """4b itself does not look at `write_authority` at all -- a
+    runtime-writable whole-device alias is refused once, by
+    `_check_preset()`'s top-of-window rule
+    (test_check_atoc_reservation.py::TestPresetCheckTopRowWriteAuthority),
+    since the alias's extent always reaches that top too. This fixture's
+    `composite` stays exempt from BOTH: not runtime-writable, so neither
+    4b nor the top-of-window rule fires."""
     cr = _load_cr()
     p = _write_fixture(
         cr, "aperture-whole-device-alias",

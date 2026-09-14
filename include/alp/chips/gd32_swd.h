@@ -61,15 +61,31 @@ extern "C" {
 /** Generic ADIv5 SW-DP IDCODE for a Cortex-M33 r0p1 SW-DPv2.
  *
  *  @warning UNVERIFIED on a GD32G553 -- this value comes from the core's
- *  generic expectation, not from a probe on the part. The bench measures
- *  the GD32 bridge answering `0x0BE12477`, and `0x6BA02477` as the V2N
- *  CM33 DAP (`Found Cortex-M33 r0p4`), both on place `e1mx-v2n-m1-01`;
- *  see `scripts/bench/aen/bench-env.sh`. A correctly-wired GD32 therefore
- *  fails a comparison against this macro, so do NOT make a mismatch fatal
- *  (`gd32_swd_connect()` deliberately does not). Settling it needs a probe
- *  on a GD32: alp-sdk#1440, #1369. A production test that wants to refuse
- *  on a mismatch should match against a value measured on its own board. */
-#define GD32_SWD_EXPECTED_IDCODE 0x6BA02477u
+ *  generic architectural expectation, not from a probe on the part. It is
+ *  also, separately, the bench-measured SW-DP ID of the V2N CM33 DAP on
+ *  `e1mx-v2n-m1-01` (`Found SW-DP with ID 0x6BA02477`, `Found Cortex-M33
+ *  r0p4`) -- a *different* target on the same board
+ *  (`scripts/bench/aen/bench-env.sh`). Whether a real GD32G553 answers
+ *  this value, the only other GD32 candidate on record (`0x0BE12477`,
+ *  itself with no attribution at all -- no bench transcript, no
+ *  datasheet reference, no commit message), or something else is
+ *  UNKNOWN: neither has been measured on a GD32 with a probe attached
+ *  (alp-sdk#1440, #1369). A comparison against this macro therefore
+ *  proves nothing about the target either way -- do NOT make a mismatch
+ *  fatal (`gd32_swd_connect()` deliberately does not), and do NOT treat
+ *  a mismatch as confirmation of wrong silicon or mis-wiring. Settling
+ *  it needs a probe on a GD32. A production test that wants to refuse
+ *  on a mismatch should match against a value measured on its own board.
+ *
+ *  `metadata/chips/gd32_swd.yaml` does NOT carry this value --
+ *  `target_expected_idcode` is deliberately absent there, same stance
+ *  `metadata/schemas/soc-spec-v1.schema.json`'s own `expect_dpidr` field
+ *  guidance takes for every Alif Ensemble SoC variant (#1355): an absent
+ *  key is the correct published "unknown", and a guessed value is
+ *  strictly worse than absent. This macro stays only as the
+ *  informational generic-architecture reference that the driver comment
+ *  and the v2n-gd32-swd-flash example log; neither gates on it. */
+#define GD32_SWD_GENERIC_CM33_R0P1_IDCODE 0x6BA02477u
 
 /** Default clock-delay loop count.  Higher = slower SWCLK. */
 #define GD32_SWD_DEFAULT_CLOCK_DELAY 4u

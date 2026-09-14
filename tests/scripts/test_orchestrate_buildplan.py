@@ -570,6 +570,7 @@ def test_real_zephyr_board_names_lists_every_shipped_tree() -> None:
     assert _real_zephyr_board_names(REPO) == {
         "alp_e1m_aen401_m55_hp", "alp_e1m_aen601_m55_hp",
         "alp_e1m_aen801_m55_he", "alp_e1m_aen801_m55_hp",
+        "alp_e1m_aen803_m55_he", "alp_e1m_aen803_m55_hp",
         "alp_e1m_v2m101_m33_sm", "alp_e1m_v2n101_m33_sm",
     }
 
