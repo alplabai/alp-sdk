@@ -212,7 +212,13 @@ static void companion_serve_event_cb(uint8_t opcode, const uint8_t *payload, siz
 	if (opcode != (uint8_t)ALP_CC3501E_EVT_SOCK_ACCEPTED) {
 		return;
 	}
-	if (cc3501e_sock_accepted_decode(payload, len, &ev) != ALP_OK) {
+	/* #2126 review: companion_cc3501e is the ctx this event's companion was
+	 * registered on -- NULL here would mean this callback fired after
+	 * unregistration, which cc3501e_add_event_callback()'s own contract
+	 * does not allow, but link_epoch defaults 0 on a fresh ctx either way,
+	 * so this stays a defensive no-op rather than a NULL-deref either way. */
+	const uint8_t epoch = (companion_cc3501e != NULL) ? companion_cc3501e->link_epoch : 0u;
+	if (cc3501e_sock_accepted_decode(payload, len, epoch, &ev) != ALP_OK) {
 		return;
 	}
 	/* Queue-full drops the handle, which LEAKS a firmware socket -- the firmware

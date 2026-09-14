@@ -37,6 +37,12 @@ typedef struct cc3501e cc3501e_t;
  *  in `<alp/protocol/cc3501e.h>`. */
 typedef void (*cc3501e_event_cb_t)(uint8_t cmd, const uint8_t *payload, size_t len, void *user);
 
+/** Recovery callback (issue #2126) -- see @ref cc3501e_set_recover_callback.
+ *  @p ctx is the context that just recovered, @p recover_count is its
+ *  post-increment @ref cc3501e::recover_count, @p user is whatever was
+ *  registered. Runs after cc3501e_recover() has already committed. */
+typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, void *user);
+
 /** Maximum simultaneous async-event subscribers per context (issue #1723).
  *  Sized for the in-tree consumers -- the Zephyr console companion plus an
  *  application -- with headroom; @ref cc3501e_add_event_callback reports
@@ -351,18 +357,79 @@ struct cc3501e {
 	 * cc3501e_request(). */
 	bool request_lock;
 
-	/* Auto-recovery bookkeeping (issue #2126). cc3501e_link_check_and_recover()
-	 * (chips/cc3501e/cc3501e_core.c, internal -- see cc3501e_internal.h) bumps
-	 * @ref recover_count every time it warm-resets a wedged link back to life,
-	 * and stamps @ref last_recover_ms so the next call can enforce
-	 * CC3501E_RECOVER_COOLDOWN_MS before trying again. @ref recover_count is a
-	 * legitimate read for a caller's own telemetry (how many times THIS boot
-	 * has needed a warm-reset recovery) -- e.g. `alp companion recover`
-	 * (src/zephyr/console) prints it. @ref last_recover_ms is internal
-	 * cooldown bookkeeping only, same category as sock_send_seq above -- public
-	 * because this whole struct is, not because a caller should read it. */
+	/* Recovery bookkeeping (issue #2126), all maintained by cc3501e_recover()
+	 * itself (<alp/chips/cc3501e/core.h>) so a manual `alp companion recover`
+	 * and the automatic path (cc3501e_link_check_and_recover(), internal --
+	 * see cc3501e_internal.h) share IDENTICAL state -- neither is a second,
+	 * independently-maintained copy.
+	 *   - recover_count: bumped on every SUCCESSFUL recovery. A legitimate
+	 *     read for a caller's own telemetry (how many times THIS boot has
+	 *     needed a warm-reset recovery) -- e.g. `alp companion recover`
+	 *     (src/zephyr/console) prints it.
+	 *   - recover_attempt_count / last_recover_ms / recover_fail_streak:
+	 *     internal cooldown/back-off bookkeeping only, same category as
+	 *     sock_send_seq above -- public because this whole struct is, not
+	 *     because a caller should read them. recover_attempt_count is
+	 *     bumped on EVERY attempt regardless of outcome (unlike
+	 *     recover_count) -- the fix for a real bug: gating the cooldown on
+	 *     recover_count alone let a caller stuck in a fail/retry loop
+	 *     re-trigger a fresh warm reset on every single op, because a
+	 *     FAILED attempt never advanced the old gate. recover_fail_streak
+	 *     resets to 0 on success and drives the cooldown's exponential
+	 *     back-off (CC3501E_RECOVER_COOLDOWN_MS doubling up to
+	 *     CC3501E_RECOVER_COOLDOWN_MAX_MS, cc3501e_core.c) on repeated
+	 *     failure. */
 	uint32_t recover_count;
+	uint32_t recover_attempt_count;
 	uint64_t last_recover_ms;
+	uint8_t  recover_fail_streak;
+	/* Exclusive-ownership flag for cc3501e_recover()'s own reset sequence
+	 * (issue #2126) -- claimed via compiler-builtin CAS (same portability
+	 * shape as request_lock above), so two concurrent callers (an
+	 * auto-trigger racing a manual `alp companion recover`, or two
+	 * auto-triggers off two different failing ops) cannot double-pulse
+	 * nRESET. The loser gets ALP_ERR_BUSY immediately, no reset attempted.
+	 * Never touch directly -- go through cc3501e_recover(). */
+	bool recovering;
+	/* Bumped by cc3501e_recover() on every SUCCESSFUL recovery (issue
+	 * #2126). The device reboots on recovery, so a raw firmware handle
+	 * minted before this counter last changed (a socket from
+	 * cc3501e_sock_open(), an accepted connection's handle from the async
+	 * event queue) may now refer to nothing, or -- worse -- to a
+	 * DIFFERENT, unrelated socket the post-reboot firmware happens to
+	 * allocate the same numeric id to. cc3501e_sock_send() etc.
+	 * (cc3501e_sockets.c) encode this into the upper byte of every handle
+	 * they hand back and refuse (ALP_ERR_NOT_READY) a handle whose epoch
+	 * byte no longer matches. Wraps 255 -> 0 (defined unsigned overflow);
+	 * a caller holding a handle across 256 recoveries is not something
+	 * this scheme defends against, same accepted-residual shape as
+	 * sock_send_seq's own wrap above. */
+	uint8_t link_epoch;
+	/* Registered via cc3501e_set_recover_callback() (issue #2126); invoked
+	 * by cc3501e_recover() after a successful recovery has already
+	 * committed (recover_count bumped, stale state cleared), for BOTH the
+	 * automatic and manual paths. NULL = no callback registered (the
+	 * default). Never touch directly -- go through
+	 * cc3501e_set_recover_callback(). */
+	cc3501e_recover_cb_t recover_cb;
+	void                *recover_cb_user;
+	/* True for the whole span an OTA/update-mode session is open (issue
+	 * #2126) -- set BEFORE the first update-mode send in
+	 * cc3501e_ota_update_mode(ctx, true, ...) (chips/cc3501e/cc3501e_ota.c),
+	 * cleared once that same function confirms the device is genuinely
+	 * back in normal mode (readback OR its own hard-reset fallback, both
+	 * of which guarantee it), on a bail (cc3501e_ota_update()'s
+	 * ota_update_bail(), which itself goes through update_mode(false)), on
+	 * a confirmed FINISH, or on a confirmed PROMOTE. Deliberately NOT
+	 * cc3501e_peer_is_polled() (cc3501e_internal.h): that flag is a
+	 * transport-framing detail (edge- vs level-gate the READY line) that
+	 * happens to correlate with a session but is not one -- a caller that
+	 * flips it directly, or a driver bug that leaves it stale, must not be
+	 * misread as "OTA in progress" or "OTA long over" respectively.
+	 * cc3501e_recover() refuses outright (ALP_ERR_BUSY) while this is
+	 * true, for both the automatic path and a manual `alp companion
+	 * recover`. */
+	bool ota_session_active;
 };
 
 /**
@@ -440,7 +507,10 @@ alp_status_t cc3501e_power_off(cc3501e_t *ctx);
  *
  * The inter-chip link can enter a state where the CC3501E is healthy but no
  * longer receives what the host clocks: requests time out (ALP_ERR_TIMEOUT) and
- * then fail (ALP_ERR_IO) indefinitely. It does not self-heal.
+ * then fail (ALP_ERR_IO) indefinitely. It does not self-heal on its own --
+ * this call, or the automatic path built on it (@ref
+ * cc3501e_wifi_connect and every worker-routed op wired to it internally,
+ * issue #2126), is what clears it.
  *
  * Firmware-side diagnostics taken across the fault (see #1691) show the slave
  * armed and idle in its request-header phase with READY HIGH, its housekeeping
@@ -448,21 +518,50 @@ alp_status_t cc3501e_power_off(cc3501e_t *ctx);
  * firmware has no way to know anything is wrong. Only the host, which is getting
  * no answers, can tell. Hence this call.
  *
- * Issues a warm reset (nRESET only, supply left up) and confirms the link with a
- * PING; falls back to a full supply cycle if the warm reset does not take. On
- * success the link is usable again -- but the device rebooted, so the Wi-Fi
- * association, the BLE host and every open socket are gone and must be
- * re-established.
+ * Issues a warm reset (nRESET only, supply left up), confirms the link with a
+ * PING, and re-fetches the protocol version -- all three under ONE hold of the
+ * internal transport lock (issue #2126), so a concurrent caller on this same
+ * @p ctx (another thread's request, the console's async-event poll) gets
+ * @ref ALP_ERR_BUSY instead of clocking a byte into the module mid-reboot,
+ * which would desync the CS-less link permanently. Falls back to a full
+ * supply cycle if the warm reset does not take. On success the link is
+ * usable again -- but the device rebooted, so the Wi-Fi association, the BLE
+ * host and every open socket are gone and must be re-established; a stale
+ * socket handle from before this call now reads back @ref ALP_ERR_NOT_READY
+ * (@ref cc3501e::link_epoch, cc3501e_sockets.c) rather than silently
+ * addressing whatever new socket now happens to share its number.
+ *
+ * At most one recovery runs at a time per @p ctx: a concurrent call (auto
+ * racing manual, or two auto-triggers) loses a compare-and-swap and returns
+ * @ref ALP_ERR_BUSY immediately, with no reset attempted. Register @ref
+ * cc3501e_set_recover_callback to be notified after a successful recovery.
  *
  * @warning NEVER call this with an OTA in flight -- resetting mid-update destroys
- *          the partially staged image. Tearing down or re-opening the bridge
- *          during a flash operation is what #1610 traced its hangs to.
+ *          the partially staged image, and #1610 traced its hangs to exactly
+ *          this. Refused outright: returns @ref ALP_ERR_BUSY while @ref
+ *          cc3501e::ota_session_active (cc3501e_ota.c) is true.
  *
  * @param ctx  Initialised bridge handle.
  * @return ALP_OK when the link answers again; ALP_ERR_INVAL if @p ctx is NULL;
- *         otherwise the mapped error from the reset or the confirming PING.
+ *         ALP_ERR_BUSY if an OTA session is active or another recovery is
+ *         already running on this @p ctx; otherwise the mapped error from
+ *         the reset or the confirming PING.
  */
 alp_status_t cc3501e_recover(cc3501e_t *ctx);
+
+/**
+ * @brief Register a callback invoked after every SUCCESSFUL recovery.
+ *
+ * Runs after @ref cc3501e_recover has already committed -- recover_count
+ * bumped, stale same-ctx state cleared -- for BOTH the automatic path and a
+ * manual `alp companion recover`. One slot per @p ctx; a second call
+ * overwrites the first. Pass a NULL @p cb to unregister.
+ *
+ * @param ctx   Initialised bridge handle.
+ * @param cb    Callback to invoke, or NULL to unregister.
+ * @param user  Opaque pointer handed back unchanged as @p cb's last argument.
+ */
+void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void *user);
 
 /**
  * @brief Warm hard reset: pulse nRESET with WIFI_EN kept asserted (rails stay up).
@@ -501,12 +600,30 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx);
  * so hard-resetting it on a -5 would destroy a genuine RF/firmware
  * diagnostic instead of recovering a wedge.
  *
- * This is app-level policy, not driver behaviour -- do not fold it into any op
- * function in this driver, because a caller mid-association or mid-BLE-link
- * must not silently lose that state to a reset it never asked for.  This
- * function only pulses the line and blind-settles; it does not confirm the
- * link itself (no PING, no version check), so the retried op is what proves
- * recovery, not this call's return value.
+ * This function itself is still app-level policy, not driver behaviour -- do
+ * NOT fold a bare call to it into any op function in this driver, because a
+ * caller mid-association or mid-BLE-link must not silently lose that state to
+ * a reset it never asked for.  It only pulses the line and blind-settles; it
+ * does not confirm the link itself (no PING, no version check), so a caller
+ * using it for the #2035 one-shot-retry recipe above must treat the RETRIED
+ * OP as what proves recovery, not this call's own return value.
+ *
+ * @note **Issue #2126 update.** A DIFFERENT, broader mechanism now IS folded
+ * into every worker-routed op and into @ref cc3501e_wifi_connect: when a
+ * top-level op comes back @ref ALP_ERR_TIMEOUT (or @ref ALP_ERR_IO) with NO
+ * reply EVER decoded off the wire for that op -- the same shape a #2035
+ * first-radio-op wedge produces, among others -- @ref
+ * cc3501e_link_check_and_recover() (internal; wired into those ops' own
+ * failure exits) probes the link and, only if every probe fails, calls @ref
+ * cc3501e_recover() below, which does a superset of this function's job (this
+ * pulse, THEN a confirming PING, THEN a protocol-version re-fetch, all
+ * automatic). That does not change this function's own contract -- it
+ * remains a raw, uninvoked-by-the-driver primitive an application may still
+ * call by hand for the #2035 recipe above -- but an application relying on
+ * that recipe purely to recover from a wedge (not to distinguish a
+ * first-boot-specific fault) now gets the same recovery automatically and
+ * should consider retiring its own hand-rolled version (see
+ * examples/aen/aen-cc3501e-companion-tour's own retired copy).
  *
  * @param ctx Initialised driver context (must have @c reset_pin populated).
  * @return ALP_OK after the re-boot budget elapses; ALP_ERR_NOSUPPORT if no reset pin.

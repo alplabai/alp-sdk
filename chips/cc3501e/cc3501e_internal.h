@@ -133,22 +133,27 @@ alp_status_t cc3501e_reply_verdict(alp_cc3501e_cmd_t cmd,
 bool cc3501e_mac_is_valid(const uint8_t mac[CC3501E_MAC_LEN]);
 
 /* Cause-agnostic link recovery (issue #2126): probe with cc3501e_ping() up to
- * CC3501E_LINK_PROBE_TRIES times; if every probe fails, warm-reset via
- * cc3501e_recover() and re-establish wire state.  Declared here rather than
- * in the public <alp/chips/cc3501e/core.h> -- unlike cc3501e_recover()
- * (which a caller invokes explicitly, e.g. `alp companion recover`), nothing
- * outside this driver's own wrapper files decides WHEN to call this; it is
- * wired into their own failure exits below, exactly once per failed
- * top-level op (poll_by_repeat_seq()'s terminal returns in cc3501e_core.c,
- * cc3501e_wifi_connect()'s timeout exit in cc3501e_wifi.c), never from
- * inside a retry loop. A caller that wants an unconditional, hand-driven
- * recovery already has cc3501e_recover() for that. Guards internally against
- * an open OTA/update session (cc3501e_peer_is_polled()), the Kconfig switch
- * (CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER), and CC3501E_RECOVER_COOLDOWN_MS
- * since the last recovery -- see cc3501e_core.c for the full rationale.
- * Not `static` for the same test-visibility shape as this header's other
- * entries, though tests/zephyr/cc3501e_host_driver exercises it only through
- * the public wrapper functions + ctx->recover_count. */
+ * CC3501E_LINK_PROBE_TRIES times (>= CC3501E_WIFI_DOWN_WINDOW_MS, wide enough
+ * to outlast a legitimate transport blackout); if every probe fails,
+ * warm-reset via cc3501e_recover(), which re-establishes wire state itself.
+ * Declared here rather than in the public <alp/chips/cc3501e/core.h> --
+ * unlike cc3501e_recover() (which a caller invokes explicitly, e.g. `alp
+ * companion recover`), nothing outside this driver's own wrapper files
+ * decides WHEN to call this; it is wired into their own failure exits below,
+ * exactly once per failed top-level op (poll_by_repeat_seq()'s terminal
+ * returns in cc3501e_core.c, cc3501e_wifi_connect()'s timeout exit in
+ * cc3501e_wifi.c), never from inside a retry loop. A caller that wants an
+ * unconditional, hand-driven recovery already has cc3501e_recover() for
+ * that. Guards internally against an open OTA/update session
+ * (ctx->ota_session_active, cc3501e_ota.c -- NOT cc3501e_peer_is_polled(), a
+ * transport-framing detail, not a session marker), a missing reset_pin, the
+ * Kconfig switch (CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER), a recovery already
+ * in flight (ctx->recovering), and an attempt-based, back-off cooldown since
+ * cc3501e_recover()'s own last attempt (shared with a manual `alp companion
+ * recover`) -- see cc3501e_core.c for the full rationale. Not `static` for
+ * the same test-visibility shape as this header's other entries, though
+ * tests/zephyr/cc3501e_host_driver exercises it only through the public
+ * wrapper functions + ctx->recover_count / recover_attempt_count. */
 alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx);
 
 #endif /* CC3501E_INTERNAL_H */

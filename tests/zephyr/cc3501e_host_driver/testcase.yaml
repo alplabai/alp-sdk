@@ -22,38 +22,15 @@ tests:
       - ble
       - sockets
 
-  # Same suite, rebuilt with CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER forced to 0
-  # (issue #2126) -- via a plain CMake cache var (extra_args), NOT a real
-  # Kconfig override. CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER (zephyr/kconfigs/
-  # chips.kconfig) lives under `if ALP_SDK` (zephyr/Kconfig) then `if
-  # ALP_SDK_CHIP_CC3501E`, and enabling ALP_SDK also makes
-  # zephyr/CMakeLists.txt build+link the real alp-sdk Zephyr library -- which
-  # duplicates chips/cc3501e/cc3501e_*.c (this test's own CMakeLists.txt
-  # globs them directly, not through that library) and the
-  # alp_spi_transceive/alp_gpio_* fakes this test supplies, so a real
-  # extra_configs override here builds but fails to LINK
-  # ("multiple definition of ..."). CMakeLists.txt turns
-  # CC3501E_AUTO_RECOVER_OFF into a target_compile_definitions on `app`
-  # instead -- the one macro cc3501e_core.c's own #ifndef fallback reads --
-  # without pulling in the rest of the SDK. Only
-  # test_link_dead_no_recovery_when_kconfig_off_2126 (#if-gated on `defined
-  # (CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER) &&
-  # !CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER` -- NOT IS_ENABLED(), which is only
-  # reliable against Kconfig's own "1 or undefined" convention and not a
-  # hand-defined literal 0) runs differently here; every other test in the
-  # suite is unaffected either way.
-  alp_sdk.cc3501e.host_driver.auto_recover_off:
-    extra_args:
-      - CC3501E_AUTO_RECOVER_OFF=1
-    platform_allow:
-      - native_sim
-      - native_sim/native/64
-    integration_platforms:
-      - native_sim
-      - native_sim/native/64
-    tags:
-      - alp-sdk
-      - cc3501e
-      - wifi
-      - ble
-      - sockets
+  # issue #2126 review: this used to grow a second `.auto_recover_off`
+  # scenario here, forcing CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER off via a
+  # plain CMake -D define instead of real Kconfig -- correctly rejected: a
+  # bare -D proves nothing about the actual Kconfig path (Zephyr Kconfig
+  # omits a disabled bool from autoconf.h entirely; that IS the bug this
+  # whole change fixes). See CMakeLists.txt's own comment for why a REAL
+  # Kconfig override can't work in THIS hermetic, glob-sourced target
+  # without duplicating the whole alp-sdk Zephyr library. The real
+  # Kconfig-off proof lives in tests/console instead (see the PR/task
+  # notes: build it once at default and once with
+  # CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=n and diff the compiled
+  # cc3501e_core.c.obj's disassembly).

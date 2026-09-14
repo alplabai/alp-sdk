@@ -40,7 +40,7 @@
  * {
  *         alp_cc3501e_sock_accepted_evt_t ev;
  *         if (opcode != ALP_CC3501E_EVT_SOCK_ACCEPTED) return;
- *         if (cc3501e_sock_accepted_decode(payload, len, &ev) != ALP_OK) return;
+ *         if (cc3501e_sock_accepted_decode(payload, len, ctx->link_epoch, &ev) != ALP_OK) return;
  *         // ev.handle is a normal socket: recv the request, send the reply,
  *         // then cc3501e_sock_close() it.  The host owns it from here.
  * }
@@ -180,6 +180,13 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  *
  * @param payload  Event payload bytes as delivered to the callback.
  * @param len      Payload length as delivered to the callback.
+ * @param epoch    The bridge ctx's CURRENT @c link_epoch (issue #2126) --
+ *                 encoded into @p out's @c listen_handle and @c handle, the
+ *                 same as every OTHER fresh firmware handle this driver
+ *                 hands out (see cc3501e_sock_open()). Pass @c fw->link_epoch
+ *                 (the ctx this event's companion was registered on); a
+ *                 mismatched or stale value here would make cc3501e_sock_recv()
+ *                 etc. refuse handles this call just minted.
  * @param out      Receives the decoded event.
  * @return ALP_OK on success; ALP_ERR_INVAL if @p payload or @p out is NULL, or
  *         @p len is shorter than the event (a truncated entry -- do not use
@@ -187,6 +194,7 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  */
 alp_status_t cc3501e_sock_accepted_decode(const uint8_t                   *payload,
                                           size_t                           len,
+                                          uint8_t                          epoch,
                                           alp_cc3501e_sock_accepted_evt_t *out);
 
 /**
