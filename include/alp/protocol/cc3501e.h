@@ -1330,15 +1330,20 @@ typedef struct {
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
  *   - seq: retry identity (proto v7).  The host assigns a per-context
- *     free-running counter ONCE per logical send and holds it constant
- *     across every poll_by_repeat() retry of that same call (see
- *     cc3501e_sock_send()).  The firmware caches the (seq, reply) of the
- *     last completed send and serves it back on a matching seq instead of
- *     re-submitting -- without this, a retry that lands after the worker
- *     already finished is indistinguishable from a new request and
- *     re-transmits the payload (alp-sdk#1746, cc3501e-bridge-firmware#88).
- *     Through v6 this byte was always written 0 and carried no meaning;
- *     the field keeps its wire offset, only the semantics changed.
+ *     free-running counter ONCE per FRAME -- one chunk of a logical send,
+ *     i.e. one iteration of cc3501e_sock_send()'s remainder-retry loop
+ *     (cc3501e-bridge-firmware#107) -- and holds it constant across every
+ *     poll_by_repeat() retry (including its own bounded post-timeout
+ *     collection grace) of that same chunk (see cc3501e_sock_send()).  A
+ *     chunk carrying different remaining bytes than the previous one is a
+ *     NEW frame and gets a NEW seq.  The firmware caches the (seq, reply)
+ *     of the last completed send and serves it back on a matching seq
+ *     instead of re-submitting -- without this, a retry that lands after
+ *     the worker already finished is indistinguishable from a new request
+ *     and re-transmits the payload (alp-sdk#1746,
+ *     cc3501e-bridge-firmware#88).  Through v6 this byte was always
+ *     written 0 and carried no meaning; the field keeps its wire offset,
+ *     only the semantics changed.
  *   - data_len: number of payload bytes that follow inline. */
 typedef struct {
 	uint16_t handle;
