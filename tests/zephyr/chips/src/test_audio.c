@@ -1178,3 +1178,35 @@ ZTEST(alp_chips, test_es8388_init_null_args)
 	zassert_equal(es8388_init(&dev, bus, 0), ALP_ERR_INVAL);
 	alp_i2c_close(bus);
 }
+
+/*
+ * #2097: examples/aen/aen-evk-demo's Phase 11 AMP_FAULT (IRQ_N) raw-pin
+ * mapping, pulled out of main.c into amp_fault_verdict.h for the same
+ * reason as sound_verdict.h above -- one ternary, but it was inverted
+ * for a whole release. Reachable via this app's existing
+ * examples/aen/aen-evk-demo/src include dir (see bmp581_verdict.h's
+ * comment in this app's CMakeLists.txt).
+ */
+#include "amp_fault_verdict.h"
+
+ZTEST(alp_chips, test_amp_fault_pin_raw_high_is_idle_not_asserted)
+{
+	bool asserted = true; /* deliberately wrong initial value */
+	zassert_true(amp_fault_pin_verdict(1, &asserted), "raw=1 is a valid read");
+	zassert_false(asserted, "IRQ_N is active-low -- raw HIGH (R124's pull-up) must be idle");
+}
+
+ZTEST(alp_chips, test_amp_fault_pin_raw_low_is_asserted)
+{
+	bool asserted = false;
+	zassert_true(amp_fault_pin_verdict(0, &asserted), "raw=0 is a valid read");
+	zassert_true(asserted, "IRQ_N is active-low -- raw LOW must be the fault");
+}
+
+ZTEST(alp_chips, test_amp_fault_pin_negative_errno_is_a_read_failure_not_a_verdict)
+{
+	bool asserted = false;
+	/* gpio_pin_get() returns a negative errno on a real failure -- that
+	 * must never be silently read as either "idle" or "asserted". */
+	zassert_false(amp_fault_pin_verdict(-5, &asserted), "a negative raw level is not a valid read");
+}
