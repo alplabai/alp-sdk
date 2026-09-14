@@ -67,11 +67,36 @@ commands report the bridge is not ready. See
 | Command | What it does |
 |---|---|
 | `wifi scan` | Scan for Wi-Fi APs and list SSID / channel / RSSI / security. |
-| `wifi connect <ssid> [pass] [wpa3]` | Associate as a station (omit `pass` for open; `wpa3` selects SAE). |
+| `wifi connect <ssid> [pass] [wpa3]` | Associate as a station (omit `pass` for open; `wpa3` selects SAE). On a failed (or timed-out) result, the line also prints `reason: <N>` when the bridge recorded one for this attempt -- see below for what `<N>` means. |
 | `wifi disconnect` | Tear down the STA association. |
 | `wifi ap <ssid> [pass] [wpa3]` | Start a soft-AP (omit `pass` for an open AP). |
 | `wifi ap-stop` | Stop the soft-AP. |
-| `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). |
+| `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). On a failed connect, also prints `reason: <N>` when the bridge recorded one. |
+
+**What `reason: <N>` means.** `<N>` is the reason/status code for the MOST
+RECENT connect attempt: the low byte of the 802.11 REASON code from a
+DISCONNECT event, or the 802.11 STATUS code from an ASSOCIATION_REJECTED /
+AUTHENTICATION_REJECTED event -- two different code tables, and nothing on
+the wire says which one, so `fail: 2` (REJECTED) does not tell you which
+table `<N>` came from. It is recorded only while that attempt was
+CONNECTING, then frozen and **persists through later state publishes** --
+including a later `wifi disconnect`, which republishes this same frozen
+value rather than clearing it -- until the next connect attempt starts. A
+successful connect (`CONNECTED`) always publishes `0`, even over an earlier
+transient rejection in the same attempt that a firmware-internal retry then
+overcame. `0` means nothing was recorded for that attempt, not "no cause": a
+clean success or a bare timeout also reads `0`. It never holds vendor reason
+200 (`WLAN_DISCONNECT_USER_INITIATED`). Known residual: a late event from the
+PREVIOUS attempt landing in the brief window right before the new attempt's
+own connect call can still be recorded against the new one.
+
+`wifi connect`'s printed `reason: <N>` is only ever the CURRENT attempt's own
+failure: the console checks that the fetched status latch's `state` itself
+reads `CONN_FAILED` before trusting `<N>` -- a plain `timed out` with the
+latch still `DISCONNECTED`/`CONNECTING` (the submit was bounced busy by a
+concurrent worker op, or lost to a transport fault) never got far enough to
+record anything of its own, and printing a leftover value there would blame
+an unrelated earlier attempt.
 
 `wifi ap` cannot report a confirmed "up" against CC3501E firmware protocol
 v4: `cc3501e_wifi_ap_start()` submits the request once and returns

@@ -256,28 +256,47 @@ alp_status_t cc3501e_wifi_scan_stop(cc3501e_t *ctx)
 #define CC3501E_WIFI_STATUS_POLL_GAP_MS 50u
 
 /* Single, non-retried WIFI_STATUS read (opcode 0x1B) -- decodes the same
- * fixed 4-byte wire layout as the public cc3501e_wifi_status() below, but
- * WITHOUT its down-window poll_by_repeat.
+ * fixed 4-byte wire layout as cc3501e_wifi_status() below, but WITHOUT its
+ * down-window poll_by_repeat, so ONE call cannot itself balloon to
+ * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) the way that retrying call can.
  *
- * cc3501e_wifi_connect()'s own loop below already re-polls on its own
- * cadence (CC3501E_WIFI_STATUS_POLL_GAP_MS) for the caller's whole
- * timeout_ms budget.  Calling the public cc3501e_wifi_status() from inside
- * that loop layered ITS OWN internal retry (up to CC3501E_WIFI_DOWN_WINDOW_MS
- * = 10 s) underneath the outer loop, and the outer loop's
- * `remaining -= gap` accounting only ever saw the 50 ms gap it slept for --
- * never the up-to-10-s the inner call could burn on a wedged transport.
- * Measured against a wedged transport in this repo's own harness:
- * connect(timeout_ms=200) made 1005 WIFI_STATUS attempts = 50250 ms (251x
- * the declared budget) before giving up.
+ * The CC3501E_REQ_TMO_MS passed to cc3501e_request() below is NOT an
+ * enforced per-call bound -- cc3501e_request() takes `timeout_ms` and
+ * discards it unconditionally (`(void)timeout_ms;`, cc3501e_core.c), same as
+ * every other single-shot request in this file.  The REAL bound on a single
+ * call here is two-part: acquiring the shared request lock is itself capped
+ * at CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS (default 100 ms,
+ * cc3501e_core.c) and returns ALP_ERR_BUSY on expiry (e.g. another thread's
+ * connect holds it); once granted, each SPI phase this opcode's exchange
+ * takes waits up to CC3501E_READY_WAIT_US (250 ms, cc3501e_core.c) for the
+ * slave's READY edge once the line is proven, and times out ALP_ERR_IO /
+ * ALP_ERR_NOT_READY rather than retrying if the slave never re-arms.
  *
- * A single non-retried attempt here (nominally CC3501E_REQ_TMO_MS, the same
- * per-attempt budget every other single-shot request in this file passes --
- * but cc3501e_request() does NOT enforce it, see the #1481 note in
- * cc3501e_wifi_connect() below) keeps the outer loop the SOLE owner of the
- * retry budget, matching <alp/chips/cc3501e/wifi.h>'s documented contract
- * for cc3501e_wifi_connect ("Upper bound on the WIFI_STATUS poll budget"). */
-static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
+ * Originally file-private, used only by cc3501e_wifi_connect()'s own loop
+ * below, which already re-polls on its own cadence (CC3501E_WIFI_STATUS_
+ * POLL_GAP_MS) for the caller's whole timeout_ms budget.  Calling the public
+ * cc3501e_wifi_status() from inside that loop layered ITS OWN internal retry
+ * (up to CC3501E_WIFI_DOWN_WINDOW_MS = 10 s) underneath the outer loop, and
+ * the outer loop's `remaining -= gap` accounting only ever saw the 50 ms gap
+ * it slept for -- never the up-to-10-s the inner call could burn on a wedged
+ * transport.  Measured against a wedged transport in this repo's own
+ * harness: connect(timeout_ms=200) made 1005 WIFI_STATUS attempts = 50250 ms
+ * (251x the declared budget) before giving up.
+ *
+ * A single non-retried attempt here keeps the outer loop the SOLE owner of
+ * the retry budget, matching <alp/chips/cc3501e/wifi.h>'s documented
+ * contract for cc3501e_wifi_connect ("Upper bound on the WIFI_STATUS poll
+ * budget").
+ *
+ * Exposed publicly (alp-sdk#2099) so a caller who wants @c last_reason as a
+ * best-effort diagnostic on a failure path -- e.g. the console's `wifi
+ * connect` result line -- can fetch it WITHOUT risking
+ * cc3501e_wifi_status()'s up-to-10-s down-window retry on a wedged
+ * transport. */
+alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 {
+	if (out == NULL) return ALP_ERR_INVAL;
+
 	uint8_t      reply[4] = { 0 };
 	size_t       got      = 0;
 	alp_status_t s        = cc3501e_request(
@@ -287,7 +306,7 @@ static alp_status_t wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *
 	out->state       = reply[0];
 	out->fail_reason = reply[1];
 	out->rssi_dbm    = (int8_t)reply[2];
-	out->reserved    = reply[3];
+	out->last_reason = reply[3];
 	return ALP_OK;
 }
 
@@ -335,7 +354,7 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * (see below), and the bound only ever applies to the connect that
 	 * follows a failure.
 	 *
-	 * Uses wifi_status_once() -- the single non-retried attempt (nominally
+	 * Uses cc3501e_wifi_status_once() -- the single non-retried attempt (nominally
 	 * CC3501E_REQ_TMO_MS; cc3501e_request() does not enforce it, see the
 	 * #1481 note below) -- NOT the public cc3501e_wifi_status(), which
 	 * rides its own CC3501E_WIFI_DOWN_WINDOW_MS retry and would make a
@@ -348,7 +367,7 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * clear's own result is deliberately discarded -- best-effort, same
 	 * reasoning as every other radio-op teardown in this file. */
 	alp_cc3501e_wifi_status_t entry_st;
-	if (wifi_status_once(ctx, &entry_st) == ALP_OK &&
+	if (cc3501e_wifi_status_once(ctx, &entry_st) == ALP_OK &&
 	    entry_st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 		(void)cc3501e_wifi_disconnect(ctx);
 	}
@@ -411,8 +430,8 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	/* Await the outcome off the non-blocking WIFI_STATUS latch (opcode
 	 * 0x1B) -- never off the submit's own ack.  CONNECTING means the
 	 * association is still running; CONNECTED / CONN_FAILED are terminal.
-	 * Uses wifi_status_once() (a single non-retried attempt), NOT the public
-	 * cc3501e_wifi_status() -- see wifi_status_once()'s comment for why
+	 * Uses cc3501e_wifi_status_once() (a single non-retried attempt), NOT the public
+	 * cc3501e_wifi_status() -- see cc3501e_wifi_status_once()'s comment for why
 	 * layering that function's own 10 s down-window retry underneath this
 	 * loop broke the timeout_ms accounting.
 	 *
@@ -447,7 +466,7 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	uint32_t elapsed_ms = 0u;
 	for (;;) {
 		alp_cc3501e_wifi_status_t st;
-		alp_status_t              ss = wifi_status_once(ctx, &st);
+		alp_status_t              ss = cc3501e_wifi_status_once(ctx, &st);
 		if (ss == ALP_OK) {
 			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
 			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
@@ -771,7 +790,7 @@ alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 	if (out == NULL) return ALP_ERR_INVAL;
 
 	/* Reply is the fixed 4-byte alp_cc3501e_wifi_status_t wire layout (no
-	 * padding): state | fail_reason | rssi_dbm | reserved.  The FIRMWARE-side
+	 * padding): state | fail_reason | rssi_dbm | last_reason.  The FIRMWARE-side
 	 * handler (handle_wifi_status) is a genuine non-blocking latch read -- no
 	 * radio op, ISR-safe, always replies RESP_OK -- but the shared bridge
 	 * TRANSPORT is briefly down whenever ANY radio op is in flight (Wlan_Start
@@ -802,6 +821,6 @@ alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out)
 	out->state       = reply[0];
 	out->fail_reason = reply[1];
 	out->rssi_dbm    = (int8_t)reply[2];
-	out->reserved    = reply[3];
+	out->last_reason = reply[3];
 	return ALP_OK;
 }
