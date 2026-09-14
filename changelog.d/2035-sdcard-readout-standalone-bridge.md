@@ -1,5 +1,9 @@
 ### Added — `aen-sdcard-readout` brings its own CC3501E bridge up and drives the SDIO mux, so it no longer needs `aen-evk-demo` (#2035)
 
+(`aen-sdcard-readout` renamed `aen-sdhc-probe`, #2051 — the standalone bridge
+bring-up this entry describes was itself removed by #2051, once the whole SD
+host controller was disabled on this board.)
+
 `aen-sdcard-readout` was 72 lines with no GPIO code, no bridge bring-up and no
 `alp_*` call: on the EVK the microSD sits behind a 74LVC157 mux whose ENABLE
 (E1M `IO20` → CC3501E `GPIO_26`, both module revisions) is only drivable over

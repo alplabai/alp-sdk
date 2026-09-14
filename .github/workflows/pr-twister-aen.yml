@@ -9,8 +9,9 @@
 # (aen-analog-validate, the five aen-cc3501e-* companion examples,
 # aen-eeprom-manifest, aen-secure-element-sign, edgeai-vision-aen) and are
 # not this gate's business. Of the 61 files, 25 predate this gate, 35 were
-# added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout) by
-# #1097 once its driver linked; PR #1085 added the workflow itself, not the
+# added by the #1076 metadata sweep (#1095), and 1 (aen-sdcard-readout,
+# renamed aen-sdhc-probe by #2051) by #1097 once its driver linked; PR #1085
+# added the workflow itself, not the
 # metadata. (The counts were 62/53/60/70 and a 36-file #1095 bucket until
 # docs/adr/0022 Amendment 2 deleted the Renode-sim aen-sim-vision example,
 # which carried one HP-only scenario from that sweep.)
@@ -59,8 +60,9 @@
 # aen-npu-inference* (the tflite-micro/Ethos-U family) will need
 # `ethos-u-vela` on PATH once it gains a testcase.yaml -- tflite-micro and
 # hal_ethos_u are already unconditional west.yml groups, so no manifest
-# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout` was the one
-# example #1095 left without a testcase.yaml, because its driver
+# change, just a `pip install ethos-u-vela` step here. `aen-sdcard-readout`
+# (renamed aen-sdhc-probe by #2051) was the one example #1095 left without a
+# testcase.yaml, because its driver
 # (zephyr/drivers/sdhc/sdhc_dwc.c) expanded
 # `Z_GENERIC_SECTION(CONFIG_SDHC_DESCRIPTOR_SECTION)` to an empty linker
 # section name (`default ""` in
@@ -88,6 +90,8 @@ on:
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
+      - 'zephyr/dts/alif/**'
+      - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
       - 'west.yml'
       - 'metadata/toolchains.json'
@@ -106,6 +110,8 @@ on:
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
       - 'zephyr/drivers/sdhc/**'
+      - 'zephyr/dts/alif/**'
+      - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
       - 'west.yml'
       - 'metadata/toolchains.json'

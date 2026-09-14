@@ -104,7 +104,26 @@ extern "C" {
  * Per the 74LVC157 truth table:
  *   /E = 0, S = 0  ->  M.2 E-key SDIO routed to SoM
  *   /E = 0, S = 1  ->  microSD card slot routed to SoM
- *   /E = 1         ->  outputs Hi-Z (both buses isolated; safe-default)
+ *   /E = 1         ->  outputs FORCED LOW, NOT Hi-Z (#2051): the 74LVC157
+ *                       has no high-impedance state at all -- the 74LVC157
+ *                       function table gives no Hi-Z condition (the BOM
+ *                       records only "74LVC157" with no manufacturer,
+ *                       metadata/boards/e1m-evk.yaml, so this is the part
+ *                       family's own function table, not a specific
+ *                       vendor's datasheet), unlike parts (e.g. 74LVC257)
+ *                       that add a genuine output-enable. /E HIGH just
+ *                       forces every Y output low while the device stays
+ *                       powered, so the "isolated; safe-default" claim
+ *                       this comment used to make was wrong: with the mux
+ *                       powered, its outputs actively drive BOTH downstream
+ *                       buses low regardless of /E. Confirmed the hard way
+ *                       on the E1M-EVK 2626-R2 (#2051): U38/U39's outputs
+ *                       are the SoC-facing SDIO nets, so a defective part
+ *                       on this board revision holds those nets low
+ *                       whenever the mux is powered, fighting the SoC's
+ *                       own drivers -- see docs/boards/e1m-evk.md and
+ *                       zephyr/dts/alif/ensemble_e8_peripherals.dtsi's
+ *                       sdhc0 node comment.
  *
  * IMPORTANT: per the user-supplied wiring + this repo's
  * metadata/e1m_modules/aen/from-cc3501e.tsv, BOTH IO20 and IO21 are

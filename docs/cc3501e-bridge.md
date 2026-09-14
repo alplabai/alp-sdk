@@ -83,7 +83,14 @@ controller**, shared at board level (a 74LVC157 mux, `SDIO_MUX_EN` =
 `GPIO_26`, `SDIO_MUX_SEL` = `GPIO_30`) with the micro-SD slot -- so the
 CC3501E and an SD card can never use it at the same time, only
 time-share it -- and the Alif's single controller is committed to the SD
-card in the current product.
+card in the current product. **On the E1M-EVK 2626-R2 the microSD side of
+that same mux is additionally hardware-defective (#2051): this 74LVC157
+has no high-impedance state, so its SoC-facing outputs are held low
+whenever the mux is powered, regardless of `SDIO_MUX_EN`** -- see
+`docs/boards/e1m-evk.md` and `examples/aen/aen-sdhc-probe`'s README.
+The SD host controller stays disabled in the devicetree on this board
+revision as a result, independent of the "committed to the SD card"
+statement above.
 
 The practical consequence: **SPI is the only host-control link**, its
 ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
@@ -513,9 +520,21 @@ events don't sit in a queue).
 
 On boot, before the Alif-side has connected over SPI1, the
 firmware should drive its proxied mux-control pins to states
-that ISOLATE all the downstream buses:
+that leave the downstream buses in their normal-idle position:
 
-- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 → Hi-Z).
+- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1). **NOT Hi-Z (#2051):
+  this part has no high-impedance state at all** -- the 74LVC157 function
+  table gives no Hi-Z condition (no manufacturer is recorded for this part
+  in `metadata/boards/e1m-evk.yaml`, so this is the part family's own
+  function table, not a specific vendor's datasheet), unlike parts (e.g. 74LVC257)
+  that add a genuine output-enable. /E HIGH forces every Y output LOW
+  while the mux is powered; it does not isolate or disconnect either
+  downstream bus. "HIGH" here is still the correct default (it is the
+  documented disable state and stops the mux from actively routing
+  either input to the SoM), but do not read it as electrical isolation
+  -- a mux with a hardware defect can (and on the E1M-EVK 2626-R2, does)
+  hold its outputs low regardless of this pin. See
+  docs/boards/e1m-evk.md and include/alp/boards/alp_e1m_evk.h.
 - `SDIO_MUX_SEL` (`GPIO_30`): don't-care while /E is high.
 - `I2S_MUX_SEL` (`GPIO_13`): don't-care (the /E pin is on the
   Alif side and defaults to disable).

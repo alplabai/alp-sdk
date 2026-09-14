@@ -138,6 +138,14 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 - **CAN bus:** TCAN1044A transceiver, jumpers JP1–JP4, header J9.
 - **microSD:** standard slot multiplexed via 74LVC157 with the M.2
   Key E SDIO interface — software must pick which one is active.
+  **Disabled on 2626-R2 (#2051):** this 74LVC157 has no high-impedance
+  state, so its SoC-facing outputs (CLK/CMD/DAT/reset) are held low
+  whenever the mux is powered, regardless of its ENABLE input — a
+  confirmed hardware defect on this board revision, pending a component
+  change. `sdhc0` stays `status = "disabled"` in the shared SoC dtsi
+  rather than fight those held-low pads with the SoC's own drivers; see
+  `examples/aen/aen-sdhc-probe`'s README and
+  `include/alp/boards/alp_e1m_evk.h` for the corrected part behavior.
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
