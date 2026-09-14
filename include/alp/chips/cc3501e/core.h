@@ -350,6 +350,19 @@ struct cc3501e {
 	 * lock-free slot claim.  Never touch directly -- go through
 	 * cc3501e_request(). */
 	bool request_lock;
+
+	/* Auto-recovery bookkeeping (issue #2126). cc3501e_link_check_and_recover()
+	 * (chips/cc3501e/cc3501e_core.c, internal -- see cc3501e_internal.h) bumps
+	 * @ref recover_count every time it warm-resets a wedged link back to life,
+	 * and stamps @ref last_recover_ms so the next call can enforce
+	 * CC3501E_RECOVER_COOLDOWN_MS before trying again. @ref recover_count is a
+	 * legitimate read for a caller's own telemetry (how many times THIS boot
+	 * has needed a warm-reset recovery) -- e.g. `alp companion recover`
+	 * (src/zephyr/console) prints it. @ref last_recover_ms is internal
+	 * cooldown bookkeeping only, same category as sock_send_seq above -- public
+	 * because this whole struct is, not because a caller should read it. */
+	uint32_t recover_count;
+	uint64_t last_recover_ms;
 };
 
 /**

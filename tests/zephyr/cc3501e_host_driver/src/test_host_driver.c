@@ -212,6 +212,18 @@ static bool     g_get_version_override_active; /* stage a specific reply value b
 static uint16_t g_get_version_override_value;
 static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
 
+/* #2126 mutant control: while true, EVERY request header phase fails
+ * outright, regardless of opcode -- models a genuinely dead bridge link (no
+ * PING, no anything, ever answers), unlike the narrower per-opcode down-
+ * windows above. Cleared by slave_reset(). Healed by alp_gpio_write()'s own
+ * fake below the moment it sees the ctx's OWN reset_pin released HIGH --
+ * i.e. the model treats a warm nRESET pulse (cc3501e_hard_reset()) as what
+ * actually cures a #2126 wedge, the same bench-established fact
+ * cc3501e_recover()'s own doc comment records, so a test staging this can
+ * assert BOTH that recovery was attempted (the link healed) and that it was
+ * attempted at most once (the cooldown -- see ctx->recover_count). */
+static bool g_all_io_down;
+
 /* ADR 0033 mutant controls for CMD_GET_CAPABILITIES (opcode 0x06).  Both
  * cleared by slave_reset(), so a test that never touches them still gets a
  * deterministic (zero) bitmap back rather than whatever the previous test
@@ -504,6 +516,7 @@ static void slave_reset(void)
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
+	g_all_io_down                      = false;
 	g_spi1_reply_bad_seq               = false;
 	g_diag_stats_v8                    = false;
 	g_caps_override_value              = 0u;
@@ -747,6 +760,20 @@ static void slave_dispatch(void)
 		d[0]          = ALP_CC3501E_OTA_STATE_STAGED;
 		d[12]         = g_ota_pending;
 		stage_reply(ALP_CC3501E_RESP_OK, d, 16u);
+		break;
+	}
+
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE: {
+		/* #2126: instant-mode-switch model -- reply echoes back the requested
+		 * mode byte (slave.req_pl[0]) immediately, so
+		 * cc3501e_ota_update_mode()'s update_mode_reads_as() readback check
+		 * succeeds on the FIRST round trip and cc3501e_set_peer_polled() runs
+		 * with no blind-settle/reboot needed. Good enough for this suite's
+		 * purpose (proving cc3501e_link_check_and_recover() honours
+		 * cc3501e_peer_is_polled()); the real reboot-and-poll shape is out of
+		 * scope here. */
+		uint8_t d[4] = { slave.req_pl[0], 0u, 0u, 0u };
+		stage_reply(ALP_CC3501E_RESP_OK, d, 4u);
 		break;
 	}
 
@@ -1278,6 +1305,14 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (len == 0u) {
 		return ALP_OK;
 	}
+	/* #2126: a genuinely dead link -- see g_all_io_down's own comment.
+	 * Checked before every per-opcode down-window below, same PRE-DECODE
+	 * shape (fails outright, so rx_scratch[0] is left poisoned to
+	 * ALP_CC3501E_RX_SCRATCH_NO_STATUS -- exactly the signal
+	 * cc3501e_link_check_and_recover() probes on). */
+	if (slave.phase == PH_REQ_HDR && g_all_io_down) {
+		return ALP_ERR_IO;
+	}
 	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS) {
 		slave.wifi_status_attempt_count++;
 	}
@@ -1421,8 +1456,16 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 }
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
-	(void)pin;
-	(void)level;
+	/* #2126: model a warm nRESET pulse as what cures g_all_io_down -- the
+	 * RELEASE edge (level == true) on the ctx's OWN reset_pin is
+	 * cc3501e_hard_reset()'s "let the module re-boot" step. Harmless no-op
+	 * on every OTHER test (g_all_io_down is false by default, and most
+	 * tests never set fw.reset_pin at all, per this function's usual
+	 * ALP_ERR_NOSUPPORT contract below, which callers that DO care about
+	 * gpio failure already rely on). */
+	if (level && pin == fw.reset_pin) {
+		g_all_io_down = false;
+	}
 	return ALP_ERR_NOSUPPORT;
 }
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
@@ -4235,5 +4278,173 @@ ZTEST(cc3501e_host_driver, test_spi1_release_argless)
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SPI1_RELEASE, "opcode 0x57");
 	zassert_equal(slave.req_len, 0u, "RELEASE carries no request payload");
 }
+
+/* ---- link auto-recovery (issue #2126) -------------------------------------
+ *
+ * cc3501e_link_check_and_recover() is wired into poll_by_repeat_seq()'s own
+ * terminal returns (cc3501e_core.c's cc3501e_poll_exit()) -- every
+ * worker-routed wrapper this suite exercises through poll_by_repeat() goes
+ * through it, so cc3501e_wifi_get_mac() below stands in for the whole class.
+ * g_all_io_down (see its own doc comment above) models a genuinely dead
+ * link; fw.reset_pin/fw.enable_pin must be populated for cc3501e_recover()
+ * to actually pulse anything instead of reporting ALP_ERR_NOSUPPORT. */
+
+/* These two are true regardless of CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER --
+ * each asserts recover_count == 0 for a reason that holds whether or not
+ * the mechanism is even on -- so they stay unconditional and run under
+ * BOTH the default and the alp_sdk.cc3501e.host_driver.auto_recover_off
+ * build. The positive (recover_count == 1) tests below them are NOT
+ * unconditional, for the opposite reason -- see their own guard. */
+
+ZTEST(cc3501e_host_driver, test_link_transient_single_op_failure_no_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	/* WIFI_STATUS alone is wedged -- every OTHER opcode, including the
+	 * probe's own PING, answers normally.  This is the "transient" case:
+	 * one op's own retry budget genuinely exhausts (a real ALP_ERR_TIMEOUT,
+	 * same shape as the dead-link test below), but the link as a whole is
+	 * fine, which the probe discovers on its very first PING. */
+	g_status_io_down_remaining = UINT32_MAX;
+
+	alp_cc3501e_wifi_status_t st;
+	alp_status_t              s = cc3501e_wifi_status(&fw, &st);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "the wedged op itself still fails");
+	zassert_equal(fw.recover_count,
+	              0u,
+	              "a single op's own transient failure must not warm-reset a link the probe's "
+	              "own PING (a different, unaffected opcode) finds fine");
+}
+
+ZTEST(cc3501e_host_driver, test_link_ota_open_suppresses_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	alp_status_t enter_s = cc3501e_ota_update_mode(&fw, true, 1000u);
+
+	g_all_io_down                     = true;
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t op_s                 = cc3501e_wifi_get_mac(&fw, mac, 100u);
+	uint32_t     recovers_seen        = fw.recover_count;
+
+	/* Restore state BEFORE asserting, not after: cc3501e_peer_is_polled()
+	 * is a file-static in cc3501e_core.c, not reset by slave_reset()
+	 * between tests, so a failed assertion here must not leave every LATER
+	 * test in this binary silently running against a "polled peer". */
+	g_all_io_down        = false;
+	alp_status_t leave_s = cc3501e_ota_update_mode(&fw, false, 1000u);
+
+	zassert_equal(leave_s, ALP_OK, "leave update mode (cleanup)");
+	zassert_equal(enter_s, ALP_OK, "enter update mode (fake echoes the mode byte instantly)");
+	zassert_equal(op_s, ALP_ERR_TIMEOUT, "the op itself still fails");
+	zassert_equal(recovers_seen, 0u, "an open OTA/update session must suppress recovery entirely");
+}
+
+/* The three tests below assert a recovery DID run (recover_count == 1), so
+ * they only make sense under the mechanism's normal ON state -- compiled
+ * out of the alp_sdk.cc3501e.host_driver.auto_recover_off build (see that
+ * scenario's own comment), where they would correctly, but uninterestingly,
+ * fail. */
+#if !defined(CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER) || CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER
+
+ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t s                    = cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
+	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
+
+	/* And the recovery actually worked: alp_gpio_write()'s fake heals
+	 * g_all_io_down the moment cc3501e_hard_reset() releases reset_pin, so
+	 * cc3501e_link_check_and_recover()'s own confirming PING (inside
+	 * cc3501e_recover()) already proved the link answers again before this
+	 * function even returned -- a fresh op now succeeds with NO second
+	 * recovery. */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "link answers again after the warm reset");
+	zassert_equal(fw.recover_count, 1u, "the follow-up ping did not trigger a second recovery");
+}
+
+/* cc3501e_wifi_connect() does not go through poll_by_repeat() -- it drives
+ * its own WIFI_STATUS poll loop (see cc3501e_wifi.c) -- so it gets its OWN
+ * trigger at its own timeout exit, guarded by "did ANY status read ever
+ * land" rather than ctx->rx_scratch[0] (a single non-retried
+ * cc3501e_wifi_status_once() call per iteration means rx_scratch[0] only
+ * ever reflects the LAST iteration by the time this function returns). This
+ * proves that path independently of the poll_by_repeat_seq()-based tests
+ * above. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_dead_link_triggers_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	alp_status_t s = cc3501e_wifi_connect(&fw, "deadlinknet", 1u, "pw", 120u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "connect itself still times out");
+	zassert_equal(fw.recover_count,
+	              1u,
+	              "cc3501e_wifi_connect()'s own timeout exit must trigger recovery when NO "
+	              "WIFI_STATUS read ever succeeded across the whole attempt");
+}
+
+ZTEST(cc3501e_host_driver, test_link_cooldown_suppresses_second_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	zassert_equal(cc3501e_wifi_get_mac(&fw, mac, 100u), ALP_ERR_TIMEOUT, "first op fails");
+	zassert_equal(fw.recover_count, 1u, "first failure recovers once");
+
+	/* Wedge the link again immediately -- CC3501E_RECOVER_COOLDOWN_MS
+	 * (30 s) since the first recovery has not elapsed on the fake clock
+	 * (the first call only advanced it by the poll-exhaustion + probe +
+	 * warm-reset delays, nowhere near 30 s -- see the file-level comment
+	 * on alp_delay_ms()/alp_uptime_ms() sharing one fake counter). The
+	 * cooldown must decline a second warm reset even though a fresh probe
+	 * would otherwise see a dead link again. */
+	g_all_io_down = true;
+	zassert_equal(cc3501e_wifi_get_mac(&fw, mac, 100u), ALP_ERR_TIMEOUT, "second op also fails");
+	zassert_equal(fw.recover_count, 1u, "cooldown suppressed the second recovery");
+
+	g_all_io_down = false; /* leave the fixture clean for the next test */
+}
+
+#endif /* auto-recover ON */
+
+#if defined(CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER) && !CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER
+/* Compiled only under the alp_sdk.cc3501e.host_driver.auto_recover_off
+ * twister scenario (testcase.yaml / CMakeLists.txt), which
+ * target_compile_definitions()'s CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER to a
+ * literal 0 for this whole app -- see that scenario's own comment for why a
+ * runtime toggle cannot substitute for a real second build, and why this is
+ * `defined(...) && !...` rather than IS_ENABLED(): IS_ENABLED() is built for
+ * Kconfig's own "defined as 1, or plain undefined" convention and is not
+ * reliable against a hand-defined literal 0 the way a plain #if is. */
+ZTEST(cc3501e_host_driver, test_link_dead_no_recovery_when_kconfig_off_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t s                    = cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	g_all_io_down = false; /* restore before asserting -- see the OTA test's identical note */
+	zassert_equal(s, ALP_ERR_TIMEOUT, "the op itself still fails");
+	zassert_equal(fw.recover_count,
+	              0u,
+	              "CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=n must suppress the whole mechanism, "
+	              "even against a link that never answers a single probe");
+}
+#endif /* !CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER */
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);
