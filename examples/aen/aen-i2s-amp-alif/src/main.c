@@ -34,7 +34,24 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2s.h>
 
-#define I2S_NODE       DT_ALIAS(alp_i2s0)
+#define I2S_NODE DT_ALIAS(alp_i2s0)
+/* i2s3 ships "disabled" by default on EVK rev 2626-R2 -- see the SAFETY
+ * note in boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay.
+ * DEVICE_DT_GET() on a disabled node fails to LINK, not just to run, so
+ * this has to be a compile-time branch: with the node disabled (the
+ * default), i2s_dev() returns NULL and main() prints why and exits
+ * before touching the Zephyr I2S API at all. */
+#if DT_NODE_HAS_STATUS(I2S_NODE, okay)
+static const struct device *i2s_dev(void)
+{
+	return DEVICE_DT_GET(I2S_NODE);
+}
+#else
+static const struct device *i2s_dev(void)
+{
+	return NULL;
+}
+#endif
 #define SAMPLE_RATE_HZ 48000
 #define WORD_BITS      16
 #define NUM_CHANNELS   2 /* stereo: L/R interleaved */
@@ -72,7 +89,16 @@ static void fill_triangle(int16_t *frames)
 
 int main(void)
 {
-	const struct device *i2s = DEVICE_DT_GET(I2S_NODE);
+	const struct device *i2s = i2s_dev();
+
+	if (i2s == NULL) {
+		printf("[i2s] SOUND: playback skipped -- EVK 2626-R2 U46 has no Hi-Z state and "
+		       "routes SoC I2S outputs into mux outputs (hardware rework pending); i2s3 "
+		       "is left \"disabled\" in the board overlay so no pinctrl is applied and no "
+		       "clock is emitted\n[i2s] RESULT SKIPPED: i2s3 disabled by default on this "
+		       "board revision\n[i2s] done\n");
+		return 0;
+	}
 
 	printf("[i2s] open %s (audio I2S = i2s3, %d ch @ %d Hz, %d-bit TX)\n",
 	       i2s->name,
