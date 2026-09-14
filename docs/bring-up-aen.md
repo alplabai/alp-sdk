@@ -108,9 +108,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
    The SW-DP IDR (the debug-port identification register — a property of
    the ADIv5 SW-DP, **not** a core ID) reads **`0x4C013477`** on the E8
-   (BENCH-VERIFIED). Note this is *not* the generic `0x6BA02477` this repo
-   reads for the GD32/Cortex-M33 — a wrong value means wrong target or
-   reversed SWD wiring.
+   (BENCH-VERIFIED). Note this is *not* `0x6BA02477`, the generic
+   Cortex-M33 r0p1 SW-DPv2 default this repo carries as
+   `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (never measured on a GD32; #1440,
+   #1369) and separately the bench-measured V2N CM33 DAP value on this
+   same rack — a wrong value on the E8 means wrong target or reversed
+   SWD wiring.
 
    > pyocd works too, but its `-t` target id depends on the installed
    > `alif_ensemble-cmsis-dfp` CMSIS-pack (do NOT assume an `alif_e8` id).
