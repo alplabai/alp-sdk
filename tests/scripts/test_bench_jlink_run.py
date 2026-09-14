@@ -23,6 +23,7 @@ path, so production behaviour is unchanged.
 from __future__ import annotations
 
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -79,6 +80,23 @@ def _make_dev_node(dev_root: Path, bus: int, dev: int) -> None:
     (p / f"{dev:03d}").write_text("", encoding="utf-8")
 
 
+def _write_stub_true(tmp_path: Path) -> Path:
+    """Write a trivial, always-succeeds executable into tmp_path and return
+    its path, for JLINK_EXE to point at.
+
+    Deliberately NOT a system path like /bin/true or /usr/bin/true: those
+    are not the same file on every OS (macOS has no /bin/true -- only
+    /usr/bin/true -- and the next runner image can move it again either
+    way). A script this test writes itself cannot be absent on any host;
+    only the execute bit matters, and bench_jlink_exe()'s own `[ -x "$exe" ]`
+    check is satisfied by that alone, independent of PATH or `command -v`
+    (see bench-env.sh: `if ! command -v "$exe" ... && [ ! -x "$exe" ]`)."""
+    stub = tmp_path / "fake-jlinkexe"
+    stub.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+    return stub
+
+
 def _run(
     tmp_path: Path,
     *,
@@ -99,6 +117,7 @@ def _run(
         cmdfile = tmp_path / "fake.jlink"
         cmdfile.write_text("si SWD\nconnect\nexit\n", encoding="utf-8")
 
+    stub_true = _write_stub_true(tmp_path)
     lines = [
         "set -e",
         # alp-sdk#2064 review, Major 1: an INHERITED LG_PLACE would make
@@ -113,10 +132,12 @@ def _run(
         "unset LG_PLACE LG_COORDINATOR ALP_JLINK_SEARCH_ROOT",
         f'export TMPDIR="{tmp_path}"',
         # A real JLinkExe binary resolution is irrelevant under DRY_RUN (it
-        # is never exec'd) -- point JLINK_EXE at any executable so
-        # bench_jlink_exe() resolves without depending on whether THIS host
-        # happens to have a real J-Link install.
-        "export JLINK_EXE=/bin/true",
+        # is never exec'd) -- point JLINK_EXE at a stub THIS TEST wrote
+        # (_write_stub_true), not a system path, so bench_jlink_exe()
+        # resolves deterministically on every OS this file runs on -- macOS
+        # has no /bin/true (only /usr/bin/true), which is exactly how this
+        # site broke on macos-latest CI before this fix.
+        f'export JLINK_EXE="{stub_true}"',
     ]
     if sysfs_root is not None:
         lines.append(f'export BENCH_JLINK_SYSFS_ROOT="{sysfs_root}"')

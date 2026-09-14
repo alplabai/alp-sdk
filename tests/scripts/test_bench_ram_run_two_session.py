@@ -956,19 +956,27 @@ def test_missing_aen_jlink_run_falls_back_to_bench_jlink_run(tmp_path: Path) -> 
     JLinkExe resolution) -- neither path ever reaches this fake wrapper or
     touches a probe when the environment can't prove which one to use.
 
-    JLINK_EXE is pointed at a real, harmless binary (`/bin/true`) so the
-    SPECIFIC refusal under test -- bench_jlink_run()'s own "LG_SWD_PATH is
-    unresolved" gate -- is the one actually reached, deterministically,
-    regardless of whether the host running this test happens to have the
-    real SEGGER JLinkExe installed. Without this override the assertion
-    below is host-state-dependent: python-smoke on GitHub's ubuntu-latest/
-    macos-latest runners (no SEGGER tools at all) hits bench_jlink_exe()'s
-    OWN "'JLinkExe' not found" refusal first and never reaches LG_SWD_PATH's
-    -- while a bench host with a real JLinkExe install passes vacuously.
-    Measured: this test failed on both GitHub runners for exactly that
-    reason before this override was added."""
+    JLINK_EXE is pointed at a stub THIS TEST writes (never a system path
+    like /bin/true or /usr/bin/true -- macOS has no /bin/true at all, and a
+    hardcoded path is the same class of host assumption either way, just
+    waiting for a different runner image) so the SPECIFIC refusal under
+    test -- bench_jlink_run()'s own "LG_SWD_PATH is unresolved" gate -- is
+    the one actually reached, deterministically, regardless of whether the
+    host running this test happens to have the real SEGGER JLinkExe
+    installed. Without this override the assertion below is host-state-
+    dependent: python-smoke on GitHub's ubuntu-latest/macos-latest runners
+    (no SEGGER tools at all) hits bench_jlink_exe()'s OWN "'JLinkExe' not
+    found" refusal first and never reaches LG_SWD_PATH's -- while a bench
+    host with a real JLinkExe install passes vacuously. Measured: this test
+    failed on both GitHub runners for exactly that reason before this
+    override was added. This test is Linux-only (@_needs_bash_and_linux),
+    so it did not itself hit the macOS /bin/true break, but the stub is
+    used here too rather than leaving a second copy of the same fragile
+    pattern in the file."""
+    stub_true = tmp_path / "fake-jlinkexe"
+    _write_exe(stub_true, "#!/usr/bin/env bash\nexit 0\n")
     res, calls, _ = _run_ram_run(
-        tmp_path, aen_jlink_run=None, extra_env={"JLINK_EXE": "/bin/true"},
+        tmp_path, aen_jlink_run=None, extra_env={"JLINK_EXE": str(stub_true)},
     )
 
     assert res.returncode != 0, f"expected a non-zero refusal:\n{res.stdout}\n{res.stderr}"
@@ -976,7 +984,7 @@ def test_missing_aen_jlink_run_falls_back_to_bench_jlink_run(tmp_path: Path) -> 
     # own "cannot establish which probe" gate, reached because _run_ram_run
     # strips LG_PLACE/LG_COORDINATOR/LG_SWD_PATH (Major 1) -- never
     # AEN_JLINK_RUN's old message (that path is not taken at all) and never
-    # a real JLinkExe connect attempt (JLINK_EXE=/bin/true above never
+    # a real JLinkExe connect attempt (the JLINK_EXE stub above never
     # actually connects to anything; bench_jlink_run() refuses before it
     # would ever be exec'd).
     assert "bench_jlink_run: LG_SWD_PATH is unresolved" in res.stderr, res.stderr
