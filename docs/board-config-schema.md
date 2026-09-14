@@ -433,6 +433,7 @@ metadata/
 │   ├── E1M-AEN601.yaml      # partial_hw_config: true
 │   ├── E1M-AEN701.yaml      # lower-priority E7 preset
 │   ├── E1M-AEN801.yaml      # lead AEN E8 preset
+│   ├── E1M-AEN803.yaml      # AEN E8, dual external memory BOM; preliminary
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)

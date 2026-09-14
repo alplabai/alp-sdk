@@ -1109,7 +1109,7 @@ typedef enum {
 /** Reply payload of CMD_WIFI_STATUS (opcode 0x1B): a NON-BLOCKING snapshot of the
  *  STA connection state, read off a firmware latch (no radio op, ISR-safe) -- how
  *  the host collects an async connect result without blocking.  Fixed 4-byte wire
- *  layout (no padding): state | fail_reason | rssi_dbm | reserved. */
+ *  layout (no padding): state | fail_reason | rssi_dbm | last_reason. */
 typedef struct {
 	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
 	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
@@ -1120,12 +1120,65 @@ typedef struct {
 	 *  blocks that worker), so the byte has only ever held 0.  0 dBm is a LEGAL
 	 *  int8 RSSI, so there is no in-band sentinel a reader can test to tell
 	 *  "unmeasured" from a real 0 -- do NOT report this byte as a signal level
-	 *  (issue #1387).  A real reading comes only from CMD_WIFI_GET_RSSI (0x16),
-	 *  a worker-routed radio read.  Populating this byte honestly needs either a
-	 *  bench answer on whether the post-DHCP read is safe, or a validity flag on
-	 *  the wire (the @c reserved byte) -- both open; neither is decided here. */
-	int8_t  rssi_dbm;
-	uint8_t reserved;
+	 *  (issue #1387, closed with the gap itself still undecided).  A real
+	 *  reading comes only from CMD_WIFI_GET_RSSI (0x16), a worker-routed radio
+	 *  read.  Populating this byte honestly still needs a bench answer on
+	 *  whether the post-DHCP read is safe -- the wire slot that would have
+	 *  carried a validity flag (the byte formerly named @c reserved) is now
+	 *  @ref alp_cc3501e_wifi_status_t::last_reason, so a validity flag is no
+	 *  longer an available option on THIS reply; no replacement channel is
+	 *  decided here. */
+	int8_t rssi_dbm;
+	/** The reason/status code for the MOST RECENT connect attempt: the low
+	 *  byte of the 802.11 REASON code from a DISCONNECT event, or the 802.11
+	 *  STATUS code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
+	 *  event -- two DIFFERENT code tables, and nothing on the wire says
+	 *  which one, so @c fail_reason == REJECTED does NOT disambiguate them.
+	 *
+	 *  Recorded ONLY while that attempt's state is CONNECTING; frozen at its
+	 *  terminal result and PERSISTS through every later state publish --
+	 *  including a subsequent @ref cc3501e_wifi_disconnect() call
+	 *  (WIFI_DISCONNECT, 0x13), which republishes this same frozen value
+	 *  rather than a fresh one -- until the NEXT connect attempt starts and
+	 *  clears it back to 0.  0 means NOTHING WAS RECORDED for that attempt,
+	 *  not "no cause": a clean success, or a bare TIMEOUT with no DISCONNECT/
+	 *  REJECTED event of its own, also reads 0.  Note @ref cc3501e_wifi_connect
+	 *  itself issues that same disconnect at ENTRY, before submitting the new
+	 *  attempt, whenever the latch it reads first still shows a FAILED
+	 *  attempt (#1435/#1437 stale-association cleanup) -- so that internal
+	 *  disconnect can republish the OLD attempt's value too, same as an
+	 *  explicit one would.
+	 *
+	 *  CONNECTED always publishes 0, unconditionally -- even if a since-
+	 *  succeeded retry (below) recorded a transient rejection earlier in the
+	 *  same attempt -- and clears the underlying live value too, so it stays
+	 *  0 for any later republish of that same session.
+	 *
+	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED) -- a
+	 *  vendor placeholder, not a real 802.11 code.
+	 *
+	 *  @warning KNOWN RESIDUAL: the value is cleared to 0 twice for a new
+	 *  attempt -- at submit and again immediately before the vendor connect
+	 *  call -- but neither reset is the exact instant the vendor begins
+	 *  processing that attempt.  A late event from the PREVIOUS attempt
+	 *  landing in the narrow remaining window can still be recorded against
+	 *  the new one (any reason/status code, not one in particular).  The
+	 *  converse also holds: a reject arriving after an attempt has already
+	 *  been declared TIMEOUT is lost, because the attempt is already
+	 *  terminal by then.  The firmware also runs one bounded, transparent
+	 *  retry when the FIRST pass rejects with status 30 (an AP-issued
+	 *  comeback-time hint): the retry normally reports its OWN outcome (the
+	 *  value is reset again before the retry's own connect call), but if the
+	 *  retry's own connect call is itself refused, the byte instead reports
+	 *  the FIRST pass's outcome (e.g. REJECTED/30) rather than a generic
+	 *  KICK/0.
+	 *
+	 *  Scope is the connect attempt only: a deauth AFTER a successful
+	 *  CONNECTED is not recorded, because the state is no longer CONNECTING.
+	 *  Formerly an unused @c reserved byte, always 0 -- older bridge
+	 *  firmware that never populates it still sends 0, so this is purely
+	 *  additive and needs no wire-version bump (alp-sdk#2099). */
+	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */

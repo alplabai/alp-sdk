@@ -78,8 +78,15 @@
 #define PUBLISH_COUNT    3u
 #define PUBLISH_PERIOD_S 5u
 
-/* Handshake budgets. */
-#define WIFI_CONNECT_TIMEOUT_MS 10000u
+/* Handshake budgets.
+ *
+ * WIFI_CONNECT_TIMEOUT_MS: on E1M-AEN801 with the CC3501E bridge attached,
+ * alp_wifi_connect() routes to the CC3501E backend
+ * (src/backends/wifi/cc3501e.c), and the bridge's own worst case for one STA
+ * connect is 10s Wlan_RoleUp + 30s L2 association + a 30s DHCP-lease poll
+ * (hal/ti/cc3501e_hw_ti_wifi.c) = 70s. On other Wi-Fi backends this value is
+ * only an upper bound, not a derived worst case. */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
 #define MQTT_CONNECT_TIMEOUT_MS 10000u
 
 /* Read one telemetry value.

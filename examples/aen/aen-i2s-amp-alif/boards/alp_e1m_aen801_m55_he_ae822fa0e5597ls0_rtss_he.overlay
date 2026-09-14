@@ -12,6 +12,22 @@
  * (NOT i2s0@49014000 -- that was the first cut's wrong instance.) The
  * snps,designware-i2s node + driver (drivers/i2s/i2s_dw.c, CONFIG_I2S_DW) are
  * transcribed from the fork; alias alp-i2s0 -> &i2s3 keeps the portable bus id.
+ *
+ * DISABLED BY DEFAULT on EVK rev 2626-R2: I2S0_SDO/SCLK/WS (P9_3/4/5) run
+ * through U46, a 74LVC157 2:1 mux with NO high-impedance state -- with /E
+ * high its Y outputs are forced LOW, not floated. Those Y outputs are wired
+ * BACKWARDS for this direction (they drive the SoC's own I2S0_* pads, not
+ * the amps or the M.2 slot), so the instant this i2s3 node's pinctrl muxes
+ * P9_3/4/5 to the I2S3 alternate function and the controller drives them,
+ * the SoC fights U46's forced-low outputs on the same pads -- whether or
+ * not U46's /E is ever asserted. Disabling the whole node, not just
+ * skipping the app's i2s_configure()/i2s_write() calls, is the point: a
+ * disabled node gets no pinctrl-0 applied and no clock enabled at driver
+ * init, so nothing drives P9_3/4/5 at all. To exercise this node once U46
+ * has been reworked: `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * (resolved relative to this app's own source dir, examples/aen/aen-i2s-amp-alif;
+ * that file just sets `&i2s3 { status = "okay"; };`) -- the single documented
+ * switch; nothing else in this app needs to change.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -44,6 +60,9 @@
 		pinctrl-0 = <&pinctrl_i2s3>;
 		pinctrl-names = "default";
 		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
-		status = "okay";
+		/* "disabled" by default -- see the file-header SAFETY note above.
+		 * -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
+		 * flips this back to "okay" once the board is reworked. */
+		status = "disabled";
 	};
 };
