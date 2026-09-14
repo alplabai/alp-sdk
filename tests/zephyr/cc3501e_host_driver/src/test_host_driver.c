@@ -124,6 +124,33 @@ static struct {
 	 * Same capacity + drop-past-capacity rule as cmd_log above. */
 	uint8_t  flags_log[16];
 	uint32_t flags_log_count;
+
+	/* cc3501e-bridge-firmware#107 (alp-sdk#2035) remainder-retry coverage: every
+	 * CMD_SOCK_SEND dispatch that resolves DEFINITIVELY (RESP_OK -- a BUSY
+	 * reply is a poll_by_repeat-internal retry of the SAME iteration, not a
+	 * new one, and is deliberately NOT logged here, so one log entry always
+	 * means one iteration) logs its payload seq (byte [3], NOT the
+	 * wire-header flags -- see cc3501e_sock_send()'s seq comment), declared
+	 * data_len (bytes [4..5]), and the inline data bytes themselves.
+	 * slave.req_pl/req_len alone only ever hold the LAST dispatch, which
+	 * cannot prove a multi-iteration send used a DISTINCT seq per iteration
+	 * with only the UNSENT TAIL of the original buffer -- this log can (the
+	 * data_len-only version of this log let a `remaining += queued` deletion
+	 * stay green, since two iterations offering the SAME data_len as two
+	 * DIFFERENT byte ranges look identical without the bytes themselves).
+	 * Same drop-past-capacity rule as cmd_log above. */
+	uint8_t  sock_send_seq_log[12];
+	uint16_t sock_send_datalen_log[12];
+	uint8_t  sock_send_payload_log[12][32]; /* [i] holds min(datalen_log[i], 32) bytes */
+	uint32_t sock_send_log_count;
+
+	/* cc3501e-bridge-firmware#107 (alp-sdk#2035) review follow-up: a real
+	 * one-worker-slot, opcode-keyed model (see the g_sock_send_worker_*
+	 * globals below for the full shape) needs its own "did the job body run"
+	 * counter -- proving a collecting re-poll REVEALS an already-computed
+	 * result rather than re-executing it (the firmware only ever calls
+	 * lwip_send() ONCE per accepted job). */
+	uint32_t sock_send_body_exec_count;
 } slave;
 
 /* Set by test_wifi_scan_buf_is_per_context_740 / test_ble_scan_buf_is_per_context_740
@@ -253,6 +280,139 @@ static uint8_t g_diag_info_reply_len = 18u;
  * unfalsifiable against it. Cleared by slave_reset(). */
 static bool g_diag_info_legacy_unpadded;
 
+/* cc3501e-bridge-firmware `fix/107-bound-sock-send-seqguard` (the ONLY
+ * SOCK_SEND firmware shape this suite models -- alp-sdk has no active
+ * customers on the older, unbound shape) mutant controls for
+ * cc3501e_sock_send()'s remainder-retry loop, backed by a state machine that
+ * mirrors that firmware's `src/protocol_sockets.c` (`handle_sock_send()`,
+ * the seq-keyed reply cache) and `src/worker.c` (the one-job worker slot,
+ * `worker_submit_payload` / `worker_discard_stale_terminal` /
+ * `worker_reclaim_matching_terminal`) exactly, instead of a bare
+ * clock-threshold check:
+ *
+ *   1. Every dispatch first lets a PENDING job that has reached its own
+ *      ready time become TERMINAL and fills the reply cache -- by seq,
+ *      status AND reply, success or a decoded ERR alike -- exactly as
+ *      `worker_execute()` publishes into `protocol_sock_send_on_worker_
+ *      complete()` the instant a job completes, regardless of who (if
+ *      anyone) is polling at that moment.
+ *   2. A request whose seq matches a VALID cache entry invalidates nothing,
+ *      reclaims a matching terminal job (frees the slot, mirroring
+ *      `worker_reclaim_matching_terminal`), and is answered straight from
+ *      the cache -- no re-execution.
+ *   3. A request whose seq does NOT match a valid cache entry invalidates
+ *      it. It then discards a SITTING TERMINAL job whose seq differs
+ *      (`worker_discard_stale_terminal` -- freeing the slot for step 4) but
+ *      leaves a QUEUED/RUNNING job alone regardless of seq.
+ *   4. If the slot is now genuinely idle, SUBMIT: compute the result exactly
+ *      ONCE (bumping slave.sock_send_body_exec_count so a test can prove
+ *      that), arm its ready time, and answer BUSY unconditionally --
+ *      `worker_submit_payload()` never resolves a brand-new job on its own
+ *      submitting poll. If a DIFFERENT job is still QUEUED/RUNNING, answer
+ *      BUSY and submit NOTHING (`worker_submit_payload` refuses a non-IDLE
+ *      slot) -- this is the one case a bare clock-threshold fake cannot even
+ *      represent, since it has no notion of "still running" independent of
+ *      elapsed time.
+ *
+ * Without this, a fake that only checks a clock cannot fail a mutation that
+ * changes the grace round's seq (nothing to mismatch against), lets the "job
+ * body" re-run on every poll instead of once (no exec counter to prove
+ * otherwise), or resubmits over a job that is genuinely still running.
+ *
+ * All cleared by slave_reset(), so the default across the suite is one
+ * BUSY-then-OK round trip per frame, queuing the whole declared data_len.
+ *
+ *   - g_sock_send_queue_plan / _len: per-SUBMISSION queued-byte counts to
+ *     report, in order (indexed by slave.sock_send_body_exec_count AT SUBMIT
+ *     TIME, i.e. how many frames have been submitted so far -- one per
+ *     genuinely new iteration, not one per raw BUSY-then-OK dispatch pair);
+ *     once the plan is exhausted, a submission falls back to computing the
+ *     full data_len, same as the default.
+ *   - g_sock_send_always_zero: every submission computes 0 bytes queued,
+ *     regardless of the plan above -- models a peer that never reads, so the
+ *     loop must give up on ITS OWN elapsed-time budget rather than hang.
+ *   - g_sock_send_short_reply: stage an unpadded ALP_CC3501E_RESP_OK_LEGACY
+ *     reply with only 1 data byte (not the 2 a real queued-count needs) on
+ *     EVERY dispatch, bypassing the worker model entirely -- a firmware/wire
+ *     gap, not backpressure. Takes priority over every other control below.
+ *   - g_sock_send_busy_step_ms[] / _step_count: how long (from ITS OWN
+ *     submission time) a frame stays QUEUED/RUNNING before it is ready to
+ *     become terminal, indexed the same way as the queue plan. step_count==0
+ *     means every submitted frame is ready on its very next poll (the
+ *     default: one BUSY, one OK). Models two review follow-ups (both
+ *     alp-sdk#2035):
+ *       - a per-iteration remaining budget can run out while poll_by_repeat()
+ *         is still retrying a genuinely in-flight BUSY job -- a single
+ *         busy_step_ms longer than timeout_ms, so the PER-ITERATION
+ *         poll_by_repeat() call times out, but short enough that the
+ *         collection grace afterward covers it.
+ *       - cc3501e_sock_send() must budget each iteration off the genuinely
+ *         REMAINING time, not a fresh copy of timeout_ms -- a
+ *         `budget = timeout_ms` regression lets a LATER iteration retry with
+ *         far more time than it correctly has left, resolving a busy_step_ms
+ *         that a correctly-shrunk budget (even with the grace window added)
+ *         could not have.
+ *   - g_sock_send_resolve_as_error: once a submitted job becomes ready,
+ *     completing it publishes this REAL decoded device-side error (an
+ *     ALP_CC3501E_RESP_ERR_* byte) into the cache instead of RESP_OK+queued-
+ *     count -- models a genuine failure (e.g. a peer reset) discovered once
+ *     the collection grace catches up with an in-flight job. 0 (the
+ *     default) means resolve normally. */
+static uint16_t g_sock_send_queue_plan[4];
+static uint32_t g_sock_send_queue_plan_len;
+static bool     g_sock_send_always_zero;
+static bool     g_sock_send_short_reply;
+static uint32_t g_sock_send_busy_step_ms[4];
+static uint32_t g_sock_send_busy_step_count;
+static uint8_t  g_sock_send_resolve_as_error;
+
+/* The one-worker-slot state (IDLE implied by pending==sitting_terminal==
+ * false) + the seq-keyed reply cache -- opcode-keyed (this whole model only
+ * ever handles CMD_SOCK_SEND, so there is implicitly one slot per opcode
+ * already). See the mutant-control doc comment above for the exact
+ * step-by-step algorithm these back. */
+static bool     g_sock_send_worker_pending;          /* QUEUED/RUNNING          */
+static bool     g_sock_send_worker_sitting_terminal; /* DONE/ERR, uncollected   */
+static uint8_t  g_sock_send_worker_seq;              /* pending OR sitting job's seq */
+static uint16_t g_sock_send_worker_computed_queued;
+static uint8_t  g_sock_send_worker_resolve_status; /* 0 = OK; else an ALP_CC3501E_RESP_ERR_* */
+static uint64_t g_sock_send_worker_ready_ms;
+/* The submitted request's OWN declared length + inline bytes, captured AT
+ * SUBMIT time (step 4b below) -- NOT re-read from slave.req_pl once the job
+ * becomes terminal, because by then req_pl may belong to a COMPLETELY
+ * UNRELATED dispatch (this job can complete in the "background", noticed by
+ * whatever request happens to be dispatched once its ready time passes --
+ * see step 1). Needed only to log THIS job's own frame correctly at
+ * completion. */
+static uint16_t g_sock_send_worker_dl;
+static uint8_t  g_sock_send_worker_payload[32];
+static bool     g_sock_send_cache_valid;
+static uint8_t  g_sock_send_cache_seq;
+static uint8_t  g_sock_send_cache_status; /* the ALP_CC3501E_RESP_* answered -- OK or an ERR */
+static uint16_t g_sock_send_cache_queued; /* valid iff cache_status == ALP_CC3501E_RESP_OK */
+
+/* alp-sdk#2035 review follow-up: simulates a genuinely CONCURRENT caller
+ * holding ctx->request_lock, for the two cc3501e_sock_send() lock-timeout
+ * tests below. `g_lock_contention_arm_on_submit`, set by a test BEFORE
+ * calling cc3501e_sock_send(), makes the SOCK_SEND fake's very first SUBMIT
+ * (case ALP_CC3501E_CMD_SOCK_SEND, step 4b) request that the lock become
+ * externally held starting from the very NEXT alp_delay_ms() call -- i.e.
+ * AFTER that first transaction's own cc3501e_lock_release(), never during
+ * it (setting request_lock=true mid-transaction would just be clobbered by
+ * that same transaction's own release). Held for
+ * LOCK_CONTENTION_WINDOW_MS (150 ms: comfortably longer than
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS's default 100 ms internal
+ * spin, so a lock-acquire attempt landing inside the window genuinely
+ * exhausts it, then comfortably inside a 250 ms+ caller budget so a LATER
+ * attempt has time to succeed once the window ends), then released.
+ * Declared here (ahead of slave_dispatch()'s own use of
+ * g_lock_contention_arm_on_submit in the SOCK_SEND case below) rather than
+ * beside alp_delay_ms(), which is the only other place that reads them. */
+#define LOCK_CONTENTION_WINDOW_MS 150u
+static bool     g_lock_contention_arm_on_submit;
+static bool     g_lock_contention_pending;
+static uint64_t g_lock_contention_release_at_ms;
+
 static void slave_reset(void)
 {
 	memset(&slave, 0, sizeof(slave));
@@ -285,6 +445,25 @@ static void slave_reset(void)
 	g_get_ip_io_down_remaining         = 0u;
 	g_diag_info_reply_len              = 18u;
 	g_diag_info_legacy_unpadded        = false;
+	memset(g_sock_send_queue_plan, 0, sizeof(g_sock_send_queue_plan));
+	g_sock_send_queue_plan_len = 0u;
+	g_sock_send_always_zero    = false;
+	g_sock_send_short_reply    = false;
+	memset(g_sock_send_busy_step_ms, 0, sizeof(g_sock_send_busy_step_ms));
+	g_sock_send_busy_step_count         = 0u;
+	g_sock_send_resolve_as_error        = 0u;
+	g_sock_send_worker_pending          = false;
+	g_sock_send_worker_sitting_terminal = false;
+	g_sock_send_worker_seq              = 0u;
+	g_sock_send_worker_computed_queued  = 0u;
+	g_sock_send_worker_resolve_status   = 0u;
+	g_sock_send_worker_ready_ms         = 0u;
+	g_sock_send_worker_dl               = 0u;
+	memset(g_sock_send_worker_payload, 0, sizeof(g_sock_send_worker_payload));
+	g_sock_send_cache_valid  = false;
+	g_sock_send_cache_seq    = 0u;
+	g_sock_send_cache_status = 0u;
+	g_sock_send_cache_queued = 0u;
 }
 
 /* RESP_OK stages the real MAJOR-4 shape (padded + CRC trailer -- the only
@@ -648,11 +827,176 @@ static void slave_dispatch(void)
 		break;
 	}
 	case ALP_CC3501E_CMD_SOCK_SEND: {
-		/* Echo the inline data_len (bytes [4..5] of the send header) as the
-		 * accepted count -- the firmware queues everything in this model. */
-		uint16_t      dl   = (uint16_t)slave.req_pl[4] | ((uint16_t)slave.req_pl[5] << 8);
-		const uint8_t c[2] = { (uint8_t)(dl & 0xFFu), (uint8_t)((dl >> 8) & 0xFFu) };
-		stage_reply(ALP_CC3501E_RESP_OK, c, 2u);
+		/* Every SOCK_SEND dispatch costs the fake clock at least 1 ms of
+		 * simulated wire-transfer time, unconditionally -- including under
+		 * g_sock_send_always_zero, where NOTHING else advances it (an
+		 * ALP_OK+0-queued reply is not retryable, so poll_by_repeat() itself
+		 * never sleeps for it). Without this, deleting the driver's own
+		 * zero-progress back-off leaves nothing to advance g_fake_now_ms
+		 * toward the deadline and test_sock_send_never_queued_times_out_
+		 * and_backs_off_107 HANGS instead of failing -- a killed-agent-style
+		 * false read, worse than a red assertion. With it, that mutation
+		 * instead blows the test's dispatch-count bound (many more 1 ms
+		 * dispatches than the ~20 ms-paced back-off needs), a clean FAIL. */
+		alp_delay_ms(1u);
+
+		uint16_t dl  = (uint16_t)slave.req_pl[4] | ((uint16_t)slave.req_pl[5] << 8);
+		uint8_t  seq = slave.req_pl[3];
+
+		/* alp-sdk#2035 review follow-up: the seqguard firmware
+		 * (cc3501e-bridge-firmware#134) rejects a frame whose actual length
+		 * does not match its OWN declared data_len (protocol_sockets.c
+		 * ~236: req_len != 8 + data_len -> RESP_ERR_INVALID) -- catching a
+		 * host that offers a shrunk/grown data_len but still ships the OLD
+		 * (or a wrong) byte count. Checked before anything else, same as
+		 * the real handler. */
+		if (slave.req_len != (uint16_t)(8u + dl)) { /* 8 == the SOCK_SEND wire header */
+			stage_status(ALP_CC3501E_RESP_ERR_INVALID);
+			break;
+		}
+
+		if (g_sock_send_short_reply) {
+			/* Malformed reply: ALP_OK with only 1 data byte, not the 2 a real
+			 * queued-count needs (alp-sdk#2035). RESP_OK_LEGACY (the unpadded
+			 * shape, via stage_reply()'s own branch on the status byte -- see
+			 * cc3501e_reply_model.h), not RESP_OK: the padded MAJOR-4 shape
+			 * cc3501e_model_stage_reply() builds for RESP_OK always rounds up
+			 * to at least ALP_CC3501E_REPLY_PAD + CRC bytes, so a 1-byte
+			 * request there is unfalsifiable -- got can never come back under
+			 * 2 through it (same reason the GATT_READ test above uses the
+			 * legacy shape). Bypasses the worker model entirely -- not logged
+			 * as a resolved iteration, the driver must reject this outright,
+			 * not treat it as zero-progress backpressure. */
+			const uint8_t c[1] = { 0xAAu };
+			stage_reply(ALP_CC3501E_RESP_OK_LEGACY, c, 1u);
+			break;
+		}
+
+		/* Step 1 (mutant-control doc comment above): let a PENDING job that
+		 * has reached its own ready time become TERMINAL and fill the reply
+		 * cache -- by seq, status AND reply, success or a decoded ERR alike --
+		 * regardless of what seq THIS dispatch itself carries. Mirrors
+		 * worker_execute() publishing into
+		 * protocol_sock_send_on_worker_complete() the instant a job
+		 * completes, independent of who is polling at that moment. Logged
+		 * HERE, using the completing job's OWN captured seq/dl/payload (NOT
+		 * this dispatch's, which may belong to a different, later request)
+		 * -- exactly once per genuine resolution, regardless of how many
+		 * later cache hits re-serve it. */
+		if (g_sock_send_worker_pending && alp_uptime_ms() >= g_sock_send_worker_ready_ms) {
+			g_sock_send_worker_pending          = false;
+			g_sock_send_worker_sitting_terminal = true;
+			g_sock_send_cache_valid             = true;
+			g_sock_send_cache_seq               = g_sock_send_worker_seq;
+			g_sock_send_cache_status            = (g_sock_send_worker_resolve_status != 0u)
+			                                          ? g_sock_send_worker_resolve_status
+			                                          : (uint8_t)ALP_CC3501E_RESP_OK;
+			g_sock_send_cache_queued            = g_sock_send_worker_computed_queued;
+			if (slave.sock_send_log_count < ARRAY_SIZE(slave.sock_send_seq_log)) {
+				uint32_t i                     = slave.sock_send_log_count;
+				slave.sock_send_seq_log[i]     = g_sock_send_worker_seq;
+				slave.sock_send_datalen_log[i] = g_sock_send_worker_dl;
+				uint16_t copy = (g_sock_send_worker_dl < sizeof(slave.sock_send_payload_log[i]))
+				                    ? g_sock_send_worker_dl
+				                    : (uint16_t)sizeof(slave.sock_send_payload_log[i]);
+				memcpy(slave.sock_send_payload_log[i], g_sock_send_worker_payload, copy);
+				slave.sock_send_log_count++;
+			}
+		}
+
+		/* Step 2: a request whose seq matches a VALID cache entry invalidates
+		 * nothing; a request whose seq does NOT match invalidates it
+		 * (mirrors handle_sock_send()'s own seq check, before anything else). */
+		if (g_sock_send_cache_valid && g_sock_send_cache_seq != seq) {
+			g_sock_send_cache_valid = false;
+		}
+
+		if (g_sock_send_cache_valid) {
+			/* Cache hit: reclaim a matching sitting-terminal job (frees the
+			 * slot -- worker_reclaim_matching_terminal) and answer straight
+			 * from the cache, success or a decoded ERR alike. No
+			 * re-execution, no re-log -- step 1 already logged this
+			 * resolution once, whether that happened on THIS dispatch or an
+			 * earlier one. */
+			if (g_sock_send_worker_sitting_terminal && g_sock_send_worker_seq == seq) {
+				g_sock_send_worker_sitting_terminal = false;
+			}
+			if (g_sock_send_cache_status == (uint8_t)ALP_CC3501E_RESP_OK) {
+				const uint8_t c[2] = { (uint8_t)(g_sock_send_cache_queued & 0xFFu),
+					                   (uint8_t)((g_sock_send_cache_queued >> 8) & 0xFFu) };
+				stage_reply(ALP_CC3501E_RESP_OK, c, 2u);
+			} else {
+				stage_status(g_sock_send_cache_status);
+			}
+			break;
+		}
+
+		/* Step 3: cache miss. Discard a SITTING TERMINAL job whose seq
+		 * differs (worker_discard_stale_terminal) -- freeing the slot -- but
+		 * leave a QUEUED/RUNNING job alone regardless of seq: there is no
+		 * terminal result yet for it to misclaim. */
+		if (g_sock_send_worker_sitting_terminal && g_sock_send_worker_seq != seq) {
+			g_sock_send_worker_sitting_terminal = false;
+		}
+
+		/* Step 4a: a DIFFERENT job is still QUEUED/RUNNING -- BUSY, submit
+		 * NOTHING (worker_submit_payload refuses a non-IDLE slot). This is
+		 * the case a bare clock-threshold fake cannot represent at all. */
+		if (g_sock_send_worker_pending) {
+			stage_status(ALP_CC3501E_RESP_ERR_BUSY);
+			break;
+		}
+
+		/* Step 4b: the slot is genuinely IDLE -- SUBMIT. Compute the result
+		 * exactly ONCE (bumping sock_send_body_exec_count so a test can
+		 * prove that), capture this frame's OWN dl/payload for step 1's later
+		 * logging, arm its ready time, and answer BUSY unconditionally --
+		 * real firmware never resolves a brand-new job on its own submitting
+		 * poll. */
+		uint32_t exec_idx = slave.sock_send_body_exec_count;
+		uint16_t computed = dl;
+		if (g_sock_send_always_zero) {
+			computed = 0u;
+		} else if (exec_idx < g_sock_send_queue_plan_len) {
+			computed = g_sock_send_queue_plan[exec_idx];
+			if (computed > dl) computed = dl;
+		} else if (g_sock_send_busy_step_count != 0u) {
+			/* No explicit plan alongside busy_step -- default to exactly 1
+			 * byte per submission, so a multi-entry busy_step array can
+			 * require the DECLARED data_len to shrink across genuinely
+			 * separate iterations (an explicit plan above still wins). */
+			computed = (dl > 1u) ? 1u : dl;
+		}
+		slave.sock_send_body_exec_count++;
+
+		uint32_t step_ms = 0u;
+		if (g_sock_send_busy_step_count != 0u) {
+			uint32_t step_idx = (exec_idx < g_sock_send_busy_step_count)
+			                        ? exec_idx
+			                        : g_sock_send_busy_step_count - 1u;
+			step_ms           = g_sock_send_busy_step_ms[step_idx];
+		}
+		g_sock_send_worker_pending         = true;
+		g_sock_send_worker_seq             = seq;
+		g_sock_send_worker_computed_queued = computed;
+		g_sock_send_worker_resolve_status  = g_sock_send_resolve_as_error;
+		g_sock_send_worker_ready_ms        = alp_uptime_ms() + step_ms;
+		g_sock_send_worker_dl              = dl;
+		{
+			uint16_t copy = (dl < sizeof(g_sock_send_worker_payload))
+			                    ? dl
+			                    : (uint16_t)sizeof(g_sock_send_worker_payload);
+			memcpy(g_sock_send_worker_payload, &slave.req_pl[8], copy);
+		}
+		if (g_lock_contention_arm_on_submit) {
+			/* See the global's own comment: arm the NEXT alp_delay_ms() call
+			 * to force the lock externally held, not this dispatch -- that
+			 * would just be undone by this SAME transaction's own
+			 * cc3501e_lock_release() afterward. */
+			g_lock_contention_arm_on_submit = false;
+			g_lock_contention_pending       = true;
+		}
+		stage_status(ALP_CC3501E_RESP_ERR_BUSY);
 		break;
 	}
 	case ALP_CC3501E_CMD_SOCK_RECV: {
@@ -849,6 +1193,14 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	return ALP_OK;
 }
 
+/* Forward reference -- the real fixture is declared below, in its usual spot
+ * (the "fixture" section); this lets the lock-contention hooks in
+ * alp_delay_ms() below reach ctx->request_lock directly (the REAL lock seam,
+ * cc3501e_lock_acquire()'s cc3501e_lock_try(), cc3501e_core.c) without
+ * reordering the file. A file-scope `static` tentative declaration + later
+ * definition is one object, not two, per C's tentative-definition rules. */
+static cc3501e_t fw;
+
 /* alp_delay_us is a no-op under the sim; the GPIO seams are inert (the
  * fixture's ctx leaves reset/enable/ready pins unset, so the wrappers under
  * test never call them -- they exercise cc3501e_request, not the reset-pin
@@ -866,6 +1218,18 @@ void alp_delay_us(uint32_t us)
 void alp_delay_ms(uint32_t ms)
 {
 	g_fake_now_ms += ms;
+	if (g_lock_contention_pending) {
+		g_lock_contention_pending       = false;
+		fw.request_lock                 = true;
+		g_lock_contention_release_at_ms = g_fake_now_ms + LOCK_CONTENTION_WINDOW_MS;
+	} else if (g_lock_contention_release_at_ms != 0u) {
+		if (g_fake_now_ms >= g_lock_contention_release_at_ms) {
+			fw.request_lock                 = false;
+			g_lock_contention_release_at_ms = 0u;
+		} else {
+			fw.request_lock = true;
+		}
+	}
 }
 uint64_t alp_uptime_ms(void)
 {
@@ -898,6 +1262,9 @@ static void reset_before(void *fixture)
 {
 	(void)fixture;
 	slave_reset();
+	g_lock_contention_arm_on_submit = false;
+	g_lock_contention_pending       = false;
+	g_lock_contention_release_at_ms = 0u;
 	zassert_equal(cc3501e_init(&fw, fake_bus), ALP_OK, "init binds the (fake) bus");
 }
 
@@ -2225,6 +2592,414 @@ ZTEST(cc3501e_host_driver, test_sock_send_encodes_header_and_data)
 	zassert_equal(slave.req_pl[5], 0u, "data_len hi");
 	zassert_mem_equal(&slave.req_pl[8], data, 5u, "inline data after the header");
 	zassert_equal(sent, 5u, "decoded accepted byte count");
+}
+
+/* cc3501e-bridge-firmware#107 (alp-sdk#2035): a slave that queues everything
+ * on the first reply -- the pre-#107 case -- must still resolve in exactly
+ * ONE SOCK_SEND dispatch. Guards against a remainder-retry rewrite that
+ * always loops at least twice regardless of progress. */
+ZTEST(cc3501e_host_driver, test_sock_send_full_queue_first_try_one_iteration_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 0u;
+
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
+	zassert_equal(sent, 5u, "all 5 bytes reported queued");
+	zassert_equal(slave.sock_send_log_count, 1u, "one dispatch -- no remainder to retry");
+}
+
+/* cc3501e-bridge-firmware#107 (alp-sdk#2035): a slave that queues a PARTIAL
+ * count, then the rest on the next poll -- the MSG_DONTWAIT backpressure case
+ * the firmware change (#107) introduces. cc3501e_sock_send() must loop,
+ * report the FULL count once everything is queued, and -- the property
+ * #1746's cache mechanism depends on -- each iteration must carry a DISTINCT
+ * seq (payload byte [3]) with only the REMAINING bytes, not the original 5.
+ *
+ * Asserts the actual payload BYTES of iteration 2, not just its declared
+ * data_len: a `remaining += queued` deletion (the pointer never advances, so
+ * every iteration re-offers the buffer from byte 0) leaves data_len alone --
+ * iteration 2 would still correctly declare "3 bytes remaining" -- but sends
+ * the WRONG 3 bytes (the ORIGINAL data[0..3), "GET", not the unsent tail
+ * data[2..5), "T /"). A data_len-only assertion cannot see that. */
+ZTEST(cc3501e_host_driver, test_sock_send_partial_then_rest_retries_with_new_seq_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 0u;
+
+	g_sock_send_queue_plan[0]  = 2u; /* 1st dispatch: queue 2 of 5 */
+	g_sock_send_queue_plan[1]  = 3u; /* 2nd dispatch: queue the remaining 3 */
+	g_sock_send_queue_plan_len = 2u;
+
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u), ALP_OK, "SEND -> OK");
+	zassert_equal(sent, 5u, "total queued across both iterations == len");
+	zassert_equal(slave.sock_send_log_count, 2u, "exactly two iterations");
+	zassert_equal(slave.sock_send_datalen_log[0], 5u, "1st iteration offers all 5 remaining");
+	zassert_mem_equal(slave.sock_send_payload_log[0], data, 5u, "1st iteration sends bytes 0..5");
+	zassert_equal(slave.sock_send_datalen_log[1], 3u, "2nd iteration offers only what's left (3)");
+	zassert_mem_equal(slave.sock_send_payload_log[1],
+	                  &data[2],
+	                  3u,
+	                  "2nd iteration sends the UNSENT TAIL data[2..5), not data[0..3)");
+	zassert_not_equal(slave.sock_send_seq_log[0],
+	                  slave.sock_send_seq_log[1],
+	                  "each iteration is a NEW logical send -- distinct seq");
+}
+
+/* cc3501e-bridge-firmware#107: a slave that NEVER queues anything (a peer that never reads)
+ * must not hang cc3501e_sock_send() -- it must give up within its OWN
+ * timeout_ms budget, reporting ALP_ERR_TIMEOUT with whatever partial count
+ * was queued (0 here), and it must back off between attempts rather than
+ * hammering the link. The fake alp_delay_ms()/alp_uptime_ms() pair (see the
+ * fixture above) makes this deterministic without any real sleeping: time
+ * only ever advances by what the driver itself asks alp_delay_ms() to sleep. */
+ZTEST(cc3501e_host_driver, test_sock_send_never_queued_times_out_and_backs_off_107)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 123u; /* poison -- must come back 0, not left untouched */
+
+	g_sock_send_always_zero = true;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u),
+	              ALP_ERR_TIMEOUT,
+	              "a peer that never reads -> ALP_ERR_TIMEOUT within the budget");
+	zassert_equal(sent, 0u, "partial (zero) progress reported, not left poisoned");
+	/* Backed off, not hot-looped: at 20 ms/back-off and a 100 ms budget this is
+	 * a handful of dispatches, not hundreds. */
+	zassert_true(slave.sock_send_log_count >= 2u && slave.sock_send_log_count <= 10u,
+	             "bounded, back-off-paced retry count (got %u)",
+	             slave.sock_send_log_count);
+}
+
+/* alp-sdk#2035 review follow-up: a timeout_ms smaller than
+ * CC3501E_SOCK_SEND_BACKOFF_MS(20) must not be overrun by an unconditional
+ * full back-off sleep -- a 4 ms budget used to come back after ~23 ms
+ * (20 ms back-off + change), not ~4 ms. slave.sock_send_log_count alone
+ * (the bound test_sock_send_never_queued_times_out_and_backs_off_107 checks)
+ * cannot catch this: an unconditional-sleep mutant still produces a
+ * similarly-bounded dispatch count, just a late-returning one -- only the
+ * fake clock (g_fake_now_ms) directly exposes the overrun. */
+ZTEST(cc3501e_host_driver, test_sock_send_small_timeout_never_overruns_by_a_full_backoff_107)
+{
+	const uint8_t data[1] = { 'Z' };
+	size_t        sent    = 123u;
+	uint64_t      base    = g_fake_now_ms;
+
+	g_sock_send_always_zero = true;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 4u),
+	              ALP_ERR_TIMEOUT,
+	              "a 4 ms budget against a peer that never reads");
+	zassert_equal(sent, 0u, "no progress");
+
+	uint64_t elapsed = g_fake_now_ms - base;
+	zassert_true(elapsed <= 10u,
+	             "must return close to the 4 ms budget, not ~23 ms from a full "
+	             "unconditional back-off sleep (got %llu ms)",
+	             (unsigned long long)elapsed);
+}
+
+/* cc3501e-bridge-firmware#107 (alp-sdk#2035): the first attempt of an
+ * iteration can time out while the slave is genuinely BUSY (a job the
+ * firmware accepted but has not finished), then the job completes shortly
+ * after. cc3501e_sock_send() must not abandon it -- it must collect the
+ * queued count into sent_out via its bounded post-timeout grace, returning
+ * ALP_OK once that finishes the whole send, using the SAME seq the iteration
+ * already assigned (a wrong-seq grace re-poll would look like a BRAND NEW
+ * frame to the real worker-slot model below, overwriting the pending job
+ * instead of collecting it -- see the mutation-verify note in the PR this
+ * test belongs to), with the job's body having executed exactly ONCE (the
+ * firmware calls lwip_send() once per accepted job, not once per poll). A
+ * FOLLOWING, completely unrelated cc3501e_sock_send() call must not see the
+ * stale collected reply as its own (proving no leftover state, either in the
+ * driver or in this test's slave model, leaks across calls). timeout_ms(10)
+ * is deliberately far shorter than the busy_step_ms(30) required to resolve,
+ * so poll_by_repeat()'s own per-iteration call is GUARANTEED to time out
+ * before the job clears; CC3501E_SOCK_SEND_COLLECT_GRACE_MS(250) is then more
+ * than enough to collect it. */
+ZTEST(cc3501e_host_driver, test_sock_send_busy_then_done_collected_via_grace_107)
+{
+	const uint8_t data1[1] = { 'X' };
+	size_t        sent1    = 0u;
+
+	g_sock_send_busy_step_ms[0] = 30u;
+	g_sock_send_busy_step_count = 1u;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 10u),
+	              ALP_OK,
+	              "collected via the post-timeout grace -> the whole send still completes");
+	zassert_equal(sent1, 1u, "the queued count from the collected reply, not 0 / abandoned");
+	zassert_equal(slave.sock_send_log_count, 1u, "exactly one iteration was collected");
+	zassert_equal(slave.sock_send_seq_log[0],
+	              fw.sock_send_seq,
+	              "the grace round collected THIS iteration's own seq, not a bumped/different one");
+	zassert_equal(slave.sock_send_body_exec_count,
+	              1u,
+	              "the job body (the queued-count decision) ran exactly once, not once per poll");
+
+	/* A fresh, unrelated call for DIFFERENT data must get its OWN correct
+	 * result -- not whatever the grace round above collected. */
+	g_sock_send_busy_step_count = 0u; /* back to instant-OK default */
+	const uint8_t data2[4]      = { 'Y', 'Y', 'Y', 'Y' };
+	size_t        sent2         = 0u;
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 100u),
+	              ALP_OK,
+	              "the next call is unaffected by the previous call's collected job");
+	zassert_equal(sent2, 4u, "the next call's OWN full count, not the stale collected one");
+	zassert_equal(
+	    slave.sock_send_body_exec_count, 2u, "the second call submitted its OWN fresh job body");
+}
+
+/* alp-sdk#2035 review follow-up: a genuinely NEW frame dispatched while a
+ * DIFFERENT job is still QUEUED/RUNNING answers BUSY and submits NOTHING
+ * (worker_submit_payload refuses a non-IDLE slot) -- the one case a bare
+ * clock-threshold fake cannot even represent, since it has no notion of
+ * "still running" independent of elapsed time. Call 1's job needs 1000 ms,
+ * but its own budget (10 ms) plus the collection grace (250 ms) together
+ * cover only ~260 ms, so it gives up with the job STILL pending -- a genuine
+ * lower bound, not a bug (see the earlier grace tests for that path
+ * verified in isolation). Call 2, moments later with fresh data, must not
+ * see that still-running job resubmitted or overwritten: every one of its
+ * own attempts finds the slot busy and gives up too, WITHOUT ever executing
+ * a body of its own. */
+ZTEST(cc3501e_host_driver,
+      test_sock_send_new_frame_while_job_still_running_is_busy_not_resubmitted_107)
+{
+	const uint8_t data1[1] = { 'C' };
+	size_t        sent1    = 0u;
+
+	g_sock_send_busy_step_ms[0] = 1000u;
+	g_sock_send_busy_step_count = 1u;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 10u),
+	              ALP_ERR_TIMEOUT,
+	              "call 1's job needs far longer than its budget + grace -- gives up, still "
+	              "genuinely running");
+	zassert_equal(sent1, 0u, "a lower bound -- nothing collected yet");
+	zassert_equal(slave.sock_send_body_exec_count, 1u, "call 1 submitted its own job exactly once");
+
+	const uint8_t data2[1] = { 'D' };
+	size_t        sent2    = 0u;
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 50u),
+	              ALP_ERR_TIMEOUT,
+	              "call 1's job is STILL running -- every attempt is BUSY, never resubmitted");
+	zassert_equal(sent2, 0u, "nothing was ever queued for call 2's own data");
+	zassert_equal(slave.sock_send_body_exec_count,
+	              1u,
+	              "still exactly one execution -- call 2 never got to submit its own body");
+}
+
+/* alp-sdk#2035 review follow-up: a bridge with cc3501e-bridge-firmware#107
+ * (PR #134)'s per-seq reply cache is
+ * invalidated the instant a DIFFERENT seq is dispatched (cache_valid=false
+ * as soon as an incoming seq mismatches it -- BEFORE anything else), so a
+ * host seq that later wraps back to a value the cache once held finds
+ * nothing cached for it and EXECUTES instead of aliasing the stale reply.
+ * Forces the wrap directly (fw.sock_send_seq) rather than spending 255 real
+ * calls to reach it -- the SAME collision, reached the fast way: call 1
+ * caches seq 1's own count (3); call 2 (seq 2, a DIFFERENT logical send)
+ * both invalidates that entry and leaves its own count (2) cached in its
+ * place; forcing the counter back to 0 makes call 3 reuse seq 1 -- which by
+ * then matches NEITHER the (already-overwritten) cache nor any pending job,
+ * so it submits and executes its OWN fresh body, returning its OWN count
+ * (8), not call 1's stale 3. */
+ZTEST(cc3501e_host_driver, test_sock_send_wrapped_seq_executes_after_invalidation_107)
+{
+	const uint8_t data1[3] = { '1', '1', '1' };
+	size_t        sent1    = 0u;
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 100u), ALP_OK, "call 1");
+	zassert_equal(sent1, 3u, "call 1's own count, now cached under seq 1");
+
+	const uint8_t data2[2] = { '2', '2' };
+	size_t        sent2    = 0u;
+	zassert_equal(
+	    cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 100u), ALP_OK, "call 2");
+	zassert_equal(sent2, 2u, "call 2's own count, now cached under seq 2 instead");
+
+	fw.sock_send_seq = 0u; /* force the wrap: the next assigned seq (1) reuses call 1's */
+
+	const uint8_t data3[8]     = { '3', '3', '3', '3', '3', '3', '3', '3' };
+	size_t        sent3        = 0u;
+	g_sock_send_queue_plan[2]  = 8u; /* call 3 is the THIRD submission (exec_idx 2) */
+	g_sock_send_queue_plan_len = 3u;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data3, sizeof(data3), &sent3, 100u),
+	              ALP_OK,
+	              "the reused seq executes -- neither the (already-overwritten) cache nor any "
+	              "pending job matches it");
+	zassert_equal(sent3, 8u, "call 3's OWN count, not call 1's stale cached count (3)");
+	zassert_equal(slave.sock_send_body_exec_count, 3u, "three genuine executions, not an alias");
+}
+
+/* cc3501e-bridge-firmware#107 (alp-sdk#2035): cc3501e_sock_send() must
+ * budget each iteration off the genuinely REMAINING time, not a fresh copy
+ * of timeout_ms. byte 0 needs 700 ms to clear (resolves directly within the
+ * full 1000 ms budget the first iteration always starts with -- no timing
+ * difference from a bug here, so this alone would not catch it); byte 1 ALSO
+ * needs 700 ms, but by then only ~300 ms of the 1000 ms budget is genuinely
+ * left. A correctly-shrunk budget times out around 300 ms in, and the 250 ms
+ * collection grace (exercised together here) still cannot reach the 700 ms
+ * mark -- so byte 1 is never collected, total elapsed stays near timeout_ms +
+ * one grace window, and cc3501e_sock_send() reports ALP_ERR_TIMEOUT with only
+ * byte 0's count. A `budget = timeout_ms` regression hands byte 1's iteration
+ * a fresh 1000 ms budget instead of the correct ~300 ms -- comfortably
+ * enough to resolve the 700 ms requirement DIRECTLY, no timeout, no grace --
+ * reporting ALP_OK with both bytes sent, but only after ~1400 ms of real
+ * elapsed time: well past any bound a correctly-budgeted implementation could
+ * ever produce. */
+ZTEST(cc3501e_host_driver, test_sock_send_budgets_each_iteration_off_remaining_time_107)
+{
+	const uint8_t data[2] = { 'A', 'B' };
+	size_t        sent    = 0u;
+	uint64_t      base    = g_fake_now_ms;
+
+	g_sock_send_busy_step_ms[0] = 700u;
+	g_sock_send_busy_step_ms[1] = 700u;
+	g_sock_send_busy_step_count = 2u;
+
+	alp_status_t s = cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u);
+
+	uint64_t elapsed = g_fake_now_ms - base;
+	zassert_true(elapsed <= 1350u,
+	             "correct per-iteration budgeting bounds total elapsed time (got %llu ms)",
+	             (unsigned long long)elapsed);
+	zassert_equal(s, ALP_ERR_TIMEOUT, "byte 1's 700 ms requirement exceeds budget + grace");
+	zassert_equal(sent, 1u, "only byte 0 (700 ms, fit the full first-iteration budget) collected");
+}
+
+/* cc3501e-bridge-firmware#107 (alp-sdk#2035): a decoded ALP_OK reply with
+ * fewer than 2 data bytes is not a valid queued-byte count -- a firmware/wire
+ * gap, not backpressure. Silently treating it as "0 queued" would fold it
+ * into the zero-progress back-off path and spin against a malformed reply
+ * for the whole budget instead of reporting the real problem immediately. */
+ZTEST(cc3501e_host_driver, test_sock_send_short_ok_reply_is_io_not_zero_progress)
+{
+	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
+	size_t        sent    = 123u; /* poison -- must come back 0, not left untouched */
+
+	g_sock_send_short_reply = true;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u),
+	              ALP_ERR_IO,
+	              "a <2-byte OK reply is a wire gap, not backpressure -- ALP_ERR_IO immediately");
+	zassert_equal(sent, 0u, "no bytes queued");
+	zassert_equal(slave.sock_send_log_count,
+	              0u,
+	              "one dispatch and done -- not folded into the zero-progress retry loop");
+}
+
+/* alp-sdk#2035 review follow-up: the "do not start a new iteration once less
+ * than one back-off's worth of budget remains" guard must re-read the clock
+ * AFTER the zero-progress back-off sleep, not just before it -- otherwise a
+ * remaining budget that looked sufficient right before a 20 ms sleep can be
+ * far too small right after it, and the next iteration starts anyway.
+ *
+ * Combines an EXPLICIT zero-progress result (queue_plan[0] = 0, so the
+ * back-off actually fires) with a real busy wait (busy_step_ms[0] = 2 ms) so
+ * iteration 1 costs a few real ms before it resolves to "0 queued": iteration
+ * 1 resolves comfortably inside the 30 ms budget, leaving ~8 ms after its 20
+ * ms back-off -- correctly insufficient (< 20 ms) for iteration 2, so a
+ * correct implementation stops there with ALP_ERR_TIMEOUT and 0 bytes sent.
+ * A version that only checks BEFORE the sleep (using the ampler pre-sleep
+ * remaining budget) proceeds to iteration 2 anyway; that iteration's own
+ * busy_step_ms (reused from the same array's last entry) resolves well
+ * within ITS remaining budget, queuing the whole rest of the buffer and
+ * returning ALP_OK instead. */
+ZTEST(cc3501e_host_driver, test_sock_send_rechecks_budget_after_backoff_sleep_107)
+{
+	const uint8_t data[1] = { 'Z' };
+	size_t        sent    = 0u;
+
+	g_sock_send_queue_plan[0]   = 0u;
+	g_sock_send_queue_plan_len  = 1u;
+	g_sock_send_busy_step_ms[0] = 2u;
+	g_sock_send_busy_step_count = 1u;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 30u),
+	              ALP_ERR_TIMEOUT,
+	              "insufficient budget after the back-off's own sleep -- stop, don't start a "
+	              "doomed iteration 2");
+	zassert_equal(sent, 0u, "iteration 1 made zero progress; iteration 2 must not have run");
+	zassert_equal(slave.sock_send_log_count, 1u, "exactly one iteration was collected");
+}
+
+/* alp-sdk#2035 review follow-up: a transport-lock-acquire timeout on
+ * poll_by_repeat()'s very FIRST attempt (cc3501e_lock_acquire(),
+ * cc3501e_core.c) means no frame ever reached the bridge -- unambiguous,
+ * returned directly as ALP_ERR_BUSY, no collection grace needed (the grace
+ * exists to collect a frame that MIGHT already be in flight; here, nothing
+ * ever left the host). Holds the REAL lock seam (fw.request_lock) for the
+ * whole call -- see g_lock_contention_arm_on_submit's comment for the OTHER
+ * (later-attempt) half of this pair, just below. */
+ZTEST(cc3501e_host_driver, test_sock_send_first_attempt_lock_timeout_returns_busy_directly_107)
+{
+	const uint8_t data[1] = { 'A' };
+	size_t        sent    = 123u; /* poison -- must come back 0, not left untouched */
+
+	fw.request_lock = true; /* held for the whole call -- a concurrent caller never lets go */
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u),
+	              ALP_ERR_BUSY,
+	              "a lock timeout on the very FIRST attempt is unambiguous -- BUSY, directly, "
+	              "no grace");
+	zassert_equal(sent, 0u, "nothing queued");
+	zassert_equal(
+	    slave.sock_send_body_exec_count, 0u, "no frame ever reached the bridge to execute");
+}
+
+/* alp-sdk#2035 review follow-up: a transport-lock-acquire timeout on a LATER
+ * attempt is different -- an EARLIER attempt already reached the bridge (the
+ * very first SOCK_SEND submission below succeeds and gets a genuine
+ * RESP_ERR_BUSY from the firmware), so returning ALP_ERR_BUSY immediately
+ * would misreport "nothing sent" for a job that may already be running.
+ * poll_by_repeat() now retries such a timeout within its own deadline
+ * instead: g_lock_contention_arm_on_submit forces the REAL lock
+ * (fw.request_lock) externally held for LOCK_CONTENTION_WINDOW_MS starting
+ * right after that first submission, comfortably exceeding
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS's internal spin (so a
+ * lock-acquire attempt landing in the window genuinely times out, not just
+ * gets slow), then releases -- a later attempt then succeeds and collects
+ * the job (which has long since become ready, using the default "ready on
+ * its very next poll" -- no busy_step needed here). timeout_ms(400) is
+ * generous against the ~150 ms this needs. */
+ZTEST(cc3501e_host_driver, test_sock_send_later_attempt_lock_timeout_is_retried_and_collected_107)
+{
+	const uint8_t data[1] = { 'B' };
+	size_t        sent    = 0u;
+
+	g_lock_contention_arm_on_submit = true;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 400u),
+	              ALP_OK,
+	              "a LATER attempt's lock timeout is retried within budget, not returned "
+	              "immediately -- the job still completes once the lock frees up again");
+	zassert_equal(sent, 1u, "the send was collected once retried past the lock contention");
+}
+
+/* alp-sdk#2035 review follow-up: if the collection grace collects a genuine,
+ * definitive non-OK status -- e.g. a decoded device-side error such as a
+ * peer reset -- that status must be returned directly, not masked as
+ * ALP_ERR_TIMEOUT: the frame is DONE (it will never resolve into a queued
+ * count), so *sent_out is exact, not a lower bound. timeout_ms(10) is far
+ * shorter than busy_step_ms(30), so the original attempt is guaranteed to
+ * time out before the job resolves; the grace then collects the staged
+ * ALP_CC3501E_RESP_ERR_RADIO instead of a queued count. */
+ZTEST(cc3501e_host_driver, test_sock_send_grace_surfaces_genuine_device_error_107)
+{
+	const uint8_t data[1] = { 'R' };
+	size_t        sent    = 123u; /* poison -- must come back 0, not left untouched */
+
+	g_sock_send_busy_step_ms[0]  = 30u;
+	g_sock_send_busy_step_count  = 1u;
+	g_sock_send_resolve_as_error = ALP_CC3501E_RESP_ERR_RADIO;
+
+	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 10u),
+	              ALP_ERR_IO,
+	              "a genuine decoded device error collected via grace is surfaced directly, "
+	              "not masked as ALP_ERR_TIMEOUT");
+	zassert_equal(sent, 0u, "this frame is DONE, not merely timed out -- exact, not a lower bound");
 }
 
 /* RECV requests up to @cap bytes and decodes the 24-byte recv-resp header +
