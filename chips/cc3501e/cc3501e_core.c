@@ -1041,13 +1041,23 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * populated (the CC35 GPIO17 line is wired + opened as an input -- which
  * Alif pad that is depends on the module/board revision, see
  * cc3501e_reply_gate()'s own doc comment below), wait for it HIGH -- the
- * slave drives it HIGH when its SPI slave is armed+idle -- before clocking a
- * reply phase, instead of a fixed settle gap.  This tracks the slave's
- * actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies no longer
- * need a conservative fixed
- * delay.  Opt-in + degrades safely: a NULL ready_pin (CS-less r1 boards, or
- * an R2 module by default) or a line that never asserts falls back to the
- * fixed gap.  See project_cc3501e_link_topology. */
+ * slave drives it HIGH when its SPI slave is armed+idle -- ON TOP OF the
+ * fixed settle gap, not instead of it: see that doc comment for why READY
+ * may only ever ADD delay here.  This lets a genuinely slow (Wi-Fi/BLE)
+ * reply get the extra time it actually needs instead of a caller guessing a
+ * bigger fixed number for every phase.  Opt-in + degrades safely: a NULL
+ * ready_pin (CS-less r1 boards, or an R2 module by default) or a line that
+ * never asserts still pays the fixed gap in full.  See
+ * project_cc3501e_link_topology.
+ *
+ * LOCK-HOLD CAVEAT: this wait runs while cc3501e_request_locked() already
+ * holds the transport lock, so an opted-in ready_pin can add up to
+ * CC3501E_READY_WAIT_US of hold time per gate.  Another caller blocked on
+ * the same lock can see ALP_ERR_BUSY after
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS elapses.  "Safe to opt in"
+ * elsewhere in this file means safe for LINK TIMING (it can never clock a
+ * phase early) -- it does NOT mean safe from lock contention with other
+ * callers. */
 
 /* READY (when ctx->ready_pin is populated) can only ADD delay to a reply
  * phase, never remove it: wait for the pin to read HIGH, bounded by
@@ -1121,7 +1131,10 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * CC3501E_READY_WAIT_US once per CC3501E_READY_STUCK_LOW_STREAK gates
  * before the stuck-LOW latch below gives up on it -- it can never make a
  * gate return early. */
-static bool     g_ready_ignored; /* latched: stop waiting on ready_pin for this ctx */
+static bool     g_ready_ignored; /* latched: stop waiting on ready_pin -- this is
+                                   * file-global (process-wide across every
+                                   * cc3501e_t instance), not per-ctx, and it is
+                                   * RECOVERABLE: see cc3501e_reply_gate() below. */
 static uint32_t g_ready_timeout_streak;
 /* Latches true the first (and only) time g_ready_ignored is set -- chips/cc3501e
  * has no logging facility of its own (it is backend-portable; no LOG_* macro
@@ -1183,14 +1196,26 @@ void cc3501e_set_peer_polled(bool on)
 #define CC3501E_READY_POLL_US 200u
 
 /* Consecutive gates that waited the FULL CC3501E_READY_WAIT_US without ever
- * seeing HIGH before this ctx gives up on ready_pin entirely (g_ready_ignored)
- * and falls back to paying only fallback_us -- same as ready_pin == NULL.
- * Without this, a genuinely stuck-LOW (or disconnected) pad would cost
- * CC3501E_READY_WAIT_US (250 ms) on EVERY gate forever: a real slave op can
- * legitimately eat the whole budget once (a slow radio op), but 3 in a row
- * is not a slow op, it is a dead line.  This can only ever REMOVE a wasted
- * WAIT -- fallback_us is paid unconditionally either way, so this streak
- * cannot make a gate return early either. */
+ * seeing HIGH before this process gives up waiting on ready_pin (latches
+ * g_ready_ignored) and falls back to paying only fallback_us -- same as
+ * ready_pin == NULL.  Without this, a genuinely stuck-LOW (or disconnected)
+ * pad would cost CC3501E_READY_WAIT_US (250 ms) on EVERY gate forever: a real
+ * slave op can legitimately eat the whole budget once (a slow radio op), but
+ * 3 in a row is not a slow op, it is a dead line.  This can only ever REMOVE
+ * a wasted WAIT -- fallback_us is paid unconditionally either way, so this
+ * streak cannot make a gate return early either.
+ *
+ * THE LATCH RECOVERS.  A single slow radio op can legitimately hold READY LOW
+ * across several consecutive gates (one observed op spans all 3 gates of a
+ * request+reply, ~750 us of settle alone) -- long enough to hit this streak
+ * and latch even though the line is fine.  If the latch stuck forever, that
+ * one op would silently disable the wait for the rest of the boot.  So once
+ * latched, cc3501e_reply_gate() still takes one zero-wait read per gate; the
+ * moment that read comes back HIGH, both g_ready_ignored and this streak
+ * clear and the bounded wait resumes on the next gate.  The latch therefore
+ * only ever suppresses WAITING while the pin is actually reading LOW -- it
+ * never suppresses paying the settle, and it never outlives the pin proving
+ * it can still go HIGH. */
 #define CC3501E_READY_STUCK_LOW_STREAK 3u
 
 /* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
@@ -1215,7 +1240,17 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 	if (g_peer_polled && fallback_us < CC3501E_POLLED_SETTLE_US) {
 		fallback_us = CC3501E_POLLED_SETTLE_US;
 	}
-	if (ctx->ready_pin != NULL && !g_ready_ignored) {
+	if (ctx->ready_pin != NULL && g_ready_ignored) {
+		/* Latched, but the latch recovers: one zero-wait read, no bounded
+		 * spin.  A HIGH here proves the pin can still go HIGH, so the
+		 * latch was only ever a slow op that has since passed -- clear it
+		 * and let the next gate resume the real bounded wait. */
+		bool level = false;
+		if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+			g_ready_ignored        = false;
+			g_ready_timeout_streak = 0u;
+		}
+	} else if (ctx->ready_pin != NULL) {
 		bool     level     = false;
 		bool     saw_high  = false;
 		uint32_t waited_us = 0u;

@@ -457,9 +457,11 @@ bench sessions, and so are
 - [`examples/aen/aen-cc3501e-bringup`](../aen-cc3501e-bringup/) -- the
   silicon-proven host-side CC3501E bring-up phase 8 follows: its file header
   documents the wiring, the host-gated supply, the hardware-SS0 chip-select
-  model and the per-phase READY gating. `src/cc3501e_bridge.{c,h}` is copied
-  from it byte-for-byte (that pair is the SoM bring-up *template* every AEN
-  app copies, not a library).
+  model, and the OPTIONAL per-phase READY gate (opt-in, NULL/unwired by
+  default on this R2 module -- READY may only ADD delay, never remove it;
+  see `chips/cc3501e/cc3501e_core.c`'s `cc3501e_reply_gate()` comment).
+  `src/cc3501e_bridge.{c,h}` is copied from it byte-for-byte (that pair is
+  the SoM bring-up *template* every AEN app copies, not a library).
 - [`examples/aen/aen-cc3501e-companion-tour`](../aen-cc3501e-companion-tour/)
   and [`aen-cc3501e-ble-gatt`](../aen-cc3501e-ble-gatt/) -- the call shapes
   for the wider Wi-Fi/socket and BLE/GATT surfaces phase 8 deliberately does

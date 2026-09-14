@@ -98,8 +98,12 @@
  * to.  When set, cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c) can
  * only ever ADD delay to a reply phase, never remove it, so opting in on a
  * board where the wiring is wrong costs at most CC3501E_READY_WAIT_US
- * before the driver's own stuck-LOW latch gives up on it -- it is always
- * safe to try.
+ * before the driver's own (recoverable) stuck-LOW latch gives up on it --
+ * it is always safe to try FOR LINK TIMING.  It is not free, though: this
+ * wait runs while cc3501e_request() holds its internal transport lock, so
+ * a wrong or slow ready_pin can make another caller on the same ctx see
+ * ALP_ERR_BUSY after CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS -- see
+ * <alp/chips/cc3501e/core.h>'s ready_pin doc.
  *
  * NOT Alif P2_6 on e1m-aen-evk-01's R2 module: P2_6 there is E1M pad AH7 /
  * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and

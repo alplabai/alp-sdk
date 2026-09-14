@@ -906,23 +906,35 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 static uint8_t g_ready_fixture_tag;
 #define FAKE_READY_PIN ((alp_gpio_t *)&g_ready_fixture_tag)
 
-static bool     g_ready_fake_idle; /* steady level once low_reads_remaining hits 0 */
+static bool     g_ready_fake_idle; /* steady level once both run-lengths below hit 0 */
 static uint32_t g_ready_fake_low_reads_remaining;
-static bool     g_ready_fake_toggle_every; /* noisy fixture: ignores the other two entirely */
+static uint32_t g_ready_fake_high_reads_remaining; /* consumed AFTER the LOW run, before idle */
+static bool     g_ready_fake_toggle_every; /* noisy fixture: ignores the other three entirely */
 static bool     g_ready_fake_toggle_next;
 
 static void ready_fake_reset(bool idle_level)
 {
-	g_ready_fake_idle                = idle_level;
-	g_ready_fake_low_reads_remaining = 0u;
-	g_ready_fake_toggle_every        = false;
-	g_ready_fake_toggle_next         = false;
+	g_ready_fake_idle                 = idle_level;
+	g_ready_fake_low_reads_remaining  = 0u;
+	g_ready_fake_high_reads_remaining = 0u;
+	g_ready_fake_toggle_every         = false;
+	g_ready_fake_toggle_next          = false;
 }
 
 /* The next @p n reads return LOW; every read after that returns g_ready_fake_idle. */
 static void ready_fake_delay_high(uint32_t n)
 {
 	g_ready_fake_low_reads_remaining = n;
+}
+
+/* The next @p n reads (once any pending LOW run above is exhausted) return HIGH;
+ * every read after THAT returns g_ready_fake_idle again.  Lets a test model a
+ * single momentary HIGH pulse -- e.g. one gate's line coming up briefly to clear
+ * the stuck-LOW latch -- without disturbing an idle-LOW line on either side of
+ * it. */
+static void ready_fake_pulse_high(uint32_t n)
+{
+	g_ready_fake_high_reads_remaining = n;
 }
 
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
@@ -939,6 +951,9 @@ alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 		if (g_ready_fake_low_reads_remaining > 0u) {
 			g_ready_fake_low_reads_remaining--;
 			*level = false;
+		} else if (g_ready_fake_high_reads_remaining > 0u) {
+			g_ready_fake_high_reads_remaining--;
+			*level = true;
 		} else {
 			*level = g_ready_fake_idle;
 		}
@@ -2834,9 +2849,11 @@ ZTEST(cc3501e_host_driver, test_ready_gate_stuck_low_bounded_wait_then_latches)
 	 * PING #1's 3 gates cost 250250 + 250200 + 250250 = 750700, and the 3rd
 	 * gate (streak hits 3) latches g_ready_ignored on its way out. PING #2
 	 * onward costs exactly 700 -- the ordinary fallback-only floor -- because
-	 * the ctx no longer waits on ready_pin at all. This is the ONLY thing
-	 * that can make a gate cheaper than paying the bounded wait, and it never
-	 * removes the fallback itself.
+	 * this process stops waiting on ready_pin (the latch is file-global, not
+	 * per-ctx) as long as the line stays LOW; it recovers the moment a read
+	 * comes back HIGH -- see test_ready_gate_latch_clears_on_high below. This
+	 * is the ONLY thing that can make a gate cheaper than paying the bounded
+	 * wait, and it never removes the fallback itself.
 	 * Mutation target: deleting the `g_ready_ignored = true` latch would make
 	 * EVERY later PING cost 750700 forever instead of dropping to 700. */
 	fw.ready_pin = FAKE_READY_PIN;
@@ -2855,6 +2872,87 @@ ZTEST(cc3501e_host_driver, test_ready_gate_stuck_low_bounded_wait_then_latches)
 	zassert_equal(g_fake_delay_us_total,
 	              700u,
 	              "latched -- no more waiting on a dead ready_pin, fallback only from here on");
+}
+
+ZTEST(cc3501e_host_driver, test_ready_gate_timeout_high_timeout_timeout_does_not_latch)
+{
+	/* The stuck-LOW streak must not accumulate ACROSS a HIGH: firmware can
+	 * legitimately hold READY LOW for an entire radio op spanning several
+	 * gates, so a lone HIGH between two SHORTER runs of timeouts must reset
+	 * the streak back to 0, not just fail to increment it. This drives the
+	 * sequence timeout, HIGH, timeout, timeout across the tail of PING #1 and
+	 * all of PING #2 -- streak goes 1, 0, 1, 0, 1, 2, never reaching
+	 * CC3501E_READY_STUCK_LOW_STREAK (3), so this must NOT latch.
+	 * Mutation target: deleting `g_ready_timeout_streak = 0u;` on the
+	 * saw_high branch (chips/cc3501e/cc3501e_core.c) would leave the streak
+	 * un-reset at each HIGH, so it would instead climb 1, (1), 2, (2), 3 --
+	 * latching on the fifth gate here -- flipping this assertion to true. */
+	fw.ready_pin = FAKE_READY_PIN;
+	ready_fake_reset(false); /* idle LOW -- stuck/disconnected by default */
+
+	/* PING #1: gate1 times out (1251 reads, all LOW -- CC3501E_READY_WAIT_US
+	 * / CC3501E_READY_POLL_US + 1), gate2 sees one HIGH pulse and resets the
+	 * streak, gate3 times out again once the pulse is spent. */
+	g_ready_fake_low_reads_remaining = 1251u;
+	ready_fake_pulse_high(1u);
+
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
+
+	/* PING #2: gate4 sees one more HIGH pulse (resets the streak again),
+	 * gates 5 and 6 time out with nothing left to reset them -- streak ends
+	 * at 2, one short of latching. */
+	ready_fake_pulse_high(1u);
+
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK");
+
+	zassert_false(cc3501e_ready_line_was_stuck(),
+	              "a HIGH between two shorter timeout runs must reset the streak so 3 "
+	              "timeouts never land back-to-back here -- this must not latch");
+}
+
+ZTEST(cc3501e_host_driver, test_ready_gate_latch_clears_on_high)
+{
+	/* The stuck-LOW latch is RECOVERABLE: once latched, cc3501e_reply_gate()
+	 * still takes one zero-wait read per gate, and a HIGH there clears both
+	 * the latch and the streak so the next gate resumes the real bounded
+	 * wait. Without this, one op that legitimately holds READY LOW across
+	 * every gate of one PING (see the sibling latch test) would disable the
+	 * wait for the rest of the boot the first time it happened. */
+	fw.ready_pin = FAKE_READY_PIN;
+	ready_fake_reset(false); /* idle LOW forever -- HIGH never comes */
+
+	/* PING #1: 3 consecutive full timeouts -- latches, same as
+	 * test_ready_gate_stuck_low_bounded_wait_then_latches. */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
+	zassert_equal(g_fake_delay_us_total, 750700u, "3 full timeouts plus their fallbacks");
+	zassert_true(cc3501e_ready_line_was_stuck(), "3 consecutive timeouts must latch");
+
+	/* PING #2: the line comes back HIGH. Latched, gate1 takes its one
+	 * zero-wait read, sees HIGH, and clears the latch + streak; gate1 then
+	 * just pays its fallback. Gates 2-3 are no longer latched, so they run
+	 * the ordinary bounded wait -- which finds HIGH immediately too, so the
+	 * total is indistinguishable from gate-off (700) EITHER way. This call
+	 * alone cannot prove the latch cleared -- PING #3 below does. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_reset(true); /* idle HIGH forever */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK");
+	zassert_equal(g_fake_delay_us_total, 700u, "HIGH costs no extra wait either way");
+
+	/* PING #3: back to LOW forever. If the latch cleared during PING #2 (the
+	 * fix), this is a fresh encounter with a dead line: 3 full timeouts
+	 * again, 750700 total. If the latch never cleared (the pre-fix bug),
+	 * cc3501e_reply_gate() would still be skipping ready_pin entirely and
+	 * this would cost only 700 -- the discriminating assertion.
+	 * Mutation target: reverting cc3501e_reply_gate() to the old
+	 * `if (ctx->ready_pin != NULL && !g_ready_ignored)` skip-when-latched
+	 * shape (no recovery read) makes this 700 instead of 750700. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_reset(false);
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #3 -> OK");
+	zassert_equal(g_fake_delay_us_total,
+	              750700u,
+	              "the latch must have cleared during PING #2's HIGH read -- otherwise this "
+	              "ping would still be ignoring ready_pin and cost only 700");
 }
 
 ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_pays_at_least_fallback)

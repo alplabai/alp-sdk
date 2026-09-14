@@ -13,9 +13,11 @@ build-time-credential convention is copied from it).
 
 > **Erratum.** Every `~980 KB/s` figure in this section was measured (or
 > derived) against a bridge that trusted a level-only READY gate --
-> effectively near-zero inter-phase settles.  With the fixed edge-proving
-> gate (chips/cc3501e/cc3501e_core.c) and this app's own READY-off default
-> on the R2 module (see the section below), each frame instead pays
+> effectively near-zero inter-phase settles.  With the current
+> add-only-delay READY gate (chips/cc3501e/cc3501e_core.c's
+> cc3501e_reply_gate() -- READY can only ADD to a settle, never shorten it)
+> and this app's own READY-off default on the R2 module (see the section
+> below), each frame instead pays
 > `CC3501E_PHASE_SETTLE_US`-class fixed settles (>= ~950 us/frame), which
 > `~980 KB/s` is arithmetically incompatible with.  **run9** measured
 > **469 KB/s at a 4 KiB `SOCK_RECV`** with the READY gate off -- that is

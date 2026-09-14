@@ -30,14 +30,21 @@
  *   SPI1.MOSI    P14_5          out         GPIO_28
  *   SPI1.MISO    P14_4          in          GPIO_29
  *   SPI1.SS0     P14_7          out         CC35 SPI0 CSN
- *   READY        P2_6           in          GPIO_17
+ *
+ * READY (CC35 GPIO_17) is deliberately left off this table: on the R2
+ * module this app targets it is NOT wired to Alif P2_6 -- P2_6 is E1M pad
+ * AH7 / I2S1_SCLK (the EVK's Arduino CK_RST), a DIFFERENT net from GPIO_17
+ * / E1M pad G3.  See cc3501e_bridge.c and cc3501e_reply_gate()'s own doc
+ * comment (chips/cc3501e/cc3501e_core.c) for the bench evidence and how a
+ * board that genuinely wires it can opt in.
  *
  * The current E1M-AEN rev uses the dwc-ssi hardware SS0 chip-select on
- * P14_7 and a READY input on P2_6.  Each protocol phase is framed by SS0;
- * READY tells the host when the slave has re-armed for the next phase.  The
- * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its mirror
- * on the firmware side (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c).
- * This app just opens the bus and calls the driver.
+ * P14_7; this app leaves the OPTIONAL READY gate unwired (fw->ready_pin
+ * stays NULL) by default, so each protocol phase is framed by SS0 alone
+ * and paced by the driver's fixed settle.  The framing lives in the host
+ * driver (chips/cc3501e/cc3501e_core.c) and its mirror on the firmware side
+ * (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c).  This app just
+ * opens the bus and calls the driver.
  *
  * This file is ~50 % comment by design: examples are documentation for
  * hand-written firmware, not just runnable code.

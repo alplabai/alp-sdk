@@ -165,8 +165,10 @@ working HW-CS transport, not a prerequisite for it.  See
 
 #### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
 
-With the hardware SS0 chip-select per transfer + per-phase READY gating,
-the link stays framed across every radio op — including the ~15 s STA
+With the hardware SS0 chip-select per transfer (READY is OPTIONAL and left
+unwired on the boards these numbers were taken on — see
+`chips/cc3501e/cc3501e_core.c`'s `cc3501e_reply_gate()` comment), the link
+stays framed across every radio op — including the ~15 s STA
 association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 (E1M-AEN801 EVK):
 

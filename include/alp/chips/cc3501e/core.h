@@ -96,7 +96,17 @@ struct cc3501e {
 	                                *   the fixed settle with no wait.  NOT Alif P2_6 on every
 	                                *   board -- see chips/cc3501e/cc3501e_core.c's
 	                                *   cc3501e_reply_gate() comment for the per-revision
-	                                *   pin-routing fact and how to opt a real wiring in. */
+	                                *   pin-routing fact and how to opt a real wiring in.
+	                                *   LOCK-HOLD CAVEAT: this wait runs while
+	                                *   cc3501e_request() already holds the internal
+	                                *   transport lock, so a populated ready_pin can add up
+	                                *   to CC3501E_READY_WAIT_US of hold time per reply-phase
+	                                *   gate.  Another caller blocked on that same lock can
+	                                *   see @ref ALP_ERR_BUSY after
+	                                *   @c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+	                                *   elapses.  "Safe to opt in" means safe for LINK TIMING
+	                                *   only (it can never clock a phase early) -- it is not
+	                                *   immunity from lock contention with other callers. */
 	/* Async-event SUBSCRIBERS (issue #1723), not one callback slot.
 	 *
 	 * This used to be a single { event_cb, event_user } pair, and the last

@@ -38,11 +38,10 @@ static void aen_lp_pads_enable_output(void)
  *
  * READY (CC35 GPIO17) is NOT wired here: fw->ready_pin stays NULL, same as every
  * other AEN example bridge by default -- see chips/cc3501e/cc3501e_core.c's
- * cc3501e_reply_gate() comment for the pin-routing fact and bench evidence.  This
- * file used to mux + input-enable Alif P2_6 (gpio2.6) as a bodge under the belief
- * it carried READY; it does not (P2_6 is E1M pad AH7 / I2S1_SCLK, a DIFFERENT net
- * from CC35 GPIO17 / E1M pad G3), and nothing here ever read it back, so that
- * pinctrl mux was pure dead weight and has been removed along with it. */
+ * cc3501e_reply_gate() comment for the pin-routing fact and bench evidence.  On
+ * the R2 module this app targets, Alif P2_6 (gpio2.6) is E1M pad AH7 / I2S1_SCLK,
+ * a DIFFERENT net from CC35 GPIO17 / E1M pad G3 -- read that comment before
+ * assuming P2_6 is never READY on some other revision. */
 #else
 static inline void aen_lp_pads_enable_output(void)
 {
