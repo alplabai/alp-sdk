@@ -11,9 +11,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
-#include <zephyr/drivers/gpio.h>
-#include <zephyr/drivers/pinctrl.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 /*
  * AEN LP-pad mux (Alif Ensemble E8, M55-HE).  WIFI_EN (P15_5) and nRESET (P15_1)
  * are on the Alif LP-GPIO island, bound by the generic snps,designware-gpio driver
@@ -31,47 +28,23 @@ static void aen_lp_pads_enable_output(void)
 	sys_write32(ALIF_PAD_GPIO_OUTPUT, ALIF_LPGPIO_PADCTRL_BASE + 1u * 4u); /* P15_1 nRESET  */
 }
 
-/* ---- chip-select + READY/host-IRQ wiring --
- * CS  = the dwc-ssi HARDWARE SS0 (Alif P14_7 muxed as SPI1_SS0_C in pinctrl_spi1):
- *       the SPI peripheral asserts/deasserts it per transfer (no software GPIO CS,
- *       not CS-less).  The host opens ALP_SPI_NO_CS so the alp_spi backend leaves
- *       cs_present=false and spi_dw takes the hardware SER/SS0 branch.
- * READY = CC35 GPIO17, gates cc3501e_request() reply phases (HIGH = bridge
- *       ready to clock, LOW = mid-radio-op).  NOT Alif P2_6 (gpio2.6): that is
- *       E1M pad AH7 / I2S1_SCLK, a DIFFERENT net from CC35 GPIO17 (E1M pad
- *       G3 / IO16) -- see chips/cc3501e/cc3501e_core.c's g_ready_line_proven
- *       comment. The P2_6 mux below is read-enabled but not otherwise used
- *       by this file -- see aen_bodge_init()'s own comment.
- */
-/* READY is a bodge GPIO input (P2_6 = gpio2.6); guard on gpio2 (still in the overlay).
- * CS needs no node here -- it is driven by the SPI peripheral's hardware SS0. */
-#if DT_NODE_EXISTS(DT_NODELABEL(gpio2))
-/* Mux P2_6 (READY) to GPIO (func 0) with REN (read-enable, pad-config bit 16).  The snps
- * GPIO driver does not apply Alif pinctrl, so do it directly via pinctrl_configure_pins. */
-#define ALIF_PAD_REN (1u << 16)
-static const pinctrl_soc_pin_t bodge_pins[] = {
-	(pinctrl_soc_pin_t)(PIN_P2_6__GPIO | ALIF_PAD_REN) /* READY in, read-enable */
-};
-
-static void aen_bodge_init(void)
-{
-	(void)pinctrl_configure_pins(bodge_pins, ARRAY_SIZE(bodge_pins), PINCTRL_REG_NONE);
-	/* READY (P2_6 = gpio2.6) is muxed as a GPIO input, read-enabled, here, but
-	 * nothing in this file reads it back -- see chips/cc3501e/cc3501e_core.c's
-	 * cc3501e_reply_gate() for the real, ctx->ready_pin-based READY mechanism. */
-}
-/* No CS hooks here: CS is the dwc-ssi hardware SS0 (peripheral-driven per transfer); the
- * host driver does not bracket transactions with any software chip-select. */
-#else
-static inline void aen_bodge_init(void)
-{
-}
-#endif /* gpio2 (READY) node exists */
+/* ---- chip-select wiring --
+ * CS = the dwc-ssi HARDWARE SS0 (Alif P14_7 muxed as SPI1_SS0_C in pinctrl_spi1):
+ *      the SPI peripheral asserts/deasserts it per transfer (no software GPIO CS,
+ *      not CS-less).  The host opens ALP_SPI_NO_CS so the alp_spi backend leaves
+ *      cs_present=false and spi_dw takes the hardware SER/SS0 branch.  No CS hooks
+ *      needed here: the host driver does not bracket transactions with any
+ *      software chip-select.
+ *
+ * READY (CC35 GPIO17) is NOT wired here: fw->ready_pin stays NULL, same as every
+ * other AEN example bridge by default -- see chips/cc3501e/cc3501e_core.c's
+ * cc3501e_reply_gate() comment for the pin-routing fact and bench evidence.  This
+ * file used to mux + input-enable Alif P2_6 (gpio2.6) as a bodge under the belief
+ * it carried READY; it does not (P2_6 is E1M pad AH7 / I2S1_SCLK, a DIFFERENT net
+ * from CC35 GPIO17 / E1M pad G3), and nothing here ever read it back, so that
+ * pinctrl mux was pure dead weight and has been removed along with it. */
 #else
 static inline void aen_lp_pads_enable_output(void)
-{
-}
-static inline void aen_bodge_init(void)
 {
 }
 #endif
@@ -98,12 +71,6 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	aen_lp_pads_enable_output();
 	(void)alp_gpio_configure(wifi_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 	(void)alp_gpio_configure(nrst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-
-	/* Arm the rev-1 EVK READY/host-IRQ input (P2_6) BEFORE any SPI transaction, so
-	 * cc3501e_request can gate on READY through the reset/ping handshake below.  CS is
-	 * not touched here -- it is the dwc-ssi hardware SS0, driven by the SPI peripheral
-	 * per transfer. */
-	aen_bodge_init();
 
 	/* 2. Inter-chip SPI (Alif = master).  cs_pin_id = ALP_SPI_NO_CS so the alp_spi
 	 *    backend leaves cs_present=false and spi_dw drives the dwc-ssi HARDWARE SS0

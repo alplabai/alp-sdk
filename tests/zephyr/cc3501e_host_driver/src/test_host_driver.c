@@ -854,10 +854,11 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 }
 
 /* alp_delay_us accumulates into g_fake_delay_us_total instead of sleeping --
- * the READY-gate tests below (test_ready_gate_*) prove "every gate paid its
- * full fallback" (or didn't, once the line is proven) by comparing this
- * total against the known-fixed CC3501E_PHASE_SETTLE_US/200u gate sequence a
- * single cc3501e_ping() call issues, instead of timing a real wall clock.
+ * the READY-gate tests below (test_ready_gate_*) prove "every gate paid AT
+ * LEAST its full fallback, and paid the extra bounded wait exactly when it
+ * should have" by comparing this total against the known-fixed
+ * CC3501E_PHASE_SETTLE_US/200u gate sequence a single cc3501e_ping() call
+ * issues, instead of timing a real wall clock.
  * The GPIO seams are otherwise inert for every OTHER test in this suite (the
  * fixture's ctx leaves reset/enable/ready pins unset, so the wrappers under
  * test never call them -- they exercise cc3501e_request, not the reset-pin
@@ -895,107 +896,49 @@ alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
  * install on fw.ready_pin and leave every other pin's read at the suite's
  * existing ALP_ERR_NOSUPPORT (nothing else reads a GPIO).
  *
- * A programmable FIFO of levels, not a level/toggle "mode": alp_gpio_read()
- * for FAKE_READY_PIN pops the next queued value on each call, and once the
- * queue drains, REPLAYS the last popped value forever (g_ready_fake_idle) --
- * modelling a line that sits at some steady level except for the transient
- * dips a test explicitly queues.  Full control over the exact read sequence
- * is what lets these tests engineer specific scenarios (a lone glitch, a
- * healthy line's precise per-phase busy/idle timing, a stale sample
- * surviving an un-prove) deterministically, which a level/mode enum cannot
- * express -- see cc3501e_reply_gate()'s debounce (CC3501E_READY_CONFIRM_READS)
- * and busy_expected split, both of which these tests exist to exercise. */
+ * cc3501e_reply_gate() (see its own doc comment) makes NO use of the read
+ * sequence beyond "did this ONE bounded wait ever see HIGH" -- there is no
+ * proving, debouncing, or per-call-site distinction left to engineer around,
+ * so the fixture is just three orthogonal knobs: a steady idle level, an
+ * optional bounded run of LOW reads before that idle level kicks in (models
+ * a slave that takes a few polls to arm), and a noisy override that flips on
+ * every single read regardless of the other two. */
 static uint8_t g_ready_fixture_tag;
 #define FAKE_READY_PIN ((alp_gpio_t *)&g_ready_fixture_tag)
 
-#define READY_FAKE_QUEUE_CAP 256
-static bool     g_ready_fake_queue[READY_FAKE_QUEUE_CAP];
-static uint32_t g_ready_fake_queue_len;
-static uint32_t g_ready_fake_queue_pos;
-static bool     g_ready_fake_idle;         /* replayed once the queue drains */
-static bool     g_ready_fake_toggle_every; /* noisy fixture: ignores the queue entirely */
+static bool     g_ready_fake_idle; /* steady level once low_reads_remaining hits 0 */
+static uint32_t g_ready_fake_low_reads_remaining;
+static bool     g_ready_fake_toggle_every; /* noisy fixture: ignores the other two entirely */
 static bool     g_ready_fake_toggle_next;
 
 static void ready_fake_reset(bool idle_level)
 {
-	g_ready_fake_queue_len    = 0u;
-	g_ready_fake_queue_pos    = 0u;
-	g_ready_fake_idle         = idle_level;
-	g_ready_fake_toggle_every = false;
-	g_ready_fake_toggle_next  = false;
+	g_ready_fake_idle                = idle_level;
+	g_ready_fake_low_reads_remaining = 0u;
+	g_ready_fake_toggle_every        = false;
+	g_ready_fake_toggle_next         = false;
 }
 
-/* Append @p n copies of @p level to the fake queue. */
-static void ready_fake_push(bool level, uint32_t n)
+/* The next @p n reads return LOW; every read after that returns g_ready_fake_idle. */
+static void ready_fake_delay_high(uint32_t n)
 {
-	for (uint32_t i = 0; i < n; ++i) {
-		zassert_true(g_ready_fake_queue_len < READY_FAKE_QUEUE_CAP,
-		             "fake READY queue overflow -- widen READY_FAKE_QUEUE_CAP");
-		g_ready_fake_queue[g_ready_fake_queue_len++] = level;
-	}
-}
-static void ready_fake_push_low(uint32_t n)
-{
-	ready_fake_push(false, n);
-}
-static void ready_fake_push_high(uint32_t n)
-{
-	ready_fake_push(true, n);
-}
-
-/* Arms the queue so a FULLY-PROVEN ping's two busy-expected gates (gate3,
- * gate4) both see their expected busy LOW -- the shape a genuinely healthy
- * line gives under spaced traffic.  Only valid to call on an ALREADY-PROVEN
- * line: gate1's own opportunistic burst-for-HIGH runs regardless of
- * busy_expected and keeps reading PAST any LOW it meets (it is looking
- * specifically for HIGH), so it would otherwise silently drain a LOW meant
- * for a later gate -- and gate3's own trailing burst-for-HIGH would do the
- * very same thing to a LOW meant for gate4.  The three HIGHs below are
- * guards against exactly that, positioned so each gate's own search
- * terminates immediately without touching what comes after it:
- *   [HIGH]  stops gate1's burst-for-HIGH on its very first read
- *   [LOW]   gate3's LOW-spin match (resets the stuck-streak)
- *   [HIGH]  stops gate3's OWN trailing burst-for-HIGH
- *   [LOW]   gate4's LOW-spin match (resets the stuck-streak)
- * gate4's own trailing burst-for-HIGH needs no guard: nothing follows it in
- * the queue, so it falls through to the idle-HIGH replay, which matches
- * immediately regardless. */
-static void ready_fake_arm_proven_ping_hit(void)
-{
-	ready_fake_push_high(1u);
-	ready_fake_push_low(1u);
-	ready_fake_push_high(1u);
-	ready_fake_push_low(1u);
-}
-
-/* Arms the queue so a PROVEN line's NEXT busy-expected LOW-spin (gate3 or
- * gate4, whichever runs next) exhausts all CC3501E_READY_LOW_SPINS attempts
- * seeing only HIGH -- a clean, deterministic MISS -- and leaves the queue
- * positioned exactly where a caller's own follow-up push (e.g. a fresh LOW
- * for the debounce-sample that runs immediately after an un-prove) lands as
- * the very NEXT read, not swallowed by the spin itself.  Needs its own
- * gate1 guard for the same reason ready_fake_arm_proven_ping_hit() does. */
-static void ready_fake_arm_proven_spin_miss(void)
-{
-	ready_fake_push_high(1u);                      /* stops gate1's burst-for-HIGH */
-	ready_fake_push_high(CC3501E_READY_LOW_SPINS); /* saturates the LOW-spin with misses */
+	g_ready_fake_low_reads_remaining = n;
 }
 
 alp_status_t alp_gpio_read(alp_gpio_t *pin, bool *level)
 {
 	if (pin == FAKE_READY_PIN) {
 		if (g_ready_fake_toggle_every) {
-			/* Noisy/floating-pad model: flips on EVERY single read, regardless
-			 * of context.  Deterministic (no PRNG needed) and adversarial by
-			 * construction -- it can never produce two agreeing consecutive
-			 * reads, so CC3501E_READY_CONFIRM_READS (>= 2) can never be
-			 * satisfied and no sample is ever confirmed, let alone an edge. */
+			/* Noisy/floating-pad model: flips on EVERY single read. Whatever it
+			 * reads, cc3501e_reply_gate() pays its fallback in full regardless
+			 * -- this fixture exists to prove that, not to fool a proof. */
 			*level                   = g_ready_fake_toggle_next;
 			g_ready_fake_toggle_next = !g_ready_fake_toggle_next;
 			return ALP_OK;
 		}
-		if (g_ready_fake_queue_pos < g_ready_fake_queue_len) {
-			*level = g_ready_fake_queue[g_ready_fake_queue_pos++];
+		if (g_ready_fake_low_reads_remaining > 0u) {
+			g_ready_fake_low_reads_remaining--;
+			*level = false;
 		} else {
 			*level = g_ready_fake_idle;
 		}
@@ -2847,72 +2790,81 @@ ZTEST(cc3501e_host_driver, test_spi1_release_argless)
 	zassert_equal(slave.req_len, 0u, "RELEASE carries no request payload");
 }
 
-/* ================== READY GATE: edge-proving + stuck tolerance ============= *
+/* ================== READY GATE: add-only delay accounting =================== *
  *
  * cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c) gates every reply phase
  * on ctx->ready_pin when one is populated.  A single cc3501e_ping() issues
- * exactly 3 gate calls, in this order:
- *   gate1 = request header, busy_expected=false, fallback 250 us
- *   gate3 = reply header wait,  busy_expected=true,  fallback 200 us
- *   gate4 = reply payload,      busy_expected=true,  fallback 250 us
- * (there is no gate2: PING has no request-payload phase). gate1 never
- * contributes proving/streak evidence -- see cc3501e_reply_gate()'s
- * busy_expected doc comment for why.
- *
- * These prove the fix for the bug where a bare level HIGH -- not several
- * AGREEING, DEBOUNCED, busy-expected-only edges -- used to "prove" the line
- * and skip its fallback delay outright: on e1m-aen-evk-01 the READY pin
- * several AEN example bridges open is actually the EVK's Arduino CK_RST net
- * (idles high, see cc3501e_core.c's g_ready_line_proven comment for the full
- * pin-routing citation), so the old code proved it on gate #1 and clocked
- * every phase near-instantly -- bench run8 measured that as 4-of-4 boots
- * failing to associate.  They read the outcome off g_fake_delay_us_total,
- * never off wall-clock time -- the fake ready_fake_push_low()/idle queue and
- * alp_delay_us() accounting are both fully deterministic. */
+ * exactly 3 gate calls with fallback_us 250, 200, 250 -- 700 total -- with no
+ * request-payload phase.  The new rule (post-#2105 review) is simply: READY
+ * may only ADD delay, never remove it.  There is no proving, no debouncing,
+ * no per-call-site distinction left to test -- every earlier attempt at
+ * inferring trust from the read sequence (a level, a difference, several
+ * debounced agreeing edges) was defeated in turn (see cc3501e_reply_gate()'s
+ * own doc comment for the specifics), so these assert plain delay accounting
+ * only, off g_fake_delay_us_total, never off wall-clock time. */
 
-ZTEST(cc3501e_host_driver, test_ready_gate_stuck_high_never_proven)
+ZTEST(cc3501e_host_driver, test_ready_gate_stuck_high_pays_exactly_fallback)
 {
+	/* A stuck-HIGH pad is found on the very first (zero-wait) poll of every
+	 * gate, so it costs EXACTLY the ready_pin==NULL timing -- it can never
+	 * make a gate faster than gate-off, because gate-off IS the floor.
+	 * Mutation target: an early `return;` right after the HIGH read (the
+	 * pre-fix bug shape) would make this 0 instead of 700. */
 	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(true); /* idle HIGH forever, no dips queued */
+	ready_fake_reset(true); /* idle HIGH forever */
 
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING still succeeds through the blind fallback");
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING -> OK");
 	zassert_equal(g_fake_delay_us_total,
 	              700u,
-	              "a level that is always HIGH must never confirm a transition -- all 3 gates "
-	              "(250+200+250) pay their full fallback, none returns early");
-	zassert_false(cc3501e_ready_line_was_stuck(),
-	              "never proven in the first place -- there is nothing to degrade FROM");
+	              "stuck-HIGH costs exactly the 3 fallbacks (250+200+250), same as gate-off");
+	zassert_false(cc3501e_ready_line_was_stuck(), "HIGH was seen every gate -- never latched");
 
-	/* A second PING must cost exactly the same: a stuck-high line does not
-	 * get luckier the more it is read. */
+	/* A second PING must cost exactly the same -- a stuck-high line does not
+	 * get cheaper (or more expensive) the more it is read. */
 	g_fake_delay_us_total = 0u;
 	zassert_equal(cc3501e_ping(&fw), ALP_OK, "second PING -> OK");
-	zassert_equal(g_fake_delay_us_total, 700u, "still never proven on the second call either");
+	zassert_equal(g_fake_delay_us_total, 700u, "identical cost on the second call");
 }
 
-ZTEST(cc3501e_host_driver, test_ready_gate_stuck_low_never_proven)
+ZTEST(cc3501e_host_driver, test_ready_gate_stuck_low_bounded_wait_then_latches)
 {
+	/* A stuck-LOW (or disconnected) pad never satisfies the wait, so each of
+	 * the first CC3501E_READY_STUCK_LOW_STREAK (3) gates burns the FULL
+	 * CC3501E_READY_WAIT_US (250000 us) before paying its own fallback --
+	 * PING #1's 3 gates cost 250250 + 250200 + 250250 = 750700, and the 3rd
+	 * gate (streak hits 3) latches g_ready_ignored on its way out. PING #2
+	 * onward costs exactly 700 -- the ordinary fallback-only floor -- because
+	 * the ctx no longer waits on ready_pin at all. This is the ONLY thing
+	 * that can make a gate cheaper than paying the bounded wait, and it never
+	 * removes the fallback itself.
+	 * Mutation target: deleting the `g_ready_ignored = true` latch would make
+	 * EVERY later PING cost 750700 forever instead of dropping to 700. */
 	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(false); /* idle LOW forever, no recoveries queued */
+	ready_fake_reset(false); /* idle LOW forever -- HIGH never comes */
 
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING still succeeds through the blind fallback");
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
+	zassert_equal(g_fake_delay_us_total,
+	              750700u,
+	              "3 full CC3501E_READY_WAIT_US timeouts (250000 each) plus their 3 fallbacks "
+	              "(250+200+250) before the stuck-LOW latch trips");
+	zassert_true(cc3501e_ready_line_was_stuck(),
+	             "3 consecutive full-budget timeouts must latch g_ready_ignored");
+
+	g_fake_delay_us_total = 0u;
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK");
 	zassert_equal(g_fake_delay_us_total,
 	              700u,
-	              "a level that is always LOW is just as much a non-transition as always-HIGH "
-	              "-- all 3 gates pay their full fallback");
-	zassert_false(cc3501e_ready_line_was_stuck(), "never proven -- nothing to degrade");
+	              "latched -- no more waiting on a dead ready_pin, fallback only from here on");
 }
 
-ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_never_proven)
+ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_pays_at_least_fallback)
 {
 	/* Deterministic per-read toggle (see alp_gpio_read()'s g_ready_fake_toggle_every
-	 * branch) -- models a floating/noisy pad.  CC3501E_READY_CONFIRM_READS (8)
-	 * consecutive agreeing reads can NEVER happen against a source that flips
-	 * every single read, so cc3501e_ready_debounced_read() never confirms even
-	 * one sample; the line can therefore never accumulate any edge evidence at
-	 * all, proven or not.  This is the fix for "199 of 200 PINGs paid 0 us"
-	 * against a random-input model: a single differing raw sample used to be
-	 * enough to prove the line outright. */
+	 * branch) -- models a floating/noisy pad.  Whatever it reads, the fixed
+	 * fallback still runs in full afterwards, so every gate costs AT LEAST
+	 * its own fallback_us regardless of how the noise happens to line up --
+	 * it can add a little extra (whenever a read lands LOW and the wait loop
+	 * spins once more) but it can never subtract. */
 	fw.ready_pin = FAKE_READY_PIN;
 	ready_fake_reset(true);
 	g_ready_fake_toggle_every = true;
@@ -2920,182 +2872,37 @@ ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_never_proven)
 	for (int i = 0; i < 5; ++i) {
 		g_fake_delay_us_total = 0u;
 		zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING -> OK despite the noisy pad");
-		zassert_equal(g_fake_delay_us_total,
-		              700u,
-		              "noise can never survive the debounce -- every gate still pays its "
-		              "full fallback, every single PING");
+		zassert_true(g_fake_delay_us_total >= 700u,
+		             "noise must never let any gate pay less than its own fallback");
 	}
-	zassert_false(cc3501e_ready_line_was_stuck(), "never proven -- nothing to degrade");
 }
 
-ZTEST(cc3501e_host_driver, test_ready_gate_single_glitch_causes_no_unsettled_gate)
+ZTEST(cc3501e_host_driver, test_ready_gate_slow_to_arm_pays_wait_plus_fallback)
 {
-	/* Idles HIGH forever except for ONE confirmable dip queued before the
-	 * very first busy-expected gate (gate3 of PING #1) -- a lone coincidental
-	 * transition, exactly the pin-routing bench case where a mis-wired pad
-	 * happens to glitch through one edge before settling on its true stuck
-	 * level.  CC3501E_READY_EDGE_AGREE_MIN (3) means ONE edge must never be
-	 * enough: every gate across every PING below must still pay its full
-	 * fallback, with no unsettled (zero-cost) gate anywhere. */
+	/* Models a genuinely slower-than-the-fixed-settle slave (e.g. mid radio
+	 * op): the FIRST gate's READY read is LOW once before the slave finishes
+	 * arming and the pad goes HIGH, so that gate waits CC3501E_READY_POLL_US
+	 * (200 us) beyond a bare read before paying its own fallback -- this is
+	 * the one case READY actually helps in the new design, by waiting out
+	 * the real re-arm instead of guessing. Every later gate in the same PING
+	 * finds the now-idle-HIGH pad immediately (0 extra wait). Exact numbers:
+	 * gate1 (fallback 250): 1 LOW then HIGH -> 200 wait + 250 = 450.
+	 * gate3 (fallback 200): idle HIGH already -> 0 + 200 = 200.
+	 * gate4 (fallback 250): idle HIGH already -> 0 + 250 = 250.
+	 * Total = 900, strictly more than the 700 gate-off floor -- READY only
+	 * ever adds here, consistent with every other fixture in this suite. */
 	fw.ready_pin = FAKE_READY_PIN;
 	ready_fake_reset(true);
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
+	ready_fake_delay_high(1u);
 
-	for (int i = 0; i < 4; ++i) {
-		g_fake_delay_us_total = 0u;
-		zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING -> OK");
-		zassert_equal(g_fake_delay_us_total,
-		              700u,
-		              "a single glitch (one edge) must never let any gate skip its settle");
-	}
-	zassert_false(cc3501e_ready_line_was_stuck(), "never proven -- one edge is not enough");
-}
-
-ZTEST(cc3501e_host_driver, test_ready_gate_healthy_spaced_line_proves_and_stays_proven)
-{
-	/* Models a genuinely healthy line under ordinary SPACED traffic (a soak
-	 * loop, bring-up polling): each busy-expected gate sees a real dip-then-
-	 * recover, and gate1 (request header) always sees the line already
-	 * idling HIGH, exactly as cc3501e_reply_gate()'s busy_expected comment
-	 * describes.  PING #1: gate3 dips LOW (first-ever sample, no prior to
-	 * compare -- no edge yet), gate4 recovers HIGH (edge 1). PING #2: gate3
-	 * dips LOW again (edge 2), gate4 recovers HIGH (edge 3 -> PROVEN, but
-	 * this confirming call still pays its own fallback). Every gate in both
-	 * PINGs was unproven at entry, so both cost the full 700. */
-	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(true);
-
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS); /* PING1 gate3: dip (baseline) */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
-	zassert_equal(g_fake_delay_us_total, 700u, "PING #1: still unproven, pays the full fallback");
-
-	g_fake_delay_us_total = 0u;
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS); /* PING2 gate3: dip (edge 2) */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK");
-	zassert_equal(
-	    g_fake_delay_us_total, 700u, "PING #2: proves during gate4, which still pays its own");
-	zassert_false(cc3501e_ready_line_was_stuck(), "freshly proven -- nothing has degraded");
-
-	/* PING #3-5: now proven.  ready_fake_arm_proven_ping_hit() arms both
-	 * gate3's and gate4's LOW-spins to break on a real match (resetting the
-	 * stuck-streak each time), guarded so gate1's and gate3's own trailing
-	 * burst-for-HIGH searches don't swallow a LOW meant for a later gate --
-	 * see that helper's doc comment.  Every gate returns with ZERO delay. */
-	for (int i = 0; i < 3; ++i) {
-		g_fake_delay_us_total = 0u;
-		ready_fake_arm_proven_ping_hit();
-		zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING -> OK");
-		zassert_equal(
-		    g_fake_delay_us_total, 0u, "a genuinely healthy, proven line pays no settle at all");
-	}
-	zassert_false(cc3501e_ready_line_was_stuck(),
-	              "a healthy line under spaced traffic must never degrade");
-}
-
-ZTEST(cc3501e_host_driver, test_ready_gate_streak_resets_on_a_hit_between_misses)
-{
-	/* miss,miss,[hit,hit],miss,miss: mutation target for the
-	 * `g_ready_stuck_streak = 0u` reset on a seen LOW.  Each "miss PING"
-	 * (nothing queued, idle-HIGH replay) racks up 2 consecutive
-	 * busy-expected misses (gate3 then gate4); a "hit PING"
-	 * (ready_fake_arm_proven_ping_hit()) resets the streak to 0 at gate3 and
-	 * again at gate4.  Without the reset-on-hit, the streak would carry the
-	 * first PING's 2 misses straight through the hit PING (which would do
-	 * nothing to it) and the second miss PING's first miss would then be the
-	 * 3rd -- degrading a line that in fact never missed 3 times in a row. */
-	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(true);
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK (dip, baseline)");
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK (dip, proves during gate4)");
-	zassert_false(cc3501e_ready_line_was_stuck(), "freshly proven");
-
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING A (miss) -> OK"); /* streak 1, 2 */
-	ready_fake_arm_proven_ping_hit();
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING B (hit) -> OK");  /* streak reset to 0 */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING C (miss) -> OK"); /* streak 1, 2 -- not 3 */
-	zassert_false(cc3501e_ready_line_was_stuck(),
-	              "the hit PING must have reset the streak -- never 3 consecutive misses");
-}
-
-ZTEST(cc3501e_host_driver, test_ready_gate_request_header_excluded_from_streak_timing)
-{
-	/* If gate1 (request header, busy_expected=false) counted toward the
-	 * stuck-streak, a fully stuck-high line would degrade after only ONE
-	 * ping's worth of misses (gate1+gate3+gate4 = 3 in a single PING) instead
-	 * of needing parts of TWO (gate3+gate4 = 2 misses/ping, since gate1 must
-	 * not count). This pins the SLOWER, correct timing. */
-	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(true);
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK (dip, baseline)");
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK (dip, proves during gate4)");
-	zassert_false(cc3501e_ready_line_was_stuck(), "freshly proven");
-
-	/* Now goes fully, permanently stuck HIGH: no more pushes at all. */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #3 (stuck) -> OK");
-	zassert_false(cc3501e_ready_line_was_stuck(),
-	              "only 2 real misses so far (gate3+gate4) -- gate1 must not have counted "
-	              "a 3rd");
-
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #4 (stuck) -> OK");
-	zassert_true(cc3501e_ready_line_was_stuck(),
-	             "gate3 of PING #4 is the 3rd real busy-expected miss -- now it degrades");
-}
-
-ZTEST(cc3501e_host_driver, test_ready_gate_stale_sample_cleared_on_unprove)
-{
-	/* Mutation target for clearing g_ready_have_sample/g_ready_edge_agree on
-	 * un-prove.  Without that reset, the FIRST post-degrade debounced sample
-	 * is compared against a STALE confirmed level left over from before the
-	 * line was ever proven (frozen the whole time it was proven, since the
-	 * proven-mode path never touches it) -- an illegitimate "free" edge that
-	 * lets the line re-prove one genuine edge too early. */
-	fw.ready_pin = FAKE_READY_PIN;
-	ready_fake_reset(true);
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS); /* PING1 gate3: dip (baseline) */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS); /* PING2 gate3: dip (edge 2) */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 -> OK");
-	/* Proven here; the stale confirmed sample frozen by proving is HIGH
-	 * (PING #2 gate4's recovery read). */
-
-	/* Degrade: 2 stuck-HIGH misses (PING #3) + the 3rd miss at PING #4 gate3
-	 * -- same timing as test_ready_gate_request_header_excluded_from_streak_timing.
-	 * ready_fake_arm_proven_spin_miss() saturates gate3's LOW-spin with a
-	 * clean miss (triggering the degrade) and leaves the queue positioned so
-	 * the LOWs pushed right after land on the very NEXT read -- gate3's OWN
-	 * post-degrade debounced sample, run in the SAME call immediately after
-	 * un-proving.  That is the earliest possible point a stale sample could
-	 * leak through, and exactly where this fix's reset must apply. */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #3 (stuck) -> OK");
-	ready_fake_arm_proven_spin_miss();
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #4 (degrades mid-ping, then dips) -> OK");
-	zassert_true(cc3501e_ready_line_was_stuck(), "degraded as in the sibling timing test");
-
-	/* With the fix, PING #4's post-degrade LOW became the new baseline with
-	 * NO comparison (g_ready_have_sample was just cleared) -- so only gate4's
-	 * HIGH recovery right after counts as a genuine edge (edge_agree = 1).
-	 * Without the fix, that LOW would ALSO have been compared against the
-	 * STALE pre-degrade sample (frozen HIGH, from PING #2 gate4) and counted
-	 * as an illegitimate first edge -- leaving the mutant ALREADY at
-	 * edge_agree = 2 entering here, one short of proving instead of two.
-	 * PING #5 pushes one genuine LOW (gate3): with the fix this is only the
-	 * 2nd real post-degrade edge (still short of
-	 * CC3501E_READY_EDGE_AGREE_MIN), so gate4 right after must still pay its
-	 * full fallback; under the mutant it would already be the 3rd -- PROVEN
-	 * during gate3 itself -- so gate4 takes the fast proven path and pays
-	 * nothing. */
-	g_fake_delay_us_total = 0u;
-	ready_fake_push_low(CC3501E_READY_CONFIRM_READS);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #5 -> OK");
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING -> OK");
 	zassert_equal(g_fake_delay_us_total,
-	              700u,
-	              "only 2 genuine post-degrade edges so far -- the stale pre-degrade sample "
-	              "must not have contributed a 3rd; gate4 must still pay its full fallback");
+	              900u,
+	              "gate1 waits one extra poll for the slave to arm (200+250), gates 3-4 find "
+	              "the now-idle-HIGH pad immediately (200, 250) -- 700 fallback + 200 wait");
+	zassert_true(g_fake_delay_us_total >= 700u,
+	             "a slower-to-arm slave must never cost LESS than the fallback floor");
+	zassert_false(cc3501e_ready_line_was_stuck(), "HIGH was seen well within budget -- no latch");
 }
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);

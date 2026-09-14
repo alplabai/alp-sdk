@@ -103,12 +103,13 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
-	/* READY (CC35 GPIO17) is NOT wired here: this app's own overlay never
-	 * declares an `alp_pins` index [2] at all (only WIFI_EN and E_WIFI.NRST)
-	 * -- unlike the sibling AEN examples this template is copied from, whose
-	 * alp_pins[2] does point at &gpio2 6. See
-	 * chips/cc3501e/cc3501e_core.c's g_ready_line_proven comment for the
-	 * pin-routing fact and bench evidence behind that default. */
+	/* READY (CC35 GPIO17) is NOT wired here: fw->ready_pin stays NULL. No
+	 * AEN example bridge wires it by default any more -- see
+	 * chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment for the
+	 * pin-routing fact and bench evidence behind that default, and this
+	 * app's own overlay's `alp_pins` node (only WIFI_EN and E_WIFI.NRST --
+	 * no gpio2 entry at all) for why there is nothing to open here even for
+	 * an opt-in. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif

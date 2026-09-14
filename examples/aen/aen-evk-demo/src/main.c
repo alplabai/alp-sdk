@@ -2054,7 +2054,7 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 	/* --- 1. Power + reset + open the link ---------------------------- */
 	/* One call: opens SPI1 (hardware SS0, ALP_SPI_NO_CS) and the WIFI_EN /
 	 * nRESET pins (no READY pin on this R2 module -- see
-	 * chips/cc3501e/cc3501e_core.c's g_ready_line_proven comment), turns the
+	 * chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment), turns the
 	 * LP pads' output drivers on (pinctrl
 	 * does not reach the LP island), binds them, then runs the power-up and
 	 * reset sequence -- including the Puya-flash double-boot workaround: a

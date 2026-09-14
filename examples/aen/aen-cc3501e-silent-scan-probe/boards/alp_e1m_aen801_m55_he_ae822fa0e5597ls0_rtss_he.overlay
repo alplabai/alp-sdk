@@ -136,7 +136,7 @@
  * e1m-evk.yaml); the real READY net lands on E1M pad G3 / IO16 instead
  * (metadata/e1m_modules/aen/from-cc3501e.tsv). This app therefore does not
  * mux or input-enable P2_6, and does not wire fw->ready_pin -- see
- * src/cc3501e_bridge.c and chips/cc3501e/cc3501e_core.c's g_ready_line_proven
+ * src/cc3501e_bridge.c and chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
  * comment. A board (or a hand-reworked r1 unit) that genuinely wires GPIO17
  * to P2_6 can opt back in: add a pinctrl group muxing PIN_P2_6__GPIO with
  * input-enable (applied inside pinctrl_spi1's single init pass, not a

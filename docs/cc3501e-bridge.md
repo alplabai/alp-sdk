@@ -609,7 +609,7 @@ wake mask has no SDK surface: the Power driver hardwires RTC + `CSYSPWRUPREQ`, a
 READY (CC3501E `GPIO17`) cannot wake the device — it is an output *from* the
 CC3501E telling the host its slave is armed. (Which Alif pad carries it, if
 any, is board/revision-specific — see `chips/cc3501e/cc3501e_core.c`'s
-`g_ready_line_proven` comment; it is not universally `P2_6`.) After
+`cc3501e_reply_gate()` comment; it is not universally `P2_6`.) After
 `cc3501e_power_off()` the only way back is `cc3501e_reset()` driving
 `WIFI_EN`.
 

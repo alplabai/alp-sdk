@@ -91,23 +91,22 @@
 #ifndef CC3501E_BRIDGE_PIN_NRST
 #define CC3501E_BRIDGE_PIN_NRST 1u
 #endif
-/* OPTIONAL host-IRQ/READY input (CC35 GPIO17, alp_pins[2]).  When the board
- * wires it, cc3501e_request() gates reply phases on it (HIGH = slave armed)
- * instead of a fixed delay.  Absent -> ready_pin NULL -> legacy gap.
+/* OPTIONAL host-IRQ/READY input.  ready_pin has no fixed index or macro
+ * here on purpose: on a board where the CC3501E's GPIO17 READY net is
+ * actually routed to the host, set fw->ready_pin (in
+ * cc3501e_bridge_bringup() below) to whatever Alif pin that board wires it
+ * to.  When set, cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c) can
+ * only ever ADD delay to a reply phase, never remove it, so opting in on a
+ * board where the wiring is wrong costs at most CC3501E_READY_WAIT_US
+ * before the driver's own stuck-LOW latch gives up on it -- it is always
+ * safe to try.
  *
- * NOT the same net as Alif P2_6: on e1m-aen-evk-01, P2_6 is E1M pad AH7 /
- * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and the
- * CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
+ * NOT Alif P2_6 on e1m-aen-evk-01's R2 module: P2_6 there is E1M pad AH7 /
+ * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and
+ * the CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
  * (metadata/e1m_modules/aen/from-cc3501e.tsv).  cc3501e_bridge_bringup()
- * below does not open this pin on that board -- see its comment for the
- * bench evidence -- so this macro currently has no live consumer here.
- * THIS APP'S OWN overlay never declares an `alp_pins` index [2] at all
- * (unlike the sibling AEN examples this template is copied from, whose
- * alp_pins[2] does point at &gpio2 6): alp_gpio_open(CC3501E_BRIDGE_PIN_READY)
- * would fail to resolve here even if something tried to call it. */
-#ifndef CC3501E_BRIDGE_PIN_READY
-#define CC3501E_BRIDGE_PIN_READY 2u
-#endif
+ * below leaves ready_pin NULL by default on that module -- see
+ * cc3501e_reply_gate()'s own doc comment for the bench evidence. */
 
 /* DW SSI SPI1 base (0x48104000) + RX_SAMPLE_DLY to run the bridge SCLK above
  * 1 MHz.  spi_dw_configure never writes RX_SAMPLE_DLY (0xf0), so without the

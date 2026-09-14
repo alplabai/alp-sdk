@@ -104,7 +104,7 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
 	/* READY (CC35 GPIO17) is NOT wired here by default on this R2 module --
-	 * see chips/cc3501e/cc3501e_core.c's g_ready_line_proven comment for the
+	 * see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment for the
 	 * pin-routing fact, the bench evidence, and how a board that genuinely
 	 * wires it can opt back in via fw->ready_pin. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
