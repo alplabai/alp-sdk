@@ -2,42 +2,82 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * SD Host Controller overlay for the E1M-AEN801 (E8, M55-HE) -- E1M-EVK
- * 2626-R2 ONLY. `sdhc0` stays DISABLED on this board (the shared SoC dtsi's
- * own default, zephyr/dts/alif/ensemble_e8_peripherals.dtsi): the maintainer
- * decided (#2051) to keep SD off entirely on 2626-R2, not merely to leave
- * the mux ENABLE undriven.
+ * SD Host Controller overlay for the E1M-AEN801 (E8, M55-HE).
  *
- * WHY DISABLED, NOT JUST MUX-UNDRIVEN: the 74LVC157 SDIO mux (U38/U39) has
- * NO high-impedance state -- with `/E` HIGH its Y outputs are forced LOW,
- * not released. U38/U39's outputs are the SoC-side nets (E1M_CLK, E1M_CMD,
- * E1M_D3..D0, E1M_SDIO_RST), so those nets are actively held low by the mux
- * *whenever the mux is powered*, regardless of `/E`. `sdhc_dwc_init()`
- * applying SD pinctrl and `set_def_config()` starting the 400 kHz
- * identification clock on P14_1 -- which happens at POST_KERNEL, before
- * main() ever runs, whether or not this app touches the mux at all -- would
- * put the SoC's own 8 mA CLK/CMD drivers in a fight with the mux's held-low
- * outputs on every SD-routed pad. Leaving `sdhc0` disabled is the only way
- * to keep those pads untouched: no pinctrl applied, no SDCLK emitted, no
- * driver contention. This is a hardware defect pending a component change,
- * not a firmware workaround -- see README.md and docs/boards/e1m-evk.md.
+ * ============================================================================
+ * BENCH-TEST SCOPE -- READ THIS BEFORE REUSING THE OVERLAY ANYWHERE ELSE
+ * ============================================================================
+ * `sdhc0` is ENABLED here, and the SDIO mux ENABLE is driven, because the
+ * maintainer has PHYSICALLY REWORKED bench board `e1m-aen-evk-03`: U38, U39
+ * and U46 were replaced with 74LV3257 bus switches (bidirectional, a TRUE
+ * high-impedance state when `/E` is deasserted) in place of the stock
+ * 74LVC157 (a unidirectional logic mux whose SoC-facing Y outputs are
+ * forced LOW -- never released -- whenever `/E` is HIGH). That forced-low,
+ * unidirectional behaviour is the entire reason the base branch
+ * (`fix/2051-sdhc-reset-restores-config`) keeps `sdhc0` disabled on this
+ * board, and that reasoning IS STILL CORRECT for every 2626-R2 carrier that
+ * has NOT had this rework done -- which is most of them.
  *
- * PAD ROUTING HISTORY (inert while `sdhc0` is disabled, kept for whenever
- * this mux is fixed and SD is re-enabled): the SD "B" pad route
- * (CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3) is the module's real wiring,
- * corroborated by five independent metadata sources
- * (metadata/pinmux/aen.yaml:49-64, metadata/e1m_modules/aen/from-alif.tsv:36-48,
- * metadata/e1m_modules/aen/inter-chip.tsv:41-46, docs/cc3501e-bridge.md:74)
- * plus the EVK netlist (U39 pin 12 carries E1M_CMD to E2 AH11). All of CLK,
- * CMD and D0..D3 need the pad input buffer enabled (`input-enable`) even
- * though CLK is a push-pull SoC output from the SoC's own perspective: this
- * controller's command/data state machines clock off CLK LOOPED BACK FROM
- * THE PAD, not the pre-pad internal signal, so omitting it silently kills
- * that loopback (Alif's own DFP `demo_sd.c`/`demo_sdio.c`/`demo_sd_fatfs.c`/
- * `demo_mci_mdk_cmsisrtos2.c` and vendor Linux's dts pad config `0x23` on SD
- * CLK all agree). None of this is applied while `sdhc0` is disabled; git
- * blame this file for the last revision that wired it live.
+ * This overlay is a BENCH TEST for the one reworked board, not a rescoping
+ * of #2051 or #2122. Do NOT read this as "the mux defect is fixed, SD is
+ * safe to re-enable in general" -- that is a separate decision the
+ * maintainer has not made. See the base branch's own aen-sdhc-probe files
+ * (README.md, this overlay's own git history) for the un-reworked-board
+ * rationale, which this branch does not change or retract.
+ * ============================================================================
+ *
+ * `sdhc@48102000` (compatible `snps,dwc-sdhc`, IRQ 102/103) is declared ONCE
+ * in the shared SoC dtsi (zephyr/dts/alif/ensemble_e8_peripherals.dtsi),
+ * `status = "disabled"` by default, already wired with
+ * `clocks = <&clockctrl ALIF_SDC_CLK>` -- the #2051 peripheral-clock-gate fix
+ * this branch's controller-level work builds on (see src/main.c's PROBE 2).
+ * This overlay therefore only flips `status = "okay"` and supplies the
+ * carrier-specific pinctrl + bus-limit properties; it does NOT redeclare
+ * compatible/reg/interrupts/clocks the way the file this was ported from
+ * did (dev's `examples/aen/aen-sdcard-readout` overlay predates that node's
+ * promotion into the shared dtsi -- ported here, that whole node
+ * declaration would collide with the dtsi's own).
+ *
+ * PADS -- ported verbatim from dev's aen-sdcard-readout overlay
+ * (`git show origin/dev:examples/aen/aen-sdcard-readout/boards/
+ * alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`): the SD "B" pad
+ * route, CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3 -- the module's real
+ * wiring, corroborated by five independent metadata sources (see that
+ * file's header for the full citation list) plus the EVK netlist. CLK,
+ * CMD and D0..D3 all enable the pad input buffer (`input-enable`) even
+ * though CLK is a push-pull SoC output from the SoC's own perspective:
+ * this controller's command/data state machines clock off CLK LOOPED BACK
+ * FROM THE PAD, not the pre-pad internal signal -- see that file's header
+ * for the vendor citations (Alif DFP demo_sd.c/demo_sdio.c/
+ * demo_sd_fatfs.c/demo_mci_mdk_cmsisrtos2.c, vendor Linux pad config 0x23).
+ *
+ * SD_RST (P14_2) is muxed here as plain GPIO (not the SD_RST_B alt
+ * function) and `gpio14` is enabled, matching dev's aen-sdcard-readout
+ * overlay -- but UNLIKE that app, this one's src/main.c does NOT drive it,
+ * on purpose, and never should: traced against the 2626-R2 netlist
+ * (E1M-EVK-2626-R2_pinmap.csv), with the mux SELECT strapped LOW (microSD
+ * selected -- the bench default, P18 open), U39 channel 2 routes P14_2 to
+ * `M2E_SDIO_RSTn` -- the M.2 E-key connector's reset, NOT the microSD
+ * socket J7. J7 exposes only DAT2/CD-DAT3/CMD/CLK/DAT0/DAT1 -- SD cards
+ * have no reset pin. Driving P14_2 cannot reset the microSD card and would
+ * assert reset on an M.2 module if one is fitted. The old aen-sdcard-readout
+ * app's "three vendor sources bit-bang this line" reasoning assumed the pin
+ * reaches the card; on THIS topology it does not, so it is NOT reused here.
+ * PROBE 2 in src/main.c resets via the controller's own SW_RST_ALL instead.
+ * DO NOT RE-ADD AN SD_RST PULSE -- see src/main.c's sd_mux_enable() comment
+ * for the same finding.
+ *
+ * Deliberately NOT ported from dev's file: the `zephyr,sdmmc-disk` child
+ * node's absence didn't survive contact with the maintainer's PROBE-3
+ * follow-up -- see the `&sdhc0` override below, which now DOES carry it
+ * (this app's enabled `#if` branch now runs a full `disk_access_init()`
+ * enumeration, not just register-level probes). Still NOT ported: the
+ * SE-service MHUv2 block -- that clock cross-check was already superseded
+ * on this branch (see the base overlay's own former header, git blame)
+ * once `SDC_CKEN` was identified as the actual root cause.
  */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
 / {
 	chosen {
@@ -46,26 +86,184 @@
 	};
 };
 
-/*
- * ALP-SDK DELTA (#2051), not upstream: DISABLED, on purpose, on this board
- * -- see the file header. This is the SoC dtsi's own default
- * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi); the explicit override
- * here exists only so a reader does not have to go looking for why no SD
- * pinctrl or bus-limit properties are set anywhere in this file.
- */
+&pinctrl {
+	pinctrl_sdmmc: pinctrl_sdmmc {
+		/* CLK needs the pad input buffer too, despite being a push-pull
+		 * SoC output: the DWC_mshc controller's command/data state
+		 * machines clock off CLK LOOPED BACK FROM THE PAD, not off the
+		 * pre-pad internal signal. See dev's aen-sdcard-readout overlay
+		 * header for the full derivation and the vendor citations. */
+		group0 {
+			pinmux = <PIN_P14_1__SD_CLK_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+		/* CMD + D0..D3 are bidirectional: the pad input buffer
+		 * (input-enable) MUST be on so the SoC can sample the card's
+		 * CMD/DATA response lines, otherwise enumeration can never
+		 * complete. */
+		group1 {
+			pinmux = <PIN_P14_0__SD_CMD_B>,
+				 <PIN_P13_0__SD_D0_B>, <PIN_P13_1__SD_D1_B>,
+				 <PIN_P13_2__SD_D2_B>, <PIN_P13_3__SD_D3_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+		/* P14_2 -- SD_RST, muxed as plain GPIO (function 0), NOT the
+		 * SD_RST_B alternate function. NEVER DRIVE THIS PIN: on this
+		 * mux topology (SELECT strapped LOW, microSD selected) it
+		 * routes to the M.2 E-key connector's reset, not the microSD
+		 * socket -- see the file header above for the full netlist
+		 * trace. Muxed here only so `gpio14` below has a defined pad
+		 * to own; nothing in src/main.c configures or writes it. */
+		group2 {
+			pinmux = <PIN_P14_2__GPIO>;
+		};
+	};
+};
+
+&gpio14 {
+	/* Owns P14_2, among others -- see the pinctrl group2 comment above
+	 * for why this app leaves that pad undriven. Disabled by default in
+	 * the base dtsi like every other unused GPIO bank on this SoC. */
+	status = "okay";
+};
+
 &sdhc0 {
-	status = "disabled";
+	/* 25 MHz, not the controller's 50 MHz capability, and no 1.8V UHS
+	 * signaling: once CMD0 succeeds the SD subsystem would otherwise
+	 * attempt CMD11 and switch to 1.8V I/O signaling through the SDIO
+	 * mux, which runs at 3.3V. `no-1-8-v` IS read by this driver
+	 * (DT_INST_PROP_OR(n, no_1_8_v, ...) -> host_caps.vol_180_support = 0,
+	 * sdhc_dwc.c:972). `max-bus-freq` is this binding's equivalent of
+	 * vendor Linux's `max-frequency`. Ported verbatim from dev's
+	 * aen-sdcard-readout overlay -- see that file's header for the full
+	 * derivation (including the `no-hispeed` note this driver has no DT
+	 * equivalent for).
+	 */
+	max-bus-freq = <25000000>;
+	min-bus-freq = <400000>;
+	power-delay-ms = <500>;
+	bus-width = <4>;
+	no-1-8-v;
+	pinctrl-0 = <&pinctrl_sdmmc>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	/* PROBE 3 (this app's real enumeration attempt, src/main.c) needs a
+	 * disk instance behind disk_access_init()/disk_access_ioctl()/
+	 * disk_access_read() -- CONFIG_DISK_DRIVER_SDMMC + CONFIG_SDMMC_STACK
+	 * (prj.conf) build the driver that backs this node. disk-name "SD"
+	 * matches SD_DISK_NAME in src/main.c. */
+	sdmmc {
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "okay";
+	};
 };
 
 /*
- * ALP-SDK DELTA (#2051), not upstream: this app no longer brings up the
- * CC3501E inter-chip bridge, the SE-service MHUv2 transport, or any of
- * their DT wiring (SPI1, WIFI_EN/nRESET/READY, seservice0r/seservice0s/
- * se_service) -- all previously here to reach the SD mux ENABLE and to
- * cross-check the SD 100 MHz clock source via the Secure Enclave. Neither
- * survives in src/main.c any more: the mux is never touched (see the file
- * header), and the SE clock-cycle diagnostic was investigative machinery
- * for the now-superseded clock-source-mux theory, not part of the
- * controller-level probes this app keeps. See git blame for the last
- * revision that wired any of it.
+ * ============================================================================
+ * The SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge -- needed to DRIVE the
+ * SDIO mux ENABLE, not to read the card
+ * ============================================================================
+ *
+ * `MUX_EN` (E1M IO20, active low) is CC3501E-proxied, NOT an Alif pin
+ * (E1M_GPIO_IO20 -> CC3501E GPIO_26, metadata/e1m_modules/E1M-AEN801.yaml:356)
+ * -- so the SD pads above are necessary but not sufficient: without this
+ * block main() would be probing a controller with the card electrically
+ * disconnected from the mux's ENABLE side (SELECT is a hardware strap, see
+ * src/main.c). Ported verbatim from examples/aen/aen-cc3501e-gpio's overlay
+ * -- read that file's header for the full derivation behind every value
+ * here (SPI1 pinctrl, the DWC_ssi SPI1 node, the LP-GPIO island).
+ *
+ * `E1M_GPIO_IO21` (the mux SELECT) is intentionally NOT wired here --
+ * `dispatch: unrouted` on 2626-R2, and `alp_gpio_open()` refuses it
+ * unconditionally. The select is a hardware strap (P18 jumper via R198/R27),
+ * not firmware-drivable -- see src/main.c.
  */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO), plus the
+	 * hardware SS0 chip-select on P14_7. SS0 is the dwc-ssi peripheral's
+	 * OWN select -- not a GPIO bodge, not CS-less, not static-low: the
+	 * master asserts/deasserts it per transfer, framing each phase of the
+	 * bridge's request/reply exchange. Do NOT add cs-gpios here.
+	 *
+	 * input-enable on MISO because a pad's INPUT BUFFER is a PADCTRL bit
+	 * that only pinctrl sets on this SoC -- without it the pad never
+	 * senses what the slave drives.
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
+ * in ensemble_e8_peripherals.dtsi (which declares only the customer-facing
+ * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1
+ * base (+0x1000 per instance from spi0's 0x48103000). clock-frequency is
+ * REQUIRED: without it spi_dw_alif's configure takes the clock-control path,
+ * which fails -EINVAL for the gateless dummy ALIF_SPI_CLK. 200 MHz is the
+ * real SSI functional clock (E8 HWRM); BAUDR = clock-frequency / freq_hz.
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * Enable the LP GPIO island so WIFI_EN (P15_5) and E_WIFI.NRST (P15_1_FLEX)
+ * are drivable as outputs. P15_1/P15_5 function 0 (the reset default) IS
+ * LPGPIO, so no pinctrl group is needed for their mux.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
+	 * These are NOT E1M edge pads, so this app does not use the 52-slot
+	 * positional E1M map. There must be exactly ONE "alp,pin-array" node
+	 * in the tree.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};

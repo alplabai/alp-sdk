@@ -6,6 +6,24 @@ Register-level bring-up probes for the Ensemble **E8 SD Host Controller**
 is: inert register-level probes, not a working card-readout path (see
 below for why).
 
+> **This checkout is `test/2051-sdhc-enable-on-reworked-mux`, a BENCH TEST
+> branch, not the base branch's default config.** Its board overlay
+> re-enables `sdhc0` and drives the SDIO mux ENABLE, because bench board
+> `e1m-aen-evk-03` has had U38/U39/U46 physically replaced with 74LV3257
+> bus switches (a true high-impedance mux) in place of the stock 74LVC157.
+> Everything below this note describes the **un-reworked-board default**
+> (`sdhc0` disabled) that the base branch (`fix/2051-sdhc-reset-restores-config`)
+> ships and that remains correct for every carrier that has not had this
+> rework done. See the board overlay and `src/main.c` headers on this
+> branch for the reworked-board rationale; this is not a rescoping of
+> #2051 or #2122.
+>
+> On this branch, `sdhc0` enabled also adds a **PROBE 3**: a full
+> `disk_access_init()`/`disk_access_ioctl()`/`disk_access_read()`
+> enumeration through the `sdmmc` disk driver, not just the register-level
+> PROBE 1/2 below -- see `sd_probe3_full_enumeration()` in `src/main.c` and
+> its three-layer verdict (controller / mux-or-card / card-enumerated).
+
 ## SD is disabled entirely on the E1M-EVK 2626-R2 (#2051)
 
 The board's SDIO 74LVC157 mux (`U38`/`U39`) has **no high-impedance state**:

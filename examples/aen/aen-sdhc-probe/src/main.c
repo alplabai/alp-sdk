@@ -5,41 +5,55 @@
  * aen-sdhc-probe -- register-level bring-up probes for the Ensemble E8
  * SD Host Controller (`snps,dwc-sdhc`) on the E1M-AEN801 (M55-HE).
  *
- * SD IS DISABLED ENTIRELY ON THE E1M-EVK 2626-R2 (#2051). The maintainer
- * decided to keep `sdhc0` (`status = "disabled"`, the SoC dtsi's own
- * default) rather than merely leave the SDIO mux ENABLE undriven, because
- * the 74LVC157 mux (U38/U39) has NO high-impedance state: with its `/E`
- * ENABLE input HIGH, its Y outputs are forced LOW, not released. U38/U39's
- * outputs are the SoC-facing nets (E1M_CLK, E1M_CMD, E1M_D3..D0,
- * E1M_SDIO_RST), so those nets are actively held low by the mux whenever
- * it is powered, REGARDLESS of ENABLE. Enabling `sdhc0` would apply SD
- * pinctrl and let `sdhc_dwc_init()` start the 400 kHz identification
- * clock on P14_1 at `POST_KERNEL`, before this app's own `main()` even
- * runs -- putting the SoC's own 8 mA CLK/CMD drivers in a fight with the
- * mux's held-low outputs on every SD-routed pad. This is a hardware
- * defect pending a component change, not a firmware workaround -- see
- * README.md and docs/boards/e1m-evk.md.
+ * ============================================================================
+ * BENCH-TEST BRANCH (test/2051-sdhc-enable-on-reworked-mux) -- READ FIRST
+ * ============================================================================
+ * SD stays disabled entirely on a STOCK E1M-EVK 2626-R2 (#2051): the
+ * 74LVC157 mux (U38/U39) has NO high-impedance state, so its SoC-facing Y
+ * outputs are forced LOW -- never released -- whenever `/E` is HIGH,
+ * REGARDLESS of ENABLE. That reasoning is UNCHANGED and still correct for
+ * every un-reworked carrier, which is most of them.
  *
- * WHAT THIS APP DOES NOW: with `sdhc0` disabled, `#if
- * DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)` below compiles out to a
- * CLOCK-GATE PROOF instead of the full probe set -- no SD pin is opened,
- * configured, or driven; no CC3501E bridge is brought up (nothing
- * downstream needs it any more, since the SD mux is never touched); no
- * `disk_access_init()` is attempted. `CLKCTL_PER_MST` (the peripheral
- * clock gate) and `CAPABILITIES1` (the SDHC block's own read-only
- * capability word) are both plain memory-mapped registers -- reading and
- * gating them touches no pad and needs no pinctrl, which is only ever
- * applied by the SDHC driver's own init, itself never built or run while
- * `sdhc0` is disabled. The proof: read both registers, call
- * `clock_control_on()` for the gate, read both again, and print whether
- * the gate went clear->set and `CAPABILITIES1` went zero->non-zero --
- * see `sd_diag_prove_clock_gate()` below. This proves the controller
- * becomes addressable; it does NOT prove a card enumerates, which needs
- * pinctrl and a driven clock this board cannot safely apply (see above).
- * The full register-probe logic stays in the source too, guarded, so a
- * future board whose overlay re-enables `sdhc0` (a working mux, or a
- * carrier with none at all) gets the same controller-level bring-up test
- * this app has always been for, without a second app to maintain.
+ * This build runs on bench board `e1m-aen-evk-03` ONLY, where the
+ * maintainer has PHYSICALLY REPLACED U38, U39 and U46 with 74LV3257 bus
+ * switches -- bidirectional, with a TRUE high-impedance state when `/E` is
+ * deasserted. That rework removes the forced-low premise above, so this
+ * branch's board overlay re-enables `sdhc0` and drives the mux ENABLE, to
+ * actually exercise the microSD path and prove or disprove the rework on
+ * silicon. This is a BENCH TEST for that one board, NOT a rescoping of
+ * #2051 or #2122 -- do not read an enabled `sdhc0` here as "the mux defect
+ * is fixed everywhere". See the board overlay's own header for the same
+ * caveat in the devicetree.
+ * ============================================================================
+ *
+ * WHAT THIS APP DOES: `#if DT_NODE_HAS_STATUS(DT_NODELABEL(sdhc0), okay)`
+ * below selects between two builds, decided entirely by the board overlay's
+ * `sdhc0` status -- this source file does not otherwise know which board it
+ * is on:
+ *
+ *   - `sdhc0` DISABLED (any stock/un-reworked board): compiles out to a
+ *     CLOCK-GATE PROOF -- no SD pin is opened, configured, or driven; no
+ *     CC3501E bridge is brought up; no `disk_access_init()` is attempted.
+ *     `CLKCTL_PER_MST` (the peripheral clock gate) and `CAPABILITIES1` (the
+ *     SDHC block's own read-only capability word) are both plain
+ *     memory-mapped registers -- reading and gating them touches no pad and
+ *     needs no pinctrl. The proof: read both registers, call
+ *     `clock_control_on()` for the gate, read both again, and print whether
+ *     the gate went clear->set and `CAPABILITIES1` went zero->non-zero --
+ *     see `sd_diag_prove_clock_gate()` below. This proves the controller
+ *     becomes addressable; it does NOT prove a card enumerates.
+ *
+ *   - `sdhc0` ENABLED (this branch's board overlay, the reworked bench
+ *     board only): drives the CC3501E-proxied SDIO mux ENABLE first (see
+ *     `sd_mux_enable()` below), then runs the full controller-level probe
+ *     set -- CMD0, `sdhc_hw_reset()`, register reads -- AND a full
+ *     `disk_access_init()` enumeration (PROBE 3): PROBE 1/2 alone cannot
+ *     answer "does the card actually work through the reworked mux", only
+ *     "is the controller alive". The full register-probe logic stays in
+ *     the source either way, guarded, so a future board whose overlay
+ *     re-enables `sdhc0` (a working mux, or a carrier with none at all)
+ *     gets the same test this app has always been for, without a second
+ *     app to maintain.
  *
  * THE PROBES (only compiled/run when `sdhc0` is enabled):
  *   PROBE 1 -- a bare CMD0 (GO_IDLE_STATE) with NO reset call in front of
@@ -48,6 +62,13 @@
  *   PROBE 2 -- a READ-ONLY check that the SD peripheral clock gate
  *     (`CLKCTL_PER_MST` bit 16, `SDC_CKEN`) is set, then a real
  *     `sdhc_hw_reset()` + CMD0 exercise.
+ *   PROBE 3 -- `disk_access_init()` + geometry/CID ioctls + a one-block
+ *     `disk_access_read()`, through the `sdmmc` child node the board
+ *     overlay adds under `&sdhc0`. This is the only probe that actually
+ *     moves card data; PROBE 1/2 stay at the bare register level on
+ *     purpose (see `sd_probe3_full_enumeration()` below) so the three
+ *     probes isolate clock/controller/card layers from each other in the
+ *     final verdict line.
  *
  * SD PERIPHERAL CLOCK GATE, RESOLVED (#2035, #2051): `CLKCTL_PER_MST` bit
  * 16 is `SDC_CKEN`, a plain peripheral clock ENABLE (Alif's own DFP
@@ -105,6 +126,15 @@
 #include <zephyr/drivers/sdhc.h> /* sdhc_request(), sdhc_hw_reset() -- the register-level probes
                                    * below */
 #include <zephyr/kernel.h>
+
+#include <alp/e1m_pinout.h> /* ALP_E1M_GPIO_IO20 -- the SDIO mux ENABLE */
+#include <alp/peripheral.h> /* alp_gpio_open()/configure()/write()/read() */
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up helper */
+
+#include <errno.h> /* -EIO -- the "geometry not usable, read skipped" default in PROBE 3 */
+#include <zephyr/storage/disk_access.h> /* PROBE 3 -- disk_access_init()/ioctl()/read(), and the
+                                          * DISK_IOCTL_* / DISK_STATUS_* codes (zephyr/drivers/disk.h)
+                                          */
 
 /* sdhc0 -- the node label the board overlay gives the DWC SDHC controller. */
 #define SDHC_DEV DEVICE_DT_GET(DT_NODELABEL(sdhc0))
@@ -316,8 +346,259 @@ static int sd_diag_send_cmd0(void)
 	return sdhc_request(SDHC_DEV, &cmd, NULL);
 }
 
+/*
+ * Settle time for the CC3501E driving its pad and the card seeing its
+ * lines -- the mux itself is a 74LV3257/74LVC157, combinational, ns-scale.
+ * Same value and reasoning as aen-evk-demo's SD_MUX_SETTLE_MS.
+ */
+#define SD_MUX_SETTLE_MS 10u
+
+/*
+ * BENCH-TEST (test/2051-sdhc-enable-on-reworked-mux): assert the SDIO mux
+ * ENABLE (E1M IO20 -> CC3501E GPIO_26, active low) over the CC3501E GPIO
+ * proxy, BEFORE any SD pin is touched below -- the mux sits between the
+ * controller and the card, so without this the probes that follow would be
+ * driving pads that never reach a card at all, reworked mux or not.
+ *
+ * Brings the bridge up first (cc3501e_bridge_bringup(), the same one-call
+ * SoM template every other CC3501E example uses), then drives IO20 low
+ * through the portable alp_gpio_* API -- the proxy backend (built via
+ * CONFIG_ALP_SDK_GPIO_CC3501E_PROXY + this app's one-entry
+ * src/cc3501e_gpio_routes.c) routes it over the bridge to raw CC3501E
+ * GPIO_26. `alp_gpio_read()` afterwards is CORROBORATION ONLY, not proof:
+ * depending on bridge firmware this may report the far-side output
+ * register rather than the pad itself (examples/aen/aen-evk-demo/src/
+ * main.c documents the same caveat for this exact pin). It does not gate
+ * anything below -- a read disagreement is printed and the probes still
+ * run, so the log shows what the bridge reports either way.
+ *
+ * `E1M_GPIO_IO21` (the mux SELECT) is deliberately NOT touched here --
+ * `dispatch: unrouted` on 2626-R2, and `alp_gpio_open()` refuses it
+ * unconditionally. The select is set by the P18 jumper (a hardware strap:
+ * fitted pulls MUX_SEL.SDIO high through R198, open lets R27 pull it to
+ * 0V -- LOW selects the microSD slot per the netlist), not firmware.
+ *
+ * Unlike aen-cc3501e-gpio's demo, this does NOT run a PING liveness poll
+ * before driving the pin -- cc3501e_bridge_bringup()'s own cc3501e_reset()
+ * already retries a stalled first boot internally (the Puya cold-boot
+ * workaround). If the bridge is genuinely not answering, the configure/
+ * write calls below simply return non-ALP_OK and this function reports it;
+ * that is a coarser signal than aen-cc3501e-gpio's PING-gated retry loop,
+ * not a stronger one -- see the report for this as a known bench risk.
+ *
+ * SD_RST (P14_2) IS DELIBERATELY NOT DRIVEN ANYWHERE IN THIS APP -- traced
+ * against the 2626-R2 netlist (E1M-EVK-2626-R2_pinmap.csv) and confirmed by
+ * the maintainer: with the mux SELECT strapped LOW (microSD selected, the
+ * bench default), U39 channel 2 routes P14_2 to `M2E_SDIO_RSTn` -- the M.2
+ * E-key connector's reset, NOT the microSD socket. J7 (the microSD slot)
+ * exposes only DAT2/CD-DAT3/CMD/CLK/DAT0/DAT1 -- SD cards have no reset
+ * pin, full stop. Driving P14_2 cannot reset the card and would assert
+ * reset on an M.2 module if one were fitted. Do NOT re-add an SD_RST pulse
+ * here on the "three vendor sources bit-bang it" reasoning that applied to
+ * the OLD aen-sdcard-readout app -- that reasoning assumed the pin reaches
+ * the card, and on THIS mux topology it does not.
+ *
+ * Returns true iff the mux ENABLE write itself reported ALP_OK (i.e. the
+ * bridge accepted the write) -- callers use this only to shape the final
+ * verdict text, not to gate whether PROBE 3 below runs.
+ */
+static bool sd_mux_enable(void)
+{
+	static cc3501e_t fw; /* static: ~32 KB, would blow PSPLIM as a main() stack local */
+
+	alp_status_t s = cc3501e_bridge_bringup(&fw);
+	printf("[sd][mux] cc3501e_bridge_bringup() -> %d%s\n",
+	       (int)s,
+	       (s == ALP_ERR_NOT_PRESENT_ON_THIS_SOC) ? " (SPI1/WIFI_EN/nRESET absent -- check "
+	                                                "the board overlay)"
+	                                              : "");
+	if (s != ALP_OK) {
+		printf("[sd][mux] SDIO mux ENABLE NOT attempted -- bridge bring-up failed, so the "
+		       "card is almost certainly electrically disconnected from the controller "
+		       "below\n");
+		return false;
+	}
+
+	alp_gpio_t *mux_en = alp_gpio_open(ALP_E1M_GPIO_IO20);
+	if (mux_en == NULL) {
+		printf("[sd][mux] alp_gpio_open(E1M IO20 = SDIO mux /E) -> NULL, err=%d -- the mux "
+		       "cannot be enabled; check CONFIG_ALP_SDK_GPIO_CC3501E_PROXY and this app's "
+		       "cc3501e_gpio_routes[] carry the IO20 entry\n",
+		       (int)alp_last_error());
+		return false;
+	}
+
+	alp_status_t cfg_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	/* ACTIVE LOW: `false` asserts /E and connects the card-side nets to the SoC. */
+	alp_status_t en_rc = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
+
+	bool         mux_level = true;
+	alp_status_t rd_rc     = ALP_ERR_NOT_READY;
+	if (en_rc == ALP_OK) {
+		rd_rc = alp_gpio_read(mux_en, &mux_level);
+	}
+	printf("[sd][mux] SDIO mux ENABLE (E1M IO20 -> CC3501E GPIO_26, /E active low, driven "
+	       "LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, CORROBORATION "
+	       "ONLY -- may reflect the bridge's output register rather than the pad, not proof "
+	       "the line moved), settle=%u ms\n",
+	       (int)cfg_rc,
+	       (int)en_rc,
+	       (int)rd_rc,
+	       (rd_rc == ALP_OK) ? (mux_level ? "HIGH" : "LOW") : "?",
+	       (unsigned)SD_MUX_SETTLE_MS);
+
+	if (en_rc != ALP_OK) {
+		printf("[sd][mux] the mux ENABLE could not be driven -- every SDHC probe below runs "
+		       "against a card that is not connected to the controller\n");
+		alp_gpio_close(mux_en);
+		return false;
+	}
+	k_msleep(SD_MUX_SETTLE_MS);
+	/* mux_en is intentionally left open and /E left asserted for the rest of
+	 * the run, matching aen-evk-demo's phase 9 -- /E LOW is this bench's
+	 * working state for the duration of the probes below, not a resource to
+	 * restore-on-exit. */
+	return true;
+}
+
+/*
+ * PROBE 3 -- the maintainer's real question ("does the card work through
+ * the reworked mux") cannot be answered by PROBE 1/2 alone: both stay at
+ * the register/`sdhc_request()` level and never move a byte of card data.
+ * PROBE 3 goes all the way through Zephyr's disk-access layer (the
+ * `sdmmc` child node the board overlay now adds under &sdhc0, backed by
+ * CONFIG_DISK_DRIVER_SDMMC + CONFIG_SDMMC_STACK -- see prj.conf):
+ * `disk_access_init()`, geometry + CID over `disk_access_ioctl()`, and a
+ * single `disk_access_read()` of sector 0.
+ *
+ * PROBE 1/2 are left exactly as they were -- this function runs AFTER
+ * them, using their evidence (via `controller_alive`) only to word the
+ * final verdict, not to skip itself: even a "controller looks dead"
+ * reading is worth confirming disk_access_init() also fails, rather than
+ * assuming it.
+ */
+#define SD_DISK_NAME          "SD"
+#define SD_PROBE3_BLOCK_BYTES 512u /* SD/SDHC sector size; the geometry ioctl below confirms it */
+#define SD_PROBE3_HEXDUMP_BYTES \
+	64u /* a SHORT hex dump -- a prefix of the block, not the whole 512 B */
+#define SD_PROBE3_HEXDUMP_PERLINE 16u
+
+typedef enum {
+	SD_VERDICT_CONTROLLER_DEAD, /* clock gate or CAPABILITIES1 wrong -- PROBE 1/2's layer */
+	SD_VERDICT_NO_CARD,         /* controller alive, card never answers -- mux or card layer */
+	SD_VERDICT_PARTIAL,         /* card enumerated but geometry/read did not fully succeed */
+	SD_VERDICT_CARD_OK,         /* enumerated AND a block read back -- the rework works */
+} sd_verdict_t;
+
+/* `total_len` is the geometry ioctl's reported sector size; only the first
+ * SD_PROBE3_HEXDUMP_BYTES of it are ever printed -- see the macro comment. */
+static void sd_diag_hexdump_prefix(const uint8_t *buf, uint32_t total_len)
+{
+	uint32_t n = (total_len < SD_PROBE3_HEXDUMP_BYTES) ? total_len : SD_PROBE3_HEXDUMP_BYTES;
+
+	for (uint32_t off = 0u; off < n; off += SD_PROBE3_HEXDUMP_PERLINE) {
+		printf("[sd][probe3]   %04x:", off);
+		for (uint32_t i = off; i < off + SD_PROBE3_HEXDUMP_PERLINE && i < n; i++) {
+			printf(" %02x", buf[i]);
+		}
+		printf("\n");
+	}
+}
+
+static sd_verdict_t sd_probe3_full_enumeration(bool controller_alive, bool mux_ok)
+{
+	printf("[sd] -- PROBE 3: full enumeration (disk_access) --------------------\n");
+
+	if (!controller_alive) {
+		printf("[sd][probe3] SKIPPED -- PROBE 2 already found the controller unclocked or "
+		       "CAPABILITIES1 still zero; disk_access_init() would only time out against a "
+		       "dead controller, telling us nothing PROBE 1/2 have not already shown. This "
+		       "is a CONTROLLER-layer failure, not a card or mux one\n");
+		return SD_VERDICT_CONTROLLER_DEAD;
+	}
+
+	int drc = disk_access_init(SD_DISK_NAME);
+	printf("[sd][probe3] disk_access_init(\"%s\") -> %d\n", SD_DISK_NAME, drc);
+	if (drc != 0) {
+		printf("[sd][probe3] NO CARD -- the controller is alive (PROBE 1/2 above) but no "
+		       "card answered disk_access_init(). mux ENABLE write %s (see sd_mux_enable() "
+		       "above); if it reported OK, check the P18 jumper is OPEN (required to select "
+		       "the microSD slot -- S must read LOW) and that a card is actually seated in "
+		       "J7. This is a MUX-or-CARD-layer failure, not a controller one\n",
+		       mux_ok ? "reported OK" : "did NOT report OK");
+		return SD_VERDICT_NO_CARD;
+	}
+
+	uint32_t sector_count = 0u, sector_size = 0u;
+	int      sc_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_COUNT, &sector_count);
+	int      ss_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_SIZE, &sector_size);
+	printf("[sd][probe3] geometry: %u sectors x %u B = %llu MiB (ioctl rc %d / %d)\n",
+	       (unsigned)sector_count,
+	       (unsigned)sector_size,
+	       (unsigned long long)(((uint64_t)sector_count * sector_size) / (1024u * 1024u)),
+	       sc_rc,
+	       ss_rc);
+
+	/* DISK_IOCTL_GET_CARD_CID -- the only card-identity field the
+	 * disk_access surface exposes. Zephyr's own `struct sd_card` (zephyr/
+	 * include/zephyr/sd/sd.h) does NOT retain CSD after init, and there is
+	 * no DISK_IOCTL_* for it -- so "CID/CSD" above is CID only, honestly;
+	 * this is not a shortcut, it is everything the stack has to offer
+	 * through this API. Raw register, 4x uint32_t little-endian per
+	 * zephyr/subsys/sd/sd_ops.c's card_read_cid() -- SD Physical Layer
+	 * Spec 5.1 section 5.1 has the manufacturer/OEM/product/serial field
+	 * layout if decoding it further is ever useful on the bench. */
+	uint32_t cid[4] = { 0 };
+	int      cid_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_CARD_CID, cid);
+	if (cid_rc == 0) {
+		printf("[sd][probe3] CID = %08x %08x %08x %08x (raw register; CSD has no "
+		       "DISK_IOCTL_* and is not retained by the SD stack after init)\n",
+		       cid[0],
+		       cid[1],
+		       cid[2],
+		       cid[3]);
+	} else {
+		printf("[sd][probe3] DISK_IOCTL_GET_CARD_CID -> %d (CID not available)\n", cid_rc);
+	}
+
+	static uint8_t block[SD_PROBE3_BLOCK_BYTES] __aligned(SD_PROBE3_BLOCK_BYTES);
+	int            rd_rc = -EIO;
+	bool geometry_ok = (sc_rc == 0) && (ss_rc == 0) && (sector_count > 0u) && (sector_size > 0u) &&
+	                   (sector_size <= SD_PROBE3_BLOCK_BYTES);
+	if (geometry_ok) {
+		rd_rc = disk_access_read(SD_DISK_NAME, block, 0u, 1u);
+	}
+	printf("[sd][probe3] disk_access_read(sector 0, 1 block) -> %d%s\n",
+	       rd_rc,
+	       geometry_ok ? ""
+	                   : " (SKIPPED -- geometry ioctl above did not return a usable "
+	                     "sector size)");
+	if (rd_rc == 0) {
+		printf("[sd][probe3] first %u of %u B of sector 0:\n",
+		       (unsigned)((sector_size < SD_PROBE3_HEXDUMP_BYTES) ? sector_size
+		                                                          : SD_PROBE3_HEXDUMP_BYTES),
+		       (unsigned)sector_size);
+		sd_diag_hexdump_prefix(block, sector_size);
+	}
+
+	if (geometry_ok && rd_rc == 0) {
+		printf("[sd][probe3] CARD OK -- enumerated AND a block read back successfully: the "
+		       "card path through the reworked mux works\n");
+		return SD_VERDICT_CARD_OK;
+	}
+	printf("[sd][probe3] PARTIAL -- disk_access_init() succeeded (the card answered) but "
+	       "geometry and/or the block read did not (sc_rc=%d ss_rc=%d rd_rc=%d) -- a card "
+	       "layer problem short of full data movement, not a clean PASS\n",
+	       sc_rc,
+	       ss_rc,
+	       rd_rc);
+	return SD_VERDICT_PARTIAL;
+}
+
 int main(void)
 {
+	bool mux_ok = sd_mux_enable();
+
 	sd_diag_print_int_enables("main() entry");
 	sd_diag_print_int_enables("before PROBE 1 (CMD0, no reset)");
 
@@ -373,12 +654,47 @@ int main(void)
 	sd_diag_print_static_regs();
 	sd_diag_print_int_enables("before exit");
 
-	printf("[sd] RESULT: controller-level probes complete (CMD0 no-reset -> %d, "
-	       "CMD0 post-reset -> %d, sdhc_hw_reset -> %d). This board does not enable the "
-	       "card path -- see the file header\n",
+	printf("[sd] RESULT (PROBE 1/2, controller-level): CMD0 no-reset -> %d, CMD0 post-reset -> "
+	       "%d, sdhc_hw_reset -> %d. This is a REWORKED-MUX bench build "
+	       "(test/2051-sdhc-enable-on-reworked-mux) -- see sd_mux_enable() above for whether "
+	       "the mux ENABLE actually drove\n",
 	       cmd0a_rc,
 	       cmd0b_rc,
 	       hwreset2_rc);
+
+	/*
+	 * Verdict for PROBE 3 below: the controller is judged "alive" only if
+	 * BOTH the clock gate is set AND CAPABILITIES1 is non-zero -- the same
+	 * pair PROBE 2 already prints, re-read fresh here (not reused from
+	 * `clkctl_now` above) so this check reflects state AFTER PROBE 2's own
+	 * sdhc_hw_reset()/CMD0, not before it.
+	 */
+	uint32_t clkctl_final = sys_read32(SD_CLKCTL_PER_MST);
+	uint32_t caps_final   = sys_read32(SD_REG_CAPABILITIES1);
+	bool     controller_alive =
+	    ((clkctl_final & SD_CLKCTL_PER_MST_SD_EN_Msk) != 0u) && (caps_final != 0u);
+
+	sd_verdict_t verdict = sd_probe3_full_enumeration(controller_alive, mux_ok);
+
+	const char *verdict_str = "?";
+	switch (verdict) {
+	case SD_VERDICT_CONTROLLER_DEAD:
+		verdict_str = "CONTROLLER DEAD -- clock gate or CAPABILITIES1 wrong (PROBE 1/2's "
+		              "layer, upstream of the mux entirely)";
+		break;
+	case SD_VERDICT_NO_CARD:
+		verdict_str = "CONTROLLER ALIVE, NO CARD -- mux or card layer (check mux ENABLE "
+		              "result, the P18 jumper, and that a card is seated in J7)";
+		break;
+	case SD_VERDICT_PARTIAL:
+		verdict_str = "PARTIAL -- card answered disk_access_init() but geometry/read did "
+		              "not fully succeed";
+		break;
+	case SD_VERDICT_CARD_OK:
+		verdict_str = "CARD ENUMERATED AND READ -- the rework works";
+		break;
+	}
+	printf("[sd] RESULT (PROBE 3, final verdict): %s\n", verdict_str);
 	printf("[sd] done\n");
 	return 0;
 }
