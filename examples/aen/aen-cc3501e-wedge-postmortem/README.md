@@ -258,9 +258,10 @@ an **ESTIMATE** derived from fixed constants, not a bench measurement.
 **This estimate can stretch further — do not use elapsed time alone to
 judge a transcript.** This app leaves `fw.ready_pin` `NULL` by default
 (see PHASE C above and `src/cc3501e_bridge.c`), so `cc3501e_request()`'s
-reply gate always pays its fixed `CC3501E_PHASE_SETTLE_US` (250 us) settle
-per reply phase, unconditionally — not the level-only READY gate this
-paragraph used to describe. That per-phase cost is small on its own, but a
+reply gate always pays its fixed settle unconditionally per reply phase —
+~200–250 us (`CC3501E_PHASE_SETTLE_US` on most phases, a 200 us fixed value
+on the reply-header phase; see `chips/cc3501e/cc3501e_core.c`). That
+per-phase cost is small on its own, but a
 wedged link produces plenty of FAILED requests in this run, and each one
 still pays it, so the numbers above are a floor, not a ceiling. There is
 no fixed upper bound this app can quote for that stretch. Recognise a

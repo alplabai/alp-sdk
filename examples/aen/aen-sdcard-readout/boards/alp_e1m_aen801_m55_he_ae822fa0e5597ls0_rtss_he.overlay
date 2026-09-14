@@ -267,7 +267,7 @@
 	};
 };
 
-/* P2_6 (CC35 GPIO17) is NOT the CC3501E READY net on the R2 module this
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
  * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK
  * carrier repurposes as the Arduino header's CK_RST (metadata/boards/
  * e1m-evk.yaml); the real READY net lands on E1M pad G3 / IO16 instead
@@ -347,10 +347,11 @@
 	 * Compact 3-entry control array: the 2 SoM-internal CC3501E control
 	 * nets, in the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices
 	 * expect, plus SD_RST (index [2], native Alif GPIO -- see SD_RST_PIN_ID
-	 * in src/main.c). No READY entry -- see the P2_6 comment above &gpio2's
-	 * removal further up. None of these are E1M edge pads, so this app does
-	 * not use the 52-slot positional E1M map; a production board file
-	 * appends SoM-internal control nets after the E1M pad slots.
+	 * in src/main.c). No READY entry -- see the P2_6 comment further up
+	 * (this pad is not the CC3501E READY net). None of these are E1M edge
+	 * pads, so this app does not use the 52-slot positional E1M map; a
+	 * production board file appends SoM-internal control nets after the E1M
+	 * pad slots.
 	 *
 	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
 	 * one broke pin resolution outright on the bench (2026-08-26): the

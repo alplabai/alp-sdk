@@ -72,7 +72,7 @@ bool cc3501e_peer_is_polled(void);
 
 /* True once cc3501e_reply_gate() has ever given up waiting on a stuck-LOW
  * ready_pin (CC3501E_READY_STUCK_LOW_STREAK consecutive full-budget
- * timeouts) and latched g_ready_ignored for that ctx.  Production code never
+ * timeouts) and latched g_ready_ignored, process-wide.  Production code never
  * resets this once it latches.  NOT a log call -- chips/cc3501e has no
  * logging facility of its own -- a caller (bench diagnostics, a bring-up
  * app) has to poll this and print it itself if it wants the degrade

@@ -135,7 +135,7 @@
 	};
 };
 
-/* P2_6 (CC35 GPIO17) is NOT the CC3501E READY net on the R2 module this
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
  * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK
  * carrier repurposes as the Arduino header's CK_RST (metadata/boards/
  * e1m-evk.yaml); the real READY net lands on E1M pad G3 / IO16 instead

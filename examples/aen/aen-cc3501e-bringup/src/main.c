@@ -1315,13 +1315,13 @@ int main(void)
 				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
 				/* Is the READY line REAL?  This probe ALWAYS prints rc=-<NOSUPPORT>
 				 * on the R2 module e1m-aen-evk-01 currently holds: cc3501e_bridge.c
-				 * no longer wires fw->ready_pin by default, because on that module
+				 * does not wire fw->ready_pin by default, because on that module
 				 * Alif P2_6 is E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST),
 				 * NOT the CC3501E GPIO17 READY net -- see cc3501e_bridge.c and
 				 * cc3501e_reply_gate()'s own doc comment in
-				 * chips/cc3501e/cc3501e_core.c. The "clean 1.767 V line idling HIGH
-				 * with narrow LOW pulses" this probe used to report (scope
-				 * 2026-08-24) was measured on a separately hand-reworked r1 unit
+				 * chips/cc3501e/cc3501e_core.c. A "clean 1.767 V line idling HIGH
+				 * with narrow LOW pulses" is what this probe reports (scope
+				 * 2026-08-24) on a separately hand-reworked r1 unit
 				 * (its own serial was never recorded -- see changelog.d/1799.md)
 				 * where GPIO17 really was bodge-wired to P2_6 -- not evidence about
 				 * this module. The pinctrl/gpio2 wiring below stays enabled

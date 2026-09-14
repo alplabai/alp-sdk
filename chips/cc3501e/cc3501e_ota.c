@@ -275,10 +275,11 @@ alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
  * re-issue for the whole budget.  What costs time is the READY gate: whenever
  * ctx->ready_pin is populated, EACH reply phase may wait
  * CC3501E_READY_WAIT_US = 250000 us before its fixed settle even runs, so one
- * 4-phase 0x47 readback can burn ~1 s of wall time on a bodged unit --
- * bounded to CC3501E_READY_STUCK_LOW_STREAK such readbacks before
- * cc3501e_reply_gate() gives up on a stuck-LOW ready_pin for the rest of the
- * session (cc3501e_core.c).  Charging only the sleep is exactly what turned
+ * 4-phase 0x47 readback can burn ~1 s of wall time on a bodged unit -- bounded
+ * to CC3501E_READY_STUCK_LOW_STREAK such GATES (the streak counts gates, not
+ * whole readbacks) before cc3501e_reply_gate() stops waiting while ready_pin
+ * reads LOW; it resumes the bounded wait the moment a read comes back HIGH
+ * (cc3501e_core.c).  Charging only the sleep is exactly what turned
  * a nominal 20 s BEGIN wait into ~8000 s (silicon 2026-08-21), so this cap is
  * charged whether or not the frame really blocked -- an UPPER bound, as
  * CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS above is.

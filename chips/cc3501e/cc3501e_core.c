@@ -1127,16 +1127,45 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * board -- or a hand-reworked unit -- that genuinely wires GPIO17 to some
  * Alif pad can opt back in: set fw->ready_pin to that pin in
  * cc3501e_bridge_bringup().  Now that READY can only add delay, opting in
- * on a board that turns out to be wrong is safe: worst case it wastes
- * CC3501E_READY_WAIT_US once per CC3501E_READY_STUCK_LOW_STREAK gates
- * before the stuck-LOW latch below gives up on it -- it can never make a
- * gate return early. */
+ * on a board that turns out to be wrong is safe: it can never make a gate
+ * return early -- worst case is up to 3 x CC3501E_READY_WAIT_US of busy-wait
+ * per latch cycle, repeated (and growing, see the hysteresis on
+ * g_ready_stuck_low_threshold below) each time the line re-latches after a
+ * recovery, if it flaps instead of staying cleanly stuck. */
 static bool     g_ready_ignored; /* latched: stop waiting on ready_pin -- this is
                                    * file-global (process-wide across every
                                    * cc3501e_t instance), not per-ctx, and it is
                                    * RECOVERABLE: see cc3501e_reply_gate() below. */
 static uint32_t g_ready_timeout_streak;
-/* Latches true the first (and only) time g_ready_ignored is set -- chips/cc3501e
+
+/* Consecutive gates that must burn the FULL CC3501E_READY_WAIT_US without
+ * ever seeing HIGH before the process gives up waiting on ready_pin (latches
+ * g_ready_ignored) and falls back to paying only fallback_us -- same as
+ * ready_pin == NULL.  Without this, a genuinely stuck-LOW (or disconnected)
+ * pad would cost CC3501E_READY_WAIT_US (250 ms) on EVERY gate forever: a real
+ * slave op can legitimately eat the whole budget once (a slow radio op), but
+ * 3 in a row is not a slow op, it is a dead line.  This can only ever REMOVE
+ * a wasted WAIT -- fallback_us is paid unconditionally either way, so this
+ * cannot make a gate return early.
+ *
+ * HYSTERESIS.  The threshold used at runtime (g_ready_stuck_low_threshold,
+ * below) starts here at 3 and DOUBLES every time the latch actually sets
+ * (3 -> 6 -> 12 -> 24), capped at CC3501E_READY_STUCK_LOW_STREAK_MAX, and
+ * never resets for the rest of the process -- a HIGH read still clears the
+ * LATCH and the streak counter (see cc3501e_reply_gate() below), but never
+ * this threshold. Without it, a FLAPPING line (mostly LOW, the occasional
+ * HIGH) would re-latch over and over, re-paying up to 3 x
+ * CC3501E_READY_WAIT_US (750 ms) of busy-wait EVERY time it re-latches --
+ * each re-latch cycle holds cc3501e_request_locked()'s transport lock long
+ * enough that another caller's CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+ * (100 ms default) makes its own ALP_ERR_BUSY all but certain. Growing the
+ * threshold makes each successive re-latch need more consecutive timeouts to
+ * trip, spacing re-latches further apart over the life of the process. */
+#define CC3501E_READY_STUCK_LOW_STREAK     3u
+#define CC3501E_READY_STUCK_LOW_STREAK_MAX 24u
+static uint32_t g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK;
+
+/* Latches true the first time g_ready_ignored is set -- chips/cc3501e
  * has no logging facility of its own (it is backend-portable; no LOG_* macro
  * is available here), so this reuses the same internal latch+getter idiom as
  * g_peer_polled/cc3501e_peer_is_polled() just below.  NOT itself a log call:
@@ -1153,15 +1182,19 @@ bool cc3501e_ready_line_was_stuck(void)
 
 #ifdef CONFIG_ZTEST
 /* TEST-ONLY (see cc3501e_internal.h's declaration): resets every READY-gate
- * static to its zero state between fixtures.  Never called from production
+ * static to its zero state between fixtures, INCLUDING the hysteresis
+ * threshold -- production code never resets that (see its own comment
+ * above), but a test fixture needs every static back to its process-start
+ * value for isolation between test cases. Never called from production
  * code, and compiled only under CONFIG_ZTEST -- there is no ctx-scoped home
  * this state could reset itself from, so a test fixture needs an explicit
  * door back to zero instead. */
 void cc3501e_ready_gate_reset_for_test(void)
 {
-	g_ready_ignored        = false;
-	g_ready_timeout_streak = 0u;
-	g_ready_line_was_stuck = false;
+	g_ready_ignored             = false;
+	g_ready_timeout_streak      = 0u;
+	g_ready_line_was_stuck      = false;
+	g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK;
 }
 #endif
 
@@ -1195,28 +1228,18 @@ void cc3501e_set_peer_polled(bool on)
 #define CC3501E_READY_WAIT_US 250000u
 #define CC3501E_READY_POLL_US 200u
 
-/* Consecutive gates that waited the FULL CC3501E_READY_WAIT_US without ever
- * seeing HIGH before this process gives up waiting on ready_pin (latches
- * g_ready_ignored) and falls back to paying only fallback_us -- same as
- * ready_pin == NULL.  Without this, a genuinely stuck-LOW (or disconnected)
- * pad would cost CC3501E_READY_WAIT_US (250 ms) on EVERY gate forever: a real
- * slave op can legitimately eat the whole budget once (a slow radio op), but
- * 3 in a row is not a slow op, it is a dead line.  This can only ever REMOVE
- * a wasted WAIT -- fallback_us is paid unconditionally either way, so this
- * streak cannot make a gate return early either.
- *
- * THE LATCH RECOVERS.  A single slow radio op can legitimately hold READY LOW
- * across several consecutive gates (one observed op spans all 3 gates of a
- * request+reply, ~750 us of settle alone) -- long enough to hit this streak
- * and latch even though the line is fine.  If the latch stuck forever, that
- * one op would silently disable the wait for the rest of the boot.  So once
+/* THE LATCH RECOVERS.  An op holding READY LOW across >= 3 x
+ * CC3501E_READY_WAIT_US worth of gates (no bench-proven READY-wired unit
+ * exists to cite a real duration from) can legitimately trip the streak
+ * above even though the line is fine.  If the latch stuck forever, that one
+ * op would silently disable the wait for the rest of the process.  So once
  * latched, cc3501e_reply_gate() still takes one zero-wait read per gate; the
- * moment that read comes back HIGH, both g_ready_ignored and this streak
- * clear and the bounded wait resumes on the next gate.  The latch therefore
- * only ever suppresses WAITING while the pin is actually reading LOW -- it
- * never suppresses paying the settle, and it never outlives the pin proving
- * it can still go HIGH. */
-#define CC3501E_READY_STUCK_LOW_STREAK 3u
+ * moment that read comes back HIGH, it stops waiting while the pin reads LOW
+ * and resumes on that HIGH read -- both g_ready_ignored and the streak
+ * counter above clear (g_ready_stuck_low_threshold does not -- see its own
+ * comment). The latch therefore only ever suppresses WAITING while the pin
+ * is actually reading LOW -- it never suppresses paying the settle, and it
+ * never outlives a HIGH read. */
 
 /* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
  * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
@@ -1267,9 +1290,18 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 		}
 		if (saw_high) {
 			g_ready_timeout_streak = 0u;
-		} else if (++g_ready_timeout_streak >= CC3501E_READY_STUCK_LOW_STREAK) {
+		} else if (++g_ready_timeout_streak >= g_ready_stuck_low_threshold) {
 			g_ready_ignored        = true;
 			g_ready_line_was_stuck = true;
+			/* HYSTERESIS -- see g_ready_stuck_low_threshold's own comment:
+			 * double for next time (never reset), capped, so a flapping
+			 * line re-latches less and less often instead of re-paying this
+			 * same busy-wait indefinitely. */
+			if (g_ready_stuck_low_threshold <= CC3501E_READY_STUCK_LOW_STREAK_MAX / 2u) {
+				g_ready_stuck_low_threshold *= 2u;
+			} else {
+				g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK_MAX;
+			}
 		}
 	}
 	/* Unconditional -- see this function's header comment: READY only ever

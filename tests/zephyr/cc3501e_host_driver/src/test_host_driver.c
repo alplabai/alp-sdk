@@ -2953,6 +2953,92 @@ ZTEST(cc3501e_host_driver, test_ready_gate_latch_clears_on_high)
 	              750700u,
 	              "the latch must have cleared during PING #2's HIGH read -- otherwise this "
 	              "ping would still be ignoring ready_pin and cost only 700");
+
+	/* The latch clearing on HIGH also has to clear g_ready_timeout_streak, not
+	 * just g_ready_ignored -- otherwise a stale streak survives the recovery
+	 * and silently re-latches early next time.  Start this half from a clean
+	 * slate (fresh threshold too) so the numbers below are exact. */
+	cc3501e_ready_gate_reset_for_test();
+	g_fake_delay_us_total = 0u;
+	ready_fake_reset(false); /* idle LOW forever */
+
+	/* PING #4: latches again, same shape as PING #1 (3 full timeouts). */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #4 -> OK");
+	zassert_equal(g_fake_delay_us_total, 750700u, "3 full timeouts plus their fallbacks");
+
+	/* PING #5: one HIGH read (recovers), then LOW for the remaining 2 gates
+	 * of this same PING -- gate1 recovers via the latched-path zero-wait
+	 * read; gates 2-3 are back on the ordinary bounded-wait path (since
+	 * g_ready_ignored is now false) and time out again.  If the streak reset
+	 * on recovery, it restarts this run at 0; if it did not, it silently
+	 * carries the old (pre-recovery) streak value forward instead. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_pulse_high(1u);
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #5 -> OK");
+
+	/* PING #6: one more single timeout must NOT re-latch -- the streak
+	 * reset on PING #5's recovery, so this run is still well under the
+	 * (doubled, per the stuck-LOW hysteresis) threshold.
+	 * Mutation target: deleting `g_ready_timeout_streak = 0u;` from
+	 * cc3501e_reply_gate()'s latched/recovery branch (chips/cc3501e/
+	 * cc3501e_core.c) leaves the streak from PING #4's latch (3) carried
+	 * into PING #5 uncleared -- by the end of PING #6's first gate the
+	 * carried-forward streak crosses the doubled threshold (6) and
+	 * re-latches mid-PING, so gates 2-3 pay only their fallback (200 + 250 =
+	 * 450) instead of the full bounded wait -- 250250 + 450 = 250700
+	 * instead of the correct 750700. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_reset(false); /* idle LOW forever -- no more pulses */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #6 -> OK");
+	zassert_equal(g_fake_delay_us_total,
+	              750700u,
+	              "the streak must have reset during PING #5's HIGH read -- otherwise this "
+	              "ping re-latches early and costs 250250+450 (250700) instead of a full "
+	              "3-timeout run");
+}
+
+ZTEST(cc3501e_host_driver, test_ready_gate_hysteresis_doubles_relatch_threshold)
+{
+	/* HYSTERESIS: the stuck-LOW threshold starts at 3, but DOUBLES every
+	 * time the latch actually sets (3 -> 6 -> 12 -> 24, capped) and never
+	 * resets for the rest of the process -- a HIGH read clears the latch
+	 * and the streak counter, but never this threshold. Without it, a
+	 * FLAPPING line would re-latch (and re-pay up to 3 x
+	 * CC3501E_READY_WAIT_US of busy-wait while holding the transport lock)
+	 * every single time it happened to see 3 consecutive LOWs again. */
+	fw.ready_pin = FAKE_READY_PIN;
+	ready_fake_reset(false); /* idle LOW forever */
+
+	/* First latch: exactly 3 timeouts, same as the sibling latch tests.
+	 * This also grows the threshold to 6 for every gate from here on. */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #1 -> OK");
+	zassert_equal(g_fake_delay_us_total, 750700u, "first latch after 3 full timeouts");
+	zassert_true(cc3501e_ready_line_was_stuck(), "3 consecutive timeouts must latch");
+
+	/* Recover with one HIGH read, then go straight back to LOW: gate1
+	 * recovers via the latched-path zero-wait read (streak resets to 0);
+	 * gates 2-3 are back on the ordinary bounded-wait path and time out
+	 * again, bringing the POST-recovery streak to 2. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_pulse_high(1u);
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 (recover then 2 timeouts) -> OK");
+
+	/* 3 more full timeouts bring the post-recovery streak to 5 -- still
+	 * short of the DOUBLED threshold (6), so this must run to completion as
+	 * 3 full bounded waits, NOT re-latch partway through.
+	 * Mutation target: if the threshold never doubled (stayed at the
+	 * original 3), the post-recovery streak would already have crossed it
+	 * after the very first gate below (cumulative 3), and this PING would
+	 * cost only 250250 (one full timeout) + 200 + 250 = 250700 -- the
+	 * remaining two gates paying only their fallback on the now-latched
+	 * path instead of the full wait. */
+	g_fake_delay_us_total = 0u;
+	ready_fake_reset(false); /* idle LOW forever -- no more pulses */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #3 (3 more timeouts, no relatch yet) -> OK");
+	zassert_equal(g_fake_delay_us_total,
+	              750700u,
+	              "5 cumulative post-recovery timeouts must stay under the doubled threshold "
+	              "(6) -- a full 3-timeout run, not an early re-latch at the original 3");
 }
 
 ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_pays_at_least_fallback)

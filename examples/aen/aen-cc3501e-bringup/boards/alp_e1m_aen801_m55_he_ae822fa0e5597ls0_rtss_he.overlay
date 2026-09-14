@@ -62,7 +62,7 @@
 		};
 
 		/*
-		 * P2_6 (CC35 GPIO17) is muxed as a plain GPIO input here -- but NOT for
+		 * P2_6 (E1M AH7 / I2S1_SCLK) is muxed as a plain GPIO input here -- but NOT for
 		 * the cc3501e_reply_gate() READY use (cc3501e_bridge.c does not wire
 		 * fw->ready_pin: on the R2 module e1m-aen-evk-01 currently holds, P2_6
 		 * is E1M pad AH7 / I2S1_SCLK, the EVK's Arduino CK_RST net, NOT CC35's
@@ -247,7 +247,7 @@
 		 * instead of waiting for the ~500 ms timer poll.
 		 *
 		 * SAME PIN &gpio2 6 (P2_6) the pinctrl group2 comment above enables --
-		 * not `alp_pins[2]`, which no longer exists (cc3501e_bridge.c does not
+		 * there is no `alp_pins[2]` entry for it (cc3501e_bridge.c does not
 		 * wire fw->ready_pin on this R2 module; see that comment).  On a unit
 		 * where this net genuinely carries CC35 GPIO17 -- a hand-reworked r1
 		 * unit, not the stock R2 module -- there is one slave->master wire and

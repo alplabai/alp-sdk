@@ -100,15 +100,17 @@ command dispatcher — see
 [`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (`transport_spi.c` /
 `transport_sdio.c`).
 
-### Current rev: hardware-CS SPI (SS0 + per-phase READY)
+### Current rev: hardware-CS SPI (SS0; optional READY)
 
 The current E1M-AEN board rev runs the inter-chip SPI as a **proper
 hardware-framed link**: SCLK/MOSI/MISO **plus a peripheral-driven
 chip-select** — Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  The
 Alif dwc-ssi master asserts/deasserts **SS0 per transfer**, so every
-transaction is HW-framed by a real CS edge, and each of the four phases
-(request header → request payload → reply header → reply payload) is
-gated by a per-phase READY handshake.  This is **not** a CS-less /
+transaction is HW-framed by a real CS edge; each of the four phases
+(request header → request payload → reply header → reply payload) also
+runs a fixed inter-phase settle, OPTIONALLY extended by a host-IRQ READY
+read when a board wires one in (unwired, and READY is left NULL, by
+default — see "Bench-validated" below).  This is **not** a CS-less /
 clock-count scheme and **not** a GPIO bodge — the CS is the SPI
 peripheral's own slave-select.  Validated on silicon 2026-06-24 (E1M-AEN801
 EVK bench, fw v0.0.207.0).

@@ -100,11 +100,11 @@ struct cc3501e {
 	                                *   LOCK-HOLD CAVEAT: this wait runs while
 	                                *   cc3501e_request() already holds the internal
 	                                *   transport lock, so a populated ready_pin can add up
-	                                *   to CC3501E_READY_WAIT_US of hold time per reply-phase
-	                                *   gate.  Another caller blocked on that same lock can
-	                                *   see @ref ALP_ERR_BUSY after
-	                                *   @c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
-	                                *   elapses.  "Safe to opt in" means safe for LINK TIMING
+	                                *   to 250 ms of hold time per reply-phase gate.  Another
+	                                *   caller blocked on that same lock -- whose default
+	                                *   @c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS is
+	                                *   only 100 ms -- will see @ref ALP_ERR_BUSY as good as
+	                                *   certain.  "Safe to opt in" means safe for LINK TIMING
 	                                *   only (it can never clock a phase early) -- it is not
 	                                *   immunity from lock contention with other callers. */
 	/* Async-event SUBSCRIBERS (issue #1723), not one callback slot.

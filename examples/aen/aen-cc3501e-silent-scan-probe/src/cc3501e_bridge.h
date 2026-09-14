@@ -97,9 +97,12 @@
  * cc3501e_bridge_bringup() below) to whatever Alif pin that board wires it
  * to.  When set, cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c) can
  * only ever ADD delay to a reply phase, never remove it, so opting in on a
- * board where the wiring is wrong costs at most CC3501E_READY_WAIT_US
- * before the driver's own (recoverable) stuck-LOW latch gives up on it --
- * it is always safe to try FOR LINK TIMING.  It is not free, though: this
+ * board where the wiring is wrong costs up to 3 x 250 ms of busy-wait per
+ * latch cycle before the driver's own (recoverable) stuck-LOW latch gives up
+ * on it -- longer thresholds apply after each re-latch if the line flaps
+ * instead of staying cleanly stuck (chips/cc3501e/cc3501e_core.c's
+ * g_ready_stuck_low_threshold) -- it is always safe to try FOR LINK TIMING.
+ * It is not free, though: this
  * wait runs while cc3501e_request() holds its internal transport lock, so
  * a wrong or slow ready_pin can make another caller on the same ctx see
  * ALP_ERR_BUSY after CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS -- see
