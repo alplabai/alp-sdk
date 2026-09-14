@@ -8,15 +8,20 @@
 #
 # Pristine-build an AEN bench app for the E8 M55-HE target.
 # Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
-# (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
-# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
-# app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
+# (default alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he, alp-sdk#2094), so
+# Zephyr picks up boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+# and app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
 # force needed (the examples ship fully-qualified overlay names, not the
-# bare board name that would silently drop). For a Flow C RAM-run, pass
-# the bench-only ITCM retarget explicitly -- it is NOT one of the
-# auto-applied overlays above (it lives outside the app, on purpose: the
-# retarget is a bench concern, not something any app's own prj.conf/overlay
-# should carry) -- both halves together, e.g.:
+# bare board name that would silently drop). Most AEN examples have not yet
+# grown an AEN803-qualified overlay (alp-sdk#2101); this script REFUSES to
+# build an app whose boards/ ships a qualified overlay for a different board
+# than $AEN_BOARD resolves to, rather than silently dropping it (alp-sdk#2094)
+# -- override AEN_BOARD for such an app, e.g.:
+#   AEN_BOARD=alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ./build.sh <app>
+# For a Flow C RAM-run, pass the bench-only ITCM retarget explicitly -- it is
+# NOT one of the auto-applied overlays above (it lives outside the app, on
+# purpose: the retarget is a bench concern, not something any app's own
+# prj.conf/overlay should carry) -- both halves together, e.g.:
 #   -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
 #   -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
 # See docs/aen-bench-bringup.md, Flow C. Prints errors + the memory-region
@@ -50,8 +55,47 @@ else
 	APP_DIR="$ALP_SDK_DIR/$APP"
 fi
 
+# Refuse rather than silently drop an overlay (alp-sdk#2094). Zephyr
+# auto-applies a boards/ overlay/conf only on an EXACT match of the
+# fully-qualified board name (qualifier path with every "/" -> "_"); if
+# $APP_DIR ships >=1 alp_e1m_*-qualified boards/ file at all but NONE of
+# them is stem-equal to $BOARD's stem, building it anyway would produce a
+# silently wrong (e.g. AEN801-shaped) image on the target the operator
+# actually asked for -- the exact #2101 hazard AEN_BOARD's default repoint
+# to AEN803 (#2094) introduced across every example that has not yet grown
+# an AEN803 overlay.
+board_stem="$(printf '%s' "$BOARD" | tr '/' '_')"
+if [ -d "$APP_DIR/boards" ]; then
+	qualified_found=""
+	matched=""
+	for f in "$APP_DIR"/boards/alp_e1m_*; do
+		[ -f "$f" ] || continue
+		qualified_found=1
+		stem="$(basename "$f")"
+		stem="${stem%.*}"
+		if [ "$stem" = "$board_stem" ]; then
+			matched=1
+			break
+		fi
+	done
+	if [ -n "$qualified_found" ] && [ -z "$matched" ]; then
+		echo "build: REFUSING -- $NAME ships a qualified boards/ overlay for a DIFFERENT" >&2
+		echo "       board than AEN_BOARD=$BOARD resolves to (stem: $board_stem)." >&2
+		echo "       $APP_DIR/boards/ contains:" >&2
+		for f in "$APP_DIR"/boards/alp_e1m_*; do
+			[ -f "$f" ] && echo "         $(basename "$f")" >&2
+		done
+		echo "       Zephyr auto-applies an overlay ONLY on an exact board-name match, and" >&2
+		echo "       this build.sh never forces EXTRA_DTC_OVERLAY_FILE -- building anyway" >&2
+		echo "       would silently drop the overlay (alp-sdk#2094/#2101 class)." >&2
+		echo "       Either override AEN_BOARD to the target this app actually ships an" >&2
+		echo "       overlay for, or add boards/${board_stem}.overlay to this app." >&2
+		exit 3
+	fi
+fi
+
 cd "$ALP_SDK_DIR"
-echo ">>> build $NAME  (overlay: auto-applied by FQ board name)" >&2
+echo ">>> build $NAME  (board: $BOARD, overlay: auto-applied by FQ board name)" >&2
 # The build output is filtered through grep for readability, which means the
 # pipeline's status is GREP's, not west's -- and the `|| true` discarded even
 # that. Capture west's own status out of PIPESTATUS so a failure is still

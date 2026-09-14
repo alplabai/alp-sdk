@@ -95,14 +95,28 @@ export HAL_ALIF_DIR
 # (TBD) — run inside the west workspace or export HAL_ALIF_DIR".
 
 # --------------------------------------------------------------------
-# Board target (the lead part: AEN801 / E8 / M55-HE, RTSS-HE)
+# Board target (the bench's real module: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# HAZARD: build.sh uses this default unconditionally. An app whose overlay is
-# qualified for a DIFFERENT board target (e.g. an M55-HP-qualified overlay
-# like examples/aen/edgeai-vision-aen) would silently build with no overlay
-# applied under this default -- the same class of bug the HP-qualified rename
-# just fixed there. Not yet exercised (edgeai-vision-aen isn't in apps.txt).
-export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
+# Every module on this bench is an E1M-AEN803 (module serial 2026W36-0002 on
+# e1m-aen-evk-03, EEPROM-confirmed), and #2103 generated its board tree --
+# alp-sdk#2094 repoints this default to it (previously AEN801, which #2084's
+# tree generation deliberately left alone; see that issue's HAZARD note,
+# preserved below).
+#
+# HAZARD: build.sh uses this default unconditionally. An app whose boards/
+# ships a qualified overlay for a DIFFERENT board target than $AEN_BOARD
+# resolves to would silently build with NO overlay applied -- Zephyr auto-
+# applies an overlay only on an exact board-name match, and build.sh never
+# forces EXTRA_DTC_OVERLAY_FILE. Most AEN examples ship only an AEN801-
+# qualified overlay (alp-sdk#2101), so this repoint alone would trade one
+# wrong default for a silent mis-build across nearly all of them.
+#
+# build.sh therefore REFUSES (does not build) whenever the app it was handed
+# ships >=1 alp_e1m_*-qualified boards/ file but none matches this resolved
+# $AEN_BOARD's stem -- a loud, named failure instead of a silent AEN801-
+# shaped image. Override AEN_BOARD per invocation for an app that has not
+# yet grown its AEN803 overlay.
+export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
 # LG_PLACE resolution (alp-sdk#2032)
