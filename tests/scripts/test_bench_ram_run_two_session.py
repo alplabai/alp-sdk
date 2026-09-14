@@ -954,15 +954,31 @@ def test_missing_aen_jlink_run_falls_back_to_bench_jlink_run(tmp_path: Path) -> 
     falls through to the in-tree bench_jlink_run() (bench-env.sh) instead,
     which has its own independent refuse-don't-guess gate (LG_SWD_PATH /
     JLinkExe resolution) -- neither path ever reaches this fake wrapper or
-    touches a probe when the environment can't prove which one to use."""
-    res, calls, _ = _run_ram_run(tmp_path, aen_jlink_run=None)
+    touches a probe when the environment can't prove which one to use.
+
+    JLINK_EXE is pointed at a real, harmless binary (`/bin/true`) so the
+    SPECIFIC refusal under test -- bench_jlink_run()'s own "LG_SWD_PATH is
+    unresolved" gate -- is the one actually reached, deterministically,
+    regardless of whether the host running this test happens to have the
+    real SEGGER JLinkExe installed. Without this override the assertion
+    below is host-state-dependent: python-smoke on GitHub's ubuntu-latest/
+    macos-latest runners (no SEGGER tools at all) hits bench_jlink_exe()'s
+    OWN "'JLinkExe' not found" refusal first and never reaches LG_SWD_PATH's
+    -- while a bench host with a real JLinkExe install passes vacuously.
+    Measured: this test failed on both GitHub runners for exactly that
+    reason before this override was added."""
+    res, calls, _ = _run_ram_run(
+        tmp_path, aen_jlink_run=None, extra_env={"JLINK_EXE": "/bin/true"},
+    )
 
     assert res.returncode != 0, f"expected a non-zero refusal:\n{res.stdout}\n{res.stderr}"
     # The SPECIFIC refusal, not just any non-zero exit: bench_jlink_run()'s
     # own "cannot establish which probe" gate, reached because _run_ram_run
     # strips LG_PLACE/LG_COORDINATOR/LG_SWD_PATH (Major 1) -- never
     # AEN_JLINK_RUN's old message (that path is not taken at all) and never
-    # a real JLinkExe connect attempt.
+    # a real JLinkExe connect attempt (JLINK_EXE=/bin/true above never
+    # actually connects to anything; bench_jlink_run() refuses before it
+    # would ever be exec'd).
     assert "bench_jlink_run: LG_SWD_PATH is unresolved" in res.stderr, res.stderr
     assert "AEN_JLINK_RUN" not in res.stderr
     assert not list(calls.glob("call-*.jlink")), (
