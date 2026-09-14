@@ -216,20 +216,17 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
 # Wiring coverage (#2096): `_region_ipc_eligibility()`'s `cls ==
 # "unresolved"` tail above is reached through the FULL pipeline
 # (load_board_yaml -> resolve_carve_outs), not a direct call into the
-# private helper. #2053 (open as PR #2102, not yet merged at the time
-# this landed) will resolve `mram_main.base` from `"TBD"` to a real
-# address on all seven AEN presets -- once it does, those presets stop
-# being the only thing that exercises this routing end to end, and the
-# tests that cover it today (`test_resolve_carve_outs_blocks_on_unmapped_base`
-# above, and E1M-AEN801's own test below) are expected to get re-pointed
-# at direct calls into the private helper as part of that same PR. This
-# synthetic AEN-shaped preset (`_synthetic_aen_unresolved_base_root`)
-# keeps the routing covered independent of that -- whether or not any
-# real metadata/e1m_modules/E1M-AEN*.yaml still carries a "TBD" base. A
-# future change that filtered unresolved rows out earlier -- say in
-# `_candidate_regions()`, before `_region_ipc_eligibility()` is ever
-# called -- would leave the direct-call leg pins green while this test
-# alone catches the dead wiring.
+# private helper. `mram_main.base` resolves to a real address on every
+# shipped AEN preset (#2053, #2102), so no shipped preset authors an
+# unresolved `memory_map:` base any more, and the tests that cover this
+# leg elsewhere in this file are direct calls into the private helper --
+# they keep the leg itself green but prove nothing about the routing
+# that gets a row into it. This synthetic AEN-shaped preset
+# (`_synthetic_aen_unresolved_base_root`) keeps that routing covered
+# instead. A future change that filtered unresolved rows out earlier --
+# say in `_candidate_regions()`, before `_region_ipc_eligibility()` is
+# ever called -- would leave the direct-call leg pins green while this
+# test alone catches the dead wiring.
 # ---------------------------------------------------------------------
 
 SYNTHETIC_AEN_UNRESOLVED_BASE = """

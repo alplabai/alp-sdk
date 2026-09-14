@@ -155,16 +155,16 @@ def _synthetic_aen_unresolved_base_root(tmp_path: Path) -> Path:
     authors a `base: "TBD"` row, isolated from the real
     `metadata/e1m_modules/E1M-AEN*.yaml` presets (issue #2096).
 
-    #2053 (open as PR #2102) will resolve `mram_main.base` from `"TBD"`
-    to a real address on every shipped AEN preset -- the only
-    shipped-preset producer of an authored-but-unresolved `memory_map:`
-    base anywhere in the tree. This fixture keeps that shape alive
-    purely for `resolve_memory_regions()` / `resolve_carve_outs()`'s own
-    wiring tests, independent of whether #2102 has landed, and without
-    reintroducing a real `"TBD"` sentinel into any shipped preset. The
-    `memory_map:` below is a verbatim copy of
-    `metadata/e1m_modules/E1M-AEN301.yaml`'s seven rows (same SoC family,
-    same shape) -- not a synthetic layout invented for this fixture.
+    `mram_main.base` resolves to a real address on every shipped AEN
+    preset (#2053, #2102), so no shipped preset authors an unresolved
+    `memory_map:` base any more -- that was the only shipped-preset
+    producer of that shape anywhere in the tree. This fixture keeps the
+    shape alive purely for `resolve_memory_regions()` /
+    `resolve_carve_outs()`'s own wiring tests, without reintroducing a
+    real `"TBD"` sentinel into any shipped preset. The `memory_map:`
+    below is a verbatim copy of `metadata/e1m_modules/E1M-AEN301.yaml`'s
+    seven rows as they stood before #2053/#2102 (same SoC family, same
+    shape) -- not a synthetic layout invented for this fixture.
 
     Sibling of `_synthetic_nx9101_root` above, not folded into it: that
     helper's docstring and its one preset body are already
