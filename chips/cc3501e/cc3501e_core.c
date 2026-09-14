@@ -987,10 +987,13 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * from 167 kB/s to 231 kB/s with the link healthy throughout.
  *
  * 20 is TOO LOW -- it gives 0 B/s.  And note the gate before the REPLY HEADER is
- * deliberately NOT this constant: it is a hardcoded 200 us because it waits for
- * the slave to DISPATCH and stage its reply, which is a different and much
- * longer job than re-arming the next phase.  Folding it into this constant was
- * tried and killed the link outright (PING -> -5). */
+ * deliberately NOT this constant: it waits for the slave to DISPATCH and stage
+ * its reply, which is a different and much longer job than re-arming the next
+ * phase -- and, unlike this constant, is now SCALED by the reply capacity the
+ * caller offered (cc3501e_reply_header_gate_us(), floor 200 us, up to 2000 us
+ * for a >512 B reply; see that function's comment for why a flat 200 us wedges
+ * a 4071 B SOCK_RECV).  Folding it into this constant was tried and killed the
+ * link outright (PING -> -5). */
 /* 250 us, not 40.  This is the blind fallback gap cc3501e_reply_gate() uses
  * when READY is unusable -- and on the measured unit it always is: READY is
  * CC3501E GPIO_17 -> Alif P2_6, and P2_6 is SPI1_SCLK_A, so enabling its input
@@ -1098,6 +1101,147 @@ void cc3501e_set_peer_polled(bool on)
  * re-arm, which this file's own comment describes as "microseconds".  At 5000us
  * it cost 4 gates x 5 ms = 20 ms per frame, ~2 frames per 256 B chunk. */
 #define CC3501E_POLLED_SETTLE_US 200u
+
+/* Reply-header gate, scaled by how many bytes the bridge has to move BEFORE it
+ * can arm the reply header -- the fixed 200 us this used to be blindly waited
+ * on cc3501e_request_locked()'s caller having staged a reply the bridge can
+ * build inside that window, and for a large reply or a large REQUEST it
+ * cannot: dispatch_frame runs in the SPI transfer-complete ISR the instant the
+ * request payload finishes (cc3501e-bridge-firmware transport_hw_ti_spi.c
+ * ~708, protocol.c ~897-900) -- it CRCs up to ~4094 request bytes and runs the
+ * opcode's handler, which for a reply-bearing op composes the reply in the
+ * SAME ISR (ring copy, ~4100 B CRC, ~4100 B memcpy; src/protocol_sockets.c,
+ * protocol.c:996-1003, transport_hw_ti_spi.c:605) -- all of it BEFORE arming
+ * the reply header.  So the input to this gate is whichever side of the
+ * exchange is larger: the reply the caller asked for, or the request the
+ * caller just sent.  Widening it for EVERY request would tax every
+ * small-reply, small-request op (PING, GET_VERSION, most of this driver) for
+ * a cost only the large ones pay, so it is scaled per request instead.
+ *
+ * THE KEY IS NOT rx_cap.  cc3501e_sock_recv() always passes rx_cap ==
+ * sizeof(ctx->sock_buf) == ALP_CC3501E_MAX_PAYLOAD regardless of how many
+ * bytes it actually asked the peer for (its `want`, wire field @2..3 of
+ * alp_cc3501e_sock_recv_t) -- rx_cap is a fixed local staging buffer, not the
+ * bridge's own reply size, and the bridge sizes its reply from the REQUEST,
+ * not from how big a buffer the host happened to allocate.  So the two SOCK_
+ * RECV bench runs below both had rx_cap == 4096; the byte count that actually
+ * varied, and the one that must key this gate, is `want`.  cc3501e_
+ * expected_reply_bytes() below reconstructs the real expected reply size per
+ * opcode from (cmd, tx_payload, tx_len) instead.
+ *
+ * Data points -- ONLY these two sizes were bench-measured, both SOCK_RECV
+ * (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0):
+ *   - want  512 (reply 536 B, sizeof(alp_cc3501e_sock_recv_resp_t) (24 B) +
+ *     want): 200 us -> 3/3 end-to-end (the existing floor).
+ *   - want 4071: 200 us -> wedged the link on the FIRST recv, 2/2, at both
+ *     1 MHz and 25 MHz.
+ *   - want 4071: 2000 us -> 3/3 end-to-end, CRC-clean at a streamed 262144 B
+ *     (~469 kB/s).
+ * The want-4071 reply is NOT 24 + 4071 = 4095 B: a bridge command handler's
+ * writable capacity is the 4100 B frame minus its own 5 B header minus the
+ * 2 B CRC trailer = 4093 B (cc3501e-bridge-firmware protocol.c ~925), so the
+ * actual wire reply the firmware produced was capped at 4093 B, 2 B short of
+ * the naive header-plus-want arithmetic.
+ *
+ * A THIRD data point exists on the REQUEST side (not reply size), but it is
+ * INFERRED, not directly measured for this fix: examples/aen/aen-cc3501e-
+ * socket-throughput/README.md ~159-165 records a 512 B STREAM_WRITE request
+ * clean 4/4 at the old flat 200 us gate, while 1024 B and 4092 B requests
+ * both failed rc=-5, 3/3 each. No run has measured what gate value actually
+ * fixes the request side -- this fix's max(expected_reply, wire_tx_len) is
+ * CONSISTENT WITH that failure boundary (a 1024+ B request now gets more than
+ * 200 us), not proven to close it the way the reply-side fix was proven on
+ * SOCK_RECV.
+ *
+ * Every byte count strictly between the measured floor and ceiling is
+ * LINEARLY INTERPOLATED, not measured.  The ceiling anchor
+ * (CC3501E_REPLY_GATE_LARGE_BYTES) is pinned at ALP_CC3501E_MAX_PAYLOAD -
+ * ALP_CC3501E_HEADER_BYTES (4092 B) -- the largest single-frame byte count
+ * ANY opcode in this driver can ever present in either direction (it is also
+ * SPI1_TRANSFER's own worst case, sizeof(resp header) + ALP_CC3501E_SPI1_MAX_
+ * XFER) -- rather than at the measured 4093 B point itself, so the plateau
+ * starts 1 B earlier than proven.  That is conservative, not risky: it only
+ * ever hands out the full, already-proven 2000 us slightly sooner, never
+ * less delay than the interpolation would otherwise give at 4092 B. */
+#define CC3501E_REPLY_GATE_FLOOR_US 200u /* proven at bytes <= 536 (SOCK_RECV want 512) */
+#define CC3501E_REPLY_GATE_SMALL_BYTES \
+	536u /* sizeof(alp_cc3501e_sock_recv_resp_t) + 512 -- proven-floor boundary */
+#define CC3501E_REPLY_GATE_LARGE_BYTES (ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+#define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4093 B (SOCK_RECV want 4071) */
+
+/* Reconstruct the reply size THIS request actually asks for, from (cmd,
+ * tx_payload, tx_len) rather than the caller's rx_cap staging buffer -- see
+ * the gate's own comment above for why rx_cap is the wrong key for SOCK_RECV
+ * and SPI1_TRANSFER, whose rx_cap is a fixed-size scratch buffer unrelated to
+ * the wire reply they actually request. Falls back to rx_cap for every other
+ * opcode, GET_PENDING_EVENTS included.
+ *
+ * GET_PENDING_EVENTS was DELIBERATELY special-cased in an earlier version of
+ * this fix (to the firmware's real 16-entry ring, 288 B) and that case was
+ * removed: it depends on a firmware-internal constant (cc3501e-bridge-
+ * firmware src/event_ring.h) this driver has no way to verify stays 16, so a
+ * silent ring-depth change would silently under-gate this poll again -- the
+ * exact class of bug this whole fix exists to close. rx_cap here is
+ * sizeof(ctx->evt_buf) == ALP_CC3501E_MAX_PAYLOAD, so this poll pays the
+ * full ~2000 us ceiling: measured at roughly 1.8 ms added per poll, which
+ * against a realistic 2 polls/s callback cadence is about 0.36% additional
+ * transport-lock hold -- a cost worth paying to stay correct if the ring
+ * ever grows, rather than trusting a number this file cannot verify. */
+static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
+                                             const uint8_t    *tx_payload,
+                                             size_t            tx_len,
+                                             size_t            rx_cap)
+{
+	/* SOCK_RECV (0x23) wire = alp_cc3501e_sock_recv_t { handle(LE16) |
+	 * max_len(LE16) } -- max_len ("want") is the wire field the bridge
+	 * actually sizes its reply from.  Reply DATA =
+	 * alp_cc3501e_sock_recv_resp_t (24 B header) + want data bytes.
+	 *
+	 * want == 0 is NOT "expect nothing back": the bridge (cc3501e-bridge-
+	 * firmware protocol_sockets.c) clamps the reply to max_len only when
+	 * max_len != 0 -- a 0 means "no limit", and the reply can be as large as
+	 * the frame allows (up to ~4093 B, see CC3501E_REPLY_GATE_LARGE_BYTES's
+	 * own comment).  cc3501e_sock_recv() sends max_len == cap literally with
+	 * no floor, so a caller-supplied cap of 0 reaches the wire as exactly
+	 * that "no limit" value.  Fall back to rx_cap -- the most this request
+	 * could ever be asked to hold -- rather than treating want == 0 as a
+	 * tiny, header-only reply. */
+	if (cmd == ALP_CC3501E_CMD_SOCK_RECV && tx_payload != NULL &&
+	    tx_len == sizeof(alp_cc3501e_sock_recv_t)) {
+		const uint16_t want = (uint16_t)tx_payload[2] | ((uint16_t)tx_payload[3] << 8);
+		if (want == 0u) {
+			return (uint32_t)rx_cap;
+		}
+		return (uint32_t)sizeof(alp_cc3501e_sock_recv_resp_t) + want;
+	}
+	/* SPI1_TRANSFER (0x56) wire = alp_cc3501e_spi1_transfer_t { len(LE16) |
+	 * flags | seq | tx_fill | reserved(3) } (+ tx[len] inline).  Reply DATA =
+	 * alp_cc3501e_spi1_transfer_resp_t (4 B) + len RX bytes, UNLESS the
+	 * request set NO_RX, in which case the firmware replies len 0. */
+	if (cmd == ALP_CC3501E_CMD_SPI1_TRANSFER && tx_payload != NULL &&
+	    tx_len >= sizeof(alp_cc3501e_spi1_transfer_t)) {
+		if ((tx_payload[2] & ALP_CC3501E_SPI1_XFER_NO_RX) != 0u) {
+			return (uint32_t)sizeof(alp_cc3501e_spi1_transfer_resp_t);
+		}
+		const uint16_t len = (uint16_t)tx_payload[0] | ((uint16_t)tx_payload[1] << 8);
+		return (uint32_t)sizeof(alp_cc3501e_spi1_transfer_resp_t) + len;
+	}
+	return (uint32_t)rx_cap;
+}
+
+static uint32_t cc3501e_reply_header_gate_us(uint32_t bytes)
+{
+	if (bytes <= CC3501E_REPLY_GATE_SMALL_BYTES) {
+		return CC3501E_REPLY_GATE_FLOOR_US;
+	}
+	if (bytes >= CC3501E_REPLY_GATE_LARGE_BYTES) {
+		return CC3501E_REPLY_GATE_LARGE_US;
+	}
+	const uint32_t span_bytes = CC3501E_REPLY_GATE_LARGE_BYTES - CC3501E_REPLY_GATE_SMALL_BYTES;
+	const uint32_t span_us    = CC3501E_REPLY_GATE_LARGE_US - CC3501E_REPLY_GATE_FLOOR_US;
+	const uint32_t over_bytes = bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
+	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
+}
 
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
@@ -1302,8 +1446,17 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	}
 
 	/* Wait for the slave to dispatch + arm its reply before we read: the
-	 * READY gate tracks it via the host-IRQ line when wired, else a fixed gap. */
-	cc3501e_reply_gate(ctx, 200u);
+	 * READY gate tracks it via the host-IRQ line when wired, else a gap sized
+	 * to whichever side of THIS exchange is larger -- the reply the caller
+	 * actually asked for (cc3501e_expected_reply_bytes(), not rx_cap -- see
+	 * its comment) or the request payload the host just clocked
+	 * (wire_tx_len) -- via cc3501e_reply_header_gate_us() above.  Both sides
+	 * cost the bridge dispatch_frame time in the SAME ISR before it arms the
+	 * reply header (see that function's comment for the data). */
+	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
+	const uint32_t gate_bytes =
+	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
+	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(gate_bytes));
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
