@@ -26,9 +26,12 @@
 /* ---- CC3501E Wi-Fi (Alif companion) ------------------------------------- */
 #define ALP_COMPANION_WIFI_SCAN_MAX 16u
 #define ALP_COMPANION_WIFI_SCAN_MS  30000u
-/* Cover the CC3501E connect budget: L2 assoc up to 30s (WPA3-SAE is slower than
- * WPA2 -- see cc3501e_hw_ti.c) + the STA DHCP poll (~10s) = ~40s, plus margin. */
-#define ALP_COMPANION_WIFI_CONN_MS 50000u
+/* Same derivation as aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS:
+ * the firmware's own worst case is a 10s Wlan_RoleUp + 30s L2 association +
+ * a 30s DHCP-lease poll (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US,
+ * hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware documents 75000ms as
+ * the caller budget that clears it (alp-sdk#2079). */
+#define ALP_COMPANION_WIFI_CONN_MS 75000u
 
 /* ---- async Wi-Fi connect (the bridge can't block the shell) -------------- *
  * `wifi connect` SUBMITS the request (records SSID/sec/pass, sets conn_pending)
@@ -314,36 +317,23 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 	 * WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE (validated above). */
 	uint8_t sec = (argc >= 4) ? 2u : ((pass[0] == '\0') ? 0u : 1u);
 
-	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE and returns
-	 * immediately (#1385) -- it does not block for seconds here the way it
-	 * once did; see the function's own comment for why a retry loop around
-	 * this opcode is provably unwinnable. ALP_COMPANION_WIFI_CONN_MS is passed
-	 * for call-site consistency with the other companion Wi-Fi commands, but
-	 * cc3501e_wifi_ap_start() does not currently use it (documented on the
-	 * declaration). */
+	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE, then confirms
+	 * against the independent GET_DIAG_INFO role field: ALP_OK once the role
+	 * reports WIFI_AP, ALP_ERR_TIMEOUT if ALP_COMPANION_WIFI_CONN_MS elapses
+	 * first (see the function's own comment for why the submit itself is
+	 * never retried). */
 	alp_status_t s =
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
 
 	if (s != ALP_OK) {
-		/* #1385: against protocol v4 this is the EXPECTED outcome even for an
-		 * AP that came up fine -- WIFI_AP_START acks every submit BUSY and has
-		 * no status latch to confirm on, so cc3501e_wifi_ap_start() cannot
-		 * report success.  Say "unconfirmed", not "failed": printing a flat
-		 * failure for a working AP is the mirror of the false "up" the
-		 * dead-phase 0x00 alias used to print. */
-		shell_error(sh,
-		            "ap start \"%s\" unconfirmed (%d) -- firmware v4 has no AP status latch "
-		            "(#1385); check for the SSID out of band",
-		            ssid,
-		            (int)s);
+		if (s == ALP_ERR_TIMEOUT) {
+			shell_error(
+			    sh, "ap start \"%s\" failed (%d) (not confirmed within the budget)", ssid, (int)s);
+		} else {
+			shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
+		}
 		return -EIO;
 	}
-	/* Unreachable against protocol v4 today (see the @warning on
-	 * cc3501e_wifi_ap_start()'s declaration: ALP_OK is not a value this call
-	 * can currently return) -- kept, not deleted, because it is still the
-	 * CORRECT branch for the day a firmware-side AP confirmation channel
-	 * lands and makes ALP_OK reachable again; no code change would then be
-	 * needed here. */
 	shell_print(
 	    sh, "ap \"%s\" up (%s)", ssid, (sec == 0u) ? "open" : (sec == 2u ? "wpa3" : "wpa2"));
 	return 0;

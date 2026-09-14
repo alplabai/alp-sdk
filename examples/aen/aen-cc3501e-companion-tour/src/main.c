@@ -77,22 +77,22 @@
  * tour rather than a connection test, and a tour that parks for a minute on one
  * step is not a tour.
  *
- * That worst case is now about 60 s, not the 40 s an earlier version of this
- * comment gave: up to 10 s of Wlan_RoleUp (a connect issued as the first radio
- * op of a boot carries the role-up inside the connect body), up to 30 s of
- * association, and a 20 s DHCP-lease poll -- CC3501E_STA_DHCP_TRIES went from 50
- * to 100 so the poll covers lwIP's fourth DISCOVER at t=14 s instead of stopping
- * four seconds short of it.
+ * That worst case is 70 s: up to 10 s of Wlan_RoleUp (a connect issued as the
+ * first radio op of a boot carries the role-up inside the connect body), up
+ * to 30 s of association, and a 30 s DHCP-lease poll
+ * (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US = 150 x 200 ms,
+ * hal/ti/cc3501e_hw_ti_wifi.c).
  *
  * WHY THAT NUMBER MATTERS RATHER THAN BEING TRIVIA: a run budgeted below the
  * firmware's bound reports failures the radio never suffered, and it does not
  * look wrong while doing it -- the call simply returns -4 with the association
  * still in progress.  Two bench sessions in this campaign were hard to compare
  * for exactly that reason.  **If you are MEASURING connect or DHCP success,
- * override this to 70000u** (the sibling aen-cc3501e-socket-throughput budgets
- * 55000u, which predates the 20 s DHCP poll and is now marginal).  The tour's
- * own default is for touring, and a -4 at this default means "did not finish
- * inside a tour's patience", not "the radio failed".
+ * override this to 75000u** (the sibling aen-cc3501e-socket-throughput and
+ * aen-cc3501e-connect-twice-probe budgets, re-derived against this same 70 s
+ * bound, alp-sdk#2079).  The tour's own default is for touring, and a -4 at
+ * this default means "did not finish inside a tour's patience", not "the
+ * radio failed".
  * TOUR_SCAN_TIMEOUT is likewise below cc3501e_wifi_scan()'s own 20 s floor,
  * which simply raises it -- see that floor's comment for why 15 s could not
  * express a healthy scan. */

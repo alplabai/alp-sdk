@@ -59,7 +59,7 @@
  * doing on its own.
  *
  * 20 s = the 16 s bound plus margin for the reply round trip and host
- * scheduling, the same shape the 55 s connect budget uses over its own 40 s. */
+ * scheduling, the same shape the 75 s connect budget uses over its own 70 s. */
 #define CC3501E_WIFI_SCAN_WINDOW_MS 20000u
 
 /* See <alp/protocol/cc3501e.h> for the wire shape and cc3501e_internal.h for
@@ -583,17 +583,11 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * -- see the caller-visible-outcome distinction in the @warning on
 	 * cc3501e_wifi_ap_start() in <alp/chips/cc3501e/wifi.h>.
 	 *
-	 * cc3501e_wifi_connect() escaped the identical trap by submitting once and
-	 * then awaiting the independent WIFI_STATUS latch -- AP_START has no such
-	 * channel: the TI HAL's cc3501e_hw_wifi_ap_start()
-	 * (hal/ti/cc3501e_hw_ti_wifi.c) never writes g_wifi_conn, the latch
-	 * handle_wifi_status reads.  Giving AP_START one is a FIRMWARE change
-	 * (mirror the AP outcome into a latch, or add an AP-status opcode + a
-	 * protocol version bump) and needs a bench, so it is not made here.
-	 * @p timeout_ms is therefore currently unused: there is nothing left to
-	 * bound a retry loop over.  It stays in the signature (ABI/API stable) so
-	 * a future firmware-side confirmation channel can reuse it exactly as
-	 * cc3501e_wifi_connect() uses its own timeout_ms, without an API break. */
+	 * cc3501e_wifi_connect() escapes the identical trap by submitting once and
+	 * then awaiting the independent WIFI_STATUS latch -- AP_START confirms
+	 * the same way, just against a different channel: see the CONFIRM block
+	 * below, which polls GET_DIAG_INFO's role field until it reports
+	 * ALP_CC3501E_ROLE_WIFI_AP, bounded by @p timeout_ms. */
 	alp_status_t s = cc3501e_request(
 	    ctx, ALP_CC3501E_CMD_WIFI_AP_START, payload, off, NULL, 0, NULL, CC3501E_REQ_TMO_MS);
 	/* Only ALP_ERR_INVAL and ALP_ERR_NOT_READY are definite, conclusive
@@ -623,29 +617,19 @@ alp_status_t cc3501e_wifi_ap_start(cc3501e_t  *ctx,
 	 * successful Wlan_RoleUp, cc3501e_hw_radio_role() turns that into
 	 * ROLE_WIFI_AP, and GET_DIAG_INFO publishes it as byte 3 of its reply
 	 * (cc3501e-bridge-firmware:src/protocol_diag.c).  That is exactly the
-	 * independent confirmation channel this wrapper was missing.
-	 *
-	 * The comment above used to say no such channel existed and that giving
-	 * AP_START one was a firmware change plus a protocol bump.  That was true
-	 * of firmware v4, which is what it was written against: the `role` field
-	 * arrived later (for #1562) and the wire is v5 now.  No firmware change
-	 * and no version bump are involved here -- only the host learning to read
-	 * a field the firmware has been publishing all along.
+	 * independent confirmation channel this wrapper needs.
 	 *
 	 * cc3501e_diag_info() is explicitly non-disturbing (no side effects on
 	 * radio state), so polling it cannot perturb the AP being confirmed --
-	 * unlike re-submitting AP_START, which put a fresh Wlan_RoleUp on live
-	 * radio hardware every retry (the #1376 storm).  Still submit ONCE.
+	 * unlike re-submitting AP_START, which would put a fresh Wlan_RoleUp on
+	 * live radio hardware every retry.  Still submit ONCE.
 	 *
-	 * Budget accounting used to mirror cc3501e_wifi_connect(): debit the
-	 * attempt's declared worst case ONLY when the read itself failed.
-	 * cc3501e_wifi_connect() has since moved off this estimate-based ledger
-	 * entirely (see its #1481 note) because the debit above is unbounded on
-	 * a wedged transport and, even confined to the failure branch, still
-	 * overcharges every failed poll's real wall-clock cost against
-	 * timeout_ms.  This loop has the identical defect and is a candidate for
-	 * the same fix; left alone here as out of scope for #1481's fix targeted
-	 * at cc3501e_wifi_connect(). */
+	 * This loop debits the attempt's declared worst case ONLY when the read
+	 * itself failed -- an unbounded overcharge on a wedged transport, and
+	 * even confined to the failure branch it still overcharges every failed
+	 * poll's real wall-clock cost against timeout_ms.  cc3501e_wifi_connect()
+	 * does not have this defect (its own loop bounds itself on real elapsed
+	 * time, #1481); fixing this loop the same way is out of scope here. */
 	uint32_t remaining = timeout_ms;
 	for (;;) {
 		alp_cc3501e_diag_info_t di = { 0 };
