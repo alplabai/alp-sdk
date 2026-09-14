@@ -357,22 +357,28 @@ class TestCompositeConsultsContainedRows:
         proving the contained rows individually safe
         (`_composite_alias_coverage_gap()`, pinned above) is not enough,
         because PLACEMENT routes through `_reserved_spans()`, not this
-        guard. With `mram_main`'s own base unresolved (its real shape on
-        every committed AEN preset) and an out-of-window sibling added,
-        `_reserved_spans()`'s `window_top = max(hi for sized)` includes
-        that sibling's `0x90010000`, failing its
-        `origin + capacity == window_top` identity and degrading to
-        `([], reason)` -- silently reserving NOTHING, not even `mcuboot`
-        (`write_authority: vendor_image`), for whatever placement runs
-        next. Pre-Major-2 this returned `status: ok` from
-        `_resolve_flash_device()` because the coverage walk alone
-        cannot see `_reserved_spans()`'s own derivation fail."""
+        guard. `mram_main`'s own base was `TBD` on every committed AEN
+        preset when this test was written; #2053 (merged to dev) resolved
+        it to `0x80000000`, so the fixture forces it back to `TBD` here to
+        keep exercising the identity-derivation leg -- see
+        `test_reserved_spans_does_not_degrade_when_the_alias_has_its_own_base`
+        for the now-real resolved-base shape. With the base unresolved and
+        an out-of-window sibling added, `_reserved_spans()`'s
+        `window_top = max(hi for sized)` includes that sibling's
+        `0x90010000`, failing its `origin + capacity == window_top`
+        identity and degrading to `([], reason)` -- silently reserving
+        NOTHING, not even `mcuboot` (`write_authority: vendor_image`), for
+        whatever placement runs next. Pre-Major-2 this returned
+        `status: ok` from `_resolve_flash_device()` because the coverage
+        walk alone cannot see `_reserved_spans()`'s own derivation fail."""
         som_preset, memory_map = _aen801_memory_map(tmp_path)
-        som_preset["memory_map"] = memory_map + [{
-            "name": "unrelated_device", "base": 0x90000000, "size_kib": 64,
-            "accessible_from": ["m55_he", "m55_hp"], "cacheable": True,
-            "write_authority": "customer_runtime",
-        }]
+        som_preset["memory_map"] = [
+            dict(r, base="TBD") if r["name"] == "mram_main" else r
+            for r in memory_map] + [{
+                "name": "unrelated_device", "base": 0x90000000,
+                "size_kib": 64, "accessible_from": ["m55_he", "m55_hp"],
+                "cacheable": True, "write_authority": "customer_runtime",
+            }]
         descriptor, reason = _resolve_flash_device(
             "mram_main", som_preset, METADATA_ROOT)
         assert descriptor is None, descriptor
