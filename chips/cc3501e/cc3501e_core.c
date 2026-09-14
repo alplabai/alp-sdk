@@ -1731,6 +1731,7 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	 * (same shape as sock_send_seq / spi1_seq). */
 	ctx->req_seq = (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
 	const uint8_t req_seq = ctx->req_seq;
+	bool          first_lock_attempt = true;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
 		 * itself (issue #1116 follow-up): both touch the shared
@@ -1741,7 +1742,40 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * request and the peek below, corrupting the disambiguation this
 		 * retry loop depends on. */
 		s = cc3501e_lock_acquire(ctx);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) {
+			/* alp-sdk#2035 review follow-up: a lock-acquire timeout means
+			 * something very different depending on WHICH attempt it hits.
+			 * On the FIRST attempt of this call, NO request for `cmd` has
+			 * gone out yet -- ALP_ERR_BUSY here is exact and unambiguous,
+			 * so return it immediately (this is also what makes a caller
+			 * like cc3501e_sock_send() safe to treat this ALP_ERR_BUSY as
+			 * "nothing was sent", no collection grace needed).  On a LATER
+			 * attempt, an EARLIER attempt already reached the bridge (this
+			 * loop only re-enters cc3501e_lock_acquire() after a genuinely
+			 * retryable BUSY/IO from THAT successful attempt) -- returning
+			 * ALP_ERR_BUSY here would misreport "nothing sent" for a
+			 * request that may already be in flight. Treat it exactly like
+			 * a retryable BUSY/IO from the device instead: bounded retry
+			 * within the SAME deadline, using the SAME backoff schedule
+			 * as the retry path below. */
+			if (first_lock_attempt) {
+				return s;
+			}
+			const uint64_t now_ms = alp_uptime_ms();
+			if (now_ms >= deadline_ms) {
+				return ALP_ERR_TIMEOUT;
+			}
+			/* Safe cast: see the identical cast below. */
+			const uint32_t remaining_ms = (uint32_t)(deadline_ms - now_ms);
+			uint32_t       gap          = (remaining_ms < next_gap_ms) ? remaining_ms : next_gap_ms;
+			alp_delay_ms(gap);
+			if (next_gap_ms < CC3501E_POLL_GAP_MS) {
+				next_gap_ms = (next_gap_ms * 2u > CC3501E_POLL_GAP_MS) ? CC3501E_POLL_GAP_MS
+				                                                       : next_gap_ms * 2u;
+			}
+			continue;
+		}
+		first_lock_attempt = false;
 		/* Re-zero per attempt, not just once before the loop: an attempt
 		 * that copied out n bytes and then mapped to BUSY/IO would
 		 * otherwise leave that stale count visible to a caller who reads

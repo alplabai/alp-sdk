@@ -142,7 +142,11 @@ config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
 	  supervisor's own bridge ops); this timeout only matters when a
 	  transaction is stuck (e.g. a wedged link).  A caller that cannot
 	  acquire the lock within the budget gets ALP_ERR_BUSY back instead
-	  of blocking forever.  Mirrors
+	  of blocking forever -- true for a direct cc3501e_request() call, and
+	  for poll_by_repeat()'s very FIRST attempt; a poll_by_repeat() caller
+	  past its first attempt instead retries a lock timeout within its own
+	  deadline (alp-sdk#2035), so it can block up to its own timeout_ms
+	  plus one more lock wait before giving up.  Mirrors
 	  CONFIG_ALP_SDK_V2N_SUPERVISOR_ACQUIRE_TIMEOUT_MS's rationale for
 	  the structurally identical "one shared transport, many portable
 	  backends" problem.  This core is OS-agnostic (also builds into
