@@ -683,12 +683,16 @@ def _aen_check_map_overlaps(
     The sibling core's `<role>_slot0` window is not a partition here, so
     _aen_check_extents cannot see a map that overlaps it; this can.
     Regions with a non-integer `base` (a `TBD` sentinel) are skipped --
-    they are declarations of intent, not placements.
+    they are declarations of intent, not placements. No shipped AEN
+    preset authors one today (#2053 resolved the last holdout,
+    `mram_main`, on all seven), but the skip stays live for any future
+    region or preset that does.
 
     A region whose resolved extent equals the App MRAM window EXACTLY
-    (the whole-device alias, e.g. `mram_main` once its `base` stops
-    being `"TBD"`) is excluded from the pairwise overlap comparison
-    below -- it deliberately spans the same window `mcuboot` /
+    (the whole-device alias -- `mram_main`, on every AEN preset since
+    #2053 resolved its `base` off the `"TBD"` sentinel) is excluded from
+    the pairwise overlap comparison below -- it deliberately spans the
+    same window `mcuboot` /
     `he_slot0` / `hp_slot0` / `reserved` / `storage` / `atoc` subdivide,
     so comparing it against its own partitions would flag every one of
     them. `whole_device_alias.is_whole_device_alias()` carries the
