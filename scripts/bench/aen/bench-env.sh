@@ -186,8 +186,14 @@ for ln in lines:
 # here rather than silently resolving whatever labgrid last remembered or
 # driving a board this invocation does not hold (alp-sdk#2064: a non-empty,
 # non-"None" `acquired:` alone is NOT enough -- it must name us, not just
-# name someone). Returns non-zero on ANY resolution failure; callers must
-# treat that as fatal, not fall back to a guess.
+# name someone). Returns non-zero on ANY resolution failure that matters to
+# EVERY caller -- an unheld/wrong-operator reservation, or a missing `swd`
+# resource. `seuart` is resolved when present but is NOT required to
+# succeed (see the comment at its own check below): not every AEN place has
+# one, and plenty of callers never touch it. Callers must treat a non-zero
+# return as fatal, not fall back to a guess; callers that specifically need
+# SE_UART must check it themselves once this returns (see flash-run.sh,
+# bench_atoc_replace_guard).
 bench_labgrid_resolve() {
 	local place="$1" out acquired me se_path console_dev console_host console_port swd_path
 
@@ -238,15 +244,27 @@ bench_labgrid_resolve() {
 	[ "$console_port" = "None" ] && console_port=""
 	swd_path=$(bench_labgrid_resource_field "$out" swd path)
 
-	if [ -z "$se_path" ]; then
-		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'seuart' resource path" >&2
-		return 1
-	fi
 	if [ -z "$swd_path" ]; then
 		echo "bench-env: LG_PLACE=$place ($acquired) exports no 'swd' resource path" >&2
 		return 1
 	fi
 
+	# seuart is OPTIONAL here, unlike swd above (alp-sdk#2064 bench
+	# verification, e1m-aen-evk-02/-03): not every AEN place has a physical
+	# SE-UART -- those two export only 'console' and 'swd', no 'seuart' at
+	# all -- and a J-Link-only flow (Flow C/D: ram-run.sh, reread.sh,
+	# flash-jlink*.sh, ...) never touches SE_UART, so failing resolution
+	# entirely over a resource that flow doesn't need made #2064's fix
+	# unreachable on exactly the two boards where wrong-board risk is
+	# highest (all three AEN places share DPIDR 0x4C013477 and OEM serial
+	# 000603000869). Resolving SE_UART empty when the resource genuinely
+	# doesn't exist is not a guess -- it accurately reports "this place has
+	# none" -- and every script that DOES need it already refuses loudly on
+	# its own when SE_UART comes back empty: flash-run.sh's and
+	# flash-run-dualcore.sh's own `[ -z "${SE_UART:-}" ]` gate ahead of
+	# `app-write-mram`, and bench_atoc_replace_guard's own "SE_UART is
+	# unset -- cannot query the resident ATOC" abort. This mirrors how
+	# LG_CONSOLE_DEV/HOST/PORT above have never been hard-required either.
 	SE_UART="$se_path"
 	LG_CONSOLE_DEV="$console_dev"
 	LG_CONSOLE_HOST="$console_host"

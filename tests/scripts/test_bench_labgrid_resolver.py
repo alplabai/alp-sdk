@@ -352,16 +352,35 @@ def test_reservation_held_by_someone_else_refuses(tmp_path: Path) -> None:
 
 
 @_NEEDS_BASH
-def test_place_missing_the_seuart_resource_fails_loudly(tmp_path: Path) -> None:
-    """Real state, not synthesised: test-place-02 has no `seuart` resource
-    registered in labgrid at all yet. Even if it were acquired BY US, the
-    resolver must refuse rather than resolve an empty SE_UART."""
-    acquired_but_no_seuart = REAL_EVK02_UNACQUIRED.replace(
+def test_place_with_swd_but_no_seuart_resolves_successfully(tmp_path: Path) -> None:
+    """alp-sdk#2064 bench verification on e1m-aen-evk-02/-03: real state, not
+    synthesised -- test-place-02 has no `seuart` resource registered in
+    labgrid at all (only `console` and `swd` appear in `matches:`), because
+    the physical board has none. Bench verification found the ORIGINAL
+    #2064 fix made `seuart` mandatory on every resolution, including this
+    one -- so a J-Link-only flow (ram-run.sh, reread.sh, flash-jlink*.sh,
+    ...) could never resolve LG_SWD_PATH on exactly the two AEN places
+    where the wrong-board isolation matters most (all three share DPIDR
+    0x4C013477 and OEM serial 000603000869). `seuart` is now resolved when
+    present but never required for the resolve itself to succeed: this must
+    return 0, with LG_SWD_PATH resolved and SE_UART left empty (not
+    guessed) -- the split half covered here. The OTHER half -- a flow that
+    DOES need SE_UART must still refuse loudly on an empty one, never fall
+    back to a raw/guessed path -- is unaffected by this change and already
+    covered by test_atoc_guard_aborts_when_se_uart_is_unset in
+    test_bench_jlink_connect_guard.py (bench_atoc_replace_guard's own
+    `[ -z "${SE_UART:-}" ]` check) and by flash-run.sh's/
+    flash-run-dualcore.sh's own identical guard ahead of `app-write-mram`."""
+    acquired_no_seuart = REAL_EVK02_UNACQUIRED.replace(
         "  acquired: None", f"  acquired: {_who_i_am()}"
     ).replace("Matching resource", "Acquired resource")
-    res = _resolve(tmp_path, "test-place-02", {"test-place-02": acquired_but_no_seuart})
-    assert res.returncode == 1
-    assert "no 'seuart' resource path" in res.stderr
+    res = _resolve(tmp_path, "test-place-02", {"test-place-02": acquired_no_seuart})
+    assert res.returncode == 0, res.stderr
+    assert "no 'seuart' resource path" not in res.stderr
+    assert "LG_SWD_PATH=3-4.2" in res.stdout
+    assert "SE_UART=" in res.stdout and "SE_UART=/dev" not in res.stdout, (
+        "SE_UART must resolve EMPTY, not guessed, when the place has no seuart resource"
+    )
 
 
 @_NEEDS_BASH
@@ -466,3 +485,86 @@ def test_unreachable_coordinator_or_unknown_place_fails_loudly(tmp_path: Path) -
     res = _resolve(tmp_path, "test-place-99", {"test-place-01": REAL_EVK01_ACQUIRED})
     assert res.returncode == 1
     assert "returned nothing" in res.stderr
+
+
+@_NEEDS_BASH
+def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -> None:
+    """End-to-end confirmation, not just bench_labgrid_resolve() in
+    isolation (alp-sdk#2064 bench verification): a REAL helper --
+    `reread.sh`, a pure J-Link flow with no SE_UART dependency at all --
+    must get PAST bench-env.sh's sourcing on an evk-02/-03-shaped place
+    (swd + console, no seuart) and reach `bench_jlink_run()`, not die at
+    the old "exports no 'seuart' resource path" refusal before ever
+    touching the probe-isolation code.
+
+    Runs entirely against `BENCH_JLINK_RUN_DRY_RUN=1` and a fake sysfs/
+    dev-node tree with no sibling probes -- never `unshare`, never a real
+    probe, never real hardware. The DRY_RUN placeholder output is not a
+    real JLinkExe transcript, so `bench_jlink_assert_connected` correctly
+    refuses it (exit 7) -- that is the expected, ACCEPTABLE outcome here:
+    the point is that reread.sh got there at all, not that it fully
+    succeeded (nothing here has a real probe to succeed against)."""
+    workdir = tmp_path
+    reread = BENCH / "reread.sh"
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    bin_dir = workdir / "fakebin"
+    acquired_no_seuart = REAL_EVK02_UNACQUIRED.replace(
+        "  acquired: None", f"  acquired: {_who_i_am()}"
+    ).replace("Matching resource", "Acquired resource")
+    _stub_labgrid_client(bin_dir, {"test-place-02": acquired_no_seuart})
+
+    toolsdir = workdir / "tools"
+    toolsdir.mkdir()
+    fake_nm = toolsdir / "arm-zephyr-eabi-nm"
+    fake_nm.write_text("#!/usr/bin/env bash\necho '20000d00 D ram_console_buf'\n", encoding="utf-8")
+    fake_nm.chmod(0o755)
+
+    # A stub, not a system path (macOS has no /bin/true) -- see
+    # test_bench_jlink_run.py's identical reasoning.
+    stub_jlink = workdir / "fake-jlinkexe"
+    stub_jlink.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    stub_jlink.chmod(0o755)
+
+    bd = workdir / "build"
+    (bd / "zephyr").mkdir(parents=True)
+    (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
+
+    # A fake probe tree at the REAL evk-02 swd path (3-4.2) from
+    # REAL_EVK02_UNACQUIRED above, with no siblings to mask.
+    sysfs = workdir / "sysfs"
+    dev = workdir / "dev"
+    probe = sysfs / "3-4.2"
+    probe.mkdir(parents=True)
+    (probe / "idVendor").write_text("1366\n", encoding="utf-8")
+    (probe / "busnum").write_text("3\n", encoding="utf-8")
+    (probe / "devnum").write_text("9\n", encoding="utf-8")
+    (probe / "serial").write_text("000603000869\n", encoding="utf-8")
+    (dev / "003").mkdir(parents=True)
+    (dev / "003" / "009").write_text("", encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PATH"] = f"{bin_dir}{os.pathsep}{toolsdir}{os.pathsep}{env.get('PATH', '')}"
+    env["LG_COORDINATOR"] = "fake-coordinator:20408"
+    env["LG_PLACE"] = "test-place-02"
+    env["JLINK_EXE"] = str(stub_jlink)
+    env["BENCH_JLINK_SYSFS_ROOT"] = str(sysfs)
+    env["BENCH_JLINK_DEV_ROOT"] = str(dev)
+    env["BENCH_JLINK_RUN_DRY_RUN"] = "1"
+    env["ZEPHYR_SDK_INSTALL_DIR"] = ""
+    for var in ("LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
+        env.pop(var, None)
+
+    res = subprocess.run(
+        ["bash", str(reread), str(bd)], cwd=workdir, env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+    # The old bug's exact symptom must be gone.
+    assert "exports no 'seuart' resource path" not in res.stderr, res.stderr
+    assert "labgrid resolution FAILED" not in res.stderr, res.stderr
+    # It got all the way through sourcing, bench_tool_prefix, the BUF_SYM
+    # extraction, and into bench_jlink_run() -- proven by reaching the
+    # J-Link connect-transcript gate, the next thing after bench_jlink_run()
+    # returns, rather than dying anywhere before it.
+    assert res.returncode == 7, f"expected exit 7 (no real probe here):\n{res.stdout}\n{res.stderr}"
+    assert "no 'J-Link>' command" in res.stderr, res.stderr
