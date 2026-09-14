@@ -460,9 +460,10 @@ bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
 	case ALP_CC3501E_CMD_WIFI_STATUS:
 		/* alp_cc3501e_wifi_status_t: state=DISCONNECTED(0), fail_reason=
 		 * NONE(0), rssi_dbm=0 (documented "@warning NOT A MEASUREMENT...
-		 * always 0 on the wire", <alp/protocol/cc3501e.h>), reserved=0.
-		 * "Never connected since boot" is a real, common device state and
-		 * reads back byte-identical to this. */
+		 * always 0 on the wire", <alp/protocol/cc3501e.h>), last_reason=0
+		 * (no connect attempt has ended or been rejected yet). "Never
+		 * connected since boot" is a real, common device state and reads
+		 * back byte-identical to this. */
 		return true;
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
 		/* 0 dBm is a LEGAL int8 RSSI reading (see the wifi_status_t

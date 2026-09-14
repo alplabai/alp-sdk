@@ -3327,6 +3327,10 @@
         "cc3501e_wifi_status": {
           "hash": "2a5d4b86bb0e805c",
           "signature": "alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
+        },
+        "cc3501e_wifi_status_once": {
+          "hash": "12f14a4f28afda65",
+          "signature": "alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
         }
       },
       "macros": {
@@ -7678,6 +7682,10 @@
         "TAS2563_I2C_ADDR_VDD_PULL": {
           "hash": "a456a298adafb48b",
           "value": "0x4Eu"
+        },
+        "TAS2563_RESET_SETTLE_US": {
+          "hash": "1f6673afe76038a7",
+          "value": "200u"
         }
       },
       "typedefs": {
@@ -12879,14 +12887,14 @@
           "kind": "enum"
         },
         "alp_cc3501e_wifi_status_t": {
-          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t reserved; } alp_cc3501e_wifi_status_t;",
+          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t last_reason; } alp_cc3501e_wifi_status_t;",
           "fields": [
             "uint8_t state",
             "uint8_t fail_reason",
             "int8_t rssi_dbm",
-            "uint8_t reserved"
+            "uint8_t last_reason"
           ],
-          "hash": "fa9eb3a293fd5021",
+          "hash": "4cecc8cdac50e208",
           "kind": "struct"
         }
       },

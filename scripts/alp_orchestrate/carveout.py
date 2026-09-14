@@ -93,18 +93,26 @@ def _region_ipc_eligibility(
     `memory_regions`, or the silicon-variant fallback) needs no authority:
     it is RAM by construction.
 
-    `mram_main` (metadata/e1m_modules/E1M-AEN80{1,...} and its AEN
-    siblings) is the reason this function exists: it lists an
+    `mram_main` (metadata/e1m_modules/E1M-AEN{301,...,803}, all seven
+    presets) is the reason this function exists: it lists an
     `a32_cluster`/`m55_*` endpoint, carries NO `carveout` key at all, and
-    -- while its `base` stays `"TBD"` -- was the only thing standing
-    between an `ipc:` entry and a carve-out inside the live ATOC band
-    (0x80578000..0x80580000; bench-observed intact ATOC magic `ckBS`
-    under a live app write at 0x80560000, 2026-08-08). Its class is
-    `"unresolved"` today (base TBD); its authored `write_authority:
-    composite` (not `customer_runtime`) already disqualifies it below.
-    Once `base` resolves, its extent equals the aperture exactly (the
-    whole-device alias) and `classify_region` calls it `"flash"` outright
-    -- the hazard is closed on BOTH sides of that resolution.
+    -- back when its `base` stayed `"TBD"` -- was the only thing
+    standing between an `ipc:` entry and a carve-out inside the live
+    ATOC band (0x80578000..0x80580000; bench-observed intact ATOC magic
+    `ckBS` under a live app write at 0x80560000, 2026-08-08). #2053
+    resolved `base` to `0x80000000` on every AEN preset, so its extent
+    now equals the aperture exactly (the whole-device alias) and
+    `classify_region` calls it `"flash"` outright, which disqualifies it
+    unconditionally a few lines below (independent of `write_authority`
+    entirely) -- the hazard is closed on both sides of that resolution:
+    before #2053 its class was `"unresolved"` and its authored
+    `write_authority: composite` (never `customer_runtime`) already
+    disqualified it via the `cls == "unresolved"` tail further down
+    (still reachable for any future preset that authors an unresolved
+    `base`; pinned directly by
+    `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
+    `TestUnresolvedLegOrdering` now that no shipped preset reaches it
+    end-to-end).
 
     AGREE contract (#1365 split B review, BLOCKER): `carveout:` is a
     LEGACY OVERRIDE that must AGREE with a resolvable derived class

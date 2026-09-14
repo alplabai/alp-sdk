@@ -73,6 +73,10 @@ METADATA_ROOT = REPO / "metadata"
 PARITY_COVERED: dict[str, tuple[str, str]] = {
     "e1m_aen801_m55_hp": ("E1M-AEN801", "m55_hp"),
     "e1m_aen801_m55_he": ("E1M-AEN801", "m55_he"),
+    # E1M-AEN803 (#2084): same E8 silicon/variant as AEN801, dual-external-
+    # memory BOM (both OSPI0 memories fitted); generated the same way.
+    "e1m_aen803_m55_hp": ("E1M-AEN803", "m55_hp"),
+    "e1m_aen803_m55_he": ("E1M-AEN803", "m55_he"),
     # V2N/V2M: `emit_zephyr_board()` now also claims the pinctrl.dtsi,
     # _defconfig (#655 slice 1) and the board `.dts` (#655 slice 2), all
     # sourced from metadata/e1m_modules/v2n/supervisor-links.yaml plus the
@@ -119,8 +123,10 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
         files = emit_zephyr_board(sku, core_id, METADATA_ROOT)
         self.assertTrue(files, f"generator produced no files for {sku}/{core_id}")
         committed_dir = BOARDS_ROOT / board_dir
+        claimed_names: set[str] = set()
         for relpath, content in files.items():
             _, fname = relpath.split("/", 1)
+            claimed_names.add(fname)
             committed_path = committed_dir / fname
             self.assertTrue(
                 committed_path.is_file(),
@@ -131,6 +137,22 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
                 committed, content,
                 f"generated {fname} for {sku}/{core_id} drifted from the "
                 f"committed {committed_path} -- regenerate or fix the source")
+        # Reverse direction: every committed file NOT in HAND_MAINTAINED must
+        # be something the generator actually claims. Only forward-checking
+        # (generated -> committed, above) would miss a hand-added file
+        # quietly sitting in a generated board directory -- exactly the kind
+        # of drift this byte-equivalence gate exists to catch. Runs for
+        # every PARITY_COVERED board (AEN801, AEN803, V2N101, V2M101 today),
+        # not just one hardcoded directory.
+        for committed_path in committed_dir.iterdir():
+            if not committed_path.is_file() or committed_path.name in HAND_MAINTAINED:
+                continue
+            self.assertIn(
+                committed_path.name, claimed_names,
+                f"{committed_path} is committed under {board_dir} but the "
+                f"generator for {sku}/{core_id} never claims it, and it is "
+                f"not in HAND_MAINTAINED -- either the generator is missing "
+                f"this file or it is a stray hand-added file")
 
     def _parity(self, board_dir: str) -> None:
         sku, core_id = PARITY_COVERED[board_dir]
@@ -141,6 +163,12 @@ class TestGenZephyrBoardByteEquivalence(unittest.TestCase):
 
     def test_aen801_m55_he_full_tree(self) -> None:
         self._parity("e1m_aen801_m55_he")
+
+    def test_aen803_m55_hp_full_tree(self) -> None:
+        self._parity("e1m_aen803_m55_hp")
+
+    def test_aen803_m55_he_full_tree(self) -> None:
+        self._parity("e1m_aen803_m55_he")
 
     def test_v2n101_m33_sm_family_agnostic_files(self) -> None:
         self._parity("e1m_v2n101_m33_sm")
@@ -1043,28 +1071,22 @@ class TestAenMemoryMapValidation(unittest.TestCase):
     def test_whole_device_alias_does_not_overlap_its_own_partitions(self) -> None:
         """`mram_main` deliberately spans the same 5632 KiB window that
         `mcuboot`/`he_slot0`/`hp_slot0`/`reserved`/`storage`/`atoc`
-        subdivide (#2073) -- once its `base` resolves to a real address
-        it must NOT be reported as overlapping every region inside it.
-        `alp_orchestrate.aperture.classify_region()` already carries this
-        exact "extent == aperture exactly" exception; this pins that
-        `_aen_check_map_overlaps()` now agrees with it instead of
+        subdivide (#2073) -- its `base` resolves to a real address
+        (#2053) and must NOT be reported as overlapping every region
+        inside it. `alp_orchestrate.aperture.classify_region()` already
+        carries this exact "extent == aperture exactly" exception; this
+        pins that `_aen_check_map_overlaps()` agrees with it instead of
         refusing the very shape the SoM presets declare on purpose."""
         with _MutatedMetadata() as mm:
-            mm.sub(AEN801_PRESET,
-                   'name: mram_main, base: "TBD",      size_kib: 5632',
-                   "name: mram_main, base: 0x80000000, size_kib: 5632")
             files = emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
         self.assertIn("alp_e1m_aen801_m55_hp/board.yml", files)
 
     def test_whole_device_alias_exception_does_not_swallow_a_real_overlap(self) -> None:
         """The whole-device-alias exception must be narrow: a genuine
         overlap between two ordinary partitions is still refused even
-        while `mram_main` (also spanning the whole window) sits in the
-        same `memory_map:`."""
+        while `mram_main` (also spanning the whole window, resolved
+        since #2053) sits in the same `memory_map:`."""
         with _MutatedMetadata() as mm:
-            mm.sub(AEN801_PRESET,
-                   'name: mram_main, base: "TBD",      size_kib: 5632',
-                   "name: mram_main, base: 0x80000000, size_kib: 5632")
             mm.sub(AEN801_PRESET,
                    "name: hp_slot0,  base: 0x802b0000",
                    "name: hp_slot0,  base: 0x802a0000")
@@ -1082,9 +1104,6 @@ class TestAenMemoryMapValidation(unittest.TestCase):
         alias is still a bad input and must be refused, not passed
         through quietly (review of #2073)."""
         with _MutatedMetadata() as mm:
-            mm.sub(AEN801_PRESET,
-                   'name: mram_main, base: "TBD",      size_kib: 5632',
-                   "name: mram_main, base: 0x80000000, size_kib: 5632")
             mm.sub(
                 AEN801_PRESET,
                 "- { name: mram_main, base: 0x80000000, size_kib: 5632, "
@@ -1117,7 +1136,7 @@ class TestAenMemoryMapValidation(unittest.TestCase):
         (review of #2073)."""
         with _MutatedMetadata() as mm:
             mm.sub(AEN801_PRESET,
-                   'name: mram_main, base: "TBD",      size_kib: 5632',
+                   "name: mram_main, base: 0x80000000, size_kib: 5632",
                    "name: mram_main, base: 0x80000000, size_kib: 5631")
             with self.assertRaises(ZephyrBoardEmitError) as ctx:
                 emit_zephyr_board("E1M-AEN801", "m55_hp", mm.root)
