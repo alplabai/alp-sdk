@@ -80,15 +80,12 @@
 
 /* Handshake budgets.
  *
- * WIFI_CONNECT_TIMEOUT_MS: this board.yaml pins E1M-AEN801, so
+ * WIFI_CONNECT_TIMEOUT_MS: on E1M-AEN801 with the CC3501E bridge attached,
  * alp_wifi_connect() routes to the CC3501E backend
- * (src/backends/wifi/cc3501e.c), which passes this value straight through
- * to cc3501e_wifi_connect(). Same derivation as
- * aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS: the firmware's
- * own worst case is a 10s Wlan_RoleUp + 30s L2 association + a 30s
- * DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware
- * documents 75000ms as the caller budget that clears it (alp-sdk#2079).
- * 10000u never cleared that bound. */
+ * (src/backends/wifi/cc3501e.c), and the bridge's own worst case for one STA
+ * connect is 10s Wlan_RoleUp + 30s L2 association + a 30s DHCP-lease poll
+ * (hal/ti/cc3501e_hw_ti_wifi.c) = 70s. On other Wi-Fi backends this value is
+ * only an upper bound, not a derived worst case. */
 #define WIFI_CONNECT_TIMEOUT_MS 75000u
 #define MQTT_CONNECT_TIMEOUT_MS 10000u
 

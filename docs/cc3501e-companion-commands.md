@@ -73,14 +73,12 @@ commands report the bridge is not ready. See
 | `wifi ap-stop` | Stop the soft-AP. |
 | `wifi status` | Show connection state + RSSI + IP. RSSI is a live radio read when connected -- can take ~10s (~20s if the link is wedged). |
 
-`wifi ap` cannot report a confirmed "up" against CC3501E firmware protocol
-v4: `cc3501e_wifi_ap_start()` submits the request once and returns
-immediately, with no independent AP-status channel to confirm against
-(issue #1385). A call that reaches the firmware still prints an error line —
-`ap start "<ssid>" unconfirmed (-4) -- firmware v4 has no AP status latch
-(#1385); check for the SSID out of band` — rather than `ap "<ssid>" up
-(...)`, even for an AP that came up correctly. Confirm the AP out of band
-(e.g. scan for its SSID from a peer).
+`wifi ap` submits `WIFI_AP_START` once, then confirms the outcome against an
+independent channel: it polls `GET_DIAG_INFO`'s role field until the role
+reports `WIFI_AP` (prints `ap "<ssid>" up (...)`) or the connect budget
+elapses (prints `ap start "<ssid>" failed (-4) (not confirmed within the
+budget)`). The submit itself is never retried — see `cc3501e_wifi_ap_start()`
+for why a retry loop around this opcode is provably unwinnable.
 
 ## `alp companion ble`
 

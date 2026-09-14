@@ -77,12 +77,11 @@
  * tour rather than a connection test, and a tour that parks for a minute on one
  * step is not a tour.
  *
- * That worst case is now 70 s, not the 60 s an earlier version of this comment
- * gave: up to 10 s of Wlan_RoleUp (a connect issued as the first radio op of a
- * boot carries the role-up inside the connect body), up to 30 s of
- * association, and a 30 s DHCP-lease poll -- CC3501E_STA_DHCP_TRIES went from
- * 100 to 150 so the poll covers a lease still arriving after the fourth
- * DISCOVER instead of stopping short of it.
+ * That worst case is 70 s: up to 10 s of Wlan_RoleUp (a connect issued as the
+ * first radio op of a boot carries the role-up inside the connect body), up
+ * to 30 s of association, and a 30 s DHCP-lease poll
+ * (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US = 150 x 200 ms,
+ * hal/ti/cc3501e_hw_ti_wifi.c).
  *
  * WHY THAT NUMBER MATTERS RATHER THAN BEING TRIVIA: a run budgeted below the
  * firmware's bound reports failures the radio never suffered, and it does not

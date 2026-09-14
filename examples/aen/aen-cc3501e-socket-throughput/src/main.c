@@ -190,35 +190,30 @@
  * number: the L2 association wait is `osi_SyncObjWait(&wifi_event_sync,
  * 30u * OSI_WAIT_FOR_SECOND)` (30 s -- that comment records WPA2 associating
  * ~15 s in and WPA3-SAE, with its extra SAE commit/confirm exchange + PMF,
- * running slower still, which is why the wait was widened from 15 s to 30 s
- * after a bench-seen WPA3 timeout), and DHCP afterward is bounded by
- * `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 150 * 200 ms = 30 s
- * (widened from 100 tries / 20 s on measurement -- see that constant's own
- * comment in hal/ti/cc3501e_hw_ti_wifi.c).
+ * running slower still, which is why the wait covers up to 30 s), and DHCP
+ * afterward is bounded by `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US`
+ * = 150 * 200 ms = 30 s.
  *
- * There is a THIRD term the original derivation missed: this image does not
- * call cc3501e_hw_wifi_boot_start(), so a connect issued as the first radio op
- * of a boot carries Wlan_Start, a Wlan_Set and a 10 s Wlan_RoleUp INSIDE the
+ * There is a THIRD term a naive derivation misses: this image does not call
+ * cc3501e_hw_wifi_boot_start(), so a connect issued as the first radio op of
+ * a boot carries Wlan_Start, a Wlan_Set and a 10 s Wlan_RoleUp INSIDE the
  * connect body, before the association wait even begins.
  *
  * 10 s + 30 s + 30 s = 70 s is the firmware's own worst case for one connect,
  * and the firmware documents 75000 ms as the caller budget that clears it
  * (alp-sdk#2079); a caller budget below that races a healthy association even
- * with perfectly accurate host-side accounting.  55000u -- this file's
- * previous value, derived when DHCP was 10 s and the role-up term was missed
- * -- no longer clears it, so by this app's own rule it was buying failures the
- * radio never suffered. */
+ * with perfectly accurate host-side accounting. */
 #define SOCKTP_CONNECT_TIMEOUT_MS 75000u
 #define SOCKTP_SOCK_TIMEOUT_MS    5000u
 #define SOCKTP_RECV_TIMEOUT_MS    3000u
 
 /* How long to wait, after cc3501e_wifi_connect() itself reports a non-OK
  * status, before reading the independent WIFI_STATUS latch for the real
- * radio verdict -- see the call site below. Long enough to cover the
- * firmware's own worst-case connect budgets (30 s L2 association + 10 s
- * DHCP, see SOCKTP_CONNECT_TIMEOUT_MS's derivation above) even when the
- * failure came from the HOST giving up early, not the radio. */
-#define SOCKTP_VERDICT_WAIT_MS 45000u
+ * radio verdict -- see the call site below. Matches SOCKTP_CONNECT_TIMEOUT_MS
+ * (the bridge firmware's own worst-case connect budget above, 70 s) so a
+ * HOST-side accounting timeout gets the same window a real radio failure
+ * would need to resolve. */
+#define SOCKTP_VERDICT_WAIT_MS SOCKTP_CONNECT_TIMEOUT_MS
 
 /*
  * Wi-Fi STA credentials for the CONNECT step. DELIBERATELY EMPTY by

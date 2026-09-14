@@ -64,8 +64,9 @@ loop re-framing the link while the firmware works, not to observe the link
 early.
 
 A short connect budget alone is not enough, though: the firmware's own
-connect body keeps holding the host off for up to 30 s of association plus
-30 s of DHCP regardless of what this app's own timeout returns. So once
+connect body keeps holding the host off for up to 10 s of role-up plus 30 s
+of association plus 30 s of DHCP regardless of what this app's own timeout
+returns. So once
 the connect call returns, PHASE B goes **silent** — no requests issued at
 all — for `WEDGEPM_QUIET_WAIT_MS` (75 s, derived exactly like the sibling
 apps' own 75 s connect budget: the firmware's documented 70 s worst case
