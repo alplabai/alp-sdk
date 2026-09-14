@@ -293,7 +293,7 @@ struct cc3501e {
 	 * allocation (proto v8) instead. Pre-incremented, so a fresh ctx's
 	 * first successful recv commits seq 1.
 	 *
-	 * Older firmware without the pending replay logic simply ignores the
+	 * Firmware without the replay logic (before cc3501e-bridge-firmware#138) ignores the
 	 * seq bits for SOCK_RECV, exactly as it already does for every opcode
 	 * that never checks them -- this counter is harmless against it. */
 	uint8_t sock_recv_seq;

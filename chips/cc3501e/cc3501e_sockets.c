@@ -160,7 +160,7 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  * reject) and, thanks to #107's now-non-blocking send, would resolve it
  * almost immediately -- but this function's OWN per-iteration deadline gives
  * up first. A bridge with cc3501e-bridge-firmware#107 (PR #134,
- * fix/107-bound-sock-send-seqguard -- not yet merged/released) bounds, but
+ * merged, not yet in a released blob) bounds, but
  * does not close, what
  * abandoning that frame here would risk: it discards a finished-but-
  * uncollected job outright once a request with a DIFFERENT seq arrives, so a
@@ -299,8 +299,8 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		 * (Firmware without #107 at all has no seq-vs-cache check either, so
 		 * it can answer a brand-new send with a previous send's cached
 		 * count on far less than a full wrap.) A bridge with
-		 * cc3501e-bridge-firmware#107 (PR #134, fix/107-bound-sock-send-
-		 * seqguard -- not yet merged/released) invalidates its reply cache
+		 * cc3501e-bridge-firmware#107 (PR #134, merged, not yet in a
+		 * released blob) invalidates its reply cache
 		 * the instant a DIFFERENT seq is DISPATCHED, which narrows the
 		 * window to 255 consecutive frames whose seq increments but which
 		 * never reach that dispatch at all -- e.g. this driver reporting
@@ -498,12 +498,13 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	 * ctx->sock_recv_seq counter, NOT the shared ctx->req_seq every other
 	 * worker-routed opcode draws from via plain poll_by_repeat() -- see
 	 * ctx->sock_recv_seq's comment in <alp/chips/cc3501e/core.h> for the full
-	 * story (a pending firmware change, cc3501e-bridge-firmware
-	 * fix/sock-recv-retry-safe, will key its receive-ring replay cache on
+	 * story (cc3501e-bridge-firmware#138 keys its receive replay caches on
 	 * this seq + the socket handle; this counter is the groundwork that
-	 * keeps that key unambiguous). ONE counter for the whole ctx, shared
-	 * across every handle, is enough -- see that same comment for why a
-	 * per-handle counter is not needed.
+	 * keeps that key unambiguous). ONE counter for the whole ctx is shared
+	 * across every handle, so recovery is guaranteed only for an immediate
+	 * retry on the SAME handle: a failed recv on one handle followed by a recv
+	 * on another before the retry can still lose the first handle's bytes
+	 * (cc3501e-bridge-firmware#136 tracks per-handle state).
 	 *
 	 * CANDIDATE, not yet committed: this is the value THIS call will use on
 	 * the wire, but ctx->sock_recv_seq itself is only updated to it once
