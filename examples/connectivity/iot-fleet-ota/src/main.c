@@ -123,6 +123,15 @@
  * string) -- 1 KiB is generous. */
 #define MANIFEST_MAX_BYTES 1024u
 
+/* This board.yaml pins E1M-AEN801, so alp_wifi_connect() routes to the
+ * CC3501E backend (src/backends/wifi/cc3501e.c), which passes this value
+ * straight through to cc3501e_wifi_connect(). Same derivation as
+ * aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS: the firmware's
+ * own worst case is a 10s Wlan_RoleUp + 30s L2 association + a 30s
+ * DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware
+ * documents 75000ms as the caller budget that clears it (alp-sdk#2079). */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
+
 /* ----------------------------------------------------------------- */
 /* Stage 1: connect to the Mender server                              */
 /* ----------------------------------------------------------------- */
@@ -151,7 +160,7 @@ static bool fleet_wifi_up(void)
 		.ssid = "fleet-ssid",
 		.psk  = "fleet-psk",
 	};
-	const alp_status_t rc = alp_wifi_connect(w, &creds, 10000u);
+	const alp_status_t rc = alp_wifi_connect(w, &creds, WIFI_CONNECT_TIMEOUT_MS);
 	if (rc != ALP_OK) {
 		printf("[ota]   alp_wifi_connect -> %d\n", (int)rc);
 		alp_wifi_close(w);

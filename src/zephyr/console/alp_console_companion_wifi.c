@@ -26,9 +26,13 @@
 /* ---- CC3501E Wi-Fi (Alif companion) ------------------------------------- */
 #define ALP_COMPANION_WIFI_SCAN_MAX 16u
 #define ALP_COMPANION_WIFI_SCAN_MS  30000u
-/* Cover the CC3501E connect budget: L2 assoc up to 30s (WPA3-SAE is slower than
- * WPA2 -- see cc3501e_hw_ti.c) + the STA DHCP poll (~10s) = ~40s, plus margin. */
-#define ALP_COMPANION_WIFI_CONN_MS 50000u
+/* Same derivation as aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS:
+ * the firmware's own worst case is a 10s Wlan_RoleUp + 30s L2 association +
+ * a 30s DHCP-lease poll (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US,
+ * hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware documents 75000ms as
+ * the caller budget that clears it (alp-sdk#2079). 50000u never cleared that
+ * bound; it was a miss #2079's sweep didn't catch. */
+#define ALP_COMPANION_WIFI_CONN_MS 75000u
 
 /* ---- async Wi-Fi connect (the bridge can't block the shell) -------------- *
  * `wifi connect` SUBMITS the request (records SSID/sec/pass, sets conn_pending)

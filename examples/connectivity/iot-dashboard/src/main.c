@@ -59,6 +59,15 @@
 
 #include "dashboard_ui.h"
 
+/* This board.yaml pins E1M-AEN801, so alp_wifi_connect() routes to the
+ * CC3501E backend (src/backends/wifi/cc3501e.c), which passes this value
+ * straight through to cc3501e_wifi_connect(). Same derivation as
+ * aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS: the firmware's
+ * own worst case is a 10s Wlan_RoleUp + 30s L2 association + a 30s
+ * DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware
+ * documents 75000ms as the caller budget that clears it (alp-sdk#2079). */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
+
 LOG_MODULE_REGISTER(iot_dashboard, LOG_LEVEL_INF);
 
 static bme280_t    s_env;
@@ -144,7 +153,7 @@ int main(void)
 		                           .ssid = "alp-demo-ssid",
 		                           .psk  = "demo-password",
 		                       },
-		                       /*timeout_ms=*/5000);
+		                       /*timeout_ms=*/WIFI_CONNECT_TIMEOUT_MS);
 	}
 	static const alp_mqtt_tls_config_t s_tls = { 0 }; /* defaults: OS CA, verify peer. */
 	s_mqtt                                   = alp_mqtt_open(&(alp_mqtt_config_t){

@@ -147,8 +147,9 @@
  * derivation as aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS:
  * the firmware's own worst case is a 10 s Wlan_RoleUp inside the connect body
  * (this image never calls cc3501e_hw_wifi_boot_start, so the first radio op of
- * a boot carries it) + 30 s L2 association + a 20 s DHCP-lease poll
- * (hal/ti/cc3501e_hw_ti_wifi.c) = 60 s, plus a 15 s reinitialisation margin.
+ * a boot carries it) + 30 s L2 association + a 30 s DHCP-lease poll
+ * (hal/ti/cc3501e_hw_ti_wifi.c) = 70 s, and the firmware documents 75000 ms
+ * as the caller budget that clears it (alp-sdk#2079).
  *
  * An earlier version of this comment said 40 s, from before the DHCP poll was
  * widened to cover lwIP's fourth DISCOVER and from before anyone counted the
