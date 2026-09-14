@@ -1,9 +1,10 @@
 <!-- cross-platform-lint:ignore -->
-# AEN801 (Alif Ensemble E8) bench flash + RAM-run helpers
+# AEN80x (Alif Ensemble E8) bench flash + RAM-run helpers
 
 Runnable companions to [`docs/aen-bench-bringup.md`](../../../docs/aen-bench-bringup.md).
 These wrap the J-Link CommanderScript and Alif SETOOLS flows used to flash,
-RAM-run, and read back AEN801 (E8, M55-HE) bench apps over SWD. They are
+RAM-run, and read back AEN80x (E8, M55-HE) bench apps over SWD — the bench's
+own default target is AEN803 (alp-sdk#2094). They are
 **Linux-side bench tooling**: J-Link Commander (`JLinkExe`) plus the Alif
 Security Toolkit (`app-gen-toc` / `app-write-mram`), both Linux binaries on
 this bench. Run them under WSL2 on Windows; macOS has J-Link but not the
@@ -38,8 +39,12 @@ export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE 
                                                      # resolves SE_UART, the console, and (alp-sdk#2064) which
                                                      # J-Link probe every helper below is allowed to open
 
-# 2. Build an app for the AEN801 M55-HE target.
-scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
+# 2. Build an app for the M55-HE target. AEN_BOARD defaults to AEN803
+#    (alp-sdk#2094); aen-gpio-bench has not yet grown an AEN803-qualified
+#    overlay (alp-sdk#2101), so override AEN_BOARD back to AEN801 for it --
+#    build.sh REFUSES rather than silently building it AEN803-shaped.
+AEN_BOARD=alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+	scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
 
 # 3. Flash + boot + read back the RAM console (pick a flow).
 scripts/bench/aen/flash-jlink.sh "$BENCH_ROOT/build/aen-gpio-bench"   # Flow D

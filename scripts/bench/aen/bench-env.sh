@@ -8,8 +8,9 @@
 # SETOOLS are Linux-only. There is no native PowerShell equivalent —
 # the bench is physically Linux-attached. See docs/aen-bench-bringup.md.
 #
-# SHARED, SANITIZED env for the AEN801 (Alif Ensemble E8, M55-HE) bench
-# flash/RAM-run helpers. SOURCE this (don't execute it):
+# SHARED, SANITIZED env for the AEN80x (Alif Ensemble E8, M55-HE) bench
+# flash/RAM-run helpers -- the bench's own default target is AEN803
+# (alp-sdk#2094). SOURCE this (don't execute it):
 #
 #     source "$(dirname "$0")/bench-env.sh"
 #
@@ -104,18 +105,26 @@ export HAL_ALIF_DIR
 # preserved below).
 #
 # HAZARD: build.sh uses this default unconditionally. An app whose boards/
-# ships a qualified overlay for a DIFFERENT board target than $AEN_BOARD
-# resolves to would silently build with NO overlay applied -- Zephyr auto-
-# applies an overlay only on an exact board-name match, and build.sh never
-# forces EXTRA_DTC_OVERLAY_FILE. Most AEN examples ship only an AEN801-
-# qualified overlay (alp-sdk#2101), so this repoint alone would trade one
-# wrong default for a silent mis-build across nearly all of them.
+# ships a qualified overlay/conf for a DIFFERENT board target than
+# $AEN_BOARD resolves to would silently build with it NOT applied -- Zephyr
+# auto-applies a boards/ overlay or conf fragment only on an exact match of
+# the FULL qualified stem (board + every qualifier segment) OR the SHORT
+# stem (board + every qualifier segment except the first, the SoC id --
+# zephyr_file(CONF_FILES ...) tries both), and build.sh never forces
+# EXTRA_DTC_OVERLAY_FILE/EXTRA_CONF_FILE. .overlay and .conf are matched
+# independently -- a match on one kind does not excuse a mismatch on the
+# other. Most AEN examples ship only an AEN801-qualified overlay
+# (alp-sdk#2101), so this repoint alone would trade one wrong default for a
+# silent mis-build across nearly all of them.
 #
 # build.sh therefore REFUSES (does not build) whenever the app it was handed
-# ships >=1 alp_e1m_*-qualified boards/ file but none matches this resolved
-# $AEN_BOARD's stem -- a loud, named failure instead of a silent AEN801-
-# shaped image. Override AEN_BOARD per invocation for an app that has not
-# yet grown its AEN803 overlay.
+# ships >=1 alp_e1m_*-qualified boards/*.overlay or boards/*.conf file but
+# none of that kind matches this resolved $AEN_BOARD's full or short stem --
+# a loud, named failure instead of a silent AEN801-shaped image. Override
+# AEN_BOARD per invocation for an app that has not yet grown its AEN803
+# overlay. Skipped when the caller's own extra args already force the
+# overlay/conf selection explicitly (-DDTC_OVERLAY_FILE=... or
+# -DAPPLICATION_CONFIG_DIR=...) -- nothing can be silently dropped then.
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------

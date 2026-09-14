@@ -9,14 +9,17 @@
 # Pristine-build an AEN bench app for the E8 M55-HE target.
 # Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
 # (default alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he, alp-sdk#2094), so
-# Zephyr picks up boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
-# and app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
-# force needed (the examples ship fully-qualified overlay names, not the
-# bare board name that would silently drop). Most AEN examples have not yet
-# grown an AEN803-qualified overlay (alp-sdk#2101); this script REFUSES to
-# build an app whose boards/ ships a qualified overlay for a different board
-# than $AEN_BOARD resolves to, rather than silently dropping it (alp-sdk#2094)
-# -- override AEN_BOARD for such an app, e.g.:
+# Zephyr picks up a boards/ overlay/conf qualified by either the FULL stem
+# (alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he) or the SHORT stem
+# (alp_e1m_aen803_m55_he_rtss_he, dropping the SoC id) and app.overlay by
+# name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE force needed
+# (the examples ship qualified names, not the bare board name that would
+# silently drop). Most AEN examples have not yet grown an AEN803-qualified
+# overlay/conf (alp-sdk#2101); this script REFUSES to build an app whose
+# boards/ ships a qualified .overlay or .conf for a different board than
+# $AEN_BOARD resolves to (checked independently per kind), rather than
+# silently dropping it (alp-sdk#2094) -- override AEN_BOARD for such an
+# app, e.g.:
 #   AEN_BOARD=alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he ./build.sh <app>
 # For a Flow C RAM-run, pass the bench-only ITCM retarget explicitly -- it is
 # NOT one of the auto-applied overlays above (it lives outside the app, on
@@ -55,41 +58,88 @@ else
 	APP_DIR="$ALP_SDK_DIR/$APP"
 fi
 
-# Refuse rather than silently drop an overlay (alp-sdk#2094). Zephyr
-# auto-applies a boards/ overlay/conf only on an EXACT match of the
-# fully-qualified board name (qualifier path with every "/" -> "_"); if
-# $APP_DIR ships >=1 alp_e1m_*-qualified boards/ file at all but NONE of
-# them is stem-equal to $BOARD's stem, building it anyway would produce a
-# silently wrong (e.g. AEN801-shaped) image on the target the operator
-# actually asked for -- the exact #2101 hazard AEN_BOARD's default repoint
-# to AEN803 (#2094) introduced across every example that has not yet grown
-# an AEN803 overlay.
-board_stem="$(printf '%s' "$BOARD" | tr '/' '_')"
-if [ -d "$APP_DIR/boards" ]; then
-	qualified_found=""
-	matched=""
-	for f in "$APP_DIR"/boards/alp_e1m_*; do
-		[ -f "$f" ] || continue
-		qualified_found=1
-		stem="$(basename "$f")"
-		stem="${stem%.*}"
-		if [ "$stem" = "$board_stem" ]; then
-			matched=1
-			break
+# Refuse rather than silently drop an overlay/conf fragment (alp-sdk#2094
+# review). Zephyr's zephyr_file(CONF_FILES ...) (extensions.cmake) accepts
+# EITHER the FULL qualified stem (board + every qualifier segment) OR the
+# SHORT stem (board + every qualifier segment except the FIRST -- the SoC
+# id); requiring only the full stem would false-refuse a real, Zephyr-valid
+# short-form overlay like alp_e1m_aen803_m55_he_rtss_he.overlay. This
+# mirrors scripts/check_example_board_overlay_parity.py's
+# _qualified_target_to_stems() (dev, #2120) rather than reimplementing it
+# ad hoc. .overlay and .conf are matched as INDEPENDENT pools -- Zephyr
+# auto-applies each kind separately, so a matching .overlay does not excuse
+# a mismatched qualified .conf (or vice versa); only *.overlay/*.conf are
+# considered qualified (an unrelated alp_e1m_*-prefixed file, e.g. a
+# firmware-update-log *_log_mram.dtsi, is never auto-applied and must not
+# trigger a refusal).
+#
+# Skipped outright when the caller's own extra args already force the
+# overlay/conf selection explicitly (-DDTC_OVERLAY_FILE=... or
+# -DAPPLICATION_CONFIG_DIR=...) -- configuration_files.cmake skips the
+# boards/ auto-apply entirely in that case, so nothing can be silently
+# dropped and refusing would only block a deliberate override.
+skip_preflight=""
+for _a in "$@"; do
+	case "$_a" in
+	-DDTC_OVERLAY_FILE=* | -DAPPLICATION_CONFIG_DIR=*)
+		skip_preflight=1
+		;;
+	esac
+done
+
+if [ -z "$skip_preflight" ] && [ -d "$APP_DIR/boards" ]; then
+	# Split $BOARD's qualifier path ("board/qual0/qual1/...") into the FULL
+	# stem (every segment) and the SHORT stem (board + every qualifier
+	# except qual0, the SoC id) -- bash 3.2 has no readarray/mapfile, so
+	# IFS-split via `read -a` into an indexed array instead.
+	IFS='/' read -r -a board_parts <<<"$BOARD"
+	n_parts=${#board_parts[@]}
+	board_full_stem="${board_parts[0]}"
+	i=1
+	while [ "$i" -lt "$n_parts" ]; do
+		board_full_stem="${board_full_stem}_${board_parts[$i]}"
+		i=$((i + 1))
+	done
+	board_short_stem="${board_parts[0]}"
+	i=2
+	while [ "$i" -lt "$n_parts" ]; do
+		board_short_stem="${board_short_stem}_${board_parts[$i]}"
+		i=$((i + 1))
+	done
+
+	mismatch_report=""
+	for ext in overlay conf; do
+		qualified_found=""
+		found_files=""
+		matched=""
+		for f in "$APP_DIR"/boards/alp_e1m_*."$ext"; do
+			[ -f "$f" ] || continue
+			qualified_found=1
+			found_files="$found_files $(basename "$f")"
+			file_stem="$(basename "$f")"
+			file_stem="${file_stem%.*}"
+			if [ "$file_stem" = "$board_full_stem" ] || [ "$file_stem" = "$board_short_stem" ]; then
+				matched=1
+			fi
+		done
+		if [ -n "$qualified_found" ] && [ -z "$matched" ]; then
+			mismatch_report="${mismatch_report}
+       .$ext:$found_files"
 		fi
 	done
-	if [ -n "$qualified_found" ] && [ -z "$matched" ]; then
-		echo "build: REFUSING -- $NAME ships a qualified boards/ overlay for a DIFFERENT" >&2
-		echo "       board than AEN_BOARD=$BOARD resolves to (stem: $board_stem)." >&2
-		echo "       $APP_DIR/boards/ contains:" >&2
-		for f in "$APP_DIR"/boards/alp_e1m_*; do
-			[ -f "$f" ] && echo "         $(basename "$f")" >&2
-		done
-		echo "       Zephyr auto-applies an overlay ONLY on an exact board-name match, and" >&2
-		echo "       this build.sh never forces EXTRA_DTC_OVERLAY_FILE -- building anyway" >&2
-		echo "       would silently drop the overlay (alp-sdk#2094/#2101 class)." >&2
-		echo "       Either override AEN_BOARD to the target this app actually ships an" >&2
-		echo "       overlay for, or add boards/${board_stem}.overlay to this app." >&2
+
+	if [ -n "$mismatch_report" ]; then
+		echo "build: REFUSING -- $NAME ships qualified boards/ file(s) for a DIFFERENT" >&2
+		echo "       board than AEN_BOARD=$BOARD resolves to" >&2
+		echo "       (full stem: $board_full_stem, short stem: $board_short_stem)." >&2
+		echo "       Mismatched kind(s), found file(s):$mismatch_report" >&2
+		echo "       Zephyr auto-applies a boards/ overlay or conf fragment ONLY on an" >&2
+		echo "       exact full- or short-stem match, and this build.sh never forces" >&2
+		echo "       EXTRA_DTC_OVERLAY_FILE/EXTRA_CONF_FILE for them -- building anyway" >&2
+		echo "       would silently drop the mismatched kind (alp-sdk#2094/#2101 class)." >&2
+		echo "       Either override AEN_BOARD to the target this app actually ships for," >&2
+		echo "       or add boards/${board_full_stem}.<ext> (or the short-stem form" >&2
+		echo "       boards/${board_short_stem}.<ext>) to this app." >&2
 		exit 3
 	fi
 fi
