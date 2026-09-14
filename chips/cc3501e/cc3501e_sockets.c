@@ -160,7 +160,7 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
  * reject) and, thanks to #107's now-non-blocking send, would resolve it
  * almost immediately -- but this function's OWN per-iteration deadline gives
  * up first. A bridge with cc3501e-bridge-firmware#107 (PR #134,
- * fix/107-bound-sock-send-seqguard -- not yet merged/released) bounds, but
+ * merged, not yet in a released blob) bounds, but
  * does not close, what
  * abandoning that frame here would risk: it discards a finished-but-
  * uncollected job outright once a request with a DIFFERENT seq arrives, so a
@@ -299,8 +299,8 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 		 * (Firmware without #107 at all has no seq-vs-cache check either, so
 		 * it can answer a brand-new send with a previous send's cached
 		 * count on far less than a full wrap.) A bridge with
-		 * cc3501e-bridge-firmware#107 (PR #134, fix/107-bound-sock-send-
-		 * seqguard -- not yet merged/released) invalidates its reply cache
+		 * cc3501e-bridge-firmware#107 (PR #134, merged, not yet in a
+		 * released blob) invalidates its reply cache
 		 * the instant a DIFFERENT seq is DISPATCHED, which narrows the
 		 * window to 255 consecutive frames whose seq increments but which
 		 * never reach that dispatch at all -- e.g. this driver reporting
@@ -492,17 +492,56 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	/* Per-context scratch, NOT a 4 KB stack frame -- see the note in
 	 * cc3501e_sock_send() above and cc3501e_t's sock_buf comment. */
 	if (ctx->sock_busy) return ALP_ERR_BUSY;
-	ctx->sock_busy     = true;
+	ctx->sock_busy = true;
+
+	/* alp-sdk#2108: SOCK_RECV allocates its retry seq from its OWN
+	 * ctx->sock_recv_seq counter, NOT the shared ctx->req_seq every other
+	 * worker-routed opcode draws from via plain poll_by_repeat() -- see
+	 * ctx->sock_recv_seq's comment in <alp/chips/cc3501e/core.h> for the full
+	 * story (cc3501e-bridge-firmware#138 keys its receive replay caches on
+	 * this seq + the socket handle; this counter is the groundwork that
+	 * keeps that key unambiguous). ONE counter for the whole ctx is shared
+	 * across every handle, so recovery is guaranteed only for an immediate
+	 * retry on the SAME handle: a failed recv on one handle followed by a recv
+	 * on another before the retry can still lose the first handle's bytes
+	 * (cc3501e-bridge-firmware#136 tracks per-handle state).
+	 *
+	 * CANDIDATE, not yet committed: this is the value THIS call will use on
+	 * the wire, but ctx->sock_recv_seq itself is only updated to it once
+	 * this call reaches ALP_OK below with the reply actually decoded. A
+	 * caller whose call instead returns ALP_ERR_TIMEOUT / ALP_ERR_IO / a
+	 * short header (any early return past this point) leaves
+	 * ctx->sock_recv_seq untouched, so the NEXT cc3501e_sock_recv() call --
+	 * on ANY handle -- computes this SAME candidate again.
+	 *
+	 *   - Retried on the SAME handle next: the bridge (once
+	 *     fix/sock-recv-retry-safe ships) sees the identical (seq, handle)
+	 *     it already answered and replays that exact chunk instead of
+	 *     committing a new one -- recovering bytes a lost/corrupted reply
+	 *     would otherwise have dropped, with no grace loop needed here.
+	 *   - A DIFFERENT handle is called first instead: that call also gets
+	 *     this same candidate value, but with its OWN handle, so the
+	 *     bridge's single-entry key does not match the failed call's entry
+	 *     either way -- it commits fresh, exactly as any new request should.
+	 *     Once THAT call succeeds and commits, the bridge's key has moved on
+	 *     to the different handle, so a LATER retry of the original handle
+	 *     gets a genuinely new seq and can no longer recover the original
+	 *     lost chunk -- recovery is guaranteed only for an IMMEDIATE retry
+	 *     of the same handle, not indefinitely. */
+	const uint8_t candidate_seq =
+	    (ctx->sock_recv_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->sock_recv_seq + 1u);
+
 	uint8_t     *reply = ctx->sock_buf;
 	size_t       got   = 0;
-	alp_status_t s     = poll_by_repeat(ctx,
-	                                    ALP_CC3501E_CMD_SOCK_RECV,
-	                                    p,
-	                                    sizeof(p),
-	                                    reply,
-	                                    sizeof(ctx->sock_buf),
-	                                    &got,
-	                                    timeout_ms);
+	alp_status_t s     = poll_by_repeat_seq(ctx,
+	                                        ALP_CC3501E_CMD_SOCK_RECV,
+	                                        p,
+	                                        sizeof(p),
+	                                        reply,
+	                                        sizeof(ctx->sock_buf),
+	                                        &got,
+	                                        timeout_ms,
+	                                        candidate_seq);
 	ctx->sock_busy     = false;
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_SOCK_RECV_RESP_HDR) return ALP_ERR_IO; /* short reply header */
@@ -516,6 +555,11 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	size_t copy = (data_len > cap) ? cap : data_len;
 	if (copy > 0u) memcpy(buf, &reply[CC3501E_SOCK_RECV_RESP_HDR], copy);
 	if (recv_len_out != NULL) *recv_len_out = copy;
+	/* Commit now, not before: everything above this line succeeded, so this
+	 * call's candidate is genuinely spent -- see the comment at its
+	 * computation above for why an early return past this point must NOT
+	 * reach here. */
+	ctx->sock_recv_seq = candidate_seq;
 	return ALP_OK;
 }
 
