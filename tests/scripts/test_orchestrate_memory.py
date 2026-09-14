@@ -22,8 +22,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _orchestrate_support import (              # noqa: E402
-    REPO,
     V2N_HAPPY,
+    _scratch_metadata_root,
+    _synthetic_aen_unresolved_base_root,
     _synthetic_nx9101_root,
     _write_board,
 )
@@ -211,6 +212,63 @@ def test_resolve_carve_outs_blocks_on_unmapped_base(
         "flash-class" in entry.reason)
 
 
+# ---------------------------------------------------------------------
+# Wiring coverage (#2096): `_region_ipc_eligibility()`'s `cls ==
+# "unresolved"` tail above is reached through the FULL pipeline
+# (load_board_yaml -> resolve_carve_outs), not a direct call into the
+# private helper. `mram_main.base` resolves to a real address on every
+# shipped AEN preset (#2053, #2102), so no shipped preset authors an
+# unresolved `memory_map:` base any more, and the tests that cover this
+# leg elsewhere in this file are direct calls into the private helper --
+# they keep the leg itself green but prove nothing about the routing
+# that gets a row into it. This synthetic AEN-shaped preset
+# (`_synthetic_aen_unresolved_base_root`) keeps that routing covered
+# instead. A future change that filtered unresolved rows out earlier --
+# say in `_candidate_regions()`, before `_region_ipc_eligibility()` is
+# ever called -- would leave the direct-call leg pins green while this
+# test alone catches the dead wiring.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_AEN_UNRESOLVED_BASE = """
+name: test-synthetic-aen-carveout
+som:
+  sku: E1M-AEN899
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+
+ipc:
+  - kind: rpmsg
+    endpoints: [m55_hp, m55_he]
+    carve_out_kb: 64
+    name: alp_test_rpmsg
+"""
+
+
+def test_resolve_carve_outs_routes_an_unresolved_base_through_the_full_pipeline(
+        tmp_path: Path) -> None:
+    import alp_orchestrate
+
+    meta = _synthetic_aen_unresolved_base_root(tmp_path)
+    path = _write_board(tmp_path, SYNTHETIC_AEN_UNRESOLVED_BASE)
+    project = alp_orchestrate.load_board_yaml(path, metadata_root=meta)
+    resolved = resolve_carve_outs(project)         # must not raise
+
+    assert len(resolved) == 1
+    entry = resolved[0]
+    assert entry.status == "blocked"
+    assert entry.reason is not None
+    assert "E1M-AEN899" in entry.reason
+    assert "ineligible for an IPC carve-out" in entry.reason
+    assert "mram_main" in entry.reason
+    assert "write_authority is 'composite'" in entry.reason
+
+
 def test_resolve_carve_outs_aen801_stays_blocked_after_1069_memory_map(
     tmp_path: Path,
 ) -> None:
@@ -278,26 +336,8 @@ def test_resolve_carve_outs_blocks_on_no_reserved_channel(
     """
     import alp_orchestrate
 
-    # Compose the synthetic SoM preset on a scratch metadata root.
-    meta = tmp_path / "metadata"
-    e1m = meta / "e1m_modules"
-    socs = meta / "socs" / "renesas" / "rzv2n"
-    schemas = meta / "schemas"
-    for d in (e1m, socs, schemas):
-        d.mkdir(parents=True)
-
-    # Symlink / copy the v2 board-config schema + SoC + som-preset
-    # schemas from the real repo so the validator finds them.
-    import shutil
-    real_meta = REPO / "metadata"
-    shutil.copy(real_meta / "schemas" / "board.schema.json",
-                schemas / "board.schema.json")
-    shutil.copy(real_meta / "schemas" / "som-preset-v1.schema.json",
-                schemas / "som-preset-v1.schema.json")
-    shutil.copy(real_meta / "schemas" / "soc-spec-v1.schema.json",
-                schemas / "soc-spec-v1.schema.json")
-    shutil.copy(real_meta / "socs" / "renesas" / "rzv2n" / "n44.json",
-                socs / "n44.json")
+    meta, e1m = _scratch_metadata_root(
+        tmp_path, ("renesas", "rzv2n", "n44.json"))
 
     preset = e1m / "E1M-V2N101.yaml"
     preset.write_text(textwrap.dedent("""
