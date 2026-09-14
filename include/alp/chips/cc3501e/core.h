@@ -205,13 +205,17 @@ struct cc3501e {
 	 * transport-level retry (poll_by_repeat re-issuing the identical frame on BUSY
 	 * or IO) comes back from the firmware's cached reply instead of re-submitting
 	 * -- and for CMD_SOCK_SEND, re-submitting means re-TRANSMITTING the payload,
-	 * not just re-clocking a read.  cc3501e_sock_send() assigns it ONCE, before
-	 * the poll_by_repeat() call, so it stays constant across that call's retries;
-	 * see the assignment site for why that constancy is what makes the fix work.
-	 * uint8_t: wraps 255 -> 0 (defined unsigned overflow) after 256 sends, which
-	 * cannot collide with the firmware's single-entry cache -- it only ever holds
-	 * the immediately-preceding completed send's seq, never one from 256 sends
-	 * back. */
+	 * not just re-clocking a read.  cc3501e_sock_send() assigns it ONCE per FRAME
+	 * (cc3501e-bridge-firmware#107: one chunk of a logical send -- one iteration
+	 * of its remainder-retry loop, including that iteration's own bounded
+	 * post-timeout collection grace), before each poll_by_repeat() call, so it
+	 * stays constant across that frame's retries but changes for the next chunk's
+	 * different remaining bytes; see the assignment site for why that constancy
+	 * is what makes the fix work.
+	 * uint8_t: wraps 255 -> 0 (defined unsigned overflow) after 256 increments,
+	 * which cannot collide with the firmware's single-entry cache -- it only ever
+	 * holds the immediately-preceding completed frame's seq, never one from 256
+	 * increments back. */
 	uint8_t sock_send_seq;
 
 	/* Generic request retry seq (proto v8, cc3501e-bridge-firmware#102).
@@ -457,10 +461,15 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx);
  * Thread-safe (issue #1116): the byte-walk clocks the same CS-less bus as
  * @ref cc3501e_request, so it runs under the same transport lock and holds
  * it for the whole walk — re-aligning to the slave's header boundary is
- * only meaningful if nothing else moves the bus underneath it.  A request
- * issued concurrently therefore gets @ref ALP_ERR_BUSY from its own bounded
- * acquire, which is the honest answer: the link is by definition unusable
- * until the re-sync completes.
+ * only meaningful if nothing else moves the bus underneath it.  A direct
+ * cc3501e_request() call issued concurrently gets @ref ALP_ERR_BUSY from its
+ * own bounded acquire, which is the honest answer: the link is by
+ * definition unusable until the re-sync completes.  A poll_by_repeat()
+ * caller (alp-sdk#2035) only gets that same @ref ALP_ERR_BUSY on its very
+ * FIRST lock attempt; past that, it instead waits out the sync within its
+ * own deadline (retrying the lock acquire like any other retryable BUSY),
+ * so it can block up to its own timeout_ms plus one more lock wait before
+ * giving up.
  *
  * @param ctx         Initialised driver context.
  * @param timeout_ms  Coarse upper bound on re-sync effort (each ~ms covers

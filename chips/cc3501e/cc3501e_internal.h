@@ -49,6 +49,16 @@
  * transceive) by the same ctx->rx_scratch[0] peek mechanism -- see
  * ALP_CC3501E_RX_SCRATCH_NO_STATUS (<alp/chips/cc3501e/core.h>).
  *
+ * EXCEPTION 3 (alp-sdk#2035 review follow-up): cc3501e_lock_acquire()'s OWN
+ * timeout is NOT one of the two retryable conditions above -- it means no
+ * request even got a chance to reach the bridge, and only on the FIRST
+ * attempt: it is returned immediately (unambiguous ALP_ERR_BUSY, nothing
+ * sent). A lock timeout on a LATER attempt is different -- an EARLIER
+ * attempt already reached the bridge (this loop only revisits the lock
+ * after a retryable BUSY/IO from that attempt) -- so it is folded into the
+ * SAME retry-within-budget treatment as BUSY/IO above instead, and can
+ * still end in ALP_ERR_TIMEOUT if the whole budget elapses contended.
+ *
  * Returns the final cc3501e_request status; ALP_ERR_TIMEOUT if it never
  * resolved within the budget.  The caller's budget must therefore cover the
  * longest down-window (Wlan_Start/op, seconds) -- see cc3501e_wifi_get_mac.
