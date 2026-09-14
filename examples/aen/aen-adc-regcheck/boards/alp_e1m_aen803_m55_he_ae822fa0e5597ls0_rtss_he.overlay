@@ -1,0 +1,29 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-adc-regcheck overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Same silicon (AE822FA0E5597LS0) and same adc12_0 node as the E1M-AEN801
+ * overlay in this directory -- E1M-AEN803 only differs by its external
+ * OSPI0 memory population (both HyperRAM + NOR fitted, see
+ * metadata/e1m_modules/E1M-AEN803.yaml), which this ADC bind check does not
+ * touch. See the AEN801 overlay in this same directory for the full
+ * rationale; not restated per-board here.
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&adc12_0 {
+	status = "okay";
+};

@@ -4470,13 +4470,13 @@
         },
         "m55_he": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen803_m55_he",
+          "board": "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen803_m55_hp",
+          "board": "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }
