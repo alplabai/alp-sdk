@@ -79,6 +79,7 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -97,6 +98,7 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -290,7 +292,14 @@ jobs:
       # <alp/update_log.h> demo, not AEN-only). AEN803 is only build_only:
       # true today (examples/aen/aen-adc-regcheck), so this adds two
       # compile scenarios, not two bench-run scenarios.
-      - name: twister · AEN801 + AEN803 (M55-HE + M55-HP) on examples/aen + firmware-update-log
+      # examples/peripheral-io/drone-autopilot is a third, bounded root
+      # (issue #2106, same #1101 precedent as firmware-update-log above):
+      # its AEN hardware scenario named a board target it shipped no
+      # overlay for, so the alp-i2c0/alp-uart1/alp-pwm0..3 aliases its
+      # overlay wires were silently dropped and nothing built to notice.
+      # Bounded to this one example, not widened to examples/peripheral-io/
+      # -- every other example there is native_sim-only (see #2106).
+      - name: twister · AEN801 + AEN803 (M55-HE + M55-HP) on examples/aen + firmware-update-log + drone-autopilot
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -300,8 +309,10 @@ jobs:
         # this at 1055s/17.6min and a resulting 25min cap). 30min =
         # ~1.54x that real worst case, kept under the job's own 41min
         # ceiling (see that job-level comment). Not re-measured for the
-        # two added AEN803 compile-only scenarios (alp-sdk#2084); revisit
-        # this budget if they push the job close to the ceiling.
+        # two added AEN803 compile-only scenarios (alp-sdk#2084) or for
+        # the #2106 drone-autopilot root (one additional build_only
+        # scenario); revisit this budget if it pushes the job close to
+        # the ceiling.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
@@ -311,6 +322,7 @@ jobs:
             -p alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --inline-logs \
             --no-detailed-test-id
 
