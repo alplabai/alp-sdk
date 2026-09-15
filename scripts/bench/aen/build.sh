@@ -23,6 +23,11 @@
 # summary only.
 set -e
 
+# A pure `west build` wrapper -- never touches SE_UART or a J-Link probe --
+# so an operator's LG_PLACE (exported for OTHER helpers in the same shell)
+# must not abort a plain compile on a labgrid/reservation problem that has
+# nothing to do with building (alp-sdk#2064 review).
+BENCH_ENV_NO_PROBE=1
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 

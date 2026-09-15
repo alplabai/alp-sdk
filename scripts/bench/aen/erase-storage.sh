@@ -84,14 +84,11 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-if [ "$DRY_RUN" = 1 ]; then
-	JLINK="$(bench_jlink_exe 2>/dev/null || echo JLinkExe)"
-else
-	JLINK="$(bench_jlink_exe)" || exit $?
-fi
-JLINK_ARGS=("$JLINK")
-# See ram-run.sh for why the selector is conditional on JLINK_SN.
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns. DRY_RUN never
+# reaches a call site below, so this never opens a probe in that mode.
+JLINK_ARGS=(bench_jlink_run)
 
 # 1. DERIVE the window from the SoM preset -- single source of truth, so a
 #    future layout move cannot leave a stale address baked in here. Then assert
