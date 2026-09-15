@@ -97,48 +97,49 @@ properties:
       SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register, GAIN
       field, lines ~19081-19092: "Gain in unsigned 8.4 format", bitRange
       [11:0]; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
-      drivers/include/pdm.h). A value of 0x1000 or above OVERFLOWS the
-      12-bit field and wraps to 0, which MUTES the channel -- see PDM_INIT's
-      BUILD_ASSERT below.
+      drivers/include/pdm.h). A value written above PDM_CH_GAIN_MAX (0xFFF)
+      truncates to bits [11:0] -- 0x1000 exactly truncates to 0, which MUTES
+      the channel -- see PDM_INIT's BUILD_ASSERT below.
 
       The default (0x200 = 32.0x = +30.1 dB) is PROVISIONAL, pending a
-      calibrated full-scale measurement, not a tuned value -- issue #2133
-      round 4e's silicon run (gain 0x800 = 128x, quiet room, no controlled
-      stimulus) put every unclipped sample at a multiple of 0x80 (the gain
-      is a saturating multiply applied AFTER the datapath quantizes, so a
-      coarser gain step doesn't cost resolution) and pinned the start
-      transient / post-restart window at full scale, putting the estimated
-      (uncalibrated) pre-gain full scale around 900-1000 LSB -- 0x800 clips
-      a close clap or any start transient. 0x200 maps that estimated
-      pre-gain full scale to roughly int16 full scale (~900-1000 * 32 =~
-      28800-32000 against 32767) -- ONLY ABOUT 1 dB of estimated headroom,
-      not "clearly below the clip point" as an earlier round claimed
-      (round 4f correction). It is NOT a documented "voice-tuned" value
-      either: BLE Audio's `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig
-      (`range 1 256`, left-shifted by 4 before writing this register) has
-      three different values in the same codebase and none is described as
-      tuned for anything -- `0x140` is its Kconfig DEFAULT (20),
-      `0x320` is a DIFFERENT `#ifndef` FALLBACK (50,
-      subsys/bluetooth/le_audio/audio_source_pdm.c), and
+      calibrated full-scale measurement, not a tuned value. Full-scale
+      headroom at 0x200 is UNMEASURED: issue #2133 round 4e's silicon run
+      (gain 0x800 = 128x, quiet room, no controlled stimulus) put every
+      unclipped sample at a multiple of 0x80 (the gain is a saturating
+      multiply applied AFTER the datapath quantizes, so a coarser gain step
+      doesn't cost resolution) and pinned the start transient / post-restart
+      window at full scale -- evidence 0x800 clips a close clap or any start
+      transient, but not a calibrated pre-gain full-scale figure. 0x200 is
+      NOT "clearly below the clip point" as an earlier round claimed. It is
+      also NOT a documented "voice-tuned" value: BLE Audio's
+      `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig (`range 1 256`,
+      left-shifted by 4 before writing this register) has three different
+      values in the same codebase and none is described as tuned for
+      anything -- `0x140` is its Kconfig DEFAULT (20), `0x320` is a
+      DIFFERENT `#ifndef` FALLBACK (50, sdk-alif
+      subsys/bluetooth/le_audio/audio_source_pdm.c), and sdk-alif
       samples/bluetooth/le_audio/unicast_initiator's `prj.conf` ships a
       THIRD value, 100 (`0x640`). A round 4f speaker-to-mic loopback
-      (TAS2563 speakers -> PDM mics, e1m-aen-evk-03) confirmed 0x200
-      captures frequency- and level-correct audio, but the loopback signal
-      was only ~20 LSB pre-gain -- far below the estimated ~900-1000 LSB
-      pre-gain full scale, so 0x200's ~1 dB of estimated headroom remains
-      UNCONFIRMED by that test. Alif's own audio-capture references are
-      NOT a clean precedent for a 48 kHz default either: `alif_kws`'s
-      `AudioBackend.cpp` sets 0xF00, but that sample's shipped model runs
-      at 16 kHz (`g_AudioRate = 16000`,
+      (TAS2563 speakers -> PDM mics, e1m-aen-evk-03, PROBE_LOOPBACK mode of
+      examples/aen/aen-i2s-tas2563-probe on branch
+      test/u46-i2s-tas2563-on-reworked-mux, issue #2143) confirmed 0x200
+      captures frequency- and level-correct audio on mic ch0/ch1 (PDM
+      controller 0) -- see zephyr/drivers/audio/alif_pdm.c's top-of-file
+      STATUS comment for the numbers; the D2 pair (HW 4/5) is register-level
+      verified only. Full-scale headroom at 0x200 remains UNMEASURED by that
+      test (it used a fixed loudspeaker level, not a calibration sweep).
+      Alif's own audio-capture references are NOT a clean precedent for a
+      48 kHz default either: `alif_kws`'s `AudioBackend.cpp` sets 0xF00, but
+      that sample's shipped model runs at 16 kHz (`g_AudioRate = 16000`,
       generated/kws/kws_micronet_m_vela_H128.tflite.cc), which selects mode
       4, not the mode 7 this driver defaults to -- 0xF00 was never
       Alif-validated at 48 kHz. The GitHub-hosted
       alifsemi/alif_ml-embedded-evaluation-kit's mic_listener.c uses 0x800
       (not vendored locally, so not a `path:NNN` citation). The driver's OLD
       hardcoded default (0x0D) is Alif's register-level driver test value
-      (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:88-123, and
+      (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:88-123, and sdk-alif
       samples/drivers/audio/dmic_alif/src/main.c:22) -- never an audio-tuned
-      value, and confirmed ~40 dB too quiet on silicon (issue #2133 round
-      4d). Override per board/mic once a controlled-stimulus calibration
-      exists; PDM_INIT's BUILD_ASSERT rejects an out-of-range value at
-      build time.
+      value: 0x0D = 0.8125x (-1.8 dB vs unity), 31.9 dB below the
+      provisional 0x200 (issue #2133 round 4d). Override per board/mic once
+      a controlled-stimulus calibration exists; PDM_INIT's BUILD_ASSERT
+      rejects an out-of-range value at build time.

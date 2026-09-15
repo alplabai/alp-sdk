@@ -40,11 +40,15 @@
  *      and 4,5 for the second -- (0*2,0*2+1) and (2*2,2*2+1). Controller 1
  *      (unused on this SoM) would span HW 2,3. Register-level configuration
  *      (this channel map) and the 48 kHz capture rate are silicon-verified
- *      (issue #2133 round 2/4d); acoustic capture at 48 kHz is ALSO now
- *      verified, by a speaker-to-mic loopback (round 4f, e1m-aen-evk-03,
- *      2026-09-15) -- round 4d's believed "clap test" was NOT that
- *      evidence (nobody clapped during it), see divergence (11) in
- *      alif_pdm.c for the actual verification.
+ *      (issue #2133 round 2/4d); acoustic capture at 48 kHz on mic ch0/ch1
+ *      (PDM controller 0) is ALSO now verified, by a speaker-to-mic
+ *      loopback (e1m-aen-evk-03, 2026-09-15 -- PROBE_LOOPBACK mode of
+ *      examples/aen/aen-i2s-tas2563-probe on branch
+ *      test/u46-i2s-tas2563-on-reworked-mux, issue #2143, not this
+ *      driver's own example) -- round 4d's believed "clap test" was NOT
+ *      that evidence (nobody clapped during it), see divergence (11) in
+ *      alif_pdm.c for the actual verification. The D2 pair (HW 4/5) is
+ *      register-level verified only, never acoustically tested.
  *
  * Up to ALIF_PDM_MAX_CONTROLLERS (4) PDM controllers x 2 (L/R) = the 8 HW
  * channels MAX_NUM_CHANNELS names -- a pdm index at or above that cannot be

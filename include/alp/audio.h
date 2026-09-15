@@ -111,13 +111,13 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg);
 /**
  * @brief Begin capturing.  Frames flow into an internal ring buffer.
  *
- * @note Samples delivered in the first ~1 ms after start (or after a
- *       restart following a stop/error) may contain a settling transient
- *       from the capture datapath's decimation/filtering and should be
- *       treated as non-representative. Duration and shape are backend/
- *       silicon-specific; discard at least 1 ms of samples, or the first
- *       block your reads deliver, whichever is longer (issue #2133
- *       round 4f).
+ * @note Samples delivered immediately after start (or after a restart
+ *       following a stop/error) may contain a settling transient from the
+ *       capture datapath's decimation/filtering and should be treated as
+ *       non-representative. Duration and shape are backend/silicon-specific
+ *       -- discard the first block after start/restart; the settling
+ *       duration itself is backend-specific (see the backend's own DT
+ *       binding or driver docs for a measured figure, where one exists).
  *
  * @param[in] in  Handle from @ref alp_audio_in_open.
  *

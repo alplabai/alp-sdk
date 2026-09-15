@@ -15,15 +15,19 @@
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * Silicon status (issue #2133, e1m-aen-evk-03): register-level
  * configuration verified; 48 kHz mode 7 capture rate verified exact with no
- * drops (round 4d, commit 68a169977). Acoustic capture at 48 kHz VERIFIED
- * by a speaker-to-mic loopback (round 4f, 2026-09-15 14:49Z, TAS2563
- * speakers -> PDM mics, gain 0x200 readback-confirmed): Goertzel-bin
- * analysis found the 1 kHz bin rising from ~9/0 dB in silence to ~58 dB at
- * volume 48, a 500 Hz bin that lit up only during the 500 Hz stimulus, and
- * p2p rising from 128 in silence to ~651 at 1 kHz/volume 48. NOT verified:
- * full-scale headroom at the current provisional gain default (0x200,
- * issue #2143) -- the loopback signal was only ~20 LSB pre-gain, far below
- * the ~900-1000 LSB estimated pre-gain full scale.
+ * drops (commit 68a169977). Acoustic capture at 48 kHz VERIFIED on mic
+ * ch0/ch1 (PDM controller 0) ONLY, by a speaker-to-mic loopback
+ * (2026-09-15 14:49Z, TAS2563 speakers -> PDM mics, gain 0x200
+ * readback-confirmed; PROBE_LOOPBACK mode of
+ * examples/aen/aen-i2s-tas2563-probe on branch
+ * test/u46-i2s-tas2563-on-reworked-mux, issue #2143 -- not this example):
+ * Goertzel-bin analysis found the 1 kHz bin at 9.3/0.1 dB (ch0/ch1) in
+ * silence rising to 43.4/48.8 dB at volume 16 and 57.8/57.6 dB at volume
+ * 48, a 500 Hz bin at 54.7/56.6 dB that lit up only during the 500 Hz
+ * stimulus, and peak-to-peak rising from 128/128 in silence to 651/652 at
+ * 1 kHz/volume 48. The D2 pair (HW 4/5) is register-level verified only --
+ * never acoustically tested. NOT verified: full-scale headroom at the
+ * current provisional gain default (0x200, issue #2143) -- unmeasured.
  * ==================================================================
  *
  * Vendored from the fork with this provenance header added, plus the
@@ -277,13 +281,16 @@
  * ------------------------- alp-sdk divergence (11) ---------------------
  * issue #2133 round 4f -- acoustic capture VERIFIED (by a real method,
  * unlike round 4d/4e's non-clap), plus three more corrections:
- *  - A speaker-to-mic loopback on `e1m-aen-evk-03` (TAS2563 speakers,
- *    independently verified audible, playing known tones into the PDM
- *    mics at gain 0x200) found frequency-correct, level-correct signal via
- *    Goertzel-bin analysis -- see this file's top-of-file STATUS comment
- *    for the numbers. Acoustic capture at 48 kHz is now proven; full-scale
- *    headroom at gain 0x200 is not (the loopback signal never approached
- *    the estimated pre-gain full scale).
+ *  - A speaker-to-mic loopback on `e1m-aen-evk-03` (PROBE_LOOPBACK mode of
+ *    examples/aen/aen-i2s-tas2563-probe on branch
+ *    test/u46-i2s-tas2563-on-reworked-mux, issue #2143 -- not this example;
+ *    TAS2563 speakers, independently verified audible, playing known tones
+ *    into the PDM mics at gain 0x200) found frequency-correct, level-correct
+ *    signal on mic ch0/ch1 (PDM controller 0) via Goertzel-bin analysis --
+ *    see this file's top-of-file STATUS comment for the numbers. Acoustic
+ *    capture at 48 kHz on ch0/ch1 is now proven; the D2 pair (HW 4/5) is
+ *    register-level only, never acoustically tested; full-scale headroom
+ *    at gain 0x200 is unmeasured.
  *  - The example's per-channel signal-level thresholds (`MIN_SIGNAL_RMS_
  *    LSB`/`MIN_SIGNAL_PEAK_TO_PEAK_LSB`, examples/aen/aen-pdm-mic-alif/
  *    src/main.c) were sized at the OLD gain default (0x0D); at the current
@@ -498,11 +505,13 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * provenance and round 4e's silicon-driven default change
 	 * (issue #2143, divergence (9)/(10)).
 	 *
-	 * ROUND 4F: acoustic capture at 48 kHz IS now verified, by a
-	 * different and actually controlled method -- a speaker-to-mic
-	 * loopback (TAS2563 speakers playing known tones into the PDM mics,
-	 * gain 0x200 readback-confirmed). See this file's top-of-file STATUS
-	 * comment and divergence (11) for the numbers.
+	 * ROUND 4F: acoustic capture at 48 kHz IS now verified on mic ch0/ch1
+	 * (PDM controller 0) only, by a different and actually controlled
+	 * method -- a speaker-to-mic loopback (TAS2563 speakers playing known
+	 * tones into the PDM mics, gain 0x200 readback-confirmed). The D2 pair
+	 * (HW 4/5) is register-level only, never acoustically tested. See this
+	 * file's top-of-file STATUS comment and divergence (11) for the
+	 * numbers.
 	 */
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
@@ -853,11 +862,13 @@ void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 	uintptr_t ch_n_gain = (reg_base + PDM_CH_GAIN + (ch_num * PDM_CH_OFFSET));
 
 	/* PDM_CH_GAIN's GAIN field is only 12 bits (issue #2133 round 4f) --
-	 * a value above PDM_CH_GAIN_MAX would overflow it and wrap to 0,
-	 * silently MUTING the channel instead of clipping loud as a caller
-	 * might expect. This function returns void (public API, existing
-	 * callers), so it cannot report -EINVAL -- clamp and warn instead of
-	 * writing a value that wraps. The one in-tree caller
+	 * a value above PDM_CH_GAIN_MAX would truncate to bits [11:0]
+	 * instead of clipping loud as a caller might expect (see
+	 * PDM_CH_GAIN_MAX's own comment in alif_pdm_reg.h). This function
+	 * returns void (public API, existing callers), so it cannot report
+	 * -EINVAL -- clamp (pdm_ch_gain_clamp(), alif_pdm_reg.h -- host-
+	 * tested, issue #2133 round 5) and warn instead of writing a value
+	 * that truncates. The one in-tree caller
 	 * (pdm_apply_channel_defaults(), via cfg->channel_gain) is already
 	 * bounded at DT-build time by PDM_INIT's BUILD_ASSERT; this guards
 	 * an app calling pdm_set_ch_gain() directly with a bad runtime
@@ -865,10 +876,11 @@ void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 	 */
 	if (ch_gain > PDM_CH_GAIN_MAX) {
 		LOG_WRN("ch_gain 0x%x exceeds PDM_CH_GAIN's 12-bit field (max 0x%x) -- "
-			"clamping (an unclamped write would overflow and mute the channel)",
-			ch_gain, PDM_CH_GAIN_MAX);
-		ch_gain = PDM_CH_GAIN_MAX;
+		        "clamping (an unclamped write would truncate to bits [11:0])",
+		        ch_gain,
+		        PDM_CH_GAIN_MAX);
 	}
+	ch_gain = pdm_ch_gain_clamp(ch_gain);
 
 	sys_write32(ch_gain, ch_n_gain);
 }
@@ -1487,11 +1499,16 @@ static void alif_pdm_warning_isr(const struct device *dev)
  * clock-mode fields a prior configure()+trigger(START) already programmed
  * into PDM_CONFIG_REGISTER: pdm_initialize() used to always force-sleep,
  * so waking from suspend without the app re-calling configure() left the
- * MODE field restorable (pdata->clk_mode survives suspend, it's a plain
- * struct field) but the CHANNEL-ENABLE bits permanently cleared -- a
- * post-resume dmic_trigger(START) would then clock the block with zero
- * channels actually enabled. Only a cold boot has no prior session to
- * preserve, so only it forces sleep.
+ * MODE field restorable (pdata->clk_mode is a plain struct field with no
+ * suspend handler of its own) but the CHANNEL-ENABLE bits permanently
+ * cleared -- a post-resume dmic_trigger(START) would then clock the block
+ * with zero channels actually enabled. Only a cold boot has no prior
+ * session to preserve, so only it forces sleep. NOTE: as of divergence
+ * (11), PM_DEVICE_ACTION_SUSPEND itself now resets pdata->clk_mode to
+ * PDM_MODE_MICROPHONE_SLEEP (a fail-safe against the hardware registers
+ * NOT surviving suspend) -- that is a SUSPEND-side reset, not something
+ * this cold_init-only function does; clk_mode no longer survives a
+ * suspend/resume cycle the way this comment originally assumed.
  */
 static int pdm_hw_bringup(const struct device *dev, bool cold_init)
 {
@@ -1698,27 +1715,28 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 	 * value). \
 	 */ \
 	BUILD_ASSERT(!(DT_INST_NODE_HAS_PROP(n, clk_frequency_min) && \
-		       DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
-			 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
-			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
-		     "alif,alif-pdm: clk-frequency-min must not exceed " \
-		     "clk-frequency-max (the DT range is inverted)"); \
+	               DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
+	                 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
+	                  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
+	             "alif,alif-pdm: clk-frequency-min must not exceed " \
+	             "clk-frequency-max (the DT range is inverted)"); \
 	/* PDM_CH_GAIN's GAIN field is bits [11:0] (unsigned 8.4 fixed-point, \
 	 * issue #2133 round 4e -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, \
 	 * PDM_CH_GAIN register, GAIN field, lines ~19081-19092; matches the \
 	 * Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU, drivers/include/pdm.h). The \
-	 * bound is therefore the register's own hardware range: 0xFFF (4095) \
-	 * is the largest value the 12-bit field can hold -- 0x1000 and above \
-	 * OVERFLOW it and wrap to 0, which MUTES the channel, not "sets max \
-	 * gain" as a name like PDM_MAX_GAIN_CTRL might suggest. The lower \
-	 * bound is 0x001: 0x000 is 0.0x, a silently-muted channel indistinct \
-	 * from a dead one, and never a plausible DT value. \
+	 * bound is therefore the register's own hardware range: PDM_CH_GAIN_MAX \
+	 * (0xFFF, 4095) is the largest value the 12-bit field can hold -- a \
+	 * value written above it truncates to bits [11:0]; 0x1000 exactly \
+	 * truncates to 0, which MUTES the channel, not "sets max gain" as a \
+	 * name like PDM_MAX_GAIN_CTRL might suggest. The lower bound is 0x001: \
+	 * 0x000 is 0.0x, a silently-muted channel indistinct from a dead one, \
+	 * and never a plausible DT value. \
 	 */ \
 	BUILD_ASSERT(DT_INST_PROP_OR(n, channel_gain, 0x200) >= 0x001 && \
-			     DT_INST_PROP_OR(n, channel_gain, 0x200) <= 0xFFF, \
-		     "alif,alif-pdm: channel-gain out of PDM_CH_GAIN's 12-bit " \
-		     "0x001..0xFFF range (0x1000 and above overflow the field and " \
-		     "mute the channel)"); \
+	                 DT_INST_PROP_OR(n, channel_gain, 0x200) <= PDM_CH_GAIN_MAX, \
+	             "alif,alif-pdm: channel-gain out of PDM_CH_GAIN's 12-bit " \
+	             "0x001..0xFFF range (0x1000 and above truncate the field and " \
+	             "can mute the channel)"); \
 	static void            pdm_irq_config_##n(void); \
 	static struct pdm_data dmic_alif_pdm_data_##n = { \
 		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \

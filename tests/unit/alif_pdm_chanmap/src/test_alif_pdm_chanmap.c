@@ -51,11 +51,13 @@ ZTEST(alif_pdm_chanmap, test_backend_2channel_map_enables_hw_0_and_1)
 	    mask, old_verbatim_mask, "fixed translation must differ from the old buggy verbatim read");
 }
 
-/* examples/aen/aen-pdm-mic-alif's 4-channel map (register-level verified;
- * acoustic capture at 48 kHz verified by speaker loopback, issue #2133
- * round 4f): D0 (pdm=0) carries channels 0/1, D2 (pdm=2) carries channels
- * 2/3 -- must enable HW channels 0, 1, 4, 5 (the PDM_MASK_CHANNEL_0|1|4|5
- * the example used to pass by hand).
+/* examples/aen/aen-pdm-mic-alif's 4-channel map (register-level verified on
+ * both pairs; acoustic capture at 48 kHz verified by speaker loopback on
+ * mic ch0/ch1, PDM controller 0, ONLY -- issue #2133 round 4f, see
+ * alif_pdm.c's STATUS banner. The D2 pair (HW 4/5) is register-level
+ * verified only, never acoustically tested): D0 (pdm=0) carries channels
+ * 0/1, D2 (pdm=2) carries channels 2/3 -- must enable HW channels 0, 1, 4,
+ * 5 (the PDM_MASK_CHANNEL_0|1|4|5 the example used to pass by hand).
  */
 ZTEST(alif_pdm_chanmap, test_example_4channel_map_enables_hw_0_1_4_5)
 {
@@ -172,4 +174,36 @@ ZTEST(alif_pdm_chanmap, test_out_of_order_hw_channel_rejected)
 
 	zassert_equal(rc, -EINVAL, "a non-ascending hw-channel map must be rejected");
 	zassert_equal(mask, 0x77U, "mask_out must be left untouched on failure");
+}
+
+/* pdm_ch_gain_clamp() (alif_pdm_reg.h, issue #2133 round 5): PDM_CH_GAIN's
+ * GAIN field is only 12 bits -- pdm_set_ch_gain() (alif_pdm.c) clamps every
+ * write through this pure function instead of writing an unclamped value
+ * that would truncate to bits [11:0] (0x1000 exactly -> 0 = mute). Host-
+ * tested here (no MMIO/device involved) so this boundary is exercised
+ * without a full driver build; mutation-checked: removing the clamp (an
+ * unconditional `return ch_gain;`) fails exactly the two out-of-range
+ * cases below.
+ */
+ZTEST(alif_pdm_chanmap, test_gain_clamp_max_value_passes_through)
+{
+	zassert_equal(pdm_ch_gain_clamp(PDM_CH_GAIN_MAX),
+	              PDM_CH_GAIN_MAX,
+	              "the largest valid 12-bit value must pass through unchanged");
+}
+
+ZTEST(alif_pdm_chanmap, test_gain_clamp_mute_boundary_is_clamped)
+{
+	zassert_equal(pdm_ch_gain_clamp(PDM_CH_GAIN_MAX + 1U),
+	              PDM_CH_GAIN_MAX,
+	              "0x1000 (the exact truncate-to-mute value) must be clamped to PDM_CH_GAIN_MAX, "
+	              "not written unclamped");
+}
+
+ZTEST(alif_pdm_chanmap, test_gain_clamp_max_uint32_is_clamped)
+{
+	zassert_equal(pdm_ch_gain_clamp(0xFFFFFFFFU),
+	              PDM_CH_GAIN_MAX,
+	              "an arbitrary out-of-range caller value must clamp to PDM_CH_GAIN_MAX, "
+	              "not truncate to whatever its low 12 bits happen to be");
 }

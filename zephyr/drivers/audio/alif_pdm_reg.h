@@ -18,6 +18,8 @@
 #ifndef ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_REG_H_
 #define ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_REG_H_
 
+#include <stdint.h>
+
 #define PDM_CONFIG_REGISTER      (0x0)  /* PDM Audio Control Register 0  */
 #define PDM_CTL_REGISTER         (0x4)  /* PDM Audio Control Register 1  */
 #define PDM_THRESHOLD_REGISTER   (0x8)  /* FIFO Watermark Register    */
@@ -37,9 +39,24 @@
 /* GAIN field is bits [11:0], unsigned 8.4 fixed-point (issue #2133 round
  * 4f -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
  * GAIN field; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
- * drivers/include/pdm.h). A value above this overflows the field and
- * wraps to 0, muting the channel. */
+ * drivers/include/pdm.h). The register itself only ever sees bits [11:0]
+ * of whatever is written -- a value that truncates to bits [11:0] equal to
+ * 0 (only 0x1000 exactly, among values just above PDM_CH_GAIN_MAX) mutes
+ * the channel; any other truncation lands somewhere else in [1, 0xFFF]. */
 #define PDM_CH_GAIN_MAX (0xFFFU)
+
+/* Clamp a caller-supplied gain to PDM_CH_GAIN's 12-bit hardware range
+ * (issue #2133 round 5, extracted from pdm_set_ch_gain() so a host test can
+ * exercise the boundary without a device/register model). A value above
+ * PDM_CH_GAIN_MAX is clamped to PDM_CH_GAIN_MAX rather than written
+ * unclamped -- an unclamped write above the 12-bit field truncates to bits
+ * [11:0], which for most out-of-range values lands somewhere in [1, 0xFFF]
+ * (louder than intended) and for 0x1000 exactly mutes the channel (0).
+ * Neither is what a caller raising gain past the max would expect. */
+static inline uint32_t pdm_ch_gain_clamp(uint32_t ch_gain)
+{
+	return (ch_gain > PDM_CH_GAIN_MAX) ? PDM_CH_GAIN_MAX : ch_gain;
+}
 #define PDM_CH_PKDET_TH          (0xCC) /* Channel (n) Peak Detector Threshold Register  */
 #define PDM_CH_PKDET_ITV         (0xD0) /* Channel (n) Peak Detector Interval Register  */
 
