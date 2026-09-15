@@ -235,3 +235,64 @@ def test_standalone_app_route_table_never_targets_a_reserved_pad(path):
         f"{path} routes a bridge-reserved CC3501E pad: {hits} -- "
         f"the firmware's gpio_pad_reserved() would refuse it at runtime"
     )
+
+
+def _revision_dependent_e1m_pads() -> set[str]:
+    """E1M pads that metadata/e1m_modules/aen/hw-revisions.yaml moves between
+    chips on at least one AEN hw_rev -- IO8/IO10/IO21 today, via r1's
+    `pad_route_overrides`. A route-table entry for one of these pads is only
+    ever correct on the ONE revision its target pin/chip was resolved for --
+    on any other revision it silently drives a DIFFERENT physical pin/chip
+    (issue #2138: aen-evk-demo's hand-written IO8 -> CC3501E GPIO_30 entry is
+    correct on r2 only; on r1 GPIO_30 is the carrier's SDIO mux SELECT, tied
+    to +3V3 by a fitted P18 jumper)."""
+    path = METADATA / "e1m_modules" / "aen" / "hw-revisions.yaml"
+    doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+    pads: set[str] = set()
+    for rev in (doc.get("hw_revisions") or {}).values():
+        for row in rev.get("pad_route_overrides") or []:
+            pads.add(row["e1m"])
+    return pads
+
+
+# The runtime guard aen-evk-demo/src/main.c's phase 11 uses to confirm the
+# live module is hw_rev 2626-r2 before it ever opens a revision-dependent
+# proxied pad -- see that phase's "0. Refuse unless..." step.  Named here so
+# the test below fails loudly (a clear assertion message) rather than just
+# "not found" if a future refactor renames the guard without updating both
+# sites.
+REVISION_GUARD_MARKER = "hw_rev_confirmed_r2"
+
+
+@pytest.mark.parametrize("path", STANDALONE_APP_ROUTE_TABLES)
+def test_standalone_app_route_table_guards_revision_dependent_pads(path):
+    """A hand-written route table -- no per-revision generation reaches these
+    standalone apps, see the file header comment on both tables -- that maps
+    a revision-dependent pad (per hw-revisions.yaml) must be paired with a
+    runtime hw_rev guard in the app's main.c that runs BEFORE that pad is
+    ever opened. Without one, the table silently drives the wrong physical
+    pin/chip on every revision but the one it was hand-built for (#2138)."""
+    revision_dependent = _revision_dependent_e1m_pads()
+    routes = _example_gpio_routes(path)
+    guarded_pads = revision_dependent & routes.keys()
+    if not guarded_pads:
+        pytest.skip(f"{path.name} routes no revision-dependent pad")
+
+    main_c_path = path.parent / "main.c"
+    main_c = main_c_path.read_text(encoding="utf-8")
+    for e1m in sorted(guarded_pads):
+        open_call = f"alp_gpio_open(ALP_{e1m})"
+        open_idx = main_c.find(open_call)
+        assert open_idx != -1, (
+            f"{path} routes revision-dependent pad {e1m} but {main_c_path} "
+            f"never calls {open_call} -- update this test if the app was "
+            f"rewritten to open it another way"
+        )
+        guard_idx = main_c.find(REVISION_GUARD_MARKER)
+        assert guard_idx != -1 and guard_idx < open_idx, (
+            f"{main_c_path}: {e1m} is revision-dependent "
+            f"(metadata/e1m_modules/aen/hw-revisions.yaml pad_route_overrides) "
+            f"but {open_call} runs with no '{REVISION_GUARD_MARKER}' runtime "
+            f"guard before it -- on r1 this pad routes to a DIFFERENT "
+            f"physical pin/chip than the hand-written table assumes (#2138)"
+        )

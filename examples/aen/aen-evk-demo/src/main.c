@@ -3954,6 +3954,11 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * FULL BRING-UP / TEARDOWN ORDER, so the whole sequence is reviewable in one
  * place rather than reconstructed from call sites. Steps marked
  * "PLAYBACK ONLY" exist solely inside `#if AEN_EVKDEMO_SOUND_PLAYBACK`:
+ *   0. PLAYBACK ONLY: refuse (FAIL) unless a fresh EEPROM read confirms
+ *      hw_rev 2626-r2 -- IO8 -> CC3501E GPIO_30 only holds on that
+ *      revision; on r1 GPIO_30 is the carrier's SDIO mux SELECT, shorted
+ *      to +3V3 by a fitted P18 jumper (issue #2138). See that check's own
+ *      comment, right before step 1 in the code, for the full reasoning.
  *   1. PLAYBACK ONLY: 74LVC157 mux ENABLE (E1M IO8 -> CC3501E GPIO_30) +
  *      SELECT (E1M IO13 -> CC3501E GPIO_13, 0 = TAS2563 amps) over the
  *      bridge phase 8 leaves up -- same CC3501E-proxy mechanism phase 9
@@ -4153,6 +4158,52 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	alp_gpio_t *mux_en  = NULL;
 	alp_gpio_t *mux_sel = NULL;
 #if AEN_EVKDEMO_SOUND_PLAYBACK
+	/* --- 0. Refuse unless the live module is CONFIRMED hw_rev 2626-r2 -- */
+	/* cc3501e_gpio_routes.c's E1M IO8 -> CC3501E GPIO_30 entry holds ONLY
+	 * on r2 (metadata/e1m_modules/aen/hw-revisions.yaml
+	 * pad_route_overrides). On r1, IO8 is instead a direct Alif GPIO and
+	 * GPIO_30 is the carrier's SDIO mux SELECT -- on an E1M-EVK 2626-R2
+	 * carrier that net is tied to +3V3 through a fitted P18 jumper
+	 * (R198), so driving GPIO_30 low here would short a CC3501E output
+	 * against +3V3 (issue #2138). This app has no board.yaml (see the
+	 * file header above), so it gets none of the per-revision route
+	 * table scripts/gen_cc3501e_gpio_routes.py generates for the
+	 * board.yaml-driven CC3501E examples -- the hand-written table is
+	 * fixed at build time and cannot itself tell r1 from r2. So this
+	 * phase confirms the revision itself, over the same EEPROM manifest
+	 * phase 5 reads (a fresh read, not a cached one -- this phase must
+	 * not assume phase 5 ran or passed). A read failure, a bad magic, or
+	 * any hw_rev string other than exactly "2626-r2" all refuse -- not
+	 * just a recognised "2626-r1" -- so an unprovisioned module or a
+	 * future r3+ board fails safe here too, instead of being silently
+	 * treated as r2. */
+	eeprom_24c128_t      hwrev_ee;
+	alp_hw_info_eeprom_t hwrev_manifest = { 0 };
+	alp_status_t         hwrev_rc       = ALP_ERR_NOT_READY;
+	if (ctx->carrier_bus != NULL) {
+		hwrev_rc = eeprom_24c128_init(&hwrev_ee, ctx->carrier_bus, EEPROM_24C128_I2C_ADDR_LOW);
+		if (hwrev_rc == ALP_OK) {
+			hwrev_rc = eeprom_24c128_read(
+			    &hwrev_ee, 0x0000u, (uint8_t *)&hwrev_manifest, sizeof(hwrev_manifest));
+			eeprom_24c128_deinit(&hwrev_ee);
+		}
+	}
+	bool hw_rev_confirmed_r2 =
+	    (hwrev_rc == ALP_OK) && (hwrev_manifest.magic == ALP_HW_INFO_MAGIC) &&
+	    (strncmp(hwrev_manifest.hw_rev, "2626-r2", ALP_HW_INFO_HW_REV_LEN) == 0);
+	if (!hw_rev_confirmed_r2) {
+		printf("[evkdemo] SOUND: refusing to drive E1M IO8 (I2S mux ENABLE) as CC3501E "
+		       "GPIO_30 -- that route holds only on hw_rev 2626-r2 and this run could not "
+		       "confirm it (EEPROM read -> %d, hw_rev=\"%.*s\"). On r1, GPIO_30 is the "
+		       "carrier's SDIO mux SELECT, shorted to +3V3 by a fitted P18 jumper -- see "
+		       "issue #2138. Not opening IO8 or IO13.\n",
+		       (int)hwrev_rc,
+		       ALP_HW_INFO_HW_REV_LEN,
+		       hwrev_manifest.hw_rev);
+		ctx->note = "refused: hw_rev != 2626-r2 (#2138)";
+		return PHASE_FAIL;
+	}
+
 	/* --- 1. I2S mux ENABLE + SELECT over the CC3501E proxy ------------- */
 	mux_en              = alp_gpio_open(ALP_E1M_GPIO_IO8);
 	mux_sel             = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
