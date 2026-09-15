@@ -43,9 +43,29 @@
  * can never divide-by/against zero. Reapply this divergence if the file is
  * ever re-synced from the fork.
  * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (3) ----------------------
+ * dmic_alif_pdm_configure() (issue #2133) broke Zephyr's standard `dmic`
+ * contract two ways: it read req_chan_map_lo's low byte VERBATIM as the
+ * hardware channel-enable mask instead of decoding the standard
+ * dmic_build_channel_map() nibble encoding (every dmic_build_channel_map()
+ * caller, incl. the portable src/backends/audio/zephyr_drv.c backend,
+ * enabled the wrong hardware channel), OR'd that mask into whatever the
+ * register already held instead of replacing it, and never left the PDM
+ * clock-mode field MICROPHONE_SLEEP nor programmed per-channel FIR/gain --
+ * only the Alif-specific pdm_mode()/pdm_channel_config(), which a standard
+ * dmic consumer has no reason to call, did that. Fixed by decoding the
+ * channel map with alif_pdm_chanmap_translate() (alif_pdm_chanmap.h),
+ * replacing (not OR-ing) the channel-enable field, and applying the
+ * bench-proven STANDARD_VOICE_512 clock mode + per-channel defaults as
+ * part of configure() itself. Reapply this divergence if the file is ever
+ * re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm
+
+#include <string.h>
 
 #include <zephyr/audio/dmic.h>
 #include <zephyr/drivers/pdm/pdm_alif.h>
@@ -59,6 +79,7 @@
 #include <zephyr/sys/util.h>
 #include "alif_pdm_reg.h"
 #include "alif_pdm_burst_plan.h"
+#include "alif_pdm_chanmap.h"
 
 /* Upper bound on how many slab blocks a single IRQ burst can be split
  * across (#1122). A burst is at most MAX_DATA_ITEMS * MAX_NUM_CHANNELS *
@@ -112,6 +133,70 @@ struct pdm_config {
 	clock_control_subsys_t clkid;
 };
 
+/* Bench-proven pcm_rate -> PDM clock-mode table (issue #2133).
+ * STANDARD_VOICE_512 @ 16 kHz is the ONLY entry: its FIR/gain/phase/
+ * peak-detect defaults (pdm_default_fir_voice512 and the PDM_DEFAULT_CH_*
+ * constants below) are copied VERBATIM from the Alif reference dmic app
+ * (sdk-alif samples/drivers/audio/dmic_alif, via
+ * examples/aen/aen-pdm-mic-alif) and confirmed live on E1M-AEN803 silicon
+ * (docs/test-plan.md: "Live varying PCM captured"). Do not add another rate
+ * here without an equally-sourced, bench-verified coefficient set -- see
+ * the securing-the-alp-sdk-position no-invented-register-values rule; a
+ * pcm_rate with no matching mode is rejected by configure() rather than
+ * silently left in MICROPHONE_SLEEP.
+ */
+struct pdm_clock_mode_entry {
+	uint32_t pcm_rate_hz;
+	uint8_t mode;
+};
+
+static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
+	{ 16000U, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ },
+};
+
+static int pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out)
+{
+	for (size_t i = 0; i < ARRAY_SIZE(pdm_clock_modes); i++) {
+		if (pdm_clock_modes[i].pcm_rate_hz == pcm_rate_hz) {
+			*mode_out = pdm_clock_modes[i].mode;
+			return 0;
+		}
+	}
+	return -EINVAL;
+}
+
+/* Per-channel FIR decimation-filter coefficients for STANDARD_VOICE_512 --
+ * see the pdm_clock_modes provenance note above. */
+static const uint32_t pdm_default_fir_voice512[PDM_MAX_FIR_COEFFICIENT] = {
+	0x00000001, 0x00000003, 0x00000003, 0x000007F4, 0x00000004, 0x000007ED,
+	0x000007F5, 0x000007F4, 0x000007D3, 0x000007FE, 0x000007BC, 0x000007E5,
+	0x000007D9, 0x00000793, 0x00000029, 0x0000072C, 0x00000072, 0x000002FD,
+};
+#define PDM_DEFAULT_CH_PHASE          0x0000001FUL
+#define PDM_DEFAULT_CH_GAIN           0x0000000DUL
+#define PDM_DEFAULT_CH_PEAK_DETECT_TH 0x00060002UL
+#define PDM_DEFAULT_CH_PEAK_DETECT_IT 0x0004002DUL
+#define PDM_DEFAULT_CH_IIR_COEF       0x00000004UL
+
+/* Prime one hardware channel's FIR/IIR/gain/phase/peak-detect state for
+ * STANDARD_VOICE_512 -- same calls, same values, as the bench-proven
+ * examples/aen/aen-pdm-mic-alif used to do by hand before every configure().
+ */
+static void pdm_apply_channel_defaults(const struct device *dev, uint8_t hw_ch)
+{
+	struct pdm_ch_config cc = { 0 };
+
+	pdm_set_ch_phase(dev, hw_ch, PDM_DEFAULT_CH_PHASE);
+	pdm_set_ch_gain(dev, hw_ch, PDM_DEFAULT_CH_GAIN);
+	pdm_set_peak_detect_th(dev, hw_ch, PDM_DEFAULT_CH_PEAK_DETECT_TH);
+	pdm_set_peak_detect_itv(dev, hw_ch, PDM_DEFAULT_CH_PEAK_DETECT_IT);
+
+	cc.ch_num = hw_ch;
+	memcpy(cc.ch_fir_coef, pdm_default_fir_voice512, sizeof(cc.ch_fir_coef));
+	cc.ch_iir_coef = PDM_DEFAULT_CH_IIR_COEF;
+	pdm_channel_config(dev, &cc);
+}
+
 /**
  * @fn		int dmic_alif_pdm_configure(const struct device *dev,
  *						struct dmic_cfg *config)
@@ -127,6 +212,9 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	struct pdm_data *pdata = DEV_DATA(dev);
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
 	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+	uint8_t hw_chan_mask;
+	uint8_t clk_mode;
+	int rc;
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
@@ -142,17 +230,63 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 		return -EINVAL;
 	}
 
+	/* Decode the STANDARD Zephyr channel-map encoding (issue #2133)
+	 * instead of reading req_chan_map_lo's low byte as if it were
+	 * already the hardware bitmask -- see alif_pdm_chanmap.h for the
+	 * pdm-controller -> HW-channel grounding.
+	 */
+	rc = alif_pdm_chanmap_translate(config->channel.req_chan_map_lo,
+					 config->channel.req_chan_map_hi,
+					 config->channel.req_num_chan, &hw_chan_mask);
+	if (rc != 0) {
+		LOG_DBG("config invalid: channel map not expressible in hardware\n");
+		return rc;
+	}
+
+	/* Reject a pcm_rate with no bench-verified clock mode rather than
+	 * leave the block silently asleep (issue #2133).
+	 */
+	rc = pdm_clock_mode_for_rate(config->streams[0].pcm_rate, &clk_mode);
+	if (rc != 0) {
+		LOG_DBG("config invalid: no PDM clock mode for pcm_rate=%u\n",
+			config->streams[0].pcm_rate);
+		return rc;
+	}
+
 	if (pdata) {
 		pdata->mem_slab = config->streams[0].mem_slab;
 		pdata->block_size = config->streams[0].block_size;
-		pdata->channel_map = config->channel.req_chan_map_lo & 0xFF;
+		pdata->channel_map = hw_chan_mask;
 
-		reg_val |= pdata->channel_map;
+		/* Replace the channel-enable field rather than OR into
+		 * whatever the register already held -- a previous
+		 * configure() call's channels must not leak into this one
+		 * (issue #2133).
+		 */
+		reg_val &= ~(uint32_t)PDM_CHANNEL_ENABLE;
+		reg_val |= hw_chan_mask;
 
 		/* Enable the PDM multiple channels */
 		sys_write32(reg_val, reg_base + PDM_CONFIG_REGISTER);
 
 		pdata->num_channels = config->channel.req_num_chan;
+
+		/* Standard dmic_configure()/dmic_trigger(START) contract:
+		 * prime every enabled channel's FIR/IIR/gain/phase/
+		 * peak-detect defaults, THEN select a real clock mode --
+		 * without this the block stays in MICROPHONE_SLEEP and the
+		 * FIFO never fills, even though configure() and trigger()
+		 * both return 0 (issue #2133). Same order as the
+		 * bench-proven examples/aen/aen-pdm-mic-alif.
+		 * pdm_channel_config()/pdm_mode() stay public so an app can
+		 * still override these afterward.
+		 */
+		for (uint8_t hw_ch = 0; hw_ch < MAX_NUM_CHANNELS; hw_ch++) {
+			if (hw_chan_mask & (1U << hw_ch)) {
+				pdm_apply_channel_defaults(dev, hw_ch);
+			}
+		}
+		pdm_mode(dev, clk_mode);
 
 		LOG_DBG("block size: %d\n", pdata->block_size);
 	}

@@ -43,9 +43,13 @@ them):
    LPPDM (per `from-alif.tsv`); with the wrong instance/pads nothing samples.
 2. **Wrong/missing pads** — now the SoM-TSV mic route (D0=P6_0/C0=P6_1,
    D2=P5_4/C2=P11_4); data pads carry `input-enable` (pad REN).
-3. **`MICROPHONE_SLEEP`** — the app must call `pdm_channel_config()` (FIR/IIR/gain
-   from the Alif reference) per channel + `pdm_mode(STANDARD_VOICE_512)` before
-   START; channel mask is the raw PDM mask (`0x33` = ch 0,1,4,5).
+3. **`MICROPHONE_SLEEP`** — as of issue #2133 the driver itself primes every
+   enabled channel's FIR/IIR/gain (from the Alif reference) and selects
+   `STANDARD_VOICE_512` as part of `dmic_configure()`; the app supplies only
+   the standard `dmic_build_channel_map()` channel map (not a raw PDM
+   bitmask) and calls no Alif-specific setup function. `pdm_mode()` /
+   `pdm_channel_config()` stay available for an app that wants to override
+   the driver's defaults.
 4. **EXPMST0 IP clock not forced** — set `EXPMST0_CTRL` (`0x4902F000`) bits 30/31
    (PCLK/IPCLK force), not just the bit-8 gate.
 5. **The 76.8 MHz audio source was OFF** — the load-bearing fix. The upstream Alif

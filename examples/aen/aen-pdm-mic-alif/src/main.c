@@ -8,6 +8,14 @@
  * / dmic_trigger / dmic_read) on DT_ALIAS(alp_pdm0) = &pdm.  The mics are wired to
  * the HP PDM (per the SoM from-alif.tsv), NOT the LPPDM.
  *
+ * As of issue #2133, dmic_alif_pdm_configure() honours the STANDARD dmic
+ * contract itself: it decodes dmic_build_channel_map()'s nibble encoding into
+ * the hardware channel-enable bits, and configure() alone primes the
+ * per-channel FIR/gain defaults and selects a real PDM clock mode (derived
+ * from streams[0].pcm_rate) -- no app-side pdm_mode() / pdm_channel_config()
+ * calls are needed for this, or any, capture. Those calls remain public only
+ * for an app that wants to override the driver's defaults.
+ *
  * PASS gate: the device is ready, dmic_configure + dmic_trigger(START) return 0,
  * and dmic_read returns blocks with non-zero, NON-CONSTANT samples (live acoustic
  * energy -- tap or speak near the mics).  A run that configures + reads cleanly but
@@ -16,21 +24,16 @@
  */
 
 #include <stdio.h>
-#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/audio/dmic.h>
-#include <zephyr/drivers/pdm/pdm_alif.h>
 
 #define PDM_NODE         DT_ALIAS(alp_pdm0)
-#define SAMPLE_RATE_HZ   16000
+#define SAMPLE_RATE_HZ   16000 /* the only pcm_rate the driver has a bench-proven clock mode for */
 #define SAMPLE_BIT_WIDTH 16
 #define NUM_CHANNELS     4 /* HP PDM: D0->ch0/1, D2->ch4/5 = the 4 MP34DT05 mics */
 
-/* The E1M-AEN801 routes its mics to HP-PDM data lines D0 (channels 0,1) and D2
- * (channels 4,5) -- see the board overlay / from-alif.tsv. */
-static const uint8_t mic_channels[NUM_CHANNELS] = { 0, 1, 4, 5 };
 #define READ_TIMEOUT_MS 2000
 /* 100 ms block: bytes = 2 * (rate/10) * channels */
 #define BLOCK_SIZE  (2u * (SAMPLE_RATE_HZ / 10u) * NUM_CHANNELS)
@@ -42,43 +45,6 @@ static const uint8_t mic_channels[NUM_CHANNELS] = { 0, 1, 4, 5 };
  * without an extra memcpy. BLOCK_COUNT=4 gives the driver headroom to keep
  * filling blocks while this app is still consuming the previous one. */
 K_MEM_SLAB_DEFINE_STATIC(pdm_slab, BLOCK_SIZE, BLOCK_COUNT, 4);
-
-/*
- * Per-channel FIR/IIR + gain/phase/peak-detect coefficients for STANDARD_VOICE
- * (PDM_MODE_STANDARD_VOICE_512_CLK_FRQ), copied VERBATIM from the Alif reference
- * dmic app (sdk-alif samples/drivers/audio/dmic_alif). These are NOT invented --
- * the FIR is the block's decimation filter for this clock mode. The driver leaves
- * the PDM clock-mode field at reset (MICROPHONE_SLEEP) until the app calls
- * pdm_mode(), and never programs the FIR/gain -- so configuring each enabled
- * channel + selecting a non-sleep mode here is what makes the FIFO actually fill.
- */
-static const uint32_t fir_voice512[PDM_MAX_FIR_COEFFICIENT] = {
-	0x00000001, 0x00000003, 0x00000003, 0x000007F4, 0x00000004, 0x000007ED,
-	0x000007F5, 0x000007F4, 0x000007D3, 0x000007FE, 0x000007BC, 0x000007E5,
-	0x000007D9, 0x00000793, 0x00000029, 0x0000072C, 0x00000072, 0x000002FD
-};
-#define CH_PHASE          0x0000001F
-#define CH_GAIN           0x0000000D
-#define CH_PEAK_DETECT_TH 0x00060002
-#define CH_PEAK_DETECT_IT 0x0004002D
-#define CH_IIR_COEF       0x00000004
-
-/* Program one PDM channel exactly as the Alif reference does, then the caller
- * selects the clock mode once for the block. */
-static void pdm_config_channel(const struct device *dmic, uint8_t ch)
-{
-	struct pdm_ch_config cc = { 0 };
-
-	pdm_set_ch_phase(dmic, ch, CH_PHASE);
-	pdm_set_ch_gain(dmic, ch, CH_GAIN);
-	pdm_set_peak_detect_th(dmic, ch, CH_PEAK_DETECT_TH);
-	pdm_set_peak_detect_itv(dmic, ch, CH_PEAK_DETECT_IT);
-
-	cc.ch_num = ch;
-	memcpy(cc.ch_fir_coef, fir_voice512, sizeof(cc.ch_fir_coef));
-	cc.ch_iir_coef = CH_IIR_COEF;
-	pdm_channel_config(dmic, &cc);
-}
 
 int main(void)
 {
@@ -96,12 +62,10 @@ int main(void)
 		.block_size = BLOCK_SIZE,
 		.mem_slab   = &pdm_slab,
 	};
-	/* The alif_pdm driver takes req_chan_map_lo's low byte VERBATIM as the PDM
-	 * hardware channel-enable mask (dmic_alif_pdm_configure: channel_map =
-	 * req_chan_map_lo & 0xFF), NOT the dmic_build_channel_map() nibble encoding.
-	 * Enable the mics' HW channels: D0 -> ch0/ch1, D2 -> ch4/ch5. */
-	uint32_t chan_map =
-	    PDM_MASK_CHANNEL_0 | PDM_MASK_CHANNEL_1 | PDM_MASK_CHANNEL_4 | PDM_MASK_CHANNEL_5;
+	/* Standard dmic_build_channel_map() encoding -- one nibble per logical
+	 * channel, (PDM controller, L/R). D0 is PDM controller 0 (mics 0/1);
+	 * D2 is PDM controller 2 (mics 2/3). The driver's alif_pdm_chanmap.h
+	 * translates this into the hardware channel-enable bits (0,1,4,5). */
 	struct dmic_cfg cfg = {
 		/* Acceptable range for the PDM bit clock the driver derives from the
 		 * 76.8 MHz audio source: wide enough to admit whatever divide the
@@ -119,7 +83,10 @@ int main(void)
 		    {
 		        .req_num_streams = 1,
 		        .req_num_chan    = NUM_CHANNELS,
-		        .req_chan_map_lo = chan_map,
+		        .req_chan_map_lo = dmic_build_channel_map(0, 0, PDM_CHAN_LEFT) |
+		                           dmic_build_channel_map(1, 0, PDM_CHAN_RIGHT) |
+		                           dmic_build_channel_map(2, 2, PDM_CHAN_LEFT) |
+		                           dmic_build_channel_map(3, 2, PDM_CHAN_RIGHT),
 		    },
 	};
 
@@ -135,15 +102,6 @@ int main(void)
 		printf("[pdm] RESULT FAIL: configure rc=%d\n[pdm] done\n", rc);
 		return 0;
 	}
-
-	/* Configure each enabled channel's FIR/IIR/gain, then select a non-sleep
-	 * clock mode -- WITHOUT this the PDM block stays in MICROPHONE_SLEEP and the
-	 * FIFO never fills (every read would -EAGAIN). pdm_mode() is app-side API. */
-	for (int i = 0; i < NUM_CHANNELS; i++) {
-		pdm_config_channel(dmic, mic_channels[i]);
-	}
-	pdm_mode(dmic, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ);
-	printf("[pdm] channels configured + clock mode = STANDARD_VOICE_512\n");
 
 	rc = dmic_trigger(dmic, DMIC_TRIGGER_START);
 	printf("[pdm] dmic_trigger(START) -> %d\n", rc);
