@@ -10,14 +10,14 @@
  * this class of bug):
  *
  *   - TRIGGER_START on an empty TX ring returns -ENOMEM (queue_get(),
- *     i2s_dw.c:144-147/794).
+ *     i2s_dw.c:144-147/809).
  *   - TRIGGER_START while already running returns -EIO (state must be
  *     READY, i2s_dw.c:279-283).
  *   - TRIGGER_STOP / TRIGGER_DRAIN while NOT running return -EIO
  *     (i2s_dw.c:301-304 / :315-321).
  *   - TRIGGER_DROP works from READY too and always releases every
  *     queued block back to the k_mem_slab captured at configure() time
- *     (tx_stream_disable() + tx_queue_drop(), i2s_dw.c:886-900),
+ *     (tx_stream_disable() + tx_queue_drop(), i2s_dw.c:901-915),
  *     mirroring the ONE trigger the real driver accepts unconditionally.
  *   - write() queues a block regardless of run state (queue_put()); a
  *     START consumes exactly one queued block per trigger (queue_get()).
@@ -35,7 +35,7 @@
  * RX (issue #2137 review round 2, finding 1): modeled with the SAME
  * shape as TX -- a single "currently filling" active block allocated at
  * START (mirrors rx_stream_start() allocating its own buffer from the
- * slab, i2s_dw.c:751-787) plus a small ring of COMPLETED blocks read()
+ * slab, i2s_dw.c:766-802) plus a small ring of COMPLETED blocks read()
  * drains from. Unlike TX, RX has no caller-supplied ring to refuse an
  * empty START against -- START only fails if already RUNNING or in
  * ERROR. fake_i2s_rx_simulate_overrun() is this fake's only way into RX
@@ -52,7 +52,7 @@
  * 2, finding 5). They can fail a trigger/write in states real i2s_dw
  * would answer with success (e.g. TRIGGER_START while the ring holds a
  * block and the fake is READY-equivalent -- queue_get() only fails on an
- * EMPTY ring, i2s_dw.c:794-798, and the READY-state check is the only
+ * EMPTY ring, i2s_dw.c:809-813, and the READY-state check is the only
  * OTHER way START fails, i2s_dw.c:279-283). Tests using any force-fail
  * knob are exercising this backend's retry/DROP/PREPARE bookkeeping
  * under an injected fault, standing in for whatever real cause (a
@@ -106,7 +106,7 @@ static unsigned int          forced_drop_remaining;
 static unsigned int          prepare_call_count;
 static unsigned int          drain_call_count;
 static fake_i2s_write_hook_t write_hook;
-static fake_i2s_write_hook_t prepare_hook;
+static fake_i2s_write_hook_t write_fail_hook;
 
 /* RX (issue #2137 review round 2, finding 1) -- see the file header
  * comment for the shape. */
@@ -137,7 +137,7 @@ void fake_i2s_reset(void)
 	prepare_call_count       = 0;
 	drain_call_count         = 0;
 	write_hook               = NULL;
-	prepare_hook             = NULL;
+	write_fail_hook          = NULL;
 
 	rx_head         = 0;
 	rx_len          = 0;
@@ -163,21 +163,9 @@ void fake_i2s_set_write_hook(fake_i2s_write_hook_t hook)
 	write_hook = hook;
 }
 
-void fake_i2s_set_prepare_hook(fake_i2s_write_hook_t hook)
+void fake_i2s_set_write_fail_hook(fake_i2s_write_hook_t hook)
 {
-	prepare_hook = hook;
-}
-
-void fake_i2s_tx_simulate_concurrent_recovery(void)
-{
-	/* Mirrors a CONCURRENT DROP (or another writer's own successful
-	 * PREPARE) already having cleared I2S_STATE_ERROR between our own
-	 * i2s_write() failing and our own PREPARE running (issue #2137
-	 * review round 2, finding 4) -- same tx_error effect DROP/PREPARE
-	 * themselves produce, without going through either trigger (no
-	 * queued blocks to touch: this fake never reaches this state with
-	 * anything queued, same as the real DROP/PREPARE from ERROR). */
-	tx_error = false;
+	write_fail_hook = hook;
 }
 
 void fake_i2s_tx_simulate_underrun(void)
@@ -268,31 +256,49 @@ void fake_i2s_rx_simulate_overrun(void)
 
 void fake_i2s_rx_complete_block(void)
 {
-	/* Mirrors the ISR's success path (i2s_dw.c's offset >= size branch):
-	 * hand the filled block to the completed-read ring, then allocate a
-	 * fresh one to keep filling -- a no-op if not genuinely RUNNING with
-	 * an active block, since that state cannot legitimately complete
-	 * anything. */
+	/* Mirrors the ISR's order exactly (issue #2137 review round 3, nit
+	 * 9): save the filled block, ALLOC THE NEXT ONE FIRST (i2s_dw.c:
+	 * 633-649), and only once that succeeds attempt to hand the filled
+	 * block off (queue_put(), i2s_dw.c:652-661) -- this fake's ring
+	 * standing in for that queue, "full" standing in for queue_put()
+	 * failing. Both error exits free the block that was filled, never
+	 * leaking it, matching the real driver's own #2137 fix; a no-op if
+	 * not genuinely RUNNING with an active block, since that state
+	 * cannot legitimately complete anything. */
 	if (!rx_running || rx_active_block == NULL) return;
-	if (rx_len < RX_RING_CAP) {
-		rx_ring[(rx_head + rx_len) % RX_RING_CAP] = (struct queue_item){
-			.block = rx_active_block,
-			.size  = rx_block_bytes,
-		};
-		rx_len++;
-	}
-	void *blk       = NULL;
-	int   err       = k_mem_slab_alloc(rx_mem_slab, &blk, K_NO_WAIT);
-	rx_active_block = (err == 0) ? blk : NULL;
+	void *mblk_tmp = rx_active_block;
+
+	void *blk = NULL;
+	int   err = k_mem_slab_alloc(rx_mem_slab, &blk, K_NO_WAIT);
 	if (err != 0) {
-		/* Same leak-class exit as fake_i2s_rx_simulate_overrun(), just
-		 * reached via the alloc-fail arm instead of the forced knob --
-		 * nothing to free here since the just-completed block was
-		 * already safely queued above, only the NEXT block's alloc
-		 * failed. */
-		rx_running = false;
-		rx_error   = true;
+		/* i2s_dw.c:641-649, exit 1 (issue #2137 finding 1's fix): free
+		 * the block that was filled -- nothing else references it. */
+		k_mem_slab_free(rx_mem_slab, mblk_tmp);
+		rx_active_block = NULL;
+		rx_running      = false;
+		rx_error        = true;
+		return;
 	}
+	rx_active_block = blk;
+
+	if (rx_len >= RX_RING_CAP) {
+		/* i2s_dw.c:652-661, exit 2 (issue #2137 finding 1's fix): free
+		 * the block that was filled -- the FRESH block just allocated
+		 * above is freed too, mirroring rx_stream_disable()'s own
+		 * generic free of stream->mem_block once the real ISR's
+		 * `goto rx_disable` unwinds there. */
+		k_mem_slab_free(rx_mem_slab, mblk_tmp);
+		k_mem_slab_free(rx_mem_slab, rx_active_block);
+		rx_active_block = NULL;
+		rx_running      = false;
+		rx_error        = true;
+		return;
+	}
+	rx_ring[(rx_head + rx_len) % RX_RING_CAP] = (struct queue_item){
+		.block = mblk_tmp,
+		.size  = rx_block_bytes,
+	};
+	rx_len++;
 }
 
 /* Free the oldest queued block back to the slab captured at configure()
@@ -364,7 +370,7 @@ static int fake_i2s_tx_trigger(enum i2s_trigger_cmd cmd)
 			forced_start_remaining--;
 			return forced_start_errno;
 		}
-		/* i2s_dw.c:144-147/794 -- queue_get() on an empty ring. */
+		/* i2s_dw.c:144-147/809 -- queue_get() on an empty ring. */
 		if (tx_len == 0) return -ENOMEM;
 		tx_free_one();
 		tx_running = true;
@@ -397,16 +403,6 @@ static int fake_i2s_tx_trigger(enum i2s_trigger_cmd cmd)
 		return 0;
 
 	case I2S_TRIGGER_PREPARE:
-		/* One-shot: fires BEFORE anything else below, standing in for
-		 * a concurrent DROP/PREPARE (a second writer, or a stop())
-		 * that already cleared tx_error between OUR OWN i2s_write()
-		 * failing and OUR OWN PREPARE running (issue #2137 review
-		 * round 2, finding 4). */
-		if (prepare_hook != NULL) {
-			fake_i2s_write_hook_t hook = prepare_hook;
-			prepare_hook               = NULL;
-			hook();
-		}
 		/* i2s_dw.c:340-344 -- the ONLY trigger valid FROM ERROR
 		 * (issue #2137); refused everywhere else. Counted regardless
 		 * of outcome -- fake_i2s_prepare_call_count() is how a test
@@ -437,7 +433,7 @@ static int fake_i2s_rx_trigger(enum i2s_trigger_cmd cmd)
 		if (rx_running || rx_error) return -EIO;
 		if (rx_mem_slab != NULL) {
 			void *blk = NULL;
-			/* i2s_dw.c:751-787 -- rx_stream_start() allocates its own
+			/* i2s_dw.c:766-802 -- rx_stream_start() allocates its own
 			 * buffer from the slab, unlike TX's dequeue-a-caller-
 			 * filled-ring. */
 			int err = k_mem_slab_alloc(rx_mem_slab, &blk, K_NO_WAIT);
@@ -520,7 +516,26 @@ static int fake_i2s_write(const struct device *dev, void *mem_block, size_t size
 	 * queue_put() accepts regardless of RUNNING vs READY, up to the
 	 * ring's capacity. */
 	ARG_UNUSED(dev);
-	if (tx_error) return -EIO;
+	if (tx_error) {
+		/* issue #2137 review round 3, finding 2: one-shot hook fired
+		 * from exactly the real race window z_write() has -- between
+		 * THIS i2s_write() call failing -EIO and z_write()'s own
+		 * PREPARE running next (both outside the backend lock at this
+		 * point: this call is the caller-visible side of that
+		 * unlocked i2s_write(), z_write()'s PREPARE hasn't taken the
+		 * lock yet). Runs a REAL alp_i2s_* call (write/stop/start) on
+		 * the SAME handle synchronously, standing in for a second
+		 * thread -- replaces the review round 2 knob
+		 * (fake_i2s_tx_simulate_concurrent_recovery()) that cleared
+		 * tx_error directly with no trigger and no flag update, a
+		 * state no real caller could ever produce. */
+		if (write_fail_hook != NULL) {
+			fake_i2s_write_hook_t hook = write_fail_hook;
+			write_fail_hook            = NULL;
+			hook();
+		}
+		return -EIO;
+	}
 	if (forced_write_remaining > 0) {
 		forced_write_remaining--;
 		return forced_write_errno;

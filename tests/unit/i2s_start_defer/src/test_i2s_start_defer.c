@@ -31,7 +31,7 @@
  * test_underrun_then_write_resumes_with_no_slab_leak, and
  * test_underrun_write_prepare_refused_propagates_original_error below.
  *
- * issue #2137 review round 2 closed six more gaps found against that
+ * issue #2137 review round 2 closed five more gaps found against that
  * first pass: the RX-side leak in i2s_dw.c's own overrun ISR path
  * (fixed at its actual source, not in this backend -- see
  * test_rx_overrun_recovers_no_slab_leak), a stale tx_started surviving
@@ -42,14 +42,26 @@
  * via fake_i2s_drain_call_count()), z_write() giving up on a refused
  * PREPARE instead of still retrying (test_underrun_write_retry_fails_
  * after_prepare_succeeds_no_leak proves the RETRY's own failure
- * surfaces correctly instead), z_start()'s own refused-PREPARE case
+ * surfaces correctly instead), and z_start()'s own refused-PREPARE case
  * having no direct test (test_underrun_start_prepare_refused_
- * propagates_original_error), and -- found only by writing that fifth
- * test's own first-pass fix and then testing IT -- a still-stale
- * tx_pending_start when a CONCURRENT recovery (not our own PREPARE)
- * clears ERROR first, which would otherwise silently strand a
- * genuinely-queued block with nothing ever firing its START
- * (test_underrun_write_retry_succeeds_despite_refused_prepare).
+ * propagates_original_error).
+ *
+ * Round 2's OWN first-pass fix for the refused-PREPARE-retry case
+ * introduced a NEW bug rather than closing one: it reset the TX flags
+ * UNCONDITIONALLY whenever this branch was entered, not only when THIS
+ * CALL's own PREPARE succeeded. Review round 3 reproduced this on real
+ * API interleavings (fake_i2s_set_write_fail_hook() -- see below) rather
+ * than the round-2 test's own knob, which cleared I2S_STATE_ERROR
+ * directly with no trigger and no flag update, a state no real caller
+ * could ever produce, and so could not catch it: see
+ * test_ilv_a_second_writer_after_concurrent_writer_recovery,
+ * test_ilv_b_writer_does_not_undo_concurrent_stop, and
+ * test_ilv_d_writer_resumes_after_concurrent_start_recovery. The fix
+ * reverts to resetting only on THIS call's own successful PREPARE --
+ * see z_write()'s own comment for why that is correct: every state-
+ * changing trigger updates the tx_* flags under the same lock it uses,
+ * so a concurrent call that already left ERROR has already set them
+ * correctly by the time this call's own PREPARE observes the refusal.
  *
  * fake_i2s.c models the real i2s_dw.c state machine closely enough to
  * catch all of the above: unlike tests/unit/i2s_write_bounds' always-
@@ -886,54 +898,150 @@ ZTEST(alp_i2s_start_defer, test_underrun_write_retry_fails_after_prepare_succeed
 	              "double-freed");
 }
 
-/* issue #2137 review round 2, finding 4's own regression proof: a
- * CONCURRENT recovery (another writer's PREPARE, or a stop()'s DROP)
- * clears I2S_STATE_ERROR between THIS write()'s own trigger failing and
- * THIS write()'s own PREPARE running -- so THIS PREPARE is legitimately
- * REFUSED (already READY), yet the retry that follows must still
- * succeed, AND must actually re-fire the deferred start: a first-pass
- * fix that only reset the TX flags when ITS OWN PREPARE succeeded left
- * tx_started stale-true and tx_pending_start false in exactly this case
- * (the original write()'s own -EIO already proves tx_started was wrong,
- * regardless of who fixed it), so the retried write silently queued a
- * block that never got played -- caught by asserting fake_i2s_tx_
- * running() actually goes true here, not just that write2_rc is ALP_OK. */
-static void concurrent_recovery_prepare_hook(void)
+/* issue #2137 review round 3, finding 1/2: real API interleavings against
+ * the actual race window z_write() has (between this write()'s own
+ * i2s_write() failing -EIO and this write()'s own PREPARE running, both
+ * OUTSIDE the backend lock at that point) -- run via
+ * fake_i2s_set_write_fail_hook(), which fires a REAL alp_i2s_* call on the
+ * SAME handle from exactly that window, standing in for a second thread
+ * without needing real ones. These reproduce the round-2 blocker directly:
+ * an unconditional flag reset on a REFUSED prepare stamps a fresh "needs
+ * restart" over flags a CONCURRENT call had already set correctly (every
+ * state-changing trigger updates the tx_* flags under the same lock it
+ * uses, so by the time this call's own PREPARE runs, the flags already
+ * reflect whatever that concurrent call actually did). */
+static alp_i2s_t   *ilv_handle;
+static alp_status_t ilv_inner_rc;
+static bool         ilv_running_after_inner;
+
+static void ilv_writer_hook(void)
 {
-	fake_i2s_tx_simulate_concurrent_recovery();
+	ilv_inner_rc            = write_block(ilv_handle);
+	ilv_running_after_inner = fake_i2s_tx_running();
 }
 
-ZTEST(alp_i2s_start_defer, test_underrun_write_retry_succeeds_despite_refused_prepare)
+static void ilv_stop_hook(void)
+{
+	ilv_inner_rc            = alp_i2s_stop(ilv_handle);
+	ilv_running_after_inner = fake_i2s_tx_running();
+}
+
+static void ilv_start_hook(void)
+{
+	ilv_inner_rc            = alp_i2s_start(ilv_handle);
+	ilv_running_after_inner = fake_i2s_tx_running();
+}
+
+/* Writer A's own write() races ahead and fully recovers (PREPARE succeeds,
+ * retry queues, START fires -- A ends up genuinely RUNNING) from INSIDE
+ * writer B's failed i2s_write(), before B's own PREPARE runs. B's retry
+ * must land on A's now-RUNNING stream and be accepted normally -- NOT tear
+ * it down by stamping a stale "needs restart" over A's valid tx_started. */
+ZTEST(alp_i2s_start_defer, test_ilv_a_second_writer_after_concurrent_writer_recovery)
 {
 	fake_i2s_reset();
-	alp_i2s_t *h = open_tx();
-
-	alp_status_t start_rc  = alp_i2s_start(h);
-	alp_status_t write1_rc = write_block(h);
+	alp_i2s_t *h            = open_tx();
+	ilv_handle              = h;
+	ilv_inner_rc            = -999;
+	ilv_running_after_inner = false;
+	alp_status_t start_rc   = alp_i2s_start(h);
+	alp_status_t w1_rc      = write_block(h);
 	fake_i2s_tx_simulate_underrun();
-
-	fake_i2s_set_prepare_hook(concurrent_recovery_prepare_hook);
-	alp_status_t write2_rc            = write_block(h);
-	size_t       prepare_calls        = fake_i2s_prepare_call_count();
-	bool         running_after_write2 = fake_i2s_tx_running();
-
+	bool in_err = fake_i2s_tx_in_error();
+	fake_i2s_set_write_fail_hook(ilv_writer_hook);
+	alp_status_t wb_rc           = write_block(h);
+	bool         running_after_b = fake_i2s_tx_running();
+	size_t       depth           = fake_i2s_tx_queue_depth();
+	size_t       free_after      = fake_i2s_slab_free_count();
 	alp_i2s_close(h);
-	fake_i2s_set_prepare_hook(NULL);
+	fake_i2s_set_write_fail_hook(NULL);
+	TC_PRINT("ILV-A start=%d w1=%d in_err=%d writerA=%d running_after_A=%d writerB=%d "
+	         "running_after_B=%d depth=%zu free=%zu\n",
+	         (int)start_rc,
+	         (int)w1_rc,
+	         (int)in_err,
+	         (int)ilv_inner_rc,
+	         (int)ilv_running_after_inner,
+	         (int)wb_rc,
+	         (int)running_after_b,
+	         depth,
+	         free_after);
+	zassert_equal(ilv_inner_rc, ALP_OK);
+	zassert_true(ilv_running_after_inner);
+	zassert_true(running_after_b, "writer B must not tear down the RUNNING stream of writer A");
+	zassert_equal(wb_rc, ALP_OK, "writer B retry landed on a RUNNING stream, must be accepted");
+}
 
-	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
-	zassert_equal(start_rc, ALP_OK);
-	zassert_equal(write1_rc, ALP_OK);
-	zassert_equal(prepare_calls,
-	              1u,
-	              "our own PREPARE must have been attempted (and correctly refused, since the "
-	              "concurrent recovery already cleared ERROR first)");
-	zassert_equal(write2_rc,
-	              ALP_OK,
-	              "a refused PREPARE must not abandon the write when the retry itself succeeds");
-	zassert_true(running_after_write2,
-	             "the retry succeeding must also re-fire the deferred start -- a flag reset "
-	             "gated on OUR OWN PREPARE succeeding would leave this stream silently stalled "
-	             "with a block queued but never played");
+/* A concurrent stop() wins the race and genuinely stops the stream (DROP
+ * succeeds) from inside this writer's failed i2s_write(), before this
+ * writer's own PREPARE runs. This writer's retry must NOT resurrect
+ * playback the caller just explicitly stopped -- only the caller's own
+ * next start() should. */
+ZTEST(alp_i2s_start_defer, test_ilv_b_writer_does_not_undo_concurrent_stop)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h            = open_tx();
+	ilv_handle              = h;
+	ilv_inner_rc            = -999;
+	ilv_running_after_inner = true;
+	alp_status_t start_rc   = alp_i2s_start(h);
+	alp_status_t w1_rc      = write_block(h);
+	fake_i2s_tx_simulate_underrun();
+	fake_i2s_set_write_fail_hook(ilv_stop_hook);
+	alp_status_t wb_rc                = write_block(h);
+	bool         running_after_b      = fake_i2s_tx_running();
+	alp_status_t start2_rc            = alp_i2s_start(h);
+	bool         running_after_start2 = fake_i2s_tx_running();
+	alp_i2s_close(h);
+	fake_i2s_set_write_fail_hook(NULL);
+	TC_PRINT("ILV-B start=%d w1=%d stop=%d running_after_stop=%d writer=%d "
+	         "running_after_writer=%d start2=%d running_after_start2=%d\n",
+	         (int)start_rc,
+	         (int)w1_rc,
+	         (int)ilv_inner_rc,
+	         (int)ilv_running_after_inner,
+	         (int)wb_rc,
+	         (int)running_after_b,
+	         (int)start2_rc,
+	         (int)running_after_start2);
+	zassert_equal(ilv_inner_rc, ALP_OK);
+	zassert_false(ilv_running_after_inner);
+	zassert_false(running_after_b, "a writer that raced stop() must not restart playback");
+	zassert_equal(start2_rc, ALP_OK, "the start() the caller issues after stop() must not fail");
+}
+
+/* A concurrent start() wins the race and fully recovers the stream (its
+ * own PREPARE succeeds, ring is empty so it re-defers) from inside this
+ * writer's failed i2s_write(), before this writer's own PREPARE runs. This
+ * writer's retry must still succeed and resume playback -- the concurrent
+ * start() alone left nothing queued, so this write is what actually fires
+ * the real trigger. */
+ZTEST(alp_i2s_start_defer, test_ilv_d_writer_resumes_after_concurrent_start_recovery)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h            = open_tx();
+	ilv_handle              = h;
+	ilv_inner_rc            = -999;
+	ilv_running_after_inner = true;
+	alp_status_t start_rc   = alp_i2s_start(h);
+	alp_status_t w1_rc      = write_block(h);
+	fake_i2s_tx_simulate_underrun();
+	fake_i2s_set_write_fail_hook(ilv_start_hook);
+	alp_status_t wb_rc           = write_block(h);
+	bool         running_after_b = fake_i2s_tx_running();
+	alp_i2s_close(h);
+	fake_i2s_set_write_fail_hook(NULL);
+	TC_PRINT("ILV-D start=%d w1=%d start2=%d running_after_start2=%d writer=%d "
+	         "running_after_writer=%d\n",
+	         (int)start_rc,
+	         (int)w1_rc,
+	         (int)ilv_inner_rc,
+	         (int)ilv_running_after_inner,
+	         (int)wb_rc,
+	         (int)running_after_b);
+	zassert_equal(ilv_inner_rc, ALP_OK);
+	zassert_equal(wb_rc, ALP_OK);
+	zassert_true(running_after_b, "the writer must resume playback after a concurrent start()");
 }
 
 /* issue #2137 review round 2, finding 5 (optional case): force the DROP

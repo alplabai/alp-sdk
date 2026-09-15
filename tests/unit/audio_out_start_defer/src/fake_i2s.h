@@ -55,32 +55,23 @@ typedef void (*fake_i2s_write_hook_t)(void);
 void fake_i2s_set_write_hook(fake_i2s_write_hook_t hook);
 
 /**
- * @brief Same one-shot-hook shape as fake_i2s_set_write_hook(), but run at
- *        the TOP of the fake's TX TRIGGER_PREPARE handling -- i.e. from
- *        INSIDE the real i2s_trigger(..., I2S_TRIGGER_PREPARE) call
- *        z_write() makes, BEFORE that PREPARE's own state check. Lets a
- *        single-threaded ztest deterministically reproduce issue #2137
- *        review round 2's finding 4: a CONCURRENT recovery (another
- *        writer's own PREPARE, or a stop()'s DROP) that clears
- *        I2S_STATE_ERROR between THIS write()'s own trigger failing and
- *        THIS write()'s own PREPARE running -- which makes THIS PREPARE
- *        legitimately REFUSED (already READY, nothing to prepare from),
- *        even though the retry that follows still succeeds for real.
+ * @brief Same one-shot-hook shape as fake_i2s_set_write_hook(), but run
+ *        from INSIDE fake_i2s_write() at the exact instant it is about to
+ *        return -EIO for I2S_STATE_ERROR -- i.e. the real race window
+ *        z_write() has: this call's own i2s_write() has already failed,
+ *        but z_write() has not yet taken its lock to run its own PREPARE.
+ *        Lets a single-threaded ztest run a REAL alp_i2s_write() /
+ *        alp_i2s_stop() / alp_i2s_start() call on the SAME handle right
+ *        there, standing in for a second thread (issue #2137 review round
+ *        3, finding 2 -- replaces a round-2 knob,
+ *        fake_i2s_tx_simulate_concurrent_recovery(), that cleared
+ *        tx_error directly with no trigger and no flag update, a state no
+ *        real caller could ever produce).
  *
  * Consumed after one call (set back to NULL); pass NULL to clear it
  * early. There is exactly one hook slot, same caveat as the write hook.
  */
-void fake_i2s_set_prepare_hook(fake_i2s_write_hook_t hook);
-
-/**
- * @brief Clear I2S_STATE_ERROR the way a CONCURRENT DROP or PREPARE
- *        would, without going through either trigger -- the effect a
- *        fake_i2s_set_prepare_hook() callback applies to model "someone
- *        else already recovered the stream" (issue #2137 review round 2,
- *        finding 4). Intended to be called FROM a prepare hook, not
- *        directly by test bodies (though nothing stops it).
- */
-void fake_i2s_tx_simulate_concurrent_recovery(void);
+void fake_i2s_set_write_fail_hook(fake_i2s_write_hook_t hook);
 
 /**
  * @brief Force a TX underrun: mirrors zephyr/drivers/i2s/i2s_dw.c's TX
