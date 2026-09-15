@@ -561,11 +561,18 @@ reply's `radio_ok_out` to learn whether the *previous* apply was realised.
 
 > **Known issue ([#1691](https://github.com/alplabai/alp-sdk/issues/1691)):**
 > repeated BLE advertise/stop cycles can wedge the bridge — requests time out,
-> then fail, and it does not self-heal. Firmware diagnostics across the fault show
-> the CC3501E healthy the whole time (slave armed, READY high, transfers still
-> completing, all error counters zero), so no firmware self-heal can detect it.
-> `cc3501e_recover()` is the escape hatch: a warm reset recovered every observed
-> wedge. Not power-related — it reproduces with no power policy applied at all.
+> then fail. Firmware diagnostics across the fault show the CC3501E healthy
+> the whole time (slave armed, READY high, transfers still completing, all
+> error counters zero), so the FIRMWARE cannot self-heal it — it has no way
+> to know anything is wrong. The HOST can, and does automatically since
+> issue [#2126](https://github.com/alplabai/alp-sdk/issues/2126):
+> `cc3501e_link_check_and_recover()` is wired into every worker-routed op's
+> own failure exit (`CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER`, default `y`) and
+> probes, then warm-resets via `cc3501e_recover()` below, with no application
+> code required. `cc3501e_recover()` remains the manual escape hatch (`alp
+> companion recover` on the console) for a caller that wants it by hand — a
+> warm reset has recovered every observed wedge. Not power-related — it
+> reproduces with no power policy applied at all.
 
 ### Long gaps: cut the supply (`cc3501e_power_off()`)
 

@@ -61,6 +61,62 @@ commands report the bridge is not ready. See
 | `alp companion ping` | Liveness round-trip (cheapest is-it-alive probe). |
 | `alp companion reset` | Soft-reset the CC3501E firmware in-band (the link drops; re-sync after). |
 | `alp companion bench [n]` | Time `n` `GET_VERSION` round-trips over the bridge. |
+| `alp companion recover` | Warm-reset the bridge on demand (see "Link auto-recovery" below); refuses while an OTA session is open; prints the recovery count. |
+
+## Link auto-recovery (issue #2126)
+
+e1m-aen-evk-01 has been observed to wedge the bridge link mid Wi-Fi-connect
+roughly 3 times in 50 connects, for a cause that isn't fully identified yet
+(firmware-side self-heal is tracked separately,
+cc3501e-bridge-firmware#142). Once wedged, every request fails (`ver` → `-4`
+or `-5`) until the board is power-cycled — except a warm `nRESET`
+(`cc3501e_recover()`) has recovered every observed wedge so far (#1691).
+
+`cc3501e_link_check_and_recover()` wires that warm reset into the driver's
+own failure exits (`poll_by_repeat()`'s terminal return and
+`cc3501e_wifi_connect()`'s own timeout exit), so an application does not have
+to detect and recover a wedge itself:
+
+1. A top-level op returns `ALP_ERR_IO`/`ALP_ERR_TIMEOUT` with **no reply
+   status ever decoded** off the wire (the same signal the transport uses
+   internally to tell a real device-side error apart from silence).
+2. Up to 24 bare `PING`s, 500 ms apart (~12–18 s), check whether the link is
+   merely in one of the transport's known transient windows (a radio-down
+   window, a teardown/re-arm race) rather than genuinely dead. The probe
+   stops at the first answer. It is deliberately longer than the bridge's
+   own 10 s radio-down window, so a busy-but-healthy bridge is never reset.
+3. Only if every probe fails does it warm-reset (`cc3501e_recover()`),
+   re-confirm the firmware's protocol version, and clear the driver's
+   same-context busy latches — the Wi-Fi association, BLE host, and any open
+   sockets are gone either way, exactly as after a manual `alp companion
+   recover` or a `cc3501e_recover()` call.
+
+Guards: never while an OTA/update session is open (the device is
+deliberately deaf for 22–41 s of slot erase there, and a reset would abort
+the session); a cooldown between attempts on the same link, starting at 30 s
+and doubling to 5 minutes while attempts keep failing, back to 30 s once one
+succeeds; only one recovery at a time, holding the link's request lock from
+the reset through the confirming `PING`; and
+`CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER` (default `y`) to turn the whole
+mechanism off on a bench that wants to observe a wedge rather than have the
+driver clear it. The measurement apps `aen-cc3501e-wedge-postmortem`,
+`aen-cc3501e-command-sweep` and `aen-cc3501e-silent-scan-probe` set it to
+`n` for that reason.
+
+A successful recovery logs `cc3501e: link recovered by warm reset (#n)` and
+bumps `ctx->recover_count`, which a host application can read directly for
+its own telemetry, or subscribe to with `cc3501e_set_recover_callback()`.
+
+`alp companion recover` runs the same `cc3501e_recover()` the automatic path
+does, with the same OTA-session refusal, the same one-at-a-time rule and the
+same shared cooldown timestamp — it just skips the probe, for an operator
+who already knows the link needs it. It bumps the same `recover_count`.
+
+After any recovery the bridge has rebooted: the Wi-Fi association, the BLE
+host and every open socket are gone. Socket handles minted before it now
+carry the previous link epoch in their upper byte and fail closed with
+`ALP_ERR_NOT_READY`; open new ones. A proxied GPIO pin configured before the
+recovery answers `ALP_ERR_NOT_READY` until it is configured again.
 
 ## `alp companion wifi`
 

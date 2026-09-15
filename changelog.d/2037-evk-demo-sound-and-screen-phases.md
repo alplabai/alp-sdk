@@ -10,9 +10,10 @@ over I2C, and `alp_audio_out_set_volume()` opened and started at a small
 fraction of unity before `tas2563_set_mode(ACTIVE)` is ever called — with
 the volume only ramped up afterwards, capped well below half of unity, for
 one short tone. Both amps (U27 `0x4D`, U28 `0x4E`) are brought up, both
-fault words are read over I2C before and after (a
-`TAS2563_FAULT_SHUTDOWN_CAUSES` bit set after the tone is a real `FAIL`,
-never swallowed), and the amplifier is idle-restored on every exit path,
+fault words are read over I2C before and after (any
+`TAS2563_FAULT_SHUTDOWN_CAUSES` bit set after the tone except
+`TAS2563_FAULT_TDM_CLOCK` (see #2146) is a real `FAIL`, never swallowed), and
+the amplifier is idle-restored on every exit path,
 including every failure — the same discipline phase 6 (RGB LED) uses, not
 phase 9 (SD mux)'s deliberate non-restore.
 
