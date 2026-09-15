@@ -93,29 +93,57 @@ extern "C" {
 /* describe the hardware those macros bind to.                        */
 /* ================================================================== */
 
-/* SDIO 74LVC157 multiplexer (M.2 E-key SDIO vs microSD card slot).
+/* SDIO multiplexer (M.2 E-key SDIO vs microSD card slot).
  *
- * Two 74LVC157 quad 2:1 muxes (U38 for data lines, U39 for CLK/CMD/RST)
- * pick which device drives the SoM's single SDIO bus.  Control pins:
+ * Two 2:1 mux/switch ICs (U38 for data lines, U39 for CLK/CMD/RST) pick
+ * which device drives the SoM's single SDIO bus.  Control pins:
  *
  *   /E (active-low enable) = E1M IO20 -- both U38 and U39 share /E
  *   S  (select)            = E1M IO21
  *
- * Per the 74LVC157 truth table:
+ * Per the mux truth table:
  *   /E = 0, S = 0  ->  microSD card slot routed to SoM
  *   /E = 0, S = 1  ->  M.2 E-key SDIO routed to SoM
- *   /E = 1         ->  outputs forced LOW (both buses isolated; safe-default)
+ *   /E = 1         ->  PART-DEPENDENT, see below -- neither state on
+ *                       this pin is a universally safe default
+ *
+ * U38/U39 shipped as 74LVC157 on the original 2626-R2 BOM; the standard
+ * fit going forward is a 74LV3257 FET bus-switch rework.  The two parts
+ * behave differently when disabled, on the SAME SoC-side nets (U39
+ * `3Y` = `E1M_CLK`, `4Y` = `E1M_CMD`; U38 `1Y`..`4Y` = `E1M_D3`..`E1M_D0`,
+ * per the authoritative 2626-R2 carrier netlist):
+ *
+ *   - 74LVC157 (original BOM): /E = 1 drives those SoC-side nets LOW.
+ *     That is NOT isolation -- it contends with an active SD host
+ *     controller drive on the same pins and must not be treated as a
+ *     safe default.
+ *   - 74LV3257 (the rework, now the standard fit): /E = 1 is genuine
+ *     Hi-Z on those nets.
  *
  * IMPORTANT: per the user-supplied wiring + this repo's
  * metadata/e1m_modules/aen/from-cc3501e.tsv, IO20 (/E) is proxied
- * through the on-module CC3501E (GPIO_26 on the CC3501E side) and
- * firmware drives it by dispatching GPIO_WRITE commands over the
- * inter-chip SPI1 (see <alp/protocol/cc3501e.h>'s
+ * through the on-module CC3501E (GPIO_26 on the CC3501E side) on BOTH
+ * hardware revisions, and firmware drives it by dispatching GPIO_WRITE
+ * commands over the inter-chip SPI1 (see <alp/protocol/cc3501e.h>'s
  * ALP_CC3501E_CMD_GPIO_WRITE), NOT via Alif's GPIO peripheral.  IO21
- * (S) is NOT proxied on 2626-R2 -- it is `dispatch: unrouted`
- * (physically open, no CC3501E or Alif termination; #1854) and is
- * instead hardware-strapped to a fixed level (microSD by default on
- * this EVK), so firmware cannot change the SDIO select at runtime.
+ * (S) is REVISION-DEPENDENT
+ * (metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides`):
+ *
+ *   - r1: IO21 IS CC3501E-proxied (GPIO_30) and firmware-drivable the
+ *     same way as /E.  HAZARD: the same select net also reaches header
+ *     P18 pin 1 (`+3V3`) through R198 (0 ohm) -- fitting P18's jumper
+ *     while firmware drives IO21 LOW makes CC3501E GPIO_30 sink the
+ *     +3V3 rail.  Fit the jumper or drive the pin, never both.
+ *   - r2: IO21 is `dispatch: unrouted` -- it is NOT proxied at all
+ *     (physically open, no CC3501E or Alif termination; #1854) and is
+ *     instead hardware-strapped to a fixed level via R198/R27/header
+ *     P18 (microSD by default on this EVK), so firmware cannot change
+ *     the SDIO select at runtime.
+ *
+ * Take the revision from the module, not from this comment: `alp board`
+ * prints it out of the EEPROM manifest.  Portable code should not
+ * branch on it by hand -- open the pin by its E1M_* id and let the SDK
+ * apply the per-rev `pad_route_overrides`.
  *
  * EVK_PIN_SDIO_MUX_EN (= ALP_E1M_GPIO_IO20) and EVK_PIN_SDIO_MUX_SEL
  * (= ALP_E1M_GPIO_IO21), and the `evk_sdio_select_t` enum, are

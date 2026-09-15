@@ -136,8 +136,12 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   jack stays dark.  Each jack carries the standard activity LEDs
   (`ETH*_LED0`, `ETH*_LED1`).
 - **CAN bus:** TCAN1044A transceiver, jumpers JP1–JP4, header J9.
-- **microSD:** standard slot multiplexed via 74LVC157 with the M.2
-  Key E SDIO interface — software must pick which one is active.
+- **microSD:** standard slot multiplexed via 74LVC157/74LV3257 with
+  the M.2 Key E SDIO interface. The select is hardware-strapped on
+  r2 (not software-drivable — the default is the microSD slot); r1
+  can drive it from firmware over the CC3501E GPIO proxy, but doing
+  so while header P18's jumper is fitted is a hardware hazard (see
+  `include/alp/boards/alp_e1m_evk.h`).
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails

@@ -79,9 +79,10 @@ those six Alif pins are the only place the CC3501E's SDIO can land.
 
 Two further constraints stack behind that, both of which still apply if
 the links are ever populated: the Alif Ensemble has a **single SDIO
-controller**, shared at board level (a 74LVC157 mux, `SDIO_MUX_EN` =
-`GPIO_26`; `SDIO_MUX_SEL` is NOT a CC3501E pin on 2626-R2 -- it is
-hardware-strapped, not firmware-driven, see "Safe-default mux state"
+controller**, shared at board level (a 74LVC157/74LV3257 mux,
+`SDIO_MUX_EN` = `GPIO_26` on both hw revisions; `SDIO_MUX_SEL` is
+firmware-drivable only on r1 (`GPIO_30`) -- on r2 it is NOT a CC3501E
+pin at all, it is hardware-strapped, see "Safe-default mux state"
 below) with the micro-SD slot -- so the CC3501E and an SD card can
 never use it at the same time, only time-share it -- and the Alif's
 single controller is committed to the SD card in the current product.
@@ -514,16 +515,38 @@ events don't sit in a queue).
 
 On boot, before the Alif-side has connected over SPI1, the
 firmware should drive its proxied mux-control pins to states
-that ISOLATE all the downstream buses:
+that ISOLATE all the downstream buses -- with the caveat below that
+"HIGH" does not mean isolation on every fit of these mux parts:
 
-- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 -> outputs forced
-  LOW, both buses isolated).
-- `SDIO_MUX_SEL`: not a CC3501E pin on 2626-R2 -- `E1M_GPIO_IO21` is
-  `dispatch: unrouted` (#1854) and the select is hardware-strapped
-  (microSD by default on this EVK), so firmware has no control over it
-  here regardless of /E.
-- `I2S_MUX_SEL` (`GPIO_13`): don't-care (the /E pin is on the
-  Alif side and defaults to disable).
+- `SDIO_MUX_EN` (`GPIO_26`, both hw revisions): HIGH (active-low
+  enable, so HIGH disables the mux). What HIGH actually does to the
+  downstream SoC-side nets is PART-DEPENDENT, not a safe default on
+  every board: the original 2626-R2 BOM's 74LVC157 drives those nets
+  LOW when disabled, which contends with an active SD host controller
+  rather than isolating anything; the 74LV3257 bus-switch rework (the
+  standard fit going forward) is genuine Hi-Z at HIGH. See
+  `include/alp/boards/alp_e1m_evk.h`'s SDIO mux block for the exact
+  net mapping.
+- `SDIO_MUX_SEL`: revision-dependent, not a single CC3501E pin.
+  r2: not a CC3501E pin at all -- `E1M_GPIO_IO21` is `dispatch:
+  unrouted` (#1854) and the select is hardware-strapped (microSD by
+  default on this EVK), so firmware has no control over it here
+  regardless of `/E`. r1: IS a CC3501E pin, `GPIO_30`
+  (`metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`),
+  and IS firmware-drivable -- but the same net also reaches header
+  P18 pin 1 (`+3V3`) through `R198` (0 ohm), so driving it LOW while
+  P18's jumper is fitted makes `GPIO_30` sink the +3V3 rail. Fit the
+  jumper or drive the pin, never both.
+- `I2S_MUX_EN` (`GPIO_30` on r2 only -- on r1 `IO8` is a direct Alif
+  GPIO, not proxied through this coprocessor at all, per
+  `metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`
+  and `metadata/e1m_modules/aen/from-cc3501e.tsv`): on r2, HIGH
+  (active-low enable, so HIGH disables the mux); the same
+  part-dependent LOW-vs-Hi-Z caveat as `SDIO_MUX_EN` above applies to
+  U46, the I2S mux this pin controls.
+- `I2S_MUX_SEL` (`GPIO_13`, both hw revisions): don't-care while
+  `I2S_MUX_EN` is disabled -- this select pin (unlike its enable
+  counterpart) is CC3501E-side on both revisions.
 - `USB2_MUX_SEL` (`GPIO_2`): default to 0 (USB-A connector
   routed; M.2 E-key USB isolated).
 

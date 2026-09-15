@@ -49,10 +49,13 @@
  * receive path, and removing it reproduces the earlier bug where a rotary
  * encoder pad also read wrong until PADCTRL_READ_ENABLE was set.
  *
- * CARD REACHABILITY -- the EVK microSD is behind a 74LVC157 SDIO mux whose
- * EN (IO20) + SEL (IO21) are BOTH on the CC3501E side (driven over the SPI
- * bridge), so no card is reachable until that bridge routes the mux.  cd-gpios is
- * omitted (the driver falls back to controller card-detect).
+ * CARD REACHABILITY -- the EVK microSD is behind a 74LVC157/74LV3257 SDIO
+ * mux whose EN (IO20) is CC3501E-side (driven over the SPI bridge) on both
+ * hardware revisions, so no card is reachable until that bridge drives EN.
+ * SEL (IO21) is revision-dependent, not always CC3501E-side: on r1 it is
+ * also CC3501E-proxied; on r2 it is unrouted and hardware-strapped instead
+ * (metadata/e1m_modules/aen/hw-revisions.yaml).  cd-gpios is omitted (the
+ * driver falls back to controller card-detect).
  *
  * SD_RST (#2035) -- P14_2 (SD_RST_B's pad) is muxed here as plain GPIO, not
  * as its SD_RST_B alternate function, and driven by main() as a bit-banged

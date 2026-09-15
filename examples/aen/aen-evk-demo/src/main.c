@@ -1904,10 +1904,12 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  *
  * WHAT IT LEAVES BEHIND. WIFI_EN stays HIGH, `cc35_fw` stays bound, and the
  * BLE controller stays enabled when it came up -- deliberately, because the
- * SD-card phase's SDIO mux (EN/SEL on CC35 GPIO_26 / GPIO_30) is reachable
- * only through this coprocessor, so powering it back down here would make
- * that phase impossible to add later. The cost is that phases 9-14 run with
- * both radios up; on a bench-diagnostic image that is the right trade.
+ * SD-card phase's SDIO mux ENABLE (CC35 GPIO_26, both hw revisions; SELECT
+ * is NOT CC3501E-proxied on this bench module's r2 -- see phase 9's own
+ * comment) is reachable only through this coprocessor, so powering it back
+ * down here would make that phase impossible to add later. The cost is that
+ * phases 9-14 run with both radios up; on a bench-diagnostic image that is
+ * the right trade.
  */
 
 /* Bounded retry for the first PING. cc3501e_reset() has already waited out
@@ -1957,7 +1959,8 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  *     with CONFIG_MAIN_STACK_SIZE=32768; a static handle is cheaper and this
  *     app has fourteen other phases to fund.
  *  2. The SD-card phase needs this same bound handle to reach the SDIO mux
- *     on CC35 GPIO_26/GPIO_30. A handle scoped to phase 8's frame would be
+ *     ENABLE on CC35 GPIO_26 (SELECT is not CC3501E-proxied on this bench
+ *     module's r2). A handle scoped to phase 8's frame would be
  *     gone by the time phase 9 ran.
  */
 static cc3501e_t cc35_fw;
