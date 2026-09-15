@@ -346,6 +346,51 @@ static int sd_diag_send_cmd0(void)
 	return sdhc_request(SDHC_DEV, &cmd, NULL);
 }
 
+/* CMD8 (SEND_IF_COND) timeout/retries for the card-presence probe below --
+ * a few retries, unlike CMD0's zero above, because a card that just saw two
+ * CMD0s (PROBE 1/2) can need a beat before it answers CMD8; still nowhere
+ * near CONFIG_SD_RETRY_COUNT (subsys/sd's own, much longer, retry budget). */
+#define SD_DIAG_CMD8_TIMEOUT_MS 100
+#define SD_DIAG_CMD8_RETRIES    2u
+
+/*
+ * BENCH-TEST fix (this branch): does a card physically answer CMD8, checked
+ * BEFORE disk_access_init() and independent of it? Bench evidence (see the
+ * file header) is that -134/-ENOTSUP from disk_access_init() is ambiguous by
+ * itself -- subsys/sd/sd.c:239 returns the identical code for "the bus is
+ * dead, CMD8 never got a response" and "the card fully identified (ACMD41,
+ * CMD2/3/9/7/55 all cc:1) then failed on the FIRST data-bearing command,
+ * deep inside sdmmc_card_init()". This probe answers the CMD8 half on its
+ * own, directly through sdhc_request() -- same pattern as sd_diag_send_cmd0()
+ * above, same command subsys/sd/sd.c's sd_send_interface_condition() sends
+ * (CMD0 then CMD8, SD_IF_COND_VHS_3V3 | SD_IF_COND_CHECK, R7) -- so the
+ * verdict below can tell "no card answered" apart from "a card answered but
+ * something past CMD8 (e.g. ADMA/DMA translation) failed".
+ */
+static bool sd_diag_probe_card_present(void)
+{
+	(void)sd_diag_send_cmd0();
+
+	struct sdhc_command cmd = {
+		.opcode        = SD_SEND_IF_COND,
+		.arg           = SD_IF_COND_VHS_3V3 | SD_IF_COND_CHECK,
+		.response_type = SD_RSP_TYPE_R7,
+		.retries       = SD_DIAG_CMD8_RETRIES,
+		.timeout_ms    = SD_DIAG_CMD8_TIMEOUT_MS,
+	};
+
+	int rc = sdhc_request(SDHC_DEV, &cmd, NULL);
+
+	printf("[sd][probe3] card-presence CMD8 (SEND_IF_COND) -> %d%s\n",
+	       rc,
+	       (rc == 0) ? ((cmd.response[0] & 0xFFu) == SD_IF_COND_CHECK
+	                        ? " (check pattern echoed -- a card is present and answering)"
+	                        : " (no check-pattern echo -- treating as no card)")
+	                 : " (no response -- no card, or the bus/mux is dead)");
+
+	return (rc == 0) && ((cmd.response[0] & 0xFFu) == SD_IF_COND_CHECK);
+}
+
 /*
  * Settle time for the CC3501E driving its pad and the card seeing its
  * lines -- the mux itself is a 74LV3257/74LVC157, combinational, ns-scale.
@@ -484,10 +529,13 @@ static bool sd_mux_enable(void)
 #define SD_PROBE3_HEXDUMP_PERLINE 16u
 
 typedef enum {
-	SD_VERDICT_CONTROLLER_DEAD, /* clock gate or CAPABILITIES1 wrong -- PROBE 1/2's layer */
-	SD_VERDICT_NO_CARD,         /* controller alive, card never answers -- mux or card layer */
-	SD_VERDICT_PARTIAL,         /* card enumerated but geometry/read did not fully succeed */
-	SD_VERDICT_CARD_OK,         /* enumerated AND a block read back -- the rework works */
+	SD_VERDICT_CONTROLLER_DEAD,       /* clock gate or CAPABILITIES1 wrong -- PROBE 1/2's layer */
+	SD_VERDICT_NO_CARD,               /* CMD8 itself got no response -- mux or card layer */
+	SD_VERDICT_CARD_SEEN_INIT_FAILED, /* CMD8 answered, but disk_access_init() still failed --
+					    * a card IS there; the failure is past CMD8 (see
+					    * sd_probe3_full_enumeration()'s printf for detail) */
+	SD_VERDICT_PARTIAL,               /* card enumerated but geometry/read did not fully succeed */
+	SD_VERDICT_CARD_OK,               /* enumerated AND a block read back -- the rework works */
 } sd_verdict_t;
 
 /* `total_len` is the geometry ioctl's reported sector size; only the first
@@ -517,16 +565,37 @@ static sd_verdict_t sd_probe3_full_enumeration(bool controller_alive, bool mux_o
 		return SD_VERDICT_CONTROLLER_DEAD;
 	}
 
+	/*
+	 * Card-presence probe, INDEPENDENT of disk_access_init() and run
+	 * before it: disk_access_init()'s own -ENOTSUP (-134) is ambiguous by
+	 * itself between "no card ever answered" and "a card answered CMD8
+	 * fully then failed later" (see sd_diag_probe_card_present()'s header
+	 * comment) -- so the verdict below asks the CMD8 question directly
+	 * rather than inferring it from disk_access_init()'s return code.
+	 */
+	bool card_present = sd_diag_probe_card_present();
+
 	int drc = disk_access_init(SD_DISK_NAME);
 	printf("[sd][probe3] disk_access_init(\"%s\") -> %d\n", SD_DISK_NAME, drc);
 	if (drc != 0) {
-		printf("[sd][probe3] NO CARD -- the controller is alive (PROBE 1/2 above) but no "
-		       "card answered disk_access_init(). mux ENABLE write %s (see sd_mux_enable() "
-		       "above); if it reported OK, check the P18 jumper is OPEN (required to select "
-		       "the microSD slot -- S must read LOW) and that a card is actually seated in "
-		       "J7. This is a MUX-or-CARD-layer failure, not a controller one\n",
-		       mux_ok ? "reported OK" : "did NOT report OK");
-		return SD_VERDICT_NO_CARD;
+		if (!card_present) {
+			printf("[sd][probe3] NO CARD -- the controller is alive (PROBE 1/2 above) "
+			       "and CMD8 itself got no response. mux ENABLE write %s (see "
+			       "sd_mux_enable() above); if it reported OK, check the P18 jumper is "
+			       "OPEN (required to select the microSD slot -- S must read LOW) and "
+			       "that a card is actually seated in J7. This is a MUX-or-CARD-layer "
+			       "failure, not a controller one\n",
+			       mux_ok ? "reported OK" : "did NOT report OK");
+			return SD_VERDICT_NO_CARD;
+		}
+		printf("[sd][probe3] CARD SEEN, INIT FAILED -- CMD8 got a response (a card IS "
+		       "present and answering) but disk_access_init() still returned %d. This is "
+		       "NOT a missing-card verdict: the failure is downstream of CMD8, inside "
+		       "sdmmc_card_init() -- enable CONFIG_SD_LOG_LEVEL_DBG/CONFIG_SDHC_LOG_LEVEL_DBG "
+		       "(see prj.conf) and read the debug log for the deciding command (e.g. an "
+		       "ADMA_ERR on the first data-bearing command past enumeration)\n",
+		       drc);
+		return SD_VERDICT_CARD_SEEN_INIT_FAILED;
 	}
 
 	uint32_t sector_count = 0u, sector_size = 0u;
@@ -683,8 +752,14 @@ int main(void)
 		              "layer, upstream of the mux entirely)";
 		break;
 	case SD_VERDICT_NO_CARD:
-		verdict_str = "CONTROLLER ALIVE, NO CARD -- mux or card layer (check mux ENABLE "
-		              "result, the P18 jumper, and that a card is seated in J7)";
+		verdict_str = "CONTROLLER ALIVE, NO CARD -- CMD8 itself got no response (mux or "
+		              "card layer; check mux ENABLE result, the P18 jumper, and that a "
+		              "card is seated in J7)";
+		break;
+	case SD_VERDICT_CARD_SEEN_INIT_FAILED:
+		verdict_str = "CARD SEEN, INIT FAILED -- CMD8 answered (a card IS present) but "
+		              "disk_access_init() failed past that point; read the debug log for "
+		              "the deciding command, this is not a missing-card result";
 		break;
 	case SD_VERDICT_PARTIAL:
 		verdict_str = "PARTIAL -- card answered disk_access_init() but geometry/read did "
