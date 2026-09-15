@@ -16,7 +16,7 @@
  * The DATA pads carry `input-enable` (the upstream pad REN bit) so the mic
  * bitstream is sensed; the CLOCK pads are outputs (no input-enable).
  *
- * min-pdm-clk-freq/max-pdm-clk-freq (issue #2133 round 3): the fitted mics
+ * clk-frequency-min/clk-frequency-max (issue #2133 round 3): the fitted mics
  * are MP34DT05TR-A (U19/U20, E1M-EVK-2626-R2_components.csv), whose PDM
  * clock spec ST's own in-tree Zephyr driver encodes as
  * MPXXDTYY_MIN_PDM_FREQ / MPXXDTYY_MAX_PDM_FREQ (drivers/audio/mpxxdtyy.h,
@@ -65,8 +65,8 @@
 		bypass_iir_filter = <1>;
 		/* MP34DT05TR-A spec, mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ -- see the
 		 * file header. */
-		min-pdm-clk-freq = <1200000>;
-		max-pdm-clk-freq = <3250000>;
+		clk-frequency-min = <1200000>;
+		clk-frequency-max = <3250000>;
 		status = "okay";
 	};
 };

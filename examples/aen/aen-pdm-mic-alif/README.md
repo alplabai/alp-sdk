@@ -31,18 +31,18 @@ but only two are **in spec for the fitted mics** on this board. The
 MP34DT05TR-A's PDM clock spec, per ST's own in-tree Zephyr driver
 (`drivers/audio/mpxxdtyy.h`: `MPXXDTYY_MIN_PDM_FREQ 1200000`,
 `MPXXDTYY_MAX_PDM_FREQ 3250000`), is **1.2-3.25 MHz** — the board overlay
-declares that range (`min-pdm-clk-freq`/`max-pdm-clk-freq`), and
+declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 `dmic_alif_pdm_configure()` now rejects anything outside it with `-EINVAL`:
 
 | `SAMPLE_RATE_HZ` | PDM mode | On THIS board | FIR-reuse basis |
 |---|---|---|---|
-| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec** | same decimation ratio as the register-proven mode 1 -- direct |
-| `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec | different decimation ratio (48 vs 64) -- less direct |
-| `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
+| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec, mode confirmed programmed** (`PDM_CONFIG_REGISTER=0x00070033` held throughout capture) -- but the MEASURED delivery rate on silicon is **~32 kHz, not 48 kHz**; root cause pending, see Status | same decimation ratio as the register-proven mode 1 -- direct |
+| `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec, not yet bench-run | different decimation ratio (48 vs 64) -- less direct |
+| `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
 
-None of these four is bench-verified as REAL acoustic capture yet (see
-Status) -- 8 kHz's earlier "PASS" is downgraded below.
+**Do not read the 48 kHz row as "48 kHz works"** -- the mode select is right,
+the measured PCM rate on silicon is not; see Status.
 
 ```sh
 # default (48 kHz, in spec):
@@ -75,9 +75,21 @@ decimation ratio; (2) it adds a per-channel **RMS / peak-to-peak / DC-offset**
 print and requires at least one channel to clear a documented floor (a full
 order of magnitude above a dead channel's "±1-2 LSB flat noise") for `PASS` --
 a clean read at the right rate with no channel over that floor now reports
-`INCONCLUSIVE (no acoustic signal)` instead. Neither the 48 kHz nor the 32 kHz
-in-spec mode has its own silicon confirmation yet; that is the next bench run,
-not this round.
+`INCONCLUSIVE (no acoustic signal)` instead.
+
+**Round 4a silicon results on `e1m-aen-evk-03`:**
+- The 16 kHz build's guard is CONFIRMED: `dmic_configure -> -22`
+  (`-EINVAL`), and `PDM_CONFIG_REGISTER` was never written.
+- The 48 kHz build's mode select is CONFIRMED CORRECT and held:
+  `PDM_CONFIG_REGISTER = 0x00070033` throughout capture, and blocks arrived
+  at the configured 38400 B (4800 frames x 4 ch x 2 B). But
+  `measured_rate_hz` read **~32 kHz in two runs**, not 48 kHz -- host-side
+  timing agreed. Per-channel `rms_ac` 6-7, `peak_to_peak` 1011-1126 (sparse
+  spikes, not a clean tone). **The root cause (ISR throughput/frame drops
+  vs clock/decimation vs block assembly) is under separate investigation.**
+  Do not treat 48 kHz as verified -- only the clock-mode selection and the
+  16 kHz rejection are proven this round. Neither the 32 kHz mode nor a
+  fixed 48 kHz path has bench confirmation yet.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):
