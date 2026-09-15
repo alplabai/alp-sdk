@@ -472,10 +472,12 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	 * remaining suspect", and it was right: READY (CC35 GPIO17) read 0 only
 	 * because the Alif pad's INPUT BUFFER was never enabled -- an input-enable
 	 * pinctrl group turns it on (see the board overlay this was measured
-	 * against).  With READY actually readable and cc3501e_reply_gate() waiting
-	 * for the drop-then-rise EDGE, the host stops clocking into an un-armed
-	 * slave and 487 works: 262405 B in 883 ms = 297174 B/s, over a link
-	 * running ping_fail=0.
+	 * against).  With READY actually readable and cc3501e_reply_gate() -- AS IT
+	 * WAS THEN, waiting for a drop-then-rise EDGE; that design was since
+	 * replaced (see cc3501e_core.c's cc3501e_reply_gate() doc comment) by one
+	 * that only ever ADDS delay, never removes it -- the host stopped clocking
+	 * into an un-armed slave and 487 worked: 262405 B in 883 ms = 297174 B/s,
+	 * over a link running ping_fail=0.
 	 *
 	 * The cap therefore belongs to the frame, not to a magic number.
 	 *

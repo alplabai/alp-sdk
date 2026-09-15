@@ -89,9 +89,12 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 uint32_t          timeout_ms,
                                 uint8_t           req_seq);
 
-/* Tell the transport the peer is a POLLED slave (OTA update mode): floors
- * cc3501e_reply_gate()'s fallback settle at CC3501E_POLLED_SETTLE_US instead
- * of the shorter NORMAL-mode settle. */
+/* Tell the transport the peer is a POLLED slave (OTA update mode).
+ * cc3501e_ota_begin() reads this back via cc3501e_peer_is_polled() as a hard
+ * precondition -- see that function's own comment for why BEGIN on the
+ * ordinary callback/DMA bridge permanently wedges the device.  See
+ * g_peer_polled's comment in cc3501e_core.c for why this no longer also
+ * floors cc3501e_reply_gate()'s fallback settle. */
 void cc3501e_set_peer_polled(bool on);
 
 /* True when the host believes the peer is running the POLLED update-mode boot. */

@@ -370,7 +370,7 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * return at once instead of burning the settle on a device that never left.
 	 * (It is also why the confirm loop below may re-issue the same opcode.) */
 	if (update_mode_reads_as(ctx, want, timeout_ms)) {
-		cc3501e_set_peer_polled(enable); /* polled slave -> edge-gate READY */
+		cc3501e_set_peer_polled(enable); /* gates cc3501e_ota_begin()'s precondition */
 		return ALP_OK;
 	}
 
@@ -404,9 +404,10 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * here is the timeout either way.
 	 *
 	 * Clear the polled flag FIRST: the reset always lands the device in NORMAL
-	 * mode, so leaving it set would keep every gate's fallback floored at
-	 * CC3501E_POLLED_SETTLE_US instead of the shorter NORMAL-mode settle, for
-	 * the rest of the session. */
+	 * mode, so leaving it set would leave cc3501e_ota_begin()'s precondition
+	 * check believing update mode is still entered when it is not, wrongly
+	 * letting a later BEGIN proceed straight into the wedge this function
+	 * exists to prevent. */
 	cc3501e_set_peer_polled(false);
 	(void)cc3501e_hard_reset(ctx);
 	return ALP_ERR_TIMEOUT;

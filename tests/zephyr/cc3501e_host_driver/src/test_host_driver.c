@@ -4520,7 +4520,13 @@ ZTEST(cc3501e_host_driver, test_ready_gate_hysteresis_doubles_relatch_threshold)
 	 * and the streak counter, but never this threshold. Without it, a
 	 * FLAPPING line would re-latch (and re-pay up to 3 x
 	 * CC3501E_READY_WAIT_US of busy-wait while holding the transport lock)
-	 * every single time it happened to see 3 consecutive LOWs again. */
+	 * every single time it happened to see 3 consecutive LOWs again.
+	 *
+	 * Drives the WHOLE doubling sequence, not just the first step (3 -> 6):
+	 * also 6 -> 12, 12 -> 24, and a final round that must NOT grow past the
+	 * cap (24 -> 24, CC3501E_READY_STUCK_LOW_STREAK_MAX) -- the ceiling is
+	 * where an off-by-one on the "<= STREAK_MAX / 2u" cap check, or a
+	 * missing cap entirely, would first show up. */
 	fw.ready_pin = FAKE_READY_PIN;
 	ready_fake_reset(false); /* idle LOW forever */
 
@@ -4530,30 +4536,51 @@ ZTEST(cc3501e_host_driver, test_ready_gate_hysteresis_doubles_relatch_threshold)
 	zassert_equal(g_fake_delay_us_total, 750700u, "first latch after 3 full timeouts");
 	zassert_true(cc3501e_ready_line_was_stuck(), "3 consecutive timeouts must latch");
 
-	/* Recover with one HIGH read, then go straight back to LOW: gate1
-	 * recovers via the latched-path zero-wait read (streak resets to 0);
-	 * gates 2-3 are back on the ordinary bounded-wait path and time out
-	 * again, bringing the POST-recovery streak to 2. */
-	g_fake_delay_us_total = 0u;
-	ready_fake_pulse_high(1u);
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #2 (recover then 2 timeouts) -> OK");
+	/* Each stage below expects the CURRENT runtime threshold (doubled by
+	 * every latch so far), and re-latches to grow it to the NEXT one:
+	 * 6, then 12, then 24, then 24 again (proving the cap holds instead of
+	 * doubling a 4th time to 48). */
+	static const uint32_t thresholds[] = { 6u, 12u, 24u, 24u };
 
-	/* 3 more full timeouts bring the post-recovery streak to 5 -- still
-	 * short of the DOUBLED threshold (6), so this must run to completion as
-	 * 3 full bounded waits, NOT re-latch partway through.
-	 * Mutation target: if the threshold never doubled (stayed at the
-	 * original 3), the post-recovery streak would already have crossed it
-	 * after the very first gate below (cumulative 3), and this PING would
-	 * cost only 250250 (one full timeout) + 200 + 250 = 250700 -- the
-	 * remaining two gates paying only their fallback on the now-latched
-	 * path instead of the full wait. */
-	g_fake_delay_us_total = 0u;
-	ready_fake_reset(false); /* idle LOW forever -- no more pulses */
-	zassert_equal(cc3501e_ping(&fw), ALP_OK, "PING #3 (3 more timeouts, no relatch yet) -> OK");
-	zassert_equal(g_fake_delay_us_total,
-	              750700u,
-	              "5 cumulative post-recovery timeouts must stay under the doubled threshold "
-	              "(6) -- a full 3-timeout run, not an early re-latch at the original 3");
+	for (size_t stage = 0u; stage < ARRAY_SIZE(thresholds); ++stage) {
+		const uint32_t threshold = thresholds[stage];
+
+		/* Recover with one HIGH read, then go straight back to LOW: gate1
+		 * recovers via the latched-path zero-wait read (streak resets to
+		 * 0); gates 2-3 are back on the ordinary bounded-wait path and
+		 * time out again, bringing the POST-recovery streak to 2 -- same
+		 * shape as the original single-stage version of this test. */
+		g_fake_delay_us_total = 0u;
+		ready_fake_pulse_high(1u);
+		zassert_equal(cc3501e_ping(&fw), ALP_OK, "stage recovery PING (1 HIGH + 2 timeouts) -> OK");
+		ready_fake_reset(false); /* idle LOW forever again -- no more pulses */
+
+		/* (threshold/3 - 1) more full 3-timeout PINGs bring the streak to
+		 * threshold - 1 (2 + 3*(threshold/3 - 1) = threshold - 1) -- still
+		 * short of THIS stage's threshold, so each must run to completion
+		 * as 3 full bounded waits, never re-latching partway through. */
+		const uint32_t full_pings = threshold / 3u - 1u;
+		for (uint32_t i = 0u; i < full_pings; ++i) {
+			g_fake_delay_us_total = 0u;
+			zassert_equal(cc3501e_ping(&fw), ALP_OK, "pre-threshold PING -> OK");
+			zassert_equal(g_fake_delay_us_total,
+			              750700u,
+			              "must stay a full 3-timeout run -- this stage's doubled "
+			              "threshold has not been reached yet");
+		}
+
+		/* The boundary PING: its first gate crosses `threshold` and
+		 * re-latches mid-PING, so gates 2-3 pay only their fallback on the
+		 * now-latched path -- 250250 (1 full timeout) + 450 (200 + 250) =
+		 * 250700, never a 4th full 750700 run. Doubles (or caps) the
+		 * threshold for the next stage. */
+		g_fake_delay_us_total = 0u;
+		zassert_equal(cc3501e_ping(&fw), ALP_OK, "boundary PING -> OK");
+		zassert_equal(g_fake_delay_us_total,
+		              250700u,
+		              "the threshold-th gate must re-latch mid-PING instead of running "
+		              "a full 3-timeout PING or re-latching a gate early");
+	}
 }
 
 ZTEST(cc3501e_host_driver, test_ready_gate_noisy_pad_pays_at_least_fallback)

@@ -1202,12 +1202,27 @@ void cc3501e_ready_gate_reset_for_test(void)
 }
 #endif
 
-/* Set while the peer is in OTA update mode (polled slave).  Only floors the
- * fallback settle at CC3501E_POLLED_SETTLE_US below -- a polled slave's
- * service loop takes microseconds of processing to re-arm, not an ISR, and
- * the ordinary settle is too short for that (header-only frames survived
- * while every payload-bearing OTA_WRITE lost its bytes and the stream died
- * at off=256, silicon 2026-08-21). */
+/* Set while the peer is in OTA update mode (polled slave).  Read back by
+ * cc3501e_peer_is_polled(), which cc3501e_ota_begin() uses as a hard
+ * precondition: psa_fwu_start/psa_fwu_write on the ordinary callback/DMA
+ * bridge PERMANENTLY wedge the device (bench-proven; SPI_close does not undo
+ * the claim), so BEGIN must refuse unless update mode was already entered.
+ *
+ * This used to ALSO floor cc3501e_reply_gate()'s fallback settle at a
+ * polled-only CC3501E_POLLED_SETTLE_US, because a polled slave's service
+ * loop takes microseconds of processing to re-arm, not an ISR, and the
+ * then-200us ordinary settle was too short for that (header-only frames
+ * survived while every payload-bearing OTA_WRITE lost its bytes and the
+ * stream died at off=256, silicon 2026-08-21).  That floor is GONE: it was
+ * walked back from 5000us to 200us once the real cause (a polled RX-FIFO
+ * desync) was fixed firmware-side, and CC3501E_PHASE_SETTLE_US has since
+ * been raised to 250us for an unrelated reason (the sock-send re-arm race,
+ * #1873) -- every fallback_us this file ever gates with, fixed or
+ * byte-scaled (CC3501E_REPLY_GATE_FLOOR_US, also 200us), is now >= 200us on
+ * its own, so a floor of exactly 200us can never fire.  Removed rather than
+ * left as dead code describing behaviour that cannot happen; if a polled
+ * slave is ever measured needing more than the ordinary settle again, size
+ * a new floor from that bench evidence, not by resurrecting this one. */
 static bool g_peer_polled;
 
 bool cc3501e_peer_is_polled(void)
@@ -1244,23 +1259,6 @@ void cc3501e_set_peer_polled(bool on)
  * comment). The latch therefore only ever suppresses WAITING while the pin
  * is actually reading LOW -- it never suppresses paying the settle, and it
  * never outlives a HIGH read. */
-
-/* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
- * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
- * settle has to cover that.  200 us is right for the DMA slave and too short here:
- * header-only frames survived while every payload-bearing OTA_WRITE lost its bytes
- * and the stream died at off=256 (silicon 2026-08-21).  Widening the settle for
- * EVERY peer regressed update-mode ENTRY to -4 (that handshake runs on the ordinary
- * DMA bridge), so it is scoped to polled peers only.  Independent of READY, which
- * is not readable on this bench (READY probe: rc=0 level=0). */
-/* WAS 5000u.  That value was sized against a symptom, not a cause: "every
- * payload-bearing OTA_WRITE lost its bytes and the stream died at off=256" is
- * exactly the polled RX-FIFO desync that spi_fifo_reset() (firmware
- * transport_hw_ti_spi.c) now clears at the start of EVERY frame.  With the cause
- * fixed, this gate is back to doing only its stated job -- covering the slave's
- * re-arm, which this file's own comment describes as "microseconds".  At 5000us
- * it cost 4 gates x 5 ms = 20 ms per frame, ~2 frames per 256 B chunk. */
-#define CC3501E_POLLED_SETTLE_US 200u
 
 /* Reply-header gate, scaled by how many bytes the bridge has to move BEFORE it
  * can arm the reply header -- the fixed 200 us this used to be blindly waited
@@ -1405,9 +1403,6 @@ static uint32_t cc3501e_reply_header_gate_us(uint32_t bytes)
 
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
-	if (g_peer_polled && fallback_us < CC3501E_POLLED_SETTLE_US) {
-		fallback_us = CC3501E_POLLED_SETTLE_US;
-	}
 	if (ctx->ready_pin != NULL && g_ready_ignored) {
 		/* Latched, but the latch recovers: one zero-wait read, no bounded
 		 * spin.  A HIGH here proves the pin can still go HIGH, so the
