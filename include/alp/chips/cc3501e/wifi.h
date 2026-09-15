@@ -16,6 +16,15 @@
  * gets RESP_OK with the result, or the timeout elapses.  This is how
  * the bring-up proves the firmware's worker seam from the host with
  * no async-event line on this HW rev.
+ *
+ * @note **`timeout_ms` does not bound an automatic recovery (issue #2126).**
+ *       A call that exhausts its budget with nothing decoded off the wire
+ *       hands the link to the driver's recovery path before returning: up to
+ *       ~12-18 s of probing and, only if every probe fails, a warm reset with
+ *       its ~3.5 s settle. The call therefore returns later than @p
+ *       timeout_ms in exactly that case -- the alternative was failing every
+ *       later call until someone power-cycled the board. Turn it off with
+ *       `CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=n`.
  */
 
 #ifndef ALP_CHIPS_CC3501E_WIFI_H

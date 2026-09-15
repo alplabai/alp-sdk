@@ -206,7 +206,7 @@ config ALP_SDK_CC3501E_AUTO_RECOVER
 	  nothing else on the device can tell (see cc3501e_recover()'s own
 	  doc comment in include/alp/chips/cc3501e/core.h).
 	  cc3501e_link_check_and_recover() (chips/cc3501e/cc3501e_core.c,
-	  internal) probes with a few PINGs first and
+	  internal) probes with up to 24 PINGs first (a PING every 500 ms) and
 	  only warm-resets if every one fails, so a genuinely transient
 	  transport hiccup is not mistaken for a wedge; it also refuses while
 	  an OTA/update session is open and enforces a cooldown between real
@@ -216,8 +216,9 @@ config ALP_SDK_CC3501E_AUTO_RECOVER
 	  either way.
 
 	  LATENCY (issue #2126 review): on a call this fires from, the probe
-	  alone can add up to ~12 s (a PING every 500 ms, up to 24 tries) on
-	  top of that op's own budget before a genuinely dead link is even
+	  alone can add ~12-18 s (24 PINGs 500 ms apart, plus each PING's own
+	  wire time -- longer when READY is held low) on top of that op's own
+	  budget before a genuinely dead link is even
 	  declared dead, and a confirmed wedge adds the warm-reset's own ~3.5 s
 	  blind settle (longer still on the power-cycle fallback) after that.
 	  A caller with a tight timeout_ms on a worker-routed op, or reading

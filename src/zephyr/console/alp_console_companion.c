@@ -42,10 +42,14 @@ cc3501e_t *companion_cc3501e;
  * active console backend, safe off whatever thread the failing op was
  * running on. Runs AFTER the recovery is already committed (ctx->
  * recover_count already bumped), so @p recover_count here is exactly what
- * `alp companion recover` would print too. Replaces a strong override of the
- * driver's weak cc3501e_recover_notify() hook (pre-review shape) -- a
- * registered, per-ctx callback instead, the same pattern this driver already
- * uses for async events (cc3501e_add_event_callback). */
+ * `alp companion recover` would print too. A registered, per-ctx callback,
+ * the same pattern this driver already uses for async events
+ * (cc3501e_add_event_callback).
+ *
+ * ONE slot: this registration happens in alp_console_companion_set(), so an
+ * application that wants its own recovery callback must register it AFTER
+ * binding the console -- the later registration wins and this line stops
+ * printing. */
 static void companion_recover_notify(cc3501e_t *ctx, uint32_t recover_count, void *user)
 {
 	ARG_UNUSED(ctx);

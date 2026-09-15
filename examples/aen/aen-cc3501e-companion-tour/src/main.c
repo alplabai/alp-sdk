@@ -380,24 +380,31 @@ static unsigned tour_portable_wireless_checkpoint(void)
 static void tour_wifi_scan(cc3501e_t *fw)
 {
 	static cc3501e_scan_record_t recs[TOUR_SCAN_MAX];
-	size_t                       n = 0u;
+	size_t                       n                 = 0u;
+	const uint32_t               recoveries_before = fw->recover_count;
 	alp_status_t s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
 
-	/* issue #2126: this used to hand-roll exactly ONE cc3501e_hard_reset() +
-	 * ONE retry on an ALP_ERR_TIMEOUT here, on the theory that -4 on the
-	 * first radio op of a boot is the known #2035 wedge (~2 in 16 cold
-	 * boots). That retry is now redundant by the time this app ever sees
-	 * the failure: cc3501e_wifi_scan() -> poll_by_repeat() already wires
-	 * cc3501e_link_check_and_recover() into its own terminal ALP_ERR_TIMEOUT
-	 * exit (default CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=y, on in this app's
-	 * own prj.conf) -- it already probed the link and, if every probe
-	 * failed, already did a warm-reset-and-confirm (a superset of this
-	 * app's old single hard_reset()) BEFORE cc3501e_wifi_scan() itself
-	 * returned. A retry here would only be doing that work a second time.
-	 * If the AUTO_RECOVER=n bench build (see aen-cc3501e-wedge-postmortem,
-	 * a sibling example) wants this exact behaviour back, `cc3501e_recover
-	 * (fw)` (chips/cc3501e/cc3501e_core.c) + one retry of the failed op is
-	 * the equivalent hand-rolled recipe. */
+	/* issue #2126: this used to hand-roll ONE cc3501e_hard_reset() + ONE
+	 * retry on an ALP_ERR_TIMEOUT here, because -4 on the first radio op of
+	 * a boot is the known #2035 wedge (~2 in 16 cold boots). The reset half
+	 * is now the driver's job: cc3501e_wifi_scan() -> poll_by_repeat()
+	 * wires cc3501e_link_check_and_recover() into its own terminal failure
+	 * exit (default CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=y, set in this
+	 * app's prj.conf), so by the time the call returns the link has already
+	 * been probed and, if every probe failed, warm-reset and confirmed.
+	 *
+	 * The RETRY half is still this app's job. A recovery reboots the
+	 * bridge: it clears the wedge but it does not re-issue the scan, and it
+	 * drops any association, socket handle and BLE link the app held. So
+	 * retry exactly once, and only when a recovery actually happened during
+	 * the call (recover_count moved) -- that is the one case where the
+	 * failure was the link, not the radio. */
+	if (s != ALP_OK && fw->recover_count != recoveries_before) {
+		printf("[tour] WIFI_SCAN -> %d after a link recovery, retrying once\n", (int)s);
+		n = 0u;
+		s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
+	}
+
 	if (s != ALP_OK) {
 		printf("[tour] WIFI_SCAN -> %d\n", (int)s);
 		return;

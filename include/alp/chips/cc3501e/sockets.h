@@ -14,6 +14,17 @@
  * poll-by-repeat over the bridge like the Wi-Fi getters.  v1 is
  * IPv4-only; addresses are 4 octets in network (big-endian) order.
  *
+ * @note **Handles carry the link epoch, and `timeout_ms` does not bound a
+ *       recovery (issue #2126).**  A handle's upper byte is the link epoch it
+ *       was opened under, so print it as `0x%04x` and mask with `& 0xFF`
+ *       before comparing it against a firmware-side number.  After the driver
+ *       warm-resets a wedged bridge, every handle from before that reset fails
+ *       closed with `ALP_ERR_NOT_READY` instead of addressing whichever socket
+ *       now holds that number; open new ones.  A call that fails with nothing
+ *       decoded off the wire can also run ~12-18 s of probing plus ~3.5 s of
+ *       reset past its own @p timeout_ms before returning -- see
+ *       `CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER`.
+ *
  * SERVING (protocol v9).  @ref cc3501e_sock_bind + @ref cc3501e_sock_listen
  * turn a socket into a passive one so an application on the host can serve
  * over the module's own soft-AP -- an embedded web console on a product with

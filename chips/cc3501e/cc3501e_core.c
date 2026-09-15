@@ -207,6 +207,15 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx)
 	 * correlate with a session but is not one. */
 	if (ctx->ota_session_active) return ALP_ERR_BUSY;
 
+	/* #2126 review (minor): no nRESET line means the ONLY path below is the
+	 * supply-cut fallback, and that one is worse than doing nothing here:
+	 * cc3501e_power_off() clears ctx->initialised and the cc3501e_reset()
+	 * that follows it returns ALP_ERR_NOSUPPORT for the same missing pin,
+	 * leaving the ctx permanently NOT_READY after what may have been a
+	 * transient wedge. Refuse up front instead, manual entry point
+	 * included. */
+	if (ctx->reset_pin == NULL) return ALP_ERR_NOSUPPORT;
+
 	/* #2126 review: claim exclusive ownership of the recovery sequence
 	 * BEFORE touching anything. A concurrent caller -- another auto-
 	 * trigger racing this one, or a manual `alp companion recover` racing
@@ -240,6 +249,13 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx)
 	 * comment) and self-deadlock. */
 	const alp_status_t ls = cc3501e_lock_acquire(ctx);
 	if (ls != ALP_OK) {
+		/* #2126 review (minor): stamp the cooldown on this exit too.
+		 * Without it a caller whose op keeps failing while another
+		 * thread holds the lock re-runs the ~12-18 s probe in
+		 * cc3501e_link_check_and_recover() on EVERY failing op, since
+		 * the gate there only sees last_recover_ms. Not counted as an
+		 * attempt: no reset was pulsed. */
+		ctx->last_recover_ms = alp_uptime_ms();
 		__atomic_store_n(&ctx->recovering, false, __ATOMIC_RELEASE);
 		return ls;
 	}
@@ -312,10 +328,21 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx)
 					ctx->fw_proto_major = fw_major;
 					ctx->fw_proto_minor = fw_minor;
 				} else {
-					ctx->initialised = false;
+					/* #2126 review: report the refusal, do not swallow
+					 * it. Clearing ctx->initialised while still
+					 * returning ALP_OK counted the recovery as a
+					 * success -- recover_count bumped, the callback
+					 * fired -- while every later op failed
+					 * ALP_ERR_NOT_READY with nothing saying why.
+					 * cc3501e_reset() answers ALP_ERR_VERSION for the
+					 * same case; match it. */
+					ctx->fw_proto_major = 0u;
+					ctx->fw_proto_minor = 0u;
+					ctx->initialised    = false;
+					final               = ALP_ERR_VERSION;
 				}
 			}
-			cc3501e_recover_clear_stale_state(ctx);
+			if (final == ALP_OK) cc3501e_recover_clear_stale_state(ctx);
 		}
 
 		cc3501e_lock_release(ctx);
@@ -448,10 +475,22 @@ alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
 	 * wedge -- and a warm reset is destructive (every association/socket/
 	 * BLE link gone), so it must not fire on a link that would have
 	 * answered eventually on its own. Stops at the first OK. */
+	const uint32_t attempts_before_probe = ctx->recover_attempt_count;
 	for (uint32_t i = 0; i < CC3501E_LINK_PROBE_TRIES; i++) {
 		if (cc3501e_ping(ctx) == ALP_OK) return ALP_OK; /* link is fine */
 		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
 	}
+
+	/* #2126 review (minor): the probe above takes ~12-18 s, long enough for
+	 * ANOTHER thread's whole attempt to start and finish inside it -- both
+	 * threads passed the cooldown gate before either reset, so without this
+	 * the second one pulses nRESET again immediately, straight through the
+	 * back-off. Re-check here, after the probe and before committing: a
+	 * changed attempt count means someone already recovered (or tried) in
+	 * the meantime, so back out and let the cooldown gate decide next time.
+	 * The PINGs just spent are not wasted -- they are the evidence that the
+	 * other thread's reset did not bring the link back. */
+	if (ctx->recover_attempt_count != attempts_before_probe) return ALP_OK;
 
 	/* Every probe failed -- warm-reset and confirm. cc3501e_recover()
 	 * itself now stamps last_recover_ms / recover_attempt_count /

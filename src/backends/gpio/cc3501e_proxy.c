@@ -201,6 +201,16 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 		/* Proxied pin: the bridge owns it. */
 		s->is_bridge   = true;
 		s->cc35_raw    = raw;
+		/* #2126 review (minor): stamp the link epoch the handle was
+		 * opened under. _alloc_side() zeroes it, and epoch 0 is only
+		 * ever current before the first recovery -- so without this a
+		 * pin opened AFTER a recovery answered ALP_ERR_NOT_READY on
+		 * every op until the caller happened to call
+		 * alp_gpio_configure(), while the identical sequence on a ctx
+		 * that had never recovered worked. The staleness rule is "the
+		 * firmware rebooted since this handle last agreed with it";
+		 * a handle opened now agrees with it now. */
+		s->cfg_epoch   = g_bridge_ctx->link_epoch;
 		state->be_data = s;
 		state->pin_id  = pin_id;
 		return ALP_OK;

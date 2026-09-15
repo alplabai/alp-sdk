@@ -557,6 +557,11 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx);
  * manual `alp companion recover`. One slot per @p ctx; a second call
  * overwrites the first. Pass a NULL @p cb to unregister.
  *
+ * @note On Zephyr, `alp_console_companion_set()` registers its own callback
+ *       (it prints `cc3501e: link recovered by warm reset (#n)`). Register
+ *       yours AFTER binding the console, or the console's registration
+ *       replaces it.
+ *
  * @param ctx   Initialised bridge handle.
  * @param cb    Callback to invoke, or NULL to unregister.
  * @param user  Opaque pointer handed back unchanged as @p cb's last argument.
