@@ -4161,7 +4161,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * (ALP_ERR_NOSUPPORT), not a bridge/build fault. */
 	alp_status_t mux_en_open_err = (mux_en == NULL) ? alp_last_error() : ALP_OK;
 	mux_sel                      = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
-	alp_status_t mux_rc          = ALP_ERR_NOT_READY;
+	alp_status_t mux_rc          = (mux_en == NULL) ? mux_en_open_err : ALP_ERR_NOT_READY;
 	if (mux_en != NULL && mux_sel != NULL) {
 		/* /E active low: false asserts and connects I2S3 to the amps. */
 		mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
@@ -4186,8 +4186,8 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 			printf("[evkdemo] SOUND: mux not drivable -- IO8's #2144 revision "
 			       "guard refused it (ALP_ERR_NOSUPPORT): no CRC-valid manifest "
 			       "confirmed this module's hw_rev == CONFIG_ALP_SDK_SOM_HW_REV "
-			       "(\"2626-r2\"). Check phase 5's manifest report, not phase 8 "
-			       "or the build\n");
+			       "(set in prj.conf). Check phase 5's manifest report against it, "
+			       "not phase 8 or the bridge\n");
 		} else {
 			printf("[evkdemo] SOUND: mux not drivable -- check phase 8 passed (the proxy "
 			       "needs its bridge attached) and this build carries the IO8/IO13 routes. "
