@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# BENCH-TEST (test/u46-i2s-tas2563-on-reworked-mux), not the dev-branch
+# default: this build's board overlay enables i2s3 for real and drives the
+# I2S0 mux SELECT + ENABLE over the CC3501E bridge -- the reworked
+# e1m-aen-evk-03 bench board only. See the board overlay and src/main.c
+# headers. Compile-checks the driver + DT node + app on the real E8 board
+# target; the pass/fail proof itself needs a flash + register readback, so
+# this scenario is build_only like every other AEN bench app.
+
+sample:
+  name: aen-i2s-tas2563-probe
+  description: |
+    Bench RAM-run proof that the I2S0 path through the reworked U46 mux
+    (74LVC157 -> 74LV3257) reaches both TAS2563 amps on the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE): drives the CC3501E-proxied mux
+    SELECT + ENABLE, brings up both amps over I2C, starts a low-volume I2S3
+    tone, and reads the TAS2563 TDM-clock-error fault bit before/during
+    playback as the no-ears-needed objective check.
+
+tests:
+  alp_sdk.examples.aen.i2s_tas2563_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2s
+      - audio
+      - tas2563
+    build_only: true   # the amp/clock-detect check is a bench flash, not a CI run.
