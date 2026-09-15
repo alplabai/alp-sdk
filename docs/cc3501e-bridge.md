@@ -553,7 +553,8 @@ that ISOLATE all the downstream buses -- with the caveat below that
   whose `Y` outputs drive the SoC side), not undervoltage, so it can
   NEVER pass SoC-to-amp I2S at any `VCC`. A working U46 needs the part
   REPLACED with a 3257-type bus switch AND that switch's `VCC` on a
-  rail within ITS spec (2.3-3.6 V) -- a 3257-type swap alone, `VCC`
+  rail within ITS spec (2.3-3.6 V), or a switch rated for 1.8 V VCC
+  (untested) -- a 3257-type swap alone, `VCC`
   left on `+VIO`, is still out of spec and silent. `+VIO` is NOT a
   carrier-selected rail, it is the plugged-in SoM's own `VIO_OUT`
   (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which

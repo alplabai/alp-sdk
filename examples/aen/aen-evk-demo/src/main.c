@@ -3924,10 +3924,10 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46 is BOTH a
  * 3257-type bus switch (a stock 74LVC157, even on +3V3, is still a
  * one-way mux and reproduces the driver-contention hazard above --
- * VCC alone is not the gate) AND that switch's VCC is on `+3V3`, OR a
- * switch rated for 1.8 V VCC (untested)
+ * VCC alone is not the gate) AND that switch's VCC is on `+3V3`
  * (VCC on `+VIO`, 1.8 V with the E1M-AEN SoM, is out of a 3257-type
- * part's spec and confirmed silent on the bench). On `e1m-aen-evk-03`
+ * part's spec and confirmed silent on the bench), OR a switch rated
+ * for 1.8 V VCC (untested). On `e1m-aen-evk-03`
  * (2026-09-15), a fitted 3257-type part's VCC was moved to `+3V3`
  * between that silent run and an audible run -- not established as
  * the only difference between the two (see
@@ -4203,7 +4203,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 #else
 	printf("[evkdemo] SOUND: playback skipped -- requires U46 to be a "
 	       "3257-type switch powered from +3V3, or a 1.8 V-rated switch "
-	       "(see alp_e1m_evk.h); amps verified over I2C only\n");
+	       "(untested) (see alp_e1m_evk.h); amps verified over I2C only\n");
 #endif
 
 	/* --- 2. AMP_ENABLE (SD_N) low-then-high -- an ACTUAL hardware reset - */
