@@ -3943,10 +3943,10 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      digital stream ever contains. Unconditional -- runs whether or not
  *      playback is on, since it is a pure I2C write.
  *   2. alp_audio_out_set_volume(SOUND_VOL_START) -- a small fraction of
- *      unity (SOUND_VOL_START/255) on the digital PCM side, opened and
- *      STARTED before tas2563_set_mode(ACTIVE) is ever called on either
- *      amp, so the amp comes out of shutdown already receiving a
- *      near-silent, not undefined, stream. The volume is only ever
+ *      unity (SOUND_VOL_START/255) on the digital PCM side, opened,
+ *      started AND fed one silent write before tas2563_resume() is ever
+ *      called on either amp, so the amp comes out of shutdown already
+ *      receiving a near-silent, not undefined, stream. The volume is only ever
  *      ramped UP after that, in small steps, capped at SOUND_VOL_CEILING
  *      (well under half of unity) -- see the two #defines below for the
  *      actual numbers. Only exists when playback is on.
@@ -3999,13 +3999,19 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *   7. PLAYBACK ONLY: alp_audio_in_open() (PDM, peripheral 0) + start --
  *      capture SOUND_BASELINE_BLOCKS of room noise BEFORE the tone starts.
  *   8. PLAYBACK ONLY: alp_audio_out_open() (I2S3, peripheral 0) +
- *      set_volume(SOUND_VOL_START) + start -- lever 2 above, BEFORE either
- *      amp goes ACTIVE.
- *   9. PLAYBACK ONLY: tas2563_set_mode(ACTIVE) on every initialised amp --
- *      ONLY now, with both levers already at their quiet settings and a
- *      live low-volume stream already running. Never reached with
- *      playback off -- the amp stays in software shutdown for this
- *      phase's whole run in that mode.
+ *      set_volume(SOUND_VOL_START) + start, THEN one silent block written
+ *      before either amp is touched -- lever 2 above. Since #2132,
+ *      alp_audio_out_start() with nothing queued only arms a pending
+ *      start; the real START, and the I2S3 bit clock with it, does not
+ *      fire until this first write. tas2563_resume() (next step) requires
+ *      that clock already running, so this silent write is what makes it
+ *      true rather than assumed (#2146).
+ *   9. PLAYBACK ONLY: tas2563_resume() on every initialised amp -- ONLY
+ *      now, with both levers already at their quiet settings, the bit
+ *      clock genuinely running (step 8), and any latch a previous stop
+ *      left behind cleared as part of the same call before MODE switches
+ *      to ACTIVE. Never reached with playback off -- the amp stays in
+ *      software shutdown for this phase's whole run in that mode.
  *  10. PLAYBACK ONLY: the tone -- SOUND_TONE_BLOCKS blocks of a square
  *      wave, interleaved one alp_audio_out_write() with one
  *      alp_audio_in_read() per iteration (no threads needed -- both calls
@@ -4366,14 +4372,27 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	       (int)spk_rc);
 
 	if (spk != NULL && spk_rc == ALP_OK) {
-		/* --- 10. ONLY NOW: both amps ACTIVE -- a quiet stream is already
-		 * running. --------------------------------------------------- */
+		/* --- 10. One silent block FIRST, then both amps resumed -----------
+		 * Since #2132, alp_audio_out_start() with nothing queued only
+		 * arms a pending start -- the real START, and the I2S3 bit clock
+		 * with it, does not fire until the FIRST write.  Every amp that
+		 * went ACTIVE right after alp_audio_out_start() (the old order
+		 * here) therefore switched on with no clock present, which is
+		 * what latched the TDM clock error at the start of playback and,
+		 * separately, is what the part's own ~1 s clock-loss shutdown
+		 * eventually silenced after a stop/restart (#2146).  Writing one
+		 * silent block before either amp is touched makes the clock
+		 * actually running true instead of assumed; tas2563_resume()
+		 * then clears that (or any earlier) latch before switching MODE
+		 * to ACTIVE -- see its doc for why clear-then-activate is the
+		 * required order. */
+		static int16_t silence[SOUND_FRAMES_PER_BLOCK * 2u] = { 0 };
+		(void)alp_audio_out_write(spk, silence, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+
 		for (size_t i = 0; i < AMP_COUNT; i++) {
 			if (!amp_up[i]) continue;
-			alp_status_t act_rc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
-			printf("[evkdemo] SOUND: tas2563_set_mode(0x%02x, ACTIVE) -> %d\n",
-			       amp_addrs[i],
-			       (int)act_rc);
+			alp_status_t act_rc = tas2563_resume(&amps[i]);
+			printf("[evkdemo] SOUND: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)act_rc);
 		}
 
 		/* --- 11. The tone, ramped, interleaved with mic reads --------- */

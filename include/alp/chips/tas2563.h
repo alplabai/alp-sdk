@@ -810,6 +810,58 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
 alp_status_t tas2563_clear_faults(tas2563_t *ctx);
 
 /**
+ * @brief Clear latched faults and bring the amp back to
+ *        @ref TAS2563_MODE_ACTIVE after a TDM/I2S clock loss.
+ *
+ * @par Why this exists.  The part enters software shutdown on its own
+ *   when any of @ref TAS2563_FAULT_SHUTDOWN_CAUSES latches -- in
+ *   particular a TDM clock error (SLASET3D §7.3.12, p.35-36) -- and
+ *   nothing in the audio stack re-arms it afterwards.  On the E1M-EVK
+ *   (`e1m-aen-evk-03`), both amps were observed to self-transition
+ *   `PWR_CTL` from `0Ch` (MODE ACTIVE) to `0Eh` (MODE SHUTDOWN) about
+ *   1 s after the I2S bit clock stopped, and to stay in SHUTDOWN once
+ *   playback resumed (#2146).  The bit clock stops on every I2S stop
+ *   path and on an underrun (`zephyr/drivers/i2s/i2s_dw.c`
+ *   `tx_stream_disable()` calls `i2s_clock_disable()`), so a restart
+ *   after either needs this call to be heard again.
+ *
+ * @par Precondition: the TDM/I2S bit clock and FSYNC must already be
+ *   running when this is called -- clearing the latch before the clock
+ *   is back lets the same fault re-latch immediately.  With
+ *   `<alp/audio.h>`'s @ref alp_audio_out_t, call this AFTER the first
+ *   successful write following a start or restart, not right after
+ *   @ref alp_audio_out_start itself: since #2132, `alp_audio_out_start()`
+ *   with nothing queued only arms a pending start, and the real START
+ *   (and the bit clock with it) does not fire until the first write.
+ *   Calling this before that first write goes out finds no clock
+ *   running and clears a latch that has nothing to keep it clear.
+ *
+ * Order matters internally, and this function fixes it: it clears the
+ * latches via @ref tas2563_clear_faults (the same self-clearing
+ * `CLR_INTP_LTCH` bit, `INT & CLK CFG` 0x30 bit 2) before calling
+ * @ref tas2563_set_mode with @ref TAS2563_MODE_ACTIVE, not after --
+ * clearing after going ACTIVE would leave a shutdown-causing latch
+ * from the last clock loss standing, ready to re-trip the part the
+ * instant a masked interrupt re-evaluates it.
+ *
+ * @param[in] ctx  Initialised context.  Not mutated by this call
+ *                 itself (only @c bus / @c addr are read to reach the
+ *                 device); the parameter is `const` for that reason,
+ *                 even though the two calls it forwards to are not.
+ *
+ * @return ALP_OK, or the underlying bus status from whichever of
+ *         @ref tas2563_clear_faults / @ref tas2563_set_mode failed
+ *         first.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.  MODE is
+ *                            not written in this case, or in any case
+ *                            where the latch clear itself fails --
+ *                            @ref tas2563_set_mode is only reached
+ *                            once @ref tas2563_clear_faults has
+ *                            returned ALP_OK.
+ */
+alp_status_t tas2563_resume(const tas2563_t *ctx);
+
+/**
  * @brief Replay a tuning register stream into the chip.
  *
  * @warning Calling @ref tas2563_init again on an already-tuned amp
