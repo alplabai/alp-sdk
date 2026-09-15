@@ -51,3 +51,14 @@ endif()
 if(DEFINED PROBE_RESUME)
   target_compile_definitions(app PRIVATE PROBE_RESUME=${PROBE_RESUME})
 endif()
+
+# PROBE_RESUME2 (test/u46-i2s-tas2563-on-reworked-mux): compile-time switch
+# to src/main.c's PROBE_RESUME + mic-measured-pitch variant -- the same A-F
+# #2146 sequence, but with >=3 s of silence before every tone and an
+# objective PDM-mic Goertzel pitch scan (200-4000 Hz) per tone/silence
+# window, instead of trusting a listener's ear alone. Opt in with
+# `west build ... -- -DPROBE_RESUME2=1`; unset (the default), this app is
+# unchanged, same as the other four PROBE_* switches unset.
+if(DEFINED PROBE_RESUME2)
+  target_compile_definitions(app PRIVATE PROBE_RESUME2=${PROBE_RESUME2})
+endif()

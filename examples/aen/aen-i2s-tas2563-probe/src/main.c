@@ -3050,6 +3050,754 @@ static int resume_main(void)
 
 #endif /* PROBE_RESUME */
 
+/* ================================================================== */
+/* PROBE_RESUME2 -- PROBE_RESUME + mic-measured pitch, silence-separated */
+/* ================================================================== */
+/* Compile-time mode, same shape as the four above: `west build ... --
+ * -DPROBE_RESUME2=1` replaces main()'s ENTIRE body with resume2_main();
+ * with none of PROBE_LISTEN/PROBE_MELODY/PROBE_LOOPBACK/PROBE_RESUME/
+ * PROBE_RESUME2 defined, main() is unchanged, and with exactly one of the
+ * other four defined, this whole block is preprocessed away -- so none of
+ * the four existing builds' object code moves by adding this one.
+ * resume2_main() duplicates the other four modes' bring-up rather than
+ * sharing a helper with any of them, for the same byte-identity reason.
+ *
+ * PROBE_RESUME (this file, above) proved #2146's fix in registers, but
+ * the maintainer heard "different pitches" across its six back-to-back
+ * 1 kHz tones. Every tone in PROBE_RESUME asks for the SAME 1000 Hz (see
+ * resume_play_tone()'s callers -- samples_per_cycle is always
+ * SOUND_SAMPLE_RATE_HZ/1000u), so if the pitch genuinely changed it did
+ * not come from this app's C code; this mode adds an OBJECTIVE measurement
+ * (the PDM mics, proven live by PROBE_LOOPBACK: 1000 Hz and 500 Hz both
+ * >50 dB above silence there) plus >=3 s of silence between every tone so
+ * a listener can tell the tones apart by ear too.
+ *
+ * Same A-F sequence as PROBE_RESUME (ordered start with tas2563_resume(),
+ * a halt-time measurement, restart WITHOUT resume to reproduce #2146 on
+ * purpose, resume after that restart, a short-gap self-heal sweep, then
+ * teardown) at the SAME SOUND_VOL_MAX-independent RESUME_VOLUME (128) and
+ * the SAME PWR_CTL/INT_LTCH0/INT_LTCH3/INT_LTCH4 checkpoints -- only the
+ * pacing (silence added) and the mic measurement are new. */
+#if defined(PROBE_RESUME2)
+
+#include <string.h> /* memset(), used by the silence writer below. */
+
+#define RESUME2_VOLUME   128u
+#define RESUME2_BLOCK_MS (SOUND_FRAMES_PER_BLOCK * 1000u / SOUND_SAMPLE_RATE_HZ) /* 16 ms. */
+
+/* Register addresses, copied verbatim from chips/tas2563/tas2563.c's own
+ * (private) TAS2563_REG_* -- see PROBE_RESUME's RESUME_REG_* above for the
+ * same values/citations. resume2_reg_read() mirrors that block's own read
+ * helper. */
+#define RESUME2_REG_PWR_CTL 0x02u /* Power control        (SLASET3D §7.5.4,  p.65). */
+#define RESUME2_REG_INT_LTCH0 \
+	0x24u /* Latched interrupts 0 (SLASET3D §7.5.36, p.82) -- TDM_CLOCK. */
+#define RESUME2_REG_INT_LTCH3 \
+	0x26u /* Latched interrupts 2 (SLASET3D §7.5.38, p.84) -- BOOST_CLOCK. */
+#define RESUME2_REG_INT_LTCH4 \
+	0x27u /* Latched interrupts 3 (SLASET3D §7.5.39, p.84) -- POWER_DOWN. */
+
+static uint8_t resume2_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+static void resume2_read_full(const char *label, tas2563_t amps[AMP_COUNT])
+{
+	printf("[r2] %-20s uptime=%u ms  PWR_CTL=0x%02x/0x%02x  INT_LTCH0=0x%02x/0x%02x  "
+	       "INT_LTCH3=0x%02x/0x%02x  INT_LTCH4=0x%02x/0x%02x\n",
+	       label,
+	       k_uptime_get_32(),
+	       resume2_reg_read(&amps[0], RESUME2_REG_PWR_CTL),
+	       resume2_reg_read(&amps[1], RESUME2_REG_PWR_CTL),
+	       resume2_reg_read(&amps[0], RESUME2_REG_INT_LTCH0),
+	       resume2_reg_read(&amps[1], RESUME2_REG_INT_LTCH0),
+	       resume2_reg_read(&amps[0], RESUME2_REG_INT_LTCH3),
+	       resume2_reg_read(&amps[1], RESUME2_REG_INT_LTCH3),
+	       resume2_reg_read(&amps[0], RESUME2_REG_INT_LTCH4),
+	       resume2_reg_read(&amps[1], RESUME2_REG_INT_LTCH4));
+}
+
+static void resume2_read_pwr_ctl_pair(tas2563_t amps[AMP_COUNT], uint8_t out[AMP_COUNT])
+{
+	for (size_t c = 0; c < AMP_COUNT; c++)
+		out[c] = resume2_reg_read(&amps[c], RESUME2_REG_PWR_CTL);
+}
+
+/* --- I2S TX: a continuous 1 kHz sine or silence, one block at a time --- */
+static alp_status_t resume2_write_sine_block(alp_audio_out_t *spk,
+                                             int16_t         *buf,
+                                             uint32_t        *phase_acc,
+                                             uint32_t         samples_per_cycle)
+{
+	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+		float theta =
+		    GOERTZEL_TWO_PI * (float)(*phase_acc % samples_per_cycle) / (float)samples_per_cycle;
+		int16_t sample  = (int16_t)((float)SOUND_TONE_AMPLITUDE * sinf(theta));
+		buf[2u * f]     = sample;
+		buf[2u * f + 1] = sample;
+		(*phase_acc)++;
+	}
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+static alp_status_t resume2_write_silence_block(alp_audio_out_t *spk, int16_t *buf)
+{
+	memset(buf, 0, SOUND_FRAMES_PER_BLOCK * 2u * sizeof(int16_t));
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+/* tone_freq_hz == 0 means silence; phase_acc is the SAME variable across
+ * every call this run -- see resume2_main()'s "tone generator" print and
+ * its own comment for why that makes this generator phase-continuous. */
+static alp_status_t
+resume2_write_block(alp_audio_out_t *spk, int16_t *buf, uint32_t tone_freq_hz, uint32_t *phase_acc)
+{
+	if (tone_freq_hz == 0u) return resume2_write_silence_block(spk, buf);
+	return resume2_write_sine_block(spk, buf, phase_acc, SOUND_SAMPLE_RATE_HZ / tone_freq_hz);
+}
+
+/* --- Mic-side pitch measurement: 200-4000 Hz Goertzel scan in 25 Hz steps,
+ * ch0 only, run ONCE after capture (never per-block/per-sample) -- see
+ * r2_scan() below. --------------------------------------------------- */
+#define R2_DISCARD_BLOCKS 19u /* 304 ms -- decimator/restart settle, discarded. */
+#define R2_CAPTURE_BLOCKS 31u /* 496 ms -- "about 0.5 s". */
+#define R2_MEASURE_BLOCKS (R2_DISCARD_BLOCKS + R2_CAPTURE_BLOCKS)    /* 50 blocks, 800 ms. */
+#define R2_CAPTURE_FRAMES (R2_CAPTURE_BLOCKS * MIC_FRAMES_PER_BLOCK) /* 23808. */
+#define R2_SCAN_MIN_HZ    200u
+#define R2_SCAN_MAX_HZ    4000u
+#define R2_SCAN_STEP_HZ   25u
+#define R2_SCAN_BINS      ((R2_SCAN_MAX_HZ - R2_SCAN_MIN_HZ) / R2_SCAN_STEP_HZ + 1u) /* 153. */
+#define R2_SCAN_BIN_1000HZ \
+	((1000u - R2_SCAN_MIN_HZ) / R2_SCAN_STEP_HZ) /* 32 -- exact, 200+32*25=1000. */
+
+/* ch0-only raw capture buffer: 23808 * 2 bytes = 46 608 bytes. static: off
+ * resume2_measure_window()'s stack. Per-sample capture work above (in
+ * resume2_measure_window()) is a plain copy plus int16 min/max -- integer,
+ * cheap; the float Goertzel scan below runs on this buffer ONCE the
+ * capture loop (and therefore every alp_audio_in_read() for this window)
+ * has already finished, so it can never be the reason a read starves the
+ * mic's slab -- the same "cheap consumer" rule this app's original
+ * acoustic-loopback fix and PROBE_LOOPBACK both already apply. */
+static int16_t r2_ch0_buf[R2_CAPTURE_FRAMES];
+
+typedef struct {
+	float coeff;
+	float s_prev;
+	float s_prev2;
+} r2_goertzel_t;
+
+static void
+r2_goertzel_reset(r2_goertzel_t *g, uint32_t freq_hz, uint32_t n_samples, uint32_t fs_hz)
+{
+	float k     = (float)n_samples * (float)freq_hz / (float)fs_hz;
+	float omega = GOERTZEL_TWO_PI * k / (float)n_samples;
+	g->coeff    = 2.0f * cosf(omega);
+	g->s_prev   = 0.0f;
+	g->s_prev2  = 0.0f;
+}
+
+static inline void r2_goertzel_step(r2_goertzel_t *g, float x)
+{
+	float s    = x + g->coeff * g->s_prev - g->s_prev2;
+	g->s_prev2 = g->s_prev;
+	g->s_prev  = s;
+}
+
+static float r2_goertzel_power(const r2_goertzel_t *g)
+{
+	return g->s_prev * g->s_prev + g->s_prev2 * g->s_prev2 - g->coeff * g->s_prev * g->s_prev2;
+}
+
+/* Scans R2_SCAN_BINS Goertzel bins (200-4000 Hz, 25 Hz steps) over the
+ * first n_captured samples of r2_ch0_buf[]. Finds the peak bin and
+ * expresses it (and the 1000 Hz bin) in dB above the MEDIAN bin power --
+ * an insertion sort over 153 floats, done once, is cheap enough not to
+ * matter here. */
+static void
+r2_scan(uint32_t n_captured, uint32_t *peak_hz_out, double *peak_db_out, double *f1000_db_out)
+{
+	float powers[R2_SCAN_BINS];
+	for (uint32_t i = 0; i < R2_SCAN_BINS; i++) {
+		r2_goertzel_t g;
+		r2_goertzel_reset(&g, R2_SCAN_MIN_HZ + i * R2_SCAN_STEP_HZ, n_captured, MIC_SAMPLE_RATE_HZ);
+		for (uint32_t s = 0; s < n_captured; s++)
+			r2_goertzel_step(&g, (float)r2_ch0_buf[s]);
+		powers[i] = r2_goertzel_power(&g);
+	}
+
+	uint32_t peak_i = 0;
+	float    peak_p = powers[0];
+	for (uint32_t i = 1; i < R2_SCAN_BINS; i++) {
+		if (powers[i] > peak_p) {
+			peak_p = powers[i];
+			peak_i = i;
+		}
+	}
+
+	float sorted[R2_SCAN_BINS];
+	memcpy(sorted, powers, sizeof(powers));
+	for (uint32_t i = 1; i < R2_SCAN_BINS; i++) {
+		float key = sorted[i];
+		int   j   = (int)i - 1;
+		while (j >= 0 && sorted[j] > key) {
+			sorted[j + 1] = sorted[j];
+			j--;
+		}
+		sorted[j + 1] = key;
+	}
+	float median_p = sorted[R2_SCAN_BINS / 2u] + 1e-6f;
+
+	*peak_hz_out  = R2_SCAN_MIN_HZ + peak_i * R2_SCAN_STEP_HZ;
+	*peak_db_out  = 10.0 * log10((double)(peak_p + 1e-6f) / (double)median_p);
+	*f1000_db_out = 10.0 * log10((double)(powers[R2_SCAN_BIN_1000HZ] + 1e-6f) / (double)median_p);
+}
+
+typedef struct {
+	uint32_t peak_hz;
+	double   peak_db;
+	double   f1000_db;
+	int32_t  p2p;
+} r2_measure_result_t;
+
+/* Runs R2_MEASURE_BLOCKS I2S blocks (tone if tone_freq_hz != 0, else
+ * silence), reading one PDM block per I2S block in lock-step. The first
+ * R2_DISCARD_BLOCKS are read-and-discarded (decimator/restart settle,
+ * zero per-sample work); the next R2_CAPTURE_BLOCKS are copied into
+ * r2_ch0_buf (ch0 only) plus int16 min/max, also cheap/integer. Retries
+ * once via STOP/START on a dmic -EIO (the round-4b overrun contract,
+ * same as PROBE_LOOPBACK), counting it into *overrun_count. Returns false
+ * only if the retry also fails. */
+static bool resume2_measure_window(alp_audio_out_t     *spk,
+                                   alp_audio_in_t      *mic,
+                                   int16_t             *out_buf,
+                                   int16_t             *mic_scratch,
+                                   uint32_t             tone_freq_hz,
+                                   uint32_t            *phase_acc,
+                                   uint32_t            *write_failures,
+                                   uint32_t            *overrun_count,
+                                   r2_measure_result_t *result)
+{
+	for (int attempt = 0; attempt < 2; attempt++) {
+		int16_t      minv       = INT16_MAX;
+		int16_t      maxv       = INT16_MIN;
+		uint32_t     cap_n      = 0;
+		bool         mic_error  = false;
+		alp_status_t mic_err_rc = ALP_OK;
+
+		for (uint32_t b = 0; b < R2_MEASURE_BLOCKS; b++) {
+			if (resume2_write_block(spk, out_buf, tone_freq_hz, phase_acc) != ALP_OK) {
+				(*write_failures)++;
+			}
+
+			size_t       got = 0;
+			alp_status_t rrc = alp_audio_in_read(
+			    mic, mic_scratch, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
+				mic_error  = true;
+				mic_err_rc = rrc;
+				break;
+			}
+
+			if (b >= R2_DISCARD_BLOCKS) {
+				for (uint32_t f = 0; f < MIC_FRAMES_PER_BLOCK; f++) {
+					int16_t x = mic_scratch[f * MIC_CHANNELS + 0];
+					if (x < minv) minv = x;
+					if (x > maxv) maxv = x;
+					r2_ch0_buf[cap_n++] = x;
+				}
+			}
+		}
+
+		if (mic_error) {
+			bool dropped = (mic_err_rc == ALP_ERR_IO);
+			printf("[r2] mic %s rc=%d -- recovering (STOP/START), attempt %d/2\n",
+			       dropped ? "reports a DROPPED burst (-EIO, overrun)" : "read FAILED",
+			       (int)mic_err_rc,
+			       attempt + 1);
+			if (dropped) (*overrun_count)++;
+			alp_status_t stop_rc  = alp_audio_in_stop(mic);
+			alp_status_t start_rc = alp_audio_in_start(mic);
+			printf("[r2] mic recovery alp_audio_in_stop -> %d, alp_audio_in_start -> %d\n",
+			       (int)stop_rc,
+			       (int)start_rc);
+			if (attempt == 0 && stop_rc == ALP_OK && start_rc == ALP_OK) continue;
+			return false;
+		}
+
+		r2_scan(cap_n, &result->peak_hz, &result->peak_db, &result->f1000_db);
+		result->p2p = (int32_t)maxv - (int32_t)minv;
+		return true;
+	}
+	return false;
+}
+
+/* Keeps writing tone/silence blocks and draining one PDM block per I2S
+ * block (best-effort STOP/START on an overrun -- not a measurement, so no
+ * retry-the-whole-span logic), with no per-sample work at all -- used for
+ * every span this mode does NOT need to measure (the silence padding
+ * beyond a window's own SILENCE-before-N measurement, and the rest of a
+ * tone after its own TONE-n measurement). Returns the write-failure
+ * count. */
+static uint32_t resume2_drain_blocks(alp_audio_out_t *spk,
+                                     alp_audio_in_t  *mic,
+                                     int16_t         *out_buf,
+                                     int16_t         *mic_scratch,
+                                     uint32_t         tone_freq_hz,
+                                     uint32_t         blocks,
+                                     uint32_t        *phase_acc,
+                                     uint32_t        *overrun_count)
+{
+	uint32_t write_failures = 0;
+	for (uint32_t b = 0; b < blocks; b++) {
+		if (resume2_write_block(spk, out_buf, tone_freq_hz, phase_acc) != ALP_OK) write_failures++;
+		size_t       got = 0;
+		alp_status_t rrc =
+		    alp_audio_in_read(mic, mic_scratch, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+		if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
+			if (rrc == ALP_ERR_IO) (*overrun_count)++;
+			(void)alp_audio_in_stop(mic);
+			(void)alp_audio_in_start(mic);
+		}
+	}
+	return write_failures;
+}
+
+/* >=3 s of silence before tone n (this task's requirement 1), with the
+ * SILENCE-before-n mic measurement (requirement 2) inside its first
+ * R2_MEASURE_BLOCKS (800 ms) -- the remaining ~2.2 s is drained (cheap,
+ * no measurement). 188 blocks = 3008 ms is the smallest block count
+ * >= 3000 ms (187*16=2992 < 3000). Returns this call's OWN write-failure
+ * count (not accumulated) so callers that need to gate tas2563_resume()
+ * on "did every priming write actually succeed" (the #2146 round-2
+ * pattern examples/aen/aen-evk-demo/src/main.c now uses) can check it. */
+#define R2_SILENCE_BLOCKS 188u /* 3008 ms, >= the required 3000 ms. */
+
+static uint32_t resume2_pre_tone_silence(alp_audio_out_t *spk,
+                                         alp_audio_in_t  *mic,
+                                         int16_t         *out_buf,
+                                         int16_t         *mic_scratch,
+                                         uint32_t        *phase_acc,
+                                         unsigned         n,
+                                         uint32_t        *overrun_count)
+{
+	uint32_t            write_failures = 0;
+	r2_measure_result_t mres;
+	bool                ok = resume2_measure_window(
+	    spk, mic, out_buf, mic_scratch, 0u, phase_acc, &write_failures, overrun_count, &mres);
+	if (ok) {
+		printf(
+		    "[r2] SILENCE-before-%u mic peak=%u Hz  peak_dB=%.1f\n", n, mres.peak_hz, mres.peak_db);
+	} else {
+		printf("[r2] SILENCE-before-%u mic measurement FAILED (overrun recovery exhausted)\n", n);
+	}
+	if (R2_SILENCE_BLOCKS > R2_MEASURE_BLOCKS) {
+		write_failures += resume2_drain_blocks(spk,
+		                                       mic,
+		                                       out_buf,
+		                                       mic_scratch,
+		                                       0u,
+		                                       R2_SILENCE_BLOCKS - R2_MEASURE_BLOCKS,
+		                                       phase_acc,
+		                                       overrun_count);
+	}
+	return write_failures;
+}
+
+/* TONE n/6 ON <label> ... TONE n/6 OFF -- this task's requirement 1's
+ * exact print pair. The mic measurement (requirement 2) runs in the
+ * tone's own first R2_MEASURE_BLOCKS (800 ms); any read-full()
+ * checkpoints (requirement 3, same as PROBE_RESUME's A/C/D/E) are timed
+ * from TONE START, so they land correctly in the "remainder" span after
+ * the measurement window. Returns this call's own write-failure count. */
+static uint32_t resume2_play_tone(alp_audio_out_t *spk,
+                                  alp_audio_in_t  *mic,
+                                  tas2563_t        amps[AMP_COUNT],
+                                  int16_t         *out_buf,
+                                  int16_t         *mic_scratch,
+                                  uint32_t        *phase_acc,
+                                  const char      *label,
+                                  unsigned         n,
+                                  uint32_t         total_ms,
+                                  const uint32_t  *checkpoints_ms,
+                                  size_t           n_checkpoints,
+                                  uint32_t        *overrun_count)
+{
+	printf("[r2] TONE %u/6 ON %s (expect 1000 Hz)\n", n, label);
+	uint32_t write_failures = 0;
+
+	r2_measure_result_t mres;
+	bool                ok = resume2_measure_window(
+	    spk, mic, out_buf, mic_scratch, 1000u, phase_acc, &write_failures, overrun_count, &mres);
+	if (ok) {
+		printf("[r2] TONE %u mic peak=%u Hz  peak_dB=%.1f  f1000_dB=%.1f  p2p=%d\n",
+		       n,
+		       mres.peak_hz,
+		       mres.peak_db,
+		       mres.f1000_db,
+		       mres.p2p);
+	} else {
+		printf("[r2] TONE %u mic measurement FAILED (overrun recovery exhausted)\n", n);
+	}
+
+	uint32_t total_blocks   = (total_ms + RESUME2_BLOCK_MS / 2u) / RESUME2_BLOCK_MS;
+	uint32_t elapsed_blocks = R2_MEASURE_BLOCKS;
+	size_t   next_cp        = 0;
+	while (elapsed_blocks < total_blocks) {
+		uint32_t run_blocks = total_blocks - elapsed_blocks;
+		if (next_cp < n_checkpoints) {
+			uint32_t cp_block =
+			    (checkpoints_ms[next_cp] + RESUME2_BLOCK_MS / 2u) / RESUME2_BLOCK_MS;
+			if (cp_block > elapsed_blocks && cp_block < total_blocks) {
+				run_blocks = cp_block - elapsed_blocks;
+			}
+		}
+		write_failures += resume2_drain_blocks(
+		    spk, mic, out_buf, mic_scratch, 1000u, run_blocks, phase_acc, overrun_count);
+		elapsed_blocks += run_blocks;
+
+		if (next_cp < n_checkpoints) {
+			uint32_t cp_block =
+			    (checkpoints_ms[next_cp] + RESUME2_BLOCK_MS / 2u) / RESUME2_BLOCK_MS;
+			if (elapsed_blocks == cp_block) {
+				resume2_read_full(label, amps);
+				next_cp++;
+			}
+		}
+	}
+	printf("[r2] TONE %u/6 OFF\n", n);
+	return write_failures;
+}
+
+static int resume2_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_RESUME2): #2146 + mic-measured pitch ===\n");
+	(void)alp_init();
+
+	/* --- Same bring-up as the other PROBE_* modes: bridge, mux,
+	 * AMP_ENABLE, tas2563_init x2, level MIN, configure_i2s x2. -------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[r2] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[r2] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[r2] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[r2] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[r2] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[r2] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[r2] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[r2] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[r2] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[r2] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[r2] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	/* --- PDM mic open+start BEFORE phase A, kept running throughout, as
+	 * PROBE_LOOPBACK does -- proven live there (1000/500 Hz each >50 dB
+	 * above silence). ---------------------------------------------------- */
+	alp_audio_in_t *mic    = alp_audio_in_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = MIC_SAMPLE_RATE_HZ,
+	    .channels         = MIC_CHANNELS,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = MIC_FRAMES_PER_BLOCK,
+	});
+	alp_status_t    mic_rc = (mic != NULL) ? alp_audio_in_start(mic) : alp_last_error();
+	bool            mic_ok = (mic != NULL) && (mic_rc == ALP_OK);
+	printf("[r2] alp_audio_in_open+start(PDM, U19 LEFT/U20 RIGHT) -> %d\n", (int)mic_rc);
+
+	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+	static int16_t mic_scratch[MIC_FRAMES_PER_BLOCK * MIC_CHANNELS];
+	uint32_t       phase_acc      = 0;
+	uint32_t       write_failures = 0;
+	uint32_t       overrun_count  = 0;
+
+	/* This task's requirement 4: the tone generator's own parameters,
+	 * printed once. phase_acc above is declared ONCE for this entire run
+	 * and threaded by pointer through every resume2_write_sine_block()
+	 * call (inside resume2_measure_window()/resume2_drain_blocks(), for
+	 * every tone AND every silence span) -- it is never reset per block
+	 * or per call, so this generator is PHASE-CONTINUOUS across the whole
+	 * run, not just within one tone. A phase reset per block would cause
+	 * an audible buzz/click train at the block rate (16 ms, 62.5 Hz),
+	 * not a pitch change -- reported here either way, per this task's ask. */
+	printf("[r2] tone generator: sample_rate=%u Hz  frames_per_block=%u  tone_freq=1000 Hz  "
+	       "samples_per_cycle=%u  phase_continuous=YES (single phase_acc threaded through every "
+	       "write this run, never reset)\n",
+	       SOUND_SAMPLE_RATE_HZ,
+	       SOUND_FRAMES_PER_BLOCK,
+	       SOUND_SAMPLE_RATE_HZ / 1000u);
+
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[r2] alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	if (spk_rc == ALP_OK) spk_rc = alp_audio_out_set_volume(spk, RESUME2_VOLUME);
+	printf("[r2] alp_audio_out_set_volume(%u) -> %d\n", RESUME2_VOLUME, (int)spk_rc);
+
+	if (!mic_ok || spk_rc != ALP_OK) {
+		printf("[r2] %s -- aborting before touching the amps\n",
+		       !mic_ok ? "PDM mic never opened/started" : "I2S3 did not start");
+	} else {
+		/* --- A. Ordered start: >=3 s silence (+ SILENCE-before-1
+		 * measurement), tas2563_resume() gated on that priming actually
+		 * succeeding (the #2146 round-2 pattern), read, TONE 1/6, read. */
+		uint32_t a_fail = resume2_pre_tone_silence(
+		    spk, mic, tone_buf, mic_scratch, &phase_acc, 1u, &overrun_count);
+		write_failures += a_fail;
+		if (a_fail == 0) {
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				alp_status_t rrc = tas2563_resume(&amps[i]);
+				printf("[r2] A: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rrc);
+			}
+		} else {
+			printf("[r2] A: priming silence had %u write failure(s) -- skipping "
+			       "tas2563_resume(), amps left in shutdown\n",
+			       a_fail);
+		}
+		resume2_read_full("A: after resume", amps);
+		const uint32_t no_checkpoints[1] = { 0 };
+		write_failures += resume2_play_tone(spk,
+		                                    mic,
+		                                    amps,
+		                                    tone_buf,
+		                                    mic_scratch,
+		                                    &phase_acc,
+		                                    "A",
+		                                    1u,
+		                                    3000u,
+		                                    no_checkpoints,
+		                                    0,
+		                                    &overrun_count);
+		resume2_read_full("A: after tone", amps);
+
+		/* --- B. Halt-time measurement: stop, poll PWR_CTL every 50 ms
+		 * for 3 s (cheap enough to drop from PROBE_RESUME's 100 ms). --- */
+		alp_status_t stop_rc = alp_audio_out_stop(spk);
+		printf("[r2] B: alp_audio_out_stop -> %d\n", (int)stop_rc);
+		bool     shutdown_seen[AMP_COUNT]  = { false, false };
+		uint32_t shutdown_at_ms[AMP_COUNT] = { 0, 0 };
+		for (uint32_t elapsed = 0; elapsed <= 3000u; elapsed += 50u) {
+			uint8_t pwr[AMP_COUNT];
+			resume2_read_pwr_ctl_pair(amps, pwr);
+			printf("[r2] B: +%u ms  uptime=%u ms  PWR_CTL=0x%02x/0x%02x\n",
+			       elapsed,
+			       k_uptime_get_32(),
+			       pwr[0],
+			       pwr[1]);
+			for (size_t c = 0; c < AMP_COUNT; c++) {
+				if (!shutdown_seen[c] && pwr[c] == 0x0eu) {
+					shutdown_seen[c]  = true;
+					shutdown_at_ms[c] = elapsed;
+				}
+			}
+			if (elapsed < 3000u) k_msleep(50);
+		}
+		for (size_t c = 0; c < AMP_COUNT; c++) {
+			if (shutdown_seen[c]) {
+				printf("[r2] shutdown observed at +%u ms after stop (0x%02x)\n",
+				       shutdown_at_ms[c],
+				       amp_addrs[c]);
+			} else {
+				printf("[r2] shutdown observed at +ms after stop (0x%02x): never\n", amp_addrs[c]);
+			}
+		}
+
+		/* --- C. Restart WITHOUT resume -- reproduces #2146 on purpose. */
+		alp_status_t restart_rc = alp_audio_out_start(spk);
+		printf("[r2] C: restart without resume, alp_audio_out_start -> %d\n", (int)restart_rc);
+		write_failures += resume2_pre_tone_silence(
+		    spk, mic, tone_buf, mic_scratch, &phase_acc, 2u, &overrun_count);
+		const uint32_t c_checkpoints[2] = { 1000u, 2500u };
+		write_failures += resume2_play_tone(spk,
+		                                    mic,
+		                                    amps,
+		                                    tone_buf,
+		                                    mic_scratch,
+		                                    &phase_acc,
+		                                    "C",
+		                                    2u,
+		                                    3000u,
+		                                    c_checkpoints,
+		                                    ARRAY_SIZE(c_checkpoints),
+		                                    &overrun_count);
+
+		/* --- D. Resume after C -- I2S already running; the silence
+		 * before this tone is written as zero blocks, NEVER a stop. --- */
+		uint32_t d_fail = resume2_pre_tone_silence(
+		    spk, mic, tone_buf, mic_scratch, &phase_acc, 3u, &overrun_count);
+		write_failures += d_fail;
+		if (d_fail == 0) {
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				alp_status_t rrc = tas2563_resume(&amps[i]);
+				printf("[r2] D: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rrc);
+			}
+		} else {
+			printf("[r2] D: priming silence had %u write failure(s) -- skipping "
+			       "tas2563_resume(), amps left as-is\n",
+			       d_fail);
+		}
+		resume2_read_full("D: after resume", amps);
+		const uint32_t d_checkpoints[2] = { 1000u, 2500u };
+		write_failures += resume2_play_tone(spk,
+		                                    mic,
+		                                    amps,
+		                                    tone_buf,
+		                                    mic_scratch,
+		                                    &phase_acc,
+		                                    "D",
+		                                    3u,
+		                                    3000u,
+		                                    d_checkpoints,
+		                                    ARRAY_SIZE(d_checkpoints),
+		                                    &overrun_count);
+
+		/* --- E. Short-gap sweep, no resume -- self-heal threshold. Each
+		 * gap keeps ITS OWN stop semantics (a real stop, per this task's
+		 * ask); the >=3 s of silence this task also requires before each
+		 * gap's tone is added AFTER the restart, as zero-block writes. */
+		static const uint32_t gaps_ms[] = { 200u, 500u, 1500u };
+		for (size_t g = 0; g < ARRAY_SIZE(gaps_ms); g++) {
+			unsigned     n           = 4u + (unsigned)g;
+			alp_status_t gap_stop_rc = alp_audio_out_stop(spk);
+			k_msleep(gaps_ms[g]);
+			alp_status_t gap_start_rc = alp_audio_out_start(spk);
+			printf("[r2] E: gap=%u ms stop -> %d, start -> %d\n",
+			       gaps_ms[g],
+			       (int)gap_stop_rc,
+			       (int)gap_start_rc);
+
+			write_failures += resume2_pre_tone_silence(
+			    spk, mic, tone_buf, mic_scratch, &phase_acc, n, &overrun_count);
+
+			char label[24];
+			snprintf(label, sizeof(label), "E gap=%u", gaps_ms[g]);
+			const uint32_t e_checkpoint[1] = { 1000u };
+			write_failures += resume2_play_tone(spk,
+			                                    mic,
+			                                    amps,
+			                                    tone_buf,
+			                                    mic_scratch,
+			                                    &phase_acc,
+			                                    label,
+			                                    n,
+			                                    2000u,
+			                                    e_checkpoint,
+			                                    1,
+			                                    &overrun_count);
+
+			uint8_t pwr[AMP_COUNT];
+			resume2_read_pwr_ctl_pair(amps, pwr);
+			printf("[r2] gap=%u PWR_CTL=0x%02x/0x%02x\n", gaps_ms[g], pwr[0], pwr[1]);
+
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				alp_status_t rrc = tas2563_resume(&amps[i]);
+				printf("[r2] E: tas2563_resume(0x%02x) -> %d [re-arm for next gap]\n",
+				       amp_addrs[i],
+				       (int)rrc);
+			}
+			/* This task's requirement 3: "After each E re-arm, also read
+			 * PWR_CTL; the last run didn't print it." */
+			resume2_read_full("E: after re-arm", amps);
+		}
+	}
+
+	/* --- F. Teardown. ---------------------------------------------------- */
+	alp_status_t final_stop_rc = (spk != NULL) ? alp_audio_out_stop(spk) : ALP_ERR_NOT_READY;
+	printf("[r2] F: alp_audio_out_stop -> %d\n", (int)final_stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[r2] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+		tas2563_deinit(&amps[i]);
+	}
+	if (spk != NULL) alp_audio_out_close(spk);
+	if (mic != NULL) alp_audio_in_close(mic);
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	printf("[r2] total alp_audio_out_write() failures this run: %u\n", write_failures);
+	printf("[r2] total mic overrun count this run: %u\n", overrun_count);
+	printf("[r2] done\n");
+	return 0;
+}
+
+#endif /* PROBE_RESUME2 */
+
 int main(void)
 {
 #if defined(PROBE_LISTEN)
@@ -3060,6 +3808,8 @@ int main(void)
 	return loop_main();
 #elif defined(PROBE_RESUME)
 	return resume_main();
+#elif defined(PROBE_RESUME2)
+	return resume2_main();
 #else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();
