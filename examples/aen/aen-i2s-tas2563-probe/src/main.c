@@ -167,14 +167,37 @@
  * RMS (accumulated in `double` for precision over ACOUSTIC_ANALYSIS_FRAMES
  * samples, converted to float only at the end) as a coarse sanity check.
  *
+ * MIC CAPTURE RATE IS 8 kHz, NOT 16 kHz -- a SEPARATE peripheral/rate from
+ * the I2S3 TX side. Bench-testing the #2133 driver fix against
+ * examples/aen/aen-pdm-mic-alif on e1m-aen-evk-03 showed correct blocks
+ * (PDM_CONFIG_REGISTER = 0x00010033, FIFO moving, rc=0) arriving ~200 ms
+ * apart for 1600-frame blocks -- i.e. 8 kHz, not the 16 kHz this app
+ * originally requested. Cross-checked against the Alif DFP
+ * (Alif_CMSIS/Include/Driver_PDM.h): the SAME numeric mode values
+ * pdm_alif.h uses carry rate in their DFP names --
+ * ARM_PDM_MODE_AUDIOFREQ_8K_DECM_64 = 0x01 = PDM_MODE_STANDARD_VOICE_512_
+ * CLK_FRQ = the ONLY mode with a proven FIR table anywhere (the DFP's own
+ * demo_pdm.c uses it for "Standard voice"); 0x02/0x03/0x04 are the 16 kHz
+ * variants. The #2133 fix's FIR table is therefore 8 kHz-only; requesting
+ * 16 kHz is expected to return -EINVAL once it lands, and running this app
+ * unchanged against the CURRENT (pre-#2133) driver would have silently
+ * captured at 8 kHz while this file's own Goertzel math assumed 16 kHz --
+ * a real 1 kHz tone would alias to 2 kHz in the analysis and score
+ * "not heard". MIC_SAMPLE_RATE_HZ is therefore 8000, independent of
+ * SOUND_SAMPLE_RATE_HZ (16000, unchanged -- I2S3 TX to the TAS2563 amps is
+ * a different peripheral and is unaffected by any of this).
+ *
  * EXACT-BIN WINDOW SIZING -- a Goertzel bin is only leakage-free when the
  * target frequency lands EXACTLY on an integer DFT bin of the analysis
  * window: k = N * f / fs must be a whole number. With fs = MIC_SAMPLE_RATE_HZ
- * = 16000 Hz and N = ACOUSTIC_ANALYSIS_FRAMES = 6400 (25 blocks of 256
- * frames, ~400 ms): k(1000 Hz) = 6400*1000/16000 = 400, k(800 Hz) =
- * 6400*800/16000 = 320, k(1200 Hz) = 6400*1200/16000 = 480 -- all three
- * exact integers, verified by hand here (not just "computed at runtime and
- * hoped").
+ * = 8000 Hz and N = ACOUSTIC_ANALYSIS_FRAMES = 3200 (25 blocks of
+ * MIC_FRAMES_PER_BLOCK=128 frames, ~400 ms): k(1000 Hz) = 3200*1000/8000 =
+ * 400, k(800 Hz) = 3200*800/8000 = 320, k(1200 Hz) = 3200*1200/8000 = 480
+ * -- all three exact integers, verified by hand here (not just "computed
+ * at runtime and hoped"), and numerically IDENTICAL to the k values at the
+ * previous 16 kHz/6400-sample window: k = N/fs * f = (window duration in
+ * seconds) * f, and the window duration (0.4 s) did not change -- only fs
+ * and N did, in the same proportion.
  *
  * WINDOW SEQUENCE, in order. EVIDENCE 1's DURING/STOPPED check is now ITS
  * OWN segment (run_tdm_clock_check()), run entirely before any acoustic
@@ -440,8 +463,24 @@ static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, S
 #define SOUND_VOL_STEP_COUNT ARRAY_SIZE(sound_vol_steps)
 
 /* ---- PDM mics (U19 LEFT / U20 RIGHT) -- see the file header's MIC MAPPING */
-#define MIC_CHANNELS       2u                   /* ch0=U19 LEFT, ch1=U20 RIGHT. */
-#define MIC_SAMPLE_RATE_HZ SOUND_SAMPLE_RATE_HZ /* one shared clock domain/timing base. */
+#define MIC_CHANNELS 2u /* ch0=U19 LEFT, ch1=U20 RIGHT. */
+/* 8000 Hz, NOT SOUND_SAMPLE_RATE_HZ (16000, the SEPARATE I2S3 TX rate) --
+ * see the file header's "MIC CAPTURE RATE IS 8 kHz, NOT 16 kHz" section.
+ * The #2133 driver fix's only bench-verified/proven FIR coefficient table
+ * is for ARM_PDM_MODE_AUDIOFREQ_8K_DECM_64 ("Standard voice"); a 16 kHz
+ * open is expected to be refused (-EINVAL) once that fix lands. */
+#define MIC_SAMPLE_RATE_HZ 8000u
+/* 128 frames at 8 kHz = 16 ms/block -- deliberately the SAME wall-clock
+ * block period as SOUND_FRAMES_PER_BLOCK (256 @ 16 kHz = 16 ms) for the
+ * I2S TX side, NOT the same frame count. capture_window() writes one TX
+ * tone block and attempts one mic-read block per loop iteration; keeping
+ * both at 16 ms/block is what keeps that interleave balanced -- a mic
+ * block genuinely half the TX block's duration would starve nothing, but
+ * a mic block LONGER than the TX block's duration would mean each mic
+ * read blocks longer than the 2-block TX slab can cover from a single
+ * write, reintroducing the exact underrun class the TDM check was moved
+ * out from under (see run_tdm_clock_check() and the file header). */
+#define MIC_FRAMES_PER_BLOCK 128u
 /* Aligned to examples/aen/aen-pdm-mic-alif's bench-verified READ_TIMEOUT_MS
  * (2000) -- was 200 here, which removed "our timeout was just too short" as
  * a candidate explanation for the first-silicon-run mic read failure
@@ -461,14 +500,18 @@ static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, S
  * (see EXACT-BIN WINDOW SIZING) has no such slack: any transient in the
  * analyzed window (mic startup, the DC-blocking filter's own settle, or
  * the tone/volume step that just changed) leaks across every bin. 6 blocks
- * covers the DC-blocker's own time constant several times over (alpha =
- * 0.995 in dc_block_s16(), src/backends/audio/zephyr_drv.c -- time
- * constant ~= 1/(1-0.995) = 200 samples = 12.5 ms at 16 kHz) with margin
- * to spare; nothing more rigorous than that informed the choice of 6. */
+ * covers the DC-blocker's own time constant roughly 4x over (alpha = 0.995
+ * in dc_block_s16(), src/backends/audio/zephyr_drv.c -- time constant ~=
+ * 1/(1-0.995) = 200 samples = 25 ms at the mic's 8 kHz capture rate) with
+ * margin to spare; nothing more rigorous than that informed the choice of
+ * 6. (This margin was ~7.7x at the previous 16 kHz mic rate -- halving the
+ * mic sample rate doubles the DC-blocker's real-time time constant for the
+ * same 200-sample count, so the SAME 6-block/96ms discard now covers it
+ * fewer times over. Still comfortably enough; not re-tuned otherwise.) */
 #define ACOUSTIC_DISCARD_BLOCKS  6u
-#define ACOUSTIC_ANALYSIS_BLOCKS 25u /* ~400ms, 25*256=6400 samples -- the exact-bin window. */
-#define ACOUSTIC_ANALYSIS_FRAMES (ACOUSTIC_ANALYSIS_BLOCKS * SOUND_FRAMES_PER_BLOCK)
-#define TONE_BIN_HZ              SOUND_TONE_HZ /* 1000 Hz, exact bin k=400 at N=6400/fs=16000. */
+#define ACOUSTIC_ANALYSIS_BLOCKS 25u /* ~400ms, 25*128=3200 samples -- the exact-bin window. */
+#define ACOUSTIC_ANALYSIS_FRAMES (ACOUSTIC_ANALYSIS_BLOCKS * MIC_FRAMES_PER_BLOCK)
+#define TONE_BIN_HZ              SOUND_TONE_HZ /* 1000 Hz, exact bin k=400 at N=3200/fs=8000. */
 #define REF_BIN_LOW_HZ           800u          /* exact bin k=320. */
 #define REF_BIN_HIGH_HZ          1200u         /* exact bin k=480. */
 #define ACOUSTIC_MARGIN_DB       10.0f         /* the task's own example threshold. */
@@ -825,7 +868,7 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
                                       uint32_t         samples_per_cycle,
                                       chan_result_t    results[MIC_CHANNELS])
 {
-	static int16_t mic_buf[SOUND_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* static: off caller's stack. */
+	static int16_t  mic_buf[MIC_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* static: off caller's stack. */
 	window_status_t st = { .tone_ok = true, .mic_ok = (mic != NULL) };
 
 	if (mic == NULL && spk == NULL) return st; /* nothing to write or read -- a true no-op call. */
@@ -844,15 +887,15 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
 			alp_status_t rrc =
-			    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
-			if (rrc != ALP_OK || got != SOUND_FRAMES_PER_BLOCK) {
+			    alp_audio_in_read(mic, mic_buf, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
 				st.mic_ok = false;
 				printf("[probe] capture_window: alp_audio_in_read FAILED (discard block %u) "
 				       "rc=%d got=%zu/%u frames\n",
 				       b,
 				       (int)rrc,
 				       got,
-				       (unsigned)SOUND_FRAMES_PER_BLOCK);
+				       (unsigned)MIC_FRAMES_PER_BLOCK);
 				dump_pdm_diagnostics();
 			}
 		}
@@ -886,15 +929,15 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
 			alp_status_t rrc =
-			    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
-			if (rrc != ALP_OK || got != SOUND_FRAMES_PER_BLOCK) {
+			    alp_audio_in_read(mic, mic_buf, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
 				st.mic_ok = false;
 				printf("[probe] capture_window: alp_audio_in_read FAILED (analysis block %u) "
 				       "rc=%d got=%zu/%u frames\n",
 				       b,
 				       (int)rrc,
 				       got,
-				       (unsigned)SOUND_FRAMES_PER_BLOCK);
+				       (unsigned)MIC_FRAMES_PER_BLOCK);
 				dump_pdm_diagnostics();
 			} else {
 				for (size_t f = 0; f < got; f++) {
@@ -1385,7 +1428,7 @@ int main(void)
 	    .sample_rate_hz   = MIC_SAMPLE_RATE_HZ,
 	    .channels         = MIC_CHANNELS,
 	    .format           = ALP_AUDIO_FMT_S16_LE,
-	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	    .frames_per_block = MIC_FRAMES_PER_BLOCK,
 	});
 	alp_status_t    mic_rc = (mic != NULL) ? alp_audio_in_start(mic) : alp_last_error();
 	bool            mic_ok = (mic != NULL) && (mic_rc == ALP_OK);
