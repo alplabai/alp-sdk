@@ -46,9 +46,11 @@ E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
   `USB2_VBUS` and CC-pin straps).  Don't drive multiple inputs
   simultaneously during early bring-up — the power-OR / eFuse
   topology hasn't been verified on every assembled revision.
-- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (selectable
-  +1V8 / +V_ANA / +3V3 / +5V via header **P17** for the user
-  interface and Arduino expansion).
+- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (the plugged-in
+  SoM's `VIO_OUT`, NOT carrier-selectable -- measures 1.8 V with the
+  E1M-AEN SoM), `+V_ANA` (jumper-selectable from `+1V8` / `+3V3` /
+  `+5V` via header **P17** for the user interface and Arduino
+  expansion).
 - **SuperCap rail:** present on `+SCAP`; useful for hold-up during
   brown-outs; `<alp/iot.h>`-level state-persistence policies should
   consult this rail when shipping examples that survive power loss.
@@ -127,7 +129,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 | RGB LED          | 150505M173300, transistor-driven, on a `+5V` rail.                      |
 | DAC outputs      | `DAC0_OUT` and `DAC1_OUT` buffered through OPA189 op-amps to header J15.|
 | Comparator       | `CMP0`, `CMP1` exposed on header J18.                                   |
-| IO-voltage select| Header **P17**: jumper between `+1V8`, `+V_ANA`, `+3V3`, `+5V`.         |
+| `+V_ANA` select  | Header **P17**: jumper connects one of `+1V8`/`+3V3`/`+5V` (pins 1/3/5) to `+V_ANA` (pins 2/4/6); does not affect `+VIO`, which comes from the SoM's `VIO_OUT`. |
 
 ## Networking & I/O at a glance
 
@@ -167,11 +169,15 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
   Class-D amps (U27 + U28; each drives a mono speaker) with JST
-  speaker headers; I²S source selectable via 74LVC157.  The shared
-  `I²S0` link carries both channels in a stereo frame -- U27 picks
-  the left slot, U28 picks the right slot via TAS2563 time-slot
-  configuration.  The amps' diagnostic feedback returns on
-  `I²S0_SDI`.
+  speaker headers, reachable over `I²S0` only through a mux (U46) --
+  NOT currently audible: U46's `VCC` is on `+VIO` (the SoM's
+  `VIO_OUT`, 1.8 V with the E1M-AEN SoM), below a 3257-type bus
+  switch's rated `VCC`, so it does not pass valid I²S levels even
+  with the mux enabled (see `include/alp/boards/alp_e1m_evk.h`'s I2S
+  mux block).  Once U46 passes audio, the shared `I²S0` link is
+  designed to carry both channels in a stereo frame -- U27 the left
+  slot, U28 the right, via TAS2563 time-slot configuration.  The
+  amps' diagnostic feedback returns on `I²S0_SDI`.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
   through LSF0108 / LSF0102 to the IO-voltage select rail.
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,

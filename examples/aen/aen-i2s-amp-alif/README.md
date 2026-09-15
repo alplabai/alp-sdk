@@ -43,8 +43,12 @@ init, so nothing drives P9_3/4/5 at all. `main.c` detects this at compile
 time (`DT_NODE_HAS_STATUS(I2S_NODE, okay)`) and prints why, then exits with
 `RESULT SKIPPED` instead of touching the Zephyr I2S API.
 
-**To exercise this node once U46 has actually been reworked** on the
-physical board under test, the single documented switch:
+**To exercise this node once U46 has been replaced with a switch rated
+for 1.8 V VCC, or its VCC moved to `+3V3`** (a same-family 3257-type
+part swap on `+VIO` alone removes the contention hazard below but is
+still silent through the amps -- see `include/alp/boards/alp_e1m_evk.h`'s
+I2S mux block; this app tests only the SoC's own `i2s3` controller, not
+the amps), the single documented switch:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -52,7 +56,7 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
 ```
 
-## Status (with the node re-enabled post-rework)
+## Status (with the node re-enabled, contention hazard removed)
 
 **TX path WORKING on E8 (RESULT PASS):** `i2s_configure(TX)` / `i2s_write` ×4 /
 `i2s_trigger(START)` / `i2s_trigger(DRAIN)` all return 0 and the FIFO drains **with

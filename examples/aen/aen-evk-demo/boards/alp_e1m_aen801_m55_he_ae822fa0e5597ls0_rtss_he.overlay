@@ -796,8 +796,11 @@
  * fact, hit first there since that example has no mux-enable GPIO to hide
  * behind). The HP PDM node stays enabled -- it is a wholly separate bus
  * (P6_0/P6_1), input-only, and never touches U46. To turn playback on once
- * U46 has been reworked: set AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c
- * AND pass `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * U46 has been replaced with a switch rated for 1.8 V VCC or its VCC moved
+ * to +3V3 (see include/alp/boards/alp_e1m_evk.h's I2S mux block -- a
+ * same-family 3257-type part swap on +VIO alone stays silent): set
+ * AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c AND pass
+ * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (relative to this app's own source dir) -- both switches, not either alone.
  */
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>

@@ -49,7 +49,7 @@ extern "C" {
 #define EVK_PIN_M2E_SDIO_WAKE  ALP_E1M_GPIO_IO18  /**< M.2 E-key SDIO-path wake (active-low). Active-low. */
 #define EVK_PIN_M2E_UART_WAKE  ALP_E1M_GPIO_IO19  /**< M.2 E-key UART-path wake (active-low). Active-low. */
 #define EVK_PIN_SDIO_MUX_EN    ALP_E1M_GPIO_IO20  /**< SDIO 74LVC157 /E; drive low to enable mux. Active-low. */
-#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 74LV3257 rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper. */
+#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 3257-type bus-switch rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper. */
 #define EVK_PIN_PCIE_MUX_PD    ALP_E1M_GPIO_IO22  /**< Drive HIGH to power down all four PCIe lane muxes. */
 #define EVK_PIN_PCIE_MUX_SEL   ALP_E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
 #define EVK_PIN_LED_GREEN      ALP_E1M_GPIO_PWM3  /**< RGB LED green -- the PWM3 pad driven as a digital GPIO. */

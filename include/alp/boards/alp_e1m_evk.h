@@ -102,7 +102,7 @@ extern "C" {
  *   S  (select)            = E1M IO21
  *
  * U38/U39 shipped as 74LVC157 on the original 2626-R2 BOM; the standard
- * fit going forward is a 74LV3257 FET bus-switch rework.  SD, and
+ * fit going forward is a 3257-type FET bus-switch rework.  SD, and
  * SoC-to-amp I2S (the same-shape mux on U46, below), CAN NEVER WORK
  * through the stock 74LVC157, on EITHER `/E` state -- not just when
  * disabled.  Per the authoritative 2626-R2 carrier netlist, the mux's
@@ -115,12 +115,12 @@ extern "C" {
  * controller's own CLK/CMD output (and the SD_RST GPIO output some
  * apps drive on `E1M_SDIO_RST`, see aen-sdcard-readout) directly on the
  * wire -- there is no `/E` state on a 74LVC157 that avoids contention.
- * Only the 74LV3257 rework is a genuine bidirectional switch: at
+ * Only a 3257-type rework is a genuine bidirectional switch: at
  * `/E` = 0 it CONNECTS (does not drive) the selected side, so the
  * SoC's own driver passes through cleanly with no contention; at
  * `/E` = 1 it is real Hi-Z.
  *
- * With a 74LV3257 fitted, the truth table is:
+ * With a 3257-type switch fitted, the truth table is:
  *   /E = 0, S = 0  ->  microSD card slot routed to SoM
  *   /E = 0, S = 1  ->  M.2 E-key SDIO routed to SoM
  *   /E = 1         ->  Hi-Z, both buses isolated
@@ -173,23 +173,29 @@ extern "C" {
  * outputs LOW, which is likewise not isolation from an active I2S3 TX
  * (same reasoning as the SDIO block above).
  *
- * The same 3257-type bus-switch rework fitted at U46 (the standard fit
- * going forward, same as U38/U39 above) does NOT fix I2S-to-amps on
- * this board -- unlike SDIO, which it does fix.  Per the 2626-R2 netlist,
- * U46 pin 16 (`VCC`) is on `+VIO`, unlike U38/U39, whose pin 16 is on
- * `+3V3`.  Measured on `e1m-aen-evk-03` (maintainer, 2026-09-15):
- * `+VIO` = 1.8 V.  A 3257-type bus switch (e.g. the
- * SN74CBTLV3257/74CBTLV3257 family) is specified for `VCC` 2.3-3.6 V
- * and, being an NMOS pass-gate, only passes a HIGH of roughly
- * `VCC - Vth` -- out of spec and not a valid I2S level at 1.8 V.  With
- * a 3257-type part fitted at U46 and both amps ACTIVE, every I2S/I2C
- * call returned `ALP_OK` but the TAS2563 amps produced NO audible
- * output -- confirmed at the bench.  A working U46 needs either a
- * switch rated for 1.8 V `VCC` (e.g. TI TMUX1574, 1.5-5.5 V,
- * pinout-compatible with SN74CBTLV3257 in TSSOP-16/SOT-23-THIN-16) or
- * the fitted part re-powered from `+3V3` instead of `+VIO`.  Neither
- * change has landed on any board yet -- I2S-to-amps does not work on
- * 2626-R2 today, on either mux part.
+ * A 3257-type bus switch was ALSO fitted at U46 on evk-03 -- but unlike
+ * U38/U39 (whose 3257-type rework IS the standard fit going forward,
+ * see above), that does NOT make I2S-to-amps work.  U46's `VCC`
+ * (pin 16) is on `+VIO`, unlike U38/U39's `VCC`, which is on `+3V3`.
+ * `+VIO` is NOT a carrier-selected rail -- it is the plugged-in SoM's
+ * own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed
+ * `+VIO_C`, which reaches `+VIO` through U33's shunt monitor, IN+/IN-).
+ * MEASURED on `e1m-aen-evk-03` with the E1M-AEN SoM fitted (maintainer,
+ * 2026-09-15): `+VIO` = 1.8 V, and with both amps ACTIVE, every
+ * I2S/I2C call returned `ALP_OK` but the TAS2563 amps produced NO
+ * audible output.  INFERRED, not directly scoped: a 3257-type bus
+ * switch (e.g. the SN74CBTLV3257/74CBTLV3257 family) is specified for
+ * `VCC` 2.3-3.6 V and, being an NMOS pass-gate, only passes a HIGH of
+ * roughly `VCC - Vth` -- out-of-spec `VCC` is the likely cause, but the
+ * actual I2S signal levels were not scoped/measured directly.  A
+ * working U46 needs either a switch rated for 1.8 V `VCC` -- e.g. TI
+ * TMUX1574 (1.5-5.5 V), which keeps the SN74CBTLV3257 pin numbering
+ * ONLY in TSSOP-16/SOT-23-THIN-16 (its other packages don't match, and
+ * NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land pattern without an
+ * adapter or flying leads) -- or the fitted part re-powered from
+ * `+3V3` instead of `+VIO`.  Neither change has landed on any board
+ * yet -- I2S-to-amps does not work on 2626-R2 today, on either mux
+ * part, with a 1.8 V-`VIO` SoM.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per

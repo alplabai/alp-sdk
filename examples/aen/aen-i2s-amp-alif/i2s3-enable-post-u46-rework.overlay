@@ -7,8 +7,10 @@
  * why the node ships "disabled" by default on EVK rev 2626-R2 (U46 has no
  * Hi-Z state, and I2S0_SDO/SCLK/WS on P9_3/4/5 run through it backwards).
  *
- * Apply ONLY once U46 has actually been reworked on the physical board
- * under test:
+ * Apply ONLY once U46 has been replaced with a switch rated for 1.8 V
+ * VCC, or its VCC moved to +3V3 -- a same-family 3257-type part swap on
+ * +VIO alone removes the contention hazard but is still silent through
+ * the amps (see include/alp/boards/alp_e1m_evk.h's I2S mux block):
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
  *       examples/aen/aen-i2s-amp-alif -- \

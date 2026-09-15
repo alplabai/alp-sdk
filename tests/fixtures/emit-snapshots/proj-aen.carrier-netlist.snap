@@ -398,7 +398,7 @@
           "ref": "unrouted"
         }
       ],
-      "board_doc": "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 74LV3257 rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper.",
+      "board_doc": "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 3257-type bus-switch rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper.",
       "som_doc": "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)."
     },
     {

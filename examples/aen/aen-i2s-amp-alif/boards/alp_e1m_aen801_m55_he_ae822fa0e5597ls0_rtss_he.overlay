@@ -24,7 +24,11 @@
  * skipping the app's i2s_configure()/i2s_write() calls, is the point: a
  * disabled node gets no pinctrl-0 applied and no clock enabled at driver
  * init, so nothing drives P9_3/4/5 at all. To exercise this node once U46
- * has been reworked: `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * has been replaced with a switch rated for 1.8 V VCC, or its VCC moved to
+ * +3V3 (see include/alp/boards/alp_e1m_evk.h's I2S mux block -- a
+ * same-family 3257-type part swap on +VIO alone removes this contention
+ * but is still silent through the amps):
+ * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (resolved relative to this app's own source dir, examples/aen/aen-i2s-amp-alif;
  * that file just sets `&i2s3 { status = "okay"; };`) -- the single documented
  * switch; nothing else in this app needs to change.
@@ -62,7 +66,8 @@
 		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
 		/* "disabled" by default -- see the file-header SAFETY note above.
 		 * -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
-		 * flips this back to "okay" once the board is reworked. */
+		 * flips this back to "okay" once U46 is replaced with a
+		 * switch rated for 1.8 V VCC, or its VCC moved to +3V3. */
 		status = "disabled";
 	};
 };
