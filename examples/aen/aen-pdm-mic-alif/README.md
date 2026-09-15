@@ -111,10 +111,10 @@ windows, mic ch0/ch1 only), measured peak/rms/dc of 128/98/-97 and
 volume 16, and 651/220/-101 and 652/224/-101 at 1 kHz/volume 48. That
 probe RMS includes DC; AC RMS ~= sqrt(rms^2 - dc^2), ESTIMATED (a
 different capture path, not this example) at roughly 20 in silence, 68 at
-volume 16, and 195 at volume 48 -- all comfortably above the 60 floor.
-Predicted stimulus: a steady tone or continuous speech at approximately
-volume 16 or louder held near U19/U20 while resetting is expected to
-clear the floor and report `PASS` on this example -- **not yet confirmed
+volume 16, and 195 at volume 48. Silence (~20) stays under the 60 floor;
+volume 16 (~68) clears it only narrowly, volume 48 (~195) by about 3x.
+Predicted stimulus: a steady tone or continuous speech at volume 48, held
+near U19/U20 while resetting, should report `PASS` -- **not yet confirmed
 by a run of this example itself.**
 
 The D2 pair (HW 4/5) idle-matched ch0/1 in the idle measurement above, but
