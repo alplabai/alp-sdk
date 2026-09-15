@@ -614,11 +614,11 @@ void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void 
  * OP as what proves recovery, not this call's own return value.
  *
  * @note **Issue #2126 update.** A DIFFERENT, broader mechanism now IS folded
- * into every worker-routed op and into @ref cc3501e_wifi_connect: when a
+ * into every worker-routed op and into @ref cc3501e_wifi_connect -- when a
  * top-level op comes back @ref ALP_ERR_TIMEOUT (or @ref ALP_ERR_IO) with NO
  * reply EVER decoded off the wire for that op -- the same shape a #2035
- * first-radio-op wedge produces, among others -- @ref
- * cc3501e_link_check_and_recover() (internal; wired into those ops' own
+ * first-radio-op wedge produces, among others -- the driver's internal
+ * cc3501e_link_check_and_recover() (wired into those ops' own
  * failure exits) probes the link and, only if every probe fails, calls @ref
  * cc3501e_recover() below, which does a superset of this function's job (this
  * pulse, THEN a confirming PING, THEN a protocol-version re-fetch, all
