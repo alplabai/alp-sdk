@@ -83,23 +83,44 @@ check, not a claim of identified acoustic content by itself; see Status below
 for the actual acoustic verification -- a clean read at the right rate with
 no channel over that floor reports `INCONCLUSIVE` instead of `PASS`.
 
-**Round 5 correction: the round 4f gain-scaled floor was unreachable.**
-Scaling the round 3 (`0x0D`-baseline) floor up to the `0x200` default gave
-`MIN_SIGNAL_RMS_LSB`/`MIN_SIGNAL_PEAK_TO_PEAK_LSB` values of 630/2520 --
-both well above what the round 4f speaker-loopback silicon itself measured
-at that same gain (peak-to-peak 651/652 on tone; see below), so a `PASS`
-was unreachable at the proven signal level. The floor is now re-derived
-directly from that same loopback's own `0x200` data (`examples/aen/
-aen-pdm-mic-alif/src/main.c`'s `MIN_SIGNAL_PEAK_TO_PEAK_LSB` comment): idle
-peak-to-peak 128/128, tone peak-to-peak 651/652, floor set to 4x the idle
-figure (512 at `0x200`) and scaled proportionally with `channel-gain`. RMS
-is no longer gated (still measured and printed) -- the loopback recorded
-peak-to-peak figures only, and a gated RMS floor without a measured RMS
-silicon figure would be invented, not derived. **This floor has not yet
-been re-run on silicon**: a silent room is expected to report
-`INCONCLUSIVE` and a replayed tone `PASS`, but that is a prediction from
-the derivation above, pending a bench confirmation run (issue #2133
-round 5).
+**Signal-level gate: AC RMS, not peak-to-peak (issue #2133).** Peak-to-peak
+is transient-prone: a probe loopback silence window (`PROBE_LOOPBACK` mode
+of `examples/aen/aen-i2s-tas2563-probe` on branch
+`test/u46-i2s-tas2563-on-reworked-mux`, commit `56631094d`, issue #2143,
+`e1m-aen-evk-03`, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
+channel with the room silent -- above the prior 512 floor, from a single
+sample excursion, not sustained signal. AC RMS averages over the whole
+capture and does not share that failure mode; peak-to-peak is still printed
+per channel but no longer gated.
+
+The floor is derived directly from this example's OWN idle measurement
+(`e1m-aen-evk-03`, 2026-09-15 19:51Z, 48 kHz, `channel-gain` `0x200`, raw
+`dmic_read()`, 3 runs / 12 channel readings over blocks 1-3,
+n=14400 samples/channel): `rms_ac` read 15 on every channel in every run
+(one earlier interrupted attempt read 18-19). Floor = 4 x 15 = 60 at
+`0x200` (`examples/aen/aen-pdm-mic-alif/src/main.c`'s
+`MIN_SIGNAL_RMS_AC_LSB`), scaled proportionally with `channel-gain`.
+
+**All idle runs behind this derivation read `INCONCLUSIVE`** -- ambient
+sound during those runs is unknown, and this example still has no
+controlled stimulus of its own. A `PASS` at a real sound level is a
+**PREDICTION**, not yet measured on this example: the same probe loopback,
+via `alp_audio_in_read()` (`dc_block_s16()`'s ~38 Hz high-pass, 960 ms
+windows, mic ch0/ch1 only), measured peak/rms/dc of 128/98/-97 and
+128/111/-110 (ch0/ch1) in silence, 266/120/-99 and 292/120/-98 at 1 kHz/
+volume 16, and 651/220/-101 and 652/224/-101 at 1 kHz/volume 48. That
+probe RMS includes DC; AC RMS ~= sqrt(rms^2 - dc^2), ESTIMATED (a
+different capture path, not this example) at roughly 20 in silence, 68 at
+volume 16, and 195 at volume 48 -- all comfortably above the 60 floor.
+Predicted stimulus: a steady tone or continuous speech at approximately
+volume 16 or louder held near U19/U20 while resetting is expected to
+clear the floor and report `PASS` on this example -- **not yet confirmed
+by a run of this example itself.**
+
+The D2 pair (HW 4/5) idle-matched ch0/1 in the idle measurement above, but
+has never itself been acoustically tested -- the loopback above drives
+only ch0/ch1. The any-channel `PASS` rule therefore still includes a pair
+this floor has not been acoustically proven against.
 
 **Round 4a silicon results on `e1m-aen-evk-03`:**
 - The 16 kHz build's guard is CONFIRMED: `dmic_configure -> -22`
@@ -152,17 +173,19 @@ measurement.
 **Round 4f: acoustic capture on mic ch0/ch1 (PDM controller 0) is now
 VERIFIED by a speaker-to-mic loopback** on `e1m-aen-evk-03`, 2026-09-15
 14:49Z -- the `PROBE_LOOPBACK` mode of `examples/aen/aen-i2s-tas2563-probe`
-on branch `test/u46-i2s-tas2563-on-reworked-mux` (issue #2143), **not this
-example**, which has no controlled stimulus of its own: the EVK's TAS2563
-speakers (independently verified audible) played known tones while the PDM
-mics captured, gain `0x200` confirmed by readback. Goertzel-bin analysis
-(2 s windows, first 200 ms discarded) found the 1 kHz bin at 9.3/0.1 dB
-(ch0/ch1) in silence rising to 43.4/48.8 dB at volume 16 and 57.8/57.6 dB
-at volume 48 -- and a 500 Hz bin that only lit up (54.7/56.6 dB) during the
-500 Hz stimulus window, staying within -9.8..+5.3 dB everywhere else.
-Volume 16->48 raised the 1 kHz bin by +11.6 dB average (expected +9.5 dB).
-Peak-to-peak went from 128/128 in silence to 651/652 at 1 kHz/volume 48
-(the `p2p` field of the probe's own `loop_chan_result_t`). This
+on branch `test/u46-i2s-tas2563-on-reworked-mux` (commit `56631094d`, issue
+#2143), **not this example**, which has no controlled stimulus of its own:
+the EVK's TAS2563 speakers (independently verified audible) played known
+tones while the PDM mics captured, gain `0x200` confirmed by readback.
+Goertzel-bin analysis (2 s windows, first 200 ms discarded) found the 1 kHz
+bin at 9.3/0.1 dB (ch0/ch1) in silence rising to 43.4/48.8 dB at volume 16
+and 57.8/57.6 dB at volume 48 -- and a 500 Hz bin that only lit up (54.7/56.6
+dB) during the 500 Hz stimulus window, staying within -9.8..+5.3 dB
+everywhere else. Volume 16->48 raised the 1 kHz bin by +11.6 dB average
+(expected +9.5 dB). Peak-to-peak (the `p2p` field of the probe's own
+`loop_chan_result_t`; per channel, 960 ms window, after `zephyr_drv.c`'s
+`dc_block_s16()` high-pass, hence not a multiple of 32) went from 128/128 in
+silence to 266/292 at 1 kHz/volume 16 and 651/652 at 1 kHz/volume 48. This
 mics-capture-real-frequency-correct-sound result grounds the honest
 wording this example's own `PASS`/`INCONCLUSIVE` text now uses (see Status
 above). **The D2 pair (HW 4/5) is register-level verified only, never

@@ -4337,7 +4337,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * block 0 in place of a SOUND_BASELINE_BLOCKS-sized loop (the
 		 * previous shape) left only SOUND_BASELINE_BLOCKS-1 blocks in
 		 * the baseline, weakening it and moving the pass threshold
-		 * (issue #2133 round 5). Block 0 may contain a PDM decimator
+		 * (issue #2133). Block 0 may contain a PDM decimator
 		 * settling transient (<alp/audio.h>'s alp_audio_in_start()
 		 * note) -- a block here is 256/16000 = 16 ms, well over the
 		 * ~1 ms settling bound measured on this driver (see

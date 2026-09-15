@@ -92,7 +92,7 @@ void pdm_set_ch_phase(const struct device *dev, uint8_t ch_num, uint32_t ch_phas
  * @param	ch_gain	: PDM_CH_GAIN value. Bits [11:0] only (unsigned 8.4
  *			fixed-point, 0x10 = 1.0x -- Alif SVD
  *			AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN
- *			register, GAIN field; issue #2133 round 4f). A value
+ *			register, GAIN field; issue #2133). A value
  *			above 0xFFF truncates to bits [11:0] (0x1000 exactly
  *			-> 0 = mute) -- out-of-range values are clamped to
  *			0xFFF with a LOG_WRN instead, since this function

@@ -176,7 +176,7 @@ ZTEST(alif_pdm_chanmap, test_out_of_order_hw_channel_rejected)
 	zassert_equal(mask, 0x77U, "mask_out must be left untouched on failure");
 }
 
-/* pdm_ch_gain_clamp() (alif_pdm_reg.h, issue #2133 round 5): PDM_CH_GAIN's
+/* pdm_ch_gain_clamp() (alif_pdm_reg.h, issue #2133): PDM_CH_GAIN's
  * GAIN field is only 12 bits -- pdm_set_ch_gain() (alif_pdm.c) clamps every
  * write through this pure function instead of writing an unclamped value
  * that would truncate to bits [11:0] (0x1000 exactly -> 0 = mute). Host-

@@ -115,8 +115,8 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg);
  *       following a stop/error) may contain a settling transient from the
  *       capture datapath's decimation/filtering and should be treated as
  *       non-representative. Duration and shape are backend/silicon-specific
- *       -- discard the first block after start/restart; the settling
- *       duration itself is backend-specific (see the backend's own DT
+ *       -- discard at least the first block, and more if the backend
+ *       documents a longer settling duration (see the backend's own DT
  *       binding or driver docs for a measured figure, where one exists).
  *
  * @param[in] in  Handle from @ref alp_audio_in_open.

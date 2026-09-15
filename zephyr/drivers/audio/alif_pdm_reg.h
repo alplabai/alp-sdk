@@ -36,23 +36,26 @@
 #define PDM_CH_IIR_COEF_SEL      (0xC0) /* Channel (n) IIR Filter Coefficient  */
 #define PDM_CH_PHASE             (0xC4) /* Channel (n) Phase Control Register  */
 #define PDM_CH_GAIN              (0xC8) /* Channel (n) Gain Control Register  */
-/* GAIN field is bits [11:0], unsigned 8.4 fixed-point (issue #2133 round
- * 4f -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
+/* GAIN field is bits [11:0], unsigned 8.4 fixed-point (issue #2133 --
+ * Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
  * GAIN field; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
  * drivers/include/pdm.h). The register itself only ever sees bits [11:0]
- * of whatever is written -- a value that truncates to bits [11:0] equal to
- * 0 (only 0x1000 exactly, among values just above PDM_CH_GAIN_MAX) mutes
- * the channel; any other truncation lands somewhere else in [1, 0xFFF]. */
+ * of whatever is written -- every multiple of 0x1000 (0x1000, 0x2000, ...)
+ * truncates to 0 and mutes the channel; every other value above
+ * PDM_CH_GAIN_MAX truncates to somewhere in [1, 0xFFF], always LOWER than
+ * the value written (the field is only 12 bits wide, so the truncated
+ * result can never exceed 0xFFF). */
 #define PDM_CH_GAIN_MAX (0xFFFU)
 
 /* Clamp a caller-supplied gain to PDM_CH_GAIN's 12-bit hardware range
- * (issue #2133 round 5, extracted from pdm_set_ch_gain() so a host test can
+ * (issue #2133, extracted from pdm_set_ch_gain() so a host test can
  * exercise the boundary without a device/register model). A value above
  * PDM_CH_GAIN_MAX is clamped to PDM_CH_GAIN_MAX rather than written
- * unclamped -- an unclamped write above the 12-bit field truncates to bits
- * [11:0], which for most out-of-range values lands somewhere in [1, 0xFFF]
- * (louder than intended) and for 0x1000 exactly mutes the channel (0).
- * Neither is what a caller raising gain past the max would expect. */
+ * unclamped -- an unclamped write above the 12-bit field truncates to
+ * somewhere in [0, 0xFFF], always QUIETER than the caller intended, never
+ * louder (see PDM_CH_GAIN_MAX's own comment above), and for any multiple
+ * of 0x1000 mutes the channel outright (0). Neither is what a caller
+ * raising gain past the max would expect. */
 static inline uint32_t pdm_ch_gain_clamp(uint32_t ch_gain)
 {
 	return (ch_gain > PDM_CH_GAIN_MAX) ? PDM_CH_GAIN_MAX : ch_gain;

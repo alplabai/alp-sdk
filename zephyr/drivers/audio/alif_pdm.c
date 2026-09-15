@@ -20,13 +20,15 @@
  * (2026-09-15 14:49Z, TAS2563 speakers -> PDM mics, gain 0x200
  * readback-confirmed; PROBE_LOOPBACK mode of
  * examples/aen/aen-i2s-tas2563-probe on branch
- * test/u46-i2s-tas2563-on-reworked-mux, issue #2143 -- not this example):
- * Goertzel-bin analysis found the 1 kHz bin at 9.3/0.1 dB (ch0/ch1) in
- * silence rising to 43.4/48.8 dB at volume 16 and 57.8/57.6 dB at volume
- * 48, a 500 Hz bin at 54.7/56.6 dB that lit up only during the 500 Hz
- * stimulus, and peak-to-peak rising from 128/128 in silence to 651/652 at
- * 1 kHz/volume 48. The D2 pair (HW 4/5) is register-level verified only --
- * never acoustically tested. NOT verified: full-scale headroom at the
+ * test/u46-i2s-tas2563-on-reworked-mux (commit 56631094d), issue #2143 --
+ * not this example): Goertzel-bin analysis found the 1 kHz bin at 9.3/0.1
+ * dB (ch0/ch1) in silence rising to 43.4/48.8 dB at volume 16 and 57.8/57.6
+ * dB at volume 48, a 500 Hz bin at 54.7/56.6 dB that lit up only during the
+ * 500 Hz stimulus, and peak-to-peak -- per channel, 960 ms window, after
+ * zephyr_drv.c's dc_block_s16() high-pass, hence not a multiple of 32 --
+ * rising from 128/128 in silence to 266/292 at 1 kHz/volume 16 and 651/652
+ * at 1 kHz/volume 48. The D2 pair (HW 4/5) is register-level verified only
+ * -- never acoustically tested. NOT verified: full-scale headroom at the
  * current provisional gain default (0x200, issue #2143) -- unmeasured.
  * ==================================================================
  *
@@ -227,9 +229,9 @@
  *    DMIC_TRIGGER_STOP does.
  *  - issue #2143: PDM_DEFAULT_CH_GAIN was 0x0000000D, Alif's register-level
  *    driver test value (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:
- *    88-123, and samples/drivers/audio/dmic_alif/src/main.c:22), never an
- *    audio-tuned value -- silicon measured this ~40 dB too quiet on the
- *    EVK's MP34DT05TR-A mics. The driver now reads a per-instance,
+ *    88-123, and sdk-alif samples/drivers/audio/dmic_alif/src/main.c:22),
+ *    never an audio-tuned value -- 0.8125x (-1.8 dB vs unity), 31.9 dB
+ *    below the corrected 0x200 default. The driver now reads a per-instance,
  *    DT-configurable `channel-gain` property (alif,alif-pdm.yaml) instead.
  *    PDM_CH_GAIN's GAIN field (bits [11:0]) is UNSIGNED 8.4 fixed-point
  *    (Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
@@ -867,7 +869,7 @@ void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 	 * PDM_CH_GAIN_MAX's own comment in alif_pdm_reg.h). This function
 	 * returns void (public API, existing callers), so it cannot report
 	 * -EINVAL -- clamp (pdm_ch_gain_clamp(), alif_pdm_reg.h -- host-
-	 * tested, issue #2133 round 5) and warn instead of writing a value
+	 * tested, issue #2133) and warn instead of writing a value
 	 * that truncates. The one in-tree caller
 	 * (pdm_apply_channel_defaults(), via cfg->channel_gain) is already
 	 * bounded at DT-build time by PDM_INIT's BUILD_ASSERT; this guards
@@ -876,9 +878,8 @@ void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 	 */
 	if (ch_gain > PDM_CH_GAIN_MAX) {
 		LOG_WRN("ch_gain 0x%x exceeds PDM_CH_GAIN's 12-bit field (max 0x%x) -- "
-		        "clamping (an unclamped write would truncate to bits [11:0])",
-		        ch_gain,
-		        PDM_CH_GAIN_MAX);
+			"clamping (an unclamped write would truncate to bits [11:0])",
+			ch_gain, PDM_CH_GAIN_MAX);
 	}
 	ch_gain = pdm_ch_gain_clamp(ch_gain);
 
@@ -1507,8 +1508,8 @@ static void alif_pdm_warning_isr(const struct device *dev)
  * (11), PM_DEVICE_ACTION_SUSPEND itself now resets pdata->clk_mode to
  * PDM_MODE_MICROPHONE_SLEEP (a fail-safe against the hardware registers
  * NOT surviving suspend) -- that is a SUSPEND-side reset, not something
- * this cold_init-only function does; clk_mode no longer survives a
- * suspend/resume cycle the way this comment originally assumed.
+ * this cold_init-only function does; clk_mode does not survive a
+ * suspend/resume cycle.
  */
 static int pdm_hw_bringup(const struct device *dev, bool cold_init)
 {
@@ -1715,11 +1716,11 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 	 * value). \
 	 */ \
 	BUILD_ASSERT(!(DT_INST_NODE_HAS_PROP(n, clk_frequency_min) && \
-	               DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
-	                 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
-	                  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
-	             "alif,alif-pdm: clk-frequency-min must not exceed " \
-	             "clk-frequency-max (the DT range is inverted)"); \
+		       DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
+			 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
+			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
+		     "alif,alif-pdm: clk-frequency-min must not exceed " \
+		     "clk-frequency-max (the DT range is inverted)"); \
 	/* PDM_CH_GAIN's GAIN field is bits [11:0] (unsigned 8.4 fixed-point, \
 	 * issue #2133 round 4e -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, \
 	 * PDM_CH_GAIN register, GAIN field, lines ~19081-19092; matches the \

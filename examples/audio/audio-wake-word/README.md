@@ -12,8 +12,9 @@ bursting the convolutions on demand.
 > `src/backends/inference/ethos_u_aen.cpp`) -- neither has run on
 > silicon. PDM mic capture (see
 > [`examples/aen/aen-pdm-mic-alif`](../../aen/aen-pdm-mic-alif/README.md)
-> for the current status -- rate verified, acoustic liveness NOT yet
-> confirmed)
+> for the current status -- rate verified; acoustic capture verified on mic
+> ch0/ch1 only by the `PROBE_LOOPBACK` loopback; D2 pair register-level
+> only)
 > ran through `examples/aen/aen-pdm-mic-alif`, which drives the
 > Zephyr `dmic_configure`/`dmic_trigger`/`dmic_read` API directly,
 > bypassing `<alp/audio.h>`. NPU inference (person_detect /

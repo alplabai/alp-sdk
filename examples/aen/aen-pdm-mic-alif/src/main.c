@@ -39,13 +39,14 @@
  * unplannable burst, or a genuine hardware FIFO overflow), the MEASURED
  * sample rate (frames delivered / elapsed wall-clock time, excluding the
  * first successful read's startup latency) is within +/-5% of
- * SAMPLE_RATE_HZ, AND at least one channel's peak-to-peak clears a
- * documented floor above a dead/under-clocked mic's residual noise (issue
- * #2133 round 3: round 1's PASS gate was "samples aren't all equal", which a
- * flat +/-1-2 LSB noise floor satisfies -- that is NOT evidence of live
- * acoustic capture; RMS is measured and printed but not gated on -- see
- * MIN_SIGNAL_PEAK_TO_PEAK_LSB's comment). A run that reads cleanly at the
- * right rate but with no
+ * SAMPLE_RATE_HZ, AND at least one channel's AC RMS clears a documented
+ * floor above a dead/under-clocked mic's residual noise (issue #2133 round
+ * 3: round 1's PASS gate was "samples aren't all equal", which a flat
+ * +/-1-2 LSB noise floor satisfies -- that is NOT evidence of live acoustic
+ * capture; peak-to-peak is measured and printed but not gated on, since a
+ * single transient spike can clear a peak-to-peak floor without sustained
+ * signal -- see MIN_SIGNAL_RMS_AC_LSB's comment). A run that reads cleanly
+ * at the right rate but with no
  * channel over that floor is reported INCONCLUSIVE, not PASS; a run where
  * the driver ever reported a drop is FAILed outright regardless of what the
  * surviving blocks measured; an empty FIFO or a rate mismatch also FAILs,
@@ -89,38 +90,55 @@
 #define BLOCK_SIZE  (2u * (SAMPLE_RATE_HZ / 10u) * NUM_CHANNELS)
 #define BLOCK_COUNT 4
 
-/* Peak-to-peak floor for the per-channel signal-level check (issue #2133
- * round 5, replacing round 4f's floor -- that floor was scaled from a
- * DIFFERENT gain's (0x0D) idle-noise measurement and worked out to 630/2520
- * (RMS/p2p) at the current default (0x200), well above what the round 4f
- * speaker-loopback silicon itself measured at that SAME gain (p2p 651/652
- * on tone -- see below), making a PASS unreachable at the proven signal
- * level.
+/* AC-RMS floor for the per-channel signal-level check (issue #2133,
+ * replacing the prior peak-to-peak gate). Peak-to-peak is transient-prone:
+ * a probe loopback silence window (`PROBE_LOOPBACK` mode of
+ * examples/aen/aen-i2s-tas2563-probe on branch
+ * test/u46-i2s-tas2563-on-reworked-mux, commit 56631094d, issue #2143,
+ * e1m-aen-evk-03, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
+ * channel with the room silent, above this example's prior 512 floor, from
+ * a single sample excursion rather than sustained signal; AC RMS averages
+ * over the whole capture and does not share that failure mode.
+ * peak-to-peak is still measured and printed per channel below, but is no
+ * longer gated on.
  *
- * Re-derived directly from the round 4f loopback's own 0x200 silicon data
- * (e1m-aen-evk-03, 2026-09-15, mic ch0/ch1 / PDM controller 0 only -- see
- * this file's header): idle (silence) peak-to-peak measured 128/128; a
- * 1 kHz/volume-48 tone measured 651/652. Floor = 4x the idle p2p (512 at
- * 0x200) -- comfortably above idle noise while the proven tone reading
- * still clears it. `channel-gain` is a saturating multiply applied after
- * the datapath quantizes (see alif,alif-pdm.yaml), so idle noise -- and
- * this floor -- both scale with it; scaled proportionally against the
- * 0x200 baseline the floor was measured at, so this stays an
- * above-idle-noise gate at whatever gain the board overlay configures.
+ * Floor derived directly from THIS example's OWN idle measurement
+ * (e1m-aen-evk-03, 2026-09-15 19:51Z, 48 kHz, `channel-gain` 0x200, raw
+ * dmic_read(), 3 runs / 12 channel readings over blocks 1-3,
+ * n=14400 samples/channel): rms_ac read 15 on every channel in every run
+ * (one earlier, interrupted attempt read 18-19). Floor = 4 * 15 = 60 at
+ * 0x200, i.e. MIN_SIGNAL_RMS_AC_LSB = 4 * 15 * channel_gain / 0x200 --
+ * comfortably above both idle readings. `channel-gain` is a saturating
+ * multiply applied after the datapath quantizes (see alif,alif-pdm.yaml),
+ * so idle noise -- and this floor -- both scale with it; scaled
+ * proportionally against the 0x200 baseline the floor was measured at, so
+ * this stays an above-idle-noise gate at whatever gain the board overlay
+ * configures.
  *
- * RMS is still measured and printed per channel for diagnostics but is NOT
- * gated on: round 4f's loopback recorded peak-to-peak figures only, and a
- * threshold without a measured RMS floor would be invented, not derived.
+ * All runs behind this floor's own derivation read INCONCLUSIVE (idle
+ * only; ambient sound during those runs is unknown, and this example still
+ * has no controlled stimulus of its own). A PASS at a real sound level is
+ * a PREDICTION, not yet measured on this example: a DIFFERENT capture path
+ * -- `alp_audio_in_read()`, which applies `dc_block_s16()`'s ~38 Hz
+ * high-pass, 960 ms windows, the same probe loopback above, mic ch0/ch1
+ * only -- measured peak/rms/dc of 128/98/-97 and 128/111/-110 (ch0/ch1) in
+ * silence, 266/120/-99 and 292/120/-98 at 1 kHz/volume 16, and 651/220/-101
+ * and 652/224/-101 at 1 kHz/volume 48 (per channel, 960 ms window, after
+ * `dc_block_s16()`'s high-pass, hence not a multiple of 32). That probe RMS
+ * includes DC; AC RMS ~= sqrt(rms^2 - dc^2), ESTIMATED (different path,
+ * not this example) at roughly 20 in silence, 68 at volume 16, and 195 at
+ * volume 48 -- all comfortably above this floor.
  *
- * This floor has NOT been re-run on silicon: silence is expected to report
- * INCONCLUSIVE and a replayed tone PASS, but that is a prediction from the
- * derivation above, not a confirmed result (issue #2133 round 5's open
- * bench task).
+ * The D2 pair (HW 4/5) idle-matched ch0/1 in this floor's own idle
+ * measurement above, but has never itself been acoustically tested -- the
+ * loopback above drives only ch0/ch1. The any-channel PASS rule below
+ * therefore still includes a pair this floor has not been acoustically
+ * proven against.
  */
 #define PDM_GAIN_BASELINE_0X200 \
-	0x200U /* the gain the floor was measured at, e1m-aen-evk-03, 2026-09-15 */
-#define MIN_SIGNAL_PEAK_TO_PEAK_LSB \
-	((4U * 128U * DT_PROP(PDM_NODE, channel_gain)) / PDM_GAIN_BASELINE_0X200)
+	0x200U /* the gain this floor was measured at, e1m-aen-evk-03, 2026-09-15 */
+#define MIN_SIGNAL_RMS_AC_LSB \
+	((4U * 15U * DT_PROP(PDM_NODE, channel_gain)) / PDM_GAIN_BASELINE_0X200)
 
 /* The DMIC API is zero-copy: dmic_read() hands back a pointer into one of
  * these slab blocks and the caller must k_mem_slab_free() it once done, so
@@ -355,22 +373,24 @@ int main(void)
 	       rate_lo,
 	       rate_hi);
 
-	/* Per-channel RMS/peak/DC-offset print + noise-floor gate (issue #2133
-	 * round 3, re-derived round 5 -- see MIN_SIGNAL_PEAK_TO_PEAK_LSB's
-	 * comment): ANY channel clearing the peak-to-peak floor is enough --
-	 * the 4 mics are physically separated, so a quiet tap or speech need
-	 * not reach every one equally. This is an above-idle-noise check, not
-	 * a claim of identified acoustic content -- this example has no
-	 * controlled stimulus of its own to confirm that (issue #2133 round
-	 * 4f's speaker-loopback silicon result is the actual acoustic
-	 * verification, on mic ch0/ch1 only; see this file's header). RMS is
-	 * printed but not gated -- see the floor's own comment for why. */
+	/* Per-channel RMS/peak/DC-offset print + AC-RMS noise-floor gate (issue
+	 * #2133 -- see MIN_SIGNAL_RMS_AC_LSB's comment for the full
+	 * derivation): ANY channel clearing the floor is enough -- the 4 mics
+	 * are physically separated, so a quiet tap or speech need not reach
+	 * every one equally. This is an above-idle-noise check, not a claim of
+	 * identified acoustic content -- this example has no controlled
+	 * stimulus of its own to confirm that; peak-to-peak is printed but NOT
+	 * gated (a single transient spike can clear a peak-to-peak floor
+	 * without sustained signal -- see the floor comment). The comparison
+	 * uses chan_stats_rms_ac()'s full-precision double directly, not a
+	 * value already truncated to int, so a reading just under an integer
+	 * floor is not wrongly rounded into a pass. */
 	bool signal_ok = false;
 
 	for (int c = 0; c < NUM_CHANNELS; c++) {
 		int32_t peak_to_peak = stats[c].max_v - stats[c].min_v;
 		double  rms_ac       = chan_stats_rms_ac(&stats[c]);
-		bool    above_floor  = (peak_to_peak >= MIN_SIGNAL_PEAK_TO_PEAK_LSB);
+		bool    above_floor  = (rms_ac >= (double)MIN_SIGNAL_RMS_AC_LSB);
 
 		printf("[pdm] ch[%d] n=%u rms_ac=%d peak_to_peak=%d dc_offset=%d %s\n",
 		       c,
@@ -413,17 +433,18 @@ int main(void)
 		reason  = "measured rate outside +/-5% of requested -- cause not diagnosed here";
 	} else if (!signal_ok) {
 		verdict = "INCONCLUSIVE";
-		reason  = "every channel's peak-to-peak stayed at or below the idle-noise floor "
-		          "-- tap or speak near the mics and rerun";
+		reason  = "every channel's AC RMS stayed at or below the idle-noise floor -- hold a "
+		          "sustained sound (steady tone or continuous speech) near U19/U20 while "
+		          "resetting and rerun (the capture happens right after boot, ~300 ms)";
 	} else {
 		verdict = "PASS";
-		reason  = "varying PCM captured at the requested rate, above the idle-noise floor. "
-		          "This example has no controlled stimulus, so this means signal above the "
-		          "noise floor, not confirmed acoustic content -- acoustic capture at 48 kHz "
-		          "with this gain is verified separately, on mic ch0/ch1 (PDM controller 0) "
-		          "only, by a speaker-to-mic loopback on silicon (issue #2133 round 4f, "
+		reason  = "varying PCM captured at the requested rate, above the idle-noise AC-RMS "
+		          "floor. This example has no controlled stimulus, so this means signal "
+		          "above the noise floor, not confirmed acoustic content -- acoustic capture "
+		          "at 48 kHz on mic ch0/ch1 (PDM controller 0) only is verified separately, "
+		          "by a speaker-to-mic loopback on silicon at gain 0x200 (issue #2143, "
 		          "e1m-aen-evk-03, 2026-09-15); the D2 pair (HW 4/5) is register-level "
-		          "verified only";
+		          "verified only, never acoustically tested";
 	}
 
 	printf("[pdm] RESULT %s: %s\n", verdict, reason);
