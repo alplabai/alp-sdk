@@ -79,6 +79,20 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
  * comment in <alp/chips/cc3501e/core.h> and cc3501e_sock_recv()'s assignment
  * site in cc3501e_sockets.c. Implemented in cc3501e_core.c, beside
  * poll_by_repeat(), which now wraps it. */
+/* #2126 review: @p check_epoch / @p handle add a PER-ATTEMPT re-check of
+ * ctx->link_epoch, not just the one-shot check every cc3501e_sock_*() caller
+ * already does before entering this loop. A retry loop can span a
+ * recovery: cc3501e_lock_acquire() below blocks for the duration of a
+ * concurrent cc3501e_recover() (same ctx->request_lock), so an attempt that
+ * was already mid-retry when a recovery landed resumes holding a handle
+ * whose epoch no longer matches -- sending it anyway would address whatever
+ * NEW socket now happens to share its low byte on the rebooted firmware.
+ * Checked under the SAME lock hold as the request itself, so there is no
+ * window between "epoch looked fine" and "the send went out" for a
+ * concurrent recovery to land in. Non-socket callers pass check_epoch =
+ * false (handle then unused) and see no behaviour change -- this is
+ * poll_by_repeat_handle()'s job, not a new burden on poll_by_repeat()'s
+ * existing 50+ non-socket call sites. */
 alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 alp_cc3501e_cmd_t cmd,
                                 const uint8_t    *tx_payload,
@@ -87,7 +101,26 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 size_t            rx_cap,
                                 size_t           *rx_len,
                                 uint32_t          timeout_ms,
-                                uint8_t           req_seq);
+                                uint8_t           req_seq,
+                                bool              check_epoch,
+                                uint16_t          handle);
+
+/* Same retry loop as poll_by_repeat() above (own ctx->req_seq allocation),
+ * but with the per-attempt epoch re-check (see poll_by_repeat_seq()'s
+ * comment) enabled against @p handle -- the socket ops that carry a
+ * caller-epoch-encoded handle (connect/bind/listen/send/close) use this
+ * instead of poll_by_repeat(). Returns ALP_ERR_NOT_READY, without ever
+ * sending, the moment @p handle's epoch stops matching ctx->link_epoch.
+ * Implemented in cc3501e_core.c beside poll_by_repeat(). */
+alp_status_t poll_by_repeat_handle(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   uint16_t          handle);
 
 /* Tell the transport the peer is a POLLED slave (OTA update mode): the READY
  * gate then waits for a LOW->HIGH edge instead of a level. */

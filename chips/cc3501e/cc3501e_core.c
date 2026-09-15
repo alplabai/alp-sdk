@@ -184,8 +184,13 @@ static void cc3501e_recover_clear_stale_state(cc3501e_t *ctx)
 	 * indistinguishable from a coincidentally-numbered NEW one after it.
 	 * Bumping the epoch here is what lets cc3501e_sock_send() etc.
 	 * (cc3501e_sockets.c) refuse a stale handle instead of silently
-	 * addressing whatever new socket now happens to own that number. */
-	ctx->link_epoch++;
+	 * addressing whatever new socket now happens to own that number.
+	 * #2126 review: skip landing on 0 when wrapping (255 -> 1, not 255 ->
+	 * 0) -- 0 is reserved for "no recovery has ever happened on this ctx
+	 * yet" (a fresh, zero-initialised ctx), so wrapping onto it would make
+	 * a handle minted 255 recoveries ago (also epoch 0) indistinguishable
+	 * from one minted just now. */
+	ctx->link_epoch = (ctx->link_epoch >= 0xFFu) ? 1u : (uint8_t)(ctx->link_epoch + 1u);
 }
 
 /* See <alp/chips/cc3501e/core.h>. */
@@ -512,6 +517,11 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
          * line to pulse. */
 		return ALP_ERR_NOSUPPORT;
 	}
+	/* #2126 review: a cold power cycle, like a warm reset
+	 * (cc3501e_hard_reset()'s own comment), always lands the device in
+	 * normal mode -- clear the RAM-only OTA-session flag here too so this
+	 * recovery primitive cannot leave it stuck true. */
+	ctx->ota_session_active = false;
 	/* Reset sequence per TI SWRU626 §7.1.5 (CC3501E technical
      * reference manual):
      *
@@ -709,6 +719,16 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 	 * or there is no way back from a supply gate or a version mismatch. */
 	if (ctx == NULL || ctx->bus == NULL) return ALP_ERR_NOT_READY;
 	if (ctx->reset_pin == NULL) return ALP_ERR_NOSUPPORT;
+	/* #2126 review: a reboot ALWAYS lands in normal (non-OTA) mode -- the
+	 * flag is RAM-only and read-and-cleared at boot (cc3501e_ota.c's own
+	 * comment on cc3501e_ota_update_mode's timeout fallback). Clearing it
+	 * HERE, not just at the handful of call sites that remembered to, is
+	 * what makes it impossible for a caller that reboots the device by some
+	 * OTHER path (a forgotten bail-out, a future one) to leave the flag
+	 * stuck true forever -- which silently disables auto-recovery for good,
+	 * since cc3501e_link_check_and_recover() refuses to even probe while it
+	 * reads true. */
+	ctx->ota_session_active = false;
 	/* Pulse nRESET while keeping WIFI_EN asserted so the module re-boots WITHOUT a
 	 * cold power cycle (a cold cycle would re-trigger the Puya-flash bug).  This is
 	 * the "second boot" of the cold-boot workaround and the retry primitive the
@@ -2116,7 +2136,9 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
                                 size_t            rx_cap,
                                 size_t           *rx_len,
                                 uint32_t          timeout_ms,
-                                uint8_t           req_seq)
+                                uint8_t           req_seq,
+                                bool              check_epoch,
+                                uint16_t          handle)
 {
 	/* Same param checks cc3501e_request() runs, done ONCE here (cmd/
 	 * tx_payload/tx_len are fixed across every retry below, unlike the
@@ -2215,6 +2237,20 @@ alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
 			continue;
 		}
 		first_lock_attempt = false;
+		/* #2126 review: per-attempt epoch re-check, still under the SAME
+		 * lock this attempt's request goes out under -- see this
+		 * function's own comment in cc3501e_internal.h for why a
+		 * one-shot check before the loop is not enough. A change here
+		 * can only mean a recovery committed while THIS call was
+		 * blocked acquiring the lock above (a concurrent cc3501e_
+		 * recover() holds the same ctx->request_lock for its whole
+		 * reset sequence), so the handle is now stale -- refuse without
+		 * sending, exactly as the pre-loop check in cc3501e_sockets.c
+		 * does for the first attempt. */
+		if (check_epoch && (uint8_t)(handle >> 8) != ctx->link_epoch) {
+			cc3501e_lock_release(ctx);
+			return ALP_ERR_NOT_READY;
+		}
 		/* Re-zero per attempt, not just once before the loop: an attempt
 		 * that copied out n bytes and then mapped to BUSY/IO would
 		 * otherwise leave that stale count visible to a caller who reads
@@ -2387,5 +2423,30 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		req_seq = ctx->req_seq;
 	}
 	return poll_by_repeat_seq(
-	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq);
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq, false, 0u);
+}
+
+/* See cc3501e_internal.h. Identical body to poll_by_repeat() above except
+ * for the trailing check_epoch/handle pair -- kept as a separate function
+ * (not an extra param on poll_by_repeat() itself) so the other 50+
+ * non-socket call sites of poll_by_repeat() stay untouched by the #2126
+ * review's per-retry epoch check. */
+alp_status_t poll_by_repeat_handle(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   uint16_t          handle)
+{
+	uint8_t req_seq = 0u;
+	if (ctx != NULL && ctx->initialised) {
+		ctx->req_seq =
+		    (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+		req_seq = ctx->req_seq;
+	}
+	return poll_by_repeat_seq(
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq, true, handle);
 }

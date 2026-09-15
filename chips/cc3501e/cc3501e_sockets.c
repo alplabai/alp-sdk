@@ -96,6 +96,16 @@ alp_status_t cc3501e_sock_open(cc3501e_t *ctx,
 {
 	if (handle_out == NULL) return ALP_ERR_INVAL;
 	*handle_out = 0u;
+	/* #2126 review: snapshot the epoch BEFORE the request goes out, not
+	 * after poll_by_repeat() returns -- a recovery (bumping ctx->link_epoch)
+	 * can land WHILE this call's own internal retry loop is still blocked
+	 * on a BUSY/IO retry, and reading ctx->link_epoch only after that
+	 * returns would stamp a handle that was actually opened against the
+	 * PRE-recovery firmware with the POST-recovery epoch -- silently
+	 * un-stale-marking a handle that is, in fact, stale. ctx is NULL-
+	 * checked by poll_by_repeat() itself below, so this read is guarded
+	 * the same way cc3501e_handle_epoch_ok() guards its own ctx access. */
+	const uint8_t epoch_at_request = (ctx != NULL) ? ctx->link_epoch : 0u;
 	/* SOCK_OPEN (0x20) wire = alp_cc3501e_sock_open_t { family | type | protocol |
 	 * reserved }; reply DATA = alp_cc3501e_sock_handle_t { handle(LE16) | rsvd }. */
 	uint8_t      payload[4] = { family, type, protocol, 0u };
@@ -112,9 +122,10 @@ alp_status_t cc3501e_sock_open(cc3501e_t *ctx,
 	if (s != ALP_OK) return s;
 	if (got < 2u) return ALP_ERR_IO; /* short reply -- firmware/wire gap */
 	const uint16_t fw_handle = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
-	/* #2126 review: epoch-encode before handing it to the caller -- see
-	 * cc3501e_handle_encode()'s own comment above for the bounds caveat. */
-	return cc3501e_handle_encode(ctx->link_epoch, fw_handle, handle_out);
+	/* #2126 review: epoch-encode with the snapshot taken BEFORE the
+	 * request, not a fresh ctx->link_epoch read here -- see this
+	 * function's own comment above. */
+	return cc3501e_handle_encode(epoch_at_request, fw_handle, handle_out);
 }
 
 alp_status_t cc3501e_sock_connect(cc3501e_t    *ctx,
@@ -138,8 +149,11 @@ alp_status_t cc3501e_sock_connect(cc3501e_t    *ctx,
 	p[6] = (uint8_t)(port & 0xFFu);               /* peer.port (LE16, host order) */
 	p[7] = (uint8_t)((port >> 8) & 0xFFu);
 	memcpy(&p[8], ip, 4); /* peer.addr[0..3]; addr[4..15] stay zero (IPv4) */
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_SOCK_CONNECT, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+	/* #2126 review: poll_by_repeat_handle(), not poll_by_repeat() -- adds
+	 * the per-retry epoch re-check (see poll_by_repeat_seq()'s comment in
+	 * cc3501e_internal.h), not just the one-shot check above. */
+	return poll_by_repeat_handle(
+	    ctx, ALP_CC3501E_CMD_SOCK_CONNECT, p, sizeof(p), NULL, 0, NULL, timeout_ms, handle);
 }
 
 alp_status_t cc3501e_sock_bind(cc3501e_t    *ctx,
@@ -164,7 +178,9 @@ alp_status_t cc3501e_sock_bind(cc3501e_t    *ctx,
 	p[6] = (uint8_t)(port & 0xFFu);               /* local.port (LE16, host order) */
 	p[7] = (uint8_t)((port >> 8) & 0xFFu);
 	if (ip != NULL) memcpy(&p[8], ip, 4); /* local.addr[0..3]; [4..15] stay zero */
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_SOCK_BIND, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+	/* #2126 review: see cc3501e_sock_connect()'s identical comment above. */
+	return poll_by_repeat_handle(
+	    ctx, ALP_CC3501E_CMD_SOCK_BIND, p, sizeof(p), NULL, 0, NULL, timeout_ms, handle);
 }
 
 alp_status_t
@@ -178,8 +194,9 @@ cc3501e_sock_listen(cc3501e_t *ctx, uint16_t handle, uint8_t backlog, uint32_t t
 	if (!cc3501e_handle_epoch_ok(ctx, handle)) return ALP_ERR_NOT_READY;
 	const uint16_t fw_h = cc3501e_handle_wire(handle);
 	uint8_t        p[4] = { (uint8_t)(fw_h & 0xFFu), (uint8_t)((fw_h >> 8) & 0xFFu), backlog, 0u };
-	return poll_by_repeat(
-	    ctx, ALP_CC3501E_CMD_SOCK_LISTEN, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+	/* #2126 review: see cc3501e_sock_connect()'s identical comment above. */
+	return poll_by_repeat_handle(
+	    ctx, ALP_CC3501E_CMD_SOCK_LISTEN, p, sizeof(p), NULL, 0, NULL, timeout_ms, handle);
 }
 
 /* Zero-progress back-off for the remainder loop below (cc3501e-bridge-firmware
@@ -380,14 +397,20 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 
 		uint8_t reply[2] = { 0 };
 		size_t  got      = 0;
-		s                = poll_by_repeat(ctx,
-		                                  ALP_CC3501E_CMD_SOCK_SEND,
-		                                  p,
-		                                  CC3501E_SOCK_SEND_HDR + remaining_len,
-		                                  reply,
-		                                  sizeof(reply),
-		                                  &got,
-		                                  budget);
+		/* #2126 review: poll_by_repeat_handle() -- this loop can itself span
+		 * a recovery (its own deadline is the caller's whole timeout_ms, up
+		 * to tens of seconds), so the per-retry epoch check matters here as
+		 * much as it does inside poll_by_repeat_seq()'s own internal
+		 * retries. */
+		s = poll_by_repeat_handle(ctx,
+		                          ALP_CC3501E_CMD_SOCK_SEND,
+		                          p,
+		                          CC3501E_SOCK_SEND_HDR + remaining_len,
+		                          reply,
+		                          sizeof(reply),
+		                          &got,
+		                          budget,
+		                          handle);
 
 		if (s == ALP_ERR_TIMEOUT) {
 			/* alp-sdk#2035: do not abandon a frame this attempt may have
@@ -399,16 +422,21 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 			 * the IDENTICAL `p` buffer untouched, so the seq (p[3]) and
 			 * remaining_len are unchanged -- this is a retry of THIS
 			 * iteration, not a new one. */
-			uint8_t      grace_reply[2] = { 0 };
-			size_t       grace_got      = 0;
-			alp_status_t grace_s        = poll_by_repeat(ctx,
+			uint8_t grace_reply[2] = { 0 };
+			size_t  grace_got      = 0;
+			/* #2126 review: same poll_by_repeat_handle() switch as the main
+			 * send above -- the collection grace re-sends this exact frame
+			 * and must refuse it too if a recovery landed between the main
+			 * attempt above and this grace poll. */
+			alp_status_t grace_s = poll_by_repeat_handle(ctx,
 			                                             ALP_CC3501E_CMD_SOCK_SEND,
 			                                             p,
 			                                             CC3501E_SOCK_SEND_HDR + remaining_len,
 			                                             grace_reply,
 			                                             sizeof(grace_reply),
 			                                             &grace_got,
-			                                             CC3501E_SOCK_SEND_COLLECT_GRACE_MS);
+			                                             CC3501E_SOCK_SEND_COLLECT_GRACE_MS,
+			                                             handle);
 			if (grace_s == ALP_OK) {
 				if (grace_got < 2u) {
 					/* Malformed reply, not a queue count -- see the identical
@@ -594,18 +622,24 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	const uint8_t candidate_seq =
 	    (ctx->sock_recv_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->sock_recv_seq + 1u);
 
-	uint8_t     *reply = ctx->sock_buf;
-	size_t       got   = 0;
-	alp_status_t s     = poll_by_repeat_seq(ctx,
-	                                        ALP_CC3501E_CMD_SOCK_RECV,
-	                                        p,
-	                                        sizeof(p),
-	                                        reply,
-	                                        sizeof(ctx->sock_buf),
-	                                        &got,
-	                                        timeout_ms,
-	                                        candidate_seq);
-	ctx->sock_busy     = false;
+	uint8_t *reply = ctx->sock_buf;
+	size_t   got   = 0;
+	/* #2126 review: check_epoch=true, handle=handle -- same per-retry epoch
+	 * re-check as poll_by_repeat_handle() gives the other socket ops, added
+	 * directly here since SOCK_RECV already bypasses poll_by_repeat() for
+	 * its own seq counter (see the comment above). */
+	alp_status_t s = poll_by_repeat_seq(ctx,
+	                                    ALP_CC3501E_CMD_SOCK_RECV,
+	                                    p,
+	                                    sizeof(p),
+	                                    reply,
+	                                    sizeof(ctx->sock_buf),
+	                                    &got,
+	                                    timeout_ms,
+	                                    candidate_seq,
+	                                    true,
+	                                    handle);
+	ctx->sock_busy = false;
 	if (s != ALP_OK) return s;
 	if (got < CC3501E_SOCK_RECV_RESP_HDR) return ALP_ERR_IO; /* short reply header */
 
@@ -671,5 +705,7 @@ alp_status_t cc3501e_sock_close(cc3501e_t *ctx, uint16_t handle, uint32_t timeou
 	/* SOCK_CLOSE (0x24) wire = alp_cc3501e_sock_close_t { handle(LE16) | reserved }. */
 	const uint16_t fw_h = cc3501e_handle_wire(handle);
 	uint8_t        p[4] = { (uint8_t)(fw_h & 0xFFu), (uint8_t)((fw_h >> 8) & 0xFFu), 0u, 0u };
-	return poll_by_repeat(ctx, ALP_CC3501E_CMD_SOCK_CLOSE, p, sizeof(p), NULL, 0, NULL, timeout_ms);
+	/* #2126 review: see cc3501e_sock_connect()'s identical comment above. */
+	return poll_by_repeat_handle(
+	    ctx, ALP_CC3501E_CMD_SOCK_CLOSE, p, sizeof(p), NULL, 0, NULL, timeout_ms, handle);
 }
