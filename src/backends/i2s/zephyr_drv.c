@@ -55,7 +55,11 @@
  *
  * z_start(): if TX and nothing is queued yet, set tx_pending_start and
  * return ALP_OK without touching hardware (write-then-start already
- * queues first, so it still triggers immediately, unchanged).
+ * queues first, so it still triggers immediately, unchanged). On the
+ * immediate-trigger path, a real START that fails ALP_ERR_NOMEM is
+ * treated as "tx_block_queued lied" rather than a hard failure (issue
+ * #2132 review round 4) -- see that branch's own comment for the race
+ * this closes.
  *
  * z_write(): after a block is genuinely queued (i2s_write() succeeded),
  * set tx_block_queued.  If tx_pending_start, retry the real START --
@@ -88,8 +92,12 @@
  *
  * Locking: a k_spinlock in the sidecar (alp_z_i2s_side_t.lock) guards
  * the three tx_* flags and the i2s_trigger() calls that change them in
- * z_start()/z_write()/z_stop() -- see the lock field's own comment for
- * what it does and does NOT close.
+ * z_start()/z_write()/z_stop(). Between the lock and z_start()'s
+ * NOMEM-as-stale-flag handling above, both the write/stop race and the
+ * start/write/stop race identified across #2132's review rounds are
+ * closed -- see the lock field's own comment for exactly which
+ * mechanism closes which, and what backends this lock design does not
+ * generalise to.
  */
 
 #include <errno.h>
@@ -147,25 +155,52 @@ typedef struct {
 	 * functions. NEVER held across k_mem_slab_alloc() or the Zephyr
 	 * i2s_write() API call: both can block (i2s_dw.c's i2s_dw_write()
 	 * takes tx.sem with the caller's own timeout, i2s_dw.c:396-397).
-	 * i2s_trigger() itself IS safe to call under this lock --
-	 * i2s_dw_trigger() only takes its own brief irq_lock()/irq_unlock()
-	 * (i2s_dw.c:255-354) and never blocks.
 	 *
-	 * Known residual race (issue #2132 review, MINOR): the window
-	 * between i2s_write() genuinely queuing a block and z_write()
-	 * acquiring this lock to record tx_block_queued=true is NOT closed
-	 * -- a concurrent stop() could DROP that exact block in between
-	 * (correctly observing and draining it) and clear the flags, and
-	 * this write()'s delayed flag-set then stamps a stale "queued" on
-	 * top of an already-empty ring. Closing that fully needs the flag
-	 * update to be atomic WITH the hardware write, which the Zephyr
-	 * i2s_write() API does not expose, and the dispatcher's op-counting
-	 * (src/i2s_dispatch.c) does not serialize calls either -- it only
-	 * keeps the handle alive across concurrent ops, not disjoint.
-	 * Ceiling: don't call start()/write()/stop() on the SAME handle
-	 * from two threads without external serialization; upgrade path is
-	 * making the queue-and-flag-update one atomic operation (would need
-	 * a driver-level completion hook, not available today). */
+	 * i2s_trigger() itself is safe to call under this raw spinlock
+	 * because i2s_dw_trigger() is safe to call from ISR context: the
+	 * whole call stays under its own irq_lock()/irq_unlock()
+	 * (i2s_dw.c:255-354), and everything it does under that lock --
+	 * queue_get(), k_sem_give(), a clock_control_set_rate() call (the
+	 * Alif backend's implementation takes no mutex), register writes,
+	 * k_mem_slab_free(), pm_device_busy_set()/clear() -- never
+	 * reschedules while irqs are locked (Zephyr only switches when the
+	 * saved key has irqs unlocked, kernel/sched.c:533-539).
+	 *
+	 * That "ISR-safe trigger" property is NOT universal across every
+	 * i2s_* driver class member, even though this backend registers as
+	 * silicon_ref="*" -- it also holds for zephyr/drivers/i2s/
+	 * i2s_mcux_sai.c (whole trigger under irq_lock too), but NOT for
+	 * zephyr/drivers/i2s/i2s_ambiq.c, whose STOP/DROP call
+	 * k_sleep(K_MSEC(100)) (i2s_ambiq.c:383), or zephyr/drivers/i2s/
+	 * i2s_silabs_siwx91x.c, whose START calls pm_device_runtime_get()
+	 * (i2s_silabs_siwx91x.c:752) -- both would be illegal under this
+	 * lock. Neither is E1M silicon and no code here accounts for them;
+	 * a future vendor-ext backend swap onto either driver would need
+	 * its own locking story, not this one.
+	 *
+	 * Start/write vs stop race (issue #2132 review, MINOR) -- CLOSED: a
+	 * concurrent write() queuing a block while stop() DROPs it (or vice
+	 * versa) is serialized by this lock once both sides are inside it,
+	 * so tx_block_queued always reflects the ring's real state at the
+	 * instant either call reads or writes it while holding the lock.
+	 *
+	 * Start vs write/stop race -- CLOSED a different way (issue #2132
+	 * review, round 4): write()'s k_mem_slab_alloc()/i2s_write() run
+	 * UNLOCKED (see above), so a write can genuinely queue a block, then
+	 * a concurrent stop() can lock, see tx_started still false, DROP
+	 * that exact block for real, and clear the flags -- all before the
+	 * write reaches its own lock acquisition and stamps a now-stale
+	 * tx_block_queued=true over an empty ring. z_start()'s immediate-
+	 * trigger path closes this on the READ side instead: an
+	 * ALP_ERR_NOMEM from the real START trigger on TX means i2s_dw's
+	 * ring was empty (queue_get(), i2s_dw.c:794-798) with no other
+	 * driver-state change, so z_start() treats that outcome as "the
+	 * tx_block_queued flag was stale" and defers instead of propagating
+	 * the error -- see z_start(). z_write()'s own retry needs no
+	 * equivalent handling: it runs its whole check-and-trigger sequence
+	 * under this lock, so nothing else can race its OWN retry once
+	 * started, and any trigger failure it does see already goes through
+	 * the existing DROP-and-report-error path (MAJOR-1). */
 	struct k_spinlock lock;
 	bool              in_use;
 } alp_z_i2s_side_t;
@@ -335,7 +370,32 @@ static alp_status_t z_start(alp_i2s_backend_state_t *st)
 		return ALP_OK;
 	}
 	alp_status_t rc = _start_trigger(dev, h->cfg.direction);
-	if (rc == ALP_OK && h->cfg.direction == ALP_I2S_DIR_TX) _mark_tx_started(s);
+	if (h->cfg.direction == ALP_I2S_DIR_TX) {
+		if (rc == ALP_OK) {
+			_mark_tx_started(s);
+		} else if (rc == ALP_ERR_NOMEM) {
+			/* issue #2132 review round 4: tx_block_queued was stale.
+			 * Reachable only via the race z_write() cannot close on
+			 * its own (see the lock field's comment) -- a write()
+			 * genuinely queued a block (i2s_write() succeeded,
+			 * unlocked), then a concurrent stop() locked, saw
+			 * tx_started still false, DROPped that real block, and
+			 * cleared the flags -- all before the write reached its
+			 * own lock acquisition to (now falsely) record
+			 * tx_block_queued=true. On TX, ALP_ERR_NOMEM from the
+			 * real START trigger means exactly one thing on i2s_dw:
+			 * queue_get() found the ring empty (i2s_dw.c:794-798),
+			 * and a failed START changes no other driver state
+			 * (i2s_dw.c returns before touching stream->state --
+			 * i2s_dw.c:277-291). So treat it as "the flag lied, not
+			 * the hardware": clear tx_block_queued, defer instead of
+			 * failing, and let the next write() queue for real and
+			 * fire the trigger normally. */
+			s->tx_block_queued  = false;
+			s->tx_pending_start = true;
+			rc                  = ALP_OK;
+		}
+	}
 	k_spin_unlock(&s->lock, key);
 	return rc;
 }
@@ -423,7 +483,20 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	 * cannot tell "nothing was queued" apart from "queued, but the
 	 * deferred start still failed". tx_pending_start stays set (not
 	 * cleared here) so the next write() retries again. */
-	(void)i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP);
+	alp_status_t drop_rc =
+	    _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP));
+	if (drop_rc != ALP_OK) {
+		/* issue #2132 review round 4: don't ignore DROP's own result.
+		 * If DROP itself failed, we do NOT know whether the block is
+		 * still queued -- clearing tx_block_queued here would be a
+		 * guess, and it could silently break the "an error means
+		 * nothing is queued" invariant this whole function exists to
+		 * uphold. Surface DROP's failure instead of the original
+		 * start_rc, leaving tx_block_queued set so the state is
+		 * visibly unresolved rather than confidently wrong. */
+		k_spin_unlock(&s->lock, key);
+		return drop_rc;
+	}
 	s->tx_block_queued = false;
 	k_spin_unlock(&s->lock, key);
 	return start_rc;
