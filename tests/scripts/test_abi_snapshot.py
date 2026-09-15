@@ -646,6 +646,94 @@ def test_diff_falls_back_when_moved_name_is_ambiguous(tmp_path):
     assert "ADDED   macro alp/c.h::FOO_MACRO" in msgs, msgs
 
 
+def test_diff_reports_removed_added_when_typedef_kind_changes_across_headers(tmp_path):
+    """#2139 follow-up (review round 2): the value-may-differ MOVED
+    pairing keyed only on (category, symbol) over-matched a struct
+    `alp_x_t` REMOVED from `alp/a.h` against an unrelated ENUM
+    `alp_x_t` ADDED in the header `alp/a.h` still reaches -- a same
+    NAME is not a same SYMBOL when the typedef `kind` differs (struct
+    vs enum here). That must stay REMOVED + ADDED, not collapse into a
+    false MOVED + CHANGED that hides a genuine removal from the freeze
+    gate's `^  REMOVED ` check."""
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "typedef struct { int a; } alp_x_t;\n", "prev_a.h"),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a.h"),
+            "alp/b.h": _extract_src(
+                tmp_path, "typedef enum { A = 0, B = 1 } alp_x_t;\n", "curr_b.h"
+            ),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED typedef alp/a.h::alp_x_t" in msgs, msgs
+    assert "ADDED   typedef alp/b.h::alp_x_t" in msgs, msgs
+
+
+def test_diff_reports_removed_added_when_struct_becomes_fnptr_across_headers(tmp_path):
+    """Same hazard as above, the other kind pair the review named: a
+    struct disappearing and a function-pointer typedef of the same
+    name appearing in a reachable header must not pair either."""
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(
+                tmp_path, "typedef struct { int a; } alp_x_t;\n", "prev_a2.h"
+            ),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b2.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a2.h"),
+            "alp/b.h": _extract_src(tmp_path, "typedef void (*alp_x_t)(int);\n", "curr_b2.h"),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert not any(m.startswith("MOVED") for m in msgs), msgs
+    assert "REMOVED typedef alp/a.h::alp_x_t" in msgs, msgs
+    assert "ADDED   typedef alp/b.h::alp_x_t" in msgs, msgs
+
+
+def test_diff_reports_moved_and_changed_for_same_kind_enum_across_headers(tmp_path):
+    """The positive case alongside the two negatives above: the new
+    `kind` check must refuse a MISMATCHED kind, not typedefs in
+    general -- an enum moving to another enum of the same name, with
+    its enumerator values also changed, still gets MOVED + CHANGED."""
+    prev_src = "typedef enum { A = 0, B = 1 } alp_x_t;\n"
+    curr_src = "typedef enum { A = 1, B = 0 } alp_x_t;\n"
+    prev = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, prev_src, "prev_a3.h"),
+            "alp/b.h": _extract_src(tmp_path, "", "prev_b3.h"),
+        }
+    }
+    curr = {
+        "headers": {
+            "alp/a.h": _extract_src(tmp_path, "", "curr_a3.h"),
+            "alp/b.h": _extract_src(tmp_path, curr_src, "curr_b3.h"),
+        }
+    }
+    include_graph = {"alp/a.h": ["alp/b.h"]}
+
+    msgs = abi.diff(prev, curr, include_graph=include_graph)
+
+    assert "MOVED   typedef alp_x_t: alp/a.h -> alp/b.h" in msgs, msgs
+    assert not any(m.startswith("REMOVED") for m in msgs), msgs
+    assert not any(m.startswith("ADDED") for m in msgs), msgs
+    assert "CHANGED typedef alp/b.h::alp_x_t (moved from alp/a.h)" in msgs, msgs
+
+
 def test_diff_reports_genuine_deletion_as_removed(tmp_path):
     prev = {
         "headers": _macro_snap(

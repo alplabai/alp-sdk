@@ -1123,8 +1123,12 @@ def diff(
     # symbol, different hash) is unaffected by any of this and is
     # still emitted directly, in the original per-header/per-category
     # traversal order.
-    removed: list[tuple[str, str, str, str]] = []  # (header, category, sym, hash)
-    added: list[tuple[str, str, str, str]] = []
+    # (header, category, sym, hash, kind) -- `kind` is the typedef
+    # sub-kind (struct/union/enum/opaque/fnptr/alias), or None for
+    # every non-typedef category (issue #2139 follow-up: pairing must
+    # not cross a kind change, see below).
+    removed: list[tuple[str, str, str, str, str | None]] = []
+    added: list[tuple[str, str, str, str, str | None]] = []
 
     for name in sorted(set(prev_h) | set(curr_h)):
         if name not in curr_h:
@@ -1138,9 +1142,14 @@ def diff(
             c = curr_h[name].get(category, {})
             for sym in sorted(set(p) | set(c)):
                 if sym not in c:
-                    removed.append((name, category, sym, p[sym]["hash"]))
+                    # `kind` (struct/union/enum/opaque/fnptr/alias) is
+                    # only present on a typedef record -- `.get` reads
+                    # None for every other category, which folds them
+                    # all into one uniform "no sub-kind" bucket below
+                    # rather than needing a category-specific branch.
+                    removed.append((name, category, sym, p[sym]["hash"], p[sym].get("kind")))
                 elif sym not in p:
-                    added.append((name, category, sym, c[sym]["hash"]))
+                    added.append((name, category, sym, c[sym]["hash"], c[sym].get("kind")))
                 elif p[sym]["hash"] != c[sym]["hash"]:
                     msgs.append(f"CHANGED {category[:-1]} {name}::{sym}")
                     if category == "typedefs":
@@ -1150,13 +1159,22 @@ def diff(
     # #2139): counted over the FULL removed/added lists, not whatever
     # is left in unmatched_added by the time a given entry is visited
     # -- "several headers lose or gain the same name" describes the
-    # whole diff, not visitation order.
-    removed_name_counts: dict[tuple[str, str], int] = {}
-    for _, r_cat, r_sym, _ in removed:
-        removed_name_counts[(r_cat, r_sym)] = removed_name_counts.get((r_cat, r_sym), 0) + 1
-    added_name_counts: dict[tuple[str, str], int] = {}
-    for _, a_cat, a_sym, _ in added:
-        added_name_counts[(a_cat, a_sym)] = added_name_counts.get((a_cat, a_sym), 0) + 1
+    # whole diff, not visitation order.  Keyed on (category, symbol,
+    # kind), not just (category, symbol): a struct `alp_x_t` REMOVED
+    # from A and an unrelated enum `alp_x_t` ADDED in B share a name
+    # but are not the same symbol -- kind (None for every non-typedef
+    # category, so this changes nothing for functions/macros/
+    # variables) keeps them in separate buckets so neither counts
+    # toward the other's ambiguity, and neither can pair with the
+    # other in the match loop below.
+    removed_name_counts: dict[tuple[str, str, str | None], int] = {}
+    for _, r_cat, r_sym, _, r_kind in removed:
+        key = (r_cat, r_sym, r_kind)
+        removed_name_counts[key] = removed_name_counts.get(key, 0) + 1
+    added_name_counts: dict[tuple[str, str, str | None], int] = {}
+    for _, a_cat, a_sym, _, a_kind in added:
+        key = (a_cat, a_sym, a_kind)
+        added_name_counts[key] = added_name_counts.get(key, 0) + 1
 
     # Pair each REMOVED entry with an ADDED entry of the same
     # category/symbol where the OLD header still #includes the NEW one
@@ -1166,9 +1184,9 @@ def diff(
     # candidate that genuinely is reachable -- and must not get
     # consumed either way, since it was never a real match.
     unmatched_added = list(added)
-    for r_header, r_cat, r_sym, r_hash in removed:
+    for r_header, r_cat, r_sym, r_hash, r_kind in removed:
         match_idx = None
-        for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+        for i, (a_header, a_cat, a_sym, a_hash, _a_kind) in enumerate(unmatched_added):
             if (
                 a_cat == r_cat
                 and a_sym == r_sym
@@ -1179,24 +1197,29 @@ def diff(
                 break
         value_changed = False
         if match_idx is None and (
-            removed_name_counts.get((r_cat, r_sym), 0) == 1
-            and added_name_counts.get((r_cat, r_sym), 0) == 1
+            removed_name_counts.get((r_cat, r_sym, r_kind), 0) == 1
+            and added_name_counts.get((r_cat, r_sym, r_kind), 0) == 1
         ):
-            # No identical-content candidate, but the name is
-            # unambiguous (exactly one loser, exactly one gainer) --
-            # a reachable candidate here is still the SAME symbol that
-            # moved, it just also changed value (#2139).
-            for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+            # No identical-content candidate, but the (name, kind) is
+            # unambiguous (exactly one loser, exactly one gainer of
+            # the SAME kind) -- a reachable candidate here is still
+            # the SAME symbol that moved, it just also changed value
+            # (#2139).  `a_kind == r_kind` again here, not just relied
+            # on via the count above: the count only says the bucket
+            # has one member each side, this is what actually refuses
+            # to pair across a kind change (struct -> fnptr etc.).
+            for i, (a_header, a_cat, a_sym, a_hash, a_kind) in enumerate(unmatched_added):
                 if (
                     a_cat == r_cat
                     and a_sym == r_sym
+                    and a_kind == r_kind
                     and a_header in include_graph.get(r_header, [])
                 ):
                     match_idx = i
                     value_changed = True
                     break
         if match_idx is not None:
-            a_header, _a_cat, _a_sym, _a_hash = unmatched_added.pop(match_idx)
+            a_header, _a_cat, _a_sym, _a_hash, _a_kind = unmatched_added.pop(match_idx)
             msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
             if value_changed:
                 msgs.append(f"CHANGED {r_cat[:-1]} {a_header}::{r_sym} (moved from {r_header})")
@@ -1220,7 +1243,7 @@ def diff(
         else:
             msgs.append(f"REMOVED {r_cat[:-1]} {r_header}::{r_sym}")
 
-    for a_header, a_cat, a_sym, _a_hash in unmatched_added:
+    for a_header, a_cat, a_sym, _a_hash, _a_kind in unmatched_added:
         msgs.append(f"ADDED   {a_cat[:-1]} {a_header}::{a_sym}")
 
     return msgs
