@@ -375,9 +375,9 @@ ZTEST(i2s_dw_underrun, test_drain_gates_clock)
  * restart at the ORIGINAL rate must reprogram, not skip onto RX's
  * divider.
  *
- * MUTATION-PROVEN: with rx_stream_start()'s
- * `dev_data->tx.clk_restart_skip_ok = false;` line removed (the finding-1
- * fix), this goes RED -- the TX restart wrongly finds the stale flag
+ * MUTATION-PROVEN: replacing rx_stream_start()'s
+ * `dev_data->tx.clk_restart_skip_ok = false;` with `(void)dev_data;` (a
+ * plain delete fails -Werror) turns this RED -- the TX restart finds the stale flag
  * still armed and CER.CLKEN still set, so it skips set_rate entirely and
  * `fake_set_rate_calls > before` is false. Restored after the mutation
  * run; see the PR report.
