@@ -2209,7 +2209,7 @@ out:
 		 * written to the ring, streak left untouched (no ring write
 		 * happened, so nothing to "reset on the next decoded reply"
 		 * either). */
-		if (false && ctx->link_log_suppress) { /* MUTATION 1: disable suppression */
+		if (ctx->link_log_suppress) {
 			if (ctx->link_log_probe_fail_count < 0xFFu) ctx->link_log_probe_fail_count++;
 			return s;
 		}
