@@ -71,6 +71,24 @@ tests:
       - v2n
       - bridge
 
+  # CC3501E GPIO proxy scenario: turns on the proxy backend so
+  # src/gpio_proxy.c's delegated-path test (issue #1618) is compiled and
+  # run.  Scoped to its own image rather than prj.conf because the proxy
+  # registers at priority 200 and would otherwise route every GPIO test
+  # in this directory through it.
+  alp_sdk.peripheral.cc3501e_proxy:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_cc3501e_proxy.conf"
+    tags:
+      - alp-sdk
+      - peripheral
+      - gpio
+
   # alp_sdk.peripheral.evk_aen — HW-in-loop variant for the E1M EVK
   # populated with an E1M-AEN801 SoM. The real board target,
   # alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he, ships in-tree
