@@ -32,18 +32,27 @@
  *
  * PASS gate: the device is ready, dmic_configure + dmic_trigger(START)
  * return 0, dmic_read returns blocks with non-zero, NON-CONSTANT samples,
- * the MEASURED sample rate (frames delivered / elapsed wall-clock time,
- * excluding the first read's startup latency) is within +/-5% of
- * SAMPLE_RATE_HZ, AND at least one channel's RMS and peak-to-peak both clear
- * a documented floor above a dead/under-clocked mic's residual noise (issue
- * #2133 round 3: round 1's PASS gate was "samples aren't all equal", which a
- * flat +/-1-2 LSB noise floor satisfies -- that is NOT evidence of live
- * acoustic capture). A run that reads cleanly at the right rate but with no
- * channel over that floor is reported INCONCLUSIVE, not PASS.
+ * the driver never reports a dropped burst (dmic_read() returning -EIO --
+ * issue #2133 round 4b), the MEASURED sample rate (frames delivered /
+ * elapsed wall-clock time, excluding the first read's startup latency) is
+ * within +/-5% of SAMPLE_RATE_HZ, AND at least one channel's RMS and
+ * peak-to-peak both clear a documented floor above a dead/under-clocked
+ * mic's residual noise (issue #2133 round 3: round 1's PASS gate was
+ * "samples aren't all equal", which a flat +/-1-2 LSB noise floor satisfies
+ * -- that is NOT evidence of live acoustic capture). A run that reads
+ * cleanly at the right rate but with no channel over that floor is reported
+ * INCONCLUSIVE, not PASS; a run where the driver ever reported a drop is
+ * FAILed outright regardless of what the surviving blocks measured (round
+ * 4b: a round-3 run measured ~32 kHz on a 48 kHz request because THIS
+ * app's own per-sample stats loop couldn't keep up with the block period
+ * and the driver was silently dropping bursts -- the "wrong rate" verdict
+ * was really an unreported drop; this gate catches that class directly
+ * instead of only inferring it from a rate mismatch).
  */
 
 #include <stdio.h>
 #include <stdint.h>
+#include <errno.h>
 #include <math.h>
 
 #include <zephyr/kernel.h>
@@ -79,47 +88,68 @@
  * filling blocks while this app is still consuming the previous one. */
 K_MEM_SLAB_DEFINE_STATIC(pdm_slab, BLOCK_SIZE, BLOCK_COUNT, 4);
 
-/* Per-channel running stats (Welford's online algorithm for a numerically
- * stable single-pass mean/variance -- the raw PDM stream is consumed as it
- * arrives, so a two-pass RMS-of-(sample-mean) isn't an option without
- * buffering the whole capture). min/max give peak-to-peak directly (DC-
- * offset-invariant, no mean needed); mean itself is reported separately as
- * the DC offset.
+/* Per-channel running stats -- INTEGER-ONLY accumulation (issue #2133 round
+ * 4b). The previous version ran a double-precision Welford update (a divide
+ * per sample) on all ~19200 samples/block with no CONFIG_FPU on this M55-HE
+ * build -- soft-float, ~150 ms/block against a 100 ms block period. The
+ * 4-block slab exhausted while this loop was still chewing on an earlier
+ * block, the driver silently dropped the bursts that arrived meanwhile, and
+ * the resulting "measured_rate_hz=32142" was THIS CONSUMER falling behind,
+ * not the PDM clock (mode 7 was programmed and held correctly throughout).
+ * Root cause is the algorithm, not missing hardware float -- turning on
+ * CONFIG_FPU would only make the same per-sample division/whatever faster,
+ * not remove it, and wouldn't catch the NEXT thing that's slow. int64 sum +
+ * sum-of-squares needs no division or sqrt() per sample; min/max give
+ * peak-to-peak directly (DC-offset-invariant). The only floating point
+ * anywhere in this file is one sqrt() per channel, AFTER the capture loop
+ * (chan_stats_rms_ac() below) -- 4 calls total, not ~19200.
  */
 struct chan_stats {
 	int32_t  min_v;
 	int32_t  max_v;
-	double   mean;
-	double   m2; /* sum of squared deviations from the running mean */
+	int64_t  sum;    /* |sample| <= 32768, well under INT64_MAX over any capture length */
+	int64_t  sum_sq; /* sample^2 <= ~1.07e9; * ~14400 samples/channel here is still << INT64_MAX */
 	uint32_t n;
 };
 
 static void chan_stats_init(struct chan_stats *cs)
 {
-	cs->min_v = INT16_MAX;
-	cs->max_v = INT16_MIN;
-	cs->mean  = 0.0;
-	cs->m2    = 0.0;
-	cs->n     = 0;
+	cs->min_v  = INT16_MAX;
+	cs->max_v  = INT16_MIN;
+	cs->sum    = 0;
+	cs->sum_sq = 0;
+	cs->n      = 0;
 }
 
 static void chan_stats_update(struct chan_stats *cs, int16_t x)
 {
-	double delta, delta2;
-
 	if (x < cs->min_v) cs->min_v = x;
 	if (x > cs->max_v) cs->max_v = x;
-
+	cs->sum += x;
+	cs->sum_sq += (int64_t)x * (int64_t)x;
 	cs->n++;
-	delta = (double)x - cs->mean;
-	cs->mean += delta / (double)cs->n;
-	delta2 = (double)x - cs->mean;
-	cs->m2 += delta * delta2;
 }
 
+/* RMS of the AC component (DC offset removed): sqrt(E[x^2] - E[x]^2). The
+ * ONLY floating point in this file -- one call per channel, after the
+ * capture loop has finished, never per-sample (issue #2133 round 4b). */
 static double chan_stats_rms_ac(const struct chan_stats *cs)
 {
-	return (cs->n > 0) ? sqrt(cs->m2 / (double)cs->n) : 0.0;
+	double mean, mean_sq, variance;
+
+	if (cs->n == 0) return 0.0;
+
+	mean     = (double)cs->sum / (double)cs->n;
+	mean_sq  = (double)cs->sum_sq / (double)cs->n;
+	variance = mean_sq - mean * mean;
+	if (variance < 0.0) variance = 0.0; /* guard rounding near zero AC */
+
+	return sqrt(variance);
+}
+
+static int32_t chan_stats_dc_offset(const struct chan_stats *cs)
+{
+	return (cs->n > 0) ? (int32_t)(cs->sum / (int64_t)cs->n) : 0;
 }
 
 int main(void)
@@ -192,10 +222,11 @@ int main(void)
 		return 0;
 	}
 
-	int64_t  t_anchor_ms     = 0;
-	int64_t  t_last_ms       = 0;
-	uint32_t frames_measured = 0;
-	uint32_t reads_ok        = 0;
+	int64_t  t_anchor_ms      = 0;
+	int64_t  t_last_ms        = 0;
+	uint32_t frames_measured  = 0;
+	uint32_t reads_ok         = 0;
+	bool     overrun_detected = false;
 
 	struct chan_stats stats[NUM_CHANNELS];
 
@@ -208,6 +239,12 @@ int main(void)
 		rc            = dmic_read(dmic, 0, &buf, &size, READ_TIMEOUT_MS);
 		if (rc != 0) {
 			printf("[pdm] dmic_read[%d] -> %d\n", b, rc);
+			/* -EIO is the driver's dedicated "a burst was dropped
+			 * this session" signal (zephyr/drivers/audio/
+			 * alif_pdm.c's `overrun` flag, issue #2133 round 4b)
+			 * -- distinct from a plain -EAGAIN/-ETIMEDOUT read
+			 * timeout, which isn't itself evidence of loss. */
+			if (rc == -EIO) overrun_detected = true;
 			continue;
 		}
 		reads_ok++;
@@ -220,19 +257,25 @@ int main(void)
 		 * excluding the first read as a startup-latency anchor only
 		 * (it can span the pre-START/post-START boundary). A "PCM
 		 * varies" check alone never would have caught round 1's
-		 * mislabelled-rate bug. */
+		 * mislabelled-rate bug. Block 0's SAMPLES are excluded from
+		 * the signal stats below for the same reason plus the
+		 * decimator/FIR startup transient (issue #2133 round 3/4b).
+		 */
 		if (b == 0) {
 			t_anchor_ms = now_ms;
 		} else {
 			frames_measured += frames_in_block;
 			t_last_ms = now_ms;
-		}
 
-		const int16_t *s = (const int16_t *)buf;
-		size_t         n = size / sizeof(int16_t);
+			const int16_t *s = (const int16_t *)buf;
+			size_t         n = size / sizeof(int16_t);
 
-		for (size_t i = 0; i < n; i++) {
-			chan_stats_update(&stats[i % NUM_CHANNELS], s[i]);
+			/* Integer-only per sample (issue #2133 round 4b) --
+			 * see chan_stats_update()'s header comment for why
+			 * this loop must never do floating point. */
+			for (size_t i = 0; i < n; i++) {
+				chan_stats_update(&stats[i % NUM_CHANNELS], s[i]);
+			}
 		}
 		printf("[pdm] read[%d] size=%u\n", b, size);
 		k_mem_slab_free(&pdm_slab, buf);
@@ -272,7 +315,7 @@ int main(void)
 		       stats[c].n,
 		       (int)rms_ac,
 		       peak_to_peak,
-		       (int)stats[c].mean,
+		       chan_stats_dc_offset(&stats[c]),
 		       chan_live ? "LIVE" : "flat");
 
 		if (chan_live) signal_ok = true;
@@ -281,7 +324,16 @@ int main(void)
 	const char *verdict;
 	const char *reason;
 
-	if (reads_ok == 0) {
+	if (overrun_detected) {
+		/* Takes priority over every other check (issue #2133 round
+		 * 4b): whatever the surviving blocks measured, the driver
+		 * itself said data was lost mid-session, so the rate/signal
+		 * numbers above cannot be trusted as a full picture. */
+		verdict = "FAIL";
+		reason  = "driver reported dropped PDM data this session (dmic_read -> -EIO -- "
+		          "slab exhausted or delivery queue overflowed); this capture is not "
+		          "trustworthy regardless of what the surviving blocks measured";
+	} else if (reads_ok == 0) {
 		verdict = "PARTIAL";
 		reason  = "FIFO empty -- HP-PDM config register-verified (channel mask + mode set; "
 		          "the patched clockctrl forced EXPMST0 IPCLK/PCLK + set the CGU CLK_ENA bit); "
