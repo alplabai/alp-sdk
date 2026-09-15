@@ -187,6 +187,15 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
 /**
  * @brief Begin playback.  Caller must keep feeding via @ref alp_audio_out_write.
  *
+ * Calling this before the first @ref alp_audio_out_write is legal and
+ * returns @ref ALP_OK immediately -- it does not guarantee the hardware
+ * clock is running yet. A backend whose driver refuses to trigger with
+ * nothing queued (e.g. the DesignWare I2S TX ring buffer) defers the real
+ * start until the first write actually queues a block; a trigger failure
+ * discovered at that point surfaces from that @ref alp_audio_out_write
+ * call instead of from here. Starting after the first write triggers
+ * immediately, as before.
+ *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
