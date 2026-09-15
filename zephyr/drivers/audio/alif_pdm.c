@@ -162,13 +162,13 @@ LOG_MODULE_REGISTER(alif_pdm, LOG_LEVEL_INF);
 struct pdm_data {
 	DEVICE_MMIO_RAM;
 	struct k_mem_slab *mem_slab;
-	uint32_t block_size;
-	struct k_msgq buf_queue;
-	uint8_t channel_map;
-	uint32_t num_channels;
-	uint8_t *data_buffer;
-	uint32_t buf_index;
-	uint32_t slab_missed;
+	uint32_t           block_size;
+	struct k_msgq      buf_queue;
+	uint8_t            channel_map;
+	uint32_t           num_channels;
+	uint8_t           *data_buffer;
+	uint32_t           buf_index;
+	uint32_t           slab_missed;
 	/* Set when the ISR ever dropped audio data (a slab-alloc failure --
 	 * see get_slab() -- or the delivery queue was full and the OLDEST
 	 * undelivered block was evicted below) so dmic_alif_pdm_read() can
@@ -180,16 +180,16 @@ struct pdm_data {
 	 * so a caller that ignores one -EIO still cannot get a later read
 	 * to silently succeed past the gap.
 	 */
-	bool overrun;
+	bool     overrun;
 	uint32_t record_data;
 	uint32_t bytes_got;
-	uint8_t bypass_iir_filter;
+	uint8_t  bypass_iir_filter;
 	/* PDM_MODE resolved by dmic_alif_pdm_configure() but only WRITTEN by
 	 * DMIC_TRIGGER_START/STOP (issue #2133 round 2 divergence (4)) -- see
 	 * the file header for why configure() itself must not start the
 	 * clock. */
-	uint8_t clk_mode;
-	void *queue_data[MAX_QUEUE_LEN];
+	uint8_t  clk_mode;
+	void    *queue_data[MAX_QUEUE_LEN];
 	uint16_t data[MAX_NUM_CHANNELS * MAX_DATA_ITEMS];
 };
 
@@ -209,8 +209,8 @@ struct pdm_config {
 	bool                             has_error_irq;
 	bool                             has_audio_det_irq;
 	const struct pinctrl_dev_config *pcfg;
-	const struct device *clk_dev;
-	clock_control_subsys_t clkid;
+	const struct device             *clk_dev;
+	clock_control_subsys_t           clkid;
 	/* Board-level mic PDM clock range (issue #2133 round 3), DT property
 	 * names matching Zephyr's own pdm-dmic.yaml (round 4a) -- e.g. the
 	 * E1M-EVK's MP34DT05TR-A mics need 1.2-3.25 MHz. 0 / UINT32_MAX
@@ -235,7 +235,7 @@ struct pdm_config {
  */
 struct pdm_clock_mode_entry {
 	uint32_t pcm_rate_hz;
-	uint8_t mode;
+	uint8_t  mode;
 	uint32_t pdm_clk_hz;
 };
 
@@ -293,12 +293,12 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
 
-static int pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out,
-				    uint32_t *pdm_clk_hz_out)
+static int
+pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out, uint32_t *pdm_clk_hz_out)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(pdm_clock_modes); i++) {
 		if (pdm_clock_modes[i].pcm_rate_hz == pcm_rate_hz) {
-			*mode_out = pdm_clock_modes[i].mode;
+			*mode_out       = pdm_clock_modes[i].mode;
 			*pdm_clk_hz_out = pdm_clock_modes[i].pdm_clk_hz;
 			return 0;
 		}
@@ -338,7 +338,7 @@ static void pdm_ctl0_write_spacer(const struct device *dev)
 static void pdm_force_sleep(const struct device *dev)
 {
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-	uint32_t reg_val;
+	uint32_t  reg_val;
 
 	pdm_ctl0_write_spacer(dev);
 	reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
@@ -391,14 +391,14 @@ static void pdm_apply_channel_defaults(const struct device *dev, uint8_t hw_ch)
  */
 static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *config)
 {
-	struct pdm_data *pdata = DEV_DATA(dev);
-	const struct pdm_config *cfg = DEV_CFG(dev);
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
-	uint8_t hw_chan_mask;
-	uint8_t clk_mode;
-	uint32_t pdm_clk_hz;
-	int rc;
+	struct pdm_data         *pdata    = DEV_DATA(dev);
+	const struct pdm_config *cfg      = DEV_CFG(dev);
+	uintptr_t                reg_base = DEVICE_MMIO_GET(dev);
+	uint32_t                 reg_val  = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+	uint8_t                  hw_chan_mask;
+	uint8_t                  clk_mode;
+	uint32_t                 pdm_clk_hz;
+	int                      rc;
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
@@ -423,8 +423,9 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	 * out-of-order map is also rejected here.
 	 */
 	rc = alif_pdm_chanmap_translate(config->channel.req_chan_map_lo,
-					 config->channel.req_chan_map_hi,
-					 config->channel.req_num_chan, &hw_chan_mask);
+	                                config->channel.req_chan_map_hi,
+	                                config->channel.req_num_chan,
+	                                &hw_chan_mask);
 	if (rc != 0) {
 		LOG_DBG("config invalid: channel map not expressible in hardware\n");
 		goto invalid;
@@ -435,8 +436,7 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	 */
 	rc = pdm_clock_mode_for_rate(config->streams[0].pcm_rate, &clk_mode, &pdm_clk_hz);
 	if (rc != 0) {
-		LOG_DBG("config invalid: no PDM clock mode for pcm_rate=%u\n",
-			config->streams[0].pcm_rate);
+		LOG_DBG("config invalid: no PDM clock mode for pcm_rate=%u\n", config->streams[0].pcm_rate);
 		goto invalid;
 	}
 
@@ -461,22 +461,22 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 		uint32_t eff_max = MIN(cfg->clk_frequency_max, config->io.max_pdm_clk_freq);
 
 		if (pdm_clk_hz < eff_min) {
-			LOG_DBG("config invalid: mode clock %u Hz below mic minimum %u Hz\n",
-				pdm_clk_hz, eff_min);
+			LOG_DBG(
+			    "config invalid: mode clock %u Hz below mic minimum %u Hz\n", pdm_clk_hz, eff_min);
 			rc = -EINVAL;
 			goto invalid;
 		}
 		if (pdm_clk_hz > eff_max) {
-			LOG_DBG("config invalid: mode clock %u Hz above mic maximum %u Hz\n",
-				pdm_clk_hz, eff_max);
+			LOG_DBG(
+			    "config invalid: mode clock %u Hz above mic maximum %u Hz\n", pdm_clk_hz, eff_max);
 			rc = -EINVAL;
 			goto invalid;
 		}
 	}
 
 	if (pdata) {
-		pdata->mem_slab = config->streams[0].mem_slab;
-		pdata->block_size = config->streams[0].block_size;
+		pdata->mem_slab    = config->streams[0].mem_slab;
+		pdata->block_size  = config->streams[0].block_size;
 		pdata->channel_map = hw_chan_mask;
 		/* Resolved but NOT written here -- DMIC_TRIGGER_START writes
 		 * it (issue #2133 round 2 divergence (4)): a configure() that
@@ -544,7 +544,7 @@ invalid:
 void pdm_channel_config(const struct device *dev, struct pdm_ch_config *cnfg)
 {
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-	uint8_t i;
+	uint8_t   i;
 	uintptr_t ch_n_fir_coef_0 = reg_base + PDM_CH_FIR_COEF + (cnfg->ch_num * PDM_CH_OFFSET);
 
 	/* Store the FIR coefficient values. Each write goes through sys_write32()
@@ -553,8 +553,7 @@ void pdm_channel_config(const struct device *dev, struct pdm_ch_config *cnfg)
 	 * non-volatile object, which would silently corrupt the coefficient bank.
 	 */
 	for (i = 0; i < PDM_MAX_FIR_COEFFICIENT; i++) {
-		sys_write32(cnfg->ch_fir_coef[i],
-			    ch_n_fir_coef_0 + ((uintptr_t)i * sizeof(uint32_t)));
+		sys_write32(cnfg->ch_fir_coef[i], ch_n_fir_coef_0 + ((uintptr_t)i * sizeof(uint32_t)));
 	}
 
 	uintptr_t ch_n_iir_coef = (reg_base + PDM_CH_IIR_COEF_SEL + (cnfg->ch_num * PDM_CH_OFFSET));
@@ -575,7 +574,7 @@ void pdm_channel_config(const struct device *dev, struct pdm_ch_config *cnfg)
  */
 void pdm_set_ch_phase(const struct device *dev, uint8_t ch_num, uint32_t ch_phase)
 {
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	uintptr_t reg_base   = DEVICE_MMIO_GET(dev);
 	uintptr_t ch_n_phase = (reg_base + PDM_CH_PHASE + (ch_num * PDM_CH_OFFSET));
 
 	sys_write32(ch_phase, ch_n_phase);
@@ -593,7 +592,7 @@ void pdm_set_ch_phase(const struct device *dev, uint8_t ch_num, uint32_t ch_phas
  */
 void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 {
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	uintptr_t reg_base  = DEVICE_MMIO_GET(dev);
 	uintptr_t ch_n_gain = (reg_base + PDM_CH_GAIN + (ch_num * PDM_CH_OFFSET));
 
 	sys_write32(ch_gain, ch_n_gain);
@@ -612,7 +611,7 @@ void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
  */
 void pdm_set_peak_detect_th(const struct device *dev, uint8_t ch_num, uint32_t ch_peak_detect_th)
 {
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	uintptr_t reg_base      = DEVICE_MMIO_GET(dev);
 	uintptr_t ch_n_pkdet_th = (reg_base + PDM_CH_PKDET_TH + (ch_num * PDM_CH_OFFSET));
 
 	sys_write32(ch_peak_detect_th, ch_n_pkdet_th);
@@ -631,7 +630,7 @@ void pdm_set_peak_detect_th(const struct device *dev, uint8_t ch_num, uint32_t c
  */
 void pdm_set_peak_detect_itv(const struct device *dev, uint8_t ch_num, uint32_t ch_peak_detect_itv)
 {
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	uintptr_t reg_base       = DEVICE_MMIO_GET(dev);
 	uintptr_t ch_n_pkdet_itv = (reg_base + PDM_CH_PKDET_ITV + (ch_num * PDM_CH_OFFSET));
 
 	sys_write32(ch_peak_detect_itv, ch_n_pkdet_itv);
@@ -675,9 +674,9 @@ void pdm_mode(const struct device *dev, uint8_t mode)
  */
 static void enable_interrupt(const struct device *dev)
 {
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-	uint32_t irq_value = 0;
-	uint32_t audio_ch = 0;
+	uintptr_t reg_base  = DEVICE_MMIO_GET(dev);
+	uint32_t  irq_value = 0;
+	uint32_t  audio_ch  = 0;
 
 	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
 
@@ -747,11 +746,11 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 	case DMIC_TRIGGER_START:
 		LOG_DBG("trigger start\n");
 		pdata->record_data = 1;
-		pdata->bytes_got = 0;
-		pdata->buf_index = 0;
+		pdata->bytes_got   = 0;
+		pdata->buf_index   = 0;
 		pdata->data_buffer = NULL;
 		pdata->slab_missed = 0;
-		pdata->overrun = false;
+		pdata->overrun     = false;
 
 		/* Order is load-bearing (issue #2133 round 2 divergence (4)):
 		 * the mode write is what actually starts the block sampling,
@@ -764,7 +763,7 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 
 		{
 			uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-			uint32_t reg_val;
+			uint32_t  reg_val;
 
 			/* HWRM 15.7.5.3.5: PDM_ERROR_IRQ (0x10) and
 			 * PDM_WARN_IRQ (0x14) are edge-triggered, sticky,
@@ -821,11 +820,14 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
  * @param[in]	timeout	: Maximum time to wait for a message
  * @return		Zero on success, and a negative value on failure.
  */
-static int dmic_alif_pdm_read(const struct device *dev, uint8_t stream, void **buffer, size_t *size,
-			      int32_t timeout)
+static int dmic_alif_pdm_read(const struct device *dev,
+                              uint8_t              stream,
+                              void               **buffer,
+                              size_t              *size,
+                              int32_t              timeout)
 {
 	struct pdm_data *pdata = DEV_DATA(dev);
-	int rc;
+	int              rc;
 
 	/* A dropped burst (slab exhausted or the delivery queue evicted its
 	 * oldest block -- see get_slab() / the ISR's queue-full path) must
@@ -840,7 +842,7 @@ static int dmic_alif_pdm_read(const struct device *dev, uint8_t stream, void **b
 	 */
 	if (pdata->overrun) {
 		LOG_DBG("read: data was dropped this session (slab exhausted or queue full); "
-			"restart the capture to resume\n");
+		        "restart the capture to resume\n");
 		return -EIO;
 	}
 
@@ -864,8 +866,8 @@ static inline void pdm_error_handler(const struct device *dev)
 
 static inline void pdm_audio_det_handler(const struct device *dev)
 {
-	struct pdm_data *pdata = DEV_DATA(dev);
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	struct pdm_data *pdata    = DEV_DATA(dev);
+	uintptr_t        reg_base = DEVICE_MMIO_GET(dev);
 
 	if (pdata->slab_missed != 0) {
 		sys_clear_bits(reg_base + PDM_INTERRUPT_REGISTER, PDM_AUDIO_DETECT_IRQ_STAT);
@@ -904,7 +906,7 @@ static __maybe_unused void pdm_audio_detect_irq_handler(const struct device *dev
  */
 static void *get_slab(struct pdm_data *pdm_data)
 {
-	int rc;
+	int   rc;
 	void *buffer;
 
 	rc = k_mem_slab_alloc(pdm_data->mem_slab, &buffer, K_NO_WAIT);
@@ -936,21 +938,21 @@ static void *get_slab(struct pdm_data *pdm_data)
  */
 static void alif_pdm_warning_isr(const struct device *dev)
 {
-	struct pdm_data *pdmdata = DEV_DATA(dev);
+	struct pdm_data         *pdmdata = DEV_DATA(dev);
 	const struct pdm_config *cfg     = DEV_CFG(dev);
-	uint8_t k = 0;
-	uint8_t audio_ch;
-	uint8_t intstatus;
-	uintptr_t reg_base;
-	uint32_t num_items;
-	uint32_t data_bytes;
-	uint32_t block_size;
-	uint32_t bytes_available;
-	uint32_t i;
-	uint32_t audio_ch_0_1;
-	uint32_t audio_ch_2_3;
-	uint32_t audio_ch_4_5;
-	uint32_t audio_ch_6_7;
+	uint8_t                  k       = 0;
+	uint8_t                  audio_ch;
+	uint8_t                  intstatus;
+	uintptr_t                reg_base;
+	uint32_t                 num_items;
+	uint32_t                 data_bytes;
+	uint32_t                 block_size;
+	uint32_t                 bytes_available;
+	uint32_t                 i;
+	uint32_t                 audio_ch_0_1;
+	uint32_t                 audio_ch_2_3;
+	uint32_t                 audio_ch_4_5;
+	uint32_t                 audio_ch_6_7;
 
 	block_size = pdmdata->block_size;
 
@@ -1029,7 +1031,6 @@ static void alif_pdm_warning_isr(const struct device *dev)
 	pdmdata->bytes_got += data_bytes;
 
 	if (pdmdata->data_buffer == NULL) {
-
 		pdmdata->data_buffer = get_slab(pdmdata);
 		if (pdmdata->data_buffer == NULL) {
 			/*
@@ -1064,20 +1065,21 @@ static void alif_pdm_warning_isr(const struct device *dev)
 	 */
 	{
 		uint32_t chunks[MAX_PDM_BURST_CHUNKS];
-		size_t nchunks;
+		size_t   nchunks;
 		uint32_t copied = 0;
-		size_t idx;
+		size_t   idx;
 
-		nchunks = pdm_plan_burst_chunks(bytes_available, data_bytes, block_size, chunks,
-						 ARRAY_SIZE(chunks));
+		nchunks = pdm_plan_burst_chunks(
+		    bytes_available, data_bytes, block_size, chunks, ARRAY_SIZE(chunks));
 		if (nchunks == 0) {
 			/* Cannot safely split this burst into MAX_PDM_BURST_CHUNKS
 			 * blocks (a pathologically small block_size) -- drop the
 			 * burst rather than risk writing past a block boundary.
 			 */
 			LOG_ERR("PDM burst too large to plan safely (data_bytes=%u "
-				"block_size=%u); dropping burst\n",
-				data_bytes, block_size);
+			        "block_size=%u); dropping burst\n",
+			        data_bytes,
+			        block_size);
 			pdmdata->buf_index = 0;
 			return;
 		}
@@ -1087,7 +1089,8 @@ static void alif_pdm_warning_isr(const struct device *dev)
 
 			if (chunk > 0) {
 				memcpy(pdmdata->data_buffer + pdmdata->buf_index,
-				       (uint8_t *)pdmdata->data + copied, chunk);
+				       (uint8_t *)pdmdata->data + copied,
+				       chunk);
 				pdmdata->buf_index += chunk;
 				copied += chunk;
 			}
@@ -1102,8 +1105,7 @@ static void alif_pdm_warning_isr(const struct device *dev)
 			/* This block is now full; queue it and start a fresh
 			 * one for the next chunk.
 			 */
-			if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) !=
-			    0) {
+			if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) != 0) {
 				/* Queue full: drop oldest block to make room.
 				 * Same silent-gap hazard as a slab-alloc miss
 				 * (issue #2133 round 4b) -- the caller never
@@ -1113,13 +1115,12 @@ static void alif_pdm_warning_isr(const struct device *dev)
 				pdmdata->overrun = true;
 				if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
 					k_mem_slab_free(pdmdata->mem_slab, oldest);
-					k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer,
-						   K_NO_WAIT);
+					k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT);
 				}
 			}
 
 			pdmdata->data_buffer = get_slab(pdmdata);
-			pdmdata->buf_index = 0;
+			pdmdata->buf_index   = 0;
 			if (pdmdata->data_buffer == NULL) {
 				/* Allocation failed mid-burst: drop the
 				 * remainder of this burst, same ownership/
@@ -1134,9 +1135,9 @@ static void alif_pdm_warning_isr(const struct device *dev)
 /* Init function */
 static int pdm_initialize(const struct device *dev)
 {
-	const struct pdm_config *cfg = DEV_CFG(dev);
-	struct pdm_data *pdata = DEV_DATA(dev);
-	int32_t ret = 0;
+	const struct pdm_config *cfg   = DEV_CFG(dev);
+	struct pdm_data         *pdata = DEV_DATA(dev);
+	int32_t                  ret   = 0;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
 
@@ -1196,8 +1197,8 @@ static int pdm_initialize(const struct device *dev)
 
 static const struct _dmic_ops dmic_alif_pdm_api = {
 	.configure = dmic_alif_pdm_configure,
-	.trigger = dmic_alif_pdm_trigger,
-	.read = dmic_alif_pdm_read,
+	.trigger   = dmic_alif_pdm_trigger,
+	.read      = dmic_alif_pdm_read,
 };
 
 #if defined(CONFIG_PM_DEVICE)
@@ -1256,11 +1257,11 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 	 * 0/UINT32_MAX). \
 	 */ \
 	BUILD_ASSERT(!(DT_INST_NODE_HAS_PROP(n, clk_frequency_min) && \
-		       DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
-			 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
-			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
-		     "alif,alif-pdm: clk-frequency-min must not exceed " \
-		     "clk-frequency-max (the DT range is inverted)"); \
+	               DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
+	                 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
+	                  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
+	             "alif,alif-pdm: clk-frequency-min must not exceed " \
+	             "clk-frequency-max (the DT range is inverted)"); \
 	static void            pdm_irq_config_##n(void); \
 	static struct pdm_data dmic_alif_pdm_data_##n = { \
 		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \

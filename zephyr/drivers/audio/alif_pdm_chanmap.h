@@ -85,21 +85,23 @@
  *         ascending order. Callers MUST fail the configure call rather than
  *         fall back to a partial/best-effort mask.
  */
-static inline int alif_pdm_chanmap_translate(uint32_t chan_map_lo, uint32_t chan_map_hi,
-					      uint8_t req_num_chan, uint8_t *mask_out)
+static inline int alif_pdm_chanmap_translate(uint32_t chan_map_lo,
+                                             uint32_t chan_map_hi,
+                                             uint8_t  req_num_chan,
+                                             uint8_t *mask_out)
 {
 	uint8_t mask = 0;
 	uint8_t ch;
-	int prev_hw_ch = -1;
+	int     prev_hw_ch = -1;
 
 	if (req_num_chan == 0 || req_num_chan > 8) {
 		return -EINVAL;
 	}
 
 	for (ch = 0; ch < req_num_chan; ch++) {
-		uint8_t pdm;
+		uint8_t     pdm;
 		enum pdm_lr lr;
-		uint8_t hw_ch;
+		uint8_t     hw_ch;
 
 		dmic_parse_channel_map(chan_map_lo, chan_map_hi, ch, &pdm, &lr);
 		if (pdm >= ALIF_PDM_MAX_CONTROLLERS) {
