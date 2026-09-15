@@ -508,6 +508,18 @@ config SDHC_DWC_DMA_ADDR_TRANSLATE
 	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
 	  reachable and DMA is validated.
 
+config SDHC_RSP_136_HAS_CRC
+	bool "Realign 136-bit R2 responses stored without their CRC byte"
+	default y
+	help
+	  The DWC_mshc response registers hold a 136-bit R2 response (CID, CSD)
+	  without its CRC byte, so sdhc_dwc.c must shift the four RESP words
+	  left by 8 bits to put every field where the SD stack expects it.
+	  The driver has always gated that shift on this symbol, but nothing
+	  defined it, so IS_ENABLED() was 0 and the shift was dead code.
+	  Suspected symptom on the bench (evk-03): a ~119 GiB card whose CSD
+	  C_SIZE reads 0x3BAFF was reported as 524800 sectors (256 MiB).
+
 endif # SDHC_DWC
 
 # hal_alif (drivers/CMakeLists.txt) gates its analog VREF library
