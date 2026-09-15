@@ -223,7 +223,9 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (both the primary stop trigger and
+ *         its own internal fallback were refused -- not expected in
+ *         practice on a stream that was genuinely started).
  */
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 
