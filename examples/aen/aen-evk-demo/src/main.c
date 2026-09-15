@@ -4316,10 +4316,18 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	alp_status_t     spk_rc          = ALP_ERR_NOSUPPORT;
 	uint32_t         baseline_energy = 0;
 	uint32_t         during_energy   = 0;
+	/* Result of the silent priming write below (step 10) -- ALP_OK only
+	 * once that write actually lands, which is this phase's own proof the
+	 * I2S3 bit clock tas2563_resume() requires is genuinely running.
+	 * Starts NOSUPPORT/unreached, same convention as spk_rc above, so the
+	 * final playback-on verdict check can tell "never got there" apart
+	 * from "got there and it failed" without a third state. */
+	alp_status_t silence_rc = ALP_ERR_NOSUPPORT;
 	ARG_UNUSED(mic_rc);
 	ARG_UNUSED(spk_rc);
 	ARG_UNUSED(baseline_energy);
 	ARG_UNUSED(during_energy);
+	ARG_UNUSED(silence_rc);
 
 #if AEN_EVKDEMO_SOUND_PLAYBACK
 	/* --- 8. PDM: open + start, capture the pre-tone baseline ------------ */
@@ -4379,7 +4387,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * went ACTIVE right after alp_audio_out_start() (the old order
 		 * here) therefore switched on with no clock present, which is
 		 * what latched the TDM clock error at the start of playback and,
-		 * separately, is what the part's own ~1 s clock-loss shutdown
+		 * separately, is what the part's own ~100 ms clock-loss shutdown
 		 * eventually silenced after a stop/restart (#2146).  Writing one
 		 * silent block before either amp is touched makes the clock
 		 * actually running true instead of assumed; tas2563_resume()
@@ -4387,47 +4395,60 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * to ACTIVE -- see its doc for why clear-then-activate is the
 		 * required order. */
 		static int16_t silence[SOUND_FRAMES_PER_BLOCK * 2u] = { 0 };
-		(void)alp_audio_out_write(spk, silence, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+		silence_rc = alp_audio_out_write(spk, silence, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+		printf("[evkdemo] SOUND: alp_audio_out_write(silence) -> %d\n", (int)silence_rc);
 
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			if (!amp_up[i]) continue;
-			alp_status_t act_rc = tas2563_resume(&amps[i]);
-			printf("[evkdemo] SOUND: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)act_rc);
-		}
-
-		/* --- 11. The tone, ramped, interleaved with mic reads --------- */
-		/* Frames are interleaved across channels (<alp/audio.h>), so a
-		 * 2-channel, SOUND_FRAMES_PER_BLOCK-frame block needs 2x the
-		 * samples -- [L0,R0,L1,R1,...] -- not 2x the frame count passed
-		 * to alp_audio_out_write() below, which still takes FRAMES.
-		 * Both channels get the identical sample: this is the same
-		 * tone played out of both speakers, not a stereo mix.  static
-		 * for the same main-thread-stack reason as mic_buf above. */
-		static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
-		uint32_t       phase_acc         = 0;
-		const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
-		for (unsigned b = 0; b < SOUND_TONE_BLOCKS; b++) {
-			uint8_t vol =
-			    (uint8_t)(SOUND_VOL_START + (uint32_t)(SOUND_VOL_CEILING - SOUND_VOL_START) * b /
-			                                    (SOUND_TONE_BLOCKS - 1u));
-			(void)alp_audio_out_set_volume(spk, vol);
-
-			for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
-				int16_t sample       = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
-				                           ? SOUND_TONE_AMPLITUDE
-				                           : -SOUND_TONE_AMPLITUDE;
-				tone_buf[2u * f]     = sample; /* L -> U27 (TAS2563_RX_LEFT) */
-				tone_buf[2u * f + 1] = sample; /* R -> U28 (TAS2563_RX_RIGHT) */
-				phase_acc++;
+		if (silence_rc == ALP_OK) {
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				if (!amp_up[i]) continue;
+				alp_status_t act_rc = tas2563_resume(&amps[i]);
+				printf(
+				    "[evkdemo] SOUND: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)act_rc);
 			}
-			(void)alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
 
-			if (mic != NULL && mic_rc == ALP_OK) {
-				size_t       got = 0;
-				alp_status_t r =
-				    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
-				if (r == ALP_OK) during_energy += pdm_block_energy(mic_buf, got * 2u);
+			/* --- 11. The tone, ramped, interleaved with mic reads --------- */
+			/* Frames are interleaved across channels (<alp/audio.h>), so a
+			 * 2-channel, SOUND_FRAMES_PER_BLOCK-frame block needs 2x the
+			 * samples -- [L0,R0,L1,R1,...] -- not 2x the frame count passed
+			 * to alp_audio_out_write() below, which still takes FRAMES.
+			 * Both channels get the identical sample: this is the same
+			 * tone played out of both speakers, not a stereo mix.  static
+			 * for the same main-thread-stack reason as mic_buf above. */
+			static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+			uint32_t       phase_acc         = 0;
+			const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
+			for (unsigned b = 0; b < SOUND_TONE_BLOCKS; b++) {
+				uint8_t vol =
+				    (uint8_t)(SOUND_VOL_START + (uint32_t)(SOUND_VOL_CEILING - SOUND_VOL_START) *
+				                                    b / (SOUND_TONE_BLOCKS - 1u));
+				(void)alp_audio_out_set_volume(spk, vol);
+
+				for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+					int16_t sample   = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
+					                       ? SOUND_TONE_AMPLITUDE
+					                       : -SOUND_TONE_AMPLITUDE;
+					tone_buf[2u * f] = sample;     /* L -> U27 (TAS2563_RX_LEFT) */
+					tone_buf[2u * f + 1] = sample; /* R -> U28 (TAS2563_RX_RIGHT) */
+					phase_acc++;
+				}
+				(void)alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+
+				if (mic != NULL && mic_rc == ALP_OK) {
+					size_t       got = 0;
+					alp_status_t r =
+					    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+					if (r == ALP_OK) during_energy += pdm_block_energy(mic_buf, got * 2u);
+				}
 			}
+		} else {
+			/* No confirmed clock -- do NOT call tas2563_resume(): forcing
+			 * MODE to ACTIVE here is exactly the "amp switches on with no
+			 * clock present" defect #2146 exists to fix, just moved one
+			 * write earlier.  Amps stay in the SHUTDOWN tas2563_init() left
+			 * them in; the playback-on verdict check below fails the phase
+			 * on this rc. */
+			printf("[evkdemo] SOUND: silent priming write failed -- skipping "
+			       "tas2563_resume(), amps left in shutdown\n");
 		}
 	}
 	printf("[evkdemo] SOUND: during-tone PDM energy = %u\n", during_energy);
@@ -4511,6 +4532,11 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 #if AEN_EVKDEMO_SOUND_PLAYBACK
 	if (mic == NULL || mic_rc != ALP_OK || spk == NULL || spk_rc != ALP_OK) {
 		ctx->note = "audio_in/audio_out did not open -- see the printed rc";
+		return PHASE_FAIL;
+	}
+	if (silence_rc != ALP_OK) {
+		ctx->note = "silent priming write failed -- tas2563_resume() was skipped "
+		            "rather than risked with no confirmed clock, see the printed rc";
 		return PHASE_FAIL;
 	}
 	if (!correlated) {
