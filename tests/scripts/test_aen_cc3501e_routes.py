@@ -387,48 +387,73 @@ def _check_phase_sound_io8_guard(phase_sound_body: str) -> tuple[bool, str]:
     `(False, <which one failed>)`:
       1. `alp_gpio_open(ALP_E1M_GPIO_IO8)` appears at all.
       2. No preprocessor conditional other than the one allowed
-         `#if AEN_EVKDEMO_SOUND_PLAYBACK` line sits before that open.
+         `#if AEN_EVKDEMO_SOUND_PLAYBACK` line sits before the FIRST open.
       3. `hwrev_rc = alp_hw_info_read(&hwrev_info);` appears before the
-         open, at brace depth 1 (not nested in any block).
+         first open, at brace depth 1 (not nested in any block).
       4. `if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc,
-         hwrev_info.som_hw_rev)) {` appears after that, before the open,
-         ALSO at brace depth 1 -- so a copy sitting inside a dead `#if 0`,
-         `if (0) { ... }`, or a branch that does not dominate the open
-         (`if (ctx->carrier_bus == NULL) { ... }`) is rejected, and the
-         condition itself is pinned exactly (no trailing `&& (0)`, no
+         hwrev_info.som_hw_rev)) {` appears after that, before the first
+         open, ALSO at brace depth 1 -- so a copy sitting inside a dead
+         `#if 0`, `if (0) { ... }`, or a branch that does not dominate the
+         open (`if (ctx->carrier_bus == NULL) { ... }`) is rejected, and
+         the condition itself is pinned exactly (no trailing `&& (0)`, no
          swapped-out constant arguments).
       5. That `if`'s own block -- found by a brace-depth scan, not a lazy
          "up to the first return-shaped substring" match -- closes before
-         the open, and its OWN final statement (see
+         the first open, and its OWN final statement (see
          `_block_ends_with_bare_statement`) is exactly `return
          PHASE_FAIL;`.
+      6. The open occurs EXACTLY ONCE (round-3 follow-up review:
+         `body.find()` only ever located the first occurrence, so a
+         second, later, unguarded open -- a debug re-open, say -- still
+         passed). A second occurrence is rejected even when it is itself
+         textually reachable only through the same guarded path -- e.g.
+         straight-line code after the guard's `return PHASE_FAIL;` --
+         because proving that IN GENERAL needs real control-flow
+         analysis, not text-order/brace-depth checks, and this checker
+         deliberately does not attempt that (see point 7).
+      7. No `goto` appears anywhere in `phase_sound()` -- for the same
+         reason: this checker reasons about brace nesting and text order,
+         not reachability, so a `goto` jumping around the guard would
+         defeat it undetected. The real file has none.
     """
     body = _strip_c_comments_and_literals(phase_sound_body)
 
-    open_idx = body.find(IO8_OPEN_CALL)
-    if open_idx == -1:
+    if re.search(r"\bgoto\b", body):
+        return False, "phase_sound() contains a 'goto' -- not analysed, rejected outright"
+
+    open_matches = list(re.finditer(re.escape(IO8_OPEN_CALL), body))
+    if not open_matches:
         return False, f"{IO8_OPEN_CALL!r} not found"
-    region = body[:open_idx]
+    if len(open_matches) > 1:
+        return False, (
+            f"IO8 is opened {len(open_matches)} times in phase_sound() -- this checker "
+            f"only reasons about ONE guarded open; a later occurrence is rejected even "
+            f"when it looks textually dominated by the guard's return, since proving "
+            f"that in general needs real control-flow analysis (see the docstring)"
+        )
+    first_open_idx = open_matches[0].start()
+    region = body[:first_open_idx]
 
     pp_lines = [m.group(0).strip() for m in _PP_CONDITIONAL_RE.finditer(region)]
     bad_pp = [ln for ln in pp_lines if ln != _IO8_ALLOWED_PP_LINE]
     if bad_pp or len(pp_lines) > 1:
         return False, (
-            f"unexpected preprocessor conditional(s) before the IO8 open: {pp_lines!r} "
+            f"unexpected preprocessor conditional(s) before the first IO8 open: {pp_lines!r} "
             f"(only one {_IO8_ALLOWED_PP_LINE!r} is allowed)"
         )
 
     read_match = _IO8_GUARD_READ_RE.search(region)
     if read_match is None or _brace_depth_at(body, read_match.start()) != 1:
         return False, (
-            "no 'hwrev_rc = alp_hw_info_read(&hwrev_info);' at brace depth 1 before the IO8 open"
+            "no 'hwrev_rc = alp_hw_info_read(&hwrev_info);' at brace depth 1 before "
+            "the first IO8 open"
         )
 
     if_match = _IO8_GUARD_IF_RE.search(region, read_match.end())
     if if_match is None:
         return False, (
             "no 'if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, "
-            "hwrev_info.som_hw_rev)) {' after the read, before the IO8 open"
+            "hwrev_info.som_hw_rev)) {' after the read, before the first IO8 open"
         )
     if _brace_depth_at(body, if_match.start()) != 1:
         return False, "the guard if is nested inside another block (not brace depth 1)"
@@ -445,8 +470,8 @@ def _check_phase_sound_io8_guard(phase_sound_body: str) -> tuple[bool, str]:
                 break
     if block_close is None:
         return False, "the guard if's block never closes"
-    if block_close >= open_idx:
-        return False, "the guard if's block does not close before the IO8 open"
+    if block_close >= first_open_idx:
+        return False, "the guard if's block does not close before the first IO8 open"
 
     inner = body[block_open + 1:block_close]
     if not _block_ends_with_bare_statement(inner, "return PHASE_FAIL;"):
@@ -615,6 +640,32 @@ _IO8_GUARD_CASES: list[tuple[str, str, bool]] = [
         "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
         "\t\treturn PHASE_FAIL;\n"
         "\t}\n"
+        "}\n"
+    ), False),
+    # Round-3 follow-up review: a properly guarded FIRST open followed by a
+    # second, later, unguarded one (e.g. a debug re-open) -- body.find()
+    # only ever saw the first occurrence, so this passed before.
+    ("mutant_second_unguarded_open_after_a_guarded_first", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "\tmux_en = alp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "\t/* debug re-open, added later, never re-checked */\n"
+        "\tmux_en = alp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # Round-3 follow-up review: a goto jumping around the guard entirely.
+    ("mutant_goto_around_guard", (
+        "{\n"
+        "\tgoto skip_guard;\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "skip_guard:\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
         "}\n"
     ), False),
 ]
