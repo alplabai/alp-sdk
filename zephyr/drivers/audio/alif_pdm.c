@@ -15,8 +15,8 @@
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ==================================================================
  *
- * Vendored from the fork with this provenance header added, plus one
- * documented divergence below; the register map lives in the companion
+ * Vendored from the fork with this provenance header added, plus the
+ * documented divergences below; the register map lives in the companion
  * alif_pdm_reg.h.  vendor-ext, BENCH-UNVERIFIED.
  *
  * ------------------------- alp-sdk divergence -------------------------
@@ -55,11 +55,59 @@
  * clock-mode field MICROPHONE_SLEEP nor programmed per-channel FIR/gain --
  * only the Alif-specific pdm_mode()/pdm_channel_config(), which a standard
  * dmic consumer has no reason to call, did that. Fixed by decoding the
- * channel map with alif_pdm_chanmap_translate() (alif_pdm_chanmap.h),
- * replacing (not OR-ing) the channel-enable field, and applying the
- * bench-proven STANDARD_VOICE_512 clock mode + per-channel defaults as
- * part of configure() itself. Reapply this divergence if the file is ever
- * re-synced from the fork.
+ * channel map with alif_pdm_chanmap_translate() (alif_pdm_chanmap.h,
+ * which also rejects a duplicate/out-of-order map the ISR cannot honour),
+ * replacing (not OR-ing) the channel-enable field, validating the
+ * requested pcm_rate + the caller's io clock window against a
+ * HWRM/DFP-grounded mode table, and applying per-channel defaults in
+ * configure() -- deferring the actual PDM_MODE write to
+ * DMIC_TRIGGER_START (see divergence (4)).
+ *
+ * Round 1 of #2133 shipped this divergence with PDM_MODE_STANDARD_VOICE_512
+ * mis-keyed to 16000 Hz; HWRM Table 15-118 and bench evidence
+ * (PDM_CONFIG_REGISTER read back 0x00010033 on e1m-aen-evk-03) both show
+ * mode 1 is 512 kHz clk / decimation 64 / 8 kHz Fs. The table now keys mode
+ * 1 to 8000 Hz and adds mode 4 (HIGH_QUALITY_1024, 1024 kHz clk / decimation
+ * 64 -- the SAME ratio as mode 1) for 16000 Hz; the FIR reuse across modes
+ * 1-9 is grounded in the Alif reference's own driver test (sdk-alif
+ * tests/drivers/pdm/src/alif_test_pdm.c), but mode 4 itself is a hypothesis
+ * pending its own silicon bench run -- see pdm_clock_modes' comment.
+ * Reapply this divergence if the file is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (4) ----------------------
+ * Three more issue #2133 round-2 findings, all in the same configure/
+ * trigger path:
+ *  - HWRM 15.7.5.3.1 warns against back-to-back PDM_CTL0
+ *    (PDM_CONFIG_REGISTER) writes with no APB transactions between them;
+ *    the channel-enable write in configure() followed by the clock-mode
+ *    write (now in DMIC_TRIGGER_START) had only the per-channel-defaults
+ *    loop's writes to OTHER registers between them, and a second
+ *    dmic_configure() call has even less. pdm_ctl0_write_spacer() (>= 4
+ *    dummy reads of a harmless read-only register) now runs before every
+ *    PDM_CONFIG_REGISTER write.
+ *  - configure() used to write the clock-mode field itself, so the block
+ *    started sampling (and clocking PDM_C0/PDM_C2) the moment configure()
+ *    returned, and DMIC_TRIGGER_STOP never wrote MICROPHONE_SLEEP back --
+ *    the mics stayed clocked forever after alp_audio_in_stop()/close().
+ *    The resolved mode is now stored in pdm_data and written on
+ *    DMIC_TRIGGER_START only; STOP and a PM_DEVICE_ACTION_SUSPEND both
+ *    write MICROPHONE_SLEEP back.
+ *  - HWRM 15.7.5.3.5: PDM_ERROR_IRQ/PDM_WARN_IRQ are edge-triggered,
+ *    sticky, clear-on-read. Because the block starts sampling the instant
+ *    the mode write leaves MICROPHONE_SLEEP, and the 4-bit FIFO count
+ *    field overflows in ~1.9 ms at 8 kHz, a few ms of scheduling/printf
+ *    delay before enable_interrupt() could latch an already-serviced
+ *    overflow -- enable_interrupt()'s own write would then have
+ *    pdm_error_handler() silently clear the overflow-enable bit for the
+ *    rest of the session (a REAL later overflow then goes unreported),
+ *    with block 0 starting with stale pre-START samples followed by a
+ *    gap. DMIC_TRIGGER_START now writes the mode, THEN read-clears both
+ *    sticky status registers and pulses FIFO_CLR, THEN enables
+ *    interrupts -- clearing has to follow the mode write (nothing to
+ *    clear before the block is sampling) and precede enable_interrupt()
+ *    (so its own write can't latch stale status).
+ * Reapply this divergence if the file is ever re-synced from the fork.
  * -------------------------------------------------------------------------
  */
 
@@ -109,6 +157,11 @@ struct pdm_data {
 	uint32_t record_data;
 	uint32_t bytes_got;
 	uint8_t bypass_iir_filter;
+	/* PDM_MODE resolved by dmic_alif_pdm_configure() but only WRITTEN by
+	 * DMIC_TRIGGER_START/STOP (issue #2133 round 2 divergence (4)) -- see
+	 * the file header for why configure() itself must not start the
+	 * clock. */
+	uint8_t clk_mode;
 	void *queue_data[MAX_QUEUE_LEN];
 	uint16_t data[MAX_NUM_CHANNELS * MAX_DATA_ITEMS];
 };
@@ -133,36 +186,80 @@ struct pdm_config {
 	clock_control_subsys_t clkid;
 };
 
-/* Bench-proven pcm_rate -> PDM clock-mode table (issue #2133).
- * STANDARD_VOICE_512 @ 16 kHz is the ONLY entry: its FIR/gain/phase/
- * peak-detect defaults (pdm_default_fir_voice512 and the PDM_DEFAULT_CH_*
- * constants below) are copied VERBATIM from the Alif reference dmic app
- * (sdk-alif samples/drivers/audio/dmic_alif, via
- * examples/aen/aen-pdm-mic-alif) and confirmed live on E1M-AEN803 silicon
- * (docs/test-plan.md: "Live varying PCM captured"). Do not add another rate
- * here without an equally-sourced, bench-verified coefficient set -- see
- * the securing-the-alp-sdk-position no-invented-register-values rule; a
- * pcm_rate with no matching mode is rejected by configure() rather than
- * silently left in MICROPHONE_SLEEP.
+/* pcm_rate -> PDM clock-mode table (issue #2133). Each entry's PDM bit-clock
+ * frequency is HWRM Table 15-118 (mode -> clock divisor -> decimation ->
+ * Fs); the Alif DFP's ARM_PDM_MODE_* names (Driver_PDM.h) agree: mode 1 is
+ * *_8K_DECM_64, mode 4 is *_16K_DECM_64. Do not add a rate here without a
+ * citable HWRM/DFP source -- see securing-the-alp-sdk-position. HWRM is
+ * NDA'd: cite section/table numbers only, never a filesystem path, never
+ * copy its tables wholesale into this repo.
+ *
+ * pdm_clock_mode_for_rate() also returns pdm_clk_hz so configure() can
+ * reject a mode whose PDM bit clock falls outside the caller's declared
+ * mic-clock window (dmic_cfg.io) -- previously read by nothing.
  */
 struct pdm_clock_mode_entry {
 	uint32_t pcm_rate_hz;
 	uint8_t mode;
+	uint32_t pdm_clk_hz;
 };
 
 static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
-	{ 16000U, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ },
+	/* Mode 1 (STANDARD_VOICE_512): 512 kHz clk, decimation 64 -> 8 kHz Fs
+	 * (HWRM Table 15-118). BENCH-PROVEN on e1m-aen-evk-03 (issue #2133
+	 * round 2): PDM_CONFIG_REGISTER read back 0x00010033, the FIFO count
+	 * moved, and every read returned a full block with rc=0.
+	 */
+	{ 8000U, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ, 512000U },
+	/* Mode 4 (HIGH_QUALITY_1024): 1024 kHz clk, decimation 64 -- the SAME
+	 * ratio as the proven mode 1 -- -> 16 kHz Fs (HWRM Table 15-118).
+	 * Also the only 16 kHz mode whose clock sits inside BOTH callers' io
+	 * windows (backend 1.0-3.5 MHz, example 1.024-4.096 MHz after this
+	 * round widened their minimums); mode 2's 512 kHz clock is below
+	 * both minimums and its decimation (32) differs from the proven
+	 * ratio, so it is not used here.
+	 *
+	 * The FIR operates on the DECIMATED stream, so the same decimation
+	 * ratio (64) as the proven mode 1 means pdm_default_fir_voice512 is
+	 * EXPECTED to apply unchanged -- and Alif's own driver test applies
+	 * the identical per-channel FIR tables across every mode 1-9 with no
+	 * FIR switch (sdk-alif tests/drivers/pdm/src/alif_test_pdm.c, FIR
+	 * tables + mode select). That makes the reuse VENDOR-SOURCED, but
+	 * this entry is still a HYPOTHESIS, NOT YET BENCH-VERIFIED on
+	 * silicon -- confirm before trusting it (issue #2133 round 2).
+	 * Expected if correct: 1600-frame blocks 100 ms apart, measured rate
+	 * within +/-5% of 16000, PDM_CONFIG_REGISTER = 0x00040033.
+	 */
+	{ 16000U, PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ, 1024000U },
 };
 
-static int pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out)
+static int pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out,
+				    uint32_t *pdm_clk_hz_out)
 {
 	for (size_t i = 0; i < ARRAY_SIZE(pdm_clock_modes); i++) {
 		if (pdm_clock_modes[i].pcm_rate_hz == pcm_rate_hz) {
 			*mode_out = pdm_clock_modes[i].mode;
+			*pdm_clk_hz_out = pdm_clock_modes[i].pdm_clk_hz;
 			return 0;
 		}
 	}
 	return -EINVAL;
+}
+
+/* HWRM 15.7.5.3.1: avoid consecutive PDM_CTL0 (this driver's
+ * PDM_CONFIG_REGISTER) writes without at least ~4 APB transactions between
+ * them (issue #2133 round 2 divergence (4)). Every PDM_CONFIG_REGISTER
+ * writer calls this immediately before its sys_write32(). Reading the
+ * (read-only) FIFO status register is a harmless APB transaction that
+ * cannot itself disturb PDM_CTL0 state.
+ */
+static void pdm_ctl0_write_spacer(const struct device *dev)
+{
+	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+
+	for (int i = 0; i < 4; i++) {
+		(void)sys_read32(reg_base + PDM_FIFO_STATUS_REGISTER);
+	}
 }
 
 /* Per-channel FIR decimation-filter coefficients for STANDARD_VOICE_512 --
@@ -214,6 +311,7 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
 	uint8_t hw_chan_mask;
 	uint8_t clk_mode;
+	uint32_t pdm_clk_hz;
 	int rc;
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
@@ -233,7 +331,8 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	/* Decode the STANDARD Zephyr channel-map encoding (issue #2133)
 	 * instead of reading req_chan_map_lo's low byte as if it were
 	 * already the hardware bitmask -- see alif_pdm_chanmap.h for the
-	 * pdm-controller -> HW-channel grounding.
+	 * pdm-controller -> HW-channel grounding, and for why a duplicate/
+	 * out-of-order map is also rejected here.
 	 */
 	rc = alif_pdm_chanmap_translate(config->channel.req_chan_map_lo,
 					 config->channel.req_chan_map_hi,
@@ -243,20 +342,41 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 		return rc;
 	}
 
-	/* Reject a pcm_rate with no bench-verified clock mode rather than
-	 * leave the block silently asleep (issue #2133).
+	/* Reject a pcm_rate with no bench/vendor-grounded clock mode rather
+	 * than leave the block silently asleep (issue #2133).
 	 */
-	rc = pdm_clock_mode_for_rate(config->streams[0].pcm_rate, &clk_mode);
+	rc = pdm_clock_mode_for_rate(config->streams[0].pcm_rate, &clk_mode, &pdm_clk_hz);
 	if (rc != 0) {
 		LOG_DBG("config invalid: no PDM clock mode for pcm_rate=%u\n",
 			config->streams[0].pcm_rate);
 		return rc;
 	}
 
+	/* Reject a mode whose PDM bit clock falls outside the caller's
+	 * declared mic-clock window -- config->io used to be read by nothing
+	 * in this driver (issue #2133 round 2).
+	 */
+	if (pdm_clk_hz < config->io.min_pdm_clk_freq || pdm_clk_hz > config->io.max_pdm_clk_freq) {
+		LOG_DBG("config invalid: PDM clock %u Hz for pcm_rate=%u outside io [%u,%u]\n",
+			pdm_clk_hz, config->streams[0].pcm_rate, config->io.min_pdm_clk_freq,
+			config->io.max_pdm_clk_freq);
+		return -EINVAL;
+	}
+
 	if (pdata) {
 		pdata->mem_slab = config->streams[0].mem_slab;
 		pdata->block_size = config->streams[0].block_size;
 		pdata->channel_map = hw_chan_mask;
+		/* Resolved but NOT written here -- DMIC_TRIGGER_START writes
+		 * it (issue #2133 round 2 divergence (4)): a configure() that
+		 * starts the clock itself leaves the mics clocked from the
+		 * moment the app calls dmic_configure(), long before
+		 * dmic_trigger(START), and DMIC_TRIGGER_STOP had nothing to
+		 * put back to sleep.
+		 */
+		pdata->clk_mode = clk_mode;
+
+		pdm_ctl0_write_spacer(dev);
 
 		/* Replace the channel-enable field rather than OR into
 		 * whatever the register already held -- a previous
@@ -271,13 +391,12 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 
 		pdata->num_channels = config->channel.req_num_chan;
 
-		/* Standard dmic_configure()/dmic_trigger(START) contract:
-		 * prime every enabled channel's FIR/IIR/gain/phase/
-		 * peak-detect defaults, THEN select a real clock mode --
-		 * without this the block stays in MICROPHONE_SLEEP and the
-		 * FIFO never fills, even though configure() and trigger()
-		 * both return 0 (issue #2133). Same order as the
-		 * bench-proven examples/aen/aen-pdm-mic-alif.
+		/* Standard dmic_configure() contract: prime every enabled
+		 * channel's FIR/IIR/gain/phase/peak-detect defaults here so
+		 * DMIC_TRIGGER_START's clock-mode write (which is what
+		 * actually starts sampling) lands on an already-configured
+		 * channel bank. Same values as the bench-proven
+		 * examples/aen/aen-pdm-mic-alif used to set by hand.
 		 * pdm_channel_config()/pdm_mode() stay public so an app can
 		 * still override these afterward.
 		 */
@@ -286,7 +405,6 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 				pdm_apply_channel_defaults(dev, hw_ch);
 			}
 		}
-		pdm_mode(dev, clk_mode);
 
 		LOG_DBG("block size: %d\n", pdata->block_size);
 	}
@@ -423,6 +541,10 @@ void pdm_mode(const struct device *dev, uint8_t mode)
 	reg_val &= ~PDM_CLK_MODE_MASK;
 	reg_val |= ((uint32_t)mode << PDM_CLK_MODE) & PDM_CLK_MODE_MASK;
 
+	/* HWRM 15.7.5.3.1: space this PDM_CTL0 write from whatever wrote it
+	 * last (issue #2133 round 2 divergence (4)) -- e.g. the channel-enable
+	 * write dmic_alif_pdm_configure() just made. */
+	pdm_ctl0_write_spacer(dev);
 	sys_write32(reg_val, reg_base + PDM_CONFIG_REGISTER);
 }
 
@@ -479,6 +601,14 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 	switch (cmd) {
 	case DMIC_TRIGGER_STOP:
 		disable_interrupt(dev);
+
+		/* Return the clock to MICROPHONE_SLEEP (issue #2133 round 2
+		 * divergence (4)) -- configure() no longer writes PDM_MODE, so
+		 * without this PDM_C0/PDM_C2 would keep clocking the mics
+		 * forever after alp_audio_in_stop()/close().
+		 */
+		pdm_mode(dev, PDM_MODE_MICROPHONE_SLEEP);
+
 		pdata->record_data = 0;
 
 		/* Free in-progress buffer to prevent slab leak */
@@ -502,6 +632,49 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 		pdata->buf_index = 0;
 		pdata->data_buffer = NULL;
 		pdata->slab_missed = 0;
+
+		/* Order is load-bearing (issue #2133 round 2 divergence (4)):
+		 * the mode write is what actually starts the block sampling,
+		 * so clearing sticky status/FIFO before it would clear
+		 * nothing useful; enabling interrupts before clearing risks
+		 * enable_interrupt()'s own write latching an
+		 * already-serviced overflow. Mode -> clear -> enable.
+		 */
+		pdm_mode(dev, pdata->clk_mode);
+
+		{
+			uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+			uint32_t reg_val;
+
+			/* HWRM 15.7.5.3.5: PDM_ERROR_IRQ (0x10) and
+			 * PDM_WARN_IRQ (0x14) are edge-triggered, sticky,
+			 * clear-on-read. The 4-bit FIFO count field overflows
+			 * in ~1.9 ms at 8 kHz, comfortably inside the
+			 * mode-write-to-here window, so read-clear both
+			 * before the first enable_interrupt() of this
+			 * session -- otherwise that write would latch an
+			 * already-serviced overflow and pdm_error_handler()
+			 * would silently clear the overflow-enable bit for
+			 * the rest of the session (a REAL later overflow
+			 * then goes unreported).
+			 */
+			(void)sys_read32(reg_base + PDM_ERROR_IRQ);
+			(void)sys_read32(reg_base + PDM_WARN_IRQ);
+
+			/* Pulse FIFO_CLR (PDM_CONFIG_REGISTER bit 31) to drop
+			 * whatever arrived in that same window, so block 0
+			 * doesn't start with stale pre-clear samples followed
+			 * by a gap. Read-modify-write so the channel-enable/
+			 * mode bits this same register holds are preserved;
+			 * write the un-set value back afterward regardless of
+			 * whether FIFO_CLR is self-clearing in hardware.
+			 */
+			reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+			pdm_ctl0_write_spacer(dev);
+			sys_write32(reg_val | PDM_FIFO_CLEAR, reg_base + PDM_CONFIG_REGISTER);
+			pdm_ctl0_write_spacer(dev);
+			sys_write32(reg_val, reg_base + PDM_CONFIG_REGISTER);
+		}
 
 		enable_interrupt(dev);
 		break;
@@ -893,7 +1066,14 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		return pdm_initialize(dev);
 
 	case PM_DEVICE_ACTION_SUSPEND:
-		/* Save state and prepare for power down */
+		/* Force the clock back to MICROPHONE_SLEEP (issue #2133
+		 * round 2 divergence (4)) -- a suspend while still actively
+		 * sampling (app skipped DMIC_TRIGGER_STOP) must not leave
+		 * PDM_C0/PDM_C2 clocking the mics through a power-down.
+		 */
+		pdm_mode(dev, PDM_MODE_MICROPHONE_SLEEP);
+		return 0;
+
 	case PM_DEVICE_ACTION_TURN_OFF:
 	case PM_DEVICE_ACTION_TURN_ON:
 		/* Power domain handling is automatic via PM framework */

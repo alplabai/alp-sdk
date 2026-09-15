@@ -20,22 +20,38 @@
  *
  * hw_channel = (pdm_controller * 2) + lr
  *
- * Grounded two ways, not guessed:
+ * Grounded three ways, not guessed:
  *   1. The register map itself: PDM_CH0_CH1_AUDIO_OUT, PDM_CH2_CH3_AUDIO_OUT,
  *      PDM_CH4_CH5_AUDIO_OUT, PDM_CH6_CH7_AUDIO_OUT (alif_pdm_reg.h) each pack
  *      TWO hw channels per register -- one PDM controller's stereo (L/R)
  *      output per register, in controller order. That is exactly *2 spacing.
- *   2. The bench-proven examples/aen/aen-pdm-mic-alif, verified on
- *      E1M-AEN803 silicon (docs/test-plan.md: "Live varying PCM captured"):
- *      the E1M-AEN801 SoM routes PDM_C0/D0 to pdm controller 0 and PDM_C2/D2
- *      to pdm controller 2 (metadata/e1m_modules/aen/from-alif.tsv, see the
- *      board overlay), and the working raw bitmask enables HW channels 0,1
- *      for that first pair and 4,5 for the second -- (0*2,0*2+1) and
- *      (2*2,2*2+1). Controller 1 (unused on this SoM) would span HW 2,3.
+ *   2. HWRM 15.7.4.3.1: within one PDM controller's stereo pair, the EVEN
+ *      hw channel samples on the RISING clock edge and the ODD one on the
+ *      FALLING edge -- i.e. hw_channel's low bit IS the L/R edge selector,
+ *      matching `lr` bit-for-bit (PDM_CHAN_LEFT=0/even=rising,
+ *      PDM_CHAN_RIGHT=1/odd=falling).
+ *   3. The bench-proven examples/aen/aen-pdm-mic-alif, verified on
+ *      E1M-AEN803 silicon (docs/test-plan.md: "Live varying PCM captured"),
+ *      and confirmed against `PDM_CONFIG_REGISTER` read back as
+ *      `0x00010033` on `e1m-aen-evk-03` (issue #2133 round 2 -- channels
+ *      0,1,4,5 enabled, mode 0x1): the E1M-AEN801 SoM routes PDM_C0/D0 to
+ *      pdm controller 0 and PDM_C2/D2 to pdm controller 2
+ *      (metadata/e1m_modules/aen/from-alif.tsv, see the board overlay), and
+ *      the working raw bitmask enables HW channels 0,1 for that first pair
+ *      and 4,5 for the second -- (0*2,0*2+1) and (2*2,2*2+1). Controller 1
+ *      (unused on this SoM) would span HW 2,3.
  *
  * Up to ALIF_PDM_MAX_CONTROLLERS (4) PDM controllers x 2 (L/R) = the 8 HW
  * channels MAX_NUM_CHANNELS names -- a pdm index at or above that cannot be
  * expressed by this register and is rejected, never silently truncated.
+ *
+ * The translation also rejects a map this driver's ISR cannot honour
+ * (issue #2133 round 2): `alif_pdm_warning_isr()` always de-interleaves the
+ * FIFO in ASCENDING hw-channel order regardless of the requested logical
+ * order, so a duplicate hw channel (two logical channels naming the same
+ * (pdm, lr) pair) or an out-of-order map (a later logical channel naming a
+ * LOWER hw channel than an earlier one) would silently corrupt or swap
+ * captured channels rather than fail. Both are rejected with -EINVAL.
  */
 #ifndef ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_CHANMAP_H_
 #define ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_CHANMAP_H_
@@ -61,16 +77,20 @@
  *                     success. Left untouched on failure.
  *
  * @return 0 on success. -EINVAL if @p req_num_chan is 0 or exceeds
- *         MAX_NUM_CHANNELS (8), or any requested logical channel names a PDM
- *         controller this hardware cannot express
- *         (>= ALIF_PDM_MAX_CONTROLLERS) -- callers MUST fail the configure
- *         call rather than fall back to a partial/best-effort mask.
+ *         MAX_NUM_CHANNELS (8); if any requested logical channel names a PDM
+ *         controller this hardware cannot express (>= ALIF_PDM_MAX_CONTROLLERS);
+ *         or if the map has a duplicate hw channel, or a later logical
+ *         channel names a hw channel that is not strictly greater than an
+ *         earlier one -- see the file header for why the ISR requires
+ *         ascending order. Callers MUST fail the configure call rather than
+ *         fall back to a partial/best-effort mask.
  */
 static inline int alif_pdm_chanmap_translate(uint32_t chan_map_lo, uint32_t chan_map_hi,
 					      uint8_t req_num_chan, uint8_t *mask_out)
 {
 	uint8_t mask = 0;
 	uint8_t ch;
+	int prev_hw_ch = -1;
 
 	if (req_num_chan == 0 || req_num_chan > 8) {
 		return -EINVAL;
@@ -79,12 +99,25 @@ static inline int alif_pdm_chanmap_translate(uint32_t chan_map_lo, uint32_t chan
 	for (ch = 0; ch < req_num_chan; ch++) {
 		uint8_t pdm;
 		enum pdm_lr lr;
+		uint8_t hw_ch;
 
 		dmic_parse_channel_map(chan_map_lo, chan_map_hi, ch, &pdm, &lr);
 		if (pdm >= ALIF_PDM_MAX_CONTROLLERS) {
 			return -EINVAL;
 		}
-		mask |= (uint8_t)(1U << ((pdm * 2U) + (uint8_t)lr));
+		hw_ch = (uint8_t)((pdm * 2U) + (uint8_t)lr);
+
+		/* Duplicate (hw_ch == prev_hw_ch) and out-of-order
+		 * (hw_ch < prev_hw_ch) are the same check: the hw channel
+		 * named by each successive logical channel must strictly
+		 * increase.
+		 */
+		if ((int)hw_ch <= prev_hw_ch) {
+			return -EINVAL;
+		}
+		prev_hw_ch = (int)hw_ch;
+
+		mask |= (uint8_t)(1U << hw_ch);
 	}
 
 	*mask_out = mask;

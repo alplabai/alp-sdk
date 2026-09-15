@@ -14,16 +14,23 @@ extern "C" {
 
 #define PDM_MAX_FIR_COEFFICIENT 18
 
-#define PDM_MODE_MICROPHONE_SLEEP                  0x00UL
-#define PDM_MODE_STANDARD_VOICE_512_CLK_FRQ        0x01UL
-#define PDM_MODE_HIGH_QUALITY_512_CLK_FRQ          0x02UL
-#define PDM_MODE_HIGH_QUALITY_768_CLK_FRQ          0x03UL
-#define PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ         0x04UL
-#define PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ 0x05UL
-#define PDM_MODE_FULL_BANDWIDTH_AUDIO_2400_CLK_FRQ 0x06UL
-#define PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ 0x07UL
-#define PDM_MODE_ULTRASOUND_4800_CLOCK_FRQ         0x08UL
-#define PDM_MODE_ULTRASOUND_96_SAMPLING_RATE       0x09UL
+/* These names encode only the PDM bit clock, NOT the resulting sample rate
+ * (issue #2133 round 2 -- PDM_MODE_STANDARD_VOICE_512_CLK_FRQ was assumed to
+ * mean "16 kHz" from its name alone and shipped that way; it is actually
+ * 8 kHz). Fs = clock / decimation. Grounded per-mode below (HWRM Table
+ * 15-118); modes without a comment have not been checked against that table
+ * in this repo yet -- don't assume the name states the rate.
+ */
+#define PDM_MODE_MICROPHONE_SLEEP           0x00UL /* 128 kHz clk; sampling disabled */
+#define PDM_MODE_STANDARD_VOICE_512_CLK_FRQ 0x01UL /* 512 kHz clk, decim 64 -> 8 kHz Fs */
+#define PDM_MODE_HIGH_QUALITY_512_CLK_FRQ   0x02UL /* 512 kHz clk, decim 32 -> 16 kHz Fs */
+#define PDM_MODE_HIGH_QUALITY_768_CLK_FRQ   0x03UL /* 768 kHz clk, decim 48 -> 16 kHz Fs */
+#define PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ  0x04UL /* 1024 kHz clk, decim 64 -> 16 kHz Fs */
+#define PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ 0x05UL /* 1536 kHz clk; Fs/decim not yet grounded here */
+#define PDM_MODE_FULL_BANDWIDTH_AUDIO_2400_CLK_FRQ 0x06UL /* 2400 kHz clk; Fs/decim not yet grounded here */
+#define PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ 0x07UL /* 3071 kHz clk; Fs/decim not yet grounded here */
+#define PDM_MODE_ULTRASOUND_4800_CLOCK_FRQ         0x08UL /* 4800 kHz clk; Fs/decim not yet grounded here */
+#define PDM_MODE_ULTRASOUND_96_SAMPLING_RATE       0x09UL /* 4800 kHz clk, decim 25 -> 192 kHz Fs; the "96" names the bandwidth, not Fs */
 
 /* PDM channels */
 #define PDM_AUDIO_CHANNEL_0 (0x00)
