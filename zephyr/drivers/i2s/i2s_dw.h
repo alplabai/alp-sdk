@@ -379,6 +379,22 @@ __STATIC_INLINE void i2s_clock_disable(const struct i2s_dw_cfg *i2s)
 }
 
 /**
+ * \brief             Query I2S Clock Enable state in Master Mode
+ * \param[in]   i2s   Pointer to I2S resources
+ * \return            true if CER.CLKEN is set
+ *
+ * alp-sdk issue #2149: used by tx_stream_start()'s restart-glitch guard --
+ * i2s_configure_clock() (CCR) below is documented "Should be called with
+ * Clock disabled", so a restart that finds the clock already running (the
+ * underrun ISR path now keeps CER.CLKEN set on purpose) must skip that
+ * write instead of reprogramming CCR live.
+ */
+__STATIC_INLINE bool i2s_clock_is_enabled(const struct i2s_dw_cfg *i2s)
+{
+	return (i2s->paddr->CER & I2S_CER_CLKEN_Msk) != 0;
+}
+
+/**
  * \brief             Control I2S Configure WSS and SCLKG in Master Mode.
  *                    Should be called with Clock disabled.
  * \param[in]   i2s   Pointer to I2S resources
