@@ -69,13 +69,14 @@ struct queue_item {
 	size_t size;
 };
 
-static struct queue_item  tx_ring[TX_RING_CAP];
-static size_t             tx_head;
-static size_t             tx_len;
-static bool               tx_running;
-static struct k_mem_slab *tx_mem_slab;
-static int                forced_start_errno;
-static unsigned int       forced_start_remaining;
+static struct queue_item     tx_ring[TX_RING_CAP];
+static size_t                tx_head;
+static size_t                tx_len;
+static bool                  tx_running;
+static struct k_mem_slab    *tx_mem_slab;
+static int                   forced_start_errno;
+static unsigned int          forced_start_remaining;
+static fake_i2s_write_hook_t write_hook;
 
 void fake_i2s_reset(void)
 {
@@ -85,11 +86,17 @@ void fake_i2s_reset(void)
 	tx_mem_slab            = NULL;
 	forced_start_errno     = 0;
 	forced_start_remaining = 0;
+	write_hook             = NULL;
 }
 
 bool fake_i2s_tx_running(void)
 {
 	return tx_running;
+}
+
+void fake_i2s_set_write_hook(fake_i2s_write_hook_t hook)
+{
+	write_hook = hook;
 }
 
 size_t fake_i2s_tx_queue_depth(void)
@@ -203,6 +210,15 @@ static int fake_i2s_write(const struct device *dev, void *mem_block, size_t size
 		.size  = size,
 	};
 	tx_len++;
+
+	if (write_hook != NULL) {
+		/* One-shot: clear before calling so a hook that itself calls
+		 * back into a write() (it shouldn't, but stay safe) doesn't
+		 * recurse. See fake_i2s.h's comment for what this reproduces. */
+		fake_i2s_write_hook_t hook = write_hook;
+		write_hook                 = NULL;
+		hook();
+	}
 	return 0;
 }
 

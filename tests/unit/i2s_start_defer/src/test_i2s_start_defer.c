@@ -12,7 +12,11 @@
  * retry DROPped it (MAJOR-1), and must not leave tx_pending_start stuck
  * true past a successful start() (MAJOR-2, tx_started => !tx_pending_
  * start enforced by construction -- see _mark_tx_started()'s comment in
- * the backend).
+ * the backend); and (review round 4) a concurrent write()-vs-stop() race
+ * must not resurrect the original -ENOMEM symptom via a stale
+ * tx_block_queued -- reproduced single-threaded via
+ * fake_i2s_set_write_hook(), see test_start_write_stop_race_stale_flag_
+ * recovers below.
  *
  * fake_i2s.c models the real i2s_dw.c state machine closely enough to
  * catch all of the above: unlike tests/unit/i2s_write_bounds' always-
@@ -413,6 +417,71 @@ ZTEST(alp_i2s_start_defer, test_explicit_restart_after_failed_retry_ends_up_runn
 	zassert_false(running_after_start2);
 	zassert_equal(write2_rc, ALP_OK, "write into what must become a running stream must not fail");
 	zassert_true(running_after_write2);
+}
+
+/* issue #2132 review round 4: the start/write-vs-stop race the round-3
+ * fix's own lock comment flagged as still open. Single-threaded repro via
+ * fake_i2s_set_write_hook() (see its own comment) -- the hook runs
+ * synchronously from INSIDE the real i2s_write() call z_write() makes,
+ * before z_write() ever reaches its own lock acquisition, so calling
+ * alp_i2s_stop() from the hook deterministically reproduces "a concurrent
+ * stop() wins the race and DROPs this write's block before this write()
+ * records tx_block_queued=true":
+ *
+ *   1. start() defers (ring empty).
+ *   2. write() queues its block for real, then (via the hook, standing in
+ *      for a second thread) stop() runs to completion FIRST: it sees
+ *      tx_started still false, DROPs the block THIS write just queued,
+ *      and clears all three flags.
+ *   3. write()'s OWN code, only now reaching its lock acquisition, stamps
+ *      tx_block_queued = true over what is -- for real -- an empty ring,
+ *      and (since tx_pending_start is now false, cleared by the hook's
+ *      stop()) returns ALP_OK without ever noticing.
+ *   4. The next start() sees the STALE tx_block_queued = true and takes
+ *      the immediate-trigger path straight into i2s_dw's real empty-ring
+ *      -ENOMEM -- the original #2132 symptom, reappearing via a race.
+ *
+ * z_start()'s NOMEM-as-stale-flag handling is what must catch step 4 and
+ * recover instead of propagating it. */
+static alp_i2s_t *race_handle;
+
+static void race_stop_hook(void)
+{
+	(void)alp_i2s_stop(race_handle);
+}
+
+ZTEST(alp_i2s_start_defer, test_start_write_stop_race_stale_flag_recovers)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+	race_handle  = h;
+
+	alp_status_t start1_rc = alp_i2s_start(h);
+	fake_i2s_set_write_hook(race_stop_hook);
+	alp_status_t write1_rc            = write_block(h); /* races the hook mid-call */
+	bool         running_after_write1 = fake_i2s_tx_running();
+
+	/* Pre-fix: this returned ALP_ERR_NOMEM here -- the -7 symptom via a
+	 * race, on a codebase where the single-threaded tests all pass. */
+	alp_status_t start2_rc            = alp_i2s_start(h);
+	bool         running_after_start2 = fake_i2s_tx_running();
+	alp_status_t write2_rc            = write_block(h);
+	bool         running_after_write2 = fake_i2s_tx_running();
+
+	alp_i2s_close(h);
+	fake_i2s_set_write_hook(NULL);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start1_rc, ALP_OK);
+	zassert_equal(write1_rc, ALP_OK, "the write itself queued fine before the race hit");
+	zassert_false(running_after_write1, "the raced-in stop() must have DROPped it for real");
+	zassert_equal(start2_rc,
+	              ALP_OK,
+	              "a stale tx_block_queued must not surface i2s_dw's empty-ring -ENOMEM to "
+	              "the caller");
+	zassert_false(running_after_start2, "recovery re-defers -- nothing is queued yet");
+	zassert_equal(write2_rc, ALP_OK);
+	zassert_true(running_after_write2, "a normal write after the recovery must reach RUNNING");
 }
 
 /* RX must be unaffected by any of the above: rx_stream_start() allocates
