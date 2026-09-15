@@ -384,6 +384,34 @@ def test_place_with_swd_but_no_seuart_resolves_successfully(tmp_path: Path) -> N
 
 
 @_NEEDS_BASH
+def test_place_with_seuart_but_no_swd_still_refuses(tmp_path: Path) -> None:
+    """The mirror image of test_place_with_swd_but_no_seuart_resolves_successfully
+    above: 'seuart' is optional, but 'swd' must never become optional the
+    same way. No real AEN place actually lacks 'swd' (that is exactly the
+    wrong-board hazard #2032/#2064 exist to prevent), so unlike
+    REAL_EVK02_UNACQUIRED this fixture is not a real capture -- it is
+    REAL_EVK01_ACQUIRED_BY_US with every 'swd' trace mechanically stripped:
+    the 'NetworkUSBDebugger/swd' lines in `matches:`/`acquired resources:`,
+    and the entire "Acquired resource 'swd' (...): {...}" block at the end
+    (removed by truncating before its header, since swd is the LAST resource
+    block in the real capture and the block's own body lines don't contain
+    the substring 'swd'). 'seuart' and 'console' are left resolvable, so a
+    place that HAS everything except 'swd' must still refuse -- with no
+    probe there must be no run. Confirmed red (this test fails) with the
+    'swd' check in bench-env.sh temporarily relaxed the same way 'seuart'
+    was relaxed, and green again with the check restored."""
+    acquired_no_swd = "".join(
+        line
+        for line in REAL_EVK01_ACQUIRED_BY_US.split("Acquired resource 'swd'")[0].splitlines(keepends=True)
+        if "NetworkUSBDebugger/swd" not in line
+    )
+    res = _resolve(tmp_path, "test-place-01", {"test-place-01": acquired_no_swd})
+    assert res.returncode == 1, res.stdout
+    assert "exports no 'swd' resource path" in res.stderr
+    assert "LG_SWD_PATH=" not in res.stdout
+
+
+@_NEEDS_BASH
 def test_swd_path_is_scoped_to_its_own_resource_block(tmp_path: Path) -> None:
     """board-farm/bin/jlink-run.sh:34-50's own hazard: the top-level
     `matches:` list repeats the same resource strings, so a naive whole-output

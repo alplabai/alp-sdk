@@ -100,15 +100,17 @@ command dispatcher — see
 [`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (`transport_spi.c` /
 `transport_sdio.c`).
 
-### Current rev: hardware-CS SPI (SS0 + per-phase READY)
+### Current rev: hardware-CS SPI (SS0; optional READY)
 
 The current E1M-AEN board rev runs the inter-chip SPI as a **proper
 hardware-framed link**: SCLK/MOSI/MISO **plus a peripheral-driven
 chip-select** — Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  The
 Alif dwc-ssi master asserts/deasserts **SS0 per transfer**, so every
-transaction is HW-framed by a real CS edge, and each of the four phases
-(request header → request payload → reply header → reply payload) is
-gated by a per-phase READY handshake.  This is **not** a CS-less /
+transaction is HW-framed by a real CS edge; each of the four phases
+(request header → request payload → reply header → reply payload) also
+runs a fixed inter-phase settle, OPTIONALLY extended by a host-IRQ READY
+read when a board wires one in (unwired, and READY is left NULL, by
+default — see "Bench-validated" below).  This is **not** a CS-less /
 clock-count scheme and **not** a GPIO bodge — the CS is the SPI
 peripheral's own slave-select.  Validated on silicon 2026-06-24 (E1M-AEN801
 EVK bench, fw v0.0.207.0).
@@ -165,8 +167,10 @@ working HW-CS transport, not a prerequisite for it.  See
 
 #### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
 
-With the hardware SS0 chip-select per transfer + per-phase READY gating,
-the link stays framed across every radio op — including the ~15 s STA
+With the hardware SS0 chip-select per transfer (READY is OPTIONAL and left
+unwired on the boards these numbers were taken on — see
+`chips/cc3501e/cc3501e_core.c`'s `cc3501e_reply_gate()` comment), the link
+stays framed across every radio op — including the ~15 s STA
 association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 (E1M-AEN801 EVK):
 
@@ -417,8 +421,28 @@ first three with the fourth has repeatedly cost bench time:
 The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
 
-Current release: SemVer **0.4.0**, wire protocol **5**, stamped **`0.4.0.0`**
-(`cc3501e-bridge-firmware:prebuilt/cc3501e-v0.4.0.bin`).
+Three states are live at once here, and conflating them is the recurring
+mistake — track which one a given bench unit is actually running:
+
+- **`cc3501e-bridge-firmware:main`** carries nine merged fixes (widened DHCP
+  lease poll, the SPI re-init that wedged the link after fast operations
+  removed, bounded/non-stale SOCK_SEND, station power-up order + a
+  WIFI_STATUS reason byte, replay-safe SOCK_RECV, sticky EOF on the worker
+  path, a connect-failure-exit SPI reinit skip, in-line SPI self-heal, and
+  the stale `DEAUTH_LEAVING(3)` verdict fix) — merged, but not yet cut as a
+  release.
+- **v0.9.0** (firmware PR #151) has been **cut** carrying all nine — wire
+  protocol **4.0**, stamped GPE **`0.254.15.0`** — but it is **not yet
+  bench-verified** and not yet published to `prebuilt/`. Do not treat it as
+  available to flash.
+- **v0.8.0** (SemVer **0.8.0**, wire protocol **4.0**
+  (`ALP_CC3501E_PROTOCOL_MAJOR` 4, `_MINOR` 0), stamped GPE **`0.254.5.0`**,
+  `cc3501e-bridge-firmware:prebuilt/cc3501e-v0.8.0.bin`) is what `prebuilt/`
+  actually publishes today, and it carries **none** of the nine fixes.
+
+Every bench unit still flashed from `prebuilt/` is on v0.8.0, so host-side
+workarounds for the pre-fix behaviour stay in this driver until a fixed
+build is actually released.
 
 Two rules the stamp adds, both of which read as a dead part when broken:
 
@@ -613,9 +637,12 @@ The rest of the `ALP_CC3501E_WAKE_*` bitmap is validation only. A per-source sle
 wake mask has no SDK surface: the Power driver hardwires RTC + `CSYSPWRUPREQ`, and
 `GPIO_CFG_SHUTDOWN_WAKE_*` is a per-pin *shutdown* knob, not a sleep one.
 
-READY (`GPIO17` → `P2_6`) cannot wake the device — it is an output *from* the
-CC3501E telling the host its slave is armed. After `cc3501e_power_off()` the only
-way back is `cc3501e_reset()` driving `WIFI_EN`.
+READY (CC3501E `GPIO17`) cannot wake the device — it is an output *from* the
+CC3501E telling the host its slave is armed. (Which Alif pad carries it, if
+any, is board/revision-specific — see `chips/cc3501e/cc3501e_core.c`'s
+`cc3501e_reply_gate()` comment; it is not universally `P2_6`.) After
+`cc3501e_power_off()` the only way back is `cc3501e_reset()` driving
+`WIFI_EN`.
 
 ## Peripherals not proxied today
 

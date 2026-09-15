@@ -201,10 +201,28 @@ struct cc3501e {
 	alp_spi_t  *bus;        /**< SPI1 to the CC3501E (Alif master). */
 	alp_gpio_t *enable_pin; /**< WIFI.EN (P15_5).  May be NULL on boards that tie it on. */
 	alp_gpio_t *reset_pin;  /**< E_WIFI.NRST (P15_1_FLEX). */
-	alp_gpio_t *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17 -> Alif P2_6):
-	                                *   HIGH when the SPI slave is armed+idle.  When populated,
-	                                *   cc3501e_request() waits on it before each reply phase
-	                                *   instead of a fixed settle gap.  NULL = legacy fixed gap. */
+	alp_gpio_t *ready_pin;  /**< OPTIONAL host-IRQ/READY in (CC35 GPIO17): HIGH
+	                                *   when the SPI slave is armed+idle.  READY may only ADD
+	                                *   delay, never remove it: when populated,
+	                                *   cc3501e_request() waits (bounded) for it to read HIGH
+	                                *   before each reply phase, then ALWAYS pays the same
+	                                *   fixed settle a NULL ready_pin pays with no wait at all
+	                                *   -- so a stuck-HIGH, noisy, or mis-wired pin can never
+	                                *   make a phase return sooner than NULL would.  NULL =
+	                                *   the fixed settle with no wait.  NOT Alif P2_6 on every
+	                                *   board -- see chips/cc3501e/cc3501e_core.c's
+	                                *   cc3501e_reply_gate() comment for the per-revision
+	                                *   pin-routing fact and how to opt a real wiring in.
+	                                *   LOCK-HOLD CAVEAT: this wait runs while
+	                                *   cc3501e_request() already holds the internal
+	                                *   transport lock, so a populated ready_pin can add up
+	                                *   to 250 ms of hold time per reply-phase gate.  Another
+	                                *   caller blocked on that same lock -- whose default
+	                                *   @c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS is
+	                                *   only 100 ms -- will see @ref ALP_ERR_BUSY as good as
+	                                *   certain.  "Safe to opt in" means safe for LINK TIMING
+	                                *   only (it can never clock a phase early) -- it is not
+	                                *   immunity from lock contention with other callers. */
 	/* Async-event SUBSCRIBERS (issue #1723), not one callback slot.
 	 *
 	 * This used to be a single { event_cb, event_user } pair, and the last

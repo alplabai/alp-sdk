@@ -51,10 +51,12 @@
  *
  * ==== THE r2 HOST-IRQ CAVEAT (READ BEFORE USING INTERRUPTS) ========
  *
- * This HW rev uses hardware SS0 for SPI framing and a READY input for per-phase
- * gating, but it still does not expose GPIO edge events as portable application
- * callbacks.  The Alif is always the SPI master; the CC3501E is always the
- * slave.  Without a dedicated async event delivery path, the slave cannot
+ * This HW rev uses hardware SS0 for SPI framing and an OPTIONAL READY input
+ * for per-phase gating (unwired, fw->ready_pin stays NULL, in this app --
+ * see src/cc3501e_bridge.c), but it still does not expose GPIO edge events
+ * as portable application callbacks.  The Alif is always the SPI master;
+ * the CC3501E is always the slave.  Without a dedicated async event
+ * delivery path, the slave cannot
  * spontaneously tell the master "an edge happened on a GPIO".  So:
  *
  *   - cc3501e_gpio_set_interrupt() ARMS the edge on the CC3501E's own GPIO
