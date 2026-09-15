@@ -137,7 +137,7 @@ e1m_routes:
     - { e1m: E1M_GPIO_IO20, macro: EVK_PIN_SDIO_MUX_EN,   active_low: true,
         doc: "SDIO 74LVC157 /E; drive low to enable mux." }
     - { e1m: E1M_GPIO_IO21, macro: EVK_PIN_SDIO_MUX_SEL,
-        doc: "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO. Not firmware-driven on 2626-R2 (E1M_GPIO_IO21 is dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD." }
+        doc: "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 74LV3257 rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper." }
     - { e1m: E1M_GPIO_IO22, macro: EVK_PIN_PCIE_MUX_PD,
         doc: "Drive HIGH to power down all four PCIe lane muxes." }
     - { e1m: E1M_GPIO_IO23, macro: EVK_PIN_PCIE_MUX_SEL,

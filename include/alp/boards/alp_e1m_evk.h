@@ -101,24 +101,29 @@ extern "C" {
  *   /E (active-low enable) = E1M IO20 -- both U38 and U39 share /E
  *   S  (select)            = E1M IO21
  *
- * Per the mux truth table:
+ * U38/U39 shipped as 74LVC157 on the original 2626-R2 BOM; the standard
+ * fit going forward is a 74LV3257 FET bus-switch rework.  SD, and
+ * SoC-to-amp I2S (the same-shape mux on U46, below), CAN NEVER WORK
+ * through the stock 74LVC157, on EITHER `/E` state -- not just when
+ * disabled.  Per the authoritative 2626-R2 carrier netlist, the mux's
+ * `Y` pins land on the SoC-side nets, which are the SAME physical nets
+ * the SoC's own peripheral pins are wired to (U39 `3Y` = `E1M_CLK`,
+ * `4Y` = `E1M_CMD`, `2Y` = `E1M_SDIO_RST`; U38 `1Y`..`4Y` =
+ * `E1M_D3`..`E1M_D0`).  A 74LVC157 is UNIDIRECTIONAL and always
+ * actively drives `Y`: the selected `A`/`B` input when `/E` = 0, or
+ * forced LOW when `/E` = 1.  Either way, that fights the SD host
+ * controller's own CLK/CMD output (and the SD_RST GPIO output some
+ * apps drive on `E1M_SDIO_RST`, see aen-sdcard-readout) directly on the
+ * wire -- there is no `/E` state on a 74LVC157 that avoids contention.
+ * Only the 74LV3257 rework is a genuine bidirectional switch: at
+ * `/E` = 0 it CONNECTS (does not drive) the selected side, so the
+ * SoC's own driver passes through cleanly with no contention; at
+ * `/E` = 1 it is real Hi-Z.
+ *
+ * With a 74LV3257 fitted, the truth table is:
  *   /E = 0, S = 0  ->  microSD card slot routed to SoM
  *   /E = 0, S = 1  ->  M.2 E-key SDIO routed to SoM
- *   /E = 1         ->  PART-DEPENDENT, see below -- neither state on
- *                       this pin is a universally safe default
- *
- * U38/U39 shipped as 74LVC157 on the original 2626-R2 BOM; the standard
- * fit going forward is a 74LV3257 FET bus-switch rework.  The two parts
- * behave differently when disabled, on the SAME SoC-side nets (U39
- * `3Y` = `E1M_CLK`, `4Y` = `E1M_CMD`; U38 `1Y`..`4Y` = `E1M_D3`..`E1M_D0`,
- * per the authoritative 2626-R2 carrier netlist):
- *
- *   - 74LVC157 (original BOM): /E = 1 drives those SoC-side nets LOW.
- *     That is NOT isolation -- it contends with an active SD host
- *     controller drive on the same pins and must not be treated as a
- *     safe default.
- *   - 74LV3257 (the rework, now the standard fit): /E = 1 is genuine
- *     Hi-Z on those nets.
+ *   /E = 1         ->  Hi-Z, both buses isolated
  *
  * IMPORTANT: per the user-supplied wiring + this repo's
  * metadata/e1m_modules/aen/from-cc3501e.tsv, IO20 (/E) is proxied
@@ -131,7 +136,8 @@ extern "C" {
  *
  *   - r1: IO21 IS CC3501E-proxied (GPIO_30) and firmware-drivable the
  *     same way as /E.  HAZARD: the same select net also reaches header
- *     P18 pin 1 (`+3V3`) through R198 (0 ohm) -- fitting P18's jumper
+ *     P18 pin 2 (`NetP18_2`) through R198 (0 ohm); P18's jumper, when
+ *     fitted, ties pin 1 (`+3V3`) to pin 2 -- so fitting the jumper
  *     while firmware drives IO21 LOW makes CC3501E GPIO_30 sink the
  *     +3V3 rail.  Fit the jumper or drive the pin, never both.
  *   - r2: IO21 is `dispatch: unrouted` -- it is NOT proxied at all
@@ -150,13 +156,25 @@ extern "C" {
  * defined in the generated routes header `alp_e1m_evk_routes.h`
  * (from `mux_enums:` in metadata/boards/e1m-evk.yaml, issue #637). */
 
-/* I2S0 74LVC157 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
+/* I2S0 multiplexer (TAS2563 amplifier vs M.2 E-key I2S).
  *
- * Same shape as the SDIO mux: a 74LVC157 quad 2:1 picks which
+ * Same shape as the SDIO mux above: a 2:1 mux/switch (U46) picks which
  * device drives the SoM's single I2S0 bus.  Control pins:
  *
  *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
  *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
+ *
+ * U46 shipped as 74LVC157 on the original 2626-R2 BOM; the standard fit
+ * going forward is a 74LV3257 FET bus-switch rework -- same reasoning as
+ * the SDIO block above.  On the stock 74LVC157, `I2S0_WS`/`SCLK`/`SDO`
+ * are the mux's `Y` OUTPUTS, the SoC-side nets wired straight to the
+ * SoC's own I2S3 TX pads, so enabling the mux (`/E` = 0) does not route
+ * audio out to either destination -- it instead directly contends with
+ * the SoC's own I2S3 TX drive on those same pads (#2077).  `/E` = 1
+ * forces those `Y` outputs LOW, which is likewise not isolation from an
+ * active I2S3 TX.  Only the 74LV3257 rework is a genuine bidirectional
+ * switch, with real Hi-Z at `/E` = 1 and a clean pass-through at
+ * `/E` = 0.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per
@@ -173,11 +191,13 @@ extern "C" {
  * hand -- open the pin by its E1M_* id and let the SDK apply the per-rev
  * `pad_route_overrides`.
  *
- * IMPORTANT: the two control pins live on DIFFERENT chips on
- * this EVK -- I2S_EN is driven from Alif via alp_gpio_*, but
- * I2S_SELECT is on the CC3501E side and must be driven via
- * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1.  Apps that
- * switch the I2S routing need both code paths.
+ * IMPORTANT: which chip owns I2S_EN is REVISION-DEPENDENT, same as
+ * above.  r1: I2S_EN is driven from Alif via alp_gpio_*, on a
+ * DIFFERENT chip from I2S_SELECT (CC3501E-side, via
+ * ALP_CC3501E_CMD_GPIO_WRITE on the inter-chip SPI1).  r2: BOTH
+ * control pins are CC3501E-side, so both are driven via
+ * ALP_CC3501E_CMD_GPIO_WRITE.  Apps that switch the I2S routing need
+ * to branch on revision for which code path drives EN.
  *
  * EVK_PIN_I2S_MUX_EN (= ALP_E1M_GPIO_IO8) and EVK_PIN_I2S_MUX_SEL
  * (= ALP_E1M_GPIO_IO13), and the `evk_i2s_select_t` enum, are

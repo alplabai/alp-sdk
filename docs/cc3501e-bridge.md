@@ -519,14 +519,17 @@ that ISOLATE all the downstream buses -- with the caveat below that
 "HIGH" does not mean isolation on every fit of these mux parts:
 
 - `SDIO_MUX_EN` (`GPIO_26`, both hw revisions): HIGH (active-low
-  enable, so HIGH disables the mux). What HIGH actually does to the
-  downstream SoC-side nets is PART-DEPENDENT, not a safe default on
-  every board: the original 2626-R2 BOM's 74LVC157 drives those nets
-  LOW when disabled, which contends with an active SD host controller
-  rather than isolating anything; the 74LV3257 bus-switch rework (the
-  standard fit going forward) is genuine Hi-Z at HIGH. See
-  `include/alp/boards/alp_e1m_evk.h`'s SDIO mux block for the exact
-  net mapping.
+  enable, so HIGH disables the mux) -- but on the ORIGINAL 2626-R2
+  74LVC157 fit, neither `/E` state is a safe default, or a working
+  one: the mux's `Y` pins are wired to the SAME nets the SoC's own SD
+  host controller drives (CLK/CMD/RST), and a 74LVC157 always
+  actively drives `Y` -- the selected input at `/E` = LOW, forced LOW
+  at `/E` = HIGH -- so SD contends with the SoC either way and cannot
+  work through that part at all. Only the 74LV3257 bus-switch rework
+  (the standard fit going forward) is a genuine bidirectional switch:
+  HIGH is real Hi-Z, and LOW passes the SoC's own drive through
+  cleanly. See `include/alp/boards/alp_e1m_evk.h`'s SDIO mux block
+  for the exact net mapping.
 - `SDIO_MUX_SEL`: revision-dependent, not a single CC3501E pin.
   r2: not a CC3501E pin at all -- `E1M_GPIO_IO21` is `dispatch:
   unrouted` (#1854) and the select is hardware-strapped (microSD by
@@ -534,16 +537,18 @@ that ISOLATE all the downstream buses -- with the caveat below that
   regardless of `/E`. r1: IS a CC3501E pin, `GPIO_30`
   (`metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`),
   and IS firmware-drivable -- but the same net also reaches header
-  P18 pin 1 (`+3V3`) through `R198` (0 ohm), so driving it LOW while
-  P18's jumper is fitted makes `GPIO_30` sink the +3V3 rail. Fit the
+  P18 pin 2 (`NetP18_2`) through `R198` (0 ohm); P18's jumper, when
+  fitted, ties pin 1 (`+3V3`) to pin 2, so driving IO21 LOW while the
+  jumper is fitted makes `GPIO_30` sink the +3V3 rail. Fit the
   jumper or drive the pin, never both.
 - `I2S_MUX_EN` (`GPIO_30` on r2 only -- on r1 `IO8` is a direct Alif
   GPIO, not proxied through this coprocessor at all, per
   `metadata/e1m_modules/aen/hw-revisions.yaml` `pad_route_overrides`
   and `metadata/e1m_modules/aen/from-cc3501e.tsv`): on r2, HIGH
   (active-low enable, so HIGH disables the mux); the same
-  part-dependent LOW-vs-Hi-Z caveat as `SDIO_MUX_EN` above applies to
-  U46, the I2S mux this pin controls.
+  neither-state-is-safe-or-working caveat as `SDIO_MUX_EN` above
+  applies to U46, the I2S mux this pin controls, on the stock
+  74LVC157 fit.
 - `I2S_MUX_SEL` (`GPIO_13`, both hw revisions): don't-care while
   `I2S_MUX_EN` is disabled -- this select pin (unlike its enable
   counterpart) is CC3501E-side on both revisions.
