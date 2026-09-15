@@ -176,24 +176,45 @@
  * exact integers, verified by hand here (not just "computed at runtime and
  * hoped").
  *
- * WINDOW SEQUENCE, in order (each ~(ACOUSTIC_DISCARD_BLOCKS +
- * ACOUSTIC_ANALYSIS_BLOCKS) * 16 ms ~= 496 ms, first ACOUSTIC_DISCARD_BLOCKS
- * = 6 blocks / ~96 ms of each window discarded for settling):
+ * WINDOW SEQUENCE, in order. EVIDENCE 1's DURING/STOPPED check is now ITS
+ * OWN segment (run_tdm_clock_check()), run entirely before any acoustic
+ * window and entirely before the mic is ever interleaved with a tone write
+ * -- see "TONE-ON BUDGET, RESTATED" below for why that changed:
  *   1. BASELINE  -- amps SHUTDOWN, I2S3 not yet opened. Ambient.
- *   2. VOL=4, VOL=16, VOL=48 -- amps ACTIVE (confirmed per the safety gate
- *      below), I2S3 playing the tone at each digital-volume step in turn.
- *      The TDM_CLOCK "DURING" read (Evidence 1) is taken right after the
- *      VOL=48 window, while the tone is still genuinely playing -- reusing
- *      this tone-on time rather than adding a separate segment.
- *   3. STOPPED -- I2S3 drained (the same stop-control Evidence 1 uses),
- *      amps still ACTIVE, no tone. The TDM_CLOCK "STOPPED" read is taken
- *      right before this window's mic capture.
- *   4. SHUTDOWN -- both amps back in TAS2563_MODE_SHUTDOWN, no tone.
- * Total tone-ON time: SOUND_PREACTIVE_BLOCKS (2 blocks, ~32 ms, the quiet
- * pre-ACTIVE priming -- see HARDWARE SAFETY) + 3 * (ACOUSTIC_DISCARD_BLOCKS +
- * ACOUSTIC_ANALYSIS_BLOCKS) blocks (~1488 ms) ~= 1.52 s, comfortably under a
- * 5 s budget. The BASELINE/STOPPED/SHUTDOWN windows add mic-only wall time
- * (no tone) on top -- total wall time across all six windows ~= 3 s.
+ *   2. TDM_CLOCK check -- amps ACTIVE, tone-only (no mic): prime
+ *      (TDM_CHECK_PRIME_BLOCKS), clear latches, settle
+ *      (TDM_CHECK_SETTLE_BLOCKS, still writing tone), read = DURING; drain
+ *      (alp_audio_out_stop()), clear, k_msleep(CLOCK_CHECK_SETTLE_MS)
+ *      (nothing to starve -- the stream is genuinely stopped), read =
+ *      STOPPED.
+ *   3. VOL=4, VOL=16, VOL=48 -- SKIPPED ENTIRELY once the mic is known dead
+ *      (mic_dead -- true from step 1 on this driver as of #2133). When the
+ *      mic is alive: the stream is explicitly restarted (deferred-start
+ *      re-arms on the next write), then each step plays the tone at that
+ *      digital-volume level while capturing acoustically.
+ *   4. STOPPED (acoustic) -- I2S3 already drained by step 2's stop-control;
+ *      mic-only, no tone.
+ *   5. SHUTDOWN (acoustic) -- both amps back in TAS2563_MODE_SHUTDOWN, no
+ *      tone.
+ *
+ * TONE-ON BUDGET, RESTATED (bench-review fix): the PREVIOUS version reused
+ * the loudest acoustic volume window's tone-on time for the DURING read,
+ * which meant EVIDENCE 1 could only ever be as good as the mic's own
+ * timing that run -- and on real silicon it was worse than that: each
+ * acoustic window's alp_audio_in_read() blocked up to MIC_READ_TIMEOUT_MS
+ * with NOTHING feeding the 2-block I2S TX slab in between, draining it and
+ * failing the VERY NEXT alp_audio_out_write() -- so EVIDENCE 1 read
+ * "clocks not reaching" for a reason that had nothing to do with clocks.
+ * The TDM_CLOCK check's own tone-on cost is now fixed and small:
+ * SOUND_PREACTIVE_BLOCKS (2 blocks, ~32 ms, the quiet pre-ACTIVE priming --
+ * see HARDWARE SAFETY) + TDM_CHECK_PRIME_BLOCKS (6, ~96 ms) +
+ * TDM_CHECK_SETTLE_BLOCKS (2, ~32 ms) = 10 blocks, ~160 ms -- independent
+ * of the mic entirely. The three acoustic volume windows, IF they run
+ * (mic alive), add 3 * (ACOUSTIC_DISCARD_BLOCKS + ACOUSTIC_ANALYSIS_BLOCKS)
+ * blocks (~1488 ms) on top, for ~1.65 s total -- still comfortably under a
+ * 5 s budget. In the current (mic known dead from BASELINE) state, total
+ * tone-on time is just the ~160 ms TDM-check cost: the acoustic windows are
+ * skipped rather than played to nobody.
  *
  * ACOUSTIC VERDICT -- see acoustic_verdict_t / the matrix built in main():
  * composite (2-channel-averaged, linear-power-domain-averaged) tone-bin dB
@@ -267,10 +288,19 @@
  *
  * Both are SDK-level bugs in the shared backend, worth their own issue(s)
  * against src/backends/audio/zephyr_drv.c -- reported here, not papered
- * over by this app. Until fixed, acoustic capture through `<alp/audio.h>`
- * on this driver is expected to keep failing regardless of any tuning at
- * this app's level; EVIDENCE 1 (the TDM_CLOCK flag, which needs no mic) is
- * unaffected and remains this bench's authoritative electrical result.
+ * over by this app; filed as #2133, fix in progress. Until it lands,
+ * acoustic capture through `<alp/audio.h>` on this driver is expected to
+ * keep failing regardless of any tuning at this app's level.
+ *
+ * SECOND FINDING, SAME BENCH RUN: EVIDENCE 1 was NOT actually unaffected,
+ * as an earlier version of this comment claimed. The dead mic's blocking
+ * alp_audio_in_read() (up to MIC_READ_TIMEOUT_MS, then MIC_READ_TIMEOUT_MS
+ * again for the next window, and so on) starved the 2-block I2S TX slab
+ * between tone writes and broke the very next write, which this app's OWN
+ * verdict logic then misread as "DURING never happened" -- see the file
+ * header's "TONE-ON BUDGET, RESTATED" section and run_tdm_clock_check()
+ * for the fix: EVIDENCE 1 now runs as its own tone-only segment that never
+ * touches the mic at all, so it is genuinely independent this time.
  *
  * ============================================================================
  * HARDWARE SAFETY -- unchanged from the register-flag-only version, plus
@@ -304,8 +334,10 @@
  *     windows, never ramped within one) -- opened and STARTED at the first,
  *     quietest step (sound_vol_steps[0] = 4) before ACTIVE, so the amp
  *     comes out of shutdown already receiving a near-silent stream.
- *   - Short tone-on time in total -- see WINDOW SEQUENCE above (~1.52 s),
- *     and teardown always mutes (tas2563_set_mode(SHUTDOWN)) BOTH amps
+ *   - Short tone-on time in total -- see the "TONE-ON BUDGET, RESTATED"
+ *     note above (~160 ms with the mic dead, as it currently is; ~1.65 s
+ *     if the acoustic windows also run), and teardown always mutes
+ *     (tas2563_set_mode(SHUTDOWN)) BOTH amps
  *     before anything else tears down. This is true on EVERY exit path, not
  *     just the bottom of main(): every early return past the point
  *     AMP_ENABLE is first released (`--- 2.` below) drives AMP_ENABLE back
@@ -645,11 +677,14 @@ static void dump_pdm_diagnostics(void)
  * speakers play the same tone, not a stereo mix -- see amp_rx_channel[]'s
  * comment on why BOTH channels need real, non-zero samples). Advances
  * *phase_acc and blocks in alp_audio_out_write() for real wall-clock time.
- * Returns false on any write failure. */
-static bool write_one_tone_block(alp_audio_out_t *spk,
-                                 int16_t         *buf,
-                                 uint32_t        *phase_acc,
-                                 uint32_t         samples_per_cycle)
+ * Returns the write's own alp_status_t -- NOT collapsed to a bool -- so
+ * every call site can log the real rc at the point of failure (bench
+ * review finding: an earlier version threw the rc away here, and the only
+ * evidence of a real underrun was a bare "write FAILED" with no code). */
+static alp_status_t write_one_tone_block(alp_audio_out_t *spk,
+                                         int16_t         *buf,
+                                         uint32_t        *phase_acc,
+                                         uint32_t         samples_per_cycle)
 {
 	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
 		int16_t sample  = ((*phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
@@ -659,7 +694,7 @@ static bool write_one_tone_block(alp_audio_out_t *spk,
 		buf[2u * f + 1] = sample;
 		(*phase_acc)++;
 	}
-	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) == ALP_OK;
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
 }
 
 /* Plain tone-only pacing loop -- used for the pre-ACTIVE priming blocks
@@ -673,7 +708,14 @@ static bool play_tone_blocks(alp_audio_out_t *spk,
                              unsigned         count)
 {
 	for (unsigned b = 0; b < count; b++) {
-		if (!write_one_tone_block(spk, buf, phase_acc, samples_per_cycle)) return false;
+		alp_status_t wrc = write_one_tone_block(spk, buf, phase_acc, samples_per_cycle);
+		if (wrc != ALP_OK) {
+			printf("[probe] play_tone_blocks: alp_audio_out_write FAILED (block %u/%u) rc=%d\n",
+			       b,
+			       count,
+			       (int)wrc);
+			return false;
+		}
 	}
 	return true;
 }
@@ -786,11 +828,18 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 	static int16_t mic_buf[SOUND_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* static: off caller's stack. */
 	window_status_t st = { .tone_ok = true, .mic_ok = (mic != NULL) };
 
+	if (mic == NULL && spk == NULL) return st; /* nothing to write or read -- a true no-op call. */
+
 	for (unsigned b = 0; b < ACOUSTIC_DISCARD_BLOCKS; b++) {
-		if (spk != NULL && st.tone_ok &&
-		    !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
-			st.tone_ok = false;
-			printf("[probe] capture_window: alp_audio_out_write FAILED (discard block %u)\n", b);
+		if (spk != NULL && st.tone_ok) {
+			alp_status_t wrc = write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle);
+			if (wrc != ALP_OK) {
+				st.tone_ok = false;
+				printf("[probe] capture_window: alp_audio_out_write FAILED (discard block %u) "
+				       "rc=%d\n",
+				       b,
+				       (int)wrc);
+			}
 		}
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
@@ -824,10 +873,15 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 	}
 
 	for (unsigned b = 0; b < ACOUSTIC_ANALYSIS_BLOCKS; b++) {
-		if (spk != NULL && st.tone_ok &&
-		    !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
-			st.tone_ok = false;
-			printf("[probe] capture_window: alp_audio_out_write FAILED (analysis block %u)\n", b);
+		if (spk != NULL && st.tone_ok) {
+			alp_status_t wrc = write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle);
+			if (wrc != ALP_OK) {
+				st.tone_ok = false;
+				printf("[probe] capture_window: alp_audio_out_write FAILED (analysis block %u) "
+				       "rc=%d\n",
+				       b,
+				       (int)wrc);
+			}
 		}
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
@@ -865,6 +919,46 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 		}
 	}
 	return st;
+}
+
+/* Run one acoustic window with a RUN-WIDE dead-mic latch: once ANY window's
+ * mic read has failed, *mic_dead latches true and every LATER call (from
+ * ANY caller) stops attempting mic reads at all -- passes capture_window()
+ * a NULL mic instead. Fixes the #2132-adjacent bug this task exists for: a
+ * dead mic that keeps getting retried for up to MIC_READ_TIMEOUT_MS on
+ * every remaining window drains the I2S TX slab out from under the tone
+ * writer between blocks, which made the (unrelated) TDM_CLOCK check fail
+ * too. The TDM_CLOCK check itself no longer calls this at all (see
+ * run_tdm_clock_check() below) -- it never touches the mic in the first
+ * place, which is the real fix; this latch is the belt-and-suspenders
+ * fix for the ACOUSTIC windows specifically, so a dead mic costs at most
+ * one MIC_READ_TIMEOUT_MS timeout for the WHOLE run, not one per window.
+ *
+ * @p eligible is the window's own precondition (mic_ok, and for STOPPED
+ * also stopped_valid) -- independent of mic_dead. When eligible is true but
+ * mic_dead already latched, prints a one-line "skipped" note instead of
+ * silently returning false, so a bench log distinguishes "this window
+ * genuinely failed" from "skipped, already known dead". */
+static bool run_acoustic_window(const char      *label,
+                                alp_audio_in_t  *mic,
+                                bool            *mic_dead,
+                                bool             eligible,
+                                alp_audio_out_t *spk,
+                                int16_t         *tone_buf,
+                                uint32_t        *phase_acc,
+                                uint32_t         samples_per_cycle,
+                                chan_result_t    results[MIC_CHANNELS])
+{
+	if (eligible && *mic_dead) {
+		printf("[probe] ACOUSTIC %s skipped -- mic already failed earlier this run\n", label);
+	}
+	bool attempt_mic = eligible && !*mic_dead;
+	if (!attempt_mic && spk == NULL) return false; /* nothing to write or read either. */
+
+	window_status_t st = capture_window(
+	    attempt_mic ? mic : NULL, spk, tone_buf, phase_acc, samples_per_cycle, results);
+	if (attempt_mic && !st.mic_ok) *mic_dead = true;
+	return attempt_mic && st.mic_ok;
 }
 
 static void print_acoustic_row(const char *label, const chan_result_t r[MIC_CHANNELS], bool ok)
@@ -946,6 +1040,133 @@ static void print_early_exit_verdicts(verdict_t v, const char *reason)
 	printf("[probe] ACOUSTIC VERDICT: %s -- %s\n",
 	       acoustic_verdict_str(ACOUSTIC_INCONCLUSIVE),
 	       reason);
+}
+
+/* ================================================================== */
+/* EVIDENCE 1's DURING/STOPPED check -- its OWN tone-only segment, entirely */
+/* before any mic activity. See the file header's "TONE-ON BUDGET, RESTATED" */
+/* note for why this had to move, and why it is now a fixed, small cost.   */
+/* ================================================================== */
+
+/* Tone-only priming BEFORE the latch is cleared, so clear/settle/read runs
+ * against a controller that has genuinely been playing for a while, not
+ * the very first sample after ACTIVE. */
+#define TDM_CHECK_PRIME_BLOCKS 6u /* ~96ms. */
+/* Settle AFTER clear_faults(), paced by CONTINUING TO WRITE TONE BLOCKS --
+ * not a blind k_msleep(). This is the actual bench-review fix: the
+ * previous design's "settle" was an alp_audio_in_read() blocking for up to
+ * MIC_READ_TIMEOUT_MS with NOTHING feeding the 2-block I2S TX slab, which
+ * drained it and broke the very next alp_audio_out_write() -- read
+ * capture_window() as it stood, or `git show`-diff this commit's parent,
+ * for the exact call sequence that produced it. Must feed the slab for at
+ * least CLOCK_CHECK_SETTLE_MS; the BUILD_ASSERT below is that promise kept
+ * honest at compile time rather than by eyeballing block-count * ms/block. */
+#define TDM_CHECK_SETTLE_BLOCKS 2u /* 2 * 16ms = 32ms >= CLOCK_CHECK_SETTLE_MS (20ms). */
+BUILD_ASSERT(TDM_CHECK_SETTLE_BLOCKS *(SOUND_FRAMES_PER_BLOCK * 1000u / SOUND_SAMPLE_RATE_HZ) >=
+                 CLOCK_CHECK_SETTLE_MS,
+             "TDM_CHECK_SETTLE_BLOCKS must feed the TX slab for at least CLOCK_CHECK_SETTLE_MS");
+
+/*
+ * Run EVIDENCE 1's DURING/STOPPED check as ONE tone-only segment. This
+ * function never takes a mic handle and never can -- that absence is the
+ * actual fix, not a detail: nothing in here can ever block on a read, so
+ * nothing in here can ever starve the TX slab the way an interleaved mic
+ * read did.
+ *
+ * DURING: prime (TDM_CHECK_PRIME_BLOCKS), clear both amps' TDM_CLOCK
+ * latches, settle (TDM_CHECK_SETTLE_BLOCKS, STILL writing tone throughout
+ * -- see that constant's comment), read.
+ * STOPPED: alp_audio_out_stop() (drain; amps stay ACTIVE), clear,
+ * k_msleep(CLOCK_CHECK_SETTLE_MS) (safe to actually sleep here -- the
+ * stream is stopped, there is nothing left to starve), read.
+ *
+ * *during_valid / *stopped_valid report whether that read actually
+ * happened; @p faults_during / @p faults_stopped are only meaningful when
+ * the matching flag is true. *during_fail_rc carries the exact
+ * alp_audio_out_write() status that stopped DURING from happening (ALP_OK
+ * if DURING did happen), so the caller's verdict line can print "DURING
+ * was never read (rc=N)" instead of a bare unexplained INCONCLUSIVE.
+ * *stop_rc carries alp_audio_out_stop()'s own status for the same reason
+ * on the STOPPED side. Independent outcomes reported via out-params, same
+ * reasoning as window_status_t above -- no single bool could represent
+ * "DURING happened but STOPPED didn't, because of THIS rc" without losing
+ * information the caller needs for its verdict-reason text.
+ */
+static void run_tdm_clock_check(tas2563_t       *amps,
+                                const uint8_t   *amp_addrs,
+                                alp_audio_out_t *spk,
+                                int16_t         *tone_buf,
+                                uint32_t        *phase_acc,
+                                uint32_t         samples_per_cycle,
+                                uint32_t         faults_during[AMP_COUNT],
+                                bool            *during_valid,
+                                alp_status_t    *during_fail_rc,
+                                uint32_t         faults_stopped[AMP_COUNT],
+                                bool            *stopped_valid,
+                                alp_status_t    *stop_rc)
+{
+	*during_valid   = false;
+	*during_fail_rc = ALP_OK; /* set below iff a tone write is what stopped DURING happening. */
+	*stopped_valid  = false;
+
+	bool tone_ok = true;
+	for (unsigned b = 0; b < TDM_CHECK_PRIME_BLOCKS && tone_ok; b++) {
+		alp_status_t wrc = write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle);
+		if (wrc != ALP_OK) {
+			tone_ok         = false;
+			*during_fail_rc = wrc;
+			printf("[probe] TDM check: alp_audio_out_write FAILED (prime block %u) rc=%d\n",
+			       b,
+			       (int)wrc);
+		}
+	}
+	if (!tone_ok)
+		return; /* DURING never read -- caller must print INCONCLUSIVE, not a direction. */
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		(void)tas2563_clear_faults(&amps[i]);
+	}
+
+	for (unsigned b = 0; b < TDM_CHECK_SETTLE_BLOCKS && tone_ok; b++) {
+		alp_status_t wrc = write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle);
+		if (wrc != ALP_OK) {
+			tone_ok         = false;
+			*during_fail_rc = wrc;
+			printf("[probe] TDM check: alp_audio_out_write FAILED (settle block %u) rc=%d\n",
+			       b,
+			       (int)wrc);
+		}
+	}
+	if (!tone_ok) return;
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		(void)tas2563_read_faults(&amps[i], &faults_during[i]);
+		printf("[probe] tas2563_read_faults(0x%02x) DURING (ACTIVE, playing) -> "
+		       "0x%08x (TDM_CLOCK %s)\n",
+		       amp_addrs[i],
+		       faults_during[i],
+		       (faults_during[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
+	}
+	*during_valid = true;
+
+	*stop_rc = alp_audio_out_stop(spk);
+	printf("[probe] alp_audio_out_stop(I2S3) [stop-control, amps still ACTIVE] -> %d\n",
+	       (int)*stop_rc);
+	if (*stop_rc != ALP_OK) return; /* STOPPED never read -- caller must print INCONCLUSIVE. */
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		(void)tas2563_clear_faults(&amps[i]);
+	}
+	k_msleep(CLOCK_CHECK_SETTLE_MS); /* no tone to feed -- the stream is genuinely stopped. */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		(void)tas2563_read_faults(&amps[i], &faults_stopped[i]);
+		printf("[probe] tas2563_read_faults(0x%02x) STOPPED (ACTIVE, I2S3 halted) -> "
+		       "0x%08x (TDM_CLOCK %s)\n",
+		       amp_addrs[i],
+		       faults_stopped[i],
+		       (faults_stopped[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
+	}
+	*stopped_valid = true;
 }
 
 int main(void)
@@ -1171,6 +1392,12 @@ int main(void)
 	printf("[probe] alp_audio_in_open+start(PDM, U19 LEFT/U20 RIGHT) -> %d%s\n",
 	       (int)mic_rc,
 	       mic_ok ? "" : " -- acoustic capture skipped, EVIDENCE 1 (TDM_CLOCK) still runs");
+	/* Latches true on the FIRST mic read failure anywhere in this run (set
+	 * by run_acoustic_window() below) -- once true, every LATER window
+	 * skips the mic entirely rather than risk another MIC_READ_TIMEOUT_MS
+	 * stall that could starve the I2S TX slab. See run_acoustic_window()'s
+	 * own comment and the file header's TONE-ON BUDGET note. */
+	bool mic_dead = false;
 
 	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u]; /* static: off main()'s stack. */
 	uint32_t       phase_acc         = 0;
@@ -1186,11 +1413,15 @@ int main(void)
 	bool          shutdown_ok                               = false;
 
 	/* --- 8. Acoustic BASELINE: amps SHUTDOWN, I2S3 not yet opened -------- */
-	if (mic_ok) {
-		window_status_t st =
-		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, baseline_r);
-		baseline_ok = st.mic_ok;
-	}
+	baseline_ok = run_acoustic_window("BASELINE",
+	                                  mic,
+	                                  &mic_dead,
+	                                  mic_ok,
+	                                  NULL,
+	                                  tone_buf,
+	                                  &phase_acc,
+	                                  samples_per_cycle,
+	                                  baseline_r);
 
 	/* --- 9. I2S3 TX: open at the first (quietest) volume step, THEN start */
 	alp_audio_out_t *spk = alp_audio_out_open(&(alp_audio_config_t){
@@ -1226,101 +1457,97 @@ int main(void)
 		}
 	}
 
-	/* --- 12. Three volume-step windows (VOL=4/16/48), tone + acoustic
-	 * capture together. `tone_ok` tracks whether EVERY step's TONE stayed
-	 * healthy -- that is what EVIDENCE 1's DURING read (right after this
-	 * loop) needs, and it is now tracked from capture_window()'s
-	 * window_status_t.tone_ok field ONLY -- NEVER from whether the mic
-	 * capture also succeeded (see window_status_t's own comment: this is
-	 * the fix for the bug where a mic read timeout made the TDM_CLOCK
-	 * verdict print "not reaching" despite never measuring anything).
-	 * `vol_ok[step]` independently tracks whether THAT step's acoustic
-	 * data is trustworthy (requires both mic_ok overall AND this window's
-	 * mic stream completing). Passing mic (not NULL) unconditionally when
-	 * mic_ok is what makes the mic side even get attempted here -- when
-	 * mic_ok is false, NULL is passed and capture_window() degenerates to
-	 * exactly the tone-only pacing play_tone_blocks() provides elsewhere. */
-	bool tone_ok = active_set;
-	for (size_t step = 0; step < SOUND_VOL_STEP_COUNT; step++) {
-		if (!active_set) break;
-		alp_status_t vrc = alp_audio_out_set_volume(spk, sound_vol_steps[step]);
-		printf("[probe] alp_audio_out_set_volume(%u) [step %zu/%zu] -> %d\n",
-		       sound_vol_steps[step],
-		       step + 1,
-		       (size_t)SOUND_VOL_STEP_COUNT,
-		       (int)vrc);
-		if (vrc != ALP_OK) {
-			tone_ok = false;
-			continue;
+	/* --- 12. EVIDENCE 1's DURING/STOPPED check -- ITS OWN tone-only
+	 * segment, entirely before any mic activity. See run_tdm_clock_check()
+	 * above and the file header's TONE-ON BUDGET note: this used to be
+	 * interleaved with the acoustic volume-step windows below, and the
+	 * mic's up-to-MIC_READ_TIMEOUT_MS blocking read between tone writes
+	 * drained the 2-block I2S TX slab, breaking the NEXT write and making
+	 * the clock verdict depend on mic timing rather than the electrical
+	 * signal. Only runs if active_set (both amps genuinely ACTIVE). ------ */
+	uint32_t     faults_during[AMP_COUNT]  = { 0 };
+	uint32_t     faults_stopped[AMP_COUNT] = { 0 };
+	bool         during_valid              = false;
+	alp_status_t during_fail_rc            = ALP_OK;
+	bool         stopped_valid             = false;
+	alp_status_t stop_rc                   = ALP_ERR_NOT_READY;
+	if (active_set) {
+		run_tdm_clock_check(amps,
+		                    amp_addrs,
+		                    spk,
+		                    tone_buf,
+		                    &phase_acc,
+		                    samples_per_cycle,
+		                    faults_during,
+		                    &during_valid,
+		                    &during_fail_rc,
+		                    faults_stopped,
+		                    &stopped_valid,
+		                    &stop_rc);
+	}
+	/* run_tdm_clock_check() always attempts alp_audio_out_stop() once it
+	 * gets as far as a successful DURING read (during_valid), regardless
+	 * of whether the stop itself succeeds -- so "was a stop ever
+	 * attempted" is exactly during_valid, which the final teardown below
+	 * needs to decide whether it still owes the stream a stop() call. */
+	bool stream_stop_attempted = during_valid;
+
+	/* --- 13. Acoustic volume-step windows (VOL=4/16/48) -- SKIPPED
+	 * entirely once the mic is known dead (mic_dead, most likely already
+	 * true from step 8's BASELINE on this driver -- see #2133): no benefit
+	 * replaying the tone with nothing able to listen, and skipping bounds
+	 * this run's total tone-on time to the fixed TDM-check-only cost in
+	 * that (currently the common) case. The stream was drained by the TDM
+	 * check above, so it is explicitly restarted here -- the #2132
+	 * deferred-start fix means alp_audio_out_start() just re-arms the
+	 * real trigger for the next write, it does not fail merely because
+	 * the stream was stopped before. */
+	bool run_acoustic_windows = active_set && mic_ok && !mic_dead;
+	if (run_acoustic_windows) {
+		alp_status_t restart_rc = alp_audio_out_start(spk);
+		printf("[probe] alp_audio_out_start(I2S3) [restart for acoustic windows] -> %d\n",
+		       (int)restart_rc);
+		run_acoustic_windows = (restart_rc == ALP_OK);
+	}
+	if (run_acoustic_windows) {
+		for (size_t step = 0; step < SOUND_VOL_STEP_COUNT; step++) {
+			alp_status_t vrc = alp_audio_out_set_volume(spk, sound_vol_steps[step]);
+			printf("[probe] alp_audio_out_set_volume(%u) [step %zu/%zu] -> %d\n",
+			       sound_vol_steps[step],
+			       step + 1,
+			       (size_t)SOUND_VOL_STEP_COUNT,
+			       (int)vrc);
+			if (vrc != ALP_OK) continue; /* vol_ok[step] stays false; keep trying later steps. */
+			char label[16];
+			snprintf(label, sizeof(label), "VOL=%u", sound_vol_steps[step]);
+			vol_ok[step] = run_acoustic_window(label,
+			                                   mic,
+			                                   &mic_dead,
+			                                   true,
+			                                   spk,
+			                                   tone_buf,
+			                                   &phase_acc,
+			                                   samples_per_cycle,
+			                                   vol_r[step]);
 		}
-		window_status_t st = capture_window(
-		    mic_ok ? mic : NULL, spk, tone_buf, &phase_acc, samples_per_cycle, vol_r[step]);
-		if (!st.tone_ok) tone_ok = false;
-		vol_ok[step] = mic_ok && st.mic_ok;
+	} else if (active_set) {
+		printf("[probe] acoustic volume-step windows skipped -- %s\n",
+		       !mic_ok ? "PDM mic never opened/started" : "mic already failed earlier this run");
 	}
 
-	/* --- 13. EVIDENCE 1, DURING: amps ACTIVE, tone genuinely playing
-	 * (right after the loudest volume step, while I2S3 is still running). */
-	uint32_t faults_during[AMP_COUNT] = { 0 };
-	bool     during_valid             = tone_ok;
-	if (during_valid) {
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			(void)tas2563_clear_faults(&amps[i]);
-		}
-		k_msleep(CLOCK_CHECK_SETTLE_MS);
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			(void)tas2563_read_faults(&amps[i], &faults_during[i]);
-			printf("[probe] tas2563_read_faults(0x%02x) DURING (ACTIVE, playing) -> "
-			       "0x%08x (TDM_CLOCK %s)\n",
-			       amp_addrs[i],
-			       faults_during[i],
-			       (faults_during[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
-		}
-	}
+	/* --- 14. Acoustic STOPPED window: mic-only, no tone (I2S3 halted by
+	 * the TDM check's own stop-control above). ----------------------------*/
+	stopped_ok = run_acoustic_window("STOPPED",
+	                                 mic,
+	                                 &mic_dead,
+	                                 mic_ok && stopped_valid,
+	                                 NULL,
+	                                 tone_buf,
+	                                 &phase_acc,
+	                                 samples_per_cycle,
+	                                 stopped_r);
 
-	/* --- 14. STOP-CONTROL: stop I2S3 while BOTH amps stay ACTIVE --------- */
-	/* alp_audio_out_stop() -> alp_i2s_stop() -> i2s_trigger(...,
-	 * I2S_TRIGGER_DRAIN) (src/backends/audio/zephyr_drv.c z_out_stop(),
-	 * src/backends/i2s/zephyr_drv.c) -- drains any in-flight block then
-	 * halts the DesignWare I2S3 controller, which is what actually stops
-	 * SCLK/WS. Safe with both amps ACTIVE: SLASET3D SS7.3.12 documents the
-	 * part muting on a TDM clock error rather than free-running the
-	 * Class-D stage without one. */
-	bool         stream_stop_attempted = false;
-	alp_status_t stop_rc               = ALP_ERR_NOT_READY;
-	if (during_valid) {
-		stream_stop_attempted = true;
-		stop_rc               = alp_audio_out_stop(spk);
-		printf("[probe] alp_audio_out_stop(I2S3) [stop-control, amps still ACTIVE] -> %d\n",
-		       (int)stop_rc);
-	}
-
-	/* --- 15. EVIDENCE 1, STOPPED: amps still ACTIVE, I2S3 halted --------- */
-	uint32_t faults_stopped[AMP_COUNT] = { 0 };
-	bool     stopped_valid             = during_valid && (stop_rc == ALP_OK);
-	if (stopped_valid) {
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			(void)tas2563_clear_faults(&amps[i]);
-		}
-		k_msleep(CLOCK_CHECK_SETTLE_MS);
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			(void)tas2563_read_faults(&amps[i], &faults_stopped[i]);
-			printf("[probe] tas2563_read_faults(0x%02x) STOPPED (ACTIVE, I2S3 halted) -> "
-			       "0x%08x (TDM_CLOCK %s)\n",
-			       amp_addrs[i],
-			       faults_stopped[i],
-			       (faults_stopped[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
-		}
-	}
-
-	/* --- 16. Acoustic STOPPED window: mic-only, no tone (I2S3 halted) ---- */
-	if (mic_ok && stopped_valid) {
-		window_status_t st =
-		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, stopped_r);
-		stopped_ok = st.mic_ok;
-	}
-
-	/* --- 17. Teardown, mute FIRST -- confirmed SHUTDOWN before anything
+	/* --- 15. Teardown, mute FIRST -- confirmed SHUTDOWN before anything
 	 * else stops (both for EVIDENCE 1's safety contract and so the
 	 * acoustic SHUTDOWN window below genuinely observes amps off). Print
 	 * the rc, not discard it -- a SHUTDOWN write failure here would leave
@@ -1331,14 +1558,18 @@ int main(void)
 		printf("[probe] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)src);
 	}
 
-	/* --- 18. Acoustic SHUTDOWN window: mic-only, amps now off ------------ */
-	if (mic_ok) {
-		window_status_t st =
-		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, shutdown_r);
-		shutdown_ok = st.mic_ok;
-	}
+	/* --- 16. Acoustic SHUTDOWN window: mic-only, amps now off ------------ */
+	shutdown_ok = run_acoustic_window("SHUTDOWN",
+	                                  mic,
+	                                  &mic_dead,
+	                                  mic_ok,
+	                                  NULL,
+	                                  tone_buf,
+	                                  &phase_acc,
+	                                  samples_per_cycle,
+	                                  shutdown_r);
 
-	/* --- 19. Rest of teardown -- this is the only remaining exit path. --- */
+	/* --- 17. Rest of teardown -- this is the only remaining exit path. --- */
 	if (spk != NULL) {
 		if (!stream_stop_attempted) alp_audio_out_stop(spk); /* not yet stopped above. */
 		alp_audio_out_close(spk);
@@ -1354,7 +1585,7 @@ int main(void)
 	mux_disable(mux_sel, mux_en);
 	alp_i2c_close(bus);
 
-	/* --- 20. ACOUSTIC MEASUREMENT TABLE ----------------------------------- */
+	/* --- 18. ACOUSTIC MEASUREMENT TABLE ----------------------------------- */
 	printf("[probe] === ACOUSTIC MEASUREMENT TABLE ===\n");
 	print_acoustic_row("BASELINE", baseline_r, baseline_ok);
 	for (size_t step = 0; step < SOUND_VOL_STEP_COUNT; step++) {
@@ -1365,7 +1596,7 @@ int main(void)
 	print_acoustic_row("STOPPED", stopped_r, stopped_ok);
 	print_acoustic_row("SHUTDOWN", shutdown_r, shutdown_ok);
 
-	/* --- 21. ACOUSTIC VERDICT ---------------------------------------------- */
+	/* --- 19. ACOUSTIC VERDICT ---------------------------------------------- */
 	bool windows_valid = baseline_ok && stopped_ok && shutdown_ok;
 	for (size_t step = 0; step < SOUND_VOL_STEP_COUNT; step++) {
 		if (!vol_ok[step]) windows_valid = false;
@@ -1378,7 +1609,8 @@ int main(void)
 		av_reason = "PDM mic never opened/started";
 	} else if (!windows_valid) {
 		av        = ACOUSTIC_INCONCLUSIVE;
-		av_reason = "one or more capture windows failed (write/read error) -- see the table above";
+		av_reason = "one or more capture windows failed or were skipped after an earlier mic "
+		            "failure -- see the table above";
 	} else {
 		composite_db_t base_c          = composite_of(baseline_r);
 		composite_db_t stop_c          = composite_of(stopped_r);
@@ -1431,30 +1663,35 @@ int main(void)
 	       av_reason[0] != '\0' ? " -- " : "",
 	       av_reason);
 
-	/* --- 22. EVIDENCE 1 (TDM_CLOCK) verdict, per amp then combined ------- */
-	/* FIX 1 (bench issue): this branch used to print
+	/* --- 20. EVIDENCE 1 (TDM_CLOCK) verdict, per amp then combined ------- */
+	/* FIX 1 (bench issue, round 1): this branch used to print
 	 * VERDICT_CLOCKS_NOT_REACHING_AMP here -- a claim that SCLK/WS do not
 	 * reach the amp -- even though the DURING read (the only thing that
-	 * could measure that) never ran. INCONCLUSIVE is the only honest
-	 * verdict when the tone/ACTIVE path itself never got established: this
-	 * says nothing about the electrical signal, only that the software
-	 * path to it was never proven up. This gate depends ONLY on `tone_ok`
-	 * (I2S/amp write/mode success), never on mic status -- see the volume
-	 * loop above and window_status_t's own comment for the decoupling. */
+	 * could measure that) never ran.
+	 * FIX 4 (bench issue, round 2): a SECOND, subtler version of the same
+	 * bug survived that fix -- these two branches called
+	 * verdict_str(VERDICT_INCONCLUSIVE), whose string is
+	 * "inconclusive (TDM_CLOCK flag did not discriminate -- see the
+	 * per-amp reads above)" -- a claim that BOTH reads happened and
+	 * disagreed, which is false here: NEITHER read happened. That
+	 * canned string is reserved for the per-amp combine below, where
+	 * both reads genuinely did happen. These two branches print a plain,
+	 * literal "DURING/STOPPED was never read" instead, plus the exact rc
+	 * that stopped it, and do not depend on mic status at all -- only on
+	 * `during_valid`/`stopped_valid`, which run_tdm_clock_check() sets
+	 * from tone/amp/stop success alone. */
 	if (!during_valid) {
-		printf("[probe] I2S3/ACTIVE never reached a clean playing state through every volume "
-		       "step (open/set_volume/start/write/set_mode rc above) -- cannot run the "
-		       "DURING/STOPPED check; this is independent of the PDM mic\n");
-		printf("[probe] TDM_CLOCK VERDICT: %s -- DURING was never read\n",
-		       verdict_str(VERDICT_INCONCLUSIVE));
+		printf("[probe] I2S3/ACTIVE never reached a clean playing state (see the TDM check's "
+		       "own write-rc prints above) -- this is independent of the PDM mic\n");
+		printf("[probe] TDM_CLOCK VERDICT: INCONCLUSIVE -- DURING was never read (rc=%d)\n",
+		       (int)during_fail_rc);
 		printf("[probe] done\n");
 		return 0;
 	}
 	if (!stopped_valid) {
-		printf("[probe] could not stop the I2S3 stream for the stop-control read (rc=%d)\n",
+		printf("[probe] TDM_CLOCK VERDICT: INCONCLUSIVE -- STOPPED was never read "
+		       "(alp_audio_out_stop rc=%d)\n",
 		       (int)stop_rc);
-		printf("[probe] TDM_CLOCK VERDICT: %s -- STOPPED was never read\n",
-		       verdict_str(VERDICT_INCONCLUSIVE));
 		printf("[probe] done\n");
 		return 0;
 	}
