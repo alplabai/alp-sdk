@@ -1734,10 +1734,389 @@ static int listen_main(void)
 
 #endif /* PROBE_LISTEN */
 
+/* ================================================================== */
+/* PROBE_MELODY -- attended short-tune variant (Ode to Joy, public domain) */
+/* ================================================================== */
+/* Compile-time mode, same shape as PROBE_LISTEN above: `west build ... --
+ * -DPROBE_MELODY=1` replaces main()'s ENTIRE body with melody_main(); with
+ * neither PROBE_LISTEN nor PROBE_MELODY defined, main() is unchanged, and
+ * with PROBE_LISTEN defined, this whole block is preprocessed away before
+ * the compiler ever sees it -- so neither existing build's object code
+ * moves by adding this one. melody_main() deliberately duplicates
+ * listen_main()'s bring-up sequence (bridge/mux/AMP_ENABLE/tas2563_init/
+ * level MIN/configure_i2s) rather than sharing a new helper with it, for
+ * the same reason: touching listen_main() to extract one risks it no
+ * longer being byte-identical to the image the maintainer already heard
+ * tone from on e1m-aen-evk-03.
+ *
+ * With U46's VCC now on +3V3, the maintainer heard PROBE_LISTEN's tone
+ * cleanly -- this mode asks for a short recognisable tune instead of one
+ * sustained note, at the SAME SOUND_VOL_MAX (48) volume that was already
+ * proven comfortably audible; it does not go any louder. */
+#if defined(PROBE_MELODY)
+
+#include <string.h> /* memset(), used by melody_play_note()'s silence spans. */
+
+/* Ode to Joy's main theme (Beethoven's 9th Symphony, 1824 -- public domain)
+ * uses only 5 pitches spanning a major 5th, C4-G4. A4=440 Hz equal
+ * temperament: freq = 440 * 2^((n-9)/12), n = semitones from A4 (C4=-9,
+ * D4=-7, E4=-5, F4=-4, G4=-2); rounded to the nearest Hz here -- e.g.
+ * 261.63 Hz -> 262 -- rather than computed at runtime, since a note's pitch
+ * never changes mid-note. */
+typedef enum { NOTE_C4, NOTE_D4, NOTE_E4, NOTE_F4, NOTE_G4, NOTE_REST } melody_note_t;
+
+static const uint32_t melody_freq_hz[5] = {
+	262u, /* NOTE_C4, 261.63 Hz */
+	294u, /* NOTE_D4, 293.66 Hz */
+	330u, /* NOTE_E4, 329.63 Hz */
+	349u, /* NOTE_F4, 349.23 Hz */
+	392u, /* NOTE_G4, 392.00 Hz */
+};
+
+/* PWR_CTL address, copied verbatim from chips/tas2563/tas2563.c's own
+ * (private) TAS2563_REG_PWR_CTL -- see PROBE_LISTEN's LISTEN_REG_* block
+ * above for the same value/citation; melody_reg_read() mirrors that
+ * block's listen_reg_read() (same two alp_i2c_write_read() calls, again
+ * legitimate because tas2563_t.bus/.addr are public fields). Read here so
+ * melody_main() can print, right before each play, whether the amp is
+ * genuinely ACTIVE (mode bits 0x00) or was auto-shutdown by the chip
+ * itself -- see MELODY_REPLAY_GAP_BLOCKS's comment for the bench evidence
+ * that made this necessary. */
+#define MELODY_REG_PWR_CTL 0x02u /* Power control (SLASET3D §7.5.4, p.65). */
+
+static uint8_t melody_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+static void melody_print_pwr_ctl(tas2563_t amps[AMP_COUNT])
+{
+	printf("[melody] PWR_CTL before play: 0x%02x=0x%02x 0x%02x=0x%02x\n",
+	       amp_addrs[0],
+	       melody_reg_read(&amps[0], MELODY_REG_PWR_CTL),
+	       amp_addrs[1],
+	       melody_reg_read(&amps[1], MELODY_REG_PWR_CTL));
+}
+
+/* Every duration is a WHOLE number of SOUND_FRAMES_PER_BLOCK (256 frames,
+ * 16 ms at SOUND_SAMPLE_RATE_HZ=16000) blocks -- no partial block, so
+ * melody_play_note() below never needs to pad or split a write(), the same
+ * simplification listen_play_sine() relies on for its own block counts.
+ * quarter=25 (400 ms), eighth=12 (~192 ms), dotted-quarter=37 (~592 ms),
+ * half=50 (800 ms) -- a tempo of 150 BPM chosen only so 400 ms/quarter
+ * divides 16 ms/block evenly (25 blocks exactly); nothing about the tune
+ * requires this exact tempo. */
+typedef struct {
+	melody_note_t note;
+	uint16_t      blocks;
+} melody_step_t;
+
+/* Two 4-bar phrases (the classic "beginner" simplification of the theme,
+ * numbered notation 3 3 4 5|5 4 3 2|1 1 2 3|3. 2 2 / 3 3 4 5|5 4 3 2|1 1 2
+ * 3|2. 1 1, 1=C), a short rest between them, ~31 steps / ~13 s total --
+ * within this task's "16-32 notes"/"10-15 s" ask. */
+static const melody_step_t ode_to_joy[] = {
+	/* Phrase A */
+	{ NOTE_E4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_F4, 25 },
+	{ NOTE_G4, 25 },
+	{ NOTE_G4, 25 },
+	{ NOTE_F4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_D4, 25 },
+	{ NOTE_C4, 25 },
+	{ NOTE_C4, 25 },
+	{ NOTE_D4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_E4, 37 },
+	{ NOTE_D4, 12 },
+	{ NOTE_D4, 50 },
+	{ NOTE_REST, 12 },
+	/* Phrase B */
+	{ NOTE_E4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_F4, 25 },
+	{ NOTE_G4, 25 },
+	{ NOTE_G4, 25 },
+	{ NOTE_F4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_D4, 25 },
+	{ NOTE_C4, 25 },
+	{ NOTE_C4, 25 },
+	{ NOTE_D4, 25 },
+	{ NOTE_E4, 25 },
+	{ NOTE_D4, 37 },
+	{ NOTE_C4, 12 },
+	{ NOTE_C4, 50 },
+};
+#define ODE_TO_JOY_PHRASE_A_STEPS 16u /* through the rest; phrase B is the remainder. */
+
+#define MELODY_GAP_BLOCKS      2u   /* ~32 ms of silence between notes (not for a REST step). */
+#define MELODY_ENVELOPE_FRAMES 128u /* 8 ms at 16 kHz -- inside this task's 5-10 ms ask. */
+/* 125 * 16 ms = 2.000 s exact -- the "play it again in 2 s" gap. Written as
+ * silent blocks, NEVER as a k_msleep() with I2S left idle: bench evidence
+ * from the PROBE_LISTEN run on e1m-aen-evk-03 showed that once the bit
+ * clock stalls (alp_audio_out_stop()), the TAS2563 self-shuts-down within
+ * ~1 s on its own -- PWR_CTL read 0x0c (ACTIVE) then 0x0e (SHUTDOWN) with
+ * no tas2563_set_mode() call in between, and INT_LTCH0 bit 2 (TDM clock
+ * error), INT_LTCH3 bit 6 (BOOST_CLOCK), INT_LTCH4 bit 7
+ * (DEVICE_POWER_DOWN) all latched. A silent WRITE keeps the TDM bit clock
+ * (and therefore the amp) alive with nothing audible. */
+#define MELODY_REPLAY_GAP_BLOCKS 125u
+
+/* `blocks` silent (all-zero) SOUND_FRAMES_PER_BLOCK writes -- keeps I2S's
+ * bit clock running (see MELODY_REPLAY_GAP_BLOCKS's comment on why this
+ * must never be a k_msleep() with the stream idle instead). Shared by
+ * melody_play_note()'s NOTE_REST/gap-tail cases and melody_main()'s
+ * between-plays gap. */
+static uint32_t melody_write_silence_blocks(alp_audio_out_t *spk, int16_t *buf, uint32_t blocks)
+{
+	uint32_t write_failures = 0;
+	memset(buf, 0, SOUND_FRAMES_PER_BLOCK * 2u * sizeof(int16_t));
+	for (uint32_t b = 0; b < blocks; b++) {
+		if (alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) != ALP_OK) {
+			write_failures++;
+		}
+	}
+	return write_failures;
+}
+
+/* One note (or, for NOTE_REST, one span of silence): a linear attack/
+ * release envelope over MELODY_ENVELOPE_FRAMES at each end (no clicks),
+ * flat in between, written SOUND_FRAMES_PER_BLOCK frames at a time so
+ * playback can never underrun -- the same write-block-by-block pacing
+ * write_one_tone_block()/listen_write_sine_block() above already use.
+ * samples_per_cycle is computed ONCE per note (integer division), not per
+ * sample. Returns the write-failure count for this note/rest. */
+static uint32_t
+melody_play_note(alp_audio_out_t *spk, int16_t *buf, melody_note_t note, uint16_t total_blocks)
+{
+	if (note == NOTE_REST) return melody_write_silence_blocks(spk, buf, total_blocks);
+
+	uint32_t write_failures    = 0;
+	uint16_t tone_blocks       = (total_blocks > MELODY_GAP_BLOCKS)
+	                                 ? (uint16_t)(total_blocks - MELODY_GAP_BLOCKS)
+	                                 : total_blocks;
+	uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / melody_freq_hz[note];
+	uint32_t total_samples     = (uint32_t)tone_blocks * SOUND_FRAMES_PER_BLOCK;
+	uint32_t phase_acc         = 0;
+
+	for (uint16_t b = 0; b < tone_blocks; b++) {
+		for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+			uint32_t idx = (uint32_t)b * SOUND_FRAMES_PER_BLOCK + f;
+			float    env = 1.0f;
+			if (idx < MELODY_ENVELOPE_FRAMES) {
+				env = (float)idx / (float)MELODY_ENVELOPE_FRAMES;
+			} else if (idx >= total_samples - MELODY_ENVELOPE_FRAMES) {
+				env = (float)(total_samples - idx) / (float)MELODY_ENVELOPE_FRAMES;
+			}
+			float theta =
+			    GOERTZEL_TWO_PI * (float)(phase_acc % samples_per_cycle) / (float)samples_per_cycle;
+			int16_t sample  = (int16_t)((float)SOUND_TONE_AMPLITUDE * env * sinf(theta));
+			buf[2u * f]     = sample;
+			buf[2u * f + 1] = sample;
+			phase_acc++;
+		}
+		if (alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) != ALP_OK) {
+			write_failures++;
+		}
+	}
+
+	if (tone_blocks < total_blocks) {
+		write_failures += melody_write_silence_blocks(spk, buf, total_blocks - tone_blocks);
+	}
+	return write_failures;
+}
+
+/* Plays ode_to_joy[] once, phrase by phrase, printing one line per phrase
+ * (this task's console-format step 3). Returns the run's write-failure
+ * count so the two play-throughs in melody_main() can be summed. */
+static uint32_t melody_play_tune(alp_audio_out_t *spk, int16_t *buf)
+{
+	uint32_t write_failures = 0;
+
+	printf("[melody] phrase A: E E F G | G F E D | C C D E | E. D D\n");
+	for (size_t i = 0; i < ODE_TO_JOY_PHRASE_A_STEPS; i++) {
+		write_failures += melody_play_note(spk, buf, ode_to_joy[i].note, ode_to_joy[i].blocks);
+	}
+
+	printf("[melody] phrase B: E E F G | G F E D | C C D E | D. C C\n");
+	for (size_t i = ODE_TO_JOY_PHRASE_A_STEPS; i < ARRAY_SIZE(ode_to_joy); i++) {
+		write_failures += melody_play_note(spk, buf, ode_to_joy[i].note, ode_to_joy[i].blocks);
+	}
+
+	return write_failures;
+}
+
+static int melody_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_MELODY): attended tune test ===\n");
+	(void)alp_init();
+
+	/* --- Same bring-up as PROBE_LISTEN: bridge, mux, AMP_ENABLE --------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[melody] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[melody] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[melody] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[melody] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[melody] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[melody] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[melody] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[melody] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[melody] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[melody] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[melody] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+
+	printf("[melody] starts in 3 s\n");
+	k_msleep(1000);
+	printf("[melody] starts in 2 s\n");
+	k_msleep(1000);
+	printf("[melody] starts in 1 s\n");
+	k_msleep(1000);
+
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[melody] alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	/* SAME SOUND_VOL_MAX (48) PROBE_LISTEN used and the maintainer already
+	 * heard comfortably -- never louder. */
+	if (spk_rc == ALP_OK) spk_rc = alp_audio_out_set_volume(spk, SOUND_VOL_MAX);
+	printf("[melody] alp_audio_out_set_volume(%u) -> %d\n", SOUND_VOL_MAX, (int)spk_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t arc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
+		printf("[melody] tas2563_set_mode(0x%02x, ACTIVE) -> %d\n", amp_addrs[i], (int)arc);
+	}
+
+	uint32_t total_write_failures = 0;
+	if (spk_rc == ALP_OK) {
+		melody_print_pwr_ctl(amps);
+		printf("[melody] PLAYING: Ode to Joy (Beethoven, public domain)\n");
+		total_write_failures += melody_play_tune(spk, tone_buf);
+
+		printf("[melody] play it again in 2 s\n");
+		/* Silent WRITES, not k_msleep() -- see MELODY_REPLAY_GAP_BLOCKS's
+		 * comment: an idle I2S bus lets the TAS2563 auto-shutdown within
+		 * ~1 s, which would leave the second play silent. */
+		total_write_failures +=
+		    melody_write_silence_blocks(spk, tone_buf, MELODY_REPLAY_GAP_BLOCKS);
+
+		melody_print_pwr_ctl(amps);
+		total_write_failures += melody_play_tune(spk, tone_buf);
+	} else {
+		printf("[melody] I2S3 did not start -- skipping playback\n");
+	}
+	printf("[melody] total alp_audio_out_write() failures this run: %u\n", total_write_failures);
+
+	/* The ONLY alp_audio_out_stop() this run makes -- nothing plays after
+	 * it, so there is no restart to recover for (no clear-latches +
+	 * ACTIVE-again dance needed here): both notes/rests and the between-
+	 * plays gap above are silent WRITES, never a stop, specifically so the
+	 * TAS2563 never sees the bit clock disappear -- and therefore never
+	 * self-shuts-down -- anywhere but this final, deliberate teardown. */
+	alp_status_t stop_rc = alp_audio_out_stop(spk);
+	printf("[melody] alp_audio_out_stop(I2S3) -> %d\n", (int)stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[melody] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+		tas2563_deinit(&amps[i]);
+	}
+	if (spk != NULL) alp_audio_out_close(spk);
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	printf("[melody] done\n");
+	return 0;
+}
+
+#endif /* PROBE_MELODY */
+
 int main(void)
 {
 #if defined(PROBE_LISTEN)
 	return listen_main();
+#elif defined(PROBE_MELODY)
+	return melody_main();
 #else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();

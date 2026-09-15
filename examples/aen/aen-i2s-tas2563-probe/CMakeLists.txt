@@ -19,3 +19,12 @@ target_sources(app PRIVATE src/cc3501e_bridge.c src/cc3501e_gpio_routes.c)
 if(DEFINED PROBE_LISTEN)
   target_compile_definitions(app PRIVATE PROBE_LISTEN=${PROBE_LISTEN})
 endif()
+
+# PROBE_MELODY (test/u46-i2s-tas2563-on-reworked-mux): compile-time switch to
+# src/main.c's short-tune variant (Ode to Joy, public domain) instead of the
+# normal automated probe or PROBE_LISTEN's sustained tone. Opt in with
+# `west build ... -- -DPROBE_MELODY=1`; unset (the default), this app is
+# unchanged, same as PROBE_LISTEN unset.
+if(DEFINED PROBE_MELODY)
+  target_compile_definitions(app PRIVATE PROBE_MELODY=${PROBE_MELODY})
+endif()
