@@ -39,32 +39,57 @@
  *                      succeeded and (as far as this backend knows) is
  *                      still running.
  *
+ * INVARIANT (enforced by construction, not just by the individual call
+ * sites getting it right): tx_started => !tx_pending_start. Every site
+ * that can set tx_started true routes through _mark_tx_started(), which
+ * clears tx_pending_start in the same assignment; every site that can
+ * clear tx_started routes through _mark_tx_stopped(), which clears all
+ * three flags together. See finding #2132-MAJOR-2: z_start()'s
+ * immediate-trigger success path used to set tx_started directly
+ * without touching tx_pending_start, so a start() that raced ahead of
+ * a still-pending retry (reachable before the MAJOR-1 fix below closed
+ * off the specific sequence that exposed it) could leave both flags
+ * true, and the next write() would retry a START on an ALREADY-RUNNING
+ * stream and get i2s_dw's -EIO (i2s_dw.c:279-283) instead of just
+ * writing.
+ *
  * z_start(): if TX and nothing is queued yet, set tx_pending_start and
  * return ALP_OK without touching hardware (write-then-start already
  * queues first, so it still triggers immediately, unchanged).
  *
  * z_write(): after a block is genuinely queued (i2s_write() succeeded),
  * set tx_block_queued.  If tx_pending_start, retry the real START --
- * clear tx_pending_start (and set tx_started) ONLY on success; a write
- * into a stream whose START keeps failing must never return ALP_OK,
- * so a still-failing retry returns that failure from THIS write() call,
- * and the very next write() retries again (tx_pending_start stays set).
+ * on success, _mark_tx_started() clears tx_pending_start too; a write
+ * into a stream whose START keeps failing must never return ALP_OK, so
+ * a still-failing retry DROPs the block THIS write just queued (finding
+ * #2132-MAJOR-1: while a start is pending, nothing else can have queued
+ * ahead of it, so DROP removes exactly this write's block, never a
+ * sibling's) and returns that failure from THIS write() call -- an I2S
+ * write that returns an error has NEVER left a block queued, which is
+ * what lets the audio layer above trust out_frames again. The very next
+ * write() retries again since tx_pending_start stays set.
  *
  * z_stop(): if TX and not tx_started -- covers both "start() was
  * deferred and never fired" and "start() was never called at all" --
  * DRAIN would -EIO despite real blocks possibly sitting in the queue
  * holding slab memory.  Issue DROP instead, which works from READY and
- * releases them, then clear all three flags.  Otherwise (really
- * running) DRAIN as before.
+ * releases them, then _mark_tx_stopped() clears all three flags.
+ * Otherwise (really running) DRAIN, then _mark_tx_stopped() on success.
  *
- * z_close(): DROP unconditionally whenever dev != NULL, regardless of
- * any of the flags above -- a pending-but-written or START-still-
- * failing handle can hold real slab-block pointers in the driver's TX
- * ring / in-flight mem_block, and this function is about to k_free()
- * the slab backing them.  Skipping DROP left those pointers dangling
- * for the NEXT open() on this device: its tx_stream_start() would
- * dequeue a pointer into freed memory, and the completion path frees
- * it into the NEW handle's slab -- corruption, not just a leak.
+ * z_close(): DROP whenever dev != NULL for TX always (a pending-but-
+ * written or START-still-failing TX handle can hold real slab-block
+ * pointers in the driver's TX ring / in-flight mem_block, and this
+ * function is about to k_free() the slab backing them -- skipping DROP
+ * left those pointers dangling for the NEXT open() on this device to
+ * dequeue into freed memory: corruption, not just a leak); for RX only
+ * when h->started, matching i2s_dw's own RX behaviour byte-for-byte
+ * (rx_stream_disable() -- including its clock teardown -- only ever ran
+ * when RX had actually been triggered, pre-#2132 and after).
+ *
+ * Locking: a k_spinlock in the sidecar (alp_z_i2s_side_t.lock) guards
+ * the three tx_* flags and the i2s_trigger() calls that change them in
+ * z_start()/z_write()/z_stop() -- see the lock field's own comment for
+ * what it does and does NOT close.
  */
 
 #include <errno.h>
@@ -117,7 +142,32 @@ typedef struct {
 	bool tx_block_queued;
 	bool tx_pending_start;
 	bool tx_started;
-	bool in_use;
+	/* Guards the three tx_* flags above AND the i2s_trigger() calls that
+	 * change them, in z_start()/z_write()/z_stop() -- see those
+	 * functions. NEVER held across k_mem_slab_alloc() or the Zephyr
+	 * i2s_write() API call: both can block (i2s_dw.c's i2s_dw_write()
+	 * takes tx.sem with the caller's own timeout, i2s_dw.c:396-397).
+	 * i2s_trigger() itself IS safe to call under this lock --
+	 * i2s_dw_trigger() only takes its own brief irq_lock()/irq_unlock()
+	 * (i2s_dw.c:255-354) and never blocks.
+	 *
+	 * Known residual race (issue #2132 review, MINOR): the window
+	 * between i2s_write() genuinely queuing a block and z_write()
+	 * acquiring this lock to record tx_block_queued=true is NOT closed
+	 * -- a concurrent stop() could DROP that exact block in between
+	 * (correctly observing and draining it) and clear the flags, and
+	 * this write()'s delayed flag-set then stamps a stale "queued" on
+	 * top of an already-empty ring. Closing that fully needs the flag
+	 * update to be atomic WITH the hardware write, which the Zephyr
+	 * i2s_write() API does not expose, and the dispatcher's op-counting
+	 * (src/i2s_dispatch.c) does not serialize calls either -- it only
+	 * keeps the handle alive across concurrent ops, not disjoint.
+	 * Ceiling: don't call start()/write()/stop() on the SAME handle
+	 * from two threads without external serialization; upgrade path is
+	 * making the queue-and-flag-update one atomic operation (would need
+	 * a driver-level completion hook, not available today). */
+	struct k_spinlock lock;
+	bool              in_use;
 } alp_z_i2s_side_t;
 
 static alp_z_i2s_side_t _sides[CONFIG_ALP_SDK_MAX_I2S_HANDLES];
@@ -240,10 +290,30 @@ z_open(const alp_i2s_config_t *cfg, alp_i2s_backend_state_t *st, alp_capabilitie
 
 /* Issue the real TX/RX START trigger.  Shared by z_start()'s immediate
  * path and z_write()'s pending-start retry so the i2s_trigger() call
- * site exists exactly once. */
+ * site exists exactly once. Caller holds s->lock. */
 static alp_status_t _start_trigger(const struct device *dev, alp_i2s_dir_t dir)
 {
 	return _errno_to_alp(i2s_trigger(dev, _to_dir(dir), I2S_TRIGGER_START));
+}
+
+/* The ONLY places tx_started may become true. Clears tx_pending_start in
+ * the same assignment so tx_started => !tx_pending_start holds by
+ * construction (issue #2132-MAJOR-2) -- caller holds s->lock. */
+static void _mark_tx_started(alp_z_i2s_side_t *s)
+{
+	s->tx_started       = true;
+	s->tx_pending_start = false;
+}
+
+/* The ONLY places a TX stream transitions back to fully idle (DRAIN or
+ * DROP success). Clears all three flags together so no stale
+ * tx_pending_start (or tx_block_queued) can survive a stop() regardless
+ * of which branch reached it -- caller holds s->lock. */
+static void _mark_tx_stopped(alp_z_i2s_side_t *s)
+{
+	s->tx_started       = false;
+	s->tx_pending_start = false;
+	s->tx_block_queued  = false;
 }
 
 static alp_status_t z_start(alp_i2s_backend_state_t *st)
@@ -253,16 +323,20 @@ static alp_status_t z_start(alp_i2s_backend_state_t *st)
 	const struct device *dev = (const struct device *)st->dev;
 	if (s == NULL || dev == NULL) return ALP_ERR_NOT_READY;
 
+	k_spinlock_key_t key = k_spin_lock(&s->lock);
+
 	if (h->cfg.direction == ALP_I2S_DIR_TX && !s->tx_block_queued) {
 		/* issue #2132: defer -- see the file header comment. RX is
 		 * unaffected: rx_stream_start() allocates its own block from
 		 * the slab instead of dequeuing a caller-filled ring
 		 * (i2s_dw.c:751-787), so it has nothing to refuse here. */
 		s->tx_pending_start = true;
+		k_spin_unlock(&s->lock, key);
 		return ALP_OK;
 	}
 	alp_status_t rc = _start_trigger(dev, h->cfg.direction);
-	if (rc == ALP_OK && h->cfg.direction == ALP_I2S_DIR_TX) s->tx_started = true;
+	if (rc == ALP_OK && h->cfg.direction == ALP_I2S_DIR_TX) _mark_tx_started(s);
+	k_spin_unlock(&s->lock, key);
 	return rc;
 }
 
@@ -272,6 +346,8 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 	alp_z_i2s_side_t    *s   = (alp_z_i2s_side_t *)st->be_data;
 	const struct device *dev = (const struct device *)st->dev;
 	if (s == NULL || dev == NULL) return ALP_ERR_NOT_READY;
+
+	k_spinlock_key_t key = k_spin_lock(&s->lock);
 
 	if (h->cfg.direction == ALP_I2S_DIR_TX && !s->tx_started) {
 		/* issue #2132: never really running -- either start() was
@@ -283,17 +359,13 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 		 * stranding them. */
 		alp_status_t rc =
 		    _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP));
-		if (rc == ALP_OK) {
-			s->tx_pending_start = false;
-			s->tx_block_queued  = false;
-		}
+		if (rc == ALP_OK) _mark_tx_stopped(s);
+		k_spin_unlock(&s->lock, key);
 		return rc;
 	}
 	alp_status_t rc = _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DRAIN));
-	if (rc == ALP_OK && h->cfg.direction == ALP_I2S_DIR_TX) {
-		s->tx_started      = false;
-		s->tx_block_queued = false;
-	}
+	if (rc == ALP_OK && h->cfg.direction == ALP_I2S_DIR_TX) _mark_tx_stopped(s);
+	k_spin_unlock(&s->lock, key);
 	return rc;
 }
 
@@ -309,6 +381,9 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 	 * length with -EINVAL, but only after the memcpy has already run. */
 	if (bytes > s->block_bytes) return ALP_ERR_OUT_OF_RANGE;
 
+	/* Both of these can block (k_mem_slab_alloc() on slab room,
+	 * i2s_write()/i2s_dw_write() on its tx.sem, i2s_dw.c:396-397) --
+	 * deliberately OUTSIDE s->lock; see the lock field's comment. */
 	void *slab_block = NULL;
 	int   err        = k_mem_slab_alloc(&s->mem_slab, &slab_block, K_MSEC(timeout_ms));
 	if (err != 0 || slab_block == NULL) {
@@ -321,26 +396,37 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 		return _errno_to_alp(err);
 	}
 
-	if (h->cfg.direction == ALP_I2S_DIR_TX) {
-		s->tx_block_queued = true;
-		if (s->tx_pending_start) {
-			/* issue #2132: retry the deferred start now that a block
-			 * is genuinely queued. Clear tx_pending_start ONLY on
-			 * success -- a still-failing retry must not be swallowed
-			 * (the write itself queued fine, but this stream still
-			 * isn't playing), so return the START failure from THIS
-			 * write() call instead of ALP_OK; the very next write()
-			 * retries again since tx_pending_start stays set. */
-			alp_status_t start_rc = _start_trigger(dev, h->cfg.direction);
-			if (start_rc == ALP_OK) {
-				s->tx_pending_start = false;
-				s->tx_started       = true;
-			} else {
-				return start_rc;
-			}
-		}
+	if (h->cfg.direction != ALP_I2S_DIR_TX) return ALP_OK;
+
+	k_spinlock_key_t key = k_spin_lock(&s->lock);
+	s->tx_block_queued   = true;
+	if (!s->tx_pending_start) {
+		k_spin_unlock(&s->lock, key);
+		return ALP_OK;
 	}
-	return ALP_OK;
+	/* issue #2132: retry the deferred start now that a block is
+	 * genuinely queued. _mark_tx_started() clears tx_pending_start ONLY
+	 * on success -- a still-failing retry must not be swallowed (the
+	 * write itself queued fine, but this stream still isn't playing). */
+	alp_status_t start_rc = _start_trigger(dev, h->cfg.direction);
+	if (start_rc == ALP_OK) {
+		_mark_tx_started(s);
+		k_spin_unlock(&s->lock, key);
+		return ALP_OK;
+	}
+	/* MAJOR-1 (issue #2132 review): release the block THIS write just
+	 * queued before reporting the failure. While a start was pending,
+	 * nothing else could have queued ahead of it, so DROP here removes
+	 * exactly this write's block, never a sibling write's -- an I2S
+	 * write that returns an error must NEVER leave a block queued, or
+	 * the caller (the audio layer's out_frames, or any other caller)
+	 * cannot tell "nothing was queued" apart from "queued, but the
+	 * deferred start still failed". tx_pending_start stays set (not
+	 * cleared here) so the next write() retries again. */
+	(void)i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP);
+	s->tx_block_queued = false;
+	k_spin_unlock(&s->lock, key);
+	return start_rc;
 }
 
 static alp_status_t z_read(alp_i2s_backend_state_t *st,
@@ -372,20 +458,27 @@ static void z_close(alp_i2s_backend_state_t *st)
 	const struct device *dev = (const struct device *)st->dev;
 	struct alp_i2s      *h   = CONTAINER_OF(st, struct alp_i2s, state);
 
-	/* issue #2132 (UAF): DROP unconditionally, NOT only "if (h->started)"
-	 * -- a handle that only ever queued blocks (write() before start(),
+	/* issue #2132 (UAF): TX always DROPs, NOT only "if (h->started)" --
+	 * a TX handle that only ever queued blocks (write() before start(),
 	 * or a start() whose retry never fired) still holds real slab-block
 	 * pointers in the driver's TX ring / in-flight mem_block even though
 	 * h->started is false. i2s_dw.c accepts DROP from READY too
 	 * (i2s_dw.c:329-338), and it is the only trigger that releases both
 	 * the in-flight block and everything still queued (tx_stream_disable
 	 * + tx_queue_drop, i2s_dw.c:886-900) regardless of run state.
-	 * Skipping this for a not-yet-started handle left those pointers
+	 * Skipping this for a not-yet-started TX handle left those pointers
 	 * dangling past the k_free() below: the NEXT open() on this device's
 	 * tx_stream_start() would dequeue a pointer into freed memory, and
 	 * the completion path would free it into the NEW handle's slab --
-	 * memory corruption, not just a leak. */
-	if (dev != NULL) {
+	 * memory corruption, not just a leak.
+	 *
+	 * RX has no equivalent trap -- rx_stream_start() allocates its own
+	 * block instead of dequeuing a caller-filled ring (i2s_dw.c:751-787)
+	 * -- so RX stays gated on h->started exactly like before #2132,
+	 * byte-identical to i2s_dw's own rx_stream_disable() (i2s_dw.c:834-
+	 * 852, including its i2s_clock_disable() teardown), which only ever
+	 * ran when RX had actually been triggered. */
+	if (dev != NULL && (h->cfg.direction == ALP_I2S_DIR_TX || h->started)) {
 		(void)i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP);
 	}
 	if (s != NULL) {

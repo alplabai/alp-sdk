@@ -11,9 +11,10 @@
  * down a layer:
  *
  *   - the plain (unity-volume) write path forwards a deferred-start
- *     trigger failure and still reports out_frames on that error
- *     (src/backends/audio/zephyr_drv.c's z_out_write(), issue #2132
- *     doc fix in include/alp/audio.h);
+ *     trigger failure AND correctly does NOT count that chunk toward
+ *     out_frames -- the I2S layer already released the block before
+ *     returning the error (src/backends/audio/zephyr_drv.c's
+ *     z_out_write(), MAJOR-1 fix in src/backends/i2s/zephyr_drv.c);
  *   - the volume-scaled CHUNKED write loop (still present after the
  *     fix moved to the I2S layer) composes correctly with a deferred
  *     start across multiple sub-writes -- stereo, > 128 frames per
@@ -94,11 +95,16 @@ ZTEST(alp_audio_out_start_defer, test_mono_start_then_write_succeeds)
 	zassert_true(running_after_write, "the first write() must fire the deferred start()");
 }
 
-/* Item 7 (docs): a deferred-start trigger failure discovered during
- * write() must surface from that write() call (never ALP_OK), and
- * out_frames must still report what was handed to the driver -- the
- * block genuinely queued even though the retried start failed. */
-ZTEST(alp_audio_out_start_defer, test_mono_start_failure_surfaces_from_write_with_out_frames_set)
+/* MAJOR 1 (issue #2132 review): a deferred-start trigger failure
+ * discovered during write() must surface from that write() call (never
+ * ALP_OK), and out_frames must NOT report the failed chunk as pushed --
+ * the I2S layer DROPs the block it just queued before returning the
+ * error (src/backends/i2s/zephyr_drv.c), so nothing was genuinely
+ * queued and out_frames stays at whatever alp_audio_out_write() zeroed
+ * it to (src/audio_dispatch.c). A follow-up write, once the fault
+ * clears, must still succeed -- proving the DROP didn't also wedge
+ * tx_pending_start. */
+ZTEST(alp_audio_out_start_defer, test_mono_start_failure_does_not_count_toward_out_frames)
 {
 	fake_i2s_reset();
 	alp_audio_out_t *out = open_mono();
@@ -107,20 +113,29 @@ ZTEST(alp_audio_out_start_defer, test_mono_start_failure_surfaces_from_write_wit
 	fake_i2s_force_start_fail(-EIO, 1u);
 
 	static int16_t block[MONO_FRAMES] = { 0 };
-	size_t         out_frames         = SIZE_MAX;
-	alp_status_t   write_rc = alp_audio_out_write(out, block, MONO_FRAMES, &out_frames, 100u);
-	bool           running  = fake_i2s_tx_running();
+	size_t         out_frames1        = SIZE_MAX;
+	alp_status_t   write1_rc = alp_audio_out_write(out, block, MONO_FRAMES, &out_frames1, 100u);
+	bool           running_after_1 = fake_i2s_tx_running();
+	size_t         depth_after_1   = fake_i2s_tx_queue_depth();
+
+	size_t       out_frames2     = SIZE_MAX;
+	alp_status_t write2_rc       = alp_audio_out_write(out, block, MONO_FRAMES, &out_frames2, 100u);
+	bool         running_after_2 = fake_i2s_tx_running();
 
 	alp_audio_out_close(out);
 
 	zassert_not_null(out, "alp_audio_out_open() must resolve the fake alp-i2s0 device");
 	zassert_equal(start_rc, ALP_OK, "deferred start must not fail up front");
-	zassert_not_equal(write_rc, ALP_OK, "a forced START failure must surface from write()");
-	zassert_equal(out_frames,
-	              MONO_FRAMES,
-	              "out_frames must still report the frames handed to the driver on error "
-	              "(include/alp/audio.h)");
-	zassert_false(running);
+	zassert_not_equal(write1_rc, ALP_OK, "a forced START failure must surface from write()");
+	zassert_equal(out_frames1,
+	              0u,
+	              "a write whose deferred-start retry failed must not report ANY frames as "
+	              "pushed -- the I2S layer already released the block (include/alp/audio.h)");
+	zassert_false(running_after_1);
+	zassert_equal(depth_after_1, 0u, "the failed retry must not strand a block in the ring");
+	zassert_equal(write2_rc, ALP_OK, "the next write must retry and succeed once the fault clears");
+	zassert_equal(out_frames2, MONO_FRAMES);
+	zassert_true(running_after_2);
 }
 
 /* Stereo/chunked/set_volume(4), start-before-write: the multi-iteration

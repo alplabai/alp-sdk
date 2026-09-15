@@ -539,29 +539,25 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 			}
 			alp_status_t s =
 			    alp_i2s_write(be->i2s, chunk, n * bytes_per_frame(&state->cfg), timeout_ms);
-			/* issue #2132: alp_i2s_write() can now retry a still-pending
-			 * start() internally and return ITS failure instead of
-			 * ALP_OK -- see src/backends/i2s/zephyr_drv.c. That write
-			 * still genuinely queued this chunk into the driver first,
-			 * so count it in `pushed` on the way out even on error: a
-			 * caller re-sending the same source buffer from frame 0
-			 * would otherwise double-queue this chunk. */
-			src += ns;
-			remaining_frames -= n;
-			pushed += n;
 			if (s != ALP_OK) {
+				/* issue #2132: an alp_i2s_write() failure -- including a
+				 * still-pending start() retry that failed -- never
+				 * leaves a block queued (src/backends/i2s/zephyr_drv.c
+				 * DROPs it before returning), so this chunk was NOT
+				 * queued and must not be counted toward out_frames. */
 				if (out_frames != NULL) *out_frames = pushed;
 				return s;
 			}
+			src += ns;
+			remaining_frames -= n;
+			pushed += n;
 		}
 		if (out_frames != NULL) *out_frames = pushed;
 		return ALP_OK;
 	}
 
 	alp_status_t s = alp_i2s_write(be->i2s, buf, bytes, timeout_ms);
-	/* issue #2132: set unconditionally, success or failure -- see the
-	 * comment in the chunked loop above for why. */
-	if (out_frames != NULL) *out_frames = frames;
+	if (s == ALP_OK && out_frames != NULL) *out_frames = frames;
 	return s;
 #else
 	(void)state;

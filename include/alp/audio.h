@@ -36,12 +36,6 @@
  *     alp_audio_in_read(mic, buf, 256, &got, 100);
  * @endcode
  *
- * @par Concurrency
- *      Calls on ONE handle (any @c alp_audio_in_* / @c alp_audio_out_*
- *      function taking that handle) must not run concurrently from more
- *      than one thread -- no in-tree caller does. A different handle is
- *      independent.
- *
  * @par ABI status: [ABI-STABLE]
  *      v0.2 decl + v0.3 impl; PDM-in / I2S-out shape stable.
  *      See docs/abi-markers.md for the convention.
@@ -227,12 +221,10 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  *
  * On the Zephyr I2S backend, a successful queue here can also retry a
  * start() that @ref alp_audio_out_start deferred (see its doc); if that
- * retry fails, this call returns the start failure instead of ALP_OK,
- * even though the block was genuinely queued into the driver first.
- * @p out_frames CAN be non-zero even when this call returns an error --
- * it reports frames handed to the driver, not frames confirmed played,
- * so a caller that retries the SAME source buffer from frame 0 after an
- * error would double-queue those frames.
+ * retry still fails, the backend releases the block it just queued and
+ * this call returns the start failure -- @p out_frames is NOT
+ * incremented for a chunk whose queue attempt did not fully succeed, so
+ * it always reflects frames genuinely accepted by the driver.
  *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.
@@ -240,8 +232,7 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  *                          @c frames_per_block negotiated at open; a larger
  *                          value is refused with @ref ALP_ERR_OUT_OF_RANGE
  *                          rather than truncated.
- * @param[out] out_frames   Receives the frame count handed to the driver.
- *                          May be nonzero on error -- see above.  May be NULL.
+ * @param[out] out_frames   Receives the frame count actually pushed.  May be NULL.
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
  *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
