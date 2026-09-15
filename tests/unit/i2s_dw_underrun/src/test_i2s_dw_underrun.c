@@ -78,8 +78,9 @@ static int fake_on_calls;
 static int fake_off_calls;
 static int fake_configure_calls;
 
-static int fake_clk_set_rate(const struct device *dev, clock_control_subsys_t sys,
-			      clock_control_subsys_rate_t rate)
+static int fake_clk_set_rate(const struct device        *dev,
+                             clock_control_subsys_t      sys,
+                             clock_control_subsys_rate_t rate)
 {
 	ARG_UNUSED(dev);
 	ARG_UNUSED(sys);
@@ -114,15 +115,15 @@ static int fake_clk_configure(const struct device *dev, clock_control_subsys_t s
 }
 
 static const struct clock_control_driver_api fake_clk_api = {
-	.on = fake_clk_on,
-	.off = fake_clk_off,
-	.set_rate = fake_clk_set_rate,
+	.on        = fake_clk_on,
+	.off       = fake_clk_off,
+	.set_rate  = fake_clk_set_rate,
 	.configure = fake_clk_configure,
 };
 
 static const struct device fake_clk_dev = {
 	.name = "fake_i2s_clk",
-	.api = &fake_clk_api,
+	.api  = &fake_clk_api,
 };
 
 /* ---------------------------------------------------------------------
@@ -132,8 +133,8 @@ static const struct device fake_clk_dev = {
  * ------------------------------------------------------------------ */
 static struct I2S_Type fake_regs;
 
-#define TEST_BLOCK_BYTES  8U
-#define TEST_SLAB_BLOCKS  4U
+#define TEST_BLOCK_BYTES 8U
+#define TEST_SLAB_BLOCKS 4U
 
 K_MEM_SLAB_DEFINE_STATIC(test_tx_slab, TEST_BLOCK_BYTES, TEST_SLAB_BLOCKS, 4);
 K_MEM_SLAB_DEFINE_STATIC(test_rx_slab, TEST_BLOCK_BYTES, TEST_SLAB_BLOCKS, 4);
@@ -142,22 +143,22 @@ static struct queue_item tx_ring_storage[TEST_SLAB_BLOCKS + 1];
 static struct queue_item rx_ring_storage[TEST_SLAB_BLOCKS + 1];
 
 static const struct i2s_dw_cfg test_cfg = {
-	.clk_dev = &fake_clk_dev,
-	.clkid = (clock_control_subsys_t)0,
-	.cfg.wss_len = WSS_LEN,
+	.clk_dev             = &fake_clk_dev,
+	.clkid               = (clock_control_subsys_t)0,
+	.cfg.wss_len         = WSS_LEN,
 	.cfg.tx_fifo_trg_lvl = TX_FIFO_TRG_LVL,
 	.cfg.rx_fifo_trg_lvl = RX_FIFO_TRG_LVL,
-	.paddr = &fake_regs,
-	.irq_config = NULL,
+	.paddr               = &fake_regs,
+	.irq_config          = NULL,
 };
 
 static struct i2s_dw_data test_data;
 
 static const struct device test_dev = {
-	.name = "i2s_dw_under_test",
+	.name   = "i2s_dw_under_test",
 	.config = &test_cfg,
-	.data = &test_data,
-	.api = &i2s_dw_driver_api,
+	.data   = &test_data,
+	.api    = &i2s_dw_driver_api,
 };
 
 /* ---------------------------------------------------------------------
@@ -194,20 +195,20 @@ static void dw_test_before(void *fixture)
 	silence_unused_driver_entry_points();
 
 	memset(&fake_regs, 0, sizeof(fake_regs));
-	fake_set_rate_calls = 0;
-	fake_on_calls = 0;
-	fake_off_calls = 0;
+	fake_set_rate_calls  = 0;
+	fake_on_calls        = 0;
+	fake_off_calls       = 0;
 	fake_configure_calls = 0;
 
 	memset(&test_data, 0, sizeof(test_data));
-	test_data.tx.stream_start = tx_stream_start;
-	test_data.tx.stream_disable = tx_stream_disable;
-	test_data.tx.queue_drop = tx_queue_drop;
+	test_data.tx.stream_start        = tx_stream_start;
+	test_data.tx.stream_disable      = tx_stream_disable;
+	test_data.tx.queue_drop          = tx_queue_drop;
 	test_data.tx.mem_block_queue.buf = tx_ring_storage;
 	test_data.tx.mem_block_queue.len = ARRAY_SIZE(tx_ring_storage);
-	test_data.rx.stream_start = rx_stream_start;
-	test_data.rx.stream_disable = rx_stream_disable;
-	test_data.rx.queue_drop = rx_queue_drop;
+	test_data.rx.stream_start        = rx_stream_start;
+	test_data.rx.stream_disable      = rx_stream_disable;
+	test_data.rx.queue_drop          = rx_queue_drop;
 	test_data.rx.mem_block_queue.buf = rx_ring_storage;
 	test_data.rx.mem_block_queue.len = ARRAY_SIZE(rx_ring_storage);
 
@@ -231,14 +232,14 @@ ZTEST_SUITE(i2s_dw_underrun, NULL, NULL, dw_test_before, NULL, NULL);
 static struct i2s_config make_cfg(uint32_t rate, struct k_mem_slab *slab)
 {
 	struct i2s_config cfg = {
-		.word_size = 16,
-		.channels = 2,
-		.format = 0,
-		.options = 0,
+		.word_size      = 16,
+		.channels       = 2,
+		.format         = 0,
+		.options        = 0,
 		.frame_clk_freq = rate,
-		.mem_slab = slab,
-		.block_size = TEST_BLOCK_BYTES,
-		.timeout = 100,
+		.mem_slab       = slab,
+		.block_size     = TEST_BLOCK_BYTES,
+		.timeout        = 100,
 	};
 
 	return cfg;
@@ -247,7 +248,7 @@ static struct i2s_config make_cfg(uint32_t rate, struct k_mem_slab *slab)
 static void tx_configure(uint32_t rate)
 {
 	struct i2s_config cfg = make_cfg(rate, &test_tx_slab);
-	int rc = i2s_dw_configure(&test_dev, I2S_DIR_TX, &cfg);
+	int               rc  = i2s_dw_configure(&test_dev, I2S_DIR_TX, &cfg);
 
 	zassert_equal(rc, 0, "tx configure failed: %d", rc);
 }
@@ -255,7 +256,7 @@ static void tx_configure(uint32_t rate)
 static void tx_write_block(void)
 {
 	void *block;
-	int rc = k_mem_slab_alloc(&test_tx_slab, &block, K_NO_WAIT);
+	int   rc = k_mem_slab_alloc(&test_tx_slab, &block, K_NO_WAIT);
 
 	zassert_equal(rc, 0, "tx slab alloc failed: %d", rc);
 	memset(block, 0, TEST_BLOCK_BYTES);
@@ -300,12 +301,11 @@ ZTEST(i2s_dw_underrun, test_underrun_isr_exit_keeps_clock_disables_tx)
 
 	zassert_equal(test_data.tx.state, I2S_STATE_ERROR, "state not ERROR after underrun");
 	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) != 0,
-		     "CER.CLKEN cleared on underrun -- clock not kept alive");
-	zassert_true((fake_regs.TER & I2S_TER_TXCHEN_Msk) == 0,
-		     "TER.TXCHEN still set after underrun");
+	             "CER.CLKEN cleared on underrun -- clock not kept alive");
+	zassert_true((fake_regs.TER & I2S_TER_TXCHEN_Msk) == 0, "TER.TXCHEN still set after underrun");
 	zassert_true((fake_regs.IMR & (I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk)) ==
-			     (I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk),
-		     "TX interrupt not disabled after underrun");
+	                 (I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk),
+	             "TX interrupt not disabled after underrun");
 }
 
 /* (b) PREPARE, then a same-rate restart, does NOT call set_rate. */
@@ -323,8 +323,8 @@ ZTEST(i2s_dw_underrun, test_prepare_restart_same_rate_skips_set_rate)
 	before = fake_set_rate_calls;
 	tx_start();
 
-	zassert_equal(fake_set_rate_calls, before,
-		      "set_rate called on a skip-eligible same-rate restart");
+	zassert_equal(
+	    fake_set_rate_calls, before, "set_rate called on a skip-eligible same-rate restart");
 	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) != 0, "clock not kept on across restart");
 }
 
@@ -384,8 +384,8 @@ ZTEST(i2s_dw_underrun, test_drain_gates_clock)
  */
 ZTEST(i2s_dw_underrun, test_rx_start_invalidates_tx_restart_skip)
 {
-	int rc;
-	int before;
+	int               rc;
+	int               before;
 	struct i2s_config rx_cfg;
 
 	tx_configure(16000);
@@ -395,7 +395,7 @@ ZTEST(i2s_dw_underrun, test_rx_start_invalidates_tx_restart_skip)
 	tx_prepare();
 
 	rx_cfg = make_cfg(48000, &test_rx_slab);
-	rc = i2s_dw_configure(&test_dev, I2S_DIR_RX, &rx_cfg);
+	rc     = i2s_dw_configure(&test_dev, I2S_DIR_RX, &rx_cfg);
 	zassert_equal(rc, 0, "rx configure failed: %d", rc);
 	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
 	zassert_equal(rc, 0, "rx start failed: %d", rc);
@@ -405,7 +405,7 @@ ZTEST(i2s_dw_underrun, test_rx_start_invalidates_tx_restart_skip)
 	tx_start();
 
 	zassert_true(fake_set_rate_calls > before,
-		     "TX restart skipped reprogramming after RX repointed the shared clock");
+	             "TX restart skipped reprogramming after RX repointed the shared clock");
 }
 
 /* (f) Resume, then start, reprograms. */
@@ -426,13 +426,53 @@ ZTEST(i2s_dw_underrun, test_resume_forces_reprogram_on_next_start)
 
 	rc = i2s_resume(&test_dev);
 	zassert_equal(rc, 0, "resume failed: %d", rc);
-	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) != 0,
-		     "resume did not re-enable CER.CLKEN");
+	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) != 0, "resume did not re-enable CER.CLKEN");
 
 	tx_write_block();
 	before = fake_set_rate_calls;
 	tx_start();
 
+	zassert_true(fake_set_rate_calls > before, "TX restart after resume skipped reprogramming");
+}
+
+/*
+ * (g) A TX rate change in i2s_dw_configure() (round-2 review finding 1)
+ * invalidates the one-shot restart-skip flag: TX underrun (arms the flag,
+ * clock stays on) -> PREPARE -> i2s_dw_configure() at a DIFFERENT rate ->
+ * write -> start must reprogram, not skip onto the OLD rate's divider.
+ *
+ * MUTATION-PROVEN: with i2s_dw_configure()'s
+ * `stream->clk_restart_skip_ok = false;` line removed (the finding-1 fix
+ * for this specific invalidation site), this goes RED -- the TX restart
+ * wrongly finds the stale flag still armed and CER.CLKEN still set, so it
+ * skips set_rate entirely and `fake_set_rate_calls > before` is false.
+ * Restored after the mutation run; see the PR report.
+ */
+ZTEST(i2s_dw_underrun, test_configure_rate_change_invalidates_tx_restart_skip)
+{
+	int before;
+	int rc;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+	i2s_tx_irq_handler(&test_dev);
+	tx_prepare();
+
+	tx_configure(48000);
+
+	tx_write_block();
+	before = fake_set_rate_calls;
+	tx_start();
+
+	/* Free the block DROP picked up by start() -- unlike (a), this test
+	 * never runs the block to completion through the ISR, so without this
+	 * the block leaks out of the shared test_tx_slab for the rest of the
+	 * suite (finite K_MEM_SLAB_DEFINE_STATIC capacity). Run before the
+	 * assertion so cleanup still happens if the assertion below aborts. */
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "drop failed: %d", rc);
+
 	zassert_true(fake_set_rate_calls > before,
-		     "TX restart after resume skipped reprogramming");
+	             "TX restart skipped reprogramming after a rate change in configure()");
 }
