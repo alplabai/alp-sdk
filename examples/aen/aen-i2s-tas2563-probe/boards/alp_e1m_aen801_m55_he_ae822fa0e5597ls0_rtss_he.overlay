@@ -56,6 +56,20 @@
  * alp-i2c0, SoC I2C2) is a BOARD fact, already enabled at the board layer
  * for every AEN801/AEN803 app -- see examples/aen/aen-bmi323-regcheck's
  * overlay for the same argument made in full. Nothing to add here.
+ *
+ * ACOUSTIC LOOPBACK ADDITION (test/u46-i2s-tas2563-on-reworked-mux):
+ * `pdm@4902d000` (the HP PDM, NOT `lppdm@43002000`) + its P6_1/P6_0 pinctrl
+ * are transcribed from examples/aen/aen-pdm-mic-alif and
+ * examples/aen/aen-evk-demo's overlays -- see either file's header for the
+ * full from-alif.tsv derivation. Only the FIRST mic pair (U19 LEFT / U20
+ * RIGHT, PDM_C0/D0) is declared: <alp/audio.h>'s Zephyr backend caps
+ * channels at 2 (src/backends/audio/zephyr_drv.c), so the second pair
+ * (U25/U26 on PDM_C1/D1) is unreachable through the portable capture API
+ * regardless of whether its pads are declared here -- same reasoning
+ * aen-evk-demo's phase 11 already used for this exact mic. NO MUX in this
+ * path -- see src/main.c's file header for the netlist trace confirming
+ * PDM_C0/D0 reach U19/U20 through nothing but series resistors (R69-R72),
+ * unlike the I2S0/SDIO paths above.
  */
 
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
@@ -192,5 +206,48 @@
 		compatible = "alp,pin-array";
 		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
 			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};
+
+/*
+ * ============================================================================
+ * On-board PDM mics (the acoustic loopback listener) -- see the file-header
+ * ACOUSTIC LOOPBACK ADDITION note above
+ * ============================================================================
+ */
+
+&pinctrl {
+	pinctrl_pdm0: pinctrl_pdm0 {
+		/* Clock (output) -- no input-enable needed. C0 = P6_1. */
+		group0 {
+			pinmux = <PIN_P6_1__PDM_C0_C>;
+		};
+		/* Data (input) -- input-enable sets the pad REN, same trap called
+		 * out for the SPI1 MISO group above. D0 = P6_0. */
+		group1 {
+			pinmux = <PIN_P6_0__PDM_D0_C>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	pdm: pdm@4902d000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x4902d000 0x1000>;
+		interrupts = <145 3>, <146 3>, <147 3>;
+		interrupt-names = "warning_intr", "error_intr", "audio_det_intr";
+		pinctrl-0 = <&pinctrl_pdm0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		status = "okay";
+	};
+};
+
+/ {
+	aliases {
+		alp-pdm0 = &pdm;
 	};
 };
