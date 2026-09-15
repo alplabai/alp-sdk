@@ -818,9 +818,11 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   particular a TDM clock error (SLASET3D §7.3.12, p.35-36) -- and
  *   nothing in the audio stack re-arms it afterwards.  On the E1M-EVK
  *   (`e1m-aen-evk-03`), both amps were observed to self-transition
- *   `PWR_CTL` from `0Ch` (MODE ACTIVE) to `0Eh` (MODE SHUTDOWN) about
- *   1 s after the I2S bit clock stopped, and to stay in SHUTDOWN once
- *   playback resumed (#2146).  The bit clock stops on every I2S stop
+ *   `PWR_CTL` from `0Ch` (MODE ACTIVE) to `0Eh` (MODE SHUTDOWN) within
+ *   roughly 100 ms of the I2S bit clock stopping -- already `0Eh` at a
+ *   +100 ms poll, `0Ch` still at +0 ms -- and to stay in SHUTDOWN once
+ *   playback resumed, with no self-heal observed at any gap tested (200,
+ *   500, 1500, 3000 ms) (#2146).  The bit clock stops on every I2S stop
  *   path and on an underrun (`zephyr/drivers/i2s/i2s_dw.c`
  *   `tx_stream_disable()` calls `i2s_clock_disable()`), so a restart
  *   after either needs this call to be heard again.

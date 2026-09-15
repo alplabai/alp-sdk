@@ -215,9 +215,10 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  *   following that restart -- that write is what confirms the clock is
  *   actually running again, since a start can be deferred until it.
  *   For example, the TI TAS2563 smart amplifier enters software
- *   shutdown roughly 1 s after its TDM bit clock stops and needs
- *   `tas2563_resume()` (`<alp/chips/tas2563.h>`) called the same way,
- *   once the clock is confirmed back.
+ *   shutdown within roughly 100 ms of its TDM bit clock stopping, with no
+ *   self-heal observed once it does, and needs `tas2563_resume()`
+ *   (`<alp/chips/tas2563.h>`) called the same way, once the clock is
+ *   confirmed back.
  */
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 
