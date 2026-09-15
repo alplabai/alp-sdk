@@ -2111,12 +2111,561 @@ static int melody_main(void)
 
 #endif /* PROBE_MELODY */
 
+/* ================================================================== */
+/* PROBE_LOOPBACK -- speakers as a controlled stimulus for the PDM mics */
+/* ================================================================== */
+/* Compile-time mode, same shape as PROBE_LISTEN/PROBE_MELODY above: `west
+ * build ... -- -DPROBE_LOOPBACK=1` replaces main()'s ENTIRE body with
+ * loop_main(); with none of PROBE_LISTEN/PROBE_MELODY/PROBE_LOOPBACK
+ * defined, main() is unchanged, and with exactly one of the other two
+ * defined, this whole block is preprocessed away -- so none of the three
+ * existing builds' object code moves by adding this one. loop_main()
+ * duplicates listen_main()/melody_main()'s bring-up sequence rather than
+ * sharing a helper with either, for the same byte-identity reason those
+ * two don't share one with each other.
+ *
+ * PROBE_LISTEN and PROBE_MELODY both proved the speakers are real and
+ * audible on e1m-aen-evk-03. This mode turns that proven output into a
+ * CONTROLLED acoustic stimulus for the PDM mics (U19 LEFT / U20 RIGHT),
+ * which this app has never shown actually capturing real audio (the
+ * original acoustic-loopback windows never got a clean silicon run -- see
+ * the file header's "FIRST-SILICON BENCH RESULT" / "THIRD FINDING"
+ * sections). Six ~2 s windows (three silent, three tone) look for the
+ * mic's Goertzel bins tracking WHICH tone is playing, not just that
+ * something loud happened.
+ *
+ * ISSUE #2146 (this run's root cause, found via PROBE_MELODY's bench
+ * data): the TAS2563 self-shuts-down within ~1 s of the I2S bit clock
+ * stopping. This mode NEVER calls alp_audio_out_stop() until the very
+ * end -- every silent window is a stream of zero-sample writes, exactly
+ * like PROBE_MELODY's rests/gap fix. */
+#if defined(PROBE_LOOPBACK)
+
+#include <string.h> /* memset(), used by the silence writers below. */
+
+/* PWR_CTL address, copied verbatim from chips/tas2563/tas2563.c's own
+ * (private) TAS2563_REG_PWR_CTL -- see PROBE_LISTEN's LISTEN_REG_PWR_CTL /
+ * PROBE_MELODY's MELODY_REG_PWR_CTL above for the same value/citation.
+ * loop_reg_read() mirrors those blocks' own read helpers (same two
+ * alp_i2c_write_read() calls, legitimate because tas2563_t.bus/.addr are
+ * public fields). */
+#define LOOP_REG_PWR_CTL 0x02u /* Power control (SLASET3D §7.5.4, p.65). */
+
+static uint8_t loop_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+static void loop_print_pwr_ctl(const char *label, tas2563_t amps[AMP_COUNT])
+{
+	printf("[loop] PWR_CTL %s: 0x%02x=0x%02x 0x%02x=0x%02x\n",
+	       label,
+	       amp_addrs[0],
+	       loop_reg_read(&amps[0], LOOP_REG_PWR_CTL),
+	       amp_addrs[1],
+	       loop_reg_read(&amps[1], LOOP_REG_PWR_CTL));
+}
+
+/* Window shape, all in whole SOUND_FRAMES_PER_BLOCK/MIC_FRAMES_PER_BLOCK
+ * blocks (both exactly 16 ms at their own sample rate -- 256/16000 =
+ * 768/48000 -- so the I2S write loop and the PDM read loop stay in lock
+ * step one block at a time, the same simplification PROBE_LISTEN/
+ * PROBE_MELODY rely on). Chosen so every Goertzel bin below (1000 Hz,
+ * 500 Hz, 700 Hz, 1400 Hz) is EXACT at CAPTURE_FRAMES=46080 samples (all
+ * four k = N*f/fs come out integer -- see the git history for the LCM
+ * derivation): CAPTURE_ITERS=60 is the smallest multiple of 5 (so
+ * 60*768=46080 is a multiple of 480, the LCM constraint) near "about 1 s"
+ * (960 ms). PRE_SETTLE (832 ms) gives the volume/frequency change and the
+ * decimator time to settle BEFORE the explicit 200 ms DISCARD this task
+ * asked for; DISCARD+CAPTURE together read real mic data, DISCARD's just
+ * never accumulated into any stat. Total = 125 blocks = 2.000 s exact,
+ * this task's "about 2 s" per window. */
+#define LOOP_PRE_SETTLE_ITERS 52u /* 832 ms. */
+#define LOOP_DISCARD_ITERS    13u /* 208 ms -- "discard the first 200 ms". */
+#define LOOP_CAPTURE_ITERS    60u /* 960 ms -- "about 1 s". */
+#define LOOP_WINDOW_ITERS     (LOOP_PRE_SETTLE_ITERS + LOOP_DISCARD_ITERS + LOOP_CAPTURE_ITERS)
+#define LOOP_CAPTURE_FRAMES   (LOOP_CAPTURE_ITERS * MIC_FRAMES_PER_BLOCK) /* 46080. */
+
+typedef enum { LOOP_SILENCE, LOOP_TONE } loop_kind_t;
+
+typedef struct {
+	const char *name;
+	loop_kind_t kind;
+	uint32_t    freq_hz; /* only meaningful if kind == LOOP_TONE. */
+	uint8_t     volume;  /* only meaningful if kind == LOOP_TONE. */
+} loop_window_t;
+
+static const loop_window_t loop_windows[] = {
+	{ "SILENCE-A", LOOP_SILENCE, 0, 0 },      { "TONE-1k-VOL16", LOOP_TONE, 1000, 16 },
+	{ "TONE-1k-VOL48", LOOP_TONE, 1000, 48 }, { "SILENCE-B", LOOP_SILENCE, 0, 0 },
+	{ "TONE-500-VOL48", LOOP_TONE, 500, 48 }, { "SILENCE-C", LOOP_SILENCE, 0, 0 },
+};
+#define LOOP_WINDOW_COUNT ARRAY_SIZE(loop_windows)
+
+static alp_status_t loop_write_sine_block(alp_audio_out_t *spk,
+                                          int16_t         *buf,
+                                          uint32_t        *phase_acc,
+                                          uint32_t         samples_per_cycle)
+{
+	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+		float theta =
+		    GOERTZEL_TWO_PI * (float)(*phase_acc % samples_per_cycle) / (float)samples_per_cycle;
+		int16_t sample  = (int16_t)((float)SOUND_TONE_AMPLITUDE * sinf(theta));
+		buf[2u * f]     = sample;
+		buf[2u * f + 1] = sample;
+		(*phase_acc)++;
+	}
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+static alp_status_t loop_write_silence_block(alp_audio_out_t *spk, int16_t *buf)
+{
+	memset(buf, 0, SOUND_FRAMES_PER_BLOCK * 2u * sizeof(int16_t));
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+/* Fixed-point (Q13) single-bin Goertzel -- the per-sample recurrence
+ * (loop_goertzel_step()) is pure integer arithmetic, per this task's
+ * "keep all per-sample work integer and cheap" ask: the round-4b lesson
+ * (examples/aen/aen-i2s-tas2563-probe's own earlier fix, this file's
+ * capture_window()) was that float per-sample math with no CONFIG_FPU can
+ * starve the mic's slab. coeff_q13 is computed ONCE per window (float
+ * cosf() is fine there, it's not in the per-sample path); s_prev/s_prev2
+ * stay int64 to leave enormous headroom against a full-scale, exactly-
+ * resonant 46080-sample accumulation. loop_goertzel_power() runs ONCE per
+ * channel per window (after every sample for this window is already
+ * read), not per sample -- float/double there costs nothing. */
+typedef struct {
+	int32_t coeff_q13;
+	int64_t s_prev;
+	int64_t s_prev2;
+} loop_goertzel_t;
+
+static void
+loop_goertzel_reset(loop_goertzel_t *g, uint32_t freq_hz, uint32_t n_samples, uint32_t fs_hz)
+{
+	float k = (float)n_samples * (float)freq_hz / (float)fs_hz; /* exact, see the table above. */
+	float omega  = GOERTZEL_TWO_PI * k / (float)n_samples;
+	float coeff  = 2.0f * cosf(omega);
+	g->coeff_q13 = (int32_t)(coeff * 8192.0f + (coeff >= 0.0f ? 0.5f : -0.5f));
+	g->s_prev    = 0;
+	g->s_prev2   = 0;
+}
+
+static inline void loop_goertzel_step(loop_goertzel_t *g, int32_t x)
+{
+	int64_t s  = (int64_t)x + (((int64_t)g->coeff_q13 * g->s_prev) >> 13) - g->s_prev2;
+	g->s_prev2 = g->s_prev;
+	g->s_prev  = s;
+}
+
+static double loop_goertzel_power(const loop_goertzel_t *g)
+{
+	double s1 = (double)g->s_prev;
+	double s2 = (double)g->s_prev2;
+	double c  = (double)g->coeff_q13 / 8192.0;
+	return s1 * s1 + s2 * s2 - c * s1 * s2;
+}
+
+/* Per-channel accumulator, live ONLY during a window's CAPTURE_FRAMES --
+ * min/max/sum/sumsq are int64/int16, updated once per sample, no float. */
+typedef struct {
+	int16_t         minv;
+	int16_t         maxv;
+	int64_t         sum;
+	int64_t         sumsq;
+	loop_goertzel_t f1k;
+	loop_goertzel_t f500;
+	loop_goertzel_t ref700;
+	loop_goertzel_t ref1400;
+} loop_chan_stats_t;
+
+/* Per-channel RESULT, computed ONCE per window from loop_chan_stats_t
+ * after every sample is in -- see loop_chan_stats_t's comment. dB values
+ * are each bin's power EXPRESSED RELATIVE TO this window's own reference
+ * bins (the (700 Hz + 1400 Hz)/2 average, per this task's ask), not an
+ * absolute level -- so ref700_db/ref1400_db hover near 0 dB by
+ * construction and f1k_db/f500_db read large and positive only when that
+ * frequency's tone is actually playing. */
+typedef struct {
+	int32_t p2p;
+	int32_t rms;
+	int32_t dc;
+	double  f1k_db;
+	double  f500_db;
+	double  ref700_db;
+	double  ref1400_db;
+} loop_chan_result_t;
+
+static void loop_print_window(const char *name, const loop_chan_result_t r[MIC_CHANNELS])
+{
+	for (size_t c = 0; c < MIC_CHANNELS; c++) {
+		printf("[loop] %-14s ch%zu p2p=%-6d rms=%-6d dc=%-6d f1k=%6.1fdB f500=%6.1fdB "
+		       "ref700=%6.1fdB ref1400=%6.1fdB\n",
+		       name,
+		       c,
+		       r[c].p2p,
+		       r[c].rms,
+		       r[c].dc,
+		       r[c].f1k_db,
+		       r[c].f500_db,
+		       r[c].ref700_db,
+		       r[c].ref1400_db);
+	}
+}
+
+/* Runs one window (up to a second attempt if the mic drops a burst mid-
+ * window -- see the -EIO handling below): writes I2S continuously (tone or
+ * silence, NEVER a stop -- issue #2146), reads one PDM block per I2S block
+ * in lock-step, discards PRE_SETTLE+DISCARD blocks' mic data with zero
+ * per-sample work, then accumulates CAPTURE blocks' worth into
+ * loop_chan_stats_t. Returns false only if the mic never produced clean
+ * data even after one STOP/START recovery retry -- the caller must then
+ * treat this window (and therefore the whole run) as INCONCLUSIVE, never
+ * silently substitute stale/partial results. */
+static bool loop_run_window(alp_audio_out_t     *spk,
+                            alp_audio_in_t      *mic,
+                            const loop_window_t *w,
+                            int16_t             *out_buf,
+                            int16_t             *mic_scratch,
+                            loop_chan_result_t   results[MIC_CHANNELS],
+                            uint32_t            *overrun_count)
+{
+	for (int attempt = 0; attempt < 2; attempt++) {
+		loop_chan_stats_t stats[MIC_CHANNELS];
+		for (size_t c = 0; c < MIC_CHANNELS; c++) {
+			stats[c].minv  = INT16_MAX;
+			stats[c].maxv  = INT16_MIN;
+			stats[c].sum   = 0;
+			stats[c].sumsq = 0;
+			loop_goertzel_reset(&stats[c].f1k, 1000u, LOOP_CAPTURE_FRAMES, MIC_SAMPLE_RATE_HZ);
+			loop_goertzel_reset(&stats[c].f500, 500u, LOOP_CAPTURE_FRAMES, MIC_SAMPLE_RATE_HZ);
+			loop_goertzel_reset(&stats[c].ref700, 700u, LOOP_CAPTURE_FRAMES, MIC_SAMPLE_RATE_HZ);
+			loop_goertzel_reset(&stats[c].ref1400, 1400u, LOOP_CAPTURE_FRAMES, MIC_SAMPLE_RATE_HZ);
+		}
+
+		uint32_t phase_acc = 0;
+		uint32_t samples_per_cycle =
+		    (w->kind == LOOP_TONE) ? (SOUND_SAMPLE_RATE_HZ / w->freq_hz) : 0;
+		bool         mic_error  = false;
+		alp_status_t mic_err_rc = ALP_OK;
+
+		for (uint32_t it = 0; it < LOOP_WINDOW_ITERS; it++) {
+			if (w->kind == LOOP_TONE) {
+				(void)loop_write_sine_block(spk, out_buf, &phase_acc, samples_per_cycle);
+			} else {
+				(void)loop_write_silence_block(spk, out_buf);
+			}
+
+			size_t       got = 0;
+			alp_status_t rrc = alp_audio_in_read(
+			    mic, mic_scratch, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
+				mic_error  = true;
+				mic_err_rc = rrc;
+				break;
+			}
+
+			if (it >= LOOP_PRE_SETTLE_ITERS + LOOP_DISCARD_ITERS) {
+				for (uint32_t f = 0; f < MIC_FRAMES_PER_BLOCK; f++) {
+					for (size_t c = 0; c < MIC_CHANNELS; c++) {
+						int16_t x = mic_scratch[f * MIC_CHANNELS + c];
+						if (x < stats[c].minv) stats[c].minv = x;
+						if (x > stats[c].maxv) stats[c].maxv = x;
+						stats[c].sum += x;
+						stats[c].sumsq += (int64_t)x * (int64_t)x;
+						loop_goertzel_step(&stats[c].f1k, x);
+						loop_goertzel_step(&stats[c].f500, x);
+						loop_goertzel_step(&stats[c].ref700, x);
+						loop_goertzel_step(&stats[c].ref1400, x);
+					}
+				}
+			}
+			/* PRE_SETTLE/DISCARD blocks: read, then nothing else -- zero
+			 * per-sample work, the cheapest possible consumer. */
+		}
+
+		if (mic_error) {
+			bool dropped = (mic_err_rc == ALP_ERR_IO);
+			printf("[loop] %s: alp_audio_in_read %s rc=%d -- recovering (STOP/START), attempt "
+			       "%d/2\n",
+			       w->name,
+			       dropped ? "reports a DROPPED burst (-EIO, overrun)" : "FAILED",
+			       (int)mic_err_rc,
+			       attempt + 1);
+			if (dropped) (*overrun_count)++;
+			alp_status_t stop_rc  = alp_audio_in_stop(mic);
+			alp_status_t start_rc = alp_audio_in_start(mic);
+			printf("[loop] %s: mic recovery alp_audio_in_stop -> %d, alp_audio_in_start -> %d\n",
+			       w->name,
+			       (int)stop_rc,
+			       (int)start_rc);
+			if (attempt == 0 && stop_rc == ALP_OK && start_rc == ALP_OK) continue;
+			return false;
+		}
+
+		for (size_t c = 0; c < MIC_CHANNELS; c++) {
+			double p1k            = loop_goertzel_power(&stats[c].f1k);
+			double p500           = loop_goertzel_power(&stats[c].f500);
+			double p700           = loop_goertzel_power(&stats[c].ref700);
+			double p1400          = loop_goertzel_power(&stats[c].ref1400);
+			double p_ref          = (p700 + p1400) / 2.0 + 1e-6;
+			results[c].f1k_db     = 10.0 * log10((p1k + 1e-6) / p_ref);
+			results[c].f500_db    = 10.0 * log10((p500 + 1e-6) / p_ref);
+			results[c].ref700_db  = 10.0 * log10((p700 + 1e-6) / p_ref);
+			results[c].ref1400_db = 10.0 * log10((p1400 + 1e-6) / p_ref);
+			results[c].p2p        = (int32_t)stats[c].maxv - (int32_t)stats[c].minv;
+			results[c].dc         = (int32_t)(stats[c].sum / (int64_t)LOOP_CAPTURE_FRAMES);
+			results[c].rms = (int32_t)sqrtf((float)stats[c].sumsq / (float)LOOP_CAPTURE_FRAMES);
+		}
+		return true;
+	}
+	return false;
+}
+
+static int loop_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_LOOPBACK): speakers as mic stimulus ===\n");
+	(void)alp_init();
+
+	/* --- Same bring-up as PROBE_LISTEN/PROBE_MELODY: bridge, mux,
+	 * AMP_ENABLE, tas2563_init x2, level MIN, configure_i2s x2 ---------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[loop] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[loop] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[loop] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[loop] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[loop] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[loop] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[loop] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[loop] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[loop] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[loop] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[loop] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	/* --- 1. PDM mic open+start, THEN I2S audio-out open+start+ACTIVE ---- */
+	alp_audio_in_t *mic    = alp_audio_in_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = MIC_SAMPLE_RATE_HZ,
+	    .channels         = MIC_CHANNELS,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = MIC_FRAMES_PER_BLOCK,
+	});
+	alp_status_t    mic_rc = (mic != NULL) ? alp_audio_in_start(mic) : alp_last_error();
+	bool            mic_ok = (mic != NULL) && (mic_rc == ALP_OK);
+	printf("[loop] alp_audio_in_open+start(PDM, U19 LEFT/U20 RIGHT) -> %d\n", (int)mic_rc);
+
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[loop] alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t arc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
+		printf("[loop] tas2563_set_mode(0x%02x, ACTIVE) -> %d\n", amp_addrs[i], (int)arc);
+	}
+
+	static int16_t     out_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+	static int16_t     mic_scratch[MIC_FRAMES_PER_BLOCK * MIC_CHANNELS];
+	loop_chan_result_t win_r[LOOP_WINDOW_COUNT][MIC_CHANNELS];
+	bool               win_ok[LOOP_WINDOW_COUNT] = { false, false, false, false, false, false };
+	uint32_t           overrun_count             = 0;
+
+	bool can_run = mic_ok && spk_rc == ALP_OK;
+	if (!can_run) {
+		printf("[loop] %s -- skipping all windows\n",
+		       !mic_ok ? "PDM mic never opened/started" : "I2S3 never started");
+	}
+
+	for (size_t w = 0; w < LOOP_WINDOW_COUNT && can_run; w++) {
+		if (loop_windows[w].kind == LOOP_TONE) {
+			alp_status_t vrc = alp_audio_out_set_volume(spk, loop_windows[w].volume);
+			printf("[loop] alp_audio_out_set_volume(%u) [%s] -> %d\n",
+			       loop_windows[w].volume,
+			       loop_windows[w].name,
+			       (int)vrc);
+			if (w == 1) loop_print_pwr_ctl("before first tone", amps); /* TONE-1k-VOL16. */
+		}
+
+		win_ok[w] = loop_run_window(
+		    spk, mic, &loop_windows[w], out_buf, mic_scratch, win_r[w], &overrun_count);
+		if (win_ok[w]) {
+			loop_print_window(loop_windows[w].name, win_r[w]);
+		} else {
+			printf("[loop] %s: no clean data -- run is INCONCLUSIVE\n", loop_windows[w].name);
+		}
+
+		if (w == 4) loop_print_pwr_ctl("after last tone", amps); /* TONE-500-VOL48. */
+	}
+
+	/* --- Stop I2S (the ONLY stop this run makes -- nothing plays after
+	 * it), amps to SHUTDOWN -------------------------------------------- */
+	alp_status_t stop_rc = (spk != NULL) ? alp_audio_out_stop(spk) : ALP_ERR_NOT_READY;
+	printf("[loop] alp_audio_out_stop(I2S3) -> %d\n", (int)stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[loop] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+		tas2563_deinit(&amps[i]);
+	}
+	if (spk != NULL) alp_audio_out_close(spk);
+	if (mic != NULL) alp_audio_in_close(mic);
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	/* --- VERDICT ------------------------------------------------------ */
+	bool all_ok = can_run;
+	for (size_t w = 0; w < LOOP_WINDOW_COUNT; w++) {
+		if (!win_ok[w]) all_ok = false;
+	}
+	if (!all_ok) {
+		printf("[loop] VERDICT mics=INCONCLUSIVE -- %s\n",
+		       !can_run ? "mic/I2S never started" : "one or more windows failed to capture");
+	} else {
+		double f1k_silence  = (win_r[0][0].f1k_db + win_r[0][1].f1k_db) / 2.0;
+		double f1k_tone48   = (win_r[2][0].f1k_db + win_r[2][1].f1k_db) / 2.0;
+		double f500_silence = (win_r[0][0].f500_db + win_r[0][1].f500_db) / 2.0;
+		double f500_tone48  = (win_r[4][0].f500_db + win_r[4][1].f500_db) / 2.0;
+		double f1k_at_500   = (win_r[4][0].f1k_db + win_r[4][1].f1k_db) / 2.0;
+
+		static const size_t silence_windows[] = { 0, 3, 5 };
+		static const size_t tone_windows[]    = { 2, 4 };
+
+		int32_t silence_p2p = win_r[0][0].p2p;
+		for (size_t i = 0; i < ARRAY_SIZE(silence_windows); i++) {
+			size_t w2 = silence_windows[i];
+			for (size_t c = 0; c < MIC_CHANNELS; c++) {
+				if (win_r[w2][c].p2p > silence_p2p) silence_p2p = win_r[w2][c].p2p;
+			}
+		}
+		int32_t tone_p2p_min = win_r[2][0].p2p;
+		for (size_t i = 0; i < ARRAY_SIZE(tone_windows); i++) {
+			size_t w2 = tone_windows[i];
+			for (size_t c = 0; c < MIC_CHANNELS; c++) {
+				if (win_r[w2][c].p2p < tone_p2p_min) tone_p2p_min = win_r[w2][c].p2p;
+			}
+		}
+
+		bool c1 = (f1k_tone48 - f1k_silence) >= 15.0;
+		bool c2 = (f500_tone48 - f500_silence) >= 15.0 && (f1k_at_500 - f1k_silence) < 15.0;
+		bool c3 = tone_p2p_min >= 2 * silence_p2p;
+
+		printf("[loop] criterion 1 (1kHz rise): TONE-1k-VOL48 f1k=%.1fdB - SILENCE-A f1k=%.1fdB "
+		       "= %.1fdB (need >= 15.0) -- %s\n",
+		       f1k_tone48,
+		       f1k_silence,
+		       f1k_tone48 - f1k_silence,
+		       c1 ? "PASS" : "FAIL");
+		printf("[loop] criterion 2 (500Hz rise, 1kHz stays put): TONE-500-VOL48 f500=%.1fdB - "
+		       "SILENCE-A f500=%.1fdB = %.1fdB (need >= 15.0); f1k at TONE-500-VOL48=%.1fdB - "
+		       "SILENCE-A f1k=%.1fdB = %.1fdB (need < 15.0) -- %s\n",
+		       f500_tone48,
+		       f500_silence,
+		       f500_tone48 - f500_silence,
+		       f1k_at_500,
+		       f1k_silence,
+		       f1k_at_500 - f1k_silence,
+		       c2 ? "PASS" : "FAIL");
+		printf("[loop] criterion 3 (p2p above silence): min tone p2p=%d >= 2 * max silence "
+		       "p2p=%d (%d) -- %s\n",
+		       tone_p2p_min,
+		       silence_p2p,
+		       2 * silence_p2p,
+		       c3 ? "PASS" : "FAIL");
+
+		printf("[loop] VERDICT mics=%s\n", (c1 && c2 && c3) ? "LIVE" : "DEAD");
+	}
+	printf("[loop] overrun count this run: %u\n", overrun_count);
+	printf("[loop] done\n");
+	return 0;
+}
+
+#endif /* PROBE_LOOPBACK */
+
 int main(void)
 {
 #if defined(PROBE_LISTEN)
 	return listen_main();
 #elif defined(PROBE_MELODY)
 	return melody_main();
+#elif defined(PROBE_LOOPBACK)
+	return loop_main();
 #else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();

@@ -28,3 +28,14 @@ endif()
 if(DEFINED PROBE_MELODY)
   target_compile_definitions(app PRIVATE PROBE_MELODY=${PROBE_MELODY})
 endif()
+
+# PROBE_LOOPBACK (test/u46-i2s-tas2563-on-reworked-mux): compile-time switch
+# to src/main.c's speaker-to-mic loopback variant (six tone/silence windows,
+# integer-only per-sample stats + fixed-point Goertzel, a LIVE/DEAD/
+# INCONCLUSIVE verdict) instead of the normal automated probe or the
+# PROBE_LISTEN/PROBE_MELODY playback-only variants. Opt in with
+# `west build ... -- -DPROBE_LOOPBACK=1`; unset (the default), this app is
+# unchanged, same as PROBE_LISTEN/PROBE_MELODY unset.
+if(DEFINED PROBE_LOOPBACK)
+  target_compile_definitions(app PRIVATE PROBE_LOOPBACK=${PROBE_LOOPBACK})
+endif()
