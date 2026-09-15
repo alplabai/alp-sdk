@@ -525,23 +525,10 @@ static void sdhc_dwc_read_response(struct dwc_sdhc_regs *regs, struct sdhc_comma
 		cmd->response[3] = regs->DWC_SDHC_RESP67_R;
 
 		if (IS_ENABLED(CONFIG_SDHC_RSP_136_HAS_CRC)) {
-			/*
-			 * response[0] is the least significant word (RESP01).
-			 * Shifting the 120-bit value left by 8 means each word takes
-			 * its new low byte from the top byte of the next LOWER word,
-			 * so walk downward and read response[i - 1] before it is
-			 * itself shifted. The previous loop pulled from
-			 * response[i + 1] instead, which put RESP67's always-zero
-			 * top byte into CSD bits [71:64] and truncated a v2 C_SIZE
-			 * to 16 bits (bench, evk-03: 0x3BAFF read as 0xBAFF, #2131).
+			/* See sdhc_dwc_realign_r2_response() (sdhc_dwc.h) for why the
+			 * shift walks downward and carries from the next LOWER word.
 			 */
-			for (int i = 3; i >= 0; i--) {
-				cmd->response[i] <<= 8;
-				if (i != 0) {
-					cmd->response[i] |=
-						cmd->response[i - 1] >> 24;
-				}
-			}
+			sdhc_dwc_realign_r2_response(cmd->response);
 		}
 	} else {
 		cmd->response[0] = regs->DWC_SDHC_RESP01_R;

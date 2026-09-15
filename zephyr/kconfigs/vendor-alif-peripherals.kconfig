@@ -505,8 +505,12 @@ config SDHC_RSP_136_HAS_CRC
 	  left by 8 bits to put every field where the SD stack expects it.
 	  The driver has always gated that shift on this symbol, but nothing
 	  defined it, so IS_ENABLED() was 0 and the shift was dead code.
-	  Suspected symptom on the bench (evk-03): a ~119 GiB card whose CSD
-	  C_SIZE reads 0x3BAFF was reported as 524800 sectors (256 MiB).
+	  Confirmed on the bench (evk-03), same card, same MBR ending at
+	  sector 0x0EEC0000 (250347520): with the symbol undefined the stack
+	  reported 524800 sectors; with the symbol defined but the realign
+	  loop's carry direction still wrong (#2131) it reported 49020928
+	  (CSD C_SIZE 0x3BAFF truncated to 0xBAFF); with both fixes it
+	  reports the correct 250347520 sectors.
 
 endif # SDHC_DWC
 
