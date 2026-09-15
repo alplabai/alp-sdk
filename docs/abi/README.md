@@ -172,10 +172,18 @@ had changed in place without moving.
 An EXACT (unchanged) hash match is always preferred when one exists.
 Absent that, a value-changed match is only made when the symbol name
 is **unambiguous** across the whole diff -- exactly one header lost it
-and exactly one header gained it. If several headers lost or gained
-the same name at once, nothing is guessed: it falls back to plain
-`REMOVED` + `ADDED` for all of them, same as before this feature
-existed.
+and exactly one header gained it -- **scoped per typedef `kind`**
+(struct/union/enum/opaque/fnptr/alias; every non-typedef category has
+no `kind` and is unaffected). A same-named symbol of a DIFFERENT kind
+never pairs, no matter how unambiguous the bare name looks: a struct
+`alp_x_t` disappearing from one header and an unrelated enum
+`alp_x_t` appearing in a header it still reaches is not the same
+symbol that moved, it is a genuine removal that happens to coincide
+with an unrelated addition, and must still read `REMOVED` + `ADDED`
+so the freeze gate catches it. If several headers lost or gained the
+same `(name, kind)` at once, nothing is guessed either: it falls back
+to plain `REMOVED` + `ADDED` for all of them, same as before this
+feature existed.
 
 This used to compare
 against a frozen `docs/abi/v0.1-snapshot.json` baseline via `git show
