@@ -94,7 +94,8 @@ typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, voi
  *  two bits are the ONLY way to tell "genuinely read off the wire this
  *  attempt" apart from "zeroed because that phase's transceive never
  *  completed" -- see @ref cc3501e_link_log_entry_t::hdr_bytes /
- *  ::reply_hdr. A caller classifying deaf-armed vs desynced vs crashed from
+ *  @ref cc3501e_link_log_entry_t::reply_hdr. A caller classifying
+ *  deaf-armed vs desynced vs crashed from
  *  those byte patterns MUST check the matching VALID bit first; an unset bit
  *  means the byte array is all-zero and means nothing. */
 #define CC3501E_LINK_LOG_HDR_BYTES_VALID \
