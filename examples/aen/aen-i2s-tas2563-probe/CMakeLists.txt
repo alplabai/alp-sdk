@@ -10,3 +10,12 @@ target_sources(app PRIVATE src/main.c)
 # touching i2s3 on the reworked e1m-aen-evk-03 bench board -- see the board
 # overlay and src/main.c.
 target_sources(app PRIVATE src/cc3501e_bridge.c src/cc3501e_gpio_routes.c)
+
+# PROBE_LISTEN (test/u46-i2s-tas2563-on-reworked-mux): compile-time switch to
+# src/main.c's attended-listening variant (long continuous tone + a page-0
+# register dump, no PASS/FAIL verdict) instead of the normal automated probe.
+# Opt in with `west build ... -- -DPROBE_LISTEN=1`; unset (the default),
+# this app is unchanged.
+if(DEFINED PROBE_LISTEN)
+  target_compile_definitions(app PRIVATE PROBE_LISTEN=${PROBE_LISTEN})
+endif()

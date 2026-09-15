@@ -1369,8 +1369,376 @@ static void run_tdm_clock_check(tas2563_t       *amps,
 	*stopped_valid = true;
 }
 
+/* ================================================================== */
+/* PROBE_LISTEN -- attended listening variant (no PASS/FAIL verdict)  */
+/* ================================================================== */
+/* Compile-time mode, NOT a runtime branch: `west build ... -- -DPROBE_LISTEN=1`
+ * (CMakeLists.txt) defines PROBE_LISTEN, which replaces main()'s ENTIRE body
+ * with listen_main() below -- the normal probe (PROBE_LISTEN undefined) is
+ * byte-for-byte the same object code as before this section was added.
+ *
+ * WHY THIS EXISTS: the r2137 run (image md5 77c1a833b43cb78aaac6ee59799dd124)
+ * had every rc return 0 -- including alp_audio_out_stop()/start() after
+ * #2137 -- and TDM_CLOCK read clear in BASELINE, DURING, and STOPPED on both
+ * amps, yet the maintainer standing at the bench heard nothing at J14/J21.
+ * TDM_CLOCK clear only proves the TDM bit clock is reaching the amp; it says
+ * nothing about whether the amp is actually driving its Class-D output into
+ * the speaker load, whether the 0.4 s acoustic windows this probe uses were
+ * just too short for a human ear/room, or whether some OTHER page-0 field
+ * (a mute bit, a slot mismatch that still clocks but plays silence, a boost/
+ * charge-pump fault that isn't a latched fault bit) is the real reason nothing
+ * is audible. This variant swaps the probe's brief automated windows for one
+ * long, loud, continuous tone plus a wide page-0 register dump, so a human at
+ * the bench can correlate "do I hear it" against "what does the chip say".
+ *
+ * REGISTER SET: every address below is copied VERBATIM from chips/tas2563/
+ * tas2563.c's own (private, not exported by <alp/chips/tas2563.h>) TAS2563_REG_*
+ * -- same values, same SLASET3D section/page citations, LISTEN_REG_ prefix
+ * only to make clear this is this app's OWN copy, not a reach into driver
+ * internals. NOT dumped: INT_MASK0-3, MISC_CFG2, and a dedicated playback
+ * digital-volume register -- chips/tas2563/tas2563.c never reads or writes
+ * any of the three, and nothing in this repository (driver, header, doc)
+ * cites a SLASET3D section/address for them. Printing an invented hex
+ * address for a real register on real hardware is exactly the kind of
+ * register-address guess the house data-fidelity rule forbids -- flagged
+ * here and in this task's report, not silently skipped. INT_CLK (0x30,
+ * "INT & CLK CFG") is dumped as the closest GROUNDED stand-in for "chip
+ * status/clock-detect" the driver actually defines; it is not a dedicated
+ * status register. */
+#if defined(PROBE_LISTEN)
+
+#define LISTEN_REG_PAGE      0x00u /* Device page          (SLASET3D §7.5.2,  p.65). */
+#define LISTEN_REG_PWR_CTL   0x02u /* Power control        (SLASET3D §7.5.4,  p.65). */
+#define LISTEN_REG_PB_CFG1   0x03u /* Playback config 1    (SLASET3D §7.5.5,  p.66) -- AMP_LEVEL. */
+#define LISTEN_REG_MISC_CFG1 0x04u /* Misc configuration 1 (SLASET3D §7.5.6,  p.67). */
+#define LISTEN_REG_TDM_CFG0  0x06u /* TDM configuration 0  (SLASET3D §7.5.8,  p.68). */
+#define LISTEN_REG_TDM_CFG1  0x07u /* TDM configuration 1  (SLASET3D §7.5.9,  p.69). */
+#define LISTEN_REG_TDM_CFG2  0x08u /* TDM configuration 2  (SLASET3D §7.5.10, p.69). */
+#define LISTEN_REG_TDM_CFG5  0x0Bu /* TDM TX V-sense slot  (SLASET3D §7.5.13, p.71). */
+#define LISTEN_REG_TDM_CFG6  0x0Cu /* TDM TX I-sense slot  (SLASET3D §7.5.14, p.71). */
+#define LISTEN_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (SLASET3D §7.5.36, p.82). */
+#define LISTEN_REG_INT_LTCH1 0x25u /* Latched interrupts 1 (SLASET3D §7.5.37, p.83). */
+#define LISTEN_REG_INT_LTCH3 \
+	0x26u                          /* Latched interrupts 2 (SLASET3D §7.5.38, p.84) -- driver's own
+                                     * naming skips "LTCH2"; see chips/tas2563/tas2563.c. */
+#define LISTEN_REG_INT_LTCH4 0x27u /* Latched interrupts 3 (SLASET3D §7.5.39, p.84). */
+#define LISTEN_REG_INT_CLK   0x30u /* INT & CLK CFG        (SLASET3D §7.5.43, p.86). */
+#define LISTEN_REG_MISC      0x32u /* IRQZ pin polarity    (SLASET3D §7.5.45, p.87). */
+#define LISTEN_REG_REVID     0x7Du /* Revision + PG ID, RO (SLASET3D §7.5.60, p.93). */
+#define LISTEN_REG_BOOK      0x7Fu /* Device book          (SLASET3D §7.5.62, p.94). */
+
+/* Continuous-tone block counts, matching the app's existing SOUND_SAMPLE_RATE_HZ
+ * (16 kHz) / SOUND_FRAMES_PER_BLOCK (256) -- one block is exactly 16 ms
+ * (256/16000 s). 20 s divides exactly; 5 s does not (313*16ms = 5.008s, the
+ * nearest whole block) -- fine for a human-timed listening phase. */
+#define LISTEN_BLOCK_MS      (SOUND_FRAMES_PER_BLOCK * 1000u / SOUND_SAMPLE_RATE_HZ) /* 16 ms */
+#define LISTEN_TONE1_BLOCKS  1250u /* 1250 * 16 ms = 20.000 s exact. */
+#define LISTEN_TONE2_BLOCKS  313u  /* 313  * 16 ms =  5.008 s (nearest whole block to 5 s). */
+#define LISTEN_REGDUMP_EVERY 125u  /* 125  * 16 ms =  2.000 s exact -- the "every 2 s" cadence. */
+
+/* Raw single-register read, mirroring chips/tas2563/tas2563.c's own private
+ * reg_read() (same two calls) -- legitimate because tas2563_t.bus/.addr are
+ * PUBLIC fields (include/alp/chips/tas2563.h), not a vendor/internal
+ * reach-around. 0xFF is poisoned: not a valid reset value for any register
+ * dumped here, so a read that silently fails is visible in the printout. */
+static uint8_t listen_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+/* Full register dump this task's step 2 asked for -- see the #if PROBE_LISTEN
+ * block header comment for exactly what is and is not included and why.
+ * Leaves PAGE/BOOK at whatever it read them as (both already page 0/book 0
+ * on every call site below); nothing here ever leaves page 0, so there is
+ * nothing to restore -- unlike the digital-volume register this task asked
+ * for, which is NOT dumped (no grounded address, see above). */
+static void listen_reg_dump(tas2563_t *ctx, uint8_t addr, const char *label)
+{
+	printf("[listen][regs] 0x%02x %-14s PAGE=0x%02x BOOK=0x%02x PWR_CTL=0x%02x "
+	       "PB_CFG1=0x%02x MISC_CFG1=0x%02x\n",
+	       addr,
+	       label,
+	       listen_reg_read(ctx, LISTEN_REG_PAGE),
+	       listen_reg_read(ctx, LISTEN_REG_BOOK),
+	       listen_reg_read(ctx, LISTEN_REG_PWR_CTL),
+	       listen_reg_read(ctx, LISTEN_REG_PB_CFG1),
+	       listen_reg_read(ctx, LISTEN_REG_MISC_CFG1));
+	printf("[listen][regs] 0x%02x %-14s TDM_CFG0=0x%02x TDM_CFG1=0x%02x TDM_CFG2=0x%02x "
+	       "TDM_CFG5=0x%02x TDM_CFG6=0x%02x\n",
+	       addr,
+	       label,
+	       listen_reg_read(ctx, LISTEN_REG_TDM_CFG0),
+	       listen_reg_read(ctx, LISTEN_REG_TDM_CFG1),
+	       listen_reg_read(ctx, LISTEN_REG_TDM_CFG2),
+	       listen_reg_read(ctx, LISTEN_REG_TDM_CFG5),
+	       listen_reg_read(ctx, LISTEN_REG_TDM_CFG6));
+	printf("[listen][regs] 0x%02x %-14s INT_LTCH0=0x%02x INT_LTCH1=0x%02x INT_LTCH3=0x%02x "
+	       "INT_LTCH4=0x%02x INT_CLK=0x%02x MISC=0x%02x REVID=0x%02x\n",
+	       addr,
+	       label,
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH0),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH1),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH3),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH4),
+	       listen_reg_read(ctx, LISTEN_REG_INT_CLK),
+	       listen_reg_read(ctx, LISTEN_REG_MISC),
+	       listen_reg_read(ctx, LISTEN_REG_REVID));
+}
+
+/* Step 3/4's periodic subset (PWR_CTL, INT_LTCH0..4, INT_CLK-as-status) --
+ * fewer registers than listen_reg_dump() so it fits the 2 s/1 s cadence
+ * without spamming the console during a 20 s tone. */
+static void listen_reg_dump_brief(tas2563_t *ctx, uint8_t addr, const char *label)
+{
+	printf("[listen][regs] 0x%02x %-14s PWR_CTL=0x%02x INT_LTCH0=0x%02x INT_LTCH1=0x%02x "
+	       "INT_LTCH3=0x%02x INT_LTCH4=0x%02x INT_CLK(status)=0x%02x\n",
+	       addr,
+	       label,
+	       listen_reg_read(ctx, LISTEN_REG_PWR_CTL),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH0),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH1),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH3),
+	       listen_reg_read(ctx, LISTEN_REG_INT_LTCH4),
+	       listen_reg_read(ctx, LISTEN_REG_INT_CLK));
+}
+
+/* One CONTINUOUS 1 kHz sine block -- unlike write_one_tone_block() (a square
+ * wave, reused for the automated probe's short Goertzel windows, where the
+ * extra harmonics don't matter), this task explicitly asked for a sine.
+ * Amplitude is SOUND_TONE_AMPLITUDE (20000/32767, the SAME headroom-limited
+ * peak the file header's HARDWARE SAFETY section already analyses), not raw
+ * INT16_MAX -- "full-scale" here means this app's own existing safety
+ * ceiling, not literally the bit pattern 0x7FFF; SOUND_VOL_MAX (48/255) is
+ * the other half of that same, already-reviewed safety margin and is what
+ * this mode is told to use. Blocks back-to-back, so the only silence in a
+ * tone phase is a write() that itself failed -- counted by the caller. */
+static alp_status_t listen_write_sine_block(alp_audio_out_t *spk,
+                                            int16_t         *buf,
+                                            uint32_t        *phase_acc,
+                                            uint32_t         samples_per_cycle)
+{
+	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+		float theta =
+		    GOERTZEL_TWO_PI * (float)(*phase_acc % samples_per_cycle) / (float)samples_per_cycle;
+		int16_t sample  = (int16_t)((float)SOUND_TONE_AMPLITUDE * sinf(theta));
+		buf[2u * f]     = sample;
+		buf[2u * f + 1] = sample;
+		(*phase_acc)++;
+	}
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+/* count blocks/write failures over `blocks` continuous sine blocks, dumping
+ * listen_reg_dump_brief() every LISTEN_REGDUMP_EVERY blocks (~2 s). Shared by
+ * both tone phases (step 3 and step 5). */
+static uint32_t listen_play_sine(alp_audio_out_t *spk,
+                                 int16_t         *buf,
+                                 uint32_t        *phase_acc,
+                                 uint32_t         samples_per_cycle,
+                                 uint32_t         blocks,
+                                 tas2563_t        amps[AMP_COUNT])
+{
+	uint32_t write_failures = 0;
+	for (uint32_t b = 0; b < blocks; b++) {
+		alp_status_t wrc = listen_write_sine_block(spk, buf, phase_acc, samples_per_cycle);
+		if (wrc != ALP_OK) {
+			write_failures++;
+			printf(
+			    "[listen] alp_audio_out_write FAILED (block %u/%u) rc=%d\n", b, blocks, (int)wrc);
+		}
+		if (b != 0 && (b % LISTEN_REGDUMP_EVERY) == 0) {
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				listen_reg_dump_brief(&amps[i], amp_addrs[i], "TONE");
+			}
+		}
+	}
+	return write_failures;
+}
+
+static int listen_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_LISTEN): attended listening test ===\n");
+	(void)alp_init();
+
+	/* --- 1. Same bring-up as the probe: bridge, mux, AMP_ENABLE ---------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[listen] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[listen] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[listen] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[listen] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[listen] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[listen] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[listen] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[listen] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[listen] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[listen] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[listen] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	/* --- 2. Register dump after configure --------------------------------- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		listen_reg_dump(&amps[i], amp_addrs[i], "POST-CONFIG");
+	}
+
+	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+	uint32_t       phase_acc         = 0;
+	const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
+
+	/* --- 3. Countdown, I2S start, both amps ACTIVE, 20 s continuous tone -- */
+	printf("[listen] tone starts in 3 s\n");
+	k_msleep(1000);
+	printf("[listen] tone starts in 2 s\n");
+	k_msleep(1000);
+	printf("[listen] tone starts in 1 s\n");
+	k_msleep(1000);
+
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[listen] alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	if (spk_rc == ALP_OK) spk_rc = alp_audio_out_set_volume(spk, SOUND_VOL_MAX);
+	printf("[listen] alp_audio_out_set_volume(%u) -> %d\n", SOUND_VOL_MAX, (int)spk_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t arc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
+		printf("[listen] tas2563_set_mode(0x%02x, ACTIVE) -> %d\n", amp_addrs[i], (int)arc);
+	}
+
+	uint32_t total_write_failures = 0;
+	if (spk_rc == ALP_OK) {
+		printf("[listen] TONE ON: 1 kHz full-scale, 20 s -- listen at J14/J21 speakers\n");
+		total_write_failures += listen_play_sine(
+		    spk, tone_buf, &phase_acc, samples_per_cycle, LISTEN_TONE1_BLOCKS, amps);
+	} else {
+		printf("[listen] I2S3 did not start -- skipping tone phase\n");
+	}
+
+	/* --- 4. Silence phase: I2S stopped, amps still ACTIVE, 5 s ------------ */
+	printf("[listen] TONE OFF (I2S stopped, amps ACTIVE) 5 s\n");
+	alp_status_t stop_rc = alp_audio_out_stop(spk);
+	printf("[listen] alp_audio_out_stop(I2S3) -> %d\n", (int)stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		listen_reg_dump_brief(&amps[i], amp_addrs[i], "SILENCE");
+	}
+	for (unsigned s = 0; s < 5u; s++) {
+		k_msleep(1000);
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			listen_reg_dump_brief(&amps[i], amp_addrs[i], "SILENCE");
+		}
+	}
+
+	/* --- 5. Second tone phase: restart, 5 s, stop -------------------------- */
+	printf("[listen] TONE ON again 5 s\n");
+	alp_status_t restart_rc = alp_audio_out_start(spk);
+	printf("[listen] alp_audio_out_start(I2S3) [restart] -> %d\n", (int)restart_rc);
+	if (restart_rc == ALP_OK) {
+		total_write_failures += listen_play_sine(
+		    spk, tone_buf, &phase_acc, samples_per_cycle, LISTEN_TONE2_BLOCKS, amps);
+	} else {
+		printf("[listen] restart failed -- skipping second tone phase\n");
+	}
+	alp_status_t stop2_rc = alp_audio_out_stop(spk);
+	printf("[listen] alp_audio_out_stop(I2S3) [final] -> %d\n", (int)stop2_rc);
+
+	printf("[listen] total alp_audio_out_write() failures this run: %u\n", total_write_failures);
+
+	/* --- 6. Shutdown + teardown -------------------------------------------- */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[listen] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+		tas2563_deinit(&amps[i]);
+	}
+	if (spk != NULL) alp_audio_out_close(spk);
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	printf("[listen] done\n");
+	return 0;
+}
+
+#endif /* PROBE_LISTEN */
+
 int main(void)
 {
+#if defined(PROBE_LISTEN)
+	return listen_main();
+#else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();
 
@@ -1925,4 +2293,5 @@ int main(void)
 	printf("[probe] TDM_CLOCK VERDICT: %s\n", verdict_str(v));
 	printf("[probe] done\n");
 	return 0;
+#endif /* !PROBE_LISTEN */
 }
