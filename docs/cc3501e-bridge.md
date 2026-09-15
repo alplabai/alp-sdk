@@ -102,15 +102,17 @@ command dispatcher — see
 [`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) (`transport_spi.c` /
 `transport_sdio.c`).
 
-### Current rev: hardware-CS SPI (SS0 + per-phase READY)
+### Current rev: hardware-CS SPI (SS0; optional READY)
 
 The current E1M-AEN board rev runs the inter-chip SPI as a **proper
 hardware-framed link**: SCLK/MOSI/MISO **plus a peripheral-driven
 chip-select** — Alif `P14_7` = `SPI1_SS0_C` ↔ the CC3501E SS pad.  The
 Alif dwc-ssi master asserts/deasserts **SS0 per transfer**, so every
-transaction is HW-framed by a real CS edge, and each of the four phases
-(request header → request payload → reply header → reply payload) is
-gated by a per-phase READY handshake.  This is **not** a CS-less /
+transaction is HW-framed by a real CS edge; each of the four phases
+(request header → request payload → reply header → reply payload) also
+runs a fixed inter-phase settle, OPTIONALLY extended by a host-IRQ READY
+read when a board wires one in (unwired, and READY is left NULL, by
+default — see "Bench-validated" below).  This is **not** a CS-less /
 clock-count scheme and **not** a GPIO bodge — the CS is the SPI
 peripheral's own slave-select.  Validated on silicon 2026-06-24 (E1M-AEN801
 EVK bench, fw v0.0.207.0).
@@ -167,8 +169,10 @@ working HW-CS transport, not a prerequisite for it.  See
 
 #### Bench-validated: HW-CS bridge survives radio ops + concurrent Wi-Fi/BLE (2026-06-24)
 
-With the hardware SS0 chip-select per transfer + per-phase READY gating,
-the link stays framed across every radio op — including the ~15 s STA
+With the hardware SS0 chip-select per transfer (READY is OPTIONAL and left
+unwired on the boards these numbers were taken on — see
+`chips/cc3501e/cc3501e_core.c`'s `cc3501e_reply_gate()` comment), the link
+stays framed across every radio op — including the ~15 s STA
 association — and Wi-Fi and BLE run **concurrently**.  Measured on silicon
 (E1M-AEN801 EVK):
 
@@ -695,9 +699,12 @@ The rest of the `ALP_CC3501E_WAKE_*` bitmap is validation only. A per-source sle
 wake mask has no SDK surface: the Power driver hardwires RTC + `CSYSPWRUPREQ`, and
 `GPIO_CFG_SHUTDOWN_WAKE_*` is a per-pin *shutdown* knob, not a sleep one.
 
-READY (`GPIO17` → `P2_6`) cannot wake the device — it is an output *from* the
-CC3501E telling the host its slave is armed. After `cc3501e_power_off()` the only
-way back is `cc3501e_reset()` driving `WIFI_EN`.
+READY (CC3501E `GPIO17`) cannot wake the device — it is an output *from* the
+CC3501E telling the host its slave is armed. (Which Alif pad carries it, if
+any, is board/revision-specific — see `chips/cc3501e/cc3501e_core.c`'s
+`cc3501e_reply_gate()` comment; it is not universally `P2_6`.) After
+`cc3501e_power_off()` the only way back is `cc3501e_reset()` driving
+`WIFI_EN`.
 
 ## Peripherals not proxied today
 

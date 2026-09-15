@@ -226,7 +226,10 @@
  *     SPI1.MOSI    P14_5          out   GPIO_28
  *     SPI1.MISO    P14_4          in    GPIO_29
  *     SPI1.SS0     P14_7          out   CC35 SPI0 CSN
- *     READY        P2_6           in    GPIO_17
+ *
+ * NOT wired: READY.  Alif P2_6 (E1M pad AH7 / I2S1_SCLK) is the EVK's Arduino
+ * CK_RST net on this R2 module, not CC35 GPIO_17 -- see the P2_6 comment
+ * further down and chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate().
  *
  * WHAT THIS OVERLAY DELIBERATELY OMITS versus aen-cc3501e-bringup's: the
  * host-side peripheral-DMA wiring (dma0 / evtrtr0 / the `dmas` property, and
@@ -264,26 +267,22 @@
 			input-enable;
 		};
 
-		/*
-		 * P2_6 = the CC3501E READY / host-IRQ input (CC35 GPIO_17). Its mux
-		 * default already IS GPIO, but the pad input buffer still has to be
-		 * enabled here or alp_gpio_read(P2_6) reads 0 forever whatever the
-		 * CC35 drives -- and the host then silently falls back to fixed
-		 * settle gaps instead of gating each reply phase on the slave's
-		 * actual re-arm, which is the race that produces byte-shifted
-		 * replies.
-		 *
-		 * It lives inside THIS state rather than a standalone one applied at
-		 * runtime because P2_6's alternate function is SPI1_SCLK_A: a second
-		 * pinctrl pass after SPI1 is up killed the bridge on silicon. Applied
-		 * in the SPI driver's single init pass it is inert.
-		 */
-		group2 {
-			pinmux = <PIN_P2_6__GPIO>;
-			input-enable;
-		};
 	};
 };
+
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
+ * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK
+ * carrier repurposes as the Arduino header's CK_RST (metadata/boards/
+ * e1m-evk.yaml); the real READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv). This app therefore does not
+ * mux or input-enable P2_6, and does not wire fw->ready_pin -- see
+ * src/cc3501e_bridge.c and chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
+ * comment. A board (or a hand-reworked r1 unit) that genuinely wires GPIO17
+ * to P2_6 can opt back in: add a pinctrl group muxing PIN_P2_6__GPIO with
+ * input-enable (applied inside this state's single init pass, not a
+ * standalone runtime one -- a second pinctrl pass after SPI1 is up killed
+ * the bridge on silicon), enable &gpio2, add an alp_pins entry for it, and
+ * set fw->ready_pin in cc3501e_bridge_bringup(). */
 
 /*
  * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
@@ -341,11 +340,6 @@
 	status = "okay";
 };
 
-/* gpio2 carries the READY input (CC35 GPIO_17 -> Alif P2_6). */
-&gpio2 {
-	status = "okay";
-};
-
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
@@ -353,12 +347,14 @@
 	};
 
 	/*
-	 * Compact 4-entry control array: the 3 SoM-internal CC3501E nets, in
-	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect,
-	 * plus SD_RST (index [3], native Alif GPIO -- see SD_RST_PIN_ID in
-	 * src/main.c). None of these are E1M edge pads, so this app does not
-	 * use the 52-slot positional E1M map; a production board file appends
-	 * SoM-internal control nets after the E1M pad slots.
+	 * Compact 3-entry control array: the 2 SoM-internal CC3501E control
+	 * nets, in the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices
+	 * expect, plus SD_RST (index [2], native Alif GPIO -- see SD_RST_PIN_ID
+	 * in src/main.c). No READY entry -- see the P2_6 comment further up
+	 * (this pad is not the CC3501E READY net). None of these are E1M edge
+	 * pads, so this app does not use the 52-slot positional E1M map; a
+	 * production board file appends SoM-internal control nets after the E1M
+	 * pad slots.
 	 *
 	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
 	 * one broke pin resolution outright on the bench (2026-08-26): the
@@ -367,9 +363,8 @@
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>,    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
-			<&gpio14 2 GPIO_ACTIVE_HIGH>;   /* [3] SD_RST      (P14_2, native Alif GPIO, bit-banged) */
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>, /* [1] E_WIFI.NRST (P15_1_FLEX) */
+			<&gpio14 2 GPIO_ACTIVE_HIGH>; /* [2] SD_RST      (P14_2, native Alif GPIO, bit-banged) */
 	};
 };

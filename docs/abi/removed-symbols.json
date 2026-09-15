@@ -63,15 +63,6 @@
       "issue": 1440,
       "reason": "The name and its paired metadata/chips/gd32_swd.yaml `target_expected_idcode` field both presented 0x6BA02477 as an armed wrong-board guard. It is not: that value is CHANGELOG.md's own record of a measurement of a DIFFERENT target on the same board (the V2N CM33 DAP on e1mx-v2n-m1-01), and separately the generic ADIv5 Cortex-M33 r0p1 SW-DPv2 architectural default -- never measured on a GD32G553 with a probe attached (#1369). `target_expected_idcode` is now absent from the manifest entirely, matching the stance metadata/schemas/soc-spec-v1.schema.json's own `expect_dpidr` guidance takes: an absent key is the correct published 'unknown'. The macro is kept, renamed, as an informational-only reference nothing gates on.",
       "replacement": "GD32_SWD_GENERIC_CM33_R0P1_IDCODE"
-    },
-    {
-      "header": "alp/boards/alp_e1m_evk.h",
-      "category": "typedef",
-      "symbol": "evk_sdio_select_t",
-      "release": "v0.17.0",
-      "issue": 2129,
-      "reason": "EVK_SDIO_M2E_KEY/EVK_SDIO_SDCARD's 0/1 values were swapped: the E1M-EVK-2626-R2 74LVC157/74LV3257 SDIO mux select was documented and enumerated with S LOW/HIGH backwards against the carrier netlist and a silicon-confirmed microSD read. The typedef's generated-header move (alp_e1m_evk.h -> alp_e1m_evk_routes.h, #637) already happened before this fix and would have read as a clean MOVED against the last released (v0.15) baseline, but MOVED detection requires an identical hash and this fix also changes the enumerator values, so it now reads as a plain REMOVED instead. Out-of-tree code passing EVK_SDIO_SDCARD or EVK_SDIO_M2E_KEY as a raw 0/1 literal (rather than the symbolic name) now gets the opposite value.",
-      "replacement": "evk_sdio_select_t"
     }
   ]
 }

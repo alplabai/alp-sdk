@@ -546,14 +546,14 @@ static cc3501e_t cc35_fw;
  * settle requirement). */
 #define SD_MUX_SETTLE_MS 10u
 
-/* SD_RST (P14_2) -- index [3] in the board overlay's `alp,pin-array` node
+/* SD_RST (P14_2) -- index [2] in the board overlay's `alp,pin-array` node
  * (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay). A native
  * Alif GPIO, NOT a CC3501E-proxied one -- unlike the mux ENABLE above, this
  * pin is reached through the ordinary Alif GPIO backend (gpio14), so it
  * needs no bridge and no route-table entry. Raw index, not an
  * ALP_E1M_GPIO_* macro, for the same reason CC3501E_BRIDGE_PIN_* are raw
  * indices: this pin is SoM-internal, not an E1M edge pad. */
-#define SD_RST_PIN_ID 3u
+#define SD_RST_PIN_ID 2u
 
 /* Reset-pulse timings, taken verbatim from vendor Linux's
  * arch/arm/mach-ensemble/sdhci-alif-reset.c (an arch_initcall that runs
