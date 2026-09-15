@@ -83,6 +83,24 @@
 	chosen {
 		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
 		/delete-property/ zephyr,code-partition;
+		/*
+		 * SYSTEM RAM in global on-chip SRAM0 (@0x02000000), NOT the
+		 * generated default `zephyr,sram = &dtcm`. The SDHC is a DMA bus
+		 * master: in ADMA2 mode it fetches the descriptor table and
+		 * reads/writes data buffers over its own master port, and both
+		 * live in .bss. Bench, evk-03, head b4946d5f1: with .bss in DTCM,
+		 * ACMD51 (the first data read) failed ERR_INT_STAT 0x0200 /
+		 * ADMA_ERR 0x01 BOTH with the raw local address (ADMA_SA
+		 * 0x20000a00) AND with CONFIG_SDHC_DWC_DMA_ADDR_TRANSLATE=y
+		 * (ADMA_SA 0x58800a00, the HE DTCM global alias) -- the alias
+		 * is not on this master's path either. Same finding the xHCI
+		 * host hit on this SoC (its DMA master cannot reach DTCM even
+		 * via 0x58800000) and the same fix the GMAC uses on this exact
+		 * board target (examples/aen/aen-ethernet-link overlay). SRAM0
+		 * is CPU addr == DMA addr, so local_to_global() is a
+		 * pass-through there. Needs CONFIG_DCACHE=n (prj.conf).
+		 */
+		zephyr,sram = &sram0;
 	};
 };
 
