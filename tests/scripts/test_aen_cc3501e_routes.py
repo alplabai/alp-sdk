@@ -255,37 +255,42 @@ def _revision_dependent_e1m_pads() -> set[str]:
     return pads
 
 
-# Which pure verdict function gates which revision-dependent pad's open, per
-# app -- e.g. examples/aen/aen-evk-demo/src/hw_rev_verdict.h's
-# aen_evkdemo_hw_rev_confirms_io8_safe() for E1M_GPIO_IO8. A KeyError here
-# (a guarded pad this dict has no entry for) is deliberate: it means a NEW
-# revision-dependent pad showed up in a standalone table with no guard
-# function named for it yet, and this test cannot know what to require
-# without a human naming it (#2138 round-2 review).
-PAD_GUARD_FUNCTIONS = {
-    "E1M_GPIO_IO8": "aen_evkdemo_hw_rev_confirms_io8_safe",
-}
+def _strip_c_comments_and_literals(text: str) -> str:
+    """Blank out /* */ comments, // comments, "..." string literals and
+    '...' char literals -- preserving every other character (including
+    newlines) so a reported string offset still lines up with the real
+    file, and so a structural check downstream can never be satisfied by
+    text sitting inside a comment or a string (round-3 #2138 review: a
+    prior version of this test only stripped comments, so `return
+    PHASE_FAIL;` typed into a printf() format string still counted as the
+    guard's return statement).
 
-
-def _strip_c_comments(text: str) -> str:
-    """Blank out /* */ and // comments, preserving every other character
-    (including newlines) so a reported string offset still lines up with
-    the real file. A regex-free character scan, not a full C tokenizer --
+    Handles backslash escapes inside string/char literals (main.c's own
+    guard message embeds `\\"%.*s\\"`) so an escaped quote does not end the
+    literal early. A regex-free character scan, not a full C tokenizer --
     good enough for a structural check over one function body, not general
-    C source (a string literal containing "/*" would fool it; the guard
-    region this test scans over contains none)."""
+    C source."""
     out: list[str] = []
     i, n = 0, len(text)
     while i < n:
-        if text[i:i + 2] == "/*":
+        two = text[i:i + 2]
+        if two == "/*":
             end = text.find("*/", i + 2)
             end = n if end == -1 else end + 2
             out.append("".join(c if c == "\n" else " " for c in text[i:end]))
             i = end
-        elif text[i:i + 2] == "//":
+        elif two == "//":
             end = text.find("\n", i)
             end = n if end == -1 else end
             out.append(" " * (end - i))
+            i = end
+        elif text[i] in "\"'":
+            quote = text[i]
+            j = i + 1
+            while j < n and text[j] != quote:
+                j += 2 if text[j] == "\\" else 1
+            end = min(j + 1, n)
+            out.append("".join(c if c == "\n" else " " for c in text[i:end]))
             i = end
         else:
             out.append(text[i])
@@ -315,25 +320,340 @@ def _function_body(text: str, signature_re: str, main_c_path: Path) -> str:
     raise AssertionError(f"{main_c_path}: function body starting at offset {start} never closes")
 
 
+def _brace_depth_at(body: str, index: int) -> int:
+    """Net `{`/`}` balance in `body[:index]`, counting `body`'s OWN opening
+    brace (expected at `body[0]`) as depth 1 -- so code sitting directly in
+    a function's body, wrapped by nothing but the function itself, is depth
+    1; code inside one more `{ ... }` (an `if`, a dead branch, ...) is depth
+    2. `body` must already be comment/string-stripped (round-3 #2138
+    review: a brace typed into a string or comment must never count)."""
+    depth = 0
+    for ch in body[:index]:
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+    return depth
+
+
+def _block_ends_with_bare_statement(inner: str, statement: str) -> bool:
+    """True iff `statement` (e.g. "return PHASE_FAIL;") is `inner`'s OWN
+    final statement -- not merely a trailing SUBSTRING, which `if (0) return
+    PHASE_FAIL;` also satisfies (round-3 #2138 review mutant (e)). The
+    character immediately before it, skipping whitespace, must END a prior
+    statement (`;`) or OPEN this block (`{`) -- never continue one, the way
+    an `if (...)` head immediately before `return` does."""
+    stripped = inner.rstrip()
+    if not stripped.endswith(statement):
+        return False
+    before = stripped[: -len(statement)].rstrip()
+    return before == "" or before[-1] in "{;"
+
+
+# --- examples/aen/aen-evk-demo's phase 11 IO8 guard -- pinned to its exact
+# shape (round-3 #2138 review: a looser regex over the raw call text passed
+# every one of 7 named mutants -- the guard wrapped in `#if 0`, in a dead
+# `if (0) { ... }`, in a non-dominating `if (ctx->carrier_bus == NULL) {
+# ... }`, `&& (0)` appended to the condition, a dead `if (0) return
+# PHASE_FAIL;` inside the block, `return PHASE_FAIL;` sitting only inside a
+# string literal, and the guard called with hardcoded `(ALP_OK,
+# "2626-r2")` instead of the real variables). Pinning the exact variable
+# names is deliberate, not general: this is ONE app's ONE guard, and a
+# future revision-dependent pad's OWN guard gets its OWN checker in
+# PAD_GUARD_CHECKERS below, not a generalisation of this one. ---
+
+IO8_OPEN_CALL = "alp_gpio_open(ALP_E1M_GPIO_IO8)"
+_IO8_GUARD_READ_RE = re.compile(r"hwrev_rc\s*=\s*alp_hw_info_read\s*\(\s*&\s*hwrev_info\s*\)\s*;")
+_IO8_GUARD_IF_RE = re.compile(
+    r"if\s*\(\s*!\s*aen_evkdemo_hw_rev_confirms_io8_safe\s*\(\s*hwrev_rc\s*,\s*hwrev_info\.som_hw_rev\s*\)\s*\)\s*\{"
+)
+# The ONE preprocessor conditional allowed between phase_sound()'s start and
+# the IO8 open -- this app's own playback switch. Checked against the real
+# file (main.c: the guard sits directly under this `#if`, with no `#else`/
+# `#elif`/nested `#if` before the open) rather than assumed.
+_IO8_ALLOWED_PP_LINE = "#if AEN_EVKDEMO_SOUND_PLAYBACK"
+_PP_CONDITIONAL_RE = re.compile(r"^[ \t]*#[ \t]*(?:if|ifdef|ifndef|elif|else)\b[^\n]*$", re.MULTILINE)
+
+
+def _check_phase_sound_io8_guard(phase_sound_body: str) -> tuple[bool, str]:
+    """Structural check for aen-evk-demo's phase 11 r1/r2 IO8 guard.
+
+    `phase_sound_body` is `phase_sound()`'s `{ ... }` text (braces
+    included); RAW is fine -- this strips comments/string/char literals
+    itself, so it is safe to call directly with a hand-written synthetic
+    body in a test, not only with text `_function_body()` already stripped.
+
+    Returns `(True, "")` when EVERY one of these holds, in order, else
+    `(False, <which one failed>)`:
+      1. `alp_gpio_open(ALP_E1M_GPIO_IO8)` appears at all.
+      2. No preprocessor conditional other than the one allowed
+         `#if AEN_EVKDEMO_SOUND_PLAYBACK` line sits before that open.
+      3. `hwrev_rc = alp_hw_info_read(&hwrev_info);` appears before the
+         open, at brace depth 1 (not nested in any block).
+      4. `if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc,
+         hwrev_info.som_hw_rev)) {` appears after that, before the open,
+         ALSO at brace depth 1 -- so a copy sitting inside a dead `#if 0`,
+         `if (0) { ... }`, or a branch that does not dominate the open
+         (`if (ctx->carrier_bus == NULL) { ... }`) is rejected, and the
+         condition itself is pinned exactly (no trailing `&& (0)`, no
+         swapped-out constant arguments).
+      5. That `if`'s own block -- found by a brace-depth scan, not a lazy
+         "up to the first return-shaped substring" match -- closes before
+         the open, and its OWN final statement (see
+         `_block_ends_with_bare_statement`) is exactly `return
+         PHASE_FAIL;`.
+    """
+    body = _strip_c_comments_and_literals(phase_sound_body)
+
+    open_idx = body.find(IO8_OPEN_CALL)
+    if open_idx == -1:
+        return False, f"{IO8_OPEN_CALL!r} not found"
+    region = body[:open_idx]
+
+    pp_lines = [m.group(0).strip() for m in _PP_CONDITIONAL_RE.finditer(region)]
+    bad_pp = [ln for ln in pp_lines if ln != _IO8_ALLOWED_PP_LINE]
+    if bad_pp or len(pp_lines) > 1:
+        return False, (
+            f"unexpected preprocessor conditional(s) before the IO8 open: {pp_lines!r} "
+            f"(only one {_IO8_ALLOWED_PP_LINE!r} is allowed)"
+        )
+
+    read_match = _IO8_GUARD_READ_RE.search(region)
+    if read_match is None or _brace_depth_at(body, read_match.start()) != 1:
+        return False, (
+            "no 'hwrev_rc = alp_hw_info_read(&hwrev_info);' at brace depth 1 before the IO8 open"
+        )
+
+    if_match = _IO8_GUARD_IF_RE.search(region, read_match.end())
+    if if_match is None:
+        return False, (
+            "no 'if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, "
+            "hwrev_info.som_hw_rev)) {' after the read, before the IO8 open"
+        )
+    if _brace_depth_at(body, if_match.start()) != 1:
+        return False, "the guard if is nested inside another block (not brace depth 1)"
+
+    block_open = body.index("{", if_match.end() - 1)
+    depth, block_close = 0, None
+    for idx in range(block_open, len(body)):
+        if body[idx] == "{":
+            depth += 1
+        elif body[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                block_close = idx
+                break
+    if block_close is None:
+        return False, "the guard if's block never closes"
+    if block_close >= open_idx:
+        return False, "the guard if's block does not close before the IO8 open"
+
+    inner = body[block_open + 1:block_close]
+    if not _block_ends_with_bare_statement(inner, "return PHASE_FAIL;"):
+        return False, "'return PHASE_FAIL;' is not the guard block's own final statement"
+
+    return True, ""
+
+
+# --- Synthetic phase_sound()-shaped bodies proving _check_phase_sound_io8_
+# guard() itself, independent of whatever main.c currently contains
+# (#2138 round-3 review: "use synthetic phase_sound() bodies fed to the
+# checker function, so the test doesn't edit main.c"). The first two must
+# be ACCEPTED; every "mutant_*" one is a case the round-2 checker wrongly
+# accepted and this one must REJECT -- the seven the review named
+# (mutant_a_if_0 .. mutant_g_constant_args) plus four more from the same
+# review's own mutation script for the same reason (position/removal
+# mutants a lazier regex could still miss). ---
+
+_IO8_GUARD_GOOD_BARE = (
+    "{\n"
+    "\talp_hw_info_t hwrev_info;\n"
+    "\talp_status_t  hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+    "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+    "\t\tprintf(\"refusing\\n\");\n"
+    "\t\tctx->note = \"refused: hw_rev != 2626-r2 (#2138)\";\n"
+    "\t\treturn PHASE_FAIL;\n"
+    "\t}\n"
+    "\tmux_en = alp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+    "}\n"
+)
+
+# Same shape main.c actually uses: the whole thing lives under the app's
+# `#if AEN_EVKDEMO_SOUND_PLAYBACK` playback switch -- proves that ONE known
+# wrapper is allowed, not just a bare, unwrapped guard.
+_IO8_GUARD_GOOD_WITH_PLAYBACK_WRAPPER = (
+    "{\n"
+    "\tif (!device_is_ready(gpio5)) {\n"
+    "\t\treturn PHASE_FAIL;\n"
+    "\t}\n"
+    "#if AEN_EVKDEMO_SOUND_PLAYBACK\n"
+    "\talp_hw_info_t hwrev_info;\n"
+    "\talp_status_t  hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+    "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+    "\t\treturn PHASE_FAIL;\n"
+    "\t}\n"
+    "\tmux_en = alp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+    "#endif\n"
+    "\treturn PHASE_PASS;\n"
+    "}\n"
+)
+
+_IO8_GUARD_CASES: list[tuple[str, str, bool]] = [
+    ("good_bare", _IO8_GUARD_GOOD_BARE, True),
+    ("good_with_playback_wrapper", _IO8_GUARD_GOOD_WITH_PLAYBACK_WRAPPER, True),
+    # (a) guard wrapped in a dead `#if 0` (still textually present, never compiled).
+    ("mutant_a_guard_in_if_0_preprocessor", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "#if 0\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "#endif\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (b) guard wrapped in a dead `if (0) { ... }` C branch.
+    ("mutant_b_guard_in_if_0_dead_branch", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (0) {\n"
+        "\t\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\t\treturn PHASE_FAIL;\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (c) guard wrapped in a branch that does not dominate the open.
+    ("mutant_c_guard_in_nondominating_branch", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (ctx->carrier_bus == NULL) {\n"
+        "\t\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\t\treturn PHASE_FAIL;\n"
+        "\t\t}\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (d) `&& (0)` appended to the condition -- always false, so the `if`
+    # never refuses. The old `[^{};]*` argument class swallowed `) && (0`.
+    ("mutant_d_condition_and_zero", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev) && (0)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (e) a dead conditional return as the block's last statement.
+    ("mutant_e_dead_conditional_return", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\tif (0) return PHASE_FAIL;\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (f) "return PHASE_FAIL;" present only inside a string literal.
+    ("mutant_f_return_only_in_string_literal", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\tprintf(\"return PHASE_FAIL;\");\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # (g) hardcoded, always-safe constant arguments instead of the real vars.
+    ("mutant_g_hardcoded_safe_constant_args", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(ALP_OK, \"2626-r2\")) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    # Extra cases from the review's own mutation script, same reason:
+    ("mutant_todo_stub", (
+        "{\n"
+        "\t/* TODO: add the check here */\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    ("mutant_inverted_condition", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    ("mutant_guard_moved_after_open", (
+        "{\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "}\n"
+    ), False),
+    ("mutant_guard_removed_entirely", (
+        "{\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "}\n"
+    ), False),
+    ("mutant_io8_opened_before_guard", (
+        "{\n"
+        "\talp_gpio_open(ALP_E1M_GPIO_IO8);\n"
+        "\talp_status_t hwrev_rc = alp_hw_info_read(&hwrev_info);\n"
+        "\tif (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {\n"
+        "\t\treturn PHASE_FAIL;\n"
+        "\t}\n"
+        "}\n"
+    ), False),
+]
+
+
+@pytest.mark.parametrize(
+    "body,expected_ok", [(c[1], c[2]) for c in _IO8_GUARD_CASES], ids=[c[0] for c in _IO8_GUARD_CASES]
+)
+def test_check_phase_sound_io8_guard_synthetic_cases(body, expected_ok):
+    """Proves _check_phase_sound_io8_guard() itself against hand-built
+    bodies, entirely independent of main.c's current content -- so this
+    passes or fails on the CHECKER's own correctness, not on whatever the
+    app happens to contain today (#2138 round-3 review)."""
+    ok, reason = _check_phase_sound_io8_guard(body)
+    assert ok == expected_ok, f"expected ok={expected_ok}, got ok={ok}, reason={reason!r}"
+
+
+# Which checker function structurally proves which revision-dependent pad's
+# open is guarded, per app -- e.g. _check_phase_sound_io8_guard() above for
+# E1M_GPIO_IO8. A KeyError here (a guarded pad this dict has no entry for)
+# is deliberate: it means a NEW revision-dependent pad showed up in a
+# standalone table with no checker written for it yet, and this test
+# cannot know what to require without a human writing one (#2138 round-2
+# review).
+PAD_GUARD_CHECKERS = {
+    "E1M_GPIO_IO8": _check_phase_sound_io8_guard,
+}
+
+
 @pytest.mark.parametrize("path", STANDALONE_APP_ROUTE_TABLES)
 def test_standalone_app_route_table_guards_revision_dependent_pads(path):
     """A hand-written route table -- no per-revision generation reaches these
     standalone apps, see the file header comment on both tables -- that maps
     a revision-dependent pad (per hw-revisions.yaml) must be paired with a
-    runtime `if (!<guard>(...)) { ... return PHASE_FAIL; }` in the app's
-    phase_sound(), running BEFORE that pad is ever opened. Without one, the
-    table silently drives the wrong physical pin/chip on every revision but
-    the one it was hand-built for (#2138).
-
-    This intentionally checks the STRUCTURE of the guard, not just that its
-    name appears somewhere in the file: the round-2 review of #2138 found
-    that a plain substring search passes both a `/* TODO: add the check
-    here */` stub in place of the guard and the guard's own condition
-    inverted (`if (guard_ok)` instead of `if (!guard_ok)`, which refuses r2
-    and drives the pin on r1 -- the exact short this issue exists to
-    prevent). Stripping comments first closes the stub case (nothing left
-    for the regex to find); requiring the literal `!` before the call
-    closes the inversion case."""
+    STRUCTURAL runtime guard in the app's phase_sound(), running BEFORE that
+    pad is ever opened -- see PAD_GUARD_CHECKERS' per-pad checker function
+    for exactly what "structural" pins down. Without one, the table
+    silently drives the wrong physical pin/chip on every revision but the
+    one it was hand-built for (#2138)."""
     revision_dependent = _revision_dependent_e1m_pads()
     routes = _example_gpio_routes(path)
     guarded_pads = revision_dependent & routes.keys()
@@ -342,7 +662,7 @@ def test_standalone_app_route_table_guards_revision_dependent_pads(path):
 
     main_c_path = path.parent / "main.c"
     main_c_raw = main_c_path.read_text(encoding="utf-8")
-    main_c_nocomments = _strip_c_comments(main_c_raw)
+    main_c_nocomments = _strip_c_comments_and_literals(main_c_raw)
     phase_sound_body = _function_body(
         main_c_nocomments,
         r"static phase_verdict_t phase_sound\(demo_ctx_t \*ctx\)\s*\{",
@@ -350,27 +670,12 @@ def test_standalone_app_route_table_guards_revision_dependent_pads(path):
     )
 
     for e1m in sorted(guarded_pads):
-        guard_fn = PAD_GUARD_FUNCTIONS[e1m]
-        open_call = f"alp_gpio_open(ALP_{e1m})"
-        open_idx = phase_sound_body.find(open_call)
-        assert open_idx != -1, (
-            f"{path} routes revision-dependent pad {e1m} but {main_c_path}'s "
-            f"phase_sound() never calls {open_call} -- update this test if "
-            f"the app was rewritten to open it another way"
-        )
-
-        guard_re = re.compile(
-            r"if\s*\(\s*!\s*" + re.escape(guard_fn) + r"\s*\([^{};]*\)\s*\)\s*\{"
-            r"[^{}]*?return\s+PHASE_FAIL\s*;",
-            re.DOTALL,
-        )
-        guard_match = guard_re.search(phase_sound_body)
-        assert guard_match and guard_match.start() < open_idx, (
+        checker = PAD_GUARD_CHECKERS[e1m]
+        ok, reason = checker(phase_sound_body)
+        assert ok, (
             f"{main_c_path}: {e1m} is revision-dependent "
             f"(metadata/e1m_modules/aen/hw-revisions.yaml pad_route_overrides) "
-            f"but phase_sound() opens it ({open_call}) with no "
-            f"'if (!{guard_fn}(...)) {{ ... return PHASE_FAIL; }}' guard "
-            f"(comment-stripped, structure-checked) running before it -- on "
-            f"r1 this pad routes to a DIFFERENT physical pin/chip than the "
+            f"but its phase_sound() guard is not structurally sound: {reason} -- "
+            f"on r1 this pad routes to a DIFFERENT physical pin/chip than the "
             f"hand-written table assumes (#2138)"
         )

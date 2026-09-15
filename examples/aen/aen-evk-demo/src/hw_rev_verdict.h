@@ -27,13 +27,18 @@
  * schema_version + CRC32 before it ever populates `som_hw_rev`, and that
  * validation is already exercised end-to-end (valid / blank-erased /
  * zeroed / bad-schema / bad-CRC manifests) by tests/zephyr/hw_info/src/
- * main.c. classify_manifest() itself is `src/common/`-internal and not
- * reachable from application code -- only the public alp_hw_info_read()/
- * alp_hw_info_t surface is -- so re-deriving that validation here from a
- * second, app-owned EEPROM read would duplicate logic the SDK already gets
- * right and risk drifting from it (the exact triplication issue #1859
- * removed for the route tables themselves). This gate therefore only has
- * to decide whether an ALREADY-VALIDATED read names r2.
+ * main.c. classify_manifest() itself is SDK-internal BY CONTRACT, not by
+ * reach -- zephyr/CMakeLists.txt's zephyr_include_directories(src/common)
+ * puts its header on every consuming app's include path app-wide, same as
+ * tests/zephyr/hw_info/src/main.c uses it, so nothing stops app code from
+ * calling it directly -- but only alp_hw_info_read()/alp_hw_info_t is the
+ * PUBLIC <alp/hw_info.h> surface apps are meant to consume, and calling
+ * classify_manifest() directly here would still require this app to
+ * hand-roll its own raw EEPROM read first (classify_manifest() takes an
+ * already-read manifest buffer, not a bus/address), reintroducing exactly
+ * the second, app-owned read this file exists to avoid. So this gate calls
+ * the public entry point instead, and only has to decide whether an
+ * ALREADY-VALIDATED read names r2.
  */
 #ifndef ALP_EVK_DEMO_HW_REV_VERDICT_H
 #define ALP_EVK_DEMO_HW_REV_VERDICT_H
