@@ -1,0 +1,271 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-i2s-tas2563-probe -- board overlay for the E1M-AEN801 (E8, M55-HE).
+ *
+ * ============================================================================
+ * BENCH-TEST SCOPE -- READ THIS BEFORE REUSING THE OVERLAY ANYWHERE ELSE
+ * ============================================================================
+ * `i2s3` is ENABLED here, and the I2S0 mux SELECT + ENABLE are driven,
+ * because the maintainer has PHYSICALLY REWORKED bench board
+ * `e1m-aen-evk-03`: U46 (the I2S0 mux) plus U38/U39 were replaced with
+ * 74LV3257 bus switches -- bidirectional, with a TRUE high-impedance state
+ * when `/E` is deasserted -- in place of the stock 74LVC157, a unidirectional
+ * logic mux whose SoC-facing Y outputs are forced LOW, never released,
+ * whenever `/E` is HIGH. That forced-low, unidirectional behaviour is why
+ * `i2s3` ships "disabled" in examples/aen/aen-i2s-amp-alif and
+ * examples/aen/aen-evk-demo's board overlays (enabling it would fight the
+ * SoC's own I2S3 TX pads through U46 the instant pinctrl is applied,
+ * regardless of whether the mux ENABLE is ever asserted) -- and that
+ * reasoning IS STILL CORRECT for every 2626-R2 carrier that has NOT had
+ * this rework done, which is most of them.
+ *
+ * This overlay is a BENCH TEST for the one reworked board, not a rescoping
+ * of #2077. Do NOT read this as "the mux defect is fixed, I2S playback is
+ * safe to re-enable in general" -- that is a separate decision the
+ * maintainer has not made. See src/main.c's file header for the same
+ * caveat and the objective (no-ears-needed) pass/fail this app runs.
+ * ============================================================================
+ *
+ * `i2s3@49017000` (TX-only pinctrl: SDO/SCLK/WS on P9_3/4/5) is transcribed
+ * from examples/aen/aen-i2s-amp-alif's overlay -- see that file's header for
+ * the "why i2s3, not i2s0" pinout derivation. The 76.8 MHz audio clock is
+ * enabled by `clocks = <&clockctrl ALIF_I2S3_76M8_CLK>` plus the Tier-1.5
+ * clockctrl west-patch (zephyr/patches/zephyr/
+ * 0001-clock_control_alif-master-source-expmst-i2s-setrate.patch); no
+ * app-level register poke is needed.
+ *
+ * `gpio5` -- EVK_PIN_AMP_ENABLE (SPI0_CS0 = P5_2, active-high SD_N) and
+ * EVK_PIN_AMP_FAULT (SPI0_MISO = P5_0, open-drain IRQ_N) -- transcribed from
+ * examples/aen/aen-evk-demo's overlay. Both are "overlay pins"
+ * (metadata/boards/e1m-evk.yaml's overlay_pins: block) past the standard
+ * 52-slot E1M map this standalone app does not carry, so src/main.c reaches
+ * them via pinctrl_configure_pins() with a raw PIN_Pxx__GPIO mux, then the
+ * standard Zephyr gpio_pin_* API against DEVICE_DT_GET(DT_NODELABEL(gpio5))
+ * directly. This node only needs status = "okay"; gpio_dw applies no pad
+ * mux of its own.
+ *
+ * The I2S0 mux SELECT (E1M IO13 -> CC3501E GPIO_13) and ENABLE (E1M IO8 ->
+ * CC3501E GPIO_30) are NOT in this file -- like the SD mux ENABLE on
+ * test/2051-sdhc-enable-on-reworked-mux, both are CC3501E-proxied pads
+ * driven at runtime over the inter-chip bridge (src/cc3501e_gpio_routes.c).
+ * Devicetree describes neither.
+ *
+ * The carrier I2C bus the TAS2563 amps sit on (ALP_E1M_I2C0 / portable
+ * alp-i2c0, SoC I2C2) is a BOARD fact, already enabled at the board layer
+ * for every AEN801/AEN803 app -- see examples/aen/aen-bmi323-regcheck's
+ * overlay for the same argument made in full. Nothing to add here.
+ *
+ * ACOUSTIC LOOPBACK ADDITION (test/u46-i2s-tas2563-on-reworked-mux):
+ * `pdm@4902d000` (the HP PDM, NOT `lppdm@43002000`) + its P6_1/P6_0 pinctrl
+ * are transcribed from examples/aen/aen-pdm-mic-alif and
+ * examples/aen/aen-evk-demo's overlays -- see either file's header for the
+ * full from-alif.tsv derivation. Only the FIRST mic pair (U19 LEFT / U20
+ * RIGHT, PDM_C0/D0) is declared: <alp/audio.h>'s Zephyr backend caps
+ * channels at 2 (src/backends/audio/zephyr_drv.c), so the second pair
+ * (U25/U26 on PDM_C1/D1) is unreachable through the portable capture API
+ * regardless of whether its pads are declared here -- same reasoning
+ * aen-evk-demo's phase 11 already used for this exact mic. NO MUX in this
+ * path -- see src/main.c's file header for the netlist trace confirming
+ * PDM_C0/D0 reach U19/U20 through nothing but series resistors (R69-R72),
+ * unlike the I2S0/SDIO paths above.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+	aliases {
+		alp-i2s0 = &i2s3;
+	};
+};
+
+&pinctrl {
+	pinctrl_i2s3: pinctrl_i2s3 {
+		/* TX only: SDO + SCLK + WS. SDI (P9_2) is not declared -- this
+		 * app never reads back over I2S. */
+		group0 {
+			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
+				 <PIN_P9_5__I2S3_WS_A>;
+		};
+	};
+};
+
+&{/soc} {
+	i2s3: i2s3@49017000 {
+		compatible = "snps,designware-i2s";
+		reg = <0x49017000 0x1000>;
+		interrupts = <144 3>;
+		pinctrl-0 = <&pinctrl_i2s3>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_I2S3_76M8_CLK>;
+		/* Enabled -- this app IS the bench test for the reworked U46.
+		 * See the file header SAFETY note above. */
+		status = "okay";
+	};
+};
+
+/* AMP_ENABLE (P5_2) / AMP_FAULT (P5_0) -- see the file-header comment above. */
+&gpio5 {
+	status = "okay";
+};
+
+/*
+ * ============================================================================
+ * The SoM-internal Alif <-> CC3501E Wi-Fi/BLE bridge -- needed to DRIVE the
+ * I2S0 mux SELECT + ENABLE, not to read the amps over I2C
+ * ============================================================================
+ * Ported verbatim from examples/aen/aen-cc3501e-gpio's overlay -- read that
+ * file's header for the full derivation behind every value here (SPI1
+ * pinctrl, the DWC_ssi SPI1 node, the LP-GPIO island).
+ */
+
+&pinctrl {
+	/*
+	 * SPI1 master on P14_6 (SCK) / P14_5 (MOSI) / P14_4 (MISO), plus the
+	 * hardware SS0 chip-select on P14_7. SS0 is the dwc-ssi peripheral's
+	 * OWN select -- not a GPIO bodge, not CS-less, not static-low: the
+	 * master asserts/deasserts it per transfer, framing each phase of the
+	 * bridge's request/reply exchange. Do NOT add cs-gpios here.
+	 *
+	 * input-enable on MISO because a pad's INPUT BUFFER is a PADCTRL bit
+	 * that only pinctrl sets on this SoC -- without it the pad never
+	 * senses what the slave drives.
+	 */
+	pinctrl_spi1: pinctrl_spi1 {
+		group0 {
+			pinmux = <PIN_P14_6__SPI1_SCLK_C>, <PIN_P14_5__SPI1_MOSI_C>,
+				 <PIN_P14_7__SPI1_SS0_C>;
+		};
+		group1 {
+			pinmux = <PIN_P14_4__SPI1_MISO_C>;
+			input-enable;
+		};
+	};
+};
+
+/*
+ * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
+ * in ensemble_e8_peripherals.dtsi (which declares only the customer-facing
+ * edge SPI0), so the consuming app declares it. reg 0x48104000 = the SPI1
+ * base (+0x1000 per instance from spi0's 0x48103000). clock-frequency is
+ * REQUIRED: without it spi_dw_alif's configure takes the clock-control path,
+ * which fails -EINVAL for the gateless dummy ALIF_SPI_CLK. 200 MHz is the
+ * real SSI functional clock (E8 HWRM); BAUDR = clock-frequency / freq_hz.
+ */
+&clockctrl {
+	status = "okay";
+};
+
+&soc {
+	cc3501e_spi: spi@48104000 {
+		compatible = "alif,dwc-ssi-spi";
+		#address-cells = <1>;
+		#size-cells = <0>;
+		reg = <0x48104000 0x1000>;
+		interrupts = <138 3>;          /* BENCH-TBD: confirm SPI1 IRQ */
+		clocks = <&clockctrl ALIF_SPI_CLK>;
+		clock-frequency = <200000000>;
+		dwc-ssi;
+		fifo-depth = <16>;
+		pinctrl-0 = <&pinctrl_spi1>;
+		pinctrl-names = "default";
+		status = "okay";
+	};
+};
+
+/*
+ * Enable the LP GPIO island so WIFI_EN (P15_5) and E_WIFI.NRST (P15_1_FLEX)
+ * are drivable as outputs. P15_1/P15_5 function 0 (the reset default) IS
+ * LPGPIO, so no pinctrl group is needed for their mux.
+ */
+&lpgpio {
+	status = "okay";
+};
+
+/ {
+	aliases {
+		/* bus_id 1 in alp_spi_open() -> this controller. */
+		alp-spi1 = &cc3501e_spi;
+	};
+
+	/*
+	 * Compact 2-entry control array for the SoM-internal CC3501E nets, in
+	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
+	 * These are NOT E1M edge pads, so this app does not use the 52-slot
+	 * positional E1M map. There must be exactly ONE "alp,pin-array" node
+	 * in the tree.
+	 */
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>;   /* [1] E_WIFI.NRST (P15_1_FLEX) */
+	};
+};
+
+/*
+ * ============================================================================
+ * On-board PDM mics (the acoustic loopback listener) -- see the file-header
+ * ACOUSTIC LOOPBACK ADDITION note above
+ * ============================================================================
+ */
+
+&pinctrl {
+	pinctrl_pdm0: pinctrl_pdm0 {
+		/* Clock (output) -- no input-enable needed. C0 = P6_1. */
+		group0 {
+			pinmux = <PIN_P6_1__PDM_C0_C>;
+		};
+		/* Data (input) -- input-enable sets the pad REN, same trap called
+		 * out for the SPI1 MISO group above. D0 = P6_0. */
+		group1 {
+			pinmux = <PIN_P6_0__PDM_D0_C>;
+			input-enable;
+		};
+	};
+};
+
+&{/soc} {
+	pdm: pdm@4902d000 {
+		compatible = "alif,alif-pdm";
+		reg = <0x4902d000 0x1000>;
+		interrupts = <145 3>, <146 3>, <147 3>;
+		interrupt-names = "warning_intr", "error_intr", "audio_det_intr";
+		pinctrl-0 = <&pinctrl_pdm0>;
+		pinctrl-names = "default";
+		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
+		fifo_watermark = <5>;
+		bypass_iir_filter = <1>;
+		status = "okay";
+
+		/*
+		 * #2133 ROUND 3: U19/U20 are ST MP34DT05TR-A parts; ST's own
+		 * Zephyr driver for this family (zephyr/drivers/audio/
+		 * mpxxdtyy.h:19-20) states a 1.2-3.25 MHz PDM bit-clock spec
+		 * (MPXXDTYY_MIN_PDM_FREQ / MPXXDTYY_MAX_PDM_FREQ) -- BOTH the
+		 * 8 kHz mode (512 kHz clock) and the 16 kHz mode (1024 kHz
+		 * clock) this board's PDM controller can generate are below
+		 * that floor and were never in spec for this mic. 48 kHz
+		 * (mode 7, 3072 kHz clock) is in spec. These properties (now
+		 * declared by alif,alif-pdm.yaml) make dmic_alif_pdm_configure()
+		 * reject any clock mode outside this board's mic range instead
+		 * of silently under-clocking the mics -- see src/main.c's file
+		 * header "MIC CAPTURE RATE IS 48 kHz" section for the full
+		 * derivation.
+		 */
+		clk-frequency-min = <1200000>; /* mpxxdtyy.h MPXXDTYY_MIN_PDM_FREQ */
+		clk-frequency-max = <3250000>; /* mpxxdtyy.h MPXXDTYY_MAX_PDM_FREQ */
+	};
+};
+
+/ {
+	aliases {
+		alp-pdm0 = &pdm;
+	};
+};
