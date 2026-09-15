@@ -98,3 +98,77 @@ ZTEST(alif_pdm_chanmap, test_req_num_chan_out_of_range_rejected)
 	              "req_num_chan > MAX_NUM_CHANNELS (8) must be rejected");
 	zassert_equal(mask, 0x55U, "mask_out must be left untouched on failure");
 }
+
+/* L/R is untestable by a map that enables both edges of the same pair (round
+ * 2 review finding): a mutant that swaps LEFT/RIGHT in the (pdm*2)+lr
+ * formula still passes test_backend_2channel_map_enables_hw_0_and_1 and
+ * test_example_4channel_map_enables_hw_0_1_4_5, because both request LEFT
+ * *and* RIGHT on every PDM controller they use, so the resulting mask is
+ * identical either way. These three single-channel cases each request only
+ * ONE edge, so a swapped formula flips the expected bit and fails them (red/
+ * green proof against the `(pdm * 2U) + (1U - (uint8_t)lr)` mutant recorded
+ * in the PR/commit description, not kept as a permanent test).
+ */
+ZTEST(alif_pdm_chanmap, test_single_channel_left_enables_hw_0_only)
+{
+	uint32_t map_lo = dmic_build_channel_map(0, 0, PDM_CHAN_LEFT);
+	uint8_t  mask   = 0;
+	int      rc     = alif_pdm_chanmap_translate(map_lo, 0, 1, &mask);
+
+	zassert_equal(rc, 0, "a single LEFT channel on pdm0 must be expressible");
+	zassert_equal(
+	    mask, 0x01U, "LEFT@pdm0 (even/rising, HWRM 15.7.4.3.1) must be HW channel 0 only");
+}
+
+ZTEST(alif_pdm_chanmap, test_single_channel_right_enables_hw_1_only)
+{
+	uint32_t map_lo = dmic_build_channel_map(0, 0, PDM_CHAN_RIGHT);
+	uint8_t  mask   = 0;
+	int      rc     = alif_pdm_chanmap_translate(map_lo, 0, 1, &mask);
+
+	zassert_equal(rc, 0, "a single RIGHT channel on pdm0 must be expressible");
+	zassert_equal(
+	    mask, 0x02U, "RIGHT@pdm0 (odd/falling, HWRM 15.7.4.3.1) must be HW channel 1 only");
+}
+
+ZTEST(alif_pdm_chanmap, test_single_channel_pdm2_right_enables_hw_5_only)
+{
+	uint32_t map_lo = dmic_build_channel_map(0, 2, PDM_CHAN_RIGHT);
+	uint8_t  mask   = 0;
+	int      rc     = alif_pdm_chanmap_translate(map_lo, 0, 1, &mask);
+
+	zassert_equal(rc, 0, "a single RIGHT channel on pdm2 must be expressible");
+	zassert_equal(mask, 0x20U, "RIGHT@pdm2 must be HW channel 5 (bit 5) only");
+}
+
+/* Two logical channels naming the SAME hw channel (both LEFT on pdm0) must
+ * be rejected: alif_pdm.c stores num_channels = req_num_chan (2 here), but
+ * the mask would only ever enable one hw channel, so the ISR would copy a
+ * repeated/stale sample into the second logical slot every burst.
+ */
+ZTEST(alif_pdm_chanmap, test_duplicate_hw_channel_rejected)
+{
+	uint32_t map_lo =
+	    dmic_build_channel_map(0, 0, PDM_CHAN_LEFT) | dmic_build_channel_map(1, 0, PDM_CHAN_LEFT);
+	uint8_t mask = 0x77U;
+	int     rc   = alif_pdm_chanmap_translate(map_lo, 0, 2, &mask);
+
+	zassert_equal(rc, -EINVAL, "two logical channels naming the same hw channel must be rejected");
+	zassert_equal(mask, 0x77U, "mask_out must be left untouched on failure");
+}
+
+/* Logical channel 0 naming a HIGHER hw channel than logical channel 1 (RIGHT
+ * then LEFT on the same pdm) must be rejected: the ISR always de-interleaves
+ * in ascending hw-channel order, so this map would silently swap the two
+ * logical channels' data rather than error.
+ */
+ZTEST(alif_pdm_chanmap, test_out_of_order_hw_channel_rejected)
+{
+	uint32_t map_lo =
+	    dmic_build_channel_map(0, 0, PDM_CHAN_RIGHT) | dmic_build_channel_map(1, 0, PDM_CHAN_LEFT);
+	uint8_t mask = 0x77U;
+	int     rc   = alif_pdm_chanmap_translate(map_lo, 0, 2, &mask);
+
+	zassert_equal(rc, -EINVAL, "a non-ascending hw-channel map must be rejected");
+	zassert_equal(mask, 0x77U, "mask_out must be left untouched on failure");
+}
