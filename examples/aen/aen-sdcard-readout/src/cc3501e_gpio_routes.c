@@ -38,11 +38,12 @@
  * on r2 it is physically open and on r1 driving it would contend with the P18
  * header jumper. See main()'s mux-enable comment in src/main.c.
  *
- * cc3501e_gpio_rev_dependent[] below is carried anyway (issue #2144), even
- * though this app never opens IO8/IO10/IO21: it is a strong override of a
- * REQUIRED symbol (weak empty default = "nothing is revision-dependent"),
- * so omitting it here would silently fail OPEN on any future pad this app
- * adds without also adding it to that list.
+ * The revision-dependent pin guard (issue #2144) is not this app's table to
+ * carry: src/backends/gpio/cc3501e_proxy.c reads cc3501e_gpio_rev_dependent[]
+ * from the SDK-owned generated file
+ * src/backends/gpio/cc3501e_rev_dependent_pins.c -- the SAME set on every
+ * AEN board -- so it applies here too even though this app never opens
+ * IO8/IO10/IO21 itself.
  */
 
 #include <stdint.h>
@@ -57,12 +58,3 @@ const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
 
 const size_t cc3501e_gpio_route_count =
     sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);
-
-const uint32_t cc3501e_gpio_rev_dependent[] = {
-	ALP_E1M_GPIO_IO8,
-	ALP_E1M_GPIO_IO10,
-	ALP_E1M_GPIO_IO21,
-};
-
-const size_t cc3501e_gpio_rev_dependent_count =
-    sizeof(cc3501e_gpio_rev_dependent) / sizeof(cc3501e_gpio_rev_dependent[0]);

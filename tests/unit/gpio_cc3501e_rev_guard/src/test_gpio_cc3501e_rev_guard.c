@@ -7,30 +7,45 @@
  * mismatch, and stayed silent (fail-open) when the identity manifest
  * could not be read at all.
  *
- * Two surfaces are exercised:
+ * Three surfaces are exercised:
  *
  *   1. cc3501e_proxy_hw_rev_confirmed_match() -- the pure decision
  *      src/backends/gpio/cc3501e_proxy.c splits out of
  *      alp_gpio_cc3501e_attach() specifically so it is testable without a
  *      real EEPROM (native_sim has no I2C EEPROM to back
- *      alp_hw_info_read()).  Driven directly with crafted
- *      alp_status_t/alp_hw_info_t inputs covering all four manifest
- *      states the issue calls out: matching, mismatched hw_rev, corrupt
- *      (alp_hw_info_read() surfaces a bad schema_version/CRC32 as
- *      ALP_ERR_IO), and missing (ALP_ERR_NOT_PROVISIONED / NOSUPPORT).
+ *      alp_hw_info_read()).  Driven both with hand-crafted
+ *      alp_status_t/alp_hw_info_t inputs AND with CRC-valid
+ *      alp_hw_info_eeprom_t buffers routed through the real
+ *      alp_hw_info_classify_manifest() (built with the real
+ *      alp_hw_info_crc32(), the same helper
+ *      src/zephyr/hw_info_zephyr.c itself uses) -- covering every manifest
+ *      state the issue calls out: matching, mismatched hw_rev, corrupt
+ *      (bad schema_version or CRC32 -> ALP_ERR_IO), and missing/blank
+ *      (ALP_ERR_NOT_PROVISIONED / NOSUPPORT).
  *
  *   2. px_open()'s per-pin gate itself, exercised through the portable
  *      alp_gpio_open() API -- proving the guard is actually WIRED into
- *      the backend, not just correct in isolation.  Since
- *      alp_gpio_cc3501e_attach() would call the real (I2C-backed)
- *      alp_hw_info_read(), which always returns NOSUPPORT on native_sim
- *      (no EEPROM bus configured), this half uses the CONFIG_ZTEST-only
- *      cc3501e_proxy_test_force_hw_rev_confirmed_match() hook to set the
- *      cached decision directly instead of calling attach().
+ *      the backend, not just correct in isolation.  Uses the
+ *      CONFIG_ZTEST-only cc3501e_proxy_test_force_hw_rev_confirmed_match()
+ *      hook to set the cached decision directly instead of calling
+ *      attach() (surface 3 below covers attach() itself).
  *
- * Strong override of the WEAK cc3501e_gpio_rev_dependent[] /
- * cc3501e_gpio_rev_dependent_count in cc3501e_proxy_routes_weak.c,
- * mirroring gpio_cc3501e_unrouted's override of cc3501e_gpio_unrouted[].
+ *   3. alp_gpio_cc3501e_attach() -- does it actually SET the cached
+ *      decision, not just correctly consult it once set?  A #2144 review
+ *      mutation (hardcoding `g_hw_rev_confirmed_match = true;` in attach(),
+ *      skipping the real read) passed all of surfaces 1+2 untouched, since
+ *      neither ever calls attach() itself.  attach()'s ctx pointer is
+ *      opaque (struct cc3501e is private to chips/cc3501e/) and is never
+ *      dereferenced before the hw_info read runs, so a non-NULL sentinel
+ *      that is deliberately never touched is the smallest honest seam here
+ *      -- alp_gpio_cc3501e_attach(NULL) is a documented ALP_ERR_INVAL
+ *      short-circuit that returns before touching the cached decision at
+ *      all, so it cannot exercise this path. This test build's prj.conf
+ *      enables CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID (needed for
+ *      surface 1's real-classify cases above), but native_sim has no
+ *      devicetree I2C0 device backing it, so the real alp_hw_info_read()
+ *      genuinely fails at runtime -- attach() must reset the cached
+ *      decision to false, not leave a stale forced-true value standing.
  *
  * Backends visible on this test build:
  *   cc3501e_proxy (priority 200, "*" wildcard -- wins the selector)
@@ -50,23 +65,20 @@
 #include <alp/peripheral.h>
 #include <alp/soc_caps.h>
 
-/* Declared (non-static) in src/backends/gpio/cc3501e_proxy.c -- internal
- * test-visibility split for issue #2144, not part of the public
- * <alp/...> surface. */
-extern bool cc3501e_proxy_hw_rev_confirmed_match(alp_status_t         read_status,
-                                                 const alp_hw_info_t *info);
-extern void cc3501e_proxy_test_force_hw_rev_confirmed_match(bool confirmed);
+#include "cc3501e_proxy_internal.h"
+#include "hw_info_manifest.h" /* alp_hw_info_crc32(), alp_hw_info_classify_manifest() */
+
+/* cc3501e_gpio_routes[]/cc3501e_gpio_unrouted[] stay the WEAK empty
+ * defaults (no override in this TU) -- a "confirmed" IO8 open below falls
+ * through to the platform delegate, so only the REFUSAL decision is under
+ * test here, not the bridge routing path (already covered by the
+ * generator/route-table tests). cc3501e_gpio_rev_dependent[] is NOT
+ * overridable any more (issue #2144 design review): it is the SDK-owned
+ * src/backends/gpio/cc3501e_rev_dependent_pins.c, always linked alongside
+ * cc3501e_proxy.c, so this suite drives ALP_E1M_GPIO_IO8 -- one of its 3
+ * real entries -- directly instead of declaring a local one-pin list. */
 
 ZTEST_SUITE(alp_gpio_cc3501e_rev_guard, NULL, NULL, NULL, NULL, NULL);
-
-/* Board-provided revision-dependent list (this test build's SoM pad map):
- * IO8 moves between the Alif SoC (r1) and the CC3501E (r2).
- * cc3501e_gpio_routes[] stays the WEAK empty default, so a "confirmed" IO8
- * open below falls through to the platform delegate -- only the REFUSAL
- * decision is under test here, not the bridge routing path (already
- * covered by the generator/route-table tests). */
-const uint32_t cc3501e_gpio_rev_dependent[]     = { ALP_E1M_GPIO_IO8 };
-const size_t   cc3501e_gpio_rev_dependent_count = 1u;
 
 static alp_hw_info_t make_info(const char *hw_rev)
 {
@@ -122,6 +134,80 @@ ZTEST(alp_gpio_cc3501e_rev_guard, test_not_confirmed_on_missing_manifest)
 }
 
 /* ------------------------------------------------------------------ */
+/* Same pure decision, but through the REAL manifest classifier + the  */
+/* REAL CRC routine -- not a hand-set alp_status_t/alp_hw_info_t.       */
+/* Mirrors tests/zephyr/hw_info's make_valid_manifest() helper.         */
+/* ------------------------------------------------------------------ */
+
+static void make_valid_eeprom(alp_hw_info_eeprom_t *m, const char *hw_rev)
+{
+	memset(m, 0, sizeof(*m));
+	m->magic          = ALP_HW_INFO_MAGIC;
+	m->schema_version = ALP_HW_INFO_SCHEMA_VERSION;
+	strcpy(m->family, "aen");
+	strcpy(m->sku, "E1M-AEN801");
+	strncpy(m->hw_rev, hw_rev, sizeof(m->hw_rev) - 1u);
+	strcpy(m->serial, "ALP-AEN801-26W36-00003");
+	m->mfg_year  = 2026;
+	m->mfg_month = 6;
+	m->mfg_day   = 23;
+	m->crc32     = alp_hw_info_crc32((const uint8_t *)m, sizeof(*m) - sizeof(m->crc32));
+}
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_classify_valid_2626_r2_confirms)
+{
+	alp_hw_info_eeprom_t m;
+	make_valid_eeprom(&m, "2626-r2");
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+
+	alp_status_t rc = alp_hw_info_classify_manifest(&m, &info);
+	zassert_equal(rc, ALP_OK);
+	zassert_true(cc3501e_proxy_hw_rev_confirmed_match(rc, &info));
+}
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_classify_valid_2626_r1_does_not_confirm)
+{
+	/* CRC-valid, correctly classified -- just the OTHER AEN board rev. */
+	alp_hw_info_eeprom_t m;
+	make_valid_eeprom(&m, "2626-r1");
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+
+	alp_status_t rc = alp_hw_info_classify_manifest(&m, &info);
+	zassert_equal(rc, ALP_OK);
+	zassert_false(cc3501e_proxy_hw_rev_confirmed_match(rc, &info));
+}
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_classify_bad_crc_does_not_confirm)
+{
+	/* Otherwise-valid "2626-r2" manifest, one flipped CRC32 word -- the
+	 * bit-for-bit corruption case, not a hand-typed ALP_ERR_IO. */
+	alp_hw_info_eeprom_t m;
+	make_valid_eeprom(&m, "2626-r2");
+	m.crc32 ^= 0xFFFFFFFFu;
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+
+	alp_status_t rc = alp_hw_info_classify_manifest(&m, &info);
+	zassert_equal(rc, ALP_ERR_IO);
+	zassert_false(cc3501e_proxy_hw_rev_confirmed_match(rc, &info));
+}
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_classify_blank_eeprom_does_not_confirm)
+{
+	/* Factory-erased EEPROM: every byte 0xFF, no ALPH magic. */
+	alp_hw_info_eeprom_t m;
+	memset(&m, 0xFF, sizeof(m));
+	alp_hw_info_t info;
+	memset(&info, 0, sizeof(info));
+
+	alp_status_t rc = alp_hw_info_classify_manifest(&m, &info);
+	zassert_equal(rc, ALP_ERR_NOT_PROVISIONED);
+	zassert_false(cc3501e_proxy_hw_rev_confirmed_match(rc, &info));
+}
+
+/* ------------------------------------------------------------------ */
 /* px_open()'s per-pin gate: proves the WIRING, not the decision.       */
 /* ------------------------------------------------------------------ */
 
@@ -172,4 +258,45 @@ ZTEST(alp_gpio_cc3501e_rev_guard, test_revision_independent_pin_opens_regardless
 	alp_gpio_t *h = alp_gpio_open(ALP_E1M_GPIO_IO20);
 	zassert_not_null(h);
 	alp_gpio_close(h);
+}
+
+/* ------------------------------------------------------------------ */
+/* alp_gpio_cc3501e_attach(): does it actually SET the cached decision, */
+/* not just correctly consult it once set (surfaces 1+2 above)?         */
+/* ------------------------------------------------------------------ */
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_attach_resets_stale_forced_true_on_read_failure)
+{
+	/* Force a stale "confirmed" left over from an earlier test/hook use,
+	 * then call the REAL attach() (not the hook) -- proving attach() itself
+	 * re-derives the decision from a real alp_hw_info_read(), rather than
+	 * leaving whatever the cache already held.  A mutated attach() that
+	 * hardcodes `g_hw_rev_confirmed_match = true;` instead of assigning
+	 * cc3501e_proxy_hw_rev_confirmed_match()'s result would leave this
+	 * forced-true value standing and fail the zassert_is_null() below. */
+	cc3501e_proxy_test_force_hw_rev_confirmed_match(true);
+
+	/* struct cc3501e is opaque outside chips/cc3501e/ (no public
+	 * definition), so a test cannot construct a real one on the stack;
+	 * alp_gpio_cc3501e_attach(NULL) is a documented ALP_ERR_INVAL
+	 * short-circuit that returns before touching the cached decision at
+	 * all (see cc3501e_proxy.c), so it can't exercise this path either.
+	 * attach()'s body only ever ASSIGNS g_bridge_ctx = ctx and never
+	 * dereferences it before running the hw_info read below -- so a
+	 * deliberately-never-dereferenced non-NULL sentinel is the smallest
+	 * honest seam available.  This test never calls
+	 * alp_gpio_configure()/write()/read() (the paths that DO dereference
+	 * the bridge ctx), so the sentinel is safe here. */
+	cc3501e_t *bogus_ctx_never_dereferenced = (cc3501e_t *)(uintptr_t)1;
+	zassert_equal(alp_gpio_cc3501e_attach(bogus_ctx_never_dereferenced), ALP_OK);
+
+	/* This test build's prj.conf enables
+	 * CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID=0 (needed for the real-
+	 * classify tests above), but native_sim has no devicetree I2C0 device
+	 * backing it -- so attach()'s real alp_hw_info_read() genuinely fails,
+	 * and IO8 must be refused, proving the forced-true value above did NOT
+	 * survive attach(). */
+	alp_gpio_t *h = alp_gpio_open(ALP_E1M_GPIO_IO8);
+	zassert_is_null(h);
+	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
 }

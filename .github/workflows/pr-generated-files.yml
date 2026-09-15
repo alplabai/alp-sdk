@@ -65,6 +65,7 @@ on:
       - 'scripts/gen_catalog.py'
       - 'scripts/gen_error_catalog.py'
       - 'scripts/gen_cc3501e_gpio_routes.py'
+      - 'src/backends/gpio/cc3501e_rev_dependent_pins.c'
       # The portability matrix re-runs the som.sku swap-test through
       # scripts/alp_project.py + the alp_orchestrate/ package, so any
       # emit-pipeline change can move its generated block.
@@ -322,7 +323,8 @@ jobs:
                      docs/peripheral-support-matrix.md \
                      docs/portability-matrix.md \
                      docs/verification-status.md \
-                     examples/aen; then
+                     examples/aen \
+                     src/backends/gpio/cc3501e_rev_dependent_pins.c; then
             echo "::error::Generated files are stale.  Run:"
             echo "::error::  python3 scripts/gen_soc_caps.py"
             echo "::error::  python3 scripts/gen_status_strings.py"

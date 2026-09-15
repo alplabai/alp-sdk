@@ -3185,14 +3185,6 @@
         }
       },
       "variables": {
-        "cc3501e_gpio_rev_dependent": {
-          "declaration": "extern const uint32_t cc3501e_gpio_rev_dependent[];",
-          "hash": "4320d7ad9b88bd31"
-        },
-        "cc3501e_gpio_rev_dependent_count": {
-          "declaration": "extern const size_t cc3501e_gpio_rev_dependent_count;",
-          "hash": "fdf1330b64201317"
-        },
         "cc3501e_gpio_route_count": {
           "declaration": "extern const size_t cc3501e_gpio_route_count;",
           "hash": "0b25a39222f158d0"

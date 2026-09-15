@@ -179,16 +179,29 @@ def _rev_dependent_pads(text: str) -> set[str]:
     return set(_REV_DEPENDENT_ENTRY_RE.findall(m.group(1)))
 
 
-@pytest.mark.parametrize("path", EXAMPLE_ROUTE_TABLES)
-def test_real_tables_carry_the_full_revision_dependent_list(gen_module, path):
-    # Every generated table carries the SAME family-wide list (issue #2144)
-    # regardless of which hw_rev IT was built for -- the list names which
-    # pads move, not where this board's own table put them. Mutation check:
+def test_example_route_tables_no_longer_carry_a_rev_dependent_list(gen_module):
+    # Issue #2144 design review: the list is identical on every AEN board,
+    # so it is generated ONCE (test below), not once per app -- the
+    # per-table copy this replaced was exactly the triplication issue #1859
+    # already removed once for cc3501e_gpio_routes[] itself. Mutation check:
+    # reverting _emit() to re-embed the block makes this fail.
+    for path in EXAMPLE_ROUTE_TABLES:
+        assert not _REV_DEPENDENT_ARRAY_RE.search(path.read_text(encoding="utf-8")), (
+            f"{path} still carries cc3501e_gpio_rev_dependent[] -- it now "
+            f"belongs solely in {gen_module.REV_DEPENDENT_OUT_PATH}"
+        )
+
+
+def test_sdk_owned_rev_dependent_file_carries_the_full_list(gen_module):
+    # The ONE place the revision-dependent list now lives -- compiled
+    # unconditionally alongside src/backends/gpio/cc3501e_proxy.c
+    # (zephyr/CMakeLists.txt), never board-overridden. Mutation check:
     # deleting px_open()'s is_rev_dependent()-gate wiring in
     # src/backends/gpio/cc3501e_proxy.c doesn't touch this generated-file
     # test (that's tests/unit/gpio_cc3501e_rev_guard's job); this one fails
     # if the GENERATOR stops emitting the list or emits the wrong pads.
-    assert _rev_dependent_pads(path.read_text(encoding="utf-8")) == gen_module.REVISION_DEPENDENT_E1M_PADS
+    text = gen_module.REV_DEPENDENT_OUT_PATH.read_text(encoding="utf-8")
+    assert _rev_dependent_pads(text) == gen_module.REVISION_DEPENDENT_E1M_PADS
 
 
 @pytest.mark.skipif(not _HAS_CLANG_FORMAT, reason="clang-format not on PATH")
@@ -220,19 +233,26 @@ def test_r1_board_yaml_produces_the_r1_map_not_r2s(gen_module, tmp_path):
 @pytest.mark.skipif(not _HAS_CLANG_FORMAT, reason="clang-format not on PATH")
 def test_real_generation_is_idempotent(gen_module, tmp_path, monkeypatch):
     """Runs the real main() end to end, but redirected via _out_path_for()
-    into tmp_path -- the tracked examples/ tree is never written to by
-    this test (#1859 PR review: a test that mutates tracked files under
-    whatever clang-format happens to be on the runner's PATH is worse
-    than no test)."""
+    and _rev_dependent_out_path() into tmp_path -- the tracked examples/
+    tree AND src/backends/gpio/cc3501e_rev_dependent_pins.c are never
+    written to by this test (#1859 PR review: a test that mutates tracked
+    files under whatever clang-format happens to be on the runner's PATH
+    is worse than no test)."""
     def _redirect(app_dir: Path) -> Path:
         return tmp_path / app_dir.name / "cc3501e_gpio_routes.c"
 
+    def _redirect_rev_dependent() -> Path:
+        return tmp_path / "cc3501e_rev_dependent_pins.c"
+
     monkeypatch.setattr(gen_module, "_out_path_for", _redirect)
+    monkeypatch.setattr(gen_module, "_rev_dependent_out_path", _redirect_rev_dependent)
 
     rc = gen_module.main()
     assert rc == 0
     generated = {p: p.read_bytes() for p in sorted(tmp_path.rglob("cc3501e_gpio_routes.c"))}
     assert len(generated) == 3
+    rev_dependent_path = tmp_path / "cc3501e_rev_dependent_pins.c"
+    assert rev_dependent_path.is_file()
 
     # Content must match today's committed tables (proves the redirect
     # didn't change WHAT gets generated, only WHERE).
@@ -242,8 +262,15 @@ def test_real_generation_is_idempotent(gen_module, tmp_path, monkeypatch):
         assert gen_path.read_bytes().decode("utf-8") == committed, (
             f"generated {gen_path} differs from committed {path}"
         )
+    assert rev_dependent_path.read_text(encoding="utf-8") == (
+        gen_module.REV_DEPENDENT_OUT_PATH.read_text(encoding="utf-8")
+    )
+    rev_dependent_bytes = rev_dependent_path.read_bytes()
 
     rc2 = gen_module.main()
     assert rc2 == 0
     generated2 = {p: p.read_bytes() for p in sorted(tmp_path.rglob("cc3501e_gpio_routes.c"))}
     assert generated == generated2, "regenerating the same output changed it"
+    assert rev_dependent_path.read_bytes() == rev_dependent_bytes, (
+        "regenerating the same rev-dependent output changed it"
+    )

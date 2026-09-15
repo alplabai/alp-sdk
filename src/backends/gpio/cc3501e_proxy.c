@@ -54,6 +54,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/logging/log.h>
+
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/chips/cc3501e.h>
@@ -61,10 +63,23 @@
 
 #include "gpio_ops.h"
 #include "alp_slot_claim.h"
+#include "cc3501e_proxy_internal.h"
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 #include <alp/hw_info.h> /* alp_hw_info_read(), alp_hw_info_assert_matches_build() */
 #endif
+
+LOG_MODULE_REGISTER(alp_gpio_cc3501e_proxy, CONFIG_LOG_DEFAULT_LEVEL);
+
+/* Defined in the SDK-owned generated file src/backends/gpio/
+ * cc3501e_rev_dependent_pins.c (scripts/gen_cc3501e_gpio_routes.py), NOT
+ * declared in the public <alp/chips/cc3501e/gpio.h> -- unlike
+ * cc3501e_gpio_routes[]/cc3501e_gpio_unrouted[] above (board-provided,
+ * declared in that header), this list is identical on every AEN board and
+ * has exactly one definition, always linked alongside this file
+ * (zephyr/CMakeLists.txt), never overridden (issue #2144 design review). */
+extern const uint32_t cc3501e_gpio_rev_dependent[];
+extern const size_t   cc3501e_gpio_rev_dependent_count;
 
 /* GPIO is fast (no worker / no radio bring-up) in the CC3501E firmware, but the
  * bridge link is briefly down if a radio op overlaps; the per-request helper
@@ -153,6 +168,22 @@ alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 	alp_hw_info_t info;
 	alp_status_t  rc         = alp_hw_info_read(&info);
 	g_hw_rev_confirmed_match = cc3501e_proxy_hw_rev_confirmed_match(rc, &info);
+	/* Diagnostic (issue #2144 review): attach() runs once at bring-up, so
+	 * every revision-dependent pin's later refusal traces back to THIS
+	 * decision -- log it once here instead of leaving a bench engineer to
+	 * infer "not confirmed" from a bare ALP_ERR_NOSUPPORT on IO8. rc==ALP_OK
+	 * means info.som_hw_rev is a CRC-valid read; any other rc leaves it
+	 * zero-filled (alp_hw_info_read()'s documented contract), so print
+	 * "(unread)" rather than a misleadingly empty string. */
+	if (!g_hw_rev_confirmed_match) {
+		LOG_WRN_ONCE("hw_rev not confirmed: alp_hw_info_read()=%d, manifest "
+		             "som_hw_rev=\"%s\", build CONFIG_ALP_SDK_SOM_HW_REV=\"%s\" -- "
+		             "revision-dependent E1M pins (IO8/IO10/IO21) will refuse "
+		             "ALP_ERR_NOSUPPORT",
+		             (int)rc,
+		             rc == ALP_OK ? info.som_hw_rev : "(unread)",
+		             CONFIG_ALP_SDK_SOM_HW_REV);
+	}
 #endif
 	return ALP_OK;
 }
@@ -233,6 +264,32 @@ static bool is_rev_dependent(uint32_t pin_id)
 	return false;
 }
 
+/* One-shot-per-pin diagnostic (issue #2144 review): px_open() also returns
+ * ALP_ERR_NOSUPPORT for an UNROUTED pin (:274 above), so a bare error code
+ * alone doesn't tell a bench engineer which guard fired.  Logs at most once
+ * per DISTINCT revision-dependent pin_id -- not once ever (that would miss
+ * every pin after the first this process happens to refuse) and not once
+ * per call (a caller retrying alp_gpio_open() on the same refused pin would
+ * otherwise flood the log).
+ * ponytail: a 32-bit mask caps individual dedup at the first 32 entries of
+ * cc3501e_gpio_rev_dependent[] (today: 3); pin #33 in a future hw-revisions.yaml
+ * would just log on every refusal instead of once -- widen to a wider
+ * bitset if that list ever grows that large. */
+static uint32_t g_rev_dependent_warned_mask;
+
+static void warn_rev_dependent_refused(uint32_t pin_id)
+{
+	for (size_t i = 0; i < cc3501e_gpio_rev_dependent_count && i < 32u; ++i) {
+		if (cc3501e_gpio_rev_dependent[i] != pin_id) continue;
+		if (g_rev_dependent_warned_mask & (1u << i)) return;
+		g_rev_dependent_warned_mask |= (1u << i);
+		LOG_WRN("alp_gpio_open(pin_id=%u) refused by the #2144 revision guard "
+		        "(not the #1854 unrouted-pad guard): manifest hw_rev unconfirmed",
+		        pin_id);
+		return;
+	}
+}
+
 static alp_status_t
 px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *caps)
 {
@@ -250,7 +307,10 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 	 * too, and a revision-INDEPENDENT pin (e.g. IO20, the SD mux enable)
 	 * never reaches this check at all, so it keeps routing/delegating
 	 * exactly as before regardless of the manifest (issue #2144). */
-	if (is_rev_dependent(pin_id) && !g_hw_rev_confirmed_match) return ALP_ERR_NOSUPPORT;
+	if (is_rev_dependent(pin_id) && !g_hw_rev_confirmed_match) {
+		warn_rev_dependent_refused(pin_id);
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	proxy_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;
