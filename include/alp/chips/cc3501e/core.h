@@ -72,20 +72,34 @@ typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, voi
 /** @} */
 
 /** @ref cc3501e_link_log_entry_t::flags bits (issue #2136).  @{ */
-#define CC3501E_LINK_LOG_READY_BEFORE \
-	0x1u                                  /**< READY level sampled before the request header.
-                                             *   READY (CC35 GPIO17 -> Alif P2_6) is an OPEN
-                                             *   CONNECTION on some boards (see cc3501e_core.c's
-                                             *   in-band-armed-check comment), so a caller reading
-                                             *   this or READY_AFTER MUST also check READY_PROVEN:
-                                             *   a frozen level on a board that never proved the
-                                             *   line wired is not evidence of anything, just an
-                                             *   unpopulated read. */
-#define CC3501E_LINK_LOG_READY_AFTER 0x2u /**< READY level sampled at this attempt's exit. */
-#define CC3501E_LINK_LOG_READY_PROVEN \
-	0x4u /**< The line has been observed HIGH at least once
-                                             *   this boot (cc3501e_core.c's g_ready_line_proven) --
-                                             *   without this, BEFORE/AFTER are not trustworthy. */
+#define CC3501E_LINK_LOG_READY_AT_FAILURE \
+	0x1u /**< READY read HIGH at the moment this failure was
+                                             *   recorded.  Sampled ONCE, on the failing path only.
+                                             *
+                                             *   An earlier revision sampled BEFORE and AFTER every
+                                             *   attempt, which cost a GPIO read per bridge request
+                                             *   on every board and perturbed #2145's READY gate --
+                                             *   that gate consumes the pin in run-lengths, so a
+                                             *   second reader shifts what it observes.  A caller
+                                             *   reading this bit MUST also check
+                                             *   @c CC3501E_LINK_LOG_READY_WAS_STUCK: a level from a
+                                             *   line that had already latched stuck is not
+                                             *   evidence, just an untrusted read. */
+#define CC3501E_LINK_LOG_READY_WAS_STUCK \
+	0x4u /**< The READY line had latched stuck-LOW at the time of
+                                             *   this failure (cc3501e_core.c's
+                                             *   g_ready_line_was_stuck), so the gate had stopped
+                                             *   waiting on the pin and was falling back to a plain
+                                             *   settle.  BEFORE/AFTER still record real samples;
+                                             *   this says the pin was no longer being trusted.
+                                             *
+                                             *   Replaces an earlier READY_PROVEN bit sourced from
+                                             *   g_ready_line_proven.  #2145 deleted that variable
+                                             *   along with the whole edge-proof design -- the pin
+                                             *   is deliberately never treated as proof of
+                                             *   anything, so a "proven" bit had no source and no
+                                             *   meaning.  "Was it stuck?" is the question an
+                                             *   operator reading this ring actually has. */
 /** #2136 review (MAJOR): a phase's byte array is memcpy'd from
  *  ctx->rx_scratch regardless of whether THAT phase's own transceive
  *  actually succeeded -- on a bail, that scratch can be stale residue from a

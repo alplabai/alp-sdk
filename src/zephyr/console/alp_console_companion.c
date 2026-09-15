@@ -46,7 +46,7 @@ cc3501e_t *companion_cc3501e;
 #define COMPANION_LINK_LOG_HDR_FMT \
 	"cc3501e: link_log %u/%u entries, fail_streak=%u (legend: ts_ms cmd phase status" \
 	" flags hdr[4] reply_hdr[4] recover_attempts; phase 1=req_hdr 2=req_payload" \
-	" 3=reply_hdr 4=reply_payload; flags 1=ready_before 2=ready_after 4=ready_proven" \
+	" 3=reply_hdr 4=reply_payload; flags 1=ready_at_failure 4=ready_was_stuck" \
 	" 8=hdr_valid 0x10=reply_hdr_valid -- hdr[4]/reply_hdr[4] are MEANINGLESS," \
 	" all-zero, unless their own VALID bit is set)"
 /* #2136 review (minor): the "cc3501e: " prefix now lives IN the format string

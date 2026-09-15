@@ -1941,8 +1941,9 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 
 /* READY level for the link-failure ring only (issue #2136) -- separate from
  * the READY GATE logic above, which this does not touch. NULL ready_pin
- * (CS-less r1 board) or a read failure both report false: "not proven high",
- * the same convention g_ready_line_proven itself uses. */
+ * (CS-less r1 board) or a read failure both report false -- the sample is
+ * simply "not HIGH", which is why a reader must also weigh
+ * CC3501E_LINK_LOG_READY_WAS_STUCK before drawing anything from it. */
 static bool cc3501e_link_log_ready_level(const cc3501e_t *ctx)
 {
 	bool level = false;
@@ -1965,8 +1966,7 @@ static void cc3501e_link_log_record(cc3501e_t        *ctx,
                                     const uint8_t     reply_hdr[ALP_CC3501E_HEADER_BYTES],
                                     bool              hdr_bytes_valid,
                                     bool              reply_hdr_valid,
-                                    bool              ready_before,
-                                    bool              ready_after)
+                                    bool              ready_at_failure)
 {
 	cc3501e_link_log_entry_t *e = &ctx->link_log[ctx->link_log_next];
 
@@ -1980,9 +1980,8 @@ static void cc3501e_link_log_record(cc3501e_t        *ctx,
 	 * already zeroed hdr_bytes/reply_hdr whenever it is false, so these bits
 	 * are what lets a reader tell "genuinely all-zero on the wire" (would
 	 * need the bit set) apart from "never captured" (bit unset). */
-	e->flags = (uint8_t)((ready_before ? CC3501E_LINK_LOG_READY_BEFORE : 0u) |
-	                     (ready_after ? CC3501E_LINK_LOG_READY_AFTER : 0u) |
-	                     (g_ready_line_proven ? CC3501E_LINK_LOG_READY_PROVEN : 0u) |
+	e->flags = (uint8_t)((ready_at_failure ? CC3501E_LINK_LOG_READY_AT_FAILURE : 0u) |
+	                     (g_ready_line_was_stuck ? CC3501E_LINK_LOG_READY_WAS_STUCK : 0u) |
 	                     (hdr_bytes_valid ? CC3501E_LINK_LOG_HDR_BYTES_VALID : 0u) |
 	                     (reply_hdr_valid ? CC3501E_LINK_LOG_REPLY_HDR_VALID : 0u));
 	memcpy(e->hdr_bytes, hdr_bytes, ALP_CC3501E_HEADER_BYTES);
@@ -2172,10 +2171,15 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	/* READY sampled once here, before this exchange clocks anything, and
 	 * again at `out:` (issue #2136) -- so a ring entry can tell a slave
 	 * that was already down before this attempt started (frozen both
-	 * samples: crashed / not driving) apart from one that dropped mid-
-	 * exchange. See CC3501E_LINK_LOG_READY_PROVEN's doc comment for why a
-	 * caller must check that bit before trusting either sample. */
-	const bool link_ready_before = cc3501e_link_log_ready_level(ctx);
+	 * samples: crashed / not driving).
+	 *
+	 * #2145 interaction: this used to ALSO sample READY before the exchange,
+	 * on EVERY attempt. That cost a GPIO read per bridge request on every
+	 * board for evidence only a failing attempt ever uses, and it perturbed
+	 * the READY gate's own view of the line -- #2145's gate consumes the pin
+	 * in run-lengths, so an extra reader shifts what the gate sees. The
+	 * sample now happens once, in the failure path below, and is recorded as
+	 * the level AT FAILURE rather than a before/after pair. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	/* Ring evidence (#2136): the request-header phase's 4 MISO bytes -- a
 	 * later phase's transceive reuses rx_scratch, so this is the only
@@ -2379,10 +2383,10 @@ out:
 		 * are whatever they were last set to above -- real wire bytes with
 		 * their VALID flag set if that phase's own transceive succeeded,
 		 * all-zero with it unset otherwise (#2136 review, MAJOR: never
-		 * stale scratch presented as if it were wire data). link_ready_before
-		 * was sampled before the very first transceive above; the matching
-		 * "after" sample happens here, once, right before this attempt's
-		 * failure is committed. */
+		 * stale scratch presented as if it were wire data). READY is sampled
+		 * HERE, once, on the failing path only -- see the note above the
+		 * request-header transceive for why it is no longer sampled on every
+		 * attempt. */
 		cc3501e_link_log_record(ctx,
 		                        cmd,
 		                        link_phase,
@@ -2391,7 +2395,6 @@ out:
 		                        reply_hdr,
 		                        link_hdr_bytes_valid,
 		                        reply_hdr_valid,
-		                        link_ready_before,
 		                        cc3501e_link_log_ready_level(ctx));
 		ctx->link_log_fail_streak++;
 	} else {
