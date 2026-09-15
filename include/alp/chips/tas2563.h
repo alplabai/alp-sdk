@@ -841,13 +841,13 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   running and clears a latch that has nothing to keep it clear.
  *
  * @par Ordering contract: mute or shut down the amp before calling
- *   @ref alp_audio_out_stop -- otherwise it falls into the device's
- *   ~100 ms clock-error shutdown instead of a commanded one -- and
- *   after @ref alp_audio_out_start, call this function only once the
- *   first write has succeeded and only while the stream keeps being
- *   fed.  On the E1M-EVK, in three trials where the probe called
- *   @ref tas2563_resume and then stopped the stream within
- *   milliseconds, the maintainer heard three "kicks"; the bench
+ *   @ref alp_audio_out_stop -- otherwise it falls into the device's own
+ *   clock-error shutdown (observed within ~100 ms) instead of a
+ *   commanded one -- and after @ref alp_audio_out_start, call this
+ *   function only once the first write has succeeded and only while
+ *   the stream keeps being fed.  On the E1M-EVK, in three trials where
+ *   the probe called @ref tas2563_resume and then stopped the stream
+ *   within milliseconds, the maintainer heard three "kicks"; the bench
  *   evidence does not separate a power-up pop from a shutdown-on-clock-
  *   loss transient, so which one caused it is unclear (#2146).
  *

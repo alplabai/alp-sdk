@@ -4323,11 +4323,22 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * final playback-on verdict check can tell "never got there" apart
 	 * from "got there and it failed" without a third state. */
 	alp_status_t silence_rc = ALP_ERR_NOSUPPORT;
+	/* Count of amps whose tas2563_resume() (step 10 below) returned
+	 * ALP_OK.  Printing act_rc alone let one failed resume leave that
+	 * amp stuck at PWR_CTL 0x0e while the phase still PASSed on the
+	 * other amp's PDM-correlated signal -- the playback-on verdict below
+	 * requires this to equal ok_amps. */
+	int resumed_amps = 0;
+	/* First amp address a resume failed on, -1 if none did -- enough to
+	 * name the offending amp in the verdict note without a full list. */
+	int failed_resume_addr = -1;
 	ARG_UNUSED(mic_rc);
 	ARG_UNUSED(spk_rc);
 	ARG_UNUSED(baseline_energy);
 	ARG_UNUSED(during_energy);
 	ARG_UNUSED(silence_rc);
+	ARG_UNUSED(resumed_amps);
+	ARG_UNUSED(failed_resume_addr);
 
 #if AEN_EVKDEMO_SOUND_PLAYBACK
 	/* --- 8. PDM: open + start, capture the pre-tone baseline ------------ */
@@ -4387,9 +4398,9 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * went ACTIVE right after alp_audio_out_start() (the old order
 		 * here) therefore switched on with no clock present, which is
 		 * what latched the TDM clock error at the start of playback and,
-		 * separately, is what the part's own ~100 ms clock-loss shutdown
-		 * eventually silenced after a stop/restart (#2146).  Writing one
-		 * silent block before either amp is touched makes the clock
+		 * separately, is what the part's own clock-loss shutdown (observed
+		 * within ~100 ms) eventually silenced after a stop/restart (#2146).
+		 * Writing one silent block before either amp is touched makes the clock
 		 * actually running true instead of assumed; tas2563_resume()
 		 * then clears that (or any earlier) latch before switching MODE
 		 * to ACTIVE -- see its doc for why clear-then-activate is the
@@ -4402,6 +4413,11 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 			for (size_t i = 0; i < AMP_COUNT; i++) {
 				if (!amp_up[i]) continue;
 				alp_status_t act_rc = tas2563_resume(&amps[i]);
+				if (act_rc == ALP_OK) {
+					resumed_amps++;
+				} else if (failed_resume_addr < 0) {
+					failed_resume_addr = amp_addrs[i];
+				}
 				printf(
 				    "[evkdemo] SOUND: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)act_rc);
 			}
@@ -4470,6 +4486,16 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 
 	/* --- 13. Fault re-read: the "after" half ---------------------------- */
 	bool new_shutdown_fault = false;
+	/* TAS2563_FAULT_SHUTDOWN_CAUSES includes TAS2563_FAULT_TDM_CLOCK, but
+	 * bench run 2026-09-15 observed INT_LTCH0 bit 2 (TDM clock error)
+	 * re-latching DURING audible playback while PWR_CTL stayed 0x0c (MODE
+	 * ACTIVE, not shut down) -- on this board the bit is not evidence of
+	 * the device's own clock-error shutdown.  The driver has no
+	 * PWR_CTL.MODE read accessor this phase could use to judge shutdown
+	 * directly, so this check excludes TDM_CLOCK rather than fail the
+	 * phase on a bit that re-latches spuriously during normal playback. */
+	const uint32_t shutdown_fault_mask =
+	    TAS2563_FAULT_SHUTDOWN_CAUSES & ~(uint32_t)TAS2563_FAULT_TDM_CLOCK;
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		if (!amp_up[i]) continue;
 		uint32_t faults_after = 0;
@@ -4477,7 +4503,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		printf("[evkdemo] SOUND: tas2563_read_faults(0x%02x) after -> 0x%08x\n",
 		       amp_addrs[i],
 		       faults_after);
-		if ((faults_after & TAS2563_FAULT_SHUTDOWN_CAUSES) != 0u) new_shutdown_fault = true;
+		if ((faults_after & shutdown_fault_mask) != 0u) new_shutdown_fault = true;
 	}
 	/* Same amp_fault_pin_verdict() as the baseline read above. */
 	int  fault_pin_after      = gpio_pin_get(gpio5, AMP_FAULT_PIN);
@@ -4537,6 +4563,21 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	if (silence_rc != ALP_OK) {
 		ctx->note = "silent priming write failed -- tas2563_resume() was skipped "
 		            "rather than risked with no confirmed clock, see the printed rc";
+		return PHASE_FAIL;
+	}
+	if (resumed_amps != ok_amps) {
+		/* A failed tas2563_resume() leaves that one amp at PWR_CTL 0x0e
+		 * (SHUTDOWN) -- the PDM-correlation check below only proves the
+		 * OTHER amp's signal reached the mics, so this has to be its own
+		 * gate rather than folded into `correlated`. */
+		static char resume_fail_note[96];
+		snprintf(resume_fail_note,
+		         sizeof(resume_fail_note),
+		         "tas2563_resume() failed on amp 0x%02x (%d/%d amps resumed)",
+		         (unsigned)failed_resume_addr,
+		         resumed_amps,
+		         ok_amps);
+		ctx->note = resume_fail_note;
 		return PHASE_FAIL;
 	}
 	if (!correlated) {
