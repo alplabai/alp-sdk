@@ -675,6 +675,24 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx)
 	return reg_update(ctx, TAS2563_REG_INT_CLK, TAS2563_INT_CLK_CLR_LTCH, TAS2563_INT_CLK_CLR_LTCH);
 }
 
+alp_status_t tas2563_resume(const tas2563_t *ctx)
+{
+	/* Cast away const: both calls below only reach the bus through
+	 * ctx->bus/ctx->addr, which this function does not mutate itself --
+	 * see the header's rationale for why the pointer is const here even
+	 * though the callees it forwards to are not. */
+	tas2563_t *mutable_ctx = (tas2563_t *)ctx;
+
+	/* Clear the latches FIRST: the datasheet's own field tables
+	 * (§7.5.36-§7.5.39, cited in tas2563_clear_faults()'s doc) tie a
+	 * shutdown-causing fault to CLR_INTP_LTCH, not to MODE, so clearing
+	 * after going ACTIVE would leave a stale TDM-clock-error latch that
+	 * re-arms the very shutdown this function exists to undo. */
+	alp_status_t s = tas2563_clear_faults(mutable_ctx);
+	if (s != ALP_OK) return s;
+	return tas2563_set_mode(mutable_ctx, TAS2563_MODE_ACTIVE);
+}
+
 /* ------------------------------------------------------------------ */
 /* Tuning-blob replay                                                  */
 /* ------------------------------------------------------------------ */

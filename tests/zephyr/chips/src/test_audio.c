@@ -799,6 +799,71 @@ ZTEST(alp_chips, test_tas2563_clear_faults_sets_the_self_clearing_bit)
 	alp_i2c_close(bus);
 }
 
+/* #2146: tas2563_resume() must clear the latches BEFORE going ACTIVE --
+ * clearing after would leave a shutdown-causing latch (e.g. the TDM
+ * clock error observed on e1m-aen-evk-03) standing, ready to re-trip
+ * the part the instant it is re-evaluated.  Seed PWR_CTL = 0Eh (MODE
+ * SHUTDOWN, matching the silicon observation post-clock-loss) with
+ * both latch bytes non-zero, then check the write log puts the
+ * INT_CLK (0x30) CLR_INTP_LTCH write strictly before the PWR_CTL
+ * (0x02) write, and that the end state is both latches clear and MODE
+ * ACTIVE. */
+ZTEST(alp_chips, test_tas2563_resume_clears_latches_then_activates_in_order)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	fake_tas2563_set_reg(TAS_REG_INT_LTCH0, 0x04u); /* TDM clock error, #2146's own trigger. */
+	fake_tas2563_set_reg(TAS_REG_INT_LTCH3, 0x40u); /* boost clock error. */
+	fake_tas2563_log_reset();
+
+	zassert_equal(tas2563_resume(&ctx), ALP_OK);
+
+	uint32_t faults = 0xDEADBEEFu;
+	zassert_equal(tas2563_read_faults(&ctx, &faults), ALP_OK);
+	zassert_equal(faults, 0u, "resume must clear every latched fault");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x0Cu,
+	              "resume must leave MODE = ACTIVE (00b), sense-power bits untouched");
+
+	int clk_write_idx = -1;
+	int pwr_write_idx = -1;
+	for (size_t i = 0; i < fake_tas2563_log_len(); ++i) {
+		const struct fake_tas2563_write *w = fake_tas2563_log(i);
+		if (w->reg == TAS_REG_INT_CLK && clk_write_idx < 0) clk_write_idx = (int)i;
+		if (w->reg == TAS_REG_PWR_CTL && pwr_write_idx < 0) pwr_write_idx = (int)i;
+	}
+	zassert_true(clk_write_idx >= 0, "resume must write INT_CLK's CLR_INTP_LTCH bit");
+	zassert_true(pwr_write_idx >= 0, "resume must write PWR_CTL's MODE field");
+	zassert_true(clk_write_idx < pwr_write_idx,
+	             "the latch clear must be written before MODE, not after (#2146)");
+
+	alp_i2c_close(bus);
+}
+
+/* An I2C error on the clear step must propagate as-is and must not
+ * reach tas2563_set_mode() at all -- PWR_CTL stays at its seeded
+ * SHUTDOWN value and its write count does not move. */
+ZTEST(alp_chips, test_tas2563_resume_propagates_i2c_error_and_leaves_mode_unwritten)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	const uint32_t pwr_writes_before = fake_tas2563_write_count(TAS_REG_PWR_CTL);
+	fake_tas2563_fail_write_at(0u, 0u, TAS_REG_INT_CLK);
+
+	zassert_not_equal(
+	    tas2563_resume(&ctx), ALP_OK, "a NACKed latch-clear write must surface, not be swallowed");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x0Eu,
+	              "MODE must still read the seeded SHUTDOWN value");
+	zassert_equal(fake_tas2563_write_count(TAS_REG_PWR_CTL),
+	              pwr_writes_before,
+	              "tas2563_set_mode() must never have been reached");
+
+	alp_i2c_close(bus);
+}
+
 /* The device map is book/page paged and BOOK (7Fh) is only reachable
  * from page 0 (7.3.10 p.34, 7.5.62 p.94).  Pin the exact write
  * sequence, including the paging writes and the restore to book 0 /

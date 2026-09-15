@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-13",
+  "generated": "2026-09-15",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -2986,6 +2986,10 @@
           "hash": "2cea140e9f0dc78e",
           "signature": "alp_status_t cc3501e_reset(cc3501e_t *ctx);"
         },
+        "cc3501e_set_recover_callback": {
+          "hash": "beeff373ceb44330",
+          "signature": "void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void *user);"
+        },
         "cc3501e_spi1_configure": {
           "hash": "b11368bc9e1f4c1e",
           "signature": "alp_status_t cc3501e_spi1_configure(cc3501e_t *ctx, uint32_t freq_hz, uint8_t mode, alp_cc3501e_spi1_cs_t cs, uint32_t *actual_freq_hz_out, uint16_t *max_xfer_out, uint32_t timeout_ms);"
@@ -3023,8 +3027,13 @@
           "hash": "b89208474f7bc2be",
           "kind": "fnptr"
         },
+        "cc3501e_recover_cb_t": {
+          "definition": "typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, void *user);",
+          "hash": "674c4ae9d79e3a4b",
+          "kind": "fnptr"
+        },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; uint32_t recover_count; uint32_t recover_attempt_count; uint64_t last_recover_ms; uint8_t recover_fail_streak; bool recovering; uint8_t link_epoch; cc3501e_recover_cb_t recover_cb; void *recover_cb_user; bool ota_session_active; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "uint8_t fw_proto_major",
@@ -3052,9 +3061,18 @@
             "bool spi1_busy",
             "bool spi1_configured",
             "uint8_t spi1_seq",
-            "bool request_lock"
+            "bool request_lock",
+            "uint32_t recover_count",
+            "uint32_t recover_attempt_count",
+            "uint64_t last_recover_ms",
+            "uint8_t recover_fail_streak",
+            "bool recovering",
+            "uint8_t link_epoch",
+            "cc3501e_recover_cb_t recover_cb",
+            "void *recover_cb_user",
+            "bool ota_session_active"
           ],
-          "hash": "822bd1c0583932f9",
+          "hash": "f30820d478961391",
           "kind": "struct"
         }
       },
@@ -3238,8 +3256,8 @@
     "alp/chips/cc3501e/sockets.h": {
       "functions": {
         "cc3501e_sock_accepted_decode": {
-          "hash": "84f8620db63c1759",
-          "signature": "alp_status_t cc3501e_sock_accepted_decode(const uint8_t *payload, size_t len, alp_cc3501e_sock_accepted_evt_t *out);"
+          "hash": "88af3de55317eede",
+          "signature": "alp_status_t cc3501e_sock_accepted_decode(const uint8_t *payload, size_t len, uint8_t epoch, alp_cc3501e_sock_accepted_evt_t *out);"
         },
         "cc3501e_sock_bind": {
           "hash": "6a7f0fb7d0f49cb6",
@@ -7532,6 +7550,10 @@
         "tas2563_read_revision": {
           "hash": "42548fad01644ebf",
           "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
+        },
+        "tas2563_resume": {
+          "hash": "2d4bace192240033",
+          "signature": "alp_status_t tas2563_resume(const tas2563_t *ctx);"
         },
         "tas2563_set_amp_level": {
           "hash": "bf594748f4b3a17c",
