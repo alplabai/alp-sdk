@@ -26,8 +26,10 @@
  * init, so nothing drives P9_3/4/5 at all. To exercise this node once U46
  * is a 3257-type bus switch (removes this contention regardless of which
  * rail powers it -- this app never drives EN or SEL and does not test
- * the amps; amp audibility is a separate, stricter, PROVEN-at-+3V3
- * condition, see include/alp/boards/alp_e1m_evk.h's I2S mux block):
+ * the amps; amp audibility is a separate, stricter condition -- VCC was
+ * moved to +3V3 between a silent run and an audible run on
+ * e1m-aen-evk-03, not established as the only difference -- see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block):
  * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (resolved relative to this app's own source dir, examples/aen/aen-i2s-amp-alif;
  * that file just sets `&i2s3 { status = "okay"; };`) -- the single documented

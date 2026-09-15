@@ -3926,11 +3926,12 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * one-way mux and reproduces the driver-contention hazard above --
  * VCC alone is not the gate) AND that switch's VCC is on `+3V3`
  * (VCC on `+VIO`, 1.8 V with the E1M-AEN SoM, is out of a 3257-type
- * part's spec and confirmed silent on the bench). VERIFIED on
- * `e1m-aen-evk-03` (2026-09-15): once a fitted 3257-type part's VCC
- * was re-wired to `+3V3`, a continuous-tone image was clearly audible
- * on both amps (see include/alp/boards/alp_e1m_evk.h's I2S mux block
- * for the full finding). CAVEAT, untested: at `+3V3` a CBT-type
+ * part's spec and confirmed silent on the bench). On `e1m-aen-evk-03`
+ * (2026-09-15), a fitted 3257-type part's VCC was moved to `+3V3`
+ * between that silent run and an audible run -- not established as
+ * the only difference between the two (see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block for the full
+ * finding). CAVEAT, untested: at `+3V3` a CBT-type
  * switch's control-input VIH may not register a 1.8 V HIGH from the
  * CC3501E, so this app's own LOW-only EN/SEL use is fine but disabling
  * the mux or selecting M.2 may not switch reliably. The SAME run also

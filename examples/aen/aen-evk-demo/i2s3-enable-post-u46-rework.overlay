@@ -9,11 +9,12 @@
  * state, and I2S0_SDO/SCLK/WS on P9_3/4/5 run through it backwards).
  *
  * Apply this ONLY once U46 is BOTH a 3257-type switch AND its VCC is
- * on +3V3 (a stock 74LVC157, even on +3V3, is still one-way and
- * reproduces the contention above; VCC alone is not the gate) --
- * VERIFIED on e1m-aen-evk-03, 2026-09-15: re-powering a fitted
- * 3257-type part from +VIO to +3V3 made playback clearly audible; a
- * 3257-type part swap alone, VCC still on +VIO, stays silent -- see
+ * on +3V3, OR a switch rated for 1.8 V VCC (untested) (a stock
+ * 74LVC157, even on +3V3, is still one-way and reproduces the
+ * contention above; VCC alone is not the gate) -- on e1m-aen-evk-03,
+ * 2026-09-15, a fitted 3257-type part's VCC was moved to +3V3 between
+ * a silent run and an audible run; not established as the only
+ * difference between the two -- see
  * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
  * untested /E-or-S-HIGH caveat at +3V3 and the open TDM-latch/#2146
  * findings -- together with setting AEN_EVKDEMO_SOUND_PLAYBACK to 1

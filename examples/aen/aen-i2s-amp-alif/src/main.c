@@ -21,9 +21,11 @@
  * is REVISION-DEPENDENT -- Alif P7.1 (direct GPIO) on r1, CC3501E GPIO_30 on
  * r2 -- see include/alp/boards/alp_e1m_evk.h's I2S mux block.  AUDIBLE amp
  * output additionally needs U46 to be a 3257-type bus switch with VCC on
- * +3V3 (VERIFIED on e1m-aen-evk-03; the as-built 74LVC157 can never pass
- * this direction, see the same header) + the mux routed + the TAS2563
- * configured; this example validates only the I2S controller + clock path.
+ * +3V3 (on e1m-aen-evk-03, VCC was moved to +3V3 between a silent run and
+ * an audible run, not established as the only difference; the as-built
+ * 74LVC157 can never pass this direction regardless, see the same header)
+ * + the mux routed + the TAS2563 configured; this example validates only
+ * the I2S controller + clock path.
  *
  * PASS gate: device ready, i2s_configure + i2s_write(s) + i2s_trigger(START) all
  * return 0 and the TX FIFO DRAINs cleanly with the 76.8 MHz clock ON (the

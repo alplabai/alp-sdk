@@ -48,10 +48,12 @@ same-family part swap alone removes the contention hazard below,
 regardless of which rail powers it -- this app never drives EN or SEL
 itself, and tests only the SoC's own `i2s3` controller, not the amps).
 Amp audibility is a separate, stricter condition this app does not
-check: PROVEN on `e1m-aen-evk-03` (2026-09-15) with U46's VCC on
-`+3V3` (a switch rated for 1.8 V VCC is the untested alternative), and
-even then disabling the mux or selecting M.2 (`/E`/`S` HIGH) is
-untested -- see `include/alp/boards/alp_e1m_evk.h`'s I2S mux block.
+check: on `e1m-aen-evk-03` (2026-09-15), a fitted 3257-type part's VCC
+was moved to `+3V3` between a silent run and an audible run -- not
+established as the only difference between the two (a switch rated
+for 1.8 V VCC is the untested alternative), and even then disabling
+the mux or selecting M.2 (`/E`/`S` HIGH) is untested -- see
+`include/alp/boards/alp_e1m_evk.h`'s I2S mux block.
 The single documented switch to re-enable this node:
 
 ```bash
@@ -89,9 +91,10 @@ on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 >    `74LVC157ABQ,115` is a one-way mux and can NEVER pass this direction
 >    at any VCC (undervoltage is not the problem for that part — its VCC
 >    range is 1.2-3.6 V). U46 must be REPLACED with a 3257-type bus switch
->    AND that switch's VCC must be on `+3V3` — VERIFIED on `e1m-aen-evk-03`
->    (2026-09-15): a 3257-type part with VCC left on `+VIO` (1.8 V) was
->    silent, re-wiring VCC to `+3V3` made it audible. `S` = IO13 →
+>    AND that switch's VCC must be on `+3V3` — on `e1m-aen-evk-03`
+>    (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
+>    (1.8 V, silent) to `+3V3` (audible) — not established as the only
+>    difference between the two runs. `S` = IO13 →
 >    **CC3501E GPIO_13**, both hw revisions; `/E` is REVISION-DEPENDENT —
 >    Alif P7.1 (direct GPIO) on r1, **CC3501E GPIO_30** on r2 — per
 >    `metadata/e1m_modules/E1M-AEN801.yaml`'s `pad_routes` /
