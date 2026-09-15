@@ -14,7 +14,9 @@
  * Backend-owned state lives in module-static pools indexed via
  * state->be_data:
  *   - struct hw_in_be   (dmic device + k_mem_slab + DSP filter state)
- *   - struct hw_out_be  (alp_i2s_t handle + started flag + Q8.8 vol)
+ *   - struct hw_out_be  (alp_i2s_t handle + started/pending-start flags +
+ *     Q8.8 vol -- issue #2132: the deferred-start dance around an empty
+ *     i2s_dw TX ring buffer lives entirely in this struct)
  *
  * The dispatcher (src/audio_dispatch.c) owns the public-facing
  * struct alp_audio_in / struct alp_audio_out pools; this backend
@@ -105,11 +107,21 @@ static struct hw_in_be g_in_be_pool[CONFIG_ALP_SDK_MAX_AUDIO_IN_HANDLES];
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 
 /* in_use is the LAST member (see alp_slot_claim.h): the winning claimant
- * zeroes everything before it via offsetof. */
+ * zeroes everything before it via offsetof.
+ *
+ * pending_start / block_queued (issue #2132): the DesignWare I2S driver's
+ * tx_stream_start() dequeues a block at TRIGGER_START time and returns
+ * -ENOMEM when its ring buffer is empty (queue_get(), i2s_dw.c:144-147).
+ * Every in-tree caller starts before its first write, so z_out_start()
+ * defers the real i2s_dw trigger until z_out_write() has actually queued
+ * a block -- these two flags carry that deferred state across the
+ * start()/write()/stop() calls below. */
 struct hw_out_be {
 	alp_i2s_t *i2s;
 	bool       started;
-	uint16_t   volume_q8; /* Q8.8 software gain, 0x0100 = unity */
+	bool       pending_start; /* start() called, nothing queued yet */
+	bool       block_queued;  /* a write() has queued a block since open/stop */
+	uint16_t   volume_q8;     /* Q8.8 software gain, 0x0100 = unity */
 	bool       in_use;
 };
 
@@ -461,6 +473,15 @@ static alp_status_t z_out_start(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	if (!be->block_queued) {
+		/* issue #2132: nothing has been written since open()/stop() --
+		 * triggering the real I2S START now would hit i2s_dw.c's empty-
+		 * queue -ENOMEM. Defer; z_out_write() fires the real start once
+		 * it actually queues a block (write-then-start already starts
+		 * immediately below, unaffected). */
+		be->pending_start = true;
+		return ALP_OK;
+	}
 	alp_status_t s = alp_i2s_start(be->i2s);
 	if (s == ALP_OK) be->started = true;
 	return s;
@@ -475,14 +496,42 @@ static alp_status_t z_out_stop(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	if (be->pending_start || !be->started) {
+		/* Nothing is really running: start() was deferred and never
+		 * fired (pending, never written), or the stream is already
+		 * stopped/was never started. i2s_dw.c's STOP/DRAIN refuse a
+		 * stream that isn't I2S_STATE_RUNNING (-EIO, i2s_dw.c:301-304 /
+		 * :315-321), so clear local state instead of issuing a trigger
+		 * that would fail. */
+		be->pending_start = false;
+		be->block_queued  = false;
+		return ALP_OK;
+	}
 	alp_status_t s = alp_i2s_stop(be->i2s);
-	if (s == ALP_OK) be->started = false;
+	if (s == ALP_OK) {
+		be->started      = false;
+		be->block_queued = false;
+	}
 	return s;
 #else
 	(void)state;
 	return ALP_ERR_NOSUPPORT;
 #endif
 }
+
+#if defined(CONFIG_ALP_SDK_AUDIO_OUT)
+/* Fire a start() that z_out_start() deferred, now that z_out_write() has
+ * actually queued a block (issue #2132).  No-op once pending_start is
+ * already clear -- safe to call after every successful queue push. */
+static alp_status_t _fire_pending_start(struct hw_out_be *be)
+{
+	if (!be->pending_start) return ALP_OK;
+	be->pending_start = false;
+	alp_status_t s    = alp_i2s_start(be->i2s);
+	if (s == ALP_OK) be->started = true;
+	return s;
+}
+#endif /* CONFIG_ALP_SDK_AUDIO_OUT */
 
 static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
                                 const void                    *buf,
@@ -532,14 +581,30 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 			src += ns;
 			remaining_frames -= n;
 			pushed += n;
+
+			/* issue #2132: the first chunk just landed in the queue --
+			 * fire a deferred start() now.  A no-op on every later
+			 * chunk once pending_start is clear. */
+			be->block_queued = true;
+			s                = _fire_pending_start(be);
+			if (s != ALP_OK) {
+				if (out_frames != NULL) *out_frames = pushed;
+				return s;
+			}
 		}
 		if (out_frames != NULL) *out_frames = pushed;
 		return ALP_OK;
 	}
 
 	alp_status_t s = alp_i2s_write(be->i2s, buf, bytes, timeout_ms);
-	if (s == ALP_OK && out_frames != NULL) *out_frames = frames;
-	return s;
+	if (s != ALP_OK) return s;
+	be->block_queued = true;
+	if (out_frames != NULL) *out_frames = frames;
+	/* issue #2132: the block just landed in the queue -- fire a deferred
+	 * start() now.  A start failure surfaces from THIS write() call,
+	 * since the caller can actually observe it here (out_frames still
+	 * reports what was genuinely queued). */
+	return _fire_pending_start(be);
 #else
 	(void)state;
 	(void)buf;
@@ -576,6 +641,11 @@ static void z_out_close(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return;
+	/* issue #2132: be->started stays false for the whole pending-start
+	 * window (only _fire_pending_start() ever sets it true), so a
+	 * pending-but-never-written close correctly takes the plain
+	 * alp_i2s_close() path below with no drop trigger -- no separate
+	 * pending_start check needed here, unlike z_out_stop() above. */
 	if (be->started) {
 		(void)alp_i2s_stop(be->i2s);
 		be->started = false;
