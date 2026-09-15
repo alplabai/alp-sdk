@@ -246,8 +246,9 @@ trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
 > [`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)" for
 > the customer-facing writeup, its limitations (no `VBACKUP` supply, so no
 > timekeeping across a power cycle; `RTC_CLKOUT` carrier-only), and the
-> `0x40`-instead-of-`0x48` per-unit TMP112 defect. #1814's blocker is cleared:
-> `rv3028c7` is reachable.
+> TMP112 design address: `0x40`, not the earlier-declared `0x48`, which was a
+> metadata error (alp-sdk#1978). #1814's blocker is cleared: `rv3028c7` is
+> reachable.
 >
 > Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
 > (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
@@ -274,7 +275,7 @@ this bus actually measured.
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
 | OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
 | RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
-| TMP112 | `0x48` | Thermometer -- DECLARED address; does NOT answer on the 2026W36 batch (alp-sdk#1978) | BRD_I2C (I2C0) | SoM |
+| TMP112 | `0x40` | Thermometer -- design address for the fitted TMP112DIDPWR (X2SON-5, ADD0->GND per SBOS473L Table 7-4); the earlier-declared `0x48` was a metadata error, corrected under alp-sdk#1978 | BRD_I2C (I2C0) | SoM |
 | TCAL9538 | `0x73` | GPIO expander (U35 main) | I2C2 | EVK carrier |
 | TCAL9538 | `0x71` | GPIO expander (U37, PCIe -- NOT ASSEMBLED, alp-sdk#1974) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
@@ -377,7 +378,7 @@ pull-up alone.**
 | Address | Part | Result |
 |---|---|---|
 | `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44` (HID nibble `0x4` matches; VID nibble is production-line, not identity, per RV-3028-C7 Application Manual Rev. 1.4 §3.14); seconds `0x01` -> `0x02` (oscillator running) |
-| `0x48` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
+| `0x40` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
 | `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
 
 Every non-response was a clean `rc=-5` (`-EIO`) NACK: **zero `-ETIMEDOUT`,
