@@ -303,10 +303,14 @@ alp_status_t cc3501e_ota_promote(cc3501e_t *ctx, uint32_t timeout_ms)
  * sleep.  Note what does NOT make a readback expensive: cc3501e_request()
  * IGNORES its timeout_ms outright ("(void)timeout_ms; -- reserved for a future
  * IRQ-driven wait", cc3501e_core.c), unlike poll_by_repeat() which really does
- * re-issue for the whole budget.  What costs time is the READY gate: once
- * g_ready_line_proven latches, EACH reply phase may wait
- * CC3501E_READY_WAIT_US = 250000 us, so one 4-phase 0x47 readback can burn ~1 s
- * of wall time on a bodged unit.  Charging only the sleep is exactly what turned
+ * re-issue for the whole budget.  What costs time is the READY gate: whenever
+ * ctx->ready_pin is populated, EACH reply phase may wait
+ * CC3501E_READY_WAIT_US = 250000 us before its fixed settle even runs, so one
+ * 4-phase 0x47 readback can burn ~1 s of wall time on a bodged unit -- bounded
+ * to CC3501E_READY_STUCK_LOW_STREAK such GATES (the streak counts gates, not
+ * whole readbacks) before cc3501e_reply_gate() stops waiting while ready_pin
+ * reads LOW; it resumes the bounded wait the moment a read comes back HIGH
+ * (cc3501e_core.c).  Charging only the sleep is exactly what turned
  * a nominal 20 s BEGIN wait into ~8000 s (silicon 2026-08-21), so this cap is
  * charged whether or not the frame really blocked -- an UPPER bound, as
  * CC3501E_OTA_BLACKOUT_POLL_TIMEOUT_MS above is.
@@ -410,7 +414,7 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * return at once instead of burning the settle on a device that never left.
 	 * (It is also why the confirm loop below may re-issue the same opcode.) */
 	if (update_mode_reads_as(ctx, want, timeout_ms)) {
-		cc3501e_set_peer_polled(enable); /* polled slave -> edge-gate READY */
+		cc3501e_set_peer_polled(enable); /* gates cc3501e_ota_begin()'s precondition */
 		if (!enable) ctx->ota_session_active = false;
 		return ALP_OK;
 	}
@@ -446,9 +450,10 @@ alp_status_t cc3501e_ota_update_mode(cc3501e_t *ctx, bool enable, uint32_t timeo
 	 * here is the timeout either way.
 	 *
 	 * Clear the polled flag FIRST: the reset always lands the device in NORMAL
-	 * mode, so leaving it set would keep the host edge-gating READY against a
-	 * level-driving peer -- up to CC3501E_READY_EDGE_US of extra wait on every
-	 * phase, for the rest of the session. */
+	 * mode, so leaving it set would leave cc3501e_ota_begin()'s precondition
+	 * check believing update mode is still entered when it is not, wrongly
+	 * letting a later BEGIN proceed straight into the wedge this function
+	 * exists to prevent. */
 	cc3501e_set_peer_polled(false);
 	(void)cc3501e_hard_reset(ctx);
 	/* #2126 review: hard_reset ALWAYS lands in normal (non-polled) mode

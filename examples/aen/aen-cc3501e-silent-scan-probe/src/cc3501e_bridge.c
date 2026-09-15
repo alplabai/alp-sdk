@@ -103,14 +103,10 @@ alp_status_t cc3501e_bridge_bringup(cc3501e_t *fw)
 	(void)cc3501e_init(fw, spi);
 	fw->enable_pin = wifi_en;
 	fw->reset_pin  = nrst;
-	/* Optional host-IRQ/READY line (r2 SS0+IRQ bridge): CC35 GPIO17 -> Alif P2_6.
-	 * Open + configure as input; if the board doesn't wire it (alp_pins[2] absent),
-	 * alp_gpio_open returns NULL and the driver keeps the fixed-gap fallback. */
-	alp_gpio_t *ready = alp_gpio_open(CC3501E_BRIDGE_PIN_READY);
-	if (ready != NULL) {
-		(void)alp_gpio_configure(ready, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE);
-		fw->ready_pin = ready;
-	}
+	/* READY (CC35 GPIO17) is NOT wired here by default on this R2 module --
+	 * see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment for the
+	 * pin-routing fact, the bench evidence, and how a board that genuinely
+	 * wires it can opt back in via fw->ready_pin. */
 #ifdef CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
 	(void)alp_gpio_cc3501e_attach(fw);
 #endif
