@@ -39,6 +39,16 @@
  *     exception already recorded in the implementation is the write
  *     acknowledge-polling delay, bench-found on this same SoC I2C2 bus on
  *     2026-06-15 -- see `poll_for_ack()`.)
+ *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
+ *     are [UNTESTED] / [PAPER-ONLY]: the exact wire bytes they issue are
+ *     transcribed literally from
+ *     `docs/som-batch-provisioning-procedure.md` §7 in alp-sdk-internal
+ *     (the only source available -- no vendor datasheet PDF for this
+ *     command sequence is checked into either repo), and nothing has run
+ *     them against silicon.  The Secure Data Page lock is one-shot and
+ *     permanent, so treat both functions as needing a real bench run
+ *     against a throwaway/pre-production unit before the first production
+ *     lock, not as proven by this header shipping.
  *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and
@@ -148,9 +158,11 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
  * only ever issues the Lock Status Read; it deliberately does NOT use the
  * datasheet's other lock-check method (attempt a Secure Data Page write
  * and see whether it ACKs), because that method is itself a write.
- * Locking the Secure Data Page is permanent and is intentionally NOT
- * offered here -- it belongs in the provisioning tool, behind a
- * cold-cycle read-back gate, not this driver.
+ * Writing and locking the Secure Data Page are separate functions --
+ * @ref eeprom_24c128_secure_page_write and @ref eeprom_24c128_secure_page_lock
+ * -- and neither is exposed here; both are raw, ungated primitives. The
+ * cold-cycle read-back gate that must sit between them belongs in the
+ * provisioning tool, not this driver -- see their doc comments.
  *
  * @param ctx  Initialised driver context (see @ref eeprom_24c128_init).
  * @param out  Destination.  Zeroed first, then filled per-field; see
@@ -183,6 +195,83 @@ alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_ide
  */
 alp_status_t
 eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len);
+
+/**
+ * @brief Write the WHOLE 64-byte Secure Data Page in one page-write transaction.
+ *
+ * Deliberately has no offset/selector parameter -- @p data is always the
+ * full @ref EEPROM_24C128_SECURE_PAGE_BYTES page, written from byte 0.
+ * That is a safety property, not a convenience: it makes it structurally
+ * impossible for this function to ever construct a write to selector
+ * `0x06` (the Device Configuration Register), because the object selector
+ * and in-page offset it puts on the wire are both compile-time constants
+ * this function chooses itself -- see this file's `.c` for the exact bytes,
+ * transcribed from `docs/som-batch-provisioning-procedure.md` §7 step 5 in
+ * alp-sdk-internal (`0x58` sel `0x00`, second byte the write op-code,
+ * third byte the in-page offset, then the page data).
+ *
+ * Does NOT check the Secure Page Lock Status first, and does NOT verify
+ * the write afterwards.  Both are the caller's job: read
+ * @ref eeprom_24c128_read_identity and refuse to call this at all when
+ * `secure_page_locked` is true (a post-lock attempt NAKs at the hardware
+ * level anyway, but that is not a substitute for the caller's own gate),
+ * and after a **cold power cycle**, read the page back and byte-compare it
+ * before ever calling @ref eeprom_24c128_secure_page_lock.  See
+ * `docs/som-batch-provisioning-procedure.md` §7 steps 5-8 for the full
+ * gated sequence; `examples/aen/aen-eeprom-provision` implements it.
+ *
+ * On a board populated with the footprint-compatible alternate part
+ * (STMicro M24128-BFMH6TG, no second device-select header at all) this
+ * simply fails with the NACK the I2C layer reports for `0x58` -- there is
+ * nothing to degrade further; the array manifest is unaffected.
+ *
+ * @param ctx   Initialised driver context.
+ * @param data  Exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES bytes to write.
+ * @return ::ALP_ERR_INVAL if @p ctx or @p data is `NULL`;
+ *   ::ALP_ERR_NOT_READY if @p ctx has not been initialised;
+ *   ::ALP_ERR_OUT_OF_RANGE / ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated
+ *   from the underlying I2C transfer or the post-write ACK poll;
+ *   ::ALP_OK once the page write has been ACKed and the write cycle has
+ *   completed.
+ */
+alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx,
+                                             const uint8_t data[EEPROM_24C128_SECURE_PAGE_BYTES]);
+
+/**
+ * @brief PERMANENTLY lock the Secure Data Page.  One-shot.  Irreversible.
+ *
+ * After this returns ::ALP_OK, the device NAKs every future write to the
+ * Secure Data Page (it still reads normally, forever) -- see
+ * `docs/som-batch-provisioning-procedure.md` §7 step 7 in alp-sdk-internal.
+ * There is no unlock, no override, and no way to detect in advance whether
+ * a given call is the one that seals the wrong content.
+ *
+ * This function does NOT verify the page's contents before locking, and it
+ * MUST NOT be called as a side effect of a write -- see
+ * @ref eeprom_24c128_secure_page_write's doc comment.  The caller is
+ * responsible for gating this behind an explicit opt-in (never a build's
+ * default behaviour) and a byte-exact read-back comparison taken after a
+ * **cold power cycle** following the write, per §7 steps 5-8.  Calling this
+ * on unverified content permanently freezes a possibly-wrong identity on
+ * hardware that cannot be un-locked.
+ *
+ * After issuing the lock write, this function re-reads Secure Page Lock
+ * Status (the only state check the datasheet describes as safe -- see
+ * @ref eeprom_24c128_read_identity's doc comment for why the alternative,
+ * starting a page write and checking for a NAK, must never be used) and
+ * fails if bit 1 does not read back set, rather than trusting the write's
+ * own ACK.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ::ALP_ERR_NOT_READY if @p ctx is `NULL` or not initialised;
+ *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the lock write, its
+ *   ACK poll, or the confirming Lock Status read; ::ALP_ERR_IO if the lock
+ *   write was ACKed but Lock Status still reads unlocked afterwards
+ *   (treat as a hardware fault -- not a case to blindly retry, since a
+ *   retry re-sends the same irreversible command);
+ *   ::ALP_OK only once Lock Status confirms bit 1 set.
+ */
+alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx);
 
 /** @brief Release the driver context.  Idempotent. */
 void eeprom_24c128_deinit(eeprom_24c128_t *ctx);
