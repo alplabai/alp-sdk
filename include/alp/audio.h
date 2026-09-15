@@ -36,6 +36,12 @@
  *     alp_audio_in_read(mic, buf, 256, &got, 100);
  * @endcode
  *
+ * @par Concurrency
+ *      Calls on ONE handle (any @c alp_audio_in_* / @c alp_audio_out_*
+ *      function taking that handle) must not run concurrently from more
+ *      than one thread -- no in-tree caller does. A different handle is
+ *      independent.
+ *
  * @par ABI status: [ABI-STABLE]
  *      v0.2 decl + v0.3 impl; PDM-in / I2S-out shape stable.
  *      See docs/abi-markers.md for the convention.
@@ -188,13 +194,16 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
  * @brief Begin playback.  Caller must keep feeding via @ref alp_audio_out_write.
  *
  * Calling this before the first @ref alp_audio_out_write is legal and
- * returns @ref ALP_OK immediately -- it does not guarantee the hardware
- * clock is running yet. A backend whose driver refuses to trigger with
- * nothing queued (e.g. the DesignWare I2S TX ring buffer) defers the real
- * start until the first write actually queues a block; a trigger failure
- * discovered at that point surfaces from that @ref alp_audio_out_write
- * call instead of from here. Starting after the first write triggers
- * immediately, as before.
+ * does not fail merely because nothing is queued yet -- it does not
+ * guarantee the hardware clock is running the instant this call returns.
+ * A backend whose driver refuses to trigger with nothing queued (e.g.
+ * the Zephyr I2S backend's DesignWare TX ring buffer, via
+ * @ref alp_i2s_start) defers the real start until the first write
+ * actually queues a block; a trigger failure discovered at that point
+ * surfaces from that @ref alp_audio_out_write call instead of from here.
+ * A second start() while already playing is backend-specific (e.g.
+ * @ref ALP_ERR_IO on the Zephyr I2S backend, idempotent @ref ALP_OK on
+ * Yocto/ALSA) -- do not assume either.
  *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
@@ -216,16 +225,26 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 /**
  * @brief Block until the driver is ready for the next PCM block, then push.
  *
+ * On the Zephyr I2S backend, a successful queue here can also retry a
+ * start() that @ref alp_audio_out_start deferred (see its doc); if that
+ * retry fails, this call returns the start failure instead of ALP_OK,
+ * even though the block was genuinely queued into the driver first.
+ * @p out_frames CAN be non-zero even when this call returns an error --
+ * it reports frames handed to the driver, not frames confirmed played,
+ * so a caller that retries the SAME source buffer from frame 0 after an
+ * error would double-queue those frames.
+ *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.
  * @param[in]  frames       Frames to push.  Must not exceed the
  *                          @c frames_per_block negotiated at open; a larger
  *                          value is refused with @ref ALP_ERR_OUT_OF_RANGE
  *                          rather than truncated.
- * @param[out] out_frames   Receives the frame count actually pushed.  May be NULL.
+ * @param[out] out_frames   Receives the frame count handed to the driver.
+ *                          May be nonzero on error -- see above.  May be NULL.
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_TIMEOUT.
+ *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
  */
 alp_status_t alp_audio_out_write(alp_audio_out_t *out,
                                  const void      *buf,

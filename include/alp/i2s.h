@@ -24,6 +24,12 @@
  * public API.  Apps that need true zero-copy can drop to the
  * underlying Zephyr `i2s_*` driver class directly.
  *
+ * @par Concurrency
+ *      Calls on ONE handle (@ref alp_i2s_start / @ref alp_i2s_stop /
+ *      @ref alp_i2s_write / @ref alp_i2s_read / @ref alp_i2s_close) must
+ *      not run concurrently from more than one thread -- no in-tree
+ *      caller does. A different handle is independent.
+ *
  * @par ABI status: [ABI-STABLE]
  *      v0.2.
  *      See docs/abi-markers.md for the convention.
@@ -118,6 +124,17 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
 /**
  * @brief Begin streaming.  TX direction starts producing the bit clock.
  *
+ * Calling this before the first @ref alp_i2s_write on a TX handle is
+ * legal and does not fail merely because nothing is queued yet -- some
+ * backends (e.g. the Zephyr DesignWare driver) cannot trigger the real
+ * hardware start with an empty queue, so the trigger is deferred until
+ * the first @ref alp_i2s_write actually queues a block. A trigger
+ * failure discovered at that point surfaces from that
+ * @ref alp_i2s_write call instead of from here, and every subsequent
+ * write retries the trigger until it succeeds. Calling this after data
+ * is already queued (write-then-start) triggers immediately, as does
+ * the RX direction always (it has nothing to defer).
+ *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
@@ -142,6 +159,12 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  * memcpy's @p block into the driver-owned slab so the caller's buffer
  * can be reused immediately on return.
  *
+ * On a TX handle whose @ref alp_i2s_start was deferred (see its doc),
+ * a successful queue here also retries the real hardware start; if
+ * that retry fails, this call returns the start failure rather than
+ * ALP_OK, even though the block was genuinely queued -- the next write
+ * retries again.
+ *
  * @param[in] i2s         Handle from @ref alp_i2s_open with TX direction.
  * @param[in] block       Source PCM data.
  * @param[in] bytes       Source length.  Must not exceed the block size
@@ -150,7 +173,7 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  *                        @ref ALP_ERR_OUT_OF_RANGE rather than truncated.
  * @param[in] timeout_ms  Max wait for an available slab block.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_TIMEOUT.
+ *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
  */
 alp_status_t alp_i2s_write(alp_i2s_t *i2s, const void *block, size_t bytes, uint32_t timeout_ms);
 
