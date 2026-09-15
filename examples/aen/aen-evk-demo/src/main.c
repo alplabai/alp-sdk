@@ -4039,9 +4039,9 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * TAS2563_FAULT_SHUTDOWN_CAUSES bit set after the I2C sequence above except
  * TAS2563_FAULT_TDM_CLOCK (see #2146) -- an I2C-only verdict, labelled as
  * such in the printed summary. With
- * playback ON: see sound_verdict.h's file header for the full reasoning
- * -- in short, PASS additionally requires sound_pdm_capture_correlated()
- * to say the PDM capture during the tone carried more energy than the
+ * playback ON: PASS also needs the silent priming write and every
+ * initialised amp's tas2563_resume() to return ALP_OK, and
+ * sound_pdm_capture_correlated() to report more energy than the
  * pre-tone baseline. That is an energy check, not a frequency or
  * amplitude one -- it cannot tell a 1 kHz tone from a door slam, and does
  * not claim to. If the correlation check is what fails, the phase says so
@@ -4497,8 +4497,8 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * the phase on a bit that does not distinguish the two cases.
 	 *
 	 * ponytail: an ALP_OK tas2563_resume() followed by one amp re-tripping
-	 * TDM_CLOCK now PASSes here, because sound_pdm_capture_correlated()
-	 * only catches both amps going silent -- upgrade path is a
+	 * TDM_CLOCK can PASS here: sound_pdm_capture_correlated() cannot be
+	 * relied on to catch one amp going silent -- upgrade path is a
 	 * PWR_CTL.MODE read accessor on tas2563.h if that gap matters. */
 	const uint32_t shutdown_fault_mask =
 	    TAS2563_FAULT_SHUTDOWN_CAUSES & ~(uint32_t)TAS2563_FAULT_TDM_CLOCK;
