@@ -164,7 +164,7 @@
 #include "alp/audio.h"   /* Phase 11 only -- alp_audio_in/out_*. */
 #include "alp/i2s.h"     /* Phase 11 only -- alp_i2s_config_t, passed to tas2563_configure_i2s(). */
 #include "alp/display.h" /* Phase 12 only -- alp_display_open(); see that phase's comment. */
-#include "alp/hw_info.h" /* alp_hw_info_eeprom_t, ALP_HW_INFO_MAGIC -- manifest layout only */
+#include "alp/hw_info.h" /* alp_hw_info_eeprom_t (phase 5); alp_hw_info_read/_t, ALP_HW_INFO_HW_REV_LEN (phase 11) */
 #include "alp/boards/alp_e1m_evk.h"
 
 #include "alp/chips/rv3028c7.h"
@@ -182,6 +182,7 @@
 #include "alp/chips/tas2563.h" /* Phase 11 only. */
 #include "amp_fault_verdict.h" /* Phase 11 only -- the raw AMP_FAULT pin mapping. */
 #include "sound_verdict.h"     /* Phase 11 only -- the energy-correlation verdict. */
+#include "hw_rev_verdict.h"    /* Phase 11 only -- the r1/r2 IO8-safety gate, issue #2138. */
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
 
@@ -4170,36 +4171,27 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * table scripts/gen_cc3501e_gpio_routes.py generates for the
 	 * board.yaml-driven CC3501E examples -- the hand-written table is
 	 * fixed at build time and cannot itself tell r1 from r2. So this
-	 * phase confirms the revision itself, over the same EEPROM manifest
-	 * phase 5 reads (a fresh read, not a cached one -- this phase must
-	 * not assume phase 5 ran or passed). A read failure, a bad magic, or
-	 * any hw_rev string other than exactly "2626-r2" all refuse -- not
-	 * just a recognised "2626-r1" -- so an unprovisioned module or a
-	 * future r3+ board fails safe here too, instead of being silently
-	 * treated as r2. */
-	eeprom_24c128_t      hwrev_ee;
-	alp_hw_info_eeprom_t hwrev_manifest = { 0 };
-	alp_status_t         hwrev_rc       = ALP_ERR_NOT_READY;
-	if (ctx->carrier_bus != NULL) {
-		hwrev_rc = eeprom_24c128_init(&hwrev_ee, ctx->carrier_bus, EEPROM_24C128_I2C_ADDR_LOW);
-		if (hwrev_rc == ALP_OK) {
-			hwrev_rc = eeprom_24c128_read(
-			    &hwrev_ee, 0x0000u, (uint8_t *)&hwrev_manifest, sizeof(hwrev_manifest));
-			eeprom_24c128_deinit(&hwrev_ee);
-		}
-	}
-	bool hw_rev_confirmed_r2 =
-	    (hwrev_rc == ALP_OK) && (hwrev_manifest.magic == ALP_HW_INFO_MAGIC) &&
-	    (strncmp(hwrev_manifest.hw_rev, "2626-r2", ALP_HW_INFO_HW_REV_LEN) == 0);
-	if (!hw_rev_confirmed_r2) {
+	 * phase confirms the revision itself over alp_hw_info_read() (a
+	 * fresh read, not a cached one -- this phase must not assume phase 5
+	 * ran or passed), which validates magic + schema_version + CRC32
+	 * before it ever populates som_hw_rev -- see hw_rev_verdict.h's file
+	 * comment for why that reuse, not a second hand-rolled EEPROM read,
+	 * is deliberate. aen_evkdemo_hw_rev_confirms_io8_safe() then refuses
+	 * on anything but an exact "2626-r2": a read failure, an
+	 * unprovisioned/corrupt manifest, r1, or a future r3+ all refuse --
+	 * so an unprovisioned module fails safe here too, instead of being
+	 * silently treated as r2. */
+	alp_hw_info_t hwrev_info;
+	alp_status_t  hwrev_rc = alp_hw_info_read(&hwrev_info);
+	if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {
 		printf("[evkdemo] SOUND: refusing to drive E1M IO8 (I2S mux ENABLE) as CC3501E "
 		       "GPIO_30 -- that route holds only on hw_rev 2626-r2 and this run could not "
-		       "confirm it (EEPROM read -> %d, hw_rev=\"%.*s\"). On r1, GPIO_30 is the "
+		       "confirm it (alp_hw_info_read -> %d, hw_rev=\"%.*s\"). On r1, GPIO_30 is the "
 		       "carrier's SDIO mux SELECT, shorted to +3V3 by a fitted P18 jumper -- see "
 		       "issue #2138. Not opening IO8 or IO13.\n",
 		       (int)hwrev_rc,
 		       ALP_HW_INFO_HW_REV_LEN,
-		       hwrev_manifest.hw_rev);
+		       hwrev_info.som_hw_rev);
 		ctx->note = "refused: hw_rev != 2626-r2 (#2138)";
 		return PHASE_FAIL;
 	}

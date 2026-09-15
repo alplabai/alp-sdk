@@ -255,13 +255,64 @@ def _revision_dependent_e1m_pads() -> set[str]:
     return pads
 
 
-# The runtime guard aen-evk-demo/src/main.c's phase 11 uses to confirm the
-# live module is hw_rev 2626-r2 before it ever opens a revision-dependent
-# proxied pad -- see that phase's "0. Refuse unless..." step.  Named here so
-# the test below fails loudly (a clear assertion message) rather than just
-# "not found" if a future refactor renames the guard without updating both
-# sites.
-REVISION_GUARD_MARKER = "hw_rev_confirmed_r2"
+# Which pure verdict function gates which revision-dependent pad's open, per
+# app -- e.g. examples/aen/aen-evk-demo/src/hw_rev_verdict.h's
+# aen_evkdemo_hw_rev_confirms_io8_safe() for E1M_GPIO_IO8. A KeyError here
+# (a guarded pad this dict has no entry for) is deliberate: it means a NEW
+# revision-dependent pad showed up in a standalone table with no guard
+# function named for it yet, and this test cannot know what to require
+# without a human naming it (#2138 round-2 review).
+PAD_GUARD_FUNCTIONS = {
+    "E1M_GPIO_IO8": "aen_evkdemo_hw_rev_confirms_io8_safe",
+}
+
+
+def _strip_c_comments(text: str) -> str:
+    """Blank out /* */ and // comments, preserving every other character
+    (including newlines) so a reported string offset still lines up with
+    the real file. A regex-free character scan, not a full C tokenizer --
+    good enough for a structural check over one function body, not general
+    C source (a string literal containing "/*" would fool it; the guard
+    region this test scans over contains none)."""
+    out: list[str] = []
+    i, n = 0, len(text)
+    while i < n:
+        if text[i:i + 2] == "/*":
+            end = text.find("*/", i + 2)
+            end = n if end == -1 else end + 2
+            out.append("".join(c if c == "\n" else " " for c in text[i:end]))
+            i = end
+        elif text[i:i + 2] == "//":
+            end = text.find("\n", i)
+            end = n if end == -1 else end
+            out.append(" " * (end - i))
+            i = end
+        else:
+            out.append(text[i])
+            i += 1
+    return "".join(out)
+
+
+def _function_body(text: str, signature_re: str, main_c_path: Path) -> str:
+    """Return `text[start:end]` (braces included) for the FIRST function
+    whose signature matches `signature_re`, found via a brace-depth scan
+    rather than a single closing-brace regex -- phase_sound() itself
+    contains nested `{ ... }` blocks (the mux-enable guard, the AMP_ENABLE
+    reset, the per-amp loops), so a naive "up to the next line starting
+    with `}`" match would return early on the FIRST of those, not the
+    function's own end."""
+    m = re.search(signature_re, text)
+    assert m, f"{main_c_path}: could not find a function matching {signature_re!r}"
+    depth = 0
+    start = text.index("{", m.end() - 1)
+    for idx in range(start, len(text)):
+        if text[idx] == "{":
+            depth += 1
+        elif text[idx] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:idx + 1]
+    raise AssertionError(f"{main_c_path}: function body starting at offset {start} never closes")
 
 
 @pytest.mark.parametrize("path", STANDALONE_APP_ROUTE_TABLES)
@@ -269,9 +320,20 @@ def test_standalone_app_route_table_guards_revision_dependent_pads(path):
     """A hand-written route table -- no per-revision generation reaches these
     standalone apps, see the file header comment on both tables -- that maps
     a revision-dependent pad (per hw-revisions.yaml) must be paired with a
-    runtime hw_rev guard in the app's main.c that runs BEFORE that pad is
-    ever opened. Without one, the table silently drives the wrong physical
-    pin/chip on every revision but the one it was hand-built for (#2138)."""
+    runtime `if (!<guard>(...)) { ... return PHASE_FAIL; }` in the app's
+    phase_sound(), running BEFORE that pad is ever opened. Without one, the
+    table silently drives the wrong physical pin/chip on every revision but
+    the one it was hand-built for (#2138).
+
+    This intentionally checks the STRUCTURE of the guard, not just that its
+    name appears somewhere in the file: the round-2 review of #2138 found
+    that a plain substring search passes both a `/* TODO: add the check
+    here */` stub in place of the guard and the guard's own condition
+    inverted (`if (guard_ok)` instead of `if (!guard_ok)`, which refuses r2
+    and drives the pin on r1 -- the exact short this issue exists to
+    prevent). Stripping comments first closes the stub case (nothing left
+    for the regex to find); requiring the literal `!` before the call
+    closes the inversion case."""
     revision_dependent = _revision_dependent_e1m_pads()
     routes = _example_gpio_routes(path)
     guarded_pads = revision_dependent & routes.keys()
@@ -279,20 +341,36 @@ def test_standalone_app_route_table_guards_revision_dependent_pads(path):
         pytest.skip(f"{path.name} routes no revision-dependent pad")
 
     main_c_path = path.parent / "main.c"
-    main_c = main_c_path.read_text(encoding="utf-8")
+    main_c_raw = main_c_path.read_text(encoding="utf-8")
+    main_c_nocomments = _strip_c_comments(main_c_raw)
+    phase_sound_body = _function_body(
+        main_c_nocomments,
+        r"static phase_verdict_t phase_sound\(demo_ctx_t \*ctx\)\s*\{",
+        main_c_path,
+    )
+
     for e1m in sorted(guarded_pads):
+        guard_fn = PAD_GUARD_FUNCTIONS[e1m]
         open_call = f"alp_gpio_open(ALP_{e1m})"
-        open_idx = main_c.find(open_call)
+        open_idx = phase_sound_body.find(open_call)
         assert open_idx != -1, (
-            f"{path} routes revision-dependent pad {e1m} but {main_c_path} "
-            f"never calls {open_call} -- update this test if the app was "
-            f"rewritten to open it another way"
+            f"{path} routes revision-dependent pad {e1m} but {main_c_path}'s "
+            f"phase_sound() never calls {open_call} -- update this test if "
+            f"the app was rewritten to open it another way"
         )
-        guard_idx = main_c.find(REVISION_GUARD_MARKER)
-        assert guard_idx != -1 and guard_idx < open_idx, (
+
+        guard_re = re.compile(
+            r"if\s*\(\s*!\s*" + re.escape(guard_fn) + r"\s*\([^{};]*\)\s*\)\s*\{"
+            r"[^{}]*?return\s+PHASE_FAIL\s*;",
+            re.DOTALL,
+        )
+        guard_match = guard_re.search(phase_sound_body)
+        assert guard_match and guard_match.start() < open_idx, (
             f"{main_c_path}: {e1m} is revision-dependent "
             f"(metadata/e1m_modules/aen/hw-revisions.yaml pad_route_overrides) "
-            f"but {open_call} runs with no '{REVISION_GUARD_MARKER}' runtime "
-            f"guard before it -- on r1 this pad routes to a DIFFERENT "
-            f"physical pin/chip than the hand-written table assumes (#2138)"
+            f"but phase_sound() opens it ({open_call}) with no "
+            f"'if (!{guard_fn}(...)) {{ ... return PHASE_FAIL; }}' guard "
+            f"(comment-stripped, structure-checked) running before it -- on "
+            f"r1 this pad routes to a DIFFERENT physical pin/chip than the "
+            f"hand-written table assumes (#2138)"
         )
