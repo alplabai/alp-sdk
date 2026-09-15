@@ -44,8 +44,8 @@ is the hw_rev the CALLING board's own route table was built for (issue
 #2144) -- replacing the old all-or-nothing hw_rev guard (#1859).  This list
 is identical for every AEN board regardless of hw_rev or carrier (it names
 WHICH pads move, not where any one board's table put them), so it is
-generated once into a file compiled unconditionally alongside
-cc3501e_proxy.c (zephyr/CMakeLists.txt) instead of once per app -- the
+generated once into a file compiled whenever cc3501e_proxy.c itself is
+(zephyr/CMakeLists.txt) instead of once per app -- the
 per-app-copy design #2144 originally shipped with was exactly the
 triplication issue #1859 already removed once for cc3501e_gpio_routes[]
 itself.
@@ -291,7 +291,7 @@ def _emit(app_name: str, hw_rev: str, rows: list[tuple[str, int, str]]) -> str:
 # put them.  A per-app copy of an identical list (the original #2144 PR)
 # is exactly the triplication #1859 already removed once for
 # cc3501e_gpio_routes[] -- so this list is generated ONCE, into a file
-# compiled unconditionally with the proxy backend itself
+# compiled whenever the proxy backend itself is
 # (zephyr/CMakeLists.txt, alongside cc3501e_proxy.c), never overridden by
 # a board.
 REV_DEPENDENT_OUT_PATH = (
@@ -314,7 +314,7 @@ def _emit_rev_dependent_pins() -> str:
         " * between AEN hw_revs -- IO8/IO10/IO21 today.  ONE copy for every AEN",
         " * board regardless of hw_rev or carrier (this list names WHICH pads",
         " * move, not where any one board's route table put them) -- compiled",
-        " * unconditionally alongside src/backends/gpio/cc3501e_proxy.c",
+        " * whenever src/backends/gpio/cc3501e_proxy.c itself is",
         " * (zephyr/CMakeLists.txt), never a per-board override.  Replaced the",
         " * per-app copy of this same list (originally issue #2144) that",
         " * triplicated across every board's cc3501e_gpio_routes.c -- the exact",

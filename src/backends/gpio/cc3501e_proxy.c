@@ -18,7 +18,8 @@
  * CC3501E nor the Alif SoC, e.g. AEN r2's IO21), so delegating them would
  * silently open and drive a pin that goes nowhere (issue #1854).
  *
- * A THIRD board list, cc3501e_gpio_rev_dependent[], names E1M pads whose
+ * A THIRD list, cc3501e_gpio_rev_dependent[] -- SDK-owned, not a board list
+ * like the two above -- names E1M pads whose
  * target chip (CC3501E vs the Alif SoC vs unrouted) metadata/e1m_modules/
  * aen/hw-revisions.yaml `pad_route_overrides:` moves between AEN hw_revs --
  * IO8/IO10/IO21 today.  A route table is always compiled for ONE hw_rev; on
@@ -121,7 +122,9 @@ static cc3501e_t *g_bridge_ctx;
  * FAIL-CLOSED value: false, "not confirmed" -- see is_rev_dependent()'s use
  * of it in px_open() below.  True only when attach() proved the running
  * module's hw_rev equals CONFIG_ALP_SDK_SOM_HW_REV, the rev this board's
- * cc3501e_gpio_routes[] / cc3501e_gpio_rev_dependent[] tables were built for
+ * cc3501e_gpio_routes[] table was built for (cc3501e_gpio_rev_dependent[]
+ * itself is not per-rev -- it is the SDK-owned, identical-on-every-AEN-board
+ * list of pins that need this check at all; see the file header)
  * (issue #2144). */
 static bool g_hw_rev_confirmed_match;
 
@@ -158,6 +161,33 @@ void cc3501e_proxy_test_force_hw_rev_confirmed_match(bool confirmed)
 {
 	g_hw_rev_confirmed_match = confirmed;
 }
+
+/* Test-only hook: arm a canned alp_hw_info_read() result for the next
+ * alp_gpio_cc3501e_attach() call.  See cc3501e_proxy_internal.h for why
+ * this (not the force hook above) is the seam a POSITIVE attach() test
+ * needs -- it swaps only alp_hw_info_read()'s source, so attach()'s own
+ * cc3501e_proxy_hw_rev_confirmed_match() call and cache assignment still
+ * run for real. */
+static bool          g_test_hw_info_armed;
+static alp_status_t  g_test_hw_info_status;
+static alp_hw_info_t g_test_hw_info_info;
+
+void cc3501e_proxy_test_inject_hw_info_read(alp_status_t status, const alp_hw_info_t *info)
+{
+	g_test_hw_info_armed  = true;
+	g_test_hw_info_status = status;
+	if (info != NULL) {
+		g_test_hw_info_info = *info;
+	} else {
+		memset(&g_test_hw_info_info, 0, sizeof(g_test_hw_info_info));
+	}
+}
+
+/* Test-only teardown: see cc3501e_proxy_internal.h. */
+void cc3501e_proxy_test_reset_bridge_ctx(void)
+{
+	g_bridge_ctx = NULL;
+}
 #endif
 
 alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
@@ -166,7 +196,23 @@ alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 	g_bridge_ctx = ctx;
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 	alp_hw_info_t info;
-	alp_status_t  rc         = alp_hw_info_read(&info);
+	alp_status_t  rc;
+#if defined(CONFIG_ZTEST)
+	/* One-shot test injection (see cc3501e_proxy_test_inject_hw_info_read()
+	 * above): lets a positive attach() test prove this function's real
+	 * body -- not the force hook -- turns a confirmed manifest into
+	 * g_hw_rev_confirmed_match=true, without native_sim needing a real I2C
+	 * EEPROM. Disarmed immediately so a later attach() without re-arming
+	 * falls through to the real read below. */
+	if (g_test_hw_info_armed) {
+		g_test_hw_info_armed = false;
+		rc                   = g_test_hw_info_status;
+		info                 = g_test_hw_info_info;
+	} else
+#endif
+	{
+		rc = alp_hw_info_read(&info);
+	}
 	g_hw_rev_confirmed_match = cc3501e_proxy_hw_rev_confirmed_match(rc, &info);
 	/* Diagnostic (issue #2144 review): attach() runs once at bring-up, so
 	 * every revision-dependent pin's later refusal traces back to THIS
@@ -265,7 +311,8 @@ static bool is_rev_dependent(uint32_t pin_id)
 }
 
 /* One-shot-per-pin diagnostic (issue #2144 review): px_open() also returns
- * ALP_ERR_NOSUPPORT for an UNROUTED pin (:274 above), so a bare error code
+ * ALP_ERR_NOSUPPORT for an UNROUTED pin (the is_unrouted() check in px_open()
+ * below), so a bare error code
  * alone doesn't tell a bench engineer which guard fired.  Logs at most once
  * per DISTINCT revision-dependent pin_id -- not once ever (that would miss
  * every pin after the first this process happens to refuse) and not once

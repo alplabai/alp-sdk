@@ -303,7 +303,8 @@ jobs:
                         docs/peripheral-support-matrix.md \
                         docs/portability-matrix.md \
                         docs/verification-status.md \
-                        examples/aen
+                        examples/aen \
+                        src/backends/gpio/cc3501e_rev_dependent_pins.c
           # No line-mask here: abi_snapshot.py's own write-skip guard
           # (above) is what keeps a no-op rerun from touching the
           # "generated" line at all, so this diff sees zero lines

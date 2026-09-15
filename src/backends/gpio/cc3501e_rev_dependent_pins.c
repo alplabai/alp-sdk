@@ -11,7 +11,7 @@
  * between AEN hw_revs -- IO8/IO10/IO21 today.  ONE copy for every AEN
  * board regardless of hw_rev or carrier (this list names WHICH pads
  * move, not where any one board's route table put them) -- compiled
- * unconditionally alongside src/backends/gpio/cc3501e_proxy.c
+ * whenever src/backends/gpio/cc3501e_proxy.c itself is
  * (zephyr/CMakeLists.txt), never a per-board override.  Replaced the
  * per-app copy of this same list (originally issue #2144) that
  * triplicated across every board's cc3501e_gpio_routes.c -- the exact

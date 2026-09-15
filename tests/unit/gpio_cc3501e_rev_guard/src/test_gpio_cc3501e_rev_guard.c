@@ -46,6 +46,15 @@
  *      devicetree I2C0 device backing it, so the real alp_hw_info_read()
  *      genuinely fails at runtime -- attach() must reset the cached
  *      decision to false, not leave a stale forced-true value standing.
+ *      The POSITIVE direction -- attach() turning a CONFIRMED manifest
+ *      into g_hw_rev_confirmed_match=true -- is a second, distinct
+ *      mutation gap: neither the negative test above nor surfaces 1+2 ever
+ *      observe attach() itself PRODUCE a match. cc3501e_proxy_internal.h's
+ *      cc3501e_proxy_test_inject_hw_info_read() (also CONFIG_ZTEST-only)
+ *      arms a one-shot canned alp_hw_info_read() result for the next
+ *      attach() call, so its real body -- the real
+ *      cc3501e_proxy_hw_rev_confirmed_match() call and cache assignment,
+ *      only the read's SOURCE swapped -- runs and IO8 opens.
  *
  * Backends visible on this test build:
  *   cc3501e_proxy (priority 200, "*" wildcard -- wins the selector)
@@ -299,4 +308,52 @@ ZTEST(alp_gpio_cc3501e_rev_guard, test_attach_resets_stale_forced_true_on_read_f
 	alp_gpio_t *h = alp_gpio_open(ALP_E1M_GPIO_IO8);
 	zassert_is_null(h);
 	zassert_equal(alp_last_error(), ALP_ERR_NOSUPPORT);
+
+	/* g_bridge_ctx now holds the bogus sentinel above -- reset it to NULL
+	 * so a later test in this suite can never dereference it (it would
+	 * only happen if a route table turned is_bridge true, which this
+	 * suite's weak empty cc3501e_gpio_routes[] never does today, but the
+	 * sentinel should not outlive the one test that needs it). */
+	cc3501e_proxy_test_reset_bridge_ctx();
+}
+
+ZTEST(alp_gpio_cc3501e_rev_guard, test_attach_confirms_match_from_injected_manifest)
+{
+	/* The positive counterpart to the test above: does the REAL attach()
+	 * body -- not the force hook -- turn a CONFIRMED manifest into
+	 * g_hw_rev_confirmed_match=true?  native_sim still has no I2C EEPROM
+	 * to back a real alp_hw_info_read(), so this arms the one-shot
+	 * cc3501e_proxy_test_inject_hw_info_read() seam (declared in
+	 * cc3501e_proxy_internal.h alongside the force hook): attach() still
+	 * calls cc3501e_proxy_hw_rev_confirmed_match() and assigns its result
+	 * for real, only alp_hw_info_read()'s SOURCE is swapped.
+	 *
+	 * Mutation-proof for the #2144 review finding: a mutant hardcoding
+	 * `g_hw_rev_confirmed_match = false;` in attach() (instead of
+	 * assigning the real decision) passed all 13 prior tests in this
+	 * suite untouched, because none of them observed attach() PRODUCE a
+	 * confirmed match -- test_rev_dependent_pin_opens_when_confirmed uses
+	 * the force hook (bypasses attach() entirely), and
+	 * test_attach_resets_stale_forced_true_on_read_failure above only
+	 * proves attach() can turn confirmed INTO unconfirmed, not the
+	 * reverse. This test closes that gap; hand-verified red against that
+	 * exact mutant, then restored. */
+	cc3501e_proxy_test_force_hw_rev_confirmed_match(false);
+
+	alp_hw_info_t info = make_info(CONFIG_ALP_SDK_SOM_HW_REV);
+	cc3501e_proxy_test_inject_hw_info_read(ALP_OK, &info);
+
+	cc3501e_t *bogus_ctx_never_dereferenced = (cc3501e_t *)(uintptr_t)1;
+	zassert_equal(alp_gpio_cc3501e_attach(bogus_ctx_never_dereferenced), ALP_OK);
+
+	/* cc3501e_gpio_routes[] is empty (weak default) in this build, so a
+	 * confirmed IO8 falls through the guard and DELEGATES to the platform
+	 * driver -- proving the #2144 revision check passed, not that the pin
+	 * reaches the bridge (already covered by
+	 * test_rev_dependent_pin_opens_when_confirmed above). */
+	alp_gpio_t *h = alp_gpio_open(ALP_E1M_GPIO_IO8);
+	zassert_not_null(h);
+	alp_gpio_close(h);
+
+	cc3501e_proxy_test_reset_bridge_ctx();
 }

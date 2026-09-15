@@ -1480,7 +1480,7 @@ zephyr_library_sources_ifdef(CONFIG_GPIO
 # cc3501e_rev_dependent_pins.c is the SDK-owned (never board-overridden)
 # generated revision-dependent pin list (scripts/gen_cc3501e_gpio_routes.py,
 # issue #2144) -- identical on every AEN board, so unlike the weak file
-# above it compiles unconditionally alongside the proxy, not per board.
+# above it compiles whenever the proxy is compiled, not per board.
 zephyr_library_sources_ifdef(CONFIG_ALP_SDK_GPIO_CC3501E_PROXY
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy.c
     ${ZEPHYR_CURRENT_MODULE_DIR}/src/backends/gpio/cc3501e_proxy_routes_weak.c
