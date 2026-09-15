@@ -347,7 +347,20 @@ static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, S
 
 /* ---- Acoustic analysis window -- see the file header's EXACT-BIN WINDOW
  * SIZING derivation for why these particular numbers. */
-#define ACOUSTIC_DISCARD_BLOCKS  6u  /* ~96ms settle, discarded. */
+/* ~96ms (6*16ms) settle, discarded before analysis starts. Not a measured
+ * PDM/DC-block settling time -- deliberate headroom, chosen over
+ * examples/aen/aen-evk-demo's phase 11 precedent (SOUND_BASELINE_BLOCKS
+ * there accumulates energy from the very FIRST captured block, no discard
+ * at all) because that phase's coarse |sum| energy check tolerates a noisy
+ * lead-in sample or two while a single-bin Goertzel over an EXACT window
+ * (see EXACT-BIN WINDOW SIZING) has no such slack: any transient in the
+ * analyzed window (mic startup, the DC-blocking filter's own settle, or
+ * the tone/volume step that just changed) leaks across every bin. 6 blocks
+ * covers the DC-blocker's own time constant several times over (alpha =
+ * 0.995 in dc_block_s16(), src/backends/audio/zephyr_drv.c -- time
+ * constant ~= 1/(1-0.995) = 200 samples = 12.5 ms at 16 kHz) with margin
+ * to spare; nothing more rigorous than that informed the choice of 6. */
+#define ACOUSTIC_DISCARD_BLOCKS  6u
 #define ACOUSTIC_ANALYSIS_BLOCKS 25u /* ~400ms, 25*256=6400 samples -- the exact-bin window. */
 #define ACOUSTIC_ANALYSIS_FRAMES (ACOUSTIC_ANALYSIS_BLOCKS * SOUND_FRAMES_PER_BLOCK)
 #define TONE_BIN_HZ              SOUND_TONE_HZ /* 1000 Hz, exact bin k=400 at N=6400/fs=16000. */
