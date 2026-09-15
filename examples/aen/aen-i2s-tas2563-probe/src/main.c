@@ -207,6 +207,72 @@
  * faking a pass -- neither is dropped.
  *
  * ============================================================================
+ * FIRST-SILICON BENCH RESULT + A REAL SDK-LEVEL BUG (NOT FIXED IN THIS APP)
+ * ============================================================================
+ * The first attended run on e1m-aen-evk-03 (image e72fec2ed) had EVIDENCE 1
+ * pass cleanly (I2S3 opened/started, both amps went ACTIVE, no faults, clean
+ * teardown) but EVERY acoustic window -- including BASELINE, no tone, amps
+ * still SHUTDOWN -- failed with alp_audio_in_read() timing out at almost
+ * exactly the (then-)200 ms MIC_READ_TIMEOUT_MS. Two things about that
+ * pointed at the mic path itself, not the tone: BASELINE has no tone in
+ * flight at all, and the failure latency matched the timeout, not an
+ * instant NACK. capture_window() below now self-diagnoses this (FIX 3) --
+ * see dump_pdm_diagnostics() -- and this run's earlier bug (FIX 1/2) meant
+ * that mic failure was ALSO wrongly making EVIDENCE 1 print "clocks not
+ * reaching" despite EVIDENCE 1 never having been affected by it.
+ *
+ * Investigating against examples/aen/aen-pdm-mic-alif (bench-verified,
+ * docs/test-plan.md:310 "Live varying PCM captured") found TWO real gaps in
+ * `<alp/audio.h>`'s Zephyr audio-in backend (src/backends/audio/
+ * zephyr_drv.c) against the SAME alif,alif-pdm driver -- neither
+ * fixable from this app, since alp_audio_in_open() exposes no channel-FIR
+ * or clock-mode control:
+ *
+ *   1. NO CHANNEL/CLOCK-MODE PROGRAMMING AT ALL. aen-pdm-mic-alif's own file
+ *      header states plainly: "The driver leaves the PDM clock-mode field at
+ *      reset (MICROPHONE_SLEEP) until the app calls pdm_mode(), and never
+ *      programs the FIR/gain -- so configuring each enabled channel +
+ *      selecting a non-sleep mode here is what makes the FIFO actually
+ *      fill" (examples/aen/aen-pdm-mic-alif/src/main.c, pdm_config_channel()
+ *      + the pdm_mode(dmic, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ) call in
+ *      main()). z_in_open() (src/backends/audio/zephyr_drv.c:221-296) calls
+ *      ONLY dmic_configure() + (in z_in_start()) dmic_trigger(START) --
+ *      never pdm_channel_config()/pdm_set_ch_*()/pdm_mode(). Per the driver
+ *      comment above, that leaves the PDM block in MICROPHONE_SLEEP, FIFO
+ *      permanently empty, every read timing out -- independent of tone,
+ *      volume, or anything else this app does. This alone explains the
+ *      observed BASELINE failure.
+ *
+ *   2. THE CHANNEL MAP IS LIKELY WRONG TOO. zephyr_drv.c:287-290 builds
+ *      `req_chan_map_lo` with the GENERIC Zephyr `dmic_build_channel_map()`
+ *      nibble encoding (`dmic_build_channel_map(0,0,PDM_CHAN_LEFT) |
+ *      dmic_build_channel_map(1,0,PDM_CHAN_RIGHT)` = 0x10 for 2 channels --
+ *      zephyr/include/zephyr/audio/dmic.h:238-243). But
+ *      dmic_alif_pdm_configure() (zephyr/drivers/audio/alif_pdm.c:125,148)
+ *      does `pdata->channel_map = config->channel.req_chan_map_lo & 0xFF`
+ *      -- it takes the byte VERBATIM as a raw per-bit HARDWARE
+ *      channel-enable mask (aen-pdm-mic-alif's own comment says so too: "The
+ *      alif_pdm driver takes req_chan_map_lo's low byte VERBATIM as the PDM
+ *      hardware channel-enable mask... NOT the dmic_build_channel_map()
+ *      nibble encoding"), where bit N = PDM_MASK_CHANNEL_N (zephyr/include/
+ *      zephyr/drivers/pdm/pdm_alif.h:39-40). 0x10 = bit 4 = PDM_MASK_CHANNEL_4
+ *      -- so even if (1) were fixed, this app's 2-channel open would tell
+ *      the driver to enable HW channel 4, NOT channels 0/1 (U19/U20, this
+ *      board's actual D0-pair mics) -- and channel 4's pads (P11_4/P5_4,
+ *      PDM_C2_B/PDM_D2_B) are not even pinmuxed by this app's overlay (see
+ *      dump_pdm_diagnostics()'s P11_4/P5_4 dump, included specifically to
+ *      show those pads sitting unconfigured). aen-pdm-mic-alif sidesteps
+ *      this entirely by building `req_chan_map_lo` itself from
+ *      `PDM_MASK_CHANNEL_*` directly, bypassing `dmic_build_channel_map()`.
+ *
+ * Both are SDK-level bugs in the shared backend, worth their own issue(s)
+ * against src/backends/audio/zephyr_drv.c -- reported here, not papered
+ * over by this app. Until fixed, acoustic capture through `<alp/audio.h>`
+ * on this driver is expected to keep failing regardless of any tuning at
+ * this app's level; EVIDENCE 1 (the TDM_CLOCK flag, which needs no mic) is
+ * unaffected and remains this bench's authoritative electrical result.
+ *
+ * ============================================================================
  * HARDWARE SAFETY -- unchanged from the register-flag-only version, plus
  * ONE new cap for the digital volume steps
  * ============================================================================
@@ -290,6 +356,7 @@
 #include <zephyr/drivers/pinctrl.h>
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/sys_io.h>
 #include <zephyr/sys/util.h>
 
 #include "alp/audio.h"
@@ -341,9 +408,15 @@ static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, S
 #define SOUND_VOL_STEP_COUNT ARRAY_SIZE(sound_vol_steps)
 
 /* ---- PDM mics (U19 LEFT / U20 RIGHT) -- see the file header's MIC MAPPING */
-#define MIC_CHANNELS        2u                   /* ch0=U19 LEFT, ch1=U20 RIGHT. */
-#define MIC_SAMPLE_RATE_HZ  SOUND_SAMPLE_RATE_HZ /* one shared clock domain/timing base. */
-#define MIC_READ_TIMEOUT_MS 200u
+#define MIC_CHANNELS       2u                   /* ch0=U19 LEFT, ch1=U20 RIGHT. */
+#define MIC_SAMPLE_RATE_HZ SOUND_SAMPLE_RATE_HZ /* one shared clock domain/timing base. */
+/* Aligned to examples/aen/aen-pdm-mic-alif's bench-verified READ_TIMEOUT_MS
+ * (2000) -- was 200 here, which removed "our timeout was just too short" as
+ * a candidate explanation for the first-silicon-run mic read failure
+ * (capture_window() below stops retrying a window's mic reads after the
+ * FIRST failure, so the worst-case extra wall time this adds is bounded to
+ * roughly one timeout per window that ever fails, not per block). */
+#define MIC_READ_TIMEOUT_MS 2000u
 
 /* ---- Acoustic analysis window -- see the file header's EXACT-BIN WINDOW
  * SIZING derivation for why these particular numbers. */
@@ -450,6 +523,124 @@ static amp_clock_verdict_t amp_clock_verdict(uint32_t during, uint32_t stopped)
 	return AMP_CLOCK_INCONCLUSIVE; /* during_clear&&!stopped_set, or !during_clear&&!stopped_set. */
 }
 
+/* ================================================================== */
+/* PDM/clock/pinmux diagnostic register dump (bench issue: mic read timeout) */
+/* ================================================================== */
+/* Printed ONCE, read-only, on the FIRST alp_audio_in_read() failure this run
+ * -- docs/aen-bench-bringup.md:597 names exactly this symptom: PDM
+ * `dmic_read` -> `-EAGAIN` (FIFO=0). See capture_window() below for the call
+ * site. All addresses are cited, not invented:
+ *
+ * PDM block registers -- zephyr/drivers/audio/alif_pdm_reg.h:21-24,28. Base
+ * 0x4902d000 is this app's own pdm@4902d000 node (board overlay).
+ *
+ * Audio clock enables the Tier-1.5 clockctrl patch claims to set on
+ * clock_control_on() -- zephyr/drivers/clock_control/clock_control_alif.c:
+ * 132-190 (ALIF_CGU_CLK_ENA_REG_OFF=0x14/ALIF_CGU_CLK76P8M_BIT=24,
+ * ALIF_EXPMST0_CTRL_REG_OFF=0x00/IPCLK_FORCE=bit31/PCLK_FORCE=bit30),
+ * docs/aen-bench-bringup.md:568-571. Bases (cgu=0x1a602000,
+ * clkctl_per_slv=0x4902f000) read off THIS build's own resolved devicetree
+ * (the build directory's zephyr/zephyr.dts: clock-controller@1a602000,
+ * reg-names "cgu"/"clkctl_per_slv" -- sourced from zephyr/dts/arm/alif/
+ * ensemble/common/ensemble_common.dtsi:41-50 in ZEPHYR_BASE, not this
+ * repo's own zephyr/ directory).
+ *
+ * Pinmux registers: base 0x1a603000 (the `pinctrl` node,
+ * pin-controller@1a603000), offset = port*32 + pin*4 -- formula AND base
+ * both read from zephyr/drivers/pinctrl/pinctrl_alif.c:38,42-43,51-57
+ * (ALIF_PINCTRL_BASE, ALIF_PORT_REG_SIZE=32, ALIF_PINMUX_REG_SIZE=4),
+ * cross-checked against examples/aen/aen-sdhc-probe's own
+ * SD_PINMUX_P14_1_CLK=0x1A6031C4 (port14*32 + pin1*4 + 0x1a603000 =
+ * 0x1a6031c4 -- matches). Padcfg bits[23:16], read-enable = bit 16, same
+ * layout that SD diagnostic used. P6_1/P6_0 are this app's actual pads
+ * (PDM_C0_C/PDM_D0_C); P11_4/P5_4 (PDM_C2_B/PDM_D2_B) are dumped too even
+ * though this app's overlay never muxes them -- see the CHANNEL-MAP SDK BUG
+ * note below for why that is directly relevant evidence, not idle curiosity.
+ */
+#define PDM_DIAG_PDM_BASE           0x4902d000u
+#define PDM_DIAG_CONFIG_REG         (PDM_DIAG_PDM_BASE + 0x0u)
+#define PDM_DIAG_CTL_REG            (PDM_DIAG_PDM_BASE + 0x4u)
+#define PDM_DIAG_THRESHOLD_REG      (PDM_DIAG_PDM_BASE + 0x8u)
+#define PDM_DIAG_FIFO_STATUS_REG    (PDM_DIAG_PDM_BASE + 0xCu)
+#define PDM_DIAG_INTERRUPT_REG      (PDM_DIAG_PDM_BASE + 0x1Cu)
+#define PDM_DIAG_FIFO_STAT_CNT_MASK 0xFu
+
+#define PDM_DIAG_CGU_BASE            0x1a602000u
+#define PDM_DIAG_CGU_CLK_ENA_REG     (PDM_DIAG_CGU_BASE + 0x14u)
+#define PDM_DIAG_CGU_CLK76P8M_BIT    24u
+#define PDM_DIAG_CLKCTL_PER_SLV_BASE 0x4902f000u
+#define PDM_DIAG_EXPMST0_CTRL_REG    (PDM_DIAG_CLKCTL_PER_SLV_BASE + 0x0u)
+#define PDM_DIAG_EXPMST0_IPCLK_FORCE (1u << 31)
+#define PDM_DIAG_EXPMST0_PCLK_FORCE  (1u << 30)
+
+#define PDM_DIAG_PINMUX_BASE 0x1a603000u
+#define PDM_DIAG_PINMUX(port, pin) \
+	(PDM_DIAG_PINMUX_BASE + (uint32_t)(port) * 32u + (uint32_t)(pin) * 4u)
+#define PDM_DIAG_P6_1_CLK         PDM_DIAG_PINMUX(6, 1)  /* PDM_C0_C -- this app's clock pad. */
+#define PDM_DIAG_P6_0_DATA        PDM_DIAG_PINMUX(6, 0)  /* PDM_D0_C -- this app's data pad. */
+#define PDM_DIAG_P11_4_CLK2       PDM_DIAG_PINMUX(11, 4) /* PDM_C2_B -- NOT muxed by this app. */
+#define PDM_DIAG_P5_4_DATA2       PDM_DIAG_PINMUX(5, 4)  /* PDM_D2_B -- NOT muxed by this app. */
+#define PDM_DIAG_PADCFG_POS       16u
+#define PDM_DIAG_PADCFG_MASK      (0xFFu << PDM_DIAG_PADCFG_POS)
+#define PDM_DIAG_READ_ENABLE_MASK (1u << PDM_DIAG_PADCFG_POS)
+
+static void pdm_diag_print_pinmux(const char *label, uint32_t addr)
+{
+	uint32_t v = sys_read32(addr);
+	printf("[probe][diag] %s pinmux @0x%08x = 0x%08x  padcfg=0x%02x read-enable=%u\n",
+	       label,
+	       addr,
+	       v,
+	       (unsigned)((v & PDM_DIAG_PADCFG_MASK) >> PDM_DIAG_PADCFG_POS),
+	       (unsigned)((v & PDM_DIAG_READ_ENABLE_MASK) != 0u));
+}
+
+static bool s_pdm_diag_dumped;
+
+static void dump_pdm_diagnostics(void)
+{
+	if (s_pdm_diag_dumped) return;
+	s_pdm_diag_dumped = true;
+
+	printf("[probe][diag] === PDM/clock/pinmux register dump (first mic read failure) ===\n");
+	printf("[probe][diag] docs/aen-bench-bringup.md:597 symptom: PDM dmic_read -> -EAGAIN "
+	       "(FIFO=0)\n");
+
+	uint32_t cfg  = sys_read32(PDM_DIAG_CONFIG_REG);
+	uint32_t ctl  = sys_read32(PDM_DIAG_CTL_REG);
+	uint32_t thr  = sys_read32(PDM_DIAG_THRESHOLD_REG);
+	uint32_t fifo = sys_read32(PDM_DIAG_FIFO_STATUS_REG);
+	uint32_t irq  = sys_read32(PDM_DIAG_INTERRUPT_REG);
+	printf("[probe][diag] PDM_CONFIG_REGISTER      @0x%08x = 0x%08x\n", PDM_DIAG_CONFIG_REG, cfg);
+	printf("[probe][diag] PDM_CTL_REGISTER         @0x%08x = 0x%08x\n", PDM_DIAG_CTL_REG, ctl);
+	printf(
+	    "[probe][diag] PDM_THRESHOLD_REGISTER   @0x%08x = 0x%08x\n", PDM_DIAG_THRESHOLD_REG, thr);
+	printf("[probe][diag] PDM_FIFO_STATUS_REGISTER @0x%08x = 0x%08x  (FIFO count bits[3:0]=%u)\n",
+	       PDM_DIAG_FIFO_STATUS_REG,
+	       fifo,
+	       (unsigned)(fifo & PDM_DIAG_FIFO_STAT_CNT_MASK));
+	printf(
+	    "[probe][diag] PDM_INTERRUPT_REGISTER   @0x%08x = 0x%08x\n", PDM_DIAG_INTERRUPT_REG, irq);
+
+	uint32_t cgu     = sys_read32(PDM_DIAG_CGU_CLK_ENA_REG);
+	uint32_t expmst0 = sys_read32(PDM_DIAG_EXPMST0_CTRL_REG);
+	printf("[probe][diag] CGU CLK_ENA    @0x%08x = 0x%08x  76.8MHz/HFOSCx2(bit24)=%u\n",
+	       PDM_DIAG_CGU_CLK_ENA_REG,
+	       cgu,
+	       (unsigned)((cgu >> PDM_DIAG_CGU_CLK76P8M_BIT) & 1u));
+	printf("[probe][diag] EXPMST0_CTRL   @0x%08x = 0x%08x  IPCLK_FORCE(bit31)=%u "
+	       "PCLK_FORCE(bit30)=%u\n",
+	       PDM_DIAG_EXPMST0_CTRL_REG,
+	       expmst0,
+	       (unsigned)((expmst0 & PDM_DIAG_EXPMST0_IPCLK_FORCE) != 0u),
+	       (unsigned)((expmst0 & PDM_DIAG_EXPMST0_PCLK_FORCE) != 0u));
+
+	pdm_diag_print_pinmux("P6_1 (PDM_C0_C, clock, muxed)", PDM_DIAG_P6_1_CLK);
+	pdm_diag_print_pinmux("P6_0 (PDM_D0_C, data, muxed)", PDM_DIAG_P6_0_DATA);
+	pdm_diag_print_pinmux("P11_4 (PDM_C2_B, clock2, NOT muxed)", PDM_DIAG_P11_4_CLK2);
+	pdm_diag_print_pinmux("P5_4 (PDM_D2_B, data2, NOT muxed)", PDM_DIAG_P5_4_DATA2);
+}
+
 /* One tone block: a square wave, identical samples on both channels (both
  * speakers play the same tone, not a stereo mix -- see amp_rx_channel[]'s
  * comment on why BOTH channels need real, non-zero samples). Advances
@@ -471,9 +662,10 @@ static bool write_one_tone_block(alp_audio_out_t *spk,
 	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) == ALP_OK;
 }
 
-/* Plain tone-only pacing loop, used ONLY when the PDM mic failed to open --
- * still drives the tone for EVIDENCE 1 (the register flag), just with no
- * acoustic capture running alongside it. */
+/* Plain tone-only pacing loop -- used for the pre-ACTIVE priming blocks
+ * (step 10 in main()), which have no mic involved at all by construction.
+ * capture_window() below handles the "mic present but failing" case itself;
+ * this helper is for the simpler "no mic in the picture yet" case. */
 static bool play_tone_blocks(alp_audio_out_t *spk,
                              int16_t         *buf,
                              uint32_t        *phase_acc,
@@ -545,41 +737,75 @@ typedef struct {
 	float rms;
 } chan_result_t;
 
+/* capture_window()'s two outcomes, tracked INDEPENDENTLY: a mic failure must
+ * never silently invalidate the tone/EVIDENCE-1 side, and a tone-write
+ * failure must never silently keep stale acoustic data. Fixes a real bug: an
+ * earlier version returned one bool for both, so a mic read timeout (the
+ * silicon failure this app actually hit) made the caller believe the TONE
+ * had also failed and print "I2S clocks not reaching the amp" -- a claim
+ * nothing had measured. See the file header's EVIDENCE 1 / FIX 1-2 notes. */
+typedef struct {
+	bool tone_ok; /* true if spk == NULL, or every tone write in this window succeeded. */
+	bool mic_ok;  /* true if mic == NULL, or every mic read succeeded with a full block. */
+} window_status_t;
+
 /*
  * Run one capture window: discard ACOUSTIC_DISCARD_BLOCKS blocks (settle),
  * then feed ACOUSTIC_ANALYSIS_BLOCKS more into three Goertzel bins + an RMS
  * accumulator PER CHANNEL. If spk is non-NULL, writes one tone block before
  * each mic read (both discard and analysis phases), so the read that
  * follows samples genuinely-playing audio -- the same write-then-read
- * interleave examples/aen/aen-evk-demo's phase 11 uses. If spk is NULL,
- * this is a silent window (BASELINE/STOPPED/SHUTDOWN) -- mic-only.
+ * interleave examples/aen/aen-evk-demo's phase 11 uses. If spk is NULL, no
+ * tone is written (BASELINE/STOPPED/SHUTDOWN). If mic is NULL, no mic read
+ * is attempted (the PDM mic never opened/started) -- the tone, if any,
+ * still gets written and paced.
  *
- * @p mic must be a valid, started handle -- this function does not handle
- * mic == NULL; see play_tone_blocks() for the no-mic fallback used when the
- * PDM mic itself failed to open.
+ * The tone-write and mic-read streams are handled INDEPENDENTLY within a
+ * window: once EITHER one fails (write error, read error/timeout, or a
+ * short read -- the fixed-N Goertzel bin math needs a full block), this
+ * function stops attempting THAT stream for the rest of the window (no
+ * point retrying a NACK 25 more times) but keeps attempting the OTHER one,
+ * so a broken mic never truncates the tone this window's EVIDENCE 1 read
+ * may depend on, and a tone glitch never aborts an otherwise-working mic
+ * capture. See window_status_t above for how the caller reads the result.
+ * @p results is only written when the mic stream ran to completion
+ * (returned .mic_ok == true); the caller must not read it otherwise.
  *
- * Returns false if either the mic read or (when spk != NULL) the tone
- * write ever failed, or a read returned fewer than SOUND_FRAMES_PER_BLOCK
- * frames (the fixed-N Goertzel bin math assumes full blocks) -- the caller
- * must not trust @p results on a false return.
+ * On the FIRST mic read failure THIS RUN (across every call to this
+ * function), prints which call failed, its rc, and frames actually
+ * received, then dumps the PDM/clock/pinmux diagnostic registers once
+ * (dump_pdm_diagnostics() above).
  */
-static bool capture_window(alp_audio_in_t  *mic,
-                           alp_audio_out_t *spk,
-                           int16_t         *tone_buf,
-                           uint32_t        *phase_acc,
-                           uint32_t         samples_per_cycle,
-                           chan_result_t    results[MIC_CHANNELS])
+static window_status_t capture_window(alp_audio_in_t  *mic,
+                                      alp_audio_out_t *spk,
+                                      int16_t         *tone_buf,
+                                      uint32_t        *phase_acc,
+                                      uint32_t         samples_per_cycle,
+                                      chan_result_t    results[MIC_CHANNELS])
 {
 	static int16_t mic_buf[SOUND_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* static: off caller's stack. */
+	window_status_t st = { .tone_ok = true, .mic_ok = (mic != NULL) };
 
 	for (unsigned b = 0; b < ACOUSTIC_DISCARD_BLOCKS; b++) {
-		if (spk != NULL && !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
-			return false;
+		if (spk != NULL && st.tone_ok &&
+		    !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
+			st.tone_ok = false;
+			printf("[probe] capture_window: alp_audio_out_write FAILED (discard block %u)\n", b);
 		}
-		size_t got = 0;
-		if (alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS) !=
-		    ALP_OK) {
-			return false;
+		if (mic != NULL && st.mic_ok) {
+			size_t       got = 0;
+			alp_status_t rrc =
+			    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != SOUND_FRAMES_PER_BLOCK) {
+				st.mic_ok = false;
+				printf("[probe] capture_window: alp_audio_in_read FAILED (discard block %u) "
+				       "rc=%d got=%zu/%u frames\n",
+				       b,
+				       (int)rrc,
+				       got,
+				       (unsigned)SOUND_FRAMES_PER_BLOCK);
+				dump_pdm_diagnostics();
+			}
 		}
 	}
 
@@ -587,40 +813,58 @@ static bool capture_window(alp_audio_in_t  *mic,
 	goertzel_t ref_lo[MIC_CHANNELS];
 	goertzel_t ref_hi[MIC_CHANNELS];
 	double     sumsq[MIC_CHANNELS] = { 0 };
-	for (size_t c = 0; c < MIC_CHANNELS; c++) {
-		goertzel_reset(&tone[c], TONE_BIN_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
-		goertzel_reset(&ref_lo[c], REF_BIN_LOW_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
-		goertzel_reset(&ref_hi[c], REF_BIN_HIGH_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+	if (mic != NULL && st.mic_ok) {
+		for (size_t c = 0; c < MIC_CHANNELS; c++) {
+			goertzel_reset(&tone[c], TONE_BIN_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+			goertzel_reset(
+			    &ref_lo[c], REF_BIN_LOW_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+			goertzel_reset(
+			    &ref_hi[c], REF_BIN_HIGH_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+		}
 	}
 
 	for (unsigned b = 0; b < ACOUSTIC_ANALYSIS_BLOCKS; b++) {
-		if (spk != NULL && !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
-			return false;
+		if (spk != NULL && st.tone_ok &&
+		    !write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle)) {
+			st.tone_ok = false;
+			printf("[probe] capture_window: alp_audio_out_write FAILED (analysis block %u)\n", b);
 		}
-		size_t got = 0;
-		if (alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS) !=
-		    ALP_OK) {
-			return false;
-		}
-		if (got != SOUND_FRAMES_PER_BLOCK) return false; /* fixed-N bin math needs full blocks. */
-		for (size_t f = 0; f < got; f++) {
-			for (size_t c = 0; c < MIC_CHANNELS; c++) {
-				float x = (float)mic_buf[f * MIC_CHANNELS + c];
-				goertzel_step(&tone[c], x);
-				goertzel_step(&ref_lo[c], x);
-				goertzel_step(&ref_hi[c], x);
-				sumsq[c] += (double)x * (double)x;
+		if (mic != NULL && st.mic_ok) {
+			size_t       got = 0;
+			alp_status_t rrc =
+			    alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			if (rrc != ALP_OK || got != SOUND_FRAMES_PER_BLOCK) {
+				st.mic_ok = false;
+				printf("[probe] capture_window: alp_audio_in_read FAILED (analysis block %u) "
+				       "rc=%d got=%zu/%u frames\n",
+				       b,
+				       (int)rrc,
+				       got,
+				       (unsigned)SOUND_FRAMES_PER_BLOCK);
+				dump_pdm_diagnostics();
+			} else {
+				for (size_t f = 0; f < got; f++) {
+					for (size_t c = 0; c < MIC_CHANNELS; c++) {
+						float x = (float)mic_buf[f * MIC_CHANNELS + c];
+						goertzel_step(&tone[c], x);
+						goertzel_step(&ref_lo[c], x);
+						goertzel_step(&ref_hi[c], x);
+						sumsq[c] += (double)x * (double)x;
+					}
+				}
 			}
 		}
 	}
 
-	for (size_t c = 0; c < MIC_CHANNELS; c++) {
-		results[c].tone_power     = goertzel_power(&tone[c]);
-		results[c].ref_low_power  = goertzel_power(&ref_lo[c]);
-		results[c].ref_high_power = goertzel_power(&ref_hi[c]);
-		results[c].rms            = sqrtf((float)(sumsq[c] / (double)ACOUSTIC_ANALYSIS_FRAMES));
+	if (mic != NULL && st.mic_ok) {
+		for (size_t c = 0; c < MIC_CHANNELS; c++) {
+			results[c].tone_power     = goertzel_power(&tone[c]);
+			results[c].ref_low_power  = goertzel_power(&ref_lo[c]);
+			results[c].ref_high_power = goertzel_power(&ref_hi[c]);
+			results[c].rms            = sqrtf((float)(sumsq[c] / (double)ACOUSTIC_ANALYSIS_FRAMES));
+		}
 	}
-	return true;
+	return st;
 }
 
 static void print_acoustic_row(const char *label, const chan_result_t r[MIC_CHANNELS], bool ok)
@@ -687,6 +931,23 @@ static const char *acoustic_verdict_str(acoustic_verdict_t v)
 	}
 }
 
+/* Print BOTH verdict lines for an EARLY exit path (bridge/mux/gpio/I2C
+ * failures, before the mic or I2S3 is ever opened) -- at every one of these
+ * points NEITHER evidence stream was attempted, so both must say so
+ * explicitly rather than the run silently omitting the ACOUSTIC line, which
+ * a bench log reader could otherwise misread as "acoustic wasn't part of
+ * this build" rather than "never got the chance to run". See the file
+ * header's FIX 1 audit for why every verdict print site is guarded like
+ * this: a verdict string must only come from the condition that actually
+ * measured it. */
+static void print_early_exit_verdicts(verdict_t v, const char *reason)
+{
+	printf("[probe] TDM_CLOCK VERDICT: %s\n", verdict_str(v));
+	printf("[probe] ACOUSTIC VERDICT: %s -- %s\n",
+	       acoustic_verdict_str(ACOUSTIC_INCONCLUSIVE),
+	       reason);
+}
+
 int main(void)
 {
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
@@ -697,8 +958,7 @@ int main(void)
 	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
 	printf("[probe] cc3501e_bridge_bringup() -> %d\n", (int)rc);
 	if (rc != ALP_OK) {
-		printf("[probe] VERDICT: %s (bridge did not come up)\n",
-		       verdict_str(VERDICT_BRIDGE_MUX_FAILED));
+		print_early_exit_verdicts(VERDICT_BRIDGE_MUX_FAILED, "bridge did not come up");
 		return 0;
 	}
 
@@ -709,7 +969,7 @@ int main(void)
 		       "CONFIG_ALP_SDK_GPIO_CC3501E_PROXY and src/cc3501e_gpio_routes.c "
 		       "carry the IO8/IO13 routes\n");
 		mux_disable(mux_sel, mux_en); /* nothing open yet on either handle if this fired. */
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_BRIDGE_MUX_FAILED));
+		print_early_exit_verdicts(VERDICT_BRIDGE_MUX_FAILED, "mux GPIO open failed");
 		return 0;
 	}
 	/* SELECT to the amp side (S=0) FIRST and to completion -- see the file
@@ -723,7 +983,7 @@ int main(void)
 	printf("[probe] I2S_EN (E1M IO8 -> CC3501E GPIO_30, active low) -> %d\n", (int)mux_rc);
 	if (mux_rc != ALP_OK) {
 		mux_disable(mux_sel, mux_en); /* EP1: nothing past the mux has been touched yet. */
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_BRIDGE_MUX_FAILED));
+		print_early_exit_verdicts(VERDICT_BRIDGE_MUX_FAILED, "mux SELECT/ENABLE write failed");
 		return 0;
 	}
 	k_msleep(MUX_SETTLE_MS);
@@ -733,7 +993,7 @@ int main(void)
 	if (!device_is_ready(gpio5)) {
 		printf("[probe] gpio5 not ready -- AMP_ENABLE/AMP_FAULT (P5_2/P5_0) unreachable\n");
 		mux_disable(mux_sel, mux_en); /* EP2: AMP_ENABLE was never touched -- gpio5 unusable. */
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_AMP_CONTROL_GPIO_FAILED));
+		print_early_exit_verdicts(VERDICT_AMP_CONTROL_GPIO_FAILED, "gpio5 not ready");
 		return 0;
 	}
 	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
@@ -756,7 +1016,8 @@ int main(void)
 		       "shutdown\n",
 		       grc);
 		mux_disable(mux_sel, mux_en);
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_AMP_CONTROL_GPIO_FAILED));
+		print_early_exit_verdicts(VERDICT_AMP_CONTROL_GPIO_FAILED,
+		                          "AMP_ENABLE/AMP_FAULT pinctrl/configure failed");
 		return 0;
 	}
 	k_usleep(TAS2563_RESET_SETTLE_US); /* SDZ just went high -- settle before any I2C. */
@@ -799,7 +1060,8 @@ int main(void)
 		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
 		mux_disable(mux_sel, mux_en);
 		if (bus != NULL) alp_i2c_close(bus);
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
+		print_early_exit_verdicts(VERDICT_TAS2563_NOT_RESPONDING,
+		                          "not every TAS2563 answered tas2563_init()");
 		return 0;
 	}
 
@@ -874,7 +1136,8 @@ int main(void)
 		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
 		mux_disable(mux_sel, mux_en);
 		alp_i2c_close(bus);
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
+		print_early_exit_verdicts(VERDICT_TAS2563_NOT_RESPONDING,
+		                          "level readback and/or I2S configure not confirmed on both amps");
 		return 0;
 	}
 
@@ -924,8 +1187,9 @@ int main(void)
 
 	/* --- 8. Acoustic BASELINE: amps SHUTDOWN, I2S3 not yet opened -------- */
 	if (mic_ok) {
-		baseline_ok =
+		window_status_t st =
 		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, baseline_r);
+		baseline_ok = st.mic_ok;
 	}
 
 	/* --- 9. I2S3 TX: open at the first (quietest) volume step, THEN start */
@@ -963,12 +1227,19 @@ int main(void)
 	}
 
 	/* --- 12. Three volume-step windows (VOL=4/16/48), tone + acoustic
-	 * capture together. `tone_ok` tracks whether EVERY step's tone stayed
+	 * capture together. `tone_ok` tracks whether EVERY step's TONE stayed
 	 * healthy -- that is what EVIDENCE 1's DURING read (right after this
-	 * loop) needs; `vol_ok[step]` independently tracks whether THAT step's
-	 * acoustic data is trustworthy. Both are tracked because a mic hiccup
-	 * on one step must not silently invalidate the TDM_CLOCK check, and a
-	 * tone-write hiccup must not silently keep a stale acoustic reading. */
+	 * loop) needs, and it is now tracked from capture_window()'s
+	 * window_status_t.tone_ok field ONLY -- NEVER from whether the mic
+	 * capture also succeeded (see window_status_t's own comment: this is
+	 * the fix for the bug where a mic read timeout made the TDM_CLOCK
+	 * verdict print "not reaching" despite never measuring anything).
+	 * `vol_ok[step]` independently tracks whether THAT step's acoustic
+	 * data is trustworthy (requires both mic_ok overall AND this window's
+	 * mic stream completing). Passing mic (not NULL) unconditionally when
+	 * mic_ok is what makes the mic side even get attempted here -- when
+	 * mic_ok is false, NULL is passed and capture_window() degenerates to
+	 * exactly the tone-only pacing play_tone_blocks() provides elsewhere. */
 	bool tone_ok = active_set;
 	for (size_t step = 0; step < SOUND_VOL_STEP_COUNT; step++) {
 		if (!active_set) break;
@@ -978,21 +1249,14 @@ int main(void)
 		       step + 1,
 		       (size_t)SOUND_VOL_STEP_COUNT,
 		       (int)vrc);
-		bool step_tone_ok;
 		if (vrc != ALP_OK) {
-			step_tone_ok = false;
-		} else if (mic_ok) {
-			vol_ok[step] =
-			    capture_window(mic, spk, tone_buf, &phase_acc, samples_per_cycle, vol_r[step]);
-			step_tone_ok = vol_ok[step];
-		} else {
-			step_tone_ok = play_tone_blocks(spk,
-			                                tone_buf,
-			                                &phase_acc,
-			                                samples_per_cycle,
-			                                ACOUSTIC_DISCARD_BLOCKS + ACOUSTIC_ANALYSIS_BLOCKS);
+			tone_ok = false;
+			continue;
 		}
-		if (!step_tone_ok) tone_ok = false;
+		window_status_t st = capture_window(
+		    mic_ok ? mic : NULL, spk, tone_buf, &phase_acc, samples_per_cycle, vol_r[step]);
+		if (!st.tone_ok) tone_ok = false;
+		vol_ok[step] = mic_ok && st.mic_ok;
 	}
 
 	/* --- 13. EVIDENCE 1, DURING: amps ACTIVE, tone genuinely playing
@@ -1051,20 +1315,27 @@ int main(void)
 
 	/* --- 16. Acoustic STOPPED window: mic-only, no tone (I2S3 halted) ---- */
 	if (mic_ok && stopped_valid) {
-		stopped_ok = capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, stopped_r);
+		window_status_t st =
+		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, stopped_r);
+		stopped_ok = st.mic_ok;
 	}
 
 	/* --- 17. Teardown, mute FIRST -- confirmed SHUTDOWN before anything
 	 * else stops (both for EVIDENCE 1's safety contract and so the
-	 * acoustic SHUTDOWN window below genuinely observes amps off). ------- */
+	 * acoustic SHUTDOWN window below genuinely observes amps off). Print
+	 * the rc, not discard it -- a SHUTDOWN write failure here would leave
+	 * an amp's true mode unknown at exactly the point a bench reader most
+	 * needs to trust it. ---------------------------------------------------*/
 	for (size_t i = 0; i < AMP_COUNT; i++) {
-		(void)tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		alp_status_t src = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[probe] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)src);
 	}
 
 	/* --- 18. Acoustic SHUTDOWN window: mic-only, amps now off ------------ */
 	if (mic_ok) {
-		shutdown_ok =
+		window_status_t st =
 		    capture_window(mic, NULL, tone_buf, &phase_acc, samples_per_cycle, shutdown_r);
+		shutdown_ok = st.mic_ok;
 	}
 
 	/* --- 19. Rest of teardown -- this is the only remaining exit path. --- */
@@ -1161,18 +1432,29 @@ int main(void)
 	       av_reason);
 
 	/* --- 22. EVIDENCE 1 (TDM_CLOCK) verdict, per amp then combined ------- */
+	/* FIX 1 (bench issue): this branch used to print
+	 * VERDICT_CLOCKS_NOT_REACHING_AMP here -- a claim that SCLK/WS do not
+	 * reach the amp -- even though the DURING read (the only thing that
+	 * could measure that) never ran. INCONCLUSIVE is the only honest
+	 * verdict when the tone/ACTIVE path itself never got established: this
+	 * says nothing about the electrical signal, only that the software
+	 * path to it was never proven up. This gate depends ONLY on `tone_ok`
+	 * (I2S/amp write/mode success), never on mic status -- see the volume
+	 * loop above and window_status_t's own comment for the decoupling. */
 	if (!during_valid) {
 		printf("[probe] I2S3/ACTIVE never reached a clean playing state through every volume "
 		       "step (open/set_volume/start/write/set_mode rc above) -- cannot run the "
-		       "DURING/STOPPED check\n");
-		printf("[probe] TDM_CLOCK VERDICT: %s\n", verdict_str(VERDICT_CLOCKS_NOT_REACHING_AMP));
+		       "DURING/STOPPED check; this is independent of the PDM mic\n");
+		printf("[probe] TDM_CLOCK VERDICT: %s -- DURING was never read\n",
+		       verdict_str(VERDICT_INCONCLUSIVE));
 		printf("[probe] done\n");
 		return 0;
 	}
 	if (!stopped_valid) {
 		printf("[probe] could not stop the I2S3 stream for the stop-control read (rc=%d)\n",
 		       (int)stop_rc);
-		printf("[probe] TDM_CLOCK VERDICT: %s\n", verdict_str(VERDICT_INCONCLUSIVE));
+		printf("[probe] TDM_CLOCK VERDICT: %s -- STOPPED was never read\n",
+		       verdict_str(VERDICT_INCONCLUSIVE));
 		printf("[probe] done\n");
 		return 0;
 	}
