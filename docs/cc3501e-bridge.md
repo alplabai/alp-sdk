@@ -559,11 +559,14 @@ that ISOLATE all the downstream buses -- with the caveat below that
   (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which
   reaches `+VIO` through U33's shunt monitor). MEASURED with the
   E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, and with a
-  3257-type part fitted, the amps stayed silent. VERIFIED FIX
-  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): re-wiring that 3257-type
-  part's `VCC` from `+VIO` to `+3V3` made a continuous 1 kHz
-  PROBE_LISTEN tone through I2S3 clearly audible on both TAS2563
-  amps -- not verified: that this was the only difference between the
+  3257-type part fitted, the amps stayed silent. OBSERVED
+  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): that 3257-type part's `VCC`
+  was re-wired from `+VIO` to `+3V3` between the silent run above and
+  a run where a continuous 1 kHz PROBE_LISTEN tone through I2S3 was
+  clearly audible on both TAS2563 amps. MEASURED: the `VCC` move
+  happened between the two runs. INFERRED, not established as the
+  only difference: that the `VCC` move is what made the tone audible;
+  not verified: that this was the only difference between the
   silent and audible runs. Scope: only amp PLAYBACK audibility was
   verified this way -- PDM mic capture and M.2 E-key I2S are
   unverified. The same run also showed an open `INT_LTCH0` bit 2 (TDM

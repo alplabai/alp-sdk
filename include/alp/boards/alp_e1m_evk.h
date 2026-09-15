@@ -194,21 +194,23 @@ extern "C" {
  * ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563 amps
  * produced NO audible output.
  *
- * FIX VERIFIED ON SILICON (`e1m-aen-evk-03`, maintainer,
+ * OBSERVED ON SILICON (`e1m-aen-evk-03`, maintainer,
  * 2026-09-15 ~14:05Z): the fitted 3257-type part's `VCC` was re-wired
- * from `+VIO` to `+3V3`.  A PROBE_LISTEN image (continuous 1 kHz tone
- * through I2S3 -> U46 -> both TAS2563 amps) was then clearly audible
- * at the speakers, confirmed by ear -- re-wiring `VCC` to `+3V3` is
- * what made playback audible.  NOT verified: that undervoltage was the
- * ONLY difference between the silent and audible runs, or that no
- * other change was made.  SCOPE: only amp PLAYBACK audibility was
- * checked -- PDM mic capture and the M.2 E-key I2S path through this
- * same mux remain unverified.  The SAME run also showed an
- * `INT_LTCH0` bit 2 (TDM clock error) latch during playback, and
- * separately, issue #2146: the amps auto-shut down ~1 s after I2S
- * stops and stay off after restart.  BOTH ARE OPEN -- a 3257-type
- * part on `+3V3` makes the amps audible, it does not mean the audio
- * path is otherwise clean.
+ * from `+VIO` to `+3V3` between a silent run and an audible run.  A
+ * PROBE_LISTEN image (continuous 1 kHz tone through I2S3 -> U46 ->
+ * both TAS2563 amps) was then clearly audible at the speakers,
+ * confirmed by ear.  MEASURED: the `VCC` move happened between the
+ * two runs.  INFERRED, NOT established as the only difference: that
+ * the `VCC` move is what made playback audible.  NOT verified: that
+ * undervoltage was the ONLY difference between the silent and audible
+ * runs, or that no other change was made.  SCOPE: only amp PLAYBACK
+ * audibility was checked -- PDM mic capture and the M.2 E-key I2S
+ * path through this same mux remain unverified.  The SAME run also
+ * showed an `INT_LTCH0` bit 2 (TDM clock error) latch during
+ * playback, and separately, issue #2146: the amps auto-shut down ~1 s
+ * after I2S stops and stay off after restart.  BOTH ARE OPEN -- a
+ * 3257-type part on `+3V3` being associated with audible amps in this
+ * one run does not mean the audio path is otherwise clean.
  *
  * CAVEAT, UNTESTED: at `VCC` = 3.3 V, a CBT-type switch's control-input
  * VIH (~2.0 V) may not reliably register a 1.8 V HIGH on `/E` or `S`
@@ -220,7 +222,7 @@ extern "C" {
  * silicon either way.
  *
  * A working U46 therefore needs BOTH a 3257-type swap AND its `VCC`
- * on `+3V3` (VERIFIED above, subject to the `/E`/`S` HIGH caveat and
+ * on `+3V3` (observed above, subject to the `/E`/`S` HIGH caveat and
  * the open TDM-latch/#2146 findings) -- gating on `VCC` alone is not
  * enough, since a STOCK 74LVC157 on `+3V3` still fails by direction.
  * The untested alternative is a switch rated for 1.8 V `VCC` -- e.g.

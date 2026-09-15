@@ -21,7 +21,8 @@
  * is REVISION-DEPENDENT -- Alif P7.1 (direct GPIO) on r1, CC3501E GPIO_30 on
  * r2 -- see include/alp/boards/alp_e1m_evk.h's I2S mux block.  AUDIBLE amp
  * output additionally needs U46 to be a 3257-type bus switch with VCC on
- * +3V3 (on e1m-aen-evk-03, VCC was moved to +3V3 between a silent run and
+ * +3V3, OR a switch rated for 1.8 V VCC (untested)
+ * (on e1m-aen-evk-03, VCC was moved to +3V3 between a silent run and
  * an audible run, not established as the only difference; the as-built
  * 74LVC157 can never pass this direction regardless, see the same header)
  * + the mux routed + the TAS2563 configured; this example validates only
@@ -199,7 +200,8 @@ int main(void)
 	printf("[i2s] RESULT %s: %s\n",
 	       drained ? "PASS" : "PARTIAL",
 	       drained ? "i2s3 TX clocked the tone out with the 76.8MHz audio clock ON (SCLK/WS/SDO "
-	                 "on P9_3/4/5). For AUDIBLE amp out: U46 needs a 3257-type switch on +3V3 "
+	                 "on P9_3/4/5). For AUDIBLE amp out: U46 needs a 3257-type switch on +3V3, "
+	                 "OR a switch rated for 1.8V VCC (untested) "
 	                 "(not the stock 74LVC157), routed + the TAS2563 configured (ACTIVE)"
 	               : "configured but TX did not drain cleanly (check clock/pinctrl)");
 	printf("[i2s] done\n");

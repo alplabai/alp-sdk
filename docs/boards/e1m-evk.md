@@ -55,10 +55,12 @@ E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
   Arduino/mikroBUS expansion: it feeds the LSF0108 level shifters'
   `VREF_B` side through R176/R177/R178 (`VREF_A` on those shifters is
   `+VIO`), and directly supplies Arduino UART header J17 pin 1,
-  mikroBUS/encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/
-  `CK_SDA` pull-ups R146/R147, and U16/U17's `REFB` through R173/R174.
-  Setting P9 to `+5V` puts 5 V on J17, J18, and those I2C pull-ups too,
-  not just the Arduino/mikroBUS shifters.
+  encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/
+  `CK_SDA` pull-ups R146/R147, U16/U17's `REFB` through R173/R174, and
+  a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS
+  header P7 pin 2, P3 pin 3, and U17 pin B1).
+  Setting P9 to `+5V` puts 5 V on J17, J18, `CK_RST`, and those I2C
+  pull-ups too, not just the Arduino/mikroBUS shifters.
 - **SuperCap rail:** present on `+SCAP`; useful for hold-up during
   brown-outs; `<alp/iot.h>`-level state-persistence policies should
   consult this rail when shipping examples that survive power loss.
@@ -138,7 +140,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 | DAC outputs      | `DAC0_OUT` and `DAC1_OUT` buffered through OPA189 op-amps to header J15.|
 | Comparator       | `CMP0`, `CMP1` exposed on header J18.                                   |
 | `+V_ANA` select  | Header **P17**: jumper connects one of `+5V`/`+3V3`/`+1V8` (pins 1/3/5) to `+V_ANA` (pins 2/4/6); feeds only DAC header J15 and the OPA189 DAC buffers -- does not reach the Arduino/mikroBUS expansion or `+VIO`, which comes from the SoM's `VIO_OUT`. |
-| `+VARD` select   | Header **P9**, same shape as P17 (pins 1/3/5 = `+5V`/`+3V3`/`+1V8`, pins 2/4/6 = `+VARD`). NOT only the Arduino/mikroBUS expansion rail: sets `VREF_B` on the LSF0108 level shifters U18/U22/U40 (through R176/R177/R178, `VREF_A` = `+VIO`), and directly supplies Arduino UART header J17 pin 1, encoder header J18 pin 1, header P3 pin 2, and the `CK_SCL`/`CK_SDA` pull-ups R146/R147 and U16/U17 `REFB` (through R173/R174). Setting P9 to `+5V` puts 5 V on all of those, not just the shifters. |
+| `+VARD` select   | Header **P9**, same shape as P17 (pins 1/3/5 = `+5V`/`+3V3`/`+1V8`, pins 2/4/6 = `+VARD`). NOT only the Arduino/mikroBUS expansion rail: sets `VREF_B` on the LSF0108 level shifters U18/U22/U40 (through R176/R177/R178, `VREF_A` = `+VIO`), and directly supplies Arduino UART header J17 pin 1, encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/`CK_SDA` pull-ups R146/R147 and U16/U17 `REFB` (through R173/R174), and a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS header P7 pin 2, P3 pin 3, and U17 pin B1). Setting P9 to `+5V` puts 5 V on all of those, not just the shifters. |
 
 ## Networking & I/O at a glance
 
