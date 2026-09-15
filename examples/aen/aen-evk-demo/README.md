@@ -477,7 +477,9 @@ bench sessions, and so are
   disagrees with (see the overlay's Phase 11 header) -- both are stale;
   trust its `src/main.c`, not its prose.
 - [`examples/aen/aen-pdm-mic-alif`](../aen-pdm-mic-alif/) -- the HP PDM
-  overlay phase 11 transcribes; its silicon-proven capture (`RESULT PASS:
-  varying PCM captured = live audio`) under the same patched clockctrl.
+  overlay phase 11 transcribes; that example's own README has the current
+  silicon status (rate, live-mic clap test, and the known ~40 dB gain
+  shortfall being fixed under issue #2143) under the same patched
+  clockctrl.
 - [`<alp/boards/alp_e1m_evk_routes.h>`](../../../include/alp/boards/alp_e1m_evk_routes.h)
   -- `EVK_I2C_ADDR_*` / `EVK_PWM_LED_*` map.

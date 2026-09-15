@@ -10,9 +10,10 @@ bursting the convolutions on demand.
 > to this example's own SDK backends
 > (`src/backends/audio/zephyr_drv.c`,
 > `src/backends/inference/ethos_u_aen.cpp`) -- neither has run on
-> silicon. PDM mic capture ("PDM mics -- Live varying PCM = real
-> audio",
-> [`docs/aen-bench-bringup.md`](../../../docs/aen-bench-bringup.md))
+> silicon. PDM mic capture (see
+> [`examples/aen/aen-pdm-mic-alif`](../../aen/aen-pdm-mic-alif/README.md)
+> for the current status -- rate verified, acoustic liveness NOT yet
+> confirmed)
 > ran through `examples/aen/aen-pdm-mic-alif`, which drives the
 > Zephyr `dmic_configure`/`dmic_trigger`/`dmic_read` API directly,
 > bypassing `<alp/audio.h>`. NPU inference (person_detect /

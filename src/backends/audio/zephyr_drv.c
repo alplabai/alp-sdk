@@ -131,8 +131,20 @@ static alp_status_t errno_to_alp(int err)
 	/* Delegates to the shared negative-errno baseline (issue #1638).
 	 * This switch was one of 27 hand-copied copies that had drifted; the
 	 * arms it carried all agreed with the baseline, so the mapping it
-	 * produced for them is unchanged. */
-	return alp_status_from_zephyr_errno(err);
+	 * produced for them is unchanged.
+	 *
+	 * One local override (issue #2133 round 4d): a non-blocking empty
+	 * read (alp_audio_in_read(..., timeout_ms=0)) reaches k_msgq_get()
+	 * with K_NO_WAIT, which returns -ENOMSG for "nothing queued right
+	 * now" -- the baseline has no arm for it, so it fell through to
+	 * ALP_ERR_IO ("dropped data, sticky") instead of the timeout this
+	 * actually is. Mirrors the existing -EAGAIN override one arm up in
+	 * the shared baseline.
+	 */
+	static const alp_errno_override_t overrides[] = {
+		{ -ENOMSG, ALP_ERR_TIMEOUT },
+	};
+	return alp_status_from_zephyr_errno_ex(err, overrides, ARRAY_SIZE(overrides));
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_IN */
