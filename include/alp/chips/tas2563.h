@@ -589,6 +589,35 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
 alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code);
 
 /**
+ * @brief Read back `PB_CFG1.AMP_LEVEL` -- confirm a level write actually
+ *        landed before trusting it.
+ *
+ * A caller about to switch the amp @ref TAS2563_MODE_ACTIVE on a real
+ * speaker should not trust an `ALP_OK` from @ref tas2563_set_amp_level
+ * alone: that function is a read-modify-write (it must read `PB_CFG1`
+ * back to preserve the reserved/`DIS_DC_BLOCKER` bits before writing
+ * the new `AMP_LEVEL`), and a bus fault on either half can in
+ * principle surface as a status this driver cannot distinguish from
+ * success. This performs a read of the same register only -- same page-0
+ * selection, same bit mask @ref tas2563_set_amp_level writes -- so a
+ * caller can compare @p level_code_out against the value it asked for
+ * before ever calling @ref tas2563_set_mode with @ref
+ * TAS2563_MODE_ACTIVE. No side effect on the part: a plain register
+ * read, page-selected the same way @ref tas2563_read_revision is.
+ *
+ * @param[in]  ctx             Initialised context.
+ * @param[out] level_code_out  Receives the raw `AMP_LEVEL[4:0]` field
+ *                             (the same code space as @ref
+ *                             tas2563_set_amp_level's @p level_code --
+ *                             compare directly, no shift needed).
+ *
+ * @return ALP_OK, or the underlying bus status.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ * @retval ALP_ERR_INVAL     @p level_code_out is NULL.
+ */
+alp_status_t tas2563_read_amp_level(tas2563_t *ctx, uint8_t *level_code_out);
+
+/**
  * @brief Tell the amp what the host I2S bus is doing.
  *
  * Translates the @ref alp_i2s_config_t the caller passed to

@@ -337,6 +337,20 @@ alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code)
 	                  (uint8_t)(level_code << TAS2563_PB_CFG1_AMP_LEVEL_SHIFT));
 }
 
+alp_status_t tas2563_read_amp_level(tas2563_t *ctx, uint8_t *level_code_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (level_code_out == NULL) return ALP_ERR_INVAL;
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+	uint8_t raw = 0;
+	s           = reg_read(ctx, TAS2563_REG_PB_CFG1, &raw);
+	if (s != ALP_OK) return s;
+	*level_code_out =
+	    (uint8_t)((raw & TAS2563_PB_CFG1_AMP_LEVEL_MASK) >> TAS2563_PB_CFG1_AMP_LEVEL_SHIFT);
+	return ALP_OK;
+}
+
 /* ------------------------------------------------------------------ */
 /* I2S / TDM receive configuration                                     */
 /* ------------------------------------------------------------------ */

@@ -52,19 +52,39 @@
  * the M.2 slot never sees a moment where ENABLE is already low and SELECT
  * has not yet been asserted to the amp side.
  *
- * THE OBJECTIVE CHECK -- NEEDS NO EARS. TAS2563's four latched-interrupt
- * registers (INT_LTCH0..4, read as one packed word by tas2563_read_faults(),
+ * THE OBJECTIVE CHECK -- NEEDS NO EARS, AND DOES NOT TRUST THE SOFTWARE-
+ * SHUTDOWN BASELINE. TAS2563's four latched-interrupt registers
+ * (INT_LTCH0..4, read as one packed word by tas2563_read_faults(),
  * include/alp/chips/tas2563.h) carry @ref TAS2563_FAULT_TDM_CLOCK (0x24[2],
  * "TDM clock error", SLASET3D SS7.5.36 Table 7-136): the amp's own hardware
  * report of whether it currently sees a valid TDM/I2S clock on its RX pins.
- * This app clears + reads that bit TWICE on both amps:
- *   BASELINE, before alp_audio_out_open()/start() ever runs (no I2S3 traffic
- *   of any kind has happened yet) -- expected: the bit re-latches SET, since
- *   nothing is clocking the amp's SDIN/SCLK/WS pins at all.
- *   DURING, after the tone has been playing for several blocks -- if the
- *   bit reads CLEAR here, that is the evidence: SCLK/WS genuinely reached
- *   the amp through the reworked U46, not just that this app's own I2C
- *   writes succeeded.
+ *
+ * An earlier version of this app compared a pre-ACTIVE (software-shutdown)
+ * baseline against a during-playback read and let that decide the verdict.
+ * That is unsound: neither tas2563.h nor tas2563.c documents whether the
+ * TDM-clock-error latch is even live while the part sits in software
+ * shutdown, so a CLEAR/CLEAR run (the latch simply never active yet) would
+ * have printed "clocks reach the amp" -- a false hardware conclusion. This
+ * version instead runs a STOP-CONTROL entirely inside the ACTIVE window,
+ * where the latch is known to be live (SLASET3D SS7.3.12 documents the fault
+ * pin/latch behaviour for the ACTIVE/operating condition):
+ *   DURING  -- both amps ACTIVE, the tone genuinely playing: clear the latch,
+ *              settle, read. Expected CLEAR if SCLK/WS reach the amp.
+ *   STOPPED -- I2S3 TX stopped (alp_audio_out_stop(), which drains then
+ *              I2S_TRIGGER_DRAINs the DesignWare controller -- see
+ *              src/backends/audio/zephyr_drv.c's z_out_stop() and
+ *              src/backends/i2s/zephyr_drv.c's alp_i2s_stop()) while BOTH
+ *              amps stay ACTIVE (no tas2563_set_mode(SHUTDOWN) yet): clear
+ *              the latch again, settle, read. Expected SET now that nothing
+ *              clocks SCLK/WS.
+ * A DURING-CLEAR + STOPPED-SET pair is the only outcome that demonstrates
+ * the flag genuinely tracks this run's own clock, not a coincidence of
+ * power-up state. Stopping I2S while ACTIVE is safe here because the part
+ * mutes on a clock error (SLASET3D SS7.3.12) rather than free-running the
+ * Class-D stage without one. The pre-ACTIVE software-shutdown read is kept
+ * ONLY as supplementary printed context, per the coordinator's safety
+ * review -- see faults_before below, which no longer drives the verdict.
+ *
  * TAS2563_FAULT_ASI2_CLOCK (0x27[3], a SECOND serial-interface clock-error
  * bit) is NOT used here -- it names ASI2, a different serial port from the
  * TDM/I2S receiver this board wires, so it says nothing about this signal
@@ -78,16 +98,29 @@
  * AMP_LEVEL "near the top of the part's range". This app never exceeds:
  *   - TAS2563_AMP_LEVEL_MIN (8.5 dBV, the quietest listed analog gain code) --
  *     set on BOTH amps over I2C while they are still in software shutdown,
- *     before either is ever told ACTIVE.
+ *     and CONFIRMED by a register readback (tas2563_read_amp_level(), added
+ *     to the driver for exactly this) before either amp is ever told
+ *     ACTIVE. A write whose readback does not come back MIN keeps BOTH amps
+ *     in software shutdown for the rest of this run, full stop -- see
+ *     level_confirmed[]/i2s_confirmed[] below. tas2563_set_amp_level() is
+ *     itself a read-modify-write against a register shared with other
+ *     fields (DIS_DC_BLOCKER, reserved bits), so its own ALP_OK return is
+ *     not, by itself, proof the level this app asked for is the level now
+ *     on the part -- the readback is what actually proves it.
  *   - A FLAT digital volume of SOUND_VOL (4/255, ~1.6% of unity) via
  *     alp_audio_out_set_volume() -- opened and STARTED before ACTIVE, so
  *     the amp comes out of shutdown already receiving a near-silent stream,
  *     and never raised for the rest of this run (this is a diagnostic
  *     probe, not a demo -- there is no reason to ever go louder than the
  *     level that already answers the clock-detect question).
- *   - A short tone: SOUND_TONE_BLOCKS_TOTAL * (SOUND_FRAMES_PER_BLOCK /
- *     SOUND_SAMPLE_RATE_HZ) = 16 * 16 ms = 256 ms total, teardown always
- *     mutes (tas2563_set_mode(SHUTDOWN)) before anything else stops.
+ *   - A short tone (~128 ms before the DURING read, then I2S3 is
+ *     deliberately stopped for the STOPPED read -- see above), and teardown
+ *     always mutes (tas2563_set_mode(SHUTDOWN)) BOTH amps before anything
+ *     else tears down. This is true on EVERY exit path, not just the
+ *     bottom of main(): every early return past the point AMP_ENABLE is
+ *     first released (`--- 2.` below) drives AMP_ENABLE back to 0, mutes
+ *     any amp that ever answered I2C, deinitialises it, releases the mux
+ *     `/E`, and -- once the I2C bus is open -- closes it.
  *   Both levers mirror examples/aen/aen-evk-demo's phase 11, which this app
  *   was mined from -- see that phase's file header for the fuller "why two
  *   independent levers" reasoning.
@@ -147,13 +180,13 @@ static const pinctrl_soc_pin_t amp_fault_mux[] = { PIN_P5_0__GPIO | AMP_FAULT_PA
 #define MUX_SETTLE_MS            10u
 #define CLOCK_CHECK_SETTLE_MS    20u /* time for a fresh TDM-clock-detect edge after clear. */
 
-#define SOUND_SAMPLE_RATE_HZ         16000u
-#define SOUND_FRAMES_PER_BLOCK       256u
-#define SOUND_TONE_HZ                1000u
-#define SOUND_TONE_AMPLITUDE         20000 /* int16, headroom below INT16_MAX. */
-#define SOUND_TONE_BLOCKS_BEFORE_MID 8u    /* 8*16ms=128ms before the mid-stream clock check. */
-#define SOUND_TONE_BLOCKS_AFTER_MID  8u    /* 8*16ms=128ms after it. */
-#define SOUND_VOL                    4u    /* ~1.6% of unity (255) -- see file header SAFETY. */
+#define SOUND_SAMPLE_RATE_HZ            16000u
+#define SOUND_FRAMES_PER_BLOCK          256u
+#define SOUND_TONE_HZ                   1000u
+#define SOUND_TONE_AMPLITUDE            20000 /* int16, headroom below INT16_MAX. */
+#define SOUND_TONE_BLOCKS_BEFORE_ACTIVE 2u    /* 2*16ms=32ms: quiet stream running before ACTIVE. */
+#define SOUND_TONE_BLOCKS_AFTER_ACTIVE  6u /* 6*16ms=96ms: genuinely playing at the DURING read. */
+#define SOUND_VOL                       4u /* ~1.6% of unity (255) -- see file header SAFETY. */
 
 #define AMP_COUNT 2u
 static const uint8_t amp_addrs[AMP_COUNT] = {
@@ -168,18 +201,25 @@ static const tas2563_rx_channel_t amp_rx_channel[AMP_COUNT] = {
 	TAS2563_RX_RIGHT,
 };
 
-/* The four named outcomes this probe can report -- see the file header's
- * "THE OBJECTIVE CHECK" section for what each layer means. AMP_ENABLE (the
- * SD_N hardware-shutdown release on gpio5) is folded into TAS2563_NOT_
- * RESPONDING rather than getting a fifth bucket: if SD_N cannot be driven,
- * both amps stay in hardware shutdown and tas2563_init() will not get an
- * ACK either, so the two failures are indistinguishable from this app's
- * evidence and the task only asks for four named layers. */
+/* The named outcomes this probe can report -- see the file header's
+ * "THE OBJECTIVE CHECK" section for what DURING/STOPPED mean.
+ *
+ * AMP_CONTROL_GPIO_FAILED is split out from TAS2563_NOT_RESPONDING (an
+ * earlier version folded gpio5/AMP_ENABLE/AMP_FAULT failures into the I2C
+ * bucket): a gpio5 device or pinctrl fault is a DIFFERENT layer than an I2C
+ * NACK, and printing "TAS2563 I2C not responding" for a GPIO fault the app
+ * never got far enough to even attempt I2C on would misname the cause.
+ *
+ * INCONCLUSIVE covers every DURING/STOPPED combination that is not the
+ * clean "flag demonstrably tracks the clock" pair in either direction --
+ * see the verdict matrix in main() for the four combinations. */
 typedef enum {
 	VERDICT_BRIDGE_MUX_FAILED,
+	VERDICT_AMP_CONTROL_GPIO_FAILED,
 	VERDICT_TAS2563_NOT_RESPONDING,
 	VERDICT_CLOCKS_NOT_REACHING_AMP,
 	VERDICT_CLOCKS_REACH_AMP,
+	VERDICT_INCONCLUSIVE,
 } verdict_t;
 
 static const char *verdict_str(verdict_t v)
@@ -187,20 +227,24 @@ static const char *verdict_str(verdict_t v)
 	switch (v) {
 	case VERDICT_BRIDGE_MUX_FAILED:
 		return "bridge/mux-enable failed";
+	case VERDICT_AMP_CONTROL_GPIO_FAILED:
+		return "AMP control GPIO failed (gpio5 / AMP_ENABLE / AMP_FAULT)";
 	case VERDICT_TAS2563_NOT_RESPONDING:
 		return "TAS2563 I2C not responding";
 	case VERDICT_CLOCKS_NOT_REACHING_AMP:
 		return "I2S clocks not reaching the amp";
 	case VERDICT_CLOCKS_REACH_AMP:
 		return "clocks reach the amp";
+	case VERDICT_INCONCLUSIVE:
+		return "inconclusive (TDM_CLOCK flag did not discriminate -- see the per-amp reads above)";
 	default:
 		return "unknown";
 	}
 }
 
-/* mux_sel/mux_en/gpio5 teardown shared by every exit path.  alp_gpio_close()
- * on NULL is a documented no-op, so this is safe to call from a path that
- * never got as far as opening either handle. */
+/* mux_sel/mux_en teardown shared by every exit path.  alp_gpio_close() on
+ * NULL is a documented no-op, so this is safe to call from a path that never
+ * got as far as opening either handle. */
 static void mux_disable(alp_gpio_t *mux_sel, alp_gpio_t *mux_en)
 {
 	if (mux_en != NULL) {
@@ -208,6 +252,45 @@ static void mux_disable(alp_gpio_t *mux_sel, alp_gpio_t *mux_en)
 	}
 	alp_gpio_close(mux_sel);
 	alp_gpio_close(mux_en);
+}
+
+/* Per-amp TDM_CLOCK verdict for the DURING/STOPPED pair -- see the file
+ * header's "THE OBJECTIVE CHECK" section and the matrix in main(). */
+typedef enum {
+	AMP_CLOCK_REACHES,
+	AMP_CLOCK_NOT_REACHING,
+	AMP_CLOCK_INCONCLUSIVE,
+} amp_clock_verdict_t;
+
+static amp_clock_verdict_t amp_clock_verdict(uint32_t during, uint32_t stopped)
+{
+	bool during_clear = (during & TAS2563_FAULT_TDM_CLOCK) == 0u;
+	bool stopped_set  = (stopped & TAS2563_FAULT_TDM_CLOCK) != 0u;
+	if (during_clear && stopped_set) return AMP_CLOCK_REACHES;       /* the clean, strong case. */
+	if (!during_clear && stopped_set) return AMP_CLOCK_NOT_REACHING; /* flag live, stayed set. */
+	return AMP_CLOCK_INCONCLUSIVE; /* during_clear&&!stopped_set, or !during_clear&&!stopped_set. */
+}
+
+/* One tone block: a square wave, identical samples on both channels (both
+ * speakers play the same tone, not a stereo mix -- see amp_rx_channel[]'s
+ * comment on why BOTH channels need real, non-zero samples). Advances
+ * *phase_acc and blocks in alp_audio_out_write() for real wall-clock time.
+ * Returns false on any write failure -- the caller latches that into its
+ * own write_failed and stops calling this. */
+static bool write_one_tone_block(alp_audio_out_t *spk,
+                                 int16_t         *buf,
+                                 uint32_t        *phase_acc,
+                                 uint32_t         samples_per_cycle)
+{
+	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+		int16_t sample  = ((*phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
+		                      ? SOUND_TONE_AMPLITUDE
+		                      : -SOUND_TONE_AMPLITUDE;
+		buf[2u * f]     = sample;
+		buf[2u * f + 1] = sample;
+		(*phase_acc)++;
+	}
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) == ALP_OK;
 }
 
 int main(void)
@@ -231,7 +314,7 @@ int main(void)
 		printf("[probe] alp_gpio_open(mux SELECT/ENABLE) -> NULL -- check "
 		       "CONFIG_ALP_SDK_GPIO_CC3501E_PROXY and src/cc3501e_gpio_routes.c "
 		       "carry the IO8/IO13 routes\n");
-		mux_disable(mux_sel, mux_en);
+		mux_disable(mux_sel, mux_en); /* nothing open yet on either handle if this fired. */
 		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_BRIDGE_MUX_FAILED));
 		return 0;
 	}
@@ -245,7 +328,7 @@ int main(void)
 	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
 	printf("[probe] I2S_EN (E1M IO8 -> CC3501E GPIO_30, active low) -> %d\n", (int)mux_rc);
 	if (mux_rc != ALP_OK) {
-		mux_disable(mux_sel, mux_en);
+		mux_disable(mux_sel, mux_en); /* EP1: nothing past the mux has been touched yet. */
 		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_BRIDGE_MUX_FAILED));
 		return 0;
 	}
@@ -255,22 +338,31 @@ int main(void)
 	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
 	if (!device_is_ready(gpio5)) {
 		printf("[probe] gpio5 not ready -- AMP_ENABLE/AMP_FAULT (P5_2/P5_0) unreachable\n");
-		mux_disable(mux_sel, mux_en);
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
+		mux_disable(mux_sel, mux_en); /* EP2: AMP_ENABLE was never touched -- gpio5 unusable. */
+		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_AMP_CONTROL_GPIO_FAILED));
 		return 0;
 	}
 	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
 	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
 	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
-	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1); /* releases SD_N high. */
 	printf("[probe] AMP_ENABLE (SD_N, P5_2) hardware reset + release -> %d\n", grc);
 	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
 	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
 	if (grc != 0) {
-		printf("[probe] AMP_ENABLE/AMP_FAULT not drivable -- neither amp can leave "
-		       "hardware shutdown\n");
+		/* EP3: AMP_ENABLE may already be HIGH by the time a LATER step
+		 * (the AMP_FAULT pinctrl/configure calls) is what actually failed --
+		 * drive it back to 0 unconditionally rather than assuming the
+		 * failure happened before SD_N was ever released. A gpio_pin_set()
+		 * on a pin whose earlier pinctrl/configure step never ran is a
+		 * documented no-op-ish failure on this backend, not a hazard. */
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[probe] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d) -- driving "
+		       "AMP_ENABLE back to 0; amps may or may not have briefly left hardware "
+		       "shutdown\n",
+		       grc);
 		mux_disable(mux_sel, mux_en);
-		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
+		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_AMP_CONTROL_GPIO_FAILED));
 		return 0;
 	}
 	k_usleep(TAS2563_RESET_SETTLE_US); /* SDZ just went high -- settle before any I2C. */
@@ -281,8 +373,12 @@ int main(void)
 	    .bitrate_hz = 100000u,
 	});
 	tas2563_t  amps[AMP_COUNT];
-	bool       amp_up[AMP_COUNT] = { false, false };
-	int        ok_amps           = 0;
+	/* Which amps actually answered tas2563_init() -- needed so the EP4
+	 * cleanup below only deinits contexts that are real (tas2563_deinit()
+	 * on an un-initialised tas2563_t is not something this driver's
+	 * contract covers). */
+	bool amp_up[AMP_COUNT] = { false, false };
+	int  ok_amps           = 0;
 	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
 		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
 		printf("[probe] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
@@ -296,16 +392,46 @@ int main(void)
 		       "E1M-EVK, so a partial count is a real fault\n",
 		       ok_amps,
 		       (size_t)AMP_COUNT);
+		/* EP4: every amp that DID answer init() is already in software
+		 * shutdown (tas2563_init()'s own contract), but set_mode(SHUTDOWN)
+		 * again is cheap and makes "both amps end in SHUTDOWN on every
+		 * exit path" true by construction rather than by inference. */
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			if (amp_up[i]) {
+				(void)tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+				tas2563_deinit(&amps[i]);
+			}
+		}
 		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
 		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
 		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
 		return 0;
 	}
 
-	/* --- 4. Safety lever 1: quietest analog level, BEFORE anything else -- */
+	/* --- 4. Safety lever 1: quietest analog level, CONFIRMED by readback - */
+	/* level_confirmed[i] gates the ONLY thing that matters for hardware
+	 * safety: whether amps[i] is ever allowed to reach ACTIVE below. A
+	 * write that returns ALP_OK is NOT sufficient by itself -- see the
+	 * file header's HARDWARE SAFETY note on why tas2563_set_amp_level()'s
+	 * own return cannot be fully trusted -- so this reads PB_CFG1.AMP_LEVEL
+	 * back via tas2563_read_amp_level() (added to chips/tas2563 for this)
+	 * and only trusts an EXACT match against TAS2563_AMP_LEVEL_MIN. */
+	bool level_confirmed[AMP_COUNT] = { false, false };
 	for (size_t i = 0; i < AMP_COUNT; i++) {
-		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
-		printf("[probe] tas2563_set_amp_level(0x%02x, MIN=8.5dBV) -> %d\n", amp_addrs[i], (int)lrc);
+		alp_status_t lrc      = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		uint8_t      readback = 0xFFu; /* poisoned: never a valid AMP_LEVEL code. */
+		alp_status_t rrc      = ALP_ERR_IO;
+		if (lrc == ALP_OK) rrc = tas2563_read_amp_level(&amps[i], &readback);
+		level_confirmed[i] =
+		    (lrc == ALP_OK) && (rrc == ALP_OK) && (readback == TAS2563_AMP_LEVEL_MIN);
+		printf("[probe] tas2563_set_amp_level(0x%02x, MIN=8.5dBV) -> %d, "
+		       "tas2563_read_amp_level() -> %d (readback=0x%02x) -- %s\n",
+		       amp_addrs[i],
+		       (int)lrc,
+		       (int)rrc,
+		       readback,
+		       level_confirmed[i] ? "CONFIRMED" : "NOT CONFIRMED -- will never go ACTIVE");
 	}
 
 	/* --- 5. Tell both amps the I2S config the host bus will use ---------- */
@@ -325,12 +451,48 @@ int main(void)
 		.format         = ALP_I2S_FMT_I2S,
 		.block_frames   = SOUND_FRAMES_PER_BLOCK,
 	};
+	bool i2s_confirmed[AMP_COUNT] = { false, false };
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		i2s_confirmed[i] = (crc == ALP_OK);
 		printf("[probe] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
 	}
 
-	/* --- 6. OBJECTIVE CHECK, baseline: no I2S3 traffic has happened yet -- */
+	/* An amp only ever reaches ACTIVE below if BOTH the level readback and
+	 * the I2S configure succeeded -- "An amp whose level is not confirmed
+	 * never goes ACTIVE, full stop." If either amp is not confirmed, this
+	 * run never opens I2S3 or sets ANY amp ACTIVE at all: with only one
+	 * amp (or neither) trustworthy, the DURING/STOPPED comparison below
+	 * cannot produce a meaningful two-amp verdict either, so there is
+	 * nothing this run can still safely learn by proceeding. */
+	int confirmed_count = 0;
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		if (level_confirmed[i] && i2s_confirmed[i]) confirmed_count++;
+	}
+	if (confirmed_count != (int)AMP_COUNT) {
+		printf("[probe] %d/%zu amp(s) confirmed (level readback + I2S configure) -- "
+		       "refusing to start I2S3 or set any amp ACTIVE\n",
+		       confirmed_count,
+		       (size_t)AMP_COUNT);
+		/* EP5: same shape as EP4 -- both amps are still in software
+		 * shutdown (ACTIVE was never reached), but drive it explicitly. */
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			(void)tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+			tas2563_deinit(&amps[i]);
+		}
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		alp_i2c_close(bus);
+		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_TAS2563_NOT_RESPONDING));
+		return 0;
+	}
+
+	/* --- 6. Supplementary-only baseline: still in software shutdown ----- */
+	/* Printed for context; per the file header, this does NOT drive the
+	 * verdict -- whether the TDM-clock latch is even live in software
+	 * shutdown is undocumented, so a CLEAR read here proves nothing either
+	 * way. The DURING/STOPPED pair below (both inside the ACTIVE window)
+	 * is what decides the outcome. */
 	uint32_t faults_before[AMP_COUNT] = { 0 };
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		(void)tas2563_clear_faults(&amps[i]);
@@ -338,10 +500,11 @@ int main(void)
 	k_msleep(CLOCK_CHECK_SETTLE_MS);
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		(void)tas2563_read_faults(&amps[i], &faults_before[i]);
-		printf("[probe] tas2563_read_faults(0x%02x) BASELINE -> 0x%08x (TDM_CLOCK %s)\n",
+		printf("[probe] tas2563_read_faults(0x%02x) BASELINE (software shutdown, "
+		       "supplementary only) -> 0x%08x (TDM_CLOCK %s)\n",
 		       amp_addrs[i],
 		       faults_before[i],
-		       (faults_before[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET (no clock, expected)" : "clear");
+		       (faults_before[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
 	}
 
 	/* --- 7. I2S3 TX: open at the quiet volume, THEN start ---------------- */
@@ -362,72 +525,98 @@ int main(void)
 	const uint32_t samples_per_cycle = SOUND_SAMPLE_RATE_HZ / SOUND_TONE_HZ;
 	bool           write_failed      = false;
 
-	/* --- 8. First half of the tone -- a quiet stream is already running -- */
-	for (unsigned b = 0; b < SOUND_TONE_BLOCKS_BEFORE_MID && spk_rc == ALP_OK; b++) {
-		for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
-			int16_t sample       = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
-			                           ? SOUND_TONE_AMPLITUDE
-			                           : -SOUND_TONE_AMPLITUDE;
-			tone_buf[2u * f]     = sample;
-			tone_buf[2u * f + 1] = sample;
-			phase_acc++;
-		}
-		if (alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) != ALP_OK) {
+	/* --- 8. First few blocks -- a quiet stream is already running BEFORE
+	 * either amp goes ACTIVE (lever 2, digital volume, already engaged). - */
+	for (unsigned b = 0; b < SOUND_TONE_BLOCKS_BEFORE_ACTIVE && spk_rc == ALP_OK && !write_failed;
+	     b++) {
+		if (!write_one_tone_block(spk, tone_buf, &phase_acc, samples_per_cycle)) {
 			write_failed = true;
-			break;
 		}
 	}
 
-	/* --- 9. ONLY NOW: both amps ACTIVE -- the stream is already quiet and
-	 * running, matching examples/aen/aen-evk-demo's phase 11 ordering. ---- */
+	/* --- 9. ONLY NOW: both (confirmed) amps ACTIVE -- the stream is
+	 * already quiet and running, matching examples/aen/aen-evk-demo's
+	 * phase 11 ordering. Both amps ARE confirmed (step 5's hard gate), so
+	 * no per-amp skip is needed here. ------------------------------------ */
+	bool active_set = false;
 	if (spk_rc == ALP_OK && !write_failed) {
+		active_set = true;
 		for (size_t i = 0; i < AMP_COUNT; i++) {
 			alp_status_t arc = tas2563_set_mode(&amps[i], TAS2563_MODE_ACTIVE);
+			if (arc != ALP_OK) active_set = false;
 			printf("[probe] tas2563_set_mode(0x%02x, ACTIVE) -> %d\n", amp_addrs[i], (int)arc);
 		}
 	}
 
-	/* --- 10. Second half of the tone, THEN the mid-stream clock check ---- */
-	for (unsigned b = 0; b < SOUND_TONE_BLOCKS_AFTER_MID && spk_rc == ALP_OK && !write_failed;
-	     b++) {
-		for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
-			int16_t sample       = ((phase_acc % samples_per_cycle) < samples_per_cycle / 2u)
-			                           ? SOUND_TONE_AMPLITUDE
-			                           : -SOUND_TONE_AMPLITUDE;
-			tone_buf[2u * f]     = sample;
-			tone_buf[2u * f + 1] = sample;
-			phase_acc++;
-		}
-		if (alp_audio_out_write(spk, tone_buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u) != ALP_OK) {
+	/* --- 10. More tone blocks WHILE ACTIVE, so the DURING read below
+	 * lands while the tone is genuinely, freshly playing -- not just
+	 * relying on the controller free-running after the last write. ------ */
+	for (unsigned b = 0; b < SOUND_TONE_BLOCKS_AFTER_ACTIVE && active_set && !write_failed; b++) {
+		if (!write_one_tone_block(spk, tone_buf, &phase_acc, samples_per_cycle)) {
 			write_failed = true;
-			break;
 		}
 	}
 
-	/* --- 11. OBJECTIVE CHECK, during: ~128-256ms of real I2S3 traffic ---- */
+	/* --- 11. OBJECTIVE CHECK, DURING: amps ACTIVE, tone genuinely playing */
 	uint32_t faults_during[AMP_COUNT] = { 0 };
-	bool     playing                  = (spk_rc == ALP_OK) && !write_failed;
-	if (playing) {
+	bool     during_valid             = active_set && spk_rc == ALP_OK && !write_failed;
+	if (during_valid) {
 		for (size_t i = 0; i < AMP_COUNT; i++) {
 			(void)tas2563_clear_faults(&amps[i]);
 		}
 		k_msleep(CLOCK_CHECK_SETTLE_MS);
 		for (size_t i = 0; i < AMP_COUNT; i++) {
 			(void)tas2563_read_faults(&amps[i], &faults_during[i]);
-			printf("[probe] tas2563_read_faults(0x%02x) DURING -> 0x%08x (TDM_CLOCK %s)\n",
+			printf("[probe] tas2563_read_faults(0x%02x) DURING (ACTIVE, playing) -> "
+			       "0x%08x (TDM_CLOCK %s)\n",
 			       amp_addrs[i],
 			       faults_during[i],
-			       (faults_during[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET (still no clock)"
-			                                                    : "clear (clock present)");
+			       (faults_during[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
 		}
 	}
 
-	/* --- 12. Teardown, mute BEFORE anything else stops (unconditional) --- */
+	/* --- 12. STOP-CONTROL: stop I2S3 while BOTH amps stay ACTIVE --------- */
+	/* alp_audio_out_stop() -> alp_i2s_stop() -> i2s_trigger(...,
+	 * I2S_TRIGGER_DRAIN) (src/backends/audio/zephyr_drv.c z_out_stop(),
+	 * src/backends/i2s/zephyr_drv.c) -- drains any in-flight block then
+	 * halts the DesignWare I2S3 controller, which is what actually stops
+	 * SCLK/WS. Safe with both amps ACTIVE: SLASET3D SS7.3.12 documents the
+	 * part muting on a TDM clock error rather than free-running the
+	 * Class-D stage without one. */
+	bool         stream_stop_attempted = false;
+	alp_status_t stop_rc               = ALP_ERR_NOT_READY;
+	if (during_valid) {
+		stream_stop_attempted = true;
+		stop_rc               = alp_audio_out_stop(spk);
+		printf("[probe] alp_audio_out_stop(I2S3) [stop-control, amps still ACTIVE] -> %d\n",
+		       (int)stop_rc);
+	}
+
+	/* --- 13. OBJECTIVE CHECK, STOPPED: amps still ACTIVE, I2S3 halted ---- */
+	uint32_t faults_stopped[AMP_COUNT] = { 0 };
+	bool     stopped_valid             = during_valid && (stop_rc == ALP_OK);
+	if (stopped_valid) {
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			(void)tas2563_clear_faults(&amps[i]);
+		}
+		k_msleep(CLOCK_CHECK_SETTLE_MS);
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			(void)tas2563_read_faults(&amps[i], &faults_stopped[i]);
+			printf("[probe] tas2563_read_faults(0x%02x) STOPPED (ACTIVE, I2S3 halted) -> "
+			       "0x%08x (TDM_CLOCK %s)\n",
+			       amp_addrs[i],
+			       faults_stopped[i],
+			       (faults_stopped[i] & TAS2563_FAULT_TDM_CLOCK) ? "SET" : "clear");
+		}
+	}
+
+	/* --- 14. Teardown, mute FIRST -- confirmed SHUTDOWN before anything
+	 * else stops, on this (the only remaining) exit path. ----------------- */
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		(void)tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
 	}
 	if (spk != NULL) {
-		alp_audio_out_stop(spk);
+		if (!stream_stop_attempted) alp_audio_out_stop(spk); /* not yet stopped above. */
 		alp_audio_out_close(spk);
 	}
 	for (size_t i = 0; i < AMP_COUNT; i++) {
@@ -435,20 +624,49 @@ int main(void)
 	}
 	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
 	mux_disable(mux_sel, mux_en);
-	if (bus != NULL) alp_i2c_close(bus);
+	alp_i2c_close(bus);
 
-	/* --- 13. Verdict ------------------------------------------------------ */
+	/* --- 15. Verdict, per amp then combined ------------------------------ */
+	if (!during_valid) {
+		printf("[probe] I2S3/ACTIVE never reached a clean playing state (open/set_volume/"
+		       "start/write/set_mode rc above) -- cannot run the DURING/STOPPED check\n");
+		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_CLOCKS_NOT_REACHING_AMP));
+		printf("[probe] done\n");
+		return 0;
+	}
+	if (!stopped_valid) {
+		printf("[probe] could not stop the I2S3 stream for the stop-control read (rc=%d)\n",
+		       (int)stop_rc);
+		printf("[probe] VERDICT: %s\n", verdict_str(VERDICT_INCONCLUSIVE));
+		printf("[probe] done\n");
+		return 0;
+	}
+
+	amp_clock_verdict_t per_amp[AMP_COUNT];
+	bool                any_inconclusive = false;
+	bool                all_reach        = true;
+	bool                all_not_reach    = true;
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		per_amp[i] = amp_clock_verdict(faults_during[i], faults_stopped[i]);
+		printf("[probe] amp 0x%02x: DURING=0x%08x STOPPED=0x%08x -> %s\n",
+		       amp_addrs[i],
+		       faults_during[i],
+		       faults_stopped[i],
+		       per_amp[i] == AMP_CLOCK_REACHES        ? "REACHES"
+		       : per_amp[i] == AMP_CLOCK_NOT_REACHING ? "NOT REACHING"
+		                                              : "INCONCLUSIVE");
+		if (per_amp[i] != AMP_CLOCK_REACHES) all_reach = false;
+		if (per_amp[i] != AMP_CLOCK_NOT_REACHING) all_not_reach = false;
+		if (per_amp[i] == AMP_CLOCK_INCONCLUSIVE) any_inconclusive = true;
+	}
+
 	verdict_t v;
-	if (!playing) {
-		printf("[probe] I2S3 never started cleanly (open/set_volume/start/write rc "
-		       "above) -- cannot evaluate the clock-detect bit\n");
+	if (!any_inconclusive && all_reach) {
+		v = VERDICT_CLOCKS_REACH_AMP;
+	} else if (!any_inconclusive && all_not_reach) {
 		v = VERDICT_CLOCKS_NOT_REACHING_AMP;
 	} else {
-		bool clock_ok = true;
-		for (size_t i = 0; i < AMP_COUNT; i++) {
-			if ((faults_during[i] & TAS2563_FAULT_TDM_CLOCK) != 0u) clock_ok = false;
-		}
-		v = clock_ok ? VERDICT_CLOCKS_REACH_AMP : VERDICT_CLOCKS_NOT_REACHING_AMP;
+		v = VERDICT_INCONCLUSIVE; /* either amp inconclusive, or the two amps disagree. */
 	}
 	printf("[probe] VERDICT: %s\n", verdict_str(v));
 	printf("[probe] done\n");
