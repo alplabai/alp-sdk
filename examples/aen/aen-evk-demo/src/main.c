@@ -4022,9 +4022,9 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      initialised amp -- UNCONDITIONAL, playback on or off, so the
  *      set_mode() write path is I2C-exercised either way -- THEN (playback
  *      only) audio_out stop+close, THEN audio_in stop+close.
- *  12. Fault re-read (I2C + pin) on every amp -- the "after" half. A
- *      TAS2563_FAULT_SHUTDOWN_CAUSES bit set here is a FAIL, not swallowed.
- *      Runs regardless of playback.
+ *  12. Fault re-read (I2C + pin) on every amp -- the "after" half. Any
+ *      TAS2563_FAULT_SHUTDOWN_CAUSES bit set here except TAS2563_FAULT_TDM_CLOCK
+ *      (see #2146) is a FAIL, not swallowed. Runs regardless of playback.
  *  13. Idle restore, on EVERY exit path including every failure above,
  *      mirroring phase 6 (RGB LED) and NOT phase 9 (SD mux, which leaves its
  *      mux asserted on purpose -- see that phase's header for why): AMP_ENABLE
@@ -4036,8 +4036,9 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *
  * WHAT THIS PHASE ASSERTS, AND WHAT IT DOES NOT. With playback OFF (the
  * default): PASS requires BOTH amps to have initialised and no
- * TAS2563_FAULT_SHUTDOWN_CAUSES bit set after the I2C sequence above --
- * an I2C-only verdict, labelled as such in the printed summary. With
+ * TAS2563_FAULT_SHUTDOWN_CAUSES bit set after the I2C sequence above except
+ * TAS2563_FAULT_TDM_CLOCK (see #2146) -- an I2C-only verdict, labelled as
+ * such in the printed summary. With
  * playback ON: see sound_verdict.h's file header for the full reasoning
  * -- in short, PASS additionally requires sound_pdm_capture_correlated()
  * to say the PDM capture during the tone carried more energy than the
@@ -4324,8 +4325,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * from "got there and it failed" without a third state. */
 	alp_status_t silence_rc = ALP_ERR_NOSUPPORT;
 	/* Count of amps whose tas2563_resume() (step 10 below) returned
-	 * ALP_OK.  Printing act_rc alone let one failed resume leave that
-	 * amp stuck at PWR_CTL 0x0e while the phase still PASSed on the
+	 * ALP_OK.  Without this count, one failed resume would PASS on the
 	 * other amp's PDM-correlated signal -- the playback-on verdict below
 	 * requires this to equal ok_amps. */
 	int resumed_amps = 0;
@@ -4399,7 +4399,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		 * here) therefore switched on with no clock present, which is
 		 * what latched the TDM clock error at the start of playback and,
 		 * separately, is what the part's own clock-loss shutdown (observed
-		 * within ~100 ms) eventually silenced after a stop/restart (#2146).
+		 * within ~100 ms) silenced after a stop/restart (#2146).
 		 * Writing one silent block before either amp is touched makes the clock
 		 * actually running true instead of assumed; tas2563_resume()
 		 * then clears that (or any earlier) latch before switching MODE
@@ -4488,12 +4488,18 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	bool new_shutdown_fault = false;
 	/* TAS2563_FAULT_SHUTDOWN_CAUSES includes TAS2563_FAULT_TDM_CLOCK, but
 	 * bench run 2026-09-15 observed INT_LTCH0 bit 2 (TDM clock error)
-	 * re-latching DURING audible playback while PWR_CTL stayed 0x0c (MODE
-	 * ACTIVE, not shut down) -- on this board the bit is not evidence of
-	 * the device's own clock-error shutdown.  The driver has no
-	 * PWR_CTL.MODE read accessor this phase could use to judge shutdown
-	 * directly, so this check excludes TDM_CLOCK rather than fail the
-	 * phase on a bit that re-latches spuriously during normal playback. */
+	 * latching both during audible playback with PWR_CTL still 0x0c (MODE
+	 * ACTIVE) and together with a real 0x0c -> 0x0e shutdown after a stop --
+	 * the bit alone does not tell a shutdown apart from a latch that left
+	 * MODE ACTIVE (PWR_CTL 0x0c, cause undiagnosed, see #2140). The driver
+	 * has no PWR_CTL.MODE read accessor this phase could use to judge
+	 * shutdown directly, so this check excludes TDM_CLOCK rather than fail
+	 * the phase on a bit that does not distinguish the two cases.
+	 *
+	 * ponytail: an ALP_OK tas2563_resume() followed by one amp re-tripping
+	 * TDM_CLOCK now PASSes here, because sound_pdm_capture_correlated()
+	 * only catches both amps going silent -- upgrade path is a
+	 * PWR_CTL.MODE read accessor on tas2563.h if that gap matters. */
 	const uint32_t shutdown_fault_mask =
 	    TAS2563_FAULT_SHUTDOWN_CAUSES & ~(uint32_t)TAS2563_FAULT_TDM_CLOCK;
 	for (size_t i = 0; i < AMP_COUNT; i++) {
