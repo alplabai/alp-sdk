@@ -634,7 +634,17 @@ static void i2s_rx_irq_handler(const struct device *dev)
 				       &stream->mem_block,
 				       K_NO_WAIT);
 		if (ret < 0) {
+			/* alp-sdk issue #2137: k_mem_slab_alloc() sets
+			 * stream->mem_block to NULL on this path, so
+			 * rx_stream_disable()'s own free (it only frees
+			 * stream->mem_block) never sees mblk_tmp -- the
+			 * just-filled block this ISR was about to hand off.
+			 * Free it here or it leaks every overrun, and with
+			 * the 2-block slab alp-sdk's backend allocates
+			 * (src/backends/i2s/zephyr_drv.c) two overruns starve
+			 * the slab until close(). */
 			stream->state = I2S_STATE_ERROR;
+			k_mem_slab_free(stream->cfg.mem_slab, mblk_tmp);
 			goto rx_disable;
 		}
 		stream->mem_block_offset = 0;
@@ -643,7 +653,12 @@ static void i2s_rx_irq_handler(const struct device *dev)
 		ret = queue_put(&stream->mem_block_queue, mblk_tmp,
 				stream->cfg.block_size);
 		if (ret < 0) {
+			/* alp-sdk issue #2137: queue_put() failing leaves
+			 * mblk_tmp neither queued nor referenced by
+			 * stream->mem_block (which the alloc above already
+			 * replaced) -- same leak as above, same fix. */
 			stream->state = I2S_STATE_ERROR;
+			k_mem_slab_free(stream->cfg.mem_slab, mblk_tmp);
 			goto rx_disable;
 		}
 		k_sem_give(&stream->sem);

@@ -212,3 +212,51 @@ ZTEST(alp_audio_out_start_defer, test_stereo_chunked_volume_write_then_start_suc
 	zassert_equal(start_rc, ALP_OK);
 	zassert_true(running_after_start, "start() with blocks already queued must trigger now");
 }
+
+/* issue #2137 review round 2, finding 5: the underrun-recovery sequence
+ * exercised directly against <alp/i2s.h> in tests/unit/i2s_start_defer
+ * must also compose correctly through the <alp/audio.h> layer --
+ * silicon repro: both alp_audio_out_stop(I2S3) and alp_audio_out_start()
+ * returned -5 after the queue ran dry, e1m-aen-evk-03. */
+ZTEST(alp_audio_out_start_defer, test_mono_underrun_stop_start_write_recovers)
+{
+	fake_i2s_reset();
+	alp_audio_out_t *out = open_mono();
+
+	alp_status_t start_rc = alp_audio_out_start(out);
+
+	static int16_t block[MONO_FRAMES] = { 0 };
+	size_t         out_frames1        = SIZE_MAX;
+	alp_status_t   write1_rc = alp_audio_out_write(out, block, MONO_FRAMES, &out_frames1, 100u);
+	bool           running_after_write1 = fake_i2s_tx_running();
+
+	fake_i2s_tx_simulate_underrun();
+	bool in_error_after_underrun = fake_i2s_tx_in_error();
+
+	alp_status_t stop_rc            = alp_audio_out_stop(out);
+	bool         running_after_stop = fake_i2s_tx_running();
+
+	alp_status_t start2_rc = alp_audio_out_start(out);
+
+	size_t       out_frames2 = SIZE_MAX;
+	alp_status_t write2_rc   = alp_audio_out_write(out, block, MONO_FRAMES, &out_frames2, 100u);
+	bool         running_after_write2 = fake_i2s_tx_running();
+
+	alp_audio_out_close(out);
+
+	zassert_not_null(out, "alp_audio_out_open() must resolve the fake alp-i2s0 device");
+	zassert_equal(start_rc, ALP_OK);
+	zassert_equal(write1_rc, ALP_OK);
+	zassert_equal(out_frames1, MONO_FRAMES);
+	zassert_true(running_after_write1);
+	zassert_true(in_error_after_underrun, "the underrun must have reached I2S_STATE_ERROR");
+	zassert_equal(stop_rc,
+	              ALP_OK,
+	              "stop() after an underrun must recover through the audio composition layer "
+	              "too, not just <alp/i2s.h> directly");
+	zassert_false(running_after_stop);
+	zassert_equal(start2_rc, ALP_OK, "start() after the recovery stop must succeed");
+	zassert_equal(write2_rc, ALP_OK, "write() must resume playback");
+	zassert_equal(out_frames2, MONO_FRAMES);
+	zassert_true(running_after_write2);
+}

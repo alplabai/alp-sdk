@@ -223,7 +223,10 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (issue #2137 review round 2: both
+ *         the DRAIN and the DROP fallback it falls back to were refused --
+ *         not expected in practice, see src/backends/i2s/zephyr_drv.c's
+ *         z_stop()).
  */
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 

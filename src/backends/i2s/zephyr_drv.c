@@ -42,16 +42,20 @@
  * INVARIANT (enforced by construction, not just by the individual call
  * sites getting it right): tx_started => !tx_pending_start. Every site
  * that can set tx_started true routes through _mark_tx_started(), which
- * clears tx_pending_start in the same assignment; every site that can
- * clear tx_started routes through _mark_tx_stopped(), which clears all
- * three flags together. See finding #2132-MAJOR-2: z_start()'s
- * immediate-trigger success path used to set tx_started directly
- * without touching tx_pending_start, so a start() that raced ahead of
- * a still-pending retry (reachable before the MAJOR-1 fix below closed
- * off the specific sequence that exposed it) could leave both flags
- * true, and the next write() would retry a START on an ALREADY-RUNNING
- * stream and get i2s_dw's -EIO (i2s_dw.c:279-283) instead of just
- * writing.
+ * clears tx_pending_start in the same assignment. Two DIFFERENT sites can
+ * clear tx_started back to false, because there are two different idle
+ * shapes to land in (issue #2137 review round 2, finding 2):
+ * _mark_tx_stopped() for FULLY idle (all three flags false, a genuine
+ * stop), and _mark_tx_needs_restart() for idle-but-owed-a-restart
+ * (tx_pending_start ends up true, not false, so it cannot reuse
+ * _mark_tx_stopped()) -- both clear tx_started, so the invariant holds via
+ * either. See finding #2132-MAJOR-2: z_start()'s immediate-trigger success
+ * path used to set tx_started directly without touching tx_pending_start,
+ * so a start() that raced ahead of a still-pending retry (reachable before
+ * the MAJOR-1 fix below closed off the specific sequence that exposed it)
+ * could leave both flags true, and the next write() would retry a START on
+ * an ALREADY-RUNNING stream and get i2s_dw's -EIO (i2s_dw.c:279-283)
+ * instead of just writing.
  *
  * z_start(): if TX and nothing is queued yet, set tx_pending_start and
  * return ALP_OK without touching hardware (write-then-start already
@@ -59,8 +63,10 @@
  * immediate-trigger path, a real START that fails ALP_ERR_NOMEM is
  * treated as "tx_block_queued lied" rather than a hard failure (issue
  * #2132 review round 4) -- see that branch's own comment for the race
- * this closes. A real START that fails ALP_ERR_IO is retried ONCE after
- * a PREPARE (issue #2137, both directions) -- see below.
+ * this closes, and (issue #2137 review round 2) for why this branch now
+ * also clears tx_started via _mark_tx_needs_restart() rather than leaving
+ * it stale. A real START that fails ALP_ERR_IO is retried ONCE after a
+ * PREPARE (issue #2137, both directions) -- see below.
  *
  * z_write(): after a block is genuinely queued (i2s_write() succeeded),
  * set tx_block_queued.  If tx_pending_start, retry the real START --
@@ -75,17 +81,25 @@
  * write() retries again since tx_pending_start stays set. The initial
  * i2s_write() itself failing ALP_ERR_IO gets its own PREPARE-and-retry
  * recovery first (issue #2137, TX only -- see below) before any of this
- * runs.
+ * runs; that retry now runs even when PREPARE itself was refused (issue
+ * #2137 review round 2, finding 4) -- see that paragraph below.
  *
- * z_stop(): tries DRAIN first, unconditionally, in both directions --
- * covers the running case exactly as before. If DRAIN fails (issue
- * #2132: "start() was deferred and never fired" or "start() was never
- * called at all", both still READY; issue #2137: the stream underran/
- * overran into I2S_STATE_ERROR), fall back to DROP, which works from
- * READY, RUNNING, AND ERROR alike and releases whatever was queued
- * instead of stranding it. Either trigger succeeding runs
- * _mark_tx_stopped() (TX) and returns ALP_OK; both failing returns
- * DRAIN's failure (the primary, expected trigger).
+ * z_stop(): for TX, if tx_started already says the stream is NOT
+ * genuinely running, skip DRAIN entirely and go straight to DROP (issue
+ * #2137 review round 2, findings 2/3 -- avoids i2s_dw's own LOG_ERR on a
+ * DRAIN refusal this backend already knows is coming); otherwise, and
+ * always for RX, DRAIN is tried first -- covers the running case exactly
+ * as before. If DRAIN fails or was skipped (issue #2132: "start() was
+ * deferred and never fired" or "start() was never called at all", both
+ * still READY; issue #2137: the stream underran/overran into
+ * I2S_STATE_ERROR), fall back to DROP, which works from READY, RUNNING,
+ * AND ERROR alike and releases whatever was queued instead of stranding
+ * it -- gated on h->started for RX only (issue #2137 review round 2,
+ * finding 8: DROP touches real RX hardware teardown, so a never-started
+ * RX handle must not reach it, matching z_close()'s own gate). Either
+ * trigger succeeding runs _mark_tx_stopped() (TX) and returns ALP_OK;
+ * both failing (or DROP being skipped) returns DRAIN's failure (the
+ * primary, expected trigger).
  *
  * z_close(): DROP whenever dev != NULL for TX always (a pending-but-
  * written or START-still-failing TX handle can hold real slab-block
@@ -108,18 +122,49 @@
  * also describes a genuinely-underran one, which is exactly why z_stop()
  * above needs no separate ERROR branch: DROP already covers both.
  * I2S_TRIGGER_PREPARE is the ONLY trigger valid FROM ERROR
- * (i2s_dw.c:340-347); it moves to READY and drops the ring (already
- * empty for a TX underrun by definition). z_start() and z_write() each
- * retry their OWN failed operation exactly ONCE after a successful
- * PREPARE (never recursing further); a failed PREPARE leaves the
- * ORIGINAL -EIO as the reported failure, not PREPARE's own. z_write()'s
- * retry additionally resets the TX flags to tx_started=false,
- * tx_block_queued=false, tx_pending_start=true under the lock --
- * "freshly opened, a start is owed" -- before retrying i2s_write() with
- * the SAME slab block (never freed before the retry, never double-freed
+ * (i2s_dw.c:340-347); it moves to READY and drops the ring (normally
+ * empty for a TX underrun; PREPARE frees any block that raced in --
+ * review round 2, finding 7, since i2s_dw_write() checks state
+ * separately from queue_put(), i2s_dw.c:390-402). z_start() and
+ * z_write() each retry their OWN failed operation after a successful
+ * PREPARE; a failed PREPARE leaves z_start()'s ORIGINAL -EIO as the
+ * reported failure (not PREPARE's own) and z_start() does NOT retry
+ * further -- but z_write() DOES still retry once even when its OWN
+ * PREPARE was refused (issue #2137 review round 2, finding 4): a
+ * concurrent call may have already taken the stream out of ERROR between
+ * this write()'s own trigger failing and its own PREPARE running, so a
+ * refused PREPARE here does not prove the stream is still stuck, only
+ * that it was not FROM ERROR at that exact instant -- if it genuinely
+ * still is, the retry just gets the same -EIO and falls into the
+ * existing free-and-report path, no new failure mode. z_write()'s retry
+ * additionally resets the TX flags via _mark_tx_needs_restart() --
+ * tx_started=false, tx_block_queued=false, tx_pending_start=true --
+ * "freshly opened, a start is owed" -- UNCONDITIONALLY on entering this
+ * branch, not only when its own PREPARE succeeded: the ORIGINAL
+ * i2s_write() failing -EIO already proves the stream was in ERROR, not
+ * RUNNING (i2s_dw_write() only -EIOs from ERROR, i2s_dw.c:390-394), so
+ * tx_started is ALREADY known-stale here regardless of what THIS
+ * PREPARE call itself reports -- gating the reset on this PREPARE's own
+ * success would leave tx_pending_start false in exactly the concurrent-
+ * recovery case above, silently stranding the retry's genuinely-queued
+ * block with no START ever fired for it. Retried with the SAME slab
+ * block either way (never freed before the retry, never double-freed
  * either way after it); the existing post-write path then fires the
  * now-armed deferred start, so the write that discovers the gap is also
- * the one that resumes playback.
+ * the one that resumes playback. A recovery this call's OWN PREPARE
+ * performed (in either function) logs one LOG_WRN (issue #2137 review
+ * round 2, finding 3) -- the only bench-visible evidence a recovery
+ * happened at all; a REFUSED PREPARE does not log (nothing this call
+ * did fixed it), whether it stays stuck or a concurrent recovery already
+ * got there first.
+ *
+ * The RX overrun leak (issue #2137 review round 2, finding 1): fixed at
+ * its actual source, zephyr/drivers/i2s/i2s_dw.c's RX IRQ handler, not
+ * here -- both its error exits (a failed k_mem_slab_alloc() for the next
+ * block, and a failed queue_put() of the one just filled) now free the
+ * block they would otherwise have orphaned. Neither path touches this
+ * backend's own bookkeeping (RX carries no sidecar flags -- see z_start()
+ * never deferring for RX), so no zephyr_drv.c change was needed for it.
  *
  * Locking: a k_spinlock in the sidecar (alp_z_i2s_side_t.lock) guards
  * the three tx_* flags and the i2s_trigger() calls that change them in
@@ -127,9 +172,12 @@
  * above, each its own short lock/unlock bracket around a trigger call,
  * consistent with every other trigger site in this file; the RETRIED
  * i2s_write() call in z_write() stays outside the lock like the
- * original one, for the same blocking-call reason. Between the lock and
- * z_start()'s NOMEM-as-stale-flag handling, both the write/stop race and
- * the start/write/stop race identified across #2132's review rounds are
+ * original one, for the same blocking-call reason -- true even in review
+ * round 2's retry-despite-refused-PREPARE case (finding 4), since the
+ * lock only ever needs to protect the trigger call and the three flags,
+ * never the retried i2s_write() itself. Between the lock and z_start()'s
+ * NOMEM-as-stale-flag handling, both the write/stop race and the
+ * start/write/stop race identified across #2132's review rounds are
  * closed -- see the lock field's own comment for exactly which
  * mechanism closes which, and what backends this lock design does not
  * generalise to.
@@ -142,6 +190,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/i2s.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
@@ -152,6 +201,11 @@
 #include "alp_errno.h"
 #include "i2s_ops.h"
 #include "alp_slot_claim.h"
+
+/* issue #2137 review round 2, finding 3: a PREPARE recovery is otherwise
+ * silent -- LOG_WRN below is the only bench-visible evidence an underrun/
+ * overrun happened at all. */
+LOG_MODULE_REGISTER(alp_i2s_zephyr, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define ALP_I2S_DEV_OR_NULL(idx) \
 	COND_CODE_1(DT_NODE_HAS_STATUS(DT_ALIAS(_CONCAT(alp_i2s, idx)), okay), \
@@ -386,6 +440,21 @@ static void _mark_tx_stopped(alp_z_i2s_side_t *s)
 	s->tx_block_queued  = false;
 }
 
+/* The OTHER place tx_started clears back to false (issue #2137 review
+ * round 2, finding 2): a PREPARE recovery leaves the stream idle-but-
+ * owed-a-restart, not fully idle like _mark_tx_stopped() -- tx_pending_
+ * start must end up TRUE here, not false, so this cannot just be a call
+ * to _mark_tx_stopped(). Used by z_start()'s NOMEM branch and z_write()'s
+ * PREPARE-retry-success branch; tx_started => !tx_pending_start still
+ * holds by construction because both a stopped stream and a needs-
+ * restart stream agree tx_started is false -- caller holds s->lock. */
+static void _mark_tx_needs_restart(alp_z_i2s_side_t *s)
+{
+	s->tx_started       = false;
+	s->tx_block_queued  = false;
+	s->tx_pending_start = true;
+}
+
 static alp_status_t z_start(alp_i2s_backend_state_t *st)
 {
 	struct alp_i2s      *h   = CONTAINER_OF(st, struct alp_i2s, state);
@@ -412,15 +481,26 @@ static alp_status_t z_start(alp_i2s_backend_state_t *st)
 		 * (i2s_dw.c:516-524 / :636-647). PREPARE is the ONLY trigger
 		 * valid FROM ERROR (i2s_dw.c:340-347); it moves to READY and
 		 * drops whatever was queued, so retrying START right after
-		 * sees an empty ring on TX -- exactly the #2132 empty-queue
-		 * case below, which already defers correctly (the comment
-		 * inline explains why that is the right outcome, not a
+		 * normally sees an empty ring on TX -- PREPARE frees any block
+		 * that raced in ahead of it too (issue #2137 review round 2,
+		 * finding 7: i2s_dw_write() checks state separately from
+		 * queue_put(), i2s_dw.c:390-402, so a concurrent write is not
+		 * ruled out here) -- either way this is exactly the #2132
+		 * empty-queue case below, which already defers correctly (the
+		 * comment inline explains why that is the right outcome, not a
 		 * lingering failure). If PREPARE itself fails, `rc` is left
 		 * untouched below, so the ORIGINAL START failure is what gets
 		 * returned, not PREPARE's. */
 		alp_status_t prepare_rc =
 		    _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_PREPARE));
-		if (prepare_rc == ALP_OK) rc = _start_trigger(dev, h->cfg.direction);
+		if (prepare_rc == ALP_OK) {
+			/* issue #2137 review round 2, finding 3: otherwise-silent
+			 * recovery -- the only bench-visible evidence a PREPARE
+			 * ever ran. */
+			LOG_WRN("i2s: recovered from I2S_STATE_ERROR on start() (dir=%d)",
+			        (int)h->cfg.direction);
+			rc = _start_trigger(dev, h->cfg.direction);
+		}
 	}
 	if (h->cfg.direction == ALP_I2S_DIR_TX) {
 		if (rc == ALP_OK) {
@@ -448,10 +528,21 @@ static alp_status_t z_start(alp_i2s_backend_state_t *st)
 			 *     is the EXPECTED outcome of that recovery, not a
 			 *     race, and z_start() returning ALP_OK here (deferred)
 			 *     rather than propagating -ENOMEM is exactly what lets
-			 *     a caller's bare restart-after-underrun succeed. */
-			s->tx_block_queued  = false;
-			s->tx_pending_start = true;
-			rc                  = ALP_OK;
+			 *     a caller's bare restart-after-underrun succeed.
+			 *
+			 * issue #2137 review round 2, finding 2: route this
+			 * through _mark_tx_needs_restart(), not a manual two-
+			 * field assign -- tx_started must ALSO clear here.
+			 * Reachable with tx_started still true: start()
+			 * (deferred) -> write() fires the real START ->
+			 * underrun -> start(): the real START -EIOs, PREPARE
+			 * succeeds, the retried START -ENOMEMs (ring empty, as
+			 * above) -- tx_started was set true by write()'s own
+			 * successful trigger and nothing had cleared it yet at
+			 * this point, so leaving it alone here would violate
+			 * tx_started => !tx_pending_start by construction. */
+			_mark_tx_needs_restart(s);
+			rc = ALP_OK;
 		}
 	}
 	k_spin_unlock(&s->lock, key);
@@ -477,13 +568,49 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 	 * fallback covers both directions and both causes: DROP is valid
 	 * from any state except NOT_READY (i2s_dw.c:329-338, reachable from
 	 * READY, RUNNING, AND ERROR alike), and releases queued blocks
-	 * either way instead of stranding them. */
-	alp_status_t rc = _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DRAIN));
+	 * either way instead of stranding them.
+	 *
+	 * issue #2137 review round 2, findings 2/3: skip the DRAIN attempt
+	 * entirely for a TX stream this backend KNOWS is not RUNNING --
+	 * tx_started is the one bit that tracks the real hardware state (as
+	 * opposed to h->started, set by the dispatcher on TX's own deferred-
+	 * start ALP_OK even before the real trigger has fired -- see
+	 * z_start()). Every i2s_dw DRAIN refusal logs its own LOG_ERR
+	 * (i2s_dw.c:314), so issuing it here just to watch it fail on an
+	 * already-known, already-handled case is pure log noise -- matches
+	 * 24eb5a1c5's pre-#2137 behaviour, which used DROP unconditionally
+	 * here with no DRAIN attempt at all. RX has no equivalent hardware-
+	 * truth bit in the sidecar (RX never defers, see z_start()), so RX
+	 * always attempts the real DRAIN first, same as before. */
+	bool         tx_known_not_running = h->cfg.direction == ALP_I2S_DIR_TX && !s->tx_started;
+	alp_status_t rc;
+	if (tx_known_not_running) {
+		/* The same status i2s_dw's own refused DRAIN would report, just
+		 * without incurring its LOG_ERR side effect. */
+		rc = ALP_ERR_IO;
+	} else {
+		rc = _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DRAIN));
+	}
 	if (rc == ALP_OK) {
 		if (h->cfg.direction == ALP_I2S_DIR_TX) _mark_tx_stopped(s);
 		k_spin_unlock(&s->lock, key);
 		return ALP_OK;
 	}
+
+	/* issue #2137 review round 2, finding 8: DROP touches real hardware
+	 * (i2s_dw.c's stream_disable -- for RX that includes its own
+	 * i2s_clock_disable(), i2s_dw.c:834-852) and must not run for an RX
+	 * handle that was never started, exactly like z_close() already
+	 * gates its own DROP call on h->started (see that function's own
+	 * comment). TX carries no such gate here -- DROP is well-defined,
+	 * and necessary, even for a never-started TX handle, which may hold
+	 * queued-but-unsent blocks that must still be released (see
+	 * z_close()'s UAF comment) -- so only RX is gated. */
+	if (h->cfg.direction != ALP_I2S_DIR_TX && !h->started) {
+		k_spin_unlock(&s->lock, key);
+		return rc;
+	}
+
 	alp_status_t drop_rc =
 	    _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_DROP));
 	if (drop_rc == ALP_OK) {
@@ -492,8 +619,11 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 		return ALP_OK;
 	}
 	/* Both refused -- surface DRAIN's failure (the primary, expected
-	 * trigger); DROP failing too on a device that accepted DRAIN's own
-	 * precondition check is not expected to happen in practice. */
+	 * trigger). DRAIN was REFUSED here, not accepted (issue #2137 review
+	 * round 2, finding 8) -- DROP's own precondition (anything but
+	 * NOT_READY) is strictly wider than DRAIN's (RUNNING only), so DROP
+	 * failing too on a stream whose DRAIN was already refused is not
+	 * expected to happen in practice. */
 	k_spin_unlock(&s->lock, key);
 	return rc;
 }
@@ -525,32 +655,63 @@ z_write(alp_i2s_backend_state_t *st, const void *block, size_t bytes, uint32_t t
 		 * the last write -- i2s_dw_write() refuses anything but
 		 * RUNNING/READY (i2s_dw.c:390-394). PREPARE is the only
 		 * trigger valid FROM ERROR (i2s_dw.c:340-347); it moves to
-		 * READY and drops the ring (already empty -- an underrun IS
-		 * an empty ring). Resetting the flags here to "open, start
-		 * requested, nothing queued yet" is what #2132's own deferred-
-		 * start machinery already expects at this point; the
-		 * tx_started => !tx_pending_start invariant holds because
-		 * PREPARE succeeding means the stream is provably NOT running
-		 * any more. */
+		 * READY and drops the ring (normally empty; PREPARE frees any
+		 * block that raced in -- issue #2137 review round 2, finding 7:
+		 * i2s_dw_write() checks state separately from queue_put(),
+		 * i2s_dw.c:390-402, so a concurrent write is not ruled out
+		 * here). Resetting the flags here to "open, start requested,
+		 * nothing queued yet" is what #2132's own deferred-start
+		 * machinery already expects at this point; the tx_started =>
+		 * !tx_pending_start invariant holds because PREPARE succeeding
+		 * means the stream is provably NOT running any more. */
 		k_spinlock_key_t pkey = k_spin_lock(&s->lock);
 		alp_status_t     prepare_rc =
 		    _errno_to_alp(i2s_trigger(dev, _to_dir(h->cfg.direction), I2S_TRIGGER_PREPARE));
+		/* issue #2137 review round 2, finding 4 (fixed more robustly
+		 * than "only the flag reset depends on PREPARE's success" --
+		 * see below): reset UNCONDITIONALLY, not only when OUR OWN
+		 * PREPARE succeeded. The ORIGINAL i2s_write() already proves
+		 * the stream was in I2S_STATE_ERROR, not RUNNING -- i2s_dw_
+		 * write() only -EIOs from ERROR (i2s_dw.c:390-394) -- so
+		 * tx_started, if true, is ALREADY known-stale the instant this
+		 * branch is entered, regardless of what PREPARE itself reports.
+		 * Gating the reset on prepare_rc == ALP_OK (as found on first
+		 * pass) reintroduces finding 2's exact bug one level up: a
+		 * CONCURRENT recovery that clears ERROR before our own PREPARE
+		 * runs makes our PREPARE legitimately REFUSED (already READY,
+		 * nothing to prepare from) -- but the retry below still queues
+		 * a block for real. Leaving tx_pending_start false in that case
+		 * silently starves the stream of the START trigger it now
+		 * needs: the write reports ALP_OK, the block genuinely sits in
+		 * the ring, and nothing ever plays it. Resetting unconditionally
+		 * closes that gap; a still-stuck stream (PREPARE refused AND
+		 * the retry below also fails) is unaffected either way, since
+		 * that path frees the block and returns before ever reading
+		 * tx_pending_start again. */
+		_mark_tx_needs_restart(s);
 		if (prepare_rc == ALP_OK) {
-			s->tx_started       = false;
-			s->tx_block_queued  = false;
-			s->tx_pending_start = true;
+			/* issue #2137 review round 2, finding 3: otherwise-silent
+			 * recovery -- the only bench-visible evidence a PREPARE
+			 * ever ran. Logged only when OUR OWN PREPARE is what
+			 * recovered it, not when a concurrent one already had. */
+			LOG_WRN("i2s: recovered from I2S_STATE_ERROR on write() (dir=%d)",
+			        (int)h->cfg.direction);
 		}
 		k_spin_unlock(&s->lock, pkey);
-		if (prepare_rc != ALP_OK) {
-			/* PREPARE failed too -- give up and report the ORIGINAL
-			 * write failure, not PREPARE's. Free the block: nothing
-			 * downstream is going to consume it now. */
-			k_mem_slab_free(&s->mem_slab, slab_block);
-			return _errno_to_alp(err);
-		}
-		/* Retry ONCE with the SAME block -- not freed and not
-		 * re-allocated, so there is nothing to double-free either
-		 * way below. */
+		/* Retry ONCE regardless of PREPARE's own result -- see above.
+		 * A CONCURRENT call (another writer's own PREPARE, or a
+		 * stop()'s DROP) may already have taken the stream out of ERROR
+		 * between our own i2s_write() failing and our own PREPARE
+		 * running, so OUR PREPARE seeing -EIO does not prove the stream
+		 * is still stuck -- it proves only "not FROM ERROR right now",
+		 * which is exactly the state a retry needs anyway. If the
+		 * stream genuinely is still in ERROR, the retry below just gets
+		 * the SAME -EIO i2s_dw.c:390-394 always returns from there, and
+		 * falls into the existing free-and-report path below same as
+		 * always -- no new failure mode, just one less needlessly-
+		 * abandoned write. Retried with the SAME block either way --
+		 * not freed and not re-allocated, so there is nothing to
+		 * double-free below regardless of outcome. */
 		err = i2s_write(dev, slab_block, bytes);
 	}
 	if (err != 0) {
