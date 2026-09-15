@@ -417,8 +417,28 @@ first three with the fourth has repeatedly cost bench time:
 The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
 
-Current release: SemVer **0.4.0**, wire protocol **5**, stamped **`0.4.0.0`**
-(`cc3501e-bridge-firmware:prebuilt/cc3501e-v0.4.0.bin`).
+Three states are live at once here, and conflating them is the recurring
+mistake — track which one a given bench unit is actually running:
+
+- **`cc3501e-bridge-firmware:main`** carries nine merged fixes (widened DHCP
+  lease poll, the SPI re-init that wedged the link after fast operations
+  removed, bounded/non-stale SOCK_SEND, station power-up order + a
+  WIFI_STATUS reason byte, replay-safe SOCK_RECV, sticky EOF on the worker
+  path, a connect-failure-exit SPI reinit skip, in-line SPI self-heal, and
+  the stale `DEAUTH_LEAVING(3)` verdict fix) — merged, but not yet cut as a
+  release.
+- **v0.9.0** (firmware PR #151) has been **cut** carrying all nine — wire
+  protocol **4.0**, stamped GPE **`0.254.15.0`** — but it is **not yet
+  bench-verified** and not yet published to `prebuilt/`. Do not treat it as
+  available to flash.
+- **v0.8.0** (SemVer **0.8.0**, wire protocol **4.0**
+  (`ALP_CC3501E_PROTOCOL_MAJOR` 4, `_MINOR` 0), stamped GPE **`0.254.5.0`**,
+  `cc3501e-bridge-firmware:prebuilt/cc3501e-v0.8.0.bin`) is what `prebuilt/`
+  actually publishes today, and it carries **none** of the nine fixes.
+
+Every bench unit still flashed from `prebuilt/` is on v0.8.0, so host-side
+workarounds for the pre-fix behaviour stay in this driver until a fixed
+build is actually released.
 
 Two rules the stamp adds, both of which read as a dead part when broken:
 

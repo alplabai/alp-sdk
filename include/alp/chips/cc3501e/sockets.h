@@ -286,11 +286,20 @@ alp_status_t cc3501e_sock_send(cc3501e_t     *ctx,
 /**
  * @brief Receive bytes from a socket (SOCK_RECV, opcode 0x23).
  *
- * Requests up to @p cap bytes from the socket's receive queue into @p buf.  A
- * zero-length result (@p recv_len_out set to 0 with ALP_OK) means no data was
- * available within the firmware's receive window, or the peer closed the
- * connection -- the caller polls again to distinguish (or stops on a subsequent
- * zero after a close).  Worker-routed poll-by-repeat over the bridge.
+ * Requests up to @p cap bytes from the socket's receive queue into @p buf.
+ * What a zero-length result (@p recv_len_out set to 0 with ALP_OK) MEANS
+ * depends on which bridge is on the other end of the link:
+ *   - Against v0.8.0 (`prebuilt/cc3501e-v0.8.0.bin`, what `prebuilt/`
+ *     actually publishes today, predates cc3501e-bridge-firmware#140):
+ *     zero is AMBIGUOUS -- no data was available within the firmware's
+ *     receive window, or the peer closed the connection. The caller polls
+ *     again to distinguish (or stops on a subsequent zero after a close).
+ *   - Against a bridge carrying #140 (merged to `main`; cut as v0.9.0 but
+ *     not yet released or bench-verified): EOF is sticky on the worker
+ *     path and a reset is reported on the ring socket, so a zero-length
+ *     result is UNAMBIGUOUS -- it means the peer actually closed. No
+ *     poll-again dance is needed.
+ * Worker-routed poll-by-repeat over the bridge.
  *
  * @param ctx           Initialised driver context.
  * @param handle        Socket handle from @ref cc3501e_sock_open.
