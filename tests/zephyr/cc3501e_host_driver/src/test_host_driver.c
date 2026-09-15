@@ -216,6 +216,52 @@ static bool     g_get_version_override_active; /* stage a specific reply value b
 static uint16_t g_get_version_override_value;
 static uint32_t g_get_version_io_down_remaining; /* fail the transaction outright, N times */
 
+/* #2126 mutant control: while true, EVERY request header phase fails
+ * outright, regardless of opcode -- models a genuinely dead bridge link (no
+ * PING, no anything, ever answers), unlike the narrower per-opcode down-
+ * windows above. Cleared by slave_reset(). Healed by alp_gpio_write()'s own
+ * fake below the moment it sees the ctx's OWN reset_pin released HIGH --
+ * i.e. the model treats a warm nRESET pulse (cc3501e_hard_reset()) as what
+ * actually cures a #2126 wedge, the same bench-established fact
+ * cc3501e_recover()'s own doc comment records, so a test staging this can
+ * assert BOTH that recovery was attempted (the link healed) and that it was
+ * attempted at most once (the cooldown -- see ctx->recover_count). */
+static bool g_all_io_down;
+
+/* #2126 review follow-up mutant controls. Cleared by slave_reset() (bool/u32
+ * ones) -- g_deaf_from_ms/g_deaf_until_ms are timestamps, meaningless to
+ * reset to 0 (that would just mean "deaf from boot", not "never deaf"), so
+ * each test that uses them sets AND clears both itself. */
+/* A warm nRESET does NOT cure the wedge -- see alp_gpio_write()'s own
+ * healing hook below. Models a fault a reset genuinely cannot fix (vs.
+ * g_all_io_down's default healing model of the #1691 wedge, which every
+ * bench observation says a warm reset DOES cure). */
+static bool g_heal_disabled;
+/* CMD_BLE_ENABLE always answers a genuine DECODED RESP_ERR_BUSY (worker
+ * still running) regardless of anything else -- models a bridge that is
+ * alive and answering, not silent, for the whole span this is set. */
+static bool g_ble_enable_busy;
+/* Time-windowed silence: every PH_REQ_HDR transceive fails outright (same
+ * pre-decode shape as g_all_io_down) ONLY while alp_uptime_ms() is in
+ * [g_deaf_from_ms, g_deaf_until_ms) -- models a bounded, legitimate
+ * transport blackout (a radio op, a teardown/re-arm race) on an otherwise
+ * healthy bridge, as opposed to g_all_io_down's permanent silence. */
+static uint64_t g_deaf_from_ms, g_deaf_until_ms;
+/* Counts alp_gpio_write(reset_pin, true) calls -- the nRESET RELEASE edge,
+ * i.e. how many times cc3501e_hard_reset() actually pulsed the line. The
+ * direct, unambiguous proxy for "how many real warm resets happened",
+ * independent of what cc3501e_recover()'s own bookkeeping (recover_count,
+ * which only counts SUCCESSFUL recoveries) can prove on its own. */
+static uint32_t g_reset_release_count;
+/* CMD_PING always fails outright at the transport level -- independent of
+ * g_all_io_down, so a test can make ONE specific opcode (e.g. CMD_BLE_ENABLE
+ * via g_ble_enable_busy) answer a genuine DECODED status while the
+ * link-check probe's OWN PING still cannot succeed, giving an incorrectly
+ * fired trigger somewhere to actually reach cc3501e_recover() and bump
+ * recover_attempt_count -- see test_poll_by_repeat_busy_persists_no_
+ * recovery_2126's own comment for why that distinction matters. */
+static bool g_ping_always_fails;
+
 /* ADR 0033 mutant controls for CMD_GET_CAPABILITIES (opcode 0x06).  Both
  * cleared by slave_reset(), so a test that never touches them still gets a
  * deterministic (zero) bitmap back rather than whatever the previous test
@@ -508,6 +554,11 @@ static void slave_reset(void)
 	g_get_version_override_active      = false;
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
+	g_all_io_down                      = false;
+	g_heal_disabled                    = false;
+	g_ble_enable_busy                  = false;
+	g_reset_release_count              = 0u;
+	g_ping_always_fails                = false;
 	g_spi1_reply_bad_seq               = false;
 	g_diag_stats_v8                    = false;
 	g_caps_override_value              = 0u;
@@ -674,6 +725,13 @@ static uint16_t build_ble_scan_ctx_b(uint8_t *p)
 /* Build the reply for the just-received request. */
 static void slave_dispatch(void)
 {
+	if (g_ble_enable_busy && slave.cmd == ALP_CC3501E_CMD_BLE_ENABLE) {
+		/* Genuine decoded status every time -- a bridge that is alive and
+		 * still working the request, never silent. See g_ble_enable_busy's
+		 * own comment above. */
+		stage_status(ALP_CC3501E_RESP_ERR_BUSY);
+		return;
+	}
 	if (g_force_dead_phase_zero_payload && (slave.cmd == ALP_CC3501E_CMD_BLE_GATT_REGISTER ||
 	                                        slave.cmd == ALP_CC3501E_CMD_WIFI_SCAN_START ||
 	                                        slave.cmd == ALP_CC3501E_CMD_BLE_SCAN_START)) {
@@ -751,6 +809,20 @@ static void slave_dispatch(void)
 		d[0]          = ALP_CC3501E_OTA_STATE_STAGED;
 		d[12]         = g_ota_pending;
 		stage_reply(ALP_CC3501E_RESP_OK, d, 16u);
+		break;
+	}
+
+	case ALP_CC3501E_CMD_OTA_UPDATE_MODE: {
+		/* #2126: instant-mode-switch model -- reply echoes back the requested
+		 * mode byte (slave.req_pl[0]) immediately, so
+		 * cc3501e_ota_update_mode()'s update_mode_reads_as() readback check
+		 * succeeds on the FIRST round trip and cc3501e_set_peer_polled() runs
+		 * with no blind-settle/reboot needed. Good enough for this suite's
+		 * purpose (proving cc3501e_link_check_and_recover() honours
+		 * cc3501e_peer_is_polled()); the real reboot-and-poll shape is out of
+		 * scope here. */
+		uint8_t d[4] = { slave.req_pl[0], 0u, 0u, 0u };
+		stage_reply(ALP_CC3501E_RESP_OK, d, 4u);
 		break;
 	}
 
@@ -923,7 +995,13 @@ static void slave_dispatch(void)
 	}
 	case ALP_CC3501E_CMD_SOCK_OPEN: {
 		/* reply DATA = alp_cc3501e_sock_handle_t { handle(LE16) | rsvd[2] }. */
-		const uint8_t h[4] = { 0x34, 0x12, 0x00, 0x00 }; /* handle 0x1234 */
+		/* #2126 review: firmware handle 0x0034 -- kept <= 0xFF so
+		 * cc3501e_sock_open()'s epoch-encode (upper byte = ctx->
+		 * link_epoch) does not refuse it defensively (see
+		 * cc3501e_handle_encode()'s own comment, chips/cc3501e/
+		 * cc3501e_sockets.c) the way a real 2-byte firmware handle
+		 * would today, since that range is unverified. */
+		const uint8_t h[4] = { 0x34, 0x00, 0x00, 0x00 };
 		stage_reply(ALP_CC3501E_RESP_OK, h, 4u);
 		break;
 	}
@@ -1282,6 +1360,26 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 	if (len == 0u) {
 		return ALP_OK;
 	}
+	/* #2126: a genuinely dead link -- see g_all_io_down's own comment.
+	 * Checked before every per-opcode down-window below, same PRE-DECODE
+	 * shape (fails outright, so rx_scratch[0] is left poisoned to
+	 * ALP_CC3501E_RX_SCRATCH_NO_STATUS -- exactly the signal
+	 * cc3501e_link_check_and_recover() probes on). */
+	if (slave.phase == PH_REQ_HDR && g_all_io_down) {
+		return ALP_ERR_IO;
+	}
+	/* #2126 review: time-windowed silence -- see g_deaf_from_ms/
+	 * g_deaf_until_ms's own comment. Same PRE-DECODE shape. */
+	if (slave.phase == PH_REQ_HDR && alp_uptime_ms() >= g_deaf_from_ms &&
+	    alp_uptime_ms() < g_deaf_until_ms) {
+		return ALP_ERR_IO;
+	}
+	/* #2126 review: CMD_PING-only outright failure -- see g_ping_always_fails's
+	 * own comment above. */
+	if (slave.phase == PH_REQ_HDR && g_ping_always_fails &&
+	    tx[0] == (uint8_t)ALP_CC3501E_CMD_PING) {
+		return ALP_ERR_IO;
+	}
 	if (slave.phase == PH_REQ_HDR && tx[0] == ALP_CC3501E_CMD_WIFI_STATUS) {
 		slave.wifi_status_attempt_count++;
 	}
@@ -1428,8 +1526,19 @@ alp_gpio_t *alp_gpio_open(uint32_t pin_id)
 }
 alp_status_t alp_gpio_write(alp_gpio_t *pin, bool level)
 {
-	(void)pin;
-	(void)level;
+	/* #2126: model a warm nRESET pulse as what cures g_all_io_down -- the
+	 * RELEASE edge (level == true) on the ctx's OWN reset_pin is
+	 * cc3501e_hard_reset()'s "let the module re-boot" step. Harmless no-op
+	 * on every OTHER test (g_all_io_down is false by default, and most
+	 * tests never set fw.reset_pin at all, per this function's usual
+	 * ALP_ERR_NOSUPPORT contract below, which callers that DO care about
+	 * gpio failure already rely on). */
+	if (level && pin == fw.reset_pin) {
+		g_reset_release_count++;
+		/* #2126 review: g_heal_disabled models a fault a warm reset
+		 * genuinely cannot fix -- see its own comment above. */
+		if (!g_heal_disabled) g_all_io_down = false;
+	}
 	return ALP_ERR_NOSUPPORT;
 }
 
@@ -3133,7 +3242,7 @@ ZTEST(cc3501e_host_driver, test_sock_open_encodes_and_decodes_handle)
 	zassert_equal(slave.req_len, 4u, "open payload = {family,type,protocol,rsvd}");
 	zassert_equal(slave.req_pl[0], (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "family");
 	zassert_equal(slave.req_pl[1], (uint8_t)ALP_CC3501E_SOCK_TYPE_STREAM, "type");
-	zassert_equal(h, 0x1234u, "decoded LE16 handle");
+	zassert_equal(h, 0x0034u, "decoded LE16 handle");
 }
 
 ZTEST(cc3501e_host_driver, test_sock_open_null_handle_invalid)
@@ -3148,11 +3257,14 @@ ZTEST(cc3501e_host_driver, test_sock_open_null_handle_invalid)
 ZTEST(cc3501e_host_driver, test_sock_connect_encodes_addr_and_port)
 {
 	const uint8_t ip[4] = { 93, 184, 216, 34 }; /* 93.184.216.34 */
-	zassert_equal(cc3501e_sock_connect(&fw, 0x1234u, ip, 80u, 100u), ALP_OK, "CONNECT -> OK");
+	zassert_equal(cc3501e_sock_connect(&fw, 0x0034u, ip, 80u, 100u), ALP_OK, "CONNECT -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_CONNECT, "opcode 0x21");
 	zassert_equal(slave.req_len, 24u, "connect payload is 24 bytes");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 	zassert_equal(slave.req_pl[4], (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "peer.family");
 	zassert_equal(slave.req_pl[6], 80u, "peer.port lo (host order on the wire)");
 	zassert_equal(slave.req_pl[7], 0u, "peer.port hi");
@@ -3166,11 +3278,14 @@ ZTEST(cc3501e_host_driver, test_sock_send_encodes_header_and_data)
 	const uint8_t data[5] = { 'G', 'E', 'T', ' ', '/' };
 	size_t        sent    = 0u;
 	zassert_equal(
-	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
+	    cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_SEND, "opcode 0x22");
 	zassert_equal(slave.req_len, 8u + 5u, "send payload = 8-byte header + data");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 	zassert_equal(slave.req_pl[4], 5u, "data_len lo");
 	zassert_equal(slave.req_pl[5], 0u, "data_len hi");
 	zassert_mem_equal(&slave.req_pl[8], data, 5u, "inline data after the header");
@@ -3187,7 +3302,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_full_queue_first_try_one_iteration_107
 	size_t        sent    = 0u;
 
 	zassert_equal(
-	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
+	    cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 100u), ALP_OK, "SEND -> OK");
 	zassert_equal(sent, 5u, "all 5 bytes reported queued");
 	zassert_equal(slave.sock_send_log_count, 1u, "one dispatch -- no remainder to retry");
 }
@@ -3215,7 +3330,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_partial_then_rest_retries_with_new_seq
 	g_sock_send_queue_plan_len = 2u;
 
 	zassert_equal(
-	    cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u), ALP_OK, "SEND -> OK");
+	    cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 1000u), ALP_OK, "SEND -> OK");
 	zassert_equal(sent, 5u, "total queued across both iterations == len");
 	zassert_equal(slave.sock_send_log_count, 2u, "exactly two iterations");
 	zassert_equal(slave.sock_send_datalen_log[0], 5u, "1st iteration offers all 5 remaining");
@@ -3244,7 +3359,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_never_queued_times_out_and_backs_off_1
 
 	g_sock_send_always_zero = true;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 100u),
 	              ALP_ERR_TIMEOUT,
 	              "a peer that never reads -> ALP_ERR_TIMEOUT within the budget");
 	zassert_equal(sent, 0u, "partial (zero) progress reported, not left poisoned");
@@ -3271,7 +3386,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_small_timeout_never_overruns_by_a_full
 
 	g_sock_send_always_zero = true;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 4u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 4u),
 	              ALP_ERR_TIMEOUT,
 	              "a 4 ms budget against a peer that never reads");
 	zassert_equal(sent, 0u, "no progress");
@@ -3309,7 +3424,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_busy_then_done_collected_via_grace_107
 	g_sock_send_busy_step_ms[0] = 30u;
 	g_sock_send_busy_step_count = 1u;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 10u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data1, sizeof(data1), &sent1, 10u),
 	              ALP_OK,
 	              "collected via the post-timeout grace -> the whole send still completes");
 	zassert_equal(sent1, 1u, "the queued count from the collected reply, not 0 / abandoned");
@@ -3326,7 +3441,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_busy_then_done_collected_via_grace_107
 	g_sock_send_busy_step_count = 0u; /* back to instant-OK default */
 	const uint8_t data2[4]      = { 'Y', 'Y', 'Y', 'Y' };
 	size_t        sent2         = 0u;
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 100u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data2, sizeof(data2), &sent2, 100u),
 	              ALP_OK,
 	              "the next call is unaffected by the previous call's collected job");
 	zassert_equal(sent2, 4u, "the next call's OWN full count, not the stale collected one");
@@ -3355,7 +3470,7 @@ ZTEST(cc3501e_host_driver,
 	g_sock_send_busy_step_ms[0] = 1000u;
 	g_sock_send_busy_step_count = 1u;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 10u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data1, sizeof(data1), &sent1, 10u),
 	              ALP_ERR_TIMEOUT,
 	              "call 1's job needs far longer than its budget + grace -- gives up, still "
 	              "genuinely running");
@@ -3364,7 +3479,7 @@ ZTEST(cc3501e_host_driver,
 
 	const uint8_t data2[1] = { 'D' };
 	size_t        sent2    = 0u;
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 50u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data2, sizeof(data2), &sent2, 50u),
 	              ALP_ERR_TIMEOUT,
 	              "call 1's job is STILL running -- every attempt is BUSY, never resubmitted");
 	zassert_equal(sent2, 0u, "nothing was ever queued for call 2's own data");
@@ -3392,13 +3507,13 @@ ZTEST(cc3501e_host_driver, test_sock_send_wrapped_seq_executes_after_invalidatio
 	const uint8_t data1[3] = { '1', '1', '1' };
 	size_t        sent1    = 0u;
 	zassert_equal(
-	    cc3501e_sock_send(&fw, 0x1234u, data1, sizeof(data1), &sent1, 100u), ALP_OK, "call 1");
+	    cc3501e_sock_send(&fw, 0x0034u, data1, sizeof(data1), &sent1, 100u), ALP_OK, "call 1");
 	zassert_equal(sent1, 3u, "call 1's own count, now cached under seq 1");
 
 	const uint8_t data2[2] = { '2', '2' };
 	size_t        sent2    = 0u;
 	zassert_equal(
-	    cc3501e_sock_send(&fw, 0x1234u, data2, sizeof(data2), &sent2, 100u), ALP_OK, "call 2");
+	    cc3501e_sock_send(&fw, 0x0034u, data2, sizeof(data2), &sent2, 100u), ALP_OK, "call 2");
 	zassert_equal(sent2, 2u, "call 2's own count, now cached under seq 2 instead");
 
 	fw.sock_send_seq = 0u; /* force the wrap: the next assigned seq (1) reuses call 1's */
@@ -3408,7 +3523,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_wrapped_seq_executes_after_invalidatio
 	g_sock_send_queue_plan[2]  = 8u; /* call 3 is the THIRD submission (exec_idx 2) */
 	g_sock_send_queue_plan_len = 3u;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data3, sizeof(data3), &sent3, 100u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data3, sizeof(data3), &sent3, 100u),
 	              ALP_OK,
 	              "the reused seq executes -- neither the (already-overwritten) cache nor any "
 	              "pending job matches it");
@@ -3442,7 +3557,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_budgets_each_iteration_off_remaining_t
 	g_sock_send_busy_step_ms[1] = 700u;
 	g_sock_send_busy_step_count = 2u;
 
-	alp_status_t s = cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u);
+	alp_status_t s = cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 1000u);
 
 	uint64_t elapsed = g_fake_now_ms - base;
 	zassert_true(elapsed <= 1350u,
@@ -3464,7 +3579,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_short_ok_reply_is_io_not_zero_progress
 
 	g_sock_send_short_reply = true;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 1000u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 1000u),
 	              ALP_ERR_IO,
 	              "a <2-byte OK reply is a wire gap, not backpressure -- ALP_ERR_IO immediately");
 	zassert_equal(sent, 0u, "no bytes queued");
@@ -3500,7 +3615,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_rechecks_budget_after_backoff_sleep_10
 	g_sock_send_busy_step_ms[0] = 2u;
 	g_sock_send_busy_step_count = 1u;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 30u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 30u),
 	              ALP_ERR_TIMEOUT,
 	              "insufficient budget after the back-off's own sleep -- stop, don't start a "
 	              "doomed iteration 2");
@@ -3523,7 +3638,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_first_attempt_lock_timeout_returns_bus
 
 	fw.request_lock = true; /* held for the whole call -- a concurrent caller never lets go */
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 100u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 100u),
 	              ALP_ERR_BUSY,
 	              "a lock timeout on the very FIRST attempt is unambiguous -- BUSY, directly, "
 	              "no grace");
@@ -3554,7 +3669,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_later_attempt_lock_timeout_is_retried_
 
 	g_lock_contention_arm_on_submit = true;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 400u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 400u),
 	              ALP_OK,
 	              "a LATER attempt's lock timeout is retried within budget, not returned "
 	              "immediately -- the job still completes once the lock frees up again");
@@ -3578,7 +3693,7 @@ ZTEST(cc3501e_host_driver, test_sock_send_grace_surfaces_genuine_device_error_10
 	g_sock_send_busy_step_count  = 1u;
 	g_sock_send_resolve_as_error = ALP_CC3501E_RESP_ERR_RADIO;
 
-	zassert_equal(cc3501e_sock_send(&fw, 0x1234u, data, sizeof(data), &sent, 10u),
+	zassert_equal(cc3501e_sock_send(&fw, 0x0034u, data, sizeof(data), &sent, 10u),
 	              ALP_ERR_IO,
 	              "a genuine decoded device error collected via grace is surfaced directly, "
 	              "not masked as ALP_ERR_TIMEOUT");
@@ -3592,11 +3707,14 @@ ZTEST(cc3501e_host_driver, test_sock_recv_encodes_maxlen_and_decodes_data)
 	uint8_t buf[32] = { 0 };
 	size_t  got     = 0u;
 	zassert_equal(
-	    cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 100u), ALP_OK, "RECV -> OK");
+	    cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 100u), ALP_OK, "RECV -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_RECV, "opcode 0x23");
 	zassert_equal(slave.req_len, 4u, "recv payload = {handle(LE16), max_len(LE16)}");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 	zassert_equal(slave.req_pl[2], 32u, "max_len lo (= cap, bounded)");
 	zassert_equal(got, 5u, "decoded data_len from the 24-byte resp header");
 	zassert_mem_equal(buf, "hello", 5u, "inline received bytes copied out");
@@ -3642,7 +3760,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_seq_does_not_alias_across_intervening_
 	size_t  got    = 0u;
 
 	zassert_equal(
-	    cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 100u), ALP_OK, "first RECV");
+	    cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 100u), ALP_OK, "first RECV");
 	const uint8_t first_seq = seq_of(slave.flags);
 	zassert_not_equal(first_seq,
 	                  ALP_CC3501E_REQ_SEQ_NONE,
@@ -3655,7 +3773,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_seq_does_not_alias_across_intervening_
 	}
 
 	zassert_equal(
-	    cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 100u), ALP_OK, "second RECV");
+	    cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 100u), ALP_OK, "second RECV");
 	const uint8_t second_seq = seq_of(slave.flags);
 	zassert_not_equal(second_seq,
 	                  first_seq,
@@ -3692,18 +3810,18 @@ ZTEST(cc3501e_host_driver, test_sock_recv_seq_does_not_alias_across_different_ha
 	size_t  got    = 0u;
 
 	zassert_equal(
-	    cc3501e_sock_recv(&fw, 0xAAAAu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(A) #1");
+	    cc3501e_sock_recv(&fw, 0x00AAu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(A) #1");
 	const uint8_t seq_a1 = seq_of(slave.flags);
 	zassert_equal(got, 1u, "one-byte chunk");
 	zassert_equal(buf[0], source[0], "A's first chunk is source[0]");
 
 	for (uint32_t i = 0; i < 30u; i++) {
 		zassert_equal(
-		    cc3501e_sock_recv(&fw, 0xBBBBu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(B)");
+		    cc3501e_sock_recv(&fw, 0x00BBu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(B)");
 	}
 
 	zassert_equal(
-	    cc3501e_sock_recv(&fw, 0xAAAAu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(A) #2");
+	    cc3501e_sock_recv(&fw, 0x00AAu, buf, sizeof(buf), &got, 100u), ALP_OK, "recv(A) #2");
 	const uint8_t seq_a2 = seq_of(slave.flags);
 	zassert_equal(seq_a2,
 	              seq_a1,
@@ -3741,7 +3859,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_retry_within_one_call_reuses_seq)
 	uint8_t buf[8]                   = { 0 };
 	size_t  got                      = 0u;
 
-	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	zassert_equal(cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 1000u),
 	              ALP_OK,
 	              "RECV -> OK after riding out BUSY");
 	zassert_true(slave.flags_log_count >= 4u, "3 BUSY attempts + the collect were clocked");
@@ -3777,7 +3895,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_crc_fail_then_retry_yields_correct_byt
 
 	uint8_t buf[8] = { 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu };
 	size_t  got    = 0u;
-	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	zassert_equal(cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 1000u),
 	              ALP_OK,
 	              "the internal retry re-collects the committed reply");
 	zassert_equal(got, 5u, "no gap: the full first chunk arrived");
@@ -3790,7 +3908,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_crc_fail_then_retry_yields_correct_byt
 	/* A second, genuinely NEW recv must get the NEXT chunk, not a replay of
 	 * the first (proves the dedicated counter also keeps two back-to-back
 	 * real recvs from aliasing under the ring model itself). */
-	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	zassert_equal(cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 1000u),
 	              ALP_OK,
 	              "second RECV -> OK");
 	zassert_equal(got, 5u, "second chunk is also 5 bytes");
@@ -3822,7 +3940,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_timeout_keeps_seq_and_retry_recovers_t
 
 	uint8_t buf[8] = { 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu, 0xAAu };
 	size_t  got    = 0u;
-	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 5u),
+	zassert_equal(cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 5u),
 	              ALP_ERR_TIMEOUT,
 	              "every reply on the wire fails CRC -- the whole call times out");
 	zassert_equal(g_sock_recv_commit_count,
@@ -3832,7 +3950,7 @@ ZTEST(cc3501e_host_driver, test_sock_recv_timeout_keeps_seq_and_retry_recovers_t
 
 	/* Let the retry's reply through undamaged. */
 	g_sock_recv_corrupt_crc_remaining = 0u;
-	zassert_equal(cc3501e_sock_recv(&fw, 0x1234u, buf, sizeof(buf), &got, 1000u),
+	zassert_equal(cc3501e_sock_recv(&fw, 0x0034u, buf, sizeof(buf), &got, 1000u),
 	              ALP_OK,
 	              "the retry recovers the lost reply");
 	zassert_equal(got, 5u, "no gap: chunk 1's full 5 bytes arrived");
@@ -3845,10 +3963,13 @@ ZTEST(cc3501e_host_driver, test_sock_recv_timeout_keeps_seq_and_retry_recovers_t
 
 ZTEST(cc3501e_host_driver, test_sock_close_encodes_handle)
 {
-	zassert_equal(cc3501e_sock_close(&fw, 0x1234u, 100u), ALP_OK, "CLOSE -> OK");
+	zassert_equal(cc3501e_sock_close(&fw, 0x0034u, 100u), ALP_OK, "CLOSE -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_CLOSE, "opcode 0x24");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 }
 
 /* BIND packs the SOCK_CONNECT layout with the LOCAL endpoint, so the two parse
@@ -3859,11 +3980,14 @@ ZTEST(cc3501e_host_driver, test_sock_bind_null_ip_is_inaddr_any)
 {
 	static const uint8_t zeros[16] = { 0 };
 
-	zassert_equal(cc3501e_sock_bind(&fw, 0x1234u, NULL, 80u, 100u), ALP_OK, "BIND -> OK");
+	zassert_equal(cc3501e_sock_bind(&fw, 0x0034u, NULL, 80u, 100u), ALP_OK, "BIND -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_BIND, "opcode 0x25");
 	zassert_equal(slave.req_len, 24u, "bind payload is 24 bytes, same as connect");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 	zassert_equal(slave.req_pl[4], (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "local.family");
 	zassert_equal(slave.req_pl[6], 80u, "local.port lo (host order on the wire)");
 	zassert_equal(slave.req_pl[7], 0u, "local.port hi");
@@ -3882,11 +4006,14 @@ ZTEST(cc3501e_host_driver, test_sock_bind_explicit_ip_encodes_octets)
 
 ZTEST(cc3501e_host_driver, test_sock_listen_encodes_backlog)
 {
-	zassert_equal(cc3501e_sock_listen(&fw, 0x1234u, 4u, 100u), ALP_OK, "LISTEN -> OK");
+	zassert_equal(cc3501e_sock_listen(&fw, 0x0034u, 4u, 100u), ALP_OK, "LISTEN -> OK");
 	zassert_equal(slave.cmd, ALP_CC3501E_CMD_SOCK_LISTEN, "opcode 0x26");
 	zassert_equal(slave.req_len, 4u, "listen payload = {handle(LE16), backlog, rsvd}");
 	zassert_equal(slave.req_pl[0], 0x34u, "handle lo");
-	zassert_equal(slave.req_pl[1], 0x12u, "handle hi");
+	zassert_equal(
+	    slave.req_pl[1],
+	    0x00u,
+	    "handle hi (wire is now always low-byte-only -- epoch lives host-side, not on the wire)");
 	zassert_equal(slave.req_pl[2], 4u, "backlog");
 	zassert_equal(slave.req_pl[3], 0u, "reserved stays 0");
 }
@@ -3901,9 +4028,11 @@ ZTEST(cc3501e_host_driver, test_sock_accepted_decode_fields)
 	const uint8_t wire[12] = { 0x01, 0x00, 0x02, 0x00, 0x31, 0xD4, 0x00, 0x00, 192, 168, 1, 14 };
 	alp_cc3501e_sock_accepted_evt_t ev = { 0 };
 
-	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev), ALP_OK, "decode -> OK");
-	zassert_equal(ev.listen_handle, 1u, "listen_handle");
-	zassert_equal(ev.handle, 2u, "handle");
+	zassert_equal(
+	    cc3501e_sock_accepted_decode(wire, sizeof(wire), 0u, &ev), ALP_OK, "decode -> OK");
+	zassert_equal(
+	    ev.listen_handle, 1u, "listen_handle (epoch 0 -- byte-identical to the raw wire)");
+	zassert_equal(ev.handle, 2u, "handle (epoch 0 -- byte-identical to the raw wire)");
 	zassert_equal(ev.peer_port, 54321u, "peer_port (host order)");
 	zassert_equal(ev.peer_family, (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4, "peer_family");
 	zassert_mem_equal(ev.peer_addr, &wire[8], 4u, "peer_addr copied verbatim");
@@ -3917,12 +4046,12 @@ ZTEST(cc3501e_host_driver, test_sock_accepted_decode_rejects_short_and_null)
 	/* A truncated entry must be REJECTED, not decoded from whatever follows:
 	 * the handle it would invent is a firmware socket the host would then try
 	 * to recv on and close. */
-	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), &ev),
+	zassert_equal(cc3501e_sock_accepted_decode(wire, sizeof(wire), 0u, &ev),
 	              ALP_ERR_INVAL,
 	              "11 bytes is short -> INVAL");
 	zassert_equal(ev.handle, 0u, "out left untouched on a short payload");
-	zassert_equal(cc3501e_sock_accepted_decode(NULL, 12u, &ev), ALP_ERR_INVAL, "NULL payload");
-	zassert_equal(cc3501e_sock_accepted_decode(wire, 12u, NULL), ALP_ERR_INVAL, "NULL out");
+	zassert_equal(cc3501e_sock_accepted_decode(NULL, 12u, 0u, &ev), ALP_ERR_INVAL, "NULL payload");
+	zassert_equal(cc3501e_sock_accepted_decode(wire, 12u, 0u, NULL), ALP_ERR_INVAL, "NULL out");
 }
 
 /* ================================ BLE ====================================== */
@@ -4629,6 +4758,459 @@ ZTEST(cc3501e_host_driver, test_ready_gate_slow_to_arm_pays_wait_plus_fallback)
 	zassert_true(g_fake_delay_us_total >= 700u,
 	             "a slower-to-arm slave must never cost LESS than the fallback floor");
 	zassert_false(cc3501e_ready_line_was_stuck(), "HIGH was seen well within budget -- no latch");
+}
+
+/* ---- link auto-recovery (issue #2126, + #2126 review) ---------------------
+ *
+ * cc3501e_link_check_and_recover() is wired into poll_by_repeat_seq()'s own
+ * terminal returns (cc3501e_core.c's cc3501e_poll_exit()) -- every
+ * worker-routed wrapper this suite exercises through poll_by_repeat() goes
+ * through it, so cc3501e_wifi_get_mac() below stands in for the whole class.
+ * g_all_io_down (see its own doc comment above) models a genuinely dead
+ * link; fw.reset_pin/fw.enable_pin must be populated for cc3501e_recover()
+ * to actually pulse anything instead of reporting ALP_ERR_NOSUPPORT.
+ * g_heal_disabled / g_ble_enable_busy / g_deaf_from_ms+g_deaf_until_ms /
+ * g_reset_release_count (see their own comments above) cover the review's
+ * follow-up findings. There is no Kconfig-off test in this file any more --
+ * see CMakeLists.txt / testcase.yaml's own comments for why that needs a
+ * real Kconfig-driven build this hermetic suite cannot host, and where the
+ * real proof lives instead. */
+
+ZTEST(cc3501e_host_driver, test_link_transient_single_op_failure_no_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	/* WIFI_STATUS alone is wedged -- every OTHER opcode, including the
+	 * probe's own PING, answers normally.  This is the "transient" case:
+	 * one op's own retry budget genuinely exhausts (a real ALP_ERR_TIMEOUT,
+	 * same shape as the dead-link test below), but the link as a whole is
+	 * fine, which the probe discovers on its very first PING. */
+	g_status_io_down_remaining = UINT32_MAX;
+
+	alp_cc3501e_wifi_status_t st;
+	alp_status_t              s = cc3501e_wifi_status(&fw, &st);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "the wedged op itself still fails");
+	zassert_equal(fw.recover_count,
+	              0u,
+	              "a single op's own transient failure must not warm-reset a link the probe's "
+	              "own PING (a different, unaffected opcode) finds fine");
+}
+
+ZTEST(cc3501e_host_driver, test_link_ota_open_suppresses_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	alp_status_t enter_s = cc3501e_ota_update_mode(&fw, true, 1000u);
+
+	g_all_io_down                     = true;
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t op_s                 = cc3501e_wifi_get_mac(&fw, mac, 100u);
+	uint32_t     recovers_seen        = fw.recover_count;
+
+	/* Restore state BEFORE asserting, not after: cc3501e_peer_is_polled()
+	 * is a file-static in cc3501e_core.c, not reset by slave_reset()
+	 * between tests, so a failed assertion here must not leave every LATER
+	 * test in this binary silently running against a "polled peer". */
+	g_all_io_down        = false;
+	alp_status_t leave_s = cc3501e_ota_update_mode(&fw, false, 1000u);
+
+	zassert_equal(leave_s, ALP_OK, "leave update mode (cleanup)");
+	zassert_equal(enter_s, ALP_OK, "enter update mode (fake echoes the mode byte instantly)");
+	zassert_equal(op_s, ALP_ERR_TIMEOUT, "the op itself still fails");
+	zassert_equal(recovers_seen, 0u, "an open OTA/update session must suppress recovery entirely");
+}
+
+/* #2126 review (MAJOR: OTA guard was a transport flag, not a session
+ * marker): cc3501e_recover() itself now refuses outright while
+ * ctx->ota_session_active is set -- checked directly, independent of
+ * whichever caller (auto or `alp companion recover`) reaches it. */
+ZTEST(cc3501e_host_driver, test_recover_refuses_active_ota_session_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	fw.ota_session_active = true;
+	g_reset_release_count = 0u;
+
+	alp_status_t s = cc3501e_recover(&fw);
+
+	fw.ota_session_active = false; /* restore before asserting -- see the OTA test's note above */
+	zassert_equal(s, ALP_ERR_BUSY, "cc3501e_recover() must refuse outright with a session active");
+	zassert_equal(g_reset_release_count, 0u, "no nRESET pulse while a session is active");
+}
+
+/* #2126 review (MAJOR: concurrency during recovery): the CAS on
+ * ctx->recovering rejects a concurrent caller immediately, with NO reset
+ * attempted -- simulated here without real threads by setting the flag by
+ * hand, the same state a genuinely concurrent second caller would observe. */
+ZTEST(cc3501e_host_driver, test_recover_cas_rejects_concurrent_caller_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	fw.recovering         = true; /* another "thread" already mid-recovery */
+	g_reset_release_count = 0u;
+
+	alp_status_t s = cc3501e_recover(&fw);
+
+	fw.recovering = false;
+	zassert_equal(s, ALP_ERR_BUSY, "a concurrent recovery attempt must be rejected immediately");
+	zassert_equal(g_reset_release_count, 0u, "the loser must not pulse nRESET at all");
+}
+
+ZTEST(cc3501e_host_driver, test_link_dead_triggers_exactly_one_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t s                    = cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "a dead link still fails the op that discovered it");
+	zassert_equal(fw.recover_count, 1u, "exactly one warm-reset recovery ran");
+
+	/* And the recovery actually worked: alp_gpio_write()'s fake heals
+	 * g_all_io_down the moment cc3501e_hard_reset() releases reset_pin, so
+	 * cc3501e_link_check_and_recover()'s own confirming PING (inside
+	 * cc3501e_recover()) already proved the link answers again before this
+	 * function even returned -- a fresh op now succeeds with NO second
+	 * recovery. */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "link answers again after the warm reset");
+	zassert_equal(fw.recover_count, 1u, "the follow-up ping did not trigger a second recovery");
+}
+
+/* cc3501e_wifi_connect() does not go through poll_by_repeat() -- it drives
+ * its own WIFI_STATUS poll loop (see cc3501e_wifi.c) -- so it gets its OWN
+ * trigger at its own timeout exit, guarded by "did ANY status read ever
+ * land" rather than ctx->rx_scratch[0] (a single non-retried
+ * cc3501e_wifi_status_once() call per iteration means rx_scratch[0] only
+ * ever reflects the LAST iteration by the time this function returns). This
+ * proves that path independently of the poll_by_repeat_seq()-based tests
+ * above. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_dead_link_triggers_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	alp_status_t s = cc3501e_wifi_connect(&fw, "deadlinknet", 1u, "pw", 120u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "connect itself still times out");
+	zassert_equal(fw.recover_count,
+	              1u,
+	              "cc3501e_wifi_connect()'s own timeout exit must trigger recovery when NO "
+	              "WIFI_STATUS read ever succeeded across the whole attempt");
+}
+
+/* #2126 review (MAJOR: false trigger on a busy bridge, poll_by_repeat_seq
+ * half): kills the surviving "(no_status || !no_status)" mutation in
+ * cc3501e_poll_exit() -- a bridge that answers a genuine DECODED status
+ * (BUSY, here) on EVERY attempt, never silent even once, must not be
+ * warm-reset just because the op itself times out waiting for the worker to
+ * actually finish. */
+ZTEST(cc3501e_host_driver, test_poll_by_repeat_busy_persists_no_recovery_2126)
+{
+	fw.reset_pin      = FAKE_RESET_PIN;
+	fw.enable_pin     = FAKE_ENABLE_PIN;
+	g_ble_enable_busy = true; /* every CMD_BLE_ENABLE attempt decodes BUSY */
+	/* The probe's own PING must ALSO fail outright -- if the trigger fires
+	 * incorrectly (the mutation this test exists to kill) and the probe
+	 * instead found a healthy link, cc3501e_recover() would never even be
+	 * attempted and recover_attempt_count would stay 0 EITHER way,
+	 * defeating this test's whole point (BLE_ENABLE is the only opcode
+	 * forced busy; PING is a completely different, otherwise-unaffected
+	 * opcode). Forcing PING to fail too closes that gap: an incorrectly
+	 * fired trigger now has nowhere to go but all the way to a real
+	 * (failing) recovery attempt. */
+	g_ping_always_fails = true;
+
+	alp_status_t s = cc3501e_ble_enable(&fw, 500u);
+
+	g_ble_enable_busy   = false;
+	g_ping_always_fails = false;
+	zassert_equal(s, ALP_ERR_TIMEOUT, "still times out -- the worker never actually finishes");
+	/* recover_attempt_count, NOT recover_count -- see the identical note on
+	 * test_wifi_connect_any_status_ok_survives_late_silence_2126: with PING
+	 * forced to fail too, even an INCORRECTLY triggered recovery attempt
+	 * cannot succeed, so recover_count alone cannot distinguish "never
+	 * attempted" from "attempted and failed". */
+	zassert_equal(fw.recover_attempt_count,
+	              0u,
+	              "a bridge that decoded BUSY on every single attempt must not even ATTEMPT a "
+	              "recovery");
+	zassert_equal(cmd_log_index_of(ALP_CC3501E_CMD_PING),
+	              slave.cmd_log_count,
+	              "no probe PING was ever sent either -- the trigger must not even fire");
+}
+
+/* #2126 review (MAJOR: false trigger on a busy bridge, cc3501e_wifi_connect
+ * half): kills the surviving "any_status_ok = true;" removal mutation in
+ * cc3501e_wifi_connect(). At least one WIFI_STATUS read lands (CONNECTING)
+ * before the link goes silent for the rest of the budget -- that one
+ * successful read is proof enough the link is alive, so the eventual
+ * timeout must not trigger a warm reset. */
+ZTEST(cc3501e_host_driver, test_wifi_connect_any_status_ok_survives_late_silence_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	slave.wifi_conn_state = ALP_CC3501E_WIFI_CONNECTING; /* never resolves -- keeps polling */
+
+	uint64_t t0     = alp_uptime_ms();
+	g_deaf_from_ms  = t0 + 100u;    /* a status read or two land first */
+	g_deaf_until_ms = t0 + 100000u; /* then silent well past connect's own budget */
+
+	alp_status_t s = cc3501e_wifi_connect(&fw, "flakynet", 1u, "pw", 500u);
+
+	g_deaf_from_ms = g_deaf_until_ms = 0u;
+	zassert_equal(s, ALP_ERR_TIMEOUT, "connect times out -- CONNECTING never resolves");
+	/* recover_attempt_count, NOT recover_count: the deaf window is still
+	 * open past connect's own budget (deliberately -- it must outlast the
+	 * probe too, or a healthy-looking probe could mask this exact
+	 * mutation), so an INCORRECTLY triggered recovery attempt would also
+	 * fail its own confirming PING and never reach recover_count -- the
+	 * trigger firing AT ALL is what this test must catch, not just whether
+	 * that attempt happened to succeed. */
+	zassert_equal(fw.recover_attempt_count,
+	              0u,
+	              "at least one WIFI_STATUS read succeeded before the link went silent -- must "
+	              "not even ATTEMPT a warm-reset");
+}
+
+/* #2126 review (MAJOR: cooldown based on successes, not attempts): the
+ * reviewer's own reproducer. A wedge a warm reset does NOT cure
+ * (g_heal_disabled) still recovers (attempts) exactly ONCE across 4
+ * back-to-back failing ops -- the OLD gate (`recover_count > 0`) let every
+ * one of the 4 re-trigger a fresh nRESET pulse, because a FAILED attempt
+ * never advanced recover_count. */
+ZTEST(cc3501e_host_driver, test_link_failed_recovery_still_gets_cooldown_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	g_all_io_down         = true;
+	g_heal_disabled       = true; /* warm reset does NOT cure this wedge */
+	g_reset_release_count = 0u;
+
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	for (int i = 0; i < 4; i++) {
+		(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+	}
+
+	g_heal_disabled = false;
+	g_all_io_down   = false;
+	zassert_equal(g_reset_release_count,
+	              1u,
+	              "4 back-to-back failing ops must still produce exactly 1 nRESET pulse (%u seen)",
+	              g_reset_release_count);
+	zassert_equal(fw.recover_attempt_count, 1u, "and exactly 1 recovery ATTEMPT, not 4");
+	zassert_equal(fw.recover_count, 0u, "none of them succeeded -- the wedge never cured");
+	zassert_true(fw.recover_fail_streak >= 1u, "the failure streak must have advanced");
+}
+
+ZTEST(cc3501e_host_driver, test_link_cooldown_suppresses_second_recovery_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	zassert_equal(cc3501e_wifi_get_mac(&fw, mac, 100u), ALP_ERR_TIMEOUT, "first op fails");
+	zassert_equal(fw.recover_count, 1u, "first failure recovers once");
+
+	/* Wedge the link again immediately -- CC3501E_RECOVER_COOLDOWN_MS
+	 * (30 s, no back-off yet since the first attempt SUCCEEDED and reset
+	 * recover_fail_streak to 0) has not elapsed on the fake clock (the
+	 * first call only advanced it by the poll-exhaustion + probe +
+	 * warm-reset delays, nowhere near 30 s -- see the file-level comment
+	 * on alp_delay_ms()/alp_uptime_ms() sharing one fake counter). The
+	 * cooldown must decline a second warm reset even though a fresh probe
+	 * would otherwise see a dead link again. */
+	g_all_io_down = true;
+	zassert_equal(cc3501e_wifi_get_mac(&fw, mac, 100u), ALP_ERR_TIMEOUT, "second op also fails");
+	zassert_equal(fw.recover_count, 1u, "cooldown suppressed the second recovery");
+	zassert_equal(fw.recover_attempt_count, 1u, "and did not even ATTEMPT a second time");
+
+	g_all_io_down = false; /* leave the fixture clean for the next test */
+}
+
+/* #2126 review (MAJOR: stale handles after reboot). link_epoch is bumped by
+ * a successful cc3501e_recover(); a socket handle minted BEFORE that bump
+ * must be refused (not silently addressed to whatever new socket now
+ * happens to share its low byte), while a handle minted AFTER works
+ * normally. */
+ZTEST(cc3501e_host_driver, test_socket_handle_epoch_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	uint16_t old_handle = 0u;
+	zassert_equal(cc3501e_sock_open(&fw,
+	                                (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4,
+	                                (uint8_t)ALP_CC3501E_SOCK_TYPE_STREAM,
+	                                0u,
+	                                &old_handle,
+	                                1000u),
+	              ALP_OK,
+	              "open a socket before any recovery");
+
+	/* Force a real, successful recovery -- bumps fw.link_epoch. */
+	g_all_io_down                = true;
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+	zassert_equal(fw.recover_count, 1u, "test setup: the recovery must have actually run");
+
+	uint8_t      rx[8] = { 0 };
+	size_t       got   = 0;
+	alp_status_t s     = cc3501e_sock_recv(&fw, old_handle, rx, sizeof(rx), &got, 100u);
+	zassert_equal(
+	    s, ALP_ERR_NOT_READY, "a handle from before the recovery must be refused, not reused");
+
+	uint16_t new_handle = 0u;
+	zassert_equal(cc3501e_sock_open(&fw,
+	                                (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4,
+	                                (uint8_t)ALP_CC3501E_SOCK_TYPE_STREAM,
+	                                0u,
+	                                &new_handle,
+	                                1000u),
+	              ALP_OK,
+	              "open a socket AFTER the recovery");
+	zassert_equal(cc3501e_sock_close(&fw, new_handle, 1000u),
+	              ALP_OK,
+	              "a handle minted after the recovery works normally, not refused");
+}
+
+/* #2126 review (MAJOR: the concurrency fix was not mutation-proven). A
+ * mutant that never clears ctx->recovering on cc3501e_recover()'s FINAL exit
+ * left the whole suite green: every LATER recovery answered ALP_ERR_BUSY
+ * forever, and no test ever ran a second one. Two back-to-back recoveries
+ * here pin that -- the second must pulse nRESET again, not lose the CAS to
+ * the first one's leftover flag. */
+ZTEST(cc3501e_host_driver, test_recover_twice_each_pulses_reset_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	g_reset_release_count = 0u;
+
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "first manual recovery");
+	zassert_false(fw.recovering, "the CAS flag must be clear once a recovery has committed");
+	zassert_equal(g_reset_release_count, 1u, "first recovery pulsed nRESET once");
+
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "a second recovery must not lose the CAS");
+	zassert_false(fw.recovering, "and must leave the flag clear again");
+	zassert_equal(g_reset_release_count, 2u, "the second recovery pulsed nRESET too");
+	zassert_equal(fw.recover_count, 2u, "both recoveries counted");
+}
+
+/* #2126 review (MAJOR, same gap, other exit): a mutant that skips the
+ * ctx->recovering clear on the lock-acquire failure path also left the suite
+ * green. Hold the lock by hand -- the same state a genuinely concurrent
+ * request leaves -- and require the flag clear after the refusal, or the very
+ * next recovery attempt is rejected by a flag nobody owns. */
+ZTEST(cc3501e_host_driver, test_recover_lock_busy_still_clears_cas_flag_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	g_reset_release_count = 0u;
+	fw.request_lock       = true; /* somebody else owns the wire */
+
+	alp_status_t s  = cc3501e_recover(&fw);
+	fw.request_lock = false;
+
+	zassert_not_equal(s, ALP_OK, "recovery cannot run while another caller holds the lock");
+	zassert_false(fw.recovering, "and must not leave the CAS flag stuck true");
+	zassert_equal(g_reset_release_count, 0u, "no nRESET pulse without the lock");
+
+	/* The flag really is free: a recovery straight afterwards runs. */
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "the next recovery attempt is not locked out");
+	zassert_equal(g_reset_release_count, 1u, "and it pulsed nRESET");
+}
+
+/* #2126 review (MAJOR: only cc3501e_sock_recv() was covered -- a mutant that
+ * dropped cc3501e_sock_send()'s own epoch check survived). Every socket op
+ * that takes a handle must refuse one minted before the last recovery. */
+ZTEST(cc3501e_host_driver, test_stale_handle_refused_by_every_socket_op_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	uint16_t stale = 0u;
+	zassert_equal(cc3501e_sock_open(&fw,
+	                                (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4,
+	                                (uint8_t)ALP_CC3501E_SOCK_TYPE_STREAM,
+	                                0u,
+	                                &stale,
+	                                1000u),
+	              ALP_OK,
+	              "open a socket before the recovery");
+
+	g_all_io_down                = true;
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+	zassert_equal(fw.recover_count, 1u, "test setup: the recovery must have actually run");
+
+	const uint8_t ip[4]   = { 192u, 168u, 1u, 10u };
+	const uint8_t data[2] = { 0xAAu, 0xBBu };
+	size_t        sent    = 0u;
+
+	zassert_equal(cc3501e_sock_send(&fw, stale, data, sizeof(data), &sent, 100u),
+	              ALP_ERR_NOT_READY,
+	              "send must refuse a stale handle");
+	zassert_equal(cc3501e_sock_connect(&fw, stale, ip, 80u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "connect must refuse a stale handle");
+	zassert_equal(cc3501e_sock_bind(&fw, stale, ip, 80u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "bind must refuse a stale handle");
+	zassert_equal(cc3501e_sock_listen(&fw, stale, 4u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "listen must refuse a stale handle");
+	zassert_equal(cc3501e_sock_close(&fw, stale, 100u),
+	              ALP_ERR_NOT_READY,
+	              "close must refuse a stale handle");
+
+	/* An accepted-socket event decoded at the CURRENT epoch hands back a
+	 * handle carrying that epoch -- the same bytes decoded at a stale one
+	 * would hand back a handle every op above refuses. */
+	uint8_t                         payload[sizeof(alp_cc3501e_sock_accepted_evt_t)] = { 0 };
+	alp_cc3501e_sock_accepted_evt_t ev                                               = { 0 };
+	payload[2]                                                                       = 0x02u;
+	zassert_equal(cc3501e_sock_accepted_decode(payload, sizeof(payload), fw.link_epoch, &ev),
+	              ALP_OK,
+	              "decode at the current epoch");
+	zassert_equal((uint8_t)(ev.handle >> 8),
+	              fw.link_epoch,
+	              "the decoded handle carries the epoch it was decoded at");
+}
+
+/* #2126 review (MINOR: cc3501e_set_recover_callback() had no test -- the
+ * callback was never shown to fire at all). */
+static uint32_t g_recover_cb_calls;
+static uint32_t g_recover_cb_last_count;
+
+static void test_recover_cb(cc3501e_t *ctx, uint32_t recover_count, void *user)
+{
+	ARG_UNUSED(ctx);
+	ARG_UNUSED(user);
+	g_recover_cb_calls++;
+	g_recover_cb_last_count = recover_count;
+}
+
+ZTEST(cc3501e_host_driver, test_recover_callback_fires_once_per_recovery_2126)
+{
+	fw.reset_pin            = FAKE_RESET_PIN;
+	fw.enable_pin           = FAKE_ENABLE_PIN;
+	g_recover_cb_calls      = 0u;
+	g_recover_cb_last_count = 0u;
+	cc3501e_set_recover_callback(&fw, test_recover_cb, NULL);
+
+	g_all_io_down                = true;
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	cc3501e_set_recover_callback(&fw, NULL, NULL);
+	zassert_equal(fw.recover_count, 1u, "test setup: exactly one recovery ran");
+	zassert_equal(g_recover_cb_calls, 1u, "the registered callback fired exactly once");
+	zassert_equal(g_recover_cb_last_count, 1u, "and was handed the committed recover_count");
 }
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);

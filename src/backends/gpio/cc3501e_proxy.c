@@ -119,6 +119,16 @@ alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 typedef struct {
 	bool                     is_bridge;
 	uint8_t                  cc35_raw;
+	/* ctx->link_epoch (issue #2126) at the last successful px_configure()
+	 * on this handle. The bridge reboots on recovery, taking every
+	 * firmware GPIO direction/pull setting with it -- a proxied pin's
+	 * REAL config is gone the moment link_epoch changes, even though this
+	 * side-state and the caller's handle both still look valid. Checked
+	 * against g_bridge_ctx->link_epoch by px_write()/px_read()/
+	 * px_disable_irq() below; a mismatch means "reconfigure before using
+	 * this pin again", not "this handle is closed" -- px_configure() may
+	 * still be called on it. */
+	uint8_t                  cfg_epoch;
 	alp_gpio_backend_state_t inner; /* delegated platform-backend state */
 	bool                     in_use;
 } proxy_side_t;
@@ -191,6 +201,16 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 		/* Proxied pin: the bridge owns it. */
 		s->is_bridge   = true;
 		s->cc35_raw    = raw;
+		/* #2126 review (minor): stamp the link epoch the handle was
+		 * opened under. _alloc_side() zeroes it, and epoch 0 is only
+		 * ever current before the first recovery -- so without this a
+		 * pin opened AFTER a recovery answered ALP_ERR_NOT_READY on
+		 * every op until the caller happened to call
+		 * alp_gpio_configure(), while the identical sequence on a ctx
+		 * that had never recovered worked. The staleness rule is "the
+		 * firmware rebooted since this handle last agreed with it";
+		 * a handle opened now agrees with it now. */
+		s->cfg_epoch   = g_bridge_ctx->link_epoch;
 		state->be_data = s;
 		state->pin_id  = pin_id;
 		return ALP_OK;
@@ -225,13 +245,29 @@ px_configure(alp_gpio_backend_state_t *state, alp_gpio_dir_t dir, alp_gpio_pull_
 	if (s == NULL) return ALP_ERR_NOT_READY;
 	if (s->is_bridge) {
 		/* Portable dir/pull enums share values with the protocol enums. */
-		return cc3501e_gpio_configure(g_bridge_ctx,
-		                              s->cc35_raw,
-		                              (alp_cc3501e_gpio_direction_t)dir,
-		                              (alp_cc3501e_gpio_pull_t)pull,
-		                              CC3501E_PROXY_TMO_MS);
+		alp_status_t rc = cc3501e_gpio_configure(g_bridge_ctx,
+		                                         s->cc35_raw,
+		                                         (alp_cc3501e_gpio_direction_t)dir,
+		                                         (alp_cc3501e_gpio_pull_t)pull,
+		                                         CC3501E_PROXY_TMO_MS);
+		/* #2126 review: this call itself may as well be the reconfigure a
+		 * stale epoch below demands -- stamp it on success, whether or not
+		 * this is the pin's first configure. */
+		if (rc == ALP_OK && g_bridge_ctx != NULL) s->cfg_epoch = g_bridge_ctx->link_epoch;
+		return rc;
 	}
 	return alp_z_gpio_ops()->configure(&s->inner, dir, pull);
+}
+
+/* #2126 review: true when @p s's bridge configuration is STALE -- the
+ * firmware rebooted (link_epoch changed) since px_configure() last set it
+ * on this handle, so the direction/pull it thinks it has is gone. Every
+ * bridge op below except px_configure() itself (which IS the reconfigure)
+ * refuses with ALP_ERR_NOT_READY rather than silently driving/reading a pin
+ * under a config the firmware no longer has. */
+static bool px_bridge_cfg_stale(const proxy_side_t *s)
+{
+	return g_bridge_ctx == NULL || s->cfg_epoch != g_bridge_ctx->link_epoch;
 }
 
 static alp_status_t px_write(alp_gpio_backend_state_t *state, bool level)
@@ -239,6 +275,7 @@ static alp_status_t px_write(alp_gpio_backend_state_t *state, bool level)
 	proxy_side_t *s = (proxy_side_t *)state->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
 	if (s->is_bridge) {
+		if (px_bridge_cfg_stale(s)) return ALP_ERR_NOT_READY;
 		return cc3501e_gpio_write(g_bridge_ctx, s->cc35_raw, level, CC3501E_PROXY_TMO_MS);
 	}
 	return alp_z_gpio_ops()->write(&s->inner, level);
@@ -249,6 +286,7 @@ static alp_status_t px_read(alp_gpio_backend_state_t *state, bool *level)
 	proxy_side_t *s = (proxy_side_t *)state->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
 	if (s->is_bridge) {
+		if (px_bridge_cfg_stale(s)) return ALP_ERR_NOT_READY;
 		return cc3501e_gpio_read(g_bridge_ctx, s->cc35_raw, level, CC3501E_PROXY_TMO_MS);
 	}
 	return alp_z_gpio_ops()->read(&s->inner, level);
@@ -277,6 +315,7 @@ static alp_status_t px_disable_irq(alp_gpio_backend_state_t *state)
 	proxy_side_t *s = (proxy_side_t *)state->be_data;
 	if (s == NULL) return ALP_ERR_NOT_READY;
 	if (s->is_bridge) {
+		if (px_bridge_cfg_stale(s)) return ALP_ERR_NOT_READY;
 		return cc3501e_gpio_set_interrupt(
 		    g_bridge_ctx, s->cc35_raw, ALP_CC3501E_GPIO_EDGE_NONE, false, CC3501E_PROXY_TMO_MS);
 	}

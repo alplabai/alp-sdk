@@ -34,9 +34,38 @@
 /* ---- Alif: app-registered CC3501E handle -------------------------------- */
 cc3501e_t *companion_cc3501e;
 
+#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+/* Registered via cc3501e_set_recover_callback() below (issue #2126): announce
+ * an AUTOMATIC recovery -- cc3501e_link_check_and_recover(), wired into the
+ * driver's own failure exits (cc3501e_core.c / cc3501e_wifi.c) -- the moment
+ * it happens. printk, same as the async event callback below: goes to the
+ * active console backend, safe off whatever thread the failing op was
+ * running on. Runs AFTER the recovery is already committed (ctx->
+ * recover_count already bumped), so @p recover_count here is exactly what
+ * `alp companion recover` would print too. A registered, per-ctx callback,
+ * the same pattern this driver already uses for async events
+ * (cc3501e_add_event_callback).
+ *
+ * ONE slot: this registration happens in alp_console_companion_set(), so an
+ * application that wants its own recovery callback must register it AFTER
+ * binding the console -- the later registration wins and this line stops
+ * printing. */
+static void companion_recover_notify(cc3501e_t *ctx, uint32_t recover_count, void *user)
+{
+	ARG_UNUSED(ctx);
+	ARG_UNUSED(user);
+	printk("cc3501e: link recovered by warm reset (#%u)\n", recover_count);
+}
+#endif
+
 void alp_console_companion_set(cc3501e_t *ctx)
 {
 	companion_cc3501e = ctx;
+#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+	/* No-op on a NULL ctx (unbind) -- cc3501e_set_recover_callback() itself
+	 * refuses a NULL ctx, so there is nothing to register the callback on. */
+	cc3501e_set_recover_callback(ctx, companion_recover_notify, NULL);
+#endif
 }
 
 static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
@@ -449,6 +478,39 @@ static int cmd_companion_reset(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "soft reset requested -- firmware reboots; link will drop");
 	return 0;
 }
+
+/* ---- CC3501E warm-reset recovery (Alif companion, issue #2126) ---------- */
+static int cmd_companion_recover(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	/* No probe first, no cooldown -- unlike cc3501e_link_check_and_recover()
+	 * (the automatic path wired into the driver's own failure exits), this
+	 * is an operator asking for the warm reset directly: go straight to
+	 * cc3501e_recover(). #2126 review: it is NOT otherwise unconditional
+	 * any more -- cc3501e_recover() itself now refuses (ALP_ERR_BUSY)
+	 * while an OTA/update session is active (ctx->ota_session_active) or
+	 * another recovery is already running on this ctx, and this manual
+	 * call shares BOTH the cooldown bookkeeping and recover_count with the
+	 * automatic path (see cc3501e_recover()'s own doc comment) -- it is no
+	 * longer a separate, auto-only counter. */
+	alp_status_t s = cc3501e_recover(companion_cc3501e);
+
+	if (s == ALP_ERR_BUSY && companion_cc3501e->ota_session_active) {
+		shell_error(sh, "recover refused: an OTA/update session is active");
+		return -EBUSY;
+	}
+	if (s != ALP_OK) {
+		shell_error(sh, "recover failed (%d)", (int)s);
+		return -EIO;
+	}
+	shell_print(sh, "recover OK (%u recovery(s) so far)", companion_cc3501e->recover_count);
+	return 0;
+}
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
 /* `alp companion` itself: a decentralized dynamic subcommand set (Zephyr's
@@ -482,6 +544,13 @@ SHELL_SUBCMD_ADD((alp, companion),
                  cmd_companion_bench,
                  1,
                  1);
+SHELL_SUBCMD_ADD((alp, companion),
+                 recover,
+                 NULL,
+                 "warm-reset the bridge link unconditionally (issue #2126)",
+                 cmd_companion_recover,
+                 1,
+                 0);
 #endif
 
 SHELL_SUBCMD_ADD((alp),

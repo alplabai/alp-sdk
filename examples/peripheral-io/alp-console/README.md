@@ -86,10 +86,10 @@ uart:~$ alp companion wifi ap alp-serve alpserve123
 ap "alp-serve" up (wpa2)
 uart:~$ alp companion sock serve 80 60
 ap ip: 10.0.0.3
-listen handle 1
+listen handle 1 (epoch 0)
 listening on :80 for 60 s (the shell is blocked until then)
 [event] opcode 0x2c (len 12)
-accepted handle 2
+accepted handle 2 (epoch 0)
   request: GET /s1 HTTP/1.1
   replied 154 bytes
 ```

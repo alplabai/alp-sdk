@@ -421,8 +421,28 @@ first three with the fourth has repeatedly cost bench time:
 The firmware version moves on its own cadence — a release can ship
 without a protocol bump, and vice-versa.
 
-Current release: SemVer **0.4.0**, wire protocol **5**, stamped **`0.4.0.0`**
-(`cc3501e-bridge-firmware:prebuilt/cc3501e-v0.4.0.bin`).
+Three states are live at once here, and conflating them is the recurring
+mistake — track which one a given bench unit is actually running:
+
+- **`cc3501e-bridge-firmware:main`** carries nine merged fixes (widened DHCP
+  lease poll, the SPI re-init that wedged the link after fast operations
+  removed, bounded/non-stale SOCK_SEND, station power-up order + a
+  WIFI_STATUS reason byte, replay-safe SOCK_RECV, sticky EOF on the worker
+  path, a connect-failure-exit SPI reinit skip, in-line SPI self-heal, and
+  the stale `DEAUTH_LEAVING(3)` verdict fix) — merged, but not yet cut as a
+  release.
+- **v0.9.0** (firmware PR #151) has been **cut** carrying all nine — wire
+  protocol **4.0**, stamped GPE **`0.254.15.0`** — but it is **not yet
+  bench-verified** and not yet published to `prebuilt/`. Do not treat it as
+  available to flash.
+- **v0.8.0** (SemVer **0.8.0**, wire protocol **4.0**
+  (`ALP_CC3501E_PROTOCOL_MAJOR` 4, `_MINOR` 0), stamped GPE **`0.254.5.0`**,
+  `cc3501e-bridge-firmware:prebuilt/cc3501e-v0.8.0.bin`) is what `prebuilt/`
+  actually publishes today, and it carries **none** of the nine fixes.
+
+Every bench unit still flashed from `prebuilt/` is on v0.8.0, so host-side
+workarounds for the pre-fix behaviour stay in this driver until a fixed
+build is actually released.
 
 Two rules the stamp adds, both of which read as a dead part when broken:
 
@@ -565,11 +585,18 @@ reply's `radio_ok_out` to learn whether the *previous* apply was realised.
 
 > **Known issue ([#1691](https://github.com/alplabai/alp-sdk/issues/1691)):**
 > repeated BLE advertise/stop cycles can wedge the bridge — requests time out,
-> then fail, and it does not self-heal. Firmware diagnostics across the fault show
-> the CC3501E healthy the whole time (slave armed, READY high, transfers still
-> completing, all error counters zero), so no firmware self-heal can detect it.
-> `cc3501e_recover()` is the escape hatch: a warm reset recovered every observed
-> wedge. Not power-related — it reproduces with no power policy applied at all.
+> then fail. Firmware diagnostics across the fault show the CC3501E healthy
+> the whole time (slave armed, READY high, transfers still completing, all
+> error counters zero), so the FIRMWARE cannot self-heal it — it has no way
+> to know anything is wrong. The HOST can, and does automatically since
+> issue [#2126](https://github.com/alplabai/alp-sdk/issues/2126):
+> `cc3501e_link_check_and_recover()` is wired into every worker-routed op's
+> own failure exit (`CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER`, default `y`) and
+> probes, then warm-resets via `cc3501e_recover()` below, with no application
+> code required. `cc3501e_recover()` remains the manual escape hatch (`alp
+> companion recover` on the console) for a caller that wants it by hand — a
+> warm reset has recovered every observed wedge. Not power-related — it
+> reproduces with no power policy applied at all.
 
 ### Long gaps: cut the supply (`cc3501e_power_off()`)
 
