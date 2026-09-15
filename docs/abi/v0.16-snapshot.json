@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-14",
+  "generated": "2026-09-15",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -8850,12 +8850,32 @@
           "hash": "56e4a0992d1e4126",
           "signature": "alp_dsp_chain_t * alp_dsp_chain_open(const alp_dsp_stage_t *stages, size_t n_stages);"
         },
+        "alp_dsp_decimator_init": {
+          "hash": "81cbd99d28bc3946",
+          "signature": "alp_status_t alp_dsp_decimator_init(alp_dsp_decimator_t *dec, uint32_t ratio, uint8_t n_channels);"
+        },
+        "alp_dsp_decimator_process": {
+          "hash": "fee9a02046bdf770",
+          "signature": "alp_status_t alp_dsp_decimator_process(alp_dsp_decimator_t *dec, const int16_t *in, size_t in_frames, int16_t *out, size_t out_cap, size_t *out_frames);"
+        },
+        "alp_dsp_decimator_reset": {
+          "hash": "e5e37f12a996a782",
+          "signature": "alp_status_t alp_dsp_decimator_reset(alp_dsp_decimator_t *dec);"
+        },
         "alp_dsp_stats_f32": {
           "hash": "ef09b3feb852e674",
           "signature": "alp_status_t alp_dsp_stats_f32(const float *x, size_t n, alp_dsp_stats_t *out);"
         }
       },
       "macros": {
+        "ALP_DSP_DECIMATOR_MAX_CHANNELS": {
+          "hash": "14d9adaef8e89d56",
+          "value": "2u"
+        },
+        "ALP_DSP_DECIMATOR_TAPS": {
+          "hash": "9a4489ca6d744dcc",
+          "value": "135u"
+        },
         "ALP_DSP_MAX_FFT_POINTS": {
           "hash": "f756d4bbf4d578cd",
           "value": "1024u"
@@ -8902,6 +8922,19 @@
           ],
           "hash": "0ac24400ad0466c0",
           "kind": "enum"
+        },
+        "alp_dsp_decimator_t": {
+          "definition": "typedef struct { int16_t history[ALP_DSP_DECIMATOR_MAX_CHANNELS][2u * ALP_DSP_DECIMATOR_TAPS]; uint32_t write_idx[ALP_DSP_DECIMATOR_MAX_CHANNELS]; const int16_t *coeffs; uint32_t ratio; uint32_t phase; uint8_t n_channels; } alp_dsp_decimator_t;",
+          "fields": [
+            "int16_t history[ALP_DSP_DECIMATOR_MAX_CHANNELS][2u * ALP_DSP_DECIMATOR_TAPS]",
+            "uint32_t write_idx[ALP_DSP_DECIMATOR_MAX_CHANNELS]",
+            "const int16_t *coeffs",
+            "uint32_t ratio",
+            "uint32_t phase",
+            "uint8_t n_channels"
+          ],
+          "hash": "02872b958405f103",
+          "kind": "struct"
         },
         "alp_dsp_fft_output_t": {
           "definition": "typedef enum { ALP_DSP_FFT_OUTPUT_COMPLEX = 0, ALP_DSP_FFT_OUTPUT_MAGNITUDE = 1, ALP_DSP_FFT_OUTPUT_MAGNITUDE_ONESIDED = 2, } alp_dsp_fft_output_t;",
