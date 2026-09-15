@@ -72,8 +72,8 @@ Tracked here so the page is complete, but never pooled into the Summary above --
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 0 |
-| `🟡` | partial | 3 |
-| `✅` | verified | 14 |
+| `🟡` | partial | 4 |
+| `✅` | verified | 13 |
 | `❌` | failing | 0 |
 | `n/a` | n/a | 0 |
 
@@ -375,7 +375,7 @@ reconciled v0.1.0 I²C/SPI/UART/GPIO rows above for that distinction.
 | AEN801 peripheral matrix — camera stack (bind only) | `examples/aen/aen-camera-regcheck` (cam/csi/dphy/arx3a0) | 🟡 partial | Nodes BIND and `device_is_ready`; live capture is **hardware-gated** -- no sensor populated on this bench unit | same | v0.8 |
 | AEN801 peripheral matrix — Ethos-U85 / Ethos-U55-HE ID | NPU ID registers | ✅ verified | Ethos-U85 ID `0x20007001`; Ethos-U55-HE ID `0x10104201` | same | v0.8 |
 | AEN801 peripheral matrix — NPU inference (tiny fixture) | TFLM + Ethos-U85, direct `ethosu_invoke` | ✅ verified | A tiny TFLM+Ethos-U85 fixture runs to completion (the full `person_detect` model result is the separate, already-listed v0.3.0 row above) | same | v0.8 |
-| AEN801 peripheral matrix — PDM mics | `examples/aen/aen-pdm-mic-alif` | ✅ verified | Live varying PCM captured (real audio, not a static pattern) | same | v0.8 |
+| AEN801 peripheral matrix — PDM mics | `examples/aen/aen-pdm-mic-alif` | 🟡 partial | Round-1's "live varying PCM" reading used PDM mode 1 (512 kHz clk) -- below the fitted MP34DT05TR-A mics' 1.2 MHz minimum (ST's in-tree `mpxxdtyy.h` `MPXXDTYY_MIN_PDM_FREQ`) -- so it may be an under-clocked mic's flat noise, not real audio; the "samples vary" gate it used cannot tell the two apart. The channel-map decode and clock-mode driver fixes are proven at the register level (`PDM_CONFIG_REGISTER` read back correctly, FIFO count moved); in-spec-rate (48 kHz) acoustic capture with an RMS/peak-to-peak liveness gate is implemented but pending its own bench re-verification (issue #2133) | same | v0.8 |
 | AEN801 peripheral matrix — I2S TX | `examples/aen/aen-i2s-amp-alif` (i2s3) | ✅ verified | i2s3 clocks a tone out at the 76.8 MHz audio clock (no amp/mux wired -- audible output is separately still-pending) | same | v0.8 |
 | AEN801 peripheral matrix — QEnc | quadrature counter | 🟡 partial | Driver reads clean but the count stays static -- **hardware-gated**: no physical encoder is attached to spin it, not a code/Flow-D bug | same | v0.8 |
 | AEN801 peripheral matrix — SD card | DWC SDHC | 🟡 partial | DWC SDHC controller initialises but the card is unreachable -- **hardware-gated**: the EVK's SDIO 74LVC157 mux (EN=IO20, SEL=IO21, both CC3501E-side) is not routed with a card inserted on this bench unit | same | v0.8 |

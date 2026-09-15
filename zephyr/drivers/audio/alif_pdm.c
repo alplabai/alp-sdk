@@ -184,6 +184,13 @@ struct pdm_config {
 	const struct pinctrl_dev_config *pcfg;
 	const struct device *clk_dev;
 	clock_control_subsys_t clkid;
+	/* Board-level mic PDM clock range (issue #2133 round 3) -- e.g. the
+	 * E1M-EVK's MP34DT05TR-A mics need 1.2-3.25 MHz. 0 / UINT32_MAX
+	 * (unset in DT) mean "no board constraint here"; configure() only
+	 * enforces the caller's dmic_cfg.io window in that case.
+	 */
+	uint32_t min_pdm_clk_freq;
+	uint32_t max_pdm_clk_freq;
 };
 
 /* pcm_rate -> PDM clock-mode table (issue #2133). Each entry's PDM bit-clock
@@ -206,31 +213,48 @@ struct pdm_clock_mode_entry {
 
 static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	/* Mode 1 (STANDARD_VOICE_512): 512 kHz clk, decimation 64 -> 8 kHz Fs
-	 * (HWRM Table 15-118). BENCH-PROVEN on e1m-aen-evk-03 (issue #2133
-	 * round 2): PDM_CONFIG_REGISTER read back 0x00010033, the FIFO count
-	 * moved, and every read returned a full block with rc=0.
+	 * (HWRM Table 15-118). PDM_CONFIG_REGISTER read back 0x00010033 on
+	 * e1m-aen-evk-03 and the FIFO count moved (issue #2133 round 2), but
+	 * 512 kHz is BELOW the EVK's MP34DT05TR-A mics' 1.2 MHz minimum
+	 * (ST's in-tree mpxxdtyy.h: MPXXDTYY_MIN_PDM_FREQ) -- round 3: that
+	 * reading is an under-clocked mic, not proof of correct capture, and
+	 * the EVK's board overlay now declares a DT mic-clock range that
+	 * rejects this mode with -EINVAL. Left in the table because it is
+	 * valid for a mic that DOES accept 512 kHz -- only the EVK's DT
+	 * range rejects it, not this table.
 	 */
 	{ 8000U, PDM_MODE_STANDARD_VOICE_512_CLK_FRQ, 512000U },
 	/* Mode 4 (HIGH_QUALITY_1024): 1024 kHz clk, decimation 64 -- the SAME
-	 * ratio as the proven mode 1 -- -> 16 kHz Fs (HWRM Table 15-118).
-	 * Also the only 16 kHz mode whose clock sits inside BOTH callers' io
-	 * windows (backend 1.0-3.5 MHz, example 1.024-4.096 MHz after this
-	 * round widened their minimums); mode 2's 512 kHz clock is below
-	 * both minimums and its decimation (32) differs from the proven
-	 * ratio, so it is not used here.
-	 *
-	 * The FIR operates on the DECIMATED stream, so the same decimation
-	 * ratio (64) as the proven mode 1 means pdm_default_fir_voice512 is
+	 * ratio as mode 1 -- -> 16 kHz Fs (HWRM Table 15-118). Also below the
+	 * EVK mics' 1.2 MHz minimum (see mode 1's note); same "valid
+	 * elsewhere, rejected here by DT" status, not yet bench-verified on
+	 * any mic. The FIR operates on the DECIMATED stream, so the same
+	 * decimation ratio (64) as mode 1 means pdm_default_fir_voice512 is
 	 * EXPECTED to apply unchanged -- and Alif's own driver test applies
 	 * the identical per-channel FIR tables across every mode 1-9 with no
 	 * FIR switch (sdk-alif tests/drivers/pdm/src/alif_test_pdm.c, FIR
 	 * tables + mode select). That makes the reuse VENDOR-SOURCED, but
-	 * this entry is still a HYPOTHESIS, NOT YET BENCH-VERIFIED on
-	 * silicon -- confirm before trusting it (issue #2133 round 2).
-	 * Expected if correct: 1600-frame blocks 100 ms apart, measured rate
-	 * within +/-5% of 16000, PDM_CONFIG_REGISTER = 0x00040033.
+	 * this entry is still a HYPOTHESIS.
 	 */
 	{ 16000U, PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ, 1024000U },
+	/* Mode 5 (WIDE_BANDWIDTH_AUDIO_1536): 1536 kHz clk, decimation 48 ->
+	 * 32 kHz Fs (HWRM Table 15-118) -- IN SPEC for the EVK's MP34DT05TR-A
+	 * mics (1.2-3.25 MHz). Decimation (48) differs from the proven modes
+	 * 1/4 (64), so the FIR-reuse argument is LESS direct than mode 7's --
+	 * still sourced from the same sdk-alif driver test applying one FIR
+	 * set across modes 1-9, but not itself bench-verified (issue #2133
+	 * round 3).
+	 */
+	{ 32000U, PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ, 1536000U },
+	/* Mode 7 (FULL_BANDWIDTH_AUDIO_3071): 3072 kHz clk, decimation 64 --
+	 * the SAME ratio as modes 1/4 -- -> 48 kHz Fs (HWRM Table 15-118).
+	 * IN SPEC for the EVK's MP34DT05TR-A mics (1.2-3.25 MHz) and the
+	 * mode this example now defaults to. Same direct FIR-reuse argument
+	 * as mode 4 (sdk-alif tests/drivers/pdm/src/alif_test_pdm.c:34-100
+	 * FIR tables, :245-282 mode select, no FIR switch across modes
+	 * 1-9) -- not yet itself bench-verified (issue #2133 round 3).
+	 */
+	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
 
 static int pdm_clock_mode_for_rate(uint32_t pcm_rate_hz, uint8_t *mode_out,
@@ -307,6 +331,7 @@ static void pdm_apply_channel_defaults(const struct device *dev, uint8_t hw_ch)
 static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *config)
 {
 	struct pdm_data *pdata = DEV_DATA(dev);
+	const struct pdm_config *cfg = DEV_CFG(dev);
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
 	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
 	uint8_t hw_chan_mask;
@@ -352,15 +377,32 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 		return rc;
 	}
 
-	/* Reject a mode whose PDM bit clock falls outside the caller's
-	 * declared mic-clock window -- config->io used to be read by nothing
-	 * in this driver (issue #2133 round 2).
+	/* Reject a mode whose PDM bit clock falls outside the INTERSECTION of
+	 * the caller's declared io window (config->io, previously read by
+	 * nothing -- issue #2133 round 2) and the board's mic clock range,
+	 * if the devicetree node declares one (min-pdm-clk-freq/
+	 * max-pdm-clk-freq, alif,alif-pdm.yaml -- round 3). A mic's clock
+	 * spec is a BOARD fact, not something the caller or this driver
+	 * should know -- e.g. the E1M-EVK's MP34DT05TR-A needs 1.2-3.25 MHz
+	 * (mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ), well above the 512 kHz/
+	 * 1024 kHz modes this driver otherwise supports. 0 / UINT32_MAX mean
+	 * "DT declares no board constraint" -- the intersection then
+	 * collapses to config->io alone.
 	 */
-	if (pdm_clk_hz < config->io.min_pdm_clk_freq || pdm_clk_hz > config->io.max_pdm_clk_freq) {
-		LOG_DBG("config invalid: PDM clock %u Hz for pcm_rate=%u outside io [%u,%u]\n",
-			pdm_clk_hz, config->streams[0].pcm_rate, config->io.min_pdm_clk_freq,
-			config->io.max_pdm_clk_freq);
-		return -EINVAL;
+	{
+		uint32_t eff_min = MAX(cfg->min_pdm_clk_freq, config->io.min_pdm_clk_freq);
+		uint32_t eff_max = MIN(cfg->max_pdm_clk_freq, config->io.max_pdm_clk_freq);
+
+		if (pdm_clk_hz < eff_min) {
+			LOG_DBG("config invalid: mode clock %u Hz below mic minimum %u Hz\n",
+				pdm_clk_hz, eff_min);
+			return -EINVAL;
+		}
+		if (pdm_clk_hz > eff_max) {
+			LOG_DBG("config invalid: mode clock %u Hz above mic maximum %u Hz\n",
+				pdm_clk_hz, eff_max);
+			return -EINVAL;
+		}
 	}
 
 	if (pdata) {
@@ -1104,6 +1146,8 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		.pcfg              = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
 		.clk_dev           = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
 		.clkid             = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid), \
+		.min_pdm_clk_freq  = DT_INST_PROP_OR(n, min_pdm_clk_freq, 0), \
+		.max_pdm_clk_freq  = DT_INST_PROP_OR(n, max_pdm_clk_freq, UINT32_MAX), \
 	}; \
 	static void pdm_irq_config_##n(void) \
 	{ \

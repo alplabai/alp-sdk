@@ -261,16 +261,15 @@ static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
 		.mem_slab   = &be->slab,
 	};
 	struct dmic_cfg dcfg = {
-        /* Window covers both bench/vendor-grounded alif_pdm clock modes
-         * (zephyr/drivers/audio/alif_pdm.c's pdm_clock_modes): 512 kHz
-         * (8 kHz Fs, mode 1, bench-proven) and 1024 kHz (16 kHz Fs, mode
-         * 4). The driver now enforces this window itself (issue #2133
-         * round 2) -- it used to be read by nothing, and this backend's
-         * old 1.0 MHz minimum would have rejected the proven 512 kHz
-         * mode. */
+        /* Generic PDM bit-clock window -- this PORTABLE backend names no mic
+         * part number, so it declares no mic-specific range here. A real
+         * mic's clock limits are a BOARD fact and belong in the SoM/carrier
+         * devicetree instead (alif,alif-pdm.yaml's min-pdm-clk-freq/
+         * max-pdm-clk-freq, issue #2133 round 3); dmic_alif_pdm_configure()
+         * enforces the intersection of this window and that DT range. */
         .io =
             {
-                .min_pdm_clk_freq = 500000,
+                .min_pdm_clk_freq = 1000000,
                 .max_pdm_clk_freq = 3500000,
                 .min_pdm_clk_dc   = 40,
                 .max_pdm_clk_dc   = 60,

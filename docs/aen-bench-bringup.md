@@ -32,7 +32,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
 | **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
 | **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. Real models from MRAM slot0: **person_detect** (100% NPU) + **keyword_scrambled** (mixed 6-NPU/9-CPU, via the `<6>` op-resolver) both `runJob=OK` (2026-06-17). See `examples/aen/aen-npu-inference-person-mram`. |
-| **PDM mics** | ✅ PASS | Live varying PCM = real audio. |
+| **PDM mics** | 🟡 PARTIAL *(re-verification pending)* | Prior "live varying PCM" reading used PDM mode 1 (512 kHz clk) -- below the fitted MP34DT05TR-A mics' 1.2 MHz minimum (`mpxxdtyy.h` `MPXXDTYY_MIN_PDM_FREQ`) -- so it may be an under-clocked mic's flat noise, not real audio; its "samples vary" gate cannot tell the two apart. Driver's channel-map + clock-mode fixes are register-level proven; an in-spec 48 kHz capture with an RMS/peak-to-peak liveness gate is implemented, bench re-run pending (issue #2133). |
 | **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock (audible amp output pends the 74LVC157 mux + TAS2563 config). |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
 | **SD card** (DWC SDHC) | 🟡 PARTIAL *(HW-gated)* | SDHC inits but the card is unreachable until the EVK SDIO 74LVC157 mux (EN=IO20 / SEL=IO21, both CC3501E-side) is routed and a card is inserted. Not a code/Flow-D bug. |

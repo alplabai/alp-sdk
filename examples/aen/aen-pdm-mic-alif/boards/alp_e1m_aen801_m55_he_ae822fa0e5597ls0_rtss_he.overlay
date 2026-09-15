@@ -15,6 +15,15 @@
  *
  * The DATA pads carry `input-enable` (the upstream pad REN bit) so the mic
  * bitstream is sensed; the CLOCK pads are outputs (no input-enable).
+ *
+ * min-pdm-clk-freq/max-pdm-clk-freq (issue #2133 round 3): the fitted mics
+ * are MP34DT05TR-A (U19/U20, E1M-EVK-2626-R2_components.csv), whose PDM
+ * clock spec ST's own in-tree Zephyr driver encodes as
+ * MPXXDTYY_MIN_PDM_FREQ / MPXXDTYY_MAX_PDM_FREQ (drivers/audio/mpxxdtyy.h,
+ * 1.2-3.25 MHz) -- BELOW that, an "active" capture can be an under-clocked
+ * mic outputting near-flat noise, not real audio. dmic_alif_pdm_configure()
+ * enforces this as the board's mic-clock range, separate from whatever io
+ * window a caller declares.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
@@ -54,6 +63,10 @@
 		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
 		fifo_watermark = <5>;
 		bypass_iir_filter = <1>;
+		/* MP34DT05TR-A spec, mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ -- see the
+		 * file header. */
+		min-pdm-clk-freq = <1200000>;
+		max-pdm-clk-freq = <3250000>;
 		status = "okay";
 	};
 };
