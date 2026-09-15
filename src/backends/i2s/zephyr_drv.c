@@ -150,8 +150,16 @@
  * never double-freed either way after it); the existing post-write path
  * then fires the now-armed deferred start when the flag reset above set
  * it, so the write that discovers the gap is also the one that resumes
- * the I2S stream (an external codec/amplifier that shut itself down on
- * the clock loss is not re-armed by this layer -- see issue #2146). A
+ * the I2S stream. As of issue #2149, i2s_dw.c's underrun ISR path keeps
+ * the bit clock running through this whole recovery (CER.CLKEN stays set;
+ * only the TX channel/block/interrupt are torn down), specifically so an
+ * external codec/amplifier does not read clock loss as its own cue to
+ * latch SHUTDOWN in the first place -- this layer still does not, and
+ * cannot, re-arm a codec that already shut itself down some other way
+ * (an explicit stop()/start() cycle still drops the clock -- see issue
+ * #2146 -- and an RX overrun on a controller sharing this clock with an
+ * active TX stream still clears CER via rx_stream_disable(), a known gap
+ * #2149 does not close). A
  * recovery this call's OWN PREPARE performed (in either function) logs
  * one rate-limited LOG_WRN -- the only bench-visible evidence a
  * recovery happened at all, since i2s_dw_trigger() itself only LOG_ERRs
