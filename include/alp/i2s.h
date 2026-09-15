@@ -131,11 +131,13 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
  *
  * A TX stream that underran (the queue ran dry while playing) or an RX
  * stream that overran (the slab or queue was exhausted while capturing)
- * is recovered transparently: this call resumes it instead of failing
- * forever. Calling this right after an underrun/overrun behaves like
- * calling it on a fresh handle -- if nothing is queued yet on TX, the
- * real start is deferred exactly as above; the caller does not need to
- * detect or clear the condition itself.
+ * is recovered transparently: this call resumes the I2S stream instead
+ * of failing forever. Calling this right after an underrun/overrun
+ * behaves like calling it on a fresh handle -- if nothing is queued yet
+ * on TX, the real start is deferred exactly as above; the caller does
+ * not need to detect or clear the condition itself. An external codec
+ * or amplifier that shut itself down when the bit clock stopped is not
+ * re-armed by this layer (see issue #2146).
  *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
@@ -174,10 +176,11 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  * retries the deferred start again.
  *
  * A gap between writes long enough for the stream to underrun is
- * recovered transparently: the write that follows the gap resumes
- * playback instead of failing forever. The caller does not need to
+ * recovered transparently: the write that follows the gap resumes the
+ * I2S stream instead of failing forever. The caller does not need to
  * call @ref alp_i2s_stop / @ref alp_i2s_start to clear the condition
- * first -- writing again is enough.
+ * first -- writing again is enough (see @ref alp_i2s_start's doc for
+ * what this recovery does not cover downstream of the bus).
  *
  * @param[in] i2s         Handle from @ref alp_i2s_open with TX direction.
  * @param[in] block       Source PCM data.

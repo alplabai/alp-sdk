@@ -20,12 +20,12 @@
  *
  * issue #2137 (a separate, independent bug once a stream starts and
  * then goes quiet): a TX underrun -- the queue running dry while
- * RUNNING -- drops i2s_dw into I2S_STATE_ERROR (i2s_dw.c:516-524), and
- * from there DRAIN, START, and write() all -EIO forever
- * (i2s_dw.c:301-321/278-283/390-394): nothing in the pre-#2137 backend
- * ever issued the ONE trigger valid from ERROR (I2S_TRIGGER_PREPARE,
- * i2s_dw.c:340-347) or the DROP fallback that also works there
- * (i2s_dw.c:329-338). z_stop()/z_start()/z_write() now recover
+ * RUNNING -- drops i2s_dw into I2S_STATE_ERROR (i2s_tx_irq_handler()'s
+ * queue-empty branch), and from there DRAIN, START, and write() all
+ * -EIO forever (i2s_dw_trigger()'s DRAIN/START cases, i2s_dw_write()):
+ * nothing in the pre-#2137 backend ever issued the ONE trigger valid
+ * from ERROR (I2S_TRIGGER_PREPARE) or the DROP fallback that also works
+ * there. z_stop()/z_start()/z_write() now recover
  * transparently -- see test_underrun_then_stop_recovers,
  * test_underrun_then_start_and_write_replays,
  * test_underrun_then_write_resumes_with_no_slab_leak, and
@@ -530,8 +530,8 @@ ZTEST(alp_i2s_start_defer, test_start_write_stop_race_stale_flag_recovers)
 }
 
 /* issue #2137, case (a): start, write, underrun, then stop must recover
- * (return ALP_OK) instead of the -EIO i2s_dw's DRAIN returns forever
- * once the stream is stuck in I2S_STATE_ERROR (i2s_dw.c:315-321) --
+ * (return ALP_OK) instead of the -EIO i2s_dw_trigger()'s DRAIN case
+ * returns forever once the stream is stuck in I2S_STATE_ERROR --
  * silicon repro: alp_audio_out_stop() returning -5 after the queue ran
  * dry, e1m-aen-evk-03. */
 ZTEST(alp_i2s_start_defer, test_underrun_then_stop_recovers)
@@ -583,10 +583,10 @@ ZTEST(alp_i2s_start_defer, test_underrun_then_start_and_write_replays)
 	bool in_error_after_underrun = fake_i2s_tx_in_error();
 
 	/* start() alone, with no write() in between, must NOT fail --
-	 * i2s_dw's START -EIOs from ERROR (i2s_dw.c:278-283); PREPARE
-	 * recovers to READY, and since PREPARE also drops the (already
-	 * empty) ring, the retried START correctly re-defers rather than
-	 * hitting -ENOMEM. */
+	 * i2s_dw_trigger()'s START case -EIOs from ERROR; PREPARE recovers
+	 * to READY, and since PREPARE also drops the (already empty) ring,
+	 * the retried START correctly re-defers rather than hitting
+	 * -ENOMEM. */
 	alp_status_t start2_rc            = alp_i2s_start(h);
 	bool         running_after_start2 = fake_i2s_tx_running();
 	bool         error_after_start2   = fake_i2s_tx_in_error();
@@ -698,20 +698,16 @@ ZTEST(alp_i2s_start_defer, test_underrun_write_prepare_refused_propagates_origin
 
 /* RX must be unaffected by any of the above: rx_stream_start() allocates
  * its own block from the slab instead of dequeuing a caller-filled
- * ring (i2s_dw.c:751-787), so z_start() never defers for RX -- direct
- * alp_i2s_start() before any read() must trigger immediately. */
+ * ring, so z_start() never defers for RX -- direct alp_i2s_start()
+ * before any read() must trigger immediately. */
 ZTEST(alp_i2s_start_defer, test_rx_start_is_never_deferred)
 {
 	fake_i2s_reset();
 	alp_i2s_t *h = open_rx();
 
-	/* A fresh RX handle's trigger() always succeeds (fake_i2s.c) -- what
-	 * this test actually pins is that z_start() took the immediate
-	 * path, not the TX-only deferral branch, for an RX handle. (issue
-	 * #2137 review round 2, finding 1: the fake's RX modeling is no
-	 * longer a blanket always-succeeds -- see the overrun/ERROR tests
-	 * below -- but a fresh, never-triggered handle still succeeds every
-	 * call exactly as before.) */
+	/* A fresh, never-triggered RX handle's trigger() always succeeds --
+	 * what this test actually pins is that z_start() took the immediate
+	 * path, not the TX-only deferral branch, for an RX handle. */
 	alp_status_t start_rc = alp_i2s_start(h);
 	alp_status_t stop_rc  = alp_i2s_stop(h);
 
@@ -720,6 +716,32 @@ ZTEST(alp_i2s_start_defer, test_rx_start_is_never_deferred)
 	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (RX)");
 	zassert_equal(start_rc, ALP_OK);
 	zassert_equal(stop_rc, ALP_OK);
+}
+
+/* issue #2137: stop() on an RX handle that was NEVER started must
+ * return ALP_OK directly, without ever issuing a real DROP trigger --
+ * DROP tears down real RX hardware (rx_stream_disable(), including its
+ * own clock teardown), so it must not run for a handle the caller never
+ * armed. Asserting fake_i2s_drop_call_count() == 0 (not just stop_rc ==
+ * ALP_OK) is what actually pins the gate: a mutant that changes the
+ * gated `return ALP_OK;` to `return rc;` (DRAIN's own -EIO) would fail
+ * on stop_rc alone, but a mutant that simply REMOVES the gate and lets
+ * DROP run unconditionally would still return ALP_OK (DROP always
+ * succeeds in this fake) and pass a stop_rc-only check. */
+ZTEST(alp_i2s_start_defer, test_rx_stop_never_started_is_ok_and_skips_drop)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_rx();
+
+	alp_status_t stop_rc    = alp_i2s_stop(h);
+	size_t       drop_calls = fake_i2s_drop_call_count();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (RX)");
+	zassert_equal(stop_rc, ALP_OK, "a never-started RX stop must return ALP_OK directly");
+	zassert_equal(
+	    drop_calls, 0u, "a never-started RX handle must never reach the real DROP trigger");
 }
 
 /* issue #2137 review round 2, finding 2: the NOMEM branch must clear

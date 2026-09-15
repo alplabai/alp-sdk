@@ -26,13 +26,14 @@
  *   - the RX IRQ handler's two error exits (a failed k_mem_slab_alloc() for
  *     the next block, and a failed queue_put() of the one just filled) now
  *     free the block they would otherwise have orphaned instead of leaking
- *     it (issue #2137 review round 2, finding 1);
+ *     it (issue #2137);
  *   - rx_stream_start() now resets mem_block_offset to 0 on every (re)start,
- *     matching tx_stream_start()'s own reset -- without it, the offset a
- *     just-orphaned block left at the full block size survived into the
- *     freshly allocated one, and the first ISR after a recovery delivered
- *     it as a "complete" frame that was never actually filled (issue #2137
- *     review round 3, finding 3).
+ *     matching tx_stream_start()'s own reset -- without it, a stale offset
+ *     left over by any prior stop (not only an ERROR-recovery one: none of
+ *     STOP/DRAIN/DROP/PREPARE reset this field either) survived into the
+ *     freshly allocated block, and the first ISR after the restart
+ *     delivered it as a "complete" frame that was never actually filled
+ *     (issue #2137).
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
  * fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
@@ -786,19 +787,21 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	if (ret < 0) {
 		return ret;
 	}
-	/* alp-sdk issue #2137 review round 3, finding 3: mirrors
-	 * tx_stream_start()'s own reset (i2s_dw.c:816) for the SAME reason --
-	 * on the recovery path (PREPARE moves ERROR->READY without touching
-	 * this field, then this function allocates a FRESH stream->mem_block
-	 * but never reset the offset left over from the block that
-	 * triggered the overrun in the first place -- set to the full block
-	 * size at i2s_dw.c:638 and left there by exit 1's error path just
-	 * below it). Without this, the
-	 * first ISR after recovery sees offset already >= size, computes
-	 * frames=0 for a block that was never actually filled, and queues
-	 * it as a "complete" frame on the strength of a stale offset alone
-	 * -- stale/garbage sample data delivered silently, on literally the
-	 * first frame after every recovery. */
+	/* alp-sdk issue #2137: mirrors tx_stream_start()'s own reset for the
+	 * SAME reason. None of STOP/DRAIN/DROP/PREPARE reset this field, so
+	 * a stale "already full" offset from a previous block survives into
+	 * whatever fresh stream->mem_block this call allocates -- not only
+	 * on the ERROR-recovery path (PREPARE moves ERROR->READY without
+	 * touching it, and the overrun ISR exit that set it to the full
+	 * block size never got to reset it either), but also on a plain
+	 * stop() mid-block followed by a fresh start(): none of the trigger
+	 * cases that can precede this call ever clear mem_block_offset.
+	 * Without this reset, the first ISR firing after any such restart
+	 * sees offset already >= size, computes frames=0 for a block that
+	 * was never actually filled, and queues it as a "complete" frame on
+	 * the strength of a stale offset alone -- stale/garbage sample data
+	 * delivered silently, on literally the first frame after the
+	 * restart. */
 	stream->mem_block_offset = 0;
 
 	/* Configure the I2S Peripheral Clock */

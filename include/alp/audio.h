@@ -211,9 +211,11 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
  *
  * On the Zephyr I2S backend, a gap between writes long enough for the
  * stream to underrun is recovered transparently -- calling this right
- * after (or the next @ref alp_audio_out_write, see its doc) resumes
- * playback instead of failing forever; the caller does not need to
- * detect or clear the condition itself.
+ * after (or the next @ref alp_audio_out_write, see its doc) resumes the
+ * I2S stream instead of failing forever; the caller does not need to
+ * detect or clear the condition itself. An external codec or amplifier
+ * that shut itself down when the bit clock stopped is not re-armed by
+ * this layer (see issue #2146).
  *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
@@ -266,8 +268,10 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * incremented for a chunk whose queue attempt did not fully succeed, so
  * it always reflects frames genuinely accepted by the driver. A gap
  * between writes long enough for the stream to underrun is ALSO
- * recovered transparently here: this call resumes playback instead of
- * failing forever, with no separate stop()/start() needed first.
+ * recovered transparently here: this call resumes the I2S stream
+ * instead of failing forever, with no separate stop()/start() needed
+ * first (see @ref alp_audio_out_start's doc for what this recovery
+ * does not cover downstream of the bus).
  *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.
