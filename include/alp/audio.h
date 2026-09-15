@@ -202,8 +202,11 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
  *         ALP_ERR_NOSUPPORT.
  *
- * @note A stop/restart cycle here (or an underrun a backend recovers
- *   from transparently) only restores the SoC-side I2S link -- the bit
+ * @note Ordering contract: mute or shut down any external amp before
+ *   calling this function -- if the amp is still ACTIVE when the clock
+ *   stops, it shuts down abruptly.  A stop/restart cycle here (or an
+ *   underrun, which stops the clock the same way and is tracked
+ *   separately in #2149) only restores the SoC-side I2S link -- the bit
  *   clock and FSYNC resume, but nothing in this call reaches past the
  *   I2S pins.  An external codec or amplifier on the other end of that
  *   link may have put itself into a self-protective shutdown while the
@@ -212,13 +215,16 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  *   SoC side restarted, not that the far end is listening again.  If
  *   your board has such a codec/amplifier, its driver may need to be
  *   re-armed after the first successful @ref alp_audio_out_write
- *   following that restart -- that write is what confirms the clock is
- *   actually running again, since a start can be deferred until it.
- *   For example, the TI TAS2563 smart amplifier enters software
- *   shutdown within roughly 100 ms of its TDM bit clock stopping, with no
- *   self-heal observed once it does, and needs `tas2563_resume()`
- *   (`<alp/chips/tas2563.h>`) called the same way, once the clock is
- *   confirmed back.
+ *   following that restart, and only while the stream keeps being fed --
+ *   that write is what confirms the clock is actually running again,
+ *   since a start can be deferred until it.  For example, the TI
+ *   TAS2563 smart amplifier enters software shutdown within roughly
+ *   100 ms of its TDM bit clock stopping, with no self-heal observed
+ *   once it does, and needs `tas2563_resume()` (`<alp/chips/tas2563.h>`)
+ *   called the same way, once the clock is confirmed back; calling it
+ *   just before the stream stops produced an audible thump on the
+ *   E1M-EVK (bench evidence does not separate a power-up pop from a
+ *   shutdown-on-clock-loss transient).
  */
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 

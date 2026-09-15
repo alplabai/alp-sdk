@@ -820,12 +820,14 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   (`e1m-aen-evk-03`), both amps were observed to self-transition
  *   `PWR_CTL` from `0Ch` (MODE ACTIVE) to `0Eh` (MODE SHUTDOWN) within
  *   roughly 100 ms of the I2S bit clock stopping -- already `0Eh` at a
- *   +100 ms poll, `0Ch` still at +0 ms -- and to stay in SHUTDOWN once
- *   playback resumed, with no self-heal observed at any gap tested (200,
- *   500, 1500, 3000 ms) (#2146).  The bit clock stops on every I2S stop
- *   path and on an underrun (`zephyr/drivers/i2s/i2s_dw.c`
- *   `tx_stream_disable()` calls `i2s_clock_disable()`), so a restart
- *   after either needs this call to be heard again.
+ *   +100 ms poll, `0Ch` still at +0 ms -- and to still read `0Eh`
+ *   (SHUTDOWN) 3000 ms after @ref alp_audio_out_stop with no restart,
+ *   with no self-heal observed at 200/500/1500 ms restart gaps either
+ *   (#2146).  The bit clock stops on every I2S stop path and on an
+ *   underrun (`zephyr/drivers/i2s/i2s_dw.c` `tx_stream_disable()` calls
+ *   `i2s_clock_disable()`; keeping the clock running across an underrun
+ *   is tracked separately in #2149), so a restart after either needs
+ *   this call to be heard again.
  *
  * @par Precondition: the TDM/I2S bit clock and FSYNC must already be
  *   running when this is called -- clearing the latch before the clock
@@ -837,6 +839,16 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   (and the bit clock with it) does not fire until the first write.
  *   Calling this before that first write goes out finds no clock
  *   running and clears a latch that has nothing to keep it clear.
+ *
+ * @par Ordering contract: mute or shut down the amp before calling
+ *   @ref alp_audio_out_stop -- if the amp is still ACTIVE when the
+ *   clock stops, it shuts down abruptly -- and after
+ *   @ref alp_audio_out_start, call this function only once the first
+ *   write has succeeded and only while the stream keeps being fed.  On
+ *   the E1M-EVK, calling it just before the stream stopped produced an
+ *   audible thump each time; the bench evidence does not separate a
+ *   power-up pop from a shutdown-on-clock-loss transient, so which one
+ *   caused it is unclear (#2146).
  *
  * Order matters internally, and this function fixes it: it clears the
  * latches via @ref tas2563_clear_faults (the same self-clearing
