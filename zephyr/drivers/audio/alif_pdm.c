@@ -109,6 +109,21 @@
  *    (so its own write can't latch stale status).
  * Reapply this divergence if the file is ever re-synced from the fork.
  * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (5) ----------------------
+ * dmic_alif_pdm_read() (issue #2133 round 4b) used to hand back whatever
+ * the queue held next even after the ISR silently dropped a burst -- a
+ * slab-alloc miss (get_slab()) or a full delivery queue evicting its oldest
+ * undelivered block -- so a caller reading a steady stream of blocks had no
+ * way to know one was missing from the middle of it. pdm_data now carries
+ * an `overrun` flag set at both drop sites; dmic_alif_pdm_read() checks it
+ * before every k_msgq_get() and returns -EIO, sticky until the next
+ * DMIC_TRIGGER_START, following the precedent in the upstream nxp dmic
+ * driver (dmic_mcux.c's DMIC_STATE_ERROR, checked first thing in
+ * dmic_mcux_read() before its own k_msgq_get() -- ZEPHYR_BASE
+ * zephyr/drivers/audio/dmic_mcux.c). Reapply this divergence if the file is
+ * ever re-synced from the fork.
+ * -------------------------------------------------------------------------
  */
 
 #define DT_DRV_COMPAT alif_alif_pdm
@@ -154,6 +169,18 @@ struct pdm_data {
 	uint8_t *data_buffer;
 	uint32_t buf_index;
 	uint32_t slab_missed;
+	/* Set when the ISR ever dropped audio data (a slab-alloc failure --
+	 * see get_slab() -- or the delivery queue was full and the OLDEST
+	 * undelivered block was evicted below) so dmic_alif_pdm_read() can
+	 * report the gap instead of silently splicing the next arriving
+	 * block onto it (issue #2133 round 4b; precedent: dmic_mcux.c's
+	 * DMIC_STATE_ERROR, checked in dmic_mcux_read() before every
+	 * k_msgq_get(), ZEPHYR_BASE zephyr/drivers/audio/dmic_mcux.c).
+	 * Sticky like that precedent -- cleared only by DMIC_TRIGGER_START,
+	 * so a caller that ignores one -EIO still cannot get a later read
+	 * to silently succeed past the gap.
+	 */
+	bool overrun;
 	uint32_t record_data;
 	uint32_t bytes_got;
 	uint8_t bypass_iir_filter;
@@ -724,6 +751,7 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 		pdata->buf_index = 0;
 		pdata->data_buffer = NULL;
 		pdata->slab_missed = 0;
+		pdata->overrun = false;
 
 		/* Order is load-bearing (issue #2133 round 2 divergence (4)):
 		 * the mode write is what actually starts the block sampling,
@@ -799,6 +827,23 @@ static int dmic_alif_pdm_read(const struct device *dev, uint8_t stream, void **b
 	struct pdm_data *pdata = DEV_DATA(dev);
 	int rc;
 
+	/* A dropped burst (slab exhausted or the delivery queue evicted its
+	 * oldest block -- see get_slab() / the ISR's queue-full path) must
+	 * fail every future read rather than let this call silently splice
+	 * the next arriving block onto a gap the caller never sees (issue
+	 * #2133 round 4b). Precedent: dmic_mcux.c's DMIC_STATE_ERROR check,
+	 * first thing in dmic_mcux_read(), before its k_msgq_get()
+	 * (ZEPHYR_BASE zephyr/drivers/audio/dmic_mcux.c). Sticky like that
+	 * precedent: only DMIC_TRIGGER_START clears it, so the caller must
+	 * notice and restart rather than have a later read silently
+	 * succeed past the gap.
+	 */
+	if (pdata->overrun) {
+		LOG_DBG("read: data was dropped this session (slab exhausted or queue full); "
+			"restart the capture to resume\n");
+		return -EIO;
+	}
+
 	rc = k_msgq_get(&pdata->buf_queue, buffer, SYS_TIMEOUT_MS(timeout));
 
 	if (rc != 0) {
@@ -868,6 +913,12 @@ static void *get_slab(struct pdm_data *pdm_data)
 		LOG_DBG("Memory block allocated : %p\n", buffer);
 	} else {
 		pdm_data->slab_missed++;
+		/* The consumer fell behind and a burst is about to be
+		 * dropped -- mark the session so dmic_alif_pdm_read() reports
+		 * it instead of silently handing back the next block as if
+		 * nothing were missing (issue #2133 round 4b).
+		 */
+		pdm_data->overrun = true;
 		return NULL;
 	}
 
@@ -1053,9 +1104,13 @@ static void alif_pdm_warning_isr(const struct device *dev)
 			 */
 			if (k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer, K_NO_WAIT) !=
 			    0) {
-				/* Queue full: drop oldest block to make room */
+				/* Queue full: drop oldest block to make room.
+				 * Same silent-gap hazard as a slab-alloc miss
+				 * (issue #2133 round 4b) -- the caller never
+				 * sees the evicted block, so mark overrun. */
 				void *oldest = NULL;
 
+				pdmdata->overrun = true;
 				if (k_msgq_get(&pdmdata->buf_queue, &oldest, K_NO_WAIT) == 0) {
 					k_mem_slab_free(pdmdata->mem_slab, oldest);
 					k_msgq_put(&pdmdata->buf_queue, &pdmdata->data_buffer,
