@@ -3,12 +3,13 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * Pure DMIC_TRIGGER_START decision logic for the vendored Alif PDM driver
- * (see alif_pdm.c for the full ADR 0017 provenance banner). Split into its
- * own tiny header, alongside alif_pdm_chanmap.h / alif_pdm_burst_plan.h, so
- * tests/unit/alif_pdm_trigger_state can exercise the exact refuse/no-op/
- * proceed decision dmic_alif_pdm_trigger() makes, on the host, with no
- * DEVICE_MMIO/k_msgq/PDM-instance involved.
+ * Pure DMIC_TRIGGER_START / dmic_alif_pdm_configure() session-state decision
+ * logic for the vendored Alif PDM driver (see alif_pdm.c for the full ADR
+ * 0017 provenance banner). Split into its own tiny header, alongside
+ * alif_pdm_chanmap.h / alif_pdm_burst_plan.h, so tests/unit/
+ * alif_pdm_trigger_state can exercise the exact refuse/no-op/proceed
+ * decisions dmic_alif_pdm_trigger() and dmic_alif_pdm_configure() make, on
+ * the host, with no DEVICE_MMIO/k_msgq/PDM-instance involved.
  *
  * Mirrors dmic_mcux_trigger()'s DMIC_TRIGGER_START precedent (ZEPHYR_BASE
  * zephyr/drivers/audio/dmic_mcux.c:606-616, issue #2133 round 4c):
@@ -61,6 +62,37 @@ static inline enum pdm_start_decision pdm_decide_start(bool configured, bool ove
 		return PDM_START_NOOP;
 	}
 	return PDM_START_PROCEED;
+}
+
+/**
+ * @brief Decide whether dmic_alif_pdm_configure() may proceed.
+ *
+ * Mirrors dmic_mcux_configure()'s DMIC_STATE_ACTIVE refusal (ZEPHYR_BASE
+ * zephyr/drivers/audio/dmic_mcux.c, ~lines 421-424, issue #2133 round 4d):
+ * reconfiguring an ALREADY-ACTIVE capture is refused outright, before any
+ * validation or hardware touch, closing two failures pdm_decide_start()
+ * alone did not:
+ *   (A) configure() -> START -> a SECOND, refused configure() (which used
+ *       to force-sleep the hardware and reset clk_mode/channel_map even
+ *       though record_data was still 1) -> a THIRD, valid configure() ->
+ *       START now NOOPs (record_data never went back to 0) over a block
+ *       that was silently put to sleep -- dead capture with no error
+ *       anywhere.
+ *   (B) A reconfigure mid-session swaps pdata->mem_slab out from under an
+ *       in-progress data_buffer; DMIC_TRIGGER_STOP would then free that
+ *       buffer into the NEW slab, not the one it was actually allocated
+ *       from.
+ * Both require the app to call DMIC_TRIGGER_STOP (which clears
+ * record_data) before it may configure() again.
+ *
+ * @param active pdata->record_data != 0 -- a capture session is already
+ *               running.
+ * @return true if configure() may proceed; false if it must return -EBUSY
+ *         without touching any state.
+ */
+static inline bool pdm_configure_allowed(bool active)
+{
+	return !active;
 }
 
 #endif /* ZEPHYR_DRIVERS_AUDIO_ALIF_PDM_TRIGGER_STATE_H_ */

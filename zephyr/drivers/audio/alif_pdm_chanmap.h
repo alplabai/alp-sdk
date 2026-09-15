@@ -30,16 +30,17 @@
  *      FALLING edge -- i.e. hw_channel's low bit IS the L/R edge selector,
  *      matching `lr` bit-for-bit (PDM_CHAN_LEFT=0/even=rising,
  *      PDM_CHAN_RIGHT=1/odd=falling).
- *   3. The bench-proven examples/aen/aen-pdm-mic-alif, verified on
- *      E1M-AEN803 silicon (docs/test-plan.md: "Live varying PCM captured"),
- *      and confirmed against `PDM_CONFIG_REGISTER` read back as
- *      `0x00010033` on `e1m-aen-evk-03` (issue #2133 round 2 -- channels
- *      0,1,4,5 enabled, mode 0x1): the E1M-AEN801 SoM routes PDM_C0/D0 to
- *      pdm controller 0 and PDM_C2/D2 to pdm controller 2
+ *   3. examples/aen/aen-pdm-mic-alif on E1M-AEN803/E1M-AEN801 silicon,
+ *      confirmed against `PDM_CONFIG_REGISTER` read back as `0x00010033`
+ *      on `e1m-aen-evk-03` (issue #2133 round 2 -- channels 0,1,4,5
+ *      enabled, mode 0x1): the E1M-AEN801 SoM routes PDM_C0/D0 to pdm
+ *      controller 0 and PDM_C2/D2 to pdm controller 2
  *      (metadata/e1m_modules/aen/from-alif.tsv, see the board overlay), and
  *      the working raw bitmask enables HW channels 0,1 for that first pair
  *      and 4,5 for the second -- (0*2,0*2+1) and (2*2,2*2+1). Controller 1
- *      (unused on this SoM) would span HW 2,3.
+ *      (unused on this SoM) would span HW 2,3. Round 4d's attended clap
+ *      test (issue #2133) confirmed this mapping delivers live audio on
+ *      all 4 channels, not just varying PCM.
  *
  * Up to ALIF_PDM_MAX_CONTROLLERS (4) PDM controllers x 2 (L/R) = the 8 HW
  * channels MAX_NUM_CHANNELS names -- a pdm index at or above that cannot be

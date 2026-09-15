@@ -40,7 +40,24 @@
 #define PDM_FIFO_CLEAR            (1U << 31U)   /* To clear FIFO clear bit  */
 #define PDM_AUDIO_DETECT_IRQ_STAT (0xFFU << 8U) /* Audio detect interrupt  */
 #define PDM_FIFO_ALMOST_FULL_IRQ  (0x1U << 0U)  /* FIFO almost full Interrupt*/
-#define PDM_FIFO_OVERFLOW_IRQ     (0x1U << 1U)  /* FIFO overflow interrupt   */
+#define PDM_FIFO_OVERFLOW_IRQ     (0x1U << 1U)  /* PDM_INTERRUPT_REGISTER (enable) bit
+                                                  * layout ONLY -- see
+                                                  * PDM_ERROR_IRQ_FIFO_OVERFLOW_STAT for
+                                                  * the DIFFERENT bit position this same
+                                                  * condition uses in the PDM_ERROR_IRQ
+                                                  * STATUS register (issue #2133 round
+                                                  * 4d). */
+/* PDM_ERROR_IRQ (status register, offset 0x10) bit 0 = FIFO_OVERFLOW_IRQ,
+ * read-clear (Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_ERROR_IRQ
+ * register, FIFO_OVERFLOW_IRQ field, bitRange [0:0], readAction "clear";
+ * matches the Alif DFP's PDM_INTERRUPT_STATUS_VALUE == 0x1U check against
+ * this same register, drivers/source/pdm.c + include/pdm.h). NOT the same
+ * bit position as PDM_FIFO_OVERFLOW_IRQ above -- that constant names bit 1
+ * of the DIFFERENT PDM_INTERRUPT_REGISTER (enable) register layout; reusing
+ * it to test PDM_ERROR_IRQ's status bit tested the wrong bit entirely
+ * (issue #2133 round 4d).
+ */
+#define PDM_ERROR_IRQ_FIFO_OVERFLOW_STAT (0x1U << 0U)
 #define PDM_BYPASS_IIR            (2U)    /* Bypass DC blocking IIR filter*/
 #define PDM_CHANNEL_ENABLE        (0xFFU)       /* To check the which channel is enabled*/
 

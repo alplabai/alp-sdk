@@ -6,9 +6,12 @@
  * clear `overrun` itself without freeing the in-progress block or draining
  * the queue, and never refused an unconfigured or already-active device --
  * mirroring dmic_mcux_trigger()'s DMIC_TRIGGER_START precedent (ZEPHYR_BASE
- * zephyr/drivers/audio/dmic_mcux.c:606-616) fixes both. Exercised here
- * against the exact refuse/no-op/proceed decision the trigger handler now
- * calls, on the host, with no MMIO/k_msgq/devicetree involved.
+ * zephyr/drivers/audio/dmic_mcux.c:606-616) fixes both. Round 4d adds
+ * dmic_alif_pdm_configure()'s own DMIC_STATE_ACTIVE refusal (same file,
+ * ~lines 421-424), closing a reconfigure-while-active hole trigger state
+ * alone couldn't. Exercised here against the exact decisions the
+ * configure/trigger handlers now call, on the host, with no
+ * MMIO/k_msgq/devicetree involved.
  */
 #include <stdbool.h>
 
@@ -56,4 +59,23 @@ ZTEST(alif_pdm_trigger_state, test_configured_clean_proceeds)
 ZTEST(alif_pdm_trigger_state, test_already_active_is_noop)
 {
 	zassert_equal(pdm_decide_start(true, false, true), PDM_START_NOOP);
+}
+
+/* Issue #2133 round 4d: dmic_alif_pdm_configure() never checked whether a
+ * capture session was already active, so a reconfigure mid-session could
+ * force-sleep the hardware / reset clk_mode out from under a still-running
+ * capture (pdm_decide_start()'s STARTs NOOP relied on record_data staying
+ * accurate), or swap pdata->mem_slab out from under an in-progress
+ * data_buffer. pdm_configure_allowed() mirrors dmic_mcux_configure()'s
+ * DMIC_STATE_ACTIVE refusal (ZEPHYR_BASE zephyr/drivers/audio/dmic_mcux.c,
+ * ~lines 421-424).
+ */
+ZTEST(alif_pdm_trigger_state, test_configure_refused_while_active)
+{
+	zassert_false(pdm_configure_allowed(true));
+}
+
+ZTEST(alif_pdm_trigger_state, test_configure_allowed_while_idle)
+{
+	zassert_true(pdm_configure_allowed(false));
 }

@@ -67,3 +67,21 @@ properties:
       accept -- see clk-frequency-min. E1M-EVK MP34DT05TR-A: <= 3.25 MHz
       (mpxxdtyy.h: MPXXDTYY_MAX_PDM_FREQ). Optional, same fallback as
       clk-frequency-min.
+
+  channel-gain:
+    type: int
+    default: 0x800
+    description: |
+      Per-channel PDM_CH_GAIN value applied to every enabled hardware channel
+      by dmic_alif_pdm_configure() (issue #2143). The default (0x800, 2048)
+      is carried from Alif's ml-embedded-evaluation-kit reference
+      (mic_listener.c) -- it is NOT documented anywhere as a calibrated
+      value; no source names PDM_CH_GAIN's bit width or dB scale. Alif's own
+      KWS sample (alif_kws AudioBackend.cpp) uses 0xF00 for this same 48 kHz
+      mode instead -- higher, also unexplained. The driver's OLD hardcoded
+      default (0x0D, from Alif's register-level driver test,
+      sdk-alif tests/drivers/pdm/src/alif_test_pdm.c) measured ~40 dB too
+      quiet on the E1M-EVK's MP34DT05TR-A mics (issue #2133 round 4d silicon
+      result) -- it was never an audio-tuned value to begin with. Override
+      per board/mic if 0x800 proves wrong on silicon; PDM_INIT's BUILD_ASSERT
+      rejects an out-of-range value at build time.

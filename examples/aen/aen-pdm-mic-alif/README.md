@@ -36,13 +36,14 @@ declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 
 | `SAMPLE_RATE_HZ` | PDM mode | On THIS board | FIR-reuse basis |
 |---|---|---|---|
-| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec, mode confirmed programmed** (`PDM_CONFIG_REGISTER=0x00070033` held throughout capture) -- but the app's measured rate on that silicon run was **~32 kHz, not 48 kHz**; round 4c traces that to the app's OWN (now-fixed) read-loop pacing rather than the PDM clock, see Status | same decimation ratio as the register-proven mode 1 -- direct |
+| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **CONFIRMED on silicon** (commit `68a169977`, `e1m-aen-evk-03`): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`, no `-EIO` for the full run | same decimation ratio as the register-proven mode 1 -- direct |
 | `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec, not yet bench-run | different decimation ratio (48 vs 64) -- less direct |
 | `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
 
-**Do not read the 48 kHz row as "48 kHz works"** -- the mode select is right,
-the measured PCM rate on silicon is not; see Status.
+**48 kHz rate is now bench-confirmed with no drops.** A separate attended
+clap test also confirmed the mics are live at this rate, but at ~40 dB too
+low a gain -- see Status and issue #2143.
 
 ```sh
 # default (48 kHz, in spec):
@@ -86,21 +87,26 @@ a clean read at the right rate with no channel over that floor now reports
   `measured_rate_hz` read **~32 kHz in two runs**, not 48 kHz. Per-channel
   `rms_ac` 6-7, `peak_to_peak` 1011-1126 (sparse spikes, not a clean tone).
 
-**Round 4c, restated conservatively:** the ~32 kHz reading is this app's OWN
-rate measurement -- frames delivered per elapsed wall-clock time in ITS read
-loop -- so it measures how fast the loop pulled blocks, not the PDM sample
-clock. Round 4a shipped this example with a double-precision per-sample
-stats loop (soft-float, ~150-180 ms/block against a 100 ms block period,
-no `CONFIG_FPU`); a 1 ms timing model of that loop reproduces ~32-36 kHz
-readings on its own. Whether the driver's 4-block slab ALSO exhausted on
-that specific run was not separately measured at the time -- the driver had
-no way to report a drop until this round added one (`dmic_read()` now
-returns `-EIO` on any dropped burst, including a genuine hardware FIFO
-overflow). This example's stats loop is now integer-only so it cannot
-reproduce that pacing artifact. Do not treat 48 kHz as verified -- only the
-clock-mode selection and the 16 kHz rejection are proven on silicon so far;
-a fresh bench run with both fixes in place is the next step, not done in
-this round.
+**Round 4c** traced the ~32 kHz reading to this app's OWN rate measurement --
+frames delivered per elapsed wall-clock time in ITS read loop, paced by a
+double-precision per-sample stats loop (soft-float, ~150-180 ms/block
+against a 100 ms block period, no `CONFIG_FPU`) -- not the PDM sample clock.
+The stats loop is now integer-only.
+
+**Round 4d silicon results on `e1m-aen-evk-03`** (commit `68a169977`, fixed
+consumer): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`,
+no `-EIO` for the full run -- **48 kHz is now confirmed with no drops.** A
+separate 30 s attended clap test (same driver, patched read loop) recorded
+coherent bursts on all 4 channels when a person clapped near U19/U20 (peak
+p2p ch0=34 ch1=46 ch2=48 ch3=48 at t=14000 ms; quiet windows stay 2-3 LSB)
+-- **the mics are confirmed live.** A mid-capture register readback during
+that same test found `CTL0=0x00070033`, `CH0 GAIN=0x0000000D`,
+`PHASE=0x0000001F`, `FIR[0]=0x00000001` -- the gain is ~40 dB too low
+against Alif's own audio-capture apps (`alif_kws` `AudioBackend.cpp` uses
+`0x00000F00` for this same mode; the ML evaluation kit's `mic_listener.c`
+uses `0x00000800`). Fixed by issue #2143 (a new `channel-gain` devicetree
+property, default `0x800`); a silicon re-run with the corrected gain
+default has not been done yet.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):

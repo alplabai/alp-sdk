@@ -149,7 +149,9 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  *         the caller stops and restarts the stream; every read keeps
  *         returning ALP_ERR_IO until then. This is distinct from
  *         ALP_ERR_TIMEOUT, which just means no data arrived within
- *         @p timeout_ms and does not by itself indicate loss.
+ *         @p timeout_ms (including a non-blocking @p timeout_ms=0 call
+ *         that simply found nothing queued yet -- issue #2133 round 4d)
+ *         and does not by itself indicate loss.
  */
 alp_status_t alp_audio_in_read(alp_audio_in_t *in,
                                void           *buf,

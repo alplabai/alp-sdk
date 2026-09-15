@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * ====== ADR 0017 Tier-2 (vendored fork-driver copy, INTERIM -> retire onto
- * sdk-alif fork, BENCH-UNVERIFIED) ======
+ * sdk-alif fork, PARTIALLY BENCH-VERIFIED) ======
  * The Alif Ensemble PDM (pulse-density-modulation microphone) block is driven by
  * a vendored copy of the Apache-2.0 zephyr_alif fork driver
  * (drivers/audio/alif_pdm.c, compatible "alif,alif_pdm").  hal_alif ships no PDM
@@ -13,11 +13,17 @@
  * it survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
  * once the pdm node is repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * Silicon status (issue #2133 round 4d, e1m-aen-evk-03): 48 kHz mode 7
+ * capture rate confirmed exact with no drops, and an attended clap test
+ * confirmed the mics are live. Confirmed at the OLD, too-quiet gain default
+ * (0x0D, issue #2143 divergence (9)) -- a re-run with the new 0x800 default
+ * has not been done yet, so this is not fully bench-verified end to end.
  * ==================================================================
  *
  * Vendored from the fork with this provenance header added, plus the
  * documented divergences below; the register map lives in the companion
- * alif_pdm_reg.h.  vendor-ext, BENCH-UNVERIFIED.
+ * alif_pdm_reg.h.  vendor-ext, PARTIALLY BENCH-VERIFIED (see silicon status
+ * above).
  *
  * ------------------------- alp-sdk divergence -------------------------
  * pdm_channel_config()'s FIR-coefficient store loop (issue #758) was
@@ -168,11 +174,16 @@
  *    zephyr/drivers/audio/dmic_mcux.c:606-616). STOP is now the only place
  *    that clears `overrun`, after it frees/drains.
  *  - pdm_error_handler() read-cleared PDM_ERROR_IRQ without checking it, so
- *    a genuine hardware FIFO overflow (HWRM 15.7.5.3.5, bit 1
- *    PDM_FIFO_OVERFLOW_IRQ) was a THIRD silent drop alongside the
+ *    a genuine hardware FIFO overflow was a THIRD silent drop alongside the
  *    slab-alloc-miss and queue-full paths -- now sets `overrun` too. Runs
  *    on both the HP PDM's dedicated error IRQ and, inline, LPPDM's shared
- *    warning IRQ.
+ *    warning IRQ. Round 4d correction: this originally tested bit 1
+ *    (PDM_FIFO_OVERFLOW_IRQ), which is PDM_INTERRUPT_REGISTER's (enable)
+ *    bit layout, not PDM_ERROR_IRQ's -- the SVD places FIFO_OVERFLOW_IRQ
+ *    at bit 0 of the STATUS register, confirmed by the Alif DFP's own
+ *    equality check against it (see pdm_error_handler()'s comment and
+ *    PDM_ERROR_IRQ_FIFO_OVERFLOW_STAT, alif_pdm_reg.h). The wrong bit
+ *    never actually detected a real overflow.
  *  - A refused configure() left pdata->clk_mode/channel_map at whatever a
  *    PRIOR successful configure() set, so a refused reconfigure followed
  *    by START would restart the OLD clock mode over hardware channels
@@ -183,6 +194,37 @@
  *    (divergence (7)) wiped a prior session's hardware channel-enable
  *    field on every resume. Split into pdm_hw_bringup(dev, cold_init) --
  *    only a genuine cold boot force-sleeps; resume does not.
+ * Reapply this divergence if the file is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (9) ----------------------
+ * issue #2133 round 4d, two more state findings, plus issue #2143's gain fix:
+ *  - dmic_alif_pdm_configure() never checked whether a capture session was
+ *    already active (pdata->record_data != 0), so a reconfigure mid-session
+ *    could force-sleep the hardware / reset clk_mode out from under a
+ *    still-running capture, or swap pdata->mem_slab out from under an
+ *    in-progress data_buffer (the next STOP would then free it into the
+ *    WRONG slab). pdm_configure_allowed() (alif_pdm_trigger_state.h) now
+ *    refuses (-EBUSY) before touching any state, mirroring
+ *    dmic_mcux_configure()'s DMIC_STATE_ACTIVE refusal (ZEPHYR_BASE
+ *    zephyr/drivers/audio/dmic_mcux.c:421-424).
+ *  - PM_DEVICE_ACTION_SUSPEND left record_data/overrun/the in-progress
+ *    block/the queue exactly as an active session left them, so a
+ *    post-resume DMIC_TRIGGER_START silently NOOPed over a block nothing
+ *    was sampling into (dead capture, no error), and pdm_hw_bringup()'s
+ *    k_msgq_init() on resume orphaned any still-queued blocks. SUSPEND now
+ *    runs the same free/drain/record_data=0/overrun=false cleanup
+ *    DMIC_TRIGGER_STOP does.
+ *  - issue #2143: PDM_DEFAULT_CH_GAIN was 0x0000000D, from Alif's
+ *    register-level driver test (sdk-alif tests/drivers/pdm/src/
+ *    alif_test_pdm.c), not from any audio-capture-tuned source -- silicon
+ *    measured this ~40 dB too quiet on the EVK's MP34DT05TR-A mics. The
+ *    driver now reads a per-instance, DT-configurable `channel-gain`
+ *    property (alif,alif-pdm.yaml) instead, defaulting to 0x800 from the
+ *    ML evaluation kit's mic_listener.c. Phase (0x1F), FIR
+ *    (pdm_default_fir_voice512), and IIR (bypass) are UNCHANGED by this
+ *    divergence -- they already match Alif's own audio-capture examples,
+ *    only the gain was wrong.
  * Reapply this divergence if the file is ever re-synced from the fork.
  * -------------------------------------------------------------------------
  */
@@ -238,9 +280,12 @@ struct pdm_data {
 	 * block onto it (issue #2133 round 4b; precedent: dmic_mcux.c's
 	 * DMIC_STATE_ERROR, checked in dmic_mcux_read() before every
 	 * k_msgq_get(), ZEPHYR_BASE zephyr/drivers/audio/dmic_mcux.c).
-	 * Sticky like that precedent -- cleared only by DMIC_TRIGGER_START,
-	 * so a caller that ignores one -EIO still cannot get a later read
-	 * to silently succeed past the gap.
+	 * Sticky like that precedent -- cleared only by DMIC_TRIGGER_STOP
+	 * (issue #2133 round 4c: originally cleared by START itself, which
+	 * skipped freeing the in-progress block/draining the queue and let a
+	 * restart-without-stopping silently erase the report), so a caller
+	 * that ignores one -EIO still cannot get a later read to silently
+	 * succeed past the gap.
 	 */
 	bool overrun;
 	uint32_t record_data;
@@ -281,6 +326,10 @@ struct pdm_config {
 	 */
 	uint32_t clk_frequency_min;
 	uint32_t clk_frequency_max;
+	/* PDM_CH_GAIN applied to every enabled channel (issue #2143) -- see
+	 * alif,alif-pdm.yaml's channel-gain for the provenance/default.
+	 */
+	uint32_t channel_gain;
 };
 
 /* pcm_rate -> PDM clock-mode table (issue #2133). Each entry's PDM bit-clock
@@ -348,23 +397,28 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * ch x 2 B) arrived as configured -- but the app's `measured_rate_hz`
 	 * was ~32 kHz (two runs), not 48 kHz.
 	 *
-	 * ROUND 4C, restated conservatively: that example's rate measurement
-	 * counts frames delivered per wall-clock time in ITS OWN read loop,
-	 * so it measures how fast the CONSUMER pulled blocks, not the PDM
-	 * sample clock -- and round 4b found the example's own per-sample
-	 * stats loop was slow enough (soft-float double-precision Welford,
-	 * ~150 ms/block against a 100 ms block period, no CONFIG_FPU) to
-	 * pace that measurement on its own. A 1 ms timing model of that
-	 * consumer shows it explains the ~32 kHz reading whether or not the
-	 * 4-block slab ever actually exhausted during that specific run --
-	 * whether it did was NOT separately measured at the time (the
-	 * driver had no way to report a drop yet). Round 4b's `overrun`
-	 * flag + round 4c's hardware-FIFO-overflow check close that
-	 * reporting hole going forward, and the example now fixes its own
-	 * consumer to integer-only stats. Do NOT assume this entry delivers
-	 * 48 kHz PCM yet -- only that mode 7 itself is correctly selected;
-	 * a fresh silicon re-run with the fixed consumer is the next step,
-	 * not done in this round.
+	 * ROUND 4C: that example's rate measurement counted frames delivered
+	 * per wall-clock time in ITS OWN read loop, so it measured how fast
+	 * the CONSUMER pulled blocks, not the PDM sample clock -- round 4b
+	 * found the example's own per-sample stats loop was slow enough
+	 * (soft-float double-precision Welford, ~150 ms/block against a
+	 * 100 ms block period, no CONFIG_FPU) to pace that measurement on
+	 * its own. The example was fixed to integer-only stats.
+	 *
+	 * ROUND 4D SILICON RESULT (commit 68a169977, e1m-aen-evk-03, fixed
+	 * consumer): a fresh run measured `measured_rate_hz=48000` exactly,
+	 * with `slab_missed=0`, `overrun=0`, and no -EIO for the full run --
+	 * mode 7 delivers 48 kHz PCM with no dropped blocks. A separate 30 s
+	 * attended clap test (same driver, patched read loop) recorded
+	 * coherent bursts on all 4 channels when a person clapped near
+	 * U19/U20 (peak p2p ch0=34 ch1=46 ch2=48 ch3=48 at t=14000 ms, quiet
+	 * windows 2-3 LSB) -- the mics are live. A mid-capture register
+	 * readback during that same test found CH0 GAIN=0x0000000D, ~40 dB
+	 * too low against Alif's own audio-capture apps (alif_kws
+	 * AudioBackend.cpp uses 0x00000F00 for this same mode; the ML
+	 * evaluation kit's mic_listener.c uses 0x00000800) -- fixed by
+	 * divergence (9)/the channel-gain DT property below (issue #2143). A silicon
+	 * re-run with the corrected gain default has not been done yet.
 	 */
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
@@ -431,21 +485,25 @@ static const uint32_t pdm_default_fir_voice512[PDM_MAX_FIR_COEFFICIENT] = {
 	0x000007D9, 0x00000793, 0x00000029, 0x0000072C, 0x00000072, 0x000002FD,
 };
 #define PDM_DEFAULT_CH_PHASE          0x0000001FUL
-#define PDM_DEFAULT_CH_GAIN           0x0000000DUL
 #define PDM_DEFAULT_CH_PEAK_DETECT_TH 0x00060002UL
 #define PDM_DEFAULT_CH_PEAK_DETECT_IT 0x0004002DUL
 #define PDM_DEFAULT_CH_IIR_COEF       0x00000004UL
 
 /* Prime one hardware channel's FIR/IIR/gain/phase/peak-detect state for
- * STANDARD_VOICE_512 -- same calls, same values, as the bench-proven
+ * STANDARD_VOICE_512 -- same calls, same values, as
  * examples/aen/aen-pdm-mic-alif used to do by hand before every configure().
+ * FIR/IIR/phase are silicon-consistent with Alif's own audio-capture
+ * examples (issue #2133); the gain comes from the DT-configurable
+ * cfg->channel_gain, NOT a hardcoded default -- see divergence (9)
+ * (issue #2143).
  */
 static void pdm_apply_channel_defaults(const struct device *dev, uint8_t hw_ch)
 {
-	struct pdm_ch_config cc = { 0 };
+	const struct pdm_config *cfg = DEV_CFG(dev);
+	struct pdm_ch_config     cc = { 0 };
 
 	pdm_set_ch_phase(dev, hw_ch, PDM_DEFAULT_CH_PHASE);
-	pdm_set_ch_gain(dev, hw_ch, PDM_DEFAULT_CH_GAIN);
+	pdm_set_ch_gain(dev, hw_ch, cfg->channel_gain);
 	pdm_set_peak_detect_th(dev, hw_ch, PDM_DEFAULT_CH_PEAK_DETECT_TH);
 	pdm_set_peak_detect_itv(dev, hw_ch, PDM_DEFAULT_CH_PEAK_DETECT_IT);
 
@@ -469,12 +527,26 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 {
 	struct pdm_data *pdata = DEV_DATA(dev);
 	const struct pdm_config *cfg = DEV_CFG(dev);
-	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
-	uint32_t reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+	uintptr_t reg_base;
+	uint32_t reg_val;
 	uint8_t hw_chan_mask;
 	uint8_t clk_mode;
 	uint32_t pdm_clk_hz;
 	int rc;
+
+	/* Mirror dmic_mcux_configure()'s DMIC_STATE_ACTIVE refusal (issue
+	 * #2133 round 4d) -- see pdm_configure_allowed()'s header comment
+	 * for the two failure sequences this closes. Checked BEFORE touching
+	 * any hardware state, so a refused reconfigure during an active
+	 * session leaves the running capture completely undisturbed.
+	 */
+	if (!pdm_configure_allowed(pdata->record_data != 0)) {
+		LOG_ERR("Cannot configure device while it is active");
+		return -EBUSY;
+	}
+
+	reg_base = DEVICE_MMIO_GET(dev);
+	reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
@@ -582,7 +654,7 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 		 * channel's FIR/IIR/gain/phase/peak-detect defaults here so
 		 * DMIC_TRIGGER_START's clock-mode write (which is what
 		 * actually starts sampling) lands on an already-configured
-		 * channel bank. Same values as the bench-proven
+		 * channel bank. Same values as
 		 * examples/aen/aen-pdm-mic-alif used to set by hand.
 		 * pdm_channel_config()/pdm_mode() stay public so an app can
 		 * still override these afterward.
@@ -856,7 +928,16 @@ static int dmic_alif_pdm_trigger(const struct device *dev, enum dmic_trigger cmd
 		    pdata->record_data != 0);
 
 		if (decision == PDM_START_REFUSE) {
-			LOG_ERR("Device is not configured");
+			/* Two distinct causes fold into the same decision (issue
+			 * #2133 round 4d) -- log which one so a dead-capture
+			 * report doesn't get misdiagnosed as the other.
+			 */
+			if (pdata->clk_mode == PDM_MODE_MICROPHONE_SLEEP) {
+				LOG_ERR("Device is not configured");
+			} else {
+				LOG_ERR("Dropped PDM data pending -- call DMIC_TRIGGER_STOP "
+					"before START");
+			}
 			return -EIO;
 		}
 		if (decision == PDM_START_NOOP) {
@@ -945,20 +1026,22 @@ static int dmic_alif_pdm_read(const struct device *dev, uint8_t stream, void **b
 	struct pdm_data *pdata = DEV_DATA(dev);
 	int rc;
 
-	/* A dropped burst (slab exhausted or the delivery queue evicted its
-	 * oldest block -- see get_slab() / the ISR's queue-full path) must
-	 * fail every future read rather than let this call silently splice
-	 * the next arriving block onto a gap the caller never sees (issue
-	 * #2133 round 4b). Precedent: dmic_mcux.c's DMIC_STATE_ERROR check,
-	 * first thing in dmic_mcux_read(), before its k_msgq_get()
+	/* A dropped burst (slab exhausted, the delivery queue evicted its
+	 * oldest block, an unplannable burst, or a hardware FIFO overflow --
+	 * see get_slab() / the ISR's queue-full path / pdm_error_handler())
+	 * must fail every future read rather than let this call silently
+	 * splice the next arriving block onto a gap the caller never sees
+	 * (issue #2133 round 4b). Precedent: dmic_mcux.c's DMIC_STATE_ERROR
+	 * check, first thing in dmic_mcux_read(), before its k_msgq_get()
 	 * (ZEPHYR_BASE zephyr/drivers/audio/dmic_mcux.c). Sticky like that
-	 * precedent: only DMIC_TRIGGER_START clears it, so the caller must
-	 * notice and restart rather than have a later read silently
-	 * succeed past the gap.
+	 * precedent: only DMIC_TRIGGER_STOP clears it (issue #2133 round 4c
+	 * -- START used to clear it itself, defeating the report), so the
+	 * caller must stop, then start again, rather than have a later read
+	 * silently succeed past the gap.
 	 */
 	if (pdata->overrun) {
-		LOG_DBG("read: data was dropped this session (slab exhausted or queue full); "
-			"restart the capture to resume\n");
+		LOG_DBG("read: data was dropped this session (slab exhausted, queue full, or "
+			"hardware FIFO overflow); stop then start the capture to resume\n");
 		return -EIO;
 	}
 
@@ -980,21 +1063,33 @@ static inline void pdm_error_handler(const struct device *dev)
 
 	sys_clear_bits(reg_base + PDM_INTERRUPT_REGISTER, PDM_FIFO_OVERFLOW_IRQ);
 
-	/* HWRM 15.7.5.3.5: PDM_ERROR_IRQ (register offset 0x10) is
-	 * edge-triggered, sticky, clear-on-read -- this IS the read that
-	 * clears it, so check bit 1 (PDM_FIFO_OVERFLOW_IRQ, alif_pdm_reg.h)
-	 * before discarding the value. A hardware FIFO overflow is a THIRD
-	 * silent drop alongside the slab-alloc-miss and queue-full paths
-	 * (issue #2133 round 4c) -- it used to go unreported the same way
-	 * they did before round 4b's `overrun` flag existed. This function
-	 * runs from both the HP PDM's dedicated error_intr ISR
-	 * (pdm_error_detect_irq_handler()) and, inline, from
+	/* PDM_ERROR_IRQ (register offset 0x10) is edge-triggered, sticky,
+	 * clear-on-read -- this IS the read that clears it, so check its
+	 * status bit before discarding the value. A hardware FIFO overflow
+	 * is a THIRD silent drop alongside the slab-alloc-miss and
+	 * queue-full paths (issue #2133 round 4c) -- it used to go
+	 * unreported the same way they did before round 4b's `overrun` flag
+	 * existed. This function runs from both the HP PDM's dedicated
+	 * error_intr ISR (pdm_error_detect_irq_handler()) and, inline, from
 	 * alif_pdm_warning_isr() for any instance without a named error_intr
 	 * line (LPPDM folds error+audio-detect into the warning IRQ -- see
 	 * the `!cfg->has_error_irq` call below), so this covers both paths.
+	 *
+	 * BIT POSITION (issue #2133 round 4d): PDM_ERROR_IRQ's
+	 * FIFO_OVERFLOW_IRQ status bit is bit 0 -- PDM_ERROR_IRQ_FIFO_
+	 * OVERFLOW_STAT, alif_pdm_reg.h, cited from the Alif SVD
+	 * (AE822FA0E5597BS0_CM55_HP_View.svd, PDM_ERROR_IRQ register) and
+	 * confirmed by the Alif DFP's own equality check against this
+	 * register (drivers/source/pdm.c + include/pdm.h,
+	 * PDM_INTERRUPT_STATUS_VALUE == 0x1U). This is NOT the same bit as
+	 * PDM_FIFO_OVERFLOW_IRQ (bit 1), which names the DIFFERENT
+	 * PDM_INTERRUPT_REGISTER (enable) bit layout used two lines above --
+	 * an earlier version of this function wrongly reused that enable-bit
+	 * constant to test the status register and so never actually
+	 * detected a real overflow.
 	 */
 	error_status = sys_read32(reg_base + PDM_ERROR_IRQ);
-	if (error_status & PDM_FIFO_OVERFLOW_IRQ) {
+	if (error_status & PDM_ERROR_IRQ_FIFO_OVERFLOW_STAT) {
 		pdata->overrun = true;
 	}
 }
@@ -1388,14 +1483,43 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		 * pdm_hw_bringup()'s header comment. */
 		return pdm_hw_bringup(dev, false);
 
-	case PM_DEVICE_ACTION_SUSPEND:
+	case PM_DEVICE_ACTION_SUSPEND: {
+		struct pdm_data *pdata = DEV_DATA(dev);
+
 		/* Force the clock back to MICROPHONE_SLEEP (issue #2133
 		 * round 2 divergence (4)) -- a suspend while still actively
 		 * sampling (app skipped DMIC_TRIGGER_STOP) must not leave
 		 * PDM_C0/PDM_C2 clocking the mics through a power-down.
 		 */
 		pdm_mode(dev, PDM_MODE_MICROPHONE_SLEEP);
+
+		/* Round 4d fix: this used to leave record_data/overrun/the
+		 * in-progress block/the queue exactly as an active session
+		 * left them. Two bugs resulted: (1) record_data stayed 1
+		 * across resume, so a post-resume DMIC_TRIGGER_START silently
+		 * NOOPed (pdm_decide_start()) over a block nothing was
+		 * sampling into anymore -- dead capture with no error; (2)
+		 * pdm_hw_bringup()'s k_msgq_init() on resume re-initializes
+		 * buf_queue, orphaning (leaking) whatever blocks were still
+		 * queued at suspend time. Mirror DMIC_TRIGGER_STOP's cleanup
+		 * so a suspend/resume cycle is indistinguishable from a
+		 * STOP/START one from the app's side. */
+		if (pdata->data_buffer != NULL) {
+			k_mem_slab_free(pdata->mem_slab, pdata->data_buffer);
+			pdata->data_buffer = NULL;
+		}
+
+		void *buf;
+
+		while (k_msgq_get(&pdata->buf_queue, &buf, K_NO_WAIT) == 0) {
+			k_mem_slab_free(pdata->mem_slab, buf);
+		}
+
+		pdata->record_data = 0;
+		pdata->overrun = false;
+
 		return 0;
+	}
 
 	case PM_DEVICE_ACTION_TURN_OFF:
 	case PM_DEVICE_ACTION_TURN_ON:
@@ -1432,6 +1556,20 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
 		     "alif,alif-pdm: clk-frequency-min must not exceed " \
 		     "clk-frequency-max (the DT range is inverted)"); \
+	/* PDM_CH_GAIN's register width/scale is undocumented (issue #2143), \
+	 * so this cannot be a tight bound -- it exists only to catch an \
+	 * obviously-wrong value (e.g. a copy-paste of a raw dB figure) at \
+	 * BUILD time rather than silicon. Bounds taken from the one place a \
+	 * range IS documented for this register: subsys/bluetooth/le_audio's \
+	 * ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN Kconfig, `range 1 256`, which \
+	 * that subsystem left-shifts by 4 before writing PDM_CH_GAIN -- so \
+	 * 1..256 becomes 0x10..0x1000 in this register's own units. \
+	 */ \
+	BUILD_ASSERT(DT_INST_PROP_OR(n, channel_gain, 0x800) >= 0x10 && \
+			     DT_INST_PROP_OR(n, channel_gain, 0x800) <= 0x1000, \
+		     "alif,alif-pdm: channel-gain out of the plausible 0x10..0x1000 " \
+		     "range (BLE Audio's ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN 1..256, " \
+		     "shifted left by 4)"); \
 	static void            pdm_irq_config_##n(void); \
 	static struct pdm_data dmic_alif_pdm_data_##n = { \
 		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \
@@ -1447,6 +1585,7 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		.clkid             = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid), \
 		.clk_frequency_min = DT_INST_PROP_OR(n, clk_frequency_min, 0), \
 		.clk_frequency_max = DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX), \
+		.channel_gain      = DT_INST_PROP_OR(n, channel_gain, 0x800), \
 	}; \
 	static void pdm_irq_config_##n(void) \
 	{ \
