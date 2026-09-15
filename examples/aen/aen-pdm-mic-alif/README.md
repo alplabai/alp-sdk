@@ -1,10 +1,10 @@
 # aen-pdm-mic-alif
 
-Capture PCM audio from the EVK's **PDM microphones** (4× MP34DT05) on the
-E1M-AEN801 (Alif Ensemble **E8**, M55-HE), through the Ensemble **HP PDM** block
-(`pdm@4902d000`) and the vendored `alif,alif-pdm` DMIC driver. Drives the standard
-Zephyr **DMIC API** (`dmic_configure` / `dmic_trigger` / `dmic_read`) on
-`DT_ALIAS(alp_pdm0)`.
+Capture PCM audio from the EVK's **PDM microphones** (4× MP34DT05TR-A,
+`E1M-EVK-2626-R2_components.csv`) on the E1M-AEN801 (Alif Ensemble **E8**,
+M55-HE), through the Ensemble **HP PDM** block (`pdm@4902d000`) and the
+vendored `alif,alif-pdm` DMIC driver. Drives the standard Zephyr **DMIC API**
+(`dmic_configure` / `dmic_trigger` / `dmic_read`) on `DT_ALIAS(alp_pdm0)`.
 
 ## The block
 
@@ -26,27 +26,40 @@ So two stereo data lines (D0→ch0/1, D2→ch4/5) = the 4 mics. Upstream Zephyr 
 
 ## Rates
 
-Two `SAMPLE_RATE_HZ` builds are supported, both keyed in
-`zephyr/drivers/audio/alif_pdm.c`'s `pdm_clock_modes` table:
+`zephyr/drivers/audio/alif_pdm.c`'s `pdm_clock_modes` table has four entries,
+but only two are **in spec for the fitted mics** on this board. The
+MP34DT05TR-A's PDM clock spec, per ST's own in-tree Zephyr driver
+(`drivers/audio/mpxxdtyy.h`: `MPXXDTYY_MIN_PDM_FREQ 1200000`,
+`MPXXDTYY_MAX_PDM_FREQ 3250000`), is **1.2-3.25 MHz** — the board overlay
+declares that range (`min-pdm-clk-freq`/`max-pdm-clk-freq`), and
+`dmic_alif_pdm_configure()` now rejects anything outside it with `-EINVAL`:
 
-| `SAMPLE_RATE_HZ` | PDM mode | Status |
-|---|---|---|
-| `8000` (build default is `16000`; override with `-DEXTRA_CFLAGS="-DSAMPLE_RATE_HZ=8000"`) | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **BENCH-PROVEN** on `e1m-aen-evk-03` |
-| `16000` (default) | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64 — same ratio) | vendor-sourced FIR reuse, **not yet itself bench-verified** |
+| `SAMPLE_RATE_HZ` | PDM mode | On THIS board | FIR-reuse basis |
+|---|---|---|---|
+| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec** | same decimation ratio as the register-proven mode 1 -- direct |
+| `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec | different decimation ratio (48 vs 64) -- less direct |
+| `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
+| `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
+
+None of these four is bench-verified as REAL acoustic capture yet (see
+Status) -- 8 kHz's earlier "PASS" is downgraded below.
 
 ```sh
+# default (48 kHz, in spec):
+west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-pdm-mic-alif
+# prove the out-of-spec guard (expect RESULT FAIL: configure rc=-22):
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
-  examples/aen/aen-pdm-mic-alif -- -DEXTRA_CFLAGS="-DSAMPLE_RATE_HZ=8000"
+  examples/aen/aen-pdm-mic-alif -- -DEXTRA_CFLAGS="-DSAMPLE_RATE_HZ=16000"
 ```
 
 ## Status
 
-**WORKING on E8 — RESULT PASS: live PCM captured from the mics at
-`SAMPLE_RATE_HZ=8000`.** The 6300/6400-nonzero-of-12800-byte-block reading
-below is the round-1 bench run, on the driver as it stood before round 2 added
-the `measured_rate_hz` check (its own read log is still accurate; only the
-"RESULT" line's rate qualifier and the mode-1-is-8kHz correction below are
-new):
+**Round-1's PASS is DOWNGRADED, not confirmed.** The 6300/6400-nonzero-of-
+12800-byte-block reading below was captured at 8 kHz (`PDM_MODE_STANDARD_
+VOICE_512_CLK_FRQ`, 512 kHz clk) -- **below the fitted MP34DT05TR-A mics'
+1.2 MHz minimum**. An under-clocked PDM mic can output non-constant, non-zero
+noise; round 1's gate ("samples aren't all equal") cannot distinguish that
+from real acoustic energy:
 
 ```
 [pdm] read[0] size=12800 nonzero=6288 first=0
@@ -55,15 +68,16 @@ new):
 [pdm] RESULT PASS: varying PCM captured = live audio
 ```
 
-Issue #2133 round 1 shipped `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` mis-keyed to
-16 kHz; it is actually **8 kHz** (HWRM Table 15-118: 512 kHz clock / decimation
-64), confirmed by the round-1 bench's own 1600-frame-per-~200ms cadence (a
-100ms-block cadence would mean 16 kHz; ~200ms means 8 kHz). Round 2 added a
-`measured_rate_hz` print + a ±5% pass gate so a future rate mislabel fails
-loudly instead of only "PCM varies" passing regardless of rate — its own
-printed reading is pending the next bench run. The 16 kHz build
-(`PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ`) is not yet bench-verified at all — see
-the Rates table above.
+Round 3 changes what this example proves two ways: (1) it now defaults to
+**48 kHz** (`PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ`), the only table
+entry both in spec for these mics and sharing the register-proven mode's
+decimation ratio; (2) it adds a per-channel **RMS / peak-to-peak / DC-offset**
+print and requires at least one channel to clear a documented floor (a full
+order of magnitude above a dead channel's "±1-2 LSB flat noise") for `PASS` --
+a clean read at the right rate with no channel over that floor now reports
+`INCONCLUSIVE (no acoustic signal)` instead. Neither the 48 kHz nor the 32 kHz
+in-spec mode has its own silicon confirmation yet; that is the next bench run,
+not this round.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):
@@ -80,6 +94,8 @@ them):
    `dmic_build_channel_map()` channel map (not a raw PDM bitmask) and calls
    no Alif-specific setup function. `pdm_mode()` / `pdm_channel_config()`
    stay available for an app that wants to override the driver's defaults.
+   Round 3: the driver also rejects a mode outside the board overlay's
+   declared mic clock range -- see Rates above.
 4. **EXPMST0 IP clock not forced** — set `EXPMST0_CTRL` (`0x4902F000`) bits 30/31
    (PCLK/IPCLK force), not just the bit-8 gate.
 5. **The 76.8 MHz audio source was OFF** — the load-bearing fix. The upstream Alif

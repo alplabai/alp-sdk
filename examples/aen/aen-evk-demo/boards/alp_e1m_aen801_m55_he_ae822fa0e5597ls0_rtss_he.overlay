@@ -740,7 +740,15 @@
  *     (src/backends/audio/zephyr_drv.c), so channels 4/5 are unreachable
  *     through the portable surface this phase uses regardless of whether
  *     their pads are declared -- two mics is already enough to prove the
- *     loop closed.
+ *     loop closed. min-pdm-clk-freq/max-pdm-clk-freq below declare the fitted
+ *     MP34DT05TR-A's 1.2-3.25 MHz spec (issue #2133 round 3, same citation as
+ *     aen-pdm-mic-alif's overlay) -- this phase's SOUND_SAMPLE_RATE_HZ (16000,
+ *     PDM mode 4, 1024 kHz) is BELOW that minimum, so with
+ *     AEN_EVKDEMO_SOUND_PLAYBACK=1 the mic's alp_audio_in_open() now fails
+ *     with -EINVAL rather than silently under-clocking the mic; this phase
+ *     was already gated off by default and already blocked by the U46 mux
+ *     issue documented in the README, so this is a second, independent reason
+ *     playback mode needs rework before use, not a new regression.
  *
  * CLOCKING -- the load-bearing fix BOTH reference apps needed, already folded
  * in here for free. I2S and the HP PDM both derive their functional clock
@@ -849,6 +857,10 @@
 		clocks = <&clockctrl ALIF_PDM_76M8_CLK>;
 		fifo_watermark = <5>;
 		bypass_iir_filter = <1>;
+		/* MP34DT05TR-A spec, mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ -- see the
+		 * file header. */
+		min-pdm-clk-freq = <1200000>;
+		max-pdm-clk-freq = <3250000>;
 		status = "okay";
 	};
 };

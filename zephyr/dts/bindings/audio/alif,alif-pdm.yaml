@@ -35,3 +35,20 @@ properties:
     enum:
       - 0
       - 1
+
+  min-pdm-clk-freq:
+    type: int
+    description: |
+      Minimum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
+      accept. Board-level fact, not a SoC/driver one -- e.g. the E1M-EVK's
+      MP34DT05TR-A mics need >= 1.2 MHz (ST's in-tree mpxxdtyy.h:
+      MPXXDTYY_MIN_PDM_FREQ). Optional: when unset, dmic_alif_pdm_configure()
+      only enforces the caller's dmic_cfg.io window (issue #2133).
+
+  max-pdm-clk-freq:
+    type: int
+    description: |
+      Maximum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
+      accept -- see min-pdm-clk-freq. E1M-EVK MP34DT05TR-A: <= 3.25 MHz
+      (mpxxdtyy.h: MPXXDTYY_MAX_PDM_FREQ). Optional, same fallback as
+      min-pdm-clk-freq.

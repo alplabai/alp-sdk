@@ -26,9 +26,9 @@ extern "C" {
 #define PDM_MODE_HIGH_QUALITY_512_CLK_FRQ   0x02UL /* 512 kHz clk, decim 32 -> 16 kHz Fs */
 #define PDM_MODE_HIGH_QUALITY_768_CLK_FRQ   0x03UL /* 768 kHz clk, decim 48 -> 16 kHz Fs */
 #define PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ  0x04UL /* 1024 kHz clk, decim 64 -> 16 kHz Fs */
-#define PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ 0x05UL /* 1536 kHz clk; Fs/decim not yet grounded here */
-#define PDM_MODE_FULL_BANDWIDTH_AUDIO_2400_CLK_FRQ 0x06UL /* 2400 kHz clk; Fs/decim not yet grounded here */
-#define PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ 0x07UL /* 3071 kHz clk; Fs/decim not yet grounded here */
+#define PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ 0x05UL /* 1536 kHz clk, decim 48 -> 32 kHz Fs */
+#define PDM_MODE_FULL_BANDWIDTH_AUDIO_2400_CLK_FRQ 0x06UL /* 2400 kHz clk, decim 50 -> 48 kHz Fs */
+#define PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ 0x07UL /* 3072 kHz clk, decim 64 -> 48 kHz Fs */
 #define PDM_MODE_ULTRASOUND_4800_CLOCK_FRQ         0x08UL /* 4800 kHz clk; Fs/decim not yet grounded here */
 #define PDM_MODE_ULTRASOUND_96_SAMPLING_RATE       0x09UL /* 4800 kHz clk, decim 25 -> 192 kHz Fs; the "96" names the bandwidth, not Fs */
 
