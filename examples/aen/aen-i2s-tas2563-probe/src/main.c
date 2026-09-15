@@ -194,9 +194,9 @@
  *     3072 kHz clock, decimation 64) -- 48 kHz is used here. The #2133 fix
  *     is being changed again to add 48 kHz and to reject the two
  *     out-of-spec 8/16 kHz modes on this board via a devicetree mic clock
- *     range (min-pdm-clk-freq/max-pdm-clk-freq on the board overlay's
- *     pdm@4902d000 node below -- property names PENDING that binding, see
- *     the overlay's own comment).
+ *     range (clk-frequency-min/clk-frequency-max on the board overlay's
+ *     pdm@4902d000 node below -- these are Zephyr's own pdm-dmic.yaml
+ *     property names, issue #2133 round 4a).
  *   - #2133 BENCH TRACE (kept for the record, not because 8 kHz is used):
  *     testing the #2133 fix against examples/aen/aen-pdm-mic-alif on
  *     e1m-aen-evk-03 showed correct blocks (PDM_CONFIG_REGISTER =
@@ -347,6 +347,26 @@
  * header's "TONE-ON BUDGET, RESTATED" section and run_tdm_clock_check()
  * for the fix: EVIDENCE 1 now runs as its own tone-only segment that never
  * touches the mic at all, so it is genuinely independent this time.
+ *
+ * THIRD FINDING, LATER RUN (rebuilt against #2137 + #2133 round 4a/4b): a
+ * TX underrun/RX overrun used to leave Zephyr's DW I2S driver stuck in
+ * I2S_STATE_ERROR forever (zephyr/drivers/i2s/i2s_dw.c) -- once the acoustic
+ * windows stopped feeding it (mic already dead that run), the very next
+ * alp_audio_out_stop()/alp_audio_out_start() both returned -5, so
+ * run_tdm_clock_check() could never reach STOPPED even though DURING had
+ * read cleanly. Fixed in the shared I2S backend, not this app (#2137):
+ * PREPARE now recovers I2S_STATE_ERROR on both stop() and start(). Separately,
+ * "48 kHz measured ~32 kHz" (the "MIC CAPTURE RATE IS 48 kHz" section above)
+ * turned out to be the CONSUMER, not the clock: chan_stats-style
+ * double-precision math on every sample, with no CONFIG_FPU, ran slower than
+ * the 100 ms block period and starved the mic's slab. #2133 round 4b makes
+ * dmic_alif_pdm_read() return -EIO (sticky until DMIC_TRIGGER_START) instead
+ * of silently splicing the next block onto a drop, and capture_window()
+ * below now (a) does zero per-sample work in its read loop -- Goertzel/RMS/
+ * peak/dc all run once, after the window's reads are done -- and (b) treats
+ * -EIO as a per-window DROPPED event (STOP/START, try again next window),
+ * keeping it separate from the run-wide mic_dead latch that a genuine
+ * failure sets.
  *
  * ============================================================================
  * HARDWARE SAFETY -- unchanged from the register-flag-only version, plus
@@ -887,10 +907,23 @@ typedef struct {
  * earlier version returned one bool for both, so a mic read timeout (the
  * silicon failure this app actually hit) made the caller believe the TONE
  * had also failed and print "I2S clocks not reaching the amp" -- a claim
- * nothing had measured. See the file header's EVIDENCE 1 / FIX 1-2 notes. */
+ * nothing had measured. See the file header's EVIDENCE 1 / FIX 1-2 notes.
+ *
+ * mic_dropped/mic_fail_rc (issue #2133 round 4b): dmic_alif_pdm_read() now
+ * returns -EIO, sticky until the next DMIC_TRIGGER_START, when the ISR
+ * silently dropped a burst (slab-alloc miss or a full delivery queue) --
+ * ZEPHYR_BASE zephyr/drivers/audio/alif_pdm.c divergence (5). That is a
+ * RECOVERABLE per-window event, not proof the mic is dead: the caller
+ * (run_acoustic_window() below) tells the two apart via mic_dropped and
+ * only STOP/STARTs the mic on a dropped burst, reserving the mic_dead
+ * run-wide latch for every OTHER read failure. mic_fail_rc is the
+ * triggering alp_status_t, valid iff !mic_ok, so the caller can print it
+ * instead of a bare unexplained latch. */
 typedef struct {
-	bool tone_ok; /* true if spk == NULL, or every tone write in this window succeeded. */
-	bool mic_ok;  /* true if mic == NULL, or every mic read succeeded with a full block. */
+	bool         tone_ok;     /* true if spk == NULL, or every tone write in this window ok. */
+	bool         mic_ok;      /* true if mic == NULL, or every mic read succeeded, full block. */
+	bool         mic_dropped; /* true iff !mic_ok because of a recoverable dropped burst (-EIO). */
+	alp_status_t mic_fail_rc; /* the triggering alp_audio_in_read() rc; valid iff !mic_ok. */
 } window_status_t;
 
 /*
@@ -920,6 +953,38 @@ typedef struct {
  * received, then dumps the PDM/clock/pinmux diagnostic registers once
  * (dump_pdm_diagnostics() above).
  */
+/* rrc/got -> window_status_t's mic fields, shared by both read call sites
+ * below: -EIO is a recoverable dropped burst (mic_dropped), anything else
+ * (a real error, or a short read) is a genuine failure that gets the
+ * register dump -- see window_status_t's comment. */
+static void note_mic_read_failure(window_status_t *st,
+                                  const char      *phase,
+                                  unsigned         b,
+                                  alp_status_t     rrc,
+                                  size_t           got)
+{
+	st->mic_ok      = false;
+	st->mic_fail_rc = rrc;
+	st->mic_dropped = (rrc == ALP_ERR_IO);
+	printf("[probe] capture_window: alp_audio_in_read %s (%s block %u) rc=%d got=%zu/%u frames\n",
+	       st->mic_dropped ? "reports a DROPPED burst (-EIO, sticky until STOP/START)" : "FAILED",
+	       phase,
+	       b,
+	       (int)rrc,
+	       got,
+	       (unsigned)MIC_FRAMES_PER_BLOCK);
+	if (!st->mic_dropped) dump_pdm_diagnostics(); /* a genuine failure is the one worth a dump. */
+}
+
+/* One window's raw mic samples, filled by the ANALYSIS-phase read loop
+ * below with NO per-sample work at all (issue #2133 round 4b root cause:
+ * ~150 ms of double-precision Goertzel/Welford math per 100 ms block, with
+ * no CONFIG_FPU, starved the 4-block slab between reads). Goertzel/RMS/
+ * peak/dc all run ONCE, after every block in the window has been read --
+ * see the file header's "MAKE THE MIC CONSUMER CHEAP" note. static: off
+ * capture_window()'s stack (76 800 bytes). */
+static int16_t s_analysis_buf[ACOUSTIC_ANALYSIS_FRAMES * MIC_CHANNELS];
+
 static window_status_t capture_window(alp_audio_in_t  *mic,
                                       alp_audio_out_t *spk,
                                       int16_t         *tone_buf,
@@ -927,7 +992,7 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
                                       uint32_t         samples_per_cycle,
                                       chan_result_t    results[MIC_CHANNELS])
 {
-	static int16_t  mic_buf[MIC_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* static: off caller's stack. */
+	static int16_t  discard_buf[MIC_FRAMES_PER_BLOCK * MIC_CHANNELS]; /* discard phase only. */
 	window_status_t st = { .tone_ok = true, .mic_ok = (mic != NULL) };
 
 	if (mic == NULL && spk == NULL) return st; /* nothing to write or read -- a true no-op call. */
@@ -945,37 +1010,16 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 		}
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
-			alp_status_t rrc =
-			    alp_audio_in_read(mic, mic_buf, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			alp_status_t rrc = alp_audio_in_read(
+			    mic, discard_buf, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
 			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
-				st.mic_ok = false;
-				printf("[probe] capture_window: alp_audio_in_read FAILED (discard block %u) "
-				       "rc=%d got=%zu/%u frames\n",
-				       b,
-				       (int)rrc,
-				       got,
-				       (unsigned)MIC_FRAMES_PER_BLOCK);
-				dump_pdm_diagnostics();
+				note_mic_read_failure(&st, "discard", b, rrc, got);
 			}
 		}
 	}
 
-	goertzel_t tone[MIC_CHANNELS];
-	goertzel_t ref_lo[MIC_CHANNELS];
-	goertzel_t ref_hi[MIC_CHANNELS];
-	double     sumsq[MIC_CHANNELS] = { 0 }; /* -> rms */
-	double     dcsum[MIC_CHANNELS] = { 0 }; /* -> dc (residual -- see chan_result_t's comment) */
-	float      peak[MIC_CHANNELS]  = { 0 }; /* -> peak, max |sample| this window */
-	if (mic != NULL && st.mic_ok) {
-		for (size_t c = 0; c < MIC_CHANNELS; c++) {
-			goertzel_reset(&tone[c], TONE_BIN_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
-			goertzel_reset(
-			    &ref_lo[c], REF_BIN_LOW_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
-			goertzel_reset(
-			    &ref_hi[c], REF_BIN_HIGH_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
-		}
-	}
-
+	/* ANALYSIS phase: read directly into s_analysis_buf, no per-sample work
+	 * in this loop at all -- see s_analysis_buf's comment above. */
 	for (unsigned b = 0; b < ACOUSTIC_ANALYSIS_BLOCKS; b++) {
 		if (spk != NULL && st.tone_ok) {
 			alp_status_t wrc = write_one_tone_block(spk, tone_buf, phase_acc, samples_per_cycle);
@@ -989,42 +1033,54 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 		}
 		if (mic != NULL && st.mic_ok) {
 			size_t       got = 0;
+			int16_t     *dst = &s_analysis_buf[b * MIC_FRAMES_PER_BLOCK * MIC_CHANNELS];
 			alp_status_t rrc =
-			    alp_audio_in_read(mic, mic_buf, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
+			    alp_audio_in_read(mic, dst, MIC_FRAMES_PER_BLOCK, &got, MIC_READ_TIMEOUT_MS);
 			if (rrc != ALP_OK || got != MIC_FRAMES_PER_BLOCK) {
-				st.mic_ok = false;
-				printf("[probe] capture_window: alp_audio_in_read FAILED (analysis block %u) "
-				       "rc=%d got=%zu/%u frames\n",
-				       b,
-				       (int)rrc,
-				       got,
-				       (unsigned)MIC_FRAMES_PER_BLOCK);
-				dump_pdm_diagnostics();
-			} else {
-				for (size_t f = 0; f < got; f++) {
-					for (size_t c = 0; c < MIC_CHANNELS; c++) {
-						float x  = (float)mic_buf[f * MIC_CHANNELS + c];
-						float ax = fabsf(x);
-						goertzel_step(&tone[c], x);
-						goertzel_step(&ref_lo[c], x);
-						goertzel_step(&ref_hi[c], x);
-						sumsq[c] += (double)x * (double)x;
-						dcsum[c] += (double)x;
-						if (ax > peak[c]) peak[c] = ax;
-					}
-				}
+				note_mic_read_failure(&st, "analysis", b, rrc, got);
 			}
 		}
 	}
 
+	/* Post-window analysis: one pass over the whole buffer, entirely after
+	 * every alp_audio_in_read() above has returned -- it can no longer be
+	 * the reason a read starves the slab. sumsq/dcsum/peak are integer
+	 * (int64/int32) here purely because this pass has no reason to touch
+	 * an FPU either; Goertzel itself still needs float (cosf/its running
+	 * state), same as before. */
 	if (mic != NULL && st.mic_ok) {
+		goertzel_t tone[MIC_CHANNELS];
+		goertzel_t ref_lo[MIC_CHANNELS];
+		goertzel_t ref_hi[MIC_CHANNELS];
+		int64_t    sumsq[MIC_CHANNELS] = { 0 }; /* -> rms */
+		int64_t    dcsum[MIC_CHANNELS] = { 0 }; /* -> dc (residual, see chan_result_t's comment) */
+		int32_t    peak[MIC_CHANNELS]  = { 0 }; /* -> peak, max |sample| this window */
+		for (size_t c = 0; c < MIC_CHANNELS; c++) {
+			goertzel_reset(&tone[c], TONE_BIN_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+			goertzel_reset(
+			    &ref_lo[c], REF_BIN_LOW_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+			goertzel_reset(
+			    &ref_hi[c], REF_BIN_HIGH_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
+		}
+		for (size_t f = 0; f < ACOUSTIC_ANALYSIS_FRAMES; f++) {
+			for (size_t c = 0; c < MIC_CHANNELS; c++) {
+				int16_t x  = s_analysis_buf[f * MIC_CHANNELS + c];
+				int32_t ax = (x < 0) ? -(int32_t)x : (int32_t)x;
+				goertzel_step(&tone[c], (float)x);
+				goertzel_step(&ref_lo[c], (float)x);
+				goertzel_step(&ref_hi[c], (float)x);
+				sumsq[c] += (int64_t)x * (int64_t)x;
+				dcsum[c] += x;
+				if (ax > peak[c]) peak[c] = ax;
+			}
+		}
 		for (size_t c = 0; c < MIC_CHANNELS; c++) {
 			results[c].tone_power     = goertzel_power(&tone[c]);
 			results[c].ref_low_power  = goertzel_power(&ref_lo[c]);
 			results[c].ref_high_power = goertzel_power(&ref_hi[c]);
-			results[c].rms            = sqrtf((float)(sumsq[c] / (double)ACOUSTIC_ANALYSIS_FRAMES));
-			results[c].peak           = peak[c];
-			results[c].dc             = (float)(dcsum[c] / (double)ACOUSTIC_ANALYSIS_FRAMES);
+			results[c].rms            = sqrtf((float)sumsq[c] / (float)ACOUSTIC_ANALYSIS_FRAMES);
+			results[c].peak           = (float)peak[c];
+			results[c].dc             = (float)dcsum[c] / (float)ACOUSTIC_ANALYSIS_FRAMES;
 		}
 	}
 	return st;
@@ -1047,7 +1103,15 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
  * also stopped_valid) -- independent of mic_dead. When eligible is true but
  * mic_dead already latched, prints a one-line "skipped" note instead of
  * silently returning false, so a bench log distinguishes "this window
- * genuinely failed" from "skipped, already known dead". */
+ * genuinely failed" from "skipped, already known dead".
+ *
+ * mic_dead only latches on a GENUINE failure now (issue #2133 round 4b): a
+ * dropped burst (capture_window()'s st.mic_dropped, -EIO) is recoverable
+ * per-window, not proof the mic is dead, so this function STOP/STARTs the
+ * mic right here and lets the NEXT window try again -- see
+ * window_status_t's comment for why the driver can tell the two apart. Only
+ * an actual latch prints "mic_dead latched" with the triggering rc; a
+ * recovered drop prints its own line and mic_dead stays false. */
 static bool run_acoustic_window(const char      *label,
                                 alp_audio_in_t  *mic,
                                 bool            *mic_dead,
@@ -1066,7 +1130,32 @@ static bool run_acoustic_window(const char      *label,
 
 	window_status_t st = capture_window(
 	    attempt_mic ? mic : NULL, spk, tone_buf, phase_acc, samples_per_cycle, results);
-	if (attempt_mic && !st.mic_ok) *mic_dead = true;
+
+	if (attempt_mic && !st.mic_ok) {
+		if (st.mic_dropped) {
+			alp_status_t stop_rc  = alp_audio_in_stop(mic);
+			alp_status_t start_rc = alp_audio_in_start(mic);
+			printf("[probe] ACOUSTIC %s DROPPED (rc=%d) -- recovering for the next window: "
+			       "alp_audio_in_stop -> %d, alp_audio_in_start -> %d\n",
+			       label,
+			       (int)st.mic_fail_rc,
+			       (int)stop_rc,
+			       (int)start_rc);
+			if (stop_rc != ALP_OK || start_rc != ALP_OK) {
+				*mic_dead = true;
+				printf("[probe] ACOUSTIC %s mic_dead latched -- drop recovery itself failed "
+				       "(stop=%d start=%d)\n",
+				       label,
+				       (int)stop_rc,
+				       (int)start_rc);
+			}
+		} else {
+			*mic_dead = true;
+			printf("[probe] ACOUSTIC %s mic_dead latched -- alp_audio_in_read rc=%d\n",
+			       label,
+			       (int)st.mic_fail_rc);
+		}
+	}
 	return attempt_mic && st.mic_ok;
 }
 

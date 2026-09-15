@@ -259,8 +259,8 @@
 		 * header "MIC CAPTURE RATE IS 48 kHz" section for the full
 		 * derivation.
 		 */
-		min-pdm-clk-freq = <1200000>; /* mpxxdtyy.h MPXXDTYY_MIN_PDM_FREQ */
-		max-pdm-clk-freq = <3250000>; /* mpxxdtyy.h MPXXDTYY_MAX_PDM_FREQ */
+		clk-frequency-min = <1200000>; /* mpxxdtyy.h MPXXDTYY_MIN_PDM_FREQ */
+		clk-frequency-max = <3250000>; /* mpxxdtyy.h MPXXDTYY_MAX_PDM_FREQ */
 	};
 };
 
