@@ -46,27 +46,36 @@ cc3501e_t *companion_cc3501e;
 #define COMPANION_LINK_LOG_HDR_FMT \
 	"cc3501e: link_log %u/%u entries, fail_streak=%u (legend: ts_ms cmd phase status" \
 	" flags hdr[4] reply_hdr[4] recover_attempts; phase 1=req_hdr 2=req_payload" \
-	" 3=reply_hdr 4=reply_payload 5=verdict; flags 1=ready_before 2=ready_after" \
-	" 4=ready_proven)"
-#define COMPANION_LINK_LOG_LINE_FMT "%08x %02x %u %d %02x %02x%02x%02x%02x %02x%02x%02x%02x %u"
+	" 3=reply_hdr 4=reply_payload; flags 1=ready_before 2=ready_after 4=ready_proven" \
+	" 8=hdr_valid 0x10=reply_hdr_valid -- hdr[4]/reply_hdr[4] are MEANINGLESS," \
+	" all-zero, unless their own VALID bit is set)"
+/* #2136 review (minor): the "cc3501e: " prefix now lives IN the format string
+ * itself, not concatenated separately at each call site -- the printk call
+ * below used to add it and the shell_print call did not, so a grep/parser
+ * written against a printk (recovery-callback) capture silently matched
+ * nothing on an `alp companion linklog` (shell) capture. Both paths use this
+ * SAME format now, so both agree. */
+#define COMPANION_LINK_LOG_LINE_FMT \
+	"cc3501e: %08x %02x %u %d %02x %02x%02x%02x%02x %02x%02x%02x%02x %u"
 
-static void companion_print_link_log(const struct shell *sh)
+/* @p fail_streak is the caller's choice of WHICH streak to show: the live
+ * value (cc3501e_link_log_fail_streak(), for `alp companion linklog`) or the
+ * one frozen at the start of the most recent recovery
+ * (cc3501e_link_log_recover_streak(), for the recovery-notify dump below) --
+ * see cc3501e_link_log_recover_streak()'s own doc comment for why those
+ * differ (#2136 review, minor: the live field always read 0 by the time a
+ * recovery dump ran, because that recovery's OWN confirming PING had already
+ * reset it). */
+static void companion_print_link_log(const struct shell *sh, uint32_t fail_streak)
 {
 	if (companion_cc3501e == NULL) return;
 
 	const uint8_t n = cc3501e_link_log_count(companion_cc3501e);
 
 	if (sh != NULL) {
-		shell_print(sh,
-		            COMPANION_LINK_LOG_HDR_FMT,
-		            n,
-		            CC3501E_LINK_LOG_LEN,
-		            companion_cc3501e->link_log_fail_streak);
+		shell_print(sh, COMPANION_LINK_LOG_HDR_FMT, n, CC3501E_LINK_LOG_LEN, fail_streak);
 	} else {
-		printk(COMPANION_LINK_LOG_HDR_FMT "\n",
-		       n,
-		       CC3501E_LINK_LOG_LEN,
-		       companion_cc3501e->link_log_fail_streak);
+		printk(COMPANION_LINK_LOG_HDR_FMT "\n", n, CC3501E_LINK_LOG_LEN, fail_streak);
 	}
 
 	for (uint8_t i = 0; i < n; i++) {
@@ -91,7 +100,7 @@ static void companion_print_link_log(const struct shell *sh)
 			            e.reply_hdr[3],
 			            e.recover_attempt_count);
 		} else {
-			printk("cc3501e: " COMPANION_LINK_LOG_LINE_FMT "\n",
+			printk(COMPANION_LINK_LOG_LINE_FMT "\n",
 			       e.ts_ms,
 			       e.cmd,
 			       e.phase,
@@ -127,12 +136,23 @@ static void companion_print_link_log(const struct shell *sh)
  * printing. */
 static void companion_recover_notify(cc3501e_t *ctx, uint32_t recover_count, void *user)
 {
-	ARG_UNUSED(ctx);
 	ARG_UNUSED(user);
 	/* Issue #2136: dump the ring right before the recovery line, no extra
 	 * bench step needed to capture the state around a reset -- see
-	 * companion_print_link_log()'s doc comment. */
-	companion_print_link_log(NULL);
+	 * companion_print_link_log()'s doc comment. cc3501e_link_log_recover_streak(),
+	 * not the live cc3501e_link_log_fail_streak(): this recovery's own
+	 * confirming PING already reset the live one to 0 by the time this
+	 * callback runs. */
+	companion_print_link_log(NULL, cc3501e_link_log_recover_streak(ctx));
+	/* #2136 review (MAJOR follow-up): the probe's own PING failures never
+	 * land in the ring (link_log_suppress, cc3501e_core.c), so surface them
+	 * here instead -- an operator still needs to know the probe ran and how
+	 * many of its own attempts failed before the reset landed.
+	 * CC3501E_LINK_PROBE_TRIES itself (currently 24) is a private
+	 * cc3501e_core.c constant, not exported here -- print the count alone
+	 * rather than duplicate that magic number into this TU. */
+	printk("cc3501e: recovery probe: %u PING(s) failed before the reset\n",
+	       cc3501e_link_log_probe_fail_count(ctx));
 	printk("cc3501e: link recovered by warm reset (#%u)\n", recover_count);
 }
 #endif
@@ -600,7 +620,7 @@ static int cmd_companion_linklog(const struct shell *sh, size_t argc, char **arg
 		shell_warn(sh, "companion not registered");
 		return -ENODEV;
 	}
-	companion_print_link_log(sh);
+	companion_print_link_log(sh, cc3501e_link_log_fail_streak(companion_cc3501e));
 	return 0;
 }
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */

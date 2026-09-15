@@ -135,36 +135,82 @@ on the host side for exactly this reason. `cc3501e_request_locked()` records
 one entry only when a pre-decode transport/framing failure leaves no reply
 status decoded — never on success, never on a genuine decoded device error.
 Each entry carries: a timestamp; the opcode; which of the four wire phases
-(or the verdict) the attempt reached; the mapped `alp_status_t`; the
-request-header phase's 4 MISO bytes and the reply-header phase's 4 bytes;
-READY-line evidence (sampled before the request and again at exit, plus
-whether the line has ever proven itself wired this boot); and the recovery
-attempt count at record time. A consecutive-failure counter
-(`ctx->link_log_fail_streak`) resets on the next decoded reply, and the last
-successful `GET_DIAG_INFO` probe (`ctx->link_log_last_probe_word` /
-`_last_probe_ms`) is kept alongside for correlation — a wedge-probe firmware
-build rides its own free-running word in that reply's `free_heap_bytes`
-field.
+the attempt reached; the mapped `alp_status_t`; the request-header phase's 4
+MISO bytes and the reply-header phase's 4 bytes; READY-line evidence
+(sampled before the request and again at exit, plus whether the line has
+ever proven itself wired this boot); and the recovery attempt count at
+record time. A consecutive-failure counter (`ctx->link_log_fail_streak`,
+read via `cc3501e_link_log_fail_streak()`) resets on the next decoded reply,
+and the last successful `GET_DIAG_INFO` probe (`ctx->link_log_last_probe_word`
+/ `_last_probe_ms`) is kept alongside for correlation — a wedge-probe
+firmware build rides its own free-running word in that reply's
+`free_heap_bytes` field.
 
-Read it with `cc3501e_link_log_count()` / `cc3501e_link_log_get()`, or
-`alp companion linklog`, which dumps the ring as hex, oldest entry first,
-with a legend line. The automatic and manual recovery paths
+**A byte array is meaningless unless its VALID flag is set** (#2136 review).
+`hdr_bytes` / `reply_hdr` used to be `memcpy`'d from `ctx->rx_scratch`
+regardless of whether that phase's own transceive actually succeeded — on a
+bail, that could capture STALE SCRATCH left by a completely different,
+earlier exchange (the poisoned-marker byte plus residue) and present it as
+if it were this attempt's wire data, producing a confident misdiagnosis.
+Each byte array now has a matching `entry.flags` bit —
+`CC3501E_LINK_LOG_HDR_BYTES_VALID` (`0x8`) for `hdr_bytes`,
+`CC3501E_LINK_LOG_REPLY_HDR_VALID` (`0x10`) for `reply_hdr` — set only when
+that phase's transceive returned `ALP_OK`; unset means the array is all-zero
+and carries no information (either the attempt never reached that phase, or
+it reached it and the transceive itself failed). **Check the VALID bit
+before reading either array**, including before applying the classification
+below.
+
+Read the ring with `cc3501e_link_log_count()` / `cc3501e_link_log_get()`
+(both take the driver's internal request lock, so a read can never observe a
+write mid-entry), or `alp companion linklog`, which dumps it as hex, oldest
+entry first, with a legend line. The automatic and manual recovery paths
 (`companion_recover_notify()`, `src/zephyr/console/alp_console_companion.c`)
 also dump it right before printing their own recovery line, so a bench run
-captures the ring around a reset with no extra step.
+captures the ring around a reset with no extra step — using
+`cc3501e_link_log_recover_streak()` for the fail-streak field on that dump,
+not the live `cc3501e_link_log_fail_streak()`: the recovery's own confirming
+PING already reset the live streak to 0 by the time the dump runs.
 
-Roughly, the classification the ring makes possible:
+**The ring survives the very recovery it exists to outlive** (#2136 review).
+`cc3501e_link_check_and_recover()`'s own probe fires up to 24 PINGs before
+concluding the link is dead — more than the ring's 8 slots, so an
+unsuppressed probe would guarantee-evict the ORIGINAL wedging op's entry,
+replacing it with 8 identical PING failures and destroying the one thing an
+operator actually needed. The probe now sets `ctx->link_log_suppress` for its
+own duration; `cc3501e_request_locked()`'s ring-write site checks it and, when
+set, counts the failure into `ctx->link_log_probe_fail_count`
+(`cc3501e_link_log_probe_fail_count()`) instead of writing a ring entry — the
+probe's own failures stay countable (the recovery-notify dump prints them)
+without ever evicting the wedging op's own evidence.
 
-- **deaf-armed** — the request-header phase reads the armed marker
-  (`ALP_CC3501E_SYNC_IDLE` x4) every attempt, but the reply header never
-  echoes the opcode, and that non-echo repeats: the slave armed the link and
-  then never dispatched anything.
-- **desynced** — the request-header phase reads something other than the
+**A ring this thin can still mean "many failures", not "few"** (#2136
+review). A request that loses `cc3501e_lock_acquire()` returns
+`ALP_ERR_BUSY` after the 100 ms
+`CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS` window without ever entering
+`cc3501e_request_locked()` — so it leaves no ring entry and does not bump
+`link_log_fail_streak` either. During a wedge that is the common shape for
+every thread except whichever one is already holding the lock; do not read a
+thin ring as proof of a mild fault.
+
+Roughly, the classification the ring makes possible — **only once the
+relevant VALID bit confirms the bytes are real**:
+
+- **deaf-armed** — `hdr_bytes` is VALID and reads the armed marker
+  (`ALP_CC3501E_SYNC_IDLE` x4) every attempt, `reply_hdr` is ALSO VALID
+  (the reply-header transceive itself succeeded) but never echoes the
+  opcode, and that non-echo repeats: the slave armed the link and then
+  never dispatched anything.
+- **desynced** — `hdr_bytes` is VALID and reads something other than the
   armed marker (e.g. `0x00`, the slave's payload-phase dummy, or stale reply
   bytes), and the pattern changes across attempts as the slave consumes
   bytes the host keeps clocking.
-- **crashed / not driving** — a constant `0xFF` or `0x00` run with no
-  variation and a frozen READY reading.
+- **crashed / not driving** — `hdr_bytes` VALID with a constant `0xFF` or
+  `0x00` run and no variation, with a frozen READY reading.
+- **transceive itself failing** (a genuine transport/IO fault, not a
+  framing issue) — the relevant VALID bit is UNSET and the byte array reads
+  all-zero; do not classify from an unset-VALID entry at all, it carries no
+  wire evidence.
 
 ## `alp companion wifi`
 

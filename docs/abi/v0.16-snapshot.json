@@ -2974,9 +2974,21 @@
           "hash": "cc5337f9523b8908",
           "signature": "uint8_t cc3501e_link_log_count(const cc3501e_t *ctx);"
         },
+        "cc3501e_link_log_fail_streak": {
+          "hash": "d973e03dbb081dda",
+          "signature": "uint32_t cc3501e_link_log_fail_streak(const cc3501e_t *ctx);"
+        },
         "cc3501e_link_log_get": {
           "hash": "933f26bd6ede6200",
           "signature": "alp_status_t cc3501e_link_log_get(const cc3501e_t *ctx, uint8_t idx, cc3501e_link_log_entry_t *out);"
+        },
+        "cc3501e_link_log_probe_fail_count": {
+          "hash": "378c9c0b3d251b3b",
+          "signature": "uint8_t cc3501e_link_log_probe_fail_count(const cc3501e_t *ctx);"
+        },
+        "cc3501e_link_log_recover_streak": {
+          "hash": "1bac0422f1eaa8d5",
+          "signature": "uint8_t cc3501e_link_log_recover_streak(const cc3501e_t *ctx);"
         },
         "cc3501e_power_off": {
           "hash": "b03252cb8a26bd20",
@@ -3028,6 +3040,10 @@
           "hash": "00515043b2f6006c",
           "value": "4"
         },
+        "CC3501E_LINK_LOG_HDR_BYTES_VALID": {
+          "hash": "a82a55af798dec41",
+          "value": "0x8u"
+        },
         "CC3501E_LINK_LOG_LEN": {
           "hash": "7c5607fddb85dd0a",
           "value": "8u"
@@ -3048,10 +3064,6 @@
           "hash": "fb2c7865402a3d53",
           "value": "2u"
         },
-        "CC3501E_LINK_LOG_PHASE_VERDICT": {
-          "hash": "9924a27b646534f1",
-          "value": "5u"
-        },
         "CC3501E_LINK_LOG_READY_AFTER": {
           "hash": "8d277733bf9b784b",
           "value": "0x2u"
@@ -3063,6 +3075,10 @@
         "CC3501E_LINK_LOG_READY_PROVEN": {
           "hash": "84c17b063e6b185c",
           "value": "0x4u"
+        },
+        "CC3501E_LINK_LOG_REPLY_HDR_VALID": {
+          "hash": "db74127281e48b22",
+          "value": "0x10u"
         }
       },
       "typedefs": {
@@ -3092,7 +3108,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; uint32_t recover_count; uint32_t recover_attempt_count; uint64_t last_recover_ms; uint8_t recover_fail_streak; bool recovering; uint8_t link_epoch; cc3501e_recover_cb_t recover_cb; void *recover_cb_user; bool ota_session_active; cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN]; uint8_t link_log_count; uint8_t link_log_next; uint32_t link_log_fail_streak; uint32_t link_log_last_probe_word; uint32_t link_log_last_probe_ms; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; uint32_t recover_count; uint32_t recover_attempt_count; uint64_t last_recover_ms; uint8_t recover_fail_streak; bool recovering; uint8_t link_epoch; cc3501e_recover_cb_t recover_cb; void *recover_cb_user; bool ota_session_active; uint8_t link_log_probe_fail_count; uint8_t link_log_recover_streak; cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN]; uint8_t link_log_count; uint8_t link_log_next; bool link_log_suppress; uint32_t link_log_fail_streak; uint32_t link_log_last_probe_word; uint32_t link_log_last_probe_ms; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "uint8_t fw_proto_major",
@@ -3130,14 +3146,17 @@
             "cc3501e_recover_cb_t recover_cb",
             "void *recover_cb_user",
             "bool ota_session_active",
+            "uint8_t link_log_probe_fail_count",
+            "uint8_t link_log_recover_streak",
             "cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN]",
             "uint8_t link_log_count",
             "uint8_t link_log_next",
+            "bool link_log_suppress",
             "uint32_t link_log_fail_streak",
             "uint32_t link_log_last_probe_word",
             "uint32_t link_log_last_probe_ms"
           ],
-          "hash": "62a98728b06247c8",
+          "hash": "cfa4c2ee79c7f87f",
           "kind": "struct"
         }
       },
