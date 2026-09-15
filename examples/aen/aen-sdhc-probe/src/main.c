@@ -608,28 +608,6 @@ static sd_verdict_t sd_probe3_full_enumeration(bool controller_alive, bool mux_o
 	       sc_rc,
 	       ss_rc);
 
-	/* DISK_IOCTL_GET_CARD_CID -- the only card-identity field the
-	 * disk_access surface exposes. Zephyr's own `struct sd_card` (zephyr/
-	 * include/zephyr/sd/sd.h) does NOT retain CSD after init, and there is
-	 * no DISK_IOCTL_* for it -- so "CID/CSD" above is CID only, honestly;
-	 * this is not a shortcut, it is everything the stack has to offer
-	 * through this API. Raw register, 4x uint32_t little-endian per
-	 * zephyr/subsys/sd/sd_ops.c's card_read_cid() -- SD Physical Layer
-	 * Spec 5.1 section 5.1 has the manufacturer/OEM/product/serial field
-	 * layout if decoding it further is ever useful on the bench. */
-	uint32_t cid[4] = { 0 };
-	int      cid_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_CARD_CID, cid);
-	if (cid_rc == 0) {
-		printf("[sd][probe3] CID = %08x %08x %08x %08x (raw register; CSD has no "
-		       "DISK_IOCTL_* and is not retained by the SD stack after init)\n",
-		       cid[0],
-		       cid[1],
-		       cid[2],
-		       cid[3]);
-	} else {
-		printf("[sd][probe3] DISK_IOCTL_GET_CARD_CID -> %d (CID not available)\n", cid_rc);
-	}
-
 	static uint8_t block[SD_PROBE3_BLOCK_BYTES] __aligned(SD_PROBE3_BLOCK_BYTES);
 	int            rd_rc = -EIO;
 	bool geometry_ok = (sc_rc == 0) && (ss_rc == 0) && (sector_count > 0u) && (sector_size > 0u) &&
@@ -648,6 +626,33 @@ static sd_verdict_t sd_probe3_full_enumeration(bool controller_alive, bool mux_o
 		                                                          : SD_PROBE3_HEXDUMP_BYTES),
 		       (unsigned)sector_size);
 		sd_diag_hexdump_prefix(block, sector_size);
+		/* The MBR / boot-sector signature sits past the hex-dump prefix;
+		 * print it so a real card read is provable from the log alone. */
+		if (sector_size >= 0x200u) {
+			bool sig = (block[0x1FE] == 0x55u) && (block[0x1FF] == 0xAAu);
+			printf("[sd][probe3] sector 0 bytes 0x1FE/0x1FF = %02x %02x (%s)\n",
+			       block[0x1FE],
+			       block[0x1FF],
+			       sig ? "55 AA boot signature present" : "no 55 AA boot signature");
+		}
+	}
+
+	/* DISK_IOCTL_GET_CARD_CID -- deliberately AFTER the sector read. Zephyr
+	 * serves this ioctl with CMD2 ALL_SEND_CID (zephyr/subsys/sd/sd_ops.c:295,
+	 * via :888), which a card only answers in the identification state.
+	 * After disk_access_init() the card is in transfer state, so CMD2 times
+	 * out and sdhc_dwc's error path soft-resets CMD|DAT -- and on the bench
+	 * (evk-03, run 4) that reset landed immediately before CMD17, confounding
+	 * the first 4-bit read. Running it last keeps it out of the read path;
+	 * a failure here is expected and says nothing about the card. */
+	uint32_t cid[4] = { 0 };
+	int      cid_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_CARD_CID, cid);
+	if (cid_rc == 0) {
+		printf("[sd][probe3] CID = %08x %08x %08x %08x\n", cid[0], cid[1], cid[2], cid[3]);
+	} else {
+		printf("[sd][probe3] DISK_IOCTL_GET_CARD_CID -> %d (expected in transfer state: "
+		       "Zephyr sends CMD2, see comment)\n",
+		       cid_rc);
 	}
 
 	if (geometry_ok && rd_rc == 0) {
