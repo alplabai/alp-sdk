@@ -39,3 +39,15 @@ endif()
 if(DEFINED PROBE_LOOPBACK)
   target_compile_definitions(app PRIVATE PROBE_LOOPBACK=${PROBE_LOOPBACK})
 endif()
+
+# PROBE_RESUME (test/u46-i2s-tas2563-on-reworked-mux): compile-time switch to
+# src/main.c's #2146 bench-verification variant (tas2563_resume() ordered
+# start, a halt-time measurement, a restart-without-resume that reproduces
+# the bug on purpose, a resume-after-restart that proves the fix, and a
+# short-gap self-heal sweep) instead of the normal automated probe or the
+# other three PROBE_* variants. Opt in with `west build ... --
+# -DPROBE_RESUME=1`; unset (the default), this app is unchanged, same as
+# the other three PROBE_* switches unset.
+if(DEFINED PROBE_RESUME)
+  target_compile_definitions(app PRIVATE PROBE_RESUME=${PROBE_RESUME})
+endif()

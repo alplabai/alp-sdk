@@ -2658,6 +2658,398 @@ static int loop_main(void)
 
 #endif /* PROBE_LOOPBACK */
 
+/* ================================================================== */
+/* PROBE_RESUME -- bench-verify #2146's tas2563_resume() fix          */
+/* ================================================================== */
+/* Compile-time mode, same shape as the three above: `west build ... --
+ * -DPROBE_RESUME=1` replaces main()'s ENTIRE body with resume_main(); with
+ * none of PROBE_LISTEN/PROBE_MELODY/PROBE_LOOPBACK/PROBE_RESUME defined,
+ * main() is unchanged, and with exactly one of the other three defined,
+ * this whole block is preprocessed away -- so none of the four existing
+ * builds' object code moves by adding this one. resume_main() duplicates
+ * the other three modes' bring-up sequence rather than sharing a helper
+ * with any of them, for the same byte-identity reason.
+ *
+ * Issue #2146: the TAS2563 self-shuts-down (latches a TDM-clock/BOOST_
+ * CLOCK/DEVICE_POWER_DOWN fault and drops PWR_CTL's mode field to
+ * SHUTDOWN) within about 1 s of its I2S bit clock stopping. chips/tas2563/
+ * tas2563.c's new tas2563_resume() clears the latches FIRST (a
+ * shutdown-causing fault ties to CLR_INTP_LTCH, not to MODE -- clearing
+ * after going ACTIVE would leave a stale latch that re-arms the very
+ * shutdown this exists to undo), then sets ACTIVE. This mode benches that
+ * fix directly: an ordered start using tas2563_resume() (A), a halt-time
+ * measurement (B), a restart WITHOUT resume to reproduce the bug on
+ * purpose (C), a resume AFTER that restart to prove the fix recovers it
+ * (D), and a short-gap sweep to find the self-heal threshold (E). Volume
+ * is 128 here, not the other modes' SOUND_VOL_MAX (48) -- explicitly
+ * authorised for this mode only, already heard clean and louder on
+ * e1m-aen-evk-03; the other three modes' own volume ceilings are
+ * untouched. */
+#if defined(PROBE_RESUME)
+
+#define RESUME_VOLUME   128u
+#define RESUME_BLOCK_MS (SOUND_FRAMES_PER_BLOCK * 1000u / SOUND_SAMPLE_RATE_HZ) /* 16 ms. */
+
+/* Register addresses, copied verbatim from chips/tas2563/tas2563.c's own
+ * (private) TAS2563_REG_* -- see PROBE_LISTEN/PROBE_MELODY/PROBE_LOOPBACK's
+ * own *_REG_PWR_CTL above for the same PWR_CTL value/citation.
+ * resume_reg_read() mirrors those blocks' own read helpers (same two
+ * alp_i2c_write_read() calls, legitimate because tas2563_t.bus/.addr are
+ * public fields). */
+#define RESUME_REG_PWR_CTL   0x02u /* Power control        (SLASET3D §7.5.4,  p.65). */
+#define RESUME_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (SLASET3D §7.5.36, p.82) -- TDM_CLOCK. */
+#define RESUME_REG_INT_LTCH3 \
+	0x26u /* Latched interrupts 2 (SLASET3D §7.5.38, p.84) -- BOOST_CLOCK. */
+#define RESUME_REG_INT_LTCH4 \
+	0x27u /* Latched interrupts 3 (SLASET3D §7.5.39, p.84) -- POWER_DOWN. */
+
+static uint8_t resume_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+/* Every "read" step this task asks for: uptime + PWR_CTL/INT_LTCH0/
+ * INT_LTCH3/INT_LTCH4 for both amps, one line. */
+static void resume_read_full(const char *label, tas2563_t amps[AMP_COUNT])
+{
+	printf("[resume] %-20s uptime=%u ms  PWR_CTL=0x%02x/0x%02x  INT_LTCH0=0x%02x/0x%02x  "
+	       "INT_LTCH3=0x%02x/0x%02x  INT_LTCH4=0x%02x/0x%02x\n",
+	       label,
+	       k_uptime_get_32(),
+	       resume_reg_read(&amps[0], RESUME_REG_PWR_CTL),
+	       resume_reg_read(&amps[1], RESUME_REG_PWR_CTL),
+	       resume_reg_read(&amps[0], RESUME_REG_INT_LTCH0),
+	       resume_reg_read(&amps[1], RESUME_REG_INT_LTCH0),
+	       resume_reg_read(&amps[0], RESUME_REG_INT_LTCH3),
+	       resume_reg_read(&amps[1], RESUME_REG_INT_LTCH3),
+	       resume_reg_read(&amps[0], RESUME_REG_INT_LTCH4),
+	       resume_reg_read(&amps[1], RESUME_REG_INT_LTCH4));
+}
+
+static void resume_read_pwr_ctl_pair(tas2563_t amps[AMP_COUNT], uint8_t out[AMP_COUNT])
+{
+	for (size_t c = 0; c < AMP_COUNT; c++)
+		out[c] = resume_reg_read(&amps[c], RESUME_REG_PWR_CTL);
+}
+
+static alp_status_t resume_write_sine_block(alp_audio_out_t *spk,
+                                            int16_t         *buf,
+                                            uint32_t        *phase_acc,
+                                            uint32_t         samples_per_cycle)
+{
+	for (uint32_t f = 0; f < SOUND_FRAMES_PER_BLOCK; f++) {
+		float theta =
+		    GOERTZEL_TWO_PI * (float)(*phase_acc % samples_per_cycle) / (float)samples_per_cycle;
+		int16_t sample  = (int16_t)((float)SOUND_TONE_AMPLITUDE * sinf(theta));
+		buf[2u * f]     = sample;
+		buf[2u * f + 1] = sample;
+		(*phase_acc)++;
+	}
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+/* Plays a continuous tone for total_ms (rounded to the nearest
+ * RESUME_BLOCK_MS block, keeping I2S continuous -- no stop, no gap), doing
+ * a full resume_read_full() at each of checkpoints_ms[] (each rounded to
+ * its own nearest block) as it passes. Prints the TONE ON/OFF pair this
+ * task asks for so a listener can match what they hear to the log.
+ * Returns the write-failure count for this tone span. */
+static uint32_t resume_play_tone(alp_audio_out_t *spk,
+                                 tas2563_t        amps[AMP_COUNT],
+                                 int16_t         *buf,
+                                 uint32_t        *phase_acc,
+                                 uint32_t         samples_per_cycle,
+                                 const char      *label,
+                                 uint32_t         total_ms,
+                                 const uint32_t  *checkpoints_ms,
+                                 size_t           n_checkpoints)
+{
+	printf("[resume] TONE ON %s (uptime=%u ms)\n", label, k_uptime_get_32());
+	uint32_t write_failures = 0;
+	uint32_t blocks         = (total_ms + RESUME_BLOCK_MS / 2u) / RESUME_BLOCK_MS;
+	size_t   next_cp        = 0;
+
+	for (uint32_t b = 0; b < blocks; b++) {
+		if (resume_write_sine_block(spk, buf, phase_acc, samples_per_cycle) != ALP_OK) {
+			write_failures++;
+		}
+		if (next_cp < n_checkpoints) {
+			uint32_t cp_block = (checkpoints_ms[next_cp] + RESUME_BLOCK_MS / 2u) / RESUME_BLOCK_MS;
+			if (b == cp_block) {
+				resume_read_full(label, amps);
+				next_cp++;
+			}
+		}
+	}
+	printf("[resume] TONE OFF %s (uptime=%u ms)\n", label, k_uptime_get_32());
+	return write_failures;
+}
+
+static int resume_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_RESUME): bench-verify #2146 ===\n");
+	(void)alp_init();
+
+	/* --- Same bring-up as PROBE_LISTEN/PROBE_MELODY/PROBE_LOOPBACK:
+	 * bridge, mux, AMP_ENABLE, tas2563_init x2, level MIN, configure_i2s
+	 * x2 -- ACTIVE is NOT set here; step A below sets it via
+	 * tas2563_resume(), not tas2563_set_mode(). ---------------------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[resume] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[resume] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[resume] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[resume] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[resume] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[resume] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[resume] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[resume] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[resume] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[resume] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[resume] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+	uint32_t       phase_acc      = 0;
+	uint32_t       write_failures = 0;
+
+	/* --- A. Ordered start: open+start, ONE silent block, tas2563_resume()
+	 * on both amps (NOT set_mode ACTIVE), read, 3 s tone, read. -------- */
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[resume] A: alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	if (spk_rc == ALP_OK) spk_rc = alp_audio_out_set_volume(spk, RESUME_VOLUME);
+	printf("[resume] A: alp_audio_out_set_volume(%u) -> %d\n", RESUME_VOLUME, (int)spk_rc);
+
+	if (spk_rc != ALP_OK) {
+		printf("[resume] I2S3 did not start -- aborting before touching the amps\n");
+	} else {
+		static int16_t silence_block[SOUND_FRAMES_PER_BLOCK * 2u]; /* memset below, once. */
+		for (size_t i = 0; i < ARRAY_SIZE(silence_block); i++)
+			silence_block[i] = 0;
+		if (alp_audio_out_write(spk, silence_block, SOUND_FRAMES_PER_BLOCK, NULL, 200u) != ALP_OK) {
+			write_failures++;
+		}
+
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			alp_status_t rrc = tas2563_resume(&amps[i]);
+			printf("[resume] A: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rrc);
+		}
+		resume_read_full("A: after resume", amps);
+
+		const uint32_t no_checkpoints[1] = { 0 };
+		write_failures += resume_play_tone(spk,
+		                                   amps,
+		                                   tone_buf,
+		                                   &phase_acc,
+		                                   SOUND_SAMPLE_RATE_HZ / 1000u,
+		                                   "A",
+		                                   3000u,
+		                                   no_checkpoints,
+		                                   0);
+		resume_read_full("A: after tone", amps);
+
+		/* --- B. Halt-time measurement: stop, poll PWR_CTL every 100 ms
+		 * for 3 s. -------------------------------------------------- */
+		alp_status_t stop_rc = alp_audio_out_stop(spk);
+		printf("[resume] B: alp_audio_out_stop -> %d\n", (int)stop_rc);
+		bool     shutdown_seen[AMP_COUNT]  = { false, false };
+		uint32_t shutdown_at_ms[AMP_COUNT] = { 0, 0 };
+		for (uint32_t elapsed = 0; elapsed <= 3000u; elapsed += 100u) {
+			uint8_t pwr[AMP_COUNT];
+			resume_read_pwr_ctl_pair(amps, pwr);
+			printf("[resume] B: +%u ms  uptime=%u ms  PWR_CTL=0x%02x/0x%02x\n",
+			       elapsed,
+			       k_uptime_get_32(),
+			       pwr[0],
+			       pwr[1]);
+			for (size_t c = 0; c < AMP_COUNT; c++) {
+				if (!shutdown_seen[c] && pwr[c] == 0x0eu) {
+					shutdown_seen[c]  = true;
+					shutdown_at_ms[c] = elapsed;
+				}
+			}
+			if (elapsed < 3000u) k_msleep(100);
+		}
+		for (size_t c = 0; c < AMP_COUNT; c++) {
+			if (shutdown_seen[c]) {
+				printf("[resume] shutdown observed at +%u ms after stop (0x%02x)\n",
+				       shutdown_at_ms[c],
+				       amp_addrs[c]);
+			} else {
+				printf("[resume] shutdown observed at +ms after stop (0x%02x): never\n",
+				       amp_addrs[c]);
+			}
+		}
+
+		/* --- C. Restart WITHOUT resume -- reproduces the bug on purpose. */
+		printf("[resume] C: restart without resume\n");
+		alp_status_t restart_rc = alp_audio_out_start(spk);
+		printf("[resume] C: alp_audio_out_start -> %d\n", (int)restart_rc);
+		const uint32_t c_checkpoints[2] = { 1000u, 2500u };
+		write_failures += resume_play_tone(spk,
+		                                   amps,
+		                                   tone_buf,
+		                                   &phase_acc,
+		                                   SOUND_SAMPLE_RATE_HZ / 1000u,
+		                                   "C",
+		                                   3000u,
+		                                   c_checkpoints,
+		                                   ARRAY_SIZE(c_checkpoints));
+
+		/* --- D. Resume after restart -- I2S is already running from C. */
+		printf("[resume] D: after tas2563_resume\n");
+		for (size_t i = 0; i < AMP_COUNT; i++) {
+			alp_status_t rrc = tas2563_resume(&amps[i]);
+			printf("[resume] D: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rrc);
+		}
+		resume_read_full("D: after resume", amps);
+		const uint32_t d_checkpoints[2] = { 1000u, 2500u };
+		write_failures += resume_play_tone(spk,
+		                                   amps,
+		                                   tone_buf,
+		                                   &phase_acc,
+		                                   SOUND_SAMPLE_RATE_HZ / 1000u,
+		                                   "D",
+		                                   3000u,
+		                                   d_checkpoints,
+		                                   ARRAY_SIZE(d_checkpoints));
+
+		/* --- E. Short-gap sweep, no resume -- self-heal threshold. ---- */
+		static const uint32_t gaps_ms[] = { 200u, 500u, 1500u };
+		for (size_t g = 0; g < ARRAY_SIZE(gaps_ms); g++) {
+			alp_status_t gap_stop_rc = alp_audio_out_stop(spk);
+			k_msleep(gaps_ms[g]);
+			alp_status_t gap_start_rc = alp_audio_out_start(spk);
+			printf("[resume] E: gap=%u ms stop -> %d, start -> %d\n",
+			       gaps_ms[g],
+			       (int)gap_stop_rc,
+			       (int)gap_start_rc);
+
+			char label[24];
+			snprintf(label, sizeof(label), "E gap=%u", gaps_ms[g]);
+			uint32_t cp_1s         = 1000u;
+			uint32_t before_uptime = k_uptime_get_32();
+			(void)before_uptime;
+			write_failures += resume_play_tone(spk,
+			                                   amps,
+			                                   tone_buf,
+			                                   &phase_acc,
+			                                   SOUND_SAMPLE_RATE_HZ / 1000u,
+			                                   label,
+			                                   2000u,
+			                                   &cp_1s,
+			                                   1);
+
+			uint8_t pwr[AMP_COUNT];
+			resume_read_pwr_ctl_pair(amps, pwr);
+			printf("[resume] gap=%u PWR_CTL=0x%02x/0x%02x\n", gaps_ms[g], pwr[0], pwr[1]);
+
+			for (size_t i = 0; i < AMP_COUNT; i++) {
+				alp_status_t rrc = tas2563_resume(&amps[i]);
+				printf("[resume] E: tas2563_resume(0x%02x) -> %d [re-arm for next gap]\n",
+				       amp_addrs[i],
+				       (int)rrc);
+			}
+		}
+	}
+
+	/* --- F. Teardown. --------------------------------------------------- */
+	alp_status_t final_stop_rc = (spk != NULL) ? alp_audio_out_stop(spk) : ALP_ERR_NOT_READY;
+	printf("[resume] F: alp_audio_out_stop -> %d\n", (int)final_stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[resume] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+		tas2563_deinit(&amps[i]);
+	}
+	if (spk != NULL) alp_audio_out_close(spk);
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	printf("[resume] total alp_audio_out_write() failures this run: %u\n", write_failures);
+	printf("[resume] done\n");
+	return 0;
+}
+
+#endif /* PROBE_RESUME */
+
 int main(void)
 {
 #if defined(PROBE_LISTEN)
@@ -2666,6 +3058,8 @@ int main(void)
 	return melody_main();
 #elif defined(PROBE_LOOPBACK)
 	return loop_main();
+#elif defined(PROBE_RESUME)
+	return resume_main();
 #else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();
