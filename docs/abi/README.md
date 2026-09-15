@@ -128,9 +128,7 @@ hand-written block into its generated `*_routes.h` sibling -- would
 otherwise read as `REMOVED` + `ADDED` and block the PR even though no
 consumer lost anything. `MOVED` is reported instead when ALL of:
 
-* the symbol name and category are unchanged,
-* its recorded hash (value for a macro, full signature for a function,
-  normalised body for a typedef) is unchanged, and
+* the symbol name and category are unchanged, and
 * the OLD header still `#include`s the new one, so a translation unit
   including the old header still sees the symbol.
 
@@ -149,7 +147,37 @@ toward `REMOVED`:
   transitively stays `REMOVED`.
 
 Both failure modes produce a false `REMOVED`, which is noise a human
-resolves at review; the opposite error would be a silent ABI break. This used to compare
+resolves at review; the opposite error would be a silent ABI break.
+
+**A move whose recorded hash (value for a macro, full signature for a
+function, normalised body for a typedef) also differs is still
+`MOVED`, not `REMOVED` + `ADDED`** (issue #2139) -- a consumer of the
+old header still reaches the symbol, it just now has different
+content. That reads as an accompanying
+
+```
+CHANGED typedef alp/boards/alp_e1m_evk_routes.h::evk_sdio_select_t (moved from alp/boards/alp_e1m_evk.h)
+    enumerator[0] of alp/boards/alp_e1m_evk_routes.h::evk_sdio_select_t: 'EVK_SDIO_SDCARD = 1' -> 'EVK_SDIO_SDCARD = 0'
+    enumerator[1] of alp/boards/alp_e1m_evk_routes.h::evk_sdio_select_t: 'EVK_SDIO_M2E_KEY = 0' -> 'EVK_SDIO_M2E_KEY = 1'
+```
+
+with the same per-member detail a same-header `CHANGED` typedef gets
+(enumerator/field values; a function/macro/variable quotes its
+signature/value/declaration instead). That `CHANGED` line is subject
+to the exact same policy as any other `CHANGED` entry -- pre-1.0 it's
+allowed through the freeze gate (which blocks only on a bare `REMOVED`
+line) and only trips `--diff`'s own exit code, same as if the symbol
+had changed in place without moving.
+
+An EXACT (unchanged) hash match is always preferred when one exists.
+Absent that, a value-changed match is only made when the symbol name
+is **unambiguous** across the whole diff -- exactly one header lost it
+and exactly one header gained it. If several headers lost or gained
+the same name at once, nothing is guessed: it falls back to plain
+`REMOVED` + `ADDED` for all of them, same as before this feature
+existed.
+
+This used to compare
 against a frozen `docs/abi/v0.1-snapshot.json` baseline via `git show
 v0.1:...`, gated on a `v0.1` git tag that has never existed and never
 will (v0.1 predates the `vX.Y.Z` release-tag convention -- see the (†)

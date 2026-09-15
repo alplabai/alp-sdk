@@ -47,12 +47,19 @@ of the *complete* normalised declaration, body included).
 and `docs/abi/README.md`'s "Recording an INTENTIONAL removal".
 
 `--diff` reports a symbol that disappeared from one header and
-reappeared under the same name/category/value in another as `MOVED`,
-not `REMOVED` + `ADDED` -- but only when the old header still
-`#include`s the new one in the CURRENT tree (see `build_include_graph`
-and `diff()`).  That reachability check reads today's headers off
-disk; it is intentionally NOT part of this file's persisted JSON
-schema, so `--output` keeps writing exactly what it always has.
+reappeared under the same name/category in another as `MOVED`, not
+`REMOVED` + `ADDED` -- but only when the old header still `#include`s
+the new one in the CURRENT tree (see `build_include_graph` and
+`diff()`).  That reachability check reads today's headers off disk; it
+is intentionally NOT part of this file's persisted JSON schema, so
+`--output` keeps writing exactly what it always has.  If the symbol's
+content also changed (an enumerator/field value swap, a signature
+edit) riding along with the move, `--diff` still reports `MOVED` (not
+`REMOVED`) plus an accompanying `CHANGED` line with the same per-field
+detail a same-header change gets (issue #2139) -- unless the same name
+is ambiguous (several headers lost or gained it at once), in which
+case it falls back to plain `REMOVED` + `ADDED` rather than guess which
+pair to fuse.
 
 The parser is **deliberately simple** -- it walks the SDK's own
 declaration style, which is consistent across the headers (one decl per
@@ -749,6 +756,40 @@ def _field_diff(
     return msgs
 
 
+# The descriptive text field each non-typedef category's record carries
+# alongside its `hash` -- what `_moved_change_detail` below quotes when a
+# MOVED symbol's content also changed and there's no field/enumerator
+# list to diff member-by-member (see `_field_diff`).
+_CHANGED_TEXT_KEY = {"functions": "signature", "macros": "value", "variables": "declaration"}
+
+
+def _moved_change_detail(
+    category: str, header: str, sym: str, prev_rec: dict[str, Any], curr_rec: dict[str, Any]
+) -> list[str]:
+    """Per-symbol detail for a MOVED symbol whose content hash ALSO
+    differs (issue #2139) -- the same idea as `_field_diff` (member-
+    level, for a struct/enum typedef) extended to every category.  A
+    non-aggregate typedef (fnptr/alias/opaque) and every other category
+    have no `fields`/`enumerators` list, so they fall back to quoting
+    the record's own descriptive text (`signature`/`value`/
+    `declaration`/`definition`).  A schema that ever carries nothing
+    more than a bare hash -- not true for any category today, kept as a
+    defensive floor -- reports that plainly instead of emitting nothing.
+    """
+    if category == "typedefs":
+        lines = _field_diff(header, sym, prev_rec, curr_rec)
+        if lines:
+            return lines
+        key = "definition"
+    else:
+        key = _CHANGED_TEXT_KEY.get(category)
+    if key is not None:
+        pv, cv = prev_rec.get(key), curr_rec.get(key)
+        if pv != cv:
+            return [f"    {key} of {header}::{sym}: {pv!r} -> {cv!r}"]
+    return ["    content hash changed"]
+
+
 # ---------------------------------------------------------------------
 # MOVED detection: one-hop #include graph of the CURRENT tree
 # ---------------------------------------------------------------------
@@ -1002,14 +1043,38 @@ def diff(
     `include_graph` (see `build_include_graph`) is what lets a header
     SPLIT read as `MOVED` instead of `REMOVED` + `ADDED`: when the same
     symbol name disappears from header A and reappears in header B, in
-    the same category, with an IDENTICAL hash (value/signature
-    unchanged -- a move that ALSO changes the value is still reported
-    as a plain REMOVED + ADDED, never collapsed into MOVED), and A
-    still `#include`s B in the CURRENT tree, a consumer of A sees
-    exactly what it saw before.  `include_graph` defaults to `{}` (no
-    edges), so a caller that doesn't pass one -- every caller before
-    this feature existed -- gets the old REMOVED+ADDED behaviour,
-    unchanged.
+    the same category, and A still `#include`s B in the CURRENT tree, a
+    consumer of A sees exactly what it saw before, whether or not the
+    symbol's content hash also changed.  `include_graph` defaults to
+    `{}` (no edges), so a caller that doesn't pass one -- every caller
+    before this feature existed -- gets the old REMOVED+ADDED
+    behaviour, unchanged.
+
+    A move whose hash ALSO differs (issue #2139 -- an enumerator/field
+    value swap that rode along with a header split) is still `MOVED`,
+    never a plain `REMOVED` + `ADDED`: a consumer of the old header
+    still reaches the symbol, it just now has different content, which
+    reads as an accompanying
+
+        CHANGED {category} {new_header}::{symbol} (moved from {old_header})
+
+    with the same per-member/per-field detail `_field_diff` gives a
+    same-header CHANGED (see `_moved_change_detail`).  That CHANGED line
+    is subject to the exact same exit-code/freeze-gate policy as any
+    other CHANGED entry below -- pre-1.0 it's allowed through the freeze
+    gate and only trips `diff()`'s own `1` exit code, same as if the
+    move hadn't happened at all.
+
+    Disambiguation: an EXACT hash match is always preferred over one
+    that requires the value to have changed (a candidate whose content
+    is byte-identical is a strictly better explanation than one that
+    also changed). If no exact-hash candidate exists, a value-changed
+    match is only made when the symbol name is UNAMBIGUOUS -- exactly
+    one header lost it and exactly one header gained it, across the
+    WHOLE diff, not just the reachable subset -- so a real ambiguity
+    (several headers losing or gaining the same name at once) is never
+    guessed at; it falls back to the plain REMOVED + ADDED behaviour
+    below instead.
 
     `MOVED` must never satisfy `m.startswith(("REMOVED", "CHANGED"))`
     (the exit-code check in `main()` below) and must never match the
@@ -1081,12 +1146,24 @@ def diff(
                     if category == "typedefs":
                         msgs.extend(_field_diff(name, sym, p[sym], c[sym]))
 
+    # Name-ambiguity guard for the value-may-differ match below (issue
+    # #2139): counted over the FULL removed/added lists, not whatever
+    # is left in unmatched_added by the time a given entry is visited
+    # -- "several headers lose or gain the same name" describes the
+    # whole diff, not visitation order.
+    removed_name_counts: dict[tuple[str, str], int] = {}
+    for _, r_cat, r_sym, _ in removed:
+        removed_name_counts[(r_cat, r_sym)] = removed_name_counts.get((r_cat, r_sym), 0) + 1
+    added_name_counts: dict[tuple[str, str], int] = {}
+    for _, a_cat, a_sym, _ in added:
+        added_name_counts[(a_cat, a_sym)] = added_name_counts.get((a_cat, a_sym), 0) + 1
+
     # Pair each REMOVED entry with an ADDED entry of the same
-    # category/symbol/hash where the OLD header still #includes the
-    # NEW one today.  Every hash-matching candidate is tried, not just
-    # the first: a same-name/same-value symbol that happens to reappear
-    # in some UNRELATED, unreachable header first must not shadow a
-    # later candidate that genuinely is reachable -- and must not get
+    # category/symbol where the OLD header still #includes the NEW one
+    # today.  Every hash-matching candidate is tried, not just the
+    # first: a same-name/same-value symbol that happens to reappear in
+    # some UNRELATED, unreachable header first must not shadow a later
+    # candidate that genuinely is reachable -- and must not get
     # consumed either way, since it was never a real match.
     unmatched_added = list(added)
     for r_header, r_cat, r_sym, r_hash in removed:
@@ -1100,9 +1177,38 @@ def diff(
             ):
                 match_idx = i
                 break
+        value_changed = False
+        if match_idx is None and (
+            removed_name_counts.get((r_cat, r_sym), 0) == 1
+            and added_name_counts.get((r_cat, r_sym), 0) == 1
+        ):
+            # No identical-content candidate, but the name is
+            # unambiguous (exactly one loser, exactly one gainer) --
+            # a reachable candidate here is still the SAME symbol that
+            # moved, it just also changed value (#2139).
+            for i, (a_header, a_cat, a_sym, a_hash) in enumerate(unmatched_added):
+                if (
+                    a_cat == r_cat
+                    and a_sym == r_sym
+                    and a_header in include_graph.get(r_header, [])
+                ):
+                    match_idx = i
+                    value_changed = True
+                    break
         if match_idx is not None:
-            a_header = unmatched_added.pop(match_idx)[0]
+            a_header, _a_cat, _a_sym, _a_hash = unmatched_added.pop(match_idx)
             msgs.append(f"MOVED   {r_cat[:-1]} {r_sym}: {r_header} -> {a_header}")
+            if value_changed:
+                msgs.append(f"CHANGED {r_cat[:-1]} {a_header}::{r_sym} (moved from {r_header})")
+                msgs.extend(
+                    _moved_change_detail(
+                        r_cat,
+                        a_header,
+                        r_sym,
+                        prev_h[r_header][r_cat][r_sym],
+                        curr_h[a_header][r_cat][r_sym],
+                    )
+                )
             continue
         allow_entry = removed_allowlist.get((r_header, r_cat[:-1], r_sym))
         if allow_entry is not None:
