@@ -163,41 +163,64 @@
  * itself, plus two off-tone reference bins (REF_BIN_LOW_HZ/REF_BIN_HIGH_HZ)
  * -- a real 1 kHz tone should stand out against ITS neighbours, not just
  * against a silent recording, which is what stops ambient wideband noise
- * (fan, HVAC) at any single "loud" frequency from faking a pass. Plus plain
- * RMS (accumulated in `double` for precision over ACOUSTIC_ANALYSIS_FRAMES
- * samples, converted to float only at the end) as a coarse sanity check.
+ * (fan, HVAC) at any single "loud" frequency from faking a pass. Plus three
+ * coarse, non-frequency-selective sanity numbers per channel -- RMS
+ * (accumulated in `double` for precision over ACOUSTIC_ANALYSIS_FRAMES
+ * samples, converted to float only at the end), peak |sample|, and mean
+ * (DC residual, post the backend's own DC-block filter) -- printed
+ * alongside the bins specifically so an idle or under-clocked mic (flat at
+ * +-1-2 LSB) is distinguishable from a mic that is genuinely capturing
+ * something, just not at 1 kHz: three near-zero Goertzel bins alone cannot
+ * tell those two apart, but a peak that never rises above a couple of LSB
+ * can. See chan_result_t's own comment for the full reasoning.
  *
- * MIC CAPTURE RATE IS 8 kHz, NOT 16 kHz -- a SEPARATE peripheral/rate from
- * the I2S3 TX side. Bench-testing the #2133 driver fix against
- * examples/aen/aen-pdm-mic-alif on e1m-aen-evk-03 showed correct blocks
- * (PDM_CONFIG_REGISTER = 0x00010033, FIFO moving, rc=0) arriving ~200 ms
- * apart for 1600-frame blocks -- i.e. 8 kHz, not the 16 kHz this app
- * originally requested. Cross-checked against the Alif DFP
- * (Alif_CMSIS/Include/Driver_PDM.h): the SAME numeric mode values
- * pdm_alif.h uses carry rate in their DFP names --
- * ARM_PDM_MODE_AUDIOFREQ_8K_DECM_64 = 0x01 = PDM_MODE_STANDARD_VOICE_512_
- * CLK_FRQ = the ONLY mode with a proven FIR table anywhere (the DFP's own
- * demo_pdm.c uses it for "Standard voice"); 0x02/0x03/0x04 are the 16 kHz
- * variants. The #2133 fix's FIR table is therefore 8 kHz-only; requesting
- * 16 kHz is expected to return -EINVAL once it lands, and running this app
- * unchanged against the CURRENT (pre-#2133) driver would have silently
- * captured at 8 kHz while this file's own Goertzel math assumed 16 kHz --
- * a real 1 kHz tone would alias to 2 kHz in the analysis and score
- * "not heard". MIC_SAMPLE_RATE_HZ is therefore 8000, independent of
+ * MIC CAPTURE RATE IS 48 kHz -- neither of the two earlier guesses (16 kHz,
+ * then 8 kHz) survived contact with the mic's own datasheet. History, so
+ * the next person doesn't repeat either mistake:
+ *   - 16 kHz (the original guess): wrong -- see the #2133 bench trace
+ *     below, which showed 8 kHz on silicon.
+ *   - 8 kHz (PDM_MODE_STANDARD_VOICE_512_CLK_FRQ /
+ *     ARM_PDM_MODE_AUDIOFREQ_8K_DECM_64, cross-checked against the Alif DFP
+ *     Driver_PDM.h -- the mode the #2133 bench trace actually measured, a
+ *     512 kHz PDM bit clock): ALSO wrong for THIS mic. U19/U20 are
+ *     MP34DT05TR-A parts; ST's own Zephyr driver for this family
+ *     (zephyr/drivers/audio/mpxxdtyy.h:19-20) states
+ *     `MPXXDTYY_MIN_PDM_FREQ 1200000` / `MPXXDTYY_MAX_PDM_FREQ 3250000` --
+ *     a 1.2-3.25 MHz PDM bit clock. Both the 512 kHz (8 kHz mode) and the
+ *     1024 kHz (16 kHz mode) clocks are BELOW that 1.2 MHz floor -- neither
+ *     was ever in spec for this mic, on ANY board, regardless of what the
+ *     Alif PDM controller was willing to generate or what FIR table the
+ *     driver had. The in-spec modes are 32 kHz and 48 kHz (mode 7, a
+ *     3072 kHz clock, decimation 64) -- 48 kHz is used here. The #2133 fix
+ *     is being changed again to add 48 kHz and to reject the two
+ *     out-of-spec 8/16 kHz modes on this board via a devicetree mic clock
+ *     range (min-pdm-clk-freq/max-pdm-clk-freq on the board overlay's
+ *     pdm@4902d000 node below -- property names PENDING that binding, see
+ *     the overlay's own comment).
+ *   - #2133 BENCH TRACE (kept for the record, not because 8 kHz is used):
+ *     testing the #2133 fix against examples/aen/aen-pdm-mic-alif on
+ *     e1m-aen-evk-03 showed correct blocks (PDM_CONFIG_REGISTER =
+ *     0x00010033, FIFO moving, rc=0) arriving ~200 ms apart for
+ *     1600-frame blocks -- 8 kHz, not the 16 kHz this app originally
+ *     requested. That is what first disproved the 16 kHz guess; the mic
+ *     datasheet then disproved 8 kHz too.
+ * MIC_SAMPLE_RATE_HZ is therefore 48000, independent of
  * SOUND_SAMPLE_RATE_HZ (16000, unchanged -- I2S3 TX to the TAS2563 amps is
- * a different peripheral and is unaffected by any of this).
+ * a different peripheral and is unaffected by any of this: the TDM_CLOCK
+ * check and every safety property are untouched by the mic's own rate).
  *
  * EXACT-BIN WINDOW SIZING -- a Goertzel bin is only leakage-free when the
  * target frequency lands EXACTLY on an integer DFT bin of the analysis
  * window: k = N * f / fs must be a whole number. With fs = MIC_SAMPLE_RATE_HZ
- * = 8000 Hz and N = ACOUSTIC_ANALYSIS_FRAMES = 3200 (25 blocks of
- * MIC_FRAMES_PER_BLOCK=128 frames, ~400 ms): k(1000 Hz) = 3200*1000/8000 =
- * 400, k(800 Hz) = 3200*800/8000 = 320, k(1200 Hz) = 3200*1200/8000 = 480
- * -- all three exact integers, verified by hand here (not just "computed
- * at runtime and hoped"), and numerically IDENTICAL to the k values at the
- * previous 16 kHz/6400-sample window: k = N/fs * f = (window duration in
- * seconds) * f, and the window duration (0.4 s) did not change -- only fs
- * and N did, in the same proportion.
+ * = 48000 Hz and N = ACOUSTIC_ANALYSIS_FRAMES = 19200 (25 blocks of
+ * MIC_FRAMES_PER_BLOCK=768 frames, ~400 ms): k(1000 Hz) =
+ * 19200*1000/48000 = 400, k(800 Hz) = 19200*800/48000 = 320, k(1200 Hz) =
+ * 19200*1200/48000 = 480 -- all three exact integers, verified by hand
+ * here (not just "computed at runtime and hoped"), and numerically
+ * IDENTICAL to the k values at both earlier (wrong-rate) window sizes:
+ * k = N/fs * f = (window duration in seconds) * f, and the window
+ * duration (0.4 s) has never changed across any of the three rates --
+ * only fs and N move together, in the same proportion.
  *
  * WINDOW SEQUENCE, in order. EVIDENCE 1's DURING/STOPPED check is now ITS
  * OWN segment (run_tdm_clock_check()), run entirely before any acoustic
@@ -462,25 +485,47 @@ BUILD_ASSERT(SOUND_VOL_STEP_2 <= SOUND_VOL_MAX, "digital volume step exceeds the
 static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, SOUND_VOL_STEP_2 };
 #define SOUND_VOL_STEP_COUNT ARRAY_SIZE(sound_vol_steps)
 
-/* ---- PDM mics (U19 LEFT / U20 RIGHT) -- see the file header's MIC MAPPING */
+/* ---- PDM mics (U19 LEFT / U20 RIGHT) -- see the file header's MIC MAPPING
+ * and MIC CAPTURE RATE IS 48 kHz sections. */
 #define MIC_CHANNELS 2u /* ch0=U19 LEFT, ch1=U20 RIGHT. */
-/* 8000 Hz, NOT SOUND_SAMPLE_RATE_HZ (16000, the SEPARATE I2S3 TX rate) --
- * see the file header's "MIC CAPTURE RATE IS 8 kHz, NOT 16 kHz" section.
- * The #2133 driver fix's only bench-verified/proven FIR coefficient table
- * is for ARM_PDM_MODE_AUDIOFREQ_8K_DECM_64 ("Standard voice"); a 16 kHz
- * open is expected to be refused (-EINVAL) once that fix lands. */
-#define MIC_SAMPLE_RATE_HZ 8000u
-/* 128 frames at 8 kHz = 16 ms/block -- deliberately the SAME wall-clock
+/* 48000 Hz, NOT SOUND_SAMPLE_RATE_HZ (16000, the SEPARATE I2S3 TX rate).
+ * The ONLY in-spec rate for the MP34DT05TR-A's 1.2-3.25 MHz PDM clock
+ * range (ST's mpxxdtyy.h) that this driver/board combination offers --
+ * 8 kHz and 16 kHz are both out of spec for this mic regardless of driver
+ * support; see the file header for the two-wrong-guesses history. */
+#define MIC_SAMPLE_RATE_HZ 48000u
+/* 768 frames at 48 kHz = 16 ms/block -- deliberately the SAME wall-clock
  * block period as SOUND_FRAMES_PER_BLOCK (256 @ 16 kHz = 16 ms) for the
  * I2S TX side, NOT the same frame count. capture_window() writes one TX
  * tone block and attempts one mic-read block per loop iteration; keeping
  * both at 16 ms/block is what keeps that interleave balanced -- a mic
- * block genuinely half the TX block's duration would starve nothing, but
- * a mic block LONGER than the TX block's duration would mean each mic
- * read blocks longer than the 2-block TX slab can cover from a single
- * write, reintroducing the exact underrun class the TDM check was moved
- * out from under (see run_tdm_clock_check() and the file header). */
-#define MIC_FRAMES_PER_BLOCK 128u
+ * block LONGER than the TX block's duration would mean each mic read
+ * blocks longer than the 2-block TX slab can cover from a single write,
+ * reintroducing the exact underrun class the TDM check was moved out from
+ * under (see run_tdm_clock_check() and the file header). The BUILD_ASSERT
+ * below makes that equal-period promise a compile-time fact instead of an
+ * eyeballed comment, so a future rate change on either side cannot desync
+ * them silently. */
+#define MIC_FRAMES_PER_BLOCK 768u
+BUILD_ASSERT(MIC_FRAMES_PER_BLOCK *SOUND_SAMPLE_RATE_HZ ==
+                 SOUND_FRAMES_PER_BLOCK * MIC_SAMPLE_RATE_HZ,
+             "mic and I2S TX block periods must match (cross-multiplied to dodge fractional ms): "
+             "768*16000 == 256*48000 == 12288000");
+/* 768 frames * MIC_CHANNELS(2) * sizeof(int16_t) = 3072 B per block --
+ * checked against CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES (src/backends/audio/
+ * zephyr_drv.c, default 4096, not overridden in this app's prj.conf): fits
+ * with headroom. If MIC_CHANNELS ever grows (e.g. capturing the second mic
+ * pair, U25/U26 -- which the 2-channel backend cap still prevents, see the
+ * file header), re-check this against CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES
+ * before raising it. The per-handle slab that actually backs this
+ * (g_in_be_pool[].slab_buf[], src/backends/audio/zephyr_drv.c) is a
+ * STATIC array sized CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES *
+ * CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS (default 4) = 16 KiB regardless of
+ * this app's actual per-block byte count, so this rate change costs this
+ * app NO additional heap or slab RAM -- CONFIG_HEAP_MEM_POOL_SIZE and
+ * CONFIG_ALP_SDK_AUDIO_IN_SLAB_BLOCKS are unchanged in prj.conf. */
+BUILD_ASSERT((MIC_FRAMES_PER_BLOCK * MIC_CHANNELS * (uint32_t)sizeof(int16_t)) <= 4096u,
+             "mic block bytes must fit CONFIG_ALP_SDK_AUDIO_BLOCK_BYTES's default (4096)");
 /* Aligned to examples/aen/aen-pdm-mic-alif's bench-verified READ_TIMEOUT_MS
  * (2000) -- was 200 here, which removed "our timeout was just too short" as
  * a candidate explanation for the first-silicon-run mic read failure
@@ -500,18 +545,18 @@ static const uint8_t sound_vol_steps[] = { SOUND_VOL_STEP_0, SOUND_VOL_STEP_1, S
  * (see EXACT-BIN WINDOW SIZING) has no such slack: any transient in the
  * analyzed window (mic startup, the DC-blocking filter's own settle, or
  * the tone/volume step that just changed) leaks across every bin. 6 blocks
- * covers the DC-blocker's own time constant roughly 4x over (alpha = 0.995
- * in dc_block_s16(), src/backends/audio/zephyr_drv.c -- time constant ~=
- * 1/(1-0.995) = 200 samples = 25 ms at the mic's 8 kHz capture rate) with
- * margin to spare; nothing more rigorous than that informed the choice of
- * 6. (This margin was ~7.7x at the previous 16 kHz mic rate -- halving the
- * mic sample rate doubles the DC-blocker's real-time time constant for the
- * same 200-sample count, so the SAME 6-block/96ms discard now covers it
- * fewer times over. Still comfortably enough; not re-tuned otherwise.) */
+ * covers the DC-blocker's own time constant with wide margin (alpha =
+ * 0.995 in dc_block_s16(), src/backends/audio/zephyr_drv.c -- time
+ * constant ~= 1/(1-0.995) = 200 samples = 4.17 ms at the mic's 48 kHz
+ * capture rate, so 96 ms is ~23x that); nothing more rigorous than that
+ * informed the choice of 6, and 6 is unchanged from the two earlier
+ * (wrong-rate) versions of this app -- only the margin it buys changed as
+ * the mic rate moved: ~7.7x at the original 16 kHz guess, ~4x at the
+ * 8 kHz guess, ~23x at the actual 48 kHz rate. */
 #define ACOUSTIC_DISCARD_BLOCKS  6u
-#define ACOUSTIC_ANALYSIS_BLOCKS 25u /* ~400ms, 25*128=3200 samples -- the exact-bin window. */
+#define ACOUSTIC_ANALYSIS_BLOCKS 25u /* ~400ms, 25*768=19200 samples -- the exact-bin window. */
 #define ACOUSTIC_ANALYSIS_FRAMES (ACOUSTIC_ANALYSIS_BLOCKS * MIC_FRAMES_PER_BLOCK)
-#define TONE_BIN_HZ              SOUND_TONE_HZ /* 1000 Hz, exact bin k=400 at N=3200/fs=8000. */
+#define TONE_BIN_HZ              SOUND_TONE_HZ /* 1000 Hz, exact bin k=400 at N=19200/fs=48000. */
 #define REF_BIN_LOW_HZ           800u          /* exact bin k=320. */
 #define REF_BIN_HIGH_HZ          1200u         /* exact bin k=480. */
 #define ACOUSTIC_MARGIN_DB       10.0f         /* the task's own example threshold. */
@@ -813,13 +858,27 @@ static float goertzel_power(const goertzel_t *g)
 
 /* Per-channel result of one capture window: LINEAR power (not yet dB, so
  * callers can average across channels correctly -- see composite_of()
- * below) for the tone bin + both reference bins, plus plain RMS amplitude
- * (not dB; printed as a raw sanity-check number). */
+ * below) for the tone bin + both reference bins, plus three coarse,
+ * non-frequency-selective sanity numbers printed alongside the bins:
+ *   rms  -- overall signal amplitude.
+ *   peak -- max |sample| observed this window (post the backend's own
+ *           DC-block filter). An idle or under-clocked mic reads flat at
+ *           +-1-2 LSB regardless of what the Goertzel bins say (three bins
+ *           of near-zero noise can still look "quiet" without this), so
+ *           peak is what actually distinguishes "no real signal reached
+ *           the ADC" from "signal reached it but wasn't at 1 kHz".
+ *   dc   -- mean sample value this window. The backend's DC-block filter
+ *           (dc_block_s16(), src/backends/audio/zephyr_drv.c) already runs
+ *           on every block before capture_window() ever sees it, so this
+ *           is a RESIDUAL, expected near zero -- printed as a filter
+ *           sanity check, not a raw mic DC-offset measurement. */
 typedef struct {
 	float tone_power;
 	float ref_low_power;
 	float ref_high_power;
 	float rms;
+	float peak;
+	float dc;
 } chan_result_t;
 
 /* capture_window()'s two outcomes, tracked INDEPENDENTLY: a mic failure must
@@ -904,7 +963,9 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 	goertzel_t tone[MIC_CHANNELS];
 	goertzel_t ref_lo[MIC_CHANNELS];
 	goertzel_t ref_hi[MIC_CHANNELS];
-	double     sumsq[MIC_CHANNELS] = { 0 };
+	double     sumsq[MIC_CHANNELS] = { 0 }; /* -> rms */
+	double     dcsum[MIC_CHANNELS] = { 0 }; /* -> dc (residual -- see chan_result_t's comment) */
+	float      peak[MIC_CHANNELS]  = { 0 }; /* -> peak, max |sample| this window */
 	if (mic != NULL && st.mic_ok) {
 		for (size_t c = 0; c < MIC_CHANNELS; c++) {
 			goertzel_reset(&tone[c], TONE_BIN_HZ, ACOUSTIC_ANALYSIS_FRAMES, MIC_SAMPLE_RATE_HZ);
@@ -942,11 +1003,14 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 			} else {
 				for (size_t f = 0; f < got; f++) {
 					for (size_t c = 0; c < MIC_CHANNELS; c++) {
-						float x = (float)mic_buf[f * MIC_CHANNELS + c];
+						float x  = (float)mic_buf[f * MIC_CHANNELS + c];
+						float ax = fabsf(x);
 						goertzel_step(&tone[c], x);
 						goertzel_step(&ref_lo[c], x);
 						goertzel_step(&ref_hi[c], x);
 						sumsq[c] += (double)x * (double)x;
+						dcsum[c] += (double)x;
+						if (ax > peak[c]) peak[c] = ax;
 					}
 				}
 			}
@@ -959,6 +1023,8 @@ static window_status_t capture_window(alp_audio_in_t  *mic,
 			results[c].ref_low_power  = goertzel_power(&ref_lo[c]);
 			results[c].ref_high_power = goertzel_power(&ref_hi[c]);
 			results[c].rms            = sqrtf((float)(sumsq[c] / (double)ACOUSTIC_ANALYSIS_FRAMES));
+			results[c].peak           = peak[c];
+			results[c].dc             = (float)(dcsum[c] / (double)ACOUSTIC_ANALYSIS_FRAMES);
 		}
 	}
 	return st;
@@ -1013,7 +1079,7 @@ static void print_acoustic_row(const char *label, const chan_result_t r[MIC_CHAN
 	static const char *const chan_names[MIC_CHANNELS] = { "LEFT/U19", "RIGHT/U20" };
 	for (size_t c = 0; c < MIC_CHANNELS; c++) {
 		printf("[probe] ACOUSTIC %-8s ch%zu(%-9s): tone(%uHz)=%6.1fdB  ref(%uHz)=%6.1fdB  "
-		       "ref(%uHz)=%6.1fdB  RMS=%7.1f\n",
+		       "ref(%uHz)=%6.1fdB  RMS=%7.1f  peak=%6.0f  DC=%7.1f\n",
 		       label,
 		       c,
 		       chan_names[c],
@@ -1023,7 +1089,9 @@ static void print_acoustic_row(const char *label, const chan_result_t r[MIC_CHAN
 		       (double)POWER_TO_DB(r[c].ref_low_power),
 		       (unsigned)REF_BIN_HIGH_HZ,
 		       (double)POWER_TO_DB(r[c].ref_high_power),
-		       (double)r[c].rms);
+		       (double)r[c].rms,
+		       (double)r[c].peak,
+		       (double)r[c].dc);
 	}
 }
 

@@ -243,6 +243,37 @@
 		fifo_watermark = <5>;
 		bypass_iir_filter = <1>;
 		status = "okay";
+
+		/*
+		 * PENDING #2133 ROUND 3 -- NOT YET ADDED AS LIVE PROPERTIES.
+		 * U19/U20 are ST MP34DT05TR-A parts; ST's own Zephyr driver for
+		 * this family (zephyr/drivers/audio/mpxxdtyy.h:19-20) states a
+		 * 1.2-3.25 MHz PDM bit-clock spec (MPXXDTYY_MIN_PDM_FREQ /
+		 * MPXXDTYY_MAX_PDM_FREQ) -- BOTH the 8 kHz mode (512 kHz clock)
+		 * and the 16 kHz mode (1024 kHz clock) this board's PDM
+		 * controller can generate are below that floor and were never
+		 * in spec for this mic. The #2133 fix is adding 48 kHz (mode 7,
+		 * 3072 kHz clock -- in spec) and rejecting 8/16 kHz on THIS
+		 * board via a devicetree mic clock range.
+		 *
+		 * TRIED adding `min-pdm-clk-freq = <1200000>;` / `max-pdm-clk-
+		 * freq = <3250000>;` here (the mpxxdtyy.h values) and it is a
+		 * HARD BUILD FAILURE today, not just a warning: this node's
+		 * `alif,alif-pdm.yaml` binding is a strict "properties:" list
+		 * and dtc/gen_defines reject any property the binding does not
+		 * declare (devicetree error: '...' appears in /soc/pdm@... but
+		 * is not declared in 'properties:' in .../alif,alif-pdm.yaml --
+		 * confirmed on a scratch build, not assumed). So this stays a
+		 * COMMENT, not devicetree source, until the #2133 round-3
+		 * binding actually declares the property (name TBC -- may not
+		 * even be a clock-range pair; could be a single mode enum
+		 * instead). When that branch lands, add the real property
+		 * name(s)/value(s) here for real. See src/main.c's file header
+		 * "MIC CAPTURE RATE IS 48 kHz" section for the full derivation.
+		 *
+		 *   min-pdm-clk-freq = <1200000>;  (mpxxdtyy.h MIN, NOT YET LIVE)
+		 *   max-pdm-clk-freq = <3250000>;  (mpxxdtyy.h MAX, NOT YET LIVE)
+		 */
 	};
 };
 
