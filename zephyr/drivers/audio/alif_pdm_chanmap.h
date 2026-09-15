@@ -38,9 +38,11 @@
  *      (metadata/e1m_modules/aen/from-alif.tsv, see the board overlay), and
  *      the working raw bitmask enables HW channels 0,1 for that first pair
  *      and 4,5 for the second -- (0*2,0*2+1) and (2*2,2*2+1). Controller 1
- *      (unused on this SoM) would span HW 2,3. Round 4d's attended clap
- *      test (issue #2133) confirmed this mapping delivers live audio on
- *      all 4 channels, not just varying PCM.
+ *      (unused on this SoM) would span HW 2,3. Register-level configuration
+ *      and the 48 kHz capture rate are silicon-verified (issue #2133 round
+ *      4d/4e); live acoustic capture on all 4 channels is NOT -- round 4d's
+ *      believed "clap test" was not attended (nobody clapped), so its
+ *      recorded bursts are not evidence of that.
  *
  * Up to ALIF_PDM_MAX_CONTROLLERS (4) PDM controllers x 2 (L/R) = the 8 HW
  * channels MAX_NUM_CHANNELS names -- a pdm index at or above that cannot be

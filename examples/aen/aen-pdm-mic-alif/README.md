@@ -41,9 +41,8 @@ declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 | `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
 
-**48 kHz rate is now bench-confirmed with no drops.** A separate attended
-clap test also confirmed the mics are live at this rate, but at ~40 dB too
-low a gain -- see Status and issue #2143.
+**48 kHz rate is now bench-confirmed with no drops.** Live acoustic capture
+at this rate is NOT confirmed -- see Status and issue #2143.
 
 ```sh
 # default (48 kHz, in spec):
@@ -96,17 +95,33 @@ The stats loop is now integer-only.
 **Round 4d silicon results on `e1m-aen-evk-03`** (commit `68a169977`, fixed
 consumer): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`,
 no `-EIO` for the full run -- **48 kHz is now confirmed with no drops.** A
-separate 30 s attended clap test (same driver, patched read loop) recorded
-coherent bursts on all 4 channels when a person clapped near U19/U20 (peak
-p2p ch0=34 ch1=46 ch2=48 ch3=48 at t=14000 ms; quiet windows stay 2-3 LSB)
--- **the mics are confirmed live.** A mid-capture register readback during
-that same test found `CTL0=0x00070033`, `CH0 GAIN=0x0000000D`,
-`PHASE=0x0000001F`, `FIR[0]=0x00000001` -- the gain is ~40 dB too low
-against Alif's own audio-capture apps (`alif_kws` `AudioBackend.cpp` uses
-`0x00000F00` for this same mode; the ML evaluation kit's `mic_listener.c`
-uses `0x00000800`). Fixed by issue #2143 (a new `channel-gain` devicetree
-property, default `0x800`); a silicon re-run with the corrected gain
-default has not been done yet.
+separate 30 s capture (same driver, patched read loop) was believed at the
+time to be an attended clap test; **round 4e correction: nobody actually
+clapped during that capture**, so the bursts it recorded (peak p2p ch0=34
+ch1=46 ch2=48 ch3=48 at t=14000 ms; quiet windows 2-3 LSB) are unidentified
+room sound or interference, not proof of acoustic liveness -- **mic
+liveness is UNVERIFIED**, pending a controlled-stimulus re-run. A
+mid-capture register readback during that same session found
+`CTL0=0x00070033`, `CH0 GAIN=0x0000000D`, `PHASE=0x0000001F`,
+`FIR[0]=0x00000001`. `PDM_CH_GAIN` is bits [11:0], unsigned 8.4 fixed-point
+(Alif SVD `AE822FA0E5597BS0_CM55_HP_View.svd`, `PDM_CH_GAIN` register), so
+`0x0D` = 0.8125x gain -- confirmed ~40 dB too quiet. Alif's `alif_kws`
+sample (`AudioBackend.cpp`, `0xF00`) is NOT a precedent for this mode: its
+shipped model runs at 16 kHz (mode 4), not the 48 kHz mode 7 this driver
+defaults to. The 0x0D value itself is Alif's register-level driver test
+value, not audio-tuned. **Round 4e silicon at gain `0x800`** (quiet room,
+no controlled stimulus) found every unclipped sample a multiple of `0x80`
+(the gain multiply is saturating and runs after the datapath quantizes) and
+the start-of-capture / post-restart window pinned at full scale (decimator
+settling, not signal) -- `0x800` was too high. Fixed by issue #2143 with a
+new, DT-configurable `channel-gain` property, provisional default `0x200`
+(chosen only as "clearly below the observed clip point", pending
+calibration); a silicon re-run with the corrected default has not been
+done yet. The first block after every `DMIC_TRIGGER_START` (including a
+restart after an overrun) contains decimator-settling transient and may
+clip or read as full-scale garbage -- this example already excludes the
+anchor (first) block from its signal stats for that reason; any consumer
+of this driver should do the same.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):

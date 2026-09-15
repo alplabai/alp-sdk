@@ -12,6 +12,12 @@
  * alone couldn't. Exercised here against the exact decisions the
  * configure/trigger handlers now call, on the host, with no
  * MMIO/k_msgq/devicetree involved.
+ *
+ * Scope note (issue #2133 round 4e): this proves the two pure DECISION
+ * functions only -- that dmic_alif_pdm_configure()/dmic_alif_pdm_trigger()
+ * actually CALL them, with the right arguments, at the right point, is not
+ * covered here (that would need MMIO/k_msgq/devicetree, which this test
+ * deliberately has none of).
  */
 #include <stdbool.h>
 

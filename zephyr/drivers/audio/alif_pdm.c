@@ -13,11 +13,14 @@
  * it survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
  * once the pdm node is repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
- * Silicon status (issue #2133 round 4d, e1m-aen-evk-03): 48 kHz mode 7
- * capture rate confirmed exact with no drops, and an attended clap test
- * confirmed the mics are live. Confirmed at the OLD, too-quiet gain default
- * (0x0D, issue #2143 divergence (9)) -- a re-run with the new 0x800 default
- * has not been done yet, so this is not fully bench-verified end to end.
+ * Silicon status (issue #2133 round 4e, e1m-aen-evk-03): register-level
+ * configuration is verified, and 48 kHz mode 7 capture rate is verified
+ * exact with no drops. Acoustic capture is UNVERIFIED: the round 4d
+ * "clap test" believed to confirm live mics was not attended -- nobody
+ * actually clapped during that capture, so the recorded bursts (at gain
+ * 0x0D) are unidentified room sound or interference, not proof of
+ * acoustic liveness. A controlled-stimulus re-run (with the new
+ * provisional gain default, divergence (9)/(10)) has not been done yet.
  * ==================================================================
  *
  * Vendored from the fork with this provenance header added, plus the
@@ -215,16 +218,54 @@
  *    k_msgq_init() on resume orphaned any still-queued blocks. SUSPEND now
  *    runs the same free/drain/record_data=0/overrun=false cleanup
  *    DMIC_TRIGGER_STOP does.
- *  - issue #2143: PDM_DEFAULT_CH_GAIN was 0x0000000D, from Alif's
- *    register-level driver test (sdk-alif tests/drivers/pdm/src/
- *    alif_test_pdm.c), not from any audio-capture-tuned source -- silicon
- *    measured this ~40 dB too quiet on the EVK's MP34DT05TR-A mics. The
- *    driver now reads a per-instance, DT-configurable `channel-gain`
- *    property (alif,alif-pdm.yaml) instead, defaulting to 0x800 from the
- *    ML evaluation kit's mic_listener.c. Phase (0x1F), FIR
- *    (pdm_default_fir_voice512), and IIR (bypass) are UNCHANGED by this
- *    divergence -- they already match Alif's own audio-capture examples,
- *    only the gain was wrong.
+ *  - issue #2143: PDM_DEFAULT_CH_GAIN was 0x0000000D, Alif's register-level
+ *    driver test value (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:
+ *    88-123, and samples/drivers/audio/dmic_alif/src/main.c:22), never an
+ *    audio-tuned value -- silicon measured this ~40 dB too quiet on the
+ *    EVK's MP34DT05TR-A mics. The driver now reads a per-instance,
+ *    DT-configurable `channel-gain` property (alif,alif-pdm.yaml) instead.
+ *    PDM_CH_GAIN's GAIN field (bits [11:0]) is UNSIGNED 8.4 fixed-point
+ *    (Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
+ *    lines ~19081-19092; DFP PDM_MAX_GAIN_CTRL 0xFFFU) -- round 4d's
+ *    "register width/scale undocumented" claim was wrong; it IS documented,
+ *    just not in a source this driver had already grounded elsewhere.
+ *    Phase (0x1F), FIR (pdm_default_fir_voice512), and the IIR coefficient
+ *    (0x4) are UNCHANGED by this divergence; whether the IIR actually
+ *    filters depends on the board's `bypass_iir_filter` DT property, which
+ *    every current overlay sets to 1 (bypassed) -- "matches Alif's
+ *    examples" is not a precise claim for a coefficient that isn't in
+ *    effect. Round 4e correction: the 0x800 default (from GitHub's
+ *    alifsemi/alif_ml-embedded-evaluation-kit mic_listener.c, not vendored
+ *    locally) clipped on silicon (see divergence (10)) -- replaced with a
+ *    provisional 0x200, see alif,alif-pdm.yaml's channel-gain description
+ *    for the full silicon reasoning.
+ * Reapply this divergence if the file is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (10) ---------------------
+ * issue #2133 round 4e -- adversarial re-review corrected two round-4d
+ * claims and the gain default:
+ *  - The "clap test" that appeared to confirm live mics (divergence (9)'s
+ *    era) was NOT a clap test: nobody clapped during that capture. The
+ *    recorded bursts (p2p <= 48 at gain 0x0D) are unidentified room sound
+ *    or electrical interference, not proof of acoustic liveness. Every
+ *    "mics confirmed live" claim in this file, the example, and the docs
+ *    is removed; register-level configuration and the 48 kHz rate remain
+ *    proven, acoustic capture does not.
+ *  - PM_DEVICE_ACTION_SUSPEND (divergence (9)) freed data_buffer and
+ *    drained buf_queue while interrupts were still enabled and
+ *    record_data was still 1 -- the ISR could touch data_buffer/buf_queue
+ *    concurrently with the free/drain, a use-after-free/double-free
+ *    hazard DMIC_TRIGGER_STOP does not have (it disables interrupts and
+ *    zeroes record_data FIRST). SUSPEND now does the same ordering.
+ *  - A silicon run at gain 0x800 (quiet room, no controlled stimulus,
+ *    e1m-aen-evk-03, image built from 7e2535d63) found every unclipped
+ *    sample a multiple of 0x80 (the gain is a saturating multiply AFTER
+ *    the datapath quantizes -- a coarser gain adds no resolution) and the
+ *    start-of-capture / post-restart window pinned at +/-32767 (decimator
+ *    settling, not signal) -- 0x800 was too high a default. Replaced with
+ *    a provisional 0x200; see alif,alif-pdm.yaml's channel-gain
+ *    description.
  * Reapply this divergence if the file is ever re-synced from the fork.
  * -------------------------------------------------------------------------
  */
@@ -408,17 +449,18 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * ROUND 4D SILICON RESULT (commit 68a169977, e1m-aen-evk-03, fixed
 	 * consumer): a fresh run measured `measured_rate_hz=48000` exactly,
 	 * with `slab_missed=0`, `overrun=0`, and no -EIO for the full run --
-	 * mode 7 delivers 48 kHz PCM with no dropped blocks. A separate 30 s
-	 * attended clap test (same driver, patched read loop) recorded
-	 * coherent bursts on all 4 channels when a person clapped near
-	 * U19/U20 (peak p2p ch0=34 ch1=46 ch2=48 ch3=48 at t=14000 ms, quiet
-	 * windows 2-3 LSB) -- the mics are live. A mid-capture register
-	 * readback during that same test found CH0 GAIN=0x0000000D, ~40 dB
-	 * too low against Alif's own audio-capture apps (alif_kws
-	 * AudioBackend.cpp uses 0x00000F00 for this same mode; the ML
-	 * evaluation kit's mic_listener.c uses 0x00000800) -- fixed by
-	 * divergence (9)/the channel-gain DT property below (issue #2143). A silicon
-	 * re-run with the corrected gain default has not been done yet.
+	 * mode 7 delivers 48 kHz PCM with no dropped blocks, CONFIRMED. A
+	 * separate 30 s capture (same driver, patched read loop) recorded
+	 * bursts on all 4 channels during a supposed "clap test" -- ROUND 4E
+	 * CORRECTION: nobody actually clapped during that capture, so those
+	 * bursts (peak p2p ch0=34 ch1=46 ch2=48 ch3=48, at the old gain
+	 * 0x0000000D) are unidentified room sound or interference, NOT proof
+	 * of live acoustic capture. Mic liveness remains UNVERIFIED pending a
+	 * controlled-stimulus re-run. A mid-capture register readback during
+	 * that same session found CH0 GAIN=0x0000000D -- see
+	 * alif,alif-pdm.yaml's channel-gain property for the full gain
+	 * provenance and round 4e's silicon-driven default change
+	 * (issue #2143, divergence (9)/(10)).
 	 */
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
@@ -487,15 +529,22 @@ static const uint32_t pdm_default_fir_voice512[PDM_MAX_FIR_COEFFICIENT] = {
 #define PDM_DEFAULT_CH_PHASE          0x0000001FUL
 #define PDM_DEFAULT_CH_PEAK_DETECT_TH 0x00060002UL
 #define PDM_DEFAULT_CH_PEAK_DETECT_IT 0x0004002DUL
-#define PDM_DEFAULT_CH_IIR_COEF       0x00000004UL
+#define PDM_DEFAULT_CH_IIR_COEF       0x00000004UL /* DC-block IIR, bypassed on every
+                                                      * current overlay (issue #2133 round
+                                                      * 4e) -- if ever un-bypassed, a
+                                                      * coefficient of 0x4 gives a ~480 Hz
+                                                      * corner at 48 kHz (the reset value,
+                                                      * 0x9, gives ~15 Hz). */
 
 /* Prime one hardware channel's FIR/IIR/gain/phase/peak-detect state for
  * STANDARD_VOICE_512 -- same calls, same values, as
  * examples/aen/aen-pdm-mic-alif used to do by hand before every configure().
- * FIR/IIR/phase are silicon-consistent with Alif's own audio-capture
- * examples (issue #2133); the gain comes from the DT-configurable
- * cfg->channel_gain, NOT a hardcoded default -- see divergence (9)
- * (issue #2143).
+ * FIR/phase match Alif's own audio-capture examples (issue #2133); the IIR
+ * coefficient (PDM_DEFAULT_CH_IIR_COEF, 0x4) does too, but whether it
+ * actually filters depends on the board's `bypass_iir_filter` DT property
+ * -- every current overlay bypasses it, same as Alif's examples. The gain
+ * comes from the DT-configurable cfg->channel_gain, NOT a hardcoded
+ * default -- see divergence (9)/(10) (issue #2143).
  */
 static void pdm_apply_channel_defaults(const struct device *dev, uint8_t hw_ch)
 {
@@ -1486,6 +1535,23 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 	case PM_DEVICE_ACTION_SUSPEND: {
 		struct pdm_data *pdata = DEV_DATA(dev);
 
+		/* Round 4e ordering fix: the round 4d version freed
+		 * data_buffer and drained buf_queue while interrupts were
+		 * STILL ENABLED and record_data was STILL 1 -- the ISR could
+		 * run concurrently with this free/drain (a use-after-free on
+		 * data_buffer, or a double-free racing the drain loop's own
+		 * k_mem_slab_free()). DMIC_TRIGGER_STOP never had this bug:
+		 * it disables interrupts and, ordering-wise, establishes
+		 * "no longer recording" before it frees anything. Mirror
+		 * that exact ordering here: interrupts off and record_data=0
+		 * FIRST, so the ISR cannot touch data_buffer/buf_queue by
+		 * the time this function frees/drains them. Latent today --
+		 * CONFIG_PM_DEVICE is off on every board this driver ships
+		 * on -- fixed anyway.
+		 */
+		disable_interrupt(dev);
+		pdata->record_data = 0;
+
 		/* Force the clock back to MICROPHONE_SLEEP (issue #2133
 		 * round 2 divergence (4)) -- a suspend while still actively
 		 * sampling (app skipped DMIC_TRIGGER_STOP) must not leave
@@ -1515,7 +1581,6 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 			k_mem_slab_free(pdata->mem_slab, buf);
 		}
 
-		pdata->record_data = 0;
 		pdata->overrun = false;
 
 		return 0;
@@ -1556,20 +1621,22 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
 		     "alif,alif-pdm: clk-frequency-min must not exceed " \
 		     "clk-frequency-max (the DT range is inverted)"); \
-	/* PDM_CH_GAIN's register width/scale is undocumented (issue #2143), \
-	 * so this cannot be a tight bound -- it exists only to catch an \
-	 * obviously-wrong value (e.g. a copy-paste of a raw dB figure) at \
-	 * BUILD time rather than silicon. Bounds taken from the one place a \
-	 * range IS documented for this register: subsys/bluetooth/le_audio's \
-	 * ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN Kconfig, `range 1 256`, which \
-	 * that subsystem left-shifts by 4 before writing PDM_CH_GAIN -- so \
-	 * 1..256 becomes 0x10..0x1000 in this register's own units. \
+	/* PDM_CH_GAIN's GAIN field is bits [11:0] (unsigned 8.4 fixed-point, \
+	 * issue #2133 round 4e -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, \
+	 * PDM_CH_GAIN register, GAIN field, lines ~19081-19092; matches the \
+	 * Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU, drivers/include/pdm.h). The \
+	 * bound is therefore the register's own hardware range: 0xFFF (4095) \
+	 * is the largest value the 12-bit field can hold -- 0x1000 and above \
+	 * OVERFLOW it and wrap to 0, which MUTES the channel, not "sets max \
+	 * gain" as a name like PDM_MAX_GAIN_CTRL might suggest. The lower \
+	 * bound is 0x001: 0x000 is 0.0x, a silently-muted channel indistinct \
+	 * from a dead one, and never a plausible DT value. \
 	 */ \
-	BUILD_ASSERT(DT_INST_PROP_OR(n, channel_gain, 0x800) >= 0x10 && \
-			     DT_INST_PROP_OR(n, channel_gain, 0x800) <= 0x1000, \
-		     "alif,alif-pdm: channel-gain out of the plausible 0x10..0x1000 " \
-		     "range (BLE Audio's ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN 1..256, " \
-		     "shifted left by 4)"); \
+	BUILD_ASSERT(DT_INST_PROP_OR(n, channel_gain, 0x200) >= 0x001 && \
+			     DT_INST_PROP_OR(n, channel_gain, 0x200) <= 0xFFF, \
+		     "alif,alif-pdm: channel-gain out of PDM_CH_GAIN's 12-bit " \
+		     "0x001..0xFFF range (0x1000 and above overflow the field and " \
+		     "mute the channel)"); \
 	static void            pdm_irq_config_##n(void); \
 	static struct pdm_data dmic_alif_pdm_data_##n = { \
 		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \
@@ -1585,7 +1652,7 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		.clkid             = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid), \
 		.clk_frequency_min = DT_INST_PROP_OR(n, clk_frequency_min, 0), \
 		.clk_frequency_max = DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX), \
-		.channel_gain      = DT_INST_PROP_OR(n, channel_gain, 0x800), \
+		.channel_gain      = DT_INST_PROP_OR(n, channel_gain, 0x200), \
 	}; \
 	static void pdm_irq_config_##n(void) \
 	{ \

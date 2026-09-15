@@ -1,7 +1,19 @@
 # Copyright (C) 2025 Alif Semiconductor
 # SPDX-License-Identifier: Apache-2.0
 
-description: Alif Pulse Density Module
+description: |
+  Alif Pulse Density Module
+
+  Decimator settling (issue #2133 round 4e): the first PCM block delivered
+  after every DMIC_TRIGGER_START -- including a restart after an
+  overrun/STOP-then-START cycle, not just the very first capture -- contains
+  the FIR/decimator's startup transient and may read as full-scale (silicon
+  observed +/-32767) or otherwise non-representative. This is not a driver
+  bug and is not filtered by the driver: upstream Zephyr dmic drivers don't
+  discard a settling block either, and the dmic API has no settling
+  contract for a driver to implement against. Consumers should discard the
+  first block after every START themselves -- examples/aen/aen-pdm-mic-alif
+  already excludes it from its signal-level stats for this reason.
 
 compatible: "alif,alif-pdm"
 
@@ -70,18 +82,42 @@ properties:
 
   channel-gain:
     type: int
-    default: 0x800
+    default: 0x200
     description: |
       Per-channel PDM_CH_GAIN value applied to every enabled hardware channel
-      by dmic_alif_pdm_configure() (issue #2143). The default (0x800, 2048)
-      is carried from Alif's ml-embedded-evaluation-kit reference
-      (mic_listener.c) -- it is NOT documented anywhere as a calibrated
-      value; no source names PDM_CH_GAIN's bit width or dB scale. Alif's own
-      KWS sample (alif_kws AudioBackend.cpp) uses 0xF00 for this same 48 kHz
-      mode instead -- higher, also unexplained. The driver's OLD hardcoded
-      default (0x0D, from Alif's register-level driver test,
-      sdk-alif tests/drivers/pdm/src/alif_test_pdm.c) measured ~40 dB too
-      quiet on the E1M-EVK's MP34DT05TR-A mics (issue #2133 round 4d silicon
-      result) -- it was never an audio-tuned value to begin with. Override
-      per board/mic if 0x800 proves wrong on silicon; PDM_INIT's BUILD_ASSERT
-      rejects an out-of-range value at build time.
+      by dmic_alif_pdm_configure() (issue #2143). GAIN is an UNSIGNED 8.4
+      fixed-point field, bits [11:0] of PDM_CH_GAIN, reset 0x10 = 1.0x (Alif
+      SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register, GAIN
+      field, lines ~19081-19092: "Gain in unsigned 8.4 format", bitRange
+      [11:0]; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
+      drivers/include/pdm.h). A value of 0x1000 or above OVERFLOWS the
+      12-bit field and wraps to 0, which MUTES the channel -- see PDM_INIT's
+      BUILD_ASSERT below.
+
+      The default (0x200 = 32.0x = +30.1 dB) is PROVISIONAL, pending a
+      calibrated full-scale measurement, not a tuned value -- issue #2133
+      round 4e's silicon run (gain 0x800 = 128x, quiet room, no controlled
+      stimulus) put every unclipped sample at a multiple of 0x80 (the gain
+      is a saturating multiply applied AFTER the datapath quantizes, so a
+      coarser gain step doesn't cost resolution) and pinned the start
+      transient / post-restart window at full scale, putting the estimated
+      (uncalibrated) pre-gain full scale around 900-1000 LSB -- 0x800 clips
+      a close clap or any start transient. 0x200 is chosen only as "clearly
+      below the clip point"; it brackets BLE Audio's voice-tuned
+      `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig range (0x140-0x320 in
+      this register's units, `range 1 256` left-shifted by 4). Alif's own
+      audio-capture references are NOT a clean precedent for a 48 kHz
+      default: `alif_kws`'s `AudioBackend.cpp` sets 0xF00, but that sample's
+      shipped model runs at 16 kHz (`g_AudioRate = 16000`,
+      generated/kws/kws_micronet_m_vela_H128.tflite.cc), which selects mode
+      4, not the mode 7 this driver defaults to -- 0xF00 was never
+      Alif-validated at 48 kHz. The GitHub-hosted
+      alifsemi/alif_ml-embedded-evaluation-kit's mic_listener.c uses 0x800
+      (not vendored locally, so not a `path:NNN` citation). The driver's OLD
+      hardcoded default (0x0D) is Alif's register-level driver test value
+      (sdk-alif tests/drivers/pdm/src/alif_test_pdm.h:88-123, and
+      samples/drivers/audio/dmic_alif/src/main.c:22) -- never an audio-tuned
+      value, and confirmed ~40 dB too quiet on silicon (issue #2133 round
+      4d). Override per board/mic once a controlled-stimulus calibration
+      exists; PDM_INIT's BUILD_ASSERT rejects an out-of-range value at
+      build time.

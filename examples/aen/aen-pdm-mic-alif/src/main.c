@@ -90,10 +90,12 @@
 /* Liveness floor for the per-channel signal-level check (issue #2133 round
  * 3). A dead or under-clocked PDM channel reads back "+/-1-2 LSB flat
  * noise" -- these thresholds sit a full order of magnitude above that floor.
- * NOT a calibrated SNR figure, and NOT proven to pass on quiet-room ambient
- * noise alone -- round 4d's attended clap test is what confirmed the mics
- * are live at the current (too-low, see issue #2143) gain; this floor is
- * only a documented, order-of-magnitude dead-channel gate.
+ * NOT a calibrated SNR figure, and NOT proof of real acoustic capture: round
+ * 4d's believed "clap test" was not attended (nobody clapped), so the
+ * bursts it recorded above this floor are unidentified room sound or
+ * interference, not confirmed live audio (issue #2133 round 4e). Mic
+ * liveness remains unverified pending a controlled-stimulus re-run; this
+ * floor is only a documented, order-of-magnitude dead-channel gate.
  */
 #define MIN_SIGNAL_RMS_LSB          16
 #define MIN_SIGNAL_PEAK_TO_PEAK_LSB 64
