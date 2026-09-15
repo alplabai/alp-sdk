@@ -14,9 +14,11 @@
  * the hardware channel-enable bits, validates the requested pcm_rate against
  * a HWRM/DFP-grounded PDM_MODE table AND the board's mic clock range (the
  * board overlay's clk-frequency-min/clk-frequency-max -- a board fact, not
- * something this app or the driver invents), and dmic_trigger(START) primes
- * the per-channel FIR/gain defaults and selects the real clock mode. No
- * app-side pdm_mode() / pdm_channel_config() calls are needed.
+ * something this app or the driver invents), and primes the per-channel
+ * FIR/gain defaults itself; dmic_trigger(START) then selects the real clock
+ * mode (round 4c: configure() primes the channel bank, START is what
+ * actually starts sampling -- see alif_pdm.c). No app-side pdm_mode() /
+ * pdm_channel_config() calls are needed.
  *
  * Rates (zephyr/drivers/audio/alif_pdm.c's pdm_clock_modes table): this
  * example defaults to 48000 Hz (PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ,
@@ -33,21 +35,35 @@
  * PASS gate: the device is ready, dmic_configure + dmic_trigger(START)
  * return 0, dmic_read returns blocks with non-zero, NON-CONSTANT samples,
  * the driver never reports a dropped burst (dmic_read() returning -EIO --
- * issue #2133 round 4b), the MEASURED sample rate (frames delivered /
- * elapsed wall-clock time, excluding the first read's startup latency) is
- * within +/-5% of SAMPLE_RATE_HZ, AND at least one channel's RMS and
- * peak-to-peak both clear a documented floor above a dead/under-clocked
- * mic's residual noise (issue #2133 round 3: round 1's PASS gate was
- * "samples aren't all equal", which a flat +/-1-2 LSB noise floor satisfies
- * -- that is NOT evidence of live acoustic capture). A run that reads
- * cleanly at the right rate but with no channel over that floor is reported
- * INCONCLUSIVE, not PASS; a run where the driver ever reported a drop is
- * FAILed outright regardless of what the surviving blocks measured (round
- * 4b: a round-3 run measured ~32 kHz on a 48 kHz request because THIS
- * app's own per-sample stats loop couldn't keep up with the block period
- * and the driver was silently dropping bursts -- the "wrong rate" verdict
- * was really an unreported drop; this gate catches that class directly
- * instead of only inferring it from a rate mismatch).
+ * issue #2133 round 4b/4c: slab exhaustion, delivery-queue overflow, an
+ * unplannable burst, or a genuine hardware FIFO overflow), the MEASURED
+ * sample rate (frames delivered / elapsed wall-clock time, excluding the
+ * first successful read's startup latency) is within +/-5% of
+ * SAMPLE_RATE_HZ, AND at least one channel's RMS and peak-to-peak both clear
+ * a documented floor above a dead/under-clocked mic's residual noise (issue
+ * #2133 round 3: round 1's PASS gate was "samples aren't all equal", which a
+ * flat +/-1-2 LSB noise floor satisfies -- that is NOT evidence of live
+ * acoustic capture). A run that reads cleanly at the right rate but with no
+ * channel over that floor is reported INCONCLUSIVE, not PASS; a run where
+ * the driver ever reported a drop is FAILed outright regardless of what the
+ * surviving blocks measured; an empty FIFO or a rate mismatch also FAILs,
+ * without guessing a cause (round 4c: round 2's "SE-managed HFOSCx2" and
+ * round 3's "wrong PDM clock mode" diagnoses for those two cases were never
+ * confirmed and are no longer asserted here).
+ *
+ * On the round-3/4a ~32 kHz measurement (round 4a shipped this example with
+ * a double-precision per-sample stats loop): that WAS this app's own read
+ * loop pacing the measurement -- a 1 ms timing model of the old
+ * double-precision loop's ~150-180 ms/block cost reproduces ~32-36 kHz
+ * readings on its own, with or without an actual driver-side drop in the
+ * same run. Whether the 4-block slab also exhausted on that specific run
+ * was NOT separately measured at the time (the driver had no way to report
+ * one yet) -- round 4c does not claim it did. What round 4c DOES fix on
+ * both sides: this file's stats loop is now integer-only (see
+ * chan_stats_update() below) so it cannot re-introduce that pacing
+ * artifact, and the driver now reports every drop path it has via -EIO, so
+ * a future slow-consumer session fails loudly here instead of producing a
+ * plausible-looking wrong number.
  */
 
 #include <stdio.h>
@@ -89,20 +105,26 @@
 K_MEM_SLAB_DEFINE_STATIC(pdm_slab, BLOCK_SIZE, BLOCK_COUNT, 4);
 
 /* Per-channel running stats -- INTEGER-ONLY accumulation (issue #2133 round
- * 4b). The previous version ran a double-precision Welford update (a divide
- * per sample) on all ~19200 samples/block with no CONFIG_FPU on this M55-HE
- * build -- soft-float, ~150 ms/block against a 100 ms block period. The
- * 4-block slab exhausted while this loop was still chewing on an earlier
- * block, the driver silently dropped the bursts that arrived meanwhile, and
- * the resulting "measured_rate_hz=32142" was THIS CONSUMER falling behind,
- * not the PDM clock (mode 7 was programmed and held correctly throughout).
- * Root cause is the algorithm, not missing hardware float -- turning on
- * CONFIG_FPU would only make the same per-sample division/whatever faster,
- * not remove it, and wouldn't catch the NEXT thing that's slow. int64 sum +
- * sum-of-squares needs no division or sqrt() per sample; min/max give
- * peak-to-peak directly (DC-offset-invariant). The only floating point
- * anywhere in this file is one sqrt() per channel, AFTER the capture loop
- * (chan_stats_rms_ac() below) -- 4 calls total, not ~19200.
+ * 4b/4c). The previous version ran a double-precision Welford update (a
+ * divide per sample) on all ~19200 samples/block with no CONFIG_FPU on this
+ * M55-HE build -- soft-float, ~150 ms/block against a 100 ms block period.
+ * That alone is enough to explain a "measured_rate_hz=32142" reading: the
+ * rate measurement below counts frames per elapsed wall-clock time in THIS
+ * loop, so it measures how fast THIS LOOP pulled blocks, not the PDM
+ * sample clock (a 1 ms timing model of the old loop's ~150-180 ms/block
+ * cost reproduces ~32-36 kHz on its own). Whether the 4-block slab ALSO
+ * exhausted on any given slow run is a separate question this app could
+ * not answer before round 4c added the driver's -EIO drop report -- round
+ * 4b's comment here overstated that connection as settled fact; it wasn't
+ * measured. What IS settled: mode 7 was programmed and held correctly
+ * throughout (PDM_CONFIG_REGISTER read back unchanged), and this loop's
+ * own cost was gratuitous. int64 sum + sum-of-squares needs no division or
+ * sqrt() per sample; min/max give peak-to-peak directly (DC-offset-
+ * invariant). The only floating point anywhere in this file is one sqrt()
+ * per channel, AFTER the capture loop (chan_stats_rms_ac() below) -- 4
+ * calls total, not ~19200. Turning on CONFIG_FPU was deliberately NOT the
+ * fix: it would only make the same per-sample cost faster, not remove the
+ * design smell, and wouldn't catch the next thing that's slow.
  */
 struct chan_stats {
 	int32_t  min_v;
@@ -201,8 +223,10 @@ int main(void)
 	 * (zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch)
 	 * enables the CGU master 76.8 MHz source AND the EXPMST0_CTRL IPCLK/PCLK force
 	 * bits the EXPMST0-domain HP PDM needs, inside clock_control_on() -- which the
-	 * alif_pdm driver calls during dmic_configure(). Without those the PDM has no
-	 * functional clock and never samples (FIFO=0 -> dmic_read -EAGAIN). */
+	 * alif_pdm driver calls once, from pdm_initialize() at boot (round 4c: NOT from
+	 * dmic_configure(), which only validates + primes channel state -- see
+	 * alif_pdm.c). Without those the PDM has no functional clock and never
+	 * samples (FIFO=0 -> dmic_read -EAGAIN). */
 	int rc = dmic_configure(dmic, &cfg);
 	if (rc != 0) {
 		printf("[pdm] dmic_configure -> %d\n", rc);
@@ -226,6 +250,7 @@ int main(void)
 	int64_t  t_last_ms        = 0;
 	uint32_t frames_measured  = 0;
 	uint32_t reads_ok         = 0;
+	bool     have_anchor      = false;
 	bool     overrun_detected = false;
 
 	struct chan_stats stats[NUM_CHANNELS];
@@ -241,7 +266,7 @@ int main(void)
 			printf("[pdm] dmic_read[%d] -> %d\n", b, rc);
 			/* -EIO is the driver's dedicated "a burst was dropped
 			 * this session" signal (zephyr/drivers/audio/
-			 * alif_pdm.c's `overrun` flag, issue #2133 round 4b)
+			 * alif_pdm.c's `overrun` flag, issue #2133 round 4b/4c)
 			 * -- distinct from a plain -EAGAIN/-ETIMEDOUT read
 			 * timeout, which isn't itself evidence of loss. */
 			if (rc == -EIO) overrun_detected = true;
@@ -254,15 +279,22 @@ int main(void)
 
 		/* Measure the ACHIEVED rate, not the requested one: count
 		 * frames across reads and divide by elapsed wall-clock time,
-		 * excluding the first read as a startup-latency anchor only
-		 * (it can span the pre-START/post-START boundary). A "PCM
+		 * excluding the FIRST SUCCESSFUL read as a startup-latency
+		 * anchor only (it can span the pre-START/post-START boundary)
+		 * -- anchored on `have_anchor`, not loop index `b == 0` (issue
+		 * #2133 round 4c): if the very first read() times out, the OLD
+		 * `b == 0` check would let the actual first successful read
+		 * (at some b > 0) fall into the "else" branch and be counted
+		 * as a normal sample instead of becoming the anchor. A "PCM
 		 * varies" check alone never would have caught round 1's
-		 * mislabelled-rate bug. Block 0's SAMPLES are excluded from
-		 * the signal stats below for the same reason plus the
-		 * decimator/FIR startup transient (issue #2133 round 3/4b).
+		 * mislabelled-rate bug. The anchor block's SAMPLES are
+		 * excluded from the signal stats below for the same reason
+		 * plus the decimator/FIR startup transient (issue #2133 round
+		 * 3/4b).
 		 */
-		if (b == 0) {
+		if (!have_anchor) {
 			t_anchor_ms = now_ms;
+			have_anchor = true;
 		} else {
 			frames_measured += frames_in_block;
 			t_last_ms = now_ms;
@@ -334,15 +366,20 @@ int main(void)
 		          "slab exhausted or delivery queue overflowed); this capture is not "
 		          "trustworthy regardless of what the surviving blocks measured";
 	} else if (reads_ok == 0) {
-		verdict = "PARTIAL";
-		reason  = "FIFO empty -- HP-PDM config register-verified (channel mask + mode set; "
-		          "the patched clockctrl forced EXPMST0 IPCLK/PCLK + set the CGU CLK_ENA bit); "
-		          "not sampling -> the 76.8MHz audio source itself (HFOSCx2) is SE-managed: the "
-		          "CGU CLK_ENA bit alone may not engage the oscillator. Needs the se_services/MHU "
-		          "clock request to the SE (alp-sdk doesn't wire it yet).";
+		/* issue #2133 round 4c: this used to guess a specific cause
+		 * (SE-managed HFOSCx2 not engaged) that was never confirmed
+		 * on silicon -- state only what was observed. */
+		verdict = "FAIL";
+		reason  = "no PDM data read within the timeout on any attempt -- "
+		          "cause not diagnosed here";
 	} else if (!rate_ok) {
-		verdict = "PARTIAL";
-		reason  = "measured rate outside +/-5% of requested -- wrong PDM clock mode";
+		/* issue #2133 round 4c: this used to assert "wrong PDM clock
+		 * mode" as the cause -- round 4c traced a prior ~32 kHz
+		 * reading to this APP's own read-loop pacing instead (see the
+		 * file header), so naming a specific hardware cause here was
+		 * never justified either. */
+		verdict = "FAIL";
+		reason  = "measured rate outside +/-5% of requested -- cause not diagnosed here";
 	} else if (!signal_ok) {
 		verdict = "INCONCLUSIVE";
 		reason  = "no acoustic signal (every channel's RMS/peak-to-peak stayed at or below the "

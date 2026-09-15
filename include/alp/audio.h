@@ -141,7 +141,15 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[out] out_frames   Receives the frame count actually delivered.
  *                          May be NULL.
  * @param[in]  timeout_ms   Max wait for available frames.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ *         ALP_ERR_IO. ALP_ERR_IO (issue #2133 round 4c) means the backend
+ *         itself reported dropped data mid-session (e.g. the Zephyr
+ *         alif_pdm driver's slab-exhaustion/queue-overflow/hardware-FIFO-
+ *         overflow detection, `-EIO` from `dmic_read()`) -- sticky until
+ *         the caller stops and restarts the stream; every read keeps
+ *         returning ALP_ERR_IO until then. This is distinct from
+ *         ALP_ERR_TIMEOUT, which just means no data arrived within
+ *         @p timeout_ms and does not by itself indicate loss.
  */
 alp_status_t alp_audio_in_read(alp_audio_in_t *in,
                                void           *buf,

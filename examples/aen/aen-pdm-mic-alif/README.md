@@ -36,7 +36,7 @@ declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 
 | `SAMPLE_RATE_HZ` | PDM mode | On THIS board | FIR-reuse basis |
 |---|---|---|---|
-| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec, mode confirmed programmed** (`PDM_CONFIG_REGISTER=0x00070033` held throughout capture) -- but the MEASURED delivery rate on silicon is **~32 kHz, not 48 kHz**; root cause pending, see Status | same decimation ratio as the register-proven mode 1 -- direct |
+| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **in spec, mode confirmed programmed** (`PDM_CONFIG_REGISTER=0x00070033` held throughout capture) -- but the app's measured rate on that silicon run was **~32 kHz, not 48 kHz**; round 4c traces that to the app's OWN (now-fixed) read-loop pacing rather than the PDM clock, see Status | same decimation ratio as the register-proven mode 1 -- direct |
 | `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec, not yet bench-run | different decimation ratio (48 vs 64) -- less direct |
 | `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
@@ -82,14 +82,25 @@ a clean read at the right rate with no channel over that floor now reports
   (`-EINVAL`), and `PDM_CONFIG_REGISTER` was never written.
 - The 48 kHz build's mode select is CONFIRMED CORRECT and held:
   `PDM_CONFIG_REGISTER = 0x00070033` throughout capture, and blocks arrived
-  at the configured 38400 B (4800 frames x 4 ch x 2 B). But
-  `measured_rate_hz` read **~32 kHz in two runs**, not 48 kHz -- host-side
-  timing agreed. Per-channel `rms_ac` 6-7, `peak_to_peak` 1011-1126 (sparse
-  spikes, not a clean tone). **The root cause (ISR throughput/frame drops
-  vs clock/decimation vs block assembly) is under separate investigation.**
-  Do not treat 48 kHz as verified -- only the clock-mode selection and the
-  16 kHz rejection are proven this round. Neither the 32 kHz mode nor a
-  fixed 48 kHz path has bench confirmation yet.
+  at the configured 38400 B (4800 frames x 4 ch x 2 B). But the app's own
+  `measured_rate_hz` read **~32 kHz in two runs**, not 48 kHz. Per-channel
+  `rms_ac` 6-7, `peak_to_peak` 1011-1126 (sparse spikes, not a clean tone).
+
+**Round 4c, restated conservatively:** the ~32 kHz reading is this app's OWN
+rate measurement -- frames delivered per elapsed wall-clock time in ITS read
+loop -- so it measures how fast the loop pulled blocks, not the PDM sample
+clock. Round 4a shipped this example with a double-precision per-sample
+stats loop (soft-float, ~150-180 ms/block against a 100 ms block period,
+no `CONFIG_FPU`); a 1 ms timing model of that loop reproduces ~32-36 kHz
+readings on its own. Whether the driver's 4-block slab ALSO exhausted on
+that specific run was not separately measured at the time -- the driver had
+no way to report a drop until this round added one (`dmic_read()` now
+returns `-EIO` on any dropped burst, including a genuine hardware FIFO
+overflow). This example's stats loop is now integer-only so it cannot
+reproduce that pacing artifact. Do not treat 48 kHz as verified -- only the
+clock-mode selection and the 16 kHz rejection are proven on silicon so far;
+a fresh bench run with both fixes in place is the next step, not done in
+this round.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):
@@ -98,9 +109,10 @@ them):
 2. **Wrong/missing pads** — now the SoM-TSV mic route (D0=P6_0/C0=P6_1,
    D2=P5_4/C2=P11_4); data pads carry `input-enable` (pad REN).
 3. **`MICROPHONE_SLEEP`** — as of issue #2133 the driver itself primes every
-   enabled channel's FIR/IIR/gain (from the Alif reference) and selects the
-   real clock mode as part of `dmic_trigger(DMIC_TRIGGER_START)` (round 2:
-   moved out of `dmic_configure()` so the block doesn't start sampling, and
+   enabled channel's FIR/IIR/gain (from the Alif reference) as part of
+   `dmic_configure()`, and selects the real clock mode as part of
+   `dmic_trigger(DMIC_TRIGGER_START)` (round 2: the clock-mode write moved
+   out of `dmic_configure()` so the block doesn't start sampling, and
    `DMIC_TRIGGER_STOP` doesn't leave it sampling, outside the app's
    start/stop calls); the app supplies only the standard
    `dmic_build_channel_map()` channel map (not a raw PDM bitmask) and calls
