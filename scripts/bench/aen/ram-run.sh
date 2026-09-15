@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 # scripts/bench/aen/ram-run.sh <build-dir> [sleep_ms] [bufsize_hex] [preload_jlink_file]
 #
-# Requires BENCH_PLACE (the labgrid-client place name whose probe to use, e.g.
-# "e1m-aen-evk-02" -- you must already hold that place's reservation) AND
-# AEN_JLINK_RUN (the board-farm's jlink-run.sh wrapper path -- no default;
-# see the comments below for why). See the BENCH_PLACE/AEN_JLINK_RUN
-# comments below.
+# Requires LG_PLACE (the labgrid-client place name whose probe to use, e.g.
+# "e1m-aen-evk-02" -- you must already hold that place's reservation; see
+# bench-env.sh). Every JLinkExe session below is routed through
+# bench_jlink_run() (bench-env.sh, alp-sdk#2064), which resolves the probe
+# from LG_PLACE and masks every other probe in a private namespace. Export
+# AEN_JLINK_RUN (the board-farm's jlink-run.sh wrapper path) instead to
+# route through THAT wrapper -- an operator opt-in, not the default -- see
+# the jlink_run() comment below for why one might still want it.
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
-# drives JLinkExe via the board-farm's jlink-run.sh wrapper). Runs under
-# WSL2 on Windows. No SETOOLS/SE-UART -- this flow never writes MRAM. See
-# docs/aen-bench-bringup.md. Requires gawk (GNU awk) -- the LOAD-segment
-# address derivation below uses strtonum(), a gawk extension mawk/BSD awk
-# lack; checked explicitly before it's needed (see the "requires gawk"
-# exit below).
+# drives JLinkExe via bench_jlink_run()'s in-tree probe-isolation wrapper).
+# Runs under WSL2 on Windows. No SETOOLS/SE-UART -- this flow never writes
+# MRAM. See docs/aen-bench-bringup.md. Requires gawk (GNU awk) -- the
+# LOAD-segment address derivation below uses strtonum(), a gawk extension
+# mawk/BSD awk lack; checked explicitly before it's needed (see the
+# "requires gawk" exit below).
 #
 # FLOW C -- RAM-run a Zephyr ITCM image on the E8 (M55-HE) over J-Link and
 # ASCII-decode the CONFIG_RAM_CONSOLE buffer ('ram_console_buf') read back over SWD.
@@ -62,100 +65,88 @@ if ! [[ "$SLEEP" =~ ^[0-9]+$ ]]; then
 	exit 2
 fi
 
-# BENCH_PLACE -- the labgrid-client place name whose probe this run uses, routed
-# through the board-farm's jlink-run.sh wrapper (alp-sdk#2076 review,
-# alp-sdk#2064) instead of a bare -SelectEmuBySN. Several probes on this
-# bench share one OEM serial (the exact count enumerated has drifted before
-# and is not repeated here); JLINK_SN alone cannot tell them apart, and the
-# DPIDR preflight below only checks WHICH board answered THAT session -- it
-# does not stop session 1 loading one board while session 2 reads a
-# DIFFERENT one under the same shared serial. jlink-run.sh instead resolves
-# the named place's probe from labgrid and USB-masks every other probe so
-# only it can be opened, closing that gap structurally rather than by
-# checking after the fact. No default -- host/bench-specific, like
-# SE_UART/AEN_OPENOCD_CFG in bench-env.sh (NOT edited here: PR #2080 and
-# draft #2033 both touch that file).
-BENCH_PLACE="${BENCH_PLACE:-}"
-if [ -z "$BENCH_PLACE" ]; then
-	echo "ram-run: BENCH_PLACE is unset. Several J-Links on this bench share" >&2
-	echo "         one OEM serial -- a bare -SelectEmuBySN cannot tell them" >&2
-	echo "         apart, so ram-run.sh requires the labgrid-client PLACE NAME" >&2
-	echo "         whose probe to use, e.g.:" >&2
-	echo "             export BENCH_PLACE=e1m-aen-evk-02" >&2
-	echo "         (you must already hold that place's labgrid reservation)." >&2
-	exit 2
-fi
-
-# AEN_JLINK_RUN -- the board-farm's per-probe isolation wrapper (labgrid
-# reservation check + USB-namespace masking + firmware-safe JLinkExe
-# selection). NO default, matching AEN_OPENOCD_CFG's own "error-if-unset"
-# shape in bench-env.sh, NOT bench_jlink_exe()'s $HOME/segger-latest
-# default: on a real bench host the natural default IS the real wrapper, so
-# a dev/test run that forgot to override this would silently drive a real
-# probe instead of failing closed (alp-sdk#2076 review). Export it
-# explicitly, or point it at a fake sharing the wrapper's own "<place>
-# [JLinkExe args...]" contract in a test.
+# AEN_JLINK_RUN (optional, alp-sdk#2076/#2064) -- the board-farm's per-probe
+# isolation wrapper (labgrid reservation check + USB-namespace masking +
+# firmware-safe JLinkExe selection). When exported, jlink_run() below routes
+# through IT instead of the in-tree bench_jlink_run() -- an operator opt-in
+# for a bench host that has it installed. Both suppress the same
+# probe-firmware-update prompt (bench_jlink_run() ports that guard itself,
+# see its own header comment in bench-env.sh) -- picking one over the other
+# is not a safety tradeoff. NO default: an unset AEN_JLINK_RUN falls through
+# to bench_jlink_run(), it never silently drives a real probe with no
+# isolation at all.
 AEN_JLINK_RUN="${AEN_JLINK_RUN:-}"
-if [ -z "$AEN_JLINK_RUN" ]; then
-	echo "ram-run: AEN_JLINK_RUN is unset. This is the board-farm's per-probe" >&2
-	echo "         isolation wrapper (host-specific, not shipped). Export it, e.g.:" >&2
-	echo "             export AEN_JLINK_RUN=\$HOME/board-farm/bin/jlink-run.sh" >&2
-	exit 2
-fi
-if [ ! -x "$AEN_JLINK_RUN" ]; then
-	echo "ram-run: '$AEN_JLINK_RUN' not found or not executable." >&2
-	exit 2
+if [ -n "$AEN_JLINK_RUN" ]; then
+	if [ ! -x "$AEN_JLINK_RUN" ]; then
+		echo "ram-run: AEN_JLINK_RUN='$AEN_JLINK_RUN' not found or not executable." >&2
+		exit 2
+	fi
+	# BENCH_PLACE -- the labgrid-client place name passed to AEN_JLINK_RUN.
+	# Falls back to LG_PLACE (bench-env.sh's own primary input, alp-sdk#2032)
+	# so a caller need not set both names for the same board; several probes
+	# on this bench share one OEM serial (the exact count enumerated has
+	# drifted before and is not repeated here) and JLINK_SN alone cannot tell
+	# them apart, so SOME place name is required whenever the external
+	# wrapper is in play.
+	BENCH_PLACE="${BENCH_PLACE:-${LG_PLACE:-}}"
+	if [ -z "$BENCH_PLACE" ]; then
+		echo "ram-run: AEN_JLINK_RUN is set but no place name is available --" >&2
+		echo "         export BENCH_PLACE=<labgrid place> (or LG_PLACE, which" >&2
+		echo "         bench-env.sh already resolves SE_UART/LG_SWD_PATH from)," >&2
+		echo "         e.g.:" >&2
+		echo "             export BENCH_PLACE=e1m-aen-evk-02" >&2
+		echo "         (you must already hold that place's labgrid reservation)." >&2
+		exit 2
+	fi
 fi
 
-# JLINK_SN selection -- for the SIX sibling scripts in this directory that
-# still select their probe this way and point HERE for the explanation
-# (flash-jlink.sh, flash-jlink-hp.sh, flash-run.sh, flash-all-flowd.sh,
-# erase-storage.sh, reread.sh; NOT flash-jlink-mramxip.sh -- it cites this
-# file only for the #935 BUF_SYM guard and uses its own `${JLINK_SN:+...}`
-# pattern, not this one): WHY their `-SelectEmuBySN` is added only when
-# JLINK_SN is set, never unconditionally.
+# JLINK_SN selection -- for the TEN sibling scripts in this directory that
+# still select their probe this way (indirectly, via bench_jlink_run() /
+# bench-env.sh now, alp-sdk#2064) and point HERE for the historical
+# explanation of why `-SelectEmuBySN` alone is not enough on this bench.
 # Leaving JLINK_SN unset is NOT a no-op -- alplab-gw carries multiple
 # J-Links, some sharing a cloned OEM serial, and an unselected JLinkExe run
 # there fails every command with "Cannot connect to the probe/programmer"
-# (alp-sdk#1318) or silently attaches the wrong one; forcing an EMPTY
-# -SelectEmuBySN unconditionally would be worse than omitting the flag, so
-# those scripts guard it with `[ -n "${JLINK_SN:-}" ]`. ram-run.sh ITSELF no
-# longer selects by JLINK_SN -- see BENCH_PLACE/AEN_JLINK_RUN above, which
-# route through jlink-run.sh's USB masking instead, closing the wrong-board
-# gap a bare serial select cannot (alp-sdk#2076 review, alp-sdk#2064).
+# (alp-sdk#1318) or silently attaches the wrong one. ram-run.sh ITSELF no
+# longer selects by JLINK_SN -- jlink_run() below routes through
+# bench_jlink_run()'s USB masking instead (or AEN_JLINK_RUN's, if exported),
+# closing the wrong-board gap a bare serial select cannot (alp-sdk#2076
+# review, alp-sdk#2064).
 
-# jlink_run <JLinkExe args...> -- one isolated JLinkExe session against
-# BENCH_PLACE's probe. Kept as one small function (rather than inlining the
-# wrapper call at each site) so a test can override AEN_JLINK_RUN with a
-# fake and exercise every call site through it, without driving the real
-# wrapper's labgrid reservation check / USB masking / OpenOCD firmware read.
+# jlink_run <JLinkExe args...> -- one isolated JLinkExe session against the
+# probe LG_PLACE (or BENCH_PLACE, if AEN_JLINK_RUN is exported) actually
+# owns. Kept as one small function (rather than inlining the call at each
+# site) so a test can override AEN_JLINK_RUN with a fake and exercise every
+# call site through it, without driving a real labgrid reservation check /
+# USB masking / probe access.
 #
-# The wrapper only special-cases `-CommandFile <path>` (it injects `exec
-# DisableAutoUpdateFW` ahead of it, so a probe whose bundled firmware
-# differs from the DLL is never offered an update) -- NOT `-CommanderScript`,
-# which every other bench script in this repo uses. Both are the same
-# JLinkExe option (confirmed against the real JLinkExe binary on this host:
-# `-CommandFile` and `-CommanderScript` produce identical transcripts), but
-# only `-CommandFile` is what the wrapper recognizes; passing
-# `-CommanderScript` here would make it refuse (no file to inject into).
+# AEN_JLINK_RUN's wrapper only special-cases `-CommandFile <path>` (it
+# injects `exec DisableAutoUpdateFW` ahead of it, so a probe whose bundled
+# firmware differs from the DLL is never offered an update) -- NOT
+# `-CommanderScript`, which every other bench script in this repo uses. Both
+# are the same JLinkExe option (confirmed against the real JLinkExe binary on
+# this host: `-CommandFile` and `-CommanderScript` produce identical
+# transcripts), but only `-CommandFile` is what that wrapper recognizes;
+# bench_jlink_run() (the default path) accepts either flag too, and rewrites
+# whichever one is present to point at its own DisableAutoUpdateFW-prepended
+# copy of the file (see its header comment in bench-env.sh) -- every other
+# argument passes through unmodified.
 jlink_run() {
-	"$AEN_JLINK_RUN" "$BENCH_PLACE" "$@"
+	if [ -n "$AEN_JLINK_RUN" ]; then
+		"$AEN_JLINK_RUN" "$BENCH_PLACE" "$@"
+	else
+		bench_jlink_run "$@"
+	fi
 }
 
 # _connect_or_exit <transcript> <context> -- bench_jlink_assert_connected
-# (bench-env.sh), plus a ram-run-specific correction. bench-env.sh's own
-# hint on a failed connect says `export JLINK_SN=<serial>`, which this
-# script now ignores (BENCH_PLACE/AEN_JLINK_RUN above select the probe
-# instead) -- bench-env.sh is off limits (PR #2080/#2033 both touch it), so
-# the correction is appended here rather than editing that hint in place.
+# (bench-env.sh), exit 7 on failure. bench-env.sh's own failure hint now
+# names LG_PLACE directly (alp-sdk#2064 review), so no local correction is
+# needed here any more -- this wrapper exists only so every call site below
+# stays a one-liner.
 _connect_or_exit() {
 	local out="$1" ctx="$2"
-	if ! bench_jlink_assert_connected "$out" "$ctx"; then
-		echo "ram-run: (the JLINK_SN hint above is stale for this script --" >&2
-		echo "         set BENCH_PLACE to a held labgrid-client place name" >&2
-		echo "         instead; AEN_JLINK_RUN routes through it.)" >&2
-		exit 7
-	fi
+	bench_jlink_assert_connected "$out" "$ctx" || exit 7
 }
 
 OBJ="$(bench_tool_prefix)" || exit $?
@@ -336,8 +327,8 @@ trap _ram_run_cleanup EXIT
 #
 # Flow C is not a read: it writes an AEN-linked image into ITCM and executes
 # it. jlink_run's USB masking (above) already prevents opening any probe but
-# BENCH_PLACE's; this is defense in depth for the case that masking didn't
-# take, matching the DPIDR gate the MRAM writers have had since #1069.
+# the target place's; this is defense in depth for the case that masking
+# didn't take, matching the DPIDR gate the MRAM writers have had since #1069.
 cat > "$WORKDIR/preflight.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
@@ -390,7 +381,7 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
   echo go
   echo exit
 } > "$WORKDIR/load.jlink"
-echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms  place=$BENCH_PLACE" >&2
+echo ">>> RAM-run $(basename "$BD")  entry=$ENTRY  base=$BASE  ram_console_buf=$BUF  sleep=${SLEEP}ms  place=${BENCH_PLACE:-$LG_PLACE}" >&2
 # stderr merged into the same transcript as the preflight already does --
 # jlink-run.sh reports every one of ITS OWN refusals (place not held, board
 # unpowered, USB mask failure, a failed labgrid `show`) on stderr only, and
@@ -522,9 +513,10 @@ fi
 
 # Host-side wait -- Sleep no longer runs inside a JLinkExe session, so the
 # host waits the same $SLEEP milliseconds between the two sessions instead.
-# Routing through jlink_run adds its own overhead per call (a labgrid
-# `show`, an OpenOCD probe-firmware read) on top of this -- the app is
-# guaranteed to run for AT LEAST sleep_ms, not exactly sleep_ms.
+# Routing through jlink_run adds its own overhead per call on top of this
+# (bench_jlink_run's own USB-mask setup, or -- if AEN_JLINK_RUN is exported
+# -- that wrapper's labgrid `show` + OpenOCD probe-firmware read) -- the app
+# is guaranteed to run for AT LEAST sleep_ms, not exactly sleep_ms.
 SLEEP_S=$(awk -v ms="$SLEEP" 'BEGIN { printf "%.3f", ms / 1000 }')
 sleep "$SLEEP_S"
 
