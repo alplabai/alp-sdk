@@ -51,10 +51,11 @@ ZTEST(alif_pdm_chanmap, test_backend_2channel_map_enables_hw_0_and_1)
 	    mask, old_verbatim_mask, "fixed translation must differ from the old buggy verbatim read");
 }
 
-/* The bench-proven examples/aen/aen-pdm-mic-alif 4-channel map: D0 (pdm=0)
- * carries channels 0/1, D2 (pdm=2) carries channels 2/3 -- must enable HW
- * channels 0, 1, 4, 5 (the PDM_MASK_CHANNEL_0|1|4|5 the working example used
- * to pass by hand).
+/* examples/aen/aen-pdm-mic-alif's 4-channel map (register-level verified;
+ * acoustic capture at 48 kHz verified by speaker loopback, issue #2133
+ * round 4f): D0 (pdm=0) carries channels 0/1, D2 (pdm=2) carries channels
+ * 2/3 -- must enable HW channels 0, 1, 4, 5 (the PDM_MASK_CHANNEL_0|1|4|5
+ * the example used to pass by hand).
  */
 ZTEST(alif_pdm_chanmap, test_example_4channel_map_enables_hw_0_1_4_5)
 {
@@ -67,7 +68,7 @@ ZTEST(alif_pdm_chanmap, test_example_4channel_map_enables_hw_0_1_4_5)
 	zassert_equal(rc, 0, "a 4-channel map spanning PDM controllers 0 and 2 must be expressible");
 	zassert_equal(mask,
 	              (PDM_CHANNEL_0 | PDM_CHANNEL_1 | PDM_CHANNEL_4 | PDM_CHANNEL_5),
-	              "must match the working example's raw PDM_MASK_CHANNEL_0|1|4|5");
+	              "must match the example's raw PDM_MASK_CHANNEL_0|1|4|5");
 }
 
 /* A PDM controller index the 8-hw-channel part cannot express

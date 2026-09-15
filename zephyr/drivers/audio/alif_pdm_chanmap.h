@@ -36,13 +36,15 @@
  *      enabled, mode 0x1): the E1M-AEN801 SoM routes PDM_C0/D0 to pdm
  *      controller 0 and PDM_C2/D2 to pdm controller 2
  *      (metadata/e1m_modules/aen/from-alif.tsv, see the board overlay), and
- *      the working raw bitmask enables HW channels 0,1 for that first pair
+ *      the example's raw bitmask enables HW channels 0,1 for that first pair
  *      and 4,5 for the second -- (0*2,0*2+1) and (2*2,2*2+1). Controller 1
  *      (unused on this SoM) would span HW 2,3. Register-level configuration
- *      and the 48 kHz capture rate are silicon-verified (issue #2133 round
- *      4d/4e); live acoustic capture on all 4 channels is NOT -- round 4d's
- *      believed "clap test" was not attended (nobody clapped), so its
- *      recorded bursts are not evidence of that.
+ *      (this channel map) and the 48 kHz capture rate are silicon-verified
+ *      (issue #2133 round 2/4d); acoustic capture at 48 kHz is ALSO now
+ *      verified, by a speaker-to-mic loopback (round 4f, e1m-aen-evk-03,
+ *      2026-09-15) -- round 4d's believed "clap test" was NOT that
+ *      evidence (nobody clapped during it), see divergence (11) in
+ *      alif_pdm.c for the actual verification.
  *
  * Up to ALIF_PDM_MAX_CONTROLLERS (4) PDM controllers x 2 (L/R) = the 8 HW
  * channels MAX_NUM_CHANNELS names -- a pdm index at or above that cannot be

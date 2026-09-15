@@ -4336,6 +4336,12 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS; b++) {
 			size_t       got = 0;
 			alp_status_t r   = alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+			/* Skip the first post-START block: it may contain a PDM
+			 * decimator settling transient (issue #2133 round 4f,
+			 * <alp/audio.h>'s alp_audio_in_start() note) -- a block
+			 * here is 256/16000 = 16 ms, well over the ~1 ms bound
+			 * silicon measured, so skipping just block 0 covers it. */
+			if (b == 0) continue;
 			if (r == ALP_OK) baseline_energy += pdm_block_energy(mic_buf, got * 2u);
 		}
 	}

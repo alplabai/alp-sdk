@@ -41,8 +41,11 @@ declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 | `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
 
-**48 kHz rate is now bench-confirmed with no drops.** Live acoustic capture
-at this rate is NOT confirmed -- see Status and issue #2143.
+**48 kHz rate is now bench-confirmed with no drops.** Acoustic capture at
+this rate is now confirmed too, by a speaker-to-mic loopback on silicon
+(issue #2133 round 4f, `e1m-aen-evk-03`, 2026-09-15) -- see Status.
+Full-scale headroom at the provisional gain default remains unverified;
+see issue #2143.
 
 ```sh
 # default (48 kHz, in spec):
@@ -72,10 +75,17 @@ Round 3 changes what this example proves two ways: (1) it now defaults to
 **48 kHz** (`PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ`), the only table
 entry both in spec for these mics and sharing the register-proven mode's
 decimation ratio; (2) it adds a per-channel **RMS / peak-to-peak / DC-offset**
-print and requires at least one channel to clear a documented floor (a full
-order of magnitude above a dead channel's "±1-2 LSB flat noise") for `PASS` --
-a clean read at the right rate with no channel over that floor now reports
-`INCONCLUSIVE (no acoustic signal)` instead.
+print and requires at least one channel to clear a documented floor -- a full
+order of magnitude above a dead channel's "±1-2 LSB flat noise" AT THE GAIN
+THAT FLOOR WAS MEASURED AT (`0x0D`, issue #2143); round 4f scales the
+threshold with the board overlay's `channel-gain` so it stays above idle
+noise at the current default (`0x200`) instead of sitting below it -- idle
+noise scales with gain too (a saturating multiply after the datapath
+quantizes), so a fixed threshold sized at the old gain would have let a
+dead channel pass at the new one. This is an above-idle-noise check, not a
+claim of identified acoustic content by itself; see Status below for the
+actual acoustic verification -- a clean read at the right rate with no
+channel over that floor reports `INCONCLUSIVE` instead of `PASS`.
 
 **Round 4a silicon results on `e1m-aen-evk-03`:**
 - The 16 kHz build's guard is CONFIRMED: `dmic_configure -> -22`
@@ -99,8 +109,7 @@ separate 30 s capture (same driver, patched read loop) was believed at the
 time to be an attended clap test; **round 4e correction: nobody actually
 clapped during that capture**, so the bursts it recorded (peak p2p ch0=34
 ch1=46 ch2=48 ch3=48 at t=14000 ms; quiet windows 2-3 LSB) are unidentified
-room sound or interference, not proof of acoustic liveness -- **mic
-liveness is UNVERIFIED**, pending a controlled-stimulus re-run. A
+room sound or interference, not proof of acoustic liveness on their own. A
 mid-capture register readback during that same session found
 `CTL0=0x00070033`, `CH0 GAIN=0x0000000D`, `PHASE=0x0000001F`,
 `FIR[0]=0x00000001`. `PDM_CH_GAIN` is bits [11:0], unsigned 8.4 fixed-point
@@ -114,14 +123,47 @@ no controlled stimulus) found every unclipped sample a multiple of `0x80`
 (the gain multiply is saturating and runs after the datapath quantizes) and
 the start-of-capture / post-restart window pinned at full scale (decimator
 settling, not signal) -- `0x800` was too high. Fixed by issue #2143 with a
-new, DT-configurable `channel-gain` property, provisional default `0x200`
-(chosen only as "clearly below the observed clip point", pending
-calibration); a silicon re-run with the corrected default has not been
-done yet. The first block after every `DMIC_TRIGGER_START` (including a
-restart after an overrun) contains decimator-settling transient and may
-clip or read as full-scale garbage -- this example already excludes the
-anchor (first) block from its signal stats for that reason; any consumer
-of this driver should do the same.
+new, DT-configurable `channel-gain` property, provisional default `0x200`.
+`0x200` maps the estimated pre-gain full scale (~900-1000 LSB, itself
+uncalibrated) to roughly int16 full scale with little headroom (~1 dB) --
+it is NOT "clearly below the clip point" as an earlier round claimed, nor
+is it a documented "voice-tuned" value: `0x140` is BLE Audio's Kconfig
+DEFAULT (20, `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN`), `0x320` is that same
+subsystem's `#ifndef` FALLBACK (50, `audio_source_pdm.c`), and
+`unicast_initiator`'s `prj.conf` ships 100 (`0x640`) -- three different
+values from the same codebase, none documented as tuned for anything in
+particular. `0x200` is provisional pending a calibrated full-scale
+measurement.
+
+**Round 4f: acoustic capture is now VERIFIED by a speaker-to-mic loopback**
+on `e1m-aen-evk-03`, 2026-09-15 14:49Z (`PROBE_LOOPBACK` image, driver at
+this branch's `3d8a051b0`): the EVK's TAS2563 speakers (independently
+verified audible) played known tones while the PDM mics captured, gain
+`0x200` confirmed by readback. Goertzel-bin analysis (2 s windows, first
+200 ms discarded) found the 1 kHz bin at 9.3/0.1 dB (ch0/ch1) in silence
+rising to 57.8/57.6 dB at 1 kHz/volume 48 -- and a 500 Hz bin that only
+lit up (54.7/56.6 dB) during the 500 Hz stimulus window, staying within
+-9.8..+5.3 dB everywhere else. Volume 16->48 raised the 1 kHz bin by
++11.6 dB average (expected +9.5 dB). p2p went from 128/128 in silence to
+651/652 at 1 kHz/volume 48. This mics-capture-real-frequency-correct-sound
+result is NOT from this example (it has no controlled stimulus of its
+own) -- it grounds the honest wording this example's own `PASS`/
+`INCONCLUSIVE` text now uses (see Status above). **Still NOT verified:**
+full-scale headroom -- through the speakers the pre-gain signal was only
+about 20 LSB, nowhere near the estimated ~900-1000 LSB pre-gain full
+scale, so `0x200`'s ~1 dB of estimated headroom is unconfirmed by this
+test.
+
+The first block after every `DMIC_TRIGGER_START` (including a restart
+after an overrun) may contain a decimator-settling transient and should be
+discarded -- this example already excludes the anchor (first) block from
+its signal stats for that reason. How LONG that transient lasts was never
+directly measured until round 4f: an early raw hex dump (issue #2133 round
+4e's clap-test build, now deleted) showed roughly 7 zero samples followed
+by ~25 samples of ring-down at 48 kHz -- under 1 ms total, well inside one
+block. Recommend discarding at least 1 ms of samples, or the first block,
+whichever is longer -- a smaller-block consumer than this example's 100 ms
+blocks could otherwise still see settling in its second block.
 
 Getting here required finding a chain of real issues (the first cut had all of
 them):
@@ -130,7 +172,8 @@ them):
 2. **Wrong/missing pads** — now the SoM-TSV mic route (D0=P6_0/C0=P6_1,
    D2=P5_4/C2=P11_4); data pads carry `input-enable` (pad REN).
 3. **`MICROPHONE_SLEEP`** — as of issue #2133 the driver itself primes every
-   enabled channel's FIR/IIR/gain (from the Alif reference) as part of
+   enabled channel's FIR/IIR (from the Alif reference) and gain (from
+   `channel-gain`, issue #2143) as part of
    `dmic_configure()`, and selects the real clock mode as part of
    `dmic_trigger(DMIC_TRIGGER_START)` (round 2: the clock-mode write moved
    out of `dmic_configure()` so the block doesn't start sampling, and

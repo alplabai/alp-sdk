@@ -111,6 +111,14 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg);
 /**
  * @brief Begin capturing.  Frames flow into an internal ring buffer.
  *
+ * @note Samples delivered in the first ~1 ms after start (or after a
+ *       restart following a stop/error) may contain a settling transient
+ *       from the capture datapath's decimation/filtering and should be
+ *       treated as non-representative. Duration and shape are backend/
+ *       silicon-specific; discard at least 1 ms of samples, or the first
+ *       block your reads deliver, whichever is longer (issue #2133
+ *       round 4f).
+ *
  * @param[in] in  Handle from @ref alp_audio_in_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
@@ -141,6 +149,9 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[out] out_frames   Receives the frame count actually delivered.
  *                          May be NULL.
  * @param[in]  timeout_ms   Max wait for available frames.
+ * @note See @ref alp_audio_in_start for the startup settling-transient
+ *       caveat -- it applies to the first block(s) this function delivers
+ *       after start/restart, not just to alp_audio_in_start() itself.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
  *         ALP_ERR_IO. ALP_ERR_IO (issue #2133 round 4c) means the backend
  *         itself reported dropped data mid-session (e.g. the Zephyr

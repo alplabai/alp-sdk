@@ -478,8 +478,9 @@ bench sessions, and so are
   trust its `src/main.c`, not its prose.
 - [`examples/aen/aen-pdm-mic-alif`](../aen-pdm-mic-alif/) -- the HP PDM
   overlay phase 11 transcribes; that example's own README has the current
-  silicon status (rate, live-mic clap test, and the known ~40 dB gain
-  shortfall being fixed under issue #2143) under the same patched
-  clockctrl.
+  silicon status (48 kHz rate verified; acoustic capture at 48 kHz now
+  verified by a speaker-to-mic loopback on `e1m-aen-evk-03`, issue #2133
+  round 4f; the per-channel gain default is still provisional, issue
+  #2143) under the same patched clockctrl.
 - [`<alp/boards/alp_e1m_evk_routes.h>`](../../../include/alp/boards/alp_e1m_evk_routes.h)
   -- `EVK_I2C_ADDR_*` / `EVK_PWM_LED_*` map.

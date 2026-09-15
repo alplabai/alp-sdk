@@ -4,16 +4,23 @@
 description: |
   Alif Pulse Density Module
 
-  Decimator settling (issue #2133 round 4e): the first PCM block delivered
-  after every DMIC_TRIGGER_START -- including a restart after an
-  overrun/STOP-then-START cycle, not just the very first capture -- contains
-  the FIR/decimator's startup transient and may read as full-scale (silicon
-  observed +/-32767) or otherwise non-representative. This is not a driver
-  bug and is not filtered by the driver: upstream Zephyr dmic drivers don't
-  discard a settling block either, and the dmic API has no settling
-  contract for a driver to implement against. Consumers should discard the
-  first block after every START themselves -- examples/aen/aen-pdm-mic-alif
-  already excludes it from its signal-level stats for this reason.
+  Decimator settling (issue #2133 round 4e/4f): PCM delivered shortly after
+  every DMIC_TRIGGER_START -- including a restart after an
+  overrun/STOP-then-START cycle, not just the very first capture -- may
+  contain the FIR/decimator's startup transient and read as full-scale
+  (silicon observed +/-32767) or otherwise non-representative. MEASURED
+  bound (round 4f): a raw hex dump of the start of capture showed roughly 7
+  zero samples followed by ~25 samples of ring-down at 48 kHz -- under 1 ms
+  total, well inside this driver's typical 100 ms block. This is not a
+  driver bug and is not filtered by the driver: upstream Zephyr dmic
+  drivers don't discard a settling block either, and the dmic API has no
+  settling contract for a driver to implement against. Consumers should
+  discard AT LEAST 1 ms of samples after every START, or the first block,
+  WHICHEVER IS LONGER -- discarding only "the first block" is not enough
+  for a consumer using a block size smaller than ~1 ms, which could still
+  see settling in its second block. examples/aen/aen-pdm-mic-alif excludes
+  its first (anchor) block from signal-level stats for this reason, which
+  covers it at that example's 100 ms block size.
 
 compatible: "alif,alif-pdm"
 
@@ -102,13 +109,27 @@ properties:
       coarser gain step doesn't cost resolution) and pinned the start
       transient / post-restart window at full scale, putting the estimated
       (uncalibrated) pre-gain full scale around 900-1000 LSB -- 0x800 clips
-      a close clap or any start transient. 0x200 is chosen only as "clearly
-      below the clip point"; it brackets BLE Audio's voice-tuned
-      `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig range (0x140-0x320 in
-      this register's units, `range 1 256` left-shifted by 4). Alif's own
-      audio-capture references are NOT a clean precedent for a 48 kHz
-      default: `alif_kws`'s `AudioBackend.cpp` sets 0xF00, but that sample's
-      shipped model runs at 16 kHz (`g_AudioRate = 16000`,
+      a close clap or any start transient. 0x200 maps that estimated
+      pre-gain full scale to roughly int16 full scale (~900-1000 * 32 =~
+      28800-32000 against 32767) -- ONLY ABOUT 1 dB of estimated headroom,
+      not "clearly below the clip point" as an earlier round claimed
+      (round 4f correction). It is NOT a documented "voice-tuned" value
+      either: BLE Audio's `ALIF_BLE_AUDIO_PDM_MICROPHONE_GAIN` Kconfig
+      (`range 1 256`, left-shifted by 4 before writing this register) has
+      three different values in the same codebase and none is described as
+      tuned for anything -- `0x140` is its Kconfig DEFAULT (20),
+      `0x320` is a DIFFERENT `#ifndef` FALLBACK (50,
+      subsys/bluetooth/le_audio/audio_source_pdm.c), and
+      samples/bluetooth/le_audio/unicast_initiator's `prj.conf` ships a
+      THIRD value, 100 (`0x640`). A round 4f speaker-to-mic loopback
+      (TAS2563 speakers -> PDM mics, e1m-aen-evk-03) confirmed 0x200
+      captures frequency- and level-correct audio, but the loopback signal
+      was only ~20 LSB pre-gain -- far below the estimated ~900-1000 LSB
+      pre-gain full scale, so 0x200's ~1 dB of estimated headroom remains
+      UNCONFIRMED by that test. Alif's own audio-capture references are
+      NOT a clean precedent for a 48 kHz default either: `alif_kws`'s
+      `AudioBackend.cpp` sets 0xF00, but that sample's shipped model runs
+      at 16 kHz (`g_AudioRate = 16000`,
       generated/kws/kws_micronet_m_vela_H128.tflite.cc), which selects mode
       4, not the mode 7 this driver defaults to -- 0xF00 was never
       Alif-validated at 48 kHz. The GitHub-hosted

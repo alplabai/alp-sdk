@@ -13,14 +13,17 @@
  * it survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
  * once the pdm node is repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
- * Silicon status (issue #2133 round 4e, e1m-aen-evk-03): register-level
- * configuration is verified, and 48 kHz mode 7 capture rate is verified
- * exact with no drops. Acoustic capture is UNVERIFIED: the round 4d
- * "clap test" believed to confirm live mics was not attended -- nobody
- * actually clapped during that capture, so the recorded bursts (at gain
- * 0x0D) are unidentified room sound or interference, not proof of
- * acoustic liveness. A controlled-stimulus re-run (with the new
- * provisional gain default, divergence (9)/(10)) has not been done yet.
+ * Silicon status (issue #2133, e1m-aen-evk-03): register-level
+ * configuration verified; 48 kHz mode 7 capture rate verified exact with no
+ * drops (round 4d, commit 68a169977). Acoustic capture at 48 kHz VERIFIED
+ * by a speaker-to-mic loopback (round 4f, 2026-09-15 14:49Z, TAS2563
+ * speakers -> PDM mics, gain 0x200 readback-confirmed): Goertzel-bin
+ * analysis found the 1 kHz bin rising from ~9/0 dB in silence to ~58 dB at
+ * volume 48, a 500 Hz bin that lit up only during the 500 Hz stimulus, and
+ * p2p rising from 128 in silence to ~651 at 1 kHz/volume 48. NOT verified:
+ * full-scale headroom at the current provisional gain default (0x200,
+ * issue #2143) -- the loopback signal was only ~20 LSB pre-gain, far below
+ * the ~900-1000 LSB estimated pre-gain full scale.
  * ==================================================================
  *
  * Vendored from the fork with this provenance header added, plus the
@@ -250,8 +253,10 @@
  *    recorded bursts (p2p <= 48 at gain 0x0D) are unidentified room sound
  *    or electrical interference, not proof of acoustic liveness. Every
  *    "mics confirmed live" claim in this file, the example, and the docs
- *    is removed; register-level configuration and the 48 kHz rate remain
- *    proven, acoustic capture does not.
+ *    is removed as of this round; register-level configuration and the
+ *    48 kHz rate remain proven, acoustic capture does not (round 4f later
+ *    verifies acoustic capture by a different method -- see divergence
+ *    (11) -- this round's "clap test" is still not evidence of anything).
  *  - PM_DEVICE_ACTION_SUSPEND (divergence (9)) freed data_buffer and
  *    drained buf_queue while interrupts were still enabled and
  *    record_data was still 1 -- the ISR could touch data_buffer/buf_queue
@@ -266,6 +271,38 @@
  *    settling, not signal) -- 0x800 was too high a default. Replaced with
  *    a provisional 0x200; see alif,alif-pdm.yaml's channel-gain
  *    description.
+ * Reapply this divergence if the file is ever re-synced from the fork.
+ * -------------------------------------------------------------------------
+ *
+ * ------------------------- alp-sdk divergence (11) ---------------------
+ * issue #2133 round 4f -- acoustic capture VERIFIED (by a real method,
+ * unlike round 4d/4e's non-clap), plus three more corrections:
+ *  - A speaker-to-mic loopback on `e1m-aen-evk-03` (TAS2563 speakers,
+ *    independently verified audible, playing known tones into the PDM
+ *    mics at gain 0x200) found frequency-correct, level-correct signal via
+ *    Goertzel-bin analysis -- see this file's top-of-file STATUS comment
+ *    for the numbers. Acoustic capture at 48 kHz is now proven; full-scale
+ *    headroom at gain 0x200 is not (the loopback signal never approached
+ *    the estimated pre-gain full scale).
+ *  - The example's per-channel signal-level thresholds (`MIN_SIGNAL_RMS_
+ *    LSB`/`MIN_SIGNAL_PEAK_TO_PEAK_LSB`, examples/aen/aen-pdm-mic-alif/
+ *    src/main.c) were sized at the OLD gain default (0x0D); at the current
+ *    0x200 they sat BELOW idle noise (idle p2p ~96-128 vs. a 64 threshold),
+ *    so a dead or disconnected channel could have printed as passing. Now
+ *    scaled proportionally to `channel-gain`.
+ *  - PM_DEVICE_ACTION_SUSPEND (divergence (10)) fixed interrupt/record_data
+ *    ordering but left `pdata->clk_mode` untouched, matching resume's
+ *    "don't wipe channel-enable" intent (divergence (7)) -- but that
+ *    intent assumes register RETENTION across the low-power transition.
+ *    If the domain actually powers down, `clk_mode` surviving in software
+ *    while the hardware's channel-enable/FIR/GAIN registers do NOT survive
+ *    means a post-resume DMIC_TRIGGER_START proceeds (pdm_decide_start()
+ *    sees "configured") over dead register state instead of refusing.
+ *    SUSPEND now also resets `clk_mode` to PDM_MODE_MICROPHONE_SLEEP, so
+ *    START correctly refuses as "not configured" until the app calls
+ *    configure() again -- fails safe regardless of whether the domain
+ *    actually lost power. Latent today (CONFIG_PM_DEVICE is off on every
+ *    board this driver ships on).
  * Reapply this divergence if the file is ever re-synced from the fork.
  * -------------------------------------------------------------------------
  */
@@ -455,12 +492,17 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * CORRECTION: nobody actually clapped during that capture, so those
 	 * bursts (peak p2p ch0=34 ch1=46 ch2=48 ch3=48, at the old gain
 	 * 0x0000000D) are unidentified room sound or interference, NOT proof
-	 * of live acoustic capture. Mic liveness remains UNVERIFIED pending a
-	 * controlled-stimulus re-run. A mid-capture register readback during
-	 * that same session found CH0 GAIN=0x0000000D -- see
+	 * of live acoustic capture on their own. A mid-capture register
+	 * readback during that same session found CH0 GAIN=0x0000000D -- see
 	 * alif,alif-pdm.yaml's channel-gain property for the full gain
 	 * provenance and round 4e's silicon-driven default change
 	 * (issue #2143, divergence (9)/(10)).
+	 *
+	 * ROUND 4F: acoustic capture at 48 kHz IS now verified, by a
+	 * different and actually controlled method -- a speaker-to-mic
+	 * loopback (TAS2563 speakers playing known tones into the PDM mics,
+	 * gain 0x200 readback-confirmed). See this file's top-of-file STATUS
+	 * comment and divergence (11) for the numbers.
 	 */
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
@@ -798,13 +840,35 @@ void pdm_set_ch_phase(const struct device *dev, uint8_t ch_num, uint32_t ch_phas
  * @brief	Sets the PDM channel gain control value
  * @param[in]	dev	: Pointer to the runtime device structure.
  * @param[in]	ch_num	: PDM channel number.
- * @param[in]	ch_gain	: PDM channel gain control value.
+ * @param[in]	ch_gain	: PDM channel gain control value. Bits [11:0] only
+ *			(issue #2133 round 4f) -- values above PDM_CH_GAIN_MAX
+ *			are clamped, with a LOG_WRN, rather than written
+ *			unclamped (which would overflow the field and mute
+ *			the channel).
  * @return	    None
  */
 void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain)
 {
 	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
 	uintptr_t ch_n_gain = (reg_base + PDM_CH_GAIN + (ch_num * PDM_CH_OFFSET));
+
+	/* PDM_CH_GAIN's GAIN field is only 12 bits (issue #2133 round 4f) --
+	 * a value above PDM_CH_GAIN_MAX would overflow it and wrap to 0,
+	 * silently MUTING the channel instead of clipping loud as a caller
+	 * might expect. This function returns void (public API, existing
+	 * callers), so it cannot report -EINVAL -- clamp and warn instead of
+	 * writing a value that wraps. The one in-tree caller
+	 * (pdm_apply_channel_defaults(), via cfg->channel_gain) is already
+	 * bounded at DT-build time by PDM_INIT's BUILD_ASSERT; this guards
+	 * an app calling pdm_set_ch_gain() directly with a bad runtime
+	 * value.
+	 */
+	if (ch_gain > PDM_CH_GAIN_MAX) {
+		LOG_WRN("ch_gain 0x%x exceeds PDM_CH_GAIN's 12-bit field (max 0x%x) -- "
+			"clamping (an unclamped write would overflow and mute the channel)",
+			ch_gain, PDM_CH_GAIN_MAX);
+		ch_gain = PDM_CH_GAIN_MAX;
+	}
 
 	sys_write32(ch_gain, ch_n_gain);
 }
@@ -1568,8 +1632,10 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		 * pdm_hw_bringup()'s k_msgq_init() on resume re-initializes
 		 * buf_queue, orphaning (leaking) whatever blocks were still
 		 * queued at suspend time. Mirror DMIC_TRIGGER_STOP's cleanup
-		 * so a suspend/resume cycle is indistinguishable from a
-		 * STOP/START one from the app's side. */
+		 * so a suspend/resume cycle matches a STOP/START one from the
+		 * app's side for the software state this function owns --
+		 * this does NOT claim the HARDWARE registers behave the same
+		 * way (issue #2133 round 4f: see the clk_mode reset below). */
 		if (pdata->data_buffer != NULL) {
 			k_mem_slab_free(pdata->mem_slab, pdata->data_buffer);
 			pdata->data_buffer = NULL;
@@ -1582,6 +1648,22 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		}
 
 		pdata->overrun = false;
+
+		/* issue #2133 round 4f: pdm_hw_bringup(dev, false) (resume)
+		 * deliberately does NOT re-apply channel-enable/FIR/GAIN --
+		 * see its header comment -- on the assumption those hardware
+		 * registers survive the low-power transition, matching
+		 * pdata->clk_mode surviving in software. If the power domain
+		 * actually powers down, that assumption is false: the
+		 * registers reset but clk_mode does not, so
+		 * pdm_decide_start() would see "configured" and a post-resume
+		 * DMIC_TRIGGER_START would proceed over dead register state
+		 * instead of refusing. Reset clk_mode here too so START
+		 * refuses as "not configured" regardless of whether the
+		 * domain actually lost power -- fails safe either way, at the
+		 * cost of requiring a fresh configure() after every resume
+		 * even when retention did hold. */
+		pdata->clk_mode = PDM_MODE_MICROPHONE_SLEEP;
 
 		return 0;
 	}

@@ -89,7 +89,15 @@ void pdm_set_ch_phase(const struct device *dev, uint8_t ch_num, uint32_t ch_phas
  * @brief	PDM channel gain control
  * @param	dev	: Pointer to the device structure for the driver instance.
  * @param	ch_num	: pdm channel
- * @param	ch_gain	: pdm channel gain control value
+ * @param	ch_gain	: PDM_CH_GAIN value. Bits [11:0] only (unsigned 8.4
+ *			fixed-point, 0x10 = 1.0x -- Alif SVD
+ *			AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN
+ *			register, GAIN field; issue #2133 round 4f). A value
+ *			above 0xFFF overflows the 12-bit field and wraps to
+ *			0 (mutes the channel) -- out-of-range values are
+ *			clamped to 0xFFF with a LOG_WRN instead, since this
+ *			function returns void and cannot report -EINVAL to a
+ *			caller.
  */
 void pdm_set_ch_gain(const struct device *dev, uint8_t ch_num, uint32_t ch_gain);
 

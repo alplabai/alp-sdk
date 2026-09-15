@@ -34,6 +34,12 @@
 #define PDM_CH_IIR_COEF_SEL      (0xC0) /* Channel (n) IIR Filter Coefficient  */
 #define PDM_CH_PHASE             (0xC4) /* Channel (n) Phase Control Register  */
 #define PDM_CH_GAIN              (0xC8) /* Channel (n) Gain Control Register  */
+/* GAIN field is bits [11:0], unsigned 8.4 fixed-point (issue #2133 round
+ * 4f -- Alif SVD AE822FA0E5597BS0_CM55_HP_View.svd, PDM_CH_GAIN register,
+ * GAIN field; matches the Alif DFP's PDM_MAX_GAIN_CTRL 0xFFFU,
+ * drivers/include/pdm.h). A value above this overflows the field and
+ * wraps to 0, muting the channel. */
+#define PDM_CH_GAIN_MAX (0xFFFU)
 #define PDM_CH_PKDET_TH          (0xCC) /* Channel (n) Peak Detector Threshold Register  */
 #define PDM_CH_PKDET_ITV         (0xD0) /* Channel (n) Peak Detector Interval Register  */
 
