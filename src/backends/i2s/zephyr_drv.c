@@ -157,9 +157,16 @@
  * latch SHUTDOWN in the first place -- this layer still does not, and
  * cannot, re-arm a codec that already shut itself down some other way
  * (an explicit stop()/start() cycle still drops the clock -- see issue
- * #2146 -- and an RX overrun on a controller sharing this clock with an
- * active TX stream still clears CER via rx_stream_disable(), a known gap
- * #2149 does not close). A
+ * #2146 -- and a controller sharing this clock with an active TX stream is
+ * still exposed on the RX side two ways: rx_stream_disable() still clears
+ * CER unconditionally on every RX overrun, and rx_stream_start() still
+ * reprograms clock_control_set_rate()/CCR unconditionally on every RX
+ * start regardless of whether TX left the clock running -- either one can
+ * kill or repoint the TX bit clock out from under it. This driver is
+ * half-duplex in practice (a single dev_data->dir, not per-direction
+ * state), which narrows but does not eliminate the exposure, since the two
+ * directions can still be reconfigured back to back on the shared clock;
+ * Refs #2150, a known gap this fix does not close). A
  * recovery this call's OWN PREPARE performed (in either function) logs
  * one rate-limited LOG_WRN -- the only bench-visible evidence a
  * recovery happened at all, since i2s_dw_trigger() itself only LOG_ERRs

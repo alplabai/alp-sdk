@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2025 Alif Semiconductor
+ * Copyright (c) 2026 Alp Lab AB
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -383,11 +385,14 @@ __STATIC_INLINE void i2s_clock_disable(const struct i2s_dw_cfg *i2s)
  * \param[in]   i2s   Pointer to I2S resources
  * \return            true if CER.CLKEN is set
  *
- * alp-sdk issue #2149: used by tx_stream_start()'s restart-glitch guard --
+ * alp-sdk issue #2149 (round 2): paired with struct stream's own one-shot
+ * clk_restart_skip_ok flag in tx_stream_start()'s restart-glitch guard --
  * i2s_configure_clock() (CCR) below is documented "Should be called with
- * Clock disabled", so a restart that finds the clock already running (the
- * underrun ISR path now keeps CER.CLKEN set on purpose) must skip that
- * write instead of reprogramming CCR live.
+ * Clock disabled", so a restart that finds the clock already running for a
+ * flag-confirmed reason (the underrun ISR path deliberately keeps
+ * CER.CLKEN set, and every path that could invalidate that clears the flag
+ * again) skips that write instead of reprogramming CCR live. This query
+ * alone is not sufficient -- see the flag's own comment for why.
  */
 __STATIC_INLINE bool i2s_clock_is_enabled(const struct i2s_dw_cfg *i2s)
 {
