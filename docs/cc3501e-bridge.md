@@ -548,19 +548,27 @@ that ISOLATE all the downstream buses -- with the caveat below that
   (active-low enable, so HIGH disables the mux); the same
   neither-state-is-safe-or-working caveat as `SDIO_MUX_EN` above
   applies to U46, the I2S mux this pin controls, on the stock
-  74LVC157 fit. A 3257-type bus-switch rework alone does NOT make
-  I2S-to-amps work on this board: U46's `VCC` (pin 16) was originally
-  on `+VIO` -- NOT a carrier-selected rail, it is the plugged-in SoM's
-  own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed
-  `+VIO_C`, which reaches `+VIO` through U33's shunt monitor). MEASURED
-  with the E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, below a
-  3257-type part's 2.3-3.6 V spec, and the amps stayed silent.
-  CONFIRMED as the root cause and FIXED on silicon
-  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): re-wiring U46 `VCC` from
-  `+VIO` to `+3V3` (same 3257-type part) made a continuous 1 kHz
+  `74LVC157ABQ,115` fit -- whose `VCC` range (1.2-3.6 V) puts `+VIO`
+  at 1.8 V IN SPEC; the stock part fails by DIRECTION (a one-way mux
+  whose `Y` outputs drive the SoC side), not undervoltage, so it can
+  NEVER pass SoC-to-amp I2S at any `VCC`. A working U46 needs the part
+  REPLACED with a 3257-type bus switch AND that switch's `VCC` on a
+  rail within ITS spec (2.3-3.6 V) -- a 3257-type swap alone, `VCC`
+  left on `+VIO`, is still out of spec and silent. `+VIO` is NOT a
+  carrier-selected rail, it is the plugged-in SoM's own `VIO_OUT`
+  (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which
+  reaches `+VIO` through U33's shunt monitor). MEASURED with the
+  E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, and with a
+  3257-type part fitted, the amps stayed silent. VERIFIED FIX
+  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): re-wiring that 3257-type
+  part's `VCC` from `+VIO` to `+3V3` made a continuous 1 kHz
   PROBE_LISTEN tone through I2S3 clearly audible on both TAS2563
-  amps. Scope: only amp PLAYBACK audibility was verified this way --
-  TDM clock faults, PDM mic capture, and M.2 E-key I2S are unverified.
+  amps -- not verified: that this was the only difference between the
+  silent and audible runs. Scope: only amp PLAYBACK audibility was
+  verified this way -- PDM mic capture and M.2 E-key I2S are
+  unverified. The same run also showed an open `INT_LTCH0` bit 2 (TDM
+  clock error) latch during playback and open issue #2146 (amps
+  auto-shut down ~1 s after I2S stops, stay off after restart).
   CAVEAT, untested: at `VCC` = 3.3 V a CBT-type switch's control-input
   VIH (~2.0 V) may not reliably register a 1.8 V HIGH from the
   CC3501E, so disabling the mux (`/E` HIGH) or selecting M.2 (`S`

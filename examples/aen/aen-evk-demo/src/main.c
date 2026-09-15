@@ -3921,21 +3921,28 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * propagation, reset-sequence and SD_N-glitch fixes stay verifiable on
  * real silicon without depending on U46 at all.
  *
- * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46's VCC is on
- * `+3V3` (a same-family 3257-type part swap alone is NOT enough while
- * VCC stays on `+VIO`, which is 1.8 V with the E1M-AEN SoM -- confirmed
- * silent on the bench). PROVEN on `e1m-aen-evk-03` (2026-09-15): once
- * VCC was re-wired to `+3V3`, a continuous-tone image was clearly
- * audible on both amps (see include/alp/boards/alp_e1m_evk.h's I2S mux
- * block for the full finding). CAVEAT, untested: at `+3V3` a CBT-type
+ * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46 is BOTH a
+ * 3257-type bus switch (a stock 74LVC157, even on +3V3, is still a
+ * one-way mux and reproduces the driver-contention hazard above --
+ * VCC alone is not the gate) AND that switch's VCC is on `+3V3`
+ * (VCC on `+VIO`, 1.8 V with the E1M-AEN SoM, is out of a 3257-type
+ * part's spec and confirmed silent on the bench). VERIFIED on
+ * `e1m-aen-evk-03` (2026-09-15): once a fitted 3257-type part's VCC
+ * was re-wired to `+3V3`, a continuous-tone image was clearly audible
+ * on both amps (see include/alp/boards/alp_e1m_evk.h's I2S mux block
+ * for the full finding). CAVEAT, untested: at `+3V3` a CBT-type
  * switch's control-input VIH may not register a 1.8 V HIGH from the
  * CC3501E, so this app's own LOW-only EN/SEL use is fine but disabling
- * the mux or selecting M.2 may not switch reliably. With U46 still
- * stock (74LVC157), turning this on reproduces the driver-contention
- * hazard above. The RX_SLEN=32-bit slot configuration and the explicit
- * LEFT/RIGHT channel mapping (both in tas2563_configure_i2s()'s call
- * below, unconditional) are already correct for a working U46 and need
- * no further change once that fix is in place on the board under test.
+ * the mux or selecting M.2 may not switch reliably. The SAME run also
+ * showed an open TDM clock-error latch (`INT_LTCH0` bit 2) during
+ * playback, and issue #2146 is open separately (amps auto-shut down
+ * ~1 s after I2S stops, stay off after restart) -- do NOT read
+ * `AEN_EVKDEMO_SOUND_PLAYBACK=1` reaching PASS as proof the audio path
+ * is otherwise clean. The RX_SLEN=32-bit slot configuration and the
+ * explicit LEFT/RIGHT channel mapping (both in
+ * tas2563_configure_i2s()'s call below, unconditional) are what this
+ * board's I2S frame needs; whether they are sufficient for a clean
+ * TDM run is exactly what the open latch above puts in question.
  *
  * THE SAFETY CONSTRAINT THE PLAYBACK PATH RESPECTS WHEN ON. Both TAS2563
  * amps can drive ~10 W peak into 4 ohm (SLASET3D Table 7-105) -- the
@@ -4192,9 +4199,9 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 	k_msleep(SOUND_MUX_SETTLE_MS);
 #else
-	printf("[evkdemo] SOUND: playback skipped -- requires U46 powered from "
-	       "+3V3 or a 1.8 V-rated switch (see alp_e1m_evk.h); amps "
-	       "verified over I2C only\n");
+	printf("[evkdemo] SOUND: playback skipped -- requires U46 to be a "
+	       "3257-type switch powered from +3V3, or a 1.8 V-rated switch "
+	       "(see alp_e1m_evk.h); amps verified over I2C only\n");
 #endif
 
 	/* --- 2. AMP_ENABLE (SD_N) low-then-high -- an ACTUAL hardware reset - */

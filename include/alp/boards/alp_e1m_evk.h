@@ -164,38 +164,51 @@ extern "C" {
  *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
  *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
  *
- * U46 shipped as 74LVC157 on the original 2626-R2 BOM.  On the stock
- * 74LVC157, `I2S0_WS`/`SCLK`/`SDO` are the mux's `Y` OUTPUTS, the
- * SoC-side nets wired straight to the SoC's own I2S3 TX pads, so
- * enabling the mux (`/E` = 0) does not route audio out to either
- * destination -- it instead directly contends with the SoC's own I2S3
- * TX drive on those same pads (#2077).  `/E` = 1 forces those `Y`
- * outputs LOW, which is likewise not isolation from an active I2S3 TX
- * (same reasoning as the SDIO block above).
+ * U46 shipped as a `74LVC157ABQ,115` on the original 2626-R2 BOM
+ * (2626-R2 components list).  That part's `VCC` range is 1.2-3.6 V, so
+ * `+VIO` at 1.8 V is IN SPEC for it -- undervoltage is NOT why the
+ * stock part fails.  The stock 74LVC157 fails by DIRECTION: its `Y`
+ * outputs (`I2S0_WS`/`SCLK`/`SDO`) are the SoC-side nets, wired
+ * straight to the SoC's own I2S3 TX pads, so it can NEVER pass
+ * SoC-to-amp I2S at any `VCC` -- enabling the mux (`/E` = 0) does not
+ * route audio out to either destination, it instead directly contends
+ * with the SoC's own I2S3 TX drive on those same pads (#2077).
+ * `/E` = 1 forces those `Y` outputs LOW, which is likewise not
+ * isolation from an active I2S3 TX (same reasoning as the SDIO block
+ * above).  Moving the STOCK part's `VCC` to `+3V3` alone changes
+ * NOTHING -- it is still a one-way mux driving the wrong direction, and
+ * re-enabling `i2s3` still creates driver contention.
  *
- * A 3257-type bus switch was ALSO fitted at U46 on evk-03, but unlike
- * U38/U39 (whose 3257-type rework IS the standard fit going forward,
- * see above), that alone did NOT make I2S-to-amps work.  U46's `VCC`
- * (pin 16) was originally on `+VIO`, unlike U38/U39's `VCC`, which is
- * on `+3V3`.  `+VIO` is NOT a carrier-selected rail -- it is the
- * plugged-in SoM's own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2
- * `VIO_OUT` feed `+VIO_C`, which reaches `+VIO` through U33's shunt
- * monitor, IN+/IN-).  MEASURED on `e1m-aen-evk-03` with the E1M-AEN
- * SoM fitted (maintainer, 2026-09-15): `+VIO` = 1.8 V, and with both
- * amps ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563
- * amps produced NO audible output -- a 3257-type bus switch is
- * specified for `VCC` 2.3-3.6 V, out of spec at 1.8 V.
+ * A working U46 needs the part REPLACED with a genuine bidirectional
+ * 3257-type bus switch -- same as U38/U39's rework, though this is NOT
+ * (yet) "the standard fit going forward" for U46 the way it is for
+ * U38/U39, see above -- AND that switch's `VCC` on a rail within its
+ * spec.  A 3257-type part was fitted at U46 on `e1m-aen-evk-03` with
+ * `VCC` initially left on `+VIO`.  `+VIO` is NOT a carrier-selected
+ * rail -- it is the plugged-in SoM's own `VIO_OUT` (2626-R2 netlist:
+ * `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which reaches `+VIO`
+ * through U33's shunt monitor, IN+/IN-).  MEASURED on `e1m-aen-evk-03`
+ * with the E1M-AEN SoM fitted (maintainer, 2026-09-15): `+VIO` =
+ * 1.8 V, below a 3257-type bus switch's 2.3-3.6 V `VCC` spec (unlike
+ * the stock 74LVC157, which tolerates 1.8 V), and with both amps
+ * ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563 amps
+ * produced NO audible output.
  *
- * ROOT CAUSE CONFIRMED, FIX PROVEN ON SILICON (`e1m-aen-evk-03`,
- * maintainer, 2026-09-15 ~14:05Z): U46 `VCC` was re-wired from `+VIO`
- * to `+3V3` -- same 3257-type part, no other change.  A PROBE_LISTEN
- * image (continuous 1 kHz tone through I2S3 -> U46 -> both TAS2563
- * amps) was then clearly audible at the speakers, confirmed by ear.
- * The undervoltage was the entire cause; a 3257-type switch powered
- * from `+3V3` is a proven fix for U46, not just an inferred one.
- * SCOPE: only amp PLAYBACK audibility was verified this way -- TAS2563
- * TDM clock-fault behaviour, PDM mic capture, and the M.2 E-key I2S
- * path through this same mux remain unverified.
+ * FIX VERIFIED ON SILICON (`e1m-aen-evk-03`, maintainer,
+ * 2026-09-15 ~14:05Z): the fitted 3257-type part's `VCC` was re-wired
+ * from `+VIO` to `+3V3`.  A PROBE_LISTEN image (continuous 1 kHz tone
+ * through I2S3 -> U46 -> both TAS2563 amps) was then clearly audible
+ * at the speakers, confirmed by ear -- re-wiring `VCC` to `+3V3` is
+ * what made playback audible.  NOT verified: that undervoltage was the
+ * ONLY difference between the silent and audible runs, or that no
+ * other change was made.  SCOPE: only amp PLAYBACK audibility was
+ * checked -- PDM mic capture and the M.2 E-key I2S path through this
+ * same mux remain unverified.  The SAME run also showed an
+ * `INT_LTCH0` bit 2 (TDM clock error) latch during playback, and
+ * separately, issue #2146: the amps auto-shut down ~1 s after I2S
+ * stops and stay off after restart.  BOTH ARE OPEN -- a 3257-type
+ * part on `+3V3` makes the amps audible, it does not mean the audio
+ * path is otherwise clean.
  *
  * CAVEAT, UNTESTED: at `VCC` = 3.3 V, a CBT-type switch's control-input
  * VIH (~2.0 V) may not reliably register a 1.8 V HIGH on `/E` or `S`
@@ -206,12 +219,15 @@ extern "C" {
  * (`S` HIGH) may not switch reliably at this `VCC`.  Not exercised on
  * silicon either way.
  *
- * A working U46 therefore has two options: the `+3V3`-repower above
- * (PROVEN, subject to the `/E`/`S` HIGH caveat), or a switch rated for
- * 1.8 V `VCC` -- e.g. TI TMUX1574 (1.5-5.5 V, keeps the SN74CBTLV3257
- * pin numbering ONLY in TSSOP-16/SOT-23-THIN-16; its other packages
- * don't match, and NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land
- * pattern without an adapter or flying leads) -- UNTESTED in-house.
+ * A working U46 therefore needs BOTH a 3257-type swap AND its `VCC`
+ * on `+3V3` (VERIFIED above, subject to the `/E`/`S` HIGH caveat and
+ * the open TDM-latch/#2146 findings) -- gating on `VCC` alone is not
+ * enough, since a STOCK 74LVC157 on `+3V3` still fails by direction.
+ * The untested alternative is a switch rated for 1.8 V `VCC` -- e.g.
+ * TI TMUX1574 (1.5-5.5 V, keeps the SN74CBTLV3257 pin numbering ONLY
+ * in TSSOP-16/SOT-23-THIN-16; its other packages don't match, and
+ * NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land pattern without
+ * an adapter or flying leads) -- UNTESTED in-house.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per

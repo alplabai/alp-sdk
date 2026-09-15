@@ -8,13 +8,16 @@
  * i2s3 ships "disabled" by default on EVK rev 2626-R2 (U46 has no Hi-Z
  * state, and I2S0_SDO/SCLK/WS on P9_3/4/5 run through it backwards).
  *
- * Apply this ONLY once U46's VCC is on +3V3 (PROVEN on e1m-aen-evk-03,
- * 2026-09-15: re-powering a same-family 3257-type part from +VIO to
- * +3V3 made playback clearly audible; a 3257-type part swap alone, VCC
- * still on +VIO, stays silent -- see include/alp/boards/alp_e1m_evk.h's
- * I2S mux block, including the untested /E-or-S-HIGH caveat at +3V3)
- * -- together with setting AEN_EVKDEMO_SOUND_PLAYBACK to 1 in
- * src/main.c -- both switches, not either alone:
+ * Apply this ONLY once U46 is BOTH a 3257-type switch AND its VCC is
+ * on +3V3 (a stock 74LVC157, even on +3V3, is still one-way and
+ * reproduces the contention above; VCC alone is not the gate) --
+ * VERIFIED on e1m-aen-evk-03, 2026-09-15: re-powering a fitted
+ * 3257-type part from +VIO to +3V3 made playback clearly audible; a
+ * 3257-type part swap alone, VCC still on +VIO, stays silent -- see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
+ * untested /E-or-S-HIGH caveat at +3V3 and the open TDM-latch/#2146
+ * findings -- together with setting AEN_EVKDEMO_SOUND_PLAYBACK to 1
+ * in src/main.c -- both switches, not either alone:
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
  *       examples/aen/aen-evk-demo -- \

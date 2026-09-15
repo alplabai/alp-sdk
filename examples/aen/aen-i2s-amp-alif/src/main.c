@@ -16,10 +16,14 @@
  * the CGU master source and divides it down to SCLK (the same master-source fix
  * that made the PDM mics capture).  The controller then clocks a tone out on
  * SCLK/WS/SDO.  On the EVK that signal reaches the two TAS2563
- * smart-amplifiers through a 74LVC157 2:1 mux: /E = Alif P7.1 (drivable) and the
- * SELECT = CC3501E GPIO13 (over the inter-chip SPI bridge, currently
- * firmware-gated). So this example validates the I2S controller + clock path; the
- * AUDIBLE amp output additionally needs the mux routed + the TAS2563 configured.
+ * smart-amplifiers through a 2:1 mux (U46): SELECT = CC3501E GPIO13 (over the
+ * inter-chip SPI bridge, currently firmware-gated), both hw revisions; ENABLE
+ * is REVISION-DEPENDENT -- Alif P7.1 (direct GPIO) on r1, CC3501E GPIO_30 on
+ * r2 -- see include/alp/boards/alp_e1m_evk.h's I2S mux block.  AUDIBLE amp
+ * output additionally needs U46 to be a 3257-type bus switch with VCC on
+ * +3V3 (VERIFIED on e1m-aen-evk-03; the as-built 74LVC157 can never pass
+ * this direction, see the same header) + the mux routed + the TAS2563
+ * configured; this example validates only the I2S controller + clock path.
  *
  * PASS gate: device ready, i2s_configure + i2s_write(s) + i2s_trigger(START) all
  * return 0 and the TX FIFO DRAINs cleanly with the 76.8 MHz clock ON (the
@@ -94,8 +98,8 @@ int main(void)
 	if (i2s == NULL) {
 		printf("[i2s] SOUND: playback skipped -- EVK 2626-R2 U46 has no Hi-Z state and "
 		       "routes SoC I2S outputs into mux outputs (a working, audible mux "
-		       "requires U46 powered from +3V3 or a 1.8 V-rated switch; see "
-		       "alp_e1m_evk.h); i2s3 is left \"disabled\" in the "
+		       "requires U46 to be a 3257-type switch powered from +3V3, or a "
+		       "1.8 V-rated switch; see alp_e1m_evk.h); i2s3 is left \"disabled\" in the "
 		       "board overlay so no pinctrl is applied and no clock is emitted\n"
 		       "[i2s] RESULT SKIPPED: i2s3 disabled by default on this "
 		       "board revision\n[i2s] done\n");
@@ -193,8 +197,8 @@ int main(void)
 	printf("[i2s] RESULT %s: %s\n",
 	       drained ? "PASS" : "PARTIAL",
 	       drained ? "i2s3 TX clocked the tone out with the 76.8MHz audio clock ON (SCLK/WS/SDO "
-	                 "on P9_3/4/5). For AUDIBLE amp out: route the 74LVC157 mux (EN=Alif P7.1 + "
-	                 "SEL=CC3501E GPIO13) to the TAS2563 + configure the amp (ACTIVE)"
+	                 "on P9_3/4/5). For AUDIBLE amp out: U46 needs a 3257-type switch on +3V3 "
+	                 "(not the stock 74LVC157), routed + the TAS2563 configured (ACTIVE)"
 	               : "configured but TX did not drain cleanly (check clock/pinctrl)");
 	printf("[i2s] done\n");
 	return 0;
