@@ -102,17 +102,20 @@ extern "C" {
  *   S  (select)            = E1M IO21
  *
  * Per the 74LVC157 truth table:
- *   /E = 0, S = 0  ->  M.2 E-key SDIO routed to SoM
- *   /E = 0, S = 1  ->  microSD card slot routed to SoM
- *   /E = 1         ->  outputs Hi-Z (both buses isolated; safe-default)
+ *   /E = 0, S = 0  ->  microSD card slot routed to SoM
+ *   /E = 0, S = 1  ->  M.2 E-key SDIO routed to SoM
+ *   /E = 1         ->  outputs forced LOW (both buses isolated; safe-default)
  *
  * IMPORTANT: per the user-supplied wiring + this repo's
- * metadata/e1m_modules/aen/from-cc3501e.tsv, BOTH IO20 and IO21 are
- * proxied through the on-module CC3501E (GPIO26 and GPIO30 on the
- * CC3501E side).  Firmware drives the mux by dispatching
- * GPIO_WRITE commands to the CC3501E over the inter-chip SPI1
- * (see <alp/protocol/cc3501e.h>'s ALP_CC3501E_CMD_GPIO_WRITE),
- * NOT via Alif's GPIO peripheral.
+ * metadata/e1m_modules/aen/from-cc3501e.tsv, IO20 (/E) is proxied
+ * through the on-module CC3501E (GPIO_26 on the CC3501E side) and
+ * firmware drives it by dispatching GPIO_WRITE commands over the
+ * inter-chip SPI1 (see <alp/protocol/cc3501e.h>'s
+ * ALP_CC3501E_CMD_GPIO_WRITE), NOT via Alif's GPIO peripheral.  IO21
+ * (S) is NOT proxied on 2626-R2 -- it is `dispatch: unrouted`
+ * (physically open, no CC3501E or Alif termination; #1854) and is
+ * instead hardware-strapped to a fixed level (microSD by default on
+ * this EVK), so firmware cannot change the SDIO select at runtime.
  *
  * EVK_PIN_SDIO_MUX_EN (= ALP_E1M_GPIO_IO20) and EVK_PIN_SDIO_MUX_SEL
  * (= ALP_E1M_GPIO_IO21), and the `evk_sdio_select_t` enum, are

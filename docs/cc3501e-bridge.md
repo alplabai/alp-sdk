@@ -80,10 +80,11 @@ those six Alif pins are the only place the CC3501E's SDIO can land.
 Two further constraints stack behind that, both of which still apply if
 the links are ever populated: the Alif Ensemble has a **single SDIO
 controller**, shared at board level (a 74LVC157 mux, `SDIO_MUX_EN` =
-`GPIO_26`, `SDIO_MUX_SEL` = `GPIO_30`) with the micro-SD slot -- so the
-CC3501E and an SD card can never use it at the same time, only
-time-share it -- and the Alif's single controller is committed to the SD
-card in the current product.
+`GPIO_26`; `SDIO_MUX_SEL` is NOT a CC3501E pin on 2626-R2 -- it is
+hardware-strapped, not firmware-driven, see "Safe-default mux state"
+below) with the micro-SD slot -- so the CC3501E and an SD card can
+never use it at the same time, only time-share it -- and the Alif's
+single controller is committed to the SD card in the current product.
 
 The practical consequence: **SPI is the only host-control link**, its
 ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
@@ -515,8 +516,12 @@ On boot, before the Alif-side has connected over SPI1, the
 firmware should drive its proxied mux-control pins to states
 that ISOLATE all the downstream buses:
 
-- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 → Hi-Z).
-- `SDIO_MUX_SEL` (`GPIO_30`): don't-care while /E is high.
+- `SDIO_MUX_EN` (`GPIO_26`): HIGH (74LVC157 /E = 1 -> outputs forced
+  LOW, both buses isolated).
+- `SDIO_MUX_SEL`: not a CC3501E pin on 2626-R2 -- `E1M_GPIO_IO21` is
+  `dispatch: unrouted` (#1854) and the select is hardware-strapped
+  (microSD by default on this EVK), so firmware has no control over it
+  here regardless of /E.
 - `I2S_MUX_SEL` (`GPIO_13`): don't-care (the /E pin is on the
   Alif side and defaults to disable).
 - `USB2_MUX_SEL` (`GPIO_2`): default to 0 (USB-A connector

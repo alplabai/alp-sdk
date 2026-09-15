@@ -398,7 +398,7 @@
           "ref": "unrouted"
         }
       ],
-      "board_doc": "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot.",
+      "board_doc": "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO. Not firmware-driven on 2626-R2 (E1M_GPIO_IO21 is dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD.",
       "som_doc": "Physically open on board 2626-R2 (no CC3501E or Alif termination); r1 routed it to CC3501E GPIO_30 -- see aen/hw-revisions.yaml pad_route_overrides (#1854)."
     },
     {

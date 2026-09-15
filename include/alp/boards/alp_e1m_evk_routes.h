@@ -49,7 +49,7 @@ extern "C" {
 #define EVK_PIN_M2E_SDIO_WAKE  ALP_E1M_GPIO_IO18  /**< M.2 E-key SDIO-path wake (active-low). Active-low. */
 #define EVK_PIN_M2E_UART_WAKE  ALP_E1M_GPIO_IO19  /**< M.2 E-key UART-path wake (active-low). Active-low. */
 #define EVK_PIN_SDIO_MUX_EN    ALP_E1M_GPIO_IO20  /**< SDIO 74LVC157 /E; drive low to enable mux. Active-low. */
-#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot. */
+#define EVK_PIN_SDIO_MUX_SEL   ALP_E1M_GPIO_IO21  /**< SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO. Not firmware-driven on 2626-R2 (E1M_GPIO_IO21 is dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. */
 #define EVK_PIN_PCIE_MUX_PD    ALP_E1M_GPIO_IO22  /**< Drive HIGH to power down all four PCIe lane muxes. */
 #define EVK_PIN_PCIE_MUX_SEL   ALP_E1M_GPIO_IO23  /**< Selects M-key vs E-key routing on the PCIe lane muxes. */
 #define EVK_PIN_LED_GREEN      ALP_E1M_GPIO_PWM3  /**< RGB LED green -- the PWM3 pad driven as a digital GPIO. */
@@ -179,8 +179,8 @@ extern "C" {
 /* ------------------------------------------------------------------ */
 
 typedef enum {
-	EVK_SDIO_M2E_KEY = 0, /**< MUX_SEL.SDIO low. */
-	EVK_SDIO_SDCARD  = 1, /**< MUX_SEL.SDIO high. */
+	EVK_SDIO_SDCARD  = 0, /**< MUX_SEL.SDIO low. */
+	EVK_SDIO_M2E_KEY = 1, /**< MUX_SEL.SDIO high. */
 } evk_sdio_select_t;
 
 typedef enum {
