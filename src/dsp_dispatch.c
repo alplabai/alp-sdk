@@ -384,105 +384,113 @@ alp_status_t alp_dsp_biquad_design(alp_dsp_biquad_kind_t kind,
  * `scripts/gen_dsp_decimator_coeffs.py` -- DO NOT hand-edit; re-run the
  * script and paste its output here if the design parameters change (it
  * is a leaf design tool with no other source-of-truth to regenerate
- * from, so it is not wired into test-all.sh's generated-files loop).
+ * from, so it is not wired into test-all.sh's generated-files loop --
+ * `python3 scripts/gen_dsp_decimator_coeffs.py --check` verifies these
+ * tables still match the design).
  *
- * Method: windowed-sinc low-pass, Kaiser window, Q15 fixed-point, unity
- * DC gain.  Every ratio shares the SAME tap count and Kaiser beta
- * (ALP_DSP_DECIMATOR_TAPS = 135 taps, beta = 3.395) by holding the
- * normalised transition width constant across ratios instead of the
- * passband-edge fraction -- the achieved specs below land within a
- * tight, uniform band (~39-40 dB stopband, <0.2 dB ripple) instead of
- * degrading sharply at the largest ratio.  See <alp/dsp.h>'s
- * alp_dsp_decimator_init Doxygen for the full per-ratio numbers.
+ * Method: windowed-sinc low-pass, Kaiser window (beta = 6.976), Q15
+ * fixed-point.  Every ratio shares the SAME tap count and beta
+ * (ALP_DSP_DECIMATOR_TAPS = 135 taps).  The PASSBAND edge is held at a
+ * fixed offset below the output Nyquist (fs_in / (2*ratio)); the
+ * STOPBAND edge sits at fs_out - passband_edge (fs_out = fs_in / ratio),
+ * not at the output Nyquist itself -- the wider transition band this
+ * buys is what lands stopband attenuation around 70 dB instead of ~40.
+ * Content between the output Nyquist and fs_out - passband_edge is
+ * therefore NOT stopband-attenuated; it folds into the transition band
+ * above the stated passband.  Each table's centre tap is nudged so the
+ * table sums to exactly 32768 (unity DC gain in Q15).  Figures below are
+ * measured on these shipped Q15 taps, not the float design.  See
+ * <alp/dsp.h>'s alp_dsp_decimator_init Doxygen for the full per-ratio
+ * numbers.
  */
 /* clang-format off */
 
-/* ratio=2  fs_in=32000 Hz  passband_edge=7467.7 Hz  output_nyquist=8000.0 Hz
-   achieved: ripple=0.17 dB  stopband_attenuation=39.7 dB  group_delay=33.5 output samples */
+/* ratio=2  fs_in=32000 Hz  passband_edge=7467.7 Hz  stopband_edge=8532.3 Hz
+   achieved: ripple=0.0044 dB  stopband_attenuation=70.31 dB  group_delay=33.50 output samples */
 static const int16_t _alp_dsp_decim_coeffs_r2[ALP_DSP_DECIMATOR_TAPS] = {
-	22, -8, -27, 6, 33, -4, -39, 0,
-	46, 5, -53, -12, 59, 21, -65, -31,
-	71, 43, -75, -57, 79, 72, -80, -90,
-	80, 110, -77, -131, 72, 154, -63, -178,
-	50, 204, -34, -231, 12, 258, 15, -286,
-	-48, 315, 89, -343, -138, 370, 196, -397,
-	-267, 422, 353, -446, -458, 467, 591, -487,
-	-766, 504, 1007, -519, -1370, 530, 1999, -538,
-	-3423, 543, 10409, 15834, 10409, 543, -3423, -538,
-	1999, 530, -1370, -519, 1007, 504, -766, -487,
-	591, 467, -458, -446, 353, 422, -267, -397,
-	196, 370, -138, -343, 89, 315, -48, -286,
-	15, 258, 12, -231, -34, 204, 50, -178,
-	-63, 154, 72, -131, -77, 110, 80, -90,
-	-80, 72, 79, -57, -75, 43, 71, -31,
-	-65, 21, 59, -12, -53, 5, 46, 0,
-	-39, -4, 33, 6, -27, -8, 22,
+	-1, 0, 2, 0, -3, 0, 5, 0,
+	-7, 0, 9, 0, -13, 0, 17, 0,
+	-22, 0, 28, 0, -36, 0, 45, 0,
+	-55, 0, 67, 0, -81, 0, 97, 0,
+	-116, 0, 138, 0, -162, 0, 191, 0,
+	-224, 0, 262, 0, -307, 0, 359, 0,
+	-421, 0, 497, 0, -590, 0, 710, 0,
+	-869, 0, 1093, 0, -1438, 0, 2049, 0,
+	-3454, 0, 10423, 16382, 10423, 0, -3454, 0,
+	2049, 0, -1438, 0, 1093, 0, -869, 0,
+	710, 0, -590, 0, 497, 0, -421, 0,
+	359, 0, -307, 0, 262, 0, -224, 0,
+	191, 0, -162, 0, 138, 0, -116, 0,
+	97, 0, -81, 0, 67, 0, -55, 0,
+	45, 0, -36, 0, 28, 0, -22, 0,
+	17, 0, -13, 0, 9, 0, -7, 0,
+	5, 0, -3, 0, 2, 0, -1,
 };
 
-/* ratio=3  fs_in=48000 Hz  passband_edge=7201.6 Hz  output_nyquist=8000.0 Hz
-   achieved: ripple=0.18 dB  stopband_attenuation=39.9 dB  group_delay=22.3 output samples */
+/* ratio=3  fs_in=48000 Hz  passband_edge=7201.6 Hz  stopband_edge=8798.4 Hz
+   achieved: ripple=0.0052 dB  stopband_attenuation=65.46 dB  group_delay=22.33 output samples */
 static const int16_t _alp_dsp_decim_coeffs_r3[ALP_DSP_DECIMATOR_TAPS] = {
-	-15, 8, 27, 23, -5, -33, -33, 0,
-	38, 45, 9, -42, -59, -21, 44, 74,
-	37, -42, -90, -57, 36, 105, 81, -25,
-	-119, -110, 7, 130, 142, 18, -138, -178,
-	-52, 139, 217, 95, -133, -258, -149, 116,
-	300, 216, -87, -342, -297, 41, 383, 397,
-	27, -422, -522, -126, 457, 684, 273, -487,
-	-911, -506, 512, 1270, 924, -530, -1998, -1928,
-	541, 4755, 8740, 10371, 8740, 4755, 541, -1928,
-	-1998, -530, 924, 1270, 512, -506, -911, -487,
-	273, 684, 457, -126, -522, -422, 27, 397,
-	383, 41, -297, -342, -87, 216, 300, 116,
-	-149, -258, -133, 95, 217, 139, -52, -178,
-	-138, 18, 142, 130, 7, -110, -119, -25,
-	81, 105, 36, -57, -90, -42, 37, 74,
-	44, -21, -59, -42, 9, 45, 38, 0,
-	-33, -33, -5, 23, 27, 8, -15,
+	1, 0, -2, -2, 0, 3, 4, 0,
+	-6, -7, 0, 10, 11, 0, -15, -17,
+	0, 22, 25, 0, -31, -35, 0, 43,
+	47, 0, -58, -64, 0, 77, 84, 0,
+	-100, -109, 0, 129, 141, 0, -165, -179,
+	0, 210, 227, 0, -266, -287, 0, 337,
+	365, 0, -430, -469, 0, 560, 615, 0,
+	-752, -840, 0, 1078, 1246, 0, -1774, -2232,
+	0, 4504, 9027, 10916, 9027, 4504, 0, -2232,
+	-1774, 0, 1246, 1078, 0, -840, -752, 0,
+	615, 560, 0, -469, -430, 0, 365, 337,
+	0, -287, -266, 0, 227, 210, 0, -179,
+	-165, 0, 141, 129, 0, -109, -100, 0,
+	84, 77, 0, -64, -58, 0, 47, 43,
+	0, -35, -31, 0, 25, 22, 0, -17,
+	-15, 0, 11, 10, 0, -7, -6, 0,
+	4, 3, 0, -2, -2, 0, 1,
 };
 
-/* ratio=4  fs_in=32000 Hz  passband_edge=3467.7 Hz  output_nyquist=4000.0 Hz
-   achieved: ripple=0.17 dB  stopband_attenuation=39.4 dB  group_delay=16.8 output samples */
+/* ratio=4  fs_in=32000 Hz  passband_edge=3467.7 Hz  stopband_edge=4532.3 Hz
+   achieved: ripple=0.0046 dB  stopband_attenuation=69.35 dB  group_delay=16.75 output samples */
 static const int16_t _alp_dsp_decim_coeffs_r4[ALP_DSP_DECIMATOR_TAPS] = {
-	-21, -24, -14, 6, 27, 36, 27, 0,
-	-31, -49, -43, -12, 30, 62, 64, 31,
-	-24, -73, -88, -57, 10, 80, 114, 90,
-	14, -79, -140, -131, -50, 68, 162, 179,
-	100, -43, -178, -231, -165, -1, 182, 287,
-	247, 68, -170, -343, -350, -166, 132, 397,
-	479, 308, -58, -446, -648, -521, -81, 488,
-	893, 877, 350, -519, -1341, -1637, -1037, 539,
-	2807, 5186, 6986, 7656, 6986, 5186, 2807, 539,
-	-1037, -1637, -1341, -519, 350, 877, 893, 488,
-	-81, -521, -648, -446, -58, 308, 479, 397,
-	132, -166, -350, -343, -170, 68, 247, 287,
-	182, -1, -165, -231, -178, -43, 100, 179,
-	162, 68, -50, -131, -140, -79, 14, 90,
-	114, 80, 10, -57, -88, -73, -24, 31,
-	64, 62, 30, -12, -43, -49, -31, 0,
-	27, 36, 27, 6, -14, -24, -21,
+	1, 1, 1, 0, -2, -4, -3, 0,
+	5, 8, 7, 0, -9, -15, -12, 0,
+	16, 25, 20, 0, -25, -40, -31, 0,
+	39, 61, 47, 0, -57, -89, -69, 0,
+	82, 126, 97, 0, -115, -176, -135, 0,
+	158, 242, 185, 0, -217, -332, -254, 0,
+	298, 457, 351, 0, -417, -646, -502, 0,
+	614, 970, 773, 0, -1017, -1694, -1449, 0,
+	2443, 5200, 7370, 8194, 7370, 5200, 2443, 0,
+	-1449, -1694, -1017, 0, 773, 970, 614, 0,
+	-502, -646, -417, 0, 351, 457, 298, 0,
+	-254, -332, -217, 0, 185, 242, 158, 0,
+	-135, -176, -115, 0, 97, 126, 82, 0,
+	-69, -89, -57, 0, 47, 61, 39, 0,
+	-31, -40, -25, 0, 20, 25, 16, 0,
+	-12, -15, -9, 0, 7, 8, 5, 0,
+	-3, -4, -2, 0, 1, 1, 1,
 };
 
-/* ratio=6  fs_in=48000 Hz  passband_edge=3201.6 Hz  output_nyquist=4000.0 Hz
-   achieved: ripple=0.17 dB  stopband_attenuation=39.3 dB  group_delay=11.2 output samples */
+/* ratio=6  fs_in=48000 Hz  passband_edge=3201.6 Hz  stopband_edge=4798.4 Hz
+   achieved: ripple=0.0062 dB  stopband_attenuation=69.87 dB  group_delay=11.17 output samples */
 static const int16_t _alp_dsp_decim_coeffs_r6[ALP_DSP_DECIMATOR_TAPS] = {
-	4, -8, -20, -29, -33, -30, -18, 0,
-	21, 40, 53, 55, 44, 21, -11, -44,
-	-71, -85, -81, -57, -16, 33, 81, 115,
-	127, 110, 66, 1, -72, -136, -176, -179,
-	-141, -65, 34, 136, 219, 259, 244, 171,
-	49, -99, -241, -344, -379, -330, -197, -1,
-	222, 423, 554, 573, 460, 218, -118, -489,
-	-815, -1013, -1010, -754, -231, 532, 1467, 2474,
-	3434, 4226, 4748, 4930, 4748, 4226, 3434, 2474,
-	1467, 532, -231, -754, -1010, -1013, -815, -489,
-	-118, 218, 460, 573, 554, 423, 222, -1,
-	-197, -330, -379, -344, -241, -99, 49, 171,
-	244, 259, 219, 136, 34, -65, -141, -179,
-	-176, -136, -72, 1, 66, 110, 127, 115,
-	81, 33, -16, -57, -81, -85, -71, -44,
-	-11, 21, 44, 55, 53, 40, 21, 0,
-	-18, -30, -33, -29, -20, -8, 4,
+	0, 0, 1, 2, 3, 3, 2, 0,
+	-3, -7, -9, -10, -6, 0, 9, 17,
+	22, 22, 14, 0, -18, -35, -45, -43,
+	-27, 0, 33, 64, 81, 77, 49, 0,
+	-58, -109, -138, -129, -81, 0, 95, 179,
+	224, 210, 131, 0, -153, -287, -359, -337,
+	-211, 0, 248, 468, 590, 560, 355, 0,
+	-434, -840, -1093, -1078, -719, 0, 1024, 2232,
+	3454, 4503, 5211, 5460, 5211, 4503, 3454, 2232,
+	1024, 0, -719, -1078, -1093, -840, -434, 0,
+	355, 560, 590, 468, 248, 0, -211, -337,
+	-359, -287, -153, 0, 131, 210, 224, 179,
+	95, 0, -81, -129, -138, -109, -58, 0,
+	49, 77, 81, 64, 33, 0, -27, -43,
+	-45, -35, -18, 0, 14, 22, 22, 17,
+	9, 0, -6, -10, -9, -7, -3, 0,
+	2, 3, 3, 2, 1, 0, 0,
 };
 /* clang-format on */
 
@@ -550,25 +558,39 @@ alp_status_t alp_dsp_decimator_process(alp_dsp_decimator_t *dec,
 	}
 
 	const uint32_t taps     = ALP_DSP_DECIMATOR_TAPS;
+	const uint32_t half     = taps / 2u; /* 67 symmetric pairs + 1 centre tap. */
+	const int16_t *coeffs   = dec->coeffs;
+	const uint8_t  n_ch     = dec->n_channels;
 	size_t         produced = 0u;
 	for (size_t i = 0u; i < in_frames; i++) {
-		for (uint8_t ch = 0u; ch < dec->n_channels; ch++) {
+		for (uint8_t ch = 0u; ch < n_ch; ch++) {
 			uint32_t widx                 = dec->write_idx[ch];
-			dec->history[ch][widx]        = in[i * dec->n_channels + ch];
-			dec->history[ch][widx + taps] = in[i * dec->n_channels + ch];
-			widx                          = (widx + 1u) % taps;
-			dec->write_idx[ch]            = widx;
+			dec->history[ch][widx]        = in[i * n_ch + ch];
+			dec->history[ch][widx + taps] = in[i * n_ch + ch];
+			widx++;
+			if (widx == taps) { /* compare-and-wrap: widx only ever steps by
+				                    * 1, so a full `% taps` (udiv+mls) is
+				                    * wasted work here. */
+				widx = 0u;
+			}
+			dec->write_idx[ch] = widx;
 		}
 		dec->phase++;
 		if (dec->phase < dec->ratio) {
 			continue;
 		}
 		dec->phase = 0u;
-		for (uint8_t ch = 0u; ch < dec->n_channels; ch++) {
+		for (uint8_t ch = 0u; ch < n_ch; ch++) {
 			const int16_t *window = &dec->history[ch][dec->write_idx[ch]];
-			int64_t        acc    = 0;
-			for (uint32_t j = 0u; j < taps; j++) {
-				acc += (int64_t)dec->coeffs[j] * (int64_t)window[j];
+			/* The tap table is symmetric (coeffs[j] == coeffs[taps-1-j] --
+			 * an odd-length linear-phase FIR), so pair up mirrored taps
+			 * before multiplying: 67 products + the unpaired centre tap
+			 * instead of 135, same exact accumulation (int arithmetic
+			 * promotion means the window[j]+window[taps-1-j] sum cannot
+			 * overflow before the multiply widens to int64). */
+			int64_t acc = (int64_t)coeffs[half] * (int64_t)window[half];
+			for (uint32_t j = 0u; j < half; j++) {
+				acc += (int64_t)coeffs[j] * (int64_t)(window[j] + window[taps - 1u - j]);
 			}
 			/* Q15 rescale (arithmetic right shift -- sign-extending on
 			 * every toolchain this SDK targets), then saturate: the
@@ -581,7 +603,7 @@ alp_status_t alp_dsp_decimator_process(alp_dsp_decimator_t *dec,
 			} else if (y < INT16_MIN) {
 				y = INT16_MIN;
 			}
-			out[produced * dec->n_channels + ch] = (int16_t)y;
+			out[produced * n_ch + ch] = (int16_t)y;
 		}
 		produced++;
 	}

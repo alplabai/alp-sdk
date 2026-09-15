@@ -7,12 +7,15 @@
  * wiring is a separate, later phase and is NOT exercised here).
  *
  * Covers:
- *   - In-band tone passes at the right frequency/level, an
- *     above-output-Nyquist tone is attenuated by at least the filter's
- *     stated stopband (ratio 3, 48 kHz -> 16 kHz, the issue's own
- *     worked example: 1 kHz in-band + 12 kHz alias).
+ *   - EVERY supported ratio (2, 3, 4, 6), table-driven: a passband tone at
+ *     ~0.9x the ratio's stated passband edge stays within its stated
+ *     ripple, and a tone just above the ratio's stated stopband edge is
+ *     attenuated by at least (stated stopband - 0.5 dB).  Catches a
+ *     wrong-ratio table swap that a single-ratio smoke test would miss
+ *     (see the mutation note below).
  *   - Exact output frame counts across odd block-size boundaries
- *     (1, 7, 256, 1023 frames/call) match a single-block run bit-for-bit.
+ *     (1, 7, 256, 1023 frames/call) match a single-block run bit-for-bit,
+ *     AND match the absolute `n_in / ratio` count.
  *   - Stereo channels stay independent (tone on L only -> R stays exactly
  *     silent, since convolving an all-zero channel is exactly zero).
  *   - Every supported ratio (2, 3, 4, 6) opens; unsupported ratios and
@@ -58,58 +61,115 @@ static float goertzel_amplitude(const int16_t *x, size_t n, size_t k)
 }
 
 /* ============================================================== */
-/* 1. Tone-quality: in-band level + above-Nyquist alias attenuation */
+/* 1. Tone-quality: EVERY ratio, table-driven                      */
 /* ============================================================== */
 
-ZTEST(alp_dsp_decimator, test_ratio3_inband_tone_passes_alias_attenuated)
+/* One row per supported ratio.  `f_pb_hz` / `f_sb_hz` are chosen so both
+ * tones land on an EXACT bin of the `n_out`-point output-rate analysis
+ * (and, since n_in = n_out * ratio, an exact bin of the input block too
+ * -- no spectral leakage either side).  `pb_bin` is the passband tone's
+ * output bin; `sb_bin` is the bin the stopband tone ALIASES to after
+ * decimation (input bin index mod n_out, the standard decimation-alias
+ * relation for an n_in = ratio * n_out block).  `stopband_db` mirrors
+ * the achieved figure in src/dsp_dispatch.c's embedded table comment /
+ * this header's alp_dsp_decimator_init Doxygen -- keep the three in
+ * sync if the design changes.
+ *
+ * Values reproduced by scripts/gen_dsp_decimator_coeffs.py (passband
+ * 0.9x the stated edge; stopband the first exact-bin frequency above
+ * the stated edge). */
+typedef struct {
+	uint32_t ratio;
+	double   fs_in_hz;
+	size_t   n_out;
+	size_t   pb_bin;
+	size_t   sb_bin;
+	double   f_pb_hz;
+	double   f_sb_hz;
+	double   stopband_db;
+} decim_ratio_spec_t;
+
+static const decim_ratio_spec_t k_ratio_specs[] = {
+	/* ratio  fs_in     n_out   pb_bin  sb_bin  f_pb_hz     f_sb_hz     stopband_db */
+	{ 2u, 32000.0, 4096u, 1721u, 2185u, 6722.6562, 8535.1562, 70.31 },
+	{ 3u, 48000.0, 4096u, 1659u, 2253u, 6480.4688, 8800.7812, 65.46 },
+	{ 4u, 32000.0, 4096u, 1598u, 2321u, 3121.0938, 4533.2031, 69.35 },
+	{ 6u, 48000.0, 4096u, 1475u, 2457u, 2880.8594, 4798.8281, 69.87 },
+};
+
+ZTEST(alp_dsp_decimator, test_every_ratio_passband_and_stopband_tones)
 {
-	const uint32_t ratio = 3u;
-	const double   fs_in = 48000.0;
-	const size_t   n_out = 4096u;         /* output-rate analysis length */
-	const size_t   n_in  = n_out * ratio; /* 12288 input frames */
-	const double   a1    = 8000.0;        /* 1 kHz in-band tone amplitude */
-	const double   a2    = 8000.0;        /* 12 kHz above-Nyquist tone amplitude */
+	const double a1 = 8000.0; /* passband tone amplitude */
+	const double a2 = 8000.0; /* stopband tone amplitude */
 
-	int16_t *in = malloc(n_in * sizeof(int16_t));
-	zassert_not_null(in, NULL);
-	for (size_t i = 0u; i < n_in; i++) {
-		double v = a1 * sin(2.0 * M_PI * 1000.0 * (double)i / fs_in) +
-		           a2 * sin(2.0 * M_PI * 12000.0 * (double)i / fs_in);
-		in[i]    = (int16_t)lrint(v);
+	for (size_t s = 0u; s < ARRAY_SIZE(k_ratio_specs); s++) {
+		const decim_ratio_spec_t *spec = &k_ratio_specs[s];
+
+		/* A pure-tone-at-an-exact-bin input is only leakage-free against
+		 * the LTI filter's STEADY-STATE response; the first (TAPS-1)
+		 * input samples are a startup transient (history still filling
+		 * from all-zero) whose broadband energy would otherwise swamp a
+		 * stopband measurement this tight (order -0.5 dB matters). Prime
+		 * the filter with a warmup run of the SAME two-tone signal --
+		 * comfortably >= 2x the tap count, rounded up to a whole number
+		 * of decimation cycles so `phase` is back at 0 at the boundary --
+		 * and analyze only the frames produced AFTER warmup. */
+		const size_t warmup_in =
+		    ((2u * ALP_DSP_DECIMATOR_TAPS + spec->ratio - 1u) / spec->ratio) * spec->ratio;
+		const size_t discard_out = warmup_in / spec->ratio;
+		const size_t n_in        = warmup_in + spec->n_out * spec->ratio;
+
+		int16_t *in = malloc(n_in * sizeof(int16_t));
+		zassert_not_null(in, "ratio %u: alloc failed", spec->ratio);
+		for (size_t i = 0u; i < n_in; i++) {
+			double v = a1 * sin(2.0 * M_PI * spec->f_pb_hz * (double)i / spec->fs_in_hz) +
+			           a2 * sin(2.0 * M_PI * spec->f_sb_hz * (double)i / spec->fs_in_hz);
+			in[i]    = (int16_t)lrint(v);
+		}
+
+		alp_dsp_decimator_t dec;
+		zassert_equal(
+		    alp_dsp_decimator_init(&dec, spec->ratio, 1u), ALP_OK, "ratio %u", spec->ratio);
+
+		const size_t out_cap = discard_out + spec->n_out;
+		int16_t     *out     = malloc(out_cap * sizeof(int16_t));
+		zassert_not_null(out, "ratio %u: alloc failed", spec->ratio);
+		size_t       got = 0u;
+		alp_status_t rc  = alp_dsp_decimator_process(&dec, in, n_in, out, out_cap, &got);
+		zassert_equal(rc, ALP_OK, "ratio %u", spec->ratio);
+		zassert_equal(
+		    got, out_cap, "ratio %u: expected %zu frames, got %zu", spec->ratio, out_cap, got);
+
+		const int16_t *steady = out + discard_out;
+		float          mag_pb = goertzel_amplitude(steady, spec->n_out, spec->pb_bin);
+		float          mag_sb = goertzel_amplitude(steady, spec->n_out, spec->sb_bin);
+
+		/* Passband: within a generous +/-15% of the injected amplitude
+		 * (stated ripple is well under 0.01 dB =~ 0.1%; the rest of the
+		 * margin covers Q15 quantization and the filter's startup
+		 * transient). */
+		zassert_true(mag_pb > 0.85f * (float)a1 && mag_pb < 1.15f * (float)a1,
+		             "ratio %u: passband amplitude out of band: %f (expected ~%f)",
+		             spec->ratio,
+		             (double)mag_pb,
+		             a1);
+
+		/* Stopband: attenuated by at least (stated stopband - 0.5 dB).
+		 * This is the check that catches a wrong-ratio table (e.g. #2134
+		 * review's case-3u-serves-the-ratio-6-table mutation): a swapped
+		 * table's actual cutoff sits at the WRONG ratio's edge, so this
+		 * ratio's stopband tone lands well inside its passband instead
+		 * of being attenuated. */
+		double atten_db = 20.0 * log10((double)a2 / (double)mag_sb);
+		zassert_true(atten_db >= spec->stopband_db - 0.5,
+		             "ratio %u: stopband tone only attenuated %f dB (want >= %f)",
+		             spec->ratio,
+		             atten_db,
+		             spec->stopband_db - 0.5);
+
+		free(in);
+		free(out);
 	}
-
-	alp_dsp_decimator_t dec;
-	zassert_equal(alp_dsp_decimator_init(&dec, ratio, 1u), ALP_OK, NULL);
-
-	int16_t *out = malloc(n_out * sizeof(int16_t));
-	zassert_not_null(out, NULL);
-	size_t       got = 0u;
-	alp_status_t s   = alp_dsp_decimator_process(&dec, in, n_in, out, n_out, &got);
-	zassert_equal(s, ALP_OK, NULL);
-	zassert_equal(got, n_out, "expected exactly %zu output frames, got %zu", n_out, got);
-
-	/* fs_out = 16000 Hz.  1000 Hz -> bin 256, aliased 12000 Hz -> 4000 Hz
-	 * (16000 - 12000) -> bin 1024.  Both are exact integer bins of the
-	 * 4096-point analysis, and both tones are exactly periodic over the
-	 * whole 12288-sample input, so there is no spectral leakage. */
-	float mag_inband = goertzel_amplitude(out, n_out, 256u);
-	float mag_alias  = goertzel_amplitude(out, n_out, 1024u);
-
-	/* Passband: within a generous +/-15% of the injected amplitude
-	 * (stated ripple is 0.18 dB =~ 2%; the rest of the margin covers
-	 * Q15 quantization and the filter's startup transient). */
-	zassert_true(mag_inband > 0.85f * (float)a1 && mag_inband < 1.15f * (float)a1,
-	             "in-band amplitude out of band: %f (expected ~%f)",
-	             (double)mag_inband,
-	             a1);
-
-	/* Stopband: attenuated by at least 35 dB (stated spec is 39.9 dB;
-	 * margin covers quantization + the Goertzel/finite-block estimate). */
-	double atten_db = 20.0 * log10((double)a2 / (double)mag_alias);
-	zassert_true(atten_db >= 35.0, "alias only attenuated %f dB", atten_db);
-
-	free(in);
-	free(out);
 }
 
 /* ============================================================== */
@@ -140,6 +200,10 @@ ZTEST(alp_dsp_decimator, test_exact_frame_counts_across_odd_blocks)
 	    alp_dsp_decimator_process(&dec_ref, in, n_in, out_ref, ARRAY_SIZE(out_ref), &got_ref),
 	    ALP_OK,
 	    NULL);
+	/* Absolute count, not just "chunked matches single-block": n_in=3000
+	 * is an exact multiple of ratio=3, so from phase 0 a single call must
+	 * emit exactly n_in/ratio frames -- no more, no fewer. */
+	zassert_equal(got_ref, n_in / ratio, "expected %zu frames, got %zu", n_in / ratio, got_ref);
 
 	/* Chunked run: cycle through {1, 7, 256, 1023}-frame blocks. */
 	const size_t        block_sizes[] = { 1u, 7u, 256u, 1023u };
