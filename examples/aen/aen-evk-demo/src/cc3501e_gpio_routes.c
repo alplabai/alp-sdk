@@ -45,8 +45,20 @@
  * both are stale prose left over from before the SoM's pad_routes were
  * finalised; the pad_routes table (what the generator and this app's GPIO
  * dispatch actually resolve through) is the one both phases 9 and 11 trust.
+ *
+ * IO8 IS ALSO REVISION-DEPENDENT (issue #2144): on r1 it is a direct Alif
+ * GPIO, not CC3501E GPIO_30 at all -- see
+ * metadata/e1m_modules/aen/hw-revisions.yaml r1 `pad_route_overrides`. This
+ * table is r2-only (CONFIG_ALP_SDK_SOM_HW_REV="2626-r2" below records that),
+ * so the strong cc3501e_gpio_rev_dependent[] override just below makes
+ * src/backends/gpio/cc3501e_proxy.c's px_open() refuse
+ * alp_gpio_open(ALP_E1M_GPIO_IO8) with ALP_ERR_NOSUPPORT on any module whose
+ * identity-EEPROM manifest doesn't confirm r2, instead of silently proxying
+ * IO8 to CC3501E GPIO_30 on an r1 module -- where GPIO_30 is IO21, the SDIO
+ * mux SELECT, tied to +3V3 through R198 and a fitted P18 jumper.
  */
 
+#include <stdint.h>
 #include <stddef.h>
 
 #include <alp/chips/cc3501e.h>
@@ -60,3 +72,15 @@ const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
 
 const size_t cc3501e_gpio_route_count =
     sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);
+
+/* IO8 (above) is CC3501E-owned on r2 only; IO10 and IO21 move too, even
+ * though this app never opens them -- the list names the hardware fact,
+ * not just this app's own usage (issue #2144). */
+const uint32_t cc3501e_gpio_rev_dependent[] = {
+	ALP_E1M_GPIO_IO8,
+	ALP_E1M_GPIO_IO10,
+	ALP_E1M_GPIO_IO21,
+};
+
+const size_t cc3501e_gpio_rev_dependent_count =
+    sizeof(cc3501e_gpio_rev_dependent) / sizeof(cc3501e_gpio_rev_dependent[0]);

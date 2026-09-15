@@ -156,6 +156,41 @@ def test_real_tables_never_target_a_reserved_pad(gen_module, path):
     )
 
 
+def test_revision_dependent_pads_are_io8_io10_io21(gen_module):
+    # Issue #2144: derived from metadata/e1m_modules/aen/hw-revisions.yaml
+    # `pad_route_overrides:`, not hand-typed -- a future hw_rev that moves a
+    # different pad must widen this set without anyone editing this test by
+    # hand (mutation check: emptying _revision_dependent_e1m_pads()'s body
+    # or hand-shrinking hw-revisions.yaml's r1 pad_route_overrides makes
+    # this fail).
+    assert gen_module.REVISION_DEPENDENT_E1M_PADS == {
+        "E1M_GPIO_IO8", "E1M_GPIO_IO10", "E1M_GPIO_IO21",
+    }
+
+
+_REV_DEPENDENT_ARRAY_RE = re.compile(
+    r"cc3501e_gpio_rev_dependent\[\]\s*=\s*\{(.*?)\};", re.DOTALL)
+_REV_DEPENDENT_ENTRY_RE = re.compile(r"ALP_(E1M_GPIO_IO\d+)")
+
+
+def _rev_dependent_pads(text: str) -> set[str]:
+    m = _REV_DEPENDENT_ARRAY_RE.search(text)
+    assert m, "cc3501e_gpio_rev_dependent[] not found in generated output"
+    return set(_REV_DEPENDENT_ENTRY_RE.findall(m.group(1)))
+
+
+@pytest.mark.parametrize("path", EXAMPLE_ROUTE_TABLES)
+def test_real_tables_carry_the_full_revision_dependent_list(gen_module, path):
+    # Every generated table carries the SAME family-wide list (issue #2144)
+    # regardless of which hw_rev IT was built for -- the list names which
+    # pads move, not where this board's own table put them. Mutation check:
+    # deleting px_open()'s is_rev_dependent()-gate wiring in
+    # src/backends/gpio/cc3501e_proxy.c doesn't touch this generated-file
+    # test (that's tests/unit/gpio_cc3501e_rev_guard's job); this one fails
+    # if the GENERATOR stops emitting the list or emits the wrong pads.
+    assert _rev_dependent_pads(path.read_text(encoding="utf-8")) == gen_module.REVISION_DEPENDENT_E1M_PADS
+
+
 @pytest.mark.skipif(not _HAS_CLANG_FORMAT, reason="clang-format not on PATH")
 def test_r1_board_yaml_produces_the_r1_map_not_r2s(gen_module, tmp_path):
     """End-to-end revision-awareness check: copy aen-cc3501e-gpio's

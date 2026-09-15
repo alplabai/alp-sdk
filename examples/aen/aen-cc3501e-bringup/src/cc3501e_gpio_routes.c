@@ -22,8 +22,21 @@
  * lines) are never emitted here -- the firmware's gpio_pad_reserved()
  * would refuse them at runtime, so the generator excludes them at
  * generation time instead (issue #1859).
+ *
+ * Also a strong override of the WEAK cc3501e_gpio_rev_dependent[] /
+ * cc3501e_gpio_rev_dependent_count: the E1M pads
+ * metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides:` move
+ * between chips on at least one AEN hw_rev.  alp_gpio_open() on one of
+ * these refuses ALP_ERR_NOSUPPORT unless a CRC-valid identity-EEPROM
+ * manifest confirms the running module's hw_rev matches
+ * CONFIG_ALP_SDK_SOM_HW_REV -- the hw_rev above -- failing CLOSED per
+ * pin on a missing/mismatched/corrupt manifest, instead of the old
+ * all-or-nothing hw_rev guard this replaces (issue #2144).  This list is
+ * the SAME for every AEN board regardless of hw_rev: it names which
+ * pads move, not where THIS build's table put them.
  */
 
+#include <stdint.h>
 #include <stddef.h>
 
 #include <alp/chips/cc3501e.h>
@@ -43,3 +56,12 @@ const cc3501e_gpio_route_t cc3501e_gpio_routes[] = {
 
 const size_t cc3501e_gpio_route_count =
     sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);
+
+const uint32_t cc3501e_gpio_rev_dependent[] = {
+	ALP_E1M_GPIO_IO8,
+	ALP_E1M_GPIO_IO10,
+	ALP_E1M_GPIO_IO21,
+};
+
+const size_t cc3501e_gpio_rev_dependent_count =
+    sizeof(cc3501e_gpio_rev_dependent) / sizeof(cc3501e_gpio_rev_dependent[0]);

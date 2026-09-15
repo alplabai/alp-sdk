@@ -47,3 +47,11 @@ __attribute__((weak)) const size_t               cc3501e_gpio_route_count = 0u;
  */
 __attribute__((weak)) const uint32_t cc3501e_gpio_unrouted[]     = { 0 };
 __attribute__((weak)) const size_t   cc3501e_gpio_unrouted_count = 0u;
+
+/*
+ * Same reasoning again, for the revision-dependent list added by #2144: a
+ * weak `const` array defined in the SAME TU that reads it would fold its
+ * count to 0 at -Os and make a board's strong override dead code (#1860).
+ */
+__attribute__((weak)) const uint32_t cc3501e_gpio_rev_dependent[]     = { 0 };
+__attribute__((weak)) const size_t   cc3501e_gpio_rev_dependent_count = 0u;

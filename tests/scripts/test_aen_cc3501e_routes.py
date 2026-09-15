@@ -12,6 +12,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+# conftest.py puts scripts/ on sys.path -- reuse the generator's OWN
+# revision-dependent-pad computation (issue #2144) rather than recomputing
+# it here a second time.
+from gen_cc3501e_gpio_routes import REVISION_DEPENDENT_E1M_PADS
+
 REPO = Path(__file__).resolve().parents[2]
 METADATA = REPO / "metadata"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
@@ -235,3 +240,30 @@ def test_standalone_app_route_table_never_targets_a_reserved_pad(path):
         f"{path} routes a bridge-reserved CC3501E pad: {hits} -- "
         f"the firmware's gpio_pad_reserved() would refuse it at runtime"
     )
+
+
+_REV_DEPENDENT_ARRAY_RE = re.compile(
+    r"cc3501e_gpio_rev_dependent\[\]\s*=\s*\{(.*?)\};", re.DOTALL)
+_REV_DEPENDENT_ENTRY_RE = re.compile(r"ALP_(E1M_GPIO_IO\d+)")
+
+
+def _rev_dependent_pads(path: Path) -> set[str]:
+    text = path.read_text(encoding="utf-8")
+    m = _REV_DEPENDENT_ARRAY_RE.search(text)
+    assert m, f"{path} carries no cc3501e_gpio_rev_dependent[] table (issue #2144)"
+    return set(_REV_DEPENDENT_ENTRY_RE.findall(m.group(1)))
+
+
+@pytest.mark.parametrize("path", EXAMPLE_ROUTE_TABLES + STANDALONE_APP_ROUTE_TABLES)
+def test_route_table_opts_into_the_revision_dependent_guard(path):
+    # Issue #2144's "standalone example route tables either use this SDK
+    # path [carry cc3501e_gpio_rev_dependent[]], or are covered by the same
+    # pin list in the existing route-table test [this one]" -- every table,
+    # generated or hand-written, carries the exact same family-wide list
+    # REVISION_DEPENDENT_E1M_PADS computes from
+    # metadata/e1m_modules/aen/hw-revisions.yaml, so
+    # src/backends/gpio/cc3501e_proxy.c's px_open() can refuse IO8/IO10/IO21
+    # per pin without a CRC-valid manifest confirming this build's hw_rev,
+    # on every app that enables the proxy -- not just the ones this issue's
+    # bench check happens to exercise.
+    assert _rev_dependent_pads(path) == REVISION_DEPENDENT_E1M_PADS

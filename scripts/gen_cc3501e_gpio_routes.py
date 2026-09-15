@@ -32,6 +32,14 @@ regenerating this file, not a runtime ALP_ERR_INVAL from
 cc3501e_gpio_configure() on a device.  See RESERVED_CC3501E_PADS below;
 each excluded row is printed, not silently dropped.
 
+Each generated table also carries cc3501e_gpio_rev_dependent[] -- the set of
+E1M pads hw-revisions.yaml's `pad_route_overrides:` moves between chips on at
+least one hw_rev (see REVISION_DEPENDENT_E1M_PADS /
+_revision_dependent_e1m_pads() below), so src/backends/gpio/cc3501e_proxy.c
+can refuse one of them per pin, at runtime, unless a CRC-valid identity
+manifest confirms the running module is the hw_rev this table was built for
+(issue #2144) -- replacing the old all-or-nothing hw_rev guard (#1859).
+
 Run:
 
     python3 scripts/gen_cc3501e_gpio_routes.py
@@ -51,10 +59,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 EXAMPLES_DIR = REPO / "examples" / "aen"
 ALP_PROJECT = REPO / "scripts" / "alp_project.py"
 FROM_CC3501E_TSV = REPO / "metadata" / "e1m_modules" / "aen" / "from-cc3501e.tsv"
+AEN_HW_REVISIONS_YAML = REPO / "metadata" / "e1m_modules" / "aen" / "hw-revisions.yaml"
 
 _TSV_IO_RE = re.compile(r"IO\d+")
 _PLAIN_GPIO_RE = re.compile(r"GPIO_?(\d+)")
@@ -98,6 +109,32 @@ def _reserved_pads_from_tsv() -> frozenset[int]:
 RESERVED_CC3501E_PADS = _reserved_pads_from_tsv()
 
 _E1M_GPIO_RE = re.compile(r"E1M_GPIO_IO\d+")
+_E1M_IO_NUM_RE = re.compile(r"IO(\d+)$")
+
+
+def _revision_dependent_e1m_pads() -> frozenset[str]:
+    """E1M pads AEN_HW_REVISIONS_YAML moves between chips on at least one
+    hw_rev -- IO8/IO10/IO21 today, via r1's `pad_route_overrides` (r2 is the
+    base pad_routes table every override is relative to).  A route-table
+    entry for one of these pads is only ever correct on the ONE revision its
+    target pin/chip was resolved for -- on any other revision it silently
+    drives a DIFFERENT physical pin/chip (issue #2144: r1's IO21 reaches
+    CC3501E GPIO_30, the E1M-EVK SDIO mux SELECT, tied to +3V3 through R198
+    and a fitted P18 jumper -- a contention hazard, not just a functional
+    miss).  The single source of this set: both the generator (below, for
+    every AEN board's emitted cc3501e_gpio_rev_dependent[]) and
+    tests/scripts/test_aen_cc3501e_routes.py (which imports this function
+    rather than recomputing it) resolve through it, so the two can never
+    disagree."""
+    doc = yaml.safe_load(AEN_HW_REVISIONS_YAML.read_text(encoding="utf-8"))
+    pads: set[str] = set()
+    for rev in (doc.get("hw_revisions") or {}).values():
+        for row in rev.get("pad_route_overrides") or []:
+            pads.add(row["e1m"])
+    return frozenset(pads)
+
+
+REVISION_DEPENDENT_E1M_PADS = _revision_dependent_e1m_pads()
 
 # Declarative "this example uses the GPIO proxy" signal: the Kconfig the
 # proxy backend is gated on (zephyr/CMakeLists.txt
@@ -207,8 +244,21 @@ def _emit(app_name: str, hw_rev: str, rows: list[tuple[str, int, str]]) -> str:
         " * lines) are never emitted here -- the firmware's gpio_pad_reserved()",
         " * would refuse them at runtime, so the generator excludes them at",
         " * generation time instead (issue #1859).",
+        " *",
+        " * Also a strong override of the WEAK cc3501e_gpio_rev_dependent[] /",
+        " * cc3501e_gpio_rev_dependent_count: the E1M pads",
+        " * metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides:` move",
+        " * between chips on at least one AEN hw_rev.  alp_gpio_open() on one of",
+        " * these refuses ALP_ERR_NOSUPPORT unless a CRC-valid identity-EEPROM",
+        " * manifest confirms the running module's hw_rev matches",
+        " * CONFIG_ALP_SDK_SOM_HW_REV -- the hw_rev above -- failing CLOSED per",
+        " * pin on a missing/mismatched/corrupt manifest, instead of the old",
+        " * all-or-nothing hw_rev guard this replaces (issue #2144).  This list is",
+        " * the SAME for every AEN board regardless of hw_rev: it names which",
+        " * pads move, not where THIS build's table put them.",
         " */",
         "",
+        "#include <stdint.h>",
         "#include <stddef.h>",
         "",
         "#include <alp/chips/cc3501e.h>",
@@ -224,6 +274,16 @@ def _emit(app_name: str, hw_rev: str, rows: list[tuple[str, int, str]]) -> str:
         "",
         "const size_t cc3501e_gpio_route_count =",
         "    sizeof(cc3501e_gpio_routes) / sizeof(cc3501e_gpio_routes[0]);",
+        "",
+        "const uint32_t cc3501e_gpio_rev_dependent[] = {",
+    ]
+    for e1m in sorted(REVISION_DEPENDENT_E1M_PADS, key=lambda p: int(_E1M_IO_NUM_RE.search(p).group(1))):
+        lines.append(f"\tALP_{e1m},")
+    lines += [
+        "};",
+        "",
+        "const size_t cc3501e_gpio_rev_dependent_count =",
+        "    sizeof(cc3501e_gpio_rev_dependent) / sizeof(cc3501e_gpio_rev_dependent[0]);",
         "",
     ]
     return "\n".join(lines)
