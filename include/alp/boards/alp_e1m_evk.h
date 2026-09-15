@@ -164,17 +164,32 @@ extern "C" {
  *   /E (active-low enable) = E1M IO8   -- REVISION-DEPENDENT, see below
  *   S  (select)            = E1M IO13  -- CC3501E side (GPIO13), both revisions
  *
- * U46 shipped as 74LVC157 on the original 2626-R2 BOM; the standard fit
- * going forward is a 74LV3257 FET bus-switch rework -- same reasoning as
- * the SDIO block above.  On the stock 74LVC157, `I2S0_WS`/`SCLK`/`SDO`
- * are the mux's `Y` OUTPUTS, the SoC-side nets wired straight to the
- * SoC's own I2S3 TX pads, so enabling the mux (`/E` = 0) does not route
- * audio out to either destination -- it instead directly contends with
- * the SoC's own I2S3 TX drive on those same pads (#2077).  `/E` = 1
- * forces those `Y` outputs LOW, which is likewise not isolation from an
- * active I2S3 TX.  Only the 74LV3257 rework is a genuine bidirectional
- * switch, with real Hi-Z at `/E` = 1 and a clean pass-through at
- * `/E` = 0.
+ * U46 shipped as 74LVC157 on the original 2626-R2 BOM.  On the stock
+ * 74LVC157, `I2S0_WS`/`SCLK`/`SDO` are the mux's `Y` OUTPUTS, the
+ * SoC-side nets wired straight to the SoC's own I2S3 TX pads, so
+ * enabling the mux (`/E` = 0) does not route audio out to either
+ * destination -- it instead directly contends with the SoC's own I2S3
+ * TX drive on those same pads (#2077).  `/E` = 1 forces those `Y`
+ * outputs LOW, which is likewise not isolation from an active I2S3 TX
+ * (same reasoning as the SDIO block above).
+ *
+ * The same 3257-type bus-switch rework fitted at U46 (the standard fit
+ * going forward, same as U38/U39 above) does NOT fix I2S-to-amps on
+ * this board -- unlike SDIO, which it does fix.  Per the 2626-R2 netlist,
+ * U46 pin 16 (`VCC`) is on `+VIO`, unlike U38/U39, whose pin 16 is on
+ * `+3V3`.  Measured on `e1m-aen-evk-03` (maintainer, 2026-09-15):
+ * `+VIO` = 1.8 V.  A 3257-type bus switch (e.g. the
+ * SN74CBTLV3257/74CBTLV3257 family) is specified for `VCC` 2.3-3.6 V
+ * and, being an NMOS pass-gate, only passes a HIGH of roughly
+ * `VCC - Vth` -- out of spec and not a valid I2S level at 1.8 V.  With
+ * a 3257-type part fitted at U46 and both amps ACTIVE, every I2S/I2C
+ * call returned `ALP_OK` but the TAS2563 amps produced NO audible
+ * output -- confirmed at the bench.  A working U46 needs either a
+ * switch rated for 1.8 V `VCC` (e.g. TI TMUX1574, 1.5-5.5 V,
+ * pinout-compatible with SN74CBTLV3257 in TSSOP-16/SOT-23-THIN-16) or
+ * the fitted part re-powered from `+3V3` instead of `+VIO`.  Neither
+ * change has landed on any board yet -- I2S-to-amps does not work on
+ * 2626-R2 today, on either mux part.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per

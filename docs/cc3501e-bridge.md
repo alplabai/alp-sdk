@@ -548,7 +548,12 @@ that ISOLATE all the downstream buses -- with the caveat below that
   (active-low enable, so HIGH disables the mux); the same
   neither-state-is-safe-or-working caveat as `SDIO_MUX_EN` above
   applies to U46, the I2S mux this pin controls, on the stock
-  74LVC157 fit.
+  74LVC157 fit. UNLIKE SDIO, the 3257-type bus-switch rework does NOT
+  make I2S-to-amps work on this board: U46's `VCC` (pin 16) is on
+  `+VIO`, measured 1.8 V on `e1m-aen-evk-03` -- out of a 3257-type
+  part's 2.3-3.6 V spec, so it does not pass valid I2S levels and the
+  amps stay silent (measured; see
+  `include/alp/boards/alp_e1m_evk.h`'s I2S mux block).
 - `I2S_MUX_SEL` (`GPIO_13`, both hw revisions): don't-care while
   `I2S_MUX_EN` is disabled -- this select pin (unlike its enable
   counterpart) is CC3501E-side on both revisions.
