@@ -169,15 +169,20 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
   Class-D amps (U27 + U28; each drives a mono speaker) with JST
-  speaker headers, reachable over `I²S0` only through a mux (U46) --
-  NOT currently audible: U46's `VCC` is on `+VIO` (the SoM's
-  `VIO_OUT`, 1.8 V with the E1M-AEN SoM), below a 3257-type bus
-  switch's rated `VCC`, so it does not pass valid I²S levels even
-  with the mux enabled (see `include/alp/boards/alp_e1m_evk.h`'s I2S
-  mux block).  Once U46 passes audio, the shared `I²S0` link is
-  designed to carry both channels in a stereo frame -- U27 the left
-  slot, U28 the right, via TAS2563 time-slot configuration.  The
-  amps' diagnostic feedback returns on `I²S0_SDI`.
+  speaker headers, reachable over `I²S0` only through a mux (U46).
+  As originally built, U46's `VCC` is on `+VIO` (the SoM's `VIO_OUT`,
+  1.8 V with the E1M-AEN SoM) -- below a 3257-type bus switch's rated
+  `VCC`, so it does not pass valid I²S levels and playback is silent.
+  **Verified fix:** re-wiring U46 `VCC` to `+3V3` (same 3257-type
+  part) makes playback audible -- confirmed by ear on `e1m-aen-evk-03`
+  (2026-09-15).  Only amp playback audibility was checked this way;
+  PDM mic capture and M.2 E-key I2S are unverified, and disabling the
+  mux or selecting M.2 (`/E`/`S` HIGH) may not switch reliably at
+  `+3V3` -- see `include/alp/boards/alp_e1m_evk.h`'s I2S mux block for
+  the full finding.  The shared `I²S0` link is designed to carry both
+  channels in a stereo frame -- U27 the left slot, U28 the right, via
+  TAS2563 time-slot configuration.  The amps' diagnostic feedback
+  returns on `I²S0_SDI`.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
   through LSF0108 / LSF0102 to the IO-voltage select rail.
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,

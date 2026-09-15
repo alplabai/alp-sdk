@@ -173,29 +173,45 @@ extern "C" {
  * outputs LOW, which is likewise not isolation from an active I2S3 TX
  * (same reasoning as the SDIO block above).
  *
- * A 3257-type bus switch was ALSO fitted at U46 on evk-03 -- but unlike
+ * A 3257-type bus switch was ALSO fitted at U46 on evk-03, but unlike
  * U38/U39 (whose 3257-type rework IS the standard fit going forward,
- * see above), that does NOT make I2S-to-amps work.  U46's `VCC`
- * (pin 16) is on `+VIO`, unlike U38/U39's `VCC`, which is on `+3V3`.
- * `+VIO` is NOT a carrier-selected rail -- it is the plugged-in SoM's
- * own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed
- * `+VIO_C`, which reaches `+VIO` through U33's shunt monitor, IN+/IN-).
- * MEASURED on `e1m-aen-evk-03` with the E1M-AEN SoM fitted (maintainer,
- * 2026-09-15): `+VIO` = 1.8 V, and with both amps ACTIVE, every
- * I2S/I2C call returned `ALP_OK` but the TAS2563 amps produced NO
- * audible output.  INFERRED, not directly scoped: a 3257-type bus
- * switch (e.g. the SN74CBTLV3257/74CBTLV3257 family) is specified for
- * `VCC` 2.3-3.6 V and, being an NMOS pass-gate, only passes a HIGH of
- * roughly `VCC - Vth` -- out-of-spec `VCC` is the likely cause, but the
- * actual I2S signal levels were not scoped/measured directly.  A
- * working U46 needs either a switch rated for 1.8 V `VCC` -- e.g. TI
- * TMUX1574 (1.5-5.5 V), which keeps the SN74CBTLV3257 pin numbering
- * ONLY in TSSOP-16/SOT-23-THIN-16 (its other packages don't match, and
- * NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land pattern without an
- * adapter or flying leads) -- or the fitted part re-powered from
- * `+3V3` instead of `+VIO`.  Neither change has landed on any board
- * yet -- I2S-to-amps does not work on 2626-R2 today, on either mux
- * part, with a 1.8 V-`VIO` SoM.
+ * see above), that alone did NOT make I2S-to-amps work.  U46's `VCC`
+ * (pin 16) was originally on `+VIO`, unlike U38/U39's `VCC`, which is
+ * on `+3V3`.  `+VIO` is NOT a carrier-selected rail -- it is the
+ * plugged-in SoM's own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2
+ * `VIO_OUT` feed `+VIO_C`, which reaches `+VIO` through U33's shunt
+ * monitor, IN+/IN-).  MEASURED on `e1m-aen-evk-03` with the E1M-AEN
+ * SoM fitted (maintainer, 2026-09-15): `+VIO` = 1.8 V, and with both
+ * amps ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563
+ * amps produced NO audible output -- a 3257-type bus switch is
+ * specified for `VCC` 2.3-3.6 V, out of spec at 1.8 V.
+ *
+ * ROOT CAUSE CONFIRMED, FIX PROVEN ON SILICON (`e1m-aen-evk-03`,
+ * maintainer, 2026-09-15 ~14:05Z): U46 `VCC` was re-wired from `+VIO`
+ * to `+3V3` -- same 3257-type part, no other change.  A PROBE_LISTEN
+ * image (continuous 1 kHz tone through I2S3 -> U46 -> both TAS2563
+ * amps) was then clearly audible at the speakers, confirmed by ear.
+ * The undervoltage was the entire cause; a 3257-type switch powered
+ * from `+3V3` is a proven fix for U46, not just an inferred one.
+ * SCOPE: only amp PLAYBACK audibility was verified this way -- TAS2563
+ * TDM clock-fault behaviour, PDM mic capture, and the M.2 E-key I2S
+ * path through this same mux remain unverified.
+ *
+ * CAVEAT, UNTESTED: at `VCC` = 3.3 V, a CBT-type switch's control-input
+ * VIH (~2.0 V) may not reliably register a 1.8 V HIGH on `/E` or `S`
+ * driven from the CC3501E (which itself still runs at 1.8 V logic).
+ * The amp playback path above only needs BOTH control pins LOW
+ * (mux enabled, amps selected), which is why it worked -- but
+ * DISABLING the mux (`/E` HIGH) or selecting the M.2 E-key side
+ * (`S` HIGH) may not switch reliably at this `VCC`.  Not exercised on
+ * silicon either way.
+ *
+ * A working U46 therefore has two options: the `+3V3`-repower above
+ * (PROVEN, subject to the `/E`/`S` HIGH caveat), or a switch rated for
+ * 1.8 V `VCC` -- e.g. TI TMUX1574 (1.5-5.5 V, keeps the SN74CBTLV3257
+ * pin numbering ONLY in TSSOP-16/SOT-23-THIN-16; its other packages
+ * don't match, and NONE of them fit U46's NXP DHVQFN-16 2.5x3mm land
+ * pattern without an adapter or flying leads) -- UNTESTED in-house.
  *
  * NOTE: the enable line MOVED between board revisions, so neither answer is
  * unconditionally true (#913).  Per

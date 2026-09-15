@@ -3921,18 +3921,21 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * propagation, reset-sequence and SD_N-glitch fixes stay verifiable on
  * real silicon without depending on U46 at all.
  *
- * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46 has been replaced
- * with a switch rated for 1.8 V VCC -- U46 sits on `+VIO`, not `+3V3`,
- * and a same-family 3257-type part swap alone is NOT enough: confirmed
- * silent on the bench with `+VIO` at 1.8 V (see
- * include/alp/boards/alp_e1m_evk.h's I2S mux block for the full finding
- * and the two ways to actually fix U46). With U46 still stock, turning
- * this on reproduces the driver-contention hazard above; with a
- * 3257-type part on `+VIO`, it produces no audible output at all. The
- * RX_SLEN=32-bit slot configuration and the explicit LEFT/RIGHT channel
- * mapping (both in tas2563_configure_i2s()'s call below, unconditional)
- * are already correct for a working U46 and need no further change
- * when that day comes.
+ * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46's VCC is on
+ * `+3V3` (a same-family 3257-type part swap alone is NOT enough while
+ * VCC stays on `+VIO`, which is 1.8 V with the E1M-AEN SoM -- confirmed
+ * silent on the bench). PROVEN on `e1m-aen-evk-03` (2026-09-15): once
+ * VCC was re-wired to `+3V3`, a continuous-tone image was clearly
+ * audible on both amps (see include/alp/boards/alp_e1m_evk.h's I2S mux
+ * block for the full finding). CAVEAT, untested: at `+3V3` a CBT-type
+ * switch's control-input VIH may not register a 1.8 V HIGH from the
+ * CC3501E, so this app's own LOW-only EN/SEL use is fine but disabling
+ * the mux or selecting M.2 may not switch reliably. With U46 still
+ * stock (74LVC157), turning this on reproduces the driver-contention
+ * hazard above. The RX_SLEN=32-bit slot configuration and the explicit
+ * LEFT/RIGHT channel mapping (both in tas2563_configure_i2s()'s call
+ * below, unconditional) are already correct for a working U46 and need
+ * no further change once that fix is in place on the board under test.
  *
  * THE SAFETY CONSTRAINT THE PLAYBACK PATH RESPECTS WHEN ON. Both TAS2563
  * amps can drive ~10 W peak into 4 ohm (SLASET3D Table 7-105) -- the
@@ -4189,9 +4192,9 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 	k_msleep(SOUND_MUX_SETTLE_MS);
 #else
-	printf("[evkdemo] SOUND: playback skipped -- EVK 2626-R2 U46 VCC is on "
-	       "+VIO (below its 3257-type part's rating; see alp_e1m_evk.h); "
-	       "amps verified over I2C only\n");
+	printf("[evkdemo] SOUND: playback skipped -- requires U46 powered from "
+	       "+3V3 or a 1.8 V-rated switch (see alp_e1m_evk.h); amps "
+	       "verified over I2C only\n");
 #endif
 
 	/* --- 2. AMP_ENABLE (SD_N) low-then-high -- an ACTUAL hardware reset - */

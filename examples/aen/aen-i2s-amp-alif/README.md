@@ -43,12 +43,16 @@ init, so nothing drives P9_3/4/5 at all. `main.c` detects this at compile
 time (`DT_NODE_HAS_STATUS(I2S_NODE, okay)`) and prints why, then exits with
 `RESULT SKIPPED` instead of touching the Zephyr I2S API.
 
-**To exercise this node once U46 has been replaced with a switch rated
-for 1.8 V VCC, or its VCC moved to `+3V3`** (a same-family 3257-type
-part swap on `+VIO` alone removes the contention hazard below but is
-still silent through the amps -- see `include/alp/boards/alp_e1m_evk.h`'s
-I2S mux block; this app tests only the SoC's own `i2s3` controller, not
-the amps), the single documented switch:
+**To exercise this node once U46 is a 3257-type bus switch** (a
+same-family part swap alone removes the contention hazard below,
+regardless of which rail powers it -- this app never drives EN or SEL
+itself, and tests only the SoC's own `i2s3` controller, not the amps).
+Amp audibility is a separate, stricter condition this app does not
+check: PROVEN on `e1m-aen-evk-03` (2026-09-15) with U46's VCC on
+`+3V3` (a switch rated for 1.8 V VCC is the untested alternative), and
+even then disabling the mux or selecting M.2 (`/E`/`S` HIGH) is
+untested -- see `include/alp/boards/alp_e1m_evk.h`'s I2S mux block.
+The single documented switch to re-enable this node:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \

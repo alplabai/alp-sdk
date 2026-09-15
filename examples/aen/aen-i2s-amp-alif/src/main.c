@@ -93,8 +93,9 @@ int main(void)
 
 	if (i2s == NULL) {
 		printf("[i2s] SOUND: playback skipped -- EVK 2626-R2 U46 has no Hi-Z state and "
-		       "routes SoC I2S outputs into mux outputs (U46 VCC on +VIO is also below "
-		       "its part's rating; see alp_e1m_evk.h); i2s3 is left \"disabled\" in the "
+		       "routes SoC I2S outputs into mux outputs (a working, audible mux "
+		       "requires U46 powered from +3V3 or a 1.8 V-rated switch; see "
+		       "alp_e1m_evk.h); i2s3 is left \"disabled\" in the "
 		       "board overlay so no pinctrl is applied and no clock is emitted\n"
 		       "[i2s] RESULT SKIPPED: i2s3 disabled by default on this "
 		       "board revision\n[i2s] done\n");

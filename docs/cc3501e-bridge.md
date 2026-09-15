@@ -548,15 +548,23 @@ that ISOLATE all the downstream buses -- with the caveat below that
   (active-low enable, so HIGH disables the mux); the same
   neither-state-is-safe-or-working caveat as `SDIO_MUX_EN` above
   applies to U46, the I2S mux this pin controls, on the stock
-  74LVC157 fit. UNLIKE SDIO, the 3257-type bus-switch rework does NOT
-  make I2S-to-amps work on this board: U46's `VCC` (pin 16) is on
-  `+VIO` -- NOT a carrier-selected rail, it is the plugged-in SoM's
+  74LVC157 fit. A 3257-type bus-switch rework alone does NOT make
+  I2S-to-amps work on this board: U46's `VCC` (pin 16) was originally
+  on `+VIO` -- NOT a carrier-selected rail, it is the plugged-in SoM's
   own `VIO_OUT` (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed
   `+VIO_C`, which reaches `+VIO` through U33's shunt monitor). MEASURED
-  with the E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, and the
-  amps stayed silent. INFERRED, not directly scoped: 1.8 V is below a
-  3257-type part's 2.3-3.6 V spec, so it likely does not pass valid
-  I2S levels -- the actual signal levels were not measured directly
+  with the E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, below a
+  3257-type part's 2.3-3.6 V spec, and the amps stayed silent.
+  CONFIRMED as the root cause and FIXED on silicon
+  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): re-wiring U46 `VCC` from
+  `+VIO` to `+3V3` (same 3257-type part) made a continuous 1 kHz
+  PROBE_LISTEN tone through I2S3 clearly audible on both TAS2563
+  amps. Scope: only amp PLAYBACK audibility was verified this way --
+  TDM clock faults, PDM mic capture, and M.2 E-key I2S are unverified.
+  CAVEAT, untested: at `VCC` = 3.3 V a CBT-type switch's control-input
+  VIH (~2.0 V) may not reliably register a 1.8 V HIGH from the
+  CC3501E, so disabling the mux (`/E` HIGH) or selecting M.2 (`S`
+  HIGH) may not switch reliably even though the all-LOW amp path does
   (see `include/alp/boards/alp_e1m_evk.h`'s I2S mux block).
 - `I2S_MUX_SEL` (`GPIO_13`, both hw revisions): don't-care while
   `I2S_MUX_EN` is disabled -- this select pin (unlike its enable
