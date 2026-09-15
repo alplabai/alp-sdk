@@ -313,13 +313,19 @@ static const char SOCKTP_HTTP_REQUEST[] =
 #define SOCKTP_SESSION_TIMEOUT_MS (60u * 1000u)
 
 /* How many consecutive zero-length OK results this app treats as "the
- * transfer is over". cc3501e_sock_recv()'s own doc is explicit that a
- * single zero-length OK is ambiguous -- "no data was available within the
- * firmware's receive window, or the peer closed the connection -- the
- * caller polls again to distinguish". Requiring a short RUN of them,
- * rather than trusting the first one, is the same reasoning
+ * transfer is over". Defends against v0.8.0 -- what `prebuilt/` actually
+ * publishes today -- where a single zero-length OK from cc3501e_sock_recv()
+ * is ambiguous -- "no data was available within the firmware's receive
+ * window, or the peer closed the connection" -- so this app cannot trust
+ * the first one. Requiring a short RUN instead is the same reasoning
  * aen-cc3501e-command-sweep's wedge tracker uses for FAIL verdicts: one
- * empty poll mid-stream is normal jitter, three in a row is a pattern. */
+ * empty poll mid-stream is normal jitter, three in a row is a pattern.
+ * Bench-validated 5 of 5 against a build carrying cc3501e-bridge-firmware
+ * #140 (merged to `main`; cut as v0.9.0 but not yet released or
+ * bench-verified), which makes EOF sticky on the worker path and removes
+ * the ambiguity this streak exists to paper over -- KEEP this workaround
+ * until a released blob carries #140, since it is correct against both
+ * firmware generations, not just v0.8.0. */
 #define SOCKTP_ZERO_STREAK_DONE 3u
 
 /*
