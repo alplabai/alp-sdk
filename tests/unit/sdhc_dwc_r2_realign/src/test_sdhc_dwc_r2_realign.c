@@ -63,22 +63,26 @@ ZTEST_SUITE(sdhc_dwc_r2_realign, NULL, NULL, NULL, NULL, NULL);
  */
 ZTEST(sdhc_dwc_r2_realign, test_new_loop_decodes_csd_v2_correctly)
 {
-	uint32_t response[4] = {RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE};
+	uint32_t response[4] = { RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE };
 
 	sdhc_dwc_realign_r2_response(response);
 
 	zassert_equal(decode_csd_structure(response), 1, "CSD_STRUCTURE must decode to v2 (1)");
 	zassert_equal(decode_read_bl_len(response), 9, "READ_BL_LEN must decode to 9");
-	zassert_equal(decode_c_size(response), 0x3BAFFU,
-		      "C_SIZE must decode to 0x3BAFF, got 0x%x", decode_c_size(response));
+	zassert_equal(decode_c_size(response),
+	              0x3BAFFU,
+	              "C_SIZE must decode to 0x3BAFF, got 0x%x",
+	              decode_c_size(response));
 
 	/* A field that lives entirely in the LOW words: response[0] (the
 	 * least significant word, RESP01) has no word below index 0 to carry
 	 * from, so its new low byte must be zero-filled, not polluted with
 	 * data pulled from the wrong neighbour.
 	 */
-	zassert_equal(response[0], 0x00000000U,
-		      "response[0]'s low byte must be zero-filled, got 0x%08x", response[0]);
+	zassert_equal(response[0],
+	              0x00000000U,
+	              "response[0]'s low byte must be zero-filled, got 0x%08x",
+	              response[0]);
 }
 
 /* Red (documents the bug, does not call the helper): the OLD carry
@@ -90,7 +94,7 @@ ZTEST(sdhc_dwc_r2_realign, test_new_loop_decodes_csd_v2_correctly)
  */
 ZTEST(sdhc_dwc_r2_realign, test_old_loop_would_truncate_c_size)
 {
-	uint32_t response[4] = {RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE};
+	uint32_t response[4] = { RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE };
 
 	for (int i = 0; i < 4; i++) {
 		response[i] <<= 8;
@@ -99,14 +103,16 @@ ZTEST(sdhc_dwc_r2_realign, test_old_loop_would_truncate_c_size)
 		}
 	}
 
-	zassert_equal(decode_c_size(response), 0xBAFFU,
-		      "old carry direction truncates C_SIZE to 0xBAFF, got 0x%x",
-		      decode_c_size(response));
-	zassert_not_equal(decode_c_size(response), 0x3BAFFU,
-			   "old carry direction must NOT recover the true C_SIZE");
-	zassert_equal(response[0], 0x00000003U,
-		      "old carry direction pollutes response[0]'s low byte, got 0x%08x",
-		      response[0]);
+	zassert_equal(decode_c_size(response),
+	              0xBAFFU,
+	              "old carry direction truncates C_SIZE to 0xBAFF, got 0x%x",
+	              decode_c_size(response));
+	zassert_not_equal(
+	    decode_c_size(response), 0x3BAFFU, "old carry direction must NOT recover the true C_SIZE");
+	zassert_equal(response[0],
+	              0x00000003U,
+	              "old carry direction pollutes response[0]'s low byte, got 0x%08x",
+	              response[0]);
 }
 
 /* No realignment at all (the dead CONFIG_SDHC_RSP_136_HAS_CRC symbol,
@@ -115,10 +121,11 @@ ZTEST(sdhc_dwc_r2_realign, test_old_loop_would_truncate_c_size)
  */
 ZTEST(sdhc_dwc_r2_realign, test_no_realignment_misreads_every_field)
 {
-	uint32_t response[4] = {RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE};
+	uint32_t response[4] = { RESP0_PRE, RESP1_PRE, RESP2_PRE, RESP3_PRE };
 
-	zassert_not_equal(decode_csd_structure(response), 1,
-			   "unrealigned response must NOT decode CSD_STRUCTURE as v2");
-	zassert_not_equal(decode_read_bl_len(response), 9,
-			   "unrealigned response must NOT decode READ_BL_LEN as 9");
+	zassert_not_equal(decode_csd_structure(response),
+	                  1,
+	                  "unrealigned response must NOT decode CSD_STRUCTURE as v2");
+	zassert_not_equal(
+	    decode_read_bl_len(response), 9, "unrealigned response must NOT decode READ_BL_LEN as 9");
 }
