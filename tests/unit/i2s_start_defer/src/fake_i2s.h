@@ -54,4 +54,54 @@ void fake_i2s_force_start_fail(int neg_errno, unsigned int count);
 typedef void (*fake_i2s_write_hook_t)(void);
 void fake_i2s_set_write_hook(fake_i2s_write_hook_t hook);
 
+/**
+ * @brief Force a TX underrun: mirrors zephyr/drivers/i2s/i2s_dw.c's TX
+ *        IRQ handler finding the ring empty when it goes to fetch the
+ *        NEXT block right after finishing the current one
+ *        (i2s_dw.c:516-524) -- issue #2137. A no-op unless the fake is
+ *        genuinely RUNNING with an empty ring (fake_i2s_tx_running() &&
+ *        fake_i2s_tx_queue_depth() == 0); a stream that still has a
+ *        block queued ahead would just keep playing on real hardware,
+ *        not underrun. On success, moves to I2S_STATE_ERROR: START
+ *        needs READY and -EIOs (i2s_dw.c:278-283), STOP/DRAIN need
+ *        RUNNING and -EIO too (i2s_dw.c:301-304/315-321), and write()
+ *        needs RUNNING or READY and -EIOs (i2s_dw.c:390-394) -- the
+ *        ONLY way out is TRIGGER_PREPARE (i2s_dw.c:340-347) or
+ *        TRIGGER_DROP (i2s_dw.c:329-338).
+ */
+void fake_i2s_tx_simulate_underrun(void);
+
+/** @brief True while the fake is in the post-underrun I2S_STATE_ERROR
+ *  (issue #2137) -- i.e. after fake_i2s_tx_simulate_underrun() and before
+ *  a successful PREPARE or DROP. */
+bool fake_i2s_tx_in_error(void);
+
+/**
+ * @brief Make the NEXT @p count TX PREPARE triggers fail with
+ *        @p neg_errno instead of the normal ERROR-only-else-EIO check
+ *        (issue #2137). Same one-shot-countdown shape as
+ *        fake_i2s_force_start_fail().
+ */
+void fake_i2s_force_prepare_fail(int neg_errno, unsigned int count);
+
+/** @brief Count of TX_TRIGGER_PREPARE calls this fake has seen since the
+ *  last fake_i2s_reset(), regardless of outcome. The way a test proves
+ *  the backend actually ATTEMPTED an underrun recovery, rather than
+ *  merely observing a status code a backend with no recovery logic at
+ *  all would also happen to return (issue #2137). */
+size_t fake_i2s_prepare_call_count(void);
+
+/**
+ * @brief The REAL Zephyr k_mem_slab's current free-block count -- the
+ *        slab captured at configure() time (src/backends/i2s/
+ *        zephyr_drv.c's 2-block ping-pong slab). The direct, ground-
+ *        truth way to prove a sequence neither leaked a block (count
+ *        stays below the slab's capacity) nor double-freed one (which
+ *        would corrupt the free list, not simply over-report the
+ *        count -- so this is a necessary, not sufficient, check; pair
+ *        it with a clean, crash-free run). 0 before any open() (no slab
+ *        configured yet).
+ */
+size_t fake_i2s_slab_free_count(void);
+
 #endif /* ALP_TEST_FAKE_I2S_H */

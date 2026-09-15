@@ -199,6 +199,12 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
  * @ref ALP_ERR_IO on the Zephyr I2S backend, idempotent @ref ALP_OK on
  * Yocto/ALSA) -- do not assume either.
  *
+ * On the Zephyr I2S backend, a gap between writes long enough for the
+ * stream to underrun is recovered transparently -- calling this right
+ * after (or the next @ref alp_audio_out_write, see its doc) resumes
+ * playback instead of failing forever; the caller does not need to
+ * detect or clear the condition itself.
+ *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
@@ -208,6 +214,11 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
 
 /**
  * @brief Stop playback.  Pending frames are drained.
+ *
+ * On the Zephyr I2S backend, recovers transparently from an underrun --
+ * stopping a stream that underran still returns @ref ALP_OK and
+ * releases whatever was queued, instead of failing because the stream
+ * is not actively playing.
  *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
@@ -224,7 +235,10 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * retry still fails, the backend releases the block it just queued and
  * this call returns the start failure -- @p out_frames is NOT
  * incremented for a chunk whose queue attempt did not fully succeed, so
- * it always reflects frames genuinely accepted by the driver.
+ * it always reflects frames genuinely accepted by the driver. A gap
+ * between writes long enough for the stream to underrun is ALSO
+ * recovered transparently here: this call resumes playback instead of
+ * failing forever, with no separate stop()/start() needed first.
  *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.

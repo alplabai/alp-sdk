@@ -18,6 +18,19 @@
  * fake_i2s_set_write_hook(), see test_start_write_stop_race_stale_flag_
  * recovers below.
  *
+ * issue #2137 (a separate, independent bug once a stream starts and
+ * then goes quiet): a TX underrun -- the queue running dry while
+ * RUNNING -- drops i2s_dw into I2S_STATE_ERROR (i2s_dw.c:516-524), and
+ * from there DRAIN, START, and write() all -EIO forever
+ * (i2s_dw.c:301-321/278-283/390-394): nothing in the pre-#2137 backend
+ * ever issued the ONE trigger valid from ERROR (I2S_TRIGGER_PREPARE,
+ * i2s_dw.c:340-347) or the DROP fallback that also works there
+ * (i2s_dw.c:329-338). z_stop()/z_start()/z_write() now recover
+ * transparently -- see test_underrun_then_stop_recovers,
+ * test_underrun_then_start_and_write_replays,
+ * test_underrun_then_write_resumes_with_no_slab_leak, and
+ * test_underrun_write_prepare_refused_propagates_original_error below.
+ *
  * fake_i2s.c models the real i2s_dw.c state machine closely enough to
  * catch all of the above: unlike tests/unit/i2s_write_bounds' always-
  * succeeds fake (which never calls trigger(START) at all), this one
@@ -482,6 +495,173 @@ ZTEST(alp_i2s_start_defer, test_start_write_stop_race_stale_flag_recovers)
 	zassert_false(running_after_start2, "recovery re-defers -- nothing is queued yet");
 	zassert_equal(write2_rc, ALP_OK);
 	zassert_true(running_after_write2, "a normal write after the recovery must reach RUNNING");
+}
+
+/* issue #2137, case (a): start, write, underrun, then stop must recover
+ * (return ALP_OK) instead of the -EIO i2s_dw's DRAIN returns forever
+ * once the stream is stuck in I2S_STATE_ERROR (i2s_dw.c:315-321) --
+ * silicon repro: alp_audio_out_stop() returning -5 after the queue ran
+ * dry, e1m-aen-evk-03. */
+ZTEST(alp_i2s_start_defer, test_underrun_then_stop_recovers)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+
+	alp_status_t start_rc            = alp_i2s_start(h);
+	alp_status_t write_rc            = write_block(h);
+	bool         running_after_write = fake_i2s_tx_running();
+
+	fake_i2s_tx_simulate_underrun();
+	bool in_error_after_underrun = fake_i2s_tx_in_error();
+
+	alp_status_t stop_rc             = alp_i2s_stop(h);
+	bool         running_after_stop  = fake_i2s_tx_running();
+	bool         in_error_after_stop = fake_i2s_tx_in_error();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start_rc, ALP_OK);
+	zassert_equal(write_rc, ALP_OK);
+	zassert_true(running_after_write);
+	zassert_true(in_error_after_underrun, "the underrun must have reached I2S_STATE_ERROR");
+	zassert_equal(stop_rc,
+	              ALP_OK,
+	              "stop() after an underrun must recover via the DROP fallback once DRAIN "
+	              "-EIOs, not propagate i2s_dw's -EIO forever");
+	zassert_false(running_after_stop);
+	zassert_false(in_error_after_stop, "stop()'s DROP fallback must clear ERROR");
+}
+
+/* issue #2137, case (b): underrun, then start() alone (deferred again --
+ * PREPARE drops the ring, so nothing is queued right after) plus a
+ * follow-up write() (which fires the real trigger) must play again --
+ * silicon repro: alp_audio_out_start() returning -5 after the underrun,
+ * e1m-aen-evk-03. */
+ZTEST(alp_i2s_start_defer, test_underrun_then_start_and_write_replays)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+
+	alp_status_t start1_rc            = alp_i2s_start(h);
+	alp_status_t write1_rc            = write_block(h);
+	bool         running_after_write1 = fake_i2s_tx_running();
+
+	fake_i2s_tx_simulate_underrun();
+	bool in_error_after_underrun = fake_i2s_tx_in_error();
+
+	/* start() alone, with no write() in between, must NOT fail --
+	 * i2s_dw's START -EIOs from ERROR (i2s_dw.c:278-283); PREPARE
+	 * recovers to READY, and since PREPARE also drops the (already
+	 * empty) ring, the retried START correctly re-defers rather than
+	 * hitting -ENOMEM. */
+	alp_status_t start2_rc            = alp_i2s_start(h);
+	bool         running_after_start2 = fake_i2s_tx_running();
+	bool         error_after_start2   = fake_i2s_tx_in_error();
+
+	alp_status_t write2_rc            = write_block(h);
+	bool         running_after_write2 = fake_i2s_tx_running();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start1_rc, ALP_OK);
+	zassert_equal(write1_rc, ALP_OK);
+	zassert_true(running_after_write1);
+	zassert_true(in_error_after_underrun, "the underrun must have reached I2S_STATE_ERROR");
+	zassert_equal(start2_rc, ALP_OK, "start() after an underrun must recover, not -EIO");
+	zassert_false(running_after_start2, "nothing is queued yet -- must re-defer, not fake it");
+	zassert_false(error_after_start2, "PREPARE must have cleared I2S_STATE_ERROR");
+	zassert_equal(write2_rc, ALP_OK);
+	zassert_true(running_after_write2, "write() must have fired the re-armed deferred start()");
+}
+
+/* issue #2137, case (c): underrun, then write() alone (no explicit
+ * start()) must resume playback -- the exact "gap between writes
+ * breaks the stream" symptom the issue reports -- and must neither
+ * leak the retried block nor double-free it, proven against the REAL
+ * k_mem_slab's own free-block count, not just this fake's bookkeeping. */
+ZTEST(alp_i2s_start_defer, test_underrun_then_write_resumes_with_no_slab_leak)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+
+	alp_status_t start_rc             = alp_i2s_start(h);
+	alp_status_t write1_rc            = write_block(h);
+	bool         running_after_write1 = fake_i2s_tx_running();
+	size_t       free_before_underrun = fake_i2s_slab_free_count();
+
+	fake_i2s_tx_simulate_underrun();
+	bool in_error_after_underrun = fake_i2s_tx_in_error();
+
+	alp_status_t write2_rc            = write_block(h);
+	bool         running_after_write2 = fake_i2s_tx_running();
+	size_t       free_after_write2    = fake_i2s_slab_free_count();
+	size_t       depth_after_write2   = fake_i2s_tx_queue_depth();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start_rc, ALP_OK);
+	zassert_equal(write1_rc, ALP_OK);
+	zassert_true(running_after_write1);
+	zassert_true(in_error_after_underrun, "the underrun must have reached I2S_STATE_ERROR");
+	zassert_equal(write2_rc,
+	              ALP_OK,
+	              "a write after an underrun must resume playback, not propagate -EIO forever");
+	zassert_true(running_after_write2, "the retried write must have re-fired START");
+	zassert_equal(depth_after_write2, 0u, "the re-armed START must have consumed the block");
+	zassert_equal(free_after_write2,
+	              free_before_underrun,
+	              "the slab's free-block count must return to where it was -- the retried "
+	              "block was reused, not leaked, and never double-freed");
+}
+
+/* issue #2137, case (d): PREPARE itself refused must surface the
+ * ORIGINAL write failure (mapped from the underrun's -EIO), not
+ * PREPARE's own (a distinct forced errno, on purpose, so a bug that
+ * swapped the two would be caught), and must free the block it can no
+ * longer deliver -- nothing downstream will ever consume it now.
+ *
+ * On a backend with NO recovery logic at all (pre-#2137), write2_rc and
+ * the slab-free-count check below would ALSO happen to come out this
+ * way -- passing straight through never queues anything and never
+ * touches PREPARE either. fake_i2s_prepare_call_count() is the
+ * discriminator that actually proves this backend attempted recovery
+ * and PREPARE was the thing that failed, not that recovery was simply
+ * never attempted. */
+ZTEST(alp_i2s_start_defer, test_underrun_write_prepare_refused_propagates_original_error)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+
+	alp_status_t start_rc             = alp_i2s_start(h);
+	alp_status_t write1_rc            = write_block(h);
+	bool         running_after_write1 = fake_i2s_tx_running();
+	size_t       free_before          = fake_i2s_slab_free_count();
+
+	fake_i2s_tx_simulate_underrun();
+	fake_i2s_force_prepare_fail(-ETIMEDOUT, 1u);
+
+	alp_status_t write2_rc     = write_block(h);
+	size_t       free_after    = fake_i2s_slab_free_count();
+	size_t       prepare_calls = fake_i2s_prepare_call_count();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start_rc, ALP_OK);
+	zassert_equal(write1_rc, ALP_OK);
+	zassert_true(running_after_write1);
+	zassert_equal(prepare_calls,
+	              1u,
+	              "the write must have actually attempted PREPARE, not skipped recovery "
+	              "entirely and happened to land on the same status by coincidence");
+	zassert_equal(write2_rc,
+	              ALP_ERR_IO,
+	              "PREPARE failing must surface the ORIGINAL write's -EIO (ALP_ERR_IO), not "
+	              "PREPARE's own forced -ETIMEDOUT");
+	zassert_equal(free_after, free_before, "the undeliverable block must be freed, not leaked");
 }
 
 /* RX must be unaffected by any of the above: rx_stream_start() allocates

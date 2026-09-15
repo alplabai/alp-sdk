@@ -129,6 +129,14 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
  * is already queued (write-then-start) triggers immediately, as does
  * the RX direction always (it has nothing to defer).
  *
+ * A TX stream that underran (the queue ran dry while playing) or an RX
+ * stream that overran (the slab or queue was exhausted while capturing)
+ * is recovered transparently: this call resumes it instead of failing
+ * forever. Calling this right after an underrun/overrun behaves like
+ * calling it on a fresh handle -- if nothing is queued yet on TX, the
+ * real start is deferred exactly as above; the caller does not need to
+ * detect or clear the condition itself.
+ *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
@@ -138,6 +146,10 @@ alp_status_t alp_i2s_start(alp_i2s_t *i2s);
 
 /**
  * @brief Drain any in-flight frames and stop the clock.
+ *
+ * Recovers transparently from a TX underrun or RX overrun -- stopping a
+ * stream in that state still returns @ref ALP_OK and releases whatever
+ * was queued, instead of failing because the stream is not RUNNING.
  *
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
@@ -160,6 +172,12 @@ alp_status_t alp_i2s_stop(alp_i2s_t *i2s);
  * has NEVER left a block queued, so the caller's slab room is never
  * silently consumed by a stream that isn't playing. The next write
  * retries the deferred start again.
+ *
+ * A gap between writes long enough for the stream to underrun is
+ * recovered transparently: the write that follows the gap resumes
+ * playback instead of failing forever. The caller does not need to
+ * call @ref alp_i2s_stop / @ref alp_i2s_start to clear the condition
+ * first -- writing again is enough.
  *
  * @param[in] i2s         Handle from @ref alp_i2s_open with TX direction.
  * @param[in] block       Source PCM data.
