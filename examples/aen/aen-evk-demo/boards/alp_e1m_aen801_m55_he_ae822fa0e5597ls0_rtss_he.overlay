@@ -740,7 +740,7 @@
  *     (src/backends/audio/zephyr_drv.c), so channels 4/5 are unreachable
  *     through the portable surface this phase uses regardless of whether
  *     their pads are declared -- two mics is already enough to prove the
- *     loop closed. min-pdm-clk-freq/max-pdm-clk-freq below declare the fitted
+ *     loop closed. clk-frequency-min/clk-frequency-max below declare the fitted
  *     MP34DT05TR-A's 1.2-3.25 MHz spec (issue #2133 round 3, same citation as
  *     aen-pdm-mic-alif's overlay) -- this phase's SOUND_SAMPLE_RATE_HZ (16000,
  *     PDM mode 4, 1024 kHz) is BELOW that minimum, so with
@@ -859,8 +859,8 @@
 		bypass_iir_filter = <1>;
 		/* MP34DT05TR-A spec, mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ -- see the
 		 * file header. */
-		min-pdm-clk-freq = <1200000>;
-		max-pdm-clk-freq = <3250000>;
+		clk-frequency-min = <1200000>;
+		clk-frequency-max = <3250000>;
 		status = "okay";
 	};
 };

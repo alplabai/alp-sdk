@@ -36,19 +36,34 @@ properties:
       - 0
       - 1
 
-  min-pdm-clk-freq:
+  # clk-frequency-min/clk-frequency-max: the SAME property names Zephyr's own
+  # zephyr/dts/bindings/audio/pdm-dmic.yaml ("Digital microphone common
+  # configuration", landed 2ceda8506e7) uses for a mic's PDM clock range --
+  # reused here rather than inventing alif-local names (issue #2133 round 4a).
+  # Upstream models the mic as a SEPARATE CHILD node (compatible
+  # "zephyr,pdm-dmic", which `include: [pdm-dmic.yaml]`s and thereby makes
+  # clk-frequency-min/max/clk-duty-cycle-min/max/channel-left/right ALL
+  # required); this driver does NOT yet adopt that child-node model -- these
+  # two properties are applied directly to the CONTROLLER node instead, and
+  # stay optional here. `include: [pdm-dmic.yaml]` was checked and rejected:
+  # it would make the two duty-cycle properties required on every
+  # alif,alif-pdm node, which nothing here reads. Migrating to the real
+  # zephyr,pdm-dmic child-node model is a follow-up, not this round.
+  clk-frequency-min:
     type: int
     description: |
       Minimum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
       accept. Board-level fact, not a SoC/driver one -- e.g. the E1M-EVK's
       MP34DT05TR-A mics need >= 1.2 MHz (ST's in-tree mpxxdtyy.h:
       MPXXDTYY_MIN_PDM_FREQ). Optional: when unset, dmic_alif_pdm_configure()
-      only enforces the caller's dmic_cfg.io window (issue #2133).
+      only enforces the caller's dmic_cfg.io window (issue #2133). If both
+      clk-frequency-min and clk-frequency-max are set, min must not exceed
+      max -- PDM_INIT's BUILD_ASSERT catches an inverted range at build time.
 
-  max-pdm-clk-freq:
+  clk-frequency-max:
     type: int
     description: |
       Maximum PDM bit-clock frequency (Hz) the mic(s) wired to this instance
-      accept -- see min-pdm-clk-freq. E1M-EVK MP34DT05TR-A: <= 3.25 MHz
+      accept -- see clk-frequency-min. E1M-EVK MP34DT05TR-A: <= 3.25 MHz
       (mpxxdtyy.h: MPXXDTYY_MAX_PDM_FREQ). Optional, same fallback as
-      min-pdm-clk-freq.
+      clk-frequency-min.

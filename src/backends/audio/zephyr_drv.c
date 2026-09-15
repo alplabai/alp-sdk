@@ -264,8 +264,8 @@ static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
         /* Generic PDM bit-clock window -- this PORTABLE backend names no mic
          * part number, so it declares no mic-specific range here. A real
          * mic's clock limits are a BOARD fact and belong in the SoM/carrier
-         * devicetree instead (alif,alif-pdm.yaml's min-pdm-clk-freq/
-         * max-pdm-clk-freq, issue #2133 round 3); dmic_alif_pdm_configure()
+         * devicetree instead (alif,alif-pdm.yaml's clk-frequency-min/
+         * clk-frequency-max, issue #2133 round 3); dmic_alif_pdm_configure()
          * enforces the intersection of this window and that DT range. */
         .io =
             {

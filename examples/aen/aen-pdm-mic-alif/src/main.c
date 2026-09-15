@@ -13,7 +13,7 @@
  * contract itself: it decodes dmic_build_channel_map()'s nibble encoding into
  * the hardware channel-enable bits, validates the requested pcm_rate against
  * a HWRM/DFP-grounded PDM_MODE table AND the board's mic clock range (the
- * board overlay's min-pdm-clk-freq/max-pdm-clk-freq -- a board fact, not
+ * board overlay's clk-frequency-min/clk-frequency-max -- a board fact, not
  * something this app or the driver invents), and dmic_trigger(START) primes
  * the per-channel FIR/gain defaults and selects the real clock mode. No
  * app-side pdm_mode() / pdm_channel_config() calls are needed.
@@ -144,7 +144,7 @@ int main(void)
 	 * translates this into the hardware channel-enable bits (0,1,4,5). */
 	struct dmic_cfg cfg = {
 		/* Generic PDM bit-clock window -- the board overlay's
-		 * min-pdm-clk-freq/max-pdm-clk-freq (the fitted MP34DT05TR-A's
+		 * clk-frequency-min/clk-frequency-max (the fitted MP34DT05TR-A's
 		 * real spec) is what actually constrains the driver's mode
 		 * choice (issue #2133 round 3); this io window just needs to
 		 * be wide enough to admit every mode this app might request. */

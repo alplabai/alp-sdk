@@ -184,13 +184,14 @@ struct pdm_config {
 	const struct pinctrl_dev_config *pcfg;
 	const struct device *clk_dev;
 	clock_control_subsys_t clkid;
-	/* Board-level mic PDM clock range (issue #2133 round 3) -- e.g. the
+	/* Board-level mic PDM clock range (issue #2133 round 3), DT property
+	 * names matching Zephyr's own pdm-dmic.yaml (round 4a) -- e.g. the
 	 * E1M-EVK's MP34DT05TR-A mics need 1.2-3.25 MHz. 0 / UINT32_MAX
 	 * (unset in DT) mean "no board constraint here"; configure() only
 	 * enforces the caller's dmic_cfg.io window in that case.
 	 */
-	uint32_t min_pdm_clk_freq;
-	uint32_t max_pdm_clk_freq;
+	uint32_t clk_frequency_min;
+	uint32_t clk_frequency_max;
 };
 
 /* pcm_rate -> PDM clock-mode table (issue #2133). Each entry's PDM bit-clock
@@ -251,8 +252,16 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * IN SPEC for the EVK's MP34DT05TR-A mics (1.2-3.25 MHz) and the
 	 * mode this example now defaults to. Same direct FIR-reuse argument
 	 * as mode 4 (sdk-alif tests/drivers/pdm/src/alif_test_pdm.c:34-100
-	 * FIR tables, :245-282 mode select, no FIR switch across modes
-	 * 1-9) -- not yet itself bench-verified (issue #2133 round 3).
+	 * FIR tables, :245-282 mode select, no FIR switch across modes 1-9).
+	 * SILICON RESULT (issue #2133 round 4a, e1m-aen-evk-03): the mode IS
+	 * programmed and HELD correctly -- PDM_CONFIG_REGISTER read back
+	 * 0x00070033 throughout capture, 38400-byte blocks (4800 frames x 4
+	 * ch x 2 B) arrived as configured -- but the MEASURED delivery rate
+	 * was ~32 kHz (two runs), not 48 kHz; per-channel rms_ac 6-7 /
+	 * peak_to_peak 1011-1126 (sparse spikes). Root cause (ISR throughput/
+	 * frame drops vs clock/decimation vs block assembly) is under
+	 * separate investigation -- do NOT assume this entry delivers 48 kHz
+	 * PCM yet; only that mode 7 itself is correctly selected.
 	 */
 	{ 48000U, PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ, 3072000U },
 };
@@ -284,6 +293,31 @@ static void pdm_ctl0_write_spacer(const struct device *dev)
 	for (int i = 0; i < 4; i++) {
 		(void)sys_read32(reg_base + PDM_FIFO_STATUS_REGISTER);
 	}
+}
+
+/* Force PDM_CONFIG_REGISTER's channel-enable AND clock-mode fields to their
+ * inert state (no channels enabled, MICROPHONE_SLEEP) -- issue #2133 round
+ * 4a. Silicon observation on e1m-aen-evk-03: PDM_CONFIG_REGISTER read back
+ * 0x00010033 (mode 1, channels 0/1/4/5) left over from a PREVIOUS image,
+ * survived the `loadbin` reset, and was STILL set after a refused
+ * dmic_configure() in the NEXT image -- pdm_initialize() only ever wrote
+ * PDM_CTL_REGISTER/PDM_THRESHOLD_REGISTER, never touching
+ * PDM_CONFIG_REGISTER, so a fresh image silently inherited whatever clock
+ * mode + channels the last one left running and kept clocking the mics for
+ * the life of the image even though the app never started a capture.
+ * Called from pdm_initialize() before anything else touches the block, and
+ * from every -EINVAL return path in dmic_alif_pdm_configure().
+ */
+static void pdm_force_sleep(const struct device *dev)
+{
+	uintptr_t reg_base = DEVICE_MMIO_GET(dev);
+	uint32_t reg_val;
+
+	pdm_ctl0_write_spacer(dev);
+	reg_val = sys_read32(reg_base + PDM_CONFIG_REGISTER);
+	reg_val &= ~(uint32_t)PDM_CHANNEL_ENABLE;
+	reg_val &= ~PDM_CLK_MODE_MASK;
+	sys_write32(reg_val, reg_base + PDM_CONFIG_REGISTER);
 }
 
 /* Per-channel FIR decimation-filter coefficients for STANDARD_VOICE_512 --
@@ -341,7 +375,8 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 
 	if (config->channel.req_num_chan == 0 || config->channel.req_num_chan > MAX_NUM_CHANNELS) {
 		LOG_DBG("config invalid: number of channels not valid\n");
-		return -EINVAL;
+		rc = -EINVAL;
+		goto invalid;
 	}
 
 	/* A zero block_size would make the IRQ-burst rollover split loop
@@ -350,7 +385,8 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	 */
 	if (config->streams[0].block_size == 0) {
 		LOG_DBG("config invalid: block size must be non-zero\n");
-		return -EINVAL;
+		rc = -EINVAL;
+		goto invalid;
 	}
 
 	/* Decode the STANDARD Zephyr channel-map encoding (issue #2133)
@@ -364,7 +400,7 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 					 config->channel.req_num_chan, &hw_chan_mask);
 	if (rc != 0) {
 		LOG_DBG("config invalid: channel map not expressible in hardware\n");
-		return rc;
+		goto invalid;
 	}
 
 	/* Reject a pcm_rate with no bench/vendor-grounded clock mode rather
@@ -374,34 +410,40 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	if (rc != 0) {
 		LOG_DBG("config invalid: no PDM clock mode for pcm_rate=%u\n",
 			config->streams[0].pcm_rate);
-		return rc;
+		goto invalid;
 	}
 
 	/* Reject a mode whose PDM bit clock falls outside the INTERSECTION of
 	 * the caller's declared io window (config->io, previously read by
 	 * nothing -- issue #2133 round 2) and the board's mic clock range,
-	 * if the devicetree node declares one (min-pdm-clk-freq/
-	 * max-pdm-clk-freq, alif,alif-pdm.yaml -- round 3). A mic's clock
-	 * spec is a BOARD fact, not something the caller or this driver
-	 * should know -- e.g. the E1M-EVK's MP34DT05TR-A needs 1.2-3.25 MHz
-	 * (mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ), well above the 512 kHz/
-	 * 1024 kHz modes this driver otherwise supports. 0 / UINT32_MAX mean
-	 * "DT declares no board constraint" -- the intersection then
-	 * collapses to config->io alone.
+	 * if the devicetree node declares one (clk-frequency-min/
+	 * clk-frequency-max, alif,alif-pdm.yaml -- round 3, renamed to
+	 * Zephyr's own pdm-dmic.yaml property names in round 4a). A mic's
+	 * clock spec is a BOARD fact, not something the caller or this
+	 * driver should know -- e.g. the E1M-EVK's MP34DT05TR-A needs
+	 * 1.2-3.25 MHz (mpxxdtyy.h MPXXDTYY_MIN/MAX_PDM_FREQ), well above the
+	 * 512 kHz/1024 kHz modes this driver otherwise supports. 0 /
+	 * UINT32_MAX mean "DT declares no board constraint" -- the
+	 * intersection then collapses to config->io alone. An INVERTED DT
+	 * range (min > max) is a build-time error -- see PDM_INIT's
+	 * BUILD_ASSERT -- so eff_min <= eff_max is guaranteed here whenever
+	 * both DT bounds are set.
 	 */
 	{
-		uint32_t eff_min = MAX(cfg->min_pdm_clk_freq, config->io.min_pdm_clk_freq);
-		uint32_t eff_max = MIN(cfg->max_pdm_clk_freq, config->io.max_pdm_clk_freq);
+		uint32_t eff_min = MAX(cfg->clk_frequency_min, config->io.min_pdm_clk_freq);
+		uint32_t eff_max = MIN(cfg->clk_frequency_max, config->io.max_pdm_clk_freq);
 
 		if (pdm_clk_hz < eff_min) {
 			LOG_DBG("config invalid: mode clock %u Hz below mic minimum %u Hz\n",
 				pdm_clk_hz, eff_min);
-			return -EINVAL;
+			rc = -EINVAL;
+			goto invalid;
 		}
 		if (pdm_clk_hz > eff_max) {
 			LOG_DBG("config invalid: mode clock %u Hz above mic maximum %u Hz\n",
 				pdm_clk_hz, eff_max);
-			return -EINVAL;
+			rc = -EINVAL;
+			goto invalid;
 		}
 	}
 
@@ -454,6 +496,14 @@ static int dmic_alif_pdm_configure(const struct device *dev, struct dmic_cfg *co
 	LOG_DBG("DMIC configure okay\n");
 
 	return 0;
+
+invalid:
+	/* A REFUSED configure() must not leave the block sampling under
+	 * whatever channels/mode a PRIOR successful configure()+trigger()
+	 * left running (issue #2133 round 4a) -- the app has no reason to
+	 * expect an errored call left hardware state behind. */
+	pdm_force_sleep(dev);
+	return rc;
 }
 
 /**
@@ -1067,6 +1117,14 @@ static int pdm_initialize(const struct device *dev)
 		return ret;
 	}
 
+	/* Force the block to MICROPHONE_SLEEP with no channels enabled
+	 * BEFORE anything else here touches PDM_CONFIG_REGISTER (issue #2133
+	 * round 4a) -- see pdm_force_sleep()'s comment for the silicon
+	 * observation this fixes: a fresh image otherwise inherits whatever
+	 * clock mode + channels the PREVIOUS image left running, surviving
+	 * even a `loadbin` reset. */
+	pdm_force_sleep(dev);
+
 	cfg->irq_config();
 
 	k_msgq_init(&pdata->buf_queue, (char *)pdata->queue_data, sizeof(void *), MAX_QUEUE_LEN);
@@ -1133,6 +1191,21 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 
 #define PDM_INIT(n) \
 	PINCTRL_DT_INST_DEFINE(n); \
+	/* A DT overlay that sets BOTH clk-frequency-min and clk-frequency-max \
+	 * with an INVERTED range (min > max) would make dmic_alif_pdm_configure() \
+	 * reject every mode with an opaque per-attempt "below mic minimum"/ \
+	 * "above mic maximum" message and never explain why -- fail loudly at \
+	 * BUILD time instead (issue #2133 round 4a). Skipped when either \
+	 * property is absent: an absent bound isn't a user-declared range to \
+	 * invert (pdm_force_sleep()/DT_INST_PROP_OR below still default it to \
+	 * 0/UINT32_MAX). \
+	 */ \
+	BUILD_ASSERT(!(DT_INST_NODE_HAS_PROP(n, clk_frequency_min) && \
+		       DT_INST_NODE_HAS_PROP(n, clk_frequency_max)) || \
+			 (DT_INST_PROP_OR(n, clk_frequency_min, 0) <= \
+			  DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX)), \
+		     "alif,alif-pdm: clk-frequency-min must not exceed " \
+		     "clk-frequency-max (the DT range is inverted)"); \
 	static void            pdm_irq_config_##n(void); \
 	static struct pdm_data dmic_alif_pdm_data_##n = { \
 		.bypass_iir_filter = DT_INST_PROP(n, bypass_iir_filter), \
@@ -1146,8 +1219,8 @@ static int pdm_pm_action(const struct device *dev, enum pm_device_action action)
 		.pcfg              = PINCTRL_DT_INST_DEV_CONFIG_GET(n), \
 		.clk_dev           = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(n)), \
 		.clkid             = (clock_control_subsys_t)DT_INST_CLOCKS_CELL(n, clkid), \
-		.min_pdm_clk_freq  = DT_INST_PROP_OR(n, min_pdm_clk_freq, 0), \
-		.max_pdm_clk_freq  = DT_INST_PROP_OR(n, max_pdm_clk_freq, UINT32_MAX), \
+		.clk_frequency_min = DT_INST_PROP_OR(n, clk_frequency_min, 0), \
+		.clk_frequency_max = DT_INST_PROP_OR(n, clk_frequency_max, UINT32_MAX), \
 	}; \
 	static void pdm_irq_config_##n(void) \
 	{ \
