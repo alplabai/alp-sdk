@@ -4684,4 +4684,138 @@ ZTEST(cc3501e_host_driver, test_socket_handle_epoch_2126)
 	              "a handle minted after the recovery works normally, not refused");
 }
 
+/* #2126 review (MAJOR: the concurrency fix was not mutation-proven). A
+ * mutant that never clears ctx->recovering on cc3501e_recover()'s FINAL exit
+ * left the whole suite green: every LATER recovery answered ALP_ERR_BUSY
+ * forever, and no test ever ran a second one. Two back-to-back recoveries
+ * here pin that -- the second must pulse nRESET again, not lose the CAS to
+ * the first one's leftover flag. */
+ZTEST(cc3501e_host_driver, test_recover_twice_each_pulses_reset_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	g_reset_release_count = 0u;
+
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "first manual recovery");
+	zassert_false(fw.recovering, "the CAS flag must be clear once a recovery has committed");
+	zassert_equal(g_reset_release_count, 1u, "first recovery pulsed nRESET once");
+
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "a second recovery must not lose the CAS");
+	zassert_false(fw.recovering, "and must leave the flag clear again");
+	zassert_equal(g_reset_release_count, 2u, "the second recovery pulsed nRESET too");
+	zassert_equal(fw.recover_count, 2u, "both recoveries counted");
+}
+
+/* #2126 review (MAJOR, same gap, other exit): a mutant that skips the
+ * ctx->recovering clear on the lock-acquire failure path also left the suite
+ * green. Hold the lock by hand -- the same state a genuinely concurrent
+ * request leaves -- and require the flag clear after the refusal, or the very
+ * next recovery attempt is rejected by a flag nobody owns. */
+ZTEST(cc3501e_host_driver, test_recover_lock_busy_still_clears_cas_flag_2126)
+{
+	fw.reset_pin          = FAKE_RESET_PIN;
+	fw.enable_pin         = FAKE_ENABLE_PIN;
+	g_reset_release_count = 0u;
+	fw.request_lock       = true; /* somebody else owns the wire */
+
+	alp_status_t s  = cc3501e_recover(&fw);
+	fw.request_lock = false;
+
+	zassert_not_equal(s, ALP_OK, "recovery cannot run while another caller holds the lock");
+	zassert_false(fw.recovering, "and must not leave the CAS flag stuck true");
+	zassert_equal(g_reset_release_count, 0u, "no nRESET pulse without the lock");
+
+	/* The flag really is free: a recovery straight afterwards runs. */
+	zassert_equal(cc3501e_recover(&fw), ALP_OK, "the next recovery attempt is not locked out");
+	zassert_equal(g_reset_release_count, 1u, "and it pulsed nRESET");
+}
+
+/* #2126 review (MAJOR: only cc3501e_sock_recv() was covered -- a mutant that
+ * dropped cc3501e_sock_send()'s own epoch check survived). Every socket op
+ * that takes a handle must refuse one minted before the last recovery. */
+ZTEST(cc3501e_host_driver, test_stale_handle_refused_by_every_socket_op_2126)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+
+	uint16_t stale = 0u;
+	zassert_equal(cc3501e_sock_open(&fw,
+	                                (uint8_t)ALP_CC3501E_SOCK_FAMILY_IPV4,
+	                                (uint8_t)ALP_CC3501E_SOCK_TYPE_STREAM,
+	                                0u,
+	                                &stale,
+	                                1000u),
+	              ALP_OK,
+	              "open a socket before the recovery");
+
+	g_all_io_down                = true;
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+	zassert_equal(fw.recover_count, 1u, "test setup: the recovery must have actually run");
+
+	const uint8_t ip[4]   = { 192u, 168u, 1u, 10u };
+	const uint8_t data[2] = { 0xAAu, 0xBBu };
+	size_t        sent    = 0u;
+
+	zassert_equal(cc3501e_sock_send(&fw, stale, data, sizeof(data), &sent, 100u),
+	              ALP_ERR_NOT_READY,
+	              "send must refuse a stale handle");
+	zassert_equal(cc3501e_sock_connect(&fw, stale, ip, 80u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "connect must refuse a stale handle");
+	zassert_equal(cc3501e_sock_bind(&fw, stale, ip, 80u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "bind must refuse a stale handle");
+	zassert_equal(cc3501e_sock_listen(&fw, stale, 4u, 100u),
+	              ALP_ERR_NOT_READY,
+	              "listen must refuse a stale handle");
+	zassert_equal(cc3501e_sock_close(&fw, stale, 100u),
+	              ALP_ERR_NOT_READY,
+	              "close must refuse a stale handle");
+
+	/* An accepted-socket event decoded at the CURRENT epoch hands back a
+	 * handle carrying that epoch -- the same bytes decoded at a stale one
+	 * would hand back a handle every op above refuses. */
+	uint8_t                         payload[sizeof(alp_cc3501e_sock_accepted_evt_t)] = { 0 };
+	alp_cc3501e_sock_accepted_evt_t ev                                               = { 0 };
+	payload[2]                                                                       = 0x02u;
+	zassert_equal(cc3501e_sock_accepted_decode(payload, sizeof(payload), fw.link_epoch, &ev),
+	              ALP_OK,
+	              "decode at the current epoch");
+	zassert_equal((uint8_t)(ev.handle >> 8),
+	              fw.link_epoch,
+	              "the decoded handle carries the epoch it was decoded at");
+}
+
+/* #2126 review (MINOR: cc3501e_set_recover_callback() had no test -- the
+ * callback was never shown to fire at all). */
+static uint32_t g_recover_cb_calls;
+static uint32_t g_recover_cb_last_count;
+
+static void test_recover_cb(cc3501e_t *ctx, uint32_t recover_count, void *user)
+{
+	ARG_UNUSED(ctx);
+	ARG_UNUSED(user);
+	g_recover_cb_calls++;
+	g_recover_cb_last_count = recover_count;
+}
+
+ZTEST(cc3501e_host_driver, test_recover_callback_fires_once_per_recovery_2126)
+{
+	fw.reset_pin            = FAKE_RESET_PIN;
+	fw.enable_pin           = FAKE_ENABLE_PIN;
+	g_recover_cb_calls      = 0u;
+	g_recover_cb_last_count = 0u;
+	cc3501e_set_recover_callback(&fw, test_recover_cb, NULL);
+
+	g_all_io_down                = true;
+	uint8_t mac[CC3501E_MAC_LEN] = { 0 };
+	(void)cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	cc3501e_set_recover_callback(&fw, NULL, NULL);
+	zassert_equal(fw.recover_count, 1u, "test setup: exactly one recovery ran");
+	zassert_equal(g_recover_cb_calls, 1u, "the registered callback fired exactly once");
+	zassert_equal(g_recover_cb_last_count, 1u, "and was handed the committed recover_count");
+}
+
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);
