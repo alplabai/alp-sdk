@@ -1,0 +1,27 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-adc-regcheck overlay for the E1M-AEN803 (Ensemble E8, M55-HP) RAM-run.
+ *
+ * ADC12_0 is a shared SoC peripheral reachable from either M55 cluster on
+ * this die; this overlay is otherwise identical to the M55-HE overlay in
+ * this same directory (same node, same RAM-run flash retarget) -- see it
+ * for the full rationale, not restated per-cluster here.
+ */
+
+/*
+ * RAM-run: the SoC `select` puts code in XIP; retarget ROM to ITCM so the image
+ * links + runs from RAM (J-Link loadbin+go, no reset). PATH-REFERENCE form
+ * (&itcm) -- the phandle-array form makes FLASH_SIZE=0 and overflows the link.
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&adc12_0 {
+	status = "okay";
+};

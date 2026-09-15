@@ -12,9 +12,31 @@
 | `E1M-AEN601`   | Alif Ensemble E6 (preliminary)         | preliminary|
 | `E1M-AEN701`   | Alif Ensemble E7                       | production |
 | `E1M-AEN801`   | Alif Ensemble E8 (preliminary)         | preliminary|
+| `E1M-AEN803`   | Alif Ensemble E8, dual external memory (preliminary) | preliminary|
 
 All AEN SKUs share the same module PCB.  Pick by Alif silicon
 tier (cores + NPU count + memory).
+
+`E1M-AEN803` is the same E1M-AEN-2626 PCB and E8 silicon
+(`AE822FA0E5597LS0`) as `E1M-AEN801` -- it is the BOM variant that
+fits both external OSPI0 memories: a 512 Mbit HyperRAM
+(`S80KS5122GABHM02`, CS0) and a 256 Mbit xSPI NOR (`IS25WX256-JHLE`,
+CS1). `E1M-AEN801` leaves both DNI and runs boot + app storage from
+the SoC's on-die MRAM only; see
+[`metadata/e1m_modules/E1M-AEN803.yaml`](../../metadata/e1m_modules/E1M-AEN803.yaml)
+for the full preset. Its Zephyr board tree
+(`zephyr/boards/alp/e1m_aen803_m55_hp/`, `.../e1m_aen803_m55_he/`) was
+generated under #2084; like `E1M-AEN801`, it still boots and stores
+from on-die MRAM only -- the two external OSPI0 parts are physically
+fitted but not yet wired into a boot or storage partition. The
+blocking gap is `flash_ospi_alif.c` having no OSPI0 pinctrl support at
+all (#2041, the operative blocker -- recheck when it closes); the
+driver also ships no `flash_driver_api` (#915). Bench evidence for the
+physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
+§0 reads the ISSI JEDEC ID off OSPI0 CS1 on the AEN803 bench module and
+says explicitly that result is silent on the HyperRAM's own behaviour
+-- the HyperRAM's fit is asserted in `E1M-AEN803.yaml`
+(`assembled: true`) but not itself bench-verified.
 
 ## What's on the module
 
@@ -33,8 +55,9 @@ tier (cores + NPU count + memory).
 the slave-only Alif LPI2C0 (#1848) -- and **bench-proven on 2626-R2
 silicon**. Full customer-facing writeup, including the limitations that
 will surprise you, in [On-module housekeeping I2C (BRD_I2C)](#on-module-housekeeping-i2c-brd_i2c)
-below. The other AEN SKUs still carry the pre-#1848 LPI2C0 assumption in
-their own preset files pending the same netlist evidence.
+below. #1848 disproved the LPI2C0 reading for the whole AEN family, not just
+E1M-AEN801, and no shipped preset carries it; the other SKUs still await
+their own per-part datasheet confirmation of the corrected mapping.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
 

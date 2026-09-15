@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """
 The ordering guard for #1365 split B -- P1's flash-class exclusion must hold
-EVEN IF `mram_main`'s `base: "TBD"` (metadata/e1m_modules/E1M-AEN801.yaml)
-were filled in tomorrow.  Split B deliberately does NOT fill that field (a
-separate, later step); this test proves the field staying `"TBD"` is not
-secretly load-bearing for safety.
+once `mram_main`'s `base` resolves to a real address
+(metadata/e1m_modules/E1M-AEN801.yaml). Split B deliberately did NOT
+resolve that field itself (a separate, later step -- #2053 did it); this
+test proves the field resolving is not secretly load-bearing for safety.
+Written before #2053 landed, when the field was still the `"TBD"`
+sentinel and this test synthetically pre-resolved it in-memory to prove
+the guard ahead of time; #2053 has since resolved it for real on every
+AEN preset, so this now exercises the committed state directly rather
+than a hypothetical.
 
 Also covers two gaps a #1365 split B review found in
 `_region_ipc_eligibility()` (`scripts/alp_orchestrate/carveout.py`):
@@ -34,14 +39,21 @@ all -- `scripts/alp_orchestrate/carveout.py` pre-split-B read
 `if region.get("carveout") is False`, so an absent key meant ELIGIBLE.  The
 allocator is top-down and seeds `region_top` from `base + size` alone with
 no knowledge that mcuboot/he_slot0/hp_slot0/reserved/storage/atoc tile the
-same window.  Today the ONLY thing keeping an `a32_cluster` IPC entry out of
-the live `atoc` band (0x80578000..0x80580000) is `mram_main`'s unresolved
-`base: "TBD"`.
+same window.  Before split B landed, the ONLY thing keeping an
+`a32_cluster` IPC entry out of the live `atoc` band
+(0x80578000..0x80580000) was `mram_main`'s unresolved `base: "TBD"` --
+split B's flash-class exclusion is what keeps it out now that `base` is
+resolved (#2053): once its extent equals the App MRAM aperture exactly
+(the whole-device alias), `classify_region()` calls it `flash` outright,
+independent of `base` staying unresolved.
 
-This test synthetically resolves that `base` (0x80000000, matching the
-declared aperture floor -- `metadata/socs/alif/ensemble/e8.json`'s
-`soc_flash_base`) in an in-memory copy of the loaded project, WITHOUT
-touching the tracked YAML, and asserts the `ipc:` entry still blocks --
+This test resolves that `base` (0x80000000, matching the declared
+aperture floor -- `metadata/socs/alif/ensemble/e8.json`'s
+`soc_flash_base`) in an in-memory copy of the loaded project -- since
+#2053 this matches the tracked YAML already, so the in-memory copy is
+now redundant with the committed state rather than a synthetic what-if,
+kept for direct regression value if a future metadata change
+un-resolves it again -- and asserts the `ipc:` entry still blocks --
 naming the DERIVED flash class, not an address inside `atoc`.  A green run
 here that predates #1365 split B's `_region_ipc_eligibility()` would go RED
 (this is exactly what `resolve_carve_outs()` used to do: place the entry at
@@ -82,8 +94,11 @@ def _with_mram_main_resolved(project):
     """Return `project` with an in-memory-only `mram_main.base` fill-in.
 
     Deep-copies `som_preset` first so this never mutates the tracked
-    `metadata/e1m_modules/E1M-AEN801.yaml` -- split B leaves that file's
-    `base: "TBD"` untouched; this is purely a synthetic what-if.
+    `metadata/e1m_modules/E1M-AEN801.yaml`. Written when that file still
+    carried `base: "TBD"`, to prove split B's exclusion ahead of the
+    resolution; #2053 has since resolved it for real, so the fill-in
+    below is now a no-op against the committed value (still asserted, as
+    a fixture-drift guard) rather than a synthetic what-if.
     """
     project.som_preset = copy.deepcopy(project.som_preset)
     found = False
@@ -397,10 +412,35 @@ class TestUnresolvedLegOrdering:
     """#2010: the `cls == "unresolved"` tail of `_region_ipc_eligibility()`
     (this region's OWN `base` doesn't resolve) had zero direct coverage of
     its own precedence and terminal cases -- every existing end-to-end test
-    that reaches this tail (`mram_main`) carries `write_authority: composite`
-    and no `carveout:` key at all, so it only ever exercises the "neither
-    field customer_runtime" refusal, never the ordering between the two
-    fields or the true no-authored-flag terminal case."""
+    that USED TO reach this tail (`mram_main`, pre-#2053, `write_authority:
+    composite` and no `carveout:` key at all) only ever exercised the
+    "write_authority present but not customer_runtime" refusal, never the
+    ordering between `carveout:` and `write_authority`, nor the true
+    no-authored-flag terminal case. #2053 resolved `mram_main.base` on
+    every AEN preset, so no shipped preset reaches this tail at all any
+    more -- all three cases below (the ordering, the wrong-value refusal
+    `mram_main` used to provide, and the neither-authored terminal) are
+    now direct-call pins rather than partially end-to-end."""
+
+    def test_unresolved_base_with_write_authority_not_customer_runtime_refuses(
+            self):
+        """The leg `E1M-AEN{301,...,803}.yaml`'s `mram_main` used to
+        exercise end-to-end before #2053 resolved its `base`:
+        `write_authority` authored to something other than
+        `customer_runtime` (its real value, `composite`), no `carveout:`
+        key -- the region must still refuse, naming the authored value
+        and what it needed to be. No shipped preset reaches this tail
+        any more (#2053), so this is now a direct-call pin."""
+        eligible, reason = _region_ipc_eligibility(
+            {"base": "TBD", "write_authority": "composite"},
+            (0x80000000, 0x80580000),
+            True)
+        assert eligible is False, (
+            "an unresolved-base region with write_authority: composite "
+            "became IPC-eligible -- the write_authority refusal on the "
+            "unresolved tail is broken")
+        assert "composite" in reason
+        assert "customer_runtime" in reason
 
     def test_unresolved_base_honours_carveout_false_over_customer_runtime(self):
         """C6 (#1365 split B review, MAJOR 2): `carveout:` must be checked

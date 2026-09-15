@@ -28,6 +28,15 @@ project(alp_sdk_chips_test LANGUAGES C)
 # sound_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
 # Phase 11 sound-out/PDM-in energy-correlation verdict, pulled out for the
 # same reason (#2037) so test_sound_verdict.c can exercise it here.
+#
+# ioexp_verdict.h (examples/aen/aen-evk-demo/src/) is the same example's
+# Phase 4 I/O-expander polarity round-trip verdict, pulled out for the
+# same reason (#2098 review follow-up) so test_ioexp_verdict.c can
+# exercise it here.
+#
+# amp_fault_verdict.h (examples/aen/aen-evk-demo/src/) is the same
+# example's Phase 11 AMP_FAULT raw-pin mapping, pulled out for the same
+# reason (#2097 review follow-up) so test_audio.c can exercise it here.
 target_include_directories(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/da9292
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../chips/bme280
@@ -50,6 +59,7 @@ target_sources(app PRIVATE
     src/test_security.c
     src/test_sensors.c
     src/test_sound_verdict.c
+    src/test_ioexp_verdict.c
 )
 
 # Fake i2c-emul fixtures (fake_lsm6dso / fake_ssd1306 / fake_bme280)

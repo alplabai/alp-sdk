@@ -92,7 +92,13 @@
  * and answers BUSY until it finishes; the host re-issues until OK/timeout). */
 #define CC3501E_MAC_TIMEOUT_MS  2000u
 #define CC3501E_SCAN_TIMEOUT_MS 8000u
-#define CC3501E_CONN_TIMEOUT_MS 15000u
+/* The bridge firmware's own worst case for one STA connect is 10 s
+ * Wlan_RoleUp + 30 s L2 association + 30 s DHCP-lease poll
+ * (cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c) = 70 s. A shorter
+ * budget races that bound: the bounded-retry loop below re-issues
+ * WIFI_CONNECT_STA on timeout, and a retry fired before the bridge's own
+ * connect actually finishes lands on top of it. */
+#define CC3501E_CONN_TIMEOUT_MS 75000u
 
 /* Max scan records to collect into the witness-backed array. */
 #define CC3501E_SCAN_MAX_RECORDS 16u

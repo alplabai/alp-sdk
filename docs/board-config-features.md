@@ -304,9 +304,13 @@ carve-out there. A region the loader DERIVED (SoC-level
 row) needs no authority at all: it is RAM by construction. The legacy
 `carveout:` flag is honoured VERBATIM only where the derivation can't
 resolve an answer -- no aperture declared for this SoC (every non-Alif
-SoM), or the region's own `base:` is unresolved (`mram_main`'s `"TBD"`,
-unchanged by split B) -- which is also what keeps every non-Alif SoM's
-resolution byte-identical to before this change. In that fallback,
+SoM), or the region's own `base:` is unresolved (a `"TBD"` placeholder;
+every AEN preset's `mram_main` used to be the standing example until
+#2053 resolved it, so this fallback has no shipped-preset producer today
+-- see `tests/scripts/test_orchestrate_carveout_aperture_ordering.py`'s
+`TestUnresolvedLegOrdering` for its direct-call coverage) -- which is
+also what keeps every non-Alif SoM's resolution byte-identical to before
+this change. In that fallback,
 `carveout:` decides BEFORE `write_authority:`: when a region's `base:`
 is unresolved and the preset authors both fields, `carveout:` wins (the
 conservative, pre-split-B signal), and `write_authority:` is consulted
@@ -319,6 +323,44 @@ that DISAGREES with a resolvable derived class -- `flash`, `ram`, or an
 bug, refused loudly and naming both facts, not a silently-honoured
 override.
 
+**#2088: `write_authority:` is also enforced, not just derived-from, at
+the `flash_device:` resolution step.** `_resolve_flash_device()`
+(`scripts/alp_orchestrate/partition.py`) refuses a `memory_map:` region
+whose authored `write_authority` is anything other than
+`customer_runtime` or `composite` -- `customer_image`/`vendor_image`/
+`secure_enclave`/`none` name a region something else owns writes to, and
+naming one directly as `flash_device:` is refused with the region, the
+value, and the remedy. An ABSENT `write_authority` on an authored region
+is refused too, but only where an on-die MRAM aperture resolves for the
+SoM (every Alif SoC/variant that declares `soc_flash_base:`) -- mirrors
+`carveout.py`'s own `_region_ipc_eligibility()` gate, which enforces the
+identical rule the same way; a no-op on every non-Alif SoM (V2N/V2M/
+NX9101), none of which author `write_authority` on a derived region in
+the first place. `composite` -- the tag a whole-device alias like
+`mram_main` carries, meaning "consult the contained rows instead" -- is
+not an unconditional pass either: every OTHER `memory_map:` row that
+resolves to an address CONTAINED in the alias's own window must declare
+its own `write_authority`, and together the contained rows must
+CONTIGUOUSLY tile the alias's capacity -- no gap, no overlap -- before
+the alias is accepted; summing sizes is not enough, since an overlap of
+N bytes plus a hole of N bytes sums correctly while the hole itself
+stays unprotected. A resolved row that can't be attributed (a gap none
+of the contained rows cover, or two rows overlapping) refuses the whole
+alias rather than let a `storage:` entry land unprotected in whatever
+band the metadata didn't account for (potentially the
+Secure-Enclave-owned `atoc` window). A row whose base or size DOESN'T
+resolve at all (`atoc`'s `base: "TBD"` before a SoM is HW-mapped is
+exactly this shape) is not immediately fatal on its own: only rows that
+DO resolve are walked for the contiguity check, and an unresolved row
+is named as a candidate ONLY when a gap remains for it to plausibly
+explain. A row whose resolved extent lies OUTSIDE the alias's window is
+not the alias's business and is ignored, so an unrelated device sharing
+the same `memory_map:` list does not block it -- but if that unrelated
+row also confuses `_reserved_spans()`'s own (separate, older) window
+derivation into degrading to zero reserved spans, the alias is refused
+on that basis too: contained rows that verify safe are worthless if
+placement can't actually reserve them.
+
 No AEN SKU has a working `storage[].flash_device:` target today. Neither
 candidate the resolver will accept resolves to a verified DT label:
 
@@ -329,7 +371,7 @@ candidate the resolver will accept resolves to a verified DT label:
   now refuses to emit `status: ok` for an entry on an unverified
   `memory_map:` device -- a `storage:` entry targeting `mram_main` blocks
   with a reason naming the unverified label, not just a fabricated
-  `dt_label`. (`mram_main` is ALSO 100% tiled on all six AEN presets --
+  `dt_label`. (`mram_main` is ALSO 100% tiled on all seven AEN presets --
   `mcuboot` + `he_slot0` + `hp_slot0` + `reserved` + `storage` + `atoc`,
   all `carveout: false`, summing to exactly its own 5632 KiB capacity --
   so on a real preset an entry there blocks on capacity first; the

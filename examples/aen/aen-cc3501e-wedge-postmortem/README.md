@@ -57,19 +57,20 @@ a silent mechanism 2.
 **PHASE B — wedge it.** Issues `WIFI_CONNECT_STA` with whatever credentials
 are configured. The connect is **expected to fail** — that is the point,
 not a bug to chase. This app never *widens* the connect timeout hunting for
-a pass, but it does deliberately **shrink** it (2 s, not the ~55 s every
+a pass, but it does deliberately **shrink** it (2 s, not the ~75 s every
 sibling app uses) — see `WEDGEPM_CONNECT_TIMEOUT_MS`'s own comment: the
 goal is to stop `cc3501e_wifi_connect()`'s own 50 ms `WIFI_STATUS` poll
 loop re-framing the link while the firmware works, not to observe the link
 early.
 
 A short connect budget alone is not enough, though: the firmware's own
-connect body keeps holding the host off for up to 30 s of association plus
-10 s of DHCP regardless of what this app's own timeout returns. So once
+connect body keeps holding the host off for up to 10 s of role-up plus 30 s
+of association plus 30 s of DHCP regardless of what this app's own timeout
+returns. So once
 the connect call returns, PHASE B goes **silent** — no requests issued at
-all — for `WEDGEPM_QUIET_WAIT_MS` (55 s, derived exactly like the sibling
-apps' own 55 s connect budget: the firmware's documented 40 s worst case
-plus the same 15 s reinitialisation margin), then issues **exactly one**
+all — for `WEDGEPM_QUIET_WAIT_MS` (75 s, derived exactly like the sibling
+apps' own 75 s connect budget: the firmware's documented 70 s worst case
+plus a reinitialisation margin), then issues **exactly one**
 confirming `PING`. The short budget and the long silent wait are **not in
 tension** — the budget stops this app's own driver code from re-framing
 the link; the silent wait then lets that identical span of time pass with
@@ -245,14 +246,14 @@ an **ESTIMATE** derived from fixed constants, not a bench measurement.
 
 - No credentials configured: PHASE A only, well under 15 seconds.
 - Credentials configured, wedge **not** reproduced: PHASE A, plus PHASE B's
-  `WEDGEPM_QUIET_WAIT_MS` silent wait (55 s) and its single confirming
+  `WEDGEPM_QUIET_WAIT_MS` silent wait (75 s) and its single confirming
   `PING`, then `=== WEDGE NOT REPRODUCED ===` and stop — roughly
-  **65–80 seconds** total.
+  **85–100 seconds** total.
 - Credentials configured, wedge **does** reproduce: the above, plus PHASE
   C's own recovery ladder — up to four more `cc3501e_hard_reset()` calls at
   ~3.5 s of blind boot settle each, the 2 s `WEDGEPM_POWER_OFF_HOLD_MS`
   hold, and, when neither recovery attempt revives the link, two exhausted
-  5 s `PING`-retry loops — roughly **90–130 seconds** total through the
+  5 s `PING`-retry loops — roughly **110–150 seconds** total through the
   `VERDICT` line.
 
 **This estimate can stretch further — do not use elapsed time alone to

@@ -3024,7 +3024,7 @@
           "kind": "fnptr"
         },
         "cc3501e_t": {
-          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
+          "definition": "typedef struct cc3501e { bool initialised; uint8_t fw_proto_major; uint8_t fw_proto_minor; alp_spi_t *bus; alp_gpio_t *enable_pin; alp_gpio_t *reset_pin; alp_gpio_t *ready_pin; struct { cc3501e_event_cb_t cb; void *user; } event_subs[CC3501E_EVENT_SUBSCRIBERS]; uint8_t rx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t tx_scratch[ALP_CC3501E_HEADER_BYTES + ALP_CC3501E_MAX_PAYLOAD]; uint8_t wifi_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t ble_scan_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t evt_buf[ALP_CC3501E_MAX_PAYLOAD]; uint8_t sock_buf[ALP_CC3501E_MAX_PAYLOAD]; bool wifi_scan_busy; bool ble_scan_busy; bool evt_busy; bool sock_busy; uint8_t sock_send_seq; uint8_t req_seq; uint8_t sock_recv_seq; uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]; uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]; bool spi1_busy; bool spi1_configured; uint8_t spi1_seq; bool request_lock; } cc3501e_t;",
           "fields": [
             "bool initialised",
             "uint8_t fw_proto_major",
@@ -3046,6 +3046,7 @@
             "bool sock_busy",
             "uint8_t sock_send_seq",
             "uint8_t req_seq",
+            "uint8_t sock_recv_seq",
             "uint8_t spi1_tx_buf[sizeof(alp_cc3501e_spi1_transfer_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "uint8_t spi1_rx_buf[sizeof(alp_cc3501e_spi1_transfer_resp_t) + ALP_CC3501E_SPI1_MAX_XFER]",
             "bool spi1_busy",
@@ -3053,7 +3054,7 @@
             "uint8_t spi1_seq",
             "bool request_lock"
           ],
-          "hash": "238bbec0055d4541",
+          "hash": "822bd1c0583932f9",
           "kind": "struct"
         }
       },
@@ -3326,6 +3327,10 @@
         "cc3501e_wifi_status": {
           "hash": "2a5d4b86bb0e805c",
           "signature": "alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
+        },
+        "cc3501e_wifi_status_once": {
+          "hash": "12f14a4f28afda65",
+          "signature": "alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);"
         }
       },
       "macros": {
@@ -3966,10 +3971,6 @@
           "hash": "31d33160e0148fa7",
           "value": "4u"
         },
-        "GD32_SWD_EXPECTED_IDCODE": {
-          "hash": "a6d11bb50f7ee27d",
-          "value": "0x6BA02477u"
-        },
         "GD32_SWD_FMC_FLASH_BASE": {
           "hash": "37487daca310bd65",
           "value": "0x08000000u"
@@ -3981,6 +3982,10 @@
         "GD32_SWD_FMC_SRAM_BASE": {
           "hash": "7fc23683f5251981",
           "value": "0x20000000u"
+        },
+        "GD32_SWD_GENERIC_CM33_R0P1_IDCODE": {
+          "hash": "6fd21d0cd37c6730",
+          "value": "0x6BA02477u"
         },
         "GD32_SWD_MAX_WAIT_RETRIES": {
           "hash": "56e35d5e27b7f2ad",
@@ -7677,6 +7682,10 @@
         "TAS2563_I2C_ADDR_VDD_PULL": {
           "hash": "a456a298adafb48b",
           "value": "0x4Eu"
+        },
+        "TAS2563_RESET_SETTLE_US": {
+          "hash": "1f6673afe76038a7",
+          "value": "200u"
         }
       },
       "typedefs": {
@@ -12878,14 +12887,14 @@
           "kind": "enum"
         },
         "alp_cc3501e_wifi_status_t": {
-          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t reserved; } alp_cc3501e_wifi_status_t;",
+          "definition": "typedef struct { uint8_t state; uint8_t fail_reason; int8_t rssi_dbm; uint8_t last_reason; } alp_cc3501e_wifi_status_t;",
           "fields": [
             "uint8_t state",
             "uint8_t fail_reason",
             "int8_t rssi_dbm",
-            "uint8_t reserved"
+            "uint8_t last_reason"
           ],
-          "hash": "fa9eb3a293fd5021",
+          "hash": "4cecc8cdac50e208",
           "kind": "struct"
         }
       },

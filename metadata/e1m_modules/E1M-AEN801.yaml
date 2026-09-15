@@ -266,30 +266,20 @@ topology:
 # is the coarse generic-storage-carve-out device name (`board.yaml
 # storage[].flash_device: mram_main`, e.g. examples/connectivity/
 # production-deployment/board.yaml) that predates this fine-grained
-# MCUboot map and isn't part of the sysbuild/aen boot chain.  `base` stays
-# the literal string "TBD" (#2053 tried resolving it to 0x80000000 --
-# same address as `mcuboot`, correct per `write_authority: composite`'s
-# own "whole-window alias" definition -- and reverted it).  The blocker is
-# NOT the IPC-carve-out path: `scripts/alp_orchestrate/aperture.py`'s
-# `classify_region()` already has a whole-device-alias case (extent ==
-# aperture exactly) that correctly calls a resolved `mram_main` `"flash"`
-# regardless of `base`. The blocker is
-# `scripts/gen_zephyr_board.py::_aen_check_map_overlaps()`, which has NO
-# such exception: it filters `memory_map:` rows by `isinstance(base, int)`
-# alone, so a resolved `mram_main.base` enters its pairwise-overlap check
-# and trips "AEN memory_map regions 'mcuboot' (ends 0x80010000) and
-# 'mram_main' (starts 0x80000000) overlap" -- a REAL collision this
-# function's own docstring silently relied on `mram_main.base` staying
-# non-integer to avoid ("Regions with a non-integer base (a TBD sentinel,
-# or the whole-window mram_main alias) are skipped"), not a false
-# positive. `tests/scripts/test_gen_zephyr_board.py`'s
-# TestGenZephyrBoardByteEquivalence suite (11 tests) reproduces this the
-# moment `base` resolves, independent of anything else in the file.
-# Needs a whole-device-alias exception in `_aen_check_map_overlaps()`
-# mirroring `classify_region()`'s existing one before this can move;
-# tracked as a follow-up (not #2069, which is the external-memory/ATOC
-# top-anchor gap -- this is a third, separate invariant). Do not resolve
-# this `base` again without that fix landing first.
+# MCUboot map and isn't part of the sysbuild/aen boot chain.  `base`
+# resolves to 0x80000000 (#2053) -- the same address as `mcuboot`,
+# correct per `write_authority: composite`'s own "whole-window alias"
+# definition, and confirmed as the App MRAM aperture independently in
+# metadata/socs/alif/ensemble/e8.json's `soc_flash_base` (2147483648)
+# and in scripts/gen_zephyr_board.py's own `_AEN_MRAM_BASE` constant
+# (sourced from upstream Zephyr's `mram: flash@80000000` node in every
+# Ensemble SoC dtsi). This was blocked twice: `#2053` first tried this
+# and reverted it because `scripts/gen_zephyr_board.py::
+# _aen_check_map_overlaps()` had no whole-device-alias exception and
+# read the resolved `mram_main` as overlapping `mcuboot`; `#2073` added
+# that exception (`whole_device_alias.is_whole_device_alias()`, shared
+# with `alp_orchestrate/aperture.py::classify_region()`'s existing one),
+# unblocking this resolution.
 memory_map:
   - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false, write_authority: vendor_image }
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
@@ -297,7 +287,7 @@ memory_map:
   - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: none }
   - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
-  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+  - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
 
 # No `hyperram` row here (#2053): `on_module.hyperram.assembled: false`
 # above -- the HyperRAM footprint (Winbond W958D8NBYA5I on this SKU's
