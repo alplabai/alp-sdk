@@ -62,6 +62,7 @@ commands report the bridge is not ready. See
 | `alp companion reset` | Soft-reset the CC3501E firmware in-band (the link drops; re-sync after). |
 | `alp companion bench [n]` | Time `n` `GET_VERSION` round-trips over the bridge. |
 | `alp companion recover` | Warm-reset the bridge on demand (see "Link auto-recovery" below); refuses while an OTA session is open; prints the recovery count. |
+| `alp companion linklog` | Dump the link-failure ring, oldest entry first (see "Link-failure ring" below). |
 
 ## Link auto-recovery (issue #2126)
 
@@ -117,6 +118,53 @@ host and every open socket are gone. Socket handles minted before it now
 carry the previous link epoch in their upper byte and fail closed with
 `ALP_ERR_NOT_READY`; open new ones. A proxied GPIO pin configured before the
 recovery answers `ALP_ERR_NOT_READY` until it is configured again.
+
+## Link-failure ring (issue #2136)
+
+On a bridge wedge, the only usable evidence used to be discarded the moment
+the next request ran: `cc3501e_request_locked()` overwrites
+`ctx->rx_scratch[0]` at its `out:` label on every pre-decode failure.
+Firmware-side capture cannot substitute here — a wedge-probe build's warm
+`nRESET` (the same reset `cc3501e_recover()` pulses to clear the wedge) does
+**not** leave the firmware's retained RAM intact across the reset
+(cc3501e-bridge-firmware#148: `boots`/reset-cause read identically before and
+after, i.e. a fresh power-on-style boot, not a survived snapshot).
+
+`ctx->link_log` (`<alp/chips/cc3501e/core.h>`) is a fixed 8-entry ring, kept
+on the host side for exactly this reason. `cc3501e_request_locked()` records
+one entry only when a pre-decode transport/framing failure leaves no reply
+status decoded — never on success, never on a genuine decoded device error.
+Each entry carries: a timestamp; the opcode; which of the four wire phases
+(or the verdict) the attempt reached; the mapped `alp_status_t`; the
+request-header phase's 4 MISO bytes and the reply-header phase's 4 bytes;
+READY-line evidence (sampled before the request and again at exit, plus
+whether the line has ever proven itself wired this boot); and the recovery
+attempt count at record time. A consecutive-failure counter
+(`ctx->link_log_fail_streak`) resets on the next decoded reply, and the last
+successful `GET_DIAG_INFO` probe (`ctx->link_log_last_probe_word` /
+`_last_probe_ms`) is kept alongside for correlation — a wedge-probe firmware
+build rides its own free-running word in that reply's `free_heap_bytes`
+field.
+
+Read it with `cc3501e_link_log_count()` / `cc3501e_link_log_get()`, or
+`alp companion linklog`, which dumps the ring as hex, oldest entry first,
+with a legend line. The automatic and manual recovery paths
+(`companion_recover_notify()`, `src/zephyr/console/alp_console_companion.c`)
+also dump it right before printing their own recovery line, so a bench run
+captures the ring around a reset with no extra step.
+
+Roughly, the classification the ring makes possible:
+
+- **deaf-armed** — the request-header phase reads the armed marker
+  (`ALP_CC3501E_SYNC_IDLE` x4) every attempt, but the reply header never
+  echoes the opcode, and that non-echo repeats: the slave armed the link and
+  then never dispatched anything.
+- **desynced** — the request-header phase reads something other than the
+  armed marker (e.g. `0x00`, the slave's payload-phase dummy, or stale reply
+  bytes), and the pattern changes across attempts as the slave consumes
+  bytes the host keeps clocking.
+- **crashed / not driving** — a constant `0xFF` or `0x00` run with no
+  variation and a frozen READY reading.
 
 ## `alp companion wifi`
 

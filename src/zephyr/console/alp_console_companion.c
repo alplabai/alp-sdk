@@ -35,6 +35,81 @@
 cc3501e_t *companion_cc3501e;
 
 #if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+/* Shared by `alp companion linklog` and the recovery callback below (issue
+ * #2136): dump ctx->link_log oldest-first, one hex line per entry. @p sh
+ * NULL means "print via printk instead of a shell" -- the recovery callback
+ * has no shell handle, only whatever console backend printk currently
+ * targets, same as its own recovery-line print just below. */
+/* No fixed-size local buffer for these -- printed directly through shell_print
+ * / printk instead of snprintf'd first, so there is no truncation budget to
+ * mis-size against the legend text below (-Werror=format-truncation). */
+#define COMPANION_LINK_LOG_HDR_FMT \
+	"cc3501e: link_log %u/%u entries, fail_streak=%u (legend: ts_ms cmd phase status" \
+	" flags hdr[4] reply_hdr[4] recover_attempts; phase 1=req_hdr 2=req_payload" \
+	" 3=reply_hdr 4=reply_payload 5=verdict; flags 1=ready_before 2=ready_after" \
+	" 4=ready_proven)"
+#define COMPANION_LINK_LOG_LINE_FMT "%08x %02x %u %d %02x %02x%02x%02x%02x %02x%02x%02x%02x %u"
+
+static void companion_print_link_log(const struct shell *sh)
+{
+	if (companion_cc3501e == NULL) return;
+
+	const uint8_t n = cc3501e_link_log_count(companion_cc3501e);
+
+	if (sh != NULL) {
+		shell_print(sh,
+		            COMPANION_LINK_LOG_HDR_FMT,
+		            n,
+		            CC3501E_LINK_LOG_LEN,
+		            companion_cc3501e->link_log_fail_streak);
+	} else {
+		printk(COMPANION_LINK_LOG_HDR_FMT "\n",
+		       n,
+		       CC3501E_LINK_LOG_LEN,
+		       companion_cc3501e->link_log_fail_streak);
+	}
+
+	for (uint8_t i = 0; i < n; i++) {
+		cc3501e_link_log_entry_t e;
+
+		if (cc3501e_link_log_get(companion_cc3501e, i, &e) != ALP_OK) break;
+		if (sh != NULL) {
+			shell_print(sh,
+			            COMPANION_LINK_LOG_LINE_FMT,
+			            e.ts_ms,
+			            e.cmd,
+			            e.phase,
+			            (int)e.status,
+			            e.flags,
+			            e.hdr_bytes[0],
+			            e.hdr_bytes[1],
+			            e.hdr_bytes[2],
+			            e.hdr_bytes[3],
+			            e.reply_hdr[0],
+			            e.reply_hdr[1],
+			            e.reply_hdr[2],
+			            e.reply_hdr[3],
+			            e.recover_attempt_count);
+		} else {
+			printk("cc3501e: " COMPANION_LINK_LOG_LINE_FMT "\n",
+			       e.ts_ms,
+			       e.cmd,
+			       e.phase,
+			       (int)e.status,
+			       e.flags,
+			       e.hdr_bytes[0],
+			       e.hdr_bytes[1],
+			       e.hdr_bytes[2],
+			       e.hdr_bytes[3],
+			       e.reply_hdr[0],
+			       e.reply_hdr[1],
+			       e.reply_hdr[2],
+			       e.reply_hdr[3],
+			       e.recover_attempt_count);
+		}
+	}
+}
+
 /* Registered via cc3501e_set_recover_callback() below (issue #2126): announce
  * an AUTOMATIC recovery -- cc3501e_link_check_and_recover(), wired into the
  * driver's own failure exits (cc3501e_core.c / cc3501e_wifi.c) -- the moment
@@ -54,6 +129,10 @@ static void companion_recover_notify(cc3501e_t *ctx, uint32_t recover_count, voi
 {
 	ARG_UNUSED(ctx);
 	ARG_UNUSED(user);
+	/* Issue #2136: dump the ring right before the recovery line, no extra
+	 * bench step needed to capture the state around a reset -- see
+	 * companion_print_link_log()'s doc comment. */
+	companion_print_link_log(NULL);
 	printk("cc3501e: link recovered by warm reset (#%u)\n", recover_count);
 }
 #endif
@@ -511,6 +590,19 @@ static int cmd_companion_recover(const struct shell *sh, size_t argc, char **arg
 	shell_print(sh, "recover OK (%u recovery(s) so far)", companion_cc3501e->recover_count);
 	return 0;
 }
+
+/* ---- CC3501E link-failure ring (Alif companion, issue #2136) ------------ */
+static int cmd_companion_linklog(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	companion_print_link_log(sh);
+	return 0;
+}
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
 /* `alp companion` itself: a decentralized dynamic subcommand set (Zephyr's
@@ -549,6 +641,13 @@ SHELL_SUBCMD_ADD((alp, companion),
                  NULL,
                  "warm-reset the bridge link unconditionally (issue #2126)",
                  cmd_companion_recover,
+                 1,
+                 0);
+SHELL_SUBCMD_ADD((alp, companion),
+                 linklog,
+                 NULL,
+                 "dump the link-failure ring, oldest first (issue #2136)",
+                 cmd_companion_linklog,
                  1,
                  0);
 #endif

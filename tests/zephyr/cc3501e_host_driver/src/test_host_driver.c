@@ -224,6 +224,16 @@ static uint32_t g_get_version_io_down_remaining; /* fail the transaction outrigh
  * attempted at most once (the cooldown -- see ctx->recover_count). */
 static bool g_all_io_down;
 
+/* #2136 mutant controls: force the two wire patterns the link-failure ring
+ * must tell apart (test_link_log_distinguishes_deaf_armed_from_desynced_2136).
+ * Cleared by slave_reset(). */
+static bool g_req_hdr_desynced; /* PH_REQ_HDR MISO reads 0x00 x4, not the armed
+                                 * ALP_CC3501E_SYNC_IDLE x4 -- a slave mid-payload,
+                                 * genuinely desynced rather than merely unarmed. */
+static bool g_reply_hdr_deaf;   /* PH_REPLY_HDR never echoes the request opcode -- stays
+                                 * ALP_CC3501E_SYNC_IDLE x4, i.e. the slave armed the
+                                 * header phase but never dispatched a reply at all. */
+
 /* #2126 review follow-up mutant controls. Cleared by slave_reset() (bool/u32
  * ones) -- g_deaf_from_ms/g_deaf_until_ms are timestamps, meaningless to
  * reset to 0 (that would just mean "deaf from boot", not "never deaf"), so
@@ -551,6 +561,8 @@ static void slave_reset(void)
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
 	g_all_io_down                      = false;
+	g_req_hdr_desynced                 = false;
+	g_reply_hdr_deaf                   = false;
 	g_heal_disabled                    = false;
 	g_ble_enable_busy                  = false;
 	g_reset_release_count              = 0u;
@@ -1416,7 +1428,10 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		slave.flags_log_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
-			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
+			/* #2136: g_req_hdr_desynced models a slave mid-payload (0x00,
+			 * not the armed marker) instead of the normal armed-idle
+			 * pattern. */
+			memset(rx, g_req_hdr_desynced ? 0x00u : ALP_CC3501E_SYNC_IDLE, len);
 		}
 		if (slave.req_len > 0u) {
 			slave.phase = PH_REQ_PL;
@@ -1434,10 +1449,17 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		slave.phase = PH_REPLY_HDR;
 		break;
 	case PH_REPLY_HDR:
-		rx[0]       = slave.cmd; /* reply header echoes the cmd */
-		rx[1]       = 0x00u;     /* solicited */
-		rx[2]       = (uint8_t)(slave.reply_len & 0xFFu);
-		rx[3]       = (uint8_t)((slave.reply_len >> 8) & 0xFFu);
+		/* #2136: g_reply_hdr_deaf models a slave that armed the request-header
+		 * phase but never dispatched a reply -- the header stays parked at
+		 * the idle marker instead of echoing the request opcode. */
+		if (g_reply_hdr_deaf) {
+			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
+		} else {
+			rx[0] = slave.cmd; /* reply header echoes the cmd */
+			rx[1] = 0x00u;     /* solicited */
+			rx[2] = (uint8_t)(slave.reply_len & 0xFFu);
+			rx[3] = (uint8_t)((slave.reply_len >> 8) & 0xFFu);
+		}
 		slave.phase = PH_REPLY_PL;
 		break;
 	case PH_REPLY_PL:
@@ -4816,6 +4838,114 @@ ZTEST(cc3501e_host_driver, test_recover_callback_fires_once_per_recovery_2126)
 	zassert_equal(fw.recover_count, 1u, "test setup: exactly one recovery ran");
 	zassert_equal(g_recover_cb_calls, 1u, "the registered callback fired exactly once");
 	zassert_equal(g_recover_cb_last_count, 1u, "and was handed the committed recover_count");
+}
+
+/* ========================= LINK-FAILURE RING (#2136) ======================= */
+
+ZTEST(cc3501e_host_driver, test_link_log_records_pre_decode_failure_2136)
+{
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "io-down ping fails pre-decode");
+	zassert_equal(cc3501e_link_log_count(&fw), 1u, "one ring entry recorded");
+
+	cc3501e_link_log_entry_t e;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &e), ALP_OK, "entry 0 reads back");
+	zassert_equal(e.cmd, (uint8_t)ALP_CC3501E_CMD_PING, "records the opcode used");
+	zassert_equal(
+	    e.phase, CC3501E_LINK_LOG_PHASE_REQUEST_HEADER, "bails at the request-header phase");
+	zassert_equal(e.status, (int8_t)ALP_ERR_IO, "records the mapped status");
+
+	/* A decoded reply -- success here -- must add NOTHING to the ring. */
+	g_all_io_down = false;
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "healthy ping succeeds");
+	zassert_equal(cc3501e_link_log_count(&fw), 1u, "success adds no ring entry");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_fail_streak_resets_on_success_2136)
+{
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	zassert_equal(fw.link_log_fail_streak, 2u, "two consecutive pre-decode failures");
+
+	g_all_io_down = false;
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, NULL);
+	zassert_equal(fw.link_log_fail_streak, 0u, "a decoded reply resets the streak");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_wraps_keeps_newest_2136)
+{
+	/* g_fake_now_ms is a suite-wide fake clock, not reset per test (see its
+	 * own doc comment) -- capture a baseline like the other tests that read
+	 * it directly, rather than assuming it starts at 0. Real delays inside
+	 * cc3501e_request_locked() only ever call alp_delay_us() on this NULL-
+	 * ready_pin fixture, which does NOT advance g_fake_now_ms, so this test
+	 * advances the fake clock itself between attempts -- the only way to
+	 * give each ring entry a distinct, orderable ts_ms without a real
+	 * sleep. */
+	const uint64_t base     = g_fake_now_ms;
+	const unsigned attempts = (unsigned)CC3501E_LINK_LOG_LEN + 3u;
+
+	g_all_io_down = true;
+	for (unsigned i = 1u; i <= attempts; i++) {
+		g_fake_now_ms = base + (uint64_t)i * 1000u;
+		zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	}
+	zassert_equal(cc3501e_link_log_count(&fw), CC3501E_LINK_LOG_LEN, "ring saturates at LEN");
+
+	cc3501e_link_log_entry_t oldest, newest;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &oldest), ALP_OK, NULL);
+	zassert_equal(
+	    cc3501e_link_log_get(&fw, (uint8_t)(CC3501E_LINK_LOG_LEN - 1u), &newest), ALP_OK, NULL);
+	/* attempts - LEN attempts were evicted, so the oldest SURVIVING entry is
+	 * attempt #(attempts - LEN + 1), and the newest is the very last one. */
+	const uint32_t expect_oldest_ts =
+	    (uint32_t)(base + (uint64_t)(attempts - CC3501E_LINK_LOG_LEN + 1u) * 1000u);
+	const uint32_t expect_newest_ts = (uint32_t)(base + (uint64_t)attempts * 1000u);
+
+	zassert_equal(oldest.ts_ms, expect_oldest_ts, "oldest entries were evicted, not kept");
+	zassert_equal(newest.ts_ms, expect_newest_ts, "the newest attempt is always kept");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_distinguishes_deaf_armed_from_desynced_2136)
+{
+	/* Desynced: the request-header phase itself reads the wrong marker
+	 * (0x00, not the armed idle pattern) -- the in-band armed check bails
+	 * at the request-header phase before anything else is clocked. */
+	g_req_hdr_desynced = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "desynced header fails the armed check");
+	cc3501e_link_log_entry_t desynced;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &desynced), ALP_OK, NULL);
+	zassert_equal(desynced.phase,
+	              CC3501E_LINK_LOG_PHASE_REQUEST_HEADER,
+	              "desynced bails at the request-header phase");
+	zassert_equal(desynced.hdr_bytes[0], 0x00u, "desynced header reads the wrong marker");
+	zassert_equal(desynced.hdr_bytes[3], 0x00u, NULL);
+	g_req_hdr_desynced = false;
+	/* The desynced attempt above left the FAKE SLAVE MODEL itself out of
+	 * lockstep with the host (the host bailed at the armed check without
+	 * ever clocking a reply phase, but the stub's own slave.phase already
+	 * advanced past PH_REQ_HDR inside slave_dispatch()) -- reset just the
+	 * model, not ctx->link_log, so the next attempt starts this SAME ctx's
+	 * ring a clean 4-phase exchange instead of inheriting that skew. */
+	slave_reset();
+
+	/* Deaf-armed: the request-header phase is normal (armed, 0xA5 x4), but
+	 * the reply header never echoes the request opcode -- the slave armed
+	 * the link and then never dispatched anything. */
+	g_reply_hdr_deaf = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "a reply that never echoes is IO");
+	cc3501e_link_log_entry_t deaf;
+	zassert_equal(cc3501e_link_log_get(&fw, 1u, &deaf), ALP_OK, NULL);
+	zassert_equal(
+	    deaf.phase, CC3501E_LINK_LOG_PHASE_REPLY_HEADER, "deaf-armed bails at the reply header");
+	zassert_equal(deaf.hdr_bytes[0], ALP_CC3501E_SYNC_IDLE, "request header WAS armed (0xA5)");
+	zassert_equal(deaf.reply_hdr[0], ALP_CC3501E_SYNC_IDLE, "reply header never echoed the cmd");
+	g_reply_hdr_deaf = false;
+
+	/* The two entries must actually be tellable apart -- the whole point. */
+	zassert_true(desynced.phase != deaf.phase, "different phase");
+	zassert_true(desynced.hdr_bytes[0] != deaf.hdr_bytes[0], "different request-header bytes");
 }
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);

@@ -262,16 +262,24 @@ alp_status_t cc3501e_recover(cc3501e_t *ctx)
 
 	/* A WARM reset -- nRESET only, rails up -- is what clears this state.
 	 * Bench-established on e1m-aen-evk-01 (#1691): every observed wedge recovered
-	 * with `warm-reset -> 0  PING -> 0`, and the .TI.noinit snapshot read back
-	 * afterwards showed the firmware had been perfectly healthy the whole time --
-	 * housekeeping ticks advancing, slave armed in PH_REQ_HEADER, READY HIGH, and
-	 * g_resync_count / g_arm_fail_count both zero.
+	 * with `warm-reset -> 0  PING -> 0`.
 	 *
-	 * That is why no firmware self-heal fires: bridge_transport_spi_is_dead() only
-	 * reports a failed SPI_open, and the stall watchdog deliberately watches only
-	 * REPLY phases because PH_REQ_HEADER legitimately waits forever for the host.
-	 * The slave cannot tell "host idle" from "host clocking, I am not receiving".
-	 * The HOST can, which is why recovery lives here and not in the firmware. */
+	 * CORRECTION (issue #2136, cc3501e-bridge-firmware#148): a EARLIER version
+	 * of this comment claimed the .TI.noinit snapshot read back after that
+	 * reset showed the firmware "had been perfectly healthy the whole time",
+	 * and used that to argue no firmware self-heal fires because the slave
+	 * genuinely cannot distinguish "host idle" from "host clocking, I am not
+	 * receiving". #148 measured that this SoC's retained RAM does NOT
+	 * survive the warm nRESET this recovery pulses (bench run14 P6: the
+	 * boots counter read 1 both before and after, reset cause read
+	 * power-on on both sides) -- so that snapshot was the FRESH post-reset
+	 * boot's own state, not evidence carried across the reset from the
+	 * wedge itself. The "firmware was healthy, the problem is host-side"
+	 * inference above does not follow from it and is UNSUPPORTED; treat it
+	 * as retracted rather than as a finding. This is exactly why the
+	 * host-side link-failure ring (@ref cc3501e::link_log,
+	 * <alp/chips/cc3501e/core.h>) exists -- firmware-side capture cannot
+	 * substitute here. */
 	const alp_status_t rs = cc3501e_hard_reset(ctx);
 	alp_status_t       final;
 
@@ -1741,6 +1749,70 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
  * (examples/aen/aen-evk-demo/src/main.c's BLE_ENABLE failure probe) can
  * recognise the marker too, instead of misreporting it as wire data. */
 
+/* READY level for the link-failure ring only (issue #2136) -- separate from
+ * the READY GATE logic above, which this does not touch. NULL ready_pin
+ * (CS-less r1 board) or a read failure both report false: "not proven high",
+ * the same convention g_ready_line_proven itself uses. */
+static bool cc3501e_link_log_ready_level(const cc3501e_t *ctx)
+{
+	bool level = false;
+
+	if (ctx->ready_pin != NULL) (void)alp_gpio_read(ctx->ready_pin, &level);
+	return level;
+}
+
+/* The link-failure ring's one write site (issue #2136) -- called only from
+ * cc3501e_request_locked()'s `out:` label below, only when !decoded. Oldest-
+ * first read order falls out of the plain wrap here: link_log_next always
+ * names the slot this call is ABOUT to overwrite, i.e. the oldest surviving
+ * entry once the ring is full -- see cc3501e_link_log_get() below for the
+ * matching read-side math. */
+static void cc3501e_link_log_record(cc3501e_t        *ctx,
+                                    alp_cc3501e_cmd_t cmd,
+                                    uint8_t           phase,
+                                    alp_status_t      status,
+                                    const uint8_t     hdr_bytes[ALP_CC3501E_HEADER_BYTES],
+                                    const uint8_t     reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                    bool              ready_before,
+                                    bool              ready_after)
+{
+	cc3501e_link_log_entry_t *e = &ctx->link_log[ctx->link_log_next];
+
+	e->ts_ms                 = (uint32_t)alp_uptime_ms();
+	e->recover_attempt_count = ctx->recover_attempt_count;
+	e->cmd                   = (uint8_t)cmd;
+	e->phase                 = phase;
+	e->status                = (int8_t)status;
+	e->flags = (uint8_t)((ready_before ? CC3501E_LINK_LOG_READY_BEFORE : 0u) |
+	                     (ready_after ? CC3501E_LINK_LOG_READY_AFTER : 0u) |
+	                     (g_ready_line_proven ? CC3501E_LINK_LOG_READY_PROVEN : 0u));
+	memcpy(e->hdr_bytes, hdr_bytes, ALP_CC3501E_HEADER_BYTES);
+	memcpy(e->reply_hdr, reply_hdr, ALP_CC3501E_HEADER_BYTES);
+
+	ctx->link_log_next = (uint8_t)((ctx->link_log_next + 1u) % CC3501E_LINK_LOG_LEN);
+	if (ctx->link_log_count < CC3501E_LINK_LOG_LEN) ctx->link_log_count++;
+}
+
+uint8_t cc3501e_link_log_count(const cc3501e_t *ctx)
+{
+	return (ctx == NULL) ? 0u : ctx->link_log_count;
+}
+
+alp_status_t cc3501e_link_log_get(const cc3501e_t *ctx, uint8_t idx, cc3501e_link_log_entry_t *out)
+{
+	if (ctx == NULL || out == NULL || idx >= ctx->link_log_count) return ALP_ERR_INVAL;
+	/* Oldest-first: before the ring has wrapped, link_log_next equals the
+	 * count and entries sit at their write-order index (0 = oldest)
+	 * already, so idx alone is the physical slot. Once wrapped, link_log_next
+	 * itself is the oldest slot (see cc3501e_link_log_record() above), so
+	 * idx walks forward from there instead. Either way this one expression
+	 * covers both: pre-wrap, link_log_next == link_log_count, so
+	 * (link_log_next - link_log_count) == 0 and it reduces to idx. */
+	const uint8_t oldest = (ctx->link_log_count < CC3501E_LINK_LOG_LEN) ? 0u : ctx->link_log_next;
+	*out                 = ctx->link_log[(uint8_t)((oldest + idx) % CC3501E_LINK_LOG_LEN)];
+	return ALP_OK;
+}
+
 /* The actual 4-phase exchange, WITHOUT taking ctx's transport lock -- the
  * caller must already hold it.  Split out of cc3501e_request() (issue
  * #1116 follow-up) so poll_by_repeat() below can bracket its OWN extra
@@ -1764,6 +1836,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * out: label knows whether rx_scratch[0] holds a real decoded status
 	 * byte or needs poisoning to ALP_CC3501E_RX_SCRATCH_NO_STATUS. */
 	bool decoded = false;
+	/* Link-failure ring evidence (issue #2136), gathered alongside the
+	 * exchange below and committed at `out:` -- ONLY when !decoded, so a
+	 * decoded reply (success or device-side error) never lands here, just
+	 * a genuine pre-decode transport/framing failure. Tracks which of the
+	 * four wire phases (or the verdict) this attempt reached; defaults to
+	 * the request-header phase since that is always attempted first. */
+	uint8_t link_phase = CC3501E_LINK_LOG_PHASE_REQUEST_HEADER;
 
 	/*
      * 3-wire deterministic framing (this HW rev wires only SCLK/MOSI/MISO
@@ -1803,7 +1882,19 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint16_t wire_tx_len =
 	    (uint16_t)(tx_len + (want_req_crc ? (size_t)ALP_CC3501E_CRC_BYTES : 0u));
 	encode_header(ctx->tx_scratch, cmd, flags, wire_tx_len);
+	/* READY sampled once here, before this exchange clocks anything, and
+	 * again at `out:` (issue #2136) -- so a ring entry can tell a slave
+	 * that was already down before this attempt started (frozen both
+	 * samples: crashed / not driving) apart from one that dropped mid-
+	 * exchange. See CC3501E_LINK_LOG_READY_PROVEN's doc comment for why a
+	 * caller must check that bit before trusting either sample. */
+	const bool link_ready_before = cc3501e_link_log_ready_level(ctx);
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	/* Ring evidence (#2136): the request-header phase's 4 MISO bytes, saved
+	 * regardless of status -- a later phase's transceive reuses rx_scratch,
+	 * so this is the only chance to capture them. */
+	uint8_t link_hdr_bytes[ALP_CC3501E_HEADER_BYTES];
+	memcpy(link_hdr_bytes, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
 
 	/* IN-BAND ARMED CHECK -- the software stand-in for the READY line.
@@ -1840,6 +1931,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		goto out;
 	}
 	if (wire_tx_len > 0) {
+		link_phase = CC3501E_LINK_LOG_PHASE_REQUEST_PAYLOAD; /* #2136 ring */
 		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
 		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
 		 * the payload back-to-back (no gap) races that re-arm -> the payload bytes are
@@ -1872,6 +1964,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = alp_spi_transceive(ctx->bus, tx_ptr, ctx->rx_scratch, wire_tx_len);
 		if (s != ALP_OK) goto out;
 	}
+	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_HEADER; /* #2136 ring */
 
 	/* Wait for the slave to dispatch + arm its reply before we read: the
 	 * READY gate tracks it via the host-IRQ line when wired, else a gap sized
@@ -1891,6 +1984,17 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	/* v4.0 (#2035): save the reply's own header bytes NOW, regardless of
+	 * status -- the payload-phase transceive below reuses ctx->rx_scratch
+	 * and overwrites them, and (#2136) a !hdr_ok bail below still wants
+	 * these 4 bytes as ring evidence -- so cc3501e_reply_verdict() can
+	 * still CRC the header + payload together on the success path (span
+	 * per <alp/protocol/cc3501e.h>: the 4 header bytes plus every payload
+	 * byte except the trailing 2 CRC bytes). Zero-initialised: a bail
+	 * before this transceive (phase 1 or 2) never touches it, and the ring
+	 * fill at `out:` reads it unconditionally. */
+	uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES] = { 0 };
+	memcpy(reply_hdr, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
 	if (s != ALP_OK) goto out;
 	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
 	/* Desync detection (no CS to recover on): a valid reply header ECHOES the
@@ -1909,13 +2013,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = ALP_ERR_IO;
 		goto out;
 	}
-	/* v4.0 (#2035): save the reply's own header bytes NOW -- the payload-phase
-	 * transceive below reuses ctx->rx_scratch and overwrites them -- so
-	 * cc3501e_reply_verdict() can still CRC the header + payload together
-	 * afterwards (span per <alp/protocol/cc3501e.h>: the 4 header bytes plus
-	 * every payload byte except the trailing 2 CRC bytes). */
-	uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES];
-	memcpy(reply_hdr, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_PAYLOAD; /* #2136 ring */
 
 	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
 	 * its ISR only after the reply-header transfer completes). */
@@ -1937,7 +2035,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * it is independently unit-testable (see cc3501e_internal.h). */
 		s = cc3501e_reply_verdict(
 		    cmd, ctx->fw_proto_major, reply_hdr, ctx->rx_scratch, resp_payload_len);
-		decoded = true;
+		decoded    = true;
+		link_phase = CC3501E_LINK_LOG_PHASE_VERDICT; /* #2136 ring -- never actually
+		                                              * logged below: decoded is
+		                                              * true here regardless of
+		                                              * cc3501e_reply_verdict()'s own
+		                                              * status. Kept for the phase
+		                                              * enum's completeness. */
 	}
 
 out:
@@ -1948,7 +2052,26 @@ out:
 	 * transceive, the !hdr_ok reject, the reply-payload transceive -- lands
 	 * here with decoded still false, so rx_scratch[0] gets overwritten
 	 * REGARDLESS of which one fired or what wire byte it left behind. */
-	if (!decoded) ctx->rx_scratch[0] = ALP_CC3501E_RX_SCRATCH_NO_STATUS;
+	if (!decoded) {
+		ctx->rx_scratch[0] = ALP_CC3501E_RX_SCRATCH_NO_STATUS;
+		/* Issue #2136: the ring's one write site. reply_hdr is whatever it
+		 * was last memcpy'd to -- all-zero if this attempt never reached
+		 * phase 3, the real reply-header bytes if it did (even on a
+		 * !hdr_ok bail). link_ready_before was sampled before the very
+		 * first transceive above; the matching "after" sample happens
+		 * here, once, right before this attempt's failure is committed. */
+		cc3501e_link_log_record(ctx,
+		                        cmd,
+		                        link_phase,
+		                        s,
+		                        link_hdr_bytes,
+		                        reply_hdr,
+		                        link_ready_before,
+		                        cc3501e_link_log_ready_level(ctx));
+		ctx->link_log_fail_streak++;
+	} else {
+		ctx->link_log_fail_streak = 0u;
+	}
 	return s;
 }
 

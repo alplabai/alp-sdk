@@ -49,6 +49,63 @@ typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, voi
  *  @ref ALP_ERR_NOMEM rather than silently dropping one past this. */
 #define CC3501E_EVENT_SUBSCRIBERS 4
 
+/** Number of @ref cc3501e_link_log_entry_t slots in @ref cc3501e::link_log
+ *  (issue #2136). A fixed ring, oldest entry overwritten first -- see
+ *  @ref cc3501e_link_log_count / @ref cc3501e_link_log_get. */
+#define CC3501E_LINK_LOG_LEN 8u
+
+/** @ref cc3501e_link_log_entry_t::phase values -- which of
+ *  cc3501e_request_locked()'s four wire phases (or the verdict) an attempt
+ *  reached before bailing.  @{ */
+#define CC3501E_LINK_LOG_PHASE_REQUEST_HEADER  1u
+#define CC3501E_LINK_LOG_PHASE_REQUEST_PAYLOAD 2u
+#define CC3501E_LINK_LOG_PHASE_REPLY_HEADER    3u
+#define CC3501E_LINK_LOG_PHASE_REPLY_PAYLOAD   4u
+#define CC3501E_LINK_LOG_PHASE_VERDICT         5u
+/** @} */
+
+/** @ref cc3501e_link_log_entry_t::flags bits -- READY line evidence (issue
+ *  #2136).  READY (CC35 GPIO17 -> Alif P2_6) is an OPEN CONNECTION on some
+ *  boards (see cc3501e_core.c's in-band-armed-check comment), so a caller
+ *  reading these bits MUST also check PROVEN: a frozen level on a board that
+ *  never proved the line wired is not evidence of anything, just an
+ *  unpopulated read.  @{ */
+#define CC3501E_LINK_LOG_READY_BEFORE 0x1u /**< READY level sampled before the request header. */
+#define CC3501E_LINK_LOG_READY_AFTER  0x2u /**< READY level sampled at this attempt's exit. */
+#define CC3501E_LINK_LOG_READY_PROVEN \
+	0x4u /**< The line has been observed HIGH at least once
+                                             *   this boot (cc3501e_core.c's g_ready_line_proven) --
+                                             *   without this, BEFORE/AFTER are not trustworthy. */
+/** @} */
+
+/**
+ * @brief One link-failure ring entry (issue #2136).
+ *
+ * Filled ONLY at cc3501e_request_locked()'s `out:` label, ONLY when no reply
+ * status was decoded (see @ref ALP_CC3501E_RX_SCRATCH_NO_STATUS) -- a genuine
+ * pre-decode transport/framing failure, never a decoded device error and
+ * never a success. This is the evidence a bridge wedge leaves on the HOST
+ * side specifically because the firmware side does not survive the warm
+ * nRESET used to recover it (cc3501e-bridge-firmware#148 measured 0
+ * retained-RAM state across that reset -- see cc3501e_core.c's corrected
+ * comment above cc3501e_recover()).
+ *
+ * 20 bytes, no padding (verify with `static_assert` if this drifts).
+ */
+typedef struct {
+	uint32_t ts_ms;                 /**< Truncated alp_uptime_ms() (wraps ~49 days --
+	                                      *   acceptable for an 8-entry recent-history ring). */
+	uint32_t recover_attempt_count; /**< @ref cc3501e::recover_attempt_count at record time. */
+	uint8_t  cmd;                   /**< @c alp_cc3501e_cmd_t opcode this attempt used. */
+	uint8_t  phase;                 /**< One of the @c CC3501E_LINK_LOG_PHASE_* values. */
+	int8_t   status;                /**< @c alp_status_t narrowed (the whole enum fits -15..0). */
+	uint8_t  flags;                 /**< @c CC3501E_LINK_LOG_READY_* bits, OR'd. */
+	uint8_t  hdr_bytes[4];          /**< Request-header phase's 4 MISO bytes (the in-band
+	                                      *   armed-check marker: ALP_CC3501E_SYNC_IDLE x4 = armed). */
+	uint8_t  reply_hdr[4];          /**< Reply-header phase's 4 bytes (echoed opcode + length),
+	                                      *   all-zero if this attempt never reached phase 3. */
+} cc3501e_link_log_entry_t;
+
 /** Value cc3501e_request_locked() (cc3501e_core.c) writes into
  *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed
  *  transceive, the in-band armed-check reject, a bad reply header -- so
@@ -430,6 +487,29 @@ struct cc3501e {
 	 * true, for both the automatic path and a manual `alp companion
 	 * recover`. */
 	bool ota_session_active;
+
+	/* Link-failure ring (issue #2136) -- see @ref cc3501e_link_log_entry_t
+	 * for the fill rule and @ref cc3501e_link_log_get for the read side.
+	 * 8 * 20 = 160 B, plus this bookkeeping. Never touch link_log /
+	 * link_log_count / link_log_next directly -- go through the accessors;
+	 * the write side is cc3501e_request_locked()'s `out:` label only. */
+	cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN];
+	uint8_t link_log_count; /**< Entries held, saturates at CC3501E_LINK_LOG_LEN. */
+	uint8_t link_log_next;  /**< Ring write cursor -- also the oldest entry's
+	                                          *   slot once the ring is full. */
+	/* Consecutive pre-decode failures (issue #2136): bumped on every ring
+	 * write, reset to 0 on the next DECODED reply (success or device-side
+	 * error alike) -- so it answers "how many attempts in a row have left
+	 * no evidence at all", distinct from @ref recover_fail_streak above
+	 * (which only counts failed RECOVERY attempts, not ordinary requests). */
+	uint32_t link_log_fail_streak;
+	/* Last successful GET_DIAG_INFO probe (issue #2136), for correlating the
+	 * ring against firmware-side telemetry: a wedge-probe firmware build
+	 * rides its own free-running word in the GET_DIAG_INFO reply's
+	 * free_heap_bytes field (see cc3501e_diag_info(), chips/cc3501e/
+	 * cc3501e_diag.c) instead of a real heap count. */
+	uint32_t link_log_last_probe_word;
+	uint32_t link_log_last_probe_ms; /**< Truncated alp_uptime_ms() at that probe. */
 };
 
 /**
@@ -909,6 +989,25 @@ alp_status_t cc3501e_spi1_transfer(cc3501e_t     *ctx,
  *         otherwise the mapped transport error.
  */
 alp_status_t cc3501e_spi1_release(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Number of link-failure ring entries currently held (issue #2136).
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return 0..CC3501E_LINK_LOG_LEN; 0 on a NULL @p ctx.
+ */
+uint8_t cc3501e_link_log_count(const cc3501e_t *ctx);
+
+/**
+ * @brief Read one link-failure ring entry, oldest-first (issue #2136).
+ *
+ * @param ctx  Initialised bridge handle.
+ * @param idx  0 = oldest entry currently held .. cc3501e_link_log_count(ctx) - 1 = newest.
+ * @param out  Receives a copy of the entry on success.
+ * @return ALP_OK; ALP_ERR_INVAL if @p ctx or @p out is NULL, or @p idx is
+ *         out of range for the entry count currently held.
+ */
+alp_status_t cc3501e_link_log_get(const cc3501e_t *ctx, uint8_t idx, cc3501e_link_log_entry_t *out);
 
 #ifdef __cplusplus
 } /* extern "C" */
