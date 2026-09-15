@@ -6,16 +6,25 @@
  * first alp_i2s_write() must not fail on the Alif DesignWare I2S
  * driver's empty TX ring buffer -- and the fix (deferred start, live in
  * src/backends/i2s/zephyr_drv.c) must not silently swallow a START that
- * keeps failing, must not strand queued blocks on stop(), and must not
- * leave a stale block for the next open() to dequeue into freed memory.
+ * keeps failing, must not strand queued blocks on stop(), must not
+ * leave a stale block for the next open() to dequeue into freed memory,
+ * and (review round 2) must not report a chunk as queued when a failed
+ * retry DROPped it (MAJOR-1), and must not leave tx_pending_start stuck
+ * true past a successful start() (MAJOR-2, tx_started => !tx_pending_
+ * start enforced by construction -- see _mark_tx_started()'s comment in
+ * the backend).
  *
  * fake_i2s.c models the real i2s_dw.c state machine closely enough to
- * catch all four: unlike tests/unit/i2s_write_bounds' always-succeeds
- * fake (which never calls trigger(START) at all), this one refuses an
- * empty-queue START (-ENOMEM), refuses STOP/DRAIN on a non-running
- * stream (-EIO), and only DROP releases queued blocks unconditionally
- * -- exactly the three-way split z_start()/z_stop()/z_close() now
- * route through.
+ * catch all of the above: unlike tests/unit/i2s_write_bounds' always-
+ * succeeds fake (which never calls trigger(START) at all), this one
+ * refuses an empty-queue START (-ENOMEM), refuses STOP/DRAIN on a non-
+ * running stream (-EIO), and only DROP releases queued blocks
+ * unconditionally -- exactly the three-way split z_start()/z_stop()/
+ * z_close() now route through. Its forced-failure knob
+ * (fake_i2s_force_start_fail()) pins THIS BACKEND's retry/DROP logic,
+ * not i2s_dw fidelity -- see fake_i2s.c's own header comment for why a
+ * forced failure on an otherwise-healthy READY-with-something-queued
+ * START cannot happen on real i2s_dw.
  *
  * Every test captures each call's result to a local and closes its
  * handle BEFORE any zassert_*: CONFIG_ALP_SDK_MAX_I2S_HANDLES defaults
@@ -104,7 +113,15 @@ ZTEST(alp_i2s_start_defer, test_direct_start_then_write_succeeds)
 
 /* Write-then-start (the legal order every in-tree caller used to need)
  * must keep working unchanged: the block is already queued, so start()
- * triggers immediately. */
+ * triggers immediately via z_start()'s IMMEDIATE-trigger branch (as
+ * opposed to the deferred-then-retried path every other test in this
+ * file exercises). A follow-up write() afterward pins MAJOR-2's
+ * invariant fix on THIS specific branch: _mark_tx_started() must have
+ * cleared tx_pending_start (it was never set in this sequence, so this
+ * is a no-op clear, but it proves the call site is wired the same way
+ * as the retry path) -- if it hadn't, the follow-up write would
+ * spuriously retry a START on an already-running stream and get
+ * i2s_dw's -EIO instead of just writing. */
 ZTEST(alp_i2s_start_defer, test_write_then_start_succeeds)
 {
 	fake_i2s_reset();
@@ -114,6 +131,8 @@ ZTEST(alp_i2s_start_defer, test_write_then_start_succeeds)
 	bool         running_before_start = fake_i2s_tx_running();
 	alp_status_t start_rc             = alp_i2s_start(h);
 	bool         running_after_start  = fake_i2s_tx_running();
+	alp_status_t write2_rc            = write_block(h);
+	bool         running_after_write2 = fake_i2s_tx_running();
 
 	alp_i2s_close(h);
 
@@ -122,6 +141,11 @@ ZTEST(alp_i2s_start_defer, test_write_then_start_succeeds)
 	zassert_false(running_before_start, "a write with no start() pending must not self-trigger");
 	zassert_equal(start_rc, ALP_OK);
 	zassert_true(running_after_start, "start() with a block already queued must trigger now");
+	zassert_equal(write2_rc,
+	              ALP_OK,
+	              "MAJOR-2: a write after the immediate-trigger start() must not spuriously "
+	              "retry a START on an already-running stream");
+	zassert_true(running_after_write2);
 }
 
 /* Stopping a pending-but-never-written stream must not issue a real
@@ -258,33 +282,47 @@ ZTEST(alp_i2s_start_defer, test_write_close_reopen_start_write_no_stale_block)
 	zassert_equal(depth_end, 0u, "h2's block was consumed, not stuck either");
 }
 
-/* Finding 2: a START failure discovered only once data is queued must
- * surface from the write() call that queued it (never ALP_OK), and
- * EVERY later write while still pending must retry -- not just the
- * first one. */
-ZTEST(alp_i2s_start_defer, test_start_failure_retries_on_every_write)
+/* Finding 2 / MAJOR-1 (issue #2132 review): a START failure discovered
+ * only once data is queued must surface from the write() call that
+ * queued it (never ALP_OK), and EVERY later write while still pending
+ * must retry -- not just the first one or two. This runs 5 (> the
+ * 2-block slab depth) consecutive forced failures: since MAJOR-1's fix
+ * DROPs the block a failed retry just queued before returning, the
+ * slab must NEVER fill up under sustained failures -- every one of the
+ * 5 writes must fail with the FORCED status (ALP_ERR_IO), never
+ * ALP_ERR_TIMEOUT from k_mem_slab_alloc() starving on un-started
+ * blocks, and the ring must be empty after each one. */
+ZTEST(alp_i2s_start_defer, test_start_failure_retries_on_every_write_past_slab_depth)
 {
 	fake_i2s_reset();
 	alp_i2s_t *h = open_tx();
 
 	alp_status_t start_rc = alp_i2s_start(h);
-	/* Force exactly 2 START attempts to fail -- one per write below --
-	 * proving BOTH retry, not just the first. */
-	fake_i2s_force_start_fail(-EIO, 2u);
-	alp_status_t write1_rc       = write_block(h); /* fills slab block 1/2 */
-	bool         running_after_1 = fake_i2s_tx_running();
-	alp_status_t write2_rc       = write_block(h); /* fills slab block 2/2 */
-	bool         running_after_2 = fake_i2s_tx_running();
+
+	enum { N_FAILURES = 5 }; /* > CONFIG_ALP_SDK_MAX_I2S_HANDLES's slab depth of 2 */
+	fake_i2s_force_start_fail(-EIO, N_FAILURES);
+	alp_status_t write_rc[N_FAILURES];
+	size_t       depth_after[N_FAILURES];
+	bool         running_after[N_FAILURES];
+	for (int i = 0; i < N_FAILURES; ++i) {
+		write_rc[i]      = write_block(h);
+		depth_after[i]   = fake_i2s_tx_queue_depth();
+		running_after[i] = fake_i2s_tx_running();
+	}
 
 	alp_i2s_close(h);
 
 	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
 	zassert_equal(start_rc, ALP_OK, "deferred start must not fail up front");
-	zassert_not_equal(
-	    write1_rc, ALP_OK, "a write into a stream whose START failed must never return ALP_OK");
-	zassert_not_equal(write2_rc, ALP_OK, "the SECOND write must retry too, not go silent");
-	zassert_false(running_after_1);
-	zassert_false(running_after_2);
+	for (int i = 0; i < N_FAILURES; ++i) {
+		zassert_equal(write_rc[i],
+		              ALP_ERR_IO,
+		              "write %d into a stream whose START keeps failing must surface the "
+		              "FORCED status, not ALP_OK and not a slab-exhaustion ALP_ERR_TIMEOUT",
+		              i);
+		zassert_equal(depth_after[i], 0u, "write %d must not strand a block in the ring", i);
+		zassert_false(running_after[i]);
+	}
 }
 
 /* Companion to the above: once the injected fault clears, a fresh
@@ -299,12 +337,14 @@ ZTEST(alp_i2s_start_defer, test_start_failure_recovers_after_fault_clears)
 	fake_i2s_force_start_fail(-EIO, 1u);
 	alp_status_t write1_rc       = write_block(h);
 	bool         running_after_1 = fake_i2s_tx_running();
+	/* MAJOR-1: the failed retry already DROPped its own block -- nothing
+	 * piles up to "release" here any more. */
+	size_t depth_after_1 = fake_i2s_tx_queue_depth();
 
-	/* Fault is one-shot (count exhausted) -- release the block that
-	 * piled up unconsumed via DROP-through-stop (pending, never really
-	 * started), then run a clean cycle. */
+	/* Fault is one-shot (count exhausted) -- a stop() here is not load-
+	 * bearing for cleanup any more (see above), just a normal idle-reset
+	 * before demonstrating a clean recovery cycle. */
 	alp_status_t stop_rc     = alp_i2s_stop(h);
-	size_t       depth       = fake_i2s_tx_queue_depth();
 	alp_status_t start2_rc   = alp_i2s_start(h);
 	alp_status_t write2_rc   = write_block(h);
 	bool         running_end = fake_i2s_tx_running();
@@ -315,11 +355,64 @@ ZTEST(alp_i2s_start_defer, test_start_failure_recovers_after_fault_clears)
 	zassert_equal(start1_rc, ALP_OK);
 	zassert_not_equal(write1_rc, ALP_OK, "forced first attempt must fail");
 	zassert_false(running_after_1);
+	zassert_equal(depth_after_1, 0u, "MAJOR-1: the failed retry must not strand a block");
 	zassert_equal(stop_rc, ALP_OK);
-	zassert_equal(depth, 0u);
 	zassert_equal(start2_rc, ALP_OK);
 	zassert_equal(write2_rc, ALP_OK, "a clean write after the fault clears must succeed");
 	zassert_true(running_end);
+}
+
+/* MAJOR-2 (issue #2132 review): the original probe sequence -- start
+ * (deferred) -> write (forced START-retry failure) -> start (explicit
+ * "retry") -> write -- used to leave tx_pending_start stuck true past a
+ * successful start() on the immediate-trigger path (z_start() set
+ * tx_started without clearing tx_pending_start), so the SECOND write
+ * would retry a START on an already-RUNNING stream and get i2s_dw's
+ * -EIO instead of just writing.
+ *
+ * MAJOR-1's fix (DROP the block on a failed retry) closes off this
+ * EXACT sequence as a live repro: after write1's DROP, tx_block_queued
+ * is false again, so start2 takes the DEFER branch (not the immediate-
+ * trigger one) and does not touch hardware -- there is no longer a
+ * window where the immediate-trigger path can observe tx_pending_start
+ * still true, because z_write() always resolves tx_pending_start (to
+ * either "started" or "still pending, block dropped") within the SAME
+ * call that set tx_block_queued, before any other call can observe it.
+ * See _mark_tx_started()'s comment for the invariant this establishes
+ * BY CONSTRUCTION regardless -- kept as defense-in-depth (protects any
+ * future caller of z_start()'s immediate branch, e.g. a refactor that
+ * reintroduces a queued-but-still-pending state).
+ *
+ * This test still pins the REQUIRED END-TO-END OUTCOME of the original
+ * sequence (the stream must end up genuinely playing, not permanently
+ * refusing writes), documenting that the INTERNAL mechanism changed:
+ * start2 now defers again (pending stays true) and write2 is what
+ * actually fires the real trigger, rather than start2 firing it
+ * directly. */
+ZTEST(alp_i2s_start_defer, test_explicit_restart_after_failed_retry_ends_up_running)
+{
+	fake_i2s_reset();
+	alp_i2s_t *h = open_tx();
+
+	alp_status_t start1_rc = alp_i2s_start(h);
+	fake_i2s_force_start_fail(-EIO, 1u);
+	alp_status_t write1_rc            = write_block(h);
+	alp_status_t start2_rc            = alp_i2s_start(h);
+	bool         running_after_start2 = fake_i2s_tx_running();
+	alp_status_t write2_rc            = write_block(h);
+	bool         running_after_write2 = fake_i2s_tx_running();
+
+	alp_i2s_close(h);
+
+	zassert_not_null(h, "alp_i2s_open() must resolve the fake alp-i2s0 device (TX)");
+	zassert_equal(start1_rc, ALP_OK);
+	zassert_not_equal(write1_rc, ALP_OK, "forced first attempt must fail");
+	zassert_equal(start2_rc, ALP_OK, "the explicit restart must not fail");
+	/* Post-MAJOR-1: start2 defers again (nothing queued yet), so it must
+	 * NOT be running until write2 fires it. */
+	zassert_false(running_after_start2);
+	zassert_equal(write2_rc, ALP_OK, "write into what must become a running stream must not fail");
+	zassert_true(running_after_write2);
 }
 
 /* RX must be unaffected by any of the above: rx_stream_start() allocates

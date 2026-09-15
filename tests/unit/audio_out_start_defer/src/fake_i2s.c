@@ -35,6 +35,20 @@
  * RX is untouched: the portable audio-out / plain <alp/i2s.h> TX paths
  * this issue is about never open RX, so RX trigger()/write() always
  * succeed trivially, same as tests/unit/i2s_write_bounds' fake.
+ *
+ * fake_i2s_force_start_fail() pins THIS BACKEND's logic, not i2s_dw
+ * fidelity (issue #2132 review, NIT). It can fail a TRIGGER_START while
+ * the ring holds a block and the fake is READY-equivalent -- a state
+ * real i2s_dw would answer with success (queue_get() only fails on an
+ * EMPTY ring, i2s_dw.c:794-798, and the READY-state check is the only
+ * OTHER way START fails, i2s_dw.c:279-283). This fake also has no
+ * ERROR/underrun state and accepts write() in any state, unlike
+ * i2s_dw_write() (i2s_dw.c:390-394). Tests using the force-fail knob
+ * are exercising this backend's retry-and-DROP bookkeeping under an
+ * injected fault, standing in for whatever real cause (a genuine
+ * hardware fault, a clock glitch) could make a START fail after the
+ * empty-queue case is already ruled out -- they are not a claim that
+ * THIS EXACT trigger sequence is reachable on real i2s_dw.
  */
 
 #define DT_DRV_COMPAT alp_test_i2s
