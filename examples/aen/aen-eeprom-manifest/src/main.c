@@ -224,7 +224,8 @@ int main(void)
 		}
 
 		if (id.lock_valid) {
-			printf("[manifest]   Secure Page Lock Status : %s\n",
+			printf("[manifest]   Secure Page Lock Status : 0x%02x (%s)\n",
+			       (unsigned)id.lock_status,
 			       id.secure_page_locked ? "LOCKED (permanent)" : "UNLOCKED");
 		} else {
 			printf("[manifest]   Secure Page Lock Status : NACK (expected on the "

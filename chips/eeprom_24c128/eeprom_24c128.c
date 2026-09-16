@@ -140,6 +140,7 @@ alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_ide
 	uint8_t lock_byte = 0;
 	if (alp_i2c_write_read(ctx->bus, alt_addr, ptr, sizeof(ptr), &lock_byte, 1) == ALP_OK) {
 		out->lock_valid         = true;
+		out->lock_status        = lock_byte;
 		out->secure_page_locked = (lock_byte & 0x02u) != 0u;
 	}
 

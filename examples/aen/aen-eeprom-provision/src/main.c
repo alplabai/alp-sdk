@@ -840,6 +840,14 @@ int main(void)
 		       "M24128-BFMH6TG alternate?); nothing to lock\n");
 		return 0;
 	}
+	/* Log the byte, not just the decode.  secure_page_locked is this byte's
+     * bit 1, and that polarity has never been confirmed against a part that
+     * was actually locked -- so the raw value before and after is the only
+     * evidence that can tell a failed lock from a correct lock whose
+     * indication is not where we think it is. */
+	printf("[provision] Lock Status before: 0x%02x, Device Config: 0x%02x\n",
+	       (unsigned)id.lock_status,
+	       (unsigned)id.device_config);
 	if (id.secure_page_locked) {
 		/* Do NOT report PASS on trust alone. A wrongly-locked page (an
          * all-0xFF page locked before ever being written, or one locked
@@ -936,13 +944,17 @@ int main(void)
      * whose lock state it never actually confirmed. The already-locked branch
      * above reaches its verdict from id.secure_page_locked; this is the same
      * evidence for the branch that just did the locking. */
+	printf("[provision] Lock Status after: 0x%02x, Device Config: 0x%02x\n",
+	       (unsigned)post.lock_status,
+	       (unsigned)post.device_config);
 	if (!post.lock_valid || !post.secure_page_locked) {
 		printf("RESULT FAIL: Secure Data Page lock state is UNCONFIRMED after "
-		       "the lock (lock_valid=%d, locked=%d) -- do not ship this module "
-		       "until Lock Status has been read back successfully; the lock "
-		       "cannot be undone\n",
+		       "the lock (lock_valid=%d, locked=%d, raw=0x%02x) -- do not ship "
+		       "this module until Lock Status has been read back successfully; "
+		       "the lock cannot be undone\n",
 		       (int)post.lock_valid,
-		       (int)post.secure_page_locked);
+		       (int)post.secure_page_locked,
+		       (unsigned)post.lock_status);
 		return 0;
 	}
 	if (!post.secure_page_valid ||

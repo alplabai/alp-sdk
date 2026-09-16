@@ -159,3 +159,15 @@ libFuzzer harness (where the cast additionally defeated the harness's own
 purpose — an x86 host tolerates the unaligned read silently, so the bug it
 exists to catch on the real ARM target could never trip). All now `memcpy`
 into an aligned local instead of casting a `uint8_t[]`/`uint8_t*` buffer.
+
+`eeprom_24c128_identity_t` also gains `lock_status`, the Lock Status Read
+byte verbatim, alongside the `secure_page_locked` bool it already carried.
+The bool is that byte's bit 1, and that polarity is transcribed from the
+provisioning procedure rather than confirmed against a part that has
+actually been locked — so on a first production lock the bool alone cannot
+distinguish "the lock did not take" from "the lock took and the indication
+is not bit 1", on an operation that cannot be repeated. Mode 3 now logs the
+raw byte before and after the lock and includes it in the UNCONFIRMED
+failure message, and `aen-eeprom-manifest` prints it beside the decode.
+`device_config` was already surfaced raw; this gives Lock Status the same
+treatment.

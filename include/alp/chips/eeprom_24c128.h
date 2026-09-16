@@ -119,6 +119,15 @@ typedef struct {
 	uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES];
 	bool    lock_valid;
 	bool    secure_page_locked; /**< Lock Status Read bit 1; 1 = locked (permanent). */
+	/** Lock Status Read, verbatim.  @ref secure_page_locked is this byte's
+	 *  bit 1, and that polarity is [PAPER-ONLY] -- transcribed from the
+	 *  provisioning procedure, never yet confirmed against a part that has
+	 *  actually been locked.  Keep the raw byte so a first production lock
+	 *  can be diagnosed: on an unexpected result the bool alone cannot tell
+	 *  "the lock did not take" from "the lock took and the indication is
+	 *  not bit 1".  Bench-observed `0xFD` on unlocked 2026W36 units.
+	 *  Meaningless unless @ref lock_valid. */
+	uint8_t lock_status;
 	bool    device_config_valid;
 	/** Device Configuration Register.  Per the N24S128 datasheet Table 9 the
 	 *  layout is `b7 b6 b5 = A2 A1 A0`, `b1 = SWP`, and `b4 b3 b2 b0`

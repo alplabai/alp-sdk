@@ -3828,7 +3828,7 @@
       },
       "typedefs": {
         "eeprom_24c128_identity_t": {
-          "definition": "typedef struct { bool secure_page_valid; uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]; bool unique_id_valid; uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]; bool lock_valid; bool secure_page_locked; bool device_config_valid; uint8_t device_config; } eeprom_24c128_identity_t;",
+          "definition": "typedef struct { bool secure_page_valid; uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]; bool unique_id_valid; uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]; bool lock_valid; bool secure_page_locked; uint8_t lock_status; bool device_config_valid; uint8_t device_config; } eeprom_24c128_identity_t;",
           "fields": [
             "bool secure_page_valid",
             "uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]",
@@ -3836,10 +3836,11 @@
             "uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]",
             "bool lock_valid",
             "bool secure_page_locked",
+            "uint8_t lock_status",
             "bool device_config_valid",
             "uint8_t device_config"
           ],
-          "hash": "1bbd940540929b8e",
+          "hash": "d75e1b71f9187135",
           "kind": "struct"
         },
         "eeprom_24c128_t": {
