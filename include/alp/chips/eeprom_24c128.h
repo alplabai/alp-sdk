@@ -40,15 +40,26 @@
  *     acknowledge-polling delay, bench-found on this same SoC I2C2 bus on
  *     2026-06-15 -- see `poll_for_ack_at()`.)
  *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
- *     are [UNTESTED] / [PAPER-ONLY]: the exact wire bytes they issue are
- *     transcribed literally from
- *     `docs/som-batch-provisioning-procedure.md` §7 in alp-sdk-internal
- *     (the only source available -- no vendor datasheet PDF for this
- *     command sequence is checked into either repo), and nothing has run
- *     them against silicon.  The Secure Data Page lock is one-shot and
- *     permanent, so treat both functions as needing a real bench run
- *     against a throwaway/pre-production unit before the first production
- *     lock, not as proven by this header shipping.
+ *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
+ *     are [BENCH-VERIFIED] as of 2026-09-16.  Their wire bytes were originally
+ *     transcribed from `docs/som-batch-provisioning-procedure.md` section 7
+ *     in alp-sdk-internal (still the only written source -- no vendor
+ *     datasheet PDF for this command sequence is checked into either repo),
+ *     and have now been exercised against real silicon on three E1M-AEN
+ *     modules: 2026W36-0005 (E4, `AE402FA0E5597LE0`) and 2026W36-0006 /
+ *     2026W36-0007 (E8, `AE822FA0E5597LS0`).  On each one the 64-byte page
+ *     read back byte-identical to the staged blob after a cold power cycle,
+ *     the lock frame `{0x04, 0x00, 0xFF}` took, and Lock Status moved
+ *     `0xFD` -> `0xFF` -- setting exactly bit 1 and nothing else -- and
+ *     survived a further cold power cycle.  Device Config stayed `0x1D`
+ *     throughout and was never written.
+ *
+ *     The lock remains one-shot and permanent.  Bench-verified means the
+ *     sequence is known to work, NOT that it is safe to run casually: the
+ *     caller is still responsible for proving the page holds the intended
+ *     bytes, after a cold cycle, before locking.  See
+ *     `examples/aen/aen-eeprom-provision` mode 3 for the gates that
+ *     enforce that.
  *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and
@@ -120,12 +131,14 @@ typedef struct {
 	bool    lock_valid;
 	bool    secure_page_locked; /**< Lock Status Read bit 1; 1 = locked (permanent). */
 	/** Lock Status Read, verbatim.  @ref secure_page_locked is this byte's
-	 *  bit 1, and that polarity is [PAPER-ONLY] -- transcribed from the
-	 *  provisioning procedure, never yet confirmed against a part that has
-	 *  actually been locked.  Keep the raw byte so a first production lock
-	 *  can be diagnosed: on an unexpected result the bool alone cannot tell
-	 *  "the lock did not take" from "the lock took and the indication is
-	 *  not bit 1".  Bench-observed `0xFD` on unlocked 2026W36 units.
+	 *  bit 1, and that polarity is [BENCH-VERIFIED] (2026-09-16): across
+	 *  three modules the byte moved `0xFD` -> `0xFF` over the lock, setting
+	 *  exactly bit 1, and held `0xFF` through a cold power cycle.  The raw
+	 *  byte is kept because it is what made that confirmation possible, and
+	 *  because on an unexpected result the bool alone cannot tell "the lock
+	 *  did not take" from "the lock took and the indication is not bit 1"
+	 *  -- on an operation that cannot be repeated.  `0xFD` is an unlocked
+	 *  page; the other bits are don't-cares reading 1.
 	 *  Meaningless unless @ref lock_valid. */
 	uint8_t lock_status;
 	bool    device_config_valid;

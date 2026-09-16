@@ -171,3 +171,15 @@ raw byte before and after the lock and includes it in the UNCONFIRMED
 failure message, and `aen-eeprom-manifest` prints it beside the decode.
 `device_config` was already surfaced raw; this gives Lock Status the same
 treatment.
+
+The Secure Data Page write and lock are no longer `[PAPER-ONLY]`. Both ran
+against real silicon on 2026-09-16, on three E1M-AEN modules — `2026W36-0005`
+(E4, `AE402FA0E5597LE0`) and `2026W36-0006` / `2026W36-0007` (E8,
+`AE822FA0E5597LS0`). On each the 64-byte page read back byte-identical to the
+staged blob after a cold power cycle, the lock frame `{0x04, 0x00, 0xFF}` took,
+and Lock Status moved `0xFD` → `0xFF`, setting exactly bit 1 and holding it
+through a further cold cycle; Device Config stayed `0x1D` and was never
+written. That is the first evidence for the `(byte & 0x02) != 0` polarity the
+driver has always assumed. `include/alp/chips/eeprom_24c128.h`,
+`docs/verification-status.md` and `docs/test-plan.md` say so; the operation is
+still one-shot and irreversible, and no automated HIL job covers it.
