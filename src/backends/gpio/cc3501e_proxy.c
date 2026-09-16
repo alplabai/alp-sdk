@@ -18,6 +18,25 @@
  * CC3501E nor the Alif SoC, e.g. AEN r2's IO21), so delegating them would
  * silently open and drive a pin that goes nowhere (issue #1854).
  *
+ * A THIRD list, cc3501e_gpio_rev_dependent[] -- SDK-owned, not a board list
+ * like the two above -- names E1M pads whose
+ * target chip (CC3501E vs the Alif SoC vs unrouted) metadata/e1m_modules/
+ * aen/hw-revisions.yaml `pad_route_overrides:` moves between AEN hw_revs --
+ * IO8/IO10/IO21 today.  A route table is always compiled for ONE hw_rev; on
+ * any OTHER hw_rev, opening one of these pins would silently drive a
+ * DIFFERENT physical net than the caller asked for -- on r1, IO21 reaches
+ * CC3501E GPIO_30, which is tied to +3V3 through R198 and a fitted P18
+ * jumper (a contention hazard, not just a functional miss).  px_open()
+ * refuses a pin on this list with ALP_ERR_NOSUPPORT UNLESS a CRC-valid
+ * identity-EEPROM manifest (<alp/hw_info.h>) confirms the running module's
+ * hw_rev equals CONFIG_ALP_SDK_SOM_HW_REV -- the hw_rev the board's route
+ * table (and this list) were built for.  FAILS CLOSED: a missing,
+ * unprovisioned or corrupt manifest refuses the pin, replacing the old
+ * fail-open, all-or-nothing g_hw_rev_mismatch guard (#1859) that dropped
+ * every proxied pin -- including revision-INDEPENDENT ones like IO20, the
+ * SD mux enable -- on any hw_rev disagreement, or silently kept routing
+ * when the manifest could not be read at all.  See issue #2144.
+ *
  * Because gpio uses one backend per SoC (alp_backend_select picks by
  * silicon_ref + priority), this proxy registers at a HIGHER priority than the
  * "*" platform backend and fans out per-pin internally.  It is OFF by default
@@ -36,6 +55,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <zephyr/logging/log.h>
+
 #include <alp/backend.h>
 #include <alp/cap_instance.h>
 #include <alp/chips/cc3501e.h>
@@ -43,11 +64,23 @@
 
 #include "gpio_ops.h"
 #include "alp_slot_claim.h"
+#include "cc3501e_proxy_internal.h"
 
 #if defined(CONFIG_ALP_SDK_HW_INFO)
-#include <alp/hw_info.h>      /* alp_hw_info_read(), alp_hw_info_t, ALP_OK */
-#include "hw_info_manifest.h" /* alp_hw_info_build_hw_rev_mismatch() -- internal, issue #1859 */
+#include <alp/hw_info.h> /* alp_hw_info_read(), alp_hw_info_assert_matches_build() */
 #endif
+
+LOG_MODULE_REGISTER(alp_gpio_cc3501e_proxy, CONFIG_LOG_DEFAULT_LEVEL);
+
+/* Defined in the SDK-owned generated file src/backends/gpio/
+ * cc3501e_rev_dependent_pins.c (scripts/gen_cc3501e_gpio_routes.py), NOT
+ * declared in the public <alp/chips/cc3501e/gpio.h> -- unlike
+ * cc3501e_gpio_routes[]/cc3501e_gpio_unrouted[] above (board-provided,
+ * declared in that header), this list is identical on every AEN board and
+ * has exactly one definition, always linked alongside this file
+ * (zephyr/CMakeLists.txt), never overridden (issue #2144 design review). */
+extern const uint32_t cc3501e_gpio_rev_dependent[];
+extern const size_t   cc3501e_gpio_rev_dependent_count;
 
 /* GPIO is fast (no worker / no radio bring-up) in the CC3501E firmware, but the
  * bridge link is briefly down if a radio op overlaps; the per-request helper
@@ -82,20 +115,79 @@
  * also delegate (no bridge to talk to yet). */
 static cc3501e_t *g_bridge_ctx;
 
-#if defined(CONFIG_ALP_SDK_HW_INFO)
 /* Cached ONCE in alp_gpio_cc3501e_attach() (not re-read per alp_gpio_open(),
  * which would put an EEPROM I2C transaction on every proxied pin open).
- * True when the live module's hw_rev disagrees with CONFIG_ALP_SDK_SOM_HW_REV
- * -- the rev this build's cc3501e_gpio_routes[] table was generated for
- * (scripts/gen_cc3501e_gpio_routes.py, issue #1859).  Mirrors #1853's boot
- * banner check (src/zephyr/alp_banner.c); this is the "stronger guard" that
- * fix deferred: the AEN family moves IO8/IO10/IO21 between the Alif and the
- * CC3501E across hw_rev, so a route table compiled for the wrong revision
- * would otherwise silently drive a different physical pin than the caller
- * asked for.  Stays false (never refuses) when the manifest can't be read
- * (NOT_PROVISIONED / no EEPROM bus wired / NOSUPPORT) -- same floor as the
- * banner check: a factory-fresh or EEPROM-less module never trips this. */
-static bool g_hw_rev_mismatch;
+ * Declared unconditionally (not inside a CONFIG_ALP_SDK_HW_INFO guard) so a
+ * build with the hw_info reader compiled OUT still has a well-defined,
+ * FAIL-CLOSED value: false, "not confirmed" -- see is_rev_dependent()'s use
+ * of it in px_open() below.  True only when attach() proved the running
+ * module's hw_rev equals CONFIG_ALP_SDK_SOM_HW_REV, the rev this board's
+ * cc3501e_gpio_routes[] table was built for (cc3501e_gpio_rev_dependent[]
+ * itself is not per-rev -- it is the SDK-owned, identical-on-every-AEN-board
+ * list of pins that need this check at all; see the file header)
+ * (issue #2144). */
+static bool g_hw_rev_confirmed_match;
+
+#if defined(CONFIG_ALP_SDK_HW_INFO)
+/* Pure decision, no I2C: does @p read_status + @p info -- an
+ * alp_hw_info_read() result -- confirm the running module's hw_rev matches
+ * CONFIG_ALP_SDK_SOM_HW_REV?  Split out from alp_gpio_cc3501e_attach() so a
+ * native_sim test can drive every case (matching / mismatched / corrupt /
+ * missing manifest) with a crafted status + alp_hw_info_t, the same
+ * testability split alp_hw_info_classify_manifest() uses
+ * (src/zephyr/hw_info_zephyr.c) for the manifest reader itself.
+ *
+ * @p read_status must be ALP_OK (a CRC-valid manifest -- alp_hw_info_read()
+ * only returns ALP_OK past magic + schema_version + CRC32 validation) for a
+ * match to be possible at all; alp_hw_info_assert_matches_build() then does
+ * the bounded hw_rev compare, itself refusing a match against an empty
+ * CONFIG_ALP_SDK_SOM_HW_REV (a build that never recorded which hw_rev its
+ * route table targets fails closed too, not "nothing to compare"). */
+bool cc3501e_proxy_hw_rev_confirmed_match(alp_status_t read_status, const alp_hw_info_t *info)
+{
+	return read_status == ALP_OK &&
+	       alp_hw_info_assert_matches_build(info, NULL, CONFIG_ALP_SDK_SOM_HW_REV) == ALP_OK;
+}
+#endif
+
+#if defined(CONFIG_ZTEST)
+/* Test-only hook: force the cached decision without a real EEPROM read.
+ * native_sim has no I2C EEPROM to back alp_hw_info_read(), so a ztest
+ * exercising px_open()'s per-pin gate (as opposed to
+ * cc3501e_proxy_hw_rev_confirmed_match()'s own logic, which it can call
+ * directly) has no other way to reach the "confirmed" state.  Never called
+ * by production code -- compiled only into CONFIG_ZTEST=y test images. */
+void cc3501e_proxy_test_force_hw_rev_confirmed_match(bool confirmed)
+{
+	g_hw_rev_confirmed_match = confirmed;
+}
+
+/* Test-only hook: arm a canned alp_hw_info_read() result for the next
+ * alp_gpio_cc3501e_attach() call.  See cc3501e_proxy_internal.h for why
+ * this (not the force hook above) is the seam a POSITIVE attach() test
+ * needs -- it swaps only alp_hw_info_read()'s source, so attach()'s own
+ * cc3501e_proxy_hw_rev_confirmed_match() call and cache assignment still
+ * run for real. */
+static bool          g_test_hw_info_armed;
+static alp_status_t  g_test_hw_info_status;
+static alp_hw_info_t g_test_hw_info_info;
+
+void cc3501e_proxy_test_inject_hw_info_read(alp_status_t status, const alp_hw_info_t *info)
+{
+	g_test_hw_info_armed  = true;
+	g_test_hw_info_status = status;
+	if (info != NULL) {
+		g_test_hw_info_info = *info;
+	} else {
+		memset(&g_test_hw_info_info, 0, sizeof(g_test_hw_info_info));
+	}
+}
+
+/* Test-only teardown: see cc3501e_proxy_internal.h. */
+void cc3501e_proxy_test_reset_bridge_ctx(void)
+{
+	g_bridge_ctx = NULL;
+}
 #endif
 
 alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
@@ -104,8 +196,39 @@ alp_status_t alp_gpio_cc3501e_attach(cc3501e_t *ctx)
 	g_bridge_ctx = ctx;
 #if defined(CONFIG_ALP_SDK_HW_INFO)
 	alp_hw_info_t info;
-	if (alp_hw_info_read(&info) == ALP_OK) {
-		g_hw_rev_mismatch = alp_hw_info_build_hw_rev_mismatch(&info, CONFIG_ALP_SDK_SOM_HW_REV);
+	alp_status_t  rc;
+#if defined(CONFIG_ZTEST)
+	/* One-shot test injection (see cc3501e_proxy_test_inject_hw_info_read()
+	 * above): lets a positive attach() test prove this function's real
+	 * body -- not the force hook -- turns a confirmed manifest into
+	 * g_hw_rev_confirmed_match=true, without native_sim needing a real I2C
+	 * EEPROM. Disarmed immediately so a later attach() without re-arming
+	 * falls through to the real read below. */
+	if (g_test_hw_info_armed) {
+		g_test_hw_info_armed = false;
+		rc                   = g_test_hw_info_status;
+		info                 = g_test_hw_info_info;
+	} else
+#endif
+	{
+		rc = alp_hw_info_read(&info);
+	}
+	g_hw_rev_confirmed_match = cc3501e_proxy_hw_rev_confirmed_match(rc, &info);
+	/* Diagnostic (issue #2144 review): attach() runs once at bring-up, so
+	 * every revision-dependent pin's later refusal traces back to THIS
+	 * decision -- log it once here instead of leaving a bench engineer to
+	 * infer "not confirmed" from a bare ALP_ERR_NOSUPPORT on IO8. rc==ALP_OK
+	 * means info.som_hw_rev is a CRC-valid read; any other rc leaves it
+	 * zero-filled (alp_hw_info_read()'s documented contract), so print
+	 * "(unread)" rather than a misleadingly empty string. */
+	if (!g_hw_rev_confirmed_match) {
+		LOG_WRN_ONCE("hw_rev not confirmed: alp_hw_info_read()=%d, manifest "
+		             "som_hw_rev=\"%s\", build CONFIG_ALP_SDK_SOM_HW_REV=\"%s\" -- "
+		             "revision-dependent E1M pins (IO8/IO10/IO21) will refuse "
+		             "ALP_ERR_NOSUPPORT",
+		             (int)rc,
+		             rc == ALP_OK ? info.som_hw_rev : "(unread)",
+		             CONFIG_ALP_SDK_SOM_HW_REV);
 	}
 #endif
 	return ALP_OK;
@@ -154,17 +277,9 @@ static void _free_side(proxy_side_t *s)
 }
 
 /* Look up a portable pin_id in the board route table.  Returns true + the raw
- * CC3501E GPIO index when the pin is proxied.  Returns false unconditionally
- * on a detected hw_rev mismatch (issue #1859): px_open()'s caller then
- * delegates to the platform driver instead of driving the wrong physical
- * chip, the same fallback an un-populated route table already gets. */
+ * CC3501E GPIO index when the pin is proxied. */
 static bool route_lookup(uint32_t pin_id, uint8_t *raw_out)
 {
-#if defined(CONFIG_ALP_SDK_HW_INFO)
-	if (g_hw_rev_mismatch) {
-		return false;
-	}
-#endif
 	for (size_t i = 0; i < cc3501e_gpio_route_count; ++i) {
 		if (cc3501e_gpio_routes[i].pin_id == pin_id) {
 			*raw_out = cc3501e_gpio_routes[i].cc35_gpio;
@@ -183,6 +298,45 @@ static bool is_unrouted(uint32_t pin_id)
 	return false;
 }
 
+/* Look up a portable pin_id in the board's revision-dependent list (issue
+ * #2144) -- an E1M pad whose target chip metadata/e1m_modules/aen/
+ * hw-revisions.yaml `pad_route_overrides:` moves across hw_revs, so a route
+ * table built for one hw_rev is only correct on that ONE hw_rev. */
+static bool is_rev_dependent(uint32_t pin_id)
+{
+	for (size_t i = 0; i < cc3501e_gpio_rev_dependent_count; ++i) {
+		if (cc3501e_gpio_rev_dependent[i] == pin_id) return true;
+	}
+	return false;
+}
+
+/* One-shot-per-pin diagnostic (issue #2144 review): px_open() also returns
+ * ALP_ERR_NOSUPPORT for an UNROUTED pin (the is_unrouted() check in px_open()
+ * below), so a bare error code
+ * alone doesn't tell a bench engineer which guard fired.  Logs at most once
+ * per DISTINCT revision-dependent pin_id -- not once ever (that would miss
+ * every pin after the first this process happens to refuse) and not once
+ * per call (a caller retrying alp_gpio_open() on the same refused pin would
+ * otherwise flood the log).
+ * ponytail: a 32-bit mask caps individual dedup at the first 32 entries of
+ * cc3501e_gpio_rev_dependent[] (today: 3); pin #33 in a future hw-revisions.yaml
+ * would just log on every refusal instead of once -- widen to a wider
+ * bitset if that list ever grows that large. */
+static uint32_t g_rev_dependent_warned_mask;
+
+static void warn_rev_dependent_refused(uint32_t pin_id)
+{
+	for (size_t i = 0; i < cc3501e_gpio_rev_dependent_count && i < 32u; ++i) {
+		if (cc3501e_gpio_rev_dependent[i] != pin_id) continue;
+		if (g_rev_dependent_warned_mask & (1u << i)) return;
+		g_rev_dependent_warned_mask |= (1u << i);
+		LOG_WRN("alp_gpio_open(pin_id=%u) refused by the #2144 revision guard "
+		        "(not the #1854 unrouted-pad guard): manifest hw_rev unconfirmed",
+		        pin_id);
+		return;
+	}
+}
+
 static alp_status_t
 px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *caps)
 {
@@ -192,6 +346,18 @@ px_open(uint32_t pin_id, alp_gpio_backend_state_t *state, alp_capabilities_t *ca
 	 * checking here (not in one example / one caller) covers every app
 	 * (issue #1854). */
 	if (is_unrouted(pin_id)) return ALP_ERR_NOSUPPORT;
+
+	/* Refuse a REVISION-DEPENDENT pin PER PIN, not all-or-nothing, unless
+	 * a CRC-valid manifest confirmed this build's hw_rev is the one its
+	 * route table was compiled for.  FAILS CLOSED -- unlike the #1859
+	 * guard this replaces, an unreadable/missing manifest refuses here
+	 * too, and a revision-INDEPENDENT pin (e.g. IO20, the SD mux enable)
+	 * never reaches this check at all, so it keeps routing/delegating
+	 * exactly as before regardless of the manifest (issue #2144). */
+	if (is_rev_dependent(pin_id) && !g_hw_rev_confirmed_match) {
+		warn_rev_dependent_refused(pin_id);
+		return ALP_ERR_NOSUPPORT;
+	}
 
 	proxy_side_t *s = _alloc_side();
 	if (s == NULL) return ALP_ERR_NOMEM;

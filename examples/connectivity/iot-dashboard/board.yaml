@@ -45,6 +45,9 @@ chips:
   - bme280                   # Environment sensor.
   - optiga_trust_m           # Planned TLS trust-anchor / handshake offload.
   - st7789                   # 240x320 TFT.
+  - cc3501e                  # Declared because src/cc3501e_bridge.h (#2112)
+                             # includes <alp/chips/cc3501e.h> directly; Wi-Fi
+                             # itself still arrives through <alp/iot.h> below.
   # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
   # surface; on AEN the generator resolves `on_module.wifi_ble:
   # cc3501e` and emits the CC3501E bridge backend.  V2N carries

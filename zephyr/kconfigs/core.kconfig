@@ -130,20 +130,32 @@ config ALP_SDK_SOM_HW_REV
 	  back to the SKU preset's `default_hw_rev`), emitted into the
 	  generated alp.conf by scripts/alp_orchestrate.py
 	  (kconfig.py::_emit_som_caps).  This is the build's resolved
-	  identity ONLY -- nothing in the compiled firmware derives a
-	  pad-routing table from it.  The SoM preset's `pad_routes`/
-	  `pad_route_overrides` data (scripts/alp_project_loader.py) is
-	  read only by scripts/alp_project_emit/bom_netlist.py, for the
-	  debug/BOM `--emit composed-route-table` / `--emit carrier-netlist`
-	  surfaces -- no header/C table/DT overlay a real build produces is
-	  generated from it.
+	  identity, primarily consumed as a comparison target, not a
+	  pad-routing source: the SoM preset's `pad_routes`/
+	  `pad_route_overrides` data (scripts/alp_project_loader.py) is read
+	  at BUILD time by scripts/alp_project_emit/bom_netlist.py (debug/BOM
+	  `--emit composed-route-table` / `--emit carrier-netlist`) and by
+	  scripts/gen_cc3501e_gpio_routes.py, which resolves it into each AEN
+	  example's cc3501e_gpio_routes[] -- this symbol is NOT itself an
+	  input to that resolution (the board.yaml `som.hw_rev` field is), it
+	  is only compared against what was already resolved.  At RUNTIME,
+	  on an AEN target with CONFIG_ALP_SDK_GPIO_CC3501E_PROXY on,
+	  src/backends/gpio/cc3501e_proxy.c's px_open() DOES derive a per-pin
+	  decision from this symbol: it refuses IO8/IO10/IO21 (the pads
+	  metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides:`
+	  moves across hw_revs) with ALP_ERR_NOSUPPORT unless a CRC-valid
+	  identity-EEPROM manifest confirms the running module's hw_rev
+	  equals THIS symbol -- see issue #2144.
 
-	  When CONFIG_ALP_SDK_HW_INFO is also on, the boot banner compares
-	  this against the LIVE revision read from the on-module identity
-	  EEPROM and warns on a mismatch -- see
-	  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL and issue #1853.  Empty when
-	  built without alp_orchestrate.py, in which case there is nothing
-	  to compare and the check never fires.
+	  When CONFIG_ALP_SDK_HW_INFO is also on, the boot banner separately
+	  compares this against the LIVE revision read from the on-module
+	  identity EEPROM and warns on a mismatch -- see
+	  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL and issue #1853.  Empty means
+	  the CC3501E proxy guard above fails CLOSED (refuses every
+	  revision-dependent pin, since there is nothing to confirm a match
+	  against) rather than "the check never fires"; the boot-banner
+	  compare specifically never fires when built without
+	  alp_orchestrate.py, since there is nothing for IT to compare.
 
 config ALP_SDK_HW_REV_MISMATCH_FATAL
 	bool "Halt boot on a SoM hw_rev mismatch instead of only warning"
