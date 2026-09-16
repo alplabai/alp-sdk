@@ -4482,6 +4482,417 @@ static int ur_main(void)
 
 #endif /* PROBE_UNDERRUN */
 
+/* ================================================================== */
+/* PROBE_RX_TEARDOWN -- #2171 (phase 1 of #2150) RX-teardown clock-ownership
+ * bench verification */
+/* ================================================================== */
+/* Compile-time mode, same shape as every PROBE_* above: `west build ... --
+ * -DPROBE_RX_TEARDOWN=1` replaces main()'s ENTIRE body with rxt_main();
+ * with none of the PROBE_* switches defined, main() is unchanged, and with
+ * exactly one defined, every other mode's block (including this one) is
+ * preprocessed away -- so none of the other builds' object code moves by
+ * adding this one. rxt_main() duplicates PROBE_UNDERRUN's bring-up AND its
+ * own step-2 TX-underrun-arm sequence rather than sharing a helper with it,
+ * for the same byte-identity reason PROBE_RESUME2's own header gives:
+ * ur_main() is already bench-verified (#2131/#2149), and extracting a
+ * shared helper out of it risks it no longer being byte-identical to the
+ * image that verification ran against.
+ *
+ * WHAT THIS PROVES, AND WHY THE ORIGINAL "an RX overrun during active TX"
+ * WORDING IS UNRUNNABLE ON THIS DRIVER: zephyr/drivers/i2s/i2s_dw.c is
+ * half-duplex by construction -- i2s_dw_configure() maps I2S_DIR_BOTH to
+ * -ENOSYS, and dev_data->dir is a single field every configure() call
+ * overwrites, so RX and TX can never run simultaneously through this
+ * driver; simultaneous duplex is out of scope for #2150 phase 1 (see that
+ * fix's own file-header "Two gaps remain" note) and is not attempted here.
+ * Issue #2171 (fix/2150-rx-clock-ownership) does not need simultaneous
+ * duplex to prove itself -- it needs TX in a state where the shared bit
+ * clock is DELIBERATELY still running (tx_clock_is_live():
+ * tx.state==RUNNING OR tx.clk_restart_skip_ok, ANDed with the hardware
+ * CER.CLKEN read), then an RX teardown through rx_stream_disable() -- the
+ * single shared body reached from RX STOP/DRAIN/DROP and every RX-ISR
+ * error exit. Sequence:
+ *   1. Bring up both amps, start TX, confirm CER=1 and PWR_CTL=0x0c/0x0c --
+ *      identical bring-up to ur_main()'s own step 1.
+ *   2. Drive a TX underrun (ur_main()'s own step-2 zero-block-stall
+ *      pattern, duplicated here as rxt_write_zero_block(s)()) so the
+ *      queue-empty ISR exit arms tx.clk_restart_skip_ok and keeps
+ *      CER.CLKEN set -- confirmed by the SAME CER/TER +100ms read
+ *      ur_main() already does; reused rather than reinvented.
+ *   3. NEW: configure + start I2S3 in RX (<alp/i2s.h>, ALP_I2S_DIR_RX,
+ *      bus_id 0 -- the alp-i2s0 alias already points at i2s3, the SAME
+ *      device TX just opened; see z_open()'s i2s_configure() call in
+ *      src/backends/i2s/zephyr_drv.c), then stop it. RX's real START/STOP
+ *      triggers never defer (unlike TX -- see z_start()'s own doc
+ *      comment), so alp_i2s_start()/alp_i2s_stop() drive
+ *      i2s_dw_trigger(RX, START) -> rx_stream_start() and
+ *      i2s_dw_trigger(RX, DRAIN) -> rx_stream_disable() directly -- the
+ *      exact code path #2171 changes. sample_rate_hz is set to
+ *      SOUND_SAMPLE_RATE_HZ, matching TX's own rate exactly, so
+ *      rx_stream_start()'s tx-live-at-a-different-rate guard (-EBUSY,
+ *      #2150 phase 1's own new refusal) does not fire -- TX is live at
+ *      the SAME rate RX is asking for, so the shared CCR divider is left
+ *      alone and only CER/the RX channel/interrupt/block are touched,
+ *      exactly the case this fix protects.
+ *   4. NEW: re-read CER and both amps' PWR_CTL (rxt_regs(), the same
+ *      ur_regs() shape) and print. PASS iff CER bit0=1 and both amps
+ *      still read 0x0c -- the pre-fix behaviour is CER bit0=0 and/or an
+ *      amp latched into 0x0e.
+ *
+ * IS I2S RX DRIVABLE HERE AT ALL? YES, at the register/state-machine
+ * level, which is everything this test needs -- but NOT for real captured
+ * audio, and this mode never asks for that. <alp/i2s.h> exposes
+ * ALP_I2S_DIR_RX end-to-end (alp_i2s_open()/_start()/_stop(),
+ * src/backends/i2s/zephyr_drv.c) down to the exact
+ * i2s_dw_configure(I2S_DIR_RX, ...) / i2s_dw_trigger(I2S_DIR_RX,
+ * START|STOP) path this mode needs. What is NOT wired: the board
+ * overlay's `pinctrl_i2s3` group declares only SDO/SCLK/WS (P9_3/4/5) --
+ * SDI (P9_2, I2S3_SDI_A) is not in the group, because no PROBE_* mode
+ * before this one ever read over I2S3 (see the overlay's own "SDI (P9_2)
+ * is not declared" comment). This mode does NOT add it, and never calls
+ * alp_i2s_read() -- rx_stream_disable() and the clock-ownership state
+ * machine it is part of do not depend on what is electrically present on
+ * SDI; they are driven entirely by i2s_dw_trigger()'s START/STOP state
+ * transitions and the shared CER/CCR hardware, which this mode exercises
+ * fully without ever touching the RX FIFO's actual contents. Reading real
+ * RX data would need SDI muxed AND something driving it -- a SEPARATE
+ * bench question from clock ownership, and explicitly out of scope:
+ * adding it here would risk an RX overrun (an unmuxed/floating SDI could
+ * fill the FIFO with garbage before this mode ever calls stop()) racing
+ * the very teardown under test, muddying which of "STOP" vs "an ISR
+ * overrun exit" actually produced the rx_stream_disable() call this mode
+ * is trying to observe cleanly.
+ *
+ * HALF-DUPLEX CAVEAT (accepted, not a bug in this mode): i2s_dw_configure()
+ * overwrites dev_data->dir on every call, and i2s_dw_isr() consults dir
+ * alone to decide whether to run i2s_tx_irq_handler() at all (see #2150's
+ * own "Two gaps remain" note) -- so once this mode's step 3 configures RX,
+ * TX's own ISR permanently stops firing for the REST OF THIS BUILD. That
+ * is fine here specifically because step 4 is the LAST thing this mode
+ * ever does with the amps before teardown -- there is no later step that
+ * still needs TX servicing, unlike ur_main()'s own steps 3-5, which is
+ * exactly why this is a SEPARATE mode instead of a new step spliced into
+ * the middle of ur_main() -- inserting it there would silently break
+ * every step after it in that already-bench-verified sequence.
+ *
+ * HARDWARE SAFETY: identical to PROBE_UNDERRUN -- TAS2563_AMP_LEVEL_MIN
+ * (analog) confirmed by readback before ACTIVE, RXT_VOLUME = SOUND_VOL_MAX
+ * (48/255 digital) as the compile-time-capped ceiling for the whole run.
+ * This mode adds no NEW amp-facing risk: RX carries no audio out of the
+ * amps at all, and the TX tone/volume path is byte-identical to
+ * ur_main()'s own step 1-2. See the file header's HARDWARE SAFETY section
+ * for why that pair is speaker-safe. */
+#if defined(PROBE_RX_TEARDOWN)
+
+#include <string.h> /* memset(), used by rxt_write_zero_block(). */
+
+#define RXT_VOLUME   SOUND_VOL_MAX /* 48/255 digital -- same hard safety cap as every mode. */
+#define RXT_BLOCK_MS (SOUND_FRAMES_PER_BLOCK * 1000u / SOUND_SAMPLE_RATE_HZ) /* 16 ms. */
+#define RXT_MS_TO_BLOCKS(ms) (((uint32_t)(ms) + RXT_BLOCK_MS / 2u) / RXT_BLOCK_MS)
+
+/* Register addresses -- same values/citations as PROBE_UNDERRUN's UR_*,
+ * copied verbatim rather than shared across #if blocks, per this file's
+ * own per-mode duplication convention (see this mode's own header). */
+#define RXT_REG_PWR_CTL   0x02u /* Power control        (SLASET3D §7.5.4,  p.65). */
+#define RXT_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (SLASET3D §7.5.36, p.82) -- TDM_CLOCK. */
+#define RXT_REG_INT_LTCH3 0x26u /* Latched interrupts 2 (SLASET3D §7.5.38, p.84) -- DC_DETECT. */
+#define RXT_LTCH0_BIT2    (1u << 2) /* INT_LTCH0 bit2 -- must read clear for a PASS. */
+#define RXT_LTCH3_BIT3    (1u << 3) /* INT_LTCH3 bit3 (0x08) -- DC_DETECT. */
+
+/* i2s3@49017000 -- same DesignWare I2S controller PROBE_UNDERRUN reads. */
+#define RXT_I2S3_CER_ADDR 0x4901700Cu
+#define RXT_I2S3_TER_ADDR 0x4901702Cu
+
+static uint8_t rxt_reg_read(tas2563_t *ctx, uint8_t reg)
+{
+	uint8_t val = 0xFFu;
+	(void)alp_i2c_write_read(ctx->bus, ctx->addr, &reg, 1, &val, 1);
+	return val;
+}
+
+typedef struct {
+	uint8_t  pwr_ctl[AMP_COUNT];
+	uint8_t  ltch0[AMP_COUNT];
+	uint8_t  ltch3[AMP_COUNT];
+	uint32_t cer;
+	uint32_t ter;
+} rxt_snapshot_t;
+
+/* rxt_regs(label) -- same shape as ur_regs(): reads PWR_CTL/INT_LTCH0/
+ * INT_LTCH3 on both amps plus I2S3's own CER/TER, prints one
+ * "[rxt] <label> ..." line, and returns the snapshot so a caller can gate
+ * a PASS/FAIL verdict on the SAME read it just printed. */
+static rxt_snapshot_t rxt_regs(const char *label, tas2563_t amps[AMP_COUNT])
+{
+	rxt_snapshot_t snap;
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		snap.pwr_ctl[i] = rxt_reg_read(&amps[i], RXT_REG_PWR_CTL);
+		snap.ltch0[i]   = rxt_reg_read(&amps[i], RXT_REG_INT_LTCH0);
+		snap.ltch3[i]   = rxt_reg_read(&amps[i], RXT_REG_INT_LTCH3);
+	}
+	snap.cer = sys_read32(RXT_I2S3_CER_ADDR);
+	snap.ter = sys_read32(RXT_I2S3_TER_ADDR);
+	printf("[rxt] %-20s uptime=%u ms  PWR_CTL=0x%02x/0x%02x  INT_LTCH0=0x%02x/0x%02x  "
+	       "INT_LTCH3=0x%02x/0x%02x  CER=0x%08x  TER=0x%08x\n",
+	       label,
+	       k_uptime_get_32(),
+	       snap.pwr_ctl[0],
+	       snap.pwr_ctl[1],
+	       snap.ltch0[0],
+	       snap.ltch0[1],
+	       snap.ltch3[0],
+	       snap.ltch3[1],
+	       snap.cer,
+	       snap.ter);
+	return snap;
+}
+
+static void rxt_clear_faults(tas2563_t amps[AMP_COUNT])
+{
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t rc = tas2563_clear_faults(&amps[i]);
+		printf("[rxt] tas2563_clear_faults(0x%02x) -> %d\n", amp_addrs[i], (int)rc);
+	}
+}
+
+static alp_status_t rxt_write_zero_block(alp_audio_out_t *spk, int16_t *buf)
+{
+	memset(buf, 0, SOUND_FRAMES_PER_BLOCK * 2u * sizeof(int16_t));
+	return alp_audio_out_write(spk, buf, SOUND_FRAMES_PER_BLOCK, NULL, 200u);
+}
+
+static uint32_t rxt_write_zero_blocks(alp_audio_out_t *spk, int16_t *buf, uint32_t n)
+{
+	uint32_t fail = 0;
+	for (uint32_t i = 0; i < n; i++) {
+		if (rxt_write_zero_block(spk, buf) != ALP_OK) fail++;
+	}
+	return fail;
+}
+
+static int rxt_main(void)
+{
+	printf("\n=== aen-i2s-tas2563-probe (PROBE_RX_TEARDOWN): #2171 (phase 1 of "
+	       "#2150) RX-teardown clock-ownership verification ===\n");
+	(void)alp_init();
+
+	/* --- Same bring-up as PROBE_UNDERRUN: bridge, mux, AMP_ENABLE,
+	 * tas2563_init x2, level MIN, configure_i2s x2. -------------------- */
+	static cc3501e_t fw;
+	alp_status_t     rc = cc3501e_bridge_bringup(&fw);
+	printf("[rxt] cc3501e_bridge_bringup() -> %d\n", (int)rc);
+	if (rc != ALP_OK) return 0;
+
+	alp_gpio_t *mux_sel = alp_gpio_open(EVK_PIN_I2S_MUX_SEL);
+	alp_gpio_t *mux_en  = alp_gpio_open(EVK_PIN_I2S_MUX_EN);
+	if (mux_sel == NULL || mux_en == NULL) {
+		printf("[rxt] alp_gpio_open(mux SELECT/ENABLE) -> NULL\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	alp_status_t mux_rc = alp_gpio_configure(mux_sel, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_sel, false);
+	printf("[rxt] I2S_SELECT (0=amps) -> %d\n", (int)mux_rc);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+	if (mux_rc == ALP_OK) mux_rc = alp_gpio_write(mux_en, false);
+	printf("[rxt] I2S_EN (active low) -> %d\n", (int)mux_rc);
+	if (mux_rc != ALP_OK) {
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_msleep(MUX_SETTLE_MS);
+
+	const struct device *gpio5 = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	if (!device_is_ready(gpio5)) {
+		printf("[rxt] gpio5 not ready\n");
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	int grc = pinctrl_configure_pins(amp_enable_mux, ARRAY_SIZE(amp_enable_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_OUTPUT_INACTIVE);
+	if (grc == 0) k_msleep(AMP_ENABLE_RESET_HOLD_MS);
+	if (grc == 0) grc = gpio_pin_set(gpio5, AMP_ENABLE_PIN, 1);
+	printf("[rxt] AMP_ENABLE (SD_N) hardware reset + release -> %d\n", grc);
+	if (grc == 0) grc = pinctrl_configure_pins(amp_fault_mux, ARRAY_SIZE(amp_fault_mux), 0U);
+	if (grc == 0) grc = gpio_pin_configure(gpio5, AMP_FAULT_PIN, GPIO_INPUT);
+	if (grc != 0) {
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		printf("[rxt] AMP_ENABLE/AMP_FAULT not fully drivable (rc=%d)\n", grc);
+		mux_disable(mux_sel, mux_en);
+		return 0;
+	}
+	k_usleep(TAS2563_RESET_SETTLE_US);
+
+	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = EVK_I2C_BUS_SENSORS,
+	    .bitrate_hz = 100000u,
+	});
+	tas2563_t  amps[AMP_COUNT];
+	int        ok_amps = 0;
+	for (size_t i = 0; i < AMP_COUNT && bus != NULL; i++) {
+		alp_status_t irc = tas2563_init(&amps[i], bus, amp_addrs[i], NULL);
+		printf("[rxt] tas2563_init(0x%02x) -> %d\n", amp_addrs[i], (int)irc);
+		if (irc == ALP_OK) ok_amps++;
+	}
+	if (ok_amps != (int)AMP_COUNT) {
+		printf("[rxt] %d/%zu amp(s) answered -- aborting\n", ok_amps, (size_t)AMP_COUNT);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		if (bus != NULL) alp_i2c_close(bus);
+		return 0;
+	}
+
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t lrc = tas2563_set_amp_level(&amps[i], TAS2563_AMP_LEVEL_MIN);
+		printf("[rxt] tas2563_set_amp_level(0x%02x, MIN) -> %d\n", amp_addrs[i], (int)lrc);
+	}
+
+	const alp_i2s_config_t amp_i2s_cfg = {
+		.bus_id         = 0,
+		.direction      = ALP_I2S_DIR_TX,
+		.sample_rate_hz = SOUND_SAMPLE_RATE_HZ,
+		.channels       = 2,
+		.word_bits      = 16,
+		.format         = ALP_I2S_FMT_I2S,
+		.block_frames   = SOUND_FRAMES_PER_BLOCK,
+	};
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t crc = tas2563_configure_i2s(&amps[i], &amp_i2s_cfg, amp_rx_channel[i]);
+		printf("[rxt] tas2563_configure_i2s(0x%02x) -> %d\n", amp_addrs[i], (int)crc);
+	}
+
+	static int16_t tone_buf[SOUND_FRAMES_PER_BLOCK * 2u];
+	uint32_t       write_failures = 0;
+
+	/* --- 1. Open, prime with one zero block, resume, checkpoint -- same
+	 * as ur_main()'s own step 1. -------------------------------------- */
+	alp_audio_out_t *spk    = alp_audio_out_open(&(alp_audio_config_t){
+	    .peripheral_id    = 0,
+	    .sample_rate_hz   = SOUND_SAMPLE_RATE_HZ,
+	    .channels         = 2,
+	    .format           = ALP_AUDIO_FMT_S16_LE,
+	    .frames_per_block = SOUND_FRAMES_PER_BLOCK,
+	});
+	alp_status_t     spk_rc = (spk != NULL) ? alp_audio_out_start(spk) : alp_last_error();
+	printf("[rxt] alp_audio_out_open+start(I2S3) -> %d\n", (int)spk_rc);
+	if (spk_rc == ALP_OK) spk_rc = alp_audio_out_set_volume(spk, RXT_VOLUME);
+	printf("[rxt] alp_audio_out_set_volume(%u) -> %d\n", RXT_VOLUME, (int)spk_rc);
+
+	if (spk_rc != ALP_OK) {
+		printf("[rxt] I2S3 did not start -- aborting before touching the amps\n");
+		for (size_t i = 0; i < AMP_COUNT; i++)
+			tas2563_deinit(&amps[i]);
+		(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		mux_disable(mux_sel, mux_en);
+		alp_i2c_close(bus);
+		return 0;
+	}
+
+	if (rxt_write_zero_block(spk, tone_buf) != ALP_OK) write_failures++;
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t rrc = tas2563_resume(&amps[i]);
+		printf("[rxt] step1: tas2563_resume(0x%02x) -> %d\n", amp_addrs[i], (int)rrc);
+	}
+	rxt_regs("after resume", amps); /* expect PWR_CTL 0x0c/0x0c, CER bit0=1. */
+
+	/* --- 2. TX underrun, reused verbatim from ur_main()'s own step 2:
+	 * clear faults, write a run of zero blocks, then STOP writing for the
+	 * INTENDED unfed span. At ~100 ms in, expect CER bit0=1 (clock still
+	 * enabled -- #2149) and TER bit0=0 (TX disabled by the underrun
+	 * itself). Resuming writes afterward exercises the SAME recovery
+	 * path ur_main()'s step 2 does -- either that recovery leaves
+	 * tx.state RUNNING again, or the underrun ISR exit's one-shot
+	 * clk_restart_skip_ok flag is still set; tx_clock_is_live() (the
+	 * function step 3 below is proving) treats both as "TX is live". -- */
+	rxt_clear_faults(amps);
+	write_failures += rxt_write_zero_blocks(spk, tone_buf, 25u);
+	k_msleep(100);
+	uint32_t cer_100ms = sys_read32(RXT_I2S3_CER_ADDR);
+	uint32_t ter_100ms = sys_read32(RXT_I2S3_TER_ADDR);
+	printf("[rxt] step2 +100ms  CER=0x%08x (bit0=%u, expect 1)  TER=0x%08x (bit0=%u, "
+	       "expect 0)\n",
+	       cer_100ms,
+	       (unsigned)(cer_100ms & 1u),
+	       ter_100ms,
+	       (unsigned)(ter_100ms & 1u));
+	k_msleep(100);
+	write_failures += rxt_write_zero_blocks(spk, tone_buf, RXT_MS_TO_BLOCKS(500u));
+	rxt_snapshot_t s2 = rxt_regs("step2", amps);
+	bool           step2_pass =
+	    (s2.pwr_ctl[0] == 0x0cu && s2.pwr_ctl[1] == 0x0cu) &&
+	    ((s2.ltch0[0] & RXT_LTCH0_BIT2) == 0u) && ((s2.ltch0[1] & RXT_LTCH0_BIT2) == 0u) &&
+	    ((s2.ltch3[0] & RXT_LTCH3_BIT3) == 0u) && ((s2.ltch3[1] & RXT_LTCH3_BIT3) == 0u);
+	printf("[rxt] step2 %s\n", step2_pass ? "PASS" : "FAIL");
+
+	/* --- 3. NEW -- #2171: configure and start I2S3 in RX, then stop it.
+	 * rx_stream_disable() (reached via alp_i2s_stop()'s DRAIN/DROP
+	 * trigger) is the code path under test -- see this mode's own header
+	 * for the full derivation. Only attempted if step 2 actually
+	 * confirmed the keep-clock precondition (TX still live); running it
+	 * against an already-dead clock would not be testing anything. -- */
+	alp_i2s_t *rx = NULL;
+	if (step2_pass) {
+		const alp_i2s_config_t rx_cfg = {
+			.bus_id    = 0, /* same alp-i2s0 alias == i2s3 TX just opened. */
+			.direction = ALP_I2S_DIR_RX,
+			.sample_rate_hz =
+			    SOUND_SAMPLE_RATE_HZ, /* matches TX -- avoids rx_stream_start()'s -EBUSY. */
+			.channels     = 2,
+			.word_bits    = 16,
+			.format       = ALP_I2S_FMT_I2S,
+			.block_frames = SOUND_FRAMES_PER_BLOCK,
+		};
+		rx                      = alp_i2s_open(&rx_cfg);
+		alp_status_t rx_open_rc = (rx != NULL) ? ALP_OK : alp_last_error();
+		printf("[rxt] step3: alp_i2s_open(RX, bus0=i2s3) -> %d\n", (int)rx_open_rc);
+
+		alp_status_t rx_start_rc = (rx != NULL) ? alp_i2s_start(rx) : rx_open_rc;
+		printf("[rxt] step3: alp_i2s_start(RX) -> %d\n", (int)rx_start_rc);
+
+		k_msleep(CLOCK_CHECK_SETTLE_MS);
+
+		alp_status_t rx_stop_rc = (rx != NULL) ? alp_i2s_stop(rx) : rx_start_rc;
+		printf("[rxt] step3: alp_i2s_stop(RX) -> %d\n", (int)rx_stop_rc);
+	} else {
+		printf("[rxt] step3: SKIPPED (step2 already FAILed -- TX clock was not "
+		       "confirmed live)\n");
+	}
+	if (rx != NULL) alp_i2s_close(rx);
+
+	/* --- 4. NEW -- #2171: re-read CER and both amps' PWR_CTL, the
+	 * pass/fail readback this whole mode exists to produce. -- */
+	rxt_snapshot_t s4 = rxt_regs("step4", amps);
+	bool           step4_pass =
+	    step2_pass && (s4.pwr_ctl[0] == 0x0cu) && (s4.pwr_ctl[1] == 0x0cu) && ((s4.cer & 1u) == 1u);
+	printf("[rxt] step4 %s (expect CER=0x00000001, PWR_CTL=0x0c/0x0c; pre-fix failure mode "
+	       "is CER=0x00000000 and/or an amp at 0x0e)\n",
+	       step4_pass ? "PASS" : "FAIL");
+
+	/* --- 5. Teardown: mute BEFORE stop (the ordering contract), then
+	 * close, then the final CER check -- same as ur_main()'s own step 6. */
+	for (size_t i = 0; i < AMP_COUNT; i++) {
+		alp_status_t srr = tas2563_set_mode(&amps[i], TAS2563_MODE_SHUTDOWN);
+		printf("[rxt] tas2563_set_mode(0x%02x, SHUTDOWN) -> %d\n", amp_addrs[i], (int)srr);
+	}
+	alp_status_t final_stop_rc = alp_audio_out_stop(spk);
+	printf("[rxt] alp_audio_out_stop -> %d\n", (int)final_stop_rc);
+	for (size_t i = 0; i < AMP_COUNT; i++)
+		tas2563_deinit(&amps[i]);
+	alp_audio_out_close(spk);
+	uint32_t cer_final = sys_read32(RXT_I2S3_CER_ADDR);
+	printf(
+	    "[rxt] teardown CER=0x%08x (bit0=%u, expect 0)\n", cer_final, (unsigned)(cer_final & 1u));
+	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	mux_disable(mux_sel, mux_en);
+	alp_i2c_close(bus);
+
+	printf("[rxt] total alp_audio_out_write() failures this run: %u\n", write_failures);
+	printf("[rxt] done\n");
+	return 0;
+}
+
+#endif /* PROBE_RX_TEARDOWN */
+
 int main(void)
 {
 #if defined(PROBE_LISTEN)
@@ -4496,6 +4907,8 @@ int main(void)
 	return resume2_main();
 #elif defined(PROBE_UNDERRUN)
 	return ur_main();
+#elif defined(PROBE_RX_TEARDOWN)
+	return rxt_main();
 #else
 	printf("\n=== aen-i2s-tas2563-probe: I2S0 through the reworked U46 mux ===\n");
 	(void)alp_init();
