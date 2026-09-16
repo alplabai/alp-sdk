@@ -396,7 +396,7 @@ int main(void)
 	 * Bring the bridge up ONCE, before the poll loop -- not inside
 	 * fleet_wifi_up(), which runs every tick and would otherwise
 	 * re-run the WIFI_EN/nRESET reset sequence on every poll. */
-	static cc3501e_t bridge = { 0 };
+	static cc3501e_t bridge    = { 0 };
 	alp_status_t     bridge_rc = cc3501e_bridge_bringup(&bridge);
 	printf("[ota]   cc3501e_bridge_bringup -> %d\n", (int)bridge_rc);
 

@@ -154,7 +154,7 @@ int main(void)
      * On native_sim this fails fast (ALP_ERR_NOT_PRESENT_ON_THIS_SOC --
      * no SPI/GPIO backend matches that SoC ref) and alp_wifi_open() below
      * still returns NULL, unchanged from before. */
-	static cc3501e_t s_bridge = { 0 };
+	static cc3501e_t s_bridge  = { 0 };
 	alp_status_t     bridge_rc = cc3501e_bridge_bringup(&s_bridge);
 	LOG_INF("cc3501e_bridge_bringup -> %d", (int)bridge_rc);
 
