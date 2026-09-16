@@ -278,6 +278,21 @@ static void tx_prepare(void)
 	zassert_equal(rc, 0, "tx prepare failed: %d", rc);
 }
 
+static void rx_configure(uint32_t rate)
+{
+	struct i2s_config cfg = make_cfg(rate, &test_rx_slab);
+	int               rc  = i2s_dw_configure(&test_dev, I2S_DIR_RX, &cfg);
+
+	zassert_equal(rc, 0, "rx configure failed: %d", rc);
+}
+
+static void rx_start(void)
+{
+	int rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+
+	zassert_equal(rc, 0, "rx start failed: %d", rc);
+}
+
 /* ---------------------------------------------------------------------
  * (a) After a queue-empty underrun: state ERROR, CER bit 0 == 1, TER
  *     bit 0 == 0, TX interrupt disabled.
@@ -475,4 +490,137 @@ ZTEST(i2s_dw_underrun, test_configure_rate_change_invalidates_tx_restart_skip)
 
 	zassert_true(fake_set_rate_calls > before,
 	             "TX restart skipped reprogramming after a rate change in configure()");
+}
+
+/*
+ * (h) alp-sdk issue #2150 (phase 1): an RX teardown (STOP here, same
+ * shared body as DRAIN/DROP/both RX-ISR error exits -- see
+ * rx_stream_disable()) must NOT gate the shared bit clock while TX is
+ * still RUNNING on it. Reverting rx_stream_disable()'s `if (!tx_live)`
+ * guard back to an unconditional i2s_clock_disable() turns this RED --
+ * CER.CLKEN reads 0 after the RX stop even though TX is still RUNNING,
+ * which is the exact silent-amp exposure #2150 phase 1 closes.
+ */
+ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_running_keeps_clock)
+{
+	int  rc;
+	bool clk_on_after_rx_stop;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+
+	rx_configure(16000);
+	rx_start();
+
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_STOP);
+	zassert_equal(rc, 0, "rx stop failed: %d", rc);
+	clk_on_after_rx_stop = (fake_regs.CER & I2S_CER_CLKEN_Msk) != 0;
+
+	/* Cleanup: free TX's outstanding block before the shared slab runs
+	 * dry for later tests in this suite. Run before the final assertion
+	 * so cleanup still happens if that assertion aborts the test. */
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
+
+	zassert_true(clk_on_after_rx_stop,
+	             "RX stop gated the shared clock while TX was still RUNNING");
+}
+
+/*
+ * (i) alp-sdk issue #2150 (phase 1): the same RX stop, but with NO TX
+ * stream configured at all (tx.state == I2S_STATE_NOT_READY, so
+ * tx_clock_is_live() is false) -- a plain RX-only user must see no change
+ * from before this fix. Reverting rx_stream_disable()'s guard to always
+ * skip (e.g. hard-coding tx_live true) turns this RED -- CER.CLKEN would
+ * stay set after the RX stop with nothing else on the bus.
+ */
+ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_idle_gates_clock)
+{
+	int rc;
+
+	rx_configure(16000);
+	rx_start();
+
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_STOP);
+	zassert_equal(rc, 0, "rx stop failed: %d", rc);
+
+	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) == 0,
+	             "RX stop left the clock enabled with no TX stream active");
+}
+
+/*
+ * (j) alp-sdk issue #2150 (phase 1): RX starting while TX is RUNNING at
+ * the SAME rate must not touch the shared divider -- TX already
+ * configured and is relying on it. Reverting rx_stream_start()'s
+ * `clk_needs_reprogram = !tx_live;` back to always-true turns this RED --
+ * fake_set_rate_calls advances on the RX start even though TX is live at
+ * the identical rate.
+ */
+ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_same_rate_skips_reprogram)
+{
+	int rc;
+	int before;
+	int set_rate_calls_after_rx_start;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+
+	rx_configure(16000);
+	before = fake_set_rate_calls;
+	rc     = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+	zassert_equal(rc, 0, "rx start failed: %d", rc);
+	set_rate_calls_after_rx_start = fake_set_rate_calls;
+
+	/* Cleanup both streams before the shared slabs run dry for later
+	 * tests in this suite. Run before the final assertion so cleanup
+	 * still happens if that assertion aborts the test. */
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "rx drop cleanup failed: %d", rc);
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
+
+	zassert_equal(set_rate_calls_after_rx_start, before,
+	              "RX start reprogrammed the shared divider while TX was RUNNING at the same rate");
+}
+
+/*
+ * (k) alp-sdk issue #2150 (phase 1): RX starting while TX is RUNNING at a
+ * DIFFERENT rate must refuse -- there is one CCR divider for both
+ * directions, so RX cannot silently retune it out from under TX. Must
+ * return -EBUSY rather than pretend to succeed, and must not touch the
+ * divider at all in the process. Reverting rx_stream_start()'s
+ * mismatched-rate guard (dropping the `return -EBUSY;` and always
+ * reprogramming) turns this RED on both assertions -- rc comes back 0 and
+ * fake_set_rate_calls advances.
+ */
+ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
+{
+	int rx_start_rc;
+	int drop_rc;
+	int before;
+	int set_rate_calls_after_rx_start;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+
+	rx_configure(48000);
+	before      = fake_set_rate_calls;
+	rx_start_rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+	set_rate_calls_after_rx_start = fake_set_rate_calls;
+
+	/* Cleanup: free TX's outstanding block. RX never allocated one --
+	 * the rejection happens before rx_stream_start()'s
+	 * k_mem_slab_alloc(). Run before the final assertions so cleanup
+	 * still happens if either aborts the test. */
+	drop_rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(drop_rc, 0, "tx drop cleanup failed: %d", drop_rc);
+
+	zassert_equal(rx_start_rc, -EBUSY,
+	              "RX start on a different rate than a live TX did not return -EBUSY: %d",
+	              rx_start_rc);
+	zassert_equal(set_rate_calls_after_rx_start, before,
+	              "RX start touched the shared divider despite being rejected");
 }
