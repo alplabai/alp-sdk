@@ -730,13 +730,21 @@ ZTEST(alp_chips, test_tas2563_configure_fault_pin_unmasks_tdm_clock_error)
 	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0), 0xFCu, "POR default");
 
+	/* Seed the other bits HIGH before the call.  Starting from POR
+	 * alone cannot tell a read-modify-write from a blind
+	 * reg_write(INT_MASK0, 0xF8): 0xFC and 0xF8 differ ONLY in bit 2,
+	 * so both implementations land on the same byte.  From 0xFF an
+	 * RMW must land on 0xFB, while a blind write still lands on 0xF8. */
+	fake_tas2563_set_reg(TAS_REG_INT_MASK0, 0xFFu);
+
 	alp_gpio_t *irq = alp_gpio_open(TAS_PIN_IRQ_N);
 	zassert_not_null(irq);
 
 	zassert_equal(tas2563_configure_fault_pin(&ctx, irq, true), ALP_OK);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0),
-	              0xF8u,
-	              "bit 2 (TDM clock) cleared, bits 1..0 and 7..3 untouched");
+	              0xFBu,
+	              "bit 2 (TDM clock) cleared by a read-modify-write; every "
+	              "other bit preserved, which 0xF8 would not prove");
 
 	alp_gpio_close(irq);
 	alp_i2c_close(bus);
