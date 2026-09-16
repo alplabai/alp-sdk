@@ -289,26 +289,33 @@ static bool secure_page_blob_is_sane(void)
 		return false;
 	}
 
-	const alp_secure_page_mirror_t *m = (const alp_secure_page_mirror_t *)alp_secure_page_blob;
+	/* memcpy, not a cast.  alp_secure_page_blob is a generated uint8_t[]
+	 * (alignment 1); alp_secure_page_mirror_t needs alignment 4 for its
+	 * uint32_t magic and uint32_t crc32.  Reading through a cast pointer is
+	 * the same misaligned-access bug already fixed on the device-read path
+	 * and in print_secure_page_identity().  The size equality above is what
+	 * makes this copy safe. */
+	alp_secure_page_mirror_t m;
+	memcpy(&m, alp_secure_page_blob, sizeof(m));
 
-	if (m->magic != ALP_SECURE_PAGE_MAGIC) {
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) {
 		printf("[provision] secure-page blob magic = 0x%08x, expected 0x%08x\n",
-		       (unsigned)m->magic,
+		       (unsigned)m.magic,
 		       (unsigned)ALP_SECURE_PAGE_MAGIC);
 		return false;
 	}
-	if (m->schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
 		printf("[provision] secure-page blob schema_version = %u, this build expects %u\n",
-		       (unsigned)m->schema_version,
+		       (unsigned)m.schema_version,
 		       (unsigned)ALP_SECURE_PAGE_SCHEMA_VERSION);
 		return false;
 	}
 
-	const size_t   covered = sizeof(*m) - sizeof(m->crc32);
+	const size_t   covered = sizeof(m) - sizeof(m.crc32);
 	const uint32_t calc    = crc32_iso3309(alp_secure_page_blob, covered);
-	if (calc != m->crc32) {
+	if (calc != m.crc32) {
 		printf("[provision] secure-page blob crc32 = 0x%08x (stored) vs 0x%08x (computed)\n",
-		       (unsigned)m->crc32,
+		       (unsigned)m.crc32,
 		       (unsigned)calc);
 		return false;
 	}
@@ -540,26 +547,33 @@ static bool secure_page_blob_is_sane(void)
 		return false;
 	}
 
-	const alp_secure_page_mirror_t *m = (const alp_secure_page_mirror_t *)alp_secure_page_blob;
+	/* memcpy, not a cast.  alp_secure_page_blob is a generated uint8_t[]
+	 * (alignment 1); alp_secure_page_mirror_t needs alignment 4 for its
+	 * uint32_t magic and uint32_t crc32.  Reading through a cast pointer is
+	 * the same misaligned-access bug already fixed on the device-read path
+	 * and in print_secure_page_identity().  The size equality above is what
+	 * makes this copy safe. */
+	alp_secure_page_mirror_t m;
+	memcpy(&m, alp_secure_page_blob, sizeof(m));
 
-	if (m->magic != ALP_SECURE_PAGE_MAGIC) {
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) {
 		printf("[provision] secure-page blob magic = 0x%08x, expected 0x%08x\n",
-		       (unsigned)m->magic,
+		       (unsigned)m.magic,
 		       (unsigned)ALP_SECURE_PAGE_MAGIC);
 		return false;
 	}
-	if (m->schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) {
 		printf("[provision] secure-page blob schema_version = %u, this build expects %u\n",
-		       (unsigned)m->schema_version,
+		       (unsigned)m.schema_version,
 		       (unsigned)ALP_SECURE_PAGE_SCHEMA_VERSION);
 		return false;
 	}
 
-	const size_t   covered = sizeof(*m) - sizeof(m->crc32);
+	const size_t   covered = sizeof(m) - sizeof(m.crc32);
 	const uint32_t calc    = crc32_iso3309(alp_secure_page_blob, covered);
-	if (calc != m->crc32) {
+	if (calc != m.crc32) {
 		printf("[provision] secure-page blob crc32 = 0x%08x (stored) vs 0x%08x (computed)\n",
-		       (unsigned)m->crc32,
+		       (unsigned)m.crc32,
 		       (unsigned)calc);
 		return false;
 	}

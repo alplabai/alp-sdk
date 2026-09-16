@@ -120,18 +120,13 @@ if(DEFINED ALP_SECURE_PAGE_BIN)
 "\n"
 "#define ALP_SECURE_PAGE_BLOB_LEN ${_sp_len}u\n"
 "\n"
-"/* __attribute__((aligned(4))): a bare uint8_t[] has alignment 1, but\n"
-" * alp_secure_page_mirror_t (include/alp/hw_info.h) leads with a\n"
-" * uint32_t magic and carries a uint16_t / uint32_t at offsets 0x38 /\n"
-" * 0x3C, both requiring 4-byte alignment. Without this, every cast of\n"
-" * this array to that struct type in src/main.c is a misaligned access\n"
-" * -- UBSan aborts on it, and an unaligned array happening to work is\n"
-" * luck, not a guarantee. GCC/Clang only (this SDK's toolchains for\n"
-" * this target); a portable _Alignas would need a C11 feature-test\n"
-" * guard for no benefit here.\n"
+"/* Plain bytes, alignment 1 -- same shape as alp_manifest_blob in\n"
+" * manifest_blob.h.\n"
+" * src/main.c never casts this array to alp_secure_page_mirror_t; every\n"
+" * reader either walks it as uint8_t or memcpys it into an aligned local,\n"
+" * so no alignment attribute is needed here.\n"
 " */\n"
-"static const uint8_t alp_secure_page_blob[ALP_SECURE_PAGE_BLOB_LEN]\n"
-"    __attribute__((aligned(4))) = { ${_sp_c} };\n")
+"static const uint8_t alp_secure_page_blob[ALP_SECURE_PAGE_BLOB_LEN] = { ${_sp_c} };\n")
     message(STATUS "aen-eeprom-provision: baked ${_sp_len}-byte secure-page mirror from ${ALP_SECURE_PAGE_BIN}")
     add_compile_definitions(ALP_HAVE_SECURE_PAGE_BLOB=1)
 elseif(ALP_LOCK_SECURE_PAGE)
