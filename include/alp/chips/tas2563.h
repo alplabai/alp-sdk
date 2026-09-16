@@ -713,13 +713,16 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  * holds the pin low until @ref tas2563_clear_faults, rather than
  * pulsing (§7.5.43 Table 7-143, p.86).
  *
- * The four `INT_MASK` registers are left at their reset values, which
- * already leave the safety-critical events unmasked: over-temperature
- * and over-current (`INT_MASK0` = `FCh`), VBAT brown-out and speaker
- * open/short load (`INT_MASK1` = `A6h`), VBAT POR (`INT_MASK2` =
- * `DFh`) -- SLASET3D §7.5.28-§7.5.31, p.77-80.  TDM clock error
- * (`INT_MASK0[2]`) is masked at reset; a caller who wants it on the
- * pin has to write `INT_MASK0` directly.
+ * The four `INT_MASK` registers are otherwise left at their reset
+ * values, which already leave the other safety-critical events
+ * unmasked: over-temperature and over-current (`INT_MASK0` = `FCh`),
+ * VBAT brown-out and speaker open/short load (`INT_MASK1` = `A6h`),
+ * VBAT POR (`INT_MASK2` = `DFh`) -- SLASET3D §7.5.28-§7.5.31, p.77-80.
+ * TDM clock error (`INT_MASK0[2]`) is the one bit `FCh` leaves masked,
+ * so this function clears it explicitly (#2140) -- without that write,
+ * @ref TAS2563_FAULT_TDM_CLOCK never latches into `INT_LTCH0[2]` and
+ * @ref tas2563_read_faults reads it clear regardless of whether the
+ * clock is present, stopped, or never valid.
  *
  * @param[in] ctx                  Initialised context.
  * @param[in] irq_n                Open GPIO handle bound to
@@ -784,6 +787,16 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  *
  * Does not require a fault pin; the latched registers are readable
  * whether or not IRQ_N is wired.
+ *
+ * @note A masked event never latches at all, so this only ever reports
+ *   what its `INT_MASK` register lets through.  At reset that is:
+ *   over-temperature and over-current (`INT_MASK0` = `FCh`), VBAT
+ *   brown-out and speaker open/short load (`INT_MASK1` = `A6h`), and
+ *   VBAT POR (`INT_MASK2` = `DFh`) -- SLASET3D §7.5.28-§7.5.31,
+ *   p.77-80.  TDM clock error (`INT_MASK0[2]`) is masked at reset and
+ *   reads clear either way until something unmasks it; @ref
+ *   tas2563_configure_fault_pin does so (#2140).  `INT_MASK3` (`FFh`)
+ *   masks everything it covers, and nothing in this driver unmasks it.
  *
  * @param[in]  ctx        Initialised context.
  * @param[out] faults_out Receives the packed fault bitmask.

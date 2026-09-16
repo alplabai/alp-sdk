@@ -198,6 +198,7 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
 #define TAS_REG_TDM_CFG2  0x08u
 #define TAS_REG_TDM_CFG5  0x0Bu
 #define TAS_REG_TDM_CFG6  0x0Cu
+#define TAS_REG_INT_MASK0 0x1Au
 #define TAS_REG_INT_LTCH0 0x24u
 #define TAS_REG_INT_LTCH1 0x25u
 #define TAS_REG_INT_LTCH3 0x26u
@@ -713,6 +714,29 @@ ZTEST(alp_chips, test_tas2563_configure_fault_pin_sets_pullup_and_latched_assert
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_MISC_CFG1),
 	              0xC6u,
 	              "the internal pull-up must be switchable back off");
+
+	alp_gpio_close(irq);
+	alp_i2c_close(bus);
+}
+
+/* #2140: TDM clock error is masked at reset (INT_MASK0 = FCh, bit 2)
+ * and stays that way unless something unmasks it -- confirm
+ * configure_fault_pin() is that something, and that it does not
+ * disturb OVER_TEMP/OVER_CURRENT (already unmasked, bits 1..0) or
+ * reserved bits 7..3. */
+ZTEST(alp_chips, test_tas2563_configure_fault_pin_unmasks_tdm_clock_error)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0), 0xFCu, "POR default");
+
+	alp_gpio_t *irq = alp_gpio_open(TAS_PIN_IRQ_N);
+	zassert_not_null(irq);
+
+	zassert_equal(tas2563_configure_fault_pin(&ctx, irq, true), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_INT_MASK0),
+	              0xF8u,
+	              "bit 2 (TDM clock) cleared, bits 1..0 and 7..3 untouched");
 
 	alp_gpio_close(irq);
 	alp_i2c_close(bus);

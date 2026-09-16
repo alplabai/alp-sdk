@@ -28,6 +28,7 @@
 #define TAS2563_REG_TDM_CFG2  0x08u /* TDM configuration 2  (§7.5.10, p.69). */
 #define TAS2563_REG_TDM_CFG5  0x0Bu /* TDM TX V-sense slot  (§7.5.13, p.71). */
 #define TAS2563_REG_TDM_CFG6  0x0Cu /* TDM TX I-sense slot  (§7.5.14, p.71). */
+#define TAS2563_REG_INT_MASK0 0x1Au /* Interrupt mask 0     (§7.5.28, p.77). */
 #define TAS2563_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (§7.5.36, p.82). */
 #define TAS2563_REG_INT_LTCH1 0x25u /* Latched interrupts 1 (§7.5.37, p.83). */
 #define TAS2563_REG_INT_LTCH3 0x26u /* Latched interrupts 2 (§7.5.38, p.84). */
@@ -83,6 +84,12 @@
 #define TAS2563_TDM_SENSE_TX        0x40u
 #define TAS2563_TDM_SENSE_SLOT_MASK 0x3Fu
 #define TAS2563_TDM_SENSE_FIELD     0x7Fu /* TX enable | slot. */
+
+/* INT_MASK0 (0x1A) -- §7.5.28, p.77.  Reset value FCh (1111 1100b):
+ * bits 1..0 (OVER_CURRENT/OVER_TEMP) are already 0 = unmasked, bit 2
+ * (TDM clock error, aligned with INT_LTCH0[2] / TAS2563_FAULT_TDM_CLOCK,
+ * §7.5.36 p.82) is 1 = masked.  0 unmasks a bit. */
+#define TAS2563_INT_MASK0_TDM_CLOCK 0x04u
 
 /* INT & CLK CFG (0x30) -- §7.5.43 Table 7-143, p.86.  CLR_INTP_LTCH
  * is the self-clearing bit 2 (§7.3.12 Table 7-11, p.37);
@@ -609,6 +616,13 @@ tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_interna
 
 	s = reg_update(
 	    ctx, TAS2563_REG_INT_CLK, TAS2563_INT_CLK_PIN_CFG_MASK, TAS2563_INT_CLK_PIN_CFG_LATCH);
+	if (s != ALP_OK) return s;
+
+	/* TDM clock error is masked at reset (INT_MASK0 = FCh, bit 2) and
+	 * nothing else in this driver unmasks it (#2140) -- a caller
+	 * binding a fault pin wants that fault reaching both the pin and
+	 * tas2563_read_faults(), not silently discarded. */
+	s = reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);
 	if (s != ALP_OK) return s;
 
 	ctx->irq_n = irq_n;
