@@ -49,4 +49,9 @@ project(iot_dashboard LANGUAGES C)
 target_sources(app PRIVATE
     src/main.c
     src/dashboard_ui.c
+    # Reusable SoM bring-up helper (cc3501e_bridge_bringup): the one-call
+    # CC3501E bridge init this app uses so alp_wifi_open() can bind to a
+    # ready bridge on E1M-AEN801 (#2112). Copyable template, same file as
+    # examples/aen/aen-cc3501e-* -- see src/cc3501e_bridge.h.
+    src/cc3501e_bridge.c
 )
