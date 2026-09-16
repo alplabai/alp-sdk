@@ -32,7 +32,7 @@ ledger is the one to trust.
 
 ## Summary
 
-103 silicon/HIL-gated ledger rows parsed across 13 sections.  A row can carry more than one glyph
+104 silicon/HIL-gated ledger rows parsed across 13 sections.  A row can carry more than one glyph
 (e.g. half a feature done, half pending), so glyph counts can
 exceed the row count.  This total EXCLUDES three kinds of row that
 would otherwise inflate it: the rows under "CI-only / tooling rows (no HIL gate)"
@@ -47,7 +47,7 @@ duplicated from the v0.4 section already counted above).
 
 | Glyph | Meaning | Count |
 |---|---|---|
-| `⏳` | untested | 38 |
+| `⏳` | untested | 39 |
 | `🟡` | partial | 52 |
 | `✅` | verified | 14 |
 | `❌` | failing | 1 |
