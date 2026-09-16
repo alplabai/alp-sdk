@@ -383,23 +383,38 @@ ZTEST(i2s_dw_underrun, test_drain_gates_clock)
 }
 
 /*
- * (e) The stale-divider sequence from round-2 review finding 1 DOES call
- * set_rate on the TX restart: TX underrun (arms the one-shot restart-skip
- * flag, clock stays on) -> PREPARE -> RX starts on the SAME shared clock
- * at a DIFFERENT rate (reprograms the divider out from under TX) -> a TX
- * restart at the ORIGINAL rate must reprogram, not skip onto RX's
- * divider.
+ * (e) alp-sdk issue #2150 (phase 1, round-3 review finding 1): this test
+ * used to be named test_rx_start_invalidates_tx_restart_skip and asserted
+ * that an RX start on the shared clock at a DIFFERENT rate, landing while
+ * TX sat parked in READY with clk_restart_skip_ok still armed (the
+ * PREPARE-retry window z_start() leaves TX in on a slow/stalled producer --
+ * see src/backends/i2s/zephyr_drv.c), succeeded and forced a later TX
+ * restart to reprogram. THAT ASSERTION ENCODED THE DEFECT: it exercised
+ * tx_clock_is_live()'s old `state == I2S_STATE_ERROR && flag` qualifier,
+ * which PREPARE's ERROR->READY move silently defeats (PREPARE does not
+ * clear the flag), so the old, narrower check answered "not live" for
+ * exactly this window and let RX silently retune the shared divider out
+ * from under a TX still relying on it at the OLD rate -- reopening the
+ * exact silent-amp hole #2149 closed. With finding 1's fix,
+ * tx_clock_is_live() correctly reports TX live here (READY + flag armed +
+ * CER.CLKEN still set), so the RX start must now be REFUSED with -EBUSY on
+ * the mismatched rate -- the same outcome as test (k)'s already-RUNNING
+ * case -- and clk_restart_skip_ok must survive untouched for the eventual
+ * TX restart to still skip reprogramming.
  *
- * MUTATION-PROVEN: replacing rx_stream_start()'s
- * `dev_data->tx.clk_restart_skip_ok = false;` with `(void)dev_data;` (a
- * plain delete fails -Werror) turns this RED -- the TX restart finds the stale flag
- * still armed and CER.CLKEN still set, so it skips set_rate entirely and
- * `fake_set_rate_calls > before` is false. Restored after the mutation
- * run; see the PR report.
+ * MUTATION-PROVEN: re-adding the old ERROR-only qualifier to
+ * tx_clock_is_live() (`dev_data->tx.state == I2S_STATE_ERROR &&
+ * dev_data->tx.clk_restart_skip_ok` in place of the state-independent
+ * `dev_data->tx.clk_restart_skip_ok`) turns this RED -- the RX start wrongly
+ * succeeds (rc == 0, not -EBUSY) and the subsequent TX restart wrongly
+ * reprograms (fake_set_rate_calls advances) once rx_stream_start()
+ * invalidates the flag on its way to the (wrongly) accepted reprogram.
+ * Restored after the mutation run.
  */
-ZTEST(i2s_dw_underrun, test_rx_start_invalidates_tx_restart_skip)
+ZTEST(i2s_dw_underrun, test_rx_start_rejected_preserves_tx_restart_skip)
 {
-	int               rc;
+	int               rx_rc;
+	int               drop_rc;
 	int               before;
 	struct i2s_config rx_cfg;
 
@@ -410,17 +425,31 @@ ZTEST(i2s_dw_underrun, test_rx_start_invalidates_tx_restart_skip)
 	tx_prepare();
 
 	rx_cfg = make_cfg(48000, &test_rx_slab);
-	rc     = i2s_dw_configure(&test_dev, I2S_DIR_RX, &rx_cfg);
-	zassert_equal(rc, 0, "rx configure failed: %d", rc);
-	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
-	zassert_equal(rc, 0, "rx start failed: %d", rc);
+	rx_rc  = i2s_dw_configure(&test_dev, I2S_DIR_RX, &rx_cfg);
+	zassert_equal(rx_rc, 0, "rx configure failed: %d", rx_rc);
+	rx_rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+	zassert_equal(rx_rc,
+	              -EBUSY,
+	              "RX start on a different rate did not refuse while TX sat parked in READY "
+	              "with clk_restart_skip_ok armed: %d",
+	              rx_rc);
 
 	tx_write_block();
 	before = fake_set_rate_calls;
 	tx_start();
 
-	zassert_true(fake_set_rate_calls > before,
-	             "TX restart skipped reprogramming after RX repointed the shared clock");
+	zassert_equal(fake_set_rate_calls,
+	              before,
+	              "TX restart reprogrammed after a correctly-refused RX start -- "
+	              "clk_restart_skip_ok did not survive the rejection");
+
+	/* Cleanup: free TX's outstanding block (never run to completion
+	 * through the ISR, same reasoning as test (g)'s own cleanup) before
+	 * the shared test_tx_slab runs dry for later tests in this suite. RX
+	 * never allocated one -- the rejection above happens before
+	 * rx_stream_start()'s k_mem_slab_alloc(), same as test (k). */
+	drop_rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(drop_rc, 0, "tx drop cleanup failed: %d", drop_rc);
 }
 
 /* (f) Resume, then start, reprograms. */
@@ -523,8 +552,7 @@ ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_running_keeps_clock)
 	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
 
-	zassert_true(clk_on_after_rx_stop,
-	             "RX stop gated the shared clock while TX was still RUNNING");
+	zassert_true(clk_on_after_rx_stop, "RX stop gated the shared clock while TX was still RUNNING");
 }
 
 /*
@@ -556,20 +584,36 @@ ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_idle_gates_clock)
  * `clk_needs_reprogram = !tx_live;` back to always-true turns this RED --
  * fake_set_rate_calls advances on the RX start even though TX is live at
  * the identical rate.
+ *
+ * MUTATION-PROVEN (round-3 review finding 4a): the fake_set_rate_calls
+ * assertion alone covers only i2s_configure_clocksource() -- it does NOT
+ * prove rx_stream_start()'s SECOND `if (clk_needs_reprogram)` guard (the
+ * one around i2s_configure_clock(), which writes CCR directly with no
+ * clock_control call at all) is also honoured. Deleting that second guard
+ * left all 12 cases green before this fix; the CCR-sentinel assertion below
+ * closes that hole -- with the guard deleted this now goes RED (CCR is
+ * rewritten to the driver's own computed value, which happens to differ
+ * from the sentinel). Restored after the mutation run.
  */
 ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_same_rate_skips_reprogram)
 {
-	int rc;
-	int before;
-	int set_rate_calls_after_rx_start;
+	int            rc;
+	int            before;
+	int            set_rate_calls_after_rx_start;
+	const uint32_t ccr_sentinel = 0xDEADBEEFU;
 
 	tx_configure(16000);
 	tx_write_block();
 	tx_start();
 
 	rx_configure(16000);
-	before = fake_set_rate_calls;
-	rc     = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+	/* Stamped AFTER tx_start() (which legitimately writes CCR on its own
+	 * first, non-restart-skip start) and read back below -- proves
+	 * rx_stream_start() itself leaves CCR untouched, not merely that it
+	 * skips the clock_control_set_rate() call fake_set_rate_calls counts. */
+	fake_regs.CCR = ccr_sentinel;
+	before        = fake_set_rate_calls;
+	rc            = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
 	zassert_equal(rc, 0, "rx start failed: %d", rc);
 	set_rate_calls_after_rx_start = fake_set_rate_calls;
 
@@ -581,8 +625,12 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_same_rate_skips_reprogram)
 	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
 
-	zassert_equal(set_rate_calls_after_rx_start, before,
+	zassert_equal(set_rate_calls_after_rx_start,
+	              before,
 	              "RX start reprogrammed the shared divider while TX was RUNNING at the same rate");
+	zassert_equal(fake_regs.CCR,
+	              ccr_sentinel,
+	              "RX start rewrote CCR directly while TX was RUNNING at the same rate");
 }
 
 /*
@@ -594,22 +642,37 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_same_rate_skips_reprogram)
  * mismatched-rate guard (dropping the `return -EBUSY;` and always
  * reprogramming) turns this RED on both assertions -- rc comes back 0 and
  * fake_set_rate_calls advances.
+ *
+ * MUTATION-PROVEN (round-3 review finding 4b): neither prior assertion
+ * proves the rejection happens BEFORE rx_stream_start()'s
+ * k_mem_slab_alloc(), which both the code comment there and the changelog
+ * assert. Moving the `return -EBUSY;` below the alloc call keeps rc and
+ * fake_set_rate_calls exactly as this test already checks, while leaking
+ * one RX block per rejection -- the real backend's 2-block slab
+ * (src/backends/i2s/zephyr_drv.c) starves after two rejections. The
+ * k_mem_slab_num_free_get() assertion below closes that hole: with the
+ * early return moved past the alloc, this now goes RED (one fewer free
+ * block after the rejected start). Restored after the mutation run.
  */
 ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 {
-	int rx_start_rc;
-	int drop_rc;
-	int before;
-	int set_rate_calls_after_rx_start;
+	int      rx_start_rc;
+	int      drop_rc;
+	int      before;
+	int      set_rate_calls_after_rx_start;
+	uint32_t rx_slab_free_before;
+	uint32_t rx_slab_free_after;
 
 	tx_configure(16000);
 	tx_write_block();
 	tx_start();
 
 	rx_configure(48000);
-	before      = fake_set_rate_calls;
-	rx_start_rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
+	before                        = fake_set_rate_calls;
+	rx_slab_free_before           = k_mem_slab_num_free_get(&test_rx_slab);
+	rx_start_rc                   = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
 	set_rate_calls_after_rx_start = fake_set_rate_calls;
+	rx_slab_free_after            = k_mem_slab_num_free_get(&test_rx_slab);
 
 	/* Cleanup: free TX's outstanding block. RX never allocated one --
 	 * the rejection happens before rx_stream_start()'s
@@ -618,9 +681,14 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 	drop_rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 	zassert_equal(drop_rc, 0, "tx drop cleanup failed: %d", drop_rc);
 
-	zassert_equal(rx_start_rc, -EBUSY,
+	zassert_equal(rx_start_rc,
+	              -EBUSY,
 	              "RX start on a different rate than a live TX did not return -EBUSY: %d",
 	              rx_start_rc);
-	zassert_equal(set_rate_calls_after_rx_start, before,
+	zassert_equal(set_rate_calls_after_rx_start,
+	              before,
 	              "RX start touched the shared divider despite being rejected");
+	zassert_equal(rx_slab_free_after,
+	              rx_slab_free_before,
+	              "RX start allocated (and leaked) an rx slab block before returning -EBUSY");
 }
