@@ -228,6 +228,25 @@ static uint32_t g_get_version_io_down_remaining; /* fail the transaction outrigh
  * attempted at most once (the cooldown -- see ctx->recover_count). */
 static bool g_all_io_down;
 
+/* #2136 mutant controls: force the two wire patterns the link-failure ring
+ * must tell apart (test_link_log_distinguishes_deaf_armed_from_desynced_2136).
+ * Cleared by slave_reset(). */
+static bool g_req_hdr_desynced; /* PH_REQ_HDR MISO reads 0x00 x4, not the armed
+                                 * ALP_CC3501E_SYNC_IDLE x4 -- a slave mid-payload,
+                                 * genuinely desynced rather than merely unarmed. */
+static bool g_reply_hdr_deaf;   /* PH_REPLY_HDR never echoes the request opcode -- stays
+                                 * ALP_CC3501E_SYNC_IDLE x4, i.e. the slave armed the
+                                 * header phase but never dispatched a reply at all. */
+
+/* #2136 review (MAJOR): PH_REPLY_HDR's own transceive fails OUTRIGHT (a
+ * genuine transport IO error mid-exchange), distinct from g_reply_hdr_deaf
+ * above (which lets the transceive succeed but makes its CONTENT wrong) --
+ * proves reply_hdr stays zero and CC3501E_LINK_LOG_REPLY_HDR_VALID stays
+ * unset even though hdr_bytes (from the already-succeeded request-header
+ * phase) is valid. One-shot: consumed and cleared the first time it fires.
+ * Also cleared by slave_reset(). */
+static bool g_reply_hdr_io_down;
+
 /* #2126 review follow-up mutant controls. Cleared by slave_reset() (bool/u32
  * ones) -- g_deaf_from_ms/g_deaf_until_ms are timestamps, meaningless to
  * reset to 0 (that would just mean "deaf from boot", not "never deaf"), so
@@ -555,6 +574,9 @@ static void slave_reset(void)
 	g_get_version_override_value       = 0u;
 	g_get_version_io_down_remaining    = 0u;
 	g_all_io_down                      = false;
+	g_req_hdr_desynced                 = false;
+	g_reply_hdr_deaf                   = false;
+	g_reply_hdr_io_down                = false;
 	g_heal_disabled                    = false;
 	g_ble_enable_busy                  = false;
 	g_reset_release_count              = 0u;
@@ -1406,6 +1428,19 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		g_get_version_io_down_remaining--;
 		return ALP_ERR_IO;
 	}
+	/* #2136 review (MAJOR): PH_REPLY_HDR's own transceive fails outright --
+	 * see g_reply_hdr_io_down's own comment. One-shot: leaves the MODEL
+	 * parked at PH_REPLY_HDR (it never reaches the switch below, so
+	 * slave.phase does not advance) even though the real host already bailed
+	 * to `out:` and will start its NEXT attempt at a fresh request-header
+	 * phase -- same model/host phase skew test_link_log_distinguishes_
+	 * deaf_armed_from_desynced_2136 hits with g_req_hdr_desynced, and the
+	 * same fix: whoever sets this flag must call slave_reset() before its
+	 * next request. */
+	if (slave.phase == PH_REPLY_HDR && g_reply_hdr_io_down) {
+		g_reply_hdr_io_down = false;
+		return ALP_ERR_IO;
+	}
 	switch (slave.phase) {
 	case PH_REQ_HDR:
 		slave.cmd   = tx[0];
@@ -1420,7 +1455,10 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		slave.flags_log_count++;
 		slave.req_len = (uint16_t)tx[2] | ((uint16_t)tx[3] << 8);
 		if (rx != NULL) {
-			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
+			/* #2136: g_req_hdr_desynced models a slave mid-payload (0x00,
+			 * not the armed marker) instead of the normal armed-idle
+			 * pattern. */
+			memset(rx, g_req_hdr_desynced ? 0x00u : ALP_CC3501E_SYNC_IDLE, len);
 		}
 		if (slave.req_len > 0u) {
 			slave.phase = PH_REQ_PL;
@@ -1438,10 +1476,17 @@ alp_status_t alp_spi_transceive(alp_spi_t *bus, const uint8_t *tx, uint8_t *rx, 
 		slave.phase = PH_REPLY_HDR;
 		break;
 	case PH_REPLY_HDR:
-		rx[0]       = slave.cmd; /* reply header echoes the cmd */
-		rx[1]       = 0x00u;     /* solicited */
-		rx[2]       = (uint8_t)(slave.reply_len & 0xFFu);
-		rx[3]       = (uint8_t)((slave.reply_len >> 8) & 0xFFu);
+		/* #2136: g_reply_hdr_deaf models a slave that armed the request-header
+		 * phase but never dispatched a reply -- the header stays parked at
+		 * the idle marker instead of echoing the request opcode. */
+		if (g_reply_hdr_deaf) {
+			memset(rx, ALP_CC3501E_SYNC_IDLE, len);
+		} else {
+			rx[0] = slave.cmd; /* reply header echoes the cmd */
+			rx[1] = 0x00u;     /* solicited */
+			rx[2] = (uint8_t)(slave.reply_len & 0xFFu);
+			rx[3] = (uint8_t)((slave.reply_len >> 8) & 0xFFu);
+		}
 		slave.phase = PH_REPLY_PL;
 		break;
 	case PH_REPLY_PL:
@@ -5211,6 +5256,277 @@ ZTEST(cc3501e_host_driver, test_recover_callback_fires_once_per_recovery_2126)
 	zassert_equal(fw.recover_count, 1u, "test setup: exactly one recovery ran");
 	zassert_equal(g_recover_cb_calls, 1u, "the registered callback fired exactly once");
 	zassert_equal(g_recover_cb_last_count, 1u, "and was handed the committed recover_count");
+}
+
+/* ========================= LINK-FAILURE RING (#2136) ======================= */
+
+ZTEST(cc3501e_host_driver, test_link_log_records_pre_decode_failure_2136)
+{
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "io-down ping fails pre-decode");
+	zassert_equal(cc3501e_link_log_count(&fw), 1u, "one ring entry recorded");
+
+	cc3501e_link_log_entry_t e;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &e), ALP_OK, "entry 0 reads back");
+	zassert_equal(e.cmd, (uint8_t)ALP_CC3501E_CMD_PING, "records the opcode used");
+	zassert_equal(
+	    e.phase, CC3501E_LINK_LOG_PHASE_REQUEST_HEADER, "bails at the request-header phase");
+	zassert_equal(e.status, (int8_t)ALP_ERR_IO, "records the mapped status");
+
+	/* A decoded reply -- success here -- must add NOTHING to the ring. */
+	g_all_io_down = false;
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "healthy ping succeeds");
+	zassert_equal(cc3501e_link_log_count(&fw), 1u, "success adds no ring entry");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_fail_streak_resets_on_success_2136)
+{
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	zassert_equal(fw.link_log_fail_streak, 2u, "two consecutive pre-decode failures");
+
+	g_all_io_down = false;
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, NULL);
+	zassert_equal(fw.link_log_fail_streak, 0u, "a decoded reply resets the streak");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_wraps_keeps_newest_2136)
+{
+	/* g_fake_now_ms is a suite-wide fake clock, not reset per test (see its
+	 * own doc comment) -- capture a baseline like the other tests that read
+	 * it directly, rather than assuming it starts at 0. Real delays inside
+	 * cc3501e_request_locked() only ever call alp_delay_us() on this NULL-
+	 * ready_pin fixture, which does NOT advance g_fake_now_ms, so this test
+	 * advances the fake clock itself between attempts -- the only way to
+	 * give each ring entry a distinct, orderable ts_ms without a real
+	 * sleep. */
+	const uint64_t base     = g_fake_now_ms;
+	const unsigned attempts = (unsigned)CC3501E_LINK_LOG_LEN + 3u;
+
+	g_all_io_down = true;
+	for (unsigned i = 1u; i <= attempts; i++) {
+		g_fake_now_ms = base + (uint64_t)i * 1000u;
+		zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	}
+	zassert_equal(cc3501e_link_log_count(&fw), CC3501E_LINK_LOG_LEN, "ring saturates at LEN");
+
+	cc3501e_link_log_entry_t oldest, newest;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &oldest), ALP_OK, NULL);
+	zassert_equal(
+	    cc3501e_link_log_get(&fw, (uint8_t)(CC3501E_LINK_LOG_LEN - 1u), &newest), ALP_OK, NULL);
+	/* attempts - LEN attempts were evicted, so the oldest SURVIVING entry is
+	 * attempt #(attempts - LEN + 1), and the newest is the very last one. */
+	const uint32_t expect_oldest_ts =
+	    (uint32_t)(base + (uint64_t)(attempts - CC3501E_LINK_LOG_LEN + 1u) * 1000u);
+	const uint32_t expect_newest_ts = (uint32_t)(base + (uint64_t)attempts * 1000u);
+
+	zassert_equal(oldest.ts_ms, expect_oldest_ts, "oldest entries were evicted, not kept");
+	zassert_equal(newest.ts_ms, expect_newest_ts, "the newest attempt is always kept");
+}
+
+ZTEST(cc3501e_host_driver, test_link_log_distinguishes_deaf_armed_from_desynced_2136)
+{
+	/* Desynced: the request-header phase itself reads the wrong marker
+	 * (0x00, not the armed idle pattern) -- the in-band armed check bails
+	 * at the request-header phase before anything else is clocked. */
+	g_req_hdr_desynced = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "desynced header fails the armed check");
+	cc3501e_link_log_entry_t desynced;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &desynced), ALP_OK, NULL);
+	zassert_equal(desynced.phase,
+	              CC3501E_LINK_LOG_PHASE_REQUEST_HEADER,
+	              "desynced bails at the request-header phase");
+	zassert_equal(desynced.hdr_bytes[0], 0x00u, "desynced header reads the wrong marker");
+	zassert_equal(desynced.hdr_bytes[3], 0x00u, NULL);
+	g_req_hdr_desynced = false;
+	/* The desynced attempt above left the FAKE SLAVE MODEL itself out of
+	 * lockstep with the host (the host bailed at the armed check without
+	 * ever clocking a reply phase, but the stub's own slave.phase already
+	 * advanced past PH_REQ_HDR inside slave_dispatch()) -- reset just the
+	 * model, not ctx->link_log, so the next attempt starts this SAME ctx's
+	 * ring a clean 4-phase exchange instead of inheriting that skew. */
+	slave_reset();
+
+	/* Deaf-armed: the request-header phase is normal (armed, 0xA5 x4), but
+	 * the reply header never echoes the request opcode -- the slave armed
+	 * the link and then never dispatched anything. */
+	g_reply_hdr_deaf = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "a reply that never echoes is IO");
+	cc3501e_link_log_entry_t deaf;
+	zassert_equal(cc3501e_link_log_get(&fw, 1u, &deaf), ALP_OK, NULL);
+	zassert_equal(
+	    deaf.phase, CC3501E_LINK_LOG_PHASE_REPLY_HEADER, "deaf-armed bails at the reply header");
+	zassert_equal(deaf.hdr_bytes[0], ALP_CC3501E_SYNC_IDLE, "request header WAS armed (0xA5)");
+	zassert_equal(deaf.reply_hdr[0], ALP_CC3501E_SYNC_IDLE, "reply header never echoed the cmd");
+	g_reply_hdr_deaf = false;
+
+	/* The two entries must actually be tellable apart -- the whole point. */
+	zassert_true(desynced.phase != deaf.phase, "different phase");
+	zassert_true(desynced.hdr_bytes[0] != deaf.hdr_bytes[0], "different request-header bytes");
+}
+
+/* #2136 review (BLOCKER): reply_hdr's declaration used to sit BETWEEN the
+ * phase-1/2 bails and phase 3 -- every early `goto out;` jumped over its
+ * initializer (C99 6.2.4p6 does not run it when skipped), so a phase-1
+ * failure's ring entry copied whatever reply_hdr happened to hold at that
+ * stack depth from a PREVIOUS attempt, not a genuine all-zero "never reached
+ * phase 3". Drive exactly that shape: a healthy request first (so something
+ * real occupies reply_hdr / that stack slot), then a phase-1 failure, and
+ * assert the failure's own entry is genuinely all-zero -- true after the fix
+ * regardless of what the prior attempt left behind, because reply_hdr is now
+ * zero-initialised above every goto in the function. */
+ZTEST(cc3501e_host_driver, test_link_log_reply_hdr_not_prior_attempt_residue_2136)
+{
+	/* A healthy PING first -- reaches phase 3+4, decodes, adds no ring entry,
+	 * but leaves real, non-zero reply-header bytes in play at cc3501e_request_
+	 * locked()'s stack depth (the exact shape the blocker needed to reproduce:
+	 * a re-entry at the same depth inheriting a PRIOR attempt's reply_hdr). */
+	zassert_equal(cc3501e_ping(&fw), ALP_OK, "a healthy ping first");
+	zassert_equal(cc3501e_link_log_count(&fw), 0u, "success adds no ring entry");
+
+	/* Now a phase-1 failure -- never reaches phase 3 at all. */
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, "io-down ping fails pre-decode");
+	g_all_io_down = false;
+
+	cc3501e_link_log_entry_t e;
+	zassert_equal(cc3501e_link_log_count(&fw), 1u, "one ring entry recorded");
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &e), ALP_OK, NULL);
+	zassert_equal(
+	    e.phase, CC3501E_LINK_LOG_PHASE_REQUEST_HEADER, "bails at the request-header phase");
+	zassert_false((e.flags & CC3501E_LINK_LOG_REPLY_HDR_VALID) != 0u,
+	              "phase 3 was never reached -- REPLY_HDR_VALID must be unset");
+	for (size_t i = 0; i < ALP_CC3501E_HEADER_BYTES; i++) {
+		zassert_equal(e.reply_hdr[i],
+		              0u,
+		              "reply_hdr must be genuinely all-zero, not a prior attempt's residue");
+	}
+}
+
+/* #2136 review (MAJOR): cc3501e_link_check_and_recover()'s own probe fires up
+ * to 24 PINGs -- more than CC3501E_LINK_LOG_LEN (8) -- before pulsing nRESET.
+ * Unsuppressed, every one of those PINGs would go through the ring's write
+ * site on failure and evict the ORIGINAL wedging op's entry 3x over, leaving
+ * only 8 identical PING failures for a bench operator to read. Drive a
+ * distinct wedging op (GET_MAC, not PING) through a dead link so the WHOLE
+ * auto-recovery cycle (probe + reset + confirm) runs inside one call, then
+ * assert the wedging op's own entry SURVIVED it. */
+ZTEST(cc3501e_host_driver, test_link_log_survives_recovery_probe_2136)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t s                    = cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, "the wedging op itself still fails");
+	zassert_equal(fw.recover_count, 1u, "the probe + reset ran exactly once");
+	/* The probe absorbed 24 PING failures into link_log_probe_fail_count
+	 * INSTEAD of the ring -- proves the suppression path actually ran, not
+	 * just that recovery happened to succeed. */
+	zassert_equal(cc3501e_link_log_probe_fail_count(&fw), 24u, "all 24 probe PINGs counted");
+
+	bool          found_wedging_op = false;
+	const uint8_t n                = cc3501e_link_log_count(&fw);
+	for (uint8_t i = 0; i < n; i++) {
+		cc3501e_link_log_entry_t e;
+		zassert_equal(cc3501e_link_log_get(&fw, i, &e), ALP_OK, NULL);
+		if (e.cmd == (uint8_t)ALP_CC3501E_CMD_GET_MAC) found_wedging_op = true;
+		/* If suppression is broken, every surviving slot reads PING -- the
+		 * eviction this test exists to catch. */
+		zassert_true(e.cmd != (uint8_t)ALP_CC3501E_CMD_PING,
+		             "no probe PING may ever reach the ring");
+	}
+	zassert_true(found_wedging_op,
+	             "the wedging op's own ring entry must survive the 24-PING probe");
+}
+
+/* #2136 review (MAJOR): hdr_bytes / reply_hdr are memcpy'd from rx_scratch
+ * ONLY when that phase's own transceive returns ALP_OK -- otherwise they stay
+ * the zero-initialised default and the matching VALID flag stays unset.
+ * Covers all three reachable shapes: neither phase reached (phase-1 IO
+ * failure), both phases' transceives succeeded (deaf-armed: phase 3's
+ * transceive is OK, its CONTENT is simply never dispatched), and the
+ * request-header phase succeeded but the reply-header phase's own transceive
+ * itself failed (g_reply_hdr_io_down) -- the one shape neither pre-existing
+ * mutant control could drive, and the one the MAJOR fix specifically targets:
+ * hdr_bytes VALID, reply_hdr NOT, even though a bail happened AFTER phase 3
+ * technically started. */
+ZTEST(cc3501e_host_driver, test_link_log_valid_flags_track_transceive_success_2136)
+{
+	/* Neither phase reached. */
+	g_all_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	g_all_io_down = false;
+	cc3501e_link_log_entry_t io_down;
+	zassert_equal(cc3501e_link_log_get(&fw, 0u, &io_down), ALP_OK, NULL);
+	zassert_false((io_down.flags & CC3501E_LINK_LOG_HDR_BYTES_VALID) != 0u,
+	              "phase 1 never completed -- HDR_BYTES_VALID must be unset");
+	zassert_false((io_down.flags & CC3501E_LINK_LOG_REPLY_HDR_VALID) != 0u,
+	              "phase 3 never reached -- REPLY_HDR_VALID must be unset");
+
+	/* Both phases' own transceives succeeded (deaf-armed: content is wrong,
+	 * not the transceive). */
+	g_reply_hdr_deaf = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	g_reply_hdr_deaf = false;
+	cc3501e_link_log_entry_t deaf;
+	zassert_equal(cc3501e_link_log_get(&fw, 1u, &deaf), ALP_OK, NULL);
+	zassert_true((deaf.flags & CC3501E_LINK_LOG_HDR_BYTES_VALID) != 0u,
+	             "phase 1's transceive succeeded -- HDR_BYTES_VALID must be set");
+	zassert_true((deaf.flags & CC3501E_LINK_LOG_REPLY_HDR_VALID) != 0u,
+	             "phase 3's transceive succeeded (content is what is wrong) -- "
+	             "REPLY_HDR_VALID must be set");
+	/* The deaf-armed bail left the MODEL parked past PH_REQ_HDR (the driver
+	 * bailed at phase 3's !hdr_ok check without ever clocking phase 4, but
+	 * slave_dispatch()'s own PH_REPLY_HDR case unconditionally advances to
+	 * PH_REPLY_PL) -- same host/model phase skew
+	 * test_link_log_distinguishes_deaf_armed_from_desynced_2136 hits after
+	 * ITS desynced scenario. Re-sync before the next request. */
+	slave_reset();
+
+	/* Phase 1 succeeded, phase 3's own transceive failed outright. */
+	g_reply_hdr_io_down = true;
+	zassert_equal(cc3501e_ping(&fw), ALP_ERR_IO, NULL);
+	slave_reset(); /* re-sync the model -- see g_reply_hdr_io_down's own comment */
+	cc3501e_link_log_entry_t reply_io_down;
+	zassert_equal(cc3501e_link_log_get(&fw, 2u, &reply_io_down), ALP_OK, NULL);
+	zassert_equal(reply_io_down.phase,
+	              CC3501E_LINK_LOG_PHASE_REPLY_HEADER,
+	              "bails at the reply-header phase");
+	zassert_true((reply_io_down.flags & CC3501E_LINK_LOG_HDR_BYTES_VALID) != 0u,
+	             "phase 1's transceive succeeded -- HDR_BYTES_VALID must be set");
+	zassert_false((reply_io_down.flags & CC3501E_LINK_LOG_REPLY_HDR_VALID) != 0u,
+	              "phase 3's OWN transceive failed -- REPLY_HDR_VALID must be unset "
+	              "even though this attempt reached phase 3");
+	for (size_t i = 0; i < ALP_CC3501E_HEADER_BYTES; i++) {
+		zassert_equal(reply_io_down.reply_hdr[i],
+		              0u,
+		              "reply_hdr must be all-zero when its own transceive failed, "
+		              "not whatever residue that failed transceive left behind");
+	}
+}
+
+/* #2136 review (minor): the streak a recovery dump prints must reflect what
+ * TRIGGERED that recovery, not the post-recovery live value -- the live
+ * ctx->link_log_fail_streak is reset to 0 by cc3501e_recover()'s own
+ * confirming PING (a decoded reply) before any dump could run. */
+ZTEST(cc3501e_host_driver, test_link_log_recover_streak_snapshots_pre_reset_value_2136)
+{
+	fw.reset_pin  = FAKE_RESET_PIN;
+	fw.enable_pin = FAKE_ENABLE_PIN;
+	g_all_io_down = true;
+
+	uint8_t      mac[CC3501E_MAC_LEN] = { 0 };
+	alp_status_t s                    = cc3501e_wifi_get_mac(&fw, mac, 100u);
+
+	zassert_equal(s, ALP_ERR_TIMEOUT, NULL);
+	zassert_equal(fw.recover_count, 1u, "recovery ran exactly once");
+	zassert_equal(cc3501e_link_log_fail_streak(&fw), 0u, "confirming PING reset the LIVE streak");
+	zassert_true(cc3501e_link_log_recover_streak(&fw) > 0u,
+	             "the snapshot must still show the streak that triggered recovery");
 }
 
 ZTEST_SUITE(cc3501e_host_driver, NULL, NULL, reset_before, NULL, NULL);
