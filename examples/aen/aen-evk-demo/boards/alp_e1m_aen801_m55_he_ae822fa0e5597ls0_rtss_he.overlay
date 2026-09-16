@@ -771,11 +771,12 @@
  * needed. This node only needs status = "okay"; gpio_dw applies no pad mux
  * of its own (same note as the encoder switch's pinctrl comment above).
  *
- * The I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30) and SELECT (E1M IO13 ->
- * CC3501E GPIO_13) are NOT in this file -- like phase 9's SD mux ENABLE,
- * both are CC3501E-proxied pads driven at runtime over the inter-chip
- * bridge phase 8 leaves up (src/cc3501e_gpio_routes.c). Devicetree describes
- * neither.
+ * The I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30, hw_rev 2626-r2 ONLY -- see
+ * src/hw_rev_verdict.h and phase 11's own header, issue #2138) and SELECT
+ * (E1M IO13 -> CC3501E GPIO_13) are NOT in this file -- like phase 9's SD mux
+ * ENABLE, both are CC3501E-proxied pads driven at runtime over the
+ * inter-chip bridge phase 8 leaves up (src/cc3501e_gpio_routes.c).
+ * Devicetree describes neither.
  *
  * SAFETY, i2s3 node DISABLED BY DEFAULT: U46 (the 74LVC157 mux above) has NO
  * Hi-Z state -- with /E high its Y outputs are forced LOW, not floated -- and
@@ -793,8 +794,17 @@
  * fact, hit first there since that example has no mux-enable GPIO to hide
  * behind). The HP PDM node stays enabled -- it is a wholly separate bus
  * (P6_0/P6_1), input-only, and never touches U46. To turn playback on once
- * U46 has been reworked: set AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c
- * AND pass `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * U46 is BOTH a 3257-type switch AND its VCC is on +3V3 (a stock
+ * 74LVC157, even on +3V3, is still one-way and reproduces the
+ * contention above; VCC alone is not the gate), OR a switch rated for
+ * 1.8 V VCC (untested) -- on e1m-aen-evk-03, 2026-09-15, a fitted 3257-type
+ * part's VCC was moved to +3V3 between a silent run and an audible
+ * run; not established as the only difference between the two -- see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
+ * untested /E-or-S-HIGH caveat at +3V3 and the open TDM-latch/#2146
+ * findings: set
+ * AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c AND pass
+ * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (relative to this app's own source dir) -- both switches, not either alone.
  */
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
