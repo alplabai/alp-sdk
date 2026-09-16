@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20)
 
-# PROBE_UNDERRUN (#2149 bench verification) needs CONFIG_LOG on -- see
-# underrun.conf's own header. OVERLAY_CONFIG has to be set BEFORE
-# find_package(Zephyr...) below for Zephyr's own Kconfig merge to pick it
-# up; every other PROBE_* mode leaves PROBE_UNDERRUN undefined, so this is a
-# no-op for them.
-if(DEFINED PROBE_UNDERRUN)
+# PROBE_UNDERRUN (#2149 bench verification) and PROBE_RX_TEARDOWN (#2171,
+# phase 1 of #2150) both need CONFIG_LOG on -- see underrun.conf's own
+# header; PROBE_RX_TEARDOWN reuses it rather than adding a near-duplicate
+# file, since its own step 2 exercises the SAME alp_i2s_zephyr
+# I2S_STATE_ERROR recovery LOG_WRN_RATELIMIT() as PROBE_UNDERRUN's step 2.
+# OVERLAY_CONFIG has to be set BEFORE find_package(Zephyr...) below for
+# Zephyr's own Kconfig merge to pick it up; every other PROBE_* mode leaves
+# both undefined, so this is a no-op for them.
+if(DEFINED PROBE_UNDERRUN OR DEFINED PROBE_RX_TEARDOWN)
   list(APPEND OVERLAY_CONFIG "${CMAKE_CURRENT_SOURCE_DIR}/underrun.conf")
 endif()
 
@@ -84,4 +87,17 @@ endif()
 # underrun.conf (see the OVERLAY_CONFIG block above) for CONFIG_LOG.
 if(DEFINED PROBE_UNDERRUN)
   target_compile_definitions(app PRIVATE PROBE_UNDERRUN=${PROBE_UNDERRUN})
+endif()
+
+# PROBE_RX_TEARDOWN (test/2171-rx-teardown-arm): compile-time switch to
+# src/main.c's #2171 (phase 1 of #2150) variant -- reuses PROBE_UNDERRUN's
+# bring-up + TX-underrun-arm pattern, then configures/starts/stops I2S3 in
+# RX (<alp/i2s.h>, ALP_I2S_DIR_RX) to exercise rx_stream_disable() while TX
+# is still depending on the shared bit clock, and re-reads CER/PWR_CTL
+# afterward. Opt in with `west build ... -- -DPROBE_RX_TEARDOWN=1`; unset
+# (the default), this app is unchanged, same as every other PROBE_* switch
+# unset. Also pulls in underrun.conf (see the OVERLAY_CONFIG block above)
+# for CONFIG_LOG.
+if(DEFINED PROBE_RX_TEARDOWN)
+  target_compile_definitions(app PRIVATE PROBE_RX_TEARDOWN=${PROBE_RX_TEARDOWN})
 endif()
