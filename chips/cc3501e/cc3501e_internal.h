@@ -122,12 +122,38 @@ alp_status_t poll_by_repeat_handle(cc3501e_t        *ctx,
                                    uint32_t          timeout_ms,
                                    uint16_t          handle);
 
-/* Tell the transport the peer is a POLLED slave (OTA update mode): the READY
- * gate then waits for a LOW->HIGH edge instead of a level. */
+/* Tell the transport the peer is a POLLED slave (OTA update mode).
+ * cc3501e_ota_begin() reads this back via cc3501e_peer_is_polled() as a hard
+ * precondition -- see that function's own comment for why BEGIN on the
+ * ordinary callback/DMA bridge permanently wedges the device.  See
+ * g_peer_polled's comment in cc3501e_core.c for why this no longer also
+ * floors cc3501e_reply_gate()'s fallback settle. */
 void cc3501e_set_peer_polled(bool on);
 
 /* True when the host believes the peer is running the POLLED update-mode boot. */
 bool cc3501e_peer_is_polled(void);
+
+/* True once cc3501e_reply_gate() has ever given up waiting on a stuck-LOW
+ * ready_pin (CC3501E_READY_STUCK_LOW_STREAK consecutive full-budget
+ * timeouts) and latched g_ready_ignored, process-wide.  Production code never
+ * resets this once it latches.  NOT a log call -- chips/cc3501e has no
+ * logging facility of its own -- a caller (bench diagnostics, a bring-up
+ * app) has to poll this and print it itself if it wants the degrade
+ * reported anywhere.  See g_ready_line_was_stuck in cc3501e_core.c for the
+ * full rationale. */
+bool cc3501e_ready_line_was_stuck(void);
+
+#ifdef CONFIG_ZTEST
+/* TEST-ONLY: reset every cc3501e_reply_gate() READY-gate static (the
+ * stuck-LOW ignore latch, its timeout streak, the was-stuck latch) to its
+ * zero state.  Compiled only under CONFIG_ZTEST -- never linked into a
+ * non-test build -- because production code never calls this: those statics
+ * are meant to persist for the whole boot.  tests/zephyr/cc3501e_host_driver
+ * drives multiple READY-line fixtures (stuck-high, stuck-low, noisy, a slow
+ * arm) through the SAME test binary, and file-static state would otherwise
+ * leak from one fixture into the next depending on run order. */
+void cc3501e_ready_gate_reset_for_test(void);
+#endif
 
 /* #2035: whether opcode @p cmd is allowed to reply all-zero (status byte +
  * data) without cc3501e_request_locked() treating that as the #1378

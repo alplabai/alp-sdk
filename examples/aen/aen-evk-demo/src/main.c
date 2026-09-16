@@ -2120,7 +2120,9 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 
 	/* --- 1. Power + reset + open the link ---------------------------- */
 	/* One call: opens SPI1 (hardware SS0, ALP_SPI_NO_CS) and the WIFI_EN /
-	 * nRESET / READY pins, turns the LP pads' output drivers on (pinctrl
+	 * nRESET pins (no READY pin on this R2 module -- see
+	 * chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate() comment), turns the
+	 * LP pads' output drivers on (pinctrl
 	 * does not reach the LP island), binds them, then runs the power-up and
 	 * reset sequence -- including the Puya-flash double-boot workaround: a
 	 * cold power-on mis-reads the PY25Q64LB on the FIRST boot, so the part
@@ -2196,8 +2198,9 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 		 * conclude something else was hanging. */
 		printf("[evkdemo] CC3501E: no answer after %u ms of retry gaps (plus each attempt's own "
 		       "transport timeout, so longer in wall-clock) -- check WIFI_EN (P15_5) actually went "
-		       "high, the SPI1 pinmux (P14_4/5/6/7), the READY line (P2_6), and that the "
-		       "coprocessor is running its bridge firmware. NOT a skip: the part is fitted and "
+		       "high, the SPI1 pinmux (P14_4/5/6/7) -- no READY pin is wired on this R2 module -- "
+		       "and that the coprocessor is running its bridge firmware. NOT a skip: the part is "
+		       "fitted and "
 		       "powered by this phase, so silence is a failure\n",
 		       (unsigned)(CC35_PING_RETRIES * CC35_PING_GAP_MS));
 		return PHASE_FAIL;
