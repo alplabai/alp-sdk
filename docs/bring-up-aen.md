@@ -108,9 +108,12 @@ PMIC's `EVENT_00` status register over BRD_I2C.
 
    The SW-DP IDR (the debug-port identification register — a property of
    the ADIv5 SW-DP, **not** a core ID) reads **`0x4C013477`** on the E8
-   (BENCH-VERIFIED). Note this is *not* the generic `0x6BA02477` this repo
-   reads for the GD32/Cortex-M33 — a wrong value means wrong target or
-   reversed SWD wiring.
+   (BENCH-VERIFIED). Note this is *not* `0x6BA02477`, the generic
+   Cortex-M33 r0p1 SW-DPv2 default this repo carries as
+   `GD32_SWD_GENERIC_CM33_R0P1_IDCODE` (never measured on a GD32; #1440,
+   #1369) and separately the bench-measured V2N CM33 DAP value on this
+   same rack — a wrong value on the E8 means wrong target or reversed
+   SWD wiring.
 
    > pyocd works too, but its `-t` target id depends on the installed
    > `alif_ensemble-cmsis-dfp` CMSIS-pack (do NOT assume an `alif_e8` id).
@@ -243,8 +246,9 @@ trio (OPTIGA / RTC / TMP112) is on the separate, shared **BRD_I2C**
 > [`docs/soms/aen.md`](soms/aen.md) "On-module housekeeping I2C (BRD_I2C)" for
 > the customer-facing writeup, its limitations (no `VBACKUP` supply, so no
 > timekeeping across a power cycle; `RTC_CLKOUT` carrier-only), and the
-> `0x40`-instead-of-`0x48` per-unit TMP112 defect. #1814's blocker is cleared:
-> `rv3028c7` is reachable.
+> TMP112 design address: `0x40`, not the earlier-declared `0x48`, which was a
+> metadata error (alp-sdk#1978). #1814's blocker is cleared: `rv3028c7` is
+> reachable.
 >
 > Unrelated but corrected in the same pass: `LPI2C1` **is** master-capable
 > (HWRM: "Two Low-Power I2C modules (LPI2C0 slave-only and LPI2C1
@@ -271,7 +275,7 @@ this bus actually measured.
 | 24C128 | `0x50` | EEPROM (manifest) | I2C2 | SoM |
 | OPTIGA TM | `0x30` | Secure element | BRD_I2C (I2C0) | SoM — **DNI on this bench batch** |
 | RV-3028-C7 | `0x52` | RTC | BRD_I2C (I2C0) | SoM |
-| TMP112 | `0x48` | Thermometer -- DECLARED address; does NOT answer on the 2026W36 batch (alp-sdk#1978) | BRD_I2C (I2C0) | SoM |
+| TMP112 | `0x40` | Thermometer -- design address for the fitted TMP112DIDPWR (X2SON-5, ADD0->GND per SBOS473L Table 7-4); the earlier-declared `0x48` was a metadata error, corrected under alp-sdk#1978 | BRD_I2C (I2C0) | SoM |
 | TCAL9538 | `0x73` | GPIO expander (U35 main) | I2C2 | EVK carrier |
 | TCAL9538 | `0x71` | GPIO expander (U37, PCIe -- NOT ASSEMBLED, alp-sdk#1974) | I2C2 | EVK carrier |
 | INA236 | `0x40`..`0x42`, `0x49`..`0x4B` | Power monitor (6x) | I2C2 | EVK carrier |
@@ -374,7 +378,7 @@ pull-up alone.**
 | Address | Part | Result |
 |---|---|---|
 | `0x52` | RV-3028-C7 | ACK; ID reg `0x28` = `0x44` (HID nibble `0x4` matches; VID nibble is production-line, not identity, per RV-3028-C7 Application Manual Rev. 1.4 §3.14); seconds `0x01` -> `0x02` (oscillator running) |
-| `0x48` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
+| `0x40` | TMP112 | ACK; `CONFIG` `0x60a0` / `T_LOW` `0x4b00` / `T_HIGH` `0x5000` = datasheet defaults; 28.062 °C |
 | `0x30` | OPTIGA Trust M | no answer -- DNP on this batch, the expected negative control |
 
 Every non-response was a clean `rc=-5` (`-EIO`) NACK: **zero `-ETIMEDOUT`,

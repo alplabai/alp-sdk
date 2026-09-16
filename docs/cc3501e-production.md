@@ -115,8 +115,9 @@ cold POR** (no rollback). The `OTA_STATUS reserved[0]` byte surfaces the swap-re
   ~15 s WPA3 association), and the L2 association completes with the bridge intact.
   The earlier "the ~15 s association **desyncs the CS-less r1 SPI bridge permanently**"
   limitation is **resolved**: the current rev runs a **hardware peripheral-driven SS0
-  chip-select** (Alif `P14_7` = `SPI1_SS0_C`; dwc-ssi drives SS0 per transfer) plus
-  per-phase READY gating, so a busy radio can no longer lose link framing — `ver`
+  chip-select** (Alif `P14_7` = `SPI1_SS0_C`; dwc-ssi drives SS0 per transfer) —
+  READY is an OPTIONAL additional gate, left unwired on the boards these numbers
+  were taken on — so a busy radio can no longer lose link framing — `ver`
   after a connect still returns, no power-cycle needed (`docs/cc3501e-bridge.md`
   "Bench-validated").  Connect was also found to have been dispatched **synchronously
   in the SPI ISR** (every other blocking radio op is worker-routed); that is fixed

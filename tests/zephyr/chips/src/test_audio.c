@@ -8,6 +8,7 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio/gpio_emul.h>
+#include <zephyr/sys/time_units.h>
 #include <zephyr/ztest.h>
 
 #include "alp/blocks/pdm_mic.h"
@@ -187,6 +188,8 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
 /* Register addresses re-declared here (they are private to
  * chips/tas2563/tas2563.c) so an assertion reads as the datasheet
  * register it checks.  SLASET3D section 7.5.1, p.64-65. */
+#define TAS_REG_PAGE      0x00u
+#define TAS_REG_SW_RESET  0x01u
 #define TAS_REG_PWR_CTL   0x02u
 #define TAS_REG_PB_CFG1   0x03u
 #define TAS_REG_MISC_CFG1 0x04u
@@ -211,38 +214,56 @@ static const struct device *tas_gpio_dev(void)
 }
 
 /* Reset the fake, pre-seed PWR_CTL, init the driver, then clear the
- * write log so each test sees only its own bus traffic. */
+ * write log so each test sees only its own bus traffic.
+ *
+ * Close-before-assert on the failure path: this helper backs roughly
+ * 15 tests, and a plain zassert_* here would abort every one of them
+ * with the bus still open on a real failure, leaking a fixed-pool
+ * handle into every later test that opens one instead of reporting
+ * just the one real failure. */
 static alp_i2c_t *tas_init(tas2563_t *ctx, uint8_t pwr_ctl_seed, alp_gpio_t *sd_n)
 {
 	fake_tas2563_reset();
 	fake_tas2563_set_reg(TAS_REG_PWR_CTL, pwr_ctl_seed);
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	alp_status_t init_rc = tas2563_init(ctx, bus, TAS_FAKE_ADDR, sd_n);
+	if (init_rc != ALP_OK) alp_i2c_close(bus);
+
 	zassert_not_null(bus);
-	zassert_equal(tas2563_init(ctx, bus, TAS_FAKE_ADDR, sd_n),
-	              ALP_OK,
-	              "init must succeed against the fake at 0x%02x",
-	              TAS_FAKE_ADDR);
+	zassert_equal(init_rc, ALP_OK, "init must succeed against the fake at 0x%02x", TAS_FAKE_ADDR);
 	fake_tas2563_log_reset();
 	return bus;
 }
 
 /* PWR_CTL's reset value is Eh -- MODE is already 10b (software
  * shutdown), SLASET3D 7.5.4 Table 7-104 p.66.  Seeding MODE = 00b
- * (ACTIVE) makes "init forced it back" observable; that is the
- * warm-restart case, where SD_N was never dropped and register state
- * survived from the previous firmware. */
+ * (ACTIVE) simulates a previous firmware having left the part running;
+ * init's own unconditional SW_RESET (SLASET3D §7.5.3) is what forces
+ * it back now, not the explicit park write that follows -- see that
+ * write's own comment in chips/tas2563/tas2563.c for why it is kept
+ * anyway. */
 ZTEST(alp_chips, test_tas2563_init_parks_amp_in_software_shutdown)
 {
 	tas2563_t  ctx;
 	alp_i2c_t *bus = tas_init(&ctx, 0x00u, NULL);
-
-	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
-	              0x02u,
-	              "init must leave PWR_CTL.MODE = 10b (software shutdown) and touch "
-	              "nothing else in the byte");
-
+	/* Close right here: everything below reads the fake's own register
+	 * model directly (fake_tas2563_get_reg()), not through the bus
+	 * handle, so nothing after this point needs it open -- and closing
+	 * now means a failing assertion below can't leak it. */
 	alp_i2c_close(bus);
+
+	/* init's own unconditional SW_RESET (SLASET3D §7.5.3) now wipes the
+	 * 0x00u seed back to the POR default 0x0Eu (fake_tas2563.c models
+	 * this) before the explicit park write ever runs, so the park write
+	 * lands on an already-correct register on every path that reaches
+	 * it -- the observable this test proves is that the SEED does not
+	 * survive init at all, regardless of what a previous firmware left
+	 * behind. */
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x0Eu,
+	              "init must leave PWR_CTL at its POR default 0x0Eu regardless of "
+	              "what a previous firmware left it at");
 }
 
 /* PWR_CTL.MODE is bits 1..0 ONLY; bits 3..2 are ISNS_PD/VSNS_PD
@@ -293,9 +314,13 @@ ZTEST(alp_chips, test_tas2563_set_mode_refuses_load_diagnostics_encoding)
 /* BOOK survives software shutdown along with the rest of the register
  * state (7.3.11.2, p.34), so a device left mid-tuning by a previous
  * firmware comes up with a non-zero BOOK.  init must select book 0 as
- * well as page 0, or REVID and PWR_CTL address coefficient space.
- * The fake gives book 0 / page 0 a backing store and nowhere else, so
- * "the park write actually landed" is the observable that proves it. */
+ * well as page 0, or SW_RESET, REVID and PWR_CTL would all address
+ * coefficient space instead of the control registers.  The fake gives
+ * book 0 / page 0 a backing store and nowhere else, so "the park write
+ * actually landed [there]" is the observable that proves it -- now at
+ * the POR default 0x0Eu, since init's SW_RESET wipes the 0x00u seed
+ * before the park write ever runs (see
+ * test_tas2563_init_parks_amp_in_software_shutdown above). */
 ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 {
 	fake_tas2563_reset();
@@ -305,17 +330,132 @@ ZTEST(alp_chips, test_tas2563_init_selects_book0_not_just_page0)
 	tas2563_t  ctx;
 	alp_i2c_t *bus =
 	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	/* Close unconditionally, success or failure, right here: every check
+	 * below reads the fake's own register/paging model directly, not
+	 * through the bus handle, so nothing after this point needs it open
+	 * -- and closing now means a failing assertion below can't leak it. */
+	alp_i2c_close(bus);
+
 	zassert_not_null(bus);
-	zassert_equal(tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL), ALP_OK);
+	zassert_equal(init_rc, ALP_OK);
 
 	zassert_equal(fake_tas2563_cur_book(), 0u, "init must select book 0");
 	zassert_equal(fake_tas2563_cur_page(), 0u, "init must select page 0");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
-	              0x02u,
+	              0x0Eu,
 	              "the park write must have landed on book 0 / page 0, not in "
 	              "whatever page the previous firmware left selected");
+}
 
+/* #2077 (SW-reset addition): tas2563_init() must issue the software
+ * reset (SW_RESET, SLASET3D §7.5.3) after selecting book 0 / page 0
+ * and before any other configuration write -- SLAA954 "TAS2563 End
+ * System Integration Guide" §3.1 Case 1.  Pin the whole write sequence
+ * a clean init issues via the fake's ordered log: PAGE=0, BOOK=0
+ * (paging), SW_RESET=1 (this fix), PWR_CTL park -- SW_RESET strictly
+ * between the paging writes and the park write. */
+ZTEST(alp_chips, test_tas2563_init_issues_sw_reset_before_other_configuration)
+{
+	fake_tas2563_reset();
+
+	tas2563_t  ctx;
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	fake_tas2563_log_reset();
+
+	/* Close right after the last bus-consuming call, BEFORE any assertion
+	 * below can abort this test (zassert_* longjmps out on failure): the
+	 * i2c backend's handle pool is small and fixed, and a leaked bus from
+	 * one failed assertion turns into cascading "bus is NULL" failures in
+	 * every later test that opens one -- a real fixed-pool handle, not a
+	 * ztest-fixture-cleaned resource, so nothing else closes it for us. */
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
 	alp_i2c_close(bus);
+
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
+
+	static const struct fake_tas2563_write expected[] = {
+		{ 0u, 0u, TAS_REG_PAGE, 0x00u },     /* select_book0_page0(): PAGE = 0 */
+		{ 0u, 0u, 0x7Fu, 0x00u },            /* select_book0_page0(): BOOK = 0 */
+		{ 0u, 0u, TAS_REG_SW_RESET, 0x01u }, /* the software reset this fix adds */
+		{ 0u, 0u, TAS_REG_PWR_CTL, 0x0Eu },  /* park write, RMW over the POR-default
+						        0x0Eu seed_defaults() leaves in PWR_CTL --
+						        ISNS_PD/VSNS_PD (already 1) survive the
+						        mask, only MODE[1:0] changes (already 10b) */
+	};
+	zassert_equal(fake_tas2563_log_len(),
+	              ARRAY_SIZE(expected),
+	              "unexpected write count during init -- SW_RESET missing or extra "
+	              "writes appeared");
+	for (size_t i = 0; i < ARRAY_SIZE(expected); ++i) {
+		const struct fake_tas2563_write *w = fake_tas2563_log(i);
+		zassert_not_null(w, "log[%zu] missing", i);
+		zassert_equal(w->book, expected[i].book, "log[%zu].book", i);
+		zassert_equal(w->page, expected[i].page, "log[%zu].page", i);
+		zassert_equal(w->reg, expected[i].reg, "log[%zu].reg", i);
+		zassert_equal(w->val, expected[i].val, "log[%zu].val", i);
+	}
+}
+
+/* #2077 (SW-reset addition): the settle wait after SW_RESET runs
+ * unconditionally, even with sd_n == NULL, where there is no
+ * hardware-reset wait at all -- this is the ONLY wait on that path, so
+ * its floor is exactly 1x TAS2563_RESET_SETTLE_US, unlike the 2x floor
+ * of the sd_n-owned test above. */
+ZTEST(alp_chips, test_tas2563_init_settles_after_sw_reset_when_sd_n_not_owned)
+{
+	fake_tas2563_reset();
+
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	tas2563_t    ctx;
+	uint32_t     t0         = k_cycle_get_32();
+	alp_status_t init_rc    = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	uint64_t     elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+	/* Close right after, before any assertion below can abort this test
+	 * and leak the handle -- see the sibling test above for why. */
+	alp_i2c_close(bus);
+
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
+	zassert_true(elapsed_us >= TAS2563_RESET_SETTLE_US,
+	             "tas2563_init() with sd_n == NULL took %llu us, want >= %u us "
+	             "(TAS2563_RESET_SETTLE_US after the mandatory software reset) -- "
+	             "looks like the settle wait was dropped",
+	             (unsigned long long)elapsed_us,
+	             TAS2563_RESET_SETTLE_US);
+}
+
+/* #2077: the connectivity probe must propagate the bus's own status
+ * instead of remapping every failure to a hardcoded ALP_ERR_NOT_READY.
+ * Arm the fake to NACK the very first bus write init issues -- the
+ * PAGE=0 write inside select_book0_page0() -- and confirm the NACK
+ * surfaces as ALP_ERR_IO, the code alp_i2c_write() documents for
+ * "NACK / bus fault" (include/alp/peripheral.h). */
+ZTEST(alp_chips, test_tas2563_init_propagates_bus_status_on_probe_failure)
+{
+	fake_tas2563_reset();
+	fake_tas2563_fail_write_at(0u, 0u, TAS_REG_PAGE);
+
+	tas2563_t  ctx;
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	/* Close right after, before any assertion below can abort this test
+	 * and leak the handle -- see test_tas2563_init_issues_sw_reset_
+	 * before_other_configuration's comment for why. */
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, NULL);
+	alp_i2c_close(bus);
+
+	zassert_not_null(bus);
+	zassert_equal(init_rc,
+	              ALP_ERR_IO,
+	              "a NACK on the probe's first write must surface as ALP_ERR_IO, the "
+	              "status the bus call actually returned -- not a hardcoded "
+	              "ALP_ERR_NOT_READY");
 }
 
 /* AMP_LEVEL is PB_CFG1 bits 5..1, reset 10h = 16.0 dBV / 8.92 Vpk;
@@ -359,10 +499,14 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	tas2563_t  ctx;
 	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
 
-	/* 16 kHz, 16-bit, standard I2S, right channel.
+	/* 16 kHz, 16-bit, standard I2S, right channel, ALP_I2S_CONFIG_DEFAULT's
+     * channels=2 (stereo) -- SLASET3D §7.4.2 (p.39) supports only 32-bit
+     * slots on a 2-slot frame, so RX_SLEN is 10b (32-bit) regardless of
+     * the 16-bit RX_WLEN word width; see word_len_codes() in
+     * chips/tas2563/tas2563.c for the channels==2 rule this locks in.
      *   TDM_CFG0 = (09h & ~0Eh) | (001b << 1) = 03h
      *   TDM_CFG1 = (02h & ~7Eh) | (1    << 1) = 02h  (I2S: 1 SBCLK offset)
-     *   TDM_CFG2 = (4Ah & ~3Fh) | (10b<<4)|(00b<<2)|00b = 60h
+     *   TDM_CFG2 = (4Ah & ~3Fh) | (10b<<4)|(00b<<2)|10b = 62h
      *              (IVMON_LEN in bits 7..6 preserved as 01b) */
 	alp_i2s_config_t cfg = ALP_I2S_CONFIG_DEFAULT(0);
 	cfg.sample_rate_hz   = 16000u;
@@ -372,13 +516,16 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x03u, "SAMP_RATE in bits 3..1");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x02u, "RX_OFFSET = 1 for I2S");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
-	              0x60u,
-	              "RX_SCFG=10b (right), RX_WLEN=00b, RX_SLEN=00b, IVMON_LEN untouched");
+	              0x62u,
+	              "RX_SCFG=10b (right), RX_WLEN=00b, RX_SLEN=10b (2-slot frame forces "
+	              "32-bit slot), IVMON_LEN untouched");
 
-	/* 96 kHz, 32-bit, left-justified, left channel.
+	/* 96 kHz, 32-bit, left-justified, left channel.  Already a 32-bit
+     * word, so RX_SLEN=10b here regardless of whether the channels==2
+     * rule applies -- unchanged from the word-equals-slot mapping.
      *   TDM_CFG0 = (03h & ~0Eh) | (101b << 1) = 0Bh
      *   TDM_CFG1 = (02h & ~7Eh) | (0    << 1) = 00h  (no offset)
-     *   TDM_CFG2 = (60h & ~3Fh) | (01b<<4)|(11b<<2)|10b = 5Eh */
+     *   TDM_CFG2 = (62h & ~3Fh) | (01b<<4)|(11b<<2)|10b = 5Eh */
 	cfg.sample_rate_hz = 96000u;
 	cfg.word_bits      = 32u;
 	cfg.format         = ALP_I2S_FMT_LEFT_JUSTIFIED;
@@ -390,11 +537,12 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x5Eu);
 
 	/* 44.1 kHz, 24-bit, I2S, stereo downmix -- the width that pins
-     * RX_WLEN=10b against RX_SLEN=01b (both 24-bit, but different
-     * encodings, so a slot/word mix-up shows here and nowhere else).
+     * RX_WLEN=10b (24-bit word) against RX_SLEN=10b (32-bit slot, forced
+     * by channels==2): both fields differ from the word width, so a
+     * slot/word mix-up shows here and nowhere else.
      *   TDM_CFG0 = (0Bh & ~0Eh) | (100b << 1) = 09h
      *   TDM_CFG1 = (00h & ~7Eh) | (1    << 1) = 02h
-     *   TDM_CFG2 = (5Eh & ~3Fh) | (11b<<4)|(10b<<2)|01b = 79h */
+     *   TDM_CFG2 = (5Eh & ~3Fh) | (11b<<4)|(10b<<2)|10b = 7Ah */
 	cfg.sample_rate_hz = 44100u;
 	cfg.word_bits      = 24u;
 	cfg.format         = ALP_I2S_FMT_I2S;
@@ -403,21 +551,40 @@ ZTEST(alp_chips, test_tas2563_configure_i2s_writes_tdm_fields)
 	    fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x09u, "44.1 and 48 kHz share the 100b encoding");
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x02u);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
-	              0x79u,
-	              "RX_WLEN=10b (24-bit word) with RX_SLEN=01b (24-bit slot)");
+	              0x7Au,
+	              "RX_WLEN=10b (24-bit word) with RX_SLEN=10b (32-bit slot, channels==2)");
 
 	/* 8 kHz, 16-bit, right-justified, slot from I2C address.
      * Right-justified is the RX_JUSTIFY bit, not an offset.
      *   TDM_CFG0 = (09h & ~0Eh) | (000b << 1) = 01h
      *   TDM_CFG1 = (02h & ~7Eh) | 40h         = 40h
-     *   TDM_CFG2 = (79h & ~3Fh) | 0            = 40h */
+     *   TDM_CFG2 = (7Ah & ~3Fh) | (00b<<4)|(00b<<2)|10b = 42h */
 	cfg.sample_rate_hz = 8000u;
 	cfg.word_bits      = 16u;
 	cfg.format         = ALP_I2S_FMT_RIGHT_JUSTIFIED;
 	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_SLOT_FROM_ADDR), ALP_OK);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG0), 0x01u);
 	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG1), 0x40u, "RX_JUSTIFY set, RX_OFFSET zero");
-	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2), 0x40u);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
+	              0x42u,
+	              "RX_SLEN=10b (32-bit slot, channels==2) even at a 16-bit word");
+
+	/* channels=1 (mono): the channels==2 rule in word_len_codes() must NOT
+     * fire here -- §7.4.2 (p.39) allows 16/24/32-bit slots on a 4- or
+     * 8-slot TDM frame, so a mono host bus keeps the word-equals-slot
+     * mapping.  16-bit word -> RX_SLEN=00b, not the 10b a 2-channel bus
+     * would get; this is what distinguishes "channels==2 forces 32-bit"
+     * from "always force 32-bit".
+     *   TDM_CFG2 = (42h & ~3Fh) | (00b<<4)|(00b<<2)|00b = 40h */
+	cfg.channels       = 1u;
+	cfg.sample_rate_hz = 16000u;
+	cfg.word_bits      = 16u;
+	cfg.format         = ALP_I2S_FMT_I2S;
+	zassert_equal(tas2563_configure_i2s(&ctx, &cfg, TAS2563_RX_SLOT_FROM_ADDR), ALP_OK);
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_TDM_CFG2),
+	              0x40u,
+	              "channels=1: RX_SLEN=00b (word-equals-slot), the channels==2 rule "
+	              "must not apply to a mono bus");
 
 	alp_i2c_close(bus);
 }
@@ -632,6 +799,71 @@ ZTEST(alp_chips, test_tas2563_clear_faults_sets_the_self_clearing_bit)
 	alp_i2c_close(bus);
 }
 
+/* #2146: tas2563_resume() must clear the latches BEFORE going ACTIVE --
+ * clearing after would leave a shutdown-causing latch (e.g. the TDM
+ * clock error observed on e1m-aen-evk-03) standing, ready to re-trip
+ * the part the instant it is re-evaluated.  Seed PWR_CTL = 0Eh (MODE
+ * SHUTDOWN, matching the silicon observation post-clock-loss) with
+ * both latch bytes non-zero, then check the write log puts the
+ * INT_CLK (0x30) CLR_INTP_LTCH write strictly before the PWR_CTL
+ * (0x02) write, and that the end state is both latches clear and MODE
+ * ACTIVE. */
+ZTEST(alp_chips, test_tas2563_resume_clears_latches_then_activates_in_order)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	fake_tas2563_set_reg(TAS_REG_INT_LTCH0, 0x04u); /* TDM clock error, #2146's own trigger. */
+	fake_tas2563_set_reg(TAS_REG_INT_LTCH3, 0x40u); /* boost clock error. */
+	fake_tas2563_log_reset();
+
+	zassert_equal(tas2563_resume(&ctx), ALP_OK);
+
+	uint32_t faults = 0xDEADBEEFu;
+	zassert_equal(tas2563_read_faults(&ctx, &faults), ALP_OK);
+	zassert_equal(faults, 0u, "resume must clear every latched fault");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x0Cu,
+	              "resume must leave MODE = ACTIVE (00b), sense-power bits untouched");
+
+	int clk_write_idx = -1;
+	int pwr_write_idx = -1;
+	for (size_t i = 0; i < fake_tas2563_log_len(); ++i) {
+		const struct fake_tas2563_write *w = fake_tas2563_log(i);
+		if (w->reg == TAS_REG_INT_CLK && clk_write_idx < 0) clk_write_idx = (int)i;
+		if (w->reg == TAS_REG_PWR_CTL && pwr_write_idx < 0) pwr_write_idx = (int)i;
+	}
+	zassert_true(clk_write_idx >= 0, "resume must write INT_CLK's CLR_INTP_LTCH bit");
+	zassert_true(pwr_write_idx >= 0, "resume must write PWR_CTL's MODE field");
+	zassert_true(clk_write_idx < pwr_write_idx,
+	             "the latch clear must be written before MODE, not after (#2146)");
+
+	alp_i2c_close(bus);
+}
+
+/* An I2C error on the clear step must propagate as-is and must not
+ * reach tas2563_set_mode() at all -- PWR_CTL stays at its seeded
+ * SHUTDOWN value and its write count does not move. */
+ZTEST(alp_chips, test_tas2563_resume_propagates_i2c_error_and_leaves_mode_unwritten)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	const uint32_t pwr_writes_before = fake_tas2563_write_count(TAS_REG_PWR_CTL);
+	fake_tas2563_fail_write_at(0u, 0u, TAS_REG_INT_CLK);
+
+	zassert_not_equal(
+	    tas2563_resume(&ctx), ALP_OK, "a NACKed latch-clear write must surface, not be swallowed");
+	zassert_equal(fake_tas2563_get_reg(TAS_REG_PWR_CTL),
+	              0x0Eu,
+	              "MODE must still read the seeded SHUTDOWN value");
+	zassert_equal(fake_tas2563_write_count(TAS_REG_PWR_CTL),
+	              pwr_writes_before,
+	              "tas2563_set_mode() must never have been reached");
+
+	alp_i2c_close(bus);
+}
+
 /* The device map is book/page paged and BOOK (7Fh) is only reachable
  * from page 0 (7.3.10 p.34, 7.5.62 p.94).  Pin the exact write
  * sequence, including the paging writes and the restore to book 0 /
@@ -809,6 +1041,146 @@ ZTEST(alp_chips, test_tas2563_deinit_drops_sd_n_when_owned)
 	alp_i2c_close(bus);
 }
 
+/* #2077: when tas2563_init() owns sd_n it waits TAS2563_RESET_SETTLE_US
+ * TWICE on this path -- once after driving SDZ high (hardware reset)
+ * and once after its own unconditional software reset -- before its
+ * first I2C access (SLASET3D §7.3.11.1 "I2C communication is disabled"
+ * in Hardware Shutdown, §9.2's 100 us OTP-load floor, which applies to
+ * both reset kinds).  Asserting >= 2x the floor, not just >= 1x, is
+ * what makes this test able to catch EITHER wait being dropped alone --
+ * at >= 1x a regression that drops one of the two would still pass.
+ *
+ * fake_tas2563.c's i2c-emul target does not model bus timing (the same
+ * limitation test_bmi323_init_honours_suspend_mode_communication_idle
+ * above documents for fake_bmi323.c), so this cannot assert either
+ * wait's POSITION relative to a bus access -- only that tas2563_init()'s
+ * measured time (native_sim's simulated clock, which both the cycle
+ * counter and alp_delay_us()'s underlying arch_busy_wait() advance in
+ * lockstep -- not host wall-clock time) is at least the combined floor.
+ * That is still enough to catch a wait being dropped: nothing else on
+ * this path takes measurable simulated time. */
+ZTEST(alp_chips, test_tas2563_init_settles_sdz_before_first_access_when_sd_n_owned)
+{
+	fake_tas2563_reset();
+	alp_gpio_t *sd_n = alp_gpio_open(TAS_PIN_SD_N);
+	alp_i2c_t  *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	/* k_uptime_ticks() is tick-resolution (too coarse to see a 200 us
+	 * spin land inside one system tick); k_cycle_get_32() tracks the
+	 * same HW cycle counter k_busy_wait() itself spins against on
+	 * native_sim's simulated clock, so it actually resolves a sub-tick
+	 * busy-wait -- real wall-clock time only in the sense that it is
+	 * what the code under test itself spun against, not host wall time. */
+	tas2563_t    ctx;
+	uint32_t     t0         = k_cycle_get_32();
+	alp_status_t init_rc    = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n);
+	uint64_t     elapsed_us = k_cyc_to_us_floor64(k_cycle_get_32() - t0);
+	/* Close both handles right after, before any assertion below can
+	 * abort this test and leak them -- see the earlier tests' comments
+	 * for why (this one holds a GPIO slot too, on top of the I2C bus). */
+	alp_gpio_close(sd_n);
+	alp_i2c_close(bus);
+
+	zassert_not_null(sd_n);
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
+	zassert_true(elapsed_us >= 2u * TAS2563_RESET_SETTLE_US,
+	             "tas2563_init() with sd_n owned took %llu us, want >= %u us "
+	             "(2x TAS2563_RESET_SETTLE_US: hardware-reset settle + "
+	             "software-reset settle) -- looks like one of the two waits "
+	             "was dropped",
+	             (unsigned long long)elapsed_us,
+	             2u * TAS2563_RESET_SETTLE_US);
+}
+
+/* gpio_emul fires every registered callback on BOTH a configure() call
+ * (drivers/gpio/gpio_emul.c:474, gpio_emul_pin_configure(), unconditional,
+ * no interrupt needed) AND a successful write (:602,
+ * gpio_emul_port_set_bits_raw()'s own trailing gpio_fire_callbacks() "for
+ * output-wiring, so the user can take action based on output") -- so a
+ * single capture-the-latest-level callback cannot tell "the write already
+ * landed by the time configure ran" apart from "the LAST event, whichever
+ * it was, happened to be high": logging just the most recent level made
+ * this test pass identically whether tas2563_init() wrote before or after
+ * configuring, since the trailing (always-correct) write's own callback
+ * overwrites whatever configure()'s callback saw.  Logging every firing,
+ * in order, and requiring ALL of them to read high is what distinguishes
+ * the two orderings -- see the test below. */
+#define SD_N_PROBE_LOG_MAX 8u
+static int    g_sd_n_probe_log[SD_N_PROBE_LOG_MAX];
+static size_t g_sd_n_probe_log_len;
+
+static void
+sd_n_configure_probe_cb(const struct device *port, struct gpio_callback *cb, gpio_port_pins_t pins)
+{
+	ARG_UNUSED(cb);
+	ARG_UNUSED(pins);
+	if (g_sd_n_probe_log_len < SD_N_PROBE_LOG_MAX) {
+		g_sd_n_probe_log[g_sd_n_probe_log_len++] = (int)gpio_emul_output_get(port, TAS_PIN_SD_N);
+	}
+}
+
+/* #2077: prove tas2563_init() writes SD_N high BEFORE configuring it as
+ * output, not only after -- the real defect on gpio_dw silicon (see "GPIO
+ * write-before-AND-after-configure ordering" in
+ * include/alp/chips/tas2563.h).  With the fix, the very FIRST
+ * configure/write event this test observes is already the pre-configure
+ * write landing high; with the bug (configure-then-write-once), the FIRST
+ * event is configure() itself, observed while the pin is still low from
+ * this test's own pre-arm below -- so asserting every logged level is
+ * high, not just the last one, is what makes this test distinguish the
+ * two orderings (see the comment above the log itself for why "only the
+ * last event" cannot).
+ *
+ * Pre-arming the pin as GPIO_OUTPUT_LOW (not the default input) before
+ * tas2563_init() runs is required to make the early write observable at
+ * all: gpio_emul masks the underlying port_set_bits_raw() write against
+ * the pins CURRENTLY marked output, so a write while the pin is still
+ * input is silently dropped -- pre-arming as output-low mimics gpio_dw's
+ * data register already being a writable output latched low, the
+ * real-hardware condition this fix protects against.  Without the
+ * pre-arm, whether the drop happens would depend on which earlier test
+ * left this shared fake device's pin 3 configured -- see
+ * test_tas2563_deinit_drops_sd_n_when_owned above, which does leave it
+ * an output, but this test does not rely on that incidental ordering. */
+ZTEST(alp_chips, test_tas2563_init_writes_sd_n_before_configuring_it)
+{
+	fake_tas2563_reset();
+	g_sd_n_probe_log_len = 0;
+
+	zassert_ok(gpio_pin_configure(tas_gpio_dev(), TAS_PIN_SD_N, GPIO_OUTPUT_LOW));
+
+	struct gpio_callback cb;
+	gpio_init_callback(&cb, sd_n_configure_probe_cb, BIT(TAS_PIN_SD_N));
+	zassert_ok(gpio_add_callback(tas_gpio_dev(), &cb));
+
+	alp_gpio_t *sd_n = alp_gpio_open(TAS_PIN_SD_N);
+	alp_i2c_t  *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+
+	tas2563_t    ctx;
+	alp_status_t init_rc = tas2563_init(&ctx, bus, TAS_FAKE_ADDR, sd_n);
+
+	/* Remove the callback and close both handles before any assertion
+	 * below can abort this test and leak them. */
+	gpio_remove_callback(tas_gpio_dev(), &cb);
+	alp_gpio_close(sd_n);
+	alp_i2c_close(bus);
+
+	zassert_not_null(sd_n);
+	zassert_not_null(bus);
+	zassert_equal(init_rc, ALP_OK);
+	zassert_true(g_sd_n_probe_log_len > 0u, "no configure/write callback fired for SD_N at all");
+	for (size_t i = 0; i < g_sd_n_probe_log_len; ++i) {
+		zassert_equal(g_sd_n_probe_log[i],
+		              1,
+		              "SD_N read 0 at configure/write event #%zu -- the write before "
+		              "configure did not land first",
+		              i);
+	}
+}
+
 #endif /* DT_NODE_EXISTS(DT_NODELABEL(fake_tas2563)) */
 
 /* ------------------------------------------------------------------ */
@@ -870,4 +1242,36 @@ ZTEST(alp_chips, test_es8388_init_null_args)
 	zassert_equal(es8388_init(&dev, NULL, ES8388_I2C_ADDR_LOW), ALP_ERR_INVAL);
 	zassert_equal(es8388_init(&dev, bus, 0), ALP_ERR_INVAL);
 	alp_i2c_close(bus);
+}
+
+/*
+ * #2097: examples/aen/aen-evk-demo's Phase 11 AMP_FAULT (IRQ_N) raw-pin
+ * mapping, pulled out of main.c into amp_fault_verdict.h for the same
+ * reason as sound_verdict.h above -- one ternary, but it was inverted
+ * for a whole release. Reachable via this app's existing
+ * examples/aen/aen-evk-demo/src include dir (see bmp581_verdict.h's
+ * comment in this app's CMakeLists.txt).
+ */
+#include "amp_fault_verdict.h"
+
+ZTEST(alp_chips, test_amp_fault_pin_raw_high_is_idle_not_asserted)
+{
+	bool asserted = true; /* deliberately wrong initial value */
+	zassert_true(amp_fault_pin_verdict(1, &asserted), "raw=1 is a valid read");
+	zassert_false(asserted, "IRQ_N is active-low -- raw HIGH (R124's pull-up) must be idle");
+}
+
+ZTEST(alp_chips, test_amp_fault_pin_raw_low_is_asserted)
+{
+	bool asserted = false;
+	zassert_true(amp_fault_pin_verdict(0, &asserted), "raw=0 is a valid read");
+	zassert_true(asserted, "IRQ_N is active-low -- raw LOW must be the fault");
+}
+
+ZTEST(alp_chips, test_amp_fault_pin_negative_errno_is_a_read_failure_not_a_verdict)
+{
+	bool asserted = false;
+	/* gpio_pin_get() returns a negative errno on a real failure -- that
+	 * must never be silently read as either "idle" or "asserted". */
+	zassert_false(amp_fault_pin_verdict(-5, &asserted), "a negative raw level is not a valid read");
 }

@@ -199,8 +199,9 @@ def is_partition_inside_aperture(
     fall back to the legacy `carveout:` flag rather than guess (ADR-0034
     clause 4), which is also what keeps this a no-op wherever the
     aperture never resolves (every non-Alif SoM), the row's own base is
-    still TBD (`mram_main` today), or the row resolves a base outside
-    the declared aperture.
+    still TBD (no shipped AEN preset today -- `mram_main` was the
+    standing example until #2053 resolved it on all seven), or the row
+    resolves a base outside the declared aperture.
     """
     if aperture is None:
         return None

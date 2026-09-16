@@ -14,10 +14,10 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 BD="$1"
 SIZE="${2:-0x500}"
 OBJ="$(bench_tool_prefix)" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
-# See ram-run.sh for why the selector is conditional on JLINK_SN.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns.
+JLINK_ARGS=(bench_jlink_run)
 # See ram-run.sh (issue #935): if BUF_SYM is empty, do NOT fold it into BUF --
 # BUF would silently become the bare string "0x" and `mem8 $BUF, $SIZE` would
 # run as `mem8 0x, $SIZE`, printing an EMPTY "RAM console" block

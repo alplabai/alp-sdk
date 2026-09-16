@@ -1,0 +1,18 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Fake I2S controller used only by the i2s_start_defer ztest. native_sim
+# ships no built-in I2S emulation, so this test supplies its own minimal
+# `struct device` behind the standard Zephyr i2s_* driver API -- enough
+# for src/backends/i2s/zephyr_drv.c to run for real instead of falling
+# back to a NULL device or sw_fallback.
+
+description: |
+  Fake I2S controller for the alp-sdk i2s_start_defer unit test. Models
+  the TX-direction empty-queue START refusal, the not-running STOP/DRAIN
+  refusal, and DROP's unconditional release that issue #2132 is about --
+  see ../src/fake_i2s.c.
+
+compatible: "alp,test-i2s"
+
+include: i2s-controller.yaml

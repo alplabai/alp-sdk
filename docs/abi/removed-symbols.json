@@ -54,6 +54,15 @@
       "issue": 1980,
       "reason": "The TCA6408ARSVR alt-population footprint (U35, R112 fitted / R145 DNP) is now `assembled: false` in metadata/boards/e1m-evk.yaml -- neither 2026-09-05 bench board answers at 0x20, and the maintainer's EVK I2C schedule places U35 at 0x73 (TCAL9538) instead (#1974). Same `_NOT_ASSEMBLED` rename gen_board_header.py already applies to EVK_I2C_ADDR_TCAL9538_PCIE.",
       "replacement": "EVK_I2C_ADDR_TCA6408A_MAIN_NOT_ASSEMBLED"
+    },
+    {
+      "header": "alp/chips/gd32_swd.h",
+      "category": "macro",
+      "symbol": "GD32_SWD_EXPECTED_IDCODE",
+      "release": "v0.17.0",
+      "issue": 1440,
+      "reason": "The name and its paired metadata/chips/gd32_swd.yaml `target_expected_idcode` field both presented 0x6BA02477 as an armed wrong-board guard. It is not: that value is CHANGELOG.md's own record of a measurement of a DIFFERENT target on the same board (the V2N CM33 DAP on e1mx-v2n-m1-01), and separately the generic ADIv5 Cortex-M33 r0p1 SW-DPv2 architectural default -- never measured on a GD32G553 with a probe attached (#1369). `target_expected_idcode` is now absent from the manifest entirely, matching the stance metadata/schemas/soc-spec-v1.schema.json's own `expect_dpidr` guidance takes: an absent key is the correct published 'unknown'. The macro is kept, renamed, as an informational-only reference nothing gates on.",
+      "replacement": "GD32_SWD_GENERIC_CM33_R0P1_IDCODE"
     }
   ]
 }

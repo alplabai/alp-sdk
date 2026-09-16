@@ -1019,10 +1019,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "iot-fleet-ota",
         "osSet": [
@@ -1118,10 +1118,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "mqtt-telemetry",
         "osSet": [
@@ -1782,7 +1782,7 @@
         ],
         "path": "examples/peripheral-io/drone-autopilot",
         "som": "E1M-AEN801",
-        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
+        "summary": "> ⚠️ **`[UNTESTED]` -- v0.5 paper-correct.** Compiles on > `native_sim/native/64` + cross-compiles to `alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp`. > **Do NOT fly this build.** The PID gains, sensor scales, > failsafe thresholds, and motor mapping are starting-point > values that need bench tuning + ground-tied throttle tests > before a real airframe goes near them."
       },
       {
         "board": "e1m-evk",
@@ -3343,7 +3343,7 @@
       "script": "scripts/check_emit_snapshots.py"
     },
     {
-      "purpose": "CI gate: if an example ships >=1 board-qualified overlay/conf under `boards/`, then every core its `board.yaml` declares via `cores.<core>.app:` must have its OWN matching qualified overlay there too -- a declared core with no matching file, while qualified overlays exist for other core(s), means the core the app actually builds silently loses its overlay.",
+      "purpose": "CI gate covering two related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
     {
@@ -3669,6 +3669,9 @@
         "alp_dsp_chain_capabilities",
         "alp_dsp_chain_close",
         "alp_dsp_chain_open",
+        "alp_dsp_decimator_init",
+        "alp_dsp_decimator_process",
+        "alp_dsp_decimator_reset",
         "alp_dsp_stats_f32"
       ],
       "header": "include/alp/dsp.h"
@@ -4470,13 +4473,13 @@
         },
         "m55_he": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen803_m55_he",
+          "board": "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         },
         "m55_hp": {
           "app": "alp-stock-shim",
-          "board": "alp_e1m_aen803_m55_hp",
+          "board": "alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

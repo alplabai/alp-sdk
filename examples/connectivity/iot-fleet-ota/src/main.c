@@ -79,7 +79,12 @@
  * the OPTIGA isn't present, and MCUboot isn't running underneath.
  * The demo stubs out the network and signature paths, prints
  * each protocol stage so a CI observer can confirm the framing
- * is intact, and exits cleanly.
+ * is intact, and exits cleanly.  main() still calls
+ * cc3501e_bridge_bringup() (#2112, same template every
+ * examples/aen/aen-cc3501e-* app uses) so alp_wifi_open() below has a
+ * live bridge handle to bind to on AEN HiL -- on native_sim that
+ * bring-up fails fast (ALP_ERR_NOT_PRESENT_ON_THIS_SOC) and Stage 1
+ * falls through to the same NULL/NOSUPPORT framing path as before.
  *
  * What runs on AEN HiL
  * ====================
@@ -102,6 +107,7 @@
 #include "alp/iot.h"
 #include "alp/security.h"
 #include "alp/storage.h"
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template, #2112 */
 
 /* Mender poll cadence.  60 s is aggressive for a fleet (typical
  * production cadence is 15-60 minutes); the short interval here
@@ -122,6 +128,13 @@
  * (artefact URL, checksum, signature, target slot, version
  * string) -- 1 KiB is generous. */
 #define MANIFEST_MAX_BYTES 1024u
+
+/* On E1M-AEN801 with the CC3501E bridge attached, alp_wifi_connect() routes
+ * to the CC3501E backend (src/backends/wifi/cc3501e.c), and the bridge's own
+ * worst case for one STA connect is 10s Wlan_RoleUp + 30s L2 association +
+ * a 30s DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s. On other Wi-Fi
+ * backends this value is only an upper bound, not a derived worst case. */
+#define WIFI_CONNECT_TIMEOUT_MS 75000u
 
 /* ----------------------------------------------------------------- */
 /* Stage 1: connect to the Mender server                              */
@@ -151,7 +164,7 @@ static bool fleet_wifi_up(void)
 		.ssid = "fleet-ssid",
 		.psk  = "fleet-psk",
 	};
-	const alp_status_t rc = alp_wifi_connect(w, &creds, 10000u);
+	const alp_status_t rc = alp_wifi_connect(w, &creds, WIFI_CONNECT_TIMEOUT_MS);
 	if (rc != ALP_OK) {
 		printf("[ota]   alp_wifi_connect -> %d\n", (int)rc);
 		alp_wifi_close(w);
@@ -377,6 +390,15 @@ int main(void)
 	printf("[ota]   trust: OPTIGA Trust M (slot 0xE0F0) +"
 	       " ECDSA-P256 + MCUboot single-app (see board.yaml [STATUS])\n");
 	printf("[ota]   transport: HTTPS poll to %s (Mender protocol)\n", MENDER_SERVER_URL);
+
+	/* STATIC, not a local -- cc3501e_t embeds several
+	 * ALP_CC3501E_MAX_PAYLOAD scratch buffers; see cc3501e_bridge.h.
+	 * Bring the bridge up ONCE, before the poll loop -- not inside
+	 * fleet_wifi_up(), which runs every tick and would otherwise
+	 * re-run the WIFI_EN/nRESET reset sequence on every poll. */
+	static cc3501e_t bridge    = { 0 };
+	alp_status_t     bridge_rc = cc3501e_bridge_bringup(&bridge);
+	printf("[ota]   cc3501e_bridge_bringup -> %d\n", (int)bridge_rc);
 
 	for (;;) {
 		if (!fleet_ota_tick()) {

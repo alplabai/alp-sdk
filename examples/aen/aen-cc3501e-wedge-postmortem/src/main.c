@@ -78,8 +78,9 @@
  *
  * A short connect budget ALONE is not enough, though: the firmware's own
  * connect body keeps running -- and keeps holding the host off -- for up
- * to 30 s of L2 association plus 10 s of DHCP, regardless of what this
- * app's own timeout returns (see WEDGEPM_QUIET_WAIT_MS below). So once
+ * to 10 s of Wlan_RoleUp plus 30 s of L2 association plus 30 s of DHCP (70 s
+ * total), regardless of what this app's own timeout returns (see
+ * WEDGEPM_QUIET_WAIT_MS below). So once
  * cc3501e_wifi_connect() returns, PHASE B goes SILENT: no requests at all,
  * nothing clocked on the bus, until past that firmware worst case plus a
  * reinitialisation margin. THE SHORT BUDGET AND THE LONG WAIT ARE NOT IN
@@ -217,11 +218,9 @@
 /* PHASE B's own connect timeout budget -- DELIBERATELY SHORT, unlike every
  * other aen-cc3501e-* sibling's own connect call (which floors comfortably
  * above the firmware's worst case -- a 10 s Wlan_RoleUp inside the connect body
- * plus 30 s L2 association plus a 20 s DHCP-lease poll, so about 60 s; see
+ * plus 30 s L2 association plus a 30 s DHCP-lease poll, so 70 s; see
  * aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS, derived from
- * hal/ti/cc3501e_hw_ti_wifi.c.  An earlier version of this comment said 40 s,
- * from before the DHCP poll was widened and before the role-up term was
- * counted).
+ * hal/ti/cc3501e_hw_ti_wifi.c).
  *
  * This app is NOT trying to let the association succeed -- see the file
  * header's WHAT THIS APP DOES NOT DO -- it is trying to let PHASE C observe
@@ -231,8 +230,8 @@
  * the WHOLE budget it is given, and each attempt clocks bytes at a slave
  * the driver's own comment says takes on a PERMANENT 1-byte frame offset
  * that cannot self-correct from exactly that kind of re-framing
- * (chips/cc3501e/cc3501e_core.c). A 55 s budget -- the siblings' own -- would
- * mean PHASE C characterises the link after roughly 1100 of those
+ * (chips/cc3501e/cc3501e_core.c). A 75 s budget -- the siblings' own -- would
+ * mean PHASE C characterises the link after roughly 1500 of those
  * re-framing transactions have already run against the wedge, not the
  * wedge itself. This is a SHORTENING to capture the moment, not the
  * WIDENING-to-hunt-for-a-pass the file header argues against -- that
@@ -258,29 +257,26 @@
  * (aen-cc3501e-socket-throughput's own sibling budget, see that app's own
  * comment): the firmware's own worst case for one connect is 30 s of L2
  * association (hal/ti/cc3501e_hw_ti_wifi.c's `osi_SyncObjWait(&wifi_event_
- * sync, 30u * OSI_WAIT_FOR_SECOND)`) plus 20 s of DHCP
- * (`CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 100 * 200 ms) plus a
+ * sync, 30u * OSI_WAIT_FOR_SECOND)`) plus 30 s of DHCP
+ * (`CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 150 * 200 ms) plus a
  * 10 s Wlan_RoleUp carried INSIDE the connect body on the first radio op of a
- * boot = 60 s total.  (An earlier version of this comment said 40 s, from
- * before the DHCP poll was widened to cover lwIP's fourth DISCOVER and from
- * before the role-up term was counted.)  This app deliberately reuses the SAME
- * 15 s reinitialisation margin the sibling budget adds on top, rather
- * than inventing a fresh number, because the underlying question is
- * identical: how long does a HEALTHY board need before it is fair to call
- * it unresponsive. The difference from the sibling budget is not the total,
- * it is WHO clocks the bus while that time passes -- the sibling's own
- * cc3501e_wifi_connect() call polls WIFI_STATUS every 50 ms for the whole
- * span; this app's wait issues nothing at all, so this app never hands a
- * wedging link the extra re-framing traffic WEDGEPM_CONNECT_TIMEOUT_MS
- * exists to avoid.
+ * boot = 70 s total, which the firmware documents 75000 ms as the caller
+ * budget that clears (alp-sdk#2079).  This app deliberately reuses the SAME
+ * margin the sibling budget adds on top, rather than
+ * inventing a fresh number, because the underlying question is identical: how
+ * long does a HEALTHY board need before it is fair to call it unresponsive.
+ * The difference from the sibling budget is not the total, it is WHO clocks
+ * the bus while that time passes -- the sibling's own cc3501e_wifi_connect()
+ * call polls WIFI_STATUS every 50 ms for the whole span; this app's wait
+ * issues nothing at all, so this app never hands a wedging link the extra
+ * re-framing traffic WEDGEPM_CONNECT_TIMEOUT_MS exists to avoid.
  *
- * Raised 55000u -> 75000u with the worst case above: 60 s of firmware plus the
- * same 15 s margin. This value is load-bearing for THIS app in a way the
- * sibling budgets are not -- the whole phase rests on having waited past the
- * point a healthy board could still be working, so a wait that no longer
- * exceeds the firmware's own bound would let a merely-slow board be reported
- * as wedged. That is precisely the false conclusion this app was written to
- * refuse. */
+ * 75000u is the worst case above (70 s of firmware) plus a 5 s margin. This
+ * value is load-bearing for THIS app in a way the sibling budgets are not --
+ * the whole phase rests on having waited past the point a healthy board
+ * could still be working, so a wait that does not exceed the firmware's own
+ * bound would let a merely-slow board be reported as wedged. That is
+ * precisely the false conclusion this app was written to refuse. */
 #define WEDGEPM_QUIET_WAIT_MS 75000u
 
 /*
@@ -885,7 +881,7 @@ int main(void)
 	       (unsigned)strlen(WEDGEPM_WIFI_SSID),
 	       (unsigned)WEDGEPM_WIFI_SECURITY);
 	printk("PHASE B: this connect is EXPECTED to fail -- that is the point of this app, not "
-	       "a bug to chase. Deliberately SHORT timeout budget (%u ms, not the ~55 s siblings "
+	       "a bug to chase. Deliberately SHORT timeout budget (%u ms, not the ~75 s siblings "
 	       "use) -- see WEDGEPM_CONNECT_TIMEOUT_MS's own comment for why.\n",
 	       (unsigned)WEDGEPM_CONNECT_TIMEOUT_MS);
 	alp_status_t connect_rc = cc3501e_wifi_connect(&fw,
@@ -968,16 +964,15 @@ int main(void)
 
 	/* 2. READY pin level, read directly as a GPIO input. fw.ready_pin is
 	 *    populated by cc3501e_bridge_bringup() (see src/cc3501e_bridge.c)
-	 *    when the board wires it -- this board does (P2_6, see the app
-	 *    overlay). BUT: chips/cc3501e/cc3501e_core.c documents this EXACT
-	 *    pad (CC35 GPIO17 -> Alif P2_6) as an OPEN CONNECTION on the bench
-	 *    unit -- 0 edges in 20000 samples taken during live traffic -- and
-	 *    the app opens it ALP_GPIO_PULL_NONE (src/cc3501e_bridge.c), so a
-	 *    read here samples a FLOATING input. A non-NULL fw.ready_pin proves
-	 *    only that a pad object exists, not that the level means anything.
-	 *    Printed for completeness only -- it carries NO evidentiary weight
-	 *    and does NOT appear in the VERDICT below (this app's own review
-	 *    record, Major 5). */
+	 *    only when the board wires it -- this app leaves it NULL by default
+	 *    on the R2 module e1m-aen-evk-01 currently holds: Alif P2_6 there is
+	 *    E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST), NOT CC35 GPIO17
+	 *    READY (see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
+	 *    comment). So this branch always takes the "no READY pin populated"
+	 *    path below on this board -- printed for completeness only, it
+	 *    carries NO evidentiary weight and does NOT appear in the VERDICT
+	 *    below (this app's own review record, Major 5). A board that opts
+	 *    into a real ready_pin would instead sample it directly here. */
 	bool ready_high    = false;
 	bool ready_read_ok = false;
 	if (fw.ready_pin != NULL) {

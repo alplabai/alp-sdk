@@ -132,12 +132,17 @@ static int stage_network_connect(void)
 		printf("[iotcam]   alp_wifi_open                 skip (v0.3 deliverable)\n");
 		return 0;
 	}
+	/* On E1M-AEN801 with the CC3501E bridge attached (overlay-aen.conf), the
+	 * bridge's own worst case for one STA connect is 10s Wlan_RoleUp + 30s L2
+	 * association + a 30s DHCP-lease poll (hal/ti/cc3501e_hw_ti_wifi.c) = 70s.
+	 * On the default V2N target (Murata LBEE5HY2FY, Linux-owned) this value
+	 * is only an upper bound, not a derived worst case. */
 	alp_status_t s = alp_wifi_connect(g_wifi,
 	                                  &(alp_wifi_credentials_t){
 	                                      .ssid = "your-ssid", /* replace with your Wi-Fi SSID */
 	                                      .psk  = NULL, /* TODO(v0.3): pull from secure store */
 	                                  },
-	                                  30000);
+	                                  75000u);
 	printf("[iotcam]   alp_wifi_connect              %s\n",
 	       (s == ALP_OK) ? "ok" : "skip (no station)");
 	return 0;
