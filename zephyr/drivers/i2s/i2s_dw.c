@@ -15,13 +15,27 @@
  * ==================================================================
  *
  * FIFO/interrupt-driven (no DMA subsystem needed).  alp-sdk edits beyond this
- * provenance header are confined to the clock path: the driver calls
- * clock_control_set_rate() to program the I2Sx bit-clock divider off the
- * 76.8 MHz CGU master source enabled by the Tier-1.5 clockctrl west-patch
- * (zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch),
- * and tolerates -ENOSYS/-ENOTSUP from clock_control_configure()/set_rate() on
- * SoCs whose clockctrl lacks those ops (e.g. native_sim).  The register block
- * layout, IRQ scheme, and FIFO trigger levels are the fork's.
+ * provenance header cover the clock path and, as of issue #2137, two RX
+ * ISR/recovery bug fixes:
+ *   - the clock path: the driver calls clock_control_set_rate() to program
+ *     the I2Sx bit-clock divider off the 76.8 MHz CGU master source enabled
+ *     by the Tier-1.5 clockctrl west-patch (zephyr/patches/zephyr/
+ *     0001-clock_control_alif-master-source-expmst-i2s-setrate.patch), and
+ *     tolerates -ENOSYS/-ENOTSUP from clock_control_configure()/set_rate()
+ *     on SoCs whose clockctrl lacks those ops (e.g. native_sim);
+ *   - the RX IRQ handler's two error exits (a failed k_mem_slab_alloc() for
+ *     the next block, and a failed queue_put() of the one just filled) now
+ *     free the block they would otherwise have orphaned instead of leaking
+ *     it (issue #2137);
+ *   - rx_stream_start() now resets mem_block_offset to 0 on every (re)start,
+ *     matching tx_stream_start()'s own reset -- without it, a stale offset
+ *     left over by any prior stop (not only an ERROR-recovery one: none of
+ *     STOP/DRAIN/DROP/PREPARE reset this field either) survived into the
+ *     freshly allocated block, and the first ISR after the restart
+ *     delivered it as a "complete" frame that was never actually filled
+ *     (issue #2137).
+ * The register block layout, IRQ scheme, and FIFO trigger levels are the
+ * fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
  * tone-out / clock programming were exercised on the bench as PARTIAL/PASS but
  * the achieved SCLK rate is a bench follow-up).
@@ -634,7 +648,17 @@ static void i2s_rx_irq_handler(const struct device *dev)
 				       &stream->mem_block,
 				       K_NO_WAIT);
 		if (ret < 0) {
+			/* alp-sdk issue #2137: k_mem_slab_alloc() sets
+			 * stream->mem_block to NULL on this path, so
+			 * rx_stream_disable()'s own free (it only frees
+			 * stream->mem_block) never sees mblk_tmp -- the
+			 * just-filled block this ISR was about to hand off.
+			 * Free it here or it leaks every overrun, and with
+			 * the 2-block slab alp-sdk's backend allocates
+			 * (src/backends/i2s/zephyr_drv.c) two overruns starve
+			 * the slab until close(). */
 			stream->state = I2S_STATE_ERROR;
+			k_mem_slab_free(stream->cfg.mem_slab, mblk_tmp);
 			goto rx_disable;
 		}
 		stream->mem_block_offset = 0;
@@ -643,7 +667,12 @@ static void i2s_rx_irq_handler(const struct device *dev)
 		ret = queue_put(&stream->mem_block_queue, mblk_tmp,
 				stream->cfg.block_size);
 		if (ret < 0) {
+			/* alp-sdk issue #2137: queue_put() failing leaves
+			 * mblk_tmp neither queued nor referenced by
+			 * stream->mem_block (which the alloc above already
+			 * replaced) -- same leak as above, same fix. */
 			stream->state = I2S_STATE_ERROR;
+			k_mem_slab_free(stream->cfg.mem_slab, mblk_tmp);
 			goto rx_disable;
 		}
 		k_sem_give(&stream->sem);
@@ -758,6 +787,22 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	if (ret < 0) {
 		return ret;
 	}
+	/* alp-sdk issue #2137: mirrors tx_stream_start()'s own reset for the
+	 * SAME reason. None of STOP/DRAIN/DROP/PREPARE reset this field, so
+	 * a stale "already full" offset from a previous block survives into
+	 * whatever fresh stream->mem_block this call allocates -- not only
+	 * on the ERROR-recovery path (PREPARE moves ERROR->READY without
+	 * touching it, and the overrun ISR exit that set it to the full
+	 * block size never got to reset it either), but also on a plain
+	 * stop() mid-block followed by a fresh start(): none of the trigger
+	 * cases that can precede this call ever clear mem_block_offset.
+	 * Without this reset, the first ISR firing after any such restart
+	 * sees offset already >= size, computes frames=0 for a block that
+	 * was never actually filled, and queues it as a "complete" frame on
+	 * the strength of a stale offset alone -- stale/garbage sample data
+	 * delivered silently, on literally the first frame after the
+	 * restart. */
+	stream->mem_block_offset = 0;
 
 	/* Configure the I2S Peripheral Clock */
 	i2s_configure_clocksource(true, i2s, stream->cfg.frame_clk_freq);
