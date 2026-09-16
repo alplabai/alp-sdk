@@ -187,6 +187,26 @@ alp_audio_out_t *alp_audio_out_open(const alp_audio_config_t *cfg);
 /**
  * @brief Begin playback.  Caller must keep feeding via @ref alp_audio_out_write.
  *
+ * Calling this before the first @ref alp_audio_out_write is legal and
+ * does not fail merely because nothing is queued yet -- it does not
+ * guarantee the hardware clock is running the instant this call returns.
+ * A backend whose driver refuses to trigger with nothing queued (e.g.
+ * the Zephyr I2S backend's DesignWare TX ring buffer, via
+ * @ref alp_i2s_start) defers the real start until the first write
+ * actually queues a block; a trigger failure discovered at that point
+ * surfaces from that @ref alp_audio_out_write call instead of from here.
+ * A second start() while already playing is backend-specific (e.g.
+ * @ref ALP_ERR_IO on the Zephyr I2S backend, idempotent @ref ALP_OK on
+ * Yocto/ALSA) -- do not assume either.
+ *
+ * On the Zephyr I2S backend, a gap between writes long enough for the
+ * stream to underrun is recovered transparently -- calling this right
+ * after (or the next @ref alp_audio_out_write, see its doc) resumes the
+ * I2S stream instead of failing forever; the caller does not need to
+ * detect or clear the condition itself. An external codec or amplifier
+ * that shut itself down when the bit clock stopped is not re-armed by
+ * this layer (see issue #2146).
+ *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
@@ -197,15 +217,45 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
 /**
  * @brief Stop playback.  Pending frames are drained.
  *
+ * On the Zephyr I2S backend, recovers transparently from an underrun --
+ * stopping a stream that underran still returns @ref ALP_OK and
+ * releases whatever was queued, instead of failing because the stream
+ * is not actively playing.
+ *
  * @param[in] out  Handle from @ref alp_audio_out_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
- *         ALP_ERR_NOSUPPORT.
+ *         ALP_ERR_NOSUPPORT / ALP_ERR_IO (both the primary stop trigger and
+ *         its own internal fallback were refused -- not expected in
+ *         practice on a stream that was genuinely started).
+ *
+ * @note Ordering contract: mute any external amplifier before calling
+ *   this function -- what happens to an amp still ACTIVE when the I2S
+ *   clock stops is chip-specific, see its own driver.  On the Zephyr
+ *   DesignWare I2S backend (`zephyr/drivers/i2s/i2s_dw.c`), a deliberate
+ *   stop drops the clock, but since #2149 an underrun does not: the ISR's
+ *   underrun exit keeps `CER.CLKEN` set on that one path.  A far-end
+ *   amplifier
+ *   may need re-arming after the first successful @ref alp_audio_out_write
+ *   following a restart, while the stream keeps being fed -- see its
+ *   chip driver (e.g. `tas2563_resume()`, `<alp/chips/tas2563.h>`).
  */
 alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
 
 /**
  * @brief Block until the driver is ready for the next PCM block, then push.
+ *
+ * On the Zephyr I2S backend, a successful queue here can also retry a
+ * start() that @ref alp_audio_out_start deferred (see its doc); if that
+ * retry still fails, the backend releases the block it just queued and
+ * this call returns the start failure -- @p out_frames is NOT
+ * incremented for a chunk whose queue attempt did not fully succeed, so
+ * it always reflects frames genuinely accepted by the driver. A gap
+ * between writes long enough for the stream to underrun is ALSO
+ * recovered transparently here: this call resumes the I2S stream
+ * instead of failing forever, with no separate stop()/start() needed
+ * first (see @ref alp_audio_out_start's doc for what this recovery
+ * does not cover downstream of the bus).
  *
  * @param[in]  out          Handle from @ref alp_audio_out_open.
  * @param[in]  buf          Source PCM data.
@@ -216,7 +266,7 @@ alp_status_t alp_audio_out_stop(alp_audio_out_t *out);
  * @param[out] out_frames   Receives the frame count actually pushed.  May be NULL.
  * @param[in]  timeout_ms   Max wait for driver readiness.
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_OUT_OF_RANGE /
- *         ALP_ERR_TIMEOUT.
+ *         ALP_ERR_TIMEOUT / a deferred-start trigger failure (see above).
  */
 alp_status_t alp_audio_out_write(alp_audio_out_t *out,
                                  const void      *buf,

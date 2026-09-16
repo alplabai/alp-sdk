@@ -1,0 +1,26 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The single documented switch that turns i2s3 back on -- see the SAFETY
+ * note in boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay for
+ * why the node ships "disabled" by default on EVK rev 2626-R2 (U46 has no
+ * Hi-Z state, and I2S0_SDO/SCLK/WS on P9_3/4/5 run through it backwards).
+ *
+ * Apply ONLY once U46 is a 3257-type bus switch -- removes the
+ * contention hazard regardless of which rail powers it; this app
+ * never drives EN or SEL and does not test the amps. Amp audibility
+ * is separate: on e1m-aen-evk-03 (2026-09-15), VCC was moved to +3V3
+ * between a silent run and an audible run, not established as the
+ * only difference; a switch rated for 1.8 V VCC is the untested
+ * alternative (see include/alp/boards/alp_e1m_evk.h's I2S mux block):
+ *
+ *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+ *       examples/aen/aen-i2s-amp-alif -- \
+ *       -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
+ *   (relative to this app's own source dir, examples/aen/aen-i2s-amp-alif)
+ */
+
+&i2s3 {
+	status = "okay";
+};

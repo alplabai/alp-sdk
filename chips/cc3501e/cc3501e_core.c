@@ -35,6 +35,20 @@
 #include "alp/protocol/crc16.h"
 #include "cc3501e_internal.h"
 
+/* #2126 review (BLOCKER): IS_ENABLED() for the CONFIG_ALP_SDK_CC3501E_AUTO_
+ * RECOVER runtime check further down -- see CC3501E_AUTO_RECOVER_ON's own
+ * comment for why a bare #ifndef fallback cannot tell "explicitly disabled"
+ * apart from "never mentioned". __ZEPHYR__ is set by the Zephyr toolchain
+ * itself, before any of our headers, so it is the same portable OS gate
+ * src/common/alp_slot_claim.c / alp_model_loader.c already use to avoid
+ * unconditionally pulling a Zephyr header into a TU that also compiles into
+ * the plain-CMake baremetal/yocto trees (this file: chips/cc3501e/
+ * cc3501e_core.c also builds into libalp_chips.a there). util_macro.h is a
+ * standalone, dependency-free macro header (no kernel.h pulled in). */
+#ifdef __ZEPHYR__
+#include <zephyr/sys/util_macro.h>
+#endif
+
 static void
 encode_header(uint8_t *frame, alp_cc3501e_cmd_t cmd, uint8_t flags, uint16_t payload_len)
 {
@@ -58,32 +72,471 @@ alp_status_t cc3501e_init(cc3501e_t *ctx, alp_spi_t *bus)
 	return ALP_OK;
 }
 
+/* Cause-agnostic auto-recovery (issue #2126): e1m-aen-evk-01 has been
+ * observed to wedge the bridge link mid Wi-Fi-connect roughly 3 times in 50
+ * connects, for a cause that isn't fully identified yet (firmware-side
+ * self-heal is tracked separately, cc3501e-bridge-firmware#142). Every
+ * request after the wedge fails until the whole board is power-cycled --
+ * unless something calls cc3501e_recover() below, which has recovered every
+ * observed wedge in bench testing. Nothing did, automatically, before this;
+ * this is that "something", wired into the driver's own wrapper failure
+ * exits (see the call sites in poll_by_repeat_seq() below and
+ * cc3501e_wifi_connect() in cc3501e_wifi.c) rather than left for every
+ * application to reinvent.
+ *
+ * #2126 review (BLOCKER): Zephyr Kconfig OMITS a disabled bool from
+ * autoconf.h entirely -- it never emits `#define CONFIG_X 0` -- so a bare
+ * `#ifndef CONFIG_X #define CONFIG_X 1 #endif` fallback cannot tell
+ * "explicitly n" apart from "never mentioned"; both read as undefined, and
+ * the fallback always picked 1. Bench-proven broken: `CONFIG_ALP_SDK_CC3501E_
+ * AUTO_RECOVER=n` still recovered. IS_ENABLED() is built exactly for this
+ * (it only matches its "enabled" branch when the macro is defined AND
+ * expands to 1, so a genuinely-absent-because-disabled symbol correctly
+ * reads 0) -- used here under __ZEPHYR__ (see the include above); the
+ * non-Zephyr branch has no Kconfig at all, so "undefined" there really does
+ * mean "never configured" and the historical default-on fallback is still
+ * correct. */
+#ifdef __ZEPHYR__
+#define CC3501E_AUTO_RECOVER_ON IS_ENABLED(CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER)
+#else
+#ifndef CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER
+#define CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER 1
+#endif
+#define CC3501E_AUTO_RECOVER_ON CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER
+#endif
+
+/* PING every CC3501E_LINK_PROBE_GAP_MS for up to CC3501E_LINK_PROBE_TRIES *
+ * CC3501E_LINK_PROBE_GAP_MS ms before concluding the link is actually dead
+ * rather than caught in one of the transport's many legitimate transient-IO
+ * windows (a radio-down window, a teardown/re-arm race -- see
+ * poll_by_repeat()'s own comments below). #2126 review: widened from 5
+ * tries * 250 ms (~1 s) to 24 * 500 ms (12 s) -- >= CC3501E_WIFI_DOWN_WINDOW_
+ * MS (10 s, cc3501e_wifi.c), the transport's own documented worst-case
+ * radio-down window, which the original 1 s probe could not possibly
+ * outlast; a probe shorter than the blackout it is supposed to rule out
+ * cannot distinguish "still busy" from "actually dead". */
+#define CC3501E_LINK_PROBE_TRIES  24u
+#define CC3501E_LINK_PROBE_GAP_MS 500u
+
+/* Floor between two REAL recovery attempts (cc3501e_recover() calls, auto
+ * or manual) on the same ctx. A warm reset costs ~3.5 s blind settle
+ * (cc3501e_hard_reset) and tears down every association/socket/BLE link --
+ * cheap next to a manual power cycle, but not free, and a caller whose own
+ * retry loop keeps re-entering this function (e.g. several poll_by_repeat()
+ * -based ops failing back to back off one dead link) must not re-trigger a
+ * fresh warm reset before the PREVIOUS one has even had a chance to prove
+ * itself. 30 s comfortably covers the longest non-OTA op's own timeout
+ * budget in this driver (the 20 s Wi-Fi scan window) plus margin.
+ * #2126 review: doubles (CC3501E_RECOVER_COOLDOWN_MS_ATTEMPT() below) on
+ * each consecutive FAILED attempt, capped at CC3501E_RECOVER_COOLDOWN_MAX_MS
+ * (5 min) -- a link that a warm reset does not actually cure (a hardware
+ * fault, not the software wedge this exists to catch) must not keep getting
+ * re-reset every 30 s forever. */
+#define CC3501E_RECOVER_COOLDOWN_MS     30000u
+#define CC3501E_RECOVER_COOLDOWN_MAX_MS 300000u
+
+/* Forward declarations: cc3501e_recover() below needs the transport-lock
+ * primitives and cc3501e_request_locked() to hold ctx->request_lock across
+ * its whole nRESET-through-confirming-PING-and-GET_VERSION sequence
+ * (#2126 review) instead of releasing it between each op -- but all three
+ * are `static` and defined much later in this file (beside poll_by_repeat,
+ * which is their other real caller), well after cc3501e_recover() has
+ * always lived. Forward-declared here rather than relocating either
+ * function, to keep this diff to the declarations, not a wholesale file
+ * reorder. */
+static alp_status_t cc3501e_lock_acquire(cc3501e_t *ctx);
+static void         cc3501e_lock_release(cc3501e_t *ctx);
+static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
+                                           alp_cc3501e_cmd_t cmd,
+                                           const uint8_t    *tx_payload,
+                                           size_t            tx_len,
+                                           uint8_t          *rx_buf,
+                                           size_t            rx_cap,
+                                           size_t           *rx_len,
+                                           uint8_t           req_seq);
+
+/* Shared post-reboot bookkeeping for BOTH of cc3501e_recover()'s paths
+ * below (issue #2126 review): the primary warm-reset (called while STILL
+ * holding ctx->request_lock -- touches only ctx fields, no I/O, so that is
+ * fine) and the power-cycle fallback via cc3501e_reset() (called AFTER that
+ * function has already released its own internal locks). Not responsible
+ * for fw_proto_major/minor: the primary path re-fetches and gates it itself
+ * (see cc3501e_recover()); the fallback's cc3501e_reset() already does,
+ * internally, as it always has. */
+static void cc3501e_recover_clear_stale_state(cc3501e_t *ctx)
+{
+	/* The reboot drops every in-flight worker job and the SPI1 controller
+	 * config with it -- clear every same-ctx-reentrancy busy latch (nothing
+	 * is genuinely in flight any more; leaving one set would wrongly bounce
+	 * the caller's next call off ALP_ERR_BUSY) and force the next SPI1
+	 * TRANSFER to CONFIGURE again rather than trust a controller state that
+	 * no longer exists (see spi1_configured's own comment in
+	 * <alp/chips/cc3501e/core.h>). */
+	ctx->sock_busy       = false;
+	ctx->wifi_scan_busy  = false;
+	ctx->ble_scan_busy   = false;
+	ctx->evt_busy        = false;
+	ctx->spi1_busy       = false;
+	ctx->spi1_configured = false;
+	/* #2126 review: Wi-Fi association / BLE host / open sockets are NOT
+	 * tracked in ctx at all (the handle is the caller's to hold), so a raw
+	 * firmware socket handle minted before this reboot is otherwise
+	 * indistinguishable from a coincidentally-numbered NEW one after it.
+	 * Bumping the epoch here is what lets cc3501e_sock_send() etc.
+	 * (cc3501e_sockets.c) refuse a stale handle instead of silently
+	 * addressing whatever new socket now happens to own that number.
+	 * #2126 review: skip landing on 0 when wrapping (255 -> 1, not 255 ->
+	 * 0) -- 0 is reserved for "no recovery has ever happened on this ctx
+	 * yet" (a fresh, zero-initialised ctx), so wrapping onto it would make
+	 * a handle minted 255 recoveries ago (also epoch 0) indistinguishable
+	 * from one minted just now. */
+	ctx->link_epoch = (ctx->link_epoch >= 0xFFu) ? 1u : (uint8_t)(ctx->link_epoch + 1u);
+}
+
 /* See <alp/chips/cc3501e/core.h>. */
 alp_status_t cc3501e_recover(cc3501e_t *ctx)
 {
 	if (ctx == NULL) return ALP_ERR_INVAL;
 
+	/* #2126 review: never recover through an open OTA/update session --
+	 * this is the manual entry point (`alp companion recover`) too, which
+	 * cc3501e_link_check_and_recover()'s own guard below does not cover.
+	 * ota_session_active (chips/cc3501e/cc3501e_ota.c) is the explicit
+	 * per-ctx session marker -- NOT cc3501e_peer_is_polled(), which is a
+	 * transport-framing detail (edge- vs level-gate READY) that happens to
+	 * correlate with a session but is not one. */
+	if (ctx->ota_session_active) return ALP_ERR_BUSY;
+
+	/* #2126 review (minor): no nRESET line means the ONLY path below is the
+	 * supply-cut fallback, and that one is worse than doing nothing here:
+	 * cc3501e_power_off() clears ctx->initialised and the cc3501e_reset()
+	 * that follows it returns ALP_ERR_NOSUPPORT for the same missing pin,
+	 * leaving the ctx permanently NOT_READY after what may have been a
+	 * transient wedge. Refuse up front instead, manual entry point
+	 * included. */
+	if (ctx->reset_pin == NULL) return ALP_ERR_NOSUPPORT;
+
+	/* #2126 review: claim exclusive ownership of the recovery sequence
+	 * BEFORE touching anything. A concurrent caller -- another auto-
+	 * trigger racing this one, or a manual `alp companion recover` racing
+	 * the auto path -- must not double-pulse nRESET (destructive: tears
+	 * down every association/socket/BLE link a SECOND time for nothing) or
+	 * double-count recover_count/recover_attempt_count. Loses the race ->
+	 * ALP_ERR_BUSY immediately, no reset attempted. Plain bool CAS, same
+	 * portability shape as ctx->request_lock (this core is OS-agnostic,
+	 * builds into the plain-CMake / Yocto libalp_chips.a too, so it cannot
+	 * use a Zephyr k_mutex). */
+	bool expected = false;
+	if (!__atomic_compare_exchange_n(
+	        &ctx->recovering, &expected, true, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
+		return ALP_ERR_BUSY;
+	}
+
+	/* #2136 review (minor): snapshot the ring's fail streak BEFORE anything
+	 * below can reset it -- the confirming PING further down, on success,
+	 * resets the LIVE ctx->link_log_fail_streak to 0 via the ordinary
+	 * decoded-reply path in cc3501e_request_locked(), so a recovery-dump
+	 * caller (companion_recover_notify()) reading the live field afterwards
+	 * always saw 0 regardless of what actually triggered this recovery.
+	 * Saturating cast: this ring's realistic streaks never approach 255
+	 * before a probe/recover cycle intervenes. */
+	ctx->link_log_recover_streak =
+	    (ctx->link_log_fail_streak > 0xFFu) ? 0xFFu : (uint8_t)ctx->link_log_fail_streak;
+
+	/* #2126 review: hold ctx->request_lock across the WHOLE sequence below
+	 * -- nRESET through the confirming PING and the GET_VERSION re-fetch --
+	 * not just each individual op, the pre-review shape. The CS-less link
+	 * has no chip-select to recover framing on: any byte a DIFFERENT
+	 * thread clocks during cc3501e_hard_reset()'s 3.5 s blind settle (that
+	 * function's own doc comment) leaves a PERMANENT 1-byte offset. A
+	 * caller like the console's ~500 ms GET_PENDING_EVENTS poll thread
+	 * (src/zephyr/console/alp_console_companion.c) fits SEVEN polls inside
+	 * that one window alone; cc3501e_ping()/cc3501e_get_version() calls
+	 * that each acquire-then-release their OWN lock only protect their OWN
+	 * transaction, never the reset in between. cc3501e_request_locked() is
+	 * used directly below instead of those public wrappers for exactly
+	 * this reason -- calling them here would try to re-acquire a lock this
+	 * function already holds (not re-entrant, see ctx->request_lock's own
+	 * comment) and self-deadlock. */
+	const alp_status_t ls = cc3501e_lock_acquire(ctx);
+	if (ls != ALP_OK) {
+		/* #2126 review (minor): stamp the cooldown on this exit too.
+		 * Without it a caller whose op keeps failing while another
+		 * thread holds the lock re-runs the ~12-18 s probe in
+		 * cc3501e_link_check_and_recover() on EVERY failing op, since
+		 * the gate there only sees last_recover_ms. Not counted as an
+		 * attempt: no reset was pulsed. */
+		ctx->last_recover_ms = alp_uptime_ms();
+		__atomic_store_n(&ctx->recovering, false, __ATOMIC_RELEASE);
+		return ls;
+	}
+
 	/* A WARM reset -- nRESET only, rails up -- is what clears this state.
 	 * Bench-established on e1m-aen-evk-01 (#1691): every observed wedge recovered
-	 * with `warm-reset -> 0  PING -> 0`, and the .TI.noinit snapshot read back
-	 * afterwards showed the firmware had been perfectly healthy the whole time --
-	 * housekeeping ticks advancing, slave armed in PH_REQ_HEADER, READY HIGH, and
-	 * g_resync_count / g_arm_fail_count both zero.
+	 * with `warm-reset -> 0  PING -> 0`.
 	 *
-	 * That is why no firmware self-heal fires: bridge_transport_spi_is_dead() only
-	 * reports a failed SPI_open, and the stall watchdog deliberately watches only
-	 * REPLY phases because PH_REQ_HEADER legitimately waits forever for the host.
-	 * The slave cannot tell "host idle" from "host clocking, I am not receiving".
-	 * The HOST can, which is why recovery lives here and not in the firmware. */
+	 * CORRECTION (issue #2136, cc3501e-bridge-firmware#148): a EARLIER version
+	 * of this comment claimed the .TI.noinit snapshot read back after that
+	 * reset showed the firmware "had been perfectly healthy the whole time",
+	 * and used that to argue no firmware self-heal fires because the slave
+	 * genuinely cannot distinguish "host idle" from "host clocking, I am not
+	 * receiving". #148 measured that this SoC's retained RAM does NOT
+	 * survive the warm nRESET this recovery pulses (bench run14 P6: the
+	 * boots counter read 1 both before and after, reset cause read
+	 * power-on on both sides) -- so that snapshot was the FRESH post-reset
+	 * boot's own state, not evidence carried across the reset from the
+	 * wedge itself. The "firmware was healthy, the problem is host-side"
+	 * inference above does not follow from it and is UNSUPPORTED; treat it
+	 * as retracted rather than as a finding. This is exactly why the
+	 * host-side link-failure ring (@ref cc3501e::link_log,
+	 * <alp/chips/cc3501e/core.h>) exists -- firmware-side capture cannot
+	 * substitute here. */
 	const alp_status_t rs = cc3501e_hard_reset(ctx);
+	alp_status_t       final;
 
 	if (rs != ALP_OK) {
-		/* nRESET alone did not take -- fall back to cutting the supply, which is
-		 * the heavier hammer and loses all device state. */
+		/* nRESET alone did not take -- fall back to cutting the supply,
+		 * which is the heavier hammer and loses all device state. Release
+		 * FIRST: cc3501e_power_off()/cc3501e_reset() do their OWN locking
+		 * (cc3501e_request()), and ctx->request_lock is not re-entrant.
+		 * #2126 review: this fallback's own blind-settle windows are
+		 * therefore NOT covered by one continuous lock hold the way the
+		 * primary path above it now is -- a known, pre-existing gap
+		 * (cc3501e_recover() has always released and re-acquired around
+		 * this fallback), left out of scope here: fixing cc3501e_reset()'s
+		 * own locking touches a function every cold-boot path calls, a
+		 * materially bigger change than this one. */
+		cc3501e_lock_release(ctx);
 		(void)cc3501e_power_off(ctx);
-		return cc3501e_reset(ctx);
+		final = cc3501e_reset(ctx);
+		if (final == ALP_OK) cc3501e_recover_clear_stale_state(ctx);
+	} else {
+		/* Confirm with a PING, still under the SAME lock -- the _locked
+		 * variant, no nested acquire. */
+		final = cc3501e_request_locked(
+		    ctx, ALP_CC3501E_CMD_PING, NULL, 0, NULL, 0, NULL, ALP_CC3501E_REQ_SEQ_NONE);
+
+		if (final == ALP_OK) {
+			/* Re-establish wire state -- still under the same lock,
+			 * best-effort (mirrors cc3501e_reset()'s own transport-
+			 * hiccup handling): the device rebooted (same firmware
+			 * image, so fw_proto_major should read back unchanged, but
+			 * re-confirm rather than assume). */
+			uint8_t            reply[2] = { 0 };
+			size_t             got      = 0;
+			const alp_status_t vs       = cc3501e_request_locked(ctx,
+			                                                     ALP_CC3501E_CMD_GET_VERSION,
+			                                                     NULL,
+			                                                     0,
+			                                                     reply,
+			                                                     sizeof(reply),
+			                                                     &got,
+			                                                     ALP_CC3501E_REQ_SEQ_NONE);
+			if (vs == ALP_OK && got >= sizeof(reply)) {
+				const uint16_t fw_version = (uint16_t)reply[0] | ((uint16_t)reply[1] << 8);
+				const uint8_t  fw_major   = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MAJOR(fw_version);
+				const uint8_t  fw_minor   = (uint8_t)ALP_CC3501E_PROTOCOL_VERSION_MINOR(fw_version);
+				/* #2126 review (minor): apply the SAME major-version
+				 * gate cc3501e_reset() does (see its own comment) --
+				 * a warm-rebooted peer that answers a DIFFERENT,
+				 * unacceptable major (a firmware swap landed between
+				 * sessions -- not the common case, but the gate
+				 * exists for exactly this) must not be trusted with
+				 * the OLD major's wire framing. */
+				if (cc3501e_fw_major_is_acceptable(fw_major)) {
+					ctx->fw_proto_major = fw_major;
+					ctx->fw_proto_minor = fw_minor;
+				} else {
+					/* #2126 review: report the refusal, do not swallow
+					 * it. Clearing ctx->initialised while still
+					 * returning ALP_OK counted the recovery as a
+					 * success -- recover_count bumped, the callback
+					 * fired -- while every later op failed
+					 * ALP_ERR_NOT_READY with nothing saying why.
+					 * cc3501e_reset() answers ALP_ERR_VERSION for the
+					 * same case; match it. */
+					ctx->fw_proto_major = 0u;
+					ctx->fw_proto_minor = 0u;
+					ctx->initialised    = false;
+					final               = ALP_ERR_VERSION;
+				}
+			}
+			if (final == ALP_OK) cc3501e_recover_clear_stale_state(ctx);
+		}
+
+		cc3501e_lock_release(ctx);
 	}
-	return cc3501e_ping(ctx);
+
+	/* #2126 review (was: MAJOR, cooldown based on successes): stamped
+	 * here -- the ONE place both the automatic path
+	 * (cc3501e_link_check_and_recover(), which never calls cc3501e_reset()
+	 * directly) and a manual `alp companion recover` funnel through -- so
+	 * the cooldown/back-off in cc3501e_link_check_and_recover() sees every
+	 * ATTEMPT, auto or manual, success or failure, never just successes.
+	 * The bug this replaces: recover_count only counted successes, so a
+	 * FAILED attempt left the cooldown gate reading "never attempted" and
+	 * a caller stuck in a fail/retry loop re-triggered a fresh warm reset
+	 * on every single op instead of being throttled. */
+	ctx->last_recover_ms = alp_uptime_ms();
+	ctx->recover_attempt_count++;
+	if (final == ALP_OK) {
+		ctx->recover_fail_streak = 0u;
+		ctx->recover_count++;
+		if (ctx->recover_cb != NULL) {
+			ctx->recover_cb(ctx, ctx->recover_count, ctx->recover_cb_user);
+		}
+	} else if (ctx->recover_fail_streak < 0xFFu) {
+		ctx->recover_fail_streak++;
+	}
+
+	__atomic_store_n(&ctx->recovering, false, __ATOMIC_RELEASE);
+	return final;
+}
+
+/**
+ * @brief Register a callback invoked after every SUCCESSFUL recovery.
+ *
+ * Runs after cc3501e_recover() has already committed -- recover_count
+ * bumped, stale same-ctx state cleared -- for BOTH the automatic path
+ * (cc3501e_link_check_and_recover()) and a manual `alp companion recover`.
+ * Replaces a single application-wide weak hook: this is per-@p ctx and
+ * overwrite-to-unregister (pass a NULL @p cb), the same shape as every
+ * other single-slot registration in this driver.
+ *
+ * @param ctx   Initialised bridge handle.
+ * @param cb    Callback to invoke, or NULL to unregister.
+ * @param user  Opaque pointer handed back unchanged as @p cb's last argument.
+ */
+void cc3501e_set_recover_callback(cc3501e_t *ctx, cc3501e_recover_cb_t cb, void *user)
+{
+	if (ctx == NULL) return;
+	ctx->recover_cb      = cb;
+	ctx->recover_cb_user = user;
+}
+
+/* See <alp/chips/cc3501e/core.h> for cc3501e_recover(); this is declared
+ * only in cc3501e_internal.h -- see its comment there for why. */
+alp_status_t cc3501e_link_check_and_recover(cc3501e_t *ctx)
+{
+	if (ctx == NULL) return ALP_ERR_INVAL;
+	if (!CC3501E_AUTO_RECOVER_ON) return ALP_OK;
+
+	/* #2126 review (minor): skip entirely when there is no reset pin --
+	 * with no reset_pin, cc3501e_hard_reset() reports ALP_ERR_NOSUPPORT
+	 * immediately and cc3501e_recover() falls into the power_off + reset
+	 * fallback, which needs enable_pin too and, on a board missing either,
+	 * can leave ctx permanently ALP_ERR_NOT_READY (cc3501e_reset()'s own
+	 * NOSUPPORT-on-missing-pins path) -- exactly the state auto-recovery
+	 * exists to get OUT of, not risk causing on a board that was simply
+	 * never wired for it. */
+	if (ctx->reset_pin == NULL) return ALP_OK;
+
+	/* Never probe, let alone recover, into an open OTA/update session: the
+	 * device is DELIBERATELY deaf for 22-41 s of slot erase (cc3501e_ota.c's
+	 * CC3501E_OTA_BEGIN_BLIND_MS comment), and a warm reset here would abort
+	 * the session and destroy the partially staged image (see
+	 * cc3501e_recover()'s @warning in <alp/chips/cc3501e/core.h>).
+	 * #2126 review: ota_session_active (cc3501e_ota.c), not
+	 * cc3501e_peer_is_polled() -- see cc3501e_recover()'s own comment on
+	 * that same substitution.
+	 *
+	 * NOT ALSO CHECKED HERE, deliberately (#2126 review): whether the
+	 * bridge currently reports a STAGED or TRIAL pending image
+	 * (alp_cc3501e_ota_status_t.pending, via cc3501e_ota_status()) once a
+	 * session has already closed. That is a genuinely separate window this
+	 * driver has no cheap way to know about: nothing in ctx caches it (the
+	 * only way to learn it is another OTA_STATUS round trip), and asking
+	 * for one here -- on a link that already looks dead, which is the only
+	 * time this function gets this far -- would add another wire
+	 * transaction that is itself likely to fail/time out, compounding the
+	 * very delay this function exists to bound rather than protecting
+	 * anything: a warm reset does not touch the flash-derived pending
+	 * image at all (cc3501e_ota_status()'s own doc comment -- "the one
+	 * value here that survives a reset that cleared the device's
+	 * session"), so recovering while an image is merely STAGED/TRIAL is
+	 * not destructive the way recovering mid-session is. */
+	if (ctx->ota_session_active) return ALP_OK;
+
+	/* #2126 review (was: MAJOR, cooldown based on successes / no back-off):
+	 * gates the WHOLE attempt cycle -- probe AND reset -- not just the
+	 * reset, keyed off cc3501e_recover()'s own recover_attempt_count /
+	 * last_recover_ms (shared with a manual `alp companion recover`) so a
+	 * FAILED attempt still starts the cooldown. Exponential back-off
+	 * (recover_fail_streak, also maintained by cc3501e_recover()) widens
+	 * the window on repeated failure up to CC3501E_RECOVER_COOLDOWN_MAX_MS,
+	 * and collapses back to the floor the moment a recovery succeeds. */
+	if (ctx->recover_attempt_count > 0u) {
+		uint32_t cooldown_ms = CC3501E_RECOVER_COOLDOWN_MS;
+		for (uint8_t i = 0; i < ctx->recover_fail_streak; i++) {
+			if (cooldown_ms >= CC3501E_RECOVER_COOLDOWN_MAX_MS / 2u) {
+				cooldown_ms = CC3501E_RECOVER_COOLDOWN_MAX_MS;
+				break;
+			}
+			cooldown_ms *= 2u;
+		}
+		if ((alp_uptime_ms() - ctx->last_recover_ms) < cooldown_ms) {
+			return ALP_OK; /* cooldown -- declined, not attempted */
+		}
+	}
+
+	/* #2126 review: best-effort skip if a recovery is already in flight on
+	 * another thread -- cc3501e_recover()'s own CAS (ctx->recovering) is
+	 * the hard guarantee against a second RESET; this just avoids the
+	 * common case of redundant probing too. A narrow window can still let
+	 * two threads both pass this peek and both probe -- harmless (PINGs
+	 * only, correctly serialised by the transport lock); their subsequent
+	 * cc3501e_recover() calls still correctly exclude each other. */
+	if (ctx->recovering) return ALP_OK;
+
+	/* Probe before concluding the link is dead: most ALP_ERR_IO/TIMEOUT
+	 * exits with no status ever decoded are one of the transport's known
+	 * transient windows (radio-down, teardown/re-arm race), not a real
+	 * wedge -- and a warm reset is destructive (every association/socket/
+	 * BLE link gone), so it must not fire on a link that would have
+	 * answered eventually on its own. Stops at the first OK.
+	 *
+	 * #2136 review (MAJOR): this probe fires up to CC3501E_LINK_PROBE_TRIES
+	 * (24) PINGs, every one of which would otherwise go through
+	 * cc3501e_request_locked()'s ring write on failure -- more than
+	 * CC3501E_LINK_LOG_LEN (8), so an unsuppressed probe is GUARANTEED to
+	 * overwrite the ring 3x over and evict the one entry a bench operator
+	 * actually needs: the ORIGINAL wedging op that triggered this recovery
+	 * in the first place. link_log_suppress makes the `out:` label count
+	 * these into link_log_probe_fail_count instead of writing them -- the
+	 * probe's own failures stay countable (cc3501e_link_log_probe_fail_count())
+	 * without evicting anything. Cleared unconditionally right after the
+	 * loop (both the early-OK exit and full exhaustion) so a later, genuine
+	 * request failure is never silently suppressed too. */
+	ctx->link_log_suppress               = true;
+	ctx->link_log_probe_fail_count       = 0u;
+	const uint32_t attempts_before_probe = ctx->recover_attempt_count;
+	bool           link_ok               = false;
+	for (uint32_t i = 0; i < CC3501E_LINK_PROBE_TRIES; i++) {
+		if (cc3501e_ping(ctx) == ALP_OK) {
+			link_ok = true;
+			break;
+		}
+		if (i + 1u < CC3501E_LINK_PROBE_TRIES) alp_delay_ms(CC3501E_LINK_PROBE_GAP_MS);
+	}
+	ctx->link_log_suppress = false;
+	if (link_ok) return ALP_OK; /* link is fine */
+
+	/* #2126 review (minor): the probe above takes ~12-18 s, long enough for
+	 * ANOTHER thread's whole attempt to start and finish inside it -- both
+	 * threads passed the cooldown gate before either reset, so without this
+	 * the second one pulses nRESET again immediately, straight through the
+	 * back-off. Re-check here, after the probe and before committing: a
+	 * changed attempt count means someone already recovered (or tried) in
+	 * the meantime, so back out and let the cooldown gate decide next time.
+	 * The PINGs just spent are not wasted -- they are the evidence that the
+	 * other thread's reset did not bring the link back. */
+	if (ctx->recover_attempt_count != attempts_before_probe) return ALP_OK;
+
+	/* Every probe failed -- warm-reset and confirm. cc3501e_recover()
+	 * itself now stamps last_recover_ms / recover_attempt_count /
+	 * recover_fail_streak / recover_count and invalidates stale state on
+	 * success, identically to a manual `alp companion recover`. */
+	return cc3501e_recover(ctx);
 }
 
 /* See <alp/chips/cc3501e/core.h>. */
@@ -143,6 +596,11 @@ alp_status_t cc3501e_reset(cc3501e_t *ctx)
          * line to pulse. */
 		return ALP_ERR_NOSUPPORT;
 	}
+	/* #2126 review: a cold power cycle, like a warm reset
+	 * (cc3501e_hard_reset()'s own comment), always lands the device in
+	 * normal mode -- clear the RAM-only OTA-session flag here too so this
+	 * recovery primitive cannot leave it stuck true. */
+	ctx->ota_session_active = false;
 	/* Reset sequence per TI SWRU626 §7.1.5 (CC3501E technical
      * reference manual):
      *
@@ -340,6 +798,16 @@ alp_status_t cc3501e_hard_reset(cc3501e_t *ctx)
 	 * or there is no way back from a supply gate or a version mismatch. */
 	if (ctx == NULL || ctx->bus == NULL) return ALP_ERR_NOT_READY;
 	if (ctx->reset_pin == NULL) return ALP_ERR_NOSUPPORT;
+	/* #2126 review: a reboot ALWAYS lands in normal (non-OTA) mode -- the
+	 * flag is RAM-only and read-and-cleared at boot (cc3501e_ota.c's own
+	 * comment on cc3501e_ota_update_mode's timeout fallback). Clearing it
+	 * HERE, not just at the handful of call sites that remembered to, is
+	 * what makes it impossible for a caller that reboots the device by some
+	 * OTHER path (a forgotten bail-out, a future one) to leave the flag
+	 * stuck true forever -- which silently disables auto-recovery for good,
+	 * since cc3501e_link_check_and_recover() refuses to even probe while it
+	 * reads true. */
+	ctx->ota_session_active = false;
 	/* Pulse nRESET while keeping WIFI_EN asserted so the module re-boots WITHOUT a
 	 * cold power cycle (a cold cycle would re-trigger the Puya-flash bug).  This is
 	 * the "second boot" of the cold-boot workaround and the retry primitive the
@@ -460,9 +928,10 @@ bool cc3501e_reply_may_be_all_zero(alp_cc3501e_cmd_t cmd)
 	case ALP_CC3501E_CMD_WIFI_STATUS:
 		/* alp_cc3501e_wifi_status_t: state=DISCONNECTED(0), fail_reason=
 		 * NONE(0), rssi_dbm=0 (documented "@warning NOT A MEASUREMENT...
-		 * always 0 on the wire", <alp/protocol/cc3501e.h>), reserved=0.
-		 * "Never connected since boot" is a real, common device state and
-		 * reads back byte-identical to this. */
+		 * always 0 on the wire", <alp/protocol/cc3501e.h>), last_reason=0
+		 * (no connect attempt has ended or been rejected yet). "Never
+		 * connected since boot" is a real, common device state and reads
+		 * back byte-identical to this. */
 		return true;
 	case ALP_CC3501E_CMD_WIFI_GET_RSSI:
 		/* 0 dBm is a LEGAL int8 RSSI reading (see the wifi_status_t
@@ -986,15 +1455,19 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * from 167 kB/s to 231 kB/s with the link healthy throughout.
  *
  * 20 is TOO LOW -- it gives 0 B/s.  And note the gate before the REPLY HEADER is
- * deliberately NOT this constant: it is a hardcoded 200 us because it waits for
- * the slave to DISPATCH and stage its reply, which is a different and much
- * longer job than re-arming the next phase.  Folding it into this constant was
- * tried and killed the link outright (PING -> -5). */
+ * deliberately NOT this constant: it waits for the slave to DISPATCH and stage
+ * its reply, which is a different and much longer job than re-arming the next
+ * phase -- and, unlike this constant, is now SCALED by the reply capacity the
+ * caller offered (cc3501e_reply_header_gate_us(), floor 200 us, up to 2000 us
+ * for a >512 B reply; see that function's comment for why a flat 200 us wedges
+ * a 4071 B SOCK_RECV).  Folding it into this constant was tried and killed the
+ * link outright (PING -> -5). */
 /* 250 us, not 40.  This is the blind fallback gap cc3501e_reply_gate() uses
  * when READY is unusable -- and on the measured unit it always is: READY is
- * CC3501E GPIO_17 -> Alif P2_6, and P2_6 is SPI1_SCLK_A, so enabling its input
- * buffer degrades the very link it is meant to gate.  g_ready_line_proven
- * therefore stays false and every phase falls back to this constant.
+ * CC3501E GPIO_17 -> Alif P2_6, and this unit's overlay selects P2_6's
+ * SPI1_SCLK_A pinmux, so enabling its input buffer degrades the very link it
+ * is meant to gate.  ready_pin is therefore left NULL on that unit and every
+ * phase falls back to this constant.
  *
  * REVISION SCOPE.  This comment used to say "on E1M-AEN801 board rev 2626-R2
  * it always is", while the bench line five paragraphs down names serial
@@ -1006,6 +1479,16 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
  * drives SPI1 -- which covers r1 as measured, and R2 unless its netlist moves
  * READY, which has not been checked.  Read the module's own revision before
  * assuming either way.
+ *
+ * UPDATE (run8, e1m-aen-evk-01): an R2 module now HAS been checked.  Its
+ * overlay selects P2_6's I2S1_SCLK pinmux for the EVK's Arduino CK_RST
+ * instead of the SPI1_SCLK_A this paragraph's unit selects -- P2_6's set of
+ * available pinmux options is fixed silicon, what differs is which one each
+ * board's OWN overlay picks -- and P2_6 is not connected to the CC3501E on
+ * that module in any way regardless of which mux it runs.  See
+ * cc3501e_reply_gate()'s own doc comment below for the current,
+ * revision-scoped picture; this paragraph is kept for the r1 CS-less-board
+ * history it documents, not as the general case.
  *
  * At 40 us the request-PAYLOAD phase intermittently out-ran the slave's
  * re-arm: the header transfer declared N bytes, the payload transfer landed
@@ -1027,32 +1510,187 @@ alp_status_t cc3501e_sync(cc3501e_t *ctx, uint32_t timeout_ms)
 #define CC3501E_PHASE_SETTLE_US 250u
 
 /* READY gate for the r2 SS0 + host-IRQ bridge.  When ctx->ready_pin is
- * populated (the CC35 GPIO17 -> Alif P2_6 line is wired + opened as an input),
- * wait for it HIGH -- the slave drives it HIGH when its SPI slave is armed+idle
- * -- before clocking a reply phase, instead of a fixed settle gap.  This tracks
- * the slave's actual re-arm rather than guessing, so slow (Wi-Fi/BLE) replies
- * no longer need a conservative fixed delay.  Opt-in + degrades safely: a NULL
- * ready_pin (CS-less r1 boards) or a line that never asserts falls back to the
- * fixed gap.  See project_cc3501e_link_topology. */
+ * populated (the CC35 GPIO17 line is wired + opened as an input -- which
+ * Alif pad that is depends on the module/board revision, see
+ * cc3501e_reply_gate()'s own doc comment below), wait for it HIGH -- the
+ * slave drives it HIGH when its SPI slave is armed+idle -- ON TOP OF the
+ * fixed settle gap, not instead of it: see that doc comment for why READY
+ * may only ever ADD delay here.  This lets a genuinely slow (Wi-Fi/BLE)
+ * reply get the extra time it actually needs instead of a caller guessing a
+ * bigger fixed number for every phase.  Opt-in + degrades safely: a NULL
+ * ready_pin (CS-less r1 boards, or an R2 module by default) or a line that
+ * never asserts still pays the fixed gap in full.  See
+ * project_cc3501e_link_topology.
+ *
+ * LOCK-HOLD CAVEAT: this wait runs while cc3501e_request_locked() already
+ * holds the transport lock, so an opted-in ready_pin can add up to
+ * CC3501E_READY_WAIT_US of hold time per gate.  Another caller blocked on
+ * the same lock can see ALP_ERR_BUSY after
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS elapses.  "Safe to opt in"
+ * elsewhere in this file means safe for LINK TIMING (it can never clock a
+ * phase early) -- it does NOT mean safe from lock contention with other
+ * callers. */
 
-/* Latched the first time READY is ever observed HIGH.  Until that happens -- and
- * permanently on a board that never asserts it -- the gate keeps its historical
- * behaviour (short burst, then the fixed gap), so an unwired line cannot stall
- * every phase.  Once the line has proven itself wired AND driven, the gate
- * becomes AUTHORITATIVE and waits for the slave to re-arm however long the
- * device op takes.  That is the difference between surviving a flash blackout
- * and clocking into a dead slave: a burst of 64 reads is ~microseconds, while a
- * psa_fwu erase/write is orders of magnitude longer. */
-static bool g_ready_line_proven;
+/* READY (when ctx->ready_pin is populated) can only ADD delay to a reply
+ * phase, never remove it: wait for the pin to read HIGH, bounded by
+ * CC3501E_READY_WAIT_US, then ALWAYS pay the full fixed fallback_us settle
+ * below regardless of what the wait saw.  A NULL ready_pin pays the
+ * fallback with no wait at all, exactly as if READY did not exist.
+ *
+ * This is deliberately NOT a "proof" that the line is real, wired, or
+ * trustworthy.  Three earlier designs here (issue #2105) each tried to
+ * infer that from GPIO reads -- a single level, a single difference, then
+ * several debounced agreeing edges gated to "busy-expected" call sites --
+ * and each one was defeated in turn: pure per-read noise eventually
+ * produced enough coincidental agreement to be trusted (proving by ping 265
+ * of a 5000-ping run, after which most gates read short), two unrelated
+ * glitches far apart proved a stuck pad, and a line that got proven this
+ * way could still return on a stale HIGH -- 100 of 100 back-to-back PINGs
+ * clocked into an un-rearmed slave once that happened.  Trying to prove
+ * anything from this pin is the wrong move.  What is left below infers
+ * NOTHING: a HIGH read only ever decides how much EXTRA time to wait before
+ * the fixed settle that runs unconditionally anyway, so however wrong that
+ * read is, the worst case is "waited a bit longer than necessary" -- never
+ * "clocked early".
+ *
+ * Consequences:
+ *   - A stuck-HIGH pad reads HIGH on the very first (zero-delay) poll, so it
+ *     costs exactly the ready_pin==NULL timing -- it can never make a gate
+ *     faster than gate-off, because gate-off IS the floor.
+ *   - A noisy or glitching pad cannot shorten a settle either: whatever it
+ *     reads, the fallback still runs in full afterwards.
+ *   - A REAL READY line only helps when the slave is slower than the fixed
+ *     settle -- e.g. after a radio op -- by waiting out the actual re-arm
+ *     instead of guessing a fixed number and hoping it was long enough.
+ *
+ * STALE-HIGH IS NOW MOOT.  Every earlier design here spent real complexity
+ * spinning for a LOW-before-HIGH edge specifically to avoid returning on a
+ * stale HIGH left over from the slave's PREVIOUS re-arm (a polled slave
+ * holds READY high for a moment past a real completion -- see g_peer_polled
+ * below).  That spin is gone and is not missed: since the full fallback_us
+ * settle now runs unconditionally after ANY HIGH, stale or not, the slave
+ * gets its settle time regardless of which HIGH ended the wait.
+ *
+ * PIN-ROUTING FACT (bench evidence, run8, e1m-aen-evk-01, advisor root-cause)
+ * -- REVISION-SCOPED, read before assuming it generally: on the R2 module
+ * mounted in e1m-aen-evk-01, Alif P2_6 -- the pad several AEN example
+ * bridges used to open as CC3501E_BRIDGE_PIN_READY -- is E1M pad AH7 /
+ * I2S1_SCLK, which the E1M EVK carrier's board.yaml maps to the Arduino
+ * header's CK_RST, NOT the CC3501E GPIO17 READY net -- that lands on E1M
+ * pad G3 / IO16 instead (metadata/e1m_modules/aen/from-cc3501e.tsv,
+ * from-alif.tsv).  P2_6's set of pinmux options (GPIO, SPI1_SCLK_A,
+ * I2S1_SCLK, ...) is a fixed property of the Alif silicon -- what differs
+ * per board is only which option that board's OWN pinctrl overlay selects
+ * (see CC3501E_PHASE_SETTLE_US's comment above for an r1 overlay that
+ * selected SPI1_SCLK_A there; the E1M EVK's selects I2S1_SCLK).  Neither
+ * selection makes P2_6 the CC3501E's READY net.  Reading CK_RST as READY on
+ * the EVK returns a constant 1 (its reset line idles high) -- exactly the
+ * level an earlier, level-proving design mistook for an armed slave.  With
+ * that design trusting the pad, station connect never associated in 4 of 4
+ * boots (get_version then returned -5); with the READY gate disabled on the
+ * same firmware, 5 of 7 boots associated.
+ *
+ * A hand-reworked r1 unit did once have READY genuinely working -- a
+ * DIFFERENT unit than the one this pin-routing finding covers, and its own
+ * serial was never recorded (see changelog.d/1799.md and
+ * cc3501e_sockets.c's SOCK_RECV cap comment): 297174 B/s over a link
+ * running ping_fail=0, plus real async-event attention edges (#1721/#130).
+ * So NULL/absent is the correct DEFAULT on the E1M EVK's R2 module, but a
+ * board -- or a hand-reworked unit -- that genuinely wires GPIO17 to some
+ * Alif pad can opt back in: set fw->ready_pin to that pin in
+ * cc3501e_bridge_bringup().  Now that READY can only add delay, opting in
+ * on a board that turns out to be wrong is safe: it can never make a gate
+ * return early -- worst case is up to 3 x CC3501E_READY_WAIT_US of busy-wait
+ * per latch cycle, repeated (and growing, see the hysteresis on
+ * g_ready_stuck_low_threshold below) each time the line re-latches after a
+ * recovery, if it flaps instead of staying cleanly stuck. */
+static bool     g_ready_ignored; /* latched: stop waiting on ready_pin -- this is
+                                   * file-global (process-wide across every
+                                   * cc3501e_t instance), not per-ctx, and it is
+                                   * RECOVERABLE: see cc3501e_reply_gate() below. */
+static uint32_t g_ready_timeout_streak;
 
-/* Set while the peer is in OTA update mode (polled slave).  A polled slave only
- * re-arms when its service loop next enters SPI_transfer, so READY is still HIGH
- * for a moment AFTER a phase completes.  A LEVEL gate therefore returns
- * immediately and the host clocks the next phase into a slave that is not
- * listening -- which is why header-only frames (OTA_STATUS) worked while every
- * payload-bearing OTA_WRITE returned -5 and the stream died at off=256 (silicon
- * 2026-08-21).  With this set the gate waits for a LOW->HIGH EDGE instead, i.e.
- * for the slave to actually drop and re-raise READY around its re-arm. */
+/* Consecutive gates that must burn the FULL CC3501E_READY_WAIT_US without
+ * ever seeing HIGH before the process gives up waiting on ready_pin (latches
+ * g_ready_ignored) and falls back to paying only fallback_us -- same as
+ * ready_pin == NULL.  Without this, a genuinely stuck-LOW (or disconnected)
+ * pad would cost CC3501E_READY_WAIT_US (250 ms) on EVERY gate forever: a real
+ * slave op can legitimately eat the whole budget once (a slow radio op), but
+ * 3 in a row is not a slow op, it is a dead line.  This can only ever REMOVE
+ * a wasted WAIT -- fallback_us is paid unconditionally either way, so this
+ * cannot make a gate return early.
+ *
+ * HYSTERESIS.  The threshold used at runtime (g_ready_stuck_low_threshold,
+ * below) starts here at 3 and DOUBLES every time the latch actually sets
+ * (3 -> 6 -> 12 -> 24), capped at CC3501E_READY_STUCK_LOW_STREAK_MAX, and
+ * never resets for the rest of the process -- a HIGH read still clears the
+ * LATCH and the streak counter (see cc3501e_reply_gate() below), but never
+ * this threshold. Without it, a FLAPPING line (mostly LOW, the occasional
+ * HIGH) would re-latch over and over, re-paying up to 3 x
+ * CC3501E_READY_WAIT_US (750 ms) of busy-wait EVERY time it re-latches --
+ * each re-latch cycle holds cc3501e_request_locked()'s transport lock long
+ * enough that another caller's CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+ * (100 ms default) makes its own ALP_ERR_BUSY all but certain. Growing the
+ * threshold makes each successive re-latch need more consecutive timeouts to
+ * trip, spacing re-latches further apart over the life of the process. */
+#define CC3501E_READY_STUCK_LOW_STREAK     3u
+#define CC3501E_READY_STUCK_LOW_STREAK_MAX 24u
+static uint32_t g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK;
+
+/* Latches true the first time g_ready_ignored is set -- chips/cc3501e
+ * has no logging facility of its own (it is backend-portable; no LOG_* macro
+ * is available here), so this reuses the same internal latch+getter idiom as
+ * g_peer_polled/cc3501e_peer_is_polled() just below.  NOT itself a log call:
+ * a caller (bench diagnostics, a bring-up app -- see
+ * examples/aen/aen-cc3501e-wedge-postmortem's READY probe for the shape of
+ * one) has to poll and print this itself if it wants the degrade reported
+ * anywhere. */
+static bool g_ready_line_was_stuck;
+
+bool cc3501e_ready_line_was_stuck(void)
+{
+	return g_ready_line_was_stuck;
+}
+
+#ifdef CONFIG_ZTEST
+/* TEST-ONLY (see cc3501e_internal.h's declaration): resets every READY-gate
+ * static to its zero state between fixtures, INCLUDING the hysteresis
+ * threshold -- production code never resets that (see its own comment
+ * above), but a test fixture needs every static back to its process-start
+ * value for isolation between test cases. Never called from production
+ * code, and compiled only under CONFIG_ZTEST -- there is no ctx-scoped home
+ * this state could reset itself from, so a test fixture needs an explicit
+ * door back to zero instead. */
+void cc3501e_ready_gate_reset_for_test(void)
+{
+	g_ready_ignored             = false;
+	g_ready_timeout_streak      = 0u;
+	g_ready_line_was_stuck      = false;
+	g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK;
+}
+#endif
+
+/* Set while the peer is in OTA update mode (polled slave).  Read back by
+ * cc3501e_peer_is_polled(), which cc3501e_ota_begin() uses as a hard
+ * precondition: psa_fwu_start/psa_fwu_write on the ordinary callback/DMA
+ * bridge PERMANENTLY wedge the device (bench-proven; SPI_close does not undo
+ * the claim), so BEGIN must refuse unless update mode was already entered.
+ *
+ * This used to ALSO floor cc3501e_reply_gate()'s fallback settle at a
+ * polled-only CC3501E_POLLED_SETTLE_US, because a polled slave's service
+ * loop takes microseconds of processing to re-arm, not an ISR, and the
+ * then-200us ordinary settle was too short for that (header-only frames
+ * survived while every payload-bearing OTA_WRITE lost its bytes and the
+ * stream died at off=256, silicon 2026-08-21).  That floor is GONE: it was
+ * walked back from 5000us to 200us once the real cause (a polled RX-FIFO
+ * desync) was fixed firmware-side, and CC3501E_PHASE_SETTLE_US has since
+ * been raised to 250us for an unrelated reason (the sock-send re-arm race,
+ * #1873) -- every fallback_us this file ever gates with, fixed or
+ * byte-scaled (CC3501E_REPLY_GATE_FLOOR_US, also 200us), is now >= 200us on
+ * its own, so a floor of exactly 200us can never fire.  Removed rather than
+ * left as dead code describing behaviour that cannot happen; if a polled
+ * slave is ever measured needing more than the ordinary settle again, size
+ * a new floor from that bench evidence, not by resurrecting this one. */
 static bool g_peer_polled;
 
 bool cc3501e_peer_is_polled(void)
@@ -1065,84 +1703,217 @@ void cc3501e_set_peer_polled(bool on)
 	g_peer_polled = on;
 }
 
-/* Authoritative-wait budget once the line is proven.  This bounds ONE PHASE, and
- * its only job is to not clock into a slave that has not re-armed -- a re-arm is
- * microseconds.  It must NOT be sized to outlast a device-side flash blackout:
- * waiting out a multi-minute psa_fwu erase is the CALLER's hold-off loop's job.
- * Sizing this at 5 s was measured on silicon 2026-08-21 to make a single
- * 4-phase cc3501e_ota_status cost up to 20 s while the caller's budget charged
- * it 250 ms, turning a nominal 600 s BEGIN confirmation into a ~13 HOUR wait
+/* Bounded wait for READY HIGH once ctx->ready_pin is populated.  This bounds
+ * ONE PHASE, and its only job is to give a genuinely slow slave (e.g. mid
+ * radio op) the actual time it needs instead of guessing a fixed number --
+ * it must NOT be sized to outlast a device-side flash blackout: waiting out
+ * a multi-minute psa_fwu erase is the CALLER's hold-off loop's job.  Sizing
+ * this at 5 s was measured on silicon 2026-08-21 to make a single 4-phase
+ * cc3501e_ota_status cost up to 20 s while the caller's budget charged it
+ * 250 ms, turning a nominal 600 s BEGIN confirmation into a ~13 HOUR wait
  * that read as "BEGIN never returns". */
 #define CC3501E_READY_WAIT_US 250000u
 #define CC3501E_READY_POLL_US 200u
-/* How long to wait for a polled peer to DROP ready before giving up on the
- * edge and treating the line as level-only. */
-#define CC3501E_READY_EDGE_US 20000u
-/* Tight spin for the READY drop; see cc3501e_reply_gate(). */
-#define CC3501E_READY_LOW_SPINS 64u
 
-/* A POLLED slave (OTA update mode) re-arms only when its service loop next enters
- * SPI_transfer -- microseconds of processing, not an ISR -- so the host's fallback
- * settle has to cover that.  200 us is right for the DMA slave and too short here:
- * header-only frames survived while every payload-bearing OTA_WRITE lost its bytes
- * and the stream died at off=256 (silicon 2026-08-21).  Widening the settle for
- * EVERY peer regressed update-mode ENTRY to -4 (that handshake runs on the ordinary
- * DMA bridge), so it is scoped to polled peers only.  Independent of READY, which
- * is not readable on this bench (READY probe: rc=0 level=0). */
-/* WAS 5000u.  That value was sized against a symptom, not a cause: "every
- * payload-bearing OTA_WRITE lost its bytes and the stream died at off=256" is
- * exactly the polled RX-FIFO desync that spi_fifo_reset() (firmware
- * transport_hw_ti_spi.c) now clears at the start of EVERY frame.  With the cause
- * fixed, this gate is back to doing only its stated job -- covering the slave's
- * re-arm, which this file's own comment describes as "microseconds".  At 5000us
- * it cost 4 gates x 5 ms = 20 ms per frame, ~2 frames per 256 B chunk. */
-#define CC3501E_POLLED_SETTLE_US 200u
+/* THE LATCH RECOVERS.  An op holding READY LOW across >= 3 x
+ * CC3501E_READY_WAIT_US worth of gates (no bench-proven READY-wired unit
+ * exists to cite a real duration from) can legitimately trip the streak
+ * above even though the line is fine.  If the latch stuck forever, that one
+ * op would silently disable the wait for the rest of the process.  So once
+ * latched, cc3501e_reply_gate() still takes one zero-wait read per gate; the
+ * moment that read comes back HIGH, it stops waiting while the pin reads LOW
+ * and resumes on that HIGH read -- both g_ready_ignored and the streak
+ * counter above clear (g_ready_stuck_low_threshold does not -- see its own
+ * comment). The latch therefore only ever suppresses WAITING while the pin
+ * is actually reading LOW -- it never suppresses paying the settle, and it
+ * never outlives a HIGH read. */
+
+/* Reply-header gate, scaled by how many bytes the bridge has to move BEFORE it
+ * can arm the reply header -- the fixed 200 us this used to be blindly waited
+ * on cc3501e_request_locked()'s caller having staged a reply the bridge can
+ * build inside that window, and for a large reply or a large REQUEST it
+ * cannot: dispatch_frame runs in the SPI transfer-complete ISR the instant the
+ * request payload finishes (cc3501e-bridge-firmware transport_hw_ti_spi.c
+ * ~708, protocol.c ~897-900) -- it CRCs up to ~4094 request bytes and runs the
+ * opcode's handler, which for a reply-bearing op composes the reply in the
+ * SAME ISR (ring copy, ~4100 B CRC, ~4100 B memcpy; src/protocol_sockets.c,
+ * protocol.c:996-1003, transport_hw_ti_spi.c:605) -- all of it BEFORE arming
+ * the reply header.  So the input to this gate is whichever side of the
+ * exchange is larger: the reply the caller asked for, or the request the
+ * caller just sent.  Widening it for EVERY request would tax every
+ * small-reply, small-request op (PING, GET_VERSION, most of this driver) for
+ * a cost only the large ones pay, so it is scaled per request instead.
+ *
+ * THE KEY IS NOT rx_cap.  cc3501e_sock_recv() always passes rx_cap ==
+ * sizeof(ctx->sock_buf) == ALP_CC3501E_MAX_PAYLOAD regardless of how many
+ * bytes it actually asked the peer for (its `want`, wire field @2..3 of
+ * alp_cc3501e_sock_recv_t) -- rx_cap is a fixed local staging buffer, not the
+ * bridge's own reply size, and the bridge sizes its reply from the REQUEST,
+ * not from how big a buffer the host happened to allocate.  So the two SOCK_
+ * RECV bench runs below both had rx_cap == 4096; the byte count that actually
+ * varied, and the one that must key this gate, is `want`.  cc3501e_
+ * expected_reply_bytes() below reconstructs the real expected reply size per
+ * opcode from (cmd, tx_payload, tx_len) instead.
+ *
+ * Data points -- ONLY these two sizes were bench-measured, both SOCK_RECV
+ * (run8/run9, e1m-aen-evk-01, bridge GPE 0.254.8.0/0.254.9.0):
+ *   - want  512 (reply 536 B, sizeof(alp_cc3501e_sock_recv_resp_t) (24 B) +
+ *     want): 200 us -> 3/3 end-to-end (the existing floor).
+ *   - want 4071: 200 us -> wedged the link on the FIRST recv, 2/2, at both
+ *     1 MHz and 25 MHz.
+ *   - want 4071: 2000 us -> 3/3 end-to-end, CRC-clean at a streamed 262144 B
+ *     (~469 kB/s).
+ * The want-4071 reply is NOT 24 + 4071 = 4095 B: a bridge command handler's
+ * writable capacity is the 4100 B frame minus its own 5 B header minus the
+ * 2 B CRC trailer = 4093 B (cc3501e-bridge-firmware protocol.c ~925), so the
+ * actual wire reply the firmware produced was capped at 4093 B, 2 B short of
+ * the naive header-plus-want arithmetic.
+ *
+ * A THIRD data point exists on the REQUEST side (not reply size), but it is
+ * INFERRED, not directly measured for this fix: examples/aen/aen-cc3501e-
+ * socket-throughput/README.md ~159-165 records a 512 B STREAM_WRITE request
+ * clean 4/4 at the old flat 200 us gate, while 1024 B and 4092 B requests
+ * both failed rc=-5, 3/3 each. No run has measured what gate value actually
+ * fixes the request side -- this fix's max(expected_reply, wire_tx_len) is
+ * CONSISTENT WITH that failure boundary (a 1024+ B request now gets more than
+ * 200 us), not proven to close it the way the reply-side fix was proven on
+ * SOCK_RECV.
+ *
+ * Every byte count strictly between the measured floor and ceiling is
+ * LINEARLY INTERPOLATED, not measured.  The ceiling anchor
+ * (CC3501E_REPLY_GATE_LARGE_BYTES) is pinned at ALP_CC3501E_MAX_PAYLOAD -
+ * ALP_CC3501E_HEADER_BYTES (4092 B) -- the largest single-frame byte count
+ * ANY opcode in this driver can ever present in either direction (it is also
+ * SPI1_TRANSFER's own worst case, sizeof(resp header) + ALP_CC3501E_SPI1_MAX_
+ * XFER) -- rather than at the measured 4093 B point itself, so the plateau
+ * starts 1 B earlier than proven.  That is conservative, not risky: it only
+ * ever hands out the full, already-proven 2000 us slightly sooner, never
+ * less delay than the interpolation would otherwise give at 4092 B. */
+#define CC3501E_REPLY_GATE_FLOOR_US 200u /* proven at bytes <= 536 (SOCK_RECV want 512) */
+#define CC3501E_REPLY_GATE_SMALL_BYTES \
+	536u /* sizeof(alp_cc3501e_sock_recv_resp_t) + 512 -- proven-floor boundary */
+#define CC3501E_REPLY_GATE_LARGE_BYTES (ALP_CC3501E_MAX_PAYLOAD - ALP_CC3501E_HEADER_BYTES)
+#define CC3501E_REPLY_GATE_LARGE_US    2000u /* proven at 4093 B (SOCK_RECV want 4071) */
+
+/* Reconstruct the reply size THIS request actually asks for, from (cmd,
+ * tx_payload, tx_len) rather than the caller's rx_cap staging buffer -- see
+ * the gate's own comment above for why rx_cap is the wrong key for SOCK_RECV
+ * and SPI1_TRANSFER, whose rx_cap is a fixed-size scratch buffer unrelated to
+ * the wire reply they actually request. Falls back to rx_cap for every other
+ * opcode, GET_PENDING_EVENTS included.
+ *
+ * GET_PENDING_EVENTS was DELIBERATELY special-cased in an earlier version of
+ * this fix (to the firmware's real 16-entry ring, 288 B) and that case was
+ * removed: it depends on a firmware-internal constant (cc3501e-bridge-
+ * firmware src/event_ring.h) this driver has no way to verify stays 16, so a
+ * silent ring-depth change would silently under-gate this poll again -- the
+ * exact class of bug this whole fix exists to close. rx_cap here is
+ * sizeof(ctx->evt_buf) == ALP_CC3501E_MAX_PAYLOAD, so this poll pays the
+ * full ~2000 us ceiling: measured at roughly 1.8 ms added per poll, which
+ * against a realistic 2 polls/s callback cadence is about 0.36% additional
+ * transport-lock hold -- a cost worth paying to stay correct if the ring
+ * ever grows, rather than trusting a number this file cannot verify. */
+static uint32_t cc3501e_expected_reply_bytes(alp_cc3501e_cmd_t cmd,
+                                             const uint8_t    *tx_payload,
+                                             size_t            tx_len,
+                                             size_t            rx_cap)
+{
+	/* SOCK_RECV (0x23) wire = alp_cc3501e_sock_recv_t { handle(LE16) |
+	 * max_len(LE16) } -- max_len ("want") is the wire field the bridge
+	 * actually sizes its reply from.  Reply DATA =
+	 * alp_cc3501e_sock_recv_resp_t (24 B header) + want data bytes.
+	 *
+	 * want == 0 is NOT "expect nothing back": the bridge (cc3501e-bridge-
+	 * firmware protocol_sockets.c) clamps the reply to max_len only when
+	 * max_len != 0 -- a 0 means "no limit", and the reply can be as large as
+	 * the frame allows (up to ~4093 B, see CC3501E_REPLY_GATE_LARGE_BYTES's
+	 * own comment).  cc3501e_sock_recv() sends max_len == cap literally with
+	 * no floor, so a caller-supplied cap of 0 reaches the wire as exactly
+	 * that "no limit" value.  Fall back to rx_cap -- the most this request
+	 * could ever be asked to hold -- rather than treating want == 0 as a
+	 * tiny, header-only reply. */
+	if (cmd == ALP_CC3501E_CMD_SOCK_RECV && tx_payload != NULL &&
+	    tx_len == sizeof(alp_cc3501e_sock_recv_t)) {
+		const uint16_t want = (uint16_t)tx_payload[2] | ((uint16_t)tx_payload[3] << 8);
+		if (want == 0u) {
+			return (uint32_t)rx_cap;
+		}
+		return (uint32_t)sizeof(alp_cc3501e_sock_recv_resp_t) + want;
+	}
+	/* SPI1_TRANSFER (0x56) wire = alp_cc3501e_spi1_transfer_t { len(LE16) |
+	 * flags | seq | tx_fill | reserved(3) } (+ tx[len] inline).  Reply DATA =
+	 * alp_cc3501e_spi1_transfer_resp_t (4 B) + len RX bytes, UNLESS the
+	 * request set NO_RX, in which case the firmware replies len 0. */
+	if (cmd == ALP_CC3501E_CMD_SPI1_TRANSFER && tx_payload != NULL &&
+	    tx_len >= sizeof(alp_cc3501e_spi1_transfer_t)) {
+		if ((tx_payload[2] & ALP_CC3501E_SPI1_XFER_NO_RX) != 0u) {
+			return (uint32_t)sizeof(alp_cc3501e_spi1_transfer_resp_t);
+		}
+		const uint16_t len = (uint16_t)tx_payload[0] | ((uint16_t)tx_payload[1] << 8);
+		return (uint32_t)sizeof(alp_cc3501e_spi1_transfer_resp_t) + len;
+	}
+	return (uint32_t)rx_cap;
+}
+
+static uint32_t cc3501e_reply_header_gate_us(uint32_t bytes)
+{
+	if (bytes <= CC3501E_REPLY_GATE_SMALL_BYTES) {
+		return CC3501E_REPLY_GATE_FLOOR_US;
+	}
+	if (bytes >= CC3501E_REPLY_GATE_LARGE_BYTES) {
+		return CC3501E_REPLY_GATE_LARGE_US;
+	}
+	const uint32_t span_bytes = CC3501E_REPLY_GATE_LARGE_BYTES - CC3501E_REPLY_GATE_SMALL_BYTES;
+	const uint32_t span_us    = CC3501E_REPLY_GATE_LARGE_US - CC3501E_REPLY_GATE_FLOOR_US;
+	const uint32_t over_bytes = bytes - CC3501E_REPLY_GATE_SMALL_BYTES;
+	return CC3501E_REPLY_GATE_FLOOR_US + (over_bytes * span_us) / span_bytes;
+}
 
 static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
 {
-	if (g_peer_polled && fallback_us < CC3501E_POLLED_SETTLE_US) {
-		fallback_us = CC3501E_POLLED_SETTLE_US;
-	}
-	if (ctx->ready_pin != NULL) {
-		bool           level     = false;
-		const uint32_t budget_us = g_ready_line_proven ? CC3501E_READY_WAIT_US : 0u;
-		uint32_t       waited_us = 0u;
-		if (g_ready_line_proven) {
-			/* Edge, not level -- and NOT only in polled mode.  The slave drops
-			 * READY in its transfer-complete ISR and raises it again once the
-			 * NEXT phase is armed.  Sampling the level alone races that drop and
-			 * returns on the STALE high, so the host clocks into an un-armed
-			 * slave.  Bench 2026-08-24: the moment P2_6 became readable the
-			 * level-only gate returned with zero delay and the link fell to
-			 * 21-32 good soak PINGs; with this edge wait the same build runs
-			 * ping_fail=0 over 441 PINGs.
-			 *
-			 * A fixed spin count, not a CC3501E_READY_POLL_US (200 us) ladder:
-			 * a slave that re-armed before we looked must cost ~nothing rather
-			 * than the full CC3501E_READY_EDGE_US bound.  The count is WALL-TIME
-			 * sensitive -- it was retuned to 160 when the same build ran on the
-			 * 400 MHz M55-HP, and 8 is too few even at 160 MHz. */
-			for (uint32_t i = 0; i < CC3501E_READY_LOW_SPINS; ++i) {
-				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && !level) {
-					break;
-				}
-			}
+	if (ctx->ready_pin != NULL && g_ready_ignored) {
+		/* Latched, but the latch recovers: one zero-wait read, no bounded
+		 * spin.  A HIGH here proves the pin can still go HIGH, so the
+		 * latch was only ever a slow op that has since passed -- clear it
+		 * and let the next gate resume the real bounded wait. */
+		bool level = false;
+		if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+			g_ready_ignored        = false;
+			g_ready_timeout_streak = 0u;
 		}
+	} else if (ctx->ready_pin != NULL) {
+		bool     level     = false;
+		bool     saw_high  = false;
+		uint32_t waited_us = 0u;
 		for (;;) {
-			/* Opportunistic burst: catches an already-armed slave with no delay. */
-			for (uint32_t i = 0; i < 64u; ++i) {
-				if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
-					g_ready_line_proven = true;
-					return;
-				}
+			if (alp_gpio_read(ctx->ready_pin, &level) == ALP_OK && level) {
+				saw_high = true;
+				break;
 			}
-			if (waited_us >= budget_us) {
+			if (waited_us >= CC3501E_READY_WAIT_US) {
 				break;
 			}
 			alp_delay_us(CC3501E_READY_POLL_US);
 			waited_us += CC3501E_READY_POLL_US;
 		}
+		if (saw_high) {
+			g_ready_timeout_streak = 0u;
+		} else if (++g_ready_timeout_streak >= g_ready_stuck_low_threshold) {
+			g_ready_ignored        = true;
+			g_ready_line_was_stuck = true;
+			/* HYSTERESIS -- see g_ready_stuck_low_threshold's own comment:
+			 * double for next time (never reset), capped, so a flapping
+			 * line re-latches less and less often instead of re-paying this
+			 * same busy-wait indefinitely. */
+			if (g_ready_stuck_low_threshold <= CC3501E_READY_STUCK_LOW_STREAK_MAX / 2u) {
+				g_ready_stuck_low_threshold *= 2u;
+			} else {
+				g_ready_stuck_low_threshold = CC3501E_READY_STUCK_LOW_STREAK_MAX;
+			}
+		}
 	}
+	/* Unconditional -- see this function's header comment: READY only ever
+	 * ADDS to this wait, it never replaces it. */
 	alp_delay_us(fallback_us);
 }
 
@@ -1168,6 +1939,145 @@ static void cc3501e_reply_gate(const cc3501e_t *ctx, uint32_t fallback_us)
  * (examples/aen/aen-evk-demo/src/main.c's BLE_ENABLE failure probe) can
  * recognise the marker too, instead of misreporting it as wire data. */
 
+/* READY level for the link-failure ring only (issue #2136) -- separate from
+ * the READY GATE logic above, which this does not touch. NULL ready_pin
+ * (CS-less r1 board) or a read failure both report false -- the sample is
+ * simply "not HIGH", which is why a reader must also weigh
+ * CC3501E_LINK_LOG_READY_WAS_STUCK before drawing anything from it. */
+static bool cc3501e_link_log_ready_level(const cc3501e_t *ctx)
+{
+	bool level = false;
+
+	if (ctx->ready_pin != NULL) (void)alp_gpio_read(ctx->ready_pin, &level);
+	return level;
+}
+
+/* The link-failure ring's one write site (issue #2136) -- called only from
+ * cc3501e_request_locked()'s `out:` label below, only when !decoded. Oldest-
+ * first read order falls out of the plain wrap here: link_log_next always
+ * names the slot this call is ABOUT to overwrite, i.e. the oldest surviving
+ * entry once the ring is full -- see cc3501e_link_log_get() below for the
+ * matching read-side math. */
+static void cc3501e_link_log_record(cc3501e_t        *ctx,
+                                    alp_cc3501e_cmd_t cmd,
+                                    uint8_t           phase,
+                                    alp_status_t      status,
+                                    const uint8_t     hdr_bytes[ALP_CC3501E_HEADER_BYTES],
+                                    const uint8_t     reply_hdr[ALP_CC3501E_HEADER_BYTES],
+                                    bool              hdr_bytes_valid,
+                                    bool              reply_hdr_valid,
+                                    bool              ready_at_failure)
+{
+	cc3501e_link_log_entry_t *e = &ctx->link_log[ctx->link_log_next];
+
+	e->ts_ms                 = (uint32_t)alp_uptime_ms();
+	e->recover_attempt_count = ctx->recover_attempt_count;
+	e->cmd                   = (uint8_t)cmd;
+	e->phase                 = phase;
+	e->status                = (int8_t)status;
+	/* #2136 review (MAJOR): *_VALID reflects whether that phase's own
+	 * transceive actually succeeded -- the caller (cc3501e_request_locked())
+	 * already zeroed hdr_bytes/reply_hdr whenever it is false, so these bits
+	 * are what lets a reader tell "genuinely all-zero on the wire" (would
+	 * need the bit set) apart from "never captured" (bit unset). */
+	e->flags = (uint8_t)((ready_at_failure ? CC3501E_LINK_LOG_READY_AT_FAILURE : 0u) |
+	                     (g_ready_line_was_stuck ? CC3501E_LINK_LOG_READY_WAS_STUCK : 0u) |
+	                     (hdr_bytes_valid ? CC3501E_LINK_LOG_HDR_BYTES_VALID : 0u) |
+	                     (reply_hdr_valid ? CC3501E_LINK_LOG_REPLY_HDR_VALID : 0u));
+	memcpy(e->hdr_bytes, hdr_bytes, ALP_CC3501E_HEADER_BYTES);
+	memcpy(e->reply_hdr, reply_hdr, ALP_CC3501E_HEADER_BYTES);
+
+	ctx->link_log_next = (uint8_t)((ctx->link_log_next + 1u) % CC3501E_LINK_LOG_LEN);
+	if (ctx->link_log_count < CC3501E_LINK_LOG_LEN) ctx->link_log_count++;
+}
+
+/* #2136 review: takes ctx->request_lock -- the SAME lock the sole writer
+ * (cc3501e_link_log_record() above, called only from cc3501e_request_locked()'s
+ * `out:` label) already holds -- so a reader here can never observe a torn
+ * write. cc3501e_lock_acquire()/cc3501e_lock_release() are ordinary static
+ * helpers in this same TU; the ATTN-arming side effect they carry is
+ * identical to what any other lock holder already causes, not something new
+ * introduced by reading. On contention (ALP_ERR_BUSY after the usual
+ * CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS budget) this reports an
+ * empty ring rather than blocking indefinitely or risking a torn read --
+ * matches the const qualifier on @p ctx staying honest for callers even
+ * though the lock helpers need a non-const pointer internally. */
+uint8_t cc3501e_link_log_count(const cc3501e_t *ctx)
+{
+	if (ctx == NULL) return 0u;
+	cc3501e_t *mctx = (cc3501e_t *)ctx;
+	if (cc3501e_lock_acquire(mctx) != ALP_OK) return 0u;
+	const uint8_t n = ctx->link_log_count;
+	cc3501e_lock_release(mctx);
+	return n;
+}
+
+alp_status_t cc3501e_link_log_get(const cc3501e_t *ctx, uint8_t idx, cc3501e_link_log_entry_t *out)
+{
+	if (ctx == NULL || out == NULL) return ALP_ERR_INVAL;
+	cc3501e_t         *mctx = (cc3501e_t *)ctx;
+	const alp_status_t ls   = cc3501e_lock_acquire(mctx);
+	if (ls != ALP_OK) return ls;
+	if (idx >= ctx->link_log_count) {
+		cc3501e_lock_release(mctx);
+		return ALP_ERR_INVAL;
+	}
+	/* Oldest-first: before the ring has wrapped, link_log_next equals the
+	 * count and entries sit at their write-order index (0 = oldest)
+	 * already, so idx alone is the physical slot. Once wrapped, link_log_next
+	 * itself is the oldest slot (see cc3501e_link_log_record() above), so
+	 * idx walks forward from there instead. Either way this one expression
+	 * covers both: pre-wrap, link_log_next == link_log_count, so
+	 * (link_log_next - link_log_count) == 0 and it reduces to idx. */
+	const uint8_t oldest = (ctx->link_log_count < CC3501E_LINK_LOG_LEN) ? 0u : ctx->link_log_next;
+	*out                 = ctx->link_log[(uint8_t)((oldest + idx) % CC3501E_LINK_LOG_LEN)];
+	cc3501e_lock_release(mctx);
+	return ALP_OK;
+}
+
+/* #2136 review (minor): companion console code (src/zephyr/console/
+ * alp_console_companion.c) used to read ctx->link_log_fail_streak directly,
+ * which the struct's own "go through the accessors" comment forbids for its
+ * neighbours -- this accessor is the fix, same locking discipline as
+ * cc3501e_link_log_count() above. */
+uint32_t cc3501e_link_log_fail_streak(const cc3501e_t *ctx)
+{
+	if (ctx == NULL) return 0u;
+	cc3501e_t *mctx = (cc3501e_t *)ctx;
+	if (cc3501e_lock_acquire(mctx) != ALP_OK) return 0u;
+	const uint32_t streak = ctx->link_log_fail_streak;
+	cc3501e_lock_release(mctx);
+	return streak;
+}
+
+/* #2136 review (minor): ctx->link_log_recover_streak is stamped once, at the
+ * TOP of cc3501e_recover() (see that function), before its own confirming
+ * PING can reset the LIVE streak to 0 via the normal decoded-reply path --
+ * see cc3501e_link_log_fail_streak() above for that live value instead. */
+uint8_t cc3501e_link_log_recover_streak(const cc3501e_t *ctx)
+{
+	if (ctx == NULL) return 0u;
+	cc3501e_t *mctx = (cc3501e_t *)ctx;
+	if (cc3501e_lock_acquire(mctx) != ALP_OK) return 0u;
+	const uint8_t streak = ctx->link_log_recover_streak;
+	cc3501e_lock_release(mctx);
+	return streak;
+}
+
+/* #2136 review (MAJOR): ctx->link_log_probe_fail_count -- see
+ * cc3501e_link_check_and_recover()'s own comment on link_log_suppress for
+ * why the probe's own PING failures are counted here instead of written to
+ * the ring. */
+uint8_t cc3501e_link_log_probe_fail_count(const cc3501e_t *ctx)
+{
+	if (ctx == NULL) return 0u;
+	cc3501e_t *mctx = (cc3501e_t *)ctx;
+	if (cc3501e_lock_acquire(mctx) != ALP_OK) return 0u;
+	const uint8_t n = ctx->link_log_probe_fail_count;
+	cc3501e_lock_release(mctx);
+	return n;
+}
+
 /* The actual 4-phase exchange, WITHOUT taking ctx's transport lock -- the
  * caller must already hold it.  Split out of cc3501e_request() (issue
  * #1116 follow-up) so poll_by_repeat() below can bracket its OWN extra
@@ -1191,6 +2101,34 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * out: label knows whether rx_scratch[0] holds a real decoded status
 	 * byte or needs poisoning to ALP_CC3501E_RX_SCRATCH_NO_STATUS. */
 	bool decoded = false;
+	/* Link-failure ring evidence (issue #2136), gathered alongside the
+	 * exchange below and committed at `out:` -- ONLY when !decoded, so a
+	 * decoded reply (success or device-side error) never lands here, just
+	 * a genuine pre-decode transport/framing failure. Tracks which of the
+	 * four wire phases (or the verdict) this attempt reached; defaults to
+	 * the request-header phase since that is always attempted first. */
+	uint8_t link_phase = CC3501E_LINK_LOG_PHASE_REQUEST_HEADER;
+	/* v4.0 (#2035): the reply's own header bytes, filled once phase 3 (the
+	 * reply-header transceive, below) actually runs.  Declared HERE, above
+	 * every `goto out;` in this function -- C99 6.2.4p6 does not run a
+	 * declaration's initializer when a jump skips over it, so a copy at its
+	 * old declaration site (between the phase-1/2 bails and phase 3) left
+	 * this indeterminate on every early exit and cc3501e_link_log_record()
+	 * below copied that garbage into the ring (blocker, #2136 review). Zero-
+	 * initialised here instead: a bail before phase 3 (request-header
+	 * transceive, in-band armed check, request-payload transceive) never
+	 * touches it and the ring fill at `out:` reads it unconditionally,
+	 * exactly matching the "all-zero if this attempt never reached phase 3"
+	 * contract in <alp/chips/cc3501e/core.h>. */
+	uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES] = { 0 };
+	/* #2136 review (MAJOR): true only once the reply-header transceive below
+	 * actually returns ALP_OK -- distinguishes "reply_hdr holds real wire
+	 * bytes" from "reply_hdr is zero because this attempt never reached
+	 * phase 3, OR reached it but that transceive itself failed". Declared
+	 * here, beside reply_hdr, for the SAME reason: every goto out; above the
+	 * phase-3 transceive must leave it false, not skip its initializer. Fed
+	 * into cc3501e_link_log_record() as CC3501E_LINK_LOG_REPLY_HDR_VALID. */
+	bool reply_hdr_valid = false;
 
 	/*
      * 3-wire deterministic framing (this HW rev wires only SCLK/MOSI/MISO
@@ -1230,7 +2168,35 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	const uint16_t wire_tx_len =
 	    (uint16_t)(tx_len + (want_req_crc ? (size_t)ALP_CC3501E_CRC_BYTES : 0u));
 	encode_header(ctx->tx_scratch, cmd, flags, wire_tx_len);
+	/* READY sampled once here, before this exchange clocks anything, and
+	 * again at `out:` (issue #2136) -- so a ring entry can tell a slave
+	 * that was already down before this attempt started (frozen both
+	 * samples: crashed / not driving).
+	 *
+	 * #2145 interaction: this used to ALSO sample READY before the exchange,
+	 * on EVERY attempt. That cost a GPIO read per bridge request on every
+	 * board for evidence only a failing attempt ever uses, and it perturbed
+	 * the READY gate's own view of the line -- #2145's gate consumes the pin
+	 * in run-lengths, so an extra reader shifts what the gate sees. The
+	 * sample now happens once, in the failure path below, and is recorded as
+	 * the level AT FAILURE rather than a before/after pair. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	/* Ring evidence (#2136): the request-header phase's 4 MISO bytes -- a
+	 * later phase's transceive reuses rx_scratch, so this is the only
+	 * chance to capture them. #2136 review (MAJOR): captured ONLY when this
+	 * transceive actually returned ALP_OK -- on failure ctx->rx_scratch can
+	 * hold stale residue from a DIFFERENT, earlier exchange (this same
+	 * buffer's own poisoned-marker byte plus neighbours, see
+	 * ALP_CC3501E_RX_SCRATCH_NO_STATUS), not wire data from THIS attempt.
+	 * link_hdr_bytes_valid is declared right here (no goto above this point
+	 * in the function skips it) and feeds
+	 * CC3501E_LINK_LOG_HDR_BYTES_VALID below. */
+	uint8_t link_hdr_bytes[ALP_CC3501E_HEADER_BYTES] = { 0 };
+	bool    link_hdr_bytes_valid                     = false;
+	if (s == ALP_OK) {
+		memcpy(link_hdr_bytes, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+		link_hdr_bytes_valid = true;
+	}
 	if (s != ALP_OK) goto out;
 
 	/* IN-BAND ARMED CHECK -- the software stand-in for the READY line.
@@ -1255,10 +2221,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 	 * reaches that verdict one aligned 4-byte transfer earlier, without having
 	 * clocked payload into an unarmed slave.
 	 *
-	 * This matters because READY (CC35 GPIO17 -> Alif P2_6) is an OPEN CONNECTION
-	 * on the bench unit -- 0 edges in 20000 samples taken during live traffic --
-	 * so the fixed inter-phase settles are the only other interlock, and they
-	 * cannot be tightened (250 us desyncs the link outright). */
+	 * This matters because READY (CC35 GPIO17) is unusable on this bench
+	 * unit's Alif pad -- 0 edges in 20000 samples taken during live traffic
+	 * (a different pin-routing fact than cc3501e_reply_gate()'s own doc
+	 * comment's R2/e1m-evk case; see that comment for which one applies to a
+	 * given revision) -- so the fixed inter-phase settles are the only other
+	 * interlock, and they cannot be tightened (250 us desyncs the link
+	 * outright). */
 	if (ctx->rx_scratch[0] != ALP_CC3501E_SYNC_IDLE ||
 	    ctx->rx_scratch[1] != ALP_CC3501E_SYNC_IDLE ||
 	    ctx->rx_scratch[2] != ALP_CC3501E_SYNC_IDLE ||
@@ -1267,6 +2236,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		goto out;
 	}
 	if (wire_tx_len > 0) {
+		link_phase = CC3501E_LINK_LOG_PHASE_REQUEST_PAYLOAD; /* #2136 ring */
 		/* Inter-phase settle (CS-less lockstep): the slave arms the request-PAYLOAD
 		 * transfer in its SPI ISR only AFTER the header transfer completes.  Clocking
 		 * the payload back-to-back (no gap) races that re-arm -> the payload bytes are
@@ -1281,7 +2251,8 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		 * This was the ONE phase still on a bare fixed delay while phases 1, 3 and 4
 		 * consult READY.  It is also the phase that clocks the most bytes (a 260 B
 		 * OTA_WRITE), so it is the worst one to send blind at a slave that has not
-		 * re-armed.  Gate it like the others; the delay stays as the fallback. */
+		 * re-armed.  Gate it like the others; the delay stays as the fallback.
+		 */
 		cc3501e_reply_gate(ctx, CC3501E_PHASE_SETTLE_US);
 		const uint8_t *tx_ptr = tx_payload;
 		if (want_req_crc) {
@@ -1299,16 +2270,41 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = alp_spi_transceive(ctx->bus, tx_ptr, ctx->rx_scratch, wire_tx_len);
 		if (s != ALP_OK) goto out;
 	}
+	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_HEADER; /* #2136 ring */
 
 	/* Wait for the slave to dispatch + arm its reply before we read: the
-	 * READY gate tracks it via the host-IRQ line when wired, else a fixed gap. */
-	cc3501e_reply_gate(ctx, 200u);
+	 * READY gate tracks it via the host-IRQ line when wired, else a gap sized
+	 * to whichever side of THIS exchange is larger -- the reply the caller
+	 * actually asked for (cc3501e_expected_reply_bytes(), not rx_cap -- see
+	 * its comment) or the request payload the host just clocked
+	 * (wire_tx_len) -- via cc3501e_reply_header_gate_us() above.  Both sides
+	 * cost the bridge dispatch_frame time in the SAME ISR before it arms the
+	 * reply header (see that function's comment for the data). */
+	const uint32_t expected_reply = cc3501e_expected_reply_bytes(cmd, tx_payload, tx_len, rx_cap);
+	const uint32_t gate_bytes =
+	    (expected_reply > (uint32_t)wire_tx_len) ? expected_reply : (uint32_t)wire_tx_len;
+	cc3501e_reply_gate(ctx, cc3501e_reply_header_gate_us(gate_bytes));
 
 	/* Dummies for the read transactions (MOSI is don't-care on a read). */
 	memset(ctx->tx_scratch, 0xFF, sizeof(ctx->tx_scratch));
 
 	/* 3. Reply header -> learn the reply payload length. */
 	s = alp_spi_transceive(ctx->bus, ctx->tx_scratch, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	/* v4.0 (#2035): save the reply's own header bytes the moment this
+	 * transceive succeeds -- the payload-phase transceive below reuses
+	 * ctx->rx_scratch and overwrites them, and (#2136) a !hdr_ok bail below
+	 * still wants these 4 bytes as ring evidence -- so cc3501e_reply_verdict()
+	 * can still CRC the header + payload together on the success path (span
+	 * per <alp/protocol/cc3501e.h>: the 4 header bytes plus every payload
+	 * byte except the trailing 2 CRC bytes). #2136 review (MAJOR): ONLY on
+	 * ALP_OK -- on failure reply_hdr stays the zero-initialised value from
+	 * the top of this function and reply_hdr_valid stays false, instead of
+	 * this capturing whatever stale residue this transceive's own failure
+	 * left in ctx->rx_scratch and presenting it as wire data. */
+	if (s == ALP_OK) {
+		memcpy(reply_hdr, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+		reply_hdr_valid = true;
+	}
 	if (s != ALP_OK) goto out;
 	uint16_t resp_payload_len = decode_header_payload_len(ctx->rx_scratch);
 	/* Desync detection (no CS to recover on): a valid reply header ECHOES the
@@ -1327,13 +2323,7 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = ALP_ERR_IO;
 		goto out;
 	}
-	/* v4.0 (#2035): save the reply's own header bytes NOW -- the payload-phase
-	 * transceive below reuses ctx->rx_scratch and overwrites them -- so
-	 * cc3501e_reply_verdict() can still CRC the header + payload together
-	 * afterwards (span per <alp/protocol/cc3501e.h>: the 4 header bytes plus
-	 * every payload byte except the trailing 2 CRC bytes). */
-	uint8_t reply_hdr[ALP_CC3501E_HEADER_BYTES];
-	memcpy(reply_hdr, ctx->rx_scratch, ALP_CC3501E_HEADER_BYTES);
+	link_phase = CC3501E_LINK_LOG_PHASE_REPLY_PAYLOAD; /* #2136 ring */
 
 	/* Same READY gate before the reply PAYLOAD phase (the slave re-arms it in
 	 * its ISR only after the reply-header transfer completes). */
@@ -1356,6 +2346,13 @@ static alp_status_t cc3501e_request_locked(cc3501e_t        *ctx,
 		s = cc3501e_reply_verdict(
 		    cmd, ctx->fw_proto_major, reply_hdr, ctx->rx_scratch, resp_payload_len);
 		decoded = true;
+		/* #2136 review (minor): no `link_phase = ...VERDICT` assignment here
+		 * -- CC3501E_LINK_LOG_PHASE_VERDICT was deleted (it could never
+		 * actually appear in a ring entry: this line runs only once
+		 * `decoded` is about to become true, and the ring is written only
+		 * when !decoded, so the value link_phase already holds
+		 * (CC3501E_LINK_LOG_PHASE_REPLY_PAYLOAD, set above) is simply never
+		 * read past this point on the success path). */
 	}
 
 out:
@@ -1366,7 +2363,43 @@ out:
 	 * transceive, the !hdr_ok reject, the reply-payload transceive -- lands
 	 * here with decoded still false, so rx_scratch[0] gets overwritten
 	 * REGARDLESS of which one fired or what wire byte it left behind. */
-	if (!decoded) ctx->rx_scratch[0] = ALP_CC3501E_RX_SCRATCH_NO_STATUS;
+	if (!decoded) {
+		ctx->rx_scratch[0] = ALP_CC3501E_RX_SCRATCH_NO_STATUS;
+		/* #2136 review (MAJOR): a cc3501e_link_check_and_recover() probe
+		 * PING lands here too -- up to CC3501E_LINK_PROBE_TRIES (24) of
+		 * them, more than CC3501E_LINK_LOG_LEN (8) -- so writing every one
+		 * would guarantee-evict the wedging op's own ring entry, exactly
+		 * the evidence this ring exists to keep. link_log_suppress (set
+		 * only around that probe loop) routes these into
+		 * link_log_probe_fail_count instead: still countable, never
+		 * written to the ring, streak left untouched (no ring write
+		 * happened, so nothing to "reset on the next decoded reply"
+		 * either). */
+		if (ctx->link_log_suppress) {
+			if (ctx->link_log_probe_fail_count < 0xFFu) ctx->link_log_probe_fail_count++;
+			return s;
+		}
+		/* Issue #2136: the ring's one write site. reply_hdr / link_hdr_bytes
+		 * are whatever they were last set to above -- real wire bytes with
+		 * their VALID flag set if that phase's own transceive succeeded,
+		 * all-zero with it unset otherwise (#2136 review, MAJOR: never
+		 * stale scratch presented as if it were wire data). READY is sampled
+		 * HERE, once, on the failing path only -- see the note above the
+		 * request-header transceive for why it is no longer sampled on every
+		 * attempt. */
+		cc3501e_link_log_record(ctx,
+		                        cmd,
+		                        link_phase,
+		                        s,
+		                        link_hdr_bytes,
+		                        reply_hdr,
+		                        link_hdr_bytes_valid,
+		                        reply_hdr_valid,
+		                        cc3501e_link_log_ready_level(ctx));
+		ctx->link_log_fail_streak++;
+	} else {
+		ctx->link_log_fail_streak = 0u;
+	}
 	return s;
 }
 
@@ -1530,14 +2563,72 @@ alp_status_t cc3501e_stream_write(cc3501e_t *ctx, const uint8_t *data, size_t le
 #define CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS 0u
 #endif
 
-alp_status_t poll_by_repeat(cc3501e_t        *ctx,
-                            alp_cc3501e_cmd_t cmd,
-                            const uint8_t    *tx_payload,
-                            size_t            tx_len,
-                            uint8_t          *rx_buf,
-                            size_t            rx_cap,
-                            size_t           *rx_len,
-                            uint32_t          timeout_ms)
+/* Real body of poll_by_repeat() below, taking the retry seq as a PARAMETER
+ * instead of always allocating it from ctx->req_seq -- alp-sdk#2108.
+ * SOCK_RECV needs a seq from its OWN dedicated counter (ctx->sock_recv_seq,
+ * see that field's comment in <alp/chips/cc3501e/core.h>) so its seq space is
+ * never shared with any other opcode; every other caller keeps going through
+ * poll_by_repeat() below, which allocates from ctx->req_seq exactly as
+ * before. Not `static` so cc3501e_sockets.c can call it directly; declared
+ * in cc3501e_internal.h beside poll_by_repeat() itself. */
+/* Terminal-exit hook for poll_by_repeat_seq() below (issue #2126): every
+ * return point past the first-lock-attempt short-circuit (no request for
+ * THIS call has gone out yet there) funnels through here -- this is "the
+ * top-level request helper's final failure path": one call site, covering
+ * GET_MAC / scan / disconnect / RSSI / status / every socket, BLE,
+ * SPI1-passthrough and OTA-finish/abort/promote wrapper that goes through
+ * poll_by_repeat()/poll_by_repeat_seq(), each exactly ONCE per op no matter
+ * how many times the loop above retried internally -- the loop itself never
+ * calls this, only the return statements below do, after the loop has
+ * already decided it is done.
+ *
+ * @p no_status is `!any_status_decoded` -- poll_by_repeat_seq()'s OWN
+ * accumulator, OR'd (never reset) across EVERY attempt of the whole call
+ * against ctx->rx_scratch[0] == ALP_CC3501E_RX_SCRATCH_NO_STATUS (the
+ * poisoning guarantee cc3501e_request_locked() makes on every pre-decode
+ * exit -- see its own comment), updated in the SAME breath as
+ * terminal_reject/terminal_decoded_io a few lines up -- i.e. still under
+ * the transport lock, before cc3501e_lock_release(). Deliberately NOT
+ * re-derived from ctx in here: this function runs AFTER the lock has been
+ * released at every real call site below, and a second caller's request
+ * landing in that window would overwrite rx_scratch[0] before a fresh read
+ * here ever saw it -- exactly the race terminal_reject/terminal_decoded_io
+ * avoid by reading under the lock (see their own comment). A stale/torn
+ * peek from a concurrent request could misattribute a live link as dead (or
+ * vice versa); a snapshot taken atomically with the other two peeks cannot.
+ *
+ * #2126 review (was: MAJOR, false trigger on a busy bridge): `no_status`
+ * used to be a peek of only the MOST RECENT attempt, so a bridge that
+ * answered decoded BUSY/CONNECTING for most of the op's budget and only
+ * went silent on its LAST attempt (a worker still genuinely running, not a
+ * wedge) read as "no status" and wrongly triggered a warm reset. Tracking
+ * it ACROSS EVERY attempt instead means `true` now means no reply was EVER
+ * decoded for the WHOLE call, the "the device answered nothing, not even
+ * once" signal cc3501e_link_check_and_recover() probes on. A terminal
+ * reject or a genuinely decoded device-side failure (RESP_ERR_STATE /
+ * RADIO / PROTOCOL / INTERNAL) on ANY attempt leaves a REAL status byte in
+ * rx_scratch[0] at that point, so @p no_status is false for those and this
+ * is a silent no-op -- correct: a device that answered, even with an
+ * error, is not the wedge this exists to catch. */
+static alp_status_t cc3501e_poll_exit(cc3501e_t *ctx, alp_status_t s, bool no_status)
+{
+	if ((s == ALP_ERR_IO || s == ALP_ERR_TIMEOUT) && no_status) {
+		(void)cc3501e_link_check_and_recover(ctx);
+	}
+	return s;
+}
+
+alp_status_t poll_by_repeat_seq(cc3501e_t        *ctx,
+                                alp_cc3501e_cmd_t cmd,
+                                const uint8_t    *tx_payload,
+                                size_t            tx_len,
+                                uint8_t          *rx_buf,
+                                size_t            rx_cap,
+                                size_t           *rx_len,
+                                uint32_t          timeout_ms,
+                                uint8_t           req_seq,
+                                bool              check_epoch,
+                                uint16_t          handle)
 {
 	/* Same param checks cc3501e_request() runs, done ONCE here (cmd/
 	 * tx_payload/tx_len are fixed across every retry below, unlike the
@@ -1566,18 +2657,32 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 	const uint64_t deadline_ms = alp_uptime_ms() + (uint64_t)timeout_ms;
 	uint32_t       next_gap_ms = CC3501E_POLL_GAP_MIN_MS;
 	alp_status_t   s;
-	/* ONE seq for this whole logical command, allocated BEFORE the loop and
-	 * re-sent unchanged on every attempt below -- that constancy is what lets
-	 * the firmware answer a repeat from its latch instead of re-executing the
-	 * operation (proto v8, cc3501e-bridge-firmware#102).  Allocating inside
-	 * the loop would make every retry look like a new command, i.e. exactly
-	 * the bug this exists to fix.
-	 *
-	 * Skips 0, which is reserved for "no identity": the space is 1..31 and
-	 * this pre-increments, so a fresh ctx's first retryable command is seq 1
-	 * (same shape as sock_send_seq / spi1_seq). */
-	ctx->req_seq = (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
-	const uint8_t req_seq = ctx->req_seq;
+	/* #2126 review (was: MAJOR, false trigger on a busy bridge): true the
+	 * moment ANY attempt of THIS call decodes a real status byte --
+	 * ACCUMULATED (OR'd) across every retry, never reset back to false, and
+	 * peeked under the lock in the SAME breath as terminal_reject/
+	 * terminal_decoded_io below (see cc3501e_poll_exit()'s own comment for
+	 * why it must not re-peek after the lock is released). This replaces a
+	 * peek of only the MOST RECENT attempt: a bridge that answers decoded
+	 * BUSY/CONNECTING for most of the op's budget and only goes silent on
+	 * its LAST attempt (a worker still genuinely running, not a wedge) used
+	 * to read as "no status" and wrongly trigger a warm reset -- exactly
+	 * the false-positive a busy-but-healthy bridge must not pay for. Starts
+	 * false: the lock-timeout-on-later-attempt exit below can only read
+	 * this as true if an EARLIER iteration already decoded something for
+	 * real (first_lock_attempt is false by construction there). */
+	bool any_status_decoded = false;
+	/* req_seq is the caller's to allocate -- poll_by_repeat() below (this
+	 * file) and cc3501e_sock_recv() (cc3501e_sockets.c) are the two callers,
+	 * each from its own counter (ctx->req_seq / ctx->sock_recv_seq
+	 * respectively). ONE value for this whole logical command, re-sent
+	 * unchanged on every attempt of THIS function's own retry loop -- that
+	 * constancy is what lets the firmware answer a repeat from its latch
+	 * instead of re-executing the operation (proto v8,
+	 * cc3501e-bridge-firmware#102). This function never re-allocates it
+	 * internally; doing so per-iteration would make every retry look like a
+	 * new command, i.e. exactly the bug this exists to fix. */
+	bool first_lock_attempt = true;
 	for (;;) {
 		/* Sentinel + peek bracketed in the SAME lock hold as the request
 		 * itself (issue #1116 follow-up): both touch the shared
@@ -1588,7 +2693,54 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * request and the peek below, corrupting the disambiguation this
 		 * retry loop depends on. */
 		s = cc3501e_lock_acquire(ctx);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) {
+			/* alp-sdk#2035 review follow-up: a lock-acquire timeout means
+			 * something very different depending on WHICH attempt it hits.
+			 * On the FIRST attempt of this call, NO request for `cmd` has
+			 * gone out yet -- ALP_ERR_BUSY here is exact and unambiguous,
+			 * so return it immediately (this is also what makes a caller
+			 * like cc3501e_sock_send() safe to treat this ALP_ERR_BUSY as
+			 * "nothing was sent", no collection grace needed).  On a LATER
+			 * attempt, an EARLIER attempt already reached the bridge (this
+			 * loop only re-enters cc3501e_lock_acquire() after a genuinely
+			 * retryable BUSY/IO from THAT successful attempt) -- returning
+			 * ALP_ERR_BUSY here would misreport "nothing sent" for a
+			 * request that may already be in flight. Treat it exactly like
+			 * a retryable BUSY/IO from the device instead: bounded retry
+			 * within the SAME deadline, using the SAME backoff schedule
+			 * as the retry path below. */
+			if (first_lock_attempt) {
+				return s;
+			}
+			const uint64_t now_ms = alp_uptime_ms();
+			if (now_ms >= deadline_ms) {
+				return cc3501e_poll_exit(ctx, ALP_ERR_TIMEOUT, !any_status_decoded);
+			}
+			/* Safe cast: see the identical cast below. */
+			const uint32_t remaining_ms = (uint32_t)(deadline_ms - now_ms);
+			uint32_t       gap          = (remaining_ms < next_gap_ms) ? remaining_ms : next_gap_ms;
+			alp_delay_ms(gap);
+			if (next_gap_ms < CC3501E_POLL_GAP_MS) {
+				next_gap_ms = (next_gap_ms * 2u > CC3501E_POLL_GAP_MS) ? CC3501E_POLL_GAP_MS
+				                                                       : next_gap_ms * 2u;
+			}
+			continue;
+		}
+		first_lock_attempt = false;
+		/* #2126 review: per-attempt epoch re-check, still under the SAME
+		 * lock this attempt's request goes out under -- see this
+		 * function's own comment in cc3501e_internal.h for why a
+		 * one-shot check before the loop is not enough. A change here
+		 * can only mean a recovery committed while THIS call was
+		 * blocked acquiring the lock above (a concurrent cc3501e_
+		 * recover() holds the same ctx->request_lock for its whole
+		 * reset sequence), so the handle is now stale -- refuse without
+		 * sending, exactly as the pre-loop check in cc3501e_sockets.c
+		 * does for the first attempt. */
+		if (check_epoch && (uint8_t)(handle >> 8) != ctx->link_epoch) {
+			cc3501e_lock_release(ctx);
+			return ALP_ERR_NOT_READY;
+		}
 		/* Re-zero per attempt, not just once before the loop: an attempt
 		 * that copied out n bytes and then mapped to BUSY/IO would
 		 * otherwise leave that stale count visible to a caller who reads
@@ -1632,8 +2784,8 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		 * again" and retries every one of them to the full budget.
 		 *
 		 * That is wrong on its own merits, independent of any single code:
-		 * this loop pre-allocates ONE req_seq before the loop and resends it
-		 * unchanged on every attempt (see the comment above the loop) so the
+		 * this loop is handed ONE req_seq value that stays constant across
+		 * the whole call (see the comment above the loop) so the
 		 * firmware's per-seq retry latch (proto v8, cc3501e-bridge-firmware
 		 * #102) can answer a repeat from its latch WITHOUT RE-EXECUTING the
 		 * op -- so a repeat of any one of these three can only ever replay
@@ -1677,9 +2829,19 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 		    (s == ALP_ERR_IO) && (ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_RADIO ||
 		                          ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_PROTOCOL ||
 		                          ctx->rx_scratch[0] == ALP_CC3501E_RESP_ERR_INTERNAL);
+		/* #2126 review: same "read here, still under the lock" rule as the
+		 * two peeks above -- see cc3501e_poll_exit()'s comment. Sticky OR,
+		 * never overwritten back to false by a LATER attempt that happens
+		 * to come back silent -- see any_status_decoded's own comment. */
+		if (ctx->rx_scratch[0] != ALP_CC3501E_RX_SCRATCH_NO_STATUS) {
+			any_status_decoded = true;
+		}
 		cc3501e_lock_release(ctx);
 		if (terminal_reject || terminal_decoded_io) {
-			return s; /* terminal reject / decoded device-side failure -- do not retry */
+			return cc3501e_poll_exit(
+			    ctx,
+			    s,
+			    !any_status_decoded); /* terminal reject / decoded device-side failure -- do not retry */
 		}
 		if (s != ALP_ERR_BUSY && s != ALP_ERR_IO) {
 			/* Guard delay applies to SUCCESS only, not to every
@@ -1691,11 +2853,12 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 			if (s == ALP_OK && CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS > 0u) {
 				alp_delay_ms(CONFIG_ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS);
 			}
-			return s; /* OK or a non-retryable error -- done. */
+			return cc3501e_poll_exit(
+			    ctx, s, !any_status_decoded); /* OK or a non-retryable error -- done. */
 		}
 		const uint64_t now_ms = alp_uptime_ms();
 		if (now_ms >= deadline_ms) {
-			return ALP_ERR_TIMEOUT;
+			return cc3501e_poll_exit(ctx, ALP_ERR_TIMEOUT, !any_status_decoded);
 		}
 		/* Safe cast: now_ms < deadline_ms was just checked, and deadline_ms
 		 * == entry-time + timeout_ms, so the difference cannot exceed
@@ -1710,4 +2873,70 @@ alp_status_t poll_by_repeat(cc3501e_t        *ctx,
 			    (next_gap_ms * 2u > CC3501E_POLL_GAP_MS) ? CC3501E_POLL_GAP_MS : next_gap_ms * 2u;
 		}
 	}
+}
+
+/* Public wrapper: allocates the retry seq from the SHARED ctx->req_seq
+ * counter, exactly as this function always has, then delegates to
+ * poll_by_repeat_seq() above. Every caller except cc3501e_sock_recv()
+ * (alp-sdk#2108) goes through this one.
+ *
+ * Deliberately NO ctx==NULL/!initialised check of its own (alp-sdk#2108
+ * review): poll_by_repeat_seq() below already runs that exact check, and
+ * runs it FIRST -- *rx_len is zeroed before it, matching this function's
+ * body before it split in two. A second, earlier check right here would
+ * return ALP_ERR_NOT_READY without ever reaching that zeroing, silently
+ * changing this error path's behaviour (a caller's *rx_len would keep
+ * whatever it held on entry instead of reading 0). Guard ONLY the
+ * ctx->req_seq access THIS wrapper itself needs to do before the call: an
+ * invalid ctx falls through with req_seq left at 0, a value
+ * poll_by_repeat_seq() never reads because its own check returns before
+ * touching it. */
+alp_status_t poll_by_repeat(cc3501e_t        *ctx,
+                            alp_cc3501e_cmd_t cmd,
+                            const uint8_t    *tx_payload,
+                            size_t            tx_len,
+                            uint8_t          *rx_buf,
+                            size_t            rx_cap,
+                            size_t           *rx_len,
+                            uint32_t          timeout_ms)
+{
+	uint8_t req_seq = 0u;
+	if (ctx != NULL && ctx->initialised) {
+		/* Skips 0, which is reserved for "no identity": the space is 1..31
+		 * and this pre-increments, so a fresh ctx's first retryable command
+		 * is seq 1 -- the same 5-bit, skip-0 shape as its sibling
+		 * ctx->sock_recv_seq (NOT sock_send_seq / spi1_seq, which are full
+		 * 8-bit counters that wrap through 0; see req_seq's own comment in
+		 * <alp/chips/cc3501e/core.h> for why this field's space is narrower). */
+		ctx->req_seq =
+		    (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+		req_seq = ctx->req_seq;
+	}
+	return poll_by_repeat_seq(
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq, false, 0u);
+}
+
+/* See cc3501e_internal.h. Identical body to poll_by_repeat() above except
+ * for the trailing check_epoch/handle pair -- kept as a separate function
+ * (not an extra param on poll_by_repeat() itself) so the other 50+
+ * non-socket call sites of poll_by_repeat() stay untouched by the #2126
+ * review's per-retry epoch check. */
+alp_status_t poll_by_repeat_handle(cc3501e_t        *ctx,
+                                   alp_cc3501e_cmd_t cmd,
+                                   const uint8_t    *tx_payload,
+                                   size_t            tx_len,
+                                   uint8_t          *rx_buf,
+                                   size_t            rx_cap,
+                                   size_t           *rx_len,
+                                   uint32_t          timeout_ms,
+                                   uint16_t          handle)
+{
+	uint8_t req_seq = 0u;
+	if (ctx != NULL && ctx->initialised) {
+		ctx->req_seq =
+		    (ctx->req_seq >= ALP_CC3501E_REQ_SEQ_LAST) ? 1u : (uint8_t)(ctx->req_seq + 1u);
+		req_seq = ctx->req_seq;
+	}
+	return poll_by_repeat_seq(
+	    ctx, cmd, tx_payload, tx_len, rx_buf, rx_cap, rx_len, timeout_ms, req_seq, true, handle);
 }

@@ -23,3 +23,9 @@ target_sources(app PRIVATE
 target_include_directories(app PRIVATE
     ${REPO_ROOT}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../cc3501e_common)
+
+# This suite compiles chips/cc3501e/*.c directly, outside the SDK's Kconfig,
+# so CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER is undefined here and IS_ENABLED()
+# would read it as OFF -- silently testing a configuration no real build
+# ships (issue #2126 review). Force the shipping default ON.
+target_compile_definitions(app PRIVATE CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=1)

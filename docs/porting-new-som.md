@@ -447,6 +447,27 @@ already-authored customer `memory_map:` on schema upgrade —
 `scripts/validate_metadata.py` enforces its presence semantically
 instead, and v2 promotes it to `required`.
 
+Three independent consumers enforce this (`scripts/validate_metadata.py`
+at author time is the fourth, upstream of all three): `carveout.py`'s
+`resolve_carve_outs()` refuses an IPC entry from landing on a region with
+the wrong (or absent-on-Alif) authority; `partition.py`'s
+`resolve_storage_partitions()` refuses a `storage[].flash_device:`
+naming one directly, the same way, EXCEPT for `composite`: it is the one
+consumer that accepts a `composite` whole-device alias as an explicit
+pin, and only once every row it contains independently resolves a
+concrete span, declares its own `write_authority`, and together they
+contiguously tile the alias with no gap and no overlap (alp-sdk#2088) —
+a row this can't account for refuses the whole alias rather than
+resolve permissively around the gap; `check_atoc_reservation.py`
+refuses a `customer_runtime` row from owning the SE-anchored top of the
+on-die MRAM window in CI (alp-sdk#2086). All three read the SAME six
+values and the SAME absent-means-unresolved rule described above — for
+five of the six values, one enforcer's refusal is every enforcer's
+refusal. `composite` is the deliberate exception: `carveout.py` refuses
+it outright, never descending into it, while `partition.py`'s
+`flash_device:` path is the only door it can pass through, and only
+after the verification above.
+
 ---
 
 ## 6. Step 3 — Update the schema `sku` pattern

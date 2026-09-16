@@ -80,11 +80,11 @@ bench_flowd_atoc_guard "$REPLACE_ATOC" "$ATOC_UNQUERYABLE" flash-jlink ALP-HE ||
 
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
-# See ram-run.sh for why the selector is conditional on JLINK_SN.
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns.
+JLINK_ARGS=(bench_jlink_run)
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"

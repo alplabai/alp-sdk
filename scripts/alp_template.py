@@ -843,7 +843,7 @@ def _derive_pin_doc_renames(
     entry's `doc:` field to the TARGET route's own `doc:` (issue #876
     review MAJOR 2) -- a renamed pin's `doc:` otherwise keeps
     describing the SOURCE board's physical pad/electricals (e.g.
-    e1m-evk's encoder-switch doc names a PEC12R-4222F-S0024 debounce
+    e1m-evk's encoder-switch doc names a PEC11R-4215K-S0024 debounce
     network; e1m-x-evk's own doc for the same role describes a
     different part with RC debounce), which is actively wrong prose
     once the pad itself has changed -- the same "copy the target's

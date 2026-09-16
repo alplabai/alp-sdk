@@ -58,6 +58,8 @@ holds on E4 unchanged.
 ```
 # Non-destructive (ITCM-linked, RAM-run):
 scripts/bench/aen/build.sh   $PWD/examples/aen/aen-tz-secure-log-append
+export BENCH_PLACE=e1m-aen-evk-01                   # your held labgrid-client place
+export AEN_JLINK_RUN=<board-farm>/bin/jlink-run.sh
 scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-tz-secure-log-append"
 # then read 0x02001100 over SWD (table above)
 

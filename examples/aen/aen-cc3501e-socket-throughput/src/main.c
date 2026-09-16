@@ -190,23 +190,30 @@
  * number: the L2 association wait is `osi_SyncObjWait(&wifi_event_sync,
  * 30u * OSI_WAIT_FOR_SECOND)` (30 s -- that comment records WPA2 associating
  * ~15 s in and WPA3-SAE, with its extra SAE commit/confirm exchange + PMF,
- * running slower still, which is why the wait was widened from 15 s to 30 s
- * after a bench-seen WPA3 timeout), and DHCP afterward is bounded by
- * `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US` = 50 * 200 ms = 10 s.
- * 30 s + 10 s = 40 s is the firmware's own worst case for one connect; a
- * caller budget below that races a healthy association even with perfectly
- * accurate host-side accounting. */
-#define SOCKTP_CONNECT_TIMEOUT_MS 55000u
+ * running slower still, which is why the wait covers up to 30 s), and DHCP
+ * afterward is bounded by `CC3501E_STA_DHCP_TRIES * CC3501E_STA_DHCP_POLL_US`
+ * = 150 * 200 ms = 30 s.
+ *
+ * There is a THIRD term a naive derivation misses: this image does not call
+ * cc3501e_hw_wifi_boot_start(), so a connect issued as the first radio op of
+ * a boot carries Wlan_Start, a Wlan_Set and a 10 s Wlan_RoleUp INSIDE the
+ * connect body, before the association wait even begins.
+ *
+ * 10 s + 30 s + 30 s = 70 s is the firmware's own worst case for one connect,
+ * and the firmware documents 75000 ms as the caller budget that clears it
+ * (alp-sdk#2079); a caller budget below that races a healthy association even
+ * with perfectly accurate host-side accounting. */
+#define SOCKTP_CONNECT_TIMEOUT_MS 75000u
 #define SOCKTP_SOCK_TIMEOUT_MS    5000u
 #define SOCKTP_RECV_TIMEOUT_MS    3000u
 
 /* How long to wait, after cc3501e_wifi_connect() itself reports a non-OK
  * status, before reading the independent WIFI_STATUS latch for the real
- * radio verdict -- see the call site below. Long enough to cover the
- * firmware's own worst-case connect budgets (30 s L2 association + 10 s
- * DHCP, see SOCKTP_CONNECT_TIMEOUT_MS's derivation above) even when the
- * failure came from the HOST giving up early, not the radio. */
-#define SOCKTP_VERDICT_WAIT_MS 45000u
+ * radio verdict -- see the call site below. Matches SOCKTP_CONNECT_TIMEOUT_MS
+ * (the bridge firmware's own worst-case connect budget above, 70 s) so a
+ * HOST-side accounting timeout gets the same window a real radio failure
+ * would need to resolve. */
+#define SOCKTP_VERDICT_WAIT_MS SOCKTP_CONNECT_TIMEOUT_MS
 
 /*
  * Wi-Fi STA credentials for the CONNECT step. DELIBERATELY EMPTY by
@@ -306,13 +313,19 @@ static const char SOCKTP_HTTP_REQUEST[] =
 #define SOCKTP_SESSION_TIMEOUT_MS (60u * 1000u)
 
 /* How many consecutive zero-length OK results this app treats as "the
- * transfer is over". cc3501e_sock_recv()'s own doc is explicit that a
- * single zero-length OK is ambiguous -- "no data was available within the
- * firmware's receive window, or the peer closed the connection -- the
- * caller polls again to distinguish". Requiring a short RUN of them,
- * rather than trusting the first one, is the same reasoning
+ * transfer is over". Defends against v0.8.0 -- what `prebuilt/` actually
+ * publishes today -- where a single zero-length OK from cc3501e_sock_recv()
+ * is ambiguous -- "no data was available within the firmware's receive
+ * window, or the peer closed the connection" -- so this app cannot trust
+ * the first one. Requiring a short RUN instead is the same reasoning
  * aen-cc3501e-command-sweep's wedge tracker uses for FAIL verdicts: one
- * empty poll mid-stream is normal jitter, three in a row is a pattern. */
+ * empty poll mid-stream is normal jitter, three in a row is a pattern.
+ * Bench-validated 5 of 5 against a build carrying cc3501e-bridge-firmware
+ * #140 (merged to `main`; cut as v0.9.0 but not yet released or
+ * bench-verified), which makes EOF sticky on the worker path and removes
+ * the ambiguity this streak exists to paper over -- KEEP this workaround
+ * until a released blob carries #140, since it is correct against both
+ * firmware generations, not just v0.8.0. */
 #define SOCKTP_ZERO_STREAK_DONE 3u
 
 /*
@@ -714,7 +727,7 @@ int main(void)
 		 * the association actually succeeded and only the host's accounting
 		 * was wrong; CONN_FAILED/FAIL_REJECTED (or FAIL_KICK) means a real
 		 * credentials/security-type/role failure; CONN_FAILED/FAIL_TIMEOUT
-		 * means the firmware's own 30 s L2 wait or 10 s DHCP budget expired
+		 * means the firmware's own 30 s L2 wait or 30 s DHCP budget expired
 		 * for real. */
 		printk("STEP 3: WIFI_CONNECT -> %d (host accounting gave up, or the radio genuinely "
 		       "failed -- can't tell yet). Waiting %u ms for the firmware's own connect "

@@ -329,4 +329,33 @@ static inline uint8_t sdhc_dwc_ms_to_tout(uint32_t ms)
 	return (bit_pos > DWC_SDHC_MAX_TIMEOUT) ? DWC_SDHC_MAX_TIMEOUT : bit_pos;
 }
 
+/*
+ * ============================================================
+ * R2 Response Realignment (CID / CSD, 136-bit response)
+ * ============================================================
+ * The DWC_mshc RESPxx registers hold a 136-bit R2 response without its CRC
+ * byte, right-justified across the 4 words with response[0] as the LEAST
+ * significant word (RESP01). Shifting the 120-bit value left by 8 bits to
+ * put every field where the SD stack (zephyr/subsys/sd/sd_ops.c) expects it
+ * means each word takes its new low byte from the top byte of the next
+ * LOWER word -- so this must walk the array downward (index 3 to 0) and
+ * read response[i - 1] before response[i] is itself shifted. response[0]'s
+ * new low byte is zero-filled: there is no word below index 0 to carry
+ * from. Getting the carry direction backwards (pulling from response[i + 1]
+ * instead) truncates CSD C_SIZE's top bits and pollutes response[0]'s low
+ * byte with data that does not belong there (#2131).
+ *
+ * Dependency-free by design (pure array shift) so it is host-testable; see
+ * tests/unit/sdhc_dwc_r2_realign.
+ */
+static inline void sdhc_dwc_realign_r2_response(uint32_t response[4])
+{
+	for (int i = 3; i >= 0; i--) {
+		response[i] <<= 8;
+		if (i != 0) {
+			response[i] |= response[i - 1] >> 24;
+		}
+	}
+}
+
 #endif /* ZEPHYR_DRIVERS_SDHC_SDHC_DWC_H_ */

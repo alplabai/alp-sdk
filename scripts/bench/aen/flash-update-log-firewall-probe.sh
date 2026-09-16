@@ -55,9 +55,10 @@ grep -q '^CONFIG_ALP_SDK_UPDATE_LOG_AEN_M55_FIREWALL_PROBE=y' "$HE_BD/zephyr/.co
 
 bench_require_setools || exit $?
 SET="$SETOOLS_DIR"
-JLINK="$(bench_jlink_exe)" || exit $?
-JLINK_ARGS=("$JLINK")
-[ -n "${JLINK_SN:-}" ] && JLINK_ARGS+=(-SelectEmuBySN "$JLINK_SN")
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns.
+JLINK_ARGS=(bench_jlink_run)
 
 ULOG_OFFSET=$(awk '
 	/alp_ulog_partition:/ { in_node = 1 }

@@ -45,7 +45,6 @@
     "upstream": { "type": "object" },
     "dependencies": { "type": "array" },
     "capacity": { "type": "object" },
-    "target_expected_idcode": { "type": "string" },
     "pwm_routing": { "type": "object" },
     "pcie": { "type": "object" },
     "adc": { "type": "object" },

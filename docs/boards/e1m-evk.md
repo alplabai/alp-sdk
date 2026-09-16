@@ -46,9 +46,21 @@ E1M-X SoMs (`E1M-V2N101/102`, `E1M-V2M101/102`) target the separate
   `USB2_VBUS` and CC-pin straps).  Don't drive multiple inputs
   simultaneously during early bring-up — the power-OR / eFuse
   topology hasn't been verified on every assembled revision.
-- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (selectable
-  +1V8 / +V_ANA / +3V3 / +5V via header **P17** for the user
-  interface and Arduino expansion).
+- **Internal rails:** `+5V`, `+3V3`, `+1V8`, `+VIO` (the plugged-in
+  SoM's `VIO_OUT`, NOT carrier-selectable -- measures 1.8 V with the
+  E1M-AEN SoM), `+V_ANA` (jumper-selectable from `+5V` / `+3V3` /
+  `+1V8` via header **P17**; feeds only DAC header J15 and the
+  OPA189 DAC buffers U23/U24 -- NOT the Arduino/mikroBUS expansion),
+  `+VARD` (same jumper shape on header **P9**) -- not only the
+  Arduino/mikroBUS expansion: it feeds the LSF0108 level shifters'
+  `VREF_B` side through R176/R177/R178 (`VREF_A` on those shifters is
+  `+VIO`), and directly supplies Arduino UART header J17 pin 1,
+  encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/
+  `CK_SDA` pull-ups R146/R147, U16/U17's `REFB` through R173/R174, and
+  a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS
+  header P7 pin 2, P3 pin 3, and U17 pin B1).
+  Setting P9 to `+5V` puts 5 V on J17, J18, `CK_RST`, and those I2C
+  pull-ups too, not just the Arduino/mikroBUS shifters.
 - **SuperCap rail:** present on `+SCAP`; useful for hold-up during
   brown-outs; `<alp/iot.h>`-level state-persistence policies should
   consult this rail when shipping examples that survive power loss.
@@ -123,11 +135,12 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
 | Item             | Description                                                             |
 |------------------|-------------------------------------------------------------------------|
-| Rotary encoder   | PEC12R-4222F-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
+| Rotary encoder   | PEC11R-4215K-S0024 — quadrature on `ENC0_X`/`ENC0_Y` plus an integrated push switch. |
 | RGB LED          | 150505M173300, transistor-driven, on a `+5V` rail.                      |
 | DAC outputs      | `DAC0_OUT` and `DAC1_OUT` buffered through OPA189 op-amps to header J15.|
-| Comparator       | `CMP0`, `CMP1` exposed on header J18.                                   |
-| IO-voltage select| Header **P17**: jumper between `+1V8`, `+V_ANA`, `+3V3`, `+5V`.         |
+| Comparator       | `CMP0`/`CMP1` are not broken out on a dedicated header.                 |
+| `+V_ANA` select  | Header **P17**: jumper connects one of `+5V`/`+3V3`/`+1V8` (pins 1/3/5) to `+V_ANA` (pins 2/4/6); feeds only DAC header J15 and the OPA189 DAC buffers -- does not reach the Arduino/mikroBUS expansion or `+VIO`, which comes from the SoM's `VIO_OUT`. |
+| `+VARD` select   | Header **P9**, same shape as P17 (pins 1/3/5 = `+5V`/`+3V3`/`+1V8`, pins 2/4/6 = `+VARD`). NOT only the Arduino/mikroBUS expansion rail: sets `VREF_B` on the LSF0108 level shifters U18/U22/U40 (through R176/R177/R178, `VREF_A` = `+VIO`), and directly supplies Arduino UART header J17 pin 1, encoder header J18 pin 1, header P3 pin 2, the `CK_SCL`/`CK_SDA` pull-ups R146/R147 and U16/U17 `REFB` (through R173/R174), and a pull-up on `CK_RST` through R175 (`CK_RST` reaches mikroBUS header P7 pin 2, P3 pin 3, and U17 pin B1). Setting P9 to `+5V` puts 5 V on all of those, not just the shifters. |
 
 ## Networking & I/O at a glance
 
@@ -136,8 +149,16 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   jack stays dark.  Each jack carries the standard activity LEDs
   (`ETH*_LED0`, `ETH*_LED1`).
 - **CAN bus:** TCAN1044A transceiver, jumpers JP1–JP4, header J9.
-- **microSD:** standard slot multiplexed via 74LVC157 with the M.2
-  Key E SDIO interface — software must pick which one is active.
+- **microSD:** standard slot multiplexed via a 2:1 mux (U38/U39) with
+  the M.2 Key E SDIO interface. As-built, U38/U39 are stock 74LVC157
+  and can NEVER pass SD through at any `VCC` -- they contend with the
+  SoC's own host controller in BOTH `/E` states (same directional
+  failure as the I2S mux, U46); a 3257-type bus-switch swap is
+  required (see `include/alp/boards/alp_e1m_evk.h`). The select is
+  hardware-strapped on r2 (not software-drivable — the default is the
+  microSD slot); r1 can drive it from firmware over the CC3501E GPIO
+  proxy, but doing so while header P18's jumper is fitted is a
+  hardware hazard.
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails
@@ -163,13 +184,31 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   > matrix wiring.
 - **Audio:** two PDM microphones (MP34DT05TR-A) and two TAS2563
   Class-D amps (U27 + U28; each drives a mono speaker) with JST
-  speaker headers; I²S source selectable via 74LVC157.  The shared
-  `I²S0` link carries both channels in a stereo frame -- U27 picks
-  the left slot, U28 picks the right slot via TAS2563 time-slot
-  configuration.  The amps' diagnostic feedback returns on
+  speaker headers, reachable over `I²S0` only through a mux (U46).
+  As originally built, U46 is a `74LVC157ABQ,115` -- its `VCC` range
+  (1.2-3.6 V) makes `+VIO` at 1.8 V IN SPEC, but the part is a
+  ONE-WAY mux whose `Y` outputs drive the SoC side, so it can NEVER
+  pass SoC-to-amp I2S at any `VCC`; moving its `VCC` to `+3V3` alone
+  does NOT make it work, and re-enabling `i2s3` on a stock board puts
+  the SoC's own I2S3 TX in contention with U46's driven outputs.  A
+  working U46 needs BOTH a 3257-type bus-switch swap AND `VCC` on
+  `+3V3` -- on `e1m-aen-evk-03` (2026-09-15), a fitted 3257-type
+  part's `VCC` was moved to `+3V3` between a silent run and an
+  audible run; not established as the only difference between the
+  two -- or a switch rated for 1.8 V `VCC` (untested).  Only
+  amp playback audibility was checked this way; PDM mic capture and
+  M.2 E-key I2S are unverified, disabling the mux or selecting M.2
+  (`/E`/`S` HIGH) may not switch reliably at `+3V3`, and the same run
+  showed an open TDM clock-error latch during playback plus an open
+  amp auto-shutdown-after-stop issue (#2146) -- see
+  `include/alp/boards/alp_e1m_evk.h`'s I2S mux block for the full
+  finding.  The shared `I²S0` link is designed to carry both channels
+  in a stereo frame -- U27 the left slot, U28 the right, via TAS2563
+  time-slot configuration.  The amps' diagnostic feedback returns on
   `I²S0_SDI`.
 - **Expansion:** Arduino headers + mikroBUS click headers, level-shifted
-  through LSF0108 / LSF0102 to the IO-voltage select rail.
+  through LSF0108 / LSF0102 to `+VARD`, the header-**P9**-selectable
+  expansion IO rail (NOT `+V_ANA`/P17, which only feeds the DAC path).
 - **PCIe / M.2:** Key M and Key E with PI3DBS12212A lane mux,
   SY75602 refclk buffer, **TMUX121NKGR** passive I²C mux
   (pin-controlled, no I²C address), and a second TCAL9538 (`0x71`)
@@ -180,7 +219,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`).
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
-  the PEC12R-4222F-S0024 quadrature signals.  The push-switch
+  the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
 
 ## Bring-up checklist (firmware perspective)

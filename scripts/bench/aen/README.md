@@ -33,9 +33,12 @@ error out if `SETOOLS_DIR` is unset. Flow C (`ram-run.sh`), `reread.sh`, and
 #    layer; override any host-specific value by exporting it first.
 export ZEPHYR_SDK_INSTALL_DIR=<your-zephyr-sdk>     # for the arm-zephyr-eabi tools
 export SETOOLS_DIR=<...>/app-release-exec-linux     # Flow A/D only (license-gated)
-export SE_UART=<your-serial-device>                 # Flow A; also used opportunistically by Flow D's
-                                                    # resident-ATOC guard when present (#2027) -- omit it
-                                                    # entirely on a bench slot with no SE-UART wired
+export LG_COORDINATOR=<host>:<port>                 # your labgrid coordinator; no default
+export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE NAME (resolved via labgrid) --
+                                                     # resolves SE_UART, the console, and (alp-sdk#2064) which
+                                                     # J-Link probe every helper below is allowed to open --
+                                                     # also used opportunistically by Flow D's resident-ATOC
+                                                     # guard once SE_UART resolves (#2027)
 
 # 2. Build an app for the AEN801 M55-HE target.
 scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
@@ -45,6 +48,87 @@ scripts/bench/aen/flash-jlink.sh "$BENCH_ROOT/build/aen-gpio-bench"   # Flow D
 scripts/bench/aen/flash-run.sh   "$BENCH_ROOT/build/aen-gpio-bench"   # Flow A
 scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 ```
+
+## `LG_PLACE` — the bench board is addressed by PLACE NAME, not a raw device path (alp-sdk#2032)
+
+**The maintainer's hard rule: never touch a bench connection by hand — every
+connection goes through labgrid, addressed by PLACE NAME, never a raw device
+path.** `export LG_PLACE=<your-bench-place>` before sourcing `bench-env.sh`
+(directly, or via any helper that sources it) and `SE_UART` plus the console
+and SWD-probe addresses are all resolved LIVE from `labgrid-client -p
+"$LG_PLACE" show` — never from a hand-maintained device-path table. This is
+not optional hygiene: the 2026-09-07 incident happened because a stale table
+had the SE-UART and app-console device paths for one board **swapped**, and
+pointed a J-Link selector at a **different** board's probe entirely (multiple
+probes on this bench share one cloned OEM serial -- the exact count has
+drifted before and is not repeated here -- so a serial alone cannot tell
+them apart).
+
+```sh
+export LG_COORDINATOR=<host>:<port>    # your labgrid coordinator; no default
+export LG_PLACE=<your-bench-place>     # you must already hold this place's reservation
+source scripts/bench/aen/bench-env.sh
+echo "$SE_UART $LG_CONSOLE_HOST:$LG_CONSOLE_PORT $LG_SWD_PATH"
+```
+
+`bench-env.sh` also verifies the reservation is actually held **by you**
+(`show`'s `acquired:` must equal `"$(hostname)/$(whoami)"`, alp-sdk#2064 —
+not merely non-empty: a place another operator holds must refuse exactly
+like a lapsed one, never resolve values for a board this invocation does not
+hold) before resolving anything — a lapsed, never-taken, or
+someone-else's-held reservation aborts loudly (non-zero from the `source`),
+it never silently resolves whatever labgrid last remembered. There is **no
+default place**: leaving `LG_PLACE` unset never falls back to guessing a
+board.
+
+### The raw device-path variables are an escape hatch, not the normal path
+
+`SE_UART` can still be exported directly for genuinely off-labgrid work —
+`erase-storage.sh`'s BENCH-VERIFIED run documents exactly that case. Doing
+so **without** `LG_PLACE` set now prints an explicit warning
+naming the hazard (stale paths, wrong board, `/dev/ttyUSBn` numbering is
+enumeration-order-assigned and not stable across a reboot/replug) — it is
+still honoured, just no longer silent. `LG_PLACE` wins whenever both are set:
+a raw `SE_UART` exported alongside it is ignored, with a note saying so.
+
+### J-Link probe selection is routed through labgrid (alp-sdk#2064)
+
+**The hazard, plainly: `-SelectEmuBySN` alone CANNOT tell this bench's J-Link
+probes apart — multiple of them answer the same cloned OEM serial
+(`000603000869`; the exact count has drifted before and is not repeated
+here). Selecting by serial alone can silently attach to a
+DIFFERENT board than the one you hold the labgrid reservation for**, with no
+error — the SW-DP IDR safety gate (`bench_jlink_assert_aen_dpidr`, below)
+catches only a wrong-CHIP attach (an AEN vs a GD32 vs a V2N CM33), never a
+wrong-BOARD attach among the three physically-identical AEN places.
+
+Every `JLinkExe` invocation in this directory therefore goes through
+`bench_jlink_run()` (`bench-env.sh`), the in-tree port of
+`board-farm/bin/jlink-run.sh`'s isolation mechanism: it resolves the target
+probe's real USB path from `LG_SWD_PATH` (labgrid-resolved, see
+`bench_labgrid_resolve` above), masks every OTHER probe's `/dev/bus/usb` node
+AND its sysfs device directory out of view inside a private, unprivileged
+mount+net+ipc namespace, brings the namespace's own loopback up, then selects
+by the (now-unambiguous) serial. It **refuses** rather than guesses when
+`LG_SWD_PATH` is not resolved, when a sibling probe can't be FULLY masked
+(an unreadable `busnum`/`devnum`, a vanished usbfs node, or -- after
+masking -- more than one vendor-`1366` device still visible in sysfs), or
+when the caller passed neither `-CommandFile` nor `-CommanderScript` — see
+the next paragraph for why that last one matters. Callers must `export
+LG_PLACE=<labgrid place>` (and `LG_COORDINATOR`) before running any helper
+here. See `bench_jlink_run`'s own header comment in `bench-env.sh` for why
+all four masking parts are load-bearing.
+
+`bench_jlink_run()` ALSO ports `jlink-run.sh`'s probe-brick guard: these
+probes are CLONES and a SEGGER firmware-update write to one is
+unrecoverable, so `exec DisableAutoUpdateFW` is injected as the first line
+of the caller's `-CommandFile`/`-CommanderScript` before any probe opens —
+refusing outright if neither flag is present, since there is then nowhere
+to inject it.
+
+`bench_labgrid_resolve()` (above) also confirms the labgrid reservation is
+held BY THE CALLING OPERATOR, not merely by someone: a place another
+operator holds refuses exactly like a lapsed one.
 
 ## Scripts
 
@@ -61,7 +145,7 @@ scripts/bench/aen/ram-run.sh     "$BENCH_ROOT/build/aen-gpio-bench"   # Flow C
 | `flash-update-log-dual.sh [--package-only] [--replace-atoc] <hp-build-dir> <he-build-dir>` | **D** | Firmware-update-log dual-M55 package: HP owner boots first and releases HE client. Builds an app-only ATOC by default for the same firewall-policy reason as the probe helper. **GUARD (#2025, exit 5):** before the write, queries the resident ATOC and refuses to proceed if any entry other than `DEVICE`/`HP-OWNER`/`HE-CLIENT` is resident, or if the query can't be verified. `--replace-atoc` opts out. **Gates on the `verifybin` outcome (#1488): exit 3** on a failed verify, **exit 3** when no `verify successful` line is present. **DATA LOSS at either exit 3:** same one-CommanderScript shape as the firewall probe, and the `HP-OWNER` ATOC entry is `"flags": ["load", "boot"]` — the board has already been pin-reset and the HP owner booted and released the HE client, so `alp_ulog_partition` may ALREADY have been appended to by this unverified package. Re-read the partition from a known-good state before trusting the update log the run produced. |
 | `read-update-log-proof.sh [--expect-hw\|--expect-firewall-probe]` | (B) | Re-read the firmware-update-log SRAM0 proof beacons without reflashing. Use this after the probe or dual-M55 run to prove what the silicon actually did; the firewall mode decodes PASS/FAIL and exits non-zero if HE changed the MRAM log partition. |
 | `openocd-ram-run.sh <build-dir> [core: hp(default)\|he] [openocd_cfg]` | **C** (OpenOCD) | **RAM-run** an ITCM image via OpenOCD against the board-farm's shared SWD config (`AEN_OPENOCD_CFG`, host-specific, no default), able to address the E8's OTHER M55 core (M55-HE, CoreSight AP `0x00300000`) that `ram-run.sh`'s JLinkExe generic attach cannot reach (alp-sdk#2037: an entire campaign unknowingly drove M55-HP, AP `0x00200000`, believing it was the HE). **`core` defaults to `hp` and every plain invocation keeps driving the HP exactly as before** — pass `he` explicitly to opt in; doing so prints an explicit `core=M55-HE (AP 0x00300000)` line (OpenOCD's own per-target-name tag does NOT reliably say which AP answered) and a warning that it overwrites evk-01's resident HE ITCM stub (RAM-only, power-cycle-recoverable, but not silent). Refuses (exit 1) on a slot0/MRAM-linked image (reset vector `>= 0x80000000`) — same guard as `ram-run.sh`. **Wrong-board safety gate (alp-sdk#2037): requires `AEN_OPENOCD_USB_LOCATION` (exit 2 if unset — see below) and runs a read-only `init;shutdown` preflight checked against `bench_jlink_assert_aen_dpidr` (exit 4 on mismatch) BEFORE any `halt`/`load_image`** — this bench has three same-serial J-Links and a bare OpenOCD invocation picks one arbitrarily. **Bench-verified on `e1m-aen-evk-01` (2026-09-10):** the restored `command_print` output showed `113960 bytes written at address 0x00000000` and all four register echoes. |
-| `ram-run.sh <build-dir> [sleep_ms] [size] [preload]` | **C** | **RAM-run** an ITCM image (no MRAM write): the load base is DERIVED from the LOAD segment with the lowest `p_paddr` among segments with nonzero `p_filesz` (`readelf -l`) — NOT just the first LOAD segment (an ITCM-retargeted link's first LOAD segment is often a zero-FileSiz `.bss` in DTCM) and not hard-coded `0x0` — an app that hard-codes a slot0 `CONFIG_FLASH_LOAD_OFFSET` still links at a non-zero ITCM address and is loaded there. `loadbin` to that base, `setpc <entry>` (thumb-bit cleared), `go`, sleep, halt, dump + ASCII-decode the RAM console. **Refuses (exit 5)** if the derived base is `>= 0x80000000` (slot0/MRAM-linked). **Refuses (exit 6)** if the derived base isn't `0x0`, the ITCM global alias (`0x50000000`/`0x58000000`), or SRAM (`0x02xxxxxx`) — catches picking the wrong LOAD segment before it splats RAM. Optional `preload` JLink file runs after halt / before loadbin (e.g. clear a SoC integration reg). |
+| `ram-run.sh <build-dir> [sleep_ms] [size] [preload]` | **C** | **RAM-run** an ITCM image (no MRAM write): the load base is DERIVED from the LOAD segment with the lowest `p_paddr` among segments with nonzero `p_filesz` (`readelf -l`) — NOT just the first LOAD segment (an ITCM-retargeted link's first LOAD segment is often a zero-FileSiz `.bss` in DTCM) and not hard-coded `0x0` — an app that hard-codes a slot0 `CONFIG_FLASH_LOAD_OFFSET` still links at a non-zero ITCM address and is loaded there. Needs `arm-zephyr-eabi-nm`/`-readelf` on `PATH` (or `ZEPHYR_SDK_INSTALL_DIR` set) — on a fresh Zephyr SDK install these live under `<sdk-root>/arm-zephyr-eabi/bin`, not the default `PATH` — **and gawk (GNU awk)**, checked explicitly before use: the LOAD-segment derivation needs `strtonum()`, a gawk extension mawk/BSD awk lack. **TWO SEPARATE JLinkExe sessions (alp-sdk#2076), both routed through `jlink_run()` — by default the in-tree `bench_jlink_run()` (`LG_PLACE`, alp-sdk#2064, see above), or the board-farm's `jlink-run.sh` wrapper instead if `AEN_JLINK_RUN` is exported (`BENCH_PLACE`/`LG_PLACE` names the place either way — see below):** session 1 `loadbin`s to that base, `setpc <entry>` (thumb-bit cleared), `go`s, then `exit`s leaving the target RUNNING (no halt, no reset — **bench-verified** 2026-09-13 on evk-02/evk-03, `examples/peripheral-io/blink`, 6 of 6 clean); the host then sleeps `sleep_ms`; session 2 is a FRESH `connect` + `mem8` (no halt) that reads and ASCII-decodes the RAM console. The app is guaranteed to run for **at least** `sleep_ms`, not exactly it — routing each session through the wrapper (a labgrid reservation check + an OpenOCD probe-firmware read before every JLinkExe call) adds its own overhead on top, measured stretching a 1.5s gap to about 3.1s. The read is therefore no longer a frozen snapshot at `sleep_ms`, and unlike `dev`'s single-session shape (which left the core halted on exit) this leaves the core **running** on exit. An in-session `halt` after `go` measured an incoherent core and a failed `mem8` on real hardware (evk-02/-03, 2026-09-13) even though the app was healthy — the two-session, no-halt-before-read shape is the one measured to work. Session 1 is judged complete only once JLinkExe itself reports `Script processing completed.` (printed once, only after `loadbin`/`setpc`/`go`/`exit` have ALL run — verified against 5 real V9.74 transcripts and against every crash/truncation shape reviewed, wherever in the sequence it lands, including right after `go`) — a crashed or truncated session is reported as exactly that, never folded into a `loadbin`/`setpc`/`go` failure (review round 3). `setpc`/`go` are then checked against what a real successful session actually prints: `setpc`'s own window must be EMPTY and `go`'s must hold only the `Memory map '...' is active` banner — anything else (including JLinkExe's real rejections, `Syntax: SetPC <addr>` / `CPU is not halted !`) is a rejection. **Exit codes:** **1** — toolchain (`arm-zephyr-eabi-*`) not found, the system `awk` has no `strtonum()` (requires gawk), the build dir's `zephyr.elf` doesn't exist, `mktemp` failed, or a `preload` file that doesn't exist (`set -e` abort); **2** — `AEN_JLINK_RUN` is exported but not executable, or is exported with no `BENCH_PLACE`/`LG_PLACE` to pass it, or `sleep_ms` is not a plain non-negative decimal integer (all checked before any probe access) — when `AEN_JLINK_RUN` is NOT exported (the default), an unresolved `LG_PLACE` instead surfaces as exit **7** below, from `bench_jlink_run()`'s own refusal inside the first JLinkExe session; **3** — the ELF has no `ram_console_buf` symbol (UART-console build; the ELF itself is confirmed to exist first — exit 1 otherwise); **4** — no LOAD segment with nonzero `FileSiz`, a non-hex parsed base, or the DPIDR preflight says this is not the AEN E8; **5** — derived base `>= 0x80000000` (slot0/MRAM-linked); **6** — derived base isn't `0x0`, the ITCM global alias, or SRAM; **7** — a connect failure in any of the three JLinkExe sessions (preflight/load/read), including a `jlink_run()` refusal before JLinkExe ever ran (`bench_jlink_run()`'s own `LG_SWD_PATH`-unresolved/probe-vanished message by default, or `jlink-run.sh`'s place-not-held/board-unpowered/USB-mask-failure message if `AEN_JLINK_RUN` is exported) — that message is in the transcript, not just `bench_jlink_assert_connected`'s generic one; **8** — session 1 completed but `loadbin` did not report `O.K.` (a stale image already resident in ITCM/DTCM could otherwise boot and be read back as this run's output) — judged on the LAST matching `loadbin $BIN $BASE` window, so a same-path preload's own successful `loadbin` ahead of it can't mask this; **9** — session 2's `mem8` itself failed (`Could not read memory.` or no dump line at all); **10** — session 1's JLinkExe transcript never reported `Script processing completed.` — crashed, killed, or truncated at ANY point (before `loadbin`, right after `go`, mid-teardown, ...); **11** — `setpc` or `go` printed something other than the expected empty/banner-only window — a real rejection. All transcripts and generated CommandFiles live under one `mktemp -d` under `$TMPDIR`, created just before the first transcript write (so an early exit 1/2/3/4/5/6 leaves nothing behind) — removed only once `$RUN_OK` is set, just before the final success output, not keyed off `$?`. `SIGINT`/`SIGTERM` are NOT trapped (an earlier attempt regressed a calling loop's own Ctrl-C-abort behaviour and didn't actually speed up teardown — see the script's own comment) — a killed run dies by the signal like any other untrapped command and still keeps its WORKDIR via the `$RUN_OK`-gated EXIT trap; a signal delivered to ONLY this script's own pid (not its process group) while it's waiting on the inter-session `sleep` or a `jlink_run` call is deferred by bash itself until that finishes (a real Ctrl-C or a process-group kill is immediate). Optional `preload` JLink file runs after halt / before loadbin in session 1 (e.g. clear a SoC integration reg). |
 | `erase-storage.sh [--dry-run]` | **D** | **PROVISIONING (#1430) — erase the customer storage window before a SoM ships**, so the module does not leave manufacturing carrying a previous app's image where the customer's first NVS write lands (#1334 measured ~110 KiB of stale app image there). **[BENCH-VERIFIED 2026-08-30]** — run once against a real module (off-labgrid E1M-AEN801, `AE822FA0E5597LS0`), `verify successful`, cold power-cycle confirmed `u VB` on the `ALP-HE` row (ATOC band untouched). Still confirm the DPIDR gate and re-read the transcript on each subsequent unit — one bench run is not a standing guarantee against a different module. The window is DERIVED from `metadata/e1m_modules/E1M-AEN801.yaml`'s `memory_map:` (today `0x80560000`, 96 KiB) and refused (**exit 5**) unless it ends exactly where the SE-owned `atoc` band begins — an overshoot lands in the live ATOC and drops the board to `No ATOC`. **The erased value on this MRAM is `0x00`, NOT `0xFF`** (#1430: `write_block_size=16 erase_value=0x00`), so the pattern written is `/dev/zero`, which doubles as the `verifybin` reference; a J-Link `erase` does **not** clear MRAM on this part, hence `loadbin` through the part-number device profile. Same gates as `flash-jlink.sh`: **exit 4** (DPIDR says this is not the AEN E8), **exit 2** (part profile could not connect), **exit 3** (verify failed, or no verify result at all). Does **not** reset or boot the board — cold power-cycle by hand afterwards and confirm the SE still finds its ATOC. `--dry-run` prints the derived window and CommanderScript without opening a probe. |
 | `reread.sh <build-dir> [size]` | (B) | Re-read `ram_console_buf` over SWD with no reflash — attach generic device, halt, `mem8`, ASCII-decode. |
 | `flash-all-flowd.sh [app ...]` | **D** | Batch Flow D over a list of apps (argv, else `apps.txt`). Strictly serial (one board / one probe); scrapes each app's `RESULT` line into `/tmp/flowd-batch-summary.txt`, printed as `BATCH SUMMARY` at the end. The batch continues past a failed app **only because every child exit is captured explicitly** — `rc=0; x=$(...) \|\| rc=$?`, never a bare `x=$(...)`, which under this script's `set -e` takes the substitution's status and aborts the whole batch before the summary is ever printed. Summary labels: `SKIP (no build)`; `FLASH-UNVERIFIED` (`flash-jlink.sh` exit 3 — verify failed or never ran); `FLASH-FAILED` (exit 2 — probe/target connect); `FLASH-ABORTED (wrong probe)` (exit 4 — DPIDR mismatch); `FLASH-OK-READBACK-FAILED` (exit 7 — flash+verify succeeded, `flash-jlink.sh`'s own post-boot read did not connect); `FLASH-ERROR (exit N)` for any other status; `CONSOLE-READ-FAILED (exit N)` when this script's own post-boot RAM-console read cannot connect. On a non-zero flash exit it also dumps the last 20 lines of the captured `flash-jlink.sh` log, because the 6-line display grep cuts off before the verify gate's own diagnostic. **#2027 re-arms this on any bench with `SE_UART` exported:** its `flash-jlink.sh "$BD" "$SIZE"` call passes neither flag, so since #2029 every entry aborted (exit 8) and the batch flashed nothing at all — with `SE_UART` exported (the documented default for `e1m-aen-evk-01`), `bench_flowd_atoc_guard()` now queries instead, and on a clean board the batch proceeds to flash every app in `apps.txt`. |
@@ -83,12 +167,15 @@ by exporting before you invoke a helper.
 | `ZEPHYR_SDK_INSTALL_DIR` | *(none)* | Zephyr SDK root; the `arm-zephyr-eabi-*` tools are resolved from here, else off `PATH`. |
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
 | `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
-| `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. `flash-jlink.sh`/`flash-jlink-hp.sh`/`flash-jlink-mramxip.sh` never require it (Flow D's whole premise is "no SE-UART needed") but now **use it opportunistically** (#2027) via `bench_flowd_atoc_guard()`: exported and usable → the same resident-ATOC guard as Flow A (exit 5 without `--replace-atoc`); unset → the #2029 `--atoc-unqueryable` acknowledgement is required instead (exit 8), with a message naming both ways forward. |
+| `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by PLACE NAME (`<your-bench-place>`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
+| `LG_COORDINATOR` | *(none, error-if-unset when `LG_PLACE` is set)* | labgrid coordinator address (`<host>:<port>`) used to resolve `LG_PLACE`. No default — a coordinator address is bench-specific, not a portable SDK value. |
+| `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. `flash-jlink.sh`/`flash-jlink-hp.sh`/`flash-jlink-mramxip.sh` never require it (Flow D's whole premise is "no SE-UART needed") but now **use it opportunistically** (#2027) via `bench_flowd_atoc_guard()`: exported and usable (whether resolved via `LG_PLACE` or the direct escape hatch) → the same resident-ATOC guard as Flow A (exit 5 without `--replace-atoc`); unset → the #2029 `--atoc-unqueryable` acknowledgement is required instead (exit 8), with a message naming both ways forward. |
+| `LG_CONSOLE_DEV` / `LG_CONSOLE_HOST` / `LG_CONSOLE_PORT` | *(none)* | Read-only, `LG_PLACE`-resolved: the app console's exporter-local device path and ser2net `host`/`port`. Not yet consumed by a helper here — read the labgrid `console` resource directly, or via these, until one is wired up. |
+| `LG_SWD_PATH` | *(none)* | Read-only, `LG_PLACE`-resolved: the SWD probe's real USB path (e.g. `3-4.1`) from labgrid's `swd` resource. Consumed by `bench_jlink_run()` (`bench-env.sh`) to mask every other probe before selecting by serial (alp-sdk#2064) — every `JLinkExe` invocation in this directory routes through it. |
 | `SETOOLS_DIR` | *(none, error-if-unset)* | Alif SETOOLS `app-release-exec-linux` dir. **License-gated, not shipped.** |
 | `JLINK_DEVICE_FLASH` | `AE822FA0E5597LS0_M55_HE` | Part-number device profile — unlocks the built-in Alif MRAM loader (Flow D). |
 | `JLINK_DEVICE_READ` | `Cortex-M55` | Generic device for all reads/attach/RAM-run (attaches to the live core). |
 | `JLINK_SPEED` | `4000` | SWD clock (kHz). |
-| `JLINK_SN` / `JLINK_SERIAL` | *(none)* | Optional SEGGER probe serial selector; set this on benches with multiple J-Links. |
 | `JLINK_EXE` | `JLinkExe` | JLink Commander binary (override for a non-PATH install). |
 | `AEN_OPENOCD_CFG` | *(none, error-if-unset)* | Board-farm's shared OpenOCD SWD config (declares both M55 cores as CoreSight-AP targets). Host-specific, not shipped. `openocd-ram-run.sh` only. |
 | `AEN_OPENOCD_USB_LOCATION` | *(none, error-if-unset)* | Labgrid-pinned USB path for the AEN E8's J-Link — all three E8 boards on this bench answer the same SW-DP (`0x4c013477`), so the USB path is the only thing that selects which physical board you talk to; resolve it per-board from `labgrid-client -p <place> show`'s swd resource, e.g. `labgrid-client -p e1m-aen-evk-01 show`, never hardcode a path copied from another board. Passed as `adapter usb location <value>`, prepended on the OpenOCD command line. `openocd-ram-run.sh` only. |
@@ -129,8 +216,13 @@ debug/attach runner.
 ```sh
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
-export SE_UART=<your-serial-device>               # the SE-UART (host-specific)
-west flash                                        # -> alif_flash -> SETOOLS
+# alif_flash.py is a separate west-runner (Python), not bench-env.sh -- it
+# reads $SE_UART directly and has no LG_PLACE resolution of its own, so
+# source bench-env.sh first to populate SE_UART from labgrid in THIS shell:
+export LG_COORDINATOR=<host>:<port>
+export LG_PLACE=<your-bench-place>
+source scripts/bench/aen/bench-env.sh
+west flash                                        # -> alif_flash -> SETOOLS, using the resolved $SE_UART
 ```
 
 The runner reads `SETOOLS_DIR` / `SE_UART` (the same env vars these helpers

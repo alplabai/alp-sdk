@@ -791,11 +791,63 @@ typedef enum {
 	ALP_CC3501E_RADIO_EVT_ERROR           = 31u,
 } alp_cc3501e_radio_evt_t;
 
+/** lwIP DHCP client state codes for @ref alp_cc3501e_diag_info_t::dhcp_state.
+ *
+ *  These are the WIRE values -- lwIP's `dhcp->state` PLUS ONE.  0 is
+ *  reserved to mean "not reported" (no lwIP linked, or the netif has no
+ *  `dhcp` struct because DHCP never started -- itself the interesting case,
+ *  which must not be misread as a real @ref ALP_CC3501E_DHCP_STATE_OFF, the
+ *  whole reason for the offset).  Compare the raw byte against these names
+ *  directly; do not subtract 1.
+ *
+ *  Named `ALP_CC3501E_DHCP_STATE_*`, deliberately distinct from the
+ *  `ALP_CC3501E_RADIO_EVT_*` family above -- these mirror lwIP's
+ *  `prot/dhcp.h` `dhcp_state_enum_t`, NOT the vendor TI `WlanEvent_t` ids
+ *  that RADIO_EVT decodes.  Not exhaustive: lwIP defines more states
+ *  (REQUESTING, RENEWING, REBINDING, ...); only the ones a host commonly
+ *  branches on are named here.  An unlisted nonzero value is a legal DHCP
+ *  state this header simply does not name. */
+typedef enum {
+	ALP_CC3501E_DHCP_STATE_NOT_REPORTED = 0u,
+	ALP_CC3501E_DHCP_STATE_OFF          = 1u,  /**< lwIP DHCP_STATE_OFF (0) + 1 */
+	ALP_CC3501E_DHCP_STATE_SELECTING    = 7u,  /**< lwIP DHCP_STATE_SELECTING (6) + 1 */
+	ALP_CC3501E_DHCP_STATE_BOUND        = 11u, /**< lwIP DHCP_STATE_BOUND (10) + 1 */
+} alp_cc3501e_dhcp_state_t;
+
+/** Bit flags for @ref alp_cc3501e_diag_info_t::netif_status (byte 17 on the
+ *  wire).  Bits 2..7 are `dhcp->tries` saturated at 63 -- not a bitmask
+ *  member, so it is extracted with @ref ALP_CC3501E_NETIF_DHCP_TRIES rather
+ *  than listed as a flag here. */
+#define ALP_CC3501E_NETIF_UP      (1u << 0) /**< netif_is_up()      */
+#define ALP_CC3501E_NETIF_LINK_UP (1u << 1) /**< netif_is_link_up() */
+
+/** Extract `dhcp->tries` (saturated at 63) from @ref
+ *  alp_cc3501e_diag_info_t::netif_status. */
+#define ALP_CC3501E_NETIF_DHCP_TRIES(netif_status) ((uint8_t)((netif_status) >> 2))
+
 /** Reply payload for CMD_GET_DIAG_INFO (opcode 0x04).  Firmware
  *  populates these fields once per request from its in-RAM
  *  bookkeeping; reading is non-disturbing (no side effects on
- *  the radio state).  Sized at 16 bytes (one cache line on the
- *  M33) so the SPI reply fits in a single short envelope.
+ *  the radio state).  Was 16 WIRE bytes (one cache line on the M33) through
+ *  v2 firmware; grew to 18 WIRE bytes ADDITIVELY when dhcp_state/netif_status
+ *  were appended (alp-sdk#2035) -- NOTE: `sizeof(alp_cc3501e_diag_info_t)` is
+ *  20, not 18, because of 4-byte tail padding after this pair; 18 is the wire
+ *  byte count, not the in-memory struct size.  A v2-firmware reply is still a
+ *  complete, valid answer, just without the two new fields (see
+ *  cc3501e_diag_info() for the backward-compat decode, and its own doc
+ *  comment for why NEITHER firmware can be told apart by wire length -- both
+ *  frame the identical padded 24-byte payload).
+ *
+ *  Deliberately NOT a PROTOCOL_MINOR bump: a host disambiguates "talking to
+ *  old firmware" from "DHCP never started" (both read dhcp_state as 0, see
+ *  the field-level note below) by `fw_version`, ALSO in this same reply, not
+ *  by the new fields' own value -- so no version check is needed to use them
+ *  safely. A MINOR bump would force a lockstep change in the firmware's
+ *  `protocol-version.txt` -- and because that job checks out alp-sdk's
+ *  DEFAULT BRANCH, a bump on `dev` would not even redden firmware PRs until
+ *  the next `dev`-to-`main` release, not immediately as originally
+ *  estimated -- for no behavioural gain either way; do not "fix" this into
+ *  a bump.
  *  Field-level meanings:
  *   - fw_version: the firmware *release* version the device reports
  *     (its own semver from firmware-version.txt; tracked separately
@@ -829,7 +881,24 @@ typedef enum {
  *     misled).  An ap_start that leaves this at 0 never received a WLAN
  *     event at all.  A value outside @ref alp_cc3501e_radio_evt_t is legal
  *     and simply means some other vendor radio event fired.
- *   - reserved[1..2]: still reserved, always 0. */
+ *   - reserved[1]: low byte of the `psa_status_t` from the last OTA flush
+ *     fault (#1610); 0 if no OTA flush has failed since last reset.  Already
+ *     surfaced by the console as `diag info`'s `otafault:` line.
+ *   - reserved[2]: update-mode boot mark -- bit7 set means the firmware is
+ *     currently running because it booted into UPDATE_MODE (see @ref
+ *     ALP_CC3501E_CMD_OTA_UPDATE_MODE); bits[6:0] are a warm-boot counter,
+ *     modulo 128.
+ *   - dhcp_state: one of @ref alp_cc3501e_dhcp_state_t, i.e. lwIP's
+ *     `dhcp->state` PLUS ONE.  0 means "not reported" -- no lwIP linked, or
+ *     the netif has no `dhcp` struct because DHCP never started; that case
+ *     must not be read as @ref ALP_CC3501E_DHCP_STATE_OFF, which is exactly
+ *     why 0 is reserved rather than aliasing the real OFF state.  Absent on
+ *     a v2-firmware 16-byte reply, in which case cc3501e_diag_info() sets
+ *     this to 0 (not-reported), same as the "never started" case.
+ *   - netif_status: bit 0 = netif UP, bit 1 = netif LINK_UP (see @ref
+ *     ALP_CC3501E_NETIF_UP / @ref ALP_CC3501E_NETIF_LINK_UP), bits 2..7 =
+ *     `dhcp->tries` saturated at 63 (see @ref ALP_CC3501E_NETIF_DHCP_TRIES).
+ *     Also 0 on a v2-firmware 16-byte reply. */
 typedef struct {
 	uint16_t fw_version;
 	uint8_t  reset_cause;
@@ -838,6 +907,8 @@ typedef struct {
 	uint32_t free_heap_bytes;
 	uint8_t  last_error;
 	uint8_t  reserved[3];
+	uint8_t  dhcp_state;
+	uint8_t  netif_status;
 } alp_cc3501e_diag_info_t;
 
 /* ------------------------------------------------------------------ */
@@ -1038,7 +1109,7 @@ typedef enum {
 /** Reply payload of CMD_WIFI_STATUS (opcode 0x1B): a NON-BLOCKING snapshot of the
  *  STA connection state, read off a firmware latch (no radio op, ISR-safe) -- how
  *  the host collects an async connect result without blocking.  Fixed 4-byte wire
- *  layout (no padding): state | fail_reason | rssi_dbm | reserved. */
+ *  layout (no padding): state | fail_reason | rssi_dbm | last_reason. */
 typedef struct {
 	uint8_t state;       /**< @ref alp_cc3501e_wifi_conn_state_t. */
 	uint8_t fail_reason; /**< @ref alp_cc3501e_wifi_fail_t (when state == FAILED). */
@@ -1049,12 +1120,65 @@ typedef struct {
 	 *  blocks that worker), so the byte has only ever held 0.  0 dBm is a LEGAL
 	 *  int8 RSSI, so there is no in-band sentinel a reader can test to tell
 	 *  "unmeasured" from a real 0 -- do NOT report this byte as a signal level
-	 *  (issue #1387).  A real reading comes only from CMD_WIFI_GET_RSSI (0x16),
-	 *  a worker-routed radio read.  Populating this byte honestly needs either a
-	 *  bench answer on whether the post-DHCP read is safe, or a validity flag on
-	 *  the wire (the @c reserved byte) -- both open; neither is decided here. */
-	int8_t  rssi_dbm;
-	uint8_t reserved;
+	 *  (issue #1387, closed with the gap itself still undecided).  A real
+	 *  reading comes only from CMD_WIFI_GET_RSSI (0x16), a worker-routed radio
+	 *  read.  Populating this byte honestly still needs a bench answer on
+	 *  whether the post-DHCP read is safe -- the wire slot that would have
+	 *  carried a validity flag (the byte formerly named @c reserved) is now
+	 *  @ref alp_cc3501e_wifi_status_t::last_reason, so a validity flag is no
+	 *  longer an available option on THIS reply; no replacement channel is
+	 *  decided here. */
+	int8_t rssi_dbm;
+	/** The reason/status code for the MOST RECENT connect attempt: the low
+	 *  byte of the 802.11 REASON code from a DISCONNECT event, or the 802.11
+	 *  STATUS code from an ASSOCIATION_REJECTED / AUTHENTICATION_REJECTED
+	 *  event -- two DIFFERENT code tables, and nothing on the wire says
+	 *  which one, so @c fail_reason == REJECTED does NOT disambiguate them.
+	 *
+	 *  Recorded ONLY while that attempt's state is CONNECTING; frozen at its
+	 *  terminal result and PERSISTS through every later state publish --
+	 *  including a subsequent @ref cc3501e_wifi_disconnect() call
+	 *  (WIFI_DISCONNECT, 0x13), which republishes this same frozen value
+	 *  rather than a fresh one -- until the NEXT connect attempt starts and
+	 *  clears it back to 0.  0 means NOTHING WAS RECORDED for that attempt,
+	 *  not "no cause": a clean success, or a bare TIMEOUT with no DISCONNECT/
+	 *  REJECTED event of its own, also reads 0.  Note @ref cc3501e_wifi_connect
+	 *  itself issues that same disconnect at ENTRY, before submitting the new
+	 *  attempt, whenever the latch it reads first still shows a FAILED
+	 *  attempt (#1435/#1437 stale-association cleanup) -- so that internal
+	 *  disconnect can republish the OLD attempt's value too, same as an
+	 *  explicit one would.
+	 *
+	 *  CONNECTED always publishes 0, unconditionally -- even if a since-
+	 *  succeeded retry (below) recorded a transient rejection earlier in the
+	 *  same attempt -- and clears the underlying live value too, so it stays
+	 *  0 for any later republish of that same session.
+	 *
+	 *  Never holds vendor reason 200 (WLAN_DISCONNECT_USER_INITIATED) -- a
+	 *  vendor placeholder, not a real 802.11 code.
+	 *
+	 *  @warning KNOWN RESIDUAL: the value is cleared to 0 twice for a new
+	 *  attempt -- at submit and again immediately before the vendor connect
+	 *  call -- but neither reset is the exact instant the vendor begins
+	 *  processing that attempt.  A late event from the PREVIOUS attempt
+	 *  landing in the narrow remaining window can still be recorded against
+	 *  the new one (any reason/status code, not one in particular).  The
+	 *  converse also holds: a reject arriving after an attempt has already
+	 *  been declared TIMEOUT is lost, because the attempt is already
+	 *  terminal by then.  The firmware also runs one bounded, transparent
+	 *  retry when the FIRST pass rejects with status 30 (an AP-issued
+	 *  comeback-time hint): the retry normally reports its OWN outcome (the
+	 *  value is reset again before the retry's own connect call), but if the
+	 *  retry's own connect call is itself refused, the byte instead reports
+	 *  the FIRST pass's outcome (e.g. REJECTED/30) rather than a generic
+	 *  KICK/0.
+	 *
+	 *  Scope is the connect attempt only: a deauth AFTER a successful
+	 *  CONNECTED is not recorded, because the state is no longer CONNECTING.
+	 *  Formerly an unused @c reserved byte, always 0 -- older bridge
+	 *  firmware that never populates it still sends 0, so this is purely
+	 *  additive and needs no wire-version bump (alp-sdk#2099). */
+	uint8_t last_reason;
 } alp_cc3501e_wifi_status_t;
 
 /** Async event for CMD_WIFI_SCAN_START and friends. */
@@ -1206,15 +1330,20 @@ typedef struct {
  *   - handle: socket from CMD_SOCK_OPEN.
  *   - flags: send flags (bit 0 = MORE; further bits reserved 0).
  *   - seq: retry identity (proto v7).  The host assigns a per-context
- *     free-running counter ONCE per logical send and holds it constant
- *     across every poll_by_repeat() retry of that same call (see
- *     cc3501e_sock_send()).  The firmware caches the (seq, reply) of the
- *     last completed send and serves it back on a matching seq instead of
- *     re-submitting -- without this, a retry that lands after the worker
- *     already finished is indistinguishable from a new request and
- *     re-transmits the payload (alp-sdk#1746, cc3501e-bridge-firmware#88).
- *     Through v6 this byte was always written 0 and carried no meaning;
- *     the field keeps its wire offset, only the semantics changed.
+ *     free-running counter ONCE per FRAME -- one chunk of a logical send,
+ *     i.e. one iteration of cc3501e_sock_send()'s remainder-retry loop
+ *     (cc3501e-bridge-firmware#107) -- and holds it constant across every
+ *     poll_by_repeat() retry (including its own bounded post-timeout
+ *     collection grace) of that same chunk (see cc3501e_sock_send()).  A
+ *     chunk carrying different remaining bytes than the previous one is a
+ *     NEW frame and gets a NEW seq.  The firmware caches the (seq, reply)
+ *     of the last completed send and serves it back on a matching seq
+ *     instead of re-submitting -- without this, a retry that lands after
+ *     the worker already finished is indistinguishable from a new request
+ *     and re-transmits the payload (alp-sdk#1746,
+ *     cc3501e-bridge-firmware#88).  Through v6 this byte was always
+ *     written 0 and carried no meaning; the field keeps its wire offset,
+ *     only the semantics changed.
  *   - data_len: number of payload bytes that follow inline. */
 typedef struct {
 	uint16_t handle;

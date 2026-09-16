@@ -16,6 +16,15 @@
  * gets RESP_OK with the result, or the timeout elapses.  This is how
  * the bring-up proves the firmware's worker seam from the host with
  * no async-event line on this HW rev.
+ *
+ * @note **`timeout_ms` does not bound an automatic recovery (issue #2126).**
+ *       A call that exhausts its budget with nothing decoded off the wire
+ *       hands the link to the driver's recovery path before returning: up to
+ *       ~12-18 s of probing and, only if every probe fails, a warm reset with
+ *       its ~3.5 s settle. The call therefore returns later than @p
+ *       timeout_ms in exactly that case -- the alternative was failing every
+ *       later call until someone power-cycled the board. Turn it off with
+ *       `CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=n`.
  */
 
 #ifndef ALP_CHIPS_CC3501E_WIFI_H
@@ -403,7 +412,7 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);
  * @ref cc3501e_wifi_connect submit -- CONNECTING while the association runs,
  * then CONNECTED or FAILED once the WLAN connect event lands.  The reply is the
  * fixed 4-byte @ref alp_cc3501e_wifi_status_t wire layout (state | fail_reason |
- * rssi_dbm | reserved), decoded into @p out.
+ * rssi_dbm | last_reason), decoded into @p out.
  *
  * The firmware-side latch read is itself non-blocking, but the SHARED bridge
  * transport is briefly down whenever any radio op is in flight (a connect
@@ -435,12 +444,54 @@ alp_status_t cc3501e_wifi_get_ip(cc3501e_t *ctx, uint8_t iface, uint8_t ip[4]);
  *             caller cannot tell it apart from a real reading (issue #1387).
  *             Use @ref cc3501e_wifi_rssi for a signal level, and report it as
  *             unavailable when that call fails rather than printing a 0.
+ *             @c last_reason is the reason/status code for the MOST RECENT
+ *             connect attempt, recorded only while that attempt was
+ *             CONNECTING and then persisting through later state publishes
+ *             (including a later @ref cc3501e_wifi_disconnect() call) until
+ *             the next attempt starts (0 = nothing recorded, or older
+ *             bridge firmware); see @ref alp_cc3501e_wifi_status_t::last_reason
+ *             for the exact capture window, the reason-vs-status ambiguity,
+ *             the CONNECTED-always-0 / retry behaviour, and the known
+ *             residual.
  * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
  *         ALP_ERR_TIMEOUT if the transport stayed down for the whole
  *         down-window; ALP_ERR_IO on a short reply; otherwise the mapped
  *         error.
  */
 alp_status_t cc3501e_wifi_status(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
+
+/**
+ * @brief Single, non-retried WIFI_STATUS read -- a bounded alternative to
+ *        @ref cc3501e_wifi_status for a best-effort fetch on a failure path.
+ *
+ * Decodes the same fixed 4-byte wire layout as @ref cc3501e_wifi_status, but
+ * without its down-window `poll_by_repeat` -- ONE attempt instead of up to
+ * `CC3501E_WIFI_DOWN_WINDOW_MS` (10 s) of retrying on a wedged transport.
+ * This is NOT bounded by a fixed request timeout -- the underlying transport
+ * ignores the `timeout_ms` it is handed -- the real bound is the shared
+ * request lock's own bounded acquire (`CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_
+ * TIMEOUT_MS`, default 100 ms) plus, once granted, the per-phase READY wait
+ * (`CC3501E_READY_WAIT_US`, 250 ms) for each SPI phase this opcode's
+ * exchange takes.  Safe to call while a connect is running on another
+ * thread: it either gets the lock in its turn or reports ALP_ERR_BUSY, and a
+ * failure landing in a radio op's down-window is expected here (not
+ * retried) rather than a defect. Intended for callers that want @ref
+ * alp_cc3501e_wifi_status_t::last_reason as a diagnostic after a connect
+ * already failed or timed out, where blocking the caller for up to 10 s just
+ * to fetch a reason code is worse than sometimes missing it.
+ *
+ * @param ctx  Initialised driver context.
+ * @param out  Receives the decoded status snapshot; same field semantics as
+ *             @ref cc3501e_wifi_status.
+ * @return ALP_OK with @p out filled; ALP_ERR_INVAL if @p out is NULL;
+ *         ALP_ERR_BUSY if another thread holds the request lock (e.g. an
+ *         in-flight connect) for longer than the bounded acquire;
+ *         ALP_ERR_NOT_READY if @p ctx is uninitialised or the firmware
+ *         itself replies not-ready; ALP_ERR_IO on a short reply or a
+ *         transport fault; otherwise the mapped error.  A non-ALP_OK return
+ *         means @p out was NOT written.
+ */
+alp_status_t cc3501e_wifi_status_once(cc3501e_t *ctx, alp_cc3501e_wifi_status_t *out);
 
 /**
  * @brief Attach the live bridge handle to the portable Wi-Fi backend.
