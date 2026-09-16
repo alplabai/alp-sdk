@@ -172,14 +172,20 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
 	return ALP_OK;
 }
 
-/* Compile-time proof that the write and lock selectors below can never
- * equal the Device Configuration Register selector (0x06) -- see
- * eeprom_24c128_secure_page_write's and eeprom_24c128_secure_page_lock's
- * doc comments in the header for why a write must never reach that
- * selector: it lands on the SWP bit and permanently write-protects the
- * array, this page, and the register together.  There is no separate
- * "op-code" byte in this wire format -- see the review note below -- so
- * this asserts the two literal selector values these functions hardcode. */
+/* NOT a proof that the functions below never emit selector 0x06 -- a
+ * _Static_assert on two named constants only proves the constants differ
+ * from each other; it says nothing about what scratch[0]/cmd[0] actually
+ * get assigned below, and a future edit that mistakenly wrote the DCR
+ * selector into either would still compile clean past this. What actually
+ * makes 0x06 unreachable is that eeprom_24c128_secure_page_write() and
+ * eeprom_24c128_secure_page_lock() hardcode these two named constants as
+ * literals, never derived from caller input -- see their doc comments in
+ * the header. This assert is a much narrower, still-useful guard: it
+ * catches EEPROM_IDENTITY_SEL_SECURE_PAGE or EEPROM_IDENTITY_SEL_LOCK_STATUS
+ * itself ever being redefined to collide with EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+ * which the runtime wire-frame tests in tests/common/eeprom_24c128_secure_page.c
+ * do not exercise (they use the constants' current values, not their
+ * definitions). */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(EEPROM_IDENTITY_SEL_SECURE_PAGE != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
                "secure-page write selector must never equal the device config selector");
@@ -250,8 +256,15 @@ alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx)
      * function would report ALP_ERR_TIMEOUT for the success case, with the
      * header telling the caller not to retry a timeout here.  Wait out the
      * same write-cycle budget once instead, with no further write to the
-     * page, then read Lock Status -- the only verdict this function needs. */
-	alp_delay_us(EEPROM_WRITE_POLL_STEP_US * (uint32_t)EEPROM_WRITE_POLL_MAX);
+     * page, then read Lock Status -- the only verdict this function needs.
+     *
+     * alp_delay_ms(), not alp_delay_us(): this is a single one-shot
+     * ~20 ms wait, not the sub-millisecond hardware-timing sequence
+     * alp_delay_us() is documented for (include/alp/peripheral.h) --
+     * that primitive is a non-yielding busy-wait (Zephyr's k_busy_wait()),
+     * and 20 ms of that stalls every equal-or-lower-priority thread on
+     * this core for the whole window (issue #1621's defect class). */
+	alp_delay_ms((EEPROM_WRITE_POLL_STEP_US / 1000u) * (uint32_t)EEPROM_WRITE_POLL_MAX);
 
 	/* Confirm, don't trust: re-read Lock Status rather than trusting the
      * write's own ACK -- the only safe state check (see

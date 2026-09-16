@@ -74,3 +74,22 @@ existing contract: on the approved footprint-compatible alternate part
 (STMicro `M24128-BFMH6TG`, no second device-select header at all), both new
 example modes fail cleanly with a "no second device-select header" message;
 the array manifest, and everything that reads it, is unaffected either way.
+
+Also adds `alp_secure_page_mirror_classify()` (`<alp/hw_info.h>`, header-only
+`static inline`, following the existing `<alp/protocol/crc16.h>` pattern):
+the mirror equivalent of `alp_hw_info_classify_manifest()`, refusing to
+parse a page whose `magic`/`schema_version` don't match exactly what this
+build understands, in either direction — the same forward-compatibility
+rule the spec states. It copies through `memcpy` rather than casting the
+raw device buffer, because `eeprom_24c128_identity_t::secure_page` sits at
+a 1-byte-aligned offset with no stronger guarantee, and this struct's own
+`uint16_t`/`uint32_t` fields need 2/4-byte alignment — a straight cast is a
+real misaligned-access bug, not just a style nit. Both provisioning-example
+modes route every raw device-page read through it.
+
+`eeprom_24c128_secure_page_lock()`'s post-lock wait (replacing the removed
+ACK poll, since a correct lock NAKs any further write to the page) uses
+`alp_delay_ms()`, not `alp_delay_us()` — the ~20 ms wait belongs on the
+yielding primitive; `alp_delay_us()` is a non-yielding busy-wait documented
+for sub-millisecond sequences only, and 20 ms of that stalls every
+equal-or-lower-priority thread on the core (issue #1621's defect class).

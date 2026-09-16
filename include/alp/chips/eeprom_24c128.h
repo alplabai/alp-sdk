@@ -38,7 +38,7 @@
  *     paper-correct until the v1.0 verification sweep covers them.  (The one
  *     exception already recorded in the implementation is the write
  *     acknowledge-polling delay, bench-found on this same SoC I2C2 bus on
- *     2026-06-15 -- see `poll_for_ack()`.)
+ *     2026-06-15 -- see `poll_for_ack_at()`.)
  *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
  *     are [UNTESTED] / [PAPER-ONLY]: the exact wire bytes they issue are
  *     transcribed literally from
@@ -235,8 +235,9 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
  * @return ::ALP_ERR_INVAL if @p ctx or @p data is `NULL`, or @p len is not
  *   exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES;
  *   ::ALP_ERR_NOT_READY if @p ctx has not been initialised;
- *   ::ALP_ERR_OUT_OF_RANGE / ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated
- *   from the underlying I2C transfer or the post-write ACK poll;
+ *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the underlying I2C
+ *   transfer or the post-write ACK poll (this function has no offset
+ *   parameter to be out of range, so ::ALP_ERR_OUT_OF_RANGE never occurs);
  *   ::ALP_OK once the page write has been ACKed and the write cycle has
  *   completed.
  */

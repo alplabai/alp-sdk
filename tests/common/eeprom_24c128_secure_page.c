@@ -8,22 +8,28 @@
  *
  * Unlike every other chips/ test in this repo, this file does NOT link
  * alp::sdk -- it compiles chips/eeprom_24c128/eeprom_24c128.c directly and
- * supplies its OWN recording-fake implementations of the three external
+ * supplies its OWN recording-fake implementations of the four external
  * symbols that file calls (alp_i2c_write, alp_i2c_write_read,
- * alp_delay_us), instead of the real backend. That is what makes the EXACT
- * wire bytes these two functions emit checkable at all: an earlier
- * revision of this file used bus == NULL as a NACK-equivalent double (the
- * technique tests/common/eeprom_24c128_read_identity.c still uses) and
- * could only check the argument/state contract, not the frame content --
- * and the frame content was wrong. eeprom_24c128_secure_page_write() put
- * the wrong selector in the wrong byte and overran the page by one byte;
+ * alp_delay_us, alp_delay_ms), instead of the real backend. That is what
+ * makes the EXACT wire bytes these two functions emit -- and their call
+ * ORDER -- checkable at all: an earlier revision of this file used
+ * bus == NULL as a NACK-equivalent double (the technique
+ * tests/common/eeprom_24c128_read_identity.c still uses) and could only
+ * check the argument/state contract, not the frame content or ordering --
+ * and both were wrong. eeprom_24c128_secure_page_write() put the wrong
+ * selector in the wrong byte and overran the page by one byte;
  * eeprom_24c128_secure_page_lock() put the Lock Status selector in the
  * SECOND pointer byte instead of the first (turning the "lock" into a data
  * write that clobbers schema_version + sku[0]) and polled for a
  * write-complete ACK by writing to the page it had just locked, which a
  * CORRECT lock always NAKs -- so a real bench run would have reported a
- * successful lock as ALP_ERR_TIMEOUT. None of that was visible to the
- * NULL-bus double; all of it is caught here.
+ * successful lock as ALP_ERR_TIMEOUT. A monotonic sequence counter
+ * (`g_seq`) stamped into every recorded write, write_read, AND
+ * alp_delay_ms call additionally proves the lock command happens BEFORE
+ * the post-lock wait, which happens BEFORE the confirming Lock Status
+ * read -- catching, e.g., a confirm read moved ahead of the lock write
+ * (which would read the PRE-lock state and misreport every real first-time
+ * lock as ALP_ERR_IO) or the wait being silently deleted.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON
@@ -43,33 +49,48 @@
 #include "test_assert.h"
 
 /* ------------------------------------------------------------------------
- * Recording fakes for alp_i2c_write() / alp_i2c_write_read() / alp_delay_us().
- * `alp_i2c_t` is opaque (`struct alp_i2c` is never defined in the public
- * header), so `ctx.bus` below just needs to be a non-NULL pointer these
- * fakes never dereference -- it is not linked against any real backend.
+ * Recording fakes for alp_i2c_write() / alp_i2c_write_read() /
+ * alp_delay_us() / alp_delay_ms(). `alp_i2c_t` is opaque (`struct alp_i2c`
+ * is never defined in the public header), so `ctx.bus` below just needs to
+ * be a non-NULL pointer these fakes never dereference -- it is not linked
+ * against any real backend.
  * ------------------------------------------------------------------------ */
 
 #define REC_MAX_CALLS 8
 #define REC_MAX_LEN   72 /* >= 2 + EEPROM_24C128_SECURE_PAGE_BYTES */
 
 typedef struct {
-	uint8_t addr;
-	uint8_t data[REC_MAX_LEN];
-	size_t  len;
+	uint8_t  addr;
+	uint8_t  data[REC_MAX_LEN];
+	size_t   len;
+	uint32_t seq; /* this call's position in g_seq's global order */
 } rec_call_t;
+
+/* Monotonic counter stamped into every recorded event (a write, a
+ * write_read, or an alp_delay_ms call) -- the only way to check ORDER
+ * across the three, since g_writes[]/g_write_reads[] are otherwise
+ * independent arrays. 0 is never a real seq value (rec_reset() sets the
+ * counter to 0 and the first ++g_seq lands on 1), so a delay record whose
+ * seq is still 0 means alp_delay_ms was never called. */
+static uint32_t g_seq;
 
 static rec_call_t   g_writes[REC_MAX_CALLS];
 static int          g_write_count;
 static rec_call_t   g_write_reads[REC_MAX_CALLS]; /* records only the WRITE half */
 static int          g_write_read_count;
+static uint32_t     g_delay_ms_total; /* sum of every alp_delay_ms() argument */
+static uint32_t     g_delay_seq;      /* seq of the LAST alp_delay_ms call; 0 = never called */
 static uint8_t      g_next_read_byte;
 static alp_status_t g_next_write_status;
 static alp_status_t g_next_write_read_status;
 
 static void rec_reset(void)
 {
+	g_seq                    = 0;
 	g_write_count            = 0;
 	g_write_read_count       = 0;
+	g_delay_ms_total         = 0;
+	g_delay_seq              = 0;
 	g_next_read_byte         = 0;
 	g_next_write_status      = ALP_OK;
 	g_next_write_read_status = ALP_OK;
@@ -82,6 +103,7 @@ alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, si
 		g_writes[g_write_count].addr = addr;
 		memcpy(g_writes[g_write_count].data, data, len);
 		g_writes[g_write_count].len = len;
+		g_writes[g_write_count].seq = ++g_seq;
 		g_write_count++;
 	}
 	return g_next_write_status;
@@ -99,6 +121,7 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
 		g_write_reads[g_write_read_count].addr = addr;
 		memcpy(g_write_reads[g_write_read_count].data, wdata, wlen);
 		g_write_reads[g_write_read_count].len = wlen;
+		g_write_reads[g_write_read_count].seq = ++g_seq;
 		g_write_read_count++;
 	}
 	if (rdata != NULL && rlen > 0) {
@@ -110,6 +133,19 @@ alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
 void alp_delay_us(uint32_t us)
 {
 	(void)us;
+	++g_seq; /* keeps ordering consistent even though no test asserts on this one */
+}
+
+/* eeprom_24c128_secure_page_lock() waits via alp_delay_ms(), not
+ * alp_delay_us() -- MAJOR 3 in review: a fixed ~20 ms wait belongs on the
+ * yielding primitive, not the non-yielding busy-wait alp_delay_us() is
+ * documented for. This is the double for that wait; MAJOR 1 in review was
+ * that an earlier revision of this file recorded nothing here at all, so
+ * deleting the wait from the driver still passed every assertion. */
+void alp_delay_ms(uint32_t ms)
+{
+	g_delay_ms_total += ms;
+	g_delay_seq = ++g_seq;
 }
 
 /* Initialised ctx via the real eeprom_24c128_init() (so its own probe read
@@ -228,7 +264,17 @@ static void test_write_frame_is_exact(void)
  * schema_version + sku[0]). And exactly ONE alp_i2c_write call total: no
  * address-only poll against the page this call just locked (BLOCKER 3: that
  * poll is itself a write to the Secure Data Page, which a CORRECT lock
- * always NAKs, so it would report success as ALP_ERR_TIMEOUT). */
+ * always NAKs, so it would report success as ALP_ERR_TIMEOUT).
+ *
+ * Also asserts the two properties review found missing from an earlier
+ * revision of this test (MAJOR 1 / MAJOR 2): the post-lock wait actually
+ * happens (deleting it from the driver drops g_delay_seq back to 0 and
+ * fails the `g_delay_seq != 0` assertion below), and the three events
+ * happen in the right ORDER -- lock write, then the wait, then the
+ * confirming read (reordering the confirm read ahead of the write, which
+ * would misreport every real first-time lock as ALP_ERR_IO by reading the
+ * PRE-lock state, fails the seq-ordering assertion below even though the
+ * frame content and call counts stay identical). */
 static void test_lock_frame_is_exact_and_never_polls_the_page(void)
 {
 	eeprom_24c128_t ctx = make_ctx();
@@ -251,6 +297,20 @@ static void test_lock_frame_is_exact_and_never_polls_the_page(void)
 	ALP_ASSERT_EQ_INT(g_write_reads[0].len, 2);
 	ALP_ASSERT_EQ_INT(g_write_reads[0].data[0], 0x04);
 	ALP_ASSERT_EQ_INT(g_write_reads[0].data[1], 0x00);
+
+	/* MAJOR 1: the wait that replaced the removed ACK poll actually ran, and
+     * waited at least as long as the driver's own write-cycle budget
+     * (EEPROM_WRITE_POLL_STEP_US / 1000 * EEPROM_WRITE_POLL_MAX = 1 ms * 20
+     * = 20 ms; those two constants are private to eeprom_24c128.c, so this
+     * is a literal cross-check against the driver's documented budget, not
+     * an include). */
+	ALP_ASSERT_TRUE(g_delay_seq != 0);
+	ALP_ASSERT_TRUE(g_delay_ms_total >= 20u);
+
+	/* MAJOR 2: ORDER, not just presence/count -- the lock write happens
+     * before the wait, which happens before the confirming read. */
+	ALP_ASSERT_TRUE(g_writes[0].seq < g_delay_seq);
+	ALP_ASSERT_TRUE(g_delay_seq < g_write_reads[0].seq);
 }
 
 static void test_lock_reports_io_when_confirm_reads_unlocked(void)

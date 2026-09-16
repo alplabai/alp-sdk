@@ -74,8 +74,10 @@
 #ifndef ALP_HW_INFO_H
 #define ALP_HW_INFO_H
 
-#include <stddef.h> /* offsetof -- see alp_secure_page_mirror_t's field-offset static_asserts */
+#include <stdbool.h> /* alp_secure_page_mirror_classify()'s return type */
+#include <stddef.h>  /* offsetof -- see alp_secure_page_mirror_t's field-offset static_asserts */
 #include <stdint.h>
+#include <string.h> /* memcpy -- alp_secure_page_mirror_classify() */
 
 #include "alp/peripheral.h" /* alp_status_t */
 
@@ -244,6 +246,53 @@ typedef struct alp_secure_page_mirror_t {
 	                                                  placement as @ref
 	                                                  alp_hw_info_eeprom_t::crc32. */
 } alp_secure_page_mirror_t;
+
+/**
+ * @brief Does @p page (exactly `sizeof(alp_secure_page_mirror_t)` raw bytes,
+ *   as read fresh off the Secure Data Page) parse as a valid mirror?
+ *
+ * The ONE implementation of this struct's forward-compatibility rule
+ * (see @ref alp_secure_page_mirror_t's doc comment and
+ * EEPROM-MANIFEST-SPEC.md's Secure Data Page section in alp-sdk-internal):
+ * refuse -- never guess -- when `magic` or `schema_version` don't match
+ * exactly what this build understands, in either direction.  The mirror
+ * equivalent of `alp_hw_info_classify_manifest()`
+ * (src/zephyr/hw_info_zephyr.c) for the array manifest.
+ *
+ * Header-only `static inline`, following this SDK's existing pattern for
+ * small, dependency-free helpers (see `<alp/protocol/crc16.h>`): no chip
+ * driver or backend needs to link against it, and it stays trivially
+ * includable from host-side tooling and unit tests with no Zephyr / OS
+ * dependency.  An earlier revision duplicated this logic once per
+ * provisioning-example build mode, each casting the raw device buffer
+ * directly to `const alp_secure_page_mirror_t *` -- a real bug, not just
+ * duplication: `eeprom_24c128_identity_t::secure_page` sits at a
+ * 1-byte-aligned offset inside a struct with no stronger alignment
+ * guarantee, so that cast is a misaligned access this struct's own
+ * 4-byte-aligned fields (`mfg_year`, `crc32`) do not tolerate.  This
+ * function copies through `memcpy` into @p out instead, which -- being a
+ * real `alp_secure_page_mirror_t` the caller declared -- carries the
+ * type's actual alignment.
+ *
+ * @param[in]  page  Exactly `sizeof(alp_secure_page_mirror_t)` (64) bytes
+ *   read fresh off the device.  May be misaligned (e.g. a byte array
+ *   embedded in another struct); never dereferenced as anything but
+ *   `const uint8_t *`.
+ * @param[out] out   Populated with a properly-aligned copy of @p page's
+ *   contents on success; left untouched on failure.
+ * @return true only when both `magic == ALP_SECURE_PAGE_MAGIC` and
+ *   `schema_version == ALP_SECURE_PAGE_SCHEMA_VERSION`.
+ */
+static inline bool alp_secure_page_mirror_classify(const uint8_t            *page,
+                                                   alp_secure_page_mirror_t *out)
+{
+	alp_secure_page_mirror_t m;
+	memcpy(&m, page, sizeof(m));
+	if (m.magic != ALP_SECURE_PAGE_MAGIC) return false;
+	if (m.schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) return false;
+	*out = m;
+	return true;
+}
 
 /**
  * @brief Combined runtime board info as returned by @ref alp_hw_info_read.

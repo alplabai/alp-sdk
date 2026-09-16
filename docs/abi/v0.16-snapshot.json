@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-15",
+  "generated": "2026-09-16",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -10693,6 +10693,10 @@
         "alp_hw_info_read": {
           "hash": "d02a9525f7e742f6",
           "signature": "alp_status_t alp_hw_info_read(alp_hw_info_t *out);"
+        },
+        "alp_secure_page_mirror_classify": {
+          "hash": "c60a242b9fb6abf9",
+          "signature": "static inline bool alp_secure_page_mirror_classify(const uint8_t *page, alp_secure_page_mirror_t *out);"
         },
         "alp_soc_info_read": {
           "hash": "f803d1d960a8ef81",
