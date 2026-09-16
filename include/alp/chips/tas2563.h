@@ -862,7 +862,7 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
  *        (0x11, read-only, SLASET3D §7.5.19 Table 7-119, p.73).
  *
  * This answers a DIFFERENT question from @ref tas2563_read_faults'
- * @ref TAS2563_FAULT_TDM_CLOCK: that bit is a LATCHED history of clock
+ * @ref TAS2563_FAULT_TDM_CLOCK -- that bit is a LATCHED history of clock
  * faults, cleared only by @ref tas2563_clear_faults.  It latches on
  * every TDM clock fault regardless of `INT_MASK0[2]`; unmasking that bit
  * via @ref tas2563_configure_fault_pin (#2140) only routes the fault to
@@ -888,8 +888,8 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
  *   with nothing driving SBCLK/FSYNC reads exactly this state, with no
  *   special-casing needed to recognise it.
  *
- * @par Datasheet self-contradiction, same shape as @ref
- *   tas2563_configure_i2s' rate mapping but on the READ side this time.
+ * @par Datasheet self-contradiction, on the READ side this time.
+ *   The same shape as @ref tas2563_configure_i2s' rate mapping.
  *   §7.4.2 Table 7-23 "PCM Audio Sample Rates" (p.40) and Table 7-24
  *   "PCM SBCLK to FSYNC Ratio" (pp.40-41) disagree with Table 7-119 --
  *   the register's OWN field description -- at the edges of both
