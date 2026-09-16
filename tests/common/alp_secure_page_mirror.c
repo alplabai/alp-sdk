@@ -171,6 +171,94 @@ static void test_provisioned_page_is_not_blank(void)
 	ALP_ASSERT_TRUE(!mirror_is_blank(page));
 }
 
+/* ---- alp_secure_page_mirror_classify() ----
+ *
+ * Previously had NO runtime coverage anywhere: the provisioning example's
+ * three build modes are all `build_only: true` in testcase.yaml, and this
+ * file only exercised the struct/CRC/blank-detect layer.  That gap is why
+ * the misaligned-cast bug (device-read bytes and the compiled-in blob both
+ * cast straight to `const alp_secure_page_mirror_t *`) survived review of
+ * the wire-format fix uncaught -- these tests close it. */
+
+static void build_valid_mirror(uint8_t page[sizeof(alp_secure_page_mirror_t)])
+{
+	alp_secure_page_mirror_t m;
+	memset(&m, 0, sizeof(m));
+	m.magic          = ALP_SECURE_PAGE_MAGIC;
+	m.schema_version = ALP_SECURE_PAGE_SCHEMA_VERSION;
+	memcpy(m.sku, "E1M-AEN401", sizeof("E1M-AEN401"));
+	memcpy(m.hw_rev, "r1", sizeof("r1"));
+	memcpy(m.serial, "TEST-0001", sizeof("TEST-0001"));
+	m.mfg_year  = 2026;
+	m.mfg_month = 3;
+	m.mfg_day   = 1;
+	memcpy(page, &m, sizeof(m));
+}
+
+static void test_classify_accepts_valid_mirror(void)
+{
+	uint8_t page[sizeof(alp_secure_page_mirror_t)];
+	build_valid_mirror(page);
+
+	alp_secure_page_mirror_t out;
+	memset(&out, 0xAA, sizeof(out)); /* poison -- classify must overwrite all of it */
+	ALP_ASSERT_TRUE(alp_secure_page_mirror_classify(page, &out));
+	ALP_ASSERT_EQ_INT(out.magic, ALP_SECURE_PAGE_MAGIC);
+	ALP_ASSERT_EQ_INT(out.schema_version, ALP_SECURE_PAGE_SCHEMA_VERSION);
+	ALP_ASSERT_EQ_INT(memcmp(out.sku, "E1M-AEN401", sizeof("E1M-AEN401")), 0);
+}
+
+static void test_classify_refuses_wrong_magic(void)
+{
+	uint8_t page[sizeof(alp_secure_page_mirror_t)];
+	build_valid_mirror(page);
+	memset(page, 0xFF, 4); /* corrupt magic -- looks like an erased page */
+
+	alp_secure_page_mirror_t out;
+	ALP_ASSERT_TRUE(!alp_secure_page_mirror_classify(page, &out));
+}
+
+/* Forward AND backward direction: a schema_version this build does not
+ * have explicit code for must be refused whether it is higher (a future
+ * layout this build predates) or lower (a version 0 never existed) --
+ * the forward-compatibility rule stated in this struct's own doc comment
+ * and EEPROM-MANIFEST-SPEC.md, and the one place a locked page's reader
+ * bug is unfixable. */
+static void test_classify_refuses_unrecognised_schema_version_both_directions(void)
+{
+	uint8_t                  page[sizeof(alp_secure_page_mirror_t)];
+	alp_secure_page_mirror_t out;
+
+	build_valid_mirror(page);
+	page[4] = (uint8_t)(ALP_SECURE_PAGE_SCHEMA_VERSION + 1); /* higher */
+	ALP_ASSERT_TRUE(!alp_secure_page_mirror_classify(page, &out));
+
+	build_valid_mirror(page);
+	page[4] = 0; /* lower */
+	ALP_ASSERT_TRUE(!alp_secure_page_mirror_classify(page, &out));
+}
+
+/* THE regression test for the misaligned-cast bug (review MAJOR 4):
+ * embed a valid mirror at a 1-byte-aligned offset inside a larger buffer,
+ * mirroring eeprom_24c128_identity_t's actual layout (`secure_page_valid`
+ * is a `bool` at offset 0, `secure_page[64]` at offset 1 -- alignment 1
+ * throughout). A pointer straight into the middle of `holder` below is
+ * guaranteed misaligned for a 4-byte-aligned type; classify() must still
+ * produce the right answer because it goes through `memcpy`, never a
+ * cast. */
+static void test_classify_works_on_a_misaligned_source_buffer(void)
+{
+	uint8_t holder[1 + sizeof(alp_secure_page_mirror_t)];
+	holder[0] = 0xAA; /* stands in for eeprom_24c128_identity_t::secure_page_valid */
+	build_valid_mirror(holder + 1);
+
+	const uint8_t           *misaligned = holder + 1; /* offset 1 -- not 4-byte aligned */
+	alp_secure_page_mirror_t out;
+	ALP_ASSERT_TRUE(alp_secure_page_mirror_classify(misaligned, &out));
+	ALP_ASSERT_EQ_INT(out.mfg_year, 2026); /* the uint16_t field UBSan flags on a bad cast */
+	ALP_ASSERT_EQ_INT(memcmp(out.sku, "E1M-AEN401", sizeof("E1M-AEN401")), 0);
+}
+
 int main(void)
 {
 	test_struct_size();
@@ -180,6 +268,11 @@ int main(void)
 	test_blank_page_all_ff();
 	test_blank_page_all_zero_is_also_blank();
 	test_provisioned_page_is_not_blank();
+
+	test_classify_accepts_valid_mirror();
+	test_classify_refuses_wrong_magic();
+	test_classify_refuses_unrecognised_schema_version_both_directions();
+	test_classify_works_on_a_misaligned_source_buffer();
 
 	ALP_TEST_SUMMARY();
 }
