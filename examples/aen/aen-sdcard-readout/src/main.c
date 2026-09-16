@@ -11,10 +11,13 @@
  * and nothing that could touch a byte on whatever card is in the slot.
  *
  * EVK ROUTING: on the E1M EVK the microSD sits on the SDIO bus behind a
- * 74LVC157 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21), and BOTH
- * are CC3501E-side on this module (metadata/e1m_modules/aen/
- * from-cc3501e.tsv) -- so the card is electrically disconnected from the SoC
- * until something drives the mux over the coprocessor's inter-chip bridge.
+ * 74LVC157/74LV3257 mux with an ENABLE (E1M IO20) and a SELECT (E1M IO21).
+ * ENABLE is CC3501E-side on both hardware revisions (metadata/e1m_modules/
+ * aen/from-cc3501e.tsv) -- so the card is electrically disconnected from the
+ * SoC until something drives the mux ENABLE over the coprocessor's
+ * inter-chip bridge. SELECT is revision-dependent: CC3501E-side on r1
+ * (metadata/e1m_modules/aen/hw-revisions.yaml `pad_route_overrides`), but
+ * unrouted and hardware-strapped on r2 -- not CC3501E-side there at all.
  * THAT WAS THIS APP'S OWN GAP UNTIL NOW: earlier revisions had no GPIO code
  * at all, so a standalone run measured a controller with the card unreachable
  * and could not tell that apart from a real disk fault.  This revision brings
@@ -543,14 +546,14 @@ static cc3501e_t cc35_fw;
  * settle requirement). */
 #define SD_MUX_SETTLE_MS 10u
 
-/* SD_RST (P14_2) -- index [3] in the board overlay's `alp,pin-array` node
+/* SD_RST (P14_2) -- index [2] in the board overlay's `alp,pin-array` node
  * (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay). A native
  * Alif GPIO, NOT a CC3501E-proxied one -- unlike the mux ENABLE above, this
  * pin is reached through the ordinary Alif GPIO backend (gpio14), so it
  * needs no bridge and no route-table entry. Raw index, not an
  * ALP_E1M_GPIO_* macro, for the same reason CC3501E_BRIDGE_PIN_* are raw
  * indices: this pin is SoM-internal, not an E1M edge pad. */
-#define SD_RST_PIN_ID 3u
+#define SD_RST_PIN_ID 2u
 
 /* Reset-pulse timings, taken verbatim from vendor Linux's
  * arch/arm/mach-ensemble/sdhci-alif-reset.c (an arch_initcall that runs
