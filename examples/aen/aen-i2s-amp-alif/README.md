@@ -43,8 +43,18 @@ init, so nothing drives P9_3/4/5 at all. `main.c` detects this at compile
 time (`DT_NODE_HAS_STATUS(I2S_NODE, okay)`) and prints why, then exits with
 `RESULT SKIPPED` instead of touching the Zephyr I2S API.
 
-**To exercise this node once U46 has actually been reworked** on the
-physical board under test, the single documented switch:
+**To exercise this node once U46 is a 3257-type bus switch** (a
+same-family part swap alone removes the contention hazard below,
+regardless of which rail powers it -- this app never drives EN or SEL
+itself, and tests only the SoC's own `i2s3` controller, not the amps).
+Amp audibility is a separate, stricter condition this app does not
+check: on `e1m-aen-evk-03` (2026-09-15), a fitted 3257-type part's VCC
+was moved to `+3V3` between a silent run and an audible run -- not
+established as the only difference between the two (a switch rated
+for 1.8 V VCC is the untested alternative), and even then disabling
+the mux or selecting M.2 (`/E`/`S` HIGH) is untested -- see
+`include/alp/boards/alp_e1m_evk.h`'s I2S mux block.
+The single documented switch to re-enable this node:
 
 ```bash
 west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
@@ -52,7 +62,7 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
     -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
 ```
 
-## Status (with the node re-enabled post-rework)
+## Status (with the node re-enabled, contention hazard removed)
 
 **TX path WORKING on E8 (RESULT PASS):** `i2s_configure(TX)` / `i2s_write` ×4 /
 `i2s_trigger(START)` / `i2s_trigger(DRAIN)` all return 0 and the FIFO drains **with
@@ -74,15 +84,31 @@ divides it down to SCLK — **this example does no raw register poke**. The driv
 `clock_control` calls still tolerate `-ENOSYS`/`-ENOTSUP` so the same source builds
 on SoCs whose clockctrl lacks `.set_rate` (e.g. `native_sim`).
 
-> **For AUDIBLE amplifier output (bench-pending — not driver bugs):**
-> 1. **74LVC157 mux → TAS2563:** the I2S3 signal reaches the two TAS2563 amps
->    through a 2:1 mux. **Both mux pins are CC3501E-proxied, not Alif pins** —
->    `/E` = IO8 → **CC3501E GPIO_30** and `S` = IO13 → **CC3501E GPIO_13**, per
->    `metadata/e1m_modules/E1M-AEN801.yaml`'s `pad_routes`. Driving either is a
->    bridge transaction, so the CC3501E link has to be up first. (An earlier
->    version of this line called `/E` "Alif P7.1, drivable via GPIO"; that was
->    wrong, and it mattered — it implied the mux could be enabled without the
->    bridge.) The mux must route to the amps.
+> **For AUDIBLE amplifier output (not driver bugs; this example does not
+> exercise the amps at all — see `include/alp/boards/alp_e1m_evk.h`'s I2S
+> mux block for the full finding):**
+> 1. **U46 mux → TAS2563, part AND rail both matter:** the I2S3 signal
+>    reaches the two TAS2563 amps through a 2:1 mux (U46). The as-built
+>    `74LVC157ABQ,115` is a one-way mux and can NEVER pass this direction
+>    at any VCC (undervoltage is not the problem for that part — its VCC
+>    range is 1.2-3.6 V). U46 must be REPLACED with a 3257-type bus switch
+>    AND that switch's VCC must be on `+3V3` — on `e1m-aen-evk-03`
+>    (2026-09-15), a fitted 3257-type part's VCC was moved from `+VIO`
+>    (1.8 V, silent) to `+3V3` (audible) — not established as the only
+>    difference between the two runs. `S` = IO13 →
+>    **CC3501E GPIO_13**, both hw revisions; `/E` is REVISION-DEPENDENT —
+>    Alif P7.1 (direct GPIO) on r1, **CC3501E GPIO_30** on r2 — per
+>    `metadata/e1m_modules/E1M-AEN801.yaml`'s `pad_routes` /
+>    `metadata/e1m_modules/aen/hw-revisions.yaml`. Driving a CC3501E-side
+>    pin is a bridge transaction, so the CC3501E link has to be up first
+>    on r2. (An earlier version of this line called `/E` "Alif P7.1,
+>    drivable via GPIO" unconditionally; that was wrong for r2 boards,
+>    and it mattered — it implied the mux could be enabled without the
+>    bridge there.) The mux must route to the amps. The same
+>    `e1m-aen-evk-03` run also showed an open TDM clock-error latch
+>    during playback and open issue #2146 (amps auto-shut down ~1 s
+>    after I2S stops, stay off after restart) — a working mux does not
+>    mean the audio path is otherwise clean.
 > 2. **TAS2563 config:** the amps need their I2C ACTIVE-mode config (done by
 >    `examples/peripheral-io/i2c-device-hub`) + a speaker on the output.
 > 3. **Exact sample rate:** the bit-clock divider (`CLKCTL_PER_SLV` `I2S3_CTRL`) is

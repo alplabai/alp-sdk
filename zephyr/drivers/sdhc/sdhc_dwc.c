@@ -525,13 +525,10 @@ static void sdhc_dwc_read_response(struct dwc_sdhc_regs *regs, struct sdhc_comma
 		cmd->response[3] = regs->DWC_SDHC_RESP67_R;
 
 		if (IS_ENABLED(CONFIG_SDHC_RSP_136_HAS_CRC)) {
-			for (int i = 0; i < 4; i++) {
-				cmd->response[i] <<= 8;
-				if (i != 3) {
-					cmd->response[i] |=
-						cmd->response[i + 1] >> 24;
-				}
-			}
+			/* See sdhc_dwc_realign_r2_response() (sdhc_dwc.h) for why the
+			 * shift walks downward and carries from the next LOWER word.
+			 */
+			sdhc_dwc_realign_r2_response(cmd->response);
 		}
 	} else {
 		cmd->response[0] = regs->DWC_SDHC_RESP01_R;

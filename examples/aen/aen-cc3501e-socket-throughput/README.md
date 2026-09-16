@@ -11,6 +11,20 @@ build-time-credential convention is copied from it).
 
 ## What this measures, and why it exists
 
+> **Erratum.** Every `~980 KB/s` figure in this section was measured (or
+> derived) against a bridge that trusted a level-only READY gate --
+> effectively near-zero inter-phase settles.  With the current
+> add-only-delay READY gate (chips/cc3501e/cc3501e_core.c's
+> cc3501e_reply_gate() -- READY can only ADD to a settle, never shorten it)
+> and this app's own READY-off default on the R2 module (see the section
+> below), each frame instead pays
+> `CC3501E_PHASE_SETTLE_US`-class fixed settles (>= ~950 us/frame), which
+> `~980 KB/s` is arithmetically incompatible with.  **run9** measured
+> **469 KB/s at a 4 KiB `SOCK_RECV`** with the READY gate off -- that is
+> the number to trust until this section is re-measured and rewritten
+> against the current default.  It is left below for its account of the
+> `k_uptime_get()` timer-floor artifact, which is still correct.
+
 A previous sweep (`aen-cc3501e-command-sweep`'s Part 2) reported
 `STREAM_WRITE` throughput as **104 KB/s at 64 bytes** and **250 KB/s at 256
 bytes**. Those numbers were never rates — they were an artifact of the
@@ -231,6 +245,17 @@ that underruns its TX FIFO deasserts its own chip-select mid-frame) —
 running this app's read loop from a faster cache-on/DTCM path than every
 other AEN801 bench app that has measured this link would produce a number
 nobody else's run is comparable to.
+
+### READY gate is off by default on this board
+
+`cc3501e_bridge_bringup()` (`src/cc3501e_bridge.c`) does not open a READY
+pin: on e1m-aen-evk-01 the candidate pin (Alif P2_6) is the EVK's Arduino
+CK_RST net, not the CC3501E's real GPIO17 READY signal (E1M pad G3 / IO16
+per `metadata/e1m_modules/aen/from-cc3501e.tsv`), so `cc3501e_request()`
+always uses its fixed inter-phase settle instead of gating on that pin.
+Bench evidence (run8): trusting that pin left station connect unable to
+associate in 4 of 4 boots; leaving it unwired as this app does, 5 of 7
+associated on the same firmware.
 
 ## Build
 
