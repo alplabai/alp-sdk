@@ -15,14 +15,23 @@
  * ==================================================================
  *
  * FIFO/interrupt-driven (no DMA subsystem needed).  alp-sdk edits beyond this
- * provenance header cover the clock path and, as of issue #2137, two RX
- * ISR/recovery bug fixes:
+ * provenance header cover the clock path, issue #2137's two RX ISR/recovery
+ * bug fixes, and issue #2149's TX-underrun clock-keep-alive fix:
  *   - the clock path: the driver calls clock_control_set_rate() to program
  *     the I2Sx bit-clock divider off the 76.8 MHz CGU master source enabled
  *     by the Tier-1.5 clockctrl west-patch (zephyr/patches/zephyr/
  *     0001-clock_control_alif-master-source-expmst-i2s-setrate.patch), and
  *     tolerates -ENOSYS/-ENOTSUP from clock_control_configure()/set_rate()
  *     on SoCs whose clockctrl lacks those ops (e.g. native_sim);
+ *   - 64-bit host builds: `mem_block_size` is `size_t`, not `uint32_t`, so it
+ *     matches queue_get()'s `size_t *` parameter, and the rate argument to
+ *     clock_control_set_rate() casts through `uintptr_t` before the
+ *     pointer-typed clock_control_subsys_rate_t. Both are no-ops on the
+ *     32-bit M55 target, where size_t and uintptr_t are already 32-bit.
+ *     Without them tests/unit/i2s_dw_underrun -- the first suite to compile
+ *     this driver AS-IS on native_sim/native/64 -- fails the build on
+ *     -Werror=incompatible-pointer-types and -Werror=int-to-pointer-cast
+ *     (issue #2149);
  *   - the RX IRQ handler's two error exits (a failed k_mem_slab_alloc() for
  *     the next block, and a failed queue_put() of the one just filled) now
  *     free the block they would otherwise have orphaned instead of leaking
@@ -33,7 +42,40 @@
  *     STOP/DRAIN/DROP/PREPARE reset this field either) survived into the
  *     freshly allocated block, and the first ISR after the restart
  *     delivered it as a "complete" frame that was never actually filled
- *     (issue #2137).
+ *     (issue #2137);
+ *   - i2s_tx_irq_handler()'s queue-empty underrun branch (the one that sets
+ *     I2S_STATE_ERROR because queue_get() came back empty, NOT the
+ *     already-ERROR or last_block exits) now leaves CER.CLKEN set instead
+ *     of calling i2s_clock_disable() -- it still disables the TX
+ *     channel/block/interrupt and still sets I2S_STATE_ERROR exactly as
+ *     before. A codec on the other end of this bus (TAS2563 on the E1M-EVK)
+ *     reads bit-clock loss as its cue to latch SHUTDOWN, and #2137's own
+ *     ERROR->READY->RUNNING recovery through PREPARE + a retried write
+ *     silently succeeds while the amp stays off, since nothing in that path
+ *     ever re-arms it (issue #2149). Every OTHER path that tears the stream
+ *     down -- STOP/DRAIN/DROP (i2s_dw_trigger()), PM suspend
+ *     (i2s_disable_controller()) -- still gates the clock exactly as
+ *     before, including DROP out of ERROR (the abandon-the-stream case),
+ *     so a stream nobody is trying to recover from no longer leaves the
+ *     clock running forever. tx_stream_start()'s own restart, in turn, now
+ *     skips reprogramming clock_control_set_rate()/CCR when a one-shot flag
+ *     (clk_restart_skip_ok, set ONLY by the underrun exit above and cleared
+ *     by every path that can invalidate it -- see the field's own comment)
+ *     confirms CER.CLKEN is already set for the exact restart the flag was
+ *     armed for, instead of writing CCR live, which its own doc comment
+ *     says must be done with the clock disabled.
+ *     Known remaining gap, NOT fixed here: rx_stream_start() reprograms
+ *     clock_control_set_rate()/CCR unconditionally on every RX start,
+ *     including while the shared clock may already be running (e.g. a TX
+ *     stream left it on via this very keep-clock underrun exit), and
+ *     rx_stream_disable() unconditionally clears CER on every RX overrun --
+ *     either one on a controller sharing this clock with an active TX
+ *     stream would reprogram or kill the TX bit clock out from under it.
+ *     This driver is half-duplex in practice (dev_data->dir is a single
+ *     field, not per-direction), which narrows but does not eliminate the
+ *     exposure: the two directions can still be reconfigured back to back
+ *     on the same physical clock. Refs #2150 (tracking issue already
+ *     filed; out of scope for this TX-underrun fix).
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
  * fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
@@ -90,8 +132,23 @@ struct stream {
 	struct    i2s_config cfg;
 	struct dw_ring_buf mem_block_queue;
 	void      *mem_block;
-	uint32_t  mem_block_size;
+	size_t             mem_block_size;
 	uint32_t  mem_block_offset;
+	/* alp-sdk issue #2149 (round 2): one-shot flag. Set ONLY by
+	 * i2s_tx_irq_handler()'s queue-empty underrun exit, the single path
+	 * that leaves CER.CLKEN set on purpose. tx_stream_start() consults it
+	 * (paired with i2s_clock_is_enabled()) to skip reprogramming
+	 * clock_control_set_rate()/CCR on a restart that immediately follows
+	 * that exact exit, then consumes (clears) it unconditionally either
+	 * way. Every path that can invalidate the assumption before that
+	 * restart happens -- a rate change (i2s_dw_configure()),
+	 * rx_stream_start()/_disable() touching the SAME shared clock, any
+	 * tx_stream_disable_ex() that actually gates the clock, PM suspend,
+	 * and PM resume -- also clears it, so a stale flag can never arm the
+	 * skip against the wrong divider (round-2 review finding 1: the
+	 * earlier clk_frame_freq_configured cache this replaces was never
+	 * cleared on any of those paths). */
+	bool      clk_restart_skip_ok;
 	bool      last_block;
 	bool      master;
 	int (*stream_start)(struct stream *strm, const struct device *dev);
@@ -126,8 +183,8 @@ static int32_t i2s_configure_clocksource(bool enable,
 		/* WSS = 32 */
 		sclk = 2 * clock_cycles[i2s->cfg.wss_len] * (sample_rate);
 
-		ret = clock_control_set_rate(i2s->clk_dev,
-				i2s->clkid, (clock_control_subsys_rate_t)sclk);
+		ret = clock_control_set_rate(
+		    i2s->clk_dev, i2s->clkid, (clock_control_subsys_rate_t)(uintptr_t)sclk);
 		/* alp-sdk: on the Alif clockctrl the I2S bit-clock divider in
 		 * CLKCTL_PER_SLV I2Sx_CTRL is now programmed from `sclk` by the
 		 * clockctrl .set_rate (Tier-1.5 west-patch
@@ -238,6 +295,16 @@ static int i2s_dw_configure(const struct device *dev, enum i2s_dir dir,
 	    stream->state != I2S_STATE_READY) {
 		LOG_ERR("invalid state");
 		return -EINVAL;
+	}
+
+	/* alp-sdk issue #2149 (round 2): a rate change invalidates TX's
+	 * one-shot restart-skip flag -- the divider a restart would skip
+	 * reprogramming was derived from the OLD frame_clk_freq. Only the TX
+	 * stream's flag is ever consulted (by tx_stream_start()), but this
+	 * runs for either dir before stream->cfg is overwritten below, so it
+	 * also catches the frame_clk_freq==0 "drop config" early return. */
+	if (dir == I2S_DIR_TX && i2s_cfg->frame_clk_freq != stream->cfg.frame_clk_freq) {
+		stream->clk_restart_skip_ok = false;
 	}
 
 	stream->master = true;
@@ -427,6 +494,7 @@ static const struct i2s_driver_api i2s_dw_driver_api = {
 };
 
 static void tx_stream_disable(struct stream *stream, const struct device *dev);
+static void tx_stream_disable_ex(struct stream *stream, const struct device *dev, bool keep_clock);
 static void rx_stream_disable(struct stream *stream, const struct device *dev);
 
 static void i2s_tx_irq_handler(const struct device *dev)
@@ -441,7 +509,11 @@ static void i2s_tx_irq_handler(const struct device *dev)
 	const uint8_t *buff = stream->mem_block; /* Assign the buffer base address */
 	uint8_t last_lap = 0, bytes = 0, cnt = 0, frames = 0;
 	uint32_t offset = stream->mem_block_offset;
-	uint32_t size = stream->mem_block_size;
+	size_t         size   = stream->mem_block_size;
+	/* alp-sdk issue #2149: set true ONLY on the queue-empty underrun exit
+	 * below. Every other tx_disable entry (already-ERROR, last_block)
+	 * keeps disabling the clock exactly as before. */
+	bool keep_clock = false;
 	int ret;
 
 	/* Stop transmission if there was an error */
@@ -534,6 +606,19 @@ static void i2s_tx_irq_handler(const struct device *dev)
 				stream->state = I2S_STATE_READY;
 			} else {
 				stream->state = I2S_STATE_ERROR;
+				/* alp-sdk issue #2149: this is the underrun exit --
+				 * the queue genuinely ran dry mid-playback, not a
+				 * caller-requested stop/drain/drop. Keep CER.CLKEN
+				 * set so the codec on the other end of this I2S bus
+				 * never sees bit-clock loss and never latches its
+				 * own SHUTDOWN; the TX channel/block/interrupt are
+				 * still disabled below exactly as before. */
+				keep_clock = true;
+				/* alp-sdk issue #2149 (round 2): arm the
+				 * one-shot restart-skip flag ONLY here -- the
+				 * only place CER.CLKEN is deliberately left
+				 * set. See struct stream's own comment. */
+				stream->clk_restart_skip_ok = true;
 			}
 			goto tx_disable;
 		}
@@ -542,7 +627,7 @@ static void i2s_tx_irq_handler(const struct device *dev)
 	return;
 
 tx_disable:
-	tx_stream_disable(stream, dev);
+	tx_stream_disable_ex(stream, dev, keep_clock);
 }
 
 static void i2s_rx_irq_handler(const struct device *dev)
@@ -780,6 +865,7 @@ static int i2s_dw_initialize(const struct device *dev)
 static int rx_stream_start(struct stream *stream, const struct device *dev)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
+	struct i2s_dw_data *const dev_data = dev->data;
 	int ret;
 
 	ret = k_mem_slab_alloc(stream->cfg.mem_slab, &stream->mem_block,
@@ -803,6 +889,16 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	 * delivered silently, on literally the first frame after the
 	 * restart. */
 	stream->mem_block_offset = 0;
+
+	/* alp-sdk issue #2149 (round 2): RX reprograms the SAME shared
+	 * bit-clock divider below (i2s_configure_clocksource() +
+	 * i2s_configure_clock()) unconditionally, regardless of whether the
+	 * clock is already running -- e.g. a TX stream may have left it on
+	 * via this fix's own keep-clock underrun exit. Invalidate TX's
+	 * one-shot skip flag here or a TX restart that follows this RX start
+	 * could wrongly skip reprogramming onto RX's divider (round-2 review
+	 * finding 1). */
+	dev_data->tx.clk_restart_skip_ok = false;
 
 	/* Configure the I2S Peripheral Clock */
 	i2s_configure_clocksource(true, i2s, stream->cfg.frame_clk_freq);
@@ -835,6 +931,36 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
 	int ret;
+	/* alp-sdk issue #2149: a restart following the ISR underrun path
+	 * (i2s_tx_irq_handler() -> PREPARE -> here) can find CER.CLKEN
+	 * already set -- deliberately, since the underrun exit is now the
+	 * one case that leaves it that way on purpose. i2s_configure_clock()
+	 * below programs CCR (SCLKG/WSS), and its own doc comment (i2s_dw.h)
+	 * says that must be done "with Clock disabled"; note CLKEN is
+	 * already 1 from i2s_dw_initialize() (i2s_enable_controller() ->
+	 * i2s_clock_enable()) onward, so in practice CCR has ALWAYS been
+	 * written with the clock already live on every first start since
+	 * boot, not only on this restart path -- this comment used to imply
+	 * otherwise (round-2 review finding 5). What actually changes here is
+	 * narrower: avoid RE-touching the divider during underrun recovery
+	 * specifically, since re-deriving the same divider gains nothing and
+	 * a live CCR rewrite is not something to do without silicon proof
+	 * it's glitch-free. Chosen: skip both clock_control_set_rate() and
+	 * i2s_configure_clock() on a restart that immediately follows the
+	 * ISR's own keep-clock underrun exit -- tracked by the one-shot
+	 * clk_restart_skip_ok flag (round-2 review finding 1; NOT a
+	 * remembered sample rate, which was the earlier, buggier form of
+	 * this guard -- see the field's own comment), consumed/cleared on
+	 * this very call so a stale flag can never arm the skip on an
+	 * unrelated restart. i2s->cfg.wss_len/sclkg (CCR's other inputs) are
+	 * fixed device-config constants no i2s_dw_configure() call ever
+	 * changes, so a rate change is exactly what clears the flag (see
+	 * i2s_dw_configure()) -- the flag being set already implies
+	 * frame_clk_freq is unchanged.
+	 * BENCH-VERIFY: confirm no BCLK/WS glitch on the restart path that
+	 * DOES still reprogram (a genuine rate change between PREPARE and
+	 * this START, not exercised by the #2137 recovery flow). */
+	bool clk_needs_reprogram;
 
 	ret = queue_get(&stream->mem_block_queue, &stream->mem_block,
 			&stream->mem_block_size);
@@ -845,8 +971,16 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 
 	stream->mem_block_offset = 0;
 
-	/* Configure the I2S Peripheral Clock */
-	i2s_configure_clocksource(true, i2s, stream->cfg.frame_clk_freq);
+	clk_needs_reprogram = !stream->clk_restart_skip_ok || !i2s_clock_is_enabled(i2s);
+	/* alp-sdk issue #2149 (round 2): the flag is one-shot -- consume
+	 * (clear) it on this restart regardless of which branch below
+	 * actually runs. Only another queue-empty underrun exit re-arms it. */
+	stream->clk_restart_skip_ok = false;
+
+	if (clk_needs_reprogram) {
+		/* Configure the I2S Peripheral Clock */
+		i2s_configure_clocksource(true, i2s, stream->cfg.frame_clk_freq);
+	}
 
 	/* Reset the Tx FIFO */
 	i2s_tx_fifo_reset(i2s);
@@ -855,7 +989,9 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 	i2s_tx_config_wlen(i2s, stream->cfg.word_size);
 
 	/* Enable Master Clock */
-	i2s_configure_clock(i2s);
+	if (clk_needs_reprogram) {
+		i2s_configure_clock(i2s);
+	}
 	i2s_clock_enable(i2s);
 
 	/* Disable Rx Channel */
@@ -879,6 +1015,7 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 static void rx_stream_disable(struct stream *stream, const struct device *dev)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
+	struct i2s_dw_data *const dev_data = dev->data;
 
 	if (stream->mem_block != NULL) {
 		k_mem_slab_free(stream->cfg.mem_slab, stream->mem_block);
@@ -894,9 +1031,28 @@ static void rx_stream_disable(struct stream *stream, const struct device *dev)
 	i2s_disable_rx_interrupt(i2s);
 	/* Disable Master Clock */
 	i2s_clock_disable(i2s);
+	/* alp-sdk issue #2149 (round 2): the shared clock is now genuinely
+	 * off -- invalidate TX's one-shot restart-skip flag so a later TX
+	 * restart reprograms instead of skipping onto a clock that just got
+	 * gated (round-2 review finding 1). */
+	dev_data->tx.clk_restart_skip_ok = false;
 }
 
-static void tx_stream_disable(struct stream *stream, const struct device *dev)
+/*
+ * alp-sdk issue #2149: shared body for every TX teardown path that goes
+ * through tx_stream_disable()/_ex(). keep_clock is true for exactly one
+ * caller -- i2s_tx_irq_handler()'s queue-empty underrun exit -- so a codec
+ * relying on this I2S bus for its own bit clock does not see clock loss
+ * and latch SHUTDOWN mid-playback. Every other caller of this pair
+ * (STOP/DRAIN/DROP via the tx_stream_disable() wrapper below, and the
+ * ISR's own already-ERROR and last_block exits) passes/keeps false and
+ * gates the clock exactly as before -- including DROP out of ERROR, so an
+ * abandoned stream does not leave the clock running forever. PM suspend
+ * (i2s_disable_controller(), below CONFIG_PM_DEVICE) never goes through
+ * this pair at all -- it clears CER.CLKEN itself, unconditionally, exactly
+ * as before this change.
+ */
+static void tx_stream_disable_ex(struct stream *stream, const struct device *dev, bool keep_clock)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
 
@@ -912,8 +1068,23 @@ static void tx_stream_disable(struct stream *stream, const struct device *dev)
 	/* Disable Tx Interrupt */
 	i2s_disable_tx_interrupt(i2s);
 
-	/* Disable Master Clock */
-	i2s_clock_disable(i2s);
+	if (!keep_clock) {
+		/* Disable Master Clock */
+		i2s_clock_disable(i2s);
+		/* alp-sdk issue #2149 (round 2): every teardown that actually
+		 * gates the clock here (STOP/DRAIN/DROP via the
+		 * tx_stream_disable() wrapper, and the ISR's own
+		 * already-ERROR/last_block exits) must also invalidate the
+		 * one-shot restart-skip flag -- only the ISR's keep-clock
+		 * exit sets it, and it must never survive past a real
+		 * clock-off (round-2 review finding 1). */
+		stream->clk_restart_skip_ok = false;
+	}
+}
+
+static void tx_stream_disable(struct stream *stream, const struct device *dev)
+{
+	tx_stream_disable_ex(stream, dev, false);
 }
 
 static void rx_queue_drop(struct stream *stream)
@@ -968,6 +1139,11 @@ static int i2s_suspend(const struct device *dev)
 	i2s_disable_rx_interrupt(i2s);
 
 	i2s_disable_controller(dev);
+	/* alp-sdk issue #2149 (round 2): suspend gates the clock
+	 * unconditionally -- invalidate TX's one-shot restart-skip flag so
+	 * resume/restart reprograms instead of trusting a stale flag from
+	 * before the suspend (round-2 review finding 1). */
+	data->tx.clk_restart_skip_ok = false;
 
 	if (i2s->clk_dev != NULL) {
 		ret = clock_control_off(i2s->clk_dev, i2s->clkid);
@@ -1024,6 +1200,12 @@ static int i2s_resume(const struct device *dev)
 	}
 
 	i2s_enable_controller(dev);
+	/* alp-sdk issue #2149 (round 2): resume re-enables CLKEN
+	 * unconditionally without reprogramming the divider -- invalidate
+	 * TX's one-shot restart-skip flag defensively so the next
+	 * tx_stream_start() always reprograms rather than trusting a flag
+	 * that predates the suspend (round-2 review finding 1). */
+	data->tx.clk_restart_skip_ok = false;
 
 	i2s_set_interrupt_mask(data->irq_mask_cache, i2s);
 
