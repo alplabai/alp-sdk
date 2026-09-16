@@ -50,6 +50,41 @@ else
 	APP_DIR="$ALP_SDK_DIR/$APP"
 fi
 
+# Zephyr auto-applies a per-app devicetree overlay ONLY when its filename
+# matches the fully-qualified board target with '/' replaced by '_'. This
+# script never forces EXTRA_DTC_OVERLAY_FILE, so an app that ships overlays
+# for a DIFFERENT target builds with NO overlay applied and says nothing --
+# the silent-misbuild hazard bench-env.sh's AEN_BOARD note describes. That
+# is the failure mode #2094 exists to stop: a bench operator gets a binary
+# shaped for the wrong module and no indication of it, and the first
+# symptom is a peripheral behaving oddly on real silicon.
+#
+# Refuse that build. An app with NO boards/ overlays at all is fine -- there
+# is nothing to miss -- so only a non-empty overlay set that lacks THIS
+# board's file is an error.
+BOARD_OVERLAY="${BOARD//\//_}.overlay"
+if [ -d "$APP_DIR/boards" ]; then
+	have_overlay=0
+	for ovl in "$APP_DIR"/boards/*.overlay; do
+		[ -e "$ovl" ] || continue
+		have_overlay=1
+		break
+	done
+	if [ "$have_overlay" = 1 ] && [ ! -e "$APP_DIR/boards/$BOARD_OVERLAY" ]; then
+		echo "build: $NAME ships board overlays, but none for $BOARD" >&2
+		echo "build:   expected: $APP_DIR/boards/$BOARD_OVERLAY" >&2
+		echo "build:   present:" >&2
+		for ovl in "$APP_DIR"/boards/*.overlay; do
+			[ -e "$ovl" ] || continue
+			echo "build:     $(basename "$ovl")" >&2
+		done
+		echo "build: refusing to build with no overlay applied (alp-sdk#2094)." >&2
+		echo "build: to build anyway, name the board explicitly:" >&2
+		echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
+		exit 2
+	fi
+fi
+
 cd "$ALP_SDK_DIR"
 echo ">>> build $NAME  (overlay: auto-applied by FQ board name)" >&2
 # The build output is filtered through grep for readability, which means the
