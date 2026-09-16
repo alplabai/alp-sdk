@@ -137,7 +137,7 @@ e1m_routes:
     - { e1m: E1M_GPIO_IO20, macro: EVK_PIN_SDIO_MUX_EN,   active_low: true,
         doc: "SDIO 74LVC157 /E; drive low to enable mux." }
     - { e1m: E1M_GPIO_IO21, macro: EVK_PIN_SDIO_MUX_SEL,
-        doc: "SDIO 74LVC157 S; 0 = M.2 E-key SDIO, 1 = microSD slot." }
+        doc: "SDIO mux S; 0 = microSD slot, 1 = M.2 E-key SDIO (works only via the 3257-type bus-switch rework, see alp_e1m_evk.h). r2: not firmware-driven (dispatch: unrouted, #1854); strapped via R198/R27 to header P18, P18 open pulls S low = microSD. r1: firmware-drivable via CC3501E GPIO_30 (hw-revisions.yaml pad_route_overrides) -- never drive it LOW with P18's jumper fitted, R198 ties GPIO_30 to P18 pin 2/+3V3 through the jumper." }
     - { e1m: E1M_GPIO_IO22, macro: EVK_PIN_PCIE_MUX_PD,
         doc: "Drive HIGH to power down all four PCIe lane muxes." }
     - { e1m: E1M_GPIO_IO23, macro: EVK_PIN_PCIE_MUX_SEL,
@@ -369,8 +369,8 @@ overlay_pins:
 mux_enums:
   - name: evk_sdio_select_t
     values:
-      - { name: EVK_SDIO_M2E_KEY, value: 0, doc: "MUX_SEL.SDIO low." }
-      - { name: EVK_SDIO_SDCARD,  value: 1, doc: "MUX_SEL.SDIO high." }
+      - { name: EVK_SDIO_SDCARD,  value: 0, doc: "MUX_SEL.SDIO low." }
+      - { name: EVK_SDIO_M2E_KEY, value: 1, doc: "MUX_SEL.SDIO high." }
   - name: evk_i2s_select_t
     values:
       - { name: EVK_I2S_AMP,     value: 0, doc: "I2S0 routed to the TAS2563 amplifiers." }

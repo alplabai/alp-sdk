@@ -154,6 +154,14 @@ config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
 	  cannot see this Kconfig value and fall back to the same 100 ms
 	  default compiled into chips/cc3501e/cc3501e_core.c.
 
+	  CAVEAT: an opted-in ctx->ready_pin (see <alp/chips/cc3501e/core.h>)
+	  is read WHILE this lock is held, and can busy-wait up to
+	  CC3501E_READY_WAIT_US per reply-phase gate.  A slow/stuck READY
+	  line lengthens the hold time other callers wait against this same
+	  timeout -- "safe to opt in" for ready_pin means safe for link
+	  timing only (it can never clock a phase early), not immunity from
+	  lock contention with other callers.
+
 config ALP_SDK_CC3501E_POLL_GAP_MIN_MS
 	int "poll_by_repeat() initial retry gap floor (ms)"
 	default 1
