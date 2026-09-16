@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-15",
+  "generated": "2026-09-16",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -3064,16 +3064,12 @@
           "hash": "fb2c7865402a3d53",
           "value": "2u"
         },
-        "CC3501E_LINK_LOG_READY_AFTER": {
-          "hash": "8d277733bf9b784b",
-          "value": "0x2u"
-        },
-        "CC3501E_LINK_LOG_READY_BEFORE": {
-          "hash": "02c29fbcf35027df",
+        "CC3501E_LINK_LOG_READY_AT_FAILURE": {
+          "hash": "be22fbdaa5291c34",
           "value": "0x1u"
         },
-        "CC3501E_LINK_LOG_READY_PROVEN": {
-          "hash": "84c17b063e6b185c",
+        "CC3501E_LINK_LOG_READY_WAS_STUCK": {
+          "hash": "61f3d363b64ca1f0",
           "value": "0x4u"
         },
         "CC3501E_LINK_LOG_REPLY_HDR_VALID": {
