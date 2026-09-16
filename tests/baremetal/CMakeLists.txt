@@ -106,3 +106,19 @@ target_compile_features(alp_test_baremetal_alp_secure_page_mirror PRIVATE c_std_
 
 add_test(NAME alp_test_baremetal_alp_secure_page_mirror
          COMMAND alp_test_baremetal_alp_secure_page_mirror)
+
+# examples/aen/aen-eeprom-provision mode 3 (ALP_LOCK_SECURE_PAGE) lock-time
+# gates -- shared with tests/yocto/ for the same reason as
+# alp_test_baremetal_alp_secure_page_mirror above.
+add_executable(alp_test_baremetal_aen_eeprom_provision_lock_gates
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/aen_eeprom_provision_lock_gates.c
+)
+target_link_libraries(alp_test_baremetal_aen_eeprom_provision_lock_gates PRIVATE alp::sdk)
+target_include_directories(alp_test_baremetal_aen_eeprom_provision_lock_gates PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/../yocto
+)
+target_compile_features(alp_test_baremetal_aen_eeprom_provision_lock_gates PRIVATE c_std_99)
+
+add_test(NAME alp_test_baremetal_aen_eeprom_provision_lock_gates
+         COMMAND alp_test_baremetal_aen_eeprom_provision_lock_gates)

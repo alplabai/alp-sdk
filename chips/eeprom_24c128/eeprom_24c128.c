@@ -28,6 +28,19 @@
 #define EEPROM_WRITE_POLL_MAX     20
 #define EEPROM_WRITE_POLL_STEP_US 1000u
 
+/** One-shot post-lock wait budget for @ref eeprom_24c128_secure_page_lock, in
+ *  milliseconds -- see that function's use of this constant for why it can't
+ *  poll instead. Deliberately its OWN named constant, not
+ *  `(EEPROM_WRITE_POLL_STEP_US / 1000u) * EEPROM_WRITE_POLL_MAX` computed
+ *  inline: that expression is integer division of two independently-tunable
+ *  constants, and any EEPROM_WRITE_POLL_STEP_US below 1000 makes the whole
+ *  term round to 0 -- silently deleting the wait, so the confirming Lock
+ *  Status read below hits a device still mid-write-cycle and this function
+ *  reports an error for a lock that actually succeeded, on a call the header
+ *  says must not be retried. Value: 20 ms, same as today's
+ *  EEPROM_WRITE_POLL_STEP_US * EEPROM_WRITE_POLL_MAX. */
+#define EEPROM_LOCK_WAIT_MS 20u
+
 /* @p addr is the 7-bit address to poll -- ctx->addr (0x50 range) after a
  * main-array write, or ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET (0x58
  * range) after a Secure Data Page write.  Both headers decode onto the
@@ -264,7 +277,7 @@ alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx)
      * that primitive is a non-yielding busy-wait (Zephyr's k_busy_wait()),
      * and 20 ms of that stalls every equal-or-lower-priority thread on
      * this core for the whole window (issue #1621's defect class). */
-	alp_delay_ms((EEPROM_WRITE_POLL_STEP_US / 1000u) * (uint32_t)EEPROM_WRITE_POLL_MAX);
+	alp_delay_ms(EEPROM_LOCK_WAIT_MS);
 
 	/* Confirm, don't trust: re-read Lock Status rather than trusting the
      * write's own ACK -- the only safe state check (see

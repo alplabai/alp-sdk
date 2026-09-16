@@ -122,9 +122,12 @@ if(DEFINED ALP_SECURE_PAGE_BIN)
 "\n"
 "/* Plain bytes, alignment 1 -- same shape as alp_manifest_blob in\n"
 " * manifest_blob.h.\n"
-" * src/main.c never casts this array to alp_secure_page_mirror_t; every\n"
-" * reader either walks it as uint8_t or memcpys it into an aligned local,\n"
-" * so no alignment attribute is needed here.\n"
+" * src/main.c never casts THIS PARTICULAR array (alp_secure_page_blob) to\n"
+" * alp_secure_page_mirror_t; every reader either walks it as uint8_t or\n"
+" * memcpys it into an aligned local, so no alignment attribute is needed\n"
+" * here. This is not a claim about the rest of src/main.c or any other\n"
+" * generated array -- each buffer in that file is swept for the same\n"
+" * cast-vs-memcpy bug independently; see its own comments.\n"
 " */\n"
 "static const uint8_t alp_secure_page_blob[ALP_SECURE_PAGE_BLOB_LEN] = { ${_sp_c} };\n")
     message(STATUS "aen-eeprom-provision: baked ${_sp_len}-byte secure-page mirror from ${ALP_SECURE_PAGE_BIN}")
@@ -153,4 +156,15 @@ endif()
 # gate this flag alone does not bypass.
 if(ALP_LOCK_SECURE_PAGE)
     target_compile_definitions(app PRIVATE ALP_LOCK_SECURE_PAGE=1)
+endif()
+
+# Operator ATTESTATION that a real cold power cycle (rail at 0.0 V, not a
+# warm reset) happened between the mode 2 write and this mode 3 run.  A
+# SEPARATE flag from ALP_LOCK_SECURE_PAGE on purpose: a Flow C RAM-run over
+# SWD never interrupts the rail, so mode 3 cannot detect a skipped cold
+# cycle mechanically -- see src/main.c's comment on this flag for why it is
+# an attestation, not proof, and where the real evidence (bench log power
+# telemetry) belongs. Off by default; mode 3 refuses to lock without it.
+if(ALP_SECURE_PAGE_COLD_CYCLED)
+    target_compile_definitions(app PRIVATE ALP_SECURE_PAGE_COLD_CYCLED=1)
 endif()

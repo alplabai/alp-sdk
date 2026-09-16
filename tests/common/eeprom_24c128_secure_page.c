@@ -137,10 +137,10 @@ void alp_delay_us(uint32_t us)
 }
 
 /* eeprom_24c128_secure_page_lock() waits via alp_delay_ms(), not
- * alp_delay_us() -- MAJOR 3 in review: a fixed ~20 ms wait belongs on the
+ * alp_delay_us() -- a fixed ~20 ms wait belongs on the
  * yielding primitive, not the non-yielding busy-wait alp_delay_us() is
- * documented for. This is the double for that wait; MAJOR 1 in review was
- * that an earlier revision of this file recorded nothing here at all, so
+ * documented for. This is the double for that wait; an
+ * earlier revision of this file recorded nothing here at all, so
  * deleting the wait from the driver still passed every assertion. */
 void alp_delay_ms(uint32_t ms)
 {
@@ -230,7 +230,7 @@ static void test_write_wrong_len_rejected(void)
  * data bytes -- the SAME 2-byte pointer convention
  * eeprom_24c128_read_identity() uses (bench-verified), not the 3-byte
  * "selector + op-code + offset" frame an earlier revision emitted (which
- * rotated every byte of the page by one on write -- BLOCKER 2 in review). */
+ * rotated every byte of the page by one on write). */
 static void test_write_frame_is_exact(void)
 {
 	eeprom_24c128_t ctx = make_ctx();
@@ -259,15 +259,15 @@ static void test_write_frame_is_exact(void)
  *
  * {0x04, 0x00, 0xFF} -- Lock Status selector in the FIRST pointer byte
  * (matching eeprom_24c128_read_identity()'s convention for the SAME
- * selector), not the second (BLOCKER 1: a selector in the second byte turns
+ * selector), not the second (a selector in the second byte turns
  * this into a plain data write at Secure-Data-Page offset 4, clobbering
  * schema_version + sku[0]). And exactly ONE alp_i2c_write call total: no
- * address-only poll against the page this call just locked (BLOCKER 3: that
+ * address-only poll against the page this call just locked -- that
  * poll is itself a write to the Secure Data Page, which a CORRECT lock
- * always NAKs, so it would report success as ALP_ERR_TIMEOUT).
+ * always NAKs, so it would report success as ALP_ERR_TIMEOUT.
  *
  * Also asserts the two properties review found missing from an earlier
- * revision of this test (MAJOR 1 / MAJOR 2): the post-lock wait actually
+ * revision of this test: the post-lock wait actually
  * happens (deleting it from the driver drops g_delay_seq back to 0 and
  * fails the `g_delay_seq != 0` assertion below), and the three events
  * happen in the right ORDER -- lock write, then the wait, then the
@@ -298,16 +298,19 @@ static void test_lock_frame_is_exact_and_never_polls_the_page(void)
 	ALP_ASSERT_EQ_INT(g_write_reads[0].data[0], 0x04);
 	ALP_ASSERT_EQ_INT(g_write_reads[0].data[1], 0x00);
 
-	/* MAJOR 1: the wait that replaced the removed ACK poll actually ran, and
-     * waited at least as long as the driver's own write-cycle budget
-     * (EEPROM_WRITE_POLL_STEP_US / 1000 * EEPROM_WRITE_POLL_MAX = 1 ms * 20
-     * = 20 ms; those two constants are private to eeprom_24c128.c, so this
-     * is a literal cross-check against the driver's documented budget, not
-     * an include). */
+	/* The wait that replaced the removed ACK poll actually ran, and
+     * waited at least as long as the driver's own post-lock wait budget
+     * (EEPROM_LOCK_WAIT_MS = 20 ms; private to eeprom_24c128.c, so this is a
+     * literal cross-check against the driver's documented budget, not an
+     * include. This used to be computed inline as
+     * (EEPROM_WRITE_POLL_STEP_US / 1000) * EEPROM_WRITE_POLL_MAX, integer
+     * division that rounds to 0 -- silently deleting the wait -- for any
+     * EEPROM_WRITE_POLL_STEP_US below 1000; it is now its own named,
+     * non-derived constant). */
 	ALP_ASSERT_TRUE(g_delay_seq != 0);
 	ALP_ASSERT_TRUE(g_delay_ms_total >= 20u);
 
-	/* MAJOR 2: ORDER, not just presence/count -- the lock write happens
+	/* ORDER, not just presence/count -- the lock write happens
      * before the wait, which happens before the confirming read. */
 	ALP_ASSERT_TRUE(g_writes[0].seq < g_delay_seq);
 	ALP_ASSERT_TRUE(g_delay_seq < g_write_reads[0].seq);

@@ -209,6 +209,17 @@ typedef struct alp_hw_info_eeprom_t {
  * from "padding here, one fewer padding byte there", which is exactly why
  * the two field-offset asserts exist as a second, independent check.
  *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 -- the Secure Data Page mirror format.  The chip driver's
+ *      own @par Verification status (include/alp/chips/eeprom_24c128.h) says
+ *      both @ref eeprom_24c128_secure_page_write and
+ *      @ref eeprom_24c128_secure_page_lock still need a real bench run before
+ *      the first production lock -- a format cannot be frozen [ABI-STABLE]
+ *      while the driver that writes it is unverified on silicon.  Promote
+ *      alongside that driver once bench-proven, per the v0.9 SoC-identity
+ *      block's precedent (documented at function granularity; see this
+ *      file's `alp_soc_info_read` / `alp_soc_secure_fw_ping`).
+ *
  * Forward/backward compatibility: a reader MUST parse this struct only when
  * `magic == ALP_SECURE_PAGE_MAGIC` AND `schema_version` is a value it has
  * explicit code for (today, only `1`) -- never attempt to interpret a
@@ -277,6 +288,11 @@ typedef struct alp_secure_page_mirror_t {
  *   contents on success; left untouched on failure.
  * @return true only when both `magic == ALP_SECURE_PAGE_MAGIC` and
  *   `schema_version == ALP_SECURE_PAGE_SCHEMA_VERSION`.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17, alongside @ref alp_secure_page_mirror_t -- see that
+ *      struct's doc comment for why the format (and therefore this
+ *      classifier) cannot be [ABI-STABLE] yet.
  */
 bool alp_secure_page_mirror_classify(const uint8_t *page, alp_secure_page_mirror_t *out);
 

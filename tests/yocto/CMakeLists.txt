@@ -94,6 +94,24 @@ target_compile_features(alp_test_alp_secure_page_mirror PRIVATE c_std_99)
 add_test(NAME alp_test_alp_secure_page_mirror
          COMMAND alp_test_alp_secure_page_mirror)
 
+# examples/aen/aen-eeprom-provision mode 3 (ALP_LOCK_SECURE_PAGE) lock-time
+# gates: array-manifest-vs-mirror cross-check (BLOCKER 1), the
+# ALP_SECURE_PAGE_COLD_CYCLED attestation gate (BLOCKER 2), and the
+# post-lock payload re-verify (MAJOR 3).  Pure header logic, no chip driver
+# source needed -- same shape as alp_test_alp_secure_page_mirror above; see
+# the test file's header comment for why main.c itself can't be linked here.
+add_executable(alp_test_aen_eeprom_provision_lock_gates
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/aen_eeprom_provision_lock_gates.c
+)
+target_link_libraries(alp_test_aen_eeprom_provision_lock_gates PRIVATE alp::sdk)
+target_include_directories(alp_test_aen_eeprom_provision_lock_gates PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+target_compile_features(alp_test_aen_eeprom_provision_lock_gates PRIVATE c_std_99)
+
+add_test(NAME alp_test_aen_eeprom_provision_lock_gates
+         COMMAND alp_test_aen_eeprom_provision_lock_gates)
+
 # Shared errno -> alp_status_t baseline mapper (#630): the reviewed
 # baseline contract + the per-operation override mechanism (CAN's
 # EAGAIN-as-timeout worked example).  Pure POSIX <errno.h> + the header
