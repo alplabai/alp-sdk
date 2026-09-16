@@ -232,9 +232,10 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  * @note Ordering contract: mute any external amplifier before calling
  *   this function -- what happens to an amp still ACTIVE when the I2S
  *   clock stops is chip-specific, see its own driver.  On the Zephyr
- *   DesignWare I2S backend (`zephyr/drivers/i2s/i2s_dw.c`), the clock
- *   also stops on an underrun, not only a deliberate stop (#2149 tracks
- *   keeping it running across an underrun instead).  A far-end amplifier
+ *   DesignWare I2S backend (`zephyr/drivers/i2s/i2s_dw.c`), a deliberate
+ *   stop drops the clock, but since #2149 an underrun does not: the ISR's
+ *   underrun exit keeps `CER.CLKEN` set on that one path.  A far-end
+ *   amplifier
  *   may need re-arming after the first successful @ref alp_audio_out_write
  *   following a restart, while the stream keeps being fed -- see its
  *   chip driver (e.g. `tas2563_resume()`, `<alp/chips/tas2563.h>`).

@@ -944,11 +944,12 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   +100 ms poll, `0Ch` still at +0 ms -- and to still read `0Eh`
  *   (SHUTDOWN) 3000 ms after @ref alp_audio_out_stop with no restart,
  *   with no self-heal observed at 200/500/1500 ms restart gaps either
- *   (#2146).  The bit clock stops on every I2S stop path and on an
- *   underrun (`zephyr/drivers/i2s/i2s_dw.c` `tx_stream_disable()` calls
- *   `i2s_clock_disable()`; keeping the clock running across an underrun
- *   is tracked separately in #2149), so a restart after either needs
- *   this call to be heard again.
+ *   (#2146).  The bit clock stops on every deliberate I2S stop path
+ *   (`zephyr/drivers/i2s/i2s_dw.c` `tx_stream_disable()` calls
+ *   `i2s_clock_disable()`), so a restart after one needs this call to be
+ *   heard again.  Since #2149 a mid-playback underrun no longer stops it:
+ *   the ISR's underrun exit keeps `CER.CLKEN` set on that one path, so a
+ *   write gap alone no longer puts the amps into SHUTDOWN.
  *
  * @par Precondition: the TDM/I2S bit clock and FSYNC must already be
  *   running when this is called -- clearing the latch before the clock
