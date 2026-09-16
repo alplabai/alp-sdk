@@ -23,6 +23,15 @@
  *     0001-clock_control_alif-master-source-expmst-i2s-setrate.patch), and
  *     tolerates -ENOSYS/-ENOTSUP from clock_control_configure()/set_rate()
  *     on SoCs whose clockctrl lacks those ops (e.g. native_sim);
+ *   - 64-bit host builds: `mem_block_size` is `size_t`, not `uint32_t`, so it
+ *     matches queue_get()'s `size_t *` parameter, and the rate argument to
+ *     clock_control_set_rate() casts through `uintptr_t` before the
+ *     pointer-typed clock_control_subsys_rate_t. Both are no-ops on the
+ *     32-bit M55 target, where size_t and uintptr_t are already 32-bit.
+ *     Without them tests/unit/i2s_dw_underrun -- the first suite to compile
+ *     this driver AS-IS on native_sim/native/64 -- fails the build on
+ *     -Werror=incompatible-pointer-types and -Werror=int-to-pointer-cast
+ *     (issue #2149);
  *   - the RX IRQ handler's two error exits (a failed k_mem_slab_alloc() for
  *     the next block, and a failed queue_put() of the one just filled) now
  *     free the block they would otherwise have orphaned instead of leaking
@@ -123,7 +132,7 @@ struct stream {
 	struct    i2s_config cfg;
 	struct dw_ring_buf mem_block_queue;
 	void      *mem_block;
-	uint32_t  mem_block_size;
+	size_t    mem_block_size;
 	uint32_t  mem_block_offset;
 	/* alp-sdk issue #2149 (round 2): one-shot flag. Set ONLY by
 	 * i2s_tx_irq_handler()'s queue-empty underrun exit, the single path
@@ -175,7 +184,7 @@ static int32_t i2s_configure_clocksource(bool enable,
 		sclk = 2 * clock_cycles[i2s->cfg.wss_len] * (sample_rate);
 
 		ret = clock_control_set_rate(i2s->clk_dev,
-				i2s->clkid, (clock_control_subsys_rate_t)sclk);
+				i2s->clkid, (clock_control_subsys_rate_t)(uintptr_t)sclk);
 		/* alp-sdk: on the Alif clockctrl the I2S bit-clock divider in
 		 * CLKCTL_PER_SLV I2Sx_CTRL is now programmed from `sclk` by the
 		 * clockctrl .set_rate (Tier-1.5 west-patch
@@ -500,7 +509,7 @@ static void i2s_tx_irq_handler(const struct device *dev)
 	const uint8_t *buff = stream->mem_block; /* Assign the buffer base address */
 	uint8_t last_lap = 0, bytes = 0, cnt = 0, frames = 0;
 	uint32_t offset = stream->mem_block_offset;
-	uint32_t size = stream->mem_block_size;
+	size_t size = stream->mem_block_size;
 	/* alp-sdk issue #2149: set true ONLY on the queue-empty underrun exit
 	 * below. Every other tx_disable entry (already-ERROR, last_block)
 	 * keeps disabling the clock exactly as before. */
