@@ -44,6 +44,14 @@ cores:
     iot:
       wifi: true
       tls:  true
+    # Portable peripheral subsystems this app opens to bring the CC3501E
+    # bridge up (cc3501e_bridge_bringup(), #2112): SPI1 (inter-chip link)
+    # + the WIFI_EN/nRESET LP-GPIO control pins. Same as the
+    # examples/aen/aen-cc3501e-* board.yaml. The loader translates these
+    # to CONFIG_SPI=y / CONFIG_GPIO=y in alp.conf.
+    peripherals:
+      - spi
+      - gpio
 
 diagnostics:
   log_level: info

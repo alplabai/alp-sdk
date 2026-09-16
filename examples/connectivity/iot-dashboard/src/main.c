@@ -48,6 +48,7 @@
 #include "alp/peripheral.h"
 #include "alp/iot.h"
 #include "alp/chips/bme280.h"
+#include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template, #2112 */
 #include <alp/display.h>
 #include <alp/gui.h>
 
@@ -145,7 +146,18 @@ int main(void)
 
 	/* WiFi + MQTT connect.  On native_sim this drops to the
      * <alp/iot.h> NOSUPPORT stub -- the UI still runs against
-     * the in-memory dashboard_state_t. */
+     * the in-memory dashboard_state_t.
+     *
+     * On E1M-AEN801, alp_wifi_open() only resolves to the CC3501E backend
+     * once a live bridge is attached (#2112) -- bring it up first, the
+     * same copyable template every examples/aen/aen-cc3501e-* app uses.
+     * On native_sim this fails fast (ALP_ERR_NOT_PRESENT_ON_THIS_SOC --
+     * no SPI/GPIO backend matches that SoC ref) and alp_wifi_open() below
+     * still returns NULL, unchanged from before. */
+	static cc3501e_t s_bridge = { 0 };
+	alp_status_t     bridge_rc = cc3501e_bridge_bringup(&s_bridge);
+	LOG_INF("cc3501e_bridge_bringup -> %d", (int)bridge_rc);
+
 	alp_wifi_t *wifi = alp_wifi_open();
 	if (wifi) {
 		(void)alp_wifi_connect(wifi,
