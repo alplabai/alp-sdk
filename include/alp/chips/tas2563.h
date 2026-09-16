@@ -748,9 +748,11 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  * VBAT POR (`INT_MASK2` = `DFh`) -- SLASET3D §7.5.28-§7.5.31, p.77-80.
  * TDM clock error (`INT_MASK0[2]`) is the one bit `FCh` leaves masked,
  * so this function clears it explicitly (#2140) -- without that write,
- * @ref TAS2563_FAULT_TDM_CLOCK never latches into `INT_LTCH0[2]` and
- * @ref tas2563_read_faults reads it clear regardless of whether the
- * clock is present, stopped, or never valid.
+ * `INT_MASK` still gates the IRQZ pin only: @ref TAS2563_FAULT_TDM_CLOCK
+ * still latches into `INT_LTCH0[2]` and @ref tas2563_read_faults still
+ * reports it, but IRQ_N never asserts for a TDM clock fault, so a
+ * caller relying on the pin (rather than polling @ref
+ * tas2563_read_faults directly) never sees one.
  *
  * @param[in] ctx                  Initialised context.
  * @param[in] irq_n                Open GPIO handle bound to
@@ -816,15 +818,34 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  * Does not require a fault pin; the latched registers are readable
  * whether or not IRQ_N is wired.
  *
- * @note A masked event never latches at all, so this only ever reports
- *   what its `INT_MASK` register lets through.  At reset that is:
- *   over-temperature and over-current (`INT_MASK0` = `FCh`), VBAT
- *   brown-out and speaker open/short load (`INT_MASK1` = `A6h`), and
- *   VBAT POR (`INT_MASK2` = `DFh`) -- SLASET3D §7.5.28-§7.5.31,
- *   p.77-80.  TDM clock error (`INT_MASK0[2]`) is masked at reset and
- *   reads clear either way until something unmasks it; @ref
- *   tas2563_configure_fault_pin does so (#2140).  `INT_MASK3` (`FFh`)
- *   masks everything it covers, and nothing in this driver unmasks it.
+ * @note `INT_MASK` gates the IRQZ / fault pin, not the live or latched
+ *   readback.  SLASET3D §7.4.x (p.35): "the IRQZ pin will assert low if
+ *   the clock error interrupt mask register bit is set low
+ *   (INT_MASK[2])... The clock fault is also available for readback in
+ *   the live or latched fault status registers (INT_LIVE[2] and
+ *   INT_LTCH[2])" -- worded identically for over-temp (`INT_MASK[0]`)
+ *   and over-current (`INT_MASK[1]`).  A masked fault still sets its
+ *   `INT_LTCH` bit; this function reports it regardless of mask state.
+ *   Measured on `e1m-aen-evk-03` (`aen-evk-demo` phase 11, built at
+ *   `cfeafd148`, i.e. before #2140 unmasked anything): with
+ *   `INT_MASK0` at its POR value `FCh` (TDM clock error still masked),
+ *   the TDM clock-error bit latched in `INT_LTCH0` on both amps
+ *   (`tas2563_read_faults()` returned `0x80510004`) while `AMP_FAULT`
+ *   stayed high throughout -- latch set, pin silent.  @ref
+ *   tas2563_configure_fault_pin unmasking `INT_MASK0[2]` (#2140) only
+ *   changes whether TDM clock error also reaches the pin; it was
+ *   already visible to this function before that change.  Per-register
+ *   POR mask values, for reference: `INT_MASK0` = `FCh` (over-temp and
+ *   over-current unmasked to the pin, TDM clock masked to the pin),
+ *   `INT_MASK1` = `A6h` (VBAT brown-out / speaker open-short), and
+ *   `INT_MASK2` = `DFh` (VBAT POR) -- SLASET3D §7.5.28-§7.5.31,
+ *   p.77-80.  `INT_MASK3` (`FFh`) masks everything it covers from the
+ *   pin, and nothing in this driver unmasks it; those bits still latch
+ *   and this function still reports them.  Also remember the
+ *   read-clears-the-latch question the @warning above raises: if
+ *   reading really does clear `INT_LTCH`, a second call returning zero
+ *   is not evidence the first reading was spurious -- capture and keep
+ *   the first result rather than re-reading to "confirm" it.
  *
  * @param[in]  ctx        Initialised context.
  * @param[out] faults_out Receives the packed fault bitmask.
@@ -842,8 +863,10 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
  *
  * This answers a DIFFERENT question from @ref tas2563_read_faults'
  * @ref TAS2563_FAULT_TDM_CLOCK: that bit is a LATCHED history of clock
- * faults, cleared only by @ref tas2563_clear_faults and armed only once
- * @ref tas2563_configure_fault_pin has unmasked `INT_MASK0[2]` (#2140).
+ * faults, cleared only by @ref tas2563_clear_faults.  It latches on
+ * every TDM clock fault regardless of `INT_MASK0[2]`; unmasking that bit
+ * via @ref tas2563_configure_fault_pin (#2140) only routes the fault to
+ * IRQZ / `AMP_FAULT` as well, it does not change whether the latch sets.
  * This function is an unlatched, always-readable, live snapshot of the
  * detector's current state -- it answers "what is the clock doing right
  * now", not "did a clock fault ever happen".  Neither replaces the

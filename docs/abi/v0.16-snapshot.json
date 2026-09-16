@@ -7631,6 +7631,10 @@
           "hash": "42548fad01644ebf",
           "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
         },
+        "tas2563_read_tdm_detect": {
+          "hash": "1dec84db189195bd",
+          "signature": "alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out);"
+        },
         "tas2563_resume": {
           "hash": "2d4bace192240033",
           "signature": "alp_status_t tas2563_resume(const tas2563_t *ctx);"
@@ -7822,6 +7826,17 @@
             "alp_gpio_t *irq_n"
           ],
           "hash": "ff7d0ed9de3791da",
+          "kind": "struct"
+        },
+        "tas2563_tdm_detect_t": {
+          "definition": "typedef struct { bool clock_valid; uint32_t sbclk_fsync_ratio; uint32_t sample_rate_low_hz; uint32_t sample_rate_high_hz; } tas2563_tdm_detect_t;",
+          "fields": [
+            "bool clock_valid",
+            "uint32_t sbclk_fsync_ratio",
+            "uint32_t sample_rate_low_hz",
+            "uint32_t sample_rate_high_hz"
+          ],
+          "hash": "34a6bea1053f5109",
           "kind": "struct"
         },
         "tas2563_tuning_reg_t": {
