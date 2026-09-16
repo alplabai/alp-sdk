@@ -195,13 +195,18 @@ typedef struct alp_hw_info_eeprom_t {
  * static_asserts at the bottom of this header enforce both -- the overall
  * size AND (individually) that @ref alp_secure_page_mirror_t::mfg_year and
  * @ref alp_secure_page_mirror_t::crc32 land at their exact expected offsets,
- * not merely that the struct's total size comes out right.  Every field's
- * offset here lands on its own natural alignment boundary (the 16/12/23
- * string widths were chosen so this is true), so no compiler needs to
- * insert padding for this to hold on any target this SDK supports -- but a
- * total-size check alone cannot tell "no padding" apart from "padding here,
- * one fewer padding byte there", which is exactly why the two field-offset
- * asserts exist as a second, independent check.
+ * not merely that the struct's total size comes out right.  Every
+ * multi-byte integer field's offset here is a multiple of *its own
+ * alignment requirement* -- not of its own size; `sku[16]` sits at `0x05`,
+ * not a multiple of 16, but `char[]` has alignment 1 so that never
+ * mattered.  What actually has to line up is `mfg_year` (a `uint16_t`,
+ * alignment 2) landing on the even offset `0x38`, and `crc32` (a
+ * `uint32_t`, alignment 4) landing on the offset `0x3C` -- both multiples
+ * of 4.  The 16/12/23 string widths were chosen so this holds, meaning no
+ * compiler needs to insert padding for this struct on any target this SDK
+ * supports -- but a total-size check alone cannot tell "no padding" apart
+ * from "padding here, one fewer padding byte there", which is exactly why
+ * the two field-offset asserts exist as a second, independent check.
  *
  * Forward/backward compatibility: a reader MUST parse this struct only when
  * `magic == ALP_SECURE_PAGE_MAGIC` AND `schema_version` is a value it has

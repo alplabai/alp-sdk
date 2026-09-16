@@ -172,47 +172,48 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
 	return ALP_OK;
 }
 
-/* Secure Data Page write/lock op-codes, carried in the SECOND pointer byte.
- * docs/som-batch-provisioning-procedure.md §7 (alp-sdk-internal) describes
- * the write op-byte as "xxxx x00x" and the lock op-byte as "xxxx x10x" --
- * the identical two-bit pattern, in the identical bit position, that the
- * FIRST pointer byte already uses to select among the four read-only
- * objects above.  Reusing those named constants (rather than inventing a
- * second set of magic numbers) makes the reuse visible and keeps exactly
- * one place that spells out "0x00" / "0x04" for this address space. */
-#define EEPROM_SECURE_PAGE_OP_WRITE EEPROM_IDENTITY_SEL_SECURE_PAGE /* 0x00 */
-#define EEPROM_SECURE_PAGE_OP_LOCK  EEPROM_IDENTITY_SEL_LOCK_STATUS /* 0x04 */
-
-/* Compile-time proof that neither write op-code can ever collide with the
- * Device Configuration Register selector (0x06) -- see
+/* Compile-time proof that the write and lock selectors below can never
+ * equal the Device Configuration Register selector (0x06) -- see
  * eeprom_24c128_secure_page_write's and eeprom_24c128_secure_page_lock's
  * doc comments in the header for why a write must never reach that
  * selector: it lands on the SWP bit and permanently write-protects the
- * array, this page, and the register together. */
+ * array, this page, and the register together.  There is no separate
+ * "op-code" byte in this wire format -- see the review note below -- so
+ * this asserts the two literal selector values these functions hardcode. */
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-_Static_assert(EEPROM_SECURE_PAGE_OP_WRITE != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
-               "secure-page write op-code must never equal the device config selector");
-_Static_assert(EEPROM_SECURE_PAGE_OP_LOCK != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
-               "secure-page lock op-code must never equal the device config selector");
+_Static_assert(EEPROM_IDENTITY_SEL_SECURE_PAGE != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+               "secure-page write selector must never equal the device config selector");
+_Static_assert(EEPROM_IDENTITY_SEL_LOCK_STATUS != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+               "secure-page lock selector must never equal the device config selector");
 #endif
 
-alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx,
-                                             const uint8_t    data[EEPROM_24C128_SECURE_PAGE_BYTES])
+alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx, const uint8_t *data, size_t len)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	if (data == NULL) return ALP_ERR_INVAL;
+	/* Reject any length but the exact page size before it reaches the bus --
+     * a caller-suppliable `size_t` here (not a fixed-size array parameter,
+     * which decays to a pointer and would silently trust a too-short
+     * buffer) is what makes it structurally impossible for a short buffer
+     * to have this function memcpy past its end into a page that then gets
+     * permanently sealed. */
+	if (len != EEPROM_24C128_SECURE_PAGE_BYTES) return ALP_ERR_INVAL;
 
 	uint8_t alt_addr = (uint8_t)(ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET);
 
-	/* [sel][op][in-page offset][...64 bytes of page data]. The in-page
-     * offset is always 0 -- this function writes the whole page in one
-     * transaction and takes no offset parameter, so it can never be
-     * steered at a partial range (see the header's doc comment). */
-	uint8_t scratch[3 + EEPROM_24C128_SECURE_PAGE_BYTES];
+	/* {sel, in-page offset} + 64 data bytes -- the SAME 2-byte pointer
+     * convention eeprom_24c128_read_identity() already uses (bench-verified)
+     * to read this same object, not a 3-byte "selector + op-code + offset"
+     * scheme: docs/som-batch-provisioning-procedure.md §7's "second byte"
+     * phrasing counts the I2C device-address byte as the first byte, so its
+     * "xxxx x00x" IS this function's FIRST (and only) pointer byte, matching
+     * EEPROM_IDENTITY_SEL_SECURE_PAGE exactly -- there is no separate op-code
+     * byte.  An earlier revision of this function got that wrong, emitted a
+     * 3-byte pointer, and rotated every byte of the page by one on write. */
+	uint8_t scratch[2 + EEPROM_24C128_SECURE_PAGE_BYTES];
 	scratch[0] = EEPROM_IDENTITY_SEL_SECURE_PAGE;
-	scratch[1] = EEPROM_SECURE_PAGE_OP_WRITE;
-	scratch[2] = 0x00;
-	memcpy(scratch + 3, data, EEPROM_24C128_SECURE_PAGE_BYTES);
+	scratch[1] = 0x00;
+	memcpy(scratch + 2, data, EEPROM_24C128_SECURE_PAGE_BYTES);
 
 	alp_status_t s = alp_i2c_write(ctx->bus, alt_addr, scratch, sizeof(scratch));
 	if (s != ALP_OK) return s;
@@ -226,20 +227,31 @@ alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx)
 
 	uint8_t alt_addr = (uint8_t)(ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET);
 
-	/* [sel][op][don't-care][0xFF] -- the exact 4-byte lock command per
-     * docs/som-batch-provisioning-procedure.md §7 step 7. The 0xFF data
-     * byte is the trigger; it is not page data and must not be changed. */
-	uint8_t cmd[4] = {
-		EEPROM_IDENTITY_SEL_SECURE_PAGE,
-		EEPROM_SECURE_PAGE_OP_LOCK,
+	/* {sel, 0x00, 0xFF} -- selector 0x04 (Secure Page Lock Status, the SAME
+     * first-pointer-byte selector eeprom_24c128_read_identity() reads),
+     * second pointer byte 0x00, then the single 0xFF trigger byte per
+     * docs/som-batch-provisioning-procedure.md §7 step 7.  Not a
+     * "sel + op-code + don't-care + data" 4-byte frame -- see
+     * eeprom_24c128_secure_page_write's comment above for why there is no
+     * separate op-code byte in this wire format. */
+	uint8_t cmd[3] = {
+		EEPROM_IDENTITY_SEL_LOCK_STATUS,
 		0x00,
 		0xFFu,
 	};
 	alp_status_t s = alp_i2c_write(ctx->bus, alt_addr, cmd, sizeof(cmd));
 	if (s != ALP_OK) return s;
 
-	s = poll_for_ack_at(ctx, alt_addr);
-	if (s != ALP_OK) return s;
+	/* Deliberately NOT poll_for_ack_at(): that polls by issuing an
+     * address-only WRITE to the just-locked page, and this repo's own
+     * quoted datasheet text is "Any write instructions to the Secure Data
+     * Page will return No ACK from the device" -- so on a CORRECT lock,
+     * every poll attempt NACKs, the loop exhausts its budget, and this
+     * function would report ALP_ERR_TIMEOUT for the success case, with the
+     * header telling the caller not to retry a timeout here.  Wait out the
+     * same write-cycle budget once instead, with no further write to the
+     * page, then read Lock Status -- the only verdict this function needs. */
+	alp_delay_us(EEPROM_WRITE_POLL_STEP_US * (uint32_t)EEPROM_WRITE_POLL_MAX);
 
 	/* Confirm, don't trust: re-read Lock Status rather than trusting the
      * write's own ACK -- the only safe state check (see

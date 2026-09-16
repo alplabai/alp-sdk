@@ -6,14 +6,24 @@
  * eeprom_24c128_secure_page_lock() (both [UNTESTED] / [PAPER-ONLY] against
  * silicon -- see the header's @par Verification status block).
  *
- * Same bus=NULL-as-NACK-double technique as
- * tests/common/eeprom_24c128_read_identity.c: neither the Yocto nor the
- * baremetal test layer links a fake I2C backend, so the actual wire bytes
- * these two functions put on 0x58 are not observable from this layer --
- * that is covered instead by a real bench run before the first production
- * lock. What IS checkable here is the argument/state contract (NULL /
- * uninitialised refusals) and that a bus failure propagates rather than
- * being swallowed.
+ * Unlike every other chips/ test in this repo, this file does NOT link
+ * alp::sdk -- it compiles chips/eeprom_24c128/eeprom_24c128.c directly and
+ * supplies its OWN recording-fake implementations of the three external
+ * symbols that file calls (alp_i2c_write, alp_i2c_write_read,
+ * alp_delay_us), instead of the real backend. That is what makes the EXACT
+ * wire bytes these two functions emit checkable at all: an earlier
+ * revision of this file used bus == NULL as a NACK-equivalent double (the
+ * technique tests/common/eeprom_24c128_read_identity.c still uses) and
+ * could only check the argument/state contract, not the frame content --
+ * and the frame content was wrong. eeprom_24c128_secure_page_write() put
+ * the wrong selector in the wrong byte and overran the page by one byte;
+ * eeprom_24c128_secure_page_lock() put the Lock Status selector in the
+ * SECOND pointer byte instead of the first (turning the "lock" into a data
+ * write that clobbers schema_version + sku[0]) and polled for a
+ * write-complete ACK by writing to the page it had just locked, which a
+ * CORRECT lock always NAKs -- so a real bench run would have reported a
+ * successful lock as ALP_ERR_TIMEOUT. None of that was visible to the
+ * NULL-bus double; all of it is caught here.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON
@@ -32,31 +42,120 @@
 
 #include "test_assert.h"
 
+/* ------------------------------------------------------------------------
+ * Recording fakes for alp_i2c_write() / alp_i2c_write_read() / alp_delay_us().
+ * `alp_i2c_t` is opaque (`struct alp_i2c` is never defined in the public
+ * header), so `ctx.bus` below just needs to be a non-NULL pointer these
+ * fakes never dereference -- it is not linked against any real backend.
+ * ------------------------------------------------------------------------ */
+
+#define REC_MAX_CALLS 8
+#define REC_MAX_LEN   72 /* >= 2 + EEPROM_24C128_SECURE_PAGE_BYTES */
+
+typedef struct {
+	uint8_t addr;
+	uint8_t data[REC_MAX_LEN];
+	size_t  len;
+} rec_call_t;
+
+static rec_call_t   g_writes[REC_MAX_CALLS];
+static int          g_write_count;
+static rec_call_t   g_write_reads[REC_MAX_CALLS]; /* records only the WRITE half */
+static int          g_write_read_count;
+static uint8_t      g_next_read_byte;
+static alp_status_t g_next_write_status;
+static alp_status_t g_next_write_read_status;
+
+static void rec_reset(void)
+{
+	g_write_count            = 0;
+	g_write_read_count       = 0;
+	g_next_read_byte         = 0;
+	g_next_write_status      = ALP_OK;
+	g_next_write_read_status = ALP_OK;
+}
+
+alp_status_t alp_i2c_write(alp_i2c_t *bus, uint8_t addr, const uint8_t *data, size_t len)
+{
+	(void)bus;
+	if (g_write_count < REC_MAX_CALLS && len <= REC_MAX_LEN) {
+		g_writes[g_write_count].addr = addr;
+		memcpy(g_writes[g_write_count].data, data, len);
+		g_writes[g_write_count].len = len;
+		g_write_count++;
+	}
+	return g_next_write_status;
+}
+
+alp_status_t alp_i2c_write_read(alp_i2c_t     *bus,
+                                uint8_t        addr,
+                                const uint8_t *wdata,
+                                size_t         wlen,
+                                uint8_t       *rdata,
+                                size_t         rlen)
+{
+	(void)bus;
+	if (g_write_read_count < REC_MAX_CALLS && wlen <= REC_MAX_LEN) {
+		g_write_reads[g_write_read_count].addr = addr;
+		memcpy(g_write_reads[g_write_read_count].data, wdata, wlen);
+		g_write_reads[g_write_read_count].len = wlen;
+		g_write_read_count++;
+	}
+	if (rdata != NULL && rlen > 0) {
+		memset(rdata, g_next_read_byte, rlen);
+	}
+	return g_next_write_read_status;
+}
+
+void alp_delay_us(uint32_t us)
+{
+	(void)us;
+}
+
+/* Initialised ctx via the real eeprom_24c128_init() (so its own probe read
+ * is exercised too), then drops that probe call from the recording so
+ * every test below starts from a clean slate. */
+static eeprom_24c128_t make_ctx(void)
+{
+	rec_reset();
+	static int      dummy_bus;
+	eeprom_24c128_t ctx;
+	alp_status_t s = eeprom_24c128_init(&ctx, (alp_i2c_t *)&dummy_bus, EEPROM_24C128_I2C_ADDR_LOW);
+	ALP_ASSERT_EQ_INT(s, ALP_OK);
+	rec_reset();
+	return ctx;
+}
+
+static uint8_t alt_addr(void)
+{
+	return (uint8_t)(EEPROM_24C128_I2C_ADDR_LOW + EEPROM_24C128_ALT_ADDR_OFFSET);
+}
+
 static eeprom_24c128_t z_make_ctx(uint8_t addr, bool initialised)
 {
 	eeprom_24c128_t ctx;
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.initialised = initialised;
-	ctx.bus         = NULL; /* Never dereferenced by a well-behaved backend
-                              * before it short-circuits on NULL -- see this
-                              * file's header comment. */
+	ctx.bus         = NULL; /* Never dereferenced when ctx == NULL / !initialised
+                              * short-circuits before the bus is ever touched. */
 	ctx.addr        = addr;
 	return ctx;
 }
 
-/* ---- eeprom_24c128_secure_page_write ---- */
+/* ---- eeprom_24c128_secure_page_write: argument/state contract ---- */
 
 static void test_write_null_ctx(void)
 {
 	uint8_t page[EEPROM_24C128_SECURE_PAGE_BYTES];
 	memset(page, 0xAB, sizeof(page));
-	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(NULL, page), ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(NULL, page, sizeof(page)), ALP_ERR_NOT_READY);
 }
 
 static void test_write_null_data(void)
 {
 	eeprom_24c128_t ctx = z_make_ctx(EEPROM_24C128_I2C_ADDR_LOW, true);
-	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(&ctx, NULL), ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(&ctx, NULL, EEPROM_24C128_SECURE_PAGE_BYTES),
+	                  ALP_ERR_INVAL);
 }
 
 static void test_write_uninitialised_ctx(void)
@@ -64,23 +163,105 @@ static void test_write_uninitialised_ctx(void)
 	eeprom_24c128_t ctx = z_make_ctx(EEPROM_24C128_I2C_ADDR_LOW, false);
 	uint8_t         page[EEPROM_24C128_SECURE_PAGE_BYTES];
 	memset(page, 0xAB, sizeof(page));
-	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(&ctx, page), ALP_ERR_NOT_READY);
+	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_write(&ctx, page, sizeof(page)), ALP_ERR_NOT_READY);
 }
 
-/* bus == NULL propagates as a bus-layer failure rather than being silently
- * swallowed as ALP_OK -- a write that "succeeds" against no bus at all
- * would be the worst possible bug in this specific function, given what it
- * gates (see eeprom_24c128_secure_page_lock's doc comment). */
-static void test_write_nack_equivalent_propagates_error(void)
+/* A short OR long buffer must be rejected before it ever reaches the bus --
+ * the length check is what makes the header's documented safety property
+ * (this function can never memcpy past a caller-supplied buffer) actually
+ * true, since a bare `const uint8_t *` parameter carries no size on its
+ * own. */
+static void test_write_wrong_len_rejected(void)
 {
-	eeprom_24c128_t ctx = z_make_ctx(EEPROM_24C128_I2C_ADDR_LOW, true);
+	eeprom_24c128_t ctx = make_ctx();
 	uint8_t         page[EEPROM_24C128_SECURE_PAGE_BYTES];
 	memset(page, 0xAB, sizeof(page));
-	alp_status_t rc = eeprom_24c128_secure_page_write(&ctx, page);
-	ALP_ASSERT_TRUE(rc != ALP_OK);
+
+	ALP_ASSERT_EQ_INT(
+	    eeprom_24c128_secure_page_write(&ctx, page, EEPROM_24C128_SECURE_PAGE_BYTES - 1),
+	    ALP_ERR_INVAL);
+	ALP_ASSERT_EQ_INT(
+	    eeprom_24c128_secure_page_write(&ctx, page, EEPROM_24C128_SECURE_PAGE_BYTES + 1),
+	    ALP_ERR_INVAL);
+	/* Neither rejected call reached the bus. */
+	ALP_ASSERT_EQ_INT(g_write_count, 0);
 }
 
-/* ---- eeprom_24c128_secure_page_lock ---- */
+/* ---- eeprom_24c128_secure_page_write: the exact wire frame ----
+ *
+ * This is the check that actually matters: a 2-byte pointer {selector,
+ * in-page offset} = {0x00, 0x00}, THEN exactly EEPROM_24C128_SECURE_PAGE_BYTES
+ * data bytes -- the SAME 2-byte pointer convention
+ * eeprom_24c128_read_identity() uses (bench-verified), not the 3-byte
+ * "selector + op-code + offset" frame an earlier revision emitted (which
+ * rotated every byte of the page by one on write -- BLOCKER 2 in review). */
+static void test_write_frame_is_exact(void)
+{
+	eeprom_24c128_t ctx = make_ctx();
+	uint8_t         payload[EEPROM_24C128_SECURE_PAGE_BYTES];
+	for (size_t i = 0; i < sizeof(payload); ++i)
+		payload[i] = (uint8_t)(0xA0u + i);
+
+	alp_status_t s = eeprom_24c128_secure_page_write(&ctx, payload, sizeof(payload));
+	ALP_ASSERT_EQ_INT(s, ALP_OK);
+
+	ALP_ASSERT_TRUE(g_write_count >= 1);
+	ALP_ASSERT_EQ_INT(g_writes[0].addr, alt_addr());
+	ALP_ASSERT_EQ_INT(g_writes[0].len, 2 + EEPROM_24C128_SECURE_PAGE_BYTES);
+	ALP_ASSERT_EQ_INT(g_writes[0].data[0], 0x00); /* Secure Data Page selector, FIRST byte */
+	ALP_ASSERT_EQ_INT(g_writes[0].data[1], 0x00); /* in-page offset */
+	ALP_ASSERT_EQ_INT(memcmp(g_writes[0].data + 2, payload, sizeof(payload)), 0);
+
+	/* The post-write ACK poll (eeprom_24c128_write's own path, unaffected by
+     * this review) is a SEPARATE, second alp_i2c_write call, 2-byte
+     * address-only -- it must not be mistaken for a second copy of the page. */
+	ALP_ASSERT_EQ_INT(g_write_count, 2);
+	ALP_ASSERT_EQ_INT(g_writes[1].len, 2);
+}
+
+/* ---- eeprom_24c128_secure_page_lock: the exact wire frame + no page poll ----
+ *
+ * {0x04, 0x00, 0xFF} -- Lock Status selector in the FIRST pointer byte
+ * (matching eeprom_24c128_read_identity()'s convention for the SAME
+ * selector), not the second (BLOCKER 1: a selector in the second byte turns
+ * this into a plain data write at Secure-Data-Page offset 4, clobbering
+ * schema_version + sku[0]). And exactly ONE alp_i2c_write call total: no
+ * address-only poll against the page this call just locked (BLOCKER 3: that
+ * poll is itself a write to the Secure Data Page, which a CORRECT lock
+ * always NAKs, so it would report success as ALP_ERR_TIMEOUT). */
+static void test_lock_frame_is_exact_and_never_polls_the_page(void)
+{
+	eeprom_24c128_t ctx = make_ctx();
+	g_next_read_byte    = 0x02u; /* Lock Status confirm read: bit 1 set = locked */
+
+	alp_status_t s = eeprom_24c128_secure_page_lock(&ctx);
+	ALP_ASSERT_EQ_INT(s, ALP_OK);
+
+	ALP_ASSERT_EQ_INT(g_write_count, 1); /* the lock command, and NOTHING else */
+	ALP_ASSERT_EQ_INT(g_writes[0].addr, alt_addr());
+	ALP_ASSERT_EQ_INT(g_writes[0].len, 3);
+	ALP_ASSERT_EQ_INT(g_writes[0].data[0], 0x04); /* Lock Status selector, FIRST byte */
+	ALP_ASSERT_EQ_INT(g_writes[0].data[1], 0x00);
+	ALP_ASSERT_EQ_INT(g_writes[0].data[2], 0xFFu); /* the lock trigger byte */
+
+	/* Exactly one confirming read: Lock Status, {sel, 0x00} pointer, 1 byte
+     * out. This is the ONLY state check the datasheet describes as safe. */
+	ALP_ASSERT_EQ_INT(g_write_read_count, 1);
+	ALP_ASSERT_EQ_INT(g_write_reads[0].addr, alt_addr());
+	ALP_ASSERT_EQ_INT(g_write_reads[0].len, 2);
+	ALP_ASSERT_EQ_INT(g_write_reads[0].data[0], 0x04);
+	ALP_ASSERT_EQ_INT(g_write_reads[0].data[1], 0x00);
+}
+
+static void test_lock_reports_io_when_confirm_reads_unlocked(void)
+{
+	eeprom_24c128_t ctx = make_ctx();
+	g_next_read_byte    = 0x00u; /* bit 1 clear -- the lock did not take */
+
+	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_lock(&ctx), ALP_ERR_IO);
+}
+
+/* ---- eeprom_24c128_secure_page_lock: argument/state contract ---- */
 
 static void test_lock_null_ctx(void)
 {
@@ -93,13 +274,14 @@ static void test_lock_uninitialised_ctx(void)
 	ALP_ASSERT_EQ_INT(eeprom_24c128_secure_page_lock(&ctx), ALP_ERR_NOT_READY);
 }
 
-/* Same shape as test_write_nack_equivalent_propagates_error: this is the
- * PERMANENT, IRREVERSIBLE call -- it must never report success against a
- * bus that never actually spoke. */
-static void test_lock_nack_equivalent_propagates_error(void)
+/* A NAK on the lock command itself (as opposed to the confirm read) must
+ * propagate, not be swallowed as ALP_OK -- this is the PERMANENT,
+ * IRREVERSIBLE call. */
+static void test_lock_write_failure_propagates(void)
 {
-	eeprom_24c128_t ctx = z_make_ctx(EEPROM_24C128_I2C_ADDR_LOW, true);
-	alp_status_t    rc  = eeprom_24c128_secure_page_lock(&ctx);
+	eeprom_24c128_t ctx = make_ctx();
+	g_next_write_status = ALP_ERR_NOT_READY;
+	alp_status_t rc     = eeprom_24c128_secure_page_lock(&ctx);
 	ALP_ASSERT_TRUE(rc != ALP_OK);
 }
 
@@ -108,11 +290,14 @@ int main(void)
 	test_write_null_ctx();
 	test_write_null_data();
 	test_write_uninitialised_ctx();
-	test_write_nack_equivalent_propagates_error();
+	test_write_wrong_len_rejected();
+	test_write_frame_is_exact();
 
+	test_lock_frame_is_exact_and_never_polls_the_page();
+	test_lock_reports_io_when_confirm_reads_unlocked();
 	test_lock_null_ctx();
 	test_lock_uninitialised_ctx();
-	test_lock_nack_equivalent_propagates_error();
+	test_lock_write_failure_propagates();
 
 	ALP_TEST_SUMMARY();
 }

@@ -347,6 +347,33 @@ static bool secure_page_is_blank(const uint8_t page[EEPROM_24C128_SECURE_PAGE_BY
 	return magic != ALP_SECURE_PAGE_MAGIC;
 }
 
+/**
+ * @brief Does @p page parse as a valid alp_secure_page_mirror_t?
+ *
+ * The mirror equivalent of alp_hw_info_classify_manifest()
+ * (src/zephyr/hw_info_zephyr.c) for the array manifest: refuse -- never
+ * guess -- when `magic` or `schema_version` don't match exactly what this
+ * build understands, in either direction.  See this struct's own
+ * forward-compatibility rule in include/alp/hw_info.h and
+ * EEPROM-MANIFEST-SPEC.md.  Every raw device-page read in this file routes
+ * through this before treating the bytes as the struct.
+ *
+ * @param page  Exactly EEPROM_24C128_SECURE_PAGE_BYTES bytes read off the
+ *   device (e.g. eeprom_24c128_identity_t::secure_page).
+ * @param out   Set to a pointer into @p page on success; untouched on
+ *   failure.
+ * @return true only when the magic and schema_version both match.
+ */
+static bool secure_page_classify(const uint8_t page[EEPROM_24C128_SECURE_PAGE_BYTES],
+                                 const alp_secure_page_mirror_t **out)
+{
+	const alp_secure_page_mirror_t *m = (const alp_secure_page_mirror_t *)page;
+	if (m->magic != ALP_SECURE_PAGE_MAGIC) return false;
+	if (m->schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) return false;
+	*out = m;
+	return true;
+}
+
 int main(void)
 {
 	printf("[provision] aen-eeprom-provision (secure-page mirror write)\n");
@@ -390,7 +417,16 @@ int main(void)
 		       "alternate?); nothing to write\n");
 		return 0;
 	}
-	if (id.lock_valid && id.secure_page_locked) {
+	/* Mode 3 demands both secure_page_valid AND lock_valid before proceeding
+     * (see its own gate below); this mode must too -- writing without
+     * knowing the lock state risks the same false confidence a missing
+     * check produces there. */
+	if (!id.lock_valid) {
+		printf("RESULT FAIL: could not read Secure Page Lock Status at 0x58 -- "
+		       "refusing to write without knowing the lock state\n");
+		return 0;
+	}
+	if (id.secure_page_locked) {
 		printf("RESULT FAIL: Secure Data Page is already locked -- refusing to "
 		       "write (the device would NAK this anyway; this check exists so "
 		       "the failure reason is unambiguous)\n");
@@ -413,7 +449,7 @@ int main(void)
 #endif
 	}
 
-	s = eeprom_24c128_secure_page_write(&ee, alp_secure_page_blob);
+	s = eeprom_24c128_secure_page_write(&ee, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN);
 	if (s != ALP_OK) {
 		printf("RESULT FAIL: eeprom_24c128_secure_page_write -> %d\n", (int)s);
 		return 0;
@@ -439,8 +475,13 @@ int main(void)
 		return 0;
 	}
 
-	print_secure_page_identity((const alp_secure_page_mirror_t *)id.secure_page,
-	                           "verified on device (same session):");
+	const alp_secure_page_mirror_t *back;
+	if (!secure_page_classify(id.secure_page, &back)) {
+		printf("RESULT FAIL: read-back byte-matched the blob but failed to parse "
+		       "(bad magic/schema) -- should not happen; treat as a hardware fault\n");
+		return 0;
+	}
+	print_secure_page_identity(back, "verified on device (same session):");
 	printf("[provision] NOT locked. Cold-cycle the board, then run this app again "
 	       "with -DALP_LOCK_SECURE_PAGE=1 to lock permanently.\n");
 	printf("RESULT PASS: secure-page mirror written and verified on device\n");
@@ -517,6 +558,27 @@ static bool secure_page_blob_is_sane(void)
 	return true;
 }
 
+/**
+ * @brief Does @p page parse as a valid alp_secure_page_mirror_t?
+ *
+ * Duplicated from mode 2's identical function -- see that copy's doc
+ * comment for the full rationale (the mirror equivalent of
+ * alp_hw_info_classify_manifest(); refuse, never guess, an unrecognised
+ * magic/schema_version). Every raw device-page read in THIS mode routes
+ * through it too, including the already-locked branch below, which is the
+ * last moment a wrongly-locked module can be told apart from a correctly
+ * locked one.
+ */
+static bool secure_page_classify(const uint8_t page[EEPROM_24C128_SECURE_PAGE_BYTES],
+                                 const alp_secure_page_mirror_t **out)
+{
+	const alp_secure_page_mirror_t *m = (const alp_secure_page_mirror_t *)page;
+	if (m->magic != ALP_SECURE_PAGE_MAGIC) return false;
+	if (m->schema_version != ALP_SECURE_PAGE_SCHEMA_VERSION) return false;
+	*out = m;
+	return true;
+}
+
 int main(void)
 {
 	printf("[provision] aen-eeprom-provision (secure-page PERMANENT LOCK)\n");
@@ -562,9 +624,31 @@ int main(void)
 		return 0;
 	}
 	if (id.secure_page_locked) {
-		print_secure_page_identity((const alp_secure_page_mirror_t *)id.secure_page,
-		                           "already locked:");
-		printf("RESULT PASS: Secure Data Page was already locked -- nothing to do\n");
+		/* Do NOT report PASS on trust alone. A wrongly-locked page (an
+         * all-0xFF page locked before ever being written, or one locked
+         * with the wrong identity) is a SCRAPPED module, and this is the
+         * LAST moment that is distinguishable from a correct lock -- it is
+         * exactly the path an operator reaches after a lock whose ACK-poll
+         * falsely timed out (see eeprom_24c128_secure_page_lock's doc
+         * comment for why that poll no longer runs). memcmp against the
+         * validated blob first; only PASS on an exact match. */
+		const alp_secure_page_mirror_t *locked;
+		if (!secure_page_classify(id.secure_page, &locked)) {
+			printf("RESULT FAIL: Secure Data Page is locked but does not parse as "
+			       "a valid mirror (bad magic/schema) -- this module is SCRAPPED, "
+			       "its identity cannot be trusted, and the lock cannot be undone\n");
+			return 0;
+		}
+		if (memcmp(id.secure_page, alp_secure_page_blob, ALP_SECURE_PAGE_BLOB_LEN) != 0) {
+			print_secure_page_identity(locked, "locked, but WRONG identity:");
+			printf("RESULT FAIL: Secure Data Page is already locked and does NOT "
+			       "match the supplied blob -- this module is SCRAPPED, the lock "
+			       "cannot be undone\n");
+			return 0;
+		}
+		print_secure_page_identity(locked, "already locked, verified:");
+		printf("RESULT PASS: Secure Data Page was already locked and matches the "
+		       "expected identity -- nothing to do\n");
 		return 0;
 	}
 
@@ -581,7 +665,14 @@ int main(void)
 		return 0;
 	}
 
-	print_secure_page_identity((const alp_secure_page_mirror_t *)id.secure_page, "locking:");
+	const alp_secure_page_mirror_t *to_lock;
+	if (!secure_page_classify(id.secure_page, &to_lock)) {
+		printf("RESULT FAIL: on-device Secure Data Page byte-matched the blob "
+		       "but failed to parse (bad magic/schema) -- should not happen; "
+		       "treat as a hardware fault\n");
+		return 0;
+	}
+	print_secure_page_identity(to_lock, "locking:");
 	s = eeprom_24c128_secure_page_lock(&ee);
 	if (s != ALP_OK) {
 		printf("RESULT FAIL: eeprom_24c128_secure_page_lock -> %d\n", (int)s);

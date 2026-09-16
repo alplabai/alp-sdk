@@ -199,16 +199,19 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
 /**
  * @brief Write the WHOLE 64-byte Secure Data Page in one page-write transaction.
  *
- * Deliberately has no offset/selector parameter -- @p data is always the
- * full @ref EEPROM_24C128_SECURE_PAGE_BYTES page, written from byte 0.
- * That is a safety property, not a convenience: it makes it structurally
- * impossible for this function to ever construct a write to selector
- * `0x06` (the Device Configuration Register), because the object selector
- * and in-page offset it puts on the wire are both compile-time constants
- * this function chooses itself -- see this file's `.c` for the exact bytes,
- * transcribed from `docs/som-batch-provisioning-procedure.md` §7 step 5 in
- * alp-sdk-internal (`0x58` sel `0x00`, second byte the write op-code,
- * third byte the in-page offset, then the page data).
+ * Wire frame: a 2-byte pointer -- `{0x00, 0x00}` (selector `0x00` = Secure
+ * Data Page, FIRST pointer byte, same convention @ref eeprom_24c128_read_identity
+ * uses to read it; second byte the in-page offset, always `0` -- this
+ * function writes the whole page in one transaction) -- followed by exactly
+ * @ref EEPROM_24C128_SECURE_PAGE_BYTES data bytes.  `len` must equal
+ * @ref EEPROM_24C128_SECURE_PAGE_BYTES exactly; there is no partial-range
+ * write, both so it can never be steered at a sub-range that mixes stale and
+ * new bytes, and so a caller cannot under-supply @p data and have this
+ * function `memcpy` past the end of a too-short buffer into a page that then
+ * gets permanently sealed.  This is also what makes it structurally
+ * impossible to construct a write to selector `0x06` (the Device
+ * Configuration Register): the selector byte is a compile-time constant
+ * this function chooses itself, never derived from a caller-supplied value.
  *
  * Does NOT check the Secure Page Lock Status first, and does NOT verify
  * the write afterwards.  Both are the caller's job: read
@@ -226,19 +229,27 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
  * nothing to degrade further; the array manifest is unaffected.
  *
  * @param ctx   Initialised driver context.
- * @param data  Exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES bytes to write.
- * @return ::ALP_ERR_INVAL if @p ctx or @p data is `NULL`;
+ * @param data  Exactly @p len bytes to write.
+ * @param len   MUST equal @ref EEPROM_24C128_SECURE_PAGE_BYTES; any other
+ *   value is rejected with ::ALP_ERR_INVAL before anything reaches the bus.
+ * @return ::ALP_ERR_INVAL if @p ctx or @p data is `NULL`, or @p len is not
+ *   exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES;
  *   ::ALP_ERR_NOT_READY if @p ctx has not been initialised;
  *   ::ALP_ERR_OUT_OF_RANGE / ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated
  *   from the underlying I2C transfer or the post-write ACK poll;
  *   ::ALP_OK once the page write has been ACKed and the write cycle has
  *   completed.
  */
-alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx,
-                                             const uint8_t data[EEPROM_24C128_SECURE_PAGE_BYTES]);
+alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx, const uint8_t *data, size_t len);
 
 /**
  * @brief PERMANENTLY lock the Secure Data Page.  One-shot.  Irreversible.
+ *
+ * Wire frame: `{0x04, 0x00, 0xFF}` -- selector `0x04` (Secure Page Lock
+ * Status, FIRST pointer byte, same selector @ref eeprom_24c128_read_identity
+ * reads), second pointer byte `0x00`, then the single trigger data byte
+ * `0xFF`.  This is the SAME first-byte selector convention every other
+ * transfer in this file uses; there is no separate "op-code" byte.
  *
  * After this returns ::ALP_OK, the device NAKs every future write to the
  * Secure Data Page (it still reads normally, forever) -- see
@@ -255,21 +266,25 @@ alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx,
  * on unverified content permanently freezes a possibly-wrong identity on
  * hardware that cannot be un-locked.
  *
- * After issuing the lock write, this function re-reads Secure Page Lock
- * Status (the only state check the datasheet describes as safe -- see
- * @ref eeprom_24c128_read_identity's doc comment for why the alternative,
- * starting a page write and checking for a NAK, must never be used) and
- * fails if bit 1 does not read back set, rather than trusting the write's
- * own ACK.
+ * Deliberately does NOT poll for a write-complete ACK the way
+ * @ref eeprom_24c128_write / @ref eeprom_24c128_secure_page_write do: that
+ * poll is itself an address-only WRITE to the Secure Data Page, and a
+ * *correct* lock makes the device NAK every subsequent write to that page
+ * -- so polling here would read a successful lock as a timeout.  Instead,
+ * this function waits out the documented write-cycle budget once, then
+ * re-reads Secure Page Lock Status (the only state check the datasheet
+ * describes as safe -- see @ref eeprom_24c128_read_identity's doc comment
+ * for why the alternative, starting a page write and checking for a NAK,
+ * must never be used) and fails if bit 1 does not read back set, rather
+ * than trusting the write's own ACK.
  *
  * @param ctx  Initialised driver context.
  * @return ::ALP_ERR_NOT_READY if @p ctx is `NULL` or not initialised;
- *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the lock write, its
- *   ACK poll, or the confirming Lock Status read; ::ALP_ERR_IO if the lock
- *   write was ACKed but Lock Status still reads unlocked afterwards
- *   (treat as a hardware fault -- not a case to blindly retry, since a
- *   retry re-sends the same irreversible command);
- *   ::ALP_OK only once Lock Status confirms bit 1 set.
+ *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the lock write or the
+ *   confirming Lock Status read; ::ALP_ERR_IO if the lock write was ACKed
+ *   but Lock Status still reads unlocked afterwards (treat as a hardware
+ *   fault -- not a case to blindly retry, since a retry re-sends the same
+ *   irreversible command); ::ALP_OK only once Lock Status confirms bit 1 set.
  */
 alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx);
 
