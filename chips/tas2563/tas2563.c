@@ -28,6 +28,7 @@
 #define TAS2563_REG_TDM_CFG2  0x08u /* TDM configuration 2  (§7.5.10, p.69). */
 #define TAS2563_REG_TDM_CFG5  0x0Bu /* TDM TX V-sense slot  (§7.5.13, p.71). */
 #define TAS2563_REG_TDM_CFG6  0x0Cu /* TDM TX I-sense slot  (§7.5.14, p.71). */
+#define TAS2563_REG_TDM_DET   0x11u /* DSP Mode & TDM_DET, RO (§7.5.19, p.73). */
 #define TAS2563_REG_INT_MASK0 0x1Au /* Interrupt mask 0     (§7.5.28, p.77). */
 #define TAS2563_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (§7.5.36, p.82). */
 #define TAS2563_REG_INT_LTCH1 0x25u /* Latched interrupts 1 (§7.5.37, p.83). */
@@ -84,6 +85,35 @@
 #define TAS2563_TDM_SENSE_TX        0x40u
 #define TAS2563_TDM_SENSE_SLOT_MASK 0x3Fu
 #define TAS2563_TDM_SENSE_FIELD     0x7Fu /* TX enable | slot. */
+
+/* DSP Mode & TDM_DET (0x11), read-only -- §7.5.19 Table 7-119, p.73.
+ * FS_RATIO is bits 6..3 (detected SBCLK:FSYNC ratio), FS_RATE is bits
+ * 2..0 (detected TDM sample rate); bit 7 is reserved.  Reset value
+ * 7Fh is itself "no valid clock has ever been detected": FS_RATIO =
+ * Fh ("Invalid ratio") and FS_RATE = 7h ("Error condition").
+ *
+ * §7.4.2 Table 7-23 "PCM Audio Sample Rates" (p.40) and Table 7-24
+ * "PCM SBCLK to FSYNC Ratio" (pp.40-41) DISAGREE with this register's
+ * own field table (Table 7-119) at the edges of both fields: Table
+ * 7-23 marks FS_RATE 000b/010b Reserved where Table 7-119 gives them
+ * real rates -- the same contradiction samp_rate_code() above follows
+ * Table 7-108 through for the write side; Table 7-24 marks FS_RATIO
+ * 0h-3h Reserved and Fh "Error Condition" where Table 7-119 decodes
+ * 00h-03h as ratios 16/24/32/48 and 0Fh specifically as "Invalid
+ * ratio".  tas2563_read_tdm_detect() decodes per Table 7-119, the
+ * register's OWN field description -- what the silicon reports back on
+ * this exact read -- rather than picking a table silently; Tables
+ * 7-23/7-24 mark those same codes Reserved for CONFIGURATION (what
+ * tas2563_configure_i2s() may legally write to SAMP_RATE, a different
+ * field), which is a different question from what this read-only
+ * register may report having detected.  0Bh-0Eh is Reserved in both
+ * tables and decodes the same as 0Fh: no ratio reported. */
+#define TAS2563_TDM_DET_FS_RATIO_MASK    0x78u
+#define TAS2563_TDM_DET_FS_RATIO_SHIFT   3u
+#define TAS2563_TDM_DET_FS_RATE_MASK     0x07u
+#define TAS2563_TDM_DET_FS_RATE_SHIFT    0u
+#define TAS2563_TDM_DET_FS_RATIO_INVALID 0x0Fu /* Table 7-119: "Invalid ratio". */
+#define TAS2563_TDM_DET_FS_RATE_ERROR    0x07u /* Table 7-119: "Error condition". */
 
 /* INT_MASK0 (0x1A) -- §7.5.28, p.77.  Reset value FCh (1111 1100b):
  * bits 1..0 (OVER_CURRENT/OVER_TEMP) are already 0 = unmasked, bit 2
@@ -664,6 +694,92 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out)
 		faults |= (uint32_t)v << (8u * i);
 	}
 	*faults_out = faults;
+	return ALP_OK;
+}
+
+/* FS_RATIO[3:0] -- §7.5.19 Table 7-119, p.73.  00h..0Ah decode to real
+ * ratios; 0Bh-0Eh (Reserved) and 0Fh (TAS2563_TDM_DET_FS_RATIO_INVALID)
+ * both decode to 0, meaning "no ratio to report" -- see the field
+ * macros' comment above for why this driver decodes per this table
+ * rather than Table 7-24. */
+static uint32_t tdm_det_ratio_value(uint8_t code)
+{
+	switch (code) {
+	case 0x00u:
+		return 16u;
+	case 0x01u:
+		return 24u;
+	case 0x02u:
+		return 32u;
+	case 0x03u:
+		return 48u;
+	case 0x04u:
+		return 64u;
+	case 0x05u:
+		return 96u;
+	case 0x06u:
+		return 128u;
+	case 0x07u:
+		return 192u;
+	case 0x08u:
+		return 256u;
+	case 0x09u:
+		return 384u;
+	case 0x0Au:
+		return 512u;
+	default:
+		return 0u; /* 0Bh-0Eh Reserved, 0Fh Invalid ratio. */
+	}
+}
+
+/* FS_RATE[2:0] -- §7.5.19 Table 7-119, p.73.  Each code covers one
+ * 44.1 kHz-family rate and one 48 kHz-family rate, same ambiguity as
+ * samp_rate_code() above: which of the pair is actually running is not
+ * something this register (or this driver) can tell apart, so both
+ * bounds of the detected pair are reported.  7h ("Error condition",
+ * TAS2563_TDM_DET_FS_RATE_ERROR) reports both as 0. */
+static void tdm_det_rate_hz(uint8_t code, uint32_t *low_hz_out, uint32_t *high_hz_out)
+{
+	static const uint32_t low[7]  = { 7350u, 14700u, 22050u, 29400u, 44100u, 88200u, 176400u };
+	static const uint32_t high[7] = { 8000u, 16000u, 24000u, 32000u, 48000u, 96000u, 192000u };
+	if (code < 7u) {
+		*low_hz_out  = low[code];
+		*high_hz_out = high[code];
+	} else {
+		*low_hz_out  = 0u;
+		*high_hz_out = 0u;
+	}
+}
+
+alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (detect_out == NULL) return ALP_ERR_INVAL;
+
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+
+	uint8_t reg = 0;
+	s           = reg_read(ctx, TAS2563_REG_TDM_DET, &reg);
+	if (s != ALP_OK) return s;
+
+	uint8_t fs_ratio =
+	    (uint8_t)((reg & TAS2563_TDM_DET_FS_RATIO_MASK) >> TAS2563_TDM_DET_FS_RATIO_SHIFT);
+	uint8_t fs_rate =
+	    (uint8_t)((reg & TAS2563_TDM_DET_FS_RATE_MASK) >> TAS2563_TDM_DET_FS_RATE_SHIFT);
+
+	detect_out->sbclk_fsync_ratio = tdm_det_ratio_value(fs_ratio);
+	tdm_det_rate_hz(fs_rate, &detect_out->sample_rate_low_hz, &detect_out->sample_rate_high_hz);
+
+	/* "No valid clock" per §7.5.19's own reset-state semantics: the
+	 * reset value 7Fh IS FS_RATIO=Fh (no ratio decoded, sbclk_fsync_ratio
+	 * == 0 above) AND FS_RATE=7h (TAS2563_TDM_DET_FS_RATE_ERROR).  Either
+	 * one on its own already means there is nothing usable in this
+	 * readback, so clock_valid requires both fields to decode to
+	 * something real. */
+	detect_out->clock_valid =
+	    (detect_out->sbclk_fsync_ratio != 0u) && (fs_rate != TAS2563_TDM_DET_FS_RATE_ERROR);
+
 	return ALP_OK;
 }
 

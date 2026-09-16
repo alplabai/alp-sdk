@@ -198,6 +198,7 @@ ZTEST(alp_chips, test_tas2563_init_rejects_broadcast_address)
 #define TAS_REG_TDM_CFG2  0x08u
 #define TAS_REG_TDM_CFG5  0x0Bu
 #define TAS_REG_TDM_CFG6  0x0Cu
+#define TAS_REG_TDM_DET   0x11u
 #define TAS_REG_INT_MASK0 0x1Au
 #define TAS_REG_INT_LTCH0 0x24u
 #define TAS_REG_INT_LTCH1 0x25u
@@ -805,6 +806,52 @@ ZTEST(alp_chips, test_tas2563_read_faults_packs_latched_registers_byte_aligned)
 	              "only the datasheet's self-shutdown causes belong in that mask");
 
 	zassert_equal(tas2563_read_faults(&ctx, NULL), ALP_ERR_INVAL);
+
+	alp_i2c_close(bus);
+}
+
+/* #2140: DSP Mode & TDM_DET (0x11) decodes per Table 7-119 -- see the
+ * field macros' comment in chips/tas2563/tas2563.c for why this driver
+ * follows that table over the self-contradicting Tables 7-23/7-24.
+ * The fake seeds 0x11 to the real POR value 7Fh (SLASET3D §7.5.19,
+ * "[reset=7Fh]"); the reset case below re-asserts that value explicitly
+ * rather than relying on the seed staying in sync with the decode. */
+ZTEST(alp_chips, test_tas2563_read_tdm_detect_decodes_ratio_and_rate)
+{
+	tas2563_t  ctx;
+	alp_i2c_t *bus = tas_init(&ctx, 0x0Eu, NULL);
+
+	/* Reset / no-valid-clock state: FS_RATIO = Fh ("Invalid ratio"),
+	 * FS_RATE = 7h ("Error condition"). */
+	fake_tas2563_set_reg(TAS_REG_TDM_DET, 0x7Fu);
+	tas2563_tdm_detect_t detect = { .clock_valid = true, .sbclk_fsync_ratio = 999u };
+	zassert_equal(tas2563_read_tdm_detect(&ctx, &detect), ALP_OK);
+	zassert_false(detect.clock_valid, "POR value 7Fh must decode as no valid clock");
+	zassert_equal(detect.sbclk_fsync_ratio, 0u, "FS_RATIO=Fh (Invalid ratio) -> 0");
+	zassert_equal(detect.sample_rate_low_hz, 0u, "FS_RATE=7h (Error condition) -> 0");
+	zassert_equal(detect.sample_rate_high_hz, 0u);
+
+	/* A real live reading: FS_RATIO = 04h (ratio 64), FS_RATE = 100b
+	 * (44.1/48 kHz family) -- 0x24 = (04h << 3) | 04h. */
+	fake_tas2563_set_reg(TAS_REG_TDM_DET, 0x24u);
+	zassert_equal(tas2563_read_tdm_detect(&ctx, &detect), ALP_OK);
+	zassert_true(detect.clock_valid);
+	zassert_equal(detect.sbclk_fsync_ratio, 64u);
+	zassert_equal(detect.sample_rate_low_hz, 44100u);
+	zassert_equal(detect.sample_rate_high_hz, 48000u);
+
+	/* Partial invalid: FS_RATIO = 0Ch (Reserved, bits 6..3), FS_RATE =
+	 * 010b (22.05/24 kHz family, otherwise a valid code) -- 0x62 =
+	 * (0Ch << 3) | 02h.  A Reserved ratio alone must make the whole
+	 * reading not-valid, even though FS_RATE decodes to a real pair. */
+	fake_tas2563_set_reg(TAS_REG_TDM_DET, 0x62u);
+	zassert_equal(tas2563_read_tdm_detect(&ctx, &detect), ALP_OK);
+	zassert_false(detect.clock_valid, "a Reserved FS_RATIO must not read as a valid clock");
+	zassert_equal(detect.sbclk_fsync_ratio, 0u, "FS_RATIO=Ch is Reserved (0Bh-0Eh) -> 0");
+	zassert_equal(detect.sample_rate_low_hz, 22050u);
+	zassert_equal(detect.sample_rate_high_hz, 24000u);
+
+	zassert_equal(tas2563_read_tdm_detect(&ctx, NULL), ALP_ERR_INVAL);
 
 	alp_i2c_close(bus);
 }

@@ -379,6 +379,33 @@ typedef enum {
 /** @} */
 
 /**
+ * Live decode of `DSP Mode & TDM_DET` (0x11, read-only), returned by
+ * @ref tas2563_read_tdm_detect.  See that function's doc for the
+ * "no valid clock" reset state and the Table 7-119 vs Table 7-23/7-24
+ * datasheet self-contradiction it decodes through.
+ */
+typedef struct {
+	/** false when the register still reads its "no valid clock"
+	 *  state -- @c sbclk_fsync_ratio decoded to 0 (Reserved/Invalid
+	 *  FS_RATIO) or the FS_RATE Error condition, or both, as at
+	 *  reset (7Fh). */
+	bool clock_valid;
+	/** Detected SBCLK:FSYNC ratio -- one of 16, 24, 32, 48, 64, 96,
+	 *  128, 192, 256, 384, 512 -- or 0 when FS_RATIO decodes to
+	 *  Reserved (0Bh-0Eh) or Invalid ratio (0Fh). */
+	uint32_t sbclk_fsync_ratio;
+	/** Low member of the detected sample-rate pair (e.g. 44100 of
+	 *  "44.1/48 kHz"), or 0 on the FS_RATE Error condition.  FS_RATE
+	 *  cannot distinguish which member of its pair is actually
+	 *  running, same ambiguity as @ref tas2563_configure_i2s'
+	 *  SAMP_RATE encoding. */
+	uint32_t sample_rate_low_hz;
+	/** High member of the detected sample-rate pair (e.g. 48000 of
+	 *  "44.1/48 kHz"), or 0 on the FS_RATE Error condition. */
+	uint32_t sample_rate_high_hz;
+} tas2563_tdm_detect_t;
+
+/**
  * One register write in a tuning stream.  The device's memory map is
  * paged, so a coefficient write is only addressable as the triple
  * (book, page, register).  SLASET3D §7.3.10 "Register Organization"
@@ -566,8 +593,9 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *   tas2563_load_tuning's write verification note for the same kind of
  *   gap; the one register whose name suggests it, `DSP Mode & TDM_DET`
  *   at 0x11 / §7.5.19, is read-only TDM clock-detection readback
- *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title) and
- *   has no mode-select field).  A caller in Smart Amp/Tuning mode that
+ *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title, and
+ *   decoded by @ref tas2563_read_tdm_detect) and has no mode-select
+ *   field).  A caller in Smart Amp/Tuning mode that
  *   calls this and gets `ALP_OK` should not assume the level actually
  *   changed on the part -- confirm via PPC3, outside this driver's
  *   knowledge, per SLAA953's workflow note above.
@@ -806,6 +834,63 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  * @retval ALP_ERR_INVAL     @p faults_out is NULL.
  */
 alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
+
+/**
+ * @brief Live readback of the auto-rate detection engine -- what TDM
+ *        clock the amp currently sees, decoded from `DSP Mode & TDM_DET`
+ *        (0x11, read-only, SLASET3D §7.5.19 Table 7-119, p.73).
+ *
+ * This answers a DIFFERENT question from @ref tas2563_read_faults'
+ * @ref TAS2563_FAULT_TDM_CLOCK: that bit is a LATCHED history of clock
+ * faults, cleared only by @ref tas2563_clear_faults and armed only once
+ * @ref tas2563_configure_fault_pin has unmasked `INT_MASK0[2]` (#2140).
+ * This function is an unlatched, always-readable, live snapshot of the
+ * detector's current state -- it answers "what is the clock doing right
+ * now", not "did a clock fault ever happen".  Neither replaces the
+ * other; a caller diagnosing a TDM clock problem wants both.
+ *
+ * @par Why a live readback matters here.  SLASET3D's TDM Port section
+ *   (p.40) states the part "employs a robust clock fault detection
+ *   engine that will automatically volume ramp down the playback path
+ *   if FSYNC does not match the configured sample rate (AUTO_RATE
+ *   enabled) or the ratio of SBCLK to FSYNC is not supported" -- that
+ *   same auto-rate detection engine is what populates `FS_RATIO`/
+ *   `FS_RATE` here, so this readback reflects what the part is actually
+ *   measuring on the wire, not a history of shutdown-causing events.
+ *
+ * @par The "no valid clock" reset state.  `DSP Mode & TDM_DET` resets to
+ *   `7Fh`: `FS_RATIO = Fh` ("Invalid ratio") and `FS_RATE = 7h` ("Error
+ *   condition").  That reset value IS the "no valid clock" answer this
+ *   function reports as @c clock_valid == false -- a freshly-reset part
+ *   with nothing driving SBCLK/FSYNC reads exactly this state, with no
+ *   special-casing needed to recognise it.
+ *
+ * @par Datasheet self-contradiction, same shape as @ref
+ *   tas2563_configure_i2s' rate mapping but on the READ side this time.
+ *   §7.4.2 Table 7-23 "PCM Audio Sample Rates" (p.40) and Table 7-24
+ *   "PCM SBCLK to FSYNC Ratio" (pp.40-41) disagree with Table 7-119 --
+ *   the register's OWN field description -- at the edges of both
+ *   fields: Table 7-23 marks `FS_RATE` `000b`/`010b` Reserved where
+ *   Table 7-119 gives them real rates (7.35/8 kHz, 22.05/24 kHz); Table
+ *   7-24 marks `FS_RATIO` `0h`-`3h` Reserved and `Fh` "Error Condition"
+ *   where Table 7-119 decodes `00h`-`03h` as ratios 16/24/32/48 and
+ *   `0Fh` specifically as "Invalid ratio".  This function decodes per
+ *   Table 7-119, since it is what the silicon reports back on this
+ *   exact read; Tables 7-23/7-24 mark those same codes Reserved for
+ *   CONFIGURATION -- what @ref tas2563_configure_i2s may legally write
+ *   to `SAMP_RATE`, a different field -- which is a different question
+ *   from what this read-only register may report having detected.
+ *   `0Bh`-`0Eh` is Reserved in both tables and decodes the same as
+ *   `0Fh`: @c sbclk_fsync_ratio reads 0, no ratio reported.
+ *
+ * @param[in]  ctx         Initialised context.
+ * @param[out] detect_out  Receives the decoded live state.
+ *
+ * @return ALP_OK, or the underlying bus status.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ * @retval ALP_ERR_INVAL     @p detect_out is NULL.
+ */
+alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out);
 
 /**
  * @brief Clear every latched fault and release IRQ_N.
