@@ -135,6 +135,70 @@ wrong manifest here is a re-run. The CC3501E's root-of-trust and MAC fuses are
 one-time and OR-only — a mistake there is a scrapped part. Prove the module with
 the reversible step first.
 
+## Secure Data Page mirror + lock (a later, separate step)
+
+The same EEPROM answers a second I²C address, `0x58` -- the same physical
+part, not a second chip. Selector `0x00` there is a 64-byte **Secure Data
+Page** that can be permanently locked. This app also carries the write +
+lock tooling for it, as two build-time modes distinct from the array write
+above. Do this only after the array manifest has been written and verified
+(this file's default flow) and, per
+`docs/som-batch-provisioning-procedure.md` §7 (alp-sdk-internal), only after
+cold-cycling the board.
+
+```sh
+# 1. Build the 64-byte mirror blob (same inputs as the manifest above).
+python3 scripts/program_eeprom_secure_page.py \
+    --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
+    --serial <SERIAL> --mfg-date <MFG-DATE> \
+    --output /tmp/secure-page-<SERIAL>.bin
+
+# 2. Write it and verify the read-back IN THIS SAME RUN. Never locks.
+B=scripts/bench/aen
+bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
+    -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin \
+    "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
+    "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
+bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
+
+# 3. Cold-power-cycle the board. Not optional -- a RAM-run cannot prove
+#    anything survived a power cycle it never experienced.
+
+# 4. Lock. PERMANENT. Irreversible. Refuses unless the page now on the
+#    device, read fresh after the cold cycle, is byte-exact against the
+#    same blob from step 1.
+bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
+    -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
+    -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin \
+    -DALP_LOCK_SECURE_PAGE=1 \
+    "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
+    "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
+bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
+```
+
+`ALP_MANIFEST_BIN` stays required to configure any of the three modes (the
+build does not make it conditional), even though the two Secure-Data-Page
+modes never reference its contents.
+
+Why two separate app invocations for step 2 and step 4, not one flag that
+does both: a RAM-run cannot span a power cycle. Locking is gated on a
+**post-cold-cycle** read-back, which by construction means a fresh process,
+which means a separate build. The lock refuses to run at all without
+`-DALP_SECURE_PAGE_BIN` even when `-DALP_LOCK_SECURE_PAGE=1` is set (see
+`CMakeLists.txt`) -- it never locks blind, and it never locks as a side
+effect of writing.
+
+After the lock: the page still reads, forever, but every future write to it
+NAKs at the hardware level. There is no unlock.
+
+On a board populated with the approved footprint-compatible alternate part
+(STMicro `M24128-BFMH6TG`, no second device-select header at all), both
+modes above fail cleanly with a "no second device-select header" message
+rather than corrupting anything -- the array manifest is unaffected either
+way, and nothing in the SDK's runtime read path depends on this mirror
+existing.
+
 ## Known gap: no `manufacturer` field
 
 The schema (`include/alp/hw_info.h`) carries `family`, `sku`, `hw_rev`, `serial`

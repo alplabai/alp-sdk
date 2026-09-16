@@ -67,6 +67,10 @@ tan-cli/
 # reaches hardware.
 !examples/aen/aen-eeprom-provision/ci-fixture-manifest.bin
 
+# Same exception, for the Secure Data Page mirror fixture: 64 bytes, same
+# deliberately unusable serial + date, build-only, never reaches hardware.
+!examples/aen/aen-eeprom-provision/ci-fixture-secure-page.bin
+
 # Libraries
 *.a
 *.lib

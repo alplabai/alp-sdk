@@ -80,6 +80,56 @@ file(WRITE ${_blob_header}
 "static const uint8_t alp_manifest_blob[ALP_MANIFEST_BLOB_LEN] = { ${_blob_c} };\n")
 message(STATUS "aen-eeprom-provision: baked ${_blob_len}-byte manifest from ${ALP_MANIFEST_BIN}")
 
+# --- the Secure Data Page mirror blob (optional) ----------------------------
+# Same idea as the manifest blob above, for the SEPARATE 64-byte Secure Data
+# Page mirror at 0x58 selector 0x00 -- see include/alp/hw_info.h's
+# alp_secure_page_mirror_t and EEPROM-MANIFEST-SPEC.md's Secure Data Page
+# section (alp-sdk-internal). Optional: a build with neither
+# ALP_SECURE_PAGE_BIN nor ALP_LOCK_SECURE_PAGE set behaves exactly like the
+# array-only tool this app started as.
+#
+#   python3 scripts/program_eeprom_secure_page.py \
+#       --board-yaml examples/aen/aen-eeprom-provision/board.yaml \
+#       --serial <SERIAL> --mfg-date <MFG-DATE> \
+#       --output /tmp/secure-page-<SERIAL>.bin
+#
+#   ... -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin
+if(DEFINED ALP_SECURE_PAGE_BIN)
+    if(NOT IS_ABSOLUTE ${ALP_SECURE_PAGE_BIN})
+        set(ALP_SECURE_PAGE_BIN ${CMAKE_CURRENT_SOURCE_DIR}/${ALP_SECURE_PAGE_BIN})
+    endif()
+    if(NOT EXISTS ${ALP_SECURE_PAGE_BIN})
+        message(FATAL_ERROR "ALP_SECURE_PAGE_BIN does not exist: ${ALP_SECURE_PAGE_BIN}")
+    endif()
+
+    file(READ ${ALP_SECURE_PAGE_BIN} _sp_hex HEX)
+    string(LENGTH ${_sp_hex} _sp_hex_len)
+    math(EXPR _sp_len "${_sp_hex_len} / 2")
+    string(REGEX REPLACE "(..)" "0x\\1," _sp_c ${_sp_hex})
+
+    set(_sp_header ${CMAKE_BINARY_DIR}/generated/secure_page_blob.h)
+    file(WRITE ${_sp_header}
+"/* GENERATED -- do not edit, do not commit.\n"
+" * Source: ${ALP_SECURE_PAGE_BIN}\n"
+" * Carries ONE module's Secure Data Page mirror; regenerated per unit at\n"
+" * configure time by examples/aen/aen-eeprom-provision/CMakeLists.txt.\n"
+" */\n"
+"#pragma once\n"
+"#include <stdint.h>\n"
+"#include <stddef.h>\n"
+"\n"
+"#define ALP_SECURE_PAGE_BLOB_LEN ${_sp_len}u\n"
+"\n"
+"static const uint8_t alp_secure_page_blob[ALP_SECURE_PAGE_BLOB_LEN] = { ${_sp_c} };\n")
+    message(STATUS "aen-eeprom-provision: baked ${_sp_len}-byte secure-page mirror from ${ALP_SECURE_PAGE_BIN}")
+    add_compile_definitions(ALP_HAVE_SECURE_PAGE_BLOB=1)
+elseif(ALP_LOCK_SECURE_PAGE)
+    message(FATAL_ERROR
+        "ALP_LOCK_SECURE_PAGE=1 needs -DALP_SECURE_PAGE_BIN=/path/to/secure-page.bin "
+        "too -- the lock step re-verifies the on-device mirror against that blob "
+        "before locking; it never locks blind.")
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_eeprom_provision LANGUAGES C)
 
@@ -90,4 +140,11 @@ target_include_directories(app PRIVATE ${CMAKE_BINARY_DIR}/generated)
 # src/main.c for why re-provisioning has to be deliberate.
 if(ALP_PROVISION_FORCE)
     target_compile_definitions(app PRIVATE ALP_PROVISION_FORCE=1)
+endif()
+
+# Opt-in, PERMANENT lock of the Secure Data Page mirror.  Off by default, same
+# shape as ALP_PROVISION_FORCE -- see src/main.c for the byte-exact read-back
+# gate this flag alone does not bypass.
+if(ALP_LOCK_SECURE_PAGE)
+    target_compile_definitions(app PRIVATE ALP_LOCK_SECURE_PAGE=1)
 endif()
