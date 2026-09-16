@@ -154,6 +154,14 @@ config ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
 	  cannot see this Kconfig value and fall back to the same 100 ms
 	  default compiled into chips/cc3501e/cc3501e_core.c.
 
+	  CAVEAT: an opted-in ctx->ready_pin (see <alp/chips/cc3501e/core.h>)
+	  is read WHILE this lock is held, and can busy-wait up to
+	  CC3501E_READY_WAIT_US per reply-phase gate.  A slow/stuck READY
+	  line lengthens the hold time other callers wait against this same
+	  timeout -- "safe to opt in" for ready_pin means safe for link
+	  timing only (it can never clock a phase early), not immunity from
+	  lock contention with other callers.
+
 config ALP_SDK_CC3501E_POLL_GAP_MIN_MS
 	int "poll_by_repeat() initial retry gap floor (ms)"
 	default 1
@@ -194,6 +202,38 @@ config ALP_SDK_CC3501E_POST_SUCCESS_GUARD_MS
 	  hardware, not a fix -- it does not touch the wire protocol or
 	  resynchronise anything.  Default (0) is today's unchanged
 	  behaviour: no delay, no throughput cost.
+
+config ALP_SDK_CC3501E_AUTO_RECOVER
+	bool "Auto-recover a wedged CC3501E bridge link"
+	default y
+	help
+	  Let the driver warm-reset the bridge on its own when a top-level op
+	  comes back ALP_ERR_IO/ALP_ERR_TIMEOUT with no reply ever decoded off
+	  the wire (issue #2126) -- e1m-aen-evk-01 has been observed to wedge
+	  the link mid Wi-Fi-connect roughly 3 times in 50 connects, and
+	  nothing else on the device can tell (see cc3501e_recover()'s own
+	  doc comment in include/alp/chips/cc3501e/core.h).
+	  cc3501e_link_check_and_recover() (chips/cc3501e/cc3501e_core.c,
+	  internal) probes with up to 24 PINGs first (a PING every 500 ms) and
+	  only warm-resets if every one fails, so a genuinely transient
+	  transport hiccup is not mistaken for a wedge; it also refuses while
+	  an OTA/update session is open and enforces a cooldown between real
+	  recoveries. Turn this off on a bench that wants to observe a wedge
+	  rather than have the driver clear it out from under the
+	  investigation -- `alp companion recover` still recovers on demand
+	  either way.
+
+	  LATENCY (issue #2126 review): on a call this fires from, the probe
+	  alone can add ~12-18 s (24 PINGs 500 ms apart, plus each PING's own
+	  wire time -- longer when READY is held low) on top of that op's own
+	  budget before a genuinely dead link is even
+	  declared dead, and a confirmed wedge adds the warm-reset's own ~3.5 s
+	  blind settle (longer still on the power-cycle fallback) after that.
+	  A caller with a tight timeout_ms on a worker-routed op, or reading
+	  cc3501e_wifi_connect()'s own return, may see it take noticeably
+	  longer to fail than before this existed -- that IS the mechanism
+	  working (trading a longer single failure for not needing a manual
+	  power cycle after it), not a regression to chase.
 
 endif # ALP_SDK_CHIP_CC3501E
 

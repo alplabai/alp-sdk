@@ -964,16 +964,15 @@ int main(void)
 
 	/* 2. READY pin level, read directly as a GPIO input. fw.ready_pin is
 	 *    populated by cc3501e_bridge_bringup() (see src/cc3501e_bridge.c)
-	 *    when the board wires it -- this board does (P2_6, see the app
-	 *    overlay). BUT: chips/cc3501e/cc3501e_core.c documents this EXACT
-	 *    pad (CC35 GPIO17 -> Alif P2_6) as an OPEN CONNECTION on the bench
-	 *    unit -- 0 edges in 20000 samples taken during live traffic -- and
-	 *    the app opens it ALP_GPIO_PULL_NONE (src/cc3501e_bridge.c), so a
-	 *    read here samples a FLOATING input. A non-NULL fw.ready_pin proves
-	 *    only that a pad object exists, not that the level means anything.
-	 *    Printed for completeness only -- it carries NO evidentiary weight
-	 *    and does NOT appear in the VERDICT below (this app's own review
-	 *    record, Major 5). */
+	 *    only when the board wires it -- this app leaves it NULL by default
+	 *    on the R2 module e1m-aen-evk-01 currently holds: Alif P2_6 there is
+	 *    E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST), NOT CC35 GPIO17
+	 *    READY (see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
+	 *    comment). So this branch always takes the "no READY pin populated"
+	 *    path below on this board -- printed for completeness only, it
+	 *    carries NO evidentiary weight and does NOT appear in the VERDICT
+	 *    below (this app's own review record, Major 5). A board that opts
+	 *    into a real ready_pin would instead sample it directly here. */
 	bool ready_high    = false;
 	bool ready_read_ok = false;
 	if (fw.ready_pin != NULL) {

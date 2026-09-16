@@ -334,7 +334,10 @@
  *
  * None of those pads collides with anything else this app drives (the PWM
  * trio P12_6/P12_7/P2_4, the SPI1 quad P14_4..P14_7, WIFI_EN P15_5, nRESET
- * P15_1, READY P2_6, the carrier I2C pair P5_6/P5_7, the console P3_4/P3_5).
+ * P15_1, the carrier I2C pair P5_6/P5_7, the console P3_4/P3_5). P2_6 is not
+ * in that list any more -- see the P2_6/READY comment further down: this
+ * app no longer muxes or reads it (it is not the CC3501E READY net on this
+ * R2 module).
  *
  * `input-enable` on the input group is NOT decoration: on this SoC a pad's
  * INPUT BUFFER is a PADCTRL bit that only pinctrl sets, so without it the RMII
@@ -551,7 +554,10 @@
  *     SPI1.MOSI    P14_5          out   GPIO_28
  *     SPI1.MISO    P14_4          in    GPIO_29
  *     SPI1.SS0     P14_7          out   CC35 SPI0 CSN
- *     READY        P2_6           in    GPIO_17
+ *
+ * NOT wired: READY.  Alif P2_6 (E1M pad AH7 / I2S1_SCLK) is the EVK's Arduino
+ * CK_RST net on this R2 module, not CC35 GPIO_17 -- see the P2_6 comment
+ * further down and chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate().
  *
  * WHAT THIS OVERLAY DELIBERATELY OMITS versus aen-cc3501e-bringup's: the
  * host-side peripheral-DMA wiring (dma0 / evtrtr0 / the `dmas` property, and
@@ -589,26 +595,22 @@
 			input-enable;
 		};
 
-		/*
-		 * P2_6 = the CC3501E READY / host-IRQ input (CC35 GPIO_17). Its mux
-		 * default already IS GPIO, but the pad input buffer still has to be
-		 * enabled here or alp_gpio_read(P2_6) reads 0 forever whatever the
-		 * CC35 drives -- and the host then silently falls back to fixed
-		 * settle gaps instead of gating each reply phase on the slave's
-		 * actual re-arm, which is the race that produces byte-shifted
-		 * replies.
-		 *
-		 * It lives inside THIS state rather than a standalone one applied at
-		 * runtime because P2_6's alternate function is SPI1_SCLK_A: a second
-		 * pinctrl pass after SPI1 is up killed the bridge on silicon. Applied
-		 * in the SPI driver's single init pass it is inert.
-		 */
-		group2 {
-			pinmux = <PIN_P2_6__GPIO>;
-			input-enable;
-		};
 	};
 };
+
+/* P2_6 (E1M AH7 / I2S1_SCLK) is NOT the CC3501E READY net on the R2 module this
+ * bridge targets -- it is E1M pad AH7 / I2S1_SCLK, which the E1M EVK
+ * carrier repurposes as the Arduino header's CK_RST (metadata/boards/
+ * e1m-evk.yaml); the real READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv). This app therefore does not
+ * mux or input-enable P2_6, and does not wire fw->ready_pin -- see
+ * src/cc3501e_bridge.c and chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
+ * comment. A board (or a hand-reworked r1 unit) that genuinely wires GPIO17
+ * to P2_6 can opt back in: add a pinctrl group muxing PIN_P2_6__GPIO with
+ * input-enable (applied inside pinctrl_spi1's single init pass, not a
+ * standalone runtime one -- a second pinctrl pass after SPI1 is up killed
+ * the bridge on silicon), enable &gpio2, add an alp_pins entry for it, and
+ * set fw->ready_pin in cc3501e_bridge_bringup(). */
 
 /*
  * DWC_ssi SPI1 (AHB) -- the on-SoM CC3501E inter-chip link. Deliberately not
@@ -688,11 +690,6 @@
 	status = "okay";
 };
 
-/* gpio2 carries the READY input (CC35 GPIO_17 -> Alif P2_6). */
-&gpio2 {
-	status = "okay";
-};
-
 / {
 	aliases {
 		/* bus_id 1 in alp_spi_open() -> this controller. */
@@ -700,11 +697,12 @@
 	};
 
 	/*
-	 * Compact 3-entry control array for the SoM-internal CC3501E nets, in
-	 * the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices expect.
-	 * These are NOT E1M edge pads, so this app does not use the 52-slot
-	 * positional E1M map; a production board file appends SoM-internal
-	 * control nets after the E1M pad slots.
+	 * Compact 2-entry control array for the SoM-internal CC3501E control
+	 * nets, in the order cc3501e_bridge.h's CC3501E_BRIDGE_PIN_* indices
+	 * expect. These are NOT E1M edge pads, so this app does not use the
+	 * 52-slot positional E1M map; a production board file appends
+	 * SoM-internal control nets after the E1M pad slots. No READY entry
+	 * here -- see the P2_6 comment above &gpio2's removal further up.
 	 *
 	 * There must be exactly ONE "alp,pin-array" node in the tree. A second
 	 * one broke pin resolution outright on the bench (2026-08-26): the
@@ -713,9 +711,8 @@
 	 */
 	alp_pins: alp-pins {
 		compatible = "alp,pin-array";
-		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>,   /* [0] WIFI_EN     (P15_5)      */
-			<&lpgpio 1 GPIO_ACTIVE_HIGH>,   /* [1] E_WIFI.NRST (P15_1_FLEX) */
-			<&gpio2 6 GPIO_ACTIVE_HIGH>;    /* [2] READY       (P2_6 <- CC35 GPIO_17) */
+		gpios = <&lpgpio 5 GPIO_ACTIVE_HIGH>, /* [0] WIFI_EN     (P15_5)      */
+			<&lpgpio 1 GPIO_ACTIVE_HIGH>; /* [1] E_WIFI.NRST (P15_1_FLEX) */
 	};
 };
 
@@ -797,8 +794,17 @@
  * fact, hit first there since that example has no mux-enable GPIO to hide
  * behind). The HP PDM node stays enabled -- it is a wholly separate bus
  * (P6_0/P6_1), input-only, and never touches U46. To turn playback on once
- * U46 has been reworked: set AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c
- * AND pass `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
+ * U46 is BOTH a 3257-type switch AND its VCC is on +3V3 (a stock
+ * 74LVC157, even on +3V3, is still one-way and reproduces the
+ * contention above; VCC alone is not the gate), OR a switch rated for
+ * 1.8 V VCC (untested) -- on e1m-aen-evk-03, 2026-09-15, a fitted 3257-type
+ * part's VCC was moved to +3V3 between a silent run and an audible
+ * run; not established as the only difference between the two -- see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
+ * untested /E-or-S-HIGH caveat at +3V3 and the open TDM-latch/#2146
+ * findings: set
+ * AEN_EVKDEMO_SOUND_PLAYBACK to 1 in src/main.c AND pass
+ * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (relative to this app's own source dir) -- both switches, not either alone.
  */
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>

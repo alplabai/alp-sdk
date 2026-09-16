@@ -463,11 +463,13 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 	 * but that omission only makes the loop run a little past timeout_ms,
 	 * never short of it, which is the safe direction for a caller's
 	 * declared budget. */
-	uint32_t elapsed_ms = 0u;
+	uint32_t elapsed_ms    = 0u;
+	bool     any_status_ok = false; /* #2126: did ANY status read ever land? */
 	for (;;) {
 		alp_cc3501e_wifi_status_t st;
 		alp_status_t              ss = cc3501e_wifi_status_once(ctx, &st);
 		if (ss == ALP_OK) {
+			any_status_ok = true;
 			if (st.state == ALP_CC3501E_WIFI_CONNECTED) return ALP_OK;
 			if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 				return (st.fail_reason == ALP_CC3501E_WIFI_FAIL_TIMEOUT) ? ALP_ERR_TIMEOUT
@@ -505,7 +507,30 @@ alp_status_t cc3501e_wifi_connect(cc3501e_t  *ctx,
 		/* ss != ALP_OK: a single status read failing (e.g. a transient
 		 * down-window IO) is worth one more pass rather than an immediate
 		 * bail -- the next iteration will retry it. */
-		if (elapsed_ms >= timeout_ms) return ALP_ERR_TIMEOUT;
+		if (elapsed_ms >= timeout_ms) {
+			/* #2126: the whole loop timed out. If EVERY status read across
+			 * the whole attempt failed (any_status_ok still false), no reply
+			 * was EVER decoded off this link for the entire connect -- the
+			 * same "top-level op returned ALP_ERR_TIMEOUT with no status ever
+			 * decoded" signal poll_by_repeat_seq()'s own terminal exit acts
+			 * on (cc3501e_core.c's cc3501e_poll_exit()), just derived from
+			 * this loop's own bookkeeping instead of ctx->rx_scratch[0]
+			 * directly -- cc3501e_wifi_status_once() is a single non-retried
+			 * cc3501e_request() call per iteration, so by the time this
+			 * function returns, rx_scratch[0] only ever reflects the LAST
+			 * iteration's outcome, not "never once across the whole loop".
+			 * Checked once, here, at the loop's own final exit -- never
+			 * inside the loop above, so a wedge discovered on connect N does
+			 * not retry-storm the probe on every one of this loop's ~50 ms
+			 * iterations. A single status read that DID land (even stuck at
+			 * CONNECTING) is positive evidence the link is alive, so no
+			 * probe/recover is warranted -- the association is just slow or
+			 * genuinely failing, not the wedge this catches. */
+			if (!any_status_ok) {
+				(void)cc3501e_link_check_and_recover(ctx);
+			}
+			return ALP_ERR_TIMEOUT;
+		}
 		uint32_t gap = ((timeout_ms - elapsed_ms) < CC3501E_WIFI_STATUS_POLL_GAP_MS)
 		                   ? (timeout_ms - elapsed_ms)
 		                   : CC3501E_WIFI_STATUS_POLL_GAP_MS;
