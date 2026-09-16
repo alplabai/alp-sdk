@@ -114,11 +114,15 @@ int main(void)
 	printf("[manifest] raw bytes:\n");
 	hex_dump(raw, sizeof(raw));
 
-	/* Reinterpret the raw bytes as the manifest struct rather than copying
-	 * field-by-field: alp_hw_info_eeprom_t is a fixed, packed on-wire layout
-	 * (the same one scripts/program_eeprom.py writes), so this is safe as
-	 * long as that layout and this decode stay in lock-step. */
-	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)raw;
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+	 * alp_hw_info_eeprom_t needs alignment 4 for its uint32_t
+	 * magic/schema_version/crc32 and uint16_t mfg_year. Reading through a
+	 * cast pointer is the same misaligned-access bug already fixed on the
+	 * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
+	 * comment in include/alp/hw_info.h) and left unswept here. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+	const alp_hw_info_eeprom_t *m = &manifest;
 
 	/* Each field check's OK/FAIL folds into `magic_ok` / `schema_ok` /
 	 * `crc_ok` below (crc_ok is set where it's computed, further down) --
@@ -220,7 +224,8 @@ int main(void)
 		}
 
 		if (id.lock_valid) {
-			printf("[manifest]   Secure Page Lock Status : %s\n",
+			printf("[manifest]   Secure Page Lock Status : 0x%02x (%s)\n",
+			       (unsigned)id.lock_status,
 			       id.secure_page_locked ? "LOCKED (permanent)" : "UNLOCKED");
 		} else {
 			printf("[manifest]   Secure Page Lock Status : NACK (expected on the "

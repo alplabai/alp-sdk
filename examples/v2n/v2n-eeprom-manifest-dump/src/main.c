@@ -111,7 +111,15 @@ int main(void)
 	/* Validate the manifest in the same order as
      * src/zephyr/hw_info_zephyr.c does at boot.  Each failure
      * mode prints a diagnostic the production line can act on. */
-	const alp_hw_info_eeprom_t *m = (const alp_hw_info_eeprom_t *)raw;
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+     * alp_hw_info_eeprom_t needs alignment 4 for its uint32_t
+     * magic/schema_version/crc32 and uint16_t mfg_year. Reading through a
+     * cast pointer is the same misaligned-access bug already fixed on the
+     * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
+     * comment in include/alp/hw_info.h) and left unswept here. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+	const alp_hw_info_eeprom_t *m = &manifest;
 
 	/* Magic byte: ASCII "ALPH" in little-endian.  An erased EEPROM
      * reads 0xFF or 0x00 across the board; either is unambiguously
