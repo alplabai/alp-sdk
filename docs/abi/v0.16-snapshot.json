@@ -7631,6 +7631,10 @@
           "hash": "42548fad01644ebf",
           "signature": "alp_status_t tas2563_read_revision(tas2563_t *ctx, uint8_t *rev_out);"
         },
+        "tas2563_resume": {
+          "hash": "2d4bace192240033",
+          "signature": "alp_status_t tas2563_resume(const tas2563_t *ctx);"
+        },
         "tas2563_set_amp_level": {
           "hash": "bf594748f4b3a17c",
           "signature": "alp_status_t tas2563_set_amp_level(tas2563_t *ctx, uint8_t level_code);"
