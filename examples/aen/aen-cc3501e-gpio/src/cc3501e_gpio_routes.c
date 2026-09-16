@@ -22,8 +22,14 @@
  * lines) are never emitted here -- the firmware's gpio_pad_reserved()
  * would refuse them at runtime, so the generator excludes them at
  * generation time instead (issue #1859).
+ *
+ * The revision-dependent pin guard (issue #2144) is NOT emitted here --
+ * it does not depend on this board's own routes, so it lives in ONE
+ * SDK-owned generated file instead of a per-app copy:
+ * src/backends/gpio/cc3501e_rev_dependent_pins.c.
  */
 
+#include <stdint.h>
 #include <stddef.h>
 
 #include <alp/chips/cc3501e.h>
