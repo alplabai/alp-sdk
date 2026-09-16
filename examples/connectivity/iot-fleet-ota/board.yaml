@@ -71,10 +71,16 @@ cores:
     # (or `bearssl`) in `libraries:` whenever `iot.tls: true` --
     # native_sim parity is restored at the v0.6 PSA work item.
 
-# No additional chips: the on-SoM OPTIGA Trust M is part of the
-# E1M-AEN801 preset and the CC3501E Wi-Fi bridge is wired
-# through cores.m55_hp.iot.wifi: true.  No extra `chips:` entries
-# needed.
+# The on-SoM OPTIGA Trust M is part of the E1M-AEN801 preset and needs no
+# entry here.  The CC3501E does need one as of #2112: Wi-Fi still reaches
+# the app through cores.m55_hp.iot.wifi: true, but this app now carries the
+# bridge helper (src/cc3501e_bridge.h), which includes
+# <alp/chips/cc3501e.h> directly -- and check_example_portability.py
+# requires any chip header an example includes to be declared here, so the
+# family-compatibility check and the portability ring can account for it.
+# Matches examples/aen/aen-cc3501e-bringup/board.yaml.
+chips:
+  - cc3501e
 
 # ----------------------------------------------------------------
 # Bootloader (project-wide, board.yaml v0.6 `boot:` block).

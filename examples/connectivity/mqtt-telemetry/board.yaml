@@ -53,5 +53,14 @@ cores:
       - spi
       - gpio
 
+# The bridge helper this app now carries (src/cc3501e_bridge.h, #2112)
+# includes <alp/chips/cc3501e.h> directly, so the chip has to be declared
+# here for check_example_portability.py's family-compatibility check and
+# the portability ring to account for it -- same as
+# examples/aen/aen-cc3501e-bringup/board.yaml.  Wi-Fi itself still reaches
+# the app through the portable <alp/iot.h> surface, not this entry.
+chips:
+  - cc3501e
+
 diagnostics:
   log_level: info
