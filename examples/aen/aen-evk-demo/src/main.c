@@ -1409,9 +1409,15 @@ static phase_verdict_t phase_eeprom_identity(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	/* Reinterpret rather than field-copy: alp_hw_info_eeprom_t is the
-	 * fixed, packed on-wire layout scripts/program_eeprom.py writes. */
-	const alp_hw_info_eeprom_t *m         = (const alp_hw_info_eeprom_t *)raw;
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+	 * alp_hw_info_eeprom_t needs alignment 4 for its uint32_t
+	 * magic/schema_version/crc32 and uint16_t mfg_year. Reading through a
+	 * cast pointer is the same misaligned-access bug already fixed on the
+	 * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
+	 * comment in include/alp/hw_info.h) and left unswept here. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+	const alp_hw_info_eeprom_t *m         = &manifest;
 	bool                        magic_ok  = (m->magic == ALP_HW_INFO_MAGIC);
 	bool                        family_ok = (strncmp(m->family, "aen", 3) == 0);
 

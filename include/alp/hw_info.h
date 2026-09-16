@@ -74,6 +74,8 @@
 #ifndef ALP_HW_INFO_H
 #define ALP_HW_INFO_H
 
+#include <stdbool.h> /* alp_secure_page_mirror_classify()'s return type */
+#include <stddef.h>  /* offsetof -- see alp_secure_page_mirror_t's field-offset static_asserts */
 #include <stdint.h>
 
 #include "alp/peripheral.h" /* alp_status_t */
@@ -123,6 +125,176 @@ typedef struct alp_hw_info_eeprom_t {
 	uint8_t  reserved[40];                   /**< Zero-padded; covered by CRC. */
 	uint32_t crc32;                          /**< CRC-32 over preceding bytes. */
 } alp_hw_info_eeprom_t;
+
+/** Magic value at offset 0 of the Secure Data Page mirror -- ASCII "ALSP"
+ *  ("Alp Lab Secure Page"), deliberately different from @ref
+ *  ALP_HW_INFO_MAGIC so the two 24C128 address spaces (the array manifest
+ *  at `0x50` vs this mirror at `0x58` selector `0x00`) can never be
+ *  mistaken for each other by a magic check alone. */
+#define ALP_SECURE_PAGE_MAGIC 0x414C5350u
+
+/** Schema version this header understands for the Secure Data Page mirror.
+ *  Independent of @ref ALP_HW_INFO_SCHEMA_VERSION -- the mirror is a
+ *  narrower, separately-versioned 64-byte format that gets permanently
+ *  frozen per unit at the lock (@ref eeprom_24c128_secure_page_lock), so it
+ *  cannot share a version counter with the still-rewritable array. */
+#define ALP_SECURE_PAGE_SCHEMA_VERSION 1u
+
+/**
+ * @brief Field length budgets for @ref alp_secure_page_mirror_t.
+ *
+ * Chosen from what the current data actually needs plus headroom sized by
+ * how likely each field is to outgrow it -- NOT copied from the array
+ * manifest's @ref ALP_HW_INFO_SKU_LEN / @ref ALP_HW_INFO_HW_REV_LEN /
+ * @ref ALP_HW_INFO_SERIAL_LEN, whose widths sum to exactly 64 and leave no
+ * room for @ref ALP_SECURE_PAGE_MAGIC or @ref ALP_SECURE_PAGE_SCHEMA_VERSION.
+ * Full reasoning + a worked test vector: `EEPROM-MANIFEST-SPEC.md`'s Secure
+ * Data Page section in alp-sdk-internal.  Once a unit's page is locked,
+ * these widths are frozen for that unit forever -- there is no second
+ * schema-bump chance the way the still-rewritable array manifest has, so
+ * the headroom split matters: `sku` gets the most of it (16, not just 10+1)
+ * because it is both the field the array itself budgets the most headroom
+ * for (24 bytes against a 10-char pattern) and the one this mirror exists
+ * to recover -- a future SKU the array could still hold but this locked
+ * mirror could not represent would defeat the mirror's whole purpose.
+ * `hw_rev` tracks a physical Altium board revision, the field least likely
+ * to grow, so it gets less (12, still 1.7x today's 7 chars). */
+#define ALP_SECURE_PAGE_SKU_LEN 16u /**< 10 chars today; sized to the array's 24-byte precedent. */
+#define ALP_SECURE_PAGE_HW_REV_LEN 12u /**< 7 chars today; least growth-prone, so least headroom. */
+#define ALP_SECURE_PAGE_SERIAL_LEN 23u /**< 12 chars today; the budget's remainder. */
+
+/**
+ * @brief On-EEPROM Secure Data Page mirror (64 bytes total).
+ *
+ * Lives at the onsemi N24S128's second device-select header: I2C address
+ * `0x58` (the array's `0x50` + 8), first pointer byte (selector) `0x00`.
+ * See `include/alp/chips/eeprom_24c128.h`'s
+ * `EEPROM_24C128_ALT_ADDR_OFFSET` / `EEPROM_24C128_SECURE_PAGE_BYTES` and
+ * @ref eeprom_24c128_read_identity.
+ *
+ * A MIRROR, never the primary store: the 128-byte array manifest
+ * (@ref alp_hw_info_eeprom_t) at `0x50` offset `0x0000` stays authoritative,
+ * and nothing in the SDK's runtime read path depends on this mirror
+ * existing.  It exists only to survive the one hazard the array manifest
+ * cannot protect itself against -- the array has no write protection at
+ * all, so a single stray `eeprom_24c128_write(ctx, 0, ...)` from customer
+ * code can wipe SKU / hw_rev / serial with nothing left to recover from.
+ * This mirror is written once and then permanently LOCKED during
+ * provisioning (@ref eeprom_24c128_secure_page_lock) -- see
+ * `docs/som-batch-provisioning-procedure.md` §7 in alp-sdk-internal for the
+ * full write/cold-cycle/verify/lock order and why the lock is irreversible.
+ *
+ * Carries only the immutable core needed to recover a board's identity --
+ * SKU, hw_rev, serial, manufacturing date, CRC.  Deliberately does NOT
+ * carry `family` or a `reserved[]` block the way @ref alp_hw_info_eeprom_t
+ * does: recovering the family is not essential (it is derivable from the
+ * SKU) and the 64-byte page has no room to spare for future-proofing that
+ * isn't needed today -- see @ref ALP_SECURE_PAGE_SKU_LEN's doc comment for
+ * where the budget went instead.
+ *
+ * The struct must be packed (no padding) and exactly 64 bytes; the
+ * static_asserts at the bottom of this header enforce both -- the overall
+ * size AND (individually) that @ref alp_secure_page_mirror_t::mfg_year and
+ * @ref alp_secure_page_mirror_t::crc32 land at their exact expected offsets,
+ * not merely that the struct's total size comes out right.  Every
+ * multi-byte integer field's offset here is a multiple of *its own
+ * alignment requirement* -- not of its own size; `sku[16]` sits at `0x05`,
+ * not a multiple of 16, but `char[]` has alignment 1 so that never
+ * mattered.  What actually has to line up is `mfg_year` (a `uint16_t`,
+ * alignment 2) landing on the even offset `0x38`, and `crc32` (a
+ * `uint32_t`, alignment 4) landing on the offset `0x3C` -- both multiples
+ * of 4.  The 16/12/23 string widths were chosen so this holds, meaning no
+ * compiler needs to insert padding for this struct on any target this SDK
+ * supports -- but a total-size check alone cannot tell "no padding" apart
+ * from "padding here, one fewer padding byte there", which is exactly why
+ * the two field-offset asserts exist as a second, independent check.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17 -- the Secure Data Page mirror format.  The chip driver's
+ *      own @par Verification status (include/alp/chips/eeprom_24c128.h) says
+ *      both @ref eeprom_24c128_secure_page_write and
+ *      @ref eeprom_24c128_secure_page_lock still need a real bench run before
+ *      the first production lock -- a format cannot be frozen [ABI-STABLE]
+ *      while the driver that writes it is unverified on silicon.  Promote
+ *      alongside that driver once bench-proven, per the v0.9 SoC-identity
+ *      block's precedent (documented at function granularity; see this
+ *      file's `alp_soc_info_read` / `alp_soc_secure_fw_ping`).
+ *
+ * Forward/backward compatibility: a reader MUST parse this struct only when
+ * `magic == ALP_SECURE_PAGE_MAGIC` AND `schema_version` is a value it has
+ * explicit code for (today, only `1`) -- never attempt to interpret a
+ * `schema_version` it does not recognise, whether lower (an earlier layout
+ * it never implemented) or higher (a later layout it predates), the same
+ * way @ref alp_hw_info_t's reader refuses an unrecognised
+ * @ref ALP_HW_INFO_SCHEMA_VERSION.  This matters more here than for the
+ * rewritable array: a locked page can never be corrected, so a reader bug
+ * that mis-parses an unrecognised version is permanent for that unit, not
+ * a re-flash away.  See EEPROM-MANIFEST-SPEC.md's Secure Data Page section
+ * for the full rule.
+ *
+ * Graceful degradation: the approved footprint-compatible alternate part
+ * (STMicro M24128-BFMH6TG) has no second device-select header at all, so
+ * on a board populated with that part these bytes never arrive --
+ * @ref eeprom_24c128_read_identity still returns ::ALP_OK with
+ * `secure_page_valid` false, not an I/O error.  The array manifest is
+ * unaffected either way.
+ */
+typedef struct alp_secure_page_mirror_t {
+	uint32_t magic;                              /**< @ref ALP_SECURE_PAGE_MAGIC. */
+	uint8_t  schema_version;                     /**< @ref ALP_SECURE_PAGE_SCHEMA_VERSION. */
+	char     sku[ALP_SECURE_PAGE_SKU_LEN];       /**< MPN, e.g. "E1M-AEN801". */
+	char     hw_rev[ALP_SECURE_PAGE_HW_REV_LEN]; /**< Revision, e.g. "2626-r2". */
+	char     serial[ALP_SECURE_PAGE_SERIAL_LEN]; /**< Factory-assigned serial. */
+	uint16_t mfg_year;                           /**< Manufacturing year (e.g. 2026). */
+	uint8_t  mfg_month;                          /**< 1..12. */
+	uint8_t  mfg_day;                            /**< 1..31. */
+	uint32_t crc32;                              /**< CRC-32 ISO-3309 over every
+	                                                  preceding byte (offsets
+	                                                  `[0x00, 0x3C)`); same
+	                                                  algorithm, same
+	                                                  little-endian trailer
+	                                                  placement as @ref
+	                                                  alp_hw_info_eeprom_t::crc32. */
+} alp_secure_page_mirror_t;
+
+/**
+ * @brief Does @p page (exactly `sizeof(alp_secure_page_mirror_t)` raw bytes,
+ *   as read fresh off the Secure Data Page) parse as a valid mirror?
+ *
+ * The ONE implementation of this struct's forward-compatibility rule
+ * (see @ref alp_secure_page_mirror_t's doc comment and
+ * EEPROM-MANIFEST-SPEC.md's Secure Data Page section in alp-sdk-internal):
+ * refuse -- never guess -- when `magic` or `schema_version` don't match
+ * exactly what this build understands, in either direction.  The mirror
+ * equivalent of `alp_hw_info_classify_manifest()`, implemented alongside
+ * it in `src/zephyr/hw_info_zephyr.c` (OS-agnostic despite the filename;
+ * see that file's header comment) for the array manifest.
+ *
+ * An earlier revision duplicated this logic once per provisioning-example
+ * build mode, each casting the raw device buffer directly to
+ * `const alp_secure_page_mirror_t *` -- a real bug, not just duplication:
+ * `eeprom_24c128_identity_t::secure_page` sits at a 1-byte-aligned offset
+ * inside a struct with no stronger alignment guarantee, so that cast is a
+ * misaligned access this struct's own 4-byte-aligned fields (`mfg_year`,
+ * `crc32`) do not tolerate.  This function copies through `memcpy` into
+ * @p out instead, which -- being a real `alp_secure_page_mirror_t` the
+ * caller declared -- carries the type's actual alignment.
+ *
+ * @param[in]  page  Exactly `sizeof(alp_secure_page_mirror_t)` (64) bytes
+ *   read fresh off the device.  May be misaligned (e.g. a byte array
+ *   embedded in another struct); never dereferenced as anything but
+ *   `const uint8_t *`.
+ * @param[out] out   Populated with a properly-aligned copy of @p page's
+ *   contents on success; left untouched on failure.
+ * @return true only when both `magic == ALP_SECURE_PAGE_MAGIC` and
+ *   `schema_version == ALP_SECURE_PAGE_SCHEMA_VERSION`.
+ *
+ * @par ABI status: [ABI-EXPERIMENTAL]
+ *      New in v0.17, alongside @ref alp_secure_page_mirror_t -- see that
+ *      struct's doc comment for why the format (and therefore this
+ *      classifier) cannot be [ABI-STABLE] yet.
+ */
+bool alp_secure_page_mirror_classify(const uint8_t *page, alp_secure_page_mirror_t *out);
 
 /**
  * @brief Combined runtime board info as returned by @ref alp_hw_info_read.
@@ -308,6 +480,25 @@ alp_status_t alp_soc_secure_fw_ping(void);
 #if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(alp_hw_info_eeprom_t) == 128,
                "alp_hw_info_eeprom_t must be 128 bytes (check struct packing)");
+#endif
+
+/* Compile-time guard: the Secure Data Page mirror must be exactly 64 bytes
+ * (the physical page size) and tightly packed -- see
+ * alp_secure_page_mirror_t's doc comment for why every field's offset was
+ * chosen to make that hold without a packed attribute. */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(alp_secure_page_mirror_t) == 64,
+               "alp_secure_page_mirror_t must be 64 bytes (check struct packing)");
+/* A total-size check alone cannot distinguish "no padding" from "padding
+ * here, one fewer padding byte there" -- pin two individual field offsets
+ * too (the doc comment above explains why these two).  If either ever
+ * fires, some target's ABI padded a field this layout assumed would be
+ * naturally aligned; the fix is a new schema_version + magic, not a
+ * packed attribute retrofitted onto an already-locked format. */
+_Static_assert(offsetof(alp_secure_page_mirror_t, mfg_year) == 0x38,
+               "alp_secure_page_mirror_t.mfg_year drifted off offset 0x38 -- unexpected padding?");
+_Static_assert(offsetof(alp_secure_page_mirror_t, crc32) == 0x3C,
+               "alp_secure_page_mirror_t.crc32 drifted off offset 0x3C -- unexpected padding?");
 #endif
 
 #ifdef __cplusplus
