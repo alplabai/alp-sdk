@@ -18,6 +18,8 @@
 #ifndef ALP_CHIPS_CC3501E_CORE_H
 #define ALP_CHIPS_CC3501E_CORE_H
 
+#include <assert.h> /* static_assert (C11) / _Static_assert fallback -- see the
+                      * cc3501e_link_log_entry_t size check below */
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -48,6 +50,128 @@ typedef void (*cc3501e_recover_cb_t)(cc3501e_t *ctx, uint32_t recover_count, voi
  *  application -- with headroom; @ref cc3501e_add_event_callback reports
  *  @ref ALP_ERR_NOMEM rather than silently dropping one past this. */
 #define CC3501E_EVENT_SUBSCRIBERS 4
+
+/** Number of @ref cc3501e_link_log_entry_t slots in @ref cc3501e::link_log
+ *  (issue #2136). A fixed ring, oldest entry overwritten first -- see
+ *  @ref cc3501e_link_log_count / @ref cc3501e_link_log_get. */
+#define CC3501E_LINK_LOG_LEN 8u
+
+/** @ref cc3501e_link_log_entry_t::phase values -- which of
+ *  cc3501e_request_locked()'s four wire phases an attempt reached before
+ *  bailing. There is deliberately no fifth "verdict" value: this ring is
+ *  filled ONLY on !decoded (see @ref cc3501e_link_log_entry_t), and reaching
+ *  the verdict means a status WAS decoded, so that phase can never actually
+ *  appear in a recorded entry -- review (#2136): a `PHASE_VERDICT` constant
+ *  used to exist for exactly that unreachable case; this repo does not ship
+ *  speculative public surface, so it was deleted rather than documented as
+ *  dead.  @{ */
+#define CC3501E_LINK_LOG_PHASE_REQUEST_HEADER  1u
+#define CC3501E_LINK_LOG_PHASE_REQUEST_PAYLOAD 2u
+#define CC3501E_LINK_LOG_PHASE_REPLY_HEADER    3u
+#define CC3501E_LINK_LOG_PHASE_REPLY_PAYLOAD   4u
+/** @} */
+
+/** @ref cc3501e_link_log_entry_t::flags bits (issue #2136).  @{ */
+#define CC3501E_LINK_LOG_READY_AT_FAILURE \
+	0x1u /**< READY read HIGH at the moment this failure was
+                                             *   recorded.  Sampled ONCE, on the failing path only.
+                                             *
+                                             *   An earlier revision sampled BEFORE and AFTER every
+                                             *   attempt, which cost a GPIO read per bridge request
+                                             *   on every board and perturbed #2145's READY gate --
+                                             *   that gate consumes the pin in run-lengths, so a
+                                             *   second reader shifts what it observes.  A caller
+                                             *   reading this bit MUST also check
+                                             *   @c CC3501E_LINK_LOG_READY_WAS_STUCK: a level from a
+                                             *   line that had already latched stuck is not
+                                             *   evidence, just an untrusted read. */
+#define CC3501E_LINK_LOG_READY_WAS_STUCK \
+	0x4u /**< The READY line had latched stuck-LOW at the time of
+                                             *   this failure (cc3501e_core.c's
+                                             *   g_ready_line_was_stuck), so the gate had stopped
+                                             *   waiting on the pin and was falling back to a plain
+                                             *   settle.  BEFORE/AFTER still record real samples;
+                                             *   this says the pin was no longer being trusted.
+                                             *
+                                             *   Replaces an earlier READY_PROVEN bit sourced from
+                                             *   g_ready_line_proven.  #2145 deleted that variable
+                                             *   along with the whole edge-proof design -- the pin
+                                             *   is deliberately never treated as proof of
+                                             *   anything, so a "proven" bit had no source and no
+                                             *   meaning.  "Was it stuck?" is the question an
+                                             *   operator reading this ring actually has. */
+/** #2136 review (MAJOR): a phase's byte array is memcpy'd from
+ *  ctx->rx_scratch regardless of whether THAT phase's own transceive
+ *  actually succeeded -- on a bail, that scratch can be stale residue from a
+ *  DIFFERENT, earlier exchange (the poisoned-marker byte 0xDA plus leftover
+ *  neighbours), presented as if it were wire data from THIS attempt. These
+ *  two bits are the ONLY way to tell "genuinely read off the wire this
+ *  attempt" apart from "zeroed because that phase's transceive never
+ *  completed" -- see @ref cc3501e_link_log_entry_t::hdr_bytes /
+ *  @ref cc3501e_link_log_entry_t::reply_hdr. A caller classifying
+ *  deaf-armed vs desynced vs crashed from
+ *  those byte patterns MUST check the matching VALID bit first; an unset bit
+ *  means the byte array is all-zero and means nothing. */
+#define CC3501E_LINK_LOG_HDR_BYTES_VALID \
+	0x8u /**< hdr_bytes came off the wire this attempt
+                                                 *   (the request-header transceive returned
+                                                 *   ALP_OK) -- unset means hdr_bytes is all-zero. */
+#define CC3501E_LINK_LOG_REPLY_HDR_VALID \
+	0x10u /**< reply_hdr came off the wire this attempt
+                                                 *   (the reply-header transceive returned
+                                                 *   ALP_OK) -- unset means reply_hdr is all-zero,
+                                                 *   whether because this attempt never reached
+                                                 *   phase 3 or because phase 3's own transceive
+                                                 *   itself failed. */
+/** @} */
+
+/**
+ * @brief One link-failure ring entry (issue #2136).
+ *
+ * Filled ONLY at cc3501e_request_locked()'s `out:` label, ONLY when no reply
+ * status was decoded (see @ref ALP_CC3501E_RX_SCRATCH_NO_STATUS) -- a genuine
+ * pre-decode transport/framing failure, never a decoded device error and
+ * never a success. This is the evidence a bridge wedge leaves on the HOST
+ * side specifically because the firmware side does not survive the warm
+ * nRESET used to recover it (cc3501e-bridge-firmware#148 measured 0
+ * retained-RAM state across that reset -- see cc3501e_core.c's corrected
+ * comment above cc3501e_recover()).
+ *
+ * 20 bytes, no padding -- enforced below by a `static_assert` right after
+ * the type, so a future field addition that drifts this fails the BUILD,
+ * not a silent ABI change.
+ */
+typedef struct {
+	uint32_t ts_ms;                 /**< Truncated alp_uptime_ms() (wraps ~49 days --
+	                                      *   acceptable for an 8-entry recent-history ring). */
+	uint32_t recover_attempt_count; /**< @ref cc3501e::recover_attempt_count at record time. */
+	uint8_t  cmd;                   /**< @c alp_cc3501e_cmd_t opcode this attempt used. */
+	uint8_t  phase;                 /**< One of the @c CC3501E_LINK_LOG_PHASE_* values. */
+	int8_t   status;                /**< @c alp_status_t narrowed (the whole enum fits -15..0). */
+	uint8_t  flags;                 /**< @c CC3501E_LINK_LOG_READY_* / @c
+	                                      *   CC3501E_LINK_LOG_*_VALID bits, OR'd. */
+	uint8_t  hdr_bytes[4];          /**< Request-header phase's 4 MISO bytes (the in-band
+	                                      *   armed-check marker: ALP_CC3501E_SYNC_IDLE x4 = armed) --
+	                                      *   MEANINGLESS, all-zero, unless @c flags has
+	                                      *   @ref CC3501E_LINK_LOG_HDR_BYTES_VALID set (#2136
+	                                      *   review: previously memcpy'd from ctx->rx_scratch
+	                                      *   regardless of whether the transceive that was
+	                                      *   supposed to fill it actually succeeded, so a bail
+	                                      *   before this phase ran could present a PRIOR
+	                                      *   attempt's stale scratch as if it were this
+	                                      *   attempt's wire data). */
+	uint8_t  reply_hdr[4];          /**< Reply-header phase's 4 bytes (echoed opcode + length) --
+	                                      *   MEANINGLESS, all-zero, unless @c flags has
+	                                      *   @ref CC3501E_LINK_LOG_REPLY_HDR_VALID set: unset
+	                                      *   covers BOTH "never reached phase 3" and "phase 3's
+	                                      *   own transceive itself failed" -- see that macro's
+	                                      *   doc comment. */
+} cc3501e_link_log_entry_t;
+
+#if defined(__cplusplus) || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L)
+static_assert(sizeof(cc3501e_link_log_entry_t) == 20u,
+              "cc3501e_link_log_entry_t drifted from 20 bytes");
+#endif
 
 /** Value cc3501e_request_locked() (cc3501e_core.c) writes into
  *  @ref cc3501e::rx_scratch's byte 0 on every PRE-DECODE exit -- a failed
@@ -448,6 +572,73 @@ struct cc3501e {
 	 * true, for both the automatic path and a manual `alp companion
 	 * recover`. */
 	bool ota_session_active;
+
+	/* #2136 review (MAJOR): pre-decode failures LOGGED while a
+	 * cc3501e_link_check_and_recover() probe is running (see
+	 * link_log_suppress below), counted here instead -- up to
+	 * CC3501E_LINK_PROBE_TRIES (24), so a uint8_t is plenty. Reset to 0 at
+	 * the start of every probe. This is the "the probe ran and here is how
+	 * it failed" evidence an operator still needs even though the probe's
+	 * OWN PING failures must not evict the wedging op's ring entry -- see
+	 * @ref cc3501e_link_log_probe_fail_count. Placed here (not after
+	 * link_log_next below) purely to reuse this padding byte rather than
+	 * grow the struct -- no relation to ota_session_active. */
+	uint8_t link_log_probe_fail_count;
+	/* #2136 review (minor): ctx->link_log_fail_streak's snapshot at the
+	 * moment the MOST RECENT cc3501e_recover() call started (top of that
+	 * function, before nRESET or the confirming PING) -- cc3501e_recover()'s
+	 * own confirming PING decodes successfully and resets the live
+	 * link_log_fail_streak to 0 via the normal decoded-reply path in
+	 * cc3501e_request_locked(), so by the time companion_recover_notify()
+	 * ran its dump the live field always read 0 regardless of how the link
+	 * actually got here. Saturates at 0xFF (plenty -- a real streak this
+	 * long would already have tripped the probe/recover cycle many times
+	 * over). See @ref cc3501e_link_log_recover_streak. Placed here for the
+	 * same padding-reuse reason as link_log_probe_fail_count above. */
+	uint8_t link_log_recover_streak;
+
+	/* Link-failure ring (issue #2136) -- see @ref cc3501e_link_log_entry_t
+	 * for the fill rule and @ref cc3501e_link_log_get for the read side.
+	 * 8 * 20 = 160 B, plus this bookkeeping. Never touch link_log /
+	 * link_log_count / link_log_next / link_log_fail_streak directly --
+	 * go through the accessors, which also take @ref request_lock (the
+	 * SAME lock the sole writer, cc3501e_request_locked()'s `out:` label,
+	 * runs under) so a reader never sees a torn entry mid-write. */
+	cc3501e_link_log_entry_t link_log[CC3501E_LINK_LOG_LEN];
+	uint8_t link_log_count; /**< Entries held, saturates at CC3501E_LINK_LOG_LEN. */
+	uint8_t link_log_next;  /**< Ring write cursor -- also the oldest entry's
+	                                          *   slot once the ring is full. */
+	/* #2136 review (MAJOR): true for the span cc3501e_link_check_and_recover()'s
+	 * own probe loop is running -- cc3501e_request_locked()'s `out:` label
+	 * checks this and, when set, counts the failure into
+	 * link_log_probe_fail_count above INSTEAD of writing a ring entry. The
+	 * probe fires up to CC3501E_LINK_PROBE_TRIES (24) PINGs, more than
+	 * CC3501E_LINK_LOG_LEN (8), so without this the probe's own PINGs
+	 * guarantee-evict the ring entry an operator actually needs -- the
+	 * wedging op that triggered recovery in the first place. Placed here
+	 * (not beside ota_session_active) to reuse THIS padding gap instead of
+	 * growing the struct. */
+	bool link_log_suppress;
+	/* Consecutive pre-decode failures (issue #2136): bumped on every ring
+	 * write, reset to 0 on the next DECODED reply (success or device-side
+	 * error alike) -- so it answers "how many attempts in a row have left
+	 * no evidence at all", distinct from @ref recover_fail_streak above
+	 * (which only counts failed RECOVERY attempts, not ordinary requests).
+	 * NOT bumped while link_log_suppress is set (see link_log_probe_fail_count
+	 * instead) and NOT bumped by a request that lost cc3501e_lock_acquire()
+	 * (ALP_ERR_BUSY after the CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS
+	 * window, without ever entering cc3501e_request_locked()) -- during a
+	 * wedge that is the common shape for every thread except the lock
+	 * holder, so a thin ring / low streak during heavy contention does NOT
+	 * mean "few failures", just "few that got the lock". */
+	uint32_t link_log_fail_streak;
+	/* Last successful GET_DIAG_INFO probe (issue #2136), for correlating the
+	 * ring against firmware-side telemetry: a wedge-probe firmware build
+	 * rides its own free-running word in the GET_DIAG_INFO reply's
+	 * free_heap_bytes field (see cc3501e_diag_info(), chips/cc3501e/
+	 * cc3501e_diag.c) instead of a real heap count. */
+	uint32_t link_log_last_probe_word;
+	uint32_t link_log_last_probe_ms; /**< Truncated alp_uptime_ms() at that probe. */
 };
 
 /**
@@ -927,6 +1118,82 @@ alp_status_t cc3501e_spi1_transfer(cc3501e_t     *ctx,
  *         otherwise the mapped transport error.
  */
 alp_status_t cc3501e_spi1_release(cc3501e_t *ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Number of link-failure ring entries currently held (issue #2136).
+ *
+ * @par Concurrency (#2136 review)
+ * Takes @ref cc3501e::request_lock for the duration of the read -- the SAME
+ * lock the sole writer (cc3501e_request_locked()'s `out:` label) holds --
+ * so this never races a write mid-entry. Bounded by the same
+ * @c CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS as an ordinary request;
+ * on contention this reports 0 rather than blocking past that budget or
+ * returning a torn count.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return 0..CC3501E_LINK_LOG_LEN; 0 on a NULL @p ctx or a lock timeout.
+ */
+uint8_t cc3501e_link_log_count(const cc3501e_t *ctx);
+
+/**
+ * @brief Read one link-failure ring entry, oldest-first (issue #2136).
+ *
+ * @par Concurrency (#2136 review)
+ * Same locking discipline as @ref cc3501e_link_log_count -- see its doc
+ * comment. A lock timeout here reports @ref ALP_ERR_BUSY, same as an
+ * ordinary request under contention.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @param idx  0 = oldest entry currently held .. cc3501e_link_log_count(ctx) - 1 = newest.
+ * @param out  Receives a copy of the entry on success.
+ * @return ALP_OK; ALP_ERR_INVAL if @p ctx or @p out is NULL, or @p idx is
+ *         out of range for the entry count currently held; ALP_ERR_BUSY on
+ *         a lock timeout.
+ */
+alp_status_t cc3501e_link_log_get(const cc3501e_t *ctx, uint8_t idx, cc3501e_link_log_entry_t *out);
+
+/**
+ * @brief Live consecutive-pre-decode-failure streak (issue #2136).
+ *
+ * The current value of @ref cc3501e::link_log_fail_streak, read under the
+ * same lock as @ref cc3501e_link_log_count (#2136 review: direct field
+ * reads of this counter are exactly the discipline @ref cc3501e::link_log
+ * documents against for its neighbours -- this accessor is the fix).
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return The live streak; 0 on a NULL @p ctx or a lock timeout.
+ */
+uint32_t cc3501e_link_log_fail_streak(const cc3501e_t *ctx);
+
+/**
+ * @brief The fail streak as it stood when the MOST RECENT cc3501e_recover()
+ *        call started (issue #2136 review).
+ *
+ * Frozen BEFORE that recovery's own confirming PING decoded and reset the
+ * live streak (@ref cc3501e_link_log_fail_streak) to 0 -- use this, not the
+ * live accessor, when reporting what a just-finished recovery actually
+ * found, e.g. in an `alp companion recover` / auto-recovery dump.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return The snapshot (saturates at 0xFF); 0 on a NULL @p ctx or if no
+ *         recovery has run yet on this @p ctx.
+ */
+uint8_t cc3501e_link_log_recover_streak(const cc3501e_t *ctx);
+
+/**
+ * @brief Pre-decode failures the most recent auto-recovery probe absorbed
+ *        WITHOUT writing a ring entry (issue #2136 review).
+ *
+ * cc3501e_link_check_and_recover()'s own up-to-@c CC3501E_LINK_PROBE_TRIES
+ * (24) PINGs suppress ring writes so they cannot evict the wedging op's own
+ * evidence (see @ref cc3501e::link_log_suppress) -- this is the "the probe
+ * ran and here is how many of its own PINGs failed" count an operator still
+ * needs, reset at the start of every probe.
+ *
+ * @param ctx  Initialised bridge handle.
+ * @return The count (0..24); 0 on a NULL @p ctx or if no probe has run yet.
+ */
+uint8_t cc3501e_link_log_probe_fail_count(const cc3501e_t *ctx);
 
 #ifdef __cplusplus
 } /* extern "C" */
