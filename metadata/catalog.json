@@ -1019,10 +1019,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "iot-fleet-ota",
         "osSet": [
@@ -1118,10 +1118,10 @@
           }
         ],
         "declares": {
-          "chips": false,
+          "chips": true,
           "ipc": false,
           "models": false,
-          "peripherals": false
+          "peripherals": true
         },
         "name": "mqtt-telemetry",
         "osSet": [
