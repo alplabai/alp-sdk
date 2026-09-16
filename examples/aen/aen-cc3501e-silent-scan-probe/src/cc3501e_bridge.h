@@ -91,12 +91,29 @@
 #ifndef CC3501E_BRIDGE_PIN_NRST
 #define CC3501E_BRIDGE_PIN_NRST 1u
 #endif
-/* OPTIONAL host-IRQ/READY input (CC35 GPIO17 -> Alif P2_6, alp_pins[2]).  When
- * the board wires it, cc3501e_request() gates reply phases on it (HIGH = slave
- * armed) instead of a fixed delay.  Absent -> ready_pin NULL -> legacy gap. */
-#ifndef CC3501E_BRIDGE_PIN_READY
-#define CC3501E_BRIDGE_PIN_READY 2u
-#endif
+/* OPTIONAL host-IRQ/READY input.  ready_pin has no fixed index or macro
+ * here on purpose: on a board where the CC3501E's GPIO17 READY net is
+ * actually routed to the host, set fw->ready_pin (in
+ * cc3501e_bridge_bringup() below) to whatever Alif pin that board wires it
+ * to.  When set, cc3501e_reply_gate() (chips/cc3501e/cc3501e_core.c) can
+ * only ever ADD delay to a reply phase, never remove it, so opting in on a
+ * board where the wiring is wrong costs up to 3 x 250 ms of busy-wait per
+ * latch cycle before the driver's own (recoverable) stuck-LOW latch gives up
+ * on it -- longer thresholds apply after each re-latch if the line flaps
+ * instead of staying cleanly stuck (chips/cc3501e/cc3501e_core.c's
+ * g_ready_stuck_low_threshold) -- it is always safe to try FOR LINK TIMING.
+ * It is not free, though: this
+ * wait runs while cc3501e_request() holds its internal transport lock, so
+ * a wrong or slow ready_pin can make another caller on the same ctx see
+ * ALP_ERR_BUSY after CONFIG_ALP_SDK_CC3501E_REQUEST_LOCK_TIMEOUT_MS -- see
+ * <alp/chips/cc3501e/core.h>'s ready_pin doc.
+ *
+ * NOT Alif P2_6 on e1m-aen-evk-01's R2 module: P2_6 there is E1M pad AH7 /
+ * I2S1_SCLK (the EVK's Arduino CK_RST, metadata/boards/e1m-evk.yaml), and
+ * the CC3501E GPIO17 READY net lands on E1M pad G3 / IO16 instead
+ * (metadata/e1m_modules/aen/from-cc3501e.tsv).  cc3501e_bridge_bringup()
+ * below leaves ready_pin NULL by default on that module -- see
+ * cc3501e_reply_gate()'s own doc comment for the bench evidence. */
 
 /* DW SSI SPI1 base (0x48104000) + RX_SAMPLE_DLY to run the bridge SCLK above
  * 1 MHz.  spi_dw_configure never writes RX_SAMPLE_DLY (0xf0), so without the

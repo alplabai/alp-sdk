@@ -1,0 +1,22 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim ships no built-in I2S emulation, so this overlay
+ * instantiates the test-local alp,test-i2s fake controller (see the
+ * dts binding and src/fake_i2s.c) and aliases alp-i2s0 to it --
+ * src/backends/i2s/zephyr_drv.c's z_open() resolves it via
+ * DT_ALIAS(alp_i2s0). Lets this test drive the real zephyr_drv path.
+ */
+/ {
+	aliases {
+		alp-i2s0 = &test_i2s0;
+	};
+
+	test_i2s0: i2s {
+		compatible = "alp,test-i2s";
+		status = "okay";
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+};

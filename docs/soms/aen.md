@@ -55,8 +55,9 @@ says explicitly that result is silent on the HyperRAM's own behaviour
 the slave-only Alif LPI2C0 (#1848) -- and **bench-proven on 2626-R2
 silicon**. Full customer-facing writeup, including the limitations that
 will surprise you, in [On-module housekeeping I2C (BRD_I2C)](#on-module-housekeeping-i2c-brd_i2c)
-below. The other AEN SKUs still carry the pre-#1848 LPI2C0 assumption in
-their own preset files pending the same netlist evidence.
+below. #1848 disproved the LPI2C0 reading for the whole AEN family, not just
+E1M-AEN801, and no shipped preset carries it; the other SKUs still await
+their own per-part datasheet confirmation of the corrected mapping.
 
 Memory + per-SKU specifics: [`metadata/e1m_modules/E1M-AEN<NNN>.yaml`](../../metadata/e1m_modules/).
 

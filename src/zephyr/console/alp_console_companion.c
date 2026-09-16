@@ -34,9 +34,137 @@
 /* ---- Alif: app-registered CC3501E handle -------------------------------- */
 cc3501e_t *companion_cc3501e;
 
+#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+/* Shared by `alp companion linklog` and the recovery callback below (issue
+ * #2136): dump ctx->link_log oldest-first, one hex line per entry. @p sh
+ * NULL means "print via printk instead of a shell" -- the recovery callback
+ * has no shell handle, only whatever console backend printk currently
+ * targets, same as its own recovery-line print just below. */
+/* No fixed-size local buffer for these -- printed directly through shell_print
+ * / printk instead of snprintf'd first, so there is no truncation budget to
+ * mis-size against the legend text below (-Werror=format-truncation). */
+#define COMPANION_LINK_LOG_HDR_FMT \
+	"cc3501e: link_log %u/%u entries, fail_streak=%u (legend: ts_ms cmd phase status" \
+	" flags hdr[4] reply_hdr[4] recover_attempts; phase 1=req_hdr 2=req_payload" \
+	" 3=reply_hdr 4=reply_payload; flags 1=ready_at_failure 4=ready_was_stuck" \
+	" 8=hdr_valid 0x10=reply_hdr_valid -- hdr[4]/reply_hdr[4] are MEANINGLESS," \
+	" all-zero, unless their own VALID bit is set)"
+/* #2136 review (minor): the "cc3501e: " prefix now lives IN the format string
+ * itself, not concatenated separately at each call site -- the printk call
+ * below used to add it and the shell_print call did not, so a grep/parser
+ * written against a printk (recovery-callback) capture silently matched
+ * nothing on an `alp companion linklog` (shell) capture. Both paths use this
+ * SAME format now, so both agree. */
+#define COMPANION_LINK_LOG_LINE_FMT \
+	"cc3501e: %08x %02x %u %d %02x %02x%02x%02x%02x %02x%02x%02x%02x %u"
+
+/* @p fail_streak is the caller's choice of WHICH streak to show: the live
+ * value (cc3501e_link_log_fail_streak(), for `alp companion linklog`) or the
+ * one frozen at the start of the most recent recovery
+ * (cc3501e_link_log_recover_streak(), for the recovery-notify dump below) --
+ * see cc3501e_link_log_recover_streak()'s own doc comment for why those
+ * differ (#2136 review, minor: the live field always read 0 by the time a
+ * recovery dump ran, because that recovery's OWN confirming PING had already
+ * reset it). */
+static void companion_print_link_log(const struct shell *sh, uint32_t fail_streak)
+{
+	if (companion_cc3501e == NULL) return;
+
+	const uint8_t n = cc3501e_link_log_count(companion_cc3501e);
+
+	if (sh != NULL) {
+		shell_print(sh, COMPANION_LINK_LOG_HDR_FMT, n, CC3501E_LINK_LOG_LEN, fail_streak);
+	} else {
+		printk(COMPANION_LINK_LOG_HDR_FMT "\n", n, CC3501E_LINK_LOG_LEN, fail_streak);
+	}
+
+	for (uint8_t i = 0; i < n; i++) {
+		cc3501e_link_log_entry_t e;
+
+		if (cc3501e_link_log_get(companion_cc3501e, i, &e) != ALP_OK) break;
+		if (sh != NULL) {
+			shell_print(sh,
+			            COMPANION_LINK_LOG_LINE_FMT,
+			            e.ts_ms,
+			            e.cmd,
+			            e.phase,
+			            (int)e.status,
+			            e.flags,
+			            e.hdr_bytes[0],
+			            e.hdr_bytes[1],
+			            e.hdr_bytes[2],
+			            e.hdr_bytes[3],
+			            e.reply_hdr[0],
+			            e.reply_hdr[1],
+			            e.reply_hdr[2],
+			            e.reply_hdr[3],
+			            e.recover_attempt_count);
+		} else {
+			printk(COMPANION_LINK_LOG_LINE_FMT "\n",
+			       e.ts_ms,
+			       e.cmd,
+			       e.phase,
+			       (int)e.status,
+			       e.flags,
+			       e.hdr_bytes[0],
+			       e.hdr_bytes[1],
+			       e.hdr_bytes[2],
+			       e.hdr_bytes[3],
+			       e.reply_hdr[0],
+			       e.reply_hdr[1],
+			       e.reply_hdr[2],
+			       e.reply_hdr[3],
+			       e.recover_attempt_count);
+		}
+	}
+}
+
+/* Registered via cc3501e_set_recover_callback() below (issue #2126): announce
+ * an AUTOMATIC recovery -- cc3501e_link_check_and_recover(), wired into the
+ * driver's own failure exits (cc3501e_core.c / cc3501e_wifi.c) -- the moment
+ * it happens. printk, same as the async event callback below: goes to the
+ * active console backend, safe off whatever thread the failing op was
+ * running on. Runs AFTER the recovery is already committed (ctx->
+ * recover_count already bumped), so @p recover_count here is exactly what
+ * `alp companion recover` would print too. A registered, per-ctx callback,
+ * the same pattern this driver already uses for async events
+ * (cc3501e_add_event_callback).
+ *
+ * ONE slot: this registration happens in alp_console_companion_set(), so an
+ * application that wants its own recovery callback must register it AFTER
+ * binding the console -- the later registration wins and this line stops
+ * printing. */
+static void companion_recover_notify(cc3501e_t *ctx, uint32_t recover_count, void *user)
+{
+	ARG_UNUSED(user);
+	/* Issue #2136: dump the ring right before the recovery line, no extra
+	 * bench step needed to capture the state around a reset -- see
+	 * companion_print_link_log()'s doc comment. cc3501e_link_log_recover_streak(),
+	 * not the live cc3501e_link_log_fail_streak(): this recovery's own
+	 * confirming PING already reset the live one to 0 by the time this
+	 * callback runs. */
+	companion_print_link_log(NULL, cc3501e_link_log_recover_streak(ctx));
+	/* #2136 review (MAJOR follow-up): the probe's own PING failures never
+	 * land in the ring (link_log_suppress, cc3501e_core.c), so surface them
+	 * here instead -- an operator still needs to know the probe ran and how
+	 * many of its own attempts failed before the reset landed.
+	 * CC3501E_LINK_PROBE_TRIES itself (currently 24) is a private
+	 * cc3501e_core.c constant, not exported here -- print the count alone
+	 * rather than duplicate that magic number into this TU. */
+	printk("cc3501e: recovery probe: %u PING(s) failed before the reset\n",
+	       cc3501e_link_log_probe_fail_count(ctx));
+	printk("cc3501e: link recovered by warm reset (#%u)\n", recover_count);
+}
+#endif
+
 void alp_console_companion_set(cc3501e_t *ctx)
 {
 	companion_cc3501e = ctx;
+#if !IS_ENABLED(CONFIG_ALP_SDK_V2N_SUPERVISOR)
+	/* No-op on a NULL ctx (unbind) -- cc3501e_set_recover_callback() itself
+	 * refuses a NULL ctx, so there is nothing to register the callback on. */
+	cc3501e_set_recover_callback(ctx, companion_recover_notify, NULL);
+#endif
 }
 
 static int cmd_companion_ver(const struct shell *sh, size_t argc, char **argv)
@@ -449,6 +577,52 @@ static int cmd_companion_reset(const struct shell *sh, size_t argc, char **argv)
 	shell_print(sh, "soft reset requested -- firmware reboots; link will drop");
 	return 0;
 }
+
+/* ---- CC3501E warm-reset recovery (Alif companion, issue #2126) ---------- */
+static int cmd_companion_recover(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	/* No probe first, no cooldown -- unlike cc3501e_link_check_and_recover()
+	 * (the automatic path wired into the driver's own failure exits), this
+	 * is an operator asking for the warm reset directly: go straight to
+	 * cc3501e_recover(). #2126 review: it is NOT otherwise unconditional
+	 * any more -- cc3501e_recover() itself now refuses (ALP_ERR_BUSY)
+	 * while an OTA/update session is active (ctx->ota_session_active) or
+	 * another recovery is already running on this ctx, and this manual
+	 * call shares BOTH the cooldown bookkeeping and recover_count with the
+	 * automatic path (see cc3501e_recover()'s own doc comment) -- it is no
+	 * longer a separate, auto-only counter. */
+	alp_status_t s = cc3501e_recover(companion_cc3501e);
+
+	if (s == ALP_ERR_BUSY && companion_cc3501e->ota_session_active) {
+		shell_error(sh, "recover refused: an OTA/update session is active");
+		return -EBUSY;
+	}
+	if (s != ALP_OK) {
+		shell_error(sh, "recover failed (%d)", (int)s);
+		return -EIO;
+	}
+	shell_print(sh, "recover OK (%u recovery(s) so far)", companion_cc3501e->recover_count);
+	return 0;
+}
+
+/* ---- CC3501E link-failure ring (Alif companion, issue #2136) ------------ */
+static int cmd_companion_linklog(const struct shell *sh, size_t argc, char **argv)
+{
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+	if (companion_cc3501e == NULL) {
+		shell_warn(sh, "companion not registered");
+		return -ENODEV;
+	}
+	companion_print_link_log(sh, cc3501e_link_log_fail_streak(companion_cc3501e));
+	return 0;
+}
 #endif /* !CONFIG_ALP_SDK_V2N_SUPERVISOR */
 
 /* `alp companion` itself: a decentralized dynamic subcommand set (Zephyr's
@@ -482,6 +656,20 @@ SHELL_SUBCMD_ADD((alp, companion),
                  cmd_companion_bench,
                  1,
                  1);
+SHELL_SUBCMD_ADD((alp, companion),
+                 recover,
+                 NULL,
+                 "warm-reset the bridge link unconditionally (issue #2126)",
+                 cmd_companion_recover,
+                 1,
+                 0);
+SHELL_SUBCMD_ADD((alp, companion),
+                 linklog,
+                 NULL,
+                 "dump the link-failure ring, oldest first (issue #2136)",
+                 cmd_companion_linklog,
+                 1,
+                 0);
 #endif
 
 SHELL_SUBCMD_ADD((alp),

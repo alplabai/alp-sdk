@@ -118,7 +118,15 @@ def test_mram_main_isolated_repro(tmp_path: Path) -> None:
     """)
     project = load_board_yaml(path)
     project.som_preset["memory_map"] = [
-        r for r in project.som_preset["memory_map"]
+        # `write_authority` forced to `customer_runtime` (real AEN
+        # presets tag `mram_main` `composite`) so this isolation stays
+        # isolated: alp-sdk#2088's composite-consult guard refuses a
+        # `composite` alias with no sibling rows left to consult
+        # (nothing tiles its declared capacity), which would otherwise
+        # block `cfg` for a DIFFERENT reason before ever reaching the
+        # #1556 dt_label question this test exists to pin.
+        dict(r, write_authority="customer_runtime")
+        for r in project.som_preset["memory_map"]
         if r.get("name") == "mram_main"
     ]
     parts = resolve_storage_partitions(project)
@@ -189,7 +197,13 @@ def test_remedy_names_a_verified_alternative_when_one_exists(
     """)
     project = load_board_yaml(path)
     project.som_preset["memory_map"] = [
-        r for r in project.som_preset["memory_map"]
+        # See `test_mram_main_isolated_repro`'s comment: forced to
+        # `customer_runtime` so alp-sdk#2088's composite-consult guard
+        # (which would otherwise refuse a `composite` alias with no
+        # sibling rows left to tile it) doesn't mask the #1556 dt_label
+        # question this test isolates.
+        dict(r, write_authority="customer_runtime")
+        for r in project.som_preset["memory_map"]
         if r.get("name") == "mram_main"
     ] + [{
         "name": "test_alt_device",
@@ -197,6 +211,10 @@ def test_remedy_names_a_verified_alternative_when_one_exists(
         "size_kib": 64,
         "accessible_from": ["m55_hp"],
         "cacheable": True,
+        # alp-sdk#2088: the aperture resolves for E1M-AEN401, so an
+        # absent write_authority would refuse this device outright
+        # before its dt_label is even considered.
+        "write_authority": "customer_runtime",
         "dt_label": "test_alt_device",
     }]
     reason = _by_name(
