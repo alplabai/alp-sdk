@@ -37,8 +37,16 @@
  * per-revision variant. IO21 -- the SD mux SELECT -- is deliberately ABSENT:
  * on r2 it is physically open and on r1 driving it would contend with the P18
  * header jumper. See main()'s mux-enable comment in src/main.c.
+ *
+ * The revision-dependent pin guard (issue #2144) is not this app's table to
+ * carry: src/backends/gpio/cc3501e_proxy.c reads cc3501e_gpio_rev_dependent[]
+ * from the SDK-owned generated file
+ * src/backends/gpio/cc3501e_rev_dependent_pins.c -- the SAME set on every
+ * AEN board -- so it applies here too even though this app never opens
+ * IO8/IO10/IO21 itself.
  */
 
+#include <stdint.h>
 #include <stddef.h>
 
 #include <alp/chips/cc3501e.h>

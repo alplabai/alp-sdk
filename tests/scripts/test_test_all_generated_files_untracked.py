@@ -79,6 +79,14 @@ def fake_git_repo(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "cap.c").write_text("/* stub */\n")
     (tmp_path / "src" / "status_strings.c").write_text("/* stub */\n")
+    # #2144 added src/backends/gpio/cc3501e_rev_dependent_pins.c to
+    # stage_generated_files' pathspec; per this fixture's contract above,
+    # every path that list names needs a stub here or `git add -N` fails
+    # closed across the WHOLE pathspec and stages nothing.
+    (tmp_path / "src" / "backends" / "gpio").mkdir(parents=True)
+    (tmp_path / "src" / "backends" / "gpio" / "cc3501e_rev_dependent_pins.c").write_text(
+        "/* stub */\n"
+    )
     (tmp_path / "metadata" / "pinmux").mkdir(parents=True)
     (tmp_path / "metadata" / "pinmux" / "existing.tsv").write_text("x\n")
     (tmp_path / "metadata" / "catalog.json").write_text("{}\n")

@@ -237,6 +237,15 @@ def test_standalone_app_route_table_never_targets_a_reserved_pad(path):
     )
 
 
+# The revision-dependent pin list is no longer per-app (issue #2144 design
+# review): a per-table opt-in test here would be checking a triplicated
+# copy of the exact shape issue #1859 already removed once for
+# cc3501e_gpio_routes[] itself.  It has exactly one definition now --
+# src/backends/gpio/cc3501e_rev_dependent_pins.c, an SDK-owned generated
+# file compiled unconditionally alongside cc3501e_proxy.c -- covered by
+# test_gen_cc3501e_gpio_routes.py's own generated-output test instead of
+# repeated once per route table here.
+
 def _revision_dependent_e1m_pads() -> set[str]:
     """E1M pads that metadata/e1m_modules/aen/hw-revisions.yaml moves between
     chips on at least one AEN hw_rev -- IO8/IO10/IO21 today, via r1's
