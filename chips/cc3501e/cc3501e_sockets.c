@@ -559,17 +559,25 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	 * xfer_fail=0, busy=0), which is why it looked like a hard size limit.
 	 *
 	 * It was not a size limit.  That comment named the READY line as "the leading
-	 * remaining suspect", and it was right: READY (CC35 GPIO17 -> Alif P2_6) read
-	 * 0 only because the Alif pad's INPUT BUFFER was never enabled -- an
-	 * input-enable pinctrl group turns it on (see the board overlay).  With READY
-	 * actually readable and cc3501e_reply_gate() waiting for the drop-then-rise
-	 * EDGE, the host stops clocking into an un-armed slave and 487 works:
-	 * 262405 B in 883 ms = 297174 B/s, over a link running ping_fail=0.
+	 * remaining suspect", and it was right: READY (CC35 GPIO17) read 0 only
+	 * because the Alif pad's INPUT BUFFER was never enabled -- an input-enable
+	 * pinctrl group turns it on (see the board overlay this was measured
+	 * against).  With READY actually readable and cc3501e_reply_gate() -- AS IT
+	 * WAS THEN, waiting for a drop-then-rise EDGE; that design was since
+	 * replaced (see cc3501e_core.c's cc3501e_reply_gate() doc comment) by one
+	 * that only ever ADDS delay, never removes it -- the host stopped clocking
+	 * into an un-armed slave and 487 worked: 262405 B in 883 ms = 297174 B/s,
+	 * over a link running ping_fail=0.
 	 *
-	 * The cap therefore belongs to the frame, not to a magic number.  A board
-	 * with no readable READY line still falls back to fixed settle gaps, where
-	 * the old 256 limit would apply -- re-measure on silicon before trusting
-	 * this on such a board. */
+	 * The cap therefore belongs to the frame, not to a magic number.
+	 *
+	 * KNOWN OPEN ITEM: that measurement's READY-readable board is not the R2
+	 * module e1m-aen-evk-01 currently holds -- see cc3501e_reply_gate()'s own
+	 * doc comment in chips/cc3501e/cc3501e_core.c.  The AEN example bridges leave ready_pin
+	 * NULL by default on that module, so they fall back to fixed settle gaps,
+	 * where the old 256-byte cap would apply.  This 487-byte figure has not
+	 * been re-measured against that fallback path; re-measure on silicon
+	 * before trusting it there. */
 	const size_t want_max = (size_t)ALP_CC3501E_MAX_PAYLOAD - CC3501E_SOCK_RECV_RESP_HDR - 1u;
 	if (want > want_max) want = want_max;
 

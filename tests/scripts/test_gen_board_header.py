@@ -476,10 +476,14 @@ def test_real_evk_header_covers_mux_enums(real_headers):
     single-sourced from `metadata/boards/e1m-evk.yaml`'s
     `mux_enums:` block and generated -- assert every typedef +
     enumerator value hand-written firmware relies on is still
-    defined, with the pre-migration hand-authored values preserved
-    verbatim (not just presence -- bind each enumerator to ITS OWN
-    value so a metadata transposition between two enumerators of
-    the same enum can't pass a membership-only check)."""
+    defined, with the metadata's current values preserved verbatim
+    (not just presence -- bind each enumerator to ITS OWN value so a
+    metadata transposition between two enumerators of the same enum
+    can't pass a membership-only check). `EVK_SDIO_M2E_KEY`/
+    `EVK_SDIO_SDCARD` no longer carry their pre-#2129 hand-authored
+    values: #2129 found the SDIO mux select polarity inverted against
+    the E1M-EVK-2626-R2 netlist and swapped the pair's 0/1 values to
+    match."""
     evk_out, _xevk_out = real_headers
     out = evk_out.read_text(encoding="utf-8")
 
@@ -494,8 +498,8 @@ def test_real_evk_header_covers_mux_enums(real_headers):
         assert f"}} {typedef_name};" in out, f"{typedef_name} missing from generated header"
 
     enum_values = {
-        "EVK_SDIO_M2E_KEY": "0",
-        "EVK_SDIO_SDCARD": "1",
+        "EVK_SDIO_SDCARD": "0",
+        "EVK_SDIO_M2E_KEY": "1",
         "EVK_I2S_AMP": "0",
         "EVK_I2S_M2E_KEY": "1",
         "EVK_USB2_CONNECTOR": "0",

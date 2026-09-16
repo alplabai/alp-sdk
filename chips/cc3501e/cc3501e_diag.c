@@ -80,6 +80,12 @@ alp_status_t cc3501e_diag_info(cc3501e_t *ctx, alp_cc3501e_diag_info_t *out)
 	out->reserved[2]     = reply[15];
 	out->dhcp_state      = reply[16];
 	out->netif_status    = reply[17];
+	/* Issue #2136: track the last successful probe, so a bench run can
+	 * correlate the link-failure ring against firmware telemetry -- a
+	 * wedge-probe firmware build rides its own free-running word in
+	 * free_heap_bytes above rather than a real heap count. */
+	ctx->link_log_last_probe_word = out->free_heap_bytes;
+	ctx->link_log_last_probe_ms   = (uint32_t)alp_uptime_ms();
 	return ALP_OK;
 }
 
