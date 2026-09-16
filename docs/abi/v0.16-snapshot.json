@@ -1205,12 +1205,12 @@
           "kind": "enum"
         },
         "evk_sdio_select_t": {
-          "definition": "typedef enum { EVK_SDIO_M2E_KEY = 0, EVK_SDIO_SDCARD = 1, } evk_sdio_select_t;",
+          "definition": "typedef enum { EVK_SDIO_SDCARD = 0, EVK_SDIO_M2E_KEY = 1, } evk_sdio_select_t;",
           "enumerators": [
-            "EVK_SDIO_M2E_KEY = 0",
-            "EVK_SDIO_SDCARD = 1"
+            "EVK_SDIO_SDCARD = 0",
+            "EVK_SDIO_M2E_KEY = 1"
           ],
-          "hash": "e77c6dfa63ab9cb0",
+          "hash": "ce42c8bf91b40312",
           "kind": "enum"
         },
         "evk_usb2_select_t": {

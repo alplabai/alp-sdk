@@ -1904,10 +1904,12 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  *
  * WHAT IT LEAVES BEHIND. WIFI_EN stays HIGH, `cc35_fw` stays bound, and the
  * BLE controller stays enabled when it came up -- deliberately, because the
- * SD-card phase's SDIO mux (EN/SEL on CC35 GPIO_26 / GPIO_30) is reachable
- * only through this coprocessor, so powering it back down here would make
- * that phase impossible to add later. The cost is that phases 9-14 run with
- * both radios up; on a bench-diagnostic image that is the right trade.
+ * SD-card phase's SDIO mux ENABLE (CC35 GPIO_26, both hw revisions; SELECT
+ * is NOT CC3501E-proxied on this bench module's r2 -- see phase 9's own
+ * comment) is reachable only through this coprocessor, so powering it back
+ * down here would make that phase impossible to add later. The cost is that
+ * phases 9-14 run with both radios up; on a bench-diagnostic image that is
+ * the right trade.
  */
 
 /* Bounded retry for the first PING. cc3501e_reset() has already waited out
@@ -1957,7 +1959,8 @@ static phase_verdict_t phase_jpeg_encode(demo_ctx_t *ctx)
  *     with CONFIG_MAIN_STACK_SIZE=32768; a static handle is cheaper and this
  *     app has fourteen other phases to fund.
  *  2. The SD-card phase needs this same bound handle to reach the SDIO mux
- *     on CC35 GPIO_26/GPIO_30. A handle scoped to phase 8's frame would be
+ *     ENABLE on CC35 GPIO_26 (SELECT is not CC3501E-proxied on this bench
+ *     module's r2). A handle scoped to phase 8's frame would be
  *     gone by the time phase 9 ran.
  */
 static cc3501e_t cc35_fw;
@@ -3921,13 +3924,30 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * propagation, reset-sequence and SD_N-glitch fixes stay verifiable on
  * real silicon without depending on U46 at all.
  *
- * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46 has actually been
- * reworked on the physical board under test -- with U46 still stock,
- * turning this on reproduces the driver-contention hazard above. The
- * RX_SLEN=32-bit slot configuration and the explicit LEFT/RIGHT channel
- * mapping (both in tas2563_configure_i2s()'s call below, unconditional)
- * are already correct for the reworked hardware and need no further
- * change when that day comes -- flipping this one switch is enough.
+ * Set `AEN_EVKDEMO_SOUND_PLAYBACK` to 1 ONLY once U46 is BOTH a
+ * 3257-type bus switch (a stock 74LVC157, even on +3V3, is still a
+ * one-way mux and reproduces the driver-contention hazard above --
+ * VCC alone is not the gate) AND that switch's VCC is on `+3V3`
+ * (VCC on `+VIO`, 1.8 V with the E1M-AEN SoM, is out of a 3257-type
+ * part's spec and confirmed silent on the bench), OR a switch rated
+ * for 1.8 V VCC (untested). On `e1m-aen-evk-03`
+ * (2026-09-15), a fitted 3257-type part's VCC was moved to `+3V3`
+ * between that silent run and an audible run -- not established as
+ * the only difference between the two (see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block for the full
+ * finding). CAVEAT, untested: at `+3V3` a CBT-type
+ * switch's control-input VIH may not register a 1.8 V HIGH from the
+ * CC3501E, so this app's own LOW-only EN/SEL use is fine but disabling
+ * the mux or selecting M.2 may not switch reliably. The SAME run also
+ * showed an open TDM clock-error latch (`INT_LTCH0` bit 2) during
+ * playback, and issue #2146 is open separately (amps auto-shut down
+ * ~1 s after I2S stops, stay off after restart) -- do NOT read
+ * `AEN_EVKDEMO_SOUND_PLAYBACK=1` reaching PASS as proof the audio path
+ * is otherwise clean. The RX_SLEN=32-bit slot configuration and the
+ * explicit LEFT/RIGHT channel mapping (both in
+ * tas2563_configure_i2s()'s call below, unconditional) are what this
+ * board's I2S frame needs; whether they are sufficient for a clean
+ * TDM run is exactly what the open latch above puts in question.
  *
  * THE SAFETY CONSTRAINT THE PLAYBACK PATH RESPECTS WHEN ON. Both TAS2563
  * amps can drive ~10 W peak into 4 ohm (SLASET3D Table 7-105) -- the
@@ -4184,9 +4204,9 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 	k_msleep(SOUND_MUX_SETTLE_MS);
 #else
-	printf("[evkdemo] SOUND: playback skipped -- EVK 2626-R2 U46 routes SoC I2S "
-	       "outputs into mux outputs (hardware rework pending); amps verified over "
-	       "I2C only\n");
+	printf("[evkdemo] SOUND: playback skipped -- requires U46 to be a "
+	       "3257-type switch powered from +3V3, or a 1.8 V-rated switch "
+	       "(untested) (see alp_e1m_evk.h); amps verified over I2C only\n");
 #endif
 
 	/* --- 2. AMP_ENABLE (SD_N) low-then-high -- an ACTUAL hardware reset - */
