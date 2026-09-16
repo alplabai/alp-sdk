@@ -618,6 +618,53 @@ that ISOLATE all the downstream buses -- with the caveat below that
 
 The Alif's bring-up code then sequences enables once it's ready.
 
+### Revision-dependent pads (IO8/IO10/IO21)
+
+Three E1M pads physically sit on a DIFFERENT chip depending on the AEN
+module's hardware revision (`metadata/e1m_modules/aen/hw-revisions.yaml`
+r1 `pad_route_overrides:`): `IO8` and `IO10` are direct Alif GPIOs on r1
+but CC3501E `GPIO_30`/`GPIO_35` on r2; `IO21` reaches CC3501E `GPIO_30` on
+r1 but is physically unrouted (open) on r2. A route table is always
+compiled for ONE hw_rev, so opening one of these pins on a module of the
+OTHER revision would silently drive a different physical net than the
+caller asked for.
+
+`src/backends/gpio/cc3501e_proxy.c`'s `px_open()` refuses
+`alp_gpio_open()` on any of these three pads with `ALP_ERR_NOSUPPORT`
+UNLESS a CRC-valid identity-EEPROM manifest confirms the running
+module's hw_rev matches the build's `CONFIG_ALP_SDK_SOM_HW_REV` -- the
+hw_rev the calling board's own `cc3501e_gpio_routes[]` was built for.
+FAILS CLOSED, per pin: a missing, unprovisioned, or corrupt manifest
+refuses just these three pads, while a revision-independent proxied pad
+(e.g. `IO20`, the SD mux enable) keeps routing/delegating exactly as
+before regardless of the manifest. See issue
+[#2144](https://github.com/alplabai/alp-sdk/issues/2144); the
+revision-dependent pad list itself is generated once, from the same
+metadata, into `src/backends/gpio/cc3501e_rev_dependent_pins.c`
+(`scripts/gen_cc3501e_gpio_routes.py`) -- identical for every AEN board,
+never a per-app copy.
+
+Kconfig symbols needed for the manifest confirmation to succeed:
+
+- `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BUS_ID` -- the I2C bus id carrying
+  the SoM's on-module identity EEPROM (AEN: SoC I2C2 / the E1M portable
+  I2C0 pads, bus id `0`). `< 0` (the default) disables the read path
+  entirely, so the guard fails closed on every revision-dependent pad.
+- `CONFIG_ALP_SDK_HW_INFO_EEPROM_I2C_BITRATE_HZ` -- the bitrate for that
+  read (default 400 kHz/fast-mode). If the SAME physical bus also
+  carries another device whose bench-validated rate is lower (e.g.
+  `examples/aen/aen-evk-demo`'s TAS2563 amps at 100 kHz), set this to
+  match -- `src/backends/i2c/zephyr_drv.c`'s backend reconfigures the
+  shared controller's live bitrate on every `alp_i2c_open()` call and
+  never restores it (`.close = NULL`), so a manifest read at a higher
+  rate than a shared device supports leaves the bus misconfigured for
+  every subsequent open.
+- `CONFIG_ALP_SDK_SOM_HW_REV` -- the hw_rev this firmware build
+  resolved (board.yaml `som.hw_rev`, or set by hand on a standalone app
+  with no board.yaml). Must be the composed `"<board_datecode>-<rev
+  key>"` form the manifest itself carries (e.g. `"2626-r2"`), not the
+  bare revision key.
+
 ## Power management
 
 Two mechanisms, for two very different idle lengths. Picking the wrong one is the
