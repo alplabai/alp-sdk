@@ -2,45 +2,43 @@
  * Copyright 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit checks for three lock-time gates review added to
- * examples/aen/aen-eeprom-provision's mode 3 (ALP_LOCK_SECURE_PAGE):
+ * Unit checks for the array-manifest-vs-mirror cross-check that
+ * examples/aen/aen-eeprom-provision's mode 3 (ALP_LOCK_SECURE_PAGE) runs
+ * before it permanently seals the Secure Data Page.
  *
- *   1. The array manifest at 0x50 must be cross-checked against
- *     the Secure Data Page mirror about to be sealed (sku/hw_rev/serial/mfg
- *     date), field by field, as NUL-terminated strings -- the two objects
- *     use DIFFERENT field widths (manifest 24/8/24, mirror 16/12/23), so a
- *     raw byte-range compare would treat the width difference itself as a
- *     disagreement.  Before this check existed, a mirror generated against
- *     the wrong board.yaml -- self-consistent, CRC-valid, for the wrong
- *     module -- would lock forever undetected.  test_refuses_when_sku_disagrees()
- *     below reproduces the EXACT scenario review found: a mirror carrying
- *     sku E1M-AEN801 about to be sealed onto a module whose array manifest
- *     says E1M-AEN401, serial 2026W36-0004.
+ * The check compares the 128-byte array manifest at 0x50 against the
+ * 64-byte mirror about to be locked, field by field (sku/hw_rev/serial/mfg
+ * date), as NUL-terminated strings -- the two objects use DIFFERENT field
+ * widths (manifest 24/8/24, mirror 16/12/23), so a raw byte-range compare
+ * would treat the width difference itself as a disagreement.  Without it, a
+ * self-consistent CRC-valid mirror belonging to another module, or one
+ * carrying a typo'd --serial, would lock forever undetected.
+ * test_refuses_when_sku_disagrees() reproduces the case review found: a
+ * mirror carrying sku E1M-AEN801 about to be sealed onto a module whose
+ * array manifest says E1M-AEN401, serial 2026W36-0004.
  *
- *   2. Mode 3 must refuse to lock without a SEPARATE
- *     ALP_SECURE_PAGE_COLD_CYCLED attestation, distinct from
- *     ALP_LOCK_SECURE_PAGE -- a Flow C RAM-run never interrupts the power
- *     rail, so mode 3 cannot detect a skipped cold cycle mechanically.
+ * SCOPE, stated exactly -- mode 3 has three lock-time gates and this file
+ * covers ONE of them, partially:
  *
- *   3. After eeprom_24c128_secure_page_lock() returns ALP_OK, the
- *     app must re-read the page and byte-compare it against the intended
- *     blob before ever printing PASS -- the lock call confirms only the
- *     Lock Status bit, never the payload.
+ *   - The cross-check's ALGORITHM is covered here, in a duplicate.  Nothing
+ *     ties this duplicate to main.c's array_manifest_agrees_with_mirror(),
+ *     so a defect introduced in main.c's copy alone still passes.
+ *   - The ALP_SECURE_PAGE_COLD_CYCLED attestation gate has NO test.  It is
+ *     a compile-time #if; an earlier revision of this file "tested" it with
+ *     a `return x` helper asserted to return x, which could not go red for
+ *     any defect, and has been deleted rather than banked as coverage.
+ *   - The post-lock re-read + byte-compare has NO test, for the same
+ *     reason: a memcmp wrapper checked against a buffer the test just
+ *     memcpy'd proves nothing about main.c.
  *
  * examples/aen/aen-eeprom-provision/src/main.c is Zephyr-only (it drives the
  * portable alp_i2c and eeprom_24c128 API against a real I2C bus) and cannot
  * build under this host test layer -- see tests/common/alp_secure_page_mirror.c's
  * header comment for the established precedent (that file duplicates
  * secure_page_is_blank() rather than sharing a source file across
- * portability tiers).  This file duplicates the pure (no I2C, no Zephyr)
- * logic behind all three gates so their behaviour is checkable
- * independently of hardware; each duplicate's doc comment cross-references
- * its main.c original.  What this file CANNOT prove: that main.c's mode 3
- * actually calls these gates, in this order, before printing PASS -- that
- * is a code-review property, not something a host unit test can observe
- * without a real board.  The mutation testing performed against these
- * duplicates (see the PR description) is against the algorithm, not
- * against main.c's control flow.
+ * portability tiers).  That those gates exist, in the right order, ahead of
+ * the lock is a code-review property, not something a host unit test can
+ * observe without a real board.
  *
  * Build with:
  *   cmake -B build -DALP_OS=yocto     -DALP_BUILD_TESTS=ON
@@ -143,8 +141,9 @@ static bool manifest_agrees_with_mirror(const uint8_t                  *manifest
  * real scripts/program_eeprom.py output has, so a passing test here means a
  * passing check against real bytes, not just against a hand-rolled
  * struct. */
-static void make_manifest(uint8_t  out[sizeof(alp_hw_info_eeprom_t)],
+static void make_manifest(uint8_t     out[sizeof(alp_hw_info_eeprom_t)],
                           const char *sku,
+                          const char *hw_rev,
                           const char *serial,
                           uint16_t    mfg_year,
                           uint8_t     mfg_month,
@@ -156,7 +155,7 @@ static void make_manifest(uint8_t  out[sizeof(alp_hw_info_eeprom_t)],
 	m.schema_version = ALP_HW_INFO_SCHEMA_VERSION;
 	strncpy(m.family, "aen", sizeof(m.family) - 1u);
 	strncpy(m.sku, sku, sizeof(m.sku) - 1u);
-	strncpy(m.hw_rev, "r1", sizeof(m.hw_rev) - 1u);
+	strncpy(m.hw_rev, hw_rev, sizeof(m.hw_rev) - 1u);
 	strncpy(m.serial, serial, sizeof(m.serial) - 1u);
 	m.mfg_year  = mfg_year;
 	m.mfg_month = mfg_month;
@@ -171,6 +170,7 @@ static void make_manifest(uint8_t  out[sizeof(alp_hw_info_eeprom_t)],
  * leaves the mirror's crc32 field at 0. */
 static void make_mirror(alp_secure_page_mirror_t *m,
                         const char               *sku,
+                        const char               *hw_rev,
                         const char               *serial,
                         uint16_t                  mfg_year,
                         uint8_t                   mfg_month,
@@ -180,7 +180,7 @@ static void make_mirror(alp_secure_page_mirror_t *m,
 	m->magic          = ALP_SECURE_PAGE_MAGIC;
 	m->schema_version = ALP_SECURE_PAGE_SCHEMA_VERSION;
 	strncpy(m->sku, sku, sizeof(m->sku) - 1u);
-	strncpy(m->hw_rev, "r1", sizeof(m->hw_rev) - 1u);
+	strncpy(m->hw_rev, hw_rev, sizeof(m->hw_rev) - 1u);
 	strncpy(m->serial, serial, sizeof(m->serial) - 1u);
 	m->mfg_year  = mfg_year;
 	m->mfg_month = mfg_month;
@@ -190,9 +190,9 @@ static void make_mirror(alp_secure_page_mirror_t *m,
 static void test_agrees_when_identical(void)
 {
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
-	make_manifest(manifest, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 
 	ALP_ASSERT_TRUE(manifest_agrees_with_mirror(manifest, &mirror));
 }
@@ -206,20 +206,81 @@ static void test_agrees_when_identical(void)
 static void test_refuses_when_sku_disagrees(void)
 {
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
-	make_manifest(manifest, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN801", "2026W36-0004", 2026u, 9u, 4u);
+	make_mirror(&mirror, "E1M-AEN801", "r2", "2026W36-0004", 2026u, 9u, 4u);
 
 	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
+}
+
+/* hw_rev is the second field that resolves from board.yaml, and the one the
+ * SoM hw-rev key tracks. A mirror built for the wrong board revision agrees
+ * on sku and serial and disagrees only here. */
+static void test_refuses_when_hw_rev_disagrees(void)
+{
+	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
+	alp_secure_page_mirror_t mirror;
+	make_mirror(&mirror, "E1M-AEN401", "r1", "2026W36-0004", 2026u, 9u, 4u);
+
+	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
+}
+
+/* The width asymmetry the NUL-terminated compare exists for: a manifest sku
+ * filled to its FULL 24 bytes with no terminator cannot be represented in
+ * the mirror's 16-byte sku at all, so the two must never be reported as
+ * agreeing. Built with memcpy, not strncpy -- strncpy always leaves a NUL
+ * here and so never constructs this case. */
+static void test_refuses_when_manifest_field_is_full_width_unterminated(void)
+{
+	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
+
+	alp_hw_info_eeprom_t raw;
+	memcpy(&raw, manifest, sizeof(raw));
+	memset(raw.sku, 'X', sizeof(raw.sku)); /* all 24 bytes, no terminator */
+	raw.crc32 = crc32_iso3309((const uint8_t *)&raw, sizeof(raw) - sizeof(raw.crc32));
+	memcpy(manifest, &raw, sizeof(raw));
+
+	alp_secure_page_mirror_t mirror;
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
+
+	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
+}
+
+/* The manifest's hw_rev field (8 bytes) is NARROWER than the mirror's (12),
+ * and `serial` sits immediately after it in the manifest. Copying the
+ * manifest field at the MIRROR's width would run 4 bytes past hw_rev into
+ * serial -- invisible while hw_rev is NUL-terminated, but a full-width
+ * 8-char hw_rev has no terminator to stop at, and the two would then be
+ * reported as disagreeing when they agree. Each field must be bounded by
+ * ITS OWN width; this is the case that proves it. */
+static void test_agrees_on_full_width_hw_rev_without_overreading_serial(void)
+{
+	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
+
+	alp_hw_info_eeprom_t raw;
+	memcpy(&raw, manifest, sizeof(raw));
+	/* Exactly ALP_HW_INFO_HW_REV_LEN bytes, no terminator -- strncpy would
+	 * always leave one, so this case can only be built with memcpy. */
+	memcpy(raw.hw_rev, "2626-r22", sizeof(raw.hw_rev));
+	raw.crc32 = crc32_iso3309((const uint8_t *)&raw, sizeof(raw) - sizeof(raw.crc32));
+	memcpy(manifest, &raw, sizeof(raw));
+
+	alp_secure_page_mirror_t mirror;
+	make_mirror(&mirror, "E1M-AEN401", "2626-r22", "2026W36-0004", 2026u, 9u, 4u);
+
+	ALP_ASSERT_TRUE(manifest_agrees_with_mirror(manifest, &mirror));
 }
 
 /* The task also names a typo'd --serial as the same exposure. */
 static void test_refuses_when_serial_disagrees(void)
 {
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
-	make_manifest(manifest, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN401", "2026W36-0099", 2026u, 9u, 4u);
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0099", 2026u, 9u, 4u);
 
 	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
 }
@@ -227,9 +288,9 @@ static void test_refuses_when_serial_disagrees(void)
 static void test_refuses_when_mfg_date_disagrees(void)
 {
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
-	make_manifest(manifest, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 5u); /* day differs */
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 5u); /* day differs */
 
 	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
 }
@@ -241,7 +302,7 @@ static void test_refuses_when_manifest_absent(void)
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
 	memset(manifest, 0xFFu, sizeof(manifest)); /* erased EEPROM */
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 
 	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
 }
@@ -249,93 +310,25 @@ static void test_refuses_when_manifest_absent(void)
 static void test_refuses_when_manifest_crc_bad(void)
 {
 	uint8_t manifest[sizeof(alp_hw_info_eeprom_t)];
-	make_manifest(manifest, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_manifest(manifest, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 	manifest[8] ^= 0xFFu; /* corrupt a byte inside `family`, covered by the CRC */
 	alp_secure_page_mirror_t mirror;
-	make_mirror(&mirror, "E1M-AEN401", "2026W36-0004", 2026u, 9u, 4u);
+	make_mirror(&mirror, "E1M-AEN401", "r2", "2026W36-0004", 2026u, 9u, 4u);
 
 	ALP_ASSERT_TRUE(!manifest_agrees_with_mirror(manifest, &mirror));
-}
-
-/* ------------------------------------------------------------------------
- * Gate 2: cold-cycle attestation is a SEPARATE, required gate.
- * ------------------------------------------------------------------------ */
-
-/* Duplicate of the boolean main.c's ALP_SECURE_PAGE_COLD_CYCLED #if
- * collapses to at compile time -- see that file's comment on the gate for
- * why a SEPARATE flag from ALP_LOCK_SECURE_PAGE is required (a Flow C
- * RAM-run never interrupts the power rail, so mode 3 cannot detect a
- * skipped cold cycle mechanically; the flag is an operator attestation,
- * not mechanical proof). */
-static bool cold_cycle_gate_permits_lock(bool operator_attested_cold_cycle)
-{
-	return operator_attested_cold_cycle;
-}
-
-static void test_cold_cycle_gate_refuses_without_attestation(void)
-{
-	ALP_ASSERT_TRUE(!cold_cycle_gate_permits_lock(false));
-}
-
-static void test_cold_cycle_gate_permits_with_attestation(void)
-{
-	ALP_ASSERT_TRUE(cold_cycle_gate_permits_lock(true));
-}
-
-/* ------------------------------------------------------------------------
- * Gate 3: PASS requires a post-lock re-read + byte-compare.
- * ------------------------------------------------------------------------ */
-
-/* Duplicate of main.c mode 3's post-lock verdict: eeprom_24c128_secure_page_lock()
- * confirms only the Lock Status bit, never the payload, so the app must
- * re-read and memcmp before ever printing PASS. */
-static bool lock_payload_matches(const uint8_t *post_lock_page,
-                                 const uint8_t *expected_blob,
-                                 size_t         len)
-{
-	return memcmp(post_lock_page, expected_blob, len) == 0;
-}
-
-static void test_post_lock_payload_match_passes(void)
-{
-	uint8_t page[sizeof(alp_secure_page_mirror_t)];
-	uint8_t expected[sizeof(alp_secure_page_mirror_t)];
-	memset(page, 0xABu, sizeof(page));
-	memcpy(expected, page, sizeof(expected));
-
-	ALP_ASSERT_TRUE(lock_payload_matches(page, expected, sizeof(expected)));
-}
-
-/* Reproduces the exact hazard gate 3 closes: a lock-frame bug that ALSO
- * writes INTO the page (review found two such bugs on this driver -- one
- * clobbered schema_version + sku[0]) still sets the Lock Status bit, so
- * eeprom_24c128_secure_page_lock() returns ALP_OK; only a payload
- * byte-compare after the lock catches it. */
-static void test_post_lock_payload_mismatch_fails(void)
-{
-	uint8_t page[sizeof(alp_secure_page_mirror_t)];
-	uint8_t expected[sizeof(alp_secure_page_mirror_t)];
-	memset(page, 0xABu, sizeof(page));
-	memcpy(expected, page, sizeof(expected));
-	page[0] = 0x00u; /* clobbered byte, e.g. schema_version's low byte */
-
-	ALP_ASSERT_TRUE(!lock_payload_matches(page, expected, sizeof(expected)));
 }
 
 int main(void)
 {
 	test_agrees_when_identical();
 	test_refuses_when_sku_disagrees();
+	test_refuses_when_hw_rev_disagrees();
+	test_refuses_when_manifest_field_is_full_width_unterminated();
+	test_agrees_on_full_width_hw_rev_without_overreading_serial();
 	test_refuses_when_serial_disagrees();
 	test_refuses_when_mfg_date_disagrees();
 	test_refuses_when_manifest_absent();
 	test_refuses_when_manifest_crc_bad();
-
-	test_cold_cycle_gate_refuses_without_attestation();
-	test_cold_cycle_gate_permits_with_attestation();
-
-	test_post_lock_payload_match_passes();
-	test_post_lock_payload_mismatch_fails();
 
 	ALP_TEST_SUMMARY();
 }

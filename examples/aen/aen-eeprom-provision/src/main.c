@@ -639,8 +639,8 @@ static bool field_matches(const char *label,
                           const char *mirror_field,
                           size_t      mirror_width)
 {
-	char mbuf[ALP_HW_INFO_SERIAL_LEN + 1];     /* widest manifest field used here (24) + NUL */
-	char sbuf[ALP_SECURE_PAGE_SERIAL_LEN + 1]; /* widest mirror field used here (23) + NUL */
+	char   mbuf[ALP_HW_INFO_SERIAL_LEN + 1];     /* widest manifest field used here (24) + NUL */
+	char   sbuf[ALP_SECURE_PAGE_SERIAL_LEN + 1]; /* widest mirror field used here (23) + NUL */
 	size_t mcopy = manifest_width < sizeof(mbuf) ? manifest_width : sizeof(mbuf) - 1u;
 	size_t scopy = mirror_width < sizeof(sbuf) ? mirror_width : sizeof(sbuf) - 1u;
 
@@ -660,14 +660,27 @@ static bool field_matches(const char *label,
  * @brief Read + integrity-check the array manifest at 0x50, and
  *   refuse to lock unless it agrees with @p mirror field for field.
  *
- * The array manifest (scripts/program_eeprom.py, SKU from an explicit CLI
- * argument) and the Secure Data Page mirror (scripts/program_eeprom_secure_page.py,
- * SKU inferred from board.yaml) are TWO INDEPENDENTLY GENERATED blobs with
- * independent inputs. Nothing before this point ever compares them -- a
- * mirror that is internally self-consistent (sane magic/schema/CRC) but was
- * generated against the wrong board.yaml passes every check upstream of
- * this one and would otherwise be locked forever, permanently freezing the
- * wrong identity on the module. This is the last check that can catch that.
+ * The array manifest and the Secure Data Page mirror are written by two
+ * separate tool runs, in two different production steps, from two separate
+ * .bin files. Nothing before this point ever compares them: mode 3 proves
+ * only that the on-device page matches the blob THIS BUILD baked in, so a
+ * mirror that is internally self-consistent (sane magic/schema/CRC) but
+ * belongs to a different module, or carries a typo'd --serial or the wrong
+ * --mfg-date, passes every check upstream of this one and would be locked
+ * forever onto a module whose array manifest says something else.
+ *
+ * KNOW WHAT THIS DOES NOT CATCH. scripts/program_eeprom_secure_page.py
+ * imports scripts/program_eeprom.py and reuses its board.yaml loader, so
+ * sku and hw_rev come from the same field, resolved by the same code, in
+ * whatever board.yaml each run was pointed at. Generate both blobs from ONE
+ * board.yaml and those two fields carry no independent signal -- a
+ * board.yaml that is wrong for the module poisons both objects identically
+ * and agrees with itself here. Independence on sku/hw_rev exists only when
+ * the two runs are given different inputs, as the operator wrapper does by
+ * synthesising the manifest's board.yaml from an explicit SKU argument.
+ * serial and mfg date are genuinely independent either way: they are
+ * per-invocation CLI arguments, and the array is written in an earlier
+ * production step than the mirror.
  *
  * "No manifest" is NOT "nothing to disagree with": a blank/erased array (no
  * ALPH magic) or one that fails its own CRC refuses here exactly like a
@@ -683,7 +696,7 @@ static bool field_matches(const char *label,
  *   date.
  */
 static bool array_manifest_agrees_with_mirror(eeprom_24c128_t                *ee,
-                                               const alp_secure_page_mirror_t *mirror)
+                                              const alp_secure_page_mirror_t *mirror)
 {
 	uint8_t      raw[sizeof(alp_hw_info_eeprom_t)];
 	alp_status_t s = eeprom_24c128_read(ee, 0u, raw, sizeof(raw));
@@ -728,17 +741,17 @@ static bool array_manifest_agrees_with_mirror(eeprom_24c128_t                *ee
 		ok = false;
 	}
 	if (!field_matches("hw_rev",
-	                    manifest.hw_rev,
-	                    sizeof(manifest.hw_rev),
-	                    mirror->hw_rev,
-	                    sizeof(mirror->hw_rev))) {
+	                   manifest.hw_rev,
+	                   sizeof(manifest.hw_rev),
+	                   mirror->hw_rev,
+	                   sizeof(mirror->hw_rev))) {
 		ok = false;
 	}
 	if (!field_matches("serial",
-	                    manifest.serial,
-	                    sizeof(manifest.serial),
-	                    mirror->serial,
-	                    sizeof(mirror->serial))) {
+	                   manifest.serial,
+	                   sizeof(manifest.serial),
+	                   mirror->serial,
+	                   sizeof(mirror->serial))) {
 		ok = false;
 	}
 	if (manifest.mfg_year != mirror->mfg_year || manifest.mfg_month != mirror->mfg_month ||
@@ -913,6 +926,23 @@ int main(void)
 		printf("RESULT FAIL: post-lock read_identity -> %d -- lock state "
 		       "unconfirmed and the lock cannot be undone\n",
 		       (int)s);
+		return 0;
+	}
+	/* Re-confirm the lock state from THIS read, not from the lock call's own
+     * verdict. eeprom_24c128_read_identity() only sets lock_valid on a
+     * successful Lock Status write_read, so a lock that changed how selector
+     * 0x04 answers would come back ALP_OK with lock_valid false and a matching
+     * payload -- and without this check the app would print PASS for a module
+     * whose lock state it never actually confirmed. The already-locked branch
+     * above reaches its verdict from id.secure_page_locked; this is the same
+     * evidence for the branch that just did the locking. */
+	if (!post.lock_valid || !post.secure_page_locked) {
+		printf("RESULT FAIL: Secure Data Page lock state is UNCONFIRMED after "
+		       "the lock (lock_valid=%d, locked=%d) -- do not ship this module "
+		       "until Lock Status has been read back successfully; the lock "
+		       "cannot be undone\n",
+		       (int)post.lock_valid,
+		       (int)post.secure_page_locked);
 		return 0;
 	}
 	if (!post.secure_page_valid ||

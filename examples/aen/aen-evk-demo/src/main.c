@@ -1424,7 +1424,7 @@ static phase_verdict_t phase_eeprom_identity(demo_ctx_t *ctx)
 	 * cast pointer is the same misaligned-access bug already fixed on the
 	 * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
 	 * comment in include/alp/hw_info.h) and left unswept here. */
-	alp_hw_info_eeprom_t        manifest;
+	alp_hw_info_eeprom_t manifest;
 	memcpy(&manifest, raw, sizeof(manifest));
 	const alp_hw_info_eeprom_t *m         = &manifest;
 	bool                        magic_ok  = (m->magic == ALP_HW_INFO_MAGIC);

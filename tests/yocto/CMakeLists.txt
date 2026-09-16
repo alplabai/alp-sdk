@@ -95,9 +95,9 @@ add_test(NAME alp_test_alp_secure_page_mirror
          COMMAND alp_test_alp_secure_page_mirror)
 
 # examples/aen/aen-eeprom-provision mode 3 (ALP_LOCK_SECURE_PAGE) lock-time
-# gates: array-manifest-vs-mirror cross-check (BLOCKER 1), the
-# ALP_SECURE_PAGE_COLD_CYCLED attestation gate (BLOCKER 2), and the
-# post-lock payload re-verify (MAJOR 3).  Pure header logic, no chip driver
+# array-manifest-vs-mirror cross-check that runs before the permanent
+# lock.  Covers that gate's algorithm only -- see the file's header for
+# what it deliberately does NOT cover.  Pure header logic, no chip driver
 # source needed -- same shape as alp_test_alp_secure_page_mirror above; see
 # the test file's header comment for why main.c itself can't be linked here.
 add_executable(alp_test_aen_eeprom_provision_lock_gates

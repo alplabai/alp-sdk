@@ -165,13 +165,13 @@ bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 # 3. Cold-power-cycle the board. Not optional -- a RAM-run cannot prove
 #    anything survived a power cycle it never experienced.
 
-# 4. Lock. PERMANENT. Irreversible. Refuses unless the page now on the
-#    device, read fresh after the cold cycle, is byte-exact against the
-#    same blob from step 1.
+# 4. Lock. PERMANENT. Irreversible. Both flags are required: the second is
+#    your attestation that step 3's cold power cycle actually happened.
 bash $B/build.sh "$PWD/examples/aen/aen-eeprom-provision" \
     -DALP_MANIFEST_BIN=/tmp/manifest-<SERIAL>.bin \
     -DALP_SECURE_PAGE_BIN=/tmp/secure-page-<SERIAL>.bin \
     -DALP_LOCK_SECURE_PAGE=1 \
+    -DALP_SECURE_PAGE_COLD_CYCLED=1 \
     "-DEXTRA_CONF_FILE=$PWD/$B/aen-bench-shared.conf;$PWD/$B/aen-flowc-itcm.conf" \
     "-DEXTRA_DTC_OVERLAY_FILE=$PWD/$B/aen-flowc-itcm.overlay"
 bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
@@ -181,13 +181,32 @@ bash $B/ram-run.sh "$PWD/build/aen-eeprom-provision"
 build does not make it conditional), even though the two Secure-Data-Page
 modes never reference its contents.
 
+Before it locks, mode 3 refuses on any of these, without touching the part:
+
+1. `ALP_SECURE_PAGE_COLD_CYCLED` not set.
+2. The baked-in blob fails its own magic / schema / CRC check.
+3. `0x58` does not answer (the footprint-compatible alternate part).
+4. The page is already locked and does not match the blob.
+5. The page now on the device is not byte-exact against the blob.
+6. The page byte-matched but does not parse as a mirror.
+7. **The array manifest at `0x50` disagrees with the mirror** on sku,
+   hw_rev, serial or the mfg date -- or is missing, or fails its CRC. The
+   message names the field and both values.
+
+And after the lock returns, it re-reads Lock Status and the page and refuses
+to print PASS unless the lock bit is confirmed in that read *and* the
+payload still matches.
+
 Why two separate app invocations for step 2 and step 4, not one flag that
-does both: a RAM-run cannot span a power cycle. Locking is gated on a
-**post-cold-cycle** read-back, which by construction means a fresh process,
-which means a separate build. The lock refuses to run at all without
-`-DALP_SECURE_PAGE_BIN` even when `-DALP_LOCK_SECURE_PAGE=1` is set (see
-`CMakeLists.txt`) -- it never locks blind, and it never locks as a side
-effect of writing.
+does both: a RAM-run cannot span a power cycle. The lock refuses to run at
+all without `-DALP_SECURE_PAGE_BIN` even when `-DALP_LOCK_SECURE_PAGE=1` is
+set (see `CMakeLists.txt`) -- it never locks blind, and it never locks as a
+side effect of writing.
+
+`ALP_SECURE_PAGE_COLD_CYCLED` is an attestation, not proof: nothing inside a
+single RAM-run can observe the power rail, and a Flow C RAM-run is a
+halt-load-go over SWD that never interrupts it. Set it only when the rail
+was confirmed at 0.0 V, and record that telemetry in the run log.
 
 After the lock: the page still reads, forever, but every future write to it
 NAKs at the hardware level. There is no unlock.
