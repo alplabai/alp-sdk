@@ -4066,7 +4066,10 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *  13. Idle restore, on EVERY exit path including every failure above,
  *      mirroring phase 6 (RGB LED) and NOT phase 9 (SD mux, which leaves its
  *      mux asserted on purpose -- see that phase's header for why): AMP_ENABLE
- *      driven LOW, both amp contexts deinitialised, and (playback only) mux
+ *      RELEASED to an input so R138's pull-up defines it, exactly as at
+ *      power-on -- NOT driven low, which would hold both amps in hardware
+ *      shutdown and make them vanish from every later I2C scan (#2164) --
+ *      both amp contexts deinitialised, and (playback only) mux
  *      SELECT+ENABLE driven back to their inactive levels. Nothing after
  *      phase 11 needs the audio path connected, and an amplifier is a
  *      higher-risk-if-left-on part than an SD bus, so idle-restore is the
@@ -4321,7 +4324,11 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	if (ok_amps == 0) {
 		printf("[evkdemo] SOUND: neither amp answered -- tas2563 is fitted (both U27 "
 		       "and U28) on every E1M-EVK, so this is a real fault, not absent hardware\n");
-		gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+		/* Release, not drive low -- same reason as the idle restore at the
+		 * end of this phase (#2164).  Leaving SD_N asserted on the way out
+		 * of a failure would make the NEXT run's scan see absent hardware
+		 * and mask whatever actually went wrong here. */
+		(void)gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_INPUT);
 		alp_gpio_close(mux_sel);
 		alp_gpio_close(mux_en);
 		ctx->note = "no TAS2563 answered";
@@ -4630,7 +4637,19 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	for (size_t i = 0; i < AMP_COUNT; i++) {
 		if (amp_up[i]) tas2563_deinit(&amps[i]);
 	}
-	(void)gpio_pin_set(gpio5, AMP_ENABLE_PIN, 0);
+	/* RELEASE AMP_ENABLE; do not drive it low (#2164).  A pin driven low
+	 * keeps SD_N asserted after this app exits, holding BOTH TAS2563s in
+	 * HARDWARE shutdown -- in that state they do not ACK, so any later
+	 * image scanning this bus sees 0x4d, 0x4e and the 0x48 broadcast
+	 * simply gone and reports missing hardware.  Measured on
+	 * e1m-aen-evk-03: 12 responders after a run of this phase, 15 after a
+	 * reset released the pin.  Configuring it as an input stops driving,
+	 * so R138's 10 kOhm pull-up to +VIO defines the level exactly as it
+	 * does at power-on -- an actively driven low overrides that pull-up,
+	 * which is why "the pull-up will release them" does not hold here.
+	 * The amps are deinitialised just above; nothing this phase leaves
+	 * behind needs them held in hardware shutdown. */
+	(void)gpio_pin_configure(gpio5, AMP_ENABLE_PIN, GPIO_INPUT);
 	(void)alp_gpio_write(mux_en, true); /* /E high = mux disabled. */
 	alp_gpio_close(mux_sel);
 	alp_gpio_close(mux_en);
