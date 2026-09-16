@@ -3867,6 +3867,14 @@
           "hash": "d30d3542af66bd6a",
           "signature": "alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_identity_t *out);"
         },
+        "eeprom_24c128_secure_page_lock": {
+          "hash": "e64781121ac9cf7a",
+          "signature": "alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx);"
+        },
+        "eeprom_24c128_secure_page_write": {
+          "hash": "d9f0bfeae59c09a9",
+          "signature": "alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx, const uint8_t *data, size_t len);"
+        },
         "eeprom_24c128_write": {
           "hash": "7f9df036749910ae",
           "signature": "alp_status_t eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len);"
@@ -3900,7 +3908,7 @@
       },
       "typedefs": {
         "eeprom_24c128_identity_t": {
-          "definition": "typedef struct { bool secure_page_valid; uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]; bool unique_id_valid; uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]; bool lock_valid; bool secure_page_locked; bool device_config_valid; uint8_t device_config; } eeprom_24c128_identity_t;",
+          "definition": "typedef struct { bool secure_page_valid; uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]; bool unique_id_valid; uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]; bool lock_valid; bool secure_page_locked; uint8_t lock_status; bool device_config_valid; uint8_t device_config; } eeprom_24c128_identity_t;",
           "fields": [
             "bool secure_page_valid",
             "uint8_t secure_page[EEPROM_24C128_SECURE_PAGE_BYTES]",
@@ -3908,10 +3916,11 @@
             "uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES]",
             "bool lock_valid",
             "bool secure_page_locked",
+            "uint8_t lock_status",
             "bool device_config_valid",
             "uint8_t device_config"
           ],
-          "hash": "1bbd940540929b8e",
+          "hash": "d75e1b71f9187135",
           "kind": "struct"
         },
         "eeprom_24c128_t": {
@@ -10818,6 +10827,10 @@
           "hash": "d02a9525f7e742f6",
           "signature": "alp_status_t alp_hw_info_read(alp_hw_info_t *out);"
         },
+        "alp_secure_page_mirror_classify": {
+          "hash": "095eebed14058360",
+          "signature": "bool alp_secure_page_mirror_classify(const uint8_t *page, alp_secure_page_mirror_t *out);"
+        },
         "alp_soc_info_read": {
           "hash": "f803d1d960a8ef81",
           "signature": "alp_status_t alp_soc_info_read(alp_soc_info_t *out);"
@@ -10851,6 +10864,26 @@
         "ALP_HW_INFO_SKU_LEN": {
           "hash": "560d8201b0ff6dc7",
           "value": "24u"
+        },
+        "ALP_SECURE_PAGE_HW_REV_LEN": {
+          "hash": "d3e33dc5b0ab1860",
+          "value": "12u"
+        },
+        "ALP_SECURE_PAGE_MAGIC": {
+          "hash": "bb07a4e04a94a3ed",
+          "value": "0x414C5350u"
+        },
+        "ALP_SECURE_PAGE_SCHEMA_VERSION": {
+          "hash": "d357b032bd119e62",
+          "value": "1u"
+        },
+        "ALP_SECURE_PAGE_SERIAL_LEN": {
+          "hash": "95238eaa22edcb13",
+          "value": "23u"
+        },
+        "ALP_SECURE_PAGE_SKU_LEN": {
+          "hash": "d942e30ce41fd867",
+          "value": "16u"
         },
         "ALP_SOC_INFO_FW_VERSION_LEN": {
           "hash": "61be5a310f28a190",
@@ -10899,6 +10932,22 @@
             "uint32_t board_id_mv"
           ],
           "hash": "a848d7bf78d3dca6",
+          "kind": "struct"
+        },
+        "alp_secure_page_mirror_t": {
+          "definition": "typedef struct alp_secure_page_mirror_t { uint32_t magic; uint8_t schema_version; char sku[ALP_SECURE_PAGE_SKU_LEN]; char hw_rev[ALP_SECURE_PAGE_HW_REV_LEN]; char serial[ALP_SECURE_PAGE_SERIAL_LEN]; uint16_t mfg_year; uint8_t mfg_month; uint8_t mfg_day; uint32_t crc32; } alp_secure_page_mirror_t;",
+          "fields": [
+            "uint32_t magic",
+            "uint8_t schema_version",
+            "char sku[ALP_SECURE_PAGE_SKU_LEN]",
+            "char hw_rev[ALP_SECURE_PAGE_HW_REV_LEN]",
+            "char serial[ALP_SECURE_PAGE_SERIAL_LEN]",
+            "uint16_t mfg_year",
+            "uint8_t mfg_month",
+            "uint8_t mfg_day",
+            "uint32_t crc32"
+          ],
+          "hash": "a77cc844558b4840",
           "kind": "struct"
         },
         "alp_soc_info_t": {
