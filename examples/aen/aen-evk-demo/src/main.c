@@ -164,7 +164,7 @@
 #include "alp/audio.h"   /* Phase 11 only -- alp_audio_in/out_*. */
 #include "alp/i2s.h"     /* Phase 11 only -- alp_i2s_config_t, passed to tas2563_configure_i2s(). */
 #include "alp/display.h" /* Phase 12 only -- alp_display_open(); see that phase's comment. */
-#include "alp/hw_info.h" /* alp_hw_info_eeprom_t, ALP_HW_INFO_MAGIC -- manifest layout only */
+#include "alp/hw_info.h" /* alp_hw_info_eeprom_t (phase 5); alp_hw_info_read/_t, ALP_HW_INFO_HW_REV_LEN (phase 11) */
 #include "alp/boards/alp_e1m_evk.h"
 
 #include "alp/chips/rv3028c7.h"
@@ -182,6 +182,7 @@
 #include "alp/chips/tas2563.h" /* Phase 11 only. */
 #include "amp_fault_verdict.h" /* Phase 11 only -- the raw AMP_FAULT pin mapping. */
 #include "sound_verdict.h"     /* Phase 11 only -- the energy-correlation verdict. */
+#include "hw_rev_verdict.h"    /* Phase 11 only -- the r1/r2 IO8-safety gate, issue #2138. */
 
 #include "cc3501e_bridge.h" /* cc3501e_bridge_bringup() -- the SoM bring-up template */
 
@@ -3977,6 +3978,11 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * FULL BRING-UP / TEARDOWN ORDER, so the whole sequence is reviewable in one
  * place rather than reconstructed from call sites. Steps marked
  * "PLAYBACK ONLY" exist solely inside `#if AEN_EVKDEMO_SOUND_PLAYBACK`:
+ *   0. PLAYBACK ONLY: refuse (FAIL) unless a fresh EEPROM read confirms
+ *      hw_rev 2626-r2 -- IO8 -> CC3501E GPIO_30 only holds on that
+ *      revision; on r1 GPIO_30 is the carrier's SDIO mux SELECT, shorted
+ *      to +3V3 by a fitted P18 jumper (issue #2138). See that check's own
+ *      comment, right before step 1 in the code, for the full reasoning.
  *   1. PLAYBACK ONLY: 74LVC157 mux ENABLE (E1M IO8 -> CC3501E GPIO_30) +
  *      SELECT (E1M IO13 -> CC3501E GPIO_13, 0 = TAS2563 amps) over the
  *      bridge phase 8 leaves up -- same CC3501E-proxy mechanism phase 9
@@ -4176,6 +4182,43 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	alp_gpio_t *mux_en  = NULL;
 	alp_gpio_t *mux_sel = NULL;
 #if AEN_EVKDEMO_SOUND_PLAYBACK
+	/* --- 0. Refuse unless the live module is CONFIRMED hw_rev 2626-r2 -- */
+	/* cc3501e_gpio_routes.c's E1M IO8 -> CC3501E GPIO_30 entry holds ONLY
+	 * on r2 (metadata/e1m_modules/aen/hw-revisions.yaml
+	 * pad_route_overrides). On r1, IO8 is instead a direct Alif GPIO and
+	 * GPIO_30 is the carrier's SDIO mux SELECT -- on an E1M-EVK 2626-R2
+	 * carrier that net is tied to +3V3 through a fitted P18 jumper
+	 * (R198), so driving GPIO_30 low here would short a CC3501E output
+	 * against +3V3 (issue #2138). This app has no board.yaml (see the
+	 * file header above), so it gets none of the per-revision route
+	 * table scripts/gen_cc3501e_gpio_routes.py generates for the
+	 * board.yaml-driven CC3501E examples -- the hand-written table is
+	 * fixed at build time and cannot itself tell r1 from r2. So this
+	 * phase confirms the revision itself over alp_hw_info_read() (a
+	 * fresh read, not a cached one -- this phase must not assume phase 5
+	 * ran or passed), which validates magic + schema_version + CRC32
+	 * before it ever populates som_hw_rev -- see hw_rev_verdict.h's file
+	 * comment for why that reuse, not a second hand-rolled EEPROM read,
+	 * is deliberate. aen_evkdemo_hw_rev_confirms_io8_safe() then refuses
+	 * on anything but an exact "2626-r2": a read failure, an
+	 * unprovisioned/corrupt manifest, r1, or a future r3+ all refuse --
+	 * so an unprovisioned module fails safe here too, instead of being
+	 * silently treated as r2. */
+	alp_hw_info_t hwrev_info;
+	alp_status_t  hwrev_rc = alp_hw_info_read(&hwrev_info);
+	if (!aen_evkdemo_hw_rev_confirms_io8_safe(hwrev_rc, hwrev_info.som_hw_rev)) {
+		printf("[evkdemo] SOUND: refusing to drive E1M IO8 (I2S mux ENABLE) as CC3501E "
+		       "GPIO_30 -- that route holds only on hw_rev 2626-r2 and this run could not "
+		       "confirm it (alp_hw_info_read -> %d, hw_rev=\"%.*s\"). On r1, GPIO_30 is the "
+		       "carrier's SDIO mux SELECT, shorted to +3V3 by a fitted P18 jumper -- see "
+		       "issue #2138. Not opening IO8 or IO13.\n",
+		       (int)hwrev_rc,
+		       ALP_HW_INFO_HW_REV_LEN,
+		       hwrev_info.som_hw_rev);
+		ctx->note = "refused: hw_rev != 2626-r2 (#2138)";
+		return PHASE_FAIL;
+	}
+
 	/* --- 1. I2S mux ENABLE + SELECT over the CC3501E proxy ------------- */
 	mux_en              = alp_gpio_open(ALP_E1M_GPIO_IO8);
 	mux_sel             = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;

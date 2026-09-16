@@ -771,11 +771,12 @@
  * needed. This node only needs status = "okay"; gpio_dw applies no pad mux
  * of its own (same note as the encoder switch's pinctrl comment above).
  *
- * The I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30) and SELECT (E1M IO13 ->
- * CC3501E GPIO_13) are NOT in this file -- like phase 9's SD mux ENABLE,
- * both are CC3501E-proxied pads driven at runtime over the inter-chip
- * bridge phase 8 leaves up (src/cc3501e_gpio_routes.c). Devicetree describes
- * neither.
+ * The I2S mux ENABLE (E1M IO8 -> CC3501E GPIO_30, hw_rev 2626-r2 ONLY -- see
+ * src/hw_rev_verdict.h and phase 11's own header, issue #2138) and SELECT
+ * (E1M IO13 -> CC3501E GPIO_13) are NOT in this file -- like phase 9's SD mux
+ * ENABLE, both are CC3501E-proxied pads driven at runtime over the
+ * inter-chip bridge phase 8 leaves up (src/cc3501e_gpio_routes.c).
+ * Devicetree describes neither.
  *
  * SAFETY, i2s3 node DISABLED BY DEFAULT: U46 (the 74LVC157 mux above) has NO
  * Hi-Z state -- with /E high its Y outputs are forced LOW, not floated -- and
