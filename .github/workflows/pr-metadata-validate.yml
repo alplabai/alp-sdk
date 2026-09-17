@@ -685,6 +685,18 @@ jobs:
       - name: Gate — examples resolve alp_project.py under ALP_SDK_ROOT
         run: python3 scripts/check_example_sdk_root.py
 
+      # Issue #2163: cc3501e_bridge.{c,h} is copied per example -- 16 copies --
+      # and nothing asserted the copies stay in sync. It is hardware-sequencing
+      # code (LP-GPIO pad writes for WIFI_EN / nRESET, the reset pulse timing,
+      # the silicon-tuned RX_SAMPLE_DLY poke), so a fix applied to one copy and
+      # missed in the rest is invisible in CI and shows up only on silicon --
+      # the same shape as #1859's drifted cc3501e_gpio_routes.c pad map. The
+      # copies stay copies on purpose (the header is a customer-facing template
+      # and `tan init --from-example` copies one directory), so this detects
+      # drift rather than removing the duplication.
+      - name: Gate — cc3501e_bridge copies are in sync
+        run: python3 scripts/check_cc3501e_bridge_copies.py
+
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at
       # least one ztest mention.  Runs informational today (no
