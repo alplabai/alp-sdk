@@ -1,19 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build-only regression for the vendored ADR 0017 Tier-2 quadrature-encoder
-# sensor driver (drivers/sensor/qdec_alif/qdec_alif_utimer.c,
-# "alif,utimer-qdec") on the E1M-AEN801 (Alif Ensemble E8, M55-HE), through
-# the standard Zephyr sensor API.
+# Build-only regression for the vendored ADR 0017 Tier-2 UTIMER QEC0 edge
+# counter (drivers/sensor/qdec_alif/qdec_alif_utimer.c, "alif,utimer-qdec")
+# on the E1M-AEN801 (Alif Ensemble E8, M55-HE), through the standard Zephyr
+# sensor API -- measured NOT to decode quadrature (#2037) -- plus the
+# software gpio-qdec decoder added in response.
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# Compile-checks the driver + DT nodes on the real E8 board target; filtered
+# OUT of the native_sim PR gate (platform_allow = the AEN801 HE board only).
 
 sample:
   name: aen-qenc-readout
   description: |
-    Bench RAM-run quadrature-encoder (alif,utimer-qdec) readout proof for the
-    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_qenc0)
-    through sensor_sample_fetch/sensor_channel_get -> SENSOR_CHAN_ROTATION.
+    Bench RAM-run readout proof for the E1M-AEN801 (Alif Ensemble E8,
+    Cortex-M55-HE): drives DT_ALIAS(alp_qenc0), the UTIMER QEC0 edge counter
+    (alif,utimer-qdec) via sensor_sample_fetch/sensor_channel_get ->
+    SENSOR_CHAN_ROTATION, alongside the software gpio-qdec decoder over the
+    same pads via &gpio3.
 
 tests:
   alp_sdk.examples.aen.qenc_readout.aen:
