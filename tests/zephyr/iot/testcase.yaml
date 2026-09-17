@@ -10,3 +10,25 @@ tests:
     tags:
       - alp-sdk
       - iot
+
+  # Build-only scenario: CONFIG_MQTT_LIB + CONFIG_NET_TCP turn on
+  # CONFIG_ALP_SDK_IOT_MQTT, compiling the real Zephyr mqtt_client body
+  # inside src/backends/mqtt/zephyr_drv.c that alp_sdk.iot.smoke's own
+  # NOSUPPORT contract never touches.  native_sim has no MQTT-capable
+  # network stack to run a real broker round trip against (see the base
+  # prj.conf's comment), so this is a compile proof, not a functional
+  # one -- it exists so the next edit to that arm can't silently break
+  # the build the way #1938 found it (issue #1938 item 2).
+  alp_sdk.iot.mqtt_build:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    build_only: true
+    extra_args:
+      - "EXTRA_CONF_FILE=prj_mqtt.conf"
+    tags:
+      - alp-sdk
+      - iot
+      - mqtt

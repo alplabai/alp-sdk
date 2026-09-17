@@ -379,6 +379,33 @@ typedef enum {
 /** @} */
 
 /**
+ * Live decode of `DSP Mode & TDM_DET` (0x11, read-only), returned by
+ * @ref tas2563_read_tdm_detect.  See that function's doc for the
+ * "no valid clock" reset state and the Table 7-119 vs Table 7-23/7-24
+ * datasheet self-contradiction it decodes through.
+ */
+typedef struct {
+	/** false when the register still reads its "no valid clock"
+	 *  state -- @c sbclk_fsync_ratio decoded to 0 (Reserved/Invalid
+	 *  FS_RATIO) or the FS_RATE Error condition, or both, as at
+	 *  reset (7Fh). */
+	bool clock_valid;
+	/** Detected SBCLK:FSYNC ratio -- one of 16, 24, 32, 48, 64, 96,
+	 *  128, 192, 256, 384, 512 -- or 0 when FS_RATIO decodes to
+	 *  Reserved (0Bh-0Eh) or Invalid ratio (0Fh). */
+	uint32_t sbclk_fsync_ratio;
+	/** Low member of the detected sample-rate pair (e.g. 44100 of
+	 *  "44.1/48 kHz"), or 0 on the FS_RATE Error condition.  FS_RATE
+	 *  cannot distinguish which member of its pair is actually
+	 *  running, same ambiguity as @ref tas2563_configure_i2s'
+	 *  SAMP_RATE encoding. */
+	uint32_t sample_rate_low_hz;
+	/** High member of the detected sample-rate pair (e.g. 48000 of
+	 *  "44.1/48 kHz"), or 0 on the FS_RATE Error condition. */
+	uint32_t sample_rate_high_hz;
+} tas2563_tdm_detect_t;
+
+/**
  * One register write in a tuning stream.  The device's memory map is
  * paged, so a coefficient write is only addressable as the triple
  * (book, page, register).  SLASET3D §7.3.10 "Register Organization"
@@ -566,8 +593,9 @@ alp_status_t tas2563_set_hw_enable(tas2563_t *ctx, bool enable);
  *   tas2563_load_tuning's write verification note for the same kind of
  *   gap; the one register whose name suggests it, `DSP Mode & TDM_DET`
  *   at 0x11 / §7.5.19, is read-only TDM clock-detection readback
- *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title) and
- *   has no mode-select field).  A caller in Smart Amp/Tuning mode that
+ *   (`FS_RATIO`/`FS_RATE`, correctly documented, despite its title, and
+ *   decoded by @ref tas2563_read_tdm_detect) and has no mode-select
+ *   field).  A caller in Smart Amp/Tuning mode that
  *   calls this and gets `ALP_OK` should not assume the level actually
  *   changed on the part -- confirm via PPC3, outside this driver's
  *   knowledge, per SLAA953's workflow note above.
@@ -713,13 +741,18 @@ tas2563_configure_iv_sense(tas2563_t *ctx, bool enable, uint8_t v_slot, uint8_t 
  * holds the pin low until @ref tas2563_clear_faults, rather than
  * pulsing (§7.5.43 Table 7-143, p.86).
  *
- * The four `INT_MASK` registers are left at their reset values, which
- * already leave the safety-critical events unmasked: over-temperature
- * and over-current (`INT_MASK0` = `FCh`), VBAT brown-out and speaker
- * open/short load (`INT_MASK1` = `A6h`), VBAT POR (`INT_MASK2` =
- * `DFh`) -- SLASET3D §7.5.28-§7.5.31, p.77-80.  TDM clock error
- * (`INT_MASK0[2]`) is masked at reset; a caller who wants it on the
- * pin has to write `INT_MASK0` directly.
+ * The four `INT_MASK` registers are otherwise left at their reset
+ * values, which already leave the other safety-critical events
+ * unmasked: over-temperature and over-current (`INT_MASK0` = `FCh`),
+ * VBAT brown-out and speaker open/short load (`INT_MASK1` = `A6h`),
+ * VBAT POR (`INT_MASK2` = `DFh`) -- SLASET3D §7.5.28-§7.5.31, p.77-80.
+ * TDM clock error (`INT_MASK0[2]`) is the one bit `FCh` leaves masked,
+ * so this function clears it explicitly (#2140) -- without that write,
+ * `INT_MASK` still gates the IRQZ pin only: @ref TAS2563_FAULT_TDM_CLOCK
+ * still latches into `INT_LTCH0[2]` and @ref tas2563_read_faults still
+ * reports it, but IRQ_N never asserts for a TDM clock fault, so a
+ * caller relying on the pin (rather than polling @ref
+ * tas2563_read_faults directly) never sees one.
  *
  * @param[in] ctx                  Initialised context.
  * @param[in] irq_n                Open GPIO handle bound to
@@ -785,6 +818,35 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  * Does not require a fault pin; the latched registers are readable
  * whether or not IRQ_N is wired.
  *
+ * @note `INT_MASK` gates the IRQZ / fault pin, not the live or latched
+ *   readback.  SLASET3D §7.4.x (p.35): "the IRQZ pin will assert low if
+ *   the clock error interrupt mask register bit is set low
+ *   (INT_MASK[2])... The clock fault is also available for readback in
+ *   the live or latched fault status registers (INT_LIVE[2] and
+ *   INT_LTCH[2])" -- worded identically for over-temp (`INT_MASK[0]`)
+ *   and over-current (`INT_MASK[1]`).  A masked fault still sets its
+ *   `INT_LTCH` bit; this function reports it regardless of mask state.
+ *   Measured on `e1m-aen-evk-03` (`aen-evk-demo` phase 11, built at
+ *   `cfeafd148`, i.e. before #2140 unmasked anything): with
+ *   `INT_MASK0` at its POR value `FCh` (TDM clock error still masked),
+ *   the TDM clock-error bit latched in `INT_LTCH0` on both amps
+ *   (`tas2563_read_faults()` returned `0x80510004`) while `AMP_FAULT`
+ *   stayed high throughout -- latch set, pin silent.  @ref
+ *   tas2563_configure_fault_pin unmasking `INT_MASK0[2]` (#2140) only
+ *   changes whether TDM clock error also reaches the pin; it was
+ *   already visible to this function before that change.  Per-register
+ *   POR mask values, for reference: `INT_MASK0` = `FCh` (over-temp and
+ *   over-current unmasked to the pin, TDM clock masked to the pin),
+ *   `INT_MASK1` = `A6h` (VBAT brown-out / speaker open-short), and
+ *   `INT_MASK2` = `DFh` (VBAT POR) -- SLASET3D §7.5.28-§7.5.31,
+ *   p.77-80.  `INT_MASK3` (`FFh`) masks everything it covers from the
+ *   pin, and nothing in this driver unmasks it; those bits still latch
+ *   and this function still reports them.  Also remember the
+ *   read-clears-the-latch question the @warning above raises: if
+ *   reading really does clear `INT_LTCH`, a second call returning zero
+ *   is not evidence the first reading was spurious -- capture and keep
+ *   the first result rather than re-reading to "confirm" it.
+ *
  * @param[in]  ctx        Initialised context.
  * @param[out] faults_out Receives the packed fault bitmask.
  *
@@ -793,6 +855,65 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  * @retval ALP_ERR_INVAL     @p faults_out is NULL.
  */
 alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out);
+
+/**
+ * @brief Live readback of the auto-rate detection engine -- what TDM
+ *        clock the amp currently sees, decoded from `DSP Mode & TDM_DET`
+ *        (0x11, read-only, SLASET3D §7.5.19 Table 7-119, p.73).
+ *
+ * This answers a DIFFERENT question from @ref tas2563_read_faults'
+ * @ref TAS2563_FAULT_TDM_CLOCK -- that bit is a LATCHED history of clock
+ * faults, cleared only by @ref tas2563_clear_faults.  It latches on
+ * every TDM clock fault regardless of `INT_MASK0[2]`; unmasking that bit
+ * via @ref tas2563_configure_fault_pin (#2140) only routes the fault to
+ * IRQZ / `AMP_FAULT` as well, it does not change whether the latch sets.
+ * This function is an unlatched, always-readable, live snapshot of the
+ * detector's current state -- it answers "what is the clock doing right
+ * now", not "did a clock fault ever happen".  Neither replaces the
+ * other; a caller diagnosing a TDM clock problem wants both.
+ *
+ * @par Why a live readback matters here.  SLASET3D's TDM Port section
+ *   (p.40) states the part "employs a robust clock fault detection
+ *   engine that will automatically volume ramp down the playback path
+ *   if FSYNC does not match the configured sample rate (AUTO_RATE
+ *   enabled) or the ratio of SBCLK to FSYNC is not supported" -- that
+ *   same auto-rate detection engine is what populates `FS_RATIO`/
+ *   `FS_RATE` here, so this readback reflects what the part is actually
+ *   measuring on the wire, not a history of shutdown-causing events.
+ *
+ * @par The "no valid clock" reset state.  `DSP Mode & TDM_DET` resets to
+ *   `7Fh`: `FS_RATIO = Fh` ("Invalid ratio") and `FS_RATE = 7h` ("Error
+ *   condition").  That reset value IS the "no valid clock" answer this
+ *   function reports as @c clock_valid == false -- a freshly-reset part
+ *   with nothing driving SBCLK/FSYNC reads exactly this state, with no
+ *   special-casing needed to recognise it.
+ *
+ * @par Datasheet self-contradiction, on the READ side this time.
+ *   The same shape as @ref tas2563_configure_i2s' rate mapping.
+ *   §7.4.2 Table 7-23 "PCM Audio Sample Rates" (p.40) and Table 7-24
+ *   "PCM SBCLK to FSYNC Ratio" (pp.40-41) disagree with Table 7-119 --
+ *   the register's OWN field description -- at the edges of both
+ *   fields: Table 7-23 marks `FS_RATE` `000b`/`010b` Reserved where
+ *   Table 7-119 gives them real rates (7.35/8 kHz, 22.05/24 kHz); Table
+ *   7-24 marks `FS_RATIO` `0h`-`3h` Reserved and `Fh` "Error Condition"
+ *   where Table 7-119 decodes `00h`-`03h` as ratios 16/24/32/48 and
+ *   `0Fh` specifically as "Invalid ratio".  This function decodes per
+ *   Table 7-119, since it is what the silicon reports back on this
+ *   exact read; Tables 7-23/7-24 mark those same codes Reserved for
+ *   CONFIGURATION -- what @ref tas2563_configure_i2s may legally write
+ *   to `SAMP_RATE`, a different field -- which is a different question
+ *   from what this read-only register may report having detected.
+ *   `0Bh`-`0Eh` is Reserved in both tables and decodes the same as
+ *   `0Fh`: @c sbclk_fsync_ratio reads 0, no ratio reported.
+ *
+ * @param[in]  ctx         Initialised context.
+ * @param[out] detect_out  Receives the decoded live state.
+ *
+ * @return ALP_OK, or the underlying bus status.
+ * @retval ALP_ERR_NOT_READY ctx is NULL or not initialised.
+ * @retval ALP_ERR_INVAL     @p detect_out is NULL.
+ */
+alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out);
 
 /**
  * @brief Clear every latched fault and release IRQ_N.

@@ -3707,7 +3707,11 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      the pin -- see AMP_FAULT below) plus one read of the raw AMP_FAULT pin
  *      (P5_0), both printed. Neither gates anything by itself here; they are
  *      the "before" half of the "did ACTIVE cause a fault" comparison after
- *      the tone. Runs regardless of playback.
+ *      the tone. Also prints tas2563_read_tdm_detect() (#2140) -- the LIVE
+ *      TDM_DET (0x11) readback, a different question from the LATCHED
+ *      TAS2563_FAULT_TDM_CLOCK bit read alongside it: at this point in the
+ *      sequence no I2S clock has ever run, so this is expected to read
+ *      "no valid clock" regardless of playback. Runs regardless of playback.
  *   7. PLAYBACK ONLY: alp_audio_in_open() (PDM, peripheral 0) + start --
  *      capture SOUND_BASELINE_BLOCKS of room noise BEFORE the tone starts.
  *   8. PLAYBACK ONLY: alp_audio_out_open() (I2S3, peripheral 0) +
@@ -3736,7 +3740,12 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  *      only) audio_out stop+close, THEN audio_in stop+close.
  *  12. Fault re-read (I2C + pin) on every amp -- the "after" half. Any
  *      TAS2563_FAULT_SHUTDOWN_CAUSES bit set here except TAS2563_FAULT_TDM_CLOCK
- *      (see #2146) is a FAIL, not swallowed. Runs regardless of playback.
+ *      (see #2146) is a FAIL, not swallowed. Also re-prints
+ *      tas2563_read_tdm_detect() (#2140), same non-gating role as at the
+ *      baseline in step 6 -- the latch answers "did a clock fault ever
+ *      happen", the live read answers "what is the clock doing right now",
+ *      and this phase reports both rather than keying its verdict on
+ *      either alone. Runs regardless of playback.
  *  13. Idle restore, on EVERY exit path including every failure above,
  *      mirroring phase 6 (RGB LED) and NOT phase 9 (SD mux, which leaves its
  *      mux asserted on purpose -- see that phase's header for why): AMP_ENABLE
@@ -4066,6 +4075,20 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		printf("[evkdemo] SOUND: tas2563_read_faults(0x%02x) baseline -> 0x%08x\n",
 		       amp_addrs[i],
 		       faults_before[i]);
+
+		/* Live readback (#2140), a different question from the latched
+		 * fault word above -- see the phase header's step 6. Not gated
+		 * on anything: no I2S clock has run yet at this point, so
+		 * "no valid clock" here is expected, not a failure. */
+		tas2563_tdm_detect_t tdm_before = { 0 };
+		(void)tas2563_read_tdm_detect(&amps[i], &tdm_before);
+		printf("[evkdemo] SOUND: tas2563_read_tdm_detect(0x%02x) baseline -> valid=%s "
+		       "ratio=%u rate=%u/%uHz\n",
+		       amp_addrs[i],
+		       tdm_before.clock_valid ? "yes" : "no",
+		       tdm_before.sbclk_fsync_ratio,
+		       tdm_before.sample_rate_low_hz,
+		       tdm_before.sample_rate_high_hz);
 	}
 	/* amp_fault_pin_verdict() (amp_fault_verdict.h) carries the polarity
 	 * reasoning -- #2097 was this exact ternary, inverted, in this file. */
@@ -4308,6 +4331,22 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 		       amp_addrs[i],
 		       faults_after);
 		if ((faults_after & shutdown_fault_mask) != 0u) new_shutdown_fault = true;
+
+		/* Live readback (#2140), same non-gating role as the baseline
+		 * print above -- see the phase header's step 12. Printed for
+		 * diagnosis alongside the latch, not used in the verdict: by
+		 * this point in teardown the amps are already muted/shut down,
+		 * so a "no valid clock" reading here is also expected on the
+		 * I2C-only (non-playback) path. */
+		tas2563_tdm_detect_t tdm_after = { 0 };
+		(void)tas2563_read_tdm_detect(&amps[i], &tdm_after);
+		printf("[evkdemo] SOUND: tas2563_read_tdm_detect(0x%02x) after -> valid=%s "
+		       "ratio=%u rate=%u/%uHz\n",
+		       amp_addrs[i],
+		       tdm_after.clock_valid ? "yes" : "no",
+		       tdm_after.sbclk_fsync_ratio,
+		       tdm_after.sample_rate_low_hz,
+		       tdm_after.sample_rate_high_hz);
 	}
 	/* Same amp_fault_pin_verdict() as the baseline read above. */
 	int  fault_pin_after      = gpio_pin_get(gpio5, AMP_FAULT_PIN);
