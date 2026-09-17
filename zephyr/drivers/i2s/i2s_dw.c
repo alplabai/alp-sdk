@@ -86,10 +86,11 @@
  *     Two gaps remain, out of scope for phase 1:
  *       - rx_stream_start() and tx_stream_start() each unconditionally
  *         disable the OTHER direction's channel-enable bit
- *         (i2s_tx_channel_disable() / i2s_rx_channel_disable()) on every
- *         start, so a genuinely concurrent RX+TX session would still have
- *         one direction's channel silenced by the other's (re)start --
- *         clock ownership aside.
+ *         (i2s_tx_channel_disable() / i2s_rx_channel_disable()) -- and,
+ *         since issue #2179 below, mask that direction's interrupts too --
+ *         on every start, so a genuinely concurrent RX+TX session would
+ *         still have one direction's channel silenced by the other's
+ *         (re)start -- clock ownership aside.
  *       - dev_data->dir is written by i2s_dw_configure() on every call and
  *         is the ONLY thing i2s_dw_isr() consults to decide whether to run
  *         i2s_tx_irq_handler() at all. Every RX-owning path this fix
@@ -104,6 +105,26 @@
  *         must not be read as "TX is actually streaming" once RX has been
  *         configured. Both gaps are full-duplex territory and stay with
  *         #2150's later phase(s).
+ *   - issue #2179 (defensive hardening, this change): an interrupt source
+ *     that is asserted and unmasked but whose i2s_dw_isr() branch the
+ *     dev_data->dir gate skips used to make that function read ISR, match
+ *     no branch, change nothing, and return -- and since the source is
+ *     level-held, the NVIC tail-chains straight back in and the core spins
+ *     with no fault taken. Four sites now make that unreachable:
+ *     i2s_dw_isr() masks any asserted-and-unmasked source it did not
+ *     service; rx_stream_start()/tx_stream_start() mask the OTHER
+ *     direction's interrupts alongside the channel disable they already
+ *     did; i2s_dw_configure() assigns dev_data->dir only after validating
+ *     the direction and the stream state, so a failed call no longer
+ *     repoints the ISR gate; and i2s_dw_initialize() quiesces
+ *     IER/IRER/ITER/RER/TER and masks interrupts BEFORE irq_config() arms
+ *     the NVIC, since this block is not in the SYSRESETREQ reset domain
+ *     and carries its register state across a warm reset. The i2s3
+ *     RX-start spin reported in #2179 was measured 6/6 on e1m-aen-evk-03,
+ *     but a follow-up bench campaign passed 8/8 without reproducing it and
+ *     no ISR/IMR capture exists, so NONE of these four is claimed to be
+ *     that fault's cause -- each is correct on its own terms. See each
+ *     site's own comment.
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
  * fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
@@ -303,8 +324,6 @@ static int i2s_dw_configure(const struct device *dev, enum i2s_dir dir,
 
 	struct stream *stream;
 
-	dev_data->dir = dir;
-
 	switch (dir) {
 	case I2S_DIR_RX:
 		stream = &dev_data->rx;
@@ -324,6 +343,19 @@ static int i2s_dw_configure(const struct device *dev, enum i2s_dir dir,
 		LOG_ERR("invalid state");
 		return -EINVAL;
 	}
+
+	/* alp-sdk issue #2179: assign dev_data->dir only once this call is
+	 * committed to (re)configuring a stream. It used to be the first
+	 * statement in this function, so a call that went on to fail -- the
+	 * I2S_DIR_BOTH -ENOSYS above, the default -EINVAL, or the invalid-state
+	 * -EINVAL just above -- still repointed the ONLY field i2s_dw_isr()
+	 * consults to decide which handler to run, permanently, on a call that
+	 * changed nothing else. I2S_DIR_BOTH is the worst of the three: it
+	 * leaves dir matching NEITHER ISR branch, so from then on every I2S
+	 * interrupt is unserviced (see i2s_dw_isr()'s own #2179 comment). A
+	 * failed configure() now leaves the gate pointing at whatever direction
+	 * was last configured successfully. */
+	dev_data->dir = dir;
 
 	/* alp-sdk issue #2149 (round 2): a rate change invalidates TX's
 	 * one-shot restart-skip flag -- the divider a restart would skip
@@ -801,24 +833,35 @@ static void i2s_dw_isr(const struct device *dev)
 	const struct i2s_dw_cfg *i2s = dev->config;
 	struct i2s_dw_data *const dev_data = dev->data;
 	uint32_t int_status = 0;
+	/* alp-sdk issue #2179: ISR and IMR share a bit layout (RXDA/RXDAM 0,
+	 * RXFO/RXFOM 1, TXFE/TXFEM 4, TXFO/TXFOM 5 -- see i2s_dw.h), and IMR
+	 * is mask-to-DISABLE, so `ISR & ~IMR` is exactly the set of sources
+	 * asserted AND unmasked, i.e. the sources actually holding this IRQ
+	 * line up. Each branch below clears the bit(s) it services; whatever
+	 * is left at the bottom was not serviced and gets masked there. */
+	uint32_t unserviced;
 
 	/* Get the Current Interrupt Status*/
 	int_status = i2s->paddr->ISR;
+	unserviced = int_status & ~i2s_get_interrupt_mask(i2s);
 
 	if ((dev_data->dir == I2S_DIR_TX) &&
 	    (_FLD2VAL(I2S_ISR_TXFE, int_status))) {
 		/* Handle Tx Interrupt */
 		i2s_tx_irq_handler(dev);
+		unserviced &= ~I2S_ISR_TXFE_Msk;
 	}
 	if ((dev_data->dir == I2S_DIR_RX) &&
 	    (_FLD2VAL(I2S_ISR_RXDA, int_status))) {
 		/* Handle Rx Interrupt */
 		i2s_rx_irq_handler(dev);
+		unserviced &= ~I2S_ISR_RXDA_Msk;
 	}
 
 	/* This should not happen */
 	if (_FLD2VAL(I2S_ISR_TXFO, int_status)) {
 		i2s_clear_tx_overrun(i2s);
+		unserviced &= ~I2S_ISR_TXFO_Msk;
 	}
 
 	if (_FLD2VAL(I2S_ISR_RXFO, int_status)) {
@@ -828,8 +871,47 @@ static void i2s_dw_isr(const struct device *dev)
 		/* Disable the Rx Overflow interrupt for now. This will */
 		/* be enabled again when Receive function is called */
 		i2s_disable_rx_fo_interrupt(i2s);
+		unserviced &= ~I2S_ISR_RXFO_Msk;
 	}
 
+	/* alp-sdk issue #2179: both data branches above are gated on
+	 * dev_data->dir, which this half-duplex driver keeps as a SINGLE field
+	 * (I2S_DIR_BOTH is -ENOSYS). A source that is asserted and unmasked but
+	 * whose branch the dir gate skipped -- TXFE while dir == I2S_DIR_RX is
+	 * the reachable case, since TXFE is asserted by an EMPTY TX FIFO, which
+	 * is its resting state, and neither i2s_enable_rx_interrupt() nor the
+	 * TX-channel disable in rx_stream_start() used to touch TXFEM -- would
+	 * otherwise make this function read ISR, match no branch, change
+	 * NOTHING, and return. These sources are level-held, so the NVIC
+	 * tail-chains straight back in and the core spins here with no fault
+	 * taken. Masking the unserviced source is the one action that is
+	 * guaranteed to change the interrupt condition, so this function can no
+	 * longer return without having done so. Note that adding a clear inside
+	 * i2s_tx_irq_handler()/i2s_rx_irq_handler() would NOT close this: on
+	 * this path the handler is never called at all.
+	 *
+	 * The mask is not lost: i2s_enable_tx_interrupt()/
+	 * i2s_enable_rx_interrupt() unmask again on the next
+	 * tx_stream_start()/rx_stream_start() for that direction, so a
+	 * direction that is later started normally is unaffected. A source that
+	 * IS serviced above is never masked here (its bit was cleared from
+	 * `unserviced`), so both working single-direction paths behave exactly
+	 * as before.
+	 *
+	 * DIAGNOSIS NOT CONFIRMED ON SILICON. The i2s3 RX-start spin reported in
+	 * issue #2179 was measured 6/6 on e1m-aen-evk-03 (live core in
+	 * i2s_dw_isr()/_isr_wrapper, CycleCnt advancing, CFSR = 0x00000000,
+	 * thread mode starved), but the follow-up bench campaign passed 8/8 and
+	 * never reproduced it, so no ISR/IMR capture exists to prove this was
+	 * its cause. This guard is defensive hardening that is correct
+	 * regardless: an unserviceable level-held source must not be left
+	 * asserted and unmasked. */
+	if (unserviced & I2S_ISR_TXFE_Msk) {
+		i2s_disable_tx_interrupt(i2s);
+	}
+	if (unserviced & I2S_ISR_RXDA_Msk) {
+		i2s_disable_rx_interrupt(i2s);
+	}
 }
 
 static int i2s_dw_initialize(const struct device *dev)
@@ -873,18 +955,54 @@ static int i2s_dw_initialize(const struct device *dev)
 		return ret;
 	}
 
-	/* Enable and configure the I2S controller */
-	i2s_enable_controller(dev);
+	/* alp-sdk issue #2179: quiesce the block and mask every interrupt
+	 * BEFORE arming the NVIC, not after. This block is NOT in the
+	 * SYSRESETREQ reset domain -- measured on e1m-aen-evk-03: CER and TER
+	 * both survived a J-Link `loadbin`'s implicit SYSRESETREQ at
+	 * 0x00000001, and only a RESETPIN reset cleared them to 0x00000000 --
+	 * so IER/IMR/IRER/ITER/RER/TER all carry over from whatever the
+	 * PREVIOUS image left behind. The old order called irq_config()
+	 * (IRQ_CONNECT + irq_enable) with those registers still holding the
+	 * previous image's state, and only masked two lines later; a latched,
+	 * unmasked source therefore had a window in which it could be delivered
+	 * to an ISR whose dev_data->dir is fresh BSS 0 (== I2S_DIR_RX) and
+	 * whose streams are not configured at all. Quiescing first closes the
+	 * window instead of racing it.
+	 *
+	 * CER is deliberately NOT cleared here: i2s_enable_controller() below
+	 * sets CER.CLKEN, and "CER.CLKEN reads 1 from i2s_dw_initialize()
+	 * onward" is the invariant tx_clock_is_live() and #2149's restart-skip
+	 * flag are both built on. It just happens a few instructions later now.
+	 *
+	 * The k_sem_init() calls also move above irq_config() for the same
+	 * reason: i2s_rx_irq_handler()/i2s_tx_irq_handler() both k_sem_give()
+	 * these semaphores.
+	 *
+	 * Inferred, not confirmed on silicon: the 0-byte-console boot in issue
+	 * #2179 (CycleCnt advancing, CFSR = 0x00000000, PC in i2s_dw_isr(),
+	 * ram_console_buf all zeros) is consistent with a storm resuming inside
+	 * this function before the old masking lines ran, but the follow-up
+	 * bench campaign never reproduced it and no capture exists. The
+	 * ordering is worth fixing on its own terms regardless. */
+	i2s_global_disable(i2s);
+	i2s_rx_block_disable(i2s);
+	i2s_tx_block_disable(i2s);
+	i2s_rx_channel_disable(i2s);
+	i2s_tx_channel_disable(i2s);
 
-	i2s->irq_config(dev);
+	/* Mask all the interrupts */
+	i2s_disable_tx_interrupt(i2s);
+	i2s_disable_rx_interrupt(i2s);
 
 	k_sem_init(&dev_data->rx.sem, 0, CONFIG_I2S_DW_RX_BLOCK_COUNT);
 	k_sem_init(&dev_data->tx.sem, CONFIG_I2S_DW_TX_BLOCK_COUNT,
 		   CONFIG_I2S_DW_TX_BLOCK_COUNT);
 
-	/* Mask all the interrupts */
-	i2s_disable_tx_interrupt(i2s);
-	i2s_disable_rx_interrupt(i2s);
+	i2s->irq_config(dev);
+
+	/* Enable and configure the I2S controller */
+	i2s_enable_controller(dev);
+
 	LOG_INF("%s inited", dev->name);
 
 	return 0;
@@ -1013,6 +1131,22 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	i2s_clock_enable(i2s);
 	/* Disable Tx Channel */
 	i2s_tx_channel_disable(i2s);
+	/* alp-sdk issue #2179: mask TX's interrupts alongside the TX channel
+	 * disable directly above. Disabling the channel does not deassert TXFE
+	 * -- TXFE is asserted by an EMPTY TX FIFO, which is a disabled
+	 * channel's resting state -- and i2s_enable_rx_interrupt() below clears
+	 * only RXDAM|RXFOM, so TXFEM left unmasked by an earlier TX phase
+	 * survived into this RX stream. That is the reachable precondition for
+	 * the unserviceable-source spin i2s_dw_isr() now also guards against
+	 * (see its own #2179 comment); this is the same defect closed at the
+	 * source, so the ISR guard is a backstop rather than the only line of
+	 * defence. No behaviour change for a TX stream that is still meant to
+	 * run: this driver's single dev_data->dir has already been repointed to
+	 * I2S_DIR_RX by the i2s_dw_configure(I2S_DIR_RX) that precedes any RX
+	 * start, so i2s_tx_irq_handler() could not have been reached from here
+	 * on regardless (see the two known full-duplex gaps in this file's
+	 * header). */
+	i2s_disable_tx_interrupt(i2s);
 
 	/* Clear Overrun interrupt if any */
 	i2s_clear_rx_overrun(i2s);
@@ -1097,6 +1231,14 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 
 	/* Disable Rx Channel */
 	i2s_rx_channel_disable(i2s);
+	/* alp-sdk issue #2179: mask RX's interrupts alongside the RX channel
+	 * disable directly above, mirroring rx_stream_start(). RXDAM left
+	 * unmasked by an earlier RX phase is the quieter half of the same
+	 * defect -- RXDA needs data to arrive, and a disabled RX channel
+	 * delivers none, so it does not storm the way a stale TXFEM does -- but
+	 * leaving a source unmasked that this direction's ISR gate will never
+	 * service is the shape of the bug, not the specific bit. */
+	i2s_disable_rx_interrupt(i2s);
 
 	/* Clear Overrun interrupt if any */
 	i2s_clear_tx_overrun(i2s);
