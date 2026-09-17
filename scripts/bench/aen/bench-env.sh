@@ -1211,7 +1211,33 @@ bench_atoc_replace_guard() {
 			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
 			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
 			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
-			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			# The remedy depends on which flow got here, and naming the wrong
+			# one is its own defect (alp-sdk#2187). On Flow A, $SE_UART IS the
+			# transport: a failed query means confirm by hand and override.
+			# On Flow D the query is opportunistic -- the flow never needs a
+			# serial device -- so a set-but-unanswering $SE_UART is almost
+			# always a stale value, and --replace-atoc is exactly the wrong
+			# advice: it is the "I checked and still want to replace" opt-out,
+			# and no check ran here. Steering an operator onto it builds the
+			# habit flash-jlink.sh's own header says must never form.
+			if [ "${BENCH_ATOC_FLOW:-A}" = D ]; then
+				echo "   SE_UART is exported (${SE_UART:-<unset>}), so this took the query path -- but" >&2
+				echo "   the query did not complete (the transcript above says which step failed;" >&2
+				echo "   a missing SETOOLS 'maintenance' binary reaches this same abort), and Flow D" >&2
+				echo "   does not need an SE-UART at all. The usual cause is a stale or wrong value" >&2
+				echo "   rather than a board problem: raw /dev/ttyUSBn paths are enumeration-ordered," >&2
+				echo "   and this bench has had its AEN SE-UART/app-console paths measured SWAPPED in" >&2
+				echo "   a stale table (#2032/#2064)." >&2
+				echo "   Two ways forward:" >&2
+				echo "     1. point SE_UART at this slot's real SE-UART -- prefer LG_PLACE, which" >&2
+				echo "        resolves it per-slot instead of by a raw path -- then re-run." >&2
+				echo "     2. 'unset SE_UART' and re-run with --atoc-unqueryable, if this bench" >&2
+				echo "        slot genuinely has no SE-UART wired." >&2
+				echo "   NOT --replace-atoc: that flag asserts you checked what is resident, and" >&2
+				echo "   on this path nothing was ever read." >&2
+			else
+				echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			fi
 			return 5
 		fi
 		if [ "${#extra[@]}" -gt 0 ]; then
@@ -1248,10 +1274,21 @@ bench_atoc_replace_guard() {
 #                          status) still apply: an exported-but-broken
 #                          $SE_UART lands in bench_atoc_replace_guard's own
 #                          "unverified" path exactly as it would for Flow A,
-#                          and needs --replace-atoc to override, same as
-#                          Flow A. --atoc-unqueryable is IGNORED in this
-#                          branch -- it is an acknowledgement that no check
-#                          ran, and one just did.
+#                          and still refuses to write (exit 5).
+#                          --atoc-unqueryable is IGNORED in this branch --
+#                          it is an acknowledgement that no check ran, and
+#                          one just did.
+#                          What that refusal TELLS the operator differs by
+#                          flow (alp-sdk#2187): Flow A is sent to
+#                          --replace-atoc, because $SE_UART is its transport
+#                          and a human confirming by hand is the only way
+#                          past. Flow D is sent to fix-or-unset $SE_UART
+#                          instead, because Flow D never needed the serial
+#                          device and a stale value is the likely cause --
+#                          naming --replace-atoc there would teach the
+#                          checked-and-override flag as the cure for a check
+#                          that never ran. Selected by $BENCH_ATOC_FLOW,
+#                          which this function sets to D for the call.
 #   $SE_UART unset      -> unchanged from #2029: --atoc-unqueryable is
 #                          required (abort, exit 8, if it is missing), and
 #                          either way this prints a one-line statement that
@@ -1266,6 +1303,16 @@ bench_flowd_atoc_guard() {
 	shift 3
 	if [ -n "${SE_UART:-}" ]; then
 		echo "GUARD ($tag): SE_UART is exported -- querying the resident ATOC before writing (alp-sdk#2027)." >&2
+		# Tell the shared guard which flow it is speaking for, so its
+		# "could not read the resident ATOC" abort names remedies that
+		# apply here -- fix or unset $SE_UART -- instead of Flow A's
+		# --replace-atoc, which asserts a check that did not run
+		# (alp-sdk#2187). `local` scopes it to this call and restores
+		# whatever an outer frame had, so it cannot leak into a later
+		# Flow A guard in the same shell. It changes NO control flow:
+		# the refusal, its exit status and every other branch are
+		# untouched -- this selects message text only.
+		local BENCH_ATOC_FLOW=D
 		bench_atoc_replace_guard "$replace_atoc" "$tag" "$@"
 		return $?
 	fi
