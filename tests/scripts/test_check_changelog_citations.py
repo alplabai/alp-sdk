@@ -652,3 +652,92 @@ def test_no_fragments_and_no_changelog_still_early_returns(
     out = capsys.readouterr().out
     assert "nothing to check" in out
     assert "OK --" not in out, "the early return is a non-verdict, not a pass"
+
+
+# ---------------------------------------------------------------------------
+# Double-delimited anchors: `` (`"text"`) `` / `` ("`text`") `` (alp-sdk#2184)
+#
+# `_ANCHOR`'s opening class consumes ONE delimiter, then the capture group
+# refuses the very next character because it is the OTHER delimiter -- so the
+# match fails outright and the citation used to fall through to "no anchor",
+# silently downgrading it from anchored-and-verified to range-checked-only
+# while the gate stayed green. These pin the fix: BOTH nesting orders are now
+# a hard ERROR (never a silent pass, never a silent SKIP), a plain single
+# delimiter is completely unaffected, and `_fix_one` reports the same case as
+# a problem for a human rather than folding it into its "nothing to verify
+# against" unanchored count.
+# ---------------------------------------------------------------------------
+
+
+def test_double_delimited_anchor_backtick_then_quote_is_a_hard_error(tmp_path):
+    """`` (`"text"`) `` -- backtick outer, quote inner. Must be a hard ERROR,
+    not silently downgraded to an unanchored (range-checked-only) citation."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`"GOOD ANCHOR"`)\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text())
+    assert skips == []
+    assert checked == 1, "the citation itself still resolves and is counted"
+    assert anchored == 0, "the malformed anchor must NOT count as anchored"
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'`'" in errors[0] and "'\"'" in errors[0]
+
+
+def test_double_delimited_anchor_quote_then_backtick_is_a_hard_error(tmp_path):
+    """`` ("`text`") `` -- the other nesting order. Same verdict either way."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` ("`GOOD ANCHOR`")\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text())
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'\"'" in errors[0] and "'`'" in errors[0]
+
+
+def test_single_delimiter_anchors_still_parse_exactly_as_before(tmp_path):
+    """Regression guard: a plain backtick-only or quote-only anchor -- the
+    two forms `_ANCHOR` was always meant to accept -- must be completely
+    unaffected by the malformed-anchor detection."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text())
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+    quoted_root = tmp_path / "quoted"
+    quoted_root.mkdir()
+    mod2, frag2 = _tree(quoted_root, _source(5, "GOOD ANCHOR"),
+                         'see `src/a.c:5` ("GOOD ANCHOR")\n')
+    errors2, skips2, checked2, anchored2 = mod2._check_one(
+        frag2, frag2.read_text())
+    assert errors2 == [] and skips2 == []
+    assert checked2 == 1 and anchored2 == 1
+
+
+def test_fix_reports_a_malformed_anchor_as_a_problem_not_unanchored(tmp_path):
+    """`_fix_one` must not treat this as "nothing to verify against" -- there
+    IS anchor text here, `_ANCHOR` just can't parse past the doubled
+    delimiter, and guessing which one to drop is exactly the kind of guess
+    this fixer refuses to make. Reported as a problem for a human, same
+    severity as an anchor found nowhere in the file, never silently folded
+    into the unanchored count alongside citations that never had an anchor
+    at all."""
+    fragment = 'see `src/a.c:5` (`"GOOD ANCHOR"`)\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment, "not rewritten -- the fixer does not guess here"
+    assert rewrites == []
+    assert unanchored == 0, "this is not the same case as no anchor at all"
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+def test_fix_reports_the_other_nesting_order_as_a_problem_too(tmp_path):
+    """The `("`text`")` order gets the identical treatment from `_fix_one`."""
+    fragment = 'see `src/a.c:5` ("`GOOD ANCHOR`")\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment
+    assert rewrites == [] and unanchored == 0
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
