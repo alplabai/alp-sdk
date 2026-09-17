@@ -424,6 +424,12 @@ config QDEC_ALIF
 	  silicon-validated.  ADR 0017 Tier-2 (INTERIM).
 	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
 
+# ALP-SDK DELTA (#2051), not upstream: indirection so the compat string's own
+# comma ("snps,dwc-sdhc") does not get split as a second dt_compat_any_has_prop
+# argument below -- := is the Kconfig preprocessor's literal-string assignment,
+# the same pattern subsys/pm/Kconfig's DT_POWER_STATE_COMPAT uses.
+SDHC_DWC_COMPAT := snps,dwc-sdhc
+
 config SDHC_DWC
 	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
@@ -431,6 +437,12 @@ config SDHC_DWC
 	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
 	select SDHC_SUPPORTS_NATIVE_MODE
 	select EVENTS
+	# ALP-SDK DELTA (#2051), not upstream: only a node with a `clocks`
+	# property (e.g. the Alif alif,clockctrl ALIF_SDC_CLK gate) needs the
+	# clock_control_on() call sdhc_dwc_init() makes -- a board where this
+	# gate is always-on, or has no such controller, omits `clocks` and
+	# does not need CLOCK_CONTROL pulled in at all.
+	select CLOCK_CONTROL if $(dt_compat_any_has_prop,$(SDHC_DWC_COMPAT),clocks)
 	help
 	  Synopsys DesignWare Core SD Host Controller driver (compatible
 	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork

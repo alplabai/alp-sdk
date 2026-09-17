@@ -40,8 +40,11 @@ EXAMPLE_BRIDGE_HELPERS = (
     REPO / "examples" / "aen" / "aen-cc3501e-gpio" / "src" / "cc3501e_bridge.h",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.c",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.h",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.c",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.h",
+    # ALP-SDK DELTA (#2051), not upstream: aen-sdcard-readout (renamed
+    # aen-sdhc-probe) no longer carries its own copy -- the app dropped the
+    # CC3501E bridge bring-up entirely once it stopped touching the SD mux
+    # at all (sdhc0 is disabled outright on the E1M-EVK 2626-R2 now, a
+    # hardware defect, not something a mux ENABLE write could route around).
 )
 
 
@@ -182,19 +185,22 @@ def test_example_bridge_helpers_stay_in_sync(suffix):
             assert path.read_text(encoding="utf-8") == reference, f"{path} drifted"
 
 
-# aen-evk-demo and aen-sdcard-readout are the standalone apps whose route
-# table is hand-written rather than emitted by
-# scripts/gen_cc3501e_gpio_routes.py: that generator discovers its targets by
-# looking for a board.yaml beside a proxy-enabling prj.conf, and both are
-# standalone Zephyr apps with no board.yaml, so both are correctly skipped.
-# Their tables are therefore pinned HERE instead -- against the same TSV the
-# generator resolves through -- so they cannot drift the way the triplicated
-# tables #1859 removed did. aen-sdcard-readout's table (#2035) declares the
-# SAME single entry as aen-evk-demo's (it drives the identical mux ENABLE),
-# so both are checked by the same two assertions below.
+# aen-evk-demo is a standalone app whose route table is hand-written rather
+# than emitted by scripts/gen_cc3501e_gpio_routes.py: that generator
+# discovers its targets by looking for a board.yaml beside a
+# proxy-enabling prj.conf, and this is a standalone Zephyr app with no
+# board.yaml, so it is correctly skipped. Its table is therefore pinned
+# HERE instead -- against the same TSV the generator resolves through --
+# so it cannot drift the way the triplicated tables #1859 removed did.
+#
+# ALP-SDK DELTA (#2051), not upstream: aen-sdcard-readout (renamed
+# aen-sdhc-probe) used to carry the SAME single entry here (#2035, it drove
+# the identical mux ENABLE) -- removed from this tuple along with its own
+# cc3501e_gpio_routes.c once that app dropped the CC3501E bridge bring-up
+# entirely (sdhc0 is disabled outright on the E1M-EVK 2626-R2, a hardware
+# defect no mux ENABLE write could route around).
 STANDALONE_APP_ROUTE_TABLES = (
     REPO / "examples" / "aen" / "aen-evk-demo" / "src" / "cc3501e_gpio_routes.c",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_gpio_routes.c",
 )
 
 

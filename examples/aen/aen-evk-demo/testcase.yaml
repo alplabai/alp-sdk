@@ -65,19 +65,14 @@ sample:
     transient single-bit corruption cannot pass as a plausible one,
     GET_CAPABILITIES, a
     passive Wi-Fi scan that never associates, and BLE_ENABLE, with a PING
-    alone explicitly not sufficient for PASS -- the microSD card behind
-    its 74LVC157 SDIO mux, which drives the mux ENABLE (E1M IO20 ->
-    CC3501E GPIO_26) over that same bridge via the portable alp_gpio_*
-    API, enumerates the card through the vendored snps,dwc-sdhc
-    controller, reports its geometry, and gates PASS on a REAL write ->
-    read -> verify round trip through one file the demo owns
-    (/ALPDEMO.TXT) -- never on disk_access_init returning 0 and never on
-    the geometry reading back; it never formats the card, never writes
-    outside that file and keeps mkfs out of the image entirely
-    (CONFIG_FS_FATFS_MOUNT_MKFS=n plus FS_MOUNT_FLAG_NO_FORMAT), and it
-    reports no card, no filesystem, a failed controller init, an
-    undrivable mux ENABLE and a verify mismatch as five DISTINCT reasons
-    -- RMII Ethernet through the
+    alone explicitly not sufficient for PASS -- the microSD card phase,
+    which always reports SKIPPED on this board revision (#2051): the
+    74LVC157 SDIO mux (U38/U39) has no high-impedance state, so its
+    SoC-facing outputs are held low whenever the mux is powered regardless
+    of its ENABLE input, and the SD host controller (snps,dwc-sdhc) stays
+    DISABLED in the devicetree rather than fight those pads -- a hardware
+    defect pending a component change, not a firmware gap -- RMII Ethernet
+    through the
     GMAC and the on-module TI DP83825 PHY, which powers the PHY from a
     SYS_INIT hook ahead of the driver's ref-clock probe, reads the real
     wire state over MDIO because a fixed-link PHY's carrier_ok is
