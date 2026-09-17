@@ -431,8 +431,9 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     every fragment into CHANGELOG.md's `[Unreleased]`, so that is a real
     tree, not a hypothetical one -- and the "no fragments -- nothing to
     check" early return fired BEFORE `--fix` did, making it a silent no-op
-    exactly there. The first half of this test pins the default path's early
-    return unchanged, because that path is the required CI context.
+    exactly there. The first half of this test pins the default path on the
+    same tree: since alp-sdk#2178 it GRADES the drifted `[Unreleased]`
+    citation instead of skipping it, and it still writes nothing.
     """
     mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
     frag.unlink()
@@ -441,7 +442,8 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     mod.CHANGELOG.write_text(drifted, encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 0, "the default path keeps its empty-dir early return"
+    assert mod.main() == 1, (
+        "alp-sdk#2178: an empty changelog.d/ no longer skips CHANGELOG.md")
     assert mod.CHANGELOG.read_text() == drifted, "and still writes nothing"
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
@@ -449,18 +451,130 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     assert '`src/a.c:7` ("RELEASE-CANDIDATE ANCHOR")' in (
         mod.CHANGELOG.read_text())
 
-    # The FALL-THROUGH is what carries the verdict, and only `main()`'s
-    # `and not args.fix` conjunct makes it happen on this tree. `--fix` on an
-    # empty changelog.d/ whose `[Unreleased]` citation it CANNOT repair -- a
-    # dead anchor, one of the cases the fixer refuses by design -- must still
-    # exit 1. Dropping that conjunct is a plausible tidy-up (`_run_fix` has
-    # already run three lines above), leaves every other test in this file
-    # green, and turns this into a silent 0: the fixer reporting success on a
-    # tree the gate would still fail, which is the one promise the module
-    # docstring makes about `--fix`'s exit code.
+    # The FALL-THROUGH is what carries the verdict. `--fix` on an empty
+    # changelog.d/ whose `[Unreleased]` citation it CANNOT repair -- a dead
+    # anchor, one of the cases the fixer refuses by design -- must exit 1: the
+    # one promise the module docstring makes about `--fix`'s exit code is that
+    # it is the gate's own verdict on the tree the fixer just wrote, and a
+    # fixer reporting success on a tree the gate would still fail is worse
+    # than no fixer.
     mod.CHANGELOG.write_text(
         "# Changelog\n\n## [Unreleased]\n\n"
         'cites `src/a.c:3` ("AN ANCHOR THAT IS NOWHERE IN THE FILE")\n',
         encoding="utf-8")
     assert mod.main() == 1, (
         "--fix must fall through to the checker and return ITS verdict")
+
+    # And the DEFAULT path answers 1 on that SAME tree. This is the asymmetry
+    # alp-sdk#2178 closed: it used to answer 0 without the flag and 1 with it,
+    # so which verdict a release-cut tree got depended on how you asked.
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 1, (
+        "default and --fix must agree on a tree neither can repair")
+
+
+# ---------------------------------------------------------------------------
+# The release-cut tree: `changelog.d/` empty, its citations now living in
+# CHANGELOG.md's `[Unreleased]` (alp-sdk#2178)
+#
+# `assemble_changelog.py:228` (`path.unlink()`) empties the fragment directory
+# at fold time, so an empty `changelog.d/` is not a quiet tree -- it is the
+# release PR, carrying several hundred citations that have never been checked
+# in the location they now occupy. The gate used to return 0 there WITHOUT
+# looking at CHANGELOG.md at all. These pin that it looks, and that looking
+# did not flatten the [Unreleased]-vs-released split.
+# ---------------------------------------------------------------------------
+
+
+def test_empty_changelog_d_still_grades_a_broken_unreleased_citation(
+        tmp_path, monkeypatch, capsys):
+    """THE defect: empty fragment dir + a drifted anchored `[Unreleased]`
+    citation exited 0 and never named the citation."""
+    mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\n"
+        'cites `src/a.c:3` ("RELEASE-CANDIDATE ANCHOR")\n', encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 1, "an empty changelog.d/ is not a pass"
+    err = capsys.readouterr().err
+    assert "src/a.c:3" in err, "the broken citation must be NAMED, not counted"
+    assert "RELEASE-CANDIDATE ANCHOR" in err
+
+
+def test_empty_changelog_d_passes_a_clean_unreleased_section(
+        tmp_path, monkeypatch, capsys):
+    """The other half of the same behaviour: grading `[Unreleased]` must not
+    manufacture a failure on a tree whose citations all resolve.
+
+    The exit code alone does NOT discriminate here -- 0 was also what the old
+    early return said -- so this asserts the gate actually LOOKED: the verdict
+    names the citation it checked, instead of the "nothing to check"
+    non-verdict that 0 used to mean on this tree."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\n"
+        'cites `src/a.c:5` ("GOOD ANCHOR")\n', encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "OK -- 1 citation(s) resolved" in out, out
+    assert "1 anchored and text-verified" in out, out
+    assert "nothing to check" not in out
+
+
+def test_empty_changelog_d_keeps_released_history_a_warning(
+        tmp_path, monkeypatch, capsys):
+    """Reaching CHANGELOG.md on an empty fragment dir must NOT collapse the
+    split. A released section describes a tree that no longer exists -- some of
+    its citations are unfixable by construction and "fixing" them would falsify
+    what shipped -- so it stays visible and non-blocking."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), "x\n")
+    frag.unlink()
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\nnothing in flight\n\n"
+        "## [v0.16.0] - 2026-08-01\n\n"
+        "the old note cited `src/gone.c:154`\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0, "released history never blocks"
+    out = capsys.readouterr().out
+    assert "WARN (released history, not blocking)" in out
+    assert "src/gone.c:154" in out, "and is never silently swallowed"
+
+
+def test_no_fragments_and_no_changelog_still_early_returns(
+        tmp_path, monkeypatch, capsys):
+    """The early return is not deleted, only narrowed to the genuinely-nothing
+    case. Without it the gate would print an `OK -- 0 citation(s)` verdict on a
+    tree that holds nothing to cite from."""
+    mod, frag = _tree(tmp_path, _source(7, "ANCHOR"), "x\n")
+    frag.unlink()
+    assert not mod.CHANGELOG.exists(), "_tree writes no CHANGELOG.md"
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0
+    out = capsys.readouterr().out
+    assert "nothing to check" in out
+    assert "OK --" not in out, "the early return is a non-verdict, not a pass"
+
+
+def test_a_populated_changelog_d_is_graded_exactly_as_before(
+        tmp_path, monkeypatch, capsys):
+    """MUTATION-PROVE the widened condition did not disturb the path the gate
+    actually runs on 364 days a year: with fragments present the early return
+    must not fire, and the verdict comes from their contents."""
+    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR"),
+                      'see `src/a.c:3` ("DRIFTED ANCHOR")\n')
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 1, "a drifted fragment citation is still an error"
+    assert "nothing to check" not in capsys.readouterr().out
+
+    frag.write_text('see `src/a.c:7` ("DRIFTED ANCHOR")\n', encoding="utf-8")
+    assert mod.main() == 0, "and a resolving one still passes"

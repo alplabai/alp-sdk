@@ -172,6 +172,10 @@ _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 #: Grading released history as errors would make this gate unlandable without
 #: rewriting shipped release notes to suit today's tree, which is the opposite of
 #: what a changelog is for.
+#:
+#: This half runs whether or not `changelog.d/` holds fragments.  It used to be
+#: skipped entirely on an empty fragment directory (alp-sdk#2178), which is
+#: precisely the release-cut tree -- see `main()`.
 CHANGELOG = REPO / "CHANGELOG.md"
 
 
@@ -489,30 +493,36 @@ def main() -> int:
 
     fragments = _iter_fragments()
 
-    # Rewrite first, then fall through to the unchanged check below, so the
-    # exit code is always this gate's own verdict on the tree --fix just
-    # wrote. Without the flag the exit code and stdout are bit-for-bit what
-    # they always were -- the checker is a required CI context and owns the
-    # default. NOT "nothing changes", though: the same commit adds the --fix
-    # epilogue to the failure message at the bottom of this function, which is
-    # new STDERR on the no-flag failure path. Stated rather than rounded off,
-    # because a comment overstating its guarantee is how the next person comes
-    # to rely on one that was never there.
+    # Rewrite first, then fall through to the check below, so the exit code is
+    # always this gate's own verdict on the tree --fix just wrote.
     #
-    # This sits ABOVE the empty-directory early return deliberately.
+    # This sits ABOVE the early return deliberately.
     # `assemble_changelog.py` empties `changelog.d/` at release time by
     # folding every fragment into CHANGELOG.md's `[Unreleased]` -- the tree
     # where the citations most want re-deriving, and the one where returning
     # early made `--fix` a silent no-op against the promise in its own
-    # `--help`. The `and not args.fix` below is what keeps the default path
-    # exactly what it was: with no flag that condition is the same
-    # `if not fragments` it has always been.
+    # `--help`.
     if args.fix:
         _run_fix(fragments)
 
-    if not fragments and not args.fix:
-        print("check-changelog-citations: no changelog.d/ fragments -- nothing "
-              "to check. This is not a pass; it means the directory is empty.")
+    # "Nothing to check" means no fragments AND no CHANGELOG.md -- NOT merely
+    # an empty `changelog.d/` (alp-sdk#2178).
+    #
+    # An empty fragment directory is not a quiet tree, it is the RELEASE CUT:
+    # `assemble_changelog.py:228` (`path.unlink()`) has just folded several
+    # hundred citations into `[Unreleased]`, which this gate grades exactly
+    # like a fragment. Returning 0 there announced itself as a non-verdict on
+    # stdout and was then read as a pass by every caller -- on the one tree
+    # whose citations had never once been checked in the location they now
+    # live in. Worse, the old condition carried `and not args.fix`, so the
+    # same tree yielded two different verdicts: default 0, `--fix` 1.
+    #
+    # The CHANGELOG.md half below now runs either way, and keeps its split --
+    # `[Unreleased]` is ERRORS, released history is WARNINGS only.
+    if not fragments and not CHANGELOG.is_file():
+        print("check-changelog-citations: no changelog.d/ fragments and no "
+              "CHANGELOG.md -- nothing to check. This is not a pass; it means "
+              "this tree holds nothing that could carry a citation.")
         return 0
 
     all_errors: list[str] = []
