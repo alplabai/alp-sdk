@@ -25,15 +25,19 @@ tests:
       type: one_line
       regex:
         - "\\[ota\\] done"
-    # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
-    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
-    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
-    # native_sim.conf for the full rationale.
-    extra_args:
-      - "EXTRA_CONF_FILE=native_sim.conf"
+    # No native_sim.conf any more: it existed only to turn mbedtls off
+    # around the ssl_misc.h break, which is fixed at its root (#2173), so
+    # this scenario now builds the same TLS-enabled config the SoM does.
+  # Issue #2173: this scenario named `ensemble_e8_dk/...` -- Alif's own
+  # DevKit board, which no -p flag in this repo selects -- so it was never
+  # built by any job, and the app had in fact stopped compiling for AEN
+  # entirely (the mbedtls PSA floor, fixed in zephyr/Kconfig.alp-libraries).
+  # It now names the board target this app's own board.yaml describes
+  # (som.sku E1M-AEN801, preset e1m-evk, core m55_hp), which
+  # pr-twister-aen.yml does run.
   alp_sdk.examples.iot_fleet_ota.aen:
     platform_allow:
-      - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

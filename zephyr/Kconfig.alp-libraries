@@ -336,6 +336,50 @@ config ALP_LITTLEFS_SYNC_IO
 endmenu  # "Alp SDK per-library HW-accelerator wiring"
 
 # ----------------------------------------------------------------------
+# mbedTLS PSA-crypto floor (issue #2173)
+# ----------------------------------------------------------------------
+# `libraries: [mbedtls]` emits CONFIG_MBEDTLS=y + CONFIG_MBEDTLS_BUILTIN=y
+# (metadata/libraries/mbedtls.yaml's integration.zephyr.kconfig) and nothing
+# else, which builds the SSL sources with PSA crypto OFF.  That does not
+# compile: the pinned mbedtls' own internal header uses a PSA type
+# unconditionally --
+#
+#     modules/crypto/mbedtls/library/ssl_misc.h:24
+#       extern const mbedtls_error_pair_t psa_to_ssl_errors[7];
+#
+# -- while `mbedtls_error_pair_t` is declared inside
+# `#if defined(MBEDTLS_PSA_CRYPTO_CLIENT)` in tf-psa-crypto's
+# psa_util_internal.h, so every TU that pulls in ssl_misc.h fails with
+# `unknown type name 'mbedtls_error_pair_t'`.  Upstream mbedtls has no
+# non-PSA TLS path left to fall back to, so PSA crypto is a floor for any
+# build that compiles TLS, not a tuning knob.
+#
+# MBEDTLS_PSA_CRYPTO_CLIENT (the symbol the header actually tests) is not
+# directly assignable: it is a non-prompt bool that defaults y on
+# `BUILD_WITH_TFM || MBEDTLS_PSA_CRYPTO_C`
+# ($ZEPHYR_BASE/modules/mbedtls/Kconfig.tf-psa-crypto).  So a TF-M build
+# already has it and must NOT select MBEDTLS_PSA_CRYPTO_C (which itself
+# `depends on !BUILD_WITH_TFM` -- TF-M owns the crypto partition); every
+# other build has to turn PSA crypto on itself.  Hence the condition on the
+# default rather than an unconditional select.
+config ALP_SDK_MBEDTLS_PSA_CRYPTO
+	bool
+	depends on MBEDTLS
+	default y if !BUILD_WITH_TFM
+	select MBEDTLS_PSA_CRYPTO_C
+	help
+	  Turn on mbedTLS' PSA crypto core whenever this SDK builds mbedTLS
+	  without TF-M.  Not a user knob: without it the pinned mbedtls does
+	  not compile its SSL sources at all (issue #2173).
+
+	  Note that MBEDTLS_PSA_CRYPTO_C selects CSPRNG_NEEDED, and no Alif
+	  Ensemble entropy driver exists in this tree or upstream -- Zephyr's
+	  random subsystem therefore falls back to the non-cryptographic
+	  TEST_RANDOM_GENERATOR on AEN targets.  That is enough to link and
+	  run, and is NOT enough for production TLS key material; wiring the
+	  SE TRNG through a real entropy driver is open silicon work.
+
+# ----------------------------------------------------------------------
 # .alpmodel package reader (<alp/model.h>)
 # ----------------------------------------------------------------------
 
