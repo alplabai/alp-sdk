@@ -168,7 +168,7 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 
 #: The anchor open, wrapped in a SECOND delimiter -- `` (`"text"`) `` or
 #: `` ("`text`") ``. Deliberately NOT anchored on a matching close (a
-#: symmetric `` `"..."` ``): the two live instances found on dev
+#: symmetric `` `"..."` ``): two of the four live instances found on dev
 #: (alp-sdk#2184) are not that tidy -- `` (`"i2s": 10`) `` closes on a bare
 #: backtick and `` ("`MOVED`, not `REMOVED` ... the")) `` closes on a bare
 #: quote, because the anchor text itself contains further backticks/quotes.
@@ -179,7 +179,19 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 #: how the anchor text is shaped further in. Detecting exactly that clash,
 #: instead of demanding a symmetric close, is what catches the real
 #: instances rather than only the textbook ones.
-_MALFORMED_ANCHOR = re.compile(r"""^\s*\(\s*(?P<outer>["“`])(?P<inner>["“`])""")
+#:
+#: `inner` mirrors `_ANCHOR`'s CAPTURE-refusal class, `["”`]` (RIGHT double
+#: quote `”`, not left `“`) -- not its opening-delimiter class. `_ANCHOR`'s
+#: own open (`["“`]`) happily accepts `“` as a first character and folds it
+#: into the captured text (its capture class only excludes `"`, `”`, and
+#: `` ` ``), so `` (`“text”`) `` and `` ("“text”") `` parse as ordinary,
+#: valid anchors -- flagging them here would be a false positive. Conversely
+#: `` (`”text`) `` and `` ("”text") `` are real misfires: `”` right after the
+#: open is exactly what `_ANCHOR`'s capture class refuses, so `_ANCHOR` fails
+#: on them the same way it fails on the backtick/straight-quote clashes above
+#: -- an `inner` class keyed on `“` instead of `”` misses that case entirely
+#: (alp-sdk#2184 review).
+_MALFORMED_ANCHOR = re.compile(r"""^\s*\(\s*(?P<outer>["“`])(?P<inner>["”`])""")
 
 #: Top-level directories that belong to a different repository, in full --
 #: not a hand-picked list of subpaths within them. alp-sdk has no `python/`,
@@ -335,7 +347,12 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
                 f"{malformed.group('inner')!r}), so `_ANCHOR` cannot capture "
                 f"any text and this citation would silently degrade to "
                 f"range-checked only. Use a single delimiter -- backtick or "
-                f"quote, not both."
+                f"quote, not both -- or, if the anchor text itself contains a "
+                f"delimiter, shorten the anchor to a delimiter-free span of at "
+                f"least 4 characters. If this parenthetical is prose "
+                f"commentary rather than an anchor at all, drop one of the "
+                f"two delimiters (the backtick or the quote) so it doesn't "
+                f"open with both."
             )
             continue
 
@@ -423,7 +440,11 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
                 f"{where} -- malformed anchor: opens with two delimiter "
                 f"characters back to back ({malformed.group('outer')!r} then "
                 f"{malformed.group('inner')!r}); rewrite it with a single "
-                f"delimiter, then re-run --fix"
+                f"delimiter -- or, if the anchor text itself contains a "
+                f"delimiter, shorten it to a delimiter-free span of at least "
+                f"4 characters; if this parenthetical is prose rather than "
+                f"an anchor, drop one of the two delimiters so it doesn't "
+                f"open with both -- then re-run --fix"
             )
             continue
 

@@ -741,3 +741,60 @@ def test_fix_reports_the_other_nesting_order_as_a_problem_too(tmp_path):
     assert new == fragment
     assert rewrites == [] and unanchored == 0
     assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2184 review: `_MALFORMED_ANCHOR`'s `inner` class was `["“`]` (LEFT
+# curly quote), a typo for `["”`]` (RIGHT curly quote, what `_ANCHOR`'s
+# capture actually refuses). That single character was wrong in both
+# directions: a smart-quoted anchor `_ANCHOR` parses just fine was flagged as
+# malformed (false positive), and a smart-quoted anchor `_ANCHOR` genuinely
+# cannot parse was NOT flagged (false negative, the open half of #2184 left
+# unfixed). These four cover every combination of {backtick, quote} outer x
+# {`_ANCHOR` accepts, `_ANCHOR` refuses} first-captured-character.
+# ---------------------------------------------------------------------------
+
+
+def test_smart_quote_anchor_backtick_open_parses_normally(tmp_path):
+    """`` (`“text”`) `` -- `_ANCHOR`'s open class accepts the LEFT curly
+    quote as an ordinary first character of the captured text (its capture
+    class excludes only `"`, `”`, and backtick). Must NOT be flagged
+    malformed."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` (`“GOOD ANCHOR”`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text())
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_quote_open_parses_normally(tmp_path):
+    """`` ("“text”") `` -- same as above with a straight-quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` ("“GOOD ANCHOR”")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text())
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_backtick_then_right_curly_is_a_hard_error(tmp_path):
+    """`` (`”text`) `` -- the RIGHT curly quote right after the backtick is
+    exactly the character `_ANCHOR`'s capture class refuses, so `_ANCHOR`
+    genuinely fails here. Must be caught, not silently downgraded."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` (`”GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text())
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+
+
+def test_smart_quote_anchor_quote_then_right_curly_is_a_hard_error(tmp_path):
+    """`` ("”text") `` -- same clash, quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` ("”GOOD ANCHOR")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text())
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
