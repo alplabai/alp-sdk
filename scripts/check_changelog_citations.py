@@ -38,11 +38,16 @@ DOES NOT CATCH:
     `crates/`, or `contract/` directory of its own, so the whole subtree is
     unresolvable here regardless of which subpath is cited. Those are
     reported as SKIPPED with a reason, never as a silent pass.
-  * a `changelog.d/**` citation made FROM CHANGELOG.md itself. Folding a
-    fragment into CHANGELOG.md deletes it (`assemble_changelog.py:228`), so
-    any such citation is unresolvable the instant it lands there -- SKIPPED
-    with a reason, same as a foreign-repo citation. A `changelog.d/**`
-    citation made FROM A FRAGMENT is unaffected and still graded normally.
+  * a `changelog.d/**` citation made FROM CHANGELOG.md itself, when the cited
+    fragment is genuinely gone. Folding a fragment into CHANGELOG.md deletes
+    it (`assemble_changelog.py:228`), so a citation surviving that fold with
+    no file left to check it against is unresolvable by construction --
+    SKIPPED with a reason, same as a foreign-repo citation. A
+    `changelog.d/**` citation from CHANGELOG.md whose cited fragment IS STILL
+    PRESENT -- a hand-edited `[Unreleased]` entry citing a fragment that has
+    not been folded yet -- is graded normally, same as any other citation. A
+    `changelog.d/**` citation made FROM A FRAGMENT is unaffected either way
+    and still graded normally.
 
 ANCHORS -- how to make a citation checkable
 -------------------------------------------
@@ -157,19 +162,30 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 #: as SKIPPED with the reason, never silently passed.
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
-#: `changelog.d/**` cited FROM CHANGELOG.md, not from a fragment. Unresolvable
-#: by construction: `assemble_changelog.py:228` (`path.unlink()`) deletes every
-#: fragment it folds into CHANGELOG.md, so any `changelog.d/**` path surviving
-#: in CHANGELOG.md prose names a file the fold itself just removed. Modeled on
-#: `_FOREIGN_PREFIXES` above -- reported as SKIPPED with a reason, never a
-#: silent pass and never a hard error (alp-sdk#2178 review).
+#: `changelog.d/**` cited FROM CHANGELOG.md, not from a fragment, ONLY WHEN the
+#: cited fragment is genuinely gone. `assemble_changelog.py:228`
+#: (`path.unlink()`) deletes every fragment it folds into CHANGELOG.md, so a
+#: post-fold citation surviving in CHANGELOG.md prose names a file the fold
+#: itself just removed -- unresolvable by construction, same treatment as a
+#: foreign-repo citation. Modeled on `_FOREIGN_PREFIXES` above -- reported as
+#: SKIPPED with a reason, never a silent pass and never a hard error
+#: (alp-sdk#2178 review).
 #:
-#: Scoped to the citation's SOURCE, not its target: this only fires when the
-#: file doing the citing is CHANGELOG.md itself. A `changelog.d/**` citation
-#: made FROM WITHIN A FRAGMENT is graded exactly as before -- fragments
-#: legitimately cross-reference each other before the fold ever runs, and
-#: that cross-reference is still a real, checkable citation until the moment
-#: of the fold.
+#: Gated on `not (REPO / rel).is_file()` so a PRE-fold citation -- a
+#: hand-edited `[Unreleased]` entry citing a fragment that has not been folded
+#: yet -- is still graded normally rather than swallowed. Keying the skip on
+#: the citing document alone silently lost exactly the grading this file
+#: exists to enforce: `CHANGELOG.md` citing `changelog.d/2175.md:3` anchored on
+#: text that actually lives at `:19` was SKIPPED while the identical citation
+#: from a fragment got rewritten by `--fix` (alp-sdk#2178 finding 2).
+#:
+#: Scoped to the citation's SOURCE as well as its TARGET: this only fires when
+#: the file doing the citing is CHANGELOG.md itself AND the cited file no
+#: longer exists. A `changelog.d/**` citation made FROM WITHIN A FRAGMENT is
+#: graded exactly as before regardless of target -- fragments legitimately
+#: cross-reference each other before the fold ever runs, and that
+#: cross-reference is still a real, checkable citation until the moment of the
+#: fold.
 _CHANGELOG_D_PREFIX = "changelog.d/"
 
 
@@ -260,10 +276,12 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
                          f"not checkable here")
             continue
 
-        if frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX):
+        if (frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX)
+                and not (REPO / rel).is_file()):
             skips.append(f"{where} -- changelog.d/ fragments are deleted "
-                         f"when folded into CHANGELOG.md; unresolvable from "
-                         f"here by construction")
+                         f"when folded into CHANGELOG.md and this one "
+                         f"already has been; unresolvable from here by "
+                         f"construction")
             continue
 
         target = REPO / rel
@@ -328,11 +346,15 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
         if rel.startswith(_FOREIGN_PREFIXES):
             continue
 
-        # Same class as the foreign-prefix skip just above: a `changelog.d/**`
-        # citation made from CHANGELOG.md itself names a file the fold already
-        # deleted, so there is nothing here for an anchor to repair either --
-        # silently left alone, not reported as a problem needing a human.
-        if frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX):
+        # Same class as the foreign-prefix skip just above, and gated the same
+        # way `_check_one` now is: a `changelog.d/**` citation made from
+        # CHANGELOG.md itself is left alone ONLY when the fold has already
+        # deleted the file it names -- there is nothing left for an anchor to
+        # repair. A citation whose target is still present (pre-fold) falls
+        # through to the normal repair path below, same as any other
+        # citation (alp-sdk#2178 finding 2).
+        if (frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX)
+                and not (REPO / rel).is_file()):
             continue
 
         target = REPO / rel

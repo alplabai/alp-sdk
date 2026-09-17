@@ -80,6 +80,61 @@ def test_changelog_d_citation_from_changelog_md_is_skipped():
     assert len(skips) == 1 and "changelog.d/999999.md" in skips[0]
 
 
+def test_changelog_d_citation_from_changelog_md_is_left_alone_by_fix():
+    """alp-sdk#2178 review, finding 1: the `_check_one` tests above pinned
+    only HALF of the skip. `_fix_one` carries the identical
+    `_CHANGELOG_D_PREFIX` branch (it must leave an unresolvable citation
+    alone rather than report it as a problem needing a human), and nothing
+    pinned it -- mutation-removing that branch from `_fix_one` left the suite
+    at 30 passed.
+
+    MUTATION-PROVE: `changelog.d/999999.md` does not exist in this tree, so
+    removing the branch in `_fix_one` turns this into the "no such file in
+    this tree" problem instead of leaving the citation untouched."""
+    mod = _load()
+    new, rewrites, problems, unanchored = mod._fix_one(
+        mod.CHANGELOG, 'cites `changelog.d/999999.md:3` ("anchor text")')
+    assert problems == [], problems
+    assert rewrites == [] and unanchored == 0
+
+
+def test_changelog_d_citation_from_changelog_md_is_graded_when_target_exists(
+        tmp_path):
+    """alp-sdk#2178 review, finding 2: the skip used to key only on the
+    CITING document, never on whether the cited file still exists. So
+    `CHANGELOG.md` citing a `changelog.d/` fragment that has NOT yet been
+    folded away (a hand-edited `[Unreleased]` entry, or the fold simply
+    hasn't run yet) whose anchor drifted was SKIPPED -- silently losing the
+    exact grading a fragment doing the identical citation still gets. Now
+    gated on `not (REPO / rel).is_file()`, so a citation whose target is
+    genuinely still present is graded normally, not skipped."""
+    mod = _load()
+    mod.REPO = tmp_path
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "2175.md").write_text(
+        "line 1\nline 2\nANCHOR TEXT\n", encoding="utf-8")
+    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT")\n'
+    errors, skips, checked, anchored = mod._check_one(mod.CHANGELOG, text)
+    assert skips == [], skips
+    assert len(errors) == 1 and "ANCHOR TEXT" in errors[0]
+
+
+def test_changelog_d_citation_from_changelog_md_is_fixed_when_target_exists(
+        tmp_path):
+    """The `_fix_one` side of the same restored grading: a still-present
+    fragment's drifted anchor is re-derived, not left alone as if the
+    fragment were already gone."""
+    mod = _load()
+    mod.REPO = tmp_path
+    (tmp_path / "changelog.d").mkdir()
+    (tmp_path / "changelog.d" / "2175.md").write_text(
+        "line 1\nline 2\nANCHOR TEXT\n", encoding="utf-8")
+    text = 'cites `changelog.d/2175.md:1` ("ANCHOR TEXT")\n'
+    new, rewrites, problems, unanchored = mod._fix_one(mod.CHANGELOG, text)
+    assert "`changelog.d/2175.md:3`" in new, new
+    assert len(rewrites) == 1 and problems == []
+
+
 def test_changelog_d_citation_from_a_fragment_is_still_graded():
     """The DIRECTION that matters: the same `changelog.d/**` path cited from
     INSIDE A FRAGMENT is not this class -- fragments legitimately
