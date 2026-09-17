@@ -15,11 +15,25 @@ tests:
     platform_allow: native_sim/native/64
     build_only: true
     # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
-    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
-    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
-    # native_sim.conf for the full rationale.
+    # emit) so it wins over the alp.conf-emitted defaults.  It no
+    # longer carries a CONFIG_MBEDTLS=n workaround -- that break is
+    # fixed at its root (#2173) and this target now builds the same
+    # TLS-enabled configuration the SoM does.  What is left is the
+    # native_sim-only panel wiring; see native_sim.conf.
     extra_args:
       - "EXTRA_CONF_FILE=native_sim.conf"
+  # This scenario names `ensemble_e8_dk/...` -- Alif's own DevKit board,
+  # which no -p flag in this repo selects -- so it is not built by any job
+  # here and never has been.  It is deliberately NOT retargeted at the
+  # alp_e1m_aen801_m55_hp target its board.yaml describes, unlike
+  # mqtt-telemetry and iot-fleet-ota (#2173): those two link on AEN now,
+  # this one does not.  LVGL requires a `zephyr,display` chosen node and no
+  # panel is wired for this app on the E1M EVK -- the EVK solders none, its
+  # documented default is an SSD1306 over the I2C/Qwiic header, and this app
+  # declares an ST7789 whose SPI0 pads are all repurposed on the 2626-R2
+  # netlist.  Which panel this demo targets is a hardware decision, so the
+  # scenario is left as-is (still running nowhere) rather than pointed at a
+  # target it cannot build.  Tracked in #2173's changelog fragment.
   alp_sdk.examples.iot_dashboard.aen:
     platform_allow:
       - ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp

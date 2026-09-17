@@ -42,7 +42,7 @@ random-number source is Zephyr's non-cryptographic fallback -- no Alif
 Ensemble entropy driver exists yet, in this tree or upstream, and the boot log
 says so (`WARNING: Using a test - not safe - entropy source`). The handshake
 builds and runs; it is not production-grade key material until the SE TRNG is
-wired to a real entropy driver.
+wired to a real entropy driver (issue #2192).
 
 ## The "sensor reading"
 

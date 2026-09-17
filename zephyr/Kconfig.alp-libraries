@@ -377,7 +377,8 @@ config ALP_SDK_MBEDTLS_PSA_CRYPTO
 	  random subsystem therefore falls back to the non-cryptographic
 	  TEST_RANDOM_GENERATOR on AEN targets.  That is enough to link and
 	  run, and is NOT enough for production TLS key material; wiring the
-	  SE TRNG through a real entropy driver is open silicon work.
+	  SE TRNG through a real entropy driver is open silicon work, tracked
+	  in issue #2192.
 
 # ----------------------------------------------------------------------
 # .alpmodel package reader (<alp/model.h>)
