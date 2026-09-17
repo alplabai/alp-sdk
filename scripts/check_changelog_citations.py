@@ -347,12 +347,18 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
                 f"{malformed.group('inner')!r}), so `_ANCHOR` cannot capture "
                 f"any text and this citation would silently degrade to "
                 f"range-checked only. Use a single delimiter -- backtick or "
-                f"quote, not both -- or, if the anchor text itself contains a "
-                f"delimiter, shorten the anchor to a delimiter-free span of at "
-                f"least 4 characters. If this parenthetical is prose "
-                f"commentary rather than an anchor at all, drop one of the "
-                f"two delimiters (the backtick or the quote) so it doesn't "
-                f"open with both."
+                f"quote, not both -- and make sure the anchor text contains "
+                f"NO delimiter anywhere in it, not just at its start: this "
+                f"check only catches a delimiter at the very first "
+                f"character, so one later in a 'shortened' span still "
+                f"degrades silently with no error at all. If this "
+                f"parenthetical is prose commentary rather than an anchor at "
+                f"all, don't merely drop one of the two delimiters -- the "
+                f"one left behind still opens the parenthetical and gets "
+                f"parsed (then verified) as a real anchor. Rewrite it so no "
+                f"delimiter is the first character after '(' at all, e.g. "
+                f"\"(the flag is `--fix`)\" rather than \"(`--fix` is the "
+                f"flag)\"."
             )
             continue
 
@@ -440,11 +446,16 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
                 f"{where} -- malformed anchor: opens with two delimiter "
                 f"characters back to back ({malformed.group('outer')!r} then "
                 f"{malformed.group('inner')!r}); rewrite it with a single "
-                f"delimiter -- or, if the anchor text itself contains a "
-                f"delimiter, shorten it to a delimiter-free span of at least "
-                f"4 characters; if this parenthetical is prose rather than "
-                f"an anchor, drop one of the two delimiters so it doesn't "
-                f"open with both -- then re-run --fix"
+                f"delimiter, making sure the anchor text contains NO "
+                f"delimiter anywhere in it (not just at its start -- this "
+                f"check only catches one at the very first character, so "
+                f"one later in a 'shortened' span still degrades silently "
+                f"with no error at all); if this parenthetical is prose "
+                f"rather than an anchor, don't merely drop one of the two "
+                f"delimiters -- the one left behind still opens the "
+                f"parenthetical and gets parsed (then verified) as a real "
+                f"anchor, so rewrite it so no delimiter is the first "
+                f"character after '(' at all -- then re-run --fix"
             )
             continue
 
@@ -638,7 +649,7 @@ def main() -> int:
     #
     # This sits ABOVE the early return, but that ordering is now INERT:
     # mutation-tested by moving `if args.fix:` below the early return and
-    # re-running the suite -- still 33 passed. What actually keeps `--fix`
+    # re-running the suite -- still 42 passed. What actually keeps `--fix`
     # from becoming a silent no-op on the release-cut tree (empty
     # `changelog.d/`, CHANGELOG.md present) is the WIDENED condition below
     # (`not fragments and not CHANGELOG.is_file()`), not this placement.
