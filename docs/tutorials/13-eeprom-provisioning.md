@@ -261,6 +261,35 @@ log together form the **per-device manufacturing record**.
 Archive them in a database keyed by serial; warranty claims
 get answered by looking up the record.
 
+## 8. Secure Data Page mirror + permanent lock (recovery copy)
+
+The same on-module 24C128 answers a **second** I²C address, `0x58` -- one
+physical part, not a second chip. Inside it, selector `0x00` is a separate
+64-byte **Secure Data Page** that can be permanently locked so it can never
+be overwritten again (not even by this same tooling). Alp Lab uses it to
+carry a *mirror* of this manifest's immutable core (`sku`, `hw_rev`,
+`serial`, mfg date, CRC) as a recovery copy, since the 128-byte manifest
+above has **no write protection at all** -- see `alp_secure_page_mirror_t`
+in [`include/alp/hw_info.h`](../../include/alp/hw_info.h) for the exact
+64-byte layout.
+
+This is a separate, later production step from §7 above, gated on this
+manifest already being written and verified, and its own read-back
+verify + explicit opt-in flag before the irreversible lock:
+`eeprom_24c128_secure_page_write()` / `eeprom_24c128_secure_page_lock()`
+in [`include/alp/chips/eeprom_24c128.h`](../../include/alp/chips/eeprom_24c128.h),
+demonstrated end-to-end by
+[`examples/aen/aen-eeprom-provision`](../../examples/aen/aen-eeprom-provision)'s
+three build modes. Its `README.md` covers the exact flags and the
+cold-power-cycle requirement between writing and locking; this section
+exists only so a reader of this tutorial knows the second address space
+is accounted for, not an undocumented device on the bus.
+
+A board populated with the approved footprint-compatible alternate part
+(STMicro `M24128-BFMH6TG`) has no second device-select header at all --
+`eeprom_24c128_read_identity()` reports that as an absent capability, not
+an error, and this manifest stays authoritative either way.
+
 ## See also
 
 - [`include/alp/hw_info.h`](../../include/alp/hw_info.h) -- the
@@ -271,3 +300,5 @@ get answered by looking up the record.
   BOARD_ID divider path.
 - [`tests/scripts/test_program_eeprom.py`](../../tests/scripts/test_program_eeprom.py)
   -- unit tests for the layout encoder.
+- [`examples/aen/aen-eeprom-provision`](../../examples/aen/aen-eeprom-provision)
+  -- the Secure Data Page mirror write + lock tool (§8 above).

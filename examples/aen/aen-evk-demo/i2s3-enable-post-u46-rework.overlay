@@ -1,0 +1,30 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The devicetree half of phase 11's two-switch playback re-enable -- see
+ * the SAFETY note in
+ * boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay for why
+ * i2s3 ships "disabled" by default on EVK rev 2626-R2 (U46 has no Hi-Z
+ * state, and I2S0_SDO/SCLK/WS on P9_3/4/5 run through it backwards).
+ *
+ * Apply this ONLY once U46 is BOTH a 3257-type switch AND its VCC is
+ * on +3V3 (a stock 74LVC157, even on +3V3, is still one-way and
+ * reproduces the contention above; VCC alone is not the gate), OR a
+ * switch rated for 1.8 V VCC (untested) -- on e1m-aen-evk-03,
+ * 2026-09-15, a fitted 3257-type part's VCC was moved to +3V3 between
+ * a silent run and an audible run; not established as the only
+ * difference between the two -- see
+ * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
+ * untested /E-or-S-HIGH caveat at +3V3 and the open TDM-latch/#2146
+ * findings -- together with setting AEN_EVKDEMO_SOUND_PLAYBACK to 1
+ * in src/main.c -- both switches, not either alone:
+ *
+ *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+ *       examples/aen/aen-evk-demo -- \
+ *       -DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay
+ */
+
+&i2s3 {
+	status = "okay";
+};

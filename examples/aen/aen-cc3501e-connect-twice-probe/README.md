@@ -58,7 +58,7 @@ attempt for exactly that reason.
 
 ## What this app prints, and what it means
 
-Both connect attempts run to a **terminal** `WIFI_STATUS` (a full 55 s
+Both connect attempts run to a **terminal** `WIFI_STATUS` (a full 75 s
 budget, not a shortened one — unlike `aen-cc3501e-wedge-postmortem`, this
 app wants a real terminal outcome, not a mid-wedge snapshot). Each attempt's
 `state` and `fail_reason` are printed as raw numbers *and* decoded names.

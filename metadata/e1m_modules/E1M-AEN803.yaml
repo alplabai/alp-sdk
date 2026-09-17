@@ -10,10 +10,9 @@
 # E1M-AEN803 is the SAME E1M-AEN-2626 PCB and silicon as E1M-AEN801 (Alif
 # Ensemble E8, AE822FA0E5597LS0) -- it is the BOM variant with BOTH external
 # OSPI0 memories populated: the 512 Mbit HyperRAM (S80KS5122GABHM02) AND the
-# 256 Mbit xSPI NOR (IS25WX256-JHLE), where E1M-AEN801 leaves the NOR
-# DNI/optional and carries only the HyperRAM. This population -- both parts
-# fitted, these exact MPNs -- IS the E1M-AEN803 SKU contract, not merely
-# what happens to be on one bench unit.
+# 256 Mbit xSPI NOR (IS25WX256-JHLE), where E1M-AEN801 populates neither.
+# This population -- both parts fitted, these exact MPNs -- IS the
+# E1M-AEN803 SKU contract, not merely what happens to be on one bench unit.
 #
 # Per the project memory note, any SKU-specific hardware value not
 # supplied authoritatively stays TBD rather than being inferred.
@@ -175,18 +174,18 @@ topology:
     toolchain: poky-glibc
   m55_hp:
     app: alp-stock-shim
-    # No generated Zephyr board tree yet -- board bring-up for this SKU has
-    # not happened (same precedent as E1M-V2M102/E1M-V2N102: a larger/
-    # differing-memory BOM variant of an already-shipping PCB, awaiting its
-    # own tree). Bare (unqualified) name, per scripts/check_board_target_
-    # tree_parity.py's _NOT_YET_SUPPORTED convention -- do NOT qualify with
-    # a <soc>/<cpucluster> suffix until the tree actually exists (#720).
-    board: alp_e1m_aen803_m55_hp
+    # Qualified Zephyr board target: the Ensemble E8 die is multi-cluster
+    # (RTSS-HE + RTSS-HP), so `west build -b` needs the <soc>/<cpucluster>
+    # qualifiers -- the bare name is ambiguous and fails to resolve under
+    # Zephyr 4.4 (#720). Must match the generated board tree's twister
+    # identifier (zephyr/boards/alp/e1m_aen803_m55_hp/...). Generated
+    # #2084 -- same silicon/variant as E1M-AEN801, dual-external-memory BOM.
+    board: alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HP carrier"
   m55_he:
     app: alp-stock-shim
-    board: alp_e1m_aen803_m55_he
+    board: alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     toolchain: arm-zephyr-eabi
     zephyr_full_name: "E1M-AEN803 (Alif Ensemble E8) Cortex-M55 HE carrier"
 
@@ -214,6 +213,14 @@ topology:
 #   storage    0x560000    96 KiB    0x80560000    m55_he, m55_hp
 #   atoc       0x578000    32 KiB    0x80578000    m55_he, m55_hp  (SE-owned)
 #   64 + 2688 + 2688 + 64 + 96 + 32 = 5632 KiB == the full 5.5 MiB App MRAM.
+#
+# `mram_main.base` resolves to 0x80000000 (#2053) -- correct for
+# IPC-carve-out purposes (`aperture.py::classify_region()`'s existing
+# whole-device-alias exception) and, since #2073, also for
+# `scripts/gen_zephyr_board.py::_aen_check_map_overlaps()`, which now
+# carries the same exception (`whole_device_alias.is_whole_device_alias()`,
+# shared by both) -- see E1M-AEN801.yaml for the full evidence trail, not
+# restated per-SKU logic.
 memory_map:
   - { name: mcuboot,   base: 0x80000000, size_kib: 64,   accessible_from: [m55_he, m55_hp], cacheable: true, carveout: false, write_authority: vendor_image }
   - { name: he_slot0,  base: 0x80010000, size_kib: 2688, accessible_from: [m55_he],          cacheable: true, carveout: false, write_authority: customer_image }
@@ -221,7 +228,42 @@ memory_map:
   - { name: reserved,  base: 0x80550000, size_kib: 64,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: none }
   - { name: storage,   base: 0x80560000, size_kib: 96,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: customer_runtime }
   - { name: atoc,      base: 0x80578000, size_kib: 32,   accessible_from: [m55_he, m55_hp],                  carveout: false, write_authority: secure_enclave }
-  - { name: mram_main, base: "TBD",      size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+  - { name: mram_main, base: 0x80000000, size_kib: 5632, accessible_from: [a32_cluster, m55_he, m55_hp], cacheable: true, write_authority: composite }
+
+  # Neither external OSPI0 memory gets a `memory_map:` row (#2053, #2069),
+  # for two independent reasons -- one about the pair of them together,
+  # one about the HyperRAM alone:
+  #
+  # 1. OSPI0 has exactly ONE XIP decode window, shared and mutually
+  #    exclusive between the two parts. The HyperRAM (S80KS5122GABHM02,
+  #    on_module.hyperram above, CS0) XIPs at `0xa0000000`, confirmed by
+  #    Alif's own Linux devicetree (arch/arm/boot/dts/alif/ensemble/
+  #    common/ensemble-ex.dtsi, under `common/` so not A32-Linux-
+  #    exclusive: `mem_hyperam@a0000000 reg = <0xa0000000 0x4000000>`,
+  #    64 MiB) -- and the NOR (IS25WX256-JHLE,
+  #    on_module.ospi_memories.ospi0, CS1) XIPs at that SAME address:
+  #    arming one unmaps the other, and the NOR's octal DDR mode is
+  #    volatile across a reset (bench review 2026-09-06). A row per part
+  #    would misrepresent them as simultaneously mapped; `memory_region`
+  #    has no way to express two regions that time-share one aperture.
+  #  2. Even a SINGLE row for the HyperRAM alone was tried and reverted:
+  #    `0xa0000000 + 64 MiB` lands exactly on `0xa4000000`, and
+  #    `scripts/check_atoc_reservation.py::_check_preset` computes
+  #    `window_top` as the highest `base + size` across EVERY resolved
+  #    `memory_map:` region in this file -- not scoped to the on-die MRAM
+  #    aperture -- then refuses unless the region owning that top is
+  #    named `atoc` (SETOOLS top-anchors the ATOC application table
+  #    there, #1289). A `hyperram` row at `0xa4000000` becomes the new
+  #    file-wide top and reads as the boot table in disguise, which it is
+  #    not: that rule is MRAM-shaped and does not scope itself to a
+  #    particular aperture. Filed as #2069 rather than loosening the
+  #    check as a side effect of this metadata addition (a real ATOC
+  #    collision is exactly what it exists to catch).
+  #
+  # Both parts' population facts stay correctly recorded in `on_module.
+  # hyperram` / `on_module.ospi_memories.ospi0` above (chip/assembled/
+  # capacity_mbit/chip_select); that block, not this table, is this SoM's
+  # source of truth for their presence until #2069 resolves.
 
 # Inter-core mailbox IP: ARM MHUv2. Same silicon as E1M-AEN801 -- see that
 # file for the full evidence trail (#225).

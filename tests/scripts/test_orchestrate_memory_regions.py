@@ -31,7 +31,11 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from _orchestrate_support import REPO, _write_board   # noqa: E402
+from _orchestrate_support import (                     # noqa: E402
+    REPO,
+    _synthetic_aen_unresolved_base_root,
+    _write_board,
+)
 
 from alp_orchestrate import memory                      # noqa: E402
 from alp_orchestrate import (                          # noqa: E402
@@ -42,9 +46,12 @@ from alp_orchestrate import (                          # noqa: E402
 
 SCHEMA = REPO / "metadata" / "schemas" / "system-manifest-v1.schema.json"
 
-# E1M-AEN301 authors a `memory_map:` -- seven rows, six with a resolved
-# base and `mram_main` deliberately carrying `base: "TBD"`.  Its aperture
-# is [0x80000000, 0x80580000) (soc_flash_base + 5.5 MiB).
+# E1M-AEN301 authors a `memory_map:` -- seven rows, all with a resolved
+# base (#2053 resolved `mram_main`'s, the last holdout).  Its aperture is
+# [0x80000000, 0x80580000) (soc_flash_base + 5.5 MiB). The
+# authored-but-unresolved-base leg this fixture used to exercise via
+# `mram_main` has no real-preset producer any more; see the synthetic-row
+# tests below (`memory._resolved_row()` direct calls) for that witness.
 AEN_BOARD = """
 name: test-aen-memory
 som:
@@ -150,11 +157,22 @@ def test_a_region_contained_in_the_aperture_is_flash(tmp_path: Path) -> None:
     assert _row(_memory(AEN_BOARD, tmp_path), "mcuboot")["kind"] == "flash"
 
 
-def test_a_region_whose_base_does_not_resolve_is_kind_unresolved(
-        tmp_path: Path) -> None:
-    """`mram_main` carries `base: "TBD"`, so there is no extent to test
-    against the aperture."""
-    assert _row(_memory(AEN_BOARD, tmp_path), "mram_main")["kind"] == "unresolved"
+def test_a_region_whose_base_does_not_resolve_is_kind_unresolved() -> None:
+    """A region declaring `base: "TBD"` has no extent to test against the
+    aperture, so `classify_region()` calls it `unresolved`.
+
+    Synthetic row (#2053): `E1M-AEN301`'s `mram_main` used to be the
+    real-preset witness for this leg, carrying `base: "TBD"`; #2053
+    resolved it to `0x80000000`, so no shipped preset authors an
+    unresolved base any more. This is the ADR-0034 clause-4 witness for
+    the leg itself, independent of any one preset ever exercising it --
+    the same direct-call shape as `test_an_unresolved_row_never_carries_a_base`
+    below."""
+    row = memory._resolved_row(
+        {"name": "pending", "base": "TBD", "size_kib": 5632},
+        _AEN_APERTURE, True, "som_preset")
+
+    assert row["kind"] == "unresolved"
 
 
 def test_a_som_with_no_declared_aperture_classifies_every_row_unresolved(
@@ -171,11 +189,17 @@ def test_a_som_with_no_declared_aperture_classifies_every_row_unresolved(
 # ---------------------------------------------------------------------
 
 
-def test_an_unresolved_base_carries_status_and_reason_but_no_base(
-        tmp_path: Path) -> None:
+def test_an_unresolved_base_carries_status_and_reason_but_no_base() -> None:
     """The schema's items description is normative: a region whose base
-    does not resolve carries no `base` and says why."""
-    row = _row(_memory(AEN_BOARD, tmp_path), "mram_main")
+    does not resolve carries no `base` and says why.
+
+    Synthetic row (#2053): `E1M-AEN301`'s `mram_main` used to be the
+    real-preset witness (`base: "TBD"`); #2053 resolved it, so this
+    exercises the `_resolved_row()` leg directly instead of assuming a
+    preset still authors an unresolved base."""
+    row = memory._resolved_row(
+        {"name": "pending", "base": "TBD", "size_kib": 5632},
+        _AEN_APERTURE, True, "som_preset")
 
     assert row["status"] == "unresolved"
     assert "base" not in row
@@ -191,11 +215,17 @@ def test_a_resolved_region_is_status_ok_and_carries_its_base(
     assert "reason" not in row
 
 
-def test_size_is_emitted_even_when_the_base_is_unresolved(
-        tmp_path: Path) -> None:
-    """Size and base resolve independently: `mram_main`'s 5632 KiB is
-    known even though its base is `"TBD"`."""
-    row = _row(_memory(AEN_BOARD, tmp_path), "mram_main")
+def test_size_is_emitted_even_when_the_base_is_unresolved() -> None:
+    """Size and base resolve independently: an unresolved base does not
+    suppress `size_bytes`.
+
+    Synthetic row (#2053): `E1M-AEN301`'s `mram_main` used to carry
+    `base: "TBD"` with its 5632 KiB size still resolving; #2053 resolved
+    its `base`, so the real preset no longer exercises this leg -- kept
+    on the same synthetic shape as the tests above rather than deleted."""
+    row = memory._resolved_row(
+        {"name": "pending", "base": "TBD", "size_kib": 5632},
+        _AEN_APERTURE, True, "som_preset")
 
     assert row["size_bytes"] == 5632 * 1024
 
@@ -263,11 +293,13 @@ def test_ipc_joins_memory_by_name() -> None:
     """`ipc[].carve_out_region` names a `memory[].name`.
 
     Uses the shipped `rpmsg-v2n` project deliberately: on every AEN SoM
-    the carve-out is REFUSED (`mram_main` has an unresolved base), and a
-    blocked `ipc[]` row carries no `carve_out_region` at all -- so an AEN
-    fixture makes this test vacuous, which is exactly how its first
-    version passed while asserting nothing. The explicit `checked` count
-    is what stops it silently degrading that way again.
+    the carve-out is REFUSED (every candidate region, including the
+    resolved `mram_main` since #2053, is flash-class -- MRAM is not safe
+    as an IPC carve-out target), and a blocked `ipc[]` row carries no
+    `carve_out_region` at all -- so an AEN fixture makes this test
+    vacuous, which is exactly how its first version passed while
+    asserting nothing. The explicit `checked` count is what stops it
+    silently degrading that way again.
     """
     project = load_board_yaml(
         REPO / "examples" / "multicore" / "rpmsg-v2n" / "board.yaml")
@@ -387,6 +419,50 @@ def test_an_unresolved_row_never_carries_a_base() -> None:
         {"name": "pending", "base": "TBD", "size_kib": 64},
         _AEN_APERTURE, True, "som_preset")
 
+    assert row["status"] == "unresolved"
+    assert "base" not in row
+    assert row["reason"]
+
+
+# ---------------------------------------------------------------------
+# Wiring coverage (#2096): the unresolved-base leg above is reached
+# through the FULL pipeline (load_board_yaml -> resolve_memory_regions),
+# not a direct call into `memory._resolved_row()`. `mram_main.base`
+# resolves to a real address on all seven AEN presets (#2053, #2102),
+# so no shipped preset authors an unresolved `memory_map:` base any
+# more, and the direct-call pins above cover this leg itself without
+# proving anything about the routing that gets a row into it. This
+# synthetic AEN-shaped preset (`_synthetic_aen_unresolved_base_root`)
+# keeps that routing covered instead. A future change that filtered
+# unresolved rows out earlier would leave every direct-call pin above
+# green while this test alone catches the
+# dead wiring.
+# ---------------------------------------------------------------------
+
+SYNTHETIC_AEN_BOARD = """
+name: test-synthetic-aen-memory
+som:
+  sku: E1M-AEN899
+
+cores:
+  m55_hp:
+    os: zephyr
+    app: ./m55_hp
+  m55_he:
+    os: zephyr
+    app: ./m55_he
+"""
+
+
+def test_a_synthetic_aen_preset_routes_an_unresolved_base_through_the_full_pipeline(
+        tmp_path: Path) -> None:
+    meta = _synthetic_aen_unresolved_base_root(tmp_path)
+    path = _write_board(tmp_path, SYNTHETIC_AEN_BOARD)
+    project = load_board_yaml(path, metadata_root=meta)
+
+    row = _row(resolve_memory_regions(project), "mram_main")
+
+    assert row["kind"] == "unresolved"
     assert row["status"] == "unresolved"
     assert "base" not in row
     assert row["reason"]

@@ -1,7 +1,8 @@
 # Alp SDK chip manifest: 24Cxx-class 128-Kbit I2C EEPROM.
 schema_version:   1
 chip_id:          eeprom_24c128
-driver_status:    complete         # init / read / write (page-aligned splitting) / read_identity / deinit.
+driver_status:    complete         # init / read / write (page-aligned splitting) / read_identity /
+                                    # secure_page_write / secure_page_lock / deinit.
 display_name:     "Generic 24Cxx-class 128-Kbit (16 KB) I2C EEPROM"
 vendor:           multi             # On-Semi N24S128C4DYT3G (default), STMicro M24128-BFMH6TG (alt)
 mpn_population:

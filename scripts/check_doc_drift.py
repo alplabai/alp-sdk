@@ -116,6 +116,15 @@ _ALLOWLIST: set[str] = {
     # ("alp_foo" gets a "@2" version node -> alp_foo_v2): not real APIs.
     "alp_foo",
     "alp_foo_v2",
+    # Build options of examples/aen/aen-eeprom-provision's CMakeLists.txt, not
+    # SDK symbols: ALP_LOCK_SECURE_PAGE selects the EEPROM Secure Data Page
+    # PERMANENT-lock mode and ALP_SECURE_PAGE_COLD_CYCLED is the operator's
+    # separate cold-cycle attestation it also requires.  Real identifiers; an
+    # example's CMake options are deliberately outside the scanned API
+    # surfaces.  Named by docs/test-plan.md + docs/verification-status.md
+    # because an operator needs both flags to run the irreversible step.
+    "ALP_LOCK_SECURE_PAGE",
+    "ALP_SECURE_PAGE_COLD_CYCLED",
     # Driver-internal compile gate in zephyr/drivers/spi/spi_renesas_rz_sci_b.c
     # (the parked SCI7 DMAC fast path), referenced by the SCI7 next-rev plan.
     # Real identifier; zephyr/drivers .c files are deliberately outside the

@@ -424,6 +424,12 @@ config QDEC_ALIF
 	  silicon-validated.  ADR 0017 Tier-2 (INTERIM).
 	  Driver: zephyr/drivers/sensor/qdec_alif/qdec_alif_utimer.c.
 
+# ALP-SDK DELTA (#2051), not upstream: indirection so the compat string's own
+# comma ("snps,dwc-sdhc") does not get split as a second dt_compat_any_has_prop
+# argument below -- := is the Kconfig preprocessor's literal-string assignment,
+# the same pattern subsys/pm/Kconfig's DT_POWER_STATE_COMPAT uses.
+SDHC_DWC_COMPAT := snps,dwc-sdhc
+
 config SDHC_DWC
 	bool "Alif Ensemble DesignWare SD Host Controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
@@ -431,6 +437,12 @@ config SDHC_DWC
 	depends on DT_HAS_SNPS_DWC_SDHC_ENABLED
 	select SDHC_SUPPORTS_NATIVE_MODE
 	select EVENTS
+	# ALP-SDK DELTA (#2051), not upstream: only a node with a `clocks`
+	# property (e.g. the Alif alif,clockctrl ALIF_SDC_CLK gate) needs the
+	# clock_control_on() call sdhc_dwc_init() makes -- a board where this
+	# gate is always-on, or has no such controller, omits `clocks` and
+	# does not need CLOCK_CONTROL pulled in at all.
+	select CLOCK_CONTROL if $(dt_compat_any_has_prop,$(SDHC_DWC_COMPAT),clocks)
 	help
 	  Synopsys DesignWare Core SD Host Controller driver (compatible
 	  "snps,dwc-sdhc"), vendored VERBATIM from the Apache-2.0 zephyr_alif fork
@@ -495,6 +507,22 @@ config SDHC_DWC_DMA_ADDR_TRANSLATE
 	  Pulls in the hal_alif soc_memory_map.h (needs itcm/dtcm `global_base`
 	  props absent from the alp-sdk E8 dtsi).  Leave disabled until a card is
 	  reachable and DMA is validated.
+
+config SDHC_RSP_136_HAS_CRC
+	bool "Realign 136-bit R2 responses stored without their CRC byte"
+	default y
+	help
+	  The DWC_mshc response registers hold a 136-bit R2 response (CID, CSD)
+	  without its CRC byte, so sdhc_dwc.c must shift the four RESP words
+	  left by 8 bits to put every field where the SD stack expects it.
+	  The driver has always gated that shift on this symbol, but nothing
+	  defined it, so IS_ENABLED() was 0 and the shift was dead code.
+	  Confirmed on the bench (evk-03), same card, same MBR ending at
+	  sector 0x0EEC0000 (250347520): with the symbol undefined the stack
+	  reported 524800 sectors; with the symbol defined but the realign
+	  loop's carry direction still wrong (#2131) it reported 49020928
+	  (CSD C_SIZE 0x3BAFF truncated to 0xBAFF); with both fixes it
+	  reports the correct 250347520 sectors.
 
 endif # SDHC_DWC
 

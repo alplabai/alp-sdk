@@ -26,9 +26,12 @@
 /* ---- CC3501E Wi-Fi (Alif companion) ------------------------------------- */
 #define ALP_COMPANION_WIFI_SCAN_MAX 16u
 #define ALP_COMPANION_WIFI_SCAN_MS  30000u
-/* Cover the CC3501E connect budget: L2 assoc up to 30s (WPA3-SAE is slower than
- * WPA2 -- see cc3501e_hw_ti.c) + the STA DHCP poll (~10s) = ~40s, plus margin. */
-#define ALP_COMPANION_WIFI_CONN_MS 50000u
+/* Same derivation as aen-cc3501e-socket-throughput's SOCKTP_CONNECT_TIMEOUT_MS:
+ * the firmware's own worst case is a 10s Wlan_RoleUp + 30s L2 association +
+ * a 30s DHCP-lease poll (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US,
+ * hal/ti/cc3501e_hw_ti_wifi.c) = 70s, and the firmware documents 75000ms as
+ * the caller budget that clears it (alp-sdk#2079). */
+#define ALP_COMPANION_WIFI_CONN_MS 75000u
 
 /* ---- async Wi-Fi connect (the bridge can't block the shell) -------------- *
  * `wifi connect` SUBMITS the request (records SSID/sec/pass, sets conn_pending)
@@ -78,10 +81,63 @@ static void companion_conn_thread(void *a, void *b, void *c)
 				shell_print(
 				    conn_sh, "wifi connected \"%s\"  rssi=unavailable (%d)", conn_ssid, (int)rs);
 			}
-		} else if (s == ALP_ERR_TIMEOUT) {
-			shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
 		} else {
-			shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
+			/* cc3501e_wifi_connect() itself only returns a mapped alp_status_t,
+			 * not the WIFI_STATUS latch's own last_reason -- fetch it
+			 * separately, best-effort, with the single-shot, BOUNDED
+			 * cc3501e_wifi_status_once() rather than cc3501e_wifi_status():
+			 * the latter's own down-window poll_by_repeat can retry for up to
+			 * CC3501E_WIFI_DOWN_WINDOW_MS (10 s) while the firmware worker is
+			 * still in its post-body re-init, which would delay this result
+			 * line and keep conn_pending held for that whole extra window.
+			 * A failed fetch here just means the line prints without a
+			 * reason, same as before this byte existed.
+			 *
+			 * Skip the fetch entirely on ALP_ERR_INVAL: that means
+			 * cc3501e_wifi_connect() rejected the request before anything was
+			 * submitted (oversize ssid/psk), so no attempt ever opened the
+			 * capture window -- the latch still holds whatever the PREVIOUS
+			 * attempt left there, and fetching it here would mislabel that
+			 * stale value as this (non-existent) attempt's reason. */
+			uint8_t last_reason = 0u;
+			if (s != ALP_ERR_INVAL) {
+				alp_cc3501e_wifi_status_t fst = { 0 };
+				/* Trust last_reason only when the latch itself confirms THIS
+				 * was a terminal FAILED outcome.  A DISCONNECTED (or
+				 * CONNECTING) state here means no failure of THIS attempt
+				 * ever landed on the latch -- e.g. the CONNECT_STA submit was
+				 * bounced BUSY by a concurrent worker op, or lost to a
+				 * transport IO fault, and cc3501e_wifi_connect()'s own loop
+				 * simply ran out its timeout_ms without ever seeing
+				 * CONN_FAILED.  The byte then still holds whatever an
+				 * UNRELATED prior attempt left there (see last_reason's own
+				 * "persists through later publishes" contract) -- printing
+				 * it here would misattribute a stale reason to an attempt
+				 * that never actually started. */
+				if (cc3501e_wifi_status_once(companion_cc3501e, &fst) == ALP_OK &&
+				    fst.state == ALP_CC3501E_WIFI_CONN_FAILED) {
+					last_reason = fst.last_reason;
+				}
+			}
+
+			if (s == ALP_ERR_TIMEOUT) {
+				if (last_reason != 0u) {
+					shell_warn(conn_sh,
+					           "wifi connect to \"%s\": timed out  reason: %u",
+					           conn_ssid,
+					           (unsigned int)last_reason);
+				} else {
+					shell_warn(conn_sh, "wifi connect to \"%s\": timed out", conn_ssid);
+				}
+			} else if (last_reason != 0u) {
+				shell_error(conn_sh,
+				            "wifi connect to \"%s\" failed (%d)  reason: %u",
+				            conn_ssid,
+				            (int)s,
+				            (unsigned int)last_reason);
+			} else {
+				shell_error(conn_sh, "wifi connect to \"%s\" failed (%d)", conn_ssid, (int)s);
+			}
 		}
 		conn_pending = false;
 	}
@@ -261,36 +317,23 @@ static int cmd_companion_wifi_ap(const struct shell *sh, size_t argc, char **arg
 	 * WPA2-PSK, a trailing "wpa3" token -> WPA3-SAE (validated above). */
 	uint8_t sec = (argc >= 4) ? 2u : ((pass[0] == '\0') ? 0u : 1u);
 
-	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE and returns
-	 * immediately (#1385) -- it does not block for seconds here the way it
-	 * once did; see the function's own comment for why a retry loop around
-	 * this opcode is provably unwinnable. ALP_COMPANION_WIFI_CONN_MS is passed
-	 * for call-site consistency with the other companion Wi-Fi commands, but
-	 * cc3501e_wifi_ap_start() does not currently use it (documented on the
-	 * declaration). */
+	/* cc3501e_wifi_ap_start() submits WIFI_AP_START exactly ONCE, then confirms
+	 * against the independent GET_DIAG_INFO role field: ALP_OK once the role
+	 * reports WIFI_AP, ALP_ERR_TIMEOUT if ALP_COMPANION_WIFI_CONN_MS elapses
+	 * first (see the function's own comment for why the submit itself is
+	 * never retried). */
 	alp_status_t s =
 	    cc3501e_wifi_ap_start(companion_cc3501e, ssid, sec, pass, ALP_COMPANION_WIFI_CONN_MS);
 
 	if (s != ALP_OK) {
-		/* #1385: against protocol v4 this is the EXPECTED outcome even for an
-		 * AP that came up fine -- WIFI_AP_START acks every submit BUSY and has
-		 * no status latch to confirm on, so cc3501e_wifi_ap_start() cannot
-		 * report success.  Say "unconfirmed", not "failed": printing a flat
-		 * failure for a working AP is the mirror of the false "up" the
-		 * dead-phase 0x00 alias used to print. */
-		shell_error(sh,
-		            "ap start \"%s\" unconfirmed (%d) -- firmware v4 has no AP status latch "
-		            "(#1385); check for the SSID out of band",
-		            ssid,
-		            (int)s);
+		if (s == ALP_ERR_TIMEOUT) {
+			shell_error(
+			    sh, "ap start \"%s\" failed (%d) (not confirmed within the budget)", ssid, (int)s);
+		} else {
+			shell_error(sh, "ap start \"%s\" failed (%d)", ssid, (int)s);
+		}
 		return -EIO;
 	}
-	/* Unreachable against protocol v4 today (see the @warning on
-	 * cc3501e_wifi_ap_start()'s declaration: ALP_OK is not a value this call
-	 * can currently return) -- kept, not deleted, because it is still the
-	 * CORRECT branch for the day a firmware-side AP confirmation channel
-	 * lands and makes ALP_OK reachable again; no code change would then be
-	 * needed here. */
 	shell_print(
 	    sh, "ap \"%s\" up (%s)", ssid, (sec == 0u) ? "open" : (sec == 2u ? "wpa3" : "wpa2"));
 	return 0;
@@ -415,6 +458,13 @@ static int cmd_companion_wifi_status(const struct shell *sh, size_t argc, char *
 		}
 	} else if (st.state == ALP_CC3501E_WIFI_CONN_FAILED) {
 		shell_print(sh, "fail:  %u", (unsigned int)st.fail_reason);
+		if (st.last_reason != 0u) {
+			/* IEEE 802.11 reason / status code that ended or rejected the
+			 * attempt -- see alp_cc3501e_wifi_status_t::last_reason.  0 means
+			 * none recorded (or bridge firmware too old to populate it), so
+			 * it is only printed when non-zero. */
+			shell_print(sh, "reason: %u", (unsigned int)st.last_reason);
+		}
 	}
 	return 0;
 }

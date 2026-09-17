@@ -220,11 +220,32 @@ lines — are hand-maintained against the swap-test evidence under
 
 ### E1M family
 
-After stripping the `CONFIG_ALP_SOC_*=y` line and the one identity
-comment, **all 6 AEN SKUs produce byte-identical `alp.conf` for every
-example.**  That is the load-bearing intra-AEN portability proof, and
-it is a claim about the *emitted Kconfig content*, unaffected by the
-paragraph below. E1M-NX9101 is currently NOT buildable at all
+**Every AEN SKU's `alp.conf` differs from every other AEN SKU's, for a
+given example, only in the documented family-wide expected-diff lines
+below** — it is not a byte-identity claim; measured directly (steps 1–5
+of the Method, run by hand across all seven AEN SKUs against
+`examples/peripheral-io/i2c-scanner`, `m55_hp`, since the tables above
+only prove each cell *generates*, not that sibling cells agree). Beyond
+the `CONFIG_ALP_SOC_*=y` line, the two SoM-identity comments (`# SoM
+silicon (...)` and `# SoM-intrinsic chip drivers (...)`, not one — see
+the E1M-X section below, which already had this right), and the
+`CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}` per-silicon identity
+block, AEN301/401/501/601/701 additionally carry
+`CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y` where AEN801/AEN803 do not (the
+OPTIGA Trust M secure element is DNP on this batch for both —
+`assembled: false` in their presets — while the other five SKUs' presets
+default it `assembled: true`), and AEN803 additionally emits two more,
+`CONFIG_ALP_SDK_SOM_DRAM_MBIT=512` and `CONFIG_ALP_SDK_SOM_FLASH_MBIT=256`
+— a legitimate, silicon-population-derived diff, the same class as the
+U85 lines in Gap G-1 below: AEN803 is the only AEN SKU whose external
+OSPI0 memories are `assembled: true` (both external
+`hyperram`/`ospi_memories.ospi0` fitted; #2084), so it is the only one
+whose `memory:` block resolves non-TBD `dram_mbit`/`flash_mbit` for the
+loader to emit. All five line families are now rows in the Expected
+diffs table below. That set of documented lines is still the
+load-bearing intra-AEN portability proof, and it is a claim about the
+*emitted Kconfig content*, unaffected by the paragraph below. E1M-NX9101
+is currently NOT buildable at all
 (`partial_hw_config: true` — see the generated Notes column — and, as
 of #1025, its only hw_rev, imx93 r1, is `status: tbd`, which the
 hw_rev-buildable gate refuses outright); the diff-family rows below
@@ -272,14 +293,17 @@ Expected diffs (legitimate — driven by silicon / SoM facts):
 
 | Line family                                       | Differs how                                         |
 | ------------------------------------------------- | --------------------------------------------------- |
-| `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one variant per AEN SKU                             |
+| `CONFIG_ALP_SOC_ALIF_ENSEMBLE_{E3..E8}=y`         | one per silicon variant, not one per AEN SKU -- AEN801 and AEN803 share E8 silicon and both emit `CONFIG_ALP_SOC_ALIF_ENSEMBLE_E8=y` (#2084) |
+| `CONFIG_ALP_SDK_SOC_{NAME,CPUS,NPUS,SRAM_KB}`     | per-silicon-variant identity block; differs across every SoC part (E3..E8, imx93) |
+| `CONFIG_ALP_SDK_CHIP_OPTIGA_TRUST_M=y`            | present when `optiga_trust_m` is `assembled: true` -- AEN301/401/501/601/701 default it true; AEN801/AEN803 both carry `assembled: false` (DNP this batch) |
+| `CONFIG_ALP_SDK_SOM_{DRAM,FLASH}_MBIT`            | only on E1M-AEN803 -- the only AEN SKU whose external OSPI0 memories (`hyperram`/`ospi_memories.ospi0`) are `assembled: true`, so the only one whose `memory:` block resolves non-TBD (#2084) |
 | `CONFIG_ALP_SOC_NXP_IMX9_IMX93=y`                 | only on E1M-NX9101                                  |
 | `CONFIG_ALP_SDK_CHIP_CC3501E=y`                   | on all AEN (on-module Wi-Fi/BLE coprocessor)        |
 | `CONFIG_ALP_SDK_CHIP_PCA9451A=y`                  | only on E1M-NX9101 (its on-module PMIC)             |
 | `CONFIG_ALP_SDK_INFERENCE_BACKEND_ETHOS_U_N93=y`          | only on E1M-NX9101                                  |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U55=y`          | on every AEN (every E3..E8 carries a U55 pair) + NX9101 fallback (none) |
 | `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U65=y`          | only on E1M-NX9101                                  |
-| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`          | AEN401 / AEN601 / AEN801 only (E4 / E6 / E8 silicon) |
+| `CONFIG_ALP_SDK_INFERENCE_ETHOS_U_VARIANT_U85=y`          | AEN401 / AEN601 / AEN801 / AEN803 only (E4 / E6 / E8 silicon; AEN803 shares AEN801's E8 -- measured on `examples/ai/wearable-activity-fall`, m55_hp, #2084) |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_HELIUM=y`          | every AEN m55_hp / m55_he slice (ARMv8.1-M Helium)  |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_REF=y`             | every NX9101 m33 slice (baseline ARMv8-M, no MVE)   |
 | `CONFIG_ALP_SDK_INFERENCE_TFLM_KERNEL_NEON=y`            | every cortex-a* slice across all SoMs               |

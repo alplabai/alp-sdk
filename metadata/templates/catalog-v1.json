@@ -84,7 +84,7 @@
           {
             "e1m": "E1M_GPIO_IO4",
             "macro": "EVK_PIN_ENCODER_SW",
-            "doc": "Rotary encoder push switch (PEC12R-4222F-S0024), 10k pull-up + 0.1uF debounce"
+            "doc": "Rotary encoder push switch (PEC11R-4215K-S0024), 10k pull-up + 0.1uF debounce"
           },
           {
             "e1m": "E1M_GPIO_PWM3",

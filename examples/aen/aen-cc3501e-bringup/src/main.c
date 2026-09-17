@@ -30,14 +30,21 @@
  *   SPI1.MOSI    P14_5          out         GPIO_28
  *   SPI1.MISO    P14_4          in          GPIO_29
  *   SPI1.SS0     P14_7          out         CC35 SPI0 CSN
- *   READY        P2_6           in          GPIO_17
+ *
+ * READY (CC35 GPIO_17) is deliberately left off this table: on the R2
+ * module this app targets it is NOT wired to Alif P2_6 -- P2_6 is E1M pad
+ * AH7 / I2S1_SCLK (the EVK's Arduino CK_RST), a DIFFERENT net from GPIO_17
+ * / E1M pad G3.  See cc3501e_bridge.c and cc3501e_reply_gate()'s own doc
+ * comment (chips/cc3501e/cc3501e_core.c) for the bench evidence and how a
+ * board that genuinely wires it can opt in.
  *
  * The current E1M-AEN rev uses the dwc-ssi hardware SS0 chip-select on
- * P14_7 and a READY input on P2_6.  Each protocol phase is framed by SS0;
- * READY tells the host when the slave has re-armed for the next phase.  The
- * framing lives in the host driver (chips/cc3501e/cc3501e.c) and its mirror
- * on the firmware side (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c).
- * This app just opens the bus and calls the driver.
+ * P14_7; this app leaves the OPTIONAL READY gate unwired (fw->ready_pin
+ * stays NULL) by default, so each protocol phase is framed by SS0 alone
+ * and paced by the driver's fixed settle.  The framing lives in the host
+ * driver (chips/cc3501e/cc3501e_core.c) and its mirror on the firmware side
+ * (cc3501e-bridge-firmware:hal/ti/transport_hw_ti_spi.c).  This app just
+ * opens the bus and calls the driver.
  *
  * This file is ~50 % comment by design: examples are documentation for
  * hand-written firmware, not just runnable code.
@@ -85,7 +92,13 @@
  * and answers BUSY until it finishes; the host re-issues until OK/timeout). */
 #define CC3501E_MAC_TIMEOUT_MS  2000u
 #define CC3501E_SCAN_TIMEOUT_MS 8000u
-#define CC3501E_CONN_TIMEOUT_MS 15000u
+/* The bridge firmware's own worst case for one STA connect is 10 s
+ * Wlan_RoleUp + 30 s L2 association + 30 s DHCP-lease poll
+ * (cc3501e-bridge-firmware:hal/ti/cc3501e_hw_ti_wifi.c) = 70 s. A shorter
+ * budget races that bound: the bounded-retry loop below re-issues
+ * WIFI_CONNECT_STA on timeout, and a retry fired before the bridge's own
+ * connect actually finishes lands on top of it. */
+#define CC3501E_CONN_TIMEOUT_MS 75000u
 
 /* Max scan records to collect into the witness-backed array. */
 #define CC3501E_SCAN_MAX_RECORDS 16u
@@ -1306,13 +1319,21 @@ int main(void)
 				g_cc3501e_witness.mac_lo = (uint32_t)mac[0] | ((uint32_t)mac[1] << 8) |
 				                           ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
 				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
-				/* Is the READY line REAL?  Every "P2_6 reads 0" claim so far came
-				 * from a raw register poke at 0x49002050 bit6 taken from a doc,
-				 * never from the GPIO driver.  Read it the supported way while the
-				 * device is idle (main.c raises READY at boot): 1 = the CC35
-				 * GPIO17 -> P2_6 net works and the READY gate can be trusted;
-				 * 0 = the line really is dead here and polled update mode cannot
-				 * be timed. */
+				/* Is the READY line REAL?  This probe ALWAYS prints rc=-<NOSUPPORT>
+				 * on the R2 module e1m-aen-evk-01 currently holds: cc3501e_bridge.c
+				 * does not wire fw->ready_pin by default, because on that module
+				 * Alif P2_6 is E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST),
+				 * NOT the CC3501E GPIO17 READY net -- see cc3501e_bridge.c and
+				 * cc3501e_reply_gate()'s own doc comment in
+				 * chips/cc3501e/cc3501e_core.c. A "clean 1.767 V line idling HIGH
+				 * with narrow LOW pulses" is what this probe reports (scope
+				 * 2026-08-24) on a separately hand-reworked r1 unit
+				 * (its own serial was never recorded -- see changelog.d/1799.md)
+				 * where GPIO17 really was bodge-wired to P2_6 -- not evidence about
+				 * this module. The pinctrl/gpio2 wiring below stays enabled
+				 * regardless, for the SEPARATE alp,cc3501e-attn async-event node
+				 * (#1721/#130), which reads the same physical pad directly, not
+				 * through fw->ready_pin. */
 				{
 					bool               rdy = false;
 					const alp_status_t rs  = (fw.ready_pin != NULL)

@@ -163,6 +163,15 @@ int main(void)
 	       (int)sample,
 	       (uint16_t)sample);
 
+	/* #2083: seq.buffer points at `sample`, so every further adc_read(adc,
+	 * &seq) call -- including the #1823 timing loop below -- overwrites it.
+	 * Capture the value from THIS gated single-shot read now, before the
+	 * timing loop runs, so the RESULT line reports that reading instead
+	 * of whatever the timing loop's last iteration left behind.  The
+	 * value itself is still REPORTED only, not part of the PASS gate --
+	 * see the note at the PASS-gate block below. */
+	uint32_t gated_sample = sample;
+
 	/*
 	 * REPORTED (not gated): the raw 12-bit code scaled to microvolts at the
 	 * driver-fixed 1.8 V reference (ADC_VREF_CONT=0x10, RDIV=0; analog_ctrl.h:
@@ -262,7 +271,7 @@ int main(void)
 	if (ok) {
 		printk("RESULT PASS: adc12_0 setup+read rc=0, single-shot ran, "
 		       "controller idle, raw=%d\n",
-		       (int)sample);
+		       (int)gated_sample);
 	} else {
 		printk("RESULT FAIL: setup_rc=%d read_rc=%d idle=%s "
 		       "(start_src=0x%08x control=0x%08x)\n",

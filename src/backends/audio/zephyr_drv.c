@@ -16,6 +16,13 @@
  *   - struct hw_in_be   (dmic device + k_mem_slab + DSP filter state)
  *   - struct hw_out_be  (alp_i2s_t handle + started flag + Q8.8 vol)
  *
+ * issue #2132: the DesignWare I2S TX driver refuses to start with an
+ * empty queue.  That is fixed once, at the lowest shared layer both
+ * this backend and the portable <alp/i2s.h> API route through --
+ * src/backends/i2s/zephyr_drv.c's z_start()/z_write()/z_stop() -- not
+ * here.  This backend stays a thin alp_i2s_* wrapper; see that file's
+ * header comment for the deferred-start state machine.
+ *
  * The dispatcher (src/audio_dispatch.c) owns the public-facing
  * struct alp_audio_in / struct alp_audio_out pools; this backend
  * carries only the Zephyr-specific per-handle blobs.
@@ -124,8 +131,20 @@ static alp_status_t errno_to_alp(int err)
 	/* Delegates to the shared negative-errno baseline (issue #1638).
 	 * This switch was one of 27 hand-copied copies that had drifted; the
 	 * arms it carried all agreed with the baseline, so the mapping it
-	 * produced for them is unchanged. */
-	return alp_status_from_zephyr_errno(err);
+	 * produced for them is unchanged.
+	 *
+	 * One local override (issue #2133 round 4d): a non-blocking empty
+	 * read (alp_audio_in_read(..., timeout_ms=0)) reaches k_msgq_get()
+	 * with K_NO_WAIT, which returns -ENOMSG for "nothing queued right
+	 * now" -- the baseline has no arm for it, so it fell through to
+	 * ALP_ERR_IO ("dropped data, sticky") instead of the timeout this
+	 * actually is. Mirrors the existing -EAGAIN override one arm up in
+	 * the shared baseline.
+	 */
+	static const alp_errno_override_t overrides[] = {
+		{ -ENOMSG, ALP_ERR_TIMEOUT },
+	};
+	return alp_status_from_zephyr_errno_ex(err, overrides, ARRAY_SIZE(overrides));
 }
 
 #endif /* CONFIG_ALP_SDK_AUDIO_IN */
@@ -261,6 +280,12 @@ static alp_status_t z_in_open(const alp_audio_config_t     *cfg,
 		.mem_slab   = &be->slab,
 	};
 	struct dmic_cfg dcfg = {
+        /* Generic PDM bit-clock window -- this PORTABLE backend names no mic
+         * part number, so it declares no mic-specific range here. A real
+         * mic's clock limits are a BOARD fact and belong in the SoM/carrier
+         * devicetree instead (alif,alif-pdm.yaml's clk-frequency-min/
+         * clk-frequency-max, issue #2133 round 3); dmic_alif_pdm_configure()
+         * enforces the intersection of this window and that DT range. */
         .io =
             {
                 .min_pdm_clk_freq = 1000000,
@@ -461,6 +486,9 @@ static alp_status_t z_out_start(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* issue #2132: alp_i2s_start() itself now tolerates -- and defers
+	 * past -- an empty TX queue (src/backends/i2s/zephyr_drv.c), so this
+	 * is a plain pass-through again; no audio-level bookkeeping needed. */
 	alp_status_t s = alp_i2s_start(be->i2s);
 	if (s == ALP_OK) be->started = true;
 	return s;
@@ -475,6 +503,10 @@ static alp_status_t z_out_stop(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return ALP_ERR_NOT_READY;
+	/* issue #2132: alp_i2s_stop() itself now picks DROP vs DRAIN
+	 * correctly depending on whether a real START ever fired
+	 * (src/backends/i2s/zephyr_drv.c), so this stays a plain
+	 * pass-through regardless of what be->started believes. */
 	alp_status_t s = alp_i2s_stop(be->i2s);
 	if (s == ALP_OK) be->started = false;
 	return s;
@@ -526,6 +558,11 @@ static alp_status_t z_out_write(alp_audio_out_backend_state_t *state,
 			alp_status_t s =
 			    alp_i2s_write(be->i2s, chunk, n * bytes_per_frame(&state->cfg), timeout_ms);
 			if (s != ALP_OK) {
+				/* issue #2132: an alp_i2s_write() failure -- including a
+				 * still-pending start() retry that failed -- never
+				 * leaves a block queued (src/backends/i2s/zephyr_drv.c
+				 * DROPs it before returning), so this chunk was NOT
+				 * queued and must not be counted toward out_frames. */
 				if (out_frames != NULL) *out_frames = pushed;
 				return s;
 			}
@@ -576,6 +613,10 @@ static void z_out_close(alp_audio_out_backend_state_t *state)
 #if defined(CONFIG_ALP_SDK_AUDIO_OUT)
 	struct hw_out_be *be = (struct hw_out_be *)state->be_data;
 	if (be == NULL) return;
+	/* issue #2132: whether or not be->started is accurate, alp_i2s_close()
+	 * below now unconditionally releases any queued/in-flight TX blocks
+	 * (src/backends/i2s/zephyr_drv.c's z_close()), so this stop-if-started
+	 * shortcut is just a courtesy DRAIN, not load-bearing for safety. */
 	if (be->started) {
 		(void)alp_i2s_stop(be->i2s);
 		be->started = false;

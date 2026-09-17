@@ -28,6 +28,8 @@
 #define TAS2563_REG_TDM_CFG2  0x08u /* TDM configuration 2  (§7.5.10, p.69). */
 #define TAS2563_REG_TDM_CFG5  0x0Bu /* TDM TX V-sense slot  (§7.5.13, p.71). */
 #define TAS2563_REG_TDM_CFG6  0x0Cu /* TDM TX I-sense slot  (§7.5.14, p.71). */
+#define TAS2563_REG_TDM_DET   0x11u /* DSP Mode & TDM_DET, RO (§7.5.19, p.73). */
+#define TAS2563_REG_INT_MASK0 0x1Au /* Interrupt mask 0     (§7.5.28, p.77). */
 #define TAS2563_REG_INT_LTCH0 0x24u /* Latched interrupts 0 (§7.5.36, p.82). */
 #define TAS2563_REG_INT_LTCH1 0x25u /* Latched interrupts 1 (§7.5.37, p.83). */
 #define TAS2563_REG_INT_LTCH3 0x26u /* Latched interrupts 2 (§7.5.38, p.84). */
@@ -83,6 +85,41 @@
 #define TAS2563_TDM_SENSE_TX        0x40u
 #define TAS2563_TDM_SENSE_SLOT_MASK 0x3Fu
 #define TAS2563_TDM_SENSE_FIELD     0x7Fu /* TX enable | slot. */
+
+/* DSP Mode & TDM_DET (0x11), read-only -- §7.5.19 Table 7-119, p.73.
+ * FS_RATIO is bits 6..3 (detected SBCLK:FSYNC ratio), FS_RATE is bits
+ * 2..0 (detected TDM sample rate); bit 7 is reserved.  Reset value
+ * 7Fh is itself "no valid clock has ever been detected": FS_RATIO =
+ * Fh ("Invalid ratio") and FS_RATE = 7h ("Error condition").
+ *
+ * §7.4.2 Table 7-23 "PCM Audio Sample Rates" (p.40) and Table 7-24
+ * "PCM SBCLK to FSYNC Ratio" (pp.40-41) DISAGREE with this register's
+ * own field table (Table 7-119) at the edges of both fields: Table
+ * 7-23 marks FS_RATE 000b/010b Reserved where Table 7-119 gives them
+ * real rates -- the same contradiction samp_rate_code() above follows
+ * Table 7-108 through for the write side; Table 7-24 marks FS_RATIO
+ * 0h-3h Reserved and Fh "Error Condition" where Table 7-119 decodes
+ * 00h-03h as ratios 16/24/32/48 and 0Fh specifically as "Invalid
+ * ratio".  tas2563_read_tdm_detect() decodes per Table 7-119, the
+ * register's OWN field description -- what the silicon reports back on
+ * this exact read -- rather than picking a table silently; Tables
+ * 7-23/7-24 mark those same codes Reserved for CONFIGURATION (what
+ * tas2563_configure_i2s() may legally write to SAMP_RATE, a different
+ * field), which is a different question from what this read-only
+ * register may report having detected.  0Bh-0Eh is Reserved in both
+ * tables and decodes the same as 0Fh: no ratio reported. */
+#define TAS2563_TDM_DET_FS_RATIO_MASK    0x78u
+#define TAS2563_TDM_DET_FS_RATIO_SHIFT   3u
+#define TAS2563_TDM_DET_FS_RATE_MASK     0x07u
+#define TAS2563_TDM_DET_FS_RATE_SHIFT    0u
+#define TAS2563_TDM_DET_FS_RATIO_INVALID 0x0Fu /* Table 7-119: "Invalid ratio". */
+#define TAS2563_TDM_DET_FS_RATE_ERROR    0x07u /* Table 7-119: "Error condition". */
+
+/* INT_MASK0 (0x1A) -- §7.5.28, p.77.  Reset value FCh (1111 1100b):
+ * bits 1..0 (OVER_CURRENT/OVER_TEMP) are already 0 = unmasked, bit 2
+ * (TDM clock error, aligned with INT_LTCH0[2] / TAS2563_FAULT_TDM_CLOCK,
+ * §7.5.36 p.82) is 1 = masked.  0 unmasks a bit. */
+#define TAS2563_INT_MASK0_TDM_CLOCK 0x04u
 
 /* INT & CLK CFG (0x30) -- §7.5.43 Table 7-143, p.86.  CLR_INTP_LTCH
  * is the self-clearing bit 2 (§7.3.12 Table 7-11, p.37);
@@ -174,41 +211,114 @@ alp_status_t tas2563_init(tas2563_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, alp
 	ctx->addr = addr_7bit;
 	ctx->sd_n = sd_n;
 
-	/* If we own the SD_N pin, drive it high to leave HW shutdown.
-     * If sd_n == NULL the caller is managing that line elsewhere
-     * (or it's tied permanently asserted on the board). */
+	/* If we own the SD_N pin, drive it high to RELEASE hardware
+	 * shutdown.  If sd_n == NULL the caller is managing that line
+	 * elsewhere (or it's tied permanently asserted on the board).
+	 *
+	 * Write BEFORE configure, THEN write again after: on the AEN801 EVK,
+	 * SD_N is gpio5, a `snps,designware-gpio` (`zephyr/dts/alif/
+	 * ensemble_e8_peripherals.dtsi`).  Its `dw_pin_config()`
+	 * (`drivers/gpio/gpio_dw.c`) switches direction to output FIRST and
+	 * only touches the data register for `GPIO_OUTPUT_INIT_HIGH`/`_LOW`
+	 * -- `ALP_GPIO_OUTPUT` alone carries neither flag (see
+	 * `_to_gpio_flags()`, `src/backends/gpio/zephyr_drv.c`), so
+	 * configuring before writing at all would switch direction to
+	 * output while the data register still held its reset-time level
+	 * (not verified as 0 on this board's actual AE822 silicon -- the
+	 * DesignWare IP's data-register reset value is a synthesis
+	 * parameter; the fix below does not depend on which it is), driving
+	 * an unplanned pulse onto SD_N -- a net shared with U28 on this
+	 * board (see "Shared SD_N / IRQZ nets" above) -- for however long
+	 * the two calls take.  The first write, before configure, closes
+	 * that glitch window on real gpio_dw silicon: `alp_gpio_write()` has
+	 * no dependency on the pin already being configured
+	 * (`src/gpio_dispatch.c` gates only on the handle's open/closed
+	 * lifecycle), and `gpio_dw_port_set_bits_raw()` writes the data
+	 * register unconditionally, independent of direction -- but ONLY if
+	 * sd_n is declared GPIO_ACTIVE_HIGH (see
+	 * include/alp/chips/tas2563.h's "sd_n must be declared
+	 * GPIO_ACTIVE_HIGH" note; no in-tree board passes a non-NULL sd_n
+	 * today, so this precondition is currently unexercised, not
+	 * unverified-and-live).  It is NOT sufficient by itself on every
+	 * backend, though: Zephyr's `gpio_emul` (native_sim, this test
+	 * suite) masks `port_set_bits_raw()`'s write against the pins
+	 * CURRENTLY configured as output, so a write issued before
+	 * configure is silently dropped there IF the pin is not already
+	 * configured as output from an earlier state (rather than
+	 * redundant, as on gpio_dw) -- the opposite failure mode, and one
+	 * this fake's shared per-device state makes order-dependent across
+	 * test cases (see test_tas2563_init_writes_sd_n_before_configuring_it,
+	 * tests/zephyr/chips/src/test_audio.c, which pre-arms the pin so the
+	 * drop is guaranteed rather than incidental).  The
+	 * second write, after configure, is what makes the final state
+	 * correct on backends like that one; it costs one redundant
+	 * register write on gpio_dw, where the first write already landed.
+	 * Verified against the Zephyr/DesignWare and gpio_emul backends
+	 * only: the sw_fallback and testing GPIO backends have no real pin
+	 * to glitch either way, but the CC3501E GPIO proxy's behaviour on a
+	 * write before its remote side has ever been configured is
+	 * UNVERIFIED. */
 	if (sd_n != NULL) {
-		alp_status_t s = alp_gpio_configure(sd_n, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
+		alp_status_t s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> release HW shutdown */
 		if (s != ALP_OK) return s;
-		s = alp_gpio_write(sd_n, true); /* AMP.ENABLE high -> chip out of HW shutdown */
+		s = alp_gpio_configure(sd_n, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
 		if (s != ALP_OK) return s;
+		s = alp_gpio_write(sd_n, true); /* re-assert: see the write-before-configure note above */
+		if (s != ALP_OK) return s;
+		/* SLASET3D §7.3.11.1 / §9.2: I2C is disabled in Hardware
+		 * Shutdown, and SDZ needs TAS2563_RESET_SETTLE_US to settle
+		 * (OTP load) before the first I2C access below.  This only
+		 * RELEASES shutdown -- if SDZ was already high (R138's
+		 * pull-up, or a warm restart that never asserted it), no
+		 * hardware reset actually happens on this path; performing an
+		 * actual hardware reset (an explicit low pulse) is the
+		 * caller's job, not this function's -- see "Shared SD_N /
+		 * IRQZ nets" above for why this function must not pulse a pin
+		 * it may share with another amp. */
+		alp_delay_us(TAS2563_RESET_SETTLE_US);
 	}
 
-	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0.  Page 0
-	 * alone is not enough: BOOK survives software shutdown along
-	 * with the rest of the register state (§7.3.11.2, p.34), which
-	 * is exactly the warm-restart case the park-write below exists
-	 * for -- a previous firmware left mid-tuning would leave BOOK
-	 * non-zero, and REVID/PWR_CTL would then address coefficient
-	 * space instead of the control registers. */
+	/* Select book 0 / page 0 first: BOOK survives software shutdown
+	 * (§7.3.11.2, p.34) -- Hardware Shutdown, unlike software shutdown,
+	 * loses every register (§7.3.11.1, p.34) -- so a device left
+	 * mid-tuning by previous firmware and then only ever software-shut
+	 * down could have BOOK non-zero, and SW_RESET (like every other
+	 * control register this driver touches) only lives at book 0 /
+	 * page 0. */
 	alp_status_t s = select_book0_page0(ctx);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
+
+	/* Software reset (SLASET3D §7.5.3, p.65): bit 0 of SW_RESET,
+	 * self-clearing, resets every register to its POR default.  SLAA954
+	 * "TAS2563 End System Integration Guide" §3.1 Case 1 recommends a
+	 * software reset before initialization, for reliable operation (its
+	 * hardware-reset recommendation is the caller's job -- see the
+	 * sd_n branch above, which only RELEASES shutdown, not a reset).
+	 * This runs before anything else init configures, since it wipes
+	 * whatever came before it -- including, incidentally, PAGE/BOOK
+	 * back to 0, which is already where the select above left them.
+	 * SLASET3D does not call out any special ACK behaviour for this
+	 * write; it is a normal single-byte write like every other one in
+	 * this driver.  §9.2's 100 us OTP-load floor applies here exactly
+	 * as it does after a hardware reset. */
+	s = reg_write(ctx, TAS2563_REG_SW_RESET, 0x01u);
+	if (s != ALP_OK) return s;
+	alp_delay_us(TAS2563_RESET_SETTLE_US);
+
+	/* I2C connectivity probe via REVID on BOOK 0 / PAGE 0. */
 	uint8_t rev = 0;
 	s           = reg_read(ctx, TAS2563_REG_REVID, &rev);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
 
 	/* Park the amplifier in software shutdown before handing the
-	 * context back.  This is the part's own reset value (PWR_CTL
-	 * reset = Eh, MODE = 10b -- §7.5.4 Table 7-104, p.66) and
-	 * releasing SD_N also lands there (§7.3.11.1, p.34), but a warm
-	 * restart with SD_N board-tied high never went through either:
-	 * software shutdown preserves register state (§7.3.11.2, p.34),
-	 * so the previous firmware's ACTIVE would survive into this
-	 * init.  For a part rated to ~10 W peak into 4 ohm (§1, p.1),
-	 * one write is cheap insurance against handing back a context
-	 * that is already driving a speaker. */
+	 * context back.  The software reset above already restores PWR_CTL
+	 * to its POR default (Eh, MODE = 10b -- §7.5.4 Table 7-104, p.66),
+	 * so this write is redundant on every path that reaches it today --
+	 * kept anyway as an explicit, cheap statement of the state this
+	 * function hands back, in case a future change ever makes the reset
+	 * above conditional again. */
 	s = reg_update(ctx, TAS2563_REG_PWR_CTL, TAS2563_PWR_CTL_MODE_MASK, TAS2563_MODE_SHUTDOWN);
-	if (s != ALP_OK) return ALP_ERR_NOT_READY;
+	if (s != ALP_OK) return s;
 
 	ctx->initialised = true;
 	return ALP_OK;
@@ -329,11 +439,34 @@ static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
 	}
 }
 
-/* RX_WLEN[1:0] and RX_SLEN[1:0] -- §7.5.10 Table 7-110, p.70.  Slot
- * length is derived from word length because alp_i2s_config_t has no
- * separate slot field: 16-bit words in 16-bit slots, 24 in 24, 32 in
- * 32.  A frame carrying narrow words in wider slots needs a direct
- * TDM_CFG2 write, not this helper.
+/* RX_WLEN[1:0] and RX_SLEN[1:0] -- §7.5.10 Table 7-110, p.70.
+ *
+ * Slot length is NOT simply word length.  SLASET3D §7.4.2 "TDM Port"
+ * (p.39) states outright: "The device supports 2 time slots at 32
+ * bits in width and 4 or 8 time slots at 16, 24 or 32 bits in width."
+ * A 2-slot frame has exactly ONE legal slot width, 32 bits, no matter
+ * how narrow the WORD inside it is (the word sits left-justified
+ * within the slot by default, RX_JUSTIFY, §7.5.9).  This is not
+ * academic for `channels == 2`: the Alif DW I2S3 peripheral
+ * (zephyr/drivers/i2s/i2s_dw.c) hardcodes a 32-cycle word-select
+ * length (`.cfg.wss_len = WSS_LEN`) and derives its bit clock as
+ * `sclk = 2 * 32 * sample_rate` -- SBCLK/FSYNC is always 64, a 2-slot
+ * frame, independent of @ref alp_i2s_config_t.word_bits.  Mapping a
+ * 16-bit word to a 16-bit slot there (the old word-equals-slot rule)
+ * put `RX_SLOT_R` (TDM_CFG3 reset `10h`, §7.5.11) on the PADDING half
+ * of a 64-bit frame, not the actual right-channel word.  (The Alif
+ * I2S3 bit-clock divider this depends on is itself BENCH-UNVERIFIED --
+ * see i2s_dw.c's own alp-sdk comment on `clock_control_set_rate` -- so
+ * the SBCLK/FSYNC ratio actually achieved on real silicon has not been
+ * measured either; this fix corrects the register programming for the
+ * ratio the driver source says it configures.)
+ *
+ * For any other channel count, §7.4.2 allows 16/24/32-bit slots at
+ * every word width (4- or 8-slot TDM), so word-equals-slot stays the
+ * default there.  This driver has no host bus that has ever opened
+ * more than 2 channels, so `channels == 2` is the narrowest rule that
+ * fixes the one case this driver actually exercises, not a general
+ * TDM slot-width policy for frame widths nothing here uses yet.
  *
  * Table 7-110 also encodes 20-bit words (RX_WLEN = 01b).  It is
  * deliberately NOT mapped here: <alp/i2s.h> documents
@@ -342,23 +475,38 @@ static alp_status_t samp_rate_code(uint32_t hz, uint8_t *code_out)
  * that cannot be reached through the real API is a mapping that
  * cannot be tested.  20-bit lands in the ALP_ERR_OUT_OF_RANGE arm
  * with every other unencodable width. */
-static alp_status_t word_len_codes(uint8_t bits, uint8_t *wlen_out, uint8_t *slen_out)
+static alp_status_t
+word_len_codes(uint8_t bits, uint8_t channels, uint8_t *wlen_out, uint8_t *slen_out)
 {
 	switch (bits) {
 	case 16u:
 		*wlen_out = 0u;
+		break;
+	case 24u:
+		*wlen_out = 2u;
+		break;
+	case 32u:
+		*wlen_out = 3u;
+		break;
+	default:
+		return ALP_ERR_OUT_OF_RANGE;
+	}
+
+	if (channels == 2u) {
+		*slen_out = 2u; /* 32-bit slot: the only one a 2-slot frame supports. */
+		return ALP_OK;
+	}
+
+	switch (bits) {
+	case 16u:
 		*slen_out = 0u;
 		return ALP_OK;
 	case 24u:
-		*wlen_out = 2u;
 		*slen_out = 1u;
 		return ALP_OK;
-	case 32u:
-		*wlen_out = 3u;
-		*slen_out = 2u;
-		return ALP_OK;
 	default:
-		return ALP_ERR_OUT_OF_RANGE;
+		*slen_out = 2u; /* 32u, already validated above. */
+		return ALP_OK;
 	}
 }
 
@@ -411,7 +559,7 @@ alp_status_t tas2563_configure_i2s(tas2563_t              *ctx,
 	if (s != ALP_OK) return s;
 
 	uint8_t wlen = 0, slen = 0;
-	s = word_len_codes(host_cfg->word_bits, &wlen, &slen);
+	s = word_len_codes(host_cfg->word_bits, host_cfg->channels, &wlen, &slen);
 	if (s != ALP_OK) return s;
 
 	s = select_page(ctx, 0);
@@ -500,6 +648,13 @@ tas2563_configure_fault_pin(tas2563_t *ctx, alp_gpio_t *irq_n, bool chip_interna
 	    ctx, TAS2563_REG_INT_CLK, TAS2563_INT_CLK_PIN_CFG_MASK, TAS2563_INT_CLK_PIN_CFG_LATCH);
 	if (s != ALP_OK) return s;
 
+	/* TDM clock error is masked at reset (INT_MASK0 = FCh, bit 2) and
+	 * nothing else in this driver unmasks it (#2140) -- a caller
+	 * binding a fault pin wants that fault reaching both the pin and
+	 * tas2563_read_faults(), not silently discarded. */
+	s = reg_update(ctx, TAS2563_REG_INT_MASK0, TAS2563_INT_MASK0_TDM_CLOCK, 0u);
+	if (s != ALP_OK) return s;
+
 	ctx->irq_n = irq_n;
 	return ALP_OK;
 }
@@ -542,12 +697,116 @@ alp_status_t tas2563_read_faults(tas2563_t *ctx, uint32_t *faults_out)
 	return ALP_OK;
 }
 
+/* FS_RATIO[3:0] -- §7.5.19 Table 7-119, p.73.  00h..0Ah decode to real
+ * ratios; 0Bh-0Eh (Reserved) and 0Fh (TAS2563_TDM_DET_FS_RATIO_INVALID)
+ * both decode to 0, meaning "no ratio to report" -- see the field
+ * macros' comment above for why this driver decodes per this table
+ * rather than Table 7-24. */
+static uint32_t tdm_det_ratio_value(uint8_t code)
+{
+	switch (code) {
+	case 0x00u:
+		return 16u;
+	case 0x01u:
+		return 24u;
+	case 0x02u:
+		return 32u;
+	case 0x03u:
+		return 48u;
+	case 0x04u:
+		return 64u;
+	case 0x05u:
+		return 96u;
+	case 0x06u:
+		return 128u;
+	case 0x07u:
+		return 192u;
+	case 0x08u:
+		return 256u;
+	case 0x09u:
+		return 384u;
+	case 0x0Au:
+		return 512u;
+	default:
+		return 0u; /* 0Bh-0Eh Reserved, 0Fh Invalid ratio. */
+	}
+}
+
+/* FS_RATE[2:0] -- §7.5.19 Table 7-119, p.73.  Each code covers one
+ * 44.1 kHz-family rate and one 48 kHz-family rate, same ambiguity as
+ * samp_rate_code() above: which of the pair is actually running is not
+ * something this register (or this driver) can tell apart, so both
+ * bounds of the detected pair are reported.  7h ("Error condition",
+ * TAS2563_TDM_DET_FS_RATE_ERROR) reports both as 0. */
+static void tdm_det_rate_hz(uint8_t code, uint32_t *low_hz_out, uint32_t *high_hz_out)
+{
+	static const uint32_t low[7]  = { 7350u, 14700u, 22050u, 29400u, 44100u, 88200u, 176400u };
+	static const uint32_t high[7] = { 8000u, 16000u, 24000u, 32000u, 48000u, 96000u, 192000u };
+	if (code < 7u) {
+		*low_hz_out  = low[code];
+		*high_hz_out = high[code];
+	} else {
+		*low_hz_out  = 0u;
+		*high_hz_out = 0u;
+	}
+}
+
+alp_status_t tas2563_read_tdm_detect(tas2563_t *ctx, tas2563_tdm_detect_t *detect_out)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (detect_out == NULL) return ALP_ERR_INVAL;
+
+	alp_status_t s = select_page(ctx, 0);
+	if (s != ALP_OK) return s;
+
+	uint8_t reg = 0;
+	s           = reg_read(ctx, TAS2563_REG_TDM_DET, &reg);
+	if (s != ALP_OK) return s;
+
+	uint8_t fs_ratio =
+	    (uint8_t)((reg & TAS2563_TDM_DET_FS_RATIO_MASK) >> TAS2563_TDM_DET_FS_RATIO_SHIFT);
+	uint8_t fs_rate =
+	    (uint8_t)((reg & TAS2563_TDM_DET_FS_RATE_MASK) >> TAS2563_TDM_DET_FS_RATE_SHIFT);
+
+	detect_out->sbclk_fsync_ratio = tdm_det_ratio_value(fs_ratio);
+	tdm_det_rate_hz(fs_rate, &detect_out->sample_rate_low_hz, &detect_out->sample_rate_high_hz);
+
+	/* "No valid clock" per §7.5.19's own reset-state semantics: the
+	 * reset value 7Fh IS FS_RATIO=Fh (no ratio decoded, sbclk_fsync_ratio
+	 * == 0 above) AND FS_RATE=7h (TAS2563_TDM_DET_FS_RATE_ERROR).  Either
+	 * one on its own already means there is nothing usable in this
+	 * readback, so clock_valid requires both fields to decode to
+	 * something real. */
+	detect_out->clock_valid =
+	    (detect_out->sbclk_fsync_ratio != 0u) && (fs_rate != TAS2563_TDM_DET_FS_RATE_ERROR);
+
+	return ALP_OK;
+}
+
 alp_status_t tas2563_clear_faults(tas2563_t *ctx)
 {
 	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
 	alp_status_t s = select_page(ctx, 0);
 	if (s != ALP_OK) return s;
 	return reg_update(ctx, TAS2563_REG_INT_CLK, TAS2563_INT_CLK_CLR_LTCH, TAS2563_INT_CLK_CLR_LTCH);
+}
+
+alp_status_t tas2563_resume(const tas2563_t *ctx)
+{
+	/* Cast away const: both calls below only reach the bus through
+	 * ctx->bus/ctx->addr, which this function does not mutate itself --
+	 * see the header's rationale for why the pointer is const here even
+	 * though the callees it forwards to are not. */
+	tas2563_t *mutable_ctx = (tas2563_t *)ctx;
+
+	/* Clear the latches FIRST: the datasheet's own field tables
+	 * (§7.5.36-§7.5.39, cited in tas2563_clear_faults()'s doc) tie a
+	 * shutdown-causing fault to CLR_INTP_LTCH, not to MODE, so clearing
+	 * after going ACTIVE would leave a stale TDM-clock-error latch that
+	 * re-arms the very shutdown this function exists to undo. */
+	alp_status_t s = tas2563_clear_faults(mutable_ctx);
+	if (s != ALP_OK) return s;
+	return tas2563_set_mode(mutable_ctx, TAS2563_MODE_ACTIVE);
 }
 
 /* ------------------------------------------------------------------ */

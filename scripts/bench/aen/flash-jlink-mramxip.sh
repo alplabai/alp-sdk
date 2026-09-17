@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-jlink-mramxip.sh [--atoc-unqueryable] <build-dir> [post_boot_read_bytes_hex]
+# scripts/bench/aen/flash-jlink-mramxip.sh [--replace-atoc] [--atoc-unqueryable] <build-dir> [post_boot_read_bytes_hex]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives JLinkExe + the Alif SETOOLS, both Linux binaries on this
@@ -49,59 +49,82 @@ set -e
 # shellcheck source=scripts/bench/aen/bench-env.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
-# #2025 -- Flow D has no SE-UART, so it cannot query the resident ATOC the way
-# the Flow A guard (bench_atoc_replace_guard, scripts/bench/aen/bench-env.sh)
-# does before `app-write-mram -p` / a J-Link `loadbin` REPLACES it. This flag
-# is a deliberate, differently-named acknowledgement, NOT the Flow A
-# `--replace-atoc` opt-out: an operator on a no-SE-UART slot (e.g.
-# e1m-aen-evk-03) will pass this on every single Flow D run, and that habit
-# must never also silence Flow A's guard on a board where the resident TOC
-# genuinely can be read. Do not merge or alias the two flags.
+# #2025/#2027 -- Flow D has no SE-UART BY DESIGN ("J-Link only, no serial
+# device required"), so when one is not exported it cannot query the
+# resident ATOC the way the Flow A guard (bench_atoc_replace_guard,
+# scripts/bench/aen/bench-env.sh) does before a J-Link `loadbin` REPLACES it.
+# --atoc-unqueryable is a deliberate, differently-named acknowledgement for
+# THAT case, NOT the Flow A `--replace-atoc` opt-out: an operator on a
+# no-SE-UART slot (e.g. e1m-aen-evk-03) will pass this on every single Flow D
+# run, and that habit must never also silence Flow A's guard on a board
+# where the resident TOC genuinely can be read. Do not merge or alias the
+# two flags. --replace-atoc is also accepted here, for the OTHER case: a
+# bench slot that DOES have an SE-UART wired -- see bench_flowd_atoc_guard
+# in bench-env.sh, which runs the real shared guard whenever $SE_UART is
+# exported and usable instead of requiring a blind acknowledgement here.
 #
-# Open question blocking the real (query-based) guard on Flow D: does
-# `maintenance -c $SE_UART -opt gettoc` reset the target? If it does, AP[3]
-# (APAddr 0x00300000) disappears (see the #1902 note below on this script's
-# pre-programming `h` gate) and step 3's halt-before-programming gate (exit 5)
-# would fail on every run -- so an SE-UART query cannot front this script's
-# write regardless of SE_UART's availability, until that's verified on
-# silicon.
+# THIS SCRIPT SPECIFICALLY -- an open question, still UNVERIFIED ON SILICON
+# because this bench cannot be reached to test it: does
+# `maintenance -c $SE_UART -opt gettoc` itself reset the target? If it does,
+# AP[3] (APAddr 0x00300000) disappears (see the #1902 note below on this
+# script's pre-programming `h` gate) between the guard's query and step 3's
+# halt-before-programming check. The guard call sits right after the
+# reset-vector sanity check (below, "0. SANITY") -- which needs only the
+# local .bin and no probe -- and still well before this script's own first
+# J-Link touch (step 0b) or either `loadbin`, specifically so any reset the
+# query might trigger has the most possible real time (SETOOLS invocation,
+# staging, app-gen-toc) to complete its reboot before step 3 tries to halt --
+# but that is a mitigation, not a proof. If it is NOT enough and the
+# interaction is real, the documented failure mode is the existing
+# "!! HALT FAILED before programming" abort (exit 5, below): NOTHING is
+# written and slot0 keeps its previous contents -- a safe, explicit abort,
+# not a silent one and not MRAM corruption. Exit 5 is NOT by itself the
+# signal that this open question is real, though: bench_flowd_atoc_guard's
+# OWN abort (an unverified or foreign-entry resident-ATOC query) also
+# returns 5, propagated straight through from below -- with $SE_UART
+# exported, both causes report exit 5. Distinguish them by the stderr text
+# ("!! ABORT (flash-jlink-mramxip): could not read the resident ATOC" /
+# "this write REPLACES" for the guard, vs "!! HALT FAILED before
+# programming" for the halt gate), not by the exit code alone.
+#
+# PARSER SHAPE (review MINOR 5, alp-sdk#2027) -- deliberately kept as the
+# whole-argv `for` scan #2029 already used for --atoc-unqueryable, NOT
+# flash-run.sh's `while`/`shift` loop. That means `--replace-atoc` is
+# recognised no matter where it lands in argv (e.g. `<build-dir>
+# --replace-atoc` still enables it here), where flash-run.sh's parser stops
+# honouring flags at the first non-option token -- the SAME invocation shape
+# does NOT enable it there. This is MORE permissive than Flow A on the one
+# flag that disables the resident-ATOC check entirely. Kept this way, not
+# fixed, so both Flow D flags share ONE parsing convention in this loop
+# rather than splitting the unchanged --atoc-unqueryable from a newly
+# stricter --replace-atoc; if this permissiveness is ever exploited by
+# accident (a flag landing after <build-dir> unintentionally), switch this
+# whole loop to flash-run.sh's while/shift shape, not just this one flag.
+REPLACE_ATOC=0
 ATOC_UNQUERYABLE=0
 POSITIONAL=()
 for arg in "$@"; do
   case "$arg" in
+    --replace-atoc) REPLACE_ATOC=1 ;;
     --atoc-unqueryable) ATOC_UNQUERYABLE=1 ;;
     *) POSITIONAL+=("$arg") ;;
   esac
 done
 set -- "${POSITIONAL[@]}"
 
-if [ "$ATOC_UNQUERYABLE" != "1" ]; then
-  echo "!! REFUSING TO WRITE: this Flow D write REPLACES the entire ATOC." >&2
-  echo "   Flow D has no SE-UART channel, so this script cannot enumerate what" >&2
-  echo "   is currently resident before it writes -- any resident boot entry not" >&2
-  echo "   named in the config below (an A32 boot chain, an HP app, a diagnostic" >&2
-  echo "   image) is silently DELISTED, and the SES prints '[SES] ATOC ok'" >&2
-  echo "   afterwards with no warning (issue #2025)." >&2
-  echo "   Pass --atoc-unqueryable to acknowledge this and proceed anyway." >&2
-  exit 8
-fi
-
 BD="$1"
 SIZE="${2:-0x800}"
 bench_require_setools || exit $?
+
 SET="$SETOOLS_DIR"
 OBJ="$(bench_tool_prefix)" || exit $?
-JLINK="$(bench_jlink_exe)" || exit $?
 DEV="$JLINK_DEVICE_FLASH"
-# Select the AEN J-Link by serial: the bench has TWO J-Links (AEN + the CC3501E
-# XDS110/V2N), so without SelectEmuBySN JLinkExe picks arbitrarily and "Cannot
-# connect to the probe". NO hardcoded serial default here: a bench-wide serial
-# (e.g. 603000869) is SHARED by two probes that differ only by USB path, and a
-# silent default can pick the WRONG board (the V2N-M1 GD32, not the AEN E8).
-# Export JLINK_SN yourself if you need to disambiguate by serial -- either way,
-# the DPIDR gate below (step 0b), not the serial, is what stops a write to the
-# wrong target.
-SEL="${JLINK_SN:+SelectEmuBySN $JLINK_SN}"
+# Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
+# OTHER probe out of a private namespace so -SelectEmuBySN resolves
+# unambiguously to the ONE probe LG_PLACE actually owns, instead of the old
+# JLINK_SN-only selection which could not distinguish same-serial probes.
+# The DPIDR gate below (step 0b) is a separate, additional check for which
+# CHIP answered -- keep both.
 NAME=$(basename "$BD")
 BIN="$BD/zephyr/zephyr.bin"
 ELF="$BD/zephyr/zephyr.elf"
@@ -134,6 +157,18 @@ case "$RV" in
      echo "   Drop any &itcm overlay; let the board default link into MRAM slot0."
      exit 3 ;;
 esac
+
+# GUARD (alp-sdk#2027) -- see the open-question note above for why this sits
+# as early as possible: right after the reset-vector sanity check above
+# (which needs only the local `.bin`, no probe and no SETOOLS query, and
+# rejects a base-linked/HP-linked image with exit 3 for free) and still well
+# before step 0b's first J-Link touch below. Review MINOR 4: putting the
+# guard BEFORE that sanity check meant a bad build (or a `--help` typo) paid
+# for two real SE-UART round-trips -- `maintenance -opt getbanner` then
+# `-opt gettoc` -- and risked whatever the still-open gettoc-reset question
+# above implies, for a failure this script could already detect for free
+# from the local file alone.
+bench_flowd_atoc_guard "$REPLACE_ATOC" "$ATOC_UNQUERYABLE" flash-jlink-mramxip ALP-HE || exit $?
 
 # 0b. SAFETY GATE -- confirm we are talking to the AEN E8, not some other probe
 # on the bench, BEFORE any MRAM write. The AEN E8 SW-DP IDR is 0x4C013477
@@ -168,14 +203,13 @@ AEN_DPIDR="${AEN_DPIDR:-4C013477}"
 # and had to be reverted.
 GD32_DPIDR="${GD32_DPIDR:-0BE12477}"
 cat > /tmp/flowd-mramxip-preflight.jlink <<EOF
-$SEL
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
+bench_jlink_run -nogui 1 -CommanderScript /tmp/flowd-mramxip-preflight.jlink \
   > /tmp/flowd-mramxip-preflight.out 2>&1 || true
 bench_jlink_assert_aen_dpidr /tmp/flowd-mramxip-preflight.out "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
@@ -262,8 +296,10 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 #   ****** Error: Verification failed @ address 0x80010000
 # This is a RACE between the SES re-booting slot0 and J-Link's program/verify,
 # which is why the SAME app passed and failed under identical settings and why
-# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout doing
-# long I/O) failed far more often than one that idles quickly.  It is NOT flaky
+# a busy resident app (aen-wdt-feed feeding a watchdog, aen-sdcard-readout --
+# renamed aen-sdhc-probe, #2051, and no longer doing any I/O at all now that
+# sdhc0 is disabled on this board -- doing long I/O at the time) failed far
+# more often than one that idles quickly.  It is NOT flaky
 # MRAM and NOT a probe-firmware limit.  `noreset` keeps the single explicit
 # reset+halt below as the only reset in the sequence, so nothing is executing
 # from MRAM while MRAM is being written.
@@ -299,7 +335,6 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # states (see reference_aen_e8_bench_traps), and trusting one here would silently
 # skip programming a page that does not actually match.
 cat > /tmp/flowd-mramxip.jlink <<EOF
-$SEL
 si SWD
 speed $JLINK_SPEED
 device $DEV
@@ -316,7 +351,7 @@ r
 g
 exit
 EOF
-$JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink 2>&1 | tee /tmp/flowd-mramxip.out | \
+bench_jlink_run -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink 2>&1 | tee /tmp/flowd-mramxip.out | \
   grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found|= " | head -40
 echo "----- (full log: /tmp/flowd-mramxip.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd-mramxip.out; then
@@ -450,7 +485,6 @@ if [ -z "$BUF_SYM" ]; then
   echo "      console via the labgrid 'console' resource instead." >&2
 else
   cat > /tmp/flowd-mramxip-read.jlink <<EOF
-$SEL
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -458,7 +492,7 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-  $JLINK -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
+  bench_jlink_run -nogui 1 -CommanderScript /tmp/flowd-mramxip-read.jlink 2>/tmp/flowd-mramxip-rd.err > /tmp/flowd-mramxip-rd.out || true
   # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
   # hides a total connect failure and the decode below would render it as
   # empty target output (alp-sdk#1318).

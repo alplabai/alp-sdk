@@ -12,18 +12,24 @@
  * sequence, as living documentation of the hand-written-firmware path:
  *
  *     init  ->  ping  ->  diag info
+ *           ->  Wi-Fi scan
  *           ->  portable Wi-Fi open  ->  portable BLE open + scan
- *           ->  Wi-Fi scan  ->  Wi-Fi connect  ->  get IP
+ *           ->  Wi-Fi connect  ->  get IP
  *           ->  TCP socket: open -> connect -> send -> recv -> close
  *           ->  Wi-Fi disconnect
  *           ->  BLE enable  ->  BLE scan  ->  BLE disable
  *           ->  proxied-GPIO read
  *
- * The first radio checkpoint goes through the application-level portable APIs
- * in <alp/iot.h> and <alp/ble.h>.  The longer tour that follows stays on
- * <alp/chips/cc3501e.h> so developers still have a diagnostic surface for
- * firmware-version, scan-record, socket, and bridge-level bring-up work.  The
- * app never touches the raw wire protocol.
+ * The Wi-Fi scan is the tour's first genuine radio op (see tour_wifi_scan()'s
+ * header comment for how that was verified) and is where issue #2035's known
+ * first-radio-op wedge would surface; the driver's own automatic recovery
+ * (issue #2126, cc3501e_link_check_and_recover(), on by default) handles it
+ * now, not this app's code. The portable checkpoint right after it goes
+ * through the application-level portable APIs in <alp/iot.h> and <alp/ble.h>.
+ * The longer tour that follows stays on <alp/chips/cc3501e.h> so developers
+ * still have a diagnostic surface for firmware-version, scan-record, socket,
+ * and bridge-level bring-up work.  The app never touches the raw wire
+ * protocol.
  *
  * WHY IT IS A DEMO, NOT A GATE.  Every step is guarded and NON-FATAL: a step
  * that fails prints the status and the tour continues to the next.  On a bench
@@ -69,11 +75,26 @@
  * #ifndef-guarded credentials right below it is a trap, so they now match.
  *
  * TOUR_CONNECT_TIMEOUT's default is deliberately BELOW the firmware's own
- * worst case for a station connect -- 30 s of association plus 50 DHCP polls
- * at 200 ms, so 40 s -- because this app is a quick full-surface tour, not a
- * connection test, and a tour that parks for 40 s on one step is not a tour.
- * Override it for a real association attempt; the sibling
- * aen-cc3501e-socket-throughput budgets 55000u for exactly that reason.
+ * worst case for a station connect, because this app is a quick full-surface
+ * tour rather than a connection test, and a tour that parks for a minute on one
+ * step is not a tour.
+ *
+ * That worst case is 70 s: up to 10 s of Wlan_RoleUp (a connect issued as the
+ * first radio op of a boot carries the role-up inside the connect body), up
+ * to 30 s of association, and a 30 s DHCP-lease poll
+ * (CC3501E_STA_DHCP_TRIES x CC3501E_STA_DHCP_POLL_US = 150 x 200 ms,
+ * hal/ti/cc3501e_hw_ti_wifi.c).
+ *
+ * WHY THAT NUMBER MATTERS RATHER THAN BEING TRIVIA: a run budgeted below the
+ * firmware's bound reports failures the radio never suffered, and it does not
+ * look wrong while doing it -- the call simply returns -4 with the association
+ * still in progress.  Two bench sessions in this campaign were hard to compare
+ * for exactly that reason.  **If you are MEASURING connect or DHCP success,
+ * override this to 75000u** (the sibling aen-cc3501e-socket-throughput and
+ * aen-cc3501e-connect-twice-probe budgets, re-derived against this same 70 s
+ * bound, alp-sdk#2079).  The tour's own default is for touring, and a -4 at
+ * this default means "did not finish inside a tour's patience", not "the
+ * radio failed".
  * TOUR_SCAN_TIMEOUT is likewise below cc3501e_wifi_scan()'s own 20 s floor,
  * which simply raises it -- see that floor's comment for why 15 s could not
  * express a healthy scan. */
@@ -182,9 +203,30 @@ static bool tour_ping(cc3501e_t *fw)
 	return false;
 }
 
+/* Map lwIP's dhcp_state (PLUS ONE on the wire) to a name for this printout --
+ * same small allowlist alp_console_companion_diag.c's `diag info` uses; an
+ * unlisted nonzero value is a legal in-progress lwIP state this tour doesn't
+ * bother spelling out. */
+static const char *tour_dhcp_state_name(uint8_t dhcp_state)
+{
+	switch (dhcp_state) {
+	case ALP_CC3501E_DHCP_STATE_NOT_REPORTED:
+		return "not-reported";
+	case ALP_CC3501E_DHCP_STATE_OFF:
+		return "off";
+	case ALP_CC3501E_DHCP_STATE_SELECTING:
+		return "selecting";
+	case ALP_CC3501E_DHCP_STATE_BOUND:
+		return "bound";
+	default:
+		return "other";
+	}
+}
+
 /* Step: protocol version + extended diagnostics.  GET_VERSION returns the wire
- * *protocol* version (the host compat gate); GET_DIAG_INFO decodes the 16-byte
- * firmware snapshot (release version, reset cause, active role, uptime, heap). */
+ * *protocol* version (the host compat gate); GET_DIAG_INFO decodes the
+ * firmware snapshot (release version, reset cause, active role, uptime, heap,
+ * plus the lwIP DHCP state / netif flags #2035 appended). */
 static void tour_diag(cc3501e_t *fw)
 {
 	uint16_t     version = 0u;
@@ -212,6 +254,17 @@ static void tour_diag(cc3501e_t *fw)
 		       diag.uptime_ms,
 		       diag.free_heap_bytes,
 		       diag.last_error);
+		/* dhcp_state == NOT_REPORTED is ambiguous by design (see
+		 * alp_cc3501e_diag_info_t's doc comment): it means EITHER DHCP never
+		 * started on this netif OR the bridge predates #2035 and never sends
+		 * these two bytes at all -- fw_version above, not this field, is what
+		 * tells the two apart. */
+		printf("[tour] diag: dhcp=%s(%u) netif=%s%s dhcp_tries=%u\n",
+		       tour_dhcp_state_name(diag.dhcp_state),
+		       diag.dhcp_state,
+		       (diag.netif_status & ALP_CC3501E_NETIF_UP) ? "up" : "down",
+		       (diag.netif_status & ALP_CC3501E_NETIF_LINK_UP) ? "+link" : "",
+		       (unsigned int)ALP_CC3501E_NETIF_DHCP_TRIES(diag.netif_status));
 	} else if (s == ALP_ERR_INVAL) {
 		printf("[tour] GET_DIAG_INFO -> rejected (v0.1 firmware; v2-only) -- expected\n");
 	} else {
@@ -238,6 +291,18 @@ static void portable_ble_scan_cb(const alp_ble_scan_result_t *r, void *user)
  * same live CC3501E bridge.  cc3501e_bridge_bringup() attached @p fw to the
  * portable Wi-Fi and BLE backends; this checkpoint verifies the public handles
  * open and that BLE can run a real scan through <alp/ble.h>.
+ *
+ * alp_wifi_open() below does not touch the wire (backends/wifi/cc3501e.c's
+ * cc35_open() only binds the already-live bridge handle), but alp_ble_open()
+ * DOES -- it reaches cc3501e_ble_enable() -> poll_by_repeat(), a worker-routed
+ * radio op, same as tour_wifi_scan()'s CMD_WIFI_SCAN_START.  This checkpoint
+ * runs AFTER tour_wifi_scan() in main() for exactly that reason: the scan is
+ * the tour's genuinely first radio op, where a #2035 wedge would surface and
+ * the driver's own automatic recovery (issue #2126) would already have run,
+ * so by the time alp_ble_open() runs here the link has already been proven
+ * (or recovered).  Do not reorder this ahead of the scan, and do not
+ * add a new radio-touching call ahead of either without re-checking which one
+ * is now first.
  */
 /* Returns the fail count so main() can fold this checkpoint's own tally
  * into the RESULT verdict -- see the header comment on RESULT below for
@@ -285,12 +350,61 @@ static unsigned tour_portable_wireless_checkpoint(void)
  * poll-by-repeat (the firmware runs Wlan_Scan on a worker and answers BUSY
  * until it finishes); a success proves the whole submit -> worker -> reply
  * seam from the host.  cc3501e_wifi_sec_name() decodes each record's raw TI
- * SecurityInfo into a human bucket (open/wpa2/wpa3/...). */
+ * SecurityInfo into a human bucket (open/wpa2/wpa3/...).
+ *
+ * THIS CALL IS THE TOUR'S FIRST RADIO OP OF THE BOOT -- verified by tracing
+ * every call main() makes ahead of it: cc3501e_bridge_bringup() only opens the
+ * SPI bus + control pins and does not touch the wire, tour_ping()/tour_diag()
+ * are plain request/reply (PING/GET_VERSION/GET_DIAG_INFO are not
+ * worker-routed and don't count), and this step now runs BEFORE
+ * tour_portable_wireless_checkpoint() precisely so it stays first -- that
+ * checkpoint's alp_ble_open() is ALSO a worker-routed radio op
+ * (cc3501e_ble_enable() -> poll_by_repeat()) and used to run ahead of this
+ * scan, making the scan the tour's THIRD radio op instead of its first (a bug
+ * this file used to state as fact without re-checking). If you add or reorder
+ * a step ahead of this one, re-trace the same way rather than trust this
+ * comment. Being first makes this the one call site issue #2035's known
+ * first-radio-op wedge can hit: roughly 2 in 16 cold boots, the first
+ * worker-routed radio opcode times out (-4) and the link then reads -5 until
+ * a cold cycle. The bridge firmware deliberately does not fix this in-band
+ * (see @ref cc3501e_hard_reset's doc for why); issue #2126 added the
+ * host-side response that used to be hand-rolled HERE, in this app, as its
+ * own ONE cc3501e_hard_reset() + ONE retry -- it is now automatic, inside
+ * the driver itself (cc3501e_link_check_and_recover(), wired into
+ * poll_by_repeat()'s own failure exit), so this function no longer rolls
+ * its own (see tour_wifi_scan()'s body). Every later radio call in this tour
+ * (the checkpoint's BLE open, connect, BLE enable/scan, ...) gets the exact
+ * same automatic coverage now, not a special case scoped to this one call
+ * site any more -- there is nothing left here specific to this function
+ * being first. */
 static void tour_wifi_scan(cc3501e_t *fw)
 {
 	static cc3501e_scan_record_t recs[TOUR_SCAN_MAX];
-	size_t                       n = 0u;
+	size_t                       n                 = 0u;
+	const uint32_t               recoveries_before = fw->recover_count;
 	alp_status_t s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
+
+	/* issue #2126: this used to hand-roll ONE cc3501e_hard_reset() + ONE
+	 * retry on an ALP_ERR_TIMEOUT here, because -4 on the first radio op of
+	 * a boot is the known #2035 wedge (~2 in 16 cold boots). The reset half
+	 * is now the driver's job: cc3501e_wifi_scan() -> poll_by_repeat()
+	 * wires cc3501e_link_check_and_recover() into its own terminal failure
+	 * exit (default CONFIG_ALP_SDK_CC3501E_AUTO_RECOVER=y, set in this
+	 * app's prj.conf), so by the time the call returns the link has already
+	 * been probed and, if every probe failed, warm-reset and confirmed.
+	 *
+	 * The RETRY half is still this app's job. A recovery reboots the
+	 * bridge: it clears the wedge but it does not re-issue the scan, and it
+	 * drops any association, socket handle and BLE link the app held. So
+	 * retry exactly once, and only when a recovery actually happened during
+	 * the call (recover_count moved) -- that is the one case where the
+	 * failure was the link, not the radio. */
+	if (s != ALP_OK && fw->recover_count != recoveries_before) {
+		printf("[tour] WIFI_SCAN -> %d after a link recovery, retrying once\n", (int)s);
+		n = 0u;
+		s = cc3501e_wifi_scan(fw, recs, TOUR_SCAN_MAX, &n, TOUR_SCAN_TIMEOUT);
+	}
+
 	if (s != ALP_OK) {
 		printf("[tour] WIFI_SCAN -> %d\n", (int)s);
 		return;
@@ -342,26 +456,35 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 		 * and the host cannot tell them apart -- both latch the identical
 		 * status, which maps here to the identical ALP_ERR_TIMEOUT:
 		 *   1. the 30 s association wait expiring (a genuine L2 failure), and
-		 *   2. a 10 s DHCP-lease gate that runs AFTER a successful
+		 *   2. a DHCP-lease gate that runs AFTER a successful
 		 *      WLAN_EVENT_CONNECT, when the interface still has no address
-		 *      (present in the shipped v0.8.0 image: two FAIL_TIMEOUT sites,
-		 *      the second right after a 50-iteration/200 ms DHCP poll).
-		 * Bench-measured: this call returned -4 at 14.45-16.87 s against a
+		 *      (two FAIL_TIMEOUT sites, the second right after the lease poll).
+		 *      That gate was 10 s in the ORIGINAL v0.8.0 image and is 20 s in
+		 *      the re-cut, which covers lwIP's fourth DISCOVER at t=14 s
+		 *      instead of stopping four seconds short of it.
+		 * Bench-measured AGAINST THE ORIGINAL v0.8.0 IMAGE, whose DHCP gate
+		 * really was 10 s: this call returned -4 at 14.45-16.87 s against a
 		 * 70 s budget that verifiably reached the driver -- ~5 s of
-		 * association plus the fixed 10 s DHCP poll fits that bracket
-		 * exactly; the 30 s path does not.  So the radio may well have
-		 * associated and the real failure is layer 3 -- plausible at
-		 * -75 dBm on an on-board antenna, where the DHCP retransmit backoff
-		 * (0, 2, 6, 14 s) only fits three attempts inside a 10 s window.
+		 * association plus that fixed 10 s poll fits the bracket exactly,
+		 * and the 30 s path does not.  So the radio had associated and the
+		 * failure was layer 3.  The reasoning held: lwIP's DISCOVER backoff
+		 * lands at 0, 2, 6, 14 s, so a 10 s window only ever fit three
+		 * attempts.
+		 *
+		 * SINCE CONFIRMED AND FIXED.  The gate is 20 s in the re-cut, the
+		 * station no longer enters power save across DHCP, and a stalled
+		 * client is restarted rather than left in an exponential backoff.
+		 * Address acquisition went from roughly 1 in 4 to 14 of 16.
 		 *
 		 * These reads change NO behaviour and NO timeout -- they only look
 		 * harder at what already happened:
 		 *   1. Signal strength: a plausible dBm means the radio associated
 		 *      at L2 (the failure is L3); unavailable means it never did.
 		 *   2. Address, polled once a second for ~30 s: a lease arriving
-		 *      late is the single most informative outcome -- it would mean
-		 *      the firmware's 10 s DHCP gate is simply too short at this
-		 *      link budget, and that the association works.
+		 *      late is the single most informative outcome -- it means the
+		 *      firmware's DHCP gate is too short at this link budget, and
+		 *      that the association works.  Measured both ways: late leases
+		 *      landed at 12 s before the fixes and at 1 s after them.
 		 *   3. The diagnostic reply's reserved[0] byte: the last Wi-Fi event
 		 *      ID the firmware's callback saw.  CONNECTED supports the
 		 *      address-lease reading; DISCONNECTED means it associated and
@@ -371,8 +494,8 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 
 		/* 1. Signal strength.  Wait at least 1 s before reading -- the
 		 * firmware's own comment warns this read can block if issued
-		 * immediately after associating -- and by now the 10 s DHCP window
-		 * has already closed too, so this is never read inside it either. */
+		 * immediately after associating -- and by now the firmware's DHCP
+		 * window has already closed too, so this is never read inside it. */
 		alp_delay_ms(1000u);
 		int8_t       rssi       = 0;
 		alp_status_t rssi_s     = cc3501e_wifi_rssi(fw, &rssi);
@@ -499,7 +622,7 @@ static void tour_wifi_connect_and_socket(cc3501e_t *fw)
 			printf("[tour] POST-FAIL READING -> inconclusive: the reads themselves failed\n");
 		} else if (late_lease) {
 			printf("[tour] POST-FAIL READING -> a DHCP lease arrived after the connect call "
-			       "gave up: the firmware's 10 s DHCP gate is too short at this link budget, "
+			       "gave up: the firmware's DHCP gate is too short at this link budget, "
 			       "association DOES work\n");
 		} else if (radio_rejected) {
 			printf("[tour] POST-FAIL READING -> radio event 0x%02x is a genuine L2 failure: "
@@ -733,14 +856,18 @@ int main(void)
 	/* Step 3 -- version + diagnostics. */
 	tour_diag(&fw);
 
-	/* Step 4 -- portable Wi-Fi/BLE dispatch checkpoint.  This is the one step
+	/* Step 4 -- Wi-Fi scan (poll-by-repeat worker seam).  This is the tour's
+	 * FIRST radio op -- see tour_wifi_scan()'s own header comment for how that
+	 * was verified -- so it runs before the portable checkpoint below, where a
+	 * #2035 wedge would surface (the driver's own automatic recovery, issue
+	 * #2126, handles it). */
+	tour_wifi_scan(&fw);
+
+	/* Step 5 -- portable Wi-Fi/BLE dispatch checkpoint.  This is the one step
 	 * in the tour with its own pass/fail tally (PORTABLE_WIRELESS: SUMMARY);
 	 * everything else here is deliberately non-fatal narration (see the file
 	 * header), so this checkpoint's fail count is what RESULT gates on. */
 	unsigned wireless_fail = tour_portable_wireless_checkpoint();
-
-	/* Step 5 -- Wi-Fi scan (poll-by-repeat worker seam). */
-	tour_wifi_scan(&fw);
 
 	/* Step 6 -- Wi-Fi connect + a TCP socket round-trip + disconnect
 	 * (skipped when no credentials are built in). */

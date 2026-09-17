@@ -30,10 +30,11 @@
  * hyperram.assembled so absence can be stated rather than implied.
  *
  * The last two lines (CONFIG_ALP_SDK_BANNER_HOUSEKEEPING, on by default) are
- * REPORT ONLY: an on-module RTC (compatible "microcrystal,rv3028") and/or
- * ambient-temperature sensor (compatible "ti,tmp112"), whichever the
- * devicetree enables -- absent on a SoM without one, e.g. native_sim.  A
- * missing/failing device prints one line and never fails the boot; see
+ * REPORT ONLY: an on-module RTC (compatible "microcrystal,rv3028", bound by
+ * devicetree compatible directly) and/or ambient-temperature sensor (read
+ * through the portable <alp/temperature.h> -- alp-sdk#2066), whichever is
+ * present -- absent on a SoM without one, e.g. native_sim.  A missing/failing
+ * device prints one line and never fails the boot; see
  * alp_print_housekeeping() below.
  *
  * Identity field (the SoM column), in priority order:
@@ -65,6 +66,8 @@
  * Uses printk so it lands on whatever console backend the app wired.
  */
 
+#include <stdint.h>
+
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/devicetree.h>
@@ -78,36 +81,37 @@
 #endif
 
 /*
- * On-module housekeeping devices (RTC, ambient temperature).  Bound by
- * DEVICETREE COMPATIBLE, never by node label or alias -- the board layer
- * that owns these nodes is free to name/relabel them, and "microcrystal,
- * rv3028" / "ti,tmp112" are the stable contracts (same choice
- * examples/aen/aen-temp-sensor already makes for TMP112).
+ * On-module RTC.  Bound by DEVICETREE COMPATIBLE, never by node label or
+ * alias -- the board layer that owns the node is free to name/relabel it,
+ * and "microcrystal,rv3028" is the stable contract.
  *
  * A node's DT status alone is NOT enough to gate DEVICE_DT_GET(): the
- * AEN801 board layer enables both nodes UNCONDITIONALLY, but upstream only
- * compiles rtc_rv3028.c / the TMP112 sensor driver in when the app itself
- * also turns on the driver subsystem (CONFIG_RTC / CONFIG_SENSOR) --
- * RTC_RV3028 and TMP112 both live inside an `if RTC` / `if SENSOR` Kconfig
+ * AEN801 board layer enables the node UNCONDITIONALLY, but upstream only
+ * compiles rtc_rv3028.c in when the app itself also turns on the driver
+ * subsystem (CONFIG_RTC) -- RTC_RV3028 lives inside an `if RTC` Kconfig
  * block upstream, `default y` only once that parent is on.  Gating on the
  * DT status alone linked clean but failed at the FINAL link step with
  * "undefined reference to __device_dts_ord_*" on any AEN801 app that
- * enables ALP_SDK without also enabling RTC/SENSOR (e.g.
+ * enables ALP_SDK without also enabling RTC (e.g.
  * examples/aen/aen-can-regcheck) -- caught by this file's own build
- * verification, not by inspection.  So: each block additionally requires
- * its driver's own Kconfig symbol, and quietly compiles to nothing (no
- * link reference at all) on a build that has the DT node but never opted
- * into the driver -- same "absent" reporting as a SoM with neither part.
+ * verification, not by inspection.  So this block additionally requires
+ * CONFIG_RTC_RV3028, and quietly compiles to nothing (no link reference at
+ * all) on a build that has the DT node but never opted into the driver --
+ * same "absent" reporting as a SoM with none.
+ *
+ * The ambient-temperature half used to follow this identical pattern here
+ * (bind "ti,tmp112" by compatible, gate on CONFIG_TMP112) -- a SECOND,
+ * vendor-bound truth about presence that could disagree with the
+ * metadata-derived one <alp/temperature.h> now owns.  It goes through
+ * alp_temperature_read_milli_c() instead (alp-sdk#2066); see
+ * alp_print_housekeeping() below.
  */
 #if defined(CONFIG_ALP_SDK_BANNER_HOUSEKEEPING)
 #include <errno.h>
+#include <alp/temperature.h>
 #if DT_HAS_COMPAT_STATUS_OKAY(microcrystal_rv3028) && defined(CONFIG_RTC_RV3028)
 #include <zephyr/drivers/rtc.h>
 #define ALP_BANNER_HAS_RTC 1
-#endif
-#if DT_HAS_COMPAT_STATUS_OKAY(ti_tmp112) && defined(CONFIG_TMP112)
-#include <zephyr/drivers/sensor.h>
-#define ALP_BANNER_HAS_TEMP 1
 #endif
 #endif /* CONFIG_ALP_SDK_BANNER_HOUSEKEEPING */
 
@@ -241,23 +245,26 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
  * Boot-time hw_rev mismatch check (issue #1853).  CONFIG_ALP_SDK_SOM_HW_REV
  * is the hw_rev this firmware BUILD resolved (board.yaml `som.hw_rev`,
  * falling back to the SKU preset's `default_hw_rev`); the EEPROM manifest
- * just read above is the module's ACTUAL revision.  Nothing in this
- * firmware image derives a pad-routing table from that build-time value --
- * the SoM preset's `pad_routes`/`pad_route_overrides` data is read only by
- * scripts/alp_project_emit/bom_netlist.py, for the debug/BOM
- * `--emit composed-route-table` / `--emit carrier-netlist` surfaces, not
- * by any header/C table/DT overlay this build produces.
+ * just read above is the module's ACTUAL revision.  This banner check
+ * itself derives no pad-routing table from that build-time value -- the
+ * SoM preset's `pad_routes`/`pad_route_overrides` data is read at BUILD
+ * time by scripts/alp_project_emit/bom_netlist.py (debug/BOM
+ * `--emit composed-route-table` / `--emit carrier-netlist`) and by
+ * scripts/gen_cc3501e_gpio_routes.py, which resolves it into each AEN
+ * example's generated cc3501e_gpio_routes[].
  *
- * The real-world risk this check warns about is downstream of that gap:
- * on the AEN family, three E1M pads (IO8/IO10/IO21) physically sit on a
- * DIFFERENT chip depending on hw_rev, and application code that hardcodes
- * a pin-to-chip map for one revision (see #1859 --
- * examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c hardcodes the r2
- * map with no IO21 entry, same table duplicated in aen-cc3501e-bringup and
- * aen-cc3501e-companion-tour) silently targets the wrong chip on the other
- * revision, with no diagnostic anywhere.  This check cannot fix that
- * hardcoded table; it can only tell the developer their firmware and their
- * board disagree.
+ * The real-world risk this check warns about: on the AEN family, three
+ * E1M pads (IO8/IO10/IO21) physically sit on a DIFFERENT chip depending on
+ * hw_rev, and a route table built for the wrong revision silently targets
+ * the wrong chip, with no diagnostic anywhere.  This check cannot fix a
+ * stale route table; it can only tell the developer their firmware and
+ * their board disagree.  Issue #2144 added the STRONGER guard this
+ * function used to lack (see "What this does NOT do" below): at RUNTIME,
+ * src/backends/gpio/cc3501e_proxy.c's px_open() refuses ALP_ERR_NOSUPPORT
+ * on IO8/IO10/IO21 specifically, per pin, unless a CRC-valid manifest
+ * confirms the SAME hw_rev match this banner check tests -- so on a
+ * CC3501E-proxy-enabled AEN build, a mismatch is no longer just a boot-log
+ * warning, it is an enforced per-pin refusal.
  *
  * Severity, chosen deliberately:
  *   - A loud warning is the FLOOR, always on: this is real -- silently
@@ -274,21 +281,20 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
  *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL.
  *   - This check lives entirely inside the boot banner (compiled only
  *     under CONFIG_ALP_SDK_BANNER); a build that turns the banner off for
- *     footprint gets neither the warning nor CONFIG_ALP_SDK_HW_REV_
- *     MISMATCH_FATAL.  Known limitation, not fixed here -- see the
- *     Kconfig help.
- *   - What this does NOT do: refuse to DISPATCH only the specific pads
- *     whose route actually differs between hw_revs (the issue's
- *     "stronger guard").  No dispatcher consults any pad-route table
- *     today, so there is nothing to retrofit -- the real missing piece
- *     is #1859: generate a per-hw_rev `cc3501e_gpio_routes[]` from the
- *     composed route table (replacing the three hand-written, r2-only
- *     copies above) plus one hw_rev guard in the GPIO proxy.  GPIO-only,
- *     much smaller than a dispatch-layer change, and out of scope for
- *     this boot-banner fix.  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL is the
- *     coarse mitigation available today: it halts before any pad is
- *     ever dispatched, covering the whole app rather than just the
- *     ambiguous pads.
+ *     footprint gets neither this warning nor CONFIG_ALP_SDK_HW_REV_
+ *     MISMATCH_FATAL -- but issue #2144's GPIO proxy guard below is
+ *     independent of CONFIG_ALP_SDK_BANNER, so IO8/IO10/IO21 stay
+ *     protected either way on a CC3501E-proxy-enabled build.
+ *   - What this does NOT do (partially resolved by issue #2144): refuse
+ *     to DISPATCH only the specific pads whose route actually differs
+ *     between hw_revs.  That guard now exists, but ONLY for the CC3501E
+ *     GPIO proxy (src/backends/gpio/cc3501e_proxy.c's is_rev_dependent()
+ *     gate, AEN-only, CONFIG_ALP_SDK_GPIO_CC3501E_PROXY) -- no OTHER
+ *     dispatcher (I2C/SPI/PWM/...) consults a pad-route table at
+ *     runtime, so a hardcoded pin-to-chip assumption in application code
+ *     outside GPIO is still only caught by this boot-banner warning, or
+ *     by opting into CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL to halt before
+ *     any pad is dispatched at all.
  */
 static void alp_check_hw_rev_match(const alp_hw_info_t *info)
 {
@@ -341,27 +347,29 @@ static void alp_print_housekeeping(void)
 	}
 #endif
 
-#if defined(ALP_BANNER_HAS_TEMP)
-	const struct device *const temp = DEVICE_DT_GET(DT_COMPAT_GET_ANY_STATUS_OKAY(ti_tmp112));
+	/*
+	 * One call, one switch -- alp_temperature_read_milli_c() already owns
+	 * the DT-alias/CONFIG_SENSOR gating this file used to duplicate.
+	 * NOSUPPORT (no on-module sensor on this build) prints nothing, the
+	 * same "absent" reporting the RTC block above gets from its own
+	 * compiled-out ALP_BANNER_HAS_RTC guard.
+	 */
+	int32_t      milli_c;
+	alp_status_t temp_status = alp_temperature_read_milli_c(&milli_c);
 
-	if (!device_is_ready(temp)) {
+	switch (temp_status) {
+	case ALP_OK:
+		printk("  Temp: %d milli-degC\n", (int)milli_c);
+		break;
+	case ALP_ERR_NOT_READY:
 		printk("  Temp: present, not ready\n");
-	} else {
-		struct sensor_value val;
-		int                 rc = sensor_sample_fetch_chan(temp, SENSOR_CHAN_AMBIENT_TEMP);
-
-		if (rc == 0) {
-			rc = sensor_channel_get(temp, SENSOR_CHAN_AMBIENT_TEMP, &val);
-		}
-		if (rc == 0) {
-			/* Integer milli-degrees C, no float printf -- same
-			 * conversion + format as examples/aen/aen-temp-sensor. */
-			printk("  Temp: %d milli-degC\n", (int)sensor_value_to_milli(&val));
-		} else {
-			printk("  Temp: read failed (rc=%d)\n", rc);
-		}
+		break;
+	case ALP_ERR_NOSUPPORT:
+		break;
+	default:
+		printk("  Temp: read failed (rc=%d)\n", (int)temp_status);
+		break;
 	}
-#endif
 }
 #endif /* CONFIG_ALP_SDK_BANNER_HOUSEKEEPING */
 

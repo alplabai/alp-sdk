@@ -1,9 +1,23 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Regression test for #2037: the Alif UTIMER quadrature decoder was fully
-configured by `qdec_alif_utimer_init()` and then never started.
+Regression test for #2037: the Alif UTIMER QEC0 quadrature channel never
+counts a real encoder edge.
 
-Measured over SWD on E1M-AEN803 serial 2026W36-0002 with the unfixed
+The original theory here -- "`qdec_alif_utimer_init()` configured the
+counter and never started it" -- was WITHDRAWN.  `alif_utimer_start_counter()`
+was tried, measured to free-run the channel at the peripheral clock rate
+(~400 Mcount/s with the entire SRC_1 trigger matrix zeroed, #2038), and
+reverted; `QdecMustNotStartTheCounter` below guards against reintroducing
+that call.  An attended bench run (2026-09-13, E1M-AEN803 2026W36-0002) then
+confirmed the actual defect: the raw P3_0/P3_1 pads toggled through all four
+quadrature states under a hand while `UTIMER_CNTR` stayed 0x00000000 the
+entire time, with the driver programming the SRC_1 "channel input A/B"
+matrix (`UTIMER_UP_1_SRC`/`UTIMER_DOWN_1_SRC`).  Alif's own CMSIS driver
+refuses SRC_1 on a QEC channel (`Driver_UTIMER.c:612-618`) and their QEC
+reference flow (`demo_qec.c`) programs SRC_0 instead -- the current fix, and
+`QdecUsesSrc0ForQecChannels` below is the regression guard for it.
+
+Measured over SWD on E1M-AEN803 serial 2026W36-0002 with the pre-#2037
 driver: `CNTR_CTRL` (0x4800d080) = 0x00000021 -- bit 0 EN set by
 `alif_utimer_enable_counter()`, bit 5 CNTR_TRIG set by #1828, but bit 1
 RUNNING CLEAR -- `GLB_CNTR_RUNNING` (0x4800000c) = 0, `GLB_CNTR_START`
@@ -11,7 +25,9 @@ RUNNING CLEAR -- `GLB_CNTR_RUNNING` (0x4800000c) = 0, `GLB_CNTR_START`
 returned success the whole time. HWRM 13.2.5 names the GLOBAL
 START/STOP/CLEAR writes as how a channel is turned on; enabling a channel
 and starting it are two different registers, and #1828 armed only the
-programmatic start *source* (`START_1_SRC[31]` PGM_EN).
+programmatic start *source* (`START_1_SRC[31]` PGM_EN).  That resting state
+is CORRECT for a trigger-counting channel (see `QdecMustNotStartTheCounter`);
+it was never the cause of the stuck-at-zero symptom.
 
 Why a source-level test and not a ztest: `tests/zephyr/` has NO
 register-level driver coverage to follow -- no test there references
@@ -144,6 +160,83 @@ class QdecFiltersBothQuadratureInputs(unittest.TestCase):
             written["UTIMER_FILTER_CTRL_B"],
             "both quadrature inputs must be filtered identically; the decode is "
             "level-qualified across the pair",
+        )
+
+
+class QdecUsesSrc0ForQecChannels(unittest.TestCase):
+    """#2037 (root cause): QEC channels (timer_id >= 12) must be armed on
+    SRC_0 (UTIMER_UP_0_SRC / UTIMER_DOWN_0_SRC), not SRC_1.
+
+    hal_alif's alif_utimer_config_qdec_triggers() only ever programs
+    SRC_1 ("channel input A/B") -- correct for the lputimer0/1/2 instances
+    Alif's own tree binds this driver to, wrong for a QEC channel, whose
+    real input path is SRC_0 (QEC_TRIGGER0/1/2).  Alif's own CMSIS driver
+    refuses SRC_1 on a QEC_MODE_ENABLE channel (Driver_UTIMER.c:612-618),
+    and an attended bench run measured UTIMER_CNTR stuck at 0x00000000
+    under a live, toggling encoder with the old SRC_1-only programming.
+    """
+
+    def test_qec_channel_path_writes_up_0_src(self):
+        self.assertIn(
+            "UTIMER_UP_0_SRC",
+            init_body(),
+            "qdec_alif_utimer_init() must arm UTIMER_UP_0_SRC for QEC "
+            "channels (timer_id >= 12) -- SRC_1 is the lputimer0/1/2 input "
+            "path, not the QEC channels' (#2037)",
+        )
+
+    def test_qec_channel_path_writes_down_0_src(self):
+        self.assertIn(
+            "UTIMER_DOWN_0_SRC",
+            init_body(),
+            "qdec_alif_utimer_init() must arm UTIMER_DOWN_0_SRC for QEC "
+            "channels (timer_id >= 12) -- see test_qec_channel_path_writes_up_0_src",
+        )
+
+    def test_src1_path_is_only_reachable_for_non_qec_channels(self):
+        """Alif's own lputimer0/1/2 usage must not be dropped by the QEC fix --
+        and the SRC_1 call must sit in the `else` of the `timer_id >= 12`
+        branch, not merely exist somewhere in the function. An earlier
+        version of this test only checked the call's TEXT was present
+        anywhere in init_body(), which would still pass on a dead call
+        placed outside the else (e.g. after the whole if/else, unconditional,
+        or inside the if-branch by mistake) -- structurally wrong in a way
+        the old assertion could not catch.
+        """
+        body = init_body()
+        match = re.search(
+            r"if\s*\(\s*cfg->timer_id\s*>=\s*12\s*\)\s*\{(?P<if_block>.*?)\}\s*"
+            r"else\s*\{(?P<else_block>.*?)\}",
+            body,
+            re.S,
+        )
+        self.assertIsNotNone(
+            match,
+            "expected an `if (cfg->timer_id >= 12) { ... } else { ... }` "
+            "structure in qdec_alif_utimer_init() -- see "
+            "test_qec_channel_path_writes_up_0_src for the if-branch, this "
+            "test for the else",
+        )
+        self.assertIn(
+            "UTIMER_UP_0_SRC",
+            match.group("if_block"),
+            "UTIMER_UP_0_SRC must be armed inside the `timer_id >= 12` "
+            "if-branch, not merely somewhere in the function",
+        )
+        self.assertIn(
+            "UTIMER_DOWN_0_SRC",
+            match.group("if_block"),
+            "UTIMER_DOWN_0_SRC must be armed inside the `timer_id >= 12` "
+            "if-branch, not merely somewhere in the function",
+        )
+        self.assertIn(
+            "alif_utimer_config_qdec_triggers",
+            match.group("else_block"),
+            "the SRC_1 path (alif_utimer_config_qdec_triggers()) must sit in "
+            "the `else` of the `timer_id >= 12` branch -- that is Alif's own "
+            "lputimer0/1/2 usage, unaffected by the QEC SRC_0 fix, and a call "
+            "anywhere else in the function (unconditional, or inside the "
+            "if-branch) is a defect this structural check exists to catch",
         )
 
 

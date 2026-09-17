@@ -38,7 +38,28 @@
  *     paper-correct until the v1.0 verification sweep covers them.  (The one
  *     exception already recorded in the implementation is the write
  *     acknowledge-polling delay, bench-found on this same SoC I2C2 bus on
- *     2026-06-15 -- see `poll_for_ack()`.)
+ *     2026-06-15 -- see `poll_for_ack_at()`.)
+ *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
+ *   - `eeprom_24c128_secure_page_write()` and `eeprom_24c128_secure_page_lock()`
+ *     are [BENCH-VERIFIED] as of 2026-09-16.  Their wire bytes were originally
+ *     transcribed from `docs/som-batch-provisioning-procedure.md` section 7
+ *     in alp-sdk-internal (still the only written source -- no vendor
+ *     datasheet PDF for this command sequence is checked into either repo),
+ *     and have now been exercised against real silicon on three E1M-AEN
+ *     modules: 2026W36-0005 (E4, `AE402FA0E5597LE0`) and 2026W36-0006 /
+ *     2026W36-0007 (E8, `AE822FA0E5597LS0`).  On each one the 64-byte page
+ *     read back byte-identical to the staged blob after a cold power cycle,
+ *     the lock frame `{0x04, 0x00, 0xFF}` took, and Lock Status moved
+ *     `0xFD` -> `0xFF` -- setting exactly bit 1 and nothing else -- and
+ *     survived a further cold power cycle.  Device Config stayed `0x1D`
+ *     throughout and was never written.
+ *
+ *     The lock remains one-shot and permanent.  Bench-verified means the
+ *     sequence is known to work, NOT that it is safe to run casually: the
+ *     caller is still responsible for proving the page holds the intended
+ *     bytes, after a cold cycle, before locking.  See
+ *     `examples/aen/aen-eeprom-provision` mode 3 for the gates that
+ *     enforce that.
  *
  * Covers the two footprint-compatible variants populated on the
  * E1M-AEN module: **N24S128C4DYT3G** (Onsemi, default) and
@@ -109,6 +130,17 @@ typedef struct {
 	uint8_t unique_id[EEPROM_24C128_UNIQUE_ID_BYTES];
 	bool    lock_valid;
 	bool    secure_page_locked; /**< Lock Status Read bit 1; 1 = locked (permanent). */
+	/** Lock Status Read, verbatim.  @ref secure_page_locked is this byte's
+	 *  bit 1, and that polarity is [BENCH-VERIFIED] (2026-09-16): across
+	 *  three modules the byte moved `0xFD` -> `0xFF` over the lock, setting
+	 *  exactly bit 1, and held `0xFF` through a cold power cycle.  The raw
+	 *  byte is kept because it is what made that confirmation possible, and
+	 *  because on an unexpected result the bool alone cannot tell "the lock
+	 *  did not take" from "the lock took and the indication is not bit 1"
+	 *  -- on an operation that cannot be repeated.  `0xFD` is an unlocked
+	 *  page; the other bits are don't-cares reading 1.
+	 *  Meaningless unless @ref lock_valid. */
+	uint8_t lock_status;
 	bool    device_config_valid;
 	/** Device Configuration Register.  Per the N24S128 datasheet Table 9 the
 	 *  layout is `b7 b6 b5 = A2 A1 A0`, `b1 = SWP`, and `b4 b3 b2 b0`
@@ -148,9 +180,11 @@ alp_status_t eeprom_24c128_read(eeprom_24c128_t *ctx, uint16_t offset, uint8_t *
  * only ever issues the Lock Status Read; it deliberately does NOT use the
  * datasheet's other lock-check method (attempt a Secure Data Page write
  * and see whether it ACKs), because that method is itself a write.
- * Locking the Secure Data Page is permanent and is intentionally NOT
- * offered here -- it belongs in the provisioning tool, behind a
- * cold-cycle read-back gate, not this driver.
+ * Writing and locking the Secure Data Page are separate functions --
+ * @ref eeprom_24c128_secure_page_write and @ref eeprom_24c128_secure_page_lock
+ * -- and neither is exposed here; both are raw, ungated primitives. The
+ * cold-cycle read-back gate that must sit between them belongs in the
+ * provisioning tool, not this driver -- see their doc comments.
  *
  * @param ctx  Initialised driver context (see @ref eeprom_24c128_init).
  * @param out  Destination.  Zeroed first, then filled per-field; see
@@ -183,6 +217,99 @@ alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_ide
  */
 alp_status_t
 eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, size_t len);
+
+/**
+ * @brief Write the WHOLE 64-byte Secure Data Page in one page-write transaction.
+ *
+ * Wire frame: a 2-byte pointer -- `{0x00, 0x00}` (selector `0x00` = Secure
+ * Data Page, FIRST pointer byte, same convention @ref eeprom_24c128_read_identity
+ * uses to read it; second byte the in-page offset, always `0` -- this
+ * function writes the whole page in one transaction) -- followed by exactly
+ * @ref EEPROM_24C128_SECURE_PAGE_BYTES data bytes.  `len` must equal
+ * @ref EEPROM_24C128_SECURE_PAGE_BYTES exactly; there is no partial-range
+ * write, both so it can never be steered at a sub-range that mixes stale and
+ * new bytes, and so a caller cannot under-supply @p data and have this
+ * function `memcpy` past the end of a too-short buffer into a page that then
+ * gets permanently sealed.  This is also what makes it structurally
+ * impossible to construct a write to selector `0x06` (the Device
+ * Configuration Register): the selector byte is a compile-time constant
+ * this function chooses itself, never derived from a caller-supplied value.
+ *
+ * Does NOT check the Secure Page Lock Status first, and does NOT verify
+ * the write afterwards.  Both are the caller's job: read
+ * @ref eeprom_24c128_read_identity and refuse to call this at all when
+ * `secure_page_locked` is true (a post-lock attempt NAKs at the hardware
+ * level anyway, but that is not a substitute for the caller's own gate),
+ * and after a **cold power cycle**, read the page back and byte-compare it
+ * before ever calling @ref eeprom_24c128_secure_page_lock.  See
+ * `docs/som-batch-provisioning-procedure.md` §7 steps 5-8 for the full
+ * gated sequence; `examples/aen/aen-eeprom-provision` implements it.
+ *
+ * On a board populated with the footprint-compatible alternate part
+ * (STMicro M24128-BFMH6TG, no second device-select header at all) this
+ * simply fails with the NACK the I2C layer reports for `0x58` -- there is
+ * nothing to degrade further; the array manifest is unaffected.
+ *
+ * @param ctx   Initialised driver context.
+ * @param data  Exactly @p len bytes to write.
+ * @param len   MUST equal @ref EEPROM_24C128_SECURE_PAGE_BYTES; any other
+ *   value is rejected with ::ALP_ERR_INVAL before anything reaches the bus.
+ * @return ::ALP_ERR_INVAL if @p ctx or @p data is `NULL`, or @p len is not
+ *   exactly @ref EEPROM_24C128_SECURE_PAGE_BYTES;
+ *   ::ALP_ERR_NOT_READY if @p ctx has not been initialised;
+ *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the underlying I2C
+ *   transfer or the post-write ACK poll (this function has no offset
+ *   parameter to be out of range, so ::ALP_ERR_OUT_OF_RANGE never occurs);
+ *   ::ALP_OK once the page write has been ACKed and the write cycle has
+ *   completed.
+ */
+alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx, const uint8_t *data, size_t len);
+
+/**
+ * @brief PERMANENTLY lock the Secure Data Page.  One-shot.  Irreversible.
+ *
+ * Wire frame: `{0x04, 0x00, 0xFF}` -- selector `0x04` (Secure Page Lock
+ * Status, FIRST pointer byte, same selector @ref eeprom_24c128_read_identity
+ * reads), second pointer byte `0x00`, then the single trigger data byte
+ * `0xFF`.  This is the SAME first-byte selector convention every other
+ * transfer in this file uses; there is no separate "op-code" byte.
+ *
+ * After this returns ::ALP_OK, the device NAKs every future write to the
+ * Secure Data Page (it still reads normally, forever) -- see
+ * `docs/som-batch-provisioning-procedure.md` §7 step 7 in alp-sdk-internal.
+ * There is no unlock, no override, and no way to detect in advance whether
+ * a given call is the one that seals the wrong content.
+ *
+ * This function does NOT verify the page's contents before locking, and it
+ * MUST NOT be called as a side effect of a write -- see
+ * @ref eeprom_24c128_secure_page_write's doc comment.  The caller is
+ * responsible for gating this behind an explicit opt-in (never a build's
+ * default behaviour) and a byte-exact read-back comparison taken after a
+ * **cold power cycle** following the write, per §7 steps 5-8.  Calling this
+ * on unverified content permanently freezes a possibly-wrong identity on
+ * hardware that cannot be un-locked.
+ *
+ * Deliberately does NOT poll for a write-complete ACK the way
+ * @ref eeprom_24c128_write / @ref eeprom_24c128_secure_page_write do: that
+ * poll is itself an address-only WRITE to the Secure Data Page, and a
+ * *correct* lock makes the device NAK every subsequent write to that page
+ * -- so polling here would read a successful lock as a timeout.  Instead,
+ * this function waits out the documented write-cycle budget once, then
+ * re-reads Secure Page Lock Status (the only state check the datasheet
+ * describes as safe -- see @ref eeprom_24c128_read_identity's doc comment
+ * for why the alternative, starting a page write and checking for a NAK,
+ * must never be used) and fails if bit 1 does not read back set, rather
+ * than trusting the write's own ACK.
+ *
+ * @param ctx  Initialised driver context.
+ * @return ::ALP_ERR_NOT_READY if @p ctx is `NULL` or not initialised;
+ *   ::ALP_ERR_IO / ::ALP_ERR_TIMEOUT propagated from the lock write or the
+ *   confirming Lock Status read; ::ALP_ERR_IO if the lock write was ACKed
+ *   but Lock Status still reads unlocked afterwards (treat as a hardware
+ *   fault -- not a case to blindly retry, since a retry re-sends the same
+ *   irreversible command); ::ALP_OK only once Lock Status confirms bit 1 set.
+ */
+alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx);
 
 /** @brief Release the driver context.  Idempotent. */
 void eeprom_24c128_deinit(eeprom_24c128_t *ctx);
