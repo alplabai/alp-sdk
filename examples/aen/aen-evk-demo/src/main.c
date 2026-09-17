@@ -4134,9 +4134,31 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * (src/backends/audio/zephyr_drv.c). */
 	static int16_t mic_buf[SOUND_FRAMES_PER_BLOCK * 2];
 	if (mic != NULL && mic_rc == ALP_OK) {
-		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS; b++) {
+		/* Read SOUND_BASELINE_BLOCKS+1 and skip the first: skipping
+		 * block 0 in place of a SOUND_BASELINE_BLOCKS-sized loop (the
+		 * previous shape) left only SOUND_BASELINE_BLOCKS-1 blocks in
+		 * the baseline, weakening it and moving the pass threshold
+		 * (issue #2133). Block 0 may contain a PDM decimator
+		 * settling transient (<alp/audio.h>'s alp_audio_in_start()
+		 * note) -- a block here is 256/16000 = 16 ms, well over the
+		 * ~1 ms settling bound measured on this driver (see
+		 * zephyr/dts/bindings/audio/alif,alif-pdm.yaml), so skipping
+		 * just block 0 covers it.
+		 *
+		 * NOTE: this path needs a mic sample rate whose PDM clock is
+		 * >= 1.2 MHz on this EVK. At SOUND_SAMPLE_RATE_HZ (16000u,
+		 * above), mode 4's 1024 kHz clock is REJECTED by the board
+		 * overlay's clk-frequency-min = <1200000> -- alp_audio_in_open()
+		 * (mic == NULL) or alp_audio_in_start() (mic_rc != ALP_OK)
+		 * fails with -EINVAL on this EVK at 16 kHz, so this whole
+		 * baseline/correlation block is skipped when playback is on.
+		 * See issue #2134 for a software-resample fix that would let
+		 * the mic capture at an in-spec rate independent of the
+		 * speaker rate. */
+		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS + 1u; b++) {
 			size_t       got = 0;
 			alp_status_t r   = alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+			if (b == 0) continue;
 			if (r == ALP_OK) baseline_energy += pdm_block_energy(mic_buf, got * 2u);
 		}
 	}
