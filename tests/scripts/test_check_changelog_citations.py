@@ -262,7 +262,8 @@ def test_fix_does_not_rewrite_inside_a_fenced_block(tmp_path):
 def test_fix_never_touches_released_changelog_history(tmp_path):
     """`[Unreleased]` describes the current tree and is fixable. A released
     section describes a tree that no longer exists -- "fixing" it would
-    falsify what shipped, so it is carried through byte for byte."""
+    falsify what shipped, so it is carried through unchanged (as LF text:
+    the read translates universal newlines, the write passes newline="")."""
     mod, frag = _tree(tmp_path, _source(12, "SHIPPED ANCHOR"), "nothing\n")
     mod.CHANGELOG.write_text(
         "# Changelog\n\n"
@@ -310,3 +311,105 @@ def test_default_run_writes_nothing_and_keeps_its_verdict(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
     assert "`src/a.c:7`" in frag.read_text()
+
+
+def test_fix_rebuilds_offsets_across_two_citations_in_one_fragment(tmp_path):
+    """TWO rewrites in ONE fragment, one growing and one shrinking.
+
+    Every other --fix test here carries exactly one rewritable citation, so
+    the multi-edit rebuild was untested: splicing each replacement in on its
+    own with `out[:s] + repl + out[e:]` passes all of them, because a single
+    edit leaves no later offset to invalidate. With two, the first edit's
+    length delta shifts every offset after it and the second replacement
+    lands mid-token -- and the post-fix re-check still returns [], because
+    the wreckage no longer parses as a citation. That corruption would ship
+    green, so this asserts the whole string, not just the two new ranges.
+    """
+    lines = [f"line {i}" for i in range(1, 1201)]
+    lines[6] = "BETA ANCHOR"        # line 7: shrinks `:900-905` to `:7-12`
+    lines[1099] = "ALPHA ANCHOR"    # line 1100: grows `:3` to `:1100`
+    fragment = ('first `src/a.c:3` ("ALPHA ANCHOR") then '
+                '`src/a.c:900-905` ("BETA ANCHOR") end\n')
+    mod, frag = _tree(tmp_path, "\n".join(lines) + "\n", fragment)
+
+    new, rewrites, problems, _ = mod._fix_one(frag, fragment)
+    assert new == ('first `src/a.c:1100` ("ALPHA ANCHOR") then '
+                   '`src/a.c:7-12` ("BETA ANCHOR") end\n'), new
+    assert len(rewrites) == 2 and problems == []
+
+    # And what it wrote is a tree the CHECKER accepts. Asserted in addition
+    # to the string above, never instead of it: the naive splice corrupts the
+    # fragment into something `_check_one` also passes.
+    assert mod._check_one(frag, new)[0] == []
+
+
+def test_fix_refuses_to_clamp_a_range_that_would_run_past_eof(tmp_path):
+    """A preserved width that runs past EOF is REFUSED, never clamped.
+
+    Clamping manufactured a green citation making a claim nobody wrote:
+    `:1-10` re-anchored on line 19 of a 20-line file became `:19-20` -- two
+    lines where the note said ten -- and `_check_one` passed it, because the
+    anchor is inside the range it was handed. With the anchor on the last
+    line it collapsed to `:20-20`, also green, also silent. Both are asserted
+    because the second is the degenerate end of the same defect.
+    """
+    fragment = 'see `src/a.c:1-10` ("ZED ANCHOR")\n'
+    mod, frag = _tree(tmp_path, _source(19, "ZED ANCHOR"), fragment)
+    new, rewrites, problems, _ = mod._fix_one(frag, fragment)
+    assert new == fragment, "not rewritten at all -- not narrowed to :19-20"
+    assert rewrites == []
+    assert len(problems) == 1 and "past the end" in problems[0]
+    assert "19" in problems[0], "the line it did find must still be reported"
+
+    last = tmp_path / "anchor-on-the-last-line"
+    last.mkdir()
+    mod2, frag2 = _tree(last, _source(20, "ZED ANCHOR"), fragment)
+    new2, rewrites2, problems2, _ = mod2._fix_one(frag2, fragment)
+    assert new2 == fragment, "not collapsed to :20-20 either"
+    assert rewrites2 == [] and len(problems2) == 1
+
+
+def test_fix_breaks_an_exact_tie_toward_the_later_line(tmp_path):
+    """Cited 10, anchors at 5 and 15, equidistant: the tie goes to 15.
+
+    `min()` returns the FIRST minimal element, so the distance key alone
+    resolved every exact tie backwards. Measured drift on #2175 is
+    consistently positive -- branch+6, dev+9..+39 -- because merging `dev`
+    inserts code above a fragment's citations and pushes them down, so the
+    later occurrence is the one the merge produced.
+    """
+    lines = [f"line {i}" for i in range(1, 21)]
+    lines[4] = "TIED ANCHOR"     # line 5, the cited 10 minus 5
+    lines[14] = "TIED ANCHOR"    # line 15, the cited 10 plus 5
+    mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
+                      'see `src/a.c:10` ("TIED ANCHOR")\n')
+    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text())
+    assert "`src/a.c:15`" in new, "an exact tie takes the LATER line"
+    assert "`src/a.c:5`" not in new, "min() alone would have taken 5"
+    assert len(rewrites) == 1 and "chose 15" in rewrites[0]
+
+
+def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
+    """`--fix` must still work on a tree with no fragments left.
+
+    `assemble_changelog.py` empties `changelog.d/` at release time by folding
+    every fragment into CHANGELOG.md's `[Unreleased]`, so that is a real
+    tree, not a hypothetical one -- and the "no fragments -- nothing to
+    check" early return fired BEFORE `--fix` did, making it a silent no-op
+    exactly there. The first half of this test pins the default path's early
+    return unchanged, because that path is the required CI context.
+    """
+    mod, frag = _tree(tmp_path, _source(7, "RELEASE-CANDIDATE ANCHOR"), "x\n")
+    frag.unlink()
+    drifted = ("# Changelog\n\n## [Unreleased]\n\n"
+               'cites `src/a.c:3` ("RELEASE-CANDIDATE ANCHOR")\n')
+    mod.CHANGELOG.write_text(drifted, encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
+    assert mod.main() == 0, "the default path keeps its empty-dir early return"
+    assert mod.CHANGELOG.read_text() == drifted, "and still writes nothing"
+
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
+    assert mod.main() == 0, "--fix re-checks the tree it just wrote"
+    assert '`src/a.c:7` ("RELEASE-CANDIDATE ANCHOR")' in (
+        mod.CHANGELOG.read_text())

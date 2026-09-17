@@ -74,9 +74,27 @@ it will touch, because a fixer that guesses is worse than no fixer at all:
     NEAREST the originally cited line, never the first. Drift is small and
     consistent, so nearest is right; first-match would silently retarget the
     note to an unrelated occurrence, which is the exact failure this gate
-    exists to catch. Every such choice is reported with its candidate lines.
+    exists to catch. An EXACT TIE goes to the LATER line, because measured
+    drift is positive: merging `dev` inserts code above a fragment's
+    citations and pushes them down (alp-sdk#2175 measured branch+6 and
+    dev+9..+39, all positive). Every such choice is reported with its
+    candidate lines.
   * When the anchor is nowhere in the file, nothing is rewritten: the anchored
     code is gone rather than moved, and a human has to look.
+  * When preserving the range's width would run PAST EOF, nothing is rewritten
+    either. Clamping to the last line looks harmless and is the worst case in
+    this list: `:1-10` re-anchored on line 19 of a 20-line file becomes
+    `:19-20`, a two-line range where the note claimed ten, and the re-check
+    then PASSES it because the anchor is inside. A green citation asserting
+    something nobody wrote is this gate's own failure mode arriving by way of
+    its fixer, so it is refused like the two cases above.
+
+Known limit of the width carry-over: a wide citation re-anchored on a one-line
+anchor emits an equally wide range over whatever now follows that line, and
+`_check_one` only requires the anchor to be somewhere INSIDE the range -- so
+the tail of a re-derived range is not itself verified. The width is preserved
+anyway, because the width is part of what the note claimed; verifying it would
+take an anchor per line.
 
 `--fix` runs the normal check afterwards, so its exit code is this gate's own
 verdict on the tree it just wrote -- it cannot report success on a tree the
@@ -133,6 +151,27 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 #: equally-foreign `python/tests/...` (alp-sdk#1522, alp-sdk#1525). Reported
 #: as SKIPPED with the reason, never silently passed.
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
+
+
+#: `_fix_one` has to read a cited file before it can tell whether the citation
+#: already resolves, so it read one per CITATION -- 646 reads on this tree, of
+#: a much smaller set of hot files. Keyed on the repo-relative path, which is
+#: exactly what a citation names.
+#:
+#: Only `_fix_one` uses it. `_check_one` is the required CI context and keeps
+#: reading from disk every time, so the check that grades what `--fix` wrote
+#: never grades it against a cached copy of the input.
+_LINES_CACHE: dict[str, list[str]] = {}
+
+
+def _cited_lines(rel: str, target: Path) -> list[str]:
+    """`target`'s lines, read once per repo-relative path per process."""
+    lines = _LINES_CACHE.get(rel)
+    if lines is None:
+        lines = target.read_text(
+            encoding="utf-8", errors="replace").splitlines()
+        _LINES_CACHE[rel] = lines
+    return lines
 
 
 #: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
@@ -295,8 +334,7 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
             continue
         needle = anchor.group("text").strip()
 
-        lines = target.read_text(
-            encoding="utf-8", errors="replace").splitlines()
+        lines = _cited_lines(rel, target)
 
         # Already resolves -> leave it alone, no churn. The range must be in
         # bounds too, or `_check_one` would still call it broken: a range
@@ -325,17 +363,48 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
         # Nearest the cited line, never hits[0]: a merge shifts a citation by
         # a small, consistent delta, so the intended occurrence is the one
         # closest to where the fragment already pointed.
-        new_start = min(hits, key=lambda h: abs(h - start))
+        #
+        # `-h` breaks an EXACT tie toward the LATER line. `min` returns the
+        # first minimal element, so the distance key alone resolved every tie
+        # backwards -- cited 10 with anchors at 5 and 15 picked 5. Measured
+        # drift on alp-sdk#2175 is consistently POSITIVE (branch+6,
+        # dev+9..+39), because merging `dev` inserts code ABOVE a fragment's
+        # citations and pushes them down, so when two candidates are
+        # equidistant the later one is the one the merge produced.
+        new_start = min(hits, key=lambda h: (abs(h - start), -h))
         note = ""
         if len(hits) > 1:
             note = (f"   [AMBIGUOUS: {needle!r} occurs at lines {hits}; chose "
                     f"{new_start}, nearest the cited {start}]")
 
         # Preserve the range's width -- `4372-4376` re-anchored at 4378 is
-        # `4378-4382` -- widening only if the anchor itself spans lines, and
-        # clamping at EOF, where the original width cannot be preserved.
+        # `4378-4382` -- widening only if the anchor itself spans lines.
+        #
+        # KNOWN LIMIT: a wide citation re-anchored on a ONE-LINE anchor emits
+        # an equally wide range over whatever now follows that line, and
+        # `_check_one` only requires the anchor to be somewhere INSIDE the
+        # range -- the tail of a re-derived range is not itself verified. The
+        # width is kept anyway, because it is part of what the note claimed;
+        # verifying it would take an anchor per line.
         width = max(end - start, needle.count("\n"))
-        new_end = min(new_start + width, len(lines))
+        new_end = new_start + width
+        if new_end > len(lines):
+            # NOT clamped to `len(lines)`. Clamping preserves the anchor but
+            # silently NARROWS the claim -- `:1-10` re-anchored on line 19 of
+            # a 20-line file becomes `:19-20`, and on the last line it
+            # collapses to `:20-20` -- and `_check_one` then PASSES it,
+            # because the anchor is inside the range it was handed. That is a
+            # green citation asserting something nobody wrote: this gate's own
+            # failure mode, manufactured by its own fixer. Refused like the
+            # other cases the fixer cannot do confidently.
+            problems.append(
+                f"{where} -- anchored on {needle!r}, found at line "
+                f"{new_start}, but preserving the cited width of {width} "
+                f"line(s) would run past the end of {rel} ({len(lines)} "
+                f"lines). Clamping would silently narrow the claim to a "
+                f"range the note never made, so this is NOT rewritten; a "
+                f"human has to look.")
+            continue
         repl = (f"`{rel}:{new_start}-{new_end}`"
                 if m.group("end") or new_end > new_start
                 else f"`{rel}:{new_start}`")
@@ -361,9 +430,18 @@ def _run_fix(fragments: list[Path]) -> None:
 
     Scope is `changelog.d/` fragments plus CHANGELOG.md's `[Unreleased]`
     section -- the two things that describe the CURRENT tree. The released
-    tail is split off and carried through byte for byte (see `CHANGELOG`
-    above): those sections describe trees that no longer exist, and "fixing"
-    them would falsify what shipped.
+    tail is split off and carried through UNCHANGED (see `CHANGELOG` above):
+    those sections describe trees that no longer exist, and "fixing" them
+    would falsify what shipped.
+
+    "Unchanged" means as LF text, not literally byte for byte: `read_text`
+    translates universal newlines on the way in and the `write_text` below
+    passes `newline=""`, so a CRLF-delimited CHANGELOG.md would come back
+    LF-delimited throughout -- released tail included. Unreachable in this
+    repo, which pins `*.md` to LF on every platform (`.gitattributes` line 11
+    `* text=auto eol=lf`, line 21 `*.md text eol=lf`), and stated rather than
+    rounded off because a docstring that overstates its guarantee is how the
+    next person comes to rely on one that was never there.
     """
     rewrites: list[str] = []
     problems: list[str] = []
@@ -423,17 +501,27 @@ def main() -> int:
     args = ap.parse_args()
 
     fragments = _iter_fragments()
-    if not fragments:
-        print("check-changelog-citations: no changelog.d/ fragments -- nothing "
-              "to check. This is not a pass; it means the directory is empty.")
-        return 0
 
     # Rewrite first, then fall through to the unchanged check below, so the
     # exit code is always this gate's own verdict on the tree --fix just
     # wrote. Without the flag nothing above or below this line behaves any
     # differently: the checker is a required CI context and owns the default.
+    #
+    # This sits ABOVE the empty-directory early return deliberately.
+    # `assemble_changelog.py` empties `changelog.d/` at release time by
+    # folding every fragment into CHANGELOG.md's `[Unreleased]` -- the tree
+    # where the citations most want re-deriving, and the one where returning
+    # early made `--fix` a silent no-op against the promise in its own
+    # `--help`. The `and not args.fix` below is what keeps the default path
+    # exactly what it was: with no flag that condition is the same
+    # `if not fragments` it has always been.
     if args.fix:
         _run_fix(fragments)
+
+    if not fragments and not args.fix:
+        print("check-changelog-citations: no changelog.d/ fragments -- nothing "
+              "to check. This is not a pass; it means the directory is empty.")
+        return 0
 
     all_errors: list[str] = []
     all_skips: list[str] = []
@@ -481,6 +569,18 @@ def main() -> int:
               "worse than one\nthat cites nothing: it sends the next reader "
               "somewhere confidently wrong.",
               file=sys.stderr)
+        # Named here because this message is the only place the fixer can
+        # reach the person who just went red. alp-sdk#2175's whole premise is
+        # that a merge drifts these en masse and the human re-resolving them
+        # by hand picks a wrong line that looks entirely reasonable -- which
+        # is how the #1387 citation shipped wrong twice in one day.
+        print("\nIf a merge moved the code, re-derive these from their "
+              "anchors instead of\nre-resolving by hand:\n\n"
+              "    python3 scripts/check_changelog_citations.py --fix\n\n"
+              "It rewrites only ANCHORED citations -- never an un-anchored "
+              "one, a fenced\nexample, or released history -- reports every "
+              "citation it will not touch, and\nre-runs this check on what "
+              "it wrote.", file=sys.stderr)
         return 1
 
     unanchored = total_checked - total_anchored
