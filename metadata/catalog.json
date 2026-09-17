@@ -3247,6 +3247,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "CI gate: every in-tree copy of `cc3501e_bridge.{c,h}` under `examples/**` is byte-identical to the canonical pair, except the copies this gate declares divergent by name.",
+      "script": "scripts/check_cc3501e_bridge_copies.py"
+    },
+    {
       "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
       "script": "scripts/check_changelog_citations.py"
     },

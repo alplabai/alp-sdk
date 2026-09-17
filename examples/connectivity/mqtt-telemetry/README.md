@@ -35,7 +35,10 @@ included. It used to be held off: with mbedTLS' PSA core disabled the pinned
 library's own `ssl_misc.h` does not compile (`unknown type name
 'mbedtls_error_pair_t'`), so the app turned mbedTLS off rather than fail. The
 SDK now turns that PSA core on wherever it builds mbedTLS without TF-M
-(`ALP_SDK_MBEDTLS_PSA_CRYPTO`, issue #2173), and the workaround is gone.
+(`ALP_SDK_MBEDTLS_PSA_CRYPTO`, issue #2173), so this app carries no mbedTLS
+knobs at all any more (see [`prj.conf`](../mqtt-telemetry/prj.conf), which is
+empty by design) and the `native_sim.conf` that used to hold the workaround is
+deleted.
 
 The record stays `preview` for a different reason: on an AEN target the
 random-number source is Zephyr's non-cryptographic fallback -- no Alif
