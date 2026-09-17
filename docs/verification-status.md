@@ -72,7 +72,7 @@ Tracked here so the page is complete, but never pooled into the Summary above --
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 0 |
-| `🟡` | partial | 2 |
+| `🟡` | partial | 3 |
 | `✅` | verified | 14 |
 | `❌` | failing | 0 |
 | `n/a` | n/a | 0 |
