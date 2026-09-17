@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ALP-SDK DELTA (#2051), not upstream: sdhc0 is DISABLED in this app's real
+# board overlay now (the E1M-EVK 2626-R2's SD mux hardware defect -- see
+# README.md), so the default scenario below no longer builds
+# CONFIG_SDHC_DWC at all -- it compile-checks the app source with the SD
+# probes compiled OUT (the DT_NODE_HAS_STATUS guard in src/main.c takes
+# the disabled branch). Driver build coverage, including the #1097
+# regression below, moved to the second scenario,
+# `.sdhc_build_coverage`, which layers `sdhc-build-coverage.overlay` on
+# top of the real board overlay to re-enable sdhc0 for THAT scenario
+# only -- build_only, never flashed, same pattern
+# examples/aen/aen-ethernet-link's `.mdio_managed` scenario uses for its
+# own alternate-DT-state coverage.
+#
+# #1097 regression coverage (now carried by `.sdhc_build_coverage`):
+# CONFIG_SDHC_DWC_ADMA=y (default) used to place the ADMA descriptor table
+# in an empty-named linker section (CONFIG_SDHC_DESCRIPTOR_SECTION default
+# ""), which is a hard orphan-section link error under
+# -Wl,--fatal-warnings. Building that scenario proves the link still
+# succeeds.
+
+sample:
+  name: aen-sdhc-probe
+  description: |
+    Register-level SD Host Controller bring-up probes for the E1M-AEN801
+    (Alif Ensemble E8, Cortex-M55-HE). sdhc0 is disabled on the E1M-EVK
+    2626-R2 (SD mux hardware defect, #2051); see README.md. Renamed from
+    aen-sdcard-readout (#2051) -- the name now says what it is: inert
+    register probes, not a card-reading app.
+
+tests:
+  alp_sdk.examples.aen.sdhc_probe.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - sdmmc
+    build_only: true   # sdhc0 is disabled on this board; nothing here reaches hardware.
+
+  # Driver build coverage only -- see the file header. NOT the app's real
+  # configuration: this re-enables sdhc0 (disabled in the real board
+  # overlay) so CONFIG_SDHC_DWC, its ADMA descriptor placement (#1097),
+  # and this app's guarded SD-probe code path still get a compile check.
+  alp_sdk.examples.aen.sdhc_probe.aen.sdhc_build_coverage:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    # extra_dtc_overlay_files REPLACES CMake's own board-default-overlay
+    # auto-discovery rather than supplementing it, so the board's default
+    # overlay must be listed explicitly here too (same trap
+    # aen-ethernet-link's .mdio_managed scenario documents), or this build
+    # silently loses the `chosen` ITCM/RAM-run properties the real overlay
+    # also carries.
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - sdhc-build-coverage.overlay
+    # ALP-SDK DELTA (#2051), not upstream: CONFIG_SDHC (needed to reach
+    # CONFIG_SDHC_DWC at all) plus the disk/SDMMC-stack symbols the
+    # `zephyr,sdmmc-disk` child node in sdhc-build-coverage.overlay needs
+    # to build -- scoped to this build-only scenario; prj.conf carries
+    # neither, since the app's real image never opens a disk.
+    extra_configs:
+      - CONFIG_SDHC=y
+      - CONFIG_DISK_ACCESS=y
+      - CONFIG_DISK_DRIVER_SDMMC=y
+      - CONFIG_SDMMC_STACK=y
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - sdhc
+      - sdmmc
+    build_only: true   # driver/ADMA build coverage only -- see sdhc-build-coverage.overlay; never flashed.

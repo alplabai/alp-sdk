@@ -158,7 +158,10 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   hardware-strapped on r2 (not software-drivable — the default is the
   microSD slot); r1 can drive it from firmware over the CC3501E GPIO
   proxy, but doing so while header P18's jumper is fitted is a
-  hardware hazard.
+  hardware hazard. **Disabled on 2626-R2 (#2051):** `sdhc0` stays
+  `status = "disabled"` in the shared SoC dtsi rather than fight the
+  mux's held-low/contending pads with the SoC's own drivers; see
+  `examples/aen/aen-sdhc-probe`'s README.
 - **Camera:** three options — Raspberry-Pi-compatible 15-pin CSI,
   standard MIPI B2B 34-pin, parallel DVP 24-pin — multiplexed via
   the **PI3WVR626XEBEX** 2:1 MIPI CSI mux.  Camera rails

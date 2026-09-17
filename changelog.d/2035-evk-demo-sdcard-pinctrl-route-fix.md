@@ -1,5 +1,7 @@
 ### Fixed — SD Host Controller pinctrl on `aen-evk-demo` and `aen-sdcard-readout` was muxed to unconnected pads (#2035)
 
+(`aen-sdcard-readout` renamed `aen-sdhc-probe`, #2051.)
+
 Both `aen-evk-demo` phase 9 and `aen-sdcard-readout` programmed Alif's SD "D"
 pad route (`CLK=P4_1`, `CMD=P4_2`, `D0..D3=P6_0..P6_3`), copied unverified
 from `alif-ensemble-pinctrl.h` and never checked against the E1M-AEN module

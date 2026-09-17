@@ -86,6 +86,14 @@ pin at all, it is hardware-strapped, see "Safe-default mux state"
 below) with the micro-SD slot -- so the CC3501E and an SD card can
 never use it at the same time, only time-share it -- and the Alif's
 single controller is committed to the SD card in the current product.
+**On the E1M-EVK 2626-R2 the microSD side of that same mux is
+additionally hardware-defective (#2051): the as-built 74LVC157 has no
+high-impedance state, so its SoC-facing outputs are held low whenever
+the mux is powered, regardless of `SDIO_MUX_EN`** -- see
+`docs/boards/e1m-evk.md` and `examples/aen/aen-sdhc-probe`'s README.
+The SD host controller stays disabled in the devicetree on this board
+revision as a result, independent of the "committed to the SD card"
+statement above.
 
 The practical consequence: **SPI is the only host-control link**, its
 ceiling is the CC3501E slave's ~15 MHz (see below), and any throughput
