@@ -38,6 +38,16 @@ DOES NOT CATCH:
     `crates/`, or `contract/` directory of its own, so the whole subtree is
     unresolvable here regardless of which subpath is cited. Those are
     reported as SKIPPED with a reason, never as a silent pass.
+  * a `changelog.d/**` citation made FROM CHANGELOG.md itself, when the cited
+    fragment is genuinely gone. Folding a fragment into CHANGELOG.md deletes
+    it (`assemble_changelog.py:228`), so a citation surviving that fold with
+    no file left to check it against is unresolvable by construction --
+    SKIPPED with a reason, same as a foreign-repo citation. A
+    `changelog.d/**` citation from CHANGELOG.md whose cited fragment IS STILL
+    PRESENT -- a hand-edited `[Unreleased]` entry citing a fragment that has
+    not been folded yet -- is graded normally, same as any other citation. A
+    `changelog.d/**` citation made FROM A FRAGMENT is unaffected either way
+    and still graded normally.
 
 ANCHORS -- how to make a citation checkable
 -------------------------------------------
@@ -152,6 +162,32 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 #: as SKIPPED with the reason, never silently passed.
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
+#: `changelog.d/**` cited FROM CHANGELOG.md, not from a fragment, ONLY WHEN the
+#: cited fragment is genuinely gone. `assemble_changelog.py:228`
+#: (`path.unlink()`) deletes every fragment it folds into CHANGELOG.md, so a
+#: post-fold citation surviving in CHANGELOG.md prose names a file the fold
+#: itself just removed -- unresolvable by construction, same treatment as a
+#: foreign-repo citation. Modeled on `_FOREIGN_PREFIXES` above -- reported as
+#: SKIPPED with a reason, never a silent pass and never a hard error
+#: (alp-sdk#2178 review).
+#:
+#: Gated on `not (REPO / rel).is_file()` so a PRE-fold citation -- a
+#: hand-edited `[Unreleased]` entry citing a fragment that has not been folded
+#: yet -- is still graded normally rather than swallowed. Keying the skip on
+#: the citing document alone silently lost exactly the grading this file
+#: exists to enforce: `CHANGELOG.md` citing `changelog.d/2175.md:3` anchored on
+#: text that actually lives at `:19` was SKIPPED while the identical citation
+#: from a fragment got rewritten by `--fix` (alp-sdk#2178 finding 2).
+#:
+#: Scoped to the citation's SOURCE as well as its TARGET: this only fires when
+#: the file doing the citing is CHANGELOG.md itself AND the cited file no
+#: longer exists. A `changelog.d/**` citation made FROM WITHIN A FRAGMENT is
+#: graded exactly as before regardless of target -- fragments legitimately
+#: cross-reference each other before the fold ever runs, and that
+#: cross-reference is still a real, checkable citation until the moment of the
+#: fold.
+_CHANGELOG_D_PREFIX = "changelog.d/"
+
 
 #: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
 #: used to stop being checked the moment its fragment was folded in at release
@@ -172,6 +208,10 @@ _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 #: Grading released history as errors would make this gate unlandable without
 #: rewriting shipped release notes to suit today's tree, which is the opposite of
 #: what a changelog is for.
+#:
+#: This half runs whether or not `changelog.d/` holds fragments.  It used to be
+#: skipped entirely on an empty fragment directory (alp-sdk#2178), which is
+#: precisely the release-cut tree -- see `main()`.
 CHANGELOG = REPO / "CHANGELOG.md"
 
 
@@ -236,6 +276,14 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
                          f"not checkable here")
             continue
 
+        if (frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX)
+                and not (REPO / rel).is_file()):
+            skips.append(f"{where} -- changelog.d/ fragments are deleted "
+                         f"when folded into CHANGELOG.md and this one "
+                         f"already has been; unresolvable from here by "
+                         f"construction")
+            continue
+
         target = REPO / rel
         if not target.is_file():
             errors.append(f"{where} -- no such file in this tree")
@@ -296,6 +344,17 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
             f"-{m.group('end')}`" if m.group("end") else "`")
 
         if rel.startswith(_FOREIGN_PREFIXES):
+            continue
+
+        # Same class as the foreign-prefix skip just above, and gated the same
+        # way `_check_one` now is: a `changelog.d/**` citation made from
+        # CHANGELOG.md itself is left alone ONLY when the fold has already
+        # deleted the file it names -- there is nothing left for an anchor to
+        # repair. A citation whose target is still present (pre-fold) falls
+        # through to the normal repair path below, same as any other
+        # citation (alp-sdk#2178 finding 2).
+        if (frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX)
+                and not (REPO / rel).is_file()):
             continue
 
         target = REPO / rel
@@ -489,30 +548,36 @@ def main() -> int:
 
     fragments = _iter_fragments()
 
-    # Rewrite first, then fall through to the unchanged check below, so the
-    # exit code is always this gate's own verdict on the tree --fix just
-    # wrote. Without the flag the exit code and stdout are bit-for-bit what
-    # they always were -- the checker is a required CI context and owns the
-    # default. NOT "nothing changes", though: the same commit adds the --fix
-    # epilogue to the failure message at the bottom of this function, which is
-    # new STDERR on the no-flag failure path. Stated rather than rounded off,
-    # because a comment overstating its guarantee is how the next person comes
-    # to rely on one that was never there.
+    # Rewrite first, then fall through to the check below, so the exit code is
+    # always this gate's own verdict on the tree --fix just wrote.
     #
-    # This sits ABOVE the empty-directory early return deliberately.
-    # `assemble_changelog.py` empties `changelog.d/` at release time by
-    # folding every fragment into CHANGELOG.md's `[Unreleased]` -- the tree
-    # where the citations most want re-deriving, and the one where returning
-    # early made `--fix` a silent no-op against the promise in its own
-    # `--help`. The `and not args.fix` below is what keeps the default path
-    # exactly what it was: with no flag that condition is the same
-    # `if not fragments` it has always been.
+    # This sits ABOVE the early return, but that ordering is now INERT:
+    # mutation-tested by moving `if args.fix:` below the early return and
+    # re-running the suite -- still 29 passed. What actually keeps `--fix`
+    # from becoming a silent no-op on the release-cut tree (empty
+    # `changelog.d/`, CHANGELOG.md present) is the WIDENED condition below
+    # (`not fragments and not CHANGELOG.is_file()`), not this placement.
     if args.fix:
         _run_fix(fragments)
 
-    if not fragments and not args.fix:
-        print("check-changelog-citations: no changelog.d/ fragments -- nothing "
-              "to check. This is not a pass; it means the directory is empty.")
+    # "Nothing to check" means no fragments AND no CHANGELOG.md -- NOT merely
+    # an empty `changelog.d/` (alp-sdk#2178).
+    #
+    # An empty fragment directory is not a quiet tree, it is the RELEASE CUT:
+    # `assemble_changelog.py:228` (`path.unlink()`) has just folded several
+    # hundred citations into `[Unreleased]`, which this gate grades exactly
+    # like a fragment. Returning 0 there announced itself as a non-verdict on
+    # stdout and was then read as a pass by every caller -- on the one tree
+    # whose citations had never once been checked in the location they now
+    # live in. Worse, the old condition carried `and not args.fix`, so the
+    # same tree yielded two different verdicts: default 0, `--fix` 1.
+    #
+    # The CHANGELOG.md half below now runs either way, and keeps its split --
+    # `[Unreleased]` is ERRORS, released history is WARNINGS only.
+    if not fragments and not CHANGELOG.is_file():
+        print("check-changelog-citations: no changelog.d/ fragments and no "
+              "CHANGELOG.md -- nothing to check. This is not a pass; it means "
+              "this tree holds nothing that could carry a citation.")
         return 0
 
     all_errors: list[str] = []
