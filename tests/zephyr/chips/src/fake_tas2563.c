@@ -93,6 +93,7 @@ static void seed_reg_defaults(uint8_t *regs)
 	regs[0x0Au] = 0x13u; /* TDM_CFG4    §7.5.12 p.70 */
 	regs[0x0Bu] = 0x02u; /* TDM_CFG5    §7.5.13 p.71 */
 	regs[0x0Cu] = 0x00u; /* TDM_CFG6    §7.5.14 p.71 */
+	regs[0x11u] = 0x7Fu; /* DSP Mode & TDM_DET §7.5.19 p.73, "[reset=7Fh]" */
 	regs[0x1Au] = 0xFCu; /* INT_MASK0   §7.5.28 p.77 */
 	regs[0x1Bu] = 0xA6u; /* INT_MASK1   §7.5.29 p.78 */
 	regs[0x1Cu] = 0xDFu; /* INT_MASK2   §7.5.30 p.79 */
