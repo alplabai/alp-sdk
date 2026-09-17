@@ -142,7 +142,10 @@ alp_i2s_t *alp_i2s_open(const alp_i2s_config_t *cfg);
  * @param[in] i2s  Handle from @ref alp_i2s_open.
  *
  * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_NOSUPPORT /
- *         ALP_ERR_IO.
+ *         ALP_ERR_IO / ALP_ERR_BUSY (issue #2150 phase 1: an RX start
+ *         refused because TX is live on the same shared bit clock at a
+ *         different rate -- retry once TX stops, or reconfigures to the
+ *         same rate).
  */
 alp_status_t alp_i2s_start(alp_i2s_t *i2s);
 
