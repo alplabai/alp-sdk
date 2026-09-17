@@ -389,6 +389,41 @@ def test_fix_breaks_an_exact_tie_toward_the_later_line(tmp_path):
     assert len(rewrites) == 1 and "chose 15" in rewrites[0]
 
 
+def test_fix_rereads_a_cited_fragment_it_rewrote_earlier_in_the_same_run(
+        tmp_path, capsys):
+    """A changelog fragment is ITSELF a citable target, and `--fix` rewrites
+    fragments -- so anything holding a cited file's lines across citations
+    goes stale mid-run.
+
+    `1.md` cites into `2.md` (the read that would populate a cache); `2.md` is
+    then rewritten; `3.md` cites into `2.md` anchored on the text that rewrite
+    produced. Served from a cache, `3.md` is graded against the PRE-rewrite
+    `2.md` and reports a FALSE "NEEDS A HUMAN" -- on a tree `_check_one`
+    itself passes, with `--fix` still exiting 0, so this output is the only
+    place it shows. Latent rather than active only when every cross-fragment
+    citation happens to point backwards in sort order, which is not a
+    property anything enforces.
+    """
+    mod, frag = _tree(tmp_path, _source(7, "MOVED ANCHOR"),
+                      'see `changelog.d/2.md:1` ("MOVED ANCHOR")\n')
+    frag.rename(mod.FRAGMENT_DIR / "1.md")
+    (mod.FRAGMENT_DIR / "2.md").write_text(
+        'see `src/a.c:3` ("MOVED ANCHOR")\n', encoding="utf-8")
+    (mod.FRAGMENT_DIR / "3.md").write_text(
+        'see `changelog.d/2.md:1` ("src/a.c:7")\n', encoding="utf-8")
+
+    fragments = sorted(mod.FRAGMENT_DIR.glob("*.md"))
+    assert [f.name for f in fragments] == ["1.md", "2.md", "3.md"], (
+        "the defect needs 2.md rewritten BETWEEN the two reads of it")
+    mod._run_fix(fragments)
+
+    assert "`src/a.c:7`" in (mod.FRAGMENT_DIR / "2.md").read_text(), (
+        "the rewrite this test turns on must actually have happened")
+    out = capsys.readouterr().out
+    assert "NEEDS A HUMAN" not in out, out
+    assert "0 need a human" in out, out
+
+
 def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     """`--fix` must still work on a tree with no fragments left.
 
@@ -413,3 +448,19 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
     assert '`src/a.c:7` ("RELEASE-CANDIDATE ANCHOR")' in (
         mod.CHANGELOG.read_text())
+
+    # The FALL-THROUGH is what carries the verdict, and only `main()`'s
+    # `and not args.fix` conjunct makes it happen on this tree. `--fix` on an
+    # empty changelog.d/ whose `[Unreleased]` citation it CANNOT repair -- a
+    # dead anchor, one of the cases the fixer refuses by design -- must still
+    # exit 1. Dropping that conjunct is a plausible tidy-up (`_run_fix` has
+    # already run three lines above), leaves every other test in this file
+    # green, and turns this into a silent 0: the fixer reporting success on a
+    # tree the gate would still fail, which is the one promise the module
+    # docstring makes about `--fix`'s exit code.
+    mod.CHANGELOG.write_text(
+        "# Changelog\n\n## [Unreleased]\n\n"
+        'cites `src/a.c:3` ("AN ANCHOR THAT IS NOWHERE IN THE FILE")\n',
+        encoding="utf-8")
+    assert mod.main() == 1, (
+        "--fix must fall through to the checker and return ITS verdict")

@@ -153,27 +153,6 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
 
-#: `_fix_one` has to read a cited file before it can tell whether the citation
-#: already resolves, so it read one per CITATION -- 646 reads on this tree, of
-#: a much smaller set of hot files. Keyed on the repo-relative path, which is
-#: exactly what a citation names.
-#:
-#: Only `_fix_one` uses it. `_check_one` is the required CI context and keeps
-#: reading from disk every time, so the check that grades what `--fix` wrote
-#: never grades it against a cached copy of the input.
-_LINES_CACHE: dict[str, list[str]] = {}
-
-
-def _cited_lines(rel: str, target: Path) -> list[str]:
-    """`target`'s lines, read once per repo-relative path per process."""
-    lines = _LINES_CACHE.get(rel)
-    if lines is None:
-        lines = target.read_text(
-            encoding="utf-8", errors="replace").splitlines()
-        _LINES_CACHE[rel] = lines
-    return lines
-
-
 #: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
 #: used to stop being checked the moment its fragment was folded in at release
 #: time, which is exactly when it starts to rot (alp-sdk#1715; alp-sdk#1498 was
@@ -334,7 +313,15 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
             continue
         needle = anchor.group("text").strip()
 
-        lines = _cited_lines(rel, target)
+        # Read fresh, never cached across citations. A changelog fragment is
+        # itself a citable target and `--fix` REWRITES fragments, so a cache
+        # keyed on the cited path serves a later fragment the PRE-rewrite copy
+        # of one already fixed this run: a false "NEEDS A HUMAN" on a tree the
+        # checker passes. Bounded -- a rewrite never changes a file's line
+        # count, so it could only ever mis-report, never mis-rewrite -- but
+        # the saving was ~646 reads of a small hot set with no measured win,
+        # so the cache is the thing that goes.
+        lines = target.read_text(encoding="utf-8", errors="replace").splitlines()
 
         # Already resolves -> leave it alone, no churn. The range must be in
         # bounds too, or `_check_one` would still call it broken: a range
@@ -504,8 +491,13 @@ def main() -> int:
 
     # Rewrite first, then fall through to the unchanged check below, so the
     # exit code is always this gate's own verdict on the tree --fix just
-    # wrote. Without the flag nothing above or below this line behaves any
-    # differently: the checker is a required CI context and owns the default.
+    # wrote. Without the flag the exit code and stdout are bit-for-bit what
+    # they always were -- the checker is a required CI context and owns the
+    # default. NOT "nothing changes", though: the same commit adds the --fix
+    # epilogue to the failure message at the bottom of this function, which is
+    # new STDERR on the no-flag failure path. Stated rather than rounded off,
+    # because a comment overstating its guarantee is how the next person comes
+    # to rely on one that was never there.
     #
     # This sits ABOVE the empty-directory early return deliberately.
     # `assemble_changelog.py` empties `changelog.d/` at release time by
