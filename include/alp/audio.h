@@ -111,6 +111,14 @@ alp_audio_in_t *alp_audio_in_open(const alp_audio_config_t *cfg);
 /**
  * @brief Begin capturing.  Frames flow into an internal ring buffer.
  *
+ * @note Samples delivered immediately after start (or after a restart
+ *       following a stop/error) may contain a settling transient from the
+ *       capture datapath's decimation/filtering and should be treated as
+ *       non-representative. Duration and shape are backend/silicon-specific
+ *       -- discard at least the first block, and more if the backend
+ *       documents a longer settling duration (see the backend's own DT
+ *       binding or driver docs for a measured figure, where one exists).
+ *
  * @param[in] in  Handle from @ref alp_audio_in_open.
  *
  * @return ALP_OK / ALP_ERR_INVAL / ALP_ERR_NOT_READY /
@@ -141,7 +149,20 @@ alp_status_t alp_audio_in_stop(alp_audio_in_t *in);
  * @param[out] out_frames   Receives the frame count actually delivered.
  *                          May be NULL.
  * @param[in]  timeout_ms   Max wait for available frames.
- * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT.
+ * @note See @ref alp_audio_in_start for the startup settling-transient
+ *       caveat -- it applies to the first block(s) this function delivers
+ *       after start/restart, not just to alp_audio_in_start() itself.
+ * @return ALP_OK / ALP_ERR_NOT_READY / ALP_ERR_INVAL / ALP_ERR_TIMEOUT /
+ *         ALP_ERR_IO. ALP_ERR_IO (issue #2133 round 4c) means the backend
+ *         itself reported dropped data mid-session (e.g. the Zephyr
+ *         alif_pdm driver's slab-exhaustion/queue-overflow/hardware-FIFO-
+ *         overflow detection, `-EIO` from `dmic_read()`) -- sticky until
+ *         the caller stops and restarts the stream; every read keeps
+ *         returning ALP_ERR_IO until then. This is distinct from
+ *         ALP_ERR_TIMEOUT, which just means no data arrived within
+ *         @p timeout_ms (including a non-blocking @p timeout_ms=0 call
+ *         that simply found nothing queued yet -- issue #2133 round 4d)
+ *         and does not by itself indicate loss.
  */
 alp_status_t alp_audio_in_read(alp_audio_in_t *in,
                                void           *buf,
