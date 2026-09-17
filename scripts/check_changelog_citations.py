@@ -50,6 +50,38 @@ code and the gate fails, which is the entire point. An un-anchored citation is
 range-checked only, and is reported so the count of unanchored citations is
 visible rather than assumed to be zero.
 
+--fix -- re-deriving a drifted citation from its anchor
+-------------------------------------------------------
+Merging `dev` into a branch shifts the files its fragments cite, so every
+citation into a moved file drifts at once (alp-sdk#2175). Two failures follow
+and only the first announces itself: a fragment BOTH sides edited conflicts and
+NEITHER side is right after the merge, so `--ours` and `--theirs` each leave a
+CI-red tree; a fragment only ONE side edited merges clean and goes SILENTLY
+stale.
+
+`--fix` re-derives the line number by locating the anchor text in the cited
+file, then rewrites the citation in place. It is deliberately narrow about what
+it will touch, because a fixer that guesses is worse than no fixer at all:
+
+  * ONLY an anchored citation. An un-anchored one has nothing to verify
+    against, so rewriting it would be guessing; it is left alone and counted.
+  * NEVER inside a fenced block -- that is where a fragment puts an EXAMPLE of
+    a citation, including this file's own `chips/cc3501e/x.c:682-684` above.
+  * NEVER released history. `changelog.d/` and `[Unreleased]` describe the
+    CURRENT tree and are fixable; a released section describes a tree that no
+    longer exists, and rewriting it would falsify what shipped.
+  * On an AMBIGUOUS anchor -- the phrase occurs more than once -- the match
+    NEAREST the originally cited line, never the first. Drift is small and
+    consistent, so nearest is right; first-match would silently retarget the
+    note to an unrelated occurrence, which is the exact failure this gate
+    exists to catch. Every such choice is reported with its candidate lines.
+  * When the anchor is nowhere in the file, nothing is rewritten: the anchored
+    code is gone rather than moved, and a human has to look.
+
+`--fix` runs the normal check afterwards, so its exit code is this gate's own
+verdict on the tree it just wrote -- it cannot report success on a tree the
+gate would still fail.
+
 Exit codes:
     0  every citation resolved (and every anchored one matched)
     1  at least one citation is broken
@@ -214,9 +246,180 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
     return errors, skips, checked, anchored
 
 
+def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
+    """Re-derive every drifted ANCHORED citation in `text` from its anchor.
+
+    Returns `(new_text, rewrites, problems, unanchored)` and writes nothing --
+    the caller owns the file. Keeping the rewrite pure is what lets it be
+    tested against a scratch tree instead of against this repo.
+
+    Shares `_CITATION`, `_ANCHOR`, `_FOREIGN_PREFIXES` and
+    `_strip_fenced_blocks` with `_check_one` above, and that sharing is the
+    point: a fixer carrying its own parser would eventually disagree with the
+    gate about what a citation even IS, and would then confidently "fix"
+    fragments into a tree the gate still rejects.
+    """
+    rewrites: list[str] = []
+    problems: list[str] = []
+    unanchored = 0
+    edits: list[tuple[int, int, str]] = []
+
+    # Offsets into the blanked text are offsets into the real text:
+    # `_strip_fenced_blocks` substitutes spaces rather than deleting, so every
+    # span is identical in both. That is what makes it safe to DETECT on the
+    # blanked copy and REWRITE the original -- a citation inside a fenced
+    # example is invisible here and therefore can never be edited.
+    stripped = _strip_fenced_blocks(text)
+
+    for m in _CITATION.finditer(stripped):
+        rel, start = m.group("path"), int(m.group("start"))
+        end = int(m.group("end") or start)
+        where = f"{frag.name}: `{rel}:{m.group('start')}" + (
+            f"-{m.group('end')}`" if m.group("end") else "`")
+
+        if rel.startswith(_FOREIGN_PREFIXES):
+            continue
+
+        target = REPO / rel
+        if not target.is_file():
+            problems.append(f"{where} -- no such file in this tree; the path "
+                            f"itself is wrong, which no anchor can repair")
+            continue
+
+        anchor = _ANCHOR.match(stripped[m.end():])
+        if not anchor:
+            # Nothing to verify against. Re-pointing this would be guessing,
+            # and a plausible-looking guess is exactly what this gate exists
+            # to stop -- so it is counted and left exactly as it is.
+            unanchored += 1
+            continue
+        needle = anchor.group("text").strip()
+
+        lines = target.read_text(
+            encoding="utf-8", errors="replace").splitlines()
+
+        # Already resolves -> leave it alone, no churn. The range must be in
+        # bounds too, or `_check_one` would still call it broken: a range
+        # running past EOF can still "contain" its anchor once Python
+        # truncates the slice.
+        if end <= len(lines) and needle in "\n".join(lines[start - 1:end]):
+            continue
+
+        # Located in the joined body rather than line by line, so an anchor a
+        # fragment wrapped across two lines is found the same way `_check_one`
+        # finds it -- by containment in the joined region.
+        body = "\n".join(lines)
+        hits: list[int] = []
+        at = body.find(needle)
+        while at != -1:
+            hits.append(body.count("\n", 0, at) + 1)
+            at = body.find(needle, at + 1)
+
+        if not hits:
+            problems.append(
+                f"{where} -- anchored on {needle!r}, which is nowhere in "
+                f"{rel}. The anchored code is gone rather than moved, so this "
+                f"is NOT rewritten; a human has to look.")
+            continue
+
+        # Nearest the cited line, never hits[0]: a merge shifts a citation by
+        # a small, consistent delta, so the intended occurrence is the one
+        # closest to where the fragment already pointed.
+        new_start = min(hits, key=lambda h: abs(h - start))
+        note = ""
+        if len(hits) > 1:
+            note = (f"   [AMBIGUOUS: {needle!r} occurs at lines {hits}; chose "
+                    f"{new_start}, nearest the cited {start}]")
+
+        # Preserve the range's width -- `4372-4376` re-anchored at 4378 is
+        # `4378-4382` -- widening only if the anchor itself spans lines, and
+        # clamping at EOF, where the original width cannot be preserved.
+        width = max(end - start, needle.count("\n"))
+        new_end = min(new_start + width, len(lines))
+        repl = (f"`{rel}:{new_start}-{new_end}`"
+                if m.group("end") or new_end > new_start
+                else f"`{rel}:{new_start}`")
+
+        rewrites.append(f"{where} -> {repl}{note}")
+        edits.append((m.start(), m.end(), repl))
+
+    if not edits:
+        return text, rewrites, problems, unanchored
+
+    out: list[str] = []
+    last = 0
+    for s, e, repl in edits:
+        out.append(text[last:s])
+        out.append(repl)
+        last = e
+    out.append(text[last:])
+    return "".join(out), rewrites, problems, unanchored
+
+
+def _run_fix(fragments: list[Path]) -> None:
+    """Rewrite drifted anchored citations in place, then report what changed.
+
+    Scope is `changelog.d/` fragments plus CHANGELOG.md's `[Unreleased]`
+    section -- the two things that describe the CURRENT tree. The released
+    tail is split off and carried through byte for byte (see `CHANGELOG`
+    above): those sections describe trees that no longer exist, and "fixing"
+    them would falsify what shipped.
+    """
+    rewrites: list[str] = []
+    problems: list[str] = []
+    unanchored = 0
+    touched = 0
+
+    # (path, fixable head, verbatim tail). A fragment is all head; only
+    # CHANGELOG.md has a tail, and that tail is never re-derived.
+    targets: list[tuple[Path, str, str]] = []
+    for frag in fragments:
+        try:
+            targets.append((frag, frag.read_text(encoding="utf-8"), ""))
+        except UnicodeDecodeError:
+            problems.append(f"{frag.name} -- not valid UTF-8; left untouched "
+                            f"rather than rewritten through a lossy decode")
+    if CHANGELOG.is_file():
+        try:
+            head, tail = _split_changelog(
+                CHANGELOG.read_text(encoding="utf-8"))
+            targets.append((CHANGELOG, head, tail))
+        except UnicodeDecodeError:
+            problems.append("CHANGELOG.md -- not valid UTF-8; left untouched")
+
+    for path, head, tail in targets:
+        new_head, r, p, u = _fix_one(path, head)
+        rewrites += r
+        problems += p
+        unanchored += u
+        if new_head != head:
+            # newline="" writes the LF verbatim instead of translating it to
+            # os.linesep, which on a Windows host would rewrite the whole file
+            # to CRLF and bury the one line that actually changed.
+            path.write_text(new_head + tail, encoding="utf-8", newline="")
+            touched += 1
+
+    print("check-changelog-citations --fix: re-deriving drifted citations "
+          "from their anchors.")
+    for r in rewrites:
+        print(f"  {r}")
+    for p in problems:
+        print(f"  NEEDS A HUMAN {p}")
+    print(f"check-changelog-citations --fix: rewrote {len(rewrites)} "
+          f"citation(s) across {touched} file(s); left {unanchored} "
+          f"un-anchored citation(s) alone (nothing to re-derive from); "
+          f"{len(problems)} need a human.")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument(
+        "--fix", action="store_true",
+        help="re-derive drifted ANCHORED citations from their anchor text and "
+             "rewrite changelog.d/ fragments and CHANGELOG.md's [Unreleased] "
+             "section in place, then check as usual. Never touches an "
+             "un-anchored citation, a fenced example, or released history.")
     args = ap.parse_args()
 
     fragments = _iter_fragments()
@@ -224,6 +427,13 @@ def main() -> int:
         print("check-changelog-citations: no changelog.d/ fragments -- nothing "
               "to check. This is not a pass; it means the directory is empty.")
         return 0
+
+    # Rewrite first, then fall through to the unchanged check below, so the
+    # exit code is always this gate's own verdict on the tree --fix just
+    # wrote. Without the flag nothing above or below this line behaves any
+    # differently: the checker is a required CI context and owns the default.
+    if args.fix:
+        _run_fix(fragments)
 
     all_errors: list[str] = []
     all_skips: list[str] = []
