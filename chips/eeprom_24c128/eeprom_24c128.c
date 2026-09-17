@@ -28,7 +28,27 @@
 #define EEPROM_WRITE_POLL_MAX     20
 #define EEPROM_WRITE_POLL_STEP_US 1000u
 
-static alp_status_t poll_for_ack(eeprom_24c128_t *ctx)
+/** One-shot post-lock wait budget for @ref eeprom_24c128_secure_page_lock, in
+ *  milliseconds -- see that function's use of this constant for why it can't
+ *  poll instead. Deliberately its OWN named constant, not
+ *  `(EEPROM_WRITE_POLL_STEP_US / 1000u) * EEPROM_WRITE_POLL_MAX` computed
+ *  inline: that expression is integer division of two independently-tunable
+ *  constants, and any EEPROM_WRITE_POLL_STEP_US below 1000 makes the whole
+ *  term round to 0 -- silently deleting the wait, so the confirming Lock
+ *  Status read below hits a device still mid-write-cycle and this function
+ *  reports an error for a lock that actually succeeded, on a call the header
+ *  says must not be retried. Value: 20 ms, same as today's
+ *  EEPROM_WRITE_POLL_STEP_US * EEPROM_WRITE_POLL_MAX. */
+#define EEPROM_LOCK_WAIT_MS 20u
+
+/* @p addr is the 7-bit address to poll -- ctx->addr (0x50 range) after a
+ * main-array write, or ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET (0x58
+ * range) after a Secure Data Page write.  Both headers decode onto the
+ * same physical die, so either address-only write NACKs while an internal
+ * write cycle from EITHER header is still in progress -- but polling the
+ * header actually written keeps this function's contract independent of
+ * that assumption. */
+static alp_status_t poll_for_ack_at(eeprom_24c128_t *ctx, uint8_t addr)
 {
 	/* Acknowledge polling: try a 0-byte (address-only) write at the device's
      * address; if the chip is still finishing an internal write cycle it NACKs.
@@ -36,7 +56,7 @@ static alp_status_t poll_for_ack(eeprom_24c128_t *ctx)
      * the chip's write cycle rather than racing past it. */
 	for (int i = 0; i < EEPROM_WRITE_POLL_MAX; ++i) {
 		uint8_t      addr_buf[2] = { 0, 0 };
-		alp_status_t s           = alp_i2c_write(ctx->bus, ctx->addr, addr_buf, 2);
+		alp_status_t s           = alp_i2c_write(ctx->bus, addr, addr_buf, 2);
 		if (s == ALP_OK) return ALP_OK;
 		alp_delay_us(EEPROM_WRITE_POLL_STEP_US);
 	}
@@ -120,6 +140,7 @@ alp_status_t eeprom_24c128_read_identity(eeprom_24c128_t *ctx, eeprom_24c128_ide
 	uint8_t lock_byte = 0;
 	if (alp_i2c_write_read(ctx->bus, alt_addr, ptr, sizeof(ptr), &lock_byte, 1) == ALP_OK) {
 		out->lock_valid         = true;
+		out->lock_status        = lock_byte;
 		out->secure_page_locked = (lock_byte & 0x02u) != 0u;
 	}
 
@@ -155,13 +176,121 @@ eeprom_24c128_write(eeprom_24c128_t *ctx, uint16_t offset, const uint8_t *data, 
 		alp_status_t s = alp_i2c_write(ctx->bus, ctx->addr, scratch, chunk + 2);
 		if (s != ALP_OK) return s;
 
-		s = poll_for_ack(ctx);
+		s = poll_for_ack_at(ctx, ctx->addr);
 		if (s != ALP_OK) return s;
 
 		offset = (uint16_t)(offset + chunk);
 		data += chunk;
 		len -= chunk;
 	}
+	return ALP_OK;
+}
+
+/* NOT a proof that the functions below never emit selector 0x06 -- a
+ * _Static_assert on two named constants only proves the constants differ
+ * from each other; it says nothing about what scratch[0]/cmd[0] actually
+ * get assigned below, and a future edit that mistakenly wrote the DCR
+ * selector into either would still compile clean past this. What actually
+ * makes 0x06 unreachable is that eeprom_24c128_secure_page_write() and
+ * eeprom_24c128_secure_page_lock() hardcode these two named constants as
+ * literals, never derived from caller input -- see their doc comments in
+ * the header. This assert is a much narrower, still-useful guard: it
+ * catches EEPROM_IDENTITY_SEL_SECURE_PAGE or EEPROM_IDENTITY_SEL_LOCK_STATUS
+ * itself ever being redefined to collide with EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+ * which the runtime wire-frame tests in tests/common/eeprom_24c128_secure_page.c
+ * do not exercise (they use the constants' current values, not their
+ * definitions). */
+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(EEPROM_IDENTITY_SEL_SECURE_PAGE != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+               "secure-page write selector must never equal the device config selector");
+_Static_assert(EEPROM_IDENTITY_SEL_LOCK_STATUS != EEPROM_IDENTITY_SEL_DEVICE_CONFIG,
+               "secure-page lock selector must never equal the device config selector");
+#endif
+
+alp_status_t eeprom_24c128_secure_page_write(eeprom_24c128_t *ctx, const uint8_t *data, size_t len)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (data == NULL) return ALP_ERR_INVAL;
+	/* Reject any length but the exact page size before it reaches the bus --
+     * a caller-suppliable `size_t` here (not a fixed-size array parameter,
+     * which decays to a pointer and would silently trust a too-short
+     * buffer) is what makes it structurally impossible for a short buffer
+     * to have this function memcpy past its end into a page that then gets
+     * permanently sealed. */
+	if (len != EEPROM_24C128_SECURE_PAGE_BYTES) return ALP_ERR_INVAL;
+
+	uint8_t alt_addr = (uint8_t)(ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET);
+
+	/* {sel, in-page offset} + 64 data bytes -- the SAME 2-byte pointer
+     * convention eeprom_24c128_read_identity() already uses (bench-verified)
+     * to read this same object, not a 3-byte "selector + op-code + offset"
+     * scheme: docs/som-batch-provisioning-procedure.md §7's "second byte"
+     * phrasing counts the I2C device-address byte as the first byte, so its
+     * "xxxx x00x" IS this function's FIRST (and only) pointer byte, matching
+     * EEPROM_IDENTITY_SEL_SECURE_PAGE exactly -- there is no separate op-code
+     * byte.  An earlier revision of this function got that wrong, emitted a
+     * 3-byte pointer, and rotated every byte of the page by one on write. */
+	uint8_t scratch[2 + EEPROM_24C128_SECURE_PAGE_BYTES];
+	scratch[0] = EEPROM_IDENTITY_SEL_SECURE_PAGE;
+	scratch[1] = 0x00;
+	memcpy(scratch + 2, data, EEPROM_24C128_SECURE_PAGE_BYTES);
+
+	alp_status_t s = alp_i2c_write(ctx->bus, alt_addr, scratch, sizeof(scratch));
+	if (s != ALP_OK) return s;
+
+	return poll_for_ack_at(ctx, alt_addr);
+}
+
+alp_status_t eeprom_24c128_secure_page_lock(eeprom_24c128_t *ctx)
+{
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+
+	uint8_t alt_addr = (uint8_t)(ctx->addr + EEPROM_24C128_ALT_ADDR_OFFSET);
+
+	/* {sel, 0x00, 0xFF} -- selector 0x04 (Secure Page Lock Status, the SAME
+     * first-pointer-byte selector eeprom_24c128_read_identity() reads),
+     * second pointer byte 0x00, then the single 0xFF trigger byte per
+     * docs/som-batch-provisioning-procedure.md §7 step 7.  Not a
+     * "sel + op-code + don't-care + data" 4-byte frame -- see
+     * eeprom_24c128_secure_page_write's comment above for why there is no
+     * separate op-code byte in this wire format. */
+	uint8_t cmd[3] = {
+		EEPROM_IDENTITY_SEL_LOCK_STATUS,
+		0x00,
+		0xFFu,
+	};
+	alp_status_t s = alp_i2c_write(ctx->bus, alt_addr, cmd, sizeof(cmd));
+	if (s != ALP_OK) return s;
+
+	/* Deliberately NOT poll_for_ack_at(): that polls by issuing an
+     * address-only WRITE to the just-locked page, and this repo's own
+     * quoted datasheet text is "Any write instructions to the Secure Data
+     * Page will return No ACK from the device" -- so on a CORRECT lock,
+     * every poll attempt NACKs, the loop exhausts its budget, and this
+     * function would report ALP_ERR_TIMEOUT for the success case, with the
+     * header telling the caller not to retry a timeout here.  Wait out the
+     * same write-cycle budget once instead, with no further write to the
+     * page, then read Lock Status -- the only verdict this function needs.
+     *
+     * alp_delay_ms(), not alp_delay_us(): this is a single one-shot
+     * ~20 ms wait, not the sub-millisecond hardware-timing sequence
+     * alp_delay_us() is documented for (include/alp/peripheral.h) --
+     * that primitive is a non-yielding busy-wait (Zephyr's k_busy_wait()),
+     * and 20 ms of that stalls every equal-or-lower-priority thread on
+     * this core for the whole window (issue #1621's defect class). */
+	alp_delay_ms(EEPROM_LOCK_WAIT_MS);
+
+	/* Confirm, don't trust: re-read Lock Status rather than trusting the
+     * write's own ACK -- the only safe state check (see
+     * eeprom_24c128_read_identity's doc comment for why the datasheet's
+     * other method, attempting a page write and checking for a NAK, must
+     * never be used). */
+	uint8_t ptr[2]    = { EEPROM_IDENTITY_SEL_LOCK_STATUS, 0x00 };
+	uint8_t lock_byte = 0;
+	s                 = alp_i2c_write_read(ctx->bus, alt_addr, ptr, sizeof(ptr), &lock_byte, 1);
+	if (s != ALP_OK) return s;
+	if ((lock_byte & 0x02u) == 0u) return ALP_ERR_IO; /* wrote OK but didn't take */
+
 	return ALP_OK;
 }
 

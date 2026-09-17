@@ -40,8 +40,11 @@ EXAMPLE_BRIDGE_HELPERS = (
     REPO / "examples" / "aen" / "aen-cc3501e-gpio" / "src" / "cc3501e_bridge.h",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.c",
     REPO / "examples" / "aen" / "aen-usb-firstlight" / "src" / "cc3501e_bridge.h",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.c",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_bridge.h",
+    # ALP-SDK DELTA (#2051), not upstream: aen-sdcard-readout (renamed
+    # aen-sdhc-probe) no longer carries its own copy -- the app dropped the
+    # CC3501E bridge bring-up entirely once it stopped touching the SD mux
+    # at all (sdhc0 is disabled outright on the E1M-EVK 2626-R2 now, a
+    # hardware defect, not something a mux ENABLE write could route around).
 )
 
 
@@ -182,19 +185,22 @@ def test_example_bridge_helpers_stay_in_sync(suffix):
             assert path.read_text(encoding="utf-8") == reference, f"{path} drifted"
 
 
-# aen-evk-demo and aen-sdcard-readout are the standalone apps whose route
-# table is hand-written rather than emitted by
-# scripts/gen_cc3501e_gpio_routes.py: that generator discovers its targets by
-# looking for a board.yaml beside a proxy-enabling prj.conf, and both are
-# standalone Zephyr apps with no board.yaml, so both are correctly skipped.
-# Their tables are therefore pinned HERE instead -- against the same TSV the
-# generator resolves through -- so they cannot drift the way the triplicated
-# tables #1859 removed did. aen-sdcard-readout's table (#2035) declares the
-# SAME single entry as aen-evk-demo's (it drives the identical mux ENABLE),
-# so both are checked by the same two assertions below.
+# aen-evk-demo is a standalone app whose route table is hand-written rather
+# than emitted by scripts/gen_cc3501e_gpio_routes.py: that generator
+# discovers its targets by looking for a board.yaml beside a
+# proxy-enabling prj.conf, and this is a standalone Zephyr app with no
+# board.yaml, so it is correctly skipped. Its table is therefore pinned
+# HERE instead -- against the same TSV the generator resolves through --
+# so it cannot drift the way the triplicated tables #1859 removed did.
+#
+# ALP-SDK DELTA (#2051), not upstream: aen-sdcard-readout (renamed
+# aen-sdhc-probe) used to carry the SAME single entry here (#2035, it drove
+# the identical mux ENABLE) -- removed from this tuple along with its own
+# cc3501e_gpio_routes.c once that app dropped the CC3501E bridge bring-up
+# entirely (sdhc0 is disabled outright on the E1M-EVK 2626-R2, a hardware
+# defect no mux ENABLE write could route around).
 STANDALONE_APP_ROUTE_TABLES = (
     REPO / "examples" / "aen" / "aen-evk-demo" / "src" / "cc3501e_gpio_routes.c",
-    REPO / "examples" / "aen" / "aen-sdcard-readout" / "src" / "cc3501e_gpio_routes.c",
 )
 
 
@@ -236,6 +242,15 @@ def test_standalone_app_route_table_never_targets_a_reserved_pad(path):
         f"the firmware's gpio_pad_reserved() would refuse it at runtime"
     )
 
+
+# The revision-dependent pin list is no longer per-app (issue #2144 design
+# review): a per-table opt-in test here would be checking a triplicated
+# copy of the exact shape issue #1859 already removed once for
+# cc3501e_gpio_routes[] itself.  It has exactly one definition now --
+# src/backends/gpio/cc3501e_rev_dependent_pins.c, an SDK-owned generated
+# file compiled unconditionally alongside cc3501e_proxy.c -- covered by
+# test_gen_cc3501e_gpio_routes.py's own generated-output test instead of
+# repeated once per route table here.
 
 def _revision_dependent_e1m_pads() -> set[str]:
     """E1M pads that metadata/e1m_modules/aen/hw-revisions.yaml moves between

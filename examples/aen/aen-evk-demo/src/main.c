@@ -142,22 +142,12 @@
 #include <zephyr/net/net_ip.h>
 
 /*
- * Phase 9 only, and deliberate for the same reason the Ethernet headers above
- * are: the portable <alp/...> API publishes no block-device or filesystem
- * peripheral class at all, so there is nothing here to route through it. The
- * ONE thing phase 9 does reach for portably is the mux ENABLE pin, and that
- * IS opened through <alp/peripheral.h>'s alp_gpio_* on a portable E1M pin id
- * (ALP_E1M_GPIO_IO20) -- the CC3501E proxy backend turns it into a bridge
- * transaction without this file naming a raw coprocessor GPIO index.
- *
- * <ff.h> is the ELM FatFs work-area type (FATFS), needed because fs_mount()
- * takes a caller-owned one; it is not otherwise called into.
+ * ALP-SDK DELTA (#2051), not upstream: the disk-access/FatFs includes that
+ * used to live here (<zephyr/storage/disk_access.h>, <zephyr/drivers/disk.h>,
+ * <zephyr/fs/fs.h>, <ff.h>) are gone. Phase 9 (SD card) never reaches
+ * disk_access_init()/fs_mount() any more -- see phase_sdcard()'s SAFETY
+ * comment -- so nothing in this file calls into any of them.
  */
-#include <zephyr/storage/disk_access.h>
-#include <zephyr/drivers/disk.h> /* DISK_STATUS_NOMEDIA -- the no-card fork */
-#include <zephyr/fs/fs.h>
-#include <ff.h>
-
 #include "alp/peripheral.h"
 #include "alp/pwm.h"
 #include "alp/jpeg.h"
@@ -1419,9 +1409,15 @@ static phase_verdict_t phase_eeprom_identity(demo_ctx_t *ctx)
 		return PHASE_FAIL;
 	}
 
-	/* Reinterpret rather than field-copy: alp_hw_info_eeprom_t is the
-	 * fixed, packed on-wire layout scripts/program_eeprom.py writes. */
-	const alp_hw_info_eeprom_t *m         = (const alp_hw_info_eeprom_t *)raw;
+	/* memcpy, not a cast -- raw is a uint8_t[] (alignment 1);
+	 * alp_hw_info_eeprom_t needs alignment 4 for its uint32_t
+	 * magic/schema_version/crc32 and uint16_t mfg_year. Reading through a
+	 * cast pointer is the same misaligned-access bug already fixed on the
+	 * Secure Data Page path (see alp_secure_page_mirror_classify()'s doc
+	 * comment in include/alp/hw_info.h) and left unswept here. */
+	alp_hw_info_eeprom_t manifest;
+	memcpy(&manifest, raw, sizeof(manifest));
+	const alp_hw_info_eeprom_t *m         = &manifest;
 	bool                        magic_ok  = (m->magic == ALP_HW_INFO_MAGIC);
 	bool                        family_ok = (strncmp(m->family, "aen", 3) == 0);
 
@@ -2679,6 +2675,17 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 /* ==================================================================== */
 
 /*
+ * SAFETY (#2051), READ THIS FIRST: none of the rest of this comment block
+ * (the five outcomes, the FAT-write nonce mechanism, the mux-enable
+ * write/read-back) describes what phase_sdcard() below actually does any
+ * more. The E1M-EVK 2626-R2's SD mux (74LVC157 U38/U39) has a confirmed
+ * hardware defect, so this phase no longer asserts MUX_EN, no longer calls
+ * disk_access_init()/fs_mount(), and always returns PHASE_SKIPPED -- see
+ * the SAFETY comment in phase_sdcard() itself and README.md for why. The
+ * rest of this block is kept as an accurate historical record of what this
+ * phase did before that defect was confirmed, and of the pad-routing facts
+ * (ENABLE vs SELECT, the P18 jumper) that are still true.
+ *
  * WHAT HAS TO BE TRUE BEFORE THIS PHASE CAN DO ANYTHING
  * ------------------------------------------------------
  * The EVK microSD is not wired straight to the SoC. It sits behind a pair of
@@ -2820,373 +2827,49 @@ static phase_verdict_t phase_cc3501e(demo_ctx_t *ctx)
 #define SD_MUX_SETTLE_MS 10u
 #endif
 
-/* FATFS work area. FILE-STATIC, not a local: fs_mount() keeps the pointer for
- * as long as the volume is mounted, so a stack-local would be dangling the
- * moment this function returned -- and sizeof(FATFS) is a few hundred bytes
- * against a 4096-byte main stack. */
-static FATFS sd_fat_fs;
-
-static struct fs_mount_t sd_mnt = {
-	.type      = FS_FATFS,
-	.fs_data   = &sd_fat_fs,
-	.mnt_point = SD_MOUNT_POINT,
-	/* Half of the two-layer no-format guarantee; the other half is
-	 * CONFIG_FS_FATFS_MOUNT_MKFS=n. See the header above. */
-	.flags = FS_MOUNT_FLAG_NO_FORMAT,
-};
-
+/*
+ * ALP-SDK DELTA (#2051), not upstream: the FATFS work area + mount struct
+ * this phase used to fs_mount() are gone -- the SAFETY note in
+ * phase_sdcard() below means this phase never reaches fs_mount() at all
+ * any more, so a static FATFS + struct fs_mount_t here would be dead
+ * weight (and, being file-static globals, would NOT even trip an
+ * unused-variable warning to catch that -- deleted rather than left as a
+ * trap for the next person who assumes their presence means the mount
+ * still runs).
+ */
 static phase_verdict_t phase_sdcard(demo_ctx_t *ctx)
 {
 	printf("[evkdemo] -- Phase: SD card (74LVC157 SDIO mux -> DWC SDHC -> FAT) --\n");
 
-	/* --- 1. Enable the SDIO mux over the CC3501E GPIO proxy ------------ */
-	/* alp_gpio_open() on a PORTABLE E1M pin id. The proxy backend looks
-	 * IO20 up in this app's cc3501e_gpio_routes[] table, finds raw CC3501E
-	 * GPIO_26, and sends the configure/write over the bridge phase 8 left
-	 * bound. Nothing here names GPIO_26 -- the raw index belongs in the
-	 * route table, which is derived from the SoM pad map, not in app code. */
-	alp_gpio_t *mux_en = alp_gpio_open(ALP_E1M_GPIO_IO20);
-	if (mux_en == NULL) {
-		printf("[evkdemo] SD: alp_gpio_open(E1M IO20 = SDIO mux /E) -> NULL, err=%d -- the mux "
-		       "cannot be enabled, so the card is electrically disconnected. IO20 reaches "
-		       "CC3501E GPIO_26 on BOTH module revisions and phase 8 leaves the bridge up, so "
-		       "this is a build/bridge fault, not an absent card\n",
-		       (int)alp_last_error());
-		ctx->note = "mux ENABLE not drivable";
-		return PHASE_FAIL;
-	}
-	alp_status_t cfg_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
-	/* ACTIVE LOW: `false` asserts /E and connects the card to the SoC. Skip
-	 * both the write and the read-back below when configure() itself already
-	 * failed -- driving, and then reading back, a pin that was never
-	 * configured as an output would report on calls that never ran. */
-	alp_status_t en_rc     = (cfg_rc == ALP_OK) ? alp_gpio_write(mux_en, false) : cfg_rc;
-	bool         mux_level = true;
-	alp_status_t rd_rc     = ALP_OK;
-	const char  *level_str = "?";
-	if (cfg_rc == ALP_OK) {
-		/* Read the pin back rather than trusting the write return code alone
-		 * -- the GPIO proxy's read path is reachable over the same bridge
-		 * phase 8 left up (route-table detail, not named here -- see the
-		 * open() comment above). A LOW read-back is only CORROBORATION that
-		 * the pad is asserted, not proof: depending on bridge firmware this
-		 * may report the far-side output register rather than the pad
-		 * itself. It does not gate anything below -- disagreement is
-		 * printed and the run falls through to disk_access_init() either
-		 * way, so the log still shows what the controller sees. */
-		rd_rc = alp_gpio_read(mux_en, &mux_level);
-		/* level=? rather than a fabricated sample on a failed read: mux_level
-		 * is seeded true and alp_gpio_read()/cc3501e_gpio_read() leaves the
-		 * output untouched on every error path, so printing it unconditionally
-		 * would make a failed read print "level=HIGH" -- indistinguishable
-		 * from a genuine high reading, in the one field whose entire purpose
-		 * is answering whether the pad actually moved. */
-		level_str = (rd_rc == ALP_OK) ? (mux_level ? "HIGH" : "LOW") : "?";
-		printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
-		       "low, driven LOW): configure -> %d, write -> %d, read-back -> %d (level=%s, "
-		       "corroboration only -- may reflect the bridge's output register rather than the "
-		       "pad, not proof the line moved), settle=%u ms\n",
-		       (int)cfg_rc,
-		       (int)en_rc,
-		       (int)rd_rc,
-		       level_str,
-		       (unsigned)SD_MUX_SETTLE_MS);
-	} else {
-		printf("[evkdemo] SD: mux ENABLE via GPIO proxy (E1M IO20 -> CC3501E GPIO_26, /E active "
-		       "low, driven LOW): configure -> %d, write -> SKIPPED (configure failed), "
-		       "read-back -> SKIPPED, settle=%u ms\n",
-		       (int)cfg_rc,
-		       (unsigned)SD_MUX_SETTLE_MS);
-	}
-	if (en_rc != ALP_OK) {
-		printf("[evkdemo] SD: the mux ENABLE could not be driven -- every step below would run "
-		       "against a card that is not connected to the SoC. Check that phase 8 passed "
-		       "(the proxy needs its bridge attached) and that this build carries the IO20 "
-		       "route\n");
-		/* No restore-to-idle here (nor at the phase's single exit below),
-		 * on the maintainer's instruction: /E LOW is this board's working
-		 * state, not a transient this phase borrows and must give back
-		 * on the way out. Whatever GPIO_26 was left driving by the failed
-		 * configure/write above stays as-is; close() only frees the
-		 * host-side proxy handle. */
-		alp_gpio_close(mux_en);
-		ctx->note = "mux ENABLE not drivable";
-		return PHASE_FAIL;
-	}
-	k_msleep(SD_MUX_SETTLE_MS);
-
-	/* From here on the mux stays ENABLED (GPIO_26 driven low) through this
-	 * function's single exit below AND past it, for the rest of the run --
-	 * deliberately NOT the restore-to-idle-before-close idiom phase 6 (RGB
-	 * LED) uses for its PWM channels. /E LOW is this board's working
-	 * state, not a resource this phase borrows: leaving it asserted is
-	 * what keeps CLK/CMD/D0..D3 connected through the mux to the card,
-	 * on the maintainer's instruction. (If this reads like the "restore
-	 * on every exit" bug that used to live here -- it isn't; that
-	 * discipline was removed on purpose.) Every step from here on still
-	 * reports through `verdict` / `ctx->note` instead of returning
-	 * directly, so the outcome bookkeeping below stays coherent across all
-	 * five outcomes -- PASS, FAIL or SKIPPED -- even though pin state no
-	 * longer varies by exit. */
-	phase_verdict_t verdict = PHASE_FAIL;
-
-	/* --- 2. Enumerate the card ---------------------------------------- */
-	/* disk_access_init() runs the whole SD initialisation on the vendored
-	 * snps,dwc-sdhc controller: card-present, power/clock ramp, CMD0/CMD8,
-	 * ACMD41, CID/CSD, bus width. Its return value is the fork between two
-	 * of the five outcomes and is therefore read, not just printed. */
-	int drc = disk_access_init(SD_DISK_NAME);
-	printf("[evkdemo] SD: disk_access_init(\"%s\") -> %d\n", SD_DISK_NAME, drc);
-	if (drc == DISK_STATUS_NOMEDIA) {
-		/* Straight from the controller's PSTATE CARD_INSRT bit (no cd-gpios
-		 * on this overlay). The mux sits between the card and that bit, so
-		 * say both causes -- an operator who only reads "no card" will not
-		 * think to check a jumper. */
-		printf("[evkdemo] SD: NOMEDIA -- the controller sees no card. Either the slot is empty, "
-		       "or the 74LVC157 mux is not passing the card through: the SELECT is header P18 "
-		       "(jumper = MUX_SEL.SDIO pulled high through R198, open = R27 pulls it to 0V) and "
-		       "is NOT software-drivable on this module -- E1M IO21 is unrouted on r2. An empty "
-		       "slot is not a fault, so this is a SKIP\n");
-		ctx->note = "no card detected (or mux SELECT on P18 wrong)";
-		verdict   = PHASE_SKIPPED;
-	} else if (drc != 0) {
-		printf("[evkdemo] SD: the card IS detected and the SD handshake still failed (rc=%d) -- "
-		       "that is the controller, the pinmux (CLK P14_1 / CMD P14_0 / D0..D3 "
-		       "P13_0..P13_3) or the clock ramp, NOT a missing card. Not a skip\n",
-		       drc);
-		ctx->note = "SDHC init failed with a card present";
-		verdict   = PHASE_FAIL;
-	} else {
-		/* Geometry, printed VERBATIM -- reported because it is the first
-		 * real data the card ever hands back and it identifies which card
-		 * is in the slot, but deliberately NOT part of the verdict. "The
-		 * geometry read back" is a chip-ID read by another name. */
-		uint32_t sectors = 0u, ssize = 0u;
-		int      sc_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_COUNT, &sectors);
-		int      ss_rc = disk_access_ioctl(SD_DISK_NAME, DISK_IOCTL_GET_SECTOR_SIZE, &ssize);
-		printf("[evkdemo] SD: geometry: %u sectors x %u B = %llu MiB (ioctl rc %d / %d)\n",
-		       (unsigned)sectors,
-		       (unsigned)ssize,
-		       (unsigned long long)(((uint64_t)sectors * ssize) / (1024u * 1024u)),
-		       sc_rc,
-		       ss_rc);
-
-		/* --- 3. Mount, read-only-until-proven -------------------------- */
-		int mrc = fs_mount(&sd_mnt);
-		printf("[evkdemo] SD: fs_mount(FAT, \"%s\", NO_FORMAT) -> %d\n", SD_MOUNT_POINT, mrc);
-		if (mrc == -ENODEV) {
-			/* subsys/fs/fat_fs.c maps THREE distinct ff.h causes onto
-			 * -ENODEV alike: FR_INVALID_DRIVE, FR_NOT_ENABLED and
-			 * FR_NO_FILESYSTEM. disk_access_init(SD_DISK_NAME) already
-			 * returned 0 above, which proves the "SD" disk itself is
-			 * registered -- so SD_DISK_NAME is cleared, not an open
-			 * suspect. What -ENODEV still cannot separate is "no FAT
-			 * volume on the card" from SD_MOUNT_POINT not matching this
-			 * build's FF_VOLUME_STRS entry, so the log below states only
-			 * what -ENODEV actually proves. */
-			printf("[evkdemo] SD: fs_mount -> -ENODEV -- subsys/fs/fat_fs.c maps three FatFs "
-			       "causes (FR_INVALID_DRIVE, FR_NOT_ENABLED, FR_NO_FILESYSTEM) onto the same "
-			       "code: either no FAT filesystem on this card, or SD_MOUNT_POINT=\"%s\" does "
-			       "not match this build's FF_VOLUME_STRS entry. disk_access_init(\"%s\") "
-			       "already returned 0 above, which rules out the disk name -- only the "
-			       "mount-point volume string is still an open question. NOT formatted here "
-			       "regardless, on purpose -- the card belongs to whoever put it in the slot. "
-			       "FS_MOUNT_FLAG_NO_FORMAT is set AND CONFIG_FS_FATFS_MOUNT_MKFS=n keeps mkfs "
-			       "out of the image entirely, so there is no format path to take even by "
-			       "mistake\n",
-			       SD_MOUNT_POINT,
-			       SD_DISK_NAME);
-			ctx->note = "no filesystem, or a mount-point/FF_VOLUME_STRS mismatch -- see log";
-			verdict   = PHASE_SKIPPED;
-		} else if (mrc != 0) {
-			printf("[evkdemo] SD: mount failed with a card that enumerated (rc=%d) -- a read of "
-			       "the boot sector did not complete, so this is the data path, not a missing "
-			       "volume\n",
-			       mrc);
-			ctx->note = "mount failed on an enumerated card";
-			verdict   = PHASE_FAIL;
-		} else {
-			/* --- 4. Write -> read -> VERIFY, in one file this demo owns */
-			/* The nonce. k_cycle_get_32() at this point in the run -- after
-			 * the bridge bring-up, a Wi-Fi scan and a BLE enable, all of
-			 * which take wall-clock time that varies -- is not a value a
-			 * previous run reproduces, which is exactly the property
-			 * needed to tell a fresh write from last run's leftover file. */
-			uint32_t nonce = k_cycle_get_32();
-			char     payload[96];
-			int      len = snprintk(payload,
-			                        sizeof(payload),
-			                        "aen-evk-demo phase 9 nonce=%08x uptime=%lldms\n",
-			                        (unsigned)nonce,
-			                        (long long)k_uptime_get());
-			printf("[evkdemo] SD: writing %d B to %s, nonce=%08x (per-run, so a stale file from "
-			       "an earlier run cannot compare equal)\n",
-			       len,
-			       SD_DEMO_FILE,
-			       (unsigned)nonce);
-
-			struct fs_file_t f;
-			fs_file_t_init(&f);
-			const char *fail_why = NULL;
-
-			/* FS_O_CREATE|FS_O_RDWR, NOT a create-exclusive open: this
-			 * file is the demo's own and every run rewrites it in place. */
-			int frc = fs_open(&f, SD_DEMO_FILE, FS_O_CREATE | FS_O_RDWR);
-			if (frc != 0) {
-				printf("[evkdemo] SD: fs_open(\"%s\", CREATE|RDWR) -> %d\n", SD_DEMO_FILE, frc);
-				fail_why = "cannot open the demo file";
-			} else {
-				ssize_t wrote = fs_write(&f, payload, (size_t)len);
-				/* Truncate ONLY when fs_write() actually landed bytes
-				 * (wrote > 0) -- never on a hard error (wrote < 0). A
-				 * hard write error can leave the file in an
-				 * indeterminate state; truncating anyway still frees
-				 * the FAT chain and rewrites the dirent, on exactly the
-				 * path that just failed a write -- destroying the one
-				 * artifact (the previous run's leftover file) that
-				 * would show what happened. A SHORT write (0 < wrote <
-				 * len) still truncates, to wherever it actually landed:
-				 * that is the case this call exists for, shedding an
-				 * earlier run's longer tail rather than leaving a
-				 * partial payload followed by stale bytes. */
-				bool  did_truncate = (wrote > 0);
-				off_t trunc_len    = did_truncate ? (off_t)wrote : 0;
-				int   trc          = did_truncate ? fs_truncate(&f, trunc_len) : 0;
-				/* SYNC BEFORE READ-BACK, and this is load-bearing. Without
-				 * it the read below could be served out of the FATFS
-				 * cache and would "verify" data that never reached the
-				 * card -- the exact shape of false pass this app exists
-				 * to refuse. Only run once the write was full AND the
-				 * truncate actually ran and returned 0 -- a skipped or
-				 * failed truncate is not a clean state to sync from
-				 * either. */
-				bool did_sync = (wrote == (ssize_t)len && did_truncate && trc == 0);
-				int  syrc     = did_sync ? fs_sync(&f) : 0;
-
-				/* A skipped call must not print the same as a successful
-				 * one -- "-> 0" either way would be indistinguishable
-				 * from a real pass in a phase whose whole thesis is that
-				 * every return code is printed. The truncate clause omits
-				 * the length argument entirely when SKIPPED, rather than
-				 * printing "fs_truncate(0) -> SKIPPED" -- that would quote
-				 * an argument for a call that never happened. */
-				char trunc_clause[40];
-				char syrc_field[16];
-				if (did_truncate) {
-					snprintk(trunc_clause,
-					         sizeof(trunc_clause),
-					         "fs_truncate(%ld) -> %d",
-					         (long)trunc_len,
-					         trc);
-				} else {
-					snprintk(trunc_clause, sizeof(trunc_clause), "fs_truncate SKIPPED");
-				}
-				if (did_sync) {
-					snprintk(syrc_field, sizeof(syrc_field), "%d", syrc);
-				} else {
-					snprintk(syrc_field, sizeof(syrc_field), "SKIPPED");
-				}
-				printf("[evkdemo] SD: fs_write -> %d of %d B, %s, fs_sync -> %s\n",
-				       (int)wrote,
-				       len,
-				       trunc_clause,
-				       syrc_field);
-
-				char    readback[sizeof(payload)] = { 0 };
-				ssize_t got                       = -1;
-				int     seek_rc                   = -1;
-				/* Gate on did_sync/syrc, not on re-deriving the same
-				 * condition from wrote/trc -- did_sync already IS "the
-				 * write landed in full AND the truncate ran and returned
-				 * 0"; re-deriving it here would let a read-back run
-				 * whenever that re-derivation happens to agree, rather
-				 * than because fs_sync() actually ran and passed. */
-				if (did_sync && syrc == 0) {
-					seek_rc = fs_seek(&f, 0, FS_SEEK_SET);
-					if (seek_rc == 0) {
-						got = fs_read(&f, readback, sizeof(readback));
-					}
-				}
-				int crc = fs_close(&f);
-				printf("[evkdemo] SD: fs_close -> %d\n", crc);
-
-				if (wrote != (ssize_t)len) {
-					fail_why = "short write";
-				} else if (trc != 0 || syrc != 0) {
-					fail_why = "truncate/sync failed";
-				} else if (seek_rc != 0 || got != (ssize_t)len) {
-					printf("[evkdemo] SD: fs_seek -> %d, fs_read -> %d (expected %d B)\n",
-					       seek_rc,
-					       (int)got,
-					       len);
-					fail_why = "short read-back";
-				} else if (memcmp(payload, readback, (size_t)len) != 0) {
-					/* Print both, not a verdict word: WHICH bytes differ
-					 * is the whole diagnostic and a bare "mismatch"
-					 * throws it away. */
-					printf("[evkdemo] SD: VERIFY MISMATCH\n[evkdemo] SD:   wrote: %.*s"
-					       "[evkdemo] SD:   read : %.*s",
-					       len,
-					       payload,
-					       len,
-					       readback);
-					fail_why = "read-back differs from what was written";
-				} else {
-					printf("[evkdemo] SD: read back %d B and they COMPARE EQUAL: %.*s",
-					       (int)got,
-					       len,
-					       readback);
-					verdict = PHASE_PASS;
-				}
-			}
-
-			/* Unmount either way -- a mounted volume with dirty FAT cache
-			 * left behind by a failing phase is how a card gets corrupted
-			 * for the next person, and phases 10-14 run after this one. */
-			int urc = fs_unmount(&sd_mnt);
-			printf("[evkdemo] SD: fs_unmount -> %d\n", urc);
-
-			if (verdict == PHASE_PASS && urc != 0) {
-				/* The write/read/verify round trip proved the data path,
-				 * but a failed unmount leaves this volume mounted in
-				 * FATFS's own view with a cache that was never flushed --
-				 * that is not a PASS on its own, independent of mux
-				 * state (which stays asserted after this phase either
-				 * way; see the close() below). */
-				fail_why = "fs_unmount failed after a passing verify";
-				verdict  = PHASE_FAIL;
-			}
-
-			if (verdict != PHASE_PASS) {
-				printf("[evkdemo] SD: RESULT FAIL -- %s. The card enumerated and the "
-				       "filesystem mounted, so this is the data path, not the slot and not "
-				       "the mux\n",
-				       fail_why);
-				ctx->note = fail_why;
-				verdict   = PHASE_FAIL;
-			} else {
-				printf("[evkdemo] SD: mux enabled, card enumerated, FAT mounted, %d B "
-				       "written -> read -> compared equal -> PASS\n",
-				       len);
-			}
-		}
-	}
-
-	/* --- 5. Close the handle -- leave the mux asserted -------------------
-	 * No de-assert here, on the maintainer's instruction: /E LOW is this
-	 * board's working state, not a transient this phase must restore on
-	 * exit -- unlike phase 6's restore-to-idle-before-close idiom for its
-	 * PWM channels, which this phase deliberately does NOT follow. GPIO_26
-	 * stays driven low through phases 10-14 and past the end of the run;
-	 * that is the desired resting state, not a leak. Closing only frees
-	 * the host-side GPIO proxy handle -- the CC3501E keeps driving GPIO_26
-	 * low afterwards regardless. One consequence worth knowing: with the
-	 * pin left asserted, MUX_EN can now be metered at U38 pin 15 / U39
-	 * pin 15 at any time after this phase runs, not only inside the
-	 * settle window above (several bench sessions were burned probing it
-	 * after the phase had already restored it to HIGH). */
-	alp_gpio_close(mux_en);
-	return verdict;
+	/*
+	 * SAFETY (#2051): do NOT assert the SDIO mux ENABLE on this board, and
+	 * do not attempt disk_access_init()/fs_mount() at all -------------
+	 * The E1M-EVK 2626-R2 netlist (metadata/boards/e1m-evk/netlists/
+	 * E1M-EVK-2626-R2_pinmap.csv, U38/U39) shows every 74LVC157 mux OUTPUT
+	 * drives a SoC-facing net -- E1M_D3/D2/D1/D0, E1M_SDIO_RST, E1M_CLK,
+	 * E1M_CMD -- with /E (MUX_EN) shared by both mux parts. The maintainer
+	 * confirmed (2026-09-13) this mux stage has a hardware defect. With
+	 * MUX_EN asserted (driven low, what step 1 used to do above), a mux
+	 * whose outputs are stuck actively driving fights the SoC's OWN
+	 * drivers on every pad it faces -- SD CLK/CMD/DAT, especially during
+	 * this phase's own FAT write -- which is driver contention on live
+	 * SoC pads, not a benign "no card" failure. So this phase no longer
+	 * drives IO20 (the IO20 -> CC3501E GPIO_26 -> mux ENABLE path) at
+	 * all, and never reaches disk_access_init(), fs_mount(), or the
+	 * /ALPDEMO.TXT write -- all of which required a reachable card that
+	 * this board cannot safely provide. See README.md and #2051's
+	 * changelog fragment. This is orthogonal to #2051's real driver fix
+	 * (the SD peripheral clock gate, SDC_CKEN, plus reset-path hardening
+	 * -- zephyr/drivers/sdhc/sdhc_dwc.c) and to phase 8, which still
+	 * brings the CC3501E bridge up for every OTHER phase that needs it.
+	 */
+	printf("[evkdemo] SD: SKIPPED -- E1M-EVK 2626-R2's SD mux (74LVC157 U38/U39) has a "
+	       "confirmed hardware defect; its outputs face the SoC on CLK/CMD/DAT, so driving "
+	       "MUX_EN would fight the SoC's own drivers on those pads. Not attempting "
+	       "disk_access_init()/fs_mount(); rework pending (component change). See "
+	       "README.md.\n");
+	ctx->note = "SD mux hardware defect (2626-R2, rework pending) -- card path not attempted";
+	return PHASE_SKIPPED;
 }
 
 /* ==================================================================== */
@@ -4230,9 +3913,14 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	}
 
 	/* --- 1. I2S mux ENABLE + SELECT over the CC3501E proxy ------------- */
-	mux_en              = alp_gpio_open(ALP_E1M_GPIO_IO8);
-	mux_sel             = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
-	alp_status_t mux_rc = ALP_ERR_NOT_READY;
+	mux_en = alp_gpio_open(ALP_E1M_GPIO_IO8);
+	/* Captured immediately, before any later alp_* call can overwrite
+	 * alp_last_error() -- IO8 is revision-dependent (issue #2144), so a
+	 * NULL here can mean the per-pin hw_rev guard refused it
+	 * (ALP_ERR_NOSUPPORT), not a bridge/build fault. */
+	alp_status_t mux_en_open_err = (mux_en == NULL) ? alp_last_error() : ALP_OK;
+	mux_sel                      = (mux_en != NULL) ? alp_gpio_open(ALP_E1M_GPIO_IO13) : NULL;
+	alp_status_t mux_rc          = (mux_en == NULL) ? mux_en_open_err : ALP_ERR_NOT_READY;
 	if (mux_en != NULL && mux_sel != NULL) {
 		/* /E active low: false asserts and connects I2S3 to the amps. */
 		mux_rc = alp_gpio_configure(mux_en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE);
@@ -4246,10 +3934,25 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	       "IO13 -> CC3501E GPIO_13, 0=amps) -> %d\n",
 	       (int)mux_rc);
 	if (mux_rc != ALP_OK) {
-		printf("[evkdemo] SOUND: mux not drivable -- check phase 8 passed (the proxy "
-		       "needs its bridge attached) and this build carries the IO8/IO13 routes. "
-		       "Both are fitted on every E1M-AEN SoM, so this is a build/bridge fault, "
-		       "not absent hardware\n");
+		if (mux_en == NULL && mux_en_open_err == ALP_ERR_NOSUPPORT) {
+			/* IO8 is revision-dependent (issue #2144): src/backends/gpio/
+			 * cc3501e_proxy.c's px_open() refuses it with ALP_ERR_NOSUPPORT
+			 * unless a CRC-valid identity-EEPROM manifest confirms this
+			 * module's hw_rev matches CONFIG_ALP_SDK_SOM_HW_REV
+			 * ("2626-r2" -- see prj.conf). Not a bridge/build fault: check
+			 * phase 5 reported magic=OK family=OK hw_rev="2626-r2" on THIS
+			 * module. */
+			printf("[evkdemo] SOUND: mux not drivable -- IO8's #2144 revision "
+			       "guard refused it (ALP_ERR_NOSUPPORT): no CRC-valid manifest "
+			       "confirmed this module's hw_rev == CONFIG_ALP_SDK_SOM_HW_REV "
+			       "(set in prj.conf). Check phase 5's manifest report against it, "
+			       "not phase 8 or the bridge\n");
+		} else {
+			printf("[evkdemo] SOUND: mux not drivable -- check phase 8 passed (the proxy "
+			       "needs its bridge attached) and this build carries the IO8/IO13 routes. "
+			       "Both are fitted on every E1M-AEN SoM, so this is a build/bridge fault, "
+			       "not absent hardware\n");
+		}
 		alp_gpio_close(mux_sel);
 		alp_gpio_close(mux_en);
 		ctx->note = "I2S mux not drivable";
@@ -4431,9 +4134,31 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * (src/backends/audio/zephyr_drv.c). */
 	static int16_t mic_buf[SOUND_FRAMES_PER_BLOCK * 2];
 	if (mic != NULL && mic_rc == ALP_OK) {
-		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS; b++) {
+		/* Read SOUND_BASELINE_BLOCKS+1 and skip the first: skipping
+		 * block 0 in place of a SOUND_BASELINE_BLOCKS-sized loop (the
+		 * previous shape) left only SOUND_BASELINE_BLOCKS-1 blocks in
+		 * the baseline, weakening it and moving the pass threshold
+		 * (issue #2133). Block 0 may contain a PDM decimator
+		 * settling transient (<alp/audio.h>'s alp_audio_in_start()
+		 * note) -- a block here is 256/16000 = 16 ms, well over the
+		 * ~1 ms settling bound measured on this driver (see
+		 * zephyr/dts/bindings/audio/alif,alif-pdm.yaml), so skipping
+		 * just block 0 covers it.
+		 *
+		 * NOTE: this path needs a mic sample rate whose PDM clock is
+		 * >= 1.2 MHz on this EVK. At SOUND_SAMPLE_RATE_HZ (16000u,
+		 * above), mode 4's 1024 kHz clock is REJECTED by the board
+		 * overlay's clk-frequency-min = <1200000> -- alp_audio_in_open()
+		 * (mic == NULL) or alp_audio_in_start() (mic_rc != ALP_OK)
+		 * fails with -EINVAL on this EVK at 16 kHz, so this whole
+		 * baseline/correlation block is skipped when playback is on.
+		 * See issue #2134 for a software-resample fix that would let
+		 * the mic capture at an in-spec rate independent of the
+		 * speaker rate. */
+		for (unsigned b = 0; b < SOUND_BASELINE_BLOCKS + 1u; b++) {
 			size_t       got = 0;
 			alp_status_t r   = alp_audio_in_read(mic, mic_buf, SOUND_FRAMES_PER_BLOCK, &got, 200u);
+			if (b == 0) continue;
 			if (r == ALP_OK) baseline_energy += pdm_block_energy(mic_buf, got * 2u);
 		}
 	}

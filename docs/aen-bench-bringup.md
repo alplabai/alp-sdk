@@ -32,7 +32,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
 | **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
 | **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. Real models from MRAM slot0: **person_detect** (100% NPU) + **keyword_scrambled** (mixed 6-NPU/9-CPU, via the `<6>` op-resolver) both `runJob=OK` (2026-06-17). See `examples/aen/aen-npu-inference-person-mram`. |
-| **PDM mics** | ✅ PASS | Live varying PCM = real audio. |
+| **PDM mics** | 🟡 PARTIAL *(mic ch0/ch1 only; full-scale headroom unmeasured)* | Register-level configuration and 48 kHz mode 7 rate verified exact (`measured_rate_hz=48000`, `slab_missed=0`, `overrun=0`, commit `68a169977`), via `examples/aen/aen-pdm-mic-alif`. Acoustic capture at 48 kHz on mic ch0/ch1 (PDM controller 0) ONLY is separately VERIFIED, not by that example, but by a speaker-to-mic loopback -- the `PROBE_LOOPBACK` mode of `examples/aen/aen-i2s-tas2563-probe` on branch `test/u46-i2s-tas2563-on-reworked-mux` (commit `56631094d`, issue #2143), `e1m-aen-evk-03`, 2026-09-15 14:49Z, TAS2563 speakers, gain `0x200` readback-confirmed: the 1 kHz Goertzel bin went from 9.3/0.1 dB (ch0/ch1) in silence to 43.4/48.8 dB at volume 16 and 57.8/57.6 dB at volume 48, a 500 Hz bin at 54.7/56.6 dB lit up only during the 500 Hz stimulus, peak-to-peak (per channel, 960 ms window, after `zephyr_drv.c`'s `dc_block_s16()` high-pass, hence not a multiple of 32) went from 128/128 in silence to 266/292 at 1 kHz/volume 16 and 651/652 at 1 kHz/volume 48. The D2 pair (HW 4/5) is register-level verified only, never acoustically tested. Gain was `0x0D` (0.8125x, -1.8 dB vs unity, 31.9 dB below the provisional `0x200`); `0x800` clipped on silicon; now a provisional `0x200` default (issue #2143) -- full-scale headroom is unmeasured. |
 | **I2S TX** (`i2s3`) | ✅ PASS | Clocks the tone out with the 76.8 MHz audio clock. **Update (2026-09-15, `e1m-aen-evk-03`): audible amp output** verified 🟡 PARTIAL with U46 replaced by a 3257-type bus switch powered from `+3V3` (the as-built 74LVC157 is a one-way mux, never passes SoC→amp I2S at any VCC) + TAS2563 config; an open TDM clock-error latch and open issue #2146 (amp auto-shutdown after I2S stop) remain. |
 | **Quadrature encoder** (`qenc`) | 🟡 PARTIAL *(HW-gated)* | Driver reads clean; count is static until the encoder is physically spun. Not a code/Flow-D bug. |
 | **SD card** (DWC SDHC) | 🟡 PARTIAL | **Update (2026-09-15, `e1m-aen-evk-03`, at 25 MHz, after a U38 solder fix):** 4-bit SD read proven with U38/U39/U46 hand-reworked to 3257-type, but only with the unmerged enable path (#2122, clock gate) plus the unmerged `test/2051-sdhc-enable-on-reworked-mux` branch (ADMA address translation, system RAM in SRAM0) -- dev's SD path is unverified until that lands. EN=IO20, CC3501E-side on both hw revisions; SEL=IO21, CC3501E-side on r1 only -- unrouted/hardware-strapped on r2. |
@@ -472,12 +472,19 @@ secure-boot verification — always write both consistent blobs.
 > that is **normal** (the pin reset reboots the SE, the app is running, J-Link can't
 > re-halt the secure core); read a witness back over the generic device.
 >
-> Helper: `scripts/bench/aen/flash-jlink.sh <build-dir> [read-bytes]` runs this whole
-> flow (gen-toc → AE822 connect → loadbin/verify the package at its per-build start
-> address from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
+> Helper: `scripts/bench/aen/flash-jlink.sh [--replace-atoc] [--atoc-unqueryable]
+> <build-dir> [read-bytes]` runs this whole flow (gen-toc → AE822 connect →
+> loadbin/verify the package at its per-build start address from
+> `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
 > writes the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps),
-> not the slot0-XIP two-blob variant above. See
-> `scripts/bench/aen/README.md` for all four flows.
+> not the slot0-XIP two-blob variant above. **Since alp-sdk#2027, this write is
+> gated on a resident-ATOC check** (`bench_flowd_atoc_guard()`): with `SE_UART`
+> exported it queries what is already resident and refuses (exit 5) on a
+> foreign entry unless `--replace-atoc` is also passed; with `SE_UART` unset
+> (Flow D's normal case) it instead refuses (exit 8) unless
+> `--atoc-unqueryable` acknowledges there is no way to check on this bench
+> slot. See `scripts/bench/aen/README.md` for all four flows and the full
+> flag/exit-code table.
 >
 > **Two-blob (slot0-XIP) helper — validated 2026-06-17.** For an app linked into MRAM
 > slot0 (a real NPU model that overflows ITCM), `scripts/bench/aen/flash-jlink-mramxip.sh`

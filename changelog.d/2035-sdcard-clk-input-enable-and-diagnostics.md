@@ -1,5 +1,7 @@
 ### Fixed — SD CLK pad input buffer was off, likely the real reason `SW_RST_CMD` never cleared (#2035)
 
+(`aen-sdcard-readout` renamed `aen-sdhc-probe`, #2051.)
+
 Both SD overlays (`aen-sdcard-readout`, `aen-evk-demo`) omitted `input-enable`
 on the SD CLK pad, on the reasoning that a push-pull SoC output needs no
 read-enable. That reasoning describes the SoC pin, not this controller's
@@ -19,6 +21,8 @@ stated the opposite conclusion, are rewritten so this cannot be quietly
 reverted.
 
 ### Added — `aen-sdcard-readout` prints SD register state before and during the disk attempt (#2035)
+
+(`aen-sdcard-readout` renamed `aen-sdhc-probe`, #2051.)
 
 New diagnostics, so the next bench load is informative either way this time:
 

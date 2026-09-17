@@ -13,7 +13,7 @@ aen-wdt-feed
 aen-adc-regcheck
 aen-dac-regcheck
 aen-qenc-readout
-aen-sdcard-readout
+aen-sdhc-probe
 aen-camera-regcheck
 aen-isp-regcheck
 aen-npu-ethosu-regcheck

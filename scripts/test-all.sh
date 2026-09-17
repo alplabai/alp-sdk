@@ -1009,6 +1009,7 @@ stage_generated_files() {
         docs/portability-matrix.md docs/peripheral-support-matrix.md \
         docs/verification-status.md \
         examples/aen \
+        src/backends/gpio/cc3501e_rev_dependent_pins.c \
         docs/diagnostics 2>/dev/null; then
         echo "git add -N failed -- an expected generated path is missing from the tree"
         return 1
@@ -1033,6 +1034,7 @@ stage_generated_files() {
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             examples/aen \
+            src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null; then
         echo "generated files are OUT OF SYNC -- regenerated in place; git add + commit:"
         git --no-pager diff --stat -- \
@@ -1042,6 +1044,7 @@ stage_generated_files() {
             docs/portability-matrix.md docs/peripheral-support-matrix.md \
             docs/verification-status.md \
             examples/aen \
+            src/backends/gpio/cc3501e_rev_dependent_pins.c \
             docs/diagnostics 2>/dev/null | tail -20
         return 1
     fi

@@ -1,0 +1,66 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * ALP-SDK DELTA (#2051), not upstream: BUILD-ONLY driver-coverage overlay.
+ * NEVER FLASH THIS on an E1M-EVK 2626-R2. It sets sdhc0 to "okay", which
+ * applies SD pinctrl and emits SDCLK onto E1M_CLK, E1M_CMD and
+ * E1M_D3..D0. On carrier 2626-R2 the 74LVC157s U38/U39 hold exactly
+ * those nets LOW whenever powered, with no high-impedance state, so the
+ * SoC would be driving HIGH into a part driving LOW on six pads at once.
+ * This configuration is build-only and MUST stay build-only -- see the
+ * board overlay and README.md for why sdhc0 stays disabled on the real,
+ * flashable configuration.
+ *
+ * With sdhc0 disabled in the board overlay (the real, flashable
+ * configuration), nothing in this app's normal build exercises
+ * CONFIG_SDHC_DWC any more -- which means the #1097 regression
+ * (CONFIG_SDHC_DWC_ADMA's descriptor table landing in an empty-named
+ * linker section, a hard orphan-section link error under
+ * -Wl,--fatal-warnings) lost its build coverage along with it. This
+ * overlay re-enables sdhc0 for a SEPARATE, build_only twister scenario
+ * (see testcase.yaml's `.sdhc_build_coverage` variant) that layers on
+ * top of the board's real overlay via `extra_dtc_overlay_files` --
+ * never the app's own default target, never flashed, never run.
+ *
+ * The pad route below (CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3, the SD
+ * "B" route) is the module's real wiring -- see the board overlay's
+ * former header (git blame) for the full derivation -- reused here only
+ * because it is a valid, already-verified pinctrl group; on this
+ * build-only scenario, no signal on these pads is ever driven.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+&pinctrl {
+	pinctrl_sdmmc_build_coverage: pinctrl_sdmmc_build_coverage {
+		group0 {
+			pinmux = <PIN_P14_1__SD_CLK_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+		group1 {
+			pinmux = <PIN_P14_0__SD_CMD_B>,
+				 <PIN_P13_0__SD_D0_B>, <PIN_P13_1__SD_D1_B>,
+				 <PIN_P13_2__SD_D2_B>, <PIN_P13_3__SD_D3_B>;
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+};
+
+&sdhc0 {
+	max-bus-freq = <25000000>;
+	min-bus-freq = <400000>;
+	power-delay-ms = <500>;
+	bus-width = <4>;
+	no-1-8-v;
+	pinctrl-0 = <&pinctrl_sdmmc_build_coverage>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	sdmmc {
+		compatible = "zephyr,sdmmc-disk";
+		disk-name = "SD";
+		status = "okay";
+	};
+};

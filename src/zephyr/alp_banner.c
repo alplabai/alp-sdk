@@ -245,23 +245,26 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
  * Boot-time hw_rev mismatch check (issue #1853).  CONFIG_ALP_SDK_SOM_HW_REV
  * is the hw_rev this firmware BUILD resolved (board.yaml `som.hw_rev`,
  * falling back to the SKU preset's `default_hw_rev`); the EEPROM manifest
- * just read above is the module's ACTUAL revision.  Nothing in this
- * firmware image derives a pad-routing table from that build-time value --
- * the SoM preset's `pad_routes`/`pad_route_overrides` data is read only by
- * scripts/alp_project_emit/bom_netlist.py, for the debug/BOM
- * `--emit composed-route-table` / `--emit carrier-netlist` surfaces, not
- * by any header/C table/DT overlay this build produces.
+ * just read above is the module's ACTUAL revision.  This banner check
+ * itself derives no pad-routing table from that build-time value -- the
+ * SoM preset's `pad_routes`/`pad_route_overrides` data is read at BUILD
+ * time by scripts/alp_project_emit/bom_netlist.py (debug/BOM
+ * `--emit composed-route-table` / `--emit carrier-netlist`) and by
+ * scripts/gen_cc3501e_gpio_routes.py, which resolves it into each AEN
+ * example's generated cc3501e_gpio_routes[].
  *
- * The real-world risk this check warns about is downstream of that gap:
- * on the AEN family, three E1M pads (IO8/IO10/IO21) physically sit on a
- * DIFFERENT chip depending on hw_rev, and application code that hardcodes
- * a pin-to-chip map for one revision (see #1859 --
- * examples/aen/aen-cc3501e-gpio/src/cc3501e_gpio_routes.c hardcodes the r2
- * map with no IO21 entry, same table duplicated in aen-cc3501e-bringup and
- * aen-cc3501e-companion-tour) silently targets the wrong chip on the other
- * revision, with no diagnostic anywhere.  This check cannot fix that
- * hardcoded table; it can only tell the developer their firmware and their
- * board disagree.
+ * The real-world risk this check warns about: on the AEN family, three
+ * E1M pads (IO8/IO10/IO21) physically sit on a DIFFERENT chip depending on
+ * hw_rev, and a route table built for the wrong revision silently targets
+ * the wrong chip, with no diagnostic anywhere.  This check cannot fix a
+ * stale route table; it can only tell the developer their firmware and
+ * their board disagree.  Issue #2144 added the STRONGER guard this
+ * function used to lack (see "What this does NOT do" below): at RUNTIME,
+ * src/backends/gpio/cc3501e_proxy.c's px_open() refuses ALP_ERR_NOSUPPORT
+ * on IO8/IO10/IO21 specifically, per pin, unless a CRC-valid manifest
+ * confirms the SAME hw_rev match this banner check tests -- so on a
+ * CC3501E-proxy-enabled AEN build, a mismatch is no longer just a boot-log
+ * warning, it is an enforced per-pin refusal.
  *
  * Severity, chosen deliberately:
  *   - A loud warning is the FLOOR, always on: this is real -- silently
@@ -278,21 +281,20 @@ static void alp_print_unit_identity(const alp_hw_info_t *info)
  *     CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL.
  *   - This check lives entirely inside the boot banner (compiled only
  *     under CONFIG_ALP_SDK_BANNER); a build that turns the banner off for
- *     footprint gets neither the warning nor CONFIG_ALP_SDK_HW_REV_
- *     MISMATCH_FATAL.  Known limitation, not fixed here -- see the
- *     Kconfig help.
- *   - What this does NOT do: refuse to DISPATCH only the specific pads
- *     whose route actually differs between hw_revs (the issue's
- *     "stronger guard").  No dispatcher consults any pad-route table
- *     today, so there is nothing to retrofit -- the real missing piece
- *     is #1859: generate a per-hw_rev `cc3501e_gpio_routes[]` from the
- *     composed route table (replacing the three hand-written, r2-only
- *     copies above) plus one hw_rev guard in the GPIO proxy.  GPIO-only,
- *     much smaller than a dispatch-layer change, and out of scope for
- *     this boot-banner fix.  CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL is the
- *     coarse mitigation available today: it halts before any pad is
- *     ever dispatched, covering the whole app rather than just the
- *     ambiguous pads.
+ *     footprint gets neither this warning nor CONFIG_ALP_SDK_HW_REV_
+ *     MISMATCH_FATAL -- but issue #2144's GPIO proxy guard below is
+ *     independent of CONFIG_ALP_SDK_BANNER, so IO8/IO10/IO21 stay
+ *     protected either way on a CC3501E-proxy-enabled build.
+ *   - What this does NOT do (partially resolved by issue #2144): refuse
+ *     to DISPATCH only the specific pads whose route actually differs
+ *     between hw_revs.  That guard now exists, but ONLY for the CC3501E
+ *     GPIO proxy (src/backends/gpio/cc3501e_proxy.c's is_rev_dependent()
+ *     gate, AEN-only, CONFIG_ALP_SDK_GPIO_CC3501E_PROXY) -- no OTHER
+ *     dispatcher (I2C/SPI/PWM/...) consults a pad-route table at
+ *     runtime, so a hardcoded pin-to-chip assumption in application code
+ *     outside GPIO is still only caught by this boot-banner warning, or
+ *     by opting into CONFIG_ALP_SDK_HW_REV_MISMATCH_FATAL to halt before
+ *     any pad is dispatched at all.
  */
 static void alp_check_hw_rev_match(const alp_hw_info_t *info)
 {
