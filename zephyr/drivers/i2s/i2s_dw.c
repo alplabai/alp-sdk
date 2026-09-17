@@ -83,7 +83,7 @@
  *     only -- clock-ownership safety, not full duplex.
  *     i2s_dw_configure() still maps I2S_DIR_BOTH to -ENOSYS and
  *     dev_data->dir is still a single field, both deliberately unchanged.
- *     Two gaps remain, out of scope for phase 1:
+ *     Three gaps remain, out of scope for phase 1:
  *       - rx_stream_start() and tx_stream_start() each unconditionally
  *         disable the OTHER direction's channel-enable bit
  *         (i2s_tx_channel_disable() / i2s_rx_channel_disable()) -- and,
@@ -103,8 +103,24 @@
  *         tx_clock_is_live() correctly keeps CER.CLKEN set for a TX the
  *         driver itself can no longer service -- but tx.state == RUNNING
  *         must not be read as "TX is actually streaming" once RX has been
- *         configured. Both gaps are full-duplex territory and stay with
- *         #2150's later phase(s).
+ *         configured.
+ *       - issue #2179's unserviced-source mask (i2s_dw_isr(), this change)
+ *         turns one reachable full-duplex hang into a silent stall instead
+ *         of the storm it used to be: alp_i2s_open(RX) -> configure(RX) ->
+ *         START(RX) leaves RX RUNNING; the app then calls configure(TX) on
+ *         the same device. i2s_dw_configure()'s state check inspects only
+ *         the TX stream (tx.state == I2S_STATE_NOT_READY), so it succeeds
+ *         and repoints dev_data->dir to I2S_DIR_TX while RX is still
+ *         RUNNING. The next RXDA is unserviced, i2s_disable_rx_interrupt()
+ *         sets RXDAM|RXFOM, and the running RX stream goes permanently deaf
+ *         -- nothing re-arms it until another rx_stream_start(). A blocking
+ *         alp_i2s_read() then times out with no error reported by the
+ *         driver. This is strictly an improvement over the pre-fix
+ *         behaviour -- that same sequence used to produce the ISR storm
+ *         this change kills -- but it is still a gap, not a fix, and stays
+ *         with #2150's later phase(s) like the other two.
+ *     All three gaps are full-duplex territory and stay with #2150's later
+ *     phase(s).
  *   - issue #2179 (defensive hardening, this change): an interrupt source
  *     that is asserted and unmasked but whose i2s_dw_isr() branch the
  *     dev_data->dir gate skips used to make that function read ISR, match
@@ -141,6 +157,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/barrier.h>
 
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/policy.h>
@@ -997,6 +1014,17 @@ static int i2s_dw_initialize(const struct device *dev)
 	k_sem_init(&dev_data->rx.sem, 0, CONFIG_I2S_DW_RX_BLOCK_COUNT);
 	k_sem_init(&dev_data->tx.sem, CONFIG_I2S_DW_TX_BLOCK_COUNT,
 		   CONFIG_I2S_DW_TX_BLOCK_COUNT);
+
+	/* alp-sdk issue #2179: make the IMR mask writes above architecturally
+	 * visible before the NVIC line is armed below -- without a barrier
+	 * here, irq_config()'s IRQ_CONNECT()/irq_enable() is free to complete,
+	 * and thus become live at the NVIC, before the masking writes have
+	 * actually posted. barrier_dsync_fence_full() rather than a bare
+	 * __DSB(): this file is also host-compiled on native_sim (CMSIS
+	 * intrinsics do not exist there), and Zephyr's portable barrier
+	 * degrades to a no-op on any arch without CONFIG_BARRIER_OPERATIONS_*,
+	 * which is the correct behaviour on a host with no NVIC to race. */
+	barrier_dsync_fence_full();
 
 	i2s->irq_config(dev);
 
