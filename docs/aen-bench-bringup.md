@@ -472,12 +472,19 @@ secure-boot verification — always write both consistent blobs.
 > that is **normal** (the pin reset reboots the SE, the app is running, J-Link can't
 > re-halt the secure core); read a witness back over the generic device.
 >
-> Helper: `scripts/bench/aen/flash-jlink.sh <build-dir> [read-bytes]` runs this whole
-> flow (gen-toc → AE822 connect → loadbin/verify the package at its per-build start
-> address from `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
+> Helper: `scripts/bench/aen/flash-jlink.sh [--replace-atoc] [--atoc-unqueryable]
+> <build-dir> [read-bytes]` runs this whole flow (gen-toc → AE822 connect →
+> loadbin/verify the package at its per-build start address from
+> `app-package-map.txt` → `RSetType 2`/`r`/`g` → RAM-console read-back). It
 > writes the **single self-contained `AppTocPackage.bin`** (our ITCM-load-via-ATOC apps),
-> not the slot0-XIP two-blob variant above. See
-> `scripts/bench/aen/README.md` for all four flows.
+> not the slot0-XIP two-blob variant above. **Since alp-sdk#2027, this write is
+> gated on a resident-ATOC check** (`bench_flowd_atoc_guard()`): with `SE_UART`
+> exported it queries what is already resident and refuses (exit 5) on a
+> foreign entry unless `--replace-atoc` is also passed; with `SE_UART` unset
+> (Flow D's normal case) it instead refuses (exit 8) unless
+> `--atoc-unqueryable` acknowledges there is no way to check on this bench
+> slot. See `scripts/bench/aen/README.md` for all four flows and the full
+> flag/exit-code table.
 >
 > **Two-blob (slot0-XIP) helper — validated 2026-06-17.** For an app linked into MRAM
 > slot0 (a real NPU model that overflows ITCM), `scripts/bench/aen/flash-jlink-mramxip.sh`
