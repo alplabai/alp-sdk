@@ -1,0 +1,22 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * native_sim ships no DMIC emulation, so this overlay instantiates the
+ * test-local alp,test-dmic fake controller (../dts/bindings/
+ * alp,test-dmic.yaml, ../src/fake_dmic.c) and aliases alp-pdm0 to it --
+ * the alias src/backends/audio/zephyr_drv.c resolves via
+ * DT_ALIAS(alp_pdm0) in z_in_open(). Lets this test drive the real
+ * zephyr_drv read path (and its errno_to_alp()) instead of
+ * sw_fallback.c, which never calls dmic_read() at all.
+ */
+/ {
+	aliases {
+		alp-pdm0 = &test_dmic0;
+	};
+
+	test_dmic0: dmic {
+		compatible = "alp,test-dmic";
+		status = "okay";
+	};
+};

@@ -71,7 +71,8 @@ clocks the tone out (`i2s3`, P9_3/4/5). This was the behaviour of every build of
 this app before U46's backwards wiring was found; it is still correct, now gated
 behind the switch above rather than run by default.
 
-The load-bearing fix (shared with the now-working PDM mics): the **76.8 MHz audio
+The load-bearing fix (shared with `aen-pdm-mic-alif`, whose own README has the
+current PDM mic silicon status): the **76.8 MHz audio
 source (HFOSCx2)** must be enabled at the CGU — the upstream Alif clockctrl only
 sets per-peripheral gates and never enables this master source. The CGU 76.8 MHz
 enable **and** the `I2Sx_CTRL` bit-clock divider are now handled entirely by the
