@@ -38,6 +38,11 @@ DOES NOT CATCH:
     `crates/`, or `contract/` directory of its own, so the whole subtree is
     unresolvable here regardless of which subpath is cited. Those are
     reported as SKIPPED with a reason, never as a silent pass.
+  * a `changelog.d/**` citation made FROM CHANGELOG.md itself. Folding a
+    fragment into CHANGELOG.md deletes it (`assemble_changelog.py:228`), so
+    any such citation is unresolvable the instant it lands there -- SKIPPED
+    with a reason, same as a foreign-repo citation. A `changelog.d/**`
+    citation made FROM A FRAGMENT is unaffected and still graded normally.
 
 ANCHORS -- how to make a citation checkable
 -------------------------------------------
@@ -152,6 +157,21 @@ _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
 #: as SKIPPED with the reason, never silently passed.
 _FOREIGN_PREFIXES = ("python/", "crates/", "contract/")
 
+#: `changelog.d/**` cited FROM CHANGELOG.md, not from a fragment. Unresolvable
+#: by construction: `assemble_changelog.py:228` (`path.unlink()`) deletes every
+#: fragment it folds into CHANGELOG.md, so any `changelog.d/**` path surviving
+#: in CHANGELOG.md prose names a file the fold itself just removed. Modeled on
+#: `_FOREIGN_PREFIXES` above -- reported as SKIPPED with a reason, never a
+#: silent pass and never a hard error (alp-sdk#2178 review).
+#:
+#: Scoped to the citation's SOURCE, not its target: this only fires when the
+#: file doing the citing is CHANGELOG.md itself. A `changelog.d/**` citation
+#: made FROM WITHIN A FRAGMENT is graded exactly as before -- fragments
+#: legitimately cross-reference each other before the fold ever runs, and
+#: that cross-reference is still a real, checkable citation until the moment
+#: of the fold.
+_CHANGELOG_D_PREFIX = "changelog.d/"
+
 
 #: `CHANGELOG.md` is scanned too, not just `changelog.d/` fragments -- a citation
 #: used to stop being checked the moment its fragment was folded in at release
@@ -240,6 +260,12 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
                          f"not checkable here")
             continue
 
+        if frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX):
+            skips.append(f"{where} -- changelog.d/ fragments are deleted "
+                         f"when folded into CHANGELOG.md; unresolvable from "
+                         f"here by construction")
+            continue
+
         target = REPO / rel
         if not target.is_file():
             errors.append(f"{where} -- no such file in this tree")
@@ -300,6 +326,13 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
             f"-{m.group('end')}`" if m.group("end") else "`")
 
         if rel.startswith(_FOREIGN_PREFIXES):
+            continue
+
+        # Same class as the foreign-prefix skip just above: a `changelog.d/**`
+        # citation made from CHANGELOG.md itself names a file the fold already
+        # deleted, so there is nothing here for an anchor to repair either --
+        # silently left alone, not reported as a problem needing a human.
+        if frag == CHANGELOG and rel.startswith(_CHANGELOG_D_PREFIX):
             continue
 
         target = REPO / rel
@@ -496,12 +529,12 @@ def main() -> int:
     # Rewrite first, then fall through to the check below, so the exit code is
     # always this gate's own verdict on the tree --fix just wrote.
     #
-    # This sits ABOVE the early return deliberately.
-    # `assemble_changelog.py` empties `changelog.d/` at release time by
-    # folding every fragment into CHANGELOG.md's `[Unreleased]` -- the tree
-    # where the citations most want re-deriving, and the one where returning
-    # early made `--fix` a silent no-op against the promise in its own
-    # `--help`.
+    # This sits ABOVE the early return, but that ordering is now INERT:
+    # mutation-tested by moving `if args.fix:` below the early return and
+    # re-running the suite -- still 29 passed. What actually keeps `--fix`
+    # from becoming a silent no-op on the release-cut tree (empty
+    # `changelog.d/`, CHANGELOG.md present) is the WIDENED condition below
+    # (`not fragments and not CHANGELOG.is_file()`), not this placement.
     if args.fix:
         _run_fix(fragments)
 

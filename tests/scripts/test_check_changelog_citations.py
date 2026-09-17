@@ -64,6 +64,36 @@ def test_nonexistent_in_tree_path_still_hard_fails():
     assert len(errors) == 1 and "no such file in this tree" in errors[0]
 
 
+def test_changelog_d_citation_from_changelog_md_is_skipped():
+    """alp-sdk#2178 review: `assemble_changelog.py:228` (`path.unlink()`)
+    deletes every fragment it folds, so a `changelog.d/**` path cited FROM
+    CHANGELOG.md itself is unresolvable by construction -- SKIPPED with a
+    reason, same treatment as a foreign-repo citation.
+
+    MUTATION-PROVE: `changelog.d/999999.md` does not exist in this tree, so
+    removing the `_CHANGELOG_D_PREFIX` branch in `_check_one` makes this
+    citation hard-fail ("no such file in this tree") instead of skipping."""
+    mod = _load()
+    text = 'cites `changelog.d/999999.md:3` from the fold\n'
+    errors, skips, checked, anchored = mod._check_one(mod.CHANGELOG, text)
+    assert errors == [], errors
+    assert len(skips) == 1 and "changelog.d/999999.md" in skips[0]
+
+
+def test_changelog_d_citation_from_a_fragment_is_still_graded():
+    """The DIRECTION that matters: the same `changelog.d/**` path cited from
+    INSIDE A FRAGMENT is not this class -- fragments legitimately
+    cross-reference each other before the fold ever runs, so it must still be
+    graded normally (here: a hard error, since the cited fragment does not
+    exist)."""
+    mod = _load()
+    frag = Path("9999.md")
+    text = 'cites `changelog.d/999999.md:3` from a sibling fragment\n'
+    errors, skips, checked, anchored = mod._check_one(frag, text)
+    assert skips == [], skips
+    assert len(errors) == 1 and "no such file in this tree" in errors[0]
+
+
 if __name__ == "__main__":
     test_python_tests_citation_is_skipped_not_hard_failed()
     test_python_scripts_citation_is_skipped_not_hard_failed()
@@ -295,10 +325,16 @@ def test_fix_skips_foreign_prefix_paths(tmp_path):
     assert new == fragment and rewrites == [] and problems == []
 
 
-def test_default_run_writes_nothing_and_keeps_its_verdict(tmp_path, monkeypatch):
+def test_default_run_writes_nothing_and_keeps_its_verdict(
+        tmp_path, monkeypatch, capsys):
     """The gate is a required CI context, so the no-flag path must be exactly
     what it always was: it reports the drift as an error and writes NOTHING.
-    Only --fix rewrites, and it then re-checks its own output."""
+    Only --fix rewrites, and it then re-checks its own output.
+
+    Also MUTATION-PROVES the widened alp-sdk#2178 condition did not disturb
+    the path the gate actually runs on 364 days a year: with a fragment
+    present the early return must not fire, so the verdict never carries its
+    "nothing to check" non-verdict text."""
     fragment = 'see `src/a.c:3` ("DRIFTED ANCHOR")\n'
     mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR"), fragment)
     mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
@@ -307,6 +343,7 @@ def test_default_run_writes_nothing_and_keeps_its_verdict(tmp_path, monkeypatch)
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, "a drifted anchor is still a hard error"
     assert frag.read_text() == fragment, "no --fix means the gate never writes"
+    assert "nothing to check" not in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
@@ -560,21 +597,3 @@ def test_no_fragments_and_no_changelog_still_early_returns(
     out = capsys.readouterr().out
     assert "nothing to check" in out
     assert "OK --" not in out, "the early return is a non-verdict, not a pass"
-
-
-def test_a_populated_changelog_d_is_graded_exactly_as_before(
-        tmp_path, monkeypatch, capsys):
-    """MUTATION-PROVE the widened condition did not disturb the path the gate
-    actually runs on 364 days a year: with fragments present the early return
-    must not fire, and the verdict comes from their contents."""
-    mod, frag = _tree(tmp_path, _source(7, "DRIFTED ANCHOR"),
-                      'see `src/a.c:3` ("DRIFTED ANCHOR")\n')
-    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
-                             encoding="utf-8")
-
-    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
-    assert mod.main() == 1, "a drifted fragment citation is still an error"
-    assert "nothing to check" not in capsys.readouterr().out
-
-    frag.write_text('see `src/a.c:7` ("DRIFTED ANCHOR")\n', encoding="utf-8")
-    assert mod.main() == 0, "and a resolving one still passes"
