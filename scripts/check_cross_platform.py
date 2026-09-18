@@ -104,16 +104,11 @@ Suppression mechanisms:
   to depend on the platform locale, so no per-call escape hatch is
   offered.
 
-  IMPLICIT_ENCODING_BASELINE (grandfather baseline, temporary).  The
-  478 pre-existing sites across 139 files found the day this rule
-  landed (#2195) are listed by file in IMPLICIT_ENCODING_BASELINE,
-  minus the files already drained.
-  Findings in a baselined file are still printed as warnings, they
-  just don't flip --fail-on-warning's exit code -- new code and new
-  files are gated from day one, the backlog drains separately
-  (#2197).  This baseline must only ever shrink; see the set's own
-  comment for the full rationale, including the file-vs-line
-  granularity tradeoff.
+  The #2195 backlog of 478 pre-existing sites across 139 files was
+  drained file by file under #2197; the grandfather baseline that
+  tracked it is gone.  IMPLICIT-ENCODING findings now flip
+  --fail-on-warning's exit code exactly like every other category --
+  there is no remaining carve-out.
 
 Operating mode:
 
@@ -314,52 +309,6 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
     "docs/adr/0012-cross-platform-developer-host.md",
     "docs/ci/HW-IN-LOOP.md",
     "tests/hil/README.md",
-})
-
-# ---------------------------------------------------------------------
-# IMPLICIT-ENCODING grandfather baseline
-# ---------------------------------------------------------------------
-#
-# What this is: the day this rule landed (#2195), it found 478
-# pre-existing IMPLICIT-ENCODING sites across 139 files -- an
-# unreviewable, repo-wide mechanical diff that would also collide
-# with everything else in flight.  Rather than ship the rule
-# soft-warn-only (which would not have caught the #2194 regression
-# this rule exists for) or block on fixing 139 files in one PR, the
-# backlog is grandfathered here and drained separately (#2197) while
-# the rule gates on *new* code from day one.
-#
-# Shape: this is a FILE-level baseline, not a site/line-level one, on
-# purpose -- following INTENTIONALLY_DISCUSSES_OS_PATHS's precedent
-# above. A line-numbered baseline rots on every unrelated edit to a
-# listed file (this repo has been bitten by exactly that kind of
-# silent drift before); a file-level list survives edits at the cost
-# of a real weakness: touching a file on this list does not force a
-# fix of its OTHER pre-existing findings, and a genuinely NEW
-# implicit-encoding call added to a listed file is still only a
-# warning, not a failure, same as its 478 grandfathered neighbours --
-# the baseline can't tell old from new within one file. That's the
-# accepted cost of file-level granularity, and it is NOT compensated
-# by the report: the summary prints one aggregate count ("N
-# IMPLICIT-ENCODING finding(s) in IMPLICIT_ENCODING_BASELINE files")
-# and no per-file breakdown, so growth inside an already-listed file
-# does not stand out by eye. What IS held mechanically is the shape
-# of this set: tests/scripts/test_check_cross_platform.py's
-# test_linter_fail_on_warning_against_real_repo_passes pins its
-# length to shrink-only and fails on an entry that no longer
-# produces a finding (#2197).
-#
-# This baseline is TEMPORARY and must only ever SHRINK. Draining it
-# (fixing sites, then deleting the now-clean file from this set) is
-# tracked in #2197 -- do not add work items here, use that issue.
-#
-# Nothing may be ADDED to this set. A new implicit-encoding call gets
-# an explicit `encoding=` -- there is no inline exemption (see the
-# module docstring's Suppression section) -- not a baseline entry;
-# this set only ever holds what is left of the day-#2195 backlog.
-IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
-    "scripts/alp_quality.py",
-    "tests/scripts/test_check_example_board_overlay_parity.py",
 })
 
 # Regex used to detect "this script has a cross-platform note" in
@@ -756,18 +705,12 @@ class Finding:
     category: str
     matched_text: str
     suggestion: str
-    # True for an IMPLICIT-ENCODING finding whose file is in
-    # IMPLICIT_ENCODING_BASELINE (see that set's comment).  Always
-    # False for every other category. Still printed as a warning --
-    # only --fail-on-warning's exit-code decision skips it.
-    baselined: bool = False
 
     def render(self) -> str:
         """Human-readable single-line report."""
-        tag = " [baselined, #2197]" if self.baselined else ""
         return (
             f"{self.path}:{self.line} {self.category}: "
-            f"`{self.matched_text}` -- {self.suggestion}{tag}"
+            f"`{self.matched_text}` -- {self.suggestion}"
         )
 
 
@@ -1045,13 +988,8 @@ def scan_file(
     # comment above `scan_python_encoding`.  It has no skip-marker /
     # allowlist mechanism (the fix IS the suppression: add
     # `encoding=`), so it runs unconditionally for every .py file
-    # `discover_files` handed us.  The one exception is
-    # IMPLICIT_ENCODING_BASELINE (see that set's comment): a file
-    # listed there still gets every finding reported (baselined
-    # findings are warnings, not silence), they just don't flip
-    # --fail-on-warning's exit code -- see `main()`.
+    # `discover_files` handed us.
     if path.name.endswith(".py"):
-        file_baselined = rel_posix in IMPLICIT_ENCODING_BASELINE
         for line, col, matched_text, suggestion in scan_python_encoding(text):
             out.append(
                 Finding(
@@ -1061,7 +999,6 @@ def scan_file(
                     category="IMPLICIT-ENCODING",
                     matched_text=matched_text,
                     suggestion=suggestion,
-                    baselined=file_baselined,
                 )
             )
 
@@ -1166,15 +1103,9 @@ def _print_summary(
     for f in findings:
         by_cat[f.category] = by_cat.get(f.category, 0) + 1
     cats = ", ".join(f"{k}={v}" for k, v in sorted(by_cat.items()))
-    n_baselined = sum(1 for f in findings if f.baselined)
     trailer = (
         f"; {n_allow} allowlisted file(s) (informational)" if n_allow else ""
     )
-    if n_baselined:
-        trailer += (
-            f"; {n_baselined} IMPLICIT-ENCODING finding(s) in "
-            f"IMPLICIT_ENCODING_BASELINE files (#2197, not fail-on-warning)"
-        )
     print(
         f"check_cross_platform: WARN: {n} finding(s) ({cats}){trailer}"
     )
@@ -1275,12 +1206,9 @@ def main() -> int:
     _print_summary(findings, summaries, as_json=args.json)
 
     # Allowlist summaries DO NOT flip the exit code -- they are
-    # informational by design.  Only real findings count -- except a
-    # `baselined` IMPLICIT-ENCODING finding (IMPLICIT_ENCODING_BASELINE,
-    # #2197's backlog): those are still printed above as warnings, they
-    # just don't fail the gate.  Every non-baselined finding still does.
-    failing = [f for f in findings if not f.baselined]
-    if failing and args.fail_on_warning:
+    # informational by design.  Every real finding, including
+    # IMPLICIT-ENCODING, fails --fail-on-warning.
+    if findings and args.fail_on_warning:
         return 1
     return 0
 

@@ -218,12 +218,14 @@ Existing state on 2026-05-18:
     with no explicit `encoding=` — a Windows `cp1252` default is
     what actually broke CI (`UnicodeDecodeError: 'charmap' codec
     can't decode byte 0x9d`).  Its 478 pre-existing sites across
-    139 files are grandfathered by a file-level baseline so the
-    rule can be enforced for new code immediately; #2197 drains
-    them.  Note this category scans `scripts/` and `tests/`, which
-    are *not* customer-facing surfaces — so the check is no longer
-    only about customer-facing docs, as this ADR originally scoped
-    it.
+    139 files were grandfathered by a file-level baseline so the
+    rule could be enforced for new code immediately; #2197 drained
+    them file by file and the baseline itself is now removed —
+    `IMPLICIT-ENCODING` fails `--fail-on-warning` like every other
+    category, with no carve-out left.  Note this category scans
+    `scripts/` and `tests/`, which are *not* customer-facing
+    surfaces — so the check is no longer only about customer-facing
+    docs, as this ADR originally scoped it.
 - The `standalone-from-alp-studio` promise
   ([[alp-sdk-standalone-studio-is-consumer]]) extends here: a
   Win / Mac user with `python` + `west` +

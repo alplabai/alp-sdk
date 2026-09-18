@@ -85,12 +85,13 @@ gate inherits `PYTHONIOENCODING=cp1252`. Without the override the stub crashes:
 `tests/scripts/test_check_tan_docs_surface.py:364`
 ("def test_tan_child_is_told_to_write_utf8").
 
-`IMPLICIT_ENCODING_BASELINE` shrinks from 85 to 2 files:
-`scripts/check_cross_platform.py:360`
-("IMPLICIT_ENCODING_BASELINE: frozenset"). The size pin moves with it:
-`tests/scripts/test_check_cross_platform.py:536`
-("IMPLICIT_ENCODING_BASELINE) <= 2"). The baselined finding count drops from
-316 to 9.
+`IMPLICIT_ENCODING_BASELINE` shrank from 85 to 2 files
+(`scripts/check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE: frozenset" —
+removed when #2197 finished the drain). The size pin moved with it
+(`tests/scripts/test_check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE) <= 2"
+— that test and pin were removed too). The baselined finding count dropped
+from 316 to 9 -- the last 2 files are drained, and the baseline machinery
+itself retired, in `changelog.d/2197-retire-encoding-baseline.md`.
 
 **Measured: the child's encoding now wins over the caller's locale.** The 113
 test files that are touched here, or that run a changed script, were run with
