@@ -5,9 +5,12 @@
 > **Build-validated (partial), 2026-05-26.** The BSP v6.30
 > `bitbake-layers` flow below was exercised on WSL: the carrier DT
 > patches apply to linux-renesas 6.1.141-cip43 and `core-image-minimal`
-> produces the kernel `Image` + carrier dtb + `.wic.gz`.  A full
-> `alp-image-edge` bake and on-bench boot are the remaining gates; the
-> i.MX 93 path is still paper-correct (gates on v0.7 HiL).
+> produces the kernel `Image` + carrier dtb + `.wic.gz`.  A `drpai`-OFF
+> `alp-image-edge` bake has since completed too -- see
+> [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md)'s status
+> banner for the task count and artefact.  On-bench boot and a
+> `drpai`-enabled bake are the remaining gates; the i.MX 93 path is
+> still paper-correct (gates on v0.7 HiL).
 
 Yocto layer that packages the **Alp SDK** runtime, on-board chip
 drivers, edge-AI examples, and reference ROS 2 nodes for the
@@ -537,11 +540,14 @@ checkout, it fetches nothing.
   SKU #264 lands first also await the maintainer's AEN HW config (the
   `# TBD(alif-hw-config)` overrides in the machine confs).
 - The DRP-AI3 backend (`PACKAGECONFIG[drpai]`) ships OFF, and NO
-  `drpai`-enabled `alp-image-edge` bake has completed on any host yet.
-  See `mera2-drpai-tvm_2.7.0.bb` for exactly what IS established
-  (`do_compile` succeeds cross-compiling `apps/MeraDrpRuntimeWrapper.cpp`
-  on an x86_64 host up to the final aarch64 link) and what is UNTESTED
-  (the final link against the real aarch64 RUHMI payload, packaging QA,
+  `drpai`-enabled `alp-image-edge` bake has completed on any host yet;
+  no `bitbake` run of `mera2-drpai-tvm_2.7.0.bb` -- with or without
+  `do_compile` -- has happened at all.  See
+  [`docs/bring-up-drpai-v2n.md`](../docs/bring-up-drpai-v2n.md) section 4
+  for exactly what IS established (a hand-run `g++` against RUHMI's real
+  headers on an x86_64 dev host proved `MeraDrpRuntimeWrapper.cpp`
+  compiles clean with every needed symbol defined) and what is UNTESTED
+  (the final aarch64 link against the real RUHMI payload, packaging QA,
   symbol resolution, and everything downstream of it — including
   on-silicon inference and the compiled YOLOX-S/VOC model's quantisation
   accuracy, which used 8 random frames rather than RUHMI's real

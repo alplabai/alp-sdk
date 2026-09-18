@@ -179,8 +179,12 @@ both default OFF, deliberately not merged into one"):
   `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) already
   installs that same pair unconditionally, gated only on `rz-drpai` being in
   `BBFILE_COLLECTIONS` and `v2n` being in `MACHINE_FEATURES` (issue #1176,
-  open question, not resolved here); and installs `alp-drpai-inference` into
-  `alp-image-edge` only, never `alp-image-prod`.
+  open question, not resolved here); and installs `alp-drpai-inference`
+  (`meta-alp-sdk/recipes-images/alp-image-edge.bb:50-51`) into
+  `alp-image-edge` only, and only on an `rzv2n-family` MACHINE (`'rzv2n-family'
+  in (d.getVar('MACHINEOVERRIDES') or '').split(':')`) -- never
+  `alp-image-prod`, and never on a non-RZ/V2N machine such as
+  `e1m-nx9101-a55` or `e1m-aen801-a32` even with `ALP_ENABLE_DRPAI = "1"` set.
 
 **Both are required and neither implies the other.** Omitting the
 `PACKAGECONFIG` half leaves `ALP_SDK_USE_DRPAI_V2N=OFF`, and

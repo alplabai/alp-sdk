@@ -23,8 +23,10 @@ silicon.** Bench sign-off is tracked as #1268.
   with this change — so the kernel's claim of the NPU and its userspace
   runtime can't drift out of sync. The demo binary, **`alp-drpai-inference`**,
   rides the same `ALP_ENABLE_DRPAI` opt-in but from a separate, IMAGE-level
-  append in `alp-image-edge.bb` (not the machine confs), so this booth demo
-  (#1268) reaches `alp-image-edge` only, never `alp-image-prod`. The
+  append in `alp-image-edge.bb` (not the machine confs), gated on the same
+  `rzv2n-family` `MACHINEOVERRIDES` check as the `bb.fatal()` guard below,
+  so this booth demo (#1268) reaches `alp-image-edge` only -- and only on
+  an `rzv2n-family` MACHINE -- never `alp-image-prod`. The
   alp-sdk backend's own `PACKAGECONFIG[drpai]` stays the released,
   independently-set second
   switch ("Two independent switches, both default OFF, deliberately not

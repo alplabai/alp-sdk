@@ -215,12 +215,15 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # code (#1145) and compiles in only under the `drpai` PACKAGECONFIG
 # above; the DEEPX DX-M1 backend is behind ALP_SDK_USE_DEEPX_DXM1 and
 # compiles against an in-tree stub header, so it remains dep-free).
-# No `drpai`-enabled alp-image-edge bake has completed yet -- see
-# mera2-drpai-tvm_2.7.0.bb for exactly what IS and is NOT established
-# (do_compile succeeds cross-compiling MeraDrpRuntimeWrapper.cpp on an
-# x86_64 host; the final aarch64 link, packaging QA and symbol
-# resolution against the real payload are all UNTESTED). Treat the
-# backend as BENCH-UNVERIFIED.
+# No `drpai`-enabled alp-image-edge bake has completed yet, and no
+# `bitbake` run of mera2-drpai-tvm_2.7.0.bb -- with or without
+# `do_compile` -- has happened at all; see docs/bring-up-drpai-v2n.md
+# section 4 and mera2-drpai-tvm_2.7.0.bb for exactly what IS and is NOT
+# established (a hand-run g++ against RUHMI's real headers on an x86_64
+# dev host proved MeraDrpRuntimeWrapper.cpp compiles clean with every
+# needed symbol defined; the final aarch64 link, packaging QA and
+# symbol resolution against the real payload are all UNTESTED). Treat
+# the backend as BENCH-UNVERIFIED.
 # Where a per-machine NPU userspace runtime package exists it is
 # installed by the *image* recipe, not this one (DEEPX's dx-rt is opted
 # in per the e1m-v2m10{1,2}-a55 MACHINE confs' IMAGE_INSTALL:append,

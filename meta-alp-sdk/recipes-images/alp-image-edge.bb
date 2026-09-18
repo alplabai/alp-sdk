@@ -66,12 +66,20 @@ IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '
 #      backend in; it installs no userspace package and neither this
 #      file nor alp-image-common.inc touches it.
 #
-# drpai_1.4.0 is NOT listed there either: it is a headers-only recipe
-# (${includedir}/linux/drpai.h) and belongs in DEPENDS, which alp-sdk's
-# PACKAGECONFIG[drpai] already carries. The DRP-AI kernel driver itself
-# is not a package either -- it is patched into linux-renesas by the
-# layer's 0002-enable-drpai-driver.patch. mmngr{,buf}-user-module arrive
-# via lib-tvm's own RDEPENDS.
+# drpai_1.4.0 is NOT listed in mechanisms 1-2 above either: it is a
+# headers-only recipe (${includedir}/linux/drpai.h) and belongs in
+# DEPENDS, which alp-sdk's PACKAGECONFIG[drpai] already carries. The
+# DRP-AI kernel driver itself is not a package either -- it is patched
+# into linux-renesas by the layer's 0002-enable-drpai-driver.patch.
+# mmngr{,buf}-user-module arrive via lib-tvm's own RDEPENDS.
+#
+# meta-rz-codecs / meta-rz-opencva (hardware video codec, OpenCV-DRP
+# accel) are the other two members of the meta-rz-drpai/codecs/opencva
+# trio (issue #1176); this image enables the alp-camera FEATURE (see
+# IMAGE_FEATURES above), so their RDEPENDS payload rides in via
+# packagegroup-alp-camera.bb the same way it does for alp-image-prod.bb
+# -- see that file's own NOTE for the full rationale and the
+# vendor-bbappend exclusions.
 #
 # The "opted in without the layer" guard lives HERE rather than in the
 # machine confs that own ALP_ENABLE_DRPAI, because bitbake's

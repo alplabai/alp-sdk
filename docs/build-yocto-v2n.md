@@ -241,5 +241,7 @@ When off (the default) the build is unchanged. When on, the kernel deploys
   gap 3).
 - **Validation:** `core-image-minimal` baked clean on WSL (BSP v6.30,
   bitbake-layers) 2026-05-26 — DT patches apply, carrier dtb + `.wic.gz`
-  produced.  A full `alp-image-edge` bake + on-bench boot are the
-  remaining gates.
+  produced.  A `drpai`-OFF `alp-image-edge` bake has since completed too
+  — see [`docs/bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
+  banner for the task count and artefact.  On-bench boot and a
+  `drpai`-enabled bake are the remaining gates.
