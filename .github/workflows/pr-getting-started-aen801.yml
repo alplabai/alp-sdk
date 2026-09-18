@@ -131,8 +131,10 @@ jobs:
           # patch) hits this cache, restores a zephyr/ tree with the OLD
           # patch(es) applied, and `west patch apply` then fails against an
           # already-patched (but stale) checkout instead of picking up the
-          # new patch content.
-          key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('alp-sdk/zephyr/patches.yml') }}
+          # new patch content.  The `*/` glob (it only matches the alp-sdk
+          # checkout) keeps the checkout dir name off this line, which
+          # check_toolchain_lock.py would otherwise read as an SDK cache key.
+          key: getting-started-aen801-zephyr-v4.4.1-${{ runner.os }}-${{ hashFiles('*/zephyr/patches.yml') }}
 
       - name: Cache Zephyr SDK
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
