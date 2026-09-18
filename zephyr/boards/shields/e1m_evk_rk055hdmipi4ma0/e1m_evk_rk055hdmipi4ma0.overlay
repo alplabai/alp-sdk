@@ -175,10 +175,10 @@
 		reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
 		/*
 		 * bl-gpios: Alif P5_5, the SoM backlight driver's enable input (not an
-		 * E1M pad).  Source: metadata/pinmux/aen.yaml, the A31 BL_LED_A row's
-		 * silicon_pad (also metadata/e1m_modules/aen/from-alif.tsv); on the
-		 * SoM, P5_5 drives the backlight driver's enable, and A31 carries that
-		 * driver's LED output (#2199).  Static high = full brightness; there is no Alif UTIMER
+		 * E1M pad).  Source: metadata/e1m_modules/aen/on-module-links.yaml,
+		 * backlight.enable (#2203): on the SoM, P5_5 drives the backlight
+		 * driver's enable, and E1M pads A31/B31 carry that driver's LED
+		 * output (#2199).  Static high = full brightness; there is no Alif UTIMER
 		 * PWM driver for dimming, and short low pulses on this input are the
 		 * backlight driver's dimming protocol, so never pulse it.  The hx8394
 		 * driver sets it at the end of a successful init; the SoC glue muxes
