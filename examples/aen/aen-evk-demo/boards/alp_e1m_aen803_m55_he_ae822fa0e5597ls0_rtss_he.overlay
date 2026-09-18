@@ -727,8 +727,11 @@
  *   - I2S3 (i2s3@49017000), examples/aen/aen-i2s-amp-alif's overlay. The
  *     board's I2S0_* signals route to I2S3_*_A on P9_3 (SDO) / P9_4 (SCLK) /
  *     P9_5 (WS) -- per metadata/e1m_modules/aen/from-alif.tsv, NOT i2s0, which
- *     an earlier cut of that app wrongly used. SDI (P9_2) is not declared:
- *     this phase only plays, it never reads back over I2S.
+ *     an earlier cut of that app wrongly used. SDI (P9_2, I2S3_SDI_A) is
+ *     declared too (pinctrl_i2s3's group1 below, with input-enable) so the
+ *     amps' SDOUT/IV-sense can be read back -- but the i2s3 node itself
+ *     still ships disabled by default; see the SAFETY paragraph below for
+ *     why.
  *   - the HP PDM (pdm@4902d000), examples/aen/aen-pdm-mic-alif's overlay. The
  *     EVK's 4x MP34DT05 mics reach it as PDM_C0/PDM_D0 on P6_1/P6_0 (clock 0 /
  *     data -> channels 0,1) and PDM_C2/PDM_D2 on P11_4/P5_4 (clock 2 / data ->
@@ -811,11 +814,25 @@
 
 &pinctrl {
 	pinctrl_i2s3: pinctrl_i2s3 {
-		/* TX only: SDO + SCLK + WS. SDI (P9_2) is not declared -- this
-		 * phase never reads back over I2S. */
+		/* TX: SDO + SCLK + WS. RX: SDI (P9_2, I2S3_SDI_A) -- U46's 4Y is
+		 * the one leg of that mux wired the correct direction (unlike
+		 * SDO/SCLK/WS, which contend with the SoC and are why this node
+		 * ships disabled -- see the file-header SAFETY note), feeding the
+		 * amps' SDOUT/IV-sense back to the SoC. input-enable sets the
+		 * pad's REN bit so the input buffer actually samples; without it
+		 * the mux alone is not sufficient to receive (REN defaults off).
+		 * Declaring SDI was originally deferred -- this phase's own scope
+		 * was TX-only, a deliberate choice and not a hazard -- but that
+		 * scope has since widened. Still inert on its own: this node ships
+		 * "disabled" by default, so pinctrl-0 is not applied until
+		 * i2s3-enable-post-u46-rework.overlay flips it "okay". */
 		group0 {
 			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
 				 <PIN_P9_5__I2S3_WS_A>;
+		};
+		group1 {
+			pinmux = <PIN_P9_2__I2S3_SDI_A>;
+			input-enable;
 		};
 	};
 
