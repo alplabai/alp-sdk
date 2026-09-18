@@ -19,6 +19,4 @@ The backlight is on/off at full brightness, not PWM-dimmed: the driver gives
 full LED current with its enable held constant high. The enable is driven
 straight to a static high and never pulsed, because short low pulses are the
 driver IC's serial dimming protocol. Dimming would need an Alif UTIMER `pwm`
-driver, which Zephyr does not have. An earlier revision of this change lit the
-backlight before the panel init from an example-local `POST_KERNEL` hook; that
-hook is gone, and the panel driver's own order (backlight last) stands.
+driver, which Zephyr does not have.

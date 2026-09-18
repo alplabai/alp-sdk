@@ -18,9 +18,12 @@
  * The SoC nodes (reg, IRQs, clocks, cdc-if / phy-if) are defined disabled in
  * zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  This shield turns them on and
  * adds what the carrier and the panel decide.  Build any app with
- * `-DSHIELD=e1m_evk_rk055hdmipi4ma0` (and CONFIG_ALP_SDK=y); the shield's
- * Kconfig.defconfig enables the drivers.  The SoC-level clock / power / pad
- * setup the chain needs lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
+ * `-DSHIELD=e1m_evk_rk055hdmipi4ma0`; the shield's Kconfig.defconfig enables
+ * the drivers.  The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app
+ * does: the CDC200 / DesignWare DSI / D-PHY driver symbols are alp-sdk's and
+ * live under `if ALP_SDK`, and the shield deliberately does not turn the SDK
+ * on for an app.  The SoC-level clock / power / pad setup the chain needs
+ * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
  *
  * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel
  * clock is not: the panel-native 62.346 MHz is unreachable from the 400 MHz
@@ -30,8 +33,10 @@
  * 400 MHz / 6 = 66.67 MHz would need ~539 Mbps/lane, over the DSI host's
  * default 500 Mbps panel-max-lane-bandwidth.
  *
- * Conflicts: the I2C expander at 0x73 becomes a driver-owned GPIO controller,
- * so an app must not also write its registers directly.
+ * Conflicts: the I2C expander at 0x73 becomes a driver-owned GPIO controller
+ * (gpio_pca_series), so an app must not also write its registers directly.
+ * aen-evk-demo's phase 4, the one in-tree raw user, checks for this shield's
+ * lcd_exp node and skips its register writes when it is present.
  */
 
 #include <mem.h>
@@ -68,8 +73,19 @@
  * dtsi's sram0).  A 720x1280 RGB565 layer is 1,843,200 B.  Plain "mmio-sram",
  * not "zephyr,memory-region": the CDC driver uses the address directly, so
  * nothing is linked here and the framebuffer adds nothing to the image (an
- * ITCM RAM-run .bin stays small).  Keep other SRAM0 users below 0x02200000.
+ * ITCM RAM-run .bin stays small).
+ *
+ * The SoC dtsi's sram0 is ALSO the "SRAM0" linker region (and system RAM for
+ * an app with `zephyr,sram = &sram0`), so it is shrunk to the bottom 2 MiB:
+ * anything linked into SRAM0 past 0x02200000 is then a link error ("region
+ * SRAM0 overflowed") instead of a silent overwrite of the framebuffer.  An
+ * app overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
+ * after this shield and still stays below the framebuffer.
  */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_M(2)>;
+};
+
 &soc {
 	lcd_fb: sram@2200000 {
 		compatible = "mmio-sram";
@@ -79,9 +95,10 @@
 
 /*
  * The panel-control I2C GPIO expander on the E1M bus 0 (SoC I2C2, whose pins,
- * clock and alp-i2c0 alias the board devicetree already sets).  0x73 =
- * EVK_I2C_ADDR_TCAL9538_MAIN in metadata/boards/e1m-evk.yaml.  P0 enables the
- * panel path (lcd_pwr_en above), P1 is the HX8394 reset.  It answers at POR;
+ * clock and alp-i2c0 alias the board devicetree already sets).  reg 0x73 is
+ * EVK_I2C_ADDR_TCAL9538_MAIN in metadata/boards/e1m-evk.yaml (the
+ * i2c_devices block).  P0 enables the panel path (lcd_pwr_en above), P1 is
+ * the HX8394 reset.  It answers at POR;
  * its own reset line is pulled up on the carrier, so no firmware action is
  * needed.
  *
@@ -102,7 +119,7 @@
 	};
 };
 
-/* gpio5 carries the backlight enable (panel bl-gpios below). */
+/* gpio5 carries the backlight enable (panel bl-gpios below, P5_5). */
 &gpio5 {
 	status = "okay";
 };
@@ -158,7 +175,10 @@
 		reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
 		/*
 		 * bl-gpios: Alif P5_5, the SoM backlight driver's enable input (not an
-		 * E1M pad).  Static high = full brightness; there is no Alif UTIMER
+		 * E1M pad).  Source: metadata/pinmux/aen.yaml, the A31 BL_LED_A row's
+		 * silicon_pad (also metadata/e1m_modules/aen/from-alif.tsv); on the
+		 * SoM, P5_5 drives the backlight driver's enable, and A31 carries that
+		 * driver's LED output (#2199).  Static high = full brightness; there is no Alif UTIMER
 		 * PWM driver for dimming, and short low pulses on this input are the
 		 * backlight driver's dimming protocol, so never pulse it.  The hx8394
 		 * driver sets it at the end of a successful init; the SoC glue muxes

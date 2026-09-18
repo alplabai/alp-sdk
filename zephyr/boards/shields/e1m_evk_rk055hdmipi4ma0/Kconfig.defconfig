@@ -2,9 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Everything the RK055HDMIPI4MA0 display chain needs on an E1M-AEN SoM, so an
-# app only adds the shield (plus CONFIG_ALP_SDK=y, which every alp-sdk app
-# sets): the display class, the DSI host + D-PHY, the panel driver, and the
-# carrier's I2C GPIO expander + fixed regulator that power and reset the panel.
+# app only adds the shield: the display class, the DSI host + D-PHY, the panel
+# driver, and the carrier's I2C GPIO expander + fixed regulator that power and
+# reset the panel.
+#
+# The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
+# CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
+# whose symbols are defined under `if ALP_SDK`.  The shield does not default
+# ALP_SDK itself -- turning the SDK on is the app's decision.
 
 if SHIELD_E1M_EVK_RK055HDMIPI4MA0
 
@@ -32,15 +37,6 @@ config REGULATOR
 config REGULATOR_FIXED
 	default y
 
-# The hx8394 driver allocates its DSI command scratch from the system heap.
-# An ADD_SIZE symbol raises the heap to at least this much without lowering a
-# larger CONFIG_HEAP_MEM_POOL_SIZE an app sets itself.
-config HEAP_MEM_POOL_ADD_SIZE_E1M_EVK_RK055HDMIPI4MA0
-	int
-	default 4096
-
-# The Alif CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2
-# copies, defined under CONFIG_ALP_SDK.
 if ALP_SDK
 
 config MIPI_DPHY
