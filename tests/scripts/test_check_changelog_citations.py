@@ -269,7 +269,7 @@ def test_fix_repoints_a_drifted_anchored_citation(tmp_path):
     mod, frag = _tree(
         tmp_path, _source(7, "#define AMP_ENABLE_RESET_HOLD_MS 24u"),
         'see `src/a.c:3` ("#define AMP_ENABLE_RESET_HOLD_MS 24u")\n')
-    new, rewrites, problems, unanchored = mod._fix_one(frag, frag.read_text())
+    new, rewrites, problems, unanchored = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:7`" in new
     assert problems == [] and unanchored == 0
     assert len(rewrites) == 1
@@ -280,7 +280,7 @@ def test_fix_preserves_a_ranges_width(tmp_path):
     line: the range's width is part of what the note claims."""
     mod, frag = _tree(tmp_path, _source(8, "ANCHOR TEXT HERE"),
                       'see `src/a.c:2-6` ("ANCHOR TEXT HERE")\n')
-    new, _, _, _ = mod._fix_one(frag, frag.read_text())
+    new, _, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:8-12`" in new, "width 4 must survive the move"
 
 
@@ -295,7 +295,7 @@ def test_fix_picks_the_nearest_match_not_the_first(tmp_path):
         lines[n - 1] = "REPEATED ANCHOR"
     mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
                       'see `src/a.c:28` ("REPEATED ANCHOR")\n')
-    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text())
+    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:30`" in new, "nearest the cited 28"
     assert "`src/a.c:2`" not in new, "hits[0] would have been line 2"
     assert len(rewrites) == 1 and "AMBIGUOUS" in rewrites[0]
@@ -358,7 +358,7 @@ def test_fix_never_touches_released_changelog_history(tmp_path):
         'shipped work cites `src/a.c:4` ("SHIPPED ANCHOR")\n',
         encoding="utf-8")
     mod._run_fix([frag])
-    out = mod.CHANGELOG.read_text()
+    out = mod.CHANGELOG.read_text(encoding="utf-8")
     assert "current work cites `src/a.c:12`" in out, "unreleased half fixed"
     assert "shipped work cites `src/a.c:4`" in out, "released half untouched"
 
@@ -397,12 +397,12 @@ def test_default_run_writes_nothing_and_keeps_its_verdict(
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, "a drifted anchor is still a hard error"
-    assert frag.read_text() == fragment, "no --fix means the gate never writes"
+    assert frag.read_text(encoding="utf-8") == fragment, "no --fix means the gate never writes"
     assert "nothing to check" not in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
-    assert "`src/a.c:7`" in frag.read_text()
+    assert "`src/a.c:7`" in frag.read_text(encoding="utf-8")
 
 
 def test_fix_rebuilds_offsets_across_two_citations_in_one_fragment(tmp_path):
@@ -475,7 +475,7 @@ def test_fix_breaks_an_exact_tie_toward_the_later_line(tmp_path):
     lines[14] = "TIED ANCHOR"    # line 15, the cited 10 plus 5
     mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
                       'see `src/a.c:10` ("TIED ANCHOR")\n')
-    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text())
+    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:15`" in new, "an exact tie takes the LATER line"
     assert "`src/a.c:5`" not in new, "min() alone would have taken 5"
     assert len(rewrites) == 1 and "chose 15" in rewrites[0]
@@ -509,7 +509,7 @@ def test_fix_rereads_a_cited_fragment_it_rewrote_earlier_in_the_same_run(
         "the defect needs 2.md rewritten BETWEEN the two reads of it")
     mod._run_fix(fragments)
 
-    assert "`src/a.c:7`" in (mod.FRAGMENT_DIR / "2.md").read_text(), (
+    assert "`src/a.c:7`" in (mod.FRAGMENT_DIR / "2.md").read_text(encoding="utf-8"), (
         "the rewrite this test turns on must actually have happened")
     out = capsys.readouterr().out
     assert "NEEDS A HUMAN" not in out, out
@@ -536,12 +536,12 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, (
         "alp-sdk#2178: an empty changelog.d/ no longer skips CHANGELOG.md")
-    assert mod.CHANGELOG.read_text() == drifted, "and still writes nothing"
+    assert mod.CHANGELOG.read_text(encoding="utf-8") == drifted, "and still writes nothing"
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
     assert '`src/a.c:7` ("RELEASE-CANDIDATE ANCHOR")' in (
-        mod.CHANGELOG.read_text())
+        mod.CHANGELOG.read_text(encoding="utf-8"))
 
     # The FALL-THROUGH is what carries the verdict. `--fix` on an empty
     # changelog.d/ whose `[Unreleased]` citation it CANNOT repair -- a dead
@@ -652,3 +652,149 @@ def test_no_fragments_and_no_changelog_still_early_returns(
     out = capsys.readouterr().out
     assert "nothing to check" in out
     assert "OK --" not in out, "the early return is a non-verdict, not a pass"
+
+
+# ---------------------------------------------------------------------------
+# Double-delimited anchors: `` (`"text"`) `` / `` ("`text`") `` (alp-sdk#2184)
+#
+# `_ANCHOR`'s opening class consumes ONE delimiter, then the capture group
+# refuses the very next character because it is the OTHER delimiter -- so the
+# match fails outright and the citation used to fall through to "no anchor",
+# silently downgrading it from anchored-and-verified to range-checked-only
+# while the gate stayed green. These pin the fix: BOTH nesting orders are now
+# a hard ERROR (never a silent pass, never a silent SKIP), a plain single
+# delimiter is completely unaffected, and `_fix_one` reports the same case as
+# a problem for a human rather than folding it into its "nothing to verify
+# against" unanchored count.
+# ---------------------------------------------------------------------------
+
+
+def test_double_delimited_anchor_backtick_then_quote_is_a_hard_error(tmp_path):
+    """`` (`"text"`) `` -- backtick outer, quote inner. Must be a hard ERROR,
+    not silently downgraded to an unanchored (range-checked-only) citation."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`"GOOD ANCHOR"`)\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1, "the citation itself still resolves and is counted"
+    assert anchored == 0, "the malformed anchor must NOT count as anchored"
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'`'" in errors[0] and "'\"'" in errors[0]
+
+
+def test_double_delimited_anchor_quote_then_backtick_is_a_hard_error(tmp_path):
+    """`` ("`text`") `` -- the other nesting order. Same verdict either way."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` ("`GOOD ANCHOR`")\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'\"'" in errors[0] and "'`'" in errors[0]
+
+
+def test_single_delimiter_anchors_still_parse_exactly_as_before(tmp_path):
+    """Regression guard: a plain backtick-only or quote-only anchor -- the
+    two forms `_ANCHOR` was always meant to accept -- must be completely
+    unaffected by the malformed-anchor detection."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+    quoted_root = tmp_path / "quoted"
+    quoted_root.mkdir()
+    mod2, frag2 = _tree(quoted_root, _source(5, "GOOD ANCHOR"),
+                         'see `src/a.c:5` ("GOOD ANCHOR")\n')
+    errors2, skips2, checked2, anchored2 = mod2._check_one(
+        frag2, frag2.read_text(encoding="utf-8"))
+    assert errors2 == [] and skips2 == []
+    assert checked2 == 1 and anchored2 == 1
+
+
+def test_fix_reports_a_malformed_anchor_as_a_problem_not_unanchored(tmp_path):
+    """`_fix_one` must not treat this as "nothing to verify against" -- there
+    IS anchor text here, `_ANCHOR` just can't parse past the doubled
+    delimiter, and guessing which one to drop is exactly the kind of guess
+    this fixer refuses to make. Reported as a problem for a human, same
+    severity as an anchor found nowhere in the file, never silently folded
+    into the unanchored count alongside citations that never had an anchor
+    at all."""
+    fragment = 'see `src/a.c:5` (`"GOOD ANCHOR"`)\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment, "not rewritten -- the fixer does not guess here"
+    assert rewrites == []
+    assert unanchored == 0, "this is not the same case as no anchor at all"
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+def test_fix_reports_the_other_nesting_order_as_a_problem_too(tmp_path):
+    """The `("`text`")` order gets the identical treatment from `_fix_one`."""
+    fragment = 'see `src/a.c:5` ("`GOOD ANCHOR`")\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment
+    assert rewrites == [] and unanchored == 0
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2184 review: `_MALFORMED_ANCHOR`'s `inner` class was `["“`]` (LEFT
+# curly quote), a typo for `["”`]` (RIGHT curly quote, what `_ANCHOR`'s
+# capture actually refuses). That single character was wrong in both
+# directions: a smart-quoted anchor `_ANCHOR` parses just fine was flagged as
+# malformed (false positive), and a smart-quoted anchor `_ANCHOR` genuinely
+# cannot parse was NOT flagged (false negative, the open half of #2184 left
+# unfixed). These four cover every combination of {backtick, quote} outer x
+# {`_ANCHOR` accepts, `_ANCHOR` refuses} first-captured-character.
+# ---------------------------------------------------------------------------
+
+
+def test_smart_quote_anchor_backtick_open_parses_normally(tmp_path):
+    """`` (`“text”`) `` -- `_ANCHOR`'s open class accepts the LEFT curly
+    quote as an ordinary first character of the captured text (its capture
+    class excludes only `"`, `”`, and backtick). Must NOT be flagged
+    malformed."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` (`“GOOD ANCHOR”`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_quote_open_parses_normally(tmp_path):
+    """`` ("“text”") `` -- same as above with a straight-quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` ("“GOOD ANCHOR”")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_backtick_then_right_curly_is_a_hard_error(tmp_path):
+    """`` (`”text`) `` -- the RIGHT curly quote right after the backtick is
+    exactly the character `_ANCHOR`'s capture class refuses, so `_ANCHOR`
+    genuinely fails here. Must be caught, not silently downgraded."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` (`”GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+
+
+def test_smart_quote_anchor_quote_then_right_curly_is_a_hard_error(tmp_path):
+    """`` ("”text") `` -- same clash, quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` ("”GOOD ANCHOR")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]

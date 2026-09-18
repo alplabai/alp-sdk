@@ -60,6 +60,21 @@ code and the gate fails, which is the entire point. An un-anchored citation is
 range-checked only, and is reported so the count of unanchored citations is
 visible rather than assumed to be zero.
 
+Use ONE delimiter, backtick or quote, never both. `` (`"text"`) `` and
+`` ("`text`") `` are hard errors, not accepted anchors: the opening class
+`["“`]` consumes one delimiter char, and the capture group then refuses the
+very next char because it is the OTHER delimiter -- so the match fails
+outright and the citation used to fall through to "no anchor", silently
+DOWNGRADING it from anchored-and-verified to range-checked-only while the
+gate stayed green (alp-sdk#2184). That downgrade, not the malformed syntax
+itself, is the actual defect: a citation that reads as anchored to a human
+but is not anchored to the gate is worse than one with no anchor at all, so
+this is reported as a hard ERROR rather than silently accepted or silently
+skipped -- the author can fix the delimiter right here, which is why this
+gets the same treatment as broken anchor text rather than the SKIP given to
+a citation this gate genuinely cannot resolve (a foreign-repo path, or a
+folded `changelog.d/` fragment).
+
 --fix -- re-deriving a drifted citation from its anchor
 -------------------------------------------------------
 Merging `dev` into a branch shifts the files its fragments cite, so every
@@ -131,7 +146,7 @@ def _repo_root() -> Path:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise SystemExit("error: not inside a git worktree")
@@ -150,6 +165,33 @@ _CITATION = re.compile(
 #: An optional anchor: a parenthesised backtick- or quote-delimited phrase
 #: immediately following the citation.
 _ANCHOR = re.compile(r"""^\s*\(\s*["“`](?P<text>[^"”`]{4,120})["”`]""")
+
+#: The anchor open, wrapped in a SECOND delimiter -- `` (`"text"`) `` or
+#: `` ("`text`") ``. Deliberately NOT anchored on a matching close (a
+#: symmetric `` `"..."` ``): two of the four live instances found on dev
+#: (alp-sdk#2184) are not that tidy -- `` (`"i2s": 10`) `` closes on a bare
+#: backtick and `` ("`MOVED`, not `REMOVED` ... the")) `` closes on a bare
+#: quote, because the anchor text itself contains further backticks/quotes.
+#: What both share, and what actually breaks `_ANCHOR`, is only the OPEN:
+#: `\(\s*` consumes one delimiter, and the very next character is a SECOND
+#: delimiter char, which `_ANCHOR`'s `[^"”`]{4,120}` capture then refuses as
+#: its first character -- so the match fails at position zero regardless of
+#: how the anchor text is shaped further in. Detecting exactly that clash,
+#: instead of demanding a symmetric close, is what catches the real
+#: instances rather than only the textbook ones.
+#:
+#: `inner` mirrors `_ANCHOR`'s CAPTURE-refusal class, `["”`]` (RIGHT double
+#: quote `”`, not left `“`) -- not its opening-delimiter class. `_ANCHOR`'s
+#: own open (`["“`]`) happily accepts `“` as a first character and folds it
+#: into the captured text (its capture class only excludes `"`, `”`, and
+#: `` ` ``), so `` (`“text”`) `` and `` ("“text”") `` parse as ordinary,
+#: valid anchors -- flagging them here would be a false positive. Conversely
+#: `` (`”text`) `` and `` ("”text") `` are real misfires: `”` right after the
+#: open is exactly what `_ANCHOR`'s capture class refuses, so `_ANCHOR` fails
+#: on them the same way it fails on the backtick/straight-quote clashes above
+#: -- an `inner` class keyed on `“` instead of `”` misses that case entirely
+#: (alp-sdk#2184 review).
+_MALFORMED_ANCHOR = re.compile(r"""^\s*\(\s*(?P<outer>["“`])(?P<inner>["”`])""")
 
 #: Top-level directories that belong to a different repository, in full --
 #: not a hand-picked list of subpaths within them. alp-sdk has no `python/`,
@@ -296,7 +338,31 @@ def _check_one(frag: Path, text: str) -> tuple[list[str], list[str], int, int]:
 
         checked += 1
 
-        anchor = _ANCHOR.match(text[m.end():])
+        rest = text[m.end():]
+        malformed = _MALFORMED_ANCHOR.match(rest)
+        if malformed:
+            errors.append(
+                f"{where} -- malformed anchor: opens with two delimiter "
+                f"characters back to back ({malformed.group('outer')!r} then "
+                f"{malformed.group('inner')!r}), so `_ANCHOR` cannot capture "
+                f"any text and this citation would silently degrade to "
+                f"range-checked only. Use a single delimiter -- backtick or "
+                f"quote, not both -- and make sure the anchor text contains "
+                f"NO delimiter anywhere in it, not just at its start: this "
+                f"check only catches a delimiter at the very first "
+                f"character, so one later in a 'shortened' span still "
+                f"degrades silently with no error at all. If this "
+                f"parenthetical is prose commentary rather than an anchor at "
+                f"all, don't merely drop one of the two delimiters -- the "
+                f"one left behind still opens the parenthetical and gets "
+                f"parsed (then verified) as a real anchor. Rewrite it so no "
+                f"delimiter is the first character after '(' at all, e.g. "
+                f"\"(the flag is `--fix`)\" rather than \"(`--fix` is the "
+                f"flag)\"."
+            )
+            continue
+
+        anchor = _ANCHOR.match(rest)
         if not anchor:
             continue
         anchored += 1
@@ -319,11 +385,15 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
     the caller owns the file. Keeping the rewrite pure is what lets it be
     tested against a scratch tree instead of against this repo.
 
-    Shares `_CITATION`, `_ANCHOR`, `_FOREIGN_PREFIXES` and
-    `_strip_fenced_blocks` with `_check_one` above, and that sharing is the
-    point: a fixer carrying its own parser would eventually disagree with the
-    gate about what a citation even IS, and would then confidently "fix"
-    fragments into a tree the gate still rejects.
+    Shares `_CITATION`, `_ANCHOR`, `_MALFORMED_ANCHOR`, `_FOREIGN_PREFIXES`,
+    `_CHANGELOG_D_PREFIX` and `_strip_fenced_blocks` with `_check_one` above,
+    and that sharing is the point: a fixer carrying its own parser would
+    eventually disagree with the gate about what a citation even IS, and
+    would then confidently "fix" fragments into a tree the gate still
+    rejects. `_CHANGELOG_D_PREFIX` is the one of these duplicated BY HAND
+    into both halves rather than imported once -- exactly the divergence
+    duplication risks, and worth naming here rather than leaving it as the
+    one piece of shared machinery this docstring doesn't admit to sharing.
     """
     rewrites: list[str] = []
     problems: list[str] = []
@@ -363,7 +433,33 @@ def _fix_one(frag: Path, text: str) -> tuple[str, list[str], list[str], int]:
                             f"itself is wrong, which no anchor can repair")
             continue
 
-        anchor = _ANCHOR.match(stripped[m.end():])
+        rest = stripped[m.end():]
+        malformed = _MALFORMED_ANCHOR.match(rest)
+        if malformed:
+            # Not "nothing to verify against" -- there IS anchor text here,
+            # `_ANCHOR` just can't parse it past the doubled opening
+            # delimiter. Guessing which delimiter to drop is exactly the
+            # kind of guess this fixer refuses to make, so this is a problem
+            # for a human, not a silent `unanchored += 1` alongside citations
+            # that genuinely never had an anchor at all.
+            problems.append(
+                f"{where} -- malformed anchor: opens with two delimiter "
+                f"characters back to back ({malformed.group('outer')!r} then "
+                f"{malformed.group('inner')!r}); rewrite it with a single "
+                f"delimiter, making sure the anchor text contains NO "
+                f"delimiter anywhere in it (not just at its start -- this "
+                f"check only catches one at the very first character, so "
+                f"one later in a 'shortened' span still degrades silently "
+                f"with no error at all); if this parenthetical is prose "
+                f"rather than an anchor, don't merely drop one of the two "
+                f"delimiters -- the one left behind still opens the "
+                f"parenthetical and gets parsed (then verified) as a real "
+                f"anchor, so rewrite it so no delimiter is the first "
+                f"character after '(' at all -- then re-run --fix"
+            )
+            continue
+
+        anchor = _ANCHOR.match(rest)
         if not anchor:
             # Nothing to verify against. Re-pointing this would be guessing,
             # and a plausible-looking guess is exactly what this gate exists
@@ -553,7 +649,7 @@ def main() -> int:
     #
     # This sits ABOVE the early return, but that ordering is now INERT:
     # mutation-tested by moving `if args.fix:` below the early return and
-    # re-running the suite -- still 29 passed. What actually keeps `--fix`
+    # re-running the suite -- still 42 passed. What actually keeps `--fix`
     # from becoming a silent no-op on the release-cut tree (empty
     # `changelog.d/`, CHANGELOG.md present) is the WIDENED condition below
     # (`not fragments and not CHANGELOG.is_file()`), not this placement.
