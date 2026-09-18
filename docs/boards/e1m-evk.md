@@ -207,7 +207,12 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   shield builds for the AEN801 and AEN803 M55-HE targets.  The D-PHY
   clocks are the SoC `dphy` node's four real `MIPI_CKEN` gates, so
   the shield composes with a DSI panel app without either overriding
-  them.  The sensor shields and their drivers are described in
+  them.  What feeds those gates is also the D-PHY driver's job: at
+  init `dphy_dw.c` enables the CGU `CLK_ENA` HFOSC (38.4 MHz PLL
+  reference) and 100 MHz (CFG clock) sources and clears the VBAT
+  `PWR_CTRL` D-PHY power masks, isolation and 1.8 V bypass.  At reset
+  those leave the D-PHY unpowered, and the CSI-2 receiver then times
+  out waiting for Stop-state.  The sensor shields and their drivers are described in
   [`docs/camera-shields.md`](../camera-shields.md).  The
   app needs `CONFIG_ALP_SDK=y` and `CONFIG_VIDEO=y`, and a video
   buffer pool that fits in RAM (the Zephyr 2 MB default does not fit
