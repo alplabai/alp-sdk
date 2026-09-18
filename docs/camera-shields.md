@@ -47,17 +47,25 @@ when no instance declares it.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 
-ADR 0017 Tier-2 -- a **port** of the Apache-2.0 Espressif
-`esp-video-components` `esp_cam_sensor/sensors/ov9281` driver onto the
-upstream Zephyr v4.4 video API, keeping Espressif's register
+ADR 0017 Tier-1.5 (third-party permissive port) -- a **port** of the
+Apache-2.0 Espressif `esp-video-components` `esp_cam_sensor/sensors/ov9281`
+driver onto the upstream Zephyr v4.4 video API, keeping Espressif's register
 addresses/values/init tables verbatim. BENCH-UNVERIFIED (no silicon bench
 pass on this batch). See the file header for the source commit and
-retirement note.
+retirement note, and the "Amendment (2026-09-18)" section of
+[ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md) for why this is Tier-1.5
+and not Tier-2 (Tier-2 names the opt-in Alif vendor-SDK fork specifically,
+which this driver never touches).
 
 Modes: only the two Espressif ships -- `GREY` (RAW8 mono) 1280x720 @ 50 fps
 and 640x400 @ 100 fps, MIPI CSI-2 D-PHY, 2 data lanes, 24 MHz XVCLK (no
 RAW10 or 1280x800 mode is invented). Controls: exposure, analogue gain
 (112-step discrete LUT), test pattern, pixel rate, link frequency.
+
+This is the *streaming* OV9281 driver. A separate portable chip-ID stub,
+`chips/ov9281/ov9281.c` (`metadata/chips/ov9281.yaml`, `driver_status: stub`,
+advertises up to 1280x800), exists only for the SDK's chip-manifest/backend
+scaffolding and does not stream frames -- see that manifest's `notes:` field.
 
 ## Driver: IMX296 (`zephyr/drivers/video/imx296.c`)
 
@@ -72,8 +80,13 @@ provenance note and retirement path.
 Mode: All-pixel scan only -- 1440x1080 (the sensor's own "recording pixel"
 output size, not the 1456x1088 effective-silicon count -- the extra rows/
 columns are a colour-processing margin the sensor crops internally before
-CSI-2 output), `SGBRG10P` (RAW10 packed, GBRG Bayer order for the
-IMX296LQR-C colour part), MIPI CSI-2 D-PHY, **1 data lane** (unlike OV5647 /
+CSI-2 output), `SRGGB10P` (RAW10 packed, RGGB Bayer order -- taken from the
+datasheet's "Drive Timing Chart for Serial Output in All-pixel Scan Mode",
+which draws the colour-filter phase at the Recording pixel area's own first
+transmitted pixel, not from the physical-array corner diagram elsewhere in
+the datasheet, which is a different row: readout starts at the OB side, not
+the N1-pin side) for the IMX296LQR-C colour part, MIPI CSI-2 D-PHY, **1 data
+lane** (unlike OV5647 /
 OV9281 above, both 2-lane parts), 37.125/54/74.25 MHz INCK (any other
 frequency is rejected at runtime with `-ENOTSUP`), 60.3 frame/s fixed.
 Controls: exposure (in integration-time lines, converted internally to the

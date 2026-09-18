@@ -10,6 +10,14 @@ mpn_population:
 datasheet:
   primary:        "OV9281 datasheet Rev 1.06 (Oct 2017)"
 
+notes: |
+  This manifest describes the portable chip-ID stub (chips/ov9281/ov9281.c,
+  driver_status: stub above) used by the SDK's chip-manifest/backend
+  scaffolding -- it does not stream frames. The streaming Zephyr video
+  driver is zephyr/drivers/video/ov9281.c (ADR 0017 Tier-1.5, a port of the
+  Apache-2.0 Espressif esp-video-components esp_cam_sensor/sensors/ov9281
+  driver); see docs/camera-shields.md for its modes/controls.
+
 bus:              i2c
 i2c:
   addresses:

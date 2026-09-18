@@ -4,7 +4,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ====== ADR 0017 Tier-2 (port of an Apache-2.0 vendor driver), BENCH-UNVERIFIED ======
+ * ====== ADR 0017 Tier-1.5 (third-party permissive port), BENCH-UNVERIFIED ======
  * OmniVision OV9281 global-shutter mono MIPI CSI-2 sensor. Ported onto the
  * upstream Zephyr v4.4 video API (video_driver_api set_format/get_format/
  * get_caps/set_stream + the video_ctrls registry) from the Apache-2.0
@@ -31,10 +31,14 @@
  * BENCH-UNVERIFIED: not yet run against real OV9281 silicon on the E1M-EVK
  * (no innomaker_cam_ov9281 shield bench pass on this batch).
  *
- * RETIREMENT: this is a Tier-2 vendor-driver port, not an interim backport --
- * it has no upstream Zephyr equivalent to retire onto. If upstream Zephyr
- * ever grows a native "ovti,ov9281" driver, prefer it and delete this file.
- * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * RETIREMENT: this is a ported third-party permissive driver, not a Tier-2
+ * fork-driver copy or an interim backport -- it has no upstream Zephyr
+ * equivalent to retire onto. If upstream Zephyr ever grows a native
+ * "ovti,ov9281" driver, prefer it and delete this file. See the "Amendment
+ * (2026-09-18)" section of docs/adr/0017-alp-sdk-over-the-vendor-sdk.md for
+ * why this is labeled Tier-1.5 rather than Tier-2: Tier-2 in this ladder
+ * names the opt-in Alif vendor-SDK fork specifically, which this driver
+ * never touches.
  * ======================================================================
  */
 
@@ -267,6 +271,10 @@ struct ov9281_config {
 	struct i2c_dt_spec i2c;
 };
 
+/* Forward declaration: ov9281_set_fmt() re-applies the video_ctrl cache through this after a
+ * real mode reload, ahead of its own definition further down this file. */
+static int ov9281_set_ctrl(const struct device *dev, uint32_t cid);
+
 static int ov9281_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct ov9281_config *cfg = dev->config;
@@ -280,6 +288,20 @@ static int ov9281_set_fmt(const struct device *dev, struct video_format *fmt)
 		LOG_ERR("Format '%s' %ux%u not supported", VIDEO_FOURCC_TO_STR(fmt->pixelformat),
 			fmt->width, fmt->height);
 		return -ENOTSUP;
+	}
+
+	/*
+	 * zephyr_video.c's get_fmt path round-trips through video_get_format() -> set_format(),
+	 * so a real caller (the CPI backend querying the negotiated format) hits this function
+	 * far more often than a genuine mode change. Every entry in ov9281_mode_*_regs[] starts
+	 * with a 0x0103 soft reset (Espressif's table, kept verbatim), so reloading it
+	 * unconditionally would stop an active stream and revert exposure/gain/test-pattern to
+	 * Espressif's mode defaults on every no-op query -- while the video_ctrl cache below
+	 * keeps reporting whatever the user last set via VIDEO_CID_*, silently diverging from the
+	 * sensor. Skip the reload entirely when the requested mode is already the active one.
+	 */
+	if (idx == data->mode && data->fmt.pixelformat == fmt->pixelformat) {
+		return 0;
 	}
 
 	mode = &ov9281_modes[idx];
@@ -301,7 +323,26 @@ static int ov9281_set_fmt(const struct device *dev, struct video_format *fmt)
 	data->ctrls.pixel_rate.range.max64 = mode->pixel_rate;
 	data->ctrls.pixel_rate.val64 = mode->pixel_rate;
 
-	return 0;
+	/*
+	 * A real reload just soft-reset the sensor to Espressif's per-mode register defaults,
+	 * which for VIDEO_CID_EXPOSURE/ANALOGUE_GAIN/TEST_PATTERN overwrites whatever the caller
+	 * had set through set_ctrl() -- the video_ctrl cache itself is untouched by the reset, so
+	 * re-push it now. This runs at driver init too (ov9281_init()'s first, unconditional
+	 * mode load), which is why ov9281_init() now calls ov9281_init_ctrls() *before*
+	 * ov9281_set_fmt() -- ctrls->*.val must already hold a real default by this point, not a
+	 * zero-initialized one.
+	 */
+	ret = ov9281_set_ctrl(dev, VIDEO_CID_EXPOSURE);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = ov9281_set_ctrl(dev, VIDEO_CID_ANALOGUE_GAIN);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return ov9281_set_ctrl(dev, VIDEO_CID_TEST_PATTERN);
 }
 
 static int ov9281_get_fmt(const struct device *dev, struct video_format *fmt)
@@ -519,12 +560,18 @@ static int ov9281_init(const struct device *dev)
 
 	data->mode = OV9281_MODE_1280X720_50FPS;
 
-	ret = ov9281_set_fmt(dev, &fmt);
+	/*
+	 * Controls before the mode load: ov9281_set_fmt() re-applies the video_ctrl cache
+	 * (exposure/gain/test-pattern) after every REAL mode reload -- including this first one
+	 * -- so ctrls->*.val must already hold a real default, not a zero-initialized one, by the
+	 * time set_fmt() runs.
+	 */
+	ret = ov9281_init_ctrls(dev);
 	if (ret < 0) {
 		return ret;
 	}
 
-	return ov9281_init_ctrls(dev);
+	return ov9281_set_fmt(dev, &fmt);
 }
 
 #define OV9281_EP(n) DT_CHILD(DT_INST_CHILD(n, port), endpoint)
