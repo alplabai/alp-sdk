@@ -13,9 +13,8 @@
 # syntax the west build command examples in README.md / docs/camera-
 # shields.md use directly on the command line.
 #
-# Adding the 4th shield this branch designs for but doesn't ship yet
-# (raspberry_pi_global_shutter_camera / IMX296) is one more scenario entry
-# below -- src/main.c's compile-time #if ladder already has a slot for it.
+# A new camera shield is one more scenario entry below plus one more #elif
+# in src/main.c's compile-time #if ladder.
 
 sample:
   name: aen-camera-firstlight

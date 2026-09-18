@@ -2,7 +2,7 @@
 #
 # aen-camera-firstlight -- first-light bench proof for RPi-style CSI-2
 # camera shields on the E1M-AEN801/AEN803 EVK, via the portable
-# <alp/camera.h> API. See testcase.yaml for the three camera-shield
+# <alp/camera.h> API. See testcase.yaml for the four camera-shield
 # scenarios and README.md for the build command / expected results.
 
 cmake_minimum_required(VERSION 3.20)
