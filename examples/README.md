@@ -125,6 +125,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 |------------------------------------|------------------------------------------------------------------------------|
 | `ai-anomaly-detection-vibration`   | Predictive maintenance -- sliding-window vibration → 1D-CNN anomaly score via TFLM. **(AEN)** |
 | `aen/edgeai-vision-aen`            | On-device vision inference with Ethos-U on an AEN SoM. **(AEN)**              |
+| `v2n/v2n-drpai-inference`          | DRP-AI3 on-die NPU still-frame inference through `<alp/inference.h>` -- the exhibition booth demo. **(V2N, Yocto)** |
 | `v2n/v2n-m1-deepx-inference`       | DEEPX DX-M1 NPU bring-up + a single inference through `<alp/inference.h>`. **(V2N-M1)** |
 | `v2n/v2n-m1-ros-perception`        | ROS 2 perception node -- detection on DEEPX, DRP-AI3 fallback on plain V2N. **(V2N / V2N-M1, Yocto)** |
 | `cold-chain-monitor`               | Pharma/food cold-chain integrity monitor -- BME280 T/RH/P samples → anomaly classification; v0.9 paper-correct, HiL bench-gated. |

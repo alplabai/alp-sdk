@@ -6,12 +6,23 @@
  * <alp/inference.h>, A55 / Linux / Yocto side of the RZ/V2N.
  *
  * BENCH-UNVERIFIED: header-checks against the real
- * MeraDrpRuntimeWrapper.h surface, but has NOT run on silicon and does
- * NOT cross-link here -- the EdgeCortix MERA2 runtime + DRP-AI TVM
- * runtime libs only exist on the RZ/V Yocto SDK sysroot (mera2_runtime /
- * drp_tvm_rt / tvm_runtime), not on this dev host.  Compiled only when
- * ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the DEEPX
- * DX-M1 hook (inference_deepx.cpp).
+ * MeraDrpRuntimeWrapper.h surface and cross-compiles to a valid .o with
+ * every previously-missing symbol defined -- confirmed with `nm` by hand
+ * on an x86_64 dev host, NOT by a bake (see
+ * meta-alp-sdk/recipes-renesas/mera2-drpai-tvm/mera2-drpai-tvm_2.7.0.bb).
+ * The FINAL LINK against the real aarch64 obj/build_runtime/v2h
+ * libraries has never been exercised: that same x86_64 host stops with
+ * "skipping incompatible ... when searching for -lmera2_runtime", an
+ * architecture mismatch, not proof of symbol resolution.  NO
+ * `drpai`-enabled alp-image-edge bake has ever completed, on any host.
+ * A drpai_dir bundle DOES now exist (YOLOX-S/VOC, compiled with DRP-AI
+ * Translator i8 v1.12; deploy.json carries one fused mera_drp op, so the
+ * graph is fully offloaded), but it was quantised against 8 random
+ * frames rather than a calibration set -- the vendor's 200 calibration
+ * images ship as Git LFS pointer stubs -- so its accuracy is
+ * unvalidated, and no inference has executed on a real board.  Compiled
+ * only when ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the
+ * DEEPX DX-M1 hook (inference_deepx.cpp).
  *
  * ----------------------------------------------------------------------
  * Real vendor API
