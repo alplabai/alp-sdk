@@ -232,6 +232,52 @@ struct i2s_dw_data {
 
 #define MODULO_INC(val, max) { val = (++val < max) ? val : 0; }
 
+/* ===== BENCH-ONLY INSTRUMENTATION -- alp-sdk #2179 -- NOT FOR MERGE =====
+ * Lives only on the bench branch test/2179-isr-capture. Records the raw
+ * DesignWare I2S interrupt state on the FIRST i2s_dw_isr() entry after
+ * i2s_dw_trigger(I2S_DIR_RX, I2S_TRIGGER_START), BEFORE the ISR services or
+ * masks anything. Read over SWD by symbol address (nm on the exact ELF run).
+ * Only IER/IRER/ITER/CER/RER/TER/ISR/IMR are read -- never ROR/TOR
+ * (clear-on-read) nor LRBR/RRBR/RXDMA (FIFO pop). Word offsets are fixed
+ * (all uint32_t) so the SWD decoder can index them. */
+struct i2s_dw_bench2179_regs {
+	uint32_t ier, irer, iter, cer, rer, ter, isr, imr;
+};
+struct i2s_dw_bench2179 {
+	uint32_t magic;             /* +0x00  0x21790001 */
+	uint32_t entries_total;     /* +0x04  every i2s_dw_isr() entry, any instance */
+	uint32_t armed;             /* +0x08  1 once RX START trigger entered */
+	uint32_t paddr;             /* +0x0C  armed instance base address */
+	uint32_t entries_after_arm; /* +0x10  ISR entries on armed instance since arm */
+	uint32_t entries_at_rx_stop;/* +0x14  entries_after_arm at first later RX trigger */
+	uint32_t rx_stop_seen;      /* +0x18  1 once that later RX trigger ran */
+	uint32_t captured;          /* +0x1C  1 once the first post-arm entry was recorded */
+	struct i2s_dw_bench2179_regs arm;   /* +0x20  at RX START entry, pre rx_stream_start */
+	struct i2s_dw_bench2179_regs first; /* +0x40  first post-arm ISR entry, raw */
+	uint32_t first_dir;         /* +0x60  dev_data->dir at first entry (0=RX,1=TX) */
+	uint32_t first_rx_state;    /* +0x64  dev_data->rx.state at first entry */
+	uint32_t first_tx_state;    /* +0x68  dev_data->tx.state at first entry */
+	uint32_t first_unserviced;  /* +0x6C  #2190 guard's leftover set at first entry */
+	uint32_t guard_txfe_masks;  /* +0x70  #2190 guard masked TXFE, post-arm count */
+	uint32_t guard_rxda_masks;  /* +0x74  #2190 guard masked RXDA, post-arm count */
+	uint32_t arm_entries_total; /* +0x78  entries_total at arm time */
+};
+volatile struct i2s_dw_bench2179 i2s_dw_bench2179_capture = {.magic = 0x21790001u};
+
+static void i2s_dw_bench2179_snap(volatile struct i2s_dw_bench2179_regs *r,
+				  const struct i2s_dw_cfg *i2s)
+{
+	r->ier = i2s->paddr->IER;
+	r->irer = i2s->paddr->IRER;
+	r->iter = i2s->paddr->ITER;
+	r->cer = i2s->paddr->CER;
+	r->rer = i2s->paddr->RER;
+	r->ter = i2s->paddr->TER;
+	r->isr = i2s->paddr->ISR;
+	r->imr = i2s->paddr->IMR;
+}
+/* ===== END BENCH-ONLY INSTRUMENTATION ===== */
+
 static int32_t i2s_configure_clocksource(bool enable,
 					const struct i2s_dw_cfg *i2s,
 					uint32_t sample_rate)
@@ -430,6 +476,22 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	default:
 		LOG_ERR("Either RX or TX direction must be selected");
 		return -EINVAL;
+	}
+
+	/* BENCH-ONLY #2179 (not for merge): arm the first-ISR capture. */
+	if (dir == I2S_DIR_RX) {
+		volatile struct i2s_dw_bench2179 *c = &i2s_dw_bench2179_capture;
+
+		if (cmd == I2S_TRIGGER_START && !c->armed) {
+			i2s_dw_bench2179_snap(&c->arm, dev->config);
+			c->paddr = (uint32_t)(uintptr_t)((const struct i2s_dw_cfg *)dev->config)->paddr;
+			c->arm_entries_total = c->entries_total;
+			c->entries_after_arm = 0;
+			c->armed = 1;
+		} else if (cmd != I2S_TRIGGER_START && c->armed && !c->rx_stop_seen) {
+			c->entries_at_rx_stop = c->entries_after_arm;
+			c->rx_stop_seen = 1;
+		}
 	}
 
 	switch (cmd) {
@@ -858,6 +920,25 @@ static void i2s_dw_isr(const struct device *dev)
 	 * is left at the bottom was not serviced and gets masked there. */
 	uint32_t unserviced;
 
+	/* BENCH-ONLY #2179 (not for merge): raw capture BEFORE any servicing. */
+	volatile struct i2s_dw_bench2179 *bc = &i2s_dw_bench2179_capture;
+	bool bench_armed_here = bc->armed &&
+				(bc->paddr == (uint32_t)(uintptr_t)i2s->paddr);
+	bool bench_first = false;
+
+	bc->entries_total++;
+	if (bench_armed_here) {
+		bc->entries_after_arm++;
+		if (!bc->captured) {
+			i2s_dw_bench2179_snap(&bc->first, i2s);
+			bc->first_dir = (uint32_t)dev_data->dir;
+			bc->first_rx_state = (uint32_t)dev_data->rx.state;
+			bc->first_tx_state = (uint32_t)dev_data->tx.state;
+			bc->captured = 1;
+			bench_first = true;
+		}
+	}
+
 	/* Get the Current Interrupt Status*/
 	int_status = i2s->paddr->ISR;
 	unserviced = int_status & ~i2s_get_interrupt_mask(i2s);
@@ -923,6 +1004,17 @@ static void i2s_dw_isr(const struct device *dev)
 	 * its cause. This guard is defensive hardening that is correct
 	 * regardless: an unserviceable level-held source must not be left
 	 * asserted and unmasked. */
+	/* BENCH-ONLY #2179 (not for merge): record what the #2190 guard did. */
+	if (bench_first) {
+		bc->first_unserviced = unserviced;
+	}
+	if (bench_armed_here && (unserviced & I2S_ISR_TXFE_Msk)) {
+		bc->guard_txfe_masks++;
+	}
+	if (bench_armed_here && (unserviced & I2S_ISR_RXDA_Msk)) {
+		bc->guard_rxda_masks++;
+	}
+
 	if (unserviced & I2S_ISR_TXFE_Msk) {
 		i2s_disable_tx_interrupt(i2s);
 	}
