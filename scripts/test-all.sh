@@ -809,6 +809,20 @@ stage_required_gate_scripts() {
     return "${failed}"
 }
 
+# required-gate-scripts graded changelog citations against the WORKING
+# TREE. CI grades the PR merge commit instead (actions/checkout on a
+# pull_request event checks out refs/pull/N/merge), where a citation into
+# a file dev has since moved is already wrong. This grades that merge,
+# built in the object store from origin/dev and HEAD -- committed work
+# only (alp-sdk#2186). origin/dev is passed explicitly rather than
+# inherited: DIFF_BASE is shared with the clang-format stage, and a base
+# that is already an ancestor of HEAD would grade HEAD, not a merge. The
+# orchestration below probes for git >= 2.38 (merge-tree --write-tree)
+# and for origin/dev first, and reports either as a [GAP] SKIP.
+stage_changelog_citations_merge() {
+    DIFF_BASE=origin/dev python3 scripts/check_changelog_citations.py --against-merge
+}
+
 stage_hil_spec_validate() {
     # Cheap host-side validation of every HiL smoke spec under
     # tests/hil/.  Catches stale board targets, missing example
@@ -1144,6 +1158,19 @@ else
     # above.  Keeps this wrapper's coverage aligned with the hard
     # gates pr-metadata-validate.yml / pr-doc-drift.yml run in CI.
     run_stage "required-gate-scripts" stage_required_gate_scripts
+
+    # The same citation gate, graded against the merge CI will check out.
+    # Both probes mirror what stage_changelog_citations_merge needs, so a
+    # host that cannot build the merge gets a named [GAP], not a FAIL.
+    if ! command -v python3 >/dev/null 2>&1 || [ ! -f scripts/check_changelog_citations.py ]; then
+        skip_stage "changelog-citations-merge" "python3 or scripts/check_changelog_citations.py missing" gap
+    elif ! git merge-tree --write-tree HEAD HEAD >/dev/null 2>&1; then
+        skip_stage "changelog-citations-merge" "$(git --version) has no merge-tree --write-tree (needs git >= 2.38)" gap
+    elif ! git rev-parse -q --verify "origin/dev^{commit}" >/dev/null; then
+        skip_stage "changelog-citations-merge" "origin/dev not present here (git fetch origin dev)" gap
+    else
+        run_stage "changelog-citations-merge" stage_changelog_citations_merge
+    fi
 
     # `check · generated files in sync` -- regenerate every single-sourced
     # artifact + fail on drift.  Catches the class of red that bit #623 /
