@@ -114,6 +114,11 @@
 	status = "okay";
 };
 
+/* gpio5.5 drives the SoM-side backlight controller's CTRL input. */
+&gpio5 {
+	status = "okay";
+};
+
 &i2c2 {
 	status = "okay";
 	pinctrl-0 = <&pinctrl_i2c2>;
@@ -228,6 +233,13 @@
 			compatible = "himax,hx8394";
 			reg = <0>;
 			reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
+			/*
+			 * bl-gpios: SoM-side KTD2801 backlight controller's CTRL pin
+			 * (E1M pad A31 BL_LED_A = Alif P5_5, metadata/pinmux/aen.yaml:29).
+			 * No Alif UTIMER PWM driver in Zephyr, so static-high CTRL =
+			 * datasheet full-brightness on/off, not PWM dimming.
+			 */
+			bl-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
 			data-lanes = <2>;
 			width = <720>;
 			height = <1280>;
