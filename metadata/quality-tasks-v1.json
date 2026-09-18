@@ -511,8 +511,22 @@
       "ci": "pr-metadata-validate.yml:validate"
     },
     {
+      "id": "example-board-overlay-content-parity",
+      "description": "Same-PCB SKU board overlays in an example (e.g. alp_e1m_aen801_* vs alp_e1m_aen803_*) carry identical devicetree/Kconfig content, comments and each file's own SKU name excluded, bar an explicit BOM-population allowlist; an alp_e1m_<sku>_ file with no resolvable SoM preset, or an app CMakeLists.txt naming one SKU's paired file outside an if() on that SKU, is an error (issue #2198).",
+      "runner": "check-script",
+      "script": "scripts/check_example_board_overlay_content_parity.py",
+      "gate": true,
+      "profiles": [
+        "pr",
+        "full",
+        "release"
+      ],
+      "output": "none",
+      "ci": "pr-metadata-validate.yml:validate"
+    },
+    {
       "id": "example-board-overlay-parity",
-      "description": "Every example board.yaml core declared via cores.<core>.app: (issue #1009), and every testcase.yaml alp_e1m_* platform_allow entry (issue #2101), has a matching boards/ overlay wherever the example ships qualified overlays.",
+      "description": "Every example board.yaml core declared via cores.<core>.app: (issue #1009), and every testcase.yaml alp_e1m_* platform_allow entry (issue #2101), has a matching boards/ overlay wherever the example ships qualified overlays; every examples/**/boards/ directory sits next to a CMakeLists.txt (issue #2207).",
       "runner": "check-script",
       "script": "scripts/check_example_board_overlay_parity.py",
       "gate": true,

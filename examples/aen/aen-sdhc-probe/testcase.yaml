@@ -23,7 +23,7 @@
 sample:
   name: aen-sdhc-probe
   description: |
-    Register-level SD Host Controller bring-up probes for the E1M-AEN801
+    Register-level SD Host Controller bring-up probes for the E1M-AEN801/803
     (Alif Ensemble E8, Cortex-M55-HE). sdhc0 is disabled on the E1M-EVK
     2626-R2 (SD mux hardware defect, #2051); see README.md. Renamed from
     aen-sdcard-readout (#2051) -- the name now says what it is: inert
@@ -33,6 +33,7 @@ tests:
   alp_sdk.examples.aen.sdhc_probe.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

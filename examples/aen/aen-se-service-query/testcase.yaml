@@ -8,20 +8,21 @@
 # non-mutating calls are made.
 #
 # Compile-checks the app + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# of the native_sim PR gate (platform_allow = the AEN801 + AEN803 HE boards).
 
 sample:
   name: aen-se-service-query
   description: |
     Bench RAM-run proof of the portable, SE-backed read-only surfaces
     (<alp/hw_info.h> SoC identity, <alp/power.h> RUN/STANDBY profiles,
-    <alp/security.h> TRNG) for the E1M-AEN801 (Alif Ensemble E8,
+    <alp/security.h> TRNG) for the E1M-AEN801/803 (Alif Ensemble E8,
     Cortex-M55-HE).  Only non-mutating calls are made.
 
 tests:
   alp_sdk.examples.aen.se_service_query.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example
