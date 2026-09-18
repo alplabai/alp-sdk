@@ -618,9 +618,9 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
 # AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 or DPI display
 # driver, so the source is carried in-tree to survive a `west update`.  The TU
-# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; the
-# default SRAM0 framebuffer path needs neither it nor the hal_alif common include
-# dir.  ADR 0017 Tier-2 (INTERIM).
+# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; a
+# framebuffer memory-region in global SRAM needs neither it nor the hal_alif
+# common include dir.  ADR 0017 Tier-2 (INTERIM).
 if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
     zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
 endif()

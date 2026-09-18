@@ -34,6 +34,7 @@
  *     from it and the DSI host times its lanes from it, so they cannot drift.
  */
 
+#include <mem.h>
 #include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
 #include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -43,8 +44,8 @@
 /*
  * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
  * form makes FLASH_SIZE=0 and overflows the link).  The 720x1280 RGB565
- * framebuffer does NOT live here -- it is pinned in SRAM0 @0x02000000 by the
- * cdc200 driver's fixed-address path (-DNO_RELOCATE_SRAM0, see CMakeLists.txt).
+ * framebuffer does NOT live here -- it is the cdc200 memory-region below, the
+ * top 2 MiB of SRAM0, used by address (no linker section).
  */
 / {
 	chosen {
@@ -151,6 +152,12 @@
  * into the shared dtsi once bench-verified.  Placed under the SoC peripheral bus.
  */
 &{/soc/} {
+	/* Framebuffer: the top 2 MiB of the 4 MiB SRAM0 (plain mmio-sram, nothing linked). */
+	lcd_fb: sram@2200000 {
+		compatible = "mmio-sram";
+		reg = <0x02200000 DT_SIZE_M(2)>;
+	};
+
 	cdc200: cdc200@49031000 {
 		compatible = "tes,cdc-2.1";
 		reg = <0x49031000 0x1000>;
@@ -189,6 +196,7 @@
 		 */
 		clock-frequency = <57142857>;
 		bg-color = <0x000000>;
+		memory-region = <&lcd_fb>;
 
 		/* L1 only: a single full-screen RGB565 layer (FB pinned in SRAM0). */
 		enable-l1 = <1>;

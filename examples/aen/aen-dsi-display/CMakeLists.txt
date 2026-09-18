@@ -17,24 +17,13 @@
 #
 # FRAMEBUFFER PLACEMENT (RAM-run critical): a 720x1280 RGB565 L1 framebuffer is
 # 1,843,200 B -- it does NOT fit ITCM (256 KB), where the RAM-run links code.
-# The cdc200 driver's default framebuffer path emits a `__alif_sram0_section`
-# linker attribute that exists only in the Alif fork's link script (NOT in
-# alp-sdk / upstream Zephyr).  We therefore compile the driver TU with
-# -DNO_RELOCATE_SRAM0, which selects its fixed-address SRAM0 path: the L1 FB is
-# pinned at 0x02000000 (E8 SRAM0, multi-MB), with NO linker section needed.  The
-# driver already does sys_cache_data_flush_range() after every framebuffer write,
-# so the CDC scanout sees coherent pixels (DCACHE stays on).  See src/main.c for
-# the full placement note + the pixel-clock bench-tunable.
+# The overlay gives the cdc200 node a memory-region (the top 2 MiB of SRAM0);
+# the driver uses that address directly, with no linker section, and flushes
+# the data cache after every framebuffer write.
 
 cmake_minimum_required(VERSION 3.20)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_dsi_display LANGUAGES C)
-
-# Select the cdc200 driver's fixed-SRAM0 framebuffer path (FB @0x02000000).
-# Scoped narrowly to the driver TU: the macro only gates code inside
-# display_cdc200.c, but a project-wide definition is the least-surprising knob
-# and harmless elsewhere.  See the FRAMEBUFFER PLACEMENT note above.
-zephyr_compile_definitions(NO_RELOCATE_SRAM0)
 
 target_sources(app PRIVATE src/main.c)
