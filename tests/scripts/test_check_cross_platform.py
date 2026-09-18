@@ -60,7 +60,7 @@ def _run(*args: str) -> subprocess.CompletedProcess[str]:
     """Invoke the linter as a subprocess."""
     return subprocess.run(
         [sys.executable, str(LINTER), *args],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, encoding="utf-8",
     )
 
 
@@ -107,8 +107,10 @@ def test_dev_null_not_flagged(tmp_path: Path) -> None:
 
 
 def test_dev_paths_not_flagged_in_python(tmp_path: Path) -> None:
-    """Python source isn't scanned -- the linter only walks
-    .md and .sh files."""
+    """Python source gets the IMPLICIT-ENCODING check (below), but
+    none of the LINUX-ONLY-IDIOM text patterns -- a bare string
+    literal containing `/dev/ttyUSB0` is not itself an encoding
+    hazard, so it produces no findings."""
     p = _write(tmp_path, "foo.py", "OPEN = '/dev/ttyUSB0'\n")
     findings = linter.scan([p], base=tmp_path)
     assert findings == []
@@ -493,10 +495,12 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
 
 
 def test_linter_module_help_includes_categories() -> None:
-    """The module docstring documents both categories the linter
-    emits.  Locks the contract that the script self-documents."""
+    """The module docstring documents all three categories the
+    linter emits.  Locks the contract that the script
+    self-documents."""
     assert "LINUX-ONLY-IDIOM" in linter.__doc__
     assert "BASH-ONLY-SHEBANG" in linter.__doc__
+    assert "IMPLICIT-ENCODING" in linter.__doc__
 
 
 # ---------------------------------------------------------------------
@@ -714,3 +718,309 @@ def test_allowlist_summary_render_humanreadable() -> None:
     assert "allowlisted" in rendered
     assert "12" in rendered
     assert "informational" in rendered
+
+
+# ---------------------------------------------------------------------
+# 11. Pattern: IMPLICIT-ENCODING (Python, AST-based)
+# ---------------------------------------------------------------------
+
+
+def test_implicit_encoding_flags_path_read_text(tmp_path: Path) -> None:
+    """`Path.read_text()` with no `encoding=` is flagged."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        Path("x").read_text()
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "IMPLICIT-ENCODING"
+    assert "read_text" in findings[0].matched_text
+
+
+def test_implicit_encoding_flags_path_write_text(tmp_path: Path) -> None:
+    """`Path.write_text()` with no `encoding=` is flagged."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        Path("x").write_text("data")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert "write_text" in findings[0].matched_text
+
+
+def test_implicit_encoding_flags_bare_open_text_mode(tmp_path: Path) -> None:
+    """A bare `open(path)` (default text mode) with no `encoding=`
+    is flagged."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        f = open("x")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "IMPLICIT-ENCODING"
+
+
+def test_implicit_encoding_flags_open_explicit_r_mode(tmp_path: Path) -> None:
+    """`open(path, "r")` -- explicit text mode, still no encoding --
+    is flagged."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        f = open("x", "r")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+
+
+def test_implicit_encoding_flags_path_open(tmp_path: Path) -> None:
+    """`Path.open()` (no mode -> text default) with no `encoding=`
+    is flagged, same as bare `open()`."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        f = Path("x").open()
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+
+
+def test_implicit_encoding_flags_subprocess_run_text_true(
+    tmp_path: Path,
+) -> None:
+    """`subprocess.run(..., text=True)` with no `encoding=` is
+    flagged -- this is the real #2194 site's shape
+    (tests/scripts/conftest.py:45, fixed in the same change)."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        subprocess.run(["x", "--version"], capture_output=True, text=True, check=True)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "IMPLICIT-ENCODING"
+    assert "subprocess.run" in findings[0].suggestion
+
+
+def test_implicit_encoding_flags_check_output_universal_newlines(
+    tmp_path: Path,
+) -> None:
+    """`subprocess.check_output(..., universal_newlines=True)` with
+    no `encoding=` is flagged."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        subprocess.check_output(["x"], universal_newlines=True)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+
+
+def test_implicit_encoding_flags_popen_text_true(tmp_path: Path) -> None:
+    """`subprocess.Popen(..., text=True)` with no `encoding=` is
+    flagged."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        p = subprocess.Popen(["x"], text=True)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+
+
+def test_implicit_encoding_multiline_call_still_caught(
+    tmp_path: Path,
+) -> None:
+    """The real #2194 shape spreads kwargs across several lines --
+    this is exactly what motivates the AST scan over a regex."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        subprocess.run(
+            ["x", "--version"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+
+
+def test_implicit_encoding_binary_open_not_flagged(tmp_path: Path) -> None:
+    """`open(path, "rb")` / `open(path, "wb")` are correct and must
+    not fire."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        a = open("x", "rb")
+        b = open("x", "wb")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_read_bytes_write_bytes_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """`Path.read_bytes()` / `Path.write_bytes()` are a different
+    method name entirely and are never matched."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        Path("x").read_bytes()
+        Path("x").write_bytes(b"data")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_explicit_encoding_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """`encoding=` present on `read_text` / `write_text` / `open`
+    suppresses the finding -- the fix IS the suppression, no
+    separate skip-marker exists for this category."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        Path("x").read_text(encoding="utf-8")
+        Path("x").write_text("d", encoding="utf-8")
+        open("x", encoding="utf-8")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_locale_preferred_encoding_passes(
+    tmp_path: Path,
+) -> None:
+    """`encoding=locale.getpreferredencoding()` passes -- the check
+    verifies the keyword's presence, not a rationale comment on it
+    (see the module docstring)."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        import locale
+        from pathlib import Path
+        Path("x").read_text(encoding=locale.getpreferredencoding())
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_text_true_with_encoding_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """`text=True` paired with an explicit `encoding=` is exactly
+    correct and must not fire."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        subprocess.run(["x"], text=True, encoding="utf-8")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_text_false_not_flagged(tmp_path: Path) -> None:
+    """`text=False` is an explicit binary choice, not an encoding
+    hazard -- must not fire."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        subprocess.run(["x"], text=False)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_kwargs_unpack_not_flagged(tmp_path: Path) -> None:
+    """A `**kwargs` unpack could carry `encoding=` the scan can't
+    see into -- skipped rather than guessed at."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        from pathlib import Path
+        extra = {"encoding": "utf-8"}
+        Path("x").read_text(**extra)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_unrelated_open_call_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """A totally unrelated no-arg call named `open` on some other
+    object with no mode-shaped args at all is still flagged under
+    the heuristic (name-based, like the rest of this linter) --
+    this test locks that documented limitation rather than pretend
+    it doesn't exist."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        widget.open()
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "IMPLICIT-ENCODING"
+
+
+def test_implicit_encoding_syntax_error_no_crash(tmp_path: Path) -> None:
+    """A .py file that fails to parse produces no findings (and no
+    crash) -- reporting a syntax error isn't this linter's job."""
+    p = _write(tmp_path, "scripts/broken.py", "def f(:\n")
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
+def test_implicit_encoding_scan_helper_returns_tuples() -> None:
+    """`scan_python_encoding` returns (line, col, matched, suggestion)
+    tuples directly -- unit-test the helper without going through
+    `Finding` construction."""
+    text = 'open("x")\n'
+    results = linter.scan_python_encoding(text)
+    assert len(results) == 1
+    line, col, matched, suggestion = results[0]
+    assert line == 1
+    assert col == 1
+    assert "open" in matched
+    assert "encoding" in suggestion
+
+
+def test_implicit_encoding_scoped_to_scripts_and_tests_by_default(
+    tmp_path: Path,
+) -> None:
+    """The default (root-scoped) walk only considers .py files under
+    scripts/** and tests/** (PY_SCAN_ROOTS) -- a .py file under
+    examples/ is not discovered even though it has the same hazard,
+    matching the module docstring's Scope section."""
+    _write(tmp_path, "scripts/inscope.py", 'open("x")\n')
+    _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    files = linter.discover_files(
+        [tmp_path], excludes=linter.DEFAULT_EXCLUDES, base=tmp_path,
+    )
+    paths = {f.relative_to(tmp_path).as_posix() for f in files}
+    assert "scripts/inscope.py" in paths
+    assert "examples/foo/gen.py" not in paths
+
+
+def test_implicit_encoding_explicit_path_scans_outside_py_scan_roots(
+    tmp_path: Path,
+) -> None:
+    """An explicit `--path` target is scanned regardless of
+    PY_SCAN_ROOTS -- the restriction only narrows the implicit
+    default walk, not an explicit request."""
+    p = _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert findings[0].category == "IMPLICIT-ENCODING"
+
+
+def test_implicit_encoding_cli_fail_on_warning_exits_one(
+    tmp_path: Path,
+) -> None:
+    """CLI wiring: an IMPLICIT-ENCODING finding flips the exit code
+    under --fail-on-warning, same as the other categories."""
+    _write(tmp_path, "scripts/foo.py", 'open("x")\n')
+    rv = _run(
+        "--root", str(tmp_path),
+        "--base", str(tmp_path),
+        "--fail-on-warning",
+    )
+    assert rv.returncode == 1
+    assert "IMPLICIT-ENCODING" in rv.stdout
+
+
+def test_conftest_known_site_now_clean() -> None:
+    """Regression lock for the real #2195 trigger:
+    tests/scripts/conftest.py:45 (`subprocess.run(..., text=True)`
+    with no `encoding=`) was the only implicit-encoding call left in
+    the pytest tests/scripts/ surface -- fixed in the same change
+    that added this rule.  This asserts it stays fixed."""
+    conftest = REPO / "tests" / "scripts" / "conftest.py"
+    findings = linter.scan([conftest], base=REPO)
+    encoding_findings = [
+        f for f in findings if f.category == "IMPLICIT-ENCODING"
+    ]
+    assert encoding_findings == [], encoding_findings
