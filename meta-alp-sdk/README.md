@@ -251,7 +251,17 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 #     CMAKE_LIBRARY_PATH are a plain-CMake-only hint; they do nothing
 #     under BitBake -- see "Model compilation toolchain (RUHMI / DRP-AI
 #     TVM)" below).  BENCH-UNVERIFIED: never run on DRP-AI silicon.
+#
+#     This is ONE of two independent switches, both default OFF and
+#     deliberately not merged into one (CHANGELOG.md v0.15.0, #1145):
+#     PACKAGECONFIG[drpai] compiles the backend in; ALP_ENABLE_DRPAI = "1"
+#     (a MACHINE-conf variable, set below or in local.conf) installs the
+#     devicetree override that claims the DRP-AI carve-out. Neither
+#     implies the other -- the backend without the node fails at open()
+#     with a clear error, the node without the backend is an idle
+#     device. See section 4 of docs/bring-up-drpai-v2n.md.
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+ALP_ENABLE_DRPAI = "1"
 
 # 8. Build the image:
 bitbake alp-image-edge                 # dev image (passwordless root, bench tooling)
@@ -376,9 +386,9 @@ dependency of the recipe.
 
 | MACHINE              | NPU backend                          | Runtime source                                                        |
 |----------------------|--------------------------------------|-----------------------------------------------------------------------|
-| `e1m-v2n101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI`), BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
-| `e1m-v2n102-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI`), BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
-| `e1m-v2m101-a55`     | DRP-AI3 + DEEPX DX-M1                | DRP-AI3 as above; `dx-rt` via the machine conf (`ALP_ENABLE_DEEPX_DXM1`) |
+| `e1m-v2n101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED | kernel driver + `<linux/drpai.h>` + `libtvm_runtime.so` from `meta-rz-drpai`; `mera2_runtime` / `mera2_plan_io` / `drp_tvm_rt` (staged) + `mera_drpai_wrapper` (compiled from `apps/MeraDrpRuntimeWrapper.cpp`) from a built RUHMI checkout |
+| `e1m-v2n102-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED | Same as V2N101 (memory variant)                                       |
+| `e1m-v2m101-a55`     | DRP-AI3 — opt-in (`ALP_ENABLE_DRPAI` node + `PACKAGECONFIG[drpai]` backend, both required), BENCH-UNVERIFIED + DEEPX DX-M1 — opt-in (`ALP_ENABLE_DEEPX_DXM1`) | DRP-AI3 as above; `dx-rt` via the machine conf (`ALP_ENABLE_DEEPX_DXM1`) |
 | `e1m-v2m102-a55`     | Same as V2M101                       | Same as V2M101 (memory variant)                                       |
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |

@@ -33,16 +33,31 @@ IMAGE_INSTALL += " \
 # only the example package is edge-specific.
 IMAGE_INSTALL += " alp-lvgl-dashboard"
 
-# NOTE: alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) already
-# installs the meta-rz-drpai userspace payload UNCONDITIONALLY once the
-# rz-drpai layer is present in BBFILE_COLLECTIONS -- no opt-in switch. The
-# ALP_ENABLE_DRPAI-gated IMAGE_INSTALL:append below is therefore
-# belt-and-suspenders for that half (bitbake dedupes repeated package
-# names in IMAGE_INSTALL, so this is not a build break); what it alone
-# still drives is the alp-sdk PACKAGECONFIG[drpai] compile flag
-# (`PACKAGECONFIG:append:pn-alp-sdk` below), which alp-image-common.inc
-# does not touch. Reconcile which mechanism owns the userspace install
-# before both land for good.
+# alp-drpai-inference (the issue #1268 exhibition-booth demo) rides the
+# SAME opt-in this MACHINE's ALP_ENABLE_DRPAI switch drives (see e.g.
+# e1m-v2n101-a55.conf), but installed here rather than there -- an
+# IMAGE-level append, so this booth demo reaches alp-image-edge only,
+# never alp-image-prod. Mirrors the alp-lvgl-dashboard precedent above.
+IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' else ''}"
+
+# NOTE: three DIFFERENT mechanisms feed the DRP-AI userspace stack, and
+# none of them touches another's variable:
+#   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) installs
+#      `lib-tvm kernel-module-mmngr` UNCONDITIONALLY -- no opt-in switch --
+#      whenever the rz-drpai layer is in BBFILE_COLLECTIONS AND 'v2n' is
+#      in MACHINE_FEATURES (true for all four RZ/V2N machine confs).
+#   2. Each RZ/V2N machine conf's ALP_ENABLE_DRPAI-gated IMAGE_INSTALL:append
+#      installs the SAME `lib-tvm kernel-module-mmngr` pair a second time
+#      (bitbake dedupes repeated package names, so this is not a build
+#      break) -- redundant with #1 whenever ALP_ENABLE_DRPAI = "1", and a
+#      no-op otherwise.
+#   3. `PACKAGECONFIG[drpai]` on the alp-sdk recipe (set by the builder via
+#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` in local.conf) is a
+#      THIRD, independent switch: neither this file nor
+#      alp-image-common.inc touches it, and it alone drives whether
+#      alp-sdk's DRP-AI backend is compiled in at all.
+# Reconcile which mechanism owns the userspace install (#1 vs #2) before
+# both land for good.
 #
 # DRP-AI userspace (RZ/V2N on-die NPU) on the rzv2n-family machine confs:
 # the machine confs own this, gated on ALP_ENABLE_DRPAI (meta-rz-drpai's

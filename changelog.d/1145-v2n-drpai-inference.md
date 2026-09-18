@@ -19,10 +19,14 @@ silicon.** Bench sign-off is tracked as #1268.
   — added by `cbea0e29`, gating only the `&drpai0` devicetree node) on all
   four RZ/V2N-family machine confs (`e1m-v2n101-a55.conf`,
   `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) now
-  also gates `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr
-  alp-drpai-inference`) — new with this change — so the demo binary and the
-  kernel's claim of the NPU can't drift out of sync. The alp-sdk backend's
-  own `PACKAGECONFIG[drpai]` stays the released, independently-set second
+  also gates `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr`) — new
+  with this change — so the kernel's claim of the NPU and its userspace
+  runtime can't drift out of sync. The demo binary, **`alp-drpai-inference`**,
+  rides the same `ALP_ENABLE_DRPAI` opt-in but from a separate, IMAGE-level
+  append in `alp-image-edge.bb` (not the machine confs), so this booth demo
+  (#1268) reaches `alp-image-edge` only, never `alp-image-prod`. The
+  alp-sdk backend's own `PACKAGECONFIG[drpai]` stays the released,
+  independently-set second
   switch ("Two independent switches, both default OFF, deliberately not
   merged into one" — `CHANGELOG.md`'s v0.15.0 entry). An earlier revision of
   this branch coupled the two via `PACKAGECONFIG:append:pn-alp-sdk`; that
@@ -51,10 +55,11 @@ silicon.** Bench sign-off is tracked as #1268.
   incompatible ... when searching for -lmera2_runtime", an architecture
   mismatch, not proof of symbol resolution).
 
-**Open reviewer question, not resolved by this change:** `alp-image-edge.bb`'s
-`ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append` overlaps `dev`'s existing
-unconditional `ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both
-install the `meta-rz-drpai` userspace payload, one unconditionally and one
+**Open reviewer question, not resolved by this change:** the four RZ/V2N-family
+machine confs' own `ALP_ENABLE_DRPAI`-gated `IMAGE_INSTALL:append`
+(`lib-tvm kernel-module-mmngr`) overlaps `dev`'s existing unconditional
+`ALP_RZ_DRPAI_INSTALL` in `alp-image-common.inc` (#1176) — both install the
+same `lib-tvm kernel-module-mmngr` pair, one unconditionally and one
 opt-in. `bitbake` dedupes the repeated package names, so this is not a build
 break, but which mechanism should own the userspace install long-term is an
 open question, left to review rather than picked here.

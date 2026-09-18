@@ -32,7 +32,8 @@ extern "C" {
  *                       Must hold @p max_n elements.
  *  @param[out] out_val The selected values themselves, largest first.
  *                       Must hold @p max_n elements.
- *  @param[out] out_n   Number of entries written (`min(max_n, count)`).
+ *  @param[out] out_n   Number of entries written (`min(max_n, number of
+ *                       finite values in @p values[0..count))`).
  *
  *  Non-finite values (NaN, +-Inf) in @p values are skipped, not ranked --
  *  a realistic input for a model quantised against non-representative

@@ -5,10 +5,12 @@ Run a compiled model through the RZ/V2N's on-die **DRP-AI3** NPU via
 line, and print per-image results plus timing -- the demo the
 exhibition booth runs (issue #1268).
 
-> **`[UNTESTED on silicon]`.** Builds and links clean on a Linux host
-> against a real `libalp_sdk` (`ALP_OS=yocto`), and the NOSUPPORT path
-> runs end-to-end there (see "What actually ran" below). No inference
-> has run against real DRP-AI hardware yet -- see
+> **`[UNTESTED on silicon]`.** Builds clean as a standalone C translation
+> unit against the real `<alp/inference.h>` header (see "What actually
+> ran" below). Linking against a real `libalp_sdk` (`ALP_OS=yocto`) and
+> running end-to-end through the documented NOSUPPORT path have **not**
+> been re-verified by this PR. No inference has run against real DRP-AI
+> hardware yet -- see
 > [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 > for the full silicon status.
 
@@ -106,10 +108,23 @@ existing DRP-AI opt-in:
 ALP_ENABLE_DRPAI = "1"
 ```
 
-in `local.conf` (the same single switch documented in
+in `local.conf`. This is only HALF of what a working bake needs --
+`ALP_ENABLE_DRPAI` installs the userspace runtime payload (`lib-tvm`,
+`kernel-module-mmngr`, `alp-drpai-inference`) and enables the DRP-AI3
+devicetree node, but does **not** compile alp-sdk's DRP-AI backend in.
+For that, also set
+
+```
+PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+```
+
+in the same `local.conf`. Both switches are required and neither
+implies the other -- see
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 4 -- one knob drives both the userspace runtime payload and
-alp-sdk's compiled-in DRP-AI backend). After boot:
+Sec 4. Omitting the `PACKAGECONFIG` half leaves
+`ALP_SDK_USE_DRPAI_V2N=OFF`, and `alp_inference_open()` in this example
+returns `NULL` with `ALP_ERR_NOSUPPORT` even though the node and
+userspace payload are present. After boot:
 
 ```sh
 v2n-drpai-inference <model.tar> <frame0.bin> [frame1.bin ...]
@@ -124,7 +139,7 @@ cmake --build build/drpai-demo
 scp build/drpai-demo/v2n-drpai-inference root@<board-ip>:
 ```
 
-### Host build (no DRP-AI -- proves the NOSUPPORT path only)
+### Host build (no DRP-AI -- builds only; the NOSUPPORT path has NOT been re-verified by this PR)
 
 ```sh
 cmake -S . -B build/host -DALP_OS=yocto
@@ -142,8 +157,10 @@ gcc -I include -o v2n-drpai-inference \
   [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
   Sec 0 -- DEEPX on V2M is an addition, not a replacement).
 - E1M-X-EVK carrier.
-- An `alp-image-edge` bake with `ALP_ENABLE_DRPAI = "1"` and
-  `meta-rz-drpai` in `bblayers.conf`.
+- An `alp-image-edge` bake with `ALP_ENABLE_DRPAI = "1"` AND
+  `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` both set in `local.conf`
+  (see "Yocto (recommended)" above), and `meta-rz-drpai` in
+  `bblayers.conf`.
 
 ## What actually ran
 
