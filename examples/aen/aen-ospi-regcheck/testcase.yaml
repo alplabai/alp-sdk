@@ -6,8 +6,9 @@
 # E1M-AEN803 (Ensemble E8, M55-HE). AEN803 is additionally the live bench
 # target for the JEDEC-ID path on its populated OSPI0 CS1 NOR (see src/main.c).
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# Compile-checks the driver + DT node on the real E8 board targets; filtered
+# OUT of the native_sim PR gate (platform_allow = the AEN801 + AEN803 HE
+# boards only).
 
 sample:
   name: aen-ospi-regcheck

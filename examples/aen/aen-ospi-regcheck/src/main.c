@@ -65,6 +65,13 @@
  * not yet produced that result. The fitted device is ISSI, not the Macronix
  * part named by an earlier BOM read.
  *
+ * BOTH SKUs, SAME CONTROLLER PROOF (#2198): the paired overlays deliberately
+ * remain functionally identical. They select CS1 and the capture-safe 20 MHz
+ * rate on both SKUs; AEN801 never transfers because it fits no target, while
+ * AEN803 executes the JEDEC-ID step below. Earlier controller-only builds of
+ * this app ran successfully on two AEN803 boards, but that is not evidence for
+ * the new flash_read_jedec_id() path.
+ *
  * This example has caught three real, distinct silicon/build bugs (the
  * clock-gate fault, the MPU Device-mapping regression, and the OSPI_XIP_SER
  * fault above) purely at the controller-register level -- it is a

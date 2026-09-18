@@ -2,14 +2,40 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * Live OSPI0 CS1 proof for E1M-AEN803 (Ensemble E8, M55-HE). The 13-pad
- * route is the shared E1M-AEN module route from
- * metadata/e1m_modules/aen/alif-ospi.tsv. Unlike E1M-AEN801, this SKU fits
- * the IS25WX256-JHLE NOR on CS1; #2041 measured its JEDEC ID reliably at
- * 20 MHz, while the 100 MHz DT default produced sampling errors.
+ * aen-ospi-regcheck overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * Enables the Alif OSPI/HexSPI node so it BINDS on silicon:
+ *   - ospi0 (snps,designware-ospi @ 0x83000000, IRQ 96, aes-reg 0x83001000,
+ *     xip-base 0xA0000000/0x10000000)
+ *
+ * SCOPE: this proves the ospi0 node BINDS (DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
+ * + the reg/irq match) and that the flash_ospi_alif.c driver compiles and
+ * links. On AEN803 the app also targets the fitted CS1 NOR's JEDEC ID at the
+ * raw-capture-safe 20 MHz rate. XiP setup remains skipped outright because
+ * OSPI_XIP_SER does not exist on AE822.
+ *
+ * CORRECTED (#2041): this overlay's pinctrl-0 previously muxed the Alif
+ * DevKit's own OSPI0 route (zephyr_alif fork's ensemble-e4-e6-e8-pinctrl.dtsi
+ * pinctrl_ospi0 "_B" group -- SCLK/RXDS/SS0 on port 3, D0-D7 on port 2), a
+ * pad set that does not exist on the E1M-AEN module at all.  Because
+ * flash_ospi_alif.c had no pinctrl support (see that file), pinctrl-0 was
+ * also never applied, so this drove nothing regardless.  Both are fixed now:
+ * the driver applies pinctrl-0 in its init, and the group below is
+ * transcribed from metadata/e1m_modules/aen/alif-ospi.tsv, the E1M-AEN
+ * module's actual OSPI0 routing (13 pads on ports 0/2/6/12, all function 1)
+ * -- the same routing a silicon JEDEC-ID read used to confirm a populated
+ * NOR at SS1 on E1M-AEN803 (see src/main.c).  Pad config
+ * (input-enable/drive-strength=12/slew-rate=fast) is unchanged from the
+ * prior group -- generic Alif pad electrical settings, not route-specific.
+ * The paired AEN801 overlay carries the same CS/rate settings to preserve the
+ * same-PCB content invariant; its app path performs no device transfer.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
+/*
+ * MANDATORY bench RAM-run retarget: run from ITCM so J-Link can loadbin+run
+ * without programming MRAM, and drop the MCUboot code-partition fixup.
+ */
 / {
 	chosen {
 		zephyr,flash = &itcm;
@@ -20,6 +46,8 @@
 &pinctrl {
 	pinctrl_ospi0: pinctrl_ospi0 {
 		group0 {
+			/* metadata/e1m_modules/aen/alif-ospi.tsv -- E1M-AEN module OSPI0
+			 * routing, 13 pads, all function 1. */
 			pinmux = <PIN_P12_0__OSPI0_SCLK_C>,
 				 <PIN_P12_1__OSPI0_SCLKN_C>,
 				 <PIN_P12_2__OSPI0_RXDS_C>,
