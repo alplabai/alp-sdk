@@ -24,7 +24,7 @@ already documented in the driver:
   (`0x4800D024`) read `0x00000096`, with `UP_0_SRC` (`0x4800D018`) and
   `DOWN_0_SRC` (`0x4800D020`) both `0x00000000`.
 - Pinmux is right on both sides. `metadata/e1m_modules/aen/from-alif.tsv:9`
-  ("ENC0_X") and `metadata/e1m_modules/aen/from-alif.tsv:61` ("ENC0_Y") map
+  ("ENC0_X") and `metadata/e1m_modules/aen/from-alif.tsv:60` ("ENC0_Y") map
   the carrier's `ENC0_X`/`ENC0_Y` nets to `QEC0_X_A`/`QEC0_Y_A` on
   `P3_0`/`P3_1`, which is what the example's board overlay muxes.
 
