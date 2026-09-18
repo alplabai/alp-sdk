@@ -210,6 +210,20 @@ Existing state on 2026-05-18:
   mechanical enforcement of the above.  Soft warnings initially;
   flipped to fail-on-warning in CI once the docs are cleaned (a
   future cleanup task, scoped separately).
+  - *Amendment (2026-09-18):* both halves of that sentence are now
+    done and the text above is kept only as the original decision.
+    CI runs `--fail-on-warning` as of #1032 A5.  #2195 then added a
+    second category, `IMPLICIT-ENCODING`, which flags a text-mode
+    `open()` / `read_text()` / `write_text()` / `subprocess` call
+    with no explicit `encoding=` — a Windows `cp1252` default is
+    what actually broke CI (`UnicodeDecodeError: 'charmap' codec
+    can't decode byte 0x9d`).  Its 478 pre-existing sites across
+    139 files are grandfathered by a file-level baseline so the
+    rule can be enforced for new code immediately; #2197 drains
+    them.  Note this category scans `scripts/` and `tests/`, which
+    are *not* customer-facing surfaces — so the check is no longer
+    only about customer-facing docs, as this ADR originally scoped
+    it.
 - The `standalone-from-alp-studio` promise
   ([[alp-sdk-standalone-studio-is-consumer]]) extends here: a
   Win / Mac user with `python` + `west` +

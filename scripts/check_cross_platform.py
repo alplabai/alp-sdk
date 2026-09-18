@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Lint repo content for Linux-only idioms in customer-facing surfaces.
+Lint repo content for cross-platform hazards: Linux-only idioms in
+customer-facing surfaces, and implicit text encodings in the SDK's
+own Python under scripts/ and tests/.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
 Alp SDK promises Win + Mac + Linux as first-class developer hosts
@@ -9,12 +11,21 @@ for the Zephyr-on-M-class workflow.  This script mechanically
 enforces that promise by flagging Linux-only idioms that creep
 into docs, scripts, examples, and tests.
 
-Two finding categories are emitted:
+Three finding categories are emitted:
 
   - LINUX-ONLY-IDIOM -- a doc / markdown idiom that doesn't render
     on at least one of Win + Mac.
   - BASH-ONLY-SHEBANG -- a shell script with a bash shebang that
     customers might be expected to invoke on Win or Mac.
+  - IMPLICIT-ENCODING -- a Python text-IO call with no explicit
+    `encoding=` keyword.  Python resolves the default text encoding
+    from the platform locale -- UTF-8 on our Linux/Mac hosts, cp1252
+    on the `windows-latest` CI runner -- so a call that never states
+    its encoding works on every host the author tested on and raises
+    `UnicodeDecodeError` the moment non-ASCII content reaches
+    Windows.  Not hypothetical: this is what turned PR #2194's
+    curly-quote fixtures into a red Windows leg while
+    `scripts/test-all.sh` (Linux-only) stayed green throughout.
 
 Patterns detected (1-1 with the ADR's "operational consequences"
 list):
@@ -44,6 +55,22 @@ list):
      /home/user/...) in markdown code examples.  These don't
      render correctly on Windows.  Use placeholders or per-OS
      code-tabs.
+  6. IMPLICIT-ENCODING: a Python call under scripts/** or tests/**
+     that decodes/encodes text with no `encoding=` keyword --
+     `Path.read_text(`/`Path.write_text(`; bare `open(` or
+     `Path.open(` in text mode (no `"b"` in the mode argument, or no
+     mode argument at all -- Python's default is text mode);
+     `subprocess.run`/`check_output`/`Popen` with `text=True` or
+     `universal_newlines=True`.  Binary-mode IO (`"rb"`/`"wb"`,
+     `read_bytes`/`write_bytes`) is correct and never flagged, and
+     any call that already passes `encoding=` (including
+     `encoding=locale.getpreferredencoding()`) passes as-is -- this
+     linter checks for the keyword's presence, not for a rationale
+     comment on it.  Checked with `ast.parse`, not a regex: these
+     calls routinely spread their keyword args across several lines,
+     and "does this Call node have an `encoding=` keyword anywhere"
+     is not something a line-oriented regex can answer reliably.
+     Recommendation: pass `encoding="utf-8"` explicitly.
 
 Suppression mechanisms:
 
@@ -64,6 +91,22 @@ Suppression mechanisms:
   maintainer can still spot pathological growth without drowning
   in noise.  Allowlist summaries are NOT findings -- they do not
   flip --fail-on-warning to exit 1.
+
+  IMPLICIT-ENCODING has no skip-marker mechanism: the fix IS the
+  suppression -- add the `encoding=` keyword the finding names.
+  There's no legitimate reason for a call under scripts/ or tests/
+  to depend on the platform locale, so no per-call escape hatch is
+  offered.
+
+  IMPLICIT_ENCODING_BASELINE (grandfather baseline, temporary).  The
+  478 pre-existing sites across 139 files found the day this rule
+  landed (#2195) are listed by file in IMPLICIT_ENCODING_BASELINE.
+  Findings in a baselined file are still printed as warnings, they
+  just don't flip --fail-on-warning's exit code -- new code and new
+  files are gated from day one, the backlog drains separately
+  (#2197).  This baseline must only ever shrink; see the set's own
+  comment for the full rationale, including the file-vs-line
+  granularity tradeoff.
 
 Operating mode:
 
@@ -89,15 +132,20 @@ Scope:
   side helper dirs (e.g. meta-alp-sdk/ --
   the Linux-only Yocto layer).
 
-  Markdown files (.md) get all 5 pattern checks.
+  Markdown files (.md) get all 5 LINUX-ONLY-IDIOM pattern checks.
   Shell scripts (.sh) get the bash-shebang check (intentionally
   Bash scripts must carry a header note explaining their OS scope;
   the lint does NOT object to *.sh existing, only to silent
   bash-onlyness).
 
-  Python files (.py) are out of scope for this text-idiom linter;
-  emitted-artifact portability (e.g. Windows-only escape sequences
-  produced by a generator script) is covered by tests, not this scan.
+  Python files (.py) get the IMPLICIT-ENCODING check (pattern 6
+  above), but only under scripts/** and tests/** -- the two trees
+  that actually run as part of the SDK's own tooling and test
+  surface, where a locale-dependent decode fails a CI runner rather
+  than a customer's build.  Python elsewhere (examples/, docs/) is
+  out of scope for this linter; emitted-artifact portability (e.g.
+  Windows-only escape sequences produced by a generator script) is
+  covered by tests, not this scan.
 
 Output format:
 
@@ -133,6 +181,7 @@ Local invocation:
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -179,6 +228,15 @@ DEFAULT_ROOTS: tuple[str, ...] = (
     "CONTRIBUTING.md",
     "CODE_OF_CONDUCT.md",
 )
+
+# Top-level (repo-relative) trees a *.py file must sit under for the
+# IMPLICIT-ENCODING check to consider it during a default/root-scoped
+# walk.  scripts/ and tests/ are the SDK's own tooling + test surface
+# -- exactly where a locale-dependent decode fails a CI runner.
+# examples/ and docs/ are left alone here (see the module docstring's
+# Scope section); an explicit `--path some/other.py` still scans the
+# named file regardless of this restriction.
+PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests")
 
 # Bash-only scripts that are intentionally Linux-side helpers per
 # ADR 0012 §7.6 carve-out.  These are exempt from the bash-shebang
@@ -249,6 +307,189 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
     "docs/adr/0012-cross-platform-developer-host.md",
     "docs/ci/HW-IN-LOOP.md",
     "tests/hil/README.md",
+})
+
+# ---------------------------------------------------------------------
+# IMPLICIT-ENCODING grandfather baseline
+# ---------------------------------------------------------------------
+#
+# What this is: the day this rule landed (#2195), it found 478
+# pre-existing IMPLICIT-ENCODING sites across these 139 files -- an
+# unreviewable, repo-wide mechanical diff that would also collide
+# with everything else in flight.  Rather than ship the rule
+# soft-warn-only (which would not have caught the #2194 regression
+# this rule exists for) or block on fixing 139 files in one PR, the
+# backlog is grandfathered here and drained separately (#2197) while
+# the rule gates on *new* code from day one.
+#
+# Shape: this is a FILE-level baseline, not a site/line-level one, on
+# purpose -- following INTENTIONALLY_DISCUSSES_OS_PATHS's precedent
+# above. A line-numbered baseline rots on every unrelated edit to a
+# listed file (this repo has been bitten by exactly that kind of
+# silent drift before); a file-level list survives edits at the cost
+# of a real weakness: touching a file on this list does not force a
+# fix of its OTHER pre-existing findings, and a genuinely NEW
+# implicit-encoding call added to a listed file is still only a
+# warning, not a failure, same as its 478 grandfathered neighbours --
+# the baseline can't tell old from new within one file. That's the
+# accepted cost of file-level granularity, and it is NOT compensated
+# by the report: the summary prints one aggregate count ("N
+# IMPLICIT-ENCODING finding(s) in IMPLICIT_ENCODING_BASELINE files")
+# and no per-file breakdown, so growth inside an already-listed file
+# does not stand out by eye. What IS held mechanically is the shape
+# of this set: tests/scripts/test_check_cross_platform.py's
+# test_linter_fail_on_warning_against_real_repo_passes pins its
+# length to shrink-only and fails on an entry that no longer
+# produces a finding (#2197).
+#
+# This baseline is TEMPORARY and must only ever SHRINK. Draining it
+# (fixing sites, then deleting the now-clean file from this set) is
+# tracked in #2197 -- do not add work items here, use that issue.
+#
+# Nothing may be ADDED to this set without justification. A new file
+# that legitimately needs a locale-dependent encoding is an inline
+# exemption at the call site with a comment explaining why, not a
+# baseline entry -- this set only ever holds the day-#2195 backlog.
+IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
+    "scripts/alp_mcp/server.py",
+    "scripts/alp_model/adapters/deepx.py",
+    "scripts/alp_model/adapters/drpai.py",
+    "scripts/alp_model/adapters/ethos_u.py",
+    "scripts/alp_orchestrate/buildplan.py",
+    "scripts/alp_orchestrate/kconfig_symbols.py",
+    "scripts/alp_quality.py",
+    "scripts/alp_template.py",
+    "scripts/build_receipt.py",
+    "scripts/check_board_schema_version.py",
+    "scripts/check_bootstrap_manifest.py",
+    "scripts/check_e1m_pinout.py",
+    "scripts/check_emit_kconfig_contract.py",
+    "scripts/check_emit_snapshots.py",
+    "scripts/check_example_storage_claims.py",
+    "scripts/check_library_registry.py",
+    "scripts/check_local_paths.py",
+    "scripts/check_no_committed_doxygen_output.py",
+    "scripts/check_plain_cmake_link_complete.py",
+    "scripts/check_public_private.py",
+    "scripts/check_stub_symbol_matrix.py",
+    "scripts/check_toolchain_lock.py",
+    "scripts/check_write_text_newline.py",
+    "scripts/check_zephyr_conf_parity.py",
+    "scripts/flash_backends/baremetal_cmake_flash.py",
+    "scripts/flash_backends/swd_probe.py",
+    "scripts/flash_backends/yocto_wic.py",
+    "scripts/flash_backends/zephyr_west_flash.py",
+    "scripts/gen_cc3501e_gpio_routes.py",
+    "scripts/gen_portability_matrix.py",
+    "scripts/gen_soc_caps.py",
+    "scripts/gen_status_strings.py",
+    "scripts/provision_som.py",
+    "scripts/refresh_issue_state_snapshot.py",
+    "scripts/resolve_generated_conflicts.py",
+    "scripts/sync_e1m_spec.py",
+    "scripts/verify_west_patches.py",
+    "scripts/west_commands/alp_migrate.py",
+    "scripts/ws6c_emit_parity.py",
+    "tests/hil/run_smoke.py",
+    "tests/parity/seam1_field_diff.py",
+    "tests/parity/test_seam1_field_diff.py",
+    "tests/scripts/_project_support.py",
+    "tests/scripts/test_abi_snapshot.py",
+    "tests/scripts/test_abi_snapshot_freeze_gate.py",
+    "tests/scripts/test_aen_cc3501e_routes.py",
+    "tests/scripts/test_alp_lock.py",
+    "tests/scripts/test_alp_lock_metadata_coverage.py",
+    "tests/scripts/test_alp_migrate.py",
+    "tests/scripts/test_alp_model_adapters.py",
+    "tests/scripts/test_alp_model_package.py",
+    "tests/scripts/test_alp_project_diagnostics.py",
+    "tests/scripts/test_alp_project_scaffold_emit.py",
+    "tests/scripts/test_alp_template.py",
+    "tests/scripts/test_apt_bounded_wrapper.py",
+    "tests/scripts/test_bench_jlink_connect_guard.py",
+    "tests/scripts/test_bench_jlink_run.py",
+    "tests/scripts/test_bench_labgrid_resolver.py",
+    "tests/scripts/test_bench_ram_run_two_session.py",
+    "tests/scripts/test_board_schema_version.py",
+    "tests/scripts/test_board_yaml_diagnostics.py",
+    "tests/scripts/test_build_receipt.py",
+    "tests/scripts/test_check_board_target_tree_parity.py",
+    "tests/scripts/test_check_bootstrap_manifest.py",
+    "tests/scripts/test_check_build_plan.py",
+    "tests/scripts/test_check_cmake_chip_list_parity.py",
+    "tests/scripts/test_check_diagnostic_narratives.py",
+    "tests/scripts/test_check_diagnostic_schema.py",
+    "tests/scripts/test_check_doxyfile_single_source.py",
+    "tests/scripts/test_check_e1m_route_capability.py",
+    "tests/scripts/test_check_emit_registry.py",
+    "tests/scripts/test_check_example_board_overlay_parity.py",
+    "tests/scripts/test_check_example_storage_claims.py",
+    "tests/scripts/test_check_helper_firmware_path.py",
+    "tests/scripts/test_check_i2c_address_uniqueness.py",
+    "tests/scripts/test_check_library_registry.py",
+    "tests/scripts/test_check_no_committed_doxygen_output.py",
+    "tests/scripts/test_check_public_private.py",
+    "tests/scripts/test_check_slot_claim_atomic.py",
+    "tests/scripts/test_check_som_bundle.py",
+    "tests/scripts/test_check_som_topology_parity.py",
+    "tests/scripts/test_check_stub_issues.py",
+    "tests/scripts/test_check_sw_fallback_tags.py",
+    "tests/scripts/test_check_system_manifest.py",
+    "tests/scripts/test_check_tan_docs_surface.py",
+    "tests/scripts/test_check_template_catalog.py",
+    "tests/scripts/test_check_test_coverage.py",
+    "tests/scripts/test_check_toolchain_lock.py",
+    "tests/scripts/test_check_vendor_ext_tags.py",
+    "tests/scripts/test_check_write_text_newline.py",
+    "tests/scripts/test_check_yocto_machine_tree_parity.py",
+    "tests/scripts/test_check_zephyr_conf_parity.py",
+    "tests/scripts/test_diagnostic.py",
+    "tests/scripts/test_dispatch_confirm.py",
+    "tests/scripts/test_emit_cross_core_shmem_cache.py",
+    "tests/scripts/test_emit_inference_mac.py",
+    "tests/scripts/test_emit_os_topology.py",
+    "tests/scripts/test_emit_snapshot_goldens.py",
+    "tests/scripts/test_gen_board_header.py",
+    "tests/scripts/test_gen_catalog.py",
+    "tests/scripts/test_gen_dsp_decimator_coeffs.py",
+    "tests/scripts/test_gen_error_catalog.py",
+    "tests/scripts/test_gen_pinmux_capability.py",
+    "tests/scripts/test_gen_portability_matrix.py",
+    "tests/scripts/test_gen_rzv2n_cm33_svd.py",
+    "tests/scripts/test_gen_soc_peripheral_instances.py",
+    "tests/scripts/test_gen_support_matrix.py",
+    "tests/scripts/test_gen_verification_status.py",
+    "tests/scripts/test_gen_zephyr_board.py",
+    "tests/scripts/test_hw_rev_existence_gate.py",
+    "tests/scripts/test_hw_rev_table_unreadable.py",
+    "tests/scripts/test_lint_doc_yaml_fragments.py",
+    "tests/scripts/test_orchestrate_baremetal_slice.py",
+    "tests/scripts/test_orchestrate_security.py",
+    "tests/scripts/test_program_eeprom.py",
+    "tests/scripts/test_program_eeprom_secure_page.py",
+    "tests/scripts/test_project_backends.py",
+    "tests/scripts/test_project_emit_zephyr.py",
+    "tests/scripts/test_project_validation.py",
+    "tests/scripts/test_provision_som.py",
+    "tests/scripts/test_quality_registry.py",
+    "tests/scripts/test_release_changelog_slice.py",
+    "tests/scripts/test_release_notes_file.py",
+    "tests/scripts/test_release_tag_verify.py",
+    "tests/scripts/test_resolve_generated_conflicts.py",
+    "tests/scripts/test_soc_debug_probe_identity.py",
+    "tests/scripts/test_soc_npu_pairing.py",
+    "tests/scripts/test_test_all_gate_coverage.py",
+    "tests/scripts/test_test_all_generated_files_untracked.py",
+    "tests/scripts/test_test_all_prerequisite_gap.py",
+    "tests/scripts/test_test_all_worktree.py",
+    "tests/scripts/test_tier_a_workflow_step_timeouts.py",
+    "tests/scripts/test_topology_unresolved_core_type.py",
+    "tests/scripts/test_validate_board_yaml_entrypoints.py",
+    "tests/scripts/test_validate_metadata_duplicate_keys.py",
+    "tests/scripts/test_validate_metadata_no_alp_model_import.py",
+    "tests/scripts/test_validate_metadata_physical.py",
+    "tests/scripts/test_validate_metadata_tier_a_library_ci.py",
+    "tests/scripts/test_verify_west_patches.py",
 })
 
 # Regex used to detect "this script has a cross-platform note" in
@@ -403,6 +644,150 @@ PATTERNS: tuple[Pattern, ...] = (
 
 
 # ---------------------------------------------------------------------
+# IMPLICIT-ENCODING (Python, AST-based)
+# ---------------------------------------------------------------------
+#
+# Unlike the LINUX-ONLY-IDIOM / BASH-ONLY-SHEBANG patterns above, this
+# check is NOT a `Pattern` in the regex-driven table: the calls it
+# flags routinely spread their keyword arguments across several
+# lines (e.g. a `subprocess.run(...)` with one kwarg per line), and
+# the only accurate question -- "does this Call node have an
+# `encoding=` keyword anywhere, in any order" -- is exactly what
+# `ast.parse` answers for free and a line-oriented regex cannot.
+
+_SUBPROCESS_TEXT_CALLS: frozenset[str] = frozenset({"run", "check_output", "Popen"})
+_ENCODING_TEXT_METHODS: frozenset[str] = frozenset({"read_text", "write_text"})
+
+
+def _call_name(node: ast.Call) -> str | None:
+    """Bare function/attribute name of a Call node's target, e.g.
+    `open` for `open(...)`, `run` for `subprocess.run(...)`, `open`
+    for `p.open(...)`.  None for anything else (subscripts, a call
+    returning a call, etc.) -- those aren't a shape this check
+    recognises."""
+    func = node.func
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _kwarg_value(node: ast.Call, name: str) -> ast.expr | None:
+    for kw in node.keywords:
+        if kw.arg == name:
+            return kw.value
+    return None
+
+
+def _open_mode_is_binary(node: ast.Call) -> bool | None:
+    """Inspect an open()/Path.open() call's mode argument.
+
+    True if binary ("b" in a string-literal mode), False if text
+    (string-literal mode without "b", or no mode argument at all --
+    Python's own default is text mode "r"), None if the mode isn't a
+    string literal we can read statically (a variable, an f-string,
+    ...) -- callers should skip flagging rather than guess.
+    """
+    mode_expr = node.args[1] if len(node.args) >= 2 else _kwarg_value(node, "mode")
+    if mode_expr is None:
+        return False
+    if isinstance(mode_expr, ast.Constant) and isinstance(mode_expr.value, str):
+        return "b" in mode_expr.value
+    return None
+
+
+def _py_call_source(text: str, node: ast.Call) -> str:
+    """First line of the call's source text, truncated like the
+    regex patterns truncate a multi-line match (see `matched_line`
+    in `scan_file`)."""
+    seg = ast.get_source_segment(text, node)
+    if not seg:
+        seg = _call_name(node) or "<call>"
+    return seg.splitlines()[0].strip()
+
+
+def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
+    """Return (line, col, matched_text, suggestion) for every
+    implicit-encoding call in a Python source string.
+
+    Flags, when no `encoding=` keyword is present on the call:
+      - `Path.read_text(` / `Path.write_text(`
+      - bare `open(` or `Path.open(` in text mode
+      - `subprocess.run` / `check_output` / `Popen` with
+        `text=True` or `universal_newlines=True`
+
+    Out of scope by construction: binary-mode `open()`/`Path.open()`
+    (`"rb"`/`"wb"` et al.), `read_bytes`/`write_bytes` (different
+    method names, never matched), and any call that already passes
+    `encoding=` -- including `encoding=locale.getpreferredencoding()`,
+    which passes because the keyword is present; this check verifies
+    the keyword's presence, not a rationale comment on it.
+
+    A `**kwargs` unpack could carry `encoding=` this scan can't see
+    into -- such calls are skipped rather than guessed at.  A file
+    that fails to parse returns no findings; a syntax error isn't
+    this linter's job to report.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+
+    out: list[tuple[int, int, str, str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if any(kw.arg is None for kw in node.keywords):
+            continue  # **kwargs -- might carry encoding=, don't guess
+        if any(kw.arg == "encoding" for kw in node.keywords):
+            continue
+
+        name = _call_name(node)
+        if name is None:
+            continue
+
+        suggestion: str | None = None
+
+        if name in _ENCODING_TEXT_METHODS and isinstance(node.func, ast.Attribute):
+            suggestion = (
+                f"implicit text encoding on .{name}() -- Python "
+                f"resolves the default from the platform locale "
+                f'(UTF-8 on Linux, cp1252 on windows-latest); pass '
+                f'encoding="utf-8" explicitly'
+            )
+        elif name == "open":
+            if _open_mode_is_binary(node) is False:
+                caller = "open()" if isinstance(node.func, ast.Name) else "Path.open()"
+                suggestion = (
+                    f"implicit text encoding on {caller} -- Python "
+                    f"resolves the default from the platform locale "
+                    f'(UTF-8 on Linux, cp1252 on windows-latest); pass '
+                    f'encoding="utf-8" explicitly, or open in binary '
+                    f'mode ("rb"/"wb") if that is the real intent'
+                )
+        elif name in _SUBPROCESS_TEXT_CALLS:
+            for kw in node.keywords:
+                if kw.arg not in ("text", "universal_newlines"):
+                    continue
+                if isinstance(kw.value, ast.Constant) and kw.value.value is False:
+                    continue
+                suggestion = (
+                    f"implicit text encoding on subprocess.{name}"
+                    f"(..., {kw.arg}=...) -- decodes output using the "
+                    f'platform default encoding; pass encoding="utf-8" '
+                    f"explicitly alongside it"
+                )
+                break
+
+        if suggestion is not None:
+            line, col = node.lineno, node.col_offset + 1
+            out.append((line, col, _py_call_source(text, node), suggestion))
+
+    return out
+
+
+# ---------------------------------------------------------------------
 # Finding model
 # ---------------------------------------------------------------------
 
@@ -417,12 +802,18 @@ class Finding:
     category: str
     matched_text: str
     suggestion: str
+    # True for an IMPLICIT-ENCODING finding whose file is in
+    # IMPLICIT_ENCODING_BASELINE (see that set's comment).  Always
+    # False for every other category. Still printed as a warning --
+    # only --fail-on-warning's exit-code decision skips it.
+    baselined: bool = False
 
     def render(self) -> str:
         """Human-readable single-line report."""
+        tag = " [baselined, #2197]" if self.baselined else ""
         return (
             f"{self.path}:{self.line} {self.category}: "
-            f"`{self.matched_text}` -- {self.suggestion}"
+            f"`{self.matched_text}` -- {self.suggestion}{tag}"
         )
 
 
@@ -478,11 +869,17 @@ def discover_files(
         for p in root.rglob("*"):
             if not p.is_file():
                 continue
-            # Only scan files matching at least one pattern's
-            # applies_to glob.  This keeps the walk cheap.
-            if not (p.name.endswith(".md") or p.name.endswith(".sh")):
-                continue
             rel = p.relative_to(base) if base in p.parents else p
+            if p.name.endswith(".py"):
+                # IMPLICIT-ENCODING is scoped to scripts/** + tests/**
+                # (see PY_SCAN_ROOTS) -- skip .py files outside those
+                # trees during an implicit walk.
+                if not rel.parts or rel.parts[0] not in PY_SCAN_ROOTS:
+                    continue
+            elif not (p.name.endswith(".md") or p.name.endswith(".sh")):
+                # Only scan files matching at least one pattern's
+                # applies_to glob.  This keeps the walk cheap.
+                continue
             if _is_excluded(rel, excludes):
                 continue
             result.append(p)
@@ -690,6 +1087,30 @@ def scan_file(
                 )
             )
 
+    # IMPLICIT-ENCODING is AST-driven, not regex-driven -- see the
+    # comment above `scan_python_encoding`.  It has no skip-marker /
+    # allowlist mechanism (the fix IS the suppression: add
+    # `encoding=`), so it runs unconditionally for every .py file
+    # `discover_files` handed us.  The one exception is
+    # IMPLICIT_ENCODING_BASELINE (see that set's comment): a file
+    # listed there still gets every finding reported (baselined
+    # findings are warnings, not silence), they just don't flip
+    # --fail-on-warning's exit code -- see `main()`.
+    if path.name.endswith(".py"):
+        file_baselined = rel_posix in IMPLICIT_ENCODING_BASELINE
+        for line, col, matched_text, suggestion in scan_python_encoding(text):
+            out.append(
+                Finding(
+                    path=rel_posix,
+                    line=line,
+                    column=col,
+                    category="IMPLICIT-ENCODING",
+                    matched_text=matched_text,
+                    suggestion=suggestion,
+                    baselined=file_baselined,
+                )
+            )
+
     if on_allowlist:
         # Collapse the per-line findings into a single summary line.
         # The count reported is the number that WOULD have been
@@ -791,9 +1212,15 @@ def _print_summary(
     for f in findings:
         by_cat[f.category] = by_cat.get(f.category, 0) + 1
     cats = ", ".join(f"{k}={v}" for k, v in sorted(by_cat.items()))
+    n_baselined = sum(1 for f in findings if f.baselined)
     trailer = (
         f"; {n_allow} allowlisted file(s) (informational)" if n_allow else ""
     )
+    if n_baselined:
+        trailer += (
+            f"; {n_baselined} IMPLICIT-ENCODING finding(s) in "
+            f"IMPLICIT_ENCODING_BASELINE files (#2197, not fail-on-warning)"
+        )
     print(
         f"check_cross_platform: WARN: {n} finding(s) ({cats}){trailer}"
     )
@@ -894,8 +1321,12 @@ def main() -> int:
     _print_summary(findings, summaries, as_json=args.json)
 
     # Allowlist summaries DO NOT flip the exit code -- they are
-    # informational by design.  Only real findings count.
-    if findings and args.fail_on_warning:
+    # informational by design.  Only real findings count -- except a
+    # `baselined` IMPLICIT-ENCODING finding (IMPLICIT_ENCODING_BASELINE,
+    # #2197's backlog): those are still printed above as warnings, they
+    # just don't fail the gate.  Every non-baselined finding still does.
+    failing = [f for f in findings if not f.baselined]
+    if failing and args.fail_on_warning:
         return 1
     return 0
 
