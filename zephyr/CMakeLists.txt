@@ -639,6 +639,16 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
 
+# Tier-1.5 glue: the Alif E8 SoC-level setup the display chain needs and no
+# driver performs -- D-PHY clock sources + analog power (CGU / VBAT), the CDC200
+# pixel-clock divider, and the DSI panel backlight pad mux.  E8-only (the gate
+# mirrors the GPIO clock-enable glue above) and only when the display chain is
+# configured; each hook inside is further gated on its DT node being okay.
+if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
+endif()
+
 # Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
 # CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif
 # fork (drivers/can/can_cast.c + can_cast.h).  Upstream Zephyr v4.4 ships only
