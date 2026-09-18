@@ -8,7 +8,7 @@
 # SETOOLS are Linux-only. There is no native PowerShell equivalent —
 # the bench is physically Linux-attached. See docs/aen-bench-bringup.md.
 #
-# SHARED, SANITIZED env for the AEN801 (Alif Ensemble E8, M55-HE) bench
+# SHARED, SANITIZED env for the AEN803 (Alif Ensemble E8, M55-HE) bench
 # flash/RAM-run helpers. SOURCE this (don't execute it):
 #
 #     source "$(dirname "$0")/bench-env.sh"
@@ -95,14 +95,14 @@ export HAL_ALIF_DIR
 # (TBD) — run inside the west workspace or export HAL_ALIF_DIR".
 
 # --------------------------------------------------------------------
-# Board target (the lead part: AEN801 / E8 / M55-HE, RTSS-HE)
+# Board target (the bench default: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# HAZARD: build.sh uses this default unconditionally. An app whose overlay is
-# qualified for a DIFFERENT board target (e.g. an M55-HP-qualified overlay
-# like examples/aen/edgeai-vision-aen) would silently build with no overlay
-# applied under this default -- the same class of bug the HP-qualified rename
-# just fixed there. Not yet exercised (edgeai-vision-aen isn't in apps.txt).
-export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
+# Every module on the AEN bench (e1m-aen-evk-01/02/03) is an E1M-AEN803,
+# so this is the default build.sh uses unconditionally. Its own preflight
+# (alp-sdk#2094) refuses -- exit 2 -- when an app ships boards/*.overlay and
+# none match the resolved target, naming the files it found; an app with
+# no boards/ overlays at all is untouched. AEN_BOARD still overrides.
+export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
 # LG_PLACE resolution (alp-sdk#2032)
