@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Lint repo content for Linux-only idioms in customer-facing surfaces.
+Lint repo content for cross-platform hazards: Linux-only idioms in
+customer-facing surfaces, and implicit text encodings in the SDK's
+own Python under scripts/ and tests/.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
 Alp SDK promises Win + Mac + Linux as first-class developer hosts
@@ -330,9 +332,15 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
 # implicit-encoding call added to a listed file is still only a
 # warning, not a failure, same as its 478 grandfathered neighbours --
 # the baseline can't tell old from new within one file. That's the
-# accepted cost of file-level granularity; per-file line count is
-# still visible via the summary line below to catch pathological
-# growth by eye.
+# accepted cost of file-level granularity, and it is NOT compensated
+# by the report: the summary prints one aggregate count ("N
+# IMPLICIT-ENCODING finding(s) in IMPLICIT_ENCODING_BASELINE files")
+# and no per-file breakdown, so growth inside an already-listed file
+# does not stand out by eye. What IS held mechanically is the shape
+# of this set: tests/scripts/test_check_cross_platform.py's
+# test_linter_fail_on_warning_against_real_repo_passes pins its
+# length to shrink-only and fails on an entry that no longer
+# produces a finding (#2197).
 #
 # This baseline is TEMPORARY and must only ever SHRINK. Draining it
 # (fixing sites, then deleting the now-clean file from this set) is

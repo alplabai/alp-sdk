@@ -266,7 +266,7 @@
     },
     {
       "id": "cross-platform",
-      "description": "Lint repo content for Linux-only idioms in customer-facing surfaces.",
+      "description": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/ and tests/.",
       "runner": "check-script",
       "script": "scripts/check_cross_platform.py",
       "gate": false,

@@ -494,7 +494,11 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     NOT a --fail-on-warning failure.  What must be true is that there
     are zero findings OUTSIDE the baseline: no LINUX-ONLY-IDIOM /
     BASH-ONLY-SHEBANG finding anywhere, and no IMPLICIT-ENCODING
-    finding in a file that isn't on the baseline list."""
+    finding in a file that isn't on the baseline list.
+
+    The same `findings` list also pays for the two #2197 shrink-only
+    guards below -- a size pin and a stale-entry check -- so the
+    baseline can only ever get smaller."""
     rv = _run("--fail-on-warning")
     assert rv.returncode == 0, (
         f"check_cross_platform --fail-on-warning found drift outside "
@@ -512,6 +516,32 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     assert non_baseline == [], (
         f"finding(s) outside IMPLICIT_ENCODING_BASELINE:\n"
         + "\n".join(f.render() for f in non_baseline)
+    )
+
+    # #2197 guard 1 -- size pin.  The baseline is the frozen day-#2195
+    # backlog, not a dumping ground: the file-level shape means a new
+    # entry silently exempts every implicit-encoding call in that file,
+    # so growing the set has to be a deliberate, test-breaking act.
+    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 139, (
+        f"IMPLICIT_ENCODING_BASELINE grew to "
+        f"{len(linter.IMPLICIT_ENCODING_BASELINE)} files; it holds the "
+        f"frozen #2195 backlog (139 files) and may only ever SHRINK as "
+        f"#2197 drains it.  A new implicit-encoding call gets an explicit "
+        f"`encoding=`, or an inline exemption at the call site -- not a "
+        f"baseline entry."
+    )
+
+    # #2197 guard 2 -- no stale entry.  Every listed file must still
+    # produce a finding today; one that doesn't was already fixed,
+    # moved, or deleted, and leaving it here would silently exempt a
+    # future file that lands back at that path.  (`findings` is
+    # entirely IMPLICIT-ENCODING-in-baseline here -- the assert above
+    # just proved nothing else is in it.)
+    stale = set(linter.IMPLICIT_ENCODING_BASELINE) - {f.path for f in findings}
+    assert stale == set(), (
+        f"IMPLICIT_ENCODING_BASELINE entries that no longer produce any "
+        f"finding -- fixed, moved, or deleted.  Drop them from the set "
+        f"(#2197):\n" + "\n".join(sorted(stale))
     )
 
 
