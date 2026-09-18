@@ -21,11 +21,13 @@
  * PORTED to the v4.4 MIPI-DSI host API by Alp Lab AB.  The v4.4 mipi_dsi class
  * API (struct mipi_dsi_driver_api {.attach,.transfer,.detach}, struct
  * mipi_dsi_device, struct mipi_dsi_msg) matches the fork's usage, so the port is
- * mechanical: the fork's bogus `#include <zephyr/drivers/mipi_dsi/dsi_dw.h>`
- * (a public header that never existed in the fork) is dropped, and the
- * `enum dsi_dw_mode` it silently expected from that header is now defined in the
- * local dsi_dw.h (see DSI_DW_*_MODE).  DEVICE_API() is the v4.4 spelling of the
- * driver-api instance.  vendor-ext, BENCH-UNVERIFIED.
+ * mechanical: the fork included a public <zephyr/drivers/mipi_dsi/dsi_dw.h>
+ * that never existed in the fork; alp-sdk authors it (zephyr/include/) with the
+ * `enum dsi_dw_mode` + dsi_dw_set_mode() the fork expected from it.
+ * DEVICE_API() is the v4.4 spelling of the driver-api instance.
+ * ALP-SDK PORT FIX: attach, transfer and set_mode hold a per-host k_mutex, so a
+ * panel driver's DCS traffic cannot interleave with a display blanking mode
+ * switch on the host registers.  vendor-ext, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_dsi
 
@@ -783,7 +785,7 @@ int dsi_dw_video_mode_config(const struct device *dev)
 
 /* API functions */
 /* Device Specific APIs. */
-int dsi_dw_set_mode(const struct device *dev,
+static int dsi_dw_set_mode_locked(const struct device *dev,
 		enum dsi_dw_mode mode)
 {
 	struct dsi_dw_data *data = dev->data;
@@ -814,8 +816,19 @@ int dsi_dw_set_mode(const struct device *dev,
 	return 0;
 }
 
+int dsi_dw_set_mode(const struct device *dev, enum dsi_dw_mode mode)
+{
+	struct dsi_dw_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_set_mode_locked(dev, mode);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
 /* Generic APIs */
-static int dsi_dw_attach(const struct device *dev,
+static int dsi_dw_attach_locked(const struct device *dev,
 		uint8_t channel,
 		const struct mipi_dsi_device *mdev)
 {
@@ -927,6 +940,19 @@ static int dsi_dw_attach(const struct device *dev,
 	dsi_dw_pwr_up(regs);
 	data->attached = true;
 	return 0;
+}
+
+static int dsi_dw_attach(const struct device *dev,
+		uint8_t channel,
+		const struct mipi_dsi_device *mdev)
+{
+	struct dsi_dw_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_attach_locked(dev, channel, mdev);
+	k_mutex_unlock(&data->lock);
+	return ret;
 }
 
 #define HEADER(channel, type, data0, data1)				\
@@ -1060,7 +1086,7 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 	return 0;
 }
 
-static ssize_t dsi_dw_transfer(const struct device *dev,
+static ssize_t dsi_dw_transfer_locked(const struct device *dev,
 		uint8_t channel,
 		struct mipi_dsi_msg *msg)
 {
@@ -1187,6 +1213,19 @@ static ssize_t dsi_dw_transfer(const struct device *dev,
 	return msg->tx_len;
 }
 
+static ssize_t dsi_dw_transfer(const struct device *dev,
+		uint8_t channel,
+		struct mipi_dsi_msg *msg)
+{
+	struct dsi_dw_data *data = dev->data;
+	ssize_t ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_transfer_locked(dev, channel, msg);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
 /* ISR Function */
 static void dsi_dw_irq(const struct device *dev)
 {
@@ -1254,6 +1293,7 @@ static int dsi_dw_init(const struct device *dev)
 	int ret = 0;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+	k_mutex_init(&data->lock);
 
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
 	ret = dsi_dw_enable_clocks(dev);

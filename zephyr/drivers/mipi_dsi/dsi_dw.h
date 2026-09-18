@@ -7,10 +7,11 @@
  * Private register map + driver structs for the Synopsys DesignWare MIPI-DSI
  * host driver (compatible "snps,designware-dsi").  Vendored from the Apache-2.0
  * zephyr_alif fork (drivers/mipi_dsi/dsi_dw.h) and PORTED by Alp Lab AB:
- * the `enum dsi_dw_mode` (DSI_DW_*_MODE) used by dsi_dw.c / struct dsi_dw_data
- * is defined HERE -- the fork referenced it from a public
- * <zephyr/drivers/mipi_dsi/dsi_dw.h> that never existed in the fork tree (a
- * latent build defect), so the type is folded into this local header.
+ * the `enum dsi_dw_mode` (DSI_DW_*_MODE) and dsi_dw_set_mode() come from the
+ * public <zephyr/drivers/mipi_dsi/dsi_dw.h> (zephyr/include/) -- the fork
+ * referenced that header but never shipped it, so alp-sdk authors it.  This
+ * header is DT-dependent (struct dsi_dw_config's layout follows the includer's
+ * DT_DRV_COMPAT), so only dsi_dw.c may include it.
  * ADR 0017 Tier-2 (INTERIM, task #21).  BENCH-UNVERIFIED.
  */
 
@@ -21,6 +22,8 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/mipi_dphy/dphy_dw.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/drivers/mipi_dsi/dsi_dw.h>
+#include <zephyr/kernel.h>
 
 #define DSI_VERSION		0x00 /* HW Version Register */
 #define DSI_PWR_UP		0x04 /* Power-up Control Register */
@@ -445,24 +448,6 @@ enum dpi_vid_mode_type {
 	DPI_VID_MODE_BURST_1 = 3,
 };
 
-/*
- * PORT (Alp Lab AB): controller operating mode tracked in struct dsi_dw_data
- * (curr_mode) and switched by dsi_dw_set_mode().  The fork referenced this enum
- * from a public <zephyr/drivers/mipi_dsi/dsi_dw.h> that never existed in the
- * fork tree -- defining it here is what makes the driver compile.
- */
-enum dsi_dw_mode {
-	DSI_DW_VIDEO_MODE = 0,
-	DSI_DW_COMMAND_MODE = 1,
-};
-
-/*
- * Switch the host between command mode (panel init and DCS traffic) and video
- * mode (DPI scanout from the cdc-if controller).  Called by that controller's
- * display blanking_off/blanking_on, never before the panel driver's init.
- */
-int dsi_dw_set_mode(const struct device *dev, enum dsi_dw_mode mode);
-
 struct dpi_config {
 	/* Video signals polarity */
 	uint32_t polarity;
@@ -517,6 +502,12 @@ struct dsi_dw_data {
 	enum dsi_dw_mode curr_mode;
 	/* ALP-SDK PORT FIX: set only by a successful dsi_dw_attach(). */
 	bool attached;
+	/*
+	 * ALP-SDK PORT FIX: serialises attach, transfer and set_mode.  The panel
+	 * driver's DCS traffic and the display's blanking (mode switch) come from
+	 * different callers and must not interleave on the host registers.
+	 */
+	struct k_mutex lock;
 
 	/* null packet config */
 	uint32_t num_chunks;

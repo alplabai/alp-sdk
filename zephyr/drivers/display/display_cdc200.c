@@ -80,7 +80,7 @@
  * a SoC ever carries two.
  */
 #if defined(CONFIG_MIPI_DSI_DW) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_dsi)
-#include "../mipi_dsi/dsi_dw.h"
+#include <zephyr/drivers/mipi_dsi/dsi_dw.h>
 #define CDC200_DSI_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(snps_designware_dsi)
 static const struct device *const cdc200_dsi =
     COND_CODE_1(DT_SAME_NODE(DT_PHANDLE(CDC200_DSI_NODE, cdc_if), DT_DRV_INST(0)),
