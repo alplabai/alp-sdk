@@ -7,12 +7,12 @@
 # software gpio-qdec decoder added in response.
 #
 # Compile-checks the driver + DT nodes on the real E8 board target; filtered
-# OUT of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# OUT of the native_sim PR gate (platform_allow = the AEN801 + AEN803 HE boards).
 
 sample:
   name: aen-qenc-readout
   description: |
-    Bench RAM-run readout proof for the E1M-AEN801 (Alif Ensemble E8,
+    Bench RAM-run readout proof for the E1M-AEN801/803 (Alif Ensemble E8,
     Cortex-M55-HE): drives DT_ALIAS(alp_qenc0), the UTIMER QEC0 edge counter
     (alif,utimer-qdec) via sensor_sample_fetch/sensor_channel_get ->
     SENSOR_CHAN_ROTATION, alongside the software gpio-qdec decoder over the
@@ -22,6 +22,7 @@ tests:
   alp_sdk.examples.aen.qenc_readout.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

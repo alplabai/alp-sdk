@@ -1,0 +1,71 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * SD Host Controller overlay for the E1M-AEN803 (E8, M55-HE) -- E1M-EVK
+ * 2626-R2 ONLY. `sdhc0` stays DISABLED on this board (the shared SoC dtsi's
+ * own default, zephyr/dts/alif/ensemble_e8_peripherals.dtsi): the maintainer
+ * decided (#2051) to keep SD off entirely on 2626-R2, not merely to leave
+ * the mux ENABLE undriven.
+ *
+ * WHY DISABLED, NOT JUST MUX-UNDRIVEN: the 74LVC157 SDIO mux (U38/U39) has
+ * NO high-impedance state -- with `/E` HIGH its Y outputs are forced LOW,
+ * not released. U38/U39's outputs are the SoC-side nets (E1M_CLK, E1M_CMD,
+ * E1M_D3..D0, E1M_SDIO_RST), so those nets are actively held low by the mux
+ * *whenever the mux is powered*, regardless of `/E`. `sdhc_dwc_init()`
+ * applying SD pinctrl and `set_def_config()` starting the 400 kHz
+ * identification clock on P14_1 -- which happens at POST_KERNEL, before
+ * main() ever runs, whether or not this app touches the mux at all -- would
+ * put the SoC's own 8 mA CLK/CMD drivers in a fight with the mux's held-low
+ * outputs on every SD-routed pad. Leaving `sdhc0` disabled is the only way
+ * to keep those pads untouched: no pinctrl applied, no SDCLK emitted, no
+ * driver contention. This is a hardware defect pending a component change,
+ * not a firmware workaround -- see README.md and docs/boards/e1m-evk.md.
+ *
+ * PAD ROUTING HISTORY (inert while `sdhc0` is disabled, kept for whenever
+ * this mux is fixed and SD is re-enabled): the SD "B" pad route
+ * (CLK=P14_1, CMD=P14_0, D0..D3=P13_0..P13_3) is the module's real wiring,
+ * corroborated by five independent metadata sources
+ * (metadata/pinmux/aen.yaml:49-64, metadata/e1m_modules/aen/from-alif.tsv:36-48,
+ * metadata/e1m_modules/aen/inter-chip.tsv:41-46, docs/cc3501e-bridge.md:74)
+ * plus the EVK netlist (U39 pin 12 carries E1M_CMD to E2 AH11). All of CLK,
+ * CMD and D0..D3 need the pad input buffer enabled (`input-enable`) even
+ * though CLK is a push-pull SoC output from the SoC's own perspective: this
+ * controller's command/data state machines clock off CLK LOOPED BACK FROM
+ * THE PAD, not the pre-pad internal signal, so omitting it silently kills
+ * that loopback (Alif's own DFP `demo_sd.c`/`demo_sdio.c`/`demo_sd_fatfs.c`/
+ * `demo_mci_mdk_cmsisrtos2.c` and vendor Linux's dts pad config `0x23` on SD
+ * CLK all agree). None of this is applied while `sdhc0` is disabled; git
+ * blame this file for the last revision that wired it live.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm; /* bench RAM/SES-load; path-ref form */
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+/*
+ * ALP-SDK DELTA (#2051), not upstream: DISABLED, on purpose, on this board
+ * -- see the file header. This is the SoC dtsi's own default
+ * (zephyr/dts/alif/ensemble_e8_peripherals.dtsi); the explicit override
+ * here exists only so a reader does not have to go looking for why no SD
+ * pinctrl or bus-limit properties are set anywhere in this file.
+ */
+&sdhc0 {
+	status = "disabled";
+};
+
+/*
+ * ALP-SDK DELTA (#2051), not upstream: this app no longer brings up the
+ * CC3501E inter-chip bridge, the SE-service MHUv2 transport, or any of
+ * their DT wiring (SPI1, WIFI_EN/nRESET/READY, seservice0r/seservice0s/
+ * se_service) -- all previously here to reach the SD mux ENABLE and to
+ * cross-check the SD 100 MHz clock source via the Secure Enclave. Neither
+ * survives in src/main.c any more: the mux is never touched (see the file
+ * header), and the SE clock-cycle diagnostic was investigative machinery
+ * for the now-superseded clock-source-mux theory, not part of the
+ * controller-level probes this app keeps. See git blame for the last
+ * revision that wired any of it.
+ */
