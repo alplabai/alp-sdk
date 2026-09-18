@@ -12,7 +12,7 @@ sample:
   name: aen-pdm-mic-alif
   description: |
     Bench RAM-run PDM mic (alif,alif-pdm, pdm@4902d000) capture proof for the
-    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_pdm0)
+    E1M-AEN801/803 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_pdm0)
     through dmic_configure/dmic_trigger/dmic_read.
 
 tests:

@@ -187,9 +187,75 @@ def test_pin_after_its_guard_closed_fails(tmp_path):
     assert problems[0].startswith("examples/aen/demo/CMakeLists.txt:4: names")
 
 
+def test_pin_in_the_else_of_its_own_sku_guard_fails(tmp_path):
+    problems, _ = _app(tmp_path, 'if(BOARD MATCHES "^alp_e1m_aen801_")\n'
+                                 "  message(STATUS x)\nelse()\n"
+                                 f"  {_PIN}endif()\n")
+    assert len(problems) == 1
+    assert problems[0].startswith("examples/aen/demo/CMakeLists.txt:4: names")
+
+
+def test_pin_in_an_elseif_on_something_else_fails(tmp_path):
+    problems, _ = _app(tmp_path, 'if(BOARD MATCHES "^alp_e1m_aen801_")\n'
+                                 "  message(STATUS x)\nelseif(FOO)\n"
+                                 f"  {_PIN}endif()\n")
+    assert len(problems) == 1
+    assert problems[0].startswith("examples/aen/demo/CMakeLists.txt:4: names")
+
+
+def test_negated_or_alternated_guard_fails_closed(tmp_path):
+    for cond in ('NOT BOARD MATCHES "^alp_e1m_aen801_m55_hp"',
+                 'BOARD MATCHES "^alp_e1m_aen801_|^alp_e1m_aen803_"',
+                 'BOARD MATCHES "^alp_e1m_aen801_" OR FOO'):
+        problems, _ = _app(tmp_path, f"if({cond})\n  {_PIN}endif()\n")
+        assert len(problems) == 1, cond
+
+
 def test_pin_named_only_in_a_comment_passes(tmp_path):
     problems, _ = _app(tmp_path, f"#   -DEXTRA_{_PIN}")
     assert problems == []
+
+
+def _scenario(root: Path, targets: list[str], extra: str) -> list[str]:
+    """Same-PCB pair plus a testcase.yaml whose one scenario carries `extra`."""
+    _same_pcb(root)
+    _overlay(root, "AEN801", "disabled")
+    _overlay(root, "AEN803", "disabled")
+    app = root / "examples" / "aen" / "demo"
+    (app / "CMakeLists.txt").write_text("", encoding="utf-8")
+    allow = "".join(f"      - {t}\n" for t in targets)
+    (app / "testcase.yaml").write_text(
+        f"tests:\n  demo.cov:\n    platform_allow:\n{allow}{extra}",
+        encoding="utf-8")
+    return gate.find_problems(root)
+
+
+_HE801 = "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"
+_HE803 = "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he"
+_EXTRA_801 = ("    extra_dtc_overlay_files:\n"
+              "      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n")
+
+
+def test_testcase_extra_overlay_for_one_sku_on_sibling_target_fails(tmp_path):
+    # aen-sdhc-probe's .sdhc_build_coverage with the AEN803 target added.
+    problems = _scenario(tmp_path, [_HE801, _HE803], _EXTRA_801)
+    assert problems == [
+        "examples/aen/demo/testcase.yaml: scenario demo.cov names "
+        "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay in its extra "
+        f"board files while its platform_allow reaches aen803 ({_HE803}), so "
+        "that build reads the aen801 file instead of "
+        "examples/aen/demo/boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+        " -- give the aen803 target its own scenario naming its own file"]
+
+
+def test_testcase_extra_args_pin_on_sibling_target_fails(tmp_path):
+    extra = ('    extra_args:\n      - "DTC_OVERLAY_FILE=boards/'
+             'alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"\n')
+    assert len(_scenario(tmp_path, [_HE803], extra)) == 1
+
+
+def test_testcase_extra_overlay_on_its_own_sku_target_passes(tmp_path):
+    assert _scenario(tmp_path, [_HE801], _EXTRA_801) == []
 
 
 def test_real_tree_is_clean():

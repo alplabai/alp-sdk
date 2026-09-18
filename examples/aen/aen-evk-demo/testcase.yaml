@@ -50,7 +50,7 @@
 sample:
   name: aen-evk-demo
   description: |
-    Phased full-board demo for the E1M-AEN801 (Alif Ensemble E8, M55-HE) on
+    Phased full-board demo for the E1M-AEN801/803 (Alif Ensemble E8, M55-HE) on
     the E1M EVK carrier. Runs fourteen named phases in a fixed order, each
     reporting PASS, SKIPPED, or FAIL -- never counting an absent part or an
     unimplemented phase as PASS -- and finishes with a summary table plus a

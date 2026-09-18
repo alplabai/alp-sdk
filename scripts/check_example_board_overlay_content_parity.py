@@ -60,7 +60,13 @@ that SKU hands it to the sibling SKU's build too, and the sibling's own file
 is never read. Six AEN examples did exactly that (a pin left over from before
 #834 gave the overlays fully-qualified names), so every AEN803 build of them
 applied the AEN801 overlay. Such a reference is an error; a pin guarded like
-`if(BOARD MATCHES "^alp_e1m_aen801_m55_he")` is fine.
+`if(BOARD MATCHES "^alp_e1m_aen801_m55_he")` is fine. Only a positive, single
+`BOARD MATCHES|STREQUAL "<literal>"` counts as a guard -- `NOT`, `AND`/`OR`,
+a `|` alternation, `else()`, or an `elseif()` on something else fail closed.
+The same hazard in twister: a `testcase.yaml`/`sample.yaml` scenario whose
+`extra_dtc_overlay_files`, `extra_conf_files`, `extra_overlay_confs` or
+`extra_args` names one SKU's paired file while its `platform_allow` reaches a
+sibling SKU's target (or is absent) builds that file for the sibling too.
 
 Run locally:
 
@@ -109,6 +115,15 @@ _SPACE_OUTSIDE_STRINGS_RE = re.compile(f"({_STRING})|\\s+")
 _KCONFIG_UNSET_RE = re.compile(r"# CONFIG_[^ ]+ is not set")
 _MAX_SHOWN = 8
 _CMAKE_BRANCH_RE = re.compile(r"\s*(if|elseif|else|endif)\s*\((.*)", re.I)
+# The only condition that counts as guarding a SKU: a positive, single test of
+# BOARD against one literal. NOT, AND/OR, a regex alternation, or a condition
+# that does not close on its own line all fail closed (read as no guard).
+_SKU_GUARD_RE = re.compile(
+    r'\s*\$?\{?BOARD\}?\s+(?:MATCHES|STREQUAL)\s+"?([^"\s()|]+)"?\s*\)\s*$')
+# twister keys that name extra board files; common + scenario values are
+# concatenated (zephyr/scripts/pylib/twister/twisterlib/config_parser.py).
+_TESTCASE_FILE_KEYS = ("extra_dtc_overlay_files", "extra_conf_files",
+                       "extra_overlay_confs", "extra_args")
 
 
 def _pcb_key(root: Path, sku: str) -> tuple[str, str] | None:
@@ -179,7 +194,14 @@ def check(root: Path, allowed: dict[tuple[str, str], str] | None = None
     for a, b in pairs:
         problems += _compare(root, a, b, allowed)
     problems += _pin_problems(root, pairs)
+    problems += _testcase_pin_problems(root, pairs)
     return len(pairs), problems
+
+
+def _guards(condition: str, sku: str) -> bool:
+    """True only for `BOARD MATCHES|STREQUAL "<literal naming alp_e1m_<sku>_>"`."""
+    m = _SKU_GUARD_RE.fullmatch(condition)
+    return bool(m) and f"alp_e1m_{sku}_" in m.group(1)
 
 
 def _pin_problems(root: Path, pairs: list[tuple[Path, Path]]) -> list[str]:
@@ -191,8 +213,9 @@ def _pin_problems(root: Path, pairs: list[tuple[Path, Path]]) -> list[str]:
         if not cmake.is_file():
             continue  # a stranded boards/ dir: check_example_board_overlay_parity.py
         conditions: list[str] = []
-        # ponytail: `#` ends the line even inside a quoted CMake string, and
-        # else() counts as naming no SKU; neither shape occurs in-tree.
+        # ponytail: a line scan, not a CMake parser. `#` ends the line even
+        # inside a quoted string; a pin reached through include()d .cmake, a
+        # filename built from variables, or file(GLOB) is not seen.
         for n, line in enumerate(cmake.read_text(encoding="utf-8").splitlines(), 1):
             line = line.split("#", 1)[0]
             branch = _CMAKE_BRANCH_RE.match(line)
@@ -209,7 +232,7 @@ def _pin_problems(root: Path, pairs: list[tuple[Path, Path]]) -> list[str]:
             for pinned, other in ((a, b), (b, a)):
                 key = (cmake, n, pinned.name)
                 if (pinned.name not in line or key in seen
-                        or f"alp_e1m_{_sku(pinned)}_" in " ".join(conditions)):
+                        or any(_guards(c, _sku(pinned)) for c in conditions)):
                     continue
                 seen.add(key)
                 problems.append(
@@ -220,6 +243,48 @@ def _pin_problems(root: Path, pairs: list[tuple[Path, Path]]) -> list[str]:
                     f"pin (Zephyr applies boards/<qualified-board>.overlay "
                     f"itself) or guard it with "
                     f'if(BOARD MATCHES "^alp_e1m_{_sku(pinned)}_...")')
+    return problems
+
+
+def _as_list(value) -> list[str]:
+    if value is None:
+        return []
+    return value.split() if isinstance(value, str) else [str(v) for v in value]
+
+
+def _testcase_pin_problems(root: Path,
+                           pairs: list[tuple[Path, Path]]) -> list[str]:
+    """A twister scenario that names one SKU's paired file in its extra board
+    files while its platform_allow reaches a sibling SKU's target (or has no
+    platform_allow, so any -p platform) builds that file for the sibling."""
+    problems, seen = [], set()
+    for a, b in pairs:
+        app = a.parent.parent
+        for tc in sorted(app.glob("testcase.yaml")) + sorted(app.glob("sample.yaml")):
+            data = yaml.safe_load(tc.read_text(encoding="utf-8")) or {}
+            common = data.get("common") or {}
+            for name, scenario in (data.get("tests") or {}).items():
+                scenario = scenario or {}
+                targets = (_as_list(common.get("platform_allow"))
+                           + _as_list(scenario.get("platform_allow")))
+                refs = " ".join(v for d in (common, scenario)
+                                for k in _TESTCASE_FILE_KEYS
+                                for v in _as_list(d.get(k)))
+                for pinned, other in ((a, b), (b, a)):
+                    sibling = f"alp_e1m_{_sku(other)}_"
+                    key = (tc, name, pinned.name)
+                    if (pinned.name not in refs or key in seen or targets
+                            and not any(t.startswith(sibling) for t in targets)):
+                        continue
+                    seen.add(key)
+                    problems.append(
+                        f"{tc.relative_to(root).as_posix()}: scenario {name} "
+                        f"names {pinned.name} in its extra board files while "
+                        f"its platform_allow reaches {_sku(other)} "
+                        f"({', '.join(t for t in targets if t.startswith(sibling)) or 'no platform_allow: any platform'}), "
+                        f"so that build reads the {_sku(pinned)} file instead "
+                        f"of {other.relative_to(root).as_posix()} -- give the "
+                        f"{_sku(other)} target its own scenario naming its own file")
     return problems
 
 

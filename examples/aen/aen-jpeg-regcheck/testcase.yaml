@@ -28,8 +28,8 @@ tests:
     integration_platforms:
       - native_sim/native/64
     # No extra_configs: the Alif-E8 / hal_alif hardware-path symbols are
-    # board-scoped (boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf),
-    # so native_sim never sees them -- it builds the sw_baseline fallback
+    # board-scoped (boards/alp_e1m_aen80{1,3}_m55_he_ae822fa0e5597ls0_rtss_he.conf,
+    # one per SKU), so native_sim never sees them -- it builds the sw_baseline fallback
     # (default y, priority 50) off the shared prj.conf alone.  Assigning the
     # hal_alif CONFIG_USE_ALIF_JPEG_SW_LIB here would be an undefined-symbol
     # Kconfig warning that CI (warnings-as-errors) fails on.

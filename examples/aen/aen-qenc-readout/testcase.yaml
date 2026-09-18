@@ -12,7 +12,7 @@
 sample:
   name: aen-qenc-readout
   description: |
-    Bench RAM-run readout proof for the E1M-AEN801 (Alif Ensemble E8,
+    Bench RAM-run readout proof for the E1M-AEN801/803 (Alif Ensemble E8,
     Cortex-M55-HE): drives DT_ALIAS(alp_qenc0), the UTIMER QEC0 edge counter
     (alif,utimer-qdec) via sensor_sample_fetch/sensor_channel_get ->
     SENSOR_CHAN_ROTATION, alongside the software gpio-qdec decoder over the

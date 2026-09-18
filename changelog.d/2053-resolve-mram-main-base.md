@@ -7,7 +7,7 @@
 `metadata/e1m_modules/E1M-AEN601.yaml:191`,
 `metadata/e1m_modules/E1M-AEN701.yaml:219`,
 `metadata/e1m_modules/E1M-AEN801.yaml:290`,
-`metadata/e1m_modules/E1M-AEN803.yaml:231`), blocked twice over: first by
+`metadata/e1m_modules/E1M-AEN803.yaml:236`), blocked twice over: first by
 `scripts/gen_zephyr_board.py::_aen_check_map_overlaps()` having no
 whole-device-alias exception (fixed by #2073), then by
 `scripts/check_atoc_reservation.py`'s top-anchor rule being unscoped to the

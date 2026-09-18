@@ -11,7 +11,7 @@
 sample:
   name: aen-isp-regcheck
   description: |
-    Bench RAM-run ISP-Pico (vsi,isp-pico) build proof for the E1M-AEN801
+    Bench RAM-run ISP-Pico (vsi,isp-pico) build proof for the E1M-AEN801/803
     (Alif Ensemble E8, Cortex-M55-HE): compiles + links isp_pico.c against
     hal_alif's vendored ISP headers.  Runtime bench-blocked (no camera
     sensor wired).

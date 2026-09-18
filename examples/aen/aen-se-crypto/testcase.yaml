@@ -12,7 +12,7 @@
 sample:
   name: aen-se-crypto
   description: |
-    Bench RAM-run SE-CryptoCell compute proof for the E1M-AEN801 (Alif
+    Bench RAM-run SE-CryptoCell compute proof for the E1M-AEN801/803 (Alif
     Ensemble E8, Cortex-M55-HE): SHA-256 known-answer, AES-128-GCM
     round-trip, and TRNG through the portable <alp/security.h> surface, over
     the same MHUv2 -> SE mailbox as aen-se-service-query.

@@ -12,7 +12,7 @@ sample:
   name: aen-aipm-read
   description: |
     Bench RAM-run read of the live RUN / STANDBY power+clock operating-point
-    profiles for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE) through the
+    profiles for the E1M-AEN801/803 (Alif Ensemble E8, Cortex-M55-HE) through the
     portable alp_power_profile_get() surface.  Read-only: alp_power_profile_set
     is deliberately never invoked.
 

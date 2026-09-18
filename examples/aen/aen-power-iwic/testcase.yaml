@@ -23,7 +23,7 @@
 sample:
   name: aen-power-iwic
   description: |
-    Stage-B PM deep-sleep for the E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE):
+    Stage-B PM deep-sleep for the E1M-AEN801/803 (Alif Ensemble E8, Cortex-M55-HE):
     brings a minimal Alif PM up over the pinned Zephyr 4.4.0 tree (which ships no
     Alif pm_state_set and does not select HAS_PM) and enters the CONFIG_PM
     suspend-to-idle (deep IWIC sleep) state repeatedly via the kernel idle path,

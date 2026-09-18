@@ -15,7 +15,7 @@ sample:
   description: |
     Bench RAM-run proof of the portable, SE-backed read-only surfaces
     (<alp/hw_info.h> SoC identity, <alp/power.h> RUN/STANDBY profiles,
-    <alp/security.h> TRNG) for the E1M-AEN801 (Alif Ensemble E8,
+    <alp/security.h> TRNG) for the E1M-AEN801/803 (Alif Ensemble E8,
     Cortex-M55-HE).  Only non-mutating calls are made.
 
 tests:

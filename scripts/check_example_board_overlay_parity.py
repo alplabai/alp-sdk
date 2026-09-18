@@ -242,6 +242,14 @@ app inherits it. It is the same silently-dropped-overlay class as #1009 and
 #2101, reached by a rename instead of a missing file, which is why it lives
 here. No allowlist: the fix is always to delete the directory or move it to
 where the app now lives.
+
+Only git-TRACKED files count, so a local `west build` inside an example (its
+gitignored `build/zephyr/boards/`, `build/Kconfig/boards/`) is not reported.
+`<app>/sysbuild/<image>/boards/` is accepted when `<app>/CMakeLists.txt`
+exists: that is sysbuild's per-image configuration directory
+(`zephyr/share/sysbuild/cmake/modules/sysbuild_extensions.cmake`, the
+`${APP_DIR}/sysbuild/${ZBUILD_APPLICATION}` lookup). Outside a git checkout
+(e.g. a `git archive` tree) every file on disk counts.
 """
 from __future__ import annotations
 
@@ -466,23 +474,43 @@ def _platform_allow_overlay_problems(root: Path) -> list[str]:
     return problems
 
 
+def _example_files(root: Path) -> list[Path]:
+    """Every tracked file under examples/ (every file, outside git)."""
+    import subprocess  # lazy: only this check shells out
+
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "examples"],
+        capture_output=True, check=False)
+    if proc.returncode == 0:
+        return [root / f for f in proc.stdout.decode("utf-8").split("\0") if f]
+    return [p for p in (root / "examples").rglob("*") if p.is_file()]
+
+
 def _stranded_boards_dir_problems(root: Path) -> list[str]:
     """Issue #2207: a `boards/` directory whose parent has no CMakeLists.txt."""
-    examples_dir = root / "examples"
-    if not examples_dir.is_dir():
+    if not (root / "examples").is_dir():
         return []
-    problems = []
-    for boards in sorted(p for p in examples_dir.rglob("boards") if p.is_dir()):
-        if (boards.parent / "CMakeLists.txt").is_file():
-            continue
-        files = ", ".join(sorted(f.name for f in boards.iterdir())) or "(empty)"
-        problems.append(
-            f"{boards.relative_to(root).as_posix()}/: no CMakeLists.txt in "
-            f"{boards.parent.relative_to(root).as_posix()}/, so nothing builds "
-            f"these files ({files}) -- delete the directory, or move it to "
-            f"where the app now lives (issue #2207 class)"
-        )
-    return problems
+    stranded: dict[Path, list[str]] = {}
+    for f in _example_files(root):
+        parts = f.relative_to(root).parts
+        for i, part in enumerate(parts[:-1]):
+            if part != "boards":
+                continue
+            boards = root.joinpath(*parts[:i + 1])
+            app = boards.parent
+            if (i >= 3 and parts[i - 2] == "sysbuild"
+                    and (app.parent.parent / "CMakeLists.txt").is_file()):
+                continue  # <app>/sysbuild/<image>/boards/: sysbuild's own
+            if not (app / "CMakeLists.txt").is_file():
+                stranded.setdefault(boards, []).append(
+                    "/".join(parts[i + 1:]))
+    return [
+        f"{boards.relative_to(root).as_posix()}/: no CMakeLists.txt in "
+        f"{boards.parent.relative_to(root).as_posix()}/, so nothing builds "
+        f"these files ({', '.join(sorted(names))}) -- delete the directory, "
+        f"or move it to where the app now lives (issue #2207 class)"
+        for boards, names in sorted(stranded.items())
+    ]
 
 
 def find_problems(root: Path) -> list[str]:
