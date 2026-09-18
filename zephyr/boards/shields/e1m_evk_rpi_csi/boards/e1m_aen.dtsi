@@ -104,6 +104,8 @@ csi_interface: &csi {
 
 csi_capture_port: &cam {
 	status = "okay";
+	/* Halt the MIPI-CSI input while the CPI FIFO is almost full, not overflow it. */
+	csi-halt-en;
 
 	ports {
 		#address-cells = <1>;
