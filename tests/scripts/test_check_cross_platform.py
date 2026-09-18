@@ -498,10 +498,7 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     cross-platform-zephyr.yml's python-smoke step) -- assert 0 findings
     against the live repo here too, so a new Linux-only idiom is caught
     locally instead of only on three legs of a non-required workflow.
-
-    The #2195 IMPLICIT-ENCODING backlog was fully drained file by file
-    under #2197; the grandfather baseline that tracked it is gone, so
-    every finding -- IMPLICIT-ENCODING included -- must now be zero."""
+    Every finding, IMPLICIT-ENCODING included, must be zero."""
     rv = _run("--fail-on-warning")
     assert rv.returncode == 0, (
         f"check_cross_platform --fail-on-warning found drift:\n"
@@ -1120,21 +1117,23 @@ def test_implicit_encoding_scan_helper_returns_tuples() -> None:
     assert "encoding" in suggestion
 
 
-def test_implicit_encoding_scoped_to_scripts_and_tests_by_default(
+def test_implicit_encoding_scoped_to_py_scan_roots_by_default(
     tmp_path: Path,
 ) -> None:
     """The default (root-scoped) walk only considers .py files under
-    scripts/** and tests/** (PY_SCAN_ROOTS) -- a .py file under
-    examples/ is not discovered even though it has the same hazard,
+    scripts/**, tests/**, and examples/** (PY_SCAN_ROOTS) -- a .py file
+    under docs/ is not discovered even though it has the same hazard,
     matching the module docstring's Scope section."""
     _write(tmp_path, "scripts/inscope.py", 'open("x")\n')
     _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    _write(tmp_path, "docs/foo/gen.py", 'open("x")\n')
     files = linter.discover_files(
         [tmp_path], excludes=linter.DEFAULT_EXCLUDES, base=tmp_path,
     )
     paths = {f.relative_to(tmp_path).as_posix() for f in files}
     assert "scripts/inscope.py" in paths
-    assert "examples/foo/gen.py" not in paths
+    assert "examples/foo/gen.py" in paths
+    assert "docs/foo/gen.py" not in paths
 
 
 def test_implicit_encoding_explicit_path_scans_outside_py_scan_roots(
@@ -1143,7 +1142,7 @@ def test_implicit_encoding_explicit_path_scans_outside_py_scan_roots(
     """An explicit `--path` target is scanned regardless of
     PY_SCAN_ROOTS -- the restriction only narrows the implicit
     default walk, not an explicit request."""
-    p = _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    p = _write(tmp_path, "docs/foo/gen.py", 'open("x")\n')
     findings = linter.scan([p], base=tmp_path)
     assert len(findings) == 1
     assert findings[0].category == "IMPLICIT-ENCODING"

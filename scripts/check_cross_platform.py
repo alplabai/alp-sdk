@@ -3,7 +3,7 @@
 """
 Lint repo content for cross-platform hazards: Linux-only idioms in
 customer-facing surfaces, and implicit text encodings in the SDK's
-own Python under scripts/ and tests/.
+own Python under scripts/, tests/, and examples/.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
 Alp SDK promises Win + Mac + Linux as first-class developer hosts
@@ -55,8 +55,8 @@ list):
      /home/user/...) in markdown code examples.  These don't
      render correctly on Windows.  Use placeholders or per-OS
      code-tabs.
-  6. IMPLICIT-ENCODING: a Python call under scripts/** or tests/**
-     that decodes/encodes text with no `encoding=` keyword --
+  6. IMPLICIT-ENCODING: a Python call under scripts/**, tests/**, or
+     examples/** that decodes/encodes text with no `encoding=` keyword --
      `Path.read_text(`/`Path.write_text(`; bare `open(` or
      `Path.open(` or `os.fdopen(` in text mode (no `"b"` in the mode
      argument -- `open(file, mode)`'s and `m.open(file, mode)`'s second
@@ -100,15 +100,9 @@ Suppression mechanisms:
 
   IMPLICIT-ENCODING has no skip-marker mechanism: the fix IS the
   suppression -- add the `encoding=` keyword the finding names.
-  There's no legitimate reason for a call under scripts/ or tests/
-  to depend on the platform locale, so no per-call escape hatch is
-  offered.
-
-  The #2195 backlog of 478 pre-existing sites across 139 files was
-  drained file by file under #2197; the grandfather baseline that
-  tracked it is gone.  IMPLICIT-ENCODING findings now flip
-  --fail-on-warning's exit code exactly like every other category --
-  there is no remaining carve-out.
+  There's no legitimate reason for a call under scripts/, tests/, or
+  examples/ to depend on the platform locale, so no per-call escape
+  hatch is offered.
 
 Operating mode:
 
@@ -141,13 +135,14 @@ Scope:
   bash-onlyness).
 
   Python files (.py) get the IMPLICIT-ENCODING check (pattern 6
-  above), but only under scripts/** and tests/** -- the two trees
-  that actually run as part of the SDK's own tooling and test
-  surface, where a locale-dependent decode fails a CI runner rather
-  than a customer's build.  Python elsewhere (examples/, docs/) is
-  out of scope for this linter; emitted-artifact portability (e.g.
-  Windows-only escape sequences produced by a generator script) is
-  covered by tests, not this scan.
+  above), but only under scripts/**, tests/**, and examples/** (see
+  PY_SCAN_ROOTS) -- the trees that actually ship or run Python as
+  part of the SDK's own tooling, test surface, and customer-facing
+  examples, where a locale-dependent decode fails a CI runner (or a
+  customer's build) rather than staying silent.  Python elsewhere
+  (docs/) is out of scope for this linter; emitted-artifact
+  portability (e.g. Windows-only escape sequences produced by a
+  generator script) is covered by tests, not this scan.
 
 Output format:
 
@@ -235,10 +230,12 @@ DEFAULT_ROOTS: tuple[str, ...] = (
 # IMPLICIT-ENCODING check to consider it during a default/root-scoped
 # walk.  scripts/ and tests/ are the SDK's own tooling + test surface
 # -- exactly where a locale-dependent decode fails a CI runner.
-# examples/ and docs/ are left alone here (see the module docstring's
-# Scope section); an explicit `--path some/other.py` still scans the
-# named file regardless of this restriction.
-PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests")
+# examples/ is included too: every tracked *.py file outside scripts/
+# and tests/ lives there (the customer-facing gen_model.py generators),
+# so it is just as exposed to the cp1252-on-windows-latest failure mode
+# as the SDK's own tooling.  An explicit `--path some/other.py` still
+# scans a file outside these roots regardless of this restriction.
+PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
 
 # Bash-only scripts that are intentionally Linux-side helpers per
 # ADR 0012 §7.6 carve-out.  These are exempt from the bash-shebang
@@ -768,9 +765,9 @@ def discover_files(
                 continue
             rel = p.relative_to(base) if base in p.parents else p
             if p.name.endswith(".py"):
-                # IMPLICIT-ENCODING is scoped to scripts/** + tests/**
-                # (see PY_SCAN_ROOTS) -- skip .py files outside those
-                # trees during an implicit walk.
+                # IMPLICIT-ENCODING is scoped to PY_SCAN_ROOTS
+                # (scripts/**, tests/**, examples/**) -- skip .py
+                # files outside those trees during an implicit walk.
                 if not rel.parts or rel.parts[0] not in PY_SCAN_ROOTS:
                     continue
             elif not (p.name.endswith(".md") or p.name.endswith(".sh")):
