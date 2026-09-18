@@ -8,8 +8,10 @@
 # SETOOLS are Linux-only. There is no native PowerShell equivalent —
 # the bench is physically Linux-attached. See docs/aen-bench-bringup.md.
 #
-# SHARED, SANITIZED env for the AEN801 (Alif Ensemble E8, M55-HE) bench
-# flash/RAM-run helpers. SOURCE this (don't execute it):
+# SHARED, SANITIZED env for the AEN803 (Alif Ensemble E8, M55-HE) bench
+# flash/RAM-run helpers -- every module on the bench farm is an
+# E1M-AEN803 (#2094); export AEN_BOARD to target an AEN801 unit instead.
+# SOURCE this (don't execute it):
 #
 #     source "$(dirname "$0")/bench-env.sh"
 #
@@ -95,14 +97,44 @@ export HAL_ALIF_DIR
 # (TBD) — run inside the west workspace or export HAL_ALIF_DIR".
 
 # --------------------------------------------------------------------
-# Board target (the lead part: AEN801 / E8 / M55-HE, RTSS-HE)
+# Board target (the lead part: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# HAZARD: build.sh uses this default unconditionally. An app whose overlay is
-# qualified for a DIFFERENT board target (e.g. an M55-HP-qualified overlay
-# like examples/aen/edgeai-vision-aen) would silently build with no overlay
-# applied under this default -- the same class of bug the HP-qualified rename
-# just fixed there. Not yet exercised (edgeai-vision-aen isn't in apps.txt).
-export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
+# Every module on the bench farm is an E1M-AEN803, so this targets AEN803
+# (#2094). It read AEN801 until then, which meant a default no-override
+# bench build produced an AEN801-shaped image on AEN803 silicon.
+#
+# The repoint deliberately waited on two things, both now landed:
+#
+#   * #2168 gave build.sh an overlay preflight, and this same change
+#     (#2094) adds the symmetric .conf preflight beside it: an app that
+#     ships boards/ overlays OR .conf files, but none matching the
+#     resolved target, is REFUSED (exit 2), naming the mismatch. Before
+#     #2168 an unmatched overlay built with NOTHING applied and said
+#     nothing -- the silent-misbuild hazard this block used to warn
+#     about. Both file kinds now fail loudly, which is what makes the
+#     flip safe. See build.sh's own header comment for the exact rule --
+#     both guards are scoped to alp_e1m_*-prefixed stems only, so a bare
+#     native_sim_native_64.overlay/.conf never trips either one.
+#   * #2176 and #2214 backfilled AEN803-qualified overlays across
+#     examples/aen/; this change backfills the three examples/peripheral-io
+#     apps that also carried an AEN801-only overlay (blink, pwm-led-fade,
+#     alp-console) with AEN803 twins -- same PCB, and their pads sit
+#     outside the AEN803 OSPI0 set, so the AEN801 body copies cleanly.
+#
+# STILL REFUSED under this default, knowingly: examples/connectivity/
+# firmware-update-log ships an AEN801-qualified overlay with no AEN803
+# sibling, and a mechanical copy would not be trustworthy there -- its
+# CMakeLists.txt gates DTC_OVERLAY_FILE and EXTRA_CONF_FILE on
+# `if(BOARD MATCHES "^alp_e1m_aen801_m55_he")`, so under AEN803 neither
+# arm fires (its board-qualified .conf files are not applied either),
+# and it is the ATOC/MRAM write path carrying a fail-closed firewall
+# claim -- it needs a bench run before a twin ships, not a copy-paste
+# (tracked separately from #2094). Until then, build it with an explicit
+# override:
+#
+#     AEN_BOARD=alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
+#         scripts/bench/aen/build.sh examples/connectivity/firmware-update-log
+export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
 # LG_PLACE resolution (alp-sdk#2032)

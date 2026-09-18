@@ -166,7 +166,7 @@ by exporting before you invoke a helper.
 | `ZEPHYR_BASE` | `west topdir`/zephyr | Pinned Zephyr 4.4.0 checkout. |
 | `ZEPHYR_SDK_INSTALL_DIR` | *(none)* | Zephyr SDK root; the `arm-zephyr-eabi-*` tools are resolved from here, else off `PATH`. |
 | `HAL_ALIF_DIR` | `west list hal_alif` | hal_alif module path (passed as an extra Zephyr module). **TBD fallback:** export it if `west list` can't resolve it — we do not invent a path. |
-| `AEN_BOARD` | `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target. |
+| `AEN_BOARD` | `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` | Qualified board target -- every module on the bench farm is an E1M-AEN803 (#2094); override to `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` for an AEN801 unit. |
 | `LG_PLACE` | *(none)* | **Primary input (alp-sdk#2032).** The bench board, addressed by PLACE NAME (`<your-bench-place>`) — you must already hold its reservation. Resolves `SE_UART`, `LG_CONSOLE_DEV`, `LG_CONSOLE_HOST`, `LG_CONSOLE_PORT` and `LG_SWD_PATH` LIVE from `labgrid-client -p "$LG_PLACE" show`. No default place; wins over a raw `SE_UART` if both are set. See "`LG_PLACE`" above. |
 | `LG_COORDINATOR` | *(none, error-if-unset when `LG_PLACE` is set)* | labgrid coordinator address (`<host>:<port>`) used to resolve `LG_PLACE`. No default — a coordinator address is bench-specific, not a portable SDK value. |
 | `SE_UART` | *(none)* | SE-UART serial device for Flow A (`<your-serial-device>`; host-specific). **Resolved automatically when `LG_PLACE` is set** (the normal path); exporting it directly with no `LG_PLACE` is the WARNED off-labgrid escape hatch (see above) — `erase-storage.sh`'s BENCH-VERIFIED run is the documented case for it. Also required by `flash-update-log-dual.sh` and `flash-update-log-firewall-probe.sh` (Flow D, otherwise no SE-UART dependency): both now call the shared `bench_atoc_replace_guard()` (#2025), which queries the resident ATOC over `$SE_UART` before their `loadbin` write — unset `SE_UART` aborts them (exit 5) unless `--replace-atoc` is also passed. `flash-jlink.sh`/`flash-jlink-hp.sh`/`flash-jlink-mramxip.sh` never require it (Flow D's whole premise is "no SE-UART needed") but now **use it opportunistically** (#2027) via `bench_flowd_atoc_guard()`: exported and usable (whether resolved via `LG_PLACE` or the direct escape hatch) → the same resident-ATOC guard as Flow A (exit 5 without `--replace-atoc`); unset → the #2029 `--atoc-unqueryable` acknowledgement is required instead (exit 8), with a message naming both ways forward. |
@@ -201,9 +201,12 @@ These helpers are the bench harness. For the *customer* SES → MCUboot → slot
 chain, alp-sdk also wires Flow A into **standard `west flash`** via the
 **`alif_flash`** west runner
 ([`scripts/west_commands/runners/alif_flash.py`](../../west_commands/runners/alif_flash.py)).
-The AEN801 M55-HE/HP board files
-(`zephyr/boards/alp/e1m_aen801_m55_*/board.cmake`) wire it as the default
-flasher, so `west flash` runs the **same** `app-gen-toc` + `app-write-mram`
+The AEN803 M55-HE/HP board files
+(`zephyr/boards/alp/e1m_aen803_m55_*/board.cmake`) wire it as the default
+flasher -- identically to their AEN801 siblings
+(`zephyr/boards/alp/e1m_aen801_m55_*/board.cmake`; same silicon, only the
+external OSPI0 population differs) -- so `west flash` runs the **same**
+`app-gen-toc` + `app-write-mram`
 recipe as `flash-run.sh`. The runner auto-detects the ATOC shape from the
 build's own reset vector: an ITCM-linked app stages the `loadAddress
 0x58000000` (M55-HE) config `flash-run.sh` uses; a slot0-XIP app (below)
@@ -214,7 +217,7 @@ slot0 window instead (#1069: M55-HE `0x80010000`, unchanged; M55-HP
 debug/attach runner.
 
 ```sh
-west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he <your-app> --sysbuild
 export SETOOLS_DIR=<...>/app-release-exec-linux   # license-gated; not shipped
 # alif_flash.py is a separate west-runner (Python), not bench-env.sh -- it
 # reads $SE_UART directly and has no LG_PLACE resolution of its own, so

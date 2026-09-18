@@ -7,16 +7,17 @@
 # and scripts/bench/aen/README.md.
 #
 # Pristine-build an AEN bench app for the E8 M55-HE target.
-# Overlays auto-apply: this builds the fully-qualified $AEN_BOARD target
-# (alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
-# boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay and
-# app.overlay by name automatically -- no explicit -DEXTRA_DTC_OVERLAY_FILE
-# force needed (the examples ship fully-qualified overlay names, not the
-# bare board name that would silently drop). For a Flow C RAM-run, pass
-# the bench-only ITCM retarget explicitly -- it is NOT one of the
-# auto-applied overlays above (it lives outside the app, on purpose: the
-# retarget is a bench concern, not something any app's own prj.conf/overlay
-# should carry) -- both halves together, e.g.:
+# Overlays and board-qualified .conf files auto-apply: this builds the
+# fully-qualified $AEN_BOARD target (default
+# alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he), so Zephyr picks up
+# boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay (and the
+# matching .conf) plus app.overlay by name automatically -- no explicit
+# -DEXTRA_DTC_OVERLAY_FILE force needed (the examples ship fully-qualified
+# overlay/.conf names, not the bare board name that would silently drop).
+# For a Flow C RAM-run, pass the bench-only ITCM retarget explicitly -- it
+# is NOT one of the auto-applied overlays above (it lives outside the app,
+# on purpose: the retarget is a bench concern, not something any app's own
+# prj.conf/overlay should carry) -- both halves together, e.g.:
 #   -DEXTRA_CONF_FILE="scripts/bench/aen/aen-bench-shared.conf;scripts/bench/aen/aen-flowc-itcm.conf" \
 #   -DEXTRA_DTC_OVERLAY_FILE="scripts/bench/aen/aen-flowc-itcm.overlay"
 # See docs/aen-bench-bringup.md, Flow C. Prints errors + the memory-region
@@ -50,39 +51,68 @@ else
 	APP_DIR="$ALP_SDK_DIR/$APP"
 fi
 
-# Zephyr auto-applies a per-app devicetree overlay ONLY when its filename
-# matches the fully-qualified board target with '/' replaced by '_'. This
-# script never forces EXTRA_DTC_OVERLAY_FILE, so an app that ships overlays
-# for a DIFFERENT target builds with NO overlay applied and says nothing --
-# the silent-misbuild hazard bench-env.sh's AEN_BOARD note describes. That
-# is the failure mode #2094 exists to stop: a bench operator gets a binary
-# shaped for the wrong module and no indication of it, and the first
-# symptom is a peripheral behaving oddly on real silicon.
+# Zephyr auto-applies a per-app devicetree overlay, AND a per-app
+# board-qualified .conf, ONLY when its filename matches the
+# fully-qualified board target with '/' replaced by '_'. This script
+# never forces EXTRA_DTC_OVERLAY_FILE/EXTRA_CONF_FILE for either, so an
+# app that ships one of these for a DIFFERENT target builds with that
+# file silently dropped and says nothing -- the silent-misbuild hazard
+# bench-env.sh's AEN_BOARD note describes. That is the failure mode
+# #2094 exists to stop: a bench operator gets a binary shaped for the
+# wrong module (a missing devicetree edit, or a missing Kconfig default)
+# and no indication of it, and the first symptom is a peripheral
+# behaving oddly on real silicon.
 #
-# Refuse that build. An app with NO boards/ overlays at all is fine -- there
-# is nothing to miss -- so only a non-empty overlay set that lacks THIS
-# board's file is an error.
-BOARD_OVERLAY="${BOARD//\//_}.overlay"
-if [ -d "$APP_DIR/boards" ]; then
-	have_overlay=0
-	for ovl in "$APP_DIR"/boards/*.overlay; do
-		[ -e "$ovl" ] || continue
-		have_overlay=1
+# Refuse both. An app with NO alp_e1m_*-qualified file of a given kind is
+# fine -- there is nothing to miss -- so only a non-empty alp_e1m_* set of
+# that kind that lacks THIS board's file is an error.
+#
+# Scoped to alp_e1m_*-prefixed stems ONLY, deliberately not "every file of
+# this extension": boards/ can also hold a native_sim_native_64.overlay/
+# .conf (a different board family entirely, built by twister, never by
+# this script), and an unscoped glob would flag that as a "missing AEN803
+# file". That is rare for .overlay but COMMON for .conf -- several
+# aen-cc3501e-* bench apps ship ONLY boards/native_sim_native_64.conf, no
+# AEN .conf of any kind, and must keep building clean here.
+BOARD_STEM="${BOARD//\//_}"
+
+# bench_build_require_board_qualified <ext> <label> — refuse when
+# $APP_DIR/boards ships an alp_e1m_*.<ext> file for SOME AEN board target
+# but not one named after $BOARD_STEM.
+bench_build_require_board_qualified() {
+	local ext="$1" label="$2"
+	# A SEPARATE `local` statement, deliberately: bash expands every word on
+	# a `local a=$1 b=$a` line BEFORE any of that line's assignments take
+	# effect, so a same-line reference to $ext here would expand against
+	# whatever `ext` held before this call (empty on the first call) --
+	# not the "$1" just assigned above.
+	local expected="$APP_DIR/boards/$BOARD_STEM.$ext"
+	local have=0 f
+
+	for f in "$APP_DIR"/boards/alp_e1m_*."$ext"; do
+		[ -e "$f" ] || continue
+		have=1
 		break
 	done
-	if [ "$have_overlay" = 1 ] && [ ! -e "$APP_DIR/boards/$BOARD_OVERLAY" ]; then
-		echo "build: $NAME ships board overlays, but none for $BOARD" >&2
-		echo "build:   expected: $APP_DIR/boards/$BOARD_OVERLAY" >&2
-		echo "build:   present:" >&2
-		for ovl in "$APP_DIR"/boards/*.overlay; do
-			[ -e "$ovl" ] || continue
-			echo "build:     $(basename "$ovl")" >&2
-		done
-		echo "build: refusing to build with no overlay applied (alp-sdk#2094)." >&2
-		echo "build: to build anyway, name the board explicitly:" >&2
-		echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
-		exit 2
-	fi
+	[ "$have" = 1 ] || return 0
+	[ -e "$expected" ] && return 0
+
+	echo "build: $NAME ships AEN board $label files, but none for $BOARD" >&2
+	echo "build:   expected: $expected" >&2
+	echo "build:   present:" >&2
+	for f in "$APP_DIR"/boards/alp_e1m_*."$ext"; do
+		[ -e "$f" ] || continue
+		echo "build:     $(basename "$f")" >&2
+	done
+	echo "build: refusing to build with no $label applied (alp-sdk#2094)." >&2
+	echo "build: to build anyway, name the board explicitly:" >&2
+	echo "build:   AEN_BOARD=<fully-qualified board> $0 $APP" >&2
+	exit 2
+}
+
+if [ -d "$APP_DIR/boards" ]; then
+	bench_build_require_board_qualified overlay "overlay"
+	bench_build_require_board_qualified conf ".conf"
 fi
 
 cd "$ALP_SDK_DIR"

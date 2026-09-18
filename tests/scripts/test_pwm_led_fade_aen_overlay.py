@@ -2,7 +2,12 @@
 """
 Regression test for #1375 (and #1383 item 3: the assertion that used to
 let a wrong pad, a wrong driver channel, or a missing pinctrl block
-through).
+through). Also covers #2094's E1M-AEN803 twins: same PCB, same silicon,
+so they must stay content-identical to the AEN801 files below their own
+header comments -- a drift here is exactly the shape
+`check_example_board_overlay_content_parity.py` (#2198) exists to catch,
+this file pins it from the example side too so a change to pwm-led-fade
+specifically cannot regress unnoticed.
 
 `examples/peripheral-io/pwm-led-fade`'s board.yaml declares
 `pins: [{ e1m: E1M_PWM3, macro: EVK_PWM_LED_GREEN }]` +
@@ -58,6 +63,15 @@ AEN801_OVERLAY = (
 # where utimer10/pwm10 live).  #1375's own bench environment was rtss_he.
 AEN801_OVERLAY_HE = (
     EXAMPLE / "boards" / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+)
+# #2094: E1M-AEN803 twins of the two files above -- same PCB/silicon as
+# E1M-AEN801 (metadata/e1m_modules/E1M-AEN803.yaml), so their functional
+# content (below the header comment) must match byte-for-byte.
+AEN803_OVERLAY = (
+    EXAMPLE / "boards" / "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp.overlay"
+)
+AEN803_OVERLAY_HE = (
+    EXAMPLE / "boards" / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
 )
 AEN_ROUTE_TSV = REPO / "metadata" / "e1m_modules" / "aen" / "from-alif.tsv"
 
@@ -192,6 +206,68 @@ class TestPwmLedFadeAenOverlay(unittest.TestCase):
                 "other is the #1383 item 1 defect returning"
             ),
         )
+
+    def test_aen803_twins_exist_and_match_aen801_below_their_header(self) -> None:
+        # #2094: the E1M-AEN803 twins must exist (mechanical backfill, same
+        # as #2176/#2214 did for examples/aen/), and their content below the
+        # header comment must byte-match the AEN801 files -- same PCB, same
+        # silicon (metadata/e1m_modules/E1M-AEN803.yaml), so a delta there
+        # is drift, not a legitimate per-SKU difference. The header comment
+        # itself is allowed (and expected) to differ: it names the E1M-AEN803
+        # rationale in its own words, not a verbatim copy of the AEN801 one
+        # (#2176's "AEN803/AEN803" trap this test does not want to encourage).
+        self.assertTrue(
+            AEN803_OVERLAY.is_file(),
+            msg=f"missing {AEN803_OVERLAY.relative_to(REPO)} -- #2094's AEN803 twin",
+        )
+        self.assertTrue(
+            AEN803_OVERLAY_HE.is_file(),
+            msg=f"missing {AEN803_OVERLAY_HE.relative_to(REPO)} -- #2094's AEN803 twin",
+        )
+        for aen801, aen803 in (
+            (AEN801_OVERLAY, AEN803_OVERLAY),
+            (AEN801_OVERLAY_HE, AEN803_OVERLAY_HE),
+        ):
+            body_801 = _strip_leading_block_comment(aen801.read_text(encoding="utf-8"))
+            body_803 = _strip_leading_block_comment(aen803.read_text(encoding="utf-8"))
+            self.assertEqual(
+                body_803,
+                body_801,
+                msg=(
+                    f"{aen803.relative_to(REPO)} must stay byte-identical to "
+                    f"{aen801.relative_to(REPO)} below the header comment -- "
+                    "E1M-AEN801/E1M-AEN803 are the same PCB and silicon, so a "
+                    "functional delta here is drift "
+                    "(check_example_board_overlay_content_parity.py, #2198)"
+                ),
+            )
+
+    def test_aen803_header_names_803_and_avoids_the_2176_rename_trap(self) -> None:
+        # The #2176 trap named in the #2094 task: a mechanical find/replace
+        # (aen801 -> aen803) run to produce a twin can hit a phrase that
+        # deliberately named BOTH SKUs together ("E1M-AEN801/AEN803") and
+        # turn it into a nonsensical duplicate ("E1M-AEN803/AEN803"). This
+        # header is hand-written prose, not a mechanical rename, and it
+        # legitimately still names E1M-AEN801 (a cross-reference to "see the
+        # AEN801 overlay in this directory for the full rationale") -- so
+        # what this pins is the ACTUAL broken pattern, not the presence of
+        # "aen801" at all.
+        for path in (AEN803_OVERLAY, AEN803_OVERLAY_HE):
+            text = path.read_text(encoding="utf-8")
+            header = text[: text.find("*/") + 2]
+            self.assertIn(
+                "AEN803", header, msg=f"{path.relative_to(REPO)}: header must name E1M-AEN803"
+            )
+            self.assertNotIn(
+                "AEN803/AEN803",
+                header,
+                msg=(
+                    f"{path.relative_to(REPO)}: header contains the #2176 "
+                    "mechanical-rename artifact 'AEN803/AEN803' -- a naive "
+                    "aen801->aen803 replace turned a both-SKUs phrase into a "
+                    "nonsensical duplicate"
+                ),
+            )
 
     def test_aen801_overlay_defines_alp_pwm3_via_a_pwm_leds_consumer(self) -> None:
         self.assertTrue(AEN801_OVERLAY.is_file(), msg="see test_aen801_qualified_overlay_exists")

@@ -100,10 +100,16 @@ The lint enforces two invariants:
       devicetree edits or Kconfig defaults.  Unlike (f), this check is
       scoped to `board.yaml`-bearing examples only -- an internal
       bench/regcheck dir with no `board.yaml` legitimately ships a
-      bare-name overlay/`.conf` because `scripts/bench/aen/build.sh`
-      force-applies it via `-DEXTRA_DTC_OVERLAY_FILE` (and the
-      matching `.conf` is picked up by `build.sh`'s own board-name
-      match, not Zephyr's fully-qualified auto-apply).
+      bare-name overlay/`.conf`: Zephyr's own board-overlay auto-apply
+      rule picks up BOTH the bare board name and the fully-qualified
+      one (they merge), so a bare-name file there is not silently
+      dropped the way it would be on a customer build that names only
+      the fully-qualified id.  `scripts/bench/aen/build.sh` builds the
+      fully-qualified `$AEN_BOARD` target directly and does NOT force
+      anything via `-DEXTRA_DTC_OVERLAY_FILE`/`-DEXTRA_CONF_FILE` (see
+      `check_overlay_qualified()` below and `build.sh`'s own header
+      comment) -- it is Zephyr's own rule doing the work here, not
+      this script.
 
 Run from the alp-sdk repo root:
 

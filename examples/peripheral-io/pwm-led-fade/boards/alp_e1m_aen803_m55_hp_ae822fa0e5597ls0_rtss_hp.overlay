@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-AEN803 M55-HP overlay for pwm-led-fade (#2094).  E1M-AEN803 is the
+ * same PCB and silicon (AE822FA0E5597LS0) as E1M-AEN801 -- the SKUs only
+ * differ in their external OSPI0 memory population (E1M-AEN803 fits both
+ * HyperRAM and NOR, see metadata/e1m_modules/E1M-AEN803.yaml).  This
+ * demo's single pad, P2_4 (E1M_PWM3, the RGB LED's green channel), is not
+ * part of the OSPI0 set (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4,
+ * P15_2, P15_3, P15_6, P15_7), so the E1M-AEN801 body below carries over
+ * unchanged.  The M55-HE overlay beside this one is identical -- the LED
+ * pad is a SoM-level route, not a core-level one, so either core can
+ * drive it.
+ *
+ * See the E1M-AEN801 overlay in this same directory for the full
+ * rationale (why the route needs an overlay at all, the pad -> utimer
+ * mapping, and the two traps this file avoids) -- not restated per-SKU
+ * here.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+
+/ {
+	pwm_led_green_leds: pwm-leds {
+		compatible = "pwm-leds";
+
+		pwm_led_green: pwm_led_green {
+			label = "board-pwm-led-green";
+			pwms  = <&pwm10 0 PWM_USEC(1000) PWM_POLARITY_NORMAL>;
+		};
+	};
+
+	aliases {
+		alp-pwm3 = &pwm_led_green; /* BOARD_PWM_LED_GREEN / ALP_E1M_PWM3 */
+	};
+};
+
+&pinctrl {
+	pinctrl_pwm10: pinctrl_pwm10 {
+		group0 {
+			/* UT10_T0_A -> P2_4 = E1M_PWM3 = RGB LED green. */
+			pinmux = <PIN_P2_4__UT10_T0_A>;
+		};
+	};
+};
+
+&utimer10 {
+	status = "okay";
+
+	pwm10 {
+		status = "okay";
+		pinctrl-0 = <&pinctrl_pwm10>;
+		pinctrl-names = "default";
+	};
+};

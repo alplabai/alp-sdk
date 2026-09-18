@@ -1,0 +1,96 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Real-hardware pin routing for blink on the E1M-AEN803 (Alif Ensemble
+ * E8), M55-HE core (#2094).  E1M-AEN803 shares the E1M-AEN801 PCB and
+ * silicon (AE822FA0E5597LS0) -- the SKUs only differ in their external
+ * OSPI0 memory population (E1M-AEN803 fits both HyperRAM and NOR, see
+ * metadata/e1m_modules/E1M-AEN803.yaml).  None of this demo's pads sit
+ * on that OSPI0 bus (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4, P15_2,
+ * P15_3, P15_6, P15_7): the LED lives on P12_7/gpio12, its RGB siblings
+ * on P12_6/gpio12 and P2_4/gpio2, and every unmapped array slot on the
+ * gpio2-pin-31 sentinel below -- so the E1M-AEN801 body carries over
+ * unchanged.  The M55-HP overlay beside this one is identical -- the
+ * LED pad is a SoM-level route, not a core-level one, so either core
+ * can drive it.
+ *
+ * See the E1M-AEN801 overlay in this same directory for the full
+ * rationale (why this file has to exist at all, the from-alif.tsv pad
+ * mapping, and why the unmapped array slots point at a disabled-
+ * controller sentinel instead of a plausible-looking real pin) -- not
+ * restated per-SKU here.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/*
+ * No &pinctrl group here on purpose.  GPIO is alt-0 on this SoC and is
+ * the pad's default mux, so P12_7 (the LED pad, PWM0) comes up as GPIO
+ * without a pinmux entry -- the same reason examples/aen/aen-cc3501e-gpio
+ * notes "the LP-GPIO mux (alt-0 default)" for its control nets.  It
+ * could not be attached here anyway: gpio12 binds snps,designware-gpio.yaml,
+ * which declares no `pinctrl-0` property, so adding one is a devicetree
+ * error.  Claiming the pad's alt-4 UT11_T1_C timer function instead is
+ * what a real PWM fade on this pad would do.
+ */
+
+&gpio12 {
+	status = "okay";
+};
+
+/*
+ * gpio2 backs the RGB LED's GREEN channel (P2_4, PWM3 --
+ * metadata/e1m_modules/aen/from-alif.tsv: `B5 PWM3 UT10_T0_A P2_4`,
+ * see index [29] below) plus every unmapped sentinel slot in this
+ * array (gpio2 pin 31, see the header comment).  This demo doesn't
+ * open the green channel, but index 29 still needs a real, enabled
+ * controller behind it -- same reasoning as gpio12 above.
+ */
+&gpio2 {
+	status = "okay";
+};
+
+/*
+ * gpio12 also backs the RGB LED's BLUE channel (P12_6, PWM1 --
+ * `B6 PWM1 UT11_T0_C P12_6`, see index [27] below).  Both gpio11..gpio14
+ * only became reachable when they were added to
+ * ensemble_e8_peripherals.dtsi -- before that these routes resolved to
+ * no controller at all.
+ */
+
+/ {
+	alp_pins: alp-pins {
+		compatible = "alp,pin-array";
+		gpios = <&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 0] ALP_E1M_GPIO_IO0   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 1] ALP_E1M_GPIO_IO1   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 2] ALP_E1M_GPIO_IO2   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 3] ALP_E1M_GPIO_IO3   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 4] ALP_E1M_GPIO_IO4   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 5] ALP_E1M_GPIO_IO5   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 6] ALP_E1M_GPIO_IO6   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 7] ALP_E1M_GPIO_IO7   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 8] ALP_E1M_GPIO_IO8   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [ 9] ALP_E1M_GPIO_IO9   -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [10] ALP_E1M_GPIO_IO10  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [11] ALP_E1M_GPIO_IO11  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [12] ALP_E1M_GPIO_IO12  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [13] ALP_E1M_GPIO_IO13  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [14] ALP_E1M_GPIO_IO14  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [15] ALP_E1M_GPIO_IO15  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [16] ALP_E1M_GPIO_IO16  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [17] ALP_E1M_GPIO_IO17  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [18] ALP_E1M_GPIO_IO18  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [19] ALP_E1M_GPIO_IO19  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [20] ALP_E1M_GPIO_IO20  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [21] ALP_E1M_GPIO_IO21  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [22] ALP_E1M_GPIO_IO22  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [23] ALP_E1M_GPIO_IO23  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [24] ALP_E1M_GPIO_IO24  -- unmapped */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [25] ALP_E1M_GPIO_IO25  -- unmapped */
+			<&gpio12 7 GPIO_ACTIVE_HIGH>,   /* [26] ALP_E1M_GPIO_PWM0  -- THE LED (RGB red channel): E1M pad A6 -> Alif P12_7 */
+			<&gpio12 6 GPIO_ACTIVE_HIGH>,   /* [27] ALP_E1M_GPIO_PWM1  -- RGB blue channel:  E1M pad B6 -> Alif P12_6 */
+			<&gpio2 31 GPIO_ACTIVE_HIGH>,   /* [28] ALP_E1M_GPIO_PWM2  -- unmapped here */
+			<&gpio2          4 GPIO_ACTIVE_HIGH>;   /* [29] ALP_E1M_GPIO_PWM3  -- RGB green channel (unused here): E1M pad B5 -> Alif P2_4 */
+	};
+};
