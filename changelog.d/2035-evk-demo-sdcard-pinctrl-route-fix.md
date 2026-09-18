@@ -17,8 +17,8 @@ why every bench run of these examples failed.
 
 Both overlays now program the "B" route (`CLK=P14_1`, `CMD=P14_0`,
 `D0..D3=P13_0..P13_3`), which is how the module is actually wired. Five
-independent metadata sources agree — `metadata/pinmux/aen.yaml:49-64`,
-`metadata/e1m_modules/aen/from-alif.tsv:36-48` (the vendor's own mapping),
+independent metadata sources agree — `metadata/pinmux/aen.yaml:48-63`,
+`metadata/e1m_modules/aen/from-alif.tsv:35-47` (the vendor's own mapping),
 `metadata/e1m_modules/aen/inter-chip.tsv:41-46`, `docs/cc3501e-bridge.md:74` —
 and the EVK netlist closes the chain at `U39` pin 12 carrying `E1M_CMD` to `E2
 AH11`. `P14_0`, `P14_1` and `P13_0..P13_3` also run through unpopulated

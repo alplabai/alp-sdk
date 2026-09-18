@@ -3247,7 +3247,7 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
-      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
+      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves, and that every new one is anchored.",
       "script": "scripts/check_changelog_citations.py"
     },
     {
