@@ -24,13 +24,29 @@
 # differently-based verdict on every ordinary PR).
 #
 # DIFF_BASE is `github.event.merge_group.base_sha` -- the merge queue's own
-# base, i.e. `dev` as it stands right now, not `HEAD^1` (this checkout's
-# first parent may be a PREVIOUS queue entry stacked ahead of this one, not
-# `dev` itself) and not the `origin/dev` default (a merge-queue checkout has
-# no such remote-tracking ref set up). check_changelog_citations.py resolves
-# it with `git rev-parse --verify DIFF_BASE^{commit}` and then
-# `git merge-base DIFF_BASE HEAD` (scripts/check_changelog_citations.py:855,
-# :913) -- a raw SHA satisfies both, provided the object is present locally.
+# base. Two rejected alternatives, for two different reasons:
+#
+#   * NOT `HEAD^1`: this checkout's first parent may be a PREVIOUS queue
+#     entry stacked ahead of this one, not `dev` itself.
+#   * NOT the script's `origin/dev` default. The reason is NOT that the ref
+#     is missing -- under `fetch-depth: 0` below, actions/checkout uses the
+#     all-history refspec (`+refs/heads/*:refs/remotes/origin/*`), so
+#     `refs/remotes/origin/dev` IS created in this job. (That "no such ref"
+#     reasoning holds only for a SHALLOW checkout, which is why
+#     `pr-metadata-validate.yml` can correctly say it of a PR checkout.) The
+#     real reason is freshness: `origin/dev` is fetched at JOB time, so if
+#     `dev` moved after this entry was enqueued, it is AHEAD of the base
+#     this entry is actually landing on -- grading against a tree that is
+#     not the merge result. `base_sha` is the queue's own deterministic
+#     base and cannot drift under the run.
+#
+# check_changelog_citations.py resolves DIFF_BASE in `_resolve_base()` with
+# `git rev-parse --verify DIFF_BASE^{commit}`, then diffs added lines in
+# `_added_lines()` with `git merge-base DIFF_BASE HEAD`. A raw SHA satisfies
+# both, provided the object is present locally. (Named by function, not by
+# line number, on purpose: that script is not in the set this very gate
+# grades, so a line citation into it would drift silently -- the exact
+# failure class #2206 exists to close.)
 #
 # `fetch-depth: 0` is required, not merely generous: a shallow checkout
 # grafts HEAD's history, and `git merge-base` over grafted history can miss
@@ -38,15 +54,28 @@
 # which always contains `base_sha` as an ancestor (it is the base branch's
 # own tip at enqueue time), so both git calls above resolve.
 #
-# on:/concurrency: shape copied from pr-twister.yml / pr-static-analysis.yml /
+# concurrency: shape copied from pr-twister.yml / pr-static-analysis.yml /
 # cross-platform-zephyr.yml, all three of which already carry a
-# `merge_group:` trigger; no `permissions:` block, matching those three (this
-# job only reads the checkout, same as they do for their own merge_group
-# work). `workflow_dispatch:` is added for the same reason every workflow in
-# this repo carries it -- a manual escape valve for testing -- not because
-# this gate needs to run outside the queue; DIFF_BASE resolves to an empty
-# string there and the script itself falls back to `origin/dev` (WARNing if
-# that ref is absent), never a hard failure.
+# `merge_group:` trigger. `cancel-in-progress: true` is inert on a
+# merge_group run -- `github.ref` there is the unique
+# `refs/heads/gh-readonly-queue/dev/pr-N-<sha>`, so the group never collides
+# across queue entries and nothing is cancelled mid-queue.
+#
+# `pull_request:` is present but PATH-FILTERED to this file alone. Without
+# it the workflow would get ZERO validation before landing: its first real
+# execution would be this PR's own queue entry, where -- being deliberately
+# not a required context -- a broken job blocks nothing and notifies no one.
+# The path filter is what keeps that from becoming the "second,
+# differently-based verdict on every ordinary PR" objection above: ordinary
+# PRs do not match it.
+#
+# `workflow_dispatch:` takes an optional `diff_base` input. Without one a
+# dispatch cannot exercise the behaviour this gate exists for: DIFF_BASE
+# would be empty, `_resolve_base()` treats empty exactly like unset and
+# falls back to `origin/dev`, and dispatched on `dev` that makes
+# `merge-base(origin/dev, HEAD) == HEAD` -- zero added lines, so the
+# new-citation rule runs vacuously and reports OK. Passing a real base ref
+# makes the dispatch a genuine smoke test.
 #
 # NOT a required context (deciding that is a branch-protection / ruleset
 # edit on GitHub's side, out of scope for this change -- see #2206). Until
@@ -59,7 +88,21 @@ name: merge-queue-changelog-citations
 
 on:
   merge_group:
+  pull_request:
+    paths:
+      - '.github/workflows/merge-queue-changelog-citations.yml'
   workflow_dispatch:
+    inputs:
+      diff_base:
+        description: >-
+          Base ref or SHA to grade new citations against. Leave empty to use
+          the script's own `origin/dev` default -- but note that dispatching
+          on `dev` itself then grades zero added lines.
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -86,5 +129,11 @@ jobs:
       - name: "Gate — changelog.d/ path:line citations resolve against dev's tip (#2206)"
         timeout-minutes: 2
         env:
-          DIFF_BASE: ${{ github.event.merge_group.base_sha }}
+          # merge_group -> the queue's own base (the case this gate exists for).
+          # workflow_dispatch -> whatever the operator passed, possibly empty.
+          # pull_request (this file only) -> empty, so _resolve_base() falls back
+          # to `origin/dev`, which fetch-depth: 0 has fetched. That is the same
+          # base pr-metadata-validate.yml grades an ordinary PR against, which is
+          # what makes this leg a faithful self-test of the workflow.
+          DIFF_BASE: ${{ github.event.merge_group.base_sha || inputs.diff_base }}
         run: python3 scripts/check_changelog_citations.py --verbose
