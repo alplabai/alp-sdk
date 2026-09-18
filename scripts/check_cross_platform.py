@@ -774,9 +774,9 @@ def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
                     continue
                 suggestion = (
                     f"implicit text encoding on subprocess.{name}"
-                    f"(..., {kw.arg}=...) -- decodes output using the "
-                    f'platform default encoding; pass encoding="utf-8" '
-                    f"explicitly alongside it"
+                    f'(..., {kw.arg}=...) -- pass encoding="utf-8", and make '
+                    f"sure the child WRITES UTF-8: a Python child writes its "
+                    f"locale (cp1252 on Windows) unless PYTHONIOENCODING=utf-8"
                 )
                 break
 
