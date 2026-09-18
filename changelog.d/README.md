@@ -91,6 +91,23 @@ fields, addresses, SKUs, hw_rev, diagnostic codes, error strings and paths
 verbatim — a "helpful" rewrap can silently corrupt one of those. Write the
 entry exactly as it should ship.
 
+## Citing code
+
+Every new `` `path:line` `` citation must carry an anchor: a short verbatim
+quote from the cited lines, in parentheses of its own, right after it.
+
+```
+the guard at `scripts/foo.py:42` ("if not fragments:")
+```
+
+`scripts/check_changelog_citations.py` fails the PR when the quote is not in
+the cited range, so a citation cannot silently go stale when the code moves.
+The quote goes AFTER the citation — `` (`scripts/foo.py:42`, "if not
+fragments:") `` looks anchored and is rejected as a near miss — and stays on
+one markdown line. When a merge of `dev` moves the code, `--fix` re-derives
+the line number from the anchor; `--against-merge` grades the merge before
+you make it. The script's docstring has the full rules.
+
 ## Release time
 
 `scripts/assemble_changelog.py` folds every fragment into `CHANGELOG.md`'s

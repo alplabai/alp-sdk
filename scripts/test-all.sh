@@ -775,6 +775,18 @@ stage_required_gate_scripts() {
         python3 "${path}" || failed=1
     done
 
+    # The loop above graded changelog citations against the WORKING TREE.
+    # CI grades the PR merge commit instead (actions/checkout on a
+    # pull_request event checks out refs/pull/N/merge), where a citation
+    # into a file dev has since moved is already wrong. Grade that merge
+    # here too, built in the object store from DIFF_BASE (default
+    # origin/dev) and HEAD -- committed work only (alp-sdk#2186).
+    if [ -f scripts/check_changelog_citations.py ]; then
+        ran=1
+        echo "--- scripts/check_changelog_citations.py --against-merge ---"
+        python3 scripts/check_changelog_citations.py --against-merge || failed=1
+    fi
+
     # board.yaml schema sweep -- canonical template + every
     # examples/*/board.yaml + tests/*/board.yaml, mirroring the
     # pr-metadata-validate.yml "schema sweep" step (including its
