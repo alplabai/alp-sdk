@@ -58,16 +58,17 @@ list):
   6. IMPLICIT-ENCODING: a Python call under scripts/** or tests/**
      that decodes/encodes text with no `encoding=` keyword --
      `Path.read_text(`/`Path.write_text(`; bare `open(` or
-     `Path.open(` in text mode (no `"b"` in the mode argument --
-     `open(file, mode)`'s second positional, `Path.open(mode)`'s
-     first -- or no mode argument at all -- Python's default is text
-     mode); `subprocess.run`/`check_output`/`Popen` with `text=True`
-     or `universal_newlines=True`, even when a `**kwargs` unpack
-     rides along.  Binary-mode IO (`"rb"`/`"wb"`,
+     `Path.open(` or `os.fdopen(` in text mode (no `"b"` in the mode
+     argument -- `open(file, mode)`'s and `m.open(file, mode)`'s second
+     positional, `Path.open(mode)`'s first -- or no mode argument at
+     all -- Python's default is text mode);
+     `subprocess.run`/`check_output`/`Popen` with `text=True` or
+     `universal_newlines=True`, even when a `**kwargs` unpack rides
+     along.  Binary-mode IO (`"rb"`/`"wb"`,
      `read_bytes`/`write_bytes`) is correct and never flagged, nor is
      `.open()` on a module whose `open` takes no `encoding=`
      (`tokenize`, `tarfile`, `os`, including `import ... as`
-     aliases); and
+     aliases and a module-level `from ... import open`); and
      any call that already passes `encoding=` (including
      `encoding=locale.getpreferredencoding()`) passes as-is -- this
      linter checks for the keyword's presence, not for a rationale
@@ -689,17 +690,23 @@ def _kwarg_value(node: ast.Call, name: str) -> ast.expr | None:
 # itself, tarfile.open()'s "r"/"w" are tar modes, os.open() returns a
 # raw fd.
 _OPEN_WITHOUT_ENCODING_MODULES: frozenset[str] = frozenset({"tokenize", "tarfile", "os"})
-# Modules whose `open` shares the builtin open(file, mode, ...) signature.
-_BUILTIN_SIGNATURE_OPEN_MODULES: frozenset[str] = frozenset({"io", "builtins", "codecs"})
+# Function names this check treats as a file open.  `fdopen` only counts
+# when it resolves to `os` (`os.fdopen(fd, mode)`, builtin-shaped).
+_OPEN_CALL_NAMES: frozenset[str] = frozenset({"open", "fdopen"})
 
 
 def _module_aliases(tree: ast.AST) -> dict[str, str]:
     """Local name -> module name for every `import m` / `import m as a`
-    in the file, at module AND function scope.
+    in the file, at module AND function scope, plus every module-level
+    `from m import open` / `from m import fdopen` (the bare name then
+    resolves to `m`).
 
     ponytail: scope-blind -- an alias bound in one function resolves
     file-wide, and a variable that shadows an imported module name is
-    misread as the module.  Per-scope resolution if that ever bites.
+    misread as the module.  `from m import open` is honoured at module
+    level only, because file-wide it would exempt every builtin
+    `open()` in the file; inside a function it is still flagged.
+    Per-scope resolution if either ever bites.
     """
     out: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -710,6 +717,11 @@ def _module_aliases(tree: ast.AST) -> dict[str, str]:
                 else:
                     top = a.name.split(".")[0]
                     out[top] = top
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for a in node.names:
+                if a.name in _OPEN_CALL_NAMES:
+                    out[a.asname or a.name] = node.module
     return out
 
 
@@ -717,10 +729,11 @@ def _open_mode_is_binary(node: ast.Call, mode_index: int) -> bool | None:
     """Inspect an open()/Path.open() call's mode argument.
 
     `mode_index` is the mode's positional slot: 1 for the builtin
-    `open(file, mode)`, 0 for `Path.open(mode)`.  True if binary ("b"
-    in a string-literal mode), False if text (string-literal mode
-    without "b", or no mode argument at all -- Python's own default is
-    text mode "r"), None if the mode isn't a string literal we can
+    `open(file, mode)` and every module-level `m.open(file, mode)`, 0
+    for a one-argument method call like `Path.open(mode)`.  True if
+    binary ("b" in a string-literal mode), False if text (string-literal
+    mode without "b", or no mode argument at all -- Python's own default
+    is text mode "r"), None if the mode isn't a string literal we can
     read statically (a variable, an f-string, ...) -- callers should
     skip flagging rather than guess.
     """
@@ -764,8 +777,10 @@ def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
 
     Also out of scope: `.open()` on a module whose `open` takes no
     `encoding=` (`tokenize`, `tarfile`, `os`), resolved through
-    `import m` / `import m as a` at any scope.  An `.open()` on any
-    other owner (a `Path`, an unknown object) is still flagged.
+    `import m` / `import m as a` at any scope and a module-level
+    `from m import open`.  An `.open()` on any other owner (a `Path`,
+    an unknown object) is still flagged, and so is `os.fdopen(fd, mode)`
+    in text mode.
 
     A `**kwargs` unpack on `read_text`/`write_text`/`open` could carry
     `encoding=` this scan can't see into -- those calls are skipped
@@ -805,21 +820,34 @@ def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
                 f'(UTF-8 on Linux, cp1252 on windows-latest); pass '
                 f'encoding="utf-8" explicitly'
             )
-        elif name == "open":
-            owner = (
-                aliases.get(node.func.value.id)
-                if isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                else None
-            )
+        elif name in _OPEN_CALL_NAMES:
+            func = node.func
+            if isinstance(func, ast.Name):
+                owner = aliases.get(func.id)  # `from m import open`
+            elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                owner = aliases.get(func.value.id)
+            else:
+                owner = None
+            # A module-level `m.open(file, mode)` and any 2+-positional
+            # call are builtin-shaped; only a one-argument method call
+            # like `Path.open(mode)` carries its mode first.
+            # ponytail: gzip/bz2/lzma.open default to "rb", so a bare
+            # `gzip.open(p)` is still flagged as text; a default-binary
+            # module set if one lands.
             builtin_shape = (
-                isinstance(node.func, ast.Name)
-                or owner in _BUILTIN_SIGNATURE_OPEN_MODULES
+                isinstance(func, ast.Name)
+                or owner is not None
+                or len(node.args) >= 2
             )
-            if owner in _OPEN_WITHOUT_ENCODING_MODULES:
+            if name == "fdopen" and owner != "os":
+                pass
+            elif name == "open" and owner in _OPEN_WITHOUT_ENCODING_MODULES:
                 pass
             elif _open_mode_is_binary(node, 1 if builtin_shape else 0) is False:
-                caller = "open()" if builtin_shape else "Path.open()"
+                if owner:
+                    caller = f"{owner}.{name}()"
+                else:
+                    caller = "open()" if builtin_shape else "Path.open()"
                 suggestion = (
                     f"implicit text encoding on {caller} -- Python "
                     f"resolves the default from the platform locale "

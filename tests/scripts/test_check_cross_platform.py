@@ -1043,12 +1043,78 @@ def test_implicit_encoding_open_on_no_encoding_module_not_flagged(
         a = tokenize.open("x.py")
         b = tarfile.open(fileobj=buf, mode="w")
         c = os.open("x", os.O_RDONLY)
+        d = os.open("x", flags=os.O_RDONLY)
         def f():
             import tarfile as _tf
             return _tf.open(fileobj=buf, mode="r")
     """)
     findings = linter.scan([p], base=tmp_path)
     assert findings == []
+
+
+def test_implicit_encoding_module_open_reads_mode_second(
+    tmp_path: Path,
+) -> None:
+    """A module-level `m.open(file, mode)` and any 2+-positional
+    `.open()` read the mode from the second positional, like the
+    builtin: binary `gzip`/`lzma`/`wave` opens are not flagged (their
+    `encoding=` would raise ValueError), a text `gzip.open(p, "rt")`
+    and an unknown `fs.open(p, "r")` are, and a one-argument
+    `Path.open("rb")` still reads its mode first (#2197)."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        import gzip, lzma, wave
+        from pathlib import Path
+        a = gzip.open("x.gz", "rb")
+        b = lzma.open("x.xz", "wb")
+        c = wave.open("x.wav", "rb")
+        d = gzip.open(p, "rt")
+        e = fs.open(p, "r")
+        f = Path(x).open("rb")
+        g = gzip.open("x.gz", mode="rb")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert [f.line for f in findings] == [6, 7]
+    assert "gzip.open()" in findings[0].suggestion
+
+
+def test_implicit_encoding_from_import_open_resolves_to_module(
+    tmp_path: Path,
+) -> None:
+    """A module-level `from tokenize import open` makes the bare
+    `open()` tokenize's, which takes no `encoding=` -- not flagged.  A
+    function-scope one does NOT exempt the file's builtin `open()`
+    calls (#2197)."""
+    top = _write(tmp_path, "scripts/top.py", """
+        from tokenize import open
+        f = open("x.py")
+    """)
+    assert linter.scan([top], base=tmp_path) == []
+    local = _write(tmp_path, "scripts/local.py", """
+        def f():
+            from tokenize import open
+        g = open("x")
+    """)
+    assert [f.line for f in linter.scan([local], base=tmp_path)] == [3]
+
+
+def test_implicit_encoding_os_fdopen_flagged_in_text_mode(
+    tmp_path: Path,
+) -> None:
+    """`os.fdopen(fd, mode)` is builtin-shaped: text mode (explicit or
+    default) is flagged, binary is not, a `from os import fdopen` alias
+    counts, and an `fdopen` on an unknown owner is ignored (#2197)."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        import os
+        from os import fdopen
+        a = os.fdopen(fd, "w")
+        b = os.fdopen(fd, "wb")
+        c = os.fdopen(fd)
+        d = fdopen(fd, "w")
+        e = thing.fdopen(fd, "w")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert [f.line for f in findings] == [3, 5, 6]
+    assert "os.fdopen()" in findings[0].suggestion
 
 
 def test_implicit_encoding_unrelated_open_call_not_flagged(

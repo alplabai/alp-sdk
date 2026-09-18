@@ -13,7 +13,8 @@ def _run(*args, **kw):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
         encoding="utf-8",
-        env={**kw.pop("env", os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"},
+        **kw,
     )
 
 
