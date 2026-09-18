@@ -454,6 +454,10 @@ void dw_setup_timeout(const struct device *dev,
 	to_clk_div = MAX(TO_CLK_DIV, DIV_ROUND_UP(hstx_to, DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK));
 	to_clk_div = MIN(to_clk_div, DSI_CLKMGR_CFG_TO_CLK_DIV_MASK);
 	hstx_to /= to_clk_div;
+	if (hstx_to > DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK) {
+		LOG_WRN("HS-TX timeout %u exceeds HSTX_TO_CNT, clamped", hstx_to);
+		hstx_to = DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK;
+	}
 
 	reg_write_part(regs + DSI_CLKMGR_CFG, to_clk_div,
 			DSI_CLKMGR_CFG_TO_CLK_DIV_MASK,

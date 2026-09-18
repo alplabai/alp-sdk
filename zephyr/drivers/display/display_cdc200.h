@@ -488,13 +488,6 @@ int cdc200_display_read(const struct device *dev, uint8_t idx, const uint16_t x,
 void cdc200_get_capabilities(const struct device *dev, struct cdc200_display_caps *capabilities);
 
 /**
- * @brief Enable or disable the CDC200 controller (global enable bit).
- *
- * @param dev    CDC200 device.
- * @param enable true to enable, false to disable.
- */
-
-/**
  * @brief Queue a framebuffer swap for a given layer (applied at next line IRQ).
  *
  * @param dev CDC200 device.
