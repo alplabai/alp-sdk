@@ -114,14 +114,15 @@ config ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 	range 1 8
 	help
 	  Number of video_buffer_alloc() frame buffers
-	  src/backends/camera/zephyr_video.c queues at alp_camera_open()
-	  (raised to the capture driver's min_vbuf_count if that is
-	  larger).  Each buffer is pitch x height bytes and comes from
+	  src/backends/camera/zephyr_video.c queues at alp_camera_open().
+	  If the capture driver's min_vbuf_count is larger, the open fails
+	  with ALP_ERR_OUT_OF_RANGE -- the count is not raised for you.
+	  Each buffer is pitch x height bytes and comes from
 	  the Zephyr video buffer pool, so keep
 	  VBUF_COUNT x frame size <= CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE.
 	  Drop to 1 for full-frame sensors whose single frame already
-	  fills most of the pool (e.g. a 1440x1080 RAW10 frame is about
-	  3 MB unpacked).
+	  fills most of the pool (e.g. the IMX296's 1456x1088 RAW10 frame
+	  is 3,168,256 bytes unpacked).
 
 config ALP_SDK_CAMERA_ALIF_ISP
 	bool "Compile the Alif Ensemble ISP-Pico camera backend (OPT-IN)"

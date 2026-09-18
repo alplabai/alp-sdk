@@ -165,6 +165,13 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
+	/* The ISP only outputs processed RGB.  A raw or mono request must fail
+	 * here: _to_video_fourcc() maps it to 0 ("no format requested"), which
+	 * would keep the ISP's default RGB output and hand back the wrong format. */
+	if (cfg->format == ALP_PIXFMT_GREY8 || cfg->format == ALP_PIXFMT_RAW8 ||
+	    cfg->format == ALP_PIXFMT_RAW10) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
 		return ALP_ERR_NOT_READY;
