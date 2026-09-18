@@ -19,11 +19,33 @@ real `MIPI_CKEN` clock gates, including the new `ALIF_MIPI_RXDPHY_CLK` (bit 4).
 The SoC `dphy` node itself is unchanged.
 
 **Real camera clock IDs.** `ALIF_CPI_CLK` (`PERIPH_CLK_ENA` bit 0) and
-`ALIF_CSI_CLK` (`PERIPH_CLK_ENA` bit 24) replace the frequency-only dummy, and
-the `csi` node's `pix_clk` is now `ALIF_CSI_PIX_SYST_ACLK` (`CSI_PIXCLK_CTRL`
-`CLK_ENA` bit 0, `CLK_SEL` bit 4 = 0, 400 MHz SYST_ACLK). The pixel-clock
-divider is still not programmable: the clock controller has no `.set_rate` for
-it, so `video_set_format()` on the CSI path fails on hardware until that lands.
+`ALIF_CSI_CLK` (`PERIPH_CLK_ENA` bit 24) replace the frequency-only dummy. The
+`csi` node's `pix_clk` is now `ALIF_CSI_PIX_SYST_ACLK` (`CSI_PIXCLK_CTRL`
+`CLK_ENA` bit 0, `CLK_SEL` bit 4 = 0, 400 MHz SYST_ACLK), and the `cam` node
+gains a `pix_clk`, the new `ALIF_CAM_PIX_SYST_ACLK` (`CAMERA_PIXCLK_CTRL`, same
+fields). In CSI mode the CPI runs that clock at the rate the CSI bridge
+programmed.
+
+**The camera pixel-clock dividers are programmable.** The Alif clock-control
+patch (`zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch`)
+now gives `.set_rate` / `.get_rate` the `CAMERA_PIXCLK_CTRL` / `CSI_PIXCLK_CTRL`
+divisor (bits [24:16], 2..0x1FF). `set_rate` picks the slowest reachable rate
+that is still at least the request and returns `-ERANGE` above source / 2. The
+source rate comes from the register's `CLK_SEL`, and `CLK_SEL` = 1 is refused
+because its rate is not yet settled. Before this, the CSI bridge's
+`clock_control_set_rate(pix_clk)` failed with `-ENOTSUP`, so `video_set_format()`
+could never succeed on hardware. A workspace that applied the previous version
+of this patch now reports it as drifted: re-apply it with
+`west patch --dst-module zephyr clean` then `west patch --dst-module zephyr apply`.
+The clean step discards local edits in the zephyr checkout.
+
+**The CSI pixel clock gives up its margin before it gives up.**
+`csi2_dw_validate_data()` asks for 1.2 x the pixel rate. When that exceeds the
+200 MHz maximum but the bare pixel rate fits, it now runs at the maximum and
+logs a warning instead of failing. It fails with `-ERANGE` only when even the
+bare rate does not fit, and the error names a wider format or a lower link
+frequency as the fix. A 2-lane IMX219 at 456 MHz therefore streams RAW10
+(182.4 Mpixel/s, run at 200 MHz); RAW8 (228 Mpixel/s) is refused.
 
 **RAW10 Bayer is accepted.** `VIDEO_PIX_FMT_SBGGR10P`, `SGBRG10P`, `SGRBG10P`
 and `SRGGB10P` now map to CSI-2 data type RAW10 in both `video_csi_dw.c` and

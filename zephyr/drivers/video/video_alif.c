@@ -377,6 +377,40 @@ static const struct {
 	{VIDEO_PIX_FMT_Y14P, VIDEO_PIX_FMT_Y14},
 };
 
+/*
+ * Alp Lab AB: in CSI mode, run the CPI pixel clock (CAMERA_PIXCLK_CTRL) at the
+ * rate the CSI bridge just programmed on its own pixel clock.  The HWRM prose
+ * names CAMERA_PIXCLK_CTRL as the CPI PIXEL_CLK source in CSI mode, while its
+ * block diagram and the fork sample (which uses it only as the sensor XVCLK)
+ * point at the CSI PIXCLK; matching the two rates is right under either
+ * reading.  No-op when the DT carries neither clock.
+ */
+static int alif_cam_sync_pixclk(const struct device *dev)
+{
+	const struct video_cam_config *config = dev->config;
+	uint32_t hz;
+	int ret;
+
+	if ((config->pix_cid == NULL) || (config->csi_pix_cid == NULL)) {
+		return 0;
+	}
+
+	ret = clock_control_get_rate(config->clk_dev, config->csi_pix_cid, &hz);
+	if (ret) {
+		LOG_ERR("Failed to read the CSI pixel clock! ret - %d", ret);
+		return ret;
+	}
+
+	ret = clock_control_set_rate(config->clk_dev, config->pix_cid,
+				     (clock_control_subsys_rate_t)hz);
+	if (ret) {
+		LOG_ERR("Failed to set the CPI pixel clock to %u Hz! ret - %d", hz, ret);
+		return ret;
+	}
+
+	return clock_control_on(config->clk_dev, config->pix_cid);
+}
+
 /* Returns the CPI data mode programmed (>= 0), or a negative errno. */
 static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 {
@@ -577,9 +611,15 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	}
 
 	if (config->interface == CAM_INTERFACE_SERIAL) {
-		ret = alif_cam_set_csi(dev, link.pixelformat);
-		if (ret < 0) {
+		int mode = alif_cam_set_csi(dev, link.pixelformat);
+
+		if (mode < 0) {
 			LOG_ERR("Failed to configure CAM as per the CSI.");
+			return mode;
+		}
+
+		ret = alif_cam_sync_pixclk(dev);
+		if (ret) {
 			return ret;
 		}
 
@@ -593,7 +633,7 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		 * ponytail: the 32-bit RGB888 container keeps its RGB24 fourcc
 		 * (only the pitch is corrected); remap it once a sensor needs it.
 		 */
-		fmt->pitch = fmt->width << (ret - CPI_DATA_MODE_8_BIT);
+		fmt->pitch = fmt->width << (mode - CPI_DATA_MODE_8_BIT);
 		fmt->pixelformat = link.pixelformat;
 		for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
 			if (link.pixelformat == cpi_unpacked_fmts[i].link) {
@@ -1270,14 +1310,23 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	return 0;
 }
 
+#define REMOTE_DEVICE(i, id) \
+	DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, id, 0))
+
+/* Alp Lab AB: pix_cid = this CPI's "pix_clk"; csi_pix_cid = the "pix_clk" of
+ * the port@0 source (the CSI bridge; a parallel sensor has none). */
 #define CAM_GET_CLK(i)                                                         \
 	IF_ENABLED(DT_INST_NODE_HAS_PROP(i, clocks),                           \
 		(.clk_dev = DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(i)),             \
 		 .cid = (clock_control_subsys_t)DT_INST_CLOCKS_CELL_BY_NAME(i, \
-			 cam_clk, clkid),))
-
-#define REMOTE_DEVICE(i, id) \
-	DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, id, 0))
+			 cam_clk, clkid),                                      \
+		 IF_ENABLED(DT_INST_CLOCKS_HAS_NAME(i, pix_clk),               \
+			(.pix_cid = (clock_control_subsys_t)                   \
+				DT_INST_CLOCKS_CELL_BY_NAME(i, pix_clk, clkid),)) \
+		 IF_ENABLED(DT_CLOCKS_HAS_NAME(REMOTE_DEVICE(i, 0), pix_clk),  \
+			(.csi_pix_cid = (clock_control_subsys_t)               \
+				DT_CLOCKS_CELL_BY_NAME(REMOTE_DEVICE(i, 0),    \
+						       pix_clk, clkid),))))
 
 #define CPI_DEFINE(i)                                                                              \
 	IF_ENABLED(CONFIG_PINCTRL,                                                                 \

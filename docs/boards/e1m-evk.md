@@ -206,9 +206,15 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   the HE core's DTCM).  RAW10 sensors are delivered to memory as
   unpacked 16-bit samples (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2),
   not the packed wire format.  Compiled against the upstream IMX219
-  driver; not yet run on hardware.  Known gap: this tree's clock
-  controller cannot yet program the CSI pixel-clock divider, so
-  `video_set_format()` on the camera fails on hardware until it can.
+  driver; not yet run on hardware.
+
+  The CSI-2 pixel clock tops out at 200 MHz (400 MHz source / 2), and
+  one pixel moves per clock.  A 2-lane IMX219 at its 456 MHz link
+  therefore needs RAW10 (`VIDEO_PIX_FMT_SBGGR10P`, 182.4 Mpixel/s):
+  RAW8 would need 228 Mpixel/s and `video_set_format()` refuses it
+  with `-ERANGE`.  The divider is programmed by the Alif clock-control
+  patch in `zephyr/patches.yml`, so the workspace must be patched
+  (`scripts/bootstrap.sh` does it).
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK

@@ -362,6 +362,7 @@ static int csi2_dw_validate_data(const struct device *dev)
 	struct dphy_csi2_settings *phy =
 		&data->phy[data->current_sensor];
 	float pixclock;
+	float pixrate;
 	uint32_t bpp;
 	uint32_t tmp;
 	int ret;
@@ -386,16 +387,42 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * Balanced pixel clock for 20% more input bandwidth:
 	 * balanced pixel clock = pix_clk * 1.2
 	 */
-	pixclock = ((phy->pll_fin << 1) * phy->num_lanes * CSI2_BANDWIDTH_SCALER) / bpp;
+	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
+	pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
 	tmp = (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
+	if (ret == -ERANGE) {
+		/*
+		 * Alp Lab AB: the 20 % margin does not fit under the pixel-clock
+		 * divider's maximum.  Ask for the bare pixel rate instead: the
+		 * clock controller rounds up to the nearest reachable rate, which
+		 * is then the maximum.  Fail only if even that does not fit.
+		 */
+		ret = clock_control_set_rate(config->clk_dev, config->pixclk,
+				(clock_control_subsys_rate_t)(uint32_t)pixrate);
+		if (ret == 0) {
+			LOG_WRN("CSI pixclk %u Hz (1.2 x %u Hz pixel rate) exceeds the max; "
+				"running at the max with < 20%% margin", tmp, (uint32_t)pixrate);
+		} else if (ret == -ERANGE) {
+			LOG_ERR("CSI pixel rate %u Hz (link %u Hz, %u lanes, %u bpp) exceeds "
+				"the pixel-clock max; use a wider format (e.g. RAW10, not RAW8) "
+				"or a lower sensor link frequency", (uint32_t)pixrate,
+				phy->pll_fin, phy->num_lanes, bpp);
+			return ret;
+		}
+	}
 	if (ret) {
-		LOG_ERR("Failed to set pixel clock rate to CPI and CSI!");
+		LOG_ERR("Failed to set CSI pixel clock rate! ret - %d", ret);
 		return ret;
+	}
+
+	/* Use the rate actually programmed (a divider rounds up) for the timings. */
+	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
+		pixclock = tmp;
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {

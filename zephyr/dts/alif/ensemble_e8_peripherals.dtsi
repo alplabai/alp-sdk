@@ -1637,14 +1637,15 @@
 	 *          "dsi_reg" 0x49032000/0x1000, "expmst_reg" 0x4903f000/0x40
 	 *          clock-names "pllref-clk","pllbypass-clk","tx-dphy-clk","rx-dphy-clk"
 	 *
-	 * CLOCKS -- cam "cam_clk" = ALIF_CPI_CLK and csi "csi_clk"/"pix_clk" =
-	 * ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK are REAL CLKCTL_PER_MST gates in the
-	 * upstream encoding (alif-ensemble-clocks-ext.h CAMERA CAPTURE block).  The
+	 * CLOCKS -- cam "cam_clk"/"pix_clk" = ALIF_CPI_CLK / ALIF_CAM_PIX_SYST_ACLK
+	 * and csi "csi_clk"/"pix_clk" = ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK are
+	 * REAL CLKCTL_PER_MST gates in the upstream encoding
+	 * (alif-ensemble-clocks-ext.h CAMERA CAPTURE block).  The
 	 * dphy node below keeps the frequency-only dummy ALIF_CSI_DPHY_CLK on all
 	 * four clocks; a board/shield overlay that enables the D-PHY supplies the
 	 * real ALIF_MIPI_*_CLK gates (boards/shields/e1m_evk_rpi_csi does, for the
-	 * camera RX path).  The pixel-clock DIVIDER is not programmed by this
-	 * tree's clockctrl (no .set_rate for it) -- see that header block.
+	 * camera RX path).  The pixel-clock dividers are programmed through the
+	 * clockctrl .set_rate added by zephyr/patches/zephyr/0001-*.patch.
 	 * These nodes stay status="disabled" here -- a board overlay enables them.
 	 *
 	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
@@ -1680,8 +1681,8 @@
 		compatible = "alif,cam";
 		reg = <0x49030000 0x1000>;
 		interrupts = <345 0>;
-		clocks = <&clockctrl ALIF_CPI_CLK>;
-		clock-names = "cam_clk";
+		clocks = <&clockctrl ALIF_CPI_CLK>, <&clockctrl ALIF_CAM_PIX_SYST_ACLK>;
+		clock-names = "cam_clk", "pix_clk";
 		fifo-wr-wmark = <0x18>;
 		fifo-rd-wmark = <0x08>;
 		wait-vsync;

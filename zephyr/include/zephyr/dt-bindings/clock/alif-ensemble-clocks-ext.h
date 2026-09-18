@@ -160,12 +160,13 @@
  * source (CLK_SEL=0 selects the 400 MHz SYST_ACLK).
  *
  * The *_PIXCLK_CTRL divisor field [24:16] (DFP *_PIXCLK_CTRL_DIVISOR_Msk) is
- * NOT expressible in this encoding and the upstream clockctrl has no .set_rate
- * for it, so clock_control_on() leaves the divider at its reset value and
- * video_csi_dw.c's clock_control_set_rate(pix_clk) returns an error.
+ * not expressible in this encoding; clock_control_set_rate() programs it
+ * through zephyr/patches/zephyr/0001-clock_control_alif-*.patch (pixel-clock
+ * hunk), and clock_control_get_rate() reports source / divisor.
  * vendor-ext, BENCH-UNVERIFIED.
  */
-#define ALIF_CSI_PIXCLK_CTRL_REG 0x08U /* CSI pixel-clock control */
+#define ALIF_CAMERA_PIXCLK_CTRL_REG 0x00U /* CPI pixel-clock control */
+#define ALIF_CSI_PIXCLK_CTRL_REG    0x08U /* CSI pixel-clock control */
 /* CPI gate: PERIPH_CLK_ENA(0x4903F00C) bit0 CPI_CKEN.  DFP sys_ctrl_cpi.h:28. */
 #define ALIF_CPI_CLK                                                         \
 	ALIF_CLK_CFG(CLKCTL_PER_MST, PERIPH_CLK_ENA, 0U, 1U, 0U, 0U, 0U,     \
@@ -178,6 +179,13 @@
  * (src_val 0 = SYST_ACLK 400 MHz).  DFP sys_ctrl_csi.h:31-32. */
 #define ALIF_CSI_PIX_SYST_ACLK                                               \
 	ALIF_CLK_CFG(CLKCTL_PER_MST, CSI_PIXCLK_CTRL, 0U, 1U, 0U, 1U, 4U,    \
+		     ALIF_PARENT_CLK_SYST_ACLK)
+/* CPI pixel clk: CAMERA_PIXCLK_CTRL(0x4903F000) CLK_ENA bit0, CLK_SEL bit4
+ * (src_val 0 = SYST_ACLK 400 MHz).  DFP sys_ctrl_cpi.h:31-32.  The same
+ * divider also feeds the CAM_XVCLK sensor-clock output; video_alif.c runs it
+ * at the CSI pixel-clock rate in CSI mode. */
+#define ALIF_CAM_PIX_SYST_ACLK                                               \
+	ALIF_CLK_CFG(CLKCTL_PER_MST, CAMERA_PIXCLK_CTRL, 0U, 1U, 0U, 1U, 4U, \
 		     ALIF_PARENT_CLK_SYST_ACLK)
 /* D-PHY RX config-clk gate: MIPI_CKEN(0x4903F040) bit4 RXDPHY_CKEN.  DFP
  * sys_ctrl_dphy.h:72.  dphy_dw.c enables it (rx-dphy-clk) for D-PHY id 0. */
