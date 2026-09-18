@@ -156,9 +156,9 @@ Everything else the alp-sdk DRP-AI3 backend compiles and links against
 `recipes-renesas/mera2-drpai-tvm`, a recipe in **this** layer: it
 fetches and vendors nothing, it only stages/compiles those headers and
 libraries out of a built RUHMI / `rzv_drp-ai_tvm` checkout that the
-builder points it at (see [Model compilation toolchain
-(RUHMI / DRP-AI TVM)](#model-compilation-toolchain-ruhmi--drp-ai-tvm)
-below, which also covers making the checkout visible to the bake).
+builder points it at (see the "Model compilation toolchain
+(RUHMI / DRP-AI TVM)" section below, which also covers making the
+checkout visible to the bake).
 `mera_drpai_wrapper` is the one exception to "staging-only": RUHMI
 ships no prebuilt library for `MeraDrpRuntimeWrapper`'s own symbols
 (ctor, `Run`, `SetInput`, `GetInputInfo`, …) at all — they are
