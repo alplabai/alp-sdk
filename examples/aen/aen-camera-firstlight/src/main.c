@@ -24,16 +24,15 @@
  *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"   # IMX219, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
+ *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
  *
  * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
  * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
  * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 and upstream
  * Zephyr's Kconfig.imx219), so this app picks its capture format the same
- * way: a compile-time #if ladder on those same three Kconfig symbols below,
- * not a runtime probe.  Adding the fourth shield this branch designs for
- * but doesn't ship yet (raspberry_pi_global_shutter_camera / IMX296, RAW10
- * full frame) is one more #elif here plus one more testcase.yaml scenario
- * -- nothing else in this file changes.
+ * way: a compile-time #if ladder on those same four Kconfig symbols below,
+ * not a runtime probe.  A new shield is one more #elif here plus one more
+ * testcase.yaml scenario -- nothing else in this file changes.
  *
  * See README.md for what each printed line means and the expected result
  * per module.
@@ -75,6 +74,16 @@
 #define CAM_SHIELD_NAME \
 	(IS_ENABLED(CONFIG_VIDEO_IMX219) ? "raspberry_pi_camera_module_2 (IMX219, RAW10 640x480)" \
 	                                 : "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)")
+#elif defined(CONFIG_VIDEO_IMX296)
+/* RPi Global Shutter Camera (IMX296LQR-C): one fixed all-pixel mode, so no
+ * crop -- 1440x1080 RAW10 over a single CSI-2 lane.  Unpacked that is
+ * 1440 x 1080 x 2 = 3,110,400 bytes, so this example's Kconfig drops the
+ * backend to ONE frame buffer and grows the SRAM0 pool to fit it. */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           1440
+#define CAM_HEIGHT          1080
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1440x1080)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif

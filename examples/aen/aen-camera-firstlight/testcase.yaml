@@ -68,3 +68,17 @@ tests:
       - video
       - csi
     build_only: true
+
+  alp_sdk.examples.aen.camera_firstlight.imx296:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true

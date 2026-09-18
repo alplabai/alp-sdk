@@ -19,16 +19,17 @@ ZEPHYR_BASE=<zephyr> west build \
 # ... or:
   -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"   # OV5647, RAW10 640x480
   -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"            # OV9281, GREY8 640x400
+  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10 1440x1080
 ```
 
 Which shield is stacked selects the capture format at **compile time**: exactly
-one of `CONFIG_VIDEO_IMX219` / `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281`
-auto-enables (each `default y` under its sensor's devicetree node), and
-`src/main.c`'s `#if` ladder on those same three symbols picks the matching
-width/height/format. See `src/main.c`'s header comment for the full ladder —
-adding the fourth shield this branch designs for but doesn't ship yet
-(`raspberry_pi_global_shutter_camera`, IMX296, RAW10 full frame) is one more
-`#elif` there plus one more `testcase.yaml` scenario, nothing else changes.
+one of `CONFIG_VIDEO_IMX219` / `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281` /
+`CONFIG_VIDEO_IMX296` auto-enables (each `default y` under its sensor's
+devicetree node), and `src/main.c`'s `#if` ladder on those same four symbols
+picks the matching width/height/format. IMX296 has a single full-frame mode
+(1440x1080 RAW10, about 3 MB unpacked), so this example's `Kconfig` drops the
+backend to one frame buffer and grows the SRAM0 pool to 3 MiB for that shield
+only. A new shield is one more `#elif` plus one more `testcase.yaml` scenario.
 
 ## What each printed line means
 
@@ -66,6 +67,7 @@ RESULT: capture ok
 | `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`), BENCH-UNVERIFIED. |
 | `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 | ADR 0017 Tier-2 port of the Espressif driver, BENCH-UNVERIFIED. |
+| `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1440x1080, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
 ## Frame buffers live in SRAM0, not DTCM
 

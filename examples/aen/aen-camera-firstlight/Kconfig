@@ -1,0 +1,17 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+# Per-shield buffer sizing.  The IMX296 shield's only mode is a full
+# 1440x1080 RAW10 frame (about 3 MB unpacked): two of those would not fit
+# the 4 MiB SRAM0 bank, so queue a single buffer and size the pool for it.
+# Every other shield keeps the defaults (two buffers, 2 MiB pool).
+configdefault ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
+	default 1 if VIDEO_IMX296
+
+configdefault VIDEO_BUFFER_POOL_NUM_MAX
+	default 1 if VIDEO_IMX296
+
+configdefault VIDEO_BUFFER_POOL_HEAP_SIZE
+	default 3145728 if VIDEO_IMX296
+
+source "Kconfig.zephyr"
