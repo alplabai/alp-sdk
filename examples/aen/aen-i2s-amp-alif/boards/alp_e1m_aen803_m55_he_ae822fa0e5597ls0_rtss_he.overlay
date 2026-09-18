@@ -50,10 +50,25 @@
 
 &pinctrl {
 	pinctrl_i2s3: pinctrl_i2s3 {
-		/* TX path: SDO (data out) + SCLK + WS, the I2S3_*_A route (P9_3/4/5). */
+		/* TX: SDO + SCLK + WS, the I2S3_*_A route (P9_3/4/5). RX: SDI
+		 * (P9_2, I2S3_SDI_A) -- U46's 4Y is the one leg of that mux wired
+		 * the correct direction (unlike SDO/SCLK/WS, which contend with
+		 * the SoC and are why this node ships disabled -- see the
+		 * file-header SAFETY note), feeding the amps' SDOUT/IV-sense back
+		 * to the SoC. input-enable sets the pad's REN bit so the input
+		 * buffer actually samples; without it the mux alone is not
+		 * sufficient to receive (REN defaults off). The original TX-only
+		 * scope here was a deliberate choice, not a hazard -- that scope
+		 * has since widened. Still inert on its own: this node ships
+		 * "disabled" by default, so pinctrl-0 is not applied until
+		 * i2s3-enable-post-u46-rework.overlay flips it "okay". */
 		group0 {
 			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
 				 <PIN_P9_5__I2S3_WS_A>;
+		};
+		group1 {
+			pinmux = <PIN_P9_2__I2S3_SDI_A>;
+			input-enable;
 		};
 	};
 };

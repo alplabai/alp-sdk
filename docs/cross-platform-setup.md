@@ -678,11 +678,20 @@ python3 scripts/check_cross_platform.py
 python scripts\check_cross_platform.py
 ```
 
-Expected: exits 0; may print warnings about Linux-only idioms in
-docs.  These warnings are informational today (the lint is soft);
-they document drift for future cleanup.  See
-[ADR 0012](adr/0012-cross-platform-developer-host.md) for why the
-lint is soft initially.
+Expected: exits 0, after printing a few hundred `IMPLICIT-ENCODING`
+warning lines — one per Python text-IO call with no explicit
+`encoding=` in the SDK's own `scripts/` and `tests/` files (478 of
+them across 139 files when the rule landed; the count only shrinks).
+Those sites are grandfathered by the `IMPLICIT_ENCODING_BASELINE`
+set in the script and are drained under #2197.
+
+The lint itself is **not** soft: CI runs it as
+`--fail-on-warning` on every runner (since #1032 A5), and that flag
+fails on any finding *outside* the baseline.  So a new Linux-only
+idiom, or a new implicit encoding in a file not on the list, breaks
+the build — only the grandfathered backlog is exempt.  See
+[ADR 0012](adr/0012-cross-platform-developer-host.md) for the
+cross-platform promise this lint enforces.
 
 ### 6.3 Native_sim example build
 

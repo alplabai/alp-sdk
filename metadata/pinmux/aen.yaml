@@ -26,7 +26,6 @@ pads:
   - { e1m_pad: "A15", e1m_function: "ANA_S0", owner: "alif", silicon_peripheral: "ANA_S0", silicon_pad: "P0_0" }
   - { e1m_pad: "A16", e1m_function: "DAC0", owner: "alif", silicon_peripheral: "DAC_0", silicon_pad: "P2_2" }
   - { e1m_pad: "A19", e1m_function: "CAN_STBY", owner: "alif", silicon_peripheral: "CAN_STBY_A", silicon_pad: "P7_3/SCP3_A" }
-  - { e1m_pad: "A31", e1m_function: "BL_LED_A", owner: "alif", silicon_peripheral: "UT2_T1_B", silicon_pad: "P5_5" }
   - { e1m_pad: "AA1", e1m_function: "PDM_C0", owner: "alif", silicon_peripheral: "PDM_C0_C", silicon_pad: "P6_1" }
   - { e1m_pad: "AA2", e1m_function: "PDM_D0", owner: "alif", silicon_peripheral: "PDM_D0_C", silicon_pad: "P6_0" }
   - { e1m_pad: "AA32", e1m_function: "CAM_D5", owner: "alif", silicon_peripheral: "CAM_D4", silicon_pad: "P8_4" }

@@ -121,9 +121,22 @@ static const struct clock_control_driver_api fake_clk_api = {
 	.configure = fake_clk_configure,
 };
 
+/*
+ * alp-sdk issue #2179: test (r) below is the first case in this suite to
+ * call i2s_dw_initialize(), which runs device_is_ready(i2s->clk_dev) --
+ * and z_impl_device_is_ready() (zephyr/kernel/device.c) dereferences
+ * dev->state unconditionally, so a device literal without one NULL-derefs
+ * there. This fake carries a state reporting "init ran, returned 0".
+ */
+static struct device_state fake_clk_state = {
+	.init_res    = 0,
+	.initialized = true,
+};
+
 static const struct device fake_clk_dev = {
-	.name = "fake_i2s_clk",
-	.api  = &fake_clk_api,
+	.name  = "fake_i2s_clk",
+	.api   = &fake_clk_api,
+	.state = &fake_clk_state,
 };
 
 /* ---------------------------------------------------------------------
@@ -132,6 +145,19 @@ static const struct device fake_clk_dev = {
  * write directly, in place of a real DesignWare I2S instance's MMIO.
  * ------------------------------------------------------------------ */
 static struct I2S_Type fake_regs;
+
+/*
+ * alp-sdk issue #2179: ISR is declared __IM (volatile const) -- the driver
+ * only ever reads it -- so a test presenting an asserted source has to cast
+ * the qualifier away. Casting through uintptr_t rather than a bare
+ * `(uint32_t *)` keeps this correct on native_sim/native/64, where a
+ * pointer is 64-bit; this suite is the first to compile i2s_dw.c on a
+ * 64-bit host, so every pointer cast it adds has to survive that.
+ */
+static void fake_assert_isr(uint32_t bits)
+{
+	*(volatile uint32_t *)(uintptr_t)&fake_regs.ISR = bits;
+}
 
 #define TEST_BLOCK_BYTES 8U
 #define TEST_SLAB_BLOCKS 4U
@@ -162,6 +188,54 @@ static const struct device test_dev = {
 };
 
 /* ---------------------------------------------------------------------
+ * alp-sdk issue #2179: a second device whose .irq_config CAPTURES the
+ * register state at the exact moment i2s_dw_initialize() arms the NVIC.
+ * On real hardware irq_config() is IRQ_CONNECT() + irq_enable(), i.e. the
+ * first instant a source latched by the PREVIOUS image (this block is not
+ * in the SYSRESETREQ reset domain) can be delivered -- so "was the block
+ * quiesced and every interrupt masked BEFORE the NVIC was armed?" is only
+ * answerable from inside this callback, never from the register file after
+ * i2s_dw_initialize() has returned.
+ * ------------------------------------------------------------------ */
+static int      irq_config_calls;
+static uint32_t imr_at_irq_config;
+static uint32_t ier_at_irq_config;
+static uint32_t irer_at_irq_config;
+static uint32_t iter_at_irq_config;
+static uint32_t rer_at_irq_config;
+static uint32_t ter_at_irq_config;
+
+static void capture_irq_config(const struct device *dev)
+{
+	ARG_UNUSED(dev);
+
+	irq_config_calls++;
+	imr_at_irq_config  = fake_regs.IMR;
+	ier_at_irq_config  = fake_regs.IER;
+	irer_at_irq_config = fake_regs.IRER;
+	iter_at_irq_config = fake_regs.ITER;
+	rer_at_irq_config  = fake_regs.RER;
+	ter_at_irq_config  = fake_regs.TER;
+}
+
+static const struct i2s_dw_cfg test_init_cfg = {
+	.clk_dev             = &fake_clk_dev,
+	.clkid               = (clock_control_subsys_t)0,
+	.cfg.wss_len         = WSS_LEN,
+	.cfg.tx_fifo_trg_lvl = TX_FIFO_TRG_LVL,
+	.cfg.rx_fifo_trg_lvl = RX_FIFO_TRG_LVL,
+	.paddr               = &fake_regs,
+	.irq_config          = capture_irq_config,
+};
+
+static const struct device test_init_dev = {
+	.name   = "i2s_dw_init_under_test",
+	.config = &test_init_cfg,
+	.data   = &test_data,
+	.api    = &i2s_dw_driver_api,
+};
+
+/* ---------------------------------------------------------------------
  * Per-test reset: mirrors i2s_dw_initialize()'s own wiring (the function
  * pointers, ring buffers and semaphores DEVICE_DT_INST_DEFINE()/
  * I2S_DW_INIT would normally set up) plus its boot sequence
@@ -170,21 +244,20 @@ static const struct device test_dev = {
  * under test cares about).
  * ------------------------------------------------------------------ */
 /*
- * alp-sdk issue #2149 (round 2 review finding 4): reference, but never
- * call, the driver's own top-level entry points this test intentionally
- * drives one layer BELOW -- i2s_dw_initialize() (device init is done
- * manually here instead, since no DT instance ever calls it) and
- * i2s_dw_isr() (this test calls i2s_tx_irq_handler()/i2s_rx_irq_handler()
- * directly, exactly as finding 4 specifies, never through the ISR
- * dispatcher) are otherwise dead code from this TU's point of view and
- * trip twister's -Werror=unused-function. i2s_pm_action() genuinely IS
- * exercised in test (f), just never by name -- i2s_suspend()/i2s_resume()
- * are called directly there instead of through its switch.
+ * alp-sdk issue #2149 (round 2 review finding 4): i2s_pm_action() is
+ * genuinely exercised in test (f), just never by name --
+ * i2s_suspend()/i2s_resume() are called directly there instead of through
+ * its switch -- so from this TU's point of view it is dead code and trips
+ * twister's -Werror=unused-function without this reference.
+ *
+ * alp-sdk issue #2179: i2s_dw_initialize() and i2s_dw_isr() used to need
+ * the same treatment (the #2149 cases drive one layer below them, calling
+ * i2s_tx_irq_handler()/i2s_rx_irq_handler() directly and wiring the device
+ * up by hand). Tests (l) through (r) now call both by name, so their
+ * (void) references are gone.
  */
 static void silence_unused_driver_entry_points(void)
 {
-	(void)i2s_dw_initialize;
-	(void)i2s_dw_isr;
 	(void)i2s_pm_action;
 }
 
@@ -199,6 +272,15 @@ static void dw_test_before(void *fixture)
 	fake_on_calls        = 0;
 	fake_off_calls       = 0;
 	fake_configure_calls = 0;
+
+	/* alp-sdk issue #2179 */
+	irq_config_calls   = 0;
+	imr_at_irq_config  = 0;
+	ier_at_irq_config  = 0;
+	irer_at_irq_config = 0;
+	iter_at_irq_config = 0;
+	rer_at_irq_config  = 0;
+	ter_at_irq_config  = 0;
 
 	memset(&test_data, 0, sizeof(test_data));
 	test_data.tx.stream_start        = tx_stream_start;
@@ -691,4 +773,247 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 	zassert_equal(rx_slab_free_after,
 	              rx_slab_free_before,
 	              "RX start allocated (and leaked) an rx slab block before returning -EBUSY");
+}
+
+/*
+ * (l) alp-sdk issue #2179: TXFE asserted AND unmasked while
+ * dev_data->dir == I2S_DIR_RX. Before this fix i2s_dw_isr() read ISR,
+ * matched neither dir-gated branch, changed NOTHING, and returned -- and
+ * because the source is level-held, the NVIC tail-chains straight back in,
+ * which is a live core spinning in the ISR with no fault taken. The ISR
+ * must now mask the source it cannot service, so the interrupt condition
+ * is guaranteed to have changed by the time it returns.
+ *
+ * This is the reachable ordering from the bench: an image runs TX (leaving
+ * TXFEM unmasked over a TX FIFO that is empty -- TXFE's resting state --
+ * because i2s_enable_rx_interrupt() only clears RXDAM|RXFOM), then opens
+ * RX, which repoints dir.
+ */
+ZTEST(i2s_dw_underrun, test_isr_txfe_with_dir_rx_masks_txfe)
+{
+	uint32_t imr_before;
+
+	rx_configure(16000);
+	zassert_equal(test_data.dir, I2S_DIR_RX, "rx configure did not set dir");
+
+	/* "An earlier TX phase left TXFEM unmasked", then TXFE asserts. */
+	fake_regs.IMR = 0U;
+	fake_assert_isr(I2S_ISR_TXFE_Msk);
+	imr_before = fake_regs.IMR;
+
+	i2s_dw_isr(&test_dev);
+
+	zassert_not_equal(fake_regs.IMR,
+	                  imr_before,
+	                  "the ISR returned without changing the interrupt condition -- the NVIC "
+	                  "tail-chains straight back in");
+	zassert_true((fake_regs.IMR & I2S_IMR_TXFEM_Msk) != 0,
+	             "TXFE left asserted AND unmasked while dir == I2S_DIR_RX");
+}
+
+/*
+ * (m) alp-sdk issue #2179: the mirror of (l). RXDA asserted and unmasked
+ * while dir == I2S_DIR_TX is the quieter half -- RXDA needs data to
+ * arrive, and tx_stream_start() disables the RX channel -- but the guard
+ * is about the shape (a source no branch will service), not the bit.
+ */
+ZTEST(i2s_dw_underrun, test_isr_rxda_with_dir_tx_masks_rxda)
+{
+	uint32_t imr_before;
+
+	tx_configure(16000);
+	zassert_equal(test_data.dir, I2S_DIR_TX, "tx configure did not set dir");
+
+	fake_regs.IMR = 0U;
+	fake_assert_isr(I2S_ISR_RXDA_Msk);
+	imr_before = fake_regs.IMR;
+
+	i2s_dw_isr(&test_dev);
+
+	zassert_not_equal(
+	    fake_regs.IMR, imr_before, "the ISR returned without changing the interrupt condition");
+	zassert_true((fake_regs.IMR & I2S_IMR_RXDAM_Msk) != 0,
+	             "RXDA left asserted AND unmasked while dir == I2S_DIR_TX");
+}
+
+/*
+ * (n) alp-sdk issue #2179, the no-regression half: a source the dir gate
+ * DOES route to its handler must still be serviced normally and must NOT
+ * be masked. A guard that simply masked everything asserted would pass (l)
+ * and (m) while killing the working RX stream on its first interrupt --
+ * this is the case that rejects it.
+ */
+ZTEST(i2s_dw_underrun, test_isr_rxda_with_dir_rx_is_serviced_not_masked)
+{
+	uint32_t imr_after_isr;
+	uint32_t rx_offset_after_isr;
+	int      rc;
+
+	rx_configure(16000);
+	rx_start();
+	zassert_true((fake_regs.IMR & I2S_IMR_RXDAM_Msk) == 0,
+	             "rx start left its own RX interrupt masked");
+
+	fake_assert_isr(I2S_ISR_RXDA_Msk);
+	i2s_dw_isr(&test_dev);
+	imr_after_isr       = fake_regs.IMR;
+	rx_offset_after_isr = test_data.rx.mem_block_offset;
+
+	/* Cleanup before the assertions so it still runs if one aborts: the
+	 * handler queued the filled block and allocated a fresh one. */
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "rx drop cleanup failed: %d", rc);
+
+	zassert_true((imr_after_isr & I2S_IMR_RXDAM_Msk) == 0,
+	             "the ISR masked the RX source it had just serviced");
+	zassert_equal(rx_offset_after_isr,
+	              0U,
+	              "the RX handler did not run to a completed block (offset %u)",
+	              rx_offset_after_isr);
+}
+
+/*
+ * (o) alp-sdk issue #2179: rx_stream_start() masks TX's interrupts
+ * alongside the TX channel disable it already did. Disabling the TX
+ * channel does not deassert TXFE (an empty FIFO is what asserts it), and
+ * i2s_enable_rx_interrupt() clears only RXDAM|RXFOM, so TXFEM used to
+ * survive an earlier TX phase into this RX stream -- the precondition
+ * test (l) then spins on.
+ */
+ZTEST(i2s_dw_underrun, test_rx_start_masks_tx_interrupt)
+{
+	uint32_t imr_after_rx_start;
+	int      rc;
+
+	/* "An earlier TX phase left TXFEM unmasked." */
+	fake_regs.IMR = 0U;
+
+	rx_configure(16000);
+	rx_start();
+	imr_after_rx_start = fake_regs.IMR;
+
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "rx drop cleanup failed: %d", rc);
+
+	zassert_equal(imr_after_rx_start & (I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk),
+	              I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk,
+	              "rx_stream_start() left TX's interrupts unmasked (IMR=0x%08x)",
+	              imr_after_rx_start);
+	zassert_equal(imr_after_rx_start & I2S_IMR_RXDAM_Msk,
+	              0U,
+	              "rx_stream_start() masked its own RX interrupt");
+}
+
+/*
+ * (p) alp-sdk issue #2179: the mirror of (o) -- tx_stream_start() masks
+ * RX's interrupts alongside the RX channel disable it already did.
+ */
+ZTEST(i2s_dw_underrun, test_tx_start_masks_rx_interrupt)
+{
+	uint32_t imr_after_tx_start;
+	int      rc;
+
+	fake_regs.IMR = 0U;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+	imr_after_tx_start = fake_regs.IMR;
+
+	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
+	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
+
+	zassert_equal(imr_after_tx_start & (I2S_IMR_RXDAM_Msk | I2S_IMR_RXFOM_Msk),
+	              I2S_IMR_RXDAM_Msk | I2S_IMR_RXFOM_Msk,
+	              "tx_stream_start() left RX's interrupts unmasked (IMR=0x%08x)",
+	              imr_after_tx_start);
+	zassert_equal(imr_after_tx_start & I2S_IMR_TXFEM_Msk,
+	              0U,
+	              "tx_stream_start() masked its own TX interrupt");
+}
+
+/*
+ * (q) alp-sdk issue #2179: dev_data->dir used to be assigned as the FIRST
+ * statement of i2s_dw_configure(), before the switch validated anything --
+ * so a call that went on to fail still repointed the one field
+ * i2s_dw_isr() consults, permanently, while changing nothing else.
+ * I2S_DIR_BOTH is the worst of the three failures: it leaves dir matching
+ * NEITHER ISR branch, so from then on every I2S interrupt is unserviced.
+ */
+ZTEST(i2s_dw_underrun, test_failed_configure_leaves_dir_unchanged)
+{
+	struct i2s_config cfg = make_cfg(16000, &test_rx_slab);
+	int               rc;
+
+	tx_configure(16000);
+	zassert_equal(test_data.dir, I2S_DIR_TX, "tx configure did not set dir");
+
+	rc = i2s_dw_configure(&test_dev, I2S_DIR_BOTH, &cfg);
+	zassert_equal(rc, -ENOSYS, "I2S_DIR_BOTH did not return -ENOSYS: %d", rc);
+	zassert_equal(test_data.dir,
+	              I2S_DIR_TX,
+	              "a failed I2S_DIR_BOTH configure() repointed the ISR direction gate at a "
+	              "direction neither ISR branch matches");
+
+	rc = i2s_dw_configure(&test_dev, (enum i2s_dir)(I2S_DIR_BOTH + 1), &cfg);
+	zassert_equal(rc, -EINVAL, "an invalid direction did not return -EINVAL: %d", rc);
+	zassert_equal(test_data.dir,
+	              I2S_DIR_TX,
+	              "a failed invalid-direction configure() repointed the ISR direction gate");
+}
+
+/*
+ * (r) alp-sdk issue #2179: i2s_dw_initialize() must quiesce the block and
+ * mask every interrupt BEFORE irq_config() arms the NVIC. The I2S block is
+ * NOT in the SYSRESETREQ reset domain -- measured on e1m-aen-evk-03, CER
+ * and TER both survived a J-Link `loadbin`'s implicit SYSRESETREQ at
+ * 0x00000001 and only a RESETPIN reset cleared them to 0x00000000 -- so a
+ * fresh image inherits the previous one's IER/IMR/IRER/ITER/RER/TER. The
+ * old order armed the NVIC first and masked two statements later, with
+ * dev_data->dir fresh from BSS as 0 (== I2S_DIR_RX) and no stream
+ * configured at all.
+ *
+ * The assertions read the state captured INSIDE irq_config(), not the
+ * register file after init returns -- that is the only instant the
+ * ordering is observable.
+ */
+ZTEST(i2s_dw_underrun, test_initialize_quiesces_before_arming_irq)
+{
+	const uint32_t all_masked =
+	    I2S_IMR_RXDAM_Msk | I2S_IMR_RXFOM_Msk | I2S_IMR_TXFEM_Msk | I2S_IMR_TXFOM_Msk;
+	int rc;
+
+	/* Model the worst case a warm reset can hand over: block and both
+	 * channels enabled, every interrupt unmasked. */
+	fake_regs.IER  = I2S_IER_IEN_Msk;
+	fake_regs.IRER = I2S_IRER_RXEN_Msk;
+	fake_regs.ITER = I2S_ITER_TXEN_Msk;
+	fake_regs.RER  = I2S_RER_RXCHEN_Msk;
+	fake_regs.TER  = I2S_TER_TXCHEN_Msk;
+	fake_regs.IMR  = 0U;
+
+	rc = i2s_dw_initialize(&test_init_dev);
+	zassert_equal(rc, 0, "i2s_dw_initialize failed: %d", rc);
+	zassert_equal(irq_config_calls, 1, "irq_config not called exactly once: %d", irq_config_calls);
+
+	zassert_equal(imr_at_irq_config & all_masked,
+	              all_masked,
+	              "NVIC armed with an I2S source still unmasked (IMR=0x%08x)",
+	              imr_at_irq_config);
+	zassert_equal(ier_at_irq_config & I2S_IER_IEN_Msk, 0U, "NVIC armed with IER.IEN still set");
+	zassert_equal(
+	    irer_at_irq_config & I2S_IRER_RXEN_Msk, 0U, "NVIC armed with IRER.RXEN still set");
+	zassert_equal(
+	    iter_at_irq_config & I2S_ITER_TXEN_Msk, 0U, "NVIC armed with ITER.TXEN still set");
+	zassert_equal(
+	    rer_at_irq_config & I2S_RER_RXCHEN_Msk, 0U, "NVIC armed with RER.RXCHEN still set");
+	zassert_equal(
+	    ter_at_irq_config & I2S_TER_TXCHEN_Msk, 0U, "NVIC armed with TER.TXCHEN still set");
+
+	/* The #2149/#2150 invariant is unchanged: CER.CLKEN reads 1 from
+	 * i2s_dw_initialize() onward -- it is just set a few statements later
+	 * now, by the i2s_enable_controller() call this reordering moved
+	 * below irq_config(). */
+	zassert_true((fake_regs.CER & I2S_CER_CLKEN_Msk) != 0,
+	             "i2s_dw_initialize() left CER.CLKEN clear");
 }

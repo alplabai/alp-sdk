@@ -8,8 +8,12 @@ foreign regardless of which subpath is cited.
 """
 
 import importlib.util
+import re
+import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_changelog_citations.py"
@@ -269,7 +273,7 @@ def test_fix_repoints_a_drifted_anchored_citation(tmp_path):
     mod, frag = _tree(
         tmp_path, _source(7, "#define AMP_ENABLE_RESET_HOLD_MS 24u"),
         'see `src/a.c:3` ("#define AMP_ENABLE_RESET_HOLD_MS 24u")\n')
-    new, rewrites, problems, unanchored = mod._fix_one(frag, frag.read_text())
+    new, rewrites, problems, unanchored = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:7`" in new
     assert problems == [] and unanchored == 0
     assert len(rewrites) == 1
@@ -280,7 +284,7 @@ def test_fix_preserves_a_ranges_width(tmp_path):
     line: the range's width is part of what the note claims."""
     mod, frag = _tree(tmp_path, _source(8, "ANCHOR TEXT HERE"),
                       'see `src/a.c:2-6` ("ANCHOR TEXT HERE")\n')
-    new, _, _, _ = mod._fix_one(frag, frag.read_text())
+    new, _, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:8-12`" in new, "width 4 must survive the move"
 
 
@@ -295,7 +299,7 @@ def test_fix_picks_the_nearest_match_not_the_first(tmp_path):
         lines[n - 1] = "REPEATED ANCHOR"
     mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
                       'see `src/a.c:28` ("REPEATED ANCHOR")\n')
-    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text())
+    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:30`" in new, "nearest the cited 28"
     assert "`src/a.c:2`" not in new, "hits[0] would have been line 2"
     assert len(rewrites) == 1 and "AMBIGUOUS" in rewrites[0]
@@ -358,7 +362,7 @@ def test_fix_never_touches_released_changelog_history(tmp_path):
         'shipped work cites `src/a.c:4` ("SHIPPED ANCHOR")\n',
         encoding="utf-8")
     mod._run_fix([frag])
-    out = mod.CHANGELOG.read_text()
+    out = mod.CHANGELOG.read_text(encoding="utf-8")
     assert "current work cites `src/a.c:12`" in out, "unreleased half fixed"
     assert "shipped work cites `src/a.c:4`" in out, "released half untouched"
 
@@ -397,12 +401,12 @@ def test_default_run_writes_nothing_and_keeps_its_verdict(
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, "a drifted anchor is still a hard error"
-    assert frag.read_text() == fragment, "no --fix means the gate never writes"
+    assert frag.read_text(encoding="utf-8") == fragment, "no --fix means the gate never writes"
     assert "nothing to check" not in capsys.readouterr().out
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
-    assert "`src/a.c:7`" in frag.read_text()
+    assert "`src/a.c:7`" in frag.read_text(encoding="utf-8")
 
 
 def test_fix_rebuilds_offsets_across_two_citations_in_one_fragment(tmp_path):
@@ -475,7 +479,7 @@ def test_fix_breaks_an_exact_tie_toward_the_later_line(tmp_path):
     lines[14] = "TIED ANCHOR"    # line 15, the cited 10 plus 5
     mod, frag = _tree(tmp_path, "\n".join(lines) + "\n",
                       'see `src/a.c:10` ("TIED ANCHOR")\n')
-    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text())
+    new, rewrites, _, _ = mod._fix_one(frag, frag.read_text(encoding="utf-8"))
     assert "`src/a.c:15`" in new, "an exact tie takes the LATER line"
     assert "`src/a.c:5`" not in new, "min() alone would have taken 5"
     assert len(rewrites) == 1 and "chose 15" in rewrites[0]
@@ -509,7 +513,7 @@ def test_fix_rereads_a_cited_fragment_it_rewrote_earlier_in_the_same_run(
         "the defect needs 2.md rewritten BETWEEN the two reads of it")
     mod._run_fix(fragments)
 
-    assert "`src/a.c:7`" in (mod.FRAGMENT_DIR / "2.md").read_text(), (
+    assert "`src/a.c:7`" in (mod.FRAGMENT_DIR / "2.md").read_text(encoding="utf-8"), (
         "the rewrite this test turns on must actually have happened")
     out = capsys.readouterr().out
     assert "NEEDS A HUMAN" not in out, out
@@ -536,12 +540,12 @@ def test_fix_runs_even_when_changelog_d_is_empty(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py"])
     assert mod.main() == 1, (
         "alp-sdk#2178: an empty changelog.d/ no longer skips CHANGELOG.md")
-    assert mod.CHANGELOG.read_text() == drifted, "and still writes nothing"
+    assert mod.CHANGELOG.read_text(encoding="utf-8") == drifted, "and still writes nothing"
 
     monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", "--fix"])
     assert mod.main() == 0, "--fix re-checks the tree it just wrote"
     assert '`src/a.c:7` ("RELEASE-CANDIDATE ANCHOR")' in (
-        mod.CHANGELOG.read_text())
+        mod.CHANGELOG.read_text(encoding="utf-8"))
 
     # The FALL-THROUGH is what carries the verdict. `--fix` on an empty
     # changelog.d/ whose `[Unreleased]` citation it CANNOT repair -- a dead
@@ -652,3 +656,521 @@ def test_no_fragments_and_no_changelog_still_early_returns(
     out = capsys.readouterr().out
     assert "nothing to check" in out
     assert "OK --" not in out, "the early return is a non-verdict, not a pass"
+
+
+# ---------------------------------------------------------------------------
+# Double-delimited anchors: `` (`"text"`) `` / `` ("`text`") `` (alp-sdk#2184)
+#
+# `_ANCHOR`'s opening class consumes ONE delimiter, then the capture group
+# refuses the very next character because it is the OTHER delimiter -- so the
+# match fails outright and the citation used to fall through to "no anchor",
+# silently downgrading it from anchored-and-verified to range-checked-only
+# while the gate stayed green. These pin the fix: BOTH nesting orders are now
+# a hard ERROR (never a silent pass, never a silent SKIP), a plain single
+# delimiter is completely unaffected, and `_fix_one` reports the same case as
+# a problem for a human rather than folding it into its "nothing to verify
+# against" unanchored count.
+# ---------------------------------------------------------------------------
+
+
+def test_double_delimited_anchor_backtick_then_quote_is_a_hard_error(tmp_path):
+    """`` (`"text"`) `` -- backtick outer, quote inner. Must be a hard ERROR,
+    not silently downgraded to an unanchored (range-checked-only) citation."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`"GOOD ANCHOR"`)\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1, "the citation itself still resolves and is counted"
+    assert anchored == 0, "the malformed anchor must NOT count as anchored"
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'`'" in errors[0] and "'\"'" in errors[0]
+
+
+def test_double_delimited_anchor_quote_then_backtick_is_a_hard_error(tmp_path):
+    """`` ("`text`") `` -- the other nesting order. Same verdict either way."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` ("`GOOD ANCHOR`")\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+    assert "'\"'" in errors[0] and "'`'" in errors[0]
+
+
+def test_single_delimiter_anchors_still_parse_exactly_as_before(tmp_path):
+    """Regression guard: a plain backtick-only or quote-only anchor -- the
+    two forms `_ANCHOR` was always meant to accept -- must be completely
+    unaffected by the malformed-anchor detection."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                       'see `src/a.c:5` (`GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+    quoted_root = tmp_path / "quoted"
+    quoted_root.mkdir()
+    mod2, frag2 = _tree(quoted_root, _source(5, "GOOD ANCHOR"),
+                         'see `src/a.c:5` ("GOOD ANCHOR")\n')
+    errors2, skips2, checked2, anchored2 = mod2._check_one(
+        frag2, frag2.read_text(encoding="utf-8"))
+    assert errors2 == [] and skips2 == []
+    assert checked2 == 1 and anchored2 == 1
+
+
+def test_fix_reports_a_malformed_anchor_as_a_problem_not_unanchored(tmp_path):
+    """`_fix_one` must not treat this as "nothing to verify against" -- there
+    IS anchor text here, `_ANCHOR` just can't parse past the doubled
+    delimiter, and guessing which one to drop is exactly the kind of guess
+    this fixer refuses to make. Reported as a problem for a human, same
+    severity as an anchor found nowhere in the file, never silently folded
+    into the unanchored count alongside citations that never had an anchor
+    at all."""
+    fragment = 'see `src/a.c:5` (`"GOOD ANCHOR"`)\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment, "not rewritten -- the fixer does not guess here"
+    assert rewrites == []
+    assert unanchored == 0, "this is not the same case as no anchor at all"
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+def test_fix_reports_the_other_nesting_order_as_a_problem_too(tmp_path):
+    """The `("`text`")` order gets the identical treatment from `_fix_one`."""
+    fragment = 'see `src/a.c:5` ("`GOOD ANCHOR`")\n'
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment
+    assert rewrites == [] and unanchored == 0
+    assert len(problems) == 1 and "malformed anchor" in problems[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2184 review: `_MALFORMED_ANCHOR`'s `inner` class was `["“`]` (LEFT
+# curly quote), a typo for `["”`]` (RIGHT curly quote, what `_ANCHOR`'s
+# capture actually refuses). That single character was wrong in both
+# directions: a smart-quoted anchor `_ANCHOR` parses just fine was flagged as
+# malformed (false positive), and a smart-quoted anchor `_ANCHOR` genuinely
+# cannot parse was NOT flagged (false negative, the open half of #2184 left
+# unfixed). These four cover every combination of {backtick, quote} outer x
+# {`_ANCHOR` accepts, `_ANCHOR` refuses} first-captured-character.
+# ---------------------------------------------------------------------------
+
+
+def test_smart_quote_anchor_backtick_open_parses_normally(tmp_path):
+    """`` (`“text”`) `` -- `_ANCHOR`'s open class accepts the LEFT curly
+    quote as an ordinary first character of the captured text (its capture
+    class excludes only `"`, `”`, and backtick). Must NOT be flagged
+    malformed."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` (`“GOOD ANCHOR”`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_quote_open_parses_normally(tmp_path):
+    """`` ("“text”") `` -- same as above with a straight-quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "“GOOD ANCHOR” lives here"),
+                       'see `src/a.c:5` ("“GOOD ANCHOR”")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert errors == [] and skips == []
+    assert checked == 1 and anchored == 1
+
+
+def test_smart_quote_anchor_backtick_then_right_curly_is_a_hard_error(tmp_path):
+    """`` (`”text`) `` -- the RIGHT curly quote right after the backtick is
+    exactly the character `_ANCHOR`'s capture class refuses, so `_ANCHOR`
+    genuinely fails here. Must be caught, not silently downgraded."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` (`”GOOD ANCHOR`)\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+
+
+def test_smart_quote_anchor_quote_then_right_curly_is_a_hard_error(tmp_path):
+    """`` ("”text") `` -- same clash, quote outer."""
+    mod, frag = _tree(tmp_path, _source(5, "irrelevant"),
+                       'see `src/a.c:5` ("”GOOD ANCHOR")\n')
+    errors, skips, checked, anchored = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert skips == []
+    assert checked == 1
+    assert anchored == 0
+    assert len(errors) == 1 and "malformed anchor" in errors[0]
+
+
+# ---------------------------------------------------------------------------
+# alp-sdk#2186: near-miss anchors, mandatory anchors for NEW citations, and
+# grading the merge result rather than the branch tip.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_git_env(monkeypatch):
+    """`DIFF_BASE` changes what main() grades, and a `GIT_DIR` inherited from
+    a hook runner would point every git call at the wrong repository."""
+    for var in ("DIFF_BASE", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_paren_before_the_citation_is_a_near_miss_error(tmp_path):
+    """`` (`path:NNN`, "text") `` -- the #2195 shape: reads as anchored,
+    anchors nothing, so a wrong line number stays green. An OLD citation
+    (no `added` set) is still an error: this is not the new-citation rule."""
+    mod, frag = _tree(tmp_path, _source(9, "GOOD ANCHOR"),
+                      'the fix (`src/a.c:5`, "GOOD ANCHOR") landed\n')
+    errors, skips, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert checked == 1 and anchored == 0 and skips == []
+    assert len(errors) == 1 and "near-miss anchor" in errors[0], errors
+    assert '`src/a.c:5` ("GOOD ANCHOR")' in errors[0], (
+        "the remedy must show the correct form, built from the author's quote")
+
+
+def test_paren_before_near_miss_spans_a_line_break(tmp_path):
+    """Measured on dev: `changelog.d/1516.md` put a newline between the
+    citation and its quote. Still the same attempted anchor."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                      'body (`src/a.c:5`:\n"GOOD ANCHOR", written) here\n')
+    errors, _, _, _ = mod._check_one(frag, frag.read_text(encoding="utf-8"))
+    assert len(errors) == 1 and "near-miss anchor" in errors[0], errors
+
+
+@pytest.mark.parametrize("fragment", [
+    'see (`src/a.c:5`, `src/a.c:6`) for both\n',       # a citation list
+    'see (`src/a.c:5`) here.\n\nA "quote" in the next paragraph\n',
+    'see (`src/a.c:5` ("GOOD ANCHOR")) inline\n',      # anchored inside a paren
+])
+def test_near_miss_leaves_non_attempts_alone(tmp_path, fragment):
+    """A backtick span, a quote past a blank line, and a correct anchor that
+    merely sits inside a paren are not attempted-and-failed anchors."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), fragment)
+    errors, _, _, _ = mod._check_one(frag, fragment)
+    assert errors == [], errors
+
+
+@pytest.mark.parametrize("anchor", ['(`: 1`)', '(`i2s"`)', '(` "text")'])
+def test_declined_anchor_after_the_citation_is_a_near_miss(tmp_path, anchor):
+    """#2186's first comment: a delimiter PAST offset 0, or a too-short span,
+    made `_ANCHOR` decline with no error at all. All three measured cases."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                      f"see `src/a.c:5` {anchor}\n")
+    errors, _, checked, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert checked == 1 and anchored == 0
+    assert len(errors) == 1 and "near-miss anchor" in errors[0], errors
+
+
+def test_fix_reports_a_near_miss_as_a_problem_not_unanchored(tmp_path):
+    """There IS anchor text; which way to rewrite it is a human's call."""
+    fragment = 'x (`src/a.c:5`, "GOOD ANCHOR") y\n'
+    mod, frag = _tree(tmp_path, _source(9, "GOOD ANCHOR"), fragment)
+    new, rewrites, problems, unanchored = mod._fix_one(frag, fragment)
+    assert new == fragment and rewrites == [] and unanchored == 0
+    assert len(problems) == 1 and "near-miss anchor" in problems[0]
+
+
+def test_wrapped_anchor_names_the_line_break(tmp_path):
+    """A quote broken across a markdown line can never match a single-line
+    citation; saying "the code moved" there sends the author hunting."""
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"),
+                      'see `src/a.c:5` ("GOOD\nANCHOR")\n')
+    errors, _, _, anchored = mod._check_one(
+        frag, frag.read_text(encoding="utf-8"))
+    assert anchored == 1
+    assert len(errors) == 1 and "broken across a markdown line" in errors[0]
+
+
+def test_new_citation_without_an_anchor_is_an_error(tmp_path):
+    """The rule itself: an un-anchored citation on an ADDED line fails, the
+    same citation on an untouched line is grandfathered, an anchored one on
+    an added line passes, and a foreign-repo one is still only skipped."""
+    text = ('old `src/a.c:5` stays\n'
+            'new `src/a.c:5` breaks\n'
+            'new `src/a.c:5` ("GOOD ANCHOR") passes\n'
+            'new `python/tan/x.py:5` is foreign\n')
+    mod, frag = _tree(tmp_path, _source(5, "GOOD ANCHOR"), text)
+    errors, skips, checked, anchored = mod._check_one(frag, text, {2, 3, 4})
+    assert len(skips) == 1 and checked == 3 and anchored == 1
+    assert len(errors) == 1, errors
+    assert "new citation with no anchor" in errors[0]
+    assert mod._check_one(frag, text)[0] == [], "added=None switches it off"
+
+
+def test_hunk_lines_skips_content_by_count():
+    """An added line reading `++ b/evil.md` renders as `+++ b/evil.md`; it
+    must not be taken for a file header, or every later hunk in the file is
+    charged to the wrong path (or to none)."""
+    mod = _load()
+    diff = ("diff --git a/changelog.d/1.md b/changelog.d/1.md\n"
+            "--- a/changelog.d/1.md\n"
+            "+++ b/changelog.d/1.md\n"
+            "@@ -2,0 +3,2 @@\n"
+            "+++ b/evil.md\n"
+            "+real\n"
+            "@@ -5 +6,0 @@\n"
+            "-gone\n"
+            "@@ -8 +9 @@\n"
+            "-old\n"
+            "+new\n"
+            "diff --git a/changelog.d/2.md b/changelog.d/2.md\n"
+            "--- a/changelog.d/2.md\n"
+            "+++ /dev/null\n"
+            "@@ -1 +0,0 @@\n"
+            "-deleted\n")
+    assert mod._hunk_lines(diff) == {"changelog.d/1.md": {3, 4, 9}}
+
+
+def _git_tree(tmp_path):
+    """A scratch git repo the module is pointed at, plus a `git` runner."""
+    mod = _load()
+    mod.REPO = tmp_path
+    mod.FRAGMENT_DIR = tmp_path / "changelog.d"
+    mod.CHANGELOG = tmp_path / "CHANGELOG.md"
+
+    def git(*args):
+        return subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false",
+             "-c", f"core.hooksPath={tmp_path / 'no-hooks'}", *args],
+            cwd=tmp_path, check=True, capture_output=True, text=True,
+            encoding="utf-8").stdout
+
+    git("init", "-q", "-b", "main")
+    (tmp_path / "src").mkdir()
+    mod.FRAGMENT_DIR.mkdir()
+    mod.CHANGELOG.write_text("# Changelog\n\n## [Unreleased]\n\nnone\n",
+                             encoding="utf-8")
+    return mod, git
+
+
+def _write(path, text):
+    path.write_text(text, encoding="utf-8", newline="")
+
+
+def _run(mod, monkeypatch, *argv):
+    monkeypatch.setattr(sys, "argv", ["check_changelog_citations.py", *argv])
+    return mod.main()
+
+
+def test_added_lines_are_counted_from_the_merge_base(
+        tmp_path, monkeypatch, capsys):
+    """What counts as NEW, end to end: a line the branch added, and an
+    untracked fragment, are new; a line the base REWROTE after the branch
+    point (`4.md`) is not charged to the branch -- diffing against the base
+    TIP instead of the merge base would charge it -- and neither is a
+    fragment a later merge of the base brought in (`3.md`)."""
+    mod, git = _git_tree(tmp_path)
+    _write(tmp_path / "src" / "a.c", _source(5, "GOOD ANCHOR"))
+    _write(mod.FRAGMENT_DIR / "1.md", "grandfathered `src/a.c:5` here\n")
+    _write(mod.FRAGMENT_DIR / "4.md", "base rewrites `src/a.c:5` this\n")
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    git("checkout", "-q", "main")
+    _write(mod.FRAGMENT_DIR / "4.md", "base rewrites `src/a.c:5` that\n")
+    _write(mod.FRAGMENT_DIR / "3.md", "from the base `src/a.c:5` here\n")
+    git("add", "-A")
+    git("commit", "-qm", "base moves on")
+    git("checkout", "-q", "feature")
+    _write(mod.FRAGMENT_DIR / "1.md",
+           "grandfathered `src/a.c:5` here\nbranch adds `src/a.c:6`\n")
+    git("commit", "-qam", "branch")
+    _write(mod.FRAGMENT_DIR / "2.md", "untracked `src/a.c:7`\n")
+
+    monkeypatch.setenv("DIFF_BASE", "main")
+    for merged in (False, True):
+        if merged:
+            git("merge", "-q", "--no-edit", "main")
+        assert _run(mod, monkeypatch) == 1
+        err = capsys.readouterr().err
+        flagged = [line for line in err.splitlines() if "new citation" in line]
+        assert len(flagged) == 2, err
+        assert any("1.md: `src/a.c:6`" in f for f in flagged)
+        assert any("2.md: `src/a.c:7`" in f for f in flagged)
+
+
+def test_no_base_degrades_loudly(tmp_path, monkeypatch, capsys):
+    """No `origin/dev` and no `DIFF_BASE`: the rule is off, and both the
+    WARN and the verdict line say so. An explicit `DIFF_BASE` that does not
+    resolve is an environment error, never the same quiet downgrade."""
+    mod, git = _git_tree(tmp_path)
+    _write(tmp_path / "src" / "a.c", _source(5, "GOOD ANCHOR"))
+    _write(mod.FRAGMENT_DIR / "1.md", "unanchored `src/a.c:5`\n")
+    git("add", "-A")
+    git("commit", "-qm", "only commit")
+
+    assert _run(mod, monkeypatch) == 0
+    out = capsys.readouterr()
+    assert "new-citation rule NOT APPLIED" in out.err
+    assert "new-citation rule: NOT APPLIED" in out.out
+
+    monkeypatch.setenv("DIFF_BASE", "no-such-ref")
+    with pytest.raises(SystemExit) as exc:
+        _run(mod, monkeypatch)
+    assert exc.value.code == 2
+    assert "no-such-ref" in capsys.readouterr().err
+
+
+def _git_version() -> tuple[int, int]:
+    out = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                         encoding="utf-8").stdout
+    m = re.search(r"(\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+#: `--against-merge` needs `git merge-tree --write-tree`, new in git 2.38.
+#: Ubuntu 22.04 ships 2.34 and Apple's git 2.37, so on those hosts these
+#: tests skip rather than fail -- the same call test-all.sh makes.
+_needs_merge_tree = pytest.mark.skipif(
+    _git_version() < (2, 38),
+    reason="git merge-tree --write-tree needs git >= 2.38")
+
+
+def _drifted_merge_repo(tmp_path):
+    """`feature` cites `src/a.c:7`, correct on its tip; `main` has since
+    pushed that line down by three, so the citation is wrong in the merge."""
+    mod, git = _git_tree(tmp_path)
+    _write(tmp_path / "src" / "a.c", _source(7, "MOVING ANCHOR"))
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    _write(mod.FRAGMENT_DIR / "1.md", 'see `src/a.c:7` ("MOVING ANCHOR")\n')
+    git("add", "-A")
+    git("commit", "-qm", "branch cites line 7")
+    git("checkout", "-q", "main")
+    _write(tmp_path / "src" / "a.c", "top 1\ntop 2\ntop 3\n"
+           + _source(7, "MOVING ANCHOR"))
+    git("commit", "-qam", "base inserts three lines above it")
+    git("checkout", "-q", "feature")
+    return mod, git
+
+
+@_needs_merge_tree
+def test_against_merge_grades_the_merge_not_the_tip(
+        tmp_path, monkeypatch, capsys):
+    """The #2186 repro: green on the branch tip, red in the tree that lands.
+    And the merge is built without touching the working tree, index or HEAD."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    monkeypatch.setenv("DIFF_BASE", "main")
+    head = git("rev-parse", "HEAD")
+
+    assert _run(mod, monkeypatch) == 0, "the branch tip is correct"
+    out = capsys.readouterr().out
+    assert "graded: the working tree" in out
+    assert "1 citation(s) on added lines, every one anchored" in out, (
+        "a pass must say the new-citation rule saw the branch's citation")
+    assert _run(mod, monkeypatch, "--against-merge") == 1
+    err = capsys.readouterr().err
+    assert "1.md: `src/a.c:7`" in err and "the merge of main into HEAD" in err
+    assert git("rev-parse", "HEAD") == head
+    assert git("status", "--porcelain") == "", "nothing written or staged"
+
+
+@_needs_merge_tree
+def test_against_merge_refuses_a_conflicting_merge(
+        tmp_path, monkeypatch, capsys):
+    """A merge with conflicts has no result to grade; say so, exit 1."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    _write(tmp_path / "src" / "a.c", "branch 1\n" + _source(7, "MOVING ANCHOR"))
+    git("commit", "-qam", "branch edits the same top line")
+    monkeypatch.setenv("DIFF_BASE", "main")
+    with pytest.raises(SystemExit) as exc:
+        _run(mod, monkeypatch, "--against-merge")
+    assert exc.value.code == 1
+    err = capsys.readouterr().err
+    assert "does not merge cleanly" in err and "src/a.c" in err
+
+
+def test_against_merge_rejects_fix(tmp_path, monkeypatch, capsys):
+    """--fix writes the working tree; the merge is not in it. A resolvable
+    base, so the refusal cannot be mistaken for the missing-base exit 2."""
+    mod, _ = _drifted_merge_repo(tmp_path)
+    monkeypatch.setenv("DIFF_BASE", "main")
+    with pytest.raises(SystemExit) as exc:
+        _run(mod, monkeypatch, "--fix", "--against-merge")
+    assert exc.value.code == 2
+    assert "merge the base, then --fix" in capsys.readouterr().err
+
+
+@_needs_merge_tree
+def test_against_merge_reads_fragments_and_new_lines_from_the_merge(
+        tmp_path, monkeypatch, capsys):
+    """Two things only the MERGED tree holds: a fragment the base added
+    (`5.md`, with a near miss) and the branch's new un-anchored citation,
+    judged against what the merge adds to the base. Reading fragments from
+    the working tree misses the first; dropping the added-line map under
+    --against-merge silently turns the new-citation rule off."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    git("checkout", "-q", "main")
+    mod.FRAGMENT_DIR.mkdir(exist_ok=True)  # git drops it: empty on main
+    _write(mod.FRAGMENT_DIR / "5.md", 'see (`src/a.c:1`, "top 1") here\n')
+    git("add", "-A")
+    git("commit", "-qm", "base adds a near-miss fragment")
+    git("checkout", "-q", "feature")
+    _write(mod.FRAGMENT_DIR / "1.md",
+           'see `src/a.c:7` ("MOVING ANCHOR")\nbare `src/a.c:2` here\n')
+    git("commit", "-qam", "branch adds an un-anchored citation")
+    monkeypatch.setenv("DIFF_BASE", "main")
+
+    assert _run(mod, monkeypatch, "--against-merge") == 1
+    err = capsys.readouterr().err
+    assert "5.md: `src/a.c:1` -- near-miss anchor" in err, err
+    assert "1.md: `src/a.c:2` -- new citation with no anchor" in err, err
+    assert "5.md: `src/a.c:1` -- new citation" not in err, (
+        "a line the base wrote is not new to the merge")
+
+
+@_needs_merge_tree
+def test_against_merge_warns_on_a_dirty_tree_and_names_a_non_merge(
+        tmp_path, monkeypatch, capsys):
+    """Uncommitted work is not in the merge, so the run says so. And a base
+    that is already an ancestor of HEAD (a merge base, say, which the
+    clang-format stage may leave in the shared DIFF_BASE) has nothing to
+    merge: the verdict must say it graded HEAD, not "a merge"."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    fork = git("merge-base", "main", "feature").strip()
+    (tmp_path / "scratch.txt").write_text("not committed\n", encoding="utf-8")
+    monkeypatch.setenv("DIFF_BASE", fork)
+
+    assert _run(mod, monkeypatch, "--against-merge") == 0
+    out = capsys.readouterr()
+    assert "uncommitted changes" in out.err, out.err
+    assert "already an ancestor of HEAD" in out.out, out.out
+    assert "graded: the merge of" not in out.out
+
+
+@pytest.mark.parametrize("name", ["9001-\u00e9.md", "9002 space.md"])
+def test_new_citation_rule_reads_a_quoted_fragment_path(
+        tmp_path, monkeypatch, capsys, name):
+    """git octal-quotes a non-ASCII path and TAB-terminates one holding a
+    space. Either used to parse as "no path", dropping the file's hunks and
+    exempting a COMMITTED fragment from the new-citation rule in silence."""
+    mod, git = _git_tree(tmp_path)
+    _write(tmp_path / "src" / "a.c", _source(5, "GOOD ANCHOR"))
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    _write(mod.FRAGMENT_DIR / name, "bare `src/a.c:5` here\n")
+    git("add", "-A")
+    git("commit", "-qm", "branch adds an oddly named fragment")
+    monkeypatch.setenv("DIFF_BASE", "main")
+
+    assert _run(mod, monkeypatch) == 1
+    err = capsys.readouterr().err
+    assert f"{name}: `src/a.c:5` -- new citation with no anchor" in err, err
+
+
+def test_hunk_lines_refuses_a_header_it_cannot_read():
+    """A path git still quotes (a control character, `"` or backslash) is an
+    error, never a silent drop of that file's hunks."""
+    mod = _load()
+    diff = '+++ "b/changelog.d/x\\ty.md"\n@@ -0,0 +1 @@\n+bare\n'
+    with pytest.raises(SystemExit) as exc:
+        mod._hunk_lines(diff)
+    assert exc.value.code == 2
