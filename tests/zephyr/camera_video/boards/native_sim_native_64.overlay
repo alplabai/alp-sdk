@@ -1,0 +1,39 @@
+/*
+ * Copyright 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Devicetree overlay for the alp-sdk camera_video ztest under native_sim
+ * (#1628).  Wires three emulated video devices to the alias names
+ * src/backends/camera/zephyr_video.c looks up:
+ *   - alp-camera0 -> zephyr,video-sw-generator (upstream driver, fills
+ *     video_format.pitch on set_format): the general open/start/capture/
+ *     release/stop/close round trip.
+ *   - alp-camera1 -> alp,fake-video-pitch0 (this test's own fixture,
+ *     leaves pitch == 0): the Part 2 buffer-sizing regression check.
+ *   - alp-camera2 -> alp,fake-video-jpeg0 (this test's own fixture,
+ *     defaults to VIDEO_PIX_FMT_JPEG with pitch == 0): the review
+ *     follow-up compressed-format sizing check.
+ */
+
+/ {
+	aliases {
+		alp-camera0 = &video_sw_generator;
+		alp-camera1 = &fake_video1;
+		alp-camera2 = &fake_video2;
+	};
+
+	video_sw_generator: video-sw-generator {
+		compatible = "zephyr,video-sw-generator";
+		status = "okay";
+	};
+
+	fake_video1: fake-video-pitch0 {
+		compatible = "alp,fake-video-pitch0";
+		status = "okay";
+	};
+
+	fake_video2: fake-video-jpeg0 {
+		compatible = "alp,fake-video-jpeg0";
+		status = "okay";
+	};
+};

@@ -110,8 +110,16 @@ typedef struct {
  *         itself -- e.g. ALP_ERR_INVAL (zephyr_video / v2n_n44_isp /
  *         alif_isp_pico: out-of-range @c camera_id), ALP_ERR_NOT_READY
  *         (zephyr_video: no camera aliased in devicetree for the
- *         requested @c camera_id), or ALP_ERR_NOT_IMPLEMENTED
- *         (zephyr_stub, on silicon with no real backend).
+ *         requested @c camera_id), ALP_ERR_NOT_IMPLEMENTED
+ *         (zephyr_stub, on silicon with no real backend),
+ *         ALP_ERR_OUT_OF_RANGE (zephyr_video / v2n_n44_isp /
+ *         alif_isp_pico: no advertised format cap matches the
+ *         requested pixfmt/width/height, or the driver's
+ *         min_vbuf_count exceeds the backend's buffer pool), or
+ *         ALP_ERR_NOSUPPORT (zephyr_video / v2n_n44_isp /
+ *         alif_isp_pico: the negotiated fourcc carries no fixed
+ *         bits-per-pixel and the driver reported no pitch, so a
+ *         safe buffer size cannot be derived).
  */
 alp_camera_t *alp_camera_open(const alp_camera_config_t *cfg);
 
