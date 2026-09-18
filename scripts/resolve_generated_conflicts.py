@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -81,7 +82,7 @@ def _repo_root() -> Path:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise SystemExit(
@@ -99,7 +100,8 @@ def _abi_snapshot_cmd() -> list[str]:
     rather than hardcoding a version that goes stale at the next bump."""
     out = subprocess.run(
         [sys.executable, "scripts/abi_snapshot.py", "--print-current-version"],
-        cwd=REPO, capture_output=True, text=True, check=True,
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=True,
     ).stdout.strip()
     return [
         sys.executable, "scripts/abi_snapshot.py",
@@ -128,7 +130,7 @@ def conflicted_paths() -> list[str]:
     """
     out = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=U"],
-        cwd=REPO, capture_output=True, text=True, check=True,
+        cwd=REPO, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     return [line for line in out.splitlines() if line.strip()]
 

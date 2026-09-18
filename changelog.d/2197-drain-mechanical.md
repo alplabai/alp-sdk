@@ -16,7 +16,7 @@ and `scripts/test-all.sh`, for example
 All 564 tests now pass. `IMPLICIT_ENCODING_BASELINE` shrinks from 137 to 85
 files, and the size pin moves with it:
 `tests/scripts/test_check_cross_platform.py:536`
-("IMPLICIT_ENCODING_BASELINE) <= 85"). The baselined finding count drops from
+("IMPLICIT_ENCODING_BASELINE) <="). The baselined finding count drops from
 484 to 316.
 
 **A file joins this batch only if none of its calls starts a Python child** -- with one exception handled in place: `baremetal_cmake_flash.py`'s `cmake --build --target flash` runs a project-supplied target that is often a Python flasher, so that call also sets `PYTHONIOENCODING=utf-8` in the child's environment.

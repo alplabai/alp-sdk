@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -171,7 +172,8 @@ def _composed_routes(board_yaml: Path) -> dict:
     proc = subprocess.run(
         [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml),
          "--emit", "composed-route-table"],
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
     if proc.returncode != 0:
         sys.exit(

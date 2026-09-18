@@ -268,11 +268,12 @@ class SwdProbeFlash:
                 )
             fd, script_path = tempfile.mkstemp(suffix=".jlink")
             try:
-                with os.fdopen(fd, "w") as fh:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
                     fh.write(script)
                 cmd = base_cmd + [script_path]
                 proc = subprocess.run(cmd, check=False,
-                                      capture_output=True, text=True)
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                      env={**os.environ, "PYTHONIOENCODING": "utf-8"})
             finally:
                 try:
                     os.unlink(script_path)
@@ -356,7 +357,8 @@ class SwdProbeFlash:
                         f"{' '.join(cmd)} (dry-run)",
                 command=cmd)
 
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                              env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

@@ -7,6 +7,7 @@ examples, real portable-API headers, and a couple of known presence cells).
 
 import io
 import json
+import os
 import subprocess
 import sys
 from contextlib import redirect_stderr
@@ -35,7 +36,8 @@ def test_committed_file_matches_generator():
 def test_check_mode_passes_on_committed_file():
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--check"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stderr
 

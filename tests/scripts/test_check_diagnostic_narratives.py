@@ -7,6 +7,7 @@ page with a real narrative + a Fix/Resolution/Remedy section must pass.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -83,7 +84,8 @@ def test_real_repo_diagnostic_pages_pass() -> None:
     """Non-vacuity smoke test against the real tree (subprocess, mirrors how
     CI invokes it)."""
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT)], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT)], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
     assert "OK" in proc.stdout

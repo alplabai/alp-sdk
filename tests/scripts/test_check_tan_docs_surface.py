@@ -245,11 +245,11 @@ def test_install_tan_stub_takes_the_windows_branch_when_forced(tmp_path, monkeyp
 
 
 def _run(repo_root: Path, tan_bin_dir: Path, **kw):
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PATH"] = f"{tan_bin_dir}{os.pathsep}{env.get('PATH', '')}"
     return subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", str(repo_root)],
-        capture_output=True, text=True, env=env, **kw,
+        capture_output=True, text=True, encoding="utf-8", env=env, **kw,
     )
 
 
@@ -398,11 +398,11 @@ def test_tan_not_on_path_fails_loudly_never_skips(tmp_path):
     empty_bin = tmp_path / "empty-bin"
     empty_bin.mkdir()
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PATH"] = str(empty_bin)  # deliberately excludes any real `tan` already on this host
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--repo-root", str(doc_root)],
-        capture_output=True, text=True, env=env,
+        capture_output=True, text=True, encoding="utf-8", env=env,
     )
     assert proc.returncode != 0
     assert "not on PATH" in proc.stderr

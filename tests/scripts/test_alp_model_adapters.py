@@ -115,8 +115,9 @@ def test_vela_adapter_compile_invokes_cli_and_reads_output(tmp_path, monkeypatch
     src.write_bytes(b"TFL3-INPUT")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         seen["cmd"] = cmd
+        seen["io"] = (encoding, env.get("PYTHONIOENCODING"))
         (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")   # emulate vela's output
 
         class _R:
@@ -129,6 +130,9 @@ def test_vela_adapter_compile_invokes_cli_and_reads_output(tmp_path, monkeypatch
     blob = VelaAdapter().compile(src, accel_config="ethos-u55-128", out_dir=tmp_path)
     assert seen["cmd"][:2] == ["vela", str(src)]
     assert "--accelerator-config" in seen["cmd"] and "ethos-u55-128" in seen["cmd"]
+    # vela is a Python child: the parent's decode and the child's write must
+    # both be UTF-8, or Windows cp1252 garbles its diagnostics (#2197).
+    assert seen["io"] == ("utf-8", "utf-8")
     assert blob.format == "vela_tflite"
     assert blob.payload == b"VELA-OUT"
     assert blob.compiler_version.startswith("vela")
@@ -138,7 +142,7 @@ def test_vela_adapter_compile_raises_on_vela_error(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-INPUT")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         class _R:
             returncode = 1
             stdout = ""
@@ -154,7 +158,7 @@ def test_vela_adapter_compile_raises_when_output_file_missing(tmp_path, monkeypa
     src = tmp_path / "m.tflite"
     src.write_bytes(b"TFL3-INPUT")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         class _R:
             returncode = 0
             stdout = ""
@@ -226,7 +230,7 @@ def test_cpu_compile_accepts_opts_kwarg(tmp_path):
 
 def test_vela_compile_accepts_opts_kwarg(tmp_path, monkeypatch):
     src = tmp_path / "m.tflite"; src.write_bytes(b"TFL3-X")
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         (tmp_path / "m_vela.tflite").write_bytes(b"VELA-OUT")
         class _R: returncode = 0; stdout = ""; stderr = ""
         return _R()
@@ -254,7 +258,7 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         if "-v" in cmd:                              # _dxcom_version() probe
             class _V:
                 returncode = 0
@@ -288,7 +292,7 @@ def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     cfg = tmp_path / "m.deepx.json"; cfg.write_text("{}", encoding="utf-8")
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, encoding, env, timeout):
         if "-v" in cmd:
             class _V:
                 returncode = 0
@@ -323,7 +327,7 @@ def test_dxcom_version_fallback_matches_success_vendor_token(monkeypatch):
     # share the same first token.
     from alp_model.adapters.deepx import _dxcom_version
 
-    def fail_run(cmd, capture_output, text, timeout):
+    def fail_run(cmd, capture_output, text, encoding, env, timeout):
         raise OSError("dxcom not found on PATH")
 
     monkeypatch.setattr("alp_model.adapters.deepx.subprocess.run", fail_run)
@@ -438,7 +442,7 @@ def test_drpai_compile_accepts_224_shape_as_yaml_list(tmp_path, monkeypatch):
     (calib / "0.png").write_bytes(b"PNG")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         seen["cmd"] = cmd
         out = Path(cmd[cmd.index("-o") + 1])
         out.mkdir(parents=True, exist_ok=True)
@@ -518,9 +522,10 @@ def test_drpai_compile_invokes_tvm_and_returns_drpai_dir(tmp_path, monkeypatch):
     (calib / "0.png").write_bytes(b"PNG")
     seen = {}
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         seen["cmd"] = cmd
         seen["product"] = env.get("PRODUCT")
+        seen["io"] = (encoding, env.get("PYTHONIOENCODING"))
         out = Path(cmd[cmd.index("-o") + 1])             # the -o object dir
         out.mkdir(parents=True, exist_ok=True)
         (out / "drp_desc.bin").write_bytes(b"DESC")      # required artifacts
@@ -547,6 +552,7 @@ def test_drpai_compile_invokes_tvm_and_returns_drpai_dir(tmp_path, monkeypatch):
     assert seen["cmd"][seen["cmd"].index("-i") + 1] == "input"
     assert "--images" in seen["cmd"] and str(calib) in seen["cmd"]
     assert seen["product"] == "V2N"
+    assert seen["io"] == ("utf-8", "utf-8")
     assert blob.format == "drpai_dir"
     assert blob.compiler_version.startswith("drp-ai_tvm")
     # The payload is a real tar carrying the object-dir files.
@@ -561,7 +567,7 @@ def test_drpai_compile_raises_when_artifacts_missing(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     calib = tmp_path / "calib"; calib.mkdir()
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         Path(cmd[cmd.index("-o") + 1]).mkdir(parents=True, exist_ok=True)   # "ok", no .bin
 
         class _R:
@@ -582,7 +588,7 @@ def test_drpai_compile_raises_on_tool_error(tmp_path, monkeypatch):
     src = tmp_path / "m.onnx"; src.write_bytes(b"ONNX-IN")
     calib = tmp_path / "calib"; calib.mkdir()
 
-    def fake_run(cmd, capture_output, text, timeout, env):
+    def fake_run(cmd, capture_output, text, encoding, timeout, env):
         class _R:
             returncode = 1
             stdout = ""

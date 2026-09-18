@@ -17,6 +17,7 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import os
 import struct
 import subprocess
 import sys
@@ -116,7 +117,8 @@ class TestSecurePageMirrorLayout(unittest.TestCase):
                  "--serial", "TEST-0001",
                  "--mfg-date", "2026-05-11",
                  "--output", str(out)],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertEqual(out.stat().st_size, 64)

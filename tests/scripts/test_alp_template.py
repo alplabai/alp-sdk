@@ -1724,7 +1724,8 @@ def test_render_to_envelope_every_template_sku_combo(template_id, sku, tmp_path)
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", core_id],
-            capture_output=True, text=True, cwd=REPO, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False)
         assert proc.returncode == 0, (template_id, sku, core_id, proc.stderr)
         assert "unknown core id" not in proc.stderr
 

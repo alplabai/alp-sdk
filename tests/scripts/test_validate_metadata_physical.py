@@ -1,10 +1,11 @@
 import json, shutil, subprocess, sys
+import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
 def test_chip_schema_exists_and_is_draft2020():
-    schema = json.loads((REPO / "metadata/schemas/chip-v1.schema.json").read_text())
+    schema = json.loads((REPO / "metadata/schemas/chip-v1.schema.json").read_text(encoding="utf-8"))
     assert schema["$schema"].endswith("2020-12/schema")
     assert schema["additionalProperties"] is False
     assert schema["properties"]["schema_version"]["const"] == 1
@@ -21,7 +22,7 @@ def test_pin_signal_must_resolve(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": "1", "signal": "SCL"}]},  # SCL not in signals
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])
     assert failures and any("SCL" in m for _, msgs in failures for m in msgs)
 
@@ -37,7 +38,7 @@ def test_duplicate_pad_rejected(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": "1", "signal": "VDD"}, {"pad": "1", "signal": "GND"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])
     assert failures and any("pad" in m.lower() for _, msgs in failures for m in msgs)
 
@@ -55,7 +56,7 @@ def test_passive_net_must_resolve(tmp_path):
                      "pins": [{"pad": "1", "signal": "SCL"}],
                      "passives": [{"role": "pullup", "value": "4k7", "net": "SCLL",
                                    "refdes_prefix": "R"}]},  # SCLL not in signals
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])
     assert failures and any("SCLL" in m for _, msgs in failures for m in msgs)
 
@@ -75,7 +76,7 @@ def test_physical_string_does_not_crash_the_gate(tmp_path):
         "mpn_population": ["W"], "datasheet": {}, "bus": "i2c",
         "signals": [{"name": "SDA", "type": "bidir"}],
         "physical": "not-an-object",
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -94,7 +95,7 @@ def test_non_object_pin_entry_does_not_crash_the_gate(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": ["not-an-object"]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -114,7 +115,7 @@ def test_non_object_passive_entry_does_not_crash_the_gate(tmp_path):
                      "visibility": "public", "provenance": "web_provisional",
                      "pins": [{"pad": "1", "signal": "SDA"}],
                      "passives": ["not-an-object"]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -136,7 +137,7 @@ def test_non_list_pins_and_signals_do_not_crash_the_gate(tmp_path):
         "signals": 5,
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public", "pins": 5, "passives": 5},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -156,7 +157,7 @@ def test_non_string_signal_name_does_not_crash_the_gate(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": "1", "signal": "SDA"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -177,7 +178,7 @@ def test_non_string_pin_signal_does_not_crash_the_gate(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": "1", "signal": {"nested": "dict"}}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures  # non-string signal is reported as unresolved
 
@@ -197,7 +198,7 @@ def test_non_string_pin_pad_does_not_crash_the_gate(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": {"nested": "dict"}, "signal": "SDA"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures == []
 
@@ -219,7 +220,7 @@ def test_non_string_passive_net_does_not_crash_the_gate(tmp_path):
                      "pins": [{"pad": "1", "signal": "SDA"}],
                      "passives": [{"role": "pullup", "value": "4k7",
                                    "net": {"nested": "dict"}, "refdes_prefix": "R"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures  # non-string net is reported as unresolved
 
@@ -240,7 +241,7 @@ def test_null_pad_duplicate_still_reported(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": None, "signal": "VDD"}, {"pad": None, "signal": "GND"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures and any("pad 'None' used more than once" in m
                              for _, msgs in failures for m in msgs)
@@ -261,13 +262,13 @@ def test_null_pin_signal_reports_diagnostic_not_silently_dropped(tmp_path):
         "physical": {"refdes_prefix": "U", "package": "P", "footprint": "p",
                      "visibility": "public",
                      "pins": [{"pad": "1", "signal": None}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_chip_physical([p])  # must not raise
     assert failures and any("signal 'None' not in signals[] or power nets" in m
                              for _, msgs in failures for m in msgs)
 
 def test_block_schema_exists():
-    schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text())
+    schema = json.loads((REPO / "metadata/schemas/block-v1.schema.json").read_text(encoding="utf-8"))
     assert schema["properties"]["block_id"]["pattern"] == "^[a-z][a-z0-9_]*$"
     assert schema["additionalProperties"] is False
 
@@ -282,7 +283,7 @@ def test_realization_chip_must_exist(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [{"chip": "does_not_exist", "maps": {"A": "LED"}}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])
     assert failures and any("does_not_exist" in m for _, msgs in failures for m in msgs)
 
@@ -297,7 +298,7 @@ def test_realization_maps_must_be_in_interface(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [{"chip": "x", "maps": {"A": "NOT_IN_INTERFACE"}}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])
     assert failures and any("NOT_IN_INTERFACE" in m for _, msgs in failures for m in msgs)
 
@@ -316,7 +317,7 @@ def test_non_object_realization_entry_does_not_crash_the_gate(tmp_path):
         "kconfig": "ALP_SDK_BLOCK_D",
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": ["not-an-object"],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures == []
 
@@ -336,7 +337,7 @@ def test_non_object_part_entry_does_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": ["not-an-object"]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures == []
 
@@ -354,7 +355,7 @@ def test_non_object_realization_passive_entry_does_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [], "passives": ["not-an-object"]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures == []
 
@@ -372,7 +373,7 @@ def test_non_object_maps_does_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [{"chip": "x", "maps": "not-an-object"}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     # `chip: x` has no manifest either (chip_files=[]), so this still
     # reports a FAIL -- the point is that it reports one instead of raising.
@@ -395,7 +396,7 @@ def test_non_list_realizations_and_parts_do_not_crash_the_gate(tmp_path):
         "kconfig": "ALP_SDK_BLOCK_H",
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": 5,
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures == []
 
@@ -405,7 +406,7 @@ def test_non_list_realizations_and_parts_do_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": 5, "passives": 5}],
-    }))
+    }), encoding="utf-8")
     failures2 = vm._check_block_realizations([blk2], chip_files=[])  # must not raise
     assert failures2 == []
 
@@ -425,7 +426,7 @@ def test_non_string_interface_signal_does_not_crash_the_gate(tmp_path):
                       {"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [], "passives": []}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures == []
 
@@ -444,7 +445,7 @@ def test_non_string_realization_part_chip_does_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [{"chip": {"nested": "dict"}, "maps": {}}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures  # non-string chip is reported as unresolved
 
@@ -463,7 +464,7 @@ def test_non_string_realization_maps_target_does_not_crash_the_gate(tmp_path):
         "interface": [{"signal": "LED", "dir": "output"}],
         "realizations": [{"id": "r", "physical_form": "discrete", "visibility": "public",
                           "parts": [{"chip": "x", "maps": {"A": {"nested": "dict"}}}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures  # non-string maps target is reported as unresolved (plus the missing chip)
 
@@ -484,14 +485,15 @@ def test_non_string_realization_passive_net_does_not_crash_the_gate(tmp_path):
                           "parts": [],
                           "passives": [{"role": "pullup", "value": "4k7",
                                         "net": {"nested": "dict"}, "refdes_prefix": "R"}]}],
-    }))
+    }), encoding="utf-8")
     failures = vm._check_block_realizations([blk], chip_files=[])  # must not raise
     assert failures  # non-string net is reported as unresolved
 
 def test_validate_metadata_passes_on_real_tree():
     # The full validator must stay green with the new chip pass wired in.
     r = subprocess.run([sys.executable, "scripts/validate_metadata.py"],
-                       cwd=REPO, capture_output=True, text=True)
+                       cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/chips/" in r.stdout  # chips are now being checked
 
@@ -516,14 +518,15 @@ def test_reference_blocks_present_and_valid():
     for name in ("button_led", "pdm_mic"):
         assert (REPO / f"metadata/blocks/{name}.yaml").is_file()
     r = subprocess.run([sys.executable, "scripts/validate_metadata.py"], cwd=REPO,
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8",
+                       env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert r.returncode == 0, r.stdout + r.stderr
     assert "metadata/blocks/button_led.yaml" in r.stdout
 
 def test_reference_chips_have_physical():
     import yaml
     for name in ("icm42670", "tas2563", "ina236"):
-        d = yaml.safe_load((REPO / f"metadata/chips/{name}.yaml").read_text())
+        d = yaml.safe_load((REPO / f"metadata/chips/{name}.yaml").read_text(encoding="utf-8"))
         assert d.get("signals"), f"{name} needs signals[]"
         assert d.get("physical"), f"{name} needs physical:"
         assert d["physical"]["visibility"] in ("public", "internal")
@@ -533,24 +536,24 @@ def test_reconciled_chips_exist_with_physical():
     for name in ("bmi323", "bmp581", "cam_mux_pi3wvr626", "tcal9538"):
         p = REPO / f"metadata/chips/{name}.yaml"
         assert p.is_file(), f"{name} manifest missing"
-        d = yaml.safe_load(p.read_text())
+        d = yaml.safe_load(p.read_text(encoding="utf-8"))
         assert d["chip_id"] == name
         assert d.get("physical")
 
 def test_aen801_reference_set_is_bom_complete():
     import yaml
-    evk = yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text())
+    evk = yaml.safe_load((REPO / "metadata/boards/e1m-evk.yaml").read_text(encoding="utf-8"))
     populated = [k for k, v in evk["populated"].items() if v is True]
     unresolved = []
     for slug in populated:
         chip = REPO / f"metadata/chips/{slug}.yaml"
         block = REPO / f"metadata/blocks/{slug}.yaml"
         if chip.is_file():
-            d = yaml.safe_load(chip.read_text())
+            d = yaml.safe_load(chip.read_text(encoding="utf-8"))
             if not d.get("physical"):
                 unresolved.append(f"{slug}: chip has no physical:")
         elif block.is_file():
-            d = yaml.safe_load(block.read_text())
+            d = yaml.safe_load(block.read_text(encoding="utf-8"))
             if not d.get("realizations"):
                 unresolved.append(f"{slug}: block has no realizations")
         else:
@@ -572,7 +575,7 @@ def test_board_bare_when_tree_is_qualified_rejected(tmp_path):
     vm = _load_vm("vm_bt1"); import yaml
     p = tmp_path / "E1M-AEN801.yaml"
     p.write_text(yaml.safe_dump({"topology": {
-        "m55_he": {"board": "alp_e1m_aen801_m55_he"}}}))  # bare, tree is qualified
+        "m55_he": {"board": "alp_e1m_aen801_m55_he"}}}), encoding="utf-8")  # bare, tree is qualified
     failures = vm._check_board_targets([p])
     assert failures and any("fully-qualified" in m for _, msgs in failures for m in msgs)
 
@@ -582,7 +585,7 @@ def test_board_qualified_without_tree_rejected(tmp_path):
     vm = _load_vm("vm_bt2"); import yaml
     p = tmp_path / "E1M-V2N102.yaml"
     p.write_text(yaml.safe_dump({"topology": {
-        "m33_sm": {"board": "alp_e1m_v2n102_m33_sm/r9a09g056n48gbg/cm33"}}}))
+        "m33_sm": {"board": "alp_e1m_v2n102_m33_sm/r9a09g056n48gbg/cm33"}}}), encoding="utf-8")
     failures = vm._check_board_targets([p])
     assert failures and any("no generated board tree" in m for _, msgs in failures for m in msgs)
 
@@ -592,7 +595,7 @@ def test_board_qualified_matching_tree_accepted(tmp_path):
     p = tmp_path / "E1M-AEN801.yaml"
     p.write_text(yaml.safe_dump({"topology": {
         "m55_he": {"board": "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"},
-        "a32_cluster": {"machine": "e1m-aen801-a32"}}}))  # yocto slice: no board, skipped
+        "a32_cluster": {"machine": "e1m-aen801-a32"}}}), encoding="utf-8")  # yocto slice: no board, skipped
     assert vm._check_board_targets([p]) == []
 
 def test_non_object_topology_does_not_crash_the_gate(tmp_path):
@@ -604,7 +607,7 @@ def test_non_object_topology_does_not_crash_the_gate(tmp_path):
     real problem."""
     vm = _load_vm("vm_bt4"); import yaml
     p = tmp_path / "E1M-AEN801.yaml"
-    p.write_text(yaml.safe_dump({"topology": "not-an-object"}))
+    p.write_text(yaml.safe_dump({"topology": "not-an-object"}), encoding="utf-8")
     failures = vm._check_board_targets([p])  # must not raise
     assert failures == []
 
@@ -617,7 +620,7 @@ def test_non_object_topology_produces_no_output_line(tmp_path, capsys):
     `dcda807d`'s behaviour)."""
     vm = _load_vm("vm_bt4b"); import yaml
     p = tmp_path / "E1M-AEN801.yaml"
-    p.write_text(yaml.safe_dump({"topology": "not-an-object"}))
+    p.write_text(yaml.safe_dump({"topology": "not-an-object"}), encoding="utf-8")
     failures = vm._check_board_targets([p])
     assert failures == []
     out = capsys.readouterr().out
@@ -639,7 +642,7 @@ def test_silicon_capability_restrictions_malformed_silicon_ref(tmp_path, monkeyp
     p.write_text(yaml.safe_dump({
         "silicon": "acme:widget",
         "silicon_capabilities": {"unpopulated": ["camera"]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_silicon_capability_restrictions([p])
     assert failures and any(
         "silicon ref `acme:widget` does not resolve to a metadata/socs/ spec" in m
@@ -652,7 +655,7 @@ def test_silicon_kconfig_null_known_silicon_rejected(tmp_path, monkeypatch):
     vm = _load_vm("vm_sk1"); import json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     registry = tmp_path / "silicon-kconfig.json"
-    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [None]}))
+    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [None]}), encoding="utf-8")
     monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
     monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_silicon_kconfig()
@@ -672,7 +675,7 @@ def test_silicon_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_path, 
     vm = _load_vm("vm_sk2"); import json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     registry = tmp_path / "silicon-kconfig.json"
-    registry.write_text(json.dumps([]))
+    registry.write_text(json.dumps([]), encoding="utf-8")
     monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
     monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_silicon_kconfig()  # must not raise
@@ -687,7 +690,7 @@ def test_silicon_kconfig_non_list_known_silicon_does_not_crash_the_gate(tmp_path
     vm = _load_vm("vm_sk3"); import json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     registry = tmp_path / "silicon-kconfig.json"
-    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": 5}))
+    registry.write_text(json.dumps({"socSymbolPrefix": "SOC_ALP_", "knownSilicon": 5}), encoding="utf-8")
     monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
     monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_silicon_kconfig()  # must not raise
@@ -704,7 +707,7 @@ def test_silicon_kconfig_non_string_known_silicon_entry_does_not_crash_the_gate(
     monkeypatch.setattr(vm, "REPO", tmp_path)
     registry = tmp_path / "silicon-kconfig.json"
     registry.write_text(json.dumps(
-        {"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [{"a": "b"}]}))
+        {"socSymbolPrefix": "SOC_ALP_", "knownSilicon": [{"a": "b"}]}), encoding="utf-8")
     monkeypatch.setattr(vm, "SILICON_KCONFIG_REGISTRY", registry)
     monkeypatch.setattr(vm, "SILICON_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_silicon_kconfig()  # must not raise
@@ -721,7 +724,7 @@ def test_peripheral_kconfig_non_object_top_level_does_not_crash_the_gate(tmp_pat
     vm = _load_vm("vm_pk1"); import json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     registry = tmp_path / "peripheral-kconfig.json"
-    registry.write_text(json.dumps([]))
+    registry.write_text(json.dumps([]), encoding="utf-8")
     monkeypatch.setattr(vm, "PERIPHERAL_KCONFIG_REGISTRY", registry)
     monkeypatch.setattr(vm, "PERIPHERAL_KCONFIG_SCHEMA", tmp_path / "does-not-exist.json")
     failures = vm._check_peripheral_kconfig()  # must not raise
@@ -777,10 +780,11 @@ def test_peripheral_kconfig_malformed_on_disk_registry_fails_cleanly_via_subproc
     registry = tmp_path / "metadata" / "registries" / "peripheral-kconfig.json"
     registry.parent.mkdir(parents=True, exist_ok=True)
     registry.write_text(json.dumps(
-        {"schemaVersion": "peripheral-kconfig-v1", "peripherals": "not-an-object"}))
+        {"schemaVersion": "peripheral-kconfig-v1", "peripherals": "not-an-object"}), encoding="utf-8")
     r = subprocess.run(
         [sys.executable, str(tmp_scripts / "validate_metadata.py")],
-        cwd=tmp_path, capture_output=True, text=True)
+        cwd=tmp_path, capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     out = r.stdout + r.stderr
     assert r.returncode != 0, out
     assert "peripheral-kconfig.json" in out
@@ -818,13 +822,13 @@ def test_silicon_capability_restrictions_malformed_soc_json_does_not_crash_the_g
     vm = _load_vm("vm_scr2"); import yaml
     monkeypatch.setattr(vm, "REPO", tmp_path)
     soc = tmp_path / "soc.json"
-    soc.write_text("{ not valid json")
+    soc.write_text("{ not valid json", encoding="utf-8")
     monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
     p = tmp_path / "E1M-TEST.yaml"
     p.write_text(yaml.safe_dump({
         "silicon": "acme:widget",
         "silicon_capabilities": {"unpopulated": ["camera"]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_silicon_capability_restrictions([p])  # must not raise
     assert failures and any("fails to parse" in m for _, msgs in failures for m in msgs)
 
@@ -839,13 +843,13 @@ def test_silicon_capability_restrictions_non_dict_capabilities_does_not_crash_th
     vm = _load_vm("vm_scr3"); import yaml, json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     soc = tmp_path / "soc.json"
-    soc.write_text(json.dumps({"capabilities": 5}))
+    soc.write_text(json.dumps({"capabilities": 5}), encoding="utf-8")
     monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
     p = tmp_path / "E1M-TEST.yaml"
     p.write_text(yaml.safe_dump({
         "silicon": "acme:widget",
         "silicon_capabilities": {"unpopulated": ["camera"]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_silicon_capability_restrictions([p])  # must not raise
     assert failures  # `camera` is not offered by the (normalised-to-empty) capability set
 
@@ -861,12 +865,12 @@ def test_silicon_capability_restrictions_non_string_unpopulated_entry_does_not_c
     vm = _load_vm("vm_scr4"); import yaml, json
     monkeypatch.setattr(vm, "REPO", tmp_path)
     soc = tmp_path / "soc.json"
-    soc.write_text(json.dumps({"capabilities": {"camera": True}}))
+    soc.write_text(json.dumps({"capabilities": {"camera": True}}), encoding="utf-8")
     monkeypatch.setattr(vm, "resolve_soc_path", lambda ref, root: soc)
     p = tmp_path / "E1M-TEST.yaml"
     p.write_text(yaml.safe_dump({
         "silicon": "acme:widget",
         "silicon_capabilities": {"unpopulated": [{"a": "b"}]},
-    }))
+    }), encoding="utf-8")
     failures = vm._check_silicon_capability_restrictions([p])  # must not raise
     assert failures == []  # the malformed entry is skipped; nothing left to flag
