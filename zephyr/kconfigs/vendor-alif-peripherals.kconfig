@@ -801,6 +801,15 @@ config MIPI_DPHY_INIT_PRIORITY
 	help
 	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
 
+# dphy_dw.c registers its log module with CONFIG_MIPI_DPHY_LOG_LEVEL, which
+# nothing defined, so any CONFIG_LOG=y build with the D-PHY enabled failed to
+# compile.  Upstream has no mipi_dphy class to supply it.
+if MIPI_DPHY_DW
+module = MIPI_DPHY
+module-str = mipi_dphy
+source "subsys/logging/Kconfig.template.log_config"
+endif # MIPI_DPHY_DW
+
 config MIPI_DSI_DW
 	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y
