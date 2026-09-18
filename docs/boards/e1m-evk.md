@@ -229,7 +229,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   patch in `zephyr/patches.yml`, so the workspace must be patched
   (`scripts/bootstrap.sh` does it).
 
-  [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/README.md)
+  [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
   is the bench first-light app for this connector: it opens each of
   the four shipped camera shields (IMX219 / OV5647 / OV9281 / IMX296)
   through `<alp/camera.h>`, starts the
