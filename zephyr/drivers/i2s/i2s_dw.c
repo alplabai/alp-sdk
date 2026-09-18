@@ -100,14 +100,14 @@
  *         the TX stream (tx.state == I2S_STATE_NOT_READY), so it succeeds
  *         and repoints dev_data->dir to I2S_DIR_TX while RX is still
  *         RUNNING. The next RXDA is unserviced, i2s_dw_isr() masks it
- *         (RXDAM), and the running RX stream goes permanently deaf --
- *         nothing re-arms it until another rx_stream_start() or a TX START
- *         pre-empts it into ERROR. A blocking alp_i2s_read() in between
- *         times out with no error reported by the driver. This is
- *         strictly an improvement over the pre-fix behaviour -- that same
- *         sequence used to produce the ISR storm this change kills -- but
- *         it is still a gap, not a fix, and stays with #2150's later
- *         phase(s). The mirror image (configure(RX)
+ *         (RXDAM), and the RX stream goes deaf while its state still says
+ *         RUNNING. The backend reads with SYS_FOREVER_MS, so a blocked
+ *         alp_i2s_read() then waits until the TX START pre-empts RX, which
+ *         releases it with -EIO (issue #2205); without a TX START it waits
+ *         forever. This is strictly an improvement over the pre-fix
+ *         behaviour -- that same sequence used to produce the ISR storm
+ *         this change kills -- but it is still a gap, not a fix, and stays
+ *         with #2150's later phase(s). The mirror image (configure(RX)
  *         while TX is RUNNING) stalls TX the same way until the RX START
  *         pre-empts it, since i2s_dw_configure() still repoints
  *         dev_data->dir too.
@@ -154,7 +154,11 @@
  *         armed, and the next write() gets -EIO and the backend's
  *         ERROR->PREPARE->START retry restarts it. A RUNNING RX pre-empted
  *         by a TX START goes to I2S_STATE_ERROR through rx_stream_disable(),
- *         which keeps CER.CLKEN whenever tx_clock_is_live();
+ *         which keeps CER.CLKEN whenever tx_clock_is_live(). Either way a
+ *         reader or writer already blocked on the pre-empted stream's
+ *         semaphore is released with -EIO -- the backend waits with
+ *         SYS_FOREVER_MS, and a blocked alp_i2s_read() used to deadlock
+ *         the handle's alp_i2s_close();
  *       - i2s_rx_channel_enable()/i2s_tx_channel_enable() read-modify-write,
  *         so the E8's per-slot enables in bits 8-23 survive.
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
@@ -573,6 +577,17 @@ static int i2s_dw_write(const struct device *dev, void *mem_block,
 			 SYS_TIMEOUT_MS(dev_data->tx.cfg.timeout));
 	if (ret < 0) {
 		return ret;
+	}
+
+	/* alp-sdk issue #2205: the stream can be parked in ERROR while this
+	 * call waits on tx.sem -- rx_stream_start() pre-empting a RUNNING TX
+	 * gives tx.sem exactly to release such a writer. Queueing into an
+	 * ERROR stream would report success for audio PREPARE then drops, so
+	 * fail it instead; the backend's ERROR->PREPARE->START retry takes it
+	 * from there. No give-back: the count this writer took was the extra
+	 * one, and PREPARE/DROP's tx_queue_drop() re-saturates tx.sem. */
+	if (dev_data->tx.state == I2S_STATE_ERROR) {
+		return -EIO;
 	}
 
 	/* Add data to the end of the TX queue */
@@ -1057,8 +1072,10 @@ static int i2s_dw_initialize(const struct device *dev)
 	 * named mask, not the read-modify-write of bits 0/1/4/5 that
 	 * i2s_disable_tx_interrupt()/i2s_disable_rx_interrupt() do. The RMW
 	 * kept whatever the previous image left in the other bits, so an
-	 * inherited unmask of the E8's TXFUM (bit 6) survived into every boot,
-	 * and nothing in this driver services TXFU. I2S_IMR_ALL_Msk (0x73) is
+	 * inherited unmask of the E8's TXFUM (bit 6) would have survived into
+	 * every boot, and nothing in this driver services TXFU. Nothing in-tree
+	 * unmasks bit 6 today; this closes the hole, it fixes no observed
+	 * fault. I2S_IMR_ALL_Msk (0x73) is
 	 * also the E8's IMR reset value; bits 2-3 are left 0 (no SVD field). */
 	i2s_set_interrupt_mask(I2S_IMR_ALL_Msk, i2s);
 
@@ -1203,6 +1220,12 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	key = irq_lock();
 	if (dev_data->tx.state == I2S_STATE_RUNNING) {
 		tx_stream_park_keep_clock(&dev_data->tx, dev);
+		/* Release a writer blocked in i2s_dw_write() on a full queue:
+		 * with dir now I2S_DIR_RX nothing else would ever give tx.sem,
+		 * and the backend configures SYS_FOREVER_MS. The writer sees
+		 * ERROR and returns -EIO. ponytail: one give releases one
+		 * waiter; the Zephyr I2S API has one writer per stream. */
+		k_sem_give(&dev_data->tx.sem);
 	}
 	dev_data->dir = I2S_DIR_RX;
 	irq_unlock(key);
@@ -1325,6 +1348,14 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 	if (dev_data->rx.state == I2S_STATE_RUNNING) {
 		dev_data->rx.state = I2S_STATE_ERROR;
 		rx_stream_disable(&dev_data->rx, dev);
+		/* Release a reader blocked in i2s_dw_read(): with dir now
+		 * I2S_DIR_TX nothing else would ever give rx.sem, the backend
+		 * configures SYS_FOREVER_MS, and alp_i2s_close() waits for
+		 * that read to leave before its DROP could reset the
+		 * semaphore -- a deadlock. The reader finds the queue empty
+		 * and returns -EIO; PREPARE/DROP's k_sem_reset() clears the
+		 * extra count. ponytail: one give releases one waiter. */
+		k_sem_give(&dev_data->rx.sem);
 	}
 	dev_data->dir = I2S_DIR_TX;
 	irq_unlock(key);

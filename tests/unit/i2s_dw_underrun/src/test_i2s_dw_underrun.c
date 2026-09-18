@@ -62,6 +62,30 @@
 #define CONFIG_I2S_DW_TX_BLOCK_COUNT 4
 #endif
 
+/*
+ * alp-sdk issue #2205: count every CER.CLKEN clear the driver makes. The
+ * register block is plain RAM, so a 1->0->1 glitch inside one call is
+ * invisible in the final register value; the #2149 hazard is exactly that
+ * glitch (a codec latches SHUTDOWN on bit-clock loss). i2s_dw.h is
+ * included first -- with the same headers i2s_dw.c includes ahead of it --
+ * so its include guard skips it inside i2s_dw.c, and every
+ * i2s_clock_disable() call in the driver body then goes through the
+ * counting wrapper below. The driver source itself is unchanged.
+ */
+#include <soc.h>
+#include <zephyr/drivers/pinctrl.h>
+#include "../../../../zephyr/drivers/i2s/i2s_dw.h"
+
+static int fake_cer_clears;
+
+static inline void counted_clock_disable(const struct i2s_dw_cfg *i2s)
+{
+	fake_cer_clears++;
+	i2s_clock_disable(i2s);
+}
+
+#define i2s_clock_disable(i2s) counted_clock_disable(i2s)
+
 /* The real driver, compiled AS-IS. */
 #include "../../../../zephyr/drivers/i2s/i2s_dw.c"
 
@@ -302,6 +326,7 @@ static void dw_test_before(void *fixture)
 	silence_unused_driver_entry_points();
 
 	fake_e8_reset();
+	fake_cer_clears      = 0;
 	fake_set_rate_calls  = 0;
 	fake_on_calls        = 0;
 	fake_off_calls       = 0;
@@ -658,11 +683,14 @@ ZTEST(i2s_dw_underrun, test_configure_rate_change_invalidates_tx_restart_skip)
 /*
  * (h) alp-sdk issue #2150 (phase 1): an RX teardown (STOP here, same
  * shared body as DRAIN/DROP/both RX-ISR error exits -- see
- * rx_stream_disable()) must NOT gate the shared bit clock while TX is
- * still RUNNING on it. Reverting rx_stream_disable()'s `if (!tx_live)`
- * guard back to an unconditional i2s_clock_disable() turns this RED --
- * CER.CLKEN reads 0 after the RX stop even though TX is still RUNNING,
- * which is the exact silent-amp exposure #2150 phase 1 closes.
+ * rx_stream_disable()) must NOT gate the shared bit clock while TX
+ * depends on it. Since issue #2205 the RX START parks the RUNNING TX in
+ * ERROR with clk_restart_skip_ok armed, so this passes through
+ * tx_clock_is_live()'s flag half, not its RUNNING half. Reverting
+ * rx_stream_disable()'s `if (!tx_live)` guard back to an unconditional
+ * i2s_clock_disable() turns this RED -- CER.CLKEN reads 0 after the RX
+ * stop although the parked TX still counts on it, which is the exact
+ * silent-amp exposure #2150 phase 1 closes.
  */
 ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_running_keeps_clock)
 {
@@ -686,7 +714,8 @@ ZTEST(i2s_dw_underrun, test_rx_stop_with_tx_running_keeps_clock)
 	rc = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DROP);
 	zassert_equal(rc, 0, "tx drop cleanup failed: %d", rc);
 
-	zassert_true(clk_on_after_rx_stop, "RX stop gated the shared clock while TX was still RUNNING");
+	zassert_true(clk_on_after_rx_stop,
+	             "RX stop gated the shared clock while the pre-empted TX still depended on it");
 }
 
 /*
@@ -796,6 +825,8 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 	int      set_rate_calls_after_rx_start;
 	uint32_t rx_slab_free_before;
 	uint32_t rx_slab_free_after;
+	int32_t  tx_state_after_rx_start;
+	uint32_t iter_after_rx_start;
 
 	tx_configure(16000);
 	tx_write_block();
@@ -807,6 +838,8 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 	rx_start_rc                   = i2s_dw_trigger(&test_dev, I2S_DIR_RX, I2S_TRIGGER_START);
 	set_rate_calls_after_rx_start = fake_set_rate_calls;
 	rx_slab_free_after            = k_mem_slab_num_free_get(&test_rx_slab);
+	tx_state_after_rx_start       = test_data.tx.state;
+	iter_after_rx_start           = fake_regs.ITER;
 
 	/* Cleanup: free TX's outstanding block. RX never allocated one --
 	 * the rejection happens before rx_stream_start()'s
@@ -825,6 +858,16 @@ ZTEST(i2s_dw_underrun, test_rx_start_with_tx_running_different_rate_fails)
 	zassert_equal(rx_slab_free_after,
 	              rx_slab_free_before,
 	              "RX start allocated (and leaked) an rx slab block before returning -EBUSY");
+	/* alp-sdk issue #2205: a REFUSED RX start must not pre-empt TX -- the
+	 * park sits after the -EBUSY check. MUTATION-PROVEN: moving the park
+	 * above that check turns these RED. */
+	zassert_equal(tx_state_after_rx_start,
+	              I2S_STATE_RUNNING,
+	              "a rejected RX start pre-empted TX (state %d)",
+	              tx_state_after_rx_start);
+	zassert_equal(iter_after_rx_start & I2S_ITER_TXEN_Msk,
+	              I2S_ITER_TXEN_Msk,
+	              "a rejected RX start cleared ITER.TXEN");
 }
 
 /*
@@ -1076,8 +1119,9 @@ ZTEST(i2s_dw_underrun, test_initialize_quiesces_before_arming_irq)
  * (s) alp-sdk issue #2205: i2s_dw_initialize() writes the FULL named IMR
  * mask, including the E8's TXFUM (bit 6). It used to set only bits
  * 0/1/4/5 by read-modify-write, so a previous image's unmask of bit 6 --
- * the block keeps its registers across a warm reset -- survived into every
- * boot, and nothing in this driver services TXFU. Bits 2-3 have no field
+ * the block keeps its registers across a warm reset -- would have survived
+ * into every boot, and nothing in this driver services TXFU. (Nothing
+ * in-tree unmasks bit 6; this is the hole, not an observed fault.) Bits 2-3 have no field
  * in either SVD and must stay 0.
  *
  * MUTATION-PROVEN: restoring the two i2s_disable_tx_interrupt()/
@@ -1229,7 +1273,10 @@ ZTEST(i2s_dw_underrun, test_rx_restart_after_tx_session_is_serviced)
  *   - parking without arming clk_restart_skip_ok
  *     (tx_stream_disable_ex(..., true) in its place) turns it RED the same
  *     way: CER.CLKEN is gated by the RX stop -- the #2171 contract broken
- *     -- and test (h) goes RED too.
+ *     -- and test (h) goes RED too;
+ *   - deleting the `if (clk_needs_reprogram)` guard around
+ *     i2s_configure_clock() in tx_stream_start() turns it RED on the CCR
+ *     sentinel (set_rate() alone does not see a live CCR rewrite).
  */
 ZTEST(i2s_dw_underrun, test_rx_start_preempts_running_tx_keeps_clock)
 {
@@ -1241,6 +1288,7 @@ ZTEST(i2s_dw_underrun, test_rx_start_preempts_running_tx_keeps_clock)
 	bool         clk_on_after_rx_stop;
 	int32_t      tx_state_after_retry;
 	enum i2s_dir dir_after_retry;
+	uint32_t     ccr_after_retry;
 	int          set_rate_delta;
 	int          write_rc;
 	int          before;
@@ -1280,13 +1328,16 @@ ZTEST(i2s_dw_underrun, test_rx_start_preempts_running_tx_keeps_clock)
 	             "RX teardown gated CER.CLKEN while the pre-empted TX was still live");
 	zassert_equal(write_rc, -EIO, "write() to the pre-empted TX did not fail -EIO: %d", write_rc);
 
-	/* The backend's ERROR->PREPARE->START retry. */
+	/* The backend's ERROR->PREPARE->START retry. The sentinel proves the
+	 * restart skips the live CCR rewrite too, not only set_rate(). */
 	tx_prepare();
 	tx_write_block();
-	before = fake_set_rate_calls;
+	before        = fake_set_rate_calls;
+	fake_regs.CCR = 0xDEADBEEFU;
 	tx_start();
 	tx_state_after_retry = test_data.tx.state;
 	dir_after_retry      = test_data.dir;
+	ccr_after_retry      = fake_regs.CCR;
 	set_rate_delta       = fake_set_rate_calls - before;
 
 	/* Cleanup before the assertions so it still runs if one aborts. */
@@ -1296,6 +1347,7 @@ ZTEST(i2s_dw_underrun, test_rx_start_preempts_running_tx_keeps_clock)
 	zassert_equal(tx_state_after_retry, I2S_STATE_RUNNING, "tx not RUNNING after the retry");
 	zassert_equal(dir_after_retry, I2S_DIR_TX, "tx restart did not point dir at TX");
 	zassert_equal(set_rate_delta, 0, "tx restart reprogrammed the kept clock");
+	zassert_equal(ccr_after_retry, 0xDEADBEEFU, "tx restart rewrote CCR on the kept clock");
 }
 
 /*
@@ -1375,4 +1427,245 @@ ZTEST(i2s_dw_underrun, test_channel_enable_preserves_slot_enables)
 	              E8_RER_RESET,
 	              "RX start clobbered the RX slot enables (RER=0x%08x)",
 	              rer_after_rx_start);
+}
+
+/* ---------------------------------------------------------------------
+ * alp-sdk issue #2205: one helper thread that blocks in i2s_dw_read() or
+ * i2s_dw_write() while the test thread pre-empts its stream. The backend
+ * (src/backends/i2s/zephyr_drv.c) configures SYS_FOREVER_MS, so a waiter
+ * that is never released hangs for good -- and alp_i2s_close() waits for
+ * it before its DROP could reset the semaphore.
+ * ------------------------------------------------------------------ */
+#define WAITER_STACK_SIZE 4096
+
+K_THREAD_STACK_DEFINE(waiter_stack, WAITER_STACK_SIZE);
+static struct k_thread waiter_thread;
+static volatile int    waiter_rc;
+static volatile bool   waiter_done;
+
+/* Room for 1 in-flight + CONFIG_I2S_DW_TX_BLOCK_COUNT queued + 1 waiting. */
+K_MEM_SLAB_DEFINE_STATIC(test_tx_big_slab, TEST_BLOCK_BYTES, 8, 4);
+
+static void reader_entry(void *p1, void *p2, void *p3)
+{
+	void  *block = NULL;
+	size_t size  = 0;
+
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+	waiter_rc = i2s_dw_read(&test_dev, &block, &size);
+	if (waiter_rc == 0) {
+		k_mem_slab_free(&test_rx_slab, block);
+	}
+	waiter_done = true;
+}
+
+static int big_write(void)
+{
+	void *block;
+	int   rc = k_mem_slab_alloc(&test_tx_big_slab, &block, K_NO_WAIT);
+
+	if (rc == 0) {
+		rc = i2s_dw_write(&test_dev, block, TEST_BLOCK_BYTES);
+		if (rc != 0) {
+			k_mem_slab_free(&test_tx_big_slab, block);
+		}
+	}
+	return rc;
+}
+
+static void writer_entry(void *p1, void *p2, void *p3)
+{
+	ARG_UNUSED(p1);
+	ARG_UNUSED(p2);
+	ARG_UNUSED(p3);
+	waiter_rc   = big_write();
+	waiter_done = true;
+}
+
+/* Start the waiter and give it time to block. */
+static void start_waiter(k_thread_entry_t entry)
+{
+	waiter_done = false;
+	waiter_rc   = 1;
+	k_thread_create(&waiter_thread,
+	                waiter_stack,
+	                K_THREAD_STACK_SIZEOF(waiter_stack),
+	                entry,
+	                NULL,
+	                NULL,
+	                NULL,
+	                K_PRIO_PREEMPT(1),
+	                0,
+	                K_NO_WAIT);
+	k_sleep(K_MSEC(20));
+}
+
+/* True if the waiter returned; otherwise it is aborted so it cannot leak
+ * into later cases. */
+static bool join_waiter(void)
+{
+	if (k_thread_join(&waiter_thread, K_MSEC(500)) == 0) {
+		return true;
+	}
+	k_thread_abort(&waiter_thread);
+	return false;
+}
+
+/*
+ * (z) alp-sdk issue #2205: a reader blocked in i2s_dw_read() when a TX
+ * START pre-empts its RX stream is released with -EIO. It used to wait on
+ * rx.sem forever (nothing gives it once dir is I2S_DIR_TX), so the app's
+ * alp_i2s_close() on that RX handle deadlocked waiting for the read.
+ *
+ * MUTATION-PROVEN: deleting the k_sem_give(&dev_data->rx.sem) from
+ * tx_stream_start()'s pre-emption turns this RED (reader never returns).
+ */
+ZTEST(i2s_dw_underrun, test_tx_start_preempting_rx_releases_blocked_reader)
+{
+	struct i2s_config cfg = make_cfg(16000, &test_rx_slab);
+	bool              blocked_before;
+	bool              released;
+	int               rc;
+
+	cfg.timeout = SYS_FOREVER_MS;
+	rc          = i2s_dw_configure(&test_dev, I2S_DIR_RX, &cfg);
+	zassert_equal(rc, 0, "rx configure failed: %d", rc);
+	rx_start();
+
+	start_waiter(reader_entry);
+	blocked_before = !waiter_done;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+	released = join_waiter();
+
+	zassert_true(blocked_before, "the reader never blocked -- this case proves nothing");
+	zassert_true(released, "a reader blocked on the pre-empted RX stream was never released");
+	zassert_equal(waiter_rc, -EIO, "released reader did not get -EIO: %d", waiter_rc);
+}
+
+/*
+ * (aa) alp-sdk issue #2205: the mirror of (z). A writer blocked in
+ * i2s_dw_write() on a full TX queue when an RX START pre-empts TX is
+ * released with -EIO, instead of waiting on tx.sem forever or, once woken,
+ * queueing into the parked stream and reporting success.
+ *
+ * MUTATION-PROVEN, two ways: deleting the k_sem_give(&dev_data->tx.sem)
+ * from rx_stream_start()'s pre-emption turns this RED (writer never
+ * returns); deleting i2s_dw_write()'s post-wait ERROR check turns it RED
+ * (writer returns 0).
+ */
+ZTEST(i2s_dw_underrun, test_rx_start_preempting_tx_releases_blocked_writer)
+{
+	struct i2s_config cfg = make_cfg(16000, &test_tx_big_slab);
+	bool              blocked_before;
+	bool              released;
+	int               rc;
+
+	cfg.timeout = SYS_FOREVER_MS;
+	rc          = i2s_dw_configure(&test_dev, I2S_DIR_TX, &cfg);
+	zassert_equal(rc, 0, "tx configure failed: %d", rc);
+	rc = big_write();
+	zassert_equal(rc, 0, "tx write failed: %d", rc);
+	tx_start();
+	for (int i = 0; i < CONFIG_I2S_DW_TX_BLOCK_COUNT; i++) {
+		rc = big_write();
+		zassert_equal(rc, 0, "tx fill write %d failed: %d", i, rc);
+	}
+	zassert_equal(k_sem_count_get(&test_data.tx.sem), 0U, "TX queue not full");
+
+	start_waiter(writer_entry);
+	blocked_before = !waiter_done;
+
+	rx_configure(16000);
+	rx_start();
+	released = join_waiter();
+
+	zassert_true(blocked_before, "the writer never blocked -- this case proves nothing");
+	zassert_true(released, "a writer blocked on the pre-empted TX stream was never released");
+	zassert_equal(waiter_rc, -EIO, "released writer did not get -EIO: %d", waiter_rc);
+}
+
+/*
+ * (ab) alp-sdk issue #2205: a TX START that fails (empty queue, -ENOMEM)
+ * must not pre-empt RX -- the pre-emption sits after queue_get().
+ *
+ * MUTATION-PROVEN: moving tx_stream_start()'s RX pre-emption above
+ * queue_get() turns this RED (RX parked in ERROR, IRER.RXEN clear).
+ */
+ZTEST(i2s_dw_underrun, test_failed_tx_start_leaves_rx_running)
+{
+	int32_t  rx_state_after;
+	uint32_t irer_after;
+	int      rc;
+
+	rx_configure(16000);
+	rx_start();
+	tx_configure(16000);
+
+	rc             = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_START);
+	rx_state_after = test_data.rx.state;
+	irer_after     = fake_regs.IRER;
+
+	zassert_equal(rc, -ENOMEM, "TX START on an empty queue did not fail -ENOMEM: %d", rc);
+	zassert_equal(rx_state_after,
+	              I2S_STATE_RUNNING,
+	              "a failed TX START pre-empted RX (state %d)",
+	              rx_state_after);
+	zassert_equal(
+	    irer_after & I2S_IRER_RXEN_Msk, I2S_IRER_RXEN_Msk, "a failed TX START cleared IRER.RXEN");
+}
+
+/*
+ * (ac) alp-sdk issue #2205: the backend's TX retry pre-empting a RUNNING
+ * RX must never gate the bit clock, even for an instant. The flag armed
+ * when RX parked TX keeps tx_clock_is_live() true inside the RX teardown
+ * only because tx_stream_start() pre-empts RX BEFORE it consumes that
+ * flag. The other order gates CER.CLKEN in rx_stream_disable() and turns
+ * it back on a few lines later: 1 -> 0 -> 1, the bit-clock loss a codec
+ * latches SHUTDOWN on (#2149). The final register value cannot show that,
+ * so this counts every clear.
+ *
+ * MUTATION-PROVEN: moving the RX pre-emption below
+ * `stream->clk_restart_skip_ok = false;` turns this RED (one clear).
+ */
+ZTEST(i2s_dw_underrun, test_tx_retry_preempting_rx_never_gates_clock)
+{
+	void   *block;
+	int32_t rx_state_after;
+	bool    clk_on_after;
+	int     clears;
+	int     write_rc;
+	int     rc;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+	rx_configure(16000);
+	rx_start();
+
+	rc = k_mem_slab_alloc(&test_tx_slab, &block, K_NO_WAIT);
+	zassert_equal(rc, 0, "tx slab alloc failed: %d", rc);
+	write_rc = i2s_dw_write(&test_dev, block, TEST_BLOCK_BYTES);
+	k_mem_slab_free(&test_tx_slab, block);
+	zassert_equal(write_rc, -EIO, "write to the parked TX did not fail -EIO: %d", write_rc);
+
+	tx_prepare();
+	tx_write_block();
+	fake_cer_clears = 0;
+	tx_start();
+	clears         = fake_cer_clears;
+	rx_state_after = test_data.rx.state;
+	clk_on_after   = (fake_regs.CER & I2S_CER_CLKEN_Msk) != 0;
+
+	zassert_equal(
+	    clears, 0, "the TX retry gated CER.CLKEN %d time(s) while pre-empting RX", clears);
+	zassert_true(clk_on_after, "CER.CLKEN clear after the TX retry");
+	zassert_equal(rx_state_after,
+	              I2S_STATE_ERROR,
+	              "the TX retry did not pre-empt the RUNNING RX (state %d)",
+	              rx_state_after);
 }

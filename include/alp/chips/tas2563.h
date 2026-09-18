@@ -949,7 +949,9 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   `i2s_clock_disable()`), so a restart after one needs this call to be
  *   heard again.  Since #2149 a mid-playback underrun no longer stops it:
  *   the ISR's underrun exit keeps `CER.CLKEN` set on that one path, so a
- *   write gap alone no longer puts the amps into SHUTDOWN.
+ *   write gap alone no longer puts the amps into SHUTDOWN.  Since #2205 an
+ *   RX start on the same I2S controller that pre-empts running playback
+ *   takes that same keep-clock exit.
  *
  * @par Precondition: the TDM/I2S bit clock and FSYNC must already be
  *   running when this is called -- clearing the latch before the clock
