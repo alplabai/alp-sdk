@@ -138,16 +138,20 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 #define IMX296_REG_CSI_TIMING IMX296_REG8(0x418C)
 
 /*
- * "Pixel Arrangement" (page 8) / "Readout Drive Modes" (page 44): silicon
- * carries 1456x1088 effective pixels, but the sensor's own "Number of
- * recording pixels" for All-pixel scan mode -- the size actually output
- * over CSI-2 once the colour-processing margin is cropped internally -- is
- * 1440x1080 ("Register List of All-pixel scan mode", page 49, and the
- * "Readout Drive Modes" table, page 44). This driver uses 1440x1080, the
- * size the sensor itself outputs, not the larger effective-pixel count.
+ * "Drive Timing Chart for Serial Output in All-pixel Scan Mode" (page 50):
+ * the TRANSMITTED RAW10 (DT 0x2B) frame is the whole 1456x1088 effective
+ * array, not the 1440x1080 "recommended recording pixels" of the "Readout
+ * Drive Modes" table (page 44). Each RAW10 line carries 8 + 1440 + 8 = 1456
+ * pixels (the colour-processing margin is sent, not cropped), and there are
+ * 4 + 1080 + 4 = 1088 RAW10 lines per frame. The embedded-data (DT 0x12),
+ * NULL (DT 0x10) and vertical-OB (DT 0x37) lines ride other data types
+ * ("Image Data Output Format", page 45) that the CSI-2 host's IPI does not
+ * pass to the capture side. 1440x1080 is an image-quality recommendation,
+ * so cropping to it is the consumer's (or the capture block's) job; the
+ * sensor output is 1456x1088.
  */
-#define IMX296_WIDTH  1440
-#define IMX296_HEIGHT 1080
+#define IMX296_WIDTH  1456
+#define IMX296_HEIGHT 1088
 
 /*
  * "Register List of All-pixel scan mode" (page 49), AD = 10 bit / 60.3
@@ -169,9 +173,10 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  *   link_freq = per_lane_bit_rate / 2 = 1.188 Gbps / 2 = 594 MHz
  *   pixel_rate = per_lane_bit_rate * lanes / bits_per_pixel
  *              = 1.188 Gbps * 1 / 10 = 118.8 Mpix/s
- * Cross-checked against the table's own numbers: 1440 x 1118 recording
- * lines... using the *total* pixel count (1760 x 1118, "Number of INCK in
- * 1H" row) and 60.3 fps: 1760 * 1118 * 60.3 ~= 118.8 Mpix/s.
+ * Cross-checked against the table's own numbers using the *total* pixel
+ * count per frame (1760 x 1118, the "Total number of pixels" columns, which
+ * include blanking) and 60.3 fps: 1760 * 1118 * 60.3 ~= 118.7 Mpix/s. The
+ * active 1456x1088 window is a subset of that, so the rate is unchanged.
  */
 #define IMX296_LINK_FREQ_HZ  594000000
 #define IMX296_PIXEL_RATE_HZ 118800000
@@ -233,16 +238,18 @@ static const struct imx296_inck_regs imx296_inck_table[] = {
  * Bayer order: NOT taken from the "Color Coding Diagram" (page 22) -- that
  * diagram gives the physical colour-filter phase at the TOTAL pixel array's
  * outer edge (adjacent to the N1/A1 pins), which is a different row than the
- * Recording pixel area's own first transmitted row (see the width/height
- * comment below for why: readout starts at the OB side, not the N1 side).
+ * first transmitted RAW10 row (readout starts at the OB side, not the N1
+ * side -- see the IMX296_WIDTH/IMX296_HEIGHT comment above).
  * The authoritative source is the "Register List of All-pixel scan mode" ->
  * "Pixel Array Image Drawing in All-pixel scan Mode" / "Drive Timing Chart
  * for Serial Output in All-pixel Scan Mode" (page 50), which draws the CFA
- * swatch directly at the Recording pixel area's own top-left corner (the
- * first transmitted line, first transmitted column, HREVERSE/VREVERSE at
+ * swatch at the colour-processing margin's own top-left corner (the first
+ * transmitted RAW10 line, first transmitted column, HREVERSE/VREVERSE at
  * their POR "Normal" default of 0, matching this driver -- it never touches
  * IMX296_REG_REVERSE): that swatch reads R,G on the first row and G,B on the
- * second, i.e. RGGB in V4L2/Zephyr Bayer naming, not GBRG.
+ * second, i.e. RGGB in V4L2/Zephyr Bayer naming, not GBRG. The margins are
+ * even (8 columns, 4 rows), so the Recording pixel area inside starts on the
+ * same RGGB phase -- the page draws the same swatch there too.
  */
 static const struct video_format_cap imx296_fmts[] = {
 	{

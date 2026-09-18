@@ -15,6 +15,6 @@ config VIDEO_IMX296
 	help
 	  Enable the Sony IMX296 1.58 MP global-shutter MIPI CSI-2 image
 	  sensor driver (compatible "sony,imx296"), authored from the Sony
-	  IMX296 datasheet. All-pixel scan mode only: 1440x1080, RAW10, 1
+	  IMX296 datasheet. All-pixel scan mode only: 1456x1088, RAW10, 1
 	  MIPI CSI-2 data lane, 37.125/54/74.25 MHz INCK. Driver:
 	  zephyr/drivers/video/imx296.c.

@@ -24,6 +24,12 @@ override.
 On alp-sdk that carrier connector shield is the E1M-EVK's
 ``e1m_evk_rpi_csi`` shield.
 
+The driver offers the sensor's one All-pixel scan mode: 1456x1088 RAW10
+(``SRGGB10P``), the frame the sensor actually transmits. That is the
+1440x1080 recommended recording area plus the 8-column / 4-row
+colour-processing margin around it, which the sensor sends rather than crops.
+A 1440x1080 image is a crop the application takes from that frame.
+
 .. important::
    The 54 MHz ``fixed-clock`` in this shield's overlay must match the actual
    crystal on the camera module in hand. The Sony IMX296 accepts

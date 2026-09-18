@@ -14,8 +14,9 @@ description: |
 
   A raw Bayer (colour) or mono global-shutter image sensor with a single-lane
   MIPI CSI-2 image data interface and a CCI (I2C compatible) control bus.
-  Only All-pixel scan mode is supported: 1440x1080 RAW10, 1 data lane,
-  37.125 / 54 / 74.25 MHz INCK.
+  Only All-pixel scan mode is supported: 1456x1088 RAW10 (the whole
+  effective array as transmitted; 1440x1080 is the recommended recording
+  crop inside it), 1 data lane, 37.125 / 54 / 74.25 MHz INCK.
 
 compatible: "sony,imx296"
 

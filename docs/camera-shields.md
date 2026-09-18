@@ -77,15 +77,20 @@ GPL/LGPL and were not read while writing this file. BENCH-UNVERIFIED (no
 silicon bench pass on this batch). See the file header for the full
 provenance note and retirement path.
 
-Mode: All-pixel scan only -- 1440x1080 (the sensor's own "recording pixel"
-output size, not the 1456x1088 effective-silicon count -- the extra rows/
-columns are a colour-processing margin the sensor crops internally before
-CSI-2 output), `SRGGB10P` (RAW10 packed, RGGB Bayer order -- taken from the
-datasheet's "Drive Timing Chart for Serial Output in All-pixel Scan Mode",
-which draws the colour-filter phase at the Recording pixel area's own first
+Mode: All-pixel scan only -- 1456x1088, the whole effective array as the
+sensor transmits it. The datasheet's "Drive Timing Chart for Serial Output in
+All-pixel Scan Mode" sends every RAW10 line as 8 + 1440 + 8 = 1456 pixels and
+4 + 1080 + 4 = 1088 RAW10 lines per frame: the colour-processing margin is
+transmitted, not cropped. 1440x1080 ("recommended recording pixels") is an
+image-quality crop inside that frame, left to the consumer; a hardware crop
+in the CPI is a possible follow-up. The frame's embedded-data, NULL and
+vertical-OB lines use other CSI-2 data types, which the CSI-2 host's IPI does
+not pass on. Pixel format `SRGGB10P` (RAW10 packed, RGGB Bayer order -- taken
+from the same timing chart, which draws the colour-filter phase at the first
 transmitted pixel, not from the physical-array corner diagram elsewhere in
 the datasheet, which is a different row: readout starts at the OB side, not
-the N1-pin side) for the IMX296LQR-C colour part, MIPI CSI-2 D-PHY, **1 data
+the N1-pin side; the margins are even, so the 1440x1080 crop keeps the same
+phase) for the IMX296LQR-C colour part, MIPI CSI-2 D-PHY, **1 data
 lane** (unlike OV5647 /
 OV9281 above, both 2-lane parts), 37.125/54/74.25 MHz INCK (any other
 frequency is rejected at runtime with `-ENOTSUP`), 60.3 frame/s fixed.
@@ -100,9 +105,9 @@ device-identification value), so the driver's probe instead does a
 documented readable-register sanity check: it reads back the STANDBY
 register and checks it holds its documented power-on-reset default.
 
-**Memory**: RAW10 unpacked is 2 bytes/pixel, so a 1440x1080 frame is
-1440 x 1080 x 2 ~= 3.11 MB -- too large for TCM on the boards this shield
-targets; frame buffers must live in SRAM/DDR, not TCM.
+**Memory**: RAW10 unpacked is 2 bytes/pixel, so a 1456x1088 frame is
+1456 x 1088 x 2 = 3,168,256 bytes (~3.17 MB) -- too large for TCM on the
+boards this shield targets; frame buffers must live in SRAM/DDR, not TCM.
 
 ## Build coverage
 

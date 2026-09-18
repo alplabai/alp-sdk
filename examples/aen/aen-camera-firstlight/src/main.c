@@ -76,14 +76,17 @@
 	                                 : "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)")
 #elif defined(CONFIG_VIDEO_IMX296)
 /* RPi Global Shutter Camera (IMX296LQR-C): one fixed all-pixel mode, so no
- * crop -- 1440x1080 RAW10 over a single CSI-2 lane.  Unpacked that is
- * 1440 x 1080 x 2 = 3,110,400 bytes, so this example's Kconfig drops the
- * backend to ONE frame buffer and grows the SRAM0 pool to fit it. */
+ * crop -- 1456x1088 RAW10 over a single CSI-2 lane.  That is what the sensor
+ * transmits: the datasheet's 1440x1080 "recording" area plus the 8-column /
+ * 4-row colour-processing margin on every side, which is sent, not cropped.
+ * Unpacked that is 1456 x 1088 x 2 = 3,168,256 bytes, so this example's
+ * Kconfig drops the backend to ONE frame buffer and grows the SRAM0 pool to
+ * fit it. */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
-#define CAM_WIDTH           1440
-#define CAM_HEIGHT          1080
+#define CAM_WIDTH           1456
+#define CAM_HEIGHT          1088
 #define CAM_BYTES_PER_PIXEL 2
-#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1440x1080)"
+#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1456x1088)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif
