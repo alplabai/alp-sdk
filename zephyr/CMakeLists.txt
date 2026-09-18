@@ -639,12 +639,14 @@ endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
 
-# Tier-1.5 glue: the Alif E8 SoC-level setup the display chain needs and no
-# driver performs -- D-PHY clock sources + analog power (CGU / VBAT), the CDC200
-# pixel-clock divider, and the DSI panel backlight pad mux.  E8-only (the gate
-# mirrors the GPIO clock-enable glue above) and only when the display chain is
-# configured; each hook inside is further gated on its DT node being okay.
-if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+# ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
+# display chain need and no driver performs -- D-PHY clock sources + analog
+# power (CGU / VBAT), the CDC200 pixel-clock divider, and the DSI panel
+# backlight pad mux.  E8-only (the gate mirrors the GPIO clock-enable glue
+# above) and only when the D-PHY, DSI or CDC200 driver is configured, so a
+# CSI-camera build gets the D-PHY power-up too; each hook inside is further
+# gated on its DT node being okay.
+if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
     zephyr_library_sources(
         ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
 endif()
