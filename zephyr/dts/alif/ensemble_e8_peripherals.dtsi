@@ -1652,6 +1652,14 @@
 	 * camera clock IDs via alif-ensemble-clocks-ext.h when the stack is
 	 * bench-brought-up.
 	 *
+	 * EXCEPTION -- the shared D-PHY's pllref-clk / pllbypass-clk / tx-dphy-clk
+	 * ARE real: ALIF_MIPI_PLLREF_CLK / ALIF_MIPI_BYPASS_CLK /
+	 * ALIF_MIPI_TXDPHY_CLK (MIPI_CKEN bits 8 / 12 / 0, re-authored from the
+	 * AE822 DFP sys_ctrl_dphy.h), used by the DSI display chain below.  With
+	 * the dummy, dphy_dw_master_setup() "enabled" a non-clock and then stalled
+	 * the AXI on the unclocked D-PHY config registers (a hard core hang).
+	 * rx-dphy-clk (the CSI/camera RX role) stays on the placeholder.
+	 *
 	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
 	 * data pads), not defined in this tree; the driver applies pinctrl only IF
 	 * the node carries it, so the node is left pinctrl-less (a board that wires
@@ -1671,10 +1679,10 @@
 		      <0x4903F000 0x40>;
 		reg-names = "csi_reg", "dsi_reg", "expmst_reg";
 		#dphy-cells = <1>;
-		clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>;
+		clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>,
+			 <&clockctrl ALIF_MIPI_BYPASS_CLK>,
+			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>,
+			 <&clockctrl ALIF_CSI_DPHY_CLK>; /* rx-dphy-clk: placeholder */
 		clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
 		ref-frequency = <38400000>;
 		cfg-clk-frequency = <25000000>;
@@ -1709,6 +1717,60 @@
 		csi-vbp = <4>;
 		csi-vfp = <4>;
 		csi-vact = <560>;
+		status = "disabled";
+	};
+
+	/*
+	 * DISPLAY path -- TES CDC-2.1 (CDC200) DPI pixel pump (cdc200) feeding the
+	 * DesignWare MIPI-DSI host (mipi_dsi), which drives the shared D-PHY above
+	 * in its TX role.  Drivers: zephyr/drivers/display/display_cdc200.c
+	 * ("tes,cdc-2.1") and zephyr/drivers/mipi_dsi/dsi_dw.c
+	 * ("snps,designware-dsi"), both ADR 0017 Tier-2 fork copies.
+	 *
+	 * SoC facts ONLY: reg / IRQ are from the Alif CMSIS DFP (CDC_BASE
+	 * 0x49031000, DSI_BASE 0x49032000) and the clock ids are the real
+	 * re-authored ALIF_*_CLK values in alif-ensemble-clocks-ext.h.  The panel
+	 * (timings, layers, clock-frequency, framebuffer memory-region, the DSI
+	 * panel child and vid-pkt-size) is a board/shield fact and is added by the
+	 * enabling overlay -- e.g. the e1m_evk_rk055hdmipi4ma0 shield
+	 * (zephyr/boards/shields/).  The tes,cdc-2.1 timing properties are marked
+	 * required, which edtlib enforces only on status="okay" nodes, so this
+	 * disabled node is well-formed without them.
+	 *
+	 * The DSI host's dsi_dw driver reads only "dsi-clk-en" + "pixel-clk" (it
+	 * reaches the D-PHY through phy-if, not a clock cell).  frame-ack-en is
+	 * deliberately absent: with it the host waits for a panel ACK after every
+	 * frame, which bench-produced TO_LP_RX + DPI_PLD_WR_ERR (#2199).
+	 */
+	cdc200: cdc200@49031000 {
+		compatible = "tes,cdc-2.1";
+		reg = <0x49031000 0x1000>;
+		interrupts = <333 0>, <334 0>, <335 0>, <336 0>, <337 0>,
+			     <338 0>, <339 0>, <340 0>, <341 0>, <342 0>;
+		interrupt-names = "scanline_0", "scanline_1",
+				  "fifo_warning_0", "fifo_warning_1",
+				  "fifo_underrun_0", "fifo_underrun_1",
+				  "bus_error_0", "bus_error_1",
+				  "reg_reload_0", "reg_reload_1";
+		clocks = <&clockctrl ALIF_DPI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dpi-clk-en", "pixel-clk";
+		status = "disabled";
+	};
+
+	mipi_dsi: mipi-dsi@49032000 {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		compatible = "snps,designware-dsi";
+		reg = <0x49032000 0x1000>;
+		interrupts = <343 0>;
+		cdc-if = <&cdc200>;
+		phy-if = <&dphy 1>;
+		clocks = <&clockctrl ALIF_DSI_CLK>, <&clockctrl ALIF_CDC200_PIX_SYST_ACLK>;
+		clock-names = "dsi-clk-en", "pixel-clk";
+		dpi-shutdn-active = <1>;
+		dpi-colorm-active = <1>;
+		ecc-recv-en;
+		crc-recv-en;
 		status = "disabled";
 	};
 
