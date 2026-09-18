@@ -113,6 +113,28 @@ ZTEST(top_scores, test_nan_is_skipped_not_ranked)
 	zassert_within((double)val[2], 3.0, 1e-6, "val[2]=3.0");
 }
 
+ZTEST(top_scores, test_infinity_is_skipped_not_ranked)
+{
+	/* +-Inf are non-finite too and must be skipped exactly like NaN --
+	 * in particular +Inf must NOT win rank #1 just because it compares
+	 * true against every finite value; skipping it discards what would
+	 * otherwise be the largest score (see top_scores.h). */
+	static const float values[] = { INFINITY, 1.0f, -INFINITY, 42.0f, 7.0f };
+	size_t             idx[3];
+	float              val[3];
+	size_t             n = 0;
+
+	top_scores_select(values, 5, 3, idx, val, &n);
+
+	zassert_equal(n, 3, "3 finite values selected, +-Inf skipped");
+	zassert_equal(idx[0], 3, "largest is values[3]=42.0, not +Inf");
+	zassert_within((double)val[0], 42.0, 1e-6, "val[0]=42.0");
+	zassert_equal(idx[1], 4, "2nd largest is values[4]=7.0");
+	zassert_within((double)val[1], 7.0, 1e-6, "val[1]=7.0");
+	zassert_equal(idx[2], 1, "3rd largest is values[1]=1.0");
+	zassert_within((double)val[2], 1.0, 1e-6, "val[2]=1.0");
+}
+
 ZTEST(top_scores, test_all_nan_yields_zero_selected)
 {
 	static const float values[] = { NAN, NAN, NAN, NAN, NAN };

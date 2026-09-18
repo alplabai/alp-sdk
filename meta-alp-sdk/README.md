@@ -252,14 +252,9 @@ MACHINE = "e1m-v2m101-a55"     # V2N + DEEPX
 #     under BitBake -- see "Model compilation toolchain (RUHMI / DRP-AI
 #     TVM)" below).  BENCH-UNVERIFIED: never run on DRP-AI silicon.
 #
-#     This is ONE of two independent switches, both default OFF and
-#     deliberately not merged into one (CHANGELOG.md v0.15.0, #1145):
-#     PACKAGECONFIG[drpai] compiles the backend in; ALP_ENABLE_DRPAI = "1"
-#     (a MACHINE-conf variable, set below or in local.conf) installs the
-#     devicetree override that claims the DRP-AI carve-out. Neither
-#     implies the other -- the backend without the node fails at open()
-#     with a clear error, the node without the backend is an idle
-#     device. See section 4 of docs/bring-up-drpai-v2n.md.
+#     PACKAGECONFIG[drpai] + ALP_ENABLE_DRPAI = "1": two independent
+#     switches, both required, neither implies the other -- see
+#     docs/bring-up-drpai-v2n.md section 4 for the full contract.
 PACKAGECONFIG:append:pn-alp-sdk = " drpai"
 ALP_ENABLE_DRPAI = "1"
 
@@ -393,6 +388,10 @@ dependency of the recipe.
 | `e1m-nx9101-a55`     | Ethos-U65                            | NXP i.MX 93 Ethos-U userspace via the image                           |
 | `e1m-aen801-a32`     | Ethos-U85 + 2x U55                   | Ethos-U path inside the alp-sdk library                               |
 | `e1m-aen701-a32`     | 2x Ethos-U55                         | Ethos-U path inside the alp-sdk library                               |
+
+See `docs/bring-up-drpai-v2n.md` section 4 for the full DRP-AI3 two-switch
+contract (what each of `ALP_ENABLE_DRPAI` / `PACKAGECONFIG[drpai]` installs,
+and what omitting either one does).
 
 Customer apps still pick the active backend per-handle at runtime via
 `alp_inference_open(.backend = ALP_INFERENCE_BACKEND_AUTO)` (or an
@@ -564,9 +563,10 @@ checkout, it fetches nothing.
 
 **Partial.** `core-image-minimal` baked on the BSP v6.30 flow (WSL,
 2026-05-26): the carrier DT patches apply and the kernel + carrier dtb
-+ image build.  Still pending: a full `alp-image-edge` bake (ROS 2 +
-DEEPX + Mender recipes) and on-bench boot — the v0.7 V2N HiL gate.  **No
-full `alp-image-edge` bake has ever completed on any host.**  The
++ image build.  A `drpai`-OFF `alp-image-edge` bake has since completed
+too — see `docs/bring-up-drpai-v2n.md` for the task count and artefact.
+Still pending: a `drpai`-enabled bake, the ROS 2 + DEEPX + Mender
+feature set together, and on-bench boot — the v0.7 V2N HiL gate.  The
 i.MX 93 path remains unbaked.
 
 DRP-AI3 specifically: **never run on silicon.**  The `&drpai0` overlay,

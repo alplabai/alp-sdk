@@ -98,33 +98,24 @@ The `alp-drpai-inference` recipe
 binary into `alp-image-edge` whenever the image is built with the
 existing DRP-AI opt-in:
 
+```
+ALP_ENABLE_DRPAI = "1"
+PACKAGECONFIG:append:pn-alp-sdk = " drpai"
+```
+
+in `local.conf`. **Both switches are required and neither implies the
+other** -- see
+[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
+Sec 4 for the full contract, including what each half installs and
+what omitting either one does.
+
 > The recipe's `SRC_URI` currently tracks alp-sdk's `dev` branch (this
 > example is not on `main` yet) -- flip it to `branch=main` at the next
 > promotion, the same pattern `alp-lvgl-dashboard_0.6.bb` documents.
 > A bake against `main` before that promotion will not find this
 > example's `CMakeLists.txt`.
 
-```
-ALP_ENABLE_DRPAI = "1"
-```
-
-in `local.conf`. This is only HALF of what a working bake needs --
-`ALP_ENABLE_DRPAI` installs the userspace runtime payload (`lib-tvm`,
-`kernel-module-mmngr`, `alp-drpai-inference`) and enables the DRP-AI3
-devicetree node, but does **not** compile alp-sdk's DRP-AI backend in.
-For that, also set
-
-```
-PACKAGECONFIG:append:pn-alp-sdk = " drpai"
-```
-
-in the same `local.conf`. Both switches are required and neither
-implies the other -- see
-[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 4. Omitting the `PACKAGECONFIG` half leaves
-`ALP_SDK_USE_DRPAI_V2N=OFF`, and `alp_inference_open()` in this example
-returns `NULL` with `ALP_ERR_NOSUPPORT` even though the node and
-userspace payload are present. After boot:
+After boot:
 
 ```sh
 v2n-drpai-inference <model.tar> <frame0.bin> [frame1.bin ...]
@@ -139,7 +130,7 @@ cmake --build build/drpai-demo
 scp build/drpai-demo/v2n-drpai-inference root@<board-ip>:
 ```
 
-### Host build (no DRP-AI -- builds only; the NOSUPPORT path has NOT been re-verified by this PR)
+### Host build (no DRP-AI; the link and the NOSUPPORT path have NOT been re-verified by this PR)
 
 ```sh
 cmake -S . -B build/host -DALP_OS=yocto
@@ -154,8 +145,8 @@ gcc -I include -o v2n-drpai-inference \
 
 - E1M-V2N101/102 or E1M-V2M101/102 SoM (DRP-AI3 is on-die in every
   RZ/V2N-family SKU, per
-  [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-  Sec 0 -- DEEPX on V2M is an addition, not a replacement).
+  [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)'s
+  intro -- DEEPX on V2M is an addition, not a replacement).
 - E1M-X-EVK carrier.
 - An `alp-image-edge` bake with `ALP_ENABLE_DRPAI = "1"` AND
   `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` both set in `local.conf`

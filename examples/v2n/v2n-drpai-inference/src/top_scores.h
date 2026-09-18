@@ -39,7 +39,11 @@ extern "C" {
  *  a realistic input for a model quantised against non-representative
  *  calibration data. A NaN in particular compares false against every
  *  ordered comparison, so ranking it would let it claim a slot it could
- *  never lose.
+ *  never lose. Skipping +Inf is a deliberate consequence of the same
+ *  rule, not a special case: it discards what would otherwise rank as
+ *  the single largest score in @p values, on the reasoning that an
+ *  infinite raw NPU output is corrupt input, not a real result worth
+ *  surfacing.
  *
  *  Small-N selection in O(count * max_n) -- fine for a demo-sized tensor
  *  and a single-digit N, not worth a heap here.

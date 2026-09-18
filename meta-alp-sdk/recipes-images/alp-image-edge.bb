@@ -37,37 +37,34 @@ IMAGE_INSTALL += " alp-lvgl-dashboard"
 # SAME opt-in this MACHINE's ALP_ENABLE_DRPAI switch drives (see e.g.
 # e1m-v2n101-a55.conf), but installed here rather than there -- an
 # IMAGE-level append, so this booth demo reaches alp-image-edge only,
-# never alp-image-prod. Mirrors the alp-lvgl-dashboard precedent above.
-IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' else ''}"
+# never alp-image-prod. The IMAGE-level install SHAPE mirrors the
+# alp-lvgl-dashboard precedent above; the ALP_ENABLE_DRPAI gate itself
+# does not -- alp-lvgl-dashboard installs unconditionally, and
+# ALP_ENABLE_DRPAI alone is not a sufficient gate here either: it is
+# ONLY declared (`?=`) in the four RZ/V2N machine confs, so this line
+# also checks 'rzv2n-family' in MACHINEOVERRIDES, the same guard the
+# python() block below uses, so a stray ALP_ENABLE_DRPAI = "1" in a
+# shared local.conf cannot pull this RZ-only recipe into an
+# e1m-nx9101-a55 / e1m-aen801-a32 build (see that guard's comment for
+# why 'rzv2n-family' is confirmed present at this parse point).
+IMAGE_INSTALL += "${@' alp-drpai-inference' if d.getVar('ALP_ENABLE_DRPAI') == '1' and \
+    'rzv2n-family' in (d.getVar('MACHINEOVERRIDES') or '').split(':') else ''}"
 
-# NOTE: three DIFFERENT mechanisms feed the DRP-AI userspace stack, and
-# none of them touches another's variable:
+# NOTE: two DIFFERENT mechanisms feed the DRP-AI userspace RUNTIME
+# PACKAGES (lib-tvm + kernel-module-mmngr), and a third, independent
+# switch feeds the SDK BACKEND compiled into libalp_sdk.so -- see
+# docs/bring-up-drpai-v2n.md section 4 for the full two-switch contract:
 #   1. alp-image-common.inc's ALP_RZ_DRPAI_INSTALL (issue #1176) installs
-#      `lib-tvm kernel-module-mmngr` UNCONDITIONALLY -- no opt-in switch --
-#      whenever the rz-drpai layer is in BBFILE_COLLECTIONS AND 'v2n' is
-#      in MACHINE_FEATURES (true for all four RZ/V2N machine confs).
-#   2. Each RZ/V2N machine conf's ALP_ENABLE_DRPAI-gated IMAGE_INSTALL:append
-#      installs the SAME `lib-tvm kernel-module-mmngr` pair a second time
-#      (bitbake dedupes repeated package names, so this is not a build
-#      break) -- redundant with #1 whenever ALP_ENABLE_DRPAI = "1", and a
-#      no-op otherwise.
-#   3. `PACKAGECONFIG[drpai]` on the alp-sdk recipe (set by the builder via
-#      `PACKAGECONFIG:append:pn-alp-sdk = " drpai"` in local.conf) is a
-#      THIRD, independent switch: neither this file nor
-#      alp-image-common.inc touches it, and it alone drives whether
-#      alp-sdk's DRP-AI backend is compiled in at all.
-# Reconcile which mechanism owns the userspace install (#1 vs #2) before
-# both land for good.
-#
-# DRP-AI userspace (RZ/V2N on-die NPU) on the rzv2n-family machine confs:
-# the machine confs own this, gated on ALP_ENABLE_DRPAI (meta-rz-drpai's
-# lib-tvm ships through a core-image-% bbappend that does NOT match
-# `alp-image-edge`, so the payload has to be installed explicitly, and
-# doing that installation MACHINE-blind here would pull RZ-only recipes
-# into every alp-image-edge, including e1m-nx9101-a55 / e1m-aen801-a32,
-# which have no DRP-AI silicon -- see e1m-v2n101-a55.conf et al.). No
-# unconditional append here: it would also fail parsing for every
-# consumer that legitimately drops the RZ/V layers (AEN, NX91).
+#      the runtime packages UNCONDITIONALLY whenever the rz-drpai layer
+#      is in BBFILE_COLLECTIONS AND 'v2n' is in MACHINE_FEATURES.
+#   2. Each RZ/V2N machine conf's ALP_ENABLE_DRPAI-gated
+#      IMAGE_INSTALL:append installs the SAME pair a second time
+#      (bitbake dedupes, so this is not a build break) -- redundant with
+#      #1 whenever ALP_ENABLE_DRPAI = "1", a no-op otherwise. Reconcile
+#      which of #1/#2 owns this before both land for good.
+#   3. `PACKAGECONFIG[drpai]` on the alp-sdk recipe compiles the SDK
+#      backend in; it installs no userspace package and neither this
+#      file nor alp-image-common.inc touches it.
 #
 # drpai_1.4.0 is NOT listed there either: it is a headers-only recipe
 # (${includedir}/linux/drpai.h) and belongs in DEPENDS, which alp-sdk's

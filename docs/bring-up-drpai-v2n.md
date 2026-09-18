@@ -164,6 +164,31 @@ no-op on hardware seen so far, not as validated for that case.
 
 ## 4. Image
 
+**The two-switch contract, authoritative here — every other mention in this
+repo is a pointer to this paragraph, not a restatement of it.** Two
+independent switches, both default OFF, deliberately not merged into one
+(the released v0.15.0 contract, `CHANGELOG.md`: "Two independent switches,
+both default OFF, deliberately not merged into one"):
+
+- **`PACKAGECONFIG[drpai]`** on the `alp-sdk` recipe (set by the builder in
+  `local.conf` as `PACKAGECONFIG:append:pn-alp-sdk = " drpai"`) compiles the
+  DRP-AI3 backend into `libalp_sdk`. Nothing else sets it.
+- **`ALP_ENABLE_DRPAI = "1"`** (a MACHINE-conf variable) enables the
+  `&drpai0` devicetree node (§3); redundantly re-installs `lib-tvm` +
+  `kernel-module-mmngr` at MACHINE level, redundant because
+  `alp-image-common.inc`'s `ALP_RZ_DRPAI_INSTALL` (lines 81-85) already
+  installs that same pair unconditionally, gated only on `rz-drpai` being in
+  `BBFILE_COLLECTIONS` and `v2n` being in `MACHINE_FEATURES` (issue #1176,
+  open question, not resolved here); and installs `alp-drpai-inference` into
+  `alp-image-edge` only, never `alp-image-prod`.
+
+**Both are required and neither implies the other.** Omitting the
+`PACKAGECONFIG` half leaves `ALP_SDK_USE_DRPAI_V2N=OFF`, and
+`alp_inference_open()` returns `NULL` with `ALP_ERR_NOSUPPORT` even though
+the node and userspace payload are present. Omitting `ALP_ENABLE_DRPAI`
+gives a compiled backend with no node to drive — an idle device, not an
+error. Neither silently half-works.
+
 Enable the backend through the SDK recipe's PACKAGECONFIG:
 
 ```
