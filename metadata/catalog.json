@@ -911,7 +911,7 @@
         ],
         "path": "examples/camera-vision/ai-object-detection-realtime",
         "som": "E1M-V2M101",
-        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces, > which all ship today -- DEEPX DX-M1 dispatch runs through > `alp_inference_open(...)` same as any other backend. What's still > missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see \"Adding > the model\" below) and V2N-M1 HiL bench validation."
+        "summary": "> **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on > `native_sim/native/64` + the AEN fallback target against the full > `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces. > The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM > CPU is its only inference backend; the placeholder DXNN request remains > an intentional NOSUPPORT skeleton. A real DX-M1 run still needs an > A55/Yocto app, a compiled YOLOv8-tiny model, and V2N-M1 HiL validation."
       }
     ],
     "connectivity": [
