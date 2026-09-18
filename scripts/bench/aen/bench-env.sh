@@ -97,8 +97,8 @@ export HAL_ALIF_DIR
 # --------------------------------------------------------------------
 # Board target (the bench default: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# Every module on the AEN bench (e1m-aen-evk-01/02/03) is an E1M-AEN803,
-# so this is the default build.sh uses unconditionally. Its own preflight
+# Every module on the Alp Lab AEN bench farm is an E1M-AEN803, so
+# this is the default build.sh uses unconditionally. Its own preflight
 # (alp-sdk#2094) refuses -- exit 2 -- when an app ships boards/*.overlay and
 # none match the resolved target, naming the files it found; an app with
 # no boards/ overlays at all is untouched. AEN_BOARD still overrides.
