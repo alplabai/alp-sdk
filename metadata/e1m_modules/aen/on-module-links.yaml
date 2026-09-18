@@ -26,6 +26,18 @@
 # controller + pinctrl for an on-module chip present on every board
 # built from this SoM (docs/bring-up-aen.md §5.1: "Two separate buses").
 #
+# SECOND EXCEPTION: `backlight` (below).  A31/B31 DO have E1M edge-
+# connector identity (metadata/e1m/pinout-v1.json silkscreen names
+# BL_LED_A / BL_LED_K) but, unlike e1m_i2c0, deliberately carry NO row in
+# metadata/pinmux/aen.yaml: neither pad is backed by any SoC silicon pad.
+# Both are the on-module backlight driver's own LED output/feedback pins
+# -- a boost-converter output well above logic level -- reaching the edge
+# connector straight from the driver, bypassing the SoC entirely.  Only
+# the driver's ENABLE input is a real SoC pad (P5_5), and it is
+# SoM-internal like brd_i2c/rtc_alarm above: no edge route of its own.
+# Previously A31 was wrongly listed as an Alif-owned pad at P5_5 in
+# from-alif.tsv / pinmux/aen.yaml; corrected in alp-sdk#2203.
+#
 # scripts/gen_zephyr_board.py's `_aen_pinctrl_dtsi()` / `_aen_dts()`
 # emitters read this file to produce the AEN `<board>-pinctrl.dtsi` and
 # `<board>.dts`; every pad, macro, address and alias in those generated
@@ -248,3 +260,36 @@ on_module_links:
     # MODULE_STBY (U21 pin 8, EVI) is a CARRIER-driven external event
     # input (E1M edge pin O2, R43 100k to +1V8) -- no SoC pad, so no link
     # here.
+
+  # On-module backlight LED driver.  Not consumed by any board emitter
+  # today -- bring-up is alp-sdk#2199 -- this entry exists purely to
+  # record the fact so nothing re-derives A31/B31 as Alif-owned again
+  # (alp-sdk#2203).
+  backlight:
+    # The driver's enable input: a real SoC pad, SoM-internal like
+    # brd_i2c/rtc_alarm above (no E1M edge route of its own).
+    enable:
+      silicon_peripheral: "UT2_T1_B"
+      silicon_pad: "P5_5"
+      status: enabled
+      evidence: >-
+        Per the E1M-AEN-2626-R2 SoM netlist (internal): P5_5 is the
+        on-module backlight driver's enable input.  It is SoM-internal --
+        not routed to any E1M edge pad.  The only path from P5_5 toward
+        the edge connector is an unpopulated (DNP) option, not a live
+        connection, so it must never be projected into from-alif.tsv /
+        metadata/pinmux/aen.yaml.
+    # The driver's LED string: reaches the E1M edge connector on its OWN
+    # two pins, direct from the driver, never through the SoC.  Carries a
+    # boost-converter output far above logic level -- a carrier must
+    # never wire a logic-level signal here.
+    led_pins:
+      - { e1m_pad: "A31", e1m_function: "BL_LED_A" }
+      - { e1m_pad: "B31", e1m_function: "BL_LED_K" }
+    evidence: >-
+      Per the E1M-AEN-2626-R2 SoM netlist (internal): A31 (`BL_LED_A`)
+      and B31 (`BL_LED_K`) are the on-module backlight driver's LED
+      output/feedback pair, reaching the panel through the carrier's
+      display connector.  Neither pad is backed by Alif (or any other)
+      silicon, so neither belongs in from-alif.tsv / pinmux/aen.yaml, and
+      neither is assignable as a general-purpose GPIO/PWM pad by any app.
