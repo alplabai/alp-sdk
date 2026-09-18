@@ -80,7 +80,7 @@ class BaremetalCmakeFlash:
             )
 
         proc = subprocess.run(cmd, check=False,
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace")
         elapsed = time.monotonic() - start
         if proc.returncode == 0:
             return FlashResult(

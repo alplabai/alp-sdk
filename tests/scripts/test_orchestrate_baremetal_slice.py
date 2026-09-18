@@ -367,7 +367,7 @@ def test_baremetal_plan_actually_produces_a_binary(tmp_path: Path) -> None:
         cwd.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
             [step["tool"], *(detoken(a) for a in step["args"])],
-            cwd=cwd, capture_output=True, text=True)
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert proc.returncode == 0, (
             f"{step['tool']} {step['args']}\n"
             f"{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}")
@@ -452,7 +452,7 @@ def test_an_empty_output_dir_does_not_mean_the_slice_built_nothing(
         cwd.mkdir(parents=True, exist_ok=True)
         proc = subprocess.run(
             [step["tool"], *(detoken(a) for a in step["args"])],
-            cwd=cwd, capture_output=True, text=True)
+            cwd=cwd, capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert proc.returncode == 0, (
             f"{step['tool']} {step['args']}\n"
             f"{proc.stdout[-4000:]}\n{proc.stderr[-4000:]}")

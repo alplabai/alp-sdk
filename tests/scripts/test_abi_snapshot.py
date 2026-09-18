@@ -1007,9 +1007,10 @@ def test_include_graph_excludes_a_conditional_include(tmp_path):
         "#endif\n"
         "#endif /* ALP_FACADE_H */\n",
         newline="",
+        encoding="utf-8",
     )
     for name in ("always.h", "board_a.h", "board_b.h"):
-        (root / name).write_text("#define X 1\n", newline="")
+        (root / name).write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 
@@ -1077,9 +1078,10 @@ def test_include_graph_handles_a_pragma_once_header(tmp_path):
         '#include "alp/board_a.h"\n'
         "#endif\n",
         newline="",
+        encoding="utf-8",
     )
     for name in ("always.h", "board_a.h"):
-        (root / name).write_text("#define X 1\n", newline="")
+        (root / name).write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 
@@ -1103,8 +1105,9 @@ def test_include_graph_handles_a_top_level_if_above_the_guard(tmp_path):
         "#endif\n"
         "#endif\n",
         newline="",
+        encoding="utf-8",
     )
-    (root / "always.h").write_text("#define X 1\n", newline="")
+    (root / "always.h").write_text("#define X 1\n", newline="", encoding="utf-8")
 
     graph = abi.build_include_graph(root)
 

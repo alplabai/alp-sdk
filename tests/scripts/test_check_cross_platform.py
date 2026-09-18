@@ -533,10 +533,10 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     # backlog, not a dumping ground: the file-level shape means a new
     # entry silently exempts every implicit-encoding call in that file,
     # so growing the set has to be a deliberate, test-breaking act.
-    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 137, (
+    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 85, (
         f"IMPLICIT_ENCODING_BASELINE grew to "
         f"{len(linter.IMPLICIT_ENCODING_BASELINE)} files; it holds what "
-        f"is left of the frozen #2195 backlog (137 files) and may only "
+        f"is left of the frozen #2195 backlog (85 files) and may only "
         f"ever SHRINK as #2197 drains it.  A new implicit-encoding call "
         f"gets an explicit `encoding=` -- there is no inline exemption "
         f"-- not a baseline entry."
