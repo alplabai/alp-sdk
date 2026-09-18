@@ -12,7 +12,7 @@ reference.
 
 ## Workflows shipped
 
-`.github/workflows/` carries **24** workflow files as of this revision
+`.github/workflows/` carries **25** workflow files as of this revision
 (counted via `ls .github/workflows/*.yml .github/workflows/*.yaml
 2>/dev/null | wc -l`; recount before trusting this number, it moves
 every time a workflow is added or retired).  The table below is a
@@ -32,6 +32,7 @@ that replaced it).
 | [`pr-static-analysis.yml`](../../.github/workflows/pr-static-analysis.yml)        | PR + push        | active     | `clang-format-diff` on changed lines + `shellcheck` over every shipped `*.sh` (repo-wide `git ls-files` sweep over `*.sh`, issue #1550; `-x -S warning` for `scripts/bench/**` and `scripts/test-all.sh`, `-S error` elsewhere), both in the `clang-format-diff` job so a shellcheck defect hard-blocks too (`clang-format · diff-only` is one of `dev`'s required contexts; a separate job's context is not) + `cppcheck` informational pass over `src/` + `chips/` in its own non-required job. |
 | [`pr-generated-files.yml`](../../.github/workflows/pr-generated-files.yml)        | PR + push (paths)| active     | Catches drift in `<alp/soc_caps.h>` (re-runs `scripts/gen_soc_caps.py`) and `docs/abi/*.json` (re-runs `scripts/abi_snapshot.py`).             |
 | [`pr-metadata-validate.yml`](../../.github/workflows/pr-metadata-validate.yml)    | PR + push (paths)| active     | Validates every `metadata/socs/**/*.json` against the schema via `scripts/validate_metadata.py` + smoke-tests `scripts/alp_project.py` against `metadata/templates/board.yaml.example`. |
+| [`pr-changelog-citations.yml`](../../.github/workflows/pr-changelog-citations.yml)| merge queue      | active     | Re-grades changelog citations on the speculative `merge_group` ref against `github.event.merge_group.base_sha`. Its single static-named job is the context to require; the full metadata workflow stays off merge-queue entries. |
 | [`pr-doxygen.yml`](../../.github/workflows/pr-doxygen.yml)                        | PR + push (paths)| active     | Generates Doxygen HTML from `include/alp/**`.  Runs with `FAIL_ON_WARNINGS=YES` — zero warnings required; PR fails on any warning. |
 | [`coverity.yml`](../../.github/workflows/coverity.yml)                            | weekly + manual  | active     | Coverity Scan submission against <https://scan.coverity.com/projects/alplabai-alp-sdk>.  Secrets (`COVERITY_TOKEN`, `COVERITY_EMAIL`) provisioned; project name in the `COVERITY_PROJECT` Actions variable.       |
 | [`pr-bitbake.yml`](../../.github/workflows/pr-bitbake.yml)                        | PR to `main` (paths) | active | Dispatch bridge to the private `alp-sdk-internal` repo's self-hosted Yocto runner — see [`runner-architecture.md`](runner-architecture.md). |

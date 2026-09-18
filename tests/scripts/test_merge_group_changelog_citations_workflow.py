@@ -1,0 +1,54 @@
+# Copyright 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+"""Pin the cheap merge-queue citation gate added for #2206.
+
+The normal metadata workflow checks citations on the PR merge ref, but it does
+not run on ``merge_group`` and deliberately must not: that would put its full
+validation sweep on every queue entry. This test keeps the queue-only workflow
+small, gives it a stable requireable context, and ensures the citation checker
+compares the speculative tree with the base SHA from the event payload.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+REPO = Path(__file__).resolve().parents[2]
+WORKFLOW = REPO / ".github" / "workflows" / "pr-changelog-citations.yml"
+METADATA_WORKFLOW = REPO / ".github" / "workflows" / "pr-metadata-validate.yml"
+
+
+def _load(path: Path) -> dict:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _on_block(doc: dict) -> dict:
+    """Return ``on:`` despite PyYAML 1.1 resolving that key to ``True``."""
+    return doc.get("on", doc.get(True)) or {}
+
+
+def test_merge_queue_citation_workflow_is_dedicated_and_requireable() -> None:
+    doc = _load(WORKFLOW)
+
+    assert set(_on_block(doc)) == {"merge_group"}
+    assert set(doc["jobs"]) == {"changelog-citations"}
+    job = doc["jobs"]["changelog-citations"]
+    assert job["name"] == "changelog citations · merge queue"
+    assert "if" not in job
+
+    # The expensive metadata sweep must remain off merge_group. The standalone
+    # job is the context branch protection should require for this invariant.
+    assert "merge_group" not in _on_block(_load(METADATA_WORKFLOW))
+
+
+def test_merge_queue_citation_workflow_uses_the_event_base_sha() -> None:
+    job = _load(WORKFLOW)["jobs"]["changelog-citations"]
+    assert len(job["steps"]) == 2
+
+    checkout, check = job["steps"]
+    assert checkout["with"]["fetch-depth"] == 0
+    assert checkout["with"]["persist-credentials"] is False
+    assert check["env"]["DIFF_BASE"] == "${{ github.event.merge_group.base_sha }}"
+    assert check["run"] == "python3 scripts/check_changelog_citations.py"
