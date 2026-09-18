@@ -117,7 +117,7 @@
 #                               findings in tests/yocto/*.sh, fixed by
 #                               whitelisting them with header notes --
 #                               see INTENTIONALLY_BASH_HELPERS in the
-#                               script).  Not silent, though: 478
+#                               script).  Not silent, though: the
 #                               IMPLICIT-ENCODING findings print as
 #                               warnings and still exit 0, being
 #                               grandfathered by #2195's
