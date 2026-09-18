@@ -1,9 +1,10 @@
-# ADR 0017 Tier-2 (port of the Apache-2.0 Espressif esp-video-components
-# esp_cam_sensor/sensors/ov9281 driver onto the upstream Zephyr v4.4 video
-# API), BENCH-UNVERIFIED. Written fresh for the v4.4 video_driver_api /
-# video_ctrl registry (Espressif's Kconfig.ov9281 targets their own ESP-IDF
-# esp_cam_sensor component model and does not translate); the register
-# addresses/values/init tables in ov9281.c are the consumed Espressif asset.
+# ADR 0017 Tier-1.5 (third-party permissive port of the Apache-2.0 Espressif
+# esp-video-components esp_cam_sensor/sensors/ov9281 driver onto the
+# upstream Zephyr v4.4 video API), BENCH-UNVERIFIED. Written fresh for the
+# v4.4 video_driver_api / video_ctrl registry (Espressif's Kconfig.ov9281
+# targets their own ESP-IDF esp_cam_sensor component model and does not
+# translate); the register addresses/values/init tables in ov9281.c are the
+# consumed Espressif asset.
 # See zephyr/drivers/video/ov9281.c for the source commit + retirement note
 # and docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
 #

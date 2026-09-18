@@ -173,6 +173,22 @@ int main(void)
 		       (unsigned)frame.size,
 		       (unsigned long long)frame.timestamp_us);
 
+		/* The only runtime proof that the CPI wrote exactly one unpacked frame and not a
+		 * short/overrun one: CAM_PITCH * CAM_HEIGHT is the byte count this example expects
+		 * for every sensor above (RAW10 unpacked to 16 bits/sample, or GREY8 at 1
+		 * byte/sample -- CAM_PITCH already folds in CAM_BYTES_PER_PIXEL). A mismatch here is
+		 * exactly the class of bug a wrong sensor width/height or a wrong RAW10 unpack would
+		 * produce -- loud on purpose, since nothing downstream re-checks frame.size. */
+		size_t expected_size = (size_t)CAM_PITCH * (size_t)CAM_HEIGHT;
+		if (frame.size != expected_size) {
+			printk("[camfl]   MISMATCH: frame.size %u != expected %u "
+			       "(CAM_PITCH %u * CAM_HEIGHT %u) -- frame is short or overrun\n",
+			       (unsigned)frame.size,
+			       (unsigned)expected_size,
+			       (unsigned)CAM_PITCH,
+			       (unsigned)CAM_HEIGHT);
+		}
+
 		const uint8_t *bytes = (const uint8_t *)frame.data;
 		uint32_t       crc   = crc32_ieee(bytes, frame.size);
 		printk("[camfl]   CRC32 = 0x%08x\n", crc);

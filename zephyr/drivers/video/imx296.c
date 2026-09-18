@@ -228,14 +228,25 @@ static const struct imx296_inck_regs imx296_inck_table[] = {
 };
 
 /*
- * "Image Data Output Format" (page 45): CSI-2 RAW10 data type (0x2B). The
- * "Color Coding Diagram" (page 22) gives the colour part's (IMX296LQR-C)
- * top-left 2x2 block as Gb/B over R/Gr -- i.e. GBRG in V4L2/Zephyr Bayer
- * naming.
+ * "Image Data Output Format" (page 45): CSI-2 RAW10 data type (0x2B).
+ *
+ * Bayer order: NOT taken from the "Color Coding Diagram" (page 22) -- that
+ * diagram gives the physical colour-filter phase at the TOTAL pixel array's
+ * outer edge (adjacent to the N1/A1 pins), which is a different row than the
+ * Recording pixel area's own first transmitted row (see the width/height
+ * comment below for why: readout starts at the OB side, not the N1 side).
+ * The authoritative source is the "Register List of All-pixel scan mode" ->
+ * "Pixel Array Image Drawing in All-pixel scan Mode" / "Drive Timing Chart
+ * for Serial Output in All-pixel Scan Mode" (page 50), which draws the CFA
+ * swatch directly at the Recording pixel area's own top-left corner (the
+ * first transmitted line, first transmitted column, HREVERSE/VREVERSE at
+ * their POR "Normal" default of 0, matching this driver -- it never touches
+ * IMX296_REG_REVERSE): that swatch reads R,G on the first row and G,B on the
+ * second, i.e. RGGB in V4L2/Zephyr Bayer naming, not GBRG.
  */
 static const struct video_format_cap imx296_fmts[] = {
 	{
-		.pixelformat = VIDEO_PIX_FMT_SGBRG10P,
+		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
 		.width_min = IMX296_WIDTH,
 		.width_max = IMX296_WIDTH,
 		.width_step = 1,
@@ -484,7 +495,7 @@ static int imx296_init(const struct device *dev)
 	const struct imx296_config *cfg = dev->config;
 	const struct imx296_inck_regs *inck;
 	struct video_format fmt = {
-		.pixelformat = VIDEO_PIX_FMT_SGBRG10P,
+		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
 		.width = IMX296_WIDTH,
 		.height = IMX296_HEIGHT,
 	};
@@ -500,19 +511,22 @@ static int imx296_init(const struct device *dev)
 	 * The datasheet's register map defines no readable chip/product-ID register for this
 	 * part (its "Chip ID = 02h".."13h" headings name register-address BANKS -- the upper
 	 * byte of the 16-bit CCI address -- not a device-identification value). As a documented
-	 * readable-register connectivity sanity check instead, read back STANDBY (page 34),
-	 * which the datasheet gives a fixed POR default of 1 (standby active).
+	 * readable-register connectivity sanity check instead, read back STANDBY (page 34) and
+	 * require only an ACKed CCI transaction, not a specific bit value: the RPi-style J5
+	 * connector this part sits behind carries no reset line, and the module stays powered
+	 * across a SoC warm reset/reflash, so STANDBY can legitimately read back 0 (already
+	 * running) on any init after the first -- rejecting that as -ENODEV would silently skip
+	 * every register write and control registration below, leaving the CSI-2 link with no
+	 * sensor behind it. video_read_cci_reg() already returns a negative errno on I2C NAK/
+	 * timeout, so a successful return here IS the connectivity proof.
 	 */
 	ret = video_read_cci_reg(&cfg->i2c, IMX296_REG_STANDBY, &standby);
 	if (ret < 0) {
 		return ret;
 	}
 
-	if ((standby & IMX296_STANDBY_STANDBY) == 0) {
-		LOG_ERR("STANDBY register read back 0x%02x, expected POR default bit0 set",
-			standby);
-		return -ENODEV;
-	}
+	LOG_DBG("STANDBY read back 0x%02x (%s boot)", standby,
+		(standby & IMX296_STANDBY_STANDBY) != 0 ? "cold" : "warm");
 
 	inck = imx296_find_inck(cfg->input_clk_hz);
 	if (inck == NULL) {
@@ -521,7 +535,18 @@ static int imx296_init(const struct device *dev)
 		return -ENOTSUP;
 	}
 
-	/* Ensure standby before writing the "S" (standby-only) registers below */
+	/*
+	 * Make init idempotent regardless of the sensor's prior state (POR, or already
+	 * free-running from before a warm SoC reset): "Slave Mode and Master Mode" (page 55)
+	 * + "Standby mode" (page 54) give XMSTA-stop-then-STANDBY as the documented order to
+	 * quiesce master-mode streaming before touching the "S" (standby-only) registers below
+	 * -- the same order imx296_set_stream(dev, false, ...) uses to stop an active stream.
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, IMX296_XMSTA_STOP);
+	if (ret < 0) {
+		return ret;
+	}
+
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_STANDBY, IMX296_STANDBY_STANDBY);
 	if (ret < 0) {
 		return ret;
