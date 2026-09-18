@@ -12,8 +12,9 @@ never left the SRAM0 framebuffer. Three things kept the scanout off:
 
 `cdc200_blanking_off()` now switches the DesignWare DSI host whose `cdc-if` names
 this CDC to video mode, then sets `CDC_EN`. `cdc200_blanking_on()` does the
-reverse, in reverse order, so the DSI mode switch (which resets the host) never
-cuts a live DPI frame. The panel's init sequence still runs in command mode first:
+reverse, in reverse order, so the DSI host is reset only after the CDC has been
+told to stop feeding it. Whether `CDC_EN=0` stops at the end of the frame is not
+verified, so the last frame may still be cut. The panel's init sequence still runs in command mode first:
 in DW video mode, commands only leave during DPI blanking, and there is none
 before `CDC_EN`. With no DSI host, blanking is just `CDC_EN`, for a parallel-RGB
 panel.
@@ -32,3 +33,31 @@ were computed from stack contents: the same code gave different
 `DSI_DPI_LP_CMD_TIM` / `DSI_PHY_TMR_RD_CFG` values on two builds. The host packs
 exactly the DPI stream the CDC generates, so it now always programs the `cdc-if`
 timings.
+
+The DSI host now takes the DPI pixel clock from the `cdc-if` controller's
+`clock-frequency` instead of assuming 60 Hz. The example ran its CDC at 400/6 =
+66.67 MHz into a host timed for 59.98 MHz, so the DPI payload FIFO overflowed on
+every line (`INT_ST1` `DPI_PLD_WR_ERR`). `aen-dsi-display` now declares the rate
+it really runs, 400/7 = 57.14 MHz, and derives its CDC divider from that same
+property, so the two can no longer disagree. 66.67 MHz would need about
+539 Mbps per lane, above the host's default 500 Mbps `panel-max-lane-bandwidth`.
+
+`dw_setup_timeout()` no longer truncates the non-burst HS-TX timeout. A 720x1280
+frame (about 1.1M lane-byte clocks) does not fit the 16-bit `HSTX_TO_CNT` at the
+fixed timeout-clock divider of 10, and the truncated count was about 8 ms, so
+`TO_HS_TX` fired inside every ~17 ms frame. The divider now widens until the
+count fits.
+
+The host's DSI mode now starts as command mode, which is where it comes out of
+reset, and returning to command mode drops the HS clock request that video mode
+set.
+
+`dsi_dw_set_mode()` now returns `-ENODEV` until `dsi_dw_attach()` has succeeded,
+so `display_blanking_off()` can no longer report success on a host that was
+never configured. `cdc200_set_enable()` is removed: it toggled `CDC_EN` without
+the DSI mode and had no callers.
+
+`aen-dsi-display` no longer requests a peripheral ACK at the end of every frame
+(`frame-ack-en`). The upstream RK055 setup does not use it, and a frame whose ACK
+never comes stalls the host in LP receive long enough to overflow the DPI
+payload FIFO.

@@ -214,13 +214,17 @@ int dw_calc_clocks(const struct device *dev,
 	 * get_rate returns the pixel clock's PARENT rate (SYST_ACLK, 400 MHz), not
 	 * the post-divider pixel rate -- feeding 400 MHz here drives the D-PHY HS
 	 * target to ~3.8 GHz and PHY config fails, so dsi attach (and the panel
-	 * init) never completes.  htotal*vtotal*frame-rate is the true pixel clock
-	 * (~60 MHz for 720x1280@60).  (The clocks are still wired for the gate
+	 * init) never completes.  The rate comes from the cdc-if controller's
+	 * clock-frequency, the rate the CDC is actually run at; without it,
+	 * htotal*vtotal*60 Hz.  It MUST match the real CDC rate: in non-burst
+	 * mode a faster feed overflows the DPI payload FIFO every line
+	 * (INT_ST1 DPI_PLD_WR_ERR).  (The clocks are still wired for the gate
 	 * enable in dsi_dw_enable_clocks(); only the RATE source changed.)
 	 */
 	htotal = timings->hsync + timings->hbp + timings->hactive + timings->hfp;
 	vtotal = timings->vsync + timings->vbp + timings->vactive + timings->vfp;
-	dpi_pix_clk = htotal * vtotal * DPI_FRAME_RATE;
+	dpi_pix_clk = config->dpi_pix_clk ? config->dpi_pix_clk
+					  : htotal * vtotal * DPI_FRAME_RATE;
 
 	if (mdev->mode_flags & MIPI_DSI_MODE_VIDEO_BURST) {
 		LOG_DBG("Burst mode of clock calculation");
@@ -425,6 +429,7 @@ void dw_setup_timeout(const struct device *dev,
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	uint32_t hstx_to;
+	uint32_t to_clk_div;
 	uint32_t tmp;
 
 	/* Time in lanebyteclocks to send 1 line + 15% of pixel data */
@@ -438,9 +443,19 @@ void dw_setup_timeout(const struct device *dev,
 		 */
 		hstx_to *= timings->vactive;
 	}
-	hstx_to /= TO_CLK_DIV;
 
-	reg_write_part(regs + DSI_CLKMGR_CFG, TO_CLK_DIV,
+	/*
+	 * ALP-SDK PORT FIX: HSTX_TO_CNT is 16 bits.  A non-burst frame (720x1280: ~1.1M
+	 * lanebyteclks) does not fit at TO_CLK_DIV, and the register write
+	 * used to TRUNCATE it -- a ~8 ms timeout that fired TO_HS_TX inside
+	 * every ~17 ms frame.  Widen the (8-bit) timeout-clock divider until
+	 * the count fits; the LPRX/BTA timeouts on the same clock only grow.
+	 */
+	to_clk_div = MAX(TO_CLK_DIV, DIV_ROUND_UP(hstx_to, DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK));
+	to_clk_div = MIN(to_clk_div, DSI_CLKMGR_CFG_TO_CLK_DIV_MASK);
+	hstx_to /= to_clk_div;
+
+	reg_write_part(regs + DSI_CLKMGR_CFG, to_clk_div,
 			DSI_CLKMGR_CFG_TO_CLK_DIV_MASK,
 			DSI_CLKMGR_CFG_TO_CLK_DIV_SHIFT);
 
@@ -702,9 +717,10 @@ void dsi_dw_msg_config(uintptr_t regs, uint32_t mode_flags)
 	sys_write32(cmd_mode_cfg, regs + DSI_CMD_MODE_CFG);
 
 	/*
-	 * Clear TXREQUESTCLKHS for LP commands, but only in command mode: in
-	 * video mode the HS clock carries the scanout, and an LP command (a
-	 * panel set_orientation after blanking_off) would stop the video.
+	 * ALP-SDK PORT FIX: clear TXREQUESTCLKHS for LP commands, but only in
+	 * command mode: in video mode the HS clock carries the scanout, and an
+	 * LP command (a panel set_orientation after blanking_off) would stop
+	 * the video.
 	 */
 	bool cmd_mode = sys_read32(regs + DSI_MODE_CFG) & DSI_MODE_CFG_CMD_MODE;
 
@@ -769,6 +785,13 @@ int dsi_dw_set_mode(const struct device *dev,
 	struct dsi_dw_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
+	/*
+	 * ALP-SDK PORT FIX: an unattached host has no timings or PHY setup, so
+	 * "switching" it would report success with no video behind it.
+	 */
+	if (!data->attached)
+		return -ENODEV;
+
 	if (mode == data->curr_mode)
 		return 0;
 
@@ -779,6 +802,8 @@ int dsi_dw_set_mode(const struct device *dev,
 	} else {
 		/* Setup the DSI as Command mode. */
 		sys_write32(DSI_MODE_CFG_CMD_MODE, regs + DSI_MODE_CFG);
+		/* Stop the HS clock video mode requested; transfers re-request it. */
+		sys_clear_bits(regs + DSI_LPCLK_CTRL, DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS);
 		data->curr_mode = DSI_DW_COMMAND_MODE;
 	}
 	dsi_dw_pwr_up(regs);
@@ -799,8 +824,9 @@ static int dsi_dw_attach(const struct device *dev,
 	int ret;
 
 	/*
-	 * Always program the cdc-if controller's timings: this host packs the
-	 * DPI stream that controller generates, so no other timings are valid.
+	 * ALP-SDK PORT FIX: always program the cdc-if controller's timings:
+	 * this host packs the DPI stream that controller generates, so no
+	 * other timings are valid.
 	 * Panel drivers need not fill mdev->timings -- upstream hx8394 leaves
 	 * it UNINITIALIZED on its stack, and trusting that garbage (the old
 	 * "use ours only when hactive == 0" test) set the D-PHY rate, the DPI
@@ -895,6 +921,7 @@ static int dsi_dw_attach(const struct device *dev,
 	dsi_dw_wait_2_frames(data->dpi_pix_clk, &mdev->timings);
 	dsi_dw_intr_en(regs);
 	dsi_dw_pwr_up(regs);
+	data->attached = true;
 	return 0;
 }
 
@@ -1303,6 +1330,7 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 		.crc_recv_en = DT_INST_PROP(i, crc_recv_en),					\
 		.frame_ack_en = DT_INST_PROP(i, frame_ack_en),					\
 		.panel_max_lane_bw = DT_INST_PROP(i, panel_max_lane_bandwidth),                 \
+		.dpi_pix_clk = DT_PROP_OR(DT_INST_PHANDLE(i, cdc_if), clock_frequency, 0),      \
 	};											\
 	static struct dsi_dw_data data_##i = {							\
 		.pkt_size = COND_CODE_1(DT_INST_NODE_HAS_PROP(i, vid_pkt_size),			\
@@ -1310,6 +1338,8 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 					(DT_INST_PROP_BY_PHANDLE(i, cdc_if, width))),		\
 		.num_chunks = 0,								\
 		.null_size = 0,									\
+		/* The host leaves reset in command mode (MODE_CFG = 1). */			\
+		.curr_mode = DSI_DW_COMMAND_MODE,						\
 	};											\
 	DEVICE_DT_INST_DEFINE(i,								\
 			&dsi_dw_init,								\

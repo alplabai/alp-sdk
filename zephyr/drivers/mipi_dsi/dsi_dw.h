@@ -479,6 +479,8 @@ struct dsi_dw_config {
 
 	uint32_t irq;
 	uint32_t panel_max_lane_bw;
+	/* cdc-if clock-frequency (Hz); 0 = derive it from the timings at 60 Hz. */
+	uint32_t dpi_pix_clk;
 	struct mipi_dsi_timings timings;
 	struct dpi_config dpi;
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
@@ -513,6 +515,8 @@ struct dsi_dw_data {
 	uint32_t invact;
 	uint32_t max_rd_time;
 	enum dsi_dw_mode curr_mode;
+	/* ALP-SDK PORT FIX: set only by a successful dsi_dw_attach(). */
+	bool attached;
 
 	/* null packet config */
 	uint32_t num_chunks;

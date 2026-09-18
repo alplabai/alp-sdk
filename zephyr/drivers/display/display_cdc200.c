@@ -47,6 +47,13 @@
  * the shared cdc200_validate_transfer() (display_cdc200.h) before touching
  * memory. Reapply this divergence if the file is ever re-synced from the
  * fork.
+ *
+ * cdc200_blanking_off()/_on() (issue #2199) start and stop the scanout: the
+ * fork left them -ENOTSUP and relied on the application calling the
+ * DSI-private dsi_dw_set_mode() and cdc200_set_enable() itself.  blanking
+ * now switches the cdc-if DSI host (resolved from DT) and CDC_EN, and the
+ * cdc200_set_enable() back door, which toggled CDC_EN without the DSI mode,
+ * is removed.  Reapply both if re-synced from the fork.
  * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT tes_cdc_2_1
@@ -423,8 +430,10 @@ int cdc200_setup_registers(const struct device *dev)
  * mode until blanking_off, so the panel driver can run its init sequence first:
  * in DW video mode commands only leave during DPI blanking, which does not exist
  * before CDC_EN.  So blanking_off is DSI video mode THEN CDC_EN, and blanking_on
- * the reverse, so the DSI mode switch (which resets the host) never cuts a live
- * DPI frame.  The backlight belongs to the panel's own blanking API.
+ * the reverse, so the DSI host is reset only after the CDC is told to stop
+ * feeding it.  (Whether CDC_EN=0 stops mid-frame or at frame end is not
+ * verified; the last frame may be cut.)  The backlight belongs to the panel's
+ * own blanking API.
  */
 static int cdc200_blanking_on(const struct device *dev)
 {
@@ -732,17 +741,6 @@ void cdc200_get_capabilities(const struct device *dev, struct cdc200_display_cap
 		default:
 			break;
 		}
-	}
-}
-
-void cdc200_set_enable(const struct device *dev, bool enable)
-{
-	uintptr_t regs = DEVICE_MMIO_GET(dev);
-
-	if (enable) {
-		cdc200_global_enable(regs);
-	} else {
-		cdc200_global_disable(regs);
 	}
 }
 

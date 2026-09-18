@@ -9,7 +9,8 @@
  * banner).  v4.4 display port (Alp Lab AB): the fork driver pulled its
  * device-specific extended API (struct cdc200_display_caps / cdc200_fb_desc +
  * the cdc200_get_capabilities/_display_write/_display_read/_swap_fb/_set_enable/
- * _get_framebuffer/_restore_fb prototypes) from a public
+ * _get_framebuffer/_restore_fb prototypes; _set_enable is since removed, see
+ * the divergence note in display_cdc200.c) from a public
  * <zephyr/drivers/display/cdc200.h> header that the fork never shipped in its
  * include/ tree.  Those declarations are folded in here so the port is
  * self-contained.
@@ -492,7 +493,6 @@ void cdc200_get_capabilities(const struct device *dev, struct cdc200_display_cap
  * @param dev    CDC200 device.
  * @param enable true to enable, false to disable.
  */
-void cdc200_set_enable(const struct device *dev, bool enable);
 
 /**
  * @brief Queue a framebuffer swap for a given layer (applied at next line IRQ).
