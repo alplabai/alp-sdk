@@ -61,9 +61,12 @@ The gate then requires that text to appear within the cited range. Move the
 code and the gate fails, which is the entire point. That is the ONLY form that
 anchors: the parenthesised quote has to FOLLOW the citation, and the quoted
 text has to sit on one markdown line (a line break inside the quotes can never
-match a single-line citation; wrapping before the `(` is fine). An un-anchored
-citation is range-checked only, and is reported so the count of unanchored
-citations is visible rather than assumed to be zero.
+match a single-line citation; wrapping before the `(` is fine). For a range,
+quote the FIRST cited line: `--fix` re-derives the start from the line the
+anchor is found on, so `:10-14` anchored on line 13 becomes `:16-20` after a
++3 shift, not `:13-17`. An un-anchored citation is range-checked only, and is
+reported so the count of unanchored citations is visible rather than assumed
+to be zero.
 
 Use ONE delimiter, backtick or quote, never both. `` (`"text"`) `` and
 `` ("`text`") `` are hard errors, not accepted anchors: the opening class
@@ -95,9 +98,15 @@ gained after the branch point (or that a merge of BASE brought in) from being
 charged to this branch. Touching a line makes it new: fixing a typo on a line
 carrying an un-anchored citation means anchoring that citation too.
 
-BASE is `DIFF_BASE`, default `origin/dev`. CI sets `DIFF_BASE=HEAD^1` on its
-checkout of the PR's merge commit, whose first parent is the base branch as
-merged. When no base is available the rule degrades LOUDLY, never silently:
+BASE is `DIFF_BASE`, default `origin/dev`. CI sets `DIFF_BASE=HEAD^1` on a PR
+into `dev`, whose checkout is the PR's merge commit with `dev` as merged for
+its first parent. It leaves it empty on a PR into `main`, where `HEAD^1` is
+`main` and every line of every unfolded fragment would count as new (272
+errors when measured), and on `workflow_dispatch`. Empty falls back to
+`origin/dev`: absent from a PR checkout, so the gate WARNs that the rule did
+not run; present on a dispatch of `dev` itself, where it IS HEAD and the rule
+runs vacuously (`0 citation(s) on added lines`). When no base is available
+the rule degrades LOUDLY, never silently:
   * `DIFF_BASE` set but unresolvable -> exit 2. Whoever set it expected the
     rule to run.
   * `DIFF_BASE` unset and `origin/dev` absent -> a WARN on stderr, and the
@@ -136,9 +145,12 @@ into files `dev` has since moved are still correct -- green here, red there.
 false clean) and grades the resulting tree straight from the object store,
 touching no file, index, or ref. It grades COMMITTED HEAD only, and says so
 when the working tree is dirty; HEAD that does not merge cleanly with BASE
-exits 1, naming the conflicted files. It cannot be combined with `--fix`:
-merge BASE in, then `--fix`. `scripts/test-all.sh` runs it after the plain
-run.
+exits 1, naming the conflicted files; a BASE that is already an ancestor of
+HEAD has nothing to merge, and the verdict says it graded HEAD's own tree. It
+cannot be combined with `--fix`: merge BASE in, then `--fix`. Needs git >=
+2.38. `scripts/test-all.sh` runs it as its own stage with BASE pinned to
+`origin/dev`, and reports a `[GAP]` SKIP on a host whose git is older or
+that has no `origin/dev`.
 
 --fix -- re-deriving a drifted citation from its anchor
 -------------------------------------------------------
@@ -805,8 +817,12 @@ _DEFAULT_BASE = "origin/dev"
 #: `git diff` flags every added-line computation shares. The prefixes are
 #: pinned because `_hunk_lines` parses `+++ b/<path>`, and a user's
 #: `diff.noprefix` / `diff.mnemonicPrefix` would otherwise change them.
-_DIFF_ARGS = ("diff", "--unified=0", "--no-color", "--no-ext-diff",
-              "--find-renames", "--src-prefix=a/", "--dst-prefix=b/")
+#: `core.quotePath=false` stops git octal-quoting a non-ASCII path
+#: (`+++ "b/changelog.d/9001-\303\251.md"`), which `_hunk_lines` would
+#: otherwise fail to read as a path at all.
+_DIFF_ARGS = ("-c", "core.quotePath=false", "diff", "--unified=0",
+              "--no-color", "--no-ext-diff", "--find-renames",
+              "--src-prefix=a/", "--dst-prefix=b/")
 
 _HUNK = re.compile(r"@@ -\d+(?:,(?P<on>\d+))? \+(?P<ns>\d+)(?:,(?P<nn>\d+))? @@")
 
@@ -852,7 +868,11 @@ def _hunk_lines(diff: str) -> dict[str, set[int]]:
 
     Content lines are SKIPPED by count rather than inspected, so an added
     line that happens to read `++ x` (rendered `+++ x`) cannot be mistaken
-    for a file header.
+    for a file header. A header is `+++ b/<path>`, with a trailing TAB when
+    the path holds a space, or `+++ /dev/null` for a deletion; anything else
+    (a path git still quotes -- a control character, `"` or backslash) is
+    an error, because dropping its hunks would exempt that file from the
+    new-citation rule without a word.
     """
     added: dict[str, set[int]] = {}
     path: str | None = None
@@ -862,7 +882,14 @@ def _hunk_lines(diff: str) -> dict[str, set[int]]:
             skip -= 1
             continue
         if line.startswith("+++ "):
-            path = line[len("+++ b/"):] if line.startswith("+++ b/") else None
+            if line.startswith("+++ b/"):
+                path = line[len("+++ b/"):].rstrip("\t")
+            elif line == "+++ /dev/null":
+                path = None
+            else:
+                _die(f"cannot read the path in diff header {line!r}; git "
+                     f"quoted it, so rename that changelog.d/ file to plain "
+                     f"characters")
             continue
         h = _HUNK.match(line)
         if h and path:
@@ -1042,7 +1069,10 @@ def _main_against_merge(base: str | None, base_ref: str, verbose: bool) -> int:
     if base is None:
         _die(f"--against-merge needs a base to merge, and {base_ref} does "
              f"not resolve here. Fetch it, or set DIFF_BASE.")
-    if _git("status", "--porcelain").stdout.strip():
+    # --no-optional-locks: a plain `git status` refreshes and REWRITES the
+    # index, which this mode promises not to touch, and can race another
+    # process for index.lock in a shared checkout.
+    if _git("--no-optional-locks", "status", "--porcelain").stdout.strip():
         print("check-changelog-citations: WARN -- the working tree has "
               "uncommitted changes; --against-merge grades committed HEAD "
               "merged with the base, so they are NOT in this verdict.",
@@ -1054,8 +1084,11 @@ def _main_against_merge(base: str | None, base_ref: str, verbose: bool) -> int:
                  for rel in sorted(filter(None, listing.split("\0")))
                  if rel.endswith(".md") and rel != "changelog.d/README.md"]
     added = _hunk_lines(_git(*_DIFF_ARGS, base, tree, "--", "changelog.d/").stdout)
-    return _grade(fragments, read("CHANGELOG.md"), added, read,
-                  f"the merge of {base_ref} into HEAD (tree {tree[:12]})",
+    graded = f"the merge of {base_ref} into HEAD (tree {tree[:12]})"
+    if _git("merge-base", "--is-ancestor", base, "HEAD", ok=(0, 1)).returncode == 0:
+        graded = (f"HEAD's own tree ({tree[:12]}) -- {base_ref} is already "
+                  f"an ancestor of HEAD, so there was nothing to merge")
+    return _grade(fragments, read("CHANGELOG.md"), added, read, graded,
                   f"lines the merge adds to {base_ref} ({base[:12]})", verbose)
 
 
@@ -1090,7 +1123,7 @@ def main() -> int:
     #
     # This sits ABOVE the early return, but that ordering is now INERT:
     # mutation-tested by moving the `--fix` block below the early return and
-    # re-running the suite -- still 59 passed (all of them). What keeps `--fix`
+    # re-running the suite -- still 64 passed (all of them). What keeps `--fix`
     # from becoming a silent no-op on the release-cut tree (empty
     # `changelog.d/`, CHANGELOG.md present) is the WIDENED condition below
     # (`not fragments and not CHANGELOG.is_file()`), not this placement.

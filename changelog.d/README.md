@@ -104,9 +104,12 @@ the guard at `scripts/foo.py:42` ("if not fragments:")
 the cited range, so a citation cannot silently go stale when the code moves.
 The quote goes AFTER the citation — `` (`scripts/foo.py:42`, "if not
 fragments:") `` looks anchored and is rejected as a near miss — and stays on
-one markdown line. When a merge of `dev` moves the code, `--fix` re-derives
-the line number from the anchor; `--against-merge` grades the merge before
-you make it. The script's docstring has the full rules.
+one markdown line. For a range, quote its FIRST line: `--fix` restarts the
+range at the line the anchor is found on, so `:10-14` anchored on line 13
+becomes `:16-20` after a 3-line shift, not `:13-17`. When a merge of `dev`
+moves the code, `--fix` re-derives the line number from the anchor;
+`--against-merge` grades the merge before you make it. The script's docstring
+has the full rules.
 
 ## Release time
 

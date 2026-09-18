@@ -8,6 +8,7 @@ foreign regardless of which subpath is cited.
 """
 
 import importlib.util
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -1016,6 +1017,21 @@ def test_no_base_degrades_loudly(tmp_path, monkeypatch, capsys):
     assert "no-such-ref" in capsys.readouterr().err
 
 
+def _git_version() -> tuple[int, int]:
+    out = subprocess.run(["git", "--version"], capture_output=True, text=True,
+                         encoding="utf-8").stdout
+    m = re.search(r"(\d+)\.(\d+)", out)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+
+#: `--against-merge` needs `git merge-tree --write-tree`, new in git 2.38.
+#: Ubuntu 22.04 ships 2.34 and Apple's git 2.37, so on those hosts these
+#: tests skip rather than fail -- the same call test-all.sh makes.
+_needs_merge_tree = pytest.mark.skipif(
+    _git_version() < (2, 38),
+    reason="git merge-tree --write-tree needs git >= 2.38")
+
+
 def _drifted_merge_repo(tmp_path):
     """`feature` cites `src/a.c:7`, correct on its tip; `main` has since
     pushed that line down by three, so the citation is wrong in the merge."""
@@ -1035,6 +1051,7 @@ def _drifted_merge_repo(tmp_path):
     return mod, git
 
 
+@_needs_merge_tree
 def test_against_merge_grades_the_merge_not_the_tip(
         tmp_path, monkeypatch, capsys):
     """The #2186 repro: green on the branch tip, red in the tree that lands.
@@ -1055,6 +1072,7 @@ def test_against_merge_grades_the_merge_not_the_tip(
     assert git("status", "--porcelain") == "", "nothing written or staged"
 
 
+@_needs_merge_tree
 def test_against_merge_refuses_a_conflicting_merge(
         tmp_path, monkeypatch, capsys):
     """A merge with conflicts has no result to grade; say so, exit 1."""
@@ -1078,3 +1096,81 @@ def test_against_merge_rejects_fix(tmp_path, monkeypatch, capsys):
         _run(mod, monkeypatch, "--fix", "--against-merge")
     assert exc.value.code == 2
     assert "merge the base, then --fix" in capsys.readouterr().err
+
+
+@_needs_merge_tree
+def test_against_merge_reads_fragments_and_new_lines_from_the_merge(
+        tmp_path, monkeypatch, capsys):
+    """Two things only the MERGED tree holds: a fragment the base added
+    (`5.md`, with a near miss) and the branch's new un-anchored citation,
+    judged against what the merge adds to the base. Reading fragments from
+    the working tree misses the first; dropping the added-line map under
+    --against-merge silently turns the new-citation rule off."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    git("checkout", "-q", "main")
+    mod.FRAGMENT_DIR.mkdir(exist_ok=True)  # git drops it: empty on main
+    _write(mod.FRAGMENT_DIR / "5.md", 'see (`src/a.c:1`, "top 1") here\n')
+    git("add", "-A")
+    git("commit", "-qm", "base adds a near-miss fragment")
+    git("checkout", "-q", "feature")
+    _write(mod.FRAGMENT_DIR / "1.md",
+           'see `src/a.c:7` ("MOVING ANCHOR")\nbare `src/a.c:2` here\n')
+    git("commit", "-qam", "branch adds an un-anchored citation")
+    monkeypatch.setenv("DIFF_BASE", "main")
+
+    assert _run(mod, monkeypatch, "--against-merge") == 1
+    err = capsys.readouterr().err
+    assert "5.md: `src/a.c:1` -- near-miss anchor" in err, err
+    assert "1.md: `src/a.c:2` -- new citation with no anchor" in err, err
+    assert "5.md: `src/a.c:1` -- new citation" not in err, (
+        "a line the base wrote is not new to the merge")
+
+
+@_needs_merge_tree
+def test_against_merge_warns_on_a_dirty_tree_and_names_a_non_merge(
+        tmp_path, monkeypatch, capsys):
+    """Uncommitted work is not in the merge, so the run says so. And a base
+    that is already an ancestor of HEAD (a merge base, say, which the
+    clang-format stage may leave in the shared DIFF_BASE) has nothing to
+    merge: the verdict must say it graded HEAD, not "a merge"."""
+    mod, git = _drifted_merge_repo(tmp_path)
+    fork = git("merge-base", "main", "feature").strip()
+    (tmp_path / "scratch.txt").write_text("not committed\n", encoding="utf-8")
+    monkeypatch.setenv("DIFF_BASE", fork)
+
+    assert _run(mod, monkeypatch, "--against-merge") == 0
+    out = capsys.readouterr()
+    assert "uncommitted changes" in out.err, out.err
+    assert "already an ancestor of HEAD" in out.out, out.out
+    assert "graded: the merge of" not in out.out
+
+
+@pytest.mark.parametrize("name", ["9001-\u00e9.md", "9002 space.md"])
+def test_new_citation_rule_reads_a_quoted_fragment_path(
+        tmp_path, monkeypatch, capsys, name):
+    """git octal-quotes a non-ASCII path and TAB-terminates one holding a
+    space. Either used to parse as "no path", dropping the file's hunks and
+    exempting a COMMITTED fragment from the new-citation rule in silence."""
+    mod, git = _git_tree(tmp_path)
+    _write(tmp_path / "src" / "a.c", _source(5, "GOOD ANCHOR"))
+    git("add", "-A")
+    git("commit", "-qm", "base")
+    git("checkout", "-qb", "feature")
+    _write(mod.FRAGMENT_DIR / name, "bare `src/a.c:5` here\n")
+    git("add", "-A")
+    git("commit", "-qm", "branch adds an oddly named fragment")
+    monkeypatch.setenv("DIFF_BASE", "main")
+
+    assert _run(mod, monkeypatch) == 1
+    err = capsys.readouterr().err
+    assert f"{name}: `src/a.c:5` -- new citation with no anchor" in err, err
+
+
+def test_hunk_lines_refuses_a_header_it_cannot_read():
+    """A path git still quotes (a control character, `"` or backslash) is an
+    error, never a silent drop of that file's hunks."""
+    mod = _load()
+    diff = '+++ "b/changelog.d/x\\ty.md"\n@@ -0,0 +1 @@\n+bare\n'
+    with pytest.raises(SystemExit) as exc:
+        mod._hunk_lines(diff)
+    assert exc.value.code == 2

@@ -592,11 +592,16 @@ jobs:
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
         # HEAD is the merge commit, so this already grades the tree that will
-        # land. DIFF_BASE=HEAD^1 turns on the new-citation rule: a citation
-        # on a line this PR adds must be anchored (alp-sdk#2186). Empty on
-        # workflow_dispatch, where the gate warns that the rule did not run.
+        # land. On a PR into dev, DIFF_BASE=HEAD^1 turns on the new-citation
+        # rule: a citation on a line this PR adds must be anchored
+        # (alp-sdk#2186). NOT on a PR into main: HEAD^1 is main there, and
+        # every line of every fragment dev has not folded yet would count
+        # as new (272 errors measured). Empty falls back to origin/dev, which
+        # a PR checkout does not have, so the gate warns the rule did not
+        # run; on a workflow_dispatch of dev, origin/dev IS HEAD and the rule
+        # runs vacuously (0 citations on added lines).
         env:
-          DIFF_BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'HEAD^1' || '' }}
         run: python3 scripts/check_changelog_citations.py
 
       - name: "Gate — changelog.d/ fragment's heading issue matches its filename (#1957)"
