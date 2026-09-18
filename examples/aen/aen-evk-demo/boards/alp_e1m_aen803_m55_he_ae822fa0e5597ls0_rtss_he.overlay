@@ -727,8 +727,11 @@
  *   - I2S3 (i2s3@49017000), examples/aen/aen-i2s-amp-alif's overlay. The
  *     board's I2S0_* signals route to I2S3_*_A on P9_3 (SDO) / P9_4 (SCLK) /
  *     P9_5 (WS) -- per metadata/e1m_modules/aen/from-alif.tsv, NOT i2s0, which
- *     an earlier cut of that app wrongly used. SDI (P9_2) is not declared:
- *     this phase only plays, it never reads back over I2S.
+ *     an earlier cut of that app wrongly used. SDI (P9_2, I2S3_SDI_A) is
+ *     declared too (pinctrl_i2s3's group1 below, with input-enable) so the
+ *     amps' SDOUT/IV-sense can be read back -- but the i2s3 node itself
+ *     still ships disabled by default; see the SAFETY paragraph below for
+ *     why.
  *   - the HP PDM (pdm@4902d000), examples/aen/aen-pdm-mic-alif's overlay. The
  *     EVK's 4x MP34DT05 mics reach it as PDM_C0/PDM_D0 on P6_1/P6_0 (clock 0 /
  *     data -> channels 0,1) and PDM_C2/PDM_D2 on P11_4/P5_4 (clock 2 / data ->
