@@ -5,9 +5,10 @@ which targets `EVK_I2C_ADDR_TCA6408A_MAIN` in `metadata/boards/e1m-evk.yaml` -- 
 part the metadata marks `assembled: false` on this EVK revision. The example never
 picked up the U35 address correction from alp-sdk#1974.
 
-Both overlays now point `lcd_exp` at `gpio@73`, `reg = <0x73>`: the assembled U35,
+`lcd_exp` is now `gpio@73`, `reg = <0x73>` (in the `e1m_evk_rk055hdmipi4ma0`
+shield, which replaces the example's own overlay wiring): the assembled U35,
 `EVK_I2C_ADDR_TCAL9538_MAIN`. The compatible is `nxp,pca9538`, not `nxp,pcal9538`.
-Both bind `gpio_pca_series.c` under the existing `CONFIG_GPIO_PCA_SERIES=y`, but
+Both bind `gpio_pca_series.c` under `CONFIG_GPIO_PCA_SERIES=y`, but
 `pcal9538` is the TYPE_2 variant whose init also writes the Agile-IO block at
 `0x40`..`0x45`, which is untested on this part. `nxp,pca9538` stays on the TYPE_0
 base registers that #1974 read back at POR. The P0/P1 assignments (panel power

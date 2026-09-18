@@ -2,26 +2,26 @@
 #
 # aen-dsi-display -- drive the RK055HDMIPI4MA0 (Rocktech 720x1280, Himax HX8394
 # controller, MIPI-DSI) panel through the full Alif Ensemble E8 C2-MIPI-DSI
-# DISPLAY chain on the E1M-AEN801 (M55-HE), via the bench RAM-run + RAM-console
-# flow.  This is the pixels-on-glass successor to the BIND-only aen-dsi-regcheck:
-# it turns ON the cdc200 + dsi_dw display-class drivers and adds the panel +
-# the I2C GPIO-expander that gates panel reset.
+# DISPLAY chain on an E1M-AEN SoM (M55-HE), via the bench RAM-run + RAM-console
+# flow.  This is the pixels-on-glass successor to the BIND-only
+# aen-dsi-regcheck.
 #
 # THE CHAIN (top -> glass):
 #   display_write() -> cdc200 (tes,cdc-2.1, DPI pixel pump, framebuffer in SRAM0)
 #                   -> mipi_dsi (snps,designware-dsi, DSI-TX host)
 #                   -> dphy (snps,designware-dphy, shared D-PHY, TX role)
 #                   -> hx8394 panel (himax,hx8394) over 2 DSI data lanes
-#   panel reset: I2C GPIO expander on I2C2, consumed by the hx8394 reset-gpios
-#                path.
 #
-# FRAMEBUFFER PLACEMENT (RAM-run critical): a 720x1280 RGB565 L1 framebuffer is
-# 1,843,200 B -- it does NOT fit ITCM (256 KB), where the RAM-run links code.
-# The overlay gives the cdc200 node a memory-region (the top 2 MiB of SRAM0);
-# the driver uses that address directly, with no linker section, and flushes
-# the data cache after every framebuffer write.
+# The whole chain comes from the e1m_evk_rk055hdmipi4ma0 shield
+# (zephyr/boards/shields/): it turns on the SoC display nodes, adds the panel,
+# the carrier's I2C GPIO expander (panel power + reset) and the framebuffer
+# memory region (the top 2 MiB of SRAM0), and enables the drivers.  Any app
+# gets the same panel by adding the shield; this one appends it here so a plain
+# `west build` of the example needs no -DSHIELD.
 
 cmake_minimum_required(VERSION 3.20)
+
+list(APPEND SHIELD e1m_evk_rk055hdmipi4ma0)
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_dsi_display LANGUAGES C)

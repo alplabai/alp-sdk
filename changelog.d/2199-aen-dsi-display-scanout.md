@@ -37,9 +37,10 @@ timings.
 The DSI host now takes the DPI pixel clock from the `cdc-if` controller's
 `clock-frequency` instead of assuming 60 Hz. The example ran its CDC at 400/6 =
 66.67 MHz into a host timed for 59.98 MHz, so the DPI payload FIFO overflowed on
-every line (`INT_ST1` `DPI_PLD_WR_ERR`). `aen-dsi-display` now declares the rate
-it really runs, 400/7 = 57.14 MHz, and derives its CDC divider from that same
-property, so the two can no longer disagree. 66.67 MHz would need about
+every line (`INT_ST1` `DPI_PLD_WR_ERR`). The `cdc200` node now declares the rate
+the CDC really runs, 400/7 = 57.14 MHz (`clock-frequency = <57142857>`, in the
+`e1m_evk_rk055hdmipi4ma0` shield), and the SoC glue derives the CDC divider from
+that same property, so the two can no longer disagree. 66.67 MHz would need about
 539 Mbps per lane, above the host's default 500 Mbps `panel-max-lane-bandwidth`.
 
 `dw_setup_timeout()` no longer truncates the non-burst HS-TX timeout. A 720x1280
@@ -57,7 +58,7 @@ so `display_blanking_off()` can no longer report success on a host that was
 never configured. `cdc200_set_enable()` is removed: it toggled `CDC_EN` without
 the DSI mode and had no callers.
 
-`aen-dsi-display` no longer requests a peripheral ACK at the end of every frame
-(`frame-ack-en`). The upstream RK055 setup does not use it, and a frame whose ACK
+The display chain no longer requests a peripheral ACK at the end of every frame
+(`frame-ack-en`; neither the SoC `mipi_dsi` node nor the shield sets it). The upstream RK055 setup does not use it, and a frame whose ACK
 never comes stalls the host in LP receive long enough to overflow the DPI
 payload FIFO.

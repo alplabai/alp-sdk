@@ -4,7 +4,7 @@
  *
  * aen-dsi-display -- drive the RK055HDMIPI4MA0 (Rocktech 720x1280, Himax HX8394
  * controller, MIPI-DSI) panel through the full Alif Ensemble E8 C2-MIPI-DSI
- * DISPLAY chain on the E1M-AEN801 (M55-HE), via the bench RAM-run + RAM-console
+ * DISPLAY chain on an E1M-AEN SoM (M55-HE), via the bench RAM-run + RAM-console
  * flow.  This is the pixels-on-glass successor to aen-dsi-regcheck (which only
  * proved the chain BINDS): it turns ON the cdc200 + dsi_dw display-class drivers
  * and renders a solid-color framebuffer.
@@ -13,7 +13,7 @@
  *
  *   display_write()  ->  cdc200@49031000  (tes,cdc-2.1)
  *                            -- the DPI/RGB pixel pump (CDC200).  Its L1
- *                               framebuffer lives in SRAM0 @0x02000000 (the
+ *                               framebuffer lives in SRAM0 @0x02200000 (the
  *                               720x1280 RGB565 FB is 1.84 MB -- it does NOT fit
  *                               ITCM, where the RAM-run links code).
  *                        |  DPI
@@ -31,27 +31,45 @@
  *                            -- the HX8394 panel controller.  Its driver runs the
  *                               panel reset sequence + DSI attach at POST_KERNEL.
  *
+ * WHERE EACH PIECE LIVES (this app only USES the chain):
+ *   - the SoC nodes (reg, IRQs, clocks) -- zephyr/dts/alif/
+ *     ensemble_e8_peripherals.dtsi, disabled until something enables them;
+ *   - the panel, its timings, the carrier's panel-control expander, the
+ *     panel-enable regulator and the framebuffer region -- the
+ *     e1m_evk_rk055hdmipi4ma0 shield (zephyr/boards/shields/), which
+ *     CMakeLists.txt adds and whose Kconfig.defconfig enables the drivers;
+ *   - the SoC setup no driver does (D-PHY clock sources + analog power, the
+ *     CDC200 pixel-clock divider, the backlight pad mux) -- zephyr/soc-bridge/
+ *     alif/mipi_display_e8.c.
+ *   Any app that adds the shield gets the same chain; nothing below is needed
+ *   to make it work.
+ *
  * PANEL ENABLE / RESET / BACKLIGHT:
  *   A small I2C GPIO expander on I2C2 provides the HX8394 control GPIOs.  It
  *   answers at POR with no reset action (its reset line is pulled up on the
  *   carrier).  A boot-on fixed regulator asserts the panel-enable GPIO before
- *   the HX8394 driver performs its reset and DSI initialization.  The SoM-side
- *   backlight is lit early, before any of that (backlight_on_early below).
+ *   the HX8394 driver performs its reset and DSI initialization.  The hx8394
+ *   driver lights the SoM-side backlight (its bl-gpios) only at the END of a
+ *   successful init -- backlight last is the right production order, no white
+ *   flash before DISPLAY_ON -- so a dark backlight means the panel init
+ *   failed.  main() prints the pin level after the panel check.
  *
  * PIXELS: display_blanking_off() on the cdc200 switches the DSI host from
  *   command mode (panel init) to video mode and sets CDC_EN, which starts the
  *   DPI scanout.  Until then display_write() only fills the framebuffer.
  *
- * FRAMEBUFFER PLACEMENT (RAM-run critical -- see CMakeLists.txt for the full
- * note): the cdc200 driver is built with -DNO_RELOCATE_SRAM0, which pins the L1
- * framebuffer at a FIXED SRAM0 address (0x02000000) with no linker section.  The
+ * FRAMEBUFFER PLACEMENT (RAM-run critical): the cdc200 node's memory-region
+ * (the shield's 2 MiB at the top of SRAM0, 0x02200000) holds the L1
+ * framebuffer.  The driver uses that address directly -- no linker section --
+ * so the 1.84 MB framebuffer is not part of the ITCM RAM-run image.  The
  * driver flushes the data cache after every framebuffer write
  * (sys_cache_data_flush_range), so the CDC scanout sees coherent pixels.
  *
  * BENCH-TUNABLES / TBD (none block the build; all gate pixels-on-glass):
- *   - DPI pixel clock: the overlay's cdc200 clock-frequency is the one knob
+ *   - DPI pixel clock: the shield's cdc200 clock-frequency is the one knob
  *     (400 MHz / 7 = 57.14 MHz; the panel-native 62.346 MHz is unreachable).
- *     The divider below and the DSI host's lane timing both derive from it.
+ *     The SoC glue's CDC divider and the DSI host's lane timing both derive
+ *     from it.
  *   - cdc200/mipi_dsi clock ids are the real re-authored ALIF_*_CLK values and
  *     are proved by this app's bench PASS gate.
  *
@@ -72,74 +90,15 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/mipi_dsi.h>
-#include <zephyr/drivers/pinctrl.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
-#include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
 /*
- * Backlight FIRST, before the panel driver runs -- a deliberate BENCH ordering.
- * The hx8394 driver lights bl-gpios only at the very END of a successful init
- * (backlight last is the right production order: no white flash before
- * DISPLAY_ON), so any earlier failure leaves the glass dark and saying
- * nothing.  Lighting it here makes the backlight observable on its own.
- *
- * P5_5 is the enable input of the SoM's backlight driver.  gpio_dw does not
- * apply pad mux, so mux P5_5 to GPIO first.  Hold it static HIGH for full
- * brightness and never pulse it: short LOW pulses are the driver IC's serial
- * dimming protocol.  Priority 55 is after the GPIO drivers and before the
- * expander (60, prj.conf) and the display chain.
- */
-#define PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
-
-static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(lcd_panel), bl_gpios);
-
-static int backlight_rc = 1; /* 1 = hook never ran; SYS_INIT drops the rc */
-
-static int backlight_on_early(void)
-{
-	pinctrl_soc_pin_t m[] = { PIN_P5_5__GPIO | PAD_REN };
-	int               rc  = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
-
-	if (rc == 0 && !gpio_is_ready_dt(&bl_gpio)) {
-		rc = -ENODEV;
-	}
-	if (rc == 0) {
-		rc = gpio_pin_configure_dt(&bl_gpio, GPIO_OUTPUT_ACTIVE);
-	}
-	backlight_rc = rc;
-	return rc;
-}
-
-SYS_INIT(backlight_on_early, POST_KERNEL, 55);
-
-/*
- * Program the CDC200 pixel-clock divider directly.  The upstream Alif clockctrl
- * has no .set_rate for the CDC pixel clock, so CDC200_PIXCLK_CTRL[24:16] keeps
- * its reset divisor 0x1FF (511) -> ~0.78 MHz pixel clock.  The divider comes
- * from the overlay's cdc200 clock-frequency over the 400 MHz SYST_ACLK source,
- * the same value the DSI host times its lanes from -- if the two disagree the
- * DPI payload FIFO overflows every line.  CDC200_PIXCLK_CTRL =
- * CLKCTL_PER_MST(0x4903F000) + 0x04 (DFP sys_ctrl_cdc.h).
+ * CDC200_PIXCLK_CTRL = CLKCTL_PER_MST(0x4903F000) + 0x04 (DFP sys_ctrl_cdc.h).
+ * The SoC glue writes its divider (bits [24:16]); read here for the scanout
+ * report only.
  */
 #define CDC_PIXCLK_CTRL_ADDR 0x4903F004UL
-#define CDC_PIXCLK_DIV_POS   16U
-#define CDC_PIXCLK_DIV_MSK   (0x1FFUL << CDC_PIXCLK_DIV_POS)
-#define CDC_PIXCLK_SRC_HZ    400000000UL /* SYST_ACLK */
-#define CDC_PIXCLK_DIV \
-	DIV_ROUND_CLOSEST(CDC_PIXCLK_SRC_HZ, DT_PROP(DT_NODELABEL(cdc200), clock_frequency))
-
-static int cdc_pixclk_div_fixup(void)
-{
-	uint32_t v = sys_read32(CDC_PIXCLK_CTRL_ADDR);
-
-	v = (v & ~CDC_PIXCLK_DIV_MSK) | (CDC_PIXCLK_DIV << CDC_PIXCLK_DIV_POS);
-	sys_write32(v, CDC_PIXCLK_CTRL_ADDR);
-	return 0;
-}
-
-SYS_INIT(cdc_pixclk_div_fixup, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 
 /* Minimal DesignWare DSI host status dump for bench diagnostics. */
 #define DSI_BASE_ADDR           0x49032000UL
@@ -198,44 +157,6 @@ static void dump_dsi_status(const char *stage)
 }
 
 /*
- * Bring up the MIPI D-PHY's clock SOURCES and analog power before any peripheral
- * touches the PHY.  The CKEN gate bits in CLKCTL_PER_MST->MIPI_CKEN (set by the
- * dphy driver) only gate clocks that must already be oscillating upstream; on a
- * bare-metal/SE-less RAM-run those upstream enables are NOT done, so the D-PHY
- * PLL has neither a 38.4 MHz reference nor analog supply and never locks
- * (bench: DSI_PHY_STATUS stuck 0x1400, no LOCK bit -- even with the PLL m/n/VCO
- * shadow registers correctly programmed).
- *
- * Two register-direct steps (mirrors the Alif sdk-alif display sample's CGU poke
- * and the DevKit-e8 vbat_init(); no SE-services dependency):
- *
- *  1. CGU->CLK_ENA (0x1A602014): enable HFOSC (38.4 MHz, the PLL reference) on
- *     bit21 and the CFG clock (100 MHz, source of the 25 MHz D-PHY cfg clock that
- *     drives the PHY startup/lock state machine) on bit23.
- *  2. VBAT->PWR_CTRL (0x1A609008): un-mask the MIPI TX/RX/PLL DPHY power rails
- *     (bits 0/4/8) + the VPH-1P8 bypass (bit12) and drop the TX/RX/PLL isolation
- *     (bits 1/5/9).  At reset these leave the DPHY analog islands powered-off and
- *     isolated, so the PLL cannot lock regardless of config.
- */
-#define CGU_CLK_ENA_ADDR  0x1A602014UL
-#define CGU_CLK_HFOSC_BIT 21U /* HFOSC 38.4 MHz -- D-PHY PLL reference */
-#define CGU_CLK_CFG_BIT   23U /* CFG 100 MHz -- source of the 25 MHz D-PHY cfg clk */
-
-#define VBAT_PWR_CTRL_ADDR    0x1A609008UL
-#define VBAT_DPHY_PWR_ISO_MSK (BIT(0) | BIT(1) | BIT(4) | BIT(5) | BIT(8) | BIT(9) | BIT(12))
-/* TX pwr/iso | RX pwr/iso | PLL pwr/iso | VPH-1P8 bypass */
-
-static int dphy_clock_power_enable(void)
-{
-	sys_set_bit(CGU_CLK_ENA_ADDR, CGU_CLK_HFOSC_BIT);
-	sys_set_bit(CGU_CLK_ENA_ADDR, CGU_CLK_CFG_BIT);
-	sys_clear_bits(VBAT_PWR_CTRL_ADDR, VBAT_DPHY_PWR_ISO_MSK);
-	return 0;
-}
-
-SYS_INIT(dphy_clock_power_enable, PRE_KERNEL_1, 0);
-
-/*
  * Scanout health (bench diagnostic, not API usage).  With the DSI IRQ masked,
  * collect the read-to-clear INT_ST1 error latches over ~6 frames of video.
  * DPI_PLD_WR_ERR (bit 7) = the CDC feeds pixels faster than the DSI line time
@@ -275,6 +196,7 @@ static bool check_scanout(void)
 #define LCD_PWR_NODE DT_NODELABEL(lcd_pwr_en)
 
 static const struct gpio_dt_spec lcd_pwr_gpio = GPIO_DT_SPEC_GET(LCD_PWR_NODE, enable_gpios);
+static const struct gpio_dt_spec bl_gpio      = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios);
 static const struct i2c_dt_spec  lcd_exp_i2c  = I2C_DT_SPEC_GET(EXP_NODE);
 
 static void scan_i2c2(const char *stage)
@@ -416,8 +338,6 @@ int main(void)
 	const struct device *dsi   = DEVICE_DT_GET(DSI_NODE);
 	const struct device *disp  = DEVICE_DT_GET(DISPLAY_NODE);
 
-	printk("%-8s: early-on rc=%d level=%d\n", "backlight", backlight_rc, gpio_pin_get_dt(&bl_gpio));
-
 	/* Step 1: the panel-control expander must be ready for reset-gpios. */
 	bool exp_ok = dev_ready("lcd-exp", exp);
 	bool pwr_ok = dev_ready("lcd-reg", pwr);
@@ -442,8 +362,14 @@ int main(void)
 		dump_lcd_exp_regs("after-pwr-set");
 	}
 
-	/* Step 2: HX8394 init does mipi_dsi_attach + DCS power-on over DSI. */
+	/*
+	 * Step 2: HX8394 init does mipi_dsi_attach + DCS power-on over DSI, and
+	 * drives bl-gpios high only if all of it succeeded -- so the level is the
+	 * panel driver's own verdict.
+	 */
 	bool panel_ok = dev_ready("panel", panel);
+
+	printk("%-8s: level=%d\n", "backlight", gpio_pin_get_dt(&bl_gpio));
 
 	/* Step 3: the MIPI-DSI host. */
 	bool dsi_ok = dev_ready("mipi-dsi", dsi);
