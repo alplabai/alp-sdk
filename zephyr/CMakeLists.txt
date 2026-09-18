@@ -613,6 +613,30 @@ zephyr_library_sources_ifdef(CONFIG_MIPI_DPHY_DW
 zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/isp_pico.c)
 
+# Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers -- board-agnostic
+# (no Alif/EVK specifics), consumed via a camera shield
+# (zephyr/boards/shields/raspberry_pi_camera_module_1,
+# zephyr/boards/shields/innomaker_cam_ov9281) on top of whatever CSI-2 host is
+# on the board (e.g. the Alif video_csi_dw.c bridge above).  Both use the
+# upstream video_common.c CCI helpers (video_read_cci_reg /
+# video_write_cci_multiregs*), so the private drivers/video include dir is
+# needed here too.
+#
+# OV5647 (compatible "ovti,ov5647"): ADR 0017 Tier-1 (upstream-PENDING
+# backport of zephyrproject-rtos/zephyr#119301, INTERIM) -- see
+# zephyr/drivers/video/ov5647.c for the retirement note.
+#
+# OV9281 (compatible "ovti,ov9281"): ADR 0017 Tier-2 (port of the Apache-2.0
+# Espressif esp-video-components esp_cam_sensor ov9281 driver onto the v4.4
+# video API), BENCH-UNVERIFIED -- see zephyr/drivers/video/ov9281.c.
+if(CONFIG_VIDEO_OV5647 OR CONFIG_VIDEO_OV9281)
+    zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
+endif()
+zephyr_library_sources_ifdef(CONFIG_VIDEO_OV5647
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov5647.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_OV9281
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov9281.c)
+
 # Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
 # (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
 # (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab

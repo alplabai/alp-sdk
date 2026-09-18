@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 Espressif Systems (Shanghai) CO LTD
+# Copyright (c) 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR 0017 Tier-2 (port of the Apache-2.0 Espressif esp-video-components
+# esp_cam_sensor/sensors/ov9281 driver onto the upstream Zephyr v4.4 video
+# API), BENCH-UNVERIFIED. Shaped after upstream's dts/bindings/video/
+# sony,imx219.yaml (i2c-device.yaml + a video-interfaces.yaml endpoint child)
+# plus zephyr/drivers/video/ov5647.c's explicit `clocks: required: true`
+# (Espressif ships no Zephyr binding of its own to mirror). See
+# zephyr/drivers/video/ov9281.c for the source commit + retirement note.
+
+description: |
+  OV9281 1 MP global-shutter monochrome image sensor
+
+  The OV9281 is a raw monochrome (RAW8) global-shutter image sensor with a
+  MIPI CSI-2 image data interface and a CCI (I2C compatible) control bus.
+  Only the two modes the Espressif esp_cam_sensor port ships are supported:
+  1280x720 @ 50 fps and 640x400 @ 100 fps, both 2 data lanes / 24 MHz XVCLK.
+
+compatible: "ovti,ov9281"
+
+include: i2c-device.yaml
+
+properties:
+  clocks:
+    description: Reference to the XVCLK clock, which must be 24 MHz.
+    required: true
+
+child-binding:
+  child-binding:
+    include: video-interfaces.yaml

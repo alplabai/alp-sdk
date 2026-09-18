@@ -1,0 +1,61 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Application overlay for testing driver builds -- see testcase.yaml.
+ * Names chosen not to conflict with real-world devicetree nodes, mirroring
+ * upstream's tests/drivers/build_all/video/app.overlay convention.
+ */
+
+/ {
+	ov5647_input_clock: ov5647-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <25000000>;
+		#clock-cells = <0>;
+	};
+
+	ov9281_input_clock: ov9281-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		#clock-cells = <0>;
+	};
+
+	test {
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		test_i2c: i2c@10002000 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			compatible = "vnd,i2c";
+			reg = <0x10002000 0x1000>;
+			status = "okay";
+			clock-frequency = <100000>;
+
+			test_i2c_ov5647: ov5647@36 {
+				compatible = "ovti,ov5647";
+				reg = <0x36>;
+				clocks = <&ov5647_input_clock>;
+
+				port {
+					test_ov5647_ep: endpoint {
+						remote-endpoint-label = "";
+						data-lanes = <1 2>;
+					};
+				};
+			};
+
+			test_i2c_ov9281: ov9281@60 {
+				compatible = "ovti,ov9281";
+				reg = <0x60>;
+				clocks = <&ov9281_input_clock>;
+
+				port {
+					test_ov9281_ep: endpoint {
+						remote-endpoint-label = "";
+						data-lanes = <1 2>;
+					};
+				};
+			};
+		};
+	};
+};
