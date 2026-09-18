@@ -147,19 +147,23 @@ gcc -I include -o v2n-drpai-inference \
 
 ## What actually ran
 
-- **Compiles and links** against a real `libalp_sdk` built on a Linux
-  host with `-DALP_OS=yocto` (the DRP-AI backend defaults OFF on that
-  build, same as any Yocto build without the `drpai` PACKAGECONFIG).
-- **Runs end-to-end on that host** through the documented NOSUPPORT
-  path: given a placeholder model file and correctly- and
-  incorrectly-sized frame files, `alp_inference_open()` returns NULL
-  with `ALP_ERR_NOSUPPORT`, the program reports it and exits 1 --
-  cleanly, no crash. The frame-size guard and CLI-usage message were
-  exercised the same way.
+- **Builds clean as a standalone C translation unit** against the real
+  `<alp/inference.h>` header. **Linking against a real `libalp_sdk` and
+  running end-to-end through the documented NOSUPPORT path have NOT
+  been re-verified by this PR**: that claim was carried over from
+  `feat/1145-drpai-v2n-bringup` -- the branch whose self-reported
+  claims were found false and which is the reason this salvage PR
+  exists -- and was never independently re-run. This PR's own review
+  host is macOS, where the full SDK does not build at all for an
+  unrelated reason (a `section` attribute error blocks `src/backend.c`
+  / `src/backends/storage/sw_fallback.c` repo-wide), so the claim stays
+  open, not confirmed, until it runs on Linux. The frame-size guard and
+  argv parsing have been read and hand-traced for correctness, not
+  executed.
 - **`print_top_scores()`'s top-N selection is unit-tested** against
   hand-built float arrays (descending order, ties, negative values,
-  `count < TOP_N`, empty input) -- the selection logic lives in
-  `src/top_scores.c` and its ZTEST suite is
+  `count < TOP_N`, empty input, non-finite values) -- the selection
+  logic lives in `src/top_scores.c` and its ZTEST suite is
   [`tests/unit/top_scores`](../../../tests/unit/top_scores/), run by
   `pr-twister` like every other example-algorithm unit test in this
   repo (e.g. `tests/unit/defect_map` for `visual-defect-detection`).

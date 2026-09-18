@@ -7,8 +7,16 @@
  * Single pass over the input: keep a sorted (largest-first) window of the
  * best max_n values seen so far, insertion-sorting each new candidate into
  * the window when it beats the current worst kept value.
+ *
+ * Non-finite inputs (NaN, +-Inf) are skipped, not ranked: a NaN compares
+ * false against every ordered comparison, including its own, so it would
+ * otherwise pass the "window not full yet" admission unconditionally and
+ * then never be displaceable by a real value -- realistic here, since a
+ * quantised NPU model can emit NaN on a garbage frame (see top_scores.h).
  */
 #include "top_scores.h"
+
+#include <math.h>
 
 void top_scores_select(const float *values,
                        size_t       count,
@@ -19,8 +27,17 @@ void top_scores_select(const float *values,
 {
 	size_t n = 0;
 
+	if (max_n == 0u) {
+		*out_n = 0;
+		return;
+	}
+
 	for (size_t i = 0; i < count; ++i) {
 		float v = values[i];
+
+		if (!isfinite(v)) {
+			continue;
+		}
 
 		if (n < max_n || v > out_val[max_n - 1]) {
 			size_t pos = (n < max_n) ? n++ : max_n - 1;

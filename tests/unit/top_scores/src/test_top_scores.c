@@ -5,6 +5,8 @@
  * Host unit tests for top_scores_select() (the DRP-AI example's top-N
  * raw-score selection) -- native_sim, hand-built float arrays.
  */
+#include <math.h>
+
 #include <zephyr/ztest.h>
 #include "top_scores.h"
 
@@ -86,4 +88,53 @@ ZTEST(top_scores, test_negative_and_descending_order)
 	zassert_within((double)val[1], -1.0, 1e-6, "val[1]=-1.0");
 	zassert_within((double)val[2], -2.0, 1e-6, "val[2]=-2.0");
 	zassert_within((double)val[3], -5.0, 1e-6, "val[3]=-5.0");
+}
+
+ZTEST(top_scores, test_nan_is_skipped_not_ranked)
+{
+	/* A NaN would otherwise take rank #1 (it admits unconditionally
+	 * while the window isn't full, then can never be displaced -- every
+	 * ordered comparison against it is false) and demote the true
+	 * maximum. Realistic input: the example's README notes the model
+	 * was quantised against non-representative calibration frames. */
+	static const float values[] = { NAN, 1.0f, 2.0f, 3.0f, 100.0f, 50.0f };
+	size_t             idx[3];
+	float              val[3];
+	size_t             n = 0;
+
+	top_scores_select(values, 6, 3, idx, val, &n);
+
+	zassert_equal(n, 3, "3 finite values selected, NaN skipped");
+	zassert_equal(idx[0], 4, "largest is values[4]=100.0, not the NaN");
+	zassert_within((double)val[0], 100.0, 1e-6, "val[0]=100.0");
+	zassert_equal(idx[1], 5, "2nd largest is values[5]=50.0");
+	zassert_within((double)val[1], 50.0, 1e-6, "val[1]=50.0");
+	zassert_equal(idx[2], 3, "3rd largest is values[3]=3.0");
+	zassert_within((double)val[2], 3.0, 1e-6, "val[2]=3.0");
+}
+
+ZTEST(top_scores, test_all_nan_yields_zero_selected)
+{
+	static const float values[] = { NAN, NAN, NAN, NAN, NAN };
+	size_t             idx[5];
+	float              val[5];
+	size_t             n = 123; /* poison -- must be overwritten with 0 */
+
+	top_scores_select(values, 5, 5, idx, val, &n);
+
+	zassert_equal(n, 0, "every input is NaN -> nothing ranked");
+}
+
+ZTEST(top_scores, test_max_n_zero_does_not_underflow)
+{
+	/* max_n == 0 must not evaluate out_val[max_n - 1] (SIZE_MAX,
+	 * out-of-bounds): the short-circuit `n < max_n` is false for
+	 * n=max_n=0, so the OR's second operand WOULD be evaluated without
+	 * the explicit early return. */
+	static const float values[] = { 1.0f, 2.0f, 3.0f };
+	size_t             n        = 123; /* poison -- must be overwritten with 0 */
+
+	top_scores_select(values, 3, 0, NULL, NULL, &n);
+
+	zassert_equal(n, 0, "max_n=0 -> n=0, no out-of-bounds access");
 }

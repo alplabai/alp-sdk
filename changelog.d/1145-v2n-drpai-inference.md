@@ -15,17 +15,21 @@ silicon.** Bench sign-off is tracked as #1268.
   `backend = ALP_INFERENCE_BACKEND_DRPAI`, and prints per-image top-5 raw
   scores + timing. `[UNTESTED on silicon]`. `src/top_scores.c` (the top-N
   selection helper) is unit-tested by `tests/unit/top_scores/`.
-- **`ALP_ENABLE_DRPAI`** (new, default `"0"`) on all four RZ/V2N-family
-  machine confs (`e1m-v2n101-a55.conf`, `e1m-v2n102-a55.conf`,
-  `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) is a single opt-in driving
-  three things together: `IMAGE_INSTALL:append` (`lib-tvm
-  kernel-module-mmngr alp-drpai-inference`), `PACKAGECONFIG:append:pn-alp-sdk
-  = " drpai"`, and the `&drpai0` devicetree node — so the demo binary, the
-  compiled-in SDK backend, and the kernel claim of the NPU can't drift out of
-  sync. `alp-image-edge.bb` gates a `bb.fatal()` guard on the
-  `rzv2n-family` `MACHINEOVERRIDES` override so opting in without
-  `meta-rz-drpai` in `bblayers.conf` fails loudly at parse time instead of
-  an obscure missing-recipe error.
+- **`ALP_ENABLE_DRPAI`** (default `"0"`; the flag itself predates this change
+  — added by `cbea0e29`, gating only the `&drpai0` devicetree node) on all
+  four RZ/V2N-family machine confs (`e1m-v2n101-a55.conf`,
+  `e1m-v2n102-a55.conf`, `e1m-v2m101-a55.conf`, `e1m-v2m102-a55.conf`) now
+  also gates `IMAGE_INSTALL:append` (`lib-tvm kernel-module-mmngr
+  alp-drpai-inference`) — new with this change — so the demo binary and the
+  kernel's claim of the NPU can't drift out of sync. The alp-sdk backend's
+  own `PACKAGECONFIG[drpai]` stays the released, independently-set second
+  switch ("Two independent switches, both default OFF, deliberately not
+  merged into one" — `CHANGELOG.md`'s v0.15.0 entry). An earlier revision of
+  this branch coupled the two via `PACKAGECONFIG:append:pn-alp-sdk`; that
+  coupling is dropped from this change. `alp-image-edge.bb` gates a
+  `bb.fatal()` guard on the `rzv2n-family` `MACHINEOVERRIDES` override so
+  opting in without `meta-rz-drpai` in `bblayers.conf` fails loudly at
+  parse time instead of an obscure missing-recipe error.
 - **`meta-alp-sdk/recipes-examples/alp-drpai-inference/alp-drpai-inference_0.6.bb`**
   packages the example the same way `alp-edgeai_0.6.bb` /
   `alp-lvgl-dashboard_0.6.bb` do.

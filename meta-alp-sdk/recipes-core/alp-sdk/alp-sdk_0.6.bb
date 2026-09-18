@@ -147,8 +147,8 @@ PACKAGECONFIG[rpc]      = ",,open-amp libmetal"
 # actually works, and what mera2-drpai-tvm does, is stage/compile the
 # checkout's headers + libs into ITS OWN sysroot (${STAGING_INCDIR} /
 # ${STAGING_LIBDIR}) so the unmodified probes find them there; see
-# meta-alp-sdk/README.md's "Making the RUHMI checkout visible to the
-# bake" and mera2-drpai-tvm's RUHMI_DRPAI_TVM_DIR variable.
+# meta-alp-sdk/README.md's "Model compilation toolchain (RUHMI / DRP-AI
+# TVM)" section and mera2-drpai-tvm's RUHMI_DRPAI_TVM_DIR variable.
 #
 # The DT_NEEDED consequence that used to be silent -- libalp_sdk.so
 # carrying libmera2_runtime.so / libmera2_plan_io.so / libdrp_tvm_rt.so
@@ -212,11 +212,9 @@ PACKAGECONFIG[drpai]    = "-DALP_SDK_USE_DRPAI_V2N=ON -DALP_SDK_DRPAI_REQUIRED=O
 # by default.  The Yocto build (src/yocto/) links only the
 # <alp/inference.h> dispatcher + the portable stubs; the vendor NPU
 # backends are gated (the DRP-AI3 backend is real MeraDrpRuntimeWrapper
-# code since #1145 -- the "NOT_IMPLEMENTED stub / issue #58" description
-# this comment used to carry is no longer true -- and compiles in only
-# under the `drpai` PACKAGECONFIG above; the DEEPX DX-M1 backend is
-# behind ALP_SDK_USE_DEEPX_DXM1 and compiles against an in-tree stub
-# header, so it remains dep-free).
+# code (#1145) and compiles in only under the `drpai` PACKAGECONFIG
+# above; the DEEPX DX-M1 backend is behind ALP_SDK_USE_DEEPX_DXM1 and
+# compiles against an in-tree stub header, so it remains dep-free).
 # No `drpai`-enabled alp-image-edge bake has completed yet -- see
 # mera2-drpai-tvm_2.7.0.bb for exactly what IS and is NOT established
 # (do_compile succeeds cross-compiling MeraDrpRuntimeWrapper.cpp on an

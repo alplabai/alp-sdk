@@ -88,17 +88,25 @@
  * What actually ran
  * ==================
  *
- *   This file builds clean against the real `<alp/inference.h>` surface
- *   and its logic was exercised against a fake in-memory model buffer
- *   on the host (open() correctly reports NOSUPPORT; the frame-size
- *   guard and the argv parsing were exercised by hand). The one
- *   non-trivial algorithm here, top_scores_select() (src/top_scores.c,
- *   used by print_top_scores()), has a real host unit test against
- *   hand-built float arrays: tests/unit/top_scores/. Nothing
- *   here has run against real DRP-AI silicon: `alp_inference_open()`
- *   with a real bundle first executes on a `drpai`-enabled
- *   `alp-image-edge` bake on an E1M-X V2N board, per
- *   docs/bring-up-drpai-v2n.md.
+ *   This file builds clean as a standalone C translation unit against
+ *   the real `<alp/inference.h>` header. Linking it against a real
+ *   `libalp_sdk` and running it end-to-end through the documented
+ *   NOSUPPORT path have NOT been re-verified by this PR: that claim was
+ *   carried over from feat/1145-drpai-v2n-bringup -- the branch whose
+ *   self-reported claims were found false and which is the reason this
+ *   salvage PR exists -- and was never independently re-run. This PR's
+ *   own review host is macOS, where the full SDK does not build at all
+ *   for an unrelated reason (a `section` attribute error blocks
+ *   src/backend.c / src/backends/storage/sw_fallback.c repo-wide), so
+ *   the claim stays open, not confirmed, until it runs on Linux. The
+ *   frame-size guard and argv parsing have been read and hand-traced
+ *   for correctness, not executed. The one non-trivial algorithm here,
+ *   top_scores_select() (src/top_scores.c, used by print_top_scores()),
+ *   has a real host unit test against hand-built float arrays:
+ *   tests/unit/top_scores/. Nothing here has run against real DRP-AI
+ *   silicon: `alp_inference_open()` with a real bundle first executes
+ *   on a `drpai`-enabled `alp-image-edge` bake on an E1M-X V2N board,
+ *   per docs/bring-up-drpai-v2n.md.
  */
 
 #include <errno.h>
@@ -221,8 +229,10 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	/* format/backend per the task's verified facts:
-	 * ALP_INFERENCE_MODEL_DRPAI = 2, ALP_INFERENCE_BACKEND_DRPAI = 3.
+	/* format and backend select the DRP-AI3 bundle format and dispatcher;
+	 * both are named enumerators from <alp/inference.h> -- read the
+	 * header for the full set and their numeric values, don't assume
+	 * these two, since new backends/formats can be added between them.
 	 * arena_bytes/arena stay at the built-in default -- unlike Ethos-U,
 	 * the DRP-AI backend has no caller-supplied arena; it asks the
 	 * kernel driver for its reserved working-memory base itself (see

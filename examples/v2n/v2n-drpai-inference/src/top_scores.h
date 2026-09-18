@@ -26,11 +26,19 @@ extern "C" {
  *  @param[in]  values  Flat array to scan.
  *  @param[in]  count   Number of elements in @p values.
  *  @param[in]  max_n   Capacity of @p out_idx / @p out_val (the N in top-N).
+ *                       If 0, @p out_n is set to 0 and @p out_idx / @p
+ *                       out_val are left untouched (no zero-capacity write).
  *  @param[out] out_idx Flat index of each selected value, largest first.
  *                       Must hold @p max_n elements.
  *  @param[out] out_val The selected values themselves, largest first.
  *                       Must hold @p max_n elements.
  *  @param[out] out_n   Number of entries written (`min(max_n, count)`).
+ *
+ *  Non-finite values (NaN, +-Inf) in @p values are skipped, not ranked --
+ *  a realistic input for a model quantised against non-representative
+ *  calibration data. A NaN in particular compares false against every
+ *  ordered comparison, so ranking it would let it claim a slot it could
+ *  never lose.
  *
  *  Small-N selection in O(count * max_n) -- fine for a demo-sized tensor
  *  and a single-digit N, not worth a heap here.
