@@ -225,6 +225,23 @@ deliberately NOT implemented here: it is red today (the 12 HP/AEN401/
 AEN601 examples above), and landing it would need either those overlays
 or an allow-list alongside it -- both larger, separate changes. Filed as
 a follow-up rather than silently deferred.
+
+Extension (issue #2207): a boards/ directory with no app
+---------------------------------------------------------
+A third, independent check: every `examples/**/boards/` directory's parent
+must hold a `CMakeLists.txt`. A `boards/` directory with no app next to it
+is built by nothing, so both checks above -- and
+`check_example_board_overlay_content_parity.py`, which only compares a file
+with its SKU sibling -- walk straight past it. #2198 found one on `dev`:
+`00bcd9f2f` (#2122) renamed `examples/aen/aen-sdcard-readout` to
+`aen-sdhc-probe` while `df628b6ab` (#2176) added an AEN803 overlay at the old
+path, and both merged -- leaving that overlay, with `sdhc0` still enabled
+against the 2626-R2 SDIO mux #2051 disabled it for, alone in a directory with
+no app. Nothing breaks while it sits there; anyone who restores or copies the
+app inherits it. It is the same silently-dropped-overlay class as #1009 and
+#2101, reached by a rename instead of a missing file, which is why it lives
+here. No allowlist: the fix is always to delete the directory or move it to
+where the app now lives.
 """
 from __future__ import annotations
 
@@ -449,9 +466,29 @@ def _platform_allow_overlay_problems(root: Path) -> list[str]:
     return problems
 
 
+def _stranded_boards_dir_problems(root: Path) -> list[str]:
+    """Issue #2207: a `boards/` directory whose parent has no CMakeLists.txt."""
+    examples_dir = root / "examples"
+    if not examples_dir.is_dir():
+        return []
+    problems = []
+    for boards in sorted(p for p in examples_dir.rglob("boards") if p.is_dir()):
+        if (boards.parent / "CMakeLists.txt").is_file():
+            continue
+        files = ", ".join(sorted(f.name for f in boards.iterdir())) or "(empty)"
+        problems.append(
+            f"{boards.relative_to(root).as_posix()}/: no CMakeLists.txt in "
+            f"{boards.parent.relative_to(root).as_posix()}/, so nothing builds "
+            f"these files ({files}) -- delete the directory, or move it to "
+            f"where the app now lives (issue #2207 class)"
+        )
+    return problems
+
+
 def find_problems(root: Path) -> list[str]:
     problems = _declared_core_overlay_problems(root)
     problems.extend(_platform_allow_overlay_problems(root))
+    problems.extend(_stranded_boards_dir_problems(root))
     return problems
 
 
@@ -468,7 +505,8 @@ def main() -> int:
         return 1
     print("OK: every example board.yaml core with an app: key, and every "
           "testcase.yaml alp_e1m_* platform_allow entry, has a matching "
-          "boards/ overlay wherever the example ships qualified overlays.")
+          "boards/ overlay wherever the example ships qualified overlays; "
+          "every boards/ directory sits next to a CMakeLists.txt.")
     return 0
 
 

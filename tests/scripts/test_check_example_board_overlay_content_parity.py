@@ -30,14 +30,17 @@ def _preset(root: Path, sku: str, variant: str) -> None:
                     encoding="utf-8")
 
 
-def _overlay(root: Path, sku: str, status: str, banner: str = "App") -> str:
+def _write(root: Path, sku: str, body: str) -> str:
     boards = root / "examples" / "aen" / "demo" / "boards"
     boards.mkdir(parents=True, exist_ok=True)
     name = f"alp_e1m_{sku.lower()}_{_STEM}"
-    (boards / name).write_text(
-        _OVERLAY.format(banner=banner, SKU=sku, status=status),
-        encoding="utf-8")
+    (boards / name).write_text(body, encoding="utf-8")
     return f"examples/aen/demo/boards/{name}"
+
+
+def _overlay(root: Path, sku: str, status: str, banner: str = "App") -> str:
+    return _write(root, sku, _OVERLAY.format(banner=banner, SKU=sku,
+                                             status=status))
 
 
 def _same_pcb(root: Path) -> None:
@@ -49,7 +52,7 @@ def test_pair_differing_only_in_comments_and_sku_passes(tmp_path):
     _same_pcb(tmp_path)
     _overlay(tmp_path, "AEN801", "disabled", banner="Bench-proven on AEN801")
     _overlay(tmp_path, "AEN803", "disabled", banner="Not yet bench-run")
-    assert gate.find_problems(tmp_path) == []
+    assert gate.check(tmp_path) == (1, [])
 
 
 def test_sdhc0_left_enabled_on_one_sku_fails(tmp_path):
@@ -64,12 +67,39 @@ def test_sdhc0_left_enabled_on_one_sku_fails(tmp_path):
     assert '+status = "okay";' in problems[0]
 
 
+def test_own_sku_in_content_passes_sibling_sku_left_in_content_fails(tmp_path):
+    # Each file may name its own SKU in real content; an AEN803 file that
+    # still names aen801 there is the backfill copy-paste error.
+    _same_pcb(tmp_path)
+    _write(tmp_path, "AEN801", 'x { label = "alp_e1m_aen801"; };\n')
+    _write(tmp_path, "AEN803", 'x { label = "alp_e1m_aen803"; };\n')
+    assert gate.find_problems(tmp_path) == []
+
+    _write(tmp_path, "AEN803", 'x { label = "alp_e1m_aen801"; };\n')
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert '+x { label = "alp_e1m_aen801"; };' in problems[0]
+
+
 def test_different_silicon_is_not_paired(tmp_path):
     _preset(tmp_path, "AEN801", "AE822FA0E5597LS0")
     _preset(tmp_path, "AEN803", "SOME-OTHER-DIE")
     _overlay(tmp_path, "AEN801", "disabled")
     _overlay(tmp_path, "AEN803", "okay")
-    assert gate.find_problems(tmp_path) == []
+    assert gate.check(tmp_path) == (0, [])
+
+
+def test_sku_with_no_preset_is_an_error_not_a_silent_skip(tmp_path):
+    # A moved preset must not unpair everything and pass on zero pairs.
+    _preset(tmp_path, "AEN801", "AE822FA0E5597LS0")
+    _overlay(tmp_path, "AEN801", "disabled")
+    rel_803 = _overlay(tmp_path, "AEN803", "okay")
+    n_pairs, problems = gate.check(tmp_path)
+    assert n_pairs == 0
+    assert problems == [
+        f"{rel_803}: SKU 'aen803' has no metadata/e1m_modules/E1M-AEN803.yaml "
+        f"declaring family + silicon_variant, so no file for it can be "
+        f"paired -- fix the filename or the preset"]
 
 
 def test_allowlisted_population_delta_passes(tmp_path):
@@ -82,11 +112,43 @@ def test_allowlisted_population_delta_passes(tmp_path):
     assert gate.find_problems(tmp_path, allowed) == []
 
 
-def test_kconfig_unset_line_is_content_not_a_comment():
-    assert gate.normalise("# CONFIG_FOO is not set\n# a remark\nCONFIG_BAR=y\n",
-                          ".conf", ["aen801"]) == [
-        "# CONFIG_FOO is not set", "CONFIG_BAR=y"]
+def test_allowlist_entry_excuses_only_the_file_it_names(tmp_path):
+    # A line allowed in the AEN801 file must still fail when it is the
+    # AEN803 file that carries it alone.
+    _same_pcb(tmp_path)
+    rel_801 = _overlay(tmp_path, "AEN801", "disabled")
+    _write(tmp_path, "AEN803", _OVERLAY.format(
+        banner="App", SKU="AEN803", status="disabled") + "&i2s3 { x; };\n")
+    allowed = {(rel_801, "&i2s3 { x; };"): "test"}
+    problems = gate.find_problems(tmp_path, allowed)
+    assert len(problems) == 1
+    assert "+&i2s3 { x; };" in problems[0]
+
+
+def test_comment_marker_inside_a_quoted_string_is_content(tmp_path):
+    _same_pcb(tmp_path)
+    _write(tmp_path, "AEN801", 'x = "a//b";\n')
+    _write(tmp_path, "AEN803", 'x = "a//c";\n')
+    problems = gate.find_problems(tmp_path)
+    assert len(problems) == 1
+    assert '-x = "a//b";' in problems[0]
+    assert '+x = "a//c";' in problems[0]
+
+
+def test_normalise_keeps_what_the_build_reads():
+    dts = ('#include <a//b.h> // why\n'
+           'x = "two  spaces";   /* gone */\n'
+           '  y  =  <1 /* cell note */ 2>;\n')
+    assert gate.normalise(dts, ".overlay", "aen801") == [
+        "#include <a//b.h>", 'x = "two  spaces";', "y = <1 2>;"]
+    conf = ("# CONFIG_FOO is not set  # kept: kconfiglib reads the prefix\n"
+            "# a remark\nCONFIG_BAR=y\n")
+    assert gate.normalise(conf, ".conf", "aen801") == [
+        "# CONFIG_FOO is not set # kept: kconfiglib reads the prefix",
+        "CONFIG_BAR=y"]
 
 
 def test_real_tree_is_clean():
-    assert gate.find_problems(REPO) == []
+    n_pairs, problems = gate.check(REPO)
+    assert problems == []
+    assert n_pairs > 0

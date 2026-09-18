@@ -33,17 +33,24 @@ an overlay EXISTS for each target, not what it says.
 What is compared
 ----------------
 Comments are stripped before comparing (C-style `/* */` and `//` in
-devicetree; full-line `#` in `.conf`, except Kconfig's
-`# CONFIG_FOO is not set`, which is an assignment). Per-SKU comments are
-legitimate and must not be forced equal: a bench result measured on an
-AEN801 unit is not a claim about AEN803 (the #2176 backfill corrected two
-such banner sentences for exactly that reason). Both SKU names are then
-normalised to one token, whitespace is collapsed, and blank lines dropped,
-so what remains is the functional content: nodes, properties, includes,
-Kconfig assignments.
+devicetree, outside quoted strings and `#include <...>` paths; full-line `#`
+in `.conf`, except Kconfig's `# CONFIG_FOO is not set`, which kconfiglib
+matches at the start of the line and treats as an assignment even with a
+trailing remark). Per-SKU comments are legitimate and must not be forced
+equal: a bench result measured on an AEN801 unit is not a claim about AEN803
+(the #2176 backfill corrected two such banner sentences for exactly that
+reason). Each file's OWN SKU name is then normalised to one token -- only its
+own, so an AEN803 overlay that still names `aen801` in real content (the
+backfill's copy-paste failure mode) stays a difference. Whitespace outside
+quoted strings is collapsed and blank lines dropped, so what remains is the
+functional content: nodes, properties, includes, Kconfig assignments.
 
 Pairs only -- a file with no same-PCB sibling is out of scope here (whether
 it SHOULD have one is `check_example_board_overlay_parity.py`'s question).
+An `alp_e1m_<sku>_` file whose SKU has no preset declaring `family` and
+`silicon_variant` is an ERROR, not a skip: otherwise a moved or renamed
+preset would silently unpair every file and the gate would pass having
+compared nothing. The OK line prints the number of pairs compared.
 
 Run locally:
 
@@ -70,9 +77,9 @@ ROOT = Path(__file__).resolve().parent.parent
 # HyperRAM S80KS5122GABHM02 + xSPI NOR IS25WX256-JHLE that E1M-AEN801 does
 # not), so the only admissible entries are nodes/properties describing a
 # part one SKU populates and the other does not. Each entry needs a comment
-# naming that part. Empty today: no paired overlay touches OSPI0 --
-# aen-ospi-regcheck, the one example that does, was deliberately left
-# AEN801-only by #2176 pending a maintainer call on the population split.
+# naming that part. Empty today: the one paired overlay that touches OSPI0,
+# examples/aen/aen-ospi-regcheck, is controller-only (no device transfer,
+# no XIP), so its content is the same on both SKUs.
 # ponytail: line-granular, not position-granular -- an allowed line may
 # appear any number of times in that file; add hunk context if an entry
 # ever needs to be that narrow.
@@ -80,9 +87,16 @@ ALLOWED_DELTAS: dict[tuple[str, str], str] = {}
 
 _QUALIFIED_RE = re.compile(r"^alp_e1m_([a-z0-9]+)_(.+)$")
 _SUFFIXES = (".overlay", ".dtsi", ".conf")
-# Strings first so a `//` or `/*` inside a quoted DT string is kept.
-_DTS_COMMENT_RE = re.compile(r'"(?:\\.|[^"\\\n])*"|/\*.*?\*/|//[^\n]*', re.S)
-_KCONFIG_UNSET_RE = re.compile(r"#\s*CONFIG_\w+ is not set")
+_STRING = r'"(?:\\.|[^"\\\n])*"'
+# One left-to-right pass: a quoted string or an `#include <...>` path is
+# consumed whole before a `//` or `/*` inside it could be read as a comment.
+_DTS_TOKEN_RE = re.compile(
+    _STRING + r"|^[ \t]*#[ \t]*include[ \t]*<[^>\n]*>|/\*.*?\*/|//[^\n]*",
+    re.S | re.M)
+_SPACE_OUTSIDE_STRINGS_RE = re.compile(f"({_STRING})|\\s+")
+# kconfiglib's own `_unset_match` (zephyr/scripts/kconfig/kconfiglib.py):
+# anchored at the line start, not the end.
+_KCONFIG_UNSET_RE = re.compile(r"# CONFIG_[^ ]+ is not set")
 _MAX_SHOWN = 8
 
 
@@ -96,52 +110,77 @@ def _pcb_key(root: Path, sku: str) -> tuple[str, str] | None:
     return (family, variant) if family and variant else None
 
 
-def normalise(text: str, suffix: str, skus: list[str]) -> list[str]:
-    """Functional content of a board file: comments gone, SKUs unified."""
+def _sku(path: Path) -> str:
+    return _QUALIFIED_RE.match(path.name).group(1)
+
+
+def normalise(text: str, suffix: str, sku: str) -> list[str]:
+    """Functional content of a board file: comments gone, own SKU unified."""
     if suffix == ".conf":
         text = "\n".join(
             line for line in text.splitlines()
             if not line.lstrip().startswith("#")
-            or _KCONFIG_UNSET_RE.fullmatch(line.strip()))
+            or _KCONFIG_UNSET_RE.match(line))
     else:
-        text = _DTS_COMMENT_RE.sub(
-            lambda m: m.group(0) if m.group(0).startswith('"') else " ", text)
-    text = re.sub("|".join(map(re.escape, skus)), "SKU", text,
-                  flags=re.IGNORECASE)
-    return [" ".join(line.split()) for line in text.splitlines()
-            if line.strip()]
+        text = _DTS_TOKEN_RE.sub(
+            lambda m: " " if m.group(0).startswith(("/*", "//")) else m.group(0),
+            text)
+    text = re.sub(re.escape(sku), "SKU", text, flags=re.IGNORECASE)
+    lines = (_SPACE_OUTSIDE_STRINGS_RE.sub(lambda m: m.group(1) or " ", line)
+             for line in text.splitlines())
+    return [line.strip() for line in lines if line.strip()]
+
+
+def collect_pairs(root: Path) -> tuple[list[tuple[Path, Path]], list[str]]:
+    """Same-PCB (base, sibling) file pairs, plus unresolvable-SKU errors."""
+    groups: dict[tuple[Path, str], list[Path]] = {}
+    for path in sorted((root / "examples").glob("**/boards/alp_e1m_*")):
+        m = _QUALIFIED_RE.match(path.name)
+        if m and path.is_file() and path.suffix in _SUFFIXES:
+            groups.setdefault((path.parent, m.group(2)), []).append(path)
+
+    keys: dict[str, tuple[str, str] | None] = {}
+    pairs, problems = [], []
+    for members in groups.values():
+        by_pcb: dict[tuple[str, str], list[Path]] = {}
+        for path in members:
+            sku = _sku(path)
+            if sku not in keys:
+                keys[sku] = _pcb_key(root, sku)
+                if keys[sku] is None:
+                    problems.append(
+                        f"{path.relative_to(root).as_posix()}: SKU '{sku}' "
+                        f"has no metadata/e1m_modules/E1M-{sku.upper()}.yaml "
+                        f"declaring family + silicon_variant, so no file for "
+                        f"it can be paired -- fix the filename or the preset")
+            if keys[sku]:
+                by_pcb.setdefault(keys[sku], []).append(path)
+        for paths in by_pcb.values():
+            pairs += [(paths[0], other) for other in paths[1:]]
+    return pairs, problems
+
+
+def check(root: Path, allowed: dict[tuple[str, str], str] | None = None
+          ) -> tuple[int, list[str]]:
+    """(number of pairs compared, problems)."""
+    allowed = ALLOWED_DELTAS if allowed is None else allowed
+    pairs, problems = collect_pairs(root)
+    for a, b in pairs:
+        problems += _compare(root, a, b, allowed)
+    return len(pairs), problems
 
 
 def find_problems(root: Path,
                   allowed: dict[tuple[str, str], str] | None = None
                   ) -> list[str]:
-    allowed = ALLOWED_DELTAS if allowed is None else allowed
-    groups: dict[tuple[Path, str], dict[str, Path]] = {}
-    for path in sorted((root / "examples").glob("**/boards/alp_e1m_*")):
-        m = _QUALIFIED_RE.match(path.name)
-        if m and path.is_file() and path.suffix in _SUFFIXES:
-            groups.setdefault((path.parent, m.group(2)), {})[m.group(1)] = path
-
-    problems = []
-    for members in groups.values():
-        by_pcb: dict[tuple[str, str], list[str]] = {}
-        for sku in sorted(members):
-            key = _pcb_key(root, sku)
-            if key:
-                by_pcb.setdefault(key, []).append(sku)
-        for skus in by_pcb.values():
-            base = skus[0]
-            for other in skus[1:]:
-                problems += _compare(root, members[base], members[other],
-                                     skus, allowed)
-    return problems
+    return check(root, allowed)[1]
 
 
-def _compare(root: Path, a: Path, b: Path, skus: list[str],
+def _compare(root: Path, a: Path, b: Path,
              allowed: dict[tuple[str, str], str]) -> list[str]:
     rel_a, rel_b = (p.relative_to(root).as_posix() for p in (a, b))
-    lines_a = normalise(a.read_text(encoding="utf-8"), a.suffix, skus)
-    lines_b = normalise(b.read_text(encoding="utf-8"), b.suffix, skus)
+    lines_a = normalise(a.read_text(encoding="utf-8"), a.suffix, _sku(a))
+    lines_b = normalise(b.read_text(encoding="utf-8"), b.suffix, _sku(b))
     # autojunk off: `};` / `status = "okay";` are frequent enough in a long
     # overlay to be junked, which yields a non-minimal diff that would report
     # unchanged lines as deltas.
@@ -161,8 +200,8 @@ def _compare(root: Path, a: Path, b: Path, skus: list[str],
             if len(delta) > _MAX_SHOWN else "")
     return [
         f"{rel_b}: functional content differs from same-PCB sibling {rel_a} "
-        f"({len(delta)} line(s); '-' only in {a.name.split('_')[2]}, "
-        f"'+' only in {b.name.split('_')[2]}):\n{shown}{more}\n"
+        f"({len(delta)} line(s); '-' only in {_sku(a)}, '+' only in "
+        f"{_sku(b)}; each file's own SKU reads as SKU):\n{shown}{more}\n"
         f"    fix: `git log -p` both files, propagate the newer, correct side "
         f"to the other; if the delta is a real BOM-population difference, "
         f"add it to ALLOWED_DELTAS in {Path(__file__).name} with a comment "
@@ -174,15 +213,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
-    problems = find_problems(args.root)
+    n_pairs, problems = check(args.root)
     for problem in problems:
         print(f"ERROR: {problem}", file=sys.stderr)
     if problems:
-        print(f"FAIL: {len(problems)} same-PCB overlay pair(s) drifted "
-              f"(issue #2198).", file=sys.stderr)
+        print(f"FAIL: {len(problems)} problem(s) across {n_pairs} same-PCB "
+              f"overlay pair(s) compared (issue #2198).", file=sys.stderr)
         return 1
-    print("OK: same-PCB SKU board overlays match (comments and SKU names "
-          "excluded).")
+    print(f"OK: compared {n_pairs} same-PCB SKU board overlay pair(s); all "
+          f"match (comments and each file's own SKU name excluded).")
     return 0
 
 

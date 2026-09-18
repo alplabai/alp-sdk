@@ -40,6 +40,8 @@ def _write_example(tmp_path: Path, name: str, platform_allow: list[str],
                     overlays: list[str]) -> Path:
     example_dir = tmp_path / "examples" / "aen" / name
     example_dir.mkdir(parents=True, exist_ok=True)
+    # Every real example is an app; the #2207 check requires it.
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     allow_lines = "\n".join(f"      - {p}" for p in platform_allow)
     (example_dir / "testcase.yaml").write_text(
         _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines)
@@ -131,6 +133,7 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
     from checking that scenario."""
     example_dir = tmp_path / "examples" / "aen" / "aen-common-allow"
     example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     (example_dir / "testcase.yaml").write_text(
         "sample:\n"
         "  name: aen-common-allow\n"
@@ -231,3 +234,21 @@ def test_subslice_directory_with_no_local_boards_dir_is_not_flagged(tmp_path):
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_boards_dir_with_no_app_fails(tmp_path):
+    """Issue #2207, the #2198 instance: an app renamed away from its
+    directory leaves a boards/ overlay behind with no CMakeLists.txt next
+    to it. Nothing builds it, so no platform_allow or SKU-sibling check
+    sees it -- this one must, naming the directory and the fix."""
+    boards = tmp_path / "examples" / "aen" / "aen-sdcard-readout" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text('&sdhc0 {\n\tstatus = "okay";\n};\n', encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert ("examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt in "
+            "examples/aen/aen-sdcard-readout/") in out
+    assert "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay" in out
+    assert "delete the directory, or move it" in out
