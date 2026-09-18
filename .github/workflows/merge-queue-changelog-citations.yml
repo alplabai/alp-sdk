@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Grade changelog.d/ citations against the tree a merge-queue entry is
+# about to land on `dev` (#2206).
+#
+# `pr-metadata-validate.yml`'s `validate` job already runs
+# scripts/check_changelog_citations.py on `pull_request`, checked out at
+# `refs/pull/N/merge` -- so it grades the PR's merge commit as it stood at
+# the PR's LAST PUSH. #2186 made a citation on an added line hard-fail
+# unless anchored, keyed off `DIFF_BASE`, default `origin/dev`. If `dev`
+# moves after that push but before the merge queue lands the entry, a
+# citation the move just broke is never graded before it reaches `dev` --
+# it only turns the gate red on the next unrelated PR (the #2122
+# treadmill). `pr-metadata-validate.yml` has no `merge_group` trigger at
+# all, unlike `pr-twister.yml` / `pr-static-analysis.yml` /
+# `cross-platform-zephyr.yml`.
+#
+# Adding `merge_group:` to `pr-metadata-validate.yml` would close that gap
+# too, but it would put the whole ~18-minute job on every queue entry. This
+# gate is a checkout and a few seconds of pure-stdlib Python, so it gets its
+# own small workflow instead -- triggered ONLY on `merge_group`, not on
+# `pull_request`/`push` (those are already covered by
+# `pr-metadata-validate.yml`; duplicating them here would just be a second,
+# differently-based verdict on every ordinary PR).
+#
+# DIFF_BASE is `github.event.merge_group.base_sha` -- the merge queue's own
+# base, i.e. `dev` as it stands right now, not `HEAD^1` (this checkout's
+# first parent may be a PREVIOUS queue entry stacked ahead of this one, not
+# `dev` itself) and not the `origin/dev` default (a merge-queue checkout has
+# no such remote-tracking ref set up). check_changelog_citations.py resolves
+# it with `git rev-parse --verify DIFF_BASE^{commit}` and then
+# `git merge-base DIFF_BASE HEAD` (scripts/check_changelog_citations.py:855,
+# :913) -- a raw SHA satisfies both, provided the object is present locally.
+#
+# `fetch-depth: 0` is required, not merely generous: a shallow checkout
+# grafts HEAD's history, and `git merge-base` over grafted history can miss
+# or misresolve the common ancestor. Depth 0 fetches this ref's full history,
+# which always contains `base_sha` as an ancestor (it is the base branch's
+# own tip at enqueue time), so both git calls above resolve.
+#
+# on:/concurrency: shape copied from pr-twister.yml / pr-static-analysis.yml /
+# cross-platform-zephyr.yml, all three of which already carry a
+# `merge_group:` trigger; no `permissions:` block, matching those three (this
+# job only reads the checkout, same as they do for their own merge_group
+# work). `workflow_dispatch:` is added for the same reason every workflow in
+# this repo carries it -- a manual escape valve for testing -- not because
+# this gate needs to run outside the queue; DIFF_BASE resolves to an empty
+# string there and the script itself falls back to `origin/dev` (WARNing if
+# that ref is absent), never a hard failure.
+#
+# NOT a required context (deciding that is a branch-protection / ruleset
+# edit on GitHub's side, out of scope for this change -- see #2206). Until
+# it is required, this carries the same weakness #2201 exposed: the queue
+# does not wait for a non-required check, so a red
+# `changelog citations · merge queue` here does not by itself stop the
+# entry from landing.
+
+name: merge-queue-changelog-citations
+
+on:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog-citations:
+    name: changelog citations · merge queue
+    runs-on: ubuntu-latest
+    # Worst-case budget for a checkout of ~3.4k commits plus a pure-stdlib
+    # Python script that reads changelog.d/ -- generous headroom over the
+    # few-seconds cost the issue describes, not a measured ceiling.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          # Full history: the new-citation rule's merge-base(DIFF_BASE, HEAD)
+          # lookup needs base_sha's ancestry, not just its tip commit.
+          fetch-depth: 0
+
+      - name: "Gate — changelog.d/ path:line citations resolve against dev's tip (#2206)"
+        timeout-minutes: 2
+        env:
+          DIFF_BASE: ${{ github.event.merge_group.base_sha }}
+        run: python3 scripts/check_changelog_citations.py --verbose
