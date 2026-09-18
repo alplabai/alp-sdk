@@ -66,6 +66,21 @@
 #include <soc_memory_map.h>
 #endif
 
+/*
+ * The DesignWare MIPI-DSI host this CDC feeds: the DSI node whose cdc-if names
+ * CDC instance 0, or NULL for a parallel-RGB panel.
+ * ponytail: one CDC + one DSI (the E8); make it a per-instance config field if
+ * a SoC ever carries two.
+ */
+#if defined(CONFIG_MIPI_DSI_DW) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_dsi)
+#include "../mipi_dsi/dsi_dw.h"
+#define CDC200_DSI_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(snps_designware_dsi)
+static const struct device *const cdc200_dsi =
+    COND_CODE_1(DT_SAME_NODE(DT_PHANDLE(CDC200_DSI_NODE, cdc_if), DT_DRV_INST(0)),
+                (DEVICE_DT_GET(CDC200_DSI_NODE)),
+                (NULL));
+#endif
+
 LOG_MODULE_REGISTER(CDC200, CONFIG_DISPLAY_LOG_LEVEL);
 
 /* Helper functions */
@@ -403,22 +418,38 @@ int cdc200_setup_registers(const struct device *dev)
 
 /* API functions */
 /* Generic APIs */
+/*
+ * Blanking gates the scanout.  A MIPI-DSI host fed by this CDC stays in command
+ * mode until blanking_off, so the panel driver can run its init sequence first:
+ * in DW video mode commands only leave during DPI blanking, which does not exist
+ * before CDC_EN.  So blanking_off is DSI video mode THEN CDC_EN, and blanking_on
+ * the reverse, so the DSI mode switch (which resets the host) never cuts a live
+ * DPI frame.  The backlight belongs to the panel's own blanking API.
+ */
 static int cdc200_blanking_on(const struct device *dev)
 {
-	/*
-	 * Disable the Backlight GPIO here.
-	 * Not available with parallel display.
-	 */
-	return -ENOTSUP;
+	cdc200_global_disable(DEVICE_MMIO_GET(dev));
+#ifdef CDC200_DSI_NODE
+	if (cdc200_dsi != NULL) {
+		return dsi_dw_set_mode(cdc200_dsi, DSI_DW_COMMAND_MODE);
+	}
+#endif
+	return 0;
 }
 
 static int cdc200_blanking_off(const struct device *dev)
 {
-	/*
-	 * Enable the Backlight GPIO here.
-	 * Not available with parallel display.
-	 */
-	return -ENOTSUP;
+#ifdef CDC200_DSI_NODE
+	if (cdc200_dsi != NULL) {
+		int ret = dsi_dw_set_mode(cdc200_dsi, DSI_DW_VIDEO_MODE);
+
+		if (ret != 0) {
+			return ret;
+		}
+	}
+#endif
+	cdc200_global_enable(DEVICE_MMIO_GET(dev));
+	return 0;
 }
 
 int cdc200_generic_write(const struct device *dev, const uint16_t x, const uint16_t y,

@@ -701,9 +701,14 @@ void dsi_dw_msg_config(uintptr_t regs, uint32_t mode_flags)
 	}
 	sys_write32(cmd_mode_cfg, regs + DSI_CMD_MODE_CFG);
 
-	/* clear TXREQUESTCLKHS signal when sending commands in LP mode. */
-	sys_write32((lpm ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS),
-			regs + DSI_LPCLK_CTRL);
+	/*
+	 * Clear TXREQUESTCLKHS for LP commands, but only in command mode: in
+	 * video mode the HS clock carries the scanout, and an LP command (a
+	 * panel set_orientation after blanking_off) would stop the video.
+	 */
+	bool cmd_mode = sys_read32(regs + DSI_MODE_CFG) & DSI_MODE_CFG_CMD_MODE;
+
+	sys_write32(((lpm && cmd_mode) ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS), regs + DSI_LPCLK_CTRL);
 	if (mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS)
 		sys_set_bits(regs + DSI_LPCLK_CTRL,
 				DSI_LPCLK_CTRL_AUTO_CLKLN_CTRL);
@@ -774,6 +779,7 @@ int dsi_dw_set_mode(const struct device *dev,
 	} else {
 		/* Setup the DSI as Command mode. */
 		sys_write32(DSI_MODE_CFG_CMD_MODE, regs + DSI_MODE_CFG);
+		data->curr_mode = DSI_DW_COMMAND_MODE;
 	}
 	dsi_dw_pwr_up(regs);
 	return 0;
@@ -792,10 +798,16 @@ static int dsi_dw_attach(const struct device *dev,
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	int ret;
 
-	if (eff_mdev.timings.hactive == 0 || eff_mdev.timings.vactive == 0) {
-		eff_mdev.timings = config->timings;
-		mdev = &eff_mdev;
-	}
+	/*
+	 * Always program the cdc-if controller's timings: this host packs the
+	 * DPI stream that controller generates, so no other timings are valid.
+	 * Panel drivers need not fill mdev->timings -- upstream hx8394 leaves
+	 * it UNINITIALIZED on its stack, and trusting that garbage (the old
+	 * "use ours only when hactive == 0" test) set the D-PHY rate, the DPI
+	 * line/frame registers and the LP-command windows from stack noise.
+	 */
+	eff_mdev.timings = config->timings;
+	mdev             = &eff_mdev;
 
 	LOG_DBG("Attach called for channel: %d "
 		"With parameters - htimings(%d, %d, %d, %d)\t"

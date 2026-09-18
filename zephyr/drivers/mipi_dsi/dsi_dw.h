@@ -456,6 +456,13 @@ enum dsi_dw_mode {
 	DSI_DW_COMMAND_MODE = 1,
 };
 
+/*
+ * Switch the host between command mode (panel init and DCS traffic) and video
+ * mode (DPI scanout from the cdc-if controller).  Called by that controller's
+ * display blanking_off/blanking_on, never before the panel driver's init.
+ */
+int dsi_dw_set_mode(const struct device *dev, enum dsi_dw_mode mode);
+
 struct dpi_config {
 	/* Video signals polarity */
 	uint32_t polarity;
