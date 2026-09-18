@@ -125,10 +125,16 @@
 	pinctrl-names = "default";
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 
-	/* Panel-control expander: U35, a TCAL9538 at 0x73 (EVK_I2C_ADDR_TCAL9538_MAIN
-	 * in metadata/boards/e1m-evk.yaml). P0 enables the panel path, P1 resets HX8394. */
+	/* Panel-control expander: U35, at 0x73 (EVK_I2C_ADDR_TCAL9538_MAIN
+	 * in metadata/boards/e1m-evk.yaml). P0 enables the panel path, P1 resets HX8394.
+	 * nxp,pca9538 (not nxp,pcal9538) on purpose: both bind the same
+	 * gpio_pca_series.c under CONFIG_GPIO_PCA_SERIES, but pcal9538 is TYPE_2 and
+	 * its init additionally writes the Agile-IO block at 0x40..0x45. The physical
+	 * part at 0x73 is not identified on silicon (metadata/chips/tcal9538.yaml
+	 * marks 0x40+ untested), so stay on the TYPE_0 base register set
+	 * {0x00,0x01,0x03} that #1974 verified at POR. */
 	lcd_exp: gpio@73 {
-		compatible = "nxp,pcal9538";
+		compatible = "nxp,pca9538";
 		reg = <0x73>;
 		gpio-controller;
 		#gpio-cells = <2>;

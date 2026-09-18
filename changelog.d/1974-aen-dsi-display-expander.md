@@ -1,10 +1,6 @@
 ### Fixed — `aen-dsi-display` drove the LCD control expander at the wrong address and part (#1974)
 
-Both `aen-dsi-display` overlays --
-`examples/aen/aen-dsi-display/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay:125-127`
-and
-`examples/aen/aen-dsi-display/boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay:125-127`
--- defined `lcd_exp` as `gpio@20`, `compatible = "nxp,pca6408"`, `reg = <0x20>`. That
+Both `aen-dsi-display` overlays defined `lcd_exp` as `gpio@20`, `compatible = "nxp,pca6408"`, `reg = <0x20>`. That
 targets `EVK_I2C_ADDR_TCA6408A_MAIN` in `metadata/boards/e1m-evk.yaml`, which the
 metadata itself marks `assembled: false` on this EVK revision (NACK on 0x20 on 2 of
 2 boards, 2026-09-05). The example never picked up the U35 address correction from
