@@ -192,9 +192,9 @@
 #define ALIF_MIPI_RXDPHY_CLK                                                 \
 	ALIF_CLK_CFG(CLKCTL_PER_MST, MIPI_CKEN, 4U, 1U, 0U, 0U, 0U,          \
 		     ALIF_PARENT_CLK_SYST_ACLK)
-/* Frequency-only dummy the SoC dphy node still defaults all four clocks to;
- * a board/shield overlay that enables the D-PHY wires the real per-gate IDs
- * (ALIF_MIPI_{PLLREF,BYPASS,TXDPHY,RXDPHY}_CLK). */
+/* Frequency-only dummy (touches no register).  The SoC dphy node now carries
+ * the real per-gate IDs (ALIF_MIPI_{PLLREF,BYPASS,TXDPHY,RXDPHY}_CLK); this
+ * stays defined only for out-of-tree overlays that still name it. */
 #define ALIF_CSI_DPHY_CLK ALIF_CLK(2U)
 
 /*
