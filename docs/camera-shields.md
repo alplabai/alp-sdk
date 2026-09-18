@@ -62,3 +62,12 @@ RAW10 or 1280x800 mode is invented). Controls: exposure, analogue gain
 `tests/zephyr/video_sensors` build-only twister-tests both drivers together
 on `native_sim/native/64` against an emulated I2C bus, mirroring upstream's
 `tests/drivers/build_all/video`.
+
+## First-light example
+
+`examples/aen/aen-camera-firstlight` opens each shield through the portable
+`<alp/camera.h>` API (a third shield, `raspberry_pi_camera_module_2`/IMX219,
+also builds against it) and captures one frame with a timeout, on the
+E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
+README for what each printed line means and the expected result per module
+-- the whole CSI-2 -> CPI pipe has never run on real silicon.

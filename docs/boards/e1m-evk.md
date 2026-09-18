@@ -216,6 +216,13 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   patch in `zephyr/patches.yml`, so the workspace must be patched
   (`scripts/bootstrap.sh` does it).
 
+  `examples/aen/aen-camera-firstlight` is the bench first-light app for
+  this connector: it opens each of the three shipped camera shields
+  (IMX219 / OV5647 / OV9281) through `<alp/camera.h>`, starts the
+  stream, and waits for one frame with a 2 s timeout, printing a CRC32
+  + histogram + sample row bytes on success or a diagnosed failure
+  otherwise. See its README for what each printed line means.
+
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
   > schematic confirms `IO2` is the camera mux SEL line.  The
