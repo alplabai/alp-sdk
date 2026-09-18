@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -87,7 +88,8 @@ def run_profile(profile: str, root: Path = ROOT) -> Report:
     for t in sorted(_tasks_for(profile), key=lambda x: x["id"]):
         script = t["script"]
         r = subprocess.run([sys.executable, str(root / script)],
-                           capture_output=True, text=True, cwd=root)
+                           capture_output=True, text=True, encoding="utf-8", cwd=root,
+                           env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         rep.results.append(TaskResult(
             id=t["id"], script=script, gate=bool(t.get("gate")),
             passed=(r.returncode == 0), returncode=r.returncode,

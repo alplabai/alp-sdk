@@ -11,6 +11,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,8 @@ tests:
 def _run(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -42,13 +45,15 @@ def _write_example(tmp_path: Path, name: str, platform_allow: list[str],
     example_dir.mkdir(parents=True, exist_ok=True)
     allow_lines = "\n".join(f"      - {p}" for p in platform_allow)
     (example_dir / "testcase.yaml").write_text(
-        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines)
+        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines), encoding="utf-8"
     )
     if overlays:
         boards_dir = example_dir / "boards"
         boards_dir.mkdir(parents=True, exist_ok=True)
         for stem in overlays:
-            (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n")
+            (boards_dir / f"{stem}.overlay").write_text(
+                "/* test overlay */\n", encoding="utf-8"
+            )
     return example_dir
 
 
@@ -139,12 +144,13 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
         "tests:\n"
         "  alp_sdk.examples.test.aen-common-allow:\n"
         "    tags:\n"
-        "      - alp-sdk\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir()
     (boards_dir / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay").write_text(
-        "/* test overlay */\n"
+        "/* test overlay */\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     out = proc.stdout + proc.stderr
@@ -166,7 +172,9 @@ def test_native_sim_only_boards_dir_is_not_flagged(tmp_path):
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir(parents=True, exist_ok=True)
-    (boards_dir / "native_sim_native_64.overlay").write_text("/* native_sim */\n")
+    (boards_dir / "native_sim_native_64.overlay").write_text(
+        "/* native_sim */\n", encoding="utf-8"
+    )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -199,7 +207,7 @@ def test_conf_only_match_is_extension_agnostic(tmp_path):
         overlays=["alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he"],
     )
     (example_dir / "boards" / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf").write_text(
-        "CONFIG_TEST=y\n"
+        "CONFIG_TEST=y\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -227,7 +235,8 @@ def test_subslice_directory_with_no_local_boards_dir_is_not_flagged(tmp_path):
         "    platform_allow:\n"
         "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
         "    tags:\n"
-        "      - alp-sdk\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
