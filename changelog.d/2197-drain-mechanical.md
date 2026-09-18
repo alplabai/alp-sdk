@@ -16,7 +16,8 @@ and `scripts/test-all.sh`, for example
 All 564 tests now pass. `IMPLICIT_ENCODING_BASELINE` shrank from 137 to 85
 files, and the size pin moved with it
 (`tests/scripts/test_check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE) <="
-— that test and pin were removed when #2197 finished the drain). The
+— the pin was removed when #2197 finished the drain; the test itself survives
+as a plain zero-findings check). The
 baselined finding count dropped from
 484 to 316.
 

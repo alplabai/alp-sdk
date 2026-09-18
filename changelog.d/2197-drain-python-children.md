@@ -89,7 +89,8 @@ gate inherits `PYTHONIOENCODING=cp1252`. Without the override the stub crashes:
 (`scripts/check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE: frozenset" —
 removed when #2197 finished the drain). The size pin moved with it
 (`tests/scripts/test_check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE) <= 2"
-— that test and pin were removed too). The baselined finding count dropped
+— the pin was removed too when #2197 finished the drain; the test itself
+survives as a plain zero-findings check). The baselined finding count dropped
 from 316 to 9 -- the last 2 files are drained, and the baseline machinery
 itself retired, in `changelog.d/2197-retire-encoding-baseline.md`.
 
