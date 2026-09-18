@@ -295,9 +295,11 @@ jobs:
       # entries, kept as its own --testsuite-root rather than widened to
       # all of examples/ (this job's stated disk-budget concern, see the
       # header comment) or moved under examples/aen (it is a portable
-      # <alp/update_log.h> demo, not AEN-only). AEN803 is only build_only:
-      # true today (examples/aen/aen-adc-regcheck), so this adds two
-      # compile scenarios, not two bench-run scenarios.
+      # <alp/update_log.h> demo, not AEN-only). Every AEN803 scenario is
+      # build_only: true -- aen-adc-regcheck's HE + HP (#2084) and 12 more
+      # on the HE target (#2198) -- so they add compile scenarios, not
+      # bench runs. The rest of examples/aen still declares AEN801 only
+      # (#2209).
       # examples/peripheral-io/drone-autopilot is a third, bounded root
       # (issue #2106, same #1101 precedent as firmware-update-log above):
       # its AEN hardware scenario named a board target it shipped no
@@ -318,7 +320,11 @@ jobs:
         # two added AEN803 compile-only scenarios (alp-sdk#2084) or for
         # the #2106 drone-autopilot root (one additional build_only
         # scenario); revisit this budget if it pushes the job close to
-        # the ceiling.
+        # the ceiling. Nor for #2198's +12 AEN803 HE builds (~92 builds
+        # in all): the last eight runs before it, at ~80 builds, took
+        # 697-1220s, so ~1340s is the projected worst case. Declaring
+        # AEN803 across the rest of examples/aen (~140 builds) would pass
+        # this cap -- #2209 splits the job per SKU first.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
