@@ -26,6 +26,7 @@ Run locally:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -57,10 +58,20 @@ def _write(tmp: Path, name: str, body: str) -> Path:
 
 
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
-    """Invoke the linter as a subprocess."""
+    """Invoke the linter as a subprocess.
+
+    Both ends of the pipe must agree on the encoding.  `encoding="utf-8"`
+    only sets how the PARENT decodes; the child Python writes its locale
+    encoding, which is cp1252 on windows-latest.  The linter's own output
+    carries a `§`, which cp1252 writes as the lone byte 0xa7 -- invalid
+    UTF-8 -- so the decode fails in subprocess's reader thread, the
+    exception is swallowed, and `stdout` comes back as None.  Forcing
+    PYTHONIOENCODING makes the child write UTF-8 too.
+    """
     return subprocess.run(
         [sys.executable, str(LINTER), *args],
         capture_output=True, text=True, check=False, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
