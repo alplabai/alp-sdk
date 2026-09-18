@@ -31,11 +31,16 @@
  *                            -- the HX8394 panel controller.  Its driver runs the
  *                               panel reset sequence + DSI attach at POST_KERNEL.
  *
- * PANEL ENABLE / RESET:
- *   A small I2C GPIO expander on I2C2 provides the HX8394 control GPIOs.  The
- *   expander reset line is released before POST_KERNEL device init; a boot-on
- *   fixed regulator then asserts the panel-enable GPIO before the HX8394 driver
- *   performs its reset and DSI initialization.
+ * PANEL ENABLE / RESET / BACKLIGHT:
+ *   A small I2C GPIO expander on I2C2 provides the HX8394 control GPIOs.  It
+ *   answers at POR with no reset action (its reset line is pulled up on the
+ *   carrier).  A boot-on fixed regulator asserts the panel-enable GPIO before
+ *   the HX8394 driver performs its reset and DSI initialization.  The SoM-side
+ *   backlight is lit early, before any of that (backlight_on_early below).
+ *
+ * PIXELS: display_blanking_off() on the cdc200 switches the DSI host from
+ *   command mode (panel init) to video mode and sets CDC_EN, which starts the
+ *   DPI scanout.  Until then display_write() only fills the framebuffer.
  *
  * FRAMEBUFFER PLACEMENT (RAM-run critical -- see CMakeLists.txt for the full
  * note): the cdc200 driver is built with -DNO_RELOCATE_SRAM0, which pins the L1
@@ -51,7 +56,8 @@
  *     are proved by this app's bench PASS gate.
  *
  * The PASS gate: the expander, the DSI host, AND the cdc200 display device are
- * all device_is_ready, and display_write() of a solid-color frame returns 0.
+ * all device_is_ready, a DCS read gets a non-zero panel answer, display_write()
+ * of a solid-color frame returns 0, and display_blanking_off() starts scanout.
  * The app is robust to a NOT-ready device: it reports which stage failed and
  * prints RESULT FAIL rather than hanging.
  */
@@ -73,38 +79,39 @@
 #include <zephyr/sys/sys_io.h>
 
 /*
- * Pulse the panel-control expander reset before the PCA driver probes it.
- * gpio_dw does not apply pad mux, so mux P10_2 to GPIO first.  The PCA expander
- * is intentionally moved to POST_KERNEL priority 60 in prj.conf; this hook runs
- * at priority 55 so the expander sees a clean low->high reset edge first.
+ * Backlight FIRST, before the panel driver runs.  The hx8394 driver only drives
+ * bl-gpios at the very END of a successful init, so any earlier failure leaves
+ * the backlight dark and the glass says nothing.  Lighting it here makes the
+ * backlight path observable on its own: Alif P5_5 -> SoM net UT2_T1_B -> the
+ * KTD2801 boost (U3) CNTRL; U3 VOUT/FB leave as E1M pads A31/B31 BL_LED_A/K.
+ *
+ * gpio_dw does not apply pad mux, so mux P5_5 to GPIO first.  The level goes
+ * straight to a static HIGH and is never pulsed: short LOW pulses on KTD2801
+ * CTRL are its ExpressWire protocol.  Priority 55 is after the GPIO drivers and
+ * before the expander (60, prj.conf) and the display chain.
  */
-#define LCD_EXP_PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
+#define PAD_REN (1U << 16) /* Alif pad receiver-enable (REN_BIT_POS=16) */
 
-static int lcd_exp_reset_release(void)
+static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(DT_NODELABEL(lcd_panel), bl_gpios);
+
+static int backlight_rc = 1; /* 1 = hook never ran; SYS_INIT drops the rc */
+
+static int backlight_on_early(void)
 {
-	const struct device *gpio10 = DEVICE_DT_GET(DT_NODELABEL(gpio10));
-	pinctrl_soc_pin_t    m[]    = { PIN_P10_2__GPIO | LCD_EXP_PAD_REN };
-	int                  rc     = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
+	pinctrl_soc_pin_t m[] = { PIN_P5_5__GPIO | PAD_REN };
+	int               rc  = pinctrl_configure_pins(m, ARRAY_SIZE(m), 0U);
 
-	if (rc != 0 || !device_is_ready(gpio10)) {
-		return rc ? rc : -ENODEV;
+	if (rc == 0 && !gpio_is_ready_dt(&bl_gpio)) {
+		rc = -ENODEV;
 	}
-	rc = gpio_pin_configure(gpio10, 2, GPIO_OUTPUT_LOW);
-	if (rc != 0) {
-		return rc;
+	if (rc == 0) {
+		rc = gpio_pin_configure_dt(&bl_gpio, GPIO_OUTPUT_ACTIVE);
 	}
-	k_busy_wait(10 * USEC_PER_MSEC);
-
-	rc = gpio_pin_set(gpio10, 2, 1);
-	if (rc != 0) {
-		return rc;
-	}
-	k_busy_wait(10 * USEC_PER_MSEC);
-
-	return 0;
+	backlight_rc = rc;
+	return rc;
 }
 
-SYS_INIT(lcd_exp_reset_release, POST_KERNEL, 55);
+SYS_INIT(backlight_on_early, POST_KERNEL, 55);
 
 /*
  * Program the CDC200 pixel-clock divider directly.  The upstream Alif clockctrl
@@ -143,6 +150,20 @@ SYS_INIT(cdc_pixclk_div_fixup, POST_KERNEL, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT)
 #define DSI_INT_ST1_ADDR        (DSI_BASE_ADDR + 0xC0UL)
 #define DSI_PHY_TMR_RD_CFG_ADDR (DSI_BASE_ADDR + 0xF4UL)
 #define DSI_PHY_LOCK            BIT(0)
+#define DSI_VERSION_ADDR        (DSI_BASE_ADDR + 0x00UL)
+#define DSI_VID_PKT_SIZE_ADDR   (DSI_BASE_ADDR + 0x3CUL)
+#define DSI_VID_HLINE_TIME_ADDR (DSI_BASE_ADDR + 0x50UL)
+#define DSI_VID_VACTIVE_ADDR    (DSI_BASE_ADDR + 0x60UL)
+#define DSI_GEN_HDR_ADDR        (DSI_BASE_ADDR + 0x6CUL)
+#define DSI_GEN_PLD_DATA_ADDR   (DSI_BASE_ADDR + 0x70UL)
+#define DSI_PKT_GEN_CMD_EMPTY   BIT(0)
+#define DSI_PKT_GEN_PLD_R_EMPTY BIT(4)
+#define DSI_PHY_DIRECTION       BIT(1) /* 1 = lane 0 turned around to RX */
+#define DSI_PHY_STOPSTATE0      BIT(4) /* 0 = lane 0 left LP-11 stop state */
+#define DSI_DT_SET_MAX_RET_SIZE 0x37U
+#define DSI_DT_DCS_READ         0x06U
+
+#define CDC_GLB_CTRL_ADDR 0x49031018UL /* cdc200 @0x49031000 + CDC_GLB_CTRL; bit0 CDC_EN */
 
 #define DPHY_BASE_ADDR      0x4903F000UL
 #define DPHY_PLL_STAT0_ADDR (DPHY_BASE_ADDR + 0x20UL)
@@ -154,10 +175,15 @@ static void dump_dsi_status(const char *stage)
 {
 	uint32_t phy = sys_read32(DSI_PHY_STATUS_ADDR);
 
-	printk("dsi status[%s]: cmd=0x%08x int0=0x%08x int1=0x%08x phy=0x%08x "
+	printk("dsi status[%s]: ver=0x%08x pkt=%u hline=%u vact=%u cmd=0x%08x int0=0x%08x int1=0x%08x "
+	       "phy=0x%08x "
 	       "lock=%d mode=0x%08x cmdcfg=0x%08x pckhdl=0x%08x lpclk=0x%08x "
 	       "lpcmd=0x%08x rdtime=0x%08x dphy-pll=%08x/%08x tx=%08x/%08x\n",
 	       stage,
+	       sys_read32(DSI_VERSION_ADDR),
+	       sys_read32(DSI_VID_PKT_SIZE_ADDR),
+	       sys_read32(DSI_VID_HLINE_TIME_ADDR),
+	       sys_read32(DSI_VID_VACTIVE_ADDR),
 	       sys_read32(DSI_CMD_PKT_STATUS_ADDR),
 	       sys_read32(DSI_INT_ST0_ADDR),
 	       sys_read32(DSI_INT_ST1_ADDR),
@@ -173,6 +199,76 @@ static void dump_dsi_status(const char *stage)
 	       sys_read32(DPHY_PLL_STAT1_ADDR),
 	       sys_read32(DPHY_TX_CTRL0_ADDR),
 	       sys_read32(DPHY_TX_CTRL1_ADDR));
+}
+
+/*
+ * Discriminate WHERE a DCS read dies.  One read is driven register-direct (the
+ * driver's LP command config from the reads before it is still in place) with
+ * the DSI IRQ masked, so the read-to-clear INT_ST0/INT_ST1 latches survive for
+ * us instead of being consumed by the driver ISR.  PHY_STATUS is tight-polled
+ * for 2 ms across the read:
+ *   stop0 ever 0 -> the packet actually left on lane 0;
+ *   dir ever 1   -> the PHY turned lane 0 around to RX (BTA reached the panel).
+ * PHY_TMR_RD_CFG.max_rd_time is opened to its 0x7FFF maximum for this one read,
+ * so a response slower than the driver's line-timing-derived window still lands.
+ */
+static void dcs_read_phy_trace(uint8_t cmd)
+{
+	unsigned int irq    = DT_IRQN(DT_NODELABEL(mipi_dsi));
+	uint32_t     and_st = UINT32_MAX;
+	uint32_t     or_st  = 0;
+	uint32_t     n      = 0;
+	uint32_t     rx[2]  = { 0, 0 };
+	int          nrx    = 0;
+
+	uint32_t rd_cfg = sys_read32(DSI_PHY_TMR_RD_CFG_ADDR);
+
+	irq_disable(irq);
+	sys_write32(rd_cfg | 0x7FFFU, DSI_PHY_TMR_RD_CFG_ADDR);
+	(void)sys_read32(DSI_INT_ST0_ADDR);
+	(void)sys_read32(DSI_INT_ST1_ADDR);
+
+	sys_write32(DSI_DT_SET_MAX_RET_SIZE | (1U << 8), DSI_GEN_HDR_ADDR);
+	for (int i = 0; i < 1000 && !(sys_read32(DSI_CMD_PKT_STATUS_ADDR) & DSI_PKT_GEN_CMD_EMPTY);
+	     i++) {
+		k_busy_wait(1);
+	}
+
+	uint32_t t0 = k_cycle_get_32();
+
+	sys_write32(DSI_DT_DCS_READ | ((uint32_t)cmd << 8), DSI_GEN_HDR_ADDR);
+	while (k_cyc_to_us_floor32(k_cycle_get_32() - t0) < 2000U) {
+		uint32_t v = sys_read32(DSI_PHY_STATUS_ADDR);
+
+		and_st &= v;
+		or_st |= v;
+		n++;
+	}
+
+	uint32_t pkt  = sys_read32(DSI_CMD_PKT_STATUS_ADDR);
+	uint32_t int0 = sys_read32(DSI_INT_ST0_ADDR);
+	uint32_t int1 = sys_read32(DSI_INT_ST1_ADDR);
+
+	while (nrx < 2 && !(sys_read32(DSI_CMD_PKT_STATUS_ADDR) & DSI_PKT_GEN_PLD_R_EMPTY)) {
+		rx[nrx++] = sys_read32(DSI_GEN_PLD_DATA_ADDR);
+	}
+	sys_write32(rd_cfg, DSI_PHY_TMR_RD_CFG_ADDR);
+	irq_enable(irq);
+
+	printk("dcs trace cmd=0x%02x: polls=%u phy-and=0x%08x phy-or=0x%08x stop0-left=%d "
+	       "dir-rx=%d pkt=0x%08x int0=0x%08x int1=0x%08x rx(%d)=%08x %08x\n",
+	       cmd,
+	       n,
+	       and_st,
+	       or_st,
+	       (int)((and_st & DSI_PHY_STOPSTATE0) == 0),
+	       (int)((or_st & DSI_PHY_DIRECTION) != 0),
+	       pkt,
+	       int0,
+	       int1,
+	       nrx,
+	       rx[0],
+	       rx[1]);
 }
 
 /*
@@ -362,6 +458,8 @@ int main(void)
 	const struct device *dsi   = DEVICE_DT_GET(DSI_NODE);
 	const struct device *disp  = DEVICE_DT_GET(DISPLAY_NODE);
 
+	printk("%-8s: early-on rc=%d level=%d\n", "backlight", backlight_rc, gpio_pin_get_dt(&bl_gpio));
+
 	/* Step 1: the panel-control expander must be ready for reset-gpios. */
 	bool exp_ok = dev_ready("lcd-exp", exp);
 	bool pwr_ok = dev_ready("lcd-reg", pwr);
@@ -410,6 +508,7 @@ int main(void)
 	if (dsi_ok) {
 		panel_read_ok = probe_panel_reads(dsi);
 		dump_dsi_status("after-read");
+		dcs_read_phy_trace(0x0A); /* RDDPM */
 	}
 
 	/*
@@ -440,10 +539,14 @@ int main(void)
 			}
 		}
 		if (rc == 0) {
-			/* Take the panel out of blanking so the FB reaches glass. */
-			(void)display_blanking_off(disp);
-			write_ok = true;
 			printk("display_write: full 720x1280 frame OK (0x%04x)\n", FILL_COLOR_RGB565);
+			/* Start scanout: DSI video mode + CDC_EN, so the FB reaches glass. */
+			rc = display_blanking_off(disp);
+			printk("blanking_off: rc=%d cdc-glb=0x%08x\n", rc, sys_read32(CDC_GLB_CTRL_ADDR));
+			if (dsi_ok) {
+				dump_dsi_status("after-blanking-off");
+			}
+			write_ok = (rc == 0);
 		}
 	}
 

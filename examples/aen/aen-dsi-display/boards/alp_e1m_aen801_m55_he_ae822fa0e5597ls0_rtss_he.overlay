@@ -15,9 +15,8 @@
  *       |  2 data lanes
  *   panel@0  (himax,hx8394)                        -- the HX8394 panel controller
  *
- * Panel reset is gated by a small I2C GPIO expander on I2C2.  The expander's
- * own reset is released by the SYS_INIT in src/main.c before the panel driver
- * consumes reset-gpios during POST_KERNEL init.
+ * Panel reset is gated by a small I2C GPIO expander on I2C2 (it answers at POR;
+ * its own reset line is pulled up on the carrier, no firmware action needed).
  *
  * reg / IRQ are transcribed from the Alif CMSIS DFP (CDC_BASE 0x49031000 /
  * DSI_BASE 0x49032000) and the in-tree dtsi.  The panel timings (720x1280, the
@@ -109,12 +108,8 @@
 	};
 };
 
-/* gpio10.2 drives the panel-control expander reset. */
-&gpio10 {
-	status = "okay";
-};
-
-/* gpio5.5 drives the SoM-side backlight controller's CTRL input. */
+/* gpio5.5 drives the SoM-side backlight controller's CTRL input (lit early
+ * by backlight_on_early() in src/main.c, which also muxes P5_5 to GPIO). */
 &gpio5 {
 	status = "okay";
 };
@@ -240,8 +235,9 @@
 			reg = <0>;
 			reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
 			/*
-			 * bl-gpios: SoM-side KTD2801 backlight controller's CTRL pin
-			 * (E1M pad A31 BL_LED_A = Alif P5_5, metadata/pinmux/aen.yaml:29).
+			 * bl-gpios: the SoM's KTD2801 backlight boost (U3) CNTRL input.
+			 * Alif P5_5 drives it over SoM-internal net UT2_T1_B -- it is NOT
+			 * an E1M pad (pad A31 BL_LED_A is the boost OUTPUT, U3 VOUT).
 			 * No Alif UTIMER PWM driver in Zephyr, so static-high CTRL =
 			 * datasheet full-brightness on/off, not PWM dimming.
 			 */
