@@ -46,6 +46,7 @@ flash_args contract:
 
 from __future__ import annotations
 
+import locale
 import os
 import re
 import shutil
@@ -268,7 +269,16 @@ class SwdProbeFlash:
                 )
             fd, script_path = tempfile.mkstemp(suffix=".jlink")
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                # J-Link Commander reads its command file in the platform
+                # ANSI codepage on Windows, so the file must match the
+                # locale, not UTF-8 -- a path like C:\Users\José\... has to
+                # reach it as the bytes it will decode.  locale.getencoding()
+                # (3.11+) is that codepage even in UTF-8 Mode, where
+                # getpreferredencoding() answers "utf-8"; 3.10 has only the
+                # latter.
+                enc = (locale.getencoding() if hasattr(locale, "getencoding")
+                       else locale.getpreferredencoding(False))
+                with os.fdopen(fd, "w", encoding=enc) as fh:
                     fh.write(script)
                 cmd = base_cmd + [script_path]
                 proc = subprocess.run(cmd, check=False,

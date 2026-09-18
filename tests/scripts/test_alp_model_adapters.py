@@ -259,6 +259,10 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     seen = {}
 
     def fake_run(cmd, capture_output, text, encoding, env, timeout):
+        # dxcom is a Python child: record the decode and the child's write
+        # encoding for both calls, the -v probe and the compile (#2197).
+        seen["probe_io" if "-v" in cmd else "compile_io"] = (
+            encoding, env.get("PYTHONIOENCODING"))
         if "-v" in cmd:                              # _dxcom_version() probe
             class _V:
                 returncode = 0
@@ -286,6 +290,8 @@ def test_deepx_compile_invokes_dxcom_and_returns_dxnn(tmp_path, monkeypatch):
     assert blob.format == "dxnn"
     assert blob.payload.startswith(b"DXNN")          # raw .dxnn flatbuffer, not a tar
     assert blob.compiler_version == "DX-COM 2.3.0"
+    assert seen["probe_io"] == ("utf-8", "utf-8")
+    assert seen["compile_io"] == ("utf-8", "utf-8")
 
 
 def test_deepx_compile_raises_when_no_dxnn_produced(tmp_path, monkeypatch):

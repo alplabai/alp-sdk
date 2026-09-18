@@ -1,4 +1,4 @@
-### Fixed — 83 files leave the `IMPLICIT-ENCODING` baseline, and every Python child now writes the UTF-8 its parent decodes (#2197)
+### Fixed — 83 files leave the `IMPLICIT-ENCODING` baseline, and their Python children now write the UTF-8 their parents decode (#2197)
 
 This is the third #2197 drain batch. It covers every remaining baselined file
 except `scripts/alp_quality.py` and
@@ -57,14 +57,33 @@ Nine calls get it: `west build` in `scripts/alp_orchestrate/kconfig_symbols.py`,
 build/flash/capture runner in `tests/hil/run_smoke.py`, and `pwsh`. Compiler,
 flasher and UART bytes reach these pipes without going through Python, and
 `pwsh` writes the console codepage, so `PYTHONIOENCODING` cannot make that
-output UTF-8. The J-Link command script written through `os.fdopen()` is now
-UTF-8 as well:
-`scripts/flash_backends/swd_probe.py:271` ("os.fdopen(fd,").
+output UTF-8.
+
+**The J-Link command script is written in the locale encoding, on purpose.**
+J-Link Commander reads its command file in the platform ANSI codepage on
+Windows, so a UTF-8 file would garble a path such as `C:\Users\José\...`.
+The `os.fdopen()` call therefore names the locale encoding explicitly. It uses
+`locale.getencoding()`, because in UTF-8 Mode `locale.getpreferredencoding()`
+returns `utf-8`. On Python 3.10, which has no `locale.getencoding()`, it falls
+back to `locale.getpreferredencoding(False)`:
+`scripts/flash_backends/swd_probe.py:279` ("enc = (locale.getencoding()").
 
 **The adapter tests now check the child encoding.** Their fake
-`subprocess.run` functions accept the new keywords, and the Vela and DRP-AI
-tests assert that the call both decodes and requests UTF-8:
-`tests/scripts/test_alp_model_adapters.py:135` ("assert seen[").
+`subprocess.run` functions accept the new keywords. The Vela, DRP-AI and DEEPX
+tests assert that each call both decodes UTF-8 and asks the child for it:
+`tests/scripts/test_alp_model_adapters.py:135` ("assert seen["). The DEEPX test
+checks both `dxcom` calls, the `-v` probe and the compile:
+`tests/scripts/test_alp_model_adapters.py:293` ("probe_io").
+
+**`check_tan_docs_surface.py` asks `tan` for UTF-8 too.** That gate was not on
+the baseline, because it already decoded `tan`'s output with
+`encoding="utf-8"`. But `tan` is a Python program, so it still wrote its
+locale. It now gets `PYTHONIOENCODING=utf-8` as well:
+`scripts/check_tan_docs_surface.py:511` ("PYTHONIOENCODING"). A new test runs
+a `tan` stub that prints the Rich table through its default stdout while the
+gate inherits `PYTHONIOENCODING=cp1252`. Without the override the stub crashes:
+`tests/scripts/test_check_tan_docs_surface.py:364`
+("def test_tan_child_is_told_to_write_utf8").
 
 `IMPLICIT_ENCODING_BASELINE` shrinks from 85 to 2 files:
 `scripts/check_cross_platform.py:360`
@@ -78,10 +97,12 @@ test files that are touched here, or that run a changed script, were run with
 `PYTHONIOENCODING=cp1252` and then with `PYTHONIOENCODING=ascii` set in the
 pytest environment. Before this change, every child inherited that setting:
 
-- under `cp1252`, 64 tests failed with `UnicodeDecodeError: 'utf-8' codec can't
-  decode byte 0xb7` (or `0xa7`), because the child wrote `·` or `§` as cp1252;
-- under `ascii`, 28 tests failed with `UnicodeEncodeError: 'ascii' codec can't
-  encode character '\xa7'` inside the child.
+- under `cp1252`, 64 tests failed (68 counting subtests) with
+  `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xb7` (or `0xa7`),
+  because the child wrote `·` or `§` as cp1252;
+- under `ascii`, 28 tests failed (43 counting subtests) with
+  `UnicodeEncodeError: 'ascii' codec can't encode character '\xa7'` inside the
+  child.
 
 Both runs now pass all 2105 tests. The largest group is
 `tests/scripts/test_check_template_catalog.py:27` ("PYTHONIOENCODING"), with 17
