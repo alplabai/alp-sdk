@@ -163,9 +163,9 @@
  *         so the E8's per-slot enables in bits 8-23 survive.
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
  * fork's.
- * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
- * tone-out / clock programming were exercised on the bench as PARTIAL/PASS but
- * the achieved SCLK rate is a bench follow-up).
+ * vendor-ext, PARTIALLY BENCH-VERIFIED: TX tone-out / clock programming and
+ * issue #2205's RX-pre-emption/teardown plus full-IMR init passed on E8; the
+ * achieved SCLK rate and #2205's deferred paths still need bench coverage.
  */
 #define DT_DRV_COMPAT snps_designware_i2s
 
@@ -1247,7 +1247,7 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 		/* Release a writer blocked in i2s_dw_write() on a full queue:
 		 * with dir now I2S_DIR_RX nothing else would ever give tx.sem,
 		 * and the backend configures SYS_FOREVER_MS. The writer sees
-		 * ERROR and returns -EIO. ponytail: one give releases one
+		 * ERROR and returns -EIO. One give releases one
 		 * waiter; the Zephyr I2S API has one writer per stream. */
 		k_sem_give(&dev_data->tx.sem);
 	}
@@ -1378,7 +1378,7 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 		 * that read to leave before its DROP could reset the
 		 * semaphore -- a deadlock. The reader finds the queue empty
 		 * and returns -EIO; PREPARE/DROP's k_sem_reset() clears the
-		 * extra count. ponytail: one give releases one waiter. */
+		 * extra count. One give releases one waiter. */
 		k_sem_give(&dev_data->rx.sem);
 	}
 	dev_data->dir = I2S_DIR_TX;
