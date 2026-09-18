@@ -52,6 +52,16 @@ An `alp_e1m_<sku>_` file whose SKU has no preset declaring `family` and
 preset would silently unpair every file and the gate would pass having
 compared nothing. The OK line prints the number of pairs compared.
 
+A compared file must also be the one its build reads. Zephyr applies
+`boards/<fully-qualified-board>.overlay` (and `.conf`) by itself; an app
+`CMakeLists.txt` that names one SKU's paired file -- `set(DTC_OVERLAY_FILE
+.../alp_e1m_aen801_...overlay)` -- outside an `if()` whose condition names
+that SKU hands it to the sibling SKU's build too, and the sibling's own file
+is never read. Six AEN examples did exactly that (a pin left over from before
+#834 gave the overlays fully-qualified names), so every AEN803 build of them
+applied the AEN801 overlay. Such a reference is an error; a pin guarded like
+`if(BOARD MATCHES "^alp_e1m_aen801_m55_he")` is fine.
+
 Run locally:
 
     python3 scripts/check_example_board_overlay_content_parity.py
@@ -98,6 +108,7 @@ _SPACE_OUTSIDE_STRINGS_RE = re.compile(f"({_STRING})|\\s+")
 # anchored at the line start, not the end.
 _KCONFIG_UNSET_RE = re.compile(r"# CONFIG_[^ ]+ is not set")
 _MAX_SHOWN = 8
+_CMAKE_BRANCH_RE = re.compile(r"\s*(if|elseif|else|endif)\s*\((.*)", re.I)
 
 
 def _pcb_key(root: Path, sku: str) -> tuple[str, str] | None:
@@ -167,7 +178,49 @@ def check(root: Path, allowed: dict[tuple[str, str], str] | None = None
     pairs, problems = collect_pairs(root)
     for a, b in pairs:
         problems += _compare(root, a, b, allowed)
+    problems += _pin_problems(root, pairs)
     return len(pairs), problems
+
+
+def _pin_problems(root: Path, pairs: list[tuple[Path, Path]]) -> list[str]:
+    """A CMakeLists.txt reference to a paired file that no if() on its own
+    SKU guards: the sibling SKU's build reads it instead of its own file."""
+    problems, seen = [], set()
+    for a, b in pairs:
+        cmake = a.parent.parent / "CMakeLists.txt"
+        if not cmake.is_file():
+            continue  # a stranded boards/ dir: check_example_board_overlay_parity.py
+        conditions: list[str] = []
+        # ponytail: `#` ends the line even inside a quoted CMake string, and
+        # else() counts as naming no SKU; neither shape occurs in-tree.
+        for n, line in enumerate(cmake.read_text(encoding="utf-8").splitlines(), 1):
+            line = line.split("#", 1)[0]
+            branch = _CMAKE_BRANCH_RE.match(line)
+            if branch:
+                keyword, cond = branch.group(1).lower(), branch.group(2)
+                if keyword == "if":
+                    conditions.append(cond)
+                elif conditions:
+                    if keyword == "endif":
+                        conditions.pop()
+                    else:
+                        conditions[-1] = cond if keyword == "elseif" else ""
+                continue
+            for pinned, other in ((a, b), (b, a)):
+                key = (cmake, n, pinned.name)
+                if (pinned.name not in line or key in seen
+                        or f"alp_e1m_{_sku(pinned)}_" in " ".join(conditions)):
+                    continue
+                seen.add(key)
+                problems.append(
+                    f"{cmake.relative_to(root).as_posix()}:{n}: names "
+                    f"{pinned.name} outside an if() on SKU {_sku(pinned)}, so "
+                    f"the {_sku(other)} build applies it too and never reads "
+                    f"its own {other.relative_to(root).as_posix()} -- drop the "
+                    f"pin (Zephyr applies boards/<qualified-board>.overlay "
+                    f"itself) or guard it with "
+                    f'if(BOARD MATCHES "^alp_e1m_{_sku(pinned)}_...")')
+    return problems
 
 
 def find_problems(root: Path,

@@ -36,7 +36,7 @@ tests:
   alp_sdk.examples.aen.power_iwic.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-    # The board overlay is applied by the app CMakeLists (set(DTC_OVERLAY_FILE));
+    # Zephyr auto-applies the board-qualified overlay from boards/;
     # no EXTRA_DTC_OVERLAY_FILE here, else it would apply the same overlay twice
     # (the /delete-property/ zephyr,code-partition would run on an already-deleted
     # property).

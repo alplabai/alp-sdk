@@ -148,6 +148,50 @@ def test_normalise_keeps_what_the_build_reads():
         "CONFIG_BAR=y"]
 
 
+_PIN = ('set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/'
+        'alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay")\n')
+
+
+def _app(root: Path, cmake: str) -> tuple[list[str], str]:
+    """Same-PCB pair with identical content, plus the app's CMakeLists.txt."""
+    _same_pcb(root)
+    _overlay(root, "AEN801", "disabled")
+    rel_803 = _overlay(root, "AEN803", "disabled")
+    (root / "examples" / "aen" / "demo" / "CMakeLists.txt").write_text(
+        cmake, encoding="utf-8")
+    return gate.find_problems(root), rel_803
+
+
+def test_unguarded_pin_of_one_skus_overlay_fails(tmp_path):
+    # The six #2198 examples: every AEN803 build applied the AEN801 file.
+    problems, rel_803 = _app(tmp_path, _PIN)
+    assert problems == [
+        "examples/aen/demo/CMakeLists.txt:1: names "
+        "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay outside an "
+        "if() on SKU aen801, so the aen803 build applies it too and never "
+        f"reads its own {rel_803} -- drop the pin (Zephyr applies "
+        "boards/<qualified-board>.overlay itself) or guard it with "
+        'if(BOARD MATCHES "^alp_e1m_aen801_...")']
+
+
+def test_pin_guarded_by_its_own_sku_passes(tmp_path):
+    problems, _ = _app(tmp_path, 'if(BOARD MATCHES "^alp_e1m_aen801_m55_he")\n'
+                                 f"  {_PIN}endif()\n")
+    assert problems == []
+
+
+def test_pin_after_its_guard_closed_fails(tmp_path):
+    problems, _ = _app(tmp_path, 'if(BOARD MATCHES "^alp_e1m_aen801_m55_he")\n'
+                                 "  message(STATUS x)\nendif()\n" + _PIN)
+    assert len(problems) == 1
+    assert problems[0].startswith("examples/aen/demo/CMakeLists.txt:4: names")
+
+
+def test_pin_named_only_in_a_comment_passes(tmp_path):
+    problems, _ = _app(tmp_path, f"#   -DEXTRA_{_PIN}")
+    assert problems == []
+
+
 def test_real_tree_is_clean():
     n_pairs, problems = gate.check(REPO)
     assert problems == []
