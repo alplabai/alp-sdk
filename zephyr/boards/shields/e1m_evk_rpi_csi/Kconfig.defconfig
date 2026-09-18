@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+if SHIELD_E1M_EVK_RPI_CSI
+
+# The CSI mux SEL gpio-hog (input A = J5) only takes effect with GPIO on.
+config GPIO
+	default y
+
+endif # SHIELD_E1M_EVK_RPI_CSI

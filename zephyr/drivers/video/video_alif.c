@@ -336,6 +336,10 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 	case VIDEO_PIX_FMT_RGGB8:
 		return CSI2_DT_RAW8;
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 		return CSI2_DT_RAW10;
 	case VIDEO_PIX_FMT_Y12P:
 		return CSI2_DT_RAW12;
@@ -352,6 +356,28 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 	return -ENOTSUP;
 }
 
+/*
+ * Alp Lab AB: MIPI-packed link fourcc -> the unpacked fourcc the CPI really
+ * writes to memory.  In CSI mode RAW10/12/14 use CPI_DATA_MODE_16_BIT
+ * (data_mode_settings[]): one pixel per LSB-aligned 16-bit half-word, upper
+ * bits zero (HWRM 17.1.4.8.4-6) -- upstream's unpacked SBGGR10/Y10/.. layout,
+ * NOT the 1.25/1.5/1.75 B/px the packed fourcc describes.  The sensor keeps
+ * seeing the packed fourcc; the application sees the unpacked one.
+ */
+static const struct {
+	uint32_t link;
+	uint32_t mem;
+} cpi_unpacked_fmts[] = {
+	{VIDEO_PIX_FMT_SBGGR10P, VIDEO_PIX_FMT_SBGGR10},
+	{VIDEO_PIX_FMT_SGBRG10P, VIDEO_PIX_FMT_SGBRG10},
+	{VIDEO_PIX_FMT_SGRBG10P, VIDEO_PIX_FMT_SGRBG10},
+	{VIDEO_PIX_FMT_SRGGB10P, VIDEO_PIX_FMT_SRGGB10},
+	{VIDEO_PIX_FMT_Y10P, VIDEO_PIX_FMT_Y10},
+	{VIDEO_PIX_FMT_Y12P, VIDEO_PIX_FMT_Y12},
+	{VIDEO_PIX_FMT_Y14P, VIDEO_PIX_FMT_Y14},
+};
+
+/* Returns the CPI data mode programmed (>= 0), or a negative errno. */
 static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 {
 	const struct video_cam_config *config = dev->config;
@@ -418,7 +444,7 @@ static int alif_cam_set_csi(const struct device *dev, uint32_t fourcc)
 	reg_write_part(regs + CAM_CFG, data_mode_settings[i].data_mode, CAM_CFG_DATA_MODE_MASK,
 		       CAM_CFG_DATA_MODE_SHIFT);
 
-	return 0;
+	return data_mode_settings[i].data_mode;
 }
 
 /*
@@ -516,6 +542,7 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	int bits_pp = pix_fmt_bpp(fmt->pixelformat);
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	struct video_format link = *fmt;
 	int ret;
 
 	/*
@@ -531,28 +558,54 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		return -EINVAL;
 	}
 
-	data->current_format.pixelformat = fmt->pixelformat;
-	data->current_format.pitch = fmt->pitch;
-	data->current_format.width = fmt->width;
-	data->current_format.height = fmt->height;
+	/* An unpacked request (SBGGR10..) goes out on the link as its packed twin. */
+	for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
+		if ((config->interface == CAM_INTERFACE_SERIAL) &&
+		    (fmt->pixelformat == cpi_unpacked_fmts[i].mem)) {
+			link.pixelformat = cpi_unpacked_fmts[i].link;
+		}
+	}
 
 	sys_write32((((fmt->height - 1) & CAM_VIDEO_FCFG_ROW_MASK) << CAM_VIDEO_FCFG_ROW_SHIFT) |
 			    ((fmt->width & CAM_VIDEO_FCFG_DATA_MASK) << CAM_VIDEO_FCFG_DATA_SHIFT),
 		    regs + CAM_VIDEO_FCFG);
 
-	ret = video_set_format(config->endpoint_dev, fmt);
+	ret = video_set_format(config->endpoint_dev, &link);
 	if (ret) {
 		LOG_ERR("Failed to set sensor Format.");
 		return ret;
 	}
 
 	if (config->interface == CAM_INTERFACE_SERIAL) {
-		ret = alif_cam_set_csi(dev, fmt->pixelformat);
-		if (ret) {
+		ret = alif_cam_set_csi(dev, link.pixelformat);
+		if (ret < 0) {
 			LOG_ERR("Failed to configure CAM as per the CSI.");
 			return ret;
 		}
+
+		/*
+		 * Alp Lab AB: the CPI stores one data-mode container per pixel
+		 * (8/16/32-bit -> 1/2/4 B, HWRM 17.1.4.8), whatever the link bpp.
+		 * Storing the caller's pitch (0 from the portable backend,
+		 * width * 10 / 8 from a packed-RAW10 sensor) under-sized the
+		 * buffer and let the enqueue guard pass a frame that DMAs 60 %
+		 * past its end.
+		 * ponytail: the 32-bit RGB888 container keeps its RGB24 fourcc
+		 * (only the pitch is corrected); remap it once a sensor needs it.
+		 */
+		fmt->pitch = fmt->width << (ret - CPI_DATA_MODE_8_BIT);
+		fmt->pixelformat = link.pixelformat;
+		for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
+			if (link.pixelformat == cpi_unpacked_fmts[i].link) {
+				fmt->pixelformat = cpi_unpacked_fmts[i].mem;
+			}
+		}
 	}
+
+	data->current_format.pixelformat = fmt->pixelformat;
+	data->current_format.pitch = fmt->pitch;
+	data->current_format.width = fmt->width;
+	data->current_format.height = fmt->height;
 
 	data->is_streaming = 0;
 	return 0;
@@ -577,16 +630,13 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 		return ret;
 	}
 
+	/* set_fmt also programs the CSI side and rewrites fmt to the in-memory
+	 * layout, so no second alif_cam_set_csi() here: it would now see the
+	 * unpacked fourcc, which is not a link format.
+	 */
 	ret = alif_cam_set_fmt(dev, fmt);
 	if (ret) {
 		return ret;
-	}
-
-	if (config->interface == CAM_INTERFACE_SERIAL) {
-		ret = alif_cam_set_csi(dev, fmt->pixelformat);
-		if (ret) {
-			return ret;
-		}
 	}
 
 	fmt->pixelformat = data->current_format.pixelformat;

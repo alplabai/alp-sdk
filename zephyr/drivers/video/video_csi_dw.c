@@ -55,6 +55,10 @@ static int csi2_is_format_supported(uint32_t fourcc)
 	case VIDEO_PIX_FMT_Y7P:
 	case VIDEO_PIX_FMT_GREY:
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 	case VIDEO_PIX_FMT_Y12P:
 	case VIDEO_PIX_FMT_Y14P:
 	case VIDEO_PIX_FMT_Y16:
@@ -84,6 +88,10 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 	case VIDEO_PIX_FMT_RGGB8:
 		return CSI2_DT_RAW8;
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 		return CSI2_DT_RAW10;
 	case VIDEO_PIX_FMT_Y12P:
 		return CSI2_DT_RAW12;
@@ -336,7 +344,10 @@ static int csi2_dw_phy_config(const struct device *dev)
 	ret = dphy_dw_slave_setup(config->rx_dphy, &data->phy[data->current_sensor],
 			data->current_sensor);
 	if (ret) {
-		LOG_ERR("Failed to set-up D-PHY %s", (data->current_sensor ? "RX" : "TX as RX"));
+		/* dphy_dw_slave_setup(): id 0 = dedicated CSI RX D-PHY, id 1 = DSI TX
+		 * D-PHY in RX mode (the fork label had the two swapped).
+		 */
+		LOG_ERR("Failed to set-up D-PHY %s", (data->current_sensor ? "TX as RX" : "RX"));
 		return ret;
 	}
 	return 0;
@@ -537,6 +548,7 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 {
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
+	int64_t link_freq;
 	int32_t tmp;
 	int ret;
 	int i;
@@ -584,6 +596,21 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 
 	data->time[data->current_sensor].hact = fmt->width;
 	data->time[data->current_sensor].vact = fmt->height;
+
+	/*
+	 * Alp Lab AB: take the D-PHY lane rate from the sensor's
+	 * VIDEO_CID_LINK_FREQ (the v4.4 CSI-2 receiver convention -- upstream
+	 * sensors such as imx219 report it there and carry no DT
+	 * link-frequencies).  The DT link-frequencies / rx-ddr-clkN value stays
+	 * the fallback for a sensor that reports neither LINK_FREQ nor
+	 * PIXEL_RATE.
+	 */
+	link_freq = video_get_csi_link_freq(config->sensor[data->current_sensor],
+					    data_mode_settings[i].bits_per_pixel,
+					    data->phy[data->current_sensor].num_lanes);
+	if (link_freq > 0) {
+		data->phy[data->current_sensor].pll_fin = (uint32_t)link_freq;
+	}
 
 	return csi2_dw_configure(dev);
 }

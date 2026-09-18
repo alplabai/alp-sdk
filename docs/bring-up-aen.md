@@ -378,8 +378,10 @@ of cable insert.
 
 These are optional and SKU-/carrier-dependent.  The E1M-EVK
 carries a `CAM_MUX_PI3WVR626` MIPI CSI 2:1 mux (selected via
-`EVK_PIN_CAM_MUX_SEL`), but no camera-mux truth table is published
-yet -- treat the wiring as TBD until the carrier camera doc lands.
+`EVK_PIN_CAM_MUX_SEL`); its truth table and the Raspberry Pi
+connector (J5, input A) wiring are in
+[`boards/e1m-evk.md`](boards/e1m-evk.md), which also shows the
+`e1m_evk_rpi_csi` shield build for a Raspberry Pi camera module.
 
 
 **Bench-settled 2026-09-05** on an **R2** module (`E1M-AEN801` 2626-R2, Flow A,
