@@ -3,9 +3,10 @@
 # aen-jpeg-regcheck -- <alp/jpeg.h> backend-selection proof: the software
 # baseline (src/backends/jpeg/sw_baseline.c) runs for real on native_sim; the
 # Alif Hantro VC9000E hardware backend (src/backends/jpeg/alif_hantro.c) is
-# build_only in CI for the E1M-AEN801 (Ensemble E8, M55-HE) -- the HW encode
-# path is SILICON-PROVEN on real AEN801 hardware (valid 935-byte JPEG), but
-# needs a bench flash to run, so CI builds it rather than executing it.
+# build_only in CI for the E1M-AEN801 and E1M-AEN803 (Ensemble E8, M55-HE) --
+# the HW encode path is SILICON-PROVEN on real AEN801 hardware (valid 935-byte
+# JPEG), but needs a bench flash to run, so CI builds it rather than executing
+# it.
 
 sample:
   name: aen-jpeg-regcheck
@@ -47,6 +48,7 @@ tests:
   alp_sdk.examples.aen.jpeg_regcheck.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     build_only: true   # HW encode is a bench flash, not a CI run (silicon-proven on AEN801).
     tags:
       - alp-sdk

@@ -12,7 +12,7 @@
 #   - the suspend_idle zephyr,power-state + cpu0 cpu-power-states (board overlay)
 #     enter the devicetree, so the PM policy can select PM_STATE_SUSPEND_TO_IDLE;
 #   - the RAM-console retarget + ITCM RAM-run overlay link.
-# It is intentionally filtered to the AEN801 M55-HE board only, which the
+# It is intentionally filtered to the AEN801 and AEN803 M55-HE boards, which the
 # native_sim PR gate never selects, so it adds a board-target build check
 # without slowing the gate.
 #
@@ -36,6 +36,7 @@ tests:
   alp_sdk.examples.aen.power_iwic.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     # Zephyr auto-applies the board-qualified overlay from boards/;
     # no EXTRA_DTC_OVERLAY_FILE here, else it would apply the same overlay twice
     # (the /delete-property/ zephyr,code-partition would run on an already-deleted
