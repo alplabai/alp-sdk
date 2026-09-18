@@ -119,21 +119,56 @@ static alp_status_t _errno_to_alp(int err)
 	return alp_status_from_zephyr_errno(err);
 }
 
-/** Map the portable alp_pixfmt_t enum to a Zephyr video FourCC.
- *  Returns 0 if the format isn't expressible in the portable enum
- *  yet -- callers fall back to whatever the sensor's default
- *  pixelformat is (no set_format call). */
-static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
+/** Whether @p fmt participates in FourCC negotiation at all.  MONO_VLSB /
+ *  YUV420_PLANAR / NV12 have no Zephyr video FourCC this backend maps --
+ *  a request for one of those leaves the sensor's default format in
+ *  place (no set_format call), same as before raw formats existed. */
+static bool _pixfmt_is_negotiable(alp_pixfmt_t fmt)
 {
 	switch (fmt) {
 	case ALP_PIXFMT_RGB565:
-		return VIDEO_PIX_FMT_RGB565;
 	case ALP_PIXFMT_RGB888:
-		return VIDEO_PIX_FMT_RGB24;
 	case ALP_PIXFMT_ARGB8888:
-		return VIDEO_PIX_FMT_XRGB32;
+	case ALP_PIXFMT_GREY8:
+	case ALP_PIXFMT_RAW8:
+	case ALP_PIXFMT_RAW10:
+		return true;
 	default:
-		return 0u;
+		return false;
+	}
+}
+
+/** Whether a Zephyr video FourCC belongs to the class the portable
+ *  @p fmt requests.  RGB565 / RGB888 / ARGB8888 / GREY8 map 1:1 to a
+ *  single FourCC.  The two raw sensor formats accept ANY FourCC of
+ *  that bit depth: a Bayer sensor's driver names its own CFA order in
+ *  the FourCC (SBGGR8 vs SGRBG8 etc.), which the portable request
+ *  deliberately does not pin (see alp_pixfmt_t's Doxygen in
+ *  <alp/peripheral.h>) -- so whichever entry the device's own
+ *  video_get_caps() advertises first for that bit depth wins, and the
+ *  same open() call works unmodified across sensors with different
+ *  native CFA orders. */
+static bool _fourcc_in_class(alp_pixfmt_t fmt, uint32_t fourcc)
+{
+	switch (fmt) {
+	case ALP_PIXFMT_RGB565:
+		return fourcc == VIDEO_PIX_FMT_RGB565;
+	case ALP_PIXFMT_RGB888:
+		return fourcc == VIDEO_PIX_FMT_RGB24;
+	case ALP_PIXFMT_ARGB8888:
+		return fourcc == VIDEO_PIX_FMT_XRGB32;
+	case ALP_PIXFMT_GREY8:
+		return fourcc == VIDEO_PIX_FMT_GREY;
+	case ALP_PIXFMT_RAW8:
+		return fourcc == VIDEO_PIX_FMT_SBGGR8 || fourcc == VIDEO_PIX_FMT_SGBRG8 ||
+		       fourcc == VIDEO_PIX_FMT_SGRBG8 || fourcc == VIDEO_PIX_FMT_SRGGB8 ||
+		       fourcc == VIDEO_PIX_FMT_GREY;
+	case ALP_PIXFMT_RAW10:
+		return fourcc == VIDEO_PIX_FMT_SBGGR10P || fourcc == VIDEO_PIX_FMT_SGBRG10P ||
+		       fourcc == VIDEO_PIX_FMT_SGRBG10P || fourcc == VIDEO_PIX_FMT_SRGGB10P ||
+		       fourcc == VIDEO_PIX_FMT_Y10P;
+	default:
+		return false;
 	}
 }
 
@@ -200,15 +235,15 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
      * (pixelformat, width, height) bracket the requested config.
      * If no portable FourCC is requested or the list is empty the
      * sensor's default format stays in place. */
-	uint32_t want_fourcc    = _to_video_fourcc(cfg->format);
-	bool     fmt_negotiated = false;
-	if (want_fourcc != 0u && vcaps.format_caps != NULL) {
+	bool want_negotiation = _pixfmt_is_negotiable(cfg->format);
+	bool fmt_negotiated   = false;
+	if (want_negotiation && vcaps.format_caps != NULL) {
 		for (const struct video_format_cap *fc = vcaps.format_caps; fc->pixelformat != 0u; ++fc) {
-			if (fc->pixelformat != want_fourcc) continue;
+			if (!_fourcc_in_class(cfg->format, fc->pixelformat)) continue;
 			if (cfg->width < fc->width_min || cfg->width > fc->width_max) continue;
 			if (cfg->height < fc->height_min || cfg->height > fc->height_max) continue;
 			st->fmt.type        = VIDEO_BUF_TYPE_OUTPUT;
-			st->fmt.pixelformat = want_fourcc;
+			st->fmt.pixelformat = fc->pixelformat;
 			st->fmt.width       = cfg->width;
 			st->fmt.height      = cfg->height;
 			st->fmt.pitch       = 0u; /* driver fills in via set_format */
