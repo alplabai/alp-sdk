@@ -19,7 +19,7 @@ files, and the size pin moves with it:
 ("IMPLICIT_ENCODING_BASELINE) <= 85"). The baselined finding count drops from
 484 to 316.
 
-**A file joins this batch only if none of its calls starts a Python child.**
+**A file joins this batch only if none of its calls starts a Python child** -- with one exception handled in place: `baremetal_cmake_flash.py`'s `cmake --build --target flash` runs a project-supplied target that is often a Python flasher, so that call also sets `PYTHONIOENCODING=utf-8` in the child's environment.
 Python children include `sys.executable`, `python3`, `west`, `twister`, `pyocd`,
 `vela`, `dxcom`, and any bash script that runs `python3` while its output is
 captured. For those calls, `encoding=` is only half the fix. The child also
@@ -42,7 +42,7 @@ for an ASCII marker.** Seven calls get it:
 - the `cc` compile diagnostics in `scripts/check_stub_symbol_matrix.py`;
 - the conflicting `git merge` in the conflict-resolver test.
 
-For example, `scripts/flash_backends/baremetal_cmake_flash.py:83` ("errors=").
+For example, `scripts/flash_backends/baremetal_cmake_flash.py:87` ("errors=").
 Calls whose output is parsed as data stay strict: git paths, `nm` symbols and
 `gh` JSON.
 
