@@ -4580,7 +4580,7 @@ static const phase_t PHASES[] = {
 
 int main(void)
 {
-	printf("\n=== aen-evk-demo: E1M-AEN801 / E1M EVK phased demo ===\n");
+	printf("\n=== aen-evk-demo: E1M-AEN / E1M EVK phased demo ===\n");
 
 	(void)alp_init();
 
