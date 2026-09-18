@@ -86,6 +86,20 @@ static inline void counted_clock_disable(const struct i2s_dw_cfg *i2s)
 
 #define i2s_clock_disable(i2s) counted_clock_disable(i2s)
 
+/*
+ * alp-sdk issue #2205: count the driver's LOG_ERR() calls, so a case can
+ * assert which log level a refused trigger chose. Same technique: the
+ * logging header is included first, then LOG_ERR is replaced before
+ * i2s_dw.c is compiled. The count reflects the macro the driver invoked,
+ * whatever the logging subsystem is configured to print.
+ */
+#include <zephyr/logging/log.h>
+
+static int fake_log_errs;
+
+#undef LOG_ERR
+#define LOG_ERR(...) (fake_log_errs++)
+
 /* The real driver, compiled AS-IS. */
 #include "../../../../zephyr/drivers/i2s/i2s_dw.c"
 
@@ -327,6 +341,7 @@ static void dw_test_before(void *fixture)
 
 	fake_e8_reset();
 	fake_cer_clears      = 0;
+	fake_log_errs        = 0;
 	fake_set_rate_calls  = 0;
 	fake_on_calls        = 0;
 	fake_off_calls       = 0;
@@ -1668,4 +1683,66 @@ ZTEST(i2s_dw_underrun, test_tx_retry_preempting_rx_never_gates_clock)
 	              I2S_STATE_ERROR,
 	              "the TX retry did not pre-empt the RUNNING RX (state %d)",
 	              rx_state_after);
+}
+
+/*
+ * (ad) alp-sdk issue #2205, found on the bench: after an RX START parks a
+ * RUNNING TX in ERROR, the backend's stop() tries DRAIN before falling
+ * back to DROP, and the driver refused it with an error log --
+ * "DRAIN trigger: invalid state" on every clean teardown. DRAIN and STOP
+ * from ERROR must still be refused (-EIO; the stream stays in ERROR for
+ * DROP or PREPARE), but without an error-level log.
+ *
+ * MUTATION-PROVEN: logging the ERROR refusal with LOG_ERR again, in DRAIN
+ * or in STOP, turns this RED (one error log); letting DRAIN accept ERROR
+ * turns it RED (rc 0).
+ */
+ZTEST(i2s_dw_underrun, test_drain_stop_in_error_refused_quietly)
+{
+	int32_t state_after;
+	int     drain_rc;
+	int     stop_rc;
+	int     errs;
+
+	tx_configure(16000);
+	tx_write_block();
+	tx_start();
+	rx_configure(16000);
+	rx_start();
+	zassert_equal(test_data.tx.state, I2S_STATE_ERROR, "RX START did not park TX");
+
+	fake_log_errs = 0;
+	drain_rc      = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DRAIN);
+	stop_rc       = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_STOP);
+	errs          = fake_log_errs;
+	state_after   = test_data.tx.state;
+
+	zassert_equal(drain_rc, -EIO, "DRAIN from ERROR was not refused: %d", drain_rc);
+	zassert_equal(stop_rc, -EIO, "STOP from ERROR was not refused: %d", stop_rc);
+	zassert_equal(errs, 0, "refusing DRAIN/STOP from ERROR logged %d error(s)", errs);
+	zassert_equal(state_after, I2S_STATE_ERROR, "refused triggers moved TX out of ERROR");
+}
+
+/*
+ * (ae) alp-sdk issue #2205: the other half of (ad) -- a DRAIN or STOP from
+ * READY (never started) is a caller bug and still logs at error level.
+ *
+ * MUTATION-PROVEN: making the DRAIN refusal always quiet turns this RED.
+ */
+ZTEST(i2s_dw_underrun, test_drain_stop_in_ready_still_logs_error)
+{
+	int drain_rc;
+	int stop_rc;
+	int errs;
+
+	tx_configure(16000);
+
+	fake_log_errs = 0;
+	drain_rc      = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_DRAIN);
+	stop_rc       = i2s_dw_trigger(&test_dev, I2S_DIR_TX, I2S_TRIGGER_STOP);
+	errs          = fake_log_errs;
+
+	zassert_equal(drain_rc, -EIO, "DRAIN from READY was not refused: %d", drain_rc);
+	zassert_equal(stop_rc, -EIO, "STOP from READY was not refused: %d", stop_rc);
+	zassert_equal(errs, 2, "DRAIN/STOP from READY logged %d error(s), not 2", errs);
 }

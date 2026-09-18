@@ -438,6 +438,7 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	struct i2s_dw_data *const dev_data = dev->data;
 	struct stream *stream;
 	unsigned int key;
+	bool parked;
 	int ret;
 
 	switch (dir) {
@@ -479,8 +480,16 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	case I2S_TRIGGER_STOP:
 		key = irq_lock();
 		if (stream->state != I2S_STATE_RUNNING) {
+			parked = stream->state == I2S_STATE_ERROR;
 			irq_unlock(key);
-			LOG_ERR("STOP trigger: invalid state");
+			/* alp-sdk issue #2205: refused either way, but only a
+			 * non-ERROR state is a caller bug worth an error log --
+			 * see the DRAIN case below. */
+			if (parked) {
+				LOG_DBG("STOP trigger: stream in ERROR, use DROP");
+			} else {
+				LOG_ERR("STOP trigger: invalid state");
+			}
 			return -EIO;
 		}
 		irq_unlock(key);
@@ -495,8 +504,23 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	case I2S_TRIGGER_DRAIN:
 		key = irq_lock();
 		if (stream->state != I2S_STATE_RUNNING) {
+			parked = stream->state == I2S_STATE_ERROR;
 			irq_unlock(key);
-			LOG_ERR("DRAIN trigger: invalid state");
+			/* alp-sdk issue #2205: DRAIN still needs RUNNING, and a
+			 * stream in ERROR still gets -EIO. But ERROR is an expected
+			 * state -- the TX underrun exit and a START of the other
+			 * direction both park a stream there -- and DROP is the way
+			 * out, which is exactly what src/backends/i2s/zephyr_drv.c's
+			 * z_stop() falls back to. Logging that refusal at error
+			 * level printed the invalid-state error on every clean
+			 * teardown after a pre-emption; it is debug-level now.
+			 * Any other non-RUNNING state (READY, NOT_READY) is a caller
+			 * bug and stays at error level. */
+			if (parked) {
+				LOG_DBG("DRAIN trigger: stream in ERROR, use DROP");
+			} else {
+				LOG_ERR("DRAIN trigger: invalid state");
+			}
 			return -EIO;
 		}
 		stream->stream_disable(stream, dev);
