@@ -43,7 +43,8 @@ def clang_format_text(tmp_path: Path, name: str, text: str) -> str:
     if not exe:
         pytest.skip("clang-format not found on PATH")
     version_out = subprocess.run(
-        [exe, "--version"], capture_output=True, text=True, check=True
+        [exe, "--version"], capture_output=True, text=True, check=True,
+        encoding="utf-8",
     ).stdout
     match = re.search(r"(\d+\.\d+\.\d+)", version_out)
     found = match.group(1) if match else version_out.strip()
