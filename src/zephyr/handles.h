@@ -89,10 +89,18 @@ extern "C" {
 #include <lwrb/lwrb.h>
 
 struct alp_uart_rx_ringbuf {
-	bool                 in_use;
 	const struct device *dev;  /* mirror of port->state.dev for ISR use */
 	struct alp_uart     *port; /* back-ref for detach */
 	lwrb_t               rb;
+
+	/* lifecycle/active_ops drive the generic open/op/close guard in
+	 * alp_slot_claim.h (issue #1634) -- placed before in_use so a
+	 * fresh acquire's whole-struct zero (handles.c's DEFINE_POOL) resets
+	 * both to LC_UNOPENED/0 along with every other field. Non-volatile:
+	 * the guard uses __atomic_* on them directly. */
+	uint8_t  lifecycle;
+	uint32_t active_ops;
+	bool     in_use;
 };
 #endif
 
