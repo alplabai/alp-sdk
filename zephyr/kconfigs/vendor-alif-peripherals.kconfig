@@ -765,13 +765,14 @@ config FB_USES_DTCM_REGION
 	bool "CDC200 framebuffer lives in DTCM (needs the hal_alif local_to_global map)"
 	depends on DISPLAY_CDC200
 	help
-	  Selects the DTCM-resident framebuffer path in display_cdc200.c, which
-	  pulls in hal_alif's <soc_memory_map.h> (local_to_global) to translate
-	  the DTCM address for the CDC200 DMA engine.  Neither upstream Zephyr
-	  nor hal_alif declare this symbol -- it is alp-sdk's own gate around a
-	  vendored TU.  Leave off (default n) for the default SRAM0 framebuffer
-	  path, which needs neither the header nor the hal_alif common include
-	  dir.
+	  Set when the cdc200 node's framebuffer memory-region is a CPU-local
+	  DTCM address: display_cdc200.c then pulls in hal_alif's
+	  <soc_memory_map.h> (local_to_global) to translate it for the CDC200
+	  DMA engine.  Neither upstream Zephyr nor hal_alif declare this symbol
+	  -- it is alp-sdk's own gate around a vendored TU.  Leave off (default
+	  n) for a memory-region in global SRAM (the e1m_evk_rk055hdmipi4ma0
+	  shield's), which needs neither the header nor the hal_alif common
+	  include dir.
 
 config MIPI_DPHY
 	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"
@@ -799,6 +800,15 @@ config MIPI_DPHY_INIT_PRIORITY
 	depends on MIPI_DPHY_DW
 	help
 	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
+
+# dphy_dw.c registers its log module with CONFIG_MIPI_DPHY_LOG_LEVEL, which
+# nothing defined, so any CONFIG_LOG=y build with the D-PHY enabled failed to
+# compile.  Upstream has no mipi_dphy class to supply it.
+if MIPI_DPHY_DW
+module = MIPI_DPHY
+module-str = mipi_dphy
+source "subsys/logging/Kconfig.template.log_config"
+endif # MIPI_DPHY_DW
 
 config MIPI_DSI_DW
 	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"

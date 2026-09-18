@@ -21,11 +21,13 @@
  * PORTED to the v4.4 MIPI-DSI host API by Alp Lab AB.  The v4.4 mipi_dsi class
  * API (struct mipi_dsi_driver_api {.attach,.transfer,.detach}, struct
  * mipi_dsi_device, struct mipi_dsi_msg) matches the fork's usage, so the port is
- * mechanical: the fork's bogus `#include <zephyr/drivers/mipi_dsi/dsi_dw.h>`
- * (a public header that never existed in the fork) is dropped, and the
- * `enum dsi_dw_mode` it silently expected from that header is now defined in the
- * local dsi_dw.h (see DSI_DW_*_MODE).  DEVICE_API() is the v4.4 spelling of the
- * driver-api instance.  vendor-ext, BENCH-UNVERIFIED.
+ * mechanical: the fork included a public <zephyr/drivers/mipi_dsi/dsi_dw.h>
+ * that never existed in the fork; alp-sdk authors it (zephyr/include/) with the
+ * `enum dsi_dw_mode` + dsi_dw_set_mode() the fork expected from it.
+ * DEVICE_API() is the v4.4 spelling of the driver-api instance.
+ * ALP-SDK PORT FIX: attach, transfer and set_mode hold a per-host k_mutex, so a
+ * panel driver's DCS traffic cannot interleave with a display blanking mode
+ * switch on the host registers.  vendor-ext, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_dsi
 
@@ -214,13 +216,17 @@ int dw_calc_clocks(const struct device *dev,
 	 * get_rate returns the pixel clock's PARENT rate (SYST_ACLK, 400 MHz), not
 	 * the post-divider pixel rate -- feeding 400 MHz here drives the D-PHY HS
 	 * target to ~3.8 GHz and PHY config fails, so dsi attach (and the panel
-	 * init) never completes.  htotal*vtotal*frame-rate is the true pixel clock
-	 * (~60 MHz for 720x1280@60).  (The clocks are still wired for the gate
+	 * init) never completes.  The rate comes from the cdc-if controller's
+	 * clock-frequency, the rate the CDC is actually run at; without it,
+	 * htotal*vtotal*60 Hz.  It MUST match the real CDC rate: in non-burst
+	 * mode a faster feed overflows the DPI payload FIFO every line
+	 * (INT_ST1 DPI_PLD_WR_ERR).  (The clocks are still wired for the gate
 	 * enable in dsi_dw_enable_clocks(); only the RATE source changed.)
 	 */
 	htotal = timings->hsync + timings->hbp + timings->hactive + timings->hfp;
 	vtotal = timings->vsync + timings->vbp + timings->vactive + timings->vfp;
-	dpi_pix_clk = htotal * vtotal * DPI_FRAME_RATE;
+	dpi_pix_clk = config->dpi_pix_clk ? config->dpi_pix_clk
+					  : htotal * vtotal * DPI_FRAME_RATE;
 
 	if (mdev->mode_flags & MIPI_DSI_MODE_VIDEO_BURST) {
 		LOG_DBG("Burst mode of clock calculation");
@@ -425,6 +431,7 @@ void dw_setup_timeout(const struct device *dev,
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	uint32_t hstx_to;
+	uint32_t to_clk_div;
 	uint32_t tmp;
 
 	/* Time in lanebyteclocks to send 1 line + 15% of pixel data */
@@ -438,9 +445,23 @@ void dw_setup_timeout(const struct device *dev,
 		 */
 		hstx_to *= timings->vactive;
 	}
-	hstx_to /= TO_CLK_DIV;
 
-	reg_write_part(regs + DSI_CLKMGR_CFG, TO_CLK_DIV,
+	/*
+	 * ALP-SDK PORT FIX: HSTX_TO_CNT is 16 bits.  A non-burst frame (720x1280: ~1.1M
+	 * lanebyteclks) does not fit at TO_CLK_DIV, and the register write
+	 * used to TRUNCATE it -- a ~8 ms timeout that fired TO_HS_TX inside
+	 * every ~17 ms frame.  Widen the (8-bit) timeout-clock divider until
+	 * the count fits; the LPRX/BTA timeouts on the same clock only grow.
+	 */
+	to_clk_div = MAX(TO_CLK_DIV, DIV_ROUND_UP(hstx_to, DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK));
+	to_clk_div = MIN(to_clk_div, DSI_CLKMGR_CFG_TO_CLK_DIV_MASK);
+	hstx_to /= to_clk_div;
+	if (hstx_to > DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK) {
+		LOG_WRN("HS-TX timeout %u exceeds HSTX_TO_CNT, clamped", hstx_to);
+		hstx_to = DSI_TO_CNT_CFG_HSTX_TO_CNT_MASK;
+	}
+
+	reg_write_part(regs + DSI_CLKMGR_CFG, to_clk_div,
 			DSI_CLKMGR_CFG_TO_CLK_DIV_MASK,
 			DSI_CLKMGR_CFG_TO_CLK_DIV_SHIFT);
 
@@ -701,9 +722,15 @@ void dsi_dw_msg_config(uintptr_t regs, uint32_t mode_flags)
 	}
 	sys_write32(cmd_mode_cfg, regs + DSI_CMD_MODE_CFG);
 
-	/* clear TXREQUESTCLKHS signal when sending commands in LP mode. */
-	sys_write32((lpm ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS),
-			regs + DSI_LPCLK_CTRL);
+	/*
+	 * ALP-SDK PORT FIX: clear TXREQUESTCLKHS for LP commands, but only in
+	 * command mode: in video mode the HS clock carries the scanout, and an
+	 * LP command (a panel set_orientation after blanking_off) would stop
+	 * the video.
+	 */
+	bool cmd_mode = sys_read32(regs + DSI_MODE_CFG) & DSI_MODE_CFG_CMD_MODE;
+
+	sys_write32(((lpm && cmd_mode) ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS), regs + DSI_LPCLK_CTRL);
 	if (mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS)
 		sys_set_bits(regs + DSI_LPCLK_CTRL,
 				DSI_LPCLK_CTRL_AUTO_CLKLN_CTRL);
@@ -758,11 +785,18 @@ int dsi_dw_video_mode_config(const struct device *dev)
 
 /* API functions */
 /* Device Specific APIs. */
-int dsi_dw_set_mode(const struct device *dev,
+static int dsi_dw_set_mode_locked(const struct device *dev,
 		enum dsi_dw_mode mode)
 {
 	struct dsi_dw_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
+
+	/*
+	 * ALP-SDK PORT FIX: an unattached host has no timings or PHY setup, so
+	 * "switching" it would report success with no video behind it.
+	 */
+	if (!data->attached)
+		return -ENODEV;
 
 	if (mode == data->curr_mode)
 		return 0;
@@ -774,13 +808,27 @@ int dsi_dw_set_mode(const struct device *dev,
 	} else {
 		/* Setup the DSI as Command mode. */
 		sys_write32(DSI_MODE_CFG_CMD_MODE, regs + DSI_MODE_CFG);
+		/* Stop the HS clock video mode requested; transfers re-request it. */
+		sys_clear_bits(regs + DSI_LPCLK_CTRL, DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS);
+		data->curr_mode = DSI_DW_COMMAND_MODE;
 	}
 	dsi_dw_pwr_up(regs);
 	return 0;
 }
 
+int dsi_dw_set_mode(const struct device *dev, enum dsi_dw_mode mode)
+{
+	struct dsi_dw_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_set_mode_locked(dev, mode);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
 /* Generic APIs */
-static int dsi_dw_attach(const struct device *dev,
+static int dsi_dw_attach_locked(const struct device *dev,
 		uint8_t channel,
 		const struct mipi_dsi_device *mdev)
 {
@@ -792,10 +840,17 @@ static int dsi_dw_attach(const struct device *dev,
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	int ret;
 
-	if (eff_mdev.timings.hactive == 0 || eff_mdev.timings.vactive == 0) {
-		eff_mdev.timings = config->timings;
-		mdev = &eff_mdev;
-	}
+	/*
+	 * ALP-SDK PORT FIX: always program the cdc-if controller's timings:
+	 * this host packs the DPI stream that controller generates, so no
+	 * other timings are valid.
+	 * Panel drivers need not fill mdev->timings -- upstream hx8394 leaves
+	 * it UNINITIALIZED on its stack, and trusting that garbage (the old
+	 * "use ours only when hactive == 0" test) set the D-PHY rate, the DPI
+	 * line/frame registers and the LP-command windows from stack noise.
+	 */
+	eff_mdev.timings = config->timings;
+	mdev             = &eff_mdev;
 
 	LOG_DBG("Attach called for channel: %d "
 		"With parameters - htimings(%d, %d, %d, %d)\t"
@@ -883,7 +938,21 @@ static int dsi_dw_attach(const struct device *dev,
 	dsi_dw_wait_2_frames(data->dpi_pix_clk, &mdev->timings);
 	dsi_dw_intr_en(regs);
 	dsi_dw_pwr_up(regs);
+	data->attached = true;
 	return 0;
+}
+
+static int dsi_dw_attach(const struct device *dev,
+		uint8_t channel,
+		const struct mipi_dsi_device *mdev)
+{
+	struct dsi_dw_data *data = dev->data;
+	int ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_attach_locked(dev, channel, mdev);
+	k_mutex_unlock(&data->lock);
+	return ret;
 }
 
 #define HEADER(channel, type, data0, data1)				\
@@ -1017,7 +1086,7 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 	return 0;
 }
 
-static ssize_t dsi_dw_transfer(const struct device *dev,
+static ssize_t dsi_dw_transfer_locked(const struct device *dev,
 		uint8_t channel,
 		struct mipi_dsi_msg *msg)
 {
@@ -1144,6 +1213,19 @@ static ssize_t dsi_dw_transfer(const struct device *dev,
 	return msg->tx_len;
 }
 
+static ssize_t dsi_dw_transfer(const struct device *dev,
+		uint8_t channel,
+		struct mipi_dsi_msg *msg)
+{
+	struct dsi_dw_data *data = dev->data;
+	ssize_t ret;
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	ret = dsi_dw_transfer_locked(dev, channel, msg);
+	k_mutex_unlock(&data->lock);
+	return ret;
+}
+
 /* ISR Function */
 static void dsi_dw_irq(const struct device *dev)
 {
@@ -1211,6 +1293,7 @@ static int dsi_dw_init(const struct device *dev)
 	int ret = 0;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
+	k_mutex_init(&data->lock);
 
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
 	ret = dsi_dw_enable_clocks(dev);
@@ -1291,6 +1374,7 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 		.crc_recv_en = DT_INST_PROP(i, crc_recv_en),					\
 		.frame_ack_en = DT_INST_PROP(i, frame_ack_en),					\
 		.panel_max_lane_bw = DT_INST_PROP(i, panel_max_lane_bandwidth),                 \
+		.dpi_pix_clk = DT_PROP_OR(DT_INST_PHANDLE(i, cdc_if), clock_frequency, 0),      \
 	};											\
 	static struct dsi_dw_data data_##i = {							\
 		.pkt_size = COND_CODE_1(DT_INST_NODE_HAS_PROP(i, vid_pkt_size),			\
@@ -1298,6 +1382,8 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 					(DT_INST_PROP_BY_PHANDLE(i, cdc_if, width))),		\
 		.num_chunks = 0,								\
 		.null_size = 0,									\
+		/* The host leaves reset in command mode (MODE_CFG = 1). */			\
+		.curr_mode = DSI_DW_COMMAND_MODE,						\
 	};											\
 	DEVICE_DT_INST_DEFINE(i,								\
 			&dsi_dw_init,								\

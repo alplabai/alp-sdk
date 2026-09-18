@@ -1,0 +1,194 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * e1m_evk_rk055hdmipi4ma0 -- the RK055HDMIPI4MA0 MIPI-DSI panel (720x1280,
+ * Himax HX8394 controller, 2 data lanes, RGB565) on the E1M-EVK's display
+ * connector (J6), driven by an E1M-AEN SoM (Alif Ensemble E8) through the SoC
+ * display chain:
+ *
+ *   cdc200   (tes,cdc-2.1)          -- DPI pixel pump, framebuffer in SRAM0
+ *       |  DPI
+ *   mipi_dsi (snps,designware-dsi)  -- MIPI-DSI host
+ *       |  phy-if <&dphy 1>
+ *   dphy     (snps,designware-dphy) -- the shared D-PHY, TX role
+ *       |  2 data lanes
+ *   panel@0  (himax,hx8394)
+ *
+ * The SoC nodes (reg, IRQs, clocks, cdc-if / phy-if) are defined disabled in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi.  This shield turns them on and
+ * adds what the carrier and the panel decide.  Build any app with
+ * `-DSHIELD=e1m_evk_rk055hdmipi4ma0`; the shield's Kconfig.defconfig enables
+ * the drivers.  The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app
+ * does: the CDC200 / DesignWare DSI / D-PHY driver symbols are alp-sdk's and
+ * live under `if ALP_SDK`, and the shield deliberately does not turn the SDK
+ * on for an app.  The SoC-level clock / power / pad setup the chain needs
+ * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
+ *
+ * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel
+ * clock is not: the panel-native 62.346 MHz is unreachable from the 400 MHz
+ * CDC source, so clock-frequency is the rate the CDC really runs (400 MHz / 7
+ * = 57.14 MHz, ~57 Hz refresh).  The SoC glue derives the CDC divider from it
+ * and the DSI host times its lanes from it, so the two cannot drift.
+ * 400 MHz / 6 = 66.67 MHz would need ~539 Mbps/lane, over the DSI host's
+ * default 500 Mbps panel-max-lane-bandwidth.
+ *
+ * Conflicts: the I2C expander at 0x73 becomes a driver-owned GPIO controller
+ * (gpio_pca_series), so an app must not also write its registers directly.
+ * aen-evk-demo's phase 4, the one in-tree raw user, checks for this shield's
+ * lcd_exp node and skips its register writes when it is present.
+ */
+
+#include <mem.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
+
+/ {
+	chosen {
+		zephyr,display = &cdc200;
+	};
+
+	aliases {
+		/* <alp/display.h> resolves display 0 through this alias. */
+		alp-display0 = &cdc200;
+	};
+
+	/*
+	 * Expander P0 enables the panel supply.  Modelled as a boot-on fixed
+	 * regulator so the panel is powered before the hx8394 driver resets it and
+	 * sends its DCS init sequence.
+	 */
+	lcd_pwr_en: regulator-lcd-pwr-en {
+		compatible = "regulator-fixed";
+		regulator-name = "lcd-pwr-en";
+		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		regulator-boot-on;
+		regulator-always-on;
+		status = "okay";
+	};
+};
+
+/*
+ * The framebuffer: the top 2 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
+ * dtsi's sram0).  A 720x1280 RGB565 layer is 1,843,200 B.  Plain "mmio-sram",
+ * not "zephyr,memory-region": the CDC driver uses the address directly, so
+ * nothing is linked here and the framebuffer adds nothing to the image (an
+ * ITCM RAM-run .bin stays small).
+ *
+ * The SoC dtsi's sram0 is ALSO the "SRAM0" linker region (and system RAM for
+ * an app with `zephyr,sram = &sram0`), so it is shrunk to the bottom 2 MiB:
+ * anything linked into SRAM0 past 0x02200000 is then a link error ("region
+ * SRAM0 overflowed") instead of a silent overwrite of the framebuffer.  An
+ * app overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
+ * after this shield and still stays below the framebuffer.
+ */
+&sram0 {
+	reg = <0x02000000 DT_SIZE_M(2)>;
+};
+
+&soc {
+	lcd_fb: sram@2200000 {
+		compatible = "mmio-sram";
+		reg = <0x02200000 DT_SIZE_M(2)>;
+	};
+};
+
+/*
+ * The panel-control I2C GPIO expander on the E1M bus 0 (SoC I2C2, whose pins,
+ * clock and alp-i2c0 alias the board devicetree already sets).  reg 0x73 is
+ * EVK_I2C_ADDR_TCAL9538_MAIN in metadata/boards/e1m-evk.yaml (the
+ * i2c_devices block).  P0 enables the panel path (lcd_pwr_en above), P1 is
+ * the HX8394 reset.  It answers at POR;
+ * its own reset line is pulled up on the carrier, so no firmware action is
+ * needed.
+ *
+ * nxp,pca9538 (not nxp,pcal9538) on purpose: both bind gpio_pca_series.c, but
+ * pcal9538 is TYPE_2 and its init also writes the Agile-IO block at
+ * 0x40..0x45.  The part at 0x73 is not identified on silicon
+ * (metadata/chips/tcal9538.yaml marks 0x40+ untested), so stay on the TYPE_0
+ * base register set {0x00,0x01,0x03} that #1974 verified at POR.
+ */
+&i2c2 {
+	lcd_exp: gpio@73 {
+		compatible = "nxp,pca9538";
+		reg = <0x73>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		ngpios = <8>;
+		status = "okay";
+	};
+};
+
+/* gpio5 carries the backlight enable (panel bl-gpios below, P5_5). */
+&gpio5 {
+	status = "okay";
+};
+
+&dphy {
+	status = "okay";
+};
+
+&cdc200 {
+	/* Panel timing -- from the upstream NXP rk055hdmipi4ma0 shield. */
+	width = <720>;
+	height = <1280>;
+	hsync-len = <6>;
+	hfront-porch = <12>;
+	hback-porch = <24>;
+	vsync-len = <2>;
+	vfront-porch = <16>;
+	vback-porch = <14>;
+	hsync-active = <0>;
+	vsync-active = <0>;
+	de-active = <1>;
+	pixelclk-active = <0>;
+	/* The real pixel rate, 400 MHz / 7 (see the header). */
+	clock-frequency = <57142857>;
+	bg-color = <0x000000>;
+	memory-region = <&lcd_fb>;
+
+	/* L1 only: a single full-screen RGB565 layer. */
+	enable-l1 = <1>;
+	pixel-fmt-l1 = "rgb-565";
+	win-x0-l1 = <0>;
+	win-y0-l1 = <0>;
+	win-x1-l1 = <720>;
+	win-y1-l1 = <1280>;
+	blend-factor1-l1 = <4>;
+	blend-factor2-l1 = <5>;
+	const-alpha-l1 = <0xff>;
+
+	status = "okay";
+};
+
+&mipi_dsi {
+	vid-pkt-size = <720>;
+	status = "okay";
+
+	/*
+	 * The upstream hx8394 driver pulses reset as logical 0 -> 1;
+	 * GPIO_ACTIVE_HIGH maps that onto the expander's reset output.
+	 */
+	lcd_panel: panel@0 {
+		compatible = "himax,hx8394";
+		reg = <0>;
+		reset-gpios = <&lcd_exp 1 GPIO_ACTIVE_HIGH>;
+		/*
+		 * bl-gpios: Alif P5_5, the SoM backlight driver's enable input (not an
+		 * E1M pad).  Source: metadata/e1m_modules/aen/on-module-links.yaml,
+		 * backlight.enable (#2203): on the SoM, P5_5 drives the backlight
+		 * driver's enable, and E1M pads A31/B31 carry that driver's LED
+		 * output (#2199).  Static high = full brightness; there is no Alif UTIMER
+		 * PWM driver for dimming, and short low pulses on this input are the
+		 * backlight driver's dimming protocol, so never pulse it.  The hx8394
+		 * driver sets it at the end of a successful init; the SoC glue muxes
+		 * the pad to GPIO first (gpio_dw applies no pad mux).
+		 */
+		bl-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;
+		data-lanes = <2>;
+		width = <720>;
+		height = <1280>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB565>;
+		status = "okay";
+	};
+};

@@ -32,9 +32,9 @@
  *     into the local "display_cdc200.h" and the dangling public include is
  *     dropped, keeping the port self-contained;
  *   - <soc_memory_map.h> (hal_alif local_to_global) is only pulled in under
- *     CONFIG_FB_USES_DTCM_REGION, matching how video_alif.c gates it; the
- *     default SRAM0 framebuffer path needs neither it nor the hal_alif common
- *     include dir.
+ *     CONFIG_FB_USES_DTCM_REGION, matching how video_alif.c gates it; a
+ *     framebuffer memory-region in global SRAM needs neither it nor the
+ *     hal_alif common include dir.
  * The driver COMPILES against v4.4.  vendor-ext, BENCH-UNVERIFIED (no panel
  * wired on this batch).
  *
@@ -47,6 +47,22 @@
  * the shared cdc200_validate_transfer() (display_cdc200.h) before touching
  * memory. Reapply this divergence if the file is ever re-synced from the
  * fork.
+ *
+ * cdc200_blanking_off()/_on() (issue #2199) start and stop the scanout: the
+ * fork left them -ENOTSUP and relied on the application calling the
+ * DSI-private dsi_dw_set_mode() and cdc200_set_enable() itself.  blanking
+ * now switches the cdc-if DSI host (resolved from DT) and CDC_EN, and the
+ * cdc200_set_enable() back door, which toggled CDC_EN without the DSI mode,
+ * is removed.  Reapply both if re-synced from the fork.
+ *
+ * The layer framebuffers (issue #2199) come from the node's `memory-region`
+ * phandle: layer 1 at that node's reg base, layer 2 (if enabled) after it,
+ * with a BUILD_ASSERT that the region covers both.  The fork instead put
+ * them in its own `__alif_sram0_section` / `__alif_ns_section` linker
+ * sections (absent from upstream Zephyr's link script), or at hardcoded
+ * 0x02000000 / 0x02177000 under -DNO_RELOCATE_SRAM0.  A plain pointer is
+ * used on purpose: a loaded section would put the 1.8 MB framebuffer into
+ * an ITCM RAM-run .bin.  Reapply if re-synced from the fork.
  * -------------------------------------------------------------------------
  */
 #define DT_DRV_COMPAT tes_cdc_2_1
@@ -64,6 +80,21 @@
 
 #ifdef CONFIG_FB_USES_DTCM_REGION
 #include <soc_memory_map.h>
+#endif
+
+/*
+ * The DesignWare MIPI-DSI host this CDC feeds: the DSI node whose cdc-if names
+ * CDC instance 0, or NULL for a parallel-RGB panel.
+ * ponytail: one CDC + one DSI (the E8); make it a per-instance config field if
+ * a SoC ever carries two.
+ */
+#if defined(CONFIG_MIPI_DSI_DW) && DT_HAS_COMPAT_STATUS_OKAY(snps_designware_dsi)
+#include <zephyr/drivers/mipi_dsi/dsi_dw.h>
+#define CDC200_DSI_NODE DT_COMPAT_GET_ANY_STATUS_OKAY(snps_designware_dsi)
+static const struct device *const cdc200_dsi =
+    COND_CODE_1(DT_SAME_NODE(DT_PHANDLE(CDC200_DSI_NODE, cdc_if), DT_DRV_INST(0)),
+                (DEVICE_DT_GET(CDC200_DSI_NODE)),
+                (NULL));
 #endif
 
 LOG_MODULE_REGISTER(CDC200, CONFIG_DISPLAY_LOG_LEVEL);
@@ -403,22 +434,40 @@ int cdc200_setup_registers(const struct device *dev)
 
 /* API functions */
 /* Generic APIs */
+/*
+ * Blanking gates the scanout.  A MIPI-DSI host fed by this CDC stays in command
+ * mode until blanking_off, so the panel driver can run its init sequence first:
+ * in DW video mode commands only leave during DPI blanking, which does not exist
+ * before CDC_EN.  So blanking_off is DSI video mode THEN CDC_EN, and blanking_on
+ * the reverse, so the DSI host is reset only after the CDC is told to stop
+ * feeding it.  (Whether CDC_EN=0 stops mid-frame or at frame end is not
+ * verified; the last frame may be cut.)  The backlight belongs to the panel's
+ * own blanking API.
+ */
 static int cdc200_blanking_on(const struct device *dev)
 {
-	/*
-	 * Disable the Backlight GPIO here.
-	 * Not available with parallel display.
-	 */
-	return -ENOTSUP;
+	cdc200_global_disable(DEVICE_MMIO_GET(dev));
+#ifdef CDC200_DSI_NODE
+	if (cdc200_dsi != NULL) {
+		return dsi_dw_set_mode(cdc200_dsi, DSI_DW_COMMAND_MODE);
+	}
+#endif
+	return 0;
 }
 
 static int cdc200_blanking_off(const struct device *dev)
 {
-	/*
-	 * Enable the Backlight GPIO here.
-	 * Not available with parallel display.
-	 */
-	return -ENOTSUP;
+#ifdef CDC200_DSI_NODE
+	if (cdc200_dsi != NULL) {
+		int ret = dsi_dw_set_mode(cdc200_dsi, DSI_DW_VIDEO_MODE);
+
+		if (ret != 0) {
+			return ret;
+		}
+	}
+#endif
+	cdc200_global_enable(DEVICE_MMIO_GET(dev));
+	return 0;
 }
 
 int cdc200_generic_write(const struct device *dev, const uint16_t x, const uint16_t y,
@@ -704,17 +753,6 @@ void cdc200_get_capabilities(const struct device *dev, struct cdc200_display_cap
 	}
 }
 
-void cdc200_set_enable(const struct device *dev, bool enable)
-{
-	uintptr_t regs = DEVICE_MMIO_GET(dev);
-
-	if (enable) {
-		cdc200_global_enable(regs);
-	} else {
-		cdc200_global_disable(regs);
-	}
-}
-
 void cdc200_swap_fb(const struct device *dev, uint8_t idx, struct cdc200_fb_desc *fb)
 {
 	struct cdc200_data *data = dev->data;
@@ -954,87 +992,19 @@ static DEVICE_API(display, cdc200_display_api) = {
 	UTIL_CAT(CDC200_PIXEL_SIZE_IDX_,                                                           \
 		 DT_INST_ENUM_IDX_OR(i, LAYER_PROPERTY(pixel_fmt_l, n), UNDEFINED))
 
-/********************* Frame-buffer allocation Macros. ***********************/
+/********************* Frame-buffer placement Macros. ***********************/
 /*
- * FIXME: allocate the maximum framebuffer that can be allocated for 480x800 display.
- * Issue observed due to compilation issue with armClang.
+ * alp-sdk divergence (#2199): the layer framebuffers live in the node's
+ * memory-region (see the file header), not in a fork linker section or at a
+ * fixed address.  FB1 follows FB0, rounded up to a 64-byte (cache line) boundary.
  */
-#if defined(CONFIG_FB_USES_DTCM_REGION)
-#if defined(NO_RELOCATE_SRAM0)
-#define ALLOCATE_FB0(i)
-#define ALLOCATE_FB1(i)
-#define FB0(i) ((uint8_t *)DT_REG_ADDR(DT_NODELABEL(ns)))
-#define FB1(i) ((uint8_t *)(DT_REG_ADDR(DT_NODELABEL(ns)) + 0x80000))
-
-#else
-#define FRAME_BUFFER_SECTION __alif_ns_section
-
-#define ALLOCATE_FB0(i)                                                                            \
-	IF_ENABLED(                                                                                \
-		DT_INST_PROP(i, enable_l1),                                                        \
-		(static uint8_t FRAME_BUFFER_SECTION fb0_##i                                       \
-			 [CDC200_PIXEL_SIZE_LAYER(i, 1) *                                          \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_x1_l1),                        \
-				       (DT_INST_PROP(i, win_x1_l1)), (DT_INST_PROP(i, width))) -   \
-			   DT_INST_PROP(i, win_x0_l1)) *                                           \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_y1_l1),                        \
-				       (DT_INST_PROP(i, win_y1_l1)), (DT_INST_PROP(i, height))) -  \
-			   DT_INST_PROP(i, win_y0_l1))]))
-
-#define ALLOCATE_FB1(i)                                                                            \
-	IF_ENABLED(                                                                                \
-		DT_INST_PROP(i, enable_l2),                                                        \
-		(static uint8_t FRAME_BUFFER_SECTION fb1_##i                                       \
-			 [CDC200_PIXEL_SIZE_LAYER(i, 2) *                                          \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_x1_l2),                        \
-				       (DT_INST_PROP(i, win_x1_l2)), (DT_INST_PROP(i, width))) -   \
-			   DT_INST_PROP(i, win_x0_l2)) *                                           \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_y1_l2),                        \
-				       (DT_INST_PROP(i, win_y1_l2)), (DT_INST_PROP(i, height))) -  \
-			   DT_INST_PROP(i, win_y0_l2))]))
-
-#define FB0(i) COND_CODE_1(DT_INST_PROP(i, enable_l1), (fb0_##i), (NULL))
-#define FB1(i) COND_CODE_1(DT_INST_PROP(i, enable_l2), (fb1_##i), (NULL))
-#endif
-
-#else
-#if defined(NO_RELOCATE_SRAM0)
-#define ALLOCATE_FB0(i)
-#define ALLOCATE_FB1(i)
-#define FB0(i) ((uint8_t *)0x02000000)
-#define FB1(i) ((uint8_t *)0x02177000)
-
-#else
-#define FRAME_BUFFER_SECTION __alif_sram0_section
-
-#define ALLOCATE_FB0(i)                                                                            \
-	IF_ENABLED(                                                                                \
-		DT_INST_PROP(i, enable_l1),                                                        \
-		(static uint8_t FRAME_BUFFER_SECTION fb0_##i                                       \
-			 [CDC200_PIXEL_SIZE_LAYER(i, 1) *                                          \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_x1_l1),                        \
-				       (DT_INST_PROP(i, win_x1_l1)), (DT_INST_PROP(i, width))) -   \
-			   DT_INST_PROP(i, win_x0_l1)) *                                           \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_y1_l1),                        \
-				       (DT_INST_PROP(i, win_y1_l1)), (DT_INST_PROP(i, height))) -  \
-			   DT_INST_PROP(i, win_y0_l1))]))
-
-#define ALLOCATE_FB1(i)                                                                            \
-	IF_ENABLED(                                                                                \
-		DT_INST_PROP(i, enable_l2),                                                        \
-		(static uint8_t FRAME_BUFFER_SECTION fb1_##i                                       \
-			 [CDC200_PIXEL_SIZE_LAYER(i, 2) *                                          \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_x1_l2),                        \
-				       (DT_INST_PROP(i, win_x1_l2)), (DT_INST_PROP(i, width))) -   \
-			   DT_INST_PROP(i, win_x0_l2)) *                                           \
-			  (COND_CODE_1(DT_INST_NODE_HAS_PROP(i, win_y1_l2),                        \
-				       (DT_INST_PROP(i, win_y1_l2)), (DT_INST_PROP(i, height))) -  \
-			   DT_INST_PROP(i, win_y0_l2))]))
-#define FB0(i) COND_CODE_1(DT_INST_PROP(i, enable_l1), (fb0_##i), (NULL))
-
-#define FB1(i) COND_CODE_1(DT_INST_PROP(i, enable_l2), (fb1_##i), (NULL))
-#endif
-#endif
+#define CDC200_FB_REGION(i) DT_INST_PHANDLE(i, memory_region)
+#define CDC200_FB1_OFFSET(i) ROUND_UP(FB0_SIZE(i), 64)
+#define FB0(i) COND_CODE_1(DT_INST_PROP(i, enable_l1),                                           \
+			   ((uint8_t *)DT_REG_ADDR(CDC200_FB_REGION(i))), (NULL))
+#define FB1(i) COND_CODE_1(DT_INST_PROP(i, enable_l2),                                           \
+			   ((uint8_t *)(DT_REG_ADDR(CDC200_FB_REGION(i)) + CDC200_FB1_OFFSET(i))), \
+			   (NULL))
 
 #define FB0_SIZE(i)                                                                                \
 	CDC200_PIXEL_SIZE_LAYER(i, 1) *                                                            \
@@ -1078,8 +1048,12 @@ static DEVICE_API(display, cdc200_display_api) = {
 	CDC200_PINCTRL_INIT(i);                                                                    \
 	static void cdc200_config_func_##i(const struct device *dev);                              \
                                                                                                    \
-	ALLOCATE_FB0(i);                                                                           \
-	ALLOCATE_FB1(i);                                                                           \
+	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(i, memory_region),                                      \
+		     "tes,cdc-2.1 needs a memory-region phandle for its framebuffers");            \
+	BUILD_ASSERT((DT_INST_PROP(i, enable_l2) ? (CDC200_FB1_OFFSET(i) + (FB1_SIZE(i)))         \
+						 : (FB0_SIZE(i))) <=                               \
+			     DT_REG_SIZE(CDC200_FB_REGION(i)),                                     \
+		     "tes,cdc-2.1 memory-region is smaller than its layer framebuffers");          \
 	static const struct cdc200_config config##i = {                                            \
 		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)),                                              \
                                                                                                    \
