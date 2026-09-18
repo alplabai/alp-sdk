@@ -58,11 +58,16 @@ list):
   6. IMPLICIT-ENCODING: a Python call under scripts/** or tests/**
      that decodes/encodes text with no `encoding=` keyword --
      `Path.read_text(`/`Path.write_text(`; bare `open(` or
-     `Path.open(` in text mode (no `"b"` in the mode argument, or no
-     mode argument at all -- Python's default is text mode);
-     `subprocess.run`/`check_output`/`Popen` with `text=True` or
-     `universal_newlines=True`.  Binary-mode IO (`"rb"`/`"wb"`,
-     `read_bytes`/`write_bytes`) is correct and never flagged, and
+     `Path.open(` in text mode (no `"b"` in the mode argument --
+     `open(file, mode)`'s second positional, `Path.open(mode)`'s
+     first -- or no mode argument at all -- Python's default is text
+     mode); `subprocess.run`/`check_output`/`Popen` with `text=True`
+     or `universal_newlines=True`, even when a `**kwargs` unpack
+     rides along.  Binary-mode IO (`"rb"`/`"wb"`,
+     `read_bytes`/`write_bytes`) is correct and never flagged, nor is
+     `.open()` on a module whose `open` takes no `encoding=`
+     (`tokenize`, `tarfile`, `os`, including `import ... as`
+     aliases); and
      any call that already passes `encoding=` (including
      `encoding=locale.getpreferredencoding()`) passes as-is -- this
      linter checks for the keyword's presence, not for a rationale
@@ -100,7 +105,8 @@ Suppression mechanisms:
 
   IMPLICIT_ENCODING_BASELINE (grandfather baseline, temporary).  The
   478 pre-existing sites across 139 files found the day this rule
-  landed (#2195) are listed by file in IMPLICIT_ENCODING_BASELINE.
+  landed (#2195) are listed by file in IMPLICIT_ENCODING_BASELINE,
+  minus the files already drained.
   Findings in a baselined file are still printed as warnings, they
   just don't flip --fail-on-warning's exit code -- new code and new
   files are gated from day one, the backlog drains separately
@@ -314,7 +320,7 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------
 #
 # What this is: the day this rule landed (#2195), it found 478
-# pre-existing IMPLICIT-ENCODING sites across these 139 files -- an
+# pre-existing IMPLICIT-ENCODING sites across 139 files -- an
 # unreviewable, repo-wide mechanical diff that would also collide
 # with everything else in flight.  Rather than ship the rule
 # soft-warn-only (which would not have caught the #2194 regression
@@ -346,10 +352,10 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
 # (fixing sites, then deleting the now-clean file from this set) is
 # tracked in #2197 -- do not add work items here, use that issue.
 #
-# Nothing may be ADDED to this set without justification. A new file
-# that legitimately needs a locale-dependent encoding is an inline
-# exemption at the call site with a comment explaining why, not a
-# baseline entry -- this set only ever holds the day-#2195 backlog.
+# Nothing may be ADDED to this set. A new implicit-encoding call gets
+# an explicit `encoding=` -- there is no inline exemption (see the
+# module docstring's Suppression section) -- not a baseline entry;
+# this set only ever holds what is left of the day-#2195 backlog.
 IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
     "scripts/alp_mcp/server.py",
     "scripts/alp_model/adapters/deepx.py",
@@ -373,7 +379,6 @@ IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
     "scripts/check_public_private.py",
     "scripts/check_stub_symbol_matrix.py",
     "scripts/check_toolchain_lock.py",
-    "scripts/check_write_text_newline.py",
     "scripts/check_zephyr_conf_parity.py",
     "scripts/flash_backends/baremetal_cmake_flash.py",
     "scripts/flash_backends/swd_probe.py",
@@ -400,7 +405,6 @@ IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
     "tests/scripts/test_alp_lock.py",
     "tests/scripts/test_alp_lock_metadata_coverage.py",
     "tests/scripts/test_alp_migrate.py",
-    "tests/scripts/test_alp_model_adapters.py",
     "tests/scripts/test_alp_model_package.py",
     "tests/scripts/test_alp_project_diagnostics.py",
     "tests/scripts/test_alp_project_scaffold_emit.py",
@@ -680,16 +684,50 @@ def _kwarg_value(node: ast.Call, name: str) -> ast.expr | None:
     return None
 
 
-def _open_mode_is_binary(node: ast.Call) -> bool | None:
+# Modules whose `open` takes no `encoding=` at all, so the finding's
+# fix would raise TypeError: tokenize.open() reads the PEP 263 cookie
+# itself, tarfile.open()'s "r"/"w" are tar modes, os.open() returns a
+# raw fd.
+_OPEN_WITHOUT_ENCODING_MODULES: frozenset[str] = frozenset({"tokenize", "tarfile", "os"})
+# Modules whose `open` shares the builtin open(file, mode, ...) signature.
+_BUILTIN_SIGNATURE_OPEN_MODULES: frozenset[str] = frozenset({"io", "builtins", "codecs"})
+
+
+def _module_aliases(tree: ast.AST) -> dict[str, str]:
+    """Local name -> module name for every `import m` / `import m as a`
+    in the file, at module AND function scope.
+
+    ponytail: scope-blind -- an alias bound in one function resolves
+    file-wide, and a variable that shadows an imported module name is
+    misread as the module.  Per-scope resolution if that ever bites.
+    """
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.asname:
+                    out[a.asname] = a.name
+                else:
+                    top = a.name.split(".")[0]
+                    out[top] = top
+    return out
+
+
+def _open_mode_is_binary(node: ast.Call, mode_index: int) -> bool | None:
     """Inspect an open()/Path.open() call's mode argument.
 
-    True if binary ("b" in a string-literal mode), False if text
-    (string-literal mode without "b", or no mode argument at all --
-    Python's own default is text mode "r"), None if the mode isn't a
-    string literal we can read statically (a variable, an f-string,
-    ...) -- callers should skip flagging rather than guess.
+    `mode_index` is the mode's positional slot: 1 for the builtin
+    `open(file, mode)`, 0 for `Path.open(mode)`.  True if binary ("b"
+    in a string-literal mode), False if text (string-literal mode
+    without "b", or no mode argument at all -- Python's own default is
+    text mode "r"), None if the mode isn't a string literal we can
+    read statically (a variable, an f-string, ...) -- callers should
+    skip flagging rather than guess.
     """
-    mode_expr = node.args[1] if len(node.args) >= 2 else _kwarg_value(node, "mode")
+    if len(node.args) > mode_index:
+        mode_expr = node.args[mode_index]
+    else:
+        mode_expr = _kwarg_value(node, "mode")
     if mode_expr is None:
         return False
     if isinstance(mode_expr, ast.Constant) and isinstance(mode_expr.value, str):
@@ -724,28 +762,39 @@ def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
     which passes because the keyword is present; this check verifies
     the keyword's presence, not a rationale comment on it.
 
-    A `**kwargs` unpack could carry `encoding=` this scan can't see
-    into -- such calls are skipped rather than guessed at.  A file
-    that fails to parse returns no findings; a syntax error isn't
-    this linter's job to report.
+    Also out of scope: `.open()` on a module whose `open` takes no
+    `encoding=` (`tokenize`, `tarfile`, `os`), resolved through
+    `import m` / `import m as a` at any scope.  An `.open()` on any
+    other owner (a `Path`, an unknown object) is still flagged.
+
+    A `**kwargs` unpack on `read_text`/`write_text`/`open` could carry
+    `encoding=` this scan can't see into -- those calls are skipped
+    rather than guessed at.  A subprocess call is NOT skipped: its
+    explicit `text=True` proves text mode, and the `**kwargs` of a
+    `_run(*args, **kw)` helper forwards cwd/env/check, not an
+    encoding.  A file that fails to parse returns no findings; a
+    syntax error isn't this linter's job to report.
     """
     try:
         tree = ast.parse(text)
     except SyntaxError:
         return []
 
+    aliases = _module_aliases(tree)
     out: list[tuple[int, int, str, str]] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        if any(kw.arg is None for kw in node.keywords):
-            continue  # **kwargs -- might carry encoding=, don't guess
         if any(kw.arg == "encoding" for kw in node.keywords):
             continue
 
         name = _call_name(node)
         if name is None:
             continue
+        if name not in _SUBPROCESS_TEXT_CALLS and any(
+            kw.arg is None for kw in node.keywords
+        ):
+            continue  # **kwargs -- might carry encoding=, don't guess
 
         suggestion: str | None = None
 
@@ -757,8 +806,20 @@ def scan_python_encoding(text: str) -> list[tuple[int, int, str, str]]:
                 f'encoding="utf-8" explicitly'
             )
         elif name == "open":
-            if _open_mode_is_binary(node) is False:
-                caller = "open()" if isinstance(node.func, ast.Name) else "Path.open()"
+            owner = (
+                aliases.get(node.func.value.id)
+                if isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                else None
+            )
+            builtin_shape = (
+                isinstance(node.func, ast.Name)
+                or owner in _BUILTIN_SIGNATURE_OPEN_MODULES
+            )
+            if owner in _OPEN_WITHOUT_ENCODING_MODULES:
+                pass
+            elif _open_mode_is_binary(node, 1 if builtin_shape else 0) is False:
+                caller = "open()" if builtin_shape else "Path.open()"
                 suggestion = (
                     f"implicit text encoding on {caller} -- Python "
                     f"resolves the default from the platform locale "

@@ -533,13 +533,13 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     # backlog, not a dumping ground: the file-level shape means a new
     # entry silently exempts every implicit-encoding call in that file,
     # so growing the set has to be a deliberate, test-breaking act.
-    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 139, (
+    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 137, (
         f"IMPLICIT_ENCODING_BASELINE grew to "
-        f"{len(linter.IMPLICIT_ENCODING_BASELINE)} files; it holds the "
-        f"frozen #2195 backlog (139 files) and may only ever SHRINK as "
-        f"#2197 drains it.  A new implicit-encoding call gets an explicit "
-        f"`encoding=`, or an inline exemption at the call site -- not a "
-        f"baseline entry."
+        f"{len(linter.IMPLICIT_ENCODING_BASELINE)} files; it holds what "
+        f"is left of the frozen #2195 backlog (137 files) and may only "
+        f"ever SHRINK as #2197 drains it.  A new implicit-encoding call "
+        f"gets an explicit `encoding=` -- there is no inline exemption "
+        f"-- not a baseline entry."
     )
 
     # #2197 guard 2 -- no stale entry.  Every listed file must still
@@ -992,6 +992,65 @@ def test_implicit_encoding_kwargs_unpack_not_flagged(tmp_path: Path) -> None:
     assert findings == []
 
 
+def test_implicit_encoding_subprocess_text_with_kwargs_unpack_flagged(
+    tmp_path: Path,
+) -> None:
+    """A subprocess call whose explicit `text=True` proves text mode is
+    flagged even with a `**kw` unpack -- the `_run(*args, **kw)` helper
+    shape forwards cwd/env/check, not an encoding (#2197)."""
+    p = _write(tmp_path, "tests/foo.py", """
+        import subprocess
+        def _run(*args, **kw):
+            return subprocess.run(["x", *args], capture_output=True, text=True, **kw)
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert len(findings) == 1
+    assert "subprocess.run" in findings[0].suggestion
+
+
+def test_implicit_encoding_path_open_mode_is_first_positional(
+    tmp_path: Path,
+) -> None:
+    """`Path.open(mode)` takes its mode as the FIRST positional, the
+    builtin `open(file, mode)` (and `io.open`) as the second -- a binary
+    mode is read from the right slot in every shape, and a text mode on
+    `Path.open` is still flagged (#2197)."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        import io
+        from pathlib import Path
+        a = Path("a").open("rb")
+        b = Path("a").open(mode="rb")
+        c = open("a", "rb")
+        d = io.open("a", "rb")
+        e = Path("a").open("r")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert [f.line for f in findings] == [7]
+
+
+def test_implicit_encoding_open_on_no_encoding_module_not_flagged(
+    tmp_path: Path,
+) -> None:
+    """`.open()` on a module whose `open` takes no `encoding=` --
+    `tokenize`, `tarfile`, `os` -- is not flagged, including an
+    `import ... as` alias bound at function scope: the finding's fix
+    would raise TypeError there (#2197).  An unknown owner still is
+    (see test_implicit_encoding_unrelated_open_call_not_flagged)."""
+    p = _write(tmp_path, "scripts/foo.py", """
+        import os
+        import tarfile
+        import tokenize
+        a = tokenize.open("x.py")
+        b = tarfile.open(fileobj=buf, mode="w")
+        c = os.open("x", os.O_RDONLY)
+        def f():
+            import tarfile as _tf
+            return _tf.open(fileobj=buf, mode="r")
+    """)
+    findings = linter.scan([p], base=tmp_path)
+    assert findings == []
+
+
 def test_implicit_encoding_unrelated_open_call_not_flagged(
     tmp_path: Path,
 ) -> None:
@@ -1099,7 +1158,7 @@ def test_baseline_file_does_not_fail_fail_on_warning(tmp_path: Path) -> None:
 def test_non_baseline_file_fails_fail_on_warning(tmp_path: Path) -> None:
     """A file NOT on IMPLICIT_ENCODING_BASELINE with the exact same
     implicit-encoding call DOES flip --fail-on-warning to exit 1 --
-    the baseline only covers the 139 files it names."""
+    the baseline only covers the files it names."""
     rel = "scripts/brand_new_file_not_on_baseline.py"
     assert rel not in linter.IMPLICIT_ENCODING_BASELINE
     _write(tmp_path, rel, 'open("x")\n')

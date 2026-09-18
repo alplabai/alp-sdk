@@ -681,7 +681,7 @@ python scripts\check_cross_platform.py
 Expected: exits 0, after printing a few hundred `IMPLICIT-ENCODING`
 warning lines — one per Python text-IO call with no explicit
 `encoding=` in the SDK's own `scripts/` and `tests/` files (478 of
-them across 139 files when the rule landed; the count only shrinks).
+them across 139 files when the rule landed; the file list only shrinks).
 Those sites are grandfathered by the `IMPLICIT_ENCODING_BASELINE`
 set in the script and are drained under #2197.
 
