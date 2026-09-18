@@ -1,17 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# aen-ospi-regcheck -- compile + DT-bind proof of the Alif Ensemble OSPI/HexSPI
-# controller (Synopsys DesignWare OSPI, zephyr/drivers/flash/flash_ospi_alif.c,
-# compatible "snps,designware-ospi") staging on the E1M-AEN801 (Ensemble E8,
-# M55-HE), via the bench RAM-run + RAM-console flow.
+# aen-ospi-regcheck -- controller proof on E1M-AEN801 and live JEDEC-ID bench
+# target for the populated E1M-AEN803 OSPI0 CS1 NOR.
 #
-# Plain prj.conf app (no alp_project.py board.yaml emit). BUILD-ONLY: this
-# proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
-# and the register file reads back live -- not a live XiP read (XiP setup is
-# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822, independent of
-# what's populated on the bus -- see src/main.c's CORRECTED PREMISE note,
-# #2041) and not a device-level transfer of any kind (controller-register
-# proof only). See src/main.c + the board overlay.
+# Plain prj.conf app (no alp_project.py board.yaml emit). See src/main.c and
+# the per-SKU overlays for the deliberately different proof contracts.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -21,7 +14,11 @@ cmake_minimum_required(VERSION 3.20)
 # point at the file directly -- this builds cleanly with a plain `west build -b
 # alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he` (otherwise the ITCM RAM-run
 # retarget is dropped and the image links into MRAM).
-set(DTC_OVERLAY_FILE "${CMAKE_CURRENT_SOURCE_DIR}/boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
+if(BOARD MATCHES "aen803")
+  set(DTC_OVERLAY_FILE "boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
+else()
+  set(DTC_OVERLAY_FILE "boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay")
+endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_ospi_regcheck LANGUAGES C)

@@ -1,0 +1,49 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Live OSPI0 CS1 proof for E1M-AEN803 (Ensemble E8, M55-HE). The 13-pad
+ * route is the shared E1M-AEN module route from
+ * metadata/e1m_modules/aen/alif-ospi.tsv. Unlike E1M-AEN801, this SKU fits
+ * the IS25WX256-JHLE NOR on CS1; #2041 measured its JEDEC ID reliably at
+ * 20 MHz, while the 100 MHz DT default produced sampling errors.
+ */
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&pinctrl {
+	pinctrl_ospi0: pinctrl_ospi0 {
+		group0 {
+			pinmux = <PIN_P12_0__OSPI0_SCLK_C>,
+				 <PIN_P12_1__OSPI0_SCLKN_C>,
+				 <PIN_P12_2__OSPI0_RXDS_C>,
+				 <PIN_P12_3__OSPI0_SS0_C>,
+				 <PIN_P12_4__OSPI0_SS1_C>,
+				 <PIN_P2_0__OSPI0_D0_B>,
+				 <PIN_P2_1__OSPI0_D1_B>,
+				 <PIN_P6_2__OSPI0_D2_C>,
+				 <PIN_P6_3__OSPI0_D3_C>,
+				 <PIN_P6_4__OSPI0_D4_C>,
+				 <PIN_P6_5__OSPI0_D5_C>,
+				 <PIN_P6_6__OSPI0_D6_C>,
+				 <PIN_P0_7__OSPI0_D7_A>;
+			input-enable;
+			drive-strength = <12>;
+			slew-rate = "fast";
+		};
+	};
+};
+
+&ospi0 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_ospi0>;
+	pinctrl-names = "default";
+	cs-pin = <1>;
+	bus-speed = <20000000>;
+};

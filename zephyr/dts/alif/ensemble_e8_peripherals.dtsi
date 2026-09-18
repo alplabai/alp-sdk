@@ -788,17 +788,19 @@
 	 * disabled, a dead bus, not the overclock an earlier revision of this
 	 * fix claimed (HWRM S16.1.5.3.5; see flash_ospi_alif.c:30-80).
 	 *
-	 * BUILD-ONLY today: this node's own regcheck (see
-	 * examples/aen/aen-ospi-regcheck) proves it BINDS + the hal_alif
-	 * init/XiP-enable entry points compile and link, but makes no
-	 * device-level transfer -- not a live XiP read.  XiP setup itself
+	 * This node's own regcheck (see examples/aen/aen-ospi-regcheck) proves it
+	 * binds and the controller register path is live on AEN801; on AEN803 it
+	 * is the bench target for reading the fitted CS1 NOR's JEDEC ID through
+	 * flash_driver_api. A prior raw-register probe captured that ID; this API
+	 * path remains to be run. Addressed read/program/erase remain tracked in
+	 * #915.
+	 * XiP setup itself
 	 * (alif_hal_ospi_xip_enable()) is a deliberate skip regardless of what's
 	 * populated: OSPI_XIP_SER does not exist on this die
 	 * (SOC_FEAT_OSPI_HAS_XIP_SER=0) -- see flash_ospi_alif.c.  CORRECTED
-	 * (#2041): this comment used to claim "no octal-NOR/HyperBus part is
-	 * populated on the E1M-AEN801" as an additional reason -- that premise
-	 * is wrong; OSPI0 SS1 answers a JEDEC ID read on E1M-AEN803 (see
-	 * examples/aen/aen-ospi-regcheck/src/main.c's CORRECTED PREMISE note).
+	 * (#2041): E1M-AEN801 fits neither memory; E1M-AEN803 fits both, and
+	 * OSPI0 SS1 answers a JEDEC ID read there. The SKU-scoped distinction is
+	 * captured by the regcheck's per-board overlays.
 	 * No pinctrl-0: the enabling board/example overlay supplies it (the
 	 * eth/isp precedent) -- see examples/aen/aen-ospi-regcheck.
 	 */

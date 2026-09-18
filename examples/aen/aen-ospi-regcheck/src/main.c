@@ -2,10 +2,9 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-ospi-regcheck -- compile + DT-bind + register-file proof of the Alif
- * Ensemble OSPI/HexSPI controller (Synopsys DesignWare OSPI, compatible
- * "snps,designware-ospi") on the E1M-AEN801 (Ensemble E8, M55-HE/M55-HP), via
- * the bench RAM-run + RAM-console flow.  Mirrors aen-isp-regcheck.
+ * aen-ospi-regcheck -- controller proof on E1M-AEN801 plus a live JEDEC-ID
+ * bench target for E1M-AEN803's populated OSPI0 CS1 NOR. Both use the same Alif
+ * Ensemble E8 DesignWare OSPI controller and Tier-1.5 hal_alif-backed driver.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
@@ -19,7 +18,7 @@
  *   driver's own POST_KERNEL init plus this app's direct call both succeed
  *   against the same two-slot table).
  *
- *   So this app validates what IS deliverable build-green on this batch:
+ *   Both SKU targets validate:
  *     1. the ospi0 node EXISTS and BINDS to its expected compatible
  *        ("snps,designware-ospi"),
  *     2. the reg base + aes-reg base + IRQ the node carries match the fork
@@ -37,6 +36,11 @@
  *        driver's file-header MEASURED block) -- a real bus read, not merely
  *        "the call returned".
  *
+ *   E1M-AEN803 adds one device-level operation: flash_read_jedec_id() sends
+ *   opcode 0x9f to CS1 at the raw-capture-proven 20 MHz rate and requires the
+ *   fitted IS25WX256-JHLE response 9d 5b 19. E1M-AEN801 deliberately skips
+ *   this step because its OSPI memories are not assembled on that SKU.
+ *
  * WHY XiP IS SKIPPED, NOT ATTEMPTED: XiP setup (alif_hal_ospi_xip_enable())
  * is not called here at all.  OSPI_XIP_SER (offset 0x10C), the register that
  * call touches, DOES NOT EXIST on this die (SOC_FEAT_OSPI_HAS_XIP_SER=0,
@@ -53,27 +57,13 @@
  * SOC_FEAT_OSPI_HAS_XIP_SER=0 on AE822".  This one die-level reason is
  * sufficient on its own and needs no premise about what's populated.
  *
- * CORRECTED PREMISE (#2041): a prior version of this header also justified
- * the skip with a second, board-population layer -- "the bench unit has NO
- * OSPI memory fitted (maintainer, 2026-08-30)", against a design-intent
- * Macronix MX25UM25645GXDI00 at SS1 per the module BOM.  That premise is now
- * known WRONG.  OSPI0 SS1 (CS1) on E1M-AEN803, serial 2026W36-0002, answers
- * a JEDEC ID read (opcode 0x9F, and again on the alternate ISSI opcode 0x9E)
- * with `9d 5b 19 10` -- 0x9d = ISSI, 5b 19 = the IS25WX256 type/capacity
- * pair -- i.e. a populated ISSI IS25WX256-JHLE, not a Macronix part, and not
- * empty.  See metadata/e1m_modules/E1M-AEN801.yaml (NOR now mapped to SS1 to
- * match) and metadata/e1m_modules/aen/alif-ospi.tsv, the shared AEN-family
- * OSPI0 pinout both that measurement and this app's pinctrl group (see the
- * board overlay) derive from.
- *
- * That measurement was taken on E1M-AEN803, not this app's own target
- * (E1M-AEN801/M55-HE) -- and, critically, NOT through this app: everything
- * below is a controller-register proof (DT bind, reg/aes-reg/irq match,
- * CTRLR0 readback) with ZERO device-level transfers -- no opcode is ever
- * shifted out to a chip select.  So "the OSPI memories are silent" was never
- * actually tested at the device level by anything in this repo; this app's
- * PASS has never been, and still is not, evidence either way about whether a
- * part answers on ITS specific board.
+ * SKU SCOPE (#2041): E1M-AEN801 and E1M-AEN803 share the PCB and route but
+ * not the external-memory population. E1M-AEN801 fits neither OSPI memory.
+ * E1M-AEN803 fits both; a raw-register probe on serial 2026W36-0002 returned
+ * `9d 5b 19 10` from CS1 at 20 MHz. The first three bytes are the Zephyr
+ * JEDEC-ID contract. This app is the follow-up bench target; its API path has
+ * not yet produced that result. The fitted device is ISSI, not the Macronix
+ * part named by an earlier BOM read.
  *
  * This example has caught three real, distinct silicon/build bugs (the
  * clock-gate fault, the MPU Device-mapping regression, and the OSPI_XIP_SER
@@ -84,12 +74,14 @@
  * only the XiP step is a deliberate, explained skip.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #include <cmsis_core.h>
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
+#include <zephyr/drivers/flash.h>
 #include <zephyr/fatal.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/printk.h>
@@ -98,6 +90,10 @@
 
 /* The OSPI node (status set by the board overlay). */
 #define OSPI_NODE DT_NODELABEL(ospi0)
+
+#define OSPI_JEDEC_MFR_EXPECTED      0x9DU
+#define OSPI_JEDEC_TYPE_EXPECTED     0x5BU
+#define OSPI_JEDEC_CAPACITY_EXPECTED 0x19U
 
 /*
  * A hal_alif call in this app can bus-fault before reaching the RESULT
@@ -262,7 +258,32 @@ int main(void)
 	printk("hal   : CTRLR0=0x%08x (exp reset value 0x%08x)\n", ctrlr0, OSPI_CTRLR0_RESET_VALUE);
 
 	/*
-	 * Step 6: XiP is an explicit, stated SKIP -- not attempted. See the
+	 * Step 6: exercise the one flash operation proven on the fitted part.
+	 * E1M-AEN803's overlay selects CS1 and lowers SCLK to the measured-safe
+	 * 20 MHz. E1M-AEN801 has no assembled target, so skipping there is a SKU
+	 * fact rather than a tolerated transfer failure.
+	 */
+	uint8_t jedec_id[3] = { 0 };
+	int     jedec_rc    = -ENOTSUP;
+	bool    jedec_ok    = true;
+
+#if defined(CONFIG_BOARD_ALP_E1M_AEN803_M55_HE)
+	jedec_rc = device_is_ready(ospi_dev) ? flash_read_jedec_id(ospi_dev, jedec_id) : -ENODEV;
+	jedec_ok = (jedec_rc == 0) && (jedec_id[0] == OSPI_JEDEC_MFR_EXPECTED) &&
+	           (jedec_id[1] == OSPI_JEDEC_TYPE_EXPECTED) &&
+	           (jedec_id[2] == OSPI_JEDEC_CAPACITY_EXPECTED);
+	printk("flash : flash_read_jedec_id() rc=%d id=%02x %02x %02x "
+	       "(expected 9d 5b 19, ISSI IS25WX256)\n",
+	       jedec_rc,
+	       jedec_id[0],
+	       jedec_id[1],
+	       jedec_id[2]);
+#else
+	printk("flash : JEDEC ID SKIPPED -- E1M-AEN801 fits no OSPI0 memory\n");
+#endif
+
+	/*
+	 * Step 7: XiP is an explicit, stated SKIP -- not attempted. See the
 	 * module header for why: OSPI_XIP_SER (offset 0x10C) does not exist on
 	 * AE822 (SOC_FEAT_OSPI_HAS_XIP_SER=0), so alif_hal_ospi_xip_enable()
 	 * bus-faults unconditionally; there is no rc that could report this as a
@@ -277,29 +298,45 @@ int main(void)
 	 * "snps,designware-ospi" at the fork reg/aes-reg base with IRQ 96 --
 	 * AND alif_hal_ospi_initialize() was called and returned OSPI_ERR_NONE
 	 * both from the driver's own init and directly from this app -- AND the
-	 * register file reads back its documented CTRLR0 reset value. XiP setup
+	 * register file reads back its documented CTRLR0 reset value. On AEN803,
+	 * the CS1 NOR must also return its exact three-byte JEDEC ID. XiP setup
 	 * is out of scope for this gate (see the module header SKIP note --
 	 * OSPI_XIP_SER does not exist on AE822, independent of what any chip
-	 * select carries); this app makes no device-level transfer either way,
-	 * so its PASS says nothing about whether a NOR/HyperBus part answers.
+	 * select carries).
 	 */
-	if (node_ok && hal_init_ok && ctrlr0_ok) {
+	if (node_ok && hal_init_ok && ctrlr0_ok && jedec_ok) {
+#if defined(CONFIG_BOARD_ALP_E1M_AEN803_M55_HE)
+		printk("RESULT PASS: OSPI/HexSPI node BINDS; controller init and CTRLR0 "
+		       "readback pass; JEDEC ID = %02x %02x %02x (ISSI IS25WX256); "
+		       "XiP SKIPPED (no XIP_SER on this die)\n",
+		       jedec_id[0],
+		       jedec_id[1],
+		       jedec_id[2]);
+#else
 		printk("RESULT PASS: OSPI/HexSPI node BINDS -- ospi0@83000000 binds to "
 		       "snps,designware-ospi at the fork reg/aes-reg base with IRQ 96; "
 		       "alif_hal_ospi_initialize() is reachable and links; CTRLR0 reads "
 		       "its documented reset value; XiP SKIPPED (no XIP_SER on this die); "
 		       "no device-level transfer attempted (controller-register proof only)\n");
+#endif
 	} else {
 		printk("RESULT FAIL: OSPI/HexSPI node NOT staged "
-		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d -- node "
+		       "(bound=%d base_ok=%d irq_ok=%d hal_init_ok=%d ctrlr0_ok=%d "
+		       "jedec_ok=%d jedec_rc=%d id=%02x %02x %02x -- node "
 		       "missing, disabled, bound to the wrong compatible/reg/irq, the "
 		       "hal_alif init call did not return OSPI_ERR_NONE, or the register "
-		       "file did not read back its reset value)\n",
+		       "file did not read back its reset value, or the AEN803 CS1 NOR did "
+		       "not return 9d 5b 19)\n",
 		       (int)OSPI_BOUND,
 		       (int)(ospi_base == OSPI_BASE_EXPECTED && ospi_aes_base == OSPI_AES_BASE_EXPECTED),
 		       (int)(ospi_irq == OSPI_IRQ_EXPECTED),
 		       (int)hal_init_ok,
-		       (int)ctrlr0_ok);
+		       (int)ctrlr0_ok,
+		       (int)jedec_ok,
+		       jedec_rc,
+		       jedec_id[0],
+		       jedec_id[1],
+		       jedec_id[2]);
 	}
 
 	return 0;
