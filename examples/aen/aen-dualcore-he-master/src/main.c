@@ -105,7 +105,7 @@
 #define PEER_HB_TIMEOUT_MS 2000U
 #define PEER_HB_POLL_MS    20U
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP) || defined(CONFIG_BOARD_ALP_E1M_AEN803_M55_HP)
 
 /* PEER role: passive. This core's ATOC entry is ["load","boot","deferred"],
  * so it never runs until the HE master's boot_core() call un-defers it --

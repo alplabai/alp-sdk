@@ -25,6 +25,7 @@ tests:
   alp_sdk.examples.aen.alp_rpc.hp_host:
     platform_allow:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example
@@ -37,6 +38,7 @@ tests:
   alp_sdk.examples.aen.alp_rpc.he_remote:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

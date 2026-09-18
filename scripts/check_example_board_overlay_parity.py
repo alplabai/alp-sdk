@@ -250,10 +250,46 @@ exists: that is sysbuild's per-image configuration directory
 (`zephyr/share/sysbuild/cmake/modules/sysbuild_extensions.cmake`, the
 `${APP_DIR}/sysbuild/${ZBUILD_APPLICATION}` lookup). Outside a git checkout
 (e.g. a `git archive` tree) every file on disk counts.
+
+Extension (issue #2209): same-PCB sibling undeclared
+------------------------------------------------------
+A fourth, independent check: the "broader, deferred alternative" the
+`_platform_allow_overlay_problems` docstring above filed as a follow-up when
+#2101 landed, now implemented. A scenario's `platform_allow` names a real
+`alp_e1m_*` SKU A core target; `boards/` ships a qualified overlay for that
+same core under a SIBLING SKU B, where A and B are the SAME PCB (their
+`metadata/e1m_modules/E1M-<SKU>.yaml` declare the same `family` AND the same
+`silicon_variant` -- the identical pairing
+`check_example_board_overlay_content_parity.py`'s `_pcb_key` uses); B's
+target is not declared anywhere in that scenario. Unlike
+`_platform_allow_overlay_problems` above, the trigger here is `boards/`
+CONTENT plus SoM-preset pairing, not "some declared entry already matches
+something on disk" -- so, unlike that check, this one DOES catch the ~50
+scenarios #2209 declared the AEN803 target for (each named only the AEN801
+target while `boards/` already shipped the same-PCB AEN803 overlay for the
+same core).
+
+A scenario that pins one literal board file via `extra_dtc_overlay_files`,
+`extra_conf_files`, `extra_overlay_confs` or `extra_args` (twister keys that
+REPLACE, not supplement, Zephyr's own board-default-overlay auto-discovery)
+is skipped here: that shape is deliberately single-SKU per scenario by
+design -- the `aen-sdhc-probe`/`aen-ethernet-link` twin scenarios #2209
+added, each pinning one SKU's file explicitly and giving the other SKU its
+OWN twin scenario rather than a second `platform_allow` entry on the same
+one. Flagging it as "the sibling SKU is undeclared" would be wrong advice:
+adding a `platform_allow` entry there, without a twin scenario, is exactly
+the #2198 hazard `check_example_board_overlay_content_parity.py`'s
+`_testcase_pin_problems` already governs -- this check yields to that one
+rather than double-governing the same file.
+
+On this tree today this check is green (0 problems) once #2209's ~50
+scenario declarations and 2 twin scenarios land; it was red on the ~50
+before them, which is exactly the class it exists to catch.
 """
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -513,10 +549,149 @@ def _stranded_boards_dir_problems(root: Path) -> list[str]:
     ]
 
 
+_EXTRA_BOARD_FILE_KEYS = (
+    "extra_dtc_overlay_files", "extra_conf_files",
+    "extra_overlay_confs", "extra_args",
+)
+_QUALIFIED_STEM_RE = re.compile(r"^alp_e1m_([a-z0-9]+)_(.+)$")
+
+
+def _scenario_platform_allow_and_pins(testcase_yaml: Path):
+    """Yield (scenario_name, platform_allow entries, pins_own_board_file)
+    per scenario in a testcase.yaml. `pins_own_board_file` is True if the
+    scenario (or the file's `common:` block) sets any of twister's
+    extra-board-file keys -- those REPLACE Zephyr's own board-default-
+    overlay auto-discovery with one literal file regardless of
+    platform_allow, which is exactly the shape
+    `check_example_board_overlay_content_parity.py`'s
+    `_testcase_pin_problems` already governs (the `aen-sdhc-probe`/
+    `aen-ethernet-link` twin scenarios, issue #2209 item 3): such a
+    scenario is deliberately single-SKU by design, not a missing
+    `platform_allow` entry."""
+    with testcase_yaml.open(encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+
+    def _as_list(value):
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.split()
+        return list(value)
+
+    common = doc.get("common") or {}
+    common = common if isinstance(common, dict) else {}
+    common_allow = _as_list(common.get("platform_allow"))
+    common_pins = any(common.get(k) for k in _EXTRA_BOARD_FILE_KEYS)
+
+    tests = doc.get("tests") or {}
+    if not isinstance(tests, dict):
+        return
+    for scenario_name, scenario in tests.items():
+        if not isinstance(scenario, dict):
+            continue
+        allow = _as_list(scenario.get("platform_allow"))
+        if allow is None:
+            allow = common_allow or []
+        pins = common_pins or any(scenario.get(k) for k in _EXTRA_BOARD_FILE_KEYS)
+        yield scenario_name, {str(e) for e in allow}, pins
+
+
+def _all_preset_pcb_and_topology(presets_dir: Path
+                                 ) -> dict[str, tuple[tuple[str, str] | None, dict[str, str]]]:
+    """lowercase SKU (e.g. 'aen801') -> ((family, silicon_variant) or None,
+    {core: raw fully-qualified board target}), for every
+    `metadata/e1m_modules/E1M-*.yaml` preset. Read once per run, not once
+    per scenario -- there are ~10 presets and potentially hundreds of
+    scenarios."""
+    out: dict[str, tuple[tuple[str, str] | None, dict[str, str]]] = {}
+    for preset in sorted(presets_dir.glob("E1M-*.yaml")):
+        sku = preset.stem[len("E1M-"):].lower()
+        with preset.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        family, variant = doc.get("family"), doc.get("silicon_variant")
+        pcb = (family, variant) if family and variant else None
+        topology = doc.get("topology") or {}
+        targets: dict[str, str] = {}
+        if isinstance(topology, dict):
+            for core, entry in topology.items():
+                if isinstance(entry, dict) and "board" in entry:
+                    targets[core] = str(entry["board"]).strip().split()[0]
+        out[sku] = (pcb, targets)
+    return out
+
+
+def _same_pcb_sibling_undeclared_problems(root: Path) -> list[str]:
+    """Issue #2209 item 4a: a scenario declares SKU A's core target while
+    `boards/` ships the same-PCB SKU B's file for that same core, and B is
+    undeclared anywhere in that scenario. See the module docstring's
+    "Extension (issue #2209)" section for the full rationale, including
+    why scenarios that pin one literal board file are skipped here."""
+    problems: list[str] = []
+    examples_dir = root / "examples"
+    presets_dir = root / "metadata" / "e1m_modules"
+    if not examples_dir.is_dir() or not presets_dir.is_dir():
+        return problems
+
+    presets = _all_preset_pcb_and_topology(presets_dir)
+
+    for testcase_yaml in sorted(examples_dir.rglob("testcase.yaml")):
+        example_dir = testcase_yaml.parent
+        rel = example_dir.relative_to(root)
+        boards_dir = example_dir / "boards"
+        if not boards_dir.is_dir():
+            continue
+        present_stems = {f.stem for f in boards_dir.iterdir() if f.is_file()}
+        if not any(s.startswith(_SOM_BOARD_PREFIX) for s in present_stems):
+            continue
+
+        for scenario, allow, pins in _scenario_platform_allow_and_pins(testcase_yaml):
+            if pins:
+                continue
+            som_entries = {e for e in allow if e.startswith(_SOM_BOARD_PREFIX)}
+            if not som_entries:
+                continue
+            declared_stems = {
+                s for e in som_entries for s in _qualified_target_to_stems(e)
+            }
+
+            for entry in sorted(som_entries):
+                m = _QUALIFIED_STEM_RE.match(entry.replace("/", "_"))
+                if not m:
+                    continue
+                sku_a, suffix = m.group(1), m.group(2)
+                pcb_a = presets.get(sku_a, (None, {}))[0]
+                if pcb_a is None:
+                    continue
+
+                for sku_b, (pcb_b, targets_b) in presets.items():
+                    if sku_b == sku_a or pcb_b != pcb_a:
+                        continue
+                    for raw_target in targets_b.values():
+                        m2 = _QUALIFIED_STEM_RE.match(raw_target.replace("/", "_"))
+                        if not m2 or m2.group(2) != suffix:
+                            continue
+                        stems_b = _qualified_target_to_stems(raw_target)
+                        if not any(s in present_stems for s in stems_b):
+                            continue  # not shipped -- #2101's business, not this one
+                        if any(s in declared_stems for s in stems_b):
+                            continue  # already declared
+                        problems.append(
+                            f"{rel}: testcase.yaml scenario {scenario!r} "
+                            f"declares platform_allow entry '{entry}' (SKU "
+                            f"{sku_a.upper()}) but boards/{stems_b[0]}.* "
+                            f"ships the same-PCB SKU {sku_b.upper()}'s file "
+                            f"for the same core, undeclared in this "
+                            f"scenario -- add '{raw_target}' to "
+                            f"platform_allow (issue #2209 class)"
+                        )
+    return problems
+
+
 def find_problems(root: Path) -> list[str]:
     problems = _declared_core_overlay_problems(root)
     problems.extend(_platform_allow_overlay_problems(root))
     problems.extend(_stranded_boards_dir_problems(root))
+    problems.extend(_same_pcb_sibling_undeclared_problems(root))
     return problems
 
 
@@ -534,7 +709,9 @@ def main() -> int:
     print("OK: every example board.yaml core with an app: key, and every "
           "testcase.yaml alp_e1m_* platform_allow entry, has a matching "
           "boards/ overlay wherever the example ships qualified overlays; "
-          "every boards/ directory sits next to a CMakeLists.txt.")
+          "every boards/ directory sits next to a CMakeLists.txt; and no "
+          "scenario leaves a same-PCB sibling SKU's shipped overlay "
+          "undeclared.")
     return 0
 
 

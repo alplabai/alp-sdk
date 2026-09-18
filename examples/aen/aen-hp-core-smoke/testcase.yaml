@@ -28,6 +28,7 @@ tests:
   alp_sdk.examples.aen.hp_core_smoke.aen:
     platform_allow:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

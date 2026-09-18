@@ -33,6 +33,7 @@ tests:
   alp_sdk.examples.aen.ethernet_link.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example
@@ -63,6 +64,27 @@ tests:
     # error.
     extra_dtc_overlay_files:
       - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - mdio-managed.overlay
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - ethernet
+      - dwmac
+      - mdio
+    build_only: true   # compile-proof only; MDIO-managed PHY not bench-verified.
+
+  # AEN803 twin of the scenario above (issue #2209): a platform_allow entry
+  # alone would have applied the AEN801 file above to an AEN803 build --
+  # extra_dtc_overlay_files REPLACES CMake's board-default-overlay
+  # auto-discovery, so it always names one literal file regardless of which
+  # platform_allow target twister is building. Same DHCP/MDIO rationale as
+  # the scenario above, on the AEN803 M55-HE target instead.
+  alp_sdk.examples.aen.ethernet_link.aen803.mdio_managed:
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
       - mdio-managed.overlay
     tags:
       - alp-sdk

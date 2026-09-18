@@ -3,7 +3,10 @@
 
 Covers the issue #2101 extension: a testcase.yaml platform_allow entry
 for an alp_e1m_* target with no matching boards/ overlay, while boards/
-ships an alp_e1m_*-qualified overlay for a different target.
+ships an alp_e1m_*-qualified overlay for a different target. Also covers
+the issue #2209 item 4a extension: a scenario declares SKU A's core target
+while boards/ ships the same-PCB SKU B's file for that same core, and B is
+undeclared.
 
 Run locally:
 
@@ -17,6 +20,29 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_example_board_overlay_parity.py"
+
+# A minimal pair of same-PCB SoM presets (same family + silicon_variant),
+# each with one core's topology.<core>.board: target -- enough for
+# _all_preset_pcb_and_topology to pair them the same way
+# check_example_board_overlay_content_parity.py's _pcb_key does.
+_PRESET_TMPL = """\
+family: {family}
+silicon_variant: {variant}
+topology:
+  m55_he:
+    board: alp_e1m_{sku}_m55_he/ae822fa0e5597ls0/rtss_he
+"""
+
+
+def _write_paired_presets(tmp_path: Path, sku_a: str = "aen801", sku_b: str = "aen803",
+                           family: str = "alif-ensemble", variant: str = "AE822FA0E5597LS0") -> None:
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True, exist_ok=True)
+    for sku in (sku_a, sku_b):
+        (presets_dir / f"E1M-{sku.upper()}.yaml").write_text(
+            _PRESET_TMPL.format(family=family, variant=variant, sku=sku),
+            encoding="utf-8",
+        )
 
 _TESTCASE_TMPL = """\
 sample:
@@ -308,3 +334,128 @@ def test_tracked_stranded_boards_dir_fails(tmp_path):
     assert proc.returncode != 0
     assert "examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt" in (
         proc.stdout + proc.stderr)
+
+
+# --- issue #2209 item 4a: same-PCB sibling undeclared -----------------------
+
+def test_same_pcb_sibling_undeclared_fails(tmp_path):
+    """The #2209 defect class itself: a scenario declares only SKU A's
+    core target, boards/ ships the same-PCB SKU B's file for that same
+    core too, and the scenario never declares B -- must fail, naming the
+    example, the declared entry, and the fix."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-undeclared-sibling",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "aen-undeclared-sibling" in out
+    assert "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he" in out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'" in out
+
+
+def test_same_pcb_sibling_declared_passes(tmp_path):
+    """The fix for the case above: both same-PCB SKUs declared -- must
+    pass."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-both-declared",
+        platform_allow=[
+            "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
+            "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
+        ],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_overlay_not_shipped_is_not_flagged(tmp_path):
+    """boards/ ships only SKU A's overlay -- the sibling SKU B has no
+    file on disk at all, so this check has nothing to compare against
+    (that gap, if any, is check_example_board_overlay_content_parity.py's
+    business once an overlay exists, not this one's before it does)."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-sibling-not-shipped",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=["alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he"],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_pinned_scenario_is_not_flagged(tmp_path):
+    """A scenario that pins one literal board file via
+    extra_dtc_overlay_files is single-SKU by design (the
+    aen-sdhc-probe/aen-ethernet-link twin-scenario shape, issue #2209 item
+    3) -- check_example_board_overlay_content_parity.py's
+    _testcase_pin_problems governs that shape; this check must yield to
+    it, not double-flag the same scenario as "missing platform_allow"."""
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / "aen-pinned"
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n"
+        "  name: aen-pinned\n"
+        "tests:\n"
+        "  alp_sdk.examples.test.aen-pinned:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    extra_dtc_overlay_files:\n"
+        "      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
+        "      - extra.overlay\n"
+        "    tags:\n"
+        "      - alp-sdk\n"
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_different_core_is_not_flagged(tmp_path):
+    """SKU A's declared core (m55_he) and SKU B's shipped file are for
+    DIFFERENT cores -- not a same-core same-PCB pairing, so no fix is
+    owed."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    (presets_dir / "E1M-AEN801.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    (presets_dir / "E1M-AEN803.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_hp:\n"
+        "    board: alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp\n",
+        encoding="utf-8",
+    )
+    _write_example(
+        tmp_path, "aen-different-core",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
