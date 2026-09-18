@@ -3,15 +3,10 @@
 # aen-ospi-regcheck -- compile + DT-bind proof of the Alif Ensemble OSPI/HexSPI
 # controller (Synopsys DesignWare OSPI, zephyr/drivers/flash/flash_ospi_alif.c,
 # compatible "snps,designware-ospi") staging on the E1M-AEN801 and E1M-AEN803
-# (both Ensemble E8, M55-HE), via the bench RAM-run + RAM-console flow.
+# (both Ensemble E8, M55-HE), plus the AEN803 live JEDEC-ID bench target.
 #
-# Plain prj.conf app (no alp_project.py board.yaml emit). BUILD-ONLY: this
-# proves the ospi0 node BINDS + alif_hal_ospi_initialize() compiles, links,
-# and the register file reads back live -- not a live XiP read (XiP setup is
-# a deliberate SKIP: OSPI_XIP_SER does not exist on AE822, independent of
-# what's populated on the bus -- see src/main.c's CORRECTED PREMISE note,
-# #2041) and not a device-level transfer of any kind (controller-register
-# proof only). See src/main.c + the board overlay.
+# Plain prj.conf app (no alp_project.py board.yaml emit). See src/main.c and
+# the per-SKU overlays for the deliberately different proof contracts.
 
 cmake_minimum_required(VERSION 3.20)
 

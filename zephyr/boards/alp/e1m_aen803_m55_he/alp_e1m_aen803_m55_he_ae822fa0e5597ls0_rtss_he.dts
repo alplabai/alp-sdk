@@ -15,7 +15,8 @@
  *     OSPI0 NOR (IS25WX256-JHLE) + HyperRAM (S80KS5122GABHM02) are
  *     populated; neither is used for XIP boot here (hal_alif's
  *     alif_hal_ospi_xip_enable() targets the XIP_SER register, absent on
- *     this die, and flash_ospi_alif.c ships no flash_driver_api -- #915);
+ *     this die, and flash_ospi_alif.c implements only JEDEC-ID probing,
+ *     not addressed read/program/erase -- #915);
  *   - lays down a production MCUboot partition map in MRAM.
  *
  * NOTE (AMP, #1069): HE's slot0 lives in its OWN disjoint MRAM window,
@@ -133,8 +134,9 @@
  * MRAM-only regardless: OSPI0 NOR (IS25WX256-JHLE) + HyperRAM
  * (S80KS5122GABHM02) are populated; hal_alif's alif_hal_ospi_xip_enable()
  * targets the XIP_SER register, absent on this die, and flash_ospi_alif.c
- * ships no flash_driver_api -- #915 (see the banner above), so boot, this
- * core's own slot0, reserved headroom, and storage all live in MRAM.
+ * implements only JEDEC-ID probing, not addressed read/program/erase -- #915
+ * (see the banner above), so boot, this core's own slot0, reserved headroom,
+ * and storage all live in MRAM.
  */
 &mram {
 	compatible = "alif,mram-flash-controller";

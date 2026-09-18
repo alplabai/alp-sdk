@@ -380,8 +380,10 @@ endif()
 # add_subdirectory_ifdef precedent shared with USE_ALIF_HAL_UTIMER/_ANALOG).
 # hal_alif's own ospi CMakeLists is header-self-contained (its
 # zephyr_include_directories(include) fires when USE_ALIF_HAL_OSPI pulls the
-# subdirectory in), so no extra include path is needed here.  HW-BLOCKED /
-# BUILD-ONLY this batch: see the OSPI_ALIF Kconfig help + examples/aen/aen-ospi-regcheck.
+# subdirectory in), so no extra include path is needed here. The controller
+# path is silicon-proven; a raw-register JEDEC capture defines the next
+# aen-ospi-regcheck bench target. Addressed read/program/erase stay tracked in
+# #915. See the OSPI_ALIF Kconfig help + aen-ospi-regcheck.
 zephyr_library_sources_ifdef(CONFIG_OSPI_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/flash/flash_ospi_alif.c)
 

@@ -855,20 +855,20 @@ class TestAenHardwareFactsComeFromMetadata(unittest.TestCase):
         # ospi_psram_xip.c still calls aes_enable_xip() under that same
         # guard.  The real, non-overreaching reason: hal_alif's OWN XIP
         # enable path targets that absent register, and flash_ospi_alif.c
-        # ships no flash_driver_api at all (#915) -- true regardless of
-        # silicon capability.
+        # implements only JEDEC-ID probing rather than storage operations
+        # (#915) -- true regardless of silicon capability.
         self.assertIn(
             "OSPI0 NOR (TEST-NOR-PART) + HyperRAM (TEST-RAM-PART) are "
             "populated; neither is used for XIP boot here (hal_alif's "
             "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-            "absent on this die, and flash_ospi_alif.c ships no "
-            "flash_driver_api -- #915)", flat)
+            "absent on this die, and flash_ospi_alif.c implements only "
+            "JEDEC-ID probing, not addressed read/program/erase -- #915)", flat)
         self.assertIn(
             "MRAM-only regardless: OSPI0 NOR (TEST-NOR-PART) + HyperRAM "
             "(TEST-RAM-PART) are populated; hal_alif's "
             "alif_hal_ospi_xip_enable() targets the XIP_SER register, "
-            "absent on this die, and flash_ospi_alif.c ships no "
-            "flash_driver_api -- #915", flat)
+            "absent on this die, and flash_ospi_alif.c implements only "
+            "JEDEC-ID probing, not addressed read/program/erase -- #915", flat)
         self.assertNotIn("not populated", flat)
         # The die-level fact must never stand alone as the "why" -- if a
         # future edit reintroduces "so" right after it, this is the wrong

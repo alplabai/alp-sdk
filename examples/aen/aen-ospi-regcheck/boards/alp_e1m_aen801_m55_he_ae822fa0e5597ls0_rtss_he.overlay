@@ -30,6 +30,8 @@
  * NOR at SS1 on E1M-AEN803 (see src/main.c).  Pad config
  * (input-enable/drive-strength=12/slew-rate=fast) is unchanged from the
  * prior group -- generic Alif pad electrical settings, not route-specific.
+ * The paired AEN803 overlay carries the same CS/rate settings and uses them
+ * for its JEDEC-ID bench target. This SKU fits no target and never transfers.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -73,4 +75,6 @@
 	status = "okay";
 	pinctrl-0 = <&pinctrl_ospi0>;
 	pinctrl-names = "default";
+	cs-pin = <1>;
+	bus-speed = <20000000>;
 };

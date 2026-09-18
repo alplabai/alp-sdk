@@ -9,13 +9,10 @@
  *     xip-base 0xA0000000/0x10000000)
  *
  * SCOPE: this proves the ospi0 node BINDS (DT_HAS_SNPS_DESIGNWARE_OSPI_ENABLED
- * + the reg/irq match) and that the flash_ospi_alif.c driver's
- * alif_hal_ospi_initialize() call compiles and links.  XiP setup itself is
- * skipped outright (OSPI_XIP_SER does not exist on AE822, independent of
- * what's on the bus -- see flash_ospi_alif.c and src/main.c).  This app
- * performs no device-level transfer, so nothing here confirms or denies a
- * part on either chip select; see src/main.c's header for the CORRECTED
- * PREMISE note (#2041) on what IS now known about SS1.
+ * + the reg/irq match) and that the flash_ospi_alif.c driver compiles and
+ * links. On AEN803 the app also targets the fitted CS1 NOR's JEDEC ID at the
+ * raw-capture-safe 20 MHz rate. XiP setup remains skipped outright because
+ * OSPI_XIP_SER does not exist on AE822.
  *
  * CORRECTED (#2041): this overlay's pinctrl-0 previously muxed the Alif
  * DevKit's own OSPI0 route (zephyr_alif fork's ensemble-e4-e6-e8-pinctrl.dtsi
@@ -30,6 +27,8 @@
  * NOR at SS1 on E1M-AEN803 (see src/main.c).  Pad config
  * (input-enable/drive-strength=12/slew-rate=fast) is unchanged from the
  * prior group -- generic Alif pad electrical settings, not route-specific.
+ * The paired AEN801 overlay carries the same CS/rate settings to preserve the
+ * same-PCB content invariant; its app path performs no device transfer.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
@@ -73,4 +72,6 @@
 	status = "okay";
 	pinctrl-0 = <&pinctrl_ospi0>;
 	pinctrl-names = "default";
+	cs-pin = <1>;
+	bus-speed = <20000000>;
 };
