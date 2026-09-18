@@ -146,7 +146,7 @@ def _repo_root() -> Path:
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, encoding="utf-8", check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         raise SystemExit("error: not inside a git worktree")
