@@ -3343,6 +3343,10 @@
       "script": "scripts/check_emit_snapshots.py"
     },
     {
+      "purpose": "CI gate: same-PCB SKU board overlays in an example must say the same thing.",
+      "script": "scripts/check_example_board_overlay_content_parity.py"
+    },
+    {
       "purpose": "CI gate covering two related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
