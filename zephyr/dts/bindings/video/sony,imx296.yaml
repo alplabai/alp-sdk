@@ -1,0 +1,33 @@
+# Copyright 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), BENCH-UNVERIFIED.
+# Shaped after upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml
+# + a video-interfaces.yaml endpoint child), mirroring
+# zephyr/dts/bindings/video/ovti,ov9281.yaml's `clocks: required: true`. See
+# zephyr/drivers/video/imx296.c for the datasheet-section citations and
+# retirement note.
+
+description: |
+  Sony IMX296 1.58 MP global-shutter image sensor
+
+  A raw Bayer (colour) or mono global-shutter image sensor with a single-lane
+  MIPI CSI-2 image data interface and a CCI (I2C compatible) control bus.
+  Only All-pixel scan mode is supported: 1440x1080 RAW10, 1 data lane,
+  37.125 / 54 / 74.25 MHz INCK.
+
+compatible: "sony,imx296"
+
+include: i2c-device.yaml
+
+properties:
+  clocks:
+    description: |
+      Reference to the INCK clock, which must be 37.125 MHz, 54 MHz or
+      74.25 MHz -- see zephyr/drivers/video/imx296.c.
+    required: true
+
+child-binding:
+  child-binding:
+    include: video-interfaces.yaml

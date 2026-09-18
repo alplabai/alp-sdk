@@ -19,6 +19,12 @@
 		#clock-cells = <0>;
 	};
 
+	imx296_input_clock: imx296-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <54000000>;
+		#clock-cells = <0>;
+	};
+
 	test {
 		#address-cells = <1>;
 		#size-cells = <1>;
@@ -53,6 +59,19 @@
 					test_ov9281_ep: endpoint {
 						remote-endpoint-label = "";
 						data-lanes = <1 2>;
+					};
+				};
+			};
+
+			test_i2c_imx296: imx296@1a {
+				compatible = "sony,imx296";
+				reg = <0x1a>;
+				clocks = <&imx296_input_clock>;
+
+				port {
+					test_imx296_ep: endpoint {
+						remote-endpoint-label = "";
+						data-lanes = <1>;
 					};
 				};
 			};
