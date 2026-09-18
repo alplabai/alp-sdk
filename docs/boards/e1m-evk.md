@@ -201,6 +201,14 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
   D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
   bus, and points `alp-camera0` / `zephyr,camera` at the CPI.  The
+  SoC side lives in the shield's per-target overlays
+  (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+  the AEN803 twin, both including `boards/e1m_aen.dtsi`), so the
+  shield builds for the AEN801 and AEN803 M55-HE targets.  The D-PHY
+  clocks are the SoC `dphy` node's four real `MIPI_CKEN` gates, so
+  the shield composes with a DSI panel app without either overriding
+  them.  The sensor shields and their drivers are described in
+  [`docs/camera-shields.md`](../camera-shields.md).  The
   app needs `CONFIG_ALP_SDK=y` and `CONFIG_VIDEO=y`, and a video
   buffer pool that fits in RAM (the Zephyr 2 MB default does not fit
   the HE core's DTCM).  RAW10 sensors are delivered to memory as
@@ -216,9 +224,10 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   patch in `zephyr/patches.yml`, so the workspace must be patched
   (`scripts/bootstrap.sh` does it).
 
-  `examples/aen/aen-camera-firstlight` is the bench first-light app for
-  this connector: it opens each of the three shipped camera shields
-  (IMX219 / OV5647 / OV9281) through `<alp/camera.h>`, starts the
+  [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/README.md)
+  is the bench first-light app for this connector: it opens each of
+  the four shipped camera shields (IMX219 / OV5647 / OV9281 / IMX296)
+  through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
   otherwise. See its README for what each printed line means.

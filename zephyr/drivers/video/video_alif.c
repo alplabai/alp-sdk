@@ -408,6 +408,7 @@ static int alif_cam_sync_pixclk(const struct device *dev)
 		return ret;
 	}
 
+	/* set_rate programmed the divisor and CLK_SEL; enable last (DFP order). */
 	return clock_control_on(config->clk_dev, config->pix_cid);
 }
 
@@ -577,6 +578,7 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	struct video_format link = *fmt;
+	int mode = config->data_mode;
 	int ret;
 
 	/*
@@ -611,8 +613,7 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	}
 
 	if (config->interface == CAM_INTERFACE_SERIAL) {
-		int mode = alif_cam_set_csi(dev, link.pixelformat);
-
+		mode = alif_cam_set_csi(dev, link.pixelformat);
 		if (mode < 0) {
 			LOG_ERR("Failed to configure CAM as per the CSI.");
 			return mode;
@@ -624,16 +625,9 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		}
 
 		/*
-		 * Alp Lab AB: the CPI stores one data-mode container per pixel
-		 * (8/16/32-bit -> 1/2/4 B, HWRM 17.1.4.8), whatever the link bpp.
-		 * Storing the caller's pitch (0 from the portable backend,
-		 * width * 10 / 8 from a packed-RAW10 sensor) under-sized the
-		 * buffer and let the enqueue guard pass a frame that DMAs 60 %
-		 * past its end.
 		 * ponytail: the 32-bit RGB888 container keeps its RGB24 fourcc
 		 * (only the pitch is corrected); remap it once a sensor needs it.
 		 */
-		fmt->pitch = fmt->width << (mode - CPI_DATA_MODE_8_BIT);
 		fmt->pixelformat = link.pixelformat;
 		for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
 			if (link.pixelformat == cpi_unpacked_fmts[i].link) {
@@ -641,6 +635,16 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 			}
 		}
 	}
+
+	/*
+	 * Alp Lab AB: the CPI stores one data-mode sample per pixel (CSI: the
+	 * mode set above; parallel: the DT data-mode, 1..16 bits), whatever the
+	 * link bpp -- so 8/16/32-bit modes take 1/2/4 B per pixel.  The caller's
+	 * pitch (0 from the portable backend, width * 10 / 8 from a packed-RAW10
+	 * sensor) would under-size the enqueue guard's frame and let the DMA run
+	 * past the buffer.
+	 */
+	fmt->pitch = DIV_ROUND_UP(fmt->width << mode, BITS_PER_BYTE);
 
 	data->current_format.pixelformat = fmt->pixelformat;
 	data->current_format.pitch = fmt->pitch;

@@ -2,158 +2,42 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-EVK J5 -- the Raspberry Pi 15-pin MIPI CSI-2 camera connector -- for an
- * E1M-AEN SoM (Alif Ensemble E8).  This is the BOARD half of Zephyr's
- * Raspberry Pi camera-shield contract: pair it with a sensor shield that
- * consumes the four labels below, e.g.
+ * E1M-EVK J5 -- the Raspberry Pi 15-pin MIPI CSI-2 camera connector.  This is
+ * the BOARD half of Zephyr's Raspberry Pi camera-shield contract: pair it with
+ * a sensor shield that consumes the four labels below, e.g.
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
  *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
  *
- *   csi_interface     &csi -- the sensor shield sets status = "okay"
- *   csi_ep_in         the CSI-2 receiver input endpoint (csi port@0)
- *   csi_i2c           &i2c1 -- the camera control bus on J5 (E1M I2C1)
- *   csi_capture_port  &cam -- the CPI, the node `chosen zephyr,camera` names
+ *   csi_interface     the CSI-2 receiver -- the sensor shield sets status = "okay"
+ *   csi_ep_in         the receiver's input endpoint -- the sensor shield fills it
+ *   csi_i2c           the camera control bus on J5 (E1M I2C1)
+ *   csi_capture_port  the capture device `chosen zephyr,camera` names
  *
- * Built alone (no sensor shield) it does not link: &cam's input is the
- * still-disabled &csi.
+ * Only the board-agnostic part lives here.  The labels map onto SoC nodes and
+ * SoC pins, so each supported SoM target defines them in its own
+ * boards/<qualified-board>.overlay (Zephyr applies the one matching -b); the
+ * E1M-AEN HE targets share boards/e1m_aen.dtsi.  Building for a target with no
+ * boards/ overlay fails on the first undefined label -- add one for that SoM.
  *
- * Carrier wiring (E1M-EVK-2626-R2):
+ * Carrier wiring (E1M-EVK-2626-R2), the same for every SoM:
  *   - J5 sits on input A of the PI3WVR626 2:1 CSI mux.  The mux SEL is E1M
- *     IO2 (pad W2, Alif P12_5); SEL = 0 selects input A, so it is hogged LOW
- *     below.  /OE is tied low on the carrier.
+ *     IO2; SEL = 0 selects input A, so the SoM overlay hogs it LOW.  /OE is
+ *     tied low on the carrier.
  *   - 2 data lanes (the RPi 15-pin connector carries no more).
- *   - Camera I2C is E1M I2C1 = SoC I2C1 (SCL P3_7 function B, SDA P7_2
- *     function C), level-shifted to 3.3 V on the carrier.  It is the SAME
- *     bus as the DSI connector's touch/backlight control.
+ *   - Camera I2C is E1M I2C1, level-shifted to 3.3 V on the carrier.  It is
+ *     the SAME bus as the DSI connector's touch/backlight control.
  *   - J5 has no reset line and no XVCLK: RPi modules carry their own
  *     oscillator.  J5 pin 11 (the module enable) is pulled LOW by the carrier
  *     only when the TCAL9538 CAM_EN output is 1; CAM_EN = 0 (reset default)
  *     leaves it floating, so a module with its own pull-up self-enables.
  *     Never assert CAM_EN for these modules -- it powers them down.
  *
- * D-PHY: port index and D-PHY id are coupled in video_csi_dw.c (the first
- * phy-if entry selects BOTH the sensor port and dphy_dw_slave_setup()'s id).
- * The SoC default `phy-if = <&dphy 1>, <&dphy 0>` selects id 1 = the DSI TX
- * D-PHY running in RX mode; J5 lands on the E8's dedicated CSI RX lanes, so
- * this shield selects id 0 with the sensor on port@0.  The dphy clocks are
- * overridden with the real CLKCTL_PER_MST MIPI_CKEN gates (the SoC node
- * defaults them to a frequency-only dummy); the TX/PLL gates match what the
- * DSI display overlays set, so this composes with a DSI panel.
- *
  * ADR 0017 Tier-1 (DT wiring only, no code).  BENCH-UNVERIFIED.
  */
 
-#include <zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h>
-#include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
-#include <zephyr/dt-bindings/video/video-interfaces.h>
-
 / {
 	aliases {
-		alp-camera0 = &cam;
-	};
-};
-
-&pinctrl {
-	pinctrl_i2c1: pinctrl_i2c1 {
-		/*
-		 * input-enable on BOTH pins (i2c_dw must sense SCL too, see the
-		 * board's BRD_I2C group).  bias-pull-up is a real pull-up (DSC=1)
-		 * and is harmless next to the carrier's level-shifter pull-ups.
-		 */
-		group0 {
-			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
-			input-enable;
-			bias-pull-up;
-		};
-
-		/*
-		 * CSI mux SEL (E1M IO2) as a plain GPIO.  Muxed here because
-		 * snps,designware-gpio has no pinctrl-0 of its own (the board's
-		 * RTC_ALARM precedent); the gpio-hog on &gpio12 drives it.
-		 */
-		group1 {
-			pinmux = <PIN_P12_5__GPIO>;
-		};
-	};
-};
-
-csi_i2c: &i2c1 {
-	pinctrl-0 = <&pinctrl_i2c1>;
-	pinctrl-names = "default";
-	status = "okay";
-};
-
-&gpio12 {
-	status = "okay";
-
-	csi_mux_sel_a {
-		gpio-hog;
-		gpios = <5 GPIO_ACTIVE_HIGH>;
-		output-low;
-		line-name = "CAM_MUX_SEL";
-	};
-};
-
-&dphy {
-	status = "okay";
-	clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>,
-		 <&clockctrl ALIF_MIPI_BYPASS_CLK>,
-		 <&clockctrl ALIF_MIPI_TXDPHY_CLK>,
-		 <&clockctrl ALIF_MIPI_RXDPHY_CLK>;
-	clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
-};
-
-csi_interface: &csi {
-	phy-if = <&dphy 0>;
-
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		/* CSI-2 input from J5 -- the sensor shield fills this endpoint. */
-		port@0 {
-			reg = <0>;
-
-			csi_ep_in: endpoint {
-			};
-		};
-
-		/* IPI output to the CPI. */
-		port@2 {
-			reg = <2>;
-
-			csi_ep_out: endpoint {
-				bus-type = <VIDEO_BUS_TYPE_PARALLEL>;
-				remote-endpoint-label = "cam_ep_in";
-			};
-		};
-	};
-};
-
-csi_capture_port: &cam {
-	status = "okay";
-
-	ports {
-		#address-cells = <1>;
-		#size-cells = <0>;
-
-		port@0 {
-			reg = <0>;
-
-			cam_ep_in: endpoint {
-				remote-endpoint-label = "csi_ep_out";
-			};
-		};
-
-		/* Memory (AXI) output -- the application sink. */
-		port@1 {
-			reg = <1>;
-
-			cam_ep_out: endpoint {
-				remote-endpoint-label = "application";
-			};
-		};
+		alp-camera0 = &csi_capture_port;
 	};
 };

@@ -420,6 +420,16 @@ static int csi2_dw_validate_data(const struct device *dev)
 		return ret;
 	}
 
+	/*
+	 * Alp Lab AB: enable only after the divisor and CLK_SEL are programmed
+	 * (the DFP set_csi_pixel_clk() order), never on the reset divisor.
+	 */
+	ret = clock_control_on(config->clk_dev, config->pixclk);
+	if (ret) {
+		LOG_ERR("Failed to enable CSI pixel clock! ret - %d", ret);
+		return ret;
+	}
+
 	/* Use the rate actually programmed (a divider rounds up) for the timings. */
 	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
 		pixclock = tmp;
@@ -597,20 +607,14 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 	}
 
 	/*
-	 * Check if the current set data type is the same as the requested data
-	 * type.
+	 * Alp Lab AB: always reconfigure, even for an unchanged data type -- a
+	 * new resolution still needs hact/vact, the sensor's LINK_FREQ and the
+	 * D-PHY/pixel-clock setup redone below.
 	 */
 	tmp = fourcc_to_csi_data_type(fmt->pixelformat);
 	if (tmp < 0) {
 		LOG_ERR("Unsupported CSI pixel format.");
 		return tmp;
-	}
-
-	if (data->csi_cpi_settings[data->current_sensor] != NULL) {
-		if (tmp == data->csi_cpi_settings[data->current_sensor]->dt) {
-			LOG_INF("FourCC format already set.");
-			return 0;
-		}
 	}
 
 	for (i = 0; i < ARRAY_SIZE(data_mode_settings); i++) {
@@ -711,18 +715,12 @@ static DEVICE_API(video, csi2_dw_driver_api) = {
 static int csi_enable_clocks(const struct device *dev)
 {
 	const struct csi2_dw_config *config = dev->config;
-	int ret;
 
-	/* Enable CSI pixel clock */
-	ret = clock_control_on(config->clk_dev, config->pixclk);
-	if (ret) {
-		LOG_ERR("Failed to enable CSI IP!");
-		return ret;
-	}
-
-	/* Enable CSI peripheral clock */
+	/*
+	 * Enable CSI peripheral clock.  The pixel clock is enabled by
+	 * csi2_dw_validate_data() once its divisor is set.
+	 */
 	return clock_control_on(config->clk_dev, config->csiclk);
-
 }
 
 static uint32_t valid_sensor_map(const struct device *const *sensors, int num_sensors)

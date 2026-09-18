@@ -34,9 +34,11 @@ Also teach .set_rate/.get_rate the CPI and CSI pixel-clock dividers
 divisor [24:16], 2..0x1FF legal), so the DesignWare CSI-2 bridge's
 clock_control_set_rate(pix_clk) is programmed instead of failing -ENOTSUP.
 set_rate picks the slowest rate that is still >= the request and returns
--ERANGE above source / 2; get_rate reports source / divisor.  The source rate
-comes from the CLK_SEL the register currently holds (SYST_ACLK from the DT for
-CLK_SEL=0); CLK_SEL=1 is refused because its rate is not settled.
+-ERANGE above source / 2; get_rate reports source / divisor.  set_rate also
+programs the CLK_SEL the clock ID encodes (as .on does), so it can run before
+.on in the DFP order (divisor + CLK_SEL, then CLK_ENA) without depending on
+what boot firmware left in CLK_SEL.  CLK_SEL=0 is SYST_ACLK from the DT;
+CLK_SEL=1 is refused because its rate is not settled.
 CDC200_PIXCLK_CTRL shares the layout but is left alone.
 
 Non-Alif clock controllers are unaffected.
@@ -44,7 +46,7 @@ Non-Alif clock controllers are unaffected.
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
 diff --git a/drivers/clock_control/clock_control_alif.c b/drivers/clock_control/clock_control_alif.c
-index 4a7e002..949d3d4 100644
+index 4a7e002..3358974 100644
 --- a/drivers/clock_control/clock_control_alif.c
 +++ b/drivers/clock_control/clock_control_alif.c
 @@ -124,6 +124,93 @@ struct alif_clock_control_config {
@@ -161,7 +163,7 @@ index 4a7e002..949d3d4 100644
  	if (!ALIF_CLOCK_CFG_EN_MASK(clk_id)) {
  		/* Clock is always-on, already enabled */
  		return 0;
-@@ -268,15 +363,140 @@ static int alif_clock_control_off(const
+@@ -268,15 +363,147 @@ static int alif_clock_control_off(const
  	return 0;
  }
  
@@ -244,11 +246,14 @@ index 4a7e002..949d3d4 100644
 +}
 +
 +/**
-+ * @brief Program a CPI/CSI pixel-clock divisor
++ * @brief Program a CPI/CSI pixel-clock source and divisor
 + *
 + * The consumer needs at least the requested throughput, so this picks the
 + * slowest achievable rate that is still >= the request: divisor =
-+ * floor(source / rate), capped at 0x1FF.
++ * floor(source / rate), capped at 0x1FF.  CLK_SEL is set to the source the
++ * clock ID encodes, as .on does, so the rate never depends on the CLK_SEL boot
++ * firmware left and the consumer can follow the DFP set_*_pixel_clk() order:
++ * divisor and CLK_SEL first, then CLK_ENA through .on.
 + *
 + * @param dev Clock control device
 + * @param clk_id Encoded pixel-clock ID
@@ -260,9 +265,13 @@ index 4a7e002..949d3d4 100644
 +{
 +	mem_addr_t reg_addr = alif_get_clk_reg_addr(dev, clk_id);
 +	uint32_t reg_value = sys_read32(reg_addr);
++	uint32_t src_pos = ALIF_CLOCK_CFG_SRC_FIELD_POS(clk_id);
 +	uint32_t src_hz;
 +	uint32_t div;
 +	int ret;
++
++	reg_value &= ~(BIT_MASK(ALIF_CLOCK_CFG_SRC_FIELD_WIDTH(clk_id)) << src_pos);
++	reg_value |= ALIF_CLOCK_CFG_SRC_VAL(clk_id) << src_pos;
 +
 +	ret = alif_pixclk_src_hz(reg_value, &src_hz);
 +	if (ret) {
@@ -305,7 +314,7 @@ index 4a7e002..949d3d4 100644
   */
  static int alif_clock_control_get_rate(const struct device *dev,
  				clock_control_subsys_t sub_system,
-@@ -284,13 +504,105 @@ static int alif_clock_control_get_rate(c
+@@ -284,13 +511,105 @@ static int alif_clock_control_get_rate(c
  {
  	uint32_t clk_id = (uint32_t)sub_system;
  
@@ -412,7 +421,7 @@ index 4a7e002..949d3d4 100644
  /**
   * @brief Get the status of a peripheral clock
   *
-@@ -326,6 +638,8 @@ static DEVICE_API(clock_control, alif_cl
+@@ -326,6 +645,8 @@ static DEVICE_API(clock_control, alif_cl
  	.on = alif_clock_control_on,
  	.off = alif_clock_control_off,
  	.get_rate = alif_clock_control_get_rate,

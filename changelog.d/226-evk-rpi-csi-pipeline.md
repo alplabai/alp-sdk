@@ -6,7 +6,11 @@ E1M-EVK. It provides `csi_interface` (`&csi`), `csi_ep_in` (CSI port@0),
 `csi_i2c` (SoC `i2c1`, SCL `P3_7` function B / SDA `P7_2` function C) and
 `csi_capture_port` (`&cam`), builds the csi-to-cam endpoint graph, hogs E1M
 `IO2` (`P12_5`, the PI3WVR626 SEL) low so J5 on mux input A reaches the SoC,
-and sets `alp-camera0 = &cam`. Pair it with a sensor shield:
+and sets `alp-camera0 = &cam`. Those labels map onto SoC nodes and pins, so
+they live in per-target overlays under the shield's `boards/` directory: the
+`alp_e1m_aen801_m55_he` and `alp_e1m_aen803_m55_he` overlays both include
+`boards/e1m_aen.dtsi`, and the main overlay keeps only the board-agnostic
+alias. Pair it with a sensor shield:
 `-DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"` compiles and links
 with the upstream IMX219 driver for `alp_e1m_aen801_m55_he` and
 `alp_e1m_aen803_m55_he`. Not yet run on hardware.
@@ -14,9 +18,14 @@ with the upstream IMX219 driver for `alp_e1m_aen801_m55_he` and
 **The camera now uses the dedicated CSI-2 receive D-PHY.** The SoC default
 `phy-if = <&dphy 1>, <&dphy 0>` selects D-PHY id 1, the DSI transmit D-PHY
 running in receive mode. The shield overrides it to `<&dphy 0>` with the sensor
-on port@0, the two being coupled in `video_csi_dw.c`, and gives the D-PHY its
-real `MIPI_CKEN` clock gates, including the new `ALIF_MIPI_RXDPHY_CLK` (bit 4).
-The SoC `dphy` node itself is unchanged.
+on port@0, the two being coupled in `video_csi_dw.c`.
+
+**The SoC `dphy` node carries its four real clock gates.** `ensemble_e8_peripherals.dtsi`
+now lists `ALIF_MIPI_PLLREF_CLK`, `ALIF_MIPI_BYPASS_CLK`, `ALIF_MIPI_TXDPHY_CLK`
+and the new `ALIF_MIPI_RXDPHY_CLK` (`MIPI_CKEN` bits 8 / 12 / 0 / 4) instead of
+the frequency-only `ALIF_CSI_DPHY_CLK` placeholder, and the `aen-dsi-display`
+overlays no longer override them. Every build that enables `dphy` gets all four
+gates, so the camera shield stacked on a DSI app keeps its receive D-PHY gate.
 
 **Real camera clock IDs.** `ALIF_CPI_CLK` (`PERIPH_CLK_ENA` bit 0) and
 `ALIF_CSI_CLK` (`PERIPH_CLK_ENA` bit 24) replace the frequency-only dummy. The
@@ -24,15 +33,19 @@ The SoC `dphy` node itself is unchanged.
 `CLK_ENA` bit 0, `CLK_SEL` bit 4 = 0, 400 MHz SYST_ACLK), and the `cam` node
 gains a `pix_clk`, the new `ALIF_CAM_PIX_SYST_ACLK` (`CAMERA_PIXCLK_CTRL`, same
 fields). In CSI mode the CPI runs that clock at the rate the CSI bridge
-programmed.
+programmed. Both pixel clocks are now enabled only after their divisor is set,
+the order the Alif DFP uses; the CSI bridge had enabled its pixel clock at init
+on the reset divisor.
 
 **The camera pixel-clock dividers are programmable.** The Alif clock-control
 patch (`zephyr/patches/zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch`)
 now gives `.set_rate` / `.get_rate` the `CAMERA_PIXCLK_CTRL` / `CSI_PIXCLK_CTRL`
 divisor (bits [24:16], 2..0x1FF). `set_rate` picks the slowest reachable rate
-that is still at least the request and returns `-ERANGE` above source / 2. The
-source rate comes from the register's `CLK_SEL`, and `CLK_SEL` = 1 is refused
-because its rate is not yet settled. Before this, the CSI bridge's
+that is still at least the request and returns `-ERANGE` above source / 2.
+`set_rate` also programs the `CLK_SEL` the clock ID selects, as
+`clock_control_on()` does, so it does not depend on the `CLK_SEL` boot firmware
+left and can run before the clock is enabled. `CLK_SEL` = 1 is refused because
+its rate is not yet settled. Before this, the CSI bridge's
 `clock_control_set_rate(pix_clk)` failed with `-ENOTSUP`, so `video_set_format()`
 could never succeed on hardware. A workspace that applied the previous version
 of this patch now reports it as drifted: re-apply it with
@@ -60,9 +73,14 @@ packed-RAW10 sensor. The enqueue size guard then accepted a buffer that the
 DMA overran by 60 %. `alif_cam_set_fmt()` now sets the pitch to width x the
 data-mode container (1, 2 or 4 bytes) and returns the unpacked FOURCC
 (`SBGGR10`, `Y10`, ...), while the sensor is still asked for the packed format.
+A parallel (CPI or LPCPI) camera gets the same rule from its DT `data-mode`, so
+a pitch of 0 no longer lets the guard pass any buffer.
 
 **The CSI-2 lane rate comes from the sensor.** `video_csi_dw.c` now reads it
 with `video_get_csi_link_freq()` (the sensor's `VIDEO_CID_LINK_FREQ`, 456 MHz
 for the IMX219) and uses the DT `link-frequencies` / `rx-ddr-clk1` value only as
 a fallback. Upstream sensor shields carry no `link-frequencies`, so the D-PHY
-had been set up for the 400 MHz default.
+had been set up for the 400 MHz default. `video_set_format()` now redoes the
+full setup on every call: a second call at a new resolution with the same CSI-2
+data type used to return early and keep the old line timing, lane rate and
+pixel clock.

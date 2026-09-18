@@ -245,7 +245,7 @@ patches:
       `... --test core -- scramble_region_backwards_boundary`. Upstream
       to mcu-tools/mcuboot then drop alongside 0004.
   - path: zephyr/0001-clock_control_alif-master-source-expmst-i2s-setrate.patch
-    sha256sum: cbfeaf463fe196db280d53094e08096adceadc9610157cccf31a6a64561289c7
+    sha256sum: d4655df3492d8226aea403ee36bcf5b827d2288e7cd562100a89c7068076ec93
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -273,8 +273,10 @@ patches:
             0x08, divisor [24:16], 2..0x1FF) so video_csi_dw.c's
             clock_control_set_rate(pix_clk) is programmed instead of failing
             -ENOTSUP.  Picks the slowest rate >= the request; -ERANGE above
-            source / 2.  Source rate from the CLK_SEL in the register (CLK_SEL=1
-            refused: its rate is not settled).
+            source / 2.  set_rate also programs the CLK_SEL the clock ID
+            encodes, so consumers can set the divisor before .on (the DFP
+            order) whatever CLK_SEL boot firmware left (CLK_SEL=1 refused: its
+            rate is not settled).
       Drop all three once an Alif upstream clockctrl carries the master-source
       enable and real I2S / pixel-clock .set_rate.
   - path: zephyr/0002-ipm-add-poll-out-poll-in.patch

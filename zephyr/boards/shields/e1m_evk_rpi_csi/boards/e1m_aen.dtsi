@@ -1,0 +1,129 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * e1m_evk_rpi_csi on an E1M-AEN SoM (Alif Ensemble E8): the SoC side of the
+ * J5 camera connector.  Included by every boards/<E1M-AEN target>.overlay of
+ * this shield, so the AEN801 and AEN803 targets share one copy.
+ *
+ *   csi_interface     &csi -- the DesignWare CSI-2 host
+ *   csi_ep_in         &csi port@0 endpoint
+ *   csi_i2c           &i2c1 -- E1M I2C1 = SoC I2C1 (SCL P3_7 function B,
+ *                     SDA P7_2 function C)
+ *   csi_capture_port  &cam -- the CPI
+ *
+ * E1M IO2, the CSI mux SEL, is SoC P12_5 (pad W2); it is hogged LOW to select
+ * mux input A = J5.
+ *
+ * Built alone (no sensor shield) it does not link: &cam's input is the
+ * still-disabled &csi.
+ *
+ * D-PHY: port index and D-PHY id are coupled in video_csi_dw.c (the first
+ * phy-if entry selects BOTH the sensor port and dphy_dw_slave_setup()'s id).
+ * The SoC default `phy-if = <&dphy 1>, <&dphy 0>` selects id 1 = the DSI TX
+ * D-PHY running in RX mode; J5 lands on the E8's dedicated CSI RX lanes, so
+ * this selects id 0 with the sensor on port@0.  The dphy clocks are the SoC
+ * node's real MIPI_CKEN gates, shared with a DSI panel, so only status is set.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
+
+&pinctrl {
+	pinctrl_i2c1: pinctrl_i2c1 {
+		/*
+		 * input-enable on BOTH pins (i2c_dw must sense SCL too, see the
+		 * board's BRD_I2C group).  bias-pull-up is a real pull-up (DSC=1)
+		 * and is harmless next to the carrier's level-shifter pull-ups.
+		 */
+		group0 {
+			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		/*
+		 * CSI mux SEL (E1M IO2) as a plain GPIO.  Muxed here because
+		 * snps,designware-gpio has no pinctrl-0 of its own (the board's
+		 * RTC_ALARM precedent); the gpio-hog on &gpio12 drives it.
+		 */
+		group1 {
+			pinmux = <PIN_P12_5__GPIO>;
+		};
+	};
+};
+
+csi_i2c: &i2c1 {
+	pinctrl-0 = <&pinctrl_i2c1>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&gpio12 {
+	status = "okay";
+
+	csi_mux_sel_a {
+		gpio-hog;
+		gpios = <5 GPIO_ACTIVE_HIGH>;
+		output-low;
+		line-name = "CAM_MUX_SEL";
+	};
+};
+
+&dphy {
+	status = "okay";
+};
+
+csi_interface: &csi {
+	phy-if = <&dphy 0>;
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		/* CSI-2 input from J5 -- the sensor shield fills this endpoint. */
+		port@0 {
+			reg = <0>;
+
+			csi_ep_in: endpoint {
+			};
+		};
+
+		/* IPI output to the CPI. */
+		port@2 {
+			reg = <2>;
+
+			csi_ep_out: endpoint {
+				bus-type = <VIDEO_BUS_TYPE_PARALLEL>;
+				remote-endpoint-label = "cam_ep_in";
+			};
+		};
+	};
+};
+
+csi_capture_port: &cam {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+
+			cam_ep_in: endpoint {
+				remote-endpoint-label = "csi_ep_out";
+			};
+		};
+
+		/* Memory (AXI) output -- the application sink. */
+		port@1 {
+			reg = <1>;
+
+			cam_ep_out: endpoint {
+				remote-endpoint-label = "application";
+			};
+		};
+	};
+};

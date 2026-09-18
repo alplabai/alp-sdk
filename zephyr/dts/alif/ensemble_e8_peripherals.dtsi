@@ -1640,11 +1640,12 @@
 	 * CLOCKS -- cam "cam_clk"/"pix_clk" = ALIF_CPI_CLK / ALIF_CAM_PIX_SYST_ACLK
 	 * and csi "csi_clk"/"pix_clk" = ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK are
 	 * REAL CLKCTL_PER_MST gates in the upstream encoding
-	 * (alif-ensemble-clocks-ext.h CAMERA CAPTURE block).  The
-	 * dphy node below keeps the frequency-only dummy ALIF_CSI_DPHY_CLK on all
-	 * four clocks; a board/shield overlay that enables the D-PHY supplies the
-	 * real ALIF_MIPI_*_CLK gates (boards/shields/e1m_evk_rpi_csi does, for the
-	 * camera RX path).  The pixel-clock dividers are programmed through the
+	 * (alif-ensemble-clocks-ext.h CAMERA CAPTURE block).  The dphy clocks
+	 * are the four real CLKCTL_PER_MST MIPI_CKEN gates ALIF_MIPI_PLLREF_CLK /
+	 * _BYPASS_CLK / _TXDPHY_CLK / _RXDPHY_CLK (bits 8 / 12 / 0 / 4): the DSI
+	 * (TX) and camera (RX) roles share this one list, so an overlay that
+	 * enables the D-PHY sets status only and never overrides the clocks.
+	 * The pixel-clock dividers are programmed through the
 	 * clockctrl .set_rate added by zephyr/patches/zephyr/0001-*.patch.
 	 * These nodes stay status="disabled" here -- a board overlay enables them.
 	 *
@@ -1667,10 +1668,10 @@
 		      <0x4903F000 0x40>;
 		reg-names = "csi_reg", "dsi_reg", "expmst_reg";
 		#dphy-cells = <1>;
-		clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>;
+		clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>,
+			 <&clockctrl ALIF_MIPI_BYPASS_CLK>,
+			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>,
+			 <&clockctrl ALIF_MIPI_RXDPHY_CLK>;
 		clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
 		ref-frequency = <38400000>;
 		cfg-clk-frequency = <25000000>;
