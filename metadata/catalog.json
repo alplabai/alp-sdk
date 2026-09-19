@@ -3247,7 +3247,7 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
-      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves.",
+      "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves, and that every new one is anchored.",
       "script": "scripts/check_changelog_citations.py"
     },
     {
@@ -3341,6 +3341,10 @@
     {
       "purpose": "Byte-for-byte `--emit` snapshot regression gate.",
       "script": "scripts/check_emit_snapshots.py"
+    },
+    {
+      "purpose": "CI gate: same-PCB SKU board overlays in an example must say the same thing.",
+      "script": "scripts/check_example_board_overlay_content_parity.py"
     },
     {
       "purpose": "CI gate covering two related silent-overlay-drop defects:",

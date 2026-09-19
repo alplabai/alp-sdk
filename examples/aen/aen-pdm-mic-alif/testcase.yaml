@@ -6,19 +6,20 @@
 # the standard Zephyr DMIC API.
 #
 # Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# of the native_sim PR gate (platform_allow = the AEN801 + AEN803 HE boards).
 
 sample:
   name: aen-pdm-mic-alif
   description: |
     Bench RAM-run PDM mic (alif,alif-pdm, pdm@4902d000) capture proof for the
-    E1M-AEN801 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_pdm0)
+    E1M-AEN801/803 (Alif Ensemble E8, Cortex-M55-HE): drives DT_ALIAS(alp_pdm0)
     through dmic_configure/dmic_trigger/dmic_read.
 
 tests:
   alp_sdk.examples.aen.pdm_mic_alif.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

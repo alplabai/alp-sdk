@@ -34,6 +34,7 @@ on:
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
       # The #2101 platform_allow-parity half reads examples/**/boards/*
       # content directly, not just testcase.yaml/board.yaml -- a PR that
       # only adds/renames/deletes a boards/ overlay must fire this job too
@@ -126,6 +127,7 @@ on:
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
       # The #2101 platform_allow-parity half reads examples/**/boards/*
       # content directly, not just testcase.yaml/board.yaml -- a PR that
       # only adds/renames/deletes a boards/ overlay must fire this job too
@@ -222,6 +224,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # No `ref:`, so a pull_request run checks out the PR's MERGE commit
+          # (refs/pull/N/merge). Depth 2 fetches its parents as well, so the
+          # changelog-citations step can name HEAD^1 -- the base branch as
+          # merged -- as the base its new-citation rule diffs against
+          # (alp-sdk#2186).
+          fetch-depth: 2
         timeout-minutes: 5
 
       - name: Set up Python
@@ -572,6 +580,9 @@ jobs:
       - name: Gate — example board.yaml declared cores match their boards/ overlays
         run: python3 scripts/check_example_board_overlay_parity.py
 
+      - name: Gate — same-PCB SKU board overlays carry the same content (#2198)
+        run: python3 scripts/check_example_board_overlay_content_parity.py
+
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
 
@@ -585,6 +596,17 @@ jobs:
         run: python3 scripts/check_changelog_fragments.py
 
       - name: "Gate — changelog.d/ path:line citations still resolve (#1416)"
+        # HEAD is the merge commit, so this already grades the tree that will
+        # land. On a PR into dev, DIFF_BASE=HEAD^1 turns on the new-citation
+        # rule: a citation on a line this PR adds must be anchored
+        # (alp-sdk#2186). NOT on a PR into main: HEAD^1 is main there, and
+        # every line of every fragment dev has not folded yet would count
+        # as new (272 errors measured). Empty falls back to origin/dev, which
+        # a PR checkout does not have, so the gate warns the rule did not
+        # run; on a workflow_dispatch of dev, origin/dev IS HEAD and the rule
+        # runs vacuously (0 citations on added lines).
+        env:
+          DIFF_BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'HEAD^1' || '' }}
         run: python3 scripts/check_changelog_citations.py
 
       - name: "Gate — changelog.d/ fragment's heading issue matches its filename (#1957)"

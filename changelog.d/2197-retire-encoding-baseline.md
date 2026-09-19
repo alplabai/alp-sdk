@@ -11,7 +11,7 @@ batch used everywhere else:
 `tests/scripts/test_check_example_board_overlay_parity.py:38`
 (`env={**os.environ,`). The parity test's seven `write_text()` calls
 also get `encoding="utf-8"`, for example
-`tests/scripts/test_check_example_board_overlay_parity.py:48`
+`tests/scripts/test_check_example_board_overlay_parity.py:50`
 ("format(name=name, platform_allow=allow_lines)").
 
 With both files clean, the `IMPLICIT_ENCODING_BASELINE` grandfather set is
