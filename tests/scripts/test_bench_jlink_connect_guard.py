@@ -1498,6 +1498,160 @@ def test_flowd_guard_aborts_when_maintenance_tool_is_missing_despite_se_uart(tmp
     )
 
 
+# --- alp-sdk#2187: the unverified-query abort must name the remedy that
+# applies to the flow that reached it -------------------------------------
+#
+# bench_flowd_atoc_guard routes to the real query whenever $SE_UART is
+# exported -- whether or not the variable names a device that can answer. A
+# STALE or WRONG SE_UART therefore took the query path, the query failed, and
+# the shared guard's abort recommended `--replace-atoc`: the "I checked and
+# still want to replace it" override, for a check that demonstrably never
+# ran. `unset SE_UART` -- the actual fix on a flow that needs no serial
+# device -- was named nowhere.
+#
+# The refusal itself was always correct and is unchanged (exit 5, nothing
+# written). What these tests pin is the TEXT, because the text is the defect:
+# #2029/#2027 kept `--atoc-unqueryable` and `--replace-atoc` distinct
+# precisely so a no-check state never trains an operator onto the
+# checked-and-override flag, and flash-jlink.sh's own header says that habit
+# must never form. Steering them onto it from the other direction re-conflates
+# the two flags.
+#
+# Wording assertions rot, so each one below is anchored on the SMALLEST
+# phrase that carries the actual behavioural claim -- the flag names and
+# `unset SE_UART` -- never on a whole sentence.
+
+#: Flow A's remedy, verbatim. On Flow A $SE_UART IS the transport, so a failed
+#: query genuinely leaves confirming by hand and overriding as the only way
+#: past -- this must keep saying exactly that.
+_FLOW_A_REMEDY = "Confirm by hand what is resident, then re-run with --replace-atoc."
+
+
+@_NEEDS_BASH
+def test_flowd_unverified_query_does_not_recommend_replace_atoc(tmp_path):
+    """The #2187 defect itself: SE_UART exported but unusable on Flow D.
+
+    Still exit 5, still nothing written -- but the remedy must point at
+    fixing or unsetting SE_UART, and must say in as many words that
+    `--replace-atoc` is NOT the way out of a check that never ran.
+    """
+    res = _call_flowd_guard(
+        tmp_path, "0", "0", ["ALP-HE"], "stale-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+    assert "could not read the resident ATOC" in res.stderr, res.stderr
+    assert "unset SE_UART" in res.stderr, (
+        f"Flow D's remedy must name unsetting SE_UART -- the flow needs no "
+        f"serial device at all. Got:\n{res.stderr}"
+    )
+    assert "--atoc-unqueryable" in res.stderr, (
+        f"Flow D's remedy must name the acknowledgement flag that fits a "
+        f"check which did not run. Got:\n{res.stderr}"
+    )
+    assert "LG_PLACE" in res.stderr, (
+        f"a wrong SE_UART is usually a stale raw path; the remedy must point "
+        f"at the per-slot resolution instead. Got:\n{res.stderr}"
+    )
+    assert _FLOW_A_REMEDY not in res.stderr, (
+        f"this is the #2187 defect: Flow D was told to re-run with "
+        f"--replace-atoc, the checked-and-override flag, for a check that "
+        f"never ran. Got:\n{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_flow_a_unverified_query_still_recommends_replace_atoc(tmp_path):
+    """The other half, and the one a careless fix breaks: Flow A's wording is
+    unchanged.
+
+    On Flow A the SE-UART *is* the write transport, so there is no "unset it"
+    remedy -- a human confirming what is resident and overriding is the only
+    way past. A fix that made the new Flow D text unconditional would leave
+    this green only if it were asserted, so assert it.
+    """
+    res = _call_atoc_guard(
+        tmp_path, "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+    assert _FLOW_A_REMEDY in res.stderr, (
+        f"Flow A's remedy must be unchanged by #2187. Got:\n{res.stderr}"
+    )
+    assert "unset SE_UART" not in res.stderr, (
+        f"Flow A cannot write without its SE-UART, so unsetting it is never "
+        f"the remedy there. Got:\n{res.stderr}"
+    )
+
+
+def _call_flowd_then_flow_a(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Drive bench_flowd_atoc_guard and then bench_atoc_replace_guard in ONE
+    shell, both landing on the unverified-query abort, and capture each
+    call's stderr separately.
+
+    This is the test the implementation shape exists for. The flow is
+    selected by `BENCH_ATOC_FLOW`, which bench_flowd_atoc_guard sets with
+    `local` so it is restored when that call returns. `local` inside a
+    function is the whole guarantee: drop it (or hoist the assignment to the
+    file scope) and the variable leaks, so every LATER Flow A guard in the
+    same shell -- flash-run.sh and flash-run-dualcore.sh both call one --
+    starts printing Flow D's "unset SE_UART" advice on a board whose SE-UART
+    is the only way to write it. Nothing else in the tree would notice.
+    """
+    workdir = tmp_path
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    # No `maintenance` binary at all: both guards take the unverified-query
+    # abort, which is the branch whose wording is under test. Keeping both
+    # calls on the same cause isolates the flow selector as the only thing
+    # that can differ between the two transcripts.
+    setools_dir = workdir / "setools-empty"
+    setools_dir.mkdir(exist_ok=True)
+
+    gate = workdir / "both-gates.sh"
+    gate.write_bytes(
+        (
+            "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT\n"
+            f'export SETOOLS_DIR="{setools_dir.name}"\n'
+            'export SE_UART="stale-uart"\n'
+            "source ./bench-env.sh\n"
+            "bench_flowd_atoc_guard 0 0 flowd-first ALP-HE 2>flowd.err\n"
+            "echo \"flowd=$?\"\n"
+            "bench_atoc_replace_guard 0 flow-a-second ALP-HE 2>flowa.err\n"
+            "echo \"flowa=$?\"\n"
+            "exit 0\n"
+        ).encode("utf-8")
+    )
+    return subprocess.run(
+        ["bash", "both-gates.sh"], cwd=workdir, env=_sanitized_env(),
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_flowd_flow_selector_does_not_leak_into_a_later_flow_a_guard(tmp_path):
+    """A Flow D guard must not change what a Flow A guard prints afterwards
+    in the same shell."""
+    res = _call_flowd_then_flow_a(tmp_path)
+    flowd_err = (tmp_path / "flowd.err").read_text(encoding="utf-8")
+    flowa_err = (tmp_path / "flowa.err").read_text(encoding="utf-8")
+
+    assert "flowd=5" in res.stdout, f"the Flow D guard did not refuse: {res.stdout}"
+    assert "flowa=5" in res.stdout, f"the Flow A guard did not refuse: {res.stdout}"
+
+    assert "unset SE_UART" in flowd_err, (
+        f"the first call must print Flow D's remedy. Got:\n{flowd_err}"
+    )
+    assert _FLOW_A_REMEDY in flowa_err, (
+        f"the SECOND call is a Flow A guard and must print Flow A's remedy -- "
+        f"BENCH_ATOC_FLOW leaked out of the Flow D call. Got:\n{flowa_err}"
+    )
+    assert "unset SE_UART" not in flowa_err, (
+        f"Flow D's advice leaked into a Flow A guard: on a Flow A board the "
+        f"SE-UART is the write transport and unsetting it is never the "
+        f"remedy. Got:\n{flowa_err}"
+    )
+
+
+
 # The exact call bench_flowd_atoc_guard is invoked with in all three Flow D
 # writers -- anchored to the literal argument shape, not merely the function
 # name. Review MAJOR 1: a bare `"bench_flowd_atoc_guard" in body` substring
