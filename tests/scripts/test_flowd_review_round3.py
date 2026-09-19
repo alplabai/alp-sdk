@@ -652,6 +652,85 @@ def test_erase_storage_rejects_a_value_less_sku(tmp_path: Path) -> None:
     assert "--sku requires a value" in (res.stdout + res.stderr)
 
 
+# --------------------------------------------------------------------
+# --check-only (alp-sdk#2233 review round 4): a READ-ONLY mode -- runs the
+# DPIDR preflight and the whole-atoc-region trailer read/overlap decision
+# exactly like the real path, then exits before any write session is ever
+# built. Driven against the SAME stateful fake-MRAM stub as the rest of
+# this file, with a pre-seeded trailer sector standing in for the
+# bench-measured overlap layout (E1M-AEN803, serial 2026W36-0001).
+# --------------------------------------------------------------------
+
+def _trailer_sector(package_start: int, package_size: int) -> bytes:
+    """One 16 KiB sector carrying the bench-measured ATOC trailer shape at
+    its own top -- the sector spans 0x8057C000-0x8057FFFF, the last sector
+    of the default E1M-AEN801 `atoc` region (0x80578000, 32 KiB)."""
+    sector = bytearray(SECTOR)
+    header_addr = 0x8057FF90
+    header_off = header_addr - 0x8057C000
+    sector[header_off:header_off + 8] = b"OEMTOC01"
+    trailer_off = (0x80580000 - 16) - 0x8057C000
+    sector[trailer_off:trailer_off + 12] = struct.pack("<III", header_addr, package_start, package_size)
+    return bytes(sector)
+
+
+@_NEEDS_BASH
+def test_erase_storage_check_only_refuses_on_the_measured_overlap_layout(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    # The bench-measured hazard: package_start (0x8056A3C0) is INSIDE the
+    # default E1M-AEN801 erase window (0x80560000-0x80577FFF).
+    package_start = 0x8056A3C0
+    package_size = 0x80580000 - package_start
+    (ctx["mram"] / "8057C000.bin").write_bytes(_trailer_sector(package_start, package_size))
+    res = _run(ctx, ES, ["--check-only"])
+    out = res.stdout + res.stderr
+    assert res.returncode == 7, out
+    assert "WOULD ZERO PART OF A LIVE" in out, out
+    log = _sessions_log(ctx)
+    assert "WRITE " not in log, f"--check-only must never run a write session:\n{log}"
+    assert "BOOT" not in log, log
+
+
+@_NEEDS_BASH
+def test_erase_storage_check_only_proceeds_on_a_blank_trailer(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    # No pre-seeded trailer sector -- the stub's rd() treats a missing
+    # sector as all-0x00, i.e. a genuinely blank trailer.
+    res = _run(ctx, ES, ["--check-only"])
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, out
+    assert "WOULD PROCEED" in out, out
+    log = _sessions_log(ctx)
+    assert "WRITE " not in log, f"--check-only must never run a write session:\n{log}"
+
+
+@_NEEDS_BASH
+def test_erase_storage_check_only_rejects_combination_with_dry_run(tmp_path: Path) -> None:
+    ctx = _setup(tmp_path)
+    res = _run(ctx, ES, ["--check-only", "--dry-run"])
+    out = res.stdout + res.stderr
+    assert res.returncode == 1, out
+    assert "mutually exclusive" in out, out
+
+
+def test_erase_storage_check_only_exit_is_structural(tmp_path: Path) -> None:
+    """Complement to the two behavioural tests above: with the --check-only
+    exit itself mutated out, the erase would fall through into the REAL
+    sector-pad/backup/write pipeline (source-level regression, not just
+    "the stub happened to not build a write session"). Pinning the exit's
+    presence directly, immediately after the ATOC-trailer check block,
+    catches that even where a stub-driven run might coincidentally still
+    behave -- reused rather than a fresh mutation harness, matching this
+    file's own N13/N15 structural tests above."""
+    body = (BENCH / "erase-storage.sh").read_text(encoding="utf-8")
+    idx = body.index('if [ "$CHECK_ONLY" = 1 ]; then\n\techo ">>> --check-only:')
+    assert idx > 0, "the --check-only exit block was not found where expected"
+    # It must sit BEFORE the sector-pad section starts.
+    sector_pad_idx = body.index("# SECTOR-PAD (alp-sdk#2233): the built-in loader")
+    assert idx < sector_pad_idx, "--check-only's exit must come BEFORE any write-session machinery"
+    assert "exit 0" in body[idx:sector_pad_idx]
+
+
 def test_erase_storage_asserts_the_trailer_read_connected_before_parsing_it(tmp_path: Path) -> None:
     """Structural complement to the behavioural test above (alp-sdk#2233
     review round 3, N13): a fresh `mktemp` file the trailer-read session

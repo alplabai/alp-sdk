@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/erase-storage.sh [--dry-run] [--sku <SKU>]
+# scripts/bench/aen/erase-storage.sh [--dry-run] [--check-only] [--sku <SKU>]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh; drives
 # JLinkExe, a Linux binary on this bench). Run it under WSL2 on Windows; macOS
@@ -88,9 +88,22 @@
 # itself was written this way and byte-verified on 2026-08-30 (see the
 # [BENCH-VERIFIED] note above).
 #
+# --check-only (alp-sdk#2233 review round 4): a READ-ONLY mode -- runs the
+# DPIDR preflight and the whole-atoc-region trailer read exactly as the real
+# path does (so the overlap decision itself is exercised on real silicon,
+# not just the arithmetic around it), then exits BEFORE the pre-write
+# backup, bench_flowd_prepare_write, or any write-session CommandFile is
+# ever built. See "CHECK-ONLY" below for its own exit codes. Mutually
+# exclusive with --dry-run/FLOWD_DRY_RUN, which is the OPPOSITE promise (no
+# probe opened at all) -- combining them is a usage error (exit 1), not a
+# silently-resolved ambiguity.
+#
 # Exit codes (aligned with the sibling Flow D helpers):
-#   0  window written and byte-verified (fresh-session read-back proof) as erased
-#   1  usage error -- an unrecognised argument, or --sku with no value
+#   0  window written and byte-verified (fresh-session read-back proof) as
+#      erased -- OR, under --check-only, the read-only trailer check
+#      completed and the erase WOULD proceed (nothing written in that mode)
+#   1  usage error -- an unrecognised argument, --sku with no value, or
+#      --check-only combined with --dry-run/FLOWD_DRY_RUN
 #      (nothing written, no probe opened)
 #   2  the part-number device profile could not connect (nothing written)
 #   3  the read-back proof failed -- do NOT treat as erased
@@ -100,9 +113,12 @@
 #      (alp-sdk#2233 -- plan/pre-read/build) itself refused or failed
 #   6  the ATOC trailer could not be read/parsed, or is internally
 #      inconsistent -- the resident package's location cannot be determined
-#      safely, so the erase is refused outright (nothing written)
+#      safely, so the erase is refused outright (nothing written); under
+#      --check-only this means "undeterminable", not "refused a real erase"
 #   7  the resolved resident ATOC package overlaps the erase window --
-#      refused outright (nothing written)
+#      refused outright (nothing written); under --check-only this means
+#      "the real erase WOULD be refused for this reason", not that this run
+#      refused one
 #  11  RACE DETECTED between the pre-read and the write session's own
 #      pre-load savebin (see bench-env.sh) -- the board HAS already been
 #      written; restore from the printed paths before trusting it
@@ -117,6 +133,7 @@ set -e
 source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 
 DRY_RUN=0
+CHECK_ONLY=0
 SKU="${ALP_AEN_SKU:-E1M-AEN801}"
 # Whole-argv scan (same shape flash-jlink.sh's flag parser uses, see its own
 # PARSER SHAPE note) -- --dry-run and --sku may land in either order.
@@ -137,16 +154,17 @@ for arg in "$@"; do
 	fi
 	case "$arg" in
 	--dry-run) DRY_RUN=1 ;;
+	--check-only) CHECK_ONLY=1 ;;
 	--sku) _next_is_sku=1 ;;
 	--sku=*) SKU="${arg#--sku=}" ;;
 	*)
-		echo "!! ABORT: unknown argument '$arg' -- usage: erase-storage.sh [--dry-run] [--sku <SKU>]" >&2
+		echo "!! ABORT: unknown argument '$arg' -- usage: erase-storage.sh [--dry-run] [--check-only] [--sku <SKU>]" >&2
 		exit 1
 		;;
 	esac
 done
 if [ "$_next_is_sku" = 1 ]; then
-	echo "!! ABORT: --sku requires a value -- usage: erase-storage.sh [--dry-run] [--sku <SKU>]" >&2
+	echo "!! ABORT: --sku requires a value -- usage: erase-storage.sh [--dry-run] [--check-only] [--sku <SKU>]" >&2
 	exit 1
 fi
 # alp-sdk#2233 review round 3, finding 2: FLOWD_DRY_RUN must be treated
@@ -163,6 +181,38 @@ fi
 # branch.
 if [ -n "${FLOWD_DRY_RUN:-}" ]; then
 	DRY_RUN=1
+fi
+
+# alp-sdk#2233 review round 4: --check-only is the OPPOSITE promise from
+# --dry-run/FLOWD_DRY_RUN -- it deliberately DOES open a probe (read-only)
+# to run the DPIDR preflight and the whole-atoc-region trailer read for
+# real, so the overlap decision itself is exercised on real silicon rather
+# than only its arithmetic. Combining the two is a usage mistake, not an
+# ambiguity to silently resolve (whichever alias won would surprise the
+# other). Checked AFTER the FLOWD_DRY_RUN-aliases-DRY_RUN block above, so a
+# combination via FLOWD_DRY_RUN is caught exactly like one via --dry-run.
+if [ "$CHECK_ONLY" = 1 ] && [ "$DRY_RUN" = 1 ]; then
+	echo "!! ABORT: --check-only and --dry-run/FLOWD_DRY_RUN are mutually exclusive --" >&2
+	echo "   --check-only needs a REAL read of the ATOC trailer; --dry-run/FLOWD_DRY_RUN" >&2
+	echo "   opens no probe at all." >&2
+	exit 1
+fi
+if [ "$CHECK_ONLY" = 1 ]; then
+	# DEFENSE IN DEPTH, same shape as every other Flow D writer's own
+	# FLOWD_DRY_RUN check: bench_jlink_run()'s backstop (bench-env.sh)
+	# independently refuses (rc=13) any CommandFile containing a
+	# loadbin/erase line while this is set. --check-only's PRIMARY
+	# guarantee is structural -- it exits (see below, right after the
+	# ATOC-trailer check) before any write-session CommandFile is ever
+	# built, so this backstop should be unreachable; it exists for the
+	# case a future edit moves that exit and breaks the structural
+	# guarantee. Exported HERE, deliberately AFTER the FLOWD_DRY_RUN-
+	# aliases-DRY_RUN check above: exporting it earlier would ALSO make
+	# that check set DRY_RUN=1 and skip the DPIDR preflight and the
+	# trailer read this whole mode exists to run for real. Neither the
+	# preflight nor the trailer-read CommandFile ever contains a
+	# loadbin/erase line, so this export does not affect either of them.
+	export FLOWD_DRY_RUN=1
 fi
 
 # Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
@@ -323,6 +373,18 @@ EOF
 		fi
 		echo ">>> ATOC trailer: resident package does not overlap the erase window -- proceeding." >&2
 	fi
+fi
+
+# --check-only STOPS HERE (alp-sdk#2233 review round 4) -- the read-only
+# DPIDR preflight and ATOC-trailer read/overlap decision above are the
+# whole point of this mode; reaching this line without having already
+# exited 6 (undeterminable) or 7 (overlap refused) means the real erase
+# WOULD proceed. Exits BEFORE the pre-write backup, bench_flowd_prepare_write,
+# or any write-session CommandFile below -- none of that has run yet.
+if [ "$CHECK_ONLY" = 1 ]; then
+	echo ">>> --check-only: read-only trailer check complete -- the erase WOULD PROCEED" >&2
+	echo "    (nothing written; no write session was built or run)." >&2
+	exit 0
 fi
 
 # SECTOR-PAD (alp-sdk#2233): the built-in loader rewrites the WHOLE 16 KiB
