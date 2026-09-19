@@ -1,5 +1,5 @@
 /*
- * Flow-C-ONLY AEN801 (E8, M55-HE) devicetree overlay -- retargets the ROM
+ * Flow-C-ONLY AEN803 (E8, M55-HE) devicetree overlay -- retargets the ROM
  * region to ITCM for a J-Link RAM-run. This is the other half of the
  * Flow C ITCM retarget; the Kconfig half lives in
  * scripts/bench/aen/aen-flowc-itcm.conf. BOTH halves are required --

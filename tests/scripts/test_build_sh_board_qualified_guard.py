@@ -207,6 +207,30 @@ class TestBuildShBoardQualifiedGuard:
         assert "BUILD FAILED" in result.stderr, result.stderr
         assert result.returncode == 1
 
+    def test_firewall_fragment_only_conf_is_not_mistaken_for_a_board_qualified_one(
+        self, tmp_path: Path
+    ) -> None:
+        # A second scoping regression, narrower than the native_sim case
+        # above: examples/connectivity/firmware-update-log ships
+        # boards/alp_e1m_aen801_m55_he_firewall_probe.conf and
+        # ..._firewall_proven.conf -- real alp_e1m_*-prefixed .conf
+        # fragments, but passed explicitly via that app's own
+        # CMakeLists.txt EXTRA_CONF_FILE, never auto-applied by Zephyr's
+        # board-name match. An app that ships ONLY such a fragment (no
+        # genuinely board-qualified "..._rtss_h[ep].conf" file) must not
+        # be refused for a file that was never going to be applied in the
+        # first place -- the glob is scoped to the "_rtss_h[ep]" suffix
+        # every real board-qualified stem carries, which a
+        # "_firewall_probe"/"_firewall_proven" stem does not.
+        app = _make_app(tmp_path, "app-firewall-fragment-only", {
+            f"{BOARD_STEM}.overlay": "/* matches the resolved board */\n",
+            f"{BOARD_STEM}_firewall_probe.conf": "# explicit EXTRA_CONF_FILE fragment\n",
+        })
+        result = _run(tmp_path, app)
+        assert "ships AEN board" not in result.stderr, result.stderr
+        assert "BUILD FAILED" in result.stderr, result.stderr
+        assert result.returncode == 1
+
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

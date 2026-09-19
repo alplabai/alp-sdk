@@ -5,10 +5,11 @@
 # JLinkExe, a Linux binary on this bench). Run it under WSL2 on Windows; macOS
 # has the J-Link tools but is not the bench host. See docs/aen-provisioning.md.
 #
-# PROVISIONING STEP (alp-sdk#1430) -- erase the E1M-AEN801 CUSTOMER STORAGE
+# PROVISIONING STEP (alp-sdk#1430) -- erase the E1M-AEN803 CUSTOMER STORAGE
 # WINDOW before a SoM ships, so the module does not leave manufacturing
 # carrying a previous application's image in the window the customer's first
-# NVS write lands in.
+# NVS write lands in. (Every module on the bench farm is an E1M-AEN803,
+# #2094; the window is identical on E1M-AEN801 -- see hazard 4 below.)
 #
 # WHY: alp-sdk#1334 measured, on E8 silicon, ~110 KiB of a stale
 # previously-flashed Zephyr application image sitting in what was then the
@@ -50,10 +51,12 @@
 #    not use it, because the SWD path gets the DPIDR board-identity gate below.
 #
 # 4. THE BAND IMMEDIATELY ABOVE THE WINDOW IS SE-OWNED. `atoc` starts where
-#    `storage` ends (metadata/e1m_modules/E1M-AEN801.yaml). SETOOLS top-anchors
-#    the signed ATOC there and grows it downward, so an overshoot of even one
-#    byte can land in the live ATOC -- the board then boots to `No ATOC` and
-#    needs re-provisioning over the SE-UART (docs/aen-provisioning.md section 4).
+#    `storage` ends (metadata/e1m_modules/E1M-AEN803.yaml -- byte-identical
+#    to E1M-AEN801.yaml's memory_map rows, same PCB and silicon). SETOOLS
+#    top-anchors the signed ATOC there and grows it downward, so an
+#    overshoot of even one byte can land in the live ATOC -- the board then
+#    boots to `No ATOC` and needs re-provisioning over the SE-UART
+#    (docs/aen-provisioning.md section 4).
 #    The window is therefore DERIVED from the preset and asserted adjacent to
 #    `atoc` below; nothing here is a hardcoded address.
 #
@@ -93,7 +96,15 @@ JLINK_ARGS=(bench_jlink_run)
 # 1. DERIVE the window from the SoM preset -- single source of truth, so a
 #    future layout move cannot leave a stale address baked in here. Then assert
 #    it ends exactly where the SE-owned `atoc` band begins (hazard 4).
-PRESET="$ALP_SDK_DIR/metadata/e1m_modules/E1M-AEN801.yaml"
+#
+#    Read from the E1M-AEN803 preset, not E1M-AEN801 -- every module on the
+#    bench farm is an E1M-AEN803 (#2094). NOT a hazard either way: the two
+#    presets' `memory_map:` rows are byte-identical (storage 0x80560000,
+#    atoc 0x80578000, mram_main 0x80000000) -- same PCB, same silicon, only
+#    the external OSPI0 population differs, and OSPI0 has no memory_map row
+#    on either preset. Naming consistency only; if a future change ever
+#    makes the two windows diverge, this reference needs to move with it.
+PRESET="$ALP_SDK_DIR/metadata/e1m_modules/E1M-AEN803.yaml"
 if [ ! -r "$PRESET" ]; then
 	echo "!! ABORT: cannot read $PRESET -- run this from inside the alp-sdk checkout." >&2
 	exit 5

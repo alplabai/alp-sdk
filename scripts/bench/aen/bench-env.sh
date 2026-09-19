@@ -116,24 +116,67 @@ export HAL_ALIF_DIR
 #     both guards are scoped to alp_e1m_*-prefixed stems only, so a bare
 #     native_sim_native_64.overlay/.conf never trips either one.
 #   * #2176 and #2214 backfilled AEN803-qualified overlays across
-#     examples/aen/; this change backfills the three examples/peripheral-io
-#     apps that also carried an AEN801-only overlay (blink, pwm-led-fade,
-#     alp-console) with AEN803 twins -- same PCB, and their pads sit
-#     outside the AEN803 OSPI0 set, so the AEN801 body copies cleanly.
+#     examples/aen/; this change backfills the examples/peripheral-io apps
+#     that also carried an AEN801-only overlay (blink, pwm-led-fade,
+#     alp-console -- HE, since that is this default's target -- and
+#     drone-autopilot's HP-only overlay, for symmetry when a caller
+#     explicitly overrides to the HP target) with AEN803 twins -- same
+#     PCB, and each one's pads sit outside the AEN803 OSPI0 set, so the
+#     AEN801 body copies cleanly.
 #
-# STILL REFUSED under this default, knowingly: examples/connectivity/
-# firmware-update-log ships an AEN801-qualified overlay with no AEN803
+# The census below is re-derivable: it re-runs the exact guard logic in
+# build.sh's bench_build_require_board_qualified() against every
+# examples/*/*/boards/ directory, for BOTH the AEN801 and the AEN803 HE
+# board stems, and diffs the two refusal sets. Re-run it after any further
+# overlay/.conf backfill to see what moved:
+#
+#     for d in examples/*/*/boards; do app=$(dirname "$d"); for ext in overlay conf; do have=0; for f in "$d"/alp_e1m_*."$ext"; do [ -e "$f" ] && have=1; done; [ "$have" = 1 ] || continue; for b in alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he; do [ -e "$d/$b.$ext" ] || echo "$app  $ext  refused-under-$b"; done; done; done
+#
+# Two DIFFERENT categories come out of that census -- do not conflate them:
+#
+# NEWLY refused BY THIS REPOINT (refused under AEN803, was NOT refused
+# under AEN801 -- this is the hazard #2094 exists to close): only
+# examples/connectivity/firmware-update-log (both its overlay AND its
+# .conf). It ships an AEN801-qualified overlay/.conf with no AEN803
 # sibling, and a mechanical copy would not be trustworthy there -- its
 # CMakeLists.txt gates DTC_OVERLAY_FILE and EXTRA_CONF_FILE on
 # `if(BOARD MATCHES "^alp_e1m_aen801_m55_he")`, so under AEN803 neither
 # arm fires (its board-qualified .conf files are not applied either),
 # and it is the ATOC/MRAM write path carrying a fail-closed firewall
 # claim -- it needs a bench run before a twin ships, not a copy-paste
-# (tracked separately from #2094). Until then, build it with an explicit
-# override:
+# (tracked separately from #2094). The repoint changes nothing about how
+# that app is actually built today: its own README documents an explicit
+# `-b alp_e1m_aen801_m55_he/...` override (never this default), and
+# flash-update-log-dual.sh takes an already-built build dir, not
+# AEN_BOARD -- so this exclusion cannot regress that app's documented
+# workflow. Until a twin ships, build it explicitly:
 #
 #     AEN_BOARD=alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
 #         scripts/bench/aen/build.sh examples/connectivity/firmware-update-log
+#
+# ALREADY refused BEFORE AND AFTER this repoint, unrelated to AEN801 vs
+# AEN803 (do not read these as caused by this change):
+#
+#   * aen-hp-core-smoke and edgeai-vision-aen ship an HP-only overlay
+#     (both an AEN801 AND an AEN803 one already) with no HE sibling of
+#     EITHER SKU, so the HE-default guard above refuses them regardless
+#     of AEN_BOARD's SKU -- override with the HP target, e.g.
+#     AEN_BOARD=alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp.
+#   * iot-connected-camera is a DIFFERENT shape: its only alp_e1m_*
+#     board file is a V2N one (alp_e1m_v2n101_m33_sm_...overlay), a
+#     wholly different SoM family that happens to also start with the
+#     glob's alp_e1m_* prefix. It ships no AEN overlay of any core, so
+#     it is refused for lacking the AEN803 (and, before, the AEN801)
+#     file entirely -- an HP/HE split does not apply here. Out of scope
+#     to fix: narrowing the guard's glob to exclude other SoM families
+#     is a build.sh change this issue does not make.
+#   * drone-autopilot is the same shape as aen-hp-core-smoke /
+#     edgeai-vision-aen (HP-only, board.yaml pins `cores: [m55_hp]`) and
+#     is likewise refused under this HE default both before and after --
+#     its AEN803 HP overlay is backfilled beside the AEN801 one anyway
+#     (verified pad-disjoint from the OSPI0 set: I2C2 P5_6/P5_7, UART3
+#     P1_2/P1_3, PWM10/PWM11 P2_4/P2_5/P12_6/P12_7), so an explicit HP
+#     override now works cleanly on either SKU, same as the other two.
 export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------

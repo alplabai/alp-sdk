@@ -3,23 +3,78 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Real-hardware pin routing for blink on the E1M-AEN803 (Alif Ensemble
- * E8), M55-HP core (#2094).  E1M-AEN803 shares the E1M-AEN801 PCB and
- * silicon (AE822FA0E5597LS0) -- the SKUs only differ in their external
- * OSPI0 memory population (E1M-AEN803 fits both HyperRAM and NOR, see
+ * E8), M55-HP core (#2094) -- every module on the bench farm is an
+ * E1M-AEN803, so this is the overlay the default bench build now reads.
+ * E1M-AEN803 shares the E1M-AEN801 PCB and silicon (AE822FA0E5597LS0)
+ * -- the SKUs only differ in their external OSPI0 memory population
+ * (E1M-AEN803 fits both HyperRAM and NOR, see
  * metadata/e1m_modules/E1M-AEN803.yaml).  None of this demo's pads sit
  * on that OSPI0 bus (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4, P15_2,
  * P15_3, P15_6, P15_7): the LED lives on P12_7/gpio12, its RGB siblings
  * on P12_6/gpio12 and P2_4/gpio2, and every unmapped array slot on the
- * gpio2-pin-31 sentinel below -- so the E1M-AEN801 body carries over
- * unchanged.  The M55-HE overlay beside this one is identical -- the
- * LED pad is a SoM-level route, not a core-level one, so either core
- * can drive it.
+ * gpio2-pin-31 sentinel below -- so the E1M-AEN801 body (below) carries
+ * over unchanged.  The M55-HE overlay beside this one is identical --
+ * the LED pad is a SoM-level route, not a core-level one, so either
+ * core can drive it.
  *
- * See the E1M-AEN801 overlay in this same directory for the full
- * rationale (why this file has to exist at all, the from-alif.tsv pad
- * mapping, and why the unmapped array slots point at a disabled-
- * controller sentinel instead of a plausible-looking real pin) -- not
- * restated per-SKU here.
+ * WHY THIS FILE EXISTS AT ALL.  <alp/peripheral.h>'s portable
+ * alp_gpio_open() resolves a pin id through the `alp,pin-array` DT node
+ * (src/backends/gpio/zephyr_drv.c, alp_z_gpio_resolve()).  That node is
+ * NOT supplied by the board tree under zephyr/boards/alp/ -- every
+ * example that touches GPIO on real silicon ships its own.  Without
+ * this file the example builds, links, boots, reaches main() and then
+ * fails at the first call with ALP_ERR_INVAL, because the array does
+ * not exist.  Verified before the E1M-AEN801 overlay was added:
+ *
+ *     [blink] init led=BOARD_PIN_LED_RED
+ *     [blink] failed: open status=-1
+ *
+ * THE PAD.  BOARD_PIN_LED_RED -> EVK_PIN_LED_RED -> ALP_E1M_GPIO_PWM0,
+ * canonical pin id 26.  (Bench-measured 2026-07-28: the RGB LED's
+ * RED/GREEN pads were swapped from the internal netlist's wrong
+ * LED_R/LED_G net names -- PWM0 is physically red, PWM3 physically
+ * green; see metadata/boards/e1m-evk.yaml's `e1m_routes:` comment.
+ * Don't "fix" this back toward the netlist.)  The E1M pad -> Alif pad
+ * mapping is committed data, not a guess --
+ * metadata/e1m_modules/aen/from-alif.tsv:5:
+ *
+ *     e1m_pad  e1m_function  alif_peripheral  alif_pad
+ *     A6       PWM0          UT11_T1_C        P12_7
+ *
+ * P12_7 is port 12 pin 7 -> `gpio12` (gpio@4900c000,
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi:222).  Its GPIO function
+ * is alt-0 (PIN_P12_7__GPIO = ALIF_PINMUX(12, 7, 0)); the pad's default
+ * peripheral function UT11_T1_C is alt-4, which is the PWM path a real
+ * PWM fade on this pad would claim instead.  Same silicon -- never
+ * hold both at once.
+ *
+ * WHY THE OTHER 25 ENTRIES POINT AT A DISABLED NODE.  The array is
+ * POSITIONAL and the resolver bounds-checks against its length
+ * (`if (pin_id >= ARRAY_SIZE(alp_pins)) return false;`), so reaching
+ * index 26 means declaring indices 0..25 as well (this overlay in fact
+ * declares through index 29, since the RGB GREEN/BLUE channels also
+ * have committed Alif mappings).  Only 11 of the E1M GPIO-class pads
+ * have a committed Alif mapping in from-alif.tsv (IO0, IO2..IO7,
+ * PWM0..PWM4, PWM6) -- IO1 and IO8..IO25 have none.
+ *
+ * Filling those slots with plausible-looking gpio2 pins would make
+ * alp_gpio_open() on any of them DRIVE A REAL PAD on a live board,
+ * chosen by guesswork, with whatever else is wired to it.  That is a
+ * hardware-contention hazard, not a documentation shortcut.  Instead
+ * every unmapped index points at gpio2 pin 31 -- a REAL, ready
+ * controller but a pin that does not exist on it (gpio2 has
+ * `ngpios = <8>`, so only pins 0..7 are valid).  Zephyr's generic
+ * gpio_pin_configure() rejects it against the port pin mask with
+ * -EINVAL, so the call fails before any pad is touched.  A disabled
+ * sentinel node cannot be used instead: Zephyr only instantiates
+ * devices for `status = "okay"` nodes, so DEVICE_DT_GET on a disabled
+ * one fails to build (`__device_dts_ord_N undeclared`).
+ *
+ * So on this board: opening BOARD_PIN_LED_RED works; opening an
+ * unmapped E1M pad fails cleanly and loudly.  When a pad gains a real
+ * mapping in from-alif.tsv, move its entry off the sentinel.  This is
+ * the same rationale the E1M-AEN801 overlay beside this one carries --
+ * its body is byte-identical to the one below.
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>

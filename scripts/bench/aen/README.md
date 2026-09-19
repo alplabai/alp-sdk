@@ -1,9 +1,9 @@
 <!-- cross-platform-lint:ignore -->
-# AEN801 (Alif Ensemble E8) bench flash + RAM-run helpers
+# AEN803 (Alif Ensemble E8) bench flash + RAM-run helpers
 
 Runnable companions to [`docs/aen-bench-bringup.md`](../../../docs/aen-bench-bringup.md).
 These wrap the J-Link CommanderScript and Alif SETOOLS flows used to flash,
-RAM-run, and read back AEN801 (E8, M55-HE) bench apps over SWD. They are
+RAM-run, and read back AEN803 (E8, M55-HE) bench apps over SWD. They are
 **Linux-side bench tooling**: J-Link Commander (`JLinkExe`) plus the Alif
 Security Toolkit (`app-gen-toc` / `app-write-mram`), both Linux binaries on
 this bench. Run them under WSL2 on Windows; macOS has J-Link but not the
@@ -40,7 +40,7 @@ export LG_PLACE=<your-bench-place>                  # the bench board, by PLACE 
                                                      # also used opportunistically by Flow D's resident-ATOC
                                                      # guard once SE_UART resolves (#2027)
 
-# 2. Build an app for the AEN801 M55-HE target.
+# 2. Build an app for the AEN803 M55-HE target.
 scripts/bench/aen/build.sh examples/aen/aen-gpio-bench
 
 # 3. Flash + boot + read back the RAM console (pick a flow).

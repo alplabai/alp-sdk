@@ -63,22 +63,37 @@ fi
 # and no indication of it, and the first symptom is a peripheral
 # behaving oddly on real silicon.
 #
-# Refuse both. An app with NO alp_e1m_*-qualified file of a given kind is
-# fine -- there is nothing to miss -- so only a non-empty alp_e1m_* set of
-# that kind that lacks THIS board's file is an error.
+# Refuse both. An app with NO board-qualified file of a given kind is
+# fine -- there is nothing to miss -- so only a non-empty board-qualified
+# set of that kind that lacks THIS board's file is an error.
 #
-# Scoped to alp_e1m_*-prefixed stems ONLY, deliberately not "every file of
-# this extension": boards/ can also hold a native_sim_native_64.overlay/
-# .conf (a different board family entirely, built by twister, never by
-# this script), and an unscoped glob would flag that as a "missing AEN803
+# Scoped to alp_e1m_*_rtss_h[ep]-shaped stems ONLY, deliberately not
+# "every alp_e1m_* file of this extension" and not "every file of this
+# extension": boards/ can also hold a native_sim_native_64.overlay/.conf
+# (a different board family entirely, built by twister, never by this
+# script), and an unscoped glob would flag that as a "missing AEN803
 # file". That is rare for .overlay but COMMON for .conf -- several
 # aen-cc3501e-* bench apps ship ONLY boards/native_sim_native_64.conf, no
 # AEN .conf of any kind, and must keep building clean here.
+#
+# The narrower "..._rtss_h[ep]" suffix (every real AEN board-qualified
+# stem this script ever resolves to ends in "_rtss_he" or "_rtss_hp" --
+# see $BOARD_STEM below) also excludes an alp_e1m_*-prefixed file that is
+# NOT board-qualified at all:
+# examples/connectivity/firmware-update-log ships
+# boards/alp_e1m_aen801_m55_he_firewall_probe.conf and
+# ..._firewall_proven.conf, passed explicitly via that app's own
+# CMakeLists.txt EXTRA_CONF_FILE, never picked up by Zephyr's board-name
+# auto-apply rule. A plain alp_e1m_* glob would count those as "have a
+# board-qualified .conf" and could one day refuse an app that ships ONLY
+# such fragments for a file that was never going to be auto-applied in
+# the first place.
 BOARD_STEM="${BOARD//\//_}"
 
 # bench_build_require_board_qualified <ext> <label> — refuse when
-# $APP_DIR/boards ships an alp_e1m_*.<ext> file for SOME AEN board target
-# but not one named after $BOARD_STEM.
+# $APP_DIR/boards ships an alp_e1m_*_rtss_h[ep].<ext> file (board-
+# qualified for SOME AEN board target) but not one named after
+# $BOARD_STEM.
 bench_build_require_board_qualified() {
 	local ext="$1" label="$2"
 	# A SEPARATE `local` statement, deliberately: bash expands every word on
@@ -89,7 +104,7 @@ bench_build_require_board_qualified() {
 	local expected="$APP_DIR/boards/$BOARD_STEM.$ext"
 	local have=0 f
 
-	for f in "$APP_DIR"/boards/alp_e1m_*."$ext"; do
+	for f in "$APP_DIR"/boards/alp_e1m_*_rtss_h[ep]."$ext"; do
 		[ -e "$f" ] || continue
 		have=1
 		break
@@ -100,7 +115,7 @@ bench_build_require_board_qualified() {
 	echo "build: $NAME ships AEN board $label files, but none for $BOARD" >&2
 	echo "build:   expected: $expected" >&2
 	echo "build:   present:" >&2
-	for f in "$APP_DIR"/boards/alp_e1m_*."$ext"; do
+	for f in "$APP_DIR"/boards/alp_e1m_*_rtss_h[ep]."$ext"; do
 		[ -e "$f" ] || continue
 		echo "build:     $(basename "$f")" >&2
 	done

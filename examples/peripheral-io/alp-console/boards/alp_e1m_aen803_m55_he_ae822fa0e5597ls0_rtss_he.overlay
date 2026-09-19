@@ -16,9 +16,9 @@
  * 1. CC3501E inter-chip bridge wiring (so `alp companion ver/ping` reaches the
  *    on-module CC3501E) -- the SoM-internal Alif<->CC3501E SPI1 link + the two
  *    host-driven control nets, from metadata/e1m_modules/aen/inter-chip.tsv.
- *    This is the SAME proven wiring as examples/aen/aen-cc3501e-bringup, so
- *    it needs the matching overlay too (cc3501e_bridge_bringup opens bus_id
- *    1 = &cc3501e_spi):
+ *    This is the SAME proven wiring as examples/aen/aen-cc3501e-bringup; the
+ *    console copies cc3501e_bridge.{c,h} from there, so it needs the matching
+ *    overlay too (cc3501e_bridge_bringup opens bus_id 1 = &cc3501e_spi):
  *      SPI1.SCK P14_6  MOSI P14_5  MISO P14_4   WIFI_EN P15_5  NRST P15_1_FLEX
  *
  * 2. Master I2C bus (so `alp i2c scan 0` has a live bus): portable bus 0 ->

@@ -2,21 +2,50 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * E1M-AEN803 M55-HE overlay for pwm-led-fade (#2094).  E1M-AEN803 is the
- * same PCB and silicon (AE822FA0E5597LS0) as E1M-AEN801 -- the SKUs only
- * differ in their external OSPI0 memory population (E1M-AEN803 fits both
- * HyperRAM and NOR, see metadata/e1m_modules/E1M-AEN803.yaml).  This
- * demo's single pad, P2_4 (E1M_PWM3, the RGB LED's green channel), is not
- * part of the OSPI0 set (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4,
- * P15_2, P15_3, P15_6, P15_7), so the E1M-AEN801 body below carries over
- * unchanged.  The M55-HP overlay beside this one is identical -- the LED
- * pad is a SoM-level route, not a core-level one, so either core can
- * drive it.
+ * E1M-AEN803 M55-HE overlay for pwm-led-fade (#2094) -- every module on
+ * the bench farm is an E1M-AEN803, so this is the overlay the default
+ * bench build now reads.  E1M-AEN803 is the same PCB and silicon
+ * (AE822FA0E5597LS0) as E1M-AEN801 -- the SKUs only differ in their
+ * external OSPI0 memory population (E1M-AEN803 fits both HyperRAM and
+ * NOR, see metadata/e1m_modules/E1M-AEN803.yaml).  This demo's single
+ * pad, P2_4 (E1M_PWM3, the RGB LED's green channel), is not part of the
+ * OSPI0 set (P2_0, P2_1, P6_2..P6_6, P0_7, P12_0..P12_4, P15_2, P15_3,
+ * P15_6, P15_7), so the E1M-AEN801 body (below) carries over unchanged.
+ * The M55-HP overlay beside this one is identical -- the LED pad is a
+ * SoM-level route, not a core-level one, so either core can drive it.
  *
- * See the E1M-AEN801 overlay in this same directory for the full
- * rationale (why the route needs an overlay at all, the pad -> utimer
- * mapping, and the two traps this file avoids) -- not restated per-SKU
- * here.
+ * WHY THIS FILE EXISTS: board.yaml's declarative `pins: [{ e1m: E1M_PWM3,
+ * macro: EVK_PWM_LED_GREEN }]` + `peripherals: [pwm]` route does NOT emit a
+ * DT alias anywhere in the build -- `tan build`'s CMakeLists.txt only calls
+ * `alp_project.py --emit zephyr-conf` (for alp.conf's CONFIG_PWM=y), never
+ * `--emit dts-overlay`, so nothing wires the pad to hardware.  The Zephyr
+ * PWM backend (src/backends/pwm/zephyr_drv.c) resolves each portable
+ * channel through the `alp-pwm<N>` alias; with none defined,
+ * ALP_PWM_SPEC_3_INIT is `{ .dev = NULL }` and alp_pwm_open() returns
+ * NOT_READY.  This is the same route examples/peripheral-io/alp-console and
+ * examples/aen/aen-analog-validate already use to bridge AEN peripherals
+ * end-to-end: a per-example, per-board-target overlay that Zephyr picks up
+ * automatically by filename (no CMake wiring needed).
+ *
+ * E1M_PWM3 = EVK_PWM_LED_GREEN = pad P2_4 (bench-measured 2026-07-28, see
+ * metadata/boards/e1m-evk.yaml: "observed directly on D19: PWM3/P2_4 lights
+ * GREEN").  P2_4 muxes to UTIMER10 channel 0 driver A (PIN_P2_4__UT10_T0_A,
+ * zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h); utimer10/pwm10 are
+ * already instantiated (disabled) for both M55 cores in
+ * zephyr/dts/alif/ensemble_e8_peripherals.dtsi, this overlay just enables
+ * them and points the pinctrl group at the LED pad.
+ *
+ * TRAP (see examples/aen/aen-pwm-utimer-pwmleds): `alp-pwm3` must alias a
+ * `pwm-leds` CONSUMER child, never the pwm10 controller node directly --
+ * DEVICE_DT_GET on the controller triggers a phantom `pwm10_P_pwms_IDX_0`
+ * codegen reference because the "alif,pwm" binding re-declares #pwm-cells.
+ *
+ * TRAP (numbering domains): the Zephyr node number and the E1M pad number
+ * are NOT the same axis -- node `pwm3` (utimer3) is E1M PWM7 on P10_6, not
+ * E1M PWM3.  Do not "simplify" this file by generalizing pwm<N>-to-alp-pwm<N>;
+ * each E1M PWM pad needs its own bench-confirmed utimer/pinctrl mapping.
+ * This is the same rationale the E1M-AEN801 overlay beside this one
+ * carries -- its body is byte-identical to the one below.
  */
 #include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 #include <zephyr/dt-bindings/pwm/pwm.h>

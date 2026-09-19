@@ -87,29 +87,31 @@ The lint enforces two invariants:
       it is not scoped to `board.yaml`-bearing examples, so it also
       catches a dead overlay in a bare-Zephyr regcheck/test dir.
 
-  (g) HARD ERROR: a customer-facing (`board.yaml`-bearing) example's
-      `boards/<name>.overlay` OR `boards/<name>.conf` must NOT name a
-      bare board that has a fully-qualified sibling under
-      `zephyr/boards/alp/<dir>/` (e.g. `alp_e1m_aen801_m55_he.overlay`
-      or `.conf` when
+  (g) HARD ERROR: any `boards/<name>.overlay` OR `boards/<name>.conf`
+      under `examples/**` or `tests/**` must NOT name a bare board that
+      has a fully-qualified sibling under `zephyr/boards/alp/<dir>/`
+      (e.g. `alp_e1m_aen801_m55_he.overlay` or `.conf` when
       `alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.yaml` exists next
       to that board's `board.yml`).  Zephyr only auto-applies the
-      overlay/`.conf` named after the FULLY-QUALIFIED board id on the
-      customer build (`west build -b <bare>/<soc>/<core>`); a bare-name
-      overlay or `.conf` builds "clean" and silently drops its
-      devicetree edits or Kconfig defaults.  Unlike (f), this check is
-      scoped to `board.yaml`-bearing examples only -- an internal
-      bench/regcheck dir with no `board.yaml` legitimately ships a
-      bare-name overlay/`.conf`: Zephyr's own board-overlay auto-apply
-      rule picks up BOTH the bare board name and the fully-qualified
-      one (they merge), so a bare-name file there is not silently
-      dropped the way it would be on a customer build that names only
-      the fully-qualified id.  `scripts/bench/aen/build.sh` builds the
-      fully-qualified `$AEN_BOARD` target directly and does NOT force
-      anything via `-DEXTRA_DTC_OVERLAY_FILE`/`-DEXTRA_CONF_FILE` (see
-      `check_overlay_qualified()` below and `build.sh`'s own header
-      comment) -- it is Zephyr's own rule doing the work here, not
-      this script.
+      overlay/`.conf` named after the FULLY-QUALIFIED board id (or, for
+      a board declared single-SoC, the id with just its SoC-level
+      qualifier segment dropped) -- `cmake/modules/dts.cmake`'s
+      `zephyr_file(CONF_FILES ...)` derives the candidate filenames via
+      `zephyr_build_string(... MERGE)`, whose `MERGE` only adds a
+      revision-less variant that still carries every qualifier; it
+      never emits the bare, unqualified board name once `BOARD_QUALIFIERS`
+      is non-empty.  So a bare-name overlay or `.conf` builds "clean"
+      and silently drops its devicetree edits or Kconfig defaults, on
+      EVERY build that resolves those qualifiers -- a customer's `west
+      build -b <bare>/<soc>/<core>` and `scripts/bench/aen/build.sh`'s
+      bench build alike, since both invoke the identical Zephyr
+      mechanism; there is no bench-vs-customer distinction here.
+      Applies to EVERY example under `examples/**` and `tests/**`,
+      `board.yaml`-bearing or not -- same scope as (f), not narrower --
+      because an internal bench/regcheck dir with no `board.yaml` is
+      just as exposed to the silent drop as a customer-facing example;
+      that is exactly why `check_overlay_qualified()` below does not
+      filter on `board.yaml` either.
 
 Run from the alp-sdk repo root:
 
