@@ -754,7 +754,7 @@ _NO_ATOC = "No ATOC found on target device.\n"
 
 _COMPLIANT_BANNER = "SES A1 v1.8.0 Feb 20 2026\n"
 
-# Real captures off `e1m-aen-evk-01`, 2026-09-07, ANSI intact -- verbatim,
+# Real captures off an AEN EVK bench unit, 2026-09-07, ANSI intact -- verbatim,
 # not synthesised. alp-sdk#2026 round-2 review measured these against the
 # fixed guard by hand before this suite pinned them:
 #
@@ -1156,7 +1156,7 @@ def test_atoc_guard_aborts_when_tmpdir_does_not_exist(tmp_path):
     )
 
 
-# --- validated against REAL silicon captures off e1m-aen-evk-01 (2026-09-07),
+# --- validated against REAL silicon captures off an AEN EVK bench unit (2026-09-07),
 # ANSI intact, not synthesised (alp-sdk#2026 round-2 review) -----------------
 
 

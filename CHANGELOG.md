@@ -244,7 +244,7 @@ big-endian into a 16-bit frame puts exactly the same bits on the wire as two
 8-bit frames — the peer cannot tell the difference, and no firmware change is
 needed on the other end.
 
-Measured on E1M-AEN801 (`e1m-aen-evk-01`), 512 x 4092 B framed and ACKed over the
+Measured on an E1M-AEN801 AEN EVK bench unit, 512 x 4092 B framed and ACKed over the
 CC3501E bridge: **912 KB/s -> 1139 KB/s**, reproducible to within 30 us across
 runs, with `RESULT PASS: cc3501e link stable over 20 soak PINGs (ping_fail=0)`.
 
@@ -7391,7 +7391,7 @@ captured out of `PIPESTATUS[0]` so the failure message can report it.
 `zephyr.bin` remains the assertion: it is the artefact every downstream flow
 consumes, and it is absent for every failure mode, not just a configure error.
 
-Verified on `e1m-aen-evk-01`'s gateway, both directions:
+Verified on an AEN EVK bench unit's gateway, both directions:
 
 ```
 FAILING app:     EXIT=1   BUILD FAILED: no zephyr.bin at .../aen-analog-validate/... (west exit 1)
@@ -7595,7 +7595,7 @@ now that all three probes are known:
 
 | probe | SW-DP IDR | place |
 |---|---|---|
-| AEN E8 | `0x4C013477` | `e1m-aen-evk-01` |
+| AEN E8 | `0x4C013477` | an AEN EVK bench place |
 | GD32 bridge | `0x0BE12477` | `e1mx-v2n-m1-01` |
 | V2N CM33 DAP | `0x6BA02477` | `e1mx-v2n-m1-01` |
 
@@ -7748,7 +7748,7 @@ the parametrised checks cannot silently cover nothing.
 
 ### Fixed — a failed J-Link connect was reported as an empty RAM console (#1318)
 
-Found by an end-to-end Flow C run on the physical `e1m-aen-evk-01` bench.
+Found by an end-to-end Flow C run on a physical AEN EVK bench unit.
 `scripts/bench/aen/ram-run.sh` printed its normal header and an empty
 console block:
 
@@ -10339,7 +10339,7 @@ maps over the SAME physical App MRAM (`mram_storage@80000000`,
 `slot0_partition` at offset `0x10000`), so a dual-core project's `west
 flash` (or a hand-assembled two-entry ATOC) wrote two images to one
 `mramAddress` and the second silently overwrote the first — bench-confirmed
-on `e1m-aen-evk-01`: an `m55_hp` build and an `m55_he` build both resolved
+on an AEN EVK bench unit: an `m55_hp` build and an `m55_he` build both resolved
 to `mramAddress 0x80010000` in their staged ATOC. Decided layout (deferring
 OTA rather than shrinking either slot, since a swap-sized secondary slot on
 both cores would break the ~2.6 MiB NPU MRAM-model budget; every
@@ -12230,7 +12230,7 @@ second walk of the same tree.
 compiled devicetree, not that it was instantiated. A board whose overlay
 aliases `alp-<periph>N` to a disabled node passed the guard and then failed
 to link against a `struct device` that was never created (bench-confirmed on
-E1M-AEN801, `e1m-aen-evk-01`). `src/zephyr/v2n_power_mgmt.c:56` already used
+an E1M-AEN801 AEN EVK bench unit). `src/zephyr/v2n_power_mgmt.c:56` already used
 the correct guard, `DT_NODE_HAS_STATUS(..., okay)`, and is the reference this
 fix matches.
 

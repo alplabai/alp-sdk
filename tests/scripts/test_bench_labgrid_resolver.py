@@ -16,7 +16,7 @@ real captures carry details (leading whitespace inside a pformat'd nested
 dict) a hand-typed fixture doesn't reproduce.
 
 SANITISED, not byte-for-byte: the place names below (`test-place-01..03`)
-replace the real `e1m-aen-evk-01..03`, the coordinator address
+replace the real board-farm place names, the coordinator address
 (`203.0.113.1:20408`, RFC 5737 TEST-NET-3) replaces the real one, and the
 `comment:` line real `show` output prints for each place (an operational
 narrative -- bench state, incident history, an internal-repo issue
@@ -353,7 +353,7 @@ def test_reservation_held_by_someone_else_refuses(tmp_path: Path) -> None:
 
 @_NEEDS_BASH
 def test_place_with_swd_but_no_seuart_resolves_successfully(tmp_path: Path) -> None:
-    """alp-sdk#2064 bench verification on e1m-aen-evk-02/-03: real state, not
+    """alp-sdk#2064 bench verification on two AEN EVK bench places: real state, not
     synthesised -- test-place-02 has no `seuart` resource registered in
     labgrid at all (only `console` and `swd` appear in `matches:`), because
     the physical board has none. Bench verification found the ORIGINAL

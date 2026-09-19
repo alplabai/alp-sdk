@@ -11,7 +11,7 @@
 # core the shared SW-DP happens to expose as "the live core", which an
 # entire bench campaign spent unknowingly targeting the WRONG one (alp-sdk#2037).
 #
-# BENCH-VERIFIED 2026-09-09 (alp-sdk#2037): on e1m-aen-evk-01 the two M55
+# BENCH-VERIFIED 2026-09-09 (alp-sdk#2037): on an AEN EVK bench unit the two M55
 # cores are separate CoreSight access ports on the ONE shared SW-DP --
 #   M55-HP  AP 0x00200000
 #   M55-HE  AP 0x00300000
@@ -70,8 +70,8 @@
 #      the AEN E8 answers 0x4C013477, the GD32 bridge 0x0BE12477. Either
 #      gate failing aborts before the probe is touched again.
 #
-# BENCH-VERIFIED 2026-09-10 on e1m-aen-evk-01, with the USB path resolved
-# fresh from `labgrid-client -p e1m-aen-evk-01 show` (never copied from a
+# BENCH-VERIFIED 2026-09-10 on an AEN EVK bench unit, with the USB path resolved
+# fresh from `labgrid-client -p <your-bench-place> show` (never copied from a
 # doc -- all three EVK boards answer the same DPIDR, so the USB path is the
 # only board selector). The run printed the transcript below, including
 # "113960 bytes written at address 0x00000000" and all four register echoes

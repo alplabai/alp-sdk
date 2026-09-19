@@ -84,8 +84,8 @@
  * XIP, no write.  So its PASS/FAIL does not depend on what the chip selects
  * carry, and the AEN803 board overlay is the AEN801 one with the SKU changed.
  * It has already run on AEN803 silicon: #2041's 2026-09-13 bench check built
- * this app for the AEN801 target and ran it on e1m-aen-evk-02 and
- * e1m-aen-evk-03, both E1M-AEN803 -- rc=0, CTRLR0=0x00c00407, RESULT PASS on
+ * this app for the AEN801 target and ran it on E1M-AEN803 serial
+ * 2026W36-0001 and E1M-AEN803 serial 2026W36-0002 -- rc=0, CTRLR0=0x00c00407, RESULT PASS on
  * both (docs/verification-status.md, OSPI0 pinctrl row).
  *
  * This example has caught three real, distinct silicon/build bugs (the

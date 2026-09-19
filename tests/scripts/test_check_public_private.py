@@ -116,6 +116,30 @@ def test_detects_labgrid_place(tmp_path: Path) -> None:
     assert {f.category for f in findings} == {"LABGRID_PLACE"}
 
 
+def test_detects_labgrid_place_bare_identifier(tmp_path: Path) -> None:
+    # alp-sdk#2224: a bare bench-farm place identifier (no "labgrid place"
+    # phrase in sight) must fire too.  Synthetic slot number -- not a real
+    # farm place -- so this is a fixture, not a leak of its own.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Bench-proven on e1m-aen" "-evk-99 today.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"LABGRID_PLACE"}
+
+
+def test_labgrid_place_ignores_board_names(tmp_path: Path) -> None:
+    # e1m-evk / e1m-x-evk are real public board identifiers with no
+    # trailing bench-slot number; the rule must not flag those.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Targets the e1m-evk and e1m-x-evk board families.\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
 def test_detects_probe_serial(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

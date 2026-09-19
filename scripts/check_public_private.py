@@ -16,7 +16,7 @@ Default scan roots:
 
   README.md, CHANGELOG.md, VERSIONS.md, docs/, include/, metadata/,
   examples/, firmware/, scripts/, src/, chips/, blocks/, tests/, tools/,
-  zephyr/, meta-alp-sdk/, .github/workflows/
+  zephyr/, meta-alp-sdk/, .github/workflows/, changelog.d/
 
 Generated ABI snapshots, vendored code, and build outputs are always
 skipped.  ``docs/superpowers`` (raw internal planning notes) is scanned by
@@ -71,6 +71,7 @@ DEFAULT_ROOTS: tuple[str, ...] = (
     "zephyr",
     "meta-alp-sdk",
     ".github/workflows",
+    "changelog.d",
 )
 
 DEFAULT_EXCLUDES: tuple[str, ...] = (
@@ -556,8 +557,12 @@ RULES: tuple[Rule, ...] = (
     ),
     Rule(
         "LABGRID_PLACE",
-        re.compile(r"labgrid " r"place ", re.IGNORECASE),
-        "Drop the internal labgrid-place identifier; keep the bench-proven claim and its date.",
+        re.compile(
+            r"labgrid " r"place " r"|" r"\be1m-[a-z0-9-]+-evk-\d+\b",
+            re.IGNORECASE,
+        ),
+        "Drop the internal labgrid-place identifier; keep the bench-proven claim and its date "
+        "(name the unit by module SKU + serial instead, if that is known for certain).",
     ),
     Rule(
         "PROBE_SERIAL",

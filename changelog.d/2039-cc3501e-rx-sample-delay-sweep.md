@@ -27,7 +27,7 @@ graded margin.
 quietly dropped.** `examples/aen/aen-cc3501e-bringup`'s overlay said `rx-delay =
 <0>` "fails outright" and that `4` "fails too"; both passed three runs of three.
 `cc3501e_bridge.h` claimed a clean `4..8` window; `8` hard-fails here — though
-that claim was taken on `e1m-aen-evk-01` at roughly half the clock, so it is
+that claim was taken on an earlier bench run at roughly half the clock, so it is
 re-scoped to the board and rate it was measured on rather than called wrong.
 
 **What `rx-delay` in devicetree actually does is now written down where someone
