@@ -15,13 +15,12 @@
  * "skipping incompatible ... when searching for -lmera2_runtime", an
  * architecture mismatch, not proof of symbol resolution.  NO
  * `drpai`-enabled alp-image-edge bake has ever completed, on any host.
- * A drpai_dir bundle DOES now exist (YOLOX-S/VOC, compiled with DRP-AI
- * Translator i8 v1.12; deploy.json carries one fused mera_drp op, so the
- * graph is fully offloaded), but it was quantised against 8 random
- * frames rather than a calibration set -- the vendor's 200 calibration
- * images ship as Git LFS pointer stubs -- so its accuracy is
- * unvalidated, and no inference has executed on a real board.  Compiled
- * only when ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the
+ * No compiled drpai_dir bundle exists in this checkout -- only an ONNX
+ * source does (RUHMI's yolox-S_VOC.onnx); see docs/bring-up-drpai-v2n.md
+ * Sec 5 for the current compile status and alp-sdk#2236 for the tracked
+ * work (derive real preprocessing from app_yolox_cam, compile a bundle,
+ * verify it byte-for-byte against its own input_0.bin).  Compiled only
+ * when ALP_SDK_USE_DRPAI_V2N=ON (default OFF).  Same posture as the
  * DEEPX DX-M1 hook (inference_deepx.cpp).
  *
  * ----------------------------------------------------------------------

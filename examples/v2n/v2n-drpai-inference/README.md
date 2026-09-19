@@ -35,9 +35,10 @@ Decoding a real image file needs an image codec library outside this
 SDK's portable surface, so this example reads **raw pre-processed
 frames** instead: flat **640x640x3 float32 NCHW** buffers, exactly
 4,915,200 bytes each (`640 * 640 * 3 * sizeof(float)`) -- **planar**
-(the whole R plane, then the whole G plane, then the whole B plane),
-not interleaved HWC. NCHW is the target model's declared ONNX input
-shape (RUHMI's `yolox-S_VOC.onnx`, `1,3,640,640` per
+(the whole channel-0 plane, then the whole channel-1 plane, then the
+whole channel-2 plane), not interleaved HWC. NCHW is the target
+model's declared ONNX input shape (RUHMI's `yolox-S_VOC.onnx`,
+`1,3,640,640` per
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 Sec 5 and `scripts/alp_model/adapters/drpai.py`), and it reaches the
 model unchanged: the DRP-AI backend
@@ -52,8 +53,8 @@ and would silently be fed to the NPU with the wrong channel ordering.
 Getting NCHW right is entirely the caller's job.
 
 Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255 vs
-mean/std), and letterbox padding are **unverified** on this review
-host (no vendor sample was run here) -- the vendor's own
+mean/std), and letterbox padding are **unverified** -- no vendor
+sample has been run against this example. The vendor's own
 `how-to/sample_app_v2h/app_yolox_cam` sample is the authority for all
 three; match it exactly, do not guess. A camera/video capture path is
 explicitly **out of scope** here (that is issue #1149); a customer
@@ -76,8 +77,8 @@ np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
 
 ## Model bundle
 
-The first argument is a path to a `drpai_dir` bundle **tar** -- the
-output of
+The first argument is a path to a `drpai_dir` bundle **tar** --
+notionally the output of
 
 ```sh
 python3 -m alp_model build --target drpai --product V2N <model.onnx>
@@ -87,22 +88,28 @@ python3 -m alp_model build --target drpai --product V2N <model.onnx>
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
 Sec 5). The target is **YOLOX-S trained on VOC**
 (RUHMI's `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx`, ONNX
-input `1,3,640,640` -- NCHW). **No compiled `drpai_dir` bundle exists
-yet, though** -- Sec 5 of that doc confirms only the ONNX source is
-present in a fresh checkout, not a compiled
-`drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json` set;
-compiling one with real (not random-calibration) accuracy needs a real
-calibration image set, tracked in alp-sdk#1271, not done here. Once a
-bundle is compiled, its `deploy.json`'s single fused `mera_drp` op
-means the whole graph is NPU-offloaded (no CPU-side split), and this
-example's frame generator should be checked byte-for-byte against
-that bundle's own sample `input_0.bin` -- also owed, not done, since
-neither the bundle nor that sample exists in this checkout.
+input `1,3,640,640` -- NCHW). **That command cannot actually compile
+this target model today, though**: the adapter's `--images`
+calibration path only preprocesses to the 224x224 ImageNet-classifier
+geometry the vendor tutorial hard-codes, rejects a 1,3,640,640 detector
+shape up front, and has no random-frame fallback
+(`scripts/alp_model/adapters/drpai.py`). **No compiled `drpai_dir`
+bundle exists in this checkout** -- only the ONNX source does; Sec 5 of
+that doc confirms no `drp_desc.bin`/`weight.bin`/`addr_map.txt`/
+`deploy.json` set exists anywhere in a fresh checkout. Deriving real
+preprocessing from the vendor's `app_yolox_cam` sample, compiling a
+bundle, and checking this example's frame generator byte-for-byte
+against that bundle's own sample `input_0.bin` are all tracked in
+alp-sdk#2236, not done here.
 
 ## Output: raw scores, not decoded detections
 
-Because the compiled graph is fully fused, `alp_inference_get_output()`
-hands back **one flat float32 tensor**: the raw, pre-decode network
+Once a bundle is compiled (see "Model bundle" above -- none exists
+yet), its `deploy.json` is **expected** to carry a single fused
+`mera_drp` op, meaning the whole graph would be NPU-offloaded; no
+`deploy.json` has actually been seen to confirm this. On that
+expectation, `alp_inference_get_output()` would hand back **one flat
+float32 tensor**: the raw, pre-decode network
 output across YOLOX-S's roughly 8400 candidate boxes (three feature-map
 strides -- 8 / 16 / 32 for a 640x640 input -- each carrying box
 regression + objectness + 20 VOC class scores).

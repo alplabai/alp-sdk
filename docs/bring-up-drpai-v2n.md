@@ -193,9 +193,14 @@ the node and userspace payload are present. Omitting `ALP_ENABLE_DRPAI`
 also fails, not idles: with a compiled backend but no `&drpai0` node,
 `/dev/drpai0` does not exist, so `open()`'s `ENOENT` collapses to
 `ALP_ERR_IO` (`src/yocto/inference_drpai.cpp`'s `_drpai_mem_start()`,
-called first from `alp_inference_drpai_open()`) — the same code path a
-busy or genuinely absent device returns. Neither switch silently
-half-works, and neither missing switch is silent either.
+called first from `alp_inference_drpai_open()`, via
+`_drpai_errno_to_status()`'s default case). A driver that IS present
+but contended returns a different code from that same mapping instead
+— `ALP_ERR_TIMEOUT` for `ETIMEDOUT`, `ALP_ERR_BUSY` for `EINPROGRESS`/
+`EADDRNOTAVAIL` — so absent (`ALP_ERR_IO`) and busy
+(`ALP_ERR_TIMEOUT`/`ALP_ERR_BUSY`) are distinguishable, not the same
+code path. Neither switch silently half-works, and neither missing
+switch is silent either.
 
 Enable the backend through the SDK recipe's PACKAGECONFIG:
 

@@ -32,25 +32,25 @@
  *   see docs/portability.md on keeping the portable surface small).
  *   Instead this example reads RAW pre-processed frames: flat
  *   640x640x3 float32 NCHW buffers, exactly `FRAME_BYTES` bytes each --
- *   planar (the whole R plane, then the whole G plane, then the whole B
- *   plane), NOT interleaved HWC. NCHW is the target model's declared
- *   ONNX input shape (RUHMI's `yolox-S_VOC.onnx`, `1,3,640,640` per
- *   docs/bring-up-drpai-v2n.md Sec 5 and
- *   scripts/alp_model/adapters/drpai.py), and it reaches the model
- *   unchanged: the DRP-AI backend (src/yocto/inference_drpai.cpp) pushes
- *   this buffer straight into the MERA runtime's `SetInput()` and never
- *   runs the compiled bundle's own `preprocess/` step against it. The
- *   runtime cannot catch a layout mistake for you: `alp_inference_get_
- *   input()` reports only a byte count, never a shape (the MERA wrapper
- *   exposes no per-input shape, so rank stays 0 -- see
- *   `alp_inference_drpai_get_input()` in inference_drpai.cpp), so an
- *   interleaved HWC file of the identical byte count passes the size
- *   check below and would be fed to the NPU with a silently wrong
+ *   planar (the whole channel-0 plane, then the whole channel-1 plane,
+ *   then the whole channel-2 plane), NOT interleaved HWC. NCHW is the
+ *   target model's declared ONNX input shape (RUHMI's
+ *   `yolox-S_VOC.onnx`, `1,3,640,640` per docs/bring-up-drpai-v2n.md
+ *   Sec 5 and scripts/alp_model/adapters/drpai.py), and it reaches the
+ *   model unchanged: the DRP-AI backend (src/yocto/inference_drpai.cpp)
+ *   pushes this buffer straight into the MERA runtime's `SetInput()`
+ *   and never runs the compiled bundle's own `preprocess/` step against
+ *   it. The runtime cannot catch a layout mistake for you:
+ *   `alp_inference_get_input()` reports only a byte count, never a
+ *   shape (the MERA wrapper exposes no per-input shape, so rank stays
+ *   0 -- see `alp_inference_drpai_get_input()` in inference_drpai.cpp),
+ *   so an interleaved HWC file of the identical byte count passes the
+ *   size check below and would be fed to the NPU with a silently wrong
  *   channel ordering. Getting NCHW right is entirely the caller's job.
  *
  *   Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255
- *   vs mean/std), and letterbox padding are UNVERIFIED on this
- *   review host (no vendor sample was run here) -- the vendor's own
+ *   vs mean/std), and letterbox padding are UNVERIFIED -- no vendor
+ *   sample has been run against this example. The vendor's own
  *   `how-to/sample_app_v2h/app_yolox_cam` sample is the authority for
  *   all three; match it exactly, do not guess. A customer with a real
  *   camera/video pipeline (out of scope here -- see issue #1149)
@@ -72,33 +72,42 @@
  * Model bundle
  * ============
  *
- *   `argv[1]` is the path to a `drpai_dir` bundle tar -- the output of
+ *   `argv[1]` is the path to a `drpai_dir` bundle tar -- notionally the
+ *   output of
  *
  *       python3 -m alp_model build --target drpai --product V2N <model.onnx>
  *
  *   (scripts/alp_model/adapters/drpai.py; see docs/bring-up-drpai-v2n.md
- *   Sec 5).  That script tars the compiler's object directory
- *   (drp_desc.bin / weight.bin / addr_map.txt / deploy.json / deploy.so
- *   / preprocess/) deterministically; this program hands the raw tar
- *   bytes to `alp_inference_open()` as `cfg.model_data` exactly as-is
- *   -- the SDK's DRP-AI backend (src/yocto/inference_drpai.cpp) is what
- *   untars it to a private staging directory before loading it into the
- *   vendor runtime. No compiled `drpai_dir` bundle exists yet, though --
- *   docs/bring-up-drpai-v2n.md Sec 5 confirms only an ONNX source
- *   (RUHMI's `yolox-S_VOC.onnx`) exists in a fresh checkout, not a
- *   compiled `drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json`
- *   set; compiling one for real accuracy needs a real calibration image
- *   set, tracked in alp-sdk#1271, not done here. This program's own
- *   size/byte-for-byte check against that bundle's sample `input_0.bin`
- *   is therefore still owed, not done: that file does not exist in this
- *   checkout either.
+ *   Sec 5), which tars the compiler's object directory (drp_desc.bin /
+ *   weight.bin / addr_map.txt / deploy.json / deploy.so / preprocess/)
+ *   deterministically; this program hands the raw tar bytes to
+ *   `alp_inference_open()` as `cfg.model_data` exactly as-is -- the
+ *   SDK's DRP-AI backend (src/yocto/inference_drpai.cpp) is what untars
+ *   it to a private staging directory before loading it into the vendor
+ *   runtime. That command cannot actually compile this target model
+ *   today, though: the adapter's `--images` calibration path only
+ *   preprocesses to the 224x224 ImageNet-classifier geometry the vendor
+ *   tutorial hard-codes, rejects a 1,3,640,640 detector shape up front,
+ *   and has no random-frame fallback
+ *   (scripts/alp_model/adapters/drpai.py). No compiled `drpai_dir`
+ *   bundle exists in this checkout -- only an ONNX source does
+ *   (RUHMI's `yolox-S_VOC.onnx`; docs/bring-up-drpai-v2n.md Sec 5
+ *   confirms no `drp_desc.bin`/`weight.bin`/`addr_map.txt`/
+ *   `deploy.json` set anywhere in a fresh checkout). Deriving real
+ *   preprocessing from the vendor's `app_yolox_cam` sample, compiling a
+ *   bundle, and checking this program's frame generator byte-for-byte
+ *   against that bundle's own sample `input_0.bin` are all tracked in
+ *   alp-sdk#2236, not done here.
  *
  * Output: raw scores, not decoded detections
  * ===========================================
  *
- *   The compiled bundle's `deploy.json` carries a single fused
- *   `mera_drp` op -- the whole YOLOX graph is NPU-offloaded, so
- *   `alp_inference_get_output()` hands back one flat float32 tensor: the
+ *   Once a bundle is compiled (see "Model bundle" above -- none exists
+ *   yet), its `deploy.json` is EXPECTED to carry a single fused
+ *   `mera_drp` op, meaning the whole YOLOX graph would be
+ *   NPU-offloaded; no `deploy.json` has actually been seen to confirm
+ *   this. On that expectation, `alp_inference_get_output()` would hand
+ *   back one flat float32 tensor: the
  *   raw, pre-decode network output for all ~8400 candidate boxes across
  *   the model's three feature-map strides (8 / 16 / 32 for a 640x640
  *   input), each carrying box regression + objectness + 20 VOC class

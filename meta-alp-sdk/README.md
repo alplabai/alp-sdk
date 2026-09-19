@@ -549,10 +549,12 @@ checkout, it fetches nothing.
   compiles clean with every needed symbol defined) and what is UNTESTED
   (the final aarch64 link against the real RUHMI payload, packaging QA,
   symbol resolution, and everything downstream of it — including
-  on-silicon inference and the compiled YOLOX-S/VOC model's quantisation
-  accuracy, which used 8 random frames rather than RUHMI's real
-  calibration set: its 200 images ship as 129-byte Git LFS pointer
-  stubs in this checkout).  Its nine MERA2/TVM libraries and
+  on-silicon inference; no compiled YOLOX-S/VOC bundle exists yet
+  either, since the documented compile path can't calibrate a
+  1,3,640,640 detector against real images (RUHMI's 200 calibration
+  images ship as 129-byte Git LFS pointer stubs in this checkout, and
+  there is no random-frame fallback) -- tracked in alp-sdk#2236).  Its
+  nine MERA2/TVM libraries and
   `MeraDrpRuntimeWrapper.h` are packaged by `mera2-drpai-tvm`: eight
   staged verbatim from a builder-supplied RUHMI checkout, nothing
   vendored, plus a ninth (`libmera_drpai_wrapper.so`) that recipe
