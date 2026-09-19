@@ -6,6 +6,7 @@ CLI / alp-sdk-vscode 'Wave C' consumer reads (see #610). These lock the
 emitter <-> contract lockstep and the gate behaviour.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,8 @@ from alp_orchestrate import emit_build_plan, load_board_yaml  # noqa: E402
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def test_schema_is_valid_draft202012():

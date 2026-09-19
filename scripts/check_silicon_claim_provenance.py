@@ -80,8 +80,8 @@ incident.
 
 WHAT THIS DOES NOT CATCH -- read this before trusting it
 ----------------------------------------------------------
-* A narrative claim with NO hex/serial anchor ("bench-verified on
-  e1m-aen-evk-01: all four presets report radio_ok=1" -- changelog.d/
+* A narrative claim with NO hex/serial anchor ("bench-verified on an
+  AEN EVK bench unit: all four presets report radio_ok=1" -- changelog.d/
   1679.md) is not checked at all. Requiring every such sentence to cite
   an external record was tried against this tree first and flagged
   roughly 20 of 24 existing, correctly-sourced fragments (no matching

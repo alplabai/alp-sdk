@@ -47,7 +47,7 @@ def _make_bundle(tmp_path, status="bootloader-only:image-pending-hw", with_image
                        "patches": ["deepx"], "equivalence": "functional-equiv modulo gcc"},
         "signature": None,
     }
-    (d / "bundle.json").write_text(json.dumps(bundle))
+    (d / "bundle.json").write_text(json.dumps(bundle), encoding="utf-8")
     return d
 
 
@@ -60,13 +60,14 @@ def _stub_ledger(tmp_path):
         "import sys\n"
         f"open(r'{log}', 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
         "if 'alloc' in sys.argv: print('2026W24-0001')\n"
-        "sys.exit(0)\n")
+        "sys.exit(0)\n", encoding="utf-8")
     return s, log
 
 
 def _run(*args, env=None):
     return subprocess.run([sys.executable, str(SCRIPT), *args],
-                          capture_output=True, text=True, env=env)
+                          capture_output=True, text=True, encoding="utf-8",
+                          env={**(env or os.environ), "PYTHONIOENCODING": "utf-8"})
 
 
 def test_dry_run_bootloader_only_plans_bl2_fip_skips_image(tmp_path):
@@ -90,9 +91,9 @@ def test_dry_run_complete_bundle_plans_emmc(tmp_path):
 
 def test_invalid_bundle_fails_fast(tmp_path):
     d = _make_bundle(tmp_path)
-    b = json.loads((d / "bundle.json").read_text())
+    b = json.loads((d / "bundle.json").read_text(encoding="utf-8"))
     b["sku"] = "NOT-A-SKU"           # fails the schema pattern
-    (d / "bundle.json").write_text(json.dumps(b))
+    (d / "bundle.json").write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(d), "--serial", "2026W24-0001")
     assert proc.returncode != 0
     assert "validation" in proc.stdout.lower() or "valid" in proc.stdout.lower()
@@ -104,7 +105,7 @@ def test_ledger_hook_allocs_and_records(tmp_path):
     proc = _run("--bundle", str(d), "--ledger-root", str(tmp_path / "ledger"),
                 "--som-ledger", str(stub), "--by", "lab")
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    calls = log.read_text()
+    calls = log.read_text(encoding="utf-8")
     assert "alloc --sku E1M-V2N101" in calls
     assert "record" in calls and "2026W24-0001" in calls
     assert "--test-result pending-hw" in calls   # dry-run => pending-hw
@@ -159,7 +160,7 @@ def test_carrier_derive_miss_does_not_write_a_ledger_row(tmp_path):
                 "--carrier", "not-a-real-carrier",
                 "--ledger-root", str(tmp_path / "ledger"), "--som-ledger", str(stub))
     assert proc.returncode != 0, proc.stdout + proc.stderr
-    assert not log.exists(), log.read_text()   # no alloc call ever made, no orphaned serial
+    assert not log.exists(), log.read_text(encoding="utf-8")   # no alloc call ever made, no orphaned serial
 
 
 def test_execute_skipped_power_on_test_records_pending_hw_not_pass(tmp_path, monkeypatch):
@@ -187,8 +188,8 @@ def test_execute_skipped_power_on_test_records_pending_hw_not_pass(tmp_path, mon
                 mfg_date="2026-06-08", ledger_root=tmp_path / "ledger",
                 som_ledger=stub, by="lab")
     rc = ps.provision(cfg)
-    assert rc == 0, log.read_text() if log.exists() else "<no ledger calls -- record step never ran>"
-    calls = log.read_text()
+    assert rc == 0, log.read_text(encoding="utf-8") if log.exists() else "<no ledger calls -- record step never ran>"
+    calls = log.read_text(encoding="utf-8")
     assert "--test-result pass" not in calls
     assert "--test-result pending-hw" in calls
 
@@ -219,7 +220,7 @@ def test_execute_failed_power_on_test_records_fail_not_pending_hw(tmp_path, monk
     fake_root = tmp_path / "fake_sdk"
     fake_hil = fake_root / "tests" / "hil"
     fake_hil.mkdir(parents=True)
-    (fake_hil / "run_smoke.py").write_text("import sys\nsys.exit(1)\n")
+    (fake_hil / "run_smoke.py").write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
     spec_dir = fake_hil / "stub-carrier"
     spec_dir.mkdir()
     cfg = ps.Cfg(bundle_dir=d, execute=True, serial="2026W24-0001",
@@ -227,7 +228,7 @@ def test_execute_failed_power_on_test_records_fail_not_pending_hw(tmp_path, monk
                 som_ledger=stub, by="lab", hil_spec=spec_dir, alp_sdk_root=fake_root)
     rc = ps.provision(cfg)
     assert rc == 1   # the test step itself failed
-    calls = log.read_text() if log.exists() else ""
+    calls = log.read_text(encoding="utf-8") if log.exists() else ""
     assert "--test-result fail" in calls, calls
     assert "--test-result pass" not in calls
     assert "--test-result pending-hw" not in calls
@@ -247,7 +248,7 @@ def test_relative_hil_spec_resolves_against_alp_sdk_root_not_cwd(tmp_path, monke
     fake_root = tmp_path / "fake_sdk"
     fake_hil = fake_root / "tests" / "hil"
     fake_hil.mkdir(parents=True)
-    (fake_hil / "run_smoke.py").write_text("import sys\nsys.exit(0)\n")
+    (fake_hil / "run_smoke.py").write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
     (fake_hil / "board-x").mkdir()
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
@@ -257,7 +258,7 @@ def test_relative_hil_spec_resolves_against_alp_sdk_root_not_cwd(tmp_path, monke
                 som_ledger=stub, by="lab",
                 hil_spec=Path("tests/hil/board-x"), alp_sdk_root=fake_root)
     rc = ps.provision(cfg)
-    calls = log.read_text() if log.exists() else "<no ledger calls>"
+    calls = log.read_text(encoding="utf-8") if log.exists() else "<no ledger calls>"
     assert rc == 0, calls
     assert "--test-result pass" in calls, calls
 

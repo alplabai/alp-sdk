@@ -8,6 +8,7 @@ code<->registry drift-detection gate.
 """
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,7 +21,8 @@ REGISTRY = REPO / "metadata" / "emit-registry-v1.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def _registry() -> dict:

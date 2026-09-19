@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/bench/aen/flash-all-flowd.sh [app-name ...]
+# scripts/bench/aen/flash-all-flowd.sh [--atoc-unqueryable] [app-name ...]
 #
 # Cross-platform scope: Linux-side bench helper (sources bench-env.sh;
 # drives flash-jlink.sh = JLinkExe + the Alif SETOOLS). Runs under WSL2
@@ -12,6 +12,16 @@
 # App list: the names given on argv, else the committed apps.txt (one
 # build-dir name per line, '#' comments ignored). Each name is a
 # directory under $BENCH_ROOT/build/.
+#
+# --atoc-unqueryable is forwarded verbatim to every flash-jlink.sh call, for
+# a bench slot with no SE-UART wired -- on such a slot Flow D is the ONLY
+# load path. It is opt-in here for the same reason it is opt-in
+# there: it acknowledges that the resident-ATOC check did not run, and the
+# whole point of #2029/#2027 is that a human says that once, deliberately.
+# Hardcoding it at the call site below would make the batch replace the ATOC
+# blindly on every run with the acknowledgement nowhere -- re-entering the
+# #2025 hazard through the batch runner. --replace-atoc is deliberately NOT
+# forwarded: see flash-jlink.sh's header on why the two must never merge.
 #
 # SETOOLS is license-gated and is NOT redistributed by alp-sdk: export
 # SETOOLS_DIR before running. See README.md.
@@ -29,6 +39,24 @@ OBJNM="$(bench_tool_prefix)-nm" || exit $?
 # same way; this array is only for the read_console() probe here.
 JLINK_ARGS=(bench_jlink_run)
 SIZE=0xB00
+
+# Flag scan (alp-sdk#2189). Deliberately the same whole-argv `for` shape
+# flash-jlink.sh uses for this exact flag, NOT flash-run.sh's while/shift
+# loop: this script's positionals are a variable-length app list, so a parser
+# that stops honouring flags at the first non-option token would silently
+# ignore `flash-all-flowd.sh aen-wdt-feed --atoc-unqueryable` -- and silently
+# ignoring THIS flag means every entry aborts with exit 8 again, which is the
+# bug being fixed. Both Flow D flags keep one parsing convention across the
+# two scripts; see flash-jlink.sh's PARSER SHAPE note before changing either.
+ATOC_UNQUERYABLE=()
+POSITIONAL=()
+for arg in "$@"; do
+	case "$arg" in
+	--atoc-unqueryable) ATOC_UNQUERYABLE=(--atoc-unqueryable) ;;
+	*) POSITIONAL+=("$arg") ;;
+	esac
+done
+set -- "${POSITIONAL[@]}"
 
 # App list: argv wins; otherwise read apps.txt (prefer the committed list).
 if [ "$#" -gt 0 ]; then
@@ -94,7 +122,7 @@ for a in "${APPS[@]}"; do
   # was just captured into $flog (the echo below would never run) and never
   # reaching the "BATCH SUMMARY" cat at the bottom. Reset frc every iteration.
   frc=0
-  flog=$(timeout 120 bash "$HERE/flash-jlink.sh" "$BD" "$SIZE" 2>&1) || frc=$?
+  flog=$(timeout 120 bash "$HERE/flash-jlink.sh" "${ATOC_UNQUERYABLE[@]}" "$BD" "$SIZE" 2>&1) || frc=$?
   echo "$flog" | grep -iE "package:|Connecting to J-Link|Verify|FAILED|Could not connect|Programming flash" | head -6
   # The grep|head -6 above is a summary, and on a failure it is the WRONG six
   # lines: flash-jlink.sh displays up to 30 transcript lines of its own before
@@ -122,6 +150,24 @@ for a in "${APPS[@]}"; do
   7)
     echo ">> $a : FLASH-OK-READBACK-FAILED (flash+verify succeeded, post-boot console read did not)"
     echo "$a : FLASH-OK-READBACK-FAILED" >>"$SUM"; continue
+    ;;
+  8)
+    # bench_flowd_atoc_guard's refusal: no SE_UART and no --atoc-unqueryable
+    # (bench-env.sh). Unlike every other arm here this is a BATCH-level
+    # configuration refusal, not a per-app failure -- it is decided before
+    # any probe or target access, so it cannot differ between apps and every
+    # remaining entry would abort identically. Breaking out says so once
+    # instead of printing the same guard text N times and handing back a
+    # summary that is 100% FLASH-REFUSED with no board ever written
+    # (alp-sdk#2189). The already-processed entries keep their real verdicts
+    # in $SUM, and the BATCH SUMMARY below still prints.
+    echo ">> $a : FLASH-REFUSED (no resident-ATOC check available)"
+    echo "$a : FLASH-REFUSED (no resident-ATOC check)" >>"$SUM"
+    echo "!! ABORTING BATCH: flash-jlink.sh refuses to write without a resident-ATOC check."
+    echo "   This is a run-level setting, so every remaining app would refuse identically."
+    echo "   Either export SE_UART for a slot that has one wired, or re-run this script"
+    echo "   with --atoc-unqueryable to acknowledge this slot has no SE-UART."
+    break
     ;;
   *)
     echo ">> $a : FLASH-ERROR (exit $frc) -- see log above"; echo "$a : FLASH-ERROR (exit $frc)" >>"$SUM"; continue

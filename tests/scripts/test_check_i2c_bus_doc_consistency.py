@@ -9,6 +9,7 @@ a fixture small enough to read at a glance.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -19,7 +20,10 @@ SCRIPT = REPO / "scripts" / "check_i2c_bus_doc_consistency.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"},
+        **kw,
     )
 
 

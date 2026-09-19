@@ -264,7 +264,7 @@ def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str
     `extra` appends extra CLI args after `--emit <mode>` -- e.g.
     scaffold's `--template <id> --sku <SKU>` (issue #864).
     """
-    env = {**os.environ}
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     scripts_dir = str(REPO / "scripts")
     env["PYTHONPATH"] = (
         scripts_dir + os.pathsep + env["PYTHONPATH"]
@@ -272,7 +272,7 @@ def _emit(tool: Path, board: str, mode: str, extra: tuple[str, ...] = ()) -> str
     )
     rv = subprocess.run(
         [*tool, "--input", board, "--emit", mode, *extra],
-        capture_output=True, text=True, cwd=REPO, check=False, env=env)
+        capture_output=True, text=True, encoding="utf-8", cwd=REPO, check=False, env=env)
     if rv.returncode != 0:
         raise SystemExit(f"check_emit_snapshots: emit failed for {board} "
                          f"--emit {mode} (rc={rv.returncode}):\n{rv.stderr}")

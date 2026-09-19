@@ -183,18 +183,18 @@ extern "C" {
  * 3257-type bus switch -- same as U38/U39's rework, though this is NOT
  * (yet) "the standard fit going forward" for U46 the way it is for
  * U38/U39, see above -- AND that switch's `VCC` on a rail within its
- * spec.  A 3257-type part was fitted at U46 on `e1m-aen-evk-03` with
+ * spec.  A 3257-type part was fitted at U46 on E1M-AEN803 serial 2026W36-0002 with
  * `VCC` initially left on `+VIO`.  `+VIO` is NOT a carrier-selected
  * rail -- it is the plugged-in SoM's own `VIO_OUT` (2626-R2 netlist:
  * `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which reaches `+VIO`
- * through U33's shunt monitor, IN+/IN-).  MEASURED on `e1m-aen-evk-03`
+ * through U33's shunt monitor, IN+/IN-).  MEASURED on E1M-AEN803 serial 2026W36-0002
  * with the E1M-AEN SoM fitted (maintainer, 2026-09-15): `+VIO` =
  * 1.8 V, below a 3257-type bus switch's 2.3-3.6 V `VCC` spec (unlike
  * the stock 74LVC157, which tolerates 1.8 V), and with both amps
  * ACTIVE, every I2S/I2C call returned `ALP_OK` but the TAS2563 amps
  * produced NO audible output.
  *
- * OBSERVED ON SILICON (`e1m-aen-evk-03`, maintainer,
+ * OBSERVED ON SILICON (E1M-AEN803 serial 2026W36-0002, maintainer,
  * 2026-09-15 ~14:05Z): the fitted 3257-type part's `VCC` was re-wired
  * from `+VIO` to `+3V3` between a silent run and an audible run.  A
  * PROBE_LISTEN image (continuous 1 kHz tone through I2S3 -> U46 ->

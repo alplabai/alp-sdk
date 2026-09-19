@@ -2,7 +2,7 @@
 # scripts/bench/aen/ram-run.sh <build-dir> [sleep_ms] [bufsize_hex] [preload_jlink_file]
 #
 # Requires LG_PLACE (the labgrid-client place name whose probe to use, e.g.
-# "e1m-aen-evk-02" -- you must already hold that place's reservation; see
+# "<your-bench-place>" -- you must already hold that place's reservation; see
 # bench-env.sh). Every JLinkExe session below is routed through
 # bench_jlink_run() (bench-env.sh, alp-sdk#2064), which resolves the probe
 # from LG_PLACE and masks every other probe in a private namespace. Export
@@ -94,7 +94,7 @@ if [ -n "$AEN_JLINK_RUN" ]; then
 		echo "         export BENCH_PLACE=<labgrid place> (or LG_PLACE, which" >&2
 		echo "         bench-env.sh already resolves SE_UART/LG_SWD_PATH from)," >&2
 		echo "         e.g.:" >&2
-		echo "             export BENCH_PLACE=e1m-aen-evk-02" >&2
+		echo "             export BENCH_PLACE=<your-bench-place>" >&2
 		echo "         (you must already hold that place's labgrid reservation)." >&2
 		exit 2
 	fi
@@ -344,7 +344,7 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
 # --- Session 1: LOAD + START the app, then disconnect leaving it RUNNING --
 #
 # Split from the read-back into a SEPARATE JLinkExe session (alp-sdk#2076).
-# Bench-measured on e1m-aen-evk-02/-03 (2026-09-13): an in-session second
+# Bench-measured on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002) (2026-09-13): an in-session second
 # `halt` issued after `go` + `Sleep` returned an INCOHERENT core
 # (SP=0x00000030, FAULTMASK=378E, the FPS registers mirroring R0-R14, no
 # MSPLIM block at all) and the `mem8` that followed it failed outright
@@ -357,7 +357,7 @@ bench_jlink_assert_aen_dpidr "$WORKDIR/preflight.out" "RAM-run preflight" || exi
 #
 # Ending on a plain `exit` after `go` -- not `qc`, and no `halt`/`r` first
 # -- leaves the target running: BENCH-VERIFIED 2026-09-13 on
-# e1m-aen-evk-02 and e1m-aen-evk-03 (examples/peripheral-io/blink, whose
+# two E1M-AEN803 modules, serial 2026W36-0001 and serial 2026W36-0002 (examples/peripheral-io/blink, whose
 # main() never returns; 6 of 6 clean runs, three per board). Every load
 # transcript ended `loadbin ... O.K.`, `setpc`, `go`, `exit`; a separate
 # attach immediately after found the core still running (`CPU is not
@@ -461,8 +461,8 @@ _session1_window() {
 # -- it needs its own check.
 #
 # POSITIVE check, scoped to an EXACT window, not a whole-transcript
-# substring scan -- both were bench-measured wrong on evk-02/evk-03
-# (2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
+# substring scan -- both were bench-measured wrong on two E1M-AEN803 modules
+# (serial 2026W36-0001/2026W36-0002, 2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
 #   - too narrow: a real successful loadbin puts SIX lines (the implicit-
 #     reset banner + "Downloading file [...]...") between the echoed
 #     command and "O.K.", not "immediately after" as an earlier draft of

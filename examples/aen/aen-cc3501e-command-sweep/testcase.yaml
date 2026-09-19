@@ -5,8 +5,7 @@
 # plus the STREAM_WRITE / SPI1_TRANSFER throughput sweep against the real
 # board target.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- this app needs the real inter-chip SPI1 link and a
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets) -- this app needs the real inter-chip SPI1 link and a
 # CC3501E actually running wire-protocol-4.0 firmware; a compile check here
 # only proves the build, not the coverage or the throughput numbers.
 
@@ -27,6 +26,7 @@ tests:
   alp_sdk.examples.aen.cc3501e_command_sweep.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

@@ -1,8 +1,8 @@
 ### Fixed — the UTIMER QEC0 channel was armed on the wrong trigger-source registers; measured to be an edge counter, not a quadrature decoder (#2037)
 
 **Round 1 (2026-09-13, pre-fix build): signal reaches the SoC, the channel
-never counts it.** An attended run on `e1m-aen-evk-03` (E1M-AEN803
-`2026W36-0002`), maintainer turning the shaft continuously for the whole 60 s
+never counts it.** An attended run on E1M-AEN803 serial 2026W36-0002,
+maintainer turning the shaft continuously for the whole 60 s
 window: GPIO3 `EXT_PORTA` (`0x49003050`, bits 0/1) showed all four quadrature
 states across 189 sample lines (128x `11`, 44x `10`, 15x `01`, 2x `00`) -- the
 encoder is fitted, wired, and live -- while `UTIMER_CNTR` (`0x4800D0A0`) read

@@ -107,7 +107,7 @@ def _check_key_set_conformance(envelope: dict, label: str) -> list[str]:
 
 
 def _run_case(board_yaml: str, core: str) -> list[str]:
-    env = {**os.environ}
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     scripts_dir = str(REPO / "scripts")
     env["PYTHONPATH"] = (
         scripts_dir + os.pathsep + env["PYTHONPATH"]
@@ -116,7 +116,7 @@ def _run_case(board_yaml: str, core: str) -> list[str]:
     cmd = [sys.executable, "-m", "alp_orchestrate",
            "--input", str(REPO / board_yaml),
            "--emit", "kconfig", "--core", core]
-    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, env=env)
+    proc = subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", env=env)
     label = f"{board_yaml}::{core}"
 
     if proc.returncode != 0:

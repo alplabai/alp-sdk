@@ -4,7 +4,7 @@
 # (Ensemble E8, M55-HE): compile-checks upstream's rtc_rv3028 driver, its
 # CONFIG_RTC_ALARM half, and the devicetree node (i2c0 child + int-gpios onto
 # lpgpio) against the real E8 board target. Filtered OUT of the native_sim PR
-# gate (platform_allow = the AEN801 HE board only) -- the alarm interrupt is an
+# gate (platform_allow = the AEN801/AEN803 M55-HE board targets) -- the alarm interrupt is an
 # electrical outcome that needs the bench, not a CI run.
 
 sample:
@@ -20,6 +20,7 @@ tests:
   alp_sdk.examples.aen.rtc_alarm.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

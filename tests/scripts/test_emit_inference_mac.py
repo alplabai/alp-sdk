@@ -35,8 +35,8 @@ from alp_orchestrate.paths import METADATA_ROOT as _MR  # noqa: E402
 
 def _emit(sku: str, soc: str, core: str) -> list[str]:
     """Emit the inference Kconfig lines for one SKU/core using real metadata."""
-    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / f"{soc}.json").read_text())
-    som = yaml.safe_load((_MR / "e1m_modules" / f"{sku}.yaml").read_text())
+    soc_spec = json.loads((_MR / "socs" / "alif" / "ensemble" / f"{soc}.json").read_text(encoding="utf-8"))
+    som = yaml.safe_load((_MR / "e1m_modules" / f"{sku}.yaml").read_text(encoding="utf-8"))
     proj = types.SimpleNamespace(soc_spec=soc_spec, som_preset=som, sku=sku,
                                  effective_metadata_root=lambda: _MR)
     slice_ = Slice(core_id=core, os="zephyr", inference={"default_arena_kib": 256})
@@ -84,7 +84,7 @@ def test_multi_mac_variant_without_paired_core_raises():
     # Synthetic SoC: two U55s of different MAC arrays, NEITHER declaring
     # paired_core -- the emit must refuse to guess (silent max() was the #909
     # bug), not fall back to 256.
-    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+    som = yaml.safe_load((_MR / "e1m_modules" / "E1M-AEN301.yaml").read_text(encoding="utf-8"))
     soc_spec = {
         "cores": [{"id": "m55_he", "type": "cortex-m55"}, {"id": "m55_hp", "type": "cortex-m55"}],
         "npus": [

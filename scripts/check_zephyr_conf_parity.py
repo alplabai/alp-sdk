@@ -28,6 +28,7 @@ Usage:
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -153,7 +154,8 @@ def main() -> int:
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml), "--emit", "zephyr-conf",
              "--core", core_id],
-            capture_output=True, text=True, cwd=REPO)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO)
         if proc.returncode != 0:
             failures.append(f"{rel}: alp_project.py --core {core_id} "
                              f"failed (rc={proc.returncode}): {proc.stderr}")

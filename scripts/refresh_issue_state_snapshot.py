@@ -56,7 +56,7 @@ def _issue_state(number: int) -> str | None:
     try:
         out = subprocess.run(
             ["gh", "issue", "view", str(number), "--json", "state", "-q", ".state"],
-            capture_output=True, text=True, check=True, cwd=REPO,
+            capture_output=True, text=True, encoding="utf-8", check=True, cwd=REPO,
         )
     except FileNotFoundError:
         sys.exit("refresh_issue_state_snapshot: `gh` CLI not found on PATH")

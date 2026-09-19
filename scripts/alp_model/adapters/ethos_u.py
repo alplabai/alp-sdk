@@ -8,6 +8,7 @@ arena/peak-SRAM footprint is parsed best-effort from vela's summary CSV (column
 names drift across vela versions, so matching is tolerant; 0 when unavailable)."""
 from __future__ import annotations
 import csv
+import os
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -65,7 +66,8 @@ class VelaAdapter(CompilerAdapter):
         cmd = ["vela", str(source), "--accelerator-config", accel_config,
                "--output-dir", str(out_dir)]
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_VELA_TIMEOUT_S)
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                                  env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=_VELA_TIMEOUT_S)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"vela timed out after {exc.timeout}s for {accel_config}") from exc
         if proc.returncode != 0:
