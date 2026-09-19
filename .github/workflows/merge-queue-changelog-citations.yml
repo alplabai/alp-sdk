@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Re-check changelog citations on the merge queue's speculative ref. A
+# citation can still drift after its PR run when dev moves underneath it;
+# grading the queued tree against the queue's base closes that last window
+# without running the full metadata-validation workflow (#2206).
+#
+# `pr-metadata-validate.yml`'s `validate` job already runs
+# scripts/check_changelog_citations.py on `pull_request`, checked out at
+# `refs/pull/N/merge` with no `ref:` pinned -- so it grades the PR's merge
+# commit as it stood at the PR's LAST PUSH. That workflow carries no
+# `merge_group:` trigger at all, unlike `pr-twister.yml`,
+# `pr-static-analysis.yml`, and `cross-platform-zephyr.yml`. So a citation
+# `dev` breaks by moving between a PR's last push and the merge queue landing
+# the entry is never graded before it lands -- it only turns the gate red on
+# the *next*, unrelated PR (the #2122 treadmill).
+#
+# DIFF_BASE is `github.event.merge_group.base_sha` -- the merge queue's own
+# base. Two alternatives rejected, for two different reasons:
+#
+#   * NOT `HEAD^1`: this checkout's first parent may be a PREVIOUS queue
+#     entry stacked ahead of this one, not `dev` itself.
+#   * NOT the script's `origin/dev` default. The reason is NOT that the ref
+#     is missing -- under `fetch-depth: 0` below, `actions/checkout` uses
+#     its all-history refspec (`+refs/heads/*:refs/remotes/origin/*`), so
+#     `refs/remotes/origin/dev` DOES exist in this job. (That "no such ref"
+#     reasoning holds only for a SHALLOW checkout, which is why
+#     `pr-metadata-validate.yml` can correctly say it of a PR checkout.) The
+#     real reason is freshness: `origin/dev` is fetched at JOB time, so if
+#     `dev` moved after this entry was enqueued, it is AHEAD of the base
+#     this entry is actually landing on -- grading against a tree that is
+#     not the merge result. `base_sha` cannot drift under the run.
+#
+# `fetch-depth: 0` is required, not merely generous: `git merge-base` over a
+# grafted shallow history can miss or misresolve the common ancestor, and
+# `base_sha` -- `dev`'s own tip at enqueue time -- has to be a resolvable
+# ancestor of HEAD for the new-citation rule to run at all.
+#
+# `pull_request:` is present but PATH-FILTERED to this file alone. Without
+# it the workflow would get ZERO validation before landing: its first real
+# execution would be its own queue entry, where -- deliberately not a
+# required context -- a broken job blocks nothing and notifies nobody. The
+# path filter is what keeps this from becoming a second, differently-based
+# verdict on every ordinary PR.
+#
+# `workflow_dispatch:` takes an optional `diff_base` input. Without one a
+# dispatch cannot exercise the rule this gate exists for: `DIFF_BASE` would
+# be empty, `_resolve_base()` treats empty exactly like unset and falls back
+# to `origin/dev`, and dispatched on `dev` that makes
+# `merge-base(origin/dev, HEAD)` equal `HEAD` -- zero added lines, so the
+# new-citation rule passes vacuously.
+
+name: merge-queue-changelog-citations
+
+on:
+  merge_group:
+  pull_request:
+    paths:
+      - '.github/workflows/merge-queue-changelog-citations.yml'
+  workflow_dispatch:
+    inputs:
+      diff_base:
+        description: >-
+          Base ref or SHA to grade new citations against. Leave empty to use
+          the script's own `origin/dev` default -- but note that dispatching
+          on `dev` itself then grades zero added lines.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changelog-citations:
+    # Static by design: this is the context branch protection can require.
+    name: changelog citations · merge queue
+    runs-on: ubuntu-latest
+    # Checkout has its own 5-minute cap; the local Python check normally takes
+    # seconds, leaving ample room before this job-level backstop fires.
+    timeout-minutes: 10
+    steps:
+      - name: Checkout merge-group ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        timeout-minutes: 5
+        with:
+          persist-credentials: false
+          # A merge group can contain several PRs. Fetch all history so its
+          # base_sha resolves even when it is more than one parent behind HEAD.
+          fetch-depth: 0
+
+      - name: Grade changelog citations against merge-group base
+        env:
+          # merge_group -> the queue's own base (the case this gate exists
+          # for). workflow_dispatch -> whatever the operator passed, possibly
+          # empty. pull_request (this file only) -> empty, so
+          # _resolve_base() falls back to `origin/dev`, which
+          # fetch-depth: 0 has fetched -- the same base
+          # pr-metadata-validate.yml grades an ordinary PR against, making
+          # this leg a faithful self-test of the workflow.
+          DIFF_BASE: ${{ github.event.merge_group.base_sha || inputs.diff_base }}
+        run: python3 scripts/check_changelog_citations.py --verbose

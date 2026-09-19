@@ -16,7 +16,7 @@ from pathlib import Path
 import yaml
 
 REPO = Path(__file__).resolve().parents[2]
-WORKFLOW = REPO / ".github" / "workflows" / "pr-changelog-citations.yml"
+WORKFLOW = REPO / ".github" / "workflows" / "merge-queue-changelog-citations.yml"
 METADATA_WORKFLOW = REPO / ".github" / "workflows" / "pr-metadata-validate.yml"
 
 
@@ -31,8 +31,26 @@ def _on_block(doc: dict) -> dict:
 
 def test_merge_queue_citation_workflow_is_dedicated_and_requireable() -> None:
     doc = _load(WORKFLOW)
+    on_block = _on_block(doc)
 
-    assert set(_on_block(doc)) == {"merge_group"}
+    # `merge_group` is the trigger this gate exists for. `pull_request` and
+    # `workflow_dispatch` are deliberate secondary legs (self-test +
+    # manual smoke test, see the workflow's own header comment) -- but
+    # nothing broader than these three may sneak in.
+    assert "merge_group" in on_block
+    assert set(on_block) == {"merge_group", "pull_request", "workflow_dispatch"}
+
+    # The `pull_request` leg must stay path-filtered to the workflow's own
+    # file, or ordinary PRs would pick up a second, differently-based
+    # citation verdict alongside pr-metadata-validate.yml's.
+    assert on_block["pull_request"]["paths"] == [
+        ".github/workflows/merge-queue-changelog-citations.yml"
+    ]
+
+    # workflow_dispatch must carry a diff_base input, or a manual run can't
+    # exercise the new-citation rule (see the workflow's header comment).
+    assert "diff_base" in on_block["workflow_dispatch"]["inputs"]
+
     assert set(doc["jobs"]) == {"changelog-citations"}
     job = doc["jobs"]["changelog-citations"]
     assert job["name"] == "changelog citations · merge queue"
@@ -50,5 +68,8 @@ def test_merge_queue_citation_workflow_uses_the_event_base_sha() -> None:
     checkout, check = job["steps"]
     assert checkout["with"]["fetch-depth"] == 0
     assert checkout["with"]["persist-credentials"] is False
-    assert check["env"]["DIFF_BASE"] == "${{ github.event.merge_group.base_sha }}"
-    assert check["run"] == "python3 scripts/check_changelog_citations.py"
+    assert (
+        check["env"]["DIFF_BASE"]
+        == "${{ github.event.merge_group.base_sha || inputs.diff_base }}"
+    )
+    assert check["run"] == "python3 scripts/check_changelog_citations.py --verbose"
