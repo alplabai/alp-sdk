@@ -29,20 +29,24 @@ template until that port lands.
 
 ## TLS status -- preview
 
-<!-- The ../mqtt-telemetry/ detour is deliberate: the scaffold
-     rewriter's _RELATIVE_LINK_RE only matches `../`-prefixed links, and
-     native_sim.conf is a child of this dir, not a sibling -- don't "fix" this. -->
+The `mqtts://` path is configured through the portable API (broker URI + a
+pinned CA) and **mbedTLS is now built in on every target**, native_sim
+included. It used to be held off: with mbedTLS' PSA core disabled the pinned
+library's own `ssl_misc.h` does not compile (`unknown type name
+'mbedtls_error_pair_t'`), so the app turned mbedTLS off rather than fail. The
+SDK now turns that PSA core on wherever it builds mbedTLS without TF-M
+(`ALP_SDK_MBEDTLS_PSA_CRYPTO`, issue #2173), so this app carries no mbedTLS
+knobs at all any more (see [`prj.conf`](../mqtt-telemetry/prj.conf), which is
+empty by design) and the `native_sim.conf` that used to hold the workaround is
+deleted.
 
-The `mqtts://` path is configured through the portable API (broker
-URI + a pinned CA), but **`CONFIG_MBEDTLS` is held OFF in the build
-today**. Zephyr v4.4's mbedtls 3.6 has an `ssl_misc.h`
-include-order bug (`unknown type name 'mbedtls_error_pair_t'`); full
-`tf-psa-crypto` wiring is a v0.6 work item. On real AEN silicon the
-build follows the TF-M stack and is unaffected; the native_sim leg
-turns mbedtls off (see
-[`native_sim.conf`](../mqtt-telemetry/native_sim.conf)) so the
-framing path still builds and runs. This is why the catalog record
-is `preview`.
+The record stays `preview` for a different reason: no Alif Ensemble entropy
+driver exists yet, in this tree or upstream. An ordinary AEN hardware build is
+therefore refused instead of silently using Zephyr's non-cryptographic
+fallback. The AEN Twister scenario sets
+`CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` only because it is `build_only`; that
+image must never be flashed or shipped. A production AEN TLS build remains
+blocked until the SE TRNG is wired to a real entropy driver (issue #2192).
 
 ## The "sensor reading"
 
@@ -55,12 +59,10 @@ over `<alp/chips/bmp581.h>`) -- and the publish path is unchanged.
 ## Build
 
 ```bash
-# Standalone, native_sim (no radio; framing-only, mbedtls off):
-# native_sim.conf ships only in the alp-sdk tree, not in this
-# scaffold -- copy it in first (see the link above) before
-# running this leg.
+# Standalone, native_sim (no radio, so the app prints the framing it
+# would publish; mbedTLS is built in):
 west build -b native_sim/native/64 examples/connectivity/mqtt-telemetry \
-    -- -DEXTRA_ZEPHYR_MODULES=$(pwd) -DEXTRA_CONF_FILE=native_sim.conf
+    -- -DEXTRA_ZEPHYR_MODULES=$(pwd)
 west build -t run
 
 # On real silicon (E1M-AEN801):
