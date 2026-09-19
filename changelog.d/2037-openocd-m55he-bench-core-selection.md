@@ -27,7 +27,7 @@ table, `resume`) against either core.
   answer (it read `[alif.m55he]` for a whole campaign that was really
   driving the HP).
 - **`core=he` prints a hazard warning, every run, not just the first**:
-  `evk-01`'s HE ITCM carries a ~4.6 KB Secure-Enclave-resident stub
+  an AEN EVK bench place's HE ITCM carries a ~4.6 KB Secure-Enclave-resident stub
   (MSP `0x20040000`, reset vector `0x00000B58`) that `load_image` overwrites.
   It is RAM (power-cycle-recoverable, not a persistent MRAM write like Flow
   A/D), but this script does not restore or ask before clobbering it.

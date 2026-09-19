@@ -326,7 +326,7 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # !! D-cache on is exactly that case.  Prove a flash by cutting power at the
 # !! DPS-150 and re-reading slot0.  RESOLVED 2026-09-04: the AEN place now drives
 # !! DPS-150 10A2617F4486 at the documented 16.0 V (pwr-only.yaml re-cabled, the
-# !! retired e1mx-v2n-m1-01 agent disabled), so
+# !! retired V2N bench place's agent disabled), so
 # !!   LG_ENV=~/board-farm/labgrid/pwr-only.yaml labgrid-client -p <your-bench-place> power off|on
 # !! really cuts power and the cold-cycle proof is available on this bench.
 #

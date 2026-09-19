@@ -1034,7 +1034,7 @@ bench_atoc_replace_guard() {
 	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
 	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
 	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
-	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# boards on this farm makes two concurrent runs of the
 	# SAME script against DIFFERENT boards a real scenario, and a fixed path
 	# let run A's write land between run B's redirect and B's read, so B
 	# parsed A's board (reproduced: B printed A's clean table and returned

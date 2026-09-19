@@ -31,7 +31,7 @@
 # aliases differ -- 0x58000000 HE / 0x50000000 HP -- and those matter only
 # for one core reading the other, not for this script).
 #
-# HE HAZARD -- NOT SILENT: on evk-01, the HE ITCM carries a resident ~4.6 KB
+# HE HAZARD -- NOT SILENT: on an AEN EVK bench place, the HE ITCM carries a resident ~4.6 KB
 # stub the Secure Enclave parks there at boot (MSP=0x20040000, reset vector
 # 0x00000B58, every fault vector collapsed onto one handler; fully captured
 # at <board-farm>/artifacts/evk01-he-itcm-resident-FULL-2026-09-09.bin, md5
@@ -45,7 +45,7 @@
 # `ram-run.sh` hazard #1312/#1318 already fixed for JLinkExe, reintroduced
 # here because OpenOCD is a different tool with no shared preflight. Three
 # probes on alplab-gw answer the SAME cloned serial `603000869` -- and this
-# farm holds MULTIPLE AEN E8 boards (e.g. evk-01, evk-03), each its own
+# farm holds MULTIPLE AEN E8 boards, each its own
 # probe at its own USB path, plus the GD32 bridge probe sharing the clone.
 # All three answer the SAME SWD DPIDR too (0x4c013477), so a mis-pinned path
 # still "looks healthy" all the way through -- the USB path is the ONLY
@@ -150,7 +150,7 @@ if [ "$CORE" = "he" ]; then
 	NAMEFMT="M55-HE"
 	SELECT_CMDS=(-c "targets alif.m55he" -c "alif.m55he arp_examine")
 	cat >&2 <<-EOF
-	!! core=he: this OVERWRITES evk-01's resident HE ITCM stub (the ~4.6 KB
+	!! core=he: this OVERWRITES the board's resident HE ITCM stub (the ~4.6 KB
 	!! Secure-Enclave park stub, MSP=0x20040000, reset vector 0x00000B58) via
 	!! load_image. It is RAM, so a power cycle restores it -- but this script
 	!! does not restore it for you, and does not ask before doing this.

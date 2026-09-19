@@ -1815,7 +1815,7 @@ preflight and by-eye DPIDR comparison, then flash immediately with the
 same selector, then re-read after any re-plug or intervening
 invocation. The `CHANGELOG.md:1727-1731` citation for the V2N CM33 DAP
 measurement — a line range that shifts every release — is replaced
-with the `e1mx-v2n-m1-01` probe table under CHANGELOG.md's "### Fixed
+with the V2N bench unit's probe table under CHANGELOG.md's "### Fixed
 — Flow C wrote and executed on a target it never identified (#1312)"
 heading (a heading, not a line number, since CHANGELOG line numbers
 shift every release just as the citation being replaced did),
@@ -2284,7 +2284,7 @@ when nothing else works. Its copy-pasteable snippet `abort()`ed unless the SW-DP
 IDCODE equalled `GD32_SWD_EXPECTED_IDCODE` (`0x6BA02477`), and told the reader a
 mismatch "means mis-wiring or a non-G5x3 part".
 
-The bench measures otherwise. Both on place `e1mx-v2n-m1-01`
+The bench measures otherwise. Both on the V2N bench unit
 (`scripts/bench/aen/bench-env.sh`): the GD32 bridge answers `0x0BE12477`, and
 `0x6BA02477` is the **V2N CM33 DAP** — whose measurement also reported `Found
 Cortex-M33 r0p4`, not the `r0p1` the constant's comment claims. On those
@@ -5962,7 +5962,7 @@ Also removed:
 **The DPIDR contradiction is carried forward, not dropped** — and it is worse
 than the "two unmeasured candidates" #1439 described.
 `metadata/chips/gd32_swd.yaml:49` arms the GD32 wrong-board guard with `0x6BA02477`, which `CHANGELOG.md` records as a
-measurement of the **V2N CM33 DAP** on `e1mx-v2n-m1-01` (`Found SW-DP with ID
+measurement of the **V2N CM33 DAP** on a V2N bench unit (`Found SW-DP with ID
 0x6BA02477`, `Found Cortex-M33 r0p4` — also contradicting the `r0p1`
 annotation). Filed as #1440; needs one reading on a GD32 with a probe attached.
 No value was picked here.
@@ -7332,7 +7332,7 @@ channel mask is the wrong shape: the CM33 configures DMAC0 by writing FSP config
 structs directly, so there is no DT-expressible partition to publish on that
 side.
 
-**Confirmed on the live board** (`e1mx-v2n-m1-01`, 2026-08-08), which is what
+**Confirmed on the live board** (a V2N bench unit, 2026-08-08), which is what
 the ADR needed to assert the mitigation still holds:
 
 ```
@@ -7596,10 +7596,10 @@ now that all three probes are known:
 | probe | SW-DP IDR | place |
 |---|---|---|
 | AEN E8 | `0x4C013477` | an AEN EVK bench place |
-| GD32 bridge | `0x0BE12477` | `e1mx-v2n-m1-01` |
-| V2N CM33 DAP | `0x6BA02477` | `e1mx-v2n-m1-01` |
+| GD32 bridge | `0x0BE12477` | a V2N bench unit |
+| V2N CM33 DAP | `0x6BA02477` | a V2N bench unit |
 
-`V2N_CM33_DPIDR` is new, measured on `e1mx-v2n-m1-01` — `Found SW-DP with ID
+`V2N_CM33_DPIDR` is new, measured on a V2N bench unit — `Found SW-DP with ID
 0x6BA02477`, `Found Cortex-M33 r0p4`. That core answers on **SWD, not JTAG**.
 
 ### Fixed — the new J-Link guard tests reddened `python-smoke (windows-latest)` on every PR

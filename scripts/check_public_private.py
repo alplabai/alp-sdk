@@ -558,7 +558,8 @@ RULES: tuple[Rule, ...] = (
     Rule(
         "LABGRID_PLACE",
         re.compile(
-            r"labgrid " r"place " r"|" r"\be1m-[a-z0-9-]+-evk-\d+\b",
+            r"labgrid " r"place " r"|" r"\be1m-[a-z0-9-]+-evk-\d+\b"
+            r"|" r"\be1mx-[a-z0-9-]+-\d+\b" r"|" r"\bevk-0\d\b",
             re.IGNORECASE,
         ),
         "Drop the internal labgrid-place identifier; keep the bench-proven claim and its date "

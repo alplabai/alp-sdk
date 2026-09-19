@@ -461,8 +461,8 @@ _session1_window() {
 # -- it needs its own check.
 #
 # POSITIVE check, scoped to an EXACT window, not a whole-transcript
-# substring scan -- both were bench-measured wrong on evk-02/evk-03
-# (2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
+# substring scan -- both were bench-measured wrong on two E1M-AEN803 modules
+# (serial 2026W36-0001/2026W36-0002, 2026-09-13, real JLinkExe V9.74 through jlink-run.sh):
 #   - too narrow: a real successful loadbin puts SIX lines (the implicit-
 #     reset banner + "Downloading file [...]...") between the echoed
 #     command and "O.K.", not "immediately after" as an earlier draft of

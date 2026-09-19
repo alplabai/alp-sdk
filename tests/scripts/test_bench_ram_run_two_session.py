@@ -408,7 +408,7 @@ def _assert_no_halt_or_reset(lines: list[str], where: str) -> None:
         token = ln.split()[0] if ln.split() else ""
         assert token not in _HALT_OR_RESET_TOKENS, (
             f"'{ln}' re-halts/resets the core in {where} -- this is the exact "
-            f"shape measured broken on evk-02/-03 (alp-sdk#2076): {lines}"
+            f"shape measured broken on two E1M-AEN803 bench modules (alp-sdk#2076): {lines}"
         )
         assert not ln.startswith("RSetType"), (
             f"'{ln}' issues a pin reset in {where}: {lines}"

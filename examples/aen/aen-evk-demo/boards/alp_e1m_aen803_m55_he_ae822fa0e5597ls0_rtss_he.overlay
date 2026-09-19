@@ -571,7 +571,7 @@
  * 0..7 all pass, 8 hard-fails 3 runs of 3, 9 and 10 pass again. The full table
  * and the reasoning for the value chosen are in src/cc3501e_bridge.h. The two
  * comments that used to disagree here are both retired: the "4..8 clean window"
- * was an evk-01 measurement at ~14.3 MHz and does not carry over, and the
+ * was an earlier bench run at ~14.3 MHz and does not carry over, and the
  * sibling overlay's "0 fails, 4 fails" is contradicted outright -- both passed.
  */
 &clockctrl {

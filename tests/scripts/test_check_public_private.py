@@ -140,6 +140,43 @@ def test_labgrid_place_ignores_board_names(tmp_path: Path) -> None:
     assert classifier.scan([path], base=tmp_path) == []
 
 
+def test_detects_labgrid_place_v2n_farm_identifier(tmp_path: Path) -> None:
+    # alp-sdk#2224 follow-up: the V2N farm's e1mx-<family>-<board>-<slot>
+    # naming scheme is a different shape from the AEN farm's -- must also
+    # fire.  Synthetic slot number, not a real farm place.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Bench-proven on e1mx-v2n-m1" "-07 today.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"LABGRID_PLACE"}
+
+
+def test_detects_labgrid_place_bare_evk_slot(tmp_path: Path) -> None:
+    # alp-sdk#2224 follow-up: a bare "evk-0N" slot name with no "e1m-"
+    # prefix leaks the same place identity and must also fire.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Bench-proven on evk-0" "5 today.\n",
+    )
+    findings = classifier.scan([path], base=tmp_path)
+    assert {f.category for f in findings} == {"LABGRID_PLACE"}
+
+
+def test_labgrid_place_ignores_the_evk_carrier_part_number(tmp_path: Path) -> None:
+    # E1M-EVK-2626 is the real carrier PCB part number (and its r1/r2
+    # revisions) -- it must never be confused with a bare "evk-0N" bench
+    # slot: the digits after "EVK-" here are a board revision, not a slot.
+    path = _write(
+        tmp_path,
+        "docs/example.md",
+        "Carrier P/N: E1M-EVK-2626-R2, per E1M-EVK-2626_pinmap.csv.\n",
+    )
+    assert classifier.scan([path], base=tmp_path) == []
+
+
 def test_detects_probe_serial(tmp_path: Path) -> None:
     path = _write(
         tmp_path,

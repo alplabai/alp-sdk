@@ -520,7 +520,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
     """End-to-end confirmation, not just bench_labgrid_resolve() in
     isolation (alp-sdk#2064 bench verification): a REAL helper --
     `reread.sh`, a pure J-Link flow with no SE_UART dependency at all --
-    must get PAST bench-env.sh's sourcing on an evk-02/-03-shaped place
+    must get PAST bench-env.sh's sourcing on a swd-only-shaped place
     (swd + console, no seuart) and reach `bench_jlink_run()`, not die at
     the old "exports no 'seuart' resource path" refusal before ever
     touching the probe-isolation code.
@@ -558,7 +558,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
     (bd / "zephyr").mkdir(parents=True)
     (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
 
-    # A fake probe tree at the REAL evk-02 swd path (3-4.2) from
+    # A fake probe tree at the REAL swd path (3-4.2) from
     # REAL_EVK02_UNACQUIRED above, with no siblings to mask.
     sysfs = workdir / "sysfs"
     dev = workdir / "dev"

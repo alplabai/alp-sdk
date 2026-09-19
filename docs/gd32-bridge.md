@@ -202,7 +202,7 @@ actually-measured instance of that stance).
 The manifest previously carried `0x6BA02477` there, but that value is
 not a GD32 reading -- it is the bench-measured SW-DP ID of the V2N CM33
 DAP, a third J-Link on this rack (`scripts/bench/aen/bench-env.sh:145-147`,
-measured 2026-08-08, `Found Cortex-M33 r0p4`; the `e1mx-v2n-m1-01`
+measured 2026-08-08, `Found Cortex-M33 r0p4`; the V2N bench unit's
 probe table, `CHANGELOG.md:3364` and `CHANGELOG.md:3367`), tracked as
 #1440.  An
 unattributed `0x0BE12477` elsewhere in this repo is the only GD32
