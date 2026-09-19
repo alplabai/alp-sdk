@@ -8,6 +8,18 @@ the field?".
 Targets every E1M-X SoM family. native_sim build verified; HiL
 verification gates on a staged Mender server (separate repo).
 
+> **TLS randomness is not production-grade on AEN yet (#2192).**
+> This app's HTTPS poll and its ECDSA-P256 verification run on
+> mbedTLS' PSA crypto core, which needs a cryptographically secure
+> RNG. There is no Alif Ensemble entropy driver in this tree or
+> upstream, so an AEN build is *refused* unless it sets
+> `CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` to acknowledge a predictable
+> generator. The CI scenario sets it because it only compiles; a
+> shipping image must not. Until the Secure Enclave TRNG is wired
+> through a real entropy driver, treat the OTA trust chain
+> demonstrated here as structurally complete and cryptographically
+> unproven.
+
 ## What lands declaratively in v0.6
 
 This example is the SDK's reference for the v0.6 `boot:` + `ota:`
