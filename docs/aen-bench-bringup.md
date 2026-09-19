@@ -432,6 +432,20 @@ r
 g
 exit
 ```
+> **alp-sdk#2233 — two hazards in the raw session above, if you type it by hand.**
+> SEGGER's built-in loader rewrites the WHOLE 16 KiB sector either `loadbin` touches
+> and never reads its prior contents first, so any blob that doesn't start and end on
+> a sector (`0x4000`) boundary silently turns the REST of that sector to `0xFF`.
+> Separately, `verifybin` here only ever compares against J-Link's own in-process
+> flash cache, not a fresh chip read — `Verify successful.` is not proof. The scripted
+> path (`scripts/bench/aen/flash-jlink-mramxip.sh`) handles both: it reads the touched
+> sectors first, overlays each blob on them (`scripts/bench/aen/flowd_sector_pad.py`),
+> `loadbin`s the padded image instead, and proves the write with a FRESH read-only
+> session rather than `verifybin`. Prefer the script; if you must type this by hand,
+> at minimum confirm with a fresh-session `savebin`/cold-cycle read as the "Confirm
+> with a cold-cycle read, never with `verifybin` alone" guidance elsewhere in this
+> doc set already says.
+
 Invoke: `JLinkExe -CommanderScript <script>` (Linux) / `JLink.exe -CommandFile <script>`
 (Windows). On success J-Link prints `Program & Verify` + `Verify successful.` for both blobs and
 `mem32 0x80010000 = … 80012…`. The post-`r` "connect under reset / Attach to CPU failed"

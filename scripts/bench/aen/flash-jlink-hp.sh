@@ -129,15 +129,24 @@ ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt |
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address"; exit 1; }
 echo "    package: $PKG ($(stat -c%s "$PKG") B) -> MRAM $ADDR" >&2
 
-# 2. part-number device unlocks the MRAM loader; write + verify the package, then
-#    PIN reset so the SE boot ROM reloads + boots the HP ATOC.
+# SECTOR-PAD (alp-sdk#2233): the built-in loader rewrites the WHOLE 16 KiB
+# sector(s) $PKG touches and never reads their prior contents first -- see
+# bench-env.sh's Flow D section header. Read those sectors' current MRAM
+# content and overlay $PKG on them; the padded image is what gets loadbin'ed.
+FLOWD_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/flowd-flash-jlink-hp-XXXXXX")" || exit 9
+bench_flowd_prepare_write flash-jlink-hp "$FLOWD_SCRATCH" "$PKG:$ADDR" || exit 9
+
+# 2. part-number device unlocks the MRAM loader; write the sector-padded
+#    package, then PIN reset so the SE boot ROM reloads + boots the HP ATOC.
+#    `verifybin` is deliberately GONE (#2233): it only ever compared against
+#    J-Link's own flash cache, never a fresh chip read -- see the
+#    bench_flowd_proof step below.
 cat > /tmp/hp-write.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-loadbin $PKG $ADDR
-verifybin $PKG $ADDR
+$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
 RSetType 2
 r
 g
@@ -150,22 +159,16 @@ if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   exit 2
 fi
 
-# GATE ON THE VERIFY RESULT (#1343) -- same defect as flash-jlink-mramxip.sh.
-# The `verifybin` above was issued but its outcome was never read: the output went
-# to a display-only pipe and the connect check was the only thing that could fail
-# this script, so a `Verify failed.` exited 0 and reported a good flash.  One
-# verifybin here (a single package write), against two in the mramxip script.
-if grep -qiE "verify failed|verification failed|mismatch" /tmp/hp-write.out; then
-  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
-  grep -iE "verify failed|verification failed|mismatch" /tmp/hp-write.out | head -5
+# GATE ON THE READ-BACK PROOF (#2233, replacing the old #1343/#1488 verifybin
+# gate) -- a FRESH read-only J-Link session savebin's every padded range back
+# and cmp's it byte-for-byte against the padded image, proving both that $PKG
+# landed AND that its sector neighbours survived.
+if ! bench_flowd_proof flash-jlink-hp "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
+  echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
   exit 3
 fi
-if ! grep -qi "verify successful" /tmp/hp-write.out; then
-  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
-  exit 3
-fi
-echo "verify: verifybin OK ($PKG @ $ADDR)"
+echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded)"
 
 # 3. SES has booted the HP core; read the SRAM0 beacon via the generic device
 #    (the HE/system AP reads global SRAM0 regardless of HP core state), then

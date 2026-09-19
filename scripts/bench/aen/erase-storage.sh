@@ -70,12 +70,13 @@
 # [BENCH-VERIFIED] note above).
 #
 # Exit codes (aligned with the sibling Flow D helpers):
-#   0  window written and byte-verified as erased
+#   0  window written and byte-verified (fresh-session read-back proof) as erased
 #   2  the part-number device profile could not connect (nothing written)
-#   3  verify failed, or no verify result at all -- do NOT treat as erased
+#   3  the read-back proof failed -- do NOT treat as erased
 #   4  DPIDR gate: this is not the AEN E8 (nothing written)
 #   5  the storage window could not be derived from the preset, or it is not
-#      adjacent to `atoc` (nothing written)
+#      adjacent to `atoc` (nothing written); or the sector-pad prepare step
+#      (alp-sdk#2233 -- plan/pre-read/build) itself refused or failed
 set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh
@@ -125,9 +126,9 @@ printf '>>> customer storage window: %s .. 0x%X (%s KiB, exclusive of atoc at %s
 	"$BASE" "$END" "$KIB" "$ATOC_BASE" >&2
 
 # 2. Build the erased pattern. 0x00 IS the erased value on this MRAM (hazard 2),
-#    so the file is literally $SIZE zero bytes -- and it doubles as the
-#    verifybin reference, which makes "erased" a byte-compare rather than a
-#    claim.
+#    so the file is literally $SIZE zero bytes -- and it is the blob the
+#    sector-pad machinery below both writes and later read-back-proves,
+#    which makes "erased" a byte-compare rather than a claim.
 ZEROS=/tmp/aen-storage-erased.bin
 head -c "$SIZE" /dev/zero > "$ZEROS"
 
@@ -151,12 +152,10 @@ printf '    erased pattern: %s (%s B of 0x00 -- NOT 0xFF)\n' \
 # 3. SAFETY GATE -- prove the AEN E8 answered BEFORE any write (hazard 5).
 #    Read-only connect with the generic device, same gate as flash-jlink.sh.
 #
-#    This runs BEFORE the erase CommanderScript is written, not after: a failed
-#    gate then leaves no destructive script staged in /tmp for someone to run by
-#    hand.  It also keeps the erase script's `verifybin` adjacent to its own
-#    transcript, which is what tests/scripts/test_bench_jlink_connect_guard.py
-#    checks -- with the preflight in between, that pairing resolved to the
-#    PREFLIGHT transcript and the gate below looked absent.
+#    This runs BEFORE any other probe touch (including the sector pre-read
+#    below) and before the erase CommanderScript is written: a failed gate
+#    then leaves no destructive script staged in /tmp for someone to run by
+#    hand, and nothing has read from a possibly-wrong board either.
 #
 #    DRY_RUN never reaches here, so it still opens no probe.
 if [ "$DRY_RUN" != 1 ]; then
@@ -173,13 +172,36 @@ EOF
 	echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 fi
 
+# SECTOR-PAD (alp-sdk#2233): the built-in loader rewrites the WHOLE 16 KiB
+# sector(s) a write touches, so a truly generic Flow D writer must read
+# neighbours first (bench-env.sh's Flow D section header). This window IS
+# sector-aligned at both ends (BASE and END are both 0x4000-multiples --
+# asserted by construction above: BASE/END come straight from the preset and
+# END is checked adjacent to `atoc`), so the padded image ends up being
+# nothing but $ZEROS itself; the machinery is still run for real, not
+# special-cased away, so a future preset move that breaks alignment is
+# padded correctly instead of silently writing a partial sector wrong.
+#
+# --dry-run (this script's own flag, hazard-driven: DRY_RUN must open no
+# probe at all) implies FLOWD_DRY_RUN for the pad machinery too -- harmless
+# here specifically because $ZEROS covers every byte of every sector it
+# touches, so no real neighbour content is ever needed to prove this write,
+# aligned or not.
+if [ "$DRY_RUN" = 1 ]; then
+	export FLOWD_DRY_RUN=1
+fi
+FLOWD_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/flowd-erase-storage-XXXXXX")" || exit 5
+bench_flowd_prepare_write erase-storage "$FLOWD_SCRATCH" "$ZEROS:$BASE" || exit 5
+
+# `verifybin` is deliberately GONE here (#2233): it only ever compared
+# against J-Link's own in-process flash cache, never a fresh chip read -- see
+# the bench_flowd_proof gate below, which replaces it.
 cat > /tmp/aen-erase-storage.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-loadbin $ZEROS_FOR_JLINK $BASE
-verifybin $ZEROS_FOR_JLINK $BASE
+$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
 exit
 EOF
 
@@ -189,12 +211,9 @@ if [ "$DRY_RUN" = 1 ]; then
 	exit 0
 fi
 
-# 4. Write + verify. Deliberately NO reset and NO `g`: this step must not boot
+# 4. Write. Deliberately NO reset and NO `g`: this step must not boot
 #    anything. Cold power-cycle by hand afterwards and confirm the SE still
-#    finds its ATOC (docs/aen-provisioning.md section 2 listener). Transcript is
-#    written in full FIRST, then grepped for display -- a `| tee | grep | head`
-#    pipeline can SIGPIPE tee and truncate away the very `Verify` line the gate
-#    below reads (#1488 finding 5, see flash-jlink.sh).
+#    finds its ATOC (docs/aen-provisioning.md section 2 listener).
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/aen-erase-storage.jlink \
 	> /tmp/aen-erase-storage.out 2>&1 || true
 grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Cortex|Found" \
@@ -206,20 +225,14 @@ if grep -qi "Could not connect to the target device" /tmp/aen-erase-storage.out;
 	exit 2
 fi
 
-# GATE ON THE VERIFY RESULT (#1488). An unread verifybin is the defect
-# flash-jlink.sh and flash-jlink-hp.sh were both fixed for: JLinkExe exits 0
-# on a failed verify, so without this the script would report a clean erase
-# over a window that still holds the old image.
-if grep -qiE "verify failed|verification failed|mismatch" /tmp/aen-erase-storage.out; then
-	echo "!! VERIFY FAILED -- the window is NOT uniformly 0x00. Do not ship this SoM."
-	grep -iE "verify failed|verification failed|mismatch" /tmp/aen-erase-storage.out | head -5
+# GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin
+# gate): a FRESH read-only J-Link session savebin's the whole window back and
+# cmp's it byte-for-byte against the padded (here: pure-zero) image.
+if ! bench_flowd_proof erase-storage "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
+	echo "!! READ-BACK PROOF FAILED -- the window is NOT uniformly 0x00. Do not ship this SoM."
 	exit 3
 fi
-if ! grep -qi "verify successful" /tmp/aen-erase-storage.out; then
-	echo "!! no verifybin success reported -- treating as NOT erased (the verify never ran)."
-	exit 3
-fi
-printf 'erased: %s .. 0x%X verified all-0x00\n' "$BASE" "$END"
+printf 'erased: %s .. 0x%X verified all-0x00 (fresh-session read-back proof)\n' "$BASE" "$END"
 echo "NEXT (by hand, still owed): cold power-cycle the module and confirm the SE"
 echo "     boots clean on the docs/aen-provisioning.md section 2 listener -- the"
 echo "     ATOC band was not touched, so the banner must still show the app"

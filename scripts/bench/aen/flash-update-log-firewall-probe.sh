@@ -172,13 +172,25 @@ EOF
 bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
 bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
 
+# SECTOR-PAD (alp-sdk#2233): the built-in loader rewrites the WHOLE 16 KiB
+# sector(s) $PKG touches and never reads their prior contents first -- see
+# bench-env.sh's Flow D section header. Read those sectors' current MRAM
+# content and overlay $PKG on them; the padded image is what gets loadbin'ed.
+FLOWD_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/flowd-update-log-fwprobe-XXXXXX")" || exit 9
+bench_flowd_prepare_write flash-update-log-firewall-probe "$FLOWD_SCRATCH" "$PKG:$ATOC_ADDR" || exit 9
+
+# `verifybin` is deliberately GONE here (#2233): it only ever compared
+# against J-Link's own in-process flash cache, never a fresh chip read -- see
+# the bench_flowd_proof gate below, which runs BEFORE the boot script (#1526
+# unchanged: a failed proof must still keep the board from booting an
+# unverified image, which for THIS script means the HE probe never runs its
+# destructive overwrite attempt on alp_ulog_partition).
 cat > /tmp/firmware-update-log-firewall-probe-write.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-loadbin $PKG $ATOC_ADDR
-verifybin $PKG $ATOC_ADDR
+$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
 exit
 EOF
 
@@ -201,39 +213,30 @@ if grep -qiE "Could not connect to the target device|Cannot connect to the probe
 	exit 2
 fi
 
-# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
-# for under #1343. The `verifybin` above was issued but its outcome was never
-# read: the output went to a display-only pipe and the connect check was the
-# only thing that could fail this script, so a `Verify failed.` exited 0 and
-# reported a good flash.
-#
-# This gate is now LOAD-BEARING (#1526).  The CommanderScript above carries
-# only `loadbin` + `verifybin`; `RSetType 2` / `r` / `g` moved to a SECOND
-# script that runs further down, and only if the checks below pass.  So a
-# failed verify now stops the board being reset into an image that did not
-# verify -- and because the ATOC entry carries `"flags": ["load", "boot"]`,
-# not booting is what keeps the HE probe from running and overwriting
-# `alp_ulog_partition`.
+# This gate is LOAD-BEARING (#1526).  The CommanderScript above carries only
+# `loadbin`; `RSetType 2` / `r` / `g` moved to a SECOND script that runs
+# further down, and only if the check below passes.  So a failed proof now
+# stops the board being reset into an image that did not verify -- and
+# because the ATOC entry carries `"flags": ["load", "boot"]`, not booting is
+# what keeps the HE probe from running and overwriting `alp_ulog_partition`.
 #
 # The MRAM write itself has of course already happened -- that is what
 # `loadbin` is.  What is prevented is acting on it.
-if grep -qiE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out; then
-	echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG." >&2
-	grep -iE "verify failed|verification failed|mismatch" /tmp/firmware-update-log-firewall-probe-write.out | head -5 >&2
+#
+# GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin gate)
+# -- a FRESH read-only J-Link session savebin's every padded range back and
+# cmp's it byte-for-byte against the padded image, proving both that $PKG
+# landed AND that its sector neighbours survived.
+if ! bench_flowd_proof flash-update-log-firewall-probe "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
+	echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ATOC_ADDR." >&2
 	echo "   Do not treat this board as flashed." >&2
 	echo "   The board was NOT reset or booted (#1526): the reset/boot CommanderScript" >&2
 	echo "   runs only past this gate, so the HE probe never ran and" >&2
-	echo "   alp_ulog_partition is intact.  MRAM now holds an image that failed verify --" >&2
+	echo "   alp_ulog_partition is intact.  MRAM now holds an image that failed proof --" >&2
 	echo "   reflash before booting this board." >&2
 	exit 3
 fi
-if ! grep -qi "verify successful" /tmp/firmware-update-log-firewall-probe-write.out; then
-	echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)." >&2
-	echo "   The board was NOT reset or booted (#1526), so alp_ulog_partition is intact." >&2
-	echo "   MRAM now holds an unverified image -- reflash before booting this board." >&2
-	exit 3
-fi
-echo "verify: verifybin OK ($PKG @ $ATOC_ADDR)" >&2
+echo "verify: read-back proof OK ($PKG @ $ATOC_ADDR, sector-padded)" >&2
 
 # ONLY NOW reset into the image (#1526).  Separate CommanderScript so the boot
 # is genuinely downstream of the verify result -- inside one script JLinkExe

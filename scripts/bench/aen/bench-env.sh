@@ -1360,3 +1360,323 @@ bench_flowd_atoc_guard() {
 	echo "        this bench slot and proceed without the check." >&2
 	return 8
 }
+
+# --------------------------------------------------------------------
+# Flow D sector-padded MRAM write + fresh-session savebin proof (alp-sdk#2233)
+# --------------------------------------------------------------------
+#
+# TWO MEASURED DEFECTS (2026-09-19, see the issue):
+#
+#   1. SEGGER's built-in AE822FA0E5597LS0_M55_HE loader always erases and
+#      reprograms WHOLE 16 KiB (0x4000) sectors, never just the bytes a
+#      `loadbin` names, and never reads a sector's own prior contents first --
+#      so every byte of a touched sector OUTSIDE the blob becomes 0xFF the
+#      instant a write does not start and end on a sector boundary.
+#   2. `verifybin` compares against J-Link's own in-process flash-CACHE, not a
+#      fresh chip read -- `Verify successful.` proves nothing about MRAM.
+#
+# The functions below are the shared machinery every Flow D writer uses to
+# fix both: read the CURRENT bytes of every sector a write touches, overlay
+# the blob(s) on them (scripts/bench/aen/flowd_sector_pad.py, pure host-side,
+# no probe access), `loadbin` the padded image instead of the raw blob so the
+# loader's own whole-sector rewrite reproduces the neighbours unchanged, and
+# prove it by `savebin`-reading the range back in a FRESH JLinkExe session
+# (a new process cannot be served from another process's flash cache) and
+# comparing byte-for-byte against that same padded image -- which proves both
+# that the blob landed and that the neighbours survived.
+#
+# `verifybin` MUST NOT gate a Flow D script any more (defect 2) -- a
+# transcript may still carry one for its log value, but the pass/fail
+# decision comes from bench_flowd_proof() below, never from grepping for
+# "Verify successful."/"Verify failed." in a `loadbin` session's own output.
+#
+# CALL SHAPE for the common case (one write, or several writes that share one
+# write session): plan -> read the named sectors -> build the padded
+# manifest -> embed its loadbin line(s) in the caller's own CommandFile
+# (preserving whatever guard/reset ordering that script already has --
+# `, noreset` where the caller must not let `loadbin`'s implicit reset race a
+# second write, same as any other loadbin) -> once that session has run, call
+# bench_flowd_proof() in a fresh session. Deliberately NOT one monolithic
+# "do everything" function: flash-jlink-mramxip.sh's `h` / `exec
+# SetSkipProgOnCRCMatch` / dual-noreset / halt-before-programming ordering
+# (see its own header) is load-bearing and must not be disturbed to fit a
+# one-size call -- it calls bench_flowd_plan/_read_sectors/_build/
+# _loadbin_lines directly and splices the loadbin lines into its existing
+# CommandFile.
+#
+# FLOWD_DRY_RUN -- set to any non-empty value to exercise the WHOLE pipeline
+# (plan, sector "read", padded-image build, the loadbin line(s), the
+# CommandFile a write session would run, and the CommandFile a proof session
+# would run) without ever invoking JLinkExe for either the read-back or the
+# write/proof. bench_flowd_read_sectors() synthesizes all-0x00 sector images
+# instead of a real savebin session in this mode (clearly logged as
+# synthetic) so every downstream step -- build, the loadbin lines, the
+# CommandFiles -- runs its REAL code path against real files an operator or a
+# test can inspect, not a second hand-simulated copy of it. Never set this on
+# a real bench host; every helper below still requires a resolved LG_PLACE /
+# real bench_jlink_run() for its OTHER (unrelated) JLinkExe touches, e.g. the
+# DPIDR preflight every script already carries -- FLOWD_DRY_RUN governs only
+# the sector-pad read/write/proof sessions in the functions below.
+export FLOWD_DRY_RUN="${FLOWD_DRY_RUN:-}"
+
+# FLOWD_SECTOR_SIZE / FLOWD_WINDOW_LO / FLOWD_WINDOW_HI -- forwarded verbatim
+# to flowd_sector_pad.py; override only to point at a different part's
+# geometry. Defaults match the AEN E8 application MRAM window (alp-sdk#2233).
+export FLOWD_SECTOR_SIZE="${FLOWD_SECTOR_SIZE:-0x4000}"
+export FLOWD_WINDOW_LO="${FLOWD_WINDOW_LO:-0x80000000}"
+export FLOWD_WINDOW_HI="${FLOWD_WINDOW_HI:-0x8057FFFF}"
+
+# FLOWD_SECTOR_PAD_PY -- resolved next to this file so it works from any
+# checkout with no extra config; override only for a test double.
+export FLOWD_SECTOR_PAD_PY="${FLOWD_SECTOR_PAD_PY:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/flowd_sector_pad.py}"
+
+# bench_flowd_python <args...> -- run the pure host-side helper. Pinned
+# PYTHONIOENCODING=utf-8: this subshell's own locale is not guaranteed
+# UTF-8 (the IMPLICIT-ENCODING lint -- a Windows host defaults a Python
+# child to cp1252, which breaks any non-ASCII path/manifest content).
+bench_flowd_python() {
+	PYTHONIOENCODING=utf-8 python3 "$FLOWD_SECTOR_PAD_PY" "$@"
+}
+
+# bench_flowd_jlink_path <path> -- the path form the JLinkExe BINARY can
+# open, which is not always the one this shell sees. On a Windows bench host
+# (Git Bash/MSYS driving a native JLink.exe) a Unix-style "/tmp/..." path is
+# meaningless to the callee and the run dies with "Failed to open file." --
+# the same trap erase-storage.sh's own ZEROS_FOR_JLINK conversion exists for
+# (see its comment); this is that same conversion, shared, so every Flow D
+# writer gets it for the padded images it now loadbins, not just the one
+# script that had already hit it. On Linux/macOS cygpath is absent and the
+# path is already right.
+bench_flowd_jlink_path() {
+	if command -v cygpath >/dev/null 2>&1; then
+		cygpath -w "$1"
+	else
+		printf '%s' "$1"
+	fi
+}
+
+# bench_flowd_plan <sectors-out-file> <write...> -- <write> is "<path>:<hex-
+# address>", repeatable. Writes one sector base (e.g. "0x802E4000") per line
+# to <sectors-out-file>: every sector that must be pre-read before a padded
+# image can be built. Host-only (no probe), so this always runs for real,
+# FLOWD_DRY_RUN or not. Non-zero (message on stderr, nothing written) on any
+# refusal -- a blob outside the MRAM window, or two blobs overlapping with
+# different bytes.
+bench_flowd_plan() {
+	local out="$1"
+	shift
+	local -a wargs=()
+	local w
+	for w in "$@"; do
+		wargs+=(--write "$w")
+	done
+	bench_flowd_python plan \
+		--sector-size "$FLOWD_SECTOR_SIZE" --window-lo "$FLOWD_WINDOW_LO" --window-hi "$FLOWD_WINDOW_HI" \
+		"${wargs[@]+"${wargs[@]}"}" >"$out"
+}
+
+# bench_flowd_read_sectors <tag> <sector-dir> <sectors-file> -- ONE read-only
+# J-Link session (the GENERIC device, JLINK_DEVICE_READ) that `savebin`s
+# every sector base named in <sectors-file> (one per line, from
+# bench_flowd_plan) to <sector-dir>/<ADDR-no-0x>.bin. Refuses (non-zero) if
+# any expected file is missing or the wrong size afterwards -- a partial or
+# failed session must not silently hand bench_flowd_build a short read that
+# then gets baked into a padded image as if it were real MRAM content.
+#
+# FLOWD_DRY_RUN: touches no probe. Prints the CommandFile it would have run,
+# then synthesizes each expected sector as FLOWD_SECTOR_SIZE bytes of 0x00 --
+# clearly logged as synthetic, never mistaken for a real read -- so
+# bench_flowd_build downstream still runs its real code path against real,
+# correctly-sized files.
+bench_flowd_read_sectors() {
+	local tag="$1" sector_dir="$2" sectors_file="$3"
+	mkdir -p "$sector_dir"
+
+	if [ ! -s "$sectors_file" ]; then
+		echo "bench-env: bench_flowd_read_sectors ($tag): nothing to read (empty plan)" >&2
+		return 0
+	fi
+
+	local cmdfile
+	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-read-XXXXXX.jlink")" || return 1
+	{
+		echo "device $JLINK_DEVICE_READ"
+		echo "si SWD"
+		echo "speed $JLINK_SPEED"
+		echo "connect"
+		local base
+		while IFS= read -r base; do
+			[ -n "$base" ] || continue
+			printf 'savebin %s/%s.bin %s %s\n' "$sector_dir" "${base#0x}" "$base" "$FLOWD_SECTOR_SIZE"
+		done <"$sectors_file"
+		echo "exit"
+	} >"$cmdfile"
+
+	if [ -n "$FLOWD_DRY_RUN" ]; then
+		echo ">>> FLOWD_DRY_RUN ($tag): sector pre-read CommandFile (not run):" >&2
+		cat "$cmdfile" >&2
+		local base
+		while IFS= read -r base; do
+			[ -n "$base" ] || continue
+			python3 -c "
+import sys
+with open(sys.argv[1], 'wb') as f:
+    f.write(b'\\x00' * int(sys.argv[2], 0))
+" "$sector_dir/${base#0x}.bin" "$FLOWD_SECTOR_SIZE"
+			echo "    (synthetic, FLOWD_DRY_RUN -- not read from MRAM): $sector_dir/${base#0x}.bin" >&2
+		done <"$sectors_file"
+		rm -f "$cmdfile"
+		return 0
+	fi
+
+	local out
+	out="$(mktemp "${TMPDIR:-/tmp}/flowd-read-XXXXXX.out")" || {
+		rm -f "$cmdfile"
+		return 1
+	}
+	bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
+	rm -f "$cmdfile"
+	bench_jlink_assert_connected "$out" "$tag sector pre-read" || return $?
+
+	local base name path got
+	while IFS= read -r base; do
+		[ -n "$base" ] || continue
+		name="${base#0x}"
+		path="$sector_dir/$name.bin"
+		if [ ! -f "$path" ]; then
+			echo "bench-env: bench_flowd_read_sectors ($tag): expected sector read $path is missing" >&2
+			return 1
+		fi
+		got=$(wc -c <"$path" | tr -d ' ')
+		if [ "$got" != "$((FLOWD_SECTOR_SIZE))" ]; then
+			echo "bench-env: bench_flowd_read_sectors ($tag): $path is $got bytes, expected $((FLOWD_SECTOR_SIZE))" >&2
+			return 1
+		fi
+	done <"$sectors_file"
+	return 0
+}
+
+# bench_flowd_build <sector-dir> <out-dir> <write...> -- builds one padded
+# image per merged range (blob bytes overlaid on <sector-dir>'s pre-read
+# sector content) plus a manifest, via flowd_sector_pad.py build. Sets
+# FLOWD_MANIFEST to the manifest path on success. Host-only: runs the same
+# code path whether <sector-dir> holds real reads or FLOWD_DRY_RUN's
+# synthetic zero-fill -- no dry-run special-casing needed here.
+FLOWD_MANIFEST=""
+bench_flowd_build() {
+	local sector_dir="$1" out_dir="$2"
+	shift 2
+	local -a wargs=()
+	local w
+	for w in "$@"; do
+		wargs+=(--write "$w")
+	done
+	mkdir -p "$out_dir"
+	# shellcheck disable=SC2034  # consumed by every CALLER of bench_flowd_build
+	# (flash-jlink.sh et al.) after sourcing this file -- shellcheck -x follows a
+	# `source` forward, not back to the scripts that source THIS file, so it can
+	# never see that use from here (same class of cross-file false positive as
+	# GD32_DPIDR above, see that comment).
+	FLOWD_MANIFEST="$(bench_flowd_python build \
+		--sector-size "$FLOWD_SECTOR_SIZE" --window-lo "$FLOWD_WINDOW_LO" --window-hi "$FLOWD_WINDOW_HI" \
+		--sector-dir "$sector_dir" --out-dir "$out_dir" "${wargs[@]+"${wargs[@]}"}")" || return $?
+	return 0
+}
+
+# bench_flowd_prepare_write <tag> <scratch-dir> <write...> -- the common-case
+# composition of plan + read + build for a SINGLE write session (one or more
+# writes that land in the same CommandFile). Leaves FLOWD_MANIFEST set on
+# success; the caller embeds bench_flowd_loadbin_lines' output in its own
+# CommandFile immediately after.
+bench_flowd_prepare_write() {
+	local tag="$1" scratch="$2"
+	shift 2
+	mkdir -p "$scratch"
+	local sectors_file="$scratch/sectors.txt"
+	bench_flowd_plan "$sectors_file" "$@" || return $?
+	bench_flowd_read_sectors "$tag" "$scratch/sectors" "$sectors_file" || return $?
+	bench_flowd_build "$scratch/sectors" "$scratch/padded" "$@" || return $?
+	return 0
+}
+
+# bench_flowd_loadbin_lines <manifest> [noreset 0|1] -- print one `loadbin
+# <padded-image> <address>[, noreset]` line per manifest entry (address
+# order), for the caller to splice into its own CommandFile in place of the
+# raw `loadbin <blob> <address>` line(s) it used to write directly. Image
+# paths go through bench_flowd_jlink_path so a Windows JLinkExe can open
+# them. <manifest> empty/unset prints nothing (nothing to embed).
+bench_flowd_loadbin_lines() {
+	local manifest="$1" noreset="${2:-1}"
+	[ -n "$manifest" ] || return 0
+	local addr image
+	while IFS=$'\t' read -r addr image; do
+		[ -n "$addr" ] || continue
+		if [ "$noreset" = "1" ]; then
+			printf 'loadbin %s %s, noreset\n' "$(bench_flowd_jlink_path "$image")" "$addr"
+		else
+			printf 'loadbin %s %s\n' "$(bench_flowd_jlink_path "$image")" "$addr"
+		fi
+	done < <(python3 -c "
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    manifest = json.load(f)
+for e in manifest:
+    print(e['address'] + '\t' + e['image'])
+" "$manifest")
+}
+
+# bench_flowd_proof <tag> <manifest> <read-dir> -- the read-back proof
+# (alp-sdk#2233 defect 2): a FRESH read-only J-Link session (a new JLinkExe
+# process, so nothing here can be served from another process's flash cache)
+# `savebin`s every manifest range to <read-dir>, then flowd_sector_pad.py
+# proof `cmp`s each byte-for-byte against its padded image. PASS/FAIL prints
+# per range; returns 0 only if every range PASSed.
+#
+# FLOWD_DRY_RUN: touches no probe. Prints the savebin CommandFile a real
+# proof session would run and returns 0 WITHOUT comparing anything -- there
+# is no real post-write MRAM content to compare against in this mode.
+bench_flowd_proof() {
+	local tag="$1" manifest="$2" read_dir="$3"
+	[ -n "$manifest" ] || {
+		echo "bench-env: bench_flowd_proof ($tag): no manifest -- nothing to prove" >&2
+		return 1
+	}
+	mkdir -p "$read_dir"
+
+	local cmdfile
+	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.jlink")" || return 1
+	{
+		echo "device $JLINK_DEVICE_READ"
+		echo "si SWD"
+		echo "speed $JLINK_SPEED"
+		echo "connect"
+		python3 -c "
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    manifest = json.load(f)
+for e in manifest:
+    name = e['address'][2:]
+    print('savebin ' + sys.argv[2] + '/' + name + '.bin ' + e['address'] + ' ' + hex(e['size']))
+" "$manifest" "$read_dir"
+		echo "exit"
+	} >"$cmdfile"
+
+	if [ -n "$FLOWD_DRY_RUN" ]; then
+		echo ">>> FLOWD_DRY_RUN ($tag): post-write proof-read CommandFile (not run):" >&2
+		cat "$cmdfile" >&2
+		echo ">>> FLOWD_DRY_RUN ($tag): would then run: bench_flowd_python proof --manifest $manifest --read-dir $read_dir" >&2
+		rm -f "$cmdfile"
+		return 0
+	fi
+
+	local out
+	out="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.out")" || {
+		rm -f "$cmdfile"
+		return 1
+	}
+	bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
+	rm -f "$cmdfile"
+	bench_jlink_assert_connected "$out" "$tag post-write proof read" || return $?
+
+	bench_flowd_python proof --manifest "$manifest" --read-dir "$read_dir"
+}

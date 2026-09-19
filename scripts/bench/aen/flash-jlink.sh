@@ -132,15 +132,26 @@ ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt |
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address from build/app-package-map.txt"; exit 1; }
 echo "    package: $PKG ($(stat -c%s "$PKG") B) -> MRAM $ADDR" >&2
 
-# 3. J-Link CommanderScript: part-number device unlocks the MRAM loader; write +
-#    verify the package, then PIN reset (RSetType 2) so the SE boot ROM reloads it.
+# 2b. SECTOR-PAD (alp-sdk#2233): SEGGER's built-in loader rewrites the WHOLE
+#    16 KiB sector(s) $PKG touches and never reads their prior contents first,
+#    so the bytes outside $PKG in its first/last sector would otherwise become
+#    0xFF. Read those sectors' CURRENT MRAM content and overlay $PKG on them --
+#    the padded image below is what actually gets `loadbin`ed, so the loader's
+#    whole-sector rewrite reproduces the neighbours unchanged instead.
+FLOWD_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/flowd-flash-jlink-XXXXXX")" || exit 9
+bench_flowd_prepare_write flash-jlink "$FLOWD_SCRATCH" "$PKG:$ADDR" || exit 9
+
+# 3. J-Link CommanderScript: part-number device unlocks the MRAM loader; write
+#    the sector-padded image(s), then PIN reset (RSetType 2) so the SE boot ROM
+#    reloads it. `verifybin` is deliberately GONE here (#2233 finding 2): it
+#    only ever compared against J-Link's own in-process flash cache, never a
+#    fresh chip read -- see the bench_flowd_proof step below, which replaces it.
 cat > /tmp/flowd.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $DEV
 connect
-loadbin $PKG $ADDR
-verifybin $PKG $ADDR
+$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
 RSetType 2
 r
 g
@@ -163,22 +174,17 @@ if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   exit 2
 fi
 
-# GATE ON THE VERIFY RESULT (#1488) -- same defect flash-jlink-hp.sh was fixed
-# for under #1343. The `verifybin` above was issued but its outcome was never
-# read: the output went to a display-only pipe and the connect check was the
-# only thing that could fail this script, so a `Verify failed.` exited 0 and
-# reported a good flash.
-if grep -qiE "verify failed|verification failed|mismatch" /tmp/flowd.out; then
-  echo "!! VERIFY FAILED -- the bytes on the part do NOT match $PKG."
-  grep -iE "verify failed|verification failed|mismatch" /tmp/flowd.out | head -5
+# GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin gate):
+# a FRESH read-only J-Link session -- a new JLinkExe process, so nothing here
+# can be served from the write session's own flash cache -- savebin's every
+# padded range back and cmp's it byte-for-byte against the padded image,
+# which proves both that $PKG landed AND that its sector neighbours survived.
+if ! bench_flowd_proof flash-jlink "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
+  echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
   exit 3
 fi
-if ! grep -qi "verify successful" /tmp/flowd.out; then
-  echo "!! no verifybin success reported -- treating as FAILED (the verify never ran)."
-  exit 3
-fi
-echo "verify: verifybin OK ($PKG @ $ADDR)"
+echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded)"
 
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
