@@ -394,37 +394,149 @@ def test_same_pcb_sibling_overlay_not_shipped_is_not_flagged(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_same_pcb_sibling_pinned_scenario_is_not_flagged(tmp_path):
-    """A scenario that pins one literal board file via
-    extra_dtc_overlay_files is single-SKU by design (the
-    aen-sdhc-probe/aen-ethernet-link twin-scenario shape, issue #2209 item
-    3) -- check_example_board_overlay_content_parity.py's
-    _testcase_pin_problems governs that shape; this check must yield to
-    it, not double-flag the same scenario as "missing platform_allow"."""
+_PINNED_A_TMPL = (
+    "  alp_sdk.examples.test.aen-pinned:\n"
+    "    platform_allow:\n"
+    "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+    "    extra_dtc_overlay_files:\n"
+    "      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
+    "      - extra.overlay\n"
+    "    tags:\n"
+    "      - alp-sdk\n"
+)
+_PINNED_B_TWIN_TMPL = (
+    "  alp_sdk.examples.test.aen-pinned.aen803:\n"
+    "    platform_allow:\n"
+    "      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he\n"
+    "    extra_dtc_overlay_files:\n"
+    "      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
+    "      - extra.overlay\n"
+    "    tags:\n"
+    "      - alp-sdk\n"
+)
+
+
+def _write_pinned_example(tmp_path, name: str, extra_scenarios: str = "") -> None:
     _write_paired_presets(tmp_path)
-    example_dir = tmp_path / "examples" / "aen" / "aen-pinned"
+    example_dir = tmp_path / "examples" / "aen" / name
     example_dir.mkdir(parents=True)
     (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     boards_dir = example_dir / "boards"
     boards_dir.mkdir()
     for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
                  "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
-        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n")
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
     (example_dir / "testcase.yaml").write_text(
         "sample:\n"
-        "  name: aen-pinned\n"
-        "tests:\n"
-        "  alp_sdk.examples.test.aen-pinned:\n"
+        f"  name: {name}\n"
+        "tests:\n" + _PINNED_A_TMPL + extra_scenarios,
+        encoding="utf-8",
+    )
+
+
+def test_same_pcb_sibling_pinned_scenario_with_twin_is_not_flagged(tmp_path):
+    """A scenario that pins one literal board file via
+    extra_dtc_overlay_files is single-SKU by design (the
+    aen-sdhc-probe/aen-ethernet-link twin-scenario shape, issue #2209 item
+    3) -- satisfied by a SIBLING PINNED scenario (the twin) declaring the
+    other SKU's own file, not by declaring both in the same scenario."""
+    _write_pinned_example(tmp_path, "aen-pinned-with-twin", _PINNED_B_TWIN_TMPL)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_pinned_scenario_twin_deleted_fails(tmp_path):
+    """Deleting the AEN803 twin scenario, with nothing else in the file
+    pinning AEN803's own file, must fail -- the #2209 mutation-proof case.
+    (Reproduces the real aen-sdhc-probe/aen-ethernet-link shape in a
+    fixture where the pinned scenario is the file's only scenario, so no
+    unrelated non-pinned scenario can coincidentally satisfy it.)"""
+    _write_pinned_example(tmp_path, "aen-pinned-no-twin")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "aen-pinned-no-twin" in out
+    assert "give AEN803 its own twin scenario" in out
+
+
+def test_same_pcb_sibling_pinned_scenario_stray_non_pinned_twin_does_not_satisfy(tmp_path):
+    """A coincidental non-pinned scenario elsewhere in the file that
+    happens to declare the sibling SKU's target does NOT satisfy a pinned
+    scenario's twin requirement -- only another PINNED scenario counts."""
+    stray_non_pinned = (
+        "  alp_sdk.examples.test.aen-pinned.unrelated:\n"
         "    platform_allow:\n"
-        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
-        "    extra_dtc_overlay_files:\n"
-        "      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
-        "      - extra.overlay\n"
+        "      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he\n"
         "    tags:\n"
         "      - alp-sdk\n"
     )
+    _write_pinned_example(tmp_path, "aen-pinned-stray", stray_non_pinned)
     proc = _run("--root", str(tmp_path))
-    assert proc.returncode == 0, proc.stdout + proc.stderr
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "give AEN803 its own twin scenario" in out
+
+
+def test_same_pcb_sibling_extra_args_config_does_not_suppress_the_check(tmp_path):
+    """An extra_args entry that does NOT start DTC_OVERLAY_FILE=/CONF_FILE=
+    (e.g. a bare CONFIG_ override) must not be treated as pinned -- the
+    scenario stays subject to the ordinary per-scenario check and must
+    still declare its own sibling target."""
+    non_pin_args = (
+        "  alp_sdk.examples.test.aen-args:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    extra_args:\n"
+        "      - CONFIG_LOG=y\n"
+        "    tags:\n"
+        "      - alp-sdk\n"
+    )
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / "aen-args"
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n  name: aen-args\ntests:\n" + non_pin_args, encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he' to platform_allow" in out
+
+
+def test_same_pcb_sibling_extra_overlay_confs_does_not_suppress_the_check(tmp_path):
+    """extra_overlay_confs only ADDS a Kconfig fragment (Twister's
+    OVERLAY_CONFIG); it never suppresses boards/ auto-discovery, so it must
+    not be treated as pinned either."""
+    non_pin_overlay_confs = (
+        "  alp_sdk.examples.test.aen-overlay-confs:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    extra_overlay_confs:\n"
+        "      - extra.conf\n"
+        "    tags:\n"
+        "      - alp-sdk\n"
+    )
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / "aen-overlay-confs"
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n  name: aen-overlay-confs\ntests:\n" + non_pin_overlay_confs,
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he' to platform_allow" in out
 
 
 def test_same_pcb_sibling_different_core_is_not_flagged(tmp_path):
@@ -455,6 +567,75 @@ def test_same_pcb_sibling_different_core_is_not_flagged(tmp_path):
         overlays=[
             "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
             "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_different_silicon_variant_is_not_flagged(tmp_path):
+    """Same family AND the exact same board-qualifier suffix (so a suffix
+    mismatch cannot be what skips the pairing), but a DIFFERENT
+    silicon_variant -- not the same PCB, so no fix is owed. Isolates the
+    `pcb_b != pcb_a` comparison itself: a mutation dropping that guard (or
+    the `pcb_a is None` skip) would incorrectly pair these two and flag a
+    fix, since every other precondition (family, core, suffix, shipped
+    overlay) matches."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    (presets_dir / "E1M-AEN801.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    # Same family, IDENTICAL board-qualifier suffix as AEN801 above --
+    # only silicon_variant differs.
+    (presets_dir / "E1M-AENXX.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE999FA0E5597XX0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aenxx_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    _write_example(
+        tmp_path, "aen-different-variant",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aenxx_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_unresolvable_declared_sku_is_not_flagged(tmp_path):
+    """The declared SKU's OWN preset is missing silicon_variant (so its pcb
+    key is unresolvable -- None), and the sibling SKU's preset is ALSO
+    broken the same way. Catches a mutation that drops the `pcb_a is None:
+    continue` skip: without it, two SKUs that both resolve to pcb=None
+    compare equal (`None != None` is False) and get wrongly treated as the
+    same PCB, even though neither's PCB pairing is actually known."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    for sku in ("aen801", "aenyy"):
+        (presets_dir / f"E1M-{sku.upper()}.yaml").write_text(
+            "family: alif-ensemble\n"
+            "topology:\n"
+            "  m55_he:\n"
+            f"    board: alp_e1m_{sku}_m55_he/ae822fa0e5597ls0/rtss_he\n",
+            encoding="utf-8",
+        )
+    _write_example(
+        tmp_path, "aen-unresolvable-pcb",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aenyy_m55_he_ae822fa0e5597ls0_rtss_he",
         ],
     )
     proc = _run("--root", str(tmp_path))
