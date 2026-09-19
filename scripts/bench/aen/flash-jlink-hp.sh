@@ -141,34 +141,71 @@ bench_flowd_prepare_write flash-jlink-hp "$FLOWD_SCRATCH" "$PKG:$ADDR" || exit 9
 #    `verifybin` is deliberately GONE (#2233): it only ever compared against
 #    J-Link's own flash cache, never a fresh chip read -- see the
 #    bench_flowd_proof step below.
+#
+# Computed into a variable BEFORE the heredoc (#2233 review item 13c): a
+# `$(...)` inline inside a heredoc discards the command's own exit status.
+FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
+  echo "!! bench_flowd_loadbin_lines failed for $FLOWD_MANIFEST -- refusing to write nothing." >&2
+  exit 9
+}
+[ -n "$FLOWD_LOADBIN_LINES" ] || {
+  echo "!! bench_flowd_loadbin_lines produced no loadbin line for $FLOWD_MANIFEST -- refusing." >&2
+  exit 9
+}
+# RACE CHECK setup (#2233 review major 4) -- see bench-env.sh's "Pre-read ->
+# write RACE detection" section.
+FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
 cat > /tmp/hp-write.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
+$FLOWD_PREWRITE_LINES
+$FLOWD_LOADBIN_LINES
 RSetType 2
 r
 g
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-write.jlink 2>&1 | tee /tmp/hp-write.out | \
-  grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" | head -20
+
+# FLOWD_DRY_RUN (#2233 review blocker 1a): exit right here, having printed
+# what the write session WOULD run, WITHOUT ever invoking JLinkExe on it.
+if [ -n "$FLOWD_DRY_RUN" ]; then
+  echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
+  cat /tmp/hp-write.jlink
+  exit 10
+fi
+
+# Write the transcript FIRST, fully, then grep it for display (#2233 review
+# item 12 -- SAME SIGPIPE hazard #1488 finding 5 fixed in flash-jlink.sh: a
+# `... | tee out | grep ... | head -N` pipeline lets `head` exit early and
+# SIGPIPE grep, which can close tee's stdout pipe and kill JLinkExe mid-write
+# before the connect-failure check below ever sees the full transcript).
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-write.jlink > /tmp/hp-write.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" /tmp/hp-write.out | head -20
 if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
   echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- flow D not unlocked on this probe."
   exit 2
 fi
 
+# RACE CHECK (#2233 review major 4).
+if ! bench_flowd_check_race flash-jlink-hp "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
+  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+  echo "   before trusting this board. The board HAS already been written and booted." >&2
+  exit 11
+fi
+
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1343/#1488 verifybin
 # gate) -- a FRESH read-only J-Link session savebin's every padded range back
 # and cmp's it byte-for-byte against the padded image, proving both that $PKG
-# landed AND that its sector neighbours survived.
+# landed AND that its sector neighbours survived THIS write -- NOT a
+# persistence proof across a power cycle (see bench_flowd_proof's own header).
 if ! bench_flowd_proof flash-jlink-hp "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
   echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
   exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded)"
+echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; not a cold-cycle persistence proof)"
 
 # 3. SES has booted the HP core; read the SRAM0 beacon via the generic device
 #    (the HE/system AP reads global SRAM0 regardless of HP core state), then

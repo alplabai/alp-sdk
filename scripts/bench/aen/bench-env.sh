@@ -676,6 +676,27 @@ bench_jlink_run() {
 		-CommandFile | -CommanderScript)
 			if [ $((i + 1)) -lt ${#argv[@]} ]; then
 				cmdfile="${argv[$((i + 1))]}"
+				# DEFENSE IN DEPTH (alp-sdk#2233 review blocker 1b): FLOWD_DRY_RUN's
+				# whole promise is that NO probe is ever opened for a write. Every
+				# Flow D writer's own dry-run exit (right after it prints the
+				# CommandFile it WOULD run) is the primary guard; this is the
+				# backstop for the case that guard is missing, deleted, or wrong --
+				# refuse HERE, before the probe-brick prelude is even built, rather
+				# than trust every caller got its own check right. Only `loadbin`
+				# and `erase` are load-bearing (the two commands that write/erase
+				# MRAM); `savebin`/`connect`/`h`/`r`/`g`/etc. are read-only or
+				# boot-only and remain allowed under FLOWD_DRY_RUN (the sector
+				# pre-read and proof read-back sessions are real reads even when
+				# FLOWD_DRY_RUN is set for a WRITE elsewhere in the same run -- see
+				# bench_flowd_read_sectors' own dry-run branch, which never reaches
+				# this function at all).
+				if [ -n "${FLOWD_DRY_RUN:-}" ] && grep -qiE '^[[:space:]]*(loadbin|erase)\b' "$cmdfile" 2>/dev/null; then
+					echo "bench-env: bench_jlink_run: REFUSING -- FLOWD_DRY_RUN is set and" >&2
+					echo "           '$cmdfile' contains a loadbin/erase command. FLOWD_DRY_RUN" >&2
+					echo "           promises NO probe is ever opened for a write (alp-sdk#2233) --" >&2
+					echo "           this is the backstop behind each writer's own dry-run exit." >&2
+					return 13
+				fi
 				prelude=$(mktemp "${TMPDIR:-/tmp}/bench-jlink-run-XXXXXX.jlink") || {
 					echo "bench-env: bench_jlink_run: cannot create the DisableAutoUpdateFW prelude file" >&2
 					return 10
@@ -1407,16 +1428,36 @@ bench_flowd_atoc_guard() {
 # FLOWD_DRY_RUN -- set to any non-empty value to exercise the WHOLE pipeline
 # (plan, sector "read", padded-image build, the loadbin line(s), the
 # CommandFile a write session would run, and the CommandFile a proof session
-# would run) without ever invoking JLinkExe for either the read-back or the
-# write/proof. bench_flowd_read_sectors() synthesizes all-0x00 sector images
-# instead of a real savebin session in this mode (clearly logged as
-# synthetic) so every downstream step -- build, the loadbin lines, the
-# CommandFiles -- runs its REAL code path against real files an operator or a
-# test can inspect, not a second hand-simulated copy of it. Never set this on
-# a real bench host; every helper below still requires a resolved LG_PLACE /
+# would run) with NO WRITE EVER REACHING A PROBE. This is a THREE-layer
+# guarantee, not one flag with one effect (alp-sdk#2233 review blocker 1 --
+# an earlier version of this comment claimed the guarantee before all three
+# layers exchange existed, which was false: bench_flowd_read_sectors() alone
+# skipping its own savebin did NOT stop the WRITE session further down from
+# running for real):
+#
+#   1. Every writer script itself checks FLOWD_DRY_RUN right after it builds
+#      its write CommandFile and, if set, prints "DRY RUN -- nothing
+#      written" plus the CommandFile and EXITS -- it never reaches the line
+#      that would invoke bench_jlink_run() for that CommandFile at all.
+#   2. bench_jlink_run() itself independently REFUSES (does not open a
+#      probe) to run any CommandFile containing a `loadbin`/`erase` line
+#      while FLOWD_DRY_RUN is set -- a backstop for #1, not a substitute.
+#   3. bench_flowd_proof() never reports success in this mode -- it returns
+#      a distinct non-zero ("nothing proven: dry run") rather than 0, so a
+#      caller that DOES still reach it (skipping #1, e.g. a direct call from
+#      a test) cannot mistake "dry run, nothing was ever written" for "proof
+#      passed".
+#
+# bench_flowd_read_sectors() synthesizes all-0x00 sector images instead of a
+# real savebin session in this mode (clearly logged as synthetic) so the
+# HOST-ONLY steps downstream -- build, the loadbin lines, the CommandFiles --
+# still run their REAL code path against real files an operator or a test
+# can inspect, not a second hand-simulated copy of it. Never set this on a
+# real bench host; every helper below still requires a resolved LG_PLACE /
 # real bench_jlink_run() for its OTHER (unrelated) JLinkExe touches, e.g. the
-# DPIDR preflight every script already carries -- FLOWD_DRY_RUN governs only
-# the sector-pad read/write/proof sessions in the functions below.
+# DPIDR preflight every script already carries BEFORE its own FLOWD_DRY_RUN
+# check -- FLOWD_DRY_RUN governs only the sector-pad read/write/proof
+# sessions, never a script's other guards.
 export FLOWD_DRY_RUN="${FLOWD_DRY_RUN:-}"
 
 # FLOWD_SECTOR_SIZE / FLOWD_WINDOW_LO / FLOWD_WINDOW_HI -- forwarded verbatim
@@ -1507,7 +1548,8 @@ bench_flowd_read_sectors() {
 		local base
 		while IFS= read -r base; do
 			[ -n "$base" ] || continue
-			printf 'savebin %s/%s.bin %s %s\n' "$sector_dir" "${base#0x}" "$base" "$FLOWD_SECTOR_SIZE"
+			printf 'savebin %s %s %s\n' \
+				"$(bench_flowd_jlink_path "$sector_dir/${base#0x}.bin")" "$base" "$FLOWD_SECTOR_SIZE"
 		done <"$sectors_file"
 		echo "exit"
 	} >"$cmdfile"
@@ -1518,7 +1560,7 @@ bench_flowd_read_sectors() {
 		local base
 		while IFS= read -r base; do
 			[ -n "$base" ] || continue
-			python3 -c "
+			PYTHONIOENCODING=utf-8 python3 -c "
 import sys
 with open(sys.argv[1], 'wb') as f:
     f.write(b'\\x00' * int(sys.argv[2], 0))
@@ -1537,6 +1579,30 @@ with open(sys.argv[1], 'wb') as f:
 	bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
 	rm -f "$cmdfile"
 	bench_jlink_assert_connected "$out" "$tag sector pre-read" || return $?
+
+	# alp-sdk#2233 review item 7: a `savebin` that silently no-ops or fails
+	# mid-read must not be trusted just because a file of the right SIZE later
+	# exists (a stale file from an earlier run in the same scratch dir would
+	# pass that check alone). "Could not read memory" is the one JLinkExe
+	# read-failure string already bench-measured and gated on elsewhere in
+	# this directory for an M-series memory read (ram-run.sh's own `mem8`
+	# gate); there is no bench-measured POSITIVE `savebin` success string in
+	# this tree to cite (unlike "Verify successful." for `verifybin`, which is
+	# exactly the string #2233 showed cannot be trusted anyway) -- rather than
+	# invent one, this refuses on any KNOWN failure text and otherwise treats
+	# "connected, no failure string, and a correctly-sized output file exists
+	# for every planned sector" as the success evidence (the per-sector
+	# existence+size loop below). If a real bench session ever shows
+	# JLinkExe's actual `savebin` success line, add it here as a positive
+	# check alongside this one -- do not replace it, since the failure-string
+	# check catches cases (e.g. a short read that still writes a truncated,
+	# wrong-size file) the size check independently also catches.
+	if grep -qiE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error' "$out"; then
+		echo "bench-env: bench_flowd_read_sectors ($tag): the transcript reports a read failure --" >&2
+		grep -iE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error' "$out" | head -5 >&2
+		echo "           refusing to trust any sector image from this session." >&2
+		return 1
+	fi
 
 	local base name path got
 	while IFS= read -r base; do
@@ -1585,9 +1651,11 @@ bench_flowd_build() {
 
 # bench_flowd_prepare_write <tag> <scratch-dir> <write...> -- the common-case
 # composition of plan + read + build for a SINGLE write session (one or more
-# writes that land in the same CommandFile). Leaves FLOWD_MANIFEST set on
-# success; the caller embeds bench_flowd_loadbin_lines' output in its own
-# CommandFile immediately after.
+# writes that land in the same CommandFile). Leaves FLOWD_MANIFEST and
+# FLOWD_SECTORS_FILE set on success; the caller embeds
+# bench_flowd_loadbin_lines' output in its own CommandFile immediately after,
+# and (for the race check below) bench_flowd_prewrite_lines' output BEFORE it.
+FLOWD_SECTORS_FILE=""
 bench_flowd_prepare_write() {
 	local tag="$1" scratch="$2"
 	shift 2
@@ -1596,7 +1664,95 @@ bench_flowd_prepare_write() {
 	bench_flowd_plan "$sectors_file" "$@" || return $?
 	bench_flowd_read_sectors "$tag" "$scratch/sectors" "$sectors_file" || return $?
 	bench_flowd_build "$scratch/sectors" "$scratch/padded" "$@" || return $?
+	# shellcheck disable=SC2034  # consumed by every CALLER after sourcing this
+	# file, same cross-file false positive as FLOWD_MANIFEST above.
+	FLOWD_SECTORS_FILE="$sectors_file"
 	return 0
+}
+
+# --------------------------------------------------------------------
+# Pre-read -> write RACE detection (alp-sdk#2233 review major 4)
+# --------------------------------------------------------------------
+# The pre-read session (bench_flowd_read_sectors) does not halt the core, and
+# neither the HP nor the A32 cores are ever halted by any of this -- so an
+# app write to a touched sector BETWEEN the pre-read and the write session's
+# own `loadbin` would be silently overwritten by the padded image (which was
+# built from the now-stale pre-read), and bench_flowd_proof would still PASS
+# afterward, because the padded image is exactly what a correctly-working
+# write reproduces.
+#
+# Since JLinkExe cannot branch mid-CommandFile, the write session itself
+# `savebin`s the SAME sectors into a SEPARATE "prewrite" directory right
+# before its own load lines (bench_flowd_prewrite_lines, embedded by the
+# caller) -- as close to the load as this tool can get. bench_flowd_check_race
+# then compares prewrite against the original pre-read ON THE HOST, after the
+# session: any difference proves something else touched a to-be-padded sector
+# after the pre-read completed, and the load may have clobbered it. This
+# cannot detect a race in the OTHER direction (a write landing between the
+# prewrite savebin and the load itself, inside the same session) -- that
+# window is far smaller (one CommandFile, no host round-trip) and is not
+# addressed here; say so plainly rather than imply full coverage.
+
+# bench_flowd_prewrite_lines <sectors-file> <prewrite-dir> -- print one
+# `savebin <prewrite-dir>/<ADDR>.bin <addr> <sector-size>` line per sector
+# base in <sectors-file>, for the caller to splice into its OWN write
+# CommandFile right after `connect` (and `h`, where the script halts) and
+# BEFORE its bench_flowd_loadbin_lines output.
+bench_flowd_prewrite_lines() {
+	local sectors_file="$1" prewrite_dir="$2"
+	[ -s "$sectors_file" ] || return 0
+	# JLinkExe's `savebin` does not create its destination directory -- unlike
+	# every OTHER bench_flowd_* function, which mkdir -p's its own output
+	# directory itself, this one is a pure text generator with no probe
+	# access, so it takes care of it here too rather than leaving every
+	# caller to remember a bare `mkdir -p` before embedding this output
+	# (measured: without this, savebin silently fails to write the file,
+	# every sector reads back as "missing prewrite capture", and
+	# bench_flowd_check_race reports a RACE on every run, real or not).
+	mkdir -p "$prewrite_dir"
+	local base
+	while IFS= read -r base; do
+		[ -n "$base" ] || continue
+		printf 'savebin %s %s %s\n' \
+			"$(bench_flowd_jlink_path "$prewrite_dir/${base#0x}.bin")" "$base" "$FLOWD_SECTOR_SIZE"
+	done <"$sectors_file"
+}
+
+# bench_flowd_check_race <tag> <sectors-file> <preread-dir> <prewrite-dir> --
+# host-side (no probe) cmp of every planned sector's pre-read image against
+# its prewrite capture from the SAME write session. Returns non-zero (and
+# prints "RACE DETECTED", naming and KEEPING both copies for restore/
+# inspection) on any difference, or if a prewrite capture is missing
+# entirely (the write session's own savebin didn't produce it -- treated the
+# same as a detected race, since a race cannot be ruled out either). Never
+# deletes either directory itself -- the caller's scratch dir owns that.
+bench_flowd_check_race() {
+	local tag="$1" sectors_file="$2" preread_dir="$3" prewrite_dir="$4"
+	[ -s "$sectors_file" ] || return 0
+	local base name pre post raced=0
+	while IFS= read -r base; do
+		[ -n "$base" ] || continue
+		name="${base#0x}"
+		pre="$preread_dir/$name.bin"
+		post="$prewrite_dir/$name.bin"
+		if [ ! -f "$post" ]; then
+			echo "!! RACE DETECTED ($tag): no prewrite capture for sector $base ($post" >&2
+			echo "   is missing) -- a race for this sector cannot be ruled out." >&2
+			raced=1
+			continue
+		fi
+		if ! cmp -s "$pre" "$post"; then
+			echo "!! RACE DETECTED ($tag): sector $base changed between the pre-read and the" >&2
+			echo "   write session's own pre-load savebin -- something else wrote to this" >&2
+			echo "   sector after the pre-read and before the load; the padded image was built" >&2
+			echo "   from the now-stale pre-read, so the load may have clobbered fresh data." >&2
+			echo "   pre-read (stale):  $pre" >&2
+			echo "   prewrite (recent): $post" >&2
+			echo "   BOTH ARE KEPT -- restore from $prewrite_dir before trusting this board." >&2
+			raced=1
+		fi
+	done <"$sectors_file"
+	[ "$raced" -eq 0 ]
 }
 
 # bench_flowd_loadbin_lines <manifest> [noreset 0|1] -- print one `loadbin
@@ -1616,7 +1772,7 @@ bench_flowd_loadbin_lines() {
 		else
 			printf 'loadbin %s %s\n' "$(bench_flowd_jlink_path "$image")" "$addr"
 		fi
-	done < <(python3 -c "
+	done < <(PYTHONIOENCODING=utf-8 python3 -c "
 import json, sys
 with open(sys.argv[1], 'r', encoding='utf-8') as f:
     manifest = json.load(f)
@@ -1632,9 +1788,23 @@ for e in manifest:
 # proof `cmp`s each byte-for-byte against its padded image. PASS/FAIL prints
 # per range; returns 0 only if every range PASSed.
 #
-# FLOWD_DRY_RUN: touches no probe. Prints the savebin CommandFile a real
-# proof session would run and returns 0 WITHOUT comparing anything -- there
-# is no real post-write MRAM content to compare against in this mode.
+# THIS IS NOT A PERSISTENCE PROOF (alp-sdk#2233 review item 10). A read
+# straight back from the part over the SAME debug session's part-number
+# profile proves the bytes landed and their neighbours survived THIS write --
+# it does NOT prove the write survives a cold power cycle. flash-jlink-mramxip.sh's
+# own header (search "ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK") records
+# a measured case where `Verify successful.` was followed by a cold-cycle
+# REVERT; nothing here changes that -- a cold-cycle read remains the only
+# end-to-end persistence evidence, on top of (not instead of) this proof.
+#
+# FLOWD_DRY_RUN: touches no probe, and NEVER reports success -- returns 12
+# ("nothing proven: dry run") unconditionally. Every real writer script exits
+# right after printing its write CommandFile when FLOWD_DRY_RUN is set (see
+# each script's own dry-run branch), so in practice this function is never
+# reached from one in that mode; this return value exists so a DIRECT caller
+# (a test, a future script) can never mistake "dry run, nothing was ever
+# written" for "proof passed" -- alp-sdk#2233 review blocker 1c: the previous
+# `return 0` here was read by callers as a real PASS.
 bench_flowd_proof() {
 	local tag="$1" manifest="$2" read_dir="$3"
 	[ -n "$manifest" ] || {
@@ -1642,6 +1812,12 @@ bench_flowd_proof() {
 		return 1
 	}
 	mkdir -p "$read_dir"
+	# alp-sdk#2233 review item 6: delete any STALE read-back files left from a
+	# previous call before this session's savebin runs -- otherwise a savebin
+	# that silently no-ops (probe hiccup, wrong address) leaves yesterday's
+	# file in place and the cmp below would compare against THAT, not against
+	# nothing, which could accidentally PASS a proof that read nothing at all.
+	rm -f "$read_dir"/*.bin 2>/dev/null || true
 
 	local cmdfile
 	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.jlink")" || return 1
@@ -1650,14 +1826,21 @@ bench_flowd_proof() {
 		echo "si SWD"
 		echo "speed $JLINK_SPEED"
 		echo "connect"
-		python3 -c "
+		PYTHONIOENCODING=utf-8 python3 -c "
 import json, sys
 with open(sys.argv[1], 'r', encoding='utf-8') as f:
     manifest = json.load(f)
+def line(addr, size):
+    name = addr[2:]
+    print('savebin ' + sys.argv[2] + '/' + name + '.bin ' + addr + ' ' + hex(size))
 for e in manifest:
-    name = e['address'][2:]
-    print('savebin ' + sys.argv[2] + '/' + name + '.bin ' + e['address'] + ' ' + hex(e['size']))
-" "$manifest" "$read_dir"
+    line(e['address'], e['size'])
+    # GUARD SECTORS (alp-sdk#2233 review item 11): the neighbour sectors just
+    # outside the padded range also need a fresh read-back, so proof() can
+    # catch collateral damage outside the range, not just inside it.
+    for g in e.get('guards', []):
+        line(g['address'], g['size'])
+" "$manifest" "$(bench_flowd_jlink_path "$read_dir")"
 		echo "exit"
 	} >"$cmdfile"
 
@@ -1665,18 +1848,48 @@ for e in manifest:
 		echo ">>> FLOWD_DRY_RUN ($tag): post-write proof-read CommandFile (not run):" >&2
 		cat "$cmdfile" >&2
 		echo ">>> FLOWD_DRY_RUN ($tag): would then run: bench_flowd_python proof --manifest $manifest --read-dir $read_dir" >&2
+		echo ">>> FLOWD_DRY_RUN ($tag): NOTHING PROVEN -- dry run, no probe opened, no comparison made." >&2
 		rm -f "$cmdfile"
-		return 0
+		return 12
 	fi
 
-	local out
-	out="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.out")" || {
-		rm -f "$cmdfile"
-		return 1
-	}
-	bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
+	# SETTLE DELAY + BOUNDED CONNECT RETRY (alp-sdk#2233 review item 8). Every
+	# caller invokes this proof right after `RSetType 2; r; g` (or, on
+	# flash-update-log-dual.sh/flash-update-log-firewall-probe.sh, after a
+	# `loadbin`'s own implicit reset) -- AP[3] (the M55 debug AP) can be absent
+	# until the SES has actually finished re-booting the image, matching the
+	# `-- 8/8 halts ... 0/8 halts after a reset` measurement flash-jlink-mramxip.sh's
+	# own header records for the identical AP[3]-after-reset window. The OLD
+	# post-boot RAM-console reads across these scripts used a flat `sleep 3`
+	# for the same reason; this keeps that settle delay and ADDS a bounded
+	# retry -- but ONLY on a failed CONNECT (bench_jlink_assert_connected's
+	# job is exactly "did we reach the target", nothing about content). A
+	# byte MISMATCH from a session that DID connect is never retried -- that
+	# is flowd_sector_pad.py proof's PASS/FAIL verdict, called exactly once
+	# below, after a connect has already succeeded.
+	sleep 3
+	local out rc attempt
+	attempt=1
+	while :; do
+		out="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.out")" || {
+			rm -f "$cmdfile"
+			return 1
+		}
+		bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
+		if bench_jlink_assert_connected "$out" "$tag post-write proof read (attempt $attempt/3)"; then
+			break
+		fi
+		rc=$?
+		if [ "$attempt" -ge 3 ]; then
+			rm -f "$cmdfile"
+			return "$rc"
+		fi
+		echo "bench-env: bench_flowd_proof ($tag): connect attempt $attempt/3 failed -- the SES may still be" >&2
+		echo "           mid-boot (AP[3] not yet up); retrying after a short settle." >&2
+		attempt=$((attempt + 1))
+		sleep 2
+	done
 	rm -f "$cmdfile"
-	bench_jlink_assert_connected "$out" "$tag post-write proof read" || return $?
 
 	bench_flowd_python proof --manifest "$manifest" --read-dir "$read_dir"
 }

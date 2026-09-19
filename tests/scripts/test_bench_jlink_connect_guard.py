@@ -566,6 +566,52 @@ def test_every_former_verifybin_writer_embeds_padded_loadbin_lines() -> None:
     assert not missing, f"script(s) build a padded manifest but never embed it via bench_flowd_loadbin_lines: {missing}"
 
 
+# alp-sdk#2233 review major 5, mutation M4: a RAW, unpadded `loadbin <blob>
+# <address>` line reintroduced alongside (or instead of) the embedded
+# bench_flowd_loadbin_lines output. None of the six scripts should ever
+# contain a literal `loadbin` command word any more -- every one now comes
+# from the padded variable at RUNTIME, invisible to a static grep of the
+# SOURCE text. A literal `loadbin ` word in the source (not inside a comment
+# or this file's own regex) is therefore always a regression.
+_RAW_LOADBIN_LINE_RE = re.compile(r"^[ \t]*loadbin[ \t]", re.M)
+
+
+def test_no_script_has_a_raw_loadbin_line_outside_the_embedded_variable() -> None:
+    """alp-sdk#2233 review major 5 (mutation M4). Every loadbin now comes
+    from `$FLOWD_LOADBIN_LINES`/`$FLOWD_PREWRITE_LINES`, expanded at
+    runtime -- a literal `loadbin <arg> <arg>` line reappearing in a
+    script's own source is always the unpadded-write regression #2233
+    fixed, whether reintroduced instead of or alongside the padded one."""
+    offenders = {}
+    for p in _bench_scripts():
+        if p.name not in _FLOWD_PROOF_SCRIPTS:
+            continue
+        body = p.read_text(encoding="utf-8")
+        hits = _RAW_LOADBIN_LINE_RE.findall(body)
+        if hits:
+            offenders[p.name] = len(hits)
+    assert not offenders, f"raw (unpadded) loadbin line(s) found in: {offenders}"
+
+
+# alp-sdk#2233 review major 5, mutations M3/M6: the proof gate's polarity.
+# Every `bench_flowd_proof` call site must be the CONDITION of an `if !`
+# (fail-closed) -- inverting it (M3) or short-circuiting it with `if false
+# && !` (M6) both defeat the gate while a bare substring search for
+# "bench_flowd_proof" (test_every_former_verifybin_writer_now_calls_bench_flowd_proof
+# above) would not notice either. Complements (does not replace) the
+# behavioural mutation-proof in test_flowd_writer_scripts_e2e.py.
+_FLOWD_PROOF_NEGATED_RE = re.compile(r"^[ \t]*if[ \t]+![ \t]*bench_flowd_proof\b", re.M)
+
+
+@pytest.mark.parametrize("script", _FLOWD_PROOF_SCRIPTS)
+def test_bench_flowd_proof_call_is_the_condition_of_a_negated_if(script: str) -> None:
+    body = (BENCH / script).read_text(encoding="utf-8")
+    assert _FLOWD_PROOF_NEGATED_RE.search(body), (
+        f"{script}: bench_flowd_proof is not called as `if ! bench_flowd_proof ...` -- "
+        "an inverted or short-circuited gate would defeat it silently"
+    )
+
+
 # --- alp-sdk#2025 follow-up: bench_atoc_replace_guard, shared by every script
 # that commits a fresh ATOC (flash-run.sh, flash-run-dualcore.sh,
 # flash-update-log-dual.sh, flash-update-log-firewall-probe.sh) ------------

@@ -352,6 +352,21 @@ bench_flowd_prepare_write flash-jlink-mramxip "$FLOWD_SCRATCH" \
 # built above, with `, noreset` on both -- unchanged from before (#1902,
 # see the header comment above this block): still the only reset in the
 # sequence, still after both blobs are written.
+#
+# Computed into a variable BEFORE the heredoc (#2233 review item 13c): a
+# `$(...)` inline inside a heredoc discards the command's own exit status.
+FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 1)" || {
+  echo "!! bench_flowd_loadbin_lines failed for $FLOWD_MANIFEST -- refusing to write nothing." >&2
+  exit 9
+}
+[ -n "$FLOWD_LOADBIN_LINES" ] || {
+  echo "!! bench_flowd_loadbin_lines produced no loadbin line for $FLOWD_MANIFEST -- refusing." >&2
+  exit 9
+}
+# RACE CHECK setup (#2233 review major 4) -- savebin's the same sectors right
+# after `h` (the core is already halted here) and BEFORE the load lines --
+# see bench-env.sh's "Pre-read -> write RACE detection" section.
+FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
 cat > /tmp/flowd-mramxip.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
@@ -359,15 +374,31 @@ device $DEV
 connect
 exec SetSkipProgOnCRCMatch = 0
 h
-$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 1)
+$FLOWD_PREWRITE_LINES
+$FLOWD_LOADBIN_LINES
 mem32 $APP_ADDR 2
 RSetType 2
 r
 g
 exit
 EOF
-bench_jlink_run -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink 2>&1 | tee /tmp/flowd-mramxip.out | \
-  grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found|= " | head -40
+
+# FLOWD_DRY_RUN (#2233 review blocker 1a): exit right here, having printed
+# what the write session WOULD run, WITHOUT ever invoking JLinkExe on it.
+if [ -n "$FLOWD_DRY_RUN" ]; then
+  echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
+  cat /tmp/flowd-mramxip.jlink
+  exit 10
+fi
+
+# Write the transcript FIRST, fully, then grep it for display (#2233 review
+# item 12 -- the SAME SIGPIPE hazard #1488 finding 5 fixed in flash-jlink.sh:
+# a `... | tee out | grep ... | head -N` pipeline lets `head` exit early and
+# SIGPIPE grep, which can close tee's stdout pipe and kill JLinkExe mid-write
+# -- and this script's downstream halt/loadbin-failure checks below all read
+# from the same file, so a truncated transcript would misreport them too).
+bench_jlink_run -nogui 1 -CommanderScript /tmp/flowd-mramxip.jlink > /tmp/flowd-mramxip.out 2>&1 || true
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found|= " /tmp/flowd-mramxip.out | head -40
 echo "----- (full log: /tmp/flowd-mramxip.out) -----"
 if grep -qi "Could not connect to the target device" /tmp/flowd-mramxip.out; then
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe."; exit 2
@@ -404,7 +435,8 @@ if ! grep -qE "^PC = [0-9A-F]{8}, CycleCnt = " /tmp/flowd-mramxip.preprog; then
 fi
 echo "halt: core halted before programming ($(grep -oE '^PC = [0-9A-F]{8}' /tmp/flowd-mramxip.preprog | head -1))"
 
-# #1902 -- A FAILED `loadbin` IS NOT SURVIVABLE, AND `verifybin` DOES NOT CATCH IT.
+# #1902 -- A FAILED `loadbin` IS NOT SURVIVABLE, AND (AT THE TIME) `verifybin`
+# DID NOT CATCH IT.
 #
 # Bench-measured 2026-09-04: a run whose ATOC `loadbin` died with
 #   ****** Error: Timeout while preparing target, core does not stop. (PC = 0x80015190, XPSR = 0x01000003, SP = 0x20002EA8)!
@@ -413,34 +445,53 @@ echo "halt: core halted before programming ($(grep -oE '^PC = [0-9A-F]{8}' /tmp/
 # still reported `verify: 2/2` and exited 0.  It passed because the PREVIOUS
 # app's ATOC was still resident and happened to satisfy the comparison -- the
 # resident ATOC reported size 78932 (aen-gpu2d-bench's) while the app being
-# flashed was aen-wdt-feed at 78752.  So counting `verifybin` successes is NOT
-# sufficient: a stale-but-self-consistent blob verifies clean.
+# flashed was aen-wdt-feed at 78752.  So counting `verifybin` successes was NOT
+# sufficient: a stale-but-self-consistent blob verified clean. #2233's
+# bench_flowd_proof gate below cannot repeat this specific failure -- it reads
+# through a FRESH JLinkExe process (no flash cache) and compares against a
+# manifest built from THIS run's own blobs, so a stale resident blob would
+# read back as ITSELF, not as a match -- but this check stays as a fast,
+# explicit fail on a known-bad transcript pattern regardless.
 #
-# Fail on the loadbin error directly.  This must run BEFORE the verify count, so
-# a false 2/2 can never mask it.
+# Fail on the loadbin error directly.  Kept BEFORE the read-back proof below,
+# so a loadbin that already died gets this specific, more informative message
+# instead of the proof's generic mismatch report.
 if grep -qiE "Failed to perform RAMCode-sided Prepare\(\)|Timeout while preparing target|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out; then
   echo "!! LOADBIN FAILED -- at least one blob was NOT written to MRAM."
   grep -iE "Timeout while preparing target|Failed to perform RAMCode-sided Prepare|Failed to prepare for programming|Unspecified error -1" /tmp/flowd-mramxip.out | head -4
-  echo "   Do NOT trust any 'Verify successful.' in this run: a stale resident blob"
-  echo "   from a previous flash can satisfy verifybin while the new one never landed."
   echo "   slot0 and/or the ATOC are now MIXED -- erase and reflash before using this board."
   exit 6
 fi
+
+# RACE CHECK (#2233 review major 4): compare the prewrite savebin (captured
+# right after `h`, before either loadbin, in THIS session) against the
+# original pre-read, on the host.
+if ! bench_flowd_check_race flash-jlink-mramxip "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
+  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+  echo "   before trusting this board. The board HAS already been written and booted." >&2
+  exit 11
+fi
+
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1343/#1902 verifybin
 # count above) -- a FRESH read-only J-Link session savebin's both padded
 # ranges back and cmp's each byte-for-byte against its padded image, proving
-# both blobs landed AND that their sector neighbours survived. Unlike the old
-# verifybin count, this reads a NEW JLinkExe process's view of MRAM, not a
-# debug-AP read inside the same session the loadbins ran in -- so the #1902
+# both blobs landed AND that their sector neighbours survived THIS write --
+# NOT a persistence proof across a power cycle. Unlike the old verifybin
+# count, this reads a NEW JLinkExe process's view of MRAM, not a debug-AP
+# read inside the same session the loadbins ran in -- so the #1902
 # "stale-but-self-consistent blob verifies clean" failure mode above cannot
 # recur here either: a stale resident blob would read back as ITSELF, which
 # is not what the padded manifest (built from this run's own blobs) expects.
+# The cold-cycle read-back this section's own header already requires
+# ("ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK") remains the standing
+# end-to-end requirement -- this proof is a strong, but same-power-cycle,
+# addition on top of it, not a replacement for it.
 if ! bench_flowd_proof flash-jlink-mramxip "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
   echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded images."
   echo "   slot0 content is NOT what you built.  Do not treat this board as flashed."
   exit 3
 fi
-echo "verify: read-back proof OK (app image + AppTocPackage, sector-padded)"
+echo "verify: read-back proof OK (app image + AppTocPackage, sector-padded; still requires a cold-cycle read to prove persistence)"
 if grep -qi "CPU could not be halted" /tmp/flowd-mramxip.out; then
   echo "note: the trailing boot reset could not halt the core -- EXPECTED on this part"
   echo "      (AP[3] (APAddr 0x00300000) is absent after any reset).  The image is"

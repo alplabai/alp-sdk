@@ -135,17 +135,53 @@ def test_dry_run_write_commandfile_has_only_aligned_loadbin_and_no_verifybin(tmp
 
 
 @_NEEDS_BASH
+def test_bench_flowd_loadbin_lines_emits_noreset_when_requested(tmp_path: Path) -> None:
+    """alp-sdk#2233 review major 5, mutation M5: `, noreset` on every
+    loadbin line is load-bearing for flash-jlink-mramxip.sh (#1902 -- the
+    SES re-booting slot0 between the two loadbins races J-Link's own
+    program/verify). Calls bench_flowd_loadbin_lines directly with
+    noreset=1/0 and asserts the suffix is present/absent exactly as asked --
+    if bench-env.sh's own `if [ "$noreset" = "1" ]` branch were ever
+    disabled, this fails immediately without needing a live mramxip run."""
+    blob = _write_blob(tmp_path, "pkg.bin", b"\xAB" * 1024)
+    body = _preamble(tmp_path, dry_run=True) + [
+        f'bench_flowd_prepare_write test1b "{tmp_path}/scratch" "{blob}:0x802E5000"',
+        'echo "NORESET1:"',
+        'bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 1',
+        'echo "NORESET0:"',
+        'bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0',
+    ]
+    res = _run(tmp_path, body)
+    assert res.returncode == 0, res.stdout + res.stderr
+    out = res.stdout
+    noreset1 = out.split("NORESET1:")[1].split("NORESET0:")[0]
+    noreset0 = out.split("NORESET0:")[1]
+    loadbin1 = [ln for ln in noreset1.splitlines() if ln.startswith("loadbin ")]
+    loadbin0 = [ln for ln in noreset0.splitlines() if ln.startswith("loadbin ")]
+    assert loadbin1, f"no loadbin line for noreset=1:\n{out}"
+    assert loadbin0, f"no loadbin line for noreset=0:\n{out}"
+    for ln in loadbin1:
+        assert ln.rstrip().endswith(", noreset"), f"noreset=1 must append ', noreset': {ln!r}"
+    for ln in loadbin0:
+        assert not ln.rstrip().endswith(", noreset"), f"noreset=0 must NOT append ', noreset': {ln!r}"
+
+
+@_NEEDS_BASH
 def test_dry_run_proof_commandfile_uses_savebin_at_aligned_ranges(tmp_path: Path) -> None:
     """The post-write proof session's CommandFile must savebin only
-    sector-aligned ranges, never a verifybin."""
+    sector-aligned ranges, never a verifybin -- and (alp-sdk#2233 review
+    blocker 1c) bench_flowd_proof must NEVER report success (exit 0) in
+    FLOWD_DRY_RUN: it returns a distinct 12 ("nothing proven"), so a direct
+    caller can never mistake a dry run for a passed proof."""
     blob = _write_blob(tmp_path, "pkg.bin", b"\xCD" * 300)
     body = _preamble(tmp_path, dry_run=True) + [
         f'bench_flowd_prepare_write test2 "{tmp_path}/scratch" "{blob}:0x802E5100"',
         f'bench_flowd_proof test2 "$FLOWD_MANIFEST" "{tmp_path}/postread"',
     ]
     res = _run(tmp_path, body)
-    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.returncode == 12, res.stdout + res.stderr
     assert "verifybin" not in res.stderr
+    assert "NOTHING PROVEN" in res.stderr
     savebin_lines = [ln for ln in res.stderr.splitlines() if ln.strip().startswith("savebin ")]
     assert savebin_lines, f"no savebin line printed:\n{res.stderr}"
     for ln in savebin_lines:
@@ -244,6 +280,7 @@ def main() -> int:
             if not parts:
                 continue
             if parts[0] == "connect":
+                print("Found SW-DP with ID 0x4C013477")
                 print("Cortex-M55 identified.")
             elif parts[0] == "savebin" and len(parts) >= 4:
                 dest, addr_s, size_s = parts[1], parts[2], parts[3]
@@ -352,3 +389,111 @@ def test_real_round_trip_fails_proof_when_mram_was_never_written(tmp_path: Path)
     res = _run(tmp_path, body)
     assert res.returncode != 0
     assert "FAIL 0x802E4000" in res.stdout, res.stdout + res.stderr
+
+
+# --------------------------------------------------------------------
+# erase-storage.sh's ATOC-trailer overlap refusal (alp-sdk#2233 review
+# blocker 2), against a stub MRAM carrying the bench-measured layout
+# --------------------------------------------------------------------
+
+import shutil  # noqa: E402
+
+
+def _write_full_script_copy(tmp_path: Path, stub: Path) -> Path:
+    """A full copy of scripts/bench/aen/ with bench_jlink_run overridden in
+    the COPY of bench-env.sh -- the same technique needed to run a whole
+    writer script (not just the bench_flowd_* functions directly) against a
+    stub, since the script itself sources bench-env.sh by relative path."""
+    src = REPO / "scripts" / "bench" / "aen"
+    dst = tmp_path / "aen"
+    shutil.copytree(src, dst)
+    envf = dst / "bench-env.sh"
+    override = (
+        "\nbench_jlink_run() {\n"
+        f'  python3 "{stub}" "$@"\n'
+        "}\n"
+    )
+    envf.write_text(envf.read_text(encoding="utf-8") + override, encoding="utf-8")
+    return dst
+
+
+def _measured_atoc_trailer_sector(package_start: int, package_size: int) -> bytes:
+    """One 16 KiB sector carrying the bench-measured ATOC trailer shape at
+    its own top (see scripts/bench/aen/atoc_trailer.py's header) -- the
+    sector spans 0x8057C000-0x8057FFFF, matching the E1M-AEN801/AEN803
+    `atoc` region's own last sector."""
+    import struct
+
+    sector = bytearray(SECTOR)
+    header_addr = 0x8057FF90
+    header_off = header_addr - 0x8057C000
+    sector[header_off:header_off + 8] = b"OEMTOC01"
+    trailer_off = (0x80580000 - 16) - 0x8057C000
+    sector[trailer_off:trailer_off + 12] = struct.pack("<III", header_addr, package_start, package_size)
+    return bytes(sector)
+
+
+@_NEEDS_BASH
+def test_erase_storage_refuses_when_resident_atoc_overlaps_the_window(tmp_path: Path) -> None:
+    """The exact alp-sdk#2233 review blocker 2 hazard, reproduced against a
+    stub MRAM carrying the bench-measured layout (E1M-AEN803, serial
+    2026W36-0001): a resident ATOC package starting INSIDE the nominal
+    customer storage window must refuse the erase outright, before any
+    write, and the stub's fake-MRAM must show NO write occurred."""
+    stub = _write_stub_jlink(tmp_path)
+    script_dir = _write_full_script_copy(tmp_path, stub)
+    fake_mram = tmp_path / "fake_mram"
+    fake_mram.mkdir()
+    # The measured hazard: package_start (0x8056A3C0) is INSIDE the erase
+    # window (0x80560000-0x80577FFF), well below its end (0x80578000).
+    package_start = 0x8056A3C0
+    package_size = 0x80580000 - package_start
+    (fake_mram / "8057C000.bin").write_bytes(_measured_atoc_trailer_sector(package_start, package_size))
+    # A distinctive pattern in the storage window itself, so "was it
+    # written" can be checked directly against the fake-MRAM backing store.
+    (fake_mram / "80560000.bin").write_bytes(bytes((i * 3 + 1) % 251 for i in range(SECTOR)))
+
+    env = dict(os.environ)
+    for var in ("LG_PLACE", "LG_COORDINATOR", "LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT", "SE_UART"):
+        env.pop(var, None)
+    env["TMPDIR"] = str(tmp_path)
+    env["FLOWD_TEST_FAKE_MRAM"] = str(fake_mram)
+    env["ALP_SDK_DIR"] = str(REPO)
+    env["BENCH_ROOT"] = str(tmp_path)  # so a (never-reached) backup dir lands under tmp_path
+    res = subprocess.run(
+        ["bash", str(script_dir / "erase-storage.sh")],
+        cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert res.returncode == 7, res.stdout + res.stderr
+    assert "WOULD ZERO PART OF A LIVE" in res.stdout + res.stderr
+    # Decisive: the storage window's own fake-MRAM content is UNCHANGED --
+    # no loadbin ever reached the stub for it.
+    assert (fake_mram / "80560000.bin").read_bytes() == bytes((i * 3 + 1) % 251 for i in range(SECTOR))
+
+
+@_NEEDS_BASH
+def test_erase_storage_proceeds_when_atoc_trailer_is_blank(tmp_path: Path) -> None:
+    """A genuinely blank atoc region (no resident package at all) must NOT
+    be refused -- only an actual overlap is a hazard."""
+    stub = _write_stub_jlink(tmp_path)
+    script_dir = _write_full_script_copy(tmp_path, stub)
+    fake_mram = tmp_path / "fake_mram"
+    fake_mram.mkdir()
+    (fake_mram / "8057C000.bin").write_bytes(b"\x00" * SECTOR)  # blank trailer -> NO_ATOC
+
+    env = dict(os.environ)
+    for var in ("LG_PLACE", "LG_COORDINATOR", "LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT", "SE_UART"):
+        env.pop(var, None)
+    env["TMPDIR"] = str(tmp_path)
+    env["FLOWD_TEST_FAKE_MRAM"] = str(fake_mram)
+    env["ALP_SDK_DIR"] = str(REPO)
+    env["BENCH_ROOT"] = str(tmp_path)
+    res = subprocess.run(
+        ["bash", str(script_dir / "erase-storage.sh")],
+        cwd=tmp_path, env=env, capture_output=True, text=True, encoding="utf-8", timeout=60,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "no resident package found" in res.stdout + res.stderr
+    # The window is now uniformly zero in the fake-MRAM backing store.
+    for base in range(0x80560000, 0x80578000, SECTOR):
+        assert (fake_mram / f"{base:08X}.bin").read_bytes() == b"\x00" * SECTOR

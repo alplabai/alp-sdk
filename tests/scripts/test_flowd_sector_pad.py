@@ -201,10 +201,20 @@ def test_refuses_wrong_size_pre_read_sector(fsp, tmp_path: Path) -> None:
 # Proof PASS / FAIL
 # --------------------------------------------------------------------
 
+def _guarded_sector_dir(tmp_path: Path, name: str, main_base: int, fill: bytes = b"\x00") -> Path:
+    """A pre-read sector directory carrying <main_base> plus its two guard
+    neighbours (one sector before, one after) -- what build() now requires
+    since alp-sdk#2233 review item 11 added guard-sector pre-reads."""
+    d = tmp_path / name
+    _write_sector(d, main_base - SECTOR, fill)
+    _write_sector(d, main_base, fill)
+    _write_sector(d, main_base + SECTOR, fill)
+    return d
+
+
 def test_proof_pass_and_fail(fsp, tmp_path: Path) -> None:
     blob = _write_blob(tmp_path / "b.bin", b"\x77" * 0x400)
-    sector_dir = tmp_path / "sectors"
-    _write_sector(sector_dir, 0x802E4000, b"\x00")
+    sector_dir = _guarded_sector_dir(tmp_path, "sectors", 0x802E4000)
     out_dir = tmp_path / "out"
 
     build_args = ["build", "--write", f"{blob}:0x802E5000",
@@ -214,31 +224,67 @@ def test_proof_pass_and_fail(fsp, tmp_path: Path) -> None:
     manifest_path = out_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert len(manifest) == 1
+    assert len(manifest[0]["guards"]) == 2  # one before, one after
     image_bytes = Path(manifest[0]["image"]).read_bytes()
 
-    # PASS: the read-back is byte-identical to the padded image.
+    # PASS: the read-back is byte-identical to the padded image AND both
+    # guard sectors read back unchanged from their pre-read value.
     read_dir_pass = tmp_path / "read_pass"
     read_dir_pass.mkdir()
     (read_dir_pass / "802E4000.bin").write_bytes(image_bytes)
+    (read_dir_pass / "802E0000.bin").write_bytes(b"\x00" * SECTOR)
+    (read_dir_pass / "802E8000.bin").write_bytes(b"\x00" * SECTOR)
     res = _run_cli(["proof", "--manifest", str(manifest_path), "--read-dir", str(read_dir_pass)], cwd=tmp_path)
     assert res.returncode == 0, res.stdout + res.stderr
     assert "PASS 0x802E4000" in res.stdout
+    assert "PASS 0x802E0000" in res.stdout
+    assert "PASS 0x802E8000" in res.stdout
 
-    # FAIL: one flipped byte in the read-back.
+    # FAIL: one flipped byte in the main range's read-back.
     read_dir_fail = tmp_path / "read_fail"
     read_dir_fail.mkdir()
     corrupted = bytearray(image_bytes)
     corrupted[0] ^= 0xFF
     (read_dir_fail / "802E4000.bin").write_bytes(bytes(corrupted))
+    (read_dir_fail / "802E0000.bin").write_bytes(b"\x00" * SECTOR)
+    (read_dir_fail / "802E8000.bin").write_bytes(b"\x00" * SECTOR)
     res = _run_cli(["proof", "--manifest", str(manifest_path), "--read-dir", str(read_dir_fail)], cwd=tmp_path)
     assert res.returncode == 1
     assert "FAIL 0x802E4000" in res.stdout
 
 
+def test_proof_fail_on_guard_sector_collateral_damage(fsp, tmp_path: Path) -> None:
+    """The decisive alp-sdk#2233 review item 11 case: the padded range
+    itself matches, but a NEIGHBOUR sector the write should never have
+    touched came back changed -- proof must FAIL, not just check the range."""
+    blob = _write_blob(tmp_path / "b.bin", b"\x77" * 0x400)
+    sector_dir = _guarded_sector_dir(tmp_path, "sectors", 0x802E4000)
+    out_dir = tmp_path / "out"
+    res = _run_cli(
+        ["build", "--write", f"{blob}:0x802E5000", "--sector-dir", str(sector_dir), "--out-dir", str(out_dir)],
+        cwd=tmp_path,
+    )
+    assert res.returncode == 0, res.stderr
+    manifest_path = out_dir / "manifest.json"
+    image_bytes = (out_dir / "802E4000.bin").read_bytes()
+
+    read_dir = tmp_path / "read"
+    read_dir.mkdir()
+    (read_dir / "802E4000.bin").write_bytes(image_bytes)          # range: correct
+    (read_dir / "802E0000.bin").write_bytes(b"\x00" * SECTOR)     # guard before: correct
+    corrupted_guard = bytearray(b"\x00" * SECTOR)
+    corrupted_guard[0x10] = 0xEE
+    (read_dir / "802E8000.bin").write_bytes(bytes(corrupted_guard))  # guard after: DAMAGED
+    res = _run_cli(["proof", "--manifest", str(manifest_path), "--read-dir", str(read_dir)], cwd=tmp_path)
+    assert res.returncode == 1
+    assert "PASS 0x802E4000" in res.stdout
+    assert "FAIL 0x802E8000" in res.stdout
+    assert "collateral damage" in res.stdout
+
+
 def test_proof_fail_on_missing_read_back(fsp, tmp_path: Path) -> None:
     blob = _write_blob(tmp_path / "b.bin", b"\x77" * 0x10)
-    sector_dir = tmp_path / "sectors"
-    _write_sector(sector_dir, 0x802E4000, b"\x00")
+    sector_dir = _guarded_sector_dir(tmp_path, "sectors", 0x802E4000)
     out_dir = tmp_path / "out"
     res = _run_cli(
         ["build", "--write", f"{blob}:0x802E5000", "--sector-dir", str(sector_dir), "--out-dir", str(out_dir)],
@@ -256,15 +302,93 @@ def test_proof_fail_on_missing_read_back(fsp, tmp_path: Path) -> None:
     assert "missing read-back image" in res.stdout
 
 
+def test_proof_refuses_empty_manifest(tmp_path: Path) -> None:
+    manifest_path = tmp_path / "empty.json"
+    manifest_path.write_text("[]\n", encoding="utf-8")
+    read_dir = tmp_path / "read"
+    read_dir.mkdir()
+    res = _run_cli(["proof", "--manifest", str(manifest_path), "--read-dir", str(read_dir)], cwd=tmp_path)
+    assert res.returncode != 0
+    assert "REFUSE" in res.stderr
+    assert "empty manifest" in res.stderr
+
+
+def test_proof_refuses_when_manifest_image_was_tampered_with(fsp, tmp_path: Path) -> None:
+    """alp-sdk#2233 review item 6: a padded image file changed after build()
+    (hand-edited, corrupted on disk) must not silently become the new
+    "expected" -- the manifest's own sha256/size is re-checked against it."""
+    blob = _write_blob(tmp_path / "b.bin", b"\x77" * 0x400)
+    sector_dir = _guarded_sector_dir(tmp_path, "sectors", 0x802E4000)
+    out_dir = tmp_path / "out"
+    res = _run_cli(
+        ["build", "--write", f"{blob}:0x802E5000", "--sector-dir", str(sector_dir), "--out-dir", str(out_dir)],
+        cwd=tmp_path,
+    )
+    assert res.returncode == 0, res.stderr
+    manifest_path = out_dir / "manifest.json"
+    image_path = out_dir / "802E4000.bin"
+    tampered = bytearray(image_path.read_bytes())
+    tampered[5] ^= 0xFF
+    image_path.write_bytes(bytes(tampered))
+    read_dir = tmp_path / "read"
+    read_dir.mkdir()
+    (read_dir / "802E4000.bin").write_bytes(bytes(tampered))  # even a MATCHING read-back
+    res = _run_cli(["proof", "--manifest", str(manifest_path), "--read-dir", str(read_dir)], cwd=tmp_path)
+    assert res.returncode == 1
+    assert "no longer matches its own recorded sha256" in res.stdout
+
+
 # --------------------------------------------------------------------
-# CLI plan mode (used directly by bench-env.sh's bench_flowd_write())
+# Sector-size validation (alp-sdk#2233 review item 11)
+# --------------------------------------------------------------------
+
+def test_refuses_zero_sector_size(tmp_path: Path) -> None:
+    blob = _write_blob(tmp_path / "b.bin", b"\x11" * 0x10)
+    res = _run_cli(["plan", "--sector-size", "0", "--write", f"{blob}:0x80001000"], cwd=tmp_path)
+    assert res.returncode != 0
+    assert "REFUSE" in res.stderr
+    assert "power of two" not in res.stderr  # positivity is checked first, distinct message
+    assert "positive" in res.stderr
+
+
+def test_refuses_non_power_of_two_sector_size(tmp_path: Path) -> None:
+    blob = _write_blob(tmp_path / "b.bin", b"\x11" * 0x10)
+    res = _run_cli(["plan", "--sector-size", "0x3000", "--write", f"{blob}:0x80001000"], cwd=tmp_path)
+    assert res.returncode != 0
+    assert "power of two" in res.stderr
+
+
+def test_refuses_range_whose_aligned_sector_overhangs_the_window(tmp_path: Path) -> None:
+    """The item-11 boundary case: the raw blob sits INSIDE the window, but
+    its sector-aligned range would extend past window_hi. The old
+    validate_window (raw-blob-only) let this through; validate_ranges_in_window
+    (on the merged/aligned ranges) must not.
+
+    window_hi = 0x80001FFF sits MID-sector (sector size 0x4000, window_lo
+    default 0x80000000). A blob at 0x80001FF0 (8 bytes) ends at 0x80001FF7 --
+    entirely inside the window, so the raw-blob check alone would pass -- but
+    its aligned range is 0x80000000-0x80003FFF, whose top (0x80003FFF)
+    overhangs window_hi."""
+    blob = _write_blob(tmp_path / "b.bin", b"\x11" * 8)
+    res = _run_cli(
+        ["plan", "--window-hi", "0x80001FFF", "--write", f"{blob}:0x80001FF0"],
+        cwd=tmp_path,
+    )
+    assert res.returncode != 0
+    assert "REFUSE" in res.stderr
+    assert "padded range" in res.stderr
+
+
+# --------------------------------------------------------------------
+# CLI plan mode (used directly by bench-env.sh's bench_flowd_prepare_write())
 # --------------------------------------------------------------------
 
 def test_cli_plan_lists_sector_bases(tmp_path: Path) -> None:
+    """Includes the two GUARD sectors (item 11) alongside the touched one."""
     blob = _write_blob(tmp_path / "b.bin", b"\x11" * 0x400)
     res = _run_cli(["plan", "--write", f"{blob}:0x802E5000"], cwd=tmp_path)
     assert res.returncode == 0, res.stderr
-    assert res.stdout.splitlines() == ["0x802E4000"]
+    assert res.stdout.splitlines() == ["0x802E0000", "0x802E4000", "0x802E8000"]
 
 
 def test_cli_plan_refuses_and_exits_nonzero_on_bad_window(tmp_path: Path) -> None:

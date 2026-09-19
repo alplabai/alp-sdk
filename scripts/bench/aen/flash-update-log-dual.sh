@@ -163,23 +163,45 @@ bench_flowd_prepare_write flash-update-log-dual "$FLOWD_SCRATCH" "$PKG:$ATOC_ADD
 # the bench_flowd_proof gate below, which runs BEFORE the boot script (#1526
 # unchanged: a failed proof must still keep the board from booting an
 # unverified image).
+#
+# Computed into a variable BEFORE the heredoc (#2233 review item 13c): a
+# `$(...)` inline inside a heredoc discards the command's own exit status.
+FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
+	echo "!! bench_flowd_loadbin_lines failed for $FLOWD_MANIFEST -- refusing to write nothing." >&2
+	exit 9
+}
+[ -n "$FLOWD_LOADBIN_LINES" ] || {
+	echo "!! bench_flowd_loadbin_lines produced no loadbin line for $FLOWD_MANIFEST -- refusing." >&2
+	exit 9
+}
+# RACE CHECK setup (#2233 review major 4) -- see bench-env.sh's "Pre-read ->
+# write RACE detection" section.
+FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
 cat > /tmp/firmware-update-log-dual-write.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
 connect
-$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
+$FLOWD_PREWRITE_LINES
+$FLOWD_LOADBIN_LINES
 exit
 EOF
+
+# FLOWD_DRY_RUN (#2233 review blocker 1a): exit right here, having printed
+# what the write session WOULD run, WITHOUT ever invoking JLinkExe on it --
+# and, since the boot CommandFile is separate (#1526) and gated on this
+# session's own outcome, without reaching the boot script either.
+if [ -n "$FLOWD_DRY_RUN" ]; then
+	echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
+	cat /tmp/firmware-update-log-dual-write.jlink
+	exit 10
+fi
 
 # Write the transcript FIRST, fully, then grep|head it for display (#1488
 # finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
 # exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
-# tee can die from that SIGPIPE before JLinkExe's full transcript (including
-# the `Verify successful.` / `Verify failed.` line the gate below depends on)
-# is written to disk. Once a genuinely good flash's transcript got truncated
-# that way, the absence of "verify successful" in the truncated file would
-# read as a hard exit 3 on a board that actually flashed fine.
+# tee can die from that SIGPIPE before JLinkExe's full transcript is written
+# to disk, and the connect-failure check below depends on the FULL transcript.
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-dual-write.jlink \
 	> /tmp/firmware-update-log-dual-write.out 2>&1 || true
 grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
@@ -189,6 +211,14 @@ if grep -qiE "Could not connect to the target device|Cannot connect to the probe
 	/tmp/firmware-update-log-dual-write.out; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
+fi
+
+# RACE CHECK (#2233 review major 4).
+if ! bench_flowd_check_race flash-update-log-dual "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
+	echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+	echo "   before trusting this board. The write HAS already happened (the boot has not --" >&2
+	echo "   #1526 still gates that on the proof below)." >&2
+	exit 11
 fi
 
 # This gate is LOAD-BEARING (#1526).  The CommanderScript above carries only
@@ -205,7 +235,8 @@ fi
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin gate)
 # -- a FRESH read-only J-Link session savebin's every padded range back and
 # cmp's it byte-for-byte against the padded image, proving both that $PKG
-# landed AND that its sector neighbours survived.
+# landed AND that its sector neighbours survived THIS write -- NOT a
+# persistence proof across a power cycle.
 if ! bench_flowd_proof flash-update-log-dual "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
 	echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ATOC_ADDR." >&2
 	echo "   Do not treat this board as flashed." >&2
@@ -215,7 +246,7 @@ if ! bench_flowd_proof flash-update-log-dual "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/p
 	echo "   proof -- reflash before booting this board." >&2
 	exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ATOC_ADDR, sector-padded)" >&2
+echo "verify: read-back proof OK ($PKG @ $ATOC_ADDR, sector-padded; not a cold-cycle persistence proof)" >&2
 
 # ONLY NOW reset into the image (#1526).  Separate CommanderScript so the boot
 # is genuinely downstream of the verify result -- inside one script JLinkExe

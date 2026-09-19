@@ -92,6 +92,18 @@ class MergedRange:
         return self.end - self.start
 
 
+def validate_sector_size(sector_size: int) -> None:
+    """Refuse a sector size that would make align_down/align_up either crash
+    (0 -- ZeroDivisionError) or silently mis-align (anything not a power of
+    two -- the loader's real sectors are always a power of two, and `addr %
+    sector_size` only means "distance from the last boundary" for one).
+    alp-sdk#2233 review item 11: a REFUSE here, not a traceback."""
+    if sector_size <= 0:
+        raise FlowdSectorPadError(f"--sector-size must be positive, got {sector_size}")
+    if sector_size & (sector_size - 1) != 0:
+        raise FlowdSectorPadError(f"--sector-size must be a power of two, got 0x{sector_size:X}")
+
+
 def align_down(addr: int, sector_size: int) -> int:
     return addr - (addr % sector_size)
 
@@ -143,6 +155,10 @@ def load_writes(specs: list[str]) -> list[Write]:
 
 
 def validate_window(writes: list[Write], window_lo: int, window_hi: int) -> None:
+    """Checks each RAW blob span. Catches blatant nonsense (a negative or
+    wildly out-of-range address) early and cheaply, before merging -- but is
+    NOT sufficient by itself: see validate_ranges_in_window below, which is
+    the check that actually matters (alp-sdk#2233 review item 11)."""
     for w in writes:
         last = w.address + len(w.data) - 1
         if w.address < window_lo or last > window_hi:
@@ -150,6 +166,42 @@ def validate_window(writes: list[Write], window_lo: int, window_hi: int) -> None
                 f"--write {w.blob_path}:0x{w.address:08X} (0x{w.address:08X}-0x{last:08X}) "
                 f"falls outside the MRAM window 0x{window_lo:08X}-0x{window_hi:08X}"
             )
+
+
+def validate_ranges_in_window(ranges: list[MergedRange], window_lo: int, window_hi: int) -> None:
+    """The check that actually matters (alp-sdk#2233 review item 11):
+    validate_window above checks each RAW blob span, but a blob can sit
+    entirely inside the window while its SECTOR-ALIGNED range still
+    overhangs past window_hi (a blob near the very top of the window,
+    rounded up to the next sector boundary) or before window_lo. Padding --
+    reading and later overlaying -- a range outside the window this module
+    understands is worse than doing nothing (it could touch the SE-owned
+    band), so this runs on the MERGED, ALIGNED ranges, after merge_ranges."""
+    for r in ranges:
+        if r.start < window_lo or (r.end - 1) > window_hi:
+            raise FlowdSectorPadError(
+                f"padded range 0x{r.start:08X}-0x{r.end - 1:08X} (sector-aligned) falls "
+                f"outside the MRAM window 0x{window_lo:08X}-0x{window_hi:08X} -- refusing "
+                "to pad a range this module does not understand"
+            )
+
+
+def guard_sector_bases(rng: MergedRange, sector_size: int, window_lo: int, window_hi: int) -> list[int]:
+    """The one sector immediately BEFORE and the one immediately AFTER a
+    padded range (alp-sdk#2233 review item 11) -- read-only witnesses, never
+    written, never padded. Comparing their read-back against their pre-read
+    value in proof() makes collateral damage OUTSIDE the padded range (a
+    loader bug, a second write racing this one, a miscomputed range) visible
+    instead of silently unchecked. Omitted where it would itself fall
+    outside the window (the range already at the window's own edge)."""
+    guards = []
+    before = rng.start - sector_size
+    if before >= window_lo:
+        guards.append(before)
+    after = rng.end
+    if after + sector_size - 1 <= window_hi:
+        guards.append(after)
+    return guards
 
 
 def check_blob_conflicts(writes: list[Write]) -> None:
@@ -204,6 +256,27 @@ def all_sector_bases(ranges: list[MergedRange], sector_size: int) -> list[int]:
     return sorted(bases)
 
 
+def load_preread_sector(sector_dir: str, base: int, sector_size: int) -> bytes:
+    """One pre-read sector's bytes, validated. Shared by build_padded_image
+    (the sectors a range overlays) and the guard-sector loader (item 11) --
+    same refusal shape either way: a missing or wrong-size pre-read is
+    refused, never silently treated as zero/0xFF."""
+    path = os.path.join(sector_dir, image_filename(base))
+    if not os.path.isfile(path):
+        raise FlowdSectorPadError(
+            f"missing pre-read sector image for 0x{base:08X}: {path} "
+            "-- run the plan step's savebin read first"
+        )
+    with open(path, "rb") as f:
+        sector_bytes = f.read()
+    if len(sector_bytes) != sector_size:
+        raise FlowdSectorPadError(
+            f"pre-read sector image {path} is {len(sector_bytes)} bytes, "
+            f"expected {sector_size} (sector size) -- stale or truncated read"
+        )
+    return sector_bytes
+
+
 def build_padded_image(rng: MergedRange, sector_dir: str, sector_size: int) -> bytes:
     """Overlay rng's writes on the CURRENT (pre-read) MRAM bytes of every
     sector it touches. Refuses if a needed pre-read sector image is missing
@@ -212,19 +285,7 @@ def build_padded_image(rng: MergedRange, sector_dir: str, sector_size: int) -> b
     written = bytearray(rng.size)  # 0 = still padding, 1 = a blob wrote this byte
 
     for base in sector_bases(rng.start, rng.end, sector_size):
-        path = os.path.join(sector_dir, image_filename(base))
-        if not os.path.isfile(path):
-            raise FlowdSectorPadError(
-                f"missing pre-read sector image for 0x{base:08X}: {path} "
-                "-- run the plan step's savebin read first"
-            )
-        with open(path, "rb") as f:
-            sector_bytes = f.read()
-        if len(sector_bytes) != sector_size:
-            raise FlowdSectorPadError(
-                f"pre-read sector image {path} is {len(sector_bytes)} bytes, "
-                f"expected {sector_size} (sector size) -- stale or truncated read"
-            )
+        sector_bytes = load_preread_sector(sector_dir, base, sector_size)
         off = base - rng.start
         buf[off:off + sector_size] = sector_bytes
 
@@ -246,11 +307,16 @@ def build_padded_image(rng: MergedRange, sector_dir: str, sector_size: int) -> b
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
+    validate_sector_size(args.sector_size)
     writes = load_writes(args.write)
     validate_window(writes, args.window_lo, args.window_hi)
     check_blob_conflicts(writes)
     ranges = merge_ranges(writes, args.sector_size)
-    bases = all_sector_bases(ranges, args.sector_size)
+    validate_ranges_in_window(ranges, args.window_lo, args.window_hi)
+    bases_set: set[int] = set(all_sector_bases(ranges, args.sector_size))
+    for rng in ranges:
+        bases_set.update(guard_sector_bases(rng, args.sector_size, args.window_lo, args.window_hi))
+    bases = sorted(bases_set)
 
     if args.json:
         payload = {
@@ -269,10 +335,12 @@ def cmd_plan(args: argparse.Namespace) -> int:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
+    validate_sector_size(args.sector_size)
     writes = load_writes(args.write)
     validate_window(writes, args.window_lo, args.window_hi)
     check_blob_conflicts(writes)
     ranges = merge_ranges(writes, args.sector_size)
+    validate_ranges_in_window(ranges, args.window_lo, args.window_hi)
 
     os.makedirs(args.out_dir, exist_ok=True)
     manifest = []
@@ -282,6 +350,25 @@ def cmd_build(args: argparse.Namespace) -> int:
         image_path = os.path.join(args.out_dir, image_filename(rng.start))
         with open(image_path, "wb") as f:
             f.write(image)
+
+        # GUARD SECTORS (alp-sdk#2233 review item 11): the pre-read content of
+        # the sector immediately before/after this range, copied into out_dir
+        # under its own name so proof() can compare a FRESH read-back of it
+        # against what it held BEFORE this write -- it is never touched by
+        # the write itself, so any difference is collateral damage.
+        guards = []
+        for gbase in guard_sector_bases(rng, args.sector_size, args.window_lo, args.window_hi):
+            gdata = load_preread_sector(args.sector_dir, gbase, args.sector_size)
+            gpath = os.path.join(args.out_dir, "GUARD_" + image_filename(gbase))
+            with open(gpath, "wb") as f:
+                f.write(gdata)
+            guards.append({
+                "address": f"0x{gbase:08X}",
+                "size": args.sector_size,
+                "image": gpath,
+                "sha256": hashlib.sha256(gdata).hexdigest(),
+            })
+
         manifest.append({
             "address": f"0x{rng.start:08X}",
             "size": rng.size,
@@ -292,7 +379,11 @@ def cmd_build(args: argparse.Namespace) -> int:
                 {"blob": w.blob_path, "address": f"0x{w.address:08X}", "size": len(w.data)}
                 for w in rng.writes
             ],
+            "guards": guards,
         })
+
+    if not manifest:
+        raise FlowdSectorPadError("no --write given -- refusing to write an empty manifest")
 
     manifest_path = args.manifest or os.path.join(args.out_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
@@ -302,32 +393,63 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def _proof_one(addr: int, image_path: str, expected_sha256: str, expected_size: int,
+                read_dir: str, label: str) -> bool:
+    """One PASS/FAIL check: <label> 0x<addr>. Re-validates the recorded
+    image file against its own manifest sha256/size FIRST (alp-sdk#2233
+    review item 6 -- a corrupted or hand-edited padded image between build()
+    and proof() must not silently become the new "expected", since that
+    would make proof() prove the write matches a lie instead of the real
+    pre-write MRAM state), then cmp's a fresh read-back against it."""
+    if not os.path.isfile(image_path):
+        print(f"FAIL 0x{addr:08X}: {label} manifest image is missing: {image_path}")
+        return False
+    with open(image_path, "rb") as f:
+        expected = f.read()
+    if len(expected) != expected_size or hashlib.sha256(expected).hexdigest() != expected_sha256:
+        print(
+            f"FAIL 0x{addr:08X}: {label} manifest image {image_path} no longer matches its "
+            f"own recorded sha256/size -- refusing to treat it as ground truth"
+        )
+        return False
+
+    read_path = os.path.join(read_dir, image_filename(addr))
+    if not os.path.isfile(read_path):
+        print(f"FAIL 0x{addr:08X}: missing read-back image {read_path}")
+        return False
+    with open(read_path, "rb") as f:
+        actual = f.read()
+    if actual == expected:
+        print(f"PASS 0x{addr:08X} ({label}, {len(expected)} B, sha256={expected_sha256})")
+        return True
+    n = min(len(actual), len(expected))
+    first_diff = next((i for i in range(n) if actual[i] != expected[i]), n)
+    print(
+        f"FAIL 0x{addr:08X}: {label} mismatch at offset 0x{first_diff:X} "
+        f"(expected {len(expected)} B, read back {len(actual)} B)"
+    )
+    return False
+
+
 def cmd_proof(args: argparse.Namespace) -> int:
     with open(args.manifest, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
+    if not manifest:
+        raise FlowdSectorPadError(f"{args.manifest} is an empty manifest -- nothing to prove")
+
     all_ok = True
     for entry in manifest:
         addr = int(entry["address"], 16)
-        with open(entry["image"], "rb") as f:
-            expected = f.read()
-        read_path = os.path.join(args.read_dir, image_filename(addr))
-        if not os.path.isfile(read_path):
-            print(f"FAIL 0x{addr:08X}: missing read-back image {read_path}")
-            all_ok = False
-            continue
-        with open(read_path, "rb") as f:
-            actual = f.read()
-        if actual == expected:
-            print(f"PASS 0x{addr:08X} ({len(expected)} B, sha256={entry['sha256']})")
-        else:
-            all_ok = False
-            n = min(len(actual), len(expected))
-            first_diff = next((i for i in range(n) if actual[i] != expected[i]), n)
-            print(
-                f"FAIL 0x{addr:08X}: mismatch at offset 0x{first_diff:X} "
-                f"(expected {len(expected)} B, read back {len(actual)} B)"
+        ok = _proof_one(addr, entry["image"], entry["sha256"], entry["size"], args.read_dir, "range")
+        all_ok = all_ok and ok
+        for guard in entry.get("guards", []):
+            gaddr = int(guard["address"], 16)
+            gok = _proof_one(
+                gaddr, guard["image"], guard["sha256"], guard["size"], args.read_dir,
+                "GUARD (collateral damage outside the padded range if this fails)",
             )
+            all_ok = all_ok and gok
     return 0 if all_ok else 1
 
 

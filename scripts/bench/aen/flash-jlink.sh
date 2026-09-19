@@ -146,25 +146,58 @@ bench_flowd_prepare_write flash-jlink "$FLOWD_SCRATCH" "$PKG:$ADDR" || exit 9
 #    reloads it. `verifybin` is deliberately GONE here (#2233 finding 2): it
 #    only ever compared against J-Link's own in-process flash cache, never a
 #    fresh chip read -- see the bench_flowd_proof step below, which replaces it.
+#
+# Computed into a variable BEFORE the heredoc, not `$(...)` inline inside it
+# (#2233 review item 13c): a `$(...)` inside a heredoc discards the command's
+# own exit status -- a failed bench_flowd_loadbin_lines would silently splice
+# in NOTHING and this script would `loadbin` nothing at all, reporting success
+# on a write that never happened. Refuse loudly instead.
+FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
+  echo "!! bench_flowd_loadbin_lines failed for $FLOWD_MANIFEST -- refusing to write nothing." >&2
+  exit 9
+}
+[ -n "$FLOWD_LOADBIN_LINES" ] || {
+  echo "!! bench_flowd_loadbin_lines produced no loadbin line for $FLOWD_MANIFEST -- refusing." >&2
+  exit 9
+}
+# RACE CHECK setup (#2233 review major 4): the write session below savebin's
+# the SAME sectors into $FLOWD_SCRATCH/prewrite BEFORE the loadbin line(s),
+# so a host-side compare against the pre-read afterward can catch a write
+# that landed between the pre-read and this session -- see bench-env.sh's
+# "Pre-read -> write RACE detection" section for what this can and cannot
+# catch.
+FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
 cat > /tmp/flowd.jlink <<EOF
 si SWD
 speed $JLINK_SPEED
 device $DEV
 connect
-$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)
+$FLOWD_PREWRITE_LINES
+$FLOWD_LOADBIN_LINES
 RSetType 2
 r
 g
 exit
 EOF
+
+# FLOWD_DRY_RUN (#2233 review blocker 1a): exit right here, having printed
+# what the write session WOULD run, WITHOUT ever invoking JLinkExe on it --
+# following erase-storage.sh's own --dry-run model. This is the primary
+# guarantee behind FLOWD_DRY_RUN's promise that no probe is ever opened for
+# a write; bench_jlink_run() also independently refuses a loadbin/erase
+# CommandFile in this mode as a backstop (bench-env.sh), but that backstop
+# must never be the ONLY thing standing between this script and a real write.
+if [ -n "$FLOWD_DRY_RUN" ]; then
+  echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
+  cat /tmp/flowd.jlink
+  exit 10
+fi
+
 # Write the transcript FIRST, fully, then grep|head it for display (#1488
 # finding 5) -- a `... | tee out | grep ... | head -N` pipeline lets `head`
 # exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
-# tee can die from that SIGPIPE before JLinkExe's full transcript (including
-# the `Verify successful.` / `Verify failed.` line the gate below depends on)
-# is written to disk. Once a genuinely good flash's transcript got truncated
-# that way, the absence of "verify successful" in the truncated file would
-# read as a hard exit 3 on a board that actually flashed fine.
+# tee can die from that SIGPIPE before JLinkExe's full transcript is written
+# to disk, and the connect-failure check below depends on the FULL transcript.
 "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink > /tmp/flowd.out 2>&1 || true
 grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" /tmp/flowd.out | head -30
 echo "----- (full log: /tmp/flowd.out) -----"
@@ -174,17 +207,34 @@ if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
   exit 2
 fi
 
+# RACE CHECK (#2233 review major 4): compare this session's prewrite savebin
+# against the ORIGINAL pre-read, on the host. Any difference means something
+# else wrote to a touched sector between the pre-read and this session's own
+# pre-load savebin -- the padded image (built from the stale pre-read) may
+# have just overwritten it. Both copies are kept; nothing here is deleted.
+if ! bench_flowd_check_race flash-jlink "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
+  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+  echo "   before trusting this board. The board HAS already been written and booted" >&2
+  echo "   (RSetType 2/r/g already ran in the same session) -- this is a post-hoc warning," >&2
+  echo "   not a block on the write." >&2
+  exit 11
+fi
+
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin gate):
 # a FRESH read-only J-Link session -- a new JLinkExe process, so nothing here
 # can be served from the write session's own flash cache -- savebin's every
 # padded range back and cmp's it byte-for-byte against the padded image,
-# which proves both that $PKG landed AND that its sector neighbours survived.
+# which proves both that $PKG landed AND that its sector neighbours survived
+# THIS write. This is NOT a persistence proof across a power cycle -- see
+# bench_flowd_proof's own header in bench-env.sh, and flash-jlink-mramxip.sh's
+# "ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK" note for why a cold-cycle
+# read remains the standing end-to-end requirement on top of this.
 if ! bench_flowd_proof flash-jlink "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
   echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
   exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded)"
+echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; a fresh-session read, NOT a cold-cycle persistence proof)"
 
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
