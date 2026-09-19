@@ -347,6 +347,17 @@ EOF
 	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.jlink" \
 		> "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out" 2>&1 || true
 	bench_jlink_assert_connected "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out" "ATOC trailer read" || exit 6
+	# alp-sdk#2233 review round 5: require the bench-measured savebin SUCCESS
+	# line (see bench_flowd_read_sectors' identical check in bench-env.sh,
+	# same bench measurement) for this session's ONE savebin -- a connected
+	# session that never actually reported reading the region must not be
+	# trusted just because a right-sized (mktemp'd) file exists.
+	if ! grep -qE 'Reading [0-9]+ bytes from addr 0x[0-9A-Fa-f]+ into file.*O\.K\.' "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out"; then
+		echo "!! ABORT: the ATOC-trailer read session connected but reported no savebin success" >&2
+		echo "   line -- refusing to trust $TRAILER_SECTOR_FILE. Transcript:" >&2
+		cat "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out" >&2
+		exit 6
+	fi
 
 	ATOC_RESOLVE_OUT="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-resolve-XXXXXX.out")" || exit 6
 	if ! PYTHONIOENCODING=utf-8 python3 "$ALP_SDK_DIR/scripts/bench/aen/atoc_trailer.py" resolve \

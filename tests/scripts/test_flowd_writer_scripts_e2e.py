@@ -132,6 +132,10 @@ def main() -> int:
                     data = read_range(mram_dir, addr, size)
                     with open(dest, "wb") as f:
                         f.write(data)
+                    # alp-sdk#2233 review round 5: the bench-measured savebin
+                    # SUCCESS line (V9.50) -- required by bench-env.sh's own
+                    # per-savebin success-count gate.
+                    print(f"Reading {size} bytes from addr 0x{addr:08X} into file...O.K.")
                 elif stripped[0] == "loadbin" and len(stripped) >= 3:
                     if skip_loadbin:
                         continue

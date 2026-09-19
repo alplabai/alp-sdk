@@ -135,7 +135,22 @@ for ln in lines:
         if not os.path.isdir(d):
             print("Failed to open file.")
             continue
-        open(p[1], "wb").write(rd(addr, int(p[3], 0)))
+        _sz = int(p[3], 0)
+        open(p[1], "wb").write(rd(addr, _sz))
+        # SILENT_READ_SECTOR (alp-sdk#2233 review round 5): the file lands,
+        # right-sized and correct-content, but NO success line is printed
+        # and NO known failure string either -- a truly silent savebin, the
+        # one shape only the NEW success-line-count gate can catch (the
+        # pre-existing failure-string check and the existence+size loop
+        # both see nothing wrong here).
+        silent_sector = os.environ.get("SILENT_READ_SECTOR")
+        if (silent_sector and int(silent_sector, 16) == (addr - addr % SEC) and "flowd-read-" in kind):
+            log.write("  SILENT-SAVEBIN %08X\n" % addr)
+            continue
+        # alp-sdk#2233 review round 5: the bench-measured savebin SUCCESS
+        # line (V9.50) -- required by bench-env.sh's own per-savebin
+        # success-count gate.
+        print("Reading %d bytes from addr 0x%08X into file...O.K." % (_sz, addr))
     elif p[0].lower() == "loadbin":
         log.write("  WRITE %s\n" % p[2])
         if os.environ.get("SKIP_WRITE") == "1":
@@ -440,6 +455,12 @@ if cmdfile:
             dest, addr_s, size_s = parts[1], parts[2], parts[3]
             data = read_range(mram_dir, int(addr_s, 0), int(size_s, 0))
             open(dest, "wb").write(data)
+            # alp-sdk#2233 review round 5: the bench-measured savebin
+            # SUCCESS line (V9.50) -- required by bench-env.sh's own
+            # per-savebin success-count gate. The SKIP_SAVEBIN_MARKER
+            # no-op path above deliberately does NOT reach here, matching
+            # a real silent no-op printing no success line either.
+            print("Reading %d bytes from addr 0x%08X into file...O.K." % (int(size_s, 0), int(addr_s, 0)))
         elif parts[0].lower() == "loadbin" and len(parts) >= 3:
             src, addr_s = parts[1], parts[2]
             data = open(src, "rb").read(); a = int(addr_s, 0)
@@ -500,8 +521,16 @@ def test_bench_flowd_proof_ignores_a_stale_readback_file_from_a_prior_call(tmp_p
         # matching leftover from the FIRST call is whether that leftover was
         # deleted first.
         f'touch "{tmp_path}/skip-savebin.marker"',
-        f'SKIP_SAVEBIN_MARKER="{tmp_path}/skip-savebin.marker" bench_flowd_proof nsevntest "$FLOWD_MANIFEST" "{read_dir}"',
-        'echo "SECOND_RC=$?"',
+        # `SECOND_RC=0; cmd || SECOND_RC=$?` (not a bare `cmd`, and not
+        # `cmd || true; echo $?`) -- a bare statement under this script's
+        # `set -e` would abort the WHOLE script the moment bench_flowd_proof
+        # returns non-zero here, and `echo "SECOND_RC=$?"` would never run
+        # at all (the exact class of bug alp-sdk#2233 review round 3 fixed
+        # in the production code -- this test must not reintroduce it in
+        # its OWN harness).
+        "SECOND_RC=0",
+        f'SKIP_SAVEBIN_MARKER="{tmp_path}/skip-savebin.marker" bench_flowd_proof nsevntest "$FLOWD_MANIFEST" "{read_dir}" || SECOND_RC=$?',
+        'echo "SECOND_RC=$SECOND_RC"',
     ]
     script = tmp_path / "run.sh"
     script.write_text("\n".join(body) + "\n", encoding="utf-8")
@@ -518,7 +547,12 @@ def test_bench_flowd_proof_ignores_a_stale_readback_file_from_a_prior_call(tmp_p
         "bench_flowd_proof reused a STALE read-back file from the first call instead of "
         f"re-reading the (now different) current MRAM content:\n{out}"
     )
-    assert "FAIL 0x802E4000" in out.split("FIRST_RC")[1], out
+    # alp-sdk#2233 review round 5: the second call's OWN savebin is skipped
+    # (SKIP_SAVEBIN_MARKER), so with the stale-cleanup fix in place it now
+    # never reaches flowd_sector_pad.py's PASS/FAIL comparison at all -- the
+    # bench-measured savebin SUCCESS-line count check catches the missing
+    # read first and refuses with its own message.
+    assert "savebin success" in out.split("FIRST_RC")[1], out
 
 
 @_NEEDS_BASH
@@ -534,6 +568,24 @@ def test_flash_jlink_refuses_when_the_pre_read_reports_a_failure_string(tmp_path
     out = res.stdout + res.stderr
     assert res.returncode == 9, out
     assert "read failure" in out, out
+    log = _sessions_log(ctx)
+    assert "WRITE " not in log, f"no write may happen off an unreliable pre-read:\n{log}"
+
+
+@_NEEDS_BASH
+def test_flash_jlink_refuses_when_the_pre_read_savebin_is_silent(tmp_path: Path) -> None:
+    """alp-sdk#2233 review round 5: a pre-read `savebin` that neither
+    reports a known failure string NOR the bench-measured success line --
+    a truly silent session, the shape only the NEW success-line-count gate
+    can catch (the file lands right-sized and correct-content, so the
+    pre-existing failure-string check and the existence+size loop both see
+    nothing wrong)."""
+    ctx = _setup(tmp_path)
+    bd = _fake_build_dir(ctx["tmp_path"], "app")
+    res = _run(ctx, FJ, ["--atoc-unqueryable", str(bd)], extra_env={"SILENT_READ_SECTOR": "8057C000"})
+    out = res.stdout + res.stderr
+    assert res.returncode == 9, out
+    assert "savebin success" in out, out
     log = _sessions_log(ctx)
     assert "WRITE " not in log, f"no write may happen off an unreliable pre-read:\n{log}"
 
@@ -664,13 +716,20 @@ def test_erase_storage_rejects_a_value_less_sku(tmp_path: Path) -> None:
 def _trailer_sector(package_start: int, package_size: int) -> bytes:
     """One 16 KiB sector carrying the bench-measured ATOC trailer shape at
     its own top -- the sector spans 0x8057C000-0x8057FFFF, the last sector
-    of the default E1M-AEN801 `atoc` region (0x80578000, 32 KiB)."""
+    of the default E1M-AEN801 `atoc` region (0x80578000, 32 KiB).
+
+    alp-sdk#2233 review round 5: the real fields sit at +0x4/+0x8/+0xC, not
+    +0x0/+0x4/+0x8 -- +0x0 is an opaque word0 (bench-measured 0x4966A80E,
+    never validated). See atoc_trailer.py's own docstring / the identical
+    fixture-fix comment in test_bench_flowd_write.py for the real-silicon
+    bug this corrects."""
     sector = bytearray(SECTOR)
     header_addr = 0x8057FF90
     header_off = header_addr - 0x8057C000
     sector[header_off:header_off + 8] = b"OEMTOC01"
     trailer_off = (0x80580000 - 16) - 0x8057C000
-    sector[trailer_off:trailer_off + 12] = struct.pack("<III", header_addr, package_start, package_size)
+    word0 = 0x4966A80E  # bench-measured, opaque, never validated
+    sector[trailer_off:trailer_off + 16] = struct.pack("<IIII", word0, header_addr, package_start, package_size)
     return bytes(sector)
 
 

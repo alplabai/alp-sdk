@@ -1599,21 +1599,32 @@ with open(sys.argv[1], 'wb') as f:
 	# pass that check alone). "Could not read memory" is the one JLinkExe
 	# read-failure string already bench-measured and gated on elsewhere in
 	# this directory for an M-series memory read (ram-run.sh's own `mem8`
-	# gate); there is no bench-measured POSITIVE `savebin` success string in
-	# this tree to cite (unlike "Verify successful." for `verifybin`, which is
-	# exactly the string #2233 showed cannot be trusted anyway) -- rather than
-	# invent one, this refuses on any KNOWN failure text and otherwise treats
-	# "connected, no failure string, and a correctly-sized output file exists
-	# for every planned sector" as the success evidence (the per-sector
-	# existence+size loop below). If a real bench session ever shows
-	# JLinkExe's actual `savebin` success line, add it here as a positive
-	# check alongside this one -- do not replace it, since the failure-string
-	# check catches cases (e.g. a short read that still writes a truncated,
-	# wrong-size file) the size check independently also catches.
+	# gate) -- refuses on any KNOWN failure text, below.
 	if grep -qiE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error' "$out"; then
 		echo "bench-env: bench_flowd_read_sectors ($tag): the transcript reports a read failure --" >&2
 		grep -iE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error' "$out" | head -5 >&2
 		echo "           refusing to trust any sector image from this session." >&2
+		return 1
+	fi
+
+	# alp-sdk#2233 review round 5: the `savebin` SUCCESS line is now
+	# bench-measured (E1M-AEN803, serial 2026W36-0001, J-Link V9.50,
+	# `savebin <file> 0x80578000 0x8000`):
+	#   Reading 32768 bytes from addr 0x80578000 into file...O.K.
+	# -- an earlier version of this comment said no such positive string had
+	# ever been measured; this is that string. Require ONE per PLANNED
+	# savebin (the line count in $sectors_file), on top of (not instead of)
+	# the failure-string refusal above and the per-sector existence+size
+	# loop below -- a session that reports neither a known failure NOR a
+	# success line for every sector is not evidence, whatever files happen
+	# to already sit on disk from an earlier run.
+	local expected_savebins got_savebins
+	expected_savebins=$(grep -c '.' "$sectors_file")
+	got_savebins=$(grep -cE 'Reading [0-9]+ bytes from addr 0x[0-9A-Fa-f]+ into file.*O\.K\.' "$out")
+	if [ "$got_savebins" -lt "$expected_savebins" ]; then
+		echo "bench-env: bench_flowd_read_sectors ($tag): expected $expected_savebins savebin success" >&2
+		echo "           line(s), found $got_savebins in the transcript -- refusing to trust any" >&2
+		echo "           sector image from this session." >&2
 		return 1
 	fi
 
@@ -1933,6 +1944,24 @@ for e in manifest:
 		bench_jlink_assert_connected "$out" "$tag post-write proof read (attempt $attempt/3)"
 		rc=$?
 		if [ "$rc" -eq 0 ]; then
+			# alp-sdk#2233 review round 5: require ONE bench-measured savebin
+			# SUCCESS line (see bench_flowd_read_sectors' identical check,
+			# same bench measurement) per `savebin` actually IN THIS
+			# CommandFile -- not a retried check (a connected session with
+			# an incomplete read is a content problem, not a "did we reach
+			# the target" one; same reasoning as the byte-mismatch case
+			# above, which is also never retried).
+			local expected_savebins got_savebins
+			expected_savebins=$(grep -cE '^savebin ' "$cmdfile")
+			got_savebins=$(grep -cE 'Reading [0-9]+ bytes from addr 0x[0-9A-Fa-f]+ into file.*O\.K\.' "$out")
+			if [ "$got_savebins" -lt "$expected_savebins" ]; then
+				echo "bench-env: bench_flowd_proof ($tag): expected $expected_savebins savebin success" >&2
+				echo "           line(s), found $got_savebins in the transcript -- refusing to trust" >&2
+				echo "           this read-back." >&2
+				echo "           transcript kept for inspection: $out" >&2
+				rm -f "$cmdfile"
+				return 1
+			fi
 			rm -f "$out"
 			break
 		fi

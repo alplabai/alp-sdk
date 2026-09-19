@@ -23,14 +23,23 @@ SETOOLS/Alif spec; treat every field below as a HINT this module validates,
 never as ground truth taken on faith)
 -----------------------------------------------------------------------
 SETOOLS top-anchors the signed ATOC at the top of its allocated window and
-grows it downward. The last 16 bytes of that window held three little-endian
-32-bit words -- this module calls that 16-byte tail the "trailer":
+grows it downward. The last 16 bytes of that window held FOUR little-endian
+32-bit words -- this module calls that 16-byte tail the "trailer". An
+earlier version of this module (and this docstring) had the offsets wrong
+by one word -- it read three words starting at +0x0, which on this board's
+ACTUAL layout unpacks the checksum-or-similar word as `header_address` and
+refuses every real trailer. Re-measured on 2026-09-19 with `mem32` twice
+and a `savebin` tail agreeing on the same 16 bytes
+(`0x4966A80E 8057FF90 8056A3C0 00015C40`):
 
-    +0x0  header_address   -- where the `OEMTOC01` signature itself lives
+    +0x0  word0            -- UNKNOWN meaning (possibly a checksum) -- TBD,
+                              recorded and printed, NEVER VALIDATED
+                              (measured: 0x4966A80E)
+    +0x4  header_address   -- where the `OEMTOC01` signature itself lives
                               (measured: 0x8057FF90, i.e. window_end - 0x70)
-    +0x4  package_start    -- the LOWEST address SETOOLS actually wrote
+    +0x8  package_start    -- the LOWEST address SETOOLS actually wrote
                               (measured: 0x8056A3C0)
-    +0x8  package_size     -- package_start + package_size == window_end
+    +0xC  package_size     -- package_start + package_size == window_end
                               (measured: 0x00015C40; 0x8056A3C0 + 0x15C40
                               == 0x80580000, the window's own end)
 
@@ -58,6 +67,12 @@ class AtocTrailerError(Exception):
 
 @dataclass
 class AtocTrailer:
+    # word0 (alp-sdk#2233 review round 5): the trailer's own +0x0 word,
+    # bench-measured as 0x4966A80E on 2026-09-19 but of UNKNOWN meaning
+    # (possibly a checksum) -- recorded verbatim and printed by cmd_resolve,
+    # but NEVER validated: this module has no basis to say what a "correct"
+    # value looks like, so it is carried through opaque rather than guessed at.
+    word0: int
     header_address: int
     package_start: int
     package_size: int
@@ -71,13 +86,20 @@ def parse_trailer_bytes(data: bytes) -> AtocTrailer | None:
     """The 16-byte trailer -> AtocTrailer, or None if it reads as "no
     resident ATOC" (all-0x00 or all-0xFF). Raises on a malformed length --
     the CALLER is responsible for slicing exactly TRAILER_SIZE bytes from
-    the right offset; this only ever sees what it's handed."""
+    the right offset; this only ever sees what it's handed.
+
+    FIELD OFFSETS (alp-sdk#2233 review round 5): +0x0 word0 (opaque, TBD),
+    +0x4 header_address, +0x8 package_start, +0xC package_size -- see the
+    module docstring's WHAT WAS MEASURED section for the bench measurement
+    and the one-word offset bug this corrects (an earlier version read
+    header_address/package_start/package_size starting at +0x0, which
+    misparsed word0 as header_address and refused every real trailer)."""
     if len(data) != TRAILER_SIZE:
         raise AtocTrailerError(f"trailer must be exactly {TRAILER_SIZE} bytes, got {len(data)}")
     if data == b"\x00" * TRAILER_SIZE or data == b"\xff" * TRAILER_SIZE:
         return None
-    header_addr, pkg_start, pkg_size = struct.unpack("<III", data[:12])
-    return AtocTrailer(header_address=header_addr, package_start=pkg_start, package_size=pkg_size)
+    word0, header_addr, pkg_start, pkg_size = struct.unpack("<IIII", data)
+    return AtocTrailer(word0=word0, header_address=header_addr, package_start=pkg_start, package_size=pkg_size)
 
 
 def validate_trailer(trailer: AtocTrailer, header_bytes: bytes, window_lo: int, window_end: int) -> None:

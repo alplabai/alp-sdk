@@ -289,6 +289,10 @@ def main() -> int:
                 data = read_range(mram_dir, addr, size)
                 with open(dest, "wb") as f:
                     f.write(data)
+                # alp-sdk#2233 review round 5: the bench-measured savebin
+                # SUCCESS line (V9.50) -- required by bench-env.sh's own
+                # per-savebin success-count gate.
+                print(f"Reading {size} bytes from addr 0x{addr:08X} into file...O.K.")
             elif parts[0] == "loadbin" and len(parts) >= 3:
                 src, addr_s = parts[1], parts[2]
                 addr = int(addr_s, 0)
@@ -421,7 +425,16 @@ def _measured_atoc_trailer_sector(package_start: int, package_size: int) -> byte
     """One 16 KiB sector carrying the bench-measured ATOC trailer shape at
     its own top (see scripts/bench/aen/atoc_trailer.py's header) -- the
     sector spans 0x8057C000-0x8057FFFF, matching the E1M-AEN801/AEN803
-    `atoc` region's own last sector."""
+    `atoc` region's own last sector.
+
+    alp-sdk#2233 review round 5: the trailer's real fields sit at +0x4/+0x8/
+    +0xC (header_address/package_start/package_size), not +0x0/+0x4/+0x8 --
+    +0x0 is an opaque word0 (bench-measured 0x4966A80E, unknown meaning,
+    never validated). An earlier version of this fixture packed only three
+    words starting at +0x0, which happened to still validate here because
+    this file's own tests never checked word0 -- but it reproduced the
+    real off-by-one-word bug that made `erase-storage.sh --check-only` exit
+    6 instead of 7 on real E1M-AEN803 silicon (serial 2026W36-0001)."""
     import struct
 
     sector = bytearray(SECTOR)
@@ -429,7 +442,8 @@ def _measured_atoc_trailer_sector(package_start: int, package_size: int) -> byte
     header_off = header_addr - 0x8057C000
     sector[header_off:header_off + 8] = b"OEMTOC01"
     trailer_off = (0x80580000 - 16) - 0x8057C000
-    sector[trailer_off:trailer_off + 12] = struct.pack("<III", header_addr, package_start, package_size)
+    word0 = 0x4966A80E  # bench-measured, opaque, never validated
+    sector[trailer_off:trailer_off + 16] = struct.pack("<IIII", word0, header_addr, package_start, package_size)
     return bytes(sector)
 
 
