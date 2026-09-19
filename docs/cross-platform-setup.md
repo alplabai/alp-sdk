@@ -678,18 +678,23 @@ python3 scripts/check_cross_platform.py
 python scripts\check_cross_platform.py
 ```
 
-Expected: exits 0, after printing a few hundred `IMPLICIT-ENCODING`
-warning lines — one per Python text-IO call with no explicit
-`encoding=` in the SDK's own `scripts/` and `tests/` files (478 of
-them across 139 files when the rule landed; the file list only shrinks).
-Those sites are grandfathered by the `IMPLICIT_ENCODING_BASELINE`
-set in the script and are drained under #2197.
+Expected: exits 0, with `check_cross_platform: 0 finding(s)` plus
+four informational `allowlisted` lines for the docs that
+intentionally discuss per-OS paths (`INTENTIONALLY_DISCUSSES_OS_PATHS`).
+The #2195 `IMPLICIT-ENCODING` backlog (478 sites across 139 files
+when the rule landed) was fully drained file by file under #2197 —
+every Python text-IO call under `scripts/`, `tests/`, and `examples/`
+(`PY_SCAN_ROOTS`) now states its `encoding=` explicitly, so there is
+nothing left to grandfather.
 
 The lint itself is **not** soft: CI runs it as
 `--fail-on-warning` on every runner (since #1032 A5), and that flag
-fails on any finding *outside* the baseline.  So a new Linux-only
-idiom, or a new implicit encoding in a file not on the list, breaks
-the build — only the grandfathered backlog is exempt.  See
+fails on any finding, `IMPLICIT-ENCODING` included — there is no
+carve-out any more.  `python3 scripts/check_cross_platform.py
+--fail-on-warning` exits 0 on a clean tree exactly like the
+no-flag form above.  So a new Linux-only idiom, or a new implicit
+encoding under `scripts/`, `tests/`, or `examples/` (or anywhere
+else via an explicit `--path`), breaks the build.  See
 [ADR 0012](adr/0012-cross-platform-developer-host.md) for the
 cross-platform promise this lint enforces.
 
