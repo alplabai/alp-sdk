@@ -5,8 +5,7 @@
 # (networked steps skipped) and the placeholder-credentials shape against
 # the real board target.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
 # AP, and a server actually answering with a large body; a compile check
 # here only proves the build, not the measured rate.
 

@@ -6,7 +6,7 @@
 #
 # Compile-checks the driver calls + carrier-bus path on the real E8 board
 # target; filtered OUT of the native_sim PR gate (platform_allow = the
-# AEN801 HE board only) -- the electrical assert/clear proof needs the real
+# AEN801/AEN803 M55-HE board targets) -- the electrical assert/clear proof needs the real
 # ALP_E1M_I2C0 carrier bus and its populated sensors/expander.
 
 sample:

@@ -5,7 +5,7 @@
 # E8, M55-HE): drives a tone out of i2s3 through the standard Zephyr I2S API.
 #
 # Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only).
+# of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets).
 
 sample:
   name: aen-i2s-amp-alif

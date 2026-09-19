@@ -5,10 +5,10 @@
 # against the board layer's "ti,tmp112" node on BRD_I2C.
 #
 # Compile-checks the driver + DT binding on the real E8 board target; filtered
-# OUT of the native_sim PR gate (platform_allow = the AEN801 HE board only),
-# because the node this app binds exists only in the AEN801 board files -- on
-# native_sim the app would compile to its "no ti,tmp112 node" branch and prove
-# nothing.
+# OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE
+# board targets), because the node this app binds exists only in the real
+# board files -- on native_sim the app would compile to its "no ti,tmp112
+# node" branch and prove nothing.
 
 sample:
   name: aen-temp-sensor

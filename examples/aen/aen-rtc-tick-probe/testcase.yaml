@@ -5,8 +5,9 @@
 # loops against the real board target.
 #
 # Compile-checks the driver + raw-register path on the real E8 board target;
-# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- the electrical settlement needs the real BRD_I2C bus and a
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets) -- the electrical settlement needs the real BRD_I2C
+# bus and a
 # multi-minute bench run (TEST A's 30 s window + TEST B's 55 x 1100 ms
 # intervals).
 

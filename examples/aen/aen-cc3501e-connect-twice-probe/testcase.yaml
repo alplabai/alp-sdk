@@ -5,8 +5,7 @@
 # (CONNTWICE_WIFI_SSID empty -- the whole probe is skipped) against the real
 # board target.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- this app needs the real inter-chip SPI1 link and a CC3501E
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets) -- this app needs the real inter-chip SPI1 link and a CC3501E
 # actually running the bridge firmware; a compile check here only proves the
 # build, not the hypothesis this app exists to test.
 

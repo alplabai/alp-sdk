@@ -7,8 +7,8 @@
 # arbitration is the fuller test (see README).
 #
 # Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 HE board only -- the
-# M55-only HWSEM block has no native_sim model).
+# of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board
+# targets -- the M55-only HWSEM block has no native_sim model).
 
 sample:
   name: aen-hwsem-regcheck

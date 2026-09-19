@@ -8,8 +8,8 @@
 # endpoint, echoes each "ping" as a "pong").  BENCH-VERIFIED PASS on E8
 # (2026-06-18): 16/16 round-trips.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
-# targets only, no native_sim overlay); build_only in the advisory
+# Filtered OUT of the native_sim PR gate (platform_allow = real AEN board
+# targets, no native_sim overlay); build_only in the advisory
 # pr-twister-aen.yml gate -- the round-trip itself is a dual-ATOC bench flash,
 # not a CI run.
 

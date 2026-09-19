@@ -11,9 +11,10 @@
 #   - set_alarm's COMPARE_A_BUF1 shadow write + the comp_a_buf1 IRQ_CONNECT (the
 #     two bring-up fixes) compile against the hal_alif register library,
 #   - the board overlay's ITCM RAM-run retarget (zephyr,flash = &itcm) links.
-# It is intentionally filtered OUT of the native_sim PR gate: the only platform
-# allowed is the AEN801 M55-HE board, which the native_sim twister run never
-# selects, so this adds a board-target build check without slowing the gate.
+# It is intentionally filtered OUT of the native_sim PR gate: the only
+# platforms allowed are the AEN801/AEN803 M55-HE boards, which the
+# native_sim twister run never selects, so this adds a board-target build
+# check without slowing the gate.
 #
 # NOTE: the platform id below MUST match the board .yaml `identifier` exactly
 # (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently

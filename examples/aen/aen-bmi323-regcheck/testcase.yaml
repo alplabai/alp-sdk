@@ -6,8 +6,9 @@
 # bmi323_read_accel() calls against the real board target.
 #
 # Compile-checks the raw-register + driver path on the real E8 board target;
-# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- the electrical settlement needs the real carrier I2C bus.
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets) -- the electrical settlement needs the real carrier
+# I2C bus.
 
 sample:
   name: aen-bmi323-regcheck

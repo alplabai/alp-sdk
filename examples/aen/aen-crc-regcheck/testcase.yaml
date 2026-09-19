@@ -5,8 +5,8 @@
 # order is the open bench-confirm item (see the README / main.c note); the CI
 # gate only compile-checks the driver + DT node on the real E8 board target.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE board
-# only).
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets).
 
 sample:
   name: aen-crc-regcheck

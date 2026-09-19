@@ -9,7 +9,7 @@
 #
 # Uses CMSE intrinsics (-mcmse) for the Secure<->Non-Secure call.
 # Compile-checks the app on the real E8 board target; filtered OUT of the
-# native_sim PR gate (platform_allow = the AEN801 HE board only).
+# native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets).
 
 sample:
   name: aen-tz-secure-log-append

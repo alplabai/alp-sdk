@@ -8,8 +8,8 @@
 # BENCH-VERIFIED PASS on E8 (2026-06-18): HE sent count == HP received count,
 # exactly.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
-# targets only, no native_sim overlay); build_only in the advisory
+# Filtered OUT of the native_sim PR gate (platform_allow = real AEN board
+# targets, no native_sim overlay); build_only in the advisory
 # pr-twister-aen.yml gate -- the doorbell-ring proof is a dual-ATOC bench
 # flash, not a CI run.
 

@@ -6,8 +6,8 @@
 # to the bind-only aen-dsi-regcheck.
 #
 # Compile-checks the driver chain + DT nodes on the real E8 board target;
-# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only).
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets).
 
 sample:
   name: aen-dsi-display
