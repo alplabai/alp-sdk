@@ -271,8 +271,13 @@ def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> 
 # Every `-CommanderScript ... > <file> || true` read-back site. Derived from the
 # script bodies, NOT a hand-maintained allowlist -- a new read-back added
 # without the assertion fails this test rather than slipping through.
+#
+# Two output-path SHAPES (alp-sdk#2233 review round 3, finding 9): a bare
+# `/tmp/foo.out` literal (scripts not yet touched by the TMPDIR conversion),
+# or a QUOTED `"${TMPDIR:-/tmp}/foo.out"` (the six Flow D writers, converted
+# so concurrent pytest runs against the same host /tmp no longer collide).
 _READBACK_RE = re.compile(
-    r"^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>/tmp/\S+)\s*\|\|\s*true[ \t]*$",
+    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$\{TMPDIR:-/tmp\}/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
     re.M,
 )
 

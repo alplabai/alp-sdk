@@ -109,6 +109,46 @@ def test_validate_refuses_start_below_window_lo(mod) -> None:
         mod.validate_trailer(trailer, b"OEMTOC01", WINDOW_LO, WINDOW_END)
 
 
+# alp-sdk#2233 review round 3, finding 6: a zero-size package, or a header
+# address outside [package_start, package_end), is internally inconsistent
+# the same way a bad checksum is -- refuse rather than trust it.
+
+def test_validate_refuses_zero_size_package(mod) -> None:
+    trailer = mod.AtocTrailer(header_address=WINDOW_END, package_start=WINDOW_END, package_size=0)
+    with pytest.raises(mod.AtocTrailerError, match="package_size"):
+        mod.validate_trailer(trailer, b"OEMTOC01", WINDOW_LO, WINDOW_END)
+
+
+def test_validate_refuses_header_below_package_start(mod) -> None:
+    # header_address sits BELOW package_start -- outside the package, even
+    # though package_end still checks out.
+    trailer = mod.AtocTrailer(header_address=PKG_START - 0x10, package_start=PKG_START, package_size=PKG_SIZE)
+    with pytest.raises(mod.AtocTrailerError, match="BELOW package_start"):
+        mod.validate_trailer(trailer, b"OEMTOC01", WINDOW_LO, WINDOW_END)
+
+
+def test_validate_refuses_header_that_does_not_fit_before_package_end(mod) -> None:
+    # header_address + 8 (the signature length) overruns package_end by one
+    # byte -- the header does not fully fit inside the package it names.
+    # package_end must still equal window_end (PKG_START + package_size) so
+    # this exercises ONLY the new header-fit check, not the pre-existing
+    # package_end != window_end one.
+    trailer = mod.AtocTrailer(header_address=WINDOW_END - 7, package_start=PKG_START,
+                               package_size=WINDOW_END - PKG_START)
+    with pytest.raises(mod.AtocTrailerError, match="does not fit inside the package"):
+        mod.validate_trailer(trailer, b"OEMTOC01", WINDOW_LO, WINDOW_END)
+
+
+def test_validate_accepts_header_exactly_at_package_end_minus_signature(mod) -> None:
+    # The boundary case: header_address + 8 == package_end exactly must be
+    # ACCEPTED (the header's last byte is the package's last byte) -- only
+    # spilling past it is refused.
+    header_addr = WINDOW_END - 8
+    trailer = mod.AtocTrailer(header_address=header_addr, package_start=PKG_START,
+                               package_size=WINDOW_END - PKG_START)
+    mod.validate_trailer(trailer, b"OEMTOC01", WINDOW_LO, WINDOW_END)  # must not raise
+
+
 # --------------------------------------------------------------------
 # CLI (subprocess) tests -- what erase-storage.sh actually invokes
 # --------------------------------------------------------------------
@@ -161,6 +201,44 @@ def test_cli_resolve_refuses_bad_signature(tmp_path: Path) -> None:
     )
     assert res.returncode == 1
     assert "REFUSE" in res.stderr
+
+
+# alp-sdk#2233 review round 3, finding 5: a blank TRAILER (all-0x00) does
+# not by itself prove there is no resident ATOC if the OEMTOC01 signature is
+# still findable elsewhere in the pre-read region -- an earlier version
+# returned NO_ATOC without ever searching, contradicting its own docstring.
+
+def test_cli_resolve_blank_trailer_refuses_when_signature_present_elsewhere(tmp_path: Path) -> None:
+    buf = bytearray(SECTOR)  # trailer stays all-0x00 -> parses as blank
+    # A live OEMTOC01 signature sitting at the SAME header offset a real
+    # resident package would use, but with a blank trailer -- exactly the
+    # adversarial case alp-sdk#2233 review round 3's harness constructs.
+    buf[HEADER_ADDR - SECTOR_BASE: HEADER_ADDR - SECTOR_BASE + 8] = b"OEMTOC01"
+    p = tmp_path / "sector.bin"
+    p.write_bytes(bytes(buf))
+    res = _run_cli(
+        ["resolve", "--sector-file", str(p), "--sector-base", hex(SECTOR_BASE),
+         "--window-lo", hex(WINDOW_LO), "--window-end", hex(WINDOW_END)],
+        cwd=tmp_path,
+    )
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "REFUSE" in res.stderr
+    assert "NO_ATOC" not in res.stdout
+
+
+def test_cli_resolve_blank_trailer_with_no_signature_anywhere_is_still_no_atoc(tmp_path: Path) -> None:
+    # Control for the test above: a GENUINELY blank region (no signature
+    # anywhere) must still proceed as NO_ATOC -- the fix must not turn every
+    # blank window into a refusal.
+    p = tmp_path / "sector.bin"
+    p.write_bytes(b"\x00" * SECTOR)
+    res = _run_cli(
+        ["resolve", "--sector-file", str(p), "--sector-base", hex(SECTOR_BASE),
+         "--window-lo", hex(WINDOW_LO), "--window-end", hex(WINDOW_END)],
+        cwd=tmp_path,
+    )
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert res.stdout.strip() == "NO_ATOC"
 
 
 def test_cli_resolve_refuses_inconsistent_size(tmp_path: Path) -> None:

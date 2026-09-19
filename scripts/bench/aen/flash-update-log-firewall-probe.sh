@@ -77,7 +77,7 @@ ULOG_ADDR=$(printf '0x%08X' $(($ULOG_OFFSET + 0x80000000)))
 
 read_ulog_words() {
 	local out="$1"
-	cat > /tmp/firmware-update-log-probe-read-mram.jlink <<EOF
+	cat > "${TMPDIR:-/tmp}/firmware-update-log-probe-read-mram.jlink" <<EOF
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -85,13 +85,13 @@ connect
 mem32 $ULOG_ADDR, 0x4
 exit
 EOF
-	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-probe-read-mram.jlink \
-		2>/tmp/firmware-update-log-probe-read-mram.err \
-		>"/tmp/firmware-update-log-probe-read-mram-$out.out" || true
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/firmware-update-log-probe-read-mram.jlink" \
+		2>"${TMPDIR:-/tmp}/firmware-update-log-probe-read-mram.err" \
+		>"${TMPDIR:-/tmp}/firmware-update-log-probe-read-mram-$out.out" || true
 	awk -v addr="${ULOG_ADDR#0x}" 'toupper($1) == toupper(addr) && $2 == "=" {
 		print toupper($3" "$4" "$5" "$6)
 		exit
-	}' "/tmp/firmware-update-log-probe-read-mram-$out.out"
+	}' "${TMPDIR:-/tmp}/firmware-update-log-probe-read-mram-$out.out"
 }
 
 rv=$(xxd -e -l 8 "$HE_BIN" | awk '{print $3}')
@@ -124,8 +124,8 @@ JSON
 
 cd "$SET"
 echo ">>> AEN firmware-update-log HE firewall-probe ATOC" >&2
-./app-gen-toc -f build/config/firmware-update-log-firewall-probe.json >/tmp/firmware-update-log-firewall-probe-gentoc.log 2>&1 \
-	|| { echo "gen-toc FAILED"; tail -20 /tmp/firmware-update-log-firewall-probe-gentoc.log; exit 1; }
+./app-gen-toc -f build/config/firmware-update-log-firewall-probe.json >"${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log" 2>&1 \
+	|| { echo "gen-toc FAILED"; tail -20 "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-gentoc.log"; exit 1; }
 
 PKG="$SET/build/AppTocPackage.bin"
 ATOC_ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
@@ -160,17 +160,17 @@ echo "    alp_ulog baseline @ $ULOG_ADDR: $BASELINE_WORDS" >&2
 # $ATOC_ADDR -- an MRAM write. Two probes on this bench share OEM serial
 # 603000869 and JLinkExe has no USB-path selector, so confirm the SW-DP ID
 # before writing. Read-only connect first.
-cat > /tmp/fwprobe-preflight.jlink <<EOF
+cat > "${TMPDIR:-/tmp}/fwprobe-preflight.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/fwprobe-preflight.jlink \
-  > /tmp/fwprobe-preflight.out 2>&1 || true
-bench_jlink_assert_connected /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 7
-bench_jlink_assert_aen_dpidr /tmp/fwprobe-preflight.out "firewall-probe preflight" || exit 4
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/fwprobe-preflight.jlink" \
+  > "${TMPDIR:-/tmp}/fwprobe-preflight.out" 2>&1 || true
+bench_jlink_assert_connected "${TMPDIR:-/tmp}/fwprobe-preflight.out" "firewall-probe preflight" || exit 7
+bench_jlink_assert_aen_dpidr "${TMPDIR:-/tmp}/fwprobe-preflight.out" "firewall-probe preflight" || exit 4
 
 # SECTOR-PAD (alp-sdk#2233): the built-in loader rewrites the WHOLE 16 KiB
 # sector(s) $PKG touches and never reads their prior contents first -- see
@@ -199,7 +199,9 @@ FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
 # RACE CHECK setup (#2233 review major 4) -- see bench-env.sh's "Pre-read ->
 # write RACE detection" section.
 FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
-cat > /tmp/firmware-update-log-firewall-probe-write.jlink <<EOF
+FLOWD_WRITE_JLINK="${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-write.jlink"
+FLOWD_WRITE_OUT="${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-write.out"
+cat > "$FLOWD_WRITE_JLINK" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
@@ -213,8 +215,10 @@ EOF
 # what the write session WOULD run, WITHOUT ever invoking JLinkExe on it --
 # and, since the boot CommandFile is separate (#1526), without reaching it.
 if [ -n "$FLOWD_DRY_RUN" ]; then
-	echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
-	cat /tmp/firmware-update-log-firewall-probe-write.jlink
+	# alp-sdk#2233 review round 3, finding 4: "no probe was opened" was false
+	# -- the read-only DPIDR preflight above already opened one.
+	echo "--- DRY RUN: nothing written, no write session was run (read-only probe access only, FLOWD_DRY_RUN) ---"
+	cat "$FLOWD_WRITE_JLINK"
 	exit 10
 fi
 
@@ -223,31 +227,42 @@ fi
 # exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
 # tee can die from that SIGPIPE before JLinkExe's full transcript is written
 # to disk, and the connect-failure check below depends on the FULL transcript.
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-write.jlink \
-	> /tmp/firmware-update-log-firewall-probe-write.out 2>&1 || true
+#
+# CAPTURE THE WRITE-SESSION STATUS (alp-sdk#2233 review round 3, finding 3) --
+# see flash-jlink.sh's identical comment for why `write_rc=0; cmd ||
+# write_rc=$?`, not a later `if ...; then ...; fi; rc=$?`.
+write_rc=0
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "$FLOWD_WRITE_JLINK" \
+	> "$FLOWD_WRITE_OUT" 2>&1 || write_rc=$?
+if [ "$write_rc" -eq 13 ]; then
+	echo "!! bench_jlink_run REFUSED the write session -- FLOWD_DRY_RUN backstop (rc=13)." >&2
+	echo "   Refusing before any race check, proof, or boot." >&2
+	exit 13
+fi
 grep -iE "could not connect|fail|error|Verify|O\\.K\\.|Reset|Writing|Programming" \
-	/tmp/firmware-update-log-firewall-probe-write.out | head -40
+	"$FLOWD_WRITE_OUT" | head -40
 
 if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" \
-	/tmp/firmware-update-log-firewall-probe-write.out; then
+	"$FLOWD_WRITE_OUT"; then
 	echo "!! $JLINK_DEVICE_FLASH profile failed to connect" >&2
 	exit 2
 fi
 
-# RACE CHECK (#2233 review major 4).
-if ! bench_flowd_check_race flash-update-log-firewall-probe "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
-	echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
-	echo "   before trusting this board. The write HAS already happened (the boot has not --" >&2
-	echo "   #1526 still gates that on the proof below)." >&2
-	exit 11
-fi
-
+# RUN THE PROOF BEFORE THE RACE CHECK, PRINT BOTH (alp-sdk#2233 review round
+# 3, finding 7): an earlier version ran the race check FIRST and exited 11
+# before the proof ever ran, hiding whether the write even landed. Both now
+# always run and both verdicts are always printed; a detected race still
+# wins the final exit code (11) even when the proof passed. Neither the
+# race check nor a failed proof runs the boot script below -- #1526's
+# "board was NOT reset or booted" guarantee holds for both, not just proof.
+#
 # This gate is LOAD-BEARING (#1526).  The CommanderScript above carries only
 # `loadbin`; `RSetType 2` / `r` / `g` moved to a SECOND script that runs
-# further down, and only if the check below passes.  So a failed proof now
-# stops the board being reset into an image that did not verify -- and
-# because the ATOC entry carries `"flags": ["load", "boot"]`, not booting is
-# what keeps the HE probe from running and overwriting `alp_ulog_partition`.
+# further down, and only if BOTH checks below pass.  So a failed proof OR a
+# detected race now stops the board being reset into an image that did not
+# verify (or whose neighbours may be suspect) -- and because the ATOC entry
+# carries `"flags": ["load", "boot"]`, not booting is what keeps the HE
+# probe from running and overwriting `alp_ulog_partition`.
 #
 # The MRAM write itself has of course already happened -- that is what
 # `loadbin` is.  What is prevented is acting on it.
@@ -257,6 +272,7 @@ fi
 # cmp's it byte-for-byte against the padded image, proving both that $PKG
 # landed AND that its sector neighbours survived THIS write -- NOT a
 # persistence proof across a power cycle.
+proof_failed=0
 if ! bench_flowd_proof flash-update-log-firewall-probe "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
 	echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ATOC_ADDR." >&2
 	echo "   Do not treat this board as flashed." >&2
@@ -264,15 +280,33 @@ if ! bench_flowd_proof flash-update-log-firewall-probe "$FLOWD_MANIFEST" "$FLOWD
 	echo "   runs only past this gate, so the HE probe never ran and" >&2
 	echo "   alp_ulog_partition is intact.  MRAM now holds an image that failed proof --" >&2
 	echo "   reflash before booting this board." >&2
+	proof_failed=1
+fi
+if [ "$proof_failed" -eq 0 ]; then
+	echo "verify: read-back proof OK ($PKG @ $ATOC_ADDR, sector-padded; not a cold-cycle persistence proof)" >&2
+fi
+
+# RACE CHECK (#2233 review major 4).
+race_failed=0
+if ! bench_flowd_check_race flash-update-log-firewall-probe "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite" "$FLOWD_WRITE_OUT"; then
+	echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+	echo "   before trusting this board. The write HAS already happened (the boot has not --" >&2
+	echo "   #1526 still gates that on both checks above)." >&2
+	race_failed=1
+fi
+
+if [ "$race_failed" -eq 1 ]; then
+	exit 11
+fi
+if [ "$proof_failed" -eq 1 ]; then
 	exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ATOC_ADDR, sector-padded; not a cold-cycle persistence proof)" >&2
 
 # ONLY NOW reset into the image (#1526).  Separate CommanderScript so the boot
 # is genuinely downstream of the verify result -- inside one script JLinkExe
 # runs everything before the shell can read anything, which is what made the
 # old gate advisory.
-cat > /tmp/firmware-update-log-firewall-probe-boot.jlink <<EOF
+cat > "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-boot.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
@@ -282,8 +316,8 @@ r
 g
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/firmware-update-log-firewall-probe-boot.jlink 	> /tmp/firmware-update-log-firewall-probe-boot.out 2>&1 || true
-if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" 	/tmp/firmware-update-log-firewall-probe-boot.out; then
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-boot.jlink" 	> "${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-boot.out" 2>&1 || true
+if grep -qiE "Could not connect to the target device|Cannot connect to the probe/programmer" 	"${TMPDIR:-/tmp}/firmware-update-log-firewall-probe-boot.out"; then
 	echo "!! reset/boot script failed to connect -- image is verified in MRAM but the" >&2
 	echo "   board was not booted; alp_ulog_partition is untouched." >&2
 	exit 2

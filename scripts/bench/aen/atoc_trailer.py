@@ -10,8 +10,11 @@ BELOW the SE-owned `atoc` region using the metadata preset's window
 boundaries alone. Those boundaries describe the ALLOCATED `atoc` region, not
 where the signed ATOC package SETOOLS actually wrote ends up -- and on a real
 E1M-AEN803 bench board, serial 2026W36-0001 (2026-09-19), the resident ATOC
-package was measured to start well INSIDE that allocated region, at
-`0x8056A3C0`, not at its base (`0x80578000`). A metadata-window-only erase on
+package was measured to start well BELOW that allocated region's own base
+(alp-sdk#2233 review round 3, item 13b: an earlier version of this paragraph
+said "well INSIDE that allocated region", which is backwards -- the measured
+start, `0x8056A3C0`, is LESS than the atoc region's base, `0x80578000`, i.e.
+it is inside `storage`, not inside `atoc`). A metadata-window-only erase on
 that board would zero `0x8056A3C0`-`0x80577FFF` of a live, no-SE-UART-recovery
 boot table.
 
@@ -99,6 +102,27 @@ def validate_trailer(trailer: AtocTrailer, header_bytes: bytes, window_lo: int, 
             f"trailer's package_start 0x{trailer.package_start:08X} is below the MRAM window "
             f"0x{window_lo:08X} -- inconsistent trailer, cannot trust it"
         )
+    # alp-sdk#2233 review round 3, finding 6: a zero-size package, or a
+    # header address outside [package_start, package_end), is internally
+    # inconsistent the same way a bad checksum or a missing signature is --
+    # refuse rather than trust a location a real package could never occupy.
+    if trailer.package_size <= 0:
+        raise AtocTrailerError(
+            f"trailer's package_size is 0x{trailer.package_size:X} -- a resident package cannot "
+            "be zero (or negative) bytes; inconsistent trailer, cannot trust it"
+        )
+    if not (trailer.package_start <= trailer.header_address):
+        raise AtocTrailerError(
+            f"trailer's header_address 0x{trailer.header_address:08X} is BELOW package_start "
+            f"0x{trailer.package_start:08X} -- the header must live inside the package it "
+            "describes; inconsistent trailer, cannot trust it"
+        )
+    if not (trailer.header_address + HEADER_SIGNATURE_SIZE <= trailer.package_end):
+        raise AtocTrailerError(
+            f"trailer's header_address 0x{trailer.header_address:08X} + {HEADER_SIGNATURE_SIZE} "
+            f"does not fit inside the package (ends 0x{trailer.package_end:08X}) -- the header "
+            "must live inside the package it describes; inconsistent trailer, cannot trust it"
+        )
 
 
 def read_bytes_from_sector(sector_path: str, sector_base: int, addr: int, size: int) -> bytes:
@@ -125,6 +149,28 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     trailer_bytes = read_bytes_from_sector(args.sector_file, args.sector_base, trailer_addr, TRAILER_SIZE)
     trailer = parse_trailer_bytes(trailer_bytes)
     if trailer is None:
+        # alp-sdk#2233 review round 3, finding 5: a blank TRAILER does not by
+        # itself prove there is no resident package -- the docstring above
+        # (WHAT WAS MEASURED) already says a trailer is only trusted as "no
+        # resident ATOC" when it is genuinely blank AND no OEMTOC01 signature
+        # is found; an earlier version of this function returned NO_ATOC on
+        # a blank trailer WITHOUT ever searching for the signature,
+        # contradicting its own docstring. Search the whole pre-read region
+        # the caller handed in (ideally the whole atoc region, not just the
+        # 16-byte trailer's own sector -- see erase-storage.sh, which now
+        # reads the whole atoc region into this same --sector-file) for the
+        # ASCII signature; its presence means SOMETHING is resident even
+        # though the trailer itself reads as blank, and the location cannot
+        # be trusted -- refuse rather than guess "empty".
+        with open(args.sector_file, "rb") as f:
+            region_bytes = f.read()
+        if HEADER_SIGNATURE in region_bytes:
+            raise AtocTrailerError(
+                f"trailer at 0x{trailer_addr:08X} reads as blank (no resident ATOC), but "
+                f"{HEADER_SIGNATURE!r} was found elsewhere in the pre-read region "
+                f"{args.sector_file} -- the package location cannot be determined from a blank "
+                "trailer alone; refusing rather than assume the window is genuinely empty"
+            )
         print("NO_ATOC")
         return 0
 

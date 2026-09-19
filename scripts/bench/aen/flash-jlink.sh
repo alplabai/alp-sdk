@@ -100,16 +100,16 @@ BUF=0x$BUF_SYM
 # flash-jlink-mramxip.sh (see that script for the full rationale): JLINK_SN
 # narrows probe choice but does not itself prove which board answered. Hard
 # ABORT, not a warning -- read-only connect first, no writes until confirmed.
-cat > /tmp/flowd-preflight.jlink <<EOF
+cat > "${TMPDIR:-/tmp}/flowd-preflight.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-preflight.jlink \
-  > /tmp/flowd-preflight.out 2>&1 || true
-bench_jlink_assert_aen_dpidr /tmp/flowd-preflight.out "MRAM write preflight" || exit 4
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/flowd-preflight.jlink" \
+  > "${TMPDIR:-/tmp}/flowd-preflight.out" 2>&1 || true
+bench_jlink_assert_aen_dpidr "${TMPDIR:-/tmp}/flowd-preflight.out" "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the image + the per-app signed-ATOC config (same JSON flow-run.sh uses)
@@ -126,7 +126,7 @@ cd "$SET"
 echo ">>> FLOW-D J-Link flash $NAME  (ram_console_buf=${BUF_SYM:-none (UART console)})" >&2
 # 2. build the signed ATOC package (app-gen-toc only -- NO SE-UART) + read its
 #    MRAM placement from the generated map (shifts per build/config -- never hardcode).
-./app-gen-toc -f "build/config/$NAME.json" >/tmp/gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/gentoc.log; exit 1; }
+./app-gen-toc -f "build/config/$NAME.json" >"${TMPDIR:-/tmp}/gentoc.log" 2>&1 || { echo "gen-toc FAILED"; tail "${TMPDIR:-/tmp}/gentoc.log"; exit 1; }
 PKG="$SET/build/AppTocPackage.bin"
 ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address from build/app-package-map.txt"; exit 1; }
@@ -167,7 +167,9 @@ FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
 # "Pre-read -> write RACE detection" section for what this can and cannot
 # catch.
 FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
-cat > /tmp/flowd.jlink <<EOF
+FLOWD_WRITE_JLINK="${TMPDIR:-/tmp}/flowd.jlink"
+FLOWD_WRITE_OUT="${TMPDIR:-/tmp}/flowd.out"
+cat > "$FLOWD_WRITE_JLINK" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $DEV
@@ -188,8 +190,11 @@ EOF
 # CommandFile in this mode as a backstop (bench-env.sh), but that backstop
 # must never be the ONLY thing standing between this script and a real write.
 if [ -n "$FLOWD_DRY_RUN" ]; then
-  echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
-  cat /tmp/flowd.jlink
+  # alp-sdk#2233 review round 3, finding 4: "no probe was opened" was false
+  # here -- the read-only DPIDR preflight above already opened one before
+  # this line is ever reached. Only the WRITE session is skipped.
+  echo "--- DRY RUN: nothing written, no write session was run (read-only probe access only, FLOWD_DRY_RUN) ---"
+  cat "$FLOWD_WRITE_JLINK"
   exit 10
 fi
 
@@ -198,28 +203,42 @@ fi
 # exit after N lines and SIGPIPE grep, which then closes tee's stdout pipe;
 # tee can die from that SIGPIPE before JLinkExe's full transcript is written
 # to disk, and the connect-failure check below depends on the FULL transcript.
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd.jlink > /tmp/flowd.out 2>&1 || true
-grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" /tmp/flowd.out | head -30
-echo "----- (full log: /tmp/flowd.out) -----"
-if grep -qi "Could not connect to the target device" /tmp/flowd.out; then
+#
+# CAPTURE THE WRITE-SESSION STATUS (alp-sdk#2233 review round 3, finding 3):
+# a bare `|| true` used to swallow bench_jlink_run()'s own exit code, so its
+# FLOWD_DRY_RUN backstop refusal (rc=13) fell straight through to the
+# connect-failure text grep below (which finds nothing, since no session
+# ever ran) and on into the race check/proof/boot as if a write had
+# happened. `write_rc=0; cmd || write_rc=$?` keeps `set -e` from aborting on
+# an ordinary connect failure (still handled by the text grep just below)
+# while capturing the one case that matters here directly, on the same line
+# -- not via a later `if ...; then ...; fi; rc=$?`, which reads the WRONG
+# status when the `if` takes no branch (see bench_flowd_proof's retry-loop
+# fix in bench-env.sh for the measured proof: `if false; then :; fi; echo
+# $?` prints 0, not 1).
+write_rc=0
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "$FLOWD_WRITE_JLINK" > "$FLOWD_WRITE_OUT" 2>&1 || write_rc=$?
+if [ "$write_rc" -eq 13 ]; then
+  echo "!! bench_jlink_run REFUSED the write session -- FLOWD_DRY_RUN backstop (rc=13)." >&2
+  echo "   Refusing before any race check, proof, or boot." >&2
+  exit 13
+fi
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Reset|Cortex|Found" "$FLOWD_WRITE_OUT" | head -30
+echo "----- (full log: $FLOWD_WRITE_OUT) -----"
+if grep -qi "Could not connect to the target device" "$FLOWD_WRITE_OUT"; then
   echo "!! $DEV profile FAILED to connect -- flow D not unlocked on this probe (same blocker the doc records)."
   echo "   The MRAM was NOT written. Check the new probe's firmware / connect-under-reset behaviour."
   exit 2
 fi
 
-# RACE CHECK (#2233 review major 4): compare this session's prewrite savebin
-# against the ORIGINAL pre-read, on the host. Any difference means something
-# else wrote to a touched sector between the pre-read and this session's own
-# pre-load savebin -- the padded image (built from the stale pre-read) may
-# have just overwritten it. Both copies are kept; nothing here is deleted.
-if ! bench_flowd_check_race flash-jlink "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
-  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
-  echo "   before trusting this board. The board HAS already been written and booted" >&2
-  echo "   (RSetType 2/r/g already ran in the same session) -- this is a post-hoc warning," >&2
-  echo "   not a block on the write." >&2
-  exit 11
-fi
-
+# RUN THE PROOF BEFORE THE RACE CHECK, PRINT BOTH (alp-sdk#2233 review round
+# 3, finding 7): an earlier version ran the race check FIRST and exited 11
+# on a detected race before the proof ever ran, hiding whether the write
+# even landed. Both now always run, both verdicts are always printed, and a
+# detected race still wins the final exit code (11) even when the proof
+# passed -- the race means something ELSE touched a to-be-padded sector, so
+# the whole picture is suspect regardless of what the proof says.
+#
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin gate):
 # a FRESH read-only J-Link session -- a new JLinkExe process, so nothing here
 # can be served from the write session's own flash cache -- savebin's every
@@ -229,12 +248,39 @@ fi
 # bench_flowd_proof's own header in bench-env.sh, and flash-jlink-mramxip.sh's
 # "ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK" note for why a cold-cycle
 # read remains the standing end-to-end requirement on top of this.
+proof_failed=0
 if ! bench_flowd_proof flash-jlink "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
   echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
+  proof_failed=1
+fi
+if [ "$proof_failed" -eq 0 ]; then
+  echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; a fresh-session read, NOT a cold-cycle persistence proof)"
+fi
+
+# RACE CHECK (#2233 review major 4): compare this session's prewrite savebin
+# against the ORIGINAL pre-read, on the host. Any difference means something
+# else wrote to a touched sector between the pre-read and this session's own
+# pre-load savebin -- the padded image (built from the stale pre-read) may
+# have just overwritten it. Both copies are kept; nothing here is deleted.
+# Also fails closed (alp-sdk#2233 review round 3, finding 7) if the write
+# session's OWN prewrite savebin reported a read failure -- see
+# bench_flowd_check_race's own header in bench-env.sh.
+race_failed=0
+if ! bench_flowd_check_race flash-jlink "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite" "$FLOWD_WRITE_OUT"; then
+  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+  echo "   before trusting this board. The board HAS already been written and booted" >&2
+  echo "   (RSetType 2/r/g already ran in the same session) -- this is a post-hoc warning," >&2
+  echo "   not a block on the write." >&2
+  race_failed=1
+fi
+
+if [ "$race_failed" -eq 1 ]; then
+  exit 11
+fi
+if [ "$proof_failed" -eq 1 ]; then
   exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; a fresh-session read, NOT a cold-cycle persistence proof)"
 
 # 4. SES has re-booted the app; attach read-only with the GENERIC device and dump
 #    the RAM console (the part-number profile can't re-halt the running secure core).
@@ -244,7 +290,7 @@ if [ -z "$BUF_SYM" ]; then
   echo "      the flash above still completed -- this is not a boot failure. Read the" >&2
   echo "      console via the labgrid 'console' resource instead." >&2
 else
-  cat > /tmp/flowd-read.jlink <<EOF
+  cat > "${TMPDIR:-/tmp}/flowd-read.jlink" <<EOF
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -252,12 +298,12 @@ connect
 mem8 $BUF, $SIZE
 exit
 EOF
-  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/flowd-read.jlink 2>/tmp/flowd-rd.err > /tmp/flowd-rd.out || true
+  "${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/flowd-read.jlink" 2>"${TMPDIR:-/tmp}/flowd-rd.err" > "${TMPDIR:-/tmp}/flowd-rd.out" || true
   # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
   # hides a total connect failure and the decode below would render it as
   # empty target output (alp-sdk#1318).
-  bench_jlink_assert_connected /tmp/flowd-rd.out "Flow D read-back" || exit 7
+  bench_jlink_assert_connected "${TMPDIR:-/tmp}/flowd-rd.out" "Flow D read-back" || exit 7
   echo "----- $NAME RAM console (flow-D flashed, SE-booted) -----"
-  awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' /tmp/flowd-rd.out
+  awk '/^[0-9A-Fa-f]+ = / { for (i=3;i<=NF;i++){ if ($i !~ /^[0-9A-Fa-f][0-9A-Fa-f]$/) continue; b=strtonum("0x"$i); if(b==0){nul++; if(nul>6)exit; next} nul=0; if(b==10||b==13){printf "\n";continue} if(b>=32&&b<127)printf "%c",b } }' "${TMPDIR:-/tmp}/flowd-rd.out"
   echo; echo "--------------------------------------------------------"
 fi

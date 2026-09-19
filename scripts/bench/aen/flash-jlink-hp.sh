@@ -98,16 +98,16 @@ BIN="$BD/zephyr/zephyr.bin"
 # flash-jlink-mramxip.sh (see that script for the full rationale): JLINK_SN
 # narrows probe choice but does not itself prove which board answered. Hard
 # ABORT, not a warning -- read-only connect first, no writes until confirmed.
-cat > /tmp/hp-preflight.jlink <<EOF
+cat > "${TMPDIR:-/tmp}/hp-preflight.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-preflight.jlink \
-  > /tmp/hp-preflight.out 2>&1 || true
-bench_jlink_assert_aen_dpidr /tmp/hp-preflight.out "MRAM write preflight" || exit 4
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/hp-preflight.jlink" \
+  > "${TMPDIR:-/tmp}/hp-preflight.out" 2>&1 || true
+bench_jlink_assert_aen_dpidr "${TMPDIR:-/tmp}/hp-preflight.out" "MRAM write preflight" || exit 4
 echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 
 # 1. stage the HP image + an M55_HP signed-ATOC config (cpu_id/loadAddress are
@@ -123,7 +123,7 @@ JSON
 
 cd "$SET"
 echo ">>> FLOW-D M55_HP flash $NAME  (SRAM0 beacon=$BEACON)" >&2
-./app-gen-toc -f "build/config/$NAME.json" >/tmp/hp-gentoc.log 2>&1 || { echo "gen-toc FAILED"; tail /tmp/hp-gentoc.log; exit 1; }
+./app-gen-toc -f "build/config/$NAME.json" >"${TMPDIR:-/tmp}/hp-gentoc.log" 2>&1 || { echo "gen-toc FAILED"; tail "${TMPDIR:-/tmp}/hp-gentoc.log"; exit 1; }
 PKG="$SET/build/AppTocPackage.bin"
 ADDR=$(awk '/APP Package Start Address:/{print $NF}' build/app-package-map.txt | tail -1)
 [ -z "$ADDR" ] && { echo "could not parse APP Package Start Address"; exit 1; }
@@ -155,7 +155,9 @@ FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
 # RACE CHECK setup (#2233 review major 4) -- see bench-env.sh's "Pre-read ->
 # write RACE detection" section.
 FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
-cat > /tmp/hp-write.jlink <<EOF
+FLOWD_WRITE_JLINK="${TMPDIR:-/tmp}/hp-write.jlink"
+FLOWD_WRITE_OUT="${TMPDIR:-/tmp}/hp-write.out"
+cat > "$FLOWD_WRITE_JLINK" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
@@ -171,8 +173,10 @@ EOF
 # FLOWD_DRY_RUN (#2233 review blocker 1a): exit right here, having printed
 # what the write session WOULD run, WITHOUT ever invoking JLinkExe on it.
 if [ -n "$FLOWD_DRY_RUN" ]; then
-  echo "--- DRY RUN: nothing written, no probe was opened (FLOWD_DRY_RUN) ---"
-  cat /tmp/hp-write.jlink
+  # alp-sdk#2233 review round 3, finding 4: "no probe was opened" was false
+  # -- the read-only DPIDR preflight above already opened one.
+  echo "--- DRY RUN: nothing written, no write session was run (read-only probe access only, FLOWD_DRY_RUN) ---"
+  cat "$FLOWD_WRITE_JLINK"
   exit 10
 fi
 
@@ -181,38 +185,62 @@ fi
 # `... | tee out | grep ... | head -N` pipeline lets `head` exit early and
 # SIGPIPE grep, which can close tee's stdout pipe and kill JLinkExe mid-write
 # before the connect-failure check below ever sees the full transcript).
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-write.jlink > /tmp/hp-write.out 2>&1 || true
-grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" /tmp/hp-write.out | head -20
-if grep -qi "Could not connect to the target device" /tmp/hp-write.out; then
+#
+# CAPTURE THE WRITE-SESSION STATUS (alp-sdk#2233 review round 3, finding 3) --
+# see flash-jlink.sh's identical comment for why `write_rc=0; cmd ||
+# write_rc=$?`, not a later `if ...; then ...; fi; rc=$?`.
+write_rc=0
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "$FLOWD_WRITE_JLINK" > "$FLOWD_WRITE_OUT" 2>&1 || write_rc=$?
+if [ "$write_rc" -eq 13 ]; then
+  echo "!! bench_jlink_run REFUSED the write session -- FLOWD_DRY_RUN backstop (rc=13)." >&2
+  echo "   Refusing before any race check, proof, or boot." >&2
+  exit 13
+fi
+grep -iE "could not connect|fail|error|Verify|O\.K\.|Reset" "$FLOWD_WRITE_OUT" | head -20
+if grep -qi "Could not connect to the target device" "$FLOWD_WRITE_OUT"; then
   echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- flow D not unlocked on this probe."
   exit 2
 fi
 
-# RACE CHECK (#2233 review major 4).
-if ! bench_flowd_check_race flash-jlink-hp "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
-  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
-  echo "   before trusting this board. The board HAS already been written and booted." >&2
-  exit 11
-fi
-
+# RUN THE PROOF BEFORE THE RACE CHECK, PRINT BOTH (alp-sdk#2233 review round
+# 3, finding 7) -- see flash-jlink.sh's identical comment.
+#
 # GATE ON THE READ-BACK PROOF (#2233, replacing the old #1343/#1488 verifybin
 # gate) -- a FRESH read-only J-Link session savebin's every padded range back
 # and cmp's it byte-for-byte against the padded image, proving both that $PKG
 # landed AND that its sector neighbours survived THIS write -- NOT a
 # persistence proof across a power cycle (see bench_flowd_proof's own header).
+proof_failed=0
 if ! bench_flowd_proof flash-jlink-hp "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
   echo "!! READ-BACK PROOF FAILED -- MRAM does NOT match the padded image for $PKG @ $ADDR."
   echo "   Do not treat this board as flashed."
+  proof_failed=1
+fi
+if [ "$proof_failed" -eq 0 ]; then
+  echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; not a cold-cycle persistence proof)"
+fi
+
+# RACE CHECK (#2233 review major 4).
+race_failed=0
+if ! bench_flowd_check_race flash-jlink-hp "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite" "$FLOWD_WRITE_OUT"; then
+  echo "!! RACE DETECTED -- restore from $FLOWD_SCRATCH/sectors and $FLOWD_SCRATCH/prewrite" >&2
+  echo "   before trusting this board. The board HAS already been written and booted." >&2
+  race_failed=1
+fi
+
+if [ "$race_failed" -eq 1 ]; then
+  exit 11
+fi
+if [ "$proof_failed" -eq 1 ]; then
   exit 3
 fi
-echo "verify: read-back proof OK ($PKG @ $ADDR, sector-padded; not a cold-cycle persistence proof)"
 
 # 3. SES has booted the HP core; read the SRAM0 beacon via the generic device
 #    (the HE/system AP reads global SRAM0 regardless of HP core state), then
 #    re-read the heartbeat word after a delay to show it advancing.
 sleep 3
 HB=$(printf "0x%X" $(( BEACON + 12 )))   # beacon[3] = heartbeat
-cat > /tmp/hp-read.jlink <<EOF
+cat > "${TMPDIR:-/tmp}/hp-read.jlink" <<EOF
 device $JLINK_DEVICE_READ
 si SWD
 speed $JLINK_SPEED
@@ -222,12 +250,12 @@ Sleep 400
 mem32 $HB, 0x4
 exit
 EOF
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/hp-read.jlink 2>/tmp/hp-read.err > /tmp/hp-read.out || true
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/hp-read.jlink" 2>"${TMPDIR:-/tmp}/hp-read.err" > "${TMPDIR:-/tmp}/hp-read.out" || true
 # JLinkExe exits 0 even when it never opened the probe, so `|| true` above
 # hides a total connect failure and the decode below would render it as
 # empty target output (alp-sdk#1318).
-bench_jlink_assert_connected /tmp/hp-read.out "Flow D HP read-back" || exit 7
+bench_jlink_assert_connected "${TMPDIR:-/tmp}/hp-read.out" "Flow D HP read-back" || exit 7
 echo "----- $NAME M55-HP SRAM0 beacon (magic / CPUID / VTOR / heartbeat) -----"
-grep -iE "^$(printf '%08X' $BEACON)| = " /tmp/hp-read.out | head
+grep -iE "^$(printf '%08X' $BEACON)| = " "${TMPDIR:-/tmp}/hp-read.out" | head
 echo "(heartbeat re-read below should differ from beacon[3] above = HP actively running)"
 echo "-----------------------------------------------------------------------"

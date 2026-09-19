@@ -1457,7 +1457,13 @@ bench_flowd_atoc_guard() {
 # real bench_jlink_run() for its OTHER (unrelated) JLinkExe touches, e.g. the
 # DPIDR preflight every script already carries BEFORE its own FLOWD_DRY_RUN
 # check -- FLOWD_DRY_RUN governs only the sector-pad read/write/proof
-# sessions, never a script's other guards.
+# sessions, never a script's other guards. EXCEPT erase-storage.sh (alp-sdk#2233
+# review round 3, finding 2): that script now treats FLOWD_DRY_RUN exactly
+# like its own --dry-run flag, so its DPIDR preflight and ATOC-trailer read
+# are ALSO skipped under FLOWD_DRY_RUN, not just its own --dry-run -- see
+# that script's own header for why (a blank ATOC-trailer read taken under
+# FLOWD_DRY_RUN's synthetic sector-read would otherwise get backed up to
+# $BENCH_ROOT/flowd-backup/... as if it were a real pre-write sector).
 export FLOWD_DRY_RUN="${FLOWD_DRY_RUN:-}"
 
 # FLOWD_SECTOR_SIZE / FLOWD_WINDOW_LO / FLOWD_WINDOW_HI -- forwarded verbatim
@@ -1578,7 +1584,14 @@ with open(sys.argv[1], 'wb') as f:
 	}
 	bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
 	rm -f "$cmdfile"
-	bench_jlink_assert_connected "$out" "$tag sector pre-read" || return $?
+	# alp-sdk#2233 review round 3, item 12: `$out` used to leak on every call
+	# (each pre-read mktemp's a fresh file, forever). Kept on any failure
+	# below as evidence; removed just before the final `return 0`.
+	bench_jlink_assert_connected "$out" "$tag sector pre-read" || {
+		local rc=$?
+		echo "bench-env: bench_flowd_read_sectors ($tag): transcript kept for inspection: $out" >&2
+		return "$rc"
+	}
 
 	# alp-sdk#2233 review item 7: a `savebin` that silently no-ops or fails
 	# mid-read must not be trusted just because a file of the right SIZE later
@@ -1619,6 +1632,7 @@ with open(sys.argv[1], 'wb') as f:
 			return 1
 		fi
 	done <"$sectors_file"
+	rm -f "$out"
 	return 0
 }
 
@@ -1706,9 +1720,17 @@ bench_flowd_prewrite_lines() {
 	# directory itself, this one is a pure text generator with no probe
 	# access, so it takes care of it here too rather than leaving every
 	# caller to remember a bare `mkdir -p` before embedding this output
-	# (measured: without this, savebin silently fails to write the file,
-	# every sector reads back as "missing prewrite capture", and
-	# bench_flowd_check_race reports a RACE on every run, real or not).
+	# (alp-sdk#2233 review round 3, item 13c -- this is an ASSUMPTION/stub
+	# observation, not a cited bench transcript: no real-hardware JLinkExe
+	# log demonstrating a bare `savebin` into a missing directory has been
+	# captured on this bench. Documented JLinkExe behaviour and the stub
+	# harness this repo's own tests use both agree `savebin` does not
+	# mkdir -p its destination; relabelled from an earlier "measured" claim
+	# that overstated its evidence. If this ever IS measured against real
+	# hardware, cite the transcript here instead of this note).  Without
+	# this mkdir, a missing directory would make every sector read back as
+	# "missing prewrite capture", and bench_flowd_check_race would report a
+	# RACE on every run, real or not.
 	mkdir -p "$prewrite_dir"
 	local base
 	while IFS= read -r base; do
@@ -1718,18 +1740,39 @@ bench_flowd_prewrite_lines() {
 	done <"$sectors_file"
 }
 
-# bench_flowd_check_race <tag> <sectors-file> <preread-dir> <prewrite-dir> --
-# host-side (no probe) cmp of every planned sector's pre-read image against
-# its prewrite capture from the SAME write session. Returns non-zero (and
-# prints "RACE DETECTED", naming and KEEPING both copies for restore/
-# inspection) on any difference, or if a prewrite capture is missing
-# entirely (the write session's own savebin didn't produce it -- treated the
-# same as a detected race, since a race cannot be ruled out either). Never
-# deletes either directory itself -- the caller's scratch dir owns that.
+# bench_flowd_check_race <tag> <sectors-file> <preread-dir> <prewrite-dir>
+# [write-session-out-file] -- host-side (no probe) cmp of every planned
+# sector's pre-read image against its prewrite capture from the SAME write
+# session. Returns non-zero (and prints "RACE DETECTED", naming and KEEPING
+# both copies for restore/inspection) on any difference, or if a prewrite
+# capture is missing entirely (the write session's own savebin didn't
+# produce it -- treated the same as a detected race, since a race cannot be
+# ruled out either). Never deletes either directory itself -- the caller's
+# scratch dir owns that.
+#
+# [write-session-out-file] (alp-sdk#2233 review round 3, item 7), if given:
+# the write session's own captured transcript is grepped for the SAME
+# read-failure strings bench_flowd_read_sectors() checks, scoped to the
+# portion BEFORE the first `Downloading file` (the point loadbin actually
+# starts) -- i.e. exactly the prewrite savebin's own output, not anything a
+# loadbin/reset further down might also print. A failed prewrite READ (not
+# just a byte mismatch) means the race check has no trustworthy "just
+# before the load" snapshot to compare against at all -- fail closed, same
+# as a missing prewrite capture above.
 bench_flowd_check_race() {
-	local tag="$1" sectors_file="$2" preread_dir="$3" prewrite_dir="$4"
+	local tag="$1" sectors_file="$2" preread_dir="$3" prewrite_dir="$4" write_out="${5:-}"
 	[ -s "$sectors_file" ] || return 0
-	local base name pre post raced=0
+	local base name pre post raced=0 preload
+	if [ -n "$write_out" ] && [ -f "$write_out" ]; then
+		preload="$(awk '/Downloading file/{exit} {print}' "$write_out")"
+		if printf '%s\n' "$preload" | grep -qiE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error'; then
+			echo "!! RACE DETECTED ($tag): the write session's own pre-load savebin (the" >&2
+			echo "   prewrite capture) reports a read failure -- treating this as a race," >&2
+			echo "   fail closed, since there is no trustworthy just-before-the-load snapshot:" >&2
+			printf '%s\n' "$preload" | grep -iE 'Could not read memory|Cannot read memory|\*\*\*\* ?Error' | head -5 >&2
+			raced=1
+		fi
+	fi
 	while IFS= read -r base; do
 		[ -n "$base" ] || continue
 		name="${base#0x}"
@@ -1789,8 +1832,10 @@ for e in manifest:
 # per range; returns 0 only if every range PASSed.
 #
 # THIS IS NOT A PERSISTENCE PROOF (alp-sdk#2233 review item 10). A read
-# straight back from the part over the SAME debug session's part-number
-# profile proves the bytes landed and their neighbours survived THIS write --
+# straight back from the part, in a FRESH debug session under the GENERIC
+# device profile ($JLINK_DEVICE_READ, alp-sdk#2233 review round 3, item 13a
+# -- NOT the same session, and NOT the part-number profile the write itself
+# used), proves the bytes landed and their neighbours survived THIS write --
 # it does NOT prove the write survives a cold power cycle. flash-jlink-mramxip.sh's
 # own header (search "ACCEPTANCE ON THIS PATH IS A COLD-CYCLE READBACK") records
 # a measured case where `Verify successful.` was followed by a cold-cycle
@@ -1876,16 +1921,34 @@ for e in manifest:
 			return 1
 		}
 		bench_jlink_run -nogui 1 -CommanderScript "$cmdfile" >"$out" 2>&1 || true
-		if bench_jlink_assert_connected "$out" "$tag post-write proof read (attempt $attempt/3)"; then
+		# alp-sdk#2233 review round 3, BLOCKER: `rc=$?` used to sit AFTER a
+		# separate `if cmd; then break; fi` statement. When a compound `if`
+		# takes no branch (condition false, no else), ITS OWN exit status is
+		# 0 -- NOT the condition command's -- so that `rc=$?` always read 0,
+		# and exhausting all 3 retries fell through to `return "$rc"` with
+		# rc=0: a proof whose every connect attempt FAILED still returned
+		# success. Verified: `if false; then :; fi; echo $?` prints 0.
+		# Capture the assertion's OWN status directly, on the same line, so
+		# nothing can sit between the command and reading `$?`.
+		bench_jlink_assert_connected "$out" "$tag post-write proof read (attempt $attempt/3)"
+		rc=$?
+		if [ "$rc" -eq 0 ]; then
+			rm -f "$out"
 			break
 		fi
-		rc=$?
 		if [ "$attempt" -ge 3 ]; then
 			rm -f "$cmdfile"
+			# alp-sdk#2233 review round 3, item 12: every earlier attempt's
+			# $out is removed below (nothing to learn from a retry that was
+			# superseded); THIS one -- the terminal failure -- is kept as
+			# evidence for whoever reads the abort message.
+			echo "bench-env: bench_flowd_proof ($tag): giving up after $attempt/3 connect attempts --" >&2
+			echo "           transcript kept for inspection: $out" >&2
 			return "$rc"
 		fi
 		echo "bench-env: bench_flowd_proof ($tag): connect attempt $attempt/3 failed -- the SES may still be" >&2
 		echo "           mid-boot (AP[3] not yet up); retrying after a short settle." >&2
+		rm -f "$out"
 		attempt=$((attempt + 1))
 		sleep 2
 	done

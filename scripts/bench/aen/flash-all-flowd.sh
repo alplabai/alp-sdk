@@ -161,7 +161,10 @@ for a in "${APPS[@]}"; do
     # below), not a per-app one -- if it's set, every remaining app would
     # print the same "nothing written" result identically. Break, same
     # reasoning as exit 8.
-    echo ">> $a : FLASH-DRY-RUN (FLOWD_DRY_RUN is set -- nothing written, no probe opened)"
+    # alp-sdk#2233 review round 3, finding 4: "no probe opened" was false --
+    # each child's own DPIDR preflight already opened one (read-only) before
+    # its dry-run exit; only the write session is skipped.
+    echo ">> $a : FLASH-DRY-RUN (FLOWD_DRY_RUN is set -- nothing written, no write session run)"
     echo "$a : FLASH-DRY-RUN (nothing written)" >>"$SUM"
     echo "!! ABORTING BATCH: FLOWD_DRY_RUN is set for this run -- unset it to actually flash."
     break
@@ -173,10 +176,13 @@ for a in "${APPS[@]}"; do
     ;;
   8)
     # bench_flowd_atoc_guard's refusal: no SE_UART and no --atoc-unqueryable
-    # (bench-env.sh). Unlike every other arm here this is a BATCH-level
-    # configuration refusal, not a per-app failure -- it is decided before
-    # any probe or target access, so it cannot differ between apps and every
-    # remaining entry would abort identically. Breaking out says so once
+    # (bench-env.sh). Like exit 10 above (alp-sdk#2233 review round 3,
+    # finding 10 -- an earlier version of this comment said "unlike every
+    # other arm here", which stopped being true the moment exit 10 also
+    # started breaking the batch), this is a BATCH-level configuration
+    # refusal, not a per-app failure -- it is decided before any probe or
+    # target access, so it cannot differ between apps and every remaining
+    # entry would abort identically. Breaking out says so once
     # instead of printing the same guard text N times and handing back a
     # summary that is 100% FLASH-REFUSED with no board ever written
     # (alp-sdk#2189). The already-processed entries keep their real verdicts

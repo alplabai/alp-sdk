@@ -90,6 +90,8 @@
 #
 # Exit codes (aligned with the sibling Flow D helpers):
 #   0  window written and byte-verified (fresh-session read-back proof) as erased
+#   1  usage error -- an unrecognised argument, or --sku with no value
+#      (nothing written, no probe opened)
 #   2  the part-number device profile could not connect (nothing written)
 #   3  the read-back proof failed -- do NOT treat as erased
 #   4  DPIDR gate: this is not the AEN E8 (nothing written)
@@ -104,6 +106,11 @@
 #  11  RACE DETECTED between the pre-read and the write session's own
 #      pre-load savebin (see bench-env.sh) -- the board HAS already been
 #      written; restore from the printed paths before trusting it
+#  13  bench_jlink_run()'s FLOWD_DRY_RUN backstop refused the write session
+#      (nothing written) -- should never be reachable in practice, since
+#      FLOWD_DRY_RUN is now treated exactly like --dry-run and exits before
+#      any write session is even built; kept as defense in depth, same as
+#      every other Flow D writer
 set -e
 
 # shellcheck source=scripts/bench/aen/bench-env.sh
@@ -113,7 +120,14 @@ DRY_RUN=0
 SKU="${ALP_AEN_SKU:-E1M-AEN801}"
 # Whole-argv scan (same shape flash-jlink.sh's flag parser uses, see its own
 # PARSER SHAPE note) -- --dry-run and --sku may land in either order.
-POSITIONAL=()
+#
+# REJECT UNKNOWN ARGS AND A VALUE-LESS --sku (alp-sdk#2233 review round 3,
+# finding 11) -- an earlier version silently dropped anything it didn't
+# recognise into an unused POSITIONAL array: a `--dryrun` typo (missing the
+# hyphen) ran a REAL, destructive erase instead of refusing, and a trailing
+# bare `--sku` with no value silently kept targeting the E1M-AEN801 default
+# instead of erroring. This script takes no operands, so ANY unrecognised
+# argument is a usage mistake, not something to ignore.
 _next_is_sku=0
 for arg in "$@"; do
 	if [ "$_next_is_sku" = 1 ]; then
@@ -125,9 +139,31 @@ for arg in "$@"; do
 	--dry-run) DRY_RUN=1 ;;
 	--sku) _next_is_sku=1 ;;
 	--sku=*) SKU="${arg#--sku=}" ;;
-	*) POSITIONAL+=("$arg") ;;
+	*)
+		echo "!! ABORT: unknown argument '$arg' -- usage: erase-storage.sh [--dry-run] [--sku <SKU>]" >&2
+		exit 1
+		;;
 	esac
 done
+if [ "$_next_is_sku" = 1 ]; then
+	echo "!! ABORT: --sku requires a value -- usage: erase-storage.sh [--dry-run] [--sku <SKU>]" >&2
+	exit 1
+fi
+# alp-sdk#2233 review round 3, finding 2: FLOWD_DRY_RUN must be treated
+# EXACTLY like this script's own --dry-run -- an earlier version let
+# FLOWD_DRY_RUN reach the DPIDR preflight, the ATOC-trailer read, and the
+# pre-write backup copy for real, backing up SYNTHETIC all-zero sectors
+# (bench_flowd_read_sectors' own FLOWD_DRY_RUN synthesis) into
+# $BENCH_ROOT/flowd-backup/... as if they were a genuine pre-write capture,
+# and relied on bench_jlink_run()'s backstop (return 13) to stop the actual
+# write -- a backstop, not a substitute for exiting before ANY of that runs.
+# Aliasing the two flags here reuses the SAME --dry-run code path below
+# (DPIDR skipped, ATOC-trailer read skipped, backup skipped, prints the
+# CommandFile and exits 0) rather than adding a second, parallel dry-run
+# branch.
+if [ -n "${FLOWD_DRY_RUN:-}" ]; then
+	DRY_RUN=1
+fi
 
 # Routed through bench_jlink_run (bench-env.sh, alp-sdk#2064): masks every
 # OTHER probe out of a private namespace so -SelectEmuBySN resolves
@@ -180,7 +216,7 @@ printf '>>> customer storage window: %s .. 0x%X (%s KiB, exclusive of atoc at %s
 #    so the file is literally $SIZE zero bytes -- and it is the blob the
 #    sector-pad machinery below both writes and later read-back-proves,
 #    which makes "erased" a byte-compare rather than a claim.
-ZEROS=/tmp/aen-storage-erased.bin
+ZEROS="${TMPDIR:-/tmp}/aen-storage-erased.bin"
 head -c "$SIZE" /dev/zero > "$ZEROS"
 
 # The path handed to the J-Link CommanderScript has to be one the J-Link BINARY
@@ -210,16 +246,16 @@ printf '    erased pattern: %s (%s B of 0x00 -- NOT 0xFF)\n' \
 #
 #    DRY_RUN never reaches here, so it still opens no probe.
 if [ "$DRY_RUN" != 1 ]; then
-	cat > /tmp/aen-erase-preflight.jlink <<EOF
+	cat > "${TMPDIR:-/tmp}/aen-erase-preflight.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
 exit
 EOF
-	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/aen-erase-preflight.jlink \
-		> /tmp/aen-erase-preflight.out 2>&1 || true
-	bench_jlink_assert_aen_dpidr /tmp/aen-erase-preflight.out "storage-erase preflight" || exit 4
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/aen-erase-preflight.jlink" \
+		> "${TMPDIR:-/tmp}/aen-erase-preflight.out" 2>&1 || true
+	bench_jlink_assert_aen_dpidr "${TMPDIR:-/tmp}/aen-erase-preflight.out" "storage-erase preflight" || exit 4
 	echo ">>> DPIDR gate OK: probe confirmed AEN E8 (0x$AEN_DPIDR)" >&2
 fi
 
@@ -232,28 +268,39 @@ fi
 #
 # Read-only, in the same read-only pre-read spirit as the sector-pad plan
 # below -- this only ever SAVEBINs, never LOADBINs. DRY_RUN never reaches
-# here (no probe opened at all in that mode, hazard-driven), so the overlap
-# check below is simply SKIPPED under --dry-run -- it inherently needs a
-# real read to answer; that is a known, printed limitation of --dry-run, not
-# a silent gap.
+# here (no probe opened at all in that mode, hazard-driven -- alp-sdk#2233
+# review round 3, finding 2: FLOWD_DRY_RUN now aliases DRY_RUN=1 too, not
+# just this script's own --dry-run), so the overlap check below is simply
+# SKIPPED under DRY_RUN -- it inherently needs a real read to answer; that
+# is a known, printed limitation, not a silent gap.
+#
+# READS THE WHOLE ATOC REGION, not just its trailer-bearing top sector
+# (alp-sdk#2233 review round 3, finding 5): a blank TRAILER does not by
+# itself prove there is no resident package (see atoc_trailer.py's own
+# blank-trailer handling) -- it also needs to search for a live OEMTOC01
+# signature elsewhere in the region before trusting "blank". `atoc`'s own
+# size (32 KiB, two sectors on every AEN E8 SKU today) makes reading the
+# whole thing here just as cheap as reading one sector, and removes the
+# need for a second, separate read.
 if [ "$DRY_RUN" != 1 ]; then
-	TRAILER_SECTOR_BASE=$((ATOC_END - FLOWD_SECTOR_SIZE))
+	ATOC_REGION_SIZE=$((ATOC_KIB * 1024))
+	TRAILER_SECTOR_BASE="$ATOC_BASE"
 	TRAILER_SECTOR_FILE="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-trailer-XXXXXX.bin")" || exit 6
-	cat > /tmp/aen-erase-atoc-trailer.jlink <<EOF
+	cat > "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_READ
 connect
-savebin $(bench_flowd_jlink_path "$TRAILER_SECTOR_FILE") $(printf '0x%X' "$TRAILER_SECTOR_BASE") $FLOWD_SECTOR_SIZE
+savebin $(bench_flowd_jlink_path "$TRAILER_SECTOR_FILE") $(printf '0x%X' "$((TRAILER_SECTOR_BASE))") $(printf '0x%X' "$ATOC_REGION_SIZE")
 exit
 EOF
-	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/aen-erase-atoc-trailer.jlink \
-		> /tmp/aen-erase-atoc-trailer.out 2>&1 || true
-	bench_jlink_assert_connected /tmp/aen-erase-atoc-trailer.out "ATOC trailer read" || exit 6
+	"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.jlink" \
+		> "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out" 2>&1 || true
+	bench_jlink_assert_connected "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.out" "ATOC trailer read" || exit 6
 
 	ATOC_RESOLVE_OUT="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-resolve-XXXXXX.out")" || exit 6
 	if ! PYTHONIOENCODING=utf-8 python3 "$ALP_SDK_DIR/scripts/bench/aen/atoc_trailer.py" resolve \
-		--sector-file "$TRAILER_SECTOR_FILE" --sector-base "$(printf '0x%X' "$TRAILER_SECTOR_BASE")" \
+		--sector-file "$TRAILER_SECTOR_FILE" --sector-base "$(printf '0x%X' "$((TRAILER_SECTOR_BASE))")" \
 		--window-lo "$FLOWD_WINDOW_LO" --window-end "$(printf '0x%X' "$ATOC_END")" \
 		>"$ATOC_RESOLVE_OUT" 2>&1; then
 		echo "!! ABORT: could not determine the resident ATOC package's location -- refusing" >&2
@@ -331,7 +378,9 @@ FLOWD_LOADBIN_LINES="$(bench_flowd_loadbin_lines "$FLOWD_MANIFEST" 0)" || {
 # one script in this directory that erases a whole customer window, so a
 # race between the pre-read and the write is the highest-consequence case.
 FLOWD_PREWRITE_LINES="$(bench_flowd_prewrite_lines "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/prewrite")"
-cat > /tmp/aen-erase-storage.jlink <<EOF
+ERASE_WRITE_JLINK="${TMPDIR:-/tmp}/aen-erase-storage.jlink"
+ERASE_WRITE_OUT="${TMPDIR:-/tmp}/aen-erase-storage.out"
+cat > "$ERASE_WRITE_JLINK" <<EOF
 si SWD
 speed $JLINK_SPEED
 device $JLINK_DEVICE_FLASH
@@ -343,39 +392,75 @@ EOF
 
 if [ "$DRY_RUN" = 1 ]; then
 	echo "--- DRY RUN: nothing was written, no probe was opened ---"
-	cat /tmp/aen-erase-storage.jlink
+	cat "$ERASE_WRITE_JLINK"
 	exit 0
 fi
 
 # 4. Write. Deliberately NO reset and NO `g`: this step must not boot
 #    anything. Cold power-cycle by hand afterwards and confirm the SE still
 #    finds its ATOC (docs/aen-provisioning.md section 2 listener).
-"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript /tmp/aen-erase-storage.jlink \
-	> /tmp/aen-erase-storage.out 2>&1 || true
+#
+# CAPTURE THE WRITE-SESSION STATUS (alp-sdk#2233 review round 3, finding 3):
+# every writer used to discard this with a bare `|| true`, so a
+# bench_jlink_run() backstop refusal (FLOWD_DRY_RUN set, rc=13 -- see
+# bench-env.sh) fell straight through to the connect-failure text grep
+# below, which found nothing and let the script carry on into the race
+# check/proof as if a real session had run. `write_rc=0; cmd || write_rc=$?`
+# (not `if cmd; then ...; fi; rc=$?` -- see bench_flowd_proof's own retry-loop
+# fix for exactly why that shape is unsafe) keeps `set -e` from aborting on a
+# real connect failure (unchanged, handled by the text grep just below) while
+# still capturing bench_jlink_run's OWN exit code for the one case that
+# matters here: 13 means NO session ran at all.
+write_rc=0
+"${JLINK_ARGS[@]}" -nogui 1 -CommanderScript "$ERASE_WRITE_JLINK" \
+	> "$ERASE_WRITE_OUT" 2>&1 || write_rc=$?
+if [ "$write_rc" -eq 13 ]; then
+	echo "!! bench_jlink_run REFUSED the write session -- FLOWD_DRY_RUN backstop (rc=13)." >&2
+	echo "   Refusing before any race check, proof, or write claim. Should be unreachable" >&2
+	echo "   now that FLOWD_DRY_RUN is treated exactly like --dry-run above; this is" >&2
+	echo "   defense in depth." >&2
+	exit 13
+fi
 grep -iE "could not connect|fail|error|Verify|O\.K\.|Writing|Programming|Cortex|Found" \
-	/tmp/aen-erase-storage.out | head -30
-echo "----- (full log: /tmp/aen-erase-storage.out) -----"
-if grep -qi "Could not connect to the target device" /tmp/aen-erase-storage.out; then
+	"$ERASE_WRITE_OUT" | head -30
+echo "----- (full log: $ERASE_WRITE_OUT) -----"
+if grep -qi "Could not connect to the target device" "$ERASE_WRITE_OUT"; then
 	echo "!! $JLINK_DEVICE_FLASH profile FAILED to connect -- the Alif MRAM loader was"
 	echo "   never unlocked. The window was NOT erased."
 	exit 2
 fi
 
-# RACE CHECK (#2233 review major 4).
-if ! bench_flowd_check_race erase-storage "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite"; then
-	echo "!! RACE DETECTED -- restore from $FLOWD_BACKUP_DIR and $FLOWD_SCRATCH/prewrite" >&2
-	echo "   before trusting this board. The write HAS already happened." >&2
-	exit 11
-fi
-
-# GATE ON THE READ-BACK PROOF (#2233, replacing the old #1488 verifybin
-# gate): a FRESH read-only J-Link session savebin's the whole window back and
-# cmp's it byte-for-byte against the padded (here: pure-zero) image.
+# RUN THE PROOF BEFORE THE RACE CHECK, PRINT BOTH (alp-sdk#2233 review round
+# 3, finding 7): an earlier version ran the race check FIRST and exited 11
+# immediately on a detected race, so a proof failure right alongside it was
+# NEVER EVEN CHECKED, let alone reported -- an operator investigating a race
+# had no idea whether the write also failed to land at all. Both now always
+# run and both verdicts are always printed; a detected race still wins the
+# final exit code (11) even when the proof itself passed, because the race
+# means something ELSE touched this window and the whole picture is suspect
+# regardless of what the proof says.
+proof_failed=0
 if ! bench_flowd_proof erase-storage "$FLOWD_MANIFEST" "$FLOWD_SCRATCH/postread"; then
 	echo "!! READ-BACK PROOF FAILED -- the window is NOT uniformly 0x00. Do not ship this SoM."
+	proof_failed=1
+fi
+if [ "$proof_failed" -eq 0 ]; then
+	printf 'erased: %s .. 0x%X verified all-0x00 (fresh-session read-back proof)\n' "$BASE" "$END"
+fi
+
+race_failed=0
+if ! bench_flowd_check_race erase-storage "$FLOWD_SECTORS_FILE" "$FLOWD_SCRATCH/sectors" "$FLOWD_SCRATCH/prewrite" "$ERASE_WRITE_OUT"; then
+	echo "!! RACE DETECTED -- restore from $FLOWD_BACKUP_DIR and $FLOWD_SCRATCH/prewrite" >&2
+	echo "   before trusting this board. The write HAS already happened." >&2
+	race_failed=1
+fi
+
+if [ "$race_failed" -eq 1 ]; then
+	exit 11
+fi
+if [ "$proof_failed" -eq 1 ]; then
 	exit 3
 fi
-printf 'erased: %s .. 0x%X verified all-0x00 (fresh-session read-back proof)\n' "$BASE" "$END"
 echo "NEXT (by hand, still owed): cold power-cycle the module and confirm the SE"
 echo "     boots clean on the docs/aen-provisioning.md section 2 listener -- the"
 echo "     ATOC band was not touched, so the banner must still show the app"
