@@ -862,28 +862,33 @@ def test_scaffold_readme_cold_chain_models_link_survives_scaffolding():
         readme, "No model is shipped", "[`models/README.md`](")
 
 
-def test_scaffold_readme_mqtt_native_sim_conf_link_survives_scaffolding():
-    """Issue #1794: mqtt-telemetry's README deliberately links
-    `../mqtt-telemetry/native_sim.conf` -- climbing out of the example
-    dir and back in -- because `_RELATIVE_LINK_RE` only matches
-    `../`-prefixed links and `native_sim.conf` is a CHILD of the example
-    dir, not a sibling. A future edit that "tidies" the link to the more
-    natural `](native_sim.conf)` would stop matching the rewriter
-    entirely and ship a dangling relative link in every scaffold; assert
-    on the EMITTED output, not the source text, so this catches that.
+def test_scaffold_readme_mqtt_own_dir_link_survives_scaffolding():
+    """Issue #1794: mqtt-telemetry's README deliberately links a file in
+    its OWN directory as `../mqtt-telemetry/<file>` -- climbing out of the
+    example dir and back in -- because `_RELATIVE_LINK_RE` only matches
+    `../`-prefixed links and a child of the example dir is not a sibling.
+    A future edit that "tidies" the link to the more natural
+    `](<file>)` would stop matching the rewriter entirely and ship a
+    dangling relative link in every scaffold; assert on the EMITTED
+    output, not the source text, so this catches that.
 
     Also pins issue #1798's rendering regression: a URL substring alone
     survives even when an explanatory HTML comment sitting at column 0
-    silently splits the "turns mbedtls off (see [link])" sentence into
-    two paragraphs, so also assert the lead-in and the link render in
-    the SAME CommonMark block."""
+    silently splits the "... (see [link])" sentence into two paragraphs,
+    so also assert the lead-in and the link render in the SAME CommonMark
+    block.
+
+    The fixture used to be `native_sim.conf`, which existed only to force
+    `CONFIG_MBEDTLS=n`; that break is fixed at its root and the file is
+    deleted (#2173), so this pins the same two behaviours on `prj.conf` --
+    a child of the example dir that is not going anywhere."""
     envelope = dict(alp_template.render_to_envelope("iot", "E1M-AEN801"))
     readme = envelope["README.md"]
     ref = alp_template._docs_ref(alp_template.REPO)
     assert (f"https://github.com/alplabai/alp-sdk/blob/{ref}"
-            "/examples/connectivity/mqtt-telemetry/native_sim.conf") in readme
+            "/examples/connectivity/mqtt-telemetry/prj.conf") in readme
     assert _no_paragraph_break_between(
-        readme, "turns mbedtls off (see", "[`native_sim.conf`](")
+        readme, "carries no mbedTLS", "[`prj.conf`](")
 
 
 def test_scaffold_readme_extra_zephyr_modules_uses_alp_sdk_root_not_pwd():

@@ -99,6 +99,8 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
@@ -112,6 +114,8 @@ on:
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
@@ -120,6 +124,8 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
@@ -133,6 +139,8 @@ on:
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
   workflow_dispatch:
@@ -364,7 +372,21 @@ jobs:
       # overlay wires were silently dropped and nothing built to notice.
       # Bounded to this one example, not widened to examples/peripheral-io/
       # -- every other example there is native_sim-only (see #2106).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot
+      # examples/connectivity/mqtt-telemetry and .../iot-fleet-ota are the
+      # fourth and fifth bounded roots (issue #2173). Neither had ANY AEN
+      # coverage here: mqtt-telemetry shipped no AEN scenario at all, and
+      # iot-fleet-ota's named `ensemble_e8_dk/...` -- the stock Alif DevKit
+      # board, which no -p flag in this repo selects -- so the apps'
+      # real-silicon build was ungated and stayed broken (they did not
+      # compile at all until the mbedtls PSA floor landed). Both now name
+      # the alp_e1m_aen801_m55_hp target their own board.yaml describes
+      # (som.sku E1M-AEN801, preset e1m-evk), build_only, so a regression
+      # in the CC3501E/TLS build path fails a PR instead of a bench run.
+      # Both are AEN801-only, so they contribute scenarios to the AEN801
+      # matrix leg and select nothing on the AEN803 one -- these two apps
+      # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
+      # not reach them (they sit outside examples/aen).
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -386,6 +408,8 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
             --inline-logs \
             --no-detailed-test-id
 

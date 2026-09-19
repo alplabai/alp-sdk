@@ -28,9 +28,44 @@ tests:
         type: one_line
         regex:
           - "\\[mqtt\\] done"
-    # native_sim.conf loads LAST (after alp.conf's EXTRA_CONF_FILE
-    # emit) so it can flip CONFIG_MBEDTLS off -- works around the
-    # Zephyr 4.4 / mbedtls 3.6 ssl_misc.h include-order bug; see
-    # native_sim.conf for the full rationale.
-    extra_args:
-      - "EXTRA_CONF_FILE=native_sim.conf"
+    # No native_sim.conf any more: it existed only to turn mbedtls off
+    # around the ssl_misc.h break, which is fixed at its root (#2173), so
+    # this scenario now builds the same TLS-enabled config the SoM does.
+    # native_sim's only entropy driver is FAKE_ENTROPY_NATIVE_SIM, whose own
+    # Kconfig help says it "does not generate real entropy", so the weak-RNG
+    # refusal in zephyr/CMakeLists.txt applies here too (#2192). A simulator
+    # run is exactly what the opt-in exists for. It lives on the SCENARIO,
+    # not in the app's prj.conf, so a copy scaffolded by `tan init
+    # --from-example` and built for real hardware still refuses.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
+
+  # Issue #2173: the AEN build had no scenario at all, so the one target
+  # this app is actually written for -- the CC3501E bridge on an
+  # E1M-AEN801 -- was never compiled in CI, and it had stopped compiling
+  # (the mbedtls PSA floor, fixed in zephyr/Kconfig.alp-libraries).
+  # build_only: there is no radio on a CI runner, so this asserts the
+  # image links for the SoM its board.yaml names, nothing more.
+  alp_sdk.example.mqtt_telemetry.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - iot
+      - mqtt
+      - aen
+    build_only: true
+    # There is no Alif Ensemble entropy driver in this tree or upstream
+    # (#2192), so this compile check has to acknowledge the weak RNG to run
+    # at all -- that is the honest state of AEN TLS today, and build_only
+    # means the image never leaves CI. The opt-in is deliberately here and
+    # not in the app's prj.conf: a scaffolded copy built for a real SoM gets
+    # the refusal, naming #2192 and the entropy driver it needs.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
+    harness: console
+    harness_config:
+        type: one_line
+        regex:
+          - "\\[mqtt\\] done"

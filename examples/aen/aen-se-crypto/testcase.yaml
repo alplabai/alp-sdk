@@ -22,6 +22,11 @@ tests:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    # This scenario only compile-checks the bench image. AEN has no Zephyr
+    # entropy driver yet (#2192), so acknowledge the weak PSA fallback here,
+    # not in prj.conf where a copied or flashed example would inherit it.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
     tags:
       - alp-sdk
       - example
