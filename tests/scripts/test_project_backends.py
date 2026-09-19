@@ -14,6 +14,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -86,7 +87,8 @@ class TestHwBackendsLoader(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         # In any subTest we want the actual returncode + stderr in the
         # failure message, so attach them to the returned string.
@@ -275,7 +277,8 @@ class TestInferenceFromSomCaps(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "zephyr-conf",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -295,7 +298,8 @@ class TestInferenceFromSomCaps(unittest.TestCase):
                  "--input", str(path),
                  "--emit", "cmake-args",
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 

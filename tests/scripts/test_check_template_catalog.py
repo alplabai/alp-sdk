@@ -8,6 +8,7 @@ gate, including the #448/#520 known-content-quality-gap rule.
 """
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +23,8 @@ CATALOG = REPO / "metadata" / "templates" / "catalog-v1.json"
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def _catalog() -> dict:

@@ -255,7 +255,7 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(emit(entries), encoding="utf-8", newline="")
     _clang_format(OUT, exe)
-    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text().splitlines())} lines)")
+    print(f"wrote {OUT.relative_to(REPO)} ({len(OUT.read_text(encoding='utf-8').splitlines())} lines)")
     return 0
 
 

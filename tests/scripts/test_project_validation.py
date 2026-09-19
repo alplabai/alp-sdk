@@ -14,6 +14,7 @@ Or via CI as configured in .github/workflows/pr-metadata-validate.yml.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -44,7 +45,8 @@ class TestValidatorPeripheralCheck(unittest.TestCase):
             [sys.executable,
              str(REPO / "scripts" / "validate_board_yaml.py"),
              "--input", str(example)],
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
         )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertIn(f"{example}: clean", rv.stdout)
@@ -73,7 +75,8 @@ class TestEmitModeCoreOsMismatch(unittest.TestCase):
                  "--input", str(path),
                  "--emit", emit,
                  "--core", core],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         return rv.returncode, rv.stdout, rv.stderr
 
@@ -141,7 +144,8 @@ class TestEmitModeCoreOsMismatch(unittest.TestCase):
                 [sys.executable, str(LOADER),
                  "--input", str(path),
                  "--emit", "zephyr-conf"],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
         self.assertEqual(rv.returncode, 0, msg=rv.stderr)
         self.assertIn("core: m55_hp", rv.stdout)

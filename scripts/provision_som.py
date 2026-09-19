@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -83,7 +84,8 @@ def _validate_bundle(cfg: Cfg):
         return None, Step("validate", False, f"no bundle.json in {cfg.bundle_dir}")
     proc = subprocess.run(
         [sys.executable, str(SCRIPTS / "check_som_bundle.py"), "--bundle", str(bj)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if proc.returncode != 0:
         return None, Step("validate", False,
                           f"bundle failed schema validation:\n{proc.stdout.strip()}")
@@ -131,7 +133,8 @@ def _alloc_serial(cfg: Cfg, bundle: dict):
            "alloc", "--sku", bundle["sku"]]
     if cfg.mfg_date:
         cmd += ["--date", cfg.mfg_date]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if proc.returncode != 0:
         return None, Step("serial", False, f"alloc failed: {proc.stderr.strip()}")
     serial = proc.stdout.strip()
@@ -154,7 +157,8 @@ def _eeprom(cfg: Cfg, bundle: dict):
         [sys.executable, str(SCRIPTS / "program_eeprom.py"),
          "--board-yaml", str(tmp / "board.yaml"), "--serial", cfg.serial,
          "--mfg-date", cfg.mfg_date, "--output", str(manifest)],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if proc.returncode != 0:
         return None, Step("eeprom", False,
                           f"program_eeprom failed: {(proc.stderr or proc.stdout).strip()}")
@@ -184,7 +188,8 @@ def _power_on_test(cfg: Cfg) -> tuple[bool, Step]:
     runner = root / "tests" / "hil" / "run_smoke.py"
     mode = [] if cfg.execute else ["--validate"]
     cmd = [sys.executable, str(runner), *mode, str(cfg.hil_spec)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     ok = proc.returncode == 0
     verb = "ran HiL smoke" if cfg.execute else "validated HiL spec (would run smoke)"
     return True, Step("test", ok, f"{verb} {cfg.hil_spec} rc={proc.returncode}", cmd)
@@ -231,7 +236,8 @@ def _record(cfg: Cfg, bundle: dict, manifest: Path, test_ran: bool, test_ok: boo
            "--test-result", result, "--by", cfg.by]
     if cfg.station:
         cmd += ["--station", cfg.station]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     ok = proc.returncode == 0
     detail = "ok" if ok else (proc.stderr or proc.stdout).strip()
     return Step("record", ok, f"ledger record {cfg.serial} ({result}): {detail}", cmd)

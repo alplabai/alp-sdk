@@ -369,7 +369,8 @@ def _run(cmd: list[str]) -> tuple[int, str]:
     (returncode, output).  Doesn't raise on non-zero exit -- the
     caller decides whether to fail the spec."""
     proc = subprocess.run(
-        cmd, capture_output=True, text=True, check=False,
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 

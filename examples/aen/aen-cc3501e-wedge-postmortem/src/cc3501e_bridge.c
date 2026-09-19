@@ -7,7 +7,7 @@
 
 #include "cc3501e_bridge.h"
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HE)
 #include <zephyr/arch/cpu.h>
 #include <zephyr/sys/sys_io.h>
 /*

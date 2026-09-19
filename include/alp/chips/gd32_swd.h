@@ -63,7 +63,7 @@ extern "C" {
  *  @warning UNVERIFIED on a GD32G553 -- this value comes from the core's
  *  generic architectural expectation, not from a probe on the part. It is
  *  also, separately, the bench-measured SW-DP ID of the V2N CM33 DAP on
- *  `e1mx-v2n-m1-01` (`Found SW-DP with ID 0x6BA02477`, `Found Cortex-M33
+ *  a V2N bench unit (`Found SW-DP with ID 0x6BA02477`, `Found Cortex-M33
  *  r0p4`) -- a *different* target on the same board
  *  (`scripts/bench/aen/bench-env.sh`). Whether a real GD32G553 answers
  *  this value, the only other GD32 candidate on record (`0x0BE12477`,

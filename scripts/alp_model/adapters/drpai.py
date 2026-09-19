@@ -210,9 +210,9 @@ class DrpaiAdapter(CompilerAdapter):
             "-i", str(input_name),
             "--images", str(images),
         ]
-        env = {**os.environ, "PRODUCT": product}
+        env = {**os.environ, "PRODUCT": product, "PYTHONIOENCODING": "utf-8"}
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True,
+            proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                                   timeout=_DRPAI_TIMEOUT_S, env=env)
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"DRP-AI compile timed out after {exc.timeout}s") from exc

@@ -55,7 +55,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 # scripts/bench/aen/bench-env.sh) does before a J-Link `loadbin` REPLACES it.
 # --atoc-unqueryable is a deliberate, differently-named acknowledgement for
 # THAT case, NOT the Flow A `--replace-atoc` opt-out: an operator on a
-# no-SE-UART slot (e.g. e1m-aen-evk-03) will pass this on every single Flow D
+# no-SE-UART slot (e.g. an AEN EVK bench place with no SE-UART wired) will pass this on every single Flow D
 # run, and that habit must never also silence Flow A's guard on a board
 # where the resident TOC genuinely can be read. Do not merge or alias the
 # two flags. --replace-atoc is also accepted here, for the OTHER case: a
@@ -326,8 +326,8 @@ echo "    atoc -> $ATOC_ADDR ($(stat -c%s "$PKG") B)" >&2
 # !! D-cache on is exactly that case.  Prove a flash by cutting power at the
 # !! DPS-150 and re-reading slot0.  RESOLVED 2026-09-04: the AEN place now drives
 # !! DPS-150 10A2617F4486 at the documented 16.0 V (pwr-only.yaml re-cabled, the
-# !! retired e1mx-v2n-m1-01 agent disabled), so
-# !!   LG_ENV=~/board-farm/labgrid/pwr-only.yaml labgrid-client -p e1m-aen-evk-01 power off|on
+# !! retired V2N bench place's agent disabled), so
+# !!   LG_ENV=~/board-farm/labgrid/pwr-only.yaml labgrid-client -p <your-bench-place> power off|on
 # !! really cuts power and the cold-cycle proof is available on this bench.
 #
 # SetSkipProgOnCRCMatch = 0: never let J-Link decide a page is already correct

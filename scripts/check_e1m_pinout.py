@@ -86,7 +86,7 @@ def _load_snapshot(form: str, errors: list[str]) -> dict | None:
         _fail(errors, f"[snapshot] missing {path.relative_to(REPO)}")
         return None
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         _fail(errors, f"[snapshot] {path.relative_to(REPO)} is not valid JSON: {exc}")
         return None
@@ -94,7 +94,7 @@ def _load_snapshot(form: str, errors: list[str]) -> dict | None:
 
 def check_schema(snapshots: dict[str, dict], errors: list[str]) -> None:
     try:
-        schema = json.loads(SCHEMA_PATH.read_text())
+        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         _fail(errors, f"[schema] cannot load {SCHEMA_PATH.relative_to(REPO)}: {exc}")
         return
@@ -121,7 +121,7 @@ def check_lock(snapshots: dict[str, dict], errors: list[str]) -> None:
         _fail(errors, f"[lock] missing {LOCK_PATH.relative_to(REPO)}")
         return
     try:
-        lock = yaml.safe_load(LOCK_PATH.read_text())
+        lock = yaml.safe_load(LOCK_PATH.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         _fail(errors, f"[lock] {LOCK_PATH.relative_to(REPO)} is not valid YAML: {exc}")
         return
@@ -146,7 +146,7 @@ def check_lock(snapshots: dict[str, dict], errors: list[str]) -> None:
 
 def check_join(snapshots: dict[str, dict], errors: list[str]) -> None:
     for pinmux_path in sorted(PINMUX_DIR.glob("*.yaml")):
-        doc = yaml.safe_load(pinmux_path.read_text())
+        doc = yaml.safe_load(pinmux_path.read_text(encoding="utf-8"))
         family = doc.get("family")
         form = FAMILY_FORM_FACTOR.get(family)
         if form is None:

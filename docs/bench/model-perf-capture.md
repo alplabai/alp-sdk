@@ -174,7 +174,8 @@ different measurements and get two different files; see
    status via `(void)alp_inference_invoke(inf)`, which is exactly the
    discarded-status defect this step exists to avoid.
 5. **Fill `capture`**: `date` (ISO-8601, the day of the run),
-   `operator`, `bench_id` (the physical rig, e.g. `e1m-aen-evk-01`),
+   `operator`, `bench_id` (the physical rig, identified by module SKU +
+   serial, e.g. `E1M-AEN801/2026W36-0003`),
    and `notes` for anything a reader trusting the number should know
    (thermal state, firmware build, the const-region caveat from
    blocker 2).

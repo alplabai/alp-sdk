@@ -240,7 +240,7 @@ def test_security_psa_attestation_optiga_rejected_when_som_lacks_it(
 
     # Synthetic AEN301 variant with OPTIGA explicitly DNI'd.
     preset = yaml.safe_load(
-        (real_meta / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+        (real_meta / "e1m_modules" / "E1M-AEN301.yaml").read_text(encoding="utf-8"))
     preset["on_module"].pop("secure_element", None)
     preset["capabilities"].pop("optiga_trust_m", None)
     (e1m / "E1M-AEN301.yaml").write_text(yaml.safe_dump(preset),

@@ -591,9 +591,9 @@ that ISOLATE all the downstream buses -- with the caveat below that
   carrier-selected rail, it is the plugged-in SoM's own `VIO_OUT`
   (2626-R2 netlist: `E2` pins P1/P2 `VIO_OUT` feed `+VIO_C`, which
   reaches `+VIO` through U33's shunt monitor). MEASURED with the
-  E1M-AEN SoM on `e1m-aen-evk-03`: `+VIO` = 1.8 V, and with a
+  E1M-AEN SoM (serial 2026W36-0002): `+VIO` = 1.8 V, and with a
   3257-type part fitted, the amps stayed silent. OBSERVED
-  (`e1m-aen-evk-03`, 2026-09-15 ~14:05Z): that 3257-type part's `VCC`
+  (same unit, 2026-09-15 ~14:05Z): that 3257-type part's `VCC`
   was re-wired from `+VIO` to `+3V3` between the silent run above and
   a run where a continuous 1 kHz PROBE_LISTEN tone through I2S3 was
   clearly audible on both TAS2563 amps. MEASURED: the `VCC` move
