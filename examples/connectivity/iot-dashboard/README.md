@@ -7,7 +7,8 @@
 Customer-facing IoT demo: an E1M-AEN module reads BME280
 environment samples (temperature / humidity / pressure),
 publishes them to an MQTT broker over TLS, and renders a live
-LVGL dashboard on a 240×320 ST7789.
+LVGL dashboard on a RK055HDMIPI4MA0 720×1280 MIPI-DSI panel
+(Himax HX8394) on the EVK's J6 connector.
 
 ## What it shows
 
@@ -25,14 +26,53 @@ LVGL dashboard on a 240×320 ST7789.
 - **LVGL** composes the dashboard layout with sparkline chart +
   status strip, bound to the panel via `<alp/display.h>` +
   `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
-  `<zephyr/drivers/display.h>` calls in app code.
+  `<zephyr/drivers/display.h>` calls in app code.  The dashboard's own
+  layout is fixed at 240×320 and draws in the top-left corner of the
+  720×1280 panel; it does not scale to fill it (#2173).
 
 ## Build
 
+A real-silicon build refuses to configure without a real entropy
+source (#2192: AEN has no Ensemble entropy driver yet, so the weak-RNG
+guard in `zephyr/CMakeLists.txt` trips), so the plain command below
+fails at configure time without the opt-in shown. CI's `testcase.yaml`
+opts in the same way to get a build-only compile check; the
+`CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y` acknowledgement is
+**bench-only -- never ship it**.
+
+Compile-only check (matches CI, no MCUboot signing, not flashable):
+
 ```
-west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp examples/connectivity/iot-dashboard
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
+    examples/connectivity/iot-dashboard -- \
+    -DCONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y   # bench-only -- never ship this flag
+```
+
+The documented AEN flow builds with `--sysbuild` instead, so MCUboot
+signs the image into slot0 (see `docs/_aen-runbook-section.md`). Under
+`--sysbuild`, sysbuild does not forward a plain `-DBOARD=`/`-DCONFIG_...`
+pair to the app image's own CMake invocation the way a non-sysbuild
+build does, so the config override below must be passed unprefixed at
+the sysbuild command line, which sysbuild then routes to the main app
+image (`iot-dashboard`) only:
+
+```
+west build -b alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp \
+    examples/connectivity/iot-dashboard --sysbuild -- \
+    -DSB_CONF_FILE=<abs-alp-sdk>/zephyr/sysbuild/aen/sysbuild.conf \
+    -DCONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y   # bench-only -- never ship this flag
 west flash
 ```
+
+(`alp_e1m_aen801_m55_hp/...` also builds -- pick the target matching
+your SoM SKU.) `CMakeLists.txt` applies the `e1m_evk_rk055hdmipi4ma0`
+shield automatically for these two AEN M55-HP board targets under
+either build form, so no `-DSHIELD=...` flag is needed.
+
+> The display chain above is compile-proven, not bench-proven: no
+> pixels have been confirmed on glass yet. It depends on #2204 (the
+> `e1m_evk_rk055hdmipi4ma0` shield), and the twister coverage this
+> example gets is `build_only`.
 
 On `native_sim/native/64` the WiFi + MQTT paths stub via the
 `<alp/iot.h>` NOSUPPORT contract; the UI still renders against the

@@ -99,6 +99,7 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
@@ -106,10 +107,13 @@ on:
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -124,6 +128,7 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-dashboard/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
@@ -131,10 +136,13 @@ on:
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_hp/**'
+      - 'zephyr/boards/shields/**'
       - 'zephyr/soc-bridge/**'
       - 'src/backends/mproc/**'
       - 'src/backends/soc_info/alif_se.c'
       - 'src/backends/update_log/**'
+      - 'zephyr/drivers/display/**'
+      - 'zephyr/drivers/mipi_dsi/**'
       - 'zephyr/drivers/sdhc/**'
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
@@ -386,7 +394,18 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota
+      # examples/connectivity/iot-dashboard is the third `--testsuite-root`
+      # line below, also issue #2173 item (3): its AEN scenario named
+      # `ensemble_e8_dk/...` the same way iot-fleet-ota's did, and had no
+      # panel wired at all (LVGL needs a `zephyr,display` chosen node, and
+      # the ST7789 its board.yaml used to declare has no working SPI route
+      # on the EVK). The example's own
+      # CMakeLists.txt now applies the e1m_evk_rk055hdmipi4ma0 DSI shield
+      # (the #2204 panel) for the AEN M55-HP board targets, and the scenario
+      # names BOTH alp_e1m_aen801_m55_hp and alp_e1m_aen803_m55_hp -- unlike
+      # mqtt-telemetry/iot-fleet-ota above, this one contributes a scenario
+      # to BOTH matrix legs.
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + iot-dashboard
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -399,14 +418,19 @@ jobs:
         # AEN801 configurations and 66 AEN803 (144 total, up from 92) --
         # scaled linearly off the 1461s/92-build #2198 measurement, AEN801
         # projects to about 1240s/20.7min and AEN803 to about 1050s/17.5min,
-        # both still comfortably under this 30min cap. Revisit if a future
-        # scenario count pushes either leg close to it.
+        # both still comfortably under this 30min cap. #2173 item (3) adds
+        # one build-only scenario per leg (iot-dashboard) on top of that
+        # count; not independently re-measured here (see the changelog
+        # fragment), but a single extra build_only scenario is far inside
+        # the existing margin on both legs. Revisit if a future scenario
+        # count pushes either leg close to it.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
             ${{ matrix.platform_flags }} \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/aen" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/firmware-update-log" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-dashboard" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \

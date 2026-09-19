@@ -3,8 +3,10 @@
 # Reads BME280 temperature/humidity/pressure, publishes the
 # samples to an MQTT broker (TLS via mbedTLS today; OPTIGA
 # handshake offload is planned), and renders a live LVGL dashboard
-# on a 240x320 ST7789.  The Wi-Fi connection comes up through
-# the E1M-AEN module's on-module CC3501E bridge backend.
+# on a RK055HDMIPI4MA0 720x1280 MIPI-DSI panel (Himax HX8394),
+# applied via the e1m_evk_rk055hdmipi4ma0 shield on EVK connector
+# J6 -- see ../CMakeLists.txt (#2173).  The Wi-Fi connection comes
+# up through the E1M-AEN module's on-module CC3501E bridge backend.
 
 libraries:
   - name: lvgl
@@ -16,8 +18,11 @@ som:
   sku: E1M-AEN801
 
 preset: e1m-evk             # External chips wired into the EVK
-                            # headers (BME280, ST7789) are listed in
-                            # `chips:` below.
+                            # headers (BME280) are listed in `chips:`
+                            # below.  The DSI panel is not an EVK-header
+                            # chip -- it arrives via the
+                            # e1m_evk_rk055hdmipi4ma0 shield, applied in
+                            # ../CMakeLists.txt.
 
 # E1M pads this app uses (subset of the EVK preset's `e1m_routes:`).
 pins:
@@ -38,16 +43,29 @@ cores:
       tls:     true
     peripherals:
       - i2c                  # BME280.
-      - spi                  # Display.
-      - gpio                 # Display ancillaries + CC3501E control GPIOs.
+      - spi                  # CC3501E bridge transport (EVK_SPI_BUS_ARDUINO
+                             # above); the DSI panel is not on this bus --
+                             # it comes through the shield's own cdc200 /
+                             # mipi_dsi / dphy chain, not the portable SPI
+                             # peripheral.
+      - gpio                 # CC3501E control GPIOs (WIFI_EN, nRESET); the
+                             # panel's power/reset lines are owned by the
+                             # shield's own I2C GPIO expander, not this app.
 
 chips:
   - bme280                   # Environment sensor.
   - optiga_trust_m           # Planned TLS trust-anchor / handshake offload.
-  - st7789                   # 240x320 TFT.
   - cc3501e                  # Declared because src/cc3501e_bridge.h (#2112)
                              # includes <alp/chips/cc3501e.h> directly; Wi-Fi
                              # itself still arrives through <alp/iot.h> below.
+  # The DSI panel (RK055HDMIPI4MA0, Himax HX8394) has no
+  # metadata/chips/*.yaml manifest of its own -- it is brought up as a
+  # Zephyr shield (zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/),
+  # applied by default (a caller-set SHIELD wins) for this app's AEN
+  # M55-HP targets in ../CMakeLists.txt -- including under `--sysbuild`,
+  # which resolves BOARD from the sysbuild cache file instead of a
+  # `-DBOARD=` cache entry -- not declared here.
+  #
   # WiFi connectivity comes through the <alp/iot.h> alp_wifi_*
   # surface; on AEN the generator resolves `on_module.wifi_ble:
   # cc3501e` and emits the CC3501E bridge backend.  V2N carries
