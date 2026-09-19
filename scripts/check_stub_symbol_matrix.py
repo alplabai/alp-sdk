@@ -120,7 +120,7 @@ def stub_sources() -> list[Path]:
 def _public_syms(obj: Path) -> set[str]:
     """Public `alp_*` symbols an object file *defines* (global, any section)."""
     rv = subprocess.run(["nm", "-g", "--defined-only", str(obj)],
-                        capture_output=True, text=True, check=True)
+                        capture_output=True, text=True, encoding="utf-8", check=True)
     syms: set[str] = set()
     for line in rv.stdout.splitlines():
         parts = line.split()
@@ -140,7 +140,7 @@ def _build_combo(cc: str, srcs: list[Path], macros: list[str],
     for i, src in enumerate(srcs):
         obj = workdir / f"{i}_{src.stem}.o"
         rv = subprocess.run([cc, *CFLAGS, *defs, str(src), "-o", str(obj)],
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
         if rv.returncode != 0:
             raise SystemExit(
                 f"check_stub_symbol_matrix: compile failed for {src.name} "

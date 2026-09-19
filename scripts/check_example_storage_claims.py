@@ -38,6 +38,7 @@ def _git_root(path: pathlib.Path) -> pathlib.Path | None:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except (OSError, subprocess.CalledProcessError):
         return None
@@ -51,6 +52,7 @@ def _git_ls_files(root: pathlib.Path, pathspec: str) -> list[pathlib.Path] | Non
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except (OSError, subprocess.CalledProcessError):
         return None

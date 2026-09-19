@@ -25,7 +25,7 @@ from check_i2c_address_uniqueness import find_problems  # noqa: E402
 def _seed(root: Path, relpath: str, body: str) -> None:
     p = root / relpath
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(textwrap.dedent(body), newline="")
+    p.write_text(textwrap.dedent(body), newline="", encoding="utf-8")
 
 
 def test_clean_module_preset_passes(tmp_path: Path) -> None:

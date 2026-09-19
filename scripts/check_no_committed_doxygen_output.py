@@ -47,6 +47,7 @@ def _tracked_files_under(root: Path, subdir: str) -> list[str]:
             cwd=root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=True,
         )
     except FileNotFoundError:

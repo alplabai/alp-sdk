@@ -47,7 +47,7 @@ def _bash_can_run_a_script() -> bool:
     try:
         probe = subprocess.run(
             ["bash", "-c", "printf ok"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -82,7 +82,7 @@ def _awk_has_strtonum() -> bool:
     try:
         probe = subprocess.run(
             ["awk", 'BEGIN{strtonum("0")}'],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -387,7 +387,7 @@ def _run_ram_run(
         args.append(preload)
 
     res = subprocess.run(
-        args, capture_output=True, text=True, timeout=60, env=env,
+        args, capture_output=True, text=True, encoding="utf-8", timeout=60, env=env,
     )
     return res, calls, sandbox_tmpdir
 
@@ -430,9 +430,9 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
     # tmp_path (derived from this test's name) contains the literal
     # substring "mem8", so a bare `"mem8" in body` false-positives on the
     # `loadbin <path-containing-mem8> ...` line in the load+go session.
-    load_lines = [ln.strip() for ln in load_go.read_text().splitlines()]
-    read_lines = [ln.strip() for ln in read_back.read_text().splitlines()]
-    preflight_body = preflight.read_text()
+    load_lines = [ln.strip() for ln in load_go.read_text(encoding="utf-8").splitlines()]
+    read_lines = [ln.strip() for ln in read_back.read_text(encoding="utf-8").splitlines()]
+    preflight_body = preflight.read_text(encoding="utf-8")
 
     assert any(ln.startswith("loadbin ") for ln in load_lines), load_lines
     assert "go" in load_lines, load_lines
@@ -458,7 +458,7 @@ def test_loadbin_go_and_mem8_are_in_separate_sessions(tmp_path: Path) -> None:
     # BENCH_PLACE actually reached the wrapper -- the whole point of routing
     # through it (review finding 2).
     for i in (1, 2, 3):
-        assert (calls / f"place-{i}").read_text().strip() == "test-place"
+        assert (calls / f"place-{i}").read_text(encoding="utf-8").strip() == "test-place"
 
     # The decoder must still work unchanged against session 2's transcript.
     assert "hi" in res.stdout
@@ -477,8 +477,8 @@ def test_a_real_time_gap_separates_the_two_sessions(tmp_path: Path) -> None:
     res, calls, _ = _run_ram_run(tmp_path, sleep_ms="500")
     assert res.returncode == 0, f"expected success:\n{res.stdout}\n{res.stderr}"
 
-    ts2 = float((calls / "ts-2").read_text().strip())
-    ts3 = float((calls / "ts-3").read_text().strip())
+    ts2 = float((calls / "ts-2").read_text(encoding="utf-8").strip())
+    ts3 = float((calls / "ts-3").read_text(encoding="utf-8").strip())
     gap = ts3 - ts2
     assert gap >= 0.4, (
         f"only {gap:.3f}s between the load+go session and the read session "
@@ -629,7 +629,7 @@ def test_a_preload_loadbin_success_does_not_mask_the_main_loadbin_failure(tmp_pa
     # bare substring count would double-count (the same class of
     # self-interference as the "mem8"-in-tmp_path trap elsewhere in this
     # file).
-    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text().splitlines()
+    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text(encoding="utf-8").splitlines()
     n_loadbins = sum(1 for ln in load_lines if ln.strip().startswith("loadbin "))
     assert n_loadbins == 2, f"expected exactly 2 loadbin lines (preload + main): {load_lines}"
 
@@ -658,7 +658,7 @@ def test_a_same_path_preload_loadbin_success_does_not_mask_the_main_loadbin_fail
         f"a same-path preload's own successful loadbin masked the main "
         f"image's failure:\n{res.stdout}\n{res.stderr}"
     )
-    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text().splitlines()
+    load_lines = (sorted(calls.glob("call-*.jlink"))[1]).read_text(encoding="utf-8").splitlines()
     n_loadbins = sum(1 for ln in load_lines if ln.strip().startswith("loadbin "))
     assert n_loadbins == 2, f"expected exactly 2 loadbin lines (preload + main): {load_lines}"
 
@@ -814,12 +814,12 @@ def _descendants_comm(pid: int) -> list[str]:
     (not just that session 1 finished) before signalling it."""
     out: list[str] = []
     try:
-        kids = Path(f"/proc/{pid}/task/{pid}/children").read_text().split()
+        kids = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8").split()
     except OSError:
         return out
     for k in kids:
         try:
-            out.append(Path(f"/proc/{k}/comm").read_text().strip())
+            out.append(Path(f"/proc/{k}/comm").read_text(encoding="utf-8").strip())
         except OSError:
             pass
         out += _descendants_comm(int(k))
@@ -907,7 +907,7 @@ def test_a_sigterm_to_the_pid_during_the_inter_session_sleep_keeps_the_workdir(
     SLEEP_MS = 3000
     proc = subprocess.Popen(
         ["bash", str(RAM_RUN), str(bd), str(SLEEP_MS), "0x10"],
-        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8",
     )
     deadline = _time.time() + 20
     while _time.time() < deadline and "sleep" not in _descendants_comm(proc.pid):

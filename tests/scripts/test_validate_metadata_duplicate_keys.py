@@ -32,7 +32,7 @@ def test_check_files_rejects_duplicate_key_yaml(tmp_path_factory):
     p = REPO / "metadata" / "chips" / f".test-dup-{d.name}.yaml"
     try:
         # Two `chip_id:` keys -- plain yaml.safe_load would silently keep "b".
-        p.write_text("chip_id: a\nchip_id: b\n")
+        p.write_text("chip_id: a\nchip_id: b\n", encoding="utf-8")
         failures = vm._check_files(
             "YAML", [p], _NullValidator(),
             lambda path: vm.strict_yaml_load(path.read_text(encoding="utf-8"), source=path),
@@ -49,7 +49,7 @@ def test_check_files_rejects_duplicate_key_json(tmp_path_factory):
     d = tmp_path_factory.mktemp("dupkey", numbered=True)
     p = REPO / "metadata" / "chips" / f".test-dup-{d.name}.json"
     try:
-        p.write_text('{"chip_id": "a", "chip_id": "b"}')
+        p.write_text('{"chip_id": "a", "chip_id": "b"}', encoding="utf-8")
         failures = vm._check_files(
             "JSON", [p], _NullValidator(),
             lambda path: vm.strict_json_loads(path.read_text(encoding="utf-8"), source=path),
