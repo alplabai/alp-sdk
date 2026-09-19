@@ -76,7 +76,21 @@ concurrency:
 
 jobs:
   changelog-citations:
-    # Static by design: this is the context branch protection can require.
+    # Static by design, so the context name is stable enough to require --
+    # but it CANNOT be required while this workflow keeps the shape above.
+    # The `pull_request` leg is path-filtered to this file, so an ordinary PR
+    # skips the workflow entirely and reports no check run at all; GitHub
+    # then holds a required-but-skipped context at "Expected -- Waiting for
+    # status to be reported", and the PR can never enter the merge queue. The
+    # `merge_group:` leg does not rescue that: required contexts gate a PR
+    # BEFORE it is enqueued. Both of dev's required-context workflows carry
+    # an unfiltered `pull_request:` for exactly this reason --
+    # `.github/workflows/pr-twister.yml` and
+    # `.github/workflows/pr-static-analysis.yml`, each citing #1415
+    # (AWAITING_CHECKS). Promoting this context therefore means FIRST either
+    # dropping the `paths:` filter (accepting a second, PR-side citation
+    # verdict on every PR) or adding an always-run job that reports the
+    # context unconditionally.
     name: changelog citations · merge queue
     runs-on: ubuntu-latest
     # Checkout has its own 5-minute cap; the local Python check normally takes
@@ -98,8 +112,9 @@ jobs:
           # for). workflow_dispatch -> whatever the operator passed, possibly
           # empty. pull_request (this file only) -> empty, so
           # _resolve_base() falls back to `origin/dev`, which
-          # fetch-depth: 0 has fetched -- the same base
-          # pr-metadata-validate.yml grades an ordinary PR against, making
-          # this leg a faithful self-test of the workflow.
+          # fetch-depth: 0 has fetched. That resolves to the same merge base
+          # as pr-metadata-validate.yml's `HEAD^1` (it pins HEAD^1, not
+          # origin/dev -- see its own DIFF_BASE expression), which is what
+          # makes this leg a faithful self-test of the workflow.
           DIFF_BASE: ${{ github.event.merge_group.base_sha || inputs.diff_base }}
         run: python3 scripts/check_changelog_citations.py --verbose
