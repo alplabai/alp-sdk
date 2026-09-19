@@ -28,6 +28,14 @@ tests:
     # No native_sim.conf any more: it existed only to turn mbedtls off
     # around the ssl_misc.h break, which is fixed at its root (#2173), so
     # this scenario now builds the same TLS-enabled config the SoM does.
+    # native_sim's only entropy driver is FAKE_ENTROPY_NATIVE_SIM, whose own
+    # Kconfig help says it "does not generate real entropy", so the weak-RNG
+    # refusal in zephyr/CMakeLists.txt applies here too (#2192). A simulator
+    # run is exactly what the opt-in exists for. It lives on the SCENARIO,
+    # not in the app's prj.conf, so a copy scaffolded by `tan init
+    # --from-example` and built for real hardware still refuses.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
   # Issue #2173: this scenario named `ensemble_e8_dk/...` -- Alif's own
   # DevKit board, which no -p flag in this repo selects -- so it was never
   # built by any job, and the app had in fact stopped compiling for AEN
@@ -45,6 +53,14 @@ tests:
       - ota
       - security
     build_only: true
+    # There is no Alif Ensemble entropy driver in this tree or upstream
+    # (#2192), so this compile check has to acknowledge the weak RNG to run
+    # at all -- that is the honest state of AEN TLS today, and build_only
+    # means the image never leaves CI. The opt-in is deliberately here and
+    # not in the app's prj.conf: a scaffolded copy built for a real SoM gets
+    # the refusal, naming #2192 and the entropy driver it needs.
+    extra_configs:
+      - CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y
     harness: console
     harness_config:
       type: one_line
