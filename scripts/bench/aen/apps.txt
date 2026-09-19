@@ -1,4 +1,4 @@
-# AEN803 (E8) bench apps flashed over Flow D, one build-dir name per line.
+# AEN (E8, M55-HE) bench apps flashed over Flow D, one build-dir name per line.
 # Lines starting with '#' and blank lines are ignored. The batch runner
 # (flash-all-flowd.sh) reads this file when no app names are given on argv.
 # Each name is a directory under $BENCH_ROOT/build/.

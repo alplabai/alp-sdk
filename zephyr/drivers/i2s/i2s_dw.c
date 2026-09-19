@@ -127,7 +127,7 @@
  *     the NVIC, since this block is not in the SYSRESETREQ reset domain
  *     and carries its register state across a warm reset. The cause of
  *     the i2s3 RX-start spin reported in #2179 is PROVEN on silicon: #2179
- *     closed on an A/B capture on e1m-aen-evk-03 in which, with this
+ *     closed on an A/B capture on E1M-AEN803 serial 2026W36-0002 in which, with this
  *     change reverted, the first i2s_dw_isr() entry after the RX start saw
  *     ISR & ~IMR = 0x00000010 (TXFE, unmasked, with dir == I2S_DIR_RX)
  *     and the core stormed (3/3); with it, 6/6 ran clean. In the clean arm
@@ -136,7 +136,7 @@
  *     own comment.
  *   - issue #2205 (the E8 channel-enable model, this change): on the
  *     Alif E8, TER bit 0 (TXCHENX) and RER bit 0 (RXCHENX) are read-only
- *     -- measured on e1m-aen-evk-03 i2s3 with the block idle, RER and TER
+ *     -- measured on E1M-AEN803 serial 2026W36-0002 i2s3 with the block idle, RER and TER
  *     both still read 0x00FFFF01 after the init-time clears (see
  *     I2S_TER_TXCHEN_Msk in i2s_dw.h) -- so i2s_tx_channel_disable() and
  *     i2s_rx_channel_disable() never stopped anything there, and an RX
@@ -992,7 +992,7 @@ static void i2s_dw_isr(const struct device *dev)
 	 * is ever written to IMR bits 2-3, which neither SVD defines.
 	 *
 	 * PROVEN ON SILICON (#2179): the i2s3 RX-start spin measured 6/6 on
-	 * e1m-aen-evk-03 (live core in i2s_dw_isr()/_isr_wrapper, CycleCnt
+	 * E1M-AEN803 serial 2026W36-0002 (live core in i2s_dw_isr()/_isr_wrapper, CycleCnt
 	 * advancing, CFSR = 0x00000000, thread mode starved) is this exact
 	 * case. #2179 closed on an A/B capture: with the #2179 change reverted
 	 * (this guard AND rx_stream_start()'s TX mask), the first i2s_dw_isr()
@@ -1050,7 +1050,7 @@ static int i2s_dw_initialize(const struct device *dev)
 
 	/* alp-sdk issue #2179: quiesce the block and mask every interrupt
 	 * BEFORE arming the NVIC, not after. This block is NOT in the
-	 * SYSRESETREQ reset domain -- measured on e1m-aen-evk-03: CER and TER
+	 * SYSRESETREQ reset domain -- measured on E1M-AEN803 serial 2026W36-0002: CER and TER
 	 * both survived a J-Link `loadbin`'s implicit SYSRESETREQ at
 	 * 0x00000001 -- so IER/IMR/IRER/ITER/RER/TER all carry over from
 	 * whatever the PREVIOUS image left behind. (The all-zero CER/TER read

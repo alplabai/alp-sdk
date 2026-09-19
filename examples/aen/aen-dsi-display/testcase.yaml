@@ -6,8 +6,8 @@
 # to the bind-only aen-dsi-regcheck.
 #
 # Compile-checks the driver chain + DT nodes on the real E8 board target;
-# filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only).
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets).
 
 sample:
   name: aen-dsi-display
@@ -21,6 +21,7 @@ tests:
   alp_sdk.examples.aen.dsi_display.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

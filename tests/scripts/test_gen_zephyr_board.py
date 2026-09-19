@@ -28,6 +28,7 @@ either board's claim set.
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -1209,7 +1210,8 @@ class TestZephyrBoardCli(unittest.TestCase):
                  "--core", "m55_he",
                  "--emit", "zephyr-board",
                  "--output", str(out_dir)],
-                cwd=REPO, capture_output=True, text=True,
+                cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             committed_dir = BOARDS_ROOT / "e1m_aen801_m55_he"
@@ -1229,7 +1231,8 @@ class TestZephyrBoardCli(unittest.TestCase):
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml), "--emit", "zephyr-board",
              "--output", "/tmp/should-not-be-written"],
-            cwd=REPO, capture_output=True, text=True,
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--core", result.stderr)
@@ -1240,7 +1243,8 @@ class TestZephyrBoardCli(unittest.TestCase):
             [sys.executable, str(REPO / "scripts" / "alp_project.py"),
              "--input", str(board_yaml), "--core", "m55_he",
              "--emit", "zephyr-board"],
-            cwd=REPO, capture_output=True, text=True,
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("--output", result.stderr)

@@ -1,5 +1,6 @@
 """Unit tests for scripts/check_yocto_machine_tree_parity.py."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,8 @@ SCRIPT = REPO / "scripts" / "check_yocto_machine_tree_parity.py"
 
 def _run(*args, **kw):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, **kw,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**(kw.pop("env", None) or os.environ), "PYTHONIOENCODING": "utf-8"}, **kw,
     )
 
 
@@ -18,14 +20,15 @@ def _write_preset(tmp_path: Path, sku: str, core: str, machine: str) -> None:
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
     (d / f"{sku}.yaml").write_text(
-        f"sku: {sku}\ntopology:\n  {core}:\n    machine: {machine}\n"
+        f"sku: {sku}\ntopology:\n  {core}:\n    machine: {machine}\n",
+        encoding="utf-8"
     )
 
 
 def _write_machine_conf(tmp_path: Path, machine: str) -> None:
     d = tmp_path / "meta-alp-sdk" / "conf" / "machine"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{machine}.conf").write_text("# stub\n")
+    (d / f"{machine}.conf").write_text("# stub\n", encoding="utf-8")
 
 
 def test_empty_tree_passes(tmp_path):
@@ -87,7 +90,8 @@ def test_non_yocto_topology_entry_without_machine_is_ignored(tmp_path):
     d = tmp_path / "metadata" / "e1m_modules"
     d.mkdir(parents=True, exist_ok=True)
     (d / "E1M-TEST.yaml").write_text(
-        "sku: E1M-TEST\ntopology:\n  m55_hp:\n    board: alp_e1m_test_m55_hp\n"
+        "sku: E1M-TEST\ntopology:\n  m55_hp:\n    board: alp_e1m_test_m55_hp\n",
+        encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr

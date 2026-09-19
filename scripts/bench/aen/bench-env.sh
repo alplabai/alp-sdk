@@ -325,7 +325,7 @@ bench_labgrid_resolve() {
 	fi
 
 	# seuart is OPTIONAL here, unlike swd above (alp-sdk#2064 bench
-	# verification, e1m-aen-evk-02/-03): not every AEN place has a physical
+	# verification, on two AEN EVK bench units): not every AEN place has a physical
 	# SE-UART -- those two export only 'console' and 'swd', no 'seuart' at
 	# all -- and a J-Link-only flow (Flow C/D: ram-run.sh, reread.sh,
 	# flash-jlink*.sh, ...) never touches SE_UART, so failing resolution
@@ -640,8 +640,12 @@ bench_jlink_exe() {
 #      an in-use J-Link over loopback, so the second instance attaches to
 #      THAT probe regardless of any USB masking. No amount of USB-node
 #      masking substitutes for this.
-#   4. `ip link set lo up` inside the fresh network namespace -- a new netns
-#      starts with loopback DOWN, and the J-Link DLL segfaults on it.
+#   4. `ip link set lo up` inside the fresh network namespace, VERIFIED via
+#      `ip -o link show lo`'s UP flag rather than trusted blind -- a new
+#      netns starts with loopback DOWN, the J-Link DLL segfaults on it, and
+#      `ip link set` can itself fail silently (alp-sdk#2174); refuses (exit
+#      9, same isolation-did-not-take family as the checks below) rather
+#      than proceeding on an unconfirmed loopback.
 #
 # The mask is PROCESS-LOCAL (an unprivileged `unshare -rm`, no sudo needed):
 # it exists only inside this invocation and vanishes with the process, even
@@ -844,6 +848,28 @@ bench_jlink_run() {
 		unshare -rm --net --ipc --propagation private /bin/bash -c '
 			set -e
 			ip link set lo up 2>/dev/null || true
+			# alp-sdk#2174: the line above was failure-tolerant, so a
+			# netns where lo never came up (permission, race, ...) fell
+			# through to JLinkExe with a still-down loopback and it
+			# segfaulted. Verified via the UP flag word `ip -o link show lo`
+			# prints -- NOT /sys/class/net/lo/flags, measured stale here
+			# without an explicit remount; `ip` goes over netlink, always correct.
+			#
+			# `command -v ip` is checked FIRST, explicitly: under `set -e`
+			# above, `lostate=$(ip ...)` alone would abort the whole
+			# subshell with a bare, unexplained rc=127 the moment `ip` is
+			# missing -- the command substitution assignment fails on its
+			# own and trips `set -e` before the "did not come up" message
+			# right below ever gets a chance to print (measured).
+			command -v ip >/dev/null 2>&1 || {
+				echo "bench_jlink_run: ip not found in the fresh netns -- cannot verify loopback state" >&2
+				exit 9
+			}
+			lostate=$(ip -o link show lo 2>/dev/null)
+			printf "%s\n" "$lostate" | tr ",<>" "\n\n\n" | grep -qx UP || {
+				echo "bench_jlink_run: loopback did not come up in the fresh netns ($lostate)" >&2
+				exit 9
+			}
 			for n in $JLINK_MASKS; do mount --bind /dev/null "$n"; done
 			for s in $JLINK_SYSMASKS; do mount --bind "$JLINK_EMPTY" "$s"; done
 			[ -c "$JLINK_TARGET_NODE" ] || {
@@ -1054,7 +1080,7 @@ bench_require_openocd() {
 		echo "           All three E8 boards answer the same SW-DP 0x4c013477," >&2
 		echo "           so the USB path is the ONLY thing that selects the" >&2
 		echo "           board -- resolve YOUR board's from:" >&2
-		echo "               labgrid-client -p e1m-aen-evk-01 show" >&2
+		echo "               labgrid-client -p <your-bench-place> show" >&2
 		echo "           (the swd resource's USB path) and export exactly that" >&2
 		echo "           value, e.g.:" >&2
 		echo "               export AEN_OPENOCD_USB_LOCATION=<path from the show above>" >&2
@@ -1082,7 +1108,7 @@ bench_require_openocd() {
 # every OTHER resident app entry NOT in the JSON you are about to burn is
 # gone the instant the write lands -- no error, no SES warning (`[SES] ATOC
 # ok` prints either way). This destroyed a live A32 Linux boot chain
-# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on `e1m-aen-evk-01`, 2026-09-07.
+# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on an AEN EVK bench unit, 2026-09-07.
 #
 # Originally written into flash-run.sh alone for its own single ALP-HE entry
 # (#2025); factored out here so every script that commits a TOC shares one
@@ -1109,7 +1135,7 @@ bench_atoc_replace_guard() {
 	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
 	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
 	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
-	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# boards on this farm makes two concurrent runs of the
 	# SAME script against DIFFERENT boards a real scenario, and a fixed path
 	# let run A's write land between run B's redirect and B's read, so B
 	# parsed A's board (reproduced: B printed A's clean table and returned
@@ -1156,9 +1182,9 @@ bench_atoc_replace_guard() {
 		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before" || return 5
 	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
 		# Confirm the serial device that answers is actually the SES, not the
-		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
+		# app console (e.g. on an AEN EVK bench unit, /dev/ttyUSB0 is SE-UART,
 		# /dev/ttyUSB1 is the app console). BENCH-VERIFIED: a real
-		# `getbanner` capture off e1m-aen-evk-01 (2026-09-07) reads
+		# `getbanner` capture off an AEN EVK bench unit (2026-09-07) reads
 		# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping --
 		# docs/debugging-aen.md:548 is only a doc placeholder
 		# ("SES <rev> v<version> <build date>"), not a transcript, and is
@@ -1168,7 +1194,7 @@ bench_atoc_replace_guard() {
 		local banner banner_ok=1 banner_rc
 		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
 		banner_rc=$?
-		# Real capture off e1m-aen-evk-01 (2026-09-07), ANSI intact:
+		# Real capture off an AEN EVK bench unit (2026-09-07), ANSI intact:
 		#   ^[[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 ^[[0m
 		# Strip the ANSI FIRST, then match -- and the stripped line has a
 		# LEADING SPACE (SETOOLS' own padding, not a terminal artifact), so
@@ -1208,7 +1234,7 @@ bench_atoc_replace_guard() {
 	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
 	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
 	# BENCH-VERIFIED against a real 9-row getbanner+gettoc capture off
-	# e1m-aen-evk-01 (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
+	# an AEN EVK bench unit (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
 	# (`^[[94m |    DEVICE|...|`), not just the cell text, so the
 	# ANSI-stripped row keeps a LEADING SPACE before the pipe. A bare `/^\|/`
 	# anchor (no synthetic test fixture ever exercised this -- the test's
@@ -1285,7 +1311,7 @@ bench_atoc_replace_guard() {
 			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
 			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
 			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
-			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
+			echo "   exactly how an AEN EVK bench unit lost its A32 Linux boot chain on 2026-09-07." >&2
 			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
 			return 5
 		fi
@@ -1293,7 +1319,7 @@ bench_atoc_replace_guard() {
 			echo "!! ABORT ($tag): this write REPLACES every app ATOC entry not in it -- it does NOT merge." >&2
 			echo "   This board also carries: ${extra[*]}" >&2
 			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
-			echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+			echo "   (this destroyed the A32 Linux boot chain on an AEN EVK bench unit, 2026-09-07)." >&2
 			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
 			echo "   losing them is genuinely intended." >&2
 			return 5

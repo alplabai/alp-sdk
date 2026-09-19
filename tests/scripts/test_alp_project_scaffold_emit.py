@@ -13,6 +13,7 @@ directly.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,8 @@ HELLO_WORLD = REPO / "examples" / "peripheral-io" / "hello-world"
 def _run(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(ALP_PROJECT), *args],
-        capture_output=True, text=True, cwd=REPO, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False,
     )
 
 
@@ -80,7 +82,8 @@ def test_scaffold_substitutes_sku_and_preset_for_a_different_sku():
         check = subprocess.run(
             [sys.executable, str(ALP_PROJECT), "--input", str(board_yaml_path),
              "--emit", "zephyr-conf", "--core", "m33_sm"],
-            capture_output=True, text=True, cwd=REPO, check=False)
+            capture_output=True, text=True, encoding="utf-8",
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=REPO, check=False)
         assert check.returncode == 0, check.stderr
 
 

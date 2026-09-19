@@ -10,6 +10,7 @@ the loader consistently.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -41,7 +42,8 @@ def _run_loader(
         cmd.extend(["--core", core])
     return subprocess.run(
         cmd,
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
     )
 
 

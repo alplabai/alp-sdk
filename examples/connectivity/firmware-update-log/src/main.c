@@ -51,7 +51,11 @@
 #include <zephyr/storage/flash_map.h>
 
 #if defined(CONFIG_ALP_SDK_UPDATE_LOG_PERSIST) && PARTITION_EXISTS(alp_ulog_partition)
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HE) || defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+/* Whether alp_ulog_partition backs onto the on-die MRAM is a SoC/silicon
+ * fact (Alif Ensemble E8, either core, either SKU sharing that die), not a
+ * board or SKU one -- CONFIG_SOC_AE822FA0E5597LS0 is select-ed by both
+ * *_RTSS_HE and *_RTSS_HP. */
+#if defined(CONFIG_SOC_AE822FA0E5597LS0)
 #define UPDATE_LOG_STORAGE_STR "MRAM NVS (alp_ulog_partition)"
 #else
 #define UPDATE_LOG_STORAGE_STR "persistent NVS (alp_ulog_partition)"

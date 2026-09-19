@@ -4,7 +4,7 @@
  *
  * aen-evk-demo -- phased full-board demo for the E1M-AEN801 (Alif Ensemble
  * E8, M55-HE) on the E1M EVK carrier, bench RAM-run via J-Link
- * (e1m-aen-evk-03, E1M-AEN803 serial 2026W36-0002, EVK rev 2626-R2).
+ * (E1M-AEN803 serial 2026W36-0002, EVK rev 2626-R2).
  *
  * WHY A PHASE FRAMEWORK, NOT A FLAT LIST OF CHECKS
  * -------------------------------------------------
@@ -3614,7 +3614,7 @@ static phase_verdict_t phase_encoder(demo_ctx_t *ctx)
  * VCC alone is not the gate) AND that switch's VCC is on `+3V3`
  * (VCC on `+VIO`, 1.8 V with the E1M-AEN SoM, is out of a 3257-type
  * part's spec and confirmed silent on the bench), OR a switch rated
- * for 1.8 V VCC (untested). On `e1m-aen-evk-03`
+ * for 1.8 V VCC (untested). On E1M-AEN803 serial 2026W36-0002
  * (2026-09-15), a fitted 3257-type part's VCC was moved to `+3V3`
  * between that silent run and an audible run -- not established as
  * the only difference between the two (see
@@ -4367,7 +4367,7 @@ static phase_verdict_t phase_sound(demo_ctx_t *ctx)
 	 * HARDWARE shutdown -- in that state they do not ACK, so any later
 	 * image scanning this bus sees 0x4d, 0x4e and the 0x48 broadcast
 	 * simply gone and reports missing hardware.  Measured on
-	 * e1m-aen-evk-03: 12 responders after a run of this phase, 15 after a
+	 * E1M-AEN803 serial 2026W36-0002: 12 responders after a run of this phase, 15 after a
 	 * reset released the pin.  Configuring it as an input stops driving,
 	 * so R138's 10 kOhm pull-up to +VIO defines the level exactly as it
 	 * does at power-on -- an actively driven low overrides that pull-up,

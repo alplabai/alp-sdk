@@ -117,13 +117,10 @@
 #                               findings in tests/yocto/*.sh, fixed by
 #                               whitelisting them with header notes --
 #                               see INTENTIONALLY_BASH_HELPERS in the
-#                               script).  Not silent, though: 478
-#                               IMPLICIT-ENCODING findings print as
-#                               warnings and still exit 0, being
-#                               grandfathered by #2195's
-#                               IMPLICIT_ENCODING_BASELINE (drained
-#                               under #2197).  The step fails only on
-#                               a finding OUTSIDE that baseline.
+#                               script).  The #2195 IMPLICIT-ENCODING
+#                               backlog was fully drained under #2197;
+#                               the step now fails on any finding,
+#                               IMPLICIT-ENCODING included.
 #
 # Twister + bitbake are NOT exercised here:
 #   - Twister is the load-bearing Zephyr coverage gate -- it lives
