@@ -133,7 +133,7 @@ def test_a_step_whose_budget_is_spent_fails_loudly_rather_than_silently(
 
     proc = subprocess.run(
         ["bash", str(_WRAPPER), "install", "-y", "some-package"],
-        env=env, capture_output=True, text=True, timeout=120,
+        env=env, capture_output=True, text=True, encoding="utf-8", timeout=120,
     )
     assert proc.returncode != 0, (
         "budget exhausted but the wrapper exited 0 -- a step whose install never "
@@ -152,13 +152,13 @@ def test_the_deadline_is_shared_across_invocations_in_one_step(
     env["PATH"] = f"{_fake_apt(tmp_path, exit_code=0)}:{env['PATH']}"
 
     subprocess.run(["bash", str(_WRAPPER), "update"], env=env,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     written = list(tmp_path.glob("apt-bounded.*.deadline"))
     assert len(written) == 1, f"expected exactly one deadline file, got {written}"
     first = written[0].read_text(encoding="utf-8")
 
     subprocess.run(["bash", str(_WRAPPER), "install", "-y", "pkg"], env=env,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
     assert written[0].read_text(encoding="utf-8") == first, (
         "the second invocation rewrote the deadline -- each call would get a "
         "full budget again, which is the #1592 overrun"
@@ -170,12 +170,12 @@ def test_a_different_step_gets_its_own_budget(tmp_path: Path) -> None:
     env_a = _env(tmp_path, step="step-a")
     env_a["PATH"] = f"{_fake_apt(tmp_path, exit_code=0)}:{env_a['PATH']}"
     subprocess.run(["bash", str(_WRAPPER), "update"], env=env_a,
-                   capture_output=True, text=True, timeout=120, check=False)
+                   capture_output=True, text=True, encoding="utf-8", timeout=120, check=False)
 
     env_b = _env(tmp_path, step="step-b")
     env_b["PATH"] = env_a["PATH"]
     proc = subprocess.run(["bash", str(_WRAPPER), "update"], env=env_b,
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 0, (
         f"a fresh step must get a fresh budget. stderr:\n{proc.stderr}"
     )
@@ -187,7 +187,7 @@ def test_a_real_apt_error_is_not_retried(tmp_path: Path) -> None:
     env = _env(tmp_path, step="step-err")
     env["PATH"] = f"{_fake_apt(tmp_path, exit_code=7)}:{env['PATH']}"
     proc = subprocess.run(["bash", str(_WRAPPER), "install", "-y", "pkg"],
-                          env=env, capture_output=True, text=True, timeout=120)
+                          env=env, capture_output=True, text=True, encoding="utf-8", timeout=120)
     assert proc.returncode == 7, (
         f"a non-transient exit must pass through unchanged, got {proc.returncode}"
     )
@@ -216,7 +216,7 @@ def _run_hanging(tmp_path: Path, *, budget: str, slice_s: str, step: str):
     env["APT_ATTEMPTS"] = "3"
     env["PATH"] = f"{_hanging_apt(tmp_path)}:{env['PATH']}"
     return subprocess.run(["bash", str(_WRAPPER), "update"], env=env,
-                          capture_output=True, text=True, timeout=180)
+                          capture_output=True, text=True, encoding="utf-8", timeout=180)
 
 
 def test_the_give_up_line_agrees_with_the_attempt_lines(tmp_path: Path) -> None:

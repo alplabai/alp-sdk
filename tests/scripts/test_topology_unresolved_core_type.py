@@ -85,9 +85,9 @@ def test_emit_kconfig_never_raises_on_an_unresolved_type(core_type) -> None:
     from alp_orchestrate.models import Slice
 
     soc = json.loads(
-        (METADATA_ROOT / "socs" / "alif" / "ensemble" / "e3.json").read_text())
+        (METADATA_ROOT / "socs" / "alif" / "ensemble" / "e3.json").read_text(encoding="utf-8"))
     som = yaml.safe_load(
-        (METADATA_ROOT / "e1m_modules" / "E1M-AEN301.yaml").read_text())
+        (METADATA_ROOT / "e1m_modules" / "E1M-AEN301.yaml").read_text(encoding="utf-8"))
     for c in soc["cores"]:
         if c["id"] == "m55_he":
             c["type"] = core_type
