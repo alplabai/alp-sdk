@@ -11,6 +11,7 @@ which excludes the other class's OS).
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -161,7 +162,8 @@ def test_allowed_os_keyed_on_metadata_root(tmp_path: Path) -> None:
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--input", str(p),
          "--metadata-root", str(meta), "--emit", "os-topology"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     cores = _by_id(json.loads(proc.stdout))
     assert "os_scratch_marker" in cores["m33_sm"]["allowed_os"]
@@ -170,7 +172,8 @@ def test_allowed_os_keyed_on_metadata_root(tmp_path: Path) -> None:
     # No override: must resolve against the real in-tree schema.
     proc_intree = subprocess.run(
         [sys.executable, str(SCRIPT), "--input", str(p), "--emit", "os-topology"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert proc_intree.returncode == 0, proc_intree.stdout + proc_intree.stderr
     cores_intree = _by_id(json.loads(proc_intree.stdout))
     assert "os_scratch_marker" not in cores_intree["m33_sm"]["allowed_os"]
@@ -188,7 +191,8 @@ def test_cli_emit_os_topology(tmp_path: Path) -> None:
     p = _write_board(tmp_path, body)
     proc = subprocess.run(
         [sys.executable, str(SCRIPT), "--input", str(p), "--emit", "os-topology"],
-        capture_output=True, text=True)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     assert proc.returncode == 0, proc.stdout + proc.stderr
     cores = {c["core_id"]: c for c in json.loads(proc.stdout)["cores"]}
     assert cores["m33_sm"]["default_os"] == "zephyr"

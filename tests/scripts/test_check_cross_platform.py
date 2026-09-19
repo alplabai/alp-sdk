@@ -498,22 +498,11 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
     cross-platform-zephyr.yml's python-smoke step) -- assert 0 findings
     against the live repo here too, so a new Linux-only idiom is caught
     locally instead of only on three legs of a non-required workflow.
-
-    #2195 grandfathered 478 pre-existing IMPLICIT-ENCODING sites via
-    IMPLICIT_ENCODING_BASELINE (see that set's comment + #2197, the
-    drain issue) -- those are expected to still be present and are
-    NOT a --fail-on-warning failure.  What must be true is that there
-    are zero findings OUTSIDE the baseline: no LINUX-ONLY-IDIOM /
-    BASH-ONLY-SHEBANG finding anywhere, and no IMPLICIT-ENCODING
-    finding in a file that isn't on the baseline list.
-
-    The same `findings` list also pays for the two #2197 shrink-only
-    guards below -- a size pin and a stale-entry check -- so the
-    baseline can only ever get smaller."""
+    Every finding, IMPLICIT-ENCODING included, must be zero."""
     rv = _run("--fail-on-warning")
     assert rv.returncode == 0, (
-        f"check_cross_platform --fail-on-warning found drift outside "
-        f"the IMPLICIT_ENCODING_BASELINE:\n{rv.stdout}\n{rv.stderr}"
+        f"check_cross_platform --fail-on-warning found drift:\n"
+        f"{rv.stdout}\n{rv.stderr}"
     )
     findings = linter.scan(
         linter.discover_files(
@@ -523,36 +512,9 @@ def test_linter_fail_on_warning_against_real_repo_passes() -> None:
         ),
         base=REPO,
     )
-    non_baseline = [f for f in findings if not f.baselined]
-    assert non_baseline == [], (
-        f"finding(s) outside IMPLICIT_ENCODING_BASELINE:\n"
-        + "\n".join(f.render() for f in non_baseline)
-    )
-
-    # #2197 guard 1 -- size pin.  The baseline is the frozen day-#2195
-    # backlog, not a dumping ground: the file-level shape means a new
-    # entry silently exempts every implicit-encoding call in that file,
-    # so growing the set has to be a deliberate, test-breaking act.
-    assert len(linter.IMPLICIT_ENCODING_BASELINE) <= 85, (
-        f"IMPLICIT_ENCODING_BASELINE grew to "
-        f"{len(linter.IMPLICIT_ENCODING_BASELINE)} files; it holds what "
-        f"is left of the frozen #2195 backlog (85 files) and may only "
-        f"ever SHRINK as #2197 drains it.  A new implicit-encoding call "
-        f"gets an explicit `encoding=` -- there is no inline exemption "
-        f"-- not a baseline entry."
-    )
-
-    # #2197 guard 2 -- no stale entry.  Every listed file must still
-    # produce a finding today; one that doesn't was already fixed,
-    # moved, or deleted, and leaving it here would silently exempt a
-    # future file that lands back at that path.  (`findings` is
-    # entirely IMPLICIT-ENCODING-in-baseline here -- the assert above
-    # just proved nothing else is in it.)
-    stale = set(linter.IMPLICIT_ENCODING_BASELINE) - {f.path for f in findings}
-    assert stale == set(), (
-        f"IMPLICIT_ENCODING_BASELINE entries that no longer produce any "
-        f"finding -- fixed, moved, or deleted.  Drop them from the set "
-        f"(#2197):\n" + "\n".join(sorted(stale))
+    assert findings == [], (
+        f"finding(s) against the live repo:\n"
+        + "\n".join(f.render() for f in findings)
     )
 
 
@@ -1155,21 +1117,23 @@ def test_implicit_encoding_scan_helper_returns_tuples() -> None:
     assert "encoding" in suggestion
 
 
-def test_implicit_encoding_scoped_to_scripts_and_tests_by_default(
+def test_implicit_encoding_scoped_to_py_scan_roots_by_default(
     tmp_path: Path,
 ) -> None:
     """The default (root-scoped) walk only considers .py files under
-    scripts/** and tests/** (PY_SCAN_ROOTS) -- a .py file under
-    examples/ is not discovered even though it has the same hazard,
+    scripts/**, tests/**, and examples/** (PY_SCAN_ROOTS) -- a .py file
+    under docs/ is not discovered even though it has the same hazard,
     matching the module docstring's Scope section."""
     _write(tmp_path, "scripts/inscope.py", 'open("x")\n')
     _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    _write(tmp_path, "docs/foo/gen.py", 'open("x")\n')
     files = linter.discover_files(
         [tmp_path], excludes=linter.DEFAULT_EXCLUDES, base=tmp_path,
     )
     paths = {f.relative_to(tmp_path).as_posix() for f in files}
     assert "scripts/inscope.py" in paths
-    assert "examples/foo/gen.py" not in paths
+    assert "examples/foo/gen.py" in paths
+    assert "docs/foo/gen.py" not in paths
 
 
 def test_implicit_encoding_explicit_path_scans_outside_py_scan_roots(
@@ -1178,7 +1142,7 @@ def test_implicit_encoding_explicit_path_scans_outside_py_scan_roots(
     """An explicit `--path` target is scanned regardless of
     PY_SCAN_ROOTS -- the restriction only narrows the implicit
     default walk, not an explicit request."""
-    p = _write(tmp_path, "examples/foo/gen.py", 'open("x")\n')
+    p = _write(tmp_path, "docs/foo/gen.py", 'open("x")\n')
     findings = linter.scan([p], base=tmp_path)
     assert len(findings) == 1
     assert findings[0].category == "IMPLICIT-ENCODING"
@@ -1197,78 +1161,6 @@ def test_implicit_encoding_cli_fail_on_warning_exits_one(
     )
     assert rv.returncode == 1
     assert "IMPLICIT-ENCODING" in rv.stdout
-
-
-# ---------------------------------------------------------------------
-# 12. IMPLICIT_ENCODING_BASELINE (grandfather baseline, #2195 / #2197)
-# ---------------------------------------------------------------------
-
-
-def test_baseline_file_does_not_fail_fail_on_warning(tmp_path: Path) -> None:
-    """A file on IMPLICIT_ENCODING_BASELINE still gets its finding
-    printed (it's a warning, not silence) but does NOT flip
-    --fail-on-warning's exit code."""
-    rel = "scripts/alp_quality.py"
-    assert rel in linter.IMPLICIT_ENCODING_BASELINE
-    _write(tmp_path, rel, 'open("x")\n')
-    rv = _run(
-        "--path", str(tmp_path / rel),
-        "--base", str(tmp_path),
-        "--fail-on-warning",
-    )
-    assert rv.returncode == 0, rv.stdout + rv.stderr
-    assert "IMPLICIT-ENCODING" in rv.stdout
-    assert "baselined" in rv.stdout
-
-
-def test_non_baseline_file_fails_fail_on_warning(tmp_path: Path) -> None:
-    """A file NOT on IMPLICIT_ENCODING_BASELINE with the exact same
-    implicit-encoding call DOES flip --fail-on-warning to exit 1 --
-    the baseline only covers the files it names."""
-    rel = "scripts/brand_new_file_not_on_baseline.py"
-    assert rel not in linter.IMPLICIT_ENCODING_BASELINE
-    _write(tmp_path, rel, 'open("x")\n')
-    rv = _run(
-        "--path", str(tmp_path / rel),
-        "--base", str(tmp_path),
-        "--fail-on-warning",
-    )
-    assert rv.returncode == 1, rv.stdout + rv.stderr
-    assert "IMPLICIT-ENCODING" in rv.stdout
-
-
-def test_new_finding_in_baselined_file_still_reported_as_warning(
-    tmp_path: Path,
-) -> None:
-    """A NEW implicit-encoding call added to an already-baselined
-    file is still surfaced as a warning finding (not swallowed like
-    the INTENTIONALLY_DISCUSSES_OS_PATHS allowlist would) -- it just
-    doesn't fail the gate.  This is the documented file-level-vs-
-    line-level weakness: the baseline can't distinguish an old site
-    from a brand-new one in the same file, so both print and neither
-    fails."""
-    rel = "scripts/alp_quality.py"
-    assert rel in linter.IMPLICIT_ENCODING_BASELINE
-    p = _write(tmp_path, rel, 'open("brand_new_call_added_today")\n')
-    findings = linter.scan([p], base=tmp_path)
-    assert len(findings) == 1
-    assert findings[0].category == "IMPLICIT-ENCODING"
-    assert findings[0].baselined is True
-    # Still a real Finding object that renders (not a suppressed
-    # allowlist summary) -- confirms it reaches --quiet-off output.
-    assert "IMPLICIT-ENCODING" in findings[0].render()
-
-
-def test_baseline_finding_dataclass_field_defaults_false(
-    tmp_path: Path,
-) -> None:
-    """Every non-IMPLICIT-ENCODING finding, and every IMPLICIT-ENCODING
-    finding outside the baseline, has baselined=False -- the default
-    must not accidentally suppress a real failure."""
-    p = _write(tmp_path, "scripts/never_baselined.py", 'open("x")\n')
-    findings = linter.scan([p], base=tmp_path)
-    assert len(findings) == 1
-    assert findings[0].baselined is False
 
 
 def test_conftest_known_site_now_clean() -> None:

@@ -3,7 +3,7 @@
 """
 Lint repo content for cross-platform hazards: Linux-only idioms in
 customer-facing surfaces, and implicit text encodings in the SDK's
-own Python under scripts/ and tests/.
+own Python under scripts/, tests/, and examples/.
 
 Per ADR 0012 (docs/adr/0012-cross-platform-developer-host.md) the
 Alp SDK promises Win + Mac + Linux as first-class developer hosts
@@ -55,8 +55,8 @@ list):
      /home/user/...) in markdown code examples.  These don't
      render correctly on Windows.  Use placeholders or per-OS
      code-tabs.
-  6. IMPLICIT-ENCODING: a Python call under scripts/** or tests/**
-     that decodes/encodes text with no `encoding=` keyword --
+  6. IMPLICIT-ENCODING: a Python call under scripts/**, tests/**, or
+     examples/** that decodes/encodes text with no `encoding=` keyword --
      `Path.read_text(`/`Path.write_text(`; bare `open(` or
      `Path.open(` or `os.fdopen(` in text mode (no `"b"` in the mode
      argument -- `open(file, mode)`'s and `m.open(file, mode)`'s second
@@ -100,20 +100,9 @@ Suppression mechanisms:
 
   IMPLICIT-ENCODING has no skip-marker mechanism: the fix IS the
   suppression -- add the `encoding=` keyword the finding names.
-  There's no legitimate reason for a call under scripts/ or tests/
-  to depend on the platform locale, so no per-call escape hatch is
-  offered.
-
-  IMPLICIT_ENCODING_BASELINE (grandfather baseline, temporary).  The
-  478 pre-existing sites across 139 files found the day this rule
-  landed (#2195) are listed by file in IMPLICIT_ENCODING_BASELINE,
-  minus the files already drained.
-  Findings in a baselined file are still printed as warnings, they
-  just don't flip --fail-on-warning's exit code -- new code and new
-  files are gated from day one, the backlog drains separately
-  (#2197).  This baseline must only ever shrink; see the set's own
-  comment for the full rationale, including the file-vs-line
-  granularity tradeoff.
+  There's no legitimate reason for a call under scripts/, tests/, or
+  examples/ to depend on the platform locale, so no per-call escape
+  hatch is offered.
 
 Operating mode:
 
@@ -146,13 +135,14 @@ Scope:
   bash-onlyness).
 
   Python files (.py) get the IMPLICIT-ENCODING check (pattern 6
-  above), but only under scripts/** and tests/** -- the two trees
-  that actually run as part of the SDK's own tooling and test
-  surface, where a locale-dependent decode fails a CI runner rather
-  than a customer's build.  Python elsewhere (examples/, docs/) is
-  out of scope for this linter; emitted-artifact portability (e.g.
-  Windows-only escape sequences produced by a generator script) is
-  covered by tests, not this scan.
+  above), but only under scripts/**, tests/**, and examples/** (see
+  PY_SCAN_ROOTS) -- the trees that actually ship or run Python as
+  part of the SDK's own tooling, test surface, and customer-facing
+  examples, where a locale-dependent decode fails a CI runner (or a
+  customer's build) rather than staying silent.  Python elsewhere
+  (docs/) is out of scope for this linter; emitted-artifact
+  portability (e.g. Windows-only escape sequences produced by a
+  generator script) is covered by tests, not this scan.
 
 Output format:
 
@@ -240,10 +230,12 @@ DEFAULT_ROOTS: tuple[str, ...] = (
 # IMPLICIT-ENCODING check to consider it during a default/root-scoped
 # walk.  scripts/ and tests/ are the SDK's own tooling + test surface
 # -- exactly where a locale-dependent decode fails a CI runner.
-# examples/ and docs/ are left alone here (see the module docstring's
-# Scope section); an explicit `--path some/other.py` still scans the
-# named file regardless of this restriction.
-PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests")
+# examples/ is included too: every tracked *.py file outside scripts/
+# and tests/ lives there (the customer-facing gen_model.py generators),
+# so it is just as exposed to the cp1252-on-windows-latest failure mode
+# as the SDK's own tooling.  An explicit `--path some/other.py` still
+# scans a file outside these roots regardless of this restriction.
+PY_SCAN_ROOTS: tuple[str, ...] = ("scripts", "tests", "examples")
 
 # Bash-only scripts that are intentionally Linux-side helpers per
 # ADR 0012 §7.6 carve-out.  These are exempt from the bash-shebang
@@ -314,135 +306,6 @@ INTENTIONALLY_DISCUSSES_OS_PATHS: frozenset[str] = frozenset({
     "docs/adr/0012-cross-platform-developer-host.md",
     "docs/ci/HW-IN-LOOP.md",
     "tests/hil/README.md",
-})
-
-# ---------------------------------------------------------------------
-# IMPLICIT-ENCODING grandfather baseline
-# ---------------------------------------------------------------------
-#
-# What this is: the day this rule landed (#2195), it found 478
-# pre-existing IMPLICIT-ENCODING sites across 139 files -- an
-# unreviewable, repo-wide mechanical diff that would also collide
-# with everything else in flight.  Rather than ship the rule
-# soft-warn-only (which would not have caught the #2194 regression
-# this rule exists for) or block on fixing 139 files in one PR, the
-# backlog is grandfathered here and drained separately (#2197) while
-# the rule gates on *new* code from day one.
-#
-# Shape: this is a FILE-level baseline, not a site/line-level one, on
-# purpose -- following INTENTIONALLY_DISCUSSES_OS_PATHS's precedent
-# above. A line-numbered baseline rots on every unrelated edit to a
-# listed file (this repo has been bitten by exactly that kind of
-# silent drift before); a file-level list survives edits at the cost
-# of a real weakness: touching a file on this list does not force a
-# fix of its OTHER pre-existing findings, and a genuinely NEW
-# implicit-encoding call added to a listed file is still only a
-# warning, not a failure, same as its 478 grandfathered neighbours --
-# the baseline can't tell old from new within one file. That's the
-# accepted cost of file-level granularity, and it is NOT compensated
-# by the report: the summary prints one aggregate count ("N
-# IMPLICIT-ENCODING finding(s) in IMPLICIT_ENCODING_BASELINE files")
-# and no per-file breakdown, so growth inside an already-listed file
-# does not stand out by eye. What IS held mechanically is the shape
-# of this set: tests/scripts/test_check_cross_platform.py's
-# test_linter_fail_on_warning_against_real_repo_passes pins its
-# length to shrink-only and fails on an entry that no longer
-# produces a finding (#2197).
-#
-# This baseline is TEMPORARY and must only ever SHRINK. Draining it
-# (fixing sites, then deleting the now-clean file from this set) is
-# tracked in #2197 -- do not add work items here, use that issue.
-#
-# Nothing may be ADDED to this set. A new implicit-encoding call gets
-# an explicit `encoding=` -- there is no inline exemption (see the
-# module docstring's Suppression section) -- not a baseline entry;
-# this set only ever holds what is left of the day-#2195 backlog.
-IMPLICIT_ENCODING_BASELINE: frozenset[str] = frozenset({
-    "scripts/alp_mcp/server.py",
-    "scripts/alp_model/adapters/deepx.py",
-    "scripts/alp_model/adapters/drpai.py",
-    "scripts/alp_model/adapters/ethos_u.py",
-    "scripts/alp_orchestrate/kconfig_symbols.py",
-    "scripts/alp_quality.py",
-    "scripts/alp_template.py",
-    "scripts/check_emit_kconfig_contract.py",
-    "scripts/check_emit_snapshots.py",
-    "scripts/check_zephyr_conf_parity.py",
-    "scripts/flash_backends/swd_probe.py",
-    "scripts/flash_backends/yocto_wic.py",
-    "scripts/flash_backends/zephyr_west_flash.py",
-    "scripts/gen_cc3501e_gpio_routes.py",
-    "scripts/gen_portability_matrix.py",
-    "scripts/provision_som.py",
-    "scripts/resolve_generated_conflicts.py",
-    "scripts/verify_west_patches.py",
-    "scripts/ws6c_emit_parity.py",
-    "tests/hil/run_smoke.py",
-    "tests/parity/seam1_field_diff.py",
-    "tests/scripts/_project_support.py",
-    "tests/scripts/test_abi_snapshot_freeze_gate.py",
-    "tests/scripts/test_aen_cc3501e_routes.py",
-    "tests/scripts/test_alp_lock.py",
-    "tests/scripts/test_alp_project_diagnostics.py",
-    "tests/scripts/test_alp_project_scaffold_emit.py",
-    "tests/scripts/test_alp_template.py",
-    "tests/scripts/test_bench_labgrid_resolver.py",
-    "tests/scripts/test_board_yaml_diagnostics.py",
-    "tests/scripts/test_check_board_target_tree_parity.py",
-    "tests/scripts/test_check_bootstrap_manifest.py",
-    "tests/scripts/test_check_build_plan.py",
-    "tests/scripts/test_check_cmake_chip_list_parity.py",
-    "tests/scripts/test_check_diagnostic_narratives.py",
-    "tests/scripts/test_check_diagnostic_schema.py",
-    "tests/scripts/test_check_doxyfile_single_source.py",
-    "tests/scripts/test_check_e1m_route_capability.py",
-    "tests/scripts/test_check_emit_registry.py",
-    "tests/scripts/test_check_example_board_overlay_parity.py",
-    "tests/scripts/test_check_example_storage_claims.py",
-    "tests/scripts/test_check_helper_firmware_path.py",
-    "tests/scripts/test_check_public_private.py",
-    "tests/scripts/test_check_som_bundle.py",
-    "tests/scripts/test_check_som_topology_parity.py",
-    "tests/scripts/test_check_stub_issues.py",
-    "tests/scripts/test_check_sw_fallback_tags.py",
-    "tests/scripts/test_check_system_manifest.py",
-    "tests/scripts/test_check_tan_docs_surface.py",
-    "tests/scripts/test_check_template_catalog.py",
-    "tests/scripts/test_check_test_coverage.py",
-    "tests/scripts/test_check_toolchain_lock.py",
-    "tests/scripts/test_check_vendor_ext_tags.py",
-    "tests/scripts/test_check_write_text_newline.py",
-    "tests/scripts/test_check_yocto_machine_tree_parity.py",
-    "tests/scripts/test_check_zephyr_conf_parity.py",
-    "tests/scripts/test_emit_os_topology.py",
-    "tests/scripts/test_emit_snapshot_goldens.py",
-    "tests/scripts/test_gen_catalog.py",
-    "tests/scripts/test_gen_dsp_decimator_coeffs.py",
-    "tests/scripts/test_gen_error_catalog.py",
-    "tests/scripts/test_gen_pinmux_capability.py",
-    "tests/scripts/test_gen_portability_matrix.py",
-    "tests/scripts/test_gen_rzv2n_cm33_svd.py",
-    "tests/scripts/test_gen_soc_peripheral_instances.py",
-    "tests/scripts/test_gen_support_matrix.py",
-    "tests/scripts/test_gen_verification_status.py",
-    "tests/scripts/test_gen_zephyr_board.py",
-    "tests/scripts/test_hw_rev_existence_gate.py",
-    "tests/scripts/test_hw_rev_table_unreadable.py",
-    "tests/scripts/test_lint_doc_yaml_fragments.py",
-    "tests/scripts/test_program_eeprom.py",
-    "tests/scripts/test_program_eeprom_secure_page.py",
-    "tests/scripts/test_project_backends.py",
-    "tests/scripts/test_project_emit_zephyr.py",
-    "tests/scripts/test_project_validation.py",
-    "tests/scripts/test_provision_som.py",
-    "tests/scripts/test_release_changelog_slice.py",
-    "tests/scripts/test_release_tag_verify.py",
-    "tests/scripts/test_test_all_gate_coverage.py",
-    "tests/scripts/test_test_all_generated_files_untracked.py",
-    "tests/scripts/test_test_all_worktree.py",
-    "tests/scripts/test_validate_board_yaml_entrypoints.py",
-    "tests/scripts/test_validate_metadata_no_alp_model_import.py",
-    "tests/scripts/test_validate_metadata_physical.py",
 })
 
 # Regex used to detect "this script has a cross-platform note" in
@@ -839,18 +702,12 @@ class Finding:
     category: str
     matched_text: str
     suggestion: str
-    # True for an IMPLICIT-ENCODING finding whose file is in
-    # IMPLICIT_ENCODING_BASELINE (see that set's comment).  Always
-    # False for every other category. Still printed as a warning --
-    # only --fail-on-warning's exit-code decision skips it.
-    baselined: bool = False
 
     def render(self) -> str:
         """Human-readable single-line report."""
-        tag = " [baselined, #2197]" if self.baselined else ""
         return (
             f"{self.path}:{self.line} {self.category}: "
-            f"`{self.matched_text}` -- {self.suggestion}{tag}"
+            f"`{self.matched_text}` -- {self.suggestion}"
         )
 
 
@@ -908,9 +765,9 @@ def discover_files(
                 continue
             rel = p.relative_to(base) if base in p.parents else p
             if p.name.endswith(".py"):
-                # IMPLICIT-ENCODING is scoped to scripts/** + tests/**
-                # (see PY_SCAN_ROOTS) -- skip .py files outside those
-                # trees during an implicit walk.
+                # IMPLICIT-ENCODING is scoped to PY_SCAN_ROOTS
+                # (scripts/**, tests/**, examples/**) -- skip .py
+                # files outside those trees during an implicit walk.
                 if not rel.parts or rel.parts[0] not in PY_SCAN_ROOTS:
                     continue
             elif not (p.name.endswith(".md") or p.name.endswith(".sh")):
@@ -1128,13 +985,8 @@ def scan_file(
     # comment above `scan_python_encoding`.  It has no skip-marker /
     # allowlist mechanism (the fix IS the suppression: add
     # `encoding=`), so it runs unconditionally for every .py file
-    # `discover_files` handed us.  The one exception is
-    # IMPLICIT_ENCODING_BASELINE (see that set's comment): a file
-    # listed there still gets every finding reported (baselined
-    # findings are warnings, not silence), they just don't flip
-    # --fail-on-warning's exit code -- see `main()`.
+    # `discover_files` handed us.
     if path.name.endswith(".py"):
-        file_baselined = rel_posix in IMPLICIT_ENCODING_BASELINE
         for line, col, matched_text, suggestion in scan_python_encoding(text):
             out.append(
                 Finding(
@@ -1144,7 +996,6 @@ def scan_file(
                     category="IMPLICIT-ENCODING",
                     matched_text=matched_text,
                     suggestion=suggestion,
-                    baselined=file_baselined,
                 )
             )
 
@@ -1249,15 +1100,9 @@ def _print_summary(
     for f in findings:
         by_cat[f.category] = by_cat.get(f.category, 0) + 1
     cats = ", ".join(f"{k}={v}" for k, v in sorted(by_cat.items()))
-    n_baselined = sum(1 for f in findings if f.baselined)
     trailer = (
         f"; {n_allow} allowlisted file(s) (informational)" if n_allow else ""
     )
-    if n_baselined:
-        trailer += (
-            f"; {n_baselined} IMPLICIT-ENCODING finding(s) in "
-            f"IMPLICIT_ENCODING_BASELINE files (#2197, not fail-on-warning)"
-        )
     print(
         f"check_cross_platform: WARN: {n} finding(s) ({cats}){trailer}"
     )
@@ -1358,12 +1203,9 @@ def main() -> int:
     _print_summary(findings, summaries, as_json=args.json)
 
     # Allowlist summaries DO NOT flip the exit code -- they are
-    # informational by design.  Only real findings count -- except a
-    # `baselined` IMPLICIT-ENCODING finding (IMPLICIT_ENCODING_BASELINE,
-    # #2197's backlog): those are still printed above as warnings, they
-    # just don't fail the gate.  Every non-baselined finding still does.
-    failing = [f for f in findings if not f.baselined]
-    if failing and args.fail_on_warning:
+    # informational by design.  Every real finding, including
+    # IMPLICIT-ENCODING, fails --fail-on-warning.
+    if findings and args.fail_on_warning:
         return 1
     return 0
 
