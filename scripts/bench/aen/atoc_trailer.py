@@ -203,6 +203,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     print(f"PACKAGE_START=0x{trailer.package_start:08X}")
     print(f"PACKAGE_SIZE=0x{trailer.package_size:X}")
     print(f"HEADER_ADDRESS=0x{trailer.header_address:08X}")
+    print(f"WORD0=0x{trailer.word0:08X}")
     return 0
 
 

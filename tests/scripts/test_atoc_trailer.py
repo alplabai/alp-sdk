@@ -307,6 +307,7 @@ def test_cli_resolve_exact_measured_bytes(tmp_path: Path) -> None:
     assert res.returncode == 0, res.stdout + res.stderr
     assert f"PACKAGE_START=0x{PKG_START:08X}" in res.stdout
     assert f"PACKAGE_SIZE=0x{PKG_SIZE:X}" in res.stdout
+    assert f"WORD0=0x{WORD0:08X}" in res.stdout
 
 
 def test_cli_resolve_refuses_the_old_wrong_three_word_layout(tmp_path: Path) -> None:
