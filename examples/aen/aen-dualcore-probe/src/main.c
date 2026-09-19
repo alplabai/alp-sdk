@@ -39,7 +39,7 @@
 #include <zephyr/sys/printk.h>
 
 /* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #define BEACON_BASE      0x02000010U
 #define ROLE             "HP"
 #define MAGIC            0xB1B10090U /* HP slot */

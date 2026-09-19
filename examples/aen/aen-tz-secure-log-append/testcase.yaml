@@ -9,7 +9,7 @@
 #
 # Uses CMSE intrinsics (-mcmse) for the Secure<->Non-Secure call.
 # Compile-checks the app on the real E8 board target; filtered OUT of the
-# native_sim PR gate (platform_allow = the AEN801 HE board only).
+# native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets).
 
 sample:
   name: aen-tz-secure-log-append
@@ -23,6 +23,7 @@ tests:
   alp_sdk.examples.aen.tz_secure_log_append.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example
