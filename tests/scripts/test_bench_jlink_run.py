@@ -23,6 +23,7 @@ path, so production behaviour is unchanged.
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -295,6 +296,104 @@ def test_injects_disableautoupdatefw_ahead_of_the_callers_script(tmp_path: Path)
         f"the probe-brick guard must be the FIRST line JLinkExe would see: {content}"
     )
     assert "si SWD" in content, "the caller's own CommandFile content must survive"
+
+
+def _unshare_can_make_a_private_netns() -> bool:
+    """Unprivileged `unshare --net` needs user namespaces enabled on the
+    host kernel -- some CI/sandbox images disable them. Skip rather than
+    fail when it is unavailable, matching _NEEDS_BASH's shape."""
+    try:
+        probe = subprocess.run(
+            ["unshare", "-rm", "--net", "--ipc", "--propagation", "private",
+             "/bin/bash", "-c", "printf ok"],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return probe.returncode == 0 and probe.stdout.strip() == "ok"
+
+
+_NEEDS_UNSHARE = pytest.mark.skipif(
+    not _unshare_can_make_a_private_netns(),
+    reason="unprivileged `unshare --net` is unavailable on this host",
+)
+
+
+def _extract_lo_check() -> str:
+    """alp-sdk#2174: pull the EXACT loopback-verification text
+    bench_jlink_run() runs inside its unshare subshell -- from `ip link
+    set lo up` up to (not including) the JLINK_MASKS masking loop -- out
+    of the real bench-env.sh, rather than hand-copying a second version
+    into this test that could silently drift from what actually ships.
+    Stopping before the masking loop means this needs no real char
+    device: it exercises only the loopback guard, nothing downstream of it
+    that depends on a real USB topology."""
+    text = ENV.read_text(encoding="utf-8")
+    start = text.index("ip link set lo up 2>/dev/null || true")
+    end = text.index("for n in $JLINK_MASKS")
+    return text[start:end]
+
+
+def _run_lo_check(tmp_path: Path, *, lo_up: bool) -> subprocess.CompletedProcess[str]:
+    """Run the extracted loopback-check block for real, inside a genuine
+    fresh net namespace, with a stub `ip` on PATH ahead of the real one so
+    `ip -o link show lo` reports a controlled up/down flag set -- the real
+    `ip link set lo up` call ahead of it still runs for real (harmless,
+    its own result is deliberately ignored by `|| true`)."""
+    real_ip = shutil.which("ip") or "/usr/sbin/ip"
+    fake_ip = tmp_path / "ip"
+    flags = "LOOPBACK,UP,LOWER_UP" if lo_up else "LOOPBACK"
+    fake_ip.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ "$*" = "-o link show lo" ]; then\n'
+        f'  echo "1: lo: <{flags}> mtu 65536 qdisc noop state DOWN"\n'
+        "  exit 0\n"
+        "fi\n"
+        # The REAL binary by ABSOLUTE path, never a bare "ip" -- PATH below
+        # puts this stub first, so a PATH-relative re-exec would recurse
+        # into itself forever instead of falling through (measured: a
+        # `/usr/bin/env ip` fallback here hung every real run until fixed).
+        f'exec "{real_ip}" "$@"\n',
+        encoding="utf-8",
+    )
+    fake_ip.chmod(fake_ip.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+    script = tmp_path / "lo_check.sh"
+    script.write_text(_extract_lo_check() + '\necho REACHED\n', encoding="utf-8")
+
+    env = _sanitized_env()
+    env["PATH"] = f"{tmp_path}{os.pathsep}{env.get('PATH', '')}"
+    return subprocess.run(
+        ["unshare", "-rm", "--net", "--ipc", "--propagation", "private",
+         "/bin/bash", str(script)],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=30,
+    )
+
+
+@_NEEDS_BASH
+@_NEEDS_UNSHARE
+def test_lo_up_lets_the_session_proceed(tmp_path: Path) -> None:
+    """alp-sdk#2174: lo reporting UP in a fresh netns (however it got
+    there) must not block the caller's own script from continuing."""
+    res = _run_lo_check(tmp_path, lo_up=True)
+    assert res.returncode == 0, f"{res.stdout}\n{res.stderr}"
+    assert "REACHED" in res.stdout
+
+
+@_NEEDS_BASH
+@_NEEDS_UNSHARE
+def test_lo_staying_down_refuses_instead_of_silently_continuing(tmp_path: Path) -> None:
+    """alp-sdk#2174: the bug this closes -- `ip link set lo up 2>/dev/null
+    || true` swallowed a failed bring-up and let JLinkExe run against a
+    netns whose loopback never came up (the J-Link DLL segfaults on that).
+    A still-down lo must refuse (exit 9, the isolation-did-not-take family
+    the neighbouring checks in this same subshell already use) and never
+    reach the caller's own script."""
+    res = _run_lo_check(tmp_path, lo_up=False)
+    assert res.returncode == 9, f"{res.stdout}\n{res.stderr}"
+    assert "loopback did not come up" in res.stderr, res.stderr
+    assert "REACHED" not in res.stdout, "must refuse before the caller's script ever runs"
 
 
 @_NEEDS_BASH
