@@ -191,7 +191,7 @@ def _fake_setools(tmp_path: Path, name: str, pkg_addr: str) -> Path:
     gen_toc.write_text(
         "#!/usr/bin/env bash\n"
         "set -e\n"
-        "head -c 1280 /dev/zero | tr '\\0' '\\253' > build/AppTocPackage.bin\n"
+        "head -c 1280 /dev/zero | LC_ALL=C tr '\\0' '\\253' > build/AppTocPackage.bin\n"
         f'echo "APP Package Start Address: {pkg_addr}" > build/app-package-map.txt\n',
         encoding="utf-8",
     )

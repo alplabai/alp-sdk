@@ -697,7 +697,7 @@ bench_jlink_run() {
 					echo "           this is the backstop behind each writer's own dry-run exit." >&2
 					return 13
 				fi
-				prelude=$(mktemp "${TMPDIR:-/tmp}/bench-jlink-run-XXXXXX.jlink") || {
+				prelude=$(mktemp "${TMPDIR:-/tmp}/bench-jlink-run.jlink.XXXXXX") || {
 					echo "bench-env: bench_jlink_run: cannot create the DisableAutoUpdateFW prelude file" >&2
 					return 10
 				}
@@ -1545,7 +1545,7 @@ bench_flowd_read_sectors() {
 	fi
 
 	local cmdfile
-	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-read-XXXXXX.jlink")" || return 1
+	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-read.jlink.XXXXXX")" || return 1
 	{
 		echo "device $JLINK_DEVICE_READ"
 		echo "si SWD"
@@ -1578,7 +1578,7 @@ with open(sys.argv[1], 'wb') as f:
 	fi
 
 	local out
-	out="$(mktemp "${TMPDIR:-/tmp}/flowd-read-XXXXXX.out")" || {
+	out="$(mktemp "${TMPDIR:-/tmp}/flowd-read.out.XXXXXX")" || {
 		rm -f "$cmdfile"
 		return 1
 	}
@@ -1876,7 +1876,7 @@ bench_flowd_proof() {
 	rm -f "$read_dir"/*.bin 2>/dev/null || true
 
 	local cmdfile
-	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.jlink")" || return 1
+	cmdfile="$(mktemp "${TMPDIR:-/tmp}/flowd-proof.jlink.XXXXXX")" || return 1
 	{
 		echo "device $JLINK_DEVICE_READ"
 		echo "si SWD"
@@ -1927,7 +1927,7 @@ for e in manifest:
 	local out rc attempt
 	attempt=1
 	while :; do
-		out="$(mktemp "${TMPDIR:-/tmp}/flowd-proof-XXXXXX.out")" || {
+		out="$(mktemp "${TMPDIR:-/tmp}/flowd-proof.out.XXXXXX")" || {
 			rm -f "$cmdfile"
 			return 1
 		}

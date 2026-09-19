@@ -335,7 +335,7 @@ fi
 if [ "$DRY_RUN" != 1 ]; then
 	ATOC_REGION_SIZE=$((ATOC_KIB * 1024))
 	TRAILER_SECTOR_BASE="$ATOC_BASE"
-	TRAILER_SECTOR_FILE="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-trailer-XXXXXX.bin")" || exit 6
+	TRAILER_SECTOR_FILE="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.bin.XXXXXX")" || exit 6
 	cat > "${TMPDIR:-/tmp}/aen-erase-atoc-trailer.jlink" <<EOF
 si SWD
 speed $JLINK_SPEED
@@ -359,7 +359,7 @@ EOF
 		exit 6
 	fi
 
-	ATOC_RESOLVE_OUT="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-resolve-XXXXXX.out")" || exit 6
+	ATOC_RESOLVE_OUT="$(mktemp "${TMPDIR:-/tmp}/aen-erase-atoc-resolve.out.XXXXXX")" || exit 6
 	if ! PYTHONIOENCODING=utf-8 python3 "$ALP_SDK_DIR/scripts/bench/aen/atoc_trailer.py" resolve \
 		--sector-file "$TRAILER_SECTOR_FILE" --sector-base "$(printf '0x%X' "$((TRAILER_SECTOR_BASE))")" \
 		--window-lo "$FLOWD_WINDOW_LO" --window-end "$(printf '0x%X' "$ATOC_END")" \

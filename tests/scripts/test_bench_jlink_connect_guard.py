@@ -1186,7 +1186,13 @@ def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
     template shape that broke it cannot silently come back. A real
     macOS run of this suite (CI) is what actually proves the fix; treat
     this test as a tripwire against re-introducing a mid-template
-    placeholder, not as macOS coverage."""
+    placeholder, not as macOS coverage.
+
+    alp-sdk#2233 re-introduced the same shape in seven more templates
+    (`flowd-read-XXXXXX.jlink`, `aen-erase-atoc-trailer-XXXXXX.bin`, ...),
+    and macOS CI went red again, so the tripwire now sweeps every mktemp
+    call in every bench script rather than the one template that broke
+    first."""
     body = ENV.read_text(encoding="utf-8")
     m = re.search(r'mktemp\s+"[^"]*atoc-before\.([A-Za-z.]+)"', body)
     assert m, "could not find the atoc-before mktemp call in bench-env.sh"
@@ -1195,6 +1201,15 @@ def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
         f"the mktemp template's X-placeholder must be exactly 6 trailing X's "
         f"with NOTHING after them (BSD/macOS mktemp requires this) -- got "
         f"{placeholder!r}"
+    )
+    mid_template = []
+    for sh in sorted(BENCH.parent.rglob("*.sh")):
+        for n, line in enumerate(sh.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.lstrip().startswith("#") and re.search(r'\bmktemp\b[^#]*X{3,}[^X\s"\')]', line):
+                mid_template.append(f"{sh.relative_to(REPO)}:{n}: {line.strip()}")
+    assert not mid_template, (
+        "mktemp templates with a suffix after the X's fail on BSD/macOS mktemp:\n"
+        + "\n".join(mid_template)
     )
 
 

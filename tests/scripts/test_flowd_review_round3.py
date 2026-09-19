@@ -59,7 +59,7 @@ log = open(LOG, "a", encoding="utf-8")
 kind = os.path.basename(cmd or "?")
 log.write("SESSION %s\n" % kind)
 print("SEGGER J-Link Commander (stub)")
-is_proof = "flowd-proof-" in kind or "-resolve" in kind
+is_proof = "flowd-proof." in kind or "-resolve" in kind
 is_trailer = "atoc-trailer" in kind
 fail_connect = (
     (is_proof and os.environ.get("FAIL_PROOF_CONNECT") == "1")
@@ -101,7 +101,7 @@ for ln in lines:
     elif p[0] == "savebin":
         addr = int(p[2], 0)
         fail_sector = os.environ.get("FAIL_READ_SECTOR")
-        if fail_sector and int(fail_sector, 16) == (addr - addr % SEC) and "flowd-read-" in kind:
+        if fail_sector and int(fail_sector, 16) == (addr - addr % SEC) and "flowd-read." in kind:
             print("****** Error: Could not read memory at address 0x%08X." % addr)
             log.write("  READ-FAIL-INJECTED %08X\n" % addr)
             # Still write a FULL-SIZE file, but of GARBAGE, not the real
@@ -116,19 +116,19 @@ for ln in lines:
             if os.path.isdir(d):
                 open(p[1], "wb").write(b"\xDE" * int(p[3], 0))
             continue
-        if os.environ.get("SKIP_SAVEBIN") == "1" and "flowd-proof-" in kind:
+        if os.environ.get("SKIP_SAVEBIN") == "1" and "flowd-proof." in kind:
             log.write("  SAVEBIN-SKIPPED %s\n" % p[1])
             continue
         # SKIP_PREWRITE_SECTOR: simulate the write session's OWN prewrite
         # savebin (the one right after connect/h, before the loadbin line)
         # silently failing for exactly one sector -- distinct from a
-        # PROOF-session savebin (kind excludes "flowd-proof-"/"flowd-read-")
+        # PROOF-session savebin (kind excludes "flowd-proof."/"flowd-read.")
         # and from a normal read failure (no error text printed here, the
         # file is just never created, matching JLinkExe writing nothing to
         # disk on a silent no-op rather than printing a known failure string).
         skip_prewrite = os.environ.get("SKIP_PREWRITE_SECTOR")
         if (skip_prewrite and int(skip_prewrite, 16) == (addr - addr % SEC)
-                and "flowd-proof-" not in kind and "flowd-read-" not in kind):
+                and "flowd-proof." not in kind and "flowd-read." not in kind):
             log.write("  PREWRITE-SKIPPED %08X\n" % addr)
             continue
         d = os.path.dirname(p[1])
@@ -144,7 +144,7 @@ for ln in lines:
         # pre-existing failure-string check and the existence+size loop
         # both see nothing wrong here).
         silent_sector = os.environ.get("SILENT_READ_SECTOR")
-        if (silent_sector and int(silent_sector, 16) == (addr - addr % SEC) and "flowd-read-" in kind):
+        if (silent_sector and int(silent_sector, 16) == (addr - addr % SEC) and "flowd-read." in kind):
             log.write("  SILENT-SAVEBIN %08X\n" % addr)
             continue
         # alp-sdk#2233 review round 5: the bench-measured savebin SUCCESS
@@ -161,10 +161,10 @@ for ln in lines:
             open(os.path.join(M, "%08X.bin" % (a + i)), "wb").write(data[i:i + SEC])
 print("Script processing completed.")
 # RACE_SECTOR: poke a byte in the named sector once, right after the PRE-READ
-# session (the "flowd-read-*" CommandFile) completes -- simulating something
+# session (the "flowd-read.*" CommandFile) completes -- simulating something
 # else writing to a to-be-padded sector between the pre-read and the write
 # session's own prewrite savebin.
-if os.environ.get("RACE_SECTOR") and "flowd-read-" in kind and not os.path.exists(M + "/.raced"):
+if os.environ.get("RACE_SECTOR") and "flowd-read." in kind and not os.path.exists(M + "/.raced"):
     b = int(os.environ["RACE_SECTOR"], 16)
     f = os.path.join(M, "%08X.bin" % b)
     buf = bytearray(open(f, "rb").read() if os.path.exists(f) else bytes(SEC))
@@ -221,7 +221,7 @@ def _setup(tmp_path: Path) -> dict:
     gen_toc = st / "app-gen-toc"
     gen_toc.write_text(
         "#!/bin/bash\n"
-        "head -c 1280 /dev/zero | tr '\\0' '\\253' > build/AppTocPackage.bin\n"
+        "head -c 1280 /dev/zero | LC_ALL=C tr '\\0' '\\253' > build/AppTocPackage.bin\n"
         "echo 'APP Package Start Address: 0x8057FB00' > build/app-package-map.txt\n",
         encoding="utf-8",
     )
