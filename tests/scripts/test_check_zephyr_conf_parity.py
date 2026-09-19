@@ -6,6 +6,7 @@ for twister/bare-`west build` consumers, the planner's `EXTRA_CONF_FILE`
 wiring serves `tan`-driven builds, and this pins the two can never diverge).
 """
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,7 +33,8 @@ def _cmakelists(path: Path, body: str) -> Path:
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"})
 
 
 def test_default_corpus_byte_identical():

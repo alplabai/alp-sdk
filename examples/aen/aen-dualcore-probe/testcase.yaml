@@ -6,8 +6,8 @@
 # peer's heartbeat advance.  BENCH-VERIFIED PASS on E8 (2026-08-01): both
 # cores observed each other advancing.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = AEN801 board
-# targets only, no native_sim overlay); build_only in the advisory
+# Filtered OUT of the native_sim PR gate (platform_allow = real AEN board
+# targets, no native_sim overlay); build_only in the advisory
 # pr-twister-aen.yml gate -- the cross-core heartbeat read is a dual-entry
 # ATOC bench flash + SWD read, not a CI run.
 
@@ -23,6 +23,7 @@ tests:
   alp_sdk.examples.aen.dualcore_probe.he:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example
@@ -34,6 +35,7 @@ tests:
   alp_sdk.examples.aen.dualcore_probe.hp:
     platform_allow:
       - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
     tags:
       - alp-sdk
       - example

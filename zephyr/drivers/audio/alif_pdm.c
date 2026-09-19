@@ -13,7 +13,7 @@
  * it survives a `west update`.  Retire onto the opt-in sdk-alif fork compatible
  * once the pdm node is repointed AND bench-verified.  See
  * docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
- * Silicon status (issue #2133, e1m-aen-evk-03): register-level
+ * Silicon status (issue #2133, E1M-AEN803 serial 2026W36-0002): register-level
  * configuration verified; 48 kHz mode 7 capture rate verified exact with no
  * drops (commit 68a169977). Acoustic capture at 48 kHz VERIFIED on mic
  * ch0/ch1 (PDM controller 0) ONLY, by a speaker-to-mic loopback
@@ -83,7 +83,7 @@
  *
  * Round 1 of #2133 shipped this divergence with PDM_MODE_STANDARD_VOICE_512
  * mis-keyed to 16000 Hz; HWRM Table 15-118 and bench evidence
- * (PDM_CONFIG_REGISTER read back 0x00010033 on e1m-aen-evk-03) both show
+ * (PDM_CONFIG_REGISTER read back 0x00010033 on E1M-AEN803 serial 2026W36-0002) both show
  * mode 1 is 512 kHz clk / decimation 64 / 8 kHz Fs. The table now keys mode
  * 1 to 8000 Hz and adds mode 4 (HIGH_QUALITY_1024, 1024 kHz clk / decimation
  * 64 -- the SAME ratio as mode 1) for 16000 Hz; the FIR reuse across modes
@@ -158,7 +158,7 @@
  *
  * ------------------------- alp-sdk divergence (7) ----------------------
  * issue #2133 round 4a: PDM_CONFIG_REGISTER read back 0x00010033 (mode 1)
- * from a PREVIOUS image on e1m-aen-evk-03, survived a `loadbin` reset, and
+ * from a PREVIOUS image on E1M-AEN803 serial 2026W36-0002, survived a `loadbin` reset, and
  * was still set after a refused dmic_configure() in the NEXT image --
  * pdm_initialize() (the fork's init function) only ever wrote
  * PDM_CTL_REGISTER/PDM_THRESHOLD_REGISTER, never PDM_CONFIG_REGISTER, so a
@@ -270,7 +270,7 @@
  *    hazard DMIC_TRIGGER_STOP does not have (it disables interrupts and
  *    zeroes record_data FIRST). SUSPEND now does the same ordering.
  *  - A silicon run at gain 0x800 (quiet room, no controlled stimulus,
- *    e1m-aen-evk-03, image built from 7e2535d63) found every unclipped
+ *    E1M-AEN803 serial 2026W36-0002, image built from 7e2535d63) found every unclipped
  *    sample a multiple of 0x80 (the gain is a saturating multiply AFTER
  *    the datapath quantizes -- a coarser gain adds no resolution) and the
  *    start-of-capture / post-restart window pinned at +/-32767 (decimator
@@ -283,7 +283,7 @@
  * ------------------------- alp-sdk divergence (11) ---------------------
  * issue #2133 round 4f -- acoustic capture VERIFIED (by a real method,
  * unlike round 4d/4e's non-clap), plus three more corrections:
- *  - A speaker-to-mic loopback on `e1m-aen-evk-03` (PROBE_LOOPBACK mode of
+ *  - A speaker-to-mic loopback on E1M-AEN803 serial 2026W36-0002 (PROBE_LOOPBACK mode of
  *    examples/aen/aen-i2s-tas2563-probe on branch
  *    test/u46-i2s-tas2563-on-reworked-mux, issue #2143 -- not this example;
  *    TAS2563 speakers, independently verified audible, playing known tones
@@ -440,7 +440,7 @@ struct pdm_clock_mode_entry {
 static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	/* Mode 1 (STANDARD_VOICE_512): 512 kHz clk, decimation 64 -> 8 kHz Fs
 	 * (HWRM Table 15-118). PDM_CONFIG_REGISTER read back 0x00010033 on
-	 * e1m-aen-evk-03 and the FIFO count moved (issue #2133 round 2), but
+	 * E1M-AEN803 serial 2026W36-0002 and the FIFO count moved (issue #2133 round 2), but
 	 * 512 kHz is BELOW the EVK's MP34DT05TR-A mics' 1.2 MHz minimum
 	 * (ST's in-tree mpxxdtyy.h: MPXXDTYY_MIN_PDM_FREQ) -- round 3: that
 	 * reading is an under-clocked mic, not proof of correct capture, and
@@ -478,7 +478,7 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * mode this example now defaults to. Same direct FIR-reuse argument
 	 * as mode 4 (sdk-alif tests/drivers/pdm/src/alif_test_pdm.c:34-100
 	 * FIR tables, :245-282 mode select, no FIR switch across modes 1-9).
-	 * SILICON RESULT (issue #2133 round 4a, e1m-aen-evk-03): the mode IS
+	 * SILICON RESULT (issue #2133 round 4a, E1M-AEN803 serial 2026W36-0002): the mode IS
 	 * programmed and HELD correctly -- PDM_CONFIG_REGISTER read back
 	 * 0x00070033 throughout capture, 38400-byte blocks (4800 frames x 4
 	 * ch x 2 B) arrived as configured -- but the app's `measured_rate_hz`
@@ -492,7 +492,7 @@ static const struct pdm_clock_mode_entry pdm_clock_modes[] = {
 	 * 100 ms block period, no CONFIG_FPU) to pace that measurement on
 	 * its own. The example was fixed to integer-only stats.
 	 *
-	 * ROUND 4D SILICON RESULT (commit 68a169977, e1m-aen-evk-03, fixed
+	 * ROUND 4D SILICON RESULT (commit 68a169977, E1M-AEN803 serial 2026W36-0002, fixed
 	 * consumer): a fresh run measured `measured_rate_hz=48000` exactly,
 	 * with `slab_missed=0`, `overrun=0`, and no -EIO for the full run --
 	 * mode 7 delivers 48 kHz PCM with no dropped blocks, CONFIRMED. A
@@ -549,7 +549,7 @@ static void pdm_ctl0_write_spacer(const struct device *dev)
 
 /* Force PDM_CONFIG_REGISTER's channel-enable AND clock-mode fields to their
  * inert state (no channels enabled, MICROPHONE_SLEEP) -- issue #2133 round
- * 4a. Silicon observation on e1m-aen-evk-03: PDM_CONFIG_REGISTER read back
+ * 4a. Silicon observation on E1M-AEN803 serial 2026W36-0002: PDM_CONFIG_REGISTER read back
  * 0x00010033 (mode 1, channels 0/1/4/5) left over from a PREVIOUS image,
  * survived the `loadbin` reset, and was STILL set after a refused
  * dmic_configure() in the NEXT image -- pdm_initialize() only ever wrote

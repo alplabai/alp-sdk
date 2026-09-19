@@ -87,7 +87,7 @@ ZTEST(sdhc_dwc_r2_realign, test_new_loop_decodes_csd_v2_correctly)
 
 /* Red (documents the bug, does not call the helper): the OLD carry
  * direction -- index 0->3, carrying from response[i + 1] -- truncates
- * C_SIZE to 0xBAFF (49020928 sectors instead of 250347520, bench evk-03)
+ * C_SIZE to 0xBAFF (49020928 sectors instead of 250347520, E1M-AEN803 serial 2026W36-0002)
  * and pollutes response[0]'s low byte with response[1]'s top byte instead
  * of leaving it zero. This proves the fix is the carry direction, not
  * merely that the shift ran.

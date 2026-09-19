@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -67,6 +68,8 @@ def test_live_route_capability_gate_passes() -> None:
         [sys.executable, str(REPO / "scripts" / "check_e1m_route_capability.py")],
         cwd=REPO,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         capture_output=True,
         check=False,
     )

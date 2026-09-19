@@ -572,7 +572,7 @@ alp_status_t cc3501e_sock_recv(cc3501e_t *ctx,
 	 * The cap therefore belongs to the frame, not to a magic number.
 	 *
 	 * KNOWN OPEN ITEM: that measurement's READY-readable board is not the R2
-	 * module e1m-aen-evk-01 currently holds -- see cc3501e_reply_gate()'s own
+	 * module this bench currently holds -- see cc3501e_reply_gate()'s own
 	 * doc comment in chips/cc3501e/cc3501e_core.c.  The AEN example bridges leave ready_pin
 	 * NULL by default on that module, so they fall back to fixed settle gaps,
 	 * where the old 256-byte cap would apply.  This 487-byte figure has not

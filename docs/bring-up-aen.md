@@ -71,7 +71,7 @@ Inventory check before powering anything:
 > [`alif-ospi.tsv`](../metadata/e1m_modules/aen/alif-ospi.tsv)) rather
 > than the Alif DevKit's -- and that example's PASS banner no longer
 > prints the stale "no part populated this batch" claim. The apply is
-> bench-verified on `e1m-aen-evk-02` and `e1m-aen-evk-03`: it is
+> bench-verified on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002): it is
 > fail-closed and runs before the clock-enable, so the device reaching
 > READY proves it returned 0. The pad-mux registers were **not** read
 > back, though, so "pinctrl applied without error" is measured and "the

@@ -1599,6 +1599,28 @@ if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()
 
+# Weak-RNG refusal for mbedTLS' PSA crypto core (issues #2173, #2192).
+# CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG is y when this build compiles the PSA core
+# against a generator Zephyr itself documents as not random -- no entropy
+# driver at all (TEST_RANDOM_GENERATOR), or a fake one that admits it in its
+# own Kconfig help.  Kconfig cannot refuse a configuration, so the refusal
+# lives here: without it the AEN TLS and OTA examples build, link, run and
+# derive session keys from a predictable source, with nothing but a boot-log
+# WARNING between that and a shipped product.
+if(CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG AND NOT CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY)
+    message(FATAL_ERROR
+        "${BOARD} builds mbedTLS' PSA crypto core with no cryptographically "
+        "secure random source: CONFIG_CSPRNG_ENABLED is not set, or the only "
+        "entropy driver in this build declares itself a fake. TLS would "
+        "negotiate and derive key material from a predictable generator.\n"
+        "  Fix it: bind a real entropy driver for this target (on Alif "
+        "Ensemble that is the Secure Enclave TRNG -- open work, issue "
+        "#2192).\n"
+        "  Or, for a simulator, a test, or a bench-only bring-up image that "
+        "never ships, acknowledge it explicitly with "
+        "CONFIG_ALP_SDK_ALLOW_TEST_ENTROPY=y.")
+endif()
+
 # <alp/testing/*> virtual-backend test doubles (epic #610).  Hard-gated
 # on CONFIG_ZTEST at the Kconfig layer (zephyr/kconfigs/testing.kconfig);
 # FATAL_ERROR here too so a workspace that somehow forces

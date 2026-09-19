@@ -3247,6 +3247,10 @@
       "script": "scripts/check_build_receipt.py"
     },
     {
+      "purpose": "CI gate: every in-tree copy of `cc3501e_bridge.{c,h}` under `examples/**` is byte-identical to the canonical pair, except the copies this gate declares divergent by name.",
+      "script": "scripts/check_cc3501e_bridge_copies.py"
+    },
+    {
       "purpose": "Verify every `path:line` citation in `changelog.d/` still resolves, and that every new one is anchored.",
       "script": "scripts/check_changelog_citations.py"
     },
@@ -3279,7 +3283,7 @@
       "script": "scripts/check_core_cmakelists_mapping.py"
     },
     {
-      "purpose": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/ and tests/.",
+      "purpose": "Lint repo content for cross-platform hazards: Linux-only idioms in customer-facing surfaces, and implicit text encodings in the SDK's own Python under scripts/, tests/, and examples/.",
       "script": "scripts/check_cross_platform.py"
     },
     {
@@ -3347,7 +3351,7 @@
       "script": "scripts/check_example_board_overlay_content_parity.py"
     },
     {
-      "purpose": "CI gate covering two related silent-overlay-drop defects:",
+      "purpose": "CI gate covering four related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
     {

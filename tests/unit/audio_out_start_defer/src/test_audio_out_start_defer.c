@@ -217,7 +217,7 @@ ZTEST(alp_audio_out_start_defer, test_stereo_chunked_volume_write_then_start_suc
  * exercised directly against <alp/i2s.h> in tests/unit/i2s_start_defer
  * must also compose correctly through the <alp/audio.h> layer --
  * silicon repro: both alp_audio_out_stop(I2S3) and alp_audio_out_start()
- * returned -5 after the queue ran dry, e1m-aen-evk-03. */
+ * returned -5 after the queue ran dry, E1M-AEN803 serial 2026W36-0002. */
 ZTEST(alp_audio_out_start_defer, test_mono_underrun_stop_start_write_recovers)
 {
 	fake_i2s_reset();

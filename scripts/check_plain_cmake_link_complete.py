@@ -66,12 +66,16 @@ def _configure_and_build(os_backend: str, build_dir: Path, generator: str) -> Pa
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     subprocess.run(
         ["cmake", "--build", str(build_dir), "--parallel"],
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
     lib = build_dir / "libalp_sdk.a"
     if not lib.is_file():
@@ -85,6 +89,7 @@ def _defined_symbols(archive: Path) -> set[str]:
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
     ).stdout
     syms: set[str] = set()
     for line in out.splitlines():

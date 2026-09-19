@@ -252,7 +252,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   does NOT make it work, and re-enabling `i2s3` on a stock board puts
   the SoC's own I2S3 TX in contention with U46's driven outputs.  A
   working U46 needs BOTH a 3257-type bus-switch swap AND `VCC` on
-  `+3V3` -- on `e1m-aen-evk-03` (2026-09-15), a fitted 3257-type
+  `+3V3` -- on E1M-AEN803 serial 2026W36-0002 (2026-09-15), a fitted 3257-type
   part's `VCC` was moved to `+3V3` between a silent run and an
   audible run; not established as the only difference between the
   two -- or a switch rated for 1.8 V `VCC` (untested).  Only

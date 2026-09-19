@@ -36,15 +36,15 @@ declares that range (`clk-frequency-min`/`clk-frequency-max`), and
 
 | `SAMPLE_RATE_HZ` | PDM mode | On THIS board | FIR-reuse basis |
 |---|---|---|---|
-| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **CONFIRMED on silicon** (commit `68a169977`, `e1m-aen-evk-03`): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`, no `-EIO` for the full run | same decimation ratio as the register-proven mode 1 -- direct |
+| `48000` (**default**) | `PDM_MODE_FULL_BANDWIDTH_AUDIO_3071_CLK_FRQ` (3072 kHz clk, decim 64) | **CONFIRMED on silicon** (commit `68a169977`, E1M-AEN803 serial 2026W36-0002): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`, no `-EIO` for the full run | same decimation ratio as the register-proven mode 1 -- direct |
 | `32000` | `PDM_MODE_WIDE_BANDWIDTH_AUDIO_1536_CLK_FRQ` (1536 kHz clk, decim 48) | in spec, not yet bench-run | different decimation ratio (48 vs 64) -- less direct |
-| `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on `e1m-aen-evk-03`) | n/a on this board |
+| `16000` | `PDM_MODE_HIGH_QUALITY_1024_CLK_FRQ` (1024 kHz clk, decim 64) | **REJECTED on silicon** -- `dmic_configure -> -22`, register left untouched (confirmed on E1M-AEN803 serial 2026W36-0002) | n/a on this board |
 | `8000` | `PDM_MODE_STANDARD_VOICE_512_CLK_FRQ` (512 kHz clk, decim 64) | **REJECTED** -- below the 1.2 MHz minimum | n/a on this board |
 
 **48 kHz rate is now bench-confirmed with no drops.** Acoustic capture at
 this rate, on mic ch0/ch1 (PDM controller 0) only, is now confirmed too, by
-a speaker-to-mic loopback on silicon (issue #2133 round 4f, `e1m-aen-evk-03`,
-2026-09-15 -- see Status). The D2 pair (HW 4/5) is register-level verified
+a speaker-to-mic loopback on silicon (issue #2133 round 4f, E1M-AEN803 serial
+2026W36-0002, 2026-09-15 -- see Status). The D2 pair (HW 4/5) is register-level verified
 only, never acoustically tested. Full-scale headroom at the provisional
 gain default is unmeasured; see issue #2143.
 
@@ -87,14 +87,14 @@ no channel over that floor reports `INCONCLUSIVE` instead of `PASS`.
 is transient-prone: a probe loopback silence window (`PROBE_LOOPBACK` mode
 of `examples/aen/aen-i2s-tas2563-probe` on branch
 `test/u46-i2s-tas2563-on-reworked-mux`, commit `56631094d`, issue #2143,
-`e1m-aen-evk-03`, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
+E1M-AEN803 serial 2026W36-0002, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
 channel with the room silent -- above the prior 512 floor, from a single
 sample excursion, not sustained signal. AC RMS averages over the whole
 capture and does not share that failure mode; peak-to-peak is still printed
 per channel but no longer gated.
 
 The floor is derived directly from this example's OWN idle measurement
-(`e1m-aen-evk-03`, 2026-09-15 19:51Z, 48 kHz, `channel-gain` `0x200`, raw
+(E1M-AEN803 serial 2026W36-0002, 2026-09-15 19:51Z, 48 kHz, `channel-gain` `0x200`, raw
 `dmic_read()`, 3 runs / 12 channel readings over blocks 1-3,
 n=14400 samples/channel): `rms_ac` read 15 on every channel in every run
 (one earlier interrupted attempt read 18-19). Floor = 4 x 15 = 60 at
@@ -122,7 +122,7 @@ has never itself been acoustically tested -- the loopback above drives
 only ch0/ch1. The any-channel `PASS` rule therefore still includes a pair
 this floor has not been acoustically proven against.
 
-**Round 4a silicon results on `e1m-aen-evk-03`:**
+**Round 4a silicon results on E1M-AEN803 serial 2026W36-0002:**
 - The 16 kHz build's guard is CONFIRMED: `dmic_configure -> -22`
   (`-EINVAL`), and `PDM_CONFIG_REGISTER` was never written.
 - The 48 kHz build's mode select is CONFIRMED CORRECT and held:
@@ -137,7 +137,7 @@ double-precision per-sample stats loop (soft-float, ~150-180 ms/block
 against a 100 ms block period, no `CONFIG_FPU`) -- not the PDM sample clock.
 The stats loop is now integer-only.
 
-**Round 4d silicon results on `e1m-aen-evk-03`** (commit `68a169977`, fixed
+**Round 4d silicon results on E1M-AEN803 serial 2026W36-0002** (commit `68a169977`, fixed
 consumer): `measured_rate_hz=48000` exactly, `slab_missed=0`, `overrun=0`,
 no `-EIO` for the full run -- **48 kHz is now confirmed with no drops.** A
 separate 30 s capture (same driver, patched read loop) was believed at the
@@ -171,7 +171,7 @@ particular. `0x200` is provisional pending a calibrated full-scale
 measurement.
 
 **Round 4f: acoustic capture on mic ch0/ch1 (PDM controller 0) is now
-VERIFIED by a speaker-to-mic loopback** on `e1m-aen-evk-03`, 2026-09-15
+VERIFIED by a speaker-to-mic loopback** on E1M-AEN803 serial 2026W36-0002, 2026-09-15
 14:49Z -- the `PROBE_LOOPBACK` mode of `examples/aen/aen-i2s-tas2563-probe`
 on branch `test/u46-i2s-tas2563-on-reworked-mux` (commit `56631094d`, issue
 #2143), **not this example**, which has no controlled stimulus of its own:

@@ -68,8 +68,15 @@ cores:
     # artefact on the way into slot0 (single-app on this SKU today --
     # see the [STATUS] note above).  The v0.6 cross-field validator
     # (P2.3 rule 3) requires `mbedtls`
-    # (or `bearssl`) in `libraries:` whenever `iot.tls: true` --
-    # native_sim parity is restored at the v0.6 PSA work item.
+    # (or `bearssl`) in `libraries:` whenever `iot.tls: true`.
+    # native_sim parity IS restored: mbedtls is built on every target
+    # now, the ssl_misc.h break having been fixed at its root
+    # (ALP_SDK_MBEDTLS_PSA_CRYPTO, #2173).  What is NOT settled is the
+    # randomness underneath it -- there is no Alif Ensemble entropy
+    # driver, so an AEN build of this app is refused unless it
+    # acknowledges a non-cryptographic RNG (#2192).  For an OTA app
+    # that verifies signatures, read that limit before treating this
+    # template as production-ready.
 
 # The on-SoM OPTIGA Trust M is part of the E1M-AEN801 preset and needs no
 # entry here.  The CC3501E does need one as of #2112: Wi-Fi still reaches

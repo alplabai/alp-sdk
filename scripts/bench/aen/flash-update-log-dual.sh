@@ -6,7 +6,7 @@
 # Runs under WSL2 on Windows. See docs/aen-bench-bringup.md.
 #
 # Build the dual-entry ATOC package for examples/connectivity/firmware-update-log
-# on E1M-AEN801 / Alif E8:
+# on an E1M-AEN module (Alif E8):
 #   - HP owner:  M55_HP, loadAddress 0x50000000, flags ["load", "boot"]
 #   - HE client: M55_HE, loadAddress 0x58000000, flags ["load"]
 #

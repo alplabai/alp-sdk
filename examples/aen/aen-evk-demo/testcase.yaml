@@ -27,7 +27,7 @@
 # AEN803 HE boards): every phase needs real I2C/PWM/GMAC silicon to produce a
 # meaningful verdict, so this is a build-only compile check, not a
 # behavioural CI run -- the actual PASS/SKIPPED/FAIL verdicts only mean
-# something on e1m-aen-evk-03, and phase 10's need a switch on the far end
+# something on an AEN EVK bench unit, and phase 10's need a switch on the far end
 # of a cable as well.
 #
 # WHAT THE COMPILE ALONE IS WORTH FOR PHASE 10, since it can never run here:

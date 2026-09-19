@@ -8,7 +8,7 @@
 # SETOOLS are Linux-only. There is no native PowerShell equivalent —
 # the bench is physically Linux-attached. See docs/aen-bench-bringup.md.
 #
-# SHARED, SANITIZED env for the AEN801 (Alif Ensemble E8, M55-HE) bench
+# SHARED, SANITIZED env for the AEN803 (Alif Ensemble E8, M55-HE) bench
 # flash/RAM-run helpers. SOURCE this (don't execute it):
 #
 #     source "$(dirname "$0")/bench-env.sh"
@@ -95,14 +95,14 @@ export HAL_ALIF_DIR
 # (TBD) — run inside the west workspace or export HAL_ALIF_DIR".
 
 # --------------------------------------------------------------------
-# Board target (the lead part: AEN801 / E8 / M55-HE, RTSS-HE)
+# Board target (the bench default: AEN803 / E8 / M55-HE, RTSS-HE)
 # --------------------------------------------------------------------
-# HAZARD: build.sh uses this default unconditionally. An app whose overlay is
-# qualified for a DIFFERENT board target (e.g. an M55-HP-qualified overlay
-# like examples/aen/edgeai-vision-aen) would silently build with no overlay
-# applied under this default -- the same class of bug the HP-qualified rename
-# just fixed there. Not yet exercised (edgeai-vision-aen isn't in apps.txt).
-export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he}"
+# Every module on the Alp Lab AEN bench farm is an E1M-AEN803, so
+# this is the default build.sh uses unconditionally. Its own preflight
+# (alp-sdk#2094) refuses -- exit 2 -- when an app ships boards/*.overlay and
+# none match the resolved target, naming the files it found; an app with
+# no boards/ overlays at all is untouched. AEN_BOARD still overrides.
+export AEN_BOARD="${AEN_BOARD:-alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he}"
 
 # --------------------------------------------------------------------
 # LG_PLACE resolution (alp-sdk#2032)
@@ -250,7 +250,7 @@ bench_labgrid_resolve() {
 	fi
 
 	# seuart is OPTIONAL here, unlike swd above (alp-sdk#2064 bench
-	# verification, e1m-aen-evk-02/-03): not every AEN place has a physical
+	# verification, on two AEN EVK bench units): not every AEN place has a physical
 	# SE-UART -- those two export only 'console' and 'swd', no 'seuart' at
 	# all -- and a J-Link-only flow (Flow C/D: ram-run.sh, reread.sh,
 	# flash-jlink*.sh, ...) never touches SE_UART, so failing resolution
@@ -565,8 +565,12 @@ bench_jlink_exe() {
 #      an in-use J-Link over loopback, so the second instance attaches to
 #      THAT probe regardless of any USB masking. No amount of USB-node
 #      masking substitutes for this.
-#   4. `ip link set lo up` inside the fresh network namespace -- a new netns
-#      starts with loopback DOWN, and the J-Link DLL segfaults on it.
+#   4. `ip link set lo up` inside the fresh network namespace, VERIFIED via
+#      `ip -o link show lo`'s UP flag rather than trusted blind -- a new
+#      netns starts with loopback DOWN, the J-Link DLL segfaults on it, and
+#      `ip link set` can itself fail silently (alp-sdk#2174); refuses (exit
+#      9, same isolation-did-not-take family as the checks below) rather
+#      than proceeding on an unconfirmed loopback.
 #
 # The mask is PROCESS-LOCAL (an unprivileged `unshare -rm`, no sudo needed):
 # it exists only inside this invocation and vanishes with the process, even
@@ -769,6 +773,28 @@ bench_jlink_run() {
 		unshare -rm --net --ipc --propagation private /bin/bash -c '
 			set -e
 			ip link set lo up 2>/dev/null || true
+			# alp-sdk#2174: the line above was failure-tolerant, so a
+			# netns where lo never came up (permission, race, ...) fell
+			# through to JLinkExe with a still-down loopback and it
+			# segfaulted. Verified via the UP flag word `ip -o link show lo`
+			# prints -- NOT /sys/class/net/lo/flags, measured stale here
+			# without an explicit remount; `ip` goes over netlink, always correct.
+			#
+			# `command -v ip` is checked FIRST, explicitly: under `set -e`
+			# above, `lostate=$(ip ...)` alone would abort the whole
+			# subshell with a bare, unexplained rc=127 the moment `ip` is
+			# missing -- the command substitution assignment fails on its
+			# own and trips `set -e` before the "did not come up" message
+			# right below ever gets a chance to print (measured).
+			command -v ip >/dev/null 2>&1 || {
+				echo "bench_jlink_run: ip not found in the fresh netns -- cannot verify loopback state" >&2
+				exit 9
+			}
+			lostate=$(ip -o link show lo 2>/dev/null)
+			printf "%s\n" "$lostate" | tr ",<>" "\n\n\n" | grep -qx UP || {
+				echo "bench_jlink_run: loopback did not come up in the fresh netns ($lostate)" >&2
+				exit 9
+			}
 			for n in $JLINK_MASKS; do mount --bind /dev/null "$n"; done
 			for s in $JLINK_SYSMASKS; do mount --bind "$JLINK_EMPTY" "$s"; done
 			[ -c "$JLINK_TARGET_NODE" ] || {
@@ -979,7 +1005,7 @@ bench_require_openocd() {
 		echo "           All three E8 boards answer the same SW-DP 0x4c013477," >&2
 		echo "           so the USB path is the ONLY thing that selects the" >&2
 		echo "           board -- resolve YOUR board's from:" >&2
-		echo "               labgrid-client -p e1m-aen-evk-01 show" >&2
+		echo "               labgrid-client -p <your-bench-place> show" >&2
 		echo "           (the swd resource's USB path) and export exactly that" >&2
 		echo "           value, e.g.:" >&2
 		echo "               export AEN_OPENOCD_USB_LOCATION=<path from the show above>" >&2
@@ -1007,7 +1033,7 @@ bench_require_openocd() {
 # every OTHER resident app entry NOT in the JSON you are about to burn is
 # gone the instant the write lands -- no error, no SES warning (`[SES] ATOC
 # ok` prints either way). This destroyed a live A32 Linux boot chain
-# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on `e1m-aen-evk-01`, 2026-09-07.
+# (`BOOTLOAD`/`A32_APP`/`HP_APP`/`HE_APP`) on an AEN EVK bench unit, 2026-09-07.
 #
 # Originally written into flash-run.sh alone for its own single ALP-HE entry
 # (#2025); factored out here so every script that commits a TOC shares one
@@ -1034,7 +1060,7 @@ bench_atoc_replace_guard() {
 	# ${TMPDIR:-/tmp}, not a bare /tmp literal, so a test (or a host with a
 	# non-default TMPDIR) can sandbox this. `tag` is a literal script name
 	# (flash-run, flash-run-dualcore, ...), NOT run-unique -- three AEN
-	# boards (evk-01/-02/-03) on this farm makes two concurrent runs of the
+	# boards on this farm makes two concurrent runs of the
 	# SAME script against DIFFERENT boards a real scenario, and a fixed path
 	# let run A's write land between run B's redirect and B's read, so B
 	# parsed A's board (reproduced: B printed A's clean table and returned
@@ -1081,9 +1107,9 @@ bench_atoc_replace_guard() {
 		echo "GUARD: SE_UART is unset -- cannot query the resident ATOC via 'maintenance -opt gettoc'" >"$before" || return 5
 	elif [ -x "$SETOOLS_DIR/maintenance" ]; then
 		# Confirm the serial device that answers is actually the SES, not the
-		# app console (e.g. on e1m-aen-evk-01, /dev/ttyUSB0 is SE-UART,
+		# app console (e.g. on an AEN EVK bench unit, /dev/ttyUSB0 is SE-UART,
 		# /dev/ttyUSB1 is the app console). BENCH-VERIFIED: a real
-		# `getbanner` capture off e1m-aen-evk-01 (2026-09-07) reads
+		# `getbanner` capture off an AEN EVK bench unit (2026-09-07) reads
 		# " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping --
 		# docs/debugging-aen.md:548 is only a doc placeholder
 		# ("SES <rev> v<version> <build date>"), not a transcript, and is
@@ -1093,7 +1119,7 @@ bench_atoc_replace_guard() {
 		local banner banner_ok=1 banner_rc
 		banner=$( ( cd "$SETOOLS_DIR" && ./maintenance -b "${SE_UART_BAUD:-57600}" -c "$SE_UART" -opt getbanner ) 2>&1 )
 		banner_rc=$?
-		# Real capture off e1m-aen-evk-01 (2026-09-07), ANSI intact:
+		# Real capture off an AEN EVK bench unit (2026-09-07), ANSI intact:
 		#   ^[[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 ^[[0m
 		# Strip the ANSI FIRST, then match -- and the stripped line has a
 		# LEADING SPACE (SETOOLS' own padding, not a terminal artifact), so
@@ -1133,7 +1159,7 @@ bench_atoc_replace_guard() {
 	# Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" (docs/aen-provisioning.md
 	# shows a real one) -- the Name column is the literal JSON key of whatever wrote it.
 	# BENCH-VERIFIED against a real 9-row getbanner+gettoc capture off
-	# e1m-aen-evk-01 (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
+	# an AEN EVK bench unit (2026-09-07): SETOOLS' colour wraps the WHOLE LINE
 	# (`^[[94m |    DEVICE|...|`), not just the cell text, so the
 	# ANSI-stripped row keeps a LEADING SPACE before the pipe. A bare `/^\|/`
 	# anchor (no synthetic test fixture ever exercised this -- the test's
@@ -1210,15 +1236,41 @@ bench_atoc_replace_guard() {
 			echo "!! ABORT ($tag): could not read the resident ATOC via 'maintenance -c \$SE_UART -opt gettoc'" >&2
 			echo "   (see $before). A fresh ATOC write REPLACES every app entry not in it, so" >&2
 			echo "   writing blind risks silently delisting anything already on this board -- that is" >&2
-			echo "   exactly how e1m-aen-evk-01 lost its A32 Linux boot chain on 2026-09-07." >&2
-			echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			echo "   exactly how an AEN EVK bench unit lost its A32 Linux boot chain on 2026-09-07." >&2
+			# The remedy depends on which flow got here, and naming the wrong
+			# one is its own defect (alp-sdk#2187). On Flow A, $SE_UART IS the
+			# transport: a failed query means confirm by hand and override.
+			# On Flow D the query is opportunistic -- the flow never needs a
+			# serial device -- so a set-but-unanswering $SE_UART is almost
+			# always a stale value, and --replace-atoc is exactly the wrong
+			# advice: it is the "I checked and still want to replace" opt-out,
+			# and no check ran here. Steering an operator onto it builds the
+			# habit flash-jlink.sh's own header says must never form.
+			if [ "${BENCH_ATOC_FLOW:-A}" = D ]; then
+				echo "   SE_UART is exported (${SE_UART:-<unset>}), so this took the query path -- but" >&2
+				echo "   the query did not complete (the transcript above says which step failed;" >&2
+				echo "   a missing SETOOLS 'maintenance' binary reaches this same abort), and Flow D" >&2
+				echo "   does not need an SE-UART at all. The usual cause is a stale or wrong value" >&2
+				echo "   rather than a board problem: raw /dev/ttyUSBn paths are enumeration-ordered," >&2
+				echo "   and this bench has had its AEN SE-UART/app-console paths measured SWAPPED in" >&2
+				echo "   a stale table (#2032/#2064)." >&2
+				echo "   Two ways forward:" >&2
+				echo "     1. point SE_UART at this slot's real SE-UART -- prefer LG_PLACE, which" >&2
+				echo "        resolves it per-slot instead of by a raw path -- then re-run." >&2
+				echo "     2. 'unset SE_UART' and re-run with --atoc-unqueryable, if this bench" >&2
+				echo "        slot genuinely has no SE-UART wired." >&2
+				echo "   NOT --replace-atoc: that flag asserts you checked what is resident, and" >&2
+				echo "   on this path nothing was ever read." >&2
+			else
+				echo "   Confirm by hand what is resident, then re-run with --replace-atoc." >&2
+			fi
 			return 5
 		fi
 		if [ "${#extra[@]}" -gt 0 ]; then
 			echo "!! ABORT ($tag): this write REPLACES every app ATOC entry not in it -- it does NOT merge." >&2
 			echo "   This board also carries: ${extra[*]}" >&2
 			echo "   Writing now would SILENTLY DELIST ${extra[*]} -- no error, no SES warning" >&2
-			echo "   (this destroyed the A32 Linux boot chain on e1m-aen-evk-01, 2026-09-07)." >&2
+			echo "   (this destroyed the A32 Linux boot chain on an AEN EVK bench unit, 2026-09-07)." >&2
 			echo "   Re-run with --replace-atoc only once you can restore ${extra[*]}, or if" >&2
 			echo "   losing them is genuinely intended." >&2
 			return 5
@@ -1248,10 +1300,21 @@ bench_atoc_replace_guard() {
 #                          status) still apply: an exported-but-broken
 #                          $SE_UART lands in bench_atoc_replace_guard's own
 #                          "unverified" path exactly as it would for Flow A,
-#                          and needs --replace-atoc to override, same as
-#                          Flow A. --atoc-unqueryable is IGNORED in this
-#                          branch -- it is an acknowledgement that no check
-#                          ran, and one just did.
+#                          and still refuses to write (exit 5).
+#                          --atoc-unqueryable is IGNORED in this branch --
+#                          it is an acknowledgement that no check ran, and
+#                          one just did.
+#                          What that refusal TELLS the operator differs by
+#                          flow (alp-sdk#2187): Flow A is sent to
+#                          --replace-atoc, because $SE_UART is its transport
+#                          and a human confirming by hand is the only way
+#                          past. Flow D is sent to fix-or-unset $SE_UART
+#                          instead, because Flow D never needed the serial
+#                          device and a stale value is the likely cause --
+#                          naming --replace-atoc there would teach the
+#                          checked-and-override flag as the cure for a check
+#                          that never ran. Selected by $BENCH_ATOC_FLOW,
+#                          which this function sets to D for the call.
 #   $SE_UART unset      -> unchanged from #2029: --atoc-unqueryable is
 #                          required (abort, exit 8, if it is missing), and
 #                          either way this prints a one-line statement that
@@ -1266,6 +1329,16 @@ bench_flowd_atoc_guard() {
 	shift 3
 	if [ -n "${SE_UART:-}" ]; then
 		echo "GUARD ($tag): SE_UART is exported -- querying the resident ATOC before writing (alp-sdk#2027)." >&2
+		# Tell the shared guard which flow it is speaking for, so its
+		# "could not read the resident ATOC" abort names remedies that
+		# apply here -- fix or unset $SE_UART -- instead of Flow A's
+		# --replace-atoc, which asserts a check that did not run
+		# (alp-sdk#2187). `local` scopes it to this call and restores
+		# whatever an outer frame had, so it cannot leak into a later
+		# Flow A guard in the same shell. It changes NO control flow:
+		# the refusal, its exit status and every other branch are
+		# untouched -- this selects message text only.
+		local BENCH_ATOC_FLOW=D
 		bench_atoc_replace_guard "$replace_atoc" "$tag" "$@"
 		return $?
 	fi

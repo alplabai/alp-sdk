@@ -230,11 +230,11 @@ def test_board_yaml_files_prunes_build_output_dirs(tmp_path):
     sitting under a build-output dir is not."""
     real = tmp_path / "examples" / "widget" / "board.yaml"
     real.parent.mkdir(parents=True)
-    real.write_text("som:\n  sku: X\n")
+    real.write_text("som:\n  sku: X\n", encoding="utf-8")
     for junk_dir in ("twister-out", "build"):
         junk = tmp_path / junk_dir / "widget" / "board.yaml"
         junk.parent.mkdir(parents=True)
-        junk.write_text("not a real source file\n")
+        junk.write_text("not a real source file\n", encoding="utf-8")
     found = gate._board_yaml_files(tmp_path)
     assert real in found
     assert len(found) == 1

@@ -571,7 +571,7 @@
  * 0..7 all pass, 8 hard-fails 3 runs of 3, 9 and 10 pass again. The full table
  * and the reasoning for the value chosen are in src/cc3501e_bridge.h. The two
  * comments that used to disagree here are both retired: the "4..8 clean window"
- * was an evk-01 measurement at ~14.3 MHz and does not carry over, and the
+ * was an earlier bench run at ~14.3 MHz and does not carry over, and the
  * sibling overlay's "0 fails, 4 fails" is contradicted outright -- both passed.
  */
 &clockctrl {
@@ -725,7 +725,7 @@
  * U46 is BOTH a 3257-type switch AND its VCC is on +3V3 (a stock
  * 74LVC157, even on +3V3, is still one-way and reproduces the
  * contention above; VCC alone is not the gate), OR a switch rated for
- * 1.8 V VCC (untested) -- on e1m-aen-evk-03, 2026-09-15, a fitted 3257-type
+ * 1.8 V VCC (untested) -- on E1M-AEN803 serial 2026W36-0002, 2026-09-15, a fitted 3257-type
  * part's VCC was moved to +3V3 between a silent run and an audible
  * run; not established as the only difference between the two -- see
  * include/alp/boards/alp_e1m_evk.h's I2S mux block, including the
