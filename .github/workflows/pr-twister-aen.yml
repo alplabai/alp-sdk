@@ -99,6 +99,8 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
@@ -112,6 +114,8 @@ on:
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
       - '.github/workflows/pr-twister-aen.yml'
@@ -120,6 +124,8 @@ on:
     paths:
       - 'examples/aen/**'
       - 'examples/connectivity/firmware-update-log/**'
+      - 'examples/connectivity/iot-fleet-ota/**'
+      - 'examples/connectivity/mqtt-telemetry/**'
       - 'examples/peripheral-io/drone-autopilot/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
@@ -133,6 +139,8 @@ on:
       - 'zephyr/dts/alif/**'
       - 'zephyr/include/zephyr/dt-bindings/clock/**'
       - 'zephyr/kconfigs/vendor-alif-peripherals.kconfig'
+      - 'zephyr/CMakeLists.txt'
+      - 'zephyr/Kconfig.alp-libraries'
       - 'west.yml'
       - 'metadata/toolchains.json'
   workflow_dispatch:

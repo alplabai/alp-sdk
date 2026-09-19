@@ -29,9 +29,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import yaml
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _KCONFIG = _REPO_ROOT / "zephyr" / "Kconfig.alp-libraries"
 _CMAKELISTS = _REPO_ROOT / "zephyr" / "CMakeLists.txt"
+_AEN_WORKFLOW = _REPO_ROOT / ".github" / "workflows" / "pr-twister-aen.yml"
 
 
 def _config_block(text: str, symbol: str) -> str:
@@ -210,3 +213,22 @@ def test_the_fake_entropy_term_is_load_bearing() -> None:
         "native_sim -- if it does not, the truth table above is not actually "
         "exercising that term"
     )
+
+
+def test_aen_workflow_retriggers_for_policy_and_bounded_examples() -> None:
+    """Every input to the two added AEN scenarios must wake their CI job."""
+    data = yaml.safe_load(_AEN_WORKFLOW.read_text(encoding="utf-8"))
+    triggers = data.get("on", data.get(True))
+    required = {
+        "examples/connectivity/iot-fleet-ota/**",
+        "examples/connectivity/mqtt-telemetry/**",
+        "zephyr/CMakeLists.txt",
+        "zephyr/Kconfig.alp-libraries",
+    }
+
+    for trigger in ("pull_request", "push"):
+        paths = set(triggers[trigger]["paths"])
+        assert required <= paths, (
+            f"pr-twister-aen.yml {trigger} paths omit inputs to the bounded "
+            f"connectivity/entropy builds: {sorted(required - paths)}"
+        )
