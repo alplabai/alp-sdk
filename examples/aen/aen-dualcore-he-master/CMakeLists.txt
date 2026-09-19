@@ -7,8 +7,9 @@
 # alp_mproc_boot_core(ALP_CORE_M55_HP, ...) via the deferred-TOC path -- see
 # README.md for why this direction can't use the plain 501 release path); the
 # HP board target is the peer role (a passive SRAM0 beacon, like
-# aen-dualcore-probe). One source file, role picked by CONFIG_BOARD_* at
-# compile time, same pattern as every other aen-dualcore-* example.
+# aen-dualcore-probe). One source file, role picked by CONFIG_SOC_*_RTSS_HP
+# (a SoC-core fact, true on either SKU) at compile time, same pattern as
+# every other aen-dualcore-* example.
 cmake_minimum_required(VERSION 3.20)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(aen_dualcore_he_master LANGUAGES C)

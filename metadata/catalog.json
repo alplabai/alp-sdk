@@ -3347,7 +3347,7 @@
       "script": "scripts/check_example_board_overlay_content_parity.py"
     },
     {
-      "purpose": "CI gate covering two related silent-overlay-drop defects:",
+      "purpose": "CI gate covering four related silent-overlay-drop defects:",
       "script": "scripts/check_example_board_overlay_parity.py"
     },
     {

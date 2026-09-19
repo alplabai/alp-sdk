@@ -5,8 +5,7 @@
 # (WEDGEPM_WIFI_SSID empty -- the wedge phase, and therefore the whole
 # reproduction, is skipped) against the real board target.
 #
-# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 HE
-# board only) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board targets) -- this app needs the real inter-chip SPI1 link, a live Wi-Fi
 # AP that will refuse or ignore the connect, and physical control of the
 # bench power rail (power-cycle phase); a compile check here only proves the
 # build, never reproduces the wedge or captures real evidence.
@@ -33,6 +32,7 @@ tests:
   alp_sdk.examples.aen.cc3501e_wedge_postmortem.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example

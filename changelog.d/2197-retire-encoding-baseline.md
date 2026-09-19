@@ -8,10 +8,10 @@ batch drained everywhere else). Each subprocess call now pairs `encoding="utf-8"
 child environment carrying `PYTHONIOENCODING=utf-8`, the same idiom the third
 batch used everywhere else:
 `scripts/alp_quality.py:91` ("capture_output=True, text=True") and
-`tests/scripts/test_check_example_board_overlay_parity.py:38`
+`tests/scripts/test_check_example_board_overlay_parity.py:64`
 (`env={**os.environ,`). The parity test's seven `write_text()` calls
 also get `encoding="utf-8"`, for example
-`tests/scripts/test_check_example_board_overlay_parity.py:50`
+`tests/scripts/test_check_example_board_overlay_parity.py:76`
 ("format(name=name, platform_allow=allow_lines)").
 
 With both files clean, the `IMPLICIT_ENCODING_BASELINE` grandfather set is

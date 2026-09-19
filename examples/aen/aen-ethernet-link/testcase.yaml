@@ -12,9 +12,10 @@
 #     (cache-coherency guard) compile,
 #   - the board overlay's DMA-buffer placement (chosen zephyr,sram = &sram0,
 #     CONFIG_DCACHE=n) is consistent.
-# It is intentionally filtered OUT of the native_sim PR gate: the only platform
-# allowed is the AEN801 M55-HE board, which the native_sim twister run never
-# selects, so this adds a board-target build check without slowing the gate.
+# It is intentionally filtered OUT of the native_sim PR gate: the only
+# platforms allowed are the AEN801/AEN803 M55-HE boards, which the
+# native_sim twister run never selects, so this adds a board-target build
+# check without slowing the gate.
 #
 # NOTE: the platform id below MUST match the board .yaml `identifier` exactly
 # (zephyr/boards/alp/e1m_aen801_m55_he/..._rtss_he.yaml) or twister silently
@@ -33,6 +34,7 @@ tests:
   alp_sdk.examples.aen.ethernet_link.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
     tags:
       - alp-sdk
       - example
@@ -63,6 +65,27 @@ tests:
     # error.
     extra_dtc_overlay_files:
       - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay
+      - mdio-managed.overlay
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - ethernet
+      - dwmac
+      - mdio
+    build_only: true   # compile-proof only; MDIO-managed PHY not bench-verified.
+
+  # AEN803 twin of the scenario above (issue #2209): a platform_allow entry
+  # alone would have applied the AEN801 file above to an AEN803 build --
+  # extra_dtc_overlay_files REPLACES CMake's board-default-overlay
+  # auto-discovery, so it always names one literal file regardless of which
+  # platform_allow target twister is building. Same DHCP/MDIO rationale as
+  # the scenario above, on the AEN803 M55-HE target instead.
+  alp_sdk.examples.aen.ethernet_link.aen803.mdio_managed:
+    platform_allow:
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_dtc_overlay_files:
+      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay
       - mdio-managed.overlay
     tags:
       - alp-sdk
