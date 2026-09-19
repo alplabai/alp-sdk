@@ -531,13 +531,16 @@ PACKAGE_ARCH = "${MACHINE_ARCH}"
 #      PACKAGECONFIG[drpai] existed in alp-sdk_0.6.bb.  OE errors out on an
 #      append naming an undefined flag.
 #
-# So what is actually established, and nothing beyond it: do_compile
-# cross-compiles apps/MeraDrpRuntimeWrapper.cpp on an x86_64 host up to the
-# final link, where it stops with "skipping incompatible ... when searching
-# for -lmera2_runtime" -- an architecture mismatch against the aarch64
-# obj/build_runtime/v2h libraries, not a symbol error.  Whether packaging
-# passes do_package_qa, and whether the symbols resolve against the real
-# aarch64 payload, are both UNTESTED.
+# So what is actually established, and nothing beyond it: a hand-run host
+# g++ command modelled on do_compile compiled apps/MeraDrpRuntimeWrapper.cpp
+# against the real RUHMI headers.  A separate hand-run host link probe then
+# stopped with "skipping incompatible ... when searching for
+# -lmera2_runtime" -- an architecture mismatch against the aarch64
+# obj/build_runtime/v2h libraries, not a symbol error.  No BitBake task ran.
+# Whether do_compile reaches a real aarch64 link, whether packaging passes
+# do_package_qa, and whether the symbols resolve against the real aarch64
+# payload are all UNTESTED.  docs/bring-up-drpai-v2n.md's status banner is
+# the authority for the current bake state.
 #
 # The kernel side is proven independently of this recipe: /dev/drpai0 probes
 # clean on a real board and DRPAI_GET_DRPAI_AREA returns the 0xD0000000 /

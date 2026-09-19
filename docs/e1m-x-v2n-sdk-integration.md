@@ -30,7 +30,7 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
 | 2 | Bootloader (alp DDR in BL2) | **Recipe + binary + DDR.c → alp-sdk-internal** | not in public alp-sdk (licensing) |
 | 3 | Metadata values | **Audio + board_id captured**; `ti,tas2563` audio nodes + HW wiring pending | `metadata/boards/e1m-x-evk.yaml` |
 | 4 | Errata | **Done** | `docs/errata-e1m-x-v2n.md` |
-| 5 | Yocto build flow | **WSL-baked 2026-05-26** (core-image-minimal, bitbake-layers); full alp-image-edge pending | `meta-alp-sdk/README.md` |
+| 5 | Yocto build flow | **Base images bake**: `core-image-minimal` (2026-05-26) and `drpai`-OFF `alp-image-edge` (12118 tasks, 716 MB `.wic.gz`); `drpai`-enabled bake + on-bench boot pending | [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md) status banner |
 
 ## What's validated vs not
 
@@ -43,14 +43,17 @@ into alp-sdk so a clean checkout reproduces a working board. Branch:
   USB2.0 host kept enabled), and the alp DDR
   in BL2 (DDR 7.9 GiB, boots). The carrier dtsi/dts were also dtc-clean
   rebuilt from source.
-- **WSL-baked 2026-05-26** (bitbake-layers, BSP v6.30): the carrier
+- **WSL-baked** (bitbake-layers, BSP v6.30): the carrier
   dtsi/dts + kernel patches apply cleanly to linux-renesas 6.1.141-cip43 (SHA 6717c06c —
   the exact kernel the BSP ships, so no regen), and `core-image-minimal`
   bakes a `.wic.gz` + the carrier dtb for `MACHINE=e1m-v2n101-a55`. A few
   overlay fixes the bake surfaced are staged separately pending bench
-  confirmation; a full `alp-image-edge` bake + on-bench boot are the
-  remaining steps. (The TF-A DDR-injection bbappend + its DDR overwrite
-  ordering live in alp-sdk-internal.)
+  confirmation. A later `alp-image-edge` bake also completed (12118 tasks,
+  716 MB `.wic.gz`), but with `drpai` OFF. A `drpai`-enabled
+  `alp-image-edge` bake and on-bench boot of an image from this branch remain
+  unverified. [`bring-up-drpai-v2n.md`](bring-up-drpai-v2n.md)'s status
+  banner is the authority for the current bake state. (The TF-A DDR-injection
+  bbappend + its DDR overwrite ordering live in alp-sdk-internal.)
 
 ## Audio + board_id (gap 3) — captured
 
