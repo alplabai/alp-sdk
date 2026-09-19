@@ -29,7 +29,7 @@ OV5640 ──▶ <alp/camera.h> ──▶ <alp/inference.h> ──▶ post-proce
   - AEN401 / AEN601 / AEN801 → `CONFIG_ALP_TFLM_ETHOS_U85=y` +
     `_U55=y`
   - NX9101 → `CONFIG_ALP_TFLM_ETHOS_U65=y`
-  - V2N → `CONFIG_ALP_TFLM_DRP_AI=y`
+  - V2N M33 → TFLM CPU kernels; DRP-AI3 remains on the A55/Yocto side
 - **LVGL** composes the preview, bounding-box overlay, and
   latency / FPS strip, bound to the panel via `<alp/display.h>` +
   `alp_gui_lvgl_attach()` (`<alp/gui.h>`) -- no direct
