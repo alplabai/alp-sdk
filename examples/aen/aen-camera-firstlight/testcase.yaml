@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regressions for the RPi-style CSI-2 camera first-light bench
+# app, one scenario per camera shield stacked on e1m_evk_rpi_csi.  The whole
+# CSI-2 -> CPI pipe has never run on real silicon (see the branch this
+# example ships on), so these are compile proofs, not bench runs -- the
+# actual PASS/FAIL/TIMEOUT verdict only means something on real hardware.
+#
+# Twister's extra_args SHIELD value carries BOTH shields as one
+# space-separated string (the carrier connector shield first, the camera
+# shield second) -- CMake's shields.cmake splits SHIELD on whitespace
+# itself (`string(REPLACE " " ";" SHIELD_AS_LIST "${SHIELD}")`), same
+# syntax the west build command examples in README.md / docs/camera-
+# shields.md use directly on the command line.
+#
+# A new camera shield is one more scenario entry below plus one more #elif
+# in src/main.c's compile-time #if ladder.
+
+sample:
+  name: aen-camera-firstlight
+  description: |
+    First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera
+    modules on the E1M-EVK's J5 connector: open / start / capture-with-
+    timeout / release / stop / close through the portable <alp/camera.h>
+    API only, printing CRC32 + a histogram + sample row bytes on a
+    successful capture, or a diagnosed failure otherwise.
+
+tests:
+  alp_sdk.examples.aen.camera_firstlight.imx219:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true # the CSI-2 -> CPI pipe is a bench flash, not a CI run.
+
+  alp_sdk.examples.aen.camera_firstlight.ov5647:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true
+
+  alp_sdk.examples.aen.camera_firstlight.ov9281:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true
+
+  alp_sdk.examples.aen.camera_firstlight.imx296:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true

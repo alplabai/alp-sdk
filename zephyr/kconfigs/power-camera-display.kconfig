@@ -107,6 +107,23 @@ config ALP_SDK_CAMERA_V2N_N44_ISP
 	  Off on non-V2N builds; the zephyr_video backend remains
 	  the default on every other supported SoC.
 
+config ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
+	int "Frame buffers the zephyr_video camera backend allocates per open"
+	depends on VIDEO
+	default 2
+	range 1 8
+	help
+	  Number of video_buffer_alloc() frame buffers
+	  src/backends/camera/zephyr_video.c queues at alp_camera_open().
+	  If the capture driver's min_vbuf_count is larger, the open fails
+	  with ALP_ERR_OUT_OF_RANGE -- the count is not raised for you.
+	  Each buffer is pitch x height bytes and comes from
+	  the Zephyr video buffer pool, so keep
+	  VBUF_COUNT x frame size <= CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE.
+	  Drop to 1 for full-frame sensors whose single frame already
+	  fills most of the pool (e.g. the IMX296's 1456x1088 RAW10 frame
+	  is 3,168,256 bytes unpacked).
+
 config ALP_SDK_CAMERA_ALIF_ISP
 	bool "Compile the Alif Ensemble ISP-Pico camera backend (OPT-IN)"
 	depends on VIDEO

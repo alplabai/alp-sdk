@@ -122,7 +122,7 @@ The TCAL9538 IO expander (U35) drives:
 | `LCD_PWR_EN`  | output        | Display 1V8 / 3V3 enable                            |
 | `LCD_RST`     | output        | Display panel reset                                 |
 | `CTP_RST`     | output        | Capacitive touch reset                              |
-| `CAM_EN`      | output        | Camera-module enable (drives the camera sensor's EN/STBY pin, NOT the camera power rails) |
+| `CAM_EN`      | output        | Camera-module enable line, NOT the camera power rails. On the RPi connector (J5) it acts on pin 11 through an inverting open-drain stage: `0` (reset default) leaves pin 11 floating so the module self-enables on its own pull-up; `1` pulls pin 11 low and powers the module down. Leave it at `0` for RPi modules. |
 | `S_42670.INT1`| input         | ICM-42670-P interrupt 1                             |
 | `S_42670.INT2`| input         | ICM-42670-P interrupt 2                             |
 | `S_42670.FSYNC`| input        | ICM-42670-P FSYNC                                   |
@@ -179,6 +179,63 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   `cam_mux_pi3wvr626_*` helper in `<alp/chips/cam_mux_pi3wvr626.h>`
   to switch inputs at runtime.  The `/OE` pin is hardwired to GND
   on this board, so the output is always live.
+
+  **Raspberry Pi camera connector (J5).**  J5 is the RPi 15-pin
+  CSI-2 connector and sits on mux input **A** (`SEL = 0`).  It
+  carries **2 data lanes** (the most the 15-pin pinout has), no reset
+  line and no sensor clock -- RPi modules carry their own
+  oscillator.  Its control I2C is E1M `I2C1` (`EVK_I2C_BUS_DSI_CSI`
+  = SoC I2C1, SCL `P3_7` / SDA `P7_2`), level-shifted to 3.3 V on the
+  carrier and shared with the DSI connector's touch controller.  Pin
+  11 (module enable) is driven by `CAM_EN` (see the expander table
+  above): keep `CAM_EN = 0` so the module self-enables.
+
+  On an E1M-AEN SoM, build a camera app with the board-side shield
+  `e1m_evk_rpi_csi` paired with a sensor shield that follows
+  Zephyr's Raspberry Pi camera contract, e.g. the Camera Module 2
+  (IMX219):
+
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
+
+  `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
+  D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
+  bus, and points `alp-camera0` / `zephyr,camera` at the CPI.  The
+  SoC side lives in the shield's per-target overlays
+  (`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+  the AEN803 twin, both including `boards/e1m_aen.dtsi`), so the
+  shield builds for the AEN801 and AEN803 M55-HE targets.  The D-PHY
+  clocks are the SoC `dphy` node's four real `MIPI_CKEN` gates, so
+  the shield composes with a DSI panel app without either overriding
+  them.  What feeds those gates is also the D-PHY driver's job: at
+  init `dphy_dw.c` enables the CGU `CLK_ENA` HFOSC (38.4 MHz PLL
+  reference) and 100 MHz (CFG clock) sources and clears the VBAT
+  `PWR_CTRL` D-PHY power masks, isolation and 1.8 V bypass.  At reset
+  those leave the D-PHY unpowered, and the CSI-2 receiver then times
+  out waiting for Stop-state.  The sensor shields and their drivers are described in
+  [`docs/camera-shields.md`](../camera-shields.md).  The
+  app needs `CONFIG_ALP_SDK=y` and `CONFIG_VIDEO=y`, and a video
+  buffer pool that fits in RAM (the Zephyr 2 MB default does not fit
+  the HE core's DTCM).  RAW10 sensors are delivered to memory as
+  unpacked 16-bit samples (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2),
+  not the packed wire format.  Compiled against the upstream IMX219
+  driver; not yet run on hardware.
+
+  The CSI-2 pixel clock tops out at 200 MHz (400 MHz source / 2), and
+  one pixel moves per clock.  A 2-lane IMX219 at its 456 MHz link
+  therefore needs RAW10 (`VIDEO_PIX_FMT_SBGGR10P`, 182.4 Mpixel/s):
+  RAW8 would need 228 Mpixel/s and `video_set_format()` refuses it
+  with `-ERANGE`.  The divider is programmed by the Alif clock-control
+  patch in `zephyr/patches.yml`, so the workspace must be patched
+  (`scripts/bootstrap.sh` does it).
+
+  [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
+  is the bench first-light app for this connector: it opens each of
+  the four shipped camera shields (IMX219 / OV5647 / OV9281 / IMX296)
+  through `<alp/camera.h>`, starts the
+  stream, and waits for one frame with a 2 s timeout, printing a CRC32
+  + histogram + sample row bytes on success or a diagnosed failure
+  otherwise. See its README for what each printed line means.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK

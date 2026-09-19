@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-16",
+  "generated": "2026-09-18",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -11958,16 +11958,19 @@
           "kind": "fnptr"
         },
         "alp_pixfmt_t": {
-          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3, ALP_PIXFMT_YUV420_PLANAR = 4, ALP_PIXFMT_NV12 = 5, } alp_pixfmt_t;",
+          "definition": "typedef enum { ALP_PIXFMT_MONO_VLSB = 0, ALP_PIXFMT_RGB565 = 1, ALP_PIXFMT_RGB888 = 2, ALP_PIXFMT_ARGB8888 = 3, ALP_PIXFMT_YUV420_PLANAR = 4, ALP_PIXFMT_NV12 = 5, ALP_PIXFMT_GREY8 = 6, ALP_PIXFMT_RAW8 = 7, ALP_PIXFMT_RAW10 = 8, } alp_pixfmt_t;",
           "enumerators": [
             "ALP_PIXFMT_MONO_VLSB = 0",
             "ALP_PIXFMT_RGB565 = 1",
             "ALP_PIXFMT_RGB888 = 2",
             "ALP_PIXFMT_ARGB8888 = 3",
             "ALP_PIXFMT_YUV420_PLANAR = 4",
-            "ALP_PIXFMT_NV12 = 5"
+            "ALP_PIXFMT_NV12 = 5",
+            "ALP_PIXFMT_GREY8 = 6",
+            "ALP_PIXFMT_RAW8 = 7",
+            "ALP_PIXFMT_RAW10 = 8"
           ],
-          "hash": "884de555b8503700",
+          "hash": "8245897e60264348",
           "kind": "enum"
         },
         "alp_spi_config_t": {

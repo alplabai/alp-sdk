@@ -1,0 +1,43 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * E1M-EVK J5 -- the Raspberry Pi 15-pin MIPI CSI-2 camera connector.  This is
+ * the BOARD half of Zephyr's Raspberry Pi camera-shield contract: pair it with
+ * a sensor shield that consumes the four labels below, e.g.
+ *
+ *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+ *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
+ *
+ *   csi_interface     the CSI-2 receiver -- the sensor shield sets status = "okay"
+ *   csi_ep_in         the receiver's input endpoint -- the sensor shield fills it
+ *   csi_i2c           the camera control bus on J5 (E1M I2C1)
+ *   csi_capture_port  the capture device `chosen zephyr,camera` names
+ *
+ * Only the board-agnostic part lives here.  The labels map onto SoC nodes and
+ * SoC pins, so each supported SoM target defines them in its own
+ * boards/<qualified-board>.overlay (Zephyr applies the one matching -b); the
+ * E1M-AEN HE targets share boards/e1m_aen.dtsi.  Building for a target with no
+ * boards/ overlay fails on the first undefined label -- add one for that SoM.
+ *
+ * Carrier wiring (E1M-EVK-2626-R2), the same for every SoM:
+ *   - J5 sits on input A of the PI3WVR626 2:1 CSI mux.  The mux SEL is E1M
+ *     IO2; SEL = 0 selects input A, so the SoM overlay hogs it LOW.  /OE is
+ *     tied low on the carrier.
+ *   - 2 data lanes (the RPi 15-pin connector carries no more).
+ *   - Camera I2C is E1M I2C1, level-shifted to 3.3 V on the carrier.  It is
+ *     the SAME bus as the DSI connector's touch/backlight control.
+ *   - J5 has no reset line and no XVCLK: RPi modules carry their own
+ *     oscillator.  J5 pin 11 (the module enable) is pulled LOW by the carrier
+ *     only when the TCAL9538 CAM_EN output is 1; CAM_EN = 0 (reset default)
+ *     leaves it floating, so a module with its own pull-up self-enables.
+ *     Never assert CAM_EN for these modules -- it powers them down.
+ *
+ * ADR 0017 Tier-1 (DT wiring only, no code).  BENCH-UNVERIFIED.
+ */
+
+/ {
+	aliases {
+		alp-camera0 = &csi_capture_port;
+	};
+};

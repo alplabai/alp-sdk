@@ -123,6 +123,10 @@ struct video_cam_config {
 
 	const struct device *clk_dev;
 	clock_control_subsys_t cid;
+	/* Alp Lab AB: CPI pixel clock (CAMERA_PIXCLK_CTRL) and the CSI pixel clock
+	 * it is matched to in CSI mode; NULL when the DT does not carry them. */
+	clock_control_subsys_t pix_cid;
+	clock_control_subsys_t csi_pix_cid;
 
 	const struct device *endpoint_dev;
 };

@@ -1,0 +1,6 @@
+shield:
+  name: innomaker_cam_ov9281
+  full_name: InnoMaker CAM-OV9281 (global-shutter mono)
+  vendor: InnoMaker
+  supported_features:
+    - video

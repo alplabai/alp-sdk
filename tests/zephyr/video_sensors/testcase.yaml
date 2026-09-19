@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only twister coverage for the three Raspberry-Pi-style MIPI CSI-2
+# camera-module sensor drivers (ov5647.c, ov9281.c, imx296.c): instantiates
+# "ovti,ov5647", "ovti,ov9281" and "sony,imx296" on an emulated I2C bus on
+# native_sim, so all three drivers + their Kconfig/CMake/binding hookup stay
+# compile-proven without real silicon. Mirrors upstream's
+# tests/drivers/build_all/video/testcase.yaml shape.
+
+common:
+  build_only: true
+  tags:
+    - alp-sdk
+    - video
+    - camera
+
+tests:
+  alp_sdk.video.rpi_csi2_sensors_build:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    min_ram: 32

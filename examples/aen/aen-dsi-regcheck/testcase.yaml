@@ -3,7 +3,7 @@
 # Build-only bind-only staging check of the Alif C2-MIPI-DSI DISPLAY chain
 # (cdc200 "tes,cdc-2.1" -> mipi_dsi "snps,designware-dsi" -> the shared D-PHY
 # "snps,designware-dphy") on the E1M-AEN801 (Ensemble E8, M55-HE).  The
-# CSI/RX twin of this app is aen-camera-regcheck; the live-pixels successor
+# CSI/RX twin of this app is aen-camera-firstlight; the live-pixels successor
 # is aen-dsi-display.
 #
 # Compile-checks the driver chain + DT nodes on the real E8 board target;
