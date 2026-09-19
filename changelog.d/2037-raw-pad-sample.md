@@ -1,7 +1,7 @@
 ### Notes — attended bench run: the decoded angle never moved; raw pad sampling added to `aen-qenc-readout` to discriminate an unfitted encoder from an uncounted signal (#2037)
 
-An attended run of `examples/aen/aen-qenc-readout` on `e1m-aen-evk-03`
-(E1M-AEN803), with the maintainer turning the encoder shaft continuously for
+An attended run of `examples/aen/aen-qenc-readout` on E1M-AEN803 serial
+2026W36-0002, with the maintainer turning the encoder shaft continuously for
 the whole 60 s window, measured a clean stuck-at-zero: all 200 samples read
 `0 deg`, 200/200 clean reads, `RESULT SKIPPED`. Reading live over SWD at four
 points across the window plus once after, `UTIMER_CNTR` (`0x4800D0A0`) was

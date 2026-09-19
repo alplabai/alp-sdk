@@ -754,7 +754,7 @@ _NO_ATOC = "No ATOC found on target device.\n"
 
 _COMPLIANT_BANNER = "SES A1 v1.8.0 Feb 20 2026\n"
 
-# Real captures off `e1m-aen-evk-01`, 2026-09-07, ANSI intact -- verbatim,
+# Real captures off an AEN EVK bench unit, 2026-09-07, ANSI intact -- verbatim,
 # not synthesised. alp-sdk#2026 round-2 review measured these against the
 # fixed guard by hand before this suite pinned them:
 #
@@ -1052,7 +1052,7 @@ def _before_log_path(res: subprocess.CompletedProcess[str]) -> str:
 def test_atoc_guard_transcript_path_is_run_unique(tmp_path):
     """alp-sdk#2026 round-2 review BLOCKER: `tag` is a literal script name
     (flash-run, flash-run-dualcore, ...), not run-unique. Three AEN boards
-    on this farm (evk-01/-02/-03) makes two concurrent runs of the SAME
+    on this farm makes two concurrent runs of the SAME
     script against DIFFERENT boards a real scenario, and a shared fixed
     path let one run's write land between another run's redirect and read
     -- reproduced: the second run printed the first run's clean table and
@@ -1156,7 +1156,7 @@ def test_atoc_guard_aborts_when_tmpdir_does_not_exist(tmp_path):
     )
 
 
-# --- validated against REAL silicon captures off e1m-aen-evk-01 (2026-09-07),
+# --- validated against REAL silicon captures off an AEN EVK bench unit (2026-09-07),
 # ANSI intact, not synthesised (alp-sdk#2026 round-2 review) -----------------
 
 

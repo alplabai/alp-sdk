@@ -37,7 +37,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/bench-env.sh"
 # scripts/bench/aen/bench-env.sh) does before a J-Link `loadbin` REPLACES it.
 # --atoc-unqueryable is a deliberate, differently-named acknowledgement for
 # THAT case, NOT the Flow A `--replace-atoc` opt-out: an operator on a
-# no-SE-UART slot (e.g. e1m-aen-evk-03) will pass this on every single Flow D
+# no-SE-UART slot (e.g. an AEN EVK bench place with no SE-UART wired) will pass this on every single Flow D
 # run, and that habit must never also silence Flow A's guard on a board
 # where the resident TOC genuinely can be read. Do not merge or alias the
 # two flags. --replace-atoc is also accepted here, for the OTHER case: a

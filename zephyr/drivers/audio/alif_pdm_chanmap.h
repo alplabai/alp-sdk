@@ -32,7 +32,7 @@
  *      PDM_CHAN_RIGHT=1/odd=falling).
  *   3. examples/aen/aen-pdm-mic-alif on E1M-AEN803/E1M-AEN801 silicon,
  *      confirmed against `PDM_CONFIG_REGISTER` read back as `0x00010033`
- *      on `e1m-aen-evk-03` (issue #2133 round 2 -- channels 0,1,4,5
+ *      on E1M-AEN803 serial 2026W36-0002 (issue #2133 round 2 -- channels 0,1,4,5
  *      enabled, mode 0x1): the E1M-AEN801 SoM routes PDM_C0/D0 to pdm
  *      controller 0 and PDM_C2/D2 to pdm controller 2
  *      (metadata/e1m_modules/aen/from-alif.tsv, see the board overlay), and
@@ -42,7 +42,7 @@
  *      (this channel map) and the 48 kHz capture rate are silicon-verified
  *      (issue #2133 round 2/4d); acoustic capture at 48 kHz on mic ch0/ch1
  *      (PDM controller 0) is ALSO now verified, by a speaker-to-mic
- *      loopback (e1m-aen-evk-03, 2026-09-15 -- PROBE_LOOPBACK mode of
+ *      loopback (E1M-AEN803 serial 2026W36-0002, 2026-09-15 -- PROBE_LOOPBACK mode of
  *      examples/aen/aen-i2s-tas2563-probe on branch
  *      test/u46-i2s-tas2563-on-reworked-mux, issue #2143, not this
  *      driver's own example) -- round 4d's believed "clap test" was NOT

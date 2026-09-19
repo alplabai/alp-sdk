@@ -65,7 +65,7 @@ never been measured on a GD32.** It is the generic ADIv5
 expectation for a Cortex-M33 r0p1 SW-DPv2, carried over from the
 part's core, not read off the part.
 
-What the bench actually records at place `e1mx-v2n-m1-01`
+What the bench actually records for the V2N bench unit
 (`scripts/bench/aen/bench-env.sh`) -- only the V2N CM33 DAP row below
 is a measurement; the GD32 row is a claimed-but-unattested candidate
 value, not a bench reading (see #1369):

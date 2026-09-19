@@ -200,7 +200,7 @@ static void fake_assert_isr(uint32_t bits)
 /*
  * alp-sdk issue #2205: the Alif E8 register model. The E8 SVD (peripheral
  * LPI2S) gives these reset values, and on the E8 TER bit 0 (TXCHENX) and
- * RER bit 0 (RXCHENX) are read-only 1 -- measured on e1m-aen-evk-03 i2s3:
+ * RER bit 0 (RXCHENX) are read-only 1 -- measured on E1M-AEN803 serial 2026W36-0002 i2s3:
  * RER and TER still read 0x00FFFF01 after the driver's init-time clears.
  * Bits 8-23 are the per-slot enables. The RAM cell records what the driver
  * last wrote; fake_ter()/fake_rer() return what the silicon returns. That
@@ -1075,7 +1075,7 @@ ZTEST(i2s_dw_underrun, test_failed_configure_leaves_dir_unchanged)
 /*
  * (r) alp-sdk issue #2179: i2s_dw_initialize() must quiesce the block and
  * mask every interrupt BEFORE irq_config() arms the NVIC. The I2S block is
- * NOT in the SYSRESETREQ reset domain -- measured on e1m-aen-evk-03, CER
+ * NOT in the SYSRESETREQ reset domain -- measured on E1M-AEN803 serial 2026W36-0002, CER
  * and TER both survived a J-Link `loadbin`'s implicit SYSRESETREQ at
  * 0x00000001 (the all-zero read after a RESETPIN reset was an unclocked
  * block, not a reset value -- issue #2205) -- so a
@@ -1409,7 +1409,7 @@ ZTEST(i2s_dw_underrun, test_tx_start_preempts_running_rx)
 /*
  * (y) alp-sdk issue #2205: the channel-enable helpers read-modify-write.
  * A plain write of 0x1 zeroed the E8's per-slot enables in bits 8-23 --
- * measured on e1m-aen-evk-03: RER went 0x00FFFF01 -> 0x00000001 at the
+ * measured on E1M-AEN803 serial 2026W36-0002: RER went 0x00FFFF01 -> 0x00000001 at the
  * RX start.
  *
  * MUTATION-PROVEN: restoring the plain `TER = 0x1` / `RER = 0x1` writes
