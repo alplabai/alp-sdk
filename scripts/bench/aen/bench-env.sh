@@ -565,8 +565,12 @@ bench_jlink_exe() {
 #      an in-use J-Link over loopback, so the second instance attaches to
 #      THAT probe regardless of any USB masking. No amount of USB-node
 #      masking substitutes for this.
-#   4. `ip link set lo up` inside the fresh network namespace -- a new netns
-#      starts with loopback DOWN, and the J-Link DLL segfaults on it.
+#   4. `ip link set lo up` inside the fresh network namespace, VERIFIED via
+#      `ip -o link show lo`'s UP flag rather than trusted blind -- a new
+#      netns starts with loopback DOWN, the J-Link DLL segfaults on it, and
+#      `ip link set` can itself fail silently (alp-sdk#2174); refuses (exit
+#      9, same isolation-did-not-take family as the checks below) rather
+#      than proceeding on an unconfirmed loopback.
 #
 # The mask is PROCESS-LOCAL (an unprivileged `unshare -rm`, no sudo needed):
 # it exists only inside this invocation and vanishes with the process, even
@@ -769,6 +773,28 @@ bench_jlink_run() {
 		unshare -rm --net --ipc --propagation private /bin/bash -c '
 			set -e
 			ip link set lo up 2>/dev/null || true
+			# alp-sdk#2174: the line above was failure-tolerant, so a
+			# netns where lo never came up (permission, race, ...) fell
+			# through to JLinkExe with a still-down loopback and it
+			# segfaulted. Verified via the UP flag word `ip -o link show lo`
+			# prints -- NOT /sys/class/net/lo/flags, measured stale here
+			# without an explicit remount; `ip` goes over netlink, always correct.
+			#
+			# `command -v ip` is checked FIRST, explicitly: under `set -e`
+			# above, `lostate=$(ip ...)` alone would abort the whole
+			# subshell with a bare, unexplained rc=127 the moment `ip` is
+			# missing -- the command substitution assignment fails on its
+			# own and trips `set -e` before the "did not come up" message
+			# right below ever gets a chance to print (measured).
+			command -v ip >/dev/null 2>&1 || {
+				echo "bench_jlink_run: ip not found in the fresh netns -- cannot verify loopback state" >&2
+				exit 9
+			}
+			lostate=$(ip -o link show lo 2>/dev/null)
+			printf "%s\n" "$lostate" | tr ",<>" "\n\n\n" | grep -qx UP || {
+				echo "bench_jlink_run: loopback did not come up in the fresh netns ($lostate)" >&2
+				exit 9
+			}
 			for n in $JLINK_MASKS; do mount --bind /dev/null "$n"; done
 			for s in $JLINK_SYSMASKS; do mount --bind "$JLINK_EMPTY" "$s"; done
 			[ -c "$JLINK_TARGET_NODE" ] || {
