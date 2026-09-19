@@ -68,7 +68,7 @@ RESULT: capture ok
 |---|---|---|---|
 | `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`), BENCH-UNVERIFIED. |
-| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 | ADR 0017 Tier-2 port of the Espressif driver, BENCH-UNVERIFIED. |
+| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 | ADR 0017 Tier-1.5 port of the Espressif driver, BENCH-UNVERIFIED. |
 | `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
 ## Frame buffers live in SRAM0, not DTCM

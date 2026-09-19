@@ -38,6 +38,7 @@
  * per module.
  */
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include <zephyr/kernel.h>
@@ -192,6 +193,16 @@ int main(void)
 			       (unsigned)CAM_HEIGHT);
 		}
 
+		alp_status_t release_status;
+		bool         frame_size_ok = frame.size == expected_size;
+		if (!frame_size_ok) {
+			/* Do not inspect frame.size bytes after a size mismatch: a broken
+			 * driver may report more bytes than the pool allocation actually
+			 * owns, and turning the diagnostic into an out-of-bounds read would
+			 * hide the original capture defect. */
+			goto release_frame;
+		}
+
 		const uint8_t *bytes = (const uint8_t *)frame.data;
 		uint32_t       crc   = crc32_ieee(bytes, frame.size);
 		printk("[camfl]   CRC32 = 0x%08x\n", crc);
@@ -235,8 +246,14 @@ int main(void)
 			printk("\n");
 		}
 
-		alp_camera_release(cam, &frame);
-		printk("RESULT: capture ok\n");
+	release_frame:
+		release_status = alp_camera_release(cam, &frame);
+		printk("[camfl] alp_camera_release -> %s\n", alp_status_name(release_status));
+		if (!frame_size_ok || release_status != ALP_OK) {
+			printk("RESULT: capture failed\n");
+		} else {
+			printk("RESULT: capture ok\n");
+		}
 	}
 
 	/* --- 4. stop + close ---------------------------------------------- */

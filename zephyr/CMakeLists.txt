@@ -627,7 +627,7 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # backport of zephyrproject-rtos/zephyr#119301, INTERIM) -- see
 # zephyr/drivers/video/ov5647.c for the retirement note.
 #
-# OV9281 (compatible "ovti,ov9281"): ADR 0017 Tier-2 (port of the Apache-2.0
+# OV9281 (compatible "ovti,ov9281"): ADR 0017 Tier-1.5 (port of the Apache-2.0
 # Espressif esp-video-components esp_cam_sensor ov9281 driver onto the v4.4
 # video API), BENCH-UNVERIFIED -- see zephyr/drivers/video/ov9281.c.
 #

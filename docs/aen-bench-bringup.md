@@ -28,7 +28,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **WDT** (CMSDK, Tier-1) | ✅ PASS | CMSDK watchdog. |
 | **ADC** (`adc_alif`, Tier-2) | ✅ PASS | Single-shot read. |
 | **DAC** (`dac_alif`, Tier-2) | ✅ PASS | Write path holds (code-side; analog output bench-unverified). |
-| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load; `cam` instantiation is DT-blocked and live capture is HW-blocked (no sensor wired). |
+| **Camera stack** (`cam`/`csi`/`dphy`/`arx3a0`) | ✅ PASS *(bind)* | All four nodes BIND + the v4.4-ported drivers load. No camera module was fitted during this pass; the J5 shields are now described and build-tested, but live capture remains BENCH-UNVERIFIED. |
 | **Ethos-U85** (NPU) | ✅ PASS | ID `0x20007001`. |
 | **Ethos-U55-HE** (NPU) | ✅ PASS | ID `0x10104201`. |
 | **NPU inference** (TFLM + Ethos-U85) | ✅ PASS | Tiny fixture runs to completion. Real models from MRAM slot0: **person_detect** (100% NPU) + **keyword_scrambled** (mixed 6-NPU/9-CPU, via the `<6>` op-resolver) both `runJob=OK` (2026-06-17). See `examples/aen/aen-npu-inference-person-mram`. |

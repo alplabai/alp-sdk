@@ -709,8 +709,8 @@ endif # I2S_DW
 # the v4.4 API by Alp Lab AB (each API-shim change is marked at its call site;
 # see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
 # is RETIRED and the driver TUs build in directly when their DT node is enabled.
-# Runtime capture stays HW-blocked on this batch (no camera sensor wired).
-# vendor-ext, BENCH-UNVERIFIED.
+# J5 camera shields are now described and build-tested, but no live frame
+# capture has completed on this path.  vendor-ext, BENCH-UNVERIFIED.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
 	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -1050,4 +1050,3 @@ config OSPI_ALIF
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
 	  driver either, only the DT binding).  See docs/adr/0017.
-

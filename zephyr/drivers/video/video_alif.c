@@ -32,8 +32,9 @@
  *   - legacy Bayer/greyscale pixfmt names (BGGR8.. / Y6P / Y7P) are aliased in
  *     the vendored <zephyr/drivers/video/video_alif.h>.
  * The driver now COMPILES against v4.4 (the ALP_VIDEO_ALIF_BROKEN gate is
- * retired).  vendor-ext, BENCH-UNVERIFIED, runtime capture HW-blocked on this
- * batch (no sensor wired).
+ * retired).  vendor-ext, BENCH-UNVERIFIED: the J5 camera shields are now
+ * described and build-tested, but no live frame capture has completed on this
+ * path.
  *
  * The soc_memory_map.h include resolves via the hal_alif common/include dir
  * (gated on CONFIG_RTSS_HE/HP); the public CSI data-type + CPI-mode tables come
