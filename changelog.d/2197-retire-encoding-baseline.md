@@ -68,4 +68,5 @@ rewritten around `examples/` now being in scope and `docs/` staying out of it.
 `python3 scripts/check_cross_platform.py --fail-on-warning` both print zero
 findings and exit 0 against the live tree, with only the four
 `INTENTIONALLY_DISCUSSES_OS_PATHS` allowlist summaries left in the output.
-`metadata/catalog.json` was regenerated and is unchanged.
+`metadata/catalog.json` was regenerated; its `check_cross_platform.py`
+`purpose` line now names `examples/` alongside `scripts/` and `tests/`.
