@@ -31,20 +31,43 @@
  *   does not carry (and adding one just for a demo is out of scope --
  *   see docs/portability.md on keeping the portable surface small).
  *   Instead this example reads RAW pre-processed frames: flat
- *   640x640x3 float32 NHWC buffers, exactly `FRAME_BYTES` bytes each.
- *   That is the exact tensor layout the target model bundle (YOLOX-S
- *   trained on VOC, per docs/bring-up-drpai-v2n.md Sec 5) expects, and
- *   it matches the size of that bundle's own sample `input_0.bin`
- *   (640*640*3*4 = 4,915,200 bytes) byte for byte. A customer with a
- *   real camera/video pipeline (out of scope here -- see issue #1149)
- *   produces frames in this layout with whatever resize + normalise +
- *   HWC->NHWC step their capture path already needs; a quick host-side
- *   example with Pillow + NumPy:
+ *   640x640x3 float32 NCHW buffers, exactly `FRAME_BYTES` bytes each --
+ *   planar (the whole R plane, then the whole G plane, then the whole B
+ *   plane), NOT interleaved HWC. NCHW is the target model's declared
+ *   ONNX input shape (RUHMI's `yolox-S_VOC.onnx`, `1,3,640,640` per
+ *   docs/bring-up-drpai-v2n.md Sec 5 and
+ *   scripts/alp_model/adapters/drpai.py), and it reaches the model
+ *   unchanged: the DRP-AI backend (src/yocto/inference_drpai.cpp) pushes
+ *   this buffer straight into the MERA runtime's `SetInput()` and never
+ *   runs the compiled bundle's own `preprocess/` step against it. The
+ *   runtime cannot catch a layout mistake for you: `alp_inference_get_
+ *   input()` reports only a byte count, never a shape (the MERA wrapper
+ *   exposes no per-input shape, so rank stays 0 -- see
+ *   `alp_inference_drpai_get_input()` in inference_drpai.cpp), so an
+ *   interleaved HWC file of the identical byte count passes the size
+ *   check below and would be fed to the NPU with a silently wrong
+ *   channel ordering. Getting NCHW right is entirely the caller's job.
+ *
+ *   Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255
+ *   vs mean/std), and letterbox padding are UNVERIFIED on this
+ *   review host (no vendor sample was run here) -- the vendor's own
+ *   `how-to/sample_app_v2h/app_yolox_cam` sample is the authority for
+ *   all three; match it exactly, do not guess. A customer with a real
+ *   camera/video pipeline (out of scope here -- see issue #1149)
+ *   produces frames in this NCHW layout with whatever resize +
+ *   normalise + HWC->CHW transpose their capture path already needs. A
+ *   host-side sketch with Pillow + NumPy -- RGB, raw 0-255 float32,
+ *   plain resize with no letterbox -- is a PLACEHOLDER only, to be
+ *   checked against `app_yolox_cam` before trusting it for real
+ *   detections:
  *
  *       import numpy as np
  *       from PIL import Image
  *       img = Image.open("photo.jpg").convert("RGB").resize((640, 640))
- *       np.asarray(img, dtype=np.float32)[None].tofile("frame0.bin")
+ *       # HWC (640, 640, 3) -> CHW (3, 640, 640): move the channel axis
+ *       # from last to first; this is the transpose the model's NCHW
+ *       # input needs and a same-size HWC file would silently skip.
+ *       np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
  *
  * Model bundle
  * ============
@@ -60,9 +83,15 @@
  *   bytes to `alp_inference_open()` as `cfg.model_data` exactly as-is
  *   -- the SDK's DRP-AI backend (src/yocto/inference_drpai.cpp) is what
  *   untars it to a private staging directory before loading it into the
- *   vendor runtime.  A compiled YOLOX-S/VOC bundle already exists per
- *   that doc (Sec 5) but its accuracy is unvalidated -- it was quantised
- *   against random calibration frames, not the vendor's real set.
+ *   vendor runtime. No compiled `drpai_dir` bundle exists yet, though --
+ *   docs/bring-up-drpai-v2n.md Sec 5 confirms only an ONNX source
+ *   (RUHMI's `yolox-S_VOC.onnx`) exists in a fresh checkout, not a
+ *   compiled `drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json`
+ *   set; compiling one for real accuracy needs a real calibration image
+ *   set, tracked in alp-sdk#1271, not done here. This program's own
+ *   size/byte-for-byte check against that bundle's sample `input_0.bin`
+ *   is therefore still owed, not done: that file does not exist in this
+ *   checkout either.
  *
  * Output: raw scores, not decoded detections
  * ===========================================
@@ -118,7 +147,7 @@
 #include "alp/inference.h"
 #include "top_scores.h"
 
-/* Exact byte size of one 640x640x3 float32 NHWC frame -- see "Input:
+/* Exact byte size of one 640x640x3 float32 NCHW frame -- see "Input:
  * raw pre-processed frames" above.  A frame file of any other size is
  * rejected up front rather than fed to the NPU short or truncated. */
 #define FRAME_BYTES (640u * 640u * 3u * sizeof(float))
@@ -209,7 +238,7 @@ int main(int argc, char **argv)
 		        "usage: %s <model.tar> <frame0.bin> [frame1.bin ...]\n"
 		        "  model.tar  -- drpai_dir bundle tar from "
 		        "`alp_model build --target drpai`\n"
-		        "  frame*.bin -- raw 640x640x3 float32 NHWC frames "
+		        "  frame*.bin -- raw 640x640x3 float32 NCHW frames "
 		        "(%zu bytes each)\n",
 		        argv[0],
 		        (size_t)FRAME_BYTES);
@@ -286,7 +315,7 @@ int main(int argc, char **argv)
 		if (frame_len != FRAME_BYTES) {
 			fprintf(stderr,
 			        "error: '%s' is %zu bytes, expected %zu (640x640x3 float32 "
-			        "NHWC) -- skipped\n",
+			        "NCHW) -- skipped\n",
 			        frame_path,
 			        frame_len,
 			        (size_t)FRAME_BYTES);
@@ -308,11 +337,17 @@ int main(int argc, char **argv)
 		/* The backend's own input-tensor size is authoritative. Every
 		 * frame is already hard-rejected above unless it is exactly
 		 * FRAME_BYTES, so a mismatch here means the loaded model is
-		 * not the 640x640x3 float32 one this example targets -- skip
-		 * the frame outright rather than copy a partial tensor and
-		 * print results as if they were valid (a short copy would
+		 * not the 640x640x3 float32 NCHW one this example targets --
+		 * skip the frame outright rather than copy a partial tensor
+		 * and print results as if they were valid (a short copy would
 		 * leave the tail of the tensor holding the previous frame's
-		 * bytes, so the "output" would partly reflect frame N-1). */
+		 * bytes, so the "output" would partly reflect frame N-1).
+		 * This check is byte-count only, same as the guard above: the
+		 * MERA wrapper reports no per-input shape (rank stays 0 --
+		 * see "Input" above), so an interleaved HWC frame of the same
+		 * size passes both checks and gets copied with the wrong
+		 * channel ordering. Layout is the caller's contract, not
+		 * something this program can verify. */
 		if (in.size_bytes != frame_len) {
 			fprintf(stderr,
 			        "error: '%s' is %zu bytes but the model's input tensor is "

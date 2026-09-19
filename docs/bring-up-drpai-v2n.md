@@ -190,8 +190,12 @@ both default OFF, deliberately not merged into one"):
 `PACKAGECONFIG` half leaves `ALP_SDK_USE_DRPAI_V2N=OFF`, and
 `alp_inference_open()` returns `NULL` with `ALP_ERR_NOSUPPORT` even though
 the node and userspace payload are present. Omitting `ALP_ENABLE_DRPAI`
-gives a compiled backend with no node to drive — an idle device, not an
-error. Neither silently half-works.
+also fails, not idles: with a compiled backend but no `&drpai0` node,
+`/dev/drpai0` does not exist, so `open()`'s `ENOENT` collapses to
+`ALP_ERR_IO` (`src/yocto/inference_drpai.cpp`'s `_drpai_mem_start()`,
+called first from `alp_inference_drpai_open()`) — the same code path a
+busy or genuinely absent device returns. Neither switch silently
+half-works, and neither missing switch is silent either.
 
 Enable the backend through the SDK recipe's PACKAGECONFIG:
 

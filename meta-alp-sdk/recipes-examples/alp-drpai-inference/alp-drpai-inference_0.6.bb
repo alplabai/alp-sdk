@@ -7,7 +7,7 @@
 # Follows the same structure as alp-edgeai_0.6.bb / alp-lvgl-dashboard_0.6.bb.
 
 SUMMARY     = "ALP SDK DRP-AI3 still-frame inference demo for V2N"
-DESCRIPTION = "Reads one or more raw pre-processed 640x640x3 float32 NHWC \
+DESCRIPTION = "Reads one or more raw pre-processed 640x640x3 float32 NCHW \
 frames from paths given on the command line, runs each through \
 <alp/inference.h> with backend=ALP_INFERENCE_BACKEND_DRPAI, and prints \
 per-image results + timing.  See examples/v2n/v2n-drpai-inference/README.md \

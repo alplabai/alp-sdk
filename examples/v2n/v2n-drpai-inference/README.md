@@ -33,20 +33,45 @@ exhibition booth runs (issue #1268).
 
 Decoding a real image file needs an image codec library outside this
 SDK's portable surface, so this example reads **raw pre-processed
-frames** instead: flat **640x640x3 float32 NHWC** buffers, exactly
-4,915,200 bytes each (`640 * 640 * 3 * sizeof(float)`) -- the same
-byte count as the target model bundle's own sample `input_0.bin`. A
-camera/video capture path is explicitly **out of scope** here (that is
-issue #1149); a customer with a live pipeline produces frames in this
-layout with whatever resize/normalise/HWC->NHWC step their capture
-path already needs. A quick host-side way to produce one from a JPEG,
-for testing:
+frames** instead: flat **640x640x3 float32 NCHW** buffers, exactly
+4,915,200 bytes each (`640 * 640 * 3 * sizeof(float)`) -- **planar**
+(the whole R plane, then the whole G plane, then the whole B plane),
+not interleaved HWC. NCHW is the target model's declared ONNX input
+shape (RUHMI's `yolox-S_VOC.onnx`, `1,3,640,640` per
+[`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
+Sec 5 and `scripts/alp_model/adapters/drpai.py`), and it reaches the
+model unchanged: the DRP-AI backend
+([`src/yocto/inference_drpai.cpp`](../../../src/yocto/inference_drpai.cpp))
+pushes this buffer straight into the MERA runtime's `SetInput()` and
+never runs the compiled bundle's own `preprocess/` step against it.
+The runtime cannot catch a layout mistake for you -- `alp_inference_
+get_input()` reports only a byte count, never a shape (the MERA
+wrapper exposes no per-input shape, so rank stays 0), so an
+interleaved HWC file of the identical byte count passes the size check
+and would silently be fed to the NPU with the wrong channel ordering.
+Getting NCHW right is entirely the caller's job.
+
+Channel order (RGB vs BGR), pixel normalisation (raw 0-255 vs /255 vs
+mean/std), and letterbox padding are **unverified** on this review
+host (no vendor sample was run here) -- the vendor's own
+`how-to/sample_app_v2h/app_yolox_cam` sample is the authority for all
+three; match it exactly, do not guess. A camera/video capture path is
+explicitly **out of scope** here (that is issue #1149); a customer
+with a live pipeline produces frames in this NCHW layout with whatever
+resize/normalise/HWC->CHW transpose their capture path already needs.
+A host-side sketch with Pillow + NumPy -- RGB, raw 0-255 float32,
+plain resize with no letterbox -- is a **placeholder only**, to be
+checked against `app_yolox_cam` before trusting it for real
+detections:
 
 ```python
 import numpy as np
 from PIL import Image
 img = Image.open("photo.jpg").convert("RGB").resize((640, 640))
-np.asarray(img, dtype=np.float32)[None].tofile("frame0.bin")
+# HWC (640, 640, 3) -> CHW (3, 640, 640): move the channel axis from
+# last to first -- the transpose the model's NCHW input needs and a
+# same-size HWC file would silently skip.
+np.asarray(img, dtype=np.float32).transpose(2, 0, 1)[None].tofile("frame0.bin")
 ```
 
 ## Model bundle
@@ -60,12 +85,19 @@ python3 -m alp_model build --target drpai --product V2N <model.onnx>
 
 (`scripts/alp_model/adapters/drpai.py`; see
 [`docs/bring-up-drpai-v2n.md`](../../../docs/bring-up-drpai-v2n.md)
-Sec 5). A compiled **YOLOX-S trained on VOC** bundle already exists per
-that doc -- input `640x640x3` float32 NHWC, and its `deploy.json`
-carries a single fused `mera_drp` op, so the whole graph is
-NPU-offloaded (no CPU-side split). Its accuracy is unvalidated: it was
-quantised against random calibration frames rather than the vendor's
-real calibration set.
+Sec 5). The target is **YOLOX-S trained on VOC**
+(RUHMI's `how-to/sample_app_v2h/app_yolox_cam/yolox-S_VOC.onnx`, ONNX
+input `1,3,640,640` -- NCHW). **No compiled `drpai_dir` bundle exists
+yet, though** -- Sec 5 of that doc confirms only the ONNX source is
+present in a fresh checkout, not a compiled
+`drp_desc.bin`/`weight.bin`/`addr_map.txt`/`deploy.json` set;
+compiling one with real (not random-calibration) accuracy needs a real
+calibration image set, tracked in alp-sdk#1271, not done here. Once a
+bundle is compiled, its `deploy.json`'s single fused `mera_drp` op
+means the whole graph is NPU-offloaded (no CPU-side split), and this
+example's frame generator should be checked byte-for-byte against
+that bundle's own sample `input_0.bin` -- also owed, not done, since
+neither the bundle nor that sample exists in this checkout.
 
 ## Output: raw scores, not decoded detections
 

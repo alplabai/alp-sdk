@@ -10,7 +10,7 @@ bake has ever completed, on any host, and nothing has run on DRP-AI
 silicon.** Bench sign-off is tracked as #1268.
 
 - **`examples/v2n/v2n-drpai-inference/`** — the exhibition-booth demo: reads
-  one or more raw pre-processed 640x640x3 float32 NHWC frames given on the
+  one or more raw pre-processed 640x640x3 float32 NCHW (planar) frames given on the
   command line, runs each through `<alp/inference.h>` with
   `backend = ALP_INFERENCE_BACKEND_DRPAI`, and prints per-image top-5 raw
   scores + timing. `[UNTESTED on silicon]`. `src/top_scores.c` (the top-N
