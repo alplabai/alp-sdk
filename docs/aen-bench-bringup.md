@@ -358,8 +358,9 @@ the five `aen-cc3501e-*` apps (`aen-cc3501e-ble-gatt`, `aen-cc3501e-bringup`,
 `aen-cc3501e-companion-tour`, `aen-cc3501e-gatt-register`, `aen-cc3501e-gpio`)
 and `aen-eeprom-manifest`, all via their own `prj.conf`, plus
 `examples/peripheral-io/alp-console`, which sets it via a **BOARD-scoped**
-conf instead —
-`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`
+conf instead — both its AEN801 and AEN803 twins do:
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf` and
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf`
 (see `examples/peripheral-io/alp-console/README.md`). For any of these, a
 Flow C RAM-run must ALSO carry the explicit `CONFIG_FLASH_LOAD_OFFSET=0x0`
 override, since a later `EXTRA_CONF_FILE` fragment wins over both an app's
