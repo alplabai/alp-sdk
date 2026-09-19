@@ -108,6 +108,7 @@ def _run(
     extra_args: list[str] | None = None,
     with_commandfile: bool = True,
     commandfile_path: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     (tmp_path / "bench-env.sh").write_bytes(ENV.read_bytes())
     if commandfile_path is not None:
@@ -140,6 +141,13 @@ def _run(
         # site broke on macos-latest CI before this fix.
         f'export JLINK_EXE="{stub_true}"',
     ]
+    # alp-sdk#2233 review round 3, finding 1 (N1): lets a test export
+    # FLOWD_DRY_RUN (or any other var) to exercise bench_jlink_run()'s own
+    # backstop refusal directly, without needing the whole padded-write
+    # pipeline a real writer script builds around it.
+    if extra_env:
+        for k, v in extra_env.items():
+            lines.append(f'export {k}="{v}"')
     if sysfs_root is not None:
         lines.append(f'export BENCH_JLINK_SYSFS_ROOT="{sysfs_root}"')
     if dev_root is not None:
@@ -463,3 +471,75 @@ def test_refuses_when_the_commandfile_cannot_be_read(tmp_path: Path) -> None:
     assert "cannot read" in res.stderr, res.stderr
     assert "JLINK_MASKS=" not in res.stdout, "must refuse before computing any mask"
     assert "JLINK_PRELUDE=" not in res.stdout, "must never report success with a guard-only script"
+
+
+# --------------------------------------------------------------------
+# FLOWD_DRY_RUN backstop (alp-sdk#2233 review round 3, finding 1/N1) --
+# bench_jlink_run() itself must independently refuse (rc=13) any
+# CommandFile containing loadbin/erase while FLOWD_DRY_RUN is set, as the
+# BACKSTOP behind each writer's own dry-run exit. Exercised DIRECTLY here
+# (no padded-write pipeline needed), and BEFORE BENCH_JLINK_RUN_DRY_RUN's
+# own mask-computation branch is ever reached -- the backstop check sits
+# earlier in the function, so it must fire even when the rest of the
+# function would otherwise be exercised harmlessly under
+# BENCH_JLINK_RUN_DRY_RUN=1 (as every other test in this file does).
+# --------------------------------------------------------------------
+
+@_NEEDS_BASH
+def test_flowd_dry_run_backstop_refuses_a_loadbin_commandfile(tmp_path: Path) -> None:
+    sysfs = tmp_path / "sysfs"
+    dev = tmp_path / "dev"
+    _make_probe(sysfs, "3-4.1", vendor="1366", bus=3, dev=17, serial="000603000869")
+    _make_dev_node(dev, 3, 17)
+
+    cmdfile = tmp_path / "write.jlink"
+    cmdfile.write_text("si SWD\nconnect\nloadbin padded.bin 0x802E4000, noreset\nexit\n", encoding="utf-8")
+
+    res = _run(
+        tmp_path, sysfs_root=sysfs, dev_root=dev, lg_swd_path="3-4.1",
+        commandfile_path=cmdfile, extra_env={"FLOWD_DRY_RUN": "1"},
+    )
+    assert res.returncode == 13, f"{res.stdout}\n{res.stderr}"
+    assert "FLOWD_DRY_RUN is set" in res.stderr, res.stderr
+    assert "JLINK_MASKS=" not in res.stdout, "must refuse before computing any mask or opening a probe"
+
+
+@_NEEDS_BASH
+def test_flowd_dry_run_backstop_refuses_an_erase_commandfile(tmp_path: Path) -> None:
+    """Same backstop, the OTHER load-bearing command word -- `erase` is
+    just as destructive as `loadbin` and must be caught identically."""
+    sysfs = tmp_path / "sysfs"
+    dev = tmp_path / "dev"
+    _make_probe(sysfs, "3-4.1", vendor="1366", bus=3, dev=17, serial="000603000869")
+    _make_dev_node(dev, 3, 17)
+
+    cmdfile = tmp_path / "erase.jlink"
+    cmdfile.write_text("si SWD\nconnect\nerase\nexit\n", encoding="utf-8")
+
+    res = _run(
+        tmp_path, sysfs_root=sysfs, dev_root=dev, lg_swd_path="3-4.1",
+        commandfile_path=cmdfile, extra_env={"FLOWD_DRY_RUN": "1"},
+    )
+    assert res.returncode == 13, f"{res.stdout}\n{res.stderr}"
+
+
+@_NEEDS_BASH
+def test_flowd_dry_run_backstop_allows_a_read_only_commandfile(tmp_path: Path) -> None:
+    """Control: FLOWD_DRY_RUN must NOT refuse a read-only session (savebin/
+    connect/h/r/g) -- the sector pre-read and proof read-back sessions stay
+    real reads even while FLOWD_DRY_RUN is set for a write elsewhere in the
+    same run (see bench-env.sh's own FLOWD_DRY_RUN header)."""
+    sysfs = tmp_path / "sysfs"
+    dev = tmp_path / "dev"
+    _make_probe(sysfs, "3-4.1", vendor="1366", bus=3, dev=17, serial="000603000869")
+    _make_dev_node(dev, 3, 17)
+
+    cmdfile = tmp_path / "read.jlink"
+    cmdfile.write_text("si SWD\nconnect\nsavebin out.bin 0x802E4000 0x4000\nexit\n", encoding="utf-8")
+
+    res = _run(
+        tmp_path, sysfs_root=sysfs, dev_root=dev, lg_swd_path="3-4.1",
+        commandfile_path=cmdfile, extra_env={"FLOWD_DRY_RUN": "1"},
+    )
+    assert res.returncode == 0, f"{res.stdout}\n{res.stderr}"
+    assert "JLINK_MASKS=" in res.stdout, "a read-only CommandFile must reach the real mask computation"
