@@ -29,7 +29,7 @@ def _run(tmp_path, monkeypatch, doc) -> int:
     """Run the gate on one synthetic SoC doc; return the failure count."""
     monkeypatch.setattr(V, "REPO", tmp_path)  # so relative_to(REPO) resolves
     p = tmp_path / "soc.json"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     return len(V._check_soc_debug_probe_identity([p]))
 
 
@@ -116,7 +116,7 @@ def test_non_object_top_level_does_not_crash_the_gate(tmp_path, monkeypatch):
     problem."""
     monkeypatch.setattr(V, "REPO", tmp_path)
     p = tmp_path / "soc.json"
-    p.write_text(json.dumps([]))
+    p.write_text(json.dumps([]), encoding="utf-8")
     assert V._check_soc_debug_probe_identity([p]) == []  # must not raise
 
 
@@ -274,7 +274,7 @@ def test_expect_dpidr_gate_names_the_uncovered_core(tmp_path, monkeypatch):
     doc = copy.deepcopy(_E8_LIKE_WITH_A32)
     del doc["variants"][0]["debug"]["jlink_device"]["m55_he"]
     p = tmp_path / "soc.json"
-    p.write_text(json.dumps(doc))
+    p.write_text(json.dumps(doc), encoding="utf-8")
     failures = V._check_soc_debug_probe_identity([p])
     assert len(failures) == 1
     msgs = " ".join(failures[0][1])

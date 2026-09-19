@@ -52,11 +52,11 @@ def _relpath(path: Path, root: Path) -> str:
 def _git_rev(root: Path) -> tuple[Optional[str], bool]:
     try:
         rev = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, check=True).stdout.strip()
+                             capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None, False
     status = subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8")
     if status.returncode != 0:
         raise RuntimeError(f"git status failed in {root}: {status.stderr.strip()}")
     return (rev or None), bool(status.stdout.strip())

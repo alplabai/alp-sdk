@@ -662,6 +662,7 @@ def _git_ls_files(root: Path) -> list[Path] | None:
             check=True,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
     except (OSError, subprocess.CalledProcessError):
         return None

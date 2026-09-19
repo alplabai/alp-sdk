@@ -52,7 +52,7 @@ def _bash_can_run_a_script() -> bool:
     try:
         probe = subprocess.run(
             ["bash", "-c", "printf ok"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -161,7 +161,7 @@ def _run(
     script.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return subprocess.run(
         ["bash", str(script)], cwd=tmp_path, env=_sanitized_env(),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
 
 

@@ -20,9 +20,9 @@ def test_schema_closed_draft2020():
 def _fixture(tmp_path):
     bp = tmp_path / "build-plan.json"
     bp.write_text(json.dumps({"schemaVersion": 1, "sku": "E1M-AEN801",
-                              "boardYaml": "board.yaml"}))
+                              "boardYaml": "board.yaml"}), encoding="utf-8")
     img = tmp_path / "app.bin"; img.write_bytes(b"\x01\x02\x03")
-    board = tmp_path / "board.yaml"; board.write_text("som:\n  sku: E1M-AEN801\n")
+    board = tmp_path / "board.yaml"; board.write_text("som:\n  sku: E1M-AEN801\n", encoding="utf-8")
     return bp, img, board
 
 

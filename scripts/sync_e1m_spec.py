@@ -152,6 +152,7 @@ def main() -> int:
             xv1_pads=len(xv1["pads"]),
         ),
         newline="",
+        encoding="utf-8",
     )
     print(f"  lock -> {LOCK_PATH.relative_to(REPO)}")
     print("done. Run `python3 scripts/check_e1m_pinout.py` to verify.")
