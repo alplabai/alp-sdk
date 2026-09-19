@@ -69,7 +69,7 @@
  * both sides' state side by side without them clobbering each other; the
  * distinct SELF_MAGIC values let a dump be identified as HP's or HE's even
  * without knowing which offset was read. */
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #define ROLE        "HP"
 #define SELF_BEACON ((volatile uint32_t *)0x02000010U)
 #define B_BOUND     ((volatile uint32_t *)0x02000048U)

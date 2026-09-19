@@ -53,7 +53,7 @@
 #define HE_LOAD_ADDR 0x58000000U /* HE ITCM global alias = HE-APP loadAddress */
 
 /* Core-role selection (HP vs HE build of this app), not a peripheral-presence gate. */
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 #define ROLE           "HP"
 #define SELF_BEACON    ((volatile uint32_t *)0x02000010U)
 #define DB_BEACON      ((volatile uint32_t *)0x02000020U)
@@ -93,7 +93,7 @@ int main(void)
 	SELF_BEACON[1] = 0U;
 	DB_BEACON[0]   = 0U;
 
-#if defined(CONFIG_BOARD_ALP_E1M_AEN801_M55_HP)
+#if defined(CONFIG_SOC_AE822FA0E5597LS0_RTSS_HP)
 	/* HP master: release HE, then receive HE's doorbells on MHU-1. */
 	alp_status_t rc = alp_mproc_boot_core(ALP_CORE_M55_HE, HE_LOAD_ADDR);
 
