@@ -138,6 +138,21 @@ west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
            -d build_console examples/peripheral-io/alp-console
 ```
 
+This app also ships an E1M-AEN803 twin of the AEN801 overlay + `.conf` pair
+above
+(`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay`,
+`boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf`):
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay` and
+`boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf` (identical
+DT/Kconfig content) -- it is the AEN bench farm's default target
+(`scripts/bench/aen/bench-env.sh`'s `AEN_BOARD`). After setting
+`som.sku: E1M-AEN803` in `board.yaml`:
+
+```sh
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+           -d build_console examples/peripheral-io/alp-console
+```
+
 The app is slot0-linked (`CONFIG_FLASH_LOAD_OFFSET=0x10000`, reset vector
 `0x8001xxxx`), so it flashes via the **Flow D** MRAM path: `app-gen-toc` builds a
 signed ATOC, then J-Link `loadbin`s the image to `0x80010000` and the ATOC to its

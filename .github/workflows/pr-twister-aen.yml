@@ -101,7 +101,10 @@ on:
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -126,7 +129,10 @@ on:
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
+      - 'examples/peripheral-io/alp-console/**'
+      - 'examples/peripheral-io/blink/**'
       - 'examples/peripheral-io/drone-autopilot/**'
+      - 'examples/peripheral-io/pwm-led-fade/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_he/**'
       - 'zephyr/boards/alp/e1m_aen801_m55_hp/**'
       - 'zephyr/boards/alp/e1m_aen803_m55_he/**'
@@ -154,16 +160,19 @@ jobs:
     # #2209: one job per SKU, running in parallel, instead of one job
     # building all four board targets. Each leg selects only its own SKU's
     # two platforms (M55-HE + M55-HP) via matrix.platform_flags -- see the
-    # twister step below. A `--dry-run` over examples/aen +
-    # firmware-update-log + drone-autopilot on this tree counts 78 AEN801
-    # configurations and 75 AEN803 (153 total), against the pre-split
-    # single-job worst case of 92 that took 24m21s (#2198). Scaling that
-    # 1461s/92-build rate linearly, AEN801 (78 builds) projects to about
-    # 1240s/20.7min and AEN803 (75 builds) to about 1195s/19.9min -- both
-    # comfortably under the 30min twister-step cap and the 41min job
-    # ceiling below, so neither is tightened; a job-level timeout tighter
-    # than the shared 41min ceiling would need its own re-derivation per
-    # SKU for a margin this change does not need yet.
+    # twister step below. At #2209, a `--dry-run` over examples/aen +
+    # firmware-update-log + drone-autopilot on that (then three-root) tree
+    # counted 78 AEN801 configurations and 75 AEN803 (153 total), against
+    # the pre-split single-job worst case of 92 that took 24m21s (#2198).
+    # Scaling that 1461s/92-build rate linearly, AEN801 (78 builds)
+    # projected to about 1240s/20.7min and AEN803 (75 builds) to about
+    # 1195s/19.9min -- both comfortably under the 30min twister-step cap
+    # and the 41min job ceiling below, so neither was tightened; a
+    # job-level timeout tighter than the shared 41min ceiling would need
+    # its own re-derivation per SKU for a margin that headroom does not
+    # need yet. The current scenario count across all eight testsuite
+    # roots this job now spans is measured in the twister step's own
+    # comment below.
     strategy:
       fail-fast: false
       matrix:
@@ -347,11 +356,12 @@ jobs:
       # tree gets no real CI coverage without a -p flag AND a matching
       # platform_allow entry; a testcase.yaml change alone selects nothing
       # here. The --testsuite-root list below is scoped to examples/aen --
-      # the testcase.yaml files whose platform_allow names an AEN target
-      # are the entire point; nothing outside that tree is in scope for
-      # this job. examples/connectivity/firmware-update-log is a second,
-      # bounded root (issue #1101): it is the one non-examples/aen example
-      # with AEN801 platform_allow entries, kept as its own
+      # plus the bounded roots enumerated below; the testcase.yaml files
+      # whose platform_allow names an AEN target are the entire point;
+      # nothing outside these eight roots is in scope for this job.
+      # examples/connectivity/firmware-update-log is a second,
+      # bounded root (issue #1101): at #1101 it was the one non-examples/aen
+      # example with AEN801 platform_allow entries, kept as its own
       # --testsuite-root rather than widened to all of examples/ (this
       # job's stated disk-budget concern, see the header comment) or moved
       # under examples/aen (it is a portable <alp/update_log.h> demo, not
@@ -370,8 +380,9 @@ jobs:
       # its AEN hardware scenario named a board target it shipped no
       # overlay for, so the alp-i2c0/alp-uart1/alp-pwm0..3 aliases its
       # overlay wires were silently dropped and nothing built to notice.
-      # Bounded to this one example, not widened to examples/peripheral-io/
-      # -- every other example there is native_sim-only (see #2106).
+      # #2235 adds its AEN803 M55-HP boards/ overlay and widens that same
+      # scenario's platform_allow to name the AEN803 M55-HP target too, so
+      # this root now declares both SKUs.
       # examples/connectivity/mqtt-telemetry and .../iot-fleet-ota are the
       # fourth and fifth bounded roots (issue #2173). Neither had ANY AEN
       # coverage here: mqtt-telemetry shipped no AEN scenario at all, and
@@ -386,7 +397,24 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota
+      # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
+      # are the sixth, seventh and eighth bounded roots (issue #2235, the
+      # unlanded remainder of closed PR #2232). None of the three shipped
+      # an AEN803 boards/ overlay on dev -- each had only its AEN801
+      # boards/ files (blink and pwm-led-fade shipped HE + HP AEN801
+      # overlays; alp-console an overlay + .conf), and no testcase.yaml
+      # scenario ever selected even that, so the three examples were
+      # native_sim-only in CI and neither SKU's
+      # real-silicon build was gated. #2235 adds each example's AEN803
+      # boards/ twin (DT/Kconfig content held equal to the AEN801 file by
+      # check_example_board_overlay_content_parity.py) plus one build_only
+      # AEN scenario naming both SKUs for every core it ships an overlay
+      # for (alp-console: M55-HE; blink and pwm-led-fade: M55-HE +
+      # M55-HP). Bounded to these
+      # four examples (this trio plus drone-autopilot above), not widened to
+      # all of examples/peripheral-io/ -- every OTHER example there stays
+      # native_sim-only (see #2106).
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + alp-console + blink + pwm-led-fade
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -394,13 +422,23 @@ jobs:
         # #1477: worst observed successful run 1167s/19.45min across 10
         # sampled runs of the PRE-#2209 combined job (both SKUs, ~92
         # builds). 30min was already ~1.54x that, kept under the job's own
-        # 41min ceiling (see that job-level comment). Not re-derived per
-        # SKU post-split: a local `--dry-run` count on this tree gives 78
-        # AEN801 configurations and 66 AEN803 (144 total, up from 92) --
-        # scaled linearly off the 1461s/92-build #2198 measurement, AEN801
-        # projects to about 1240s/20.7min and AEN803 to about 1050s/17.5min,
-        # both still comfortably under this 30min cap. Revisit if a future
-        # scenario count pushes either leg close to it.
+        # 41min ceiling (see that job-level comment). Before #2235, dev
+        # built 80 AEN801 + 75 AEN803 configurations across the five
+        # testsuite roots dev's workflow ran (CI run 35436368459; the
+        # AEN801 leg took 1179.76s for those 80 builds; an eight-root
+        # --dry-run on dev gives the same 80/75, because the three new
+        # roots had no AEN scenario). #2235 adds 5 AEN801 and 6 AEN803
+        # configurations -- the sixth AEN803 one is drone-autopilot's new
+        # AEN803 M55-HP target (see that root's own paragraph above) --
+        # bringing the count to 85 AEN801 + 81 AEN803 (166 total), measured
+        # at #2235 with `twister --dry-run` over all eight roots. Scaling
+        # the AEN801 leg's measured 1179.76s/80-build rate linearly
+        # projects to about 1250s for 85 builds, still comfortably under
+        # this 30min cap; the AEN803 leg's own measured rate (693.43s/75
+        # builds, CI run 35436368459) projects to about 750s for 81
+        # builds, also comfortably under this cap, but revisit with a
+        # fresh `--dry-run` if a future scenario count pushes either leg
+        # close to it.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
@@ -410,6 +448,9 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
             --inline-logs \
             --no-detailed-test-id
 

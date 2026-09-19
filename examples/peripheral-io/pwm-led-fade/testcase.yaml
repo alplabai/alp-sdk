@@ -28,6 +28,18 @@ tests:
         type: one_line
         regex:
           - "\\[pwm\\] done"
+  alp_sdk.example.pwm_led_fade.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen801_m55_hp/ae822fa0e5597ls0/rtss_hp
+      - alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp
+    tags:
+      - alp-sdk
+      - example
+      - pwm
+      - aen
+    build_only: true
   alp_sdk.example.pwm_led_fade.e1m_evk:
     platform_allow:
       - native_sim
