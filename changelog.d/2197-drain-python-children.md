@@ -61,7 +61,7 @@ output UTF-8.
 
 **The J-Link command script is written in the locale encoding, on purpose.**
 J-Link Commander reads its command file in the platform ANSI codepage on
-Windows, so a UTF-8 file would garble a path such as `C:\Users\José\...`.
+Windows, so a UTF-8 file would garble a non-ASCII path (`C:\Users\<name>\` with an `é`).
 The `os.fdopen()` call therefore names the locale encoding explicitly. It uses
 `locale.getencoding()`, because in UTF-8 Mode `locale.getpreferredencoding()`
 returns `utf-8`. On Python 3.10, which has no `locale.getencoding()`, it falls

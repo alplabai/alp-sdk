@@ -271,7 +271,7 @@ class SwdProbeFlash:
             try:
                 # J-Link Commander reads its command file in the platform
                 # ANSI codepage on Windows, so the file must match the
-                # locale, not UTF-8 -- a path like C:\Users\José\... has to
+                # locale, not UTF-8 -- a C:\Users\<name>\ path with an é has to
                 # reach it as the bytes it will decode.  locale.getencoding()
                 # (3.11+) is that codepage even in UTF-8 Mode, where
                 # getpreferredencoding() answers "utf-8"; 3.10 has only the
