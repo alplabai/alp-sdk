@@ -578,10 +578,12 @@ bench_jlink_exe() {
 # concurrently without disturbing each other.
 #
 # REFUSES rather than guesses -- the stated #2064 expected behaviour --
-# when it cannot establish which probe belongs to LG_PLACE: LG_SWD_PATH
-# unresolved, the sysfs path vanished, a sibling probe's busnum/devnum
-# can't be read (incompletely masked, unsafe to proceed), or -- after
-# masking -- more than one vendor-1366 device is still visible in sysfs.
+# when it cannot establish which probe belongs to LG_PLACE: LG_SWD_PATH is
+# unresolved (LG_PLACE unset, or bench_labgrid_resolve above failed), the
+# sysfs path it named has since vanished, a sibling probe's own busnum/devnum
+# can't be read (an incompletely masked bench is not a safe one to proceed
+# on), or -- after masking -- more than one vendor-1366 device is still
+# visible in sysfs (the mask did not fully take).
 #
 # PROBE-BRICK GUARD, ported from board-farm/bin/jlink-run.sh: these probes
 # are CLONES and a SEGGER firmware-update write to one is unrecoverable.
@@ -589,9 +591,10 @@ bench_jlink_exe() {
 # CommandFile/CommanderScript command runs, so `exec DisableAutoUpdateFW`
 # is injected as the FIRST line of the caller's script (Commander opens the
 # emulator LAZILY -- a script containing only this exec triggers no
-# connection, confirmed by the reference this was ported from). Refuses when
-# the caller passed neither `-CommandFile` nor `-CommanderScript` -- nowhere
-# to inject the guard, and opening a probe without it is never acceptable.
+# connection, confirmed by the reference this was ported from). Refuses
+# (does not proceed) when the caller passed neither `-CommandFile` nor
+# `-CommanderScript` -- there is then nowhere to inject the guard, and
+# opening a probe without it is never acceptable.
 #
 # BENCH_JLINK_SYSFS_ROOT overrides the sysfs root (default
 # /sys/bus/usb/devices) -- test-only, so a unit test can point this at a
@@ -655,10 +658,15 @@ bench_jlink_run() {
 	target_node=$(printf '%s/%03d/%03d' "$dev_root" "$busnum" "$devnum")
 
 	# Probe-brick guard (see header): find the -CommandFile/-CommanderScript
-	# argument, rewrite it to point at a copy with the DisableAutoUpdateFW
-	# prelude prepended, refuse if neither flag is present. NOT guarded: a
-	# SECOND such flag in one argv overwrites $prelude and leaks the first
-	# mktemp -- no caller here passes more than one, so left as inert.
+	# argument and rewrite it to point at a copy with the DisableAutoUpdateFW
+	# prelude prepended. Refuse if neither flag is present.
+	#
+	# NOT guarded: a SECOND -CommandFile/-CommanderScript in one argv would
+	# overwrite $prelude and leak the first mktemp (only the last one gets
+	# cleaned up below). No caller in this repo ever passes more than one --
+	# JLinkExe itself only honours the last anyway -- so this is left as a
+	# known, inert edge case rather than added complexity for a shape
+	# nothing here produces.
 	argv=("$@")
 	newargs=()
 	i=0
@@ -672,9 +680,11 @@ bench_jlink_run() {
 					echo "bench-env: bench_jlink_run: cannot create the DisableAutoUpdateFW prelude file" >&2
 					return 10
 				}
-				# Check `cat`'s exit status (a compound command's status
-				# is its LAST command's) -- an unreadable $cmdfile must
-				# not silently hand JLinkExe a guard-only script that "succeeds".
+				# Check `cat`'s own exit status (the compound command's
+				# status is its LAST command's) -- an unreadable/missing
+				# $cmdfile must not silently hand JLinkExe a guard-only
+				# script (just the exec line, no caller commands at all),
+				# which would open the probe, do nothing, and report success.
 				if ! { printf 'exec DisableAutoUpdateFW\n'; cat "$cmdfile"; } >"$prelude"; then
 					echo "bench-env: bench_jlink_run: cannot read '$cmdfile' -- refusing to open" >&2
 					echo "           a probe with a guard-only script (none of the caller's own" >&2
@@ -704,8 +714,11 @@ bench_jlink_run() {
 
 	# Mask every OTHER SEGGER (USB vendor 1366) probe: usbfs node + sysfs
 	# dir. A sibling probe whose busnum/devnum can't be read, or whose node
-	# doesn't exist, CANNOT be masked -- abort rather than proceed with a
-	# bench still enumerable (the hole the visible-count check below also guards).
+	# doesn't exist, means it CANNOT be masked -- abort rather than silently
+	# proceed with a bench that still has it enumerable (that asymmetry
+	# depended purely on enumeration order in the reference this was ported
+	# from, and is exactly the hole the post-mask visible-count check below
+	# also guards).
 	for p in "$sysfs_root"/*-*; do
 		leaf="${p##*/}"
 		case "$leaf" in *:*) continue ;; esac
@@ -766,6 +779,17 @@ bench_jlink_run() {
 			# segfaulted. Verified via the UP flag word `ip -o link show lo`
 			# prints -- NOT /sys/class/net/lo/flags, measured stale here
 			# without an explicit remount; `ip` goes over netlink, always correct.
+			#
+			# `command -v ip` is checked FIRST, explicitly: under `set -e`
+			# above, `lostate=$(ip ...)` alone would abort the whole
+			# subshell with a bare, unexplained rc=127 the moment `ip` is
+			# missing -- the command substitution assignment fails on its
+			# own and trips `set -e` before the "did not come up" message
+			# right below ever gets a chance to print (measured).
+			command -v ip >/dev/null 2>&1 || {
+				echo "bench_jlink_run: ip not found in the fresh netns -- cannot verify loopback state" >&2
+				exit 9
+			}
 			lostate=$(ip -o link show lo 2>/dev/null)
 			printf "%s\n" "$lostate" | tr ",<>" "\n\n\n" | grep -qx UP || {
 				echo "bench_jlink_run: loopback did not come up in the fresh netns ($lostate)" >&2
@@ -777,8 +801,9 @@ bench_jlink_run() {
 				echo "bench_jlink_run: target node $JLINK_TARGET_NODE vanished under the mask" >&2
 				exit 9
 			}
-			# Prove the mask actually took: /dev/null is a char device too,
-			# so the decisive check is the SAME major:minor as /dev/null.
+			# Prove the mask actually took, before launching anything. /dev/null
+			# is a char device too, so "is it a chardev" alone proves nothing --
+			# the decisive check is the SAME major:minor as /dev/null.
 			nulldev=$(stat -c "%t:%T" /dev/null)
 			for n in $JLINK_MASKS; do
 				[ "$(stat -c "%t:%T" "$n")" = "$nulldev" ] || {
@@ -786,7 +811,8 @@ bench_jlink_run() {
 					exit 9
 				}
 			done
-			# Exactly one J-Link may remain visible -- what -SelectEmuBySN enumerates.
+			# And the decisive one: exactly one J-Link may remain visible in
+			# sysfs, because that is what -SelectEmuBySN enumerates.
 			vis=0
 			for p in "$JLINK_SYSFS_ROOT"/*-*; do
 				case "${p##*/}" in *:*) continue ;; esac

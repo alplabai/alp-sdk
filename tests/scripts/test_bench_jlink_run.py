@@ -321,15 +321,24 @@ _NEEDS_UNSHARE = pytest.mark.skipif(
 
 def _extract_lo_check() -> str:
     """alp-sdk#2174: pull the EXACT loopback-verification text
-    bench_jlink_run() runs inside its unshare subshell -- from `ip link
-    set lo up` up to (not including) the JLINK_MASKS masking loop -- out
-    of the real bench-env.sh, rather than hand-copying a second version
-    into this test that could silently drift from what actually ships.
-    Stopping before the masking loop means this needs no real char
-    device: it exercises only the loopback guard, nothing downstream of it
-    that depends on a real USB topology."""
+    bench_jlink_run() runs inside its unshare subshell -- from the `set -e`
+    immediately ahead of `ip link set lo up` up to (not including) the
+    JLINK_MASKS masking loop -- out of the real bench-env.sh, rather than
+    hand-copying a second version into this test that could silently drift
+    from what actually ships. Stopping before the masking loop means this
+    needs no real char device: it exercises only the loopback guard,
+    nothing downstream of it that depends on a real USB topology.
+
+    Starting at `set -e`, not just `ip link set lo up`, matters: without
+    it a standalone run of this extracted text has errexit OFF, which
+    hides the exact bug the missing-`ip` test below exists to catch (a
+    bare command-substitution failure silently falling through instead of
+    aborting) -- measured, the first version of this helper started one
+    line too late and the missing-`ip` mutation test passed for the wrong
+    reason (a downstream tr/grep failure, not the errexit abort itself)."""
     text = ENV.read_text(encoding="utf-8")
-    start = text.index("ip link set lo up 2>/dev/null || true")
+    lo_up_idx = text.index("ip link set lo up 2>/dev/null || true")
+    start = text.rindex("set -e", 0, lo_up_idx)
     end = text.index("for n in $JLINK_MASKS")
     return text[start:end]
 
@@ -393,6 +402,40 @@ def test_lo_staying_down_refuses_instead_of_silently_continuing(tmp_path: Path) 
     res = _run_lo_check(tmp_path, lo_up=False)
     assert res.returncode == 9, f"{res.stdout}\n{res.stderr}"
     assert "loopback did not come up" in res.stderr, res.stderr
+    assert "REACHED" not in res.stdout, "must refuse before the caller's script ever runs"
+
+
+@_NEEDS_BASH
+@_NEEDS_UNSHARE
+def test_lo_check_missing_ip_refuses_instead_of_a_bare_set_dash_e_abort(tmp_path: Path) -> None:
+    """alp-sdk#2174 review, minor finding: `lostate=$(ip -o link show lo
+    2>/dev/null)` alone, under `set -e`, aborts the whole subshell with a
+    bare, unexplained rc=127 the moment `ip` is missing -- BEFORE this
+    block's own "did not come up" refusal ever gets a chance to run. The
+    fix checks `command -v ip` first and refuses (exit 9, with a message)
+    explicitly. PATH here resolves neither a stub nor the real `ip` --
+    `unshare`/`bash` are invoked by ABSOLUTE path so launching the
+    namespace itself does not depend on this restricted PATH."""
+    unshare_bin = shutil.which("unshare")
+    bash_bin = shutil.which("bash")
+    assert unshare_bin and bash_bin, "unshare/bash must be resolvable to set this test up"
+
+    script = tmp_path / "lo_check.sh"
+    script.write_text(_extract_lo_check() + '\necho REACHED\n', encoding="utf-8")
+
+    empty_path_dir = tmp_path / "empty-path"
+    empty_path_dir.mkdir()
+    env = _sanitized_env()
+    env["PATH"] = str(empty_path_dir)  # deliberately resolves no `ip` at all
+
+    res = subprocess.run(
+        [unshare_bin, "-rm", "--net", "--ipc", "--propagation", "private",
+         bash_bin, str(script)],
+        cwd=tmp_path, env=env, capture_output=True, text=True,
+        encoding="utf-8", timeout=30,
+    )
+    assert res.returncode == 9, f"{res.stdout}\n{res.stderr}"
+    assert "ip not found" in res.stderr, res.stderr
     assert "REACHED" not in res.stdout, "must refuse before the caller's script ever runs"
 
 
