@@ -13,10 +13,12 @@ the platform locale: cp1252 on `windows-latest`, ASCII under `LC_ALL=C`. With
 errors, all `UnicodeDecodeError: 'ascii' codec`. They read non-ASCII metadata
 and `scripts/test-all.sh`, for example
 `tests/scripts/test_topology_unresolved_core_type.py:90` ("E1M-AEN301.yaml").
-All 564 tests now pass. `IMPLICIT_ENCODING_BASELINE` shrinks from 137 to 85
-files, and the size pin moves with it:
-`tests/scripts/test_check_cross_platform.py:536`
-("IMPLICIT_ENCODING_BASELINE) <= 85"). The baselined finding count drops from
+All 564 tests now pass. `IMPLICIT_ENCODING_BASELINE` shrank from 137 to 85
+files, and the size pin moved with it
+(`tests/scripts/test_check_cross_platform.py`, "IMPLICIT_ENCODING_BASELINE) <="
+— the pin was removed when #2197 finished the drain; the test itself survives
+as a plain zero-findings check). The
+baselined finding count dropped from
 484 to 316.
 
 **A file joins this batch only if none of its calls starts a Python child** -- with one exception handled in place: `baremetal_cmake_flash.py`'s `cmake --build --target flash` runs a project-supplied target that is often a Python flasher, so that call also sets `PYTHONIOENCODING=utf-8` in the child's environment.

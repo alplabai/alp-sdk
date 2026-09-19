@@ -2,6 +2,7 @@
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,8 @@ from cryptography.hazmat.primitives.asymmetric import ec
 
 def _run(*args):
     return subprocess.run(
-        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        [sys.executable, str(SCRIPT), *args], capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -56,7 +58,7 @@ def test_shipped_example_validates():
 
 def test_valid_bundle_passes(tmp_path):
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(_valid_bundle()))
+    p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -65,7 +67,7 @@ def test_complete_status_requires_system_image(tmp_path):
     b = _valid_bundle()
     b["components"] = [c for c in b["components"] if c["role"] != "system_image"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
     assert "FAIL" in proc.stdout
@@ -76,7 +78,7 @@ def test_bootloader_only_without_image_passes(tmp_path):
     b["status"] = "bootloader-only:image-pending-hw"
     b["components"] = [c for c in b["components"] if c["role"] != "system_image"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -85,7 +87,7 @@ def test_missing_bl2_fails(tmp_path):
     b = _valid_bundle()
     b["components"] = [c for c in b["components"] if c["role"] != "bl2"]
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
 
@@ -94,7 +96,7 @@ def test_bad_sha256_fails(tmp_path):
     b = _valid_bundle()
     b["components"][0]["sha256"] = "NOTHEX"
     p = tmp_path / "bundle.json"
-    p.write_text(json.dumps(b))
+    p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
 
@@ -106,7 +108,7 @@ def test_bad_created_date_fails(tmp_path):
         b = _valid_bundle()
         b["created"] = bad
         p = tmp_path / "bundle.json"
-        p.write_text(json.dumps(b))
+        p.write_text(json.dumps(b), encoding="utf-8")
         proc = _run("--bundle", str(p))
         assert proc.returncode != 0, f"{bad!r} should be rejected\n{proc.stdout}"
 
@@ -131,7 +133,7 @@ def _write_pub(key, path):
 def test_signed_bundle_verifies(tmp_path):
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     pub = tmp_path / "pub.pem"; _write_pub(key, pub)
     proc = _run("--bundle", str(p), "--pubkey", str(pub), "--require-signature")
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -142,7 +144,7 @@ def test_tampered_signed_bundle_fails(tmp_path):
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
     b["hw_rev"] = "r2"  # mutate AFTER signing
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     pub = tmp_path / "pub.pem"; _write_pub(key, pub)
     proc = _run("--bundle", str(p), "--pubkey", str(pub))
     assert proc.returncode != 0
@@ -150,13 +152,13 @@ def test_tampered_signed_bundle_fails(tmp_path):
 
 
 def test_unsigned_with_require_fails(tmp_path):
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p), "--require-signature")
     assert proc.returncode != 0
 
 
 def test_unsigned_without_require_passes(tmp_path):
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(_valid_bundle()), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode == 0, proc.stdout
 
@@ -164,7 +166,7 @@ def test_unsigned_without_require_passes(tmp_path):
 def test_malformed_signature_object_rejected_by_schema(tmp_path):
     b = _valid_bundle()
     b["signature"] = {"algorithm": "ecdsa-p256-sha256"}  # missing required fields
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     proc = _run("--bundle", str(p))
     assert proc.returncode != 0
 
@@ -173,9 +175,9 @@ def test_malformed_pubkey_is_clean_fail(tmp_path):
     # a garbage public key must produce a clean FAIL line, not a Python traceback
     key = ec.generate_private_key(ec.SECP256R1())
     b = _sign_bundle(_valid_bundle(), key)
-    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b))
+    p = tmp_path / "bundle.json"; p.write_text(json.dumps(b), encoding="utf-8")
     bad_pub = tmp_path / "bad.pem"
-    bad_pub.write_text("-----BEGIN PUBLIC KEY-----\nnotbase64\n-----END PUBLIC KEY-----\n")
+    bad_pub.write_text("-----BEGIN PUBLIC KEY-----\nnotbase64\n-----END PUBLIC KEY-----\n", encoding="utf-8")
     proc = _run("--bundle", str(p), "--pubkey", str(bad_pub))
     assert proc.returncode != 0
     assert "cannot load public key" in proc.stdout

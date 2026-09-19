@@ -51,6 +51,8 @@ def real_worktree(tmp_path):
         check=True,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
     try:
         yield wt_dir
@@ -60,6 +62,7 @@ def real_worktree(tmp_path):
             check=False,
             capture_output=True,
             text=True,
+            encoding="utf-8",
         )
 
 
@@ -77,7 +80,8 @@ def _fake_zephyr_base(tmp_path, counter_file):
         "    f.write('invoked\\n')\n"
         "    f.write('EXTRA_ZEPHYR_MODULES=' "
         "+ os.environ.get('EXTRA_ZEPHYR_MODULES', '<unset>') + '\\n')\n"
-        "sys.exit(0)\n"
+        "sys.exit(0)\n",
+        encoding="utf-8"
     )
     twister.chmod(twister.stat().st_mode | stat.S_IEXEC)
     return zephyr_base
@@ -109,7 +113,7 @@ def test_git_worktree_gitdir_is_a_file(real_worktree):
     git_entry = real_worktree / ".git"
     assert git_entry.is_file()
     assert not git_entry.is_dir()
-    assert git_entry.read_text().startswith("gitdir:")
+    assert git_entry.read_text(encoding="utf-8").startswith("gitdir:")
 
 
 def test_zephyr_only_runs_twister_exactly_once_from_a_worktree(real_worktree, tmp_path):
@@ -120,7 +124,7 @@ def test_zephyr_only_runs_twister_exactly_once_from_a_worktree(real_worktree, tm
     counter_file = tmp_path / "invocations.log"
     zephyr_base = _fake_zephyr_base(tmp_path, counter_file)
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["ZEPHYR_BASE"] = str(zephyr_base)
     env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
                          + env.get("PYTHONPATH", ""))
@@ -132,13 +136,14 @@ def test_zephyr_only_runs_twister_exactly_once_from_a_worktree(real_worktree, tm
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
     invocation_lines = [
-        line for line in counter_file.read_text().splitlines() if line == "invoked"
+        line for line in counter_file.read_text(encoding="utf-8").splitlines() if line == "invoked"
     ]
     assert len(invocation_lines) == 1, (
         f"expected the twister stage to run exactly once, saw "
@@ -164,7 +169,7 @@ def test_twister_stage_pins_worktree_as_zephyr_module(real_worktree, tmp_path):
     counter_file = tmp_path / "invocations.log"
     zephyr_base = _fake_zephyr_base(tmp_path, counter_file)
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["ZEPHYR_BASE"] = str(zephyr_base)
     env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
                          + env.get("PYTHONPATH", ""))
@@ -176,11 +181,12 @@ def test_twister_stage_pins_worktree_as_zephyr_module(real_worktree, tmp_path):
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    lines = counter_file.read_text().splitlines()
+    lines = counter_file.read_text(encoding="utf-8").splitlines()
     module_lines = [line for line in lines if line.startswith("EXTRA_ZEPHYR_MODULES=")]
     assert len(module_lines) == 1
     seen_module = module_lines[0].split("=", 1)[1]
@@ -209,7 +215,7 @@ def test_twister_stage_appends_without_dropping_other_modules(real_worktree, tmp
     other_module = tmp_path / "some-other-zephyr-module"
     other_module.mkdir()
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["ZEPHYR_BASE"] = str(zephyr_base)
     env["PYTHONPATH"] = (str(_pystubs(tmp_path)) + os.pathsep
                          + env.get("PYTHONPATH", ""))
@@ -223,11 +229,12 @@ def test_twister_stage_appends_without_dropping_other_modules(real_worktree, tmp
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         timeout=60,
     )
 
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    lines = counter_file.read_text().splitlines()
+    lines = counter_file.read_text(encoding="utf-8").splitlines()
     module_lines = [line for line in lines if line.startswith("EXTRA_ZEPHYR_MODULES=")]
     assert len(module_lines) == 1
     modules = module_lines[0].split("=", 1)[1].split(";")
@@ -254,6 +261,8 @@ def test_repo_root_resolves_to_worktree_not_primary_checkout(real_worktree):
         cwd="/",  # invoke from an unrelated cwd to prove path resolution
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=30,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
