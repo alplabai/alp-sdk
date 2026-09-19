@@ -173,7 +173,7 @@ fsp_err_t R_MHU_B_NS_Open (mhu_ctrl_t * const p_ctrl, mhu_cfg_t const * const p_
      * each is ONE register block with the two INT halves as the two directions
      * (MSG = A55->M33 / this core's RX, RSP = M33->A55 / this core's TX) -- NOT the
      * separate send/recv slots the older crossbar model invented.  Bench-proven on
-     * e1mx-v2n-m1-01: channel 5 -> R_MHU_NS5 (0x504800A0), whose MSG_INT is the one
+     * a V2N bench unit: channel 5 -> R_MHU_NS5 (0x504800A0), whose MSG_INT is the one
      * routed to MHU_MSG5_NS_IRQn(293) (#697). */
     p_instance_ctrl->p_regs =
         (R_MHU0_Type *) (R_MHU_NS0_BASE +

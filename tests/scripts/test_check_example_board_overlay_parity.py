@@ -11,6 +11,7 @@ Run locally:
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,8 @@ tests:
 def _run(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -40,15 +43,19 @@ def _write_example(tmp_path: Path, name: str, platform_allow: list[str],
                     overlays: list[str]) -> Path:
     example_dir = tmp_path / "examples" / "aen" / name
     example_dir.mkdir(parents=True, exist_ok=True)
+    # Every real example is an app; the #2207 check requires it.
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     allow_lines = "\n".join(f"      - {p}" for p in platform_allow)
     (example_dir / "testcase.yaml").write_text(
-        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines)
+        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines), encoding="utf-8"
     )
     if overlays:
         boards_dir = example_dir / "boards"
         boards_dir.mkdir(parents=True, exist_ok=True)
         for stem in overlays:
-            (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n")
+            (boards_dir / f"{stem}.overlay").write_text(
+                "/* test overlay */\n", encoding="utf-8"
+            )
     return example_dir
 
 
@@ -131,6 +138,7 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
     from checking that scenario."""
     example_dir = tmp_path / "examples" / "aen" / "aen-common-allow"
     example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     (example_dir / "testcase.yaml").write_text(
         "sample:\n"
         "  name: aen-common-allow\n"
@@ -139,12 +147,13 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
         "tests:\n"
         "  alp_sdk.examples.test.aen-common-allow:\n"
         "    tags:\n"
-        "      - alp-sdk\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir()
     (boards_dir / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay").write_text(
-        "/* test overlay */\n"
+        "/* test overlay */\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     out = proc.stdout + proc.stderr
@@ -166,7 +175,9 @@ def test_native_sim_only_boards_dir_is_not_flagged(tmp_path):
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir(parents=True, exist_ok=True)
-    (boards_dir / "native_sim_native_64.overlay").write_text("/* native_sim */\n")
+    (boards_dir / "native_sim_native_64.overlay").write_text(
+        "/* native_sim */\n", encoding="utf-8"
+    )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -199,7 +210,7 @@ def test_conf_only_match_is_extension_agnostic(tmp_path):
         overlays=["alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he"],
     )
     (example_dir / "boards" / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf").write_text(
-        "CONFIG_TEST=y\n"
+        "CONFIG_TEST=y\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -227,7 +238,82 @@ def test_subslice_directory_with_no_local_boards_dir_is_not_flagged(tmp_path):
         "    platform_allow:\n"
         "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
         "    tags:\n"
-        "      - alp-sdk\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_boards_dir_with_no_app_fails(tmp_path):
+    """Issue #2207, the #2198 instance: an app renamed away from its
+    directory leaves a boards/ overlay behind with no CMakeLists.txt next
+    to it. Nothing builds it, so no platform_allow or SKU-sibling check
+    sees it -- this one must, naming the directory and the fix."""
+    boards = tmp_path / "examples" / "aen" / "aen-sdcard-readout" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text('&sdhc0 {\n\tstatus = "okay";\n};\n', encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert ("examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt in "
+            "examples/aen/aen-sdcard-readout/") in out
+    assert "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay" in out
+    assert "delete the directory, or move it" in out
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True,
+                   capture_output=True)
+
+
+def _tracked_app(tmp_path: Path) -> Path:
+    """A git repo holding one real app (CMakeLists.txt + a board overlay)."""
+    app = tmp_path / "examples" / "aen" / "demo"
+    (app / "boards").mkdir(parents=True)
+    (app / "CMakeLists.txt").write_text("", encoding="utf-8")
+    (app / "boards" / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text("/ { };\n", encoding="utf-8")
+    _git(tmp_path, "init", "-q")
+    return app
+
+
+def test_untracked_build_tree_boards_dirs_are_not_flagged(tmp_path):
+    """A local `west build` inside an example leaves gitignored
+    build/zephyr/boards/ and build/Kconfig/boards/ with no CMakeLists.txt
+    next to them; only tracked files count."""
+    app = _tracked_app(tmp_path)
+    _git(tmp_path, "add", "examples")
+    for sub in ("build/zephyr/boards", "build/Kconfig/boards"):
+        (app / sub).mkdir(parents=True)
+        (app / sub / "x.overlay").write_text("", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_sysbuild_image_boards_dir_is_accepted(tmp_path):
+    """<app>/sysbuild/<image>/boards/ is sysbuild's per-image config dir
+    (sysbuild_extensions.cmake's ${APP_DIR}/sysbuild/<image> lookup)."""
+    app = _tracked_app(tmp_path)
+    boards = app / "sysbuild" / "mcuboot" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf"
+     ).write_text("CONFIG_X=y\n", encoding="utf-8")
+    _git(tmp_path, "add", "examples")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_tracked_stranded_boards_dir_fails(tmp_path):
+    """The git-tracked path, not just the plain-directory fallback."""
+    _tracked_app(tmp_path)
+    boards = tmp_path / "examples" / "aen" / "aen-sdcard-readout" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text("/ { };\n", encoding="utf-8")
+    _git(tmp_path, "add", "examples")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode != 0
+    assert "examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt" in (
+        proc.stdout + proc.stderr)

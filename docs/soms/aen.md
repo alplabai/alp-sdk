@@ -28,11 +28,16 @@ for the full preset. Its Zephyr board tree
 (`zephyr/boards/alp/e1m_aen803_m55_hp/`, `.../e1m_aen803_m55_he/`) was
 generated under #2084; like `E1M-AEN801`, it still boots and stores
 from on-die MRAM only -- the two external OSPI0 parts are physically
-fitted but not yet wired into a boot or storage partition. The
-blocking gap is `flash_ospi_alif.c` having no OSPI0 pinctrl support at
-all (#2041, the operative blocker -- recheck when it closes); the
-driver also ships no `flash_driver_api` (#915). Bench evidence for the
-physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
+fitted but not yet wired into a boot or storage partition. The OSPI0
+pinctrl gap that used to be the operative blocker is closed:
+`flash_ospi_alif.c` applies `PINCTRL_STATE_DEFAULT` in its init as of
+#2041 (closed 2026-09-12), bench-verified on two modules -- though
+that proof is bind-level, since the pad-mux registers were not read
+back and nothing in tree makes an OSPI device-level transfer. The
+operative blocker now is that the driver still ships no
+`flash_driver_api` (#915 -- recheck when it closes): it does config
+only, so there is no read/write/erase path a partition could use.
+Bench evidence for the physical fit is **NOR only**: [`docs/bring-up-aen.md`](../bring-up-aen.md)
 §0 reads the ISSI JEDEC ID off OSPI0 CS1 on the AEN803 bench module and
 says explicitly that result is silent on the HyperRAM's own behaviour
 -- the HyperRAM's fit is asserted in `E1M-AEN803.yaml`

@@ -249,7 +249,7 @@ nobody else's run is comparable to.
 ### READY gate is off by default on this board
 
 `cc3501e_bridge_bringup()` (`src/cc3501e_bridge.c`) does not open a READY
-pin: on e1m-aen-evk-01 the candidate pin (Alif P2_6) is the EVK's Arduino
+pin: on an R2 AEN EVK bench module the candidate pin (Alif P2_6) is the EVK's Arduino
 CK_RST net, not the CC3501E's real GPIO17 READY signal (E1M pad G3 / IO16
 per `metadata/e1m_modules/aen/from-cc3501e.tsv`), so `cc3501e_request()`
 always uses its fixed inter-phase settle instead of gating on that pin.

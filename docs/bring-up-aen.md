@@ -60,18 +60,29 @@ Inventory check before powering anything:
 > paragraph, which had the chip-select mapping backwards (NOR on CS0,
 > HyperRAM on CS1) -- a probe wired from that wording would aim a NOR
 > opcode at CS0 and could misread a live NOR as dead. That CS1 result
-> says nothing about the HyperRAM's own behaviour. The reason nothing
-> can boot or XIP from either device yet is
-> `zephyr/drivers/flash/flash_ospi_alif.c` having **no pinctrl support
-> at all** (`grep -ci pinctrl` on that file returns `0`) -- no consumer
-> can apply OSPI0's pad configuration, which is also why
-> `examples/aen/aen-ospi-regcheck`'s own overlay pinctrl silently never
-> took effect (alp-sdk#2041). That example's PASS banner also still
-> prints a stale "no part populated this batch" claim, contradicted by
-> everything above; alp-sdk#2041 owns fixing it, not this doc. Keep
-> MCUboot slots and any storage partition on MRAM regardless of SKU
-> until the OSPI0 pinctrl work tracked in alp-sdk#2041 lands -- recheck
-> this paragraph when that issue closes.
+> says nothing about the HyperRAM's own behaviour. The OSPI0 pinctrl
+> gap this paragraph used to name as the blocker is **closed**
+> (alp-sdk#2041, closed 2026-09-12):
+> `zephyr/drivers/flash/flash_ospi_alif.c` now applies
+> `pinctrl_apply_state(config->pcfg, PINCTRL_STATE_DEFAULT)` at the top
+> of `ospi_alif_init()`, before the clock-enable, and
+> `examples/aen/aen-ospi-regcheck`'s overlay now muxes the module's own
+> 13-pad OSPI0 route (ports 0/2/6/12, all function 1, per
+> [`alif-ospi.tsv`](../metadata/e1m_modules/aen/alif-ospi.tsv)) rather
+> than the Alif DevKit's -- and that example's PASS banner no longer
+> prints the stale "no part populated this batch" claim. The apply is
+> bench-verified on two E1M-AEN803 modules (serial 2026W36-0001, serial 2026W36-0002): it is
+> fail-closed and runs before the clock-enable, so the device reaching
+> READY proves it returned 0. The pad-mux registers were **not** read
+> back, though, so "pinctrl applied without error" is measured and "the
+> pads carry the intended function" is not. **Keep MCUboot slots and
+> any storage partition on MRAM regardless of SKU anyway** -- for a
+> reason that outlived the pinctrl one: `flash_ospi_alif.c` implements
+> no `flash_driver_api` at all (it does init / XIP-enable / AES-inline
+> / DDR config only, see that file's own header), so there is no
+> read/write/erase path for a partition to sit on, and nothing in tree
+> performs an OSPI device-level transfer of any kind. That is
+> alp-sdk#915 -- recheck this paragraph when **that** issue closes.
 
 ## 1. First-power smoke test
 

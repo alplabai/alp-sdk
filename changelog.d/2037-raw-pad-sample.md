@@ -1,7 +1,7 @@
 ### Notes — attended bench run: the decoded angle never moved; raw pad sampling added to `aen-qenc-readout` to discriminate an unfitted encoder from an uncounted signal (#2037)
 
-An attended run of `examples/aen/aen-qenc-readout` on `e1m-aen-evk-03`
-(E1M-AEN803), with the maintainer turning the encoder shaft continuously for
+An attended run of `examples/aen/aen-qenc-readout` on E1M-AEN803 serial
+2026W36-0002, with the maintainer turning the encoder shaft continuously for
 the whole 60 s window, measured a clean stuck-at-zero: all 200 samples read
 `0 deg`, 200/200 clean reads, `RESULT SKIPPED`. Reading live over SWD at four
 points across the window plus once after, `UTIMER_CNTR` (`0x4800D0A0`) was
@@ -24,7 +24,7 @@ already documented in the driver:
   (`0x4800D024`) read `0x00000096`, with `UP_0_SRC` (`0x4800D018`) and
   `DOWN_0_SRC` (`0x4800D020`) both `0x00000000`.
 - Pinmux is right on both sides. `metadata/e1m_modules/aen/from-alif.tsv:9`
-  ("ENC0_X") and `metadata/e1m_modules/aen/from-alif.tsv:61` ("ENC0_Y") map
+  ("ENC0_X") and `metadata/e1m_modules/aen/from-alif.tsv:60` ("ENC0_Y") map
   the carrier's `ENC0_X`/`ENC0_Y` nets to `QEC0_X_A`/`QEC0_Y_A` on
   `P3_0`/`P3_1`, which is what the example's board overlay muxes.
 

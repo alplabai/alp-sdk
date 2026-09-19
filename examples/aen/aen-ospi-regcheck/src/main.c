@@ -4,8 +4,9 @@
  *
  * aen-ospi-regcheck -- compile + DT-bind + register-file proof of the Alif
  * Ensemble OSPI/HexSPI controller (Synopsys DesignWare OSPI, compatible
- * "snps,designware-ospi") on the E1M-AEN801 (Ensemble E8, M55-HE/M55-HP), via
- * the bench RAM-run + RAM-console flow.  Mirrors aen-isp-regcheck.
+ * "snps,designware-ospi") on the E1M-AEN801 and E1M-AEN803 (Ensemble E8,
+ * M55-HE), via the bench RAM-run + RAM-console flow.  Mirrors
+ * aen-isp-regcheck.
  *
  * WHAT THIS APP VALIDATES (and what it deliberately does NOT):
  *
@@ -66,14 +67,26 @@
  * OSPI0 pinout both that measurement and this app's pinctrl group (see the
  * board overlay) derive from.
  *
- * That measurement was taken on E1M-AEN803, not this app's own target
- * (E1M-AEN801/M55-HE) -- and, critically, NOT through this app: everything
- * below is a controller-register proof (DT bind, reg/aes-reg/irq match,
- * CTRLR0 readback) with ZERO device-level transfers -- no opcode is ever
- * shifted out to a chip select.  So "the OSPI memories are silent" was never
- * actually tested at the device level by anything in this repo; this app's
- * PASS has never been, and still is not, evidence either way about whether a
- * part answers on ITS specific board.
+ * That measurement was NOT taken through this app: everything below is a
+ * controller-register proof (DT bind, reg/aes-reg/irq match, CTRLR0 readback)
+ * with ZERO device-level transfers -- no opcode is ever shifted out to a chip
+ * select.  So "the OSPI memories are silent" was never actually tested at the
+ * device level by anything in this repo; this app's PASS has never been, and
+ * still is not, evidence either way about whether a part answers on ITS
+ * specific board.
+ *
+ * BOTH SKUs, SAME APP (#2198): E1M-AEN803 fits the OSPI0 HyperRAM
+ * (S80KS5122GABHM02, SS0) and the xSPI NOR (IS25WX256-JHLE, SS1) that
+ * E1M-AEN801 leaves unpopulated.  On AEN803 those parts ARE on the bus and
+ * this app still leaves them untouched: it only binds the node, checks
+ * alif_hal_ospi_initialize()'s rc and reads CTRLR0 back against its reset
+ * value 0x00C00407 -- no device transfer, no reset pulse on P15_6/P15_7, no
+ * XIP, no write.  So its PASS/FAIL does not depend on what the chip selects
+ * carry, and the AEN803 board overlay is the AEN801 one with the SKU changed.
+ * It has already run on AEN803 silicon: #2041's 2026-09-13 bench check built
+ * this app for the AEN801 target and ran it on E1M-AEN803 serial
+ * 2026W36-0001 and E1M-AEN803 serial 2026W36-0002 -- rc=0, CTRLR0=0x00c00407, RESULT PASS on
+ * both (docs/verification-status.md, OSPI0 pinctrl row).
  *
  * This example has caught three real, distinct silicon/build bugs (the
  * clock-gate fault, the MPU Device-mapping regression, and the OSPI_XIP_SER

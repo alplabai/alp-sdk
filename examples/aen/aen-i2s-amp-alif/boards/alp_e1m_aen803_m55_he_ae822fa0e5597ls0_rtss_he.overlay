@@ -28,7 +28,7 @@
  * rail powers it -- this app never drives EN or SEL and does not test
  * the amps; amp audibility is a separate, stricter condition -- VCC was
  * moved to +3V3 between a silent run and an audible run on
- * e1m-aen-evk-03, not established as the only difference -- see
+ * E1M-AEN803 serial 2026W36-0002, not established as the only difference -- see
  * include/alp/boards/alp_e1m_evk.h's I2S mux block):
  * `-DEXTRA_DTC_OVERLAY_FILE=i2s3-enable-post-u46-rework.overlay`
  * (resolved relative to this app's own source dir, examples/aen/aen-i2s-amp-alif;
@@ -50,10 +50,25 @@
 
 &pinctrl {
 	pinctrl_i2s3: pinctrl_i2s3 {
-		/* TX path: SDO (data out) + SCLK + WS, the I2S3_*_A route (P9_3/4/5). */
+		/* TX: SDO + SCLK + WS, the I2S3_*_A route (P9_3/4/5). RX: SDI
+		 * (P9_2, I2S3_SDI_A) -- U46's 4Y is the one leg of that mux wired
+		 * the correct direction (unlike SDO/SCLK/WS, which contend with
+		 * the SoC and are why this node ships disabled -- see the
+		 * file-header SAFETY note), feeding the amps' SDOUT/IV-sense back
+		 * to the SoC. input-enable sets the pad's REN bit so the input
+		 * buffer actually samples; without it the mux alone is not
+		 * sufficient to receive (REN defaults off). The original TX-only
+		 * scope here was a deliberate choice, not a hazard -- that scope
+		 * has since widened. Still inert on its own: this node ships
+		 * "disabled" by default, so pinctrl-0 is not applied until
+		 * i2s3-enable-post-u46-rework.overlay flips it "okay". */
 		group0 {
 			pinmux = <PIN_P9_3__I2S3_SDO_A>, <PIN_P9_4__I2S3_SCLK_A>,
 				 <PIN_P9_5__I2S3_WS_A>;
+		};
+		group1 {
+			pinmux = <PIN_P9_2__I2S3_SDI_A>;
+			input-enable;
 		};
 	};
 };

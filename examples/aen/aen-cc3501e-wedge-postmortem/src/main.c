@@ -965,7 +965,7 @@ int main(void)
 	/* 2. READY pin level, read directly as a GPIO input. fw.ready_pin is
 	 *    populated by cc3501e_bridge_bringup() (see src/cc3501e_bridge.c)
 	 *    only when the board wires it -- this app leaves it NULL by default
-	 *    on the R2 module e1m-aen-evk-01 currently holds: Alif P2_6 there is
+	 *    on the R2 module this bench currently holds: Alif P2_6 there is
 	 *    E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST), NOT CC35 GPIO17
 	 *    READY (see chips/cc3501e/cc3501e_core.c's cc3501e_reply_gate()
 	 *    comment). So this branch always takes the "no READY pin populated"

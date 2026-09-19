@@ -190,7 +190,7 @@ topology:
 # M55 cores boot from the SAME physical App MRAM, and a stock symmetric
 # two-slot partition map puts HE and HP slot0 at the SAME address
 # (0x80010000) -- flashing both cores then silently overwrites one image
-# (#1069, bench-confirmed on e1m-aen-evk-01).  This is SDK build policy,
+# (#1069, bench-confirmed on an AEN EVK bench unit).  This is SDK build policy,
 # not a silicon fact (see scripts/gen_zephyr_board.py's memory_map: vs
 # metadata/socs/ split), so the fix lives here rather than in the SoC JSON.
 #

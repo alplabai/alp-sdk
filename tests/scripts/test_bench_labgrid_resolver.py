@@ -16,7 +16,7 @@ real captures carry details (leading whitespace inside a pformat'd nested
 dict) a hand-typed fixture doesn't reproduce.
 
 SANITISED, not byte-for-byte: the place names below (`test-place-01..03`)
-replace the real `e1m-aen-evk-01..03`, the coordinator address
+replace the real board-farm place names, the coordinator address
 (`203.0.113.1:20408`, RFC 5737 TEST-NET-3) replaces the real one, and the
 `comment:` line real `show` output prints for each place (an operational
 narrative -- bench state, incident history, an internal-repo issue
@@ -53,7 +53,7 @@ def _bash_can_run_a_script() -> bool:
     try:
         probe = subprocess.run(
             ["bash", "-c", "printf ok"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -73,7 +73,7 @@ def _sanitized_env() -> dict[str, str]:
     both explicitly (or explicitly leaves LG_PLACE unset), so an inherited
     value is always overridden -- this covers LG_SWD_PATH/
     ALP_JLINK_SEARCH_ROOT, which are not."""
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     for var in ("LG_SWD_PATH", "ALP_JLINK_SEARCH_ROOT"):
         env.pop(var, None)
     return env
@@ -85,8 +85,8 @@ def _who_i_am() -> str:
     socket.gethostname()/getpass.getuser(), so this can never drift from
     what the real bash builtins print on a host where they disagree with
     Python's own idea of hostname/user."""
-    host = subprocess.run(["hostname"], capture_output=True, text=True, timeout=30).stdout.strip()
-    user = subprocess.run(["whoami"], capture_output=True, text=True, timeout=30).stdout.strip()
+    host = subprocess.run(["hostname"], capture_output=True, text=True, encoding="utf-8", timeout=30).stdout.strip()
+    user = subprocess.run(["whoami"], capture_output=True, text=True, encoding="utf-8", timeout=30).stdout.strip()
     return f"{host}/{user}"
 
 
@@ -353,7 +353,7 @@ def test_reservation_held_by_someone_else_refuses(tmp_path: Path) -> None:
 
 @_NEEDS_BASH
 def test_place_with_swd_but_no_seuart_resolves_successfully(tmp_path: Path) -> None:
-    """alp-sdk#2064 bench verification on e1m-aen-evk-02/-03: real state, not
+    """alp-sdk#2064 bench verification on two AEN EVK bench places: real state, not
     synthesised -- test-place-02 has no `seuart` resource registered in
     labgrid at all (only `console` and `swd` appear in `matches:`), because
     the physical board has none. Bench verification found the ORIGINAL
@@ -450,7 +450,7 @@ def test_no_lg_place_and_no_se_uart_stays_empty_and_quiet(tmp_path: Path) -> Non
     # (see test_bench_jlink_connect_guard.py's _sanitized_env() for why).
     res = subprocess.run(
         ["bash", "-c", "unset LG_PLACE LG_COORDINATOR; source ./bench-env.sh; echo \"SE_UART=[$SE_UART]\""],
-        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, timeout=60,
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     assert res.returncode == 0, res.stderr
     assert "SE_UART=[]" in res.stdout
@@ -468,7 +468,7 @@ def test_raw_se_uart_without_lg_place_is_the_warned_escape_hatch(tmp_path: Path)
         ["bash", "-c",
          'unset LG_PLACE LG_COORDINATOR; export SE_UART=/dev/ttyUSB9; '
          'source ./bench-env.sh; echo "SE_UART=[$SE_UART]"'],
-        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, timeout=60,
+        cwd=tmp_path, env=_sanitized_env(), capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     assert res.returncode == 0, res.stderr
     assert "SE_UART=[/dev/ttyUSB9]" in res.stdout
@@ -520,7 +520,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
     """End-to-end confirmation, not just bench_labgrid_resolve() in
     isolation (alp-sdk#2064 bench verification): a REAL helper --
     `reread.sh`, a pure J-Link flow with no SE_UART dependency at all --
-    must get PAST bench-env.sh's sourcing on an evk-02/-03-shaped place
+    must get PAST bench-env.sh's sourcing on a swd-only-shaped place
     (swd + console, no seuart) and reach `bench_jlink_run()`, not die at
     the old "exports no 'seuart' resource path" refusal before ever
     touching the probe-isolation code.
@@ -558,7 +558,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
     (bd / "zephyr").mkdir(parents=True)
     (bd / "zephyr" / "zephyr.elf").write_bytes(b"\x7fELF-fake")
 
-    # A fake probe tree at the REAL evk-02 swd path (3-4.2) from
+    # A fake probe tree at the REAL swd path (3-4.2) from
     # REAL_EVK02_UNACQUIRED above, with no siblings to mask.
     sysfs = workdir / "sysfs"
     dev = workdir / "dev"
@@ -571,7 +571,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
     (dev / "003").mkdir(parents=True)
     (dev / "003" / "009").write_text("", encoding="utf-8")
 
-    env = dict(os.environ)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     env["PATH"] = f"{bin_dir}{os.pathsep}{toolsdir}{os.pathsep}{env.get('PATH', '')}"
     env["LG_COORDINATOR"] = "fake-coordinator:20408"
     env["LG_PLACE"] = "test-place-02"
@@ -585,7 +585,7 @@ def test_reread_sh_reaches_bench_jlink_run_on_a_swd_only_place(tmp_path: Path) -
 
     res = subprocess.run(
         ["bash", str(reread), str(bd)], cwd=workdir, env=env,
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     # The old bug's exact symptom must be gone.
     assert "exports no 'seuart' resource path" not in res.stderr, res.stderr

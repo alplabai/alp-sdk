@@ -196,7 +196,7 @@ def _git_tracked_workflows() -> list[str] | None:
         proc = subprocess.run(
             ["git", "-C", str(REPO), "ls-files", "--",
              ".github/workflows/*.yml", ".github/workflows/*.yaml"],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, encoding="utf-8", check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:

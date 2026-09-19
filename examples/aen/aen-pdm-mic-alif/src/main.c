@@ -95,7 +95,7 @@
  * a probe loopback silence window (`PROBE_LOOPBACK` mode of
  * examples/aen/aen-i2s-tas2563-probe on branch
  * test/u46-i2s-tas2563-on-reworked-mux, commit 56631094d, issue #2143,
- * e1m-aen-evk-03, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
+ * E1M-AEN803 serial 2026W36-0002, 2026-09-15 14:49Z) measured peak-to-peak 545 on one
  * channel with the room silent, above this example's prior 512 floor, from
  * a single sample excursion rather than sustained signal; AC RMS averages
  * over the whole capture and does not share that failure mode.
@@ -103,7 +103,7 @@
  * longer gated on.
  *
  * Floor derived directly from THIS example's OWN idle measurement
- * (e1m-aen-evk-03, 2026-09-15 19:51Z, 48 kHz, `channel-gain` 0x200, raw
+ * (E1M-AEN803 serial 2026W36-0002, 2026-09-15 19:51Z, 48 kHz, `channel-gain` 0x200, raw
  * dmic_read(), 3 runs / 12 channel readings over blocks 1-3,
  * n=14400 samples/channel): rms_ac read 15 on every channel in every run
  * (one earlier, interrupted attempt read 18-19). Floor = 4 * 15 = 60 at
@@ -136,7 +136,7 @@
  * proven against.
  */
 #define PDM_GAIN_BASELINE_0X200 \
-	0x200U /* the gain this floor was measured at, e1m-aen-evk-03, 2026-09-15 */
+	0x200U /* the gain this floor was measured at, E1M-AEN803 serial 2026W36-0002, 2026-09-15 */
 #define MIN_SIGNAL_RMS_AC_LSB \
 	((4U * 15U * DT_PROP(PDM_NODE, channel_gain)) / PDM_GAIN_BASELINE_0X200)
 
@@ -443,8 +443,8 @@ int main(void)
 		          "above the noise floor, not confirmed acoustic content -- acoustic capture "
 		          "at 48 kHz on mic ch0/ch1 (PDM controller 0) only is verified separately, "
 		          "by a speaker-to-mic loopback on silicon at gain 0x200 (issue #2143, "
-		          "e1m-aen-evk-03, 2026-09-15); the D2 pair (HW 4/5) is register-level "
-		          "verified only, never acoustically tested";
+		          "E1M-AEN803 serial 2026W36-0002, 2026-09-15); the D2 pair (HW 4/5) is "
+		          "register-level verified only, never acoustically tested";
 	}
 
 	printf("[pdm] RESULT %s: %s\n", verdict, reason);

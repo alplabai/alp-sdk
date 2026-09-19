@@ -197,9 +197,14 @@ topology:
 # to the external OSPI memory population that distinguishes this SKU), and
 # a stock symmetric two-slot partition map puts HE and HP slot0 at the SAME
 # address (0x80010000) -- flashing both cores then silently overwrites one
-# image (#1069, bench-confirmed on e1m-aen-evk-01 -- an E1M-AEN801 unit,
-# but the MRAM geometry is a shared-silicon fact, not an AEN801-specific
-# one). This is SDK build policy, not a silicon fact (see
+# image (#1069, bench-confirmed on an AEN EVK bench unit; the MRAM geometry is a
+# shared-silicon fact either way, not a per-SKU one). Which SKU a given bench
+# module carries cannot be read from silicon -- AE822FA0E5597LS0 is the part on
+# both E1M-AEN801 and E1M-AEN803 -- so it rests on the maintainer's word: as of
+# 2026-09-17, E1M-AEN803 serial 2026W36-0009 (its EEPROM 0x50 manifest written
+# with sku=E1M-AEN803), and E1M-AEN803 serial 2026W36-0001 and E1M-AEN803
+# serial 2026W36-0002, are the bench modules confirmed E1M-AEN803.
+# This is SDK build policy, not a silicon fact (see
 # scripts/gen_zephyr_board.py's memory_map: vs metadata/socs/ split), so the
 # fix lives here rather than in the SoC JSON.  See E1M-AEN801.yaml for the
 # full DECIDED-layout rationale (#1069) -- reproduced verbatim below since

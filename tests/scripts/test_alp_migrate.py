@@ -131,31 +131,31 @@ def _load_cli():
 def test_cli_requires_a_mode(tmp_path):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("som:\n  sku: X\n")
+    b.write_text("som:\n  sku: X\n", encoding="utf-8")
     with pytest.raises(SystemExit):        # argparse: a mode flag is required
         cli.main(["--board", str(b)])
-    assert b.read_text() == "som:\n  sku: X\n"   # bare invocation never writes
+    assert b.read_text(encoding="utf-8") == "som:\n  sku: X\n"   # bare invocation never writes
 
 
 def test_cli_check_clean_when_current(tmp_path):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("som:\n  sku: X\n")           # absent == v1 == LATEST
+    b.write_text("som:\n  sku: X\n", encoding="utf-8")           # absent == v1 == LATEST
     assert cli.main(["--check", "--board", str(b)]) == 0
 
 
 def test_cli_apply_is_noop_when_current(tmp_path):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("# banner\nsom:\n  sku: X\n")
+    b.write_text("# banner\nsom:\n  sku: X\n", encoding="utf-8")
     assert cli.main(["--apply", "--board", str(b), "--no-verify"]) == 0
-    assert b.read_text() == "# banner\nsom:\n  sku: X\n"   # empty registry: no change
+    assert b.read_text(encoding="utf-8") == "# banner\nsom:\n  sku: X\n"   # empty registry: no change
 
 
 def test_cli_migrate_error_is_clean(tmp_path, capsys):
     cli = _load_cli()
     b = tmp_path / "board.yaml"
-    b.write_text("schemaVersion: 999\nsom:\n  sku: X\n")
+    b.write_text("schemaVersion: 999\nsom:\n  sku: X\n", encoding="utf-8")
     rc = cli.main(["--check", "--board", str(b)])
     assert rc == 1
     err = capsys.readouterr().err
@@ -172,10 +172,10 @@ def test_all_board_yaml_files_prunes_build_output(tmp_path):
     cli = _load_cli()
     real = tmp_path / "examples" / "widget" / "board.yaml"
     real.parent.mkdir(parents=True)
-    real.write_text("som:\n  sku: X\n")
+    real.write_text("som:\n  sku: X\n", encoding="utf-8")
     junk = tmp_path / "twister-out" / "widget" / "board.yaml"
     junk.parent.mkdir(parents=True)
-    junk.write_text("not a real source file\n")
+    junk.write_text("not a real source file\n", encoding="utf-8")
     found = cli._all_board_yaml_files(tmp_path)
     assert real in found
     assert junk not in found

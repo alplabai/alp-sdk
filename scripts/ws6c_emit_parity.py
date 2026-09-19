@@ -16,6 +16,7 @@ library-relevant CONFIG lines, sorted, so unrelated ordering churn is ignored).
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -49,7 +50,8 @@ def _emit(board: Path, core: str) -> str | None:
     r = subprocess.run(
         [sys.executable, str(ROOT / "scripts/alp_project.py"),
          "--input", str(board), "--emit", "zephyr-conf", "--core", core],
-        capture_output=True, text=True, cwd=ROOT)
+        capture_output=True, text=True, encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"}, cwd=ROOT)
     if r.returncode != 0:
         return None
     # Keep every CONFIG line (library CONFIG_ can't be reliably prefix-filtered

@@ -143,7 +143,7 @@
         "bench_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Which physical bench/rig captured this point (e.g. `e1m-aen-evk-01`) -- lets a bad point be traced back to a specific board without re-deriving it from the CHANGELOG."
+          "description": "Which physical bench/rig captured this point, identified by module SKU + serial (e.g. `E1M-AEN801/2026W36-0003`, illustrative) -- lets a bad point be traced back to a specific board without re-deriving it from the CHANGELOG."
         },
         "notes": {
           "type": "string",

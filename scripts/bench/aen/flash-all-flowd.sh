@@ -14,8 +14,8 @@
 # directory under $BENCH_ROOT/build/.
 #
 # --atoc-unqueryable is forwarded verbatim to every flash-jlink.sh call, for
-# a bench slot with no SE-UART wired (e.g. e1m-aen-evk-03, where Flow D is
-# the ONLY load path). It is opt-in here for the same reason it is opt-in
+# a bench slot with no SE-UART wired -- on such a slot Flow D is the ONLY
+# load path. It is opt-in here for the same reason it is opt-in
 # there: it acknowledges that the resident-ATOC check did not run, and the
 # whole point of #2029/#2027 is that a human says that once, deliberately.
 # Hardcoding it at the call site below would make the batch replace the ATOC

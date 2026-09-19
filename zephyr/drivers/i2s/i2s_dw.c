@@ -59,11 +59,12 @@
  *     so a stream nobody is trying to recover from no longer leaves the
  *     clock running forever. tx_stream_start()'s own restart, in turn, now
  *     skips reprogramming clock_control_set_rate()/CCR when a one-shot flag
- *     (clk_restart_skip_ok, set ONLY by the underrun exit above and cleared
- *     by every path that can invalidate it -- see the field's own comment)
- *     confirms CER.CLKEN is already set for the exact restart the flag was
- *     armed for, instead of writing CCR live, which its own doc comment
- *     says must be done with the clock disabled.
+ *     (clk_restart_skip_ok, set ONLY by tx_stream_park_keep_clock() -- the
+ *     underrun exit above and, since issue #2205, an RX start pre-empting a
+ *     RUNNING TX -- and cleared by every path that can invalidate it; see
+ *     the field's own comment) confirms CER.CLKEN is already set for the
+ *     exact restart the flag was armed for, instead of writing CCR live,
+ *     which its own doc comment says must be done with the clock disabled.
  *   - issue #2150 phase 1 (RX clock ownership, this change): the two gaps
  *     the paragraph above used to describe as "NOT fixed here" are now
  *     fixed. rx_stream_disable() (STOP/DRAIN/DROP and both RX-ISR error
@@ -83,27 +84,83 @@
  *     only -- clock-ownership safety, not full duplex.
  *     i2s_dw_configure() still maps I2S_DIR_BOTH to -ENOSYS and
  *     dev_data->dir is still a single field, both deliberately unchanged.
- *     Two gaps remain, out of scope for phase 1:
- *       - rx_stream_start() and tx_stream_start() each unconditionally
- *         disable the OTHER direction's channel-enable bit
- *         (i2s_tx_channel_disable() / i2s_rx_channel_disable()) on every
- *         start, so a genuinely concurrent RX+TX session would still have
- *         one direction's channel silenced by the other's (re)start --
- *         clock ownership aside.
- *       - dev_data->dir is written by i2s_dw_configure() on every call and
- *         is the ONLY thing i2s_dw_isr() consults to decide whether to run
- *         i2s_tx_irq_handler() at all. Every RX-owning path this fix
- *         protects requires RX to have been configured, which overwrites
- *         dir to I2S_DIR_RX and permanently stops TX's IRQ from firing --
- *         so a "live" TX can no longer refill its FIFO once RX is
- *         configured, and tx.state == I2S_STATE_RUNNING becomes stale
- *         software state from that point on. This fix still delivers real
- *         value in that case -- the amps key on BCLK presence, and
- *         tx_clock_is_live() correctly keeps CER.CLKEN set for a TX the
- *         driver itself can no longer service -- but tx.state == RUNNING
- *         must not be read as "TX is actually streaming" once RX has been
- *         configured. Both gaps are full-duplex territory and stay with
- *         #2150's later phase(s).
+ *     The driver is half-duplex; issue #2205 below made the two
+ *     START-time halves of that explicit (a START of one direction
+ *     pre-empts a RUNNING stream of the other into I2S_STATE_ERROR, and
+ *     dev_data->dir follows START), which closed the first two gaps this
+ *     note used to list -- "a start silences the other direction's channel
+ *     while its state still says RUNNING" and "once RX is configured a
+ *     RUNNING TX is never serviced again". One gap remains, out of scope
+ *     for phase 1:
+ *       - issue #2179's unserviced-source mask (i2s_dw_isr(), this change)
+ *         turns one reachable full-duplex hang into a silent stall instead
+ *         of the storm it used to be: alp_i2s_open(RX) -> configure(RX) ->
+ *         START(RX) leaves RX RUNNING; the app then calls configure(TX) on
+ *         the same device. i2s_dw_configure()'s state check inspects only
+ *         the TX stream (tx.state == I2S_STATE_NOT_READY), so it succeeds
+ *         and repoints dev_data->dir to I2S_DIR_TX while RX is still
+ *         RUNNING. The next RXDA is unserviced, i2s_dw_isr() masks it
+ *         (RXDAM), and the RX stream goes deaf while its state still says
+ *         RUNNING. The backend reads with SYS_FOREVER_MS, so a blocked
+ *         alp_i2s_read() then waits until the TX START pre-empts RX, which
+ *         releases it with -EIO (issue #2205); without a TX START it waits
+ *         forever. This is strictly an improvement over the pre-fix
+ *         behaviour -- that same sequence used to produce the ISR storm
+ *         this change kills -- but it is still a gap, not a fix, and stays
+ *         with #2150's later phase(s). The mirror image (configure(RX)
+ *         while TX is RUNNING) stalls TX the same way until the RX START
+ *         pre-empts it, since i2s_dw_configure() still repoints
+ *         dev_data->dir too.
+ *   - issue #2179 (defensive hardening, this change): an interrupt source
+ *     that is asserted and unmasked but whose i2s_dw_isr() branch the
+ *     dev_data->dir gate skips used to make that function read ISR, match
+ *     no branch, change nothing, and return -- and since the source is
+ *     level-held, the NVIC tail-chains straight back in and the core spins
+ *     with no fault taken. Four sites now make that unreachable:
+ *     i2s_dw_isr() masks any asserted-and-unmasked source it did not
+ *     service; rx_stream_start()/tx_stream_start() mask the OTHER
+ *     direction's interrupts alongside the channel disable they already
+ *     did; i2s_dw_configure() assigns dev_data->dir only after validating
+ *     the direction and the stream state, so a failed call no longer
+ *     repoints the ISR gate; and i2s_dw_initialize() quiesces
+ *     IER/IRER/ITER/RER/TER and masks interrupts BEFORE irq_config() arms
+ *     the NVIC, since this block is not in the SYSRESETREQ reset domain
+ *     and carries its register state across a warm reset. The cause of
+ *     the i2s3 RX-start spin reported in #2179 is PROVEN on silicon: #2179
+ *     closed on an A/B capture on E1M-AEN803 serial 2026W36-0002 in which, with this
+ *     change reverted, the first i2s_dw_isr() entry after the RX start saw
+ *     ISR & ~IMR = 0x00000010 (TXFE, unmasked, with dir == I2S_DIR_RX)
+ *     and the core stormed (3/3); with it, 6/6 ran clean. In the clean arm
+ *     rx_stream_start()'s TX mask alone prevented it -- the i2s_dw_isr()
+ *     guard never fired and stays as defence in depth. See each site's
+ *     own comment.
+ *   - issue #2205 (the E8 channel-enable model, this change): on the
+ *     Alif E8, TER bit 0 (TXCHENX) and RER bit 0 (RXCHENX) are read-only
+ *     -- measured on E1M-AEN803 serial 2026W36-0002 i2s3 with the block idle, RER and TER
+ *     both still read 0x00FFFF01 after the init-time clears (see
+ *     I2S_TER_TXCHEN_Msk in i2s_dw.h) -- so i2s_tx_channel_disable() and
+ *     i2s_rx_channel_disable() never stopped anything there, and an RX
+ *     start left TX running in hardware while no ISR serviced it. The
+ *     channel-disable calls stay (they are real on the E7); what changed:
+ *       - i2s_dw_isr() masks EVERY unserviced source, not only TXFE/RXDA,
+ *         and i2s_dw_initialize() writes the full named IMR mask
+ *         (I2S_IMR_ALL_Msk, including the E8's TXFUM) instead of setting
+ *         bits 0/1/4/5 and inheriting bit 6 from the previous image;
+ *       - rx_stream_start()/tx_stream_start() set dev_data->dir, so a TX
+ *         restarted after an RX session is serviced again;
+ *       - a RUNNING TX pre-empted by an RX START goes to I2S_STATE_ERROR
+ *         through tx_stream_park_keep_clock() -- the same exit #2149's
+ *         underrun uses, so the clock is kept, clk_restart_skip_ok is
+ *         armed, and the next write() gets -EIO and the backend's
+ *         ERROR->PREPARE->START retry restarts it. A RUNNING RX pre-empted
+ *         by a TX START goes to I2S_STATE_ERROR through rx_stream_disable(),
+ *         which keeps CER.CLKEN whenever tx_clock_is_live(). Either way a
+ *         reader or writer already blocked on the pre-empted stream's
+ *         semaphore is released with -EIO -- the backend waits with
+ *         SYS_FOREVER_MS, and a blocked alp_i2s_read() used to deadlock
+ *         the handle's alp_i2s_close();
+ *       - i2s_rx_channel_enable()/i2s_tx_channel_enable() read-modify-write,
+ *         so the E8's per-slot enables in bits 8-23 survive.
  * The register block layout, IRQ scheme, and FIFO trigger levels are the
  * fork's.
  * vendor-ext, BENCH-UNVERIFIED (compiles + links on the E8 he target; the TX
@@ -120,6 +177,7 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/irq.h>
 #include <zephyr/drivers/clock_control.h>
+#include <zephyr/sys/barrier.h>
 
 #include <zephyr/pm/device.h>
 #include <zephyr/pm/policy.h>
@@ -163,8 +221,10 @@ struct stream {
 	size_t             mem_block_size;
 	uint32_t  mem_block_offset;
 	/* alp-sdk issue #2149 (round 2): one-shot flag. Set ONLY by
-	 * i2s_tx_irq_handler()'s queue-empty underrun exit, the single path
-	 * that leaves CER.CLKEN set on purpose. tx_stream_start() consults it
+	 * tx_stream_park_keep_clock(), the single path that leaves CER.CLKEN
+	 * set on purpose -- reached from i2s_tx_irq_handler()'s queue-empty
+	 * underrun exit and (issue #2205) from rx_stream_start() pre-empting a
+	 * RUNNING TX. tx_stream_start() consults it
 	 * (paired with i2s_clock_is_enabled()) to skip reprogramming
 	 * clock_control_set_rate()/CCR on a restart that immediately follows
 	 * that exact exit, then consumes (clears) it unconditionally either
@@ -303,8 +363,6 @@ static int i2s_dw_configure(const struct device *dev, enum i2s_dir dir,
 
 	struct stream *stream;
 
-	dev_data->dir = dir;
-
 	switch (dir) {
 	case I2S_DIR_RX:
 		stream = &dev_data->rx;
@@ -324,6 +382,19 @@ static int i2s_dw_configure(const struct device *dev, enum i2s_dir dir,
 		LOG_ERR("invalid state");
 		return -EINVAL;
 	}
+
+	/* alp-sdk issue #2179: assign dev_data->dir only once this call is
+	 * committed to (re)configuring a stream. It used to be the first
+	 * statement in this function, so a call that went on to fail -- the
+	 * I2S_DIR_BOTH -ENOSYS above, the default -EINVAL, or the invalid-state
+	 * -EINVAL just above -- still repointed the ONLY field i2s_dw_isr()
+	 * consults to decide which handler to run, permanently, on a call that
+	 * changed nothing else. I2S_DIR_BOTH is the worst of the three: it
+	 * leaves dir matching NEITHER ISR branch, so from then on every I2S
+	 * interrupt is unserviced (see i2s_dw_isr()'s own #2179 comment). A
+	 * failed configure() now leaves the gate pointing at whatever direction
+	 * was last configured successfully. */
+	dev_data->dir = dir;
 
 	/* alp-sdk issue #2149 (round 2): a rate change invalidates TX's
 	 * one-shot restart-skip flag -- the divider a restart would skip
@@ -367,6 +438,7 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	struct i2s_dw_data *const dev_data = dev->data;
 	struct stream *stream;
 	unsigned int key;
+	bool parked;
 	int ret;
 
 	switch (dir) {
@@ -408,8 +480,16 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	case I2S_TRIGGER_STOP:
 		key = irq_lock();
 		if (stream->state != I2S_STATE_RUNNING) {
+			parked = stream->state == I2S_STATE_ERROR;
 			irq_unlock(key);
-			LOG_ERR("STOP trigger: invalid state");
+			/* alp-sdk issue #2205: refused either way, but only a
+			 * non-ERROR state is a caller bug worth an error log --
+			 * see the DRAIN case below. */
+			if (parked) {
+				LOG_DBG("STOP trigger: stream in ERROR, use DROP");
+			} else {
+				LOG_ERR("STOP trigger: invalid state");
+			}
 			return -EIO;
 		}
 		irq_unlock(key);
@@ -424,8 +504,23 @@ static int i2s_dw_trigger(const struct device *dev, enum i2s_dir dir,
 	case I2S_TRIGGER_DRAIN:
 		key = irq_lock();
 		if (stream->state != I2S_STATE_RUNNING) {
+			parked = stream->state == I2S_STATE_ERROR;
 			irq_unlock(key);
-			LOG_ERR("DRAIN trigger: invalid state");
+			/* alp-sdk issue #2205: DRAIN still needs RUNNING, and a
+			 * stream in ERROR still gets -EIO. But ERROR is an expected
+			 * state -- the TX underrun exit and a START of the other
+			 * direction both park a stream there -- and DROP is the way
+			 * out, which is exactly what src/backends/i2s/zephyr_drv.c's
+			 * z_stop() falls back to. Logging that refusal at error
+			 * level printed the invalid-state error on every clean
+			 * teardown after a pre-emption; it is debug-level now.
+			 * Any other non-RUNNING state (READY, NOT_READY) is a caller
+			 * bug and stays at error level. */
+			if (parked) {
+				LOG_DBG("DRAIN trigger: stream in ERROR, use DROP");
+			} else {
+				LOG_ERR("DRAIN trigger: invalid state");
+			}
 			return -EIO;
 		}
 		stream->stream_disable(stream, dev);
@@ -508,6 +603,17 @@ static int i2s_dw_write(const struct device *dev, void *mem_block,
 		return ret;
 	}
 
+	/* alp-sdk issue #2205: the stream can be parked in ERROR while this
+	 * call waits on tx.sem -- rx_stream_start() pre-empting a RUNNING TX
+	 * gives tx.sem exactly to release such a writer. Queueing into an
+	 * ERROR stream would report success for audio PREPARE then drops, so
+	 * fail it instead; the backend's ERROR->PREPARE->START retry takes it
+	 * from there. No give-back: the count this writer took was the extra
+	 * one, and PREPARE/DROP's tx_queue_drop() re-saturates tx.sem. */
+	if (dev_data->tx.state == I2S_STATE_ERROR) {
+		return -EIO;
+	}
+
 	/* Add data to the end of the TX queue */
 	queue_put(&dev_data->tx.mem_block_queue, mem_block, size);
 
@@ -525,6 +631,28 @@ static void tx_stream_disable(struct stream *stream, const struct device *dev);
 static void tx_stream_disable_ex(struct stream *stream, const struct device *dev, bool keep_clock);
 static void rx_stream_disable(struct stream *stream, const struct device *dev);
 
+/*
+ * alp-sdk issues #2149 and #2205: stop a TX stream WITHOUT gating the bit
+ * clock and park it in I2S_STATE_ERROR. The TX channel/block/interrupt are
+ * disabled; CER.CLKEN stays set, so a codec on this bus never sees bit-clock
+ * loss and never latches its own SHUTDOWN; clk_restart_skip_ok is armed so
+ * the restart does not reprogram a divider that never stopped. The app's
+ * next write() gets -EIO, and the backend's ERROR->PREPARE->START retry
+ * (src/backends/i2s/zephyr_drv.c) restarts the stream. Two callers:
+ *   - i2s_tx_irq_handler()'s queue-empty underrun exit (#2149);
+ *   - rx_stream_start() pre-empting a RUNNING TX (#2205). Before this, TX
+ *     was left "RUNNING" with nothing draining its queue (dev_data->dir had
+ *     moved to I2S_DIR_RX), so every later write() stalled on the
+ *     backend's 2-block slab until its timeout and the stream never
+ *     recovered.
+ */
+static void tx_stream_park_keep_clock(struct stream *stream, const struct device *dev)
+{
+	stream->state = I2S_STATE_ERROR;
+	stream->clk_restart_skip_ok = true;
+	tx_stream_disable_ex(stream, dev, true);
+}
+
 static void i2s_tx_irq_handler(const struct device *dev)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
@@ -538,10 +666,6 @@ static void i2s_tx_irq_handler(const struct device *dev)
 	uint8_t last_lap = 0, bytes = 0, cnt = 0, frames = 0;
 	uint32_t offset = stream->mem_block_offset;
 	size_t         size   = stream->mem_block_size;
-	/* alp-sdk issue #2149: set true ONLY on the queue-empty underrun exit
-	 * below. Every other tx_disable entry (already-ERROR, last_block)
-	 * keeps disabling the clock exactly as before. */
-	bool keep_clock = false;
 	int ret;
 
 	/* Stop transmission if there was an error */
@@ -633,20 +757,15 @@ static void i2s_tx_irq_handler(const struct device *dev)
 			if (stream->state == I2S_STATE_STOPPING) {
 				stream->state = I2S_STATE_READY;
 			} else {
-				stream->state = I2S_STATE_ERROR;
 				/* alp-sdk issue #2149: this is the underrun exit --
 				 * the queue genuinely ran dry mid-playback, not a
-				 * caller-requested stop/drain/drop. Keep CER.CLKEN
-				 * set so the codec on the other end of this I2S bus
-				 * never sees bit-clock loss and never latches its
-				 * own SHUTDOWN; the TX channel/block/interrupt are
-				 * still disabled below exactly as before. */
-				keep_clock = true;
-				/* alp-sdk issue #2149 (round 2): arm the
-				 * one-shot restart-skip flag ONLY here -- the
-				 * only place CER.CLKEN is deliberately left
-				 * set. See struct stream's own comment. */
-				stream->clk_restart_skip_ok = true;
+				 * caller-requested stop/drain/drop. Park the stream
+				 * in ERROR with CER.CLKEN kept set and the one-shot
+				 * restart-skip flag armed; every other tx_disable
+				 * entry (already-ERROR, last_block, STOPPING) still
+				 * gates the clock exactly as before. */
+				tx_stream_park_keep_clock(stream, dev);
+				return;
 			}
 			goto tx_disable;
 		}
@@ -655,7 +774,7 @@ static void i2s_tx_irq_handler(const struct device *dev)
 	return;
 
 tx_disable:
-	tx_stream_disable_ex(stream, dev, keep_clock);
+	tx_stream_disable(stream, dev);
 }
 
 static void i2s_rx_irq_handler(const struct device *dev)
@@ -801,24 +920,35 @@ static void i2s_dw_isr(const struct device *dev)
 	const struct i2s_dw_cfg *i2s = dev->config;
 	struct i2s_dw_data *const dev_data = dev->data;
 	uint32_t int_status = 0;
+	/* alp-sdk issue #2179: ISR and IMR share a bit layout (RXDA/RXDAM 0,
+	 * RXFO/RXFOM 1, TXFE/TXFEM 4, TXFO/TXFOM 5, and on the E8 TXFU/TXFUM
+	 * 6 -- see i2s_dw.h), and IMR is mask-to-DISABLE, so `ISR & ~IMR` is
+	 * exactly the set of sources asserted AND unmasked, i.e. the sources actually holding this IRQ
+	 * line up. Each branch below clears the bit(s) it services; whatever
+	 * is left at the bottom was not serviced and gets masked there. */
+	uint32_t unserviced;
 
 	/* Get the Current Interrupt Status*/
 	int_status = i2s->paddr->ISR;
+	unserviced = int_status & ~i2s_get_interrupt_mask(i2s);
 
 	if ((dev_data->dir == I2S_DIR_TX) &&
 	    (_FLD2VAL(I2S_ISR_TXFE, int_status))) {
 		/* Handle Tx Interrupt */
 		i2s_tx_irq_handler(dev);
+		unserviced &= ~I2S_ISR_TXFE_Msk;
 	}
 	if ((dev_data->dir == I2S_DIR_RX) &&
 	    (_FLD2VAL(I2S_ISR_RXDA, int_status))) {
 		/* Handle Rx Interrupt */
 		i2s_rx_irq_handler(dev);
+		unserviced &= ~I2S_ISR_RXDA_Msk;
 	}
 
 	/* This should not happen */
 	if (_FLD2VAL(I2S_ISR_TXFO, int_status)) {
 		i2s_clear_tx_overrun(i2s);
+		unserviced &= ~I2S_ISR_TXFO_Msk;
 	}
 
 	if (_FLD2VAL(I2S_ISR_RXFO, int_status)) {
@@ -828,8 +958,53 @@ static void i2s_dw_isr(const struct device *dev)
 		/* Disable the Rx Overflow interrupt for now. This will */
 		/* be enabled again when Receive function is called */
 		i2s_disable_rx_fo_interrupt(i2s);
+		unserviced &= ~I2S_ISR_RXFO_Msk;
 	}
 
+	/* alp-sdk issue #2179: both data branches above are gated on
+	 * dev_data->dir, which this half-duplex driver keeps as a SINGLE field
+	 * (I2S_DIR_BOTH is -ENOSYS). A source that is asserted and unmasked but
+	 * whose branch the dir gate skipped -- TXFE while dir == I2S_DIR_RX is
+	 * the reachable case, since TXFE is asserted by an EMPTY TX FIFO, which
+	 * is its resting state, and neither i2s_enable_rx_interrupt() nor the
+	 * TX-channel disable in rx_stream_start() used to touch TXFEM -- would
+	 * otherwise make this function read ISR, match no branch, change
+	 * NOTHING, and return. These sources are level-held, so the NVIC
+	 * tail-chains straight back in and the core spins here with no fault
+	 * taken. Masking the unserviced source is the one action that is
+	 * guaranteed to change the interrupt condition, so this function can no
+	 * longer return without having done so. Note that adding a clear inside
+	 * i2s_tx_irq_handler()/i2s_rx_irq_handler() would NOT close this: on
+	 * this path the handler is never called at all.
+	 *
+	 * The mask is not lost: i2s_enable_tx_interrupt()/
+	 * i2s_enable_rx_interrupt() unmask again on the next
+	 * tx_stream_start()/rx_stream_start() for that direction, so a
+	 * direction that is later started normally is unaffected. A source that
+	 * IS serviced above is never masked here (its bit was cleared from
+	 * `unserviced`), so both working single-direction paths behave exactly
+	 * as before.
+	 *
+	 * alp-sdk issue #2205: mask EVERY unserviced source, not only TXFE and
+	 * RXDA. The E8's TXFU (bit 6) has no branch above; if it were ever
+	 * unmasked, a latched TXFU would be neither serviced, cleared nor
+	 * masked -- the same storm shape. Limited to I2S_IMR_ALL_Msk so no 1
+	 * is ever written to IMR bits 2-3, which neither SVD defines.
+	 *
+	 * PROVEN ON SILICON (#2179): the i2s3 RX-start spin measured 6/6 on
+	 * E1M-AEN803 serial 2026W36-0002 (live core in i2s_dw_isr()/_isr_wrapper, CycleCnt
+	 * advancing, CFSR = 0x00000000, thread mode starved) is this exact
+	 * case. #2179 closed on an A/B capture: with the #2179 change reverted
+	 * (this guard AND rx_stream_start()'s TX mask), the first i2s_dw_isr()
+	 * entry after the RX start saw ISR & ~IMR = 0x00000010 -- TXFE
+	 * asserted and unmasked while dev_data->dir == I2S_DIR_RX -- and
+	 * stormed. With the change, rx_stream_start()'s TX mask alone kept
+	 * TXFE masked and this guard never fired, so it is the backstop, not
+	 * the fix that was exercised. */
+	unserviced &= I2S_IMR_ALL_Msk;
+	if (unserviced != 0U) {
+		i2s_set_interrupt_mask(i2s_get_interrupt_mask(i2s) | unserviced, i2s);
+	}
 }
 
 static int i2s_dw_initialize(const struct device *dev)
@@ -873,18 +1048,81 @@ static int i2s_dw_initialize(const struct device *dev)
 		return ret;
 	}
 
-	/* Enable and configure the I2S controller */
-	i2s_enable_controller(dev);
+	/* alp-sdk issue #2179: quiesce the block and mask every interrupt
+	 * BEFORE arming the NVIC, not after. This block is NOT in the
+	 * SYSRESETREQ reset domain -- measured on E1M-AEN803 serial 2026W36-0002: CER and TER
+	 * both survived a J-Link `loadbin`'s implicit SYSRESETREQ at
+	 * 0x00000001 -- so IER/IMR/IRER/ITER/RER/TER all carry over from
+	 * whatever the PREVIOUS image left behind. (The all-zero CER/TER read
+	 * straight after a RESETPIN reset was an UNCLOCKED block, not a reset
+	 * value: IER read 0x00000000 there too instead of its 0x00000F00
+	 * reset value, and once clocked, just after the channel clears below,
+	 * RER and TER read their SVD reset value 0x00FFFF01 -- issue #2205.)
+	 * The old order called irq_config() (IRQ_CONNECT + irq_enable) with
+	 * those registers still holding the previous image's state, and only
+	 * masked two lines later; a latched,
+	 * unmasked source therefore had a window in which it could be delivered
+	 * to an ISR whose dev_data->dir is fresh BSS 0 (== I2S_DIR_RX) and
+	 * whose streams are not configured at all. Quiescing first closes the
+	 * window instead of racing it.
+	 *
+	 * CER is deliberately NOT cleared here: i2s_enable_controller() below
+	 * sets CER.CLKEN, and "CER.CLKEN reads 1 from i2s_dw_initialize()
+	 * onward" is the invariant tx_clock_is_live() and #2149's restart-skip
+	 * flag are both built on. It just happens a few instructions later now.
+	 *
+	 * The k_sem_init() calls also move above irq_config() for the same
+	 * reason: i2s_rx_irq_handler()/i2s_tx_irq_handler() both k_sem_give()
+	 * these semaphores.
+	 *
+	 * Inferred, not confirmed on silicon: the 0-byte-console boot in issue
+	 * #2179 (CycleCnt advancing, CFSR = 0x00000000, PC in i2s_dw_isr(),
+	 * ram_console_buf all zeros) is consistent with a storm resuming inside
+	 * this function before the old masking lines ran. #2179's A/B capture
+	 * proved the RX-start storm, not this boot-time one, which was never
+	 * reproduced. The ordering is worth fixing on its own terms regardless.
+	 *
+	 * alp-sdk issue #2205: IER/IRER/ITER are what quiesce the block here.
+	 * The two channel disables are no-ops on the E8 (TXCHENX/RXCHENX are
+	 * read-only -- RER and TER still read 0x00FFFF01 after them, measured
+	 * with the block idle) and are kept for the E7, where they are real. */
+	i2s_global_disable(i2s);
+	i2s_rx_block_disable(i2s);
+	i2s_tx_block_disable(i2s);
+	i2s_rx_channel_disable(i2s);
+	i2s_tx_channel_disable(i2s);
 
-	i2s->irq_config(dev);
+	/* alp-sdk issue #2205: mask every interrupt with ONE full write of the
+	 * named mask, not the read-modify-write of bits 0/1/4/5 that
+	 * i2s_disable_tx_interrupt()/i2s_disable_rx_interrupt() do. The RMW
+	 * kept whatever the previous image left in the other bits, so an
+	 * inherited unmask of the E8's TXFUM (bit 6) would have survived into
+	 * every boot, and nothing in this driver services TXFU. Nothing in-tree
+	 * unmasks bit 6 today; this closes the hole, it fixes no observed
+	 * fault. I2S_IMR_ALL_Msk (0x73) is
+	 * also the E8's IMR reset value; bits 2-3 are left 0 (no SVD field). */
+	i2s_set_interrupt_mask(I2S_IMR_ALL_Msk, i2s);
 
 	k_sem_init(&dev_data->rx.sem, 0, CONFIG_I2S_DW_RX_BLOCK_COUNT);
 	k_sem_init(&dev_data->tx.sem, CONFIG_I2S_DW_TX_BLOCK_COUNT,
 		   CONFIG_I2S_DW_TX_BLOCK_COUNT);
 
-	/* Mask all the interrupts */
-	i2s_disable_tx_interrupt(i2s);
-	i2s_disable_rx_interrupt(i2s);
+	/* alp-sdk issue #2179: make the IMR mask writes above architecturally
+	 * visible before the NVIC line is armed below -- without a barrier
+	 * here, irq_config()'s IRQ_CONNECT()/irq_enable() is free to complete,
+	 * and thus become live at the NVIC, before the masking writes have
+	 * actually posted. barrier_dsync_fence_full() rather than a bare
+	 * __DSB(): this file is also host-compiled on native_sim (CMSIS
+	 * intrinsics do not exist there), and Zephyr's portable barrier
+	 * degrades to a no-op on any arch without CONFIG_BARRIER_OPERATIONS_*,
+	 * which is the correct behaviour on a host with no NVIC to race. */
+	barrier_dsync_fence_full();
+
+	i2s->irq_config(dev);
+
+	/* Enable and configure the I2S controller */
+	i2s_enable_controller(dev);
+
 	LOG_INF("%s inited", dev->name);
 
 	return 0;
@@ -900,8 +1138,10 @@ static int i2s_dw_initialize(const struct device *dev)
  *   - tx.clk_restart_skip_ok qualifies on its OWN, independent of state.
  *     That flag's own contract (see struct stream) is already
  *     state-independent -- "CER.CLKEN is deliberately left set" -- armed
- *     ONLY by i2s_tx_irq_handler()'s queue-empty underrun exit (issue
- *     #2149) and cleared by every path that actually gates the clock.
+ *     ONLY by tx_stream_park_keep_clock() (i2s_tx_irq_handler()'s
+ *     queue-empty underrun exit, issue #2149, and rx_stream_start()
+ *     pre-empting a RUNNING TX, issue #2205) and cleared by every path
+ *     that actually gates the clock.
  *     round-3 review finding 1: an earlier ERROR-only form of this check
  *     (`state == ERROR && flag`) was narrower than the flag's own contract
  *     and reopened a hole -- I2S_TRIGGER_PREPARE moves TX ERROR->READY
@@ -945,6 +1185,7 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	struct i2s_dw_data *const dev_data = dev->data;
 	bool tx_live = tx_clock_is_live(i2s, dev_data);
 	bool clk_needs_reprogram;
+	unsigned int key;
 	int ret;
 
 	if (tx_live && dev_data->tx.cfg.frame_clk_freq != stream->cfg.frame_clk_freq) {
@@ -983,6 +1224,36 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 	 * restart. */
 	stream->mem_block_offset = 0;
 
+	/* alp-sdk issue #2205: this driver is half-duplex, so an RX START
+	 * pre-empts a RUNNING TX. It used to rely on i2s_tx_channel_disable()
+	 * below for that, which is a no-op on the E8 (TXCHENX is read-only),
+	 * while the repointed dev_data->dir meant no ISR ever serviced TX
+	 * again: TX kept "RUNNING" with nothing draining its queue. Park it in
+	 * ERROR instead, through the same keep-clock exit #2149's underrun
+	 * uses, so the next write() gets -EIO and the backend's
+	 * ERROR->PREPARE->START retry restarts it. The clock is kept and
+	 * clk_restart_skip_ok is armed, so tx_clock_is_live() stays true: the
+	 * #2150 phase 1 / #2171 contract holds -- a later rx_stream_disable()
+	 * leaves CER.CLKEN set -- and tx_live above (read before this) still
+	 * skips the reprogram below. Done before RX's interrupts are unmasked
+	 * and under irq_lock() together with the dir switch, so no ISR entry
+	 * can see RX sources with dir still I2S_DIR_TX, or run TX's
+	 * already-ERROR exit (which gates the clock) against this stream.
+	 * dev_data->dir follows START, not only configure(): after an RX
+	 * session, tx_stream_start() points it back at TX. */
+	key = irq_lock();
+	if (dev_data->tx.state == I2S_STATE_RUNNING) {
+		tx_stream_park_keep_clock(&dev_data->tx, dev);
+		/* Release a writer blocked in i2s_dw_write() on a full queue:
+		 * with dir now I2S_DIR_RX nothing else would ever give tx.sem,
+		 * and the backend configures SYS_FOREVER_MS. The writer sees
+		 * ERROR and returns -EIO. ponytail: one give releases one
+		 * waiter; the Zephyr I2S API has one writer per stream. */
+		k_sem_give(&dev_data->tx.sem);
+	}
+	dev_data->dir = I2S_DIR_RX;
+	irq_unlock(key);
+
 	/* alp-sdk issue #2150 (phase 1): only reprogram the shared bit-clock
 	 * divider when TX is not depending on it right now (see
 	 * tx_clock_is_live()). When TX IS live, the mismatched-rate case
@@ -1011,8 +1282,21 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 		i2s_configure_clock(i2s);
 	}
 	i2s_clock_enable(i2s);
-	/* Disable Tx Channel */
+	/* Disable Tx Channel -- alp-sdk issue #2205: a no-op on the E8, real
+	 * on the E7; a RUNNING TX was already stopped (ITER) above. */
 	i2s_tx_channel_disable(i2s);
+	/* alp-sdk issue #2179: mask TX's interrupts alongside the TX channel
+	 * disable directly above. TXFE is asserted by an EMPTY TX FIFO -- the
+	 * resting state of a TX that is not being fed -- and
+	 * i2s_enable_rx_interrupt() below clears only RXDAM|RXFOM, so TXFEM
+	 * left unmasked by an earlier TX phase survived into this RX stream.
+	 * #2179's A/B capture proved that is the RX-start storm (ISR & ~IMR =
+	 * 0x00000010 on the first ISR entry with the #2179 change reverted),
+	 * and with it this line alone prevented the storm; i2s_dw_isr()'s
+	 * guard never fired and is the backstop. For a TX that was RUNNING,
+	 * the park above already did this; the call still covers a TX left
+	 * READY or ERROR. */
+	i2s_disable_tx_interrupt(i2s);
 
 	/* Clear Overrun interrupt if any */
 	i2s_clear_rx_overrun(i2s);
@@ -1031,6 +1315,8 @@ static int rx_stream_start(struct stream *stream, const struct device *dev)
 static int tx_stream_start(struct stream *stream, const struct device *dev)
 {
 	const struct i2s_dw_cfg *i2s = dev->config;
+	struct i2s_dw_data *const dev_data = dev->data;
+	unsigned int key;
 	int ret;
 	/* alp-sdk issue #2149: a restart following the ISR underrun path
 	 * (i2s_tx_irq_handler() -> PREPARE -> here) can find CER.CLKEN
@@ -1072,10 +1358,36 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 
 	stream->mem_block_offset = 0;
 
+	/* alp-sdk issue #2205: the mirror of rx_stream_start()'s pre-emption.
+	 * A RUNNING RX goes to I2S_STATE_ERROR through rx_stream_disable() --
+	 * the body every RX teardown shares -- instead of relying on
+	 * i2s_rx_channel_disable() below, a no-op on the E8. rx_stream_disable()
+	 * keeps CER.CLKEN when tx_clock_is_live() (a restart armed by
+	 * tx_stream_park_keep_clock()); otherwise it gates the clock and clears
+	 * the flag, and the reprogram below turns it back on at TX's rate.
+	 * dev_data->dir follows START: an RX session in between no longer
+	 * leaves this TX restart unserviced. Placed before the flag is read,
+	 * and after queue_get() so a START that fails does not kill RX. */
+	key = irq_lock();
+	if (dev_data->rx.state == I2S_STATE_RUNNING) {
+		dev_data->rx.state = I2S_STATE_ERROR;
+		rx_stream_disable(&dev_data->rx, dev);
+		/* Release a reader blocked in i2s_dw_read(): with dir now
+		 * I2S_DIR_TX nothing else would ever give rx.sem, the backend
+		 * configures SYS_FOREVER_MS, and alp_i2s_close() waits for
+		 * that read to leave before its DROP could reset the
+		 * semaphore -- a deadlock. The reader finds the queue empty
+		 * and returns -EIO; PREPARE/DROP's k_sem_reset() clears the
+		 * extra count. ponytail: one give releases one waiter. */
+		k_sem_give(&dev_data->rx.sem);
+	}
+	dev_data->dir = I2S_DIR_TX;
+	irq_unlock(key);
+
 	clk_needs_reprogram = !stream->clk_restart_skip_ok || !i2s_clock_is_enabled(i2s);
 	/* alp-sdk issue #2149 (round 2): the flag is one-shot -- consume
 	 * (clear) it on this restart regardless of which branch below
-	 * actually runs. Only another queue-empty underrun exit re-arms it. */
+	 * actually runs. Only tx_stream_park_keep_clock() re-arms it. */
 	stream->clk_restart_skip_ok = false;
 
 	if (clk_needs_reprogram) {
@@ -1095,8 +1407,17 @@ static int tx_stream_start(struct stream *stream, const struct device *dev)
 	}
 	i2s_clock_enable(i2s);
 
-	/* Disable Rx Channel */
+	/* Disable Rx Channel -- alp-sdk issue #2205: a no-op on the E8, real
+	 * on the E7; a RUNNING RX was already stopped (IRER) above. */
 	i2s_rx_channel_disable(i2s);
+	/* alp-sdk issue #2179: mask RX's interrupts alongside the RX channel
+	 * disable directly above, mirroring rx_stream_start(). RXDAM left
+	 * unmasked by an earlier RX phase is the quieter half of the same
+	 * defect -- RXDA needs data to arrive, and a disabled RX channel
+	 * delivers none, so it does not storm the way a stale TXFEM does -- but
+	 * leaving a source unmasked that this direction's ISR gate will never
+	 * service is the shape of the bug, not the specific bit. */
+	i2s_disable_rx_interrupt(i2s);
 
 	/* Clear Overrun interrupt if any */
 	i2s_clear_tx_overrun(i2s);
@@ -1126,7 +1447,8 @@ static void rx_stream_disable(struct stream *stream, const struct device *dev)
 	 * them) -- the ERROR-state exit, the STOPPING-state exit (not an error:
 	 * this is the ISR's own half of a STOP/DRAIN/DROP already in progress),
 	 * the failed-k_mem_slab_alloc() exit, and the failed-queue_put() exit --
-	 * so gating the check here covers every RX teardown path in one place. */
+	 * plus (issue #2205) tx_stream_start() pre-empting a RUNNING RX, so
+	 * gating the check here covers every RX teardown path in one place. */
 	bool tx_live = tx_clock_is_live(i2s, dev_data);
 
 	if (stream->mem_block != NULL) {
@@ -1166,9 +1488,10 @@ static void rx_stream_disable(struct stream *stream, const struct device *dev)
 /*
  * alp-sdk issue #2149: shared body for every TX teardown path that goes
  * through tx_stream_disable()/_ex(). keep_clock is true for exactly one
- * caller -- i2s_tx_irq_handler()'s queue-empty underrun exit -- so a codec
- * relying on this I2S bus for its own bit clock does not see clock loss
- * and latch SHUTDOWN mid-playback. Every other caller of this pair
+ * caller -- tx_stream_park_keep_clock() (the ISR's queue-empty underrun
+ * exit, and since issue #2205 an RX start pre-empting a RUNNING TX) -- so a
+ * codec relying on this I2S bus for its own bit clock does not see clock
+ * loss and latch SHUTDOWN mid-playback. Every other caller of this pair
  * (STOP/DRAIN/DROP via the tx_stream_disable() wrapper below, and the
  * ISR's own already-ERROR and last_block exits) passes/keeps false and
  * gates the clock exactly as before -- including DROP out of ERROR, so an
