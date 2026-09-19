@@ -64,7 +64,7 @@
 		/*
 		 * P2_6 (E1M AH7 / I2S1_SCLK) is muxed as a plain GPIO input here -- but NOT for
 		 * the cc3501e_reply_gate() READY use (cc3501e_bridge.c does not wire
-		 * fw->ready_pin: on the R2 module e1m-aen-evk-01 currently holds, P2_6
+		 * fw->ready_pin: on the R2 module this bench currently holds, P2_6
 		 * is E1M pad AH7 / I2S1_SCLK, the EVK's Arduino CK_RST net, NOT CC35's
 		 * GPIO17 READY -- see cc3501e_reply_gate()'s own doc comment in
 		 * chips/cc3501e/cc3501e_core.c). This group exists ONLY for the

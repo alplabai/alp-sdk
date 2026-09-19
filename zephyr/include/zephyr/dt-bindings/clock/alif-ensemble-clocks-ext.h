@@ -74,7 +74,7 @@
  * (ALIF_SDC_CLK) and cross-checked against the DFP's own
  * PERIPH_CLK_ENA_SDC_CKEN (drivers/include/sys_ctrl_sd.h:30, `(1U << 16)`,
  * set with `|=` at :40). Bench-confirmed the BROKEN state this id fixes:
- * on evk-03 (E1M-AEN803) CLKCTL_PER_MST.PERIPH_CLK_ENA at 0x4903F00C read
+ * on E1M-AEN803 serial 2026W36-0002 CLKCTL_PER_MST.PERIPH_CLK_ENA at 0x4903F00C read
  * 0x00000000 and EVERY SDHC register -- including read-only CAPABILITIES1
  * -- read back 0x00000000 with this gate clear. That setting this id via
  * clock_control_on() actually clears that symptom on real silicon has NOT

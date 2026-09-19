@@ -23,7 +23,7 @@ Two independent gates now sit in front of any hardware touch:
   host-specific like `SE_UART`/`AEN_OPENOCD_CFG`) is required by
   `bench_require_openocd()` — unset, the script exits **2** before opening a
   build directory, resolving the vector table, or touching the probe.
-  Resolve it from `labgrid-client -p e1m-aen-evk-01 show`'s `swd` resource;
+  Resolve it from `labgrid-client -p <your-bench-place> show`'s `swd` resource;
   it is passed as `adapter usb location <value>`, prepended on the OpenOCD
   command line exactly as the shared config's header instructs.
 - **A read-only `init; shutdown` preflight** runs before the real

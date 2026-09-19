@@ -164,8 +164,8 @@ returned by the target on the first SWD read after a line reset.
 **generic** Cortex-M33 r0p1 SW-DPv2 value, **not a GD32G553
 measurement** -- `include/alp/chips/gd32_swd.h` carries a
 `@warning UNVERIFIED on a GD32G553` on it. `0x6BA02477` is separately
-the bench-measured SW-DP ID of the V2N CM33 DAP on place
-`e1mx-v2n-m1-01` -- a *different* target on the same board. The only
+the bench-measured SW-DP ID of the V2N CM33 DAP on a V2N bench
+unit -- a *different* target on the same board. The only
 other GD32 candidate on record, `0x0BE12477`, has no attribution at
 all: no bench transcript, no datasheet reference, no commit message.
 Whether a real GD32G553 answers either value is **unknown** -- neither

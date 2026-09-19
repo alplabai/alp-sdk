@@ -4,7 +4,8 @@ sessions, routed through the board-farm's per-probe isolation wrapper, with
 no in-session halt/reset between `go` and `mem8`, and no silent decode of a
 failed load or a failed read.
 
-Bench-measured on e1m-aen-evk-02/-03 (2026-09-13): an in-session second
+Bench-measured on two E1M-AEN803 modules, serial 2026W36-0001 and serial
+2026W36-0002 (2026-09-13): an in-session second
 `halt` issued after `go` + `Sleep` returned an incoherent core and the `mem8`
 that followed it failed outright, on an app a separate, read-only attach
 proved was still running cleanly. A later bench run (examples/peripheral-io/
@@ -143,7 +144,7 @@ echo "20000d00 D ram_console_buf"
 """
 
 # Verbatim from a real JLinkExe V9.74 transcript through jlink-run.sh on
-# e1m-aen-evk-02 (2026-09-13) -- SIX lines between the echoed `loadbin`
+# E1M-AEN803 serial 2026W36-0001 (2026-09-13) -- SIX lines between the echoed `loadbin`
 # command and `O.K.`, not "immediately after" (the bug a `grep -A3` window
 # missed). Used as the fake wrapper's SUCCESSFUL loadbin reply so the
 # ordinary happy-path tests below exercise the real shape, not a
@@ -407,7 +408,7 @@ def _assert_no_halt_or_reset(lines: list[str], where: str) -> None:
         token = ln.split()[0] if ln.split() else ""
         assert token not in _HALT_OR_RESET_TOKENS, (
             f"'{ln}' re-halts/resets the core in {where} -- this is the exact "
-            f"shape measured broken on evk-02/-03 (alp-sdk#2076): {lines}"
+            f"shape measured broken on two E1M-AEN803 bench modules (alp-sdk#2076): {lines}"
         )
         assert not ln.startswith("RSetType"), (
             f"'{ln}' issues a pin reset in {where}: {lines}"

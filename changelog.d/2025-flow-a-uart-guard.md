@@ -6,7 +6,7 @@ entries (`DEVICE` + `ALP-HE`) and burns it with `app-write-mram -p`, which
 merging into it — the header comment's "keeps the factory DEVICE cfg" was
 true but incomplete: it kept `DEVICE` and silently dropped everything else.
 This destroyed a live A32 Linux boot chain (`BOOTLOAD`/`A32_APP`/`HP_APP`/
-`HE_APP`) on `e1m-aen-evk-01` on 2026-09-07 — one Flow A run left only
+`HE_APP`) on an AEN EVK bench unit on 2026-09-07 — one Flow A run left only
 `DEVICE` and the new `ALP-HE`, with no error and no SES warning (`[SES]
 ATOC ok` prints either way).
 
@@ -51,7 +51,7 @@ to them means deciding whether they should newly depend on `SE_UART` for a
 read-only `gettoc` query, a design tradeoff against their "no SE-UART" Flow D
 premise that this change does not resolve. Refs #2027.
 
-**Validated against real silicon captures** off `e1m-aen-evk-01` (2026-09-07,
+**Validated against real silicon captures** off an AEN EVK bench unit (2026-09-07,
 ANSI intact), and three defects the earlier synthetic-fixture coverage
 missed fixed as a result: the transcript path (`${TMPDIR:-/tmp}/<tag>-atoc-
 before.log`) was NOT run-unique, so two concurrent runs of the same script
