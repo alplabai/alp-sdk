@@ -440,15 +440,52 @@ static void dump_lcd_exp_regs(const char *stage)
 #define PANEL_H 1280
 
 /*
- * One scanline of solid color, reused for every row via display_write's
- * per-call descriptor.  A full 720x1280 RGB565 frame is 1.84 MB -- far too big
- * for a stack/static buffer in ITCM, so we stream it one row at a time straight
- * into the SRAM0 framebuffer the driver owns.  RGB565 little-endian: 0xF800=red,
- * 0x07E0=green, 0x001F=blue, 0xFFFF=white.
+ * One scanline of solid colour, reused for every row via display_write's
+ * per-call descriptor.  A full 720x1280 frame is 1.8-2.8 MB depending on the
+ * layer format -- far too big for a stack/static buffer in ITCM -- so we stream
+ * it one row at a time straight into the SRAM0 framebuffer the driver owns.
+ *
+ * The bytes-per-pixel here MUST match the cdc200 layer's `pixel-fmt-l1`.  They
+ * live in different files and nothing used to tie them together, so this app
+ * filled 16-bit RGB565 rows into a layer configured "rgb-888": the row
+ * descriptor was then 1440 bytes where the driver wanted 2160, every
+ * display_write() returned -EINVAL, and NO frame was written and scanout never
+ * started -- while the app still reported the chain up to the point of the
+ * write.  Deriving the size from the devicetree makes the two unable to
+ * disagree, and the BUILD_ASSERT turns an unsupported format into a compile
+ * error rather than a blank panel.
  */
-#define FILL_COLOR_RGB565 0x07E0U /* solid green -- easy to spot on glass */
+#define PANEL_FMT_IS_RGB888                                                                        \
+	DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_888)
+#define PANEL_FMT_IS_RGB565                                                                        \
+	DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_565)
 
-static uint16_t row_buf[PANEL_W];
+BUILD_ASSERT(PANEL_FMT_IS_RGB888 || PANEL_FMT_IS_RGB565,
+	     "aen-dsi-display fills only rgb-888 or rgb-565; teach it the shield's pixel-fmt-l1");
+
+#if PANEL_FMT_IS_RGB888
+#define PANEL_BYTES_PER_PIXEL 3U
+#else
+#define PANEL_BYTES_PER_PIXEL 2U
+#endif
+
+/* Solid green in whichever format the layer is actually configured for. */
+static uint8_t row_buf[PANEL_W * PANEL_BYTES_PER_PIXEL];
+
+static void fill_row_green(void)
+{
+	for (uint16_t i = 0; i < PANEL_W; i++) {
+#if PANEL_FMT_IS_RGB888
+		row_buf[i * 3U + 0U] = 0x00U; /* B */
+		row_buf[i * 3U + 1U] = 0xFFU; /* G */
+		row_buf[i * 3U + 2U] = 0x00U; /* R */
+#else
+		/* RGB565 little-endian 0x07E0 = green. */
+		row_buf[i * 2U + 0U] = 0xE0U;
+		row_buf[i * 2U + 1U] = 0x07U;
+#endif
+	}
+}
 
 static bool dev_ready(const char *name, const struct device *dev)
 {
@@ -664,9 +701,7 @@ int main(void)
 	bool write_ok   = false;
 	bool scanout_ok = false;
 	if (disp_ok) {
-		for (uint16_t i = 0; i < PANEL_W; i++) {
-			row_buf[i] = FILL_COLOR_RGB565;
-		}
+		fill_row_green();
 
 		struct display_buffer_descriptor desc = {
 			.buf_size = sizeof(row_buf),
@@ -685,7 +720,8 @@ int main(void)
 		}
 		if (rc == 0) {
 			write_ok = true;
-			printk("display_write: full 720x1280 frame OK (0x%04x)\n", FILL_COLOR_RGB565);
+			printk("display_write: full 720x1280 green frame OK (%u bytes/pixel)\n",
+			       (unsigned int)PANEL_BYTES_PER_PIXEL);
 			/* Start scanout: DSI video mode + CDC_EN, so the FB reaches glass. */
 			rc = display_blanking_off(disp);
 			printk("blanking_off: rc=%d cdc-glb=0x%08x\n", rc, sys_read32(CDC_GLB_CTRL_ADDR));
@@ -736,7 +772,7 @@ int main(void)
 
 	if (pass) {
 		printk("RESULT PASS: RK055HDMIPI4MA0 chain UP -- hx8394 panel + mipi-dsi "
-		       "+ cdc200 display ready, full-screen RGB565 frame written and "
+		       "+ cdc200 display ready, full-screen green frame written and "
 		       "scanning out cleanly; pixels-on-glass: confirm green on the panel\n");
 	} else {
 		printk("RESULT FAIL: DSI display chain not fully up "
