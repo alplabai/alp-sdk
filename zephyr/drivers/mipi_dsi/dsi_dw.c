@@ -383,8 +383,54 @@ void dw_calc_lpcmd_time(const struct device *dev,
 	/*
 	 * [MAX_RD_TIME] * LANEBYTECLK_period < [OUTVACT_LPCMD_TIME] *
 	 *					16 * TXCLKESC_period
+	 *
+	 * That constraint is an UPPER bound, and only for reads issued during
+	 * active video: it keeps an LP read inside the blanking LP-command
+	 * window.  MAX_RD_TIME also has a LOWER bound the formula ignores --
+	 * the time the peripheral actually needs to answer -- and using the
+	 * upper bound alone silently sizes the read timeout from the LINE TIME.
+	 *
+	 * That is a real defect, not a theoretical one.  The same panel, same
+	 * driver, differing only in pixel clock:
+	 *
+	 *   RGB888 @ 40 MHz      MAX_RD_TIME 949 @ 60.0 MHz lane byte clk = 15.8 us
+	 *                        -> RDDID rc=3, RDDST rc=4 both answer
+	 *   RGB565 @ 57.142857   MAX_RD_TIME 591 @ 57.1 MHz lane byte clk = 10.3 us
+	 *                        -> RDDID len=3 and RDDST len=4 both rc=-5,
+	 *                           while 1- and 2-byte reads still answer
+	 *
+	 * A longer response takes longer to shift out over LPDT, so the short
+	 * reads fit the 10.3 us budget and the longer ones do not.  This is the
+	 * "reads of more than one byte never answer" behaviour tracked in #2199;
+	 * it was never a panel quirk, it is this timeout moving with the pixel
+	 * clock.
+	 *
+	 * So floor it at what a read needs.  One LP bit takes one escape clock,
+	 * i.e. esc_clk_div lane-byte clocks, and the budget below covers a long
+	 * response (4-byte header + payload + 2-byte CRC) plus BTA turnaround
+	 * and LPDT entry/exit, with room to spare.  Reads are issued in COMMAND
+	 * mode, where there is no video LP window to fit inside at all, so
+	 * raising it past the video-derived value costs nothing there; a host
+	 * that cannot meet both bounds simply cannot read during active video,
+	 * which is already what the hardware does.
+	 *
+	 * The clamp is also load-bearing: outvact is signed and has had the
+	 * LPDT-entry delay subtracted, so on a short line it can go NEGATIVE,
+	 * and the old expression assigned that straight into a uint32_t --
+	 * underflowing to a huge MAX_RD_TIME rather than a small one.
 	 */
-	max_rd_time = (outvact * data->esc_clk_div) - 1;
+	if (outvact > 0) {
+		max_rd_time = ((uint32_t)outvact * data->esc_clk_div) - 1U;
+	} else {
+		max_rd_time = 0U;
+	}
+
+	if (max_rd_time < (DSI_DW_RD_RESPONSE_BITS * data->esc_clk_div)) {
+		max_rd_time = DSI_DW_RD_RESPONSE_BITS * data->esc_clk_div;
+	}
+	if (max_rd_time > DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK) {
+		max_rd_time = DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK;
+	}
 
 	/*
 	 * OUTVACT LP-CMD Time is time available in bytes to transmit cmd in

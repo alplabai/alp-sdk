@@ -391,6 +391,14 @@
 #define  DSI_PHY_CAL_TX_SKEW_CAL_HS		BIT(0)
 
 /* Data Lane Timer Read Config Register */
+/*
+ * Lower bound for MAX_RD_TIME, in LP bits: a long read response (4-byte packet
+ * header + payload + 2-byte CRC) plus BTA turnaround and LPDT entry/exit, with
+ * margin.  One LP bit is one escape clock, so the register value is this times
+ * esc_clk_div.  See the MAX_RD_TIME floor in dsi_dw_calc_lpcmd_time().
+ */
+#define  DSI_DW_RD_RESPONSE_BITS		640U
+
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK	GENMASK(14, 0)
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_SHIFT	0
 
