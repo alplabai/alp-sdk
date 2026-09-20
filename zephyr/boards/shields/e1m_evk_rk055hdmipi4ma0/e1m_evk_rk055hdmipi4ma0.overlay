@@ -56,7 +56,17 @@
 	/*
 	 * Expander P0 enables the panel supply.  Modelled as a boot-on fixed
 	 * regulator so the panel is powered before the hx8394 driver resets it and
-	 * sends its DCS init sequence.
+	 * sends its DCS init sequence.  The lcd_exp hog below has already driven
+	 * RESX low by the time this runs, so the panel never sees VCC rise against
+	 * an undefined reset level.
+	 *
+	 * No startup-delay-us here: Zephyr 4.4.1 applies that property only on the
+	 * regulator_enable() path (regulator_common.c, the `else if` arm), and a
+	 * regulator-fixed with regulator-boot-on/always-on passes is_enabled=true
+	 * into regulator_common_init() and takes the refcount-only arm instead, so
+	 * the property would never be read.  The settle before RESX is released is
+	 * the hx8394 driver's own 1 ms VCC->RESX-valid wait plus its 1 ms reset-low
+	 * hold (display_hx8394.c), on top of the whole 75..90 init range.
 	 */
 	lcd_pwr_en: regulator-lcd-pwr-en {
 		compatible = "regulator-fixed";
@@ -116,6 +126,37 @@
 		#gpio-cells = <2>;
 		ngpios = <8>;
 		status = "okay";
+
+		/*
+		 * RESX defined LOW before the panel supply comes up.
+		 *
+		 * The TCAL9538 leaves its own reset with every pin an INPUT, and
+		 * gpio_pca_series_init() only restores that POR state (OUTPUT=0xff,
+		 * CONFIG=0xff).  So without this hog P1 stays high-impedance until the
+		 * hx8394 driver configures it at CONFIG_APPLICATION_INIT_PRIORITY (90),
+		 * which is AFTER regulator_fixed turns the panel supply on at
+		 * CONFIG_REGULATOR_FIXED_INIT_PRIORITY (75): the panel is powered with
+		 * RESX floating on the expander's weak pull for ~15 init levels.  A
+		 * floating RESX during the VCC ramp is the failure this prevents -- the
+		 * HX8394 samples an undefined reset level as it powers, which is the
+		 * ranked cause of the intermittent whole-panel DCS silence per cold
+		 * cycle seen on e1m-aen-evk-01 (#2199).
+		 *
+		 * GPIO_ACTIVE_HIGH + output-low => gpio_pin_configure(GPIO_OUTPUT_INACTIVE)
+		 * => the expander pin is driven physically low, i.e. RESX asserted.
+		 * gpio_hogs_init() (zephyr/drivers/gpio/gpio_hogs.c) runs at POST_KERNEL
+		 * CONFIG_GPIO_HOGS_INIT_PRIORITY, which Kconfig.defconfig puts strictly
+		 * between the expander and the regulator, and it only calls
+		 * gpio_pin_configure() -- Zephyr hogs do not claim or lock a pin, so the
+		 * hx8394 driver re-configuring the same pin at 90 and pulsing it is
+		 * legal and unchanged.
+		 */
+		lcd_reset_hog: lcd-reset-hog {
+			gpio-hog;
+			gpios = <1 GPIO_ACTIVE_HIGH>;
+			output-low;
+			line-name = "lcd-resx";
+		};
 	};
 };
 

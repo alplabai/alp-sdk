@@ -31,6 +31,20 @@ config GPIO
 config GPIO_PCA_SERIES
 	default y
 
+# The overlay's lcd_exp hog drives the panel RESX low, and it only works in the
+# window between the two drivers that own that pin's timing:
+#
+#   GPIO_PCA_SERIES_INIT_PRIORITY (50, = I2C_INIT_PRIORITY)  the expander exists
+#   ---> GPIO_HOGS_INIT_PRIORITY (60)                        RESX driven low
+#   REGULATOR_FIXED_INIT_PRIORITY (75)                       panel supply on
+#   APPLICATION_INIT_PRIORITY (90)                           hx8394 reset pulse
+#
+# Upstream's default of 41 is below the expander, so gpio_hogs_init() would find
+# the port not ready, log an error and configure nothing.  aen-dsi-display
+# BUILD_ASSERTs the window, since a Kconfig default cannot.
+config GPIO_HOGS_INIT_PRIORITY
+	default 60
+
 config REGULATOR
 	default y
 
