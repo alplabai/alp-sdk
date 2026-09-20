@@ -467,6 +467,26 @@ static int cdc200_blanking_off(const struct device *dev)
 	}
 #endif
 	cdc200_global_enable(DEVICE_MMIO_GET(dev));
+
+	/*
+	 * Reload the shadow registers after enabling the CDC.
+	 *
+	 * Every layer register that matters -- LAYER_EN, the window, the pixel
+	 * format, the framebuffer address, the blend factors -- is shadowed, and
+	 * they are all written in cdc200_init(), long before anything sets CDC_EN.
+	 * Belt and braces: this costs one register write and removes any question
+	 * about whether the init-time reload, issued while the controller was
+	 * still stopped, actually transferred them.
+	 *
+	 * It is NOT a fix for a known defect.  It was added on the theory that the
+	 * init-time reload does not transfer on a stopped CDC, and the bench then
+	 * refuted that: with this call in place the layer's ACTIVE registers read
+	 * back exactly as configured -- CDC_L1_CTRL 0x00000001 (LAYER_EN set),
+	 * window 720x1280, PIX_FORMAT 0x1 (RGB888), CFB_ADDR 0x02100000, pitch
+	 * 2160 -- and the glass was unchanged.  So the transfer was already
+	 * happening.  Keep the call, but do not cite it as the cause of anything.
+	 */
+	cdc200_shadow_reload_control(DEVICE_MMIO_GET(dev));
 	return 0;
 }
 
