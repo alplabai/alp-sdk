@@ -517,7 +517,7 @@ config SDHC_RSP_136_HAS_CRC
 	  left by 8 bits to put every field where the SD stack expects it.
 	  The driver has always gated that shift on this symbol, but nothing
 	  defined it, so IS_ENABLED() was 0 and the shift was dead code.
-	  Confirmed on the bench (evk-03), same card, same MBR ending at
+	  Confirmed on the bench (E1M-AEN803 serial 2026W36-0002), same card, same MBR ending at
 	  sector 0x0EEC0000 (250347520): with the symbol undefined the stack
 	  reported 524800 sectors; with the symbol defined but the realign
 	  loop's carry direction still wrong (#2131) it reported 49020928

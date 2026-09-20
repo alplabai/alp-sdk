@@ -2,7 +2,7 @@
 # Copyright 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0
 """
-CI gate covering two related silent-overlay-drop defects:
+CI gate covering four related silent-overlay-drop defects:
 
 1. (issue #1009) If an example ships >=1 board-qualified overlay/conf
    under `boards/`, then every core its `board.yaml` declares via
@@ -211,24 +211,99 @@ silently today -- this check does not catch it either, for the same
 declaration-scoping reason: none of those 12 declares an AEN401/AEN601
 `platform_allow` entry. The broader, repo-state-keyed check below would.
 
-A broader, deferred alternative: instead of keying off what a
+A broader, still-deferred alternative: instead of keying off what a
 `testcase.yaml` happens to *declare*, key off `boards/` content plus
 `zephyr/boards/alp/` tree membership directly -- for every
 `boards/<alp_e1m_SKUA>_<quals>.overlay` an example ships, if
 `zephyr/boards/alp/` also ships a sibling SKU's board tree whose
 `metadata/e1m_modules/<SKU>.yaml` `topology.<core>.board:` names the
 same core, require the sibling's overlay too (or an explicit allow-list
-entry). This is fully computable from committed metadata and would cover
-all 72 AEN801-but-not-AEN803 examples above plus the AEN401/AEN601 gap,
-with no dependence on what any given `testcase.yaml` declares. It is
-deliberately NOT implemented here: it is red today (the 12 HP/AEN401/
-AEN601 examples above), and landing it would need either those overlays
-or an allow-list alongside it -- both larger, separate changes. Filed as
-a follow-up rather than silently deferred.
+entry) -- with NO dependence on any `platform_allow` entry existing at
+all. This is fully computable from committed metadata and would cover
+all 72 AEN801-but-not-AEN803 examples above plus the AEN401/AEN601 gap.
+It is deliberately NOT implemented here: it is red today (the 12 HP/
+AEN401/AEN601 examples above), and landing it would need either those
+overlays or an allow-list alongside it -- both larger, separate changes.
+Filed as a follow-up rather than silently deferred. "Extension (issue
+#2209)" below implements a narrower, declaration-triggered relative of
+this idea -- see that section for how it differs and why it still does
+NOT close the AEN401/AEN601/HP gap described here.
+
+Extension (issue #2207): a boards/ directory with no app
+---------------------------------------------------------
+A third, independent check: every `examples/**/boards/` directory's parent
+must hold a `CMakeLists.txt`. A `boards/` directory with no app next to it
+is built by nothing, so both checks above -- and
+`check_example_board_overlay_content_parity.py`, which only compares a file
+with its SKU sibling -- walk straight past it. #2198 found one on `dev`:
+`00bcd9f2f` (#2122) renamed `examples/aen/aen-sdcard-readout` to
+`aen-sdhc-probe` while `df628b6ab` (#2176) added an AEN803 overlay at the old
+path, and both merged -- leaving that overlay, with `sdhc0` still enabled
+against the 2626-R2 SDIO mux #2051 disabled it for, alone in a directory with
+no app. Nothing breaks while it sits there; anyone who restores or copies the
+app inherits it. It is the same silently-dropped-overlay class as #1009 and
+#2101, reached by a rename instead of a missing file, which is why it lives
+here. No allowlist: the fix is always to delete the directory or move it to
+where the app now lives.
+
+Only git-TRACKED files count, so a local `west build` inside an example (its
+gitignored `build/zephyr/boards/`, `build/Kconfig/boards/`) is not reported.
+`<app>/sysbuild/<image>/boards/` is accepted when `<app>/CMakeLists.txt`
+exists: that is sysbuild's per-image configuration directory
+(`zephyr/share/sysbuild/cmake/modules/sysbuild_extensions.cmake`, the
+`${APP_DIR}/sysbuild/${ZBUILD_APPLICATION}` lookup). Outside a git checkout
+(e.g. a `git archive` tree) every file on disk counts.
+
+Extension (issue #2209): same-PCB sibling undeclared
+------------------------------------------------------
+A fourth, independent check -- narrower than the "broader, deferred
+alternative" filed as a follow-up when #2101 landed (see that note above;
+this is NOT that check). A scenario's `platform_allow` names a real
+`alp_e1m_*` SKU A core target; `boards/` ships a qualified overlay for that
+same core under a SIBLING SKU B, where A and B are the SAME PCB (their
+`metadata/e1m_modules/E1M-<SKU>.yaml` declare the same `family` AND the same
+`silicon_variant` -- the identical pairing
+`check_example_board_overlay_content_parity.py`'s `_pcb_key` uses); B's
+target is not declared anywhere this scenario's own build can reach. Like
+`_platform_allow_overlay_problems` above, this still requires a real
+`platform_allow` DECLARATION to trigger (SKU A's), and both overlays to
+already exist on disk -- it does NOT fire from `boards/` content alone with
+zero declarations, so it does NOT close the AEN401/AEN601/HP gap the
+deferred-alternative note above describes. What it DOES catch, that the
+#2101 check above does not: the ~50 scenarios #2209 declared the AEN803
+target for (each named only the AEN801 target while `boards/` already
+shipped the same-PCB AEN803 overlay for the same core) -- because this
+check's trigger is `boards/` CONTENT plus SoM-preset pairing for the
+DECLARED SKU, not "some declared entry already matches something on disk".
+
+Only `extra_dtc_overlay_files`, or an `extra_args` entry starting
+`DTC_OVERLAY_FILE=` or `CONF_FILE=`, REPLACES (rather than supplements)
+Zephyr's own board-default-overlay auto-discovery (verified against
+`zephyr/cmake/modules/configuration_files.cmake`'s `if(NOT DEFINED
+DTC_OVERLAY_FILE)` guard and `config_parser.py`'s `extract_fields_from_arg_list`
+pull-out of those two CMake vars from `extra_args`); `extra_conf_files` and
+`extra_overlay_confs` only ADD files and never suppress this check. A
+scenario pinned this way is deliberately single-SKU by design -- the
+`aen-sdhc-probe`/`aen-ethernet-link` twin scenarios #2209 added, each
+pinning one SKU's file explicitly and giving the other SKU its OWN twin
+scenario rather than a second `platform_allow` entry on the same one -- so
+such a scenario is not required to declare its OWN sibling target; instead,
+some OTHER pinned scenario in the same `testcase.yaml` must declare the
+sibling SKU's target for the same core (the twin). Deleting that twin, with
+nothing else in the file pinning the sibling's own file, fails this check.
+A non-pinned scenario gets no such fallback: it must declare its own
+sibling target itself, in the same scenario.
+
+`platform_allow` is read as Twister actually resolves it: a `set`-type
+field, so a scenario-level value MERGES with (not replaces) the file's
+`common: platform_allow:` default (`config_parser.py`'s per-scenario merge,
+~lines 176-199) -- not "scenario replaces common" as an earlier version of
+this note claimed.
 """
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -350,24 +425,29 @@ def _qualified_target_to_stems(target: str) -> list[str]:
     return stems
 
 
+def _as_list(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value.split()
+    return list(value)
+
+
 def _platform_allow_entries(testcase_yaml: Path) -> set[str]:
     """Every `platform_allow` entry across a testcase.yaml's scenarios --
-    a scenario's own `platform_allow:` if it has one, else the file's
-    top-level `common: platform_allow:` default (Twister semantics: a
-    scenario-level field replaces the common default outright, it does
-    not merge with it)."""
+    a scenario's own `platform_allow:` MERGED with the file's top-level
+    `common: platform_allow:` default when both are present (Twister
+    semantics: `platform_allow` is a `set`-type field --
+    `config_parser.py`'s `testsuite_valid_keys["platform_allow"]` --  and
+    its per-scenario merge, ~`config_parser.py:176-199`, concatenates a
+    `set`/`list`-type common value with the scenario's own rather than
+    letting the scenario replace it outright); when a scenario declares no
+    `platform_allow` of its own, the common default applies alone."""
     with testcase_yaml.open(encoding="utf-8") as f:
         doc = yaml.safe_load(f) or {}
 
-    def _as_list(value):
-        if value is None:
-            return None
-        if isinstance(value, str):
-            return value.split()
-        return list(value)
-
     common = doc.get("common") or {}
-    common_allow = _as_list(common.get("platform_allow")) if isinstance(common, dict) else None
+    common_allow = (_as_list(common.get("platform_allow")) or []) if isinstance(common, dict) else []
 
     tests = doc.get("tests") or {}
     entries: set[str] = set()
@@ -376,9 +456,8 @@ def _platform_allow_entries(testcase_yaml: Path) -> set[str]:
     for scenario in tests.values():
         if not isinstance(scenario, dict):
             continue
-        allow = _as_list(scenario.get("platform_allow"))
-        if allow is None:
-            allow = common_allow or []
+        own = _as_list(scenario.get("platform_allow"))
+        allow = common_allow + own if own is not None else common_allow
         entries.update(str(e) for e in allow)
     return entries
 
@@ -449,9 +528,220 @@ def _platform_allow_overlay_problems(root: Path) -> list[str]:
     return problems
 
 
+def _example_files(root: Path) -> list[Path]:
+    """Every tracked file under examples/ (every file, outside git)."""
+    import subprocess  # lazy: only this check shells out
+
+    proc = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "-z", "--", "examples"],
+        capture_output=True, check=False)
+    if proc.returncode == 0:
+        return [root / f for f in proc.stdout.decode("utf-8").split("\0") if f]
+    return [p for p in (root / "examples").rglob("*") if p.is_file()]
+
+
+def _stranded_boards_dir_problems(root: Path) -> list[str]:
+    """Issue #2207: a `boards/` directory whose parent has no CMakeLists.txt."""
+    if not (root / "examples").is_dir():
+        return []
+    stranded: dict[Path, list[str]] = {}
+    for f in _example_files(root):
+        parts = f.relative_to(root).parts
+        for i, part in enumerate(parts[:-1]):
+            if part != "boards":
+                continue
+            boards = root.joinpath(*parts[:i + 1])
+            app = boards.parent
+            if (i >= 3 and parts[i - 2] == "sysbuild"
+                    and (app.parent.parent / "CMakeLists.txt").is_file()):
+                continue  # <app>/sysbuild/<image>/boards/: sysbuild's own
+            if not (app / "CMakeLists.txt").is_file():
+                stranded.setdefault(boards, []).append(
+                    "/".join(parts[i + 1:]))
+    return [
+        f"{boards.relative_to(root).as_posix()}/: no CMakeLists.txt in "
+        f"{boards.parent.relative_to(root).as_posix()}/, so nothing builds "
+        f"these files ({', '.join(sorted(names))}) -- delete the directory, "
+        f"or move it to where the app now lives (issue #2207 class)"
+        for boards, names in sorted(stranded.items())
+    ]
+
+
+_QUALIFIED_STEM_RE = re.compile(r"^alp_e1m_([a-z0-9]+)_(.+)$")
+# Only these actually REPLACE (rather than supplement) Zephyr's own
+# board-default-overlay auto-discovery -- verified against
+# `zephyr/cmake/modules/configuration_files.cmake`'s `if(NOT DEFINED
+# DTC_OVERLAY_FILE)` guard (only `extra_dtc_overlay_files`, mapped to the
+# CMake var `DTC_OVERLAY_FILE`, and an `extra_args` entry starting
+# `DTC_OVERLAY_FILE=` -- `config_parser.py`'s `extract_fields_from_arg_list`
+# pulls that prefix, and `CONF_FILE=`, out of `extra_args` specially -- set
+# it). `extra_conf_files` (-> `EXTRA_CONF_FILE`) and `extra_overlay_confs`
+# (-> `OVERLAY_CONFIG`) are separate, ADDITIVE mechanisms and never suppress
+# `boards/` auto-discovery, so they must NOT count here.
+_PIN_ARG_PREFIXES = ("DTC_OVERLAY_FILE=", "CONF_FILE=")
+
+
+def _is_pinned(common: dict, scenario: dict) -> bool:
+    """True if `scenario` (merged with the file's `common:` block, same
+    additive semantics Twister uses for `extra_dtc_overlay_files`/
+    `extra_args`) sets `extra_dtc_overlay_files` or an `extra_args` entry
+    naming `DTC_OVERLAY_FILE=`/`CONF_FILE=` -- see `_PIN_ARG_PREFIXES`."""
+    if common.get("extra_dtc_overlay_files") or scenario.get("extra_dtc_overlay_files"):
+        return True
+    args = (_as_list(common.get("extra_args")) or []) + (_as_list(scenario.get("extra_args")) or [])
+    return any(str(a).startswith(_PIN_ARG_PREFIXES) for a in args)
+
+
+def _scenario_platform_allow_and_pins(testcase_yaml: Path):
+    """Yield (scenario_name, platform_allow entries, is_pinned) per
+    scenario in a testcase.yaml. `platform_allow` is `common:` MERGED with
+    the scenario's own (Twister's `set`-type per-scenario merge, see
+    `_platform_allow_entries`'s docstring -- NOT "scenario replaces
+    common"). `is_pinned` is `_is_pinned()` -- see `_PIN_ARG_PREFIXES`."""
+    with testcase_yaml.open(encoding="utf-8") as f:
+        doc = yaml.safe_load(f) or {}
+
+    common = doc.get("common") or {}
+    common = common if isinstance(common, dict) else {}
+    common_allow = _as_list(common.get("platform_allow")) or []
+
+    tests = doc.get("tests") or {}
+    if not isinstance(tests, dict):
+        return
+    for scenario_name, scenario in tests.items():
+        if not isinstance(scenario, dict):
+            continue
+        own = _as_list(scenario.get("platform_allow"))
+        allow = common_allow + own if own is not None else common_allow
+        pins = _is_pinned(common, scenario)
+        yield scenario_name, {str(e) for e in allow}, pins
+
+
+def _all_preset_pcb_and_topology(presets_dir: Path
+                                 ) -> dict[str, tuple[tuple[str, str] | None, dict[str, str]]]:
+    """lowercase SKU (e.g. 'aen801') -> ((family, silicon_variant) or None,
+    {core: raw fully-qualified board target}), for every
+    `metadata/e1m_modules/E1M-*.yaml` preset. Read once per run, not once
+    per scenario -- there are ~10 presets and potentially hundreds of
+    scenarios."""
+    out: dict[str, tuple[tuple[str, str] | None, dict[str, str]]] = {}
+    for preset in sorted(presets_dir.glob("E1M-*.yaml")):
+        sku = preset.stem[len("E1M-"):].lower()
+        with preset.open(encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        family, variant = doc.get("family"), doc.get("silicon_variant")
+        pcb = (family, variant) if family and variant else None
+        topology = doc.get("topology") or {}
+        targets: dict[str, str] = {}
+        if isinstance(topology, dict):
+            for core, entry in topology.items():
+                if isinstance(entry, dict) and "board" in entry:
+                    targets[core] = str(entry["board"]).strip().split()[0]
+        out[sku] = (pcb, targets)
+    return out
+
+
+def _same_pcb_sibling_undeclared_problems(root: Path) -> list[str]:
+    """Issue #2209 item 4a: a scenario declares SKU A's core target while
+    `boards/` ships the same-PCB SKU B's file for that same core, and B is
+    undeclared anywhere this scenario's own build can reach. See the module
+    docstring's "Extension (issue #2209)" section for the full rationale.
+
+    A non-pinned scenario must declare its own sibling target itself (in
+    the SAME scenario) -- a coincidental match in an unrelated scenario
+    elsewhere in the file does not satisfy it. A PINNED scenario (see
+    `_is_pinned`) cannot declare its own sibling this way by design (that
+    shape is `check_example_board_overlay_content_parity.py`'s
+    `_testcase_pin_problems` hazard -- see the docstring), so it is instead
+    satisfied only by another PINNED scenario, in the same testcase.yaml,
+    that itself declares the sibling SKU's target for the same core: its
+    twin. Deleting a twin scenario, with nothing else in the file pinning
+    the sibling SKU's own file, must fail this check -- a stray non-pinned
+    scenario that happens to also declare the sibling target does not save
+    it."""
+    problems: list[str] = []
+    examples_dir = root / "examples"
+    presets_dir = root / "metadata" / "e1m_modules"
+    if not examples_dir.is_dir() or not presets_dir.is_dir():
+        return problems
+
+    presets = _all_preset_pcb_and_topology(presets_dir)
+
+    for testcase_yaml in sorted(examples_dir.rglob("testcase.yaml")):
+        example_dir = testcase_yaml.parent
+        rel = example_dir.relative_to(root)
+        boards_dir = example_dir / "boards"
+        if not boards_dir.is_dir():
+            continue
+        present_stems = {f.stem for f in boards_dir.iterdir() if f.is_file()}
+        if not any(s.startswith(_SOM_BOARD_PREFIX) for s in present_stems):
+            continue
+
+        # Every scenario in the file, with its own declared stems, read
+        # once so the pinned-twin fallback below can look sideways at
+        # OTHER scenarios without re-parsing the file per scenario.
+        scenarios = list(_scenario_platform_allow_and_pins(testcase_yaml))
+        per_scenario_stems = [
+            {s for e in allow if e.startswith(_SOM_BOARD_PREFIX)
+             for s in _qualified_target_to_stems(e)}
+            for _, allow, _ in scenarios
+        ]
+
+        for idx, (scenario, allow, pinned) in enumerate(scenarios):
+            som_entries = {e for e in allow if e.startswith(_SOM_BOARD_PREFIX)}
+            if not som_entries:
+                continue
+            declared_stems = per_scenario_stems[idx]
+
+            for entry in sorted(som_entries):
+                m = _QUALIFIED_STEM_RE.match(entry.replace("/", "_"))
+                if not m:
+                    continue
+                sku_a, suffix = m.group(1), m.group(2)
+                pcb_a = presets.get(sku_a, (None, {}))[0]
+                if pcb_a is None:
+                    continue
+
+                for sku_b, (pcb_b, targets_b) in presets.items():
+                    if sku_b == sku_a or pcb_b != pcb_a:
+                        continue
+                    for raw_target in targets_b.values():
+                        m2 = _QUALIFIED_STEM_RE.match(raw_target.replace("/", "_"))
+                        if not m2 or m2.group(2) != suffix:
+                            continue
+                        stems_b = _qualified_target_to_stems(raw_target)
+                        if not any(s in present_stems for s in stems_b):
+                            continue  # not shipped -- #2101's business, not this one
+                        if any(s in declared_stems for s in stems_b):
+                            continue  # this scenario already declares it itself
+                        if pinned and any(
+                            other_pinned and any(s in other_stems for s in stems_b)
+                            for other_idx, (_, _, other_pinned) in enumerate(scenarios)
+                            if other_idx != idx
+                            for other_stems in [per_scenario_stems[other_idx]]
+                        ):
+                            continue  # a sibling PINNED twin scenario declares it
+                        problems.append(
+                            f"{rel}: testcase.yaml scenario {scenario!r} "
+                            f"declares platform_allow entry '{entry}' (SKU "
+                            f"{sku_a.upper()}) but boards/{stems_b[0]}.* "
+                            f"ships the same-PCB SKU {sku_b.upper()}'s file "
+                            f"for the same core, undeclared anywhere this "
+                            f"scenario's own build reaches -- "
+                            + (f"give {sku_b.upper()} its own twin scenario "
+                               f"pinning its own file (issue #2209 item 3 shape)"
+                               if pinned else
+                               f"add '{raw_target}' to platform_allow")
+                            + " (issue #2209 class)"
+                        )
+    return problems
+
+
 def find_problems(root: Path) -> list[str]:
     problems = _declared_core_overlay_problems(root)
     problems.extend(_platform_allow_overlay_problems(root))
+    problems.extend(_stranded_boards_dir_problems(root))
+    problems.extend(_same_pcb_sibling_undeclared_problems(root))
     return problems
 
 
@@ -468,7 +758,10 @@ def main() -> int:
         return 1
     print("OK: every example board.yaml core with an app: key, and every "
           "testcase.yaml alp_e1m_* platform_allow entry, has a matching "
-          "boards/ overlay wherever the example ships qualified overlays.")
+          "boards/ overlay wherever the example ships qualified overlays; "
+          "every boards/ directory sits next to a CMakeLists.txt; and no "
+          "scenario leaves a same-PCB sibling SKU's shipped overlay "
+          "undeclared.")
     return 0
 
 

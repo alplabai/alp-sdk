@@ -222,6 +222,7 @@ tabulated flag for a non-forwarding verb is listed in that verb's --help.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shlex
 import shutil
@@ -497,7 +498,9 @@ def _run_tan(tan_bin: str, *args: str, timeout: int = 20) -> subprocess.Complete
     back -- reported flags as missing that `--help` demonstrably lists. Both
     failure modes are invisible on the Linux CI runner, where UTF-8 is the
     default. `errors="replace"` keeps a stray undecodable byte from turning a
-    reportable problem back into a traceback.
+    reportable problem back into a traceback. `tan` is itself a Python program,
+    so `PYTHONIOENCODING=utf-8` makes it WRITE UTF-8 as well -- decoding UTF-8
+    alone would not match a child still writing its locale (#2197).
     """
     return subprocess.run(
         [tan_bin, *args],
@@ -505,6 +508,7 @@ def _run_tan(tan_bin: str, *args: str, timeout: int = 20) -> subprocess.Complete
         text=True,
         encoding="utf-8",
         errors="replace",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         timeout=timeout,
     )
 

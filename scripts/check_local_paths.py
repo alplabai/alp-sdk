@@ -130,7 +130,7 @@ EXEMPT_PREFIXES: tuple[str, ...] = ()
 def _tracked_files(root: Path) -> list[str]:
     out = subprocess.run(
         ["git", "-C", str(root), "ls-files"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, encoding="utf-8", check=True,
     )
     return out.stdout.splitlines()
 

@@ -34,6 +34,7 @@ on:
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
       # The #2101 platform_allow-parity half reads examples/**/boards/*
       # content directly, not just testcase.yaml/board.yaml -- a PR that
       # only adds/renames/deletes a boards/ overlay must fire this job too
@@ -74,6 +75,8 @@ on:
       - 'docs/**/*.md'
       - 'examples/**/*.md'
       - 'examples/**/*.c'
+      - 'examples/**/*.h'
+      - 'scripts/check_cc3501e_bridge_copies.py'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'meta-alp-sdk/**'
@@ -126,6 +129,7 @@ on:
       # check 4 reads aen_atoc.SLOT0_WINDOWS, so an aen_atoc-only PR must fire it too (#1981)
       - 'scripts/aen_atoc.py'
       - 'scripts/check_example_board_overlay_parity.py'
+      - 'scripts/check_example_board_overlay_content_parity.py'
       # The #2101 platform_allow-parity half reads examples/**/boards/*
       # content directly, not just testcase.yaml/board.yaml -- a PR that
       # only adds/renames/deletes a boards/ overlay must fire this job too
@@ -163,6 +167,8 @@ on:
       - 'docs/**/*.md'
       - 'examples/**/*.md'
       - 'examples/**/*.c'
+      - 'examples/**/*.h'
+      - 'scripts/check_cc3501e_bridge_copies.py'
       - 'west.yml'
       - 'metadata/libraries/**'
       - 'meta-alp-sdk/**'
@@ -578,6 +584,9 @@ jobs:
       - name: Gate — example board.yaml declared cores match their boards/ overlays
         run: python3 scripts/check_example_board_overlay_parity.py
 
+      - name: Gate — same-PCB SKU board overlays carry the same content (#2198)
+        run: python3 scripts/check_example_board_overlay_content_parity.py
+
       - name: Gate — chip header driver-status labels match metadata
         run: python3 scripts/check_chip_header_status.py
 
@@ -701,6 +710,18 @@ jobs:
       # examples shared the copied block.
       - name: Gate — examples resolve alp_project.py under ALP_SDK_ROOT
         run: python3 scripts/check_example_sdk_root.py
+
+      # Issue #2163: cc3501e_bridge.{c,h} is copied per example -- 16 copies --
+      # and nothing asserted the copies stay in sync. It is hardware-sequencing
+      # code (LP-GPIO pad writes for WIFI_EN / nRESET, the reset pulse timing,
+      # the silicon-tuned RX_SAMPLE_DLY poke), so a fix applied to one copy and
+      # missed in the rest is invisible in CI and shows up only on silicon --
+      # the same shape as #1859's drifted cc3501e_gpio_routes.c pad map. The
+      # copies stay copies on purpose (the header is a customer-facing template
+      # and `tan init --from-example` copies one directory), so this detects
+      # drift rather than removing the duplication.
+      - name: Gate — cc3501e_bridge copies are in sync
+        run: python3 scripts/check_cc3501e_bridge_copies.py
 
       # Public-API test-coverage audit -- per the VERSIONS.md
       # "Quality bar" entry, every public function should have at

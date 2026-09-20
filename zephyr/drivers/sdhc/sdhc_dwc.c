@@ -1371,7 +1371,7 @@ static int sdhc_dwc_init(const struct device *dev)
 	 * the Alif DFP's own sd_host_init(), where enable_sd_periph_clk() is
 	 * the very first action -- alif-dfp-ref drivers/source/sd.c:161).
 	 * Without this the block is entirely unclocked: bench-confirmed on
-	 * evk-03 (E1M-AEN803, 2026-09-13) every SDHC register, including the
+	 * E1M-AEN803 serial 2026W36-0002 (2026-09-13) every SDHC register, including the
 	 * read-only CAPABILITIES1, reads 0x00000000. See the `clocks`
 	 * property on the sdhc DT node for the id and citations.
 	 */

@@ -3,7 +3,10 @@
 
 Covers the issue #2101 extension: a testcase.yaml platform_allow entry
 for an alp_e1m_* target with no matching boards/ overlay, while boards/
-ships an alp_e1m_*-qualified overlay for a different target.
+ships an alp_e1m_*-qualified overlay for a different target. Also covers
+the issue #2209 item 4a extension: a scenario declares SKU A's core target
+while boards/ ships the same-PCB SKU B's file for that same core, and B is
+undeclared.
 
 Run locally:
 
@@ -11,12 +14,36 @@ Run locally:
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPT = REPO / "scripts" / "check_example_board_overlay_parity.py"
+
+# A minimal pair of same-PCB SoM presets (same family + silicon_variant),
+# each with one core's topology.<core>.board: target -- enough for
+# _all_preset_pcb_and_topology to pair them the same way
+# check_example_board_overlay_content_parity.py's _pcb_key does.
+_PRESET_TMPL = """\
+family: {family}
+silicon_variant: {variant}
+topology:
+  m55_he:
+    board: alp_e1m_{sku}_m55_he/ae822fa0e5597ls0/rtss_he
+"""
+
+
+def _write_paired_presets(tmp_path: Path, sku_a: str = "aen801", sku_b: str = "aen803",
+                           family: str = "alif-ensemble", variant: str = "AE822FA0E5597LS0") -> None:
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True, exist_ok=True)
+    for sku in (sku_a, sku_b):
+        (presets_dir / f"E1M-{sku.upper()}.yaml").write_text(
+            _PRESET_TMPL.format(family=family, variant=variant, sku=sku),
+            encoding="utf-8",
+        )
 
 _TESTCASE_TMPL = """\
 sample:
@@ -33,6 +60,8 @@ tests:
 def _run(*args):
     return subprocess.run(
         [sys.executable, str(SCRIPT), *args], capture_output=True, text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
 
 
@@ -40,15 +69,19 @@ def _write_example(tmp_path: Path, name: str, platform_allow: list[str],
                     overlays: list[str]) -> Path:
     example_dir = tmp_path / "examples" / "aen" / name
     example_dir.mkdir(parents=True, exist_ok=True)
+    # Every real example is an app; the #2207 check requires it.
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     allow_lines = "\n".join(f"      - {p}" for p in platform_allow)
     (example_dir / "testcase.yaml").write_text(
-        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines)
+        _TESTCASE_TMPL.format(name=name, platform_allow=allow_lines), encoding="utf-8"
     )
     if overlays:
         boards_dir = example_dir / "boards"
         boards_dir.mkdir(parents=True, exist_ok=True)
         for stem in overlays:
-            (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n")
+            (boards_dir / f"{stem}.overlay").write_text(
+                "/* test overlay */\n", encoding="utf-8"
+            )
     return example_dir
 
 
@@ -131,6 +164,7 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
     from checking that scenario."""
     example_dir = tmp_path / "examples" / "aen" / "aen-common-allow"
     example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
     (example_dir / "testcase.yaml").write_text(
         "sample:\n"
         "  name: aen-common-allow\n"
@@ -139,12 +173,13 @@ def test_common_platform_allow_default_is_honoured(tmp_path):
         "tests:\n"
         "  alp_sdk.examples.test.aen-common-allow:\n"
         "    tags:\n"
-        "      - alp-sdk\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir()
     (boards_dir / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay").write_text(
-        "/* test overlay */\n"
+        "/* test overlay */\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     out = proc.stdout + proc.stderr
@@ -166,7 +201,9 @@ def test_native_sim_only_boards_dir_is_not_flagged(tmp_path):
     )
     boards_dir = example_dir / "boards"
     boards_dir.mkdir(parents=True, exist_ok=True)
-    (boards_dir / "native_sim_native_64.overlay").write_text("/* native_sim */\n")
+    (boards_dir / "native_sim_native_64.overlay").write_text(
+        "/* native_sim */\n", encoding="utf-8"
+    )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
@@ -199,7 +236,7 @@ def test_conf_only_match_is_extension_agnostic(tmp_path):
         overlays=["alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he"],
     )
     (example_dir / "boards" / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.conf").write_text(
-        "CONFIG_TEST=y\n"
+        "CONFIG_TEST=y\n", encoding="utf-8"
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -227,7 +264,388 @@ def test_subslice_directory_with_no_local_boards_dir_is_not_flagged(tmp_path):
         "    platform_allow:\n"
         "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
         "    tags:\n"
+        "      - alp-sdk\n",
+        encoding="utf-8",
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_boards_dir_with_no_app_fails(tmp_path):
+    """Issue #2207, the #2198 instance: an app renamed away from its
+    directory leaves a boards/ overlay behind with no CMakeLists.txt next
+    to it. Nothing builds it, so no platform_allow or SKU-sibling check
+    sees it -- this one must, naming the directory and the fix."""
+    boards = tmp_path / "examples" / "aen" / "aen-sdcard-readout" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text('&sdhc0 {\n\tstatus = "okay";\n};\n', encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert ("examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt in "
+            "examples/aen/aen-sdcard-readout/") in out
+    assert "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay" in out
+    assert "delete the directory, or move it" in out
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), *args], check=True,
+                   capture_output=True)
+
+
+def _tracked_app(tmp_path: Path) -> Path:
+    """A git repo holding one real app (CMakeLists.txt + a board overlay)."""
+    app = tmp_path / "examples" / "aen" / "demo"
+    (app / "boards").mkdir(parents=True)
+    (app / "CMakeLists.txt").write_text("", encoding="utf-8")
+    (app / "boards" / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text("/ { };\n", encoding="utf-8")
+    _git(tmp_path, "init", "-q")
+    return app
+
+
+def test_untracked_build_tree_boards_dirs_are_not_flagged(tmp_path):
+    """A local `west build` inside an example leaves gitignored
+    build/zephyr/boards/ and build/Kconfig/boards/ with no CMakeLists.txt
+    next to them; only tracked files count."""
+    app = _tracked_app(tmp_path)
+    _git(tmp_path, "add", "examples")
+    for sub in ("build/zephyr/boards", "build/Kconfig/boards"):
+        (app / sub).mkdir(parents=True)
+        (app / sub / "x.overlay").write_text("", encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_sysbuild_image_boards_dir_is_accepted(tmp_path):
+    """<app>/sysbuild/<image>/boards/ is sysbuild's per-image config dir
+    (sysbuild_extensions.cmake's ${APP_DIR}/sysbuild/<image> lookup)."""
+    app = _tracked_app(tmp_path)
+    boards = app / "sysbuild" / "mcuboot" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.conf"
+     ).write_text("CONFIG_X=y\n", encoding="utf-8")
+    _git(tmp_path, "add", "examples")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_tracked_stranded_boards_dir_fails(tmp_path):
+    """The git-tracked path, not just the plain-directory fallback."""
+    _tracked_app(tmp_path)
+    boards = tmp_path / "examples" / "aen" / "aen-sdcard-readout" / "boards"
+    boards.mkdir(parents=True)
+    (boards / "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay"
+     ).write_text("/ { };\n", encoding="utf-8")
+    _git(tmp_path, "add", "examples")
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode != 0
+    assert "examples/aen/aen-sdcard-readout/boards/: no CMakeLists.txt" in (
+        proc.stdout + proc.stderr)
+
+
+# --- issue #2209 item 4a: same-PCB sibling undeclared -----------------------
+
+def test_same_pcb_sibling_undeclared_fails(tmp_path):
+    """The #2209 defect class itself: a scenario declares only SKU A's
+    core target, boards/ ships the same-PCB SKU B's file for that same
+    core too, and the scenario never declares B -- must fail, naming the
+    example, the declared entry, and the fix."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-undeclared-sibling",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "aen-undeclared-sibling" in out
+    assert "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he" in out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he'" in out
+
+
+def test_same_pcb_sibling_declared_passes(tmp_path):
+    """The fix for the case above: both same-PCB SKUs declared -- must
+    pass."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-both-declared",
+        platform_allow=[
+            "alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he",
+            "alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he",
+        ],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_overlay_not_shipped_is_not_flagged(tmp_path):
+    """boards/ ships only SKU A's overlay -- the sibling SKU B has no
+    file on disk at all, so this check has nothing to compare against
+    (that gap, if any, is check_example_board_overlay_content_parity.py's
+    business once an overlay exists, not this one's before it does)."""
+    _write_paired_presets(tmp_path)
+    _write_example(
+        tmp_path, "aen-sibling-not-shipped",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=["alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he"],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+_PINNED_A_TMPL = (
+    "  alp_sdk.examples.test.aen-pinned:\n"
+    "    platform_allow:\n"
+    "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+    "    extra_dtc_overlay_files:\n"
+    "      - boards/alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
+    "      - extra.overlay\n"
+    "    tags:\n"
+    "      - alp-sdk\n"
+)
+_PINNED_B_TWIN_TMPL = (
+    "  alp_sdk.examples.test.aen-pinned.aen803:\n"
+    "    platform_allow:\n"
+    "      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he\n"
+    "    extra_dtc_overlay_files:\n"
+    "      - boards/alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he.overlay\n"
+    "      - extra.overlay\n"
+    "    tags:\n"
+    "      - alp-sdk\n"
+)
+
+
+def _write_pinned_example(tmp_path, name: str, extra_scenarios: str = "") -> None:
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / name
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n"
+        f"  name: {name}\n"
+        "tests:\n" + _PINNED_A_TMPL + extra_scenarios,
+        encoding="utf-8",
+    )
+
+
+def test_same_pcb_sibling_pinned_scenario_with_twin_is_not_flagged(tmp_path):
+    """A scenario that pins one literal board file via
+    extra_dtc_overlay_files is single-SKU by design (the
+    aen-sdhc-probe/aen-ethernet-link twin-scenario shape, issue #2209 item
+    3) -- satisfied by a SIBLING PINNED scenario (the twin) declaring the
+    other SKU's own file, not by declaring both in the same scenario."""
+    _write_pinned_example(tmp_path, "aen-pinned-with-twin", _PINNED_B_TWIN_TMPL)
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_pinned_scenario_twin_deleted_fails(tmp_path):
+    """Deleting the AEN803 twin scenario, with nothing else in the file
+    pinning AEN803's own file, must fail -- the #2209 mutation-proof case.
+    (Reproduces the real aen-sdhc-probe/aen-ethernet-link shape in a
+    fixture where the pinned scenario is the file's only scenario, so no
+    unrelated non-pinned scenario can coincidentally satisfy it.)"""
+    _write_pinned_example(tmp_path, "aen-pinned-no-twin")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "aen-pinned-no-twin" in out
+    assert "give AEN803 its own twin scenario" in out
+
+
+def test_same_pcb_sibling_pinned_scenario_stray_non_pinned_twin_does_not_satisfy(tmp_path):
+    """A coincidental non-pinned scenario elsewhere in the file that
+    happens to declare the sibling SKU's target does NOT satisfy a pinned
+    scenario's twin requirement -- only another PINNED scenario counts."""
+    stray_non_pinned = (
+        "  alp_sdk.examples.test.aen-pinned.unrelated:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    tags:\n"
         "      - alp-sdk\n"
+    )
+    _write_pinned_example(tmp_path, "aen-pinned-stray", stray_non_pinned)
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "give AEN803 its own twin scenario" in out
+
+
+def test_same_pcb_sibling_extra_args_config_does_not_suppress_the_check(tmp_path):
+    """An extra_args entry that does NOT start DTC_OVERLAY_FILE=/CONF_FILE=
+    (e.g. a bare CONFIG_ override) must not be treated as pinned -- the
+    scenario stays subject to the ordinary per-scenario check and must
+    still declare its own sibling target."""
+    non_pin_args = (
+        "  alp_sdk.examples.test.aen-args:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    extra_args:\n"
+        "      - CONFIG_LOG=y\n"
+        "    tags:\n"
+        "      - alp-sdk\n"
+    )
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / "aen-args"
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n  name: aen-args\ntests:\n" + non_pin_args, encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he' to platform_allow" in out
+
+
+def test_same_pcb_sibling_extra_overlay_confs_does_not_suppress_the_check(tmp_path):
+    """extra_overlay_confs only ADDS a Kconfig fragment (Twister's
+    OVERLAY_CONFIG); it never suppresses boards/ auto-discovery, so it must
+    not be treated as pinned either."""
+    non_pin_overlay_confs = (
+        "  alp_sdk.examples.test.aen-overlay-confs:\n"
+        "    platform_allow:\n"
+        "      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n"
+        "    extra_overlay_confs:\n"
+        "      - extra.conf\n"
+        "    tags:\n"
+        "      - alp-sdk\n"
+    )
+    _write_paired_presets(tmp_path)
+    example_dir = tmp_path / "examples" / "aen" / "aen-overlay-confs"
+    example_dir.mkdir(parents=True)
+    (example_dir / "CMakeLists.txt").write_text("", encoding="utf-8")
+    boards_dir = example_dir / "boards"
+    boards_dir.mkdir()
+    for stem in ("alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+                 "alp_e1m_aen803_m55_he_ae822fa0e5597ls0_rtss_he"):
+        (boards_dir / f"{stem}.overlay").write_text("/* test overlay */\n", encoding="utf-8")
+    (example_dir / "testcase.yaml").write_text(
+        "sample:\n  name: aen-overlay-confs\ntests:\n" + non_pin_overlay_confs,
+        encoding="utf-8")
+    proc = _run("--root", str(tmp_path))
+    out = proc.stdout + proc.stderr
+    assert proc.returncode != 0, out
+    assert "add 'alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he' to platform_allow" in out
+
+
+def test_same_pcb_sibling_different_core_is_not_flagged(tmp_path):
+    """SKU A's declared core (m55_he) and SKU B's shipped file are for
+    DIFFERENT cores -- not a same-core same-PCB pairing, so no fix is
+    owed."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    (presets_dir / "E1M-AEN801.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    (presets_dir / "E1M-AEN803.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_hp:\n"
+        "    board: alp_e1m_aen803_m55_hp/ae822fa0e5597ls0/rtss_hp\n",
+        encoding="utf-8",
+    )
+    _write_example(
+        tmp_path, "aen-different-core",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aen803_m55_hp_ae822fa0e5597ls0_rtss_hp",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_different_silicon_variant_is_not_flagged(tmp_path):
+    """Same family AND the exact same board-qualifier suffix (so a suffix
+    mismatch cannot be what skips the pairing), but a DIFFERENT
+    silicon_variant -- not the same PCB, so no fix is owed. Isolates the
+    `pcb_b != pcb_a` comparison itself: a mutation dropping that guard (or
+    the `pcb_a is None` skip) would incorrectly pair these two and flag a
+    fix, since every other precondition (family, core, suffix, shipped
+    overlay) matches."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    (presets_dir / "E1M-AEN801.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE822FA0E5597LS0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    # Same family, IDENTICAL board-qualifier suffix as AEN801 above --
+    # only silicon_variant differs.
+    (presets_dir / "E1M-AENXX.yaml").write_text(
+        "family: alif-ensemble\n"
+        "silicon_variant: AE999FA0E5597XX0\n"
+        "topology:\n"
+        "  m55_he:\n"
+        "    board: alp_e1m_aenxx_m55_he/ae822fa0e5597ls0/rtss_he\n",
+        encoding="utf-8",
+    )
+    _write_example(
+        tmp_path, "aen-different-variant",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aenxx_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
+    )
+    proc = _run("--root", str(tmp_path))
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_same_pcb_sibling_unresolvable_declared_sku_is_not_flagged(tmp_path):
+    """The declared SKU's OWN preset is missing silicon_variant (so its pcb
+    key is unresolvable -- None), and the sibling SKU's preset is ALSO
+    broken the same way. Catches a mutation that drops the `pcb_a is None:
+    continue` skip: without it, two SKUs that both resolve to pcb=None
+    compare equal (`None != None` is False) and get wrongly treated as the
+    same PCB, even though neither's PCB pairing is actually known."""
+    presets_dir = tmp_path / "metadata" / "e1m_modules"
+    presets_dir.mkdir(parents=True)
+    for sku in ("aen801", "aenyy"):
+        (presets_dir / f"E1M-{sku.upper()}.yaml").write_text(
+            "family: alif-ensemble\n"
+            "topology:\n"
+            "  m55_he:\n"
+            f"    board: alp_e1m_{sku}_m55_he/ae822fa0e5597ls0/rtss_he\n",
+            encoding="utf-8",
+        )
+    _write_example(
+        tmp_path, "aen-unresolvable-pcb",
+        platform_allow=["alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he"],
+        overlays=[
+            "alp_e1m_aen801_m55_he_ae822fa0e5597ls0_rtss_he",
+            "alp_e1m_aenyy_m55_he_ae822fa0e5597ls0_rtss_he",
+        ],
     )
     proc = _run("--root", str(tmp_path))
     assert proc.returncode == 0, proc.stdout + proc.stderr

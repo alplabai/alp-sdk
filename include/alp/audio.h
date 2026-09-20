@@ -255,7 +255,9 @@ alp_status_t alp_audio_out_start(alp_audio_out_t *out);
  *   clock stops is chip-specific, see its own driver.  On the Zephyr
  *   DesignWare I2S backend (`zephyr/drivers/i2s/i2s_dw.c`), a deliberate
  *   stop drops the clock, but since #2149 an underrun does not: the ISR's
- *   underrun exit keeps `CER.CLKEN` set on that one path.  A far-end
+ *   underrun exit keeps `CER.CLKEN` set on that one path, and since #2205
+ *   so does an RX start on the same controller pre-empting a running
+ *   playback stream.  A far-end
  *   amplifier
  *   may need re-arming after the first successful @ref alp_audio_out_write
  *   following a restart, while the stream keeps being fed -- see its

@@ -474,9 +474,10 @@ def _run(
         return subprocess.run(
             cmd,
             cwd=str(cwd) if cwd else None,
-            env=env,
+            env={**(env or os.environ), "PYTHONIOENCODING": "utf-8"},
             capture_output=True,
             text=True,
+            encoding="utf-8",
             check=False,
             timeout=timeout,
         )

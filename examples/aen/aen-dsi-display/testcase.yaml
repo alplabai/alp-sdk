@@ -6,9 +6,9 @@
 # e1m_evk_rk055hdmipi4ma0 shield.  Pixels-on-glass successor to the bind-only
 # aen-dsi-regcheck.
 #
-# Compile-checks the driver chain + DT nodes on the real E8 board targets;
-# filtered OUT of the native_sim PR gate (platform_allow = the two AEN HE
-# boards only).
+# Compile-checks the driver chain + DT nodes on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets).
 
 sample:
   name: aen-dsi-display

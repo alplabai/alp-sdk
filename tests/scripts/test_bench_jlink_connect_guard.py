@@ -63,7 +63,7 @@ def _bash_can_run_a_script() -> bool:
     try:
         probe = subprocess.run(
             ["bash", "-c", "printf ok"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
         )
     except (OSError, subprocess.SubprocessError):
         return False
@@ -271,8 +271,13 @@ def test_transcript_with_no_commander_prompt_is_a_hard_error(tmp_path: Path) -> 
 # Every `-CommanderScript ... > <file> || true` read-back site. Derived from the
 # script bodies, NOT a hand-maintained allowlist -- a new read-back added
 # without the assertion fails this test rather than slipping through.
+#
+# Two output-path SHAPES (alp-sdk#2233 review round 3, finding 9): a bare
+# `/tmp/foo.out` literal (scripts not yet touched by the TMPDIR conversion),
+# or a QUOTED `"${TMPDIR:-/tmp}/foo.out"` (the six Flow D writers, converted
+# so concurrent pytest runs against the same host /tmp no longer collide).
 _READBACK_RE = re.compile(
-    r"^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>/tmp/\S+)\s*\|\|\s*true[ \t]*$",
+    r'^[ \t]*\S.*-CommanderScript\s.*?>\s*(?P<out>"\$\{TMPDIR:-/tmp\}/[^"]+"|/tmp/\S+)\s*\|\|\s*true[ \t]*$',
     re.M,
 )
 
@@ -472,258 +477,144 @@ def test_every_target_touching_helper_gates_on_the_dpidr():
     assert not missing, f"helper writes/executes on a target with no DPIDR gate: {missing}"
 
 
-# --- alp-sdk#1488: `verifybin`'s outcome must gate the script, not just the
-# connect check -------------------------------------------------------------
+# --- alp-sdk#2233: `verifybin` retired as a gate, replaced by a fresh-session
+# savebin read-back proof against a sector-padded image -------------------
 #
-# flash-jlink.sh / flash-update-log-dual.sh / flash-update-log-firewall-probe.sh
-# each issued `verifybin` and never read its result: the transcript went to a
-# display-only pipe, the connect check was the only thing that could fail the
-# script, so a `Verify failed.` line exited 0 and reported a good flash on a
-# board that was NOT actually written. flash-jlink-hp.sh and
-# flash-jlink-mramxip.sh had already been fixed for the identical defect under
-# alp-sdk#1343 -- but nothing derived the FULL set of verifybin sites from the
-# script bodies, so the other 3 went uncaught for months (before this test,
-# this file had ZERO occurrences of "verifybin" or "verify successful"). This
-# is that derivation: a NEW verifybin site that does not also grep ITS OWN
-# capture file for both outcomes fails here rather than shipping ungated.
-
-# Any `verifybin` invocation, wherever it lives (these all sit inside a
-# `cat > /tmp/*.jlink <<EOF ... EOF` CommanderScript heredoc).
-_VERIFYBIN_RE = re.compile(r"^[ \t]*verifybin[ \t]", re.M)
-
-# The file each write step's JLinkExe transcript lands in, resolved from
-# whichever capture shape follows the `-CommanderScript` invocation --
-# either the SIGPIPE-prone `... | tee <file> | ...` shape (still used by
-# flash-jlink-hp.sh / flash-jlink-mramxip.sh, deliberately left alone by
-# alp-sdk#1488 finding 5 -- out of scope, pre-existing) or the
-# write-then-grep-the-finished-file shape finding 5 moved the other three
-# scripts to (`... > <file> 2>&1 || true`, then a separate grep pass).
-_CAPTURE_RE = re.compile(r"\|\s*tee\s+(?P<tee>/tmp/\S+)|>\s*(?P<redir>/tmp/\S+)\s*2>&1")
-
-
-def _verifybin_capture_file(body: str, after: int) -> str | None:
-    """The transcript file the write step immediately after a `verifybin`
-    line (at body[after:]) captures its JLinkExe output to. Bounded window --
-    the capture always follows within the same CommanderScript write block,
-    not somewhere else in the file."""
-    m = _CAPTURE_RE.search(body[after : after + 2000])
-    return (m.group("tee") or m.group("redir")) if m else None
-
-
-def test_every_verifybin_site_is_gated_on_its_own_transcript() -> None:
-    """Every `verifybin` site must grep its OWN transcript file.
-
-    This half is pure text: it derives the set of verifybin sites from the
-    actual `verifybin` invocations in each script, resolves each one's OWN
-    transcript file, and pins that the greps name that file -- so a site
-    accidentally checking a SIBLING script's stale transcript (the exact
-    copy-paste trap the changelog calls out) fails here.
-
-    It pins the FILENAME only, which is not the same as pinning the gate:
-    deleting the `exit 3`s while leaving the greps in place still satisfies
-    it. `test_every_verifybin_gate_actually_gates` below is the half that
-    runs the gate and asserts it changes the exit status; the two are
-    deliberately separate because only the second one needs a working bash
-    (Windows CI has none, see _NEEDS_BASH) and this derivation must keep
-    running there.
-    """
-    missing: list[str] = []
-
-    for path in _bench_scripts():
-        body = path.read_text(encoding="utf-8")
-        for m in _VERIFYBIN_RE.finditer(body):
-            line_no = body[: m.start()].count("\n") + 1
-            out = _verifybin_capture_file(body, m.end())
-            if out is None:
-                missing.append(f"{path.name}:{line_no} issues verifybin but no capture file could be resolved")
-                continue
-            fail_re = re.compile(
-                r'grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"\s+' + re.escape(out)
-            )
-            ok_re = re.compile(r'grep\s+-\w*\s+"verify successful"\s+' + re.escape(out))
-            if not fail_re.search(body):
-                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-failed/mismatch")
-            if not ok_re.search(body):
-                missing.append(f"{path.name}:{line_no} verifybin -> {out}, never greps that file for verify-successful")
-
-    assert not missing, "verifybin site with no verify-outcome gate on its own transcript:\n  " + "\n  ".join(missing)
-
-
-def test_the_verifybin_regex_actually_matches_something() -> None:
-    """Guard against the guard: if the regex stops matching (a refactor
-    changes the invocation shape), test_every_verifybin_site_is_gated_on_its_own_transcript
-    would pass vacuously and cover nothing.
-
-    Six SITES across five SCRIPTS (flash-jlink-mramxip.sh issues two, one per
-    loadbin): flash-jlink.sh 1, flash-jlink-hp.sh 1, flash-jlink-mramxip.sh 2,
-    flash-update-log-dual.sh 1, flash-update-log-firewall-probe.sh 1. Same
-    floor as the sibling read-back guard above."""
-    total = sum(len(_VERIFYBIN_RE.findall(p.read_text(encoding="utf-8"))) for p in _bench_scripts())
-    assert total >= 6, f"expected >=6 verifybin sites, matched {total} -- regex has drifted"
-
-
-# The shell block that turns a verifybin OUTCOME into an exit status. Two
-# shapes exist in the tree and both open with the same explicit-failure `if`:
+# alp-sdk#1488/#1343 (superseded, this section used to test them directly)
+# taught these six scripts to gate on `verifybin`'s outcome. alp-sdk#2233
+# then measured that the gate itself proved nothing: `verifybin` compares
+# against J-Link's own in-process flash CACHE, never a fresh chip read, so
+# `Verify successful.` was true even when MRAM held something else. The fix
+# retired `verifybin` as a gate everywhere (scripts/bench/aen/flash-jlink.sh,
+# flash-jlink-hp.sh, flash-jlink-mramxip.sh, flash-update-log-dual.sh,
+# flash-update-log-firewall-probe.sh, erase-storage.sh) in favour of
+# bench_flowd_proof() (bench-env.sh): a FRESH read-only J-Link session that
+# `savebin`s the written range back and `cmp`s it against a padded image that
+# also proves the write's sector NEIGHBOURS survived (the loader rewrites
+# whole 16 KiB sectors and never reads their prior contents -- the other half
+# of #2233, see scripts/bench/aen/flowd_sector_pad.py and
+# tests/scripts/test_flowd_sector_pad.py).
 #
-#   flash-jlink.sh / flash-jlink-hp.sh / flash-update-log-dual.sh /
-#   flash-update-log-firewall-probe.sh   fail-`if`, then
-#                                        `if ! grep -qi "verify successful"`
-#   flash-jlink-mramxip.sh               fail-`if`, then a `grep -ci` COUNT
-#                                        compared against its two passes
-_VERIFY_GATE_START_RE = re.compile(
-    r'^[ \t]*if\s+grep\s+-\w*\s+"verify failed\|verification failed\|mismatch"'
-    r"\s+(?P<out>/tmp/\S+)\s*;\s*then[ \t]*$"
+# This section replaces the old alp-sdk#1488 "did the gate change the exit
+# status" derivation with the equivalent regression tests for the new gate:
+# no script may reintroduce a `verifybin`-outcome gate, and every former
+# verifybin writer must call bench_flowd_proof() and embed
+# bench_flowd_loadbin_lines' padded loadbin line(s) before treating a write
+# as done.
+
+# A `verifybin`-outcome GATE, specifically -- an `if` whose condition greps a
+# transcript for "verify failed"/"verify successful". A bare `verifybin`
+# COMMAND left in a CommanderScript purely for its log value (explicitly
+# allowed by alp-sdk#2233) is NOT what this matches; only a live gate built
+# on its output is.
+_VERIFY_GATE_RE = re.compile(
+    r'^[ \t]*if\s+.*grep[^\n]*"verify (?:failed|successful)"', re.M
 )
 
 
-def _verify_gate_block(body: str) -> tuple[str, str] | None:
-    """`(capture-file, shell block)` for a script's verify gate, or None.
-
-    The block is the contiguous source region from the explicit-failure `if`
-    through the `fi` that closes the success check -- everything that turns a
-    transcript into an exit status and nothing else, so it can be run
-    standalone against a synthetic transcript.
+def test_no_script_gates_on_verifybin_any_more() -> None:
+    """Regression test for alp-sdk#2233: `verifybin`'s outcome must never
+    decide a script's exit status again, on any bench script -- not just the
+    six known sites. A `Verify successful.`/`Verify failed.` string is still
+    fine in a display-only grep (the `grep -iE "...|Verify|O\\.K\\...."`
+    lines these scripts print for a human to read stay); what must never
+    come back is an `if` whose CONDITION is that grep.
     """
-    lines = body.splitlines()
-    start: int | None = None
-    out = ""
-    for i, line in enumerate(lines):
-        m = _VERIFY_GATE_START_RE.match(line)
-        if m:
-            start, out = i, m.group("out")
-            break
-    if start is None:
-        return None
-
-    depth = 0
-    saw_success = False
-    for i in range(start, len(lines)):
-        stripped = lines[i].strip()
-        if re.match(r"^if\b", stripped):
-            depth += 1
-        if "verify successful" in stripped.lower():
-            saw_success = True
-        if stripped == "fi":
-            depth -= 1
-            if depth == 0 and saw_success:
-                return out, "\n".join(lines[start : i + 1]) + "\n"
-    return None
-
-
-def _run_verify_gate(
-    tmp_path: Path, block: str, out: str, transcript: str | None
-) -> subprocess.CompletedProcess[str]:
-    """Run one extracted verify gate against a synthetic JLinkExe transcript.
-
-    `transcript=None` means the file does not exist at all. Same
-    no-absolute-paths discipline as _call_guard: the gate's `/tmp/...` path is
-    rewritten to a bare filename and bash runs with cwd=tmp_path, so the
-    drive-letter flavour of whichever bash Python resolves cannot matter.
-    `set -e` matches the real scripts, all of which run under errexit.
-
-    The block is written to a FILE and run as `bash gate.sh`, never handed to
-    `bash -c` as a string. On Windows, `subprocess` rebuilds the argument list
-    into one command line (`list2cmdline`) which the MSYS runtime then re-parses,
-    and double quotes inside a `$( ... )` command substitution do not survive the
-    round trip: `v=$(grep -ci "verify successful" t.out || true)` reaches grep as
-    the three arguments `-ci`, `"verify`, `successful"`, so grep reports
-    `grep: successful": No such file or directory` and the count comes back empty.
-    flash-jlink-mramxip.sh's gate is the only one that puts a quoted grep inside a
-    command substitution -- the other four use a bare `if grep -qi "..."`, which
-    survives -- so this manifested as exactly one parametrisation failing, naming a
-    script whose gate is CORRECT (run from a file it returns 0 on a good transcript
-    and 3 on a failing one). GitHub's windows-latest never saw it because
-    _NEEDS_BASH skips there; a developer with Git Bash installed sees a red test
-    pointing at the wrong file, which is the same misleading-failure class
-    _NEEDS_BASH exists to prevent. A file has no second parse, so it cannot recur.
-    """
-    name = "transcript.out"
-    target = tmp_path / name
-    if transcript is None:
-        target.unlink(missing_ok=True)
-    else:
-        target.write_text(transcript, encoding="utf-8")
-    gate = tmp_path / "gate.sh"
-    # write_bytes, not write_text: the gate must keep LF endings whatever the
-    # host default is -- CRLF inside the block would reach bash as stray \r.
-    gate.write_bytes(("set -e\n" + block.replace(out, name)).encode("utf-8"))
-    return subprocess.run(
-        ["bash", gate.name],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=60,
+    offenders = [
+        p.name for p in _bench_scripts() if _VERIFY_GATE_RE.search(p.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, (
+        "verifybin is gating a script again (alp-sdk#2233 regression) -- "
+        "replace it with bench_flowd_proof(): " + ", ".join(offenders)
     )
 
 
-def _scripts_with_verifybin() -> list[str]:
-    """Derived, never hand-maintained -- a new verifybin script is covered the
-    moment it lands, which is the whole point of this file."""
-    return [p.name for p in _bench_scripts() if _VERIFYBIN_RE.search(p.read_text(encoding="utf-8"))]
+# Every script that used to gate on verifybin now calls bench_flowd_proof()
+# instead. Anchored on the function name with its second (manifest) argument,
+# which is how every call site actually reads -- a bare substring match on
+# "bench_flowd_proof" would also match this file's own comments.
+_FLOWD_PROOF_CALL_RE = re.compile(r'bench_flowd_proof\s+\S+\s+"\$FLOWD_MANIFEST"')
+
+_FLOWD_PROOF_SCRIPTS = (
+    "flash-jlink.sh",
+    "flash-jlink-hp.sh",
+    "flash-jlink-mramxip.sh",
+    "flash-update-log-dual.sh",
+    "flash-update-log-firewall-probe.sh",
+    "erase-storage.sh",
+)
 
 
-@_NEEDS_BASH
-@pytest.mark.parametrize("script", _scripts_with_verifybin())
-def test_every_verifybin_gate_actually_gates(script: str, tmp_path: Path) -> None:
-    """The gate must CHANGE THE EXIT STATUS, not merely mention the strings.
-
-    test_every_verifybin_site_is_gated_on_its_own_transcript is text-only and
-    is fail-open on the alp-sdk#1488 defect itself: delete both `exit 3` from
-    a gate, or invert `if ! grep -qi "verify successful"` to `if grep -qi
-    ...`, and the greps still sit in the body against the right file, so it
-    stays green while a failed flash reports success again. This one extracts
-    the gate and RUNS it, so those mutations go red:
-
-      - a transcript whose verify FAILED must exit non-zero (3, the status
-        flash-all-flowd.sh maps to the FLASH-UNVERIFIED batch-summary entry);
-      - a transcript whose verifies all SUCCEEDED must exit 0;
-      - those two statuses must DIFFER (an inverted polarity fails both, so
-        equality alone catches it);
-      - `Verify failed.` alongside a full set of success lines must still be
-        non-zero, so the explicit-failure branch cannot be deleted and hidden
-        behind the success check;
-      - a missing or empty transcript must be non-zero -- absence of a
-        `Verify successful.` line is not evidence the verify passed.
-    """
+@pytest.mark.parametrize("script", _FLOWD_PROOF_SCRIPTS)
+def test_every_former_verifybin_writer_now_calls_bench_flowd_proof(script: str) -> None:
+    """The six scripts alp-sdk#1488/#1343/#2233 have touched for this defect
+    must call the current gate, not a dangling reference to the retired one."""
     body = (BENCH / script).read_text(encoding="utf-8")
-    sites = len(_VERIFYBIN_RE.findall(body))
-    found = _verify_gate_block(body)
-    assert found is not None, f"{script} issues verifybin but has no runnable verify-outcome gate"
-    out, block = found
+    assert _FLOWD_PROOF_CALL_RE.search(body), (
+        f'{script} does not call bench_flowd_proof(<tag>, "$FLOWD_MANIFEST", ...) -- '
+        "the alp-sdk#2233 read-back proof that replaced verifybin"
+    )
+    assert "bench_flowd_prepare_write" in body or "bench_flowd_build" in body, (
+        f"{script} calls bench_flowd_proof but never builds a padded manifest "
+        "via bench_flowd_prepare_write/bench_flowd_build first"
+    )
 
-    # One "Verify successful." per verifybin issued: flash-jlink-mramxip.sh
-    # writes two blobs and its gate demands both passes, so a single success
-    # line is a FAILURE there, not a pass.
-    ok_lines = "Verify successful.\n" * sites
-    header = "J-Link>verifybin\n"
 
-    good = _run_verify_gate(tmp_path, block, out, header + ok_lines)
-    bad = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n")
-    bad_with_ok = _run_verify_gate(tmp_path, block, out, header + "Verify failed.\n" + ok_lines)
-    empty = _run_verify_gate(tmp_path, block, out, "")
-    absent = _run_verify_gate(tmp_path, block, out, None)
+def test_every_former_verifybin_writer_embeds_padded_loadbin_lines() -> None:
+    """The raw `loadbin <blob> <address>` these scripts used to write by hand
+    must be gone, replaced by bench_flowd_loadbin_lines' output -- otherwise
+    the padding built above is computed and then never actually used."""
+    missing = [
+        p.name for p in _bench_scripts()
+        if p.name in _FLOWD_PROOF_SCRIPTS and "bench_flowd_loadbin_lines" not in p.read_text(encoding="utf-8")
+    ]
+    assert not missing, f"script(s) build a padded manifest but never embed it via bench_flowd_loadbin_lines: {missing}"
 
-    assert good.returncode == 0, (
-        f"{script}: a fully successful verify must pass the gate, got "
-        f"{good.returncode}\n{good.stdout}{good.stderr}"
+
+# alp-sdk#2233 review major 5, mutation M4: a RAW, unpadded `loadbin <blob>
+# <address>` line reintroduced alongside (or instead of) the embedded
+# bench_flowd_loadbin_lines output. None of the six scripts should ever
+# contain a literal `loadbin` command word any more -- every one now comes
+# from the padded variable at RUNTIME, invisible to a static grep of the
+# SOURCE text. A literal `loadbin ` word in the source (not inside a comment
+# or this file's own regex) is therefore always a regression.
+_RAW_LOADBIN_LINE_RE = re.compile(r"^[ \t]*loadbin[ \t]", re.M)
+
+
+def test_no_script_has_a_raw_loadbin_line_outside_the_embedded_variable() -> None:
+    """alp-sdk#2233 review major 5 (mutation M4). Every loadbin now comes
+    from `$FLOWD_LOADBIN_LINES`/`$FLOWD_PREWRITE_LINES`, expanded at
+    runtime -- a literal `loadbin <arg> <arg>` line reappearing in a
+    script's own source is always the unpadded-write regression #2233
+    fixed, whether reintroduced instead of or alongside the padded one."""
+    offenders = {}
+    for p in _bench_scripts():
+        if p.name not in _FLOWD_PROOF_SCRIPTS:
+            continue
+        body = p.read_text(encoding="utf-8")
+        hits = _RAW_LOADBIN_LINE_RE.findall(body)
+        if hits:
+            offenders[p.name] = len(hits)
+    assert not offenders, f"raw (unpadded) loadbin line(s) found in: {offenders}"
+
+
+# alp-sdk#2233 review major 5, mutations M3/M6: the proof gate's polarity.
+# Every `bench_flowd_proof` call site must be the CONDITION of an `if !`
+# (fail-closed) -- inverting it (M3) or short-circuiting it with `if false
+# && !` (M6) both defeat the gate while a bare substring search for
+# "bench_flowd_proof" (test_every_former_verifybin_writer_now_calls_bench_flowd_proof
+# above) would not notice either. Complements (does not replace) the
+# behavioural mutation-proof in test_flowd_writer_scripts_e2e.py.
+_FLOWD_PROOF_NEGATED_RE = re.compile(r"^[ \t]*if[ \t]+![ \t]*bench_flowd_proof\b", re.M)
+
+
+@pytest.mark.parametrize("script", _FLOWD_PROOF_SCRIPTS)
+def test_bench_flowd_proof_call_is_the_condition_of_a_negated_if(script: str) -> None:
+    body = (BENCH / script).read_text(encoding="utf-8")
+    assert _FLOWD_PROOF_NEGATED_RE.search(body), (
+        f"{script}: bench_flowd_proof is not called as `if ! bench_flowd_proof ...` -- "
+        "an inverted or short-circuited gate would defeat it silently"
     )
-    assert bad.returncode != 0, (
-        f"{script}: 'Verify failed.' must fail the gate -- it exited "
-        f"{bad.returncode}, the exact alp-sdk#1488 defect\n{bad.stdout}{bad.stderr}"
-    )
-    assert bad.returncode == 3, f"{script}: expected exit 3, got {bad.returncode}"
-    assert bad.returncode != good.returncode, (
-        f"{script}: the gate returns {bad.returncode} for BOTH a failed and a "
-        "successful verify -- it does not gate"
-    )
-    assert bad_with_ok.returncode == 3, (
-        f"{script}: 'Verify failed.' alongside {sites} success line(s) must still "
-        f"fail, got {bad_with_ok.returncode}"
-    )
-    assert empty.returncode == 3, f"{script}: an empty transcript must fail, got {empty.returncode}"
-    assert absent.returncode == 3, f"{script}: a missing transcript must fail, got {absent.returncode}"
 
 
 # --- alp-sdk#2025 follow-up: bench_atoc_replace_guard, shared by every script
@@ -754,7 +645,7 @@ _NO_ATOC = "No ATOC found on target device.\n"
 
 _COMPLIANT_BANNER = "SES A1 v1.8.0 Feb 20 2026\n"
 
-# Real captures off `e1m-aen-evk-01`, 2026-09-07, ANSI intact -- verbatim,
+# Real captures off an AEN EVK bench unit, 2026-09-07, ANSI intact -- verbatim,
 # not synthesised. alp-sdk#2026 round-2 review measured these against the
 # fixed guard by hand before this suite pinned them:
 #
@@ -1052,7 +943,7 @@ def _before_log_path(res: subprocess.CompletedProcess[str]) -> str:
 def test_atoc_guard_transcript_path_is_run_unique(tmp_path):
     """alp-sdk#2026 round-2 review BLOCKER: `tag` is a literal script name
     (flash-run, flash-run-dualcore, ...), not run-unique. Three AEN boards
-    on this farm (evk-01/-02/-03) makes two concurrent runs of the SAME
+    on this farm makes two concurrent runs of the SAME
     script against DIFFERENT boards a real scenario, and a shared fixed
     path let one run's write land between another run's redirect and read
     -- reproduced: the second run printed the first run's clean table and
@@ -1156,7 +1047,7 @@ def test_atoc_guard_aborts_when_tmpdir_does_not_exist(tmp_path):
     )
 
 
-# --- validated against REAL silicon captures off e1m-aen-evk-01 (2026-09-07),
+# --- validated against REAL silicon captures off an AEN EVK bench unit (2026-09-07),
 # ANSI intact, not synthesised (alp-sdk#2026 round-2 review) -----------------
 
 
@@ -1295,7 +1186,13 @@ def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
     template shape that broke it cannot silently come back. A real
     macOS run of this suite (CI) is what actually proves the fix; treat
     this test as a tripwire against re-introducing a mid-template
-    placeholder, not as macOS coverage."""
+    placeholder, not as macOS coverage.
+
+    alp-sdk#2233 re-introduced the same shape in seven more templates
+    (`flowd-read-XXXXXX.jlink`, `aen-erase-atoc-trailer-XXXXXX.bin`, ...),
+    and macOS CI went red again, so the tripwire now sweeps every mktemp
+    call in every bench script rather than the one template that broke
+    first."""
     body = ENV.read_text(encoding="utf-8")
     m = re.search(r'mktemp\s+"[^"]*atoc-before\.([A-Za-z.]+)"', body)
     assert m, "could not find the atoc-before mktemp call in bench-env.sh"
@@ -1304,6 +1201,15 @@ def test_atoc_guard_mktemp_template_has_trailing_x_placeholder() -> None:
         f"the mktemp template's X-placeholder must be exactly 6 trailing X's "
         f"with NOTHING after them (BSD/macOS mktemp requires this) -- got "
         f"{placeholder!r}"
+    )
+    mid_template = []
+    for sh in sorted(BENCH.parent.rglob("*.sh")):
+        for n, line in enumerate(sh.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.lstrip().startswith("#") and re.search(r'\bmktemp\b[^#]*X{3,}[^X\s"\')]', line):
+                mid_template.append(f"{sh.relative_to(REPO)}:{n}: {line.strip()}")
+    assert not mid_template, (
+        "mktemp templates with a suffix after the X's fail on BSD/macOS mktemp:\n"
+        + "\n".join(mid_template)
     )
 
 
@@ -1496,6 +1402,160 @@ def test_flowd_guard_aborts_when_maintenance_tool_is_missing_despite_se_uart(tmp
         f"the transcript must record why the query was unverified "
         f"(no maintenance binary), got:\n{res.stderr}"
     )
+
+
+# --- alp-sdk#2187: the unverified-query abort must name the remedy that
+# applies to the flow that reached it -------------------------------------
+#
+# bench_flowd_atoc_guard routes to the real query whenever $SE_UART is
+# exported -- whether or not the variable names a device that can answer. A
+# STALE or WRONG SE_UART therefore took the query path, the query failed, and
+# the shared guard's abort recommended `--replace-atoc`: the "I checked and
+# still want to replace it" override, for a check that demonstrably never
+# ran. `unset SE_UART` -- the actual fix on a flow that needs no serial
+# device -- was named nowhere.
+#
+# The refusal itself was always correct and is unchanged (exit 5, nothing
+# written). What these tests pin is the TEXT, because the text is the defect:
+# #2029/#2027 kept `--atoc-unqueryable` and `--replace-atoc` distinct
+# precisely so a no-check state never trains an operator onto the
+# checked-and-override flag, and flash-jlink.sh's own header says that habit
+# must never form. Steering them onto it from the other direction re-conflates
+# the two flags.
+#
+# Wording assertions rot, so each one below is anchored on the SMALLEST
+# phrase that carries the actual behavioural claim -- the flag names and
+# `unset SE_UART` -- never on a whole sentence.
+
+#: Flow A's remedy, verbatim. On Flow A $SE_UART IS the transport, so a failed
+#: query genuinely leaves confirming by hand and overriding as the only way
+#: past -- this must keep saying exactly that.
+_FLOW_A_REMEDY = "Confirm by hand what is resident, then re-run with --replace-atoc."
+
+
+@_NEEDS_BASH
+def test_flowd_unverified_query_does_not_recommend_replace_atoc(tmp_path):
+    """The #2187 defect itself: SE_UART exported but unusable on Flow D.
+
+    Still exit 5, still nothing written -- but the remedy must point at
+    fixing or unsetting SE_UART, and must say in as many words that
+    `--replace-atoc` is NOT the way out of a check that never ran.
+    """
+    res = _call_flowd_guard(
+        tmp_path, "0", "0", ["ALP-HE"], "stale-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+    assert "could not read the resident ATOC" in res.stderr, res.stderr
+    assert "unset SE_UART" in res.stderr, (
+        f"Flow D's remedy must name unsetting SE_UART -- the flow needs no "
+        f"serial device at all. Got:\n{res.stderr}"
+    )
+    assert "--atoc-unqueryable" in res.stderr, (
+        f"Flow D's remedy must name the acknowledgement flag that fits a "
+        f"check which did not run. Got:\n{res.stderr}"
+    )
+    assert "LG_PLACE" in res.stderr, (
+        f"a wrong SE_UART is usually a stale raw path; the remedy must point "
+        f"at the per-slot resolution instead. Got:\n{res.stderr}"
+    )
+    assert _FLOW_A_REMEDY not in res.stderr, (
+        f"this is the #2187 defect: Flow D was told to re-run with "
+        f"--replace-atoc, the checked-and-override flag, for a check that "
+        f"never ran. Got:\n{res.stderr}"
+    )
+
+
+@_NEEDS_BASH
+def test_flow_a_unverified_query_still_recommends_replace_atoc(tmp_path):
+    """The other half, and the one a careless fix breaks: Flow A's wording is
+    unchanged.
+
+    On Flow A the SE-UART *is* the write transport, so there is no "unset it"
+    remedy -- a human confirming what is resident and overriding is the only
+    way past. A fix that made the new Flow D text unconditional would leave
+    this green only if it were asserted, so assert it.
+    """
+    res = _call_atoc_guard(
+        tmp_path, "0", ["ALP-HE"], "fake-uart", None, setools_has_maintenance=False
+    )
+    assert res.returncode == 5, res.stderr
+    assert _FLOW_A_REMEDY in res.stderr, (
+        f"Flow A's remedy must be unchanged by #2187. Got:\n{res.stderr}"
+    )
+    assert "unset SE_UART" not in res.stderr, (
+        f"Flow A cannot write without its SE-UART, so unsetting it is never "
+        f"the remedy there. Got:\n{res.stderr}"
+    )
+
+
+def _call_flowd_then_flow_a(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+    """Drive bench_flowd_atoc_guard and then bench_atoc_replace_guard in ONE
+    shell, both landing on the unverified-query abort, and capture each
+    call's stderr separately.
+
+    This is the test the implementation shape exists for. The flow is
+    selected by `BENCH_ATOC_FLOW`, which bench_flowd_atoc_guard sets with
+    `local` so it is restored when that call returns. `local` inside a
+    function is the whole guarantee: drop it (or hoist the assignment to the
+    file scope) and the variable leaks, so every LATER Flow A guard in the
+    same shell -- flash-run.sh and flash-run-dualcore.sh both call one --
+    starts printing Flow D's "unset SE_UART" advice on a board whose SE-UART
+    is the only way to write it. Nothing else in the tree would notice.
+    """
+    workdir = tmp_path
+    (workdir / "bench-env.sh").write_bytes(ENV.read_bytes())
+
+    # No `maintenance` binary at all: both guards take the unverified-query
+    # abort, which is the branch whose wording is under test. Keeping both
+    # calls on the same cause isolates the flow selector as the only thing
+    # that can differ between the two transcripts.
+    setools_dir = workdir / "setools-empty"
+    setools_dir.mkdir(exist_ok=True)
+
+    gate = workdir / "both-gates.sh"
+    gate.write_bytes(
+        (
+            "unset LG_PLACE LG_COORDINATOR LG_SWD_PATH ALP_JLINK_SEARCH_ROOT\n"
+            f'export SETOOLS_DIR="{setools_dir.name}"\n'
+            'export SE_UART="stale-uart"\n'
+            "source ./bench-env.sh\n"
+            "bench_flowd_atoc_guard 0 0 flowd-first ALP-HE 2>flowd.err\n"
+            "echo \"flowd=$?\"\n"
+            "bench_atoc_replace_guard 0 flow-a-second ALP-HE 2>flowa.err\n"
+            "echo \"flowa=$?\"\n"
+            "exit 0\n"
+        ).encode("utf-8")
+    )
+    return subprocess.run(
+        ["bash", "both-gates.sh"], cwd=workdir, env=_sanitized_env(),
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+
+
+@_NEEDS_BASH
+def test_flowd_flow_selector_does_not_leak_into_a_later_flow_a_guard(tmp_path):
+    """A Flow D guard must not change what a Flow A guard prints afterwards
+    in the same shell."""
+    res = _call_flowd_then_flow_a(tmp_path)
+    flowd_err = (tmp_path / "flowd.err").read_text(encoding="utf-8")
+    flowa_err = (tmp_path / "flowa.err").read_text(encoding="utf-8")
+
+    assert "flowd=5" in res.stdout, f"the Flow D guard did not refuse: {res.stdout}"
+    assert "flowa=5" in res.stdout, f"the Flow A guard did not refuse: {res.stdout}"
+
+    assert "unset SE_UART" in flowd_err, (
+        f"the first call must print Flow D's remedy. Got:\n{flowd_err}"
+    )
+    assert _FLOW_A_REMEDY in flowa_err, (
+        f"the SECOND call is a Flow A guard and must print Flow A's remedy -- "
+        f"BENCH_ATOC_FLOW leaked out of the Flow D call. Got:\n{flowa_err}"
+    )
+    assert "unset SE_UART" not in flowa_err, (
+        f"Flow D's advice leaked into a Flow A guard: on a Flow A board the "
+        f"SE-UART is the write transport and unsetting it is never the "
+        f"remedy. Got:\n{flowa_err}"
+    )
+
 
 
 # The exact call bench_flowd_atoc_guard is invoked with in all three Flow D

@@ -66,7 +66,7 @@ commands report the bridge is not ready. See
 
 ## Link auto-recovery (issue #2126)
 
-e1m-aen-evk-01 has been observed to wedge the bridge link mid Wi-Fi-connect
+An AEN EVK bench unit has been observed to wedge the bridge link mid Wi-Fi-connect
 roughly 3 times in 50 connects, for a cause that isn't fully identified yet
 (firmware-side self-heal is tracked separately,
 cc3501e-bridge-firmware#142). Once wedged, every request fails (`ver` → `-4`

@@ -288,7 +288,7 @@ def _sdk_version_in_pinned_zephyr(zephyr_dir: Path, pinned_version: str) -> str 
     try:
         result = subprocess.run(
             ["git", "-C", str(zephyr_dir), "show", f"{pinned_version}:SDK_VERSION"],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

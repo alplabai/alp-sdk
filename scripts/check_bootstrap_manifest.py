@@ -901,7 +901,7 @@ def _zephyr_python_min_in_pinned_zephyr(zephyr_dir: Path, pinned_version: str) -
     try:
         result = subprocess.run(
             ["git", "-C", str(zephyr_dir), "show", f"{pinned_version}:{_PYTHON_CMAKE_PATH}"],
-            capture_output=True, text=True, timeout=15, check=False,
+            capture_output=True, text=True, encoding="utf-8", timeout=15, check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

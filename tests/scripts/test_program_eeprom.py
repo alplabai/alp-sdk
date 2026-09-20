@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 
 import importlib.util
+import os
 import struct
 import subprocess
 import sys
@@ -103,7 +104,8 @@ class TestManifestLayout(unittest.TestCase):
                  "--serial", "2026W19-0001",
                  "--mfg-date", "2026-05-11",
                  "--output", str(out)],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             self.assertEqual(out.stat().st_size, 128)
@@ -130,7 +132,8 @@ class TestBoardDatecode(unittest.TestCase):
                  "--serial", "2026W36-0001",
                  "--mfg-date", "2026-09-04",
                  "--output", str(out)],
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"}, check=False,
             )
             self.assertEqual(rv.returncode, 0, msg=rv.stderr)
             # hw_rev sits at offset 4 + 4 + 16 + 24 = 48, width 8.

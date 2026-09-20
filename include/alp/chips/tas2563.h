@@ -826,7 +826,7 @@ alp_status_t tas2563_fault_asserted(tas2563_t *ctx, bool *asserted_out);
  *   INT_LTCH[2])" -- worded identically for over-temp (`INT_MASK[0]`)
  *   and over-current (`INT_MASK[1]`).  A masked fault still sets its
  *   `INT_LTCH` bit; this function reports it regardless of mask state.
- *   Measured on `e1m-aen-evk-03` (`aen-evk-demo` phase 11, built at
+ *   Measured on E1M-AEN803 serial 2026W36-0002 (`aen-evk-demo` phase 11, built at
  *   `cfeafd148`, i.e. before #2140 unmasked anything): with
  *   `INT_MASK0` at its POR value `FCh` (TDM clock error still masked),
  *   the TDM clock-error bit latched in `INT_LTCH0` on both amps
@@ -938,7 +938,7 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   when any of @ref TAS2563_FAULT_SHUTDOWN_CAUSES latches -- in
  *   particular a TDM clock error (SLASET3D §7.3.12, p.35-36) -- and
  *   nothing in the audio stack re-arms it afterwards.  On the E1M-EVK
- *   (`e1m-aen-evk-03`), both amps were observed to self-transition
+ *   (E1M-AEN803 serial 2026W36-0002), both amps were observed to self-transition
  *   `PWR_CTL` from `0Ch` (MODE ACTIVE) to `0Eh` (MODE SHUTDOWN) within
  *   roughly 100 ms of the I2S bit clock stopping -- already `0Eh` at a
  *   +100 ms poll, `0Ch` still at +0 ms -- and to still read `0Eh`
@@ -949,7 +949,9 @@ alp_status_t tas2563_clear_faults(tas2563_t *ctx);
  *   `i2s_clock_disable()`), so a restart after one needs this call to be
  *   heard again.  Since #2149 a mid-playback underrun no longer stops it:
  *   the ISR's underrun exit keeps `CER.CLKEN` set on that one path, so a
- *   write gap alone no longer puts the amps into SHUTDOWN.
+ *   write gap alone no longer puts the amps into SHUTDOWN.  Since #2205 an
+ *   RX start on the same I2S controller that pre-empts running playback
+ *   takes that same keep-clock exit.
  *
  * @par Precondition: the TDM/I2S bit clock and FSYNC must already be
  *   running when this is called -- clearing the latch before the clock

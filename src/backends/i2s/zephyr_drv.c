@@ -606,15 +606,19 @@ static alp_status_t z_stop(alp_i2s_backend_state_t *st)
 	 * Skip the DRAIN attempt entirely for a TX stream this backend
 	 * KNOWS is not RUNNING -- tx_started=false => not RUNNING (NOT
 	 * "tracks the real hardware state" in general -- the ISR's own
-	 * RUNNING=>ERROR transition on an underrun is invisible to this
-	 * flag until some call actually issues a trigger and observes it,
+	 * RUNNING=>ERROR transition on an underrun, and (issue #2205) an RX
+	 * START on the same device parking a RUNNING TX in ERROR, are
+	 * invisible to this flag until some call actually issues a trigger
+	 * and observes it,
 	 * so tx_started=true can still be stale; only its FALSE value is a
 	 * reliable one-way guarantee). h->started, by contrast, is set by
 	 * the dispatcher on TX's own deferred-start ALP_OK even before the
 	 * real trigger has fired -- see z_start() -- so it cannot stand in
-	 * here. i2s_dw_trigger()'s DRAIN case logs its own LOG_ERR on every
-	 * refusal, so issuing it here just to watch it fail on an already-
-	 * known, already-handled case is pure log noise -- matches this
+	 * here. i2s_dw_trigger()'s DRAIN case logs a refusal from READY at
+	 * error level (from ERROR only at debug level, since issue #2205, so
+	 * a stale tx_started=true costs nothing but the refused DRAIN), and
+	 * issuing it here just to watch it fail on an already-known,
+	 * already-handled case is pure log noise -- matches this
 	 * function's own pre-#2137 behaviour, which used DROP
 	 * unconditionally here with no DRAIN attempt at all. RX has no
 	 * equivalent hardware-truth bit in the sidecar (RX never defers,

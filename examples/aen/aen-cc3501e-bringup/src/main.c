@@ -266,7 +266,7 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 	/* Sized to ALP_CC3501E_MAX_PAYLOAD-class reads: the per-transaction cost of
 	 * the bridge is ~850 us regardless of size, so asking for 512 B when the
 	 * frame can carry ~2 KB throws away most of the link.  512 -> 2048 measured
-	 * 357 kB/s -> 421 kB/s on e1m-aen-evk-01. */
+	 * 357 kB/s -> 421 kB/s on an AEN EVK bench unit. */
 	static uint8_t rx[4096];
 
 	/* 1) Throughput -- drain a file from a local HTTP server over the link. */
@@ -362,7 +362,7 @@ static void cc3501e_net_probe(cc3501e_t *fw)
 	 * radio call is illegal in its SPI-dispatch ISR -- so the status code alone
 	 * cannot tell an applied policy from a silently rejected one.
 	 *
-	 * Measured on e1m-aen-evk-01: bulk throughput under DEEP_SLEEP tracks the
+	 * Measured on an AEN EVK bench unit: bulk throughput under DEEP_SLEEP tracks the
 	 * default (798000 vs 799383 B/s).  That is CORRECT -- 802.11 power save keeps
 	 * the station awake while downlink traffic is flowing and sleeps in the idle
 	 * gaps, so the saving shows up in idle current, not as a throughput cut.
@@ -1320,7 +1320,7 @@ int main(void)
 				                           ((uint32_t)mac[2] << 16) | ((uint32_t)mac[3] << 24);
 				g_cc3501e_witness.mac_hi = (uint32_t)mac[4] | ((uint32_t)mac[5] << 8);
 				/* Is the READY line REAL?  This probe ALWAYS prints rc=-<NOSUPPORT>
-				 * on the R2 module e1m-aen-evk-01 currently holds: cc3501e_bridge.c
+				 * on the R2 module this bench currently holds: cc3501e_bridge.c
 				 * does not wire fw->ready_pin by default, because on that module
 				 * Alif P2_6 is E1M pad AH7 / I2S1_SCLK (the EVK's Arduino CK_RST),
 				 * NOT the CC3501E GPIO17 READY net -- see cc3501e_bridge.c and
