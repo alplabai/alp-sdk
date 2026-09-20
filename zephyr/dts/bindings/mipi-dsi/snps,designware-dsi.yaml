@@ -71,6 +71,36 @@ properties:
     type: boolean
     description: Request peripheral ACK at the end of frames (DSI_PCKHDL_CFG.BTA_EN).
 
+  dpi-video-mode:
+    type: string
+    default: "non-burst-sync-events"
+    enum:
+      - "non-burst-sync-events"
+      - "non-burst-sync-pulses"
+      - "burst"
+    description: |
+      The video transmission mode the PANEL needs, ORed into the mode flags the
+      panel driver hands to dsi_dw_attach().  A panel driver is supposed to
+      declare this itself, but upstream ones frequently do not: Zephyr's
+      himax,hx8394 driver sets mdev.mode_flags = MIPI_DSI_MODE_VIDEO and
+      nothing else, which leaves this host in non-burst sync-events no matter
+      what the panel actually wants.  Since the board is what knows which panel
+      is fitted, the board describes it here.
+      "burst" needs lane bandwidth ABOVE the DPI byte rate: the host asks the
+      PLL for DSI_HS_CLK_SCALING_FACTOR (4/3) x pixel-clock * bpp / lanes.
+      panel-max-lane-bandwidth clamps only that RATE -- MODE_TYPE still comes
+      from the mode flags (dsi_dw_burst_mode_setup()), so a low clamp does not
+      cancel the burst, it runs a burst whose lane is SLOWER than the DPI feed,
+      which starves the link. Keep the clamp above pixel-clock * bpp / lanes.
+
+  autoinsert-eotp:
+    type: boolean
+    description: |
+      Append an EoTp short packet to every HS transmission
+      (DSI_PCKHDL_CFG.EOTP_TX_EN, reached via MIPI_DSI_MODE_EOT_PACKET).  Some
+      panels never leave their idle state without it.  Distinct from
+      eotp-lp-tx-en, which is the LP-transmission EoTp (EOTP_TX_LP_EN).
+
   dpi-colorm-active:
     type: int
     required: true

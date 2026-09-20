@@ -243,6 +243,44 @@
 
 &mipi_dsi {
 	vid-pkt-size = <720>;
+
+	/*
+	 * What the PANEL needs, which its driver does not declare: Zephyr's
+	 * himax,hx8394 sets mdev.mode_flags = MIPI_DSI_MODE_VIDEO and nothing
+	 * else, so anything beyond plain non-burst sync-events can never reach
+	 * this host no matter what the panel wants.  The board knows which panel
+	 * is fitted, so the board says.
+	 *
+	 * Kept at non-burst deliberately.  The upstream NXP shield for this same
+	 * module uses "burst" with autoinsert-eotp, but their host is NXP's own
+	 * IP (fsl_mipi_dsi.c), not a DesignWare core, so those settings do not
+	 * transfer register-for-register.  On THIS host burst was tried at 500,
+	 * 750 and 900 Mbps clamps and killed every DCS read in all three, while
+	 * non-burst answers reliably -- and the panel's own init writes ride that
+	 * same LP path, so under burst the panel is very likely never configured
+	 * at all.  Do not switch to burst without re-testing DCS reads (#2199).
+	 */
+	dpi-video-mode = "non-burst-sync-events";
+
+	/*
+	 * The Alif DSI controller's TWO-LANE ceiling, not a guess: the Ensemble
+	 * serial-display application note's MIPI DSI feature list states
+	 * "Supports one data lane (maximum speed 850 Mbps) or two data lanes
+	 * (maximum speed 500 Mbps)", and Alif's own e1c.dtsi / b1.dtsi set
+	 * panel-max-lane-bandwidth = <500000000> explicitly.  Stated here rather
+	 * than left to the binding default so the number is visible next to the
+	 * pixel clock it constrains.
+	 *
+	 * At 2 lanes the lane rate is pixel-clock * bpp / 2, so the RGB565 link
+	 * above runs 57.142857 MHz * 16 / 2 = 457 Mbps -- inside the limit, at
+	 * 60 Hz.  Raising this above 500000000 runs the controller out of spec;
+	 * it was tried at 750 and 900 Mbps and the panel never displayed anything.
+	 * The clamp limits only the RATE: MODE_TYPE comes from the mode flags in
+	 * dsi_dw_burst_mode_setup(), so a low clamp never cancels a burst -- it
+	 * only makes the lane slower than the DPI feed, starving the link.
+	 */
+	panel-max-lane-bandwidth = <500000000>;
+
 	status = "okay";
 
 	/*

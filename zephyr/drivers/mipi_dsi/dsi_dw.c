@@ -627,9 +627,18 @@ void dsi_dw_packet_handler_config(const struct device *dev)
 	if (config->eotp_rx)
 		tmp |= DSI_PCKHDL_CFG_EOTP_RX_EN;
 
-	tmp |= DSI_PCKHDL_CFG_ECC_RX_EN |
-		DSI_PCKHDL_CFG_CRC_RX_EN |
-		DSI_PCKHDL_CFG_BTA_EN;
+	if (config->ecc_recv_en)
+		tmp |= DSI_PCKHDL_CFG_ECC_RX_EN;
+	if (config->crc_recv_en)
+		tmp |= DSI_PCKHDL_CFG_CRC_RX_EN;
+
+	/*
+	 * ALP-SDK PORT FIX: BTA_EN is not optional here.  Every DCS *read* needs a
+	 * bus turnaround, so a host that leaves it clear reports -EIO for reads
+	 * that the panel answered.  It is unrelated to frame-ack-en, which is the
+	 * end-of-frame ACK in DSI_VID_MODE_CFG (dsi_dw_dpi_frame_ack()).
+	 */
+	tmp |= DSI_PCKHDL_CFG_BTA_EN;
 
 	sys_write32(tmp, regs + DSI_PCKHDL_CFG);
 }
@@ -768,6 +777,32 @@ int dsi_dw_video_mode_config(const struct device *dev)
 	/* Setup request for Peripheral ACK at the end of frame. */
 	dsi_dw_dpi_frame_ack(regs, config->frame_ack_en);
 
+	/*
+	 * ALP-SDK PORT FIX: arm the video pattern generator HERE, not at the end
+	 * of attach.  Attach leaves the host in command mode, and the later
+	 * command->video switch in dsi_dw_set_mode_locked() brackets itself with
+	 * dsi_dw_pwr_down()/dsi_dw_pwr_up(); VPG_EN does not survive that, so a
+	 * pattern armed during attach read back as 0 once video was running and
+	 * the generator never ran.  Setting it on the video-mode path puts it
+	 * after the power-down and before the power-up, where it sticks.
+	 */
+	switch (config->dpi.vpg_pattern) {
+	case DPI_VID_PATTERN_GEN_VERT_COLORBAR:
+		sys_set_bits(regs + DSI_VID_MODE_CFG, DSI_VID_MODE_CFG_VPG_EN);
+		break;
+	case DPI_VID_PATTERN_GEN_HORIZ_COLORBAR:
+		sys_set_bits(regs + DSI_VID_MODE_CFG,
+			     DSI_VID_MODE_CFG_VPG_EN | DSI_VID_MODE_CFG_VPG_ORIENTATION);
+		break;
+	case DPI_VID_PATTERN_GEN_VERT_BER:
+		sys_set_bits(regs + DSI_VID_MODE_CFG,
+			     DSI_VID_MODE_CFG_VPG_EN | DSI_VID_MODE_CFG_VPG_MODE);
+		break;
+	case DPI_VID_PATTERN_GEN_NONE:
+		sys_clear_bits(regs + DSI_VID_MODE_CFG, DSI_VID_MODE_CFG_VPG_EN);
+		break;
+	}
+
 	tmp = sys_read32(regs + DSI_LPCLK_CTRL);
 	if (data->mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS)
 		tmp |= DSI_LPCLK_CTRL_AUTO_CLKLN_CTRL;
@@ -833,7 +868,6 @@ static int dsi_dw_attach_locked(const struct device *dev,
 		const struct mipi_dsi_device *mdev)
 {
 	const struct dsi_dw_config *config = dev->config;
-	const struct dpi_config *dpi = &config->dpi;
 	struct dsi_dw_data *data = dev->data;
 	struct dphy_dsi_settings *phy = &data->phy;
 	struct mipi_dsi_device eff_mdev = *mdev;
@@ -850,7 +884,18 @@ static int dsi_dw_attach_locked(const struct device *dev,
 	 * line/frame registers and the LP-command windows from stack noise.
 	 */
 	eff_mdev.timings = config->timings;
-	mdev             = &eff_mdev;
+
+	/*
+	 * ALP-SDK PORT FIX: the same problem one level up.  A panel driver is
+	 * meant to declare the transmission mode its panel needs, but upstream
+	 * himax,hx8394 sets only MIPI_DSI_MODE_VIDEO (display_hx8394.c), so burst
+	 * and EoTp -- both of which the RK055HDMIPI4MA0 needs, per NXP's own
+	 * shield for the identical module -- never reach this host and the panel
+	 * stays dark with a perfectly clean video stream on the link.  The board
+	 * knows which panel is fitted, so the board supplies them.
+	 */
+	eff_mdev.mode_flags |= config->mode_flags_or;
+	mdev                 = &eff_mdev;
 
 	LOG_DBG("Attach called for channel: %d "
 		"With parameters - htimings(%d, %d, %d, %d)\t"
@@ -903,36 +948,11 @@ static int dsi_dw_attach_locked(const struct device *dev,
 	dsi_dw_cmd_mode_config(dev);
 
 	/*
-	 * Setup as Video Mode at the end of attach only if VPG is active.
-	 * In case of Video inputs from DPI, keep DSI controller in command
-	 * mode.
+	 * The video pattern generator is armed on the video-mode path
+	 * (dsi_dw_video_mode_config()), not here: attach leaves the host in
+	 * command mode and the later switch to video power-cycles the host,
+	 * which clears VPG_EN.
 	 */
-	if (dpi->vpg_pattern != DPI_VID_PATTERN_GEN_NONE) {
-		switch (dpi->vpg_pattern) {
-		case DPI_VID_PATTERN_GEN_VERT_COLORBAR:
-			/* Setup the DSI as Video mode. */
-			sys_set_bits(regs + DSI_VID_MODE_CFG,
-				DSI_VID_MODE_CFG_VPG_EN);
-			break;
-		case DPI_VID_PATTERN_GEN_HORIZ_COLORBAR:
-			/* Setup the DSI as Video mode. */
-			sys_set_bits(regs + DSI_VID_MODE_CFG,
-				DSI_VID_MODE_CFG_VPG_EN |
-				DSI_VID_MODE_CFG_VPG_ORIENTATION);
-			break;
-		case DPI_VID_PATTERN_GEN_VERT_BER:
-			/* Setup the DSI as Video mode. */
-			sys_set_bits(regs + DSI_VID_MODE_CFG,
-				DSI_VID_MODE_CFG_VPG_EN |
-				DSI_VID_MODE_CFG_VPG_MODE);
-			break;
-		case DPI_VID_PATTERN_GEN_NONE:
-			break;
-		default:
-			LOG_ERR("Unknown Video Pattern Mode.");
-			return -EINVAL;
-		}
-	}
 
 	/* DSI must wait for 2 frames time after setup. */
 	dsi_dw_wait_2_frames(data->dpi_pix_clk, &mdev->timings);
@@ -1338,6 +1358,16 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 		 .dsi_cid = (clock_control_subsys_t)DT_INST_CLOCKS_CELL_BY_NAME(i,              \
 			 dsi_clk_en, clkid),))
 
+/*
+ * The panel properties the board declares on the host's behalf, because the
+ * panel driver does not.  dpi-video-mode's enum order is the binding's:
+ * 0 non-burst-sync-events (no flag), 1 non-burst-sync-pulses, 2 burst.
+ */
+#define DSI_DW_MODE_FLAGS_OR(i)                                                                 \
+	((DT_INST_ENUM_IDX(i, dpi_video_mode) == 1 ? MIPI_DSI_MODE_VIDEO_SYNC_PULSE : 0) |      \
+	 (DT_INST_ENUM_IDX(i, dpi_video_mode) == 2 ? MIPI_DSI_MODE_VIDEO_BURST : 0) |           \
+	 (DT_INST_PROP(i, autoinsert_eotp) ? MIPI_DSI_MODE_EOT_PACKET : 0))
+
 #define ALIF_MIPI_DSI_DEVICE(i)                                                                 \
 	static void dsi_dw_config_func_##i(const struct device *dev);				\
 	static const struct dsi_dw_config config_##i = {					\
@@ -1384,6 +1414,7 @@ static DEVICE_API(mipi_dsi, dsi_dw_api) = {
 		.ecc_recv_en = DT_INST_PROP(i, ecc_recv_en),					\
 		.crc_recv_en = DT_INST_PROP(i, crc_recv_en),					\
 		.frame_ack_en = DT_INST_PROP(i, frame_ack_en),					\
+		.mode_flags_or = DSI_DW_MODE_FLAGS_OR(i),					\
 		.panel_max_lane_bw = DT_INST_PROP(i, panel_max_lane_bandwidth),                 \
 		.dpi_pix_clk = DT_PROP_OR(DT_INST_PHANDLE(i, cdc_if), clock_frequency, 0),      \
 	};											\

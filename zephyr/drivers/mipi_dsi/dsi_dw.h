@@ -412,7 +412,15 @@
 /* Read-only Frame-rate value to be used for clock calculations. */
 #define  DPI_FRAME_RATE				60
 #define  DSI_HS_CLK_SCALING_FACTOR		(4.0f/3.0f)
-#define  MAX_ESC_CLK				MHZ(20)
+/*
+ * ALP-SDK PORT FIX: cap the TX escape clock at 15 MHz, not the 20 MHz D-PHY
+ * ceiling.  The divider is integer, so a lane-byte clock just above a multiple
+ * lands the escape clock within a few percent of the spec maximum (57.8 MHz / 3
+ * = 19.3 MHz here), leaving no margin for a peripheral's LP receiver.  Linux's
+ * dw-mipi-dsi sizes the same divider against 15 MHz; matching it costs only LP
+ * command time.  BENCH: chasing a per-power-up whole-panel LP-RX silence (#2199).
+ */
+#define  MAX_ESC_CLK				MHZ(15)
 enum sdf_format {
 	SDF_FORMAT_MUXED_LINES = 0x0,
 	SDF_FORMAT_MUXED_FRAMES = 0x1,
@@ -483,6 +491,13 @@ struct dsi_dw_config {
 
 	/* Request ACK at the end of a frame. */
 	uint32_t frame_ack_en : 1;
+
+	/*
+	 * Panel properties the BOARD declares because the panel driver does not.
+	 * ORed into mdev->mode_flags in dsi_dw_attach_locked(); see the
+	 * dpi-video-mode / autoinsert-eotp bindings.
+	 */
+	uint32_t mode_flags_or;
 };
 
 struct dsi_dw_data {
