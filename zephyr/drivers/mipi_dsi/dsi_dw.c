@@ -1066,10 +1066,14 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 {
 	uint32_t mask;
 
+	/*
+	 * The high byte needs the shift before the narrowing: `(uint8_t) value >> 8`
+	 * casts first and is always 0, so a size above 255 was silently truncated.
+	 */
 	sys_write32(HEADER(channel,
 			MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE,
-			(uint8_t) value & 0xff,
-			(uint8_t) value >> 8),
+			value & 0xff,
+			(value >> 8) & 0xff),
 		regs + DSI_GEN_HDR);
 
 	mask = DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY |
@@ -1201,6 +1205,13 @@ static ssize_t dsi_dw_transfer_locked(const struct device *dev,
 		ret = dsi_dw_read_payload(regs, msg->rx_buf, msg->rx_len);
 		if (ret < 0)
 			return ret;
+		/*
+		 * The mipi_dsi API asks for the number of bytes received, but the DW
+		 * controller does not expose the received word count: the read FIFO is
+		 * drained blind.  So a short response is reported as msg->rx_len with
+		 * the untouched tail of rx_buf, and a caller cannot tell truncation
+		 * from a full answer by the return value alone.
+		 */
 		return msg->rx_len;
 	}
 
