@@ -47,7 +47,9 @@
  * PANEL ENABLE / RESET / BACKLIGHT:
  *   A small I2C GPIO expander on I2C2 provides the HX8394 control GPIOs.  It
  *   answers at POR with no reset action (its reset line is pulled up on the
- *   carrier).  A boot-on fixed regulator asserts the panel-enable GPIO before
+ *   carrier).  The shield hogs the RESX pin low as soon as the expander is up,
+ *   so the panel never sees its supply rise against a floating reset; only then
+ *   does a boot-on fixed regulator assert the panel-enable GPIO, before
  *   the HX8394 driver performs its reset and DSI initialization.  The hx8394
  *   driver lights the SoM-side backlight (its bl-gpios) only at the END of a
  *   successful init -- backlight last is the right production order, no white
@@ -73,6 +75,14 @@
  *   - cdc200/mipi_dsi clock ids are the real re-authored ALIF_*_CLK values and
  *     are proved by this app's bench PASS gate.
  *
+ * BENCH DIAGNOSTICS (not API usage, and not part of the PASS gate): every block
+ * marked "BENCH DIAGNOSTIC" below exists to classify the two open defects on
+ * e1m-aen-evk-01 (#2199) -- whole-panel DCS silence on some cold cycles, and
+ * rx_len > 1 reads never answering.  They read registers the drivers own, mask
+ * the DSI IRQ around a transfer so the read-to-clear error latches survive, and
+ * snapshot the expander before the panel regulator runs.  They print raw values
+ * and decode nothing.  A production app needs none of this.
+ *
  * The PASS gate: the expander, the DSI host, AND the cdc200 display device are
  * all device_is_ready, a DCS read gets a non-zero panel answer, display_write()
  * of a solid-color frame returns 0, and display_blanking_off() starts scanout.
@@ -90,6 +100,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/init.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/sys/sys_io.h>
 
@@ -199,9 +210,83 @@ static const struct gpio_dt_spec lcd_pwr_gpio = GPIO_DT_SPEC_GET(LCD_PWR_NODE, e
 static const struct gpio_dt_spec bl_gpio      = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios);
 static const struct i2c_dt_spec  lcd_exp_i2c  = I2C_DT_SPEC_GET(EXP_NODE);
 
+/*
+ * BENCH DIAGNOSTIC -- panel power at board POR (#2199).
+ *
+ * The question this answers: was the panel ALREADY powered when the board came
+ * out of reset, or does this boot turn it on?  Only a read taken before
+ * regulator_fixed asserts the enable pin can tell, so it runs from its own
+ * SYS_INIT wedged into the one window where the expander exists but the
+ * regulator has not run yet.  main() prints what it captured.
+ *
+ *   GPIO_PCA_SERIES_INIT_PRIORITY  the expander is up (POR regs restored)
+ *   ---> LCD_EXP_POR_PRIO          this snapshot
+ *   REGULATOR_FIXED_INIT_PRIORITY  panel supply on
+ *
+ * TCAL9538 registers: 0x00 input port, 0x01 output port, 0x03 configuration
+ * (1 = input).  Printed raw -- this app decodes nothing.
+ */
+#if DT_NODE_HAS_STATUS_OKAY(EXP_NODE)
+
+#define LCD_EXP_POR_PRIO 74
+
+BUILD_ASSERT(LCD_EXP_POR_PRIO > CONFIG_GPIO_PCA_SERIES_INIT_PRIORITY &&
+                 LCD_EXP_POR_PRIO < CONFIG_REGULATOR_FIXED_INIT_PRIORITY,
+             "the POR snapshot must run after the expander and before the panel regulator");
+
+/*
+ * The same window is what the shield's RESX hog depends on, and nothing else in
+ * the tree checks it: a Kconfig default cannot assert against another symbol.
+ */
+BUILD_ASSERT(CONFIG_GPIO_HOGS_INIT_PRIORITY > CONFIG_GPIO_PCA_SERIES_INIT_PRIORITY &&
+                 CONFIG_GPIO_HOGS_INIT_PRIORITY < CONFIG_REGULATOR_FIXED_INIT_PRIORITY,
+             "the lcd_exp RESX hog must run after the expander and before the panel regulator");
+
+static uint8_t lcd_exp_por_val[3];
+static int     lcd_exp_por_rc[3];
+
+static int lcd_exp_por_snapshot(void)
+{
+	static const uint8_t regs[3] = { 0x00, 0x01, 0x03 };
+
+	for (size_t i = 0; i < ARRAY_SIZE(regs); i++) {
+		lcd_exp_por_rc[i] = i2c_reg_read_byte_dt(&lcd_exp_i2c, regs[i], &lcd_exp_por_val[i]);
+	}
+	return 0;
+}
+
+SYS_INIT(lcd_exp_por_snapshot, POST_KERNEL, LCD_EXP_POR_PRIO);
+
+#endif /* lcd_exp okay */
+
+/*
+ * BENCH DIAGNOSTIC -- Alif P5_2, the audio-amp SD_N shared with the I2C2 bus
+ * users (#2199).  0x4e appeared in one cold cycle's scan and not the next, and
+ * SD_N low is the known reason the TAS2563 amps drop off I2C, so the two want
+ * correlating.
+ *
+ * READ-ONLY, by design: P5_2 is NOT muxed to GPIO and NOT driven here.  Its
+ * input receiver may be off, in which case the gpio5 port word reads 0 for that
+ * bit regardless of the pad's real level -- so the pad config register is
+ * printed alongside, and the three amp addresses' presence is printed
+ * explicitly rather than inferred.  Muxing the pad to read it would change a
+ * live amp-shutdown line, which is not a diagnostic's business.
+ *
+ * Pad register: PINMUX base 0x1a603000 + (port * 8 + pin) * 4; P5_2 is
+ * (5 * 8 + 2) * 4 = 0xa8.  Bit 16 is REN, the input-receiver enable.
+ */
+#define P5_2_PAD_ADDR 0x1A6030A8UL
+#define P5_2_PIN      2
+
 static void scan_i2c2(const char *stage)
 {
-	const struct device *bus = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+	const struct device *bus  = DEVICE_DT_GET(DT_NODELABEL(i2c2));
+	const struct device *gp5  = DEVICE_DT_GET(DT_NODELABEL(gpio5));
+	bool                 a48  = false;
+	bool                 a4d  = false;
+	bool                 a4e  = false;
+	gpio_port_value_t    p5   = 0;
+	int                  p5rc = -ENODEV;
 
 	if (!device_is_ready(bus)) {
 		printk("i2c2 scan[%s]: bus not ready\n", stage);
@@ -214,9 +299,24 @@ static void scan_i2c2(const char *stage)
 
 		if (i2c_read(bus, &v, 1, addr) == 0) {
 			printk(" 0x%02x", addr);
+			a48 = a48 || (addr == 0x48);
+			a4d = a4d || (addr == 0x4d);
+			a4e = a4e || (addr == 0x4e);
 		}
 	}
-	printk("\n");
+
+	if (device_is_ready(gp5)) {
+		p5rc = gpio_port_get_raw(gp5, &p5);
+	}
+	printk(" | 0x48=%d 0x4d=%d 0x4e=%d p5_2-pad=0x%08x p5-port=0x%08x(rc%d) p5_2=%d\n",
+	       (int)a48,
+	       (int)a4d,
+	       (int)a4e,
+	       sys_read32(P5_2_PAD_ADDR),
+	       (uint32_t)p5,
+	       p5rc,
+	       (int)((p5 >> P5_2_PIN) & 1U));
+	printk("  (p5_2 level valid only if the pad's REN bit16 is set; not muxed, not driven)\n");
 }
 
 static void dump_lcd_exp_regs(const char *stage)
@@ -284,8 +384,49 @@ static ssize_t dcs_read_lpm(const struct device *dsi, uint8_t cmd, void *buf, si
 	return mipi_dsi_transfer(dsi, 0, &msg);
 }
 
+/*
+ * BENCH DIAGNOSTIC -- one DCS read with its own error class (#2199).
+ *
+ * INT_ST0/INT_ST1 are read-to-clear, and dsi_dw's ISR reads both on every
+ * interrupt purely to log them, so by the time the caller sees an -EIO the
+ * latch that says WHY is already gone.  Masking the DSI IRQ for the duration
+ * and clearing the latches immediately before the transfer makes whatever is
+ * set afterwards belong to THIS read: ACK-with-error/D-PHY bits in int0, the
+ * timeout (TO_HS_TX bit 0 / TO_LP_RX bit 1), ECC, CRC, PKT_SIZE and
+ * GEN_PLD_RD/RECEV bits in int1.  Raw, undecoded -- the host decodes.
+ */
+static ssize_t dcs_read_classified(const struct device *dsi,
+                                   uint8_t              cmd,
+                                   void                *buf,
+                                   size_t               len,
+                                   uint32_t            *int0,
+                                   uint32_t            *int1)
+{
+	unsigned int irq = DT_IRQN(DSI_NODE);
+	ssize_t      rc;
+
+	irq_disable(irq);
+	(void)sys_read32(DSI_INT_ST0_ADDR);
+	(void)sys_read32(DSI_INT_ST1_ADDR);
+
+	rc = dcs_read_lpm(dsi, cmd, buf, len);
+
+	*int0 = sys_read32(DSI_INT_ST0_ADDR);
+	*int1 = sys_read32(DSI_INT_ST1_ADDR);
+	irq_enable(irq);
+	return rc;
+}
+
 static bool probe_panel_reads(const struct device *dsi)
 {
+	/*
+	 * The 11 standard reads, plus two that bracket the short/long response
+	 * boundary the bench is measuring: every rx_len=1 read has answered while
+	 * RDDID (3) and RDDDB (5) never have.  RDDST2 asks for 2 bytes, which the
+	 * panel still answers with a SHORT packet, and RDDID1 asks for 1 byte of a
+	 * normally-3-byte read -- so the pair separates "rx_len > 1" from
+	 * "response is a LONG packet".
+	 */
 	static const struct {
 		uint8_t     cmd;
 		uint8_t     len;
@@ -294,7 +435,8 @@ static bool probe_panel_reads(const struct device *dsi)
 		{ 0x04, 3, "RDDID" },     { 0x09, 4, "RDDST" },     { 0x0A, 1, "RDDPM" },
 		{ 0x0B, 1, "RDDMADCTL" }, { 0x0C, 1, "RDDCOLMOD" }, { 0x0D, 1, "RDDIM" },
 		{ 0x0E, 1, "RDDSM" },     { 0xA1, 5, "RDDDB" },     { 0xDA, 1, "RDID1" },
-		{ 0xDB, 1, "RDID2" },     { 0xDC, 1, "RDID3" },
+		{ 0xDB, 1, "RDID2" },     { 0xDC, 1, "RDID3" },     { 0x09, 2, "RDDST2" },
+		{ 0x04, 1, "RDDID1" },
 	};
 	uint8_t buf[5];
 	bool    any_nonzero = false;
@@ -304,22 +446,28 @@ static bool probe_panel_reads(const struct device *dsi)
 			buf[j] = 0;
 		}
 
-		ssize_t rc      = dcs_read_lpm(dsi, probes[i].cmd, buf, probes[i].len);
-		bool    nonzero = false;
+		uint32_t int0 = 0;
+		uint32_t int1 = 0;
+		ssize_t  rc   = dcs_read_classified(dsi, probes[i].cmd, buf, probes[i].len, &int0, &int1);
+		bool     nonzero = false;
 		for (size_t j = 0; j < probes[i].len; j++) {
 			nonzero = nonzero || (buf[j] != 0);
 		}
 		any_nonzero = any_nonzero || (rc > 0 && nonzero);
 
-		printk("panel DCS read: %-9s cmd=0x%02x rc=%d data=%02x %02x %02x %02x %02x\n",
+		printk("panel DCS read: %-9s cmd=0x%02x len=%u rc=%d data=%02x %02x %02x %02x %02x "
+		       "int0=0x%08x int1=0x%08x\n",
 		       probes[i].name,
 		       probes[i].cmd,
+		       probes[i].len,
 		       (int)rc,
 		       buf[0],
 		       buf[1],
 		       buf[2],
 		       buf[3],
-		       buf[4]);
+		       buf[4],
+		       int0,
+		       int1);
 	}
 
 	printk("panel presence: %s\n",
@@ -342,6 +490,16 @@ int main(void)
 	bool exp_ok = dev_ready("lcd-exp", exp);
 	bool pwr_ok = dev_ready("lcd-reg", pwr);
 	scan_i2c2("entry");
+#if DT_NODE_HAS_STATUS_OKAY(EXP_NODE)
+	/* Captured before regulator_fixed ran -- see lcd_exp_por_snapshot(). */
+	printk("lcd-exp regs[por]: in=%02x(rc%d) out=%02x(rc%d) cfg=%02x(rc%d)\n",
+	       lcd_exp_por_val[0],
+	       lcd_exp_por_rc[0],
+	       lcd_exp_por_val[1],
+	       lcd_exp_por_rc[1],
+	       lcd_exp_por_val[2],
+	       lcd_exp_por_rc[2]);
+#endif
 	if (exp_ok) {
 		dump_lcd_exp_regs("before-pwr-set");
 	}
@@ -431,6 +589,27 @@ int main(void)
 			if (rc == 0 && dsi_ok) {
 				dump_dsi_status("after-blanking-off");
 				scanout_ok = check_scanout();
+
+				/*
+				 * BENCH DIAGNOSTIC (#2199): RDDPM once more, now that
+				 * video is streaming.  The PASS run reported sleep-out +
+				 * normal mode + display-on with the BOOSTER bit (bit 7)
+				 * clear and the glass black under a lit backlight, so the
+				 * open question is whether the booster comes up when the
+				 * scanout starts.  Informational; the gate is above.
+				 */
+				uint8_t  pm    = 0;
+				uint32_t pint0 = 0;
+				uint32_t pint1 = 0;
+				ssize_t  prc   = dcs_read_classified(dsi, 0x0A, &pm, 1, &pint0, &pint1);
+
+				printk("panel DCS read: %-9s cmd=0x0a len=1 rc=%d data=%02x "
+				       "int0=0x%08x int1=0x%08x\n",
+				       "RDDPM/vid",
+				       (int)prc,
+				       pm,
+				       pint0,
+				       pint1);
 			}
 		}
 	}
