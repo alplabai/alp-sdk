@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * e1m_evk_rk055hdmipi4ma0 -- the RK055HDMIPI4MA0 MIPI-DSI panel (720x1280,
- * Himax HX8394 controller, 2 data lanes, RGB565) on the E1M-EVK's display
+ * Himax HX8394 controller, 2 data lanes, RGB888) on the E1M-EVK's display
  * connector (J6), driven by an E1M-AEN SoM (Alif Ensemble E8) through the SoC
  * display chain:
  *
@@ -25,13 +25,31 @@
  * on for an app.  The SoC-level clock / power / pad setup the chain needs
  * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
  *
- * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel
- * clock is not: the panel-native 62.346 MHz is unreachable from the 400 MHz
- * CDC source, so clock-frequency is the rate the CDC really runs (400 MHz / 7
- * = 57.14 MHz, ~57 Hz refresh).  The SoC glue derives the CDC divider from it
- * and the DSI host times its lanes from it, so the two cannot drift.
- * 400 MHz / 6 = 66.67 MHz would need ~539 Mbps/lane, over the DSI host's
- * default 500 Mbps panel-max-lane-bandwidth.
+ * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel clock
+ * and the layer format are not, and the pair is chosen together.
+ *
+ * 400 MHz / 10 = 40 MHz at 24-bit gives 40 * 24 / 2 = 480 Mbps/lane, inside the
+ * Alif DSI controller's 500 Mbps two-lane ceiling, at ~40 Hz refresh.
+ *
+ * RGB565 at 400 MHz / 7 = 57.142857 MHz is the obvious alternative and looks
+ * better on paper: 457 Mbps/lane, also in spec, 60 Hz, a 1.84 MB framebuffer
+ * instead of 2.76 MB, and a 13.33 us line that nearly matches the panel
+ * driver's own RTN default (12.80 us) instead of needing it retuned.  It is
+ * NOT used because of a measured, unexplained defect: at that pixel clock,
+ * DCS reads of THREE OR MORE bytes fail with a TO_LP_RX timeout (INT_ST1 bit
+ * 1) while 1- and 2-byte reads keep working, and at 40 MHz the same reads
+ * return correctly (RDDID rc=3 data=83 94 0f, RDDST rc=4 data=81 73 06 00).
+ * Four bench runs, 100% correlated with the pixel clock.  The escape-clock
+ * divider is derived from the lane byte clock (60.0 MHz -> /5 -> 12 MHz;
+ * 57.8 MHz -> /4 -> 14.45 MHz), which is the suspected mechanism but is not
+ * proven.  Losing panel readback is worse than losing refresh rate, so stay at
+ * 40 MHz until that is understood; revisit the whole choice when it is (#2199).
+ *
+ * The SoC glue derives the CDC divider from clock-frequency and the DSI host
+ * times its lanes from it, so those two cannot drift.  The APP's fill format
+ * must track pixel-fmt-l1 too -- aen-dsi-display derives it from this node
+ * rather than hardcoding, after a mismatch made every display_write() return
+ * -EINVAL with no frame written at all.
  *
  * Conflicts: the I2C expander at 0x73 becomes a driver-owned GPIO controller
  * (gpio_pca_series), so an app must not also write its registers directly.
@@ -80,8 +98,8 @@
 };
 
 /*
- * The framebuffer: the top 2 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
- * dtsi's sram0).  A 720x1280 RGB565 layer is 1,843,200 B.  Plain "mmio-sram",
+ * The framebuffer: the top 3 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
+ * dtsi's sram0).  A 720x1280 RGB888 layer is 2,764,800 B.  Plain "mmio-sram",
  * not "zephyr,memory-region": the CDC driver uses the address directly, so
  * nothing is linked here and the framebuffer adds nothing to the image (an
  * ITCM RAM-run .bin stays small).
@@ -94,13 +112,13 @@
  * after this shield and still stays below the framebuffer.
  */
 &sram0 {
-	reg = <0x02000000 DT_SIZE_M(2)>;
+	reg = <0x02000000 DT_SIZE_M(1)>;
 };
 
 &soc {
-	lcd_fb: sram@2200000 {
+	lcd_fb: sram@2100000 {
 		compatible = "mmio-sram";
-		reg = <0x02200000 DT_SIZE_M(2)>;
+		reg = <0x02100000 DT_SIZE_M(3)>;
 	};
 };
 
@@ -223,13 +241,13 @@
 	de-active = <1>;
 	pixelclk-active = <0>;
 	/* The real pixel rate, 400 MHz / 7 (see the header). */
-	clock-frequency = <57142857>;
+	clock-frequency = <40000000>;
 	bg-color = <0x000000>;
 	memory-region = <&lcd_fb>;
 
 	/* L1 only: a single full-screen RGB565 layer. */
 	enable-l1 = <1>;
-	pixel-fmt-l1 = "rgb-565";
+	pixel-fmt-l1 = "rgb-888";
 	win-x0-l1 = <0>;
 	win-y0-l1 = <0>;
 	win-x1-l1 = <720>;
@@ -306,7 +324,7 @@
 		data-lanes = <2>;
 		width = <720>;
 		height = <1280>;
-		pixel-format = <MIPI_DSI_PIXFMT_RGB565>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
 		status = "okay";
 	};
 };
