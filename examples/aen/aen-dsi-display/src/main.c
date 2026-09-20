@@ -79,9 +79,11 @@
  * marked "BENCH DIAGNOSTIC" below exists to classify the two open defects on
  * e1m-aen-evk-01 (#2199) -- whole-panel DCS silence on some cold cycles, and
  * rx_len > 1 reads never answering.  They read registers the drivers own, mask
- * the DSI IRQ around a transfer so the read-to-clear error latches survive, and
- * snapshot the expander before the panel regulator runs.  They print raw values
- * and decode nothing.  A production app needs none of this.
+ * the DSI IRQ around a transfer so the read-to-clear error latches survive,
+ * snapshot the expander before the panel regulator runs, and scan the panel
+ * flex's touch I2C -- the one check that does not use the DSI link at all, so
+ * it says whether the flex is seated and the panel side powered.  They print
+ * raw values and decode nothing.  A production app needs none of this.
  *
  * The PASS gate: the expander, the DSI host, AND the cdc200 display device are
  * all device_is_ready, a DCS read gets a non-zero panel answer, display_write()
@@ -319,6 +321,97 @@ static void scan_i2c2(const char *stage)
 	printk("  (p5_2 level valid only if the pad's REN bit16 is set; not muxed, not driven)\n");
 }
 
+/*
+ * BENCH DIAGNOSTIC -- the panel flex's TOUCH I2C (#2199).
+ *
+ * This is the one check in the app that does NOT go through the DSI link, so it
+ * separates "the flex is not seated / the panel side is unpowered" from "the
+ * DSI link is unhappy": the touch controller sits on the same flex as the
+ * display and answers on its own bus.  If touch answers and DCS does not, the
+ * flex is in and powered and the problem is the DSI side; if neither answers,
+ * suspect the flex or the panel supply.
+ *
+ * The bus is SoC I2C1 (E1M_I2C1 / EVK_I2C_BUS_DSI_CSI): J6 pin 26/27 through a
+ * level translator to E1M pads AH17 / AG17, i.e. Alif P7_2 (I2C1_SDA_C) and
+ * P3_7 (I2C1_SCL_B).  The shield enables the node and its pinctrl group.
+ *
+ * Touch reset is expander U35 P3 (CTP_RST, out to J6 pin 28), driven HIGH here
+ * to RELEASE reset.  The controller latches its 7-bit address out of reset --
+ * 0x5D (default) or 0x14, the datasheet's 8-bit pairs 0xBA/0xBB and 0x28/0x29 --
+ * and its power-on/firmware load takes tens of milliseconds, so the scan waits
+ * 50 ms after the release or it reads a bus that is not answering yet.  Its INT
+ * line goes to the CC3501E's GPIO_15, not to an Alif pad, so nothing here can
+ * drive or observe INT.
+ *
+ * READ-ONLY on the touch side: no touch driver, no register write.  A
+ * GT911-class part exposes its product ID at 16-bit register 0x8140 ("911" in
+ * ASCII plus a NUL), which is read and printed raw if one of the two addresses
+ * answers.
+ */
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(i2c1)) && DT_NODE_HAS_STATUS_OKAY(EXP_NODE)
+#define TOUCH_I2C_READY 1
+
+#define CTP_RST_EXP_PIN      3
+#define CTP_RESET_SETTLE_MS  50
+#define TOUCH_ADDR_DEFAULT   0x5D
+#define TOUCH_ADDR_ALT       0x14
+#define TOUCH_PRODUCT_ID_REG 0x8140
+
+static void scan_i2c1_touch(const struct device *exp)
+{
+	const struct device *bus   = DEVICE_DT_GET(DT_NODELABEL(i2c1));
+	uint16_t             hit   = 0;
+	int                  rrc   = gpio_pin_configure(exp, CTP_RST_EXP_PIN, GPIO_OUTPUT_HIGH);
+	uint8_t              id[4] = { 0 };
+
+	printk(
+	    "ctp-rst : expander P3 released high (rc%d), settling %u ms\n", rrc, CTP_RESET_SETTLE_MS);
+	k_msleep(CTP_RESET_SETTLE_MS);
+
+	if (!device_is_ready(bus)) {
+		printk("i2c1 scan[touch]: bus not ready\n");
+		return;
+	}
+
+	printk("i2c1 scan[touch]:");
+	for (uint16_t addr = 0x08; addr < 0x78; addr++) {
+		uint8_t v;
+
+		if (i2c_read(bus, &v, 1, addr) == 0) {
+			printk(" 0x%02x", addr);
+			if (addr == TOUCH_ADDR_DEFAULT || addr == TOUCH_ADDR_ALT) {
+				hit = addr;
+			}
+		}
+	}
+	printk("\n");
+
+	if (hit == 0) {
+		printk("touch   : NO ANSWER at 0x%02x or 0x%02x -- flex not seated, panel side "
+		       "unpowered, or touch held in reset\n",
+		       TOUCH_ADDR_DEFAULT,
+		       TOUCH_ADDR_ALT);
+		return;
+	}
+
+	/* 16-bit register address, big-endian on the wire. */
+	uint8_t reg[2] = { TOUCH_PRODUCT_ID_REG >> 8, TOUCH_PRODUCT_ID_REG & 0xFF };
+	int     prc    = i2c_write_read(bus, hit, reg, sizeof(reg), id, sizeof(id));
+
+	printk("touch   : RESPONDING at 0x%02x (%s) product-id[0x%04x] rc=%d data=%02x %02x %02x "
+	       "%02x\n",
+	       hit,
+	       hit == TOUCH_ADDR_DEFAULT ? "default" : "alternate",
+	       TOUCH_PRODUCT_ID_REG,
+	       prc,
+	       id[0],
+	       id[1],
+	       id[2],
+	       id[3]);
+}
+
+#endif /* i2c1 + lcd_exp okay */
+
 static void dump_lcd_exp_regs(const char *stage)
 {
 	uint8_t in  = 0;
@@ -519,6 +612,16 @@ int main(void)
 		}
 		dump_lcd_exp_regs("after-pwr-set");
 	}
+
+#ifdef TOUCH_I2C_READY
+	/*
+	 * Step 1b (BENCH DIAGNOSTIC): the panel flex's touch bus, before any DSI
+	 * read, so its verdict is independent of the DSI link's state.
+	 */
+	if (exp_ok) {
+		scan_i2c1_touch(exp);
+	}
+#endif
 
 	/*
 	 * Step 2: HX8394 init does mipi_dsi_attach + DCS power-on over DSI, and

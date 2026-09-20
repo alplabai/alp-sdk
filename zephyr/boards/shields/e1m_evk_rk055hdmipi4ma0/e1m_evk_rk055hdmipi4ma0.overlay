@@ -42,6 +42,7 @@
 #include <mem.h>
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
 
 / {
 	chosen {
@@ -136,7 +137,8 @@
 		 * hx8394 driver configures it at CONFIG_APPLICATION_INIT_PRIORITY (90),
 		 * which is AFTER regulator_fixed turns the panel supply on at
 		 * CONFIG_REGULATOR_FIXED_INIT_PRIORITY (75): the panel is powered with
-		 * RESX floating on the expander's weak pull for ~15 init levels.  A
+		 * RESX high-impedance for ~15 init levels, at whatever level the
+		 * carrier's own termination happens to leave the net at.  A
 		 * floating RESX during the VCC ramp is the failure this prevents -- the
 		 * HX8394 samples an undefined reset level as it powers, which is the
 		 * ranked cause of the intermittent whole-panel DCS silence per cold
@@ -163,6 +165,43 @@
 /* gpio5 carries the backlight enable (panel bl-gpios below, P5_5). */
 &gpio5 {
 	status = "okay";
+};
+
+/*
+ * The panel flex's TOUCH I2C -- a DSI-independent proof that the flex is seated
+ * and the panel side is powered.  It is a shield fact (the bus only exists when
+ * this panel is plugged into J6), so it is enabled here and not in the board.
+ *
+ * Route: J6 pin 26/27 (DSI_I2C.SDA_L / DSI_I2C.SCL_L) -> level translator ->
+ * E1M pads AH17 / AG17 -> Alif silicon P7_2 (I2C1_SDA_C) and P3_7
+ * (I2C1_SCL_B), per metadata/pinmux/aen.yaml.  metadata/boards/e1m-evk.yaml
+ * names the bus E1M_I2C1 / EVK_I2C_BUS_DSI_CSI, "Display + camera control I2C
+ * (touch panel, camera-side I2C config)".  Touch reset is expander U35 P3
+ * (CTP_RST -> J6 pin 28); the touch controller's INT goes to the CC3501E's
+ * GPIO_15, not to an Alif pad, so nothing drives INT from here.
+ *
+ * P3_7 + P7_2 ONLY.  P3_6 is the I/O expander's own reset (E1M pad N1) and must
+ * not be muxed or driven from this group.
+ *
+ * input-enable + bias-pull-down is the bench-validated E8 I2C pad config, the
+ * same group shape as the board's pinctrl_i2c2 (2026-06-15); bias-pull-up is
+ * reported to give a dead bus on this silicon and is not used.  No
+ * clock-frequency: the SoC i2c1 node already declares I2C_BITRATE_STANDARD.
+ */
+&pinctrl {
+	pinctrl_i2c1_dsi: pinctrl_i2c1_dsi {
+		group0 {
+			pinmux = <PIN_P3_7__I2C1_SCL_B>, <PIN_P7_2__I2C1_SDA_C>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+};
+
+&i2c1 {
+	status = "okay";
+	pinctrl-0 = <&pinctrl_i2c1_dsi>;
+	pinctrl-names = "default";
 };
 
 &dphy {
