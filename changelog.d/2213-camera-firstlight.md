@@ -64,9 +64,14 @@ straight into J5 (or J4, the mux's other input) answers its I2C chip-ID
 probe but no frame ever arrives. An adapter crossing camera-connector pins
 2↔3, 5↔6 and 8↔9 (every other pin straight) fixes it; see
 `docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
-The IMX219, OV5647 and IMX296 paths remain BENCH-UNVERIFIED. All four
-shield scenarios stay `build_only` in twister regardless of bench status —
-twister has no bench access.
+The IMX219, OV5647 and IMX296 paths remain BENCH-UNVERIFIED. `ov9281.c`
+also gains a third, Alp-authored 1280x800 GREY8 mode (the sensor's full
+array, derived from the 1280x720 table) — BENCH-PENDING alongside
+1280x720. `tests/zephyr/video_sensors` now runs a real ztest for OV9281
+(`ov9281_test.c`) against an I2C emulator on native_sim, checking
+`get_caps`/`set_format`/register programming/exposure clamping instead of
+only compiling the driver; OV5647 and IMX296 stay `build_only` in
+twister — twister has no bench access.
 
 Retires `examples/aen/aen-camera-regcheck`: its overlay wired the sensor on
 CSI port@1 (D-PHY id 1, the DSI PHY) with an `arx3a0` sensor on `i2c2`, both
