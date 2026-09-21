@@ -90,4 +90,6 @@ pixel clock.
 application held its one in-flight buffer for more than a frame period; it now
 marks the stream starved and the next `video_enqueue()` reprograms
 `CAM_FRAME_ADDR` and resumes capture (bench-proven 2026-09-21 on an
-E1M-AEN803 on the E1M-EVK, OV9281 on J5).
+E1M-AEN803 on the E1M-EVK, OV9281 on J5: 60-frame wall-clock capture
+bursts in all three OV9281 modes each landed at their configured frame
+rate, which a stream that stalled on starvation could not have done).

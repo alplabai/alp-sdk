@@ -48,30 +48,40 @@ the fix rather than let it misbehave at run time.
 sets `CAM_CFG.AXI_PORT_EN` inside that option; with it off the E8 CPI never
 wrote a frame to memory, yet it still raised STOP for every frame, so the
 portable camera backend handed back the untouched buffer and
-`alp_camera_capture()` reported `ALP_OK`. On e1m-aen-evk-02 (OV9281 on J5)
-a pool pre-filled with `0xA5` came back byte-for-byte unchanged, test
-pattern on or off, with `CAM_CFG` = `0x00030013` (bit2 `AXI_PORT_EN`
-clear); with the fix, `0x00030017`. Alif's own E8 DK board confs set this
-option for the same reason.
+`alp_camera_capture()` reported `ALP_OK`. On an E1M-AEN803 on the E1M-EVK
+(OV9281 on J5) a pool pre-filled with `0xA5` came back byte-for-byte
+unchanged, test pattern on or off, with `CAM_CFG` = `0x00030013` (bit2
+`AXI_PORT_EN` clear); with the fix, `0x00030017`. Alif's own E8 DK
+sample/test board confs set this option for the same reason.
 
-**The whole CSI-2 -> CPI pipe is now bench-verified for one sensor.**
-2026-09-21 on e1m-aen-evk-02: the `innomaker_cam_ov9281` shield streams
-real 640x400 GREY8 frames at 800 Mbit/s/lane, once fitted with the
-P/N-crossing adapter this SoM revision's camera connector needs — its
-MIPI CSI-2 wiring swaps the P and N wires of all three differential pairs
-(clock lane and both data lanes) relative to the EVK, so a camera plugged
-straight into J5 (or J4, the mux's other input) answers its I2C chip-ID
-probe but no frame ever arrives. An adapter crossing camera-connector pins
-2↔3, 5↔6 and 8↔9 (every other pin straight) fixes it; see
-`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
-The IMX219, OV5647 and IMX296 paths remain BENCH-UNVERIFIED. `ov9281.c`
-also gains a third, Alp-authored 1280x800 GREY8 mode (the sensor's full
-array, derived from the 1280x720 table) — BENCH-PENDING alongside
-1280x720. `tests/zephyr/video_sensors` now runs a real ztest for OV9281
-(`ov9281_test.c`) against an I2C emulator on native_sim, checking
-`get_caps`/`set_format`/register programming/exposure clamping instead of
-only compiling the driver; OV5647 and IMX296 stay `build_only` in
-twister — twister has no bench access.
+**The whole CSI-2 -> CPI pipe is now bench-verified for one sensor, in all
+three of its modes.** 2026-09-21 on an E1M-AEN803 on the E1M-EVK: the
+`innomaker_cam_ov9281` shield streams real GREY8 frames at
+800 Mbit/s/lane in 640x400, 1280x720 and 1280x800, once fitted with the
+P/N-crossing adapter E1M-AEN hw_rev r2 (2626-R2)'s camera connector
+needs — its MIPI CSI-2 wiring swaps the P and N wires of all three
+differential pairs (clock lane and both data lanes) relative to the EVK,
+so a camera plugged straight into J5 answers its I2C chip-ID probe but no
+frame ever arrives; J4 shares the same SoM pads and is expected to be
+affected too (not bench-tested). An adapter crossing J5's camera-connector
+pins 2↔3, 5↔6 and 8↔9 (every other pin straight) fixes it; see
+`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`. A
+60-frame wall-clock burst per mode measured 640x400 ~100 fps, 1280x720
+~50 fps and 1280x800 ~100 fps -- every mode at its configured rate -- and
+the sensor's own test pattern was verified in all three modes too; the
+discriminating evidence throughout is the `0xA5`-prefilled pool being
+overwritten plus the test pattern appearing, not merely a non-zero CRC.
+These multi-frame bursts are also the bench proof for the buffer-
+starvation pause/resume fix below: a burst outlasting one buffer's worth
+of consumer latency depends on it. The IMX219, OV5647 and IMX296 paths
+remain BENCH-UNVERIFIED. `ov9281.c` also gains a third, Alp-authored
+1280x800 GREY8 mode (the sensor's full array, derived from the 1280x720
+table), bench-verified alongside 1280x720 above. `tests/zephyr/video_sensors`
+now runs a real ztest for OV9281 (`ov9281_test.c`) against an I2C emulator
+on native_sim, checking `get_caps`/`set_format`/register programming/
+exposure range check instead of only compiling the driver; OV5647 and
+IMX296 stay compile-coverage in that same runtime suite — twister has no
+bench access.
 
 Retires `examples/aen/aen-camera-regcheck`: its overlay wired the sensor on
 CSI port@1 (D-PHY id 1, the DSI PHY) with an `arx3a0` sensor on `i2c2`, both

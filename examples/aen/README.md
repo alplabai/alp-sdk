@@ -60,7 +60,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (IMX219 / OV5647 / OV9281 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; never run on silicon this batch. |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (IMX219 / OV5647 / OV9281 / IMX296 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; OV9281 bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes), the other three sensors not yet run on silicon this batch. |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY. |

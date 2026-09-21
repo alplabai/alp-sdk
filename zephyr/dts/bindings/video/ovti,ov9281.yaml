@@ -5,7 +5,7 @@
 #
 # ADR 0017 Tier-1.5 (port of the Apache-2.0 Espressif esp-video-components
 # esp_cam_sensor/sensors/ov9281 driver onto the upstream Zephyr v4.4 video
-# API), BENCH-VERIFIED 2026-09-21 on e1m-aen-evk-02. Shaped after
+# API), BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK. Shaped after
 # upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml + a
 # video-interfaces.yaml endpoint child)
 # plus zephyr/drivers/video/ov5647.c's explicit `clocks: required: true`
@@ -17,8 +17,10 @@ description: |
 
   The OV9281 is a raw monochrome (RAW8) global-shutter image sensor with a
   MIPI CSI-2 image data interface and a CCI (I2C compatible) control bus.
-  Only the two modes the Espressif esp_cam_sensor port ships are supported:
-  1280x720 @ 50 fps and 640x400 @ 100 fps, both 2 data lanes / 24 MHz XVCLK.
+  Three modes are supported: the two the Espressif esp_cam_sensor port
+  ships (1280x720 @ 50 fps and 640x400 @ 100 fps) plus an Alp-derived
+  1280x800 @ ~100 fps (the sensor's full array), all 2 data lanes /
+  24 MHz XVCLK.
 
 compatible: "ovti,ov9281"
 

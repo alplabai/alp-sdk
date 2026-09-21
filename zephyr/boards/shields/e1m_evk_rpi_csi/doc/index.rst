@@ -35,7 +35,7 @@ An E1M-EVK carrying a SoM target this shield has a ``boards/`` overlay for:
 Keep the carrier's ``CAM_EN`` expander output at 0 (its reset default):
 driving it to 1 pulls J5 pin 11 low and powers the module down.
 
-This SoM revision's camera connector wiring swaps the P and N wires of all
+E1M-AEN hw_rev r2 (2626-R2)'s camera connector wiring swaps the P and N wires of all
 three MIPI CSI-2 differential pairs (clock lane and both data lanes)
 relative to the EVK. A camera plugged straight into J5 answers its I2C
 chip-ID probe but never synchronizes (D-PHY leaves Stop-state, no frame

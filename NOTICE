@@ -24,7 +24,8 @@ respective component (under vendors/<name>/ or the referenced upstream).
   Copyright (c) Espressif Systems (Shanghai) CO LTD.
   Register addresses/values/per-mode init tables from
   esp_cam_sensor/sensors/ov9281 are ported verbatim into
-  zephyr/drivers/video/ov9281.c; see that file's header for the source
+  zephyr/drivers/video/ov9281.c, plus one Alp-derived 1280x800 table (see
+  the driver's file header); see that file's header for the source
   commit.
 
 - Arm CMSIS — Apache-2.0. Copyright (c) Arm Limited.

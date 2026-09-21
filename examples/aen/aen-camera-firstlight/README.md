@@ -5,9 +5,12 @@ the E1M-EVK's J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8,
 M55-HE). Exercises the portable `<alp/camera.h>` API only — open, start,
 capture-with-timeout, release, stop, close — the same four calls whichever
 sensor shield is stacked underneath. The OV9281 path is **bench-verified**
-(2026-09-21, e1m-aen-evk-02: real 640x400 GREY8 frames land in memory); the
-IMX219, OV5647 and IMX296 paths have not yet run on real silicon. See
-`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
+(2026-09-21, an E1M-AEN803 on the E1M-EVK: real GREY8 frames land in
+memory in all three modes -- 640x400, 1280x720, 1280x800 -- each at its
+configured frame rate, with the sensor test pattern also verified in all
+three); the IMX219, OV5647 and IMX296 paths have not yet run on real
+silicon. See `docs/boards/e1m-evk.md`'s Camera section and
+`docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
 connector.** Without one, the sensor answers its I2C probe but no frame
@@ -62,10 +65,10 @@ RESULT: capture ok
 
 | Step | Line | Meaning |
 |---|---|---|
-| 1. open | `alp_camera_open FAILED: ALP_ERR_NOT_READY` | The sensor's chip-ID probe never answered on I2C1 during driver init — **not powered / not answering**. Check the module is seated on J5 and self-enabling (J5 pin 11 / `CAM_EN` must stay 0, see `docs/boards/e1m-evk.md`'s Camera section). A failed open is a valid, informative bench result on hardware this pipe has never run on — it is not a bug in this app. |
+| 1. open | `alp_camera_open FAILED: ALP_ERR_NOT_READY` | The sensor's chip-ID probe never answered on I2C1 during driver init — **not powered / not answering**. Check the module is seated on J5 and self-enabling (J5 pin 11 / `CAM_EN` must stay 0, see `docs/boards/e1m-evk.md`'s Camera section). A failed open is a valid, informative bench result — it is not a bug in this app. |
 | 2. start | `alp_camera_start -> ALP_ERR_*` | Stream start rejected after a successful open — driver-level failure past the sensor probe; check the CSI-2 D-PHY / CPI clock programming (`fix(aen): program the CSI/CPI pixel-clock dividers...` on this branch). |
-| 3. capture | `alp_camera_capture TIMED OUT` | Stream started but no frame landed in 2 s — the sensor answered its I2C probe but nothing is arriving over the CSI-2 lanes (bad lane count/polarity, D-PHY not locking, wrong pixel clock). This app has no bench-diagnostic register readout for this path (see `src/main.c`'s comment at the timeout print: `video_csi_dw.c` exposes no public status query) — the timeout itself is the whole bench result today. |
-| 3. capture | `alp_camera_capture OK: N bytes ...` | A frame arrived. CRC32 + the histogram + three sample rows follow — a non-zero CRC and a non-degenerate histogram (not all one bin) mean real varying pixel data reached memory, not a zeroed or garbage buffer. |
+| 3. capture | `alp_camera_capture TIMED OUT` | Stream started but no frame landed in 2 s — the sensor answered its I2C probe but nothing is arriving over the CSI-2 lanes (bad lane count/polarity, D-PHY not locking, wrong pixel clock). The single most common cause on this SoM/EVK combination is the missing P/N-crossing camera-connector adapter (see `docs/boards/e1m-evk.md`'s Camera section) — without it the sensor still answers its I2C probe but no frame ever synchronizes. This app has no bench-diagnostic register readout for this path (see `src/main.c`'s comment at the timeout print: `video_csi_dw.c` exposes no public status query) — the timeout itself is the whole bench result today. |
+| 3. capture | `alp_camera_capture OK: N bytes ...` | A frame arrived. CRC32 + the histogram + three sample rows follow. A non-zero CRC alone is weak evidence — a warm RAM-run can leave a previous frame in SRAM0, so a non-zero buffer does not by itself prove a *new* frame arrived. The real proof (see the OV9281 bench pass below) is a buffer pre-filled with a known sentinel (`0xA5`) coming back overwritten, plus the sensor's own test pattern appearing in the data when enabled. |
 | 4. stop/close | `alp_camera_stop` / `alp_camera_close done` | Always run, even after a failure above (except a failed `open`, which has nothing to stop/close). |
 
 ## Expected results per module
@@ -74,7 +77,7 @@ RESULT: capture ok
 |---|---|---|---|
 | `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`), BENCH-UNVERIFIED. |
-| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. 640x400 **BENCH-VERIFIED 2026-09-21** on e1m-aen-evk-02: real frames, CRC32 non-zero, non-degenerate histogram. 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) are BENCH-PENDING. |
+| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on an E1M-AEN803 on the E1M-EVK, in all three modes: 640x400 (Espressif's), 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) all captured live frames -- a `0xA5`-prefilled pool overwritten plus the sensor test pattern appearing, verified in all three -- each at its configured frame rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps). |
 | `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
 ## Frame buffers live in SRAM0, not DTCM
@@ -105,6 +108,7 @@ buffers, then `ALP_ERR_NOMEM` on the second frame).
 The four `testcase.yaml` scenarios are `build_only: true` regardless of bench
 status — twister has no bench access, so a green build only proves the image
 compiles and links against the real board target. The OV9281 shield's real
-result (2026-09-21, e1m-aen-evk-02, J-Link RAM-run, same flow as the sibling
-`*-regcheck` apps) is real 640x400 GREY8 frames landing in memory; the other
-three shields still need that same bench pass.
+result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same flow
+as the sibling `*-regcheck` apps) is real GREY8 frames landing in memory in
+all three modes, each at its configured frame rate; the other three shields
+still need that same bench pass.

@@ -629,7 +629,8 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 #
 # OV9281 (compatible "ovti,ov9281"): ADR 0017 Tier-1.5 (port of the Apache-2.0
 # Espressif esp-video-components esp_cam_sensor ov9281 driver onto the v4.4
-# video API), BENCH-UNVERIFIED -- see zephyr/drivers/video/ov9281.c.
+# video API), BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK --
+# see zephyr/drivers/video/ov9281.c.
 #
 # IMX296 (compatible "sony,imx296"): ADR-0017-ADJACENT (authored from the
 # Sony IMX296 datasheet -- no permissive-licence IMX296 driver exists to

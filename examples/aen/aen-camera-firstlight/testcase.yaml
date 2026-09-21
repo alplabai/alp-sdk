@@ -5,8 +5,8 @@
 # compile proofs, not bench runs -- twister has no bench access, so the
 # PASS/FAIL/TIMEOUT verdict only means something on real hardware.  The
 # OV9281 scenario's real-silicon result is bench-verified separately
-# (2026-09-21, e1m-aen-evk-02); the other three shields have not yet run
-# on hardware.
+# (2026-09-21, an E1M-AEN803 on the E1M-EVK); the other three shields have
+# not yet run on hardware.
 #
 # Twister's extra_args SHIELD value carries BOTH shields as one
 # space-separated string (the carrier connector shield first, the camera

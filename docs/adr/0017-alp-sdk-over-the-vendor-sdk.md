@@ -291,7 +291,8 @@ silently shadowed under an identical name.
 shape above nor the tier ladder's own Tier-2 fits it. It is a port of the
 Apache-2.0 Espressif `esp-video-components` `esp_cam_sensor/sensors/ov9281`
 driver — a *third party*, not the Alif vendor fork Tier-2 names — with its
-register addresses/values/per-mode init tables kept byte-for-byte and its
+register addresses/values/per-mode init tables kept byte-for-byte (plus one
+Alp-derived 1280x800 table -- see the driver's file header) and its
 ESP-IDF driver skeleton (SCCB handle, `esp_cam_sensor_ops_t`, FreeRTOS glue)
 rewritten onto the Zephyr v4.4 `video_driver_api` + `video_ctrl` registry (see
 the driver's file header for the exact commit and the full source/target

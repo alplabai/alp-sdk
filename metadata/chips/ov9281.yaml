@@ -19,13 +19,14 @@ notes: |
   driver); see docs/camera-shields.md for its modes/controls.
 
   That streaming driver supports exactly three modes, all GREY (RAW8 mono),
-  2 MIPI data lanes only (matching mipi.lanes_supported's [1, 2] above is
-  the sensor's own capability -- the driver never uses 1 lane):
-  640x400 @100 fps and 1280x720 @50 fps (Espressif's own tables, the former
-  bench-verified per verification.hil_silicon above), and 1280x800 @~100 fps
-  (this manifest's resolutions.max -- the sensor's full array; Alp-authored,
-  derived from the 1280x720 table, bench-pending). resolutions/mipi below
-  describe the sensor's silicon capability, not a driver-mode enumeration.
+  2 MIPI data lanes only (the sensor supports 1-2 lanes -- see
+  mipi.lanes_supported's [1, 2] below -- the driver uses 2):
+  640x400 @100 fps and 1280x720 @50 fps (Espressif's own tables), and
+  1280x800 @~100 fps (this manifest's resolutions.max -- the sensor's full
+  array; Alp-authored, derived from the 1280x720 table). All three are
+  bench-verified per verification.hil_silicon below, each running at its
+  configured rate. resolutions/mipi below describe the sensor's silicon
+  capability, not a driver-mode enumeration.
 
 bus:              i2c
 i2c:
@@ -77,16 +78,17 @@ families:
   - imx93
 
 verification:
-  hil_silicon:    partial          # BENCH-VERIFIED 2026-09-21 on E1M-AEN803
+  hil_silicon:    verified          # BENCH-VERIFIED 2026-09-21 on E1M-AEN803
                                     # (E1M-EVK J5, innomaker_cam_ov9281 shield,
-                                    # via a P/N-crossing adapter): 640x400
-                                    # GREY8 @100 fps streams real frames over
+                                    # via a P/N-crossing adapter): all three
+                                    # GREY8 modes (640x400, 1280x720,
+                                    # 1280x800) stream real frames over
                                     # zephyr/drivers/video/ov9281.c, not this
                                     # manifest's chip-ID stub (driver_status
-                                    # above). 1280x720 and 1280x800 GREY8 are
-                                    # implemented in that driver but
-                                    # BENCH-PENDING -- not yet run on
-                                    # silicon.
+                                    # above), each at its configured frame
+                                    # rate (measured 60-frame bursts: ~100,
+                                    # ~50, ~100 fps); the sensor test pattern
+                                    # is also verified in all three modes.
   smoke_tests:    null_arg_guard
 
 physical:

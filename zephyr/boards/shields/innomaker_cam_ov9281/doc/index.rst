@@ -18,9 +18,11 @@ labels.
 On alp-sdk that carrier connector shield is the E1M-EVK's
 ``e1m_evk_rpi_csi`` shield.
 
-**Bench-verified 2026-09-21** on e1m-aen-evk-02: the 640x400 mode streams
-real RAW8/GREY8 frames. That EVK/SoM combination needs a P/N-crossing
-adapter on the camera connector -- see ``e1m_evk_rpi_csi``'s shield doc.
+**Bench-verified 2026-09-21** on an E1M-AEN803 on the E1M-EVK: all three
+modes (640x400, 1280x720, 1280x800) stream real RAW8/GREY8 frames, each at
+its configured frame rate, with the sensor test pattern also verified in
+all three modes. That EVK/SoM combination needs a P/N-crossing adapter on
+the camera connector -- see ``e1m_evk_rpi_csi``'s shield doc.
 
 Requirements
 ************

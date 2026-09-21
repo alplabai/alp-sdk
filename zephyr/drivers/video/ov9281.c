@@ -27,23 +27,34 @@
  * video_common.h). Two of the three supported modes are the Espressif ones
  * -- 1280x720 RAW8 @ 50 fps and 640x400 RAW8 @ 100 fps; the third, the
  * sensor's full 1280x800 active array (also RAW8/GREY), is Alp-authored (see
- * the BENCH-PENDING note below and the derivation comment on
+ * the note below and the derivation comment on
  * ov9281_mode_1280x800_100fps_regs). All three run 2 MIPI data lanes,
  * 24 MHz XVCLK -- no RAW10 or other pixel format is invented here.
  *
- * BENCH-VERIFIED 2026-09-21 on e1m-aen-evk-02 (innomaker_cam_ov9281 shield on
- * J5): the 640x400 mode streams real RAW8/GREY8 frames at 800 Mbit/s/lane.
- * The camera connector on this SoM/EVK combination needs a P/N-crossing
- * adapter (see docs/boards/e1m-evk.md's Camera section) -- without one, the
- * sensor still answers its I2C probe but no frame ever arrives.
+ * BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK
+ * (innomaker_cam_ov9281 shield on J5): live GREY8 frames captured and
+ * CRC-verified via an SWD dump in all three modes (640x400, 1280x720,
+ * 1280x800). The discriminating evidence is a 0xA5-prefilled pool being
+ * overwritten plus the sensor's own test pattern appearing on request --
+ * not merely a non-zero CRC (a warm RAM-run can leave a previous frame in
+ * SRAM0, so a non-zero buffer alone proves nothing). The test pattern was
+ * verified in all three modes (pure 0x00/0xFF bars, no other values). A
+ * 60-frame wall-clock burst per mode measured 640x400 ~100 fps (590 ms),
+ * 1280x720 ~50 fps (1169 ms) and 1280x800 ~100 fps (594 ms) -- every mode
+ * runs at its configured rate, and the bursts themselves bench-prove the
+ * buffer-starvation pause/resume fix (video_alif.c, #226): a burst longer
+ * than one buffer's worth of consumer latency depends on it. The camera
+ * connector on this SoM/EVK combination needs a P/N-crossing adapter (see
+ * docs/boards/e1m-evk.md's Camera section) -- without one, the sensor still
+ * answers its I2C probe but no frame ever arrives.
  *
  * A third mode, 1280x800 GREY (RAW8) -- the OV9281's full 1280x800 active
  * array -- is Alp-authored, not Espressif's: Espressif upstream ships only
  * 640x400@100 and 1280x720@50. ov9281_mode_1280x800_100fps_regs below is
  * derived from ov9281_mode_1280x720_50fps_regs by changing only the Y-window
- * and VTS registers (see the comment above that table); it is
- * BENCH-PENDING -- the 100 fps figure is a same-line-rate projection, not a
- * measurement, and may change once bench-verified.
+ * and VTS registers (see the comment above that table); BENCH-VERIFIED
+ * 2026-09-21 -- the 100 fps figure was a same-line-rate projection and now
+ * matches the measured wall-clock rate above.
  *
  * RETIREMENT: this is a ported third-party permissive driver, not a Tier-2
  * fork-driver copy or an interim backport -- it has no upstream Zephyr
@@ -219,9 +230,10 @@ static const struct video_reg ov9281_mode_1280x720_50fps_regs[] = {
 };
 
 /*
- * Alp-authored, NOT from Espressif -- BENCH-PENDING (2026-09-21: bench has only run
- * 640x400; the numbers below have not been measured on silicon). Espressif's ov9281
- * upstream ships no 1280x800 (full-array) mode; this table is derived from
+ * Alp-authored, NOT from Espressif -- BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on
+ * the E1M-EVK: live frames captured in this mode and the VTS projection below matches
+ * the measured wall-clock frame rate. Espressif's ov9281 upstream ships no 1280x800
+ * (full-array) mode; this table is derived from
  * ov9281_mode_1280x720_50fps_regs above (same PLL config 0x0302/0x030d/0x030e, same HTS
  * 0x380c/0x380d = 0x0369, no column/row skip 0x3814/0x3815 = 0x11/0x11, no mirror/flip
  * 0x3820/0x3821 = 0x40/0x00, same X window 0x3800..0x3805, same ISP offsets
@@ -232,10 +244,10 @@ static const struct video_reg ov9281_mode_1280x720_50fps_regs[] = {
  *                                                      640x400 table already uses)
  *   - 0x380a/0x380b (out height): 0x02d0 -> 0x0320   (800)
  *   - 0x380e/0x380f (VTS):        0x071c -> 0x038e   (910 lines)
- * VTS 910 is a same-line-rate projection, not a bench measurement: HTS 873 x VTS 1820 x
- * 50 fps (the 1280x720 mode's line rate) = 91000 lines/s = HTS 873 x VTS 910 x 100 fps, so
- * 910 lines projects to ~100 fps at the same pixel clock. Bench will verify and this VTS
- * may change.
+ * VTS 910 matches the 1280x720 mode's line rate: VTS x fps = 91000 lines/s is unchanged
+ * at the same HTS and PLL, so HTS x VTS x fps is unchanged (HTS 873 x VTS 1820 x 50 fps ==
+ * HTS 873 x VTS 910 x 100 fps == 91000 lines/s). Confirmed by the 2026-09-21 bench
+ * measurement: a 60-frame burst completed in 594 ms, ~100 fps.
  */
 static const struct video_reg ov9281_mode_1280x800_100fps_regs[] = {
 	{OV9281_REG8(0x0103), 0x01}, {OV9281_REG8(0x0106), 0x00}, {OV9281_REG8(0x0302), 0x32},
@@ -312,9 +324,10 @@ static const struct ov9281_mode ov9281_modes[] = {
 		.width = 1280, .height = 720, .framerate = 50,
 		.vts = 1820, .pixel_rate = 158886158,
 	},
-	/* Same PLL/HTS as the 1280x720 mode above, so the same pixel_rate: HTS*VTS*fps is the
-	 * pixel-clock-derived line rate and is invariant between the two (1820*50 == 910*100 ==
-	 * 91000 lines/s), so 158886158 carries over unchanged rather than being recomputed. */
+	/* Same PLL/HTS as the 1280x720 mode above, so the same pixel_rate: VTS x fps =
+	 * 91000 lines/s is unchanged at the same HTS and PLL, so HTS x VTS x fps is unchanged
+	 * (1820*50 == 910*100 == 91000 lines/s), so 158886158 carries over unchanged rather
+	 * than being recomputed. */
 	[OV9281_MODE_1280X800_100FPS] = {
 		.regs = ov9281_mode_1280x800_100fps_regs,
 		.regs_len = ARRAY_SIZE(ov9281_mode_1280x800_100fps_regs),
