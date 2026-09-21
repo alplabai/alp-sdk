@@ -777,6 +777,37 @@ int dsi_dw_dpi_config(const struct device *dev,
 	return 0;
 }
 
+/*
+ * ALP-SDK PORT FIX: clearing PHY_TXREQUESTCLKHS only REQUESTS that the clock
+ * lane leave HS -- the D-PHY needs time to complete the HS->LP transition.
+ * Issue an LP transaction before that completes and the BTA for a DCS read
+ * never gets a turnaround: DSI_INT_ST0 reads back 0x00000000, no error report,
+ * nothing.  Measured on e1m-aen-evk-01: reads succeed before video mode with
+ * DSI_INT_ST0 = 0x00100000, and fail with -EIO and DSI_INT_ST0 = 0x00000000 on
+ * every attempt after video mode, including in command mode.
+ *
+ * Poll DSI_PHY_STATUS.STOPSTATECLKLANE (bit 2) the same way
+ * dphy_dw_master_setup() waits for LP-11 after PHY init.  The host must be
+ * powered up for the PHY status to be meaningful, so callers that power-cycle
+ * the host around a mode switch must call this AFTER dsi_dw_pwr_up().
+ */
+static void dsi_dw_wait_clklane_stop(uintptr_t regs)
+{
+	uint32_t stopclk = DSI_PHY_STATUS_PHY_STOPSTATECLKLANE;
+	int i;
+
+	for (i = 0; (i < 1000000) && (sys_read32(regs + DSI_PHY_STATUS) & stopclk) != stopclk;
+	     i++) {
+		k_busy_wait(1);
+	}
+
+	if ((sys_read32(regs + DSI_PHY_STATUS) & stopclk) != stopclk) {
+		LOG_WRN("Clock lane did not reach stop state after clearing "
+			"TXREQUESTCLKHS. DSI_PHY_STATUS=0x%08x",
+			sys_read32(regs + DSI_PHY_STATUS));
+	}
+}
+
 void dsi_dw_msg_config(uintptr_t regs, uint32_t mode_flags)
 {
 	const uint32_t lp_cmd_mask = DSI_CMD_MODE_CFG_MAX_RD_PKT_SIZE |
@@ -804,10 +835,21 @@ void dsi_dw_msg_config(uintptr_t regs, uint32_t mode_flags)
 	 * command mode: in video mode the HS clock carries the scanout, and an
 	 * LP command (a panel set_orientation after blanking_off) would stop
 	 * the video.
+	 *
+	 * cmd_mode is read from the live DSI_MODE_CFG here, not passed in --
+	 * callers that are ABOUT TO switch mode (dsi_dw_cmd_mode_config()) must
+	 * write DSI_MODE_CFG before calling this, or this reads the mode being
+	 * left rather than the mode being entered.
 	 */
 	bool cmd_mode = sys_read32(regs + DSI_MODE_CFG) & DSI_MODE_CFG_CMD_MODE;
+	bool clkhs_off = lpm && cmd_mode;
 
-	sys_write32(((lpm && cmd_mode) ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS), regs + DSI_LPCLK_CTRL);
+	sys_write32((clkhs_off ? 0 : DSI_LPCLK_CTRL_PHY_TXREQUESTCLKHS), regs + DSI_LPCLK_CTRL);
+
+	if (clkhs_off) {
+		dsi_dw_wait_clklane_stop(regs);
+	}
+
 	if (mode_flags & MIPI_DSI_CLOCK_NON_CONTINUOUS)
 		sys_set_bits(regs + DSI_LPCLK_CTRL,
 				DSI_LPCLK_CTRL_AUTO_CLKLN_CTRL);
@@ -818,13 +860,20 @@ void dsi_dw_cmd_mode_config(const struct device *dev)
 	struct dsi_dw_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
+	/*
+	 * ALP-SDK PORT FIX: set DSI_MODE_CFG to command mode BEFORE the two
+	 * calls below, not after.  dsi_dw_msg_config() reads DSI_MODE_CFG live
+	 * to decide whether to clear TXREQUESTCLKHS; writing it afterwards (the
+	 * original order) made that read see the mode being left, not the mode
+	 * being entered, so a video->command transition kept the HS clock
+	 * request asserted instead of clearing it.
+	 */
+	sys_write32(DSI_MODE_CFG_CMD_MODE, regs + DSI_MODE_CFG);
+
 	/* Enable Transmission of commands in LP mode. */
 	dsi_dw_setup_lp_cmd(dev, data->mode_flags);
 
 	dsi_dw_msg_config(regs, data->mode_flags);
-
-	/* Setup the DSI as Command mode. */
-	sys_write32(DSI_MODE_CFG_CMD_MODE, regs + DSI_MODE_CFG);
 
 	data->curr_mode = DSI_DW_COMMAND_MODE;
 }
@@ -987,6 +1036,20 @@ static int dsi_dw_set_mode_locked(const struct device *dev,
 		data->curr_mode = DSI_DW_COMMAND_MODE;
 	}
 	dsi_dw_pwr_up(regs);
+
+	/*
+	 * ALP-SDK PORT FIX: this is the path display_blanking_on() actually
+	 * takes (cdc200_blanking_on() -> dsi_dw_set_mode(COMMAND) -> here), and
+	 * it clears PHY_TXREQUESTCLKHS on its own rather than through
+	 * dsi_dw_msg_config(), so it needs its own wait for the clock lane to
+	 * reach LP-11.  Without it every DCS read after a video->command switch
+	 * fails -EIO with DSI_INT_ST0 = 0x00000000.  The wait goes AFTER
+	 * dsi_dw_pwr_up() because DSI_PHY_STATUS is only meaningful with the
+	 * host powered.
+	 */
+	if (mode != DSI_DW_VIDEO_MODE) {
+		dsi_dw_wait_clklane_stop(regs);
+	}
 	return 0;
 }
 

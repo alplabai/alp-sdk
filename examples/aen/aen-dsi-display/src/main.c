@@ -133,6 +133,13 @@
 
 #define CDC_GLB_CTRL_ADDR 0x49031018UL /* cdc200 @0x49031000 + CDC_GLB_CTRL; bit0 CDC_EN */
 
+/*
+ * DSI_PHY_STATUS bit 2: D-PHY clock lane is in LP stop state.  A BTA (needed
+ * for every DCS read) has no chance of an answer while this is clear -- the
+ * clock lane is still HS and the panel isn't listening for the turnaround.
+ */
+#define DSI_PHY_STATUS_STOPSTATECLKLANE BIT(2)
+
 #define DPHY_BASE_ADDR      0x4903F000UL
 #define DPHY_PLL_STAT0_ADDR (DPHY_BASE_ADDR + 0x20UL)
 #define DPHY_PLL_STAT1_ADDR (DPHY_BASE_ADDR + 0x24UL)
@@ -897,10 +904,26 @@ static void vrx2_snapshot(const struct device *dsi,
 	*rddsdr = 0xAAU;
 	memset(rddst, 0xAAU, 4U);
 
-	*numpe_rc  = dcs_read_lpm(dsi, 0x05U, numpe, 1U);
-	*rddsm_rc  = dcs_read_lpm(dsi, 0x0EU, rddsm, 1U);
+#define VRX2_PRE_READ(cmd) \
+	do { \
+		uint32_t phy = sys_read32(DSI_PHY_STATUS_ADDR); \
+		printk("vrx2: %s pre-read cmd=0x%02x phy=0x%08x stopclk=%d\n", \
+		       stage, \
+		       (cmd), \
+		       phy, \
+		       (int)((phy & DSI_PHY_STATUS_STOPSTATECLKLANE) != 0)); \
+	} while (0)
+
+	VRX2_PRE_READ(0x05U);
+	*numpe_rc = dcs_read_lpm(dsi, 0x05U, numpe, 1U);
+	VRX2_PRE_READ(0x0EU);
+	*rddsm_rc = dcs_read_lpm(dsi, 0x0EU, rddsm, 1U);
+	VRX2_PRE_READ(0x0FU);
 	*rddsdr_rc = dcs_read_lpm(dsi, 0x0FU, rddsdr, 1U);
-	*rddst_rc  = dcs_read_lpm(dsi, 0x09U, rddst, 4U);
+	VRX2_PRE_READ(0x09U);
+	*rddst_rc = dcs_read_lpm(dsi, 0x09U, rddst, 4U);
+
+#undef VRX2_PRE_READ
 
 	printk("vrx2: %s RDNUMPE cmd=0x05 rc=%d data=%02x%s\n",
 	       stage,
@@ -951,11 +974,18 @@ static void probe_video_rx_errors_v2(const struct device *dsi, const struct devi
 
 	/* Step 2: start video. */
 	rc = display_blanking_off(disp);
-	printk("vrx2: blanking_off rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x\n",
-	       rc,
-	       sys_read32(CDC_GLB_CTRL_ADDR),
-	       sys_read32(DSI_MODE_CFG_ADDR),
-	       sys_read32(DSI_LPCLK_CTRL_ADDR));
+	{
+		uint32_t phy = sys_read32(DSI_PHY_STATUS_ADDR);
+
+		printk("vrx2: blanking_off rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x "
+		       "phy=0x%08x stopclk=%d\n",
+		       rc,
+		       sys_read32(CDC_GLB_CTRL_ADDR),
+		       sys_read32(DSI_MODE_CFG_ADDR),
+		       sys_read32(DSI_LPCLK_CTRL_ADDR),
+		       phy,
+		       (int)((phy & DSI_PHY_STATUS_STOPSTATECLKLANE) != 0));
+	}
 
 	/* Step 3: hold 5 s of live scanout; host TX-side counters only. */
 	k_msleep(5000);
@@ -965,11 +995,18 @@ static void probe_video_rx_errors_v2(const struct device *dsi, const struct devi
 
 	/* Step 4: return to command mode; the same snapshot proves the mode changed. */
 	rc = display_blanking_on(disp);
-	printk("vrx2: blanking_on rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x\n",
-	       rc,
-	       sys_read32(CDC_GLB_CTRL_ADDR),
-	       sys_read32(DSI_MODE_CFG_ADDR),
-	       sys_read32(DSI_LPCLK_CTRL_ADDR));
+	{
+		uint32_t phy = sys_read32(DSI_PHY_STATUS_ADDR);
+
+		printk("vrx2: blanking_on rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x "
+		       "phy=0x%08x stopclk=%d\n",
+		       rc,
+		       sys_read32(CDC_GLB_CTRL_ADDR),
+		       sys_read32(DSI_MODE_CFG_ADDR),
+		       sys_read32(DSI_LPCLK_CTRL_ADDR),
+		       phy,
+		       (int)((phy & DSI_PHY_STATUS_STOPSTATECLKLANE) != 0));
+	}
 
 	if (rc < 0) {
 		printk("vrx2: SKIPPED -- could not re-enter command mode, no read attempted\n");
