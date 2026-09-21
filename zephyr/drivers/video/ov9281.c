@@ -24,15 +24,26 @@
  * not carry over to Zephyr and was rewritten against
  * zephyr/drivers/video/imx219.c's v4.4 shape (DT_DRV_COMPAT, i2c_dt_spec,
  * the video_driver_api table, video_ctrl registry, CCI helpers from
- * video_common.h). Only the two modes Espressif ships are supported --
- * 1280x720 RAW8 @ 50 fps and 640x400 RAW8 @ 100 fps, 2 MIPI data lanes,
- * 24 MHz XVCLK -- no RAW10 or other resolution is invented here.
+ * video_common.h). Two of the three supported modes are the Espressif ones
+ * -- 1280x720 RAW8 @ 50 fps and 640x400 RAW8 @ 100 fps; the third, the
+ * sensor's full 1280x800 active array (also RAW8/GREY), is Alp-authored (see
+ * the BENCH-PENDING note below and the derivation comment on
+ * ov9281_mode_1280x800_100fps_regs). All three run 2 MIPI data lanes,
+ * 24 MHz XVCLK -- no RAW10 or other pixel format is invented here.
  *
  * BENCH-VERIFIED 2026-09-21 on e1m-aen-evk-02 (innomaker_cam_ov9281 shield on
  * J5): the 640x400 mode streams real RAW8/GREY8 frames at 800 Mbit/s/lane.
  * The camera connector on this SoM/EVK combination needs a P/N-crossing
  * adapter (see docs/boards/e1m-evk.md's Camera section) -- without one, the
  * sensor still answers its I2C probe but no frame ever arrives.
+ *
+ * A third mode, 1280x800 GREY (RAW8) -- the OV9281's full 1280x800 active
+ * array -- is Alp-authored, not Espressif's: Espressif upstream ships only
+ * 640x400@100 and 1280x720@50. ov9281_mode_1280x800_100fps_regs below is
+ * derived from ov9281_mode_1280x720_50fps_regs by changing only the Y-window
+ * and VTS registers (see the comment above that table); it is
+ * BENCH-PENDING -- the 100 fps figure is a same-line-rate projection, not a
+ * measurement, and may change once bench-verified.
  *
  * RETIREMENT: this is a ported third-party permissive driver, not a Tier-2
  * fork-driver copy or an interim backport -- it has no upstream Zephyr
@@ -207,10 +218,75 @@ static const struct video_reg ov9281_mode_1280x720_50fps_regs[] = {
 	{OV9281_REG8(0x4f12), 0x0f}, {OV9281_REG8(0x4f13), 0xc4},
 };
 
+/*
+ * Alp-authored, NOT from Espressif -- BENCH-PENDING (2026-09-21: bench has only run
+ * 640x400; the numbers below have not been measured on silicon). Espressif's ov9281
+ * upstream ships no 1280x800 (full-array) mode; this table is derived from
+ * ov9281_mode_1280x720_50fps_regs above (same PLL config 0x0302/0x030d/0x030e, same HTS
+ * 0x380c/0x380d = 0x0369, no column/row skip 0x3814/0x3815 = 0x11/0x11, no mirror/flip
+ * 0x3820/0x3821 = 0x40/0x00, same X window 0x3800..0x3805, same ISP offsets
+ * 0x3810..0x3813 = 0x08/0x08) by changing ONLY:
+ *   - 0x3803 (Y start):      0x28 -> 0x00           (row 0, was row 40)
+ *   - 0x3806/0x3807 (Y end): 0x0307 -> 0x032f        (row 815 = the full 816-row array;
+ *                                                      the same Y-end window Espressif's own
+ *                                                      640x400 table already uses)
+ *   - 0x380a/0x380b (out height): 0x02d0 -> 0x0320   (800)
+ *   - 0x380e/0x380f (VTS):        0x071c -> 0x038e   (910 lines)
+ * VTS 910 is a same-line-rate projection, not a bench measurement: HTS 873 x VTS 1820 x
+ * 50 fps (the 1280x720 mode's line rate) = 91000 lines/s = HTS 873 x VTS 910 x 100 fps, so
+ * 910 lines projects to ~100 fps at the same pixel clock. Bench will verify and this VTS
+ * may change.
+ */
+static const struct video_reg ov9281_mode_1280x800_100fps_regs[] = {
+	{OV9281_REG8(0x0103), 0x01}, {OV9281_REG8(0x0106), 0x00}, {OV9281_REG8(0x0302), 0x32},
+	{OV9281_REG8(0x030d), 0x50}, {OV9281_REG8(0x030e), 0x02}, {OV9281_REG8(0x3001), 0x00},
+	{OV9281_REG8(0x3004), 0x00}, {OV9281_REG8(0x3005), 0x00}, {OV9281_REG8(0x3006), 0x04},
+	{OV9281_REG8(0x3011), 0x0a}, {OV9281_REG8(0x3013), 0x18}, {OV9281_REG8(0x301c), 0xf0},
+	{OV9281_REG8(0x3022), 0x01}, {OV9281_REG8(0x3030), 0x10}, {OV9281_REG8(0x3039), 0x32},
+	{OV9281_REG8(0x303a), 0x00}, {OV9281_REG8(0x3500), 0x00}, {OV9281_REG8(0x3501), 0x2a},
+	{OV9281_REG8(0x3502), 0x90}, {OV9281_REG8(0x3503), 0x08}, {OV9281_REG8(0x3505), 0x8c},
+	{OV9281_REG8(0x3507), 0x03}, {OV9281_REG8(0x3508), 0x00},
+	{OV9281_REG8(0x3509), OV9281_GAIN_DEFAULT},
+	{OV9281_REG8(0x3610), 0x80}, {OV9281_REG8(0x3611), 0xa0}, {OV9281_REG8(0x3620), 0x6e},
+	{OV9281_REG8(0x3632), 0x56}, {OV9281_REG8(0x3633), 0x78}, {OV9281_REG8(0x3662), 0x07},
+	{OV9281_REG8(0x3666), 0x00}, {OV9281_REG8(0x366f), 0x5a}, {OV9281_REG8(0x3680), 0x84},
+	{OV9281_REG8(0x3707), 0x56}, {OV9281_REG8(0x370d), 0x00}, {OV9281_REG8(0x370e), 0xfa},
+	{OV9281_REG8(0x3712), 0x80}, {OV9281_REG8(0x372d), 0x22}, {OV9281_REG8(0x3731), 0x80},
+	{OV9281_REG8(0x3732), 0x30}, {OV9281_REG8(0x3778), 0x00}, {OV9281_REG8(0x377d), 0x22},
+	{OV9281_REG8(0x3788), 0x02}, {OV9281_REG8(0x3789), 0xa4}, {OV9281_REG8(0x378a), 0x00},
+	{OV9281_REG8(0x378b), 0x4a}, {OV9281_REG8(0x3799), 0x20}, {OV9281_REG8(0x379c), 0x01},
+	{OV9281_REG8(0x3800), 0x00}, {OV9281_REG8(0x3801), 0x00}, {OV9281_REG8(0x3802), 0x00},
+	{OV9281_REG8(0x3803), 0x00}, {OV9281_REG8(0x3804), 0x05}, {OV9281_REG8(0x3805), 0x0f},
+	{OV9281_REG8(0x3806), 0x03}, {OV9281_REG8(0x3807), 0x2f}, {OV9281_REG8(0x3808), 0x05},
+	{OV9281_REG8(0x3809), 0x00}, {OV9281_REG8(0x380a), 0x03}, {OV9281_REG8(0x380b), 0x20},
+	{OV9281_REG8(0x380c), 0x03}, {OV9281_REG8(0x380d), 0x69}, {OV9281_REG8(0x380e), 0x03},
+	{OV9281_REG8(0x380f), 0x8e}, {OV9281_REG8(0x3810), 0x00}, {OV9281_REG8(0x3811), 0x08},
+	{OV9281_REG8(0x3812), 0x00}, {OV9281_REG8(0x3813), 0x08}, {OV9281_REG8(0x3814), 0x11},
+	{OV9281_REG8(0x3815), 0x11}, {OV9281_REG8(0x3820), 0x40}, {OV9281_REG8(0x3821), 0x00},
+	{OV9281_REG8(0x382b), 0x3a}, {OV9281_REG8(0x382c), 0x06}, {OV9281_REG8(0x382d), 0xc2},
+	{OV9281_REG8(0x389d), 0x00}, {OV9281_REG8(0x3881), 0x42}, {OV9281_REG8(0x3882), 0x02},
+	{OV9281_REG8(0x3883), 0x12}, {OV9281_REG8(0x3885), 0x07}, {OV9281_REG8(0x38a8), 0x02},
+	{OV9281_REG8(0x38a9), 0x80}, {OV9281_REG8(0x38b1), 0x03}, {OV9281_REG8(0x38b3), 0x07},
+	{OV9281_REG8(0x38c4), 0x00}, {OV9281_REG8(0x38c5), 0xc0}, {OV9281_REG8(0x38c6), 0x04},
+	{OV9281_REG8(0x38c7), 0x80}, {OV9281_REG8(0x3920), 0xff},
+	{OV9281_REG8(0x4003), OV9281_BLC_TARGET_DEFAULT},
+	{OV9281_REG8(0x4008), 0x04}, {OV9281_REG8(0x4009), 0x0b}, {OV9281_REG8(0x400c), 0x01},
+	{OV9281_REG8(0x400d), 0x07}, {OV9281_REG8(0x4010), 0xf0}, {OV9281_REG8(0x4011), 0x3b},
+	{OV9281_REG8(0x4042), 0x01}, {OV9281_REG8(0x4043), 0x40}, {OV9281_REG8(0x4307), 0x30},
+	{OV9281_REG8(0x4317), 0x00}, {OV9281_REG8(0x4501), 0x00}, {OV9281_REG8(0x4507), 0x00},
+	{OV9281_REG8(0x4509), 0x00}, {OV9281_REG8(0x450a), 0x08}, {OV9281_REG8(0x4601), 0x30},
+	{OV9281_REG8(0x470f), 0x00}, {OV9281_REG8(0x4f07), 0x00}, {OV9281_REG8(0x4800), 0x60},
+	{OV9281_REG8(0x4837), 0x14}, {OV9281_REG8(0x5000), 0x9f}, {OV9281_REG8(0x5001), 0x00},
+	{OV9281_REG8(0x5e00), 0x00}, {OV9281_REG8(0x5d00), 0x07}, {OV9281_REG8(0x5d01), 0x00},
+	{OV9281_REG8(0x4f00), 0x0c}, {OV9281_REG8(0x4f10), 0x00}, {OV9281_REG8(0x4f11), 0x88},
+	{OV9281_REG8(0x4f12), 0x0f}, {OV9281_REG8(0x4f13), 0xc4},
+};
+
 /* Espressif ov9281_isp_info[] pclk/vts/hts, cross-checked as hts*vts*fps ~= pclk */
 enum ov9281_mode_id {
 	OV9281_MODE_640X400_100FPS,
 	OV9281_MODE_1280X720_50FPS,
+	OV9281_MODE_1280X800_100FPS,
 };
 
 struct ov9281_mode {
@@ -236,6 +312,15 @@ static const struct ov9281_mode ov9281_modes[] = {
 		.width = 1280, .height = 720, .framerate = 50,
 		.vts = 1820, .pixel_rate = 158886158,
 	},
+	/* Same PLL/HTS as the 1280x720 mode above, so the same pixel_rate: HTS*VTS*fps is the
+	 * pixel-clock-derived line rate and is invariant between the two (1820*50 == 910*100 ==
+	 * 91000 lines/s), so 158886158 carries over unchanged rather than being recomputed. */
+	[OV9281_MODE_1280X800_100FPS] = {
+		.regs = ov9281_mode_1280x800_100fps_regs,
+		.regs_len = ARRAY_SIZE(ov9281_mode_1280x800_100fps_regs),
+		.width = 1280, .height = 800, .framerate = 100,
+		.vts = 910, .pixel_rate = 158886158,
+	},
 };
 
 static const struct video_format_cap ov9281_fmts[] = {
@@ -248,6 +333,11 @@ static const struct video_format_cap ov9281_fmts[] = {
 		.pixelformat = VIDEO_PIX_FMT_GREY,
 		.width_min = 1280, .width_max = 1280, .width_step = 1,
 		.height_min = 720, .height_max = 720, .height_step = 1,
+	},
+	[OV9281_MODE_1280X800_100FPS] = {
+		.pixelformat = VIDEO_PIX_FMT_GREY,
+		.width_min = 1280, .width_max = 1280, .width_step = 1,
+		.height_min = 800, .height_max = 800, .height_step = 1,
 	},
 	{0},
 };
