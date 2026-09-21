@@ -4,6 +4,12 @@
  * Application overlay for testing driver builds -- see testcase.yaml.
  * Names chosen not to conflict with real-world devicetree nodes, mirroring
  * upstream's tests/drivers/build_all/video/app.overlay convention.
+ *
+ * OV9281 sits on native_sim's real I2C emulation bus (&i2c0, "zephyr,i2c-emul-controller" --
+ * see boards/native/native_sim/native_sim.dts), not the driverless `test_i2c` ("vnd,i2c")
+ * bus below: `test_i2c` only exists to make OV5647/IMX296 compile (they have no emulator, so
+ * they stay build-only), while &i2c0 is what ov9281_emul.c's EMUL_DT_INST_DEFINE(ovti_ov9281)
+ * actually answers at runtime -- see ov9281_test.c.
  */
 
 / {
@@ -50,19 +56,6 @@
 				};
 			};
 
-			test_i2c_ov9281: ov9281@60 {
-				compatible = "ovti,ov9281";
-				reg = <0x60>;
-				clocks = <&ov9281_input_clock>;
-
-				port {
-					test_ov9281_ep: endpoint {
-						remote-endpoint-label = "";
-						data-lanes = <1 2>;
-					};
-				};
-			};
-
 			test_i2c_imx296: imx296@1a {
 				compatible = "sony,imx296";
 				reg = <0x1a>;
@@ -74,6 +67,24 @@
 						data-lanes = <1>;
 					};
 				};
+			};
+		};
+	};
+};
+
+&i2c0 {
+	status = "okay";
+
+	ov9281_test: ov9281@60 {
+		compatible = "ovti,ov9281";
+		reg = <0x60>;
+		clocks = <&ov9281_input_clock>;
+		status = "okay";
+
+		port {
+			ov9281_test_ep: endpoint {
+				remote-endpoint-label = "";
+				data-lanes = <1 2>;
 			};
 		};
 	};
