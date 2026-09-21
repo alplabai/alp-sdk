@@ -80,6 +80,6 @@ west flash
 
 On `native_sim` the PDM mic + Ethos-U paths NOSUPPORT-stub; the
 loop still exercises the inference dispatch + post-process
-plumbing and prints `[wake] done`. TODO(v0.6): drop the
+plumbing and prints `[wake] done`. Still open: drop the
 Vela-compiled `hey_alp_vela.tflite` into `models/` and replace
 the `s_model[]` placeholder.

@@ -83,7 +83,7 @@ it is.
 A `board.yaml` may **disable** a core (`os: off`) or drop it to **no-OS**
 (`os: baremetal`).  Selecting the *other* class's OS — `zephyr` on a
 Cortex-A, `yocto` on a Cortex-M — is **refused**, at
-`scripts/alp_orchestrate/validate.py:270-282`
+`scripts/alp_orchestrate/validate.py:296`
 (`_enforce_os_matches_core_class`), with this exact message:
 
 ```text
@@ -103,7 +103,7 @@ for the RTOS, and pair one to each core class so that a SoM swap within
 a family keeps the same runtime per core.  That pairing is a product
 decision about what this SDK carries, tests and ships, and it is a
 defensible one; it is simply not a fact about the silicon.
-(`scripts/alp_orchestrate/topology.py:92`'s "A Cortex-A can't run
+(`scripts/alp_orchestrate/topology.py:112`'s "A Cortex-A can't run
 Zephyr" overstates it the same way, and is inaccurate as written.)
 
 What that means in practice:
