@@ -864,6 +864,230 @@ static void probe_setextc_gate_v2(const struct device *dsi)
 	}
 }
 
+/*
+ * BENCH DIAGNOSTIC -- panel-side DSI-RX health, never checked correctly before
+ * (#2199).  dump_dsi_status()/check_scanout() are the Alif DSI HOST's own
+ * int0/int1: they say whether the TX side thinks it sent clean video, not
+ * whether the HX8394 thinks it RECEIVED clean video.  RDNUMPE (05h)/RDDSM
+ * (0Eh)/RDDSDR (0Fh)/RDDST (09h) are the panel's own DSI-RX counters/status --
+ * but they are standard DCS reads, and DCS reads answer only in command mode
+ * (see the file banner).  The earlier attempt read them while video was
+ * already streaming and got only rc=-5 on every field; this version drops to
+ * command mode before every read that matters, so a real video interval gets
+ * measured instead of POR defaults.
+ *
+ * Called after main()'s own display_blanking_off() already started video, so
+ * the very first thing this probe does is drop back to command mode -- the
+ * "before" snapshot below is taken there, not at whatever mode the caller
+ * left the chain in.
+ */
+static void vrx2_snapshot(const struct device *dsi,
+                          const char          *stage,
+                          uint8_t             *numpe,
+                          uint8_t             *rddsm,
+                          uint8_t             *rddsdr,
+                          uint8_t              rddst[4],
+                          ssize_t             *numpe_rc,
+                          ssize_t             *rddsm_rc,
+                          ssize_t             *rddsdr_rc,
+                          ssize_t             *rddst_rc)
+{
+	*numpe  = 0xAAU;
+	*rddsm  = 0xAAU;
+	*rddsdr = 0xAAU;
+	memset(rddst, 0xAAU, 4U);
+
+	*numpe_rc  = dcs_read_lpm(dsi, 0x05U, numpe, 1U);
+	*rddsm_rc  = dcs_read_lpm(dsi, 0x0EU, rddsm, 1U);
+	*rddsdr_rc = dcs_read_lpm(dsi, 0x0FU, rddsdr, 1U);
+	*rddst_rc  = dcs_read_lpm(dsi, 0x09U, rddst, 4U);
+
+	printk("vrx2: %s RDNUMPE cmd=0x05 rc=%d data=%02x%s\n",
+	       stage,
+	       (int)*numpe_rc,
+	       *numpe,
+	       (*numpe_rc < 0) ? "  <- READ FAILED, sentinel not data" : "");
+	printk("vrx2: %s RDDSM   cmd=0x0e rc=%d data=%02x%s\n",
+	       stage,
+	       (int)*rddsm_rc,
+	       *rddsm,
+	       (*rddsm_rc < 0) ? "  <- READ FAILED, sentinel not data" : "");
+	printk("vrx2: %s RDDSDR  cmd=0x0f rc=%d data=%02x%s\n",
+	       stage,
+	       (int)*rddsdr_rc,
+	       *rddsdr,
+	       (*rddsdr_rc < 0) ? "  <- READ FAILED, sentinel not data" : "");
+	printk("vrx2: %s RDDST   cmd=0x09 rc=%d data=%02x %02x %02x %02x%s\n",
+	       stage,
+	       (int)*rddst_rc,
+	       rddst[0],
+	       rddst[1],
+	       rddst[2],
+	       rddst[3],
+	       (*rddst_rc < 0) ? "  <- READ FAILED, sentinel not data" : "");
+}
+
+static void probe_video_rx_errors_v2(const struct device *dsi, const struct device *disp)
+{
+	uint8_t numpe_before, rddsm_before, rddsdr_before, rddst_before[4];
+	uint8_t numpe_after, rddsm_after, rddsdr_after, rddst_after[4];
+	ssize_t numpe_before_rc, rddsm_before_rc, rddsdr_before_rc, rddst_before_rc;
+	ssize_t numpe_after_rc, rddsm_after_rc, rddsdr_after_rc, rddst_after_rc;
+	int     rc;
+
+	/* Step 1 (after an implicit drop to command mode -- see the banner above). */
+	rc = display_blanking_on(disp);
+	printk("vrx2: pre-baseline blanking_on rc=%d\n", rc);
+	vrx2_snapshot(dsi,
+	              "before",
+	              &numpe_before,
+	              &rddsm_before,
+	              &rddsdr_before,
+	              rddst_before,
+	              &numpe_before_rc,
+	              &rddsm_before_rc,
+	              &rddsdr_before_rc,
+	              &rddst_before_rc);
+
+	/* Step 2: start video. */
+	rc = display_blanking_off(disp);
+	printk("vrx2: blanking_off rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x\n",
+	       rc,
+	       sys_read32(CDC_GLB_CTRL_ADDR),
+	       sys_read32(DSI_MODE_CFG_ADDR),
+	       sys_read32(DSI_LPCLK_CTRL_ADDR));
+
+	/* Step 3: hold 5 s of live scanout; host TX-side counters only. */
+	k_msleep(5000);
+	printk("vrx2: video 5s int0=0x%08x int1=0x%08x\n",
+	       sys_read32(DSI_INT_ST0_ADDR),
+	       sys_read32(DSI_INT_ST1_ADDR));
+
+	/* Step 4: return to command mode; the same snapshot proves the mode changed. */
+	rc = display_blanking_on(disp);
+	printk("vrx2: blanking_on rc=%d cdc-glb=0x%08x mode=0x%08x lpclk=0x%08x\n",
+	       rc,
+	       sys_read32(CDC_GLB_CTRL_ADDR),
+	       sys_read32(DSI_MODE_CFG_ADDR),
+	       sys_read32(DSI_LPCLK_CTRL_ADDR));
+
+	if (rc < 0) {
+		printk("vrx2: SKIPPED -- could not re-enter command mode, no read attempted\n");
+	} else {
+		/* Step 5: re-read; decode RDDSM D0 only if that read succeeded. */
+		vrx2_snapshot(dsi,
+		              "after ",
+		              &numpe_after,
+		              &rddsm_after,
+		              &rddsdr_after,
+		              rddst_after,
+		              &numpe_after_rc,
+		              &rddsm_after_rc,
+		              &rddsdr_after_rc,
+		              &rddst_after_rc);
+
+		int  rddsm_d0 = (rddsm_after_rc >= 0) ? (int)(rddsm_after & BIT(0)) : -1;
+		bool reads_ok = (numpe_after_rc >= 0) && (rddsm_after_rc >= 0) && (rddsdr_after_rc >= 0) &&
+		                (rddst_after_rc >= 0);
+
+		/* Step 6: verdict. */
+		printk("vrx2: VERDICT numpe_before=0x%02x numpe_after=0x%02x rddsm_d0=%d "
+		       "reads_ok=%d\n",
+		       numpe_before,
+		       numpe_after,
+		       rddsm_d0,
+		       (int)reads_ok);
+	}
+
+	/* Step 7: resume video, matching the mode main() left the chain in. */
+	rc = display_blanking_off(disp);
+	printk("vrx2: resume blanking_off rc=%d\n", rc);
+}
+
+/*
+ * BENCH DIAGNOSTIC -- SETDISP (B2h) SW free-running BIST (#2199), run now that
+ * a gated write is proven to land (probe_setextc_gate_v2()).  DISP_BIST_EN
+ * (bit 3 of parameter 11, HX8394 datasheet Sec5.19.3 p.198, "Set '1' enable SW
+ * free running mode") switches the panel to its OWN internal pattern
+ * generator, making the incoming DSI video irrelevant -- a clean pattern on
+ * glass here proves the glass/gate/panel-controller side works independent of
+ * what the host is sending, narrowing a still-black panel to the DPI/DSI-RX
+ * chain instead of the panel itself.
+ *
+ * Parameters 1-6 are the init's own SETDISP values, byte for byte; 7-10 are
+ * "-" reserved in the command's own map and go out as 00; parameter 11 is
+ * 0xC0 | BIT(3).  BIST OFF restores the plain init form (its own 6-parameter
+ * form, byte for byte).
+ *
+ * Sequence runs with video already live and a framebuffer already written.
+ */
+static void probe_bist_v2(const struct device *dsi)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	static const uint8_t bist_on[]  = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU,
+		                                0x00U, 0x00U, 0x00U, 0x00U, 0xC8U };
+	static const uint8_t bist_off[] = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU };
+	ssize_t              rc;
+
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("bist2: SETEXTC (B9h FF 83 94) rc=%d\n", (int)rc);
+	}
+
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = bist_on,
+			.tx_len = sizeof(bist_on),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("bist2: SETDISP BIST-ON B2 00 80 64 0C 0D 2F 00 00 00 00 C8 rc=%d\n", (int)rc);
+	}
+
+	printk("bist2: BIST ON int0=0x%08x int1=0x%08x cdc-glb=0x%08x -- CAPTURE NOW\n",
+	       sys_read32(DSI_INT_ST0_ADDR),
+	       sys_read32(DSI_INT_ST1_ADDR),
+	       sys_read32(CDC_GLB_CTRL_ADDR));
+	k_msleep(10000);
+
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("bist2: SETEXTC (B9h FF 83 94) rc=%d\n", (int)rc);
+	}
+
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = bist_off,
+			.tx_len = sizeof(bist_off),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("bist2: SETDISP restore B2 00 80 64 0C 0D 2F rc=%d\n", (int)rc);
+	}
+
+	printk("bist2: BIST OFF (restored) int0=0x%08x int1=0x%08x cdc-glb=0x%08x -- CAPTURE NOW\n",
+	       sys_read32(DSI_INT_ST0_ADDR),
+	       sys_read32(DSI_INT_ST1_ADDR),
+	       sys_read32(CDC_GLB_CTRL_ADDR));
+	k_msleep(10000);
+}
+
 int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
@@ -1013,6 +1237,15 @@ int main(void)
 				       pm,
 				       pint0,
 				       pint1);
+
+				/*
+				 * BENCH DIAGNOSTIC (#2199): panel-side DSI-RX health, then
+				 * the internal-pattern BIST, now that the framebuffer is
+				 * written and video is live.  See probe_video_rx_errors_v2()
+				 * / probe_bist_v2() for why these two, in this order.
+				 */
+				probe_video_rx_errors_v2(dsi, disp);
+				probe_bist_v2(dsi);
 			}
 		}
 	}
