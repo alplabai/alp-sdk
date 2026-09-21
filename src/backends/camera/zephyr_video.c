@@ -299,8 +299,16 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		bytes_per_buf = 64u;
 	}
 
+	/* Allocate at CONFIG_VIDEO_BUFFER_POOL_ALIGN (64 by default), not through
+	 * video_buffer_alloc(): that one aligns to sizeof(void *) only, 4 on a
+	 * 32-bit core.  Capture engines DMA straight into the buffer and need
+	 * more -- the Alif CPI refuses anything not 8-byte aligned with -ENOBUFS
+	 * at enqueue (seen on silicon: a 0x0200005C buffer failed every open) --
+	 * and the per-buffer cache clean/invalidate must not share a cache line
+	 * with the heap's neighbouring allocation. */
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
+		st->vbufs[i] = video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN,
+		                                          K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
 			 * enqueued) before failing (#246). */
