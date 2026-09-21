@@ -147,6 +147,16 @@ struct video_cam_data {
 	struct k_poll_signal *signal;
 	struct video_format current_format;
 	bool is_streaming;
+	/* Alp Lab AB: buffer-starvation/resume contract -- `starved` marks a
+	 * STOP-interrupt-triggered pause (IN-FIFO ran dry) as distinct from a
+	 * user stream_stop(), so the next enqueue() knows to restart the
+	 * endpoint instead of the pause becoming a permanent stop
+	 * (bench-proven 2026-09-21). `lock` serializes the work-queue helper's
+	 * empty-check+starve decision against enqueue()'s put+restart decision
+	 * (both run in thread context; see video_alif.c for why this is a
+	 * k_mutex, not a spinlock). */
+	bool starved;
+	struct k_mutex lock;
 };
 
 #endif /* _VIDEO_ALIF_H_ */

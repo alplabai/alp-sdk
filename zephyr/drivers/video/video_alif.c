@@ -36,6 +36,15 @@
  * described and build-tested, but no live frame capture has completed on this
  * path.
  *
+ * Alp Lab AB: the fork's alif_cam_work_helper() stopped the endpoint on
+ * IN-FIFO starvation and never restarted it -- the next enqueue() only ever
+ * called k_fifo_put(), so a consumer that held its one buffer for more than a
+ * frame period killed the stream for good (bench-proven 2026-09-21 on an
+ * E1M-AEN803 on the E1M-EVK, OV9281).  Added `starved` + a `lock` (struct
+ * video_cam_data, video_alif.h) so starvation now PAUSES capture and
+ * enqueue() RESUMES it; see the "Buffer-starvation/resume contract" comments
+ * at the work helper and at enqueue().
+ *
  * The soc_memory_map.h include resolves via the hal_alif common/include dir
  * (gated on CONFIG_RTSS_HE/HP); the public CSI data-type + CPI-mode tables come
  * from <zephyr/drivers/video/video_alif.h> (also vendored here).
@@ -496,6 +505,8 @@ static void alif_cam_work_helper(const struct device *dev)
 	struct video_buffer *vbuf = NULL;
 
 	if (config->axi_bus_ep) {
+		k_mutex_lock(&data->lock, K_FOREVER);
+
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
 			LOG_ERR("Unexpected condition! The IN-FIFO should have "
@@ -504,12 +515,14 @@ static void alif_cam_work_helper(const struct device *dev)
 			data->curr_vid_buf = 0;
 			data->is_streaming = false;
 			signal_status = VIDEO_BUF_ERROR;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
 		if (data->curr_vid_buf != (uint32_t)vbuf->buffer) {
 			signal_status = VIDEO_BUF_ERROR;
 			LOG_ERR("Unknown Video Buffer assigned to CPI Controller.");
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -521,6 +534,7 @@ static void alif_cam_work_helper(const struct device *dev)
 			data->curr_vid_buf = 0;
 			data->is_streaming = false;
 			signal_status = VIDEO_BUF_ERROR;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -530,15 +544,28 @@ static void alif_cam_work_helper(const struct device *dev)
 		/* Move finished buffer to OUT-FIFO. */
 		k_fifo_put(&data->fifo_out, vbuf);
 
-		/* Now assign a new framebuffer to the CPI Controller. */
+		/*
+		 * Buffer-starvation/resume contract (Alp Lab AB): this IN-FIFO
+		 * peek and alif_cam_enqueue()'s fifo_in put + `starved` check run
+		 * under the same data->lock, so a buffer racing this pause can
+		 * never be lost -- either this peek sees the buffer an in-flight
+		 * enqueue() just queued (capture continues below, no pause) or
+		 * enqueue() sees `starved` already set once this function
+		 * releases the lock (enqueue() then reprograms CAM_FRAME_ADDR and
+		 * restarts the endpoint + CPI). Capture must PAUSE here, not stop
+		 * for good -- a consumer holding its one buffer past a frame
+		 * period used to kill the stream permanently (bench-proven
+		 * 2026-09-21).
+		 */
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (vbuf == NULL) {
 			LOG_DBG("No more Empty buffers in the IN-FIFO."
-					"Stopping Video Capture. If Re-queued, restart stream.");
+					"Pausing Video Capture. Next enqueue() resumes it.");
 			data->curr_vid_buf = 0;
-			data->is_streaming = false;
+			data->starved = true;
 			video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 			signal_status = VIDEO_BUF_DONE;
+			k_mutex_unlock(&data->lock);
 			goto done;
 		}
 
@@ -551,6 +578,8 @@ static void alif_cam_work_helper(const struct device *dev)
 
 		/* Restart video capture. */
 		hw_cam_start_video_capture(dev);
+
+		k_mutex_unlock(&data->lock);
 
 done:
 		LOG_DBG("cur_vid_buf - 0x%08x", data->curr_vid_buf);
@@ -705,8 +734,14 @@ static int alif_cam_stream_start(const struct device *dev)
 
 	k_work_cancel_sync(&data->cb_work, &sync);
 
+	/* Alp Lab AB: k_work_cancel_sync() above must stay OUTSIDE the lock --
+	 * it blocks on alif_cam_work_helper() (which itself takes data->lock)
+	 * finishing, so taking data->lock first would deadlock against it. */
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	if (data->is_streaming) {
 		LOG_DBG("Already streaming.");
+		k_mutex_unlock(&data->lock);
 		return -EBUSY;
 	}
 
@@ -716,6 +751,7 @@ static int alif_cam_stream_start(const struct device *dev)
 		vbuf = k_fifo_peek_head(&data->fifo_in);
 		if (!vbuf) {
 			LOG_ERR("No empty video-buffer. Aborting!!!");
+			k_mutex_unlock(&data->lock);
 			return -ENOBUFS;
 		}
 
@@ -732,6 +768,7 @@ static int alif_cam_stream_start(const struct device *dev)
 	ret = video_stream_start(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret) {
 		LOG_ERR("Failed to start streaming of Video pipeline!");
+		k_mutex_unlock(&data->lock);
 		return -EIO;
 	}
 
@@ -739,6 +776,9 @@ static int alif_cam_stream_start(const struct device *dev)
 	LOG_DBG("Stream started");
 
 	data->is_streaming = true;
+	data->starved = false;
+
+	k_mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -751,15 +791,29 @@ static int alif_cam_stream_stop(const struct device *dev)
 	uint32_t mask;
 	int ret;
 
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	if (!data->is_streaming) {
 		LOG_DBG("Already stopped streaming.");
+		k_mutex_unlock(&data->lock);
 		return 0;
 	}
 
-	ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (ret) {
-		LOG_ERR("Failed to stop streaming in Pipeline!");
-		return ret;
+	/*
+	 * Alp Lab AB: while `starved`, alif_cam_work_helper() already stopped
+	 * the endpoint as part of the starvation pause -- stopping it again
+	 * here would be a redundant I2C round trip. Clearing `starved` is
+	 * what actually matters: it stops a LATER enqueue() from mistaking
+	 * this user stop for a starvation pause and auto-restarting the
+	 * stream.
+	 */
+	if (!data->starved) {
+		ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
+		if (ret) {
+			LOG_ERR("Failed to stop streaming in Pipeline!");
+			k_mutex_unlock(&data->lock);
+			return ret;
+		}
 	}
 
 	/* Disable Interrupts. */
@@ -790,6 +844,9 @@ static int alif_cam_stream_stop(const struct device *dev)
 	LOG_DBG("Stream stopped");
 
 	data->is_streaming = false;
+	data->starved = false;
+
+	k_mutex_unlock(&data->lock);
 
 	return 0;
 }
@@ -820,11 +877,20 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 	uint32_t mask;
 
 	if (!cancel) {
+		/*
+		 * Alp Lab AB: data->lock guards the curr_vid_buf read + the
+		 * non-blocking fifo_in drain below -- NOT the wait loop that
+		 * follows, which blocks on alif_cam_work_helper() making
+		 * progress and would deadlock against it (the helper needs
+		 * the same lock) if held across the wait.
+		 */
+		k_mutex_lock(&data->lock, K_FOREVER);
 		if (!data->curr_vid_buf) {
 			while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
 				k_fifo_put(&data->fifo_out, vbuf);
 			}
 		}
+		k_mutex_unlock(&data->lock);
 
 		/*
 		 * In case the cancel option is not provided, put the thread to
@@ -856,6 +922,7 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 		/* Apply soft reset to clear BUSY flag and leave CPI in clean state */
 		hw_cam_soft_reset(regs);
 
+		k_mutex_lock(&data->lock, K_FOREVER);
 		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT))) {
 			k_fifo_put(&data->fifo_out, vbuf);
 			LOG_DBG("Video Buffer Aborted!!! - 0x%x", (uint32_t)vbuf->buffer);
@@ -865,10 +932,13 @@ static int alif_cam_flush(const struct device *dev, bool cancel)
 			}
 #endif /* defined(CONFIG_POLL) */
 		}
+		k_mutex_unlock(&data->lock);
 	}
 
 	/* Set current Video buffer to null address. */
+	k_mutex_lock(&data->lock, K_FOREVER);
 	data->curr_vid_buf = 0;
+	k_mutex_unlock(&data->lock);
 	return 0;
 }
 
@@ -879,8 +949,10 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 {
 	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t to_read;
 	uint32_t tmp;
+	int ret;
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
@@ -927,7 +999,37 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 
 	buf->bytesused = to_read;
 
+	/*
+	 * Buffer-starvation/resume contract (Alp Lab AB): a STOP interrupt
+	 * that found the IN-FIFO empty pauses capture instead of stopping it
+	 * for good (alif_cam_work_helper() sets `starved` and stops the
+	 * endpoint). data->lock serializes the put + `starved` check here
+	 * against that empty-check + pause decision, so a buffer racing the
+	 * pause is never lost -- see the comment at the work helper.
+	 */
+	k_mutex_lock(&data->lock, K_FOREVER);
+
 	k_fifo_put(&data->fifo_in, buf);
+
+	if (data->starved) {
+		data->curr_vid_buf = (uint32_t)buf->buffer;
+		sys_write32(local_to_global(UINT_TO_POINTER(data->curr_vid_buf)),
+				regs + CAM_FRAME_ADDR);
+
+		ret = video_stream_start(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
+		if (ret) {
+			LOG_ERR("Failed to resume streaming after buffer starvation! ret - %d",
+				ret);
+			k_mutex_unlock(&data->lock);
+			return ret;
+		}
+
+		/* Restart video capture. */
+		hw_cam_start_video_capture(dev);
+		data->starved = false;
+	}
+
+	k_mutex_unlock(&data->lock);
 
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
 		(uint32_t)buf->buffer, buf->size, buf->bytesused);
@@ -1246,6 +1348,9 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 
 	k_fifo_init(&data->fifo_in);
 	k_fifo_init(&data->fifo_out);
+	/* Alp Lab AB: guards the buffer-starvation/resume decision shared by
+	 * alif_cam_work_helper() and alif_cam_enqueue() (see video_alif.h). */
+	k_mutex_init(&data->lock);
 	data->dev = dev;
 
 	/* Setup the CPI-Controller hardware config. */
@@ -1311,6 +1416,7 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	}
 
 	data->is_streaming = false;
+	data->starved = false;
 
 	return 0;
 }

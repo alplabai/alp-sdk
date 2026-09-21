@@ -84,3 +84,10 @@ had been set up for the 400 MHz default. `video_set_format()` now redoes the
 full setup on every call: a second call at a new resolution with the same CSI-2
 data type used to return early and keep the old line timing, lane rate and
 pixel clock.
+
+**Buffer starvation now pauses capture instead of stopping it for good.**
+`video_alif.c` used to stop the endpoint and never restart it once the
+application held its one in-flight buffer for more than a frame period; it now
+marks the stream starved and the next `video_enqueue()` reprograms
+`CAM_FRAME_ADDR` and resumes capture (bench-proven 2026-09-21 on an
+E1M-AEN803 on the E1M-EVK, OV9281 on J5).
