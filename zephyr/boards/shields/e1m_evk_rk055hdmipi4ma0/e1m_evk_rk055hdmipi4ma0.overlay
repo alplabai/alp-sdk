@@ -26,24 +26,29 @@
  * lives in zephyr/soc-bridge/alif/mipi_display_e8.c.
  *
  * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel clock
- * and the layer format are not, and the pair is chosen together.
+ * is not: it is the fastest the link can carry.
  *
- * 400 MHz / 10 = 40 MHz at 24-bit gives 40 * 24 / 2 = 480 Mbps/lane, inside the
- * Alif DSI controller's 500 Mbps two-lane ceiling, at ~40 Hz refresh.
+ * The layer format (pixel-fmt-l1 below) sets only the framebuffer in memory.
+ * The DSI link runs at the PANEL's pixel-format (RGB888, panel@0 below) either
+ * way, so the lane rate is pixel-clock * 24 / 2 plus packet overhead.  At
+ * 400 MHz / 10 = 40 MHz that is 483.6 Mbps/lane, inside the Alif DSI
+ * controller's 500 Mbps two-lane ceiling, for a 40.0 Hz refresh.  40 MHz is
+ * the fastest 400 MHz / N clock that fits.
  *
- * RGB565 at 400 MHz / 7 = 57.142857 MHz is the obvious alternative and looks
- * better on paper: 457 Mbps/lane, also in spec, 60 Hz, a 1.84 MB framebuffer
- * instead of 2.76 MB, and a 13.33 us line that nearly matches the panel
- * driver's own RTN default (12.80 us) instead of needing it retuned.  It is
- * NOT used because of a measured, unexplained defect: at that pixel clock,
- * DCS reads of THREE OR MORE bytes fail with a TO_LP_RX timeout (INT_ST1 bit
- * 1) while 1- and 2-byte reads keep working, and at 40 MHz the same reads
- * return correctly (RDDID rc=3 data=83 94 0f, RDDST rc=4 data=81 73 06 00).
- * Four bench runs, 100% correlated with the pixel clock.  The escape-clock
- * divider is derived from the lane byte clock (60.0 MHz -> /5 -> 12 MHz;
- * 57.8 MHz -> /4 -> 14.45 MHz), which is the suspected mechanism but is not
- * proven.  Losing panel readback is worse than losing refresh rate, so stay at
- * 40 MHz until that is understood; revisit the whole choice when it is (#2199).
+ * 400 MHz / 7 = 57.142857 MHz would give 60 Hz but needs ~690 Mbps/lane at
+ * 24 bpp.  dsi_dw clamps the lane to panel-max-lane-bandwidth, so the host
+ * line is 762 * 62.5 / 57.142857 = 833 lane-byte clocks while one line's
+ * payload needs ~1086, and the DPI payload FIFO overflows every line.
+ * Measured as a controlled A/B on one board in one connector state (#2199),
+ * RGB888 link in both arms (layer RGB888 at 40 MHz, RGB565 at 57.142857 MHz):
+ *
+ *   40 MHz          CDC200_PIXCLK_CTRL 0x000a0001  INT_ST1 0x00000000
+ *   57.142857 MHz   CDC200_PIXCLK_CTRL 0x00070001  INT_ST1 0x00000080, dark
+ *
+ * INT_ST1 bit 7 is DSI_INT_1_DPI_PLD_WR_ERR (dsi_dw.h), still set after 5 s
+ * of video, and the host programmed hline = 833, as computed above.  60 Hz
+ * needs a 16-bit link (panel pixel-format MIPI_DSI_PIXFMT_RGB565,
+ * ~462 Mbps/lane), which has not been tried.
  *
  * The SoC glue derives the CDC divider from clock-frequency and the DSI host
  * times its lanes from it, so those two cannot drift.  The APP's fill format
@@ -79,30 +84,28 @@
 	 * RESX low by the time this runs, so the panel never sees VCC rise against
 	 * an undefined reset level.
 	 *
-	 * ACTIVE_HIGH is as-designed and is kept deliberately.  Both polarities were
-	 * measured on silicon on 2026-09-20 and NEITHER changes anything: with the
-	 * expander's P0 driven high and again driven low, 300 ms settle each, the
-	 * touch controller stayed silent at both 0x5d and 0x14, and an all-black
-	 * versus all-white framebuffer moved the panel's measured luminance by
-	 * -1.133 and +0.189 counts against a 0.495-count noise band, while a
-	 * backlight on/off control in the same capture moved it 126.260.  Do not
-	 * re-run that experiment.
+	 * ACTIVE_HIGH follows the upstream NXP rk055hdmipi4ma0 shield, which drives
+	 * this same connector pin (J6 pin 32) as the panel power enable.  It is not
+	 * bench-proven on this carrier.  Both polarities were tried on 2026-09-20,
+	 * but while the panel module's own DC/DC was not running (a jumper missing
+	 * on the module itself, #2199), so neither result says anything about this
+	 * pin.  The HX8394 logic answers DCS with P0 held low, so this pin does not
+	 * gate the controller's logic supply.
 	 *
 	 * The flip does take effect, if you ever need to make it: regulator_fixed_init()
 	 * drives enable-gpios itself via gpio_pin_configure_dt(..., GPIO_OUTPUT_ACTIVE)
 	 * BEFORE regulator_common_init() runs, so only startup-delay-us is lost to
 	 * the refcount-only arm described below, never the pin itself.
 	 *
-	 * Bring-up note worth more than the polarity: this panel answers every DCS
-	 * read, reports Sleep Out / Display On / 24 bpp, and still does not modulate
-	 * the glass.  Do not read that as a dead supply without evidence -- every
-	 * register reachable over DSI lives in the HX8394-F's logic domain, while
-	 * the source and gate rails do not, so the whole readable register set looks
-	 * healthy either way.  RDDST D31 "Booster On" is not documented as
-	 * voltage-sensed and proves nothing.  The one read the datasheet does tie to
-	 * booster voltage levels is RDDSDR (0Fh) D6 (§5.11.2 p.85), valid only
-	 * 120 ms after Sleep Out and only in command mode -- on this board DCS reads
-	 * stop answering entirely once video mode is enabled.  It reads D6 = 1 here.
+	 * Bring-up note worth more than the polarity: every register reachable over
+	 * DSI lives in the HX8394-F's logic domain, which runs from +L_VIO (J6 pin
+	 * 25), while the source and gate drive depend on the panel module's own
+	 * DC/DC.  With that DC/DC off, the panel still answers every DCS read and
+	 * reports Sleep Out / Display On / 24 bpp -- RDDST D31 "Booster On" and
+	 * RDDSDR (0Fh) D6 both read healthy -- and shows nothing.  That was #2199.
+	 * The GT911 touch controller shares the module's supply, so a touch
+	 * controller that does not answer at 0x5d or 0x14 is the DSI-independent
+	 * tell: check it before debugging the video link.
 	 *
 	 * No startup-delay-us here: Zephyr 4.4.1 applies that property only on the
 	 * regulator_enable() path (regulator_common.c, the `else if` arm), and a
@@ -130,8 +133,8 @@
  * ITCM RAM-run .bin stays small).
  *
  * The SoC dtsi's sram0 is ALSO the "SRAM0" linker region (and system RAM for
- * an app with `zephyr,sram = &sram0`), so it is shrunk to the bottom 2 MiB:
- * anything linked into SRAM0 past 0x02200000 is then a link error ("region
+ * an app with `zephyr,sram = &sram0`), so it is shrunk to the bottom 1 MiB:
+ * anything linked into SRAM0 past 0x02100000 is then a link error ("region
  * SRAM0 overflowed") instead of a silent overwrite of the framebuffer.  An
  * app overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
  * after this shield and still stays below the framebuffer.
@@ -183,9 +186,7 @@
 		 * RESX high-impedance for ~15 init levels, at whatever level the
 		 * carrier's own termination happens to leave the net at.  A
 		 * floating RESX during the VCC ramp is the failure this prevents -- the
-		 * HX8394 samples an undefined reset level as it powers, which is the
-		 * ranked cause of the intermittent whole-panel DCS silence per cold
-		 * cycle seen on E1M-AEN803 2026W36-0009 (#2199).
+		 * HX8394 samples an undefined reset level as it powers.
 		 *
 		 * GPIO_ACTIVE_HIGH + output-low => gpio_pin_configure(GPIO_OUTPUT_INACTIVE)
 		 * => the expander pin is driven physically low, i.e. RESX asserted.
@@ -328,12 +329,12 @@
 	vsync-active = <0>;
 	de-active = <1>;
 	pixelclk-active = <0>;
-	/* The real pixel rate, 400 MHz / 7 (see the header). */
+	/* The real pixel rate, 400 MHz / 10 (see the header). */
 	clock-frequency = <40000000>;
 	bg-color = <0x000000>;
 	memory-region = <&lcd_fb>;
 
-	/* L1 only: a single full-screen RGB565 layer. */
+	/* L1 only: a single full-screen RGB888 layer. */
 	enable-l1 = <1>;
 	pixel-fmt-l1 = "rgb-888";
 	win-x0-l1 = <0>;
@@ -385,13 +386,10 @@
 	 * discards both because burst killed DCS reads.  They are not one thing.
 	 * Burst changes how video packets are timed on the link; EoTp appends an
 	 * end-of-transmission short packet so the peripheral can tell an HS burst
-	 * ended cleanly rather than inferring it from the line going quiet.  A
-	 * receiver that never sees EoTp can mis-frame the stream and show
-	 * nothing while every LP command still answers perfectly -- which is
-	 * this board's exact symptom (#2199).
-	 *
-	 * Burst stays OFF.  Only EoTp changes here, so if DCS reads regress it
-	 * is unambiguously this property and not the video-mode choice.
+	 * ended cleanly rather than inferring it from the line going quiet.  EoTp
+	 * is on to match the vendor's configuration for this module; it was not
+	 * the cause of #2199's dark panel (the module's own DC/DC was), and the
+	 * panel displays with it on.  Burst stays OFF.
 	 */
 	autoinsert-eotp;
 
@@ -404,11 +402,10 @@
 	 * than left to the binding default so the number is visible next to the
 	 * pixel clock it constrains.
 	 *
-	 * At 2 lanes the lane rate is pixel-clock * bpp / 2, so the RGB565 link
-	 * above runs 57.142857 MHz * 16 / 2 = 457 Mbps -- inside the limit, at
-	 * 60 Hz.  Raising this above 500000000 runs the controller out of spec;
-	 * it was tried at 750 and 900 Mbps and the panel never displayed anything.
-	 * The clamp limits only the RATE: MODE_TYPE comes from the mode flags in
+	 * At 2 lanes the lane rate is pixel-clock * bpp / 2, so the RGB888 link
+	 * above runs 40 MHz * 24 / 2 = 480 Mbps (the D-PHY PLL lands at ~483.6)
+	 * -- inside the limit, at 40 Hz.  Raising this above 500000000 runs the
+	 * controller out of spec.  The clamp limits only the RATE: MODE_TYPE comes from the mode flags in
 	 * dsi_dw_burst_mode_setup(), so a low clamp never cancels a burst -- it
 	 * only makes the lane slower than the DPI feed, starving the link.
 	 */

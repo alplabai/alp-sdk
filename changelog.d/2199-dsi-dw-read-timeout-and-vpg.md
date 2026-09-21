@@ -48,7 +48,15 @@ dpi-under=0 pixclk-ctrl=0x00070001`, still set after 5 s of video, with glass
 dark. `INT_ST1` bit 7 is `DSI_INT_1_DPI_PLD_WR_ERR`
 `zephyr/drivers/mipi_dsi/dsi_dw.h:381` ("#define  DSI_INT_1_DPI_PLD_WR_ERR		BIT(7)"):
 the DPI payload FIFO overflows continuously at the higher pixel clock. That
-overflow, not a DCS read timeout, is why the shield stays at 40 MHz.
+overflow, not a DCS read timeout, is why the shield stays at 40 MHz. It is a
+link-bandwidth limit, not a host defect: the A/B changed only the CDC layer to
+RGB565, and the layer format never reaches the link, which runs at the panel's
+`pixel-format` (RGB888). 57.142857 MHz at 24 bpp needs about 690 Mbps per
+lane, the host clamps to the 500 Mbps `panel-max-lane-bandwidth`, and the line
+then comes out at 762 * 62.5 / 57.142857 = 833 lane-byte clocks -- the
+`hline` the host programmed -- against about 1086 of payload. A 16-bit link
+(panel `pixel-format = <MIPI_DSI_PIXFMT_RGB565>`) would need about 462 Mbps
+per lane; it has not been tried on a powered panel.
 
 The same clamp fixes an underflow: `outvact` is signed and has had the
 LPDT-entry delay subtracted, so on a short line it can go negative, and the old
