@@ -41,9 +41,32 @@ needs `CONFIG_SYS_HEAP_AUTO=y`, set in the example's `prj.conf`: Zephyr
 defaults to `SYS_HEAP_SMALL_ONLY` whenever the kernel's SRAM is <= 256 KB
 (the M55-HE's DTCM), and that heap kind cannot span a pool bigger than
 262136 bytes — `src/camera_dispatch.c` now fails the build with a pointer to
-the fix rather than let it misbehave at run time. The whole CSI-2 -> CPI
-pipe has never run on real silicon; all four shield scenarios are
-`build_only` in twister.
+the fix rather than let it misbehave at run time.
+
+`CONFIG_VIDEO_ALIF_CAM_EXTENDED` now defaults on for `SOC_SERIES_E8`
+(`zephyr/kconfigs/vendor-alif-peripherals.kconfig`). `video_alif.c` only
+sets `CAM_CFG.AXI_PORT_EN` inside that option; with it off the E8 CPI never
+wrote a frame to memory, yet it still raised STOP for every frame, so the
+portable camera backend handed back the untouched buffer and
+`alp_camera_capture()` reported `ALP_OK`. On e1m-aen-evk-02 (OV9281 on J5)
+a pool pre-filled with `0xA5` came back byte-for-byte unchanged, test
+pattern on or off, with `CAM_CFG` = `0x00030013` (bit2 `AXI_PORT_EN`
+clear); with the fix, `0x00030017`. Alif's own E8 DK board confs set this
+option for the same reason.
+
+**The whole CSI-2 -> CPI pipe is now bench-verified for one sensor.**
+2026-09-21 on e1m-aen-evk-02: the `innomaker_cam_ov9281` shield streams
+real 640x400 GREY8 frames at 800 Mbit/s/lane, once fitted with the
+P/N-crossing adapter this SoM revision's camera connector needs — its
+MIPI CSI-2 wiring swaps the P and N wires of all three differential pairs
+(clock lane and both data lanes) relative to the EVK, so a camera plugged
+straight into J5 (or J4, the mux's other input) answers its I2C chip-ID
+probe but no frame ever arrives. An adapter crossing camera-connector pins
+2↔3, 5↔6 and 8↔9 (every other pin straight) fixes it; see
+`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
+The IMX219, OV5647 and IMX296 paths remain BENCH-UNVERIFIED. All four
+shield scenarios stay `build_only` in twister regardless of bench status —
+twister has no bench access.
 
 Retires `examples/aen/aen-camera-regcheck`: its overlay wired the sensor on
 CSI port@1 (D-PHY id 1, the DSI PHY) with an `arx3a0` sensor on `i2c2`, both

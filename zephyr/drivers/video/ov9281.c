@@ -4,7 +4,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ====== ADR 0017 Tier-1.5 (third-party permissive port), BENCH-UNVERIFIED ======
+ * ====== ADR 0017 Tier-1.5 (third-party permissive port), BENCH-VERIFIED ======
  * OmniVision OV9281 global-shutter mono MIPI CSI-2 sensor. Ported onto the
  * upstream Zephyr v4.4 video API (video_driver_api set_format/get_format/
  * get_caps/set_stream + the video_ctrls registry) from the Apache-2.0
@@ -28,8 +28,11 @@
  * 1280x720 RAW8 @ 50 fps and 640x400 RAW8 @ 100 fps, 2 MIPI data lanes,
  * 24 MHz XVCLK -- no RAW10 or other resolution is invented here.
  *
- * BENCH-UNVERIFIED: not yet run against real OV9281 silicon on the E1M-EVK
- * (no innomaker_cam_ov9281 shield bench pass on this batch).
+ * BENCH-VERIFIED 2026-09-21 on e1m-aen-evk-02 (innomaker_cam_ov9281 shield on
+ * J5): the 640x400 mode streams real RAW8/GREY8 frames at 800 Mbit/s/lane.
+ * The camera connector on this SoM/EVK combination needs a P/N-crossing
+ * adapter (see docs/boards/e1m-evk.md's Camera section) -- without one, the
+ * sensor still answers its I2C probe but no frame ever arrives.
  *
  * RETIREMENT: this is a ported third-party permissive driver, not a Tier-2
  * fork-driver copy or an interim backport -- it has no upstream Zephyr

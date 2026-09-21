@@ -50,12 +50,25 @@ when no instance declares it.
 ADR 0017 Tier-1.5 (third-party permissive port) -- a **port** of the
 Apache-2.0 Espressif `esp-video-components` `esp_cam_sensor/sensors/ov9281`
 driver onto the upstream Zephyr v4.4 video API, keeping Espressif's register
-addresses/values/init tables verbatim. BENCH-UNVERIFIED (no silicon bench
-pass on this batch). See the file header for the source commit and
-retirement note, and the "Amendment (2026-09-18)" section of
+addresses/values/init tables verbatim. **BENCH-VERIFIED 2026-09-21** on
+e1m-aen-evk-02: the 640x400 mode streams real RAW8/GREY8 frames over the
+`innomaker_cam_ov9281` shield on J5. See the file header for the source
+commit and retirement note, and the "Amendment (2026-09-18)" section of
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md) for why this is Tier-1.5
 and not Tier-2 (Tier-2 names the opt-in Alif vendor-SDK fork specifically,
 which this driver never touches).
+
+**Requires a P/N-crossing adapter on this SoM/EVK combination.** The
+E1M-AEN SoM's camera connector wiring currently swaps the P and N wires of
+all three MIPI CSI-2 differential pairs (clock lane and both data lanes)
+relative to the EVK, so a camera plugged straight into J5 (or J4, the
+mux's other input) never synchronizes: the D-PHY leaves Stop-state and the
+sensor still answers its I2C probe, but no frame ever arrives. A short
+adapter that crosses camera-connector pins 2↔3, 5↔6 and 8↔9 (every other
+pin, including the four grounds and the power/control pins, stays
+straight) fixes it -- match lane lengths given the 800 Mbit/s/lane rate.
+This is what the OV9281 bench pass above used; expect the same fix to be
+needed for any other MIPI camera on this SoM revision.
 
 Modes: only the two Espressif ships -- `GREY` (RAW8 mono) 1280x720 @ 50 fps
 and 640x400 @ 100 fps, MIPI CSI-2 D-PHY, 2 data lanes, 24 MHz XVCLK (no
@@ -122,4 +135,6 @@ upstream's `tests/drivers/build_all/video`.
 shield also builds against it) and captures one frame with a timeout, on the
 E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
 README for what each printed line means and the expected result per module
--- the whole CSI-2 -> CPI pipe has never run on real silicon.
+-- the OV9281 path is now bench-verified (2026-09-21, e1m-aen-evk-02); the
+IMX219, OV5647 and IMX296 paths compile and link against the real board
+target but have not yet been run on real silicon.

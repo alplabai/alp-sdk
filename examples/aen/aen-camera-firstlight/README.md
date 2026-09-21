@@ -4,9 +4,15 @@ First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera modules on
 the E1M-EVK's J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8,
 M55-HE). Exercises the portable `<alp/camera.h>` API only — open, start,
 capture-with-timeout, release, stop, close — the same four calls whichever
-sensor shield is stacked underneath. The whole CSI-2 → CPI pipe this app
-drives has **never run on real silicon**; see `docs/boards/e1m-evk.md`'s
-Camera section and `docs/camera-shields.md`.
+sensor shield is stacked underneath. The OV9281 path is **bench-verified**
+(2026-09-21, e1m-aen-evk-02: real 640x400 GREY8 frames land in memory); the
+IMX219, OV5647 and IMX296 paths have not yet run on real silicon. See
+`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
+
+**This SoM/EVK combination needs a P/N-crossing adapter on the camera
+connector.** Without one, the sensor answers its I2C probe but no frame
+ever arrives — see the note in `docs/boards/e1m-evk.md`'s Camera section
+for what to build.
 
 ## Build (one image per camera shield)
 
@@ -68,7 +74,7 @@ RESULT: capture ok
 |---|---|---|---|
 | `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`), BENCH-UNVERIFIED. |
-| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 | ADR 0017 Tier-1.5 port of the Espressif driver, BENCH-UNVERIFIED. |
+| `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on e1m-aen-evk-02: real frames, CRC32 non-zero, non-degenerate histogram. |
 | `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
 ## Frame buffers live in SRAM0, not DTCM
@@ -94,10 +100,11 @@ so the heap picker sizes each heap's chunk headers to fit the pool it is
 actually given, instead of silently misbehaving at run time (4-byte-aligned
 buffers, then `ALP_ERR_NOMEM` on the second frame).
 
-## Compile proof only on this batch
+## Compile proof in CI; real results on the bench
 
-The four `testcase.yaml` scenarios are `build_only: true` — the CSI-2 → CPI
-pipe has never run on silicon (see the branch this example ships on), so a
-green twister build proves the image compiles and links against the real
-board target, not that a frame actually arrives. Run it on the bench (J-Link
-RAM-run, same flow as the sibling `*-regcheck` apps) for the real result.
+The four `testcase.yaml` scenarios are `build_only: true` regardless of bench
+status — twister has no bench access, so a green build only proves the image
+compiles and links against the real board target. The OV9281 shield's real
+result (2026-09-21, e1m-aen-evk-02, J-Link RAM-run, same flow as the sibling
+`*-regcheck` apps) is real 640x400 GREY8 frames landing in memory; the other
+three shields still need that same bench pass.

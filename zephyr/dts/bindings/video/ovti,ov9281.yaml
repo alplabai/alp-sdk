@@ -5,8 +5,9 @@
 #
 # ADR 0017 Tier-1.5 (port of the Apache-2.0 Espressif esp-video-components
 # esp_cam_sensor/sensors/ov9281 driver onto the upstream Zephyr v4.4 video
-# API), BENCH-UNVERIFIED. Shaped after upstream's dts/bindings/video/
-# sony,imx219.yaml (i2c-device.yaml + a video-interfaces.yaml endpoint child)
+# API), BENCH-VERIFIED 2026-09-21 on e1m-aen-evk-02. Shaped after
+# upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml + a
+# video-interfaces.yaml endpoint child)
 # plus zephyr/drivers/video/ov5647.c's explicit `clocks: required: true`
 # (Espressif ships no Zephyr binding of its own to mirror). See
 # zephyr/drivers/video/ov9281.c for the source commit + retirement note.

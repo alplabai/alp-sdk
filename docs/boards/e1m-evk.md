@@ -190,6 +190,18 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   11 (module enable) is driven by `CAM_EN` (see the expander table
   above): keep `CAM_EN = 0` so the module self-enables.
 
+  > **A P/N-crossing adapter is required on this SoM revision.** The
+  > E1M-AEN SoM's camera connector wiring swaps the P and N wires of all
+  > three MIPI CSI-2 differential pairs (clock lane and both data lanes)
+  > relative to the EVK, on both mux inputs (J5 and J4). A camera plugged
+  > straight into J5 never synchronizes: the D-PHY leaves Stop-state and
+  > the sensor still answers its I2C chip-ID probe, but no frame ever
+  > arrives. Build a short adapter that crosses camera-connector pins
+  > 2↔3, 5↔6 and 8↔9 (every other pin -- the four grounds and the
+  > power/control pins -- stays straight); match lane lengths given the
+  > 800 Mbit/s/lane rate. A future SoM revision is expected to fix this
+  > at the source.
+
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
   Zephyr's Raspberry Pi camera contract, e.g. the Camera Module 2
@@ -220,10 +232,14 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   `CONFIG_SYS_HEAP_AUTO=y`: Zephyr's default `SYS_HEAP_SMALL_ONLY`
   heap on the M55-HE (SRAM <= 256 KB) cannot span a bigger pool, and
   the build fails a `BUILD_ASSERT` rather than misbehave at run time.
-  RAW10 sensors are delivered to memory as
-  unpacked 16-bit samples (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2),
-  not the packed wire format.  Compiled against the upstream IMX219
-  driver; not yet run on hardware.
+  The E8's CPI also needs `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` (default on for
+  `SOC_SERIES_E8`) to set `CAM_CFG.AXI_PORT_EN`: without it the CPI still
+  raises STOP per frame but never writes one to memory, so a capture
+  reports success over an untouched buffer instead of failing. RAW10
+  sensors are delivered to memory as unpacked 16-bit samples
+  (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2), not the packed wire format.
+  Compiled against the upstream IMX219 driver; not yet run on hardware (the
+  OV9281 path is bench-verified, see below).
 
   The CSI-2 pixel clock tops out at 200 MHz (400 MHz source / 2), and
   one pixel moves per clock.  A 2-lane IMX219 at its 456 MHz link
@@ -239,7 +255,10 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
-  otherwise. See its README for what each printed line means.
+  otherwise. See its README for what each printed line means. The OV9281
+  shield is bench-verified (2026-09-21, e1m-aen-evk-02): real 640x400
+  GREY8 frames land in memory. The IMX219, OV5647 and IMX296 shields still
+  only compile and link against the real board target.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
