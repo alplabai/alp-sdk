@@ -15,10 +15,7 @@ below. Each is governed by its own license; the full terms ship with the
 respective component (under vendors/<name>/ or the referenced upstream).
 
 - Zephyr RTOS — Apache-2.0. Copyright the Zephyr Project and contributors.
-  Build-time dependency (west/Zephyr); not redistributed in this repository,
-  except for zephyr/drivers/video/ov5647.c — a verbatim backport of a still-
-  open upstream Zephyr pull request, vendored ahead of merge; see that
-  file's header and docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+  Build-time dependency (west/Zephyr); not redistributed in this repository.
 
 - Espressif esp-video-components — Apache-2.0.
   Copyright (c) Espressif Systems (Shanghai) CO LTD.
