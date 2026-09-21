@@ -30,7 +30,7 @@ against the standard offline.  See
 +----------------------------------------------------------------+
 |  alplabai/e1m-spec — the open standard                         |
 |    pinout/v1.json     E1M (35×35), pads A1..AH34, default      |
-|    pinout/x-v1.json   E1M-X (45×65), pads A1..AH50             |
+|    pinout/x-v1.json   E1M-X (45×65), pads A1..AR64             |
 |    STANDARD.md        normative prose, signal classes           |
 +----------------------------------------------------------------+
                               │
@@ -152,10 +152,12 @@ It does **not** specify:
 
 ## Version pinning
 
-The SDK's v0.1 release is built against **e1m-spec v1.1** (the
-first public release).  The pin is referenced explicitly in
-`west.yml` so a `west update` on this SDK pulls a known-compatible
-spec revision.
+The SDK is built against **e1m-spec v1.0** (the first public
+release; 312 pads for E1M, 496 for E1M-X).  The pin lives in
+[`metadata/e1m/e1m-spec.lock`](../metadata/e1m/e1m-spec.lock)
+(ref + SHA) and is applied by `scripts/sync_e1m_spec.py`, which
+vendored the spec's JSON snapshots under `metadata/e1m/` -- see
+"Vendored snapshot" above.
 
 If you're adding support for a new SoM or board:
 

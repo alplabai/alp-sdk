@@ -58,17 +58,21 @@ core) come from the SoM preset under `metadata/e1m_modules/<MPN>.yaml` and are
 Two loaders fan `board.yaml` into per-core slices:
 
 - `scripts/alp_project.py --emit {zephyr-conf,cmake-args,yocto-conf,hw-info-h,dts-overlay,west-libraries,os-topology,native-sim-overlay,system-manifest,dts-reservations,ipc-contract-h,composed-route-table,carrier-netlist,zephyr-board,scaffold}`
-  — the per-slice build config.
+  — the per-slice build config. Run from the repo root.
 - `python -m alp_orchestrate --emit {system-manifest,build-plan,ipc-contract-h,dts-reservations,dts-partitions,storage-mounts-c,tfm-sysbuild-conf,kconfig}`
-  — the cross-core / system artefacts.
+  — the cross-core / system artefacts. The package lives under `scripts/`, so
+  run it as `PYTHONPATH=scripts python -m alp_orchestrate …` (or with `scripts/`
+  on your path); note per ADR 0026 this producer is slated for deletion — tan
+  owns the planner — so treat its output as provisional.
 
 `tan build --project <app-dir>` is the customer wrapper. The current Python
 implementation carries a relocated in-process planner, reads the selected
 alp-sdk checkout's metadata/schemas, materialises the per-slice config, then
-runs each slice's native build command. The SDK's own `--emit build-plan` and
-`--emit system-manifest` remain the inspectable parity/reference producer while
-the port settles; emit them directly when reviewing what a `board.yaml`
-resolves to.
+runs each slice's native build command. Per ADR 0026 tan owns the planner
+outright: alp-sdk's `alp_orchestrate` is **not** the reference producer
+anymore, and `scripts/alp_orchestrate/` is scheduled for deletion once the
+port completes. Until then it remains a runnable way to inspect what a
+`board.yaml` resolves to; prefer `tan`'s planner for authoritative planning.
 
 The `--emit` surface is the **machine-readable contract** other tools consume
 (ADR 0014, `docs/adr/0014-build-plan-emit-cli-contract.md`). When you need to

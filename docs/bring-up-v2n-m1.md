@@ -15,7 +15,7 @@ PCIe muxes, and the DEEPX kernel runtime hand-off.
 |------------------------------|-----------------------------------------------|-------------------------------------------------------------------------------------|
 | DEEPX silicon                | absent                                        | populated (DX-M1 BGA, on-module)                                                    |
 | DA9292 CH2                   | disabled (0.75 V DEEPX rail unused)            | enabled at bring-up via `da9292_v2n_m1_enable_deepx_rail`                          |
-| TPS628640 instances on BRD_I2C | 1 optional (LPD4x_0V6 @ 0x4D)                | 4 total (adds 0x48 / 0x44 / 0x4F for DEEPX rails)                                  |
+| TPS628640 instances on BRD_I2C | 1 optional (LPD4x_0V6 @ 0x4D)                | adds 0x44 / 0x4F for DEEPX rails (the LPDDR buck's address is TBD, do not probe 0x48) |
 | PCIe muxes                   | not applicable                                | 2 × PI3DBS12212A; PD on Renesas P80, SEL on P95                                     |
 | `M1_RESET` line              | not applicable                                | Renesas PA6 -- driven by host firmware via `chips/deepx_dxm1/`                      |
 | DEEPX kernel runtime         | not applicable                                | `dx_rt_npu_linux_driver` + `libdxrt.so` from upstream `meta-deepx-m1` Yocto layer  |
@@ -25,15 +25,19 @@ PCIe muxes, and the DEEPX kernel runtime hand-off.
 ### 1. Confirm DEEPX rail PMICs ACK on BRD_I2C
 
 ```c
-tps628640_t t44, t48, t4f;
+tps628640_t t44, t4f;
 tps628640_init(&t44, brd_i2c, 0x44, 1050); /* DDR5_VDD       */
-tps628640_init(&t48, brd_i2c, 0x48, 850);  /* VDD0V85_LPDDR  */
 tps628640_init(&t4f, brd_i2c, 0x4F, 500);  /* DDR5_VDDQ_0V5  */
 ```
 
-Each `_init` must return `ALP_OK` (NOT `ALP_ERR_NOT_READY`).  All
-three rails self-regulate to their factory OTP voltages with no
+Each `_init` must return `ALP_OK` (NOT `ALP_ERR_NOT_READY`).  Both
+rails self-regulate to their factory OTP voltages with no
 host writes -- firmware just confirms the parts are populated.
+
+Do **not** probe `0x48` expecting the DEEPX LPDDR buck: on this
+bus `0x48` is the on-module TMP112, and the `deepx_lpddr_0v85`
+buck's address is still `TBD` in `metadata/e1m_modules/E1M-V2M101.yaml`
+(see [`docs/soms/v2n-m1.md`](soms/v2n-m1.md) for the strap note).
 
 If any one returns `ALP_ERR_NOT_READY`: probe the rail directly.
 A missing population shows up as "buck instance not on the bus";

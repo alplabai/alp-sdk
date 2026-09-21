@@ -44,9 +44,10 @@ signatures), if you have one.
    `--yocto-only`, `--zephyr-only`, and `--no-clean` for tighter
    inner loops.  See [`docs/testing.md`](testing.md) for the
    per-stage breakdown.
-5. Open a PR.  CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
-   matrices (whichever exist for the version you're branching from —
-   see [`VERSIONS.md`](../VERSIONS.md)).  Append a row to
+5. Open a PR.  CI runs the AEN-Zephyr (`pr-twister-aen`) and
+   V2N-Yocto (`pr-bitbake`) matrices, plus the cross-platform
+   Zephyr build gate (whichever exist for the version you're
+   branching from — see [`VERSIONS.md`](../VERSIONS.md)).  Append a row to
    [`docs/test-plan.md`](test-plan.md) for any new feature, default
    `⏳ untested`; CI green is necessary but not sufficient to flip
    the row to `✅` -- real-hardware HIL evidence does.

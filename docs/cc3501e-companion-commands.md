@@ -336,16 +336,18 @@ verbs is documented in
 
 ---
 
-## Host-driver-only surfaces (no console command)
+## Host-driver-level surfaces (console + `cc3501e_*` API)
 
-Two companion subsystems are driven from firmware through the `cc3501e_*` API
-rather than the console:
+Two companion subsystems are driven both interactively and programmatically:
 
-### OTA firmware update (`cc3501e_ota_*`)
+### OTA firmware update (`alp companion ota` / `cc3501e_ota_*`)
 
 Stream a signed CC3501E vendor image over the bridge into the coprocessor's
-non-primary slot, which it then swaps on reboot (PSA-FWU). Driven by the
-device-side Mender contract, not interactively.
+non-primary slot, which it then swaps on reboot (PSA-FWU). The
+`alp companion ota` shell group drives a session interactively:
+`ota status` reports the session state and progress cursor, `ota begin
+<total_len_bytes>` starts one (the image bytes are pushed by the firmware
+path below, not typed into the shell), and `ota abort` cancels it.
 
 | API | What it does |
 |---|---|

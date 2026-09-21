@@ -171,8 +171,6 @@ workflows (on `dev` they catch problems before integration; on
 - `pr-metadata-validate` — schema validation on every
   `metadata/**` and `examples/**/board.yaml`.
 - `pr-generated-files` — `soc_caps.h` + ABI snapshot in sync.
-- `pr-gd32-bridge-build` — firmware tree builds under both
-  `BRIDGE_HAL_BACKEND=stub` and `=gd32`.
 - `pr-abi-snapshot` — **post-1.0 only**.  Flags removed /
   signature-changed `[ABI-STABLE]` symbols.
 
@@ -296,7 +294,6 @@ held to the full `main` gate set below.
     - `pr-twister`
     - `pr-metadata-validate`
     - `pr-generated-files`
-    - `pr-gd32-bridge-build`
 
 **Merge gates:**
 

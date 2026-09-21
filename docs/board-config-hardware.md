@@ -169,8 +169,9 @@ fall back to a different code path) instead of crashing.
 Two complementary mechanisms:
 
 1. **`<alp/hw_info.h>`**.  `alp_hw_info_read()` reads the SoM
-   manifest from the on-module 24C128 EEPROM (`metadata/templates/
-   eeprom_manifest.yaml` for the layout).  Production-test wrote
+   manifest from the on-module 24C128 EEPROM (the wire layout is
+   documented in [`docs/board-id.md`](board-id.md) and written by
+   `scripts/program_eeprom.py`).  Production-test wrote
    the manifest; firmware checks `hw_info.som_hw_rev` +
    capability flags to know which chip set this unit shipped with.
 2. **Probe-and-fall-back**.  Every chip driver's `_init()`

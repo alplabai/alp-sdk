@@ -505,19 +505,23 @@ top of the per-subsystem checks.
    in §7 -- but a *non-ACKing* EEPROM is a wiring/pull-up fault.
 
 4. **CC3501E PING / GET_VERSION.**  Bring the on-module Wi-Fi/BLE
-   coprocessor to life over the inter-chip SPI1 bus.  Issue the
-   two META-group opcodes from the bridge host driver (see the
-   wire frame in `cc3501e-bridge-firmware:DESIGN.md`):
-   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`).
-   A standalone host-side helper for the M55 side is **TBD**
-   (only the device firmware ships today), so drive it from app
-   code via the bridge dispatch for now.
+   coprocessor to life over the inter-chip SPI1 bus.  The full
+   host-side driver ships in-tree: `cc3501e_init()` from
+   `<alp/chips/cc3501e.h>` (`chips/cc3501e/`) issues
+   `PING` (opcode `0x00`) then `GET_VERSION` (opcode `0x01`)
+   over the bridge dispatch and refuses a protocol-major
+   mismatch; the runnable `cc3501e_bridge_bringup()` helper is
+   in `examples/aen/aen-cc3501e-bringup/`, and the
+   `alp companion` console verbs exercise the link
+   interactively.
 
    * `PING` must return `RESP_OK` with empty data -- the liveness
      signal.
    * `GET_VERSION` must return the firmware's wire-protocol
      version; cross-check it against
      `cc3501e-bridge-firmware:prebuilt/CHANGELOG.md`.
+     Modules ship factory-flashed with the latest CC3501E
+     firmware (v0.9.0 as of this writing).
 
    No `RESP_OK` usually means the CC3501E hasn't been flashed yet
    (`helper_firmware[].firmware_path` is still TBD in the SKU
