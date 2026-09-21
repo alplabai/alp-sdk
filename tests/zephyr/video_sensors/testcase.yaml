@@ -1,12 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# twister coverage for the three Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers
-# (ov5647.c, ov9281.c, imx296.c) on native_sim. OV5647 and IMX296 stay build-only (compiled +
-# linked against a driverless "vnd,i2c" test bus, no emulator -- see app.overlay); OV9281 gets
-# a real runtime ztest (ov9281_test.c) against ov9281_emul.c, an I2C emulator on native_sim's
-# actual "zephyr,i2c-emul-controller" bus. Mirrors upstream's
-# tests/drivers/build_all/video/testcase.yaml shape for the build-only pair, and
-# tests/drivers/sensor/ina237 for the OV9281 emulator/ztest shape.
+# twister coverage for the Raspberry-Pi-style MIPI CSI-2 OV9281 camera-module sensor driver
+# (ov9281.c) on native_sim. A real runtime ztest (ov9281_test.c) runs against ov9281_emul.c,
+# an I2C emulator on native_sim's actual "zephyr,i2c-emul-controller" bus. Mirrors upstream's
+# tests/drivers/sensor/ina237 for the emulator/ztest shape.
 
 common:
   tags:
@@ -15,7 +12,7 @@ common:
     - camera
 
 tests:
-  alp_sdk.video.rpi_csi2_sensors:
+  alp_sdk.video.ov9281_sensor:
     platform_allow:
       - native_sim
       - native_sim/native/64

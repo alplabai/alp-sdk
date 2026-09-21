@@ -46,8 +46,7 @@ the 800 Mbit/s/lane rate. See ``docs/camera-shields.md``.
 Programming
 ***********
 
-Set ``-DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"`` (carrier
-shield first, camera shield second). Any sensor shield that follows the same
-label contract works in place of ``raspberry_pi_camera_module_2``, e.g.
-``raspberry_pi_camera_module_1``, ``raspberry_pi_global_shutter_camera`` or
-``innomaker_cam_ov9281``.
+Set ``-DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"`` (carrier shield
+first, camera shield second). Any sensor shield that follows the same
+label contract works in place of ``innomaker_cam_ov9281``, e.g. upstream's
+``raspberry_pi_camera_module_2``.

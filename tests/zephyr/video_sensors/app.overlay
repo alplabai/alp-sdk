@@ -6,69 +6,15 @@
  * upstream's tests/drivers/build_all/video/app.overlay convention.
  *
  * OV9281 sits on native_sim's real I2C emulation bus (&i2c0, "zephyr,i2c-emul-controller" --
- * see boards/native/native_sim/native_sim.dts), not the driverless `test_i2c` ("vnd,i2c")
- * bus below: `test_i2c` only exists to make OV5647/IMX296 compile (they have no emulator, so
- * they stay build-only), while &i2c0 is what ov9281_emul.c's EMUL_DT_INST_DEFINE(ovti_ov9281)
- * actually answers at runtime -- see ov9281_test.c.
+ * see boards/native/native_sim/native_sim.dts), which is what ov9281_emul.c's
+ * EMUL_DT_INST_DEFINE(ovti_ov9281) actually answers at runtime -- see ov9281_test.c.
  */
 
 / {
-	ov5647_input_clock: ov5647-input-clock {
-		compatible = "fixed-clock";
-		clock-frequency = <25000000>;
-		#clock-cells = <0>;
-	};
-
 	ov9281_input_clock: ov9281-input-clock {
 		compatible = "fixed-clock";
 		clock-frequency = <24000000>;
 		#clock-cells = <0>;
-	};
-
-	imx296_input_clock: imx296-input-clock {
-		compatible = "fixed-clock";
-		clock-frequency = <54000000>;
-		#clock-cells = <0>;
-	};
-
-	test {
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		test_i2c: i2c@10002000 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			compatible = "vnd,i2c";
-			reg = <0x10002000 0x1000>;
-			status = "okay";
-			clock-frequency = <100000>;
-
-			test_i2c_ov5647: ov5647@36 {
-				compatible = "ovti,ov5647";
-				reg = <0x36>;
-				clocks = <&ov5647_input_clock>;
-
-				port {
-					test_ov5647_ep: endpoint {
-						remote-endpoint-label = "";
-						data-lanes = <1 2>;
-					};
-				};
-			};
-
-			test_i2c_imx296: imx296@1a {
-				compatible = "sony,imx296";
-				reg = <0x1a>;
-				clocks = <&imx296_input_clock>;
-
-				port {
-					test_imx296_ep: endpoint {
-						remote-endpoint-label = "";
-						data-lanes = <1>;
-					};
-				};
-			};
-		};
 	};
 };
 

@@ -1,6 +1,0 @@
-shield:
-  name: raspberry_pi_global_shutter_camera
-  full_name: Raspberry Pi Global Shutter Camera (IMX296)
-  vendor: Raspberry Pi
-  supported_features:
-    - video
