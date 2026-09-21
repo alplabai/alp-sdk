@@ -66,6 +66,27 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(CPI, CONFIG_VIDEO_LOG_LEVEL);
 
+/* Alp Lab AB: on the E8, CAM_CFG.AXI_PORT_EN (gated by CONFIG_VIDEO_ALIF_CAM_EXTENDED,
+ * see alif_video_cam_set_config()) is what makes the CPI's AXI master actually write a
+ * captured frame to memory -- without it the CPI still raises STOP for every frame, so a
+ * capture silently "succeeds" over an untouched buffer instead of failing (the bug this
+ * driver's #226 fix chased). Catch a build that disables the option on an E8 target before
+ * it ships a camera path that never writes memory.
+ *
+ * Gated on CONFIG_VIDEO_ALIF_CAM too: this TU also builds standalone (see
+ * zephyr/CMakeLists.txt) to supply fourcc_to_plane_size()/fourcc_to_numplanes()/
+ * pix_fmt_bpp() to CONFIG_VIDEO_ISP_VSI when no "alif,cam" DT node is enabled at
+ * all (e.g. aen-isp-regcheck) -- DT_INST_FOREACH_STATUS_OKAY(CPI_DEFINE) then
+ * expands to nothing and CONFIG_VIDEO_ALIF_CAM_EXTENDED (which `depends on
+ * VIDEO_ALIF_CAM`) cannot be y regardless of the E8 default, with no CPI
+ * instance for the untouched-buffer bug to apply to.
+ */
+BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES_E8) ||
+		     IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED),
+	     "CONFIG_VIDEO_ALIF_CAM_EXTENDED must stay on for the E8: without it the CPI "
+	     "never writes a captured frame to memory (CAM_CFG.AXI_PORT_EN stays clear), "
+	     "so alp_camera_capture() reports success over an untouched buffer");
+
 #define WORKQ_STACK_SIZE 512
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
@@ -956,8 +977,12 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
+			/* No AXI memory endpoint on this instance (e.g. ISP-fed CPI,
+			 * config->isp_ep) -- enqueueing a buffer here would never be
+			 * filled. -ENOTSUP, not 0: a silent "success" would let the
+			 * caller believe the buffer is queued. */
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
-			return 0;
+			return -ENOTSUP;
 		}
 	}
 
@@ -1055,8 +1080,13 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 
 	if (IS_ENABLED(CONFIG_VIDEO_ALIF_CAM_EXTENDED)) {
 		if (!config->axi_bus_ep) {
+			/* Same no-AXI-endpoint instance as alif_cam_enqueue() above.
+			 * -ENOTSUP, *buf left untouched -- this used to return 0
+			 * ("success") without ever setting *buf, which a caller
+			 * reading it on a 0 return would see as an uninitialized
+			 * pointer. */
 			LOG_DBG("AXI Master interface of the IP is not enabled!");
-			return 0;
+			return -ENOTSUP;
 		}
 	}
 

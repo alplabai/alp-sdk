@@ -743,7 +743,7 @@ config VIDEO_ALIF_CAM_EXTENDED
 	help
 	  The CPI has extended registers and ports to forward video signals to the
 	  ISP and dump the frame to memory.  The E8 CPI has them (Alif's own E8 DK
-	  board confs set this), and without it the driver never sets
+	  sample/test board confs set this), and without it the driver never sets
 	  CAM_CFG.AXI_PORT_EN: the CPI still raises STOP per frame, so capture
 	  reports success over a buffer nothing was written to.
 
