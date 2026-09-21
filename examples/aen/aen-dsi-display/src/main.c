@@ -1125,6 +1125,148 @@ static void probe_bist_v2(const struct device *dsi)
 	k_msleep(10000);
 }
 
+/*
+ * DSI_CMD_PKT_STATUS bit positions (zephyr/drivers/mipi_dsi/dsi_dw.h) -- defined
+ * locally so this probe file does not include the driver-private header.
+ */
+#define WEDGE_GEN_RD_CMD_BUSY   BIT(6)
+#define WEDGE_GEN_CMD_FULL      BIT(1)
+#define WEDGE_GEN_PLD_W_FULL    BIT(3)
+#define WEDGE_GEN_BUFF_CMD_FULL BIT(17)
+#define WEDGE_GEN_BUFF_PLD_FULL BIT(19)
+
+static void wedge_dump_pkt_status(const char *arm, const char *point)
+{
+	uint32_t pkt = sys_read32(DSI_CMD_PKT_STATUS_ADDR);
+
+	printk("wedge: %s %s pkt=0x%08x rdbusy=%d cmdfull=%d pldwfull=%d buffcmdfull=%d "
+	       "buffpldfull=%d int0=0x%08x int1=0x%08x\n",
+	       arm,
+	       point,
+	       pkt,
+	       (int)((pkt & WEDGE_GEN_RD_CMD_BUSY) != 0),
+	       (int)((pkt & WEDGE_GEN_CMD_FULL) != 0),
+	       (int)((pkt & WEDGE_GEN_PLD_W_FULL) != 0),
+	       (int)((pkt & WEDGE_GEN_BUFF_CMD_FULL) != 0),
+	       (int)((pkt & WEDGE_GEN_BUFF_PLD_FULL) != 0),
+	       sys_read32(DSI_INT_ST0_ADDR),
+	       sys_read32(DSI_INT_ST1_ADDR));
+}
+
+/*
+ * BENCH DIAGNOSTIC -- probe_read_wedge() (#2199).
+ *
+ * The observation: DCS reads work perfectly in command mode until the FIRST
+ * read attempted while in video mode times out (rc=-116); every read after
+ * that fails rc=-5, including reads back in command mode, with the clock lane
+ * confirmed stopped (stopclk=1) and no error interrupt raised at all.  Two
+ * candidate causes this probe separates:
+ *
+ *   (A) merely ENTERING video mode breaks subsequent reads, or
+ *   (B) a FAILED read attempted WHILE in video mode wedges the host's generic
+ *       interface -- consistent with the earlier precedent where a probe left
+ *       an orphaned entry in the generic FIFO and every later transaction
+ *       failed until a power cycle.
+ *
+ * Three arms, run with a virgin read path -- this MUST run before anything
+ * else attempts a read in video mode (see the call site in main()), or arm 1's
+ * own baseline is already contaminated and the whole probe is void.
+ *
+ *   1) baseline: read RDDPM in command mode.
+ *   2) enter video, hold 2 s, NO read while there, leave video, read RDDPM
+ *      again.  Success refutes (A).
+ *   3) enter video, hold 2 s, attempt (and expect to fail) a read WHILE still
+ *      in video, leave video, read RDDPM again.  If arm 2 succeeded and this
+ *      final read fails, (B) is confirmed.
+ *
+ * GEN_RD_CMD_BUSY stuck SET after a failed read is the specific wedge
+ * signature, so pkt status is dumped immediately before/after every read and
+ * every blanking_off()/blanking_on() call, alongside int0/int1.
+ */
+static void probe_read_wedge(const struct device *dsi, const struct device *disp)
+{
+	uint8_t pm;
+	ssize_t arm1_rc;
+	ssize_t arm2_rc;
+	ssize_t arm3_mid_rc;
+	ssize_t arm3_rc;
+
+#define WEDGE_READ(tag, outvar) \
+	do { \
+		pm = 0xAAU; \
+		wedge_dump_pkt_status((tag), "pre-read"); \
+		(outvar) = dcs_read_lpm(dsi, 0x0AU, &pm, 1U); \
+		wedge_dump_pkt_status((tag), "post-read"); \
+		printk("wedge: %s RDDPM rc=%d data=0x%02x%s\n", \
+		       (tag), \
+		       (int)(outvar), \
+		       pm, \
+		       ((outvar) < 0) ? "  <- READ FAILED, sentinel not data" : ""); \
+	} while (0)
+
+#define WEDGE_BLANKING_OFF(tag) \
+	do { \
+		int brc; \
+		wedge_dump_pkt_status((tag), "pre-blanking_off"); \
+		brc = display_blanking_off(disp); \
+		wedge_dump_pkt_status((tag), "post-blanking_off"); \
+		printk("wedge: %s blanking_off rc=%d\n", (tag), brc); \
+	} while (0)
+
+#define WEDGE_BLANKING_ON(tag) \
+	do { \
+		int brc; \
+		wedge_dump_pkt_status((tag), "pre-blanking_on"); \
+		brc = display_blanking_on(disp); \
+		wedge_dump_pkt_status((tag), "post-blanking_on"); \
+		printk("wedge: %s blanking_on rc=%d\n", (tag), brc); \
+	} while (0)
+
+	/* --- Arm 1: baseline, command mode. --- */
+	WEDGE_READ("arm1", arm1_rc);
+
+	/* --- Arm 2: enter video, NO read while there, leave, re-read. --- */
+	WEDGE_BLANKING_OFF("arm2");
+	k_msleep(2000);
+	WEDGE_BLANKING_ON("arm2");
+	WEDGE_READ("arm2", arm2_rc);
+
+	/* --- Arm 3: enter video, DO read while there (expected to fail), leave, re-read. --- */
+	WEDGE_BLANKING_OFF("arm3");
+	k_msleep(2000);
+	WEDGE_READ("arm3-in-video", arm3_mid_rc);
+	WEDGE_BLANKING_ON("arm3");
+	WEDGE_READ("arm3", arm3_rc);
+
+#undef WEDGE_BLANKING_ON
+#undef WEDGE_BLANKING_OFF
+#undef WEDGE_READ
+
+	bool arm1_ok       = arm1_rc >= 0;
+	bool arm2_ok       = arm2_rc >= 0;
+	bool arm3_final_ok = arm3_rc >= 0;
+
+	printk("wedge: VERDICT raw arm1_rc=%d arm2_rc=%d arm3_in_video_rc=%d arm3_final_rc=%d\n",
+	       (int)arm1_rc,
+	       (int)arm2_rc,
+	       (int)arm3_mid_rc,
+	       (int)arm3_rc);
+
+	if (arm1_ok && arm2_ok && !arm3_final_ok) {
+		printk("wedge: VERDICT (B) confirmed -- entering video alone is fine (arm2 "
+		       "read succeeded), the FAILED in-video read (arm3-in-video) is what "
+		       "wedges the interface (arm3 final read fails)\n");
+	} else if (arm1_ok && !arm2_ok) {
+		printk("wedge: VERDICT (A) supported -- merely entering video mode already "
+		       "breaks the next read, with no read attempted while in video\n");
+	} else if (arm1_ok && arm2_ok && arm3_final_ok) {
+		printk("wedge: VERDICT neither (A) nor (B) -- both video-mode arms recovered "
+		       "a working read afterward\n");
+	} else {
+		printk("wedge: VERDICT indeterminate -- see raw rc values above\n");
+	}
+}
+
 int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
@@ -1247,6 +1389,18 @@ int main(void)
 			write_ok = true;
 			printk("display_write: full 720x1280 green frame OK (%u bytes/pixel)\n",
 			       (unsigned int)PANEL_BYTES_PER_PIXEL);
+
+			/*
+			 * BENCH DIAGNOSTIC (#2199): probe_read_wedge() runs FIRST, with a
+			 * virgin read path, before anything below attempts a read in video
+			 * mode -- see its banner.  The RDDPM/vid diagnostic read further
+			 * down now runs after it returns, on purpose: it must not go
+			 * first, or it wedges the interface before the experiment starts.
+			 */
+			if (dsi_ok) {
+				probe_read_wedge(dsi, disp);
+			}
+
 			/* Start scanout: DSI video mode + CDC_EN, so the FB reaches glass. */
 			rc = display_blanking_off(disp);
 			printk("blanking_off: rc=%d cdc-glb=0x%08x\n", rc, sys_read32(CDC_GLB_CTRL_ADDR));
