@@ -738,10 +738,14 @@ config VIDEO_ALIF_CAM_INIT_PRIORITY
 
 config VIDEO_ALIF_CAM_EXTENDED
 	bool "CPI has extended registers and ports (ISP / memory-dump endpoints)"
+	default y if SOC_SERIES_E8
 	depends on VIDEO_ALIF_CAM
 	help
 	  The CPI has extended registers and ports to forward video signals to the
-	  ISP and dump the frame to memory.
+	  ISP and dump the frame to memory.  The E8 CPI has them (Alif's own E8 DK
+	  board confs set this), and without it the driver never sets
+	  CAM_CFG.AXI_PORT_EN: the CPI still raises STOP per frame, so capture
+	  reports success over a buffer nothing was written to.
 
 config DISPLAY_CDC200
 	bool "TES CDC-2.1 (CDC200) DPI/RGB display controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
