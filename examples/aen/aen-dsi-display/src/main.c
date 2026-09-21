@@ -2446,15 +2446,45 @@ static enum b0_read_mech probe_b0_readback(const struct device *dsi)
 	                      ((b0[3] & (BIT(3) | BIT(2))) == (BIT(3) | BIT(2)));
 	bool any_control_ok = cc_spi_hit || cc_gen_hit || d2_spi_hit || d2_gen_hit;
 
+	/*
+	 * The verdict MUST gate on the positive controls first.  Bytes coming back
+	 * is not the same as the read path working: this panel returns rc=4 with
+	 * an all-zero payload for gated manufacturer reads, and an all-zero B0h
+	 * decodes to "every enable clear", which reads as a software-fixable root
+	 * cause.  That is a dead read path being decoded as data -- the exact
+	 * failure this probe's controls exist to catch, and the first version of
+	 * this ladder printed the false conclusion anyway because it never
+	 * consulted them.
+	 *
+	 * CCh is written to 0x03 by the panel init and D2h has a documented 0x55
+	 * default that no init touches.  If neither comes back on either mechanism,
+	 * nothing read here is evidence about the IC.
+	 */
 	printk("b0rd: VERDICT B0h_source=%s enables_all_set=%d control_confirmed=%d -- %s\n",
 	       b0_src,
 	       (int)enables_set,
 	       (int)any_control_ok,
-	       (b0 == NULL)  ? "B0h unreadable, cannot speak to the SLPOUT state machine"
-	       : enables_set ? "every enable reads SET -- IC is trying to drive the analog "
-	                       "stages, fault is downstream (electrical)"
-	                     : "at least one enable reads CLEAR -- SLPOUT never actually "
-	                       "enabled the analog stage, fixable in software");
+	       !any_control_ok ? "READ PATH UNPROVEN: neither CCh==0x03 nor D2h==0x55 came back "
+	                         "on either mechanism, so the B0h bytes above are NOT evidence "
+	                         "about the SLPOUT state machine -- an all-zero B0h is what a "
+	                         "dead gated read returns, not what a halted IC looks like"
+	       : (b0 == NULL) ? "B0h unreadable, cannot speak to the SLPOUT state machine"
+	       : enables_set  ? "every enable reads SET -- IC is trying to drive the analog "
+	                        "stages, fault is downstream (electrical)"
+	                      : "at least one enable reads CLEAR -- SLPOUT never actually "
+	                        "enabled the analog stage, fixable in software");
+
+	/*
+	 * Report the read path as unusable unless a control confirmed it, so
+	 * probe_stage_current() refuses rather than doing read-modify-write on
+	 * bytes that may be a failed read.  Writing a B0h derived from 0x00000000
+	 * clears OSC_EN and every analog enable -- recoverable by RESX plus
+	 * re-init, but it halts the IC for the rest of the run and voids every
+	 * measurement after it.
+	 */
+	if (!any_control_ok) {
+		return B0_READ_NONE;
+	}
 
 	return b0_spi_ok ? B0_READ_SPI : (b0_gen_ok ? B0_READ_GENERIC : B0_READ_NONE);
 }
