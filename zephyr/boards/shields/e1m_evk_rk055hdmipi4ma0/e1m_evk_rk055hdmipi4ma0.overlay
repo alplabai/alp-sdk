@@ -79,6 +79,31 @@
 	 * RESX low by the time this runs, so the panel never sees VCC rise against
 	 * an undefined reset level.
 	 *
+	 * ACTIVE_HIGH is as-designed and is kept deliberately.  Both polarities were
+	 * measured on silicon on 2026-09-20 and NEITHER changes anything: with the
+	 * expander's P0 driven high and again driven low, 300 ms settle each, the
+	 * touch controller stayed silent at both 0x5d and 0x14, and an all-black
+	 * versus all-white framebuffer moved the panel's measured luminance by
+	 * -1.133 and +0.189 counts against a 0.495-count noise band, while a
+	 * backlight on/off control in the same capture moved it 126.260.  Do not
+	 * re-run that experiment.
+	 *
+	 * The flip does take effect, if you ever need to make it: regulator_fixed_init()
+	 * drives enable-gpios itself via gpio_pin_configure_dt(..., GPIO_OUTPUT_ACTIVE)
+	 * BEFORE regulator_common_init() runs, so only startup-delay-us is lost to
+	 * the refcount-only arm described below, never the pin itself.
+	 *
+	 * Bring-up note worth more than the polarity: this panel answers every DCS
+	 * read, reports Sleep Out / Display On / 24 bpp, and still does not modulate
+	 * the glass.  Do not read that as a dead supply without evidence -- every
+	 * register reachable over DSI lives in the HX8394-F's logic domain, while
+	 * the source and gate rails do not, so the whole readable register set looks
+	 * healthy either way.  RDDST D31 "Booster On" is not documented as
+	 * voltage-sensed and proves nothing.  The one read the datasheet does tie to
+	 * booster voltage levels is RDDSDR (0Fh) D6 (§5.11.2 p.85), valid only
+	 * 120 ms after Sleep Out and only in command mode -- on this board DCS reads
+	 * stop answering entirely once video mode is enabled.  It reads D6 = 1 here.
+	 *
 	 * No startup-delay-us here: Zephyr 4.4.1 applies that property only on the
 	 * regulator_enable() path (regulator_common.c, the `else if` arm), and a
 	 * regulator-fixed with regulator-boot-on/always-on passes is_enabled=true

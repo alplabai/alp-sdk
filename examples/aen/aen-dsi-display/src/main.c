@@ -606,6 +606,264 @@ static bool probe_panel_reads(const struct device *dsi)
 	return any_nonzero;
 }
 
+/*
+ * THE decisive test (#2199): does SETEXTC (B9h FF 83 94) -- the extension-
+ * command unlock -- actually land on this panel?
+ *
+ * It matters because if it does not, every manufacturer register stays at
+ * power-on default, and the D5h POR default is all 18h = "constant VGL, every
+ * gate closed".  No pixel would ever be driven, while RDDPM/RDDST/RDDID keep
+ * answering normally because those are standard DCS -- exactly the symptom
+ * this board shows.  The alternative is that the unlock works and the panel
+ * module itself is faulty.
+ *
+ * Every GATED manufacturer READ on this board is dead (proven with a
+ * positive control: SETPANEL (CCh), which this app's own init writes to
+ * 0x03, reads back 00 by both the direct generic read and the FEh/FFh
+ * mechanism), so no gated readback can answer this.  probe_gate_and_length()
+ * (the ddb: probe) suggested gated WRITES land -- SETDDB (C4h) followed by
+ * RDDDB (A1h) came back non-zero -- but it has no negative control, and
+ * RDDDB had previously returned a stale FIFO echo of a just-sent payload, so
+ * it is not safe to close on.
+ *
+ * The trick that makes this answerable: RDDDB (A1h) is a STANDARD DCS read,
+ * and standard DCS reads work perfectly on this board.  So a gated register
+ * can be written and verified through a working read path -- with an actual
+ * negative control this time.
+ *
+ * Two arms, each starting with a hardware reset (the shield's HX8394 driver
+ * already sent its own SETEXTC at POST_KERNEL, before main() ever runs;
+ * SETEXTC is disabled again after reset, so the RESX pulse is what makes the
+ * locked arm a genuine negative control):
+ *
+ *   A) gate CLOSED -- RESX, read RDDDB, SETDDB(P1) with NO SETEXTC first,
+ *      flush the FIFO with an unrelated read (RDDMADCTL), read RDDDB again.
+ *      P1 must NOT appear.
+ *   B) gate OPEN -- RESX, read RDDDB, SETEXTC, SETDDB(P2), flush, read RDDDB
+ *      again.  P2 SHOULD appear.
+ *
+ * P1 (11 22 33 44 55 66) and P2 (A5 5A C3 3C 96 69) are deliberately unlike
+ * any payload the panel init sends, and unlike each other, so a stale echo
+ * cannot fake either result.
+ *
+ * Runs FIRST of every dsi_ok probe in main() -- several later probes
+ * (probe_gated_read_path() and beyond) send SETEXTC themselves and would
+ * unlock the panel behind this test's back.
+ *
+ * RESX pulsing goes through exp_set_resx() below -- a guarded read-modify-write
+ * on the expander's output register -- rather than open-coding an expander
+ * write, so P0 (panel supply enable) and P3 (touch reset) are never disturbed.
+ */
+
+/*
+ * Expander output register and the RESX bit.
+ *
+ * RESX is expander P1, confirmed two ways: the carrier netlist maps the panel
+ * reset net to this expander's P1, and the bench `rstx:` probe read back
+ * `cfg=0xf4`, i.e. bit 1 configured as an output.  P0 is the panel supply
+ * enable and P3 is the touch-controller reset -- the read-modify-write below
+ * exists so neither is ever clobbered.
+ */
+#define EXP_OUTPUT_REG 0x01U
+#define EXP_RESX_BIT   BIT(1)
+
+/*
+ * Guarded RESX drive.  Returns false WITHOUT writing if the output-register
+ * read fails: on a failed read `out` would stay 0 and the write would drive
+ * P1 and P3 low too, asserting panel reset and holding the touch controller
+ * in reset -- which reads exactly like "the panel rail is dead" and has
+ * already cost this bring-up a wasted run.
+ */
+static bool exp_set_resx(int level)
+{
+	uint8_t out = 0;
+	int     rr  = i2c_reg_read_byte_dt(&lcd_exp_i2c, EXP_OUTPUT_REG, &out);
+
+	if (rr != 0) {
+		printk("exp: RESX ABORT -- output-register read failed rc=%d, refusing RMW\n", rr);
+		return false;
+	}
+
+	uint8_t want = level ? (out | EXP_RESX_BIT) : (uint8_t)(out & ~EXP_RESX_BIT);
+	int     wr   = i2c_reg_write_byte_dt(&lcd_exp_i2c, EXP_OUTPUT_REG, want);
+
+	printk("exp: RESX -> %s  out-read-rc=%d wrote=0x%02x write-rc=%d\n",
+	       level ? "HIGH" : "LOW",
+	       rr,
+	       want,
+	       wr);
+	return true;
+}
+
+static void probe_setextc_gate_v2(const struct device *dsi)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	static const uint8_t p1[]       = { 0x11U, 0x22U, 0x33U, 0x44U, 0x55U, 0x66U };
+	static const uint8_t p2[]       = { 0xA5U, 0x5AU, 0xC3U, 0x3CU, 0x96U, 0x69U };
+	uint8_t              ddb_a_base[5];
+	uint8_t              ddb_a_after[5];
+	uint8_t              ddb_b_base[5];
+	uint8_t              ddb_b_after[5];
+	ssize_t              r;
+
+#define RESX_PULSE(label) \
+	do { \
+		if (!exp_set_resx(0)) { \
+			printk("extc: %s ABORT -- RESX-low failed, no genuine negative " \
+			       "control possible\n", \
+			       (label)); \
+			return; \
+		} \
+		k_msleep(20); \
+		if (!exp_set_resx(1)) { \
+			printk("extc: %s ABORT -- RESX-high failed\n", (label)); \
+			return; \
+		} \
+		k_msleep(60); \
+	} while (0)
+
+#define DDB_READ(dst, tag) \
+	do { \
+		memset((dst), 0xAAU, sizeof(dst)); \
+		r = dcs_read_lpm(dsi, 0xA1U, (dst), sizeof(dst)); \
+		printk("extc: %s rc=%d data=%02x %02x %02x %02x %02x%s\n", \
+		       (tag), \
+		       (int)r, \
+		       (dst)[0], \
+		       (dst)[1], \
+		       (dst)[2], \
+		       (dst)[3], \
+		       (dst)[4], \
+		       (r == (ssize_t)sizeof(dst)) ? "" : "  <- READ FAILED, sentinel"); \
+	} while (0)
+
+#define MADCTL_FLUSH(tag) \
+	do { \
+		uint8_t v  = 0xAAU; \
+		ssize_t rr = dcs_read_lpm(dsi, 0x0BU, &v, 1U); \
+		printk("extc: %s RDDMADCTL(flush) rc=%d data=0x%02x%s\n", \
+		       (tag), \
+		       (int)rr, \
+		       v, \
+		       (rr == 1) ? "" : "  <- READ FAILED, sentinel"); \
+	} while (0)
+
+	/* --- Arm A: gate CLOSED (negative control). --- */
+	RESX_PULSE("A");
+	DDB_READ(ddb_a_base, "A baseline");
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xC4U,
+			.tx_buf = p1,
+			.tx_len = sizeof(p1),
+		};
+		printk("extc: A SETDDB(C4h 11 22 33 44 55 66) rc=%d expect=%u -- no SETEXTC "
+		       "sent\n",
+		       (int)mipi_dsi_transfer(dsi, 0, &w),
+		       (unsigned int)sizeof(p1));
+	}
+	k_msleep(20);
+	MADCTL_FLUSH("A");
+	DDB_READ(ddb_a_after, "A after-P1");
+
+	/* --- Arm B: gate OPEN. --- */
+	RESX_PULSE("B");
+	DDB_READ(ddb_b_base, "B baseline");
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		printk("extc: B SETEXTC (B9h FF 83 94) rc=%d expect=%u\n",
+		       (int)mipi_dsi_transfer(dsi, 0, &w),
+		       (unsigned int)sizeof(extc_cmd));
+	}
+	k_msleep(20);
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xC4U,
+			.tx_buf = p2,
+			.tx_len = sizeof(p2),
+		};
+		printk("extc: B SETDDB(C4h A5 5A C3 3C 96 69) rc=%d expect=%u\n",
+		       (int)mipi_dsi_transfer(dsi, 0, &w),
+		       (unsigned int)sizeof(p2));
+	}
+	k_msleep(20);
+	MADCTL_FLUSH("B");
+	DDB_READ(ddb_b_after, "B after-P2");
+
+#undef MADCTL_FLUSH
+#undef DDB_READ
+#undef RESX_PULSE
+
+	/*
+	 * --- Verdict. ---
+	 *
+	 * SETDDB (C4h) takes SIX payload bytes but RDDDB (A1h) returns only FIVE,
+	 * so the pattern match compares the five bytes the read actually yields --
+	 * NOT sizeof(p1)/sizeof(p2), which is 6 and reads one byte past the read
+	 * buffer.  Confirmed on the bench: `SETDDB (C4h 5A A5 5A A5 5A A5) rc=6`
+	 * came back as `RDDDB rc=5 5a a5 5a a5 5a`, i.e. the first five written
+	 * bytes.  The compiler caught the 6-vs-5 overread here
+	 * (-Wstringop-overread); left alone it would have made p1_seen/p2_seen
+	 * compare out of bounds and decide this test wrongly.
+	 */
+	BUILD_ASSERT(sizeof(ddb_a_after) == 5U, "RDDDB returns 5 bytes");
+
+	const size_t ddb_cmp = sizeof(ddb_a_after);
+
+	bool armA_changed = memcmp(ddb_a_base, ddb_a_after, ddb_cmp) != 0;
+	bool armB_changed = memcmp(ddb_b_base, ddb_b_after, ddb_cmp) != 0;
+	bool p1_seen      = memcmp(ddb_a_after, p1, ddb_cmp) == 0;
+	bool p2_seen      = memcmp(ddb_b_after, p2, ddb_cmp) == 0;
+
+	printk("extc: VERDICT armA_changed=%d armB_changed=%d p1_seen=%d p2_seen=%d\n",
+	       (int)armA_changed,
+	       (int)armB_changed,
+	       (int)p1_seen,
+	       (int)p2_seen);
+
+	if (!armA_changed && p2_seen) {
+		printk("extc: SETEXTC GATES AS EXPECTED, gated writes land\n");
+	} else if (p1_seen) {
+		printk("extc: C4h IS NOT GATED -- this test cannot speak to SETEXTC, and "
+		       "neither could the earlier ddb probe\n");
+	} else if (!p2_seen) {
+		printk("extc: SETEXTC DOES NOT LAND -- manufacturer registers are at POR\n");
+	} else {
+		printk("extc: INDETERMINATE -- raw: A-base=%02x %02x %02x %02x %02x "
+		       "A-after=%02x %02x %02x %02x %02x B-base=%02x %02x %02x %02x %02x "
+		       "B-after=%02x %02x %02x %02x %02x\n",
+		       ddb_a_base[0],
+		       ddb_a_base[1],
+		       ddb_a_base[2],
+		       ddb_a_base[3],
+		       ddb_a_base[4],
+		       ddb_a_after[0],
+		       ddb_a_after[1],
+		       ddb_a_after[2],
+		       ddb_a_after[3],
+		       ddb_a_after[4],
+		       ddb_b_base[0],
+		       ddb_b_base[1],
+		       ddb_b_base[2],
+		       ddb_b_base[3],
+		       ddb_b_base[4],
+		       ddb_b_after[0],
+		       ddb_b_after[1],
+		       ddb_b_after[2],
+		       ddb_b_after[3],
+		       ddb_b_after[4]);
+	}
+}
+
 int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
@@ -688,6 +946,12 @@ int main(void)
 	 */
 	bool panel_read_ok = false;
 	if (dsi_ok) {
+		/*
+		 * Runs before every other probe in this block: probe_gated_read_path()
+		 * and later probes send SETEXTC themselves, which would contaminate
+		 * this test's negative control.
+		 */
+		probe_setextc_gate_v2(dsi);
 		panel_read_ok = probe_panel_reads(dsi);
 		dump_dsi_status("after-read");
 	}
