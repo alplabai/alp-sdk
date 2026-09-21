@@ -10,10 +10,10 @@ and sets `alp-camera0 = &cam`. Those labels map onto SoC nodes and pins, so
 they live in per-target overlays under the shield's `boards/` directory: the
 `alp_e1m_aen801_m55_he` and `alp_e1m_aen803_m55_he` overlays both include
 `boards/e1m_aen.dtsi`, and the main overlay keeps only the board-agnostic
-alias. Pair it with a sensor shield:
-`-DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"` compiles and links
-with the upstream IMX219 driver for `alp_e1m_aen801_m55_he` and
-`alp_e1m_aen803_m55_he`. Not yet run on hardware.
+alias. Pair it with the InnoMaker CAM-OV9281 sensor shield:
+`-DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"` compiles and links with
+the OV9281 driver for `alp_e1m_aen801_m55_he` and `alp_e1m_aen803_m55_he` —
+**bench-verified**, see below.
 
 **The camera now uses the dedicated CSI-2 receive D-PHY.** The SoC default
 `phy-if = <&dphy 1>, <&dphy 0>` selects D-PHY id 1, the DSI transmit D-PHY
@@ -57,14 +57,13 @@ The clean step discards local edits in the zephyr checkout.
 200 MHz maximum but the bare pixel rate fits, it now runs at the maximum and
 logs a warning instead of failing. It fails with `-ERANGE` only when even the
 bare rate does not fit, and the error names a wider format or a lower link
-frequency as the fix. A 2-lane IMX219 at 456 MHz therefore streams RAW10
-(182.4 Mpixel/s, run at 200 MHz); RAW8 (228 Mpixel/s) is refused.
+frequency as the fix.
 
 **RAW10 Bayer is accepted.** `VIDEO_PIX_FMT_SBGGR10P`, `SGBRG10P`, `SGRBG10P`
 and `SRGGB10P` now map to CSI-2 data type RAW10 in both `video_csi_dw.c` and
-`video_alif.c`. Before, only `Y10P` did, so a RAW10 Bayer sensor such as the
-IMX219 was rejected. `video_alif.h` aliases its old `BGGR10` names to the
-upstream `SBGGR10` symbols instead of redefining the FOURCCs.
+`video_alif.c`. Before, only `Y10P` did, so a RAW10 Bayer sensor was
+rejected. `video_alif.h` aliases its old `BGGR10` names to the upstream
+`SBGGR10` symbols instead of redefining the FOURCCs.
 
 **The CPI reports the memory layout it writes.** In CSI mode the CPI stores
 RAW10/12/14 as one 16-bit sample per pixel, but it kept whatever pitch the
@@ -77,8 +76,8 @@ A parallel (CPI or LPCPI) camera gets the same rule from its DT `data-mode`, so
 a pitch of 0 no longer lets the guard pass any buffer.
 
 **The CSI-2 lane rate comes from the sensor.** `video_csi_dw.c` now reads it
-with `video_get_csi_link_freq()` (the sensor's `VIDEO_CID_LINK_FREQ`, 456 MHz
-for the IMX219) and uses the DT `link-frequencies` / `rx-ddr-clk1` value only as
+with `video_get_csi_link_freq()` (the sensor's `VIDEO_CID_LINK_FREQ`) and uses
+the DT `link-frequencies` / `rx-ddr-clk1` value only as
 a fallback. Upstream sensor shields carry no `link-frequencies`, so the D-PHY
 had been set up for the 400 MHz default. `video_set_format()` now redoes the
 full setup on every call: a second call at a new resolution with the same CSI-2

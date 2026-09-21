@@ -23,13 +23,13 @@ also gains the `CONFIG_MIPI_DPHY_LOG_LEVEL` module log-level Kconfig
 `dphy_dw.c`'s `LOG_MODULE_REGISTER` names but that no upstream Kconfig class
 defined, which failed any `CONFIG_LOG=y` build linking the D-PHY driver.
 
-New example `examples/aen/aen-camera-firstlight` opens each of the four
-RPi-style CSI-2 camera shields the E1M-EVK's J5 connector supports (IMX219,
-OV5647, OV9281, IMX296) through `<alp/camera.h>` only, starts the stream, and
-waits for one frame with a 2 s timeout — printing CRC32 + a top-bits histogram +
-sample row bytes on success, or a diagnosed failure (e.g. `ALP_ERR_NOT_READY`
-meaning the sensor never answered its I2C chip-ID probe) otherwise. Frame
-buffers move into the global SRAM0 bank (`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION`)
+New example `examples/aen/aen-camera-firstlight` opens the InnoMaker
+CAM-OV9281 RPi-style CSI-2 camera shield on the E1M-EVK's J5 connector
+through `<alp/camera.h>` only, starts the stream, and waits for one frame
+with a 2 s timeout — printing CRC32 + a top-bits histogram + sample row
+bytes on success, or a diagnosed failure (e.g. `ALP_ERR_NOT_READY` meaning
+the sensor never answered its I2C chip-ID probe) otherwise. Frame buffers
+move into the global SRAM0 bank (`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION`)
 rather than the HE core's 256 KiB DTCM, which the default 2 MiB pool does not
 fit and the CPI's AXI capture master cannot reach regardless of size. All
 three camera backends now allocate those buffers with
@@ -54,8 +54,8 @@ unchanged, test pattern on or off, with `CAM_CFG` = `0x00030013` (bit2
 `AXI_PORT_EN` clear); with the fix, `0x00030017`. Alif's own E8 DK
 sample/test board confs set this option for the same reason.
 
-**The whole CSI-2 -> CPI pipe is now bench-verified for one sensor, in all
-three of its modes.** 2026-09-21 on an E1M-AEN803 on the E1M-EVK: the
+**The whole CSI-2 -> CPI pipe is now bench-verified, in all three of the
+OV9281's modes.** 2026-09-21 on an E1M-AEN803 on the E1M-EVK: the
 `innomaker_cam_ov9281` shield streams real GREY8 frames at
 800 Mbit/s/lane in 640x400, 1280x720 and 1280x800, once fitted with the
 P/N-crossing adapter E1M-AEN hw_rev r2 (2626-R2)'s camera connector
@@ -73,15 +73,13 @@ discriminating evidence throughout is the `0xA5`-prefilled pool being
 overwritten plus the test pattern appearing, not merely a non-zero CRC.
 These multi-frame bursts are also the bench proof for the buffer-
 starvation pause/resume fix below: a burst outlasting one buffer's worth
-of consumer latency depends on it. The IMX219, OV5647 and IMX296 paths
-remain BENCH-UNVERIFIED. `ov9281.c` also gains a third, Alp-authored
-1280x800 GREY8 mode (the sensor's full array, derived from the 1280x720
-table), bench-verified alongside 1280x720 above. `tests/zephyr/video_sensors`
-now runs a real ztest for OV9281 (`ov9281_test.c`) against an I2C emulator
-on native_sim, checking `get_caps`/`set_format`/register programming/
-exposure range check instead of only compiling the driver; OV5647 and
-IMX296 stay compile-coverage in that same runtime suite — twister has no
-bench access.
+of consumer latency depends on it. `ov9281.c` also gains a third,
+Alp-authored 1280x800 GREY8 mode (the sensor's full array, derived from the
+1280x720 table), bench-verified alongside 1280x720 above.
+`tests/zephyr/video_sensors` now runs a real ztest for OV9281
+(`ov9281_test.c`) against an I2C emulator on native_sim, checking
+`get_caps`/`set_format`/register programming/exposure range check instead
+of only compiling the driver.
 
 Retires `examples/aen/aen-camera-regcheck`: its overlay wired the sensor on
 CSI port@1 (D-PHY id 1, the DSI PHY) with an `arx3a0` sensor on `i2c2`, both
