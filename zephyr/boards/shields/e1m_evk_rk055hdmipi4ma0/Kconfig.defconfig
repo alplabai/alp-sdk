@@ -3,8 +3,9 @@
 #
 # Everything the RK055HDMIPI4MA0 display chain needs on an E1M-AEN SoM, so an
 # app only adds the shield: the display class, the DSI host + D-PHY, the panel
-# driver, and the carrier's I2C GPIO expander + fixed regulator that power and
-# reset the panel.
+# driver, the carrier's I2C GPIO expander + fixed regulator that power and
+# reset the panel, and the panel's GT911 capacitive touch controller (polling
+# only -- its INT line terminates on the CC3501E, not on the Alif SoC).
 #
 # The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
 # CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
@@ -29,6 +30,13 @@ config GPIO
 	default y
 
 config GPIO_PCA_SERIES
+	default y
+
+# INPUT_GT911 (drivers/input/Kconfig.gt911) already defaults y once its DT
+# node is enabled, but that whole menu lives inside `if INPUT`
+# (drivers/input/Kconfig) -- INPUT_GT911 has no visibility, and nothing
+# selects it, unless the parent is on.
+config INPUT
 	default y
 
 # The overlay's lcd_exp hog drives the panel RESX low, and it only works in the

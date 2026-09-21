@@ -1,0 +1,99 @@
+diff --git a/drivers/input/input_gt911.c b/drivers/input/input_gt911.c
+--- a/drivers/input/input_gt911.c
++++ b/drivers/input/input_gt911.c
+@@ -255,10 +255,15 @@
+ 	case PM_STATE_STANDBY:
+ 		/* Reconfigure the GPIO interrupt pin on exit from
+ 		 * certain low power states as we might lose the GPIO state.
++		 * Nothing to reconfigure when the board does not route an INT pin.
+ 		 */
+ 		const struct gt911_config *config = dev->config;
+ 		int r;
+
++		if (config->int_gpio.port == NULL) {
++			break;
++		}
++
+ 		r = gpio_pin_configure_dt(&config->int_gpio, GPIO_INPUT);
+ 		if (r < 0) {
+ 			LOG_ERR("Could not configure interrupt GPIO pin");
+@@ -296,10 +301,26 @@
+
+ 	int r;
+
+-	if (!gpio_is_ready_dt(&config->int_gpio)) {
+-		LOG_ERR_DEVICE_NOT_READY(config->int_gpio.port);
++	/*
++	 * irq-gpios is optional (see goodix,gt911.yaml): a board that does not
++	 * route the GT911's INT pin to a GPIO the host can drive passes no
++	 * irq-gpios and falls back to polling. Under CONFIG_INPUT_GT911_INTERRUPT
++	 * the pin is not optional -- fail cleanly instead of dereferencing a
++	 * zeroed gpio_dt_spec below.
++	 */
++#ifdef CONFIG_INPUT_GT911_INTERRUPT
++	if (config->int_gpio.port == NULL) {
++		LOG_ERR("CONFIG_INPUT_GT911_INTERRUPT requires irq-gpios in the devicetree");
+ 		return -ENODEV;
+ 	}
++#endif
++
++	if (config->int_gpio.port != NULL) {
++		if (!gpio_is_ready_dt(&config->int_gpio)) {
++			LOG_ERR_DEVICE_NOT_READY(config->int_gpio.port);
++			return -ENODEV;
++		}
++	}
+
+ 	if (config->rst_gpio.port != NULL) {
+ 		if (!gpio_is_ready_dt(&config->rst_gpio)) {
+@@ -321,12 +342,19 @@
+ 	 * Note that if an alternate I2C address is set, we will probe
+ 	 * for the alternate address if 0x5D does not work. This is useful
+ 	 * for boards that do not route the INT pin, or only permit it
+-	 * to be used as an input
++	 * to be used as an input.
++	 *
++	 * With no int_gpio at all, address mode 0 can never be forced: whatever
++	 * level the (host-invisible) INT net happens to be at during reset
++	 * decides 0x5D vs the alternate address, and alt-addr probing below is
++	 * the only way this driver can still find the device.
+ 	 */
+-	r = gpio_pin_configure_dt(&config->int_gpio, GPIO_OUTPUT_INACTIVE);
+-	if (r < 0) {
+-		LOG_ERR("Could not configure int GPIO pin");
+-		return r;
++	if (config->int_gpio.port != NULL) {
++		r = gpio_pin_configure_dt(&config->int_gpio, GPIO_OUTPUT_INACTIVE);
++		if (r < 0) {
++			LOG_ERR("Could not configure int GPIO pin");
++			return r;
++		}
+ 	}
+ 	/* Delay at least 10 ms after power on before we configure gt911 */
+ 	k_sleep(K_MSEC(20));
+@@ -342,10 +370,12 @@
+ 	/* hold down 50ms to make sure the address available */
+ 	k_sleep(K_MSEC(50));
+
+-	r = gpio_pin_configure_dt(&config->int_gpio, GPIO_INPUT);
+-	if (r < 0) {
+-		LOG_ERR("Could not configure interrupt GPIO pin");
+-		return r;
++	if (config->int_gpio.port != NULL) {
++		r = gpio_pin_configure_dt(&config->int_gpio, GPIO_INPUT);
++		if (r < 0) {
++			LOG_ERR("Could not configure interrupt GPIO pin");
++			return r;
++		}
+ 	}
+
+ #ifdef CONFIG_INPUT_GT911_INTERRUPT
+@@ -470,7 +500,7 @@
+ 		.common = INPUT_TOUCH_DT_INST_COMMON_CONFIG_INIT(index),		           \
+ 		.bus = I2C_DT_SPEC_INST_GET(index),                                                \
+ 		.rst_gpio = GPIO_DT_SPEC_INST_GET_OR(index, reset_gpios, {0}),                     \
+-		.int_gpio = GPIO_DT_SPEC_INST_GET(index, irq_gpios),                               \
++		.int_gpio = GPIO_DT_SPEC_INST_GET_OR(index, irq_gpios, {0}),                       \
+ 		.alt_addr = DT_INST_PROP_OR(index, alt_addr, 0),                                   \
+ 	};                                                                                         \
+ 	GT911_PM_NOTIFIER_FUNCS(index)                                                             \
