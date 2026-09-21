@@ -368,11 +368,42 @@ static void scan_i2c1_touch(const struct device *exp)
 {
 	const struct device *bus   = DEVICE_DT_GET(DT_NODELABEL(i2c1));
 	uint16_t             hit   = 0;
-	int                  rrc   = gpio_pin_configure(exp, CTP_RST_EXP_PIN, GPIO_OUTPUT_HIGH);
 	uint8_t              id[4] = { 0 };
+	int                  lo_rc, hi_rc, lvl_lo, lvl_hi;
 
-	printk(
-	    "ctp-rst : expander P3 released high (rc%d), settling %u ms\n", rrc, CTP_RESET_SETTLE_MS);
+	/*
+	 * This used to be a single gpio_pin_configure(..., GPIO_OUTPUT_HIGH) and
+	 * a print claiming the reset was "released".  It was not a reset at all:
+	 * the expander's output register already reads bit 3 high at POR
+	 * (`lcd-exp regs[por]: out=fd`), so configuring P3 as an output-high
+	 * produces NO falling edge and the GT911 is never reset.  Every run of
+	 * this bring-up has reported `touch : NO ANSWER` off the back of that,
+	 * and it was being read as evidence about the panel-side flex.
+	 *
+	 * Drive a real low->high pulse instead, and read the expander's INPUT
+	 * register at both ends so the log shows the pin actually moved rather
+	 * than only that the write returned 0.
+	 *
+	 * KNOWN LIMIT, and it may make this scan inconclusive either way: the
+	 * GT911 latches its I2C address during reset release from the INT pin --
+	 * INT low selects 0x5D, INT high selects 0x14, which is exactly the pair
+	 * scanned below.  CTP_INT_L is J6 pin 29 and the shield routes it to
+	 * CC3501E GPIO_15, NOT an Alif pad, so this app cannot drive it.  With
+	 * INT undriven the latched address is indeterminate, so a silent bus
+	 * after this pulse still does not prove the part is absent.
+	 */
+	lo_rc  = gpio_pin_configure(exp, CTP_RST_EXP_PIN, GPIO_OUTPUT_LOW);
+	lvl_lo = gpio_pin_get(exp, CTP_RST_EXP_PIN);
+	printk("ctp-rst : P3 driven LOW rc=%d readback=%d, holding 20 ms\n", lo_rc, lvl_lo);
+	k_msleep(20);
+
+	hi_rc  = gpio_pin_set(exp, CTP_RST_EXP_PIN, 1);
+	lvl_hi = gpio_pin_get(exp, CTP_RST_EXP_PIN);
+	printk("ctp-rst : P3 released HIGH rc=%d readback=%d, settling %u ms "
+	       "(INT undriven -- GT911 address latch is indeterminate)\n",
+	       hi_rc,
+	       lvl_hi,
+	       CTP_RESET_SETTLE_MS);
 	k_msleep(CTP_RESET_SETTLE_MS);
 
 	if (!device_is_ready(bus)) {
