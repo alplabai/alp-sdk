@@ -164,6 +164,15 @@ Internally:
 
 ## Roadmap (v0.4 cycle)
 
+> **Historical.** The amendments below redirected several of these rows;
+> they are kept verbatim for the audit trail. Rows never delivered as
+> written: `src/zephyr/ota_mcuboot.c` (MCUboot ships as sysbuild config
+> instead), `src/yocto/ota_rauc.cpp` (Amendment 1 chose Mender —
+> `meta-alp-sdk/conf/distro/include/mender.inc`), the
+> `vendors/<vendor>/tools/sign.py` wrappers, `docs/secure-boot-provisioning.md`
+> (provisioning docs live at `docs/provisioning.md` / `docs/aen-provisioning.md`),
+> and `examples/iot-ota-aen/`.
+
 | Deliverable                                | Where it lands                                         |
 |--------------------------------------------|--------------------------------------------------------|
 | ADR 0006 (this)                            | `docs/adr/0006-secure-boot-secure-ota.md` -- ✅ landed |

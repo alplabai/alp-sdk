@@ -33,7 +33,8 @@ wire change, no ABI change.
 time spent inside each attempt, so `timeout_ms` was a floor on wall time rather
 than a bound. Fixing that needed a portable monotonic millisecond clock, and
 `chips/cc3501e/*.c` is deliberately OS-agnostic (no Zephyr/vendor headers) so it
-had none available -- see the new `alp_uptime_ms()` entry below.
+had none available -- see the `alp_uptime_ms()` entry under [Unreleased]
+(pending in `changelog.d/1953.md` at the time of this fix's release).
 
 ### Changed — CC3501E wire protocol 7 to 8: request identity for every worker-routed opcode
 

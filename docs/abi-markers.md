@@ -112,6 +112,34 @@ stability statement in the file's top doxygen block.  Defaults:
 Per-chip status lives in
 [`docs/test-plan.md`](test-plan.md)'s per-row "Status" column.
 
+### Subdirectory + extension headers (`include/alp/{blocks,boards,protocol,ext}/*.h`)
+
+Headers below the top level are contract surfaces too, but they are
+classified in their file-level marker rather than the top-level table
+above (which covers `include/alp/*.h` only).  Current classification:
+
+| Header                                  | Marker               | Notes                                                              |
+|-----------------------------------------|----------------------|--------------------------------------------------------------------|
+| `boards/alp_e1m_evk_routes.h`           | `[ABI-STABLE]`       | Generated E1M-EVK board routes (`EVK_*` macros).                    |
+| `boards/alp_e1m_x_evk_routes.h`         | `[ABI-STABLE]`       | Generated E1M-X-EVK board routes (`XEVK_*` macros).                 |
+| `boards/alp_e1m_x_evk.h`                | `[ABI-EXPERIMENTAL]` | E1M-X-EVK convenience include; the macros live in the routes header. |
+| `ext/alif/{adc,camera}.h`               | `[ABI-EXPERIMENTAL]` | Vendor escape hatch (`<alp/ext/...>`); promote per the rules below. |
+| `ext/alif/storage.h`                    | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/cc3501e/console.h`                 | `[ABI-EXPERIMENTAL]` | See the table above for its rationale row.                          |
+| `ext/deepx/inference.h`                 | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/nxp/storage.h`                     | `[ABI-EXPERIMENTAL]` | Vendor escape hatch.                                                |
+| `ext/renesas/{camera,inference,power}.h`| `[ABI-EXPERIMENTAL]` | Vendor escape hatches.                                              |
+
+Headers that declare **no ABI symbols of their own** carry no
+`@par ABI status:` tag, matching the `board.h`/`console.h` facade
+convention above: `boards/alp_e1m_evk.h` (facade include of the
+generated routes), `protocol/crc16.h` (constants/helpers), and
+`blocks/button_led.h` + `blocks/pdm_mic.h` + `protocol/cc3501e.h`
+(the latter is the canonical wire-contract type header cited by
+`chips/cc3501e/`; it declares shared frame types, not dispatch
+symbols, and its stability statement lives in the file's top
+doxygen block like the chip drivers).
+
 ### Internal headers (`include/alp/internal/*.h`, `src/**/*.h`)
 
 Not part of the public ABI.  No marker required.  Renames /

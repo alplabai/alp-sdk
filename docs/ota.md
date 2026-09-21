@@ -173,10 +173,11 @@ Alif Ensemble main SoC through the inter-chip SPI1 bus, not
 the CC3501E's own flash.  The CC3501E firmware is **not** updated
 via the same OTA path -- it has its own upgrade flow (Alp-internal
 release tooling in `alp-sdk-internal` produces the version-pinned
-blob under `cc3501e-bridge-firmware:prebuilt/`; the firmware source is
-embedded in alp-sdk at
-[`cc3501e-bridge-firmware:`](https://github.com/alplabai/cc3501e-bridge-firmware) per
-[ADR 0015](adr/0015-cc3501e-firmware-embedded.md)).
+blob published at
+[`cc3501e-bridge-firmware:prebuilt/`](https://github.com/alplabai/cc3501e-bridge-firmware) per
+[ADR 0031](adr/0031-bridge-firmware-lives-in-its-own-repositories.md),
+which supersedes ADR 0015's in-tree embedding; AEN modules ship
+factory-flashed with the latest CC3501E firmware).
 Decoupling the two firmwares means a failed CC3501E update can't
 brick the Alif side and vice versa.
 

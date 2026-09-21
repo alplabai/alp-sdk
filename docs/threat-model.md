@@ -221,6 +221,14 @@ defend (e.g. `<alp/e1m_pinout.h>` is just constants) marked n/a.
 | `<alp/camera.h>` | DMA-buffer overflow if frame_size mis-declared | Backend reconciles frame_size against silicon-reported width × height × bpp |
 | `<alp/audio.h>` | DMA-buffer overflow on misbehaving DMIC | Backend enforces `frames_per_block` × `channels` × `sizeof(int16_t)` against allocator |
 | `<alp/update_log.h>` | Tamper of historical update records | Hash-chain + monotonic-counter (SW tier, tamper-evident); TF-M secure owner with PSA Protected Storage + protected high-watermark counter (HW_ENFORCED tier) |
+| `<alp/model.h>` (`.alpmodel` read-side parser) | **Untrusted model package** — header + CBOR manifest parsed from file/storage, the exact class §3's supply-chain row covers | Decode is bounded: fixed-shape header, CBOR manifest decoded with length checks against the package envelope, allocation sized from checked fields; model *bytes* are never executed by the SDK — they feed the inference backend, and firmware-image integrity (MCUboot signature) still covers what actually runs.  Model authenticity (who signed the `.alpmodel`) is application-owned today |
+| `<alp/jpeg.h>` (encode-only) | Mis-declared surface descriptor (dimensions / stride / format) driving an OOB write in the encoder | Backend reconciles the request against `pixfmt_mask` and buffer reachability (DMA-reachable check on the HW backend rejects ITCM/DTCM buffers); encode-only — no untrusted JPEG *decode* path exists in the SDK |
+| `<alp/i3c.h>` | Bus-side attacker on the shared I3C bus (dynamic-address assignment, IBI spam) | Same posture as the `<alp/peripheral.h>` bus rows: handle validated per call, config validated at `_open`; backends without I3C support fail open with `ALP_ERR_NOSUPPORT` |
+| `<alp/temperature.h>` | n/a — read-only millidegrees getter from the on-module sensor | — |
+| `<alp/usb.h>` | USB host/device peer (attacker-plugged peripheral / host) | Thin abstraction over the vendor xHCI / device stacks; enumeration policy and class-driver parsing stay in the (vendor) stack below the SDK — no SDK-side parse surface |
+| `<alp/display.h>` / `<alp/gui.h>` | Application-side surface/framebuffer descriptor injection | Panel geometry validated against the board's display config; LVGL re-export adds no parse surface of its own |
+| `<alp/ahrs.h>` / `<alp/pid.h>` / `<alp/tmu.h>` | Application-side numeric input (NaN/Inf propagation, out-of-range gains) | Pure computation on caller-owned state; TMU offload validates descriptor handles at `_open` and falls back to libm — no untrusted-network-driven path |
+| `<alp/cap.h>` / `<alp/cap_instance.h>` / `<alp/backend.h>` / `<alp/soc_caps.h>` / `<alp/e1m_x_pinout.h>` | n/a — capability flags, registration enums, generated constants; no parse surface | — |
 
 ## 5. Out-of-scope (explicit non-goals)
 
