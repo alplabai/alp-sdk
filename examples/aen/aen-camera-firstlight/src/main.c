@@ -50,9 +50,10 @@
 
 #if defined(CONFIG_VIDEO_OV9281)
 /* InnoMaker CAM-OV9281: global-shutter mono, RAW8 mono only (GREY8 in the
- * portable enum).  640x400 is one of exactly two modes the ported driver
- * offers (zephyr/drivers/video/ov9281.c) -- no crop, this IS the sensor's
- * native small mode. */
+ * portable enum).  640x400 is one of three modes the ported driver offers
+ * (zephyr/drivers/video/ov9281.c: 640x400@100 bench-verified, 1280x720@50
+ * and 1280x800@100 bench-pending) -- no crop, this IS the sensor's native
+ * small mode. */
 #define CAM_FORMAT          ALP_PIXFMT_GREY8
 #define CAM_WIDTH           640
 #define CAM_HEIGHT          400

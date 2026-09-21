@@ -1,5 +1,22 @@
 # Raspberry-Pi-style CSI-2 camera shields
 
+## Supported camera modules
+
+| Module | Sensor | Shield | Interface / lanes | Modes | Status |
+|---|---|---|---|---|---|
+| InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | 640x400 configured and **bench-verified** on E1M-AEN803 (E1M-EVK J5), 2026-09-21. 1280x720 and 1280x800 are bench-pending until the next bench pass. |
+| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P | Build-only / not run on hardware. |
+| RPi Camera Module 2 | IMX219 | `raspberry_pi_camera_module_2` (upstream) | MIPI CSI-2 D-PHY, 2 lanes | 640x480 RAW10 (this repo's first-light example) | Build-only / not run on hardware. |
+| RPi Global Shutter Camera | IMX296LQR-C (1.58 Mpx colour global-shutter) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, 1 lane | 1456x1088 SRGGB10P (all-pixel scan) | Build-only / not run on hardware. |
+
+The E1M-AEN SoM's current camera-connector revision needs a P/N-crossing
+adapter regardless of which module is used: on the differential MIPI pairs,
+the second pin of each pair is swapped with the third pin of the next pair
+in sequence (camera-connector pins 2↔3, 5↔6, 8↔9); every other pin —
+grounds, power, control — stays straight. See the OV9281 driver section
+below and [`docs/boards/e1m-evk.md`](boards/e1m-evk.md)'s Camera section for
+the full adapter note.
+
 Three board-agnostic Zephyr shields under `zephyr/boards/shields/` carry
 Raspberry-Pi-style 15-pin MIPI CSI-2 camera modules. None of the shields
 knows about any specific carrier or SoM — each just wires its sensor's
@@ -70,10 +87,14 @@ straight) fixes it -- match lane lengths given the 800 Mbit/s/lane rate.
 This is what the OV9281 bench pass above used; expect the same fix to be
 needed for any other MIPI camera on this SoM revision.
 
-Modes: only the two Espressif ships -- `GREY` (RAW8 mono) 1280x720 @ 50 fps
-and 640x400 @ 100 fps, MIPI CSI-2 D-PHY, 2 data lanes, 24 MHz XVCLK (no
-RAW10 or 1280x800 mode is invented). Controls: exposure, analogue gain
-(112-step discrete LUT), test pattern, pixel rate, link frequency.
+Modes: three, all `GREY` (RAW8 mono), MIPI CSI-2 D-PHY, 2 data lanes,
+24 MHz XVCLK. Two are Espressif's: 1280x720 @ 50 fps and 640x400 @ 100 fps
+(the latter bench-verified above). The third, 1280x800 @ ~100 fps (the
+sensor's full array), is Alp-authored -- derived from the 1280x720 table,
+BENCH-PENDING; see the file header and the derivation comment on
+`ov9281_mode_1280x800_100fps_regs` for exactly what changed and why. No
+RAW10 mode is invented. Controls: exposure, analogue gain (112-step
+discrete LUT), test pattern, pixel rate, link frequency.
 
 This is the *streaming* OV9281 driver. A separate portable chip-ID stub,
 `chips/ov9281/ov9281.c` (`metadata/chips/ov9281.yaml`, `driver_status: stub`,
