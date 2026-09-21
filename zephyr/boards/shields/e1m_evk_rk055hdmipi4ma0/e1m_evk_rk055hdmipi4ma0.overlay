@@ -185,7 +185,7 @@
 		 * floating RESX during the VCC ramp is the failure this prevents -- the
 		 * HX8394 samples an undefined reset level as it powers, which is the
 		 * ranked cause of the intermittent whole-panel DCS silence per cold
-		 * cycle seen on e1m-aen-evk-01 (#2199).
+		 * cycle seen on E1M-AEN803 2026W36-0009 (#2199).
 		 *
 		 * GPIO_ACTIVE_HIGH + output-low => gpio_pin_configure(GPIO_OUTPUT_INACTIVE)
 		 * => the expander pin is driven physically low, i.e. RESX asserted.

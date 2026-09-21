@@ -22,7 +22,7 @@ in command mode, where there is no video LP window to fit inside, so raising it
 past the video-derived value costs nothing there.
 
 This is a correctness fix, **not** a fix for the "reads of more than one byte
-never answer" behaviour on `e1m-aen-evk-01`, and it should not be cited as one.
+never answer" behaviour on `E1M-AEN803 2026W36-0009`, and it should not be cited as one.
 The bench says so directly: with the floor in place `rdtime` went from `0x24f`
 (591) to `0x00000a00` (2560) as intended, and `RDDID` (3 bytes), `RDDST` (4) and
 `RDDDB` (5) still returned `rc=-5` while 1- and 2-byte reads kept working and

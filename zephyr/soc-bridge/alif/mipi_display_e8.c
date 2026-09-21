@@ -12,7 +12,7 @@
  * driver is configured (zephyr/CMakeLists.txt), and each hook is gated on its
  * DT node.  See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  *
- * BENCH: 2026-09-18, e1m-aen-evk-01 (E1M-AEN803), aen-dsi-display Flow C
+ * BENCH: 2026-09-18, E1M-AEN803 2026W36-0009, aen-dsi-display Flow C
  * RAM-run.  Register readback after boot: CGU CLK_ENA 0x1a602014 =
  * 0xfeb3fff1 (bits 21 and 23 set), VBAT PWR_CTRL 0x1a609008 = 0x03030000
  * (bits 0/1/4/5/8/9/12 clear), CDC200_PIXCLK_CTRL 0x4903F004 = 0x00070001

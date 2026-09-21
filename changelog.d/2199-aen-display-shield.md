@@ -87,7 +87,7 @@ at `0x73` belongs to the GPIO driver, so its phase 4 checks for the shield's
 `lcd_exp` node and skips its raw register writes (`SKIPPED`), and its phase 12
 reports the display it can now open.
 
-Build-verified on E1M-AEN801 and E1M-AEN803. On the bench (e1m-aen-evk-01,
+Build-verified on E1M-AEN801 and E1M-AEN803. On the bench (E1M-AEN803 2026W36-0009,
 E1M-AEN803, 2026-09-18) the RAM-run read back the expected registers --
 `0x4903F004 = 0x00070001`, CDC L1 framebuffer `0x49031134 = 0x02200000`,
 backlight level 1, DSI `INT_ST1 = 0x00000000` over 100 ms of scanout; pixels on

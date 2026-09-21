@@ -782,7 +782,7 @@ int dsi_dw_dpi_config(const struct device *dev,
  * lane leave HS -- the D-PHY needs time to complete the HS->LP transition.
  * Issue an LP transaction before that completes and the BTA for a DCS read
  * never gets a turnaround: DSI_INT_ST0 reads back 0x00000000, no error report,
- * nothing.  Measured on e1m-aen-evk-01: reads succeed before video mode with
+ * nothing.  Measured on E1M-AEN803 2026W36-0009: reads succeed before video mode with
  * DSI_INT_ST0 = 0x00100000, and fail with -EIO and DSI_INT_ST0 = 0x00000000 on
  * every attempt after video mode, including in command mode.
  *
@@ -1179,7 +1179,7 @@ static int dsi_dw_attach_locked(const struct device *dev,
 	 * (drivers/display/display_hx8394.c) and only then pulses RESX, so a
 	 * power-up here releases the panel's reset with the host already powered
 	 * and driving the link, violating LP-11.
-	 * What that actually looks like on e1m-aen-evk-01, measured, because the
+	 * What that actually looks like on E1M-AEN803 2026W36-0009, measured, because the
 	 * obvious guess is wrong and cost this bring-up a lot of time: the link
 	 * stays perfectly healthy.  DCS reads answer (RDDID = 83 94 0f, RDDST =
 	 * 81 73 06 00), short writes take effect, generic long writes of every

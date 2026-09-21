@@ -224,7 +224,7 @@ CMDS=(
 	# psplim_s, and Zephyr switches to the main thread on psp -- so if the new
 	# image's thread stack sits below the stale limit, the core takes a
 	# HardFault before it reaches main(), at a depth that varies with how the
-	# two images' stacks happen to line up. Measured on e1m-aen-evk-01
+	# two images' stacks happen to line up. Measured on E1M-AEN803 2026W36-0009
 	# 2026-09-20: two byte-identical warm loads faulted at DIFFERENT depths
 	# (one before PRE_KERNEL_1 console init, one deep in POST_KERNEL), with
 	# psplim_s = 0x20005300 left over and psp = 0x2000527c -- below its own
@@ -238,7 +238,7 @@ CMDS=(
 	# still ACTIVE. load_image + `reg pc` + `resume` do not clear that: the
 	# fresh image resumes with IPSR = 3 and goes straight back into the fatal
 	# spin, printing nothing, so the RAM console reads as an all-zero buffer
-	# and the board looks dead. Measured on e1m-aen-evk-01 2026-09-20: the
+	# and the board looks dead. Measured on E1M-AEN803 2026W36-0009 2026-09-20: the
 	# PRE-load halt already showed "current mode: Handler HardFault" with
 	# SHCSR (0xE000ED24) = 0x00070004 (bit 2 HARDFAULTACT), while CFSR, HFSR,
 	# DFSR, MMFAR and BFAR all read 0x00000000 -- i.e. no new fault, purely
@@ -250,7 +250,7 @@ CMDS=(
 	# These two cover the ordinary case. They do NOT rescue a core whose
 	# previous app died in a fault: an ACTIVE exception is architecturally
 	# sticky, and the only exits are an exception return or a real reset.
-	# Measured on e1m-aen-evk-01 2026-09-20, on a halted core with the fault
+	# Measured on E1M-AEN803 2026W36-0009 2026-09-20, on a halted core with the fault
 	# active: `mww 0xE000ED24 0x00000000` cleared SHCSR bits 16-18
 	# (MEM/BUS/USGFAULTENA) but bit 2 HARDFAULTACT read back SET, and after
 	# `resume` the core reported IPSR = 3 again. `reg xPSR` only updates

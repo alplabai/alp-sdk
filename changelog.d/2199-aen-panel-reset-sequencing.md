@@ -10,7 +10,7 @@ it at `CONFIG_APPLICATION_INIT_PRIORITY` (90) — while
 `CONFIG_REGULATOR_FIXED_INIT_PRIORITY` (75) turned the panel supply on in
 between. The panel therefore saw its supply ramp against an undefined reset
 level, which is the ranked cause of the intermittent whole-panel DCS silence per
-cold cycle on `e1m-aen-evk-01`: two cold cycles of the same ELF gave all 11 DCS
+cold cycle on `E1M-AEN803 2026W36-0009`: two cold cycles of the same ELF gave all 11 DCS
 reads `rc=-5` in one and eight of 11 answering in the other.
 
 The shield now hogs that pin low as soon as the expander exists:

@@ -14,8 +14,8 @@ Both bind `gpio_pca_series.c` under `CONFIG_GPIO_PCA_SERIES=y`, but
 base registers that #1974 read back at POR. The P0/P1 assignments (panel power
 enable / HX8394 reset) are unchanged.
 
-The example also stops pulsing Alif `P10_2` as an "expander reset". That pad came
-from mixing up SoC ball N1 with E1M pad N1: the EVK's `IO_EXP_RST` is E1M pad N1 =
+The example also stops pulsing Alif `P10_2` as an "expander reset". That pin came
+from a naming mix-up: the EVK's `IO_EXP_RST` is E1M pad N1 =
 Alif `P3_6` (`metadata/pinmux/aen.yaml`), and pulsing even that line changed
 nothing on 2 of 2 boards. U35 answers at POR without any reset action, so the hook
 and its `&gpio10` enable are removed.

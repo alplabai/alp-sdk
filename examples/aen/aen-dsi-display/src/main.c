@@ -77,7 +77,7 @@
  *
  * BENCH DIAGNOSTICS (not API usage, and not part of the PASS gate): every block
  * marked "BENCH DIAGNOSTIC" below exists to classify the two open defects on
- * e1m-aen-evk-01 (#2199) -- whole-panel DCS silence on some cold cycles, and
+ * E1M-AEN803 2026W36-0009 (#2199) -- whole-panel DCS silence on some cold cycles, and
  * rx_len > 1 reads never answering.  They read registers the drivers own, mask
  * the DSI IRQ around a transfer so the read-to-clear error latches survive,
  * snapshot the expander before the panel regulator runs, and scan the panel
