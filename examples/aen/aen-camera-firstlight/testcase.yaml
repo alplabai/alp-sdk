@@ -1,12 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build-only regressions for the RPi-style CSI-2 camera first-light bench
-# app, one scenario per camera shield stacked on e1m_evk_rpi_csi.  These are
-# compile proofs, not bench runs -- twister has no bench access, so the
-# PASS/FAIL/TIMEOUT verdict only means something on real hardware.  The
-# OV9281 scenario's real-silicon result is bench-verified separately
-# (2026-09-21, an E1M-AEN803 on the E1M-EVK); the other three shields have
-# not yet run on hardware.
+# Build-only regression for the RPi-style CSI-2 camera first-light bench
+# app, InnoMaker CAM-OV9281 stacked on e1m_evk_rpi_csi.  This is a compile
+# proof, not a bench run -- twister has no bench access, so the PASS/FAIL/
+# TIMEOUT verdict only means something on real hardware.  The real-silicon
+# result is bench-verified separately (2026-09-21, an E1M-AEN803 on the
+# E1M-EVK).
 #
 # Twister's extra_args SHIELD value carries BOTH shields as one
 # space-separated string (the carrier connector shield first, the camera
@@ -14,50 +13,17 @@
 # itself (`string(REPLACE " " ";" SHIELD_AS_LIST "${SHIELD}")`), same
 # syntax the west build command examples in README.md / docs/camera-
 # shields.md use directly on the command line.
-#
-# A new camera shield is one more scenario entry below plus one more #elif
-# in src/main.c's compile-time #if ladder.
 
 sample:
   name: aen-camera-firstlight
   description: |
-    First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera
-    modules on the E1M-EVK's J5 connector: open / start / capture-with-
-    timeout / release / stop / close through the portable <alp/camera.h>
-    API only, printing CRC32 + a histogram + sample row bytes on a
-    successful capture, or a diagnosed failure otherwise.
+    First-light bench proof for the InnoMaker CAM-OV9281 Raspberry-Pi-style
+    MIPI CSI-2 camera module on the E1M-EVK's J5 connector: open / start /
+    capture-with-timeout / release / stop / close through the portable
+    <alp/camera.h> API only, printing CRC32 + a histogram + sample row
+    bytes on a successful capture, or a diagnosed failure otherwise.
 
 tests:
-  alp_sdk.examples.aen.camera_firstlight.imx219:
-    platform_allow:
-      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
-    extra_args:
-      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
-    tags:
-      - alp-sdk
-      - example
-      - aen
-      - camera
-      - video
-      - csi
-    build_only: true # the CSI-2 -> CPI pipe is a bench flash, not a CI run.
-
-  alp_sdk.examples.aen.camera_firstlight.ov5647:
-    platform_allow:
-      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
-    extra_args:
-      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
-    tags:
-      - alp-sdk
-      - example
-      - aen
-      - camera
-      - video
-      - csi
-    build_only: true
-
   alp_sdk.examples.aen.camera_firstlight.ov9281:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
@@ -71,19 +37,4 @@ tests:
       - camera
       - video
       - csi
-    build_only: true
-
-  alp_sdk.examples.aen.camera_firstlight.imx296:
-    platform_allow:
-      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
-      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
-    extra_args:
-      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
-    tags:
-      - alp-sdk
-      - example
-      - aen
-      - camera
-      - video
-      - csi
-    build_only: true
+    build_only: true # the CSI-2 -> CPI pipe is a bench flash, not a CI run.
