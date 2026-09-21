@@ -1339,6 +1339,20 @@ int dsi_dw_write_payload(uintptr_t regs, uint8_t byte0, const uint8_t *tx,
 	 DSI_CMD_PKT_STATUS_GEN_BUFF_CMD_EMPTY |			\
 	 DSI_CMD_PKT_STATUS_GEN_BUFF_PLD_EMPTY)
 
+/*
+ * A command FIFO that never drains latches no interrupt, so the bare timeout
+ * says nothing about why.  DSI_PHY_STATUS read at the moment of the stall does:
+ * PHY_LOCK (bit 0) clear means the lane-byte clock domain lost its PLL,
+ * PHY_DIRECTION (bit 1) set means a lane is stuck in bus turnaround, and a
+ * clear STOPSTATE bit (2 clock lane, 4 lane 0, 7 lane 1) means the packet
+ * handler is waiting for a lane that never returned to LP-11 (#2199).
+ */
+static void dsi_dw_log_fifo_stall(uintptr_t regs, uint32_t pkt_status)
+{
+	LOG_ERR("Failed to write command FIFO (CMD_PKT_STATUS=0x%08x PHY_STATUS=0x%08x).",
+		pkt_status, sys_read32(regs + DSI_PHY_STATUS));
+}
+
 int dsi_dw_write_hdr(uintptr_t regs, uint32_t header)
 {
 	uint32_t mask = 0;
@@ -1357,8 +1371,9 @@ int dsi_dw_write_hdr(uintptr_t regs, uint32_t header)
 		k_usleep(1000);
 	} while (j-- > 0);
 
-	if ((mask & sys_read32(regs + DSI_CMD_PKT_STATUS)) != mask) {
-		LOG_ERR("Failed to write command FIFO.");
+	tmp = sys_read32(regs + DSI_CMD_PKT_STATUS);
+	if ((tmp & mask) != mask) {
+		dsi_dw_log_fifo_stall(regs, tmp);
 		return -ETIMEDOUT;
 	}
 
@@ -1385,8 +1400,10 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 		(mask & sys_read32(regs + DSI_CMD_PKT_STATUS)) != mask; j++)
 		k_usleep(1000);
 
-	if ((mask & sys_read32(regs + DSI_CMD_PKT_STATUS)) != mask) {
-		LOG_ERR("Failed to write command FIFO.");
+	uint32_t status = sys_read32(regs + DSI_CMD_PKT_STATUS);
+
+	if ((mask & status) != mask) {
+		dsi_dw_log_fifo_stall(regs, status);
 		return -ETIMEDOUT;
 	}
 
