@@ -145,9 +145,27 @@ void cdc200_irq_setup(const struct device *dev)
 	uint32_t linpos =
 		(panel_cfg->vsync_len + panel_cfg->vbp + panel_cfg->active_height) & 0xffff;
 
-	/* Enable just the Line IRQ. */
+	/*
+	 * ALP-SDK PORT FIX: arm the two ERROR interrupts as well, not just the
+	 * line IRQ.
+	 *
+	 * HWRM section 18.1.4 on the two that were masked: BUS_ERROR "Normally
+	 * implies that the CDC has performed a read access to an invalid bus
+	 * address ... Should only happen when an invalid address has been
+	 * programmed to the CDC by the driver/application"; FIFO_UNDERRUN
+	 * "Implies that the available bus bandwidth has not been sufficient and
+	 * visual artifacts have appeared on the screen".
+	 *
+	 * Those are exactly the two ways a CDC produces "scanout is running and
+	 * the glass shows nothing", and with them masked a faulting CDC reads
+	 * back identical to a healthy one.  A whole bring-up session was spent
+	 * treating "no errors reported" as evidence the CDC was fine; it was
+	 * not evidence of anything.  cdc200_isr() latches them into
+	 * data->err_irq_count so a bench run can read the count instead of
+	 * inferring from silence.
+	 */
 	sys_write32(linpos, regs + CDC_LINE_IRQ_POS);
-	cdc200_set_irq_mask(regs, CDC_IRQ_LINE);
+	cdc200_set_irq_mask(regs, CDC_IRQ_LINE | CDC_IRQ_BUS_ERROR0 | CDC_IRQ_FIFO_UNDERRUN);
 }
 
 void cdc200_global_timings_set(const struct device *dev)
@@ -821,6 +839,23 @@ static void cdc200_isr(const struct device *dev)
 			data->curr_fb[CDC_LAYER_2] = data->next_fb[CDC_LAYER_2];
 		}
 		cdc200_shadow_reload_control(regs);
+	}
+
+	/*
+	 * Count and clear the error IRQs armed in cdc200_irq_setup().  Counting
+	 * rather than logging: this fires from the line IRQ's own context at the
+	 * frame rate, and a LOG_ERR per underrun would flood the RAM console the
+	 * bench reads over SWD.  A non-zero count is the evidence; the specific
+	 * frame is not interesting.
+	 */
+	if (irq_st & CDC_IRQ_BUS_ERROR0) {
+		cdc200_set_irq_clear(regs, CDC_IRQ_BUS_ERROR0);
+		data->bus_err_count++;
+	}
+
+	if (irq_st & CDC_IRQ_FIFO_UNDERRUN) {
+		cdc200_set_irq_clear(regs, CDC_IRQ_FIFO_UNDERRUN);
+		data->fifo_underrun_count++;
 	}
 }
 

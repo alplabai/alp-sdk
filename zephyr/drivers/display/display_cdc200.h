@@ -403,6 +403,17 @@ struct cdc200_data {
 
 	uint8_t *curr_fb[CDC_LAYER_MAX];
 	uint8_t *next_fb[CDC_LAYER_MAX];
+
+	/*
+	 * ALP-SDK PORT FIX: error-IRQ counters.  CDC_IRQ_BUS_ERROR0 and
+	 * CDC_IRQ_FIFO_UNDERRUN used to be masked, so a CDC faulting on its
+	 * framebuffer fetch or starving its layer FIFO was indistinguishable
+	 * from a healthy one -- and those are the two ways the CDC produces
+	 * "scanout running, nothing on the glass".  cdc200_isr() counts them;
+	 * read them from a bench app rather than trusting silence.
+	 */
+	uint32_t bus_err_count;
+	uint32_t fifo_underrun_count;
 };
 
 /*

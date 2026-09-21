@@ -528,9 +528,30 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		return -ETIMEDOUT;
 	}
 
-	/* Wait for LP11 state to be driven. */
+	/*
+	 * Wait for LP11 state to be driven.
+	 *
+	 * ALP-SDK PORT FIX: the second line used to ASSIGN, not OR --
+	 *   tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	 * so a two-lane panel (this shield) waited on lane 1's stop state ALONE
+	 * and never checked data lane 0 (bit 4) or the clock lane (bit 2).  This
+	 * function could then return 0 with lane 0 and/or the clock lane not yet
+	 * in LP-11, and dsi_dw_attach_locked() would go on to program the DPI
+	 * registers and mark the host attached over a PHY in an invalid state.
+	 *
+	 * That matters beyond tidiness here: HX8394-F Fig 5.28 requires "MIPI
+	 * Data Lane and CLK Lane must set LP11 before HW reset go high", and the
+	 * panel's RESX is released just after this returns.  Checking one data
+	 * lane is not checking the condition the panel actually needs.
+	 *
+	 * The CSI twin in this same file already ORs correctly -- see the
+	 * CSI_PHY_STOPSTATE_PHY_STOPSTATEDATA_1 case -- so the master path was
+	 * the outlier.  Inherited verbatim from the zephyr_alif fork.
+	 */
 	tmp = DSI_PHY_STATUS_STOPSTATE0LANE | DSI_PHY_STATUS_STOPSTATECLKLANE;
-	tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	if (phy->num_lanes == 2) {
+		tmp |= DSI_PHY_STATUS_STOPSTATE1LANE;
+	}
 	for (int i = 0; (i < 1000000) && (sys_read32(dsi_regs + DSI_PHY_STATUS) & tmp) != tmp;
 	     i++) {
 		k_busy_wait(1);

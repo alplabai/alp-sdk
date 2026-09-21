@@ -79,6 +79,28 @@ void dsi_dw_pwr_up(uintptr_t regs)
 	sys_set_bits(regs + DSI_PWR_UP, DSI_PWR_UP_SHUTDOWNZ);
 }
 
+/*
+ * ALP-SDK PORT FIX: the deferred power-up.  dsi_dw_attach_locked() configures
+ * the host but deliberately leaves DSI_PWR_UP[SHUTDOWNZ] = 0, so the panel's
+ * RESX can rise while the D-PHY sits in LP-11 (see the comment at the end of
+ * attach).  The host is powered here instead, at the first operation that
+ * actually needs it -- a transfer or a mode switch, both of which run after the
+ * panel driver's reset pulse.  Idempotent through data->powered, which also
+ * keeps the flag true across the power-cycle bracket in
+ * dsi_dw_set_mode_locked(), so the flag never claims a reset host is running
+ * (or the reverse).
+ */
+static void dsi_dw_pwr_up_once(const struct device *dev)
+{
+	struct dsi_dw_data *data = dev->data;
+
+	if (data->powered)
+		return;
+
+	dsi_dw_pwr_up(DEVICE_MMIO_GET(dev));
+	data->powered = true;
+}
+
 void dsi_dw_wait_2_frames(uint32_t pixclk,
 		const struct mipi_dsi_timings *timings)
 {
@@ -811,14 +833,77 @@ int dsi_dw_video_mode_config(const struct device *dev)
 {
 	const struct dsi_dw_config *config = dev->config;
 	struct dsi_dw_data *data = dev->data;
+	const struct dphy_dsi_settings *phy = &data->phy;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t tmp;
 
-	/* Setup return to Low-Power capability. */
-	sys_set_bits(regs + DSI_VID_MODE_CFG,
-		DSI_VID_MODE_CFG_LP_HFP_EN | DSI_VID_MODE_CFG_LP_HBP_EN |
-		DSI_VID_MODE_CFG_LP_VACT_EN | DSI_VID_MODE_CFG_LP_VFP_EN |
-		DSI_VID_MODE_CFG_LP_VBP_EN | DSI_VID_MODE_CFG_LP_VSA_EN);
+	/*
+	 * Setup return to Low-Power capability.
+	 *
+	 * ALP-SDK PORT FIX: the two HORIZONTAL enables are gated on the blanking
+	 * actually being long enough for an HS->LP->HS round trip.  The fork and
+	 * Linux both set all six unconditionally and trust the controller to
+	 * skip an LP entry that does not fit; on this panel's timing it does not
+	 * fit by a wide margin, and video never decodes.
+	 *
+	 * Measured for the RK055HDMIPI4MA0 at 40 MHz / 2 lanes / 24bpp:
+	 *   DSI_VID_HLINE_TIME = 1153 lanebyteclks
+	 *   one video line on the wire = 4 hdr + 2160 payload + 2 CRC, plus an
+	 *     8-byte null packet, over 2 lanes = 1087 lanebyteclks
+	 *   => 66 lanebyteclks of horizontal blanking, split HSA 9 / HBP 36 /
+	 *      HFP ~21
+	 *   one turnaround = lane_hs2lp + lane_lp2hs = 24 + 54 = 78
+	 * i.e. a single round trip costs MORE than the entire horizontal
+	 * blanking, and HBP and HFP are each far under it on their own.  The
+	 * vertical enables keep whole lines of room and stay on.
+	 *
+	 * If you re-enable these, re-derive the arithmetic above for the new
+	 * timing first -- at the panel-native 62.346 MHz the numbers change.
+	 */
+	{
+		const uint32_t turnaround = (uint32_t)phy->lane_hs2lp +
+					    (uint32_t)phy->lane_lp2hs;
+		const uint32_t hsa   = sys_read32(regs + DSI_VID_HSA_TIME);
+		const uint32_t hbp   = sys_read32(regs + DSI_VID_HBP_TIME);
+		const uint32_t hline = sys_read32(regs + DSI_VID_HLINE_TIME);
+		uint32_t lp_bits = DSI_VID_MODE_CFG_LP_VACT_EN |
+				   DSI_VID_MODE_CFG_LP_VFP_EN |
+				   DSI_VID_MODE_CFG_LP_VBP_EN |
+				   DSI_VID_MODE_CFG_LP_VSA_EN;
+
+		if (hbp > turnaround) {
+			lp_bits |= DSI_VID_MODE_CFG_LP_HBP_EN;
+		}
+
+		/*
+		 * HFP is what is left of the line after sync, back porch AND the
+		 * active payload -- so the payload has to be subtracted too.  A
+		 * first cut of this tested (hline - hsa - hbp), which is payload
+		 * PLUS front porch: 1153 - 9 - 36 = 1108 against a turnaround of
+		 * 78, so the predicate passed, LP_HFP_EN stayed set, and the
+		 * bench run was void. The front porch alone is ~21.
+		 *
+		 * One line on the wire is the video packet (4-byte header +
+		 * pkt_size * bpp / 8 payload + 2-byte CRC) plus, when one is
+		 * configured, a null packet (4 + null_size + 2), spread over
+		 * num_lanes.
+		 */
+		const uint32_t line_bytes = 6U + (data->pkt_size * data->bpp) / 8U +
+					    (data->null_size ? (6U + data->null_size) : 0U);
+		const uint32_t payload = (phy->num_lanes != 0U) ?
+					 (line_bytes / phy->num_lanes) : line_bytes;
+		const uint32_t used = hsa + hbp + payload;
+		const uint32_t hfp = (hline > used) ? (hline - used) : 0U;
+
+		if (hfp > turnaround) {
+			lp_bits |= DSI_VID_MODE_CFG_LP_HFP_EN;
+		}
+
+		LOG_DBG("LP blanking: hsa=%u hbp=%u hfp=%u hline=%u payload=%u "
+			"turnaround=%u -> bits 0x%x",
+			hsa, hbp, hfp, hline, payload, turnaround, lp_bits);
+		sys_set_bits(regs + DSI_VID_MODE_CFG, lp_bits);
+	}
 
 	/* Setup request for Peripheral ACK at the end of frame. */
 	dsi_dw_dpi_frame_ack(regs, config->frame_ack_en);
@@ -881,6 +966,14 @@ static int dsi_dw_set_mode_locked(const struct device *dev,
 
 	if (mode == data->curr_mode)
 		return 0;
+
+	/*
+	 * ALP-SDK PORT FIX: a mode switch may be the first thing that runs after
+	 * attach, which leaves the host in reset (see dsi_dw_attach_locked()).
+	 * Power it up here so the bracket below is a real power-cycle and so
+	 * data->powered matches the state the bracket leaves behind (up).
+	 */
+	dsi_dw_pwr_up_once(dev);
 
 	dsi_dw_pwr_down(regs);
 	if (mode == DSI_DW_VIDEO_MODE) {
@@ -975,12 +1068,15 @@ static int dsi_dw_attach_locked(const struct device *dev,
 	}
 
 	phy->num_lanes = mdev->data_lanes;
+	/* Stash for the LP-blanking arithmetic in dsi_dw_video_mode_config(). */
+	data->bpp = (uint8_t)dsi_format_to_bpp(mdev->pixfmt);
 	data->mode_flags = mdev->mode_flags;
 
 	LOG_DBG("Number of lanes: %d", data->phy.num_lanes);
 	LOG_DBG("DSI mode_flags: 0x%x", data->mode_flags);
 
 	dsi_dw_pwr_down(regs);
+	data->powered = false;
 	ret = dw_calc_clocks(dev, mdev);
 	if (ret)
 		return ret;
@@ -1003,7 +1099,35 @@ static int dsi_dw_attach_locked(const struct device *dev,
 	/* DSI must wait for 2 frames time after setup. */
 	dsi_dw_wait_2_frames(data->dpi_pix_clk, &mdev->timings);
 	dsi_dw_intr_en(regs);
-	dsi_dw_pwr_up(regs);
+
+	/*
+	 * ALP-SDK PORT FIX: attach ends with the host still in RESET -- do NOT
+	 * "tidy" a dsi_dw_pwr_up() back in here.  HX8394-F datasheet Fig 5.28:
+	 * "MIPI Data Lane and CLK Lane must set LP11 before HW reset go high"
+	 * (Fig 5.30 words it "MIPI Data/CLK lane should be LP-11 state before
+	 * RESX rising edge").  Alif's DFP satisfies it by leaving the host
+	 * unpowered across the panel reset: Driver_MIPI_DSI.c:182 runs
+	 * DSI_DPHY_Initialize() to completion (PHY_LOCK + lane stop-state polls,
+	 * i.e. lanes driving LP-11), :188 calls display_panel->ops->Init(), which
+	 * releases RESX, and DSI_PWR_UP[SHUTDOWNZ] is first written only later, in
+	 * DSI_StartCommandMode() (Driver_CDC200.c:382 -> Driver_MIPI_DSI.c:445
+	 * dsi_power_up_disable(), :475 dsi_power_up_enable()).
+	 * Zephyr inverts that order: hx8394_init() calls mipi_dsi_attach() FIRST
+	 * (drivers/display/display_hx8394.c) and only then pulses RESX, so a
+	 * power-up here releases the panel's reset with the host already powered
+	 * and driving the link, violating LP-11.
+	 * What that actually looks like on e1m-aen-evk-01, measured, because the
+	 * obvious guess is wrong and cost this bring-up a lot of time: the link
+	 * stays perfectly healthy.  DCS reads answer (RDDID = 83 94 0f, RDDST =
+	 * 81 73 06 00), short writes take effect, generic long writes of every
+	 * size land and drain, the panel reports Sleep-Out + Display-On + 24bpp,
+	 * scanout runs with INT_ST0/INT_ST1 both 0x00000000 -- and the glass
+	 * never shows content.  Do NOT look for a dead link or a dark panel as
+	 * the signature of this bug.
+	 * dsi_dw_pwr_up_once() powers the host at the first transfer or mode
+	 * switch instead; both run after the reset pulse, and a panel with no
+	 * reset-gpio is covered because its first transfer still triggers it.
+	 */
 	data->attached = true;
 	return 0;
 }
@@ -1070,35 +1194,87 @@ int dsi_dw_read_payload(uintptr_t regs, uint8_t *rx, ssize_t len)
 	return 0;
 }
 
+/* Poll until the payload write FIFO has room, as Linux's dw-mipi-dsi does. */
+static int dsi_dw_wait_pld_space(uintptr_t regs)
+{
+	for (int j = 0; j < DSI_DW_PLD_SPACE_POLLS; j++) {
+		if (!(sys_read32(regs + DSI_CMD_PKT_STATUS) &
+		      DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL)) {
+			return 0;
+		}
+		k_usleep(1);
+	}
+
+	return -EMSGSIZE;
+}
+
 int dsi_dw_write_payload(uintptr_t regs, uint8_t byte0, const uint8_t *tx,
 		ssize_t len)
 {
-	uint8_t tmp = (len < 3) ? len : 3;
-	uint32_t payload_word = 0;
-	int i;
+	uint32_t payload_word;
+	ssize_t i;
+	int ret;
+	int n;
 
-	payload_word = byte0 << DSI_GEN_PLD_DATA_B1_SHIFT;
-	for (i = 0; i < tmp; i++) {
-		payload_word |= tx[i] << (8 * (i + 1));
+	/*
+	 * Wait for FIFO space BEFORE each write.  The old code wrote first and
+	 * read GEN_PLD_W_FULL afterwards, which is too late to save the word,
+	 * and then returned -EMSGSIZE from the middle of a payload -- leaving
+	 * words in the FIFO with no header to consume them.  That residue is
+	 * invisible to GEN_PLD_W_EMPTY below four words (see
+	 * DSI_DW_GEN_PATH_DRAINED) and the next packet's payload is appended
+	 * to it, misaligning every long write that follows.
+	 *
+	 * The casts to uint32_t are load-bearing: tx[i] is a uint8_t promoted
+	 * to int, so `tx[i] << 24` overflows a signed int for any byte >= 0x80
+	 * and is undefined behaviour.  SETEXTC's own payload (B9h FF 83 94)
+	 * hits it.
+	 */
+	payload_word = (uint32_t)byte0 << DSI_GEN_PLD_DATA_B1_SHIFT;
+	for (i = 0; (i < len) && (i < 3); i++) {
+		payload_word |= (uint32_t)tx[i] << (8 * (i + 1));
+	}
+
+	ret = dsi_dw_wait_pld_space(regs);
+	if (ret) {
+		return ret;
 	}
 	sys_write32(payload_word, regs + DSI_GEN_PLD_DATA);
 
 	while (i < len) {
 		payload_word = 0;
-		for (tmp = 0; (tmp < 4) && (i < len); i++, tmp++) {
-			payload_word |= tx[i] << (8 * tmp);
+		for (n = 0; (n < 4) && (i < len); i++, n++) {
+			payload_word |= (uint32_t)tx[i] << (8 * n);
+		}
+
+		ret = dsi_dw_wait_pld_space(regs);
+		if (ret) {
+			return ret;
 		}
 		sys_write32(payload_word, regs + DSI_GEN_PLD_DATA);
-
-		k_busy_wait(1000);
-		if (sys_read32(regs + DSI_CMD_PKT_STATUS) &
-				DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL) {
-			/* Generic Payload FIFO overflow occurred. */
-			return -EMSGSIZE;
-		}
 	}
+
 	return 0;
 }
+
+/*
+ * Every stage of the generic path drained -- the packet has actually left.
+ *
+ * GEN_PLD_W_EMPTY alone is not enough, and on this silicon it is actively
+ * misleading: measured on the E8, one word written to GEN_PLD_DATA clears
+ * GEN_BUFF_PLD_EMPTY (bit 18) while GEN_PLD_W_EMPTY (bit 2) still reads 1,
+ * and bit 2 only clears once four words are pending.  A long write with a
+ * one-word payload -- SETEXTC (B9h FF 83 94) is exactly that -- therefore
+ * satisfied the old wait on its first poll, so the write reported success
+ * without anything having been observed to go out.  A payload left behind
+ * that way is invisible to bit 2 and the next packet's payload is appended
+ * to it, which misaligns every long write that follows.
+ */
+#define DSI_DW_GEN_PATH_DRAINED						\
+	(DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY |				\
+	 DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY |				\
+	 DSI_CMD_PKT_STATUS_GEN_BUFF_CMD_EMPTY |			\
+	 DSI_CMD_PKT_STATUS_GEN_BUFF_PLD_EMPTY)
 
 int dsi_dw_write_hdr(uintptr_t regs, uint32_t header)
 {
@@ -1109,8 +1285,7 @@ int dsi_dw_write_hdr(uintptr_t regs, uint32_t header)
 	sys_write32(header, regs + DSI_GEN_HDR);
 
 	j = 100;
-	mask = DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY |
-		DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY;
+	mask = DSI_DW_GEN_PATH_DRAINED;
 	do {
 		tmp = sys_read32(regs + DSI_CMD_PKT_STATUS);
 		if ((tmp & mask) == mask)
@@ -1142,8 +1317,7 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 			(value >> 8) & 0xff),
 		regs + DSI_GEN_HDR);
 
-	mask = DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY |
-		DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY;
+	mask = DSI_DW_GEN_PATH_DRAINED;
 	for (int j = 0; (j < 100) &&
 		(mask & sys_read32(regs + DSI_CMD_PKT_STATUS)) != mask; j++)
 		k_usleep(1000);
@@ -1175,6 +1349,15 @@ static ssize_t dsi_dw_transfer_locked(const struct device *dev,
 		mode_flags |= MIPI_DSI_MODE_LPM;
 	dsi_dw_setup_lp_cmd(dev, mode_flags);
 	dsi_dw_msg_config(regs, mode_flags);
+
+	/*
+	 * ALP-SDK PORT FIX: attach leaves the host in reset so the panel's RESX
+	 * rises with the lanes in LP-11 (see dsi_dw_attach_locked()), so power it
+	 * up here -- before any DSI_CMD_PKT_STATUS poll, DSI_GEN_HDR or
+	 * DSI_GEN_PLD_DATA access.  The two config writes above are the
+	 * DesignWare-recommended order anyway: program, then power up.
+	 */
+	dsi_dw_pwr_up_once(dev);
 
 	/* Wait till the Command FIFO has empty space or time-out. */
 	mask = DSI_CMD_PKT_STATUS_GEN_CMD_FULL;

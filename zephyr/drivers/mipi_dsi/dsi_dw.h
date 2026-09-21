@@ -399,6 +399,9 @@
  */
 #define  DSI_DW_RD_RESPONSE_BITS		640U
 
+/* Polls of GEN_PLD_W_FULL, 1 us apart, before giving up on payload FIFO space. */
+#define  DSI_DW_PLD_SPACE_POLLS		1000U
+
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK	GENMASK(14, 0)
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_SHIFT	0
 
@@ -526,6 +529,13 @@ struct dsi_dw_data {
 	/* ALP-SDK PORT FIX: set only by a successful dsi_dw_attach(). */
 	bool attached;
 	/*
+	 * ALP-SDK PORT FIX: tracks DSI_PWR_UP[SHUTDOWNZ], which attach
+	 * deliberately leaves at 0 (see dsi_dw_attach_locked()); the first
+	 * transfer or mode switch powers the host up via dsi_dw_pwr_up_once().
+	 * Distinct from `attached`, which means "configured", not "powered".
+	 */
+	bool powered;
+	/*
 	 * ALP-SDK PORT FIX: serialises attach, transfer and set_mode.  The panel
 	 * driver's DCS traffic and the display's blanking (mode switch) come from
 	 * different callers and must not interleave on the host registers.
@@ -536,6 +546,14 @@ struct dsi_dw_data {
 	uint32_t num_chunks;
 	uint32_t null_size;
 	uint32_t pkt_size;
+
+	/*
+	 * Bits per pixel of the attached format.  Kept because
+	 * dsi_dw_video_mode_config() needs the on-the-wire length of one video
+	 * line to work out whether the horizontal FRONT PORCH is long enough
+	 * for an HS->LP->HS turnaround, and mdev is long gone by then.
+	 */
+	uint8_t bpp;
 
 	uint32_t mode_flags;
 };
