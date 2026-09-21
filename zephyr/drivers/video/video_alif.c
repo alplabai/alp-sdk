@@ -87,7 +87,9 @@ BUILD_ASSERT(!IS_ENABLED(CONFIG_VIDEO_ALIF_CAM) || !IS_ENABLED(CONFIG_SOC_SERIES
 	     "never writes a captured frame to memory (CAM_CFG.AXI_PORT_EN stays clear), "
 	     "so alp_camera_capture() reports success over an untouched buffer");
 
-#define WORKQ_STACK_SIZE 512
+/* Alp Lab AB: 512 -> 1024: the helper now stops the CSI endpoint (sensor I2C
+ * write + error logging) on every buffer-starvation pause. */
+#define WORKQ_STACK_SIZE 1024
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(alif_isr_cb_workq, WORKQ_STACK_SIZE);
 
@@ -750,6 +752,17 @@ static int alif_cam_stream_start(const struct device *dev)
 	struct video_buffer *vbuf;
 	int ret;
 
+	/* Alp Lab AB: reject a second start BEFORE cancelling the helper -- on a
+	 * live stream the pending helper is the one that hands a finished frame
+	 * to fifo_out, and cancelling it stalls the stream. */
+	k_mutex_lock(&data->lock, K_FOREVER);
+	if (data->is_streaming) {
+		k_mutex_unlock(&data->lock);
+		LOG_DBG("Already streaming.");
+		return -EBUSY;
+	}
+	k_mutex_unlock(&data->lock);
+
 	/* Cancel any stale work_helper from previous session before starting */
 	struct k_work_sync sync;
 
@@ -821,20 +834,18 @@ static int alif_cam_stream_stop(const struct device *dev)
 	}
 
 	/*
-	 * Alp Lab AB: while `starved`, alif_cam_work_helper() already stopped
-	 * the endpoint as part of the starvation pause -- stopping it again
-	 * here would be a redundant I2C round trip. Clearing `starved` is
-	 * what actually matters: it stops a LATER enqueue() from mistaking
-	 * this user stop for a starvation pause and auto-restarting the
-	 * stream.
+	 * Alp Lab AB: stop the endpoint even while `starved`.  The work helper
+	 * already stopped it for the pause, but the CSI stop is idempotent (it
+	 * returns early when not streaming) and the helper ignores that stop's
+	 * result -- if it failed, this is the only stop that reaches the sensor.
+	 * Clearing `starved` below is what keeps a LATER enqueue() from
+	 * mistaking this user stop for a starvation pause and auto-restarting.
 	 */
-	if (!data->starved) {
-		ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
-		if (ret) {
-			LOG_ERR("Failed to stop streaming in Pipeline!");
-			k_mutex_unlock(&data->lock);
-			return ret;
-		}
+	ret = video_stream_stop(config->endpoint_dev, VIDEO_BUF_TYPE_OUTPUT);
+	if (ret) {
+		LOG_ERR("Failed to stop streaming in Pipeline!");
+		k_mutex_unlock(&data->lock);
+		return ret;
 	}
 
 	/* Disable Interrupts. */
@@ -1032,12 +1043,25 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 	 * against that empty-check + pause decision, so a buffer racing the
 	 * pause is never lost -- see the comment at the work helper.
 	 */
+	/* Clean+invalidate BEFORE the buffer is handed to the hardware -- and on
+	 * the resume path below that hand-over starts the DMA immediately -- so no
+	 * dirty line is written back over the incoming frame.  The matching
+	 * post-DMA invalidate is in alif_cam_dequeue(), without which speculative
+	 * prefetch during the capture window can repopulate lines the DMA then
+	 * overwrites in memory and the application reads stale pixels (#1825). */
+	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
+
 	k_mutex_lock(&data->lock, K_FOREVER);
 
 	k_fifo_put(&data->fifo_in, buf);
 
 	if (data->starved) {
-		data->curr_vid_buf = (uint32_t)buf->buffer;
+		/* `starved` means the IN-FIFO was empty under this lock, so the
+		 * buffer just put is its head; program the head, as stream_start
+		 * does, so the head and CAM_FRAME_ADDR can never diverge. */
+		struct video_buffer *head = k_fifo_peek_head(&data->fifo_in);
+
+		data->curr_vid_buf = (uint32_t)head->buffer;
 		sys_write32(local_to_global(UINT_TO_POINTER(data->curr_vid_buf)),
 				regs + CAM_FRAME_ADDR);
 
@@ -1045,9 +1069,19 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 		if (ret) {
 			LOG_ERR("Failed to resume streaming after buffer starvation! ret - %d",
 				ret);
+			/* Undo the hand-over: the caller still owns the buffer and may
+			 * retry the enqueue -- putting a node that is already in the
+			 * fifo would corrupt it.  Stay starved so a later enqueue
+			 * retries the resume. */
+			(void)k_fifo_get(&data->fifo_in, K_NO_WAIT);
+			data->curr_vid_buf = 0;
 			k_mutex_unlock(&data->lock);
 			return ret;
 		}
+
+		/* A flush(cancel) may have masked the interrupts while starved. */
+		hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
+						   INTR_INFIFO_OVERRUN | INTR_STOP);
 
 		/* Restart video capture. */
 		hw_cam_start_video_capture(dev);
@@ -1058,13 +1092,6 @@ static int alif_cam_enqueue(const struct device *dev, struct video_buffer *buf)
 
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
 		(uint32_t)buf->buffer, buf->size, buf->bytesused);
-
-	/* Clean+invalidate BEFORE the DMA so no dirty line is written back over the
-	 * incoming frame.  The matching post-DMA invalidate is in
-	 * alif_cam_dequeue(), without which speculative prefetch during the capture
-	 * window can repopulate lines the DMA then overwrites in memory and the
-	 * application reads stale pixels (#1825). */
-	(void)sys_cache_data_flush_and_invd_range(buf->buffer, buf->size);
 
 	return 0;
 }
