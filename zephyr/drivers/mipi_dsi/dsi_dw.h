@@ -402,6 +402,12 @@
 /* Polls of GEN_PLD_W_FULL, 1 us apart, before giving up on payload FIFO space. */
 #define  DSI_DW_PLD_SPACE_POLLS		1000U
 
+/*
+ * Bound on the post-power-up stop-state settle poll in dsi_dw_pwr_up_once()
+ * (#2199): 10 ms of 1 us k_busy_wait() steps.
+ */
+#define  DSI_DW_PWR_UP_SETTLE_US_MAX	10000U
+
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK	GENMASK(14, 0)
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_SHIFT	0
 

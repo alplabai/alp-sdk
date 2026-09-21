@@ -40,5 +40,5 @@ plus its 1 ms reset-low hold.
 `dsi_dw_send_max_return_packet_size()` built the maximum-return-packet-size
 header's high byte as `(uint8_t) value >> 8`, where the cast binds first and the
 result is therefore always 0 — any size above 255 was silently truncated. It is
-now `zephyr/drivers/mipi_dsi/dsi_dw.c:1389` ("value >> 8"). No in-tree caller
+now `zephyr/drivers/mipi_dsi/dsi_dw.c:1440` ("value >> 8"). No in-tree caller
 asks for 256 bytes or more, so this changes no current behaviour.

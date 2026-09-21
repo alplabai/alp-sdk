@@ -107,10 +107,21 @@
 #define  DSI_PHY_RSTZ_PHY_ENABLECLK			BIT(2)
 #define  DSI_PHY_RSTZ_PHY_RSTZ				BIT(1)
 #define  DSI_PHY_RSTZ_PHY_SHUTDOWNZ			BIT(0)
+/*
+ * ALP-SDK PORT FIX: the vendored SHIFT for PHY_STOP_WAIT_TIME was 0 -- the
+ * same shift as PHY_N_LANES below, so writing this field would have stomped
+ * N_LANES instead of landing in its own byte.  dsi_dw.c's (unrelated,
+ * private-header) DSI_PHY_IF_CFG_STOP_WAIT_TIME_SHIFT already has the real
+ * value: 8, bits [15:8], with N_LANES in bits [1:0].  Corrected now that
+ * dphy_dw_master_setup() actually writes this field (#2199).
+ */
 #define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK		GENMASK(7, 0)
-#define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT	0
+#define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT	8
 #define  DSI_PHY_IF_CFG_PHY_N_LANES_MASK		GENMASK(1, 0)
 #define  DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT		0
+
+/* Linux dw-mipi-dsi parity: PHY_STOP_WAIT_TIME(0x20), written alongside N_LANES. */
+#define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL		0x20
 #define  DSI_PHY_STATUS_ULPSACTIVENOT1LANE		BIT(8)
 #define  DSI_PHY_STATUS_STOPSTATE1LANE			BIT(7)
 #define  DSI_PHY_STATUS_ULPSESC0LANE			BIT(6)

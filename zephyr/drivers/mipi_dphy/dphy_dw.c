@@ -377,6 +377,18 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		       DSI_PHY_IF_CFG_PHY_N_LANES_MASK, DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT);
 
 	/*
+	 * ALP-SDK PORT FIX: PHY_STOP_WAIT_TIME was left at its reset value of 0.
+	 * Linux's dw-mipi-dsi always writes PHY_STOP_WAIT_TIME(0x20) alongside
+	 * N_LANES here; the field gates how long the host waits, after
+	 * requesting an HS entry, for the addressed lane to actually report
+	 * Stop before the HS request goes out, so a value of 0 lets the host
+	 * race a lane that has not reached Stop yet (#2199).
+	 */
+	reg_write_part(dsi_regs + DSI_PHY_IF_CFG, DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT);
+
+	/*
 	 * Put D-PHY in shutdown mode prior to configuring the D-PHY.
 	 * Set RSTZ = 0, SHUTDOWNZ = 0
 	 */
