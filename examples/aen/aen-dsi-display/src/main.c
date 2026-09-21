@@ -992,6 +992,291 @@ static void probe_setextc_gate_v2(const struct device *dsi)
 }
 
 /*
+ * BENCH DIAGNOSTIC -- probe_reinit_180ms() (#2199), prefix `reinit:`.
+ *
+ * Zephyr's hx8394_init() releases RESX and waits only 50 ms
+ * (display_hx8394.c:584-589) before sending the manufacturer init --
+ * SETPOWER/SETGIP0-2/SETVCOM among it.  The mainline Linux driver for this
+ * exact panel waits 180 ms (panel-himax-hx8394.c:577-579), and the
+ * datasheet documents both: Figure 5.28 says >50 ms after hardware reset,
+ * Figure 5.27 says 180 ms.  If the panel's internal power-on has not
+ * finished when the gated registers arrive, the digital core still latches
+ * them -- every command acknowledges, every ID reads back correctly -- but
+ * the analog blocks never take the configuration.  That matches everything
+ * measured on this board, and a marginal 50 ms would also be intermittent,
+ * matching panel init failing roughly one cold boot in three.
+ *
+ * This probe hardware-resets the panel with the VENDOR 180 ms dwell instead
+ * of the driver's 50 ms, then re-sends the driver's own init byte strings,
+ * in the driver's own order -- transcribed from display_hx8394.c (read, not
+ * retyped from memory) -- through reinit_tx(), which mirrors that file's own
+ * hx8394_mipi_tx() write-type dispatch, so the on-wire framing matches the
+ * driver exactly, not just the payload bytes.
+ *
+ * Runs in COMMAND MODE, before any video-mode entry: called immediately
+ * after probe_setextc_gate_v2() (see the call site in main()), whose own
+ * final RESX pulse already left the panel awake via panel_wake_after_resx()
+ * -- so this probe starts from a known state.  Everything that runs after
+ * it (probe_ta_timing(), probe_bist_v2(), probe_frm_vcom_sweep()) now
+ * measures a panel brought up with the vendor dwell instead of the driver's
+ * 50 ms floor: if any of them move the glass afterward, the dwell was the
+ * bug.
+ *
+ * RESX pulsing goes through exp_set_resx() (see its own banner) rather than
+ * an open-coded expander write, so P0 (panel supply enable) and P3 (touch
+ * reset) are never disturbed.  Never sends SETOTP (BBh) or SETID (C3h) --
+ * both burn OTP irreversibly and are never used anywhere in this app; C3
+ * appears only as payload data inside SETDDB (C4h) elsewhere in this file,
+ * never as a command byte.  Every read goes through dcs_read_classified();
+ * a failed read is reported as UNKNOWN, never decoded from the 0xAA
+ * sentinel.
+ */
+
+/*
+ * Mirrors display_hx8394.c's own hx8394_mipi_tx(): every write below is a
+ * GENERIC_* MIPI-DSI message in LPM, dispatched by payload length exactly as
+ * the driver dispatches it, so the on-wire framing matches the driver's real
+ * init rather than an approximation of it.
+ */
+static ssize_t reinit_tx(const struct device *dsi, const uint8_t *buf, size_t len)
+{
+	struct mipi_dsi_msg msg = {
+		.tx_buf = buf,
+		.tx_len = len,
+		.flags  = MIPI_DSI_MSG_USE_LPM,
+	};
+
+	switch (len) {
+	case 0U:
+		msg.type = MIPI_DSI_GENERIC_SHORT_WRITE_0_PARAM;
+		break;
+	case 1U:
+		msg.type = MIPI_DSI_GENERIC_SHORT_WRITE_1_PARAM;
+		break;
+	case 2U:
+		msg.type = MIPI_DSI_GENERIC_SHORT_WRITE_2_PARAM;
+		break;
+	default:
+		msg.type = MIPI_DSI_GENERIC_LONG_WRITE;
+		break;
+	}
+
+	return mipi_dsi_transfer(dsi, 0, &msg);
+}
+
+static void probe_reinit_180ms(const struct device *dsi)
+{
+	/*
+	 * Byte strings transcribed directly from display_hx8394.c's own
+	 * enable_extension/setmipi/address_config/power_config/... arrays
+	 * (read from that file, not retyped from memory) -- see it for the
+	 * #define expansion behind each OR'd byte.  setmipi[1] bakes in
+	 * num_of_lanes=2 (this shield's DSISETUP0), confirmed by the driver's
+	 * own on-wire bytes reported in probe_ta_timing()'s banner:
+	 * "BA 61 03 68 6B B2 C0".
+	 */
+	static const uint8_t extc[]     = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	static const uint8_t setmipi[]  = { 0xBAU, 0x61U, 0x03U, 0x68U, 0x6BU, 0xB2U, 0xC0U };
+	static const uint8_t madctl[]   = { 0x36U, 0x02U };
+	static const uint8_t setpower[] = {
+		0xB1U, 0x48U, 0x12U, 0x72U, 0x09U, 0x32U, 0x54U, 0x71U, 0x71U, 0x57U, 0x47U,
+	};
+	static const uint8_t setdisp[] = { 0xB2U, 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU };
+	static const uint8_t setcyc[]  = {
+		0xB4U, 0x73U, 0x74U, 0x73U, 0x74U, 0x73U, 0x74U, 0x01U, 0x0CU, 0x86U, 0x75U,
+		0x00U, 0x3FU, 0x73U, 0x74U, 0x73U, 0x74U, 0x73U, 0x74U, 0x01U, 0x0CU, 0x86U,
+	};
+	static const uint8_t setgip0[] = {
+		0xD3U, 0x00U, 0x00U, 0x07U, 0x07U, 0x40U, 0x07U, 0x0CU, 0x00U, 0x08U, 0x10U, 0x08U,
+		0x00U, 0x08U, 0x54U, 0x15U, 0x0AU, 0x05U, 0x0AU, 0x02U, 0x15U, 0x06U, 0x05U, 0x06U,
+		0x47U, 0x44U, 0x0AU, 0x0AU, 0x4BU, 0x10U, 0x07U, 0x07U, 0x0CU, 0x40U,
+	};
+	static const uint8_t setgip1[] = {
+		0xD5U, 0x1CU, 0x1CU, 0x1DU, 0x1DU, 0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U,
+		0x07U, 0x08U, 0x09U, 0x0AU, 0x0BU, 0x24U, 0x25U, 0x18U, 0x18U, 0x26U, 0x27U, 0x18U,
+		0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U,
+		0x18U, 0x18U, 0x18U, 0x20U, 0x21U, 0x18U, 0x18U, 0x18U, 0x18U,
+	};
+	static const uint8_t setgip2[] = {
+		0xD6U, 0x1CU, 0x1CU, 0x1DU, 0x1DU, 0x07U, 0x06U, 0x05U, 0x04U, 0x03U, 0x02U, 0x01U,
+		0x00U, 0x0BU, 0x0AU, 0x09U, 0x08U, 0x21U, 0x20U, 0x18U, 0x18U, 0x27U, 0x26U, 0x18U,
+		0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U, 0x18U,
+		0x18U, 0x18U, 0x18U, 0x25U, 0x24U, 0x18U, 0x18U, 0x18U, 0x18U,
+	};
+	static const uint8_t setvcom[]  = { 0xB6U, 0x92U, 0x92U };
+	static const uint8_t setgamma[] = {
+		0xE0U, 0x00U, 0x0AU, 0x15U, 0x1BU, 0x1EU, 0x21U, 0x24U, 0x22U, 0x47U, 0x56U, 0x65U,
+		0x66U, 0x6EU, 0x82U, 0x88U, 0x8BU, 0x9AU, 0x9DU, 0x98U, 0xA8U, 0xB9U, 0x5DU, 0x5CU,
+		0x61U, 0x66U, 0x6AU, 0x6FU, 0x7FU, 0x7FU, 0x00U, 0x0AU, 0x15U, 0x1BU, 0x1EU, 0x21U,
+		0x24U, 0x22U, 0x47U, 0x56U, 0x65U, 0x65U, 0x6EU, 0x81U, 0x87U, 0x8BU, 0x98U, 0x9DU,
+		0x99U, 0xA8U, 0xBAU, 0x5DU, 0x5DU, 0x62U, 0x67U, 0x6BU, 0x72U, 0x7FU, 0x7FU,
+	};
+	static const uint8_t cmd_c0[]   = { 0xC0U, 0x1FU, 0x31U };
+	static const uint8_t setpanel[] = { 0xCCU, 0x03U };
+	static const uint8_t cmd_d4[]   = { 0xD4U, 0x02U };
+	static const uint8_t bank_02[]  = { 0xBDU, 0x02U };
+	static const uint8_t bank_d8[]  = {
+		0xD8U, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU, 0xFFU,
+	};
+	static const uint8_t bank_00a[] = { 0xBDU, 0x00U };
+	static const uint8_t bank_01[]  = { 0xBDU, 0x01U };
+	static const uint8_t bank_b1[]  = { 0xB1U, 0x00U };
+	static const uint8_t bank_00b[] = { 0xBDU, 0x00U };
+	static const uint8_t cmd_bf[]   = {
+		0xBFU, 0x40U, 0x81U, 0x50U, 0x00U, 0x1AU, 0xFCU, 0x01U,
+	};
+	static const uint8_t cmd_c6[]  = { 0xC6U, 0xEDU };
+	static const uint8_t tear_on[] = { 0x35U, 0x00U };
+
+	uint8_t  rddpm = 0xAAU;
+	uint8_t  rddst[4];
+	uint8_t  rddid[3];
+	uint32_t int0 = 0;
+	uint32_t int1 = 0;
+	ssize_t  rc;
+	bool     rddpm_ok;
+
+	/* 1. Entry state. */
+	rc = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+	if (rc < 0) {
+		printk("reinit: entry RDDPM read FAILED rc=%d -- state UNKNOWN\n", (int)rc);
+	} else {
+		printk("reinit: entry RDDPM=0x%02x sleep_out=%d display_on=%d\n",
+		       rddpm,
+		       (int)((rddpm & BIT(4)) != 0),
+		       (int)((rddpm & BIT(2)) != 0));
+	}
+
+	memset(rddst, 0xAAU, sizeof(rddst));
+	rc = dcs_read_classified(dsi, 0x09U, rddst, sizeof(rddst), &int0, &int1);
+	if (rc < 0) {
+		printk("reinit: entry RDDST read FAILED rc=%d -- state UNKNOWN\n", (int)rc);
+	} else {
+		printk("reinit: entry RDDST=%02x %02x %02x %02x\n", rddst[0], rddst[1], rddst[2], rddst[3]);
+	}
+
+	/* 2. Hardware reset with the VENDOR 180 ms dwell, not the driver's 50 ms. */
+	if (!exp_set_resx(0)) {
+		printk("reinit: ABORT -- RESX-low failed, refusing to reinit a panel whose "
+		       "reset state is unknown\n");
+		return;
+	}
+	k_msleep(20);
+	if (!exp_set_resx(1)) {
+		printk("reinit: ABORT -- RESX-high failed\n");
+		return;
+	}
+	printk("reinit: RESX low 20ms then released high, now dwelling 180ms "
+	       "(datasheet Fig.5.27, vendor value -- the driver's own Fig.5.28 floor is 50ms)\n");
+	k_sleep(K_MSEC(180));
+
+	/* 3. Re-send the full manufacturer init, driver's own order and bytes. */
+#define REINIT_SEND(arr) \
+	do { \
+		ssize_t wrc = reinit_tx(dsi, (arr), sizeof(arr)); \
+		printk("reinit: write cmd=0x%02x len=%u rc=%d\n", \
+		       (arr)[0], \
+		       (unsigned int)sizeof(arr), \
+		       (int)wrc); \
+	} while (0)
+
+	REINIT_SEND(extc);
+	REINIT_SEND(setmipi);
+	REINIT_SEND(madctl);
+	REINIT_SEND(setpower);
+	REINIT_SEND(setdisp);
+	REINIT_SEND(setcyc);
+	REINIT_SEND(setgip0);
+	REINIT_SEND(setgip1);
+	REINIT_SEND(setgip2);
+	/* Driver's own comment: without this pause the panel stops responding
+	 * to further commands; reason undocumented in the datasheet. */
+	k_msleep(1);
+	REINIT_SEND(setvcom);
+	REINIT_SEND(setgamma);
+	REINIT_SEND(cmd_c0);
+	REINIT_SEND(setpanel);
+	REINIT_SEND(cmd_d4);
+	REINIT_SEND(bank_02);
+	REINIT_SEND(bank_d8);
+	REINIT_SEND(bank_00a);
+	REINIT_SEND(bank_01);
+	REINIT_SEND(bank_b1);
+	REINIT_SEND(bank_00b);
+	REINIT_SEND(cmd_bf);
+	REINIT_SEND(cmd_c6);
+	REINIT_SEND(tear_on);
+
+#undef REINIT_SEND
+
+	/* 4. Exit sleep (vendor 120ms dwell), then display on. */
+	{
+		struct mipi_dsi_msg slpout_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x11U, /* EXIT_SLEEP_MODE */
+		};
+		ssize_t slpout_rc = mipi_dsi_transfer(dsi, 0, &slpout_w);
+
+		printk("reinit: EXIT_SLEEP_MODE (0x11) rc=%d\n", (int)slpout_rc);
+		k_sleep(K_MSEC(120));
+
+		struct mipi_dsi_msg dispon_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x29U, /* SET_DISPLAY_ON */
+		};
+		ssize_t dispon_rc = mipi_dsi_transfer(dsi, 0, &dispon_w);
+
+		printk("reinit: SET_DISPLAY_ON (0x29) rc=%d\n", (int)dispon_rc);
+	}
+
+	/* 5. Resulting state. */
+	rc       = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+	rddpm_ok = rc >= 0;
+	if (!rddpm_ok) {
+		printk("reinit: after RDDPM read FAILED rc=%d -- state UNKNOWN\n", (int)rc);
+	} else {
+		printk("reinit: after RDDPM=0x%02x sleep_out=%d display_on=%d\n",
+		       rddpm,
+		       (int)((rddpm & BIT(4)) != 0),
+		       (int)((rddpm & BIT(2)) != 0));
+	}
+
+	memset(rddst, 0xAAU, sizeof(rddst));
+	rc = dcs_read_classified(dsi, 0x09U, rddst, sizeof(rddst), &int0, &int1);
+	if (rc < 0) {
+		printk("reinit: after RDDST read FAILED rc=%d -- state UNKNOWN\n", (int)rc);
+	} else {
+		printk("reinit: after RDDST=%02x %02x %02x %02x\n", rddst[0], rddst[1], rddst[2], rddst[3]);
+	}
+
+	memset(rddid, 0xAAU, sizeof(rddid));
+	rc = dcs_read_classified(dsi, 0x04U, rddid, sizeof(rddid), &int0, &int1);
+	if (rc < 0) {
+		printk("reinit: after RDDID read FAILED rc=%d -- state UNKNOWN\n", (int)rc);
+	} else {
+		printk("reinit: after RDDID=%02x %02x %02x\n", rddid[0], rddid[1], rddid[2]);
+	}
+
+	int sleep_out  = rddpm_ok && ((rddpm & BIT(4)) != 0);
+	int display_on = rddpm_ok && ((rddpm & BIT(2)) != 0);
+
+	if (!rddpm_ok) {
+		printk("reinit: panel wake state UNKNOWN -- RDDPM read failed\n");
+	} else if (sleep_out && display_on) {
+		printk("reinit: panel came back sleep_out=1 display_on=1 after the 180ms reinit\n");
+	} else {
+		printk("reinit: panel did NOT come back sleep_out=1 display_on=1 "
+		       "(sleep_out=%d display_on=%d)\n",
+		       sleep_out,
+		       display_on);
+	}
+
+	printk("reinit: END dwell=180ms full-init-resent\n");
+}
+
+/*
  * DSI_INT_ST1/ST0 bit positions this probe classifies on.  TO_LP_RX is the
  * link-level LP-RX (BTA reverse-turnaround) timeout; DPHY_ERR_4 is a D-PHY LP
  * contention flag.  Named locally rather than pulled from a driver-private
@@ -2042,6 +2327,18 @@ int main(void)
 		 * this test's negative control.
 		 */
 		probe_setextc_gate_v2(dsi);
+
+		/*
+		 * BENCH DIAGNOSTIC (#2199): probe_reinit_180ms() must run here --
+		 * immediately after probe_setextc_gate_v2(), whose own final RESX
+		 * pulse already left the panel awake via panel_wake_after_resx(),
+		 * so this probe starts from a known state -- and before every
+		 * probe below, so probe_panel_reads() onward all measure a panel
+		 * brought up with the vendor 180ms dwell instead of the driver's
+		 * 50ms floor.  See the probe's own banner.
+		 */
+		probe_reinit_180ms(dsi);
+
 		panel_read_ok = probe_panel_reads(dsi);
 		dump_dsi_status("after-read");
 
