@@ -9,31 +9,46 @@ DesignWare constraint `[MAX_RD_TIME] * LANEBYTECLK_period < [OUTVACT_LPCMD_TIME]
 * 16 * TXCLKESC_period`, which is an *upper* bound and only applies to reads
 issued during active video. `MAX_RD_TIME` also has a *lower* bound that formula
 ignores — how long the peripheral actually takes to answer — so the timeout was
-effectively derived from the line time. Measured on the same panel and driver,
-differing only in pixel clock: at RGB888/40 MHz the register read 949 against a
-60.0 MHz lane byte clock, a 15.8 µs budget, and `RDDID` (3 bytes) and `RDDST`
-(4 bytes) both answered; at RGB565/57.142857 MHz it read 591 against a 57.1 MHz
-lane byte clock, a 10.3 µs budget, and both returned `rc=-5` while 1- and
-2-byte reads kept working. The value is now floored at what a
+effectively derived from the line time, not the read. On the same panel and
+driver, differing only in pixel clock, the computed register value moves with
+it: RGB888/40 MHz gives a 60.0 MHz lane byte clock and `rdtime` = 949 (a
+15.8 µs budget); RGB565/57.142857 MHz gives a 57.1 MHz lane byte clock and
+`rdtime` = 591 (a 10.3 µs budget). The value is now floored at what a
 read needs — a long response (4-byte header + payload + 2-byte CRC) plus BTA
 turnaround and LPDT entry/exit, with margin — and clamped to the register width
-`zephyr/drivers/mipi_dsi/dsi_dw.c:387` ("if (outvact > 0) {"). Reads are issued
+`zephyr/drivers/mipi_dsi/dsi_dw.c:444` ("if (outvact > 0) {"). Reads are issued
 in command mode, where there is no video LP window to fit inside, so raising it
 past the video-derived value costs nothing there.
 
-This is a correctness fix, **not** a fix for the "reads of more than one byte
-never answer" behaviour on `E1M-AEN803 2026W36-0009`, and it should not be cited as one.
-The bench says so directly: with the floor in place `rdtime` went from `0x24f`
-(591) to `0x00000a00` (2560) as intended, and `RDDID` (3 bytes), `RDDST` (4) and
-`RDDDB` (5) still returned `rc=-5` while 1- and 2-byte reads kept working and
-returned correct data (`RDID1/2/3` = `83 94 0f`, `RDDST2` = `81 73`). The
-failures raise `INT_ST1` bit 1, `TO_LP_RX`, and the LP-RX window is not short
-either — `LPRX_TO_CNT` is 1000 on a clock of `lanebyteclk / to_clk_div` with
-`to_clk_div >= TO_CLK_DIV` (10), i.e. at least ~173 µs at this lane byte clock,
-against roughly 10 µs of actual response. The cutoff falls exactly on the
-MIPI short-read-response (1-2 bytes) versus long-read-response (3+) boundary,
-and the same reads DID work at a different pixel clock, so it is neither a
-fundamental protocol gap nor this timeout. Still open.
+This is a correctness fix on its own terms, and it is not what closed the
+"reads of more than one byte never answer" behaviour seen on
+`E1M-AEN803 2026W36-0009` — that symptom was never a MAX_RD_TIME problem.
+With the floor in place, `rdtime` went from `0x24f` (591) to `0x00000a00`
+(2560) as intended, but `RDDID` (3 bytes), `RDDST` (4) and `RDDDB` (5) still
+returned `rc=-5` (`INT_ST1` bit 1, `TO_LP_RX`) while 1- and 2-byte reads kept
+working — across four bench runs, 100% correlated with the pixel clock
+(failing at RGB565/57.142857 MHz, answering at RGB888/40 MHz). That
+correlation was confounded: a marginal FFC contact on the panel flex was
+corrupting the DCS read path for the whole campaign, and every one of those
+runs was measured through it. Before a connector reseat, every DCS read
+returned `rc=-5` with `int1=0x00000002` (`TO_LP_RX`) and `SETEXTC` did not
+land at all. After the reseat, on the same build, `SETEXTC` gates as expected,
+and `RDDID` returns `rc=3 data=83 94 0f`, `RDDPM=1c`, `RDDST=80 73 04 00` —
+3-, 4- and 5-byte reads now answer correctly at BOTH pixel clocks. The
+short-versus-long-read-response boundary the failures had fallen on was a
+property of what a bad LP-RX turnaround corrupts, not a MIPI protocol limit or
+this timeout.
+
+What actually distinguishes the two pixel clocks now is not reads at all. A
+controlled A/B on the same board and the same (good) contact state, 100 ms of
+scanout each: RGB888/40 MHz gives `int0=0x00000000 int1=0x00000000
+dpi-wr-err=0 dpi-under=0 pixclk-ctrl=0x000a0001`, with pixels on glass;
+RGB565/57.142857 MHz gives `int0=0x00000000 int1=0x00000080 dpi-wr-err=1
+dpi-under=0 pixclk-ctrl=0x00070001`, still set after 5 s of video, with glass
+dark. `INT_ST1` bit 7 is `DSI_INT_1_DPI_PLD_WR_ERR`
+`zephyr/drivers/mipi_dsi/dsi_dw.h:381` ("#define  DSI_INT_1_DPI_PLD_WR_ERR		BIT(7)"):
+the DPI payload FIFO overflows continuously at the higher pixel clock. That
+overflow, not a DCS read timeout, is why the shield stays at 40 MHz.
 
 The same clamp fixes an underflow: `outvact` is signed and has had the
 LPDT-entry delay subtracted, so on a short line it can go negative, and the old
@@ -44,7 +59,7 @@ expression assigned that straight into a `uint32_t` — producing a *huge*
 deliberately ends in command mode, and the later switch to video in
 `dsi_dw_set_mode()` power-cycles the host, clearing the bit. The pattern
 generator is now armed in `dsi_dw_video_mode_config()`
-`zephyr/drivers/mipi_dsi/dsi_dw.c:812` ("switch (config->dpi.vpg_pattern) {"),
+`zephyr/drivers/mipi_dsi/dsi_dw.c:969` ("switch (config->dpi.vpg_pattern) {"),
 where it survives. Any VPG result taken before this change is void.
 
 **A board can now declare the video mode and EoTp its panel needs.** A panel
@@ -65,7 +80,7 @@ margin; Linux's `dw-mipi-dsi` sizes the same divider against 15 MHz, and
 matching it costs only LP command time.
 
 The CDC200 also reloads its shadow registers once the controller is running
-`zephyr/drivers/display/display_cdc200.c:489`
+`zephyr/drivers/display/display_cdc200.c:507`
 ("cdc200_shadow_reload_control(DEVICE_MMIO_GET(dev));"). This is belt and
 braces, not a fix for a known defect: it was added on the theory that a reload
 requested on a stopped CDC does not transfer, and the bench refuted that — the

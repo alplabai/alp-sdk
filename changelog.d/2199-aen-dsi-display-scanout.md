@@ -38,9 +38,10 @@ The DSI host now takes the DPI pixel clock from the `cdc-if` controller's
 `clock-frequency` instead of assuming 60 Hz. The example ran its CDC at 400/6 =
 66.67 MHz into a host timed for 59.98 MHz, so the DPI payload FIFO overflowed on
 every line (`INT_ST1` `DPI_PLD_WR_ERR`). The `cdc200` node now declares the rate
-the CDC really runs, 400/7 = 57.14 MHz (`clock-frequency = <57142857>`, in the
-`e1m_evk_rk055hdmipi4ma0` shield), and the SoC glue derives the CDC divider from
-that same property, so the two can no longer disagree. 66.67 MHz would need about
+the CDC really runs, 400/10 = 40 MHz (`clock-frequency = <40000000>`, in the
+`e1m_evk_rk055hdmipi4ma0` shield; `90d450387` moved it here from 400/7 =
+57.142857 MHz), and the SoC glue derives the CDC divider from that same
+property, so the two can no longer disagree. 66.67 MHz would need about
 539 Mbps per lane, above the host's default 500 Mbps `panel-max-lane-bandwidth`.
 
 `dw_setup_timeout()` no longer truncates the non-burst HS-TX timeout. A 720x1280
