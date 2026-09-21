@@ -1498,6 +1498,222 @@ static void probe_bist_v2(const struct device *dsi)
 }
 
 /*
+ * BENCH DIAGNOSTIC -- probe_frm_vcom_sweep() (#2199), prefix `frmv:`.
+ *
+ * probe_bist_v2()'s Free Running Mode burn-in generator (DISP_BIST_EN, SETDISP
+ * B2h parameter 11 bit 3, datasheet Sec5.17 p.113) was measured on a
+ * confirmed-awake panel and produced NO change on the glass -- smaller than
+ * camera noise against a 117-count backlight reference.  That result is
+ * currently being read as "the glass cannot be driven".  It does not yet
+ * establish that, because VCOM has never been tested across its real range.
+ * If the common electrode sits where the liquid crystal sees no net field,
+ * the glass shows nothing no matter how perfectly the source and gate
+ * drivers work -- including under FRM.  An earlier sweep wrote SETVCOM (B6h)
+ * with only TWO parameters, leaving VCMC[8] clear, so it covered only
+ * -0.30V to -2.85V and never reached the codes that matter.
+ *
+ * This probe drives FRM and sweeps VCOM underneath it.  If any VCOM value
+ * makes the FRM pattern appear, VCOM was the blocker and the panel is fine.
+ *
+ * Runs in COMMAND MODE, before any video-mode entry -- reads still work
+ * there, so wakefulness is verifiable throughout.  Called immediately after
+ * probe_bist_v2() returns (see the call site in main()), for the same reason
+ * that probe runs where it does: probe_read_wedge() (run right after this
+ * one) shows a read attempted once video mode has been touched can wedge the
+ * read path even back in command mode, so this sweep's own RDDPM
+ * self-certification would be unreliable if it ran any later.
+ *
+ * SETVCOM (B6h) 3-parameter form: parameter 1 = VCMC_F[7:0], parameter 2 =
+ * VCMC_B[7:0], parameter 3 = VCOM_TIMES[7:5] | VCMC_B[8]<<1 | VCMC_F[8].  The
+ * 0xE0 VCOM_TIMES base (bits 7:5, the OTP programmed-times counter,
+ * documented default 111) is preserved on every write -- it is read-only
+ * state from OTP, not a value this probe owns.
+ *
+ * All B6h writes here are volatile register writes, reversed by RESX or a
+ * power cycle -- never SETOTP (BBh), the irreversible OTP burn command, which
+ * is never sent by this app.  SETID (C3h) is likewise never sent.
+ */
+#define FRMV_STEP_COUNT 7
+
+struct frmv_step {
+	uint16_t    vcmc;
+	const char *meaning;
+};
+
+static const struct frmv_step frmv_steps[FRMV_STEP_COUNT] = {
+	{ 0x092U, "init value, control" },
+	{ 0x000U, "-0.30V, top of range" },
+	{ 0x0B8U, "~-2.14V, mid" },
+	{ 0x172U, "-4.00V, bottom of normal range" },
+	{ 0x1FEU, "VSSA" },
+	{ 0x1FFU, "HZ, common electrode floating" },
+	{ 0x092U, "restore" },
+};
+
+static void probe_frm_vcom_sweep(const struct device *dsi)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	static const uint8_t frm_on[]   = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU,
+		                                0x00U, 0x00U, 0x00U, 0x00U, 0xC8U };
+	static const uint8_t frm_off[]  = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU };
+	ssize_t              vcom_rc[FRMV_STEP_COUNT];
+	bool                 all_awake = true;
+	ssize_t              rc;
+
+	/* 1. Confirm awake. */
+	{
+		uint8_t  rddpm = 0xAAU;
+		uint32_t int0  = 0;
+		uint32_t int1  = 0;
+
+		rc = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+		if (rc < 1) {
+			printk("frmv: entry RDDPM read FAILED rc=%d -- panel state UNVERIFIED\n", (int)rc);
+			return;
+		}
+
+		int sleep_out  = (int)((rddpm & BIT(4)) != 0);
+		int display_on = (int)((rddpm & BIT(2)) != 0);
+
+		printk(
+		    "frmv: entry RDDPM=0x%02x sleep_out=%d display_on=%d\n", rddpm, sleep_out, display_on);
+		all_awake = sleep_out && display_on;
+	}
+
+	/* 2. Enable FRM. */
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("frmv: SETEXTC (B9h FF 83 94) rc=%d\n", (int)rc);
+	}
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = frm_on,
+			.tx_len = sizeof(frm_on),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("frmv: SETDISP FRM-ON B2 00 80 64 0C 0D 2F 00 00 00 00 C8 rc=%d\n", (int)rc);
+	}
+
+	/* 3. Sweep VCOM with FRM running. */
+	for (int step = 0; step < FRMV_STEP_COUNT; step++) {
+		uint16_t vcmc = frmv_steps[step].vcmc;
+		uint8_t  p1   = (uint8_t)(vcmc & 0xFFU);
+		uint8_t  p2   = (uint8_t)(vcmc & 0xFFU);
+		uint8_t  p3   = (uint8_t)(0xE0U | (((vcmc >> 8) & 1U) << 1) | ((vcmc >> 8) & 1U));
+		ssize_t  extc_rc;
+
+		{
+			struct mipi_dsi_msg w = {
+				.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+				.flags  = MIPI_DSI_MSG_USE_LPM,
+				.tx_buf = extc_cmd,
+				.tx_len = sizeof(extc_cmd),
+			};
+			extc_rc = mipi_dsi_transfer(dsi, 0, &w);
+		}
+		{
+			uint8_t             vcom[3] = { p1, p2, p3 };
+			struct mipi_dsi_msg w       = {
+				.type   = MIPI_DSI_DCS_LONG_WRITE,
+				.flags  = MIPI_DSI_MSG_USE_LPM,
+				.cmd    = 0xB6U,
+				.tx_buf = vcom,
+				.tx_len = sizeof(vcom),
+			};
+			vcom_rc[step] = mipi_dsi_transfer(dsi, 0, &w);
+			printk("frmv: step %d SETVCOM (B6h) %02x %02x %02x extc_rc=%d vcom_rc=%d "
+			       "(%s)\n",
+			       step,
+			       vcom[0],
+			       vcom[1],
+			       vcom[2],
+			       (int)extc_rc,
+			       (int)vcom_rc[step],
+			       frmv_steps[step].meaning);
+		}
+
+		k_sleep(K_MSEC(8000));
+		printk("frmv: step %d VCMC=0x%03x param3=0x%02x extc_rc=%d vcom_rc=%d -- CAPTURE "
+		       "NOW\n",
+		       step,
+		       vcmc,
+		       p3,
+		       (int)extc_rc,
+		       (int)vcom_rc[step]);
+
+		{
+			uint8_t  rddpm = 0xAAU;
+			uint32_t int0  = 0;
+			uint32_t int1  = 0;
+
+			rc = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+			if (rc < 1) {
+				printk("frmv: step %d after RDDPM read FAILED rc=%d -- panel "
+				       "state UNVERIFIED\n",
+				       step,
+				       (int)rc);
+				all_awake = false;
+				continue;
+			}
+
+			int sleep_out  = (int)((rddpm & BIT(4)) != 0);
+			int display_on = (int)((rddpm & BIT(2)) != 0);
+
+			printk("frmv: step %d after RDDPM=0x%02x sleep_out=%d display_on=%d\n",
+			       step,
+			       rddpm,
+			       sleep_out,
+			       display_on);
+			all_awake = all_awake && sleep_out && display_on;
+		}
+	}
+
+	/* 4. Restore. */
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("frmv: SETEXTC (B9h FF 83 94) rc=%d\n", (int)rc);
+	}
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = frm_off,
+			.tx_len = sizeof(frm_off),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("frmv: SETDISP restore B2 00 80 64 0C 0D 2F rc=%d\n", (int)rc);
+	}
+	printk("frmv: END\n");
+
+	/* 5. Verdict. */
+	printk("frmv: VERDICT all_steps_awake=%d vcom_rc=[%d,%d,%d,%d,%d,%d,%d]\n",
+	       (int)all_awake,
+	       (int)vcom_rc[0],
+	       (int)vcom_rc[1],
+	       (int)vcom_rc[2],
+	       (int)vcom_rc[3],
+	       (int)vcom_rc[4],
+	       (int)vcom_rc[5],
+	       (int)vcom_rc[6]);
+}
+
+/*
  * DSI_CMD_PKT_STATUS bit positions (zephyr/drivers/mipi_dsi/dsi_dw.h) -- defined
  * locally so this probe file does not include the driver-private header.
  */
@@ -1787,6 +2003,19 @@ int main(void)
 			 */
 			if (dsi_ok) {
 				probe_bist_v2(dsi);
+			}
+
+			/*
+			 * BENCH DIAGNOSTIC (#2199): probe_frm_vcom_sweep() runs HERE,
+			 * immediately after probe_bist_v2() returns -- still command
+			 * mode, still before probe_read_wedge() below ever touches
+			 * video mode, so DCS reads (and this sweep's own RDDPM
+			 * self-certification) still work.  See the probe's own banner
+			 * for why the earlier FRM-only result does not yet prove the
+			 * glass cannot be driven.
+			 */
+			if (dsi_ok) {
+				probe_frm_vcom_sweep(dsi);
 			}
 
 			/*
