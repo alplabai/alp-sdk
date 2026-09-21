@@ -462,13 +462,11 @@ static void dump_lcd_exp_regs(const char *stage)
  * disagree, and the BUILD_ASSERT turns an unsupported format into a compile
  * error rather than a blank panel.
  */
-#define PANEL_FMT_IS_RGB888                                                                        \
-	DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_888)
-#define PANEL_FMT_IS_RGB565                                                                        \
-	DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_565)
+#define PANEL_FMT_IS_RGB888 DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_888)
+#define PANEL_FMT_IS_RGB565 DT_ENUM_HAS_VALUE(DT_NODELABEL(cdc200), pixel_fmt_l1, rgb_565)
 
 BUILD_ASSERT(PANEL_FMT_IS_RGB888 || PANEL_FMT_IS_RGB565,
-	     "aen-dsi-display fills only rgb-888 or rgb-565; teach it the shield's pixel-fmt-l1");
+             "aen-dsi-display fills only rgb-888 or rgb-565; teach it the shield's pixel-fmt-l1");
 
 #if PANEL_FMT_IS_RGB888
 #define PANEL_BYTES_PER_PIXEL 3U
@@ -1857,6 +1855,105 @@ static void probe_read_wedge(const struct device *dsi, const struct device *disp
 	}
 }
 
+/*
+ * BENCH DIAGNOSTIC -- probe_pwr_current() (#2199), prefix `pwrc:`.
+ *
+ * Every OPTICAL avenue is exhausted: probe_bist_v2()'s Free Running Mode
+ * burn-in generator and probe_frm_vcom_sweep()'s VCOM sweep across the
+ * panel's entire range -- including VSSA and a floating common electrode --
+ * both came back flat, below camera noise.  The open question left is
+ * whether the panel MODULE is receiving power at all: the suspicion is that
+ * the FFC at J6 is skewed or mis-seated, contacting the low/middle pins
+ * (backlight 1/2, DSI lanes 5-18, LCD_RST_L 21 -- all demonstrably working)
+ * but not the high-numbered end (DSI_I2C 26/27, CTP_RST_L/CTP_INT_L 28/29
+ * dead every run; +3V3 30, LCD_PWR_EN_L 32, +5V 39/40 unverifiable from
+ * firmware alone).
+ *
+ * This is an ELECTRICAL test, not an optical one: asserting LCD_PWR_EN
+ * (expander U35 P0) should bring up the module's analog rails and draw
+ * measurable current on the board's 16V input.  The bench DPS resolves
+ * module-level steps easily -- a backlight toggle previously gave a clean
+ * 0.146A -> 0.074A -> 0.146A step, about 1.16W -- so this probe repeats that
+ * exact calibration (phases 3-4) alongside the LCD_PWR_EN toggle (phases
+ * 1-2) an external power sampler can bucket against.  If phases 1-2 show no
+ * step while 3-4 do, the sampler was working and the module rail genuinely
+ * did not move.
+ *
+ * Runs LAST in main(), after every other probe, so nothing downstream
+ * depends on the state it leaves.  Each phase holds 10s and is announced
+ * with a "-- SAMPLE NOW" marker line so an external sampler can bucket its
+ * readings; the expander's four registers (in/out/pol/cfg, via
+ * dump_lcd_exp_regs()) are printed at every phase so the log shows what was
+ * actually driven.
+ *
+ * Guarded read-modify-write on the output register (0x01), exactly like
+ * exp_set_resx() above: LCD_RST is P1 and the touch reset is P3, and a
+ * failed read would leave `out` at 0, driving both low on write -- so a
+ * failed read aborts the toggle phases (1-2) rather than risk that.  The
+ * backlight phases (3-4) do not touch the expander output register and
+ * always run.
+ */
+#define EXP_CFG_REG        0x03U
+#define EXP_PWR_EN_BIT     BIT(0) /* LCD_PWR_EN, expander P0. */
+#define PWRC_PHASE_HOLD_MS 10000
+
+static void probe_pwr_current(void)
+{
+	uint8_t cfg          = 0;
+	int     cfg_rc       = i2c_reg_read_byte_dt(&lcd_exp_i2c, EXP_CFG_REG, &cfg);
+	bool    p0_is_output = (cfg_rc == 0) && ((cfg & EXP_PWR_EN_BIT) == 0);
+
+	printk("pwrc: P0 config cfg=0x%02x(rc%d) -- P0 configured as %s\n",
+	       cfg,
+	       cfg_rc,
+	       p0_is_output ? "OUTPUT" : "NOT OUTPUT or read failed");
+
+	uint8_t out      = 0;
+	int     out_rc   = i2c_reg_read_byte_dt(&lcd_exp_i2c, EXP_OUTPUT_REG, &out);
+	bool    guard_ok = (out_rc == 0);
+	int     booted   = guard_ok ? (int)((out & EXP_PWR_EN_BIT) != 0) : -1;
+
+	printk("pwrc: phase 0 baseline P0=%d -- SAMPLE NOW\n", booted);
+	dump_lcd_exp_regs("pwrc-phase0");
+	k_msleep(PWRC_PHASE_HOLD_MS);
+
+	if (!guard_ok) {
+		printk("pwrc: P0 ABORT -- output-register read failed rc=%d, refusing RMW\n", out_rc);
+	} else {
+		uint8_t want1 = booted ? (uint8_t)(out & ~EXP_PWR_EN_BIT) : (out | EXP_PWR_EN_BIT);
+		int     wr1   = i2c_reg_write_byte_dt(&lcd_exp_i2c, EXP_OUTPUT_REG, want1);
+
+		printk(
+		    "pwrc: phase 1 P0=%d -- SAMPLE NOW (wrote=0x%02x write-rc=%d)\n", !booted, want1, wr1);
+		dump_lcd_exp_regs("pwrc-phase1");
+		k_msleep(PWRC_PHASE_HOLD_MS);
+
+		uint8_t want2 = booted ? (want1 | EXP_PWR_EN_BIT) : (uint8_t)(want1 & ~EXP_PWR_EN_BIT);
+		int     wr2   = i2c_reg_write_byte_dt(&lcd_exp_i2c, EXP_OUTPUT_REG, want2);
+
+		printk("pwrc: phase 2 P0=%d restored -- SAMPLE NOW (wrote=0x%02x write-rc=%d)\n",
+		       booted,
+		       want2,
+		       wr2);
+		dump_lcd_exp_regs("pwrc-phase2");
+		k_msleep(PWRC_PHASE_HOLD_MS);
+	}
+
+	int bl_off_rc = gpio_pin_set_dt(&bl_gpio, 0);
+
+	printk("pwrc: phase 3 backlight OFF -- SAMPLE NOW (rc=%d)\n", bl_off_rc);
+	dump_lcd_exp_regs("pwrc-phase3");
+	k_msleep(PWRC_PHASE_HOLD_MS);
+
+	int bl_on_rc = gpio_pin_set_dt(&bl_gpio, 1);
+
+	printk("pwrc: phase 4 backlight ON -- SAMPLE NOW (rc=%d)\n", bl_on_rc);
+	dump_lcd_exp_regs("pwrc-phase4");
+	k_msleep(PWRC_PHASE_HOLD_MS);
+
+	printk("pwrc: END P0 restored to booted level, backlight ON\n");
+}
+
 int main(void)
 {
 	printk("\n=== aen-dsi-display ===\n");
@@ -2104,6 +2201,14 @@ int main(void)
 		       (int)write_ok,
 		       (int)scanout_ok);
 	}
+
+	/*
+	 * Step 7 (BENCH DIAGNOSTIC, #2199): probe_pwr_current() runs absolutely
+	 * last -- after RESULT PASS/FAIL is already decided and printed -- so
+	 * nothing above or below depends on the state it leaves (see its own
+	 * banner).
+	 */
+	probe_pwr_current();
 
 	return 0;
 }
