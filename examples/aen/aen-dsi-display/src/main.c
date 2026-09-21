@@ -554,6 +554,38 @@ static ssize_t dcs_read_classified(const struct device *dsi,
 	return rc;
 }
 
+/*
+ * Panel-state sentinel, prefixed onto every probe below that assumes the
+ * panel is awake (Sleep Out, Display On).  A RESX pulse hardware-resets the
+ * panel to Sleep In / Display Off / booster off if nothing re-wakes it
+ * afterward -- see panel_wake_after_resx() -- so a probe that skips this
+ * check can silently measure a sleeping panel and its null result gets read
+ * as real evidence.  Never skips the probe itself; only marks the output.
+ */
+static void probe_report_panel_state(const char *prefix, const struct device *dsi)
+{
+	uint8_t  rddpm = 0xAAU;
+	uint32_t int0  = 0;
+	uint32_t int1  = 0;
+
+	(void)dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+
+	int sleep_out  = (int)((rddpm & BIT(4)) != 0);
+	int display_on = (int)((rddpm & BIT(2)) != 0);
+
+	printk("%s: panel-state RDDPM=0x%02x sleep_out=%d display_on=%d\n",
+	       prefix,
+	       rddpm,
+	       sleep_out,
+	       display_on);
+
+	if (!sleep_out || !display_on) {
+		printk("%s: !! PANEL IS ASLEEP OR DISPLAY OFF -- this probe's result is NOT "
+		       "valid evidence\n",
+		       prefix);
+	}
+}
+
 static bool probe_panel_reads(const struct device *dsi)
 {
 	/*
@@ -700,6 +732,83 @@ static bool exp_set_resx(int level)
 	       want,
 	       wr);
 	return true;
+}
+
+/*
+ * Recovery sequence owed after ANY RESX pulse (datasheet Sec5.12 pp.86-87).
+ * RESX hardware-resets the panel to Sleep In / Display Off / booster off, and
+ * every manufacturer register (SETEXTC and everything gated behind it)
+ * reverts to its power-on default too -- proven on the bench:
+ * probe_setextc_gate_v2()'s own final RESX pulse left RDDST=00 71 00 00
+ * (booster off, Sleep In, Display Off) and RDDPM=0x08 (the datasheet's
+ * documented HW-reset default, Sec5.18.11 p.136), with every probe that ran
+ * afterward none the wiser.  A caller that pulses RESX and does not call this
+ * leaves every later probe measuring a panel that cannot drive glass.
+ *
+ * Re-sends SETEXTC first, purely so a caller that immediately touches a
+ * gated register afterward does not have to reopen the gate itself --
+ * EXIT_SLEEP_MODE/SET_DISPLAY_ON are standard DCS and do not need it.
+ */
+static void panel_wake_after_resx(const struct device *dsi)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	struct mipi_dsi_msg  extc_w     = {
+		.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+		.flags  = MIPI_DSI_MSG_USE_LPM,
+		.tx_buf = extc_cmd,
+		.tx_len = sizeof(extc_cmd),
+	};
+	ssize_t extc_rc = mipi_dsi_transfer(dsi, 0, &extc_w);
+
+	printk("wake: SETEXTC (B9h FF 83 94) rc=%d\n", (int)extc_rc);
+
+	struct mipi_dsi_msg slpout_w = {
+		.type  = MIPI_DSI_DCS_SHORT_WRITE,
+		.flags = MIPI_DSI_MSG_USE_LPM,
+		.cmd   = 0x11U, /* EXIT_SLEEP_MODE */
+	};
+	ssize_t slpout_rc = mipi_dsi_transfer(dsi, 0, &slpout_w);
+
+	/* Datasheet Sec5.12 -- 120 ms dwell after EXIT_SLEEP_MODE, not a guess. */
+	k_msleep(120);
+
+	struct mipi_dsi_msg dispon_w = {
+		.type  = MIPI_DSI_DCS_SHORT_WRITE,
+		.flags = MIPI_DSI_MSG_USE_LPM,
+		.cmd   = 0x29U, /* SET_DISPLAY_ON */
+	};
+	ssize_t dispon_rc = mipi_dsi_transfer(dsi, 0, &dispon_w);
+
+	uint8_t  rddst[4];
+	uint8_t  rddpm      = 0xAAU;
+	uint32_t rddst_int0 = 0;
+	uint32_t rddst_int1 = 0;
+	uint32_t rddpm_int0 = 0;
+	uint32_t rddpm_int1 = 0;
+
+	memset(rddst, 0xAAU, sizeof(rddst));
+	(void)dcs_read_classified(dsi, 0x09U, rddst, sizeof(rddst), &rddst_int0, &rddst_int1);
+	(void)dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &rddpm_int0, &rddpm_int1);
+
+	int sleep_out  = (int)((rddpm & BIT(4)) != 0);
+	int display_on = (int)((rddpm & BIT(2)) != 0);
+
+	printk("wake: SLPOUT rc=%d DISPON rc=%d RDDST=%02x %02x %02x %02x RDDPM=%02x sleep_out=%d "
+	       "display_on=%d\n",
+	       (int)slpout_rc,
+	       (int)dispon_rc,
+	       rddst[0],
+	       rddst[1],
+	       rddst[2],
+	       rddst[3],
+	       rddpm,
+	       sleep_out,
+	       display_on);
+
+	if (!sleep_out || !display_on) {
+		printk("wake: !! PANEL DID NOT WAKE -- SLEEP IN OR DISPLAY OFF, every probe "
+		       "after this one is measuring a panel that cannot drive glass\n");
+	}
 }
 
 static void probe_setextc_gate_v2(const struct device *dsi)
@@ -869,6 +978,13 @@ static void probe_setextc_gate_v2(const struct device *dsi)
 		       ddb_b_after[3],
 		       ddb_b_after[4]);
 	}
+
+	/*
+	 * Arm B's RESX pulse (above) left the panel hardware-reset -- every
+	 * probe scheduled after this one must see an awake panel, not the
+	 * Sleep In / Display Off state RESX leaves behind.
+	 */
+	panel_wake_after_resx(dsi);
 }
 
 /*
@@ -942,6 +1058,8 @@ static void probe_ta_timing(const struct device *dsi)
 	int      best_variant = -1;
 	int      best_ok      = -1;
 	int      second_ok    = -1;
+
+	probe_report_panel_state("ta", dsi);
 
 	memset(rddst, 0xAAU, sizeof(rddst));
 	rddst_rc = dcs_read_classified(dsi, 0x09U, rddst, sizeof(rddst), &rddst_int0, &rddst_int1);
@@ -1161,6 +1279,8 @@ static void probe_video_rx_errors_v2(const struct device *dsi, const struct devi
 	ssize_t numpe_after_rc, rddsm_after_rc, rddsdr_after_rc, rddst_after_rc;
 	int     rc;
 
+	probe_report_panel_state("vrx2", dsi);
+
 	/* Step 1 (after an implicit drop to command mode -- see the banner above). */
 	rc = display_blanking_on(disp);
 	printk("vrx2: pre-baseline blanking_on rc=%d\n", rc);
@@ -1268,6 +1388,8 @@ static void probe_bist_v2(const struct device *dsi)
 		                                0x00U, 0x00U, 0x00U, 0x00U, 0xC8U };
 	static const uint8_t bist_off[] = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU };
 	ssize_t              rc;
+
+	probe_report_panel_state("bist2", dsi);
 
 	{
 		struct mipi_dsi_msg w = {
@@ -1393,6 +1515,8 @@ static void probe_read_wedge(const struct device *dsi, const struct device *disp
 	ssize_t arm2_rc;
 	ssize_t arm3_mid_rc;
 	ssize_t arm3_rc;
+
+	probe_report_panel_state("wedge", dsi);
 
 #define WEDGE_READ(tag, outvar) \
 	do { \
