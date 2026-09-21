@@ -60,6 +60,14 @@
  * (gpio_pca_series), so an app must not also write its registers directly.
  * aen-evk-demo's phase 4, the one in-tree raw user, checks for this shield's
  * lcd_exp node and skips its register writes when it is present.
+ *
+ * Touch: the lcd_touch (GT911) node below requires
+ * zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch
+ * -- see that node's comments for why -- and Kconfig's INPUT defaults y, so
+ * ANY app that adds this shield compiles the GT911 driver whether or not it
+ * touches input at all.  `scripts/bootstrap.sh` applies west patches by
+ * default; a workspace bootstrapped `--no-patches` fails to compile this
+ * shield.
  */
 
 #include <mem.h>
@@ -70,6 +78,9 @@
 / {
 	chosen {
 		zephyr,display = &cdc200;
+		/* Upstream Zephyr convention (NXP's own rk055hdmipi4ma0 shield sets
+		 * this too) -- lcd_touch is defined further down, at &i2c1. */
+		zephyr,touch = &lcd_touch;
 	};
 
 	aliases {
@@ -222,16 +233,22 @@
  * names the bus E1M_I2C1 / EVK_I2C_BUS_DSI_CSI, "Display + camera control I2C
  * (touch panel, camera-side I2C config)".
  *
- * The touch controller is a Goodix GT911, confirmed alive on the bench:
+ * The touch controller is a Goodix GT911, confirmed alive with a raw I2C
+ * probe (not this driver):
  * `touch : RESPONDING at 0x14 (alternate) product-id[0x8140] rc=0
  * data=39 31 31 00` ("911" in ASCII).  Its reset is expander U35 P3 (net
  * CTP_RST -> J6 pin 28); its INT is J6 pin 29 (CTP_INT_L), through level
  * shifter U4 (LSF0102DQER) to net CTP_INT, to E1M module connector pad AH8.
  * Per the 2626-R2 netlist and metadata/pinmux/aen.yaml:99, pad AH8 is owned
  * by the CC3501E Wi-Fi/BLE coprocessor (silicon_pad: GPIO_15), NOT by the
- * Alif SoC -- the Alif can never see this INT line on this board revision,
- * and U35 has no spare pin to route it anywhere else.  See the GT911 node
- * below and zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-
+ * Alif SoC.  The Alif can see this line only through a CC3501E GPIO relay
+ * (ALP_CC3501E_CMD_GPIO_SET_INTERRUPT / EVT_GPIO_INTERRUPT,
+ * chips/cc3501e/cc3501e_gpio.c) -- not wired up today, so polling is the
+ * choice on this board revision, and U35 has no spare pin to route INT out
+ * another way regardless.  GPIO_15 must also stay an INPUT: the GT911
+ * drives its own INT pin after reset, so a CC3501E output there would
+ * contend with it.  See the GT911 node below and
+ * zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-
  * without-an-irq.patch for the polling fall-back this forces.
  *
  * P3_7 + P7_2 ONLY.  P3_6 is the I/O expander's own reset (E1M pad N1) and must
@@ -258,27 +275,25 @@
 	pinctrl-names = "default";
 
 	/*
-	 * reg is the address the GT911 forces when its INT pin is held low
-	 * across reset (its power-on-reset default is 0x5D); alt-addr = 0x14 is
-	 * what it falls back to otherwise.  Both are load-bearing here, not a
-	 * "just in case" fallback, because which one this board's controller
-	 * actually latches depends on a fact off this shield entirely: whether
-	 * the CC3501E that owns CTP_INT (see the comment above) is flashed with
-	 * firmware driving its GPIO_15.
+	 * The GT911 latches its I2C address from the level of its INT pin at
+	 * the moment its RSTB releases: low forces reg = 0x5D, high forces
+	 * alt-addr = 0x14.  Both are load-bearing here, not a "just in case"
+	 * fallback -- this shield does not drive CTP_INT (see the comment
+	 * above), so which address this board's controller actually latches
+	 * is not something this shield controls.
 	 *
-	 * As shipped, this EVK's CC3501E is NOT flashed, so GPIO_15 never drives
-	 * CTP_INT, the net floats at GT911 reset, and the controller is
-	 * bench-confirmed selecting the alternate address 0x14 (see the comment
-	 * above).  If the CC3501E is later flashed with firmware that drives
-	 * GPIO_15, the level CTP_INT sees at reset can change and the
-	 * controller can select 0x5D instead.  reg/alt-addr together, plus the
+	 * A raw I2C probe (not this driver) found the controller bench-alive
+	 * at the alternate address 0x14 (see the comment above), i.e. INT was
+	 * sampled HIGH at that moment.  reg/alt-addr together, plus the
 	 * alt-addr probing in 0004-input-gt911-fall-back-to-polling-without-an-
 	 * irq.patch (unreachable without that patch's fix, since the pristine
-	 * driver faults on the absent irq-gpios before ever reaching it), cover
-	 * both states without a board-specific edit when the CC35 is flashed.
+	 * driver fails to COMPILE with no irq-gpios property, let alone run),
+	 * are what let the driver find the device at whichever address it
+	 * actually latches.
 	 *
 	 * No irq-gpios: see the comment above the pinctrl_i2c1_dsi block --
-	 * CTP_INT terminates on the CC3501E, which the Alif SoC cannot see.
+	 * CTP_INT terminates on the CC3501E, which the Alif SoC cannot see
+	 * without a GPIO relay this board does not implement today.
 	 */
 	lcd_touch: touch@5d {
 		compatible = "goodix,gt911";
@@ -297,11 +312,21 @@
 		 * reset, physically high releases it.  GPIO_ACTIVE_LOW makes the
 		 * driver's logical assert (1) a physical LOW on U35 P3, which U4
 		 * (LSF0102DQER, a non-inverting level shifter) passes straight
-		 * through to CTP_RST_L / RSTB.  GPIO_ACTIVE_HIGH would hold the
-		 * real chip permanently OUT of reset from gt911_init()'s very first
-		 * configure call and the reset pulse would never assert it at all.
+		 * through to CTP_RST_L / RSTB.  GPIO_ACTIVE_HIGH would flip the
+		 * mapping: gt911_init()'s final gpio_pin_set_dt(&rst_gpio, 0)
+		 * [release] would then drive the pin physically LOW -- RSTB
+		 * asserted -- leaving the chip held IN reset permanently, not
+		 * out of it.
 		 */
 		reset-gpios = <&lcd_exp 3 GPIO_ACTIVE_LOW>;
+
+		/*
+		 * Note: the upstream driver rewrites the GT911's stored config's
+		 * touch-number byte to CONFIG_INPUT_GT911_MAX_TOUCH_POINTS (default
+		 * 1) on every init, and the controller keeps that value across
+		 * resets.  NXP's own rk055hdmipi4ma0 shield does the same with this
+		 * panel.  Not changed here -- the default is fine for this app.
+		 */
 
 		/* RK055HDMIPI4MA0 panel resolution -- matches cdc200 below. */
 		screen-width = <720>;

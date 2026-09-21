@@ -96,6 +96,7 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/input/input.h>
 #include <zephyr/sys/printk.h>
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
@@ -106,6 +107,52 @@
 #define LCD_PWR_NODE DT_NODELABEL(lcd_pwr_en)
 
 static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios);
+
+/*
+ * The GT911 touch controller (shield's lcd_touch node, aliased zephyr,touch)
+ * is optional: a board without this shield, or an older overlay predating
+ * #2199, has no chosen zephyr,touch at all.  DT_HAS_CHOSEN() lets this whole
+ * feature compile out cleanly instead of a hard DEVICE_DT_GET() on a node
+ * that may not exist.
+ *
+ * The GT911 has no way to interrupt the Alif SoC on this board (its INT pin
+ * lands on the CC3501E coprocessor, not the Alif -- see the shield overlay),
+ * so it is polled every CONFIG_INPUT_GT911_PERIOD_MS by the driver itself;
+ * this app only registers a callback to be told when a poll finds something.
+ */
+#if DT_HAS_CHOSEN(zephyr_touch)
+#define TOUCH_NODE DT_CHOSEN(zephyr_touch)
+
+/*
+ * The Input subsystem delivers one event per axis/button, not one bundled
+ * "touch" struct: an X move, then a Y move, then the BTN_TOUCH press/release
+ * arrive as three separate callbacks (see gt911_process() in
+ * drivers/input/input_gt911.c).  Latch X/Y as they arrive and print only on
+ * BTN_TOUCH, so each printed line already has a current position.
+ */
+static int32_t touch_x, touch_y;
+
+static void touch_event_cb(struct input_event *evt, void *user_data)
+{
+	ARG_UNUSED(user_data);
+
+	switch (evt->code) {
+	case INPUT_ABS_X:
+		touch_x = evt->value;
+		break;
+	case INPUT_ABS_Y:
+		touch_y = evt->value;
+		break;
+	case INPUT_BTN_TOUCH:
+		printk("touch: x=%d y=%d down=%d\n", touch_x, touch_y, evt->value);
+		break;
+	default:
+		break;
+	}
+}
+
+INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_event_cb, NULL);
+#endif
 
 /* Panel geometry (must match the overlay's cdc200 + panel nodes). */
 #define PANEL_W 720
@@ -184,6 +231,16 @@ int main(void)
 	/* Step 1: the panel-control expander and its boot-on panel-enable regulator. */
 	bool exp_ok = dev_ready("lcd-exp", exp);
 	bool pwr_ok = dev_ready("lcd-reg", pwr);
+
+	/*
+	 * Step 1b: the touch controller, if this shield's overlay chose one.
+	 * Not part of the PASS gate below -- this app's job is to prove pixels
+	 * reach glass, and touch is not bench-verified through this driver yet
+	 * (#2199) -- just reported and wired to print incoming events.
+	 */
+#if DT_HAS_CHOSEN(zephyr_touch)
+	(void)dev_ready("touch", DEVICE_DT_GET(TOUCH_NODE));
+#endif
 
 	/*
 	 * Step 2: HX8394 init does mipi_dsi_attach + DCS power-on over DSI, and

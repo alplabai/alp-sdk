@@ -357,7 +357,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch
-    sha256sum: 53310891468805861ccc1c4ffcda852d68d0f0a6db88d9ffb243a73b6f34a150
+    sha256sum: eccad02eaa9c804d9e2bb3723f6ef4981a0bed26fb01ee8ff024356c77cc011b
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -365,14 +365,17 @@ patches:
     upstreamable: true
     comments: |
       On the E1M-EVK's RK055HDMIPI4MA0 panel, the Goodix GT911 capacitive
-      touch controller's INT line (CTP_INT) does not reach the Alif Ensemble
-      E8 at all: per the 2626-R2 netlist, J6 pin 29 (CTP_INT_L) runs through
-      level shifter U4 to CTP_INT, to E1M module connector pad AH8, which
+      touch controller's INT line (CTP_INT) is not wired to the Alif Ensemble
+      E8: per the 2626-R2 netlist, J6 pin 29 (CTP_INT_L) runs through level
+      shifter U4 to CTP_INT, to E1M module connector pad AH8, which
       metadata/pinmux/aen.yaml lists as owned by the CC3501E Wi-Fi/BLE
-      coprocessor (silicon_pad: GPIO_15), not the Alif SoC. Expander U35
-      (the CTP_RST driver, P3) has no spare pin, and the EVK carries no
-      general-purpose header to bring INT out another way -- there is no pin
-      to give this signal on this board revision.
+      coprocessor (silicon_pad: GPIO_15), not the Alif SoC. The Alif can see
+      this line only via a CC3501E GPIO relay
+      (ALP_CC3501E_CMD_GPIO_SET_INTERRUPT / EVT_GPIO_INTERRUPT,
+      chips/cc3501e/cc3501e_gpio.c) -- not wired up today, so polling is the
+      choice on this board revision. GPIO_15 must stay an INPUT regardless of
+      that relay: the GT911 drives its own INT pin after reset, so a CC3501E
+      output on GPIO_15 would contend with it.
 
       drivers/input/input_gt911.c already supports polling
       (CONFIG_INPUT_GT911_INTERRUPT defaults off, CONFIG_INPUT_GT911_PERIOD_MS
@@ -381,37 +384,38 @@ patches:
       driver contradicts its own binding. dts/bindings/input/goodix,gt911.yaml
       marks neither irq-gpios nor reset-gpios as required, yet
       GT911_INIT() built config->int_gpio with the plain (non-_OR)
-      GPIO_DT_SPEC_INST_GET(), and gt911_init() then dereferenced it
-      unconditionally at gpio_is_ready_dt(), the two
-      gpio_pin_configure_dt() calls that force address-mode-0 during reset,
-      and again in gt911_pm_state_exit()'s PM_STATE_STANDBY reconfigure --
-      any board with no irq-gpios property faulted on a zeroed gpio_dt_spec
-      before ever reaching alt-addr probing.
+      GPIO_DT_SPEC_INST_GET(). With no irq-gpios property, that macro expands
+      to a DT accessor macro that a board with no irq-gpios never generates --
+      the driver FAILS TO COMPILE, not just at runtime, for every board that
+      leaves irq-gpios out.
 
       Mirrors how config->rst_gpio is already handled: int_gpio switches to
-      GPIO_DT_SPEC_INST_GET_OR(index, irq_gpios, {0}), and every use above
-      is now guarded by `if (config->int_gpio.port != NULL)`. Under
-      CONFIG_INPUT_GT911_INTERRUPT the pin is still genuinely required, so
-      gt911_init() now fails cleanly with -ENODEV and a clear LOG_ERR instead
-      of reaching the guarded, now-silent no-op path. With no int_gpio the
-      driver can never force address-mode-0 (drive INT low across reset), so
+      GPIO_DT_SPEC_INST_GET_OR(index, irq_gpios, {0}), and every runtime use
+      (gpio_is_ready_dt(), the two gpio_pin_configure_dt() calls that force
+      address-mode-0 during reset, and gt911_pm_state_exit()'s
+      PM_STATE_STANDBY reconfigure) is now guarded by
+      `if (config->int_gpio.port != NULL)`. A new BUILD_ASSERT in
+      GT911_INIT() keeps CONFIG_INPUT_GT911_INTERRUPT genuinely requiring
+      irq-gpios: turning that config on without the property is now a build
+      error naming the missing property, not a silently-compiling driver that
+      would fail -ENODEV at gt911_init() instead. With no int_gpio the driver
+      can never force address-mode-0 (drive INT low across reset), so
       whichever address the GT911 latches depends on whatever level the
-      otherwise-undriven INT net happens to be at; alt-addr probing (already
-      unconditional on int_gpio in the upstream code) is the only way this
-      driver can still find the device, and that path is untouched by this
-      patch.
+      otherwise-undriven INT net happens to be at when its RSTB releases: low
+      forces 0x5D, high forces 0x14. alt-addr probing was already
+      unconditional on int_gpio in the upstream code -- this patch only makes
+      that code path reachable; it does not change it.
 
-      The e1m_evk_rk055hdmipi4ma0 shield sets reg = <0x5d> (the address the
-      GT911 would force with INT driven) and alt-addr = <0x14> (its power-on
-      default). alt-addr is load-bearing in BOTH states of this EVK, not just
-      a fallback for one of them: as shipped, the CC3501E on this EVK is not
-      yet flashed, so its GPIO_15 does not drive CTP_INT, the net floats at
-      GT911 reset, and the controller is bench-confirmed selecting 0x14
+      The e1m_evk_rk055hdmipi4ma0 shield sets reg = <0x5d> (what the GT911
+      forces when INT is held low across reset) and alt-addr = <0x14> (what
+      it forces when INT is high at that moment). As shipped, this EVK's
+      CC3501E is not flashed with firmware that drives GPIO_15, and the
+      controller is bench-confirmed responding at 0x14 -- i.e. INT was
+      sampled HIGH at the GT911's reset release
       (`touch : RESPONDING at 0x14 (alternate) product-id[0x8140] rc=0
-      data=39 31 31 00`, "911" in ASCII). If the CC3501E is later flashed
-      with firmware that drives GPIO_15, the level CTP_INT sees at GT911
-      reset can change and the controller can select 0x5D instead -- the
-      shield's reg/alt-addr pair, combined with this patch's alt-addr
-      probing fix, covers both outcomes without a board-specific edit.
+      data=39 31 31 00`, "911" in ASCII, read with a raw I2C probe, not this
+      driver). reg/alt-addr together, plus this patch's fix making alt-addr
+      probing reachable, is what lets the driver find the device at whichever
+      address it actually latches.
 
       Upstream to zephyrproject-rtos/zephyr then drop.

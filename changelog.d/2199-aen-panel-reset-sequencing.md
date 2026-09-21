@@ -17,7 +17,7 @@ same all-`rc=-5` signature. The hog is a reset-ordering fix in its own right;
 it is not shown to explain that silence.
 
 The shield now hogs that pin low as soon as the expander exists:
-`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:200`
+`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:211`
 ("lcd_reset_hog: lcd-reset-hog {") with `output-low` and `GPIO_ACTIVE_HIGH`, so
 `gpio_hogs_init()` drives the expander pin physically low — `RESX` asserted —
 before the regulator runs. Upstream's hog priority default of 41 is below the
