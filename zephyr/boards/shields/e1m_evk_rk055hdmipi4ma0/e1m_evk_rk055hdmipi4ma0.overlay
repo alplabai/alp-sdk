@@ -306,6 +306,33 @@
 	dpi-video-mode = "non-burst-sync-events";
 
 	/*
+	 * EoTp auto-insert, ON -- and note this is SEPARATE from the burst
+	 * decision above, which is the whole point.
+	 *
+	 * NXP's generic driver turns this on for every panel on their host:
+	 * DSI_GetDefaultConfig() sets `config->autoInsertEoTp = true`
+	 * (mcux-sdk-ng/drivers/mipi_dsi/fsl_mipi_dsi.c:504-521), and DSI_Init()
+	 * writes it into CFG_AUTOINSERT_EOTP (:446-453).  Our binding
+	 * snps,designware-dsi.yaml declares `autoinsert-eotp` with NO `default:`
+	 * key, so it resolves FALSE when unset -- and this shield never set it.
+	 * So this panel has been running with DSI_PCKHDL_CFG_EOTP_TX_EN clear
+	 * while the vendor runs the same module with it set.
+	 *
+	 * The comment above names "burst with autoinsert-eotp" as one thing and
+	 * discards both because burst killed DCS reads.  They are not one thing.
+	 * Burst changes how video packets are timed on the link; EoTp appends an
+	 * end-of-transmission short packet so the peripheral can tell an HS burst
+	 * ended cleanly rather than inferring it from the line going quiet.  A
+	 * receiver that never sees EoTp can mis-frame the stream and show
+	 * nothing while every LP command still answers perfectly -- which is
+	 * this board's exact symptom (#2199).
+	 *
+	 * Burst stays OFF.  Only EoTp changes here, so if DCS reads regress it
+	 * is unambiguously this property and not the video-mode choice.
+	 */
+	autoinsert-eotp;
+
+	/*
 	 * The Alif DSI controller's TWO-LANE ceiling, not a guess: the Ensemble
 	 * serial-display application note's MIPI DSI feature list states
 	 * "Supports one data lane (maximum speed 850 Mbps) or two data lanes
