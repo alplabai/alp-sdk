@@ -18,7 +18,10 @@ The shared D-PHY driver (`zephyr/drivers/mipi_dphy/dphy_dw.c`) now powers the
 D-PHY at init: it enables the CGU HFOSC and 100 MHz clocks and clears the VBAT
 `PWR_CTRL` D-PHY power masks, isolation and 1.8 V bypass. Without that the
 D-PHY never reaches Stop-state and camera opens fail. Apps no longer need
-their own `SYS_INIT` for it.
+their own `SYS_INIT` for it. `zephyr/kconfigs/vendor-alif-peripherals.kconfig`
+also gains the `CONFIG_MIPI_DPHY_LOG_LEVEL` module log-level Kconfig
+`dphy_dw.c`'s `LOG_MODULE_REGISTER` names but that no upstream Kconfig class
+defined, which failed any `CONFIG_LOG=y` build linking the D-PHY driver.
 
 New example `examples/aen/aen-camera-firstlight` opens each of the four
 RPi-style CSI-2 camera shields the E1M-EVK's J5 connector supports (IMX219,
@@ -28,9 +31,19 @@ sample row bytes on success, or a diagnosed failure (e.g. `ALP_ERR_NOT_READY`
 meaning the sensor never answered its I2C chip-ID probe) otherwise. Frame
 buffers move into the global SRAM0 bank (`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION`)
 rather than the HE core's 256 KiB DTCM, which the default 2 MiB pool does not
-fit and the CPI's AXI capture master cannot reach regardless of size. The
-whole CSI-2 -> CPI pipe has never run on real silicon; all four shield
-scenarios are `build_only` in twister.
+fit and the CPI's AXI capture master cannot reach regardless of size. All
+three camera backends now allocate those buffers with
+`video_buffer_aligned_alloc()` at `CONFIG_VIDEO_BUFFER_POOL_ALIGN` (64 by
+default) instead of `video_buffer_alloc()`'s 4-byte alignment on the M55 —
+the Alif CPI rejects a non-8-byte-aligned buffer with `-ENOBUFS` at enqueue,
+which the portable backend maps to `ALP_ERR_IO`. The 2 MiB SRAM0 pool also
+needs `CONFIG_SYS_HEAP_AUTO=y`, set in the example's `prj.conf`: Zephyr
+defaults to `SYS_HEAP_SMALL_ONLY` whenever the kernel's SRAM is <= 256 KB
+(the M55-HE's DTCM), and that heap kind cannot span a pool bigger than
+262136 bytes — `src/camera_dispatch.c` now fails the build with a pointer to
+the fix rather than let it misbehave at run time. The whole CSI-2 -> CPI
+pipe has never run on real silicon; all four shield scenarios are
+`build_only` in twister.
 
 Retires `examples/aen/aen-camera-regcheck`: its overlay wired the sensor on
 CSI port@1 (D-PHY id 1, the DSI PHY) with an `arx3a0` sensor on `i2c2`, both

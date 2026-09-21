@@ -7,7 +7,7 @@
  *
  * The portable surface mirrored:
  *   alp_camera_open      -> video_get_caps + format negotiation +
- *                           video_set_format + video_buffer_alloc x N +
+ *                           video_set_format + video_buffer_aligned_alloc x N +
  *                           video_enqueue x N (warm the queue ahead
  *                           of stream_start, see Zephyr docs on
  *                           min_vbuf_count).
@@ -216,7 +216,7 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	st->dev = dev;
 
 	/* Probe the sensor's caps so we know the buffer line-stride to
-	 * use for video_buffer_alloc.  Treat -ENOSYS as success-with-
+	 * use for video_buffer_aligned_alloc.  Treat -ENOSYS as success-with-
 	 * minimal-info -- some bridges (e.g. CSI-2 SerDes pairs) leave
 	 * get_caps unimplemented and only honour set_format.
 	 *
@@ -299,6 +299,10 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 		bytes_per_buf = 64u;
 	}
 
+	/* Round the tail up to the pool's alignment too, so the last cache line
+	 * of this buffer isn't shared with the next heap chunk. */
+	bytes_per_buf = ROUND_UP(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN);
+
 	/* Allocate at CONFIG_VIDEO_BUFFER_POOL_ALIGN (64 by default), not through
 	 * video_buffer_alloc(): that one aligns to sizeof(void *) only, 4 on a
 	 * 32-bit core.  Capture engines DMA straight into the buffer and need
@@ -307,8 +311,8 @@ static alp_status_t z_open(const alp_camera_config_t  *cfg,
 	 * and the per-buffer cache clean/invalidate must not share a cache line
 	 * with the heap's neighbouring allocation. */
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN,
-		                                          K_NO_WAIT);
+		st->vbufs[i] =
+		    video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
 			 * enqueued) before failing (#246). */

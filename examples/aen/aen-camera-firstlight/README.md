@@ -73,12 +73,12 @@ RESULT: capture ok
 
 ## Frame buffers live in SRAM0, not DTCM
 
-The portable camera backend's `video_buffer_alloc()` pool defaults to a 2 MiB
-heap placed in the HE core's local DTCM — DTCM is only 256 KiB, so the default
-does not fit, and even a right-sized pool would not be reachable there: the
-CPI's AXI capture master cannot address core-local DTCM at all (the same
-reachability gap the JPEG / DMA / Ethernet AEN examples found first). `prj.conf`
-moves the pool into the global on-chip SRAM0 bank instead
+The portable camera backend's `video_buffer_aligned_alloc()` pool defaults to a
+2 MiB heap placed in the HE core's local DTCM — DTCM is only 256 KiB, so the
+default does not fit, and even a right-sized pool would not be reachable
+there: the CPI's AXI capture master cannot address core-local DTCM at all (the
+same reachability gap the JPEG / DMA / Ethernet AEN examples found first).
+`prj.conf` moves the pool into the global on-chip SRAM0 bank instead
 (`CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION=y` +
 `CONFIG_VIDEO_BUFFER_POOL_ZEPHYR_REGION_NAME="SRAM0"`), the same 4 MiB
 AXI-visible bank at `0x02000000` those siblings use. Unlike those siblings this
@@ -86,6 +86,13 @@ example does **not** set `CONFIG_DCACHE=n`: `video_alif.c`'s own
 enqueue/dequeue path already runs `sys_cache_data_flush_and_invd_range` /
 `sys_cache_data_invd_range` on every buffer, so cache coherency is handled
 per-buffer by the driver.
+
+The pool itself is also a `sys_heap`: with the kernel's SRAM being the 256 KiB
+DTCM, Zephyr defaults to `SYS_HEAP_SMALL_ONLY`, whose heaps top out at 262136
+bytes — far short of this 2 MiB pool. `prj.conf` sets `CONFIG_SYS_HEAP_AUTO=y`
+so the heap picker sizes each heap's chunk headers to fit the pool it is
+actually given, instead of silently misbehaving at run time (4-byte-aligned
+buffers, then `ALP_ERR_NOMEM` on the second frame).
 
 ## Compile proof only on this batch
 

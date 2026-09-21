@@ -69,7 +69,7 @@ config ALP_SDK_CAMERA_ZEPHYR_VIDEO
 	help
 	  Compile src/backends/camera/zephyr_video.c, the portable
 	  camera backend that wraps Zephyr's drivers/video/ class
-	  (video_get_caps + video_set_format + video_buffer_alloc +
+	  (video_get_caps + video_set_format + video_buffer_aligned_alloc +
 	  video_enqueue / video_dequeue + video_stream_start / _stop)
 	  into the alp_camera_* vtable.  Registered at silicon_ref="*"
 	  priority 50 so it always wins over the zephyr_stub fallback
@@ -113,13 +113,14 @@ config ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 	default 2
 	range 1 8
 	help
-	  Number of video_buffer_alloc() frame buffers
+	  Number of video_buffer_aligned_alloc() frame buffers
 	  src/backends/camera/zephyr_video.c queues at alp_camera_open().
 	  If the capture driver's min_vbuf_count is larger, the open fails
 	  with ALP_ERR_OUT_OF_RANGE -- the count is not raised for you.
-	  Each buffer is pitch x height bytes and comes from
-	  the Zephyr video buffer pool, so keep
-	  VBUF_COUNT x frame size <= CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE.
+	  Each buffer is pitch x height bytes, rounded up to
+	  CONFIG_VIDEO_BUFFER_POOL_ALIGN, and comes from the Zephyr video
+	  buffer pool, so keep VBUF_COUNT x ALIGN-padded frame size <=
+	  CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE.
 	  Drop to 1 for full-frame sensors whose single frame already
 	  fills most of the pool (e.g. the IMX296's 1456x1088 RAW10 frame
 	  is 3,168,256 bytes unpacked).

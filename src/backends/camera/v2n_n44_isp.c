@@ -307,10 +307,14 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		bytes_per_buf = 64u;
 	}
 
+	/* Round the tail up to the pool's alignment too, so the last cache line
+	 * of this buffer isn't shared with the next heap chunk. */
+	bytes_per_buf = ROUND_UP(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN);
+
 	for (uint8_t i = 0; i < want; ++i) {
 		/* Pool-aligned, not video_buffer_alloc()'s sizeof(void *): see zephyr_video.c. */
-		st->vbufs[i] = video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN,
-		                                          K_NO_WAIT);
+		st->vbufs[i] =
+		    video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
 			 * enqueued) before failing (#246). */

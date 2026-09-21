@@ -216,7 +216,11 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   [`docs/camera-shields.md`](../camera-shields.md).  The
   app needs `CONFIG_ALP_SDK=y` and `CONFIG_VIDEO=y`, and a video
   buffer pool that fits in RAM (the Zephyr 2 MB default does not fit
-  the HE core's DTCM).  RAW10 sensors are delivered to memory as
+  the HE core's DTCM).  A pool over 262136 B also needs
+  `CONFIG_SYS_HEAP_AUTO=y`: Zephyr's default `SYS_HEAP_SMALL_ONLY`
+  heap on the M55-HE (SRAM <= 256 KB) cannot span a bigger pool, and
+  the build fails a `BUILD_ASSERT` rather than misbehave at run time.
+  RAW10 sensors are delivered to memory as
   unpacked 16-bit samples (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2),
   not the packed wire format.  Compiled against the upstream IMX219
   driver; not yet run on hardware.
