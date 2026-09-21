@@ -872,6 +872,209 @@ static void probe_setextc_gate_v2(const struct device *dsi)
 }
 
 /*
+ * DSI_INT_ST1/ST0 bit positions this probe classifies on.  TO_LP_RX is the
+ * link-level LP-RX (BTA reverse-turnaround) timeout; DPHY_ERR_4 is a D-PHY LP
+ * contention flag.  Named locally rather than pulled from a driver-private
+ * header, same reasoning as WEDGE_GEN_* above.
+ */
+#define TA_INT1_TO_LP_RX   BIT(1)  /* DSI_INT_1_TO_LP_RX */
+#define TA_INT0_DPHY_ERR_4 BIT(20) /* DSI_INT_0_DPHY_ERR_4 */
+
+/*
+ * BENCH DIAGNOSTIC -- probe_ta_timing() (#2199).
+ *
+ * Every FAILED DCS read observed on this board carries INT_ST1 = TO_LP_RX
+ * (bit 1, LP-RX timeout); every SUCCESSFUL read carries INT_ST0 bit 20 set
+ * (DPHY_ERR_4, an LP contention flag) -- a link whose every good turnaround
+ * still raises a contention flag is marginal.  This probe tests whether
+ * SETMIPI's (BAh, datasheet Sec5.19.9 pp.209-210) reverse-turnaround timing
+ * is why: the init sends `BA 61 03 68 6B B2 C0`, i.e. DSISETUP0=0x61
+ * (bit4=0, TLPX=50 ns) and DSISETUP1=0x03 (bits[3:2]=00, T_TA-GO = 2 TLPX =
+ * 100 ns at 50 ns TLPX) -- half the 4 TLPX the datasheet's own Figure 4.15
+ * p.32 draws for the same transition.  If 100 ns is too tight for this host
+ * to see the reverse turnaround, reads fail with LP-RX timeout and late
+ * payloads land in the NEXT read's FIFO -- exactly the observed signature.
+ *
+ * Four variants, only DSISETUP0/DSISETUP1 (payload bytes 1-2) change; bytes
+ * 3-6 (68 6B B2 C0) stay exactly what the init sends in every variant:
+ *
+ *   V0  61 03  baseline -- what the init sends, the control
+ *   V1  61 0F  DSISETUP1[3:2]=11, T_TA-GO = 8 TLPX
+ *   V2  71 03  DSISETUP0[4]=1,    TLPX = 100 ns
+ *   V3  71 0F  both
+ *
+ * Every read goes through dcs_read_classified() -- masking the DSI IRQ around
+ * the transfer so the read-to-clear INT_ST0/INT_ST1 latches survive to be
+ * read back, instead of being consumed by the ISR first (see that helper's
+ * banner).  A raw read here would make every int0/int1 in this probe
+ * worthless.
+ *
+ * Runs in command mode only, BEFORE probe_read_wedge() and before anything
+ * enters video mode (see the call site in main()) -- video contaminates the
+ * read-success measurement this probe depends on.  Does NOT pulse RESX: the
+ * panel must stay exactly where the driver's init left it (Sleep Out,
+ * Display On), so RDDST is read once at entry to confirm that rather than
+ * assumed.  Runs AFTER probe_setextc_gate_v2(), which must be the first
+ * probe to send SETEXTC (see its own banner) -- this probe also sends
+ * SETEXTC (SETMIPI is gated behind it, same as SETDISP/SETDDB), so it
+ * respects that ordering rather than re-litigating it.
+ *
+ * All BAh writes here are volatile register writes, reversed by RESX or by
+ * this probe's own restore step at the end -- never SETOTP (BBh) or SETID
+ * (C3h), which burn OTP and are never used anywhere in this app.
+ */
+static void probe_ta_timing(const struct device *dsi)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	static const struct {
+		uint8_t setup0;
+		uint8_t setup1;
+	} variants[] = {
+		{ 0x61U, 0x03U },
+		{ 0x61U, 0x0FU },
+		{ 0x71U, 0x03U },
+		{ 0x71U, 0x0FU },
+	};
+	uint8_t  rddst[4];
+	ssize_t  rddst_rc;
+	uint32_t rddst_int0   = 0;
+	uint32_t rddst_int1   = 0;
+	int      best_variant = -1;
+	int      best_ok      = -1;
+	int      second_ok    = -1;
+
+	memset(rddst, 0xAAU, sizeof(rddst));
+	rddst_rc = dcs_read_classified(dsi, 0x09U, rddst, sizeof(rddst), &rddst_int0, &rddst_int1);
+	printk("ta: entry RDDST cmd=0x09 rc=%d data=%02x %02x %02x %02x int0=0x%08x int1=0x%08x\n",
+	       (int)rddst_rc,
+	       rddst[0],
+	       rddst[1],
+	       rddst[2],
+	       rddst[3],
+	       rddst_int0,
+	       rddst_int1);
+
+	for (size_t v = 0; v < ARRAY_SIZE(variants); v++) {
+		uint8_t payload[6] = {
+			variants[v].setup0, variants[v].setup1, 0x68U, 0x6BU, 0xB2U, 0xC0U,
+		};
+		struct mipi_dsi_msg extc_w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		ssize_t extc_rc = mipi_dsi_transfer(dsi, 0, &extc_w);
+
+		printk("ta: V%u SETEXTC (B9h FF 83 94) rc=%d\n", (unsigned int)v, (int)extc_rc);
+
+		struct mipi_dsi_msg mipi_w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xBAU,
+			.tx_buf = payload,
+			.tx_len = sizeof(payload),
+		};
+		ssize_t mipi_rc = mipi_dsi_transfer(dsi, 0, &mipi_w);
+
+		printk("ta: V%u SETMIPI (BAh) payload=%02x %02x %02x %02x %02x %02x rc=%d\n",
+		       (unsigned int)v,
+		       payload[0],
+		       payload[1],
+		       payload[2],
+		       payload[3],
+		       payload[4],
+		       payload[5],
+		       (int)mipi_rc);
+
+		k_sleep(K_MSEC(20));
+
+		int      ok         = 0;
+		int      to_lp_rx   = 0;
+		int      bit20      = 0;
+		uint32_t other_int0 = 0;
+		uint32_t other_int1 = 0;
+
+		for (int i = 0; i < 30; i++) {
+			uint8_t  pm   = 0xAAU;
+			uint32_t int0 = 0;
+			uint32_t int1 = 0;
+			ssize_t  rc   = dcs_read_classified(dsi, 0x0AU, &pm, 1U, &int0, &int1);
+
+			if (rc > 0) {
+				ok++;
+			}
+			if (int1 & TA_INT1_TO_LP_RX) {
+				to_lp_rx++;
+			}
+			if (int0 & TA_INT0_DPHY_ERR_4) {
+				bit20++;
+			}
+			other_int0 |= (int0 & ~(uint32_t)TA_INT0_DPHY_ERR_4);
+			other_int1 |= (int1 & ~(uint32_t)TA_INT1_TO_LP_RX);
+
+			printk("ta: V%u read[%2d] rc=%d data=0x%02x int0=0x%08x int1=0x%08x%s\n",
+			       (unsigned int)v,
+			       i,
+			       (int)rc,
+			       pm,
+			       int0,
+			       int1,
+			       (rc <= 0) ? "  <- READ FAILED, sentinel" : "");
+		}
+
+		printk("ta: V%u payload=%02x %02x 68 6b b2 c0 ok=%d/30 to_lp_rx=%d bit20=%d "
+		       "other_int0=0x%08x other_int1=0x%08x\n",
+		       (unsigned int)v,
+		       payload[0],
+		       payload[1],
+		       ok,
+		       to_lp_rx,
+		       bit20,
+		       other_int0,
+		       other_int1);
+
+		if (ok > best_ok) {
+			second_ok    = best_ok;
+			best_ok      = ok;
+			best_variant = (int)v;
+		} else if (ok > second_ok) {
+			second_ok = ok;
+		}
+	}
+
+	/* Restore the baseline the init sent -- SETEXTC first, gate is closed again by RESX-less time. */
+	{
+		struct mipi_dsi_msg extc_w = {
+			.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.tx_buf = extc_cmd,
+			.tx_len = sizeof(extc_cmd),
+		};
+		ssize_t extc_rc = mipi_dsi_transfer(dsi, 0, &extc_w);
+
+		printk("ta: restore SETEXTC (B9h FF 83 94) rc=%d\n", (int)extc_rc);
+
+		static const uint8_t baseline[6] = { 0x61U, 0x03U, 0x68U, 0x6BU, 0xB2U, 0xC0U };
+		struct mipi_dsi_msg  mipi_w      = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xBAU,
+			.tx_buf = baseline,
+			.tx_len = sizeof(baseline),
+		};
+		ssize_t mipi_rc = mipi_dsi_transfer(dsi, 0, &mipi_w);
+
+		printk("ta: restore SETMIPI (BAh 61 03 68 6b b2 c0) rc=%d\n", (int)mipi_rc);
+	}
+
+	printk("ta: VERDICT best=V%d ok=%d/30 margin=%d over next-best\n",
+	       best_variant,
+	       best_ok,
+	       best_ok - second_ok);
+}
+
+/*
  * BENCH DIAGNOSTIC -- panel-side DSI-RX health, never checked correctly before
  * (#2199).  dump_dsi_status()/check_scanout() are the Alif DSI HOST's own
  * int0/int1: they say whether the TX side thinks it sent clean video, not
@@ -1357,6 +1560,15 @@ int main(void)
 		probe_setextc_gate_v2(dsi);
 		panel_read_ok = probe_panel_reads(dsi);
 		dump_dsi_status("after-read");
+
+		/*
+		 * BENCH DIAGNOSTIC (#2199): probe_ta_timing() must run here -- in
+		 * command mode, after probe_setextc_gate_v2() (see its own banner
+		 * for why that ordering), and before anything below enters video
+		 * mode or calls probe_read_wedge(), which would contaminate the
+		 * read-success measurement this probe depends on.
+		 */
+		probe_ta_timing(dsi);
 	}
 
 	/*
