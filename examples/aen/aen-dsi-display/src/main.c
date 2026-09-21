@@ -567,8 +567,14 @@ static void probe_report_panel_state(const char *prefix, const struct device *ds
 	uint8_t  rddpm = 0xAAU;
 	uint32_t int0  = 0;
 	uint32_t int1  = 0;
+	ssize_t  rc    = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
 
-	(void)dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+	if (rc < 1) {
+		printk("%s: panel-state RDDPM read FAILED rc=%d -- panel state UNKNOWN, not asleep\n",
+		       prefix,
+		       (int)rc);
+		return;
+	}
 
 	int sleep_out  = (int)((rddpm & BIT(4)) != 0);
 	int display_on = (int)((rddpm & BIT(2)) != 0);
@@ -1379,8 +1385,45 @@ static void probe_video_rx_errors_v2(const struct device *dsi, const struct devi
  * 0xC0 | BIT(3).  BIST OFF restores the plain init form (its own 6-parameter
  * form, byte for byte).
  *
- * Sequence runs with video already live and a framebuffer already written.
+ * DISP_BIST_EN needs no incoming video at all -- that is the entire point of
+ * the test -- so this runs in COMMAND MODE, after the framebuffer is written
+ * but BEFORE main()'s first display_blanking_off() call (see the call site):
+ * wedge: (probe_read_wedge()'s own banner) shows that once video mode has
+ * run, the DCS read path can no longer be trusted, so a flat BIST measured
+ * after video has started is indistinguishable from a flat BIST on a
+ * blanked panel.  Running here, before any video-mode entry in main(), is
+ * what makes the RDDPM checks below mean anything.
+ *
+ * Self-certifying: bist2_report_rddpm() reads RDDPM at entry, immediately
+ * after the BIST-ON write, and again after the restore, so the log proves
+ * the panel stayed awake across the whole measurement rather than only at
+ * its start.  A failed read is reported as unverified -- never decoded from
+ * the 0xAA sentinel.
  */
+static bool bist2_report_rddpm(const struct device *dsi, const char *tag)
+{
+	uint8_t  rddpm = 0xAAU;
+	uint32_t int0  = 0;
+	uint32_t int1  = 0;
+	ssize_t  rc    = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+
+	if (rc < 1) {
+		printk("bist2: %s RDDPM read FAILED rc=%d -- panel state UNVERIFIED\n", tag, (int)rc);
+		return false;
+	}
+
+	int  sleep_out  = (int)((rddpm & BIT(4)) != 0);
+	int  display_on = (int)((rddpm & BIT(2)) != 0);
+	bool awake      = sleep_out && display_on;
+
+	printk(
+	    "bist2: %s RDDPM=0x%02x sleep_out=%d display_on=%d\n", tag, rddpm, sleep_out, display_on);
+	if (awake) {
+		printk("bist2: panel CONFIRMED awake at BIST time (RDDPM=0x%02x)\n", rddpm);
+	}
+	return awake;
+}
+
 static void probe_bist_v2(const struct device *dsi)
 {
 	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
@@ -1389,7 +1432,7 @@ static void probe_bist_v2(const struct device *dsi)
 	static const uint8_t bist_off[] = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU };
 	ssize_t              rc;
 
-	probe_report_panel_state("bist2", dsi);
+	bist2_report_rddpm(dsi, "entry");
 
 	{
 		struct mipi_dsi_msg w = {
@@ -1413,6 +1456,8 @@ static void probe_bist_v2(const struct device *dsi)
 		rc = mipi_dsi_transfer(dsi, 0, &w);
 		printk("bist2: SETDISP BIST-ON B2 00 80 64 0C 0D 2F 00 00 00 00 C8 rc=%d\n", (int)rc);
 	}
+
+	bist2_report_rddpm(dsi, "after-bist-on");
 
 	printk("bist2: BIST ON int0=0x%08x int1=0x%08x cdc-glb=0x%08x -- CAPTURE NOW\n",
 	       sys_read32(DSI_INT_ST0_ADDR),
@@ -1442,6 +1487,8 @@ static void probe_bist_v2(const struct device *dsi)
 		rc = mipi_dsi_transfer(dsi, 0, &w);
 		printk("bist2: SETDISP restore B2 00 80 64 0C 0D 2F rc=%d\n", (int)rc);
 	}
+
+	bist2_report_rddpm(dsi, "after-restore");
 
 	printk("bist2: BIST OFF (restored) int0=0x%08x int1=0x%08x cdc-glb=0x%08x -- CAPTURE NOW\n",
 	       sys_read32(DSI_INT_ST0_ADDR),
@@ -1727,7 +1774,23 @@ int main(void)
 			       (unsigned int)PANEL_BYTES_PER_PIXEL);
 
 			/*
-			 * BENCH DIAGNOSTIC (#2199): probe_read_wedge() runs FIRST, with a
+			 * BENCH DIAGNOSTIC (#2199): probe_bist_v2() runs HERE -- the
+			 * framebuffer is written, panel_wake_after_resx() already ran
+			 * (inside probe_setextc_gate_v2() above), and the DSI host is
+			 * still in command mode, so DCS reads still work.  DISP_BIST_EN
+			 * needs no video mode at all (see the probe's own banner), and
+			 * this must run BEFORE probe_read_wedge() below deliberately
+			 * touches video mode for the first time: per that probe's own
+			 * finding, a read attempted while in video mode can wedge the
+			 * read path even back in command mode, which would make bist2's
+			 * own RDDPM self-certification unreliable if it ran any later.
+			 */
+			if (dsi_ok) {
+				probe_bist_v2(dsi);
+			}
+
+			/*
+			 * BENCH DIAGNOSTIC (#2199): probe_read_wedge() runs next, with a
 			 * virgin read path, before anything below attempts a read in video
 			 * mode -- see its banner.  The RDDPM/vid diagnostic read further
 			 * down now runs after it returns, on purpose: it must not go
@@ -1766,13 +1829,14 @@ int main(void)
 				       pint1);
 
 				/*
-				 * BENCH DIAGNOSTIC (#2199): panel-side DSI-RX health, then
-				 * the internal-pattern BIST, now that the framebuffer is
-				 * written and video is live.  See probe_video_rx_errors_v2()
-				 * / probe_bist_v2() for why these two, in this order.
+				 * BENCH DIAGNOSTIC (#2199): panel-side DSI-RX health, now
+				 * that the framebuffer is written and video is live.  See
+				 * probe_video_rx_errors_v2() for why this runs here; its
+				 * sibling probe_bist_v2() now runs earlier, in command mode
+				 * before video ever started (see main()'s call site right
+				 * before probe_read_wedge()) -- see that probe's own banner.
 				 */
 				probe_video_rx_errors_v2(dsi, disp);
-				probe_bist_v2(dsi);
 			}
 		}
 	}
