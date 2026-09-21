@@ -63,8 +63,9 @@ and `west build` does the rest.
 For the empirical proof that this generates a byte-identical
 `alp.conf` across every E1M family SKU (modulo documented
 silicon-determined deltas), see
-[`docs/portability-matrix.md`](../portability-matrix.md) -- 18
-of 21 E1M cells (all 6 AEN SKUs; NX9101's 3 cells fail -- its only
+[`docs/portability-matrix.md`](../portability-matrix.md) -- 21
+of 24 E1M cells (all 7 AEN SKUs, AEN301..801 + AEN803; NX9101's 3
+cells fail -- its only
 hw_rev, imx93 r1, is `status: tbd`, refused outright by the
 hw_rev-buildable gate, #1025) and 8 of 12 E1M-X cells generate
 cleanly today (the `adc-voltmeter` example fails on all four

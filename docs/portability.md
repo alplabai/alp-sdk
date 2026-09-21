@@ -13,7 +13,7 @@ This cookbook ties three other docs together:
 
 - [`docs/portability-matrix.md`](portability-matrix.md) — the empirical
   guarantee.  Every cell is a SKU × example compile test;
-  18 / 21 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
+  21 / 24 cells green for E1M (NX9101's only hw_rev is `status: tbd` --
   refused outright by the hw_rev-buildable gate, #1025 --
   so all 3 of its cells currently fail), 8 / 12 for E1M-X (the
   `adc-voltmeter` example fails on all four E1M-X presets --
@@ -48,7 +48,8 @@ The promise has a **scope**.  It is not "any SoM, any time".  It is:
 ### Scope — INTRA-family
 
 - **E1M family.**  `E1M-AEN301` ↔ `E1M-AEN401` ↔ `E1M-AEN501` ↔
-  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-NX9101`.
+  `E1M-AEN601` ↔ `E1M-AEN701` ↔ `E1M-AEN801` ↔ `E1M-AEN803` ↔
+  `E1M-NX9101`.
   Same 35 × 35 mm form factor, same `<alp/e1m_pinout.h>` symbol
   namespace, same E1M-spec instance reservations
   (`ALP_E1M_I2C_COUNT == 2`, `ALP_E1M_PWM_COUNT == 8`, etc.).
@@ -840,9 +841,12 @@ Headline numbers, measured against the generated block in
 `docs/portability-matrix.md` (re-run `python3
 scripts/gen_portability_matrix.py` to reproduce):
 
-- **E1M family.**  18 / 21 (SKU × example) cells generate cleanly.
-  All 6 AEN SKUs produce byte-identical `alp.conf` for every
-  example, after stripping the SoC identity comment.  The other
+- **E1M family.**  21 / 24 (SKU × example) cells generate cleanly.
+  Across the 7 AEN SKUs (AEN301..801 + AEN803) the generated
+  `alp.conf` differs only in the documented expected-diff line
+  families (per-silicon identity, OPTIGA population, and
+  AEN803's on-module OSPI memory sizes) — not a byte-identity
+  claim; see the matrix's diff catalogue.  The other
   3 cells all belong to E1M-NX9101 — a placeholder MPN whose only
   hw_rev (imx93 r1) is `status: tbd`, which the hw_rev-buildable
   gate refuses outright, so none of its cells currently pass.

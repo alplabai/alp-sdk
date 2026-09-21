@@ -212,9 +212,9 @@ Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (t
 ## Hand-maintained analysis (expected diffs)
 
 The generated tables above prove every ✅ cell *generates* cleanly
-(that's 18 of the 21 E1M cells — NX9101's 3 are ❌ per
-#1025).  The analytical claims below — byte-identity of the emitted
-`alp.conf` across SKUs and the classification of legitimate diff
+(that's 21 of the 24 E1M cells — NX9101's 3 are ❌ per
+#1025).  The analytical claims below — the cross-SKU shape of the
+emitted `alp.conf` and the classification of legitimate diff
 lines — are hand-maintained against the swap-test evidence under
 `build/portability-test/` (gitignored), per the Method's step 4.
 

@@ -131,7 +131,7 @@ gets no `build/alp_sysbuild.conf` at all.
 supplies its default**, not one value for every SKU.  A target whose
 `memory_map:` declares a disjoint per-core `<role>_slot0` region
 (today every AEN SoM -- metadata/e1m_modules/E1M-AEN301.yaml ..
-E1M-AEN801.yaml, #1069 + #1445 --
+E1M-AEN801.yaml and E1M-AEN803.yaml, #1069 + #1445 --
 both M55 cores share the same physical App MRAM, so slot0 was split
 into disjoint per-core windows and the secondary/scratch slot dropped
 rather than forced to fit) has no slot1/scratch partition, so it
@@ -383,8 +383,8 @@ candidate the resolver will accept resolves to a verified DT label:
 * an `on_module.ospi_memories:` entry (e.g. `ospi0`) -- despite the name
   matching a controller node 1:1 on paper, `ospi0` is the ONLY `ospi<n>`
   label anywhere under `zephyr/`
-  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:688`), only the two
-  E1M-AEN801 board `.dts` files include it, and there it is the OSPI
+  (`zephyr/dts/alif/ensemble_e8_peripherals.dtsi:688`), only the four
+  E1M-AEN801 and E1M-AEN803 board `.dts` files include it, and there it is the OSPI
   CONTROLLER node (`status = "disabled"`, no flash-chip child) -- not an
   enabled flash device. E1M-AEN301/501/701 have no board tree at all;
   E1M-AEN401/601 have one with no `ospi0` node. #1556 does NOT gate this

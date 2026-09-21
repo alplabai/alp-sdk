@@ -360,6 +360,7 @@ release stabilises + meta-imx mickledore ships.
 consumption is already solved in-tree: the Alp E1M Zephyr board
 files ship at [`zephyr/boards/alp/`](../zephyr/boards/alp/)
 (`alp_e1m_aen801_m55_he`, `alp_e1m_aen801_m55_hp`,
+`alp_e1m_aen803_m55_he`, `alp_e1m_aen803_m55_hp`,
 `alp_e1m_aen401_m55_hp`, `alp_e1m_aen601_m55_hp`,
 `alp_e1m_v2n101_m33_sm`, `alp_e1m_v2m101_m33_sm`), and
 `zephyr/module.yml`'s `board_root: zephyr` exposes them to
