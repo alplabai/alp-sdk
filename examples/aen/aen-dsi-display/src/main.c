@@ -2481,10 +2481,20 @@ int main(void)
 	bool pass = exp_ok && pwr_ok && panel_ok && dsi_ok && disp_ok && panel_read_ok && write_ok &&
 	            scanout_ok;
 
+	/*
+	 * This line reports the CHAIN's state, and nothing about the glass.  It
+	 * said PASS on every run for two days while the panel stayed blank, and
+	 * three separate bench reports had to append the caveat by hand -- so it
+	 * says so itself now.  Every stage below is a host-side or DSI-side
+	 * readback: no signal in `pass` comes from an optical measurement, and
+	 * the app has no way to see the glass.  Photometry decides pixels.
+	 */
 	if (pass) {
-		printk("RESULT PASS: RK055HDMIPI4MA0 chain UP -- hx8394 panel + mipi-dsi "
-		       "+ cdc200 display ready, full-screen green frame written and "
-		       "scanning out cleanly; pixels-on-glass: confirm green on the panel\n");
+		printk("RESULT CHAIN-UP: RK055HDMIPI4MA0 chain reports ready -- hx8394 panel "
+		       "+ mipi-dsi + cdc200 all bound, full-screen green frame written, "
+		       "scanout clean. THIS IS NOT A PIXELS-ON-GLASS RESULT: every check "
+		       "behind it is a host/DSI readback, none is optical. The glass may be "
+		       "blank with all of them passing -- measure it with the camera.\n");
 	} else {
 		printk("RESULT FAIL: DSI display chain not fully up "
 		       "(lcd-exp=%d lcd-reg=%d panel=%d mipi-dsi=%d display=%d dcs-read=%d write=%d "
