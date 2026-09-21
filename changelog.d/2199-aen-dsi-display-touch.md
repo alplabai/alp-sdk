@@ -22,10 +22,9 @@ to an undefined devicetree macro when `irq-gpios` is absent -- any board with
 no `irq-gpios` FAILED TO COMPILE, never mind run.
 `zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch`
 makes `irq-gpios` genuinely optional -- mirroring how `reset-gpios` was
-already handled -- adds a `BUILD_ASSERT` that still requires `irq-gpios` under
-`CONFIG_INPUT_GT911_INTERRUPT`, and turns a still-required INT pin into a
-clean `-ENODEV` instead of a fault when that config is off but the pin is
-somehow missing at runtime.
+already handled -- and adds a `BUILD_ASSERT` that still requires `irq-gpios`
+at compile time under `CONFIG_INPUT_GT911_INTERRUPT`. With that config off,
+a missing INT pin simply means polling, not a fault.
 
 The `e1m_evk_rk055hdmipi4ma0` shield's new GT911 node sets both `reg = <0x5d>`
 (what the GT911 forces when INT is held low across reset) and

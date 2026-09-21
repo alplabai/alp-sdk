@@ -7,7 +7,7 @@
  * DISPLAY chain on an E1M-AEN SoM (M55-HE), via the bench RAM-run + RAM-console
  * flow.  This is the pixels-on-glass successor to aen-dsi-regcheck (which only
  * proves the chain BINDS): it turns ON the cdc200 + dsi_dw display-class drivers
- * and renders a solid-color framebuffer.
+ * and renders four horizontal colour bars (red/green/blue/white).
  *
  * THE DISPLAY CHAIN (app -> glass):
  *
@@ -79,7 +79,7 @@
  *
  * The PASS gate: the expander, the fixed panel-power regulator, the hx8394
  * panel, the DSI host, and the cdc200 display device are all device_is_ready,
- * display_write() of a solid-color frame returns 0, a DCS read of the panel's
+ * display_write() of the colour-bar frame returns 0, a DCS read of the panel's
  * own ID (RDDID) gets back the expected 3 bytes, and display_blanking_off()
  * is accepted.  The app has no optical sensor, so PASS means the chain
  * answered correctly end to end, not that pixels are confirmed on glass --
@@ -109,14 +109,13 @@
 static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios);
 
 /*
- * The GT911 touch controller (shield's lcd_touch node, aliased zephyr,touch)
- * is optional: a board without this shield, or an older overlay predating
- * #2199, has no chosen zephyr,touch at all.  DT_HAS_CHOSEN() lets this whole
- * feature compile out cleanly instead of a hard DEVICE_DT_GET() on a node
- * that may not exist.
+ * The GT911 touch controller (shield's lcd_touch node, chosen zephyr,touch)
+ * is optional: a board without this shield has no chosen zephyr,touch at
+ * all.  DT_HAS_CHOSEN() lets this whole feature compile out cleanly instead
+ * of a hard DEVICE_DT_GET() on a node that may not exist.
  *
- * The GT911 has no way to interrupt the Alif SoC on this board (its INT pin
- * lands on the CC3501E coprocessor, not the Alif -- see the shield overlay),
+ * The GT911 has no direct INT line to the Alif SoC on this board: the CC3501E
+ * GPIO relay that could forward it is not wired up (see the shield overlay),
  * so it is polled every CONFIG_INPUT_GT911_PERIOD_MS by the driver itself;
  * this app only registers a callback to be told when a poll finds something.
  */
@@ -127,10 +126,14 @@ static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios
  * The Input subsystem delivers one event per axis/button, not one bundled
  * "touch" struct: an X move, then a Y move, then the BTN_TOUCH press/release
  * arrive as three separate callbacks (see gt911_process() in
- * drivers/input/input_gt911.c).  Latch X/Y as they arrive and print only on
- * BTN_TOUCH, so each printed line already has a current position.
+ * drivers/input/input_gt911.c).  Latch X/Y as they arrive.  The GT911 polls
+ * every 10 ms and reports BTN_TOUCH=1 on EVERY scan while a finger stays
+ * down (input_gt911.c:179) -- printing every event would flood the 8 KiB RAM
+ * console within a couple of seconds of one touch-and-hold, so print only on
+ * the down/up transition by comparing against the last state we printed.
  */
 static int32_t touch_x, touch_y;
+static bool    touch_down;
 
 static void touch_event_cb(struct input_event *evt, void *user_data)
 {
@@ -144,7 +147,10 @@ static void touch_event_cb(struct input_event *evt, void *user_data)
 		touch_y = evt->value;
 		break;
 	case INPUT_BTN_TOUCH:
-		printk("touch: x=%d y=%d down=%d\n", touch_x, touch_y, evt->value);
+		if ((evt->value != 0) != touch_down) {
+			touch_down = (evt->value != 0);
+			printk("touch: x=%d y=%d down=%d\n", touch_x, touch_y, evt->value);
+		}
 		break;
 	default:
 		break;
@@ -159,10 +165,11 @@ INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_event_cb, NULL);
 #define PANEL_H 1280
 
 /*
- * One scanline of solid colour, reused for every row via display_write's
- * per-call descriptor.  A full 720x1280 frame is 1.8-2.8 MB depending on the
- * layer format -- far too big for a stack/static buffer in ITCM -- so we stream
- * it one row at a time straight into the SRAM0 framebuffer the driver owns.
+ * One scanline, refilled only when the colour band changes and reused for
+ * every row in that band via display_write's per-call descriptor.  A full
+ * 720x1280 frame is 1.8-2.8 MB depending on the layer format -- far too big
+ * for a stack/static buffer in ITCM -- so we stream it one row at a time
+ * straight into the SRAM0 framebuffer the driver owns.
  *
  * The bytes-per-pixel here MUST match the cdc200 layer's `pixel-fmt-l1`.  They
  * live in different files and nothing used to tie them together, so this app
@@ -186,20 +193,42 @@ BUILD_ASSERT(PANEL_FMT_IS_RGB888 || PANEL_FMT_IS_RGB565,
 #define PANEL_BYTES_PER_PIXEL 2U
 #endif
 
-/* Solid green in whichever format the layer is actually configured for. */
 static uint8_t row_buf[PANEL_W * PANEL_BYTES_PER_PIXEL];
 
-static void fill_row_green(void)
+/*
+ * Colour bars, not a solid frame: green sits in the middle of BOTH the RGB
+ * and BGR byte orders (its byte is the same either way), so a solid green
+ * frame cannot reveal an R/B lane swap or a colour-lane wiring error on the
+ * 16-bit DSI link -- it would look identical either way.  Four saturated
+ * primaries stacked top to bottom make a swap immediately visible: red and
+ * blue trade places, white stays white.
+ */
+enum bar_colour { BAR_RED, BAR_GREEN, BAR_BLUE, BAR_WHITE, BAR_COUNT };
+
+static void fill_row_bar(enum bar_colour colour)
 {
 	for (uint16_t i = 0; i < PANEL_W; i++) {
 #if PANEL_FMT_IS_RGB888
-		row_buf[i * 3U + 0U] = 0x00U; /* B */
-		row_buf[i * 3U + 1U] = 0xFFU; /* G */
-		row_buf[i * 3U + 2U] = 0x00U; /* R */
+		/* Byte order B,G,R -- unchanged from this file's original green fill. */
+		static const uint8_t bgr[BAR_COUNT][3] = {
+			[BAR_RED]   = { 0x00U, 0x00U, 0xFFU },
+			[BAR_GREEN] = { 0x00U, 0xFFU, 0x00U },
+			[BAR_BLUE]  = { 0xFFU, 0x00U, 0x00U },
+			[BAR_WHITE] = { 0xFFU, 0xFFU, 0xFFU },
+		};
+		row_buf[i * 3U + 0U] = bgr[colour][0]; /* B */
+		row_buf[i * 3U + 1U] = bgr[colour][1]; /* G */
+		row_buf[i * 3U + 2U] = bgr[colour][2]; /* R */
 #else
-		/* RGB565 little-endian 0x07E0 = green. */
-		row_buf[i * 2U + 0U] = 0xE0U;
-		row_buf[i * 2U + 1U] = 0x07U;
+		/* RGB565 little-endian: red 0xF800, green 0x07E0, blue 0x001F, white 0xFFFF. */
+		static const uint16_t rgb565[BAR_COUNT] = {
+			[BAR_RED]   = 0xF800U,
+			[BAR_GREEN] = 0x07E0U,
+			[BAR_BLUE]  = 0x001FU,
+			[BAR_WHITE] = 0xFFFFU,
+		};
+		row_buf[i * 2U + 0U] = (uint8_t)(rgb565[colour] & 0xFFU);
+		row_buf[i * 2U + 1U] = (uint8_t)(rgb565[colour] >> 8U);
 #endif
 	}
 }
@@ -258,18 +287,17 @@ int main(void)
 	bool disp_ok = dev_ready("display", disp);
 
 	/*
-	 * Step 5: render.  Fill the screen with a solid color, one row at a time.
-	 * The descriptor describes a single PANEL_W x 1 strip; we walk it down the
-	 * screen.  display_write copies into the SRAM0 framebuffer and flushes the
-	 * data cache for the CDC scanout (handled inside the driver).
+	 * Step 5: render.  Fill the screen with four colour bars, one row at a
+	 * time.  The descriptor describes a single PANEL_W x 1 strip; we walk it
+	 * down the screen, refilling row_buf only when the band changes.
+	 * display_write copies into the SRAM0 framebuffer and flushes the data
+	 * cache for the CDC scanout (handled inside the driver).
 	 */
 	bool write_ok      = false;
 	bool panel_read_ok = false;
 	bool blanking_ok   = false;
 
 	if (disp_ok) {
-		fill_row_green();
-
 		struct display_buffer_descriptor desc = {
 			.buf_size = sizeof(row_buf),
 			.width    = PANEL_W,
@@ -277,9 +305,19 @@ int main(void)
 			.pitch    = PANEL_W,
 		};
 
-		int rc = 0;
+		/* 1280 rows / 4 bars = 320 rows per bar, top to bottom. */
+		const uint16_t  rows_per_bar = PANEL_H / BAR_COUNT;
+		enum bar_colour band         = BAR_COUNT; /* invalid: forces the first fill */
+		int             rc           = 0;
 
 		for (uint16_t y = 0; y < PANEL_H; y++) {
+			enum bar_colour want = (enum bar_colour)(y / rows_per_bar);
+
+			if (want != band) {
+				band = want;
+				fill_row_bar(band);
+			}
+
 			rc = display_write(disp, 0, y, &desc, row_buf);
 			if (rc != 0) {
 				printk("display_write row %u failed (%d)\n", y, rc);
@@ -289,7 +327,7 @@ int main(void)
 
 		if (rc == 0) {
 			write_ok = true;
-			printk("display_write: full 720x1280 green frame OK (%u bytes/pixel)\n",
+			printk("display_write: colour bars R/G/B/W top-to-bottom OK (%u bytes/pixel)\n",
 			       (unsigned int)PANEL_BYTES_PER_PIXEL);
 
 			/*
@@ -335,7 +373,7 @@ int main(void)
 
 	if (pass) {
 		printk("RESULT PASS: RK055HDMIPI4MA0 chain up -- hx8394 panel + mipi-dsi + "
-		       "cdc200 all bound, full-screen green frame written, panel answered a "
+		       "cdc200 all bound, colour-bar frame written, panel answered a "
 		       "DSI read, and display_blanking_off() was accepted. "
 		       "This app has no optical sensor: confirm pixels on glass by eye.\n");
 	} else {

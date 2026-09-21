@@ -357,7 +357,7 @@ patches:
       format is untouched, so traceconfig.py and tests/kconfig/tracing are
       unaffected. Upstream to Zephyr then drop.
   - path: zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch
-    sha256sum: eccad02eaa9c804d9e2bb3723f6ef4981a0bed26fb01ee8ff024356c77cc011b
+    sha256sum: d65b30c33acc0b96552fbec00dcb223fac0af009005605be10963eab27136360
     module: zephyr
     author: Alp Lab AB
     email: contact@alplab.ai
@@ -408,10 +408,9 @@ patches:
 
       The e1m_evk_rk055hdmipi4ma0 shield sets reg = <0x5d> (what the GT911
       forces when INT is held low across reset) and alt-addr = <0x14> (what
-      it forces when INT is high at that moment). As shipped, this EVK's
-      CC3501E is not flashed with firmware that drives GPIO_15, and the
-      controller is bench-confirmed responding at 0x14 -- i.e. INT was
-      sampled HIGH at the GT911's reset release
+      it forces when INT is high at that moment). The controller is
+      bench-confirmed responding at 0x14 -- i.e. INT was sampled HIGH at the
+      GT911's reset release
       (`touch : RESPONDING at 0x14 (alternate) product-id[0x8140] rc=0
       data=39 31 31 00`, "911" in ASCII, read with a raw I2C probe, not this
       driver). reg/alt-addr together, plus this patch's fix making alt-addr

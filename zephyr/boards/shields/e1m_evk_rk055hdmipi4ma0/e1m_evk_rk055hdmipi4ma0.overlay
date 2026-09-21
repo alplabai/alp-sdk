@@ -247,7 +247,9 @@
  * choice on this board revision, and U35 has no spare pin to route INT out
  * another way regardless.  GPIO_15 must also stay an INPUT: the GT911
  * drives its own INT pin after reset, so a CC3501E output there would
- * contend with it.  See the GT911 node below and
+ * contend with it -- concretely, cc3501e_spi1_configure(..., ALP_CC3501E_SPI1_CS1,
+ * ...) (chips/cc3501e/cc3501e_spi.c) is what would turn GPIO_15 into a
+ * software chip-select OUTPUT and break this.  See the GT911 node below and
  * zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-
  * without-an-irq.patch for the polling fall-back this forces.
  *
@@ -328,9 +330,14 @@
 		 * panel.  Not changed here -- the default is fine for this app.
 		 */
 
-		/* RK055HDMIPI4MA0 panel resolution -- matches cdc200 below. */
-		screen-width = <720>;
-		screen-height = <1280>;
+		/*
+		 * No screen-width / screen-height here: zephyr/drivers/input/
+		 * input_touch.c asserts inverted-y == (screen-height > 0) (and the
+		 * same for x/inverted-x), so setting either without the matching
+		 * inverted-* property panics any app built with CONFIG_ASSERT=y on
+		 * the first touch event.  Upstream NXP's own rk055hdmipi4ma0 shield
+		 * sets neither, and this shield does not use inverted-x/-y either.
+		 */
 
 		status = "okay";
 	};
