@@ -222,10 +222,7 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   `e1m_evk_rk055hdmipi4ma0` Zephyr shield (`zephyr/boards/shields/`)
   to drive it -- see `examples/aen/aen-dsi-display`.  Backlight rails + the
   capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
-  (`ALP_E1M_I2C1`).  The shield also drives the panel's GT911 touch
-  controller (not yet bench-verified), polled every
-  `CONFIG_INPUT_GT911_PERIOD_MS` because the Alif has no INT line for it
-  without the CC3501E relay.
+  (`ALP_E1M_I2C1`).  The panel's touch controller is not driven yet.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.

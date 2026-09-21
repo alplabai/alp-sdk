@@ -17,7 +17,7 @@ same all-`rc=-5` signature. The hog is a reset-ordering fix in its own right;
 it is not shown to explain that silence.
 
 The shield now hogs that pin low as soon as the expander exists:
-`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:211`
+`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:200`
 ("lcd_reset_hog: lcd-reset-hog {") with `output-low` and `GPIO_ACTIVE_HIGH`, so
 `gpio_hogs_init()` drives the expander pin physically low — `RESX` asserted —
 before the regulator runs. Upstream's hog priority default of 41 is below the
@@ -40,5 +40,5 @@ plus its 1 ms reset-low hold.
 `dsi_dw_send_max_return_packet_size()` built the maximum-return-packet-size
 header's high byte as `(uint8_t) value >> 8`, where the cast binds first and the
 result is therefore always 0 — any size above 255 was silently truncated. It is
-now `zephyr/drivers/mipi_dsi/dsi_dw.c:1380` ("value >> 8"). No in-tree caller
+now `zephyr/drivers/mipi_dsi/dsi_dw.c:1389` ("value >> 8"). No in-tree caller
 asks for 256 bytes or more, so this changes no current behaviour.

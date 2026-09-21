@@ -96,7 +96,6 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/mipi_dsi.h>
-#include <zephyr/input/input.h>
 #include <zephyr/sys/printk.h>
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
@@ -107,58 +106,6 @@
 #define LCD_PWR_NODE DT_NODELABEL(lcd_pwr_en)
 
 static const struct gpio_dt_spec bl_gpio = GPIO_DT_SPEC_GET(PANEL_NODE, bl_gpios);
-
-/*
- * The GT911 touch controller (shield's lcd_touch node, chosen zephyr,touch)
- * is optional: a board without this shield has no chosen zephyr,touch at
- * all.  DT_HAS_CHOSEN() lets this whole feature compile out cleanly instead
- * of a hard DEVICE_DT_GET() on a node that may not exist.
- *
- * The GT911 has no direct INT line to the Alif SoC on this board: the CC3501E
- * GPIO relay that could forward it is not wired up (see the shield overlay),
- * so it is polled every CONFIG_INPUT_GT911_PERIOD_MS by the driver itself;
- * this app only registers a callback to be told when a poll finds something.
- */
-#if DT_HAS_CHOSEN(zephyr_touch)
-#define TOUCH_NODE DT_CHOSEN(zephyr_touch)
-
-/*
- * The Input subsystem delivers one event per axis/button, not one bundled
- * "touch" struct: an X move, then a Y move, then the BTN_TOUCH press/release
- * arrive as three separate callbacks (see gt911_process() in
- * drivers/input/input_gt911.c).  Latch X/Y as they arrive.  The GT911 polls
- * every 10 ms and reports BTN_TOUCH=1 on EVERY scan while a finger stays
- * down (input_gt911.c:179) -- printing every event would flood the 8 KiB RAM
- * console within a couple of seconds of one touch-and-hold, so print only on
- * the down/up transition by comparing against the last state we printed.
- */
-static int32_t touch_x, touch_y;
-static bool    touch_down;
-
-static void touch_event_cb(struct input_event *evt, void *user_data)
-{
-	ARG_UNUSED(user_data);
-
-	switch (evt->code) {
-	case INPUT_ABS_X:
-		touch_x = evt->value;
-		break;
-	case INPUT_ABS_Y:
-		touch_y = evt->value;
-		break;
-	case INPUT_BTN_TOUCH:
-		if ((evt->value != 0) != touch_down) {
-			touch_down = (evt->value != 0);
-			printk("touch: x=%d y=%d down=%d\n", touch_x, touch_y, evt->value);
-		}
-		break;
-	default:
-		break;
-	}
-}
-
-INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), touch_event_cb, NULL);
-#endif
 
 /* Panel geometry (must match the overlay's cdc200 + panel nodes). */
 #define PANEL_W 720
@@ -198,10 +145,14 @@ static uint8_t row_buf[PANEL_W * PANEL_BYTES_PER_PIXEL];
 /*
  * Colour bars, not a solid frame: green sits in the middle of BOTH the RGB
  * and BGR byte orders (its byte is the same either way), so a solid green
- * frame cannot reveal an R/B lane swap or a colour-lane wiring error on the
- * 16-bit DSI link -- it would look identical either way.  Four saturated
- * primaries stacked top to bottom make a swap immediately visible: red and
- * blue trade places, white stays white.
+ * frame cannot reveal an R/B swap anywhere between the framebuffer's byte
+ * order and the glass -- the CDC200 layer format, the DSI DPI colour coding,
+ * or the panel's own RGB/BGR setting could each be the culprit, and a green
+ * fill looks identical whichever of them is wrong.  (DSI lanes carry
+ * serialised bytes, not colours, so the swap has to be found in one of
+ * those three format decisions, not on the wire.)  Four saturated primaries
+ * stacked top to bottom make a swap immediately visible: red and blue trade
+ * places, white stays white.
  */
 enum bar_colour { BAR_RED, BAR_GREEN, BAR_BLUE, BAR_WHITE, BAR_COUNT };
 
@@ -209,7 +160,12 @@ static void fill_row_bar(enum bar_colour colour)
 {
 	for (uint16_t i = 0; i < PANEL_W; i++) {
 #if PANEL_FMT_IS_RGB888
-		/* Byte order B,G,R -- unchanged from this file's original green fill. */
+		/*
+		 * Byte order B,G,R: Zephyr's own PIXEL_FORMAT_RGB_888 puts byte 0 = B
+		 * (v4.4.1 samples/drivers/display/src/display.c, fill_buffer_rgb888's
+		 * `else` arm: byte0=b, byte1=g, byte2=r), and the CDC200 driver copies
+		 * framebuffer bytes to the layer as-is, so this fill must match.
+		 */
 		static const uint8_t bgr[BAR_COUNT][3] = {
 			[BAR_RED]   = { 0x00U, 0x00U, 0xFFU },
 			[BAR_GREEN] = { 0x00U, 0xFFU, 0x00U },
@@ -262,16 +218,6 @@ int main(void)
 	bool pwr_ok = dev_ready("lcd-reg", pwr);
 
 	/*
-	 * Step 1b: the touch controller, if this shield's overlay chose one.
-	 * Not part of the PASS gate below -- this app's job is to prove pixels
-	 * reach glass, and touch is not bench-verified through this driver yet
-	 * (#2199) -- just reported and wired to print incoming events.
-	 */
-#if DT_HAS_CHOSEN(zephyr_touch)
-	(void)dev_ready("touch", DEVICE_DT_GET(TOUCH_NODE));
-#endif
-
-	/*
 	 * Step 2: HX8394 init does mipi_dsi_attach + DCS power-on over DSI, and
 	 * drives bl-gpios high only if all of it succeeded -- so the level is the
 	 * panel driver's own verdict.
@@ -306,6 +252,10 @@ int main(void)
 		};
 
 		/* 1280 rows / 4 bars = 320 rows per bar, top to bottom. */
+		BUILD_ASSERT((PANEL_H % BAR_COUNT) == 0,
+		             "PANEL_H must be a multiple of BAR_COUNT, or the last "
+		             "rows compute a bar_colour past BAR_WHITE and index the "
+		             "colour tables out of bounds");
 		const uint16_t  rows_per_bar = PANEL_H / BAR_COUNT;
 		enum bar_colour band         = BAR_COUNT; /* invalid: forces the first fill */
 		int             rc           = 0;
@@ -327,7 +277,7 @@ int main(void)
 
 		if (rc == 0) {
 			write_ok = true;
-			printk("display_write: colour bars R/G/B/W top-to-bottom OK (%u bytes/pixel)\n",
+			printk("display_write: colour bars R/G/B/W top-to-bottom written (%u bytes/pixel)\n",
 			       (unsigned int)PANEL_BYTES_PER_PIXEL);
 
 			/*

@@ -60,14 +60,6 @@
  * (gpio_pca_series), so an app must not also write its registers directly.
  * aen-evk-demo's phase 4, the one in-tree raw user, checks for this shield's
  * lcd_exp node and skips its register writes when it is present.
- *
- * Touch: the lcd_touch (GT911) node below requires
- * zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch
- * -- see that node's comments for why -- and Kconfig's INPUT defaults y, so
- * ANY app that adds this shield compiles the GT911 driver whether or not it
- * touches input at all.  `scripts/bootstrap.sh` applies west patches by
- * default; a workspace bootstrapped `--no-patches` fails to compile this
- * shield.
  */
 
 #include <mem.h>
@@ -78,9 +70,6 @@
 / {
 	chosen {
 		zephyr,display = &cdc200;
-		/* Upstream Zephyr convention (NXP's own rk055hdmipi4ma0 shield sets
-		 * this too) -- lcd_touch is defined further down, at &i2c1. */
-		zephyr,touch = &lcd_touch;
 	};
 
 	aliases {
@@ -223,35 +212,21 @@
 };
 
 /*
- * The panel flex's TOUCH I2C -- a DSI-independent proof that the flex is seated
- * and the panel side is powered.  It is a shield fact (the bus only exists when
- * this panel is plugged into J6), so it is enabled here and not in the board.
+ * The panel flex's touch-controller I2C -- a DSI-independent proof that the
+ * flex is seated and the panel side is powered.  It is a shield fact (the
+ * bus only exists when this panel is plugged into J6), so it is enabled here
+ * and not in the board.
  *
  * Route: J6 pin 26/27 (DSI_I2C.SDA_L / DSI_I2C.SCL_L) -> level translator ->
  * E1M pads AH17 / AG17 -> Alif silicon P7_2 (I2C1_SDA_C) and P3_7
  * (I2C1_SCL_B), per metadata/pinmux/aen.yaml.  metadata/boards/e1m-evk.yaml
  * names the bus E1M_I2C1 / EVK_I2C_BUS_DSI_CSI, "Display + camera control I2C
- * (touch panel, camera-side I2C config)".
- *
- * The touch controller is a Goodix GT911, confirmed alive with a raw I2C
- * probe (not this driver):
- * `touch : RESPONDING at 0x14 (alternate) product-id[0x8140] rc=0
- * data=39 31 31 00` ("911" in ASCII).  Its reset is expander U35 P3 (net
- * CTP_RST -> J6 pin 28); its INT is J6 pin 29 (CTP_INT_L), through level
- * shifter U4 (LSF0102DQER) to net CTP_INT, to E1M module connector pad AH8.
- * Per the 2626-R2 netlist and metadata/pinmux/aen.yaml:99, pad AH8 is owned
- * by the CC3501E Wi-Fi/BLE coprocessor (silicon_pad: GPIO_15), NOT by the
- * Alif SoC.  The Alif can see this line only through a CC3501E GPIO relay
- * (ALP_CC3501E_CMD_GPIO_SET_INTERRUPT / EVT_GPIO_INTERRUPT,
- * chips/cc3501e/cc3501e_gpio.c) -- not wired up today, so polling is the
- * choice on this board revision, and U35 has no spare pin to route INT out
- * another way regardless.  GPIO_15 must also stay an INPUT: the GT911
- * drives its own INT pin after reset, so a CC3501E output there would
- * contend with it -- concretely, cc3501e_spi1_configure(..., ALP_CC3501E_SPI1_CS1,
- * ...) (chips/cc3501e/cc3501e_spi.c) is what would turn GPIO_15 into a
- * software chip-select OUTPUT and break this.  See the GT911 node below and
- * zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-
- * without-an-irq.patch for the polling fall-back this forces.
+ * (touch panel, camera-side I2C config)".  Touch reset is expander U35 P3
+ * (net CTP_RST -> J6 pin 28).  CTP_INT (J6 pin 29) terminates on E1M module
+ * connector pad AH8, which the CC3501E Wi-Fi/BLE coprocessor owns
+ * (silicon_pad: GPIO_15, metadata/pinmux/aen.yaml), so the Alif has no
+ * direct INT line.  The GT911 answers at 0x14, but this panel's config
+ * block reads blank, so no touch driver is bound here yet (#2199).
  *
  * P3_7 + P7_2 ONLY.  P3_6 is the I/O expander's own reset (E1M pad N1) and must
  * not be muxed or driven from this group.
@@ -275,72 +250,6 @@
 	status = "okay";
 	pinctrl-0 = <&pinctrl_i2c1_dsi>;
 	pinctrl-names = "default";
-
-	/*
-	 * The GT911 latches its I2C address from the level of its INT pin at
-	 * the moment its RSTB releases: low forces reg = 0x5D, high forces
-	 * alt-addr = 0x14.  Both are load-bearing here, not a "just in case"
-	 * fallback -- this shield does not drive CTP_INT (see the comment
-	 * above), so which address this board's controller actually latches
-	 * is not something this shield controls.
-	 *
-	 * A raw I2C probe (not this driver) found the controller bench-alive
-	 * at the alternate address 0x14 (see the comment above), i.e. INT was
-	 * sampled HIGH at that moment.  reg/alt-addr together, plus the
-	 * alt-addr probing in 0004-input-gt911-fall-back-to-polling-without-an-
-	 * irq.patch (unreachable without that patch's fix, since the pristine
-	 * driver fails to COMPILE with no irq-gpios property, let alone run),
-	 * are what let the driver find the device at whichever address it
-	 * actually latches.
-	 *
-	 * No irq-gpios: see the comment above the pinctrl_i2c1_dsi block --
-	 * CTP_INT terminates on the CC3501E, which the Alif SoC cannot see
-	 * without a GPIO relay this board does not implement today.
-	 */
-	lcd_touch: touch@5d {
-		compatible = "goodix,gt911";
-		reg = <0x5d>;
-		alt-addr = <0x14>;
-
-		/*
-		 * Reset polarity, worked out from the driver rather than assumed:
-		 * gt911_init() calls gpio_pin_configure_dt(&rst_gpio,
-		 * GPIO_OUTPUT_ACTIVE) FIRST (holds the chip in reset for the whole
-		 * address-mode setup that follows), then later pulses
-		 * gpio_pin_set_dt(&rst_gpio, 1) [[re-]assert] -> 1 ms ->
-		 * gpio_pin_set_dt(&rst_gpio, 0) [release] -- so DT-logical "1" is
-		 * the driver's ASSERT edge and "0" is RELEASE.  The GT911's RSTB
-		 * pin is active-low (Goodix datasheet): physically low asserts
-		 * reset, physically high releases it.  GPIO_ACTIVE_LOW makes the
-		 * driver's logical assert (1) a physical LOW on U35 P3, which U4
-		 * (LSF0102DQER, a non-inverting level shifter) passes straight
-		 * through to CTP_RST_L / RSTB.  GPIO_ACTIVE_HIGH would flip the
-		 * mapping: gt911_init()'s final gpio_pin_set_dt(&rst_gpio, 0)
-		 * [release] would then drive the pin physically LOW -- RSTB
-		 * asserted -- leaving the chip held IN reset permanently, not
-		 * out of it.
-		 */
-		reset-gpios = <&lcd_exp 3 GPIO_ACTIVE_LOW>;
-
-		/*
-		 * Note: the upstream driver rewrites the GT911's stored config's
-		 * touch-number byte to CONFIG_INPUT_GT911_MAX_TOUCH_POINTS (default
-		 * 1) on every init, and the controller keeps that value across
-		 * resets.  NXP's own rk055hdmipi4ma0 shield does the same with this
-		 * panel.  Not changed here -- the default is fine for this app.
-		 */
-
-		/*
-		 * No screen-width / screen-height here: zephyr/drivers/input/
-		 * input_touch.c asserts inverted-y == (screen-height > 0) (and the
-		 * same for x/inverted-x), so setting either without the matching
-		 * inverted-* property panics any app built with CONFIG_ASSERT=y on
-		 * the first touch event.  Upstream NXP's own rk055hdmipi4ma0 shield
-		 * sets neither, and this shield does not use inverted-x/-y either.
-		 */
-
-		status = "okay";
-	};
 };
 
 &dphy {

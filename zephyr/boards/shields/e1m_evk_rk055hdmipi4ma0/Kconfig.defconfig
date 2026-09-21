@@ -3,10 +3,8 @@
 #
 # Everything the RK055HDMIPI4MA0 display chain needs on an E1M-AEN SoM, so an
 # app only adds the shield: the display class, the DSI host + D-PHY, the panel
-# driver, the carrier's I2C GPIO expander + fixed regulator that power and
-# reset the panel, and the panel's GT911 capacitive touch controller (polling
-# only -- its INT line terminates on the CC3501E, not on the Alif SoC, and no
-# GPIO relay between the two is wired up today).
+# driver, and the carrier's I2C GPIO expander + fixed regulator that power and
+# reset the panel.
 #
 # The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
 # CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
@@ -31,19 +29,6 @@ config GPIO
 	default y
 
 config GPIO_PCA_SERIES
-	default y
-
-# INPUT_GT911 (drivers/input/Kconfig.gt911) already defaults y once its DT
-# node is enabled, but that whole menu lives inside `if INPUT`
-# (drivers/input/Kconfig) -- INPUT_GT911 has no visibility, and nothing
-# selects it, unless the parent is on.  Because this defaults y, ANY app that
-# adds this shield compiles the GT911 driver, whether or not it touches
-# input.  That driver requires
-# zephyr/patches/zephyr/0004-input-gt911-fall-back-to-polling-without-an-irq.patch
-# to compile at all with no irq-gpios property (see that patch's comments) --
-# a workspace bootstrapped `scripts/bootstrap.sh --no-patches` fails to
-# compile this shield.
-config INPUT
 	default y
 
 # The overlay's lcd_exp hog drives the panel RESX low, and it only works in the

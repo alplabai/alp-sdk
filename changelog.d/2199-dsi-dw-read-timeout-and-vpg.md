@@ -93,3 +93,16 @@ The CDC200 also reloads its shadow registers once the controller is running
 braces, not a fix for a known defect: it was added on the theory that a reload
 requested on a stopped CDC does not transfer, and the bench refuted that — the
 layer's active registers read back exactly as configured either way.
+
+**Both command-FIFO timeout sites now log `DSI_CMD_PKT_STATUS` and
+`DSI_PHY_STATUS` at the moment of the stall**, since a FIFO that never drains
+latches no interrupt and the bare "Failed to write command FIFO." message
+said nothing about why
+`zephyr/drivers/mipi_dsi/dsi_dw.c:1350`
+("static void dsi_dw_log_fifo_stall(uintptr_t regs, uint32_t pkt_status)").
+`PHY_LOCK`, `PHY_DIRECTION`, and the clock/lane-0/lane-1 stop-state bits each
+narrow the stall to a different signature — a lost PLL, a stuck bus
+turnaround, or a lane that never returned to LP-11 — found while chasing
+intermittent HX8394 init failures on `E1M-AEN803 2026W36-0009` (#2199). The
+new log distinguishes those signatures; it does not say which one is the
+root cause on this board.
