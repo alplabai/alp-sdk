@@ -136,10 +136,11 @@ class TestHwBackendsLoader(unittest.TestCase):
         CONFIG_ALP_LITTLEFS_XSPI_DMA driver shim."""
         self.assertEmitted ("E1M-AEN801", "CONFIG_ALP_LITTLEFS_XSPI_DMA=y")
 
-    def test_v2n101_drp_ai_plus_cau(self) -> None:
-        """V2N101: no Ethos, primary NPU is DRP-AI; TLS-library CAU
-        entries remain planned until a real library consumer lands."""
-        self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_DRP_AI=y")
+    def test_v2n101_m33_has_no_drp_ai_tflm_shim(self) -> None:
+        """V2N101's DRP-AI engine is A55/Linux-side; its M33 Zephyr
+        library profile must not claim a nonexistent TFLM shim.  The
+        TLS-library CAU entries remain planned until a real consumer lands."""
+        self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_DRP_AI=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U55=y")
         self.assertNotEmitted ("E1M-V2N101", "CONFIG_ALP_TFLM_ETHOS_U85=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_TFLM_NEON=y")
@@ -153,6 +154,11 @@ class TestHwBackendsLoader(unittest.TestCase):
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_NEON=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_CORDIC=y")
         self.assertEmitted    ("E1M-V2N101", "CONFIG_ALP_CMSIS_DSP_TMU_FFT=y")
+
+    def test_v2m101_m33_has_no_drp_ai_tflm_shim(self) -> None:
+        """V2M101 shares V2N's A55-only DRP-AI engine; adding the DX-M1
+        companion does not make DRP-AI available to its M33 Zephyr slice."""
+        self.assertNotEmitted("E1M-V2M101", "CONFIG_ALP_TFLM_DRP_AI=y")
 
     def test_nx9101_u65_wiring_refused_not_buildable(self) -> None:
         """NX9101: i.MX 93's Ethos-U65 must resolve via the
