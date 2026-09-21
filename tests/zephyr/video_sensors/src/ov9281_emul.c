@@ -47,11 +47,11 @@ int ov9281_emul_get_reg(const struct emul *target, uint16_t reg, uint8_t *value)
 	return 0;
 }
 
-static int ov9281_emul_transfer_i2c(const struct emul *target, struct i2c_msg msgs[],
-				    int num_msgs, int addr)
+static int
+ov9281_emul_transfer_i2c(const struct emul *target, struct i2c_msg msgs[], int num_msgs, int addr)
 {
 	struct ov9281_emul_data *data = target->data;
-	uint16_t reg;
+	uint16_t                 reg;
 
 	ARG_UNUSED(addr);
 
@@ -110,9 +110,9 @@ static const struct i2c_emul_api ov9281_emul_api_i2c = {
 	.transfer = ov9281_emul_transfer_i2c,
 };
 
-#define OV9281_EMUL(n)                                                                          \
-	static struct ov9281_emul_data ov9281_emul_data_##n;                                     \
-	EMUL_DT_INST_DEFINE(n, ov9281_emul_init, &ov9281_emul_data_##n, NULL,                    \
-			    &ov9281_emul_api_i2c, NULL)
+#define OV9281_EMUL(n) \
+	static struct ov9281_emul_data ov9281_emul_data_##n; \
+	EMUL_DT_INST_DEFINE( \
+	    n, ov9281_emul_init, &ov9281_emul_data_##n, NULL, &ov9281_emul_api_i2c, NULL)
 
 DT_INST_FOREACH_STATUS_OKAY(OV9281_EMUL)

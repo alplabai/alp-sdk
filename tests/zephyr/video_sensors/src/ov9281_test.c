@@ -19,13 +19,16 @@
 /* Register addresses this test peeks -- kept local rather than pulling ov9281.c's private
  * OV9281_REG8()-wrapped values, which also encode CCI address/data-size metadata this test
  * doesn't need. */
-#define REG_OUT_WIDTH_H  0x3808
-#define REG_OUT_WIDTH_L  0x3809
-#define REG_OUT_HEIGHT_H 0x380a
-#define REG_OUT_HEIGHT_L 0x380b
-#define REG_VTS_H        0x380e
-#define REG_VTS_L        0x380f
-#define REG_TEST_PATTERN 0x5e00
+#define REG_Y_START             0x3803
+#define REG_Y_END_H             0x3806
+#define REG_Y_END_L             0x3807
+#define REG_OUT_WIDTH_H         0x3808
+#define REG_OUT_WIDTH_L         0x3809
+#define REG_OUT_HEIGHT_H        0x380a
+#define REG_OUT_HEIGHT_L        0x380b
+#define REG_VTS_H               0x380e
+#define REG_VTS_L               0x380f
+#define REG_TEST_PATTERN        0x5e00
 #define TEST_PATTERN_ENABLE_BIT BIT(7)
 
 static const struct device *ov9281_dev(void)
@@ -45,14 +48,14 @@ ZTEST(ov9281, test_device_is_ready)
 
 ZTEST(ov9281, test_get_caps_lists_exactly_three_grey_modes)
 {
-	struct video_caps caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
+	struct video_caps caps = { .type = VIDEO_BUF_TYPE_OUTPUT };
 	static const struct {
 		uint32_t width;
 		uint32_t height;
 	} expect[] = {
-		{640, 400},
-		{1280, 720},
-		{1280, 800},
+		{ 640, 400 },
+		{ 1280, 720 },
+		{ 1280, 800 },
 	};
 	int count;
 
@@ -60,8 +63,8 @@ ZTEST(ov9281, test_get_caps_lists_exactly_three_grey_modes)
 	zassert_not_null(caps.format_caps);
 
 	for (count = 0; caps.format_caps[count].pixelformat != 0; count++) {
-		zassert_equal(caps.format_caps[count].pixelformat, VIDEO_PIX_FMT_GREY,
-			     "mode %d is not GREY", count);
+		zassert_equal(
+		    caps.format_caps[count].pixelformat, VIDEO_PIX_FMT_GREY, "mode %d is not GREY", count);
 	}
 	zassert_equal(count, 3, "expected exactly 3 modes, got %d", count);
 
@@ -77,22 +80,21 @@ ZTEST(ov9281, test_get_caps_lists_exactly_three_grey_modes)
 				break;
 			}
 		}
-		zassert_true(found, "%ux%u mode missing from get_caps", expect[i].width,
-			    expect[i].height);
+		zassert_true(found, "%ux%u mode missing from get_caps", expect[i].width, expect[i].height);
 	}
 }
 
 static void set_format_ok(uint32_t width, uint32_t height)
 {
 	struct video_format fmt = {
-		.type = VIDEO_BUF_TYPE_OUTPUT,
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_GREY,
-		.width = width,
-		.height = height,
+		.width       = width,
+		.height      = height,
 	};
 
-	zassert_ok(video_set_format(ov9281_dev(), &fmt), "set_format(%ux%u GREY) failed", width,
-		  height);
+	zassert_ok(
+	    video_set_format(ov9281_dev(), &fmt), "set_format(%ux%u GREY) failed", width, height);
 }
 
 ZTEST(ov9281, test_set_format_succeeds_for_each_supported_mode)
@@ -105,7 +107,7 @@ ZTEST(ov9281, test_set_format_succeeds_for_each_supported_mode)
 ZTEST(ov9281, test_set_format_1280x800_programs_the_derived_registers)
 {
 	const struct emul *emul = ov9281_emul();
-	uint8_t val;
+	uint8_t            val;
 
 	/* ov9281_set_fmt() skips the register reload when the requested mode is already active
 	 * (see the comment in ov9281.c) -- switch to a different mode first so the 1280x800
@@ -113,6 +115,15 @@ ZTEST(ov9281, test_set_format_1280x800_programs_the_derived_registers)
 	 * active. */
 	set_format_ok(640, 400);
 	set_format_ok(1280, 800);
+
+	/* Y-window: full 816-row array, Y start 0 -- the same Y-end window Espressif's
+	 * own 640x400 table already uses (see the derivation comment in ov9281.c). */
+	zassert_ok(ov9281_emul_get_reg(emul, REG_Y_START, &val));
+	zassert_equal(val, 0x00, "0x%04x", REG_Y_START);
+	zassert_ok(ov9281_emul_get_reg(emul, REG_Y_END_H, &val));
+	zassert_equal(val, 0x03, "0x%04x", REG_Y_END_H);
+	zassert_ok(ov9281_emul_get_reg(emul, REG_Y_END_L, &val));
+	zassert_equal(val, 0x2f, "0x%04x", REG_Y_END_L);
 
 	/* Output width stays 1280 (0x0500), unchanged from the 1280x720 table */
 	zassert_ok(ov9281_emul_get_reg(emul, REG_OUT_WIDTH_H, &val));
@@ -136,34 +147,35 @@ ZTEST(ov9281, test_set_format_1280x800_programs_the_derived_registers)
 ZTEST(ov9281, test_set_format_rejects_unsupported_fourcc)
 {
 	struct video_format fmt = {
-		.type = VIDEO_BUF_TYPE_OUTPUT,
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
-		.width = 1280,
-		.height = 800,
+		.width       = 1280,
+		.height      = 800,
 	};
 
-	zassert_equal(video_set_format(ov9281_dev(), &fmt), -ENOTSUP,
-		     "RAW10 at a valid size should be rejected");
+	zassert_equal(
+	    video_set_format(ov9281_dev(), &fmt), -ENOTSUP, "RAW10 at a valid size should be rejected");
 }
 
 ZTEST(ov9281, test_set_format_rejects_unsupported_size)
 {
 	struct video_format fmt = {
-		.type = VIDEO_BUF_TYPE_OUTPUT,
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_GREY,
-		.width = 800,
-		.height = 600,
+		.width       = 800,
+		.height      = 600,
 	};
 
-	zassert_equal(video_set_format(ov9281_dev(), &fmt), -ENOTSUP,
-		     "an unlisted 800x600 GREY size should be rejected");
+	zassert_equal(video_set_format(ov9281_dev(), &fmt),
+	              -ENOTSUP,
+	              "an unlisted 800x600 GREY size should be rejected");
 }
 
 ZTEST(ov9281, test_pattern_ctrl_sets_the_register_bit)
 {
-	const struct emul *emul = ov9281_emul();
-	struct video_control ctrl = {.id = VIDEO_CID_TEST_PATTERN, .val = 1};
-	uint8_t val;
+	const struct emul   *emul = ov9281_emul();
+	struct video_control ctrl = { .id = VIDEO_CID_TEST_PATTERN, .val = 1 };
+	uint8_t              val;
 
 	zassert_ok(video_set_ctrl(ov9281_dev(), &ctrl));
 	zassert_ok(ov9281_emul_get_reg(emul, REG_TEST_PATTERN, &val));
@@ -181,8 +193,8 @@ ZTEST(ov9281, test_exposure_above_ceiling_is_rejected)
 	 * see ov9281_init_ctrls()/ov9281_set_fmt() in ov9281.c. video_set_ctrl() range-checks
 	 * against that ceiling and rejects out-of-range values with -EINVAL before the driver's
 	 * own defensive CLAMP() ever runs (video_ctrls.c:video_set_ctrl()). */
-	struct video_control over = {.id = VIDEO_CID_EXPOSURE, .val = 886};
-	struct video_control at_ceiling = {.id = VIDEO_CID_EXPOSURE, .val = 885};
+	struct video_control over       = { .id = VIDEO_CID_EXPOSURE, .val = 886 };
+	struct video_control at_ceiling = { .id = VIDEO_CID_EXPOSURE, .val = 885 };
 
 	/* Force a real reload (see the comment in the register-check test above) so the
 	 * exposure ceiling below is freshly computed by this test's own 1280x800 load, not
@@ -190,9 +202,11 @@ ZTEST(ov9281, test_exposure_above_ceiling_is_rejected)
 	set_format_ok(640, 400);
 	set_format_ok(1280, 800);
 
-	zassert_equal(video_set_ctrl(ov9281_dev(), &over), -EINVAL,
-		     "exposure 1 row past the ceiling should be rejected");
-	zassert_ok(video_set_ctrl(ov9281_dev(), &at_ceiling), "exposure at the ceiling should be accepted");
+	zassert_equal(video_set_ctrl(ov9281_dev(), &over),
+	              -EINVAL,
+	              "exposure 1 row past the ceiling should be rejected");
+	zassert_ok(video_set_ctrl(ov9281_dev(), &at_ceiling),
+	           "exposure at the ceiling should be accepted");
 }
 
 ZTEST_SUITE(ov9281, NULL, NULL, NULL, NULL, NULL);
