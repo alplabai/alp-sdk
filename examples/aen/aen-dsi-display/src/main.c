@@ -2172,6 +2172,504 @@ static void probe_read_wedge(const struct device *dsi, const struct device *disp
 }
 
 /*
+ * Which mechanism, if either, can actually read B0h back on THIS board over
+ * DSI.  probe_b0_readback() decides this; probe_stage_current() refuses to
+ * run its read-modify-write sequence unless one of the two came back
+ * B0_READ_NONE-free -- a blind write to B0h could disable a stage this app
+ * could then never read back to restore.
+ */
+enum b0_read_mech {
+	B0_READ_NONE    = 0,
+	B0_READ_SPI     = 1, /* SETREADINDEX(FEh) + GETSPIREAD(FFh), Sec5.19.30/31 pp.250-251. */
+	B0_READ_GENERIC = 2, /* the register's own command byte, direct DCS read. */
+};
+
+static ssize_t send_setextc(const struct device *dsi, const char *prefix)
+{
+	static const uint8_t extc_cmd[] = { 0xB9U, 0xFFU, 0x83U, 0x94U };
+	struct mipi_dsi_msg  w          = {
+		.type   = MIPI_DSI_GENERIC_LONG_WRITE,
+		.flags  = MIPI_DSI_MSG_USE_LPM,
+		.tx_buf = extc_cmd,
+		.tx_len = sizeof(extc_cmd),
+	};
+	ssize_t rc = mipi_dsi_transfer(dsi, 0, &w);
+
+	printk("%s: SETEXTC (B9h FF 83 94) rc=%d\n", prefix, (int)rc);
+	return rc;
+}
+
+/*
+ * SETREADINDEX (FEh) primes the target command byte, GETSPIREAD (FFh) reads
+ * it back (Sec5.19.30 p.250, Sec5.19.31 p.251).  int0/int1 are captured
+ * around the FFh read only, the same read-to-clear latches
+ * dcs_read_classified() protects everywhere else in this file.
+ */
+static ssize_t feff_read(const struct device *dsi,
+                         uint8_t              reg,
+                         uint8_t             *buf,
+                         size_t               len,
+                         uint32_t            *int0,
+                         uint32_t            *int1)
+{
+	uint8_t             idx   = reg;
+	struct mipi_dsi_msg idx_w = {
+		.type   = MIPI_DSI_DCS_LONG_WRITE,
+		.flags  = MIPI_DSI_MSG_USE_LPM,
+		.cmd    = 0xFEU,
+		.tx_buf = &idx,
+		.tx_len = 1U,
+	};
+	ssize_t idx_rc = mipi_dsi_transfer(dsi, 0, &idx_w);
+
+	if (idx_rc < 0) {
+		*int0 = 0;
+		*int1 = 0;
+		return idx_rc;
+	}
+	return dcs_read_classified(dsi, 0xFFU, buf, len, int0, int1);
+}
+
+static ssize_t
+b0_read_via(const struct device *dsi, enum b0_read_mech mech, uint8_t *buf, size_t len)
+{
+	uint32_t int0;
+	uint32_t int1;
+
+	if (mech == B0_READ_SPI) {
+		return feff_read(dsi, 0xB0U, buf, len, &int0, &int1);
+	}
+	if (mech == B0_READ_GENERIC) {
+		return dcs_read_lpm(dsi, 0xB0U, buf, len);
+	}
+	return -ENOTSUP;
+}
+
+static void b0rd_print_hex(const char *tag, const uint8_t *buf, size_t len, ssize_t rc)
+{
+	printk("b0rd: %s raw=", tag);
+	for (size_t i = 0; i < len; i++) {
+		printk("%02x ", buf[i]);
+	}
+	printk("%s\n", (rc == (ssize_t)len) ? "" : "<- READ FAILED, sentinel");
+}
+
+/*
+ * Reads one register BOTH ways and prints both raw results side by side.
+ * The FEh/FFh path is documented for the SPI interface only -- the
+ * datasheet never states whether it also works over DSI -- so a failure
+ * there alone is inconclusive, not a fault; the plain generic read (the
+ * register's own command byte, exactly like every other probe in this file)
+ * is the cross-check.
+ */
+static void b0rd_dual_read(const struct device *dsi,
+                           uint8_t              reg,
+                           size_t               len,
+                           const char          *name,
+                           uint8_t             *spi_out,
+                           ssize_t             *spi_rc,
+                           uint8_t             *gen_out,
+                           ssize_t             *gen_rc)
+{
+	uint32_t spi_int0 = 0;
+	uint32_t spi_int1 = 0;
+	uint32_t gen_int0 = 0;
+	uint32_t gen_int1 = 0;
+
+	memset(spi_out, 0xAAU, len);
+	memset(gen_out, 0xAAU, len);
+
+	*spi_rc = feff_read(dsi, reg, spi_out, len, &spi_int0, &spi_int1);
+	printk(
+	    "b0rd: %s FEh/FFh rc=%d int0=0x%08x int1=0x%08x\n", name, (int)*spi_rc, spi_int0, spi_int1);
+	b0rd_print_hex(name, spi_out, len, *spi_rc);
+
+	*gen_rc = dcs_read_classified(dsi, reg, gen_out, len, &gen_int0, &gen_int1);
+	printk(
+	    "b0rd: %s direct  rc=%d int0=0x%08x int1=0x%08x\n", name, (int)*gen_rc, gen_int0, gen_int1);
+	b0rd_print_hex(name, gen_out, len, *gen_rc);
+}
+
+/*
+ * BENCH DIAGNOSTIC -- probe_b0_readback() (#2199), prefix `b0rd:`.
+ *
+ * The one remaining way a software root cause could be hiding.  A root-cause
+ * pass upstream of this probe already showed the dark-glass state needs only
+ * VDD1 + HS_VCC + RESX + the DSI lanes, and does NOT need VDD3 / VSP / VSN /
+ * VGH / VGL / VCL / VCOM -- exactly the set the glass needs and the logic
+ * does not.  If the SLPOUT state machine never actually enabled the analog
+ * stages, the IC is halting its own outputs and that is fixable in software.
+ * If every enable reads back SET, the IC is trying to drive and the fault is
+ * electrical, downstream of the IC.
+ *
+ * Reads the IC's real post-init power state through the datasheet's own
+ * user-define read mechanism (SETREADINDEX/GETSPIREAD, see feff_read()
+ * above) AND a plain generic read, side by side, via b0rd_dual_read().
+ * SETEXTC (B9h FF 83 94) is required before every read below -- each
+ * register's own Restrictions line says so.  B0h is READ-ONLY here: this
+ * probe never writes it.
+ *
+ * Bit positions, transcribed from the datasheet tables, not assumed:
+ *
+ *   B0h SETSEQUENCE (Sec5.19.1 pp.184-185), 4 parameters:
+ *     param2 D0 = OSC_EN
+ *     param3 D6=VSN_EN D5=VSP_EN D4=VGL_EN D3=VGH_EN D2=VCL_EN D0=STB
+ *     param4 D3=GON D2=DTE D1:D0=D[1:0]
+ *
+ *   B1h SETPOWER (Sec5.19.2 p.186) Bank 0 -- every init path in this file
+ *   (the driver's own and probe_reinit_180ms()'s) ends on bank 00h, so a
+ *   plain B1h read decodes against the Bank 0 table:
+ *     param1 D6:D5=POWMOD[1:0] D4:D2=AP[2:0]
+ *     param7 D7:D5=VGH_RATIO[2:0]
+ *     param8 D7:D5=VGL_RATIO[2:0]
+ *     param9  = VGHS[7:0]
+ *     param10 = VGLS[7:0]
+ *
+ *   B2h SETDISP (Sec5.19.3 p.198) parameter 11 D3 = DISP_BIST_EN.
+ *
+ *   CCh SETPANEL (Sec5.19.17 p.223) parameter 1 -- this app's own init
+ *   writes 0x03 to it, so a correct 0x03 readback is a positive control: it
+ *   proves whichever mechanism produced it CAN read a register this app set
+ *   to a known non-default value.
+ *
+ *   D2h SETOFFSET (Sec5.19.18 p.224) parameter 1 -- documented default 0x55,
+ *   never written by this app or the driver, so a correct 0x55 readback is a
+ *   second, independent positive control: it proves the mechanism can read
+ *   even a register nobody touched.
+ *
+ * Returns which mechanism, if either, actually read B0h back reliably --
+ * probe_stage_current() uses this to decide whether it may run at all.
+ */
+static enum b0_read_mech probe_b0_readback(const struct device *dsi)
+{
+	uint8_t b0_spi[4];
+	uint8_t b0_gen[4];
+	uint8_t b1_spi[10];
+	uint8_t b1_gen[10];
+	uint8_t b2_spi[11];
+	uint8_t b2_gen[11];
+	uint8_t cc_spi[1];
+	uint8_t cc_gen[1];
+	uint8_t d2_spi[1];
+	uint8_t d2_gen[1];
+	ssize_t b0_spi_rc, b0_gen_rc;
+	ssize_t b1_spi_rc, b1_gen_rc;
+	ssize_t b2_spi_rc, b2_gen_rc;
+	ssize_t cc_spi_rc, cc_gen_rc;
+	ssize_t d2_spi_rc, d2_gen_rc;
+
+	send_setextc(dsi, "b0rd");
+	b0rd_dual_read(dsi, 0xB0U, sizeof(b0_spi), "B0h", b0_spi, &b0_spi_rc, b0_gen, &b0_gen_rc);
+	send_setextc(dsi, "b0rd");
+	b0rd_dual_read(dsi, 0xB1U, sizeof(b1_spi), "B1h", b1_spi, &b1_spi_rc, b1_gen, &b1_gen_rc);
+	send_setextc(dsi, "b0rd");
+	b0rd_dual_read(dsi, 0xB2U, sizeof(b2_spi), "B2h", b2_spi, &b2_spi_rc, b2_gen, &b2_gen_rc);
+	send_setextc(dsi, "b0rd");
+	b0rd_dual_read(dsi, 0xCCU, sizeof(cc_spi), "CCh", cc_spi, &cc_spi_rc, cc_gen, &cc_gen_rc);
+	send_setextc(dsi, "b0rd");
+	b0rd_dual_read(dsi, 0xD2U, sizeof(d2_spi), "D2h", d2_spi, &d2_spi_rc, d2_gen, &d2_gen_rc);
+
+	/* Decode B0h -- prefer whichever mechanism returned the full byte count. */
+	bool           b0_spi_ok = (b0_spi_rc == (ssize_t)sizeof(b0_spi));
+	bool           b0_gen_ok = (b0_gen_rc == (ssize_t)sizeof(b0_gen));
+	const uint8_t *b0        = b0_spi_ok ? b0_spi : (b0_gen_ok ? b0_gen : NULL);
+	const char    *b0_src    = b0_spi_ok ? "FEh/FFh" : (b0_gen_ok ? "direct" : "none");
+
+	if (b0 != NULL) {
+		printk("b0rd: B0h decode (via %s) OSC_EN=%d STB=%d VCL_EN=%d VGH_EN=%d VGL_EN=%d "
+		       "VSP_EN=%d VSN_EN=%d GON=%d DTE=%d D[1:0]=%d\n",
+		       b0_src,
+		       (int)((b0[1] & BIT(0)) != 0),
+		       (int)((b0[2] & BIT(0)) != 0),
+		       (int)((b0[2] & BIT(2)) != 0),
+		       (int)((b0[2] & BIT(3)) != 0),
+		       (int)((b0[2] & BIT(4)) != 0),
+		       (int)((b0[2] & BIT(5)) != 0),
+		       (int)((b0[2] & BIT(6)) != 0),
+		       (int)((b0[3] & BIT(3)) != 0),
+		       (int)((b0[3] & BIT(2)) != 0),
+		       (int)(b0[3] & 0x03U));
+	} else {
+		printk("b0rd: B0h decode SKIPPED -- both read mechanisms failed\n");
+	}
+
+	/* Decode B1h Bank 0. */
+	bool           b1_spi_ok = (b1_spi_rc == (ssize_t)sizeof(b1_spi));
+	bool           b1_gen_ok = (b1_gen_rc == (ssize_t)sizeof(b1_gen));
+	const uint8_t *b1        = b1_spi_ok ? b1_spi : (b1_gen_ok ? b1_gen : NULL);
+	const char    *b1_src    = b1_spi_ok ? "FEh/FFh" : (b1_gen_ok ? "direct" : "none");
+
+	if (b1 != NULL) {
+		printk("b0rd: B1h decode (via %s) POWMOD=%d AP=%d VGH_RATIO=%d VGL_RATIO=%d "
+		       "VGHS=0x%02x VGLS=0x%02x\n",
+		       b1_src,
+		       (int)((b1[0] >> 5) & 0x03U),
+		       (int)((b1[0] >> 2) & 0x07U),
+		       (int)((b1[6] >> 5) & 0x07U),
+		       (int)((b1[7] >> 5) & 0x07U),
+		       b1[8],
+		       b1[9]);
+	} else {
+		printk("b0rd: B1h decode SKIPPED -- both read mechanisms failed\n");
+	}
+
+	/* Decode B2h parameter 11: DISP_BIST_EN. */
+	bool           b2_spi_ok = (b2_spi_rc == (ssize_t)sizeof(b2_spi));
+	bool           b2_gen_ok = (b2_gen_rc == (ssize_t)sizeof(b2_gen));
+	const uint8_t *b2        = b2_spi_ok ? b2_spi : (b2_gen_ok ? b2_gen : NULL);
+	const char    *b2_src    = b2_spi_ok ? "FEh/FFh" : (b2_gen_ok ? "direct" : "none");
+
+	if (b2 != NULL) {
+		printk("b0rd: B2h decode (via %s) DISP_BIST_EN(param11)=%d\n",
+		       b2_src,
+		       (int)((b2[10] & BIT(3)) != 0));
+	} else {
+		printk("b0rd: B2h decode SKIPPED -- both read mechanisms failed\n");
+	}
+
+	/* Positive controls. */
+	bool cc_spi_hit = (cc_spi_rc == (ssize_t)sizeof(cc_spi)) && (cc_spi[0] == 0x03U);
+	bool cc_gen_hit = (cc_gen_rc == (ssize_t)sizeof(cc_gen)) && (cc_gen[0] == 0x03U);
+	bool d2_spi_hit = (d2_spi_rc == (ssize_t)sizeof(d2_spi)) && (d2_spi[0] == 0x55U);
+	bool d2_gen_hit = (d2_gen_rc == (ssize_t)sizeof(d2_gen)) && (d2_gen[0] == 0x55U);
+
+	printk("b0rd: controls CCh==0x03 FEh/FFh=%d direct=%d | D2h==0x55 FEh/FFh=%d direct=%d\n",
+	       (int)cc_spi_hit,
+	       (int)cc_gen_hit,
+	       (int)d2_spi_hit,
+	       (int)d2_gen_hit);
+
+	/* Verdict. */
+	bool enables_set    = (b0 != NULL) &&
+	                      ((b0[2] & (BIT(6) | BIT(5) | BIT(4) | BIT(3) | BIT(2))) ==
+	                       (BIT(6) | BIT(5) | BIT(4) | BIT(3) | BIT(2))) &&
+	                      ((b0[3] & (BIT(3) | BIT(2))) == (BIT(3) | BIT(2)));
+	bool any_control_ok = cc_spi_hit || cc_gen_hit || d2_spi_hit || d2_gen_hit;
+
+	printk("b0rd: VERDICT B0h_source=%s enables_all_set=%d control_confirmed=%d -- %s\n",
+	       b0_src,
+	       (int)enables_set,
+	       (int)any_control_ok,
+	       (b0 == NULL)  ? "B0h unreadable, cannot speak to the SLPOUT state machine"
+	       : enables_set ? "every enable reads SET -- IC is trying to drive the analog "
+	                       "stages, fault is downstream (electrical)"
+	                     : "at least one enable reads CLEAR -- SLPOUT never actually "
+	                       "enabled the analog stage, fixable in software");
+
+	return b0_spi_ok ? B0_READ_SPI : (b0_gen_ok ? B0_READ_GENERIC : B0_READ_NONE);
+}
+
+#define STGI_PHASE_HOLD_MS 8000
+
+/*
+ * Read-modify-write of ONE named bit-group inside B0h off the CURRENT
+ * register value -- never composed from scratch.  clear_mask bits are
+ * cleared, set_mask bits are set; every other bit (and all 3 other bytes)
+ * passes through unchanged.  Uses whichever mechanism probe_b0_readback()
+ * showed works.
+ */
+static bool stgi_rmw_b0(const struct device *dsi,
+                        enum b0_read_mech    mech,
+                        uint8_t              byte_idx,
+                        uint8_t              clear_mask,
+                        uint8_t              set_mask,
+                        const char          *tag)
+{
+	uint8_t buf[4];
+	ssize_t rrc = b0_read_via(dsi, mech, buf, sizeof(buf));
+
+	if (rrc != (ssize_t)sizeof(buf)) {
+		printk("stgi: %s B0h read FAILED rc=%d -- refusing blind write\n", tag, (int)rrc);
+		return false;
+	}
+
+	buf[byte_idx] = (uint8_t)((buf[byte_idx] & (uint8_t)~clear_mask) | set_mask);
+
+	struct mipi_dsi_msg w = {
+		.type   = MIPI_DSI_DCS_LONG_WRITE,
+		.flags  = MIPI_DSI_MSG_USE_LPM,
+		.cmd    = 0xB0U,
+		.tx_buf = buf,
+		.tx_len = sizeof(buf),
+	};
+	ssize_t wrc = mipi_dsi_transfer(dsi, 0, &w);
+
+	printk("stgi: %s B0h write %02x %02x %02x %02x rc=%d\n",
+	       tag,
+	       buf[0],
+	       buf[1],
+	       buf[2],
+	       buf[3],
+	       (int)wrc);
+	return wrc == (ssize_t)sizeof(buf);
+}
+
+/*
+ * BENCH DIAGNOSTIC -- probe_stage_current() (#2199), prefix `stgi:`.
+ *
+ * A current-signature probe: each B0h analog-stage enable that really
+ * switches a load should move the board's 16V input current when toggled.
+ * An external DPS sampler buckets its readings against the marker lines
+ * below. Panel state matters and is the point -- probe_bist_v2() and
+ * probe_frm_vcom_sweep() already ran with FRM active and saw nothing on the
+ * glass, so this probe reproduces that exact state (Sleep Out, Display On,
+ * FRM running via SETDISP with parameter 11 bit3 set -- the same byte string
+ * probe_bist_v2() uses) and toggles the enables underneath it.
+ *
+ * B0h is documented "for DCS command auto sequence and manual mode debug
+ * use, please don't access this command in initial code" (Sec5.19.1 p.184)
+ * -- that warns against writing it from INIT code, not from a debug probe,
+ * which is what this is.  Still handled carefully: every write is a
+ * read-modify-write off the value stgi_rmw_b0() just read (never composed
+ * from scratch), the exact original bytes captured at entry are
+ * re-asserted at the end, and if anything goes wrong a RESX pulse followed
+ * by re-init (see panel_wake_after_resx() / probe_reinit_180ms()) recovers
+ * the IC.
+ *
+ * Refuses to run at all if probe_b0_readback() found neither read mechanism
+ * reliable for B0h -- a blind write here could disable a stage this probe
+ * could then never read back to restore.
+ */
+static void probe_stage_current(const struct device *dsi, enum b0_read_mech b0_mech)
+{
+	static const uint8_t frm_on[] = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU,
+		                              0x00U, 0x00U, 0x00U, 0x00U, 0xC8U };
+	uint8_t              baseline[4];
+	ssize_t              rc;
+
+	if (b0_mech == B0_READ_NONE) {
+		printk("stgi: SKIPPED -- B0h not readable, refusing blind read-modify-write\n");
+		return;
+	}
+
+	/* 1. Confirm awake before touching anything. */
+	{
+		uint8_t  rddpm = 0xAAU;
+		uint32_t int0  = 0;
+		uint32_t int1  = 0;
+
+		rc = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+		printk("stgi: entry RDDPM rc=%d data=0x%02x%s\n",
+		       (int)rc,
+		       rddpm,
+		       (rc < 1) ? "  <- READ FAILED, sentinel" : "");
+	}
+
+	/* 2. Sleep Out + Display On + FRM, reusing probe_bist_v2()'s own byte string. */
+	(void)send_setextc(dsi, "stgi");
+	{
+		struct mipi_dsi_msg slpout_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x11U, /* EXIT_SLEEP_MODE */
+		};
+		ssize_t slpout_rc = mipi_dsi_transfer(dsi, 0, &slpout_w);
+
+		printk("stgi: EXIT_SLEEP_MODE rc=%d\n", (int)slpout_rc);
+		k_msleep(120);
+
+		struct mipi_dsi_msg dispon_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x29U, /* SET_DISPLAY_ON */
+		};
+		ssize_t dispon_rc = mipi_dsi_transfer(dsi, 0, &dispon_w);
+
+		printk("stgi: SET_DISPLAY_ON rc=%d\n", (int)dispon_rc);
+	}
+	(void)send_setextc(dsi, "stgi");
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = frm_on,
+			.tx_len = sizeof(frm_on),
+		};
+		rc = mipi_dsi_transfer(dsi, 0, &w);
+		printk("stgi: SETDISP FRM-ON B2 00 80 64 0C 0D 2F 00 00 00 00 C8 rc=%d\n", (int)rc);
+	}
+
+	/* 3. Capture the ORIGINAL B0h value -- restored verbatim at the end. */
+	rc = b0_read_via(dsi, b0_mech, baseline, sizeof(baseline));
+	if (rc != (ssize_t)sizeof(baseline)) {
+		printk("stgi: ABORT -- baseline B0h read FAILED rc=%d, refusing to proceed\n", (int)rc);
+		return;
+	}
+	printk("stgi: baseline B0h=%02x %02x %02x %02x\n",
+	       baseline[0],
+	       baseline[1],
+	       baseline[2],
+	       baseline[3]);
+
+#define STGI_PHASE(n, desc) \
+	do { \
+		uint8_t  pm = 0xAAU; \
+		uint32_t i0 = 0; \
+		uint32_t i1 = 0; \
+		ssize_t  prc; \
+		printk("stgi: phase %d %s -- SAMPLE NOW\n", (n), (desc)); \
+		k_msleep(STGI_PHASE_HOLD_MS); \
+		prc = dcs_read_classified(dsi, 0x0AU, &pm, 1U, &i0, &i1); \
+		printk("stgi: phase %d RDDPM rc=%d data=0x%02x%s\n", \
+		       (n), \
+		       (int)prc, \
+		       pm, \
+		       (prc < 1) ? "  <- READ FAILED, sentinel" : ""); \
+	} while (0)
+
+	/* Phase 1: baseline, FRM running, nothing changed. */
+	STGI_PHASE(1, "baseline, FRM running, nothing changed");
+
+	/* Phase 2/3: VSP_EN + VSN_EN cleared, then restored. */
+	stgi_rmw_b0(dsi, b0_mech, 2U, BIT(5) | BIT(6), 0U, "phase2 clear VSP_EN+VSN_EN");
+	STGI_PHASE(2, "VSP_EN+VSN_EN CLEARED");
+	stgi_rmw_b0(dsi, b0_mech, 2U, 0U, BIT(5) | BIT(6), "phase3 restore VSP_EN+VSN_EN");
+	STGI_PHASE(3, "VSP_EN+VSN_EN restored");
+
+	/* Phase 4/5: VGH_EN + VGL_EN cleared, then restored. */
+	stgi_rmw_b0(dsi, b0_mech, 2U, BIT(3) | BIT(4), 0U, "phase4 clear VGH_EN+VGL_EN");
+	STGI_PHASE(4, "VGH_EN+VGL_EN CLEARED");
+	stgi_rmw_b0(dsi, b0_mech, 2U, 0U, BIT(3) | BIT(4), "phase5 restore VGH_EN+VGL_EN");
+	STGI_PHASE(5, "VGH_EN+VGL_EN restored");
+
+	/* Phase 6/7: GON cleared, then restored. */
+	stgi_rmw_b0(dsi, b0_mech, 3U, BIT(3), 0U, "phase6 clear GON");
+	STGI_PHASE(6, "GON CLEARED");
+	stgi_rmw_b0(dsi, b0_mech, 3U, 0U, BIT(3), "phase7 restore GON");
+	STGI_PHASE(7, "GON restored");
+
+	/* Phase 8/9: DTE cleared, then restored. */
+	stgi_rmw_b0(dsi, b0_mech, 3U, BIT(2), 0U, "phase8 clear DTE");
+	STGI_PHASE(8, "DTE CLEARED");
+	stgi_rmw_b0(dsi, b0_mech, 3U, 0U, BIT(2), "phase9 restore DTE");
+	STGI_PHASE(9, "DTE restored");
+
+#undef STGI_PHASE
+
+	/* Final safety restore: re-assert the exact original B0h bytes captured at entry. */
+	{
+		struct mipi_dsi_msg w = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB0U,
+			.tx_buf = baseline,
+			.tx_len = sizeof(baseline),
+		};
+		ssize_t wrc = mipi_dsi_transfer(dsi, 0, &w);
+
+		printk("stgi: final restore B0h=%02x %02x %02x %02x rc=%d\n",
+		       baseline[0],
+		       baseline[1],
+		       baseline[2],
+		       baseline[3],
+		       (int)wrc);
+	}
+
+	printk("stgi: END\n");
+}
+
+/*
  * BENCH DIAGNOSTIC -- probe_pwr_current() (#2199), prefix `pwrc:`.
  *
  * Every OPTICAL avenue is exhausted: probe_bist_v2()'s Free Running Mode
@@ -2208,13 +2706,71 @@ static void probe_read_wedge(const struct device *dsi, const struct device *disp
  * failed read aborts the toggle phases (1-2) rather than risk that.  The
  * backlight phases (3-4) do not touch the expander output register and
  * always run.
+ *
+ * FIX (#2199): the +0.0004A LCD_PWR_EN measurement below was originally
+ * taken with the panel in whatever state main() had left it in -- and if
+ * LCD_PWR_EN gates a regulator feeding the module's analog input, a panel
+ * left in Sleep In draws near-zero on that rail regardless of whether the
+ * regulator works, making a near-zero delta the CORRECT reading rather than
+ * evidence the rail is dead.  This probe now puts the panel in Sleep Out +
+ * Display On + FRM before phase 0, so the measurement is taken with the
+ * analog domain actually demanded.
  */
 #define EXP_CFG_REG        0x03U
 #define EXP_PWR_EN_BIT     BIT(0) /* LCD_PWR_EN, expander P0. */
 #define PWRC_PHASE_HOLD_MS 10000
 
-static void probe_pwr_current(void)
+static void probe_pwr_current(const struct device *dsi)
 {
+	/* 0. Wake the panel (Sleep Out + Display On + FRM) before measuring anything. */
+	(void)send_setextc(dsi, "pwrc");
+	{
+		struct mipi_dsi_msg slpout_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x11U, /* EXIT_SLEEP_MODE */
+		};
+		ssize_t slpout_rc = mipi_dsi_transfer(dsi, 0, &slpout_w);
+
+		printk("pwrc: EXIT_SLEEP_MODE rc=%d\n", (int)slpout_rc);
+		k_msleep(120);
+
+		struct mipi_dsi_msg dispon_w = {
+			.type  = MIPI_DSI_DCS_SHORT_WRITE,
+			.flags = MIPI_DSI_MSG_USE_LPM,
+			.cmd   = 0x29U, /* SET_DISPLAY_ON */
+		};
+		ssize_t dispon_rc = mipi_dsi_transfer(dsi, 0, &dispon_w);
+
+		printk("pwrc: SET_DISPLAY_ON rc=%d\n", (int)dispon_rc);
+	}
+	(void)send_setextc(dsi, "pwrc");
+	{
+		static const uint8_t frm_on[] = { 0x00U, 0x80U, 0x64U, 0x0CU, 0x0DU, 0x2FU,
+			                              0x00U, 0x00U, 0x00U, 0x00U, 0xC8U };
+		struct mipi_dsi_msg  w        = {
+			.type   = MIPI_DSI_DCS_LONG_WRITE,
+			.flags  = MIPI_DSI_MSG_USE_LPM,
+			.cmd    = 0xB2U,
+			.tx_buf = frm_on,
+			.tx_len = sizeof(frm_on),
+		};
+		ssize_t rc = mipi_dsi_transfer(dsi, 0, &w);
+
+		printk("pwrc: SETDISP FRM-ON B2 00 80 64 0C 0D 2F 00 00 00 00 C8 rc=%d\n", (int)rc);
+	}
+	{
+		uint8_t  rddpm = 0xAAU;
+		uint32_t int0  = 0;
+		uint32_t int1  = 0;
+		ssize_t  rc    = dcs_read_classified(dsi, 0x0AU, &rddpm, 1U, &int0, &int1);
+
+		printk("pwrc: post-wake RDDPM rc=%d data=0x%02x%s\n",
+		       (int)rc,
+		       rddpm,
+		       (rc < 1) ? "  <- READ FAILED, sentinel" : "");
+	}
+
 	uint8_t cfg          = 0;
 	int     cfg_rc       = i2c_reg_read_byte_dt(&lcd_exp_i2c, EXP_CFG_REG, &cfg);
 	bool    p0_is_output = (cfg_rc == 0) && ((cfg & EXP_PWR_EN_BIT) == 0);
@@ -2381,6 +2937,19 @@ int main(void)
 		 * read-success measurement this probe depends on.
 		 */
 		probe_ta_timing(dsi);
+
+		/*
+		 * BENCH DIAGNOSTIC (#2199): probe_b0_readback() must run here --
+		 * still command mode, panel awake via probe_reinit_180ms() above,
+		 * and before anything below ever enters video mode.
+		 * probe_stage_current() runs immediately after it and depends on
+		 * its return (which B0h read mechanism, if any, actually works)
+		 * to decide whether its read-modify-write toggle sequence may run
+		 * at all.
+		 */
+		enum b0_read_mech b0_mech = probe_b0_readback(dsi);
+
+		probe_stage_current(dsi, b0_mech);
 	}
 
 	/*
@@ -2546,7 +3115,7 @@ int main(void)
 	 * nothing above or below depends on the state it leaves (see its own
 	 * banner).
 	 */
-	probe_pwr_current();
+	probe_pwr_current(dsi);
 
 	return 0;
 }
