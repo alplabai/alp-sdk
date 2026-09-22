@@ -5,7 +5,7 @@
 | Module | Sensor | Shield | Interface / lanes | Modes | Status |
 |---|---|---|---|---|---|
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. |
-| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P; 640x480 is a full-array subsampled+binned mode, not a crop | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. **Run 61 (2026-09-22, current)** replaced runs 56/58/60's Alif-derived 640x480/common-init mix with the RPi/OmniVision reference driver's own tables (raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`) verbatim: column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of full scale) with the runs 56/58/60 mix to 1.0-1.5 LSB (~1.1%) with the reference set, in the same dark lab at the same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are gone. RAW10 only; RAW8 (SBGGR8) is unverified. |
+| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P; 640x480 is a full-array subsampled+binned mode at 15 fps by default, not a crop | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. **Run 61 (2026-09-22, current)** replaced runs 56/58/60's Alif-derived 640x480/common-init mix with register values taken as hardware facts from the RPi/OmniVision reference driver (raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`): column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of full scale) with the runs 56/58/60 mix to 1.0-1.5 LSB (~1.1%) with the reference set, in the same dark lab at the same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are gone; which specific register difference caused that is NOT ESTABLISHED (see the driver section). **Run 62 bench-verified the COMMITTED driver itself** (77/77 registers matched, zero CSI errors) and the maintainer confirmed a host-demosaiced render of the captured frame is the correct image (BGGR, unmirrored). **Run 62 also fixed a real bug**: the default frame rate at 640x480 had silently been 10 fps, not the intended 15, since `ov5647_init()`'s original boot format made 15 fps unreachable at boot and that low rate stuck for every later open. RAW10 only; RAW8 (SBGGR8) is unverified. |
 | RPi Camera Module 2 | IMX219 | `raspberry_pi_camera_module_2` (upstream) | MIPI CSI-2 D-PHY, 2 lanes | 640x480 RAW10 (this repo's first-light example) | Build-only / not run on hardware. |
 | RPi Global Shutter Camera | IMX296LQR-C (1.58 Mpx colour global-shutter) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, 1 lane | 1456x1088 SRGGB10P (all-pixel scan) | Build-only / not run on hardware. |
 
@@ -132,14 +132,7 @@ silently reintroduces one or both bugs.
    `0x0103` software reset and before the lane park -- the PLL dividers
    latch at that reset, not on standby exit, so the same writes issued
    after the park update the register file without moving the running
-   PLL (a bench run 51 mistake). Values are matched to mainline Linux's
-   own declared PLL constants for this mode: `0x3037` = `0x03` (prediv
-   3), `0x3036` = `0x69` (multiplier 105), `0x3035` = `0x21` (sysdiv 2) ->
-   VCO 875 MHz / sysdiv 2 = 437.5 Mbps/lane, matching mainline's declared
-   `link_freq` 218750000 (DDR half-rate) for this mode; the same relation
-   reproduces mainline's other two modes exactly (`0x3036` = `0x62`/98 ->
-   81666700, `0x3036` = `0x46`/70 -> 58333000), which is what pins
-   sysdiv = 2 as the operating point in every mode. `0x3017` = `0xf0`
+   PLL (a bench run 51 mistake). `0x3017` = `0xf0`
    (`pgm_lptx` = 3, max) is a deliberate divergence from mainline's
    `0xe0` (`pgm_lptx` = 2): mainline's value never brings the clock lane
    to Stop state, which mainline's own receiver does not gate on but ours
@@ -149,7 +142,18 @@ silently reintroduces one or both bugs.
    individually load-bearing is **not established**; only `0x3017` is
    independently bisected above. `0x4837` (PCLK period) stays at its
    power-on `0x15` (mainline writes `0x19` for this PLL); on the safe
-   side at 437.5 Mbps and not changed in the working run.
+   side at whatever bit rate the currently-programmed PLL gives (see
+   item 4 below for the CURRENT value -- this item only fixed that a
+   PLL was written at all, not which one).
+   **AT THE TIME (run 52), the specific values matched mainline's
+   full-resolution constants**: `0x3037` = `0x03` (prediv 3), `0x3036` =
+   `0x69` (multiplier 105), `0x3035` = `0x21` (sysdiv 2) -> VCO 875 MHz /
+   sysdiv 2 = 437.5 Mbps/lane, matching mainline's declared `link_freq`
+   218750000 (DDR half-rate) for the full-resolution mode. **SUPERSEDED
+   by run 61** (item 4 below): the multiplier is now 70 (`0x3036` =
+   `0x46`), matched to mainline's 640x480 10bpp table instead, since
+   640x480 is the mode this driver actually ships -- do not read `0x69`
+   or 437.5 Mbps as the current value; see item 4 for the current PLL.
 3. **`OV5647_PIXEL_RATE` corrected, not "disproven".** A previous note
    here said the claim that `PIXEL_RATE = XVCLK * 10 / 3` = 83333333
    understated the link rate was investigated and DISPROVEN, and that a
@@ -159,94 +163,142 @@ silently reintroduces one or both bugs.
    power-on link rate, and "it doubled the programmed VTS" was the
    correct *consequence* of a doubled pixel clock, not evidence against
    it. The real defect was that the PLL was never WRITTEN to match
-   either number. `OV5647_PIXEL_RATE` now derives from the same
+   either number. `OV5647_PIXEL_RATE` derives from the same
    `OV5647_PLL_PREDIV` / `OV5647_PLL_MULT` / `OV5647_PLL_SYS_DIV`
-   constants item 2 programs into the sensor, giving 87500000 at 25 MHz
-   XVCLK -- matching mainline's own declared `pixel_rate` for this PLL --
-   and feeding a correspondingly larger `TIMING_VTS` (2160 instead of the
-   previous, power-on-PLL-derived 2058); `ov5647_enum_frmival()` still
-   behaves sanely, just narrowing which of the fixed frame rates are
-   reachable at a given height. **Not bench-verified for 8-bit**: this
-   derivation is fixed at 10bpp (the RAW10 mode `ov5647_init()` selects,
-   the only one bench-proven); `cfg->pixel_rate` is a single DT-derived
-   constant, not re-derived per selected format, so selecting
+   constants item 2 programs into the sensor -- **AT THE TIME (run 52)
+   this gave 87500000 at 25 MHz XVCLK, matching mainline's full-
+   resolution `pixel_rate`; SUPERSEDED by run 61's PLL correction (item
+   4), which gives the CURRENT value 58333333.** `TIMING_VTS` is now
+   derived per the ACTIVE mode's HTS, not one constant -- see item 4;
+   `ov5647_enum_frmival()` still behaves sanely, just narrowing which of
+   the fixed frame rates are reachable at a given height and HTS.
+   **8-bit is still not bench-verified**: this derivation is fixed at
+   10bpp (the only bench-proven bpp); `cfg->pixel_rate` is a single
+   DT-derived constant, not re-derived per selected format, so selecting
    `VIDEO_PIX_FMT_SBGGR8` (8bpp) still reports the RAW10 value against
-   `video_get_csi_link_freq()`'s fallback, which would need 109375000
-   (437.5 Mbps * 2 / 8) at the same PLL to be correct for that format --
-   flagged, not fixed, pending a bench measurement of the 8-bit path.
-4. **FIXED (issue #2248, bench runs 56/58/60/61 -- run 61 is current,
-   source of truth) -- 640x480 was a heavy telephoto crop, not the
-   sensor's real 640x480 mode, and the driver never wrote the common
-   analog/BLC/AEC registers the reference driver writes for every
-   mode.** The driver's 640x480 was a 648x488 1:1 centre crop --
+   `video_get_csi_link_freq()`'s fallback, which would need 72916666
+   (291.67 Mbps * 2 / 8, the CURRENT PLL) at the same PLL to be correct
+   for that format -- flagged, not fixed, pending a bench measurement of
+   the 8-bit path.
+4. **FIXED (issue #2248, bench runs 56/58/60/61/62 -- run 61 is
+   current, source of truth) -- 640x480 was a heavy telephoto crop, not
+   the sensor's real 640x480 mode, and the driver never wrote the
+   common analog/BLC/AEC registers the reference driver writes for
+   every mode.** The driver's 640x480 was a 648x488 1:1 centre crop --
    roughly 25% of the array width -- not the full-array
-   subsampled+binned 640x480 mode. **Source of truth is the
-   RPi/OmniVision reference driver**: raspberrypi/linux branch
-   rpi-6.6.y, `drivers/media/i2c/ov5647.c`,
-   `ov5647_common_regs[]` and `ov5647_640x480_10bpp[]` -- run 61
-   applied those tables verbatim (minus `0x0100`/`0x0103`, which this
-   driver's own park/reset sequence owns) and streamed cleanly: RX-DDR
-   clock 145833332, hsfrequency bin `{300, 0x14}`, "[stg] 75 regs 0
-   failed", MFR start `ALP_OK`, zero `E:` lines / CSI fatals, frame
-   CRC-matched against a real scene.
-   Alif's own OV5647 table for this exact silicon
-   (`alif-dfp-ref components/Source/OV5647_camera_sensor.c:118-136`) is
-   a **variant** of the same reference, not an independent source: it
-   shares most analog/BLC/AEC values with the RPi table but diverges at
-   `0x3821` (Alif's `0x07` vs the reference's `0x01`) and ships a
-   larger ISP-enable set. Running Alif's `0x3821 = 0x07` analog-timing
-   variant on top of the OLDER, WRONG full-resolution PLL (see item 2
-   above; run 61 also corrects the PLL, `OV5647_PLL_MULT` 105 -> 70,
-   see the driver's PLL constants comment) is what produced the
-   stripes runs 56/58/60 bench-proved as "clean" -- the fix is
-   switching to the reference values wholesale rather than mixing
-   sources.
+   subsampled+binned 640x480 mode. The register VALUES are taken as
+   hardware facts from the RPi/OmniVision reference driver:
+   raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`,
+   `ov5647_common_regs[]` and `ov5647_640x480_10bpp[]` (GPL-2.0 -- this
+   file copies no source text from that driver, only numeric register
+   addresses/values). Run 61 ran those tables closely but NOT
+   byte-identically: `0x0100`/`0x0103` are owned by this driver's own
+   reset/park sequence, not the table; the table's `0x3017` = `0xe0`
+   was written but this driver's re-park step then overwrote it to OUR
+   `0xf0` before streaming (see items 1/2 above), so the stream always
+   started with `0xf0`; `0x3503` was left to the app's own exposure
+   control rather than the table's `0x03`; and `0x4800` used this
+   driver's park/stream-on sequence value (`0x04`), not the table's
+   `0x34`. Run 61 streamed clean: "[stg] 75 regs 0 failed", MFR start
+   `ALP_OK`, zero `E:` lines / CSI fatals, frame CRC-matched against a
+   real scene, at the CSI-2 receiver's matched hsfrequency bin 20
+   (`{300, 0x14}`) for the corrected PLL -- that bin match, not any
+   receiver-side clock readback, is the PLL-lock evidence; a receiver
+   register that merely echoes our own declared `VIDEO_CID_PIXEL_RATE`
+   back through `video_get_csi_link_freq()` is not independent
+   confirmation.
+   **Run 62 bench-verified the COMMITTED driver itself**, not a
+   modified bench app: the test app wrote no mode registers and read
+   back 77 registers against the reference, 0 mismatches; it streamed
+   with zero `E:` lines; column fixed-pattern noise matched run 61
+   plane by plane (1.65 / 1.19 / 1.18 / 0.97 LSB, ~1.1% of signal). The
+   maintainer then viewed a host-demosaiced colour render of the run-62
+   frame and **CONFIRMED it is the correct image**: orientation
+   `0x3821 = 0x01` / `0x3820 = 0x41` (see below) is unmirrored and
+   correct, Bayer order BGGR, green channels diagonal and equal
+   (107.2 / 106.8) -- maintainer-confirmed on run 62's actual rendered
+   frame, not inferred from register semantics alone.
+   Alif's own OV5647 table for this exact silicon (Alif Ensemble
+   CMSIS-DFP package "AlifSemiconductor.Ensemble",
+   `components/Source/OV5647_camera_sensor.c:118-136`, package v2.1.0)
+   is a **variant** of the same reference, not an independent source:
+   it shares most analog/BLC/AEC values with the reference but diverges
+   at `0x3821` (Alif's `0x07` vs the reference's `0x01` -- bits[2:1] of
+   `0x3821` are this driver's horizontal-mirror mask, NOT "analog
+   timing") and writes a DIFFERENT ISP-enable set (`0x5000=0x06,
+   0x5001=0x01, 0x5002=0x41, 0x5003=0x08, 0x5a00=0x08` -- the reference
+   and this driver write only `0x5000`/`0x5003`/`0x5a00`).
+   **WHICH of runs 56/58/60's several changes vs runs 61/62 (PLL, HTS,
+   `0x3821`, the ISP-enable set, and `0x3000..0x3002`) actually caused
+   the visible vertical stripes runs 56/58/60 bench-proved as "clean"
+   is NOT ESTABLISHED** -- run 61 changed all of them together against
+   the reference, not one at a time. (Runs 56/58/60 ran Alif's
+   `0x3821 = 0x07` on `OV5647_PLL_MULT = 105`, the SAME PLL run 52
+   originally fixed -- not run 61's corrected 70 -- so the stripes
+   cannot be attributed to a PLL/`0x3821` interaction specifically
+   without more bisection than this investigation did.) What runs
+   61/62 DO establish is the outcome: the reference register set,
+   applied together, streams clean with the column-FPN numbers below;
+   that is the basis for shipping it, not a claim about which single
+   register mattered most.
    Run 61's 640x480 register set: full-array window (unchanged from
    runs 56/60), output size 640x480, subsample `0x3814`/`0x3815` =
    `0x35`, binning-enable `0x3820` = `0x41` with `0x3821` = `0x01` (NOT
    runs 56/58/60's `0x07`), binned-mode analog
    `0x3612`/`0x3618`/`0x3708`/`0x3709` = `0x59`/`0x00`/`0x64`/`0x52`
-   (unchanged), and a **per-mode line length**, `0x380c`/`0x380d` =
-   `0x073c` (1852, the reference value) -- the crop path keeps the
-   driver's own bench-proven `2700` (run 52) instead of mainline's
-   full-resolution `2844`, which is unverified here.
+   (unchanged), the 50/60 Hz AEC band step `0x3a09`/`0x3a0a`/`0x3a0b`/
+   `0x3a0d`/`0x3a0e` and `0x4004` (issue #2248 fix-up: moved out of the
+   common init into this per-mode block -- the band step is in LINES,
+   which depends on line time/HTS, so a value correct for this mode's
+   HTS is wrong for the crop path's), and a **per-mode line length**,
+   `0x380c`/`0x380d` = `0x073c` (1852, the reference value) -- the crop
+   path keeps the driver's own bench-proven `2700` (run 52) instead of
+   mainline's full-resolution `2844`, which is unverified here.
    `ov5647_set_mode_regs()` picks this full-FOV binned set for exactly
    640x480 and keeps the existing centred crop for every other size --
    but the crop path now also explicitly re-asserts the 1:1
    subsample/binning/analog/HTS values (`0x3814`/`0x3815` = `0x11`,
-   `0x3820`/`0x3821` = `0x40`/`0x00`, `2700`, and mainline's
+   `0x3820`/`0x3821` = `0x40`/`0x00`, `2700`, mainline's
    full-resolution analog values `0x3612`/`0x3618`/`0x3708`/`0x3709` =
    `0x5b`/`0x04`/`0x64`/`0x12`, cited from mainline and
-   BENCH-UNVERIFIED on this module), so a prior 640x480 selection can
-   never leave binning (or its HTS) armed on a later crop window.
-   **Orientation:** `0x3821` bits[2:1] are this driver's existing
-   horizontal-mirror mask; `0x01` (reference) vs `0x07` (Alif's
-   variant) produced a LEFT-RIGHT-MIRRORED scene on the bench at
-   `0x07` -- `0x01` is correct. Per the RPi driver, `0x3821 = 0x01`
-   with `0x3820 = 0x41` is its hflip=1/vflip=0 configuration, paired
-   with `MEDIA_BUS_FMT_SBGGR10_1X10` -- matching this driver's
-   advertised SBGGR formats. Absolute orientation (which edge of the
-   frame is physically "up") is still unconfirmed against a known real
-   scene; only left-right mirroring has bench evidence.
+   BENCH-UNVERIFIED on this module, and the SAME AEC band-step values
+   as the binned mode -- no mainline full-resolution citation is
+   available, so they are reused rather than left unwritten, which
+   would silently retain a prior mode's stale line counts;
+   BENCH-UNVERIFIED at this HTS), so a prior 640x480 selection can
+   never leave binning (or its HTS/band step) armed on a later crop
+   window.
+   **Orientation (maintainer-confirmed, run 62):** `0x3821` bits[2:1]
+   are this driver's existing horizontal-mirror mask; `0x01`
+   (reference) vs `0x07` (Alif's variant) produced a LEFT-RIGHT-MIRRORED
+   scene on the bench at `0x07` -- `0x01` is correct and unmirrored, as
+   confirmed by the maintainer's review of a host-demosaiced run-62
+   frame (BGGR, greens diagonal and equal). Per the RPi driver,
+   `0x3821 = 0x01` with `0x3820 = 0x41` is its hflip=1/vflip=0
+   configuration, paired with `MEDIA_BUS_FMT_SBGGR10_1X10` -- matching
+   this driver's advertised SBGGR formats.
    **Ordering trap (bench run 54, unchanged):** binning is only
    coherent with the full-array window -- run 54 applied the binning
    registers and then let `ov5647_set_window()` rewrite the window to
    the crop, and the sensor emitted short lines against a 640-pixel
    frame declaration; the CSI host raised "Fatal Interrupt due to
    mismatch of Frame Start and Frame End" on VC0 44 times in 2 s and
-   delivered nothing. The window, output size, subsample, binning and
-   line-length registers are always written as one coherent set per
-   mode.
-   **Common init (run 61):** replaces runs 56/58/60's Alif-derived
-   block with the RPi reference's `ov5647_common_regs[]`, minus
+   delivered nothing. The window, output size, subsample, binning,
+   line-length AND AEC-band-step registers are always written as one
+   coherent set per mode.
+   **Common init (run 61, verified as shipped by run 62):** register
+   VALUES match runs 56/58/60's Alif-derived block for most addresses,
+   but the SOURCE is now the reference's `ov5647_common_regs[]`, minus
    `0x0100`/`0x0103` (park/reset), minus `0x3017` (kept at OUR `0xf0`,
-   see items 1/2 above), and minus `0x3503` (left to this driver's own
-   exposure-control logic). Unlike runs 56/58/60, it **includes** the
-   ISP block enables `0x5000 = 0x06`, `0x5003 = 0x08`, `0x5a00 = 0x08`
-   -- run 61 streamed clean with them. Run 58's CSI "incorrect frame
-   sequence" fatals, previously blamed on ISP enables as a category,
-   actually came from Alif's LARGER ISP set, which additionally wrote
-   `0x5001`/`0x5002` and (in the BLC section) `0x4050`/`0x4051` --
+   see items 1/2 above), minus `0x3503` (left to this driver's own
+   exposure-control logic), and minus the mode-specific AEC band-step
+   registers (moved to the per-mode block above). UNLIKE runs 56/58/60,
+   it **includes** the reference's ISP block enables `0x5000 = 0x06`,
+   `0x5003 = 0x08`, `0x5a00 = 0x08` -- run 61 streamed clean with them.
+   Run 58's CSI "incorrect frame sequence" fatals, previously blamed on
+   ISP enables as a category, actually came from Alif's DIFFERENT ISP
+   set specifically, which additionally writes `0x5001`/`0x5002` and
+   (in runs 56/58/60's now-superseded BLC section) `0x4050`/`0x4051` --
    none of those four are in the reference table and none are written
    here; do not add them back.
    `OV5647_EXPOSURE_DEFAULT` (unchanged by run 61) still moves from
@@ -258,21 +310,41 @@ silently reintroduces one or both bugs.
    railed at both its limits (502 lines, gain at ceiling) and a real
    image needed ~16000 lines (0.49 s) -- a scene limitation, not a
    driver bug.
+5. **FIXED (issue #2248, bench run 62) -- the default frame rate at the
+   shipped 640x480 mode was silently 10 fps, not 15.** `ov5647_init()`
+   used to boot into the full-resolution crop (`OV5647_FULL_WIDTH`/
+   `HEIGHT`); at that height and the crop-path HTS (2700), the driver's
+   own default 15 fps needs VTS 1440, below `1944 + 24 = 1968`, so it
+   was unreachable. Zephyr's `video_closest_frmival()` stops
+   enumerating at the first unreachable (sorted-ascending) rate, so it
+   never even looked past 10 fps -- and that 10 fps then stuck in
+   `data->frmrate` for every LATER `ov5647_set_fmt()` call, including
+   the 640x480 mode this driver actually ships, since nothing in
+   `src/backends/camera` or `aen-camera-firstlight` ever calls
+   `set_frmival` to override it. `ov5647_init()` now boots directly
+   into 640x480, where 15 fps IS reachable (VTS 2099/`0x0833` >=
+   `480 + 24`), so the shipped default is correctly 15. A caller that
+   explicitly switches to a full-resolution crop still gets a valid,
+   if lower, rate -- HTS 2700 genuinely cannot sustain 15 fps at 1944
+   lines; that is a real PLL/line-time limit, not a bug.
 
 **Raw-frame stripes are not a bug.** What looks like banding/noise in a
 raw capture viewed as greyscale is (a) the Bayer colour-filter mosaic
-itself, and (b) column fixed-pattern noise that scales with analog
-gain. With the run-61 reference register set this measures roughly
-1.0-1.5 LSB standard deviation (~1.1% of full scale) at x15.5 gain in
-a dark lab at 0.51 s exposure -- down from 6-8 LSB (3.7-5.9%) with
-runs 56/58/60's Alif-derived mix under the same conditions, which is
-this file's own earlier regression (mixing the Alif `0x3821`/analog
-timing with the wrong, full-resolution-era PLL), not a property of the
-sensor. Both figures are normal sensor behaviour in kind -- column
-fixed-pattern noise that scales with gain -- and only become visually
-dominant at high gain in low light; neither indicates a driver defect,
-but the magnitude is register-set-dependent, which is why run 61
-replaced runs 56/58/60's mix outright rather than patching it further.
+itself (the OV5647 is a colour Bayer sensor; the driver delivers RAW10
+BGGR, and demosaic/colour reconstruction is a downstream ISP job -- see
+run 62's maintainer-confirmed colour render above), and (b) column
+fixed-pattern noise that scales with analog gain. With the run-61/62
+reference register set this measures roughly 1.0-1.5 LSB standard
+deviation (~1.1% of full scale) at x15.5 gain in a dark lab at 0.51 s
+exposure -- down from 6-8 LSB (3.7-5.9%) with runs 56/58/60's
+Alif-derived mix under the same conditions. WHICH specific register
+difference (of several changed together in run 61) caused that
+reduction is NOT ESTABLISHED -- see item 4 above. Both figures are
+normal sensor behaviour in kind -- column fixed-pattern noise that
+scales with gain -- and only become visually dominant at high gain in
+low light; neither indicates a driver defect, but the magnitude is
+register-set-dependent, which is why run 61 replaced runs 56/58/60's
+mix outright rather than patching it further.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 

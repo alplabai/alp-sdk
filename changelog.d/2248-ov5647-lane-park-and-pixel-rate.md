@@ -57,5 +57,8 @@ not evidence the number was wrong. The real defect was that the PLL was
 never *written* to match either number — bench run 52 fixes that
 separately, and `OV5647_PIXEL_RATE` is corrected there to 87500000 (derived
 from the same PLL constants the fix now programs), not the 175000000 this
-entry describes as reverted. See `docs/camera-shields.md` for the full,
-corrected writeup.
+entry describes as reverted. **AT THE TIME (run 52's PLL multiplier 105);
+SUPERSEDED by a later #2248 fix-up (run 61), which retargets the
+multiplier to 70 to match mainline's 640x480 10bpp table instead of its
+full-resolution one — the CURRENT `OV5647_PIXEL_RATE` is 58333333, not
+87500000.** See `docs/camera-shields.md` for the full, corrected writeup.

@@ -13,8 +13,8 @@
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
  * IMX219 and IMX296 paths have not yet run on real silicon (no module
- * seated).  The OV5647 path is bench-attempted and BLOCKED at D-PHY
- * Stop-state (issue #2248) -- see docs/camera-shields.md.  This
+ * seated).  The OV5647 path is bench-verified too (runs 52/61/62, issue
+ * #2248) -- see docs/camera-shields.md for the full write-up.  This
  * app still prints enough detail on every path (including a failed open()
  * or a capture TIMEOUT) that a bench engineer can tell which stage broke if
  * the sensor isn't seated or the shield stack is wrong.
@@ -64,15 +64,18 @@
 #define CAM_BYTES_PER_PIXEL 1
 #define CAM_SHIELD_NAME     "innomaker_cam_ov9281 (OV9281, GREY8 640x400)"
 #elif defined(CONFIG_VIDEO_IMX219) || defined(CONFIG_VIDEO_OV5647)
-/* IMX219 / OV5647: both are Bayer RAW sensors whose upstream driver
- * advertises SBGGR8 and SBGGR10P at any 4-pixel-aligned size up to their
- * full resolution.  RAW10, not RAW8: the CSI-2 pixel-clock ceiling this
- * board's D-PHY divider programs is 200 MHz (see docs/boards/e1m-evk.md),
- * and IMX219's fixed 456 MHz 2-lane link needs RAW10's 182.4 Mpixel/s --
- * RAW8 would need 228 Mpixel/s and video_set_format() refuses it with
- * -ERANGE by design.  640x480 is a small centred crop (both sensors'
- * min/max/step caps accept it), chosen to keep the frame small enough for
- * a quick bench capture, not a hardware limit. */
+/* IMX219 / OV5647: both are Bayer RAW sensors advertising SBGGR8 and
+ * SBGGR10P at any 4-pixel-aligned size up to their full resolution.  RAW10,
+ * not RAW8: the CSI-2 pixel-clock ceiling this board's D-PHY divider
+ * programs is 200 MHz (see docs/boards/e1m-evk.md), and IMX219's fixed
+ * 456 MHz 2-lane link needs RAW10's 182.4 Mpixel/s -- RAW8 would need
+ * 228 Mpixel/s and video_set_format() refuses it with -ERANGE by design.
+ * 640x480 means something DIFFERENT per sensor: for IMX219 it is still a
+ * small centred crop of the full array, chosen to keep the frame small for
+ * a quick bench capture, not a hardware limit.  For OV5647 (issue #2248,
+ * AUTHORIZED LOCAL DIVERGENCE #3) 640x480 is the sensor's own real
+ * full-array subsampled+binned mode -- see the vendored driver's file
+ * header and docs/camera-shields.md -- not a crop at all. */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
 #define CAM_WIDTH           640
 #define CAM_HEIGHT          480

@@ -267,14 +267,23 @@ in the pinned Zephyr v4.4.1 base, but expected to land upstream verbatim or
 near-verbatim.
 
 This is labeled **`ADR 0017 Tier-1 (upstream-PENDING backport) — INTERIM`** in
-the driver's file header, distinct from a Tier-2 fork-driver copy: it is
-consumed **verbatim** (Apache-2.0, no logic changes — only the includes an
-older pinned Zephyr needs to resolve the same symbols; see the driver's file
-header for the exact delta), it carries the PR number **and** the commit it
-was taken from, and — unlike a genuine Tier-2 (which stays interim
-indefinitely, pending a fork retirement path) — it is **deleted, not
+the driver's file header, distinct from a Tier-2 fork-driver copy: it started
+as a **verbatim** Apache-2.0 backport (only the includes an older pinned
+Zephyr needs to resolve the same symbols), it carries the PR number **and**
+the commit it was taken from, and — unlike a genuine Tier-2 (which stays
+interim indefinitely, pending a fork retirement path) — it is **deleted, not
 maintained**, the moment the alp-sdk Zephyr pin advances to a revision that
-already contains that PR. At that point the upstream driver and our vendored
+already contains that PR AND all THREE AUTHORIZED LOCAL DIVERGENCES the
+driver's file header records are confirmed present there too: #1 (issue
+#2248, the CSI-2 lane-park sequence the upstream PR never drove), #2 (the
+PLL + MIPI-TX pad-drive init the upstream PR never programs), and #3 (the
+full-FOV binned 640x480 mode, its per-mode line length/AEC band step, the
+matching common init taken from the RPi/OmniVision reference driver, the
+corrected exposure default, and the default-frame-rate fix — all bench-driven
+corrections the upstream PR does not have). Retirement is therefore
+conditional on more than the version bump; see the driver's file header
+RETIREMENT note for the exact checklist. At that point the upstream driver
+and our vendored
 copy would define the same Kconfig symbol (`VIDEO_OV5647`) and the same DT
 `compatible` (`"ovti,ov5647"`); keeping both would be a silent build
 collision, not a safety net, so retirement is a straight deletion of the

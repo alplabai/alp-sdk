@@ -24,7 +24,12 @@ standby exit, so the same writes issued after the park update the
 register file without moving the running PLL (a bench run 51 ordering
 mistake). PLL values are matched to mainline Linux's own declared
 constants (prediv 3, multiplier 105, sysdiv 2 -> 437.5 Mbps/lane, matching
-mainline's `link_freq` 218750000). `0x3017` (LP TX pad drive) is
+mainline's `link_freq` 218750000) — **AT THE TIME, for mainline's
+FULL-RESOLUTION mode; SUPERSEDED by a later #2248 fix-up (run 61), which
+retargets the multiplier to 70 (291.67 Mbps/lane, `OV5647_PIXEL_RATE`
+58333333) to match mainline's 640x480 10bpp table instead, since 640x480
+is the mode this driver actually ships. Do not read 105 / 437.5 Mbps as
+current.** `0x3017` (LP TX pad drive) is
 bench-bisected: reset `0x10` -> no lane reaches Stop state; `pgm_lptx =
 01` -> `DATA_0` only; `10` -> `+DATA_1`; `11` -> `+CLK`, reaching
 `CSI_PHY_STOPSTATE` = `0x00010003` with `0x3017` = `0xf0` — one step
@@ -43,20 +48,28 @@ was the correct consequence of a doubled pixel clock, not evidence against
 it. The defect was that the PLL was never *written* at all. The macro now
 derives from the same PLL constants the register table programs
 (`OV5647_PLL_PREDIV`/`MULT`/`SYS_DIV`), giving 87500000 at 25 MHz XVCLK —
-matching mainline's own declared `pixel_rate` for this PLL.
+matching mainline's own declared `pixel_rate` for this PLL **AT THE TIME
+(run 52's multiplier 105); SUPERSEDED by run 61's multiplier 70, which
+gives the CURRENT value 58333333 — see the later #2248 fix-up fragment.
+Do not read 87500000 as the driver's current `OV5647_PIXEL_RATE`.**
 
 **Honest limits, not established by this fix**: which of the eight
 run-52 registers are individually load-bearing — only `0x3017` is
 independently bisected; the rest are shipped together because, matched to
 mainline's values, that is what bench-proved. `0x4837` (PCLK period)
-stays at its power-on `0x15` (mainline writes `0x19`); safe at 437.5 Mbps,
-not changed in the working run. `0x3017` = `0xf0` has no characterised
-drive-strength margin. `OV5647_PIXEL_RATE`'s correction is fixed at 10bpp
-(RAW10, the only bench-proven format); the 8-bit (SBGGR8) path would need
-a different pixel rate (109375000) that this change does not derive or
-verify — flagged in the driver, not fixed. `CSI_PHY_RX`/`CSI_PHY_STOPSTATE`
-read byte-identically in the failing and working runs at every capture
-point and should not be used alone as a bring-up gate.
+stays at its power-on `0x15` (mainline writes `0x19`); safe at 437.5 Mbps
+at the time, and safer still after run 61 lowers the bit rate further to
+291.67 Mbps — not changed in either working run. `0x3017` = `0xf0` has no
+characterised drive-strength margin. `OV5647_PIXEL_RATE`'s correction is
+fixed at 10bpp (RAW10, the only bench-proven format); the 8-bit (SBGGR8)
+path would need a different pixel rate that this change does not derive
+or verify — flagged in the driver, not fixed. AT THE TIME (run 52's PLL)
+that value would have been 109375000; with the driver's CURRENT PLL (run
+61, multiplier 70) the equivalent 8-bit value is 72916666 — still neither
+derived nor verified, the gap simply moved with the PLL correction.
+`CSI_PHY_RX`/`CSI_PHY_STOPSTATE` read byte-identically in the failing and
+working runs at every capture point and should not be used alone as a
+bring-up gate.
 
 A new runtime regression test asserts the eight registers are written
 *while the sensor is in software standby and before the park sets*
