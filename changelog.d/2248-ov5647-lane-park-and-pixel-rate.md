@@ -1,15 +1,15 @@
-### Fixed — OV5647: park the CSI-2 lanes at LP-11 and correct the PLL-derived pixel rate (#2248)
+### Fixed — OV5647: park the CSI-2 lanes at LP-11; the claimed pixel-rate defect was disproven (#2248)
 
-`2248-ov5647-root-cause.md` found two real defects in the vendored,
+`2248-ov5647-root-cause.md` found two claimed defects in the vendored,
 upstream-pending `zephyr/drivers/video/ov5647.c` (backport of
 zephyrproject-rtos/zephyr#119301) but left both unpatched, because the file's
 header forbids divergent local patches on a verbatim backport. The maintainer
-has now explicitly overruled that for these two fixes — an authorized,
+has now explicitly overruled that for the one real fix — an authorized,
 recorded divergence, not an oversight — and the header is updated to say so
-and to gate the file's eventual retirement on the fixes being re-applied or
+and to gate the file's eventual retirement on the fix being re-applied or
 confirmed present upstream first.
 
-**Defect 1 — no LP-11 presented, so a Stop-state-gated CSI-2 receiver could
+**Fixed — no LP-11 presented, so a Stop-state-gated CSI-2 receiver could
 never open the link.** The driver left the sensor in bare software standby
 (`0x0100` = `0x00`) after init, in which `CSI_PHY_STOPSTATE` reads
 `0x00000000` — no lane at LP-11 — bench-measured on an E1M-AEN803 (serial
@@ -27,29 +27,29 @@ in bare standby, and again from `ov5647_set_stream(dev, false, ...)` so a
 stopped stream still presents LP-11 for the next open.
 `ov5647_set_stream(dev, true, ...)` unparks first: `0x4800` = `0x04`
 (`BUS_IDLE`), `0x4202` = `0x00`, `0x300d` = `0x00`, then the existing
-`0x0100` = `0x01`.
+`0x0100` = `0x01`. `ov5647_set_fmt()` now also drops to standby before its
+register writes and re-parks afterwards (it previously ran against a running,
+parked sensor), and `ov5647_lane_park()`'s error paths make a best-effort
+drop back to standby rather than leaving the sensor streaming mid-sequence.
 
-**Defect 2 — the declared pixel rate was 2.1x too low, steering the D-PHY
-frequency-bin lookup wrong.** `OV5647_PIXEL_RATE(clk)` was `(clk) * 10 / 3` =
-83333333 for the nominal 25 MHz XVCLK, derived from a datasheet fps figure
-rather than the PLL. The driver never programs the PLL, so it stays at its
-power-on values, read back on the same bench unit: `0x3034` = `0x1a`
-(bits[3:0] = 0xa, 10-bit mode), `0x3035` = `0x11` (bits[7:4] system-clock
-divider 1, bits[3:0] MIPI divider 1), `0x3036` = `0x69` (multiplier 105),
-`0x3037` = `0x03` (bits[3:0] pre-divider 3, bit4 root divider 0 = /1). That
-gives VCO = 25 MHz / 3 x 105 = 875 MHz (875 Mbps/lane), and pixel rate =
-875e6 x 2 lanes / 10 bpp = 175000000, now expressed as a derived value
-(`OV5647_PLL_PREDIV`, `OV5647_PLL_MULT`, `OV5647_PLL_ROOT_DIV`,
-`OV5647_MIPI_LANES`, `OV5647_MIPI_BPP`) with the arithmetic in a comment
-rather than a bare constant. Zephyr's fallback then computes link = pixel_rate
-x bpp / (2 x lanes) = 437500000 Hz = 875 Mbps, selecting D-PHY bin
-`{900, 0x29}` instead of the wrong `{450, 0x16}`.
-
-**Not confirmed on silicon**: the pixel-rate arithmetic assumes the OV5647
-shares the OV564x family's PLL structure and pre-divider encoding — inferred,
-not taken from an OV5647-specific PLL block diagram — because the only module
-on the bench has the DATA_1/CLK hardware fault noted above and could not give
-a live D-PHY link-rate measurement. At 875 Mbps the CSI pixel clock request
-lands on the 200 MHz clamp branch in `zephyr/drivers/video/video_csi_dw.c`.
-Both caveats are recorded as comments in `ov5647.c` itself for the next
-person to re-verify on a healthy module.
+**Disproven, then reverted — the claimed pixel-rate defect.** The root-cause
+note claimed `OV5647_PIXEL_RATE(clk)` = `(clk) * 10 / 3` (83333333 at 25 MHz
+XVCLK, a datasheet fps figure) was 2.1x too low against the sensor's power-on
+PLL registers, and steered the CSI-2 receiver's D-PHY frequency-bin lookup to
+the wrong bin. A follow-up commit changed it to a PLL-derived 175000000. Both
+claims were wrong: mainline Linux `drivers/media/i2c/ov5647.c` declares
+`pixel_rate = 87500000` with `link_freq = 218750000` for this same 2592x1944
+mode — `87500000 * 10 / (2 lanes * 2)` = `218750000` exactly, so the real
+lane rate is 437.5 Mbps, not the 875 Mbps the PLL-derived attempt assumed (the
+`* lanes` factor was the error). 83333333 is within about 5% of mainline's
+figure, and both 416 Mbps (from 83333333) and 437.5 Mbps (mainline) land in
+the SAME `{450, 0x16}` row of `frequency_range[]` in
+`zephyr/drivers/mipi_dphy/dphy_dw.c` — the claimed wrong bin never existed.
+Worse, `OV5647_PIXEL_RATE` also feeds `ov5647_frmrate_to_vts()`, which divides
+it to produce the programmed `TIMING_VTS`: doubling the macro to 175000000
+while leaving the PLL untouched halved the real frame rate and made
+`ov5647_enum_frmival()` advertise an unreachable 30 fps at full resolution.
+The 175000000 change is reverted; `OV5647_PIXEL_RATE` in
+`zephyr/drivers/video/ov5647.c` is byte-identical to its pre-#2248 form, and a
+comment there records the mainline comparison and the revert for the next
+reader. See `docs/camera-shields.md` for the full writeup.

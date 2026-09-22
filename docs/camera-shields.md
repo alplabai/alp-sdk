@@ -97,47 +97,61 @@ wiring is exonerated by interleaving: the same cable, P/N-crossing
 adapter and connector gave OV5647 `DATA_0`-only, then an OV9281 reaching
 `0x00010003` with a CRC-verified frame, then OV5647 `DATA_0`-only again.
 
-Two driver defects were found along the way. Both were real regardless of
-this module, and **both are now FIXED and verified on silicon** (issue
-#2248). Fixing them in-tree is an AUTHORIZED divergence from the
-verbatim-backport rule in `zephyr/drivers/video/ov5647.c`'s header --
-which is why that header now carries a retirement warning: when the
-Zephyr pin advances to a revision containing
-zephyrproject-rtos/zephyr#119301, confirm both fixes are present upstream
-BEFORE deleting the vendored copy, or the deletion silently reintroduces
-them.
+Two driver defects were claimed along the way (issue #2248). One is real
+and **is now FIXED and verified on silicon**. The other was investigated
+and **DISPROVEN** -- recorded here rather than silently deleted, because
+the wrong conclusion was already published in issue #2248 and the
+correction needs to be findable. Fixing the real one in-tree is an
+AUTHORIZED divergence from the verbatim-backport rule in
+`zephyr/drivers/video/ov5647.c`'s header -- which is why that header now
+carries a retirement warning: when the Zephyr pin advances to a revision
+containing zephyrproject-rtos/zephyr#119301, confirm the lane-park fix is
+present upstream BEFORE deleting the vendored copy, or the deletion
+silently reintroduces it.
 
-1. **The driver never performed mainline's LP-11 park.** Mainline's
-   `ov5647_power_on()` calls `ov5647_stream_stop()` under the comment
-   "Stream off to coax lanes into LP-11 state"; the vendored driver only
-   ever wrote `0x0100`. In software standby this part presents no LP-11
-   at all (`CSI_PHY_STOPSTATE` = `0x00000000`), so on a receiver that
-   gates on Stop-state before stream start -- as this one does -- even a
-   healthy OV5647 could not open. `ov5647_init()` now leaves the sensor
-   parked and `set_stream()` unparks and re-parks around streaming, with
-   `0x0100` = `0x01` written FIRST: parking in standby replicates the
-   registers but not the state, and a bench run proved that variant does
-   nothing. Verified with the diagnostic application's own park compiled
-   out, so the driver alone was responsible: the four registers read
-   `0x01` / `0x25` / `0x0f` / `0x01` straight out of init, and
-   `CSI_PHY_STOPSTATE` reads `0x00000001` where the pre-fix driver-only
-   run read `0x00000000`.
-2. **The declared pixel rate was off by 2.1x.** `PIXEL_RATE = XVCLK * 10
-   / 3` = 83333333 came from a datasheet fps figure, but the default PLL
-   the driver leaves in place (`0x3034` = `0x1a`, `0x3035` = `0x11`,
-   `0x3036` = `0x69`, `0x3037` = `0x03`) gives VCO = 875 MHz, i.e. 875
-   Mbps per lane and a 175 MHz pixel rate, so the receiver picked
-   `hsfreqrange 0x16` (450 Mbps) where `0x29` (900) is correct. The rate
-   is now derived from those divider values. Verified: `RX-DDR clock:
-   437500000` and `hsfrequency - 41`, replacing `208333332` and
-   `hsfrequency - 22`. At this rate the CSI pixel-clock request lands on
-   the 200 MHz clamp in `zephyr/drivers/video/video_csi_dw.c`, which logs
-   an expected clamp warning rather than a failure. **Caveat, also
-   carried in the code:** the derivation assumes the OV5647 shares the
-   OV564x PLL structure and pre-divider encoding, which is inferred
-   rather than read from an OV5647 PLL block diagram, and cannot be
-   confirmed end to end while the only available module has the
-   DATA_1/CLK fault.
+1. **FIXED -- the driver never performed mainline's LP-11 park.**
+   Mainline's `ov5647_power_on()` calls `ov5647_stream_stop()` under the
+   comment "Stream off to coax lanes into LP-11 state"; the vendored
+   driver only ever wrote `0x0100`. In software standby this part
+   presents no LP-11 at all (`CSI_PHY_STOPSTATE` = `0x00000000`), so on a
+   receiver that gates on Stop-state before stream start -- as this one
+   does -- even a healthy OV5647 could not open. `ov5647_init()` now
+   leaves the sensor parked and `set_stream()` unparks and re-parks
+   around streaming, with `0x0100` = `0x01` written FIRST: parking in
+   standby replicates the registers but not the state, and a bench run
+   proved that variant does nothing. Verified with the diagnostic
+   application's own park compiled out, so the driver alone was
+   responsible: the four registers read `0x01` / `0x25` / `0x0f` / `0x01`
+   straight out of init, and `CSI_PHY_STOPSTATE` reads `0x00000001` where
+   the pre-fix driver-only run read `0x00000000`. `ov5647_set_fmt()` now
+   also drops to standby before its register writes and re-parks
+   afterwards, and `ov5647_lane_park()`'s error paths make a best-effort
+   drop back to standby rather than leaving the sensor streaming
+   mid-sequence.
+2. **DISPROVEN -- the declared pixel rate was claimed off by 2.1x and
+   claimed to steer the D-PHY frequency-bin lookup wrong.** The claim was
+   that `PIXEL_RATE = XVCLK * 10 / 3` = 83333333 (datasheet fps figure)
+   should instead be derived from the default PLL the driver leaves in
+   place (`0x3034` = `0x1a`, `0x3035` = `0x11`, `0x3036` = `0x69`,
+   `0x3037` = `0x03`, VCO = 875 MHz = 875 Mbps/lane), giving 175000000 and
+   moving the receiver from `hsfreqrange 0x16` (450 Mbps) to `0x29` (900).
+   Checked against mainline Linux's own `drivers/media/i2c/ov5647.c`,
+   which declares `pixel_rate = 87500000` with `link_freq = 218750000` for
+   this same 2592x1944 mode: `87500000 * 10 / (2 lanes * 2)` =
+   `218750000` exactly, so the real lane rate is 437.5 Mbps, not the
+   875 Mbps the PLL-derived attempt assumed -- the `* lanes` factor in
+   that derivation was the error. 83333333 is within about 5% of
+   mainline's 87500000, i.e. approximately correct, and both 416 Mbps
+   (from 83333333) and 437.5 Mbps (mainline) land in the SAME
+   `{450, 0x16}` row of `frequency_range[]` in
+   `zephyr/drivers/mipi_dphy/dphy_dw.c` -- the claimed wrong bin never
+   existed. Worse, `OV5647_PIXEL_RATE` also feeds
+   `ov5647_frmrate_to_vts()`, which divides it to produce the programmed
+   `TIMING_VTS`: doubling the macro to 175000000 while leaving the PLL
+   untouched halved the real frame rate (VTS `0x0809` -> `0x10e0`, 2057 ->
+   4320) and made `ov5647_enum_frmival()` advertise an unreachable 30 fps
+   at full resolution. The 175000000 change (issue #2248) was reverted;
+   `OV5647_PIXEL_RATE` is unchanged from upstream.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 

@@ -11,15 +11,15 @@
  * (Apache-2.0) to unblock the Raspberry Pi Camera Module 1 shield.
  *
  * Kept byte-for-byte apart from what alp-sdk's out-of-tree module build
- * requires: this file header, and three extra includes
+ * requires (this file header, and three extra includes
  * (<zephyr/drivers/video-controls.h>, "video_ctrls.h", "video_device.h")
  * the PR's target tree apparently pulls in transitively through
  * "video_common.h" but the pinned Zephyr v4.4.1 here does not --
  * struct video_ctrl_range / video_ctrl / VIDEO_DEVICE_DEFINE live in
- * those headers on this pin (see zephyr/drivers/video/imx219.c, which
- * includes all three explicitly). No other driver logic changed. See
- * zephyr/CMakeLists.txt / zephyr/kconfigs/ for the build hookup,
- * mirroring how arx3a0.c is wired. The upstream
+ * those headers on this pin, see zephyr/drivers/video/imx219.c, which
+ * includes all three explicitly) and apart from the one AUTHORIZED LOCAL
+ * DIVERGENCE below. See zephyr/CMakeLists.txt / zephyr/kconfigs/ for the
+ * build hookup, mirroring how arx3a0.c is wired. The upstream
  * symbol VIDEO_OV5647 and compatible "ovti,ov5647" are used as-is (not
  * renamed) so the eventual retirement is a clean deletion, not a rename --
  * verified against upstream's own drivers/video/Kconfig namespace (no other
@@ -27,32 +27,37 @@
  * landing on the version bump cannot silently collide with a DIFFERENT
  * driver; it can only be the merged form of this same PR.
  *
- * AUTHORIZED LOCAL DIVERGENCE (issue #2248): two bench-proven defects are
+ * AUTHORIZED LOCAL DIVERGENCE (issue #2248): one bench-proven defect is
  * fixed in this vendored copy, on top of upstream #119301, with the
  * maintainer's explicit sign-off overruling the "no divergent patches" rule
- * below:
- *   1. The driver never drove the CSI-2 lanes to LP-11 (Stop state), so a
- *      receiver that waits for Stop-state before stream start (e.g. a
- *      DesignWare CSI-2 host) could not open it. Bench evidence on an
- *      E1M-AEN803 / E1M-EVK (hw_rev 2626-r2): CSI_PHY_STOPSTATE read
- *      0x00000000 in bare software standby, and steadily 0x00000001 (module
- *      under test has a hardware fault limiting it to bit0) after
- *      ov5647_lane_park() -- mirrors mainline Linux's
- *      ov5647_power_on()/ov5647_stream_stop() "coax lanes into LP-11" step.
- *   2. OV5647_PIXEL_RATE() was derived from a datasheet fps figure (83333333
- *      for 25 MHz XVCLK) rather than the PLL, 2.1x below the 175000000 that
- *      the sensor's power-on PLL registers (0x3034/0x3035/0x3036/0x3037,
- *      read back on the same bench unit) actually yield, which steered the
- *      CSI-2 receiver's D-PHY frequency-bin selection wrong.
+ * below: the driver never drove the CSI-2 lanes to LP-11 (Stop state), so a
+ * receiver that waits for Stop-state before stream start (e.g. a
+ * DesignWare CSI-2 host) could not open it. Bench evidence on an
+ * E1M-AEN803 / E1M-EVK (hw_rev 2626-r2): CSI_PHY_STOPSTATE read
+ * 0x00000000 in bare software standby, and steadily 0x00000001 (module
+ * under test has a hardware fault limiting it to bit0) after
+ * ov5647_lane_park() -- mirrors mainline Linux's
+ * ov5647_power_on()/ov5647_stream_stop() "coax lanes into LP-11" step.
+ *
+ * ACCEPTED COST: ov5647_init() runs at POST_KERNEL on every board that
+ * enables this driver and now leaves the sensor parked -- running, with
+ * frames suppressed -- for the life of the system rather than in software
+ * standby, because the shield deliberately has no pwdn-gpios to put it in a
+ * lower-power state instead. Recorded and accepted, not an oversight.
+ *
+ * A second claimed defect -- that OV5647_PIXEL_RATE() understated the link
+ * rate and steered the D-PHY frequency-bin lookup wrong -- was investigated
+ * and DISPROVEN; see the OV5647_PIXEL_RATE comment below and
+ * docs/camera-shields.md. The macro is unchanged from upstream.
  *
  * RETIREMENT: delete this file + Kconfig.ov5647 + the ovti,ov5647.yaml
  * binding, and drop the CMake/Kconfig hookup, the moment the alp-sdk Zephyr
  * pin advances to a revision that contains #119301 (i.e. the vendored copy
  * and the upstream driver would otherwise both define VIDEO_OV5647 /
- * "ovti,ov5647" and collide) -- BUT NOT BEFORE the two fixes above are
+ * "ovti,ov5647" and collide) -- BUT NOT BEFORE the lane-park fix above is
  * either re-applied to the upstream-derived driver or confirmed already
  * present in it: deleting this file without that check silently
- * reintroduces both bugs. Do NOT otherwise maintain divergent local patches
+ * reintroduces the bug. Do NOT otherwise maintain divergent local patches
  * on this file -- open a new PR against upstream instead and re-backport.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
@@ -97,39 +102,16 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_VBLANK_MIN		24
 
 /*
- * The PLL is left in its power-on (reset) configuration; the driver never programs it. Read back
- * from silicon on an E1M-AEN803 / E1M-EVK (hw_rev 2626-r2) bench unit: 0x3034 = 0x1a (bits[3:0] =
- * 0xa, 10-bit mode), 0x3035 = 0x11 (bits[7:4] system-clock divider 1, bits[3:0] MIPI divider 1),
- * 0x3036 = 0x69 (multiplier 105 decimal), 0x3037 = 0x03 (bits[3:0] pre-divider 3, bit4 root
- * divider 0 = /1). That gives:
- *
- *   VCO = XVCLK / pre-divider * multiplier = 25 MHz / 3 * 105 = 875 MHz (root divider /1)
- *       = 875 Mbps per lane
- *   pixel rate = VCO * lanes / bits-per-pixel = 875e6 * 2 / 10 = 175000000 for the nominal
- *       25 MHz XVCLK -- previously computed as 83333333 from a datasheet fps figure (table 2-1's
- *       15 fps at full resolution with the power-on HTS/VTS), 2.1x too low, which steered the
- *       CSI-2 receiver's D-PHY frequency-bin lookup to the wrong bin.
- *
- * CAVEAT, NOT CONFIRMED ON SILICON: this arithmetic assumes the OV5647 shares the OV564x family's
- * PLL structure and pre-divider encoding (as documented for OV5640/OV5645/etc.) -- it is inferred,
- * not taken from an OV5647-specific PLL block diagram. The only OV5647 module available on the
- * bench has a hardware fault (see the file header) that made a live D-PHY link-rate measurement
- * impossible, so this has not been verified end to end. Re-verify on a healthy module before
- * relying on it beyond selecting the D-PHY frequency bin. At 875 Mbps the CSI pixel clock request
- * lands on the 200 MHz clamp branch in zephyr/drivers/video/video_csi_dw.c.
+ * The PLL is left in its power-on configuration; this is a datasheet-fps ratio, not a PLL
+ * derivation. At 25 MHz XVCLK it yields 83333333, about 5% below mainline Linux's declared
+ * 87500000 for the 2592x1944 mode (link_freq 218750000 = 437.5 Mbps/lane; mainline uses a
+ * different 58333000 for its 640x480 mode). Feeds BOTH VIDEO_CID_PIXEL_RATE and
+ * ov5647_frmrate_to_vts() below -- it sets the programmed TIMING_VTS too -- so change it only
+ * together with correct per-mode rates. A previous attempt to "correct" it to a PLL-derived
+ * 175000000 (issue #2248) was reverted: it doubled every programmed frame length instead of
+ * fixing the link rate.
  */
-#define OV5647_PLL_PREDIV		3
-#define OV5647_PLL_MULT			105
-#define OV5647_PLL_ROOT_DIV		1
-#define OV5647_MIPI_LANES		2
-#define OV5647_MIPI_BPP			10
-
-/* Cast to uint64_t before multiplying: at the top of the allowed XVCLK range (27 MHz) the plain
- * 32-bit product clk * mult * lanes overflows int before the division brings it back down.
- */
-#define OV5647_PIXEL_RATE(clk) \
-	((uint32_t)((uint64_t)(clk) * OV5647_PLL_MULT * OV5647_MIPI_LANES / \
-		    (OV5647_PLL_PREDIV * OV5647_PLL_ROOT_DIV * OV5647_MIPI_BPP)))
+#define OV5647_PIXEL_RATE(clk)		((clk) * 10 / 3)
 #define OV5647_INPUT_CLK_MIN		MHZ(6)
 #define OV5647_INPUT_CLK_MAX		MHZ(27)
 
@@ -197,11 +179,12 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 /*
  * Address 0x300d is not documented in the datasheet register map available to us; these are the
  * bench-confirmed values needed alongside MIPI_CTRL00 and FRAME_OFF_NUM to complete the
- * park/unpark sequence.
+ * park/unpark sequence. Mainline names this register OV5640_REG_PAD_OUT -- matching that name here
+ * makes re-applying this fix upstream (see the file header's retirement note) mechanical.
  */
-#define OV5647_LANE_PARK_AUX			OV5647_REG8(0x300d)
-#define OV5647_LANE_PARK_AUX_PARKED		0x01
-#define OV5647_LANE_PARK_AUX_STREAMING		0x00
+#define OV5647_PAD_OUT				OV5647_REG8(0x300d)
+#define OV5647_PAD_OUT_PARKED			0x01
+#define OV5647_PAD_OUT_STREAMING		0x00
 
 /*
  * Datasheet table 7-1 describes the 0x3034 bit mode field as 0 for 8-bit and 1 for 10-bit, which
@@ -235,6 +218,9 @@ struct ov5647_data {
 	struct ov5647_ctrls ctrls;
 	struct video_format fmt;
 	uint32_t frmrate;
+	/* Tracks the APPLICATION's streaming request (set_stream), not OV5647_MODE_SELECT, which
+	 * ov5647_lane_park() also drives while parked/unparked and which this field does not mirror.
+	 */
 	bool streaming;
 };
 
@@ -349,6 +335,11 @@ static int ov5647_get_frmival(const struct device *dev, struct video_frmival *fr
 	return 0;
 }
 
+/* Forward declaration: ov5647_set_fmt() re-parks after its writes (see below), but the park
+ * helper is defined further down, alongside the registers it uses.
+ */
+static int ov5647_lane_park(const struct device *dev);
+
 static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct ov5647_config *cfg = dev->config;
@@ -377,6 +368,18 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 		return -EINVAL;
 	}
 
+	/* data->streaming is false and the sensor is left parked (running, LP-11) rather than in
+	 * standby from ov5647_init() onward -- so without this, the writes below land on a
+	 * running PLL and can drop the lanes out of the LP-11 state the park exists to create.
+	 * Drop to standby first; ov5647_lane_park() below re-asserts running and re-parks, so this
+	 * does not race or double-write against set_stream(), which set_fmt() cannot run under
+	 * (the data->streaming guard above).
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, 0);
+	if (ret < 0) {
+		return ret;
+	}
+
 	ret = video_modify_cci_reg(&cfg->i2c, OV5647_SC_PLL_CTRL0, OV5647_MIPI_BIT_MODE,
 				   idx == OV5647_FMT_SBGGR8 ? OV5647_MIPI_BIT_MODE_RAW8
 							    : OV5647_MIPI_BIT_MODE_RAW10);
@@ -392,7 +395,12 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 	data->fmt = *fmt;
 
 	/* The reachable frame rates depend on the height that was just programmed */
-	return ov5647_set_frmival(dev, &frmival);
+	ret = ov5647_set_frmival(dev, &frmival);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return ov5647_lane_park(dev);
 }
 
 static int ov5647_get_fmt(const struct device *dev, struct video_format *fmt)
@@ -420,6 +428,12 @@ static int ov5647_get_caps(const struct device *dev, struct video_caps *caps)
  * Park the CSI-2 lanes at LP-11; see the OV5647_MIPI_CTRL00 comment above for why and the bench
  * evidence. Must be called with the sensor left running (MODE_SELECT_STREAMING set) -- parking
  * from software standby does not present LP-11.
+ *
+ * If any of the three writes after MODE_SELECT fails, the sensor is left running but only
+ * partway through the park sequence -- streaming on the CSI bus in an undefined lane state. On
+ * that path, make a best-effort drop back to standby before returning the original error; the
+ * standby write's own result is not checked (there is already an error in flight to report, and
+ * this is strictly better-effort than leaving the sensor running).
  */
 static int ov5647_lane_park(const struct device *dev)
 {
@@ -432,18 +446,26 @@ static int ov5647_lane_park(const struct device *dev)
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, OV5647_MIPI_CTRL00,
-				   OV5647_MIPI_CTRL00_CLOCK_LANE_GATE | OV5647_MIPI_CTRL00_BUS_IDLE |
-					   OV5647_MIPI_CTRL00_CLOCK_LANE_DISABLE);
+				  OV5647_MIPI_CTRL00_CLOCK_LANE_GATE | OV5647_MIPI_CTRL00_BUS_IDLE |
+					  OV5647_MIPI_CTRL00_CLOCK_LANE_DISABLE);
 	if (ret < 0) {
+		video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, 0);
 		return ret;
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, OV5647_FRAME_OFF_NUM, OV5647_FRAME_OFF_NUM_PARKED);
 	if (ret < 0) {
+		video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, 0);
 		return ret;
 	}
 
-	return video_write_cci_reg(&cfg->i2c, OV5647_LANE_PARK_AUX, OV5647_LANE_PARK_AUX_PARKED);
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_PAD_OUT, OV5647_PAD_OUT_PARKED);
+	if (ret < 0) {
+		video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, 0);
+		return ret;
+	}
+
+	return 0;
 }
 
 static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_type type)
@@ -471,6 +493,12 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 		return 0;
 	}
 
+	/* Deliberate continuous-clock choice: this writes only BUS_IDLE, clearing the park's
+	 * CLOCK_LANE_GATE/CLOCK_LANE_DISABLE bits and leaving the MIPI clock lane running between
+	 * frames, overriding a power-on default the driver previously never touched. Mainline
+	 * additionally sets CLOCK_LANE_GATE | LINE_SYNC_ENABLE when the endpoint declares a
+	 * non-continuous clock; a `clock-noncontinuous` endpoint property is not honoured here.
+	 */
 	ret = video_write_cci_reg(&cfg->i2c, OV5647_MIPI_CTRL00, OV5647_MIPI_CTRL00_BUS_IDLE);
 	if (ret < 0) {
 		return ret;
@@ -481,7 +509,7 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 		return ret;
 	}
 
-	ret = video_write_cci_reg(&cfg->i2c, OV5647_LANE_PARK_AUX, OV5647_LANE_PARK_AUX_STREAMING);
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_PAD_OUT, OV5647_PAD_OUT_STREAMING);
 	if (ret < 0) {
 		return ret;
 	}
