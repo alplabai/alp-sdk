@@ -22,8 +22,10 @@
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/emul.h>
+#include <zephyr/drivers/i2c_emul.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
 #include "ov5647_emul.h"
@@ -173,20 +175,28 @@
 #define AEC_BAND_STEP_3A0E 0x01
 #define BLC_RSVD_4004_VAL  0x02
 /* Crop path's OWN AEC band step (issue #2248 fix-up round 4, BENCH-UNVERIFIED) -- mainline's
- * ov5647_2592x1944_10bpp[] full-resolution values (raspberrypi/linux rpi-6.6.y
- * drivers/media/i2c/ov5647.c: 0x3a08/0x3a09 = 0x01/0x28 = 296, 0x3a0a/0x3a0b = 0x00/0xf6 = 246),
+ * full-resolution values (raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c: 0x3a09 = 0x28
+ * (296) and 0x3a0a/0x3a0b = 0x00/0xf6 (246) from ov5647_2592x1944_10bpp[]; 0x3a08 = 0x01 from
+ * ov5647_common_regs[] instead -- CITATION CORRECTED (fix-up round 4): that rpi-6.6.y mode table
+ * has NO 0x3a08 entry at all, only mainline Linux 6.6's own 2592x1944 table declares it per mode;
+ * see ov5647.c's ov5647_init_regs[] comment above OV5647_AEC_RSVD_3A18 for the full citation),
  * LINE-TIME-SCALED from mainline's 32.51us line (HTS 2844 / pixel_rate 87500000) to this driver's
  * crop-path 46.29us line (OV5647_HTS_CROP 2700 / OV5647_PIXEL_RATE 58333333): fix-up round 3
  * copied mainline's line counts unscaled, which represents the WRONG real-time AC period at this
  * driver's different line time -- see ov5647.c's ov5647_set_mode_regs() comment for the full
- * arithmetic. 0x3a0d/0x3a0e (max bands per frame) follow floor(VTS/band) with VTS = 1968
- * (OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN), the same rule mainline's own 0x08/0x06 reproduce. */
+ * arithmetic. 0x3a08/0x3a09/0x3a0a/0x3a0b depend only on HTS_CROP, so they are the SAME for every
+ * crop size. 0x3a0d/0x3a0e (max bands per frame) are PER MODE instead (issue #2248 fix-up round
+ * 5): floor(VTS/band) with VTS = height + OV5647_VBLANK_MIN, the requested height's OWN
+ * minimum-blanking VTS -- not a constant pinned to OV5647_FULL_HEIGHT. The values below are for
+ * the 1280x960 crop this file's tests use; see test_crop_aec_max_bands_computed_per_mode for the
+ * 2592x1944 case (VTS 1968), the same rule mainline's own 0x08/0x06 reproduce. */
 #define AEC_CROP_BANDSTEP_3A08_VAL 0x00
 #define AEC_CROP_BANDSTEP_3A09_VAL 0xd0
 #define AEC_CROP_BANDSTEP_3A0A_VAL 0x00
 #define AEC_CROP_BANDSTEP_3A0B_VAL 0xad
-#define AEC_CROP_BANDSTEP_3A0D_VAL 0x0b
-#define AEC_CROP_BANDSTEP_3A0E_VAL 0x09
+/* 1280x960: min-blanking VTS 960 + 24 = 984 -> floor(984/173) = 5, floor(984/208) = 4. */
+#define AEC_CROP_BANDSTEP_3A0D_VAL 0x05
+#define AEC_CROP_BANDSTEP_3A0E_VAL 0x04
 #define BLC_CROP_4004_VAL          0x04
 
 /*
@@ -337,7 +347,13 @@ ZTEST(ov5647, test_park_order_after_init)
 		{ REG_PAD_OUT, PAD_OUT_PARKED },
 	};
 
-	assert_write_sequence_tail(expect, ARRAY_SIZE(expect), "park sequence after ov5647_init()");
+	/* The log tail checked here is actually ov5647_test_before()'s own re-park (its
+	 * video_set_format() call, run ahead of every test including this one), not literally
+	 * ov5647_init()'s -- see that hook's own comment for why the tail shape is identical
+	 * either way (same park quartet, same ordering).
+	 */
+	assert_write_sequence_tail(
+	    expect, ARRAY_SIZE(expect), "park sequence tail (ov5647_test_before()'s re-park)");
 }
 
 /*
@@ -806,6 +822,57 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 }
 
 /*
+ * issue #2248 fix-up round 5, MAJOR BUG: 0x3a0d/0x3a0e (max bands per frame) were pinned to the
+ * 2592x1944 crop's own minimum-blanking VTS (1968) for EVERY crop size -- a smaller crop got the
+ * SAME 11/9-band figures even though they overstate what that smaller frame can hold: see
+ * ov5647_set_mode_regs()'s block comment (11 * 173 = 1903, 9 * 208 = 1872, both bigger than
+ * 1280x960's own ~984-line minimum-blanking VTS). Checked for two DIFFERENT crop sizes in one
+ * test, so a regression back to one constant pair for both cannot hide behind whichever size a
+ * test happens to check alone (test_set_format_switch_never_leaves_binning_on_crop_window above
+ * only ever exercises 1280x960).
+ */
+ZTEST(ov5647, test_crop_aec_max_bands_computed_per_mode)
+{
+	const struct emul  *emul     = ov5647_emul();
+	struct video_format fmt_1280 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
+	struct video_format fmt_full = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 2592,
+		.height      = 1944,
+	};
+	uint8_t val;
+
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	/* 1280x960: min-blanking VTS 960 + 24 = 984 -> floor(984/173) = 5, floor(984/208) = 4. */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0D, &val));
+	zassert_equal(
+	    val, 0x05, "0x3a0d = 0x%02x after 1280x960, want 0x05 (floor((960+24)/173))", val);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0E, &val));
+	zassert_equal(
+	    val, 0x04, "0x3a0e = 0x%02x after 1280x960, want 0x04 (floor((960+24)/208))", val);
+
+	/* 2592x1944: min-blanking VTS 1944 + 24 = 1968 -> floor(1968/173) = 11, floor(1968/208) =
+	 * 9 -- unchanged from before round 5, since 1968 is the VTS the pre-round-5 constant was
+	 * itself derived from.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_full));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0D, &val));
+	zassert_equal(
+	    val, 0x0b, "0x3a0d = 0x%02x after 2592x1944, want 0x0b (floor((1944+24)/173))", val);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0E, &val));
+	zassert_equal(
+	    val, 0x09, "0x3a0e = 0x%02x after 2592x1944, want 0x09 (floor((1944+24)/208))", val);
+}
+
+/*
  * issue #2248, run-62 REGRESSION test (items 2a/2d): ov5647_init() used to boot into the
  * full-resolution crop, where the driver's own default 15 fps is unreachable at HTS_CROP (VTS
  * 1440 < 1944 + 24) -- Zephyr's video_closest_frmival() then picked 10 fps, which stuck in
@@ -1006,7 +1073,16 @@ ZTEST(ov5647, test_set_format_preserves_flip_ctrls)
 	              val,
 	              TC_REG20_BINNED | TC_REG20_VFLIP_MASK);
 
-	/* The regression: a format change must not silently undo the ctrl just set. */
+	/* The regression: a format change must not silently undo the ctrl just set.
+	 *
+	 * Reset fmt.pixelformat to the BASE fourcc before re-submitting: issue #2248 fix-up round
+	 * 5 made set_format() write the EFFECTIVE (flip-shifted) fourcc back into *fmt on success
+	 * (matching get_format(), see ov5647_set_fmt()'s own comment) -- the PREVIOUS call above,
+	 * still at the default (unflipped) orientation, was a no-op remap, but VFLIP is now on, so
+	 * blindly resubmitting fmt as the previous call left it would submit a fourcc this driver
+	 * only accepts when VFLIP is what it was at THAT time, not now.
+	 */
+	fmt.pixelformat = VIDEO_PIX_FMT_SBGGR10P;
 	zassert_ok(video_set_format(ov5647_dev(), &fmt), "video_set_format(640x480) failed");
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
 	zassert_equal(val,
@@ -1018,6 +1094,7 @@ ZTEST(ov5647, test_set_format_preserves_flip_ctrls)
 
 	/* Toggle HFLIP on top of the still-set VFLIP; both must survive yet another set_format. */
 	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	fmt.pixelformat = VIDEO_PIX_FMT_SBGGR10P; /* same reset as above -- see that comment */
 	zassert_ok(video_set_format(ov5647_dev(), &fmt), "video_set_format(640x480) failed");
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
 	zassert_equal(val,
@@ -1225,12 +1302,125 @@ ZTEST(ov5647, test_set_frmival_numerator_survives_format_change)
 }
 
 /*
- * issue #2248, round 4 (documentation-only mechanism, no register-write changes): the flip ctrls
- * shift the Bayer colour order, and ov5647_get_fmt() must report that shift -- see
- * ov5647_bayer_pixfmt()'s comment in ov5647.c for the RPi-reference-derived mapping and why (0,0)
- * -> SBGGR, (1,0) -> SGBRG, (0,1) -> SGRBG, (1,1) -> SRGGB in terms of THIS driver's ctrl values.
- * Only the default (0,0) order is bench/maintainer-verified; the other three are DERIVED, not
- * bench-checked -- see docs/camera-shields.md.
+ * issue #2248 fix-up round 5, pre-existing bug: Zephyr's video_closest_frmival() tracks the best
+ * candidate against a running best-diff initialised to INT32_MAX ns, and only updates its match
+ * out-param when a candidate BEATS that running best -- if EVERY candidate's diff from the
+ * request exceeds INT32_MAX ns, the out-param is never touched even though the function still
+ * returns 0. ov5647_set_frmival() used to echo that untouched (still the caller's raw request)
+ * out-param straight back to ITS OWN caller, while the VTS register was actually programmed for
+ * a different rate (whatever index the out-param happened to default to). See
+ * ov5647_set_frmival()'s own comment for the exact mechanism this reproduces.
+ */
+ZTEST(ov5647, test_set_frmival_far_request_reports_applied_rate)
+{
+	/* {5, 1} is a 5 s frame interval (0.2 fps) -- every candidate 640x480 offers (up to 60 fps,
+	 * see test_enum_frmival_640x480_accepts_60_rejects_90) differs from it by several seconds,
+	 * comfortably past INT32_MAX ns (~2.147 s).
+	 */
+	struct video_frmival req = { .numerator = 5, .denominator = 1 };
+	struct video_frmival active;
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req),
+	           "video_closest_frmival() returning 0 without ever matching a candidate must "
+	           "not be treated as a driver error");
+	zassert_ok(video_get_frmival(ov5647_dev(), &active));
+
+	zassert_equal(req.numerator,
+	              active.numerator,
+	              "set_frmival({5,1}) reported %u/%u but the ACTIVE rate is %u/%u -- must "
+	              "report what was actually applied, not the raw request",
+	              req.numerator,
+	              req.denominator,
+	              active.numerator,
+	              active.denominator);
+	zassert_equal(req.denominator,
+	              active.denominator,
+	              "set_frmival({5,1}) reported %u/%u but the ACTIVE rate is %u/%u -- must "
+	              "report what was actually applied, not the raw request",
+	              req.numerator,
+	              req.denominator,
+	              active.numerator,
+	              active.denominator);
+}
+
+/* i2c_emul mock -- fails only the VTS register bytes (0x380e/0x380f); every other access returns
+ * -ENOSYS, which struct i2c_emul's own mock_api falls back to the real emulator API for (see its
+ * doc comment), so it passes through unmodified.
+ */
+static int
+ov5647_test_fail_vts_write(const struct emul *target, struct i2c_msg *msgs, int num_msgs, int addr)
+{
+	ARG_UNUSED(target);
+	ARG_UNUSED(addr);
+
+	if (num_msgs == 1 && msgs[0].len == 3) {
+		uint16_t reg = sys_get_be16(msgs[0].buf);
+
+		if (reg == 0x380e || reg == 0x380f) {
+			return -EIO;
+		}
+	}
+	return -ENOSYS;
+}
+
+static struct i2c_emul_api ov5647_test_fail_vts_api = { .transfer = ov5647_test_fail_vts_write };
+
+/*
+ * issue #2248 fix-up round 4: data->requested_frmival is only overwritten AFTER the VTS write
+ * succeeds -- see its own declaration ("A rejected/failed request must not overwrite a
+ * previously-saved one"). That claim had no test exercising a REAL write failure; a mutation
+ * deleting the "only on success" guard would have left every existing test passing, since none
+ * of them ever made an I2C write fail. Exercised here via i2c_emul's mock_api, not the claim
+ * alone.
+ */
+ZTEST(ov5647, test_set_frmival_failed_write_does_not_overwrite_request)
+{
+	const struct emul  *emul     = ov5647_emul();
+	struct video_format fmt_full = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 2592,
+		.height      = 1944,
+	};
+	struct video_format fmt_640 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	/* Deliberately a DIFFERENT rate than the {1, 15} ov5647_test_before() already requested,
+	 * so a leak is observable.
+	 */
+	struct video_frmival req30 = { .numerator = 1, .denominator = 30 };
+	struct video_frmival got;
+
+	emul->bus.i2c->mock_api = &ov5647_test_fail_vts_api;
+	zassert_true(video_set_frmival(ov5647_dev(), &req30) < 0,
+	             "a real I2C failure on the VTS registers was not reported to the caller");
+	emul->bus.i2c->mock_api = NULL;
+
+	/* ov5647_set_fmt() re-requests data->requested_frmival on every format change -- if the
+	 * REJECTED {1, 30} above had overwritten it anyway, this would land on 30 fps, not the
+	 * original 15 ov5647_test_before() set.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_full));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
+	zassert_ok(video_get_frmival(ov5647_dev(), &got));
+	zassert_equal(got.denominator,
+	              DEFAULT_FRMRATE_DENOM_15,
+	              "a REJECTED set_frmival() request leaked into requested_frmival: rate is "
+	              "%u/%u after switching away and back to 640x480, want the original 15/1",
+	              got.numerator,
+	              got.denominator);
+}
+
+/*
+ * issue #2248, round 4 (no NEW register writes, but an API contract change, not mere
+ * documentation): the flip ctrls shift the Bayer colour order, and ov5647_get_fmt() must report
+ * that shift -- see ov5647_bayer_pixfmt()'s comment in ov5647.c for the RPi-reference-derived
+ * mapping and why (0,0) -> SBGGR, (1,0) -> SGBRG, (0,1) -> SGRBG, (1,1) -> SRGGB in terms of THIS
+ * driver's ctrl values. Only the default (0,0) order is bench/maintainer-verified; the other
+ * three are DERIVED, not bench-checked -- see docs/camera-shields.md.
  */
 ZTEST(ov5647, test_get_fmt_reports_default_bayer_order)
 {
@@ -1282,6 +1472,151 @@ ZTEST(ov5647, test_get_fmt_reports_both_flips_bayer_order)
 	zassert_equal(got.pixelformat,
 	              VIDEO_PIX_FMT_SRGGB10P,
 	              "get_format() reports 0x%08x with HFLIP=1 and VFLIP=1, want SRGGB10P",
+	              got.pixelformat);
+}
+
+/*
+ * issue #2248 fix-up round 5, MAJOR BUG: ov5647_set_fmt() only ever matched the two BASE fourccs
+ * (SBGGR8/SBGGR10P) against ov5647_fmts[], but ov5647_get_fmt() above reports a flip-shifted one
+ * once either flip ctrl is set -- so a get_format() -> set_format() round trip failed with
+ * -ENOTSUP for every flip state except the default. One ZTEST per flip state, mirroring the four
+ * get_fmt tests above.
+ */
+ZTEST(ov5647, test_set_fmt_roundtrip_default)
+{
+	struct video_format fmt;
+
+	zassert_ok(video_get_format(ov5647_dev(), &fmt));
+	zassert_equal(fmt.pixelformat, VIDEO_PIX_FMT_SBGGR10P);
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "get_format() -> set_format() round trip failed at the default orientation");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SBGGR10P,
+	              "set_format() changed the reported fourcc to 0x%08x on a no-op round trip",
+	              fmt.pixelformat);
+}
+
+ZTEST(ov5647, test_set_fmt_roundtrip_hflip)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  fmt;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &fmt));
+	zassert_equal(fmt.pixelformat, VIDEO_PIX_FMT_SGBRG10P);
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "get_format() -> set_format() round trip failed at HFLIP=1 (SGBRG10P)");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG10P,
+	              "set_format() changed the reported fourcc to 0x%08x on a no-op round trip",
+	              fmt.pixelformat);
+}
+
+ZTEST(ov5647, test_set_fmt_roundtrip_vflip)
+{
+	struct video_control vflip_on = { .id = VIDEO_CID_VFLIP, .val = 1 };
+	struct video_format  fmt;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &fmt));
+	zassert_equal(fmt.pixelformat, VIDEO_PIX_FMT_SGRBG10P);
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "get_format() -> set_format() round trip failed at VFLIP=1 (SGRBG10P)");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGRBG10P,
+	              "set_format() changed the reported fourcc to 0x%08x on a no-op round trip",
+	              fmt.pixelformat);
+}
+
+ZTEST(ov5647, test_set_fmt_roundtrip_both_flips)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_control vflip_on = { .id = VIDEO_CID_VFLIP, .val = 1 };
+	struct video_format  fmt;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &fmt));
+	zassert_equal(fmt.pixelformat, VIDEO_PIX_FMT_SRGGB10P);
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "get_format() -> set_format() round trip failed at HFLIP=1/VFLIP=1 (SRGGB10P)");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SRGGB10P,
+	              "set_format() changed the reported fourcc to 0x%08x on a no-op round trip",
+	              fmt.pixelformat);
+}
+
+/*
+ * issue #2248 fix-up round 5: a caller submitting the BASE fourcc directly (not the flip-shifted
+ * one) must still work while a flip ctrl is active -- ov5647_set_fmt()'s remap-to-base check must
+ * be a no-op for an already-base fourcc, not accidentally reject it.
+ */
+ZTEST(ov5647, test_set_fmt_base_fourcc_accepted_while_flipped)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  fmt      = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	struct video_format got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "set_format() rejected the BASE fourcc (SBGGR10P) while HFLIP=1");
+
+	/* set_format() reports the EFFECTIVE fourcc back, matching get_format() -- HFLIP=1 shifts
+	 * the BASE request that was just accepted to SGBRG10P.
+	 */
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG10P,
+	              "set_format() reported 0x%08x for a base-fourcc request while HFLIP=1, want "
+	              "the effective SGBRG10P",
+	              fmt.pixelformat);
+
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              fmt.pixelformat,
+	              "get_format() (0x%08x) disagrees with what set_format() just reported "
+	              "(0x%08x)",
+	              got.pixelformat,
+	              fmt.pixelformat);
+}
+
+/*
+ * issue #2248 fix-up round 5: a flip ctrl changed AFTER set_format() (no second set_format()
+ * call) must still be reflected the next time get_format() is queried -- data->fmt only ever
+ * stores the BASE fourcc; ov5647_get_fmt() re-derives the effective one from the CURRENT ctrl
+ * state on every call, so this needs no driver change to hold, only a test proving it does.
+ */
+ZTEST(ov5647, test_get_fmt_reflects_flip_changed_after_set_format)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  fmt      = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	struct video_format got;
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt));
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SBGGR10P,
+	              "get_format() reports 0x%08x before any flip ctrl is touched, want SBGGR10P",
+	              got.pixelformat);
+
+	/* No set_format() call between the ctrl change and this get_format() -- the order must
+	 * still update.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG10P,
+	              "get_format() reports 0x%08x after HFLIP=1 with no intervening set_format(), "
+	              "want SGBRG10P",
 	              got.pixelformat);
 }
 

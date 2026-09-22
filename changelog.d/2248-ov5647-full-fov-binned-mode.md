@@ -30,7 +30,7 @@ render of the run-62 frame and **confirmed it is the correct image**: orientatio
 diagonal and equal (107.2 / 106.8) -- maintainer-confirmed on run 62's actual rendered frame, not
 inferred from register semantics alone. **Run 63 re-verified the committed fix** (VTS `0x0833`,
 `fps_x100=1501`, 77/0 register mismatches, column FPN unchanged from run 62) and its review
-mutation-tested the fix-up, finding two further real behaviour bugs (both below) plus the
+mutation-tested the fix-up, finding three further real behaviour bugs (all below) plus the
 accuracy corrections this entry folds in.
 
 An earlier pass (bench runs 56/58/60) reached the same shape -- a full-FOV binned 640x480 mode
@@ -137,16 +137,46 @@ lines, was 296), `0x3a0a`/`0x3a0b` = `0x00`/`0xad` (173 lines, was 246); `0x3a0d
 (`OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN`, the same VTS mainline's own `0x08`/`0x06` reproduce
 from) -- `0x0b`/`0x09`. Still BENCH-UNVERIFIED, not run on hardware.
 
-**ROUND-4, documentation mechanism (no register-write change): flipping the sensor also flips the
-Bayer colour order, which `get_format()` did not report.** Translated from the RPi/OmniVision
-reference's `ov5647_get_mbus_code()`: that driver's own `V4L2_CID_HFLIP` is the logical inverse of
-the `0x3821` mirror bit, while this driver's `HFLIP` ctrl bit IS the mirror bit directly -- so in
-terms of THIS driver's ctrl values, `(hflip, vflip)` maps `(0,0)` to SBGGR (the maintainer-confirmed
-default), `(1,0)` to SGBRG, `(0,1)` to SGRBG, and `(1,1)` to SRGGB. `get_format()` now derives and
-reports the flip-adjusted pixelformat; `set_format()`/`get_caps()` are unchanged (a caller still
-requests the base SBGGR8/SBGGR10P size/depth; the order is a side effect of the separate flip
-ctrls). Only the default order is bench/maintainer-verified; the three flipped orders are derived
-from the reference mapping, not bench-checked on this module.
+**ROUND-4 (no NEW register writes, but an API contract change, not mere documentation): flipping
+the sensor also flips the Bayer colour order, which `get_format()` did not report.** Translated
+from the RPi/OmniVision reference's `ov5647_get_mbus_code()`: that driver's own `V4L2_CID_HFLIP`
+is the logical inverse of the `0x3821` mirror bit, while this driver's `HFLIP` ctrl bit IS the
+mirror bit directly -- so in terms of THIS driver's ctrl values, `(hflip, vflip)` maps `(0,0)` to
+SBGGR (the maintainer-confirmed default), `(1,0)` to SGBRG, `(0,1)` to SGRBG, and `(1,1)` to
+SRGGB. `get_format()` now derives and reports the flip-adjusted pixelformat. Only the default
+order is bench/maintainer-verified; the three flipped orders are derived from the reference
+mapping, not bench-checked on this module.
+
+**ROUND-5, MAJOR BUG, caught by a review of round 4 above, before merge, never shipped:
+`set_format()` could not accept back what `get_format()` had just reported.** Round 4 made
+`get_format()` report the flip-shifted fourcc (e.g. `SGBRG10P` at `hflip=1`), but `set_format()`
+still only matched the two BASE fourccs (`SBGGR8`/`SBGGR10P`) against `ov5647_fmts[]` via
+`video_format_caps_index()` -- so a `get_format()` -> `set_format()` round trip, or any caller
+(`video_alif.c`'s `alif_cam_get_fmt()`) that re-submits exactly what `get_format()` returned,
+failed with `-ENOTSUP`. Fixed: `set_format()` now maps a request back to its base fourcc when it
+equals what the CURRENT flip ctrls would derive from that base, and reports the flip-adjusted
+fourcc back on success too, matching `get_format()`. A caller submitting a base fourcc directly
+while flipped still works unchanged. `get_caps()` is still unchanged (a caller still requests the
+base SBGGR8/SBGGR10P size/depth via `video_format_caps_index()`; the flip-adjusted order is a
+derived side effect, not a separately advertised capability).
+
+**ROUND-5, pre-existing: `set_frmival()` could echo a request it never actually applied.** When
+`video_closest_frmival()` finds no candidate within `INT32_MAX` ns of the request (e.g. `{5, 1}`,
+a 5 s interval, against this driver's fastest 10 fps candidate), it returns `0` without ever
+updating its `match` out-param, leaving it at the caller's original raw request while the VTS
+register is actually programmed for index 0 (10 fps) regardless. `ov5647_set_frmival()` used to
+echo that stale raw request back to its own caller instead of the rate it just wrote to hardware.
+Fixed: report `{1, ov5647_framerates[fie.index]}` -- the SAME construction `ov5647_enum_frmival()`
+itself produces for that index, so this is a no-op on every request `video_closest_frmival()` DID
+match, and only changes behaviour on this one previously-silent-mismatch path.
+
+**ROUND-5: the crop-path max-bands-per-frame registers (`0x3a0d`/`0x3a0e`) were pinned to the
+2592x1944 crop's own minimum-blanking VTS for every crop size.** A smaller crop -- e.g. 1280x960,
+minimum-blanking VTS ~984 -- got the SAME `0x0b`/`0x09` (11/9 bands) as the 1944-line crop, even
+though `11 * 173 = 1903` and `9 * 208 = 1872` both exceed that smaller frame's own VTS. Fixed:
+computed per mode from the requested height's own minimum-blanking VTS (`floor(VTS/band)`, floored
+at 1 band), the same rule the reference applies per its own modes -- see `ov5647_set_mode_regs()`'s
+block comment. Still BENCH-UNVERIFIED, same as the band-step values themselves.
 
 **ROUND-4, test infrastructure: the suite's `common_init_regs[]` table was missing two registers
 `ov5647_init_regs[]` already wrote** (`0x3503`/`OV5647_MANUAL_CTRL_VTS` and
@@ -181,8 +211,10 @@ subsample/binning/analog/HTS/band-step values (`0x3814`/`0x3815` = `0x11`, `0x38
 `0x3612`/`0x3618`/`0x3708`/`0x3709` = `0x5b`/`0x04`/`0x64`/`0x12`, cited from mainline and
 BENCH-UNVERIFIED on this module) **and the crop path's OWN AEC band step**, line-time-scaled from
 mainline's full-resolution table (`0x3a08`/`0x3a09`/`0x3a0a`/`0x3a0b`/`0x3a0d`/`0x3a0e`/`0x4004` =
-`0x00`/`0xd0`/`0x00`/`0xad`/`0x0b`/`0x09`/`0x04` -- see the ROUND-4 REGRESSION paragraph below for
-why and the arithmetic; still BENCH-UNVERIFIED on this module) --
+`0x00`/`0xd0`/`0x00`/`0xad`/`0x0b`/`0x09`/`0x04`, shown here for the 2592x1944 crop -- see the
+ROUND-4 FIX-UP paragraph above for why and the arithmetic, and the ROUND-5 paragraph above for
+why `0x3a0d`/`0x3a0e` are now computed per crop size rather than pinned to this one; still
+BENCH-UNVERIFIED on this module) --
 
 **MAJOR BUG, fixed by run 63's review, before merge, never shipped: the crop-path AEC band step
 was wrong.** A previous version of this fix reused the VGA band-step numbers
@@ -190,8 +222,7 @@ was wrong.** A previous version of this fix reused the VGA band-step numbers
 full-resolution citation is available" -- that claim was false. Reusing the VGA numbers on a
 1944-line crop would have capped banding-mode AEC around a CALCULATED (not bench-measured) 502
 lines. This was fixed first with mainline's own full-resolution values byte-for-byte, and that
-fix-up was ITSELF found wrong by a round-4 review (see below) -- so a prior 640x480 selection can
-never leave binning (or its HTS/band step) armed on a later crop window. This closes the ordering
+fix-up was ITSELF found wrong by a round-4 review (see above). This closes the ordering
 trap bench run 54 hit: applying the binning
 registers and then letting `ov5647_set_window()` rewrite the window to the crop made the sensor
 emit short lines against a 640-pixel frame declaration, and the CSI host raised "Fatal Interrupt

@@ -614,6 +614,17 @@ struct ov5647_data {
 #define OV5647_AEC_RSVD_3A0B		OV5647_REG8(0x3a0b)
 #define OV5647_AEC_RSVD_3A0D		OV5647_REG8(0x3a0d)
 #define OV5647_AEC_RSVD_3A0E		OV5647_REG8(0x3a0e)
+
+/*
+ * Crop-path 50/60 Hz AEC band-step VALUES (issue #2248 fix-up round 5), line-time-scaled from
+ * mainline's full-resolution table -- see the block comment in ov5647_set_mode_regs() for the
+ * arithmetic. Named here (not just inline in the register table) because ov5647_set_mode_regs()
+ * also needs them as divisors to compute the PER-MODE max-bands figures written to
+ * OV5647_AEC_RSVD_3A0D/3A0E -- see that computation for why a single full-resolution-derived
+ * constant (the driver's earlier bug) is wrong for a smaller crop.
+ */
+#define OV5647_AEC_BAND_50HZ_CROP	173U /* 0x3a0a/0x3a0b = 0x00/0xad */
+#define OV5647_AEC_BAND_60HZ_CROP	208U /* 0x3a08/0x3a09 = 0x00/0xd0 */
 #define OV5647_AEC_RSVD_3A0F		OV5647_REG8(0x3a0f)
 #define OV5647_AEC_RSVD_3A10		OV5647_REG8(0x3a10)
 #define OV5647_AEC_RSVD_3A1B		OV5647_REG8(0x3a1b)
@@ -836,6 +847,21 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 		return video_write_cci_multiregs(&cfg->i2c, regs, ARRAY_SIZE(regs));
 	}
 
+	/*
+	 * 0x3a0d/0x3a0e (max bands per frame) are PER MODE, not the single full-resolution-derived
+	 * constant an earlier version of this fix hardcoded here for every crop size (issue #2248
+	 * fix-up round 5): the reference's own floor(VTS/band) rule (see the block comment below)
+	 * depends on the MODE's own minimum-blanking VTS (height + OV5647_VBLANK_MIN), so a value
+	 * derived from OV5647_FULL_HEIGHT (1944) overstates what a SMALLER crop can actually hold
+	 * -- e.g. 1280x960 (min VTS ~984): the full-resolution-derived 11/173 and 9/208 give
+	 * 11*173=1903 and 9*208=1872, both bigger than the 984-line frame itself. Recomputed per
+	 * mode from the height actually requested here, floored at 1 band. BENCH-UNVERIFIED, same
+	 * as the band-step values themselves (see below).
+	 */
+	uint32_t crop_min_vts = height + OV5647_VBLANK_MIN;
+	uint32_t max_bands_50hz = MAX(1U, crop_min_vts / OV5647_AEC_BAND_50HZ_CROP);
+	uint32_t max_bands_60hz = MAX(1U, crop_min_vts / OV5647_AEC_BAND_60HZ_CROP);
+
 	ret = ov5647_set_window(dev, width, height);
 	if (ret < 0) {
 		return ret;
@@ -866,23 +892,25 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 		 * changes the real time it represents (296 lines * 32.51us = 9.63 ms; the same
 		 * 296 lines at THIS line time is 296 * 46.29us = 13.70 ms -- neither the 50 Hz
 		 * nor 60 Hz mains period). Scaled by the line-time ratio to preserve the real-time
-		 * period instead: 296 * (32.51 / 46.29) = 207.9 -> 208 (0x00d0); 246 * (32.51 /
-		 * 46.29) = 172.8 -> 173 (0x00ad). 0x3a0d/0x3a0e (max bands per frame) follow the
-		 * reference's own floor(VTS/band) rule -- mainline's 0x08/0x06 reproduce exactly
-		 * from floor(1968/246)=8 and floor(1968/296)=6.65->6, where 1968 =
-		 * OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN is that mode's minimum-blanking VTS
-		 * (this block runs once per mode, before ov5647_set_frmival() picks an actual
-		 * rate, so the max-bands figure cannot depend on a chosen frame rate). Applying
-		 * the same rule with the new band values: floor(1968/173)=11 (0x0b),
-		 * floor(1968/208)=9 (0x09). This scaling has NOT been bench-verified on this
-		 * module -- flagging the derivation, not shipping it as measured.
+		 * period instead: 296 * (32.51 / 46.29) = 207.9 -> 208 (OV5647_AEC_BAND_60HZ_CROP);
+		 * 246 * (32.51 / 46.29) = 172.8 -> 173 (OV5647_AEC_BAND_50HZ_CROP). 0x3a0d/0x3a0e
+		 * (max bands per frame) follow the reference's own floor(VTS/band) rule -- mainline's
+		 * 0x08/0x06 reproduce exactly from floor(1968/246)=8 and floor(1968/296)=6.65->6,
+		 * where 1968 = OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN is ITS mode's minimum-blanking
+		 * VTS (this block runs once per mode, before ov5647_set_frmival() picks an actual
+		 * rate, so the max-bands figure cannot depend on a chosen frame rate) -- but THIS
+		 * driver supports more than one crop size, so max_bands_50hz/max_bands_60hz above use
+		 * the REQUESTED height's own minimum-blanking VTS, not a constant pinned to
+		 * OV5647_FULL_HEIGHT (issue #2248 fix-up round 5: fixed, see that computation's own
+		 * comment). This scaling has NOT been bench-verified on this module -- flagging the
+		 * derivation, not shipping it as measured.
 		 */
 		{OV5647_AEC_RSVD_3A08, 0x00},
-		{OV5647_AEC_RSVD_3A09, 0xd0},
+		{OV5647_AEC_RSVD_3A09, OV5647_AEC_BAND_60HZ_CROP},
 		{OV5647_AEC_RSVD_3A0A, 0x00},
-		{OV5647_AEC_RSVD_3A0B, 0xad},
-		{OV5647_AEC_RSVD_3A0D, 0x0b},
-		{OV5647_AEC_RSVD_3A0E, 0x09},
+		{OV5647_AEC_RSVD_3A0B, OV5647_AEC_BAND_50HZ_CROP},
+		{OV5647_AEC_RSVD_3A0D, max_bands_50hz},
+		{OV5647_AEC_RSVD_3A0E, max_bands_60hz},
 		{OV5647_BLC_RSVD_4004, 0x04},
 	};
 
@@ -955,8 +983,24 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 	 * declaration. A rejected/failed request must not overwrite a previously-saved one.
 	 */
 	data->requested_frmival = requested;
-	*frmival = fie.discrete;
+
+	/*
+	 * Report the rate actually just written to OV5647_TIMING_VTS_REG above, not fie.discrete
+	 * (issue #2248 fix-up round 5, pre-existing bug): Zephyr's video_closest_frmival() tracks
+	 * the best candidate by comparing each diff_nsec against a running best (initialised to
+	 * INT32_MAX ns) and only updates match->discrete/index when a candidate beats it -- if
+	 * EVERY candidate's diff from the request exceeds INT32_MAX ns (e.g. a {5, 1} request, 5 s,
+	 * against this driver's fastest 10 fps candidate, ~4.9 s away), no candidate ever updates
+	 * fie.discrete/fie.index, yet video_closest_frmival() still returns 0 -- fie.discrete is
+	 * left at the caller's original raw request and fie.index at its zero-initialised default.
+	 * Echoing fie.discrete here would then report the UNAPPLIED raw request while
+	 * ov5647_framerates[fie.index] (index 0) is what the VTS write above actually used.
+	 * {1, ov5647_framerates[fie.index]} is exactly what ov5647_enum_frmival() itself would
+	 * report for that same index, so this is a no-op on every request video_closest_frmival()
+	 * DID match normally, and only changes behaviour on this one previously-silent path.
+	 */
 	data->frmrate = ov5647_framerates[fie.index];
+	*frmival = (struct video_frmival){.numerator = 1, .denominator = data->frmrate};
 
 	return 0;
 }
@@ -987,6 +1031,12 @@ static int ov5647_lane_park(const struct device *dev);
 static int ov5647_set_ctrl_hflip(const struct device *dev);
 static int ov5647_set_ctrl_vflip(const struct device *dev);
 
+/* Forward declaration: ov5647_set_fmt() below both ACCEPTS and, on success, REPORTS the
+ * flip-adjusted fourcc this returns -- issue #2248 fix-up round 5, see set_fmt()'s own comment.
+ * Defined further down, next to ov5647_get_fmt() which uses it the same way.
+ */
+static uint32_t ov5647_bayer_pixfmt(uint32_t base_pixelformat, bool hflip, bool vflip);
+
 static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct ov5647_config *cfg = dev->config;
@@ -999,6 +1049,9 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 	 * even though 640x480 can reach it.
 	 */
 	struct video_frmival frmival = data->requested_frmival;
+	bool hflip = data->ctrls.hflip.val != 0;
+	bool vflip = data->ctrls.vflip.val != 0;
+	uint32_t requested_pixelformat = fmt->pixelformat;
 	size_t idx;
 	int ret;
 
@@ -1007,10 +1060,30 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 		return -EBUSY;
 	}
 
+	/*
+	 * ov5647_get_fmt() reports the EFFECTIVE (flip-shifted) Bayer fourcc, not just the two BASE
+	 * ones ov5647_fmts[] advertises -- issue #2248 fix-up round 5 (MAJOR BUG): a
+	 * get_format() -> set_format() round trip, or any caller re-submitting exactly what
+	 * get_format() just returned, used to fail here with -ENOTSUP, because
+	 * video_format_caps_index() only ever matches the two base fourccs. Map back to the base
+	 * fourcc when the request equals what the CURRENT flip state derives from one of them --
+	 * ov5647_bayer_pixfmt() is its own inverse for a fixed flip state, so this only ever fires
+	 * on the exact fourcc get_format() would report right now. A caller submitting a base
+	 * fourcc directly is unaffected: it only matches this check when hflip/vflip are both
+	 * unset (ov5647_bayer_pixfmt()'s (0,0) case is the identity).
+	 */
+	if (requested_pixelformat == ov5647_bayer_pixfmt(VIDEO_PIX_FMT_SBGGR8, hflip, vflip)) {
+		fmt->pixelformat = VIDEO_PIX_FMT_SBGGR8;
+	} else if (requested_pixelformat ==
+		   ov5647_bayer_pixfmt(VIDEO_PIX_FMT_SBGGR10P, hflip, vflip)) {
+		fmt->pixelformat = VIDEO_PIX_FMT_SBGGR10P;
+	}
+
 	ret = video_format_caps_index(ov5647_fmts, fmt, &idx);
 	if (ret < 0) {
-		LOG_ERR("Format '%s' %ux%u not supported", VIDEO_FOURCC_TO_STR(fmt->pixelformat),
-			fmt->width, fmt->height);
+		LOG_ERR("Format '%s' %ux%u not supported",
+			VIDEO_FOURCC_TO_STR(requested_pixelformat), fmt->width, fmt->height);
+		fmt->pixelformat = requested_pixelformat;
 		return -ENOTSUP;
 	}
 
@@ -1070,17 +1143,33 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 		return ret;
 	}
 
-	return ov5647_lane_park(dev);
+	ret = ov5647_lane_park(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Report the EFFECTIVE fourcc back, matching ov5647_get_fmt() below -- data->fmt just
+	 * stored above is the BASE fourcc video_format_caps_index() matched; hflip/vflip (the flip
+	 * ctrls ov5647_set_ctrl_hflip()/vflip() just re-applied to hardware, unchanged by this
+	 * function) may shift that away from what the caller's fmt->pixelformat still holds.
+	 */
+	fmt->pixelformat = ov5647_bayer_pixfmt(data->fmt.pixelformat, hflip, vflip);
+
+	return 0;
 }
 
 /*
  * The flip ctrls (VIDEO_CID_HFLIP/VFLIP) shift the Bayer colour order, not just the image
- * orientation -- issue #2248, round 4 (documentation-only, no register write changes here):
- * mirroring an even-sized Bayer array along an axis swaps that axis's colour pairing (e.g. BGGR
- * horizontally mirrored reads GBRG). ov5647_set_ctrl_hflip()/vflip() above only ever touch
- * 0x3821/0x3820's mirror bits, so the sensor DOES shift order on a flip; this function makes
- * ov5647_get_fmt() report that shift instead of always reporting the mode's base (unflipped)
- * pixelformat, which would tell demosaic code the wrong colour order once either ctrl is set.
+ * orientation -- issue #2248, round 4: mirroring an even-sized Bayer array along an axis swaps
+ * that axis's colour pairing (e.g. BGGR horizontally mirrored reads GBRG).
+ * ov5647_set_ctrl_hflip()/vflip() above only ever touch 0x3821/0x3820's mirror bits, so the
+ * sensor DOES shift order on a flip; this function makes ov5647_get_fmt() report that shift
+ * instead of always reporting the mode's base (unflipped) pixelformat, which would tell demosaic
+ * code the wrong colour order once either ctrl is set. NOT documentation-only, despite writing no
+ * NEW registers: round 4 changed what get_format() REPORTS, and round 5 additionally changed what
+ * set_format() ACCEPTS and RETURNS (ov5647_set_fmt() above now maps one of the flip-shifted
+ * fourccs this function derives back to a base fourcc on input, and reports the shifted fourcc
+ * back on output) -- both are API contract changes, not just a comment or a report-only add-on.
  *
  * Mapping translated from the RPi/OmniVision reference's ov5647_get_mbus_code() (rpi-6.6.y
  * drivers/media/i2c/ov5647.c): `codes[hflip | (vflip << 1)] = {SGBRG, SBGGR, SRGGB, SGRBG}`. That
