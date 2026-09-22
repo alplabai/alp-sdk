@@ -2,7 +2,7 @@ From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Tue, 17 Jun 2026 00:00:00 +0000
 Subject: [PATCH] clock_control_alif: enable audio master source + EXPMST0
- force, add I2S divider set_rate
+ force, add I2S and camera pixel-clock divider set_rate
 
 On the Alif Ensemble the audio blocks need more than the per-peripheral gate
 the upstream driver flips:
@@ -29,12 +29,24 @@ reference register header but is BENCH-UNVERIFIED against the DFP/TRM for the
 DesignWare i2s_dw path -- it is a separable hunk so a bench step can hold it if
 it regresses, without losing the (grounded, bench-proven) master/EXPMST enable.
 
+Also teach .set_rate/.get_rate the CPI and CSI pixel-clock dividers
+(CLKCTL_PER_MST CAMERA_PIXCLK_CTRL 0x00 / CSI_PIXCLK_CTRL 0x08: CLK_SEL bit 4,
+divisor [24:16], 2..0x1FF legal), so the DesignWare CSI-2 bridge's
+clock_control_set_rate(pix_clk) is programmed instead of failing -ENOTSUP.
+set_rate picks the slowest rate that is still >= the request and returns
+-ERANGE above source / 2; get_rate reports source / divisor.  set_rate also
+programs the CLK_SEL the clock ID encodes (as .on does), so it can run before
+.on in the DFP order (divisor + CLK_SEL, then CLK_ENA) without depending on
+what boot firmware left in CLK_SEL.  CLK_SEL=0 is SYST_ACLK from the DT;
+CLK_SEL=1 is refused because its rate is not settled.
+CDC200_PIXCLK_CTRL shares the layout but is left alone.
+
 Non-Alif clock controllers are unaffected.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
 diff --git a/drivers/clock_control/clock_control_alif.c b/drivers/clock_control/clock_control_alif.c
-index 4a7e002..109b345 100644
+index 4a7e002..3358974 100644
 --- a/drivers/clock_control/clock_control_alif.c
 +++ b/drivers/clock_control/clock_control_alif.c
 @@ -124,6 +124,93 @@ struct alif_clock_control_config {
@@ -131,7 +143,7 @@ index 4a7e002..109b345 100644
  /**
   * @brief Get the register address for a clock ID
   * @param dev Clock control device
-@@ -205,11 +292,19 @@ static uint32_t alif_get_clock_freq(uint32_t clock_id)
+@@ -205,11 +292,19 @@ static uint32_t alif_get_clock_freq(uint
  static int alif_clock_control_on(const struct device *dev,
  			clock_control_subsys_t sub_system)
  {
@@ -151,7 +163,168 @@ index 4a7e002..109b345 100644
  	if (!ALIF_CLOCK_CFG_EN_MASK(clk_id)) {
  		/* Clock is always-on, already enabled */
  		return 0;
-@@ -291,6 +386,90 @@ static int alif_clock_control_get_rate(const struct device *dev,
+@@ -268,15 +363,147 @@ static int alif_clock_control_off(const
+ 	return 0;
+ }
+ 
++/*
++ * alp-sdk: camera pixel-clock dividers in CLKCTL_PER_MST -- CAMERA_PIXCLK_CTRL
++ * (0x00, the CPI pixel clock) and CSI_PIXCLK_CTRL (0x08, the CSI IPI pixel
++ * clock).  Both: CLK_ENA bit 0, CLK_SEL bit 4 (source mux), divisor [24:16]
++ * with 2..0x1FF legal and 0/1 illegal (AE822 DFP sys_ctrl_cpi.h /
++ * sys_ctrl_csi.h *_DIVISOR_Pos/_Msk).  CDC200_PIXCLK_CTRL (0x04) shares the
++ * layout but is deliberately NOT handled here (the display driver owns it).
++ */
++#define ALIF_CAMERA_PIXCLK_CTRL_REG_OFF 0x00U /* CLKCTL_PER_MST : CAMERA_PIXCLK_CTRL */
++#define ALIF_CSI_PIXCLK_CTRL_REG_OFF    0x08U /* CLKCTL_PER_MST : CSI_PIXCLK_CTRL */
++#define ALIF_PIXCLK_CLK_SEL             BIT(4)
++#define ALIF_PIXCLK_DIV_POS             16U
++#define ALIF_PIXCLK_DIV_MASK            0x1FFU
++#define ALIF_PIXCLK_DIV_MIN             2U
++
++/**
++ * @brief Test whether an encoded clock ID is a CPI/CSI pixel clock
++ * @param clk_id Encoded clock ID from device tree
++ * @return true if the ID decodes to CAMERA_PIXCLK_CTRL or CSI_PIXCLK_CTRL
++ */
++static inline bool alif_clk_is_pixclk(uint32_t clk_id)
++{
++	uint32_t reg = ALIF_CLOCK_CFG_REG(clk_id);
++
++	return (ALIF_CLOCK_CFG_MODULE(clk_id) == ALIF_CLKCTL_PER_MST_MODULE) &&
++	       (reg == ALIF_CAMERA_PIXCLK_CTRL_REG_OFF || reg == ALIF_CSI_PIXCLK_CTRL_REG_OFF);
++}
++
++/**
++ * @brief Rate of the source a pixel-clock register's CLK_SEL currently selects
++ * @param reg_value Current *_PIXCLK_CTRL register value
++ * @param src_hz Filled with the source rate in Hz
++ * @return 0 on success, -ENOTSUP if the selected source has no rate in this tree
++ */
++static int alif_pixclk_src_hz(uint32_t reg_value, uint32_t *src_hz)
++{
++	if ((reg_value & ALIF_PIXCLK_CLK_SEL) == 0U) {
++		*src_hz = ALIF_CLOCK_SYST_ACLK_FREQ;
++		return 0;
++	}
++
++	/*
++	 * ponytail: CLK_SEL=1 has no clock node in this tree, and the E8 HWRM
++	 * (400 MHz) and the DFP CPI_PIX_CLKSEL enum (480 MHz PLL_CLK3) disagree
++	 * on its rate.  Refuse rather than guess until a bench measurement
++	 * settles it; the camera clock IDs select CLK_SEL=0.
++	 */
++	LOG_ERR("pixel clock source CLK_SEL=1 has no known rate");
++	return -ENOTSUP;
++}
++
++/**
++ * @brief Get the current rate of a CPI/CSI pixel clock
++ * @param dev Clock control device
++ * @param clk_id Encoded pixel-clock ID
++ * @param rate Filled with source / divisor, in Hz
++ * @return 0 on success, -ENOTSUP for an unknown source, -EIO for an illegal divisor
++ */
++static int alif_pixclk_get_rate(const struct device *dev, uint32_t clk_id, uint32_t *rate)
++{
++	uint32_t reg_value = sys_read32(alif_get_clk_reg_addr(dev, clk_id));
++	uint32_t div = (reg_value >> ALIF_PIXCLK_DIV_POS) & ALIF_PIXCLK_DIV_MASK;
++	uint32_t src_hz;
++	int ret;
++
++	ret = alif_pixclk_src_hz(reg_value, &src_hz);
++	if (ret) {
++		return ret;
++	}
++
++	if (div < ALIF_PIXCLK_DIV_MIN) {
++		return -EIO;
++	}
++
++	*rate = src_hz / div;
++	return 0;
++}
++
++/**
++ * @brief Program a CPI/CSI pixel-clock source and divisor
++ *
++ * The consumer needs at least the requested throughput, so this picks the
++ * slowest achievable rate that is still >= the request: divisor =
++ * floor(source / rate), capped at 0x1FF.  CLK_SEL is set to the source the
++ * clock ID encodes, as .on does, so the rate never depends on the CLK_SEL boot
++ * firmware left and the consumer can follow the DFP set_*_pixel_clk() order:
++ * divisor and CLK_SEL first, then CLK_ENA through .on.
++ *
++ * @param dev Clock control device
++ * @param clk_id Encoded pixel-clock ID
++ * @param hz Requested minimum pixel clock in Hz
++ * @return 0 on success, -EINVAL for 0 Hz, -ERANGE above source / 2,
++ *         -ENOTSUP for an unknown source
++ */
++static int alif_pixclk_set_rate(const struct device *dev, uint32_t clk_id, uint32_t hz)
++{
++	mem_addr_t reg_addr = alif_get_clk_reg_addr(dev, clk_id);
++	uint32_t reg_value = sys_read32(reg_addr);
++	uint32_t src_pos = ALIF_CLOCK_CFG_SRC_FIELD_POS(clk_id);
++	uint32_t src_hz;
++	uint32_t div;
++	int ret;
++
++	reg_value &= ~(BIT_MASK(ALIF_CLOCK_CFG_SRC_FIELD_WIDTH(clk_id)) << src_pos);
++	reg_value |= ALIF_CLOCK_CFG_SRC_VAL(clk_id) << src_pos;
++
++	ret = alif_pixclk_src_hz(reg_value, &src_hz);
++	if (ret) {
++		return ret;
++	}
++
++	if (hz == 0U) {
++		return -EINVAL;
++	}
++
++	if (hz > src_hz / ALIF_PIXCLK_DIV_MIN) {
++		LOG_ERR("pixel clock %u Hz requested, max %u Hz (source %u Hz / %u)", hz,
++			src_hz / ALIF_PIXCLK_DIV_MIN, src_hz, ALIF_PIXCLK_DIV_MIN);
++		return -ERANGE;
++	}
++
++	div = MIN(src_hz / hz, ALIF_PIXCLK_DIV_MASK);
++	reg_value &= ~(ALIF_PIXCLK_DIV_MASK << ALIF_PIXCLK_DIV_POS);
++	reg_value |= div << ALIF_PIXCLK_DIV_POS;
++	sys_write32(reg_value, reg_addr);
++
++	LOG_DBG("pixel clock %u Hz requested -> %u Hz (source %u Hz / %u)", hz, src_hz / div,
++		src_hz, div);
++	return 0;
++}
++
+ /**
+  * @brief Get the clock rate for a peripheral clock
+  *
+- * Returns the input clock frequency for the specified peripheral.
++ * Returns the input clock frequency for the specified peripheral; for the
++ * CPI/CSI pixel clocks, the divided rate actually programmed.
+  *
+- * @param dev Clock control device (unused)
++ * @param dev Clock control device
+  * @param sub_system Encoded clock ID from device tree
+  * @param rate Pointer to store the clock rate in Hz
+- * @return 0 on success
++ * @return 0 on success, negative errno for an unreadable pixel clock
+  */
+ static int alif_clock_control_get_rate(const struct device *dev,
+ 				clock_control_subsys_t sub_system,
+@@ -284,13 +511,105 @@ static int alif_clock_control_get_rate(c
+ {
+ 	uint32_t clk_id = (uint32_t)sub_system;
+ 
+-	ARG_UNUSED(dev);
++	if (alif_clk_is_pixclk(clk_id)) {
++		return alif_pixclk_get_rate(dev, clk_id, rate);
++	}
+ 
+ 	*rate = alif_get_clock_freq(clk_id);
+ 
  	return 0;
  }
  
@@ -186,17 +359,19 @@ index 4a7e002..109b345 100644
 + *
 + * Programs the I2Sx_CTRL bit-clock divider in CLKCTL_PER_SLV so the I2S block
 + * produces the requested serial bit clock (SCLK) from the 76.8 MHz audio
-+ * reference.  Only the I2S clocks support a rate; every other clock ID returns
-+ * -ENOTSUP, which i2s_dw.c (and the generic clock_control_set_rate() consumers)
-+ * already tolerate.
++ * reference, or the CPI/CSI pixel-clock divisor (alif_pixclk_set_rate()).
++ * Every other clock ID returns -ENOTSUP, which i2s_dw.c (and the generic
++ * clock_control_set_rate() consumers) already tolerate.
 + *
 + * BENCH-UNVERIFIED divider field layout -- see the note above.
 + *
 + * @param dev Clock control device
 + * @param sub_system Encoded clock ID from device tree
-+ * @param rate Requested bit clock (SCLK) in Hz, passed as a uintptr_t value
-+ * @return 0 on success, -ENOTSUP for non-I2S clocks, -EINVAL if the rate cannot
-+ *         be reached with a 10-bit divider
++ * @param rate Requested bit clock (SCLK) or pixel clock in Hz, passed as a
++ *             uintptr_t value
++ * @return 0 on success, -ENOTSUP for other clocks, -EINVAL if the I2S rate
++ *         cannot be reached with a 10-bit divider, or alif_pixclk_set_rate()'s
++ *         result for a pixel clock
 + */
 +static int alif_clock_control_set_rate(const struct device *dev,
 +				clock_control_subsys_t sub_system,
@@ -208,8 +383,12 @@ index 4a7e002..109b345 100644
 +	uint32_t reg_value;
 +	uint32_t div;
 +
++	if (alif_clk_is_pixclk(clk_id)) {
++		return alif_pixclk_set_rate(dev, clk_id, sclk);
++	}
++
 +	if (!alif_clk_is_i2s(clk_id)) {
-+		/* Only the I2S divider is programmable here. */
++		/* Only the I2S and pixel-clock dividers are programmable here. */
 +		return -ENOTSUP;
 +	}
 +
@@ -242,7 +421,7 @@ index 4a7e002..109b345 100644
  /**
   * @brief Get the status of a peripheral clock
   *
-@@ -326,6 +505,8 @@ static DEVICE_API(clock_control, alif_clock_control_driver_api) = {
+@@ -326,6 +645,8 @@ static DEVICE_API(clock_control, alif_cl
  	.on = alif_clock_control_on,
  	.off = alif_clock_control_off,
  	.get_rate = alif_clock_control_get_rate,

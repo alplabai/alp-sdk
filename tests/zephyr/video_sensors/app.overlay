@@ -1,0 +1,37 @@
+/*
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Application overlay for testing driver builds -- see testcase.yaml.
+ * Names chosen not to conflict with real-world devicetree nodes, mirroring
+ * upstream's tests/drivers/build_all/video/app.overlay convention.
+ *
+ * OV9281 sits on native_sim's real I2C emulation bus (&i2c0, "zephyr,i2c-emul-controller" --
+ * see boards/native/native_sim/native_sim.dts), which is what ov9281_emul.c's
+ * EMUL_DT_INST_DEFINE(ovti_ov9281) actually answers at runtime -- see ov9281_test.c.
+ */
+
+/ {
+	ov9281_input_clock: ov9281-input-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		#clock-cells = <0>;
+	};
+};
+
+&i2c0 {
+	status = "okay";
+
+	ov9281_test: ov9281@60 {
+		compatible = "ovti,ov9281";
+		reg = <0x60>;
+		clocks = <&ov9281_input_clock>;
+		status = "okay";
+
+		port {
+			ov9281_test_ep: endpoint {
+				remote-endpoint-label = "";
+				data-lanes = <1 2>;
+			};
+		};
+	};
+};

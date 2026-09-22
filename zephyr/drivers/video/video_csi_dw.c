@@ -55,6 +55,10 @@ static int csi2_is_format_supported(uint32_t fourcc)
 	case VIDEO_PIX_FMT_Y7P:
 	case VIDEO_PIX_FMT_GREY:
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 	case VIDEO_PIX_FMT_Y12P:
 	case VIDEO_PIX_FMT_Y14P:
 	case VIDEO_PIX_FMT_Y16:
@@ -84,6 +88,10 @@ static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 	case VIDEO_PIX_FMT_RGGB8:
 		return CSI2_DT_RAW8;
 	case VIDEO_PIX_FMT_Y10P:
+	case VIDEO_PIX_FMT_SBGGR10P:
+	case VIDEO_PIX_FMT_SGBRG10P:
+	case VIDEO_PIX_FMT_SGRBG10P:
+	case VIDEO_PIX_FMT_SRGGB10P:
 		return CSI2_DT_RAW10;
 	case VIDEO_PIX_FMT_Y12P:
 		return CSI2_DT_RAW12;
@@ -336,7 +344,10 @@ static int csi2_dw_phy_config(const struct device *dev)
 	ret = dphy_dw_slave_setup(config->rx_dphy, &data->phy[data->current_sensor],
 			data->current_sensor);
 	if (ret) {
-		LOG_ERR("Failed to set-up D-PHY %s", (data->current_sensor ? "RX" : "TX as RX"));
+		/* dphy_dw_slave_setup(): id 0 = dedicated CSI RX D-PHY, id 1 = DSI TX
+		 * D-PHY in RX mode (the fork label had the two swapped).
+		 */
+		LOG_ERR("Failed to set-up D-PHY %s", (data->current_sensor ? "TX as RX" : "RX"));
 		return ret;
 	}
 	return 0;
@@ -351,6 +362,7 @@ static int csi2_dw_validate_data(const struct device *dev)
 	struct dphy_csi2_settings *phy =
 		&data->phy[data->current_sensor];
 	float pixclock;
+	float pixrate;
 	uint32_t bpp;
 	uint32_t tmp;
 	int ret;
@@ -375,16 +387,52 @@ static int csi2_dw_validate_data(const struct device *dev)
 	 * Balanced pixel clock for 20% more input bandwidth:
 	 * balanced pixel clock = pix_clk * 1.2
 	 */
-	pixclock = ((phy->pll_fin << 1) * phy->num_lanes * CSI2_BANDWIDTH_SCALER) / bpp;
+	pixrate = ((float)(phy->pll_fin << 1) * phy->num_lanes) / bpp;
+	pixclock = pixrate * (float)CSI2_BANDWIDTH_SCALER;
 	LOG_DBG("pll_fin - %d, Check pixclock = %d (CSI_PIXCLK_CTRL)", phy->pll_fin,
 		(uint32_t)pixclock);
 
 	tmp = (uint32_t)pixclock;
 	ret = clock_control_set_rate(config->clk_dev, config->pixclk,
 			(clock_control_subsys_rate_t)tmp);
+	if (ret == -ERANGE) {
+		/*
+		 * Alp Lab AB: the 20 % margin does not fit under the pixel-clock
+		 * divider's maximum.  Ask for the bare pixel rate instead: the
+		 * clock controller rounds up to the nearest reachable rate, which
+		 * is then the maximum.  Fail only if even that does not fit.
+		 */
+		ret = clock_control_set_rate(config->clk_dev, config->pixclk,
+				(clock_control_subsys_rate_t)(uint32_t)pixrate);
+		if (ret == 0) {
+			LOG_WRN("CSI pixclk %u Hz (1.2 x %u Hz pixel rate) exceeds the max; "
+				"running at the max with < 20%% margin", tmp, (uint32_t)pixrate);
+		} else if (ret == -ERANGE) {
+			LOG_ERR("CSI pixel rate %u Hz (link %u Hz, %u lanes, %u bpp) exceeds "
+				"the pixel-clock max; use a wider format (e.g. RAW10, not RAW8) "
+				"or a lower sensor link frequency", (uint32_t)pixrate,
+				phy->pll_fin, phy->num_lanes, bpp);
+			return ret;
+		}
+	}
 	if (ret) {
-		LOG_ERR("Failed to set pixel clock rate to CPI and CSI!");
+		LOG_ERR("Failed to set CSI pixel clock rate! ret - %d", ret);
 		return ret;
+	}
+
+	/*
+	 * Alp Lab AB: enable only after the divisor and CLK_SEL are programmed
+	 * (the DFP set_csi_pixel_clk() order), never on the reset divisor.
+	 */
+	ret = clock_control_on(config->clk_dev, config->pixclk);
+	if (ret) {
+		LOG_ERR("Failed to enable CSI pixel clock! ret - %d", ret);
+		return ret;
+	}
+
+	/* Use the rate actually programmed (a divider rounds up) for the timings. */
+	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
+		pixclock = tmp;
 	}
 
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CAM) {
@@ -537,6 +585,7 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 {
 	const struct csi2_dw_config *config = dev->config;
 	struct csi2_dw_data *data = dev->data;
+	int64_t link_freq;
 	int32_t tmp;
 	int ret;
 	int i;
@@ -558,20 +607,14 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 	}
 
 	/*
-	 * Check if the current set data type is the same as the requested data
-	 * type.
+	 * Alp Lab AB: always reconfigure, even for an unchanged data type -- a
+	 * new resolution still needs hact/vact, the sensor's LINK_FREQ and the
+	 * D-PHY/pixel-clock setup redone below.
 	 */
 	tmp = fourcc_to_csi_data_type(fmt->pixelformat);
 	if (tmp < 0) {
 		LOG_ERR("Unsupported CSI pixel format.");
 		return tmp;
-	}
-
-	if (data->csi_cpi_settings[data->current_sensor] != NULL) {
-		if (tmp == data->csi_cpi_settings[data->current_sensor]->dt) {
-			LOG_INF("FourCC format already set.");
-			return 0;
-		}
 	}
 
 	for (i = 0; i < ARRAY_SIZE(data_mode_settings); i++) {
@@ -584,6 +627,21 @@ static int csi2_dw_set_format(const struct device *dev, struct video_format *fmt
 
 	data->time[data->current_sensor].hact = fmt->width;
 	data->time[data->current_sensor].vact = fmt->height;
+
+	/*
+	 * Alp Lab AB: take the D-PHY lane rate from the sensor's
+	 * VIDEO_CID_LINK_FREQ (the v4.4 CSI-2 receiver convention -- upstream
+	 * sensors such as imx219 report it there and carry no DT
+	 * link-frequencies).  The DT link-frequencies / rx-ddr-clkN value stays
+	 * the fallback for a sensor that reports neither LINK_FREQ nor
+	 * PIXEL_RATE.
+	 */
+	link_freq = video_get_csi_link_freq(config->sensor[data->current_sensor],
+					    data_mode_settings[i].bits_per_pixel,
+					    data->phy[data->current_sensor].num_lanes);
+	if (link_freq > 0) {
+		data->phy[data->current_sensor].pll_fin = (uint32_t)link_freq;
+	}
 
 	return csi2_dw_configure(dev);
 }
@@ -657,18 +715,12 @@ static DEVICE_API(video, csi2_dw_driver_api) = {
 static int csi_enable_clocks(const struct device *dev)
 {
 	const struct csi2_dw_config *config = dev->config;
-	int ret;
 
-	/* Enable CSI pixel clock */
-	ret = clock_control_on(config->clk_dev, config->pixclk);
-	if (ret) {
-		LOG_ERR("Failed to enable CSI IP!");
-		return ret;
-	}
-
-	/* Enable CSI peripheral clock */
+	/*
+	 * Enable CSI peripheral clock.  The pixel clock is enabled by
+	 * csi2_dw_validate_data() once its divisor is set.
+	 */
 	return clock_control_on(config->clk_dev, config->csiclk);
-
 }
 
 static uint32_t valid_sensor_map(const struct device *const *sensors, int num_sensors)

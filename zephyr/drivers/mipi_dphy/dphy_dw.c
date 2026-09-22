@@ -15,12 +15,15 @@
  * dphy node is repointed AND bench-verified.
  * ==================================================================
  *
- * Vendored VERBATIM from the fork (only this provenance header is added).
- * Unlike the video drivers this driver does NOT touch the video API, so it was
- * never blocked by the v4.4 video-API rework; it compiles unchanged.  It is now
- * built alongside the (ported) CSI driver -- the ALP_VIDEO_ALIF_BROKEN gate is
- * retired across the whole stack.  Its sole consumer is video_csi_dw.c
- * (dphy_dw_slave_setup).  vendor-ext, BENCH-UNVERIFIED.
+ * Vendored from the fork with two local changes: the PLL is programmed through
+ * the SoC shadow registers (dphy_dw_config_pll()), and dphy_dw_init() powers
+ * the D-PHY and enables its upstream clocks (dphy_dw_power_on()) -- the fork
+ * leaves both of those to the application.  This driver does NOT touch the
+ * video API, so it was never blocked by the v4.4 video-API rework.  Consumers:
+ * video_csi_dw.c (dphy_dw_slave_setup, camera RX) and dsi_dw.c
+ * (dphy_dw_master_setup, DSI TX).  vendor-ext.  Equivalent power/clock writes,
+ * made from aen-dsi-display's SYS_INIT, got the TX PLL to lock on an
+ * E1M-AEN801; from this driver, and on the CSI RX path, BENCH-UNVERIFIED.
  */
 #define DT_DRV_COMPAT snps_designware_dphy
 
@@ -32,6 +35,7 @@
 #include <zephyr/kernel.h>
 
 #include <zephyr/drivers/mipi_dphy/dphy_dw.h>
+#include <soc_common.h>
 #include "dphy_dw.h"
 
 LOG_MODULE_REGISTER(dphy_dw, CONFIG_MIPI_DPHY_LOG_LEVEL);
@@ -851,6 +855,43 @@ static int dphy_dw_enable_clocks(const struct device *dev)
 
 }
 
+/*
+ * E8 HWRM CGU CLK_ENA / VBAT PWR_CTRL fields the D-PHY depends on upstream of
+ * its own MIPI_CKEN gates (CGU_CLK_ENA / VBAT_PWR_CTRL from <soc_common.h>).
+ * CLK_ENA: HFOSC_CLK (38.4 MHz) is the PLL reference and resets OFF; 100M_CLK
+ * (/4 = the 25 MHz D-PHY CFG_CLK) resets on.
+ */
+#define DPHY_CGU_CLK_ENA_CLK100M   BIT(7)
+#define DPHY_CGU_CLK_ENA_CLK38P4M  BIT(23)
+#define DPHY_VBAT_TX_DPHY_PWR_MASK BIT(0)
+#define DPHY_VBAT_TX_DPHY_ISO      BIT(1)
+#define DPHY_VBAT_RX_DPHY_PWR_MASK BIT(4)
+#define DPHY_VBAT_RX_DPHY_ISO      BIT(5)
+#define DPHY_VBAT_PLL_PWR_MASK     BIT(8)
+#define DPHY_VBAT_PLL_ISO          BIT(9)
+#define DPHY_VBAT_VPH_1P8_BYP_EN   BIT(12)
+
+#define DPHY_VBAT_PWR_BITS \
+	(DPHY_VBAT_TX_DPHY_PWR_MASK | DPHY_VBAT_RX_DPHY_PWR_MASK | DPHY_VBAT_PLL_PWR_MASK | \
+	 DPHY_VBAT_VPH_1P8_BYP_EN)
+#define DPHY_VBAT_ISO_BITS (DPHY_VBAT_TX_DPHY_ISO | DPHY_VBAT_RX_DPHY_ISO | DPHY_VBAT_PLL_ISO)
+
+/*
+ * At reset the TX / RX D-PHY and the MIPI PLL are power-masked and isolated,
+ * and the 1.8 V supply is in bypass with BYP_VAL = 0 (off).  Without this the
+ * CSI RX side never reaches Stop-state and the DSI TX PLL never locks.  The
+ * SE does not do it on a RAM-run, so the driver does, for both roles.  Pure
+ * RMW set/clear: idempotent, and a no-op when the SE already did it.
+ */
+static void dphy_dw_power_on(void)
+{
+	sys_set_bits(CGU_CLK_ENA, DPHY_CGU_CLK_ENA_CLK38P4M | DPHY_CGU_CLK_ENA_CLK100M);
+
+	/* Un-mask the rails first, then drop the isolation. */
+	sys_clear_bits(VBAT_PWR_CTRL, DPHY_VBAT_PWR_BITS);
+	sys_clear_bits(VBAT_PWR_CTRL, DPHY_VBAT_ISO_BITS);
+}
+
 static int dphy_dw_init(const struct device *dev)
 {
 	const struct dphy_dw_config *config = dev->config;
@@ -859,6 +900,8 @@ static int dphy_dw_init(const struct device *dev)
 	DEVICE_MMIO_NAMED_MAP(dev, expmst_reg, K_MEM_CACHE_NONE);
 	DEVICE_MMIO_NAMED_MAP(dev, dsi_reg, K_MEM_CACHE_NONE);
 	DEVICE_MMIO_NAMED_MAP(dev, csi_reg, K_MEM_CACHE_NONE);
+
+	dphy_dw_power_on();
 
 	ret = dphy_dw_enable_clocks(dev);
 	if (ret) {

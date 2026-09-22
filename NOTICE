@@ -17,6 +17,14 @@ respective component (under vendors/<name>/ or the referenced upstream).
 - Zephyr RTOS — Apache-2.0. Copyright the Zephyr Project and contributors.
   Build-time dependency (west/Zephyr); not redistributed in this repository.
 
+- Espressif esp-video-components — Apache-2.0.
+  Copyright (c) Espressif Systems (Shanghai) CO LTD.
+  Register addresses/values/per-mode init tables from
+  esp_cam_sensor/sensors/ov9281 are ported verbatim into
+  zephyr/drivers/video/ov9281.c, plus one Alp-derived 1280x800 table (see
+  the driver's file header); see that file's header for the source
+  commit.
+
 - Arm CMSIS — Apache-2.0. Copyright (c) Arm Limited.
   Bundled with the GD32 firmware library at
   vendors/gd32_firmware_library/upstream/Firmware/CMSIS/.

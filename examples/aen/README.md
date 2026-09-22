@@ -60,7 +60,7 @@ full reference applications over the portable `<alp/*>` or standard Zephyr APIs.
 
 | Directory                                          | What it shows                                                                |
 |----------------------------------------------------|------------------------------------------------------------------------------|
-| [`aen-camera-regcheck`](aen-camera-regcheck/)      | **staging** -- camera-capture stack (`alif,cam` / DesignWare CSI-2 + D-PHY / ON Semi ARX3A0) binds; sensor not wired this batch. |
+| [`aen-camera-firstlight`](aen-camera-firstlight/)  | **bench** -- Raspberry-Pi-style CSI-2 camera first light (InnoMaker CAM-OV9281 on the E1M-EVK's J5) through the portable `<alp/camera.h>` API; bench-verified on an E1M-AEN803 on the E1M-EVK (2026-09-21, all three modes). |
 | [`aen-isp-regcheck`](aen-isp-regcheck/)            | **staging** -- VeriSilicon ISP Pico (`vsi,isp-pico`) bind-only staging check. |
 | [`aen-dsi-regcheck`](aen-dsi-regcheck/)            | **staging** -- Alif C2-MIPI-DSI display stack bind-only check (the TX twin of the CSI camera path). |
 | [`aen-dsi-display`](aen-dsi-display/)              | **bench** -- live RK055HDMIPI4MA0 pixels-on-glass path through CDC200 + DesignWare MIPI-DSI + D-PHY, via the `e1m_evk_rk055hdmipi4ma0` shield. |
