@@ -37,11 +37,12 @@ LOG_MODULE_REGISTER(ov5647_emul, CONFIG_I2C_LOG_LEVEL);
  * keeps the emulator a direct address->value map with no sparse-lookup logic to get wrong. */
 #define OV5647_EMUL_REG_MAP_SIZE 0x6000
 
-/* ov5647_init()'s full boot sequence writes roughly two dozen registers (reset, the init-regs
- * table, the initial full-frame set_fmt(), and two lane_park() calls); tests that clear the log
- * before acting add only a handful more each. 64 leaves headroom without the log ever being the
- * limiting factor. */
-#define OV5647_EMUL_LOG_CAPACITY 64
+/* ov5647_init()'s full boot sequence writes the reset, the (now ~50-entry, since AUTHORIZED
+ * LOCAL DIVERGENCE #3 added the common analog/BLC/AEC block) init-regs table, the initial
+ * full-frame set_fmt() (window + 1:1 subsample/binning/analog + frmival), and two lane_park()
+ * calls -- around 80 writes total; tests that clear the log before acting add only a handful
+ * more each. 160 leaves headroom without the log ever being the limiting factor. */
+#define OV5647_EMUL_LOG_CAPACITY 160
 
 struct ov5647_emul_data {
 	uint8_t                  regs[OV5647_EMUL_REG_MAP_SIZE];

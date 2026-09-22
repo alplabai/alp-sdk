@@ -49,9 +49,37 @@
 #define PAD_OUT_STREAMING       0x00
 
 /* Bench-proven values from ov5647_init_regs[] (OV5647_PLL_PREDIV/MULT/SYS_DIV in ov5647.c) */
-#define SC_PLL_CTRL3_PREDIV      3
-#define SC_PLL_MULTIPLIER_MULT   105
-#define SC_PLL_CTRL1_SYS_DIV_2   0x21
+#define SC_PLL_CTRL3_PREDIV    3
+#define SC_PLL_MULTIPLIER_MULT 105
+#define SC_PLL_CTRL1_SYS_DIV_2 0x21
+
+/* AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/58/60) -- the full-FOV binned
+ * 640x480 mode, its ordering trap against the crop path, and the common analog/BLC/AEC init.
+ * Kept local for the same reason as the quartet/PLL trio above. */
+/* video_common's ADDR16 helpers write a 16-bit register as two separate 8-bit CCI transactions,
+ * high byte at the base address then low byte at base+1 (see ov5647_emul.c's header comment and
+ * how it seeds the 0x300a/0x300b chip-ID pair) -- so the LOW byte, not the base address, is
+ * where a small value like FULLFOV_X_ADDR_START (16, fits entirely in one byte) actually lands.
+ */
+#define REG_TIMING_X_ADDR_START_LO 0x3801
+#define REG_TIMING_X_INC           0x3814
+#define REG_TIMING_Y_INC           0x3815
+#define REG_TIMING_TC_REG20        0x3820
+#define REG_TIMING_TC_REG21        0x3821
+#define REG_ANALOG_RSVD_370C       0x370c
+#define REG_BLC_RSVD_4001          0x4001
+#define REG_AEC_RSVD_3A18          0x3a18
+
+#define FULLFOV_X_ADDR_START 16
+#define SUBSAMPLE_1TO1       0x11
+#define SUBSAMPLE_BINNED     0x35
+#define TC_REG20_1TO1        0x40
+#define TC_REG20_BINNED      0x41
+#define TC_REG21_1TO1        0x00
+#define TC_REG21_BINNED      0x07
+#define ANALOG_RSVD_370C_VAL 0x03
+#define BLC_RSVD_4001_VAL    0x02
+#define AEC_RSVD_3A18_VAL    0x00
 
 static const struct device *ov5647_dev(void)
 {
@@ -223,19 +251,18 @@ ZTEST(ov5647, test_pll_init_written_before_first_running_mode_select)
 	             pll_ctrl3_idx,
 	             running_idx);
 
-	zassert_true(find_write_index(emul, REG_SC_PLL_MULTIPLIER, SC_PLL_MULTIPLIER_MULT,
-	                              &pll_multiplier_idx),
-	             "SC_PLL_MULTIPLIER (0x3036) was never written to the bench-proven value "
-	             "(%d) during ov5647_init()",
-	             SC_PLL_MULTIPLIER_MULT);
+	zassert_true(
+	    find_write_index(emul, REG_SC_PLL_MULTIPLIER, SC_PLL_MULTIPLIER_MULT, &pll_multiplier_idx),
+	    "SC_PLL_MULTIPLIER (0x3036) was never written to the bench-proven value "
+	    "(%d) during ov5647_init()",
+	    SC_PLL_MULTIPLIER_MULT);
 	zassert_true(pll_multiplier_idx < running_idx,
 	             "SC_PLL_MULTIPLIER (0x3036) was written at log index %zu, at or after "
 	             "MODE_SELECT went running at index %zu -- see SC_PLL_CTRL3 above",
 	             pll_multiplier_idx,
 	             running_idx);
 
-	zassert_true(find_write_index(emul, REG_SC_PLL_CTRL1, SC_PLL_CTRL1_SYS_DIV_2,
-	                              &pll_ctrl1_idx),
+	zassert_true(find_write_index(emul, REG_SC_PLL_CTRL1, SC_PLL_CTRL1_SYS_DIV_2, &pll_ctrl1_idx),
 	             "SC_PLL_CTRL1 (0x3035) was never written to the bench-proven sysdiv=2 value "
 	             "(0x%02x) during ov5647_init()",
 	             SC_PLL_CTRL1_SYS_DIV_2);
@@ -244,6 +271,186 @@ ZTEST(ov5647, test_pll_init_written_before_first_running_mode_select)
 	             "went running at index %zu -- see SC_PLL_CTRL3 above",
 	             pll_ctrl1_idx,
 	             running_idx);
+}
+
+/*
+ * AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/58/60): the full-FOV binned
+ * 640x480 mode, ordering safety against the crop path (bench run 54's trap), and the common
+ * analog/BLC/AEC init. These three tests still read the BOOT-time log (ov5647_init()'s own
+ * set_fmt(FULL_WIDTH x FULL_HEIGHT) call takes the crop path, and MODE_SELECT only goes
+ * running once during boot), so -- like test_pll_init_written_before_first_running_mode_select
+ * above -- they must run before any test clears the log (test_stream_start_unparks below).
+ */
+ZTEST(ov5647, test_common_analog_blc_aec_before_first_running_mode_select)
+{
+	const struct emul *emul = ov5647_emul();
+	size_t             running_idx, analog_idx, blc_idx, aec_idx;
+
+	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
+	             "no write ever set MODE_SELECT (0x0100) running (0x01) during ov5647_init()");
+
+	zassert_true(find_write_index(emul, REG_ANALOG_RSVD_370C, ANALOG_RSVD_370C_VAL, &analog_idx),
+	             "0x370c was never written to the bench-confirmed value 0x%02x during "
+	             "ov5647_init() -- the common analog init (AUTHORIZED LOCAL DIVERGENCE #3) "
+	             "must land in ov5647_init_regs[]",
+	             ANALOG_RSVD_370C_VAL);
+	zassert_true(analog_idx < running_idx,
+	             "0x370c written at log index %zu, at or after MODE_SELECT went running at "
+	             "index %zu -- common analog/BLC/AEC init must run in standby, right after "
+	             "the 0x0103 reset, same as the PLL block",
+	             analog_idx,
+	             running_idx);
+
+	zassert_true(find_write_index(emul, REG_BLC_RSVD_4001, BLC_RSVD_4001_VAL, &blc_idx),
+	             "0x4001 was never written to the bench-confirmed value 0x%02x during "
+	             "ov5647_init()",
+	             BLC_RSVD_4001_VAL);
+	zassert_true(blc_idx < running_idx,
+	             "0x4001 written at log index %zu, at or after MODE_SELECT went running at "
+	             "index %zu",
+	             blc_idx,
+	             running_idx);
+
+	zassert_true(find_write_index(emul, REG_AEC_RSVD_3A18, AEC_RSVD_3A18_VAL, &aec_idx),
+	             "0x3a18 was never written to the bench-confirmed value 0x%02x during "
+	             "ov5647_init()",
+	             AEC_RSVD_3A18_VAL);
+	zassert_true(aec_idx < running_idx,
+	             "0x3a18 written at log index %zu, at or after MODE_SELECT went running at "
+	             "index %zu",
+	             aec_idx,
+	             running_idx);
+}
+
+/*
+ * Named test_set_format_... (not test_640x480_...) deliberately: ztest's iterable test-case
+ * section runs tests in NAME-SORTED order, not declaration order (confirmed by running this
+ * suite -- a "test_640x480_..." name sorted before test_chip_id_probe_and_device_ready and its
+ * ov5647_emul_clear_log() call wiped the boot log that
+ * test_pll_init_written_before_first_running_mode_select and
+ * test_common_analog_blc_aec_before_first_running_mode_select above depend on, failing both
+ * with no driver bug involved). This name sorts after every boot-log reader above (test_c... /
+ * test_p...) and before the first clearing test in the pre-existing suite
+ * (test_stream_start_unparks) -- the same safe zone test_set_format_leaves_parked already
+ * occupies.
+ */
+ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
+{
+	const struct emul  *emul = ov5647_emul();
+	struct video_format fmt  = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	size_t window_idx, subsample_idx, binning_idx, running_idx;
+
+	/* Does not depend on execution order -- always re-park first (harmless if already
+	 * parked), same pattern as test_set_format_leaves_parked below. */
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	ov5647_emul_clear_log(emul);
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt), "video_set_format(640x480) failed");
+
+	zassert_true(
+	    find_write_index(emul, REG_TIMING_X_ADDR_START_LO, FULLFOV_X_ADDR_START, &window_idx),
+	    "640x480 set_fmt() never wrote the full-array window start (0x3801 = %d) -- "
+	    "run-56/60 evidence: 640x480 must be a full-array BINNED mode, not the "
+	    "648x488 centre crop",
+	    FULLFOV_X_ADDR_START);
+	zassert_true(find_write_index(emul, REG_TIMING_X_INC, SUBSAMPLE_BINNED, &subsample_idx),
+	             "640x480 set_fmt() never wrote 0x3814 = 0x%02x (binned subsample)",
+	             SUBSAMPLE_BINNED);
+	zassert_true(find_write_index(emul, REG_TIMING_TC_REG20, TC_REG20_BINNED, &binning_idx),
+	             "640x480 set_fmt() never wrote 0x3820 = 0x%02x (binning enable)",
+	             TC_REG20_BINNED);
+	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
+	             "no write set MODE_SELECT running after 640x480 set_fmt() -- the lane park "
+	             "must not have run");
+
+	zassert_true(window_idx < running_idx,
+	             "full-array window written at log index %zu, at/after the lane park's "
+	             "running write at index %zu",
+	             window_idx,
+	             running_idx);
+	zassert_true(subsample_idx < running_idx,
+	             "0x3814 written at log index %zu, at/after the lane park's running write at "
+	             "index %zu",
+	             subsample_idx,
+	             running_idx);
+	zassert_true(binning_idx < running_idx,
+	             "0x3820 written at log index %zu, at/after the lane park's running write at "
+	             "index %zu",
+	             binning_idx,
+	             running_idx);
+}
+
+/* Same name-sorting reason as test_set_format_640x480_binned_fullfov_before_park above. */
+ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
+{
+	const struct emul  *emul    = ov5647_emul();
+	struct video_format fmt_640 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	struct video_format fmt_1280 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
+	uint8_t val;
+
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
+	zassert_equal(val,
+	              SUBSAMPLE_BINNED,
+	              "0x3814 = 0x%02x after 640x480, want binned 0x%02x",
+	              val,
+	              SUBSAMPLE_BINNED);
+
+	/* The run-54 trap: switching to a crop size must not leave binning armed against the
+	 * new crop window -- see ov5647.c's ORDERING TRAP note in the file header.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280));
+
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
+	zassert_equal(val,
+	              SUBSAMPLE_1TO1,
+	              "0x3814 = 0x%02x after switching to 1280x960, want 1:1 0x%02x -- the "
+	              "run-54 trap: binning must never be left on with a crop window",
+	              val,
+	              SUBSAMPLE_1TO1);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_Y_INC, &val));
+	zassert_equal(
+	    val, SUBSAMPLE_1TO1, "0x3815 = 0x%02x after 1280x960, want 0x%02x", val, SUBSAMPLE_1TO1);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
+	zassert_equal(
+	    val, TC_REG20_1TO1, "0x3820 = 0x%02x after 1280x960, want 0x%02x", val, TC_REG20_1TO1);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG21, &val));
+	zassert_equal(
+	    val, TC_REG21_1TO1, "0x3821 = 0x%02x after 1280x960, want 0x%02x", val, TC_REG21_1TO1);
+
+	/* Switching back to 640x480 must re-apply the binned set, not leave the 1:1 crop
+	 * values from the size in between. */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
+	zassert_equal(val,
+	              SUBSAMPLE_BINNED,
+	              "0x3814 = 0x%02x after switching back to 640x480, want binned 0x%02x "
+	              "again",
+	              val,
+	              SUBSAMPLE_BINNED);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
+	zassert_equal(val,
+	              TC_REG20_BINNED,
+	              "0x3820 = 0x%02x after switching back to 640x480, want binned 0x%02x again",
+	              val,
+	              TC_REG20_BINNED);
 }
 
 ZTEST(ov5647, test_stream_start_unparks)

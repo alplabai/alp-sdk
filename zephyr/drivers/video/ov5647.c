@@ -72,6 +72,45 @@
  * (mainline writes 0x19 for this PLL); on the safe side at 437.5 Mbps and
  * not changed in the working run.
  *
+ * AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/60): the driver's 640x480 was a
+ * 648x488 1:1 CENTRE CROP -- roughly 25% of the array width, a heavy telephoto crop -- not the
+ * full-array subsampled+binned 640x480 both Alif's own validated table for this exact silicon
+ * (alif-dfp-ref components/Source/OV5647_camera_sensor.c) and mainline Linux use. Run 60's
+ * full-FOV register set (window 0x3800..0x3807 = 0x0010,0x0000..0x0a2f,0x079f; output size
+ * 0x3808/0x3809 = 640, 0x380a/0x380b = 480; subsample 0x3814/0x3815 = 0x35; binning
+ * 0x3821/0x3820 = 0x07/0x41; binned-mode analog 0x3612/0x3618/0x3708/0x3709 =
+ * 0x59/0x00/0x64/0x52), written in software standby after ov5647_set_window() and before the
+ * lane park, streamed cleanly with a real, recognisable image. HTS stays the driver's 2700
+ * (bench-proven here; Alif's 1852 is untested on this board); the PLL stays as DIVERGENCE #2
+ * programs it. Now the 640x480 branch of ov5647_set_mode_regs() below.
+ *
+ * ORDERING TRAP (bench run 54, MUST NOT be reintroduced): binning is only coherent with the
+ * full-array window -- 0x3814 = 0x35 is a ~/4 decimation (2592/4 = 648, 1944/4 = 486). Run 54
+ * applied the binning registers and then let ov5647_set_window() rewrite the window to the
+ * crop; the sensor emitted short lines against a 640-pixel frame declaration and the CSI host
+ * raised "Fatal Interrupt due to mismatch of Frame Start and Frame End" on VC0 44 times in 2 s
+ * and delivered nothing. So the window, output size, subsample and binning registers are always
+ * written as ONE coherent set per mode -- never binning left on with a crop window. Every OTHER
+ * requested size therefore ALSO explicitly writes the 1:1 values (0x3814/0x3815 = 0x11,
+ * 0x3820/0x3821 = 0x40/0x00) plus mainline's full-resolution 1:1 analog values
+ * (0x3612/0x3618/0x3708/0x3709 = 0x5b/0x04/0x64/0x12, cited from mainline, BENCH-UNVERIFIED on
+ * this module) right after ov5647_set_window(), so switching 640x480 -> another size -> back
+ * never leaves binning armed on a stale crop window.
+ *
+ * Common analog bias / BLC / AEC registers (bench run 58, phases PC/PD/PF, 0 register
+ * read-back mismatches, clean streaming): mainline writes these in ov5647_common_regs[] for
+ * every mode, and this driver never had. Now appended to ov5647_init_regs[] -- see that array
+ * for the values. Deliberately NOT added: the ISP block enables (0x5000..0x5003/0x5a00) -- run
+ * 58 phase PB, the only phase that added them, is the phase that threw CSI "incorrect frame
+ * sequence" fatals at stream-on. The ISP is left at its power-on state.
+ *
+ * Also from the same bench pass: OV5647_EXPOSURE_DEFAULT was 0x20 (2 lines in 1/16-line units)
+ * -- effectively a closed shutter for any manual-exposure user. Now 0x0FFF (~256 lines),
+ * matching the order of magnitude of Alif's own shipped default (~0x000FFF) for this silicon.
+ * At the default 15 fps VTS in a dark lab the AEC railed at both its limits (502 lines, 2x the
+ * 0x3a0b band step; gain at the 0x3a19 ceiling) and a real image needed ~16000 lines (0.49 s) --
+ * a SCENE limitation, not a driver bug; the AEC limits above are left unchanged.
+ *
  * ACCEPTED COST: ov5647_init() runs at POST_KERNEL on every board that
  * enables this driver and now leaves the sensor parked -- running, with
  * frames suppressed -- for the life of the system rather than in software
@@ -82,12 +121,14 @@
  * binding, and drop the CMake/Kconfig hookup, the moment the alp-sdk Zephyr
  * pin advances to a revision that contains #119301 (i.e. the vendored copy
  * and the upstream driver would otherwise both define VIDEO_OV5647 /
- * "ovti,ov5647" and collide) -- BUT NOT BEFORE BOTH fixes above are either
- * re-applied to the upstream-derived driver or confirmed already present in
- * it: DIVERGENCE #1 (the LP-11 lane park) AND DIVERGENCE #2 (the PLL +
- * MIPI-TX pad-drive init, including the corrected OV5647_PIXEL_RATE
- * derivation) -- deleting this file without checking both silently
- * reintroduces one or both bugs. Do NOT otherwise maintain divergent local
+ * "ovti,ov5647" and collide) -- BUT NOT BEFORE ALL THREE fixes above are
+ * either re-applied to the upstream-derived driver or confirmed already
+ * present in it: DIVERGENCE #1 (the LP-11 lane park), DIVERGENCE #2 (the
+ * PLL + MIPI-TX pad-drive init, including the corrected OV5647_PIXEL_RATE
+ * derivation), AND DIVERGENCE #3 (the full-FOV binned 640x480 mode, the
+ * common analog/BLC/AEC init, and the corrected OV5647_EXPOSURE_DEFAULT) --
+ * deleting this file without checking all three silently reintroduces one
+ * or more bugs. Do NOT otherwise maintain divergent local
  * patches on this file -- open a new PR against upstream instead and
  * re-backport. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
@@ -194,7 +235,12 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_MIPI_BIT_MODE		GENMASK(3, 0)
 #define OV5647_EXPOSURE			OV5647_REG24(0x3500)
 #define OV5647_EXPOSURE_MAX		GENMASK(19, 0)
-#define OV5647_EXPOSURE_DEFAULT		0x20
+/*
+ * AUTHORIZED LOCAL DIVERGENCE #3: the upstream default, 0x20 (2 lines in 1/16-line units), is
+ * effectively a closed shutter for any manual-exposure user. 0x0FFF (~256 lines) matches the
+ * order of magnitude of Alif's own shipped default (~0x000FFF) for this exact silicon.
+ */
+#define OV5647_EXPOSURE_DEFAULT		0x0FFF
 #define OV5647_MANUAL_CTRL		OV5647_REG8(0x3503)
 #define OV5647_MANUAL_CTRL_VTS		BIT(2)
 #define OV5647_MANUAL_CTRL_AGC		BIT(1)
@@ -214,6 +260,58 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_TC_REG20_VFLIP		(BIT(2) | BIT(1))
 #define OV5647_TIMING_TC_REG21		OV5647_REG8(0x3821)
 #define OV5647_TC_REG21_MIRROR		(BIT(2) | BIT(1))
+
+/*
+ * Subsample (0x3814/0x3815) and binning-enable bits of 0x3820/0x3821 (AUTHORIZED LOCAL
+ * DIVERGENCE #3, issue #2248, bench runs 56/58/60) -- see the file header for the full
+ * write-up. ov5647_set_mode_regs() below writes the whole window/output/subsample/binning set
+ * as ONE coherent block per mode: binning is only coherent with the full-array window (0x3814 =
+ * 0x35 is a ~/4 decimation), and bench run 54 proved leaving it armed on a crop window throws
+ * CSI-2 frame-start/frame-end mismatches with no image delivered -- see the ORDERING TRAP note
+ * in the file header. The base 0x3820/0x3821 values below deliberately leave the mirror/flip
+ * bits (OV5647_TC_REG20_VFLIP / OV5647_TC_REG21_MIRROR) at 0 -- ov5647_set_ctrl()'s HFLIP/VFLIP
+ * handlers read-modify-write only those two bits, so a format change resets any previously
+ * requested mirror/flip and a caller must reapply VIDEO_CID_HFLIP/VFLIP after set_format().
+ */
+#define OV5647_TIMING_X_INC		OV5647_REG8(0x3814)
+#define OV5647_TIMING_Y_INC		OV5647_REG8(0x3815)
+#define OV5647_SUBSAMPLE_1TO1		0x11
+#define OV5647_SUBSAMPLE_BINNED		0x35
+#define OV5647_TC_REG20_1TO1		0x40
+#define OV5647_TC_REG20_BINNED		0x41
+#define OV5647_TC_REG21_1TO1		0x00
+#define OV5647_TC_REG21_BINNED		0x07
+
+/*
+ * Analog registers that must track the subsample/binning mode above (same divergence, same
+ * bench runs). 1:1 values are mainline Linux's full-resolution constants, cited but
+ * BENCH-UNVERIFIED on this module; binned values are run-60's bench-proven binned-mode set.
+ */
+#define OV5647_ANALOG_CTRL12		OV5647_REG8(0x3612)
+#define OV5647_ANALOG_CTRL12_1TO1	0x5b
+#define OV5647_ANALOG_CTRL12_BINNED	0x59
+#define OV5647_ANALOG_CTRL18		OV5647_REG8(0x3618)
+#define OV5647_ANALOG_CTRL18_1TO1	0x04
+#define OV5647_ANALOG_CTRL18_BINNED	0x00
+#define OV5647_SENSOR_CTRL08		OV5647_REG8(0x3708)
+#define OV5647_SENSOR_CTRL08_1TO1	0x64
+#define OV5647_SENSOR_CTRL08_BINNED	0x64
+#define OV5647_SENSOR_CTRL09		OV5647_REG8(0x3709)
+#define OV5647_SENSOR_CTRL09_1TO1	0x12
+#define OV5647_SENSOR_CTRL09_BINNED	0x52
+
+/*
+ * Full-array window read out by the 640x480 binned full-FOV mode (run 60) -- literal
+ * bench-measured register values, NOT derived from OV5647_X_ADDR_START/OV5647_FULL_WIDTH like
+ * ov5647_set_window()'s crop path below.
+ */
+#define OV5647_FULLFOV_X_ADDR_START	16
+#define OV5647_FULLFOV_Y_ADDR_START	0
+#define OV5647_FULLFOV_X_ADDR_END	0x0a2f
+#define OV5647_FULLFOV_Y_ADDR_END	0x079f
+#define OV5647_MODE_640X480_WIDTH	640
+#define OV5647_MODE_640X480_HEIGHT	480
+
 #define OV5647_ISP_CTRL3D		OV5647_REG8(0x503d)
 #define OV5647_TEST_PATTERN_ENABLE	BIT(7)
 
@@ -316,6 +414,59 @@ struct ov5647_data {
 	bool streaming;
 };
 
+/*
+ * Common analog bias / BLC / AEC init (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248, bench run
+ * 58 phases PC/PD/PF -- 0 register read-back mismatches, clean streaming). Mainline writes these
+ * in ov5647_common_regs[] for every mode; this driver never had. None of these addresses is
+ * documented in the datasheet register map available to us, so they keep the file's existing
+ * RSVD_<addr> naming (see OV5647_SC_PLL_CTRL_RSVD_303C above) rather than a guessed semantic
+ * name -- bench-confirmed values only. Deliberately NOT added: the ISP block enables
+ * (0x5000..0x5003/0x5a00) -- run 58 phase PB, the only phase that added them, is the phase that
+ * threw CSI "incorrect frame sequence" fatals at stream-on. The ISP is left at its power-on
+ * state.
+ */
+#define OV5647_ANALOG_RSVD_370C	OV5647_REG8(0x370c)
+#define OV5647_ANALOG_RSVD_3630	OV5647_REG8(0x3630)
+#define OV5647_ANALOG_RSVD_3632	OV5647_REG8(0x3632)
+#define OV5647_ANALOG_RSVD_3633	OV5647_REG8(0x3633)
+#define OV5647_ANALOG_RSVD_3634	OV5647_REG8(0x3634)
+#define OV5647_ANALOG_RSVD_3620	OV5647_REG8(0x3620)
+#define OV5647_ANALOG_RSVD_3621	OV5647_REG8(0x3621)
+#define OV5647_ANALOG_RSVD_3600	OV5647_REG8(0x3600)
+#define OV5647_ANALOG_RSVD_3704	OV5647_REG8(0x3704)
+#define OV5647_ANALOG_RSVD_3703	OV5647_REG8(0x3703)
+#define OV5647_ANALOG_RSVD_3715	OV5647_REG8(0x3715)
+#define OV5647_ANALOG_RSVD_3717	OV5647_REG8(0x3717)
+#define OV5647_ANALOG_RSVD_3731	OV5647_REG8(0x3731)
+#define OV5647_ANALOG_RSVD_370B	OV5647_REG8(0x370b)
+#define OV5647_ANALOG_RSVD_3705	OV5647_REG8(0x3705)
+#define OV5647_ANALOG_RSVD_3F05	OV5647_REG8(0x3f05)
+#define OV5647_ANALOG_RSVD_3F06	OV5647_REG8(0x3f06)
+#define OV5647_ANALOG_RSVD_3F01	OV5647_REG8(0x3f01)
+#define OV5647_ANALOG_RSVD_3C01	OV5647_REG8(0x3c01)
+#define OV5647_ANALOG_RSVD_3B07	OV5647_REG8(0x3b07)
+#define OV5647_ANALOG_RSVD_3636	OV5647_REG8(0x3636)
+#define OV5647_ANALOG_RSVD_3827	OV5647_REG8(0x3827)
+#define OV5647_BLC_RSVD_4001		OV5647_REG8(0x4001)
+#define OV5647_BLC_RSVD_4004		OV5647_REG8(0x4004)
+#define OV5647_BLC_RSVD_4000		OV5647_REG8(0x4000)
+#define OV5647_BLC_RSVD_4050		OV5647_REG8(0x4050)
+#define OV5647_BLC_RSVD_4051		OV5647_REG8(0x4051)
+#define OV5647_AEC_RSVD_3A18		OV5647_REG8(0x3a18)
+#define OV5647_AEC_RSVD_3A19		OV5647_REG8(0x3a19)
+#define OV5647_AEC_RSVD_3A08		OV5647_REG8(0x3a08)
+#define OV5647_AEC_RSVD_3A09		OV5647_REG8(0x3a09)
+#define OV5647_AEC_RSVD_3A0A		OV5647_REG8(0x3a0a)
+#define OV5647_AEC_RSVD_3A0B		OV5647_REG8(0x3a0b)
+#define OV5647_AEC_RSVD_3A0D		OV5647_REG8(0x3a0d)
+#define OV5647_AEC_RSVD_3A0E		OV5647_REG8(0x3a0e)
+#define OV5647_AEC_RSVD_3A0F		OV5647_REG8(0x3a0f)
+#define OV5647_AEC_RSVD_3A10		OV5647_REG8(0x3a10)
+#define OV5647_AEC_RSVD_3A1B		OV5647_REG8(0x3a1b)
+#define OV5647_AEC_RSVD_3A1E		OV5647_REG8(0x3a1e)
+#define OV5647_AEC_RSVD_3A11		OV5647_REG8(0x3a11)
+#define OV5647_AEC_RSVD_3A1F		OV5647_REG8(0x3a1f)
+
 static const struct video_reg ov5647_init_regs[] = {
 	/* PLL + MIPI-TX pad-drive init -- see the block comment above OV5647_SC_PLL_CTRL1 for why
 	 * this must run here (software standby, before ov5647_lane_park()) and not be reordered.
@@ -338,6 +489,52 @@ static const struct video_reg ov5647_init_regs[] = {
 	{OV5647_MANUAL_CTRL, OV5647_MANUAL_CTRL_VTS},
 	{OV5647_VTS_DIFF, 0},
 	{OV5647_TIMING_HTS_REG, OV5647_HTS},
+	/* Common analog bias / misc (AUTHORIZED LOCAL DIVERGENCE #3, bench run 58 phase PC) */
+	{OV5647_ANALOG_RSVD_370C, 0x03},
+	{OV5647_ANALOG_RSVD_3630, 0x2e},
+	{OV5647_ANALOG_RSVD_3632, 0xe2},
+	{OV5647_ANALOG_RSVD_3633, 0x23},
+	{OV5647_ANALOG_RSVD_3634, 0x44},
+	{OV5647_ANALOG_RSVD_3620, 0x64},
+	{OV5647_ANALOG_RSVD_3621, 0xe0},
+	{OV5647_ANALOG_RSVD_3600, 0x37},
+	{OV5647_ANALOG_RSVD_3704, 0xa0},
+	{OV5647_ANALOG_RSVD_3703, 0x5a},
+	{OV5647_ANALOG_RSVD_3715, 0x78},
+	{OV5647_ANALOG_RSVD_3717, 0x01},
+	{OV5647_ANALOG_RSVD_3731, 0x02},
+	{OV5647_ANALOG_RSVD_370B, 0x60},
+	{OV5647_ANALOG_RSVD_3705, 0x1a},
+	{OV5647_ANALOG_RSVD_3F05, 0x02},
+	{OV5647_ANALOG_RSVD_3F06, 0x10},
+	{OV5647_ANALOG_RSVD_3F01, 0x0a},
+	{OV5647_ANALOG_RSVD_3C01, 0x80},
+	{OV5647_ANALOG_RSVD_3B07, 0x0c},
+	{OV5647_ANALOG_RSVD_3636, 0x06},
+	{OV5647_ANALOG_RSVD_3827, 0xec},
+	/* BLC (bench run 58 phase PD) */
+	{OV5647_BLC_RSVD_4001, 0x02},
+	{OV5647_BLC_RSVD_4004, 0x02},
+	{OV5647_BLC_RSVD_4000, 0x09},
+	{OV5647_BLC_RSVD_4050, 0x6e},
+	{OV5647_BLC_RSVD_4051, 0x8f},
+	/* AEC target/limits (bench run 58 phase PF); left unchanged -- see the file header's
+	 * low-light note, a scene limitation, not a driver bug.
+	 */
+	{OV5647_AEC_RSVD_3A18, 0x00},
+	{OV5647_AEC_RSVD_3A19, 0xf8},
+	{OV5647_AEC_RSVD_3A08, 0x01},
+	{OV5647_AEC_RSVD_3A09, 0x2e},
+	{OV5647_AEC_RSVD_3A0A, 0x00},
+	{OV5647_AEC_RSVD_3A0B, 0xfb},
+	{OV5647_AEC_RSVD_3A0D, 0x02},
+	{OV5647_AEC_RSVD_3A0E, 0x01},
+	{OV5647_AEC_RSVD_3A0F, 0x58},
+	{OV5647_AEC_RSVD_3A10, 0x50},
+	{OV5647_AEC_RSVD_3A1B, 0x58},
+	{OV5647_AEC_RSVD_3A1E, 0x50},
+	{OV5647_AEC_RSVD_3A11, 0x60},
+	{OV5647_AEC_RSVD_3A1F, 0x28},
 };
 
 enum ov5647_fmt_id {
@@ -381,6 +578,60 @@ static int ov5647_set_window(const struct device *dev, uint32_t width, uint32_t 
 		{OV5647_TIMING_Y_ADDR_END, y_start + height + OV5647_WINDOW_MARGIN - 1},
 		{OV5647_TIMING_X_OUTPUT_SIZE, width},
 		{OV5647_TIMING_Y_OUTPUT_SIZE, height},
+	};
+
+	return video_write_cci_multiregs(&cfg->i2c, regs, ARRAY_SIZE(regs));
+}
+
+/*
+ * Pick the window/output-size/subsample/binning/analog register set for @p width x @p height
+ * (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248) and write it as ONE coherent block -- see the
+ * ORDERING TRAP note in the file header for why binning must never be written apart from the
+ * full-array window it depends on. 640x480 gets the bench-proven full-FOV binned mode (run 60);
+ * every other size keeps today's centred-crop window (ov5647_set_window()) but now also
+ * explicitly re-asserts the 1:1 subsample/binning/analog values, so a prior 640x480 selection
+ * can never leave binning armed on the new crop window.
+ */
+static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32_t height)
+{
+	const struct ov5647_config *cfg = dev->config;
+	int ret;
+
+	if (width == OV5647_MODE_640X480_WIDTH && height == OV5647_MODE_640X480_HEIGHT) {
+		const struct video_reg regs[] = {
+			{OV5647_TIMING_X_ADDR_START, OV5647_FULLFOV_X_ADDR_START},
+			{OV5647_TIMING_Y_ADDR_START, OV5647_FULLFOV_Y_ADDR_START},
+			{OV5647_TIMING_X_ADDR_END, OV5647_FULLFOV_X_ADDR_END},
+			{OV5647_TIMING_Y_ADDR_END, OV5647_FULLFOV_Y_ADDR_END},
+			{OV5647_TIMING_X_OUTPUT_SIZE, width},
+			{OV5647_TIMING_Y_OUTPUT_SIZE, height},
+			{OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_BINNED},
+			{OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_BINNED},
+			{OV5647_TIMING_TC_REG21, OV5647_TC_REG21_BINNED},
+			{OV5647_TIMING_TC_REG20, OV5647_TC_REG20_BINNED},
+			{OV5647_ANALOG_CTRL12, OV5647_ANALOG_CTRL12_BINNED},
+			{OV5647_ANALOG_CTRL18, OV5647_ANALOG_CTRL18_BINNED},
+			{OV5647_SENSOR_CTRL08, OV5647_SENSOR_CTRL08_BINNED},
+			{OV5647_SENSOR_CTRL09, OV5647_SENSOR_CTRL09_BINNED},
+		};
+
+		return video_write_cci_multiregs(&cfg->i2c, regs, ARRAY_SIZE(regs));
+	}
+
+	ret = ov5647_set_window(dev, width, height);
+	if (ret < 0) {
+		return ret;
+	}
+
+	const struct video_reg regs[] = {
+		{OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_1TO1},
+		{OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_1TO1},
+		{OV5647_TIMING_TC_REG20, OV5647_TC_REG20_1TO1},
+		{OV5647_TIMING_TC_REG21, OV5647_TC_REG21_1TO1},
+		{OV5647_ANALOG_CTRL12, OV5647_ANALOG_CTRL12_1TO1},
+		{OV5647_ANALOG_CTRL18, OV5647_ANALOG_CTRL18_1TO1},
+		{OV5647_SENSOR_CTRL08, OV5647_SENSOR_CTRL08_1TO1},
+		{OV5647_SENSOR_CTRL09, OV5647_SENSOR_CTRL09_1TO1},
 	};
 
 	return video_write_cci_multiregs(&cfg->i2c, regs, ARRAY_SIZE(regs));
@@ -495,7 +746,7 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 		return ret;
 	}
 
-	ret = ov5647_set_window(dev, fmt->width, fmt->height);
+	ret = ov5647_set_mode_regs(dev, fmt->width, fmt->height);
 	if (ret < 0) {
 		return ret;
 	}
