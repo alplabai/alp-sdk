@@ -384,10 +384,10 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 	 * there first.  Linux's dw-mipi-dsi always writes
 	 * PHY_STOP_WAIT_TIME(0x20) alongside N_LANES here; this is that parity,
 	 * plus a latent-bug fix: the old SHIFT for this field was 0, the same
-	 * shift as N_LANES below, so a write here would have landed on
-	 * N_LANES instead.  It is not a fix for the #2199 LP-command stall and
-	 * had no measured effect on it -- see dsi_dw.c's dsi_dw_pwr_up_once()
-	 * for that history.
+	 * shift as `DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT` above, so a write here
+	 * would have landed on N_LANES instead.  It is not a fix for the
+	 * #2199 LP-command stall and had no measured effect on it -- see
+	 * dsi_dw.c's dsi_dw_pwr_up_once() for that history.
 	 */
 	reg_write_part(dsi_regs + DSI_PHY_IF_CFG, DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL,
 		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK,

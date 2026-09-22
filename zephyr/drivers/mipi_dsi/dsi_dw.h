@@ -407,10 +407,6 @@
 #define  DSI_VID_SHADOW_CTRL_REQ		BIT(8)
 #define  DSI_VID_SHADOW_CTRL_EN			BIT(0)
 
-/*
- * MIPI-DSI Host controller configurations
- */
-
 /* Time to return read data packet from peripheral. */
 #define  TO_CLK_DIV				10
 #define  LPRX_TO_CNT				1000

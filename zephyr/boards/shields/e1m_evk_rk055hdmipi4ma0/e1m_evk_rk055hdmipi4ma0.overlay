@@ -38,14 +38,19 @@
  * at 40 MHz).  What RGB565 buys: half the framebuffer (720*1280*2 =
  * 1,843,200 B instead of 2,764,800 B) and half the CPU cost to fill it --
  * nothing on the wire changes.  Colour bars (R/G/B/W, no channel swap)
- * verified correct on glass for both the RGB888 and the RGB565 framebuffer
- * at 40 MHz, on E1M-AEN803 2026W36-0009, 2026-09-21.
+ * verified correct on glass at 40 MHz on E1M-AEN803 2026W36-0009: RGB888 at
+ * its earlier framebuffer placement, 2026-09-21; RGB565 at the shipped
+ * placement (`lcd_fb` at 0x02200000) on 2026-09-22, where the CDC L1
+ * framebuffer register (0x49031134) read back 0x02200000 on every one of 15
+ * boots, display_write() reported 2 bytes/pixel, and on the two boots that
+ * reached READY the bands came up RED, GREEN, BLUE, WHITE in order with no
+ * swap, confirmed by eye on the glass.
  *
  * 60 Hz needs 400 MHz / 7 = 57.142857 MHz, which only fits the Alif DSI
  * controller's 500 Mbps two-lane ceiling with a genuine 16-bit LINK -- not
  * just a 16-bit framebuffer: panel pixel-format MIPI_DSI_PIXFMT_RGB565,
- * clock-frequency 57142857, hline 771 (matching the panel's tighter blanking
- * at this rate), DPI_COLOR_CODING 0x1.  That combination was tried (#2199):
+ * clock-frequency 57142857, hline 771, DPI_COLOR_CODING 0x1.  That
+ * combination was tried (#2199):
  * it produced correct colour bars, but at a much higher intermittent
  * init-stall rate than the 40 MHz RGB888-link config (5/10 cold boots versus
  * 1/10, 10 boots each) and added read stalls on the first DCS read after

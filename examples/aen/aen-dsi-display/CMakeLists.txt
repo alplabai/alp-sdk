@@ -15,7 +15,8 @@
 # The whole chain comes from the e1m_evk_rk055hdmipi4ma0 shield
 # (zephyr/boards/shields/): it turns on the SoC display nodes, adds the panel,
 # the carrier's I2C GPIO expander (panel power + reset) and the framebuffer
-# memory region (the top 3 MiB of SRAM0), and enables the drivers.  Any app
+# memory region (the top 2 MiB of SRAM0, at 0x02200000), and enables the
+# drivers.  Any app
 # gets the same panel by adding the shield; this one appends it here so a plain
 # `west build` of the example needs no -DSHIELD.
 

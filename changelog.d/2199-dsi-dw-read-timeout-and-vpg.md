@@ -94,7 +94,7 @@ braces, not a fix for a known defect: it was added on the theory that a reload
 requested on a stopped CDC does not transfer, and the bench refuted that — the
 layer's active registers read back exactly as configured either way.
 
-**Both `Failed to write command FIFO.` sites now log `DSI_CMD_PKT_STATUS`,
+**Both `Failed to write command FIFO` sites now log `DSI_CMD_PKT_STATUS`,
 `DSI_PHY_STATUS`, the parked `DSI_GEN_HDR` value, and five more registers
 (`DSI_PWR_UP`, `DSI_CLKMGR_CFG`, `DSI_MODE_CFG`, `DSI_CMD_MODE_CFG`,
 `DSI_LPCLK_CTRL`) at the moment of the stall**, since a FIFO that never
