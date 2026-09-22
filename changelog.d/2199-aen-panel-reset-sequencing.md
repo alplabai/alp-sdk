@@ -17,13 +17,13 @@ same all-`rc=-5` signature. The hog is a reset-ordering fix in its own right;
 it is not shown to explain that silence.
 
 The shield now hogs that pin low as soon as the expander exists:
-`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:213`
+`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay:214`
 ("lcd_reset_hog: lcd-reset-hog {") with `output-low` and `GPIO_ACTIVE_HIGH`, so
 `gpio_hogs_init()` drives the expander pin physically low — `RESX` asserted —
 before the regulator runs. Upstream's hog priority default of 41 is below the
 expander, where `gpio_hogs_init()` would find the port not ready and configure
 nothing, so
-`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/Kconfig.defconfig:45`
+`zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/Kconfig.defconfig:53`
 ("config GPIO_HOGS_INIT_PRIORITY") pins it to 60, strictly inside the 50..75
 window. Zephyr hogs only call `gpio_pin_configure()` and claim nothing, so the
 `hx8394` driver re-configuring and pulsing the same pin at 90 is unchanged, and

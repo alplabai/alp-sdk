@@ -1,4 +1,4 @@
-### Fixed — `e1m_evk_rk055hdmipi4ma0` shield failed to link with no app Kconfig (#2204)
+### Fixed — `e1m_evk_rk055hdmipi4ma0` shield failed to link with no app Kconfig (#2199)
 
 Zephyr's own `samples/subsys/display/lvgl` and `samples/drivers/display`, built
 for `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he` with only
@@ -13,9 +13,12 @@ back never got a device driver, failing at *link* time rather than configure
 time.
 
 `zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/Kconfig.defconfig` now defaults
-`CONFIG_ALP_SDK=y` itself, `default y` (not `select`) so an app can still
-turn it back off with `CONFIG_ALP_SDK=n`. `CONFIG_I2C`, `CONFIG_PINCTRL` and
-the rest of the chain's Kconfig were already defaulted by the shield (or
+`CONFIG_ALP_SDK=y` itself (`default y`, not `select`, matching every other
+symbol in this file). Setting `CONFIG_ALP_SDK=n` is not a supported way to run
+this shield -- it reproduces the exact `__device_dts_ord_113`/`_114` link
+failure this fragment describes, since the display-driver symbols live under
+`if ALP_SDK` and nothing else provides them. `CONFIG_I2C`, `CONFIG_PINCTRL`
+and the rest of the chain's Kconfig were already defaulted by the shield (or
 transitively selected once `I2C` is on, in `PINCTRL`'s case) -- `ALP_SDK` was
 the one gap. `examples/aen/aen-dsi-display/prj.conf` drops its own
 `CONFIG_ALP_SDK=y`, now redundant with the shield's default.

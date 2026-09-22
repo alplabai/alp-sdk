@@ -11,9 +11,10 @@
 # (zephyr/Kconfig) -- without ALP_SDK on, those symbols do not exist at all
 # and the chain fails at LINK time (undefined __device_dts_ord_N for the
 # cdc200 / mipi_dsi nodes), not at configure time, which is what made this
-# easy to miss.  default y here so `-DSHIELD=e1m_evk_rk055hdmipi4ma0` alone
-# gets a working display; an app that wants ALP_SDK off can still set
-# CONFIG_ALP_SDK=n itself.
+# easy to miss.  default y here (not select) so `-DSHIELD=e1m_evk_rk055hdmipi4ma0`
+# alone gets a working display with no extra app Kconfig.  Setting
+# CONFIG_ALP_SDK=n is not a supported way to run this shield: it reproduces
+# the same link failure, since nothing else provides these symbols.
 
 if SHIELD_E1M_EVK_RK055HDMIPI4MA0
 
