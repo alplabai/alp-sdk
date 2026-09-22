@@ -17,7 +17,7 @@
  * "video_common.h" but the pinned Zephyr v4.4.1 here does not --
  * struct video_ctrl_range / video_ctrl / VIDEO_DEVICE_DEFINE live in
  * those headers on this pin (see zephyr/drivers/video/imx219.c, which
- * includes all three explicitly). No driver logic changed. See
+ * includes all three explicitly). No other driver logic changed. See
  * zephyr/CMakeLists.txt / zephyr/kconfigs/ for the build hookup,
  * mirroring how arx3a0.c is wired. The upstream
  * symbol VIDEO_OV5647 and compatible "ovti,ov5647" are used as-is (not
@@ -27,12 +27,33 @@
  * landing on the version bump cannot silently collide with a DIFFERENT
  * driver; it can only be the merged form of this same PR.
  *
+ * AUTHORIZED LOCAL DIVERGENCE (issue #2248): two bench-proven defects are
+ * fixed in this vendored copy, on top of upstream #119301, with the
+ * maintainer's explicit sign-off overruling the "no divergent patches" rule
+ * below:
+ *   1. The driver never drove the CSI-2 lanes to LP-11 (Stop state), so a
+ *      receiver that waits for Stop-state before stream start (e.g. a
+ *      DesignWare CSI-2 host) could not open it. Bench evidence on an
+ *      E1M-AEN803 / E1M-EVK (hw_rev 2626-r2): CSI_PHY_STOPSTATE read
+ *      0x00000000 in bare software standby, and steadily 0x00000001 (module
+ *      under test has a hardware fault limiting it to bit0) after
+ *      ov5647_lane_park() -- mirrors mainline Linux's
+ *      ov5647_power_on()/ov5647_stream_stop() "coax lanes into LP-11" step.
+ *   2. OV5647_PIXEL_RATE() was derived from a datasheet fps figure (83333333
+ *      for 25 MHz XVCLK) rather than the PLL, 2.1x below the 175000000 that
+ *      the sensor's power-on PLL registers (0x3034/0x3035/0x3036/0x3037,
+ *      read back on the same bench unit) actually yield, which steered the
+ *      CSI-2 receiver's D-PHY frequency-bin selection wrong.
+ *
  * RETIREMENT: delete this file + Kconfig.ov5647 + the ovti,ov5647.yaml
  * binding, and drop the CMake/Kconfig hookup, the moment the alp-sdk Zephyr
  * pin advances to a revision that contains #119301 (i.e. the vendored copy
  * and the upstream driver would otherwise both define VIDEO_OV5647 /
- * "ovti,ov5647" and collide). Do NOT maintain divergent local patches on
- * this file -- open a new PR against upstream instead and re-backport.
+ * "ovti,ov5647" and collide) -- BUT NOT BEFORE the two fixes above are
+ * either re-applied to the upstream-derived driver or confirmed already
+ * present in it: deleting this file without that check silently
+ * reintroduces both bugs. Do NOT otherwise maintain divergent local patches
+ * on this file -- open a new PR against upstream instead and re-backport.
  * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
  */
@@ -76,11 +97,39 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_VBLANK_MIN		24
 
 /*
- * The PLL is left in its power-on configuration, where the pixel rate is a fixed multiple of
- * XVCLK. Datasheet table 2-1 gives 15 fps at full resolution, which with the power-on HTS and VTS
- * is the 80 MHz that this ratio yields from the nominal 24 MHz input clock.
+ * The PLL is left in its power-on (reset) configuration; the driver never programs it. Read back
+ * from silicon on an E1M-AEN803 / E1M-EVK (hw_rev 2626-r2) bench unit: 0x3034 = 0x1a (bits[3:0] =
+ * 0xa, 10-bit mode), 0x3035 = 0x11 (bits[7:4] system-clock divider 1, bits[3:0] MIPI divider 1),
+ * 0x3036 = 0x69 (multiplier 105 decimal), 0x3037 = 0x03 (bits[3:0] pre-divider 3, bit4 root
+ * divider 0 = /1). That gives:
+ *
+ *   VCO = XVCLK / pre-divider * multiplier = 25 MHz / 3 * 105 = 875 MHz (root divider /1)
+ *       = 875 Mbps per lane
+ *   pixel rate = VCO * lanes / bits-per-pixel = 875e6 * 2 / 10 = 175000000 for the nominal
+ *       25 MHz XVCLK -- previously computed as 83333333 from a datasheet fps figure (table 2-1's
+ *       15 fps at full resolution with the power-on HTS/VTS), 2.1x too low, which steered the
+ *       CSI-2 receiver's D-PHY frequency-bin lookup to the wrong bin.
+ *
+ * CAVEAT, NOT CONFIRMED ON SILICON: this arithmetic assumes the OV5647 shares the OV564x family's
+ * PLL structure and pre-divider encoding (as documented for OV5640/OV5645/etc.) -- it is inferred,
+ * not taken from an OV5647-specific PLL block diagram. The only OV5647 module available on the
+ * bench has a hardware fault (see the file header) that made a live D-PHY link-rate measurement
+ * impossible, so this has not been verified end to end. Re-verify on a healthy module before
+ * relying on it beyond selecting the D-PHY frequency bin. At 875 Mbps the CSI pixel clock request
+ * lands on the 200 MHz clamp branch in zephyr/drivers/video/video_csi_dw.c.
  */
-#define OV5647_PIXEL_RATE(clk)		((clk) * 10 / 3)
+#define OV5647_PLL_PREDIV		3
+#define OV5647_PLL_MULT			105
+#define OV5647_PLL_ROOT_DIV		1
+#define OV5647_MIPI_LANES		2
+#define OV5647_MIPI_BPP			10
+
+/* Cast to uint64_t before multiplying: at the top of the allowed XVCLK range (27 MHz) the plain
+ * 32-bit product clk * mult * lanes overflows int before the division brings it back down.
+ */
+#define OV5647_PIXEL_RATE(clk) \
+	((uint32_t)((uint64_t)(clk) * OV5647_PLL_MULT * OV5647_MIPI_LANES / \
+		    (OV5647_PLL_PREDIV * OV5647_PLL_ROOT_DIV * OV5647_MIPI_BPP)))
 #define OV5647_INPUT_CLK_MIN		MHZ(6)
 #define OV5647_INPUT_CLK_MAX		MHZ(27)
 
@@ -125,6 +174,34 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_TC_REG21_MIRROR		(BIT(2) | BIT(1))
 #define OV5647_ISP_CTRL3D		OV5647_REG8(0x503d)
 #define OV5647_TEST_PATTERN_ENABLE	BIT(7)
+
+/*
+ * Lane park/unpark sequence (mirrors mainline Linux's ov5647_power_on(), which calls
+ * ov5647_stream_stop() under the comment "Stream off to coax lanes into LP-11 state"): with the
+ * sensor left in bare software standby (0x0100 = 0x00) CSI_PHY_STOPSTATE reads back 0x00000000 --
+ * no lane reaches LP-11. Writing 0x0100 = 0x01 (running) then these three registers, in this
+ * order, parks the lanes at LP-11 (Stop state) so a CSI-2 receiver that waits for Stop-state
+ * before stream start (e.g. a DesignWare CSI-2 host) can open the link. Bench-confirmed on an
+ * E1M-AEN803 (serial 2026W36-0001) / E1M-EVK (hw_rev 2626-r2) with a DesignWare CSI-2 receiver:
+ * 50/50 samples at 20 ms read CSI_PHY_STOPSTATE steadily as 0x00000001 after this sequence (the
+ * module under test has a hardware fault on DATA_1/CLK, hence only bit0; a healthy module should
+ * reach 0x00010003).
+ */
+#define OV5647_MIPI_CTRL00			OV5647_REG8(0x4800)
+#define OV5647_MIPI_CTRL00_CLOCK_LANE_GATE	BIT(5)
+#define OV5647_MIPI_CTRL00_BUS_IDLE		BIT(2)
+#define OV5647_MIPI_CTRL00_CLOCK_LANE_DISABLE	BIT(0)
+#define OV5647_FRAME_OFF_NUM			OV5647_REG8(0x4202)
+#define OV5647_FRAME_OFF_NUM_PARKED		0x0f
+#define OV5647_FRAME_OFF_NUM_STREAMING		0x00
+/*
+ * Address 0x300d is not documented in the datasheet register map available to us; these are the
+ * bench-confirmed values needed alongside MIPI_CTRL00 and FRAME_OFF_NUM to complete the
+ * park/unpark sequence.
+ */
+#define OV5647_LANE_PARK_AUX			OV5647_REG8(0x300d)
+#define OV5647_LANE_PARK_AUX_PARKED		0x01
+#define OV5647_LANE_PARK_AUX_STREAMING		0x00
 
 /*
  * Datasheet table 7-1 describes the 0x3034 bit mode field as 0 for 8-bit and 1 for 10-bit, which
@@ -339,6 +416,36 @@ static int ov5647_get_caps(const struct device *dev, struct video_caps *caps)
 	return 0;
 }
 
+/*
+ * Park the CSI-2 lanes at LP-11; see the OV5647_MIPI_CTRL00 comment above for why and the bench
+ * evidence. Must be called with the sensor left running (MODE_SELECT_STREAMING set) -- parking
+ * from software standby does not present LP-11.
+ */
+static int ov5647_lane_park(const struct device *dev)
+{
+	const struct ov5647_config *cfg = dev->config;
+	int ret;
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, OV5647_MODE_SELECT_STREAMING);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_MIPI_CTRL00,
+				   OV5647_MIPI_CTRL00_CLOCK_LANE_GATE | OV5647_MIPI_CTRL00_BUS_IDLE |
+					   OV5647_MIPI_CTRL00_CLOCK_LANE_DISABLE);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_FRAME_OFF_NUM, OV5647_FRAME_OFF_NUM_PARKED);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return video_write_cci_reg(&cfg->i2c, OV5647_LANE_PARK_AUX, OV5647_LANE_PARK_AUX_PARKED);
+}
+
 static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_type type)
 {
 	const struct ov5647_config *cfg = dev->config;
@@ -350,13 +457,41 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 		return -EINVAL;
 	}
 
-	ret = video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT,
-				  on ? OV5647_MODE_SELECT_STREAMING : 0);
+	if (!on) {
+		/* Re-park rather than only dropping to software standby, so a stopped stream still
+		 * presents LP-11 and a later stream start can unpark it cleanly.
+		 */
+		ret = ov5647_lane_park(dev);
+		if (ret < 0) {
+			return ret;
+		}
+
+		data->streaming = false;
+
+		return 0;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_MIPI_CTRL00, OV5647_MIPI_CTRL00_BUS_IDLE);
 	if (ret < 0) {
 		return ret;
 	}
 
-	data->streaming = on;
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_FRAME_OFF_NUM, OV5647_FRAME_OFF_NUM_STREAMING);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_LANE_PARK_AUX, OV5647_LANE_PARK_AUX_STREAMING);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, OV5647_MODE_SELECT_STREAMING);
+	if (ret < 0) {
+		return ret;
+	}
+
+	data->streaming = true;
 
 	return 0;
 }
@@ -625,7 +760,15 @@ static int ov5647_init(const struct device *dev)
 		return ret;
 	}
 
-	return ov5647_init_ctrls(dev);
+	ret = ov5647_init_ctrls(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* Leave the sensor parked at LP-11 rather than in bare standby, so a CSI-2 receiver that
+	 * waits for Stop-state can already see the lanes before the first ov5647_set_stream(true).
+	 */
+	return ov5647_lane_park(dev);
 }
 
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(pwdn_gpios)
