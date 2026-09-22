@@ -4,8 +4,9 @@
 # the RK055HDMIPI4MA0 720x1280 portrait panel (E1M-EVK connector J6), for an
 # E1M-AEN SoM (M55-HE).  Renders through the portable <alp/display.h> surface
 # (alp_display_blit / alp_display_clear) with small dirty-rect blits only --
-# never a full-frame redraw -- and steers from the on-module BMI323 tilt
-# sensor via <alp/chips/bmi323.h> + <alp/peripheral.h> (portable I2C).
+# never a full-frame redraw -- and steers from the carrier BMI323 (U13,
+# soldered on the E1M-EVK, not the SoM) tilt sensor via
+# <alp/chips/bmi323.h> + <alp/peripheral.h> (portable I2C).
 #
 # See src/main.c for the game rules and the dirty-rect / tilt-mapping
 # rationale.  Like aen-dsi-display (the display bring-up this rides on,

@@ -16,7 +16,7 @@
  * green bar across the top of the screen.  A run ends on the first shard
  * touch, pauses briefly so the final frame is readable, then restarts with
  * the score and every entity reset.  There is no touch input on this panel
- * (the touch controller is unusable on this hardware -- see
+ * -- no touch driver is bound here yet (#2199, see
  * zephyr/boards/shields/e1m_evk_rk055hdmipi4ma0/e1m_evk_rk055hdmipi4ma0.overlay);
  * steering is tilt-only.
  *
@@ -38,15 +38,17 @@
  * WHERE THE BUS + ADDRESS COME FROM
  * -----------------------------------
  * metadata/boards/e1m-evk.yaml's i2c_devices block (lines ~269-271) names
- * the on-board BMI323 (designator U13) at 7-bit address 0x68 on the bus it
- * calls EVK_I2C_BUS_SENSORS (ALP_E1M_I2C0), with the doc note that the
- * 2026W36 respin batch carries 0x68 with no collision (earlier boards
- * mis-strapped U13 to 0x69 -- see that same file for the pre-respin
- * caveat).  That metadata is what generates the macros this app includes
- * from <alp/boards/alp_e1m_evk.h>: EVK_I2C_BUS_SENSORS and
- * EVK_I2C_ADDR_BMI323 -- the same two macros examples/aen/aen-bmi323-
- * regcheck uses, so this app talks to the identical bus + address a real
- * bench session already exercised.
+ * the BMI323 soldered on the EVK CARRIER (designator U13 -- not the SoM;
+ * see metadata/chips/bmi323.yaml and that same board file's "two are
+ * soldered on the EVK" note) at 7-bit address 0x68 on the bus it calls
+ * EVK_I2C_BUS_SENSORS (ALP_E1M_I2C0), with the doc note that the 2026W36
+ * respin batch carries 0x68 with no collision (earlier boards mis-strapped
+ * U13 to 0x69 -- see that same file for the pre-respin caveat).  That
+ * metadata is what generates the macros this app includes from
+ * <alp/boards/alp_e1m_evk.h>: EVK_I2C_BUS_SENSORS and EVK_I2C_ADDR_BMI323
+ * -- the same two macros examples/aen/aen-bmi323-regcheck uses, so this app
+ * talks to the identical bus + address a real bench session already
+ * exercised.
  *
  * WHY DIRTY RECTS, NOT A FULL REDRAW
  * ------------------------------------
@@ -59,11 +61,32 @@
  * rect over the sprite's OLD position (erase), then blits the sprite's own
  * pixel buffer at its NEW position (draw).  Every sprite here is small (the
  * biggest, the skiff, is 28x28 -- well under the "keep blits under ~64x64"
- * budget), and a stationary sprite costs zero blits: alp_display_blit() is
- * only called when a position actually changed.  The scrolling starfield
- * background uses the exact same erase/draw pair per star, which is why a
- * "moving background" costs almost nothing here -- it is dozens of 3x3
- * blits, not one 720x1280 one.
+ * budget).  The scrolling starfield background uses the exact same
+ * erase/draw pair per star, which is why a "moving background" costs
+ * almost nothing here -- it is dozens of 3x3 blits, not one 720x1280 one.
+ *
+ * TICK ORDER: ERASE ALL, THEN MOVE ALL, THEN DRAW ALL
+ * -------------------------------------------------------
+ * The invariant every dirty-rect entity must honor: ANYTHING an erase
+ * blit can paint over must be redrawn in the SAME tick.  An erase blits
+ * solid background, so an entity that erases at its old rect but is never
+ * redrawn -- or is redrawn only conditionally -- leaves a permanent hole
+ * wherever a later erase happens to land on top of it.  This app enforces
+ * that invariant two ways: first, the whole tick is phased (erase every
+ * moving entity's old rect, THEN move every entity, THEN draw every entity
+ * at its new rect) rather than interleaved per-entity, so nothing is ever
+ * mid-move while another entity's erase/draw runs.  Second, the skiff and
+ * the score bar are the two "static" drawables (the skiff can sit still in
+ * the steering dead zone; the score bar only ever grows) and are handled
+ * as follows: the skiff is erased+redrawn UNCONDITIONALLY every tick, even
+ * when it hasn't moved -- a stray star/hazard/pickup erase that lands on
+ * the skiff's rows would otherwise punch a hole in it that never gets
+ * patched (that hole was this app's original review bug).  The score bar
+ * instead relies on a simpler guarantee: falling_visible() reserves rows
+ * [0, SCORE_BAR_H) for the bar alone -- no star, hazard, or pickup is ever
+ * considered "visible" (and therefore never erased or drawn) while it
+ * overlaps those rows -- so the bar is safe leaving its already-earned
+ * pixels alone and only ever painting the newly-earned segment.
  *
  * TILT MAPPING
  * ------------
@@ -82,19 +105,38 @@
  * mounting-orientation mismatch would just need X swapped for Y on real
  * silicon, not a mapping rewrite.
  *
- * A small dead zone (BMI323_STEER_DEAD_ZONE) ignores near-zero tilt so the
- * skiff doesn't creep on a board sitting still, and a one-pole low-pass
- * filter (BMI323_STEER_SMOOTH_ALPHA) smooths the raw per-tick reading so
+ * A small dead zone (BMI323_STEER_DEAD_ZONE_Q8) ignores near-zero tilt so
+ * the skiff doesn't creep on a board sitting still, and a one-pole low-pass
+ * filter (BMI323_STEER_SMOOTH_ALPHA_Q8) smooths the raw per-tick reading so
  * steering doesn't jitter.
+ *
+ * FIXED POINT, NOT FLOAT
+ * -----------------------
+ * This build does not set CONFIG_FPU: every steer value in the 30 Hz loop
+ * is Q8 fixed point (an int32_t where 256 represents 1.0), not float --
+ * see BMI323_ACCEL_2G_LSB_PER_G, BMI323_STEER_DEAD_ZONE_Q8,
+ * BMI323_STEER_SMOOTH_ALPHA_Q8, and g_ship_pos_q8 below.  On an M55 with no
+ * FPU config enabled, a float multiply/divide in the hot loop is a
+ * soft-float library call -- real cost on a part that has hardware FPU,
+ * paid every tick for no benefit a Q8 integer can't give this game (it
+ * never displays a fractional value to the player).  The skiff's on-screen
+ * position is itself tracked as Q8 (g_ship_pos_q8), not whole pixels, so a
+ * small steady tilt still accumulates real sub-pixel motion tick over
+ * tick instead of truncating to exactly zero every time (see
+ * q8_round_to_px()) -- that truncation was this app's original review bug:
+ * a small tilt produced (int16_t)(steer * 6.0f) == 0 forever.
  *
  * NO IMU? IT STILL PLAYS.
  * ------------------------
  * If the BMI323 is absent or bmi323_init()/bmi323_set_accel() fails, this
  * app does not hang, retry forever, or exit -- it prints one line saying
  * so and falls back to an "attract mode" that steers the skiff itself with
- * a slow, deterministic left-right sweep (attract_steer() below), so the
+ * a slow, deterministic left-right sweep (attract_steer_q8() below), so the
  * game keeps running and is still watchable on a bench with no working
- * sensor.
+ * sensor.  The same fallback also catches a MID-RUN IMU failure: a sensor
+ * that starts failing reads (bus glitch, loose wiring, part removed) is
+ * given a few consecutive tries before this app gives up on it for the
+ * rest of the run -- see IMU_FAIL_THRESHOLD and read_tilt_steer_q8().
  *
  * PANEL INIT IS INTERMITTENT
  * -----------------------------
@@ -104,7 +146,12 @@
  * own file header for the measured failure rates.  If alp_display_open()
  * returns NULL, this app prints a line pointing at that issue and exits
  * cleanly (return 0) rather than looping against a device that will not
- * come back without a power cycle.
+ * come back without a power cycle.  The same DSI link is known to fail
+ * INTERMITTENTLY once open, not just at init, so every alp_display_blit()
+ * / alp_display_clear() return is checked too (not (void)-cast) -- see
+ * blit_checked()/clear_checked() below: the first failure is latched and
+ * printed once, and the game keeps running rather than silently reporting
+ * a frame rate over dead glass.
  */
 
 #include <stdbool.h>
@@ -148,12 +195,25 @@
 /* --- Tuning -------------------------------------------------------------- */
 #define TICK_MS 33U /* ~30 Hz logic/render tick */
 
-#define SHIP_BOTTOM_MARGIN     24U
-#define SHIP_SPEED_PX_PER_TICK 6.0f
+#define SHIP_BOTTOM_MARGIN 24U
+#define SHIP_SPEED_PX_PER_TICK \
+	6 /* pixels/tick at full deflection (steer_q8 = +/-256).  Plain int, not \
+	   * a float -- sub-pixel motion at partial tilt comes from accumulating \
+	   * (steer_q8 * this) into g_ship_pos_q8 (Q8), not from a fractional \
+	   * speed constant.  See the file header's FIXED POINT section. */
 
-#define BMI323_ACCEL_2G_LSB_PER_G 16384.0f /* see file header: approximate */
-#define BMI323_STEER_DEAD_ZONE    0.06f
-#define BMI323_STEER_SMOOTH_ALPHA 0.15f
+#define BMI323_ACCEL_2G_LSB_PER_G \
+	16384 /* counts/g at the +/-2G FS range this app configures \
+	       * (BMI323_ACCEL_FS_2G) -- see file header: approximate, not \
+	       * itself documented in <alp/chips/bmi323.h>.  Chosen as a power \
+	       * of two on purpose: LSB_PER_G / 256 == 64 exactly, so converting \
+	       * a raw count to Q8 g's below is a plain integer divide. */
+#define BMI323_STEER_DEAD_ZONE_Q8 \
+	15U /* ~0.06 g in Q8 (round(0.06*256)) -- ignores near-zero tilt so the \
+	     * skiff doesn't creep on a board sitting still. */
+#define BMI323_STEER_SMOOTH_ALPHA_Q8 \
+	38U /* ~0.15 in Q8 (round(0.15*256)) -- one-pole low-pass so steering \
+	     * doesn't jitter frame to frame. */
 
 #define ATTRACT_PERIOD_TICKS 180U /* ~6 s sweep period at TICK_MS */
 
@@ -169,6 +229,12 @@
 #define SCORE_BAR_Y       0U
 #define SCORE_BAR_H       8U
 
+#define IMU_FAIL_THRESHOLD \
+	5U /* consecutive bmi323_read_accel() failures before this app gives up \
+	    * on the sensor for the rest of the run -- a wedged/removed part \
+	    * must not keep re-issuing a slow bus read every tick forever (a bus \
+	    * timeout can by itself blow the 33 ms TICK_MS budget). */
+
 /* --- Sprite pixel buffers, built once in build_sprites() --------------- */
 /* Two bytes per pixel (RGB565).  Each shape is filled once at startup and
  * blitted unchanged every time that entity moves -- only the destination
@@ -182,9 +248,21 @@ static uint8_t score_bar_seg_buf[POINTS_PER_PICKUP * SCORE_BAR_H * 2U];
 
 /* Solid background (all-zero == COLOR_BG), reused as the erase source for
  * every entity's dirty-rect erase blit regardless of the entity's own
- * size -- it only has to be at least as big as the largest sprite (the
- * skiff), since alp_display_blit()'s pixel size is implied by w*h. */
+ * size -- it only has to be at least as big as the largest sprite. */
 static uint8_t erase_buf[SHIP_W * SHIP_H * 2U];
+
+/* A future sprite-size bump that outgrows erase_buf would silently
+ * over-read it (alp_display_blit()'s pixel size is implied by w*h, taken
+ * straight from erase_buf's byte count) -- catch that at compile time
+ * instead. */
+#define SPRITE_PX_MAX2(a, b) ((a) > (b) ? (a) : (b))
+#define SPRITE_PX_BIGGEST \
+	SPRITE_PX_MAX2((uint32_t)(SHIP_W * SHIP_H), \
+	               SPRITE_PX_MAX2((uint32_t)(HAZARD_W * HAZARD_H), \
+	                              SPRITE_PX_MAX2((uint32_t)(PICKUP_W * PICKUP_H), \
+	                                             (uint32_t)(STAR_W * STAR_H))))
+BUILD_ASSERT(sizeof(erase_buf) >= (SPRITE_PX_BIGGEST * 2U),
+             "erase_buf must be at least as large as the largest sprite's w*h*2 bytes");
 
 /* --- Falling entities (hazards, pickups, stars) ------------------------- */
 typedef struct {
@@ -200,7 +278,9 @@ static falling_t stars[N_STARS];
 /* --- Ship + score state -------------------------------------------------- */
 static int16_t  g_ship_x;
 static int16_t  g_ship_y;
-static float    g_steer_smoothed;
+static int32_t  g_ship_pos_q8; /* sub-pixel ship x, Q8 (256 == 1 px); g_ship_x is its rounded
+                                 * whole-pixel view -- see q8_round_to_px(). */
+static int32_t  g_steer_smoothed_q8;
 static uint32_t g_score;
 static uint16_t g_score_bar_px;
 static uint32_t g_frame_count;
@@ -209,12 +289,64 @@ static uint32_t g_frame_count;
 static alp_i2c_t *g_i2c_bus;
 static bmi323_t   g_imu;
 static bool       g_imu_ok;
+static uint32_t   g_imu_fail_count;
+
+/* --- Display I/O status (latched, not spammed) -------------------------- */
+/* The panel's DSI link is known to fail intermittently on this hardware
+ * (file header, PANEL INIT IS INTERMITTENT) and that is not limited to the
+ * cold-boot init call -- a live link can drop mid-run too.  Every
+ * alp_display_blit()/alp_display_clear() return is checked through the two
+ * wrappers below instead of (void)-cast: latch only the FIRST non-ALP_OK
+ * status and print it once, so the bench log gets exactly one line pointing
+ * at the failure instead of either total silence (fps counter happily
+ * reporting a frame rate over dead glass) or 30-lines/second of spam. */
+static bool         g_display_err_reported;
+static alp_status_t g_display_err;
+
+static void latch_display_err(const char *where, alp_status_t rc)
+{
+	if ((rc == ALP_OK) || g_display_err_reported) {
+		return;
+	}
+	g_display_err_reported = true;
+	g_display_err          = rc;
+	printk("RESULT: display I/O error at %s, status=%d -- game keeps running, no further "
+	       "per-frame spam for this or any later failure\n",
+	       where,
+	       (int)rc);
+}
+
+static alp_status_t blit_checked(alp_display_t *disp,
+                                 uint16_t       x,
+                                 uint16_t       y,
+                                 uint16_t       w,
+                                 uint16_t       h,
+                                 const void    *pixels,
+                                 const char    *where)
+{
+	alp_status_t rc = alp_display_blit(disp, x, y, w, h, pixels);
+
+	latch_display_err(where, rc);
+	return rc;
+}
+
+static alp_status_t clear_checked(alp_display_t *disp, const char *where)
+{
+	alp_status_t rc = alp_display_clear(disp);
+
+	latch_display_err(where, rc);
+	return rc;
+}
 
 /*
- * A tiny xorshift32 PRNG, seeded once from k_uptime_get() at boot.  Entity
- * spawn positions/speeds don't need cryptographic quality, just "different
- * enough each run" -- this needs no CONFIG_ENTROPY_GENERATOR / hardware
- * RNG dependency the way <alp/security.h>'s TRNG surface would.
+ * A tiny xorshift32 PRNG, seeded once at boot from the free-running cycle
+ * counter (k_cycle_get_32()) rather than k_uptime_get() -- the uptime clock
+ * only has millisecond resolution at boot (effectively near-zero entropy
+ * this early), while the cycle counter's low bits vary with exact boot
+ * timing down to a CPU cycle.  Entity spawn positions/speeds don't need
+ * cryptographic quality, just "different enough run to run" -- this needs
+ * no CONFIG_ENTROPY_GENERATOR / hardware RNG dependency the way
+ * <alp/security.h>'s TRNG surface would.
  */
 static uint32_t rng_state = 1U;
 
@@ -234,9 +366,15 @@ static uint32_t rng_next(void)
 	return x;
 }
 
-/** Uniform integer in [lo, hi] inclusive. */
+/** Uniform integer in [lo, hi] inclusive.  Returns `lo` for a degenerate or
+ *  inverted range (hi <= lo) instead of computing span = hi - lo + 1 as an
+ *  unsigned 0 and taking `% 0` -- a divide-by-zero UsageFault. */
 static int32_t rng_range(int32_t lo, int32_t hi)
 {
+	if (hi <= lo) {
+		return lo;
+	}
+
 	uint32_t span = (uint32_t)(hi - lo + 1);
 
 	return lo + (int32_t)(rng_next() % span);
@@ -258,6 +396,19 @@ static bool aabb_overlap(int16_t  ax,
 {
 	return (ax < bx + (int16_t)bw) && (ax + (int16_t)aw > bx) && (ay < by + (int16_t)bh) &&
 	       (ay + (int16_t)ah > by);
+}
+
+/** Round a Q8 fixed-point value (256 == 1 px) to the nearest whole pixel,
+ *  symmetric around zero.  Plain `(q8 + 128) >> 8` would right-shift a
+ *  negative value for any leftward position, which C leaves
+ *  implementation-defined -- this instead rounds the magnitude and
+ *  reapplies the sign, portable either way. */
+static int16_t q8_round_to_px(int32_t q8)
+{
+	if (q8 >= 0) {
+		return (int16_t)((q8 + 128) >> 8);
+	}
+	return (int16_t)(-((-q8 + 128) >> 8));
 }
 
 /** Write one RGB565 pixel into a `w`-wide sprite buffer at (x, y). */
@@ -369,50 +520,67 @@ static void spawn_falling(falling_t *f,
 	f->speed = (int16_t)rng_range(speed_lo, speed_hi);
 }
 
-/** True while `f`'s WHOLE sprite is within [0, game_h) vertically -- no
- *  partial top/bottom clipping is attempted (a simplification: a sprite
- *  pops fully into view rather than sliding in edge-first, and disappears
- *  a frame or two early at the very bottom before its respawn check fires;
- *  neither is visible at 30 Hz). alp_display_blit() would itself refuse an
- *  out-of-bounds rect (ALP_ERR_OUT_OF_RANGE), so this check also protects
- *  every blit call below from ever making that call. */
+/** True while `f`'s WHOLE sprite is within the playfield -- vertically
+ *  [SCORE_BAR_H, game_h), never [0, SCORE_BAR_H): those top rows are
+ *  reserved for the score bar alone (see the file header's tick-order
+ *  section) -- no falling entity is ever "visible" while it overlaps them,
+ *  so none is ever erased or drawn there.  No partial top/bottom clipping
+ *  is attempted either (a simplification: a sprite pops fully into view
+ *  rather than sliding in edge-first, and disappears a frame or two early
+ *  at the very bottom before its respawn check fires; neither is visible
+ *  at 30 Hz). alp_display_blit() would itself refuse an out-of-bounds rect
+ *  (ALP_ERR_OUT_OF_RANGE), so this check also protects every blit call
+ *  below from ever making that call. */
 static bool falling_visible(const falling_t *f, uint16_t h, uint16_t game_h)
 {
-	return (f->y >= 0) && ((f->y + (int16_t)h) <= (int16_t)game_h);
+	return (f->y >= (int16_t)SCORE_BAR_H) && ((f->y + (int16_t)h) <= (int16_t)game_h);
 }
 
-static void update_stars(alp_display_t *disp, uint16_t game_w, uint16_t game_h)
+/* --- Erase / move / draw, split per phase (see the file header's tick- --
+ * order section for why the whole tick is phased this way instead of
+ * interleaved per entity). ------------------------------------------------ */
+
+static void erase_star(alp_display_t *disp, const falling_t *f, uint16_t game_h)
 {
-	for (uint32_t i = 0U; i < N_STARS; i++) {
-		falling_t *f = &stars[i];
-
-		if (falling_visible(f, STAR_H, game_h)) {
-			(void)alp_display_blit(disp, (uint16_t)f->x, (uint16_t)f->y, STAR_W, STAR_H, erase_buf);
-		}
-
-		f->y += f->speed;
-		if (f->y > (int16_t)game_h) {
-			spawn_falling(f, STAR_W, STAR_H, game_w, game_h, STAR_SPEED_LO, STAR_SPEED_HI, false);
-		}
-
-		if (falling_visible(f, STAR_H, game_h)) {
-			(void)alp_display_blit(disp, (uint16_t)f->x, (uint16_t)f->y, STAR_W, STAR_H, star_buf);
-		}
+	if (falling_visible(f, STAR_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, STAR_W, STAR_H, erase_buf, "erase star");
 	}
 }
 
-/** Move + redraw one hazard; sets `*collided` if it now overlaps the skiff. */
-static void
-update_hazard(falling_t *f, alp_display_t *disp, uint16_t game_w, uint16_t game_h, bool *collided)
+static void move_star(falling_t *f, uint16_t game_w, uint16_t game_h)
 {
-	if (falling_visible(f, HAZARD_H, game_h)) {
-		(void)alp_display_blit(disp, (uint16_t)f->x, (uint16_t)f->y, HAZARD_W, HAZARD_H, erase_buf);
-	}
-
 	f->y += f->speed;
 	if (f->y > (int16_t)game_h) {
-		/* Difficulty ramp: only future spawns get faster, so an
-		 * already-falling hazard keeps the speed it was given. */
+		spawn_falling(f, STAR_W, STAR_H, game_w, game_h, STAR_SPEED_LO, STAR_SPEED_HI, false);
+	}
+}
+
+static void draw_star(alp_display_t *disp, const falling_t *f, uint16_t game_h)
+{
+	if (falling_visible(f, STAR_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, STAR_W, STAR_H, star_buf, "draw star");
+	}
+}
+
+static void erase_hazard(alp_display_t *disp, const falling_t *f, uint16_t game_h)
+{
+	if (falling_visible(f, HAZARD_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, HAZARD_W, HAZARD_H, erase_buf, "erase hazard");
+	}
+}
+
+/** Advance one hazard and, if it now overlaps the (already-moved) skiff,
+ *  sets *collided.  Difficulty ramp: only future spawns get faster, so an
+ *  already-falling hazard keeps the speed it was given.  Must run after
+ *  move_ship() in the tick's MOVE phase so the collision check uses this
+ *  tick's ship position, not last tick's. */
+static void move_hazard(falling_t *f, uint16_t game_w, uint16_t game_h, bool *collided)
+{
+	f->y += f->speed;
+	if (f->y > (int16_t)game_h) {
 		int32_t speed_hi = HAZARD_SPEED_HI_BASE + (int32_t)(g_score / 50U);
 
 		if (speed_hi > HAZARD_SPEED_HI_MAX) {
@@ -421,73 +589,131 @@ update_hazard(falling_t *f, alp_display_t *disp, uint16_t game_w, uint16_t game_
 		spawn_falling(f, HAZARD_W, HAZARD_H, game_w, game_h, HAZARD_SPEED_LO, speed_hi, false);
 	}
 
-	if (falling_visible(f, HAZARD_H, game_h)) {
-		(void)alp_display_blit(
-		    disp, (uint16_t)f->x, (uint16_t)f->y, HAZARD_W, HAZARD_H, hazard_buf);
-		if (aabb_overlap(f->x, f->y, HAZARD_W, HAZARD_H, g_ship_x, g_ship_y, SHIP_W, SHIP_H)) {
-			*collided = true;
-		}
+	if (falling_visible(f, HAZARD_H, game_h) &&
+	    aabb_overlap(f->x, f->y, HAZARD_W, HAZARD_H, g_ship_x, g_ship_y, SHIP_W, SHIP_H)) {
+		*collided = true;
 	}
 }
 
-/** Grow the top-of-screen score bar by the segment just earned.  Only the
- *  newly-added pixels are blitted -- the bar never gets a full redraw. */
+static void draw_hazard(alp_display_t *disp, const falling_t *f, uint16_t game_h)
+{
+	if (falling_visible(f, HAZARD_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, HAZARD_W, HAZARD_H, hazard_buf, "draw hazard");
+	}
+}
+
+static void erase_pickup(alp_display_t *disp, const falling_t *f, uint16_t game_h)
+{
+	if (falling_visible(f, PICKUP_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, PICKUP_W, PICKUP_H, erase_buf, "erase pickup");
+	}
+}
+
+/** Advance one pickup; on overlap with the (already-moved) skiff, scores it
+ *  and respawns it immediately so a caught mote doesn't linger under the
+ *  ship.  Scoring only updates g_score here -- the score-bar blit itself
+ *  happens once per tick in grow_score_bar(), not once per pickup, so
+ *  catching two motes in the same tick still costs one bar blit. */
+static void move_pickup(falling_t *f, uint16_t game_w, uint16_t game_h)
+{
+	f->y += f->speed;
+
+	bool collected =
+	    falling_visible(f, PICKUP_H, game_h) &&
+	    aabb_overlap(f->x, f->y, PICKUP_W, PICKUP_H, g_ship_x, g_ship_y, SHIP_W, SHIP_H);
+
+	if ((f->y > (int16_t)game_h) || collected) {
+		spawn_falling(
+		    f, PICKUP_W, PICKUP_H, game_w, game_h, PICKUP_SPEED_LO, PICKUP_SPEED_HI, false);
+	}
+	if (collected) {
+		g_score += POINTS_PER_PICKUP;
+	}
+}
+
+static void draw_pickup(alp_display_t *disp, const falling_t *f, uint16_t game_h)
+{
+	if (falling_visible(f, PICKUP_H, game_h)) {
+		(void)blit_checked(
+		    disp, (uint16_t)f->x, (uint16_t)f->y, PICKUP_W, PICKUP_H, pickup_buf, "draw pickup");
+	}
+}
+
+/** Grow the top-of-screen score bar by whatever was earned this tick.
+ *  Called once per tick (not once per pickup); no-ops if nothing changed.
+ *  Only the newly-added pixels are blitted -- the bar never gets a full
+ *  redraw, and nothing else ever draws into its reserved rows (see
+ *  falling_visible()), so its already-earned pixels never need repainting
+ *  either. */
 static void grow_score_bar(alp_display_t *disp, uint16_t game_w)
 {
 	uint16_t target_px = (g_score < game_w) ? (uint16_t)g_score : game_w;
 
 	if (target_px <= g_score_bar_px) {
-		return; /* bar already capped at game_w -- nothing new to paint */
+		return; /* bar already capped at game_w, or nothing new to paint */
 	}
 
 	uint16_t new_w = target_px - g_score_bar_px;
 
-	(void)alp_display_blit(
-	    disp, g_score_bar_px, SCORE_BAR_Y, new_w, SCORE_BAR_H, score_bar_seg_buf);
+	(void)blit_checked(
+	    disp, g_score_bar_px, SCORE_BAR_Y, new_w, SCORE_BAR_H, score_bar_seg_buf, "grow score bar");
 	g_score_bar_px = target_px;
 }
 
-/** Move + redraw one pickup; on overlap with the skiff, scores it and
- *  respawns it immediately (so a caught mote doesn't linger on the ship). */
-static void update_pickup(falling_t *f, alp_display_t *disp, uint16_t game_w, uint16_t game_h)
+static void erase_ship(alp_display_t *disp)
 {
-	if (falling_visible(f, PICKUP_H, game_h)) {
-		(void)alp_display_blit(disp, (uint16_t)f->x, (uint16_t)f->y, PICKUP_W, PICKUP_H, erase_buf);
-	}
-
-	f->y += f->speed;
-
-	bool visible = falling_visible(f, PICKUP_H, game_h);
-	bool collected =
-	    visible && aabb_overlap(f->x, f->y, PICKUP_W, PICKUP_H, g_ship_x, g_ship_y, SHIP_W, SHIP_H);
-
-	if ((f->y > (int16_t)game_h) || collected) {
-		spawn_falling(
-		    f, PICKUP_W, PICKUP_H, game_w, game_h, PICKUP_SPEED_LO, PICKUP_SPEED_HI, false);
-		visible = false; /* just respawned off-screen; nothing to draw this tick */
-	}
-
-	if (collected) {
-		g_score += POINTS_PER_PICKUP;
-		grow_score_bar(disp, game_w);
-	}
-
-	if (visible) {
-		(void)alp_display_blit(
-		    disp, (uint16_t)f->x, (uint16_t)f->y, PICKUP_W, PICKUP_H, pickup_buf);
-	}
+	(void)blit_checked(
+	    disp, (uint16_t)g_ship_x, (uint16_t)g_ship_y, SHIP_W, SHIP_H, erase_buf, "erase ship");
 }
 
-/** Deterministic self-steering sweep for when there is no working IMU: a
- *  triangle wave in [-1, 1] with no libm dependency (a real sin() would
- *  work just as well, but a game this small has no other need for libm,
- *  so this stays a plain integer-driven ramp). */
-static float attract_steer(void)
+/** Advance the skiff by the current smoothed steer value (Q8 fixed point --
+ *  see the file header's FIXED POINT section), clamped to stay on the
+ *  panel.  Position is tracked as sub-pixel Q8 (g_ship_pos_q8), rounded to
+ *  a whole pixel only for drawing/collision, so a small steady tilt still
+ *  accumulates real motion instead of truncating to zero every tick. */
+static void move_ship(uint16_t game_w, int32_t steer_q8)
 {
-	uint32_t phase = g_frame_count % ATTRACT_PERIOD_TICKS;
-	float    t     = (float)phase / (float)ATTRACT_PERIOD_TICKS;
+	g_ship_pos_q8 += steer_q8 * (int32_t)SHIP_SPEED_PX_PER_TICK;
 
-	return (t < 0.5f) ? (4.0f * t - 1.0f) : (3.0f - 4.0f * t);
+	int16_t new_x = q8_round_to_px(g_ship_pos_q8);
+
+	if (new_x < 0) {
+		new_x         = 0;
+		g_ship_pos_q8 = 0;
+	} else if (new_x > (int16_t)(game_w - SHIP_W)) {
+		new_x         = (int16_t)(game_w - SHIP_W);
+		g_ship_pos_q8 = (int32_t)new_x << 8;
+	}
+	g_ship_x = new_x;
+}
+
+/** Redraw the skiff at its (possibly unchanged) position.  UNCONDITIONAL,
+ *  every tick -- even a stationary skiff still gets this call.  A stray
+ *  star/hazard/pickup erase blit that happens to land on the skiff's rows
+ *  would otherwise punch a permanent hole in it that never gets patched;
+ *  one 28x28 blit (1568 B) every tick is cheap insurance against that. See
+ *  the file header's tick-order section. */
+static void draw_ship(alp_display_t *disp)
+{
+	(void)blit_checked(
+	    disp, (uint16_t)g_ship_x, (uint16_t)g_ship_y, SHIP_W, SHIP_H, ship_buf, "draw ship");
+}
+
+/** Deterministic self-steering sweep for when there is no working IMU: an
+ *  integer triangle wave in Q8 [-256, 256], no libm dependency (a real
+ *  sin() would work just as well, but this game has no other need for
+ *  libm) and no float (see the file header's FIXED POINT section). */
+static int32_t attract_steer_q8(void)
+{
+	uint32_t half  = ATTRACT_PERIOD_TICKS / 2U;
+	uint32_t phase = g_frame_count % ATTRACT_PERIOD_TICKS;
+
+	if (phase < half) {
+		return (int32_t)((512U * phase) / half) - 256;
+	}
+	return 256 - (int32_t)((512U * (phase - half)) / half);
 }
 
 /** Bring up the BMI323 over the portable I2C surface.  Returns false (never
@@ -521,60 +747,56 @@ static bool imu_init(void)
 		return false;
 	}
 
-	k_msleep(15); /* post-config settle -- same wait aen-bmi323-regcheck uses */
+	/* No extra settle sleep here: bmi323_init()/bmi323_set_accel() already
+	 * wait out the datasheet's own start-up timing internally (see
+	 * <alp/chips/bmi323.h>) -- an additional k_msleep() after them was
+	 * redundant. */
 	return true;
 }
 
-/** One tilt sample, normalized to roughly [-1, 1], dead-zoned.  On a read
- *  error mid-game this returns the last smoothed value unchanged (coasts)
- *  rather than snapping the skiff to center or killing the run. */
-static float read_tilt_steer(void)
+/** One tilt sample in Q8 fixed point (256 == 1.0 g), dead-zoned.  On an
+ *  isolated read error this coasts (returns the last smoothed value)
+ *  rather than snapping the skiff to center or killing the run.  After
+ *  IMU_FAIL_THRESHOLD CONSECUTIVE failures it gives up on the sensor for
+ *  the rest of this run: clears g_imu_ok, prints one line, and every later
+ *  tick short-circuits straight to attract mode without touching the I2C
+ *  bus again -- a wedged sensor must not keep risking a bus-timeout blowing
+ *  the 33 ms tick budget forever. */
+static int32_t read_tilt_steer_q8(void)
 {
 	if (!g_imu_ok) {
-		return attract_steer();
+		return attract_steer_q8();
 	}
 
 	bmi323_axes_t axes;
 	alp_status_t  rc = bmi323_read_accel(&g_imu, &axes);
 
 	if (rc != ALP_OK) {
-		return g_steer_smoothed;
+		g_imu_fail_count++;
+		if (g_imu_fail_count >= IMU_FAIL_THRESHOLD) {
+			g_imu_ok = false;
+			printk("bmi323: %u consecutive read failures (last rc=%d) -- giving up on "
+			       "the IMU for the rest of this run, falling back to attract mode\n",
+			       g_imu_fail_count,
+			       (int)rc);
+			return attract_steer_q8();
+		}
+		return g_steer_smoothed_q8;
 	}
+	g_imu_fail_count = 0U; /* reset the streak on a good read */
 
-	float g = (float)axes.x / BMI323_ACCEL_2G_LSB_PER_G;
+	int32_t g_q8 = axes.x / (int32_t)(BMI323_ACCEL_2G_LSB_PER_G / 256U);
 
-	if (g > 1.0f) {
-		g = 1.0f;
-	} else if (g < -1.0f) {
-		g = -1.0f;
+	if (g_q8 > 256) {
+		g_q8 = 256;
+	} else if (g_q8 < -256) {
+		g_q8 = -256;
 	}
-	if ((g > -BMI323_STEER_DEAD_ZONE) && (g < BMI323_STEER_DEAD_ZONE)) {
-		g = 0.0f;
+	if ((g_q8 > -(int32_t)BMI323_STEER_DEAD_ZONE_Q8) &&
+	    (g_q8 < (int32_t)BMI323_STEER_DEAD_ZONE_Q8)) {
+		g_q8 = 0;
 	}
-	return g;
-}
-
-/** Move the skiff by the current smoothed steer value, clamped to stay on
- *  the panel.  Only blits (erase old + draw new) when the position
- *  actually changed -- sitting still in the dead zone costs zero blits. */
-static void update_ship(alp_display_t *disp, uint16_t game_w, float steer)
-{
-	int16_t old_x = g_ship_x;
-	int16_t new_x = (int16_t)(old_x + (int16_t)(steer * SHIP_SPEED_PX_PER_TICK));
-
-	if (new_x < 0) {
-		new_x = 0;
-	} else if (new_x > (int16_t)(game_w - SHIP_W)) {
-		new_x = (int16_t)(game_w - SHIP_W);
-	}
-
-	if (new_x == old_x) {
-		return;
-	}
-
-	(void)alp_display_blit(disp, (uint16_t)old_x, (uint16_t)g_ship_y, SHIP_W, SHIP_H, erase_buf);
-	g_ship_x = new_x;
-	(void)alp_display_blit(disp, (uint16_t)g_ship_x, (uint16_t)g_ship_y, SHIP_W, SHIP_H, ship_buf);
+	return g_q8;
 }
 
 /**
@@ -582,19 +804,24 @@ static void update_ship(alp_display_t *disp, uint16_t game_w, float steer)
  * bottom-center, every hazard/pickup/star reseeded.  alp_display_clear()
  * here is the ONE deliberate full-panel touch in this app -- it only runs
  * once per life, never in the per-tick hot path the file header describes,
- * so it doesn't compete with the dirty-rect budget above.
+ * so it doesn't compete with the dirty-rect budget above.  g_imu_ok /
+ * g_imu_fail_count are deliberately NOT reset here: once the IMU is given
+ * up on mid-run, it stays given up on for every remaining life too, rather
+ * than re-risking the same bus timeout on the very next tick after a
+ * restart.
  */
 static void reset_game(alp_display_t *disp, uint16_t game_w, uint16_t game_h)
 {
-	(void)alp_display_clear(disp);
+	(void)clear_checked(disp, "reset_game clear");
 
-	g_score          = 0U;
-	g_score_bar_px   = 0U;
-	g_steer_smoothed = 0.0f;
+	g_score             = 0U;
+	g_score_bar_px      = 0U;
+	g_steer_smoothed_q8 = 0;
 
-	g_ship_x = (int16_t)((game_w - SHIP_W) / 2U);
-	g_ship_y = (int16_t)(game_h - SHIP_H - SHIP_BOTTOM_MARGIN);
-	(void)alp_display_blit(disp, (uint16_t)g_ship_x, (uint16_t)g_ship_y, SHIP_W, SHIP_H, ship_buf);
+	g_ship_x      = (int16_t)((game_w - SHIP_W) / 2U);
+	g_ship_y      = (int16_t)(game_h - SHIP_H - SHIP_BOTTOM_MARGIN);
+	g_ship_pos_q8 = (int32_t)g_ship_x << 8;
+	draw_ship(disp);
 
 	for (uint32_t i = 0U; i < N_STARS; i++) {
 		spawn_falling(
@@ -667,10 +894,28 @@ int main(void)
 		alp_display_close(disp);
 		return 0;
 	}
+
+	/* Guard the spawn maths below: rng_range(0, game_w - w) would divide
+	 * by zero (or hand a negative bound to an unsigned cast) if the panel
+	 * were smaller than the biggest sprite plus the ship's own bottom
+	 * margin and the score bar.  Every AEN panel target dwarfs this, but
+	 * fail loudly instead of silently underflowing if that ever changes. */
+	uint16_t min_h = (uint16_t)(SHIP_BOTTOM_MARGIN + SHIP_H + SCORE_BAR_H);
+
+	if ((caps.width < SHIP_W) || (caps.height < min_h)) {
+		printk("RESULT FAIL: panel %ux%u is smaller than this game's sprites need "
+		       "(min %ux%u) -- refusing to run rather than underflow the spawn maths.\n",
+		       caps.width,
+		       caps.height,
+		       (unsigned)SHIP_W,
+		       (unsigned)min_h);
+		alp_display_close(disp);
+		return 0;
+	}
 	printk("display: %ux%u RGB565\n", caps.width, caps.height);
 
 	build_sprites();
-	rng_seed((uint32_t)k_uptime_get());
+	rng_seed(k_cycle_get_32());
 
 	g_imu_ok = imu_init();
 	if (!g_imu_ok) {
@@ -685,26 +930,68 @@ int main(void)
 	while (true) {
 		int64_t tick_start_ms = k_uptime_get();
 
-		float raw = read_tilt_steer();
+		int32_t raw_q8 = read_tilt_steer_q8();
 
-		g_steer_smoothed += (raw - g_steer_smoothed) * BMI323_STEER_SMOOTH_ALPHA;
+		g_steer_smoothed_q8 +=
+		    ((raw_q8 - g_steer_smoothed_q8) * (int32_t)BMI323_STEER_SMOOTH_ALPHA_Q8) >> 8;
 
-		update_stars(disp, caps.width, caps.height);
-		update_ship(disp, caps.width, g_steer_smoothed);
+		/* --- ERASE phase: every moving entity's OLD rect goes back to
+		 * background before anything moves this tick.  See the file
+		 * header's tick-order invariant. */
+		erase_ship(disp);
+		for (uint32_t i = 0U; i < N_STARS; i++) {
+			erase_star(disp, &stars[i], caps.height);
+		}
+		for (uint32_t i = 0U; i < N_HAZARDS; i++) {
+			erase_hazard(disp, &hazards[i], caps.height);
+		}
+		for (uint32_t i = 0U; i < N_PICKUPS; i++) {
+			erase_pickup(disp, &pickups[i], caps.height);
+		}
+
+		/* --- MOVE phase: update every position/score/collision for
+		 * THIS tick only -- no drawing here.  The skiff moves first so
+		 * hazard/pickup collision checks use this tick's ship
+		 * position, not last tick's. */
+		move_ship(caps.width, g_steer_smoothed_q8);
 
 		bool collided = false;
 
 		for (uint32_t i = 0U; i < N_HAZARDS; i++) {
-			update_hazard(&hazards[i], disp, caps.width, caps.height, &collided);
+			move_hazard(&hazards[i], caps.width, caps.height, &collided);
 		}
 		for (uint32_t i = 0U; i < N_PICKUPS; i++) {
-			update_pickup(&pickups[i], disp, caps.width, caps.height);
+			move_pickup(&pickups[i], caps.width, caps.height);
 		}
+		for (uint32_t i = 0U; i < N_STARS; i++) {
+			move_star(&stars[i], caps.width, caps.height);
+		}
+
+		/* --- DRAW phase: repaint every entity at its NEW rect.  The
+		 * skiff is unconditional (see draw_ship()); the score bar is
+		 * a single call that no-ops if nothing was earned this tick. */
+		draw_ship(disp);
+		for (uint32_t i = 0U; i < N_STARS; i++) {
+			draw_star(disp, &stars[i], caps.height);
+		}
+		for (uint32_t i = 0U; i < N_HAZARDS; i++) {
+			draw_hazard(disp, &hazards[i], caps.height);
+		}
+		for (uint32_t i = 0U; i < N_PICKUPS; i++) {
+			draw_pickup(disp, &pickups[i], caps.height);
+		}
+		grow_score_bar(disp, caps.width);
 
 		if (collided) {
 			printk("RESULT: run ended -- score=%u\n", g_score);
 			k_msleep(1500); /* let the final frame stay readable before restarting */
 			reset_game(disp, caps.width, caps.height);
+
+			/* The fps window below spans the pause above; reset it
+			 * here so the first post-death report isn't diluted by
+			 * ~1.5 s of "frames" that were really dead time. */
+			last_report_ms      = k_uptime_get();
+			frames_since_report = 0U;
 		}
 
 		g_frame_count++;

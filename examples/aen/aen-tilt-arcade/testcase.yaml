@@ -16,9 +16,9 @@ sample:
     Bench RAM-run original arcade game on the RK055HDMIPI4MA0 (720x1280
     portrait) panel: a tilt-steered craft dodges falling hazards and
     collects pickups, rendered via alp_display_blit() dirty rects (never a
-    full-frame redraw) and steered from the on-module BMI323 accelerometer
-    over portable I2C. Falls back to a self-steering attract mode when the
-    IMU is absent or fails to init.
+    full-frame redraw) and steered from the carrier BMI323 (U13, soldered on
+    the E1M-EVK, not the SoM) accelerometer over portable I2C. Falls back to
+    a self-steering attract mode when the IMU is absent or fails to init.
 
 tests:
   alp_sdk.examples.aen.tilt_arcade.aen:

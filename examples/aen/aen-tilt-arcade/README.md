@@ -13,9 +13,8 @@ the score, shown as a growing green bar across the top of the screen. A run
 ends on the first shard touch, pauses briefly so the final frame stays
 readable, then restarts with the score and every entity reset.
 
-There is no touch input on this panel -- the touch controller is unusable on
-this hardware (see the shield overlay's own header) -- so steering is
-tilt-only.
+There is no touch input on this panel -- no touch driver is bound yet (#2199,
+see the shield overlay's own header) -- so steering is tilt-only.
 
 ## What it shows
 
@@ -29,7 +28,9 @@ tilt-only.
   Every sprite (skiff, shards, motes, the starfield) is erased at its old
   position and redrawn at its new one with a small blit (28x28 at most), and
   a stationary sprite costs zero blits.
-- **Tilt steering from the on-module BMI323**, via its natural-name driver
+- **Tilt steering from the carrier BMI323** (designator U13, soldered on
+  the E1M-EVK -- not the SoM; see `metadata/chips/bmi323.yaml` and
+  `metadata/boards/e1m-evk.yaml`), via its natural-name driver
   `<alp/chips/bmi323.h>` over the portable I2C surface
   (`<alp/peripheral.h>`). Bus + address come from
   `metadata/boards/e1m-evk.yaml`'s BMI323 entry
@@ -48,16 +49,23 @@ known intermittent cold-boot init failure (#2199).
 
 - E1M-AEN801 or E1M-AEN803 SoM (Alif Ensemble E8, M55-HE) on the E1M-EVK.
 - RK055HDMIPI4MA0 panel on connector J6 (`e1m_evk_rk055hdmipi4ma0` shield).
-- The on-module BMI323 IMU (optional -- the game runs in attract mode
+- The carrier BMI323 IMU (U13, optional -- the game runs in attract mode
   without it).
 
 ## Build
 
 ```
-west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-tilt-arcade
-west flash
+ZEPHYR_BASE=<zephyr-base> west build \
+  -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+  examples/aen/aen-tilt-arcade -- \
+  "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>"
 ```
 
 The shield is appended by `CMakeLists.txt`, so a plain `west build` needs no
-`-DSHIELD`. Console is the RAM console (`ram_console_buf`, read over SWD) --
-same bench setup as `aen-dsi-display`.
+`-DSHIELD`.
+
+There is no `west flash` here: the board overlay retargets `zephyr,flash` to
+`&itcm` with no MCUboot code partition (see the overlay's own header), so
+there is no flash partition to program. Flash/run is the bench RAM-run
+(J-Link `loadbin` + go to ITCM) -- same bench setup as `aen-dsi-display`.
+Console is the RAM console (`ram_console_buf`, read over SWD).
