@@ -66,50 +66,89 @@
  *
  * NOT ESTABLISHED: which of the eight registers run 52 wrote are
  * individually load-bearing -- only 0x3017 is independently bisected above.
- * The values match mainline, which is the reference, so shipping them
- * together is right, but do not read this as proof the PLL pair alone is
+ * The values matched mainline's full-resolution constants, which were the reference at the time,
+ * so shipping them together was right, but do not read this as proof the PLL pair alone is
  * the whole fix. 0x4837 (PCLK period) is left at its power-on 0x15
- * (mainline writes 0x19 for this PLL); on the safe side at 437.5 Mbps and
- * not changed in the working run.
+ * (mainline writes 0x19 for this PLL); on the safe side at run 52's 437.5 Mbps and now safer
+ * still at run 61's 291.67 Mbps (AUTHORIZED LOCAL DIVERGENCE #3, see OV5647_PLL_MULT) -- not
+ * changed in either working run.
  *
- * AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/60): the driver's 640x480 was a
- * 648x488 1:1 CENTRE CROP -- roughly 25% of the array width, a heavy telephoto crop -- not the
- * full-array subsampled+binned 640x480 both Alif's own validated table for this exact silicon
- * (alif-dfp-ref components/Source/OV5647_camera_sensor.c) and mainline Linux use. Run 60's
- * full-FOV register set (window 0x3800..0x3807 = 0x0010,0x0000..0x0a2f,0x079f; output size
- * 0x3808/0x3809 = 640, 0x380a/0x380b = 480; subsample 0x3814/0x3815 = 0x35; binning
- * 0x3821/0x3820 = 0x07/0x41; binned-mode analog 0x3612/0x3618/0x3708/0x3709 =
- * 0x59/0x00/0x64/0x52), written in software standby after ov5647_set_window() and before the
- * lane park, streamed cleanly with a real, recognisable image. HTS stays the driver's 2700
- * (bench-proven here; Alif's 1852 is untested on this board); the PLL stays as DIVERGENCE #2
- * programs it. Now the 640x480 branch of ov5647_set_mode_regs() below.
+ * AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/58/60/61): the driver's 640x480 was
+ * a 648x488 1:1 CENTRE CROP -- roughly 25% of the array width, a heavy telephoto crop -- not the
+ * sensor's real full-array subsampled+binned 640x480 mode. SOURCE OF TRUTH for this divergence is
+ * the RPi/OmniVision reference driver: raspberrypi/linux branch rpi-6.6.y,
+ * drivers/media/i2c/ov5647.c, ov5647_common_regs[] and ov5647_640x480_10bpp[] -- run 61 applied
+ * those tables verbatim (minus the two registers this driver's own park/reset sequence owns,
+ * 0x0100/0x0103) and streamed cleanly: RX-DDR clock 145833332, hsfrequency bin {300, 0x14},
+ * "[stg] 75 regs 0 failed", MFR start ALP_OK, zero E: lines / CSI fatals, frame CRC-matched
+ * against a real scene. Column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of full scale) per
+ * Bayer plane with runs 56/58/60's mix to 1.0-1.5 LSB (~1.1%) with the reference set, same dark
+ * lab, same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are
+ * gone. AUTHORIZED LOCAL DIVERGENCES #1 and #2 (the lane park and the PLL + MIPI-TX pad-drive
+ * init) are UNCHANGED by this; #3 replaces its own prior (runs 56/58/60) register values with the
+ * reference ones below.
+ *
+ * Alif's own OV5647 table for this exact silicon (alif-dfp-ref
+ * components/Source/OV5647_camera_sensor.c:118-136) is a VARIANT of the same reference, not an
+ * independent source: it shares most analog/BLC/AEC values with RPi's table but diverges at
+ * 0x3821 (0x07, not the reference's 0x01) and ships a larger ISP-enable set. Running Alif's
+ * 0x3821 = 0x07 analog-timing variant on top of run 61's corrected PLL (below) is what produced
+ * the visible stripes runs 56/58/60 bench-proved as "clean" against the OLDER, WRONG full-
+ * resolution PLL -- the stripe reduction above is this file's own regression, fixed by switching
+ * to the reference values wholesale rather than mixing sources.
+ *
+ * 640x480 mode (bench run 61, RPi's ov5647_640x480_10bpp[]): full-array window (unchanged from
+ * runs 56/60: 0x3800..0x3807 = 0x0010,0x0000..0x0a2f,0x079f), output size 640x480 (0x3808/0x3809
+ * = 640, 0x380a/0x380b = 480), subsample 0x3814/0x3815 = 0x35, binning-enable 0x3820 = 0x41 with
+ * 0x3821 = 0x01 (NOT runs 56/58/60's 0x07 -- see below), binned-mode analog 0x3612/0x3618/0x3708/
+ * 0x3709 = 0x59/0x00/0x64/0x52 (unchanged from runs 56/60), and a PER-MODE line length,
+ * 0x380c/0x380d = 0x073c (1852) -- see OV5647_HTS_640X480_BINNED and ov5647_hts_for() below; the
+ * driver-wide OV5647_HTS_CROP (2700, bench-proven, run 52) stays for every other size, since a
+ * wide 1:1 crop needs the longer line (mainline's own full-resolution table uses 2844, itself
+ * UNVERIFIED here). Written in software standby after ov5647_set_window() and before the lane
+ * park, one coherent block per ov5647_set_mode_regs() below.
+ *
+ * 0x3821 bits[2:1] are this driver's existing OV5647_TC_REG21_MIRROR mask (horizontal mirror);
+ * 0x01 (this divergence, bits[2:1] clear) vs 0x07 (runs 56/58/60, Alif's variant, bits[2:1] set)
+ * produced a LEFT-RIGHT-MIRRORED scene on the bench at 0x07 -- 0x01 is the correct,
+ * unmirrored orientation. Per the RPi driver, 0x3821 = 0x01 with 0x3820 = 0x41 is its hflip=1 /
+ * vflip=0 configuration, which the RPi driver pairs with MEDIA_BUS_FMT_SBGGR10_1X10 -- matching
+ * this driver's advertised SBGGR10P/SBGGR8 formats. ABSOLUTE orientation (which edge of the
+ * frame is physically "up") is still UNCONFIRMED against a known real-world scene; only
+ * left-right mirroring relative to the two candidate register values has bench evidence.
  *
  * ORDERING TRAP (bench run 54, MUST NOT be reintroduced): binning is only coherent with the
  * full-array window -- 0x3814 = 0x35 is a ~/4 decimation (2592/4 = 648, 1944/4 = 486). Run 54
  * applied the binning registers and then let ov5647_set_window() rewrite the window to the
  * crop; the sensor emitted short lines against a 640-pixel frame declaration and the CSI host
  * raised "Fatal Interrupt due to mismatch of Frame Start and Frame End" on VC0 44 times in 2 s
- * and delivered nothing. So the window, output size, subsample and binning registers are always
- * written as ONE coherent set per mode -- never binning left on with a crop window. Every OTHER
- * requested size therefore ALSO explicitly writes the 1:1 values (0x3814/0x3815 = 0x11,
- * 0x3820/0x3821 = 0x40/0x00) plus mainline's full-resolution 1:1 analog values
- * (0x3612/0x3618/0x3708/0x3709 = 0x5b/0x04/0x64/0x12, cited from mainline, BENCH-UNVERIFIED on
- * this module) right after ov5647_set_window(), so switching 640x480 -> another size -> back
- * never leaves binning armed on a stale crop window.
+ * and delivered nothing. So the window, output size, subsample, binning AND line-length
+ * registers are always written as ONE coherent set per mode -- never binning (or the binned
+ * mode's HTS) left on with a crop window. Every OTHER requested size therefore ALSO explicitly
+ * writes the 1:1 values (0x3814/0x3815 = 0x11, 0x3820/0x3821 = 0x40/0x00, and OV5647_HTS_CROP)
+ * plus mainline's full-resolution 1:1 analog values (0x3612/0x3618/0x3708/0x3709 =
+ * 0x5b/0x04/0x64/0x12, cited from mainline, BENCH-UNVERIFIED on this module) right after
+ * ov5647_set_window(), so switching 640x480 -> another size -> back never leaves binning (or its
+ * HTS) armed on a stale crop window.
  *
- * Common analog bias / BLC / AEC registers (bench run 58, phases PC/PD/PF, 0 register
- * read-back mismatches, clean streaming): mainline writes these in ov5647_common_regs[] for
- * every mode, and this driver never had. Now appended to ov5647_init_regs[] -- see that array
- * for the values. Deliberately NOT added: the ISP block enables (0x5000..0x5003/0x5a00) -- run
- * 58 phase PB, the only phase that added them, is the phase that threw CSI "incorrect frame
- * sequence" fatals at stream-on. The ISP is left at its power-on state.
+ * Common init (bench run 61): replaces runs 56/58/60's Alif-derived block with RPi's
+ * ov5647_common_regs[] (same source as above), minus 0x0100/0x0103 (owned by this driver's own
+ * park/reset), minus 0x3017 (kept at OUR 0xf0 -- see DIVERGENCE #1/#2 above, a deliberate
+ * divergence from both mainline's 0xe0 and the reference driver), and minus 0x3503 (left to this
+ * driver's existing ov5647_set_ctrl_exposure()/OV5647_MANUAL_CTRL logic, not a static table
+ * value). UNLIKE runs 56/58/60, it INCLUDES the ISP block enables 0x5000 = 0x06, 0x5003 = 0x08,
+ * 0x5a00 = 0x08 -- run 61 streamed clean with them. The run-58 CSI "incorrect frame sequence"
+ * fatals that runs 56/58/60 blamed on "the ISP block enables" generically came from Alif's LARGER
+ * ISP set specifically, which additionally wrote 0x5001/0x5002 and (in the BLC section)
+ * 0x4050/0x4051 -- none of those four are in RPi's reference table and none are written here.
+ * Do NOT add 0x5001, 0x5002, 0x4050 or 0x4051.
  *
- * Also from the same bench pass: OV5647_EXPOSURE_DEFAULT was 0x20 (2 lines in 1/16-line units)
- * -- effectively a closed shutter for any manual-exposure user. Now 0x0FFF (~256 lines),
- * matching the order of magnitude of Alif's own shipped default (~0x000FFF) for this silicon.
- * At the default 15 fps VTS in a dark lab the AEC railed at both its limits (502 lines, 2x the
- * 0x3a0b band step; gain at the 0x3a19 ceiling) and a real image needed ~16000 lines (0.49 s) --
- * a SCENE limitation, not a driver bug; the AEC limits above are left unchanged.
+ * OV5647_EXPOSURE_DEFAULT (unchanged by run 61): was 0x20 (2 lines in 1/16-line units) --
+ * effectively a closed shutter for any manual-exposure user. Now 0x0FFF (~256 lines), matching
+ * the order of magnitude of Alif's own shipped default (~0x000FFF) for this silicon. At the
+ * default 15 fps VTS in a dark lab the AEC railed at both its limits (502 lines, 2x the 0x3a0b
+ * band step; gain at the 0x3a19 ceiling) and a real image needed ~16000 lines (0.49 s) -- a
+ * SCENE limitation, not a driver bug; the AEC limit registers are left unchanged.
  *
  * ACCEPTED COST: ov5647_init() runs at POST_KERNEL on every board that
  * enables this driver and now leaves the sensor parked -- running, with
@@ -125,10 +164,10 @@
  * either re-applied to the upstream-derived driver or confirmed already
  * present in it: DIVERGENCE #1 (the LP-11 lane park), DIVERGENCE #2 (the
  * PLL + MIPI-TX pad-drive init, including the corrected OV5647_PIXEL_RATE
- * derivation), AND DIVERGENCE #3 (the full-FOV binned 640x480 mode, the
- * common analog/BLC/AEC init, and the corrected OV5647_EXPOSURE_DEFAULT) --
- * deleting this file without checking all three silently reintroduces one
- * or more bugs. Do NOT otherwise maintain divergent local
+ * derivation), AND DIVERGENCE #3 (the RPi/OmniVision-reference full-FOV binned 640x480 mode with
+ * its per-mode HTS, the run-61 PLL correction, the matching common init, and the corrected
+ * OV5647_EXPOSURE_DEFAULT) -- deleting this file without checking all three silently
+ * reintroduces one or more bugs. Do NOT otherwise maintain divergent local
  * patches on this file -- open a new PR against upstream instead and
  * re-backport. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
@@ -167,49 +206,78 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
  */
 #define OV5647_WINDOW_MARGIN		8
 
-/* Line length, kept at its power-on value whatever the output size is */
-#define OV5647_HTS			2700
+/*
+ * Line length is now PER MODE (AUTHORIZED LOCAL DIVERGENCE #3, bench run 61) -- see
+ * ov5647_hts_for() near ov5647_set_mode_regs() below, which picks between these two and is the
+ * only thing that should ever read either constant. OV5647_HTS_CROP (bench-proven, run 52) is
+ * the crop path's line length, kept at its original power-on value; OV5647_HTS_640X480_BINNED is
+ * the RPi/OmniVision reference value (raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c,
+ * ov5647_640x480_10bpp[]) for the 640x480 binned mode -- a wide 1:1 crop needs the longer line
+ * (mainline's own full-resolution table uses 2844, UNVERIFIED here; OV5647_HTS_CROP keeps run
+ * 52's bench-proven 2700 instead).
+ */
+#define OV5647_HTS_CROP			2700
+#define OV5647_HTS_640X480_BINNED	0x073c /* 1852 */
 /* Power-on frame length minus the full output height */
 #define OV5647_VBLANK_MIN		24
 
 /*
  * PLL constants for the RAW10 (10bpp) mode ov5647_init() selects -- see AUTHORIZED LOCAL
- * DIVERGENCE #2 in the file header for the bench evidence and ov5647_init_regs[] below for where
- * these actually get written to the sensor. Shared with that register table so the programmed PLL
- * and the declared pixel_rate can never drift apart: VCO = XVCLK / OV5647_PLL_PREDIV *
- * OV5647_PLL_MULT; lane bit rate = VCO / OV5647_PLL_SYS_DIV. At 25 MHz XVCLK: VCO = 875 MHz, lane
- * bit rate = 437.5 Mbps/lane, matching mainline Linux's own declared link_freq (218750000, DDR
- * half-rate) for this PLL.
+ * DIVERGENCE #2 in the file header for the lane-park/pad-drive bench evidence and
+ * ov5647_init_regs[] below for where these actually get written to the sensor. Shared with that
+ * register table so the programmed PLL and the declared pixel_rate can never drift apart:
+ * VCO = XVCLK / OV5647_PLL_PREDIV * OV5647_PLL_MULT; lane bit rate = VCO / OV5647_PLL_SYS_DIV.
+ *
+ * SUPERSEDED (bench run 61, AUTHORIZED LOCAL DIVERGENCE #3): OV5647_PLL_MULT was 105 (VCO
+ * 875 MHz, 437.5 Mbps/lane, matching mainline's link_freq for the FULL-RESOLUTION mode, 218750000)
+ * from run 52's original PLL fix. Run 61 replaced it with the RPi/OmniVision reference value for
+ * the 640x480 10bpp mode -- raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c,
+ * ov5647_640x480_10bpp[] -- giving OV5647_PLL_MULT = 70 (0x46): VCO = 25 MHz / 3 * 70 =
+ * 583.33 MHz, lane bit rate = 583.33 MHz / 2 = 291.67 Mbps/lane, matching that reference's own
+ * declared pixel_rate (58333000) to within integer-truncation rounding (our derivation below
+ * computes 58333333 -- a 333 Hz, ~0.0006% difference, from truncating integer division, not a
+ * different PLL). Bench-confirmed: the CSI-2 receiver measured RX-DDR clock 145833332 Hz,
+ * hsfrequency bin {300 MHz, 0x14} -- 145833332 = 58333000 * 10 / (2 * 2), i.e. exactly
+ * pixel_rate * bpp / (2 * lanes), confirming the receiver locked to this PLL, not run 52's.
+ *
+ * ONE GLOBAL PLL, deliberately, for both the 640x480 binned mode and the crop path: this file has
+ * one ov5647_init_regs[] PLL write, not a per-mode PLL swap, so the crop path now also runs at
+ * 291.67 Mbps/lane -- slower than mainline's OWN declared PLL for its full-resolution crop mode
+ * (which run 52's 875 MHz VCO approximated, not run 61's). That is safe (a lower bit rate cannot
+ * exceed the receiver's timing budget) but UNVERIFIED against mainline's actual crop-mode PLL
+ * constants; only the 640x480 binned mode has bench evidence for this exact PLL (run 61). The
+ * crop path's HTS stays the independently bench-proven OV5647_HTS_CROP (run 52, unchanged) --
+ * see the per-mode HTS split at OV5647_HTS_640X480_BINNED below.
  */
 #define OV5647_PLL_PREDIV		3
-#define OV5647_PLL_MULT			105
+#define OV5647_PLL_MULT			70
 #define OV5647_PLL_SYS_DIV		2
 
 /*
  * pixel_rate = lane bit rate * lanes / bpp = (XVCLK / sysdiv * mult / prediv) * 2 / 10 (divide by
  * sysdiv first, not prediv, to stay exact and inside int32 range for every XVCLK in
- * [OV5647_INPUT_CLK_MIN, OV5647_INPUT_CLK_MAX]). At 25 MHz XVCLK: 87500000, matching mainline's
- * own declared pixel_rate for this PLL. Feeds BOTH VIDEO_CID_PIXEL_RATE and
- * ov5647_frmrate_to_vts() below -- it sets the programmed TIMING_VTS too (87500000/(2700*15) =
- * 2160 instead of the previous, power-on-PLL-derived 2058; ov5647_enum_frmival() only rejects a
- * frame rate whose VTS would undercut the read-out height, so the larger, correct VTS just changes
- * which of the fixed ov5647_framerates[] entries are reachable, which is expected).
+ * [OV5647_INPUT_CLK_MIN, OV5647_INPUT_CLK_MAX]). At 25 MHz XVCLK: 58333333, matching (to
+ * integer-truncation rounding -- see the PLL constants comment above) the RPi/OmniVision
+ * reference's own declared pixel_rate (58333000) for the 640x480 10bpp mode. Feeds BOTH
+ * VIDEO_CID_PIXEL_RATE and ov5647_frmrate_to_vts() below -- TIMING_VTS is now derived per the
+ * ACTIVE mode's HTS (OV5647_HTS_640X480_BINNED or OV5647_HTS_CROP), not one constant; see
+ * ov5647_hts_for() near ov5647_set_mode_regs().
  *
- * A previous attempt to "correct" this macro alone, in isolation, to a PLL-derived 175000000
- * (issue #2248) was reverted -- not because the number was wrong, but because nothing programmed
- * the PLL to match it: the reverted number was actually right about the power-on link rate (see
- * DIVERGENCE #2), and "it doubled the programmed VTS" was the correct consequence of a doubled
- * pixel clock, not evidence against it. The defect was that the PLL was never WRITTEN at all; see
- * docs/camera-shields.md.
+ * HISTORY: an earlier attempt to "correct" this macro alone, in isolation, to a PLL-derived
+ * 175000000 (issue #2248) was reverted, then run 52 fixed it properly with OV5647_PLL_MULT = 105
+ * (875 MHz VCO, 437.5 Mbps/lane) -- matched to mainline's declared constants for its
+ * FULL-RESOLUTION mode, not the 640x480 mode this driver actually ships. Run 61 (this comment)
+ * supersedes that: PLL_MULT = 70, matched to mainline's OWN 640x480 10bpp table instead of its
+ * full-resolution one, per bench evidence in the PLL constants comment above.
  *
  * NOT bench-verified for 8-bit: cfg->pixel_rate below is a single value computed once from DT at
  * OV5647_INIT() time, not re-derived per selected format. ov5647_set_fmt() does reprogram 0x3034's
  * OV5647_MIPI_BIT_MODE field per format (RAW8 vs RAW10), but nothing here recomputes pixel_rate to
  * match, so selecting VIDEO_PIX_FMT_SBGGR8 (8bpp) still reports the RAW10 value. Video_get_csi_
  * link_freq()'s PIXEL_RATE fallback (zephyr/drivers/video/video_common.c) computes link_freq =
- * pixel_rate * bpp / (2*lanes); at the same 875 MHz VCO, 8bpp would need pixel_rate = 437.5e6 * 2 /
- * 8 = 109375000, not 87500000, to feed that formula correctly. Only RAW10 is bench-proven (run
- * 52) -- flagging this gap, not shipping an unverified 8-bit number.
+ * pixel_rate * bpp / (2*lanes); at the same 583.33 MHz VCO, 8bpp would need pixel_rate =
+ * 291.67e6 * 2 / 8 = 72916666, not 58333333, to feed that formula correctly. Only RAW10 is
+ * bench-proven (runs 52/61) -- flagging this gap, not shipping an unverified 8-bit number.
  */
 #define OV5647_PIXEL_RATE(clk) \
 	((clk) / OV5647_PLL_SYS_DIV * OV5647_PLL_MULT / OV5647_PLL_PREDIV * 2 / OV5647_MIPI_BIT_MODE_RAW10)
@@ -227,10 +295,10 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_CHIP_ID_REG		OV5647_REG16(0x300a)
 #define OV5647_SC_MIPI_PHY		OV5647_REG8(0x3016)
 #define OV5647_MIPI_PAD_ENABLE		BIT(3)
+/* 0x3018 (MIPI PHY/route control) is now a literal write in ov5647_init_regs[] (run 61's
+ * reference byte 0x44), not a targeted bitfield modify -- no local mask constants needed.
+ */
 #define OV5647_SC_MIPI_SC_CTRL		OV5647_REG8(0x3018)
-#define OV5647_PHY_PD_MIPI		BIT(4)
-#define OV5647_PHY_PD_LPRX		BIT(3)
-#define OV5647_MIPI_EN			BIT(2)
 #define OV5647_SC_PLL_CTRL0		OV5647_REG8(0x3034)
 #define OV5647_MIPI_BIT_MODE		GENMASK(3, 0)
 #define OV5647_EXPOSURE			OV5647_REG24(0x3500)
@@ -263,15 +331,19 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
  * Subsample (0x3814/0x3815) and binning-enable bits of 0x3820/0x3821 (AUTHORIZED LOCAL
- * DIVERGENCE #3, issue #2248, bench runs 56/58/60) -- see the file header for the full
- * write-up. ov5647_set_mode_regs() below writes the whole window/output/subsample/binning set
- * as ONE coherent block per mode: binning is only coherent with the full-array window (0x3814 =
- * 0x35 is a ~/4 decimation), and bench run 54 proved leaving it armed on a crop window throws
- * CSI-2 frame-start/frame-end mismatches with no image delivered -- see the ORDERING TRAP note
- * in the file header. The base 0x3820/0x3821 values below deliberately leave the mirror/flip
- * bits (OV5647_TC_REG20_VFLIP / OV5647_TC_REG21_MIRROR) at 0 -- ov5647_set_ctrl()'s HFLIP/VFLIP
- * handlers read-modify-write only those two bits, so a format change resets any previously
- * requested mirror/flip and a caller must reapply VIDEO_CID_HFLIP/VFLIP after set_format().
+ * DIVERGENCE #3, issue #2248, bench runs 56/58/60/61 -- run 61 is current, see the file header)
+ * -- see the file header for the full write-up. ov5647_set_mode_regs() below writes the whole
+ * window/output/subsample/binning/HTS set as ONE coherent block per mode: binning is only
+ * coherent with the full-array window (0x3814 = 0x35 is a ~/4 decimation), and bench run 54
+ * proved leaving it armed on a crop window throws CSI-2 frame-start/frame-end mismatches with no
+ * image delivered -- see the ORDERING TRAP note in the file header. The 1:1 base value
+ * (OV5647_TC_REG21_1TO1 = 0x00) leaves the mirror/flip bits (OV5647_TC_REG20_VFLIP /
+ * OV5647_TC_REG21_MIRROR) at 0, but the binned mode's reference value (OV5647_TC_REG21_BINNED =
+ * 0x01, run 61) does NOT -- its bits[2:1] are clear (mirror off) but bit0 is set; see the file
+ * header's orientation note for what bits[2:1] control. ov5647_set_ctrl()'s HFLIP/VFLIP handlers
+ * read-modify-write only bits[2:1], so a format change still resets any previously requested
+ * mirror/flip to each mode's base value and a caller must reapply VIDEO_CID_HFLIP/VFLIP after
+ * set_format().
  */
 #define OV5647_TIMING_X_INC		OV5647_REG8(0x3814)
 #define OV5647_TIMING_Y_INC		OV5647_REG8(0x3815)
@@ -280,7 +352,8 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_TC_REG20_1TO1		0x40
 #define OV5647_TC_REG20_BINNED		0x41
 #define OV5647_TC_REG21_1TO1		0x00
-#define OV5647_TC_REG21_BINNED		0x07
+/* 0x01, not Alif's variant 0x07 -- run 61, see the file header's orientation note */
+#define OV5647_TC_REG21_BINNED		0x01
 
 /*
  * Analog registers that must track the subsample/binning mode above (same divergence, same
@@ -415,16 +488,26 @@ struct ov5647_data {
 };
 
 /*
- * Common analog bias / BLC / AEC init (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248, bench run
- * 58 phases PC/PD/PF -- 0 register read-back mismatches, clean streaming). Mainline writes these
- * in ov5647_common_regs[] for every mode; this driver never had. None of these addresses is
+ * Common init (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248, bench run 61 -- "[stg] 75 regs 0
+ * failed", MFR start ALP_OK, zero E: lines / CSI fatals, frame CRC-matched). Source of truth is
+ * raspberrypi/linux branch rpi-6.6.y, drivers/media/i2c/ov5647.c, ov5647_common_regs[] --
+ * applied verbatim here, minus 0x0100/0x0103 (this driver's own park/reset own those), minus
+ * 0x3017 (kept at OUR 0xf0, see AUTHORIZED LOCAL DIVERGENCE #1/#2 above), and minus 0x3503 (left
+ * to ov5647_set_ctrl_exposure()'s existing OV5647_MANUAL_CTRL logic). None of these addresses is
  * documented in the datasheet register map available to us, so they keep the file's existing
  * RSVD_<addr> naming (see OV5647_SC_PLL_CTRL_RSVD_303C above) rather than a guessed semantic
- * name -- bench-confirmed values only. Deliberately NOT added: the ISP block enables
- * (0x5000..0x5003/0x5a00) -- run 58 phase PB, the only phase that added them, is the phase that
- * threw CSI "incorrect frame sequence" fatals at stream-on. The ISP is left at its power-on
- * state.
+ * name. SUPERSEDES bench run 58's Alif-derived block (runs 56/58/60): that block matched this
+ * one for most addresses but diverged at 0x3821 (Alif 0x07 vs this reference's 0x01 -- see the
+ * file header's orientation note) and OMITTED the ISP block enables entirely, describing them as
+ * unsafe; that was imprecise -- run 58's CSI "incorrect frame sequence" fatals came from Alif's
+ * LARGER ISP set (which also wrote 0x5001/0x5002, and separately 0x4050/0x4051 in the BLC
+ * section), not from ISP enables as a category. This block INCLUDES the three RPi lists
+ * (0x5000/0x5003/0x5a00) and OMITS the four Alif-only additions
+ * (0x5001/0x5002/0x4050/0x4051) -- do not add those four back.
  */
+#define OV5647_SYSTEM_RSVD_3000	OV5647_REG8(0x3000)
+#define OV5647_SYSTEM_RSVD_3001	OV5647_REG8(0x3001)
+#define OV5647_SYSTEM_RSVD_3002	OV5647_REG8(0x3002)
 #define OV5647_ANALOG_RSVD_370C	OV5647_REG8(0x370c)
 #define OV5647_ANALOG_RSVD_3630	OV5647_REG8(0x3630)
 #define OV5647_ANALOG_RSVD_3632	OV5647_REG8(0x3632)
@@ -450,8 +533,6 @@ struct ov5647_data {
 #define OV5647_BLC_RSVD_4001		OV5647_REG8(0x4001)
 #define OV5647_BLC_RSVD_4004		OV5647_REG8(0x4004)
 #define OV5647_BLC_RSVD_4000		OV5647_REG8(0x4000)
-#define OV5647_BLC_RSVD_4050		OV5647_REG8(0x4050)
-#define OV5647_BLC_RSVD_4051		OV5647_REG8(0x4051)
 #define OV5647_AEC_RSVD_3A18		OV5647_REG8(0x3a18)
 #define OV5647_AEC_RSVD_3A19		OV5647_REG8(0x3a19)
 #define OV5647_AEC_RSVD_3A08		OV5647_REG8(0x3a08)
@@ -466,13 +547,19 @@ struct ov5647_data {
 #define OV5647_AEC_RSVD_3A1E		OV5647_REG8(0x3a1e)
 #define OV5647_AEC_RSVD_3A11		OV5647_REG8(0x3a11)
 #define OV5647_AEC_RSVD_3A1F		OV5647_REG8(0x3a1f)
+/* ISP block enables -- run 61, part of RPi's ov5647_common_regs[]; see the block comment above
+ * for why 0x5001/0x5002 (Alif-only, run-58 CSI fatals) are deliberately NOT declared here.
+ */
+#define OV5647_ISP_RSVD_5000		OV5647_REG8(0x5000)
+#define OV5647_ISP_RSVD_5003		OV5647_REG8(0x5003)
+#define OV5647_ISP_RSVD_5A00		OV5647_REG8(0x5a00)
 
 static const struct video_reg ov5647_init_regs[] = {
 	/* PLL + MIPI-TX pad-drive init -- see the block comment above OV5647_SC_PLL_CTRL1 for why
 	 * this must run here (software standby, before ov5647_lane_park()) and not be reordered.
 	 */
 	{OV5647_SC_PLL_CTRL3, OV5647_PLL_PREDIV}, /* bits[3:0] prediv=3, bit4 root_div=0 (/1) */
-	{OV5647_SC_PLL_MULTIPLIER, OV5647_PLL_MULT}, /* full-byte multiplier = 105 */
+	{OV5647_SC_PLL_MULTIPLIER, OV5647_PLL_MULT}, /* full-byte multiplier = 70 (0x46), run 61 */
 	{OV5647_SC_PLL_CTRL1, (OV5647_PLL_SYS_DIV << 4) | 0x1}, /* bits[7:4] sysdiv=2; low nibble
 								  * unchanged from power-on (0x11)
 								  */
@@ -485,11 +572,22 @@ static const struct video_reg ov5647_init_regs[] = {
 	{OV5647_IO_PAD_CTRL2, 0xf0},
 	{OV5647_SC_CLKRST_RSVD_3106, 0xf5},
 	{OV5647_SC_MIPI_PHY, OV5647_MIPI_PAD_ENABLE},
-	/* Drive the frame length from TIMING_VTS instead of letting the AEC stretch it */
+	/* Drive the frame length from TIMING_VTS instead of letting the AEC stretch it. HTS is now
+	 * PER MODE (AUTHORIZED LOCAL DIVERGENCE #3, run 61) -- ov5647_set_mode_regs() writes
+	 * OV5647_TIMING_HTS_REG as part of each mode's coherent register block, not here.
+	 */
 	{OV5647_MANUAL_CTRL, OV5647_MANUAL_CTRL_VTS},
 	{OV5647_VTS_DIFF, 0},
-	{OV5647_TIMING_HTS_REG, OV5647_HTS},
-	/* Common analog bias / misc (AUTHORIZED LOCAL DIVERGENCE #3, bench run 58 phase PC) */
+	/* Common init (AUTHORIZED LOCAL DIVERGENCE #3, run 61) -- see the block comment above
+	 * OV5647_SYSTEM_RSVD_3000 for the source and what was deliberately left out.
+	 */
+	{OV5647_SYSTEM_RSVD_3000, 0x00},
+	{OV5647_SYSTEM_RSVD_3001, 0x00},
+	{OV5647_SYSTEM_RSVD_3002, 0x00},
+	{OV5647_SC_MIPI_SC_CTRL, 0x44}, /* MIPI_EN set, PHY_PD_MIPI/PHY_PD_LPRX clear, per RPi's
+					  * literal reference byte -- supersedes the old
+					  * bitfield-only video_modify_cci_reg() call below
+					  */
 	{OV5647_ANALOG_RSVD_370C, 0x03},
 	{OV5647_ANALOG_RSVD_3630, 0x2e},
 	{OV5647_ANALOG_RSVD_3632, 0xe2},
@@ -512,14 +610,12 @@ static const struct video_reg ov5647_init_regs[] = {
 	{OV5647_ANALOG_RSVD_3B07, 0x0c},
 	{OV5647_ANALOG_RSVD_3636, 0x06},
 	{OV5647_ANALOG_RSVD_3827, 0xec},
-	/* BLC (bench run 58 phase PD) */
+	/* BLC (run 61; matches bench run 58's earlier values) */
 	{OV5647_BLC_RSVD_4001, 0x02},
 	{OV5647_BLC_RSVD_4004, 0x02},
 	{OV5647_BLC_RSVD_4000, 0x09},
-	{OV5647_BLC_RSVD_4050, 0x6e},
-	{OV5647_BLC_RSVD_4051, 0x8f},
-	/* AEC target/limits (bench run 58 phase PF); left unchanged -- see the file header's
-	 * low-light note, a scene limitation, not a driver bug.
+	/* AEC target/limits (run 61; matches bench run 58's earlier values); left unchanged --
+	 * see the file header's low-light note, a scene limitation, not a driver bug.
 	 */
 	{OV5647_AEC_RSVD_3A18, 0x00},
 	{OV5647_AEC_RSVD_3A19, 0xf8},
@@ -535,6 +631,12 @@ static const struct video_reg ov5647_init_regs[] = {
 	{OV5647_AEC_RSVD_3A1E, 0x50},
 	{OV5647_AEC_RSVD_3A11, 0x60},
 	{OV5647_AEC_RSVD_3A1F, 0x28},
+	/* ISP block enables (run 61) -- see the block comment above OV5647_ISP_RSVD_5000 for why
+	 * 0x5001/0x5002 are deliberately NOT here.
+	 */
+	{OV5647_ISP_RSVD_5000, 0x06},
+	{OV5647_ISP_RSVD_5003, 0x08},
+	{OV5647_ISP_RSVD_5A00, 0x08},
 };
 
 enum ov5647_fmt_id {
@@ -559,11 +661,26 @@ static const struct video_format_cap ov5647_fmts[] = {
 /* Frame rates from datasheet table 2-1, plus a slower one usable at any resolution */
 static const uint32_t ov5647_framerates[] = {10, 15, 30, 45, 60, 90, 120};
 
-static uint32_t ov5647_frmrate_to_vts(const struct device *dev, uint32_t frmrate)
+/*
+ * Which HTS applies to @p width x @p height (AUTHORIZED LOCAL DIVERGENCE #3, bench run 61):
+ * OV5647_HTS_640X480_BINNED for exactly the 640x480 binned mode, OV5647_HTS_CROP for every
+ * other (crop-path) size -- see the OV5647_HTS_640X480_BINNED/OV5647_HTS_CROP comment above for
+ * why HTS is per-mode, not one driver-wide constant.
+ */
+static uint32_t ov5647_hts_for(uint32_t width, uint32_t height)
+{
+	if (width == OV5647_MODE_640X480_WIDTH && height == OV5647_MODE_640X480_HEIGHT) {
+		return OV5647_HTS_640X480_BINNED;
+	}
+
+	return OV5647_HTS_CROP;
+}
+
+static uint32_t ov5647_frmrate_to_vts(const struct device *dev, uint32_t hts, uint32_t frmrate)
 {
 	const struct ov5647_config *cfg = dev->config;
 
-	return cfg->pixel_rate / (OV5647_HTS * frmrate);
+	return cfg->pixel_rate / (hts * frmrate);
 }
 
 static int ov5647_set_window(const struct device *dev, uint32_t width, uint32_t height)
@@ -584,13 +701,14 @@ static int ov5647_set_window(const struct device *dev, uint32_t width, uint32_t 
 }
 
 /*
- * Pick the window/output-size/subsample/binning/analog register set for @p width x @p height
- * (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248) and write it as ONE coherent block -- see the
- * ORDERING TRAP note in the file header for why binning must never be written apart from the
- * full-array window it depends on. 640x480 gets the bench-proven full-FOV binned mode (run 60);
- * every other size keeps today's centred-crop window (ov5647_set_window()) but now also
- * explicitly re-asserts the 1:1 subsample/binning/analog values, so a prior 640x480 selection
- * can never leave binning armed on the new crop window.
+ * Pick the window/output-size/subsample/binning/analog/HTS register set for @p width x
+ * @p height (AUTHORIZED LOCAL DIVERGENCE #3, issue #2248, bench run 61) and write it as ONE
+ * coherent block -- see the ORDERING TRAP note in the file header for why binning (and its HTS)
+ * must never be written apart from the full-array window it depends on. 640x480 gets the
+ * RPi/OmniVision-reference full-FOV binned mode; every other size keeps today's centred-crop
+ * window (ov5647_set_window()) but now also explicitly re-asserts the 1:1
+ * subsample/binning/analog/HTS values, so a prior 640x480 selection can never leave binning (or
+ * its HTS) armed on the new crop window.
  */
 static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32_t height)
 {
@@ -605,6 +723,7 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 			{OV5647_TIMING_Y_ADDR_END, OV5647_FULLFOV_Y_ADDR_END},
 			{OV5647_TIMING_X_OUTPUT_SIZE, width},
 			{OV5647_TIMING_Y_OUTPUT_SIZE, height},
+			{OV5647_TIMING_HTS_REG, OV5647_HTS_640X480_BINNED},
 			{OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_BINNED},
 			{OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_BINNED},
 			{OV5647_TIMING_TC_REG21, OV5647_TC_REG21_BINNED},
@@ -624,6 +743,7 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 	}
 
 	const struct video_reg regs[] = {
+		{OV5647_TIMING_HTS_REG, OV5647_HTS_CROP},
 		{OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_1TO1},
 		{OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_1TO1},
 		{OV5647_TIMING_TC_REG20, OV5647_TC_REG20_1TO1},
@@ -639,12 +759,19 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 
 static int ov5647_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
 {
+	uint32_t hts;
+
 	if (fie->index >= ARRAY_SIZE(ov5647_framerates)) {
 		return -EINVAL;
 	}
 
+	/* HTS depends on the mode @p fie->format names (AUTHORIZED LOCAL DIVERGENCE #3) -- see
+	 * ov5647_hts_for().
+	 */
+	hts = ov5647_hts_for(fie->format->width, fie->format->height);
+
 	/* A frame rate is only reachable if its frame length still covers the read-out */
-	if (ov5647_frmrate_to_vts(dev, ov5647_framerates[fie->index]) <
+	if (ov5647_frmrate_to_vts(dev, hts, ov5647_framerates[fie->index]) <
 	    fie->format->height + OV5647_VBLANK_MIN) {
 		return -EINVAL;
 	}
@@ -665,6 +792,7 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 		.type = VIDEO_FRMIVAL_TYPE_DISCRETE,
 		.format = &data->fmt,
 	};
+	uint32_t hts;
 	int ret;
 
 	ret = video_closest_frmival(dev, &fie);
@@ -672,8 +800,13 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 		return ret;
 	}
 
+	/* data->fmt is the ACTIVE mode (ov5647_set_fmt() updates it before calling here) --
+	 * AUTHORIZED LOCAL DIVERGENCE #3, see ov5647_hts_for().
+	 */
+	hts = ov5647_hts_for(data->fmt.width, data->fmt.height);
+
 	ret = video_write_cci_reg(&cfg->i2c, OV5647_TIMING_VTS_REG,
-				  ov5647_frmrate_to_vts(dev, ov5647_framerates[fie.index]));
+				  ov5647_frmrate_to_vts(dev, hts, ov5647_framerates[fie.index]));
 	if (ret < 0) {
 		return ret;
 	}
@@ -1128,16 +1261,12 @@ static int ov5647_init(const struct device *dev)
 		return -ENODEV;
 	}
 
+	/* ov5647_init_regs[] now routes the pixel stream to the MIPI transmitter itself
+	 * (OV5647_SC_MIPI_SC_CTRL = 0x44, run 61's literal reference byte) -- superseded the
+	 * targeted PHY_PD_MIPI/PHY_PD_LPRX/MIPI_EN bitfield modify this call used to make here.
+	 */
 	ret = video_write_cci_multiregs(&cfg->i2c, ov5647_init_regs,
 					ARRAY_SIZE(ov5647_init_regs));
-	if (ret < 0) {
-		return ret;
-	}
-
-	/* Route the pixel stream to the MIPI transmitter, keeping the power-on lane count */
-	ret = video_modify_cci_reg(&cfg->i2c, OV5647_SC_MIPI_SC_CTRL,
-				   OV5647_PHY_PD_MIPI | OV5647_PHY_PD_LPRX | OV5647_MIPI_EN,
-				   OV5647_MIPI_EN);
 	if (ret < 0) {
 		return ret;
 	}

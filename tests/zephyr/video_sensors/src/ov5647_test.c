@@ -48,20 +48,26 @@
 #define PAD_OUT_PARKED          0x01
 #define PAD_OUT_STREAMING       0x00
 
-/* Bench-proven values from ov5647_init_regs[] (OV5647_PLL_PREDIV/MULT/SYS_DIV in ov5647.c) */
+/* Bench-proven values from ov5647_init_regs[] (OV5647_PLL_PREDIV/MULT/SYS_DIV in ov5647.c).
+ * MULT is 70 (0x46), not the earlier 105 -- AUTHORIZED LOCAL DIVERGENCE #3, bench run 61
+ * (RPi/OmniVision reference PLL for the 640x480 10bpp mode; see ov5647.c's PLL constants
+ * comment). */
 #define SC_PLL_CTRL3_PREDIV    3
-#define SC_PLL_MULTIPLIER_MULT 105
+#define SC_PLL_MULTIPLIER_MULT 70
 #define SC_PLL_CTRL1_SYS_DIV_2 0x21
 
-/* AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/58/60) -- the full-FOV binned
- * 640x480 mode, its ordering trap against the crop path, and the common analog/BLC/AEC init.
- * Kept local for the same reason as the quartet/PLL trio above. */
+/* AUTHORIZED LOCAL DIVERGENCE #3 (issue #2248, bench runs 56/58/60/61 -- run 61, the
+ * RPi/OmniVision reference values, is current) -- the full-FOV binned 640x480 mode, its ordering
+ * trap against the crop path, the per-mode HTS, and the common init. Kept local for the same
+ * reason as the quartet/PLL trio above. */
 /* video_common's ADDR16 helpers write a 16-bit register as two separate 8-bit CCI transactions,
  * high byte at the base address then low byte at base+1 (see ov5647_emul.c's header comment and
  * how it seeds the 0x300a/0x300b chip-ID pair) -- so the LOW byte, not the base address, is
  * where a small value like FULLFOV_X_ADDR_START (16, fits entirely in one byte) actually lands.
- */
+ * HTS (1852 / 2700) needs both bytes checked since neither fits in one byte. */
 #define REG_TIMING_X_ADDR_START_LO 0x3801
+#define REG_TIMING_HTS_HI          0x380c
+#define REG_TIMING_HTS_LO          0x380d
 #define REG_TIMING_X_INC           0x3814
 #define REG_TIMING_Y_INC           0x3815
 #define REG_TIMING_TC_REG20        0x3820
@@ -76,10 +82,20 @@
 #define TC_REG20_1TO1        0x40
 #define TC_REG20_BINNED      0x41
 #define TC_REG21_1TO1        0x00
-#define TC_REG21_BINNED      0x07
+/* 0x01, not Alif's variant 0x07 -- AUTHORIZED LOCAL DIVERGENCE #3, run 61 (see ov5647.c's
+ * orientation note: 0x07 produced a left-right-mirrored scene on the bench). */
+#define TC_REG21_BINNED      0x01
 #define ANALOG_RSVD_370C_VAL 0x03
 #define BLC_RSVD_4001_VAL    0x02
 #define AEC_RSVD_3A18_VAL    0x00
+
+/* HTS is now PER MODE (run 61) -- 1852 (0x073c) for the 640x480 binned mode, the driver's
+ * original bench-proven 2700 (0x0a8c) for the crop path. Both bytes checked since neither value
+ * fits in a single CCI byte transaction. */
+#define HTS_640X480_BINNED_HI 0x07
+#define HTS_640X480_BINNED_LO 0x3c
+#define HTS_CROP_HI           0x0a
+#define HTS_CROP_LO           0x8c
 
 static const struct device *ov5647_dev(void)
 {
@@ -343,7 +359,7 @@ ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
 		.width       = 640,
 		.height      = 480,
 	};
-	size_t window_idx, subsample_idx, binning_idx, running_idx;
+	size_t window_idx, subsample_idx, binning_idx, mirror_idx, hts_hi_idx, hts_lo_idx, running_idx;
 
 	/* Does not depend on execution order -- always re-park first (harmless if already
 	 * parked), same pattern as test_set_format_leaves_parked below. */
@@ -364,6 +380,23 @@ ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
 	zassert_true(find_write_index(emul, REG_TIMING_TC_REG20, TC_REG20_BINNED, &binning_idx),
 	             "640x480 set_fmt() never wrote 0x3820 = 0x%02x (binning enable)",
 	             TC_REG20_BINNED);
+	/* AUTHORIZED LOCAL DIVERGENCE #3, run 61: the reference orientation (0x01), not Alif's
+	 * variant (0x07) -- see ov5647.c's orientation note: 0x07 produced a left-right-mirrored
+	 * scene on the bench.
+	 */
+	zassert_true(find_write_index(emul, REG_TIMING_TC_REG21, TC_REG21_BINNED, &mirror_idx),
+	             "640x480 set_fmt() never wrote 0x3821 = 0x%02x (reference orientation, not "
+	             "Alif's 0x07)",
+	             TC_REG21_BINNED);
+	/* AUTHORIZED LOCAL DIVERGENCE #3, run 61: HTS is now per-mode -- 640x480 must write the
+	 * reference 1852 (0x073c), not the driver-wide crop HTS.
+	 */
+	zassert_true(find_write_index(emul, REG_TIMING_HTS_HI, HTS_640X480_BINNED_HI, &hts_hi_idx),
+	             "640x480 set_fmt() never wrote 0x380c = 0x%02x (binned-mode HTS high byte)",
+	             HTS_640X480_BINNED_HI);
+	zassert_true(find_write_index(emul, REG_TIMING_HTS_LO, HTS_640X480_BINNED_LO, &hts_lo_idx),
+	             "640x480 set_fmt() never wrote 0x380d = 0x%02x (binned-mode HTS low byte)",
+	             HTS_640X480_BINNED_LO);
 	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
 	             "no write set MODE_SELECT running after 640x480 set_fmt() -- the lane park "
 	             "must not have run");
@@ -382,6 +415,17 @@ ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
 	             "0x3820 written at log index %zu, at/after the lane park's running write at "
 	             "index %zu",
 	             binning_idx,
+	             running_idx);
+	zassert_true(mirror_idx < running_idx,
+	             "0x3821 written at log index %zu, at/after the lane park's running write at "
+	             "index %zu",
+	             mirror_idx,
+	             running_idx);
+	zassert_true(hts_hi_idx < running_idx && hts_lo_idx < running_idx,
+	             "HTS written at log index %zu/%zu, at/after the lane park's running write at "
+	             "index %zu",
+	             hts_hi_idx,
+	             hts_lo_idx,
 	             running_idx);
 }
 
@@ -435,6 +479,16 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	zassert_equal(
 	    val, TC_REG21_1TO1, "0x3821 = 0x%02x after 1280x960, want 0x%02x", val, TC_REG21_1TO1);
 
+	/* AUTHORIZED LOCAL DIVERGENCE #3, run 61: a crop size must write the crop-path HTS
+	 * (2700 / 0x0a8c), not leave the binned mode's 1852 armed.
+	 */
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_HI, &val));
+	zassert_equal(
+	    val, HTS_CROP_HI, "0x380c = 0x%02x after 1280x960, want crop 0x%02x", val, HTS_CROP_HI);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_LO, &val));
+	zassert_equal(
+	    val, HTS_CROP_LO, "0x380d = 0x%02x after 1280x960, want crop 0x%02x", val, HTS_CROP_LO);
+
 	/* Switching back to 640x480 must re-apply the binned set, not leave the 1:1 crop
 	 * values from the size in between. */
 	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
@@ -445,6 +499,18 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	              "again",
 	              val,
 	              SUBSAMPLE_BINNED);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_HI, &val));
+	zassert_equal(val,
+	              HTS_640X480_BINNED_HI,
+	              "0x380c = 0x%02x after switching back to 640x480, want binned 0x%02x again",
+	              val,
+	              HTS_640X480_BINNED_HI);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_HTS_LO, &val));
+	zassert_equal(val,
+	              HTS_640X480_BINNED_LO,
+	              "0x380d = 0x%02x after switching back to 640x480, want binned 0x%02x again",
+	              val,
+	              HTS_640X480_BINNED_LO);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_TC_REG20, &val));
 	zassert_equal(val,
 	              TC_REG20_BINNED,
