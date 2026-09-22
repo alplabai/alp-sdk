@@ -877,6 +877,29 @@ static void alif_isr_cb_work(struct k_work *work)
 	alif_cam_work_helper(data->dev);
 }
 
+/*
+ * Alp Lab AB: an absent sensor (or absent CSI-2 host) is caught HERE, at
+ * first USE, not at our own init. The CPI initializes at
+ * CONFIG_VIDEO_ALIF_CAM_INIT_PRIORITY (59 by default) -- strictly BEFORE a
+ * directly-attached sensor's own CONFIG_VIDEO_INIT_PRIORITY (60 by
+ * default) has run on the parallel-interface path. A device_is_ready()
+ * check made from OUR init would therefore always see that sensor as
+ * not-yet-initialized and reject a genuinely PRESENT one too -- confirmed
+ * on a built image's .z_init_POST_KERNEL_P_ link order (csi @ P_41, cam @
+ * P_59, ov9281 @ P_60). By the time an application calls
+ * alp_camera_open() -- after kernel POST_KERNEL init has fully completed
+ * -- every driver's own init has already run, so checking readiness HERE
+ * reflects the real, final state without depending on init-priority
+ * ordering between unrelated Kconfig symbols.
+ */
+static int alif_cam_endpoint_ready(const struct video_cam_config *config)
+{
+	if (!device_is_ready(config->endpoint_dev)) {
+		return -ENODEV;
+	}
+	return 0;
+}
+
 static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct video_cam_config *config = dev->config;
@@ -898,6 +921,12 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 	if (!bits_pp) {
 		LOG_ERR("Bits-per-pixel - %d", bits_pp);
 		return -EINVAL;
+	}
+
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
 	}
 
 	/* An unpacked request (SBGGR10..) goes out on the link as its packed
@@ -977,6 +1006,12 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 
 	if (!fmt) {
 		return -EINVAL;
+	}
+
+	ret = alif_cam_endpoint_ready(config);
+	if (ret) {
+		LOG_ERR("Endpoint device is not ready");
+		return ret;
 	}
 
 	ret = video_get_format(config->endpoint_dev, fmt);
@@ -1510,7 +1545,13 @@ static int alif_cam_dequeue(const struct device *dev, struct video_buffer **buf,
 static int alif_cam_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	const struct video_cam_config *config = dev->config;
-	int err = -ENODEV;
+	int                            err;
+
+	err = alif_cam_endpoint_ready(config);
+	if (err) {
+		LOG_ERR("Endpoint device is not ready");
+		return err;
+	}
 
 	err = video_get_caps(config->endpoint_dev, caps);
 	caps->min_vbuf_count = CPI_MIN_VBUF;
@@ -1766,26 +1807,6 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	 * CPI controller, we need to abort.
 	 */
 	if (!config->endpoint_dev) {
-		return -ENODEV;
-	}
-
-	/*
-	 * Alp Lab AB: config->endpoint_dev being non-NULL only proves the DT
-	 * graph WIRES an upstream device (the CSI-2 host, or -- parallel
-	 * interface -- the sensor directly); it says nothing about whether
-	 * that device's own init actually succeeded. A sensor that fails its
-	 * chip-ID check at init (e.g. ov9281.c reading 0x300A/0x300B) marks
-	 * ITSELF not-ready, but nobody upstream was checking that before this
-	 * fix: an absent sensor sailed through the CSI-2 host's init, through
-	 * this CPI's own init, past alp_camera_open()'s device_is_ready()
-	 * gate (alp-camera0 resolves to THIS device), and only surfaced later
-	 * as an I2C NACK on the first video_set_format() -- ALP_ERR_IO,
-	 * indistinguishable from a genuine bus fault. Refuse to come up ready
-	 * ourselves when what we're wired to isn't, so absence is caught at
-	 * open() and reported as ALP_ERR_NOT_READY.
-	 */
-	if (!device_is_ready(config->endpoint_dev)) {
-		LOG_ERR("Endpoint device is not ready");
 		return -ENODEV;
 	}
 
