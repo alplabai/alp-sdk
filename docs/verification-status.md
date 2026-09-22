@@ -72,8 +72,8 @@ Tracked here so the page is complete, but never pooled into the Summary above --
 | Glyph | Meaning | Count |
 |---|---|---|
 | `⏳` | untested | 0 |
-| `🟡` | partial | 3 |
-| `✅` | verified | 14 |
+| `🟡` | partial | 4 |
+| `✅` | verified | 13 |
 | `❌` | failing | 0 |
 | `n/a` | n/a | 0 |
 
