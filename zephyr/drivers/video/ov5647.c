@@ -853,8 +853,8 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 	 * fix-up round 5): the reference's own floor(VTS/band) rule (see the block comment below)
 	 * depends on the MODE's own minimum-blanking VTS (height + OV5647_VBLANK_MIN), so a value
 	 * derived from OV5647_FULL_HEIGHT (1944) overstates what a SMALLER crop can actually hold
-	 * -- e.g. 1280x960 (min VTS ~984): the full-resolution-derived 11 (984/173, the 60 Hz band)
-	 * and 9 (984/208, the 50 Hz band) give 11*173=1903 and 9*208=1872, both exceed its
+	 * -- e.g. 1280x960 (min VTS ~984): the full-resolution-derived 11 (1968/173, the 60 Hz band)
+	 * and 9 (1968/208, the 50 Hz band) give 11*173=1903 and 9*208=1872, both exceed its
 	 * minimum-blanking VTS. Recomputed per mode from the height actually requested here, floored
 	 * at 1 band. BENCH-UNVERIFIED, same as the band-step values themselves (see below).
 	 *

@@ -433,6 +433,18 @@ size, overstating what a smaller crop (e.g. 1280x960) can actually hold;
 fixed to compute per mode from the requested height, same as the
 line-time-scaled band step above.
 
+**A round-6 review found `set_format()` only restored the caller's requested pixelformat on
+the `video_format_caps_index()` failure path, a nit found before merge, never shipped.** Every
+LATER failure inside `set_format()` -- the mode-select/PLL-bit-mode I2C writes,
+`ov5647_set_mode_regs()`, the hflip/vflip re-apply, `set_frmival()`, the lane re-park -- ran
+after the round-5 flip-shifted-to-base remap and returned with `fmt->pixelformat` still holding
+that internal BASE fourcc, not the caller's original (possibly flip-shifted) request. Fixed: every
+failure path now restores through one shared error-exit point instead of only the one `-ENOTSUP`
+return. Also added: a RAW8 (`SGBRG8`) `get_format()` -> `set_format()` round trip alongside the
+existing RAW10 one, and restore coverage for an unsupported fourcc, an unsupported size, and (the
+case that actually distinguishes "restored" from "never touched", since the remap is a no-op at
+the default unflipped state) an unsupported size on a flip-shifted request.
+
 **A flip ctrl set after `set_format()` does not, by itself, update what
 downstream consumers think the Bayer order is:** the CPI/ISP stages
 cache the format they were last told about (`video_alif.c`'s

@@ -178,6 +178,19 @@ computed per mode from the requested height's own minimum-blanking VTS (`floor(V
 at 1 band), the same rule the reference applies per its own modes -- see `ov5647_set_mode_regs()`'s
 block comment. Still BENCH-UNVERIFIED, same as the band-step values themselves.
 
+**ROUND-6, nit found by review, before merge, never shipped: `set_fmt()` only restored the
+caller's requested pixelformat on the `video_format_caps_index()` failure path.** Every later
+failure inside `set_fmt()` -- the `OV5647_MODE_SELECT`/`OV5647_SC_PLL_CTRL0` I2C writes,
+`ov5647_set_mode_regs()`, `ov5647_set_ctrl_hflip()`/`ov5647_set_ctrl_vflip()`,
+`ov5647_set_frmival()`, `ov5647_lane_park()` -- ran AFTER the round-5 flip-shifted-to-base remap
+and returned with `fmt->pixelformat` still holding that internal BASE fourcc, not the caller's
+original (possibly flip-shifted) request. Fixed: every failure path now `goto`s a single `err:`
+label that restores `fmt->pixelformat` before returning, instead of restoring only ahead of the
+one `-ENOTSUP` return. Also added: a RAW8 (`SGBRG8`) `get_format()` -> `set_format()` round trip
+alongside the existing RAW10 one, and coverage for the restore itself -- an unsupported fourcc, an
+unsupported size, and (the case that actually distinguishes "restored" from "never touched", since
+the remap is a no-op at the default unflipped state) an unsupported size on a flip-shifted request.
+
 **ROUND-4, test infrastructure: the suite's `common_init_regs[]` table was missing two registers
 `ov5647_init_regs[]` already wrote** (`0x3503`/`OV5647_MANUAL_CTRL_VTS` and
 `0x350c`/`0x350d`/`OV5647_VTS_DIFF`) -- a mutation test deleting either from the driver left every
