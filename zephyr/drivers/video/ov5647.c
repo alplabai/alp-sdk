@@ -27,17 +27,50 @@
  * landing on the version bump cannot silently collide with a DIFFERENT
  * driver; it can only be the merged form of this same PR.
  *
- * AUTHORIZED LOCAL DIVERGENCE (issue #2248): one bench-proven defect is
- * fixed in this vendored copy, on top of upstream #119301, with the
- * maintainer's explicit sign-off overruling the "no divergent patches" rule
- * below: the driver never drove the CSI-2 lanes to LP-11 (Stop state), so a
- * receiver that waits for Stop-state before stream start (e.g. a
- * DesignWare CSI-2 host) could not open it. Bench evidence on an
- * E1M-AEN803 / E1M-EVK (hw_rev 2626-r2): CSI_PHY_STOPSTATE read
- * 0x00000000 in bare software standby, and steadily 0x00000001 (module
- * under test has a hardware fault limiting it to bit0) after
- * ov5647_lane_park() -- mirrors mainline Linux's
- * ov5647_power_on()/ov5647_stream_stop() "coax lanes into LP-11" step.
+ * AUTHORIZED LOCAL DIVERGENCE #1 (issue #2248): the driver never drove the
+ * CSI-2 lanes to LP-11 (Stop state), so a receiver that waits for Stop-state
+ * before stream start (e.g. a DesignWare CSI-2 host) could not open it.
+ * Bench evidence on an E1M-AEN803 / E1M-EVK (hw_rev 2626-r2):
+ * CSI_PHY_STOPSTATE read 0x00000000 in bare software standby -- mirrors
+ * mainline Linux's ov5647_power_on()/ov5647_stream_stop() "coax lanes into
+ * LP-11" step. Fixed by ov5647_lane_park() below. An earlier version of
+ * this note also claimed the park alone took CSI_PHY_STOPSTATE only to
+ * 0x00000001 because of "a hardware fault on the module under test". That
+ * claim is RETRACTED -- see DIVERGENCE #2 below for the real cause.
+ *
+ * AUTHORIZED LOCAL DIVERGENCE #2 (issue #2248, bench run 52): the driver
+ * programs NO PLL and no MIPI-TX pad-drive registers, so it free-runs on
+ * OV5647 power-on defaults -- 0x3035 = 0x11 is PLL system divider 1, giving
+ * 875 Mbps/lane and a 175 MHz pixel clock, while the receiver was binned
+ * {450 MHz, 0x16} from this driver's own declared pixel_rate of 83333333
+ * (416.67 Mbps): a 2.1x mismatch, giving ERRSOTSYNCHS on both data lanes on
+ * every burst, with the clock lane locking regardless (a clock lane locks
+ * far outside the range a data lane can sync SoT in). Power-on defaults
+ * also left 0x3017 (LP TX pad drive) too low to bring CLOCK and DATA_1 to
+ * Stop state, which is what DIVERGENCE #1's "hardware fault" claim actually
+ * measured: bench-bisected on the same module, reset 0x10 -> no lane
+ * reaches Stop state; pgm_lptx = 01 -> DATA_0 only; 10 -> +DATA_1; 11 ->
+ * +CLK. CSI_PHY_STOPSTATE reads 0x00010003 (all three lanes) with 0x3017 =
+ * 0xf0. Fixed by the eight-register write in ov5647_init_regs[] documented
+ * at its own block comment below, with PLL values matched to mainline
+ * Linux's own declared constants for this mode (see the
+ * OV5647_PLL_PREDIV/MULT/SYS_DIV comment near OV5647_PIXEL_RATE). Bench
+ * evidence (run 52, E1M-AEN803 serial 2026W36-0001 / E1M-EVK hw_rev
+ * 2626-r2, RAW10 640x480): PHY_FATAL 7712 -> 0, capture ALP_OK, 60 frames
+ * at 15.96 fps, frame buffer md5 61cdf7a021584f4bfaa2ae282c7b2256 with
+ * every pre-fill byte overwritten. Mainline writes 0x3017 = 0xe0 (pgm_lptx
+ * = 10, one step lower); that never brings the CLOCK lane to Stop state,
+ * which mainline's own receiver does not gate on but ours does -- our 0xf0
+ * is a deliberate divergence from mainline, pinned at maximum drive
+ * strength with NO characterised margin against overdrive.
+ *
+ * NOT ESTABLISHED: which of the eight registers run 52 wrote are
+ * individually load-bearing -- only 0x3017 is independently bisected above.
+ * The values match mainline, which is the reference, so shipping them
+ * together is right, but do not read this as proof the PLL pair alone is
+ * the whole fix. 0x4837 (PCLK period) is left at its power-on 0x15
+ * (mainline writes 0x19 for this PLL); on the safe side at 437.5 Mbps and
+ * not changed in the working run.
  *
  * ACCEPTED COST: ov5647_init() runs at POST_KERNEL on every board that
  * enables this driver and now leaves the sensor parked -- running, with
@@ -45,21 +78,18 @@
  * standby, because the shield deliberately has no pwdn-gpios to put it in a
  * lower-power state instead. Recorded and accepted, not an oversight.
  *
- * A second claimed defect -- that OV5647_PIXEL_RATE() understated the link
- * rate and steered the D-PHY frequency-bin lookup wrong -- was investigated
- * and DISPROVEN; see the OV5647_PIXEL_RATE comment below and
- * docs/camera-shields.md. The macro is unchanged from upstream.
- *
  * RETIREMENT: delete this file + Kconfig.ov5647 + the ovti,ov5647.yaml
  * binding, and drop the CMake/Kconfig hookup, the moment the alp-sdk Zephyr
  * pin advances to a revision that contains #119301 (i.e. the vendored copy
  * and the upstream driver would otherwise both define VIDEO_OV5647 /
- * "ovti,ov5647" and collide) -- BUT NOT BEFORE the lane-park fix above is
- * either re-applied to the upstream-derived driver or confirmed already
- * present in it: deleting this file without that check silently
- * reintroduces the bug. Do NOT otherwise maintain divergent local patches
- * on this file -- open a new PR against upstream instead and re-backport.
- * See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+ * "ovti,ov5647" and collide) -- BUT NOT BEFORE BOTH fixes above are either
+ * re-applied to the upstream-derived driver or confirmed already present in
+ * it: DIVERGENCE #1 (the LP-11 lane park) AND DIVERGENCE #2 (the PLL +
+ * MIPI-TX pad-drive init, including the corrected OV5647_PIXEL_RATE
+ * derivation) -- deleting this file without checking both silently
+ * reintroduces one or both bugs. Do NOT otherwise maintain divergent local
+ * patches on this file -- open a new PR against upstream instead and
+ * re-backport. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
  */
 
@@ -102,16 +132,46 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_VBLANK_MIN		24
 
 /*
- * The PLL is left in its power-on configuration; this is a datasheet-fps ratio, not a PLL
- * derivation. At 25 MHz XVCLK it yields 83333333, about 5% below mainline Linux's declared
- * 87500000 for the 2592x1944 mode (link_freq 218750000 = 437.5 Mbps/lane; mainline uses a
- * different 58333000 for its 640x480 mode). Feeds BOTH VIDEO_CID_PIXEL_RATE and
- * ov5647_frmrate_to_vts() below -- it sets the programmed TIMING_VTS too -- so change it only
- * together with correct per-mode rates. A previous attempt to "correct" it to a PLL-derived
- * 175000000 (issue #2248) was reverted: it doubled every programmed frame length instead of
- * fixing the link rate.
+ * PLL constants for the RAW10 (10bpp) mode ov5647_init() selects -- see AUTHORIZED LOCAL
+ * DIVERGENCE #2 in the file header for the bench evidence and ov5647_init_regs[] below for where
+ * these actually get written to the sensor. Shared with that register table so the programmed PLL
+ * and the declared pixel_rate can never drift apart: VCO = XVCLK / OV5647_PLL_PREDIV *
+ * OV5647_PLL_MULT; lane bit rate = VCO / OV5647_PLL_SYS_DIV. At 25 MHz XVCLK: VCO = 875 MHz, lane
+ * bit rate = 437.5 Mbps/lane, matching mainline Linux's own declared link_freq (218750000, DDR
+ * half-rate) for this PLL.
  */
-#define OV5647_PIXEL_RATE(clk)		((clk) * 10 / 3)
+#define OV5647_PLL_PREDIV		3
+#define OV5647_PLL_MULT			105
+#define OV5647_PLL_SYS_DIV		2
+
+/*
+ * pixel_rate = lane bit rate * lanes / bpp = (XVCLK / sysdiv * mult / prediv) * 2 / 10 (divide by
+ * sysdiv first, not prediv, to stay exact and inside int32 range for every XVCLK in
+ * [OV5647_INPUT_CLK_MIN, OV5647_INPUT_CLK_MAX]). At 25 MHz XVCLK: 87500000, matching mainline's
+ * own declared pixel_rate for this PLL. Feeds BOTH VIDEO_CID_PIXEL_RATE and
+ * ov5647_frmrate_to_vts() below -- it sets the programmed TIMING_VTS too (87500000/(2700*15) =
+ * 2160 instead of the previous, power-on-PLL-derived 2058; ov5647_enum_frmival() only rejects a
+ * frame rate whose VTS would undercut the read-out height, so the larger, correct VTS just changes
+ * which of the fixed ov5647_framerates[] entries are reachable, which is expected).
+ *
+ * A previous attempt to "correct" this macro alone, in isolation, to a PLL-derived 175000000
+ * (issue #2248) was reverted -- not because the number was wrong, but because nothing programmed
+ * the PLL to match it: the reverted number was actually right about the power-on link rate (see
+ * DIVERGENCE #2), and "it doubled the programmed VTS" was the correct consequence of a doubled
+ * pixel clock, not evidence against it. The defect was that the PLL was never WRITTEN at all; see
+ * docs/camera-shields.md.
+ *
+ * NOT bench-verified for 8-bit: cfg->pixel_rate below is a single value computed once from DT at
+ * OV5647_INIT() time, not re-derived per selected format. ov5647_set_fmt() does reprogram 0x3034's
+ * OV5647_MIPI_BIT_MODE field per format (RAW8 vs RAW10), but nothing here recomputes pixel_rate to
+ * match, so selecting VIDEO_PIX_FMT_SBGGR8 (8bpp) still reports the RAW10 value. Video_get_csi_
+ * link_freq()'s PIXEL_RATE fallback (zephyr/drivers/video/video_common.c) computes link_freq =
+ * pixel_rate * bpp / (2*lanes); at the same 875 MHz VCO, 8bpp would need pixel_rate = 437.5e6 * 2 /
+ * 8 = 109375000, not 87500000, to feed that formula correctly. Only RAW10 is bench-proven (run
+ * 52) -- flagging this gap, not shipping an unverified 8-bit number.
+ */
+#define OV5647_PIXEL_RATE(clk) \
+	((clk) / OV5647_PLL_SYS_DIV * OV5647_PLL_MULT / OV5647_PLL_PREDIV * 2 / OV5647_MIPI_BIT_MODE_RAW10)
 #define OV5647_INPUT_CLK_MIN		MHZ(6)
 #define OV5647_INPUT_CLK_MAX		MHZ(27)
 
@@ -158,6 +218,34 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 #define OV5647_TEST_PATTERN_ENABLE	BIT(7)
 
 /*
+ * PLL + MIPI-TX pad-drive registers (AUTHORIZED LOCAL DIVERGENCE #2, issue #2248, bench run 52) --
+ * see the file header for the full write-up and evidence. ov5647_init_regs[] below writes all
+ * eight of these while the sensor is still in software standby, immediately after the
+ * OV5647_SOFTWARE_RESET write and before ov5647_set_fmt() -> ov5647_lane_park() puts it running
+ * (0x0100 = 0x01): the PLL dividers latch at the 0x0103 software reset, NOT on standby exit, so
+ * the same writes issued after the park (with 0x0100 already 0x01) update the register file
+ * without moving the running PLL. Bench run 51 lost a cycle to exactly that ordering mistake -- do
+ * not move this block after the OV5647_SC_MIPI_PHY entry below.
+ */
+#define OV5647_SC_PLL_CTRL1		OV5647_REG8(0x3035)
+#define OV5647_SC_PLL_MULTIPLIER	OV5647_REG8(0x3036)
+#define OV5647_SC_PLL_CTRL3		OV5647_REG8(0x3037)
+/*
+ * 0x303c and 0x3106 are not documented in the datasheet register map available to us (same
+ * situation as OV5647_PAD_OUT / 0x300d below); bench-confirmed values only, part of the same
+ * run-52 write set.
+ */
+#define OV5647_SC_PLL_CTRL_RSVD_303C	OV5647_REG8(0x303c)
+#define OV5647_SC_CLKRST_RSVD_3106	OV5647_REG8(0x3106)
+
+#define OV5647_IO_PAD_CTRL0		OV5647_REG8(0x3017)
+#define OV5647_IO_PAD_CTRL0_PGM_LPTX	GENMASK(5, 4) /* LP TX (data/clock lane) drive strength */
+#define OV5647_IO_PAD_CTRL0_PGM_VCM	GENMASK(7, 6) /* common-mode voltage drive strength */
+/* 0x301c/0x301d: undocumented, same as 0x303c/0x3106 above */
+#define OV5647_IO_PAD_CTRL1		OV5647_REG8(0x301c)
+#define OV5647_IO_PAD_CTRL2		OV5647_REG8(0x301d)
+
+/*
  * Lane park/unpark sequence (mirrors mainline Linux's ov5647_power_on(), which calls
  * ov5647_stream_stop() under the comment "Stream off to coax lanes into LP-11 state"): with the
  * sensor left in bare software standby (0x0100 = 0x00) CSI_PHY_STOPSTATE reads back 0x00000000 --
@@ -165,9 +253,13 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
  * order, parks the lanes at LP-11 (Stop state) so a CSI-2 receiver that waits for Stop-state
  * before stream start (e.g. a DesignWare CSI-2 host) can open the link. Bench-confirmed on an
  * E1M-AEN803 (serial 2026W36-0001) / E1M-EVK (hw_rev 2626-r2) with a DesignWare CSI-2 receiver:
- * 50/50 samples at 20 ms read CSI_PHY_STOPSTATE steadily as 0x00000001 after this sequence (the
- * module under test has a hardware fault on DATA_1/CLK, hence only bit0; a healthy module should
- * reach 0x00010003).
+ * 50/50 samples at 20 ms read CSI_PHY_STOPSTATE steadily as 0x00010003 (all three lanes -- CLK,
+ * DATA_0, DATA_1) after this sequence, WITH ov5647_init_regs[]'s OV5647_IO_PAD_CTRL0 = 0xf0 write
+ * also in effect (see DIVERGENCE #2 above). This park sequence alone, without that 0x3017 write,
+ * only reaches 0x00000001 (DATA_0 only) -- an earlier version of this comment misdiagnosed that
+ * gap as a hardware fault on the module under test. It was not: 0x3017 (LP TX pad drive) was still
+ * at its OV5647 power-on default, too low to bring CLOCK and DATA_1 to Stop state on this
+ * receiver. See the OV5647_IO_PAD_CTRL0 bisection above.
  */
 #define OV5647_MIPI_CTRL00			OV5647_REG8(0x4800)
 #define OV5647_MIPI_CTRL00_CLOCK_LANE_GATE	BIT(5)
@@ -225,6 +317,22 @@ struct ov5647_data {
 };
 
 static const struct video_reg ov5647_init_regs[] = {
+	/* PLL + MIPI-TX pad-drive init -- see the block comment above OV5647_SC_PLL_CTRL1 for why
+	 * this must run here (software standby, before ov5647_lane_park()) and not be reordered.
+	 */
+	{OV5647_SC_PLL_CTRL3, OV5647_PLL_PREDIV}, /* bits[3:0] prediv=3, bit4 root_div=0 (/1) */
+	{OV5647_SC_PLL_MULTIPLIER, OV5647_PLL_MULT}, /* full-byte multiplier = 105 */
+	{OV5647_SC_PLL_CTRL1, (OV5647_PLL_SYS_DIV << 4) | 0x1}, /* bits[7:4] sysdiv=2; low nibble
+								  * unchanged from power-on (0x11)
+								  */
+	{OV5647_SC_PLL_CTRL_RSVD_303C, 0x11},
+	{OV5647_IO_PAD_CTRL0, 0xf0}, /* pgm_lptx=3 (max, bits[5:4]), pgm_vcm=3 (bits[7:6]); see the
+				      * file header's bisection for why pgm_lptx must be 3, not
+				      * mainline's 2
+				      */
+	{OV5647_IO_PAD_CTRL1, 0xf8},
+	{OV5647_IO_PAD_CTRL2, 0xf0},
+	{OV5647_SC_CLKRST_RSVD_3106, 0xf5},
 	{OV5647_SC_MIPI_PHY, OV5647_MIPI_PAD_ENABLE},
 	/* Drive the frame length from TIMING_VTS instead of letting the AEC stretch it */
 	{OV5647_MANUAL_CTRL, OV5647_MANUAL_CTRL_VTS},

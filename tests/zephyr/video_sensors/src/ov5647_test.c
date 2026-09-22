@@ -33,6 +33,12 @@
 #define REG_FRAME_OFF_NUM 0x4202
 #define REG_PAD_OUT       0x300d
 
+/* The three PLL registers of AUTHORIZED LOCAL DIVERGENCE #2's eight-register init set (issue
+ * #2248, bench run 52) -- kept local for the same reason as the quartet above. */
+#define REG_SC_PLL_CTRL3      0x3037 /* prediv */
+#define REG_SC_PLL_MULTIPLIER 0x3036
+#define REG_SC_PLL_CTRL1      0x3035 /* sysdiv, upper nibble */
+
 #define MODE_SELECT_RUNNING 0x01
 
 #define MIPI_CTRL00_PARKED      0x25 /* CLOCK_LANE_GATE | BUS_IDLE | CLOCK_LANE_DISABLE */
@@ -41,6 +47,11 @@
 #define FRAME_OFF_NUM_STREAMING 0x00
 #define PAD_OUT_PARKED          0x01
 #define PAD_OUT_STREAMING       0x00
+
+/* Bench-proven values from ov5647_init_regs[] (OV5647_PLL_PREDIV/MULT/SYS_DIV in ov5647.c) */
+#define SC_PLL_CTRL3_PREDIV      3
+#define SC_PLL_MULTIPLIER_MULT   105
+#define SC_PLL_CTRL1_SYS_DIV_2   0x21
 
 static const struct device *ov5647_dev(void)
 {
@@ -160,6 +171,79 @@ ZTEST(ov5647, test_park_order_after_init)
 	};
 
 	assert_write_sequence_tail(expect, ARRAY_SIZE(expect), "park sequence after ov5647_init()");
+}
+
+/*
+ * Find the index of the first log entry writing @p reg with @p value; returns true and sets
+ * @p out_idx if found. Used below to check ORDER, not just presence: see ov5647.c's
+ * AUTHORIZED LOCAL DIVERGENCE #2 comment -- the PLL dividers latch at the 0x0103 software reset,
+ * not on standby exit, so a write issued after MODE_SELECT has already gone running (0x01)
+ * updates the register file without moving the running PLL (bench run 51 lost a cycle to exactly
+ * this). A check that only confirms the PLL values are present ANYWHERE in the log would pass
+ * that broken, reordered variant -- order is the fix.
+ */
+static bool find_write_index(const struct emul *emul, uint16_t reg, uint8_t value, size_t *out_idx)
+{
+	size_t count = ov5647_emul_log_count(emul);
+
+	for (size_t i = 0; i < count; i++) {
+		struct ov5647_emul_write w;
+
+		zassert_ok(ov5647_emul_log_get(emul, i, &w), "log entry %zu unreadable", i);
+		if (w.reg == reg && w.value == value) {
+			*out_idx = i;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+ZTEST(ov5647, test_pll_init_written_before_first_running_mode_select)
+{
+	const struct emul *emul = ov5647_emul();
+	size_t             running_idx;
+	size_t             pll_ctrl3_idx;
+	size_t             pll_multiplier_idx;
+	size_t             pll_ctrl1_idx;
+
+	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
+	             "no write ever set MODE_SELECT (0x0100) running (0x01) during ov5647_init() "
+	             "-- ov5647_lane_park() must not have run");
+
+	zassert_true(find_write_index(emul, REG_SC_PLL_CTRL3, SC_PLL_CTRL3_PREDIV, &pll_ctrl3_idx),
+	             "SC_PLL_CTRL3 (0x3037) was never written to the bench-proven prediv value "
+	             "(%d) during ov5647_init()",
+	             SC_PLL_CTRL3_PREDIV);
+	zassert_true(pll_ctrl3_idx < running_idx,
+	             "SC_PLL_CTRL3 (0x3037, prediv) was written at log index %zu, at or after "
+	             "MODE_SELECT went running at index %zu -- the PLL dividers latch at the "
+	             "0x0103 software reset, not on standby exit, so this write must land before "
+	             "the park (see ov5647.c's AUTHORIZED LOCAL DIVERGENCE #2 comment)",
+	             pll_ctrl3_idx,
+	             running_idx);
+
+	zassert_true(find_write_index(emul, REG_SC_PLL_MULTIPLIER, SC_PLL_MULTIPLIER_MULT,
+	                              &pll_multiplier_idx),
+	             "SC_PLL_MULTIPLIER (0x3036) was never written to the bench-proven value "
+	             "(%d) during ov5647_init()",
+	             SC_PLL_MULTIPLIER_MULT);
+	zassert_true(pll_multiplier_idx < running_idx,
+	             "SC_PLL_MULTIPLIER (0x3036) was written at log index %zu, at or after "
+	             "MODE_SELECT went running at index %zu -- see SC_PLL_CTRL3 above",
+	             pll_multiplier_idx,
+	             running_idx);
+
+	zassert_true(find_write_index(emul, REG_SC_PLL_CTRL1, SC_PLL_CTRL1_SYS_DIV_2,
+	                              &pll_ctrl1_idx),
+	             "SC_PLL_CTRL1 (0x3035) was never written to the bench-proven sysdiv=2 value "
+	             "(0x%02x) during ov5647_init()",
+	             SC_PLL_CTRL1_SYS_DIV_2);
+	zassert_true(pll_ctrl1_idx < running_idx,
+	             "SC_PLL_CTRL1 (0x3035) was written at log index %zu, at or after MODE_SELECT "
+	             "went running at index %zu -- see SC_PLL_CTRL3 above",
+	             pll_ctrl1_idx,
+	             running_idx);
 }
 
 ZTEST(ov5647, test_stream_start_unparks)

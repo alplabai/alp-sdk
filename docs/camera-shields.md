@@ -5,7 +5,7 @@
 | Module | Sensor | Shield | Interface / lanes | Modes | Status |
 |---|---|---|---|---|---|
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. |
-| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P | **Bench-attempted, BLOCKED**: `alp_camera_open` fails at D-PHY Stop-state (see the driver section below). NOT bench-verified. Needs the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md). |
+| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. RAW10 only; RAW8 (SBGGR8) is unverified. |
 | RPi Camera Module 2 | IMX219 | `raspberry_pi_camera_module_2` (upstream) | MIPI CSI-2 D-PHY, 2 lanes | 640x480 RAW10 (this repo's first-light example) | Build-only / not run on hardware. |
 | RPi Global Shutter Camera | IMX296LQR-C (1.58 Mpx colour global-shutter) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, 1 lane | 1456x1088 SRGGB10P (all-pixel scan) | Build-only / not run on hardware. |
 
@@ -62,96 +62,118 @@ PWDN GPIO line to wire it to — the shield overlay omits the property rather
 than faking a GPIO, and the driver compiles the PWDN code path out entirely
 when no instance declares it.
 
-**Bench-attempted, BLOCKED at D-PHY Stop-state (2026-09-22, an
-E1M-AEN803 serial 2026W36-0001 on an E1M-EVK hw_rev 2626-r2).** This is
-NOT bench-verified. The InnoMaker CAM-OV5647 module has no pull-up of
-its own on J5 pin 11 and needs the pull-up rework described in
-[`docs/boards/e1m-evk.md`](boards/e1m-evk.md) before it answers on I2C
-at all. With the module powered and answering I2C, `alp_camera_open`
-fails at `ALP_ERR_TIMEOUT` with `E: D-PHY not locked to Stop-state. PHY
-status - 0x00010000 DPHY ID: 0`. That `PHY status` field is `CSI_PHY_RX`
-(`0x49033048`), the register the driver's log line prints, and it reads
-`0x00010000` — `RXULPSCLKNOT` set, `RXCLKACTIVEHS` (bit17) clear.
-`CSI_PHY_STOPSTATE` (`0x4903304c`) is a separate register and reaches
-only `0x00000001` (bit0 `STOPSTATEDATA_0`), and only after the receiver
-is configured; bit1 (`DATA_1`) and bit16 (`CLK`) never assert. For
-contrast, the OV9281 path below reaches `CSI_PHY_STOPSTATE` =
-`0x00010003` (`CLK|DATA_1|DATA_0`) on the same receiver.
+**Bench-verified, run 52 (2026-09-22, an E1M-AEN803 serial 2026W36-0001 on
+an E1M-EVK hw_rev 2626-r2, RAW10 640x480).** `PHY_FATAL` went 7712 -> 0,
+`alp_camera_open` returned `ALP_OK`, and 60 frames captured at 15.96 fps
+(3758 ms for 60 frames), `CAM_FRAME_ADDR` advancing `0x02000080` ->
+`0x020960c0`, frame buffer md5 `61cdf7a021584f4bfaa2ae282c7b2256` with
+every pre-fill byte overwritten (`a5=0/614400`). The InnoMaker CAM-OV5647
+module still needs the pull-up rework described in
+[`docs/boards/e1m-evk.md`](boards/e1m-evk.md) before it answers on I2C at
+all; that part of the earlier BLOCKED write-up was correct and unchanged.
 
-Ruled out by control-validated bench runs: module power, the sensor's
-own MIPI PHY being disabled (register `0x3018` = `0x44` decodes to
-`PHY_PD_MIPI` 0 / `PHY_PD_LPRX` 0 / `MIPI_EN` 1), the mainline
-"coax lanes into LP-11" park sequence applied in the correct running
-state, sensor-before-receiver ordering, and the receiver's D-PHY
-frequency bin (identical behaviour at `hsfreqrange 0x16` and at `0x09`,
-the bin the OV9281 streams in).
+An earlier bench run (2026-09-22, before run 52) reached only
+`alp_camera_open` failing at `ALP_ERR_TIMEOUT` with `E: D-PHY not locked
+to Stop-state. PHY status - 0x00010000 DPHY ID: 0`. That `PHY status`
+field is `CSI_PHY_RX` (`0x49033048`), the register the driver's log line
+prints; `CSI_PHY_STOPSTATE` (`0x4903304c`) reached only `0x00000001`
+(bit0 `STOPSTATEDATA_0`), with bit1 (`DATA_1`) and bit16 (`CLK`) never
+asserting. **Neither register discriminates a broken link from a
+working one on its own**: `CSI_PHY_RX` and `CSI_PHY_STOPSTATE` both read
+byte-identically at every capture point in the failing run and in the
+working run 52 -- do not use either as a bring-up gate by itself.
 
-**Root cause: a fault in the module under test, on `DATA_1` and `CLK`.**
-Put the sensor in mainline's running-parked state (`0x0100` = `0x01`,
-then `0x4800` = `0x25`, `0x4202` = `0x0f`, `0x300d` = `0x01`), in which
-all three lanes should idle at LP-11, and sample `CSI_PHY_STOPSTATE` 50
-times at 20 ms with the receiver configured: `DATA_0` reads 50/50 while
-`DATA_1` and `CLK` read 0/50. A marginal LP swing or a module supply
-problem would have made `DATA_0` flicker too, so that is excluded. The
-wiring is exonerated by interleaving: the same cable, P/N-crossing
-adapter and connector gave OV5647 `DATA_0`-only, then an OV9281 reaching
-`0x00010003` with a CRC-verified frame, then OV5647 `DATA_0`-only again.
+**Root cause, corrected: the driver programs NO PLL and no MIPI-TX
+pad-drive registers, not a hardware fault in the module.** This
+retracts the "fault in the module under test" conclusion previously
+published here and in issue #2248 -- the module is healthy. With no PLL
+write, the sensor free-ran on its OV5647 power-on defaults: `0x3035` =
+`0x11` is PLL system divider 1, giving VCO 875 MHz / sysdiv 1 = 875
+Mbps/lane and a 175 MHz pixel clock, while the receiver had been binned
+`{450 MHz, 0x16}` from the driver's own declared `pixel_rate` of
+83333333 (416.67 Mbps) -- a 2.1x mismatch, producing `ERRSOTSYNCHS` on
+both data lanes on every burst while the clock lane still locked (a
+clock lane locks far outside the range a data lane can sync SoT in).
+Separately, `0x3017` (LP TX pad drive) was also left at its power-on
+default, too low to bring `CLOCK` and `DATA_1` to Stop state on this
+receiver -- bench-bisected on the same module: reset `0x10` -> no lane
+reaches Stop state; `pgm_lptx = 01` -> `DATA_0` only; `10` -> `+DATA_1`;
+`11` -> `+CLK`, reaching `CSI_PHY_STOPSTATE` = `0x00010003` (all three
+lanes) with `0x3017` = `0xf0`. That bisection is what the earlier write-up
+above measured as "`DATA_0` reads 50/50 while `DATA_1` and `CLK` read
+0/50" and misread as a module fault: it was the pre-fix driver's `0x3017`
+power-on value, not the silicon.
 
-Two driver defects were claimed along the way (issue #2248). One is real
-and **is now FIXED and verified on silicon**. The other was investigated
-and **DISPROVEN** -- recorded here rather than silently deleted, because
-the wrong conclusion was already published in issue #2248 and the
-correction needs to be findable. Fixing the real one in-tree is an
-AUTHORIZED divergence from the verbatim-backport rule in
-`zephyr/drivers/video/ov5647.c`'s header -- which is why that header now
-carries a retirement warning: when the Zephyr pin advances to a revision
-containing zephyrproject-rtos/zephyr#119301, confirm the lane-park fix is
+Fixing this in-tree is an AUTHORIZED divergence from the verbatim-backport
+rule in `zephyr/drivers/video/ov5647.c`'s header (a second one, alongside
+the earlier lane-park fix) -- which is why that header now carries a
+retirement warning covering BOTH fixes: when the Zephyr pin advances to a
+revision containing zephyrproject-rtos/zephyr#119301, confirm both are
 present upstream BEFORE deleting the vendored copy, or the deletion
-silently reintroduces it.
+silently reintroduces one or both bugs.
 
-1. **FIXED -- the driver never performed mainline's LP-11 park.**
-   Mainline's `ov5647_power_on()` calls `ov5647_stream_stop()` under the
-   comment "Stream off to coax lanes into LP-11 state"; the vendored
-   driver only ever wrote `0x0100`. In software standby this part
-   presents no LP-11 at all (`CSI_PHY_STOPSTATE` = `0x00000000`), so on a
-   receiver that gates on Stop-state before stream start -- as this one
-   does -- even a healthy OV5647 could not open. `ov5647_init()` now
+1. **FIXED (issue #2248) -- the driver never performed mainline's LP-11
+   park.** Mainline's `ov5647_power_on()` calls `ov5647_stream_stop()`
+   under the comment "Stream off to coax lanes into LP-11 state"; the
+   vendored driver only ever wrote `0x0100`. In software standby this
+   part presents no LP-11 at all (`CSI_PHY_STOPSTATE` = `0x00000000`), so
+   on a receiver that gates on Stop-state before stream start -- as this
+   one does -- even a healthy OV5647 could not open. `ov5647_init()` now
    leaves the sensor parked and `set_stream()` unparks and re-parks
-   around streaming, with `0x0100` = `0x01` written FIRST: parking in
-   standby replicates the registers but not the state, and a bench run
-   proved that variant does nothing. Verified with the diagnostic
-   application's own park compiled out, so the driver alone was
-   responsible: the four registers read `0x01` / `0x25` / `0x0f` / `0x01`
-   straight out of init, and `CSI_PHY_STOPSTATE` reads `0x00000001` where
-   the pre-fix driver-only run read `0x00000000`. `ov5647_set_fmt()` now
+   around streaming, with `0x0100` = `0x01` written FIRST. `ov5647_set_fmt()`
    also drops to standby before its register writes and re-parks
    afterwards, and `ov5647_lane_park()`'s error paths make a best-effort
    drop back to standby rather than leaving the sensor streaming
    mid-sequence.
-2. **DISPROVEN -- the declared pixel rate was claimed off by 2.1x and
-   claimed to steer the D-PHY frequency-bin lookup wrong.** The claim was
-   that `PIXEL_RATE = XVCLK * 10 / 3` = 83333333 (datasheet fps figure)
-   should instead be derived from the default PLL the driver leaves in
-   place (`0x3034` = `0x1a`, `0x3035` = `0x11`, `0x3036` = `0x69`,
-   `0x3037` = `0x03`, VCO = 875 MHz = 875 Mbps/lane), giving 175000000 and
-   moving the receiver from `hsfreqrange 0x16` (450 Mbps) to `0x29` (900).
-   Checked against mainline Linux's own `drivers/media/i2c/ov5647.c`,
-   which declares `pixel_rate = 87500000` with `link_freq = 218750000` for
-   this same 2592x1944 mode: `87500000 * 10 / (2 lanes * 2)` =
-   `218750000` exactly, so the real lane rate is 437.5 Mbps, not the
-   875 Mbps the PLL-derived attempt assumed -- the `* lanes` factor in
-   that derivation was the error. 83333333 is within about 5% of
-   mainline's 87500000, i.e. approximately correct, and both 416 Mbps
-   (from 83333333) and 437.5 Mbps (mainline) land in the SAME
-   `{450, 0x16}` row of `frequency_range[]` in
-   `zephyr/drivers/mipi_dphy/dphy_dw.c` -- the claimed wrong bin never
-   existed. Worse, `OV5647_PIXEL_RATE` also feeds
-   `ov5647_frmrate_to_vts()`, which divides it to produce the programmed
-   `TIMING_VTS`: doubling the macro to 175000000 while leaving the PLL
-   untouched halved the real frame rate (VTS `0x0809` -> `0x10e0`, 2057 ->
-   4320) and made `ov5647_enum_frmival()` advertise an unreachable 30 fps
-   at full resolution. The 175000000 change (issue #2248) was reverted;
-   `OV5647_PIXEL_RATE` is unchanged from upstream.
+2. **FIXED (issue #2248, bench run 52) -- the PLL and MIPI-TX pad-drive
+   registers were never programmed.** Eight registers (`0x3017 0x3035
+   0x3036 0x3037 0x303c 0x301c 0x301d 0x3106`) are now written in
+   `ov5647_init_regs[]`, in software standby immediately after the
+   `0x0103` software reset and before the lane park -- the PLL dividers
+   latch at that reset, not on standby exit, so the same writes issued
+   after the park update the register file without moving the running
+   PLL (a bench run 51 mistake). Values are matched to mainline Linux's
+   own declared PLL constants for this mode: `0x3037` = `0x03` (prediv
+   3), `0x3036` = `0x69` (multiplier 105), `0x3035` = `0x21` (sysdiv 2) ->
+   VCO 875 MHz / sysdiv 2 = 437.5 Mbps/lane, matching mainline's declared
+   `link_freq` 218750000 (DDR half-rate) for this mode; the same relation
+   reproduces mainline's other two modes exactly (`0x3036` = `0x62`/98 ->
+   81666700, `0x3036` = `0x46`/70 -> 58333000), which is what pins
+   sysdiv = 2 as the operating point in every mode. `0x3017` = `0xf0`
+   (`pgm_lptx` = 3, max) is a deliberate divergence from mainline's
+   `0xe0` (`pgm_lptx` = 2): mainline's value never brings the clock lane
+   to Stop state, which mainline's own receiver does not gate on but ours
+   does. `0xf0` is pinned at maximum drive strength with **no
+   characterised margin** against overdrive -- narrowing it needs bench
+   time this run did not spend. Which of the eight registers are
+   individually load-bearing is **not established**; only `0x3017` is
+   independently bisected above. `0x4837` (PCLK period) stays at its
+   power-on `0x15` (mainline writes `0x19` for this PLL); on the safe
+   side at 437.5 Mbps and not changed in the working run.
+3. **`OV5647_PIXEL_RATE` corrected, not "disproven".** A previous note
+   here said the claim that `PIXEL_RATE = XVCLK * 10 / 3` = 83333333
+   understated the link rate was investigated and DISPROVEN, and that a
+   follow-up correction to a PLL-derived 175000000 was reverted for
+   doubling the programmed frame length. That conclusion is now itself
+   retracted: the 175000000 figure was actually right about the
+   power-on link rate, and "it doubled the programmed VTS" was the
+   correct *consequence* of a doubled pixel clock, not evidence against
+   it. The real defect was that the PLL was never WRITTEN to match
+   either number. `OV5647_PIXEL_RATE` now derives from the same
+   `OV5647_PLL_PREDIV` / `OV5647_PLL_MULT` / `OV5647_PLL_SYS_DIV`
+   constants item 2 programs into the sensor, giving 87500000 at 25 MHz
+   XVCLK -- matching mainline's own declared `pixel_rate` for this PLL --
+   and feeding a correspondingly larger `TIMING_VTS` (2160 instead of the
+   previous, power-on-PLL-derived 2058); `ov5647_enum_frmival()` still
+   behaves sanely, just narrowing which of the fixed frame rates are
+   reachable at a given height. **Not bench-verified for 8-bit**: this
+   derivation is fixed at 10bpp (the RAW10 mode `ov5647_init()` selects,
+   the only one bench-proven); `cfg->pixel_rate` is a single DT-derived
+   constant, not re-derived per selected format, so selecting
+   `VIDEO_PIX_FMT_SBGGR8` (8bpp) still reports the RAW10 value against
+   `video_get_csi_link_freq()`'s fallback, which would need 109375000
+   (437.5 Mbps * 2 / 8) at the same PLL to be correct for that format --
+   flagged, not fixed, pending a bench measurement of the 8-bit path.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 
@@ -243,11 +265,15 @@ boards this shield targets; frame buffers must live in SRAM/DDR, not TCM.
 ## Build coverage
 
 `tests/zephyr/video_sensors` runs a real ztest for OV9281 (`ov9281_test.c`)
-against an I2C emulator on `native_sim` and `native_sim/native/64`, checking
+and OV5647 (`ov5647_test.c`), each against its own I2C emulator, on
+`native_sim` and `native_sim/native/64`: OV9281 checks
 `get_caps`/`set_format`/register programming/exposure range check; OV5647
-and IMX296 stay compile-coverage in that same runtime suite (no emulator --
-see `app.overlay`), mirroring upstream's `tests/drivers/build_all/video`
-shape for the compile-only pair.
+checks the chip-ID probe, the lane-park sequence and its write ORDER (not
+just final register values), and the PLL/MIPI-TX pad-drive registers from
+issue #2248's run-52 fix landing before the park, not after. IMX296 stays
+compile-coverage in that same runtime suite (no emulator -- see
+`app.overlay`), mirroring upstream's `tests/drivers/build_all/video` shape
+for the compile-only case.
 
 ## First-light example
 
@@ -256,8 +282,9 @@ shape for the compile-only pair.
 shield also builds against it) and captures one frame with a timeout, on the
 E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
 README for what each printed line means and the expected result per module
--- the OV9281 path is now bench-verified (2026-09-21, an E1M-AEN803 on the
-E1M-EVK); the IMX219 and IMX296 paths compile and link against the real
-board target but have not yet been run on real silicon. The OV5647 path
-has been bench-attempted but is BLOCKED at D-PHY Stop-state (see the
-OV5647 driver section above) -- it is not bench-verified.
+-- the OV9281 path is bench-verified (2026-09-21) and the OV5647 path is
+now also bench-verified, RAW10 only (run 52, 2026-09-22), both on an
+E1M-AEN803 on the E1M-EVK; see the OV5647 driver section above for the
+root-cause writeup and its honest limits. The IMX219 and IMX296 paths
+compile and link against the real board target but have not yet been run
+on real silicon.
