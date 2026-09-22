@@ -69,11 +69,14 @@ its own on J5 pin 11 and needs the pull-up rework described in
 [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) before it answers on I2C
 at all. With the module powered and answering I2C, `alp_camera_open`
 fails at `ALP_ERR_TIMEOUT` with `E: D-PHY not locked to Stop-state. PHY
-status - 0x00010000 DPHY ID: 0`. `CSI_PHY_STOPSTATE` (`0x4903304c`)
-reaches only bit0 (`STOPSTATEDATA_0`), and only after the receiver is
-configured; bit1 (`DATA_1`) and bit16 (`CLK`) never assert, and
-`CSI_PHY_RX` bit17 (`RXCLKACTIVEHS`) never sets. For contrast, the
-OV9281 path below reaches `0x00010003` on the same receiver.
+status - 0x00010000 DPHY ID: 0`. That `PHY status` field is `CSI_PHY_RX`
+(`0x49033048`), the register the driver's log line prints, and it reads
+`0x00010000` — `RXULPSCLKNOT` set, `RXCLKACTIVEHS` (bit17) clear.
+`CSI_PHY_STOPSTATE` (`0x4903304c`) is a separate register and reaches
+only `0x00000001` (bit0 `STOPSTATEDATA_0`), and only after the receiver
+is configured; bit1 (`DATA_1`) and bit16 (`CLK`) never assert. For
+contrast, the OV9281 path below reaches `CSI_PHY_STOPSTATE` =
+`0x00010003` (`CLK|DATA_1|DATA_0`) on the same receiver.
 
 Ruled out by control-validated bench runs: module power, the sensor's
 own MIPI PHY being disabled (register `0x3018` = `0x44` decodes to

@@ -1,4 +1,4 @@
-### Documented — J5 pin 11 has no pull-up on the E1M-EVK, and the OV5647 bring-up is blocked at D-PHY Stop-state, not working (#2217)
+### Documented — J5 pin 11 has no pull-up on the E1M-EVK, and the OV5647 bring-up is blocked at D-PHY Stop-state, not working (#2213)
 
 Bench-proven 2026-09-22 on an E1M-AEN803 (serial 2026W36-0001) on an
 E1M-EVK (hw_rev 2626-r2). `docs/boards/e1m-evk.md`'s `CAM_EN` row and RPi
@@ -27,10 +27,13 @@ rework too — asserting it still powers the module down.
 fitted the sensor answers on I2C, and camera bring-up was bench-attempted
 and found BLOCKED, not working. `alp_camera_open` fails at
 `ALP_ERR_TIMEOUT` with `E: D-PHY not locked to Stop-state. PHY status -
-0x00010000 DPHY ID: 0`. `CSI_PHY_STOPSTATE` (`0x4903304c`) reaches only
-bit0 (`STOPSTATEDATA_0`); bit1 (`DATA_1`), bit16 (`CLK`) and
-`CSI_PHY_RX` bit17 (`RXCLKACTIVEHS`) never assert, unlike the OV9281 path
-on the same receiver, which reaches `0x00010003`. Ruled out by
+0x00010000 DPHY ID: 0`. That `PHY status` field is `CSI_PHY_RX`
+(`0x49033048`), the register the driver's log line prints, and it reads
+`0x00010000` — `RXULPSCLKNOT` set, `RXCLKACTIVEHS` (bit17) clear.
+`CSI_PHY_STOPSTATE` (`0x4903304c`) is a separate register and reaches
+only `0x00000001` (bit0 `STOPSTATEDATA_0`); bit1 (`DATA_1`) and bit16
+(`CLK`) never assert, unlike the OV9281 path on the same receiver, which
+reaches `CSI_PHY_STOPSTATE` = `0x00010003` (`CLK|DATA_1|DATA_0`). Ruled out by
 control-validated bench runs: module power, the sensor's own MIPI PHY
 being disabled (register `0x3018` = `0x44`), the mainline "coax lanes
 into LP-11" park sequence, sensor-before-receiver ordering, and the

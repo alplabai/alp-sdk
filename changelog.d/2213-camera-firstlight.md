@@ -14,8 +14,9 @@ SRAM0, so the example's `Kconfig` drops
 `ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT` / `VIDEO_BUFFER_POOL_NUM_MAX` to 1
 and grows `VIDEO_BUFFER_POOL_HEAP_SIZE` to 3.5 MiB for that shield only.
 
-The IMX219, OV5647 and IMX296 paths compile and link against the real
-board target but have not yet been run on real silicon — only OV9281 is
-bench-verified (2026-09-21, an E1M-AEN803 on the E1M-EVK).
+The IMX219 and IMX296 paths compile and link against the real board target
+but have not yet been run on real silicon (no module seated); OV9281 is
+bench-verified (2026-09-21, an E1M-AEN803 on the E1M-EVK) and the OV5647
+path is bench-attempted and BLOCKED at D-PHY Stop-state (issue #2248).
 `tests/zephyr/video_sensors` builds OV5647 and IMX296 as compile-coverage
 (no emulator) alongside the OV9281 runtime ztest.
