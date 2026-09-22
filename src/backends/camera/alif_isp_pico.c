@@ -14,7 +14,7 @@
  * Mirrors src/backends/camera/v2n_n44_isp.c (the V2N N44 ISP backend): same
  * stub-vs-real split, and both now talk the UPSTREAM v4.4 video API --
  * video_get_caps(dev, &caps) with caps.type, video_set_format(dev, &fmt),
- * video_buffer_alloc(size, K_NO_WAIT), video_stream_start(dev, type).  This
+ * video_buffer_aligned_alloc(size, align, K_NO_WAIT), video_stream_start(dev, type).  This
  * file was the first to use it, which is why it reads as the reference; the
  * v2n backend and the portable zephyr_video.c were ported to match.
  *
@@ -165,6 +165,13 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	if (cfg == NULL || cfg->camera_id >= ARRAY_SIZE(_devs)) {
 		return ALP_ERR_INVAL;
 	}
+	/* The ISP only outputs processed RGB.  A raw or mono request must fail
+	 * here: _to_video_fourcc() maps it to 0 ("no format requested"), which
+	 * would keep the ISP's default RGB output and hand back the wrong format. */
+	if (cfg->format == ALP_PIXFMT_GREY8 || cfg->format == ALP_PIXFMT_RAW8 ||
+	    cfg->format == ALP_PIXFMT_RAW10) {
+		return ALP_ERR_NOSUPPORT;
+	}
 	const struct device *dev = _devs[cfg->camera_id];
 	if (dev == NULL || !device_is_ready(dev)) {
 		return ALP_ERR_NOT_READY;
@@ -249,8 +256,14 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		bytes_per_buf = 64u;
 	}
 
+	/* Round the tail up to the pool's alignment too, so the last cache line
+	 * of this buffer isn't shared with the next heap chunk. */
+	bytes_per_buf = ROUND_UP(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN);
+
 	for (uint8_t i = 0; i < want; ++i) {
-		st->vbufs[i] = video_buffer_alloc(bytes_per_buf, K_NO_WAIT);
+		/* Pool-aligned, not video_buffer_alloc()'s sizeof(void *): see zephyr_video.c. */
+		st->vbufs[i] =
+		    video_buffer_aligned_alloc(bytes_per_buf, CONFIG_VIDEO_BUFFER_POOL_ALIGN, K_NO_WAIT);
 		if (st->vbufs[i] == NULL) {
 			/* Pool exhausted: give back vbufs[0..i-1] (already
 			 * enqueued) before failing (#246). */

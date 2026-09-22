@@ -1637,20 +1637,17 @@
 	 *          "dsi_reg" 0x49032000/0x1000, "expmst_reg" 0x4903f000/0x40
 	 *          clock-names "pllref-clk","pllbypass-clk","tx-dphy-clk","rx-dphy-clk"
 	 *
-	 * CLOCKS -- FLAGGED PLACEHOLDER.  The fork drives these blocks with
-	 * ALIF_CPI_CLK / ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK / ALIF_MIPI_*_CLK,
-	 * which exist ONLY in the fork's 7-arg clock encoding.  Per
-	 * [[reference_alif_clock_encoding_fork_vs_upstream]] those packed values
-	 * MUST NOT be copied onto the upstream alif,clockctrl (wrong register
-	 * block).  The upstream-encoding gate/offset/parent for the camera clocks
-	 * are a TRM/bench unknown and are NOT re-authored here -- a frequency-only
-	 * dummy clock (ALIF_CLK(2U), the ALIF_SPI_CLK precedent) is used so the
-	 * nodes are well-formed.  The drivers are now PORTED to the v4.4 video API
-	 * (the ALP_VIDEO_ALIF_BROKEN gate is retired), but these camera nodes stay
-	 * status="disabled" here -- a board overlay enables them -- and even then NO
-	 * real clock is programmed (the dummy clock above).  Re-author the real
-	 * camera clock IDs via alif-ensemble-clocks-ext.h when the stack is
-	 * bench-brought-up.
+	 * CLOCKS -- cam "cam_clk"/"pix_clk" = ALIF_CPI_CLK / ALIF_CAM_PIX_SYST_ACLK
+	 * and csi "csi_clk"/"pix_clk" = ALIF_CSI_CLK / ALIF_CSI_PIX_SYST_ACLK are
+	 * REAL CLKCTL_PER_MST gates in the upstream encoding
+	 * (alif-ensemble-clocks-ext.h CAMERA CAPTURE block).  The dphy clocks
+	 * are the four real CLKCTL_PER_MST MIPI_CKEN gates ALIF_MIPI_PLLREF_CLK /
+	 * _BYPASS_CLK / _TXDPHY_CLK / _RXDPHY_CLK (bits 8 / 12 / 0 / 4): the DSI
+	 * (TX) and camera (RX) roles share this one list, so an overlay that
+	 * enables the D-PHY sets status only and never overrides the clocks.
+	 * The pixel-clock dividers are programmed through the
+	 * clockctrl .set_rate added by zephyr/patches/zephyr/0001-*.patch.
+	 * These nodes stay status="disabled" here -- a board overlay enables them.
 	 *
 	 * NO pinctrl-0: the fork cam node references &pinctrl_cam8 (the 8-bit CPI
 	 * data pads), not defined in this tree; the driver applies pinctrl only IF
@@ -1661,8 +1658,8 @@
 	 * ADR 0017 Tier-2 (fork-driver copies; upstream + hal_alif ship no camera
 	 * video / mipi_dphy drivers) -- INTERIM, retires onto the fork once the
 	 * nodes are repointed + the drivers ported to the v4.4 video API +
-	 * bench-verified.  Runtime frame CAPTURE is HW-blocked on this
-	 * batch (no camera sensor wired).  BENCH-UNVERIFIED.
+	 * bench-verified.  On the E1M-EVK a Raspberry Pi camera module plugs into
+	 * the J5 connector (shield e1m_evk_rpi_csi).  BENCH-UNVERIFIED.
 	 */
 	dphy: d-phy@49033000 {
 		compatible = "snps,designware-dphy";
@@ -1671,10 +1668,10 @@
 		      <0x4903F000 0x40>;
 		reg-names = "csi_reg", "dsi_reg", "expmst_reg";
 		#dphy-cells = <1>;
-		clocks = <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>,
-			 <&clockctrl ALIF_CSI_DPHY_CLK>;
+		clocks = <&clockctrl ALIF_MIPI_PLLREF_CLK>,
+			 <&clockctrl ALIF_MIPI_BYPASS_CLK>,
+			 <&clockctrl ALIF_MIPI_TXDPHY_CLK>,
+			 <&clockctrl ALIF_MIPI_RXDPHY_CLK>;
 		clock-names = "pllref-clk", "pllbypass-clk", "tx-dphy-clk", "rx-dphy-clk";
 		ref-frequency = <38400000>;
 		cfg-clk-frequency = <25000000>;
@@ -1685,8 +1682,8 @@
 		compatible = "alif,cam";
 		reg = <0x49030000 0x1000>;
 		interrupts = <345 0>;
-		clocks = <&clockctrl ALIF_CPI_CLK>;
-		clock-names = "cam_clk";
+		clocks = <&clockctrl ALIF_CPI_CLK>, <&clockctrl ALIF_CAM_PIX_SYST_ACLK>;
+		clock-names = "cam_clk", "pix_clk";
 		fifo-wr-wmark = <0x18>;
 		fifo-rd-wmark = <0x08>;
 		wait-vsync;
@@ -1697,7 +1694,7 @@
 		compatible = "snps,designware-csi";
 		reg = <0x49033000 0x1000>;
 		interrupts = <344 0>;
-		clocks = <&clockctrl ALIF_CSI_CLK>, <&clockctrl ALIF_CSI_CLK>;
+		clocks = <&clockctrl ALIF_CSI_CLK>, <&clockctrl ALIF_CSI_PIX_SYST_ACLK>;
 		clock-names = "csi_clk", "pix_clk";
 		ipi-mode = "Camera";
 		phy-if = <&dphy 1>, <&dphy 0>;

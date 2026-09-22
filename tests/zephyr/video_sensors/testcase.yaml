@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# twister coverage for the Raspberry-Pi-style MIPI CSI-2 OV9281 camera-module sensor driver
+# (ov9281.c) on native_sim. A real runtime ztest (ov9281_test.c) runs against ov9281_emul.c,
+# an I2C emulator on native_sim's actual "zephyr,i2c-emul-controller" bus. Mirrors upstream's
+# tests/drivers/sensor/ina237 for the emulator/ztest shape.
+
+common:
+  tags:
+    - alp-sdk
+    - video
+    - camera
+
+tests:
+  alp_sdk.video.ov9281_sensor:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    min_ram: 32

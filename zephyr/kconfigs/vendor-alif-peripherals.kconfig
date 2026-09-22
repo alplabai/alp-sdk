@@ -709,11 +709,11 @@ endif # I2S_DW
 # the v4.4 API by Alp Lab AB (each API-shim change is marked at its call site;
 # see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
 # is RETIRED and the driver TUs build in directly when their DT node is enabled.
-# Runtime capture stays HW-blocked on this batch (no camera sensor wired).
-# vendor-ext, BENCH-UNVERIFIED.
+# The J5 innomaker_cam_ov9281 shield is bench-verified (live GREY8 capture,
+# an E1M-AEN803 on the E1M-EVK, 2026-09-21).  vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
-	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM)"
 	default y
 	depends on VIDEO
 	depends on DT_HAS_ALIF_CAM_ENABLED
@@ -738,10 +738,14 @@ config VIDEO_ALIF_CAM_INIT_PRIORITY
 
 config VIDEO_ALIF_CAM_EXTENDED
 	bool "CPI has extended registers and ports (ISP / memory-dump endpoints)"
+	default y if SOC_SERIES_E8
 	depends on VIDEO_ALIF_CAM
 	help
 	  The CPI has extended registers and ports to forward video signals to the
-	  ISP and dump the frame to memory.
+	  ISP and dump the frame to memory.  The E8 CPI has them (Alif's own E8 DK
+	  sample/test board confs set this), and without it the driver never sets
+	  CAM_CFG.AXI_PORT_EN: the CPI still raises STOP per frame, so capture
+	  reports success over a buffer nothing was written to.
 
 config DISPLAY_CDC200
 	bool "TES CDC-2.1 (CDC200) DPI/RGB display controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -799,6 +803,14 @@ config MIPI_DPHY_INIT_PRIORITY
 	depends on MIPI_DPHY_DW
 	help
 	  MIPI-DPHY host-controller init priority (ahead of the CSI bridge at 41).
+
+# dphy_dw.c registers its log module against CONFIG_MIPI_DPHY_LOG_LEVEL; with
+# no upstream mipi_dphy class to define it, any CONFIG_LOG=y build failed.
+if MIPI_DPHY
+module = MIPI_DPHY
+module-str = mipi_dphy
+source "subsys/logging/Kconfig.template.log_config"
+endif # MIPI_DPHY
 
 config MIPI_DSI_DW
 	bool "DesignWare MIPI-DSI host controller for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
@@ -1050,4 +1062,3 @@ config OSPI_ALIF
 	  ADR 0017 Tier-1.5 (in-tree thin driver over an Apache-2.0 hal_alif HW
 	  library, not a fork-driver copy -- the fork ships no OSPI Zephyr class
 	  driver either, only the DT binding).  See docs/adr/0017.
-

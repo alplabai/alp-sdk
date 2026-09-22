@@ -255,3 +255,37 @@ pull-up either, which is expected — ~50 kΩ is far too weak for 100 kHz rise t
 BRD_I2C into the segment the carrier already pulls up via `R137`/`R144` — or
 dedicated pull-ups on the net. That is a board change, not a firmware one, which is
 why #1814 stays open.
+
+## Amendment (2026-09-18) — a third-party permissive port as a labeled tier
+
+The tier ladder above assumes the driver we consume is already merged
+somewhere (upstream, a fork, a vendor HAL). `zephyr/drivers/video/ov9281.c`
+is a fourth shape: neither an upstream/fork driver nor the tier ladder's own
+Tier-2. It is a port of the Apache-2.0 Espressif `esp-video-components`
+`esp_cam_sensor/sensors/ov9281` driver — a *third party*, not the Alif
+vendor fork Tier-2 names — with its register addresses/values/per-mode init
+tables kept byte-for-byte (plus one Alp-derived 1280x800 table -- see the
+driver's file header) and its ESP-IDF driver skeleton (SCCB handle,
+`esp_cam_sensor_ops_t`, FreeRTOS glue) rewritten onto the Zephyr v4.4
+`video_driver_api` + `video_ctrl` registry (see the driver's file header for
+the exact commit and the full source/target file list). This was originally
+labeled `ADR 0017 Tier-2`, which is wrong: Tier-2 in this ladder specifically
+means "pull the opt-in Alif vendor-SDK fork (`sdk-alif`)" — this driver
+never touches that fork.
+
+This shape is now labeled **`ADR 0017 Tier-1.5 (third-party permissive
+port)`**, reusing the Tier-1.5 numeral rather than minting a new one: like
+the canonical Tier-1.5 (thin glue over an Apache-2.0 *vendor* HAL library),
+someone else already did the register-level work under a permissive licence
+and this driver is only the thin Zephyr-API skeleton wrapped around it — the
+sole difference is the licensor is an unrelated third party (Espressif)
+rather than the silicon vendor (Alif), which Tier-1.5's own rationale ("no
+upstream + a ready register-level implementation exists to wrap") already
+tolerates in spirit. It is **not** `ADR-0017-ADJACENT`: that label is
+reserved for a driver authored fresh from a datasheet with nothing to
+consume (e.g. `hwsem_alif.c`) — ov9281.c is the opposite case, an asset
+genuinely consumed from elsewhere.
+
+Retirement for this shape follows Tier-1.5's own rule: it stays interim
+indefinitely (no fork to retire onto), and is deleted only if/when upstream
+Zephyr grows a native `"ovti,ov9281"` driver to prefer instead.
