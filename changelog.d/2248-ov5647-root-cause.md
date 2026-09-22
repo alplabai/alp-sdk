@@ -11,14 +11,15 @@ physical path is exonerated by interleaving an OV9281 that reached
 P/N-crossing adapter and connector between two identical OV5647 failures.
 
 Two defects in the vendored upstream-pending driver were found along the way and
-are real regardless of that module. Neither is patched locally, because
-`zephyr/drivers/video/ov5647.c`'s header forbids divergent local patches on a
-verbatim backport; both belong upstream in zephyrproject-rtos/zephyr#119301.
+are real regardless of that module. Both are now fixed in-tree and verified on
+silicon, as an authorized divergence from the verbatim-backport rule in
+`zephyr/drivers/video/ov5647.c`'s header; that header now warns that the fixes
+must be confirmed present upstream before the vendored copy is retired.
 
-- The driver never performs mainline's "coax lanes into LP-11" park, so in
-  software standby the sensor presents no LP-11 and any receiver that gates on
-  Stop-state before stream start cannot open it, even with healthy silicon.
-- `PIXEL_RATE` is derived from a datasheet fps figure rather than the PLL the
+- The driver never performed mainline's "coax lanes into LP-11" park, so in
+  software standby the sensor presented no LP-11 and any receiver that gates on
+  Stop-state before stream start could not open it, even with healthy silicon.
+- `PIXEL_RATE` was derived from a datasheet fps figure rather than the PLL the
   driver actually leaves programmed, understating the link rate by 2.1x and
   selecting the wrong D-PHY frequency bin.
 
