@@ -293,9 +293,13 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   for the PCIe-side resets/WAKE/CLKREQ signals.
 - **Display:** 40-pin MIPI DSI connector for the **RK055HDMIPI4MA0**
   720p panel (NXP-supplied reference panel; drivers are available
-  from NXP's MIPI-DSI panel collection).  Backlight rails + the
-  capacitive-touch controller sit on `EVK_I2C_BUS_DSI_CSI`
-  (`ALP_E1M_I2C1`).
+  from NXP's MIPI-DSI panel collection).  With an E1M-AEN SoM, add the
+  `e1m_evk_rk055hdmipi4ma0` Zephyr shield (`zephyr/boards/shields/`)
+  to drive it -- see `examples/aen/aen-dsi-display`, which renders at
+  40.0 Hz.  The panel intermittently fails to init on cold boot
+  (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
+  capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
+  (`ALP_E1M_I2C1`) and is not driven yet.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
