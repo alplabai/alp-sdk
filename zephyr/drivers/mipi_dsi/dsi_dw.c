@@ -89,51 +89,16 @@ void dsi_dw_pwr_up(uintptr_t regs)
  * keeps the flag true across the power-cycle bracket in
  * dsi_dw_set_mode_locked(), so the flag never claims a reset host is running
  * (or the reverse).
- *
- * The primary fix for the intermittent first-command stall (#2199,
- * ~1-in-6 cold boots on E1M-AEN803 2026W36-0009) is the ordering change in
- * dsi_dw_transfer_locked(): power up here BEFORE dsi_dw_setup_lp_cmd() and
- * dsi_dw_msg_config() touch DSI_CMD_MODE_CFG/DSI_LPCLK_CTRL, not after.  The
- * poll below is NOT that fix -- it is a bounded settle: it waits for the
- * lanes to report the stop state a locked PHY reaches, capped at 10 ms, and
- * logs how long it actually waited.  A near-zero logged wait on every boot,
- * including the ones that used to stall, says stop state was never the
- * bottleneck and the ordering fix alone accounts for it; a wait close to the
- * cap would say otherwise.  Read the log, don't assume.
  */
 static void dsi_dw_pwr_up_once(const struct device *dev)
 {
 	struct dsi_dw_data *data = dev->data;
-	uintptr_t regs;
-	uint32_t want;
-	uint32_t status;
-	uint32_t waited_us = 0;
 
 	if (data->powered)
 		return;
 
-	regs = DEVICE_MMIO_GET(dev);
-	dsi_dw_pwr_up(regs);
+	dsi_dw_pwr_up(DEVICE_MMIO_GET(dev));
 	data->powered = true;
-
-	want = DSI_PHY_STATUS_PHY_STOPSTATECLKLANE | DSI_PHY_STATUS_PHY_STOPSTATE0LANE;
-	if (data->phy.num_lanes >= 2) {
-		want |= DSI_PHY_STATUS_PHY_STOPSTATE1LANE;
-	}
-
-	status = sys_read32(regs + DSI_PHY_STATUS);
-	while ((status & want) != want && waited_us < DSI_DW_PWR_UP_SETTLE_US_MAX) {
-		k_busy_wait(1);
-		waited_us++;
-		status = sys_read32(regs + DSI_PHY_STATUS);
-	}
-
-	if ((status & want) != want) {
-		LOG_WRN("Stop state not reached %u us after power-up, PHY_STATUS=0x%08x",
-			waited_us, status);
-	}
-
-	LOG_INF("host powered: stop state after %u us, PHY_STATUS=0x%08x", waited_us, status);
 }
 
 void dsi_dw_wait_2_frames(uint32_t pixclk,
@@ -1382,21 +1347,24 @@ int dsi_dw_write_payload(uintptr_t regs, uint8_t byte0, const uint8_t *tx,
  * clear STOPSTATE bit (2 clock lane, 4 lane 0, 7 lane 1) means the packet
  * handler is waiting for a lane that never returned to LP-11 (#2199).
  *
- * The five extra registers narrow the "why" further.  A stalled boot whose
- * DSI_CMD_MODE_CFG is missing the LP-command bits, or whose DSI_CLKMGR_CFG
- * escape-clock divider reads back the "stop generating the escape clock"
- * value (0 or 1), means a config write was dropped while the host was still
- * in reset -- the ordering bug dsi_dw_pwr_up_once()'s reorder targets.
- * DSI_MODE_CFG shows whether a stalled read was issued in video mode
- * (DSI_MODE_CFG_CMD_MODE clear) rather than command mode.  DSI_PWR_UP and
- * DSI_LPCLK_CTRL are the other two registers a dropped write while the host
- * was in reset would leave at their power-on reset value instead of the
- * configured one.
+ * The five extra registers are a HYPOTHESIS aid, not proof: the DW config
+ * registers accept writes with DSI_PWR_UP[SHUTDOWNZ]=0, so a readback that
+ * disagrees with what the driver programmed only suggests a dropped write
+ * while the host was still in reset, it does not confirm one.  DSI_MODE_CFG
+ * shows whether a stalled read was issued in video mode (DSI_MODE_CFG_CMD_MODE
+ * clear) rather than command mode.  The parked `header` is the more direct
+ * clue: it is the DSI_GEN_HDR value this call site just wrote, so it says
+ * which packet is stuck.  hx8394's first command is a generic long write
+ * (B9 FF 83 94, WC=4), whose payload goes to DSI_GEN_PLD_DATA before the
+ * header does -- a parked long-write header with
+ * DSI_CMD_PKT_STATUS_GEN_BUFF_PLD_EMPTY=1 would mean the handler is starved
+ * of payload, not blocked on the header itself.
  */
-static void dsi_dw_log_fifo_stall(uintptr_t regs, uint32_t pkt_status)
+static void dsi_dw_log_fifo_stall(uintptr_t regs, uint32_t pkt_status, uint32_t header)
 {
-	LOG_ERR("Failed to write command FIFO (CMD_PKT_STATUS=0x%08x PHY_STATUS=0x%08x).",
-		pkt_status, sys_read32(regs + DSI_PHY_STATUS));
+	LOG_ERR("Failed to write command FIFO (header=0x%08x CMD_PKT_STATUS=0x%08x "
+		"PHY_STATUS=0x%08x).",
+		header, pkt_status, sys_read32(regs + DSI_PHY_STATUS));
 	LOG_ERR("PWR_UP=0x%08x CLKMGR_CFG=0x%08x MODE_CFG=0x%08x CMD_MODE_CFG=0x%08x "
 		"LPCLK_CTRL=0x%08x",
 		sys_read32(regs + DSI_PWR_UP), sys_read32(regs + DSI_CLKMGR_CFG),
@@ -1424,7 +1392,7 @@ int dsi_dw_write_hdr(uintptr_t regs, uint32_t header)
 
 	tmp = sys_read32(regs + DSI_CMD_PKT_STATUS);
 	if ((tmp & mask) != mask) {
-		dsi_dw_log_fifo_stall(regs, tmp);
+		dsi_dw_log_fifo_stall(regs, tmp, header);
 		return -ETIMEDOUT;
 	}
 
@@ -1435,16 +1403,17 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 		uint16_t value)
 {
 	uint32_t mask;
+	uint32_t header;
 
 	/*
 	 * The high byte needs the shift before the narrowing: `(uint8_t) value >> 8`
 	 * casts first and is always 0, so a size above 255 was silently truncated.
 	 */
-	sys_write32(HEADER(channel,
+	header = HEADER(channel,
 			MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE,
 			value & 0xff,
-			(value >> 8) & 0xff),
-		regs + DSI_GEN_HDR);
+			(value >> 8) & 0xff);
+	sys_write32(header, regs + DSI_GEN_HDR);
 
 	mask = DSI_DW_GEN_PATH_DRAINED;
 	for (int j = 0; (j < 100) &&
@@ -1454,7 +1423,7 @@ int dsi_dw_send_max_return_packet_size(uintptr_t regs, uint8_t channel,
 	uint32_t status = sys_read32(regs + DSI_CMD_PKT_STATUS);
 
 	if ((mask & status) != mask) {
-		dsi_dw_log_fifo_stall(regs, status);
+		dsi_dw_log_fifo_stall(regs, status, header);
 		return -ETIMEDOUT;
 	}
 
@@ -1478,24 +1447,17 @@ static ssize_t dsi_dw_transfer_locked(const struct device *dev,
 
 	if (msg->flags & MIPI_DSI_MSG_USE_LPM)
 		mode_flags |= MIPI_DSI_MODE_LPM;
+	dsi_dw_setup_lp_cmd(dev, mode_flags);
+	dsi_dw_msg_config(regs, mode_flags);
 
 	/*
 	 * ALP-SDK PORT FIX: attach leaves the host in reset so the panel's RESX
 	 * rises with the lanes in LP-11 (see dsi_dw_attach_locked()), so power it
-	 * up here -- BEFORE dsi_dw_setup_lp_cmd()/dsi_dw_msg_config() touch
-	 * DSI_CMD_MODE_CFG/DSI_LPCLK_CTRL, and before any DSI_CMD_PKT_STATUS
-	 * poll, DSI_GEN_HDR or DSI_GEN_PLD_DATA access.  This is Linux
-	 * dw-mipi-dsi parity: it programs CMD_MODE_CFG/LPCLK_CTRL with the core
-	 * already powered.  The previous order here (program, then power up) was
-	 * backwards -- it let dsi_dw_msg_config() poll DSI_PHY_STATUS while
-	 * SHUTDOWNZ was still 0, when the bit is not yet meaningful, and then put
-	 * the DSI_GEN_HDR write microseconds after the power-up with nothing
-	 * verifying the PHY had settled in between (#2199).
+	 * up here -- before any DSI_CMD_PKT_STATUS poll, DSI_GEN_HDR or
+	 * DSI_GEN_PLD_DATA access.  The two config writes above are the
+	 * DesignWare-recommended order anyway: program, then power up.
 	 */
 	dsi_dw_pwr_up_once(dev);
-
-	dsi_dw_setup_lp_cmd(dev, mode_flags);
-	dsi_dw_msg_config(regs, mode_flags);
 
 	/* Wait till the Command FIFO has empty space or time-out. */
 	mask = DSI_CMD_PKT_STATUS_GEN_CMD_FULL;

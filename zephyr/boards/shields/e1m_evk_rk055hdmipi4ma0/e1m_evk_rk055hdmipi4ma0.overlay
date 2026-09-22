@@ -28,27 +28,29 @@
  * Panel timings are the upstream NXP rk055hdmipi4ma0 shield's.  The pixel clock
  * is not: it is the fastest the link can carry.
  *
- * The layer format (pixel-fmt-l1 below) sets only the framebuffer in memory.
- * The DSI link runs at the PANEL's pixel-format (RGB888, panel@0 below) either
- * way, so the lane rate is pixel-clock * 24 / 2 plus packet overhead.  At
- * 400 MHz / 10 = 40 MHz that is 483.6 Mbps/lane, inside the Alif DSI
- * controller's 500 Mbps two-lane ceiling, for a 40.0 Hz refresh.  40 MHz is
- * the fastest 400 MHz / N clock that fits.
+ * The layer format (pixel-fmt-l1 below) sets ONLY the framebuffer in memory --
+ * the DSI link runs at the PANEL's pixel-format (RGB888, panel@0 below)
+ * either way, so switching pixel-fmt-l1 to "rgb-565" leaves the lane rate
+ * unchanged at pixel-clock * 24 / 2 plus packet overhead.  At 400 MHz / 10 =
+ * 40 MHz that is 483.6 Mbps/lane, inside the Alif DSI controller's 500 Mbps
+ * two-lane ceiling.  40 MHz is the fastest 400 MHz / N clock that fits.
+ * Measured refresh is 40.0 Hz (762 * 1312 total pixels, including blanking,
+ * at 40 MHz).  What RGB565 buys: half the framebuffer (720*1280*2 =
+ * 1,843,200 B instead of 2,764,800 B) and half the CPU cost to fill it --
+ * nothing on the wire changes.  Colour bars (R/G/B/W, no channel swap)
+ * verified correct on glass for both the RGB888 and the RGB565 framebuffer
+ * at 40 MHz, on E1M-AEN803 2026W36-0009, 2026-09-21.
  *
- * 400 MHz / 7 = 57.142857 MHz would give 60 Hz but needs ~690 Mbps/lane at
- * 24 bpp.  dsi_dw clamps the lane to panel-max-lane-bandwidth, so the host
- * line is 762 * 62.5 / 57.142857 = 833 lane-byte clocks while one line's
- * payload needs ~1086, and the DPI payload FIFO overflows every line.
- * Measured as a controlled A/B on one board in one connector state (#2199),
- * RGB888 link in both arms (layer RGB888 at 40 MHz, RGB565 at 57.142857 MHz):
- *
- *   40 MHz          CDC200_PIXCLK_CTRL 0x000a0001  INT_ST1 0x00000000
- *   57.142857 MHz   CDC200_PIXCLK_CTRL 0x00070001  INT_ST1 0x00000080, dark
- *
- * INT_ST1 bit 7 is DSI_INT_1_DPI_PLD_WR_ERR (dsi_dw.h), still set after 5 s
- * of video, and the host programmed hline = 833, as computed above.  60 Hz
- * needs a 16-bit link (panel pixel-format MIPI_DSI_PIXFMT_RGB565,
- * ~462 Mbps/lane), which has not been tried.
+ * 60 Hz needs 400 MHz / 7 = 57.142857 MHz, which only fits the Alif DSI
+ * controller's 500 Mbps two-lane ceiling with a genuine 16-bit LINK -- not
+ * just a 16-bit framebuffer: panel pixel-format MIPI_DSI_PIXFMT_RGB565,
+ * clock-frequency 57142857, hline 771 (matching the panel's tighter blanking
+ * at this rate), DPI_COLOR_CODING 0x1.  That combination was tried (#2199):
+ * it produced correct colour bars, but at a much higher intermittent
+ * init-stall rate than the 40 MHz RGB888-link config (5/10 cold boots versus
+ * 1/10, 10 boots each) and added read stalls on the first DCS read after
+ * display_write (4/10 versus 0/10).  Not shipped as the default for that
+ * reason; see changelog.d/2199-aen-panel-init-intermittent.md.
  *
  * The SoC glue derives the CDC divider from clock-frequency and the DSI host
  * times its lanes from it, so those two cannot drift.  The APP's fill format
@@ -126,27 +128,32 @@
 };
 
 /*
- * The framebuffer: the top 3 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
- * dtsi's sram0).  A 720x1280 RGB888 layer is 2,764,800 B.  Plain "mmio-sram",
- * not "zephyr,memory-region": the CDC driver uses the address directly, so
+ * The framebuffer: the top 2 MiB of the 4 MiB SRAM0 (0x02000000, the SoC
+ * dtsi's sram0).  A 720x1280 RGB565 layer is 1,843,200 B, which fits inside
+ * 2 MiB (2,097,152 B) with room to spare -- DT_SIZE_M(2) is the smallest
+ * MiB-aligned size that holds it.  Plain "mmio-sram", not
+ * "zephyr,memory-region": the CDC driver uses the address directly, so
  * nothing is linked here and the framebuffer adds nothing to the image (an
  * ITCM RAM-run .bin stays small).
  *
  * The SoC dtsi's sram0 is ALSO the "SRAM0" linker region (and system RAM for
- * an app with `zephyr,sram = &sram0`), so it is shrunk to the bottom 1 MiB:
- * anything linked into SRAM0 past 0x02100000 is then a link error ("region
- * SRAM0 overflowed") instead of a silent overwrite of the framebuffer.  An
- * app overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
- * after this shield and still stays below the framebuffer.
+ * an app with `zephyr,sram = &sram0`), so it is grown back to the bottom
+ * 2 MiB now that the smaller RGB565 framebuffer leaves room: anything linked
+ * into SRAM0 past 0x02200000 is then a link error ("region SRAM0
+ * overflowed") instead of a silent overwrite of the framebuffer.  An app
+ * overlay that narrows sram0 further (aen-evk-demo's 64 KiB) is applied
+ * after this shield and still stays below the framebuffer.  0x02000000 +
+ * 2 MiB (sram0) + 2 MiB (lcd_fb) = 0x02400000, the top of the 4 MiB SRAM0 --
+ * the two regions exactly partition it, no gap and no overlap.
  */
 &sram0 {
-	reg = <0x02000000 DT_SIZE_M(1)>;
+	reg = <0x02000000 DT_SIZE_M(2)>;
 };
 
 &soc {
-	lcd_fb: sram@2100000 {
+	lcd_fb: sram@2200000 {
 		compatible = "mmio-sram";
-		reg = <0x02100000 DT_SIZE_M(3)>;
+		reg = <0x02200000 DT_SIZE_M(2)>;
 	};
 };
 
@@ -212,21 +219,27 @@
 };
 
 /*
- * The panel flex's touch-controller I2C -- a DSI-independent proof that the
- * flex is seated and the panel side is powered.  It is a shield fact (the
- * bus only exists when this panel is plugged into J6), so it is enabled here
- * and not in the board.
+ * The panel flex's touch-controller I2C.  It is a shield fact (the bus only
+ * exists when this panel is plugged into J6), so it is enabled here and not
+ * in the board.  No touch driver is bound here yet (#2199); this just gets
+ * the bus up so an app or the I2C shell can probe the GT911 touch
+ * controller at 0x5d or 0x14.
  *
  * Route: J6 pin 26/27 (DSI_I2C.SDA_L / DSI_I2C.SCL_L) -> level translator ->
  * E1M pads AH17 / AG17 -> Alif silicon P7_2 (I2C1_SDA_C) and P3_7
  * (I2C1_SCL_B), per metadata/pinmux/aen.yaml.  metadata/boards/e1m-evk.yaml
  * names the bus E1M_I2C1 / EVK_I2C_BUS_DSI_CSI, "Display + camera control I2C
  * (touch panel, camera-side I2C config)".  Touch reset is expander U35 P3
- * (net CTP_RST -> J6 pin 28).  CTP_INT (J6 pin 29) terminates on E1M module
- * connector pad AH8, which the CC3501E Wi-Fi/BLE coprocessor owns
- * (silicon_pad: GPIO_15, metadata/pinmux/aen.yaml), so the Alif has no
- * direct INT line.  The GT911 answers at 0x14, but this panel's config
- * block reads blank, so no touch driver is bound here yet (#2199).
+ * (net CTP_RST -> J6 pin 28).  CTP_INT_L (J6 pin 29) is the flex-side net; it
+ * crosses level translator U4 to CTP_INT (U4 pin A1) on the SoC side, which
+ * terminates on E1M module connector pad AH8 -- owned by the CC3501E
+ * Wi-Fi/BLE coprocessor (silicon_pad: GPIO_15, metadata/pinmux/aen.yaml), so
+ * the Alif has no direct INT line.
+ *
+ * Hardware contention: CC3501E GPIO_15 (E1M pad AH8) must stay an INPUT.
+ * cc3501e_spi1_configure(..., ALP_CC3501E_SPI1_CS1, ...) or
+ * cc3501e_gpio_configure(ctx, 15, OUTPUT, ...) would turn it into an output
+ * that fights the GT911's INT driver through U4.
  *
  * P3_7 + P7_2 ONLY.  P3_6 is the I/O expander's own reset (E1M pad N1) and must
  * not be muxed or driven from this group.
@@ -275,9 +288,9 @@
 	bg-color = <0x000000>;
 	memory-region = <&lcd_fb>;
 
-	/* L1 only: a single full-screen RGB888 layer. */
+	/* L1 only: a single full-screen RGB565 layer (see the header comment). */
 	enable-l1 = <1>;
-	pixel-fmt-l1 = "rgb-888";
+	pixel-fmt-l1 = "rgb-565";
 	win-x0-l1 = <0>;
 	win-y0-l1 = <0>;
 	win-x1-l1 = <720>;

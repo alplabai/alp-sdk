@@ -110,10 +110,13 @@
 /*
  * ALP-SDK PORT FIX: the vendored SHIFT for PHY_STOP_WAIT_TIME was 0 -- the
  * same shift as PHY_N_LANES below, so writing this field would have stomped
- * N_LANES instead of landing in its own byte.  dsi_dw.c's (unrelated,
- * private-header) DSI_PHY_IF_CFG_STOP_WAIT_TIME_SHIFT already has the real
- * value: 8, bits [15:8], with N_LANES in bits [1:0].  Corrected now that
- * dphy_dw_master_setup() actually writes this field (#2199).
+ * N_LANES instead of landing in its own byte.  The real value is 8, bits
+ * [15:8], with N_LANES in bits [1:0].  Per the E8 SVD, this field is the
+ * minimum time the PHY must dwell in Stop state BEFORE it may request a
+ * high-speed transmission -- a floor held before HS, not a wait for Stop to
+ * be reached.  Corrected now that dphy_dw_master_setup() actually writes
+ * this field (#2199); Linux parity, and had no measured effect on the
+ * #2199 LP-command stall.
  */
 #define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK		GENMASK(7, 0)
 #define  DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT	8

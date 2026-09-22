@@ -13,8 +13,8 @@
  *
  *   display_write()  ->  cdc200@49031000  (tes,cdc-2.1)
  *                            -- the DPI/RGB pixel pump (CDC200).  Its L1
- *                               framebuffer lives in SRAM0 @0x02100000 (the
- *                               720x1280 RGB888 FB is 2,764,800 B -- it does NOT
+ *                               framebuffer lives in SRAM0 @0x02200000 (the
+ *                               720x1280 RGB565 FB is 1,843,200 B -- it does NOT
  *                               fit ITCM, where the RAM-run links code).
  *                        |  DPI
  *                        v
@@ -32,13 +32,18 @@
  *                               panel reset sequence + DSI attach at POST_KERNEL.
  *
  * The DPI pixel clock is the shield's one clock-frequency knob: 400 MHz / 10 =
- * 40 MHz (RGB888, 24 bpp, 2 lanes -> 40 x 24 / 2 = 480 Mbps/lane).  The faster
- * RGB565 / 400 MHz / 7 = 57.142857 MHz divider was measured and rejected: at
- * that rate the DPI payload FIFO overflows continuously
- * (INT_ST1 DSI_INT_1_DPI_PLD_WR_ERR, zephyr/drivers/mipi_dsi/dsi_dw.h:381) and
- * the glass stays dark, so the shield stays at the 40 MHz / RGB888 divider
- * instead.  The SoC glue's CDC divider and the DSI host's lane timing both
- * derive from clock-frequency.
+ * 40 MHz.  The DSI LINK stays RGB888 (panel@0's pixel-format) regardless of
+ * the shield's pixel-fmt-l1 -- only the framebuffer's bytes-per-pixel
+ * changes -- so the lane rate is fixed at 40 x 24 / 2 = 480 Mbps/lane
+ * (measured ~483.6 Mbps).  pixel-fmt-l1 = "rgb-565" here halves the
+ * framebuffer and the per-row fill cost versus rgb-888; both were verified
+ * on glass at 40 MHz (colour bars, no channel swap).  A genuine 60 Hz needs a
+ * 16-bit DSI LINK (panel pixel-format RGB565, clock-frequency 57142857) and
+ * was tried: correct colour bars, but a much higher intermittent init-stall
+ * rate (5/10 cold boots versus 1/10 at 40 MHz) and read stalls (4/10 versus
+ * 0/10), so it is not the shield default (#2199,
+ * changelog.d/2199-aen-panel-init-intermittent.md).  The SoC glue's CDC
+ * divider and the DSI host's lane timing both derive from clock-frequency.
  *
  * WHERE EACH PIECE LIVES (this app only USES the chain):
  *   - the SoC nodes (reg, IRQs, clocks) -- zephyr/dts/alif/
@@ -70,12 +75,13 @@
  *   DPI scanout.  Until then display_write() only fills the framebuffer.
  *
  * FRAMEBUFFER PLACEMENT (RAM-run critical): the cdc200 node's memory-region
- * (the shield's top 3 MiB of SRAM0, lcd_fb @0x02100000; sram0 itself is
- * shrunk to the bottom 1 MiB below it) holds the L1 framebuffer.  The driver
- * uses that address directly -- no linker section -- so the 2,764,800 B
- * RGB888 framebuffer is not part of the ITCM RAM-run image.  The
- * driver flushes the data cache after every framebuffer write
- * (sys_cache_data_flush_range), so the CDC scanout sees coherent pixels.
+ * (the shield's top 2 MiB of SRAM0, lcd_fb @0x02200000; sram0 itself is
+ * grown back to the bottom 2 MiB below it now that RGB565 leaves room) holds
+ * the L1 framebuffer.  The driver uses that address directly -- no linker
+ * section -- so the 1,843,200 B RGB565 framebuffer is not part of the ITCM
+ * RAM-run image.  The driver flushes the data cache after every framebuffer
+ * write (sys_cache_data_flush_range), so the CDC scanout sees coherent
+ * pixels.
  *
  * The PASS gate: the expander, the fixed panel-power regulator, the hx8394
  * panel, the DSI host, and the cdc200 display device are all device_is_ready,
@@ -223,6 +229,12 @@ int main(void)
 	 * panel driver's own verdict.
 	 */
 	bool panel_ok = dev_ready("panel", panel);
+
+	if (!panel_ok) {
+		/* Known defect #2199: hx8394_init() -EIO on ~1-in-8-10 cold boots, no re-init path. */
+		printk("KNOWN ISSUE: panel init failed -- see #2199, changelog.d/"
+		       "2199-aen-panel-init-intermittent.md (retry or power-cycle the board)\n");
+	}
 
 	printk("%-8s: level=%d\n", "backlight", gpio_pin_get_dt(&bl_gpio));
 

@@ -311,8 +311,6 @@
 #define  DSI_PHY_RSTZ_SHUTDOWNZ			BIT(0)
 
 /* PHY Config Register */
-#define  DSI_PHY_IF_CFG_STOP_WAIT_TIME_MASK	GENMASK(7, 0)
-#define  DSI_PHY_IF_CFG_STOP_WAIT_TIME_SHIFT	8
 #define  DSI_PHY_IF_CFG_N_LANES_MASK		GENMASK(1, 0)
 #define  DSI_PHY_IF_CFG_N_LANES_SHIFT		0
 
@@ -402,12 +400,6 @@
 /* Polls of GEN_PLD_W_FULL, 1 us apart, before giving up on payload FIFO space. */
 #define  DSI_DW_PLD_SPACE_POLLS		1000U
 
-/*
- * Bound on the post-power-up stop-state settle poll in dsi_dw_pwr_up_once()
- * (#2199): 10 ms of 1 us k_busy_wait() steps.
- */
-#define  DSI_DW_PWR_UP_SETTLE_US_MAX	10000U
-
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK	GENMASK(14, 0)
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_SHIFT	0
 
@@ -418,8 +410,6 @@
 /*
  * MIPI-DSI Host controller configurations
  */
-/* PHY parameters. */
-#define PHY_STOP_WAIT_TIME			0x20
 
 /* Time to return read data packet from peripheral. */
 #define  TO_CLK_DIV				10

@@ -378,11 +378,16 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 
 	/*
 	 * ALP-SDK PORT FIX: PHY_STOP_WAIT_TIME was left at its reset value of 0.
-	 * Linux's dw-mipi-dsi always writes PHY_STOP_WAIT_TIME(0x20) alongside
-	 * N_LANES here; the field gates how long the host waits, after
-	 * requesting an HS entry, for the addressed lane to actually report
-	 * Stop before the HS request goes out, so a value of 0 lets the host
-	 * race a lane that has not reached Stop yet (#2199).
+	 * Per the E8 SVD, the field is the minimum time the PHY must dwell in
+	 * Stop state BEFORE it is allowed to request a high-speed transmission
+	 * -- not a wait for Stop to be reached, a floor on how long it stays
+	 * there first.  Linux's dw-mipi-dsi always writes
+	 * PHY_STOP_WAIT_TIME(0x20) alongside N_LANES here; this is that parity,
+	 * plus a latent-bug fix: the old SHIFT for this field was 0, the same
+	 * shift as N_LANES below, so a write here would have landed on
+	 * N_LANES instead.  It is not a fix for the #2199 LP-command stall and
+	 * had no measured effect on it -- see dsi_dw.c's dsi_dw_pwr_up_once()
+	 * for that history.
 	 */
 	reg_write_part(dsi_regs + DSI_PHY_IF_CFG, DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL,
 		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK,
