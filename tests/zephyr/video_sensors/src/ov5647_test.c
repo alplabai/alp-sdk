@@ -1621,6 +1621,111 @@ ZTEST(ov5647, test_get_fmt_reflects_flip_changed_after_set_format)
 }
 
 /*
+ * issue #2248 fix-up round 6: the round-5 get_format() -> set_format() round trip tests above
+ * (test_set_fmt_roundtrip_*) only ever exercise the RAW10 (SBGGR10P) base fourcc -- add the RAW8
+ * (SBGGR8) equivalent so a mutation narrowing ov5647_bayer_pixfmt()'s VIDEO_PIX_FMT_SBGGR8 case,
+ * or ov5647_set_fmt()'s remap-to-base check, to only the RAW10 branch would still be caught.
+ */
+ZTEST(ov5647, test_set_fmt_roundtrip_hflip_raw8)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  fmt      = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR8,
+		.width       = 640,
+		.height      = 480,
+	};
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt), "set_format(SBGGR8) failed");
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &fmt));
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG8,
+	              "get_format() reports 0x%08x with HFLIP=1 on RAW8, want SGBRG8",
+	              fmt.pixelformat);
+	zassert_ok(video_set_format(ov5647_dev(), &fmt),
+	           "get_format() -> set_format() round trip failed at HFLIP=1 (SGBRG8, RAW8)");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG8,
+	              "set_format() changed the reported fourcc to 0x%08x on a RAW8 no-op round trip",
+	              fmt.pixelformat);
+}
+
+/*
+ * ov5647.c review round 6 (nit): ov5647_set_fmt() remaps fmt->pixelformat to a BASE fourcc before
+ * validating (the round-5 accept-a-flip-shifted-fourcc block), then restores the CALLER's original
+ * request on every failure path after that remap -- but a mutation deleting the restore, or a
+ * future failure path added after the remap forgetting it, would leave the caller holding the
+ * driver's internal base-fourcc guess instead of its own request. Cover both -ENOTSUP causes
+ * (unsupported fourcc and unsupported size) video_format_caps_index() can fail with, PLUS the case
+ * that actually proves the restore does something: at the default (unset) flip ctrls the remap is
+ * a no-op (a base fourcc maps to itself), so a request already unsupported at input, unmodified by
+ * the remap, would pass this test even with the restore deleted -- only a flip-SHIFTED request
+ * (one the remap rewrites to a DIFFERENT base fourcc before validation fails) can tell the two
+ * apart.
+ */
+ZTEST(ov5647, test_set_fmt_unsupported_restores_callers_pixelformat)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  fmt      = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_YUYV, /* not a Bayer fourcc this driver has */
+		.width       = 640,
+		.height      = 480,
+	};
+
+	zassert_equal(video_set_format(ov5647_dev(), &fmt),
+	              -ENOTSUP,
+	              "an unsupported fourcc did not fail with -ENOTSUP");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_YUYV,
+	              "set_format() left fmt.pixelformat as 0x%08x after an unsupported-fourcc "
+	              "failure, want the caller's original request (YUYV) back",
+	              fmt.pixelformat);
+
+	fmt = (struct video_format){
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1, /* below width_min (4) -- no caps entry matches */
+		.height      = 480,
+	};
+
+	zassert_equal(video_set_format(ov5647_dev(), &fmt),
+	              -ENOTSUP,
+	              "an unsupported (too small) size did not fail with -ENOTSUP");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SBGGR10P,
+	              "set_format() left fmt.pixelformat as 0x%08x after an unsupported-size "
+	              "failure, want the caller's original request (SBGGR10P) back",
+	              fmt.pixelformat);
+
+	/* HFLIP=1 makes SGBRG10P the flip-shifted fourcc get_format() would report for the
+	 * SBGGR10P base -- ov5647_set_fmt()'s remap rewrites this request to SBGGR10P BEFORE
+	 * validating, so a restore that only fires when fmt->pixelformat happened to equal the
+	 * original request already (both prior cases above) would not be exercised here.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	fmt = (struct video_format){
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SGBRG10P,
+		.width       = 1, /* below width_min (4) -- fails validation AFTER the remap */
+		.height      = 480,
+	};
+
+	zassert_equal(video_set_format(ov5647_dev(), &fmt),
+	              -ENOTSUP,
+	              "an unsupported size did not fail with -ENOTSUP even for a flip-shifted "
+	              "fourcc");
+	zassert_equal(fmt.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG10P,
+	              "set_format() left fmt.pixelformat as 0x%08x after a failure that happened "
+	              "AFTER the flip-shifted-to-base remap, want the caller's original "
+	              "flip-shifted request (SGBRG10P) back, not the driver's internal base-fourcc "
+	              "remap (SBGGR10P)",
+	              fmt.pixelformat);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
@@ -1653,6 +1758,13 @@ static void ov5647_test_before(void *fixture)
 	};
 
 	ARG_UNUSED(fixture);
+
+	/* Belt-and-braces alongside test_set_frmival_failed_write_does_not_overwrite_request()'s own
+	 * in-test reset: that reset runs AFTER the assertions it guards, so a failed assertion in
+	 * THAT test (or any future test installing a mock_api) would otherwise skip it and leak the
+	 * fault-injecting mock into every later test's I2C emulator calls.
+	 */
+	ov5647_emul()->bus.i2c->mock_api = NULL;
 
 	/* set_format()/set_ctrl() are rejected or reordered against a running mode while
 	 * streaming -- stop first so this reset does not depend on whichever streaming state the

@@ -294,8 +294,8 @@ silently reintroduces one or both bugs.
    2592x1944 crop's own minimum-blanking VTS for every crop size --
    a smaller crop (e.g. 1280x960, minimum-blanking VTS ~984) got the
    same 11/9-band figures as the 1944-line crop even though
-   `11 * 173 = 1903` and `9 * 208 = 1872` both exceed that smaller
-   frame's own VTS. Now computed per mode from the requested height's
+   `11 * 173 = 1903` and `9 * 208 = 1872` both exceed its
+   minimum-blanking VTS. Now computed per mode from the requested height's
    own minimum-blanking VTS (`floor(VTS/band)`, floored at 1 band).
    **Orientation (maintainer-confirmed, run 62):** `0x3821` bits[2:1]
    are this driver's existing horizontal-mirror mask; `0x01`
@@ -432,6 +432,15 @@ pinned to the 2592x1944 crop's own minimum-blanking VTS for every crop
 size, overstating what a smaller crop (e.g. 1280x960) can actually hold;
 fixed to compute per mode from the requested height, same as the
 line-time-scaled band step above.
+
+**A flip ctrl set after `set_format()` does not, by itself, update what
+downstream consumers think the Bayer order is:** the CPI/ISP stages
+cache the format they were last told about (`video_alif.c`'s
+`current_format`, `isp_pico.c`'s `port_fmt`), not the sensor's live flip
+state, and the sensor's own `set_fmt()` returns `-EBUSY` while streaming
+-- so a caller must set `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` BEFORE
+`set_format()`, or re-run `set_format()` on the ISP input afterwards, to
+propagate a flip-shifted colour order downstream.
 
 **Raw-frame stripes are not a bug.** What looks like banding/noise in a
 raw capture viewed as greyscale is (a) the Bayer colour-filter mosaic

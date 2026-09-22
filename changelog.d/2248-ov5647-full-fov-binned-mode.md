@@ -173,7 +173,7 @@ match, and only changes behaviour on this one previously-silent-mismatch path.
 **ROUND-5: the crop-path max-bands-per-frame registers (`0x3a0d`/`0x3a0e`) were pinned to the
 2592x1944 crop's own minimum-blanking VTS for every crop size.** A smaller crop -- e.g. 1280x960,
 minimum-blanking VTS ~984 -- got the SAME `0x0b`/`0x09` (11/9 bands) as the 1944-line crop, even
-though `11 * 173 = 1903` and `9 * 208 = 1872` both exceed that smaller frame's own VTS. Fixed:
+though `11 * 173 = 1903` and `9 * 208 = 1872` both exceed its minimum-blanking VTS. Fixed:
 computed per mode from the requested height's own minimum-blanking VTS (`floor(VTS/band)`, floored
 at 1 band), the same rule the reference applies per its own modes -- see `ov5647_set_mode_regs()`'s
 block comment. Still BENCH-UNVERIFIED, same as the band-step values themselves.
