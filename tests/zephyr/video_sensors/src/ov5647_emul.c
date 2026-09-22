@@ -41,8 +41,14 @@ LOG_MODULE_REGISTER(ov5647_emul, CONFIG_I2C_LOG_LEVEL);
  * LOCAL DIVERGENCE #3 added the common analog/BLC/AEC block) init-regs table, the initial
  * full-frame set_fmt() (window + 1:1 subsample/binning/analog + frmival), and two lane_park()
  * calls -- around 80 writes total; tests that clear the log before acting add only a handful
- * more each. 160 leaves headroom without the log ever being the limiting factor. */
-#define OV5647_EMUL_LOG_CAPACITY 160
+ * more each. issue #2248 fix-up round 4: the ZTEST_SUITE before-hook (ov5647_test_before())
+ * now runs a ctrl reset + set_frmival + set_format (~30 writes) ahead of EVERY test, and most
+ * tests do NOT clear the log first (only a few explicitly do -- see ov5647_test.c), so the
+ * ORIGINAL 160-entry budget (sized for a handful of writes per test, not ~30) silently dropped
+ * writes partway through the suite once several before-hook invocations had accumulated without
+ * an intervening clear, which find_write_index() then read as "never written". Raised generously
+ * rather than precisely re-budgeted, so a future test addition does not reopen this the same way. */
+#define OV5647_EMUL_LOG_CAPACITY 1024
 
 struct ov5647_emul_data {
 	uint8_t                  regs[OV5647_EMUL_REG_MAP_SIZE];

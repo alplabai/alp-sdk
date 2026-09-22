@@ -131,7 +131,7 @@
  * binning-enable 0x3820 = 0x41 with 0x3821 = 0x01 (NOT runs 56/58/60's 0x07 -- see the
  * orientation note above), binned-mode analog 0x3612/0x3618/0x3708/0x3709 =
  * 0x59/0x00/0x64/0x52 (unchanged from runs 56/60), the 50/60 Hz AEC band step
- * 0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e and 0x4004 (issue #2248 fix-up: these MOVED here from
+ * 0x3a08/0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e and 0x4004 (issue #2248 fix-up: these MOVED here from
  * ov5647_init_regs[] -- the band step is in LINES, which depends on line time/HTS, so a value
  * correct for this mode's HTS is wrong for the crop path's different HTS; see the
  * ov5647_set_mode_regs() block comment), and a PER-MODE line length, 0x380c/0x380d = 0x073c
@@ -152,11 +152,11 @@
  * therefore ALSO explicitly writes the 1:1 values (0x3814/0x3815 = 0x11, 0x3820/0x3821 =
  * 0x40/0x00, and OV5647_HTS_CROP) plus mainline's full-resolution 1:1 analog values
  * (0x3612/0x3618/0x3708/0x3709 = 0x5b/0x04/0x64/0x12, cited from mainline, BENCH-UNVERIFIED on
- * this module) and the SAME AEC band-step values as the binned mode (no mainline full-resolution
- * citation available; reused rather than left unwritten, which would silently retain a prior
- * mode's stale line-count values -- BENCH-UNVERIFIED at this HTS, flagged not proven) right after
- * ov5647_set_window(), so switching 640x480 -> another size -> back never leaves binning (or its
- * HTS/band step) armed on a stale crop window.
+ * this module) and its OWN AEC band-step values (0x3a08/0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e,
+ * line-time-scaled from mainline's full-resolution table to this driver's crop-path line time --
+ * see the block comment in ov5647_set_mode_regs() for the arithmetic; BENCH-UNVERIFIED, flagged
+ * not proven) right after ov5647_set_window(), so switching 640x480 -> another size -> back never
+ * leaves binning (or its HTS/band step) armed on a stale crop window.
  *
  * Common init (bench run 61, verified as shipped by run 62): the register VALUES match the
  * reference's ov5647_common_regs[] (same source as above), minus 0x0100/0x0103 (owned by this
@@ -268,10 +268,14 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
  * from run 52's original PLL fix. Run 61 replaced it with the RPi/OmniVision reference value for
  * the 640x480 10bpp mode -- raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c,
  * ov5647_640x480_10bpp[] -- giving OV5647_PLL_MULT = 70 (0x46): VCO = 25 MHz / 3 * 70 =
- * 583.33 MHz, lane bit rate = 583.33 MHz / 2 = 291.67 Mbps/lane, matching that reference's own
- * declared pixel_rate (58333000) to within integer-truncation rounding (our derivation below
- * computes 58333333 -- a 333 Hz, ~0.0006% difference, from truncating integer division, not a
- * different PLL). The CSI-2 receiver's hsfrequency bin 20 ({300 MHz, 0x14}) is CONFIGURATION
+ * 583.33 MHz, lane bit rate = 583.33 MHz / 2 = 291.67 Mbps/lane. CITATION CORRECTED (issue #2248
+ * fix-up round 4): fix-up round 3 claimed this matches "that reference's own declared pixel_rate
+ * (58333000)" -- it does not. raspberrypi/linux's rpi-6.6.y, rpi-6.1.y and rpi-6.12.y all declare
+ * .pixel_rate = 55000000 for the 640x480 10bpp mode, not 58333000; no revision checked declares
+ * 58333000 anywhere. OV5647_PIXEL_RATE (58333333, derived below from this PLL) is instead
+ * BENCH-MATCHED: run 63 measured fps_x100 = 1501 (15.01 fps) at VTS 0x0833 (2099) / HTS 1852,
+ * which is exactly what ov5647_frmrate_to_vts()'s formula gives from 58333333, not from 55000000.
+ * The CSI-2 receiver's hsfrequency bin 20 ({300 MHz, 0x14}) is CONFIGURATION
  * derived from our own declared pixel_rate (video_get_csi_link_freq() -> phy->pll_fin), NOT an
  * independent receiver-side measurement of the real PLL -- see the file header's evidence note
  * above for why this is not cited as confirmation on its own. The actual evidence this PLL is
@@ -295,9 +299,10 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 /*
  * pixel_rate = lane bit rate * lanes / bpp = (XVCLK / sysdiv * mult / prediv) * 2 / 10 (divide by
  * sysdiv first, not prediv, to stay exact and inside int32 range for every XVCLK in
- * [OV5647_INPUT_CLK_MIN, OV5647_INPUT_CLK_MAX]). At 25 MHz XVCLK: 58333333, matching (to
- * integer-truncation rounding -- see the PLL constants comment above) the RPi/OmniVision
- * reference's own declared pixel_rate (58333000) for the 640x480 10bpp mode. Feeds BOTH
+ * [OV5647_INPUT_CLK_MIN, OV5647_INPUT_CLK_MAX]). At 25 MHz XVCLK: 58333333 -- DERIVED from this
+ * driver's own PLL constants above, not copied from the RPi/OmniVision reference (which declares
+ * 55000000 for this mode, not 58333333 -- see the PLL constants comment above for the correction),
+ * and BENCH-MATCHED at run 63 (fps_x100 = 1501 at VTS 0x0833 / HTS 1852). Feeds BOTH
  * VIDEO_CID_PIXEL_RATE and ov5647_frmrate_to_vts() below -- TIMING_VTS is now derived per the
  * ACTIVE mode's HTS (OV5647_HTS_640X480_BINNED or OV5647_HTS_CROP), not one constant; see
  * ov5647_hts_for() near ov5647_set_mode_regs().
@@ -380,9 +385,11 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
  * OV5647_TC_REG21_MIRROR) at 0, but the binned mode's reference value (OV5647_TC_REG21_BINNED =
  * 0x01, run 61) does NOT -- its bits[2:1] are clear (mirror off) but bit0 is set; see the file
  * header's orientation note for what bits[2:1] control. ov5647_set_ctrl()'s HFLIP/VFLIP handlers
- * read-modify-write only bits[2:1], so a format change still resets any previously requested
- * mirror/flip to each mode's base value and a caller must reapply VIDEO_CID_HFLIP/VFLIP after
- * set_format().
+ * read-modify-write only bits[2:1], so writing a mode's base value here would silently undo a
+ * previously requested mirror/flip -- ov5647_set_fmt() below re-applies both ctrls right after
+ * this block (via ov5647_set_ctrl_hflip()/vflip()) on every format change, so the caller does NOT
+ * need to reapply VIDEO_CID_HFLIP/VFLIP itself (issue #2248 fix-up round 3, see the forward
+ * declaration above ov5647_set_fmt()).
  */
 #define OV5647_TIMING_X_INC		OV5647_REG8(0x3814)
 #define OV5647_TIMING_Y_INC		OV5647_REG8(0x3815)
@@ -521,18 +528,27 @@ struct ov5647_data {
 	struct video_format fmt;
 	/* ACTIVE (possibly clamped) frame rate -- what ov5647_get_frmival() reports and what
 	 * OV5647_TIMING_VTS_REG was last programmed for. NOT what ov5647_set_fmt() should
-	 * re-request on the next format change -- see requested_frmrate below (issue #2248
+	 * re-request on the next format change -- see requested_frmival below (issue #2248
 	 * fix-up round 3: FIXED, the frame rate used to stick after a format change because
 	 * set_fmt() fed this clamped value back in as the new request).
 	 */
 	uint32_t frmrate;
-	/* USER-requested frame rate -- set ONLY by ov5647_set_frmival() (default 15, matching
-	 * frmrate's default), to the value the caller asked for, BEFORE clamping. ov5647_set_fmt()
-	 * re-requests THIS on every format change, not frmrate, so e.g. set_format(2592x1944)
-	 * (which clamps frmrate to 10 -- HTS_CROP can't sustain 15 fps at that height) followed by
-	 * set_format(640x480) still asks for 15 again, rather than staying stuck at 10.
+	/* USER-requested frame interval -- the WHOLE struct (numerator AND denominator), set ONLY
+	 * by ov5647_set_frmival(), and ONLY after video_closest_frmival() and the VTS write have
+	 * both succeeded (issue #2248 fix-up round 4: FIXED, a failed set_frmival() used to
+	 * overwrite this anyway, so a rejected request still silently became the next format
+	 * change's request). ov5647_set_fmt() re-requests THIS whole struct on every format change,
+	 * not frmrate, so e.g. set_format(2592x1944) (which clamps the rate to 10 fps -- HTS_CROP
+	 * can't sustain 15 fps at that height) followed by set_format(640x480) still asks for the
+	 * original request again, rather than staying stuck at 10.
+	 *
+	 * MUST be the whole struct, not just the denominator (issue #2248 fix-up round 4: FIXED, an
+	 * earlier version of this field was a bare uint32_t denominator, which silently turned a
+	 * numerator != 1 request -- e.g. {2, 60}, 30 fps -- into a DIFFERENT rate {1, 60}, 60 fps,
+	 * on the next format change; Zephyr's own `video frmival` shell command sends requests this
+	 * way, e.g. `frmival <dev> 100ms` is {100, 1000}).
 	 */
-	uint32_t requested_frmrate;
+	struct video_frmival requested_frmival;
 	/* Tracks the APPLICATION's streaming request (set_stream), not OV5647_MODE_SELECT, which
 	 * ov5647_lane_park() also drives while parked/unparked and which this field does not mirror.
 	 */
@@ -548,7 +564,7 @@ struct ov5647_data {
  * 0x0100/0x0103 (this driver's own park/reset own those), minus 0x3017 (kept at OUR 0xf0, see
  * AUTHORIZED LOCAL DIVERGENCE #1/#2 above), minus 0x3503 (left to
  * ov5647_set_ctrl_exposure()'s existing OV5647_MANUAL_CTRL logic), and minus the mode-specific
- * 50/60 Hz AEC band-step registers (0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e, 0x4004 -- moved to
+ * 50/60 Hz AEC band-step registers (0x3a08/0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e, 0x4004 -- moved to
  * ov5647_set_mode_regs(), see the file header). None of these addresses is documented in the
  * datasheet register map available to us, so they keep the file's existing RSVD_<addr> naming
  * (see OV5647_SC_PLL_CTRL_RSVD_303C above) rather than a guessed semantic name. SUPERSEDES bench
@@ -675,12 +691,18 @@ static const struct video_reg ov5647_init_regs[] = {
 	/* AEC target/limits (run 61; matches bench run 58's earlier values); left unchanged --
 	 * see the file header's low-light note, a scene limitation, not a driver bug.
 	 * 0x3a08/0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e (50/60 Hz band step, in LINES) moved to
-	 * ov5647_set_mode_regs(): the reference declares them per mode, not in the common block,
-	 * because a line count depends on line TIME -- HTS_CROP (2700) is a different line time
-	 * than HTS_640X480_BINNED (1852), so a value correct for one mode is wrong for the other
-	 * (issue #2248 fix-up round 3: this used to be true for only five of the six band-step
-	 * registers -- 0x3a08 was left behind here, mode-independent in VALUE by coincidence
-	 * (0x01 either way) but not in KIND, so it belongs with the other five).
+	 * ov5647_set_mode_regs() because a line count depends on line TIME -- HTS_CROP (2700) is a
+	 * different line time than HTS_640X480_BINNED (1852), so a value correct for one mode is
+	 * wrong for the other. CITATION CORRECTED (issue #2248 fix-up round 4): fix-up round 3
+	 * claimed "the reference declares them per mode", i.e. in ov5647_640x480_10bpp[] /
+	 * ov5647_2592x1944_10bpp[] -- true for 0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e, but NOT for
+	 * 0x3a08: in raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c, 0x3a08 = 0x01 is in
+	 * ov5647_common_regs[], and ov5647_2592x1944_10bpp[] there has no 0x3a08 entry at all (only
+	 * upstream mainline Linux 6.6's own 2592x1944 table declares 0x3a08 per mode). Moving 0x3a08
+	 * out of the common block here is still correct -- fix-up round 3 was right that it is
+	 * mode-independent in VALUE only by coincidence (0x01 in both this driver's modes) and not
+	 * in KIND, so a future mode with a genuinely different 0x3a08 must not find it pinned here --
+	 * but the RPi-reference citation for doing so was wrong; only mainline 6.6 supports it.
 	 * Common-block placement here would have silently carried the binned mode's line counts
 	 * into the crop path.
 	 */
@@ -770,7 +792,7 @@ static int ov5647_set_window(const struct device *dev, uint32_t width, uint32_t 
  * centred-crop window (ov5647_set_window()) but now also explicitly re-asserts the 1:1
  * subsample/binning/analog/HTS/band-step values, so a prior 640x480 selection can never leave
  * binning (or its HTS/band step) armed on the new crop window. The AEC band-step registers
- * (0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e, 0x4004) are here rather than in ov5647_init_regs[] because
+ * (0x3a08/0x3a09/0x3a0a/0x3a0b/0x3a0d/0x3a0e, 0x4004) are here rather than in ov5647_init_regs[] because
  * they are LINE COUNTS, which depend on line time/HTS -- a value correct for one mode's HTS is
  * wrong for the other's.
  */
@@ -830,22 +852,37 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 		{OV5647_SENSOR_CTRL08, OV5647_SENSOR_CTRL08_1TO1},
 		{OV5647_SENSOR_CTRL09, OV5647_SENSOR_CTRL09_1TO1},
 		/* 50/60 Hz AEC band step, in LINES -- depends on line time, so the binned mode's
-		 * values (HTS_640X480_BINNED = 1852) do not carry over to HTS_CROP (2700). These
-		 * ARE mainline's own full-resolution values -- raspberrypi/linux rpi-6.6.y
-		 * drivers/media/i2c/ov5647.c, ov5647_2592x1944_10bpp[] -- not the VGA numbers
-		 * reused as a placeholder (issue #2248 fix-up round 3: FIXED, reusing VGA's
-		 * 0x3a0d=0x02/0x3a0e=0x01, max bands per frame, capped banding-mode AEC at
-		 * ~502 lines on a 1944-line crop -- roughly 4x underexposed). BENCH-UNVERIFIED
-		 * on this module: mainline validates these at HTS 2844, and this driver runs
-		 * 2700 on the lower, run-61-corrected PLL, neither of which matches mainline's
-		 * full-resolution configuration exactly.
+		 * values (HTS_640X480_BINNED = 1852) do not carry over to HTS_CROP (2700).
+		 *
+		 * issue #2248 fix-up round 4 (BENCH-UNVERIFIED, not run): fix-up round 3 wrote
+		 * mainline's OWN full-resolution values here byte-for-byte (0x3a08/0x3a09 =
+		 * 0x01/0x28 = 296 lines, 0x3a0a/0x3a0b = 0x00/0xf6 = 246 lines), citing
+		 * raspberrypi/linux rpi-6.6.y drivers/media/i2c/ov5647.c,
+		 * ov5647_2592x1944_10bpp[] -- but that reference declares pixel_rate 87500000
+		 * with HTS 2844, a 32.51us line (2844 / 87500000), while THIS driver's crop path
+		 * runs OV5647_HTS_CROP (2700) on OV5647_PIXEL_RATE (58333333), a 46.29us line
+		 * (2700 / 58333333). A band step is a LINE COUNT standing in for a fixed
+		 * real-time AC period, so copying the line count across a DIFFERENT line time
+		 * changes the real time it represents (296 lines * 32.51us = 9.63 ms; the same
+		 * 296 lines at THIS line time is 296 * 46.29us = 13.70 ms -- neither the 50 Hz
+		 * nor 60 Hz mains period). Scaled by the line-time ratio to preserve the real-time
+		 * period instead: 296 * (32.51 / 46.29) = 207.9 -> 208 (0x00d0); 246 * (32.51 /
+		 * 46.29) = 172.8 -> 173 (0x00ad). 0x3a0d/0x3a0e (max bands per frame) follow the
+		 * reference's own floor(VTS/band) rule -- mainline's 0x08/0x06 reproduce exactly
+		 * from floor(1968/246)=8 and floor(1968/296)=6.65->6, where 1968 =
+		 * OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN is that mode's minimum-blanking VTS
+		 * (this block runs once per mode, before ov5647_set_frmival() picks an actual
+		 * rate, so the max-bands figure cannot depend on a chosen frame rate). Applying
+		 * the same rule with the new band values: floor(1968/173)=11 (0x0b),
+		 * floor(1968/208)=9 (0x09). This scaling has NOT been bench-verified on this
+		 * module -- flagging the derivation, not shipping it as measured.
 		 */
-		{OV5647_AEC_RSVD_3A08, 0x01},
-		{OV5647_AEC_RSVD_3A09, 0x28},
+		{OV5647_AEC_RSVD_3A08, 0x00},
+		{OV5647_AEC_RSVD_3A09, 0xd0},
 		{OV5647_AEC_RSVD_3A0A, 0x00},
-		{OV5647_AEC_RSVD_3A0B, 0xf6},
-		{OV5647_AEC_RSVD_3A0D, 0x08},
-		{OV5647_AEC_RSVD_3A0E, 0x06},
+		{OV5647_AEC_RSVD_3A0B, 0xad},
+		{OV5647_AEC_RSVD_3A0D, 0x0b},
+		{OV5647_AEC_RSVD_3A0E, 0x09},
 		{OV5647_BLC_RSVD_4004, 0x04},
 	};
 
@@ -882,6 +919,13 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 {
 	const struct ov5647_config *cfg = dev->config;
 	struct ov5647_data *data = dev->data;
+	/* The RAW request, exactly as the caller passed it (numerator AND denominator) -- kept
+	 * aside so it can be saved into data->requested_frmival further down, but ONLY once
+	 * video_closest_frmival() and the VTS write below have both succeeded (issue #2248 fix-up
+	 * round 4, see requested_frmival's declaration). *frmival itself is overwritten with the
+	 * CLAMPED result before this function returns, so it cannot be read back for that later.
+	 */
+	struct video_frmival requested = *frmival;
 	struct video_frmival_enum fie = {
 		.discrete = *frmival,
 		.type = VIDEO_FRMIVAL_TYPE_DISCRETE,
@@ -889,13 +933,6 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 	};
 	uint32_t hts;
 	int ret;
-
-	/* Capture the RAW request (before video_closest_frmival() clamps fie.discrete) as the
-	 * user's intent -- issue #2248 fix-up round 3, see requested_frmrate's declaration.
-	 * *frmival itself is not overwritten until the *frmival = fie.discrete; line below, so
-	 * frmival->denominator here is still exactly what the caller asked for.
-	 */
-	data->requested_frmrate = frmival->denominator;
 
 	ret = video_closest_frmival(dev, &fie);
 	if (ret < 0) {
@@ -913,6 +950,11 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 		return ret;
 	}
 
+	/* Only now that both steps above succeeded: store the caller's WHOLE raw request for
+	 * ov5647_set_fmt() to re-request on the next format change -- see requested_frmival's
+	 * declaration. A rejected/failed request must not overwrite a previously-saved one.
+	 */
+	data->requested_frmival = requested;
 	*frmival = fie.discrete;
 	data->frmrate = ov5647_framerates[fie.index];
 
@@ -949,14 +991,14 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	const struct ov5647_config *cfg = dev->config;
 	struct ov5647_data *data = dev->data;
-	/* Re-request the rate the USER asked for, not data->frmrate (the last EFFECTIVE, possibly
-	 * clamped, rate) -- issue #2248 fix-up round 3, see requested_frmrate's declaration. Using
-	 * data->frmrate here was the bug: set_format(2592x1944) clamps frmrate to 10 (HTS_CROP
-	 * can't sustain 15 fps at that height), and a later set_format(640x480) fed that clamped
-	 * 10 back in as the new request, silently never recovering 15 even though 640x480 can
-	 * reach it.
+	/* Re-request the WHOLE struct the USER asked for, not data->frmrate (the last EFFECTIVE,
+	 * possibly clamped, rate) -- issue #2248 fix-up round 3, see requested_frmival's
+	 * declaration. Using data->frmrate here was the bug: set_format(2592x1944) clamps frmrate
+	 * to 10 (HTS_CROP can't sustain 15 fps at that height), and a later set_format(640x480) fed
+	 * that clamped 10 back in as the new request, silently never recovering the original rate
+	 * even though 640x480 can reach it.
 	 */
-	struct video_frmival frmival = {.numerator = 1, .denominator = data->requested_frmrate};
+	struct video_frmival frmival = data->requested_frmival;
 	size_t idx;
 	int ret;
 
@@ -1031,15 +1073,76 @@ static int ov5647_set_fmt(const struct device *dev, struct video_format *fmt)
 	return ov5647_lane_park(dev);
 }
 
+/*
+ * The flip ctrls (VIDEO_CID_HFLIP/VFLIP) shift the Bayer colour order, not just the image
+ * orientation -- issue #2248, round 4 (documentation-only, no register write changes here):
+ * mirroring an even-sized Bayer array along an axis swaps that axis's colour pairing (e.g. BGGR
+ * horizontally mirrored reads GBRG). ov5647_set_ctrl_hflip()/vflip() above only ever touch
+ * 0x3821/0x3820's mirror bits, so the sensor DOES shift order on a flip; this function makes
+ * ov5647_get_fmt() report that shift instead of always reporting the mode's base (unflipped)
+ * pixelformat, which would tell demosaic code the wrong colour order once either ctrl is set.
+ *
+ * Mapping translated from the RPi/OmniVision reference's ov5647_get_mbus_code() (rpi-6.6.y
+ * drivers/media/i2c/ov5647.c): `codes[hflip | (vflip << 1)] = {SGBRG, SBGGR, SRGGB, SGRBG}`. That
+ * reference's OWN V4L2_CID_HFLIP ctrl is the LOGICAL INVERSE of the 0x3821 mirror bit --
+ * ov5647_s_ctrl() there writes `!ctrl->val` to the register (there's an in-built hflip in the
+ * silicon, per that driver's own comment) -- while THIS driver's HFLIP ctrl bit IS the mirror bit
+ * directly (ov5647_set_ctrl_hflip() above: `hflip.val != 0 ? OV5647_TC_REG21_MIRROR : 0`, no
+ * inversion). VFLIP is direct (not inverted) in both drivers. Substituting rpi_hflip = !our_hflip
+ * and rpi_vflip = our_vflip into the reference's table, in terms of OUR ctrl values: (0,0) ->
+ * SBGGR, (1,0) -> SGBRG, (0,1) -> SGRBG, (1,1) -> SRGGB. (0,0) landing on SBGGR matches the
+ * maintainer-confirmed default orientation (run 62) as a sanity check on this translation.
+ *
+ * Only the default (0,0) order has been bench/maintainer-verified as the correct rendered colour
+ * order; the three flipped orders below are DERIVED from the reference mapping above, not
+ * bench-checked on this module -- see docs/camera-shields.md.
+ */
+static uint32_t ov5647_bayer_pixfmt(uint32_t base_pixelformat, bool hflip, bool vflip)
+{
+	switch (base_pixelformat) {
+	case VIDEO_PIX_FMT_SBGGR8:
+		if (hflip && vflip) {
+			return VIDEO_PIX_FMT_SRGGB8;
+		} else if (hflip) {
+			return VIDEO_PIX_FMT_SGBRG8;
+		} else if (vflip) {
+			return VIDEO_PIX_FMT_SGRBG8;
+		}
+		return VIDEO_PIX_FMT_SBGGR8;
+	case VIDEO_PIX_FMT_SBGGR10P:
+		if (hflip && vflip) {
+			return VIDEO_PIX_FMT_SRGGB10P;
+		} else if (hflip) {
+			return VIDEO_PIX_FMT_SGBRG10P;
+		} else if (vflip) {
+			return VIDEO_PIX_FMT_SGRBG10P;
+		}
+		return VIDEO_PIX_FMT_SBGGR10P;
+	default:
+		return base_pixelformat;
+	}
+}
+
 static int ov5647_get_fmt(const struct device *dev, struct video_format *fmt)
 {
 	struct ov5647_data *data = dev->data;
 
 	*fmt = data->fmt;
+	fmt->pixelformat = ov5647_bayer_pixfmt(data->fmt.pixelformat, data->ctrls.hflip.val != 0,
+					       data->ctrls.vflip.val != 0);
 
 	return 0;
 }
 
+/*
+ * ov5647_set_fmt() only ever matches @p fmt against these two BASE (unflipped) pixelformats via
+ * video_format_caps_index() -- the caller requests a Bayer size/depth, not a specific flipped
+ * colour order; the order is a SIDE EFFECT of the separate VIDEO_CID_HFLIP/VFLIP ctrls, reported
+ * back by ov5647_get_fmt() above, not something set_format() itself accepts. Keeping set_format()
+ * simple (two entries, matching what it actually validates) rather than also advertising the
+ * three derived flipped fourccs as separately settable formats, which set_fmt() would then have
+ * to reject anyway.
+ */
 static int ov5647_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	if (caps->type != VIDEO_BUF_TYPE_OUTPUT) {
@@ -1377,7 +1480,7 @@ static int ov5647_init(const struct device *dev)
 	 * that is a real PLL/line-time limit, not a bug, and video_closest_frmival() correctly
 	 * falls back to the next reachable entry in that case. NOTE: booting into a reachable
 	 * format alone does not keep every LATER format change at 15 fps -- see
-	 * data->requested_frmrate's declaration and ov5647_set_fmt() for the separate fix-up
+	 * data->requested_frmival's declaration and ov5647_set_fmt() for the separate fix-up
 	 * round 3 FIXED bug that does (the rate used to stick at whatever a PRIOR mode had
 	 * clamped it to).
 	 */
@@ -1479,7 +1582,7 @@ static int ov5647_init(const struct device *dev)
                                                                                                    \
 	static struct ov5647_data ov5647_data_##n = {                                              \
 		.frmrate = 15,                                                                     \
-		.requested_frmrate = 15,                                                           \
+		.requested_frmival = {.numerator = 1, .denominator = 15},                          \
 	};                                                                                         \
                                                                                                    \
 	static const struct ov5647_config ov5647_cfg_##n = {                                       \

@@ -157,10 +157,7 @@
  * of the common init and into the per-mode blocks (issue #2248 fix-up round 2) because the line
  * count depends on HTS; the binned mode's values are bench-confirmed (runs 61/62). 0x3a08
  * (round 3) is part of the same per-mode group even though its VALUE happens to be 0x01 in both
- * modes -- it moved out of the common init too. The crop path's 3a09/3a0a/3a0b/3a0d/3a0e/4004 are
- * mainline's OWN full-resolution values (round 3: FIXED -- reusing the VGA numbers here
- * under-exposed banding-mode AEC on a 1944-line crop by capping it around 502 lines), still
- * BENCH-UNVERIFIED on this module (mainline validates them at HTS 2844, not this driver's 2700). */
+ * modes -- it moved out of the common init too. */
 #define REG_AEC_RSVD_3A08  0x3a08
 #define REG_AEC_RSVD_3A09  0x3a09
 #define REG_AEC_RSVD_3A0A  0x3a0a
@@ -175,20 +172,27 @@
 #define AEC_BAND_STEP_3A0D 0x02
 #define AEC_BAND_STEP_3A0E 0x01
 #define BLC_RSVD_4004_VAL  0x02
-/* Mainline's ov5647_2592x1944_10bpp[] full-resolution band step -- raspberrypi/linux rpi-6.6.y
- * drivers/media/i2c/ov5647.c. */
-#define AEC_FULLRES_3A08_VAL 0x01
-#define AEC_FULLRES_3A09_VAL 0x28
-#define AEC_FULLRES_3A0A_VAL 0x00
-#define AEC_FULLRES_3A0B_VAL 0xf6
-#define AEC_FULLRES_3A0D_VAL 0x08
-#define AEC_FULLRES_3A0E_VAL 0x06
-#define BLC_FULLRES_4004_VAL 0x04
+/* Crop path's OWN AEC band step (issue #2248 fix-up round 4, BENCH-UNVERIFIED) -- mainline's
+ * ov5647_2592x1944_10bpp[] full-resolution values (raspberrypi/linux rpi-6.6.y
+ * drivers/media/i2c/ov5647.c: 0x3a08/0x3a09 = 0x01/0x28 = 296, 0x3a0a/0x3a0b = 0x00/0xf6 = 246),
+ * LINE-TIME-SCALED from mainline's 32.51us line (HTS 2844 / pixel_rate 87500000) to this driver's
+ * crop-path 46.29us line (OV5647_HTS_CROP 2700 / OV5647_PIXEL_RATE 58333333): fix-up round 3
+ * copied mainline's line counts unscaled, which represents the WRONG real-time AC period at this
+ * driver's different line time -- see ov5647.c's ov5647_set_mode_regs() comment for the full
+ * arithmetic. 0x3a0d/0x3a0e (max bands per frame) follow floor(VTS/band) with VTS = 1968
+ * (OV5647_FULL_HEIGHT + OV5647_VBLANK_MIN), the same rule mainline's own 0x08/0x06 reproduce. */
+#define AEC_CROP_BANDSTEP_3A08_VAL 0x00
+#define AEC_CROP_BANDSTEP_3A09_VAL 0xd0
+#define AEC_CROP_BANDSTEP_3A0A_VAL 0x00
+#define AEC_CROP_BANDSTEP_3A0B_VAL 0xad
+#define AEC_CROP_BANDSTEP_3A0D_VAL 0x0b
+#define AEC_CROP_BANDSTEP_3A0E_VAL 0x09
+#define BLC_CROP_4004_VAL          0x04
 
 /*
  * Every entry ov5647_init_regs[] (ov5647.c) writes in software standby, EXCLUDING only the
  * per-mode AEC band-step registers above (moved out in round 3; covered by the binned/crop-mode
- * tests instead). This INCLUDES the PLL/pad-drive octet's three non-PLL-divider registers
+ * tests instead). This INCLUDES the PLL/pad-drive octet's five non-PLL-divider registers
  * (0x303c/0x3106/0x3016/0x301c/0x301d) that test_pll_init_written_before_first_running_mode_
  * select does NOT check (that test covers only the three PLL divider values, 0x3035/0x3036/
  * 0x3037) -- round 3 fix-up: an earlier version of this table was NOT exhaustive over the whole
@@ -196,17 +200,24 @@
  * passing. Checked exhaustively, not by sample, so a register silently dropped from
  * ov5647_init_regs[] is caught here even if its value happens to coincide with the sensor's
  * power-on default (which a values-only readback could not tell apart from "never written").
+ *
+ * ALSO INCLUDES (round 4 fix-up): 0x3503 (OV5647_MANUAL_CTRL = OV5647_MANUAL_CTRL_VTS, drives the
+ * frame length from TIMING_VTS instead of letting the AEC stretch it) and 0x350c/0x350d
+ * (OV5647_VTS_DIFF = 0, a REG16 -- two CCI byte transactions, high then low). Round 3's version of
+ * this table omitted both even though ov5647_init_regs[] already wrote them; a mutation deleting
+ * either from the driver left every test in this suite passing.
  */
 static const struct ov5647_emul_write common_init_regs[] = {
-	{ 0x303c, 0x11 }, { 0x3017, 0xf0 }, { 0x301c, 0xf8 }, { 0x301d, 0xf0 }, { 0x3106, 0xf5 },
-	{ 0x3016, 0x08 }, { 0x3000, 0x00 }, { 0x3001, 0x00 }, { 0x3002, 0x00 }, { 0x3018, 0x44 },
-	{ 0x370c, 0x03 }, { 0x3630, 0x2e }, { 0x3632, 0xe2 }, { 0x3633, 0x23 }, { 0x3634, 0x44 },
-	{ 0x3620, 0x64 }, { 0x3621, 0xe0 }, { 0x3600, 0x37 }, { 0x3704, 0xa0 }, { 0x3703, 0x5a },
-	{ 0x3715, 0x78 }, { 0x3717, 0x01 }, { 0x3731, 0x02 }, { 0x370b, 0x60 }, { 0x3705, 0x1a },
-	{ 0x3f05, 0x02 }, { 0x3f06, 0x10 }, { 0x3f01, 0x0a }, { 0x3c01, 0x80 }, { 0x3b07, 0x0c },
-	{ 0x3636, 0x06 }, { 0x3827, 0xec }, { 0x4001, 0x02 }, { 0x4000, 0x09 }, { 0x3a18, 0x00 },
-	{ 0x3a19, 0xf8 }, { 0x3a0f, 0x58 }, { 0x3a10, 0x50 }, { 0x3a1b, 0x58 }, { 0x3a1e, 0x50 },
-	{ 0x3a11, 0x60 }, { 0x3a1f, 0x28 }, { 0x5000, 0x06 }, { 0x5003, 0x08 }, { 0x5a00, 0x08 },
+	{ 0x3503, 0x04 }, { 0x350c, 0x00 }, { 0x350d, 0x00 }, { 0x303c, 0x11 }, { 0x3017, 0xf0 },
+	{ 0x301c, 0xf8 }, { 0x301d, 0xf0 }, { 0x3106, 0xf5 }, { 0x3016, 0x08 }, { 0x3000, 0x00 },
+	{ 0x3001, 0x00 }, { 0x3002, 0x00 }, { 0x3018, 0x44 }, { 0x370c, 0x03 }, { 0x3630, 0x2e },
+	{ 0x3632, 0xe2 }, { 0x3633, 0x23 }, { 0x3634, 0x44 }, { 0x3620, 0x64 }, { 0x3621, 0xe0 },
+	{ 0x3600, 0x37 }, { 0x3704, 0xa0 }, { 0x3703, 0x5a }, { 0x3715, 0x78 }, { 0x3717, 0x01 },
+	{ 0x3731, 0x02 }, { 0x370b, 0x60 }, { 0x3705, 0x1a }, { 0x3f05, 0x02 }, { 0x3f06, 0x10 },
+	{ 0x3f01, 0x0a }, { 0x3c01, 0x80 }, { 0x3b07, 0x0c }, { 0x3636, 0x06 }, { 0x3827, 0xec },
+	{ 0x4001, 0x02 }, { 0x4000, 0x09 }, { 0x3a18, 0x00 }, { 0x3a19, 0xf8 }, { 0x3a0f, 0x58 },
+	{ 0x3a10, 0x50 }, { 0x3a1b, 0x58 }, { 0x3a1e, 0x50 }, { 0x3a11, 0x60 }, { 0x3a1f, 0x28 },
+	{ 0x5000, 0x06 }, { 0x5003, 0x08 }, { 0x5a00, 0x08 },
 };
 
 static const struct device *ov5647_dev(void)
@@ -667,61 +678,88 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	              val,
 	              VTS_CROP_15FPS_LO);
 
-	/* issue #2248 fix-up round 3, item 3: the crop path's AEC band step must be mainline's
-	 * OWN full-resolution values (ov5647_2592x1944_10bpp[]), not the VGA numbers reused as a
-	 * placeholder -- reusing 0x3a0d=0x02/0x3a0e=0x01 (max bands per frame) capped banding-mode
-	 * AEC around 502 lines on a 1944-line crop, roughly 4x underexposed.
+	/* issue #2248 fix-up round 4: the crop path's AEC band step is now LINE-TIME-SCALED from
+	 * mainline's full-resolution values, not mainline's byte-for-byte line counts (round 3's
+	 * fix, which was still wrong -- mainline's line counts assume a 32.51us line, this driver's
+	 * crop path runs 46.29us). Checked via the WRITE LOG, not a final-value readback: a
+	 * final-value check alone cannot distinguish "the crop block wrote this register" from "the
+	 * binned mode's earlier write is still sitting there, unwritten by the crop block" unless
+	 * the two modes' values happen to differ (they do here, but the write-log check does not
+	 * rely on that coincidence -- same reasoning as binned_mode_regs[] above).
 	 */
+	static const struct ov5647_emul_write crop_bandstep_regs[] = {
+		{ REG_AEC_RSVD_3A08, AEC_CROP_BANDSTEP_3A08_VAL },
+		{ REG_AEC_RSVD_3A09, AEC_CROP_BANDSTEP_3A09_VAL },
+		{ REG_AEC_RSVD_3A0A, AEC_CROP_BANDSTEP_3A0A_VAL },
+		{ REG_AEC_RSVD_3A0B, AEC_CROP_BANDSTEP_3A0B_VAL },
+		{ REG_AEC_RSVD_3A0D, AEC_CROP_BANDSTEP_3A0D_VAL },
+		{ REG_AEC_RSVD_3A0E, AEC_CROP_BANDSTEP_3A0E_VAL },
+		{ REG_BLC_RSVD_4004, BLC_CROP_4004_VAL },
+	};
+
+	for (size_t i = 0; i < ARRAY_SIZE(crop_bandstep_regs); i++) {
+		size_t idx;
+
+		zassert_true(
+		    find_write_index(emul, crop_bandstep_regs[i].reg, crop_bandstep_regs[i].value, &idx),
+		    "crop-path set_format(1280x960) never wrote register 0x%04x = 0x%02x "
+		    "(entry %zu of crop_bandstep_regs[]) -- either it was dropped, or it "
+		    "still has the binned mode's line-time-scaled value",
+		    crop_bandstep_regs[i].reg,
+		    crop_bandstep_regs[i].value,
+		    i);
+	}
+
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A08, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A08_VAL,
-	              "0x3a08 = 0x%02x after 1280x960, want mainline full-res 0x%02x",
+	              AEC_CROP_BANDSTEP_3A08_VAL,
+	              "0x3a08 = 0x%02x after 1280x960, want the crop path's own 0x%02x",
 	              val,
-	              AEC_FULLRES_3A08_VAL);
+	              AEC_CROP_BANDSTEP_3A08_VAL);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A09, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A09_VAL,
-	              "0x3a09 = 0x%02x after 1280x960, want mainline full-res 0x%02x, not the "
-	              "VGA value 0x%02x",
+	              AEC_CROP_BANDSTEP_3A09_VAL,
+	              "0x3a09 = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "binned-mode value 0x%02x",
 	              val,
-	              AEC_FULLRES_3A09_VAL,
+	              AEC_CROP_BANDSTEP_3A09_VAL,
 	              AEC_BAND_STEP_3A09);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0A, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A0A_VAL,
-	              "0x3a0a = 0x%02x after 1280x960, want mainline full-res 0x%02x",
+	              AEC_CROP_BANDSTEP_3A0A_VAL,
+	              "0x3a0a = 0x%02x after 1280x960, want the crop path's own 0x%02x",
 	              val,
-	              AEC_FULLRES_3A0A_VAL);
+	              AEC_CROP_BANDSTEP_3A0A_VAL);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0B, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A0B_VAL,
-	              "0x3a0b = 0x%02x after 1280x960, want mainline full-res 0x%02x, not the "
-	              "VGA value 0x%02x",
+	              AEC_CROP_BANDSTEP_3A0B_VAL,
+	              "0x3a0b = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "binned-mode value 0x%02x",
 	              val,
-	              AEC_FULLRES_3A0B_VAL,
+	              AEC_CROP_BANDSTEP_3A0B_VAL,
 	              AEC_BAND_STEP_3A0B);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0D, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A0D_VAL,
-	              "0x3a0d = 0x%02x after 1280x960, want mainline full-res 0x%02x, not the "
-	              "VGA (max-bands) value 0x%02x that under-exposed a 1944-line crop",
+	              AEC_CROP_BANDSTEP_3A0D_VAL,
+	              "0x3a0d = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "binned-mode (max-bands) value 0x%02x",
 	              val,
-	              AEC_FULLRES_3A0D_VAL,
+	              AEC_CROP_BANDSTEP_3A0D_VAL,
 	              AEC_BAND_STEP_3A0D);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_AEC_RSVD_3A0E, &val));
 	zassert_equal(val,
-	              AEC_FULLRES_3A0E_VAL,
-	              "0x3a0e = 0x%02x after 1280x960, want mainline full-res 0x%02x, not the "
-	              "VGA (max-bands) value 0x%02x that under-exposed a 1944-line crop",
+	              AEC_CROP_BANDSTEP_3A0E_VAL,
+	              "0x3a0e = 0x%02x after 1280x960, want the crop path's own 0x%02x, not the "
+	              "binned-mode (max-bands) value 0x%02x",
 	              val,
-	              AEC_FULLRES_3A0E_VAL,
+	              AEC_CROP_BANDSTEP_3A0E_VAL,
 	              AEC_BAND_STEP_3A0E);
 	zassert_ok(ov5647_emul_get_reg(emul, REG_BLC_RSVD_4004, &val));
 	zassert_equal(val,
-	              BLC_FULLRES_4004_VAL,
-	              "0x4004 = 0x%02x after 1280x960, want mainline full-res 0x%02x",
+	              BLC_CROP_4004_VAL,
+	              "0x4004 = 0x%02x after 1280x960, want the crop path's own 0x%02x",
 	              val,
-	              BLC_FULLRES_4004_VAL);
+	              BLC_CROP_4004_VAL);
 
 	/* Switching back to 640x480 must re-apply the binned set, not leave the 1:1 crop
 	 * values from the size in between. */
@@ -935,10 +973,8 @@ ZTEST(ov5647, test_set_format_preserves_flip_ctrls)
 		.width       = 640,
 		.height      = 480,
 	};
-	struct video_control vflip_on  = { .id = VIDEO_CID_VFLIP, .val = 1 };
-	struct video_control hflip_on  = { .id = VIDEO_CID_HFLIP, .val = 1 };
-	struct video_control vflip_off = { .id = VIDEO_CID_VFLIP, .val = 0 };
-	struct video_control hflip_off = { .id = VIDEO_CID_HFLIP, .val = 0 };
+	struct video_control vflip_on = { .id = VIDEO_CID_VFLIP, .val = 1 };
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
 	uint8_t              val;
 
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
@@ -997,11 +1033,10 @@ ZTEST(ov5647, test_set_format_preserves_flip_ctrls)
 	              val,
 	              TC_REG21_BINNED | TC_REG21_MIRROR_MASK);
 
-	/* Clean up: restore both ctrls to default so this test does not leave the sensor mirrored
-	 * for whichever test runs next (name-sort order is not guaranteed relative to this test).
+	/* No in-test cleanup: ov5647_test_before() (the ZTEST_SUITE before-hook) resets both flip
+	 * ctrls ahead of every test, including whichever one runs next -- issue #2248 fix-up
+	 * round 4, see its declaration.
 	 */
-	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_off));
-	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_off));
 }
 
 ZTEST(ov5647, test_stream_start_unparks)
@@ -1137,4 +1172,162 @@ ZTEST(ov5647, test_set_format_leaves_parked)
 	              PAD_OUT_PARKED);
 }
 
-ZTEST_SUITE(ov5647, NULL, NULL, NULL, NULL, NULL);
+/*
+ * issue #2248 fix-up round 4: MAJOR BUG, introduced by round 3's OWN fix for the sticky-rate bug
+ * (test_set_format_frmrate_does_not_stick_across_format_change above) -- data->requested_frmrate
+ * was a bare uint32_t storing only frmival->denominator, so a request whose NUMERATOR is not 1
+ * (e.g. {2, 60}, still 30 fps) silently turned into a DIFFERENT rate ({1, 60}, 60 fps) on the next
+ * format change. This is not a hypothetical shape: Zephyr's own `video frmival <dev> <interval>`
+ * shell command sends requests exactly this way (`100ms` is {100, 1000}, not {1, 10}). Fixed by
+ * storing the WHOLE struct video_frmival as data->requested_frmival -- see its declaration.
+ */
+ZTEST(ov5647, test_set_frmival_numerator_survives_format_change)
+{
+	struct video_format fmt_640 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+	struct video_format fmt_full = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 2592,
+		.height      = 1944,
+	};
+	/* Deliberately NOT 1/30 -- the same 30 fps rate, expressed with a numerator != 1. */
+	struct video_frmival req = { .numerator = 2, .denominator = 60 };
+	struct video_frmival got;
+
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
+	zassert_ok(video_set_frmival(ov5647_dev(), &req));
+	zassert_ok(video_get_frmival(ov5647_dev(), &got));
+	zassert_equal(got.denominator,
+	              30,
+	              "video_set_frmival({2, 60}) (30 fps) gave %u/%u fps at 640x480, want 30/1",
+	              got.denominator,
+	              got.numerator);
+
+	/* The regression: switching away and back must re-request the ORIGINAL {2, 60}, landing on
+	 * 30 fps again -- not a denominator-only {1, 60} a bare-uint32_t requested_frmrate would
+	 * have silently produced, landing on 60 fps instead.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_full));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
+	zassert_ok(video_get_frmival(ov5647_dev(), &got));
+	zassert_equal(got.denominator,
+	              30,
+	              "frame rate is %u/%u after switching away from and back to 640x480, want "
+	              "30/1 -- requested_frmival must preserve the numerator, not just the "
+	              "denominator",
+	              got.denominator,
+	              got.numerator);
+}
+
+/*
+ * issue #2248, round 4 (documentation-only mechanism, no register-write changes): the flip ctrls
+ * shift the Bayer colour order, and ov5647_get_fmt() must report that shift -- see
+ * ov5647_bayer_pixfmt()'s comment in ov5647.c for the RPi-reference-derived mapping and why (0,0)
+ * -> SBGGR, (1,0) -> SGBRG, (0,1) -> SGRBG, (1,1) -> SRGGB in terms of THIS driver's ctrl values.
+ * Only the default (0,0) order is bench/maintainer-verified; the other three are DERIVED, not
+ * bench-checked -- see docs/camera-shields.md.
+ */
+ZTEST(ov5647, test_get_fmt_reports_default_bayer_order)
+{
+	struct video_format got;
+
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SBGGR10P,
+	              "get_format() reports 0x%08x at the default (unflipped) orientation, want "
+	              "SBGGR10P -- the maintainer-confirmed default Bayer order (run 62)",
+	              got.pixelformat);
+}
+
+ZTEST(ov5647, test_get_fmt_reports_hflip_bayer_order)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_format  got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SGBRG10P,
+	              "get_format() reports 0x%08x with HFLIP=1, want SGBRG10P",
+	              got.pixelformat);
+}
+
+ZTEST(ov5647, test_get_fmt_reports_vflip_bayer_order)
+{
+	struct video_control vflip_on = { .id = VIDEO_CID_VFLIP, .val = 1 };
+	struct video_format  got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SGRBG10P,
+	              "get_format() reports 0x%08x with VFLIP=1, want SGRBG10P",
+	              got.pixelformat);
+}
+
+ZTEST(ov5647, test_get_fmt_reports_both_flips_bayer_order)
+{
+	struct video_control hflip_on = { .id = VIDEO_CID_HFLIP, .val = 1 };
+	struct video_control vflip_on = { .id = VIDEO_CID_VFLIP, .val = 1 };
+	struct video_format  got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_on));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_on));
+	zassert_ok(video_get_format(ov5647_dev(), &got));
+	zassert_equal(got.pixelformat,
+	              VIDEO_PIX_FMT_SRGGB10P,
+	              "get_format() reports 0x%08x with HFLIP=1 and VFLIP=1, want SRGGB10P",
+	              got.pixelformat);
+}
+
+/*
+ * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
+ * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
+ * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
+ * test happened to set them (which a failed assertion skips) or on ztest's NAME-SORTED execution
+ * order leaving the "right" test to run last.
+ *
+ * Ordering is deliberate, not incidental: video_set_format() is called LAST, after both ctrls and
+ * the frame interval are already at their reset values, so this hook's OWN writes end in exactly
+ * the same lane-park quartet (MODE_SELECT -> MIPI_CTRL00 -> FRAME_OFF_NUM -> PAD_OUT) that
+ * ov5647_init() itself ends with -- ov5647_set_fmt() re-requests data->requested_frmival (already
+ * reset by the video_set_frmival() call below) and re-applies both ctrls (already off) before its
+ * own final ov5647_lane_park(). This keeps test_park_order_after_init's write-log TAIL check valid
+ * even though this hook now runs ahead of it too: the tail is still a park sequence, just this
+ * hook's own re-park rather than literally ov5647_init()'s. The two boot-log tests that search the
+ * WHOLE log rather than its tail (test_pll_init_written_before_first_running_mode_select,
+ * test_common_analog_blc_aec_before_first_running_mode_select) are unaffected either way -- this
+ * hook never touches the PLL or common-init registers those look for, only set_mode_regs()'s
+ * per-mode block, ctrls, and VTS.
+ */
+static void ov5647_test_before(void *fixture)
+{
+	struct video_control hflip_off = { .id = VIDEO_CID_HFLIP, .val = 0 };
+	struct video_control vflip_off = { .id = VIDEO_CID_VFLIP, .val = 0 };
+	struct video_frmival frmival   = { .numerator = 1, .denominator = 15 };
+	struct video_format  fmt       = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 640,
+		.height      = 480,
+	};
+
+	ARG_UNUSED(fixture);
+
+	/* set_format()/set_ctrl() are rejected or reordered against a running mode while
+	 * streaming -- stop first so this reset does not depend on whichever streaming state the
+	 * PREVIOUS test (name-sort order, not declaration order) left the sensor in.
+	 */
+	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_off));
+	zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt));
+}
+
+ZTEST_SUITE(ov5647, NULL, NULL, ov5647_test_before, NULL, NULL);
