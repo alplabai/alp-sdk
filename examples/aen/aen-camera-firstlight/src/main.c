@@ -12,7 +12,9 @@
  *
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
- * IMX219, OV5647 and IMX296 paths have not yet run on real silicon.  This
+ * IMX219 and IMX296 paths have not yet run on real silicon (no module
+ * seated).  The OV5647 path is bench-attempted and BLOCKED at D-PHY
+ * Stop-state (issue #2248) -- see docs/camera-shields.md.  This
  * app still prints enough detail on every path (including a failed open()
  * or a capture TIMEOUT) that a bench engineer can tell which stage broke if
  * the sensor isn't seated or the shield stack is wrong.

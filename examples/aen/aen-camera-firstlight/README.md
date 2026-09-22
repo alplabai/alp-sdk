@@ -8,9 +8,10 @@ sensor shield is stacked underneath. The OV9281 path is **bench-verified**
 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real GREY8 frames land in
 memory in all three modes -- 640x400, 1280x720, 1280x800 -- each at its
 configured frame rate, with the sensor test pattern also verified in all
-three); the IMX219, OV5647 and IMX296 paths have not yet run on real
-silicon. See `docs/boards/e1m-evk.md`'s Camera section and
-`docs/camera-shields.md`.
+three); the IMX219 and IMX296 paths have not yet run on real silicon (no
+module seated). The OV5647 path is bench-attempted and BLOCKED at D-PHY
+Stop-state (issue #2248) -- see `docs/boards/e1m-evk.md`'s Camera section
+and `docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
 connector.** Without one, the sensor answers its I2C probe but no frame
@@ -76,7 +77,7 @@ RESULT: capture ok
 | Shield | Sensor | Format | Expected on this batch |
 |---|---|---|---|
 | `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
-| `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`), BENCH-UNVERIFIED. |
+| `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`). Bench-attempted, BLOCKED: `alp_camera_open` fails at D-PHY Stop-state (issue #2248), needs the J5 pin-11 pull-up rework (`docs/boards/e1m-evk.md`). NOT bench-verified. |
 | `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on an E1M-AEN803 on the E1M-EVK, in all three modes: 640x400 (Espressif's), 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) all captured live frames -- a `0xA5`-prefilled pool overwritten plus the sensor test pattern appearing, verified in all three -- each at its configured frame rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps). |
 | `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
