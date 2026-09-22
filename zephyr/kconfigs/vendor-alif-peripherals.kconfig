@@ -771,13 +771,14 @@ config FB_USES_DTCM_REGION
 	bool "CDC200 framebuffer lives in DTCM (needs the hal_alif local_to_global map)"
 	depends on DISPLAY_CDC200
 	help
-	  Selects the DTCM-resident framebuffer path in display_cdc200.c, which
-	  pulls in hal_alif's <soc_memory_map.h> (local_to_global) to translate
-	  the DTCM address for the CDC200 DMA engine.  Neither upstream Zephyr
-	  nor hal_alif declare this symbol -- it is alp-sdk's own gate around a
-	  vendored TU.  Leave off (default n) for the default SRAM0 framebuffer
-	  path, which needs neither the header nor the hal_alif common include
-	  dir.
+	  Set when the cdc200 node's framebuffer memory-region is a CPU-local
+	  DTCM address: display_cdc200.c then pulls in hal_alif's
+	  <soc_memory_map.h> (local_to_global) to translate it for the CDC200
+	  DMA engine.  Neither upstream Zephyr nor hal_alif declare this symbol
+	  -- it is alp-sdk's own gate around a vendored TU.  Leave off (default
+	  n) for a memory-region in global SRAM (the e1m_evk_rk055hdmipi4ma0
+	  shield's), which needs neither the header nor the hal_alif common
+	  include dir.
 
 config MIPI_DPHY
 	bool "MIPI-DPHY host controllers (vendored, ADR 0017 Tier-2 INTERIM)"

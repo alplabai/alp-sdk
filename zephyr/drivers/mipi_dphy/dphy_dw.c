@@ -381,6 +381,23 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		       DSI_PHY_IF_CFG_PHY_N_LANES_MASK, DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT);
 
 	/*
+	 * ALP-SDK PORT FIX: PHY_STOP_WAIT_TIME was left at its reset value of 0.
+	 * Per the E8 SVD, the field is the minimum time the PHY must dwell in
+	 * Stop state BEFORE it is allowed to request a high-speed transmission
+	 * -- not a wait for Stop to be reached, a floor on how long it stays
+	 * there first.  Linux's dw-mipi-dsi always writes
+	 * PHY_STOP_WAIT_TIME(0x20) alongside N_LANES here; this is that parity,
+	 * plus a latent-bug fix: the old SHIFT for this field was 0, the same
+	 * shift as `DSI_PHY_IF_CFG_PHY_N_LANES_SHIFT` above, so a write here
+	 * would have landed on N_LANES instead.  It is not a fix for the
+	 * #2199 LP-command stall and had no measured effect on it -- see
+	 * dsi_dw.c's dsi_dw_pwr_up_once() for that history.
+	 */
+	reg_write_part(dsi_regs + DSI_PHY_IF_CFG, DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_VAL,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_MASK,
+		       DSI_PHY_IF_CFG_PHY_STOP_WAIT_TIME_SHIFT);
+
+	/*
 	 * Put D-PHY in shutdown mode prior to configuring the D-PHY.
 	 * Set RSTZ = 0, SHUTDOWNZ = 0
 	 */
@@ -532,9 +549,30 @@ int dphy_dw_master_setup(const struct device *dev, struct dphy_dsi_settings *phy
 		return -ETIMEDOUT;
 	}
 
-	/* Wait for LP11 state to be driven. */
+	/*
+	 * Wait for LP11 state to be driven.
+	 *
+	 * ALP-SDK PORT FIX: the second line used to ASSIGN, not OR --
+	 *   tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	 * so a two-lane panel (this shield) waited on lane 1's stop state ALONE
+	 * and never checked data lane 0 (bit 4) or the clock lane (bit 2).  This
+	 * function could then return 0 with lane 0 and/or the clock lane not yet
+	 * in LP-11, and dsi_dw_attach_locked() would go on to program the DPI
+	 * registers and mark the host attached over a PHY in an invalid state.
+	 *
+	 * That matters beyond tidiness here: HX8394-F Fig 5.28 requires "MIPI
+	 * Data Lane and CLK Lane must set LP11 before HW reset go high", and the
+	 * panel's RESX is released just after this returns.  Checking one data
+	 * lane is not checking the condition the panel actually needs.
+	 *
+	 * The CSI twin in this same file already ORs correctly -- see the
+	 * CSI_PHY_STOPSTATE_PHY_STOPSTATEDATA_1 case -- so the master path was
+	 * the outlier.  Inherited verbatim from the zephyr_alif fork.
+	 */
 	tmp = DSI_PHY_STATUS_STOPSTATE0LANE | DSI_PHY_STATUS_STOPSTATECLKLANE;
-	tmp = (phy->num_lanes == 2) ? DSI_PHY_STATUS_STOPSTATE1LANE : tmp;
+	if (phy->num_lanes == 2) {
+		tmp |= DSI_PHY_STATUS_STOPSTATE1LANE;
+	}
 	for (int i = 0; (i < 1000000) && (sys_read32(dsi_regs + DSI_PHY_STATUS) & tmp) != tmp;
 	     i++) {
 		k_busy_wait(1);

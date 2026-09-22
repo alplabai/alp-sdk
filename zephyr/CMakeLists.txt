@@ -650,9 +650,9 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_IMX296
 # (drivers/display/display_cdc200.c) + PORTED to the v4.4 display API by Alp Lab
 # AB.  Upstream Zephyr v4.4 + hal_alif ship no tes,cdc-2.1 or DPI display
 # driver, so the source is carried in-tree to survive a `west update`.  The TU
-# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; the
-# default SRAM0 framebuffer path needs neither it nor the hal_alif common include
-# dir.  ADR 0017 Tier-2 (INTERIM).
+# uses hal_alif's <soc_memory_map.h> only under CONFIG_FB_USES_DTCM_REGION; a
+# framebuffer memory-region in global SRAM needs neither it nor the hal_alif
+# common include dir.  ADR 0017 Tier-2 (INTERIM).
 if(CONFIG_DISPLAY_CDC200 AND CONFIG_FB_USES_DTCM_REGION)
     zephyr_include_directories(${ZEPHYR_ALIF_MODULE_DIR}/common/include)
 endif()
@@ -670,6 +670,18 @@ if(CONFIG_MIPI_DSI_DW)
 endif()
 zephyr_library_sources_ifdef(CONFIG_MIPI_DSI_DW
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/mipi_dsi/dsi_dw.c)
+
+# ADR-0017-ADJACENT glue: the Alif E8 SoC-level setup the MIPI D-PHY and the
+# display chain need and no driver performs -- D-PHY clock sources + analog
+# power (CGU / VBAT), the CDC200 pixel-clock divider, and the DSI panel
+# backlight pad mux.  E8-only (the gate mirrors the GPIO clock-enable glue
+# above) and only when the D-PHY, DSI or CDC200 driver is configured, so a
+# CSI-camera build gets the D-PHY power-up too; each hook inside is further
+# gated on its DT node being okay.
+if(CONFIG_SOC_SERIES_E8 AND (CONFIG_MIPI_DPHY_DW OR CONFIG_MIPI_DSI_DW OR CONFIG_DISPLAY_CDC200))
+    zephyr_library_sources(
+        ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/soc-bridge/alif/mipi_display_e8.c)
+endif()
 
 # Alif Ensemble CAN-FD controller (CAST CAN-CTRL IP, compatible "cast,can",
 # CANFD0 base 0x49036000), vendored VERBATIM from the Apache-2.0 zephyr_alif

@@ -7,10 +7,11 @@
  * Private register map + driver structs for the Synopsys DesignWare MIPI-DSI
  * host driver (compatible "snps,designware-dsi").  Vendored from the Apache-2.0
  * zephyr_alif fork (drivers/mipi_dsi/dsi_dw.h) and PORTED by Alp Lab AB:
- * the `enum dsi_dw_mode` (DSI_DW_*_MODE) used by dsi_dw.c / struct dsi_dw_data
- * is defined HERE -- the fork referenced it from a public
- * <zephyr/drivers/mipi_dsi/dsi_dw.h> that never existed in the fork tree (a
- * latent build defect), so the type is folded into this local header.
+ * the `enum dsi_dw_mode` (DSI_DW_*_MODE) and dsi_dw_set_mode() come from the
+ * public <zephyr/drivers/mipi_dsi/dsi_dw.h> (zephyr/include/) -- the fork
+ * referenced that header but never shipped it, so alp-sdk authors it.  This
+ * header is DT-dependent (struct dsi_dw_config's layout follows the includer's
+ * DT_DRV_COMPAT), so only dsi_dw.c may include it.
  * ADR 0017 Tier-2 (INTERIM, task #21).  BENCH-UNVERIFIED.
  */
 
@@ -21,6 +22,8 @@
 #include <zephyr/drivers/clock_control.h>
 #include <zephyr/drivers/mipi_dphy/dphy_dw.h>
 #include <zephyr/drivers/mipi_dsi.h>
+#include <zephyr/drivers/mipi_dsi/dsi_dw.h>
+#include <zephyr/kernel.h>
 
 #define DSI_VERSION		0x00 /* HW Version Register */
 #define DSI_PWR_UP		0x04 /* Power-up Control Register */
@@ -308,8 +311,6 @@
 #define  DSI_PHY_RSTZ_SHUTDOWNZ			BIT(0)
 
 /* PHY Config Register */
-#define  DSI_PHY_IF_CFG_STOP_WAIT_TIME_MASK	GENMASK(7, 0)
-#define  DSI_PHY_IF_CFG_STOP_WAIT_TIME_SHIFT	8
 #define  DSI_PHY_IF_CFG_N_LANES_MASK		GENMASK(1, 0)
 #define  DSI_PHY_IF_CFG_N_LANES_SHIFT		0
 
@@ -388,18 +389,23 @@
 #define  DSI_PHY_CAL_TX_SKEW_CAL_HS		BIT(0)
 
 /* Data Lane Timer Read Config Register */
+/*
+ * Lower bound for MAX_RD_TIME, in LP bits: a long read response (4-byte packet
+ * header + payload + 2-byte CRC) plus BTA turnaround and LPDT entry/exit, with
+ * margin.  One LP bit is one escape clock, so the register value is this times
+ * esc_clk_div.  See the MAX_RD_TIME floor in dsi_dw_calc_lpcmd_time().
+ */
+#define  DSI_DW_RD_RESPONSE_BITS		640U
+
+/* Polls of GEN_PLD_W_FULL, 1 us apart, before giving up on payload FIFO space. */
+#define  DSI_DW_PLD_SPACE_POLLS		1000U
+
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_MASK	GENMASK(14, 0)
 #define  DSI_PHY_TMR_RD_CFG_MAX_RD_TIME_SHIFT	0
 
 /* Video Shadow Control Register */
 #define  DSI_VID_SHADOW_CTRL_REQ		BIT(8)
 #define  DSI_VID_SHADOW_CTRL_EN			BIT(0)
-
-/*
- * MIPI-DSI Host controller configurations
- */
-/* PHY parameters. */
-#define PHY_STOP_WAIT_TIME			0x20
 
 /* Time to return read data packet from peripheral. */
 #define  TO_CLK_DIV				10
@@ -409,7 +415,15 @@
 /* Read-only Frame-rate value to be used for clock calculations. */
 #define  DPI_FRAME_RATE				60
 #define  DSI_HS_CLK_SCALING_FACTOR		(4.0f/3.0f)
-#define  MAX_ESC_CLK				MHZ(20)
+/*
+ * ALP-SDK PORT FIX: cap the TX escape clock at 15 MHz, not the 20 MHz D-PHY
+ * ceiling.  The divider is integer, so a lane-byte clock just above a multiple
+ * lands the escape clock within a few percent of the spec maximum (57.8 MHz / 3
+ * = 19.3 MHz here), leaving no margin for a peripheral's LP receiver.  Linux's
+ * dw-mipi-dsi sizes the same divider against 15 MHz; matching it costs only LP
+ * command time.  BENCH: chasing a per-power-up whole-panel LP-RX silence (#2199).
+ */
+#define  MAX_ESC_CLK				MHZ(15)
 enum sdf_format {
 	SDF_FORMAT_MUXED_LINES = 0x0,
 	SDF_FORMAT_MUXED_FRAMES = 0x1,
@@ -445,17 +459,6 @@ enum dpi_vid_mode_type {
 	DPI_VID_MODE_BURST_1 = 3,
 };
 
-/*
- * PORT (Alp Lab AB): controller operating mode tracked in struct dsi_dw_data
- * (curr_mode) and switched by dsi_dw_set_mode().  The fork referenced this enum
- * from a public <zephyr/drivers/mipi_dsi/dsi_dw.h> that never existed in the
- * fork tree -- defining it here is what makes the driver compile.
- */
-enum dsi_dw_mode {
-	DSI_DW_VIDEO_MODE = 0,
-	DSI_DW_COMMAND_MODE = 1,
-};
-
 struct dpi_config {
 	/* Video signals polarity */
 	uint32_t polarity;
@@ -472,6 +475,8 @@ struct dsi_dw_config {
 
 	uint32_t irq;
 	uint32_t panel_max_lane_bw;
+	/* cdc-if clock-frequency (Hz); 0 = derive it from the timings at 60 Hz. */
+	uint32_t dpi_pix_clk;
 	struct mipi_dsi_timings timings;
 	struct dpi_config dpi;
 #if DT_ANY_INST_HAS_PROP_STATUS_OKAY(clocks)
@@ -489,6 +494,13 @@ struct dsi_dw_config {
 
 	/* Request ACK at the end of a frame. */
 	uint32_t frame_ack_en : 1;
+
+	/*
+	 * Panel properties the BOARD declares because the panel driver does not.
+	 * ORed into mdev->mode_flags in dsi_dw_attach_locked(); see the
+	 * dpi-video-mode / autoinsert-eotp bindings.
+	 */
+	uint32_t mode_flags_or;
 };
 
 struct dsi_dw_data {
@@ -506,11 +518,34 @@ struct dsi_dw_data {
 	uint32_t invact;
 	uint32_t max_rd_time;
 	enum dsi_dw_mode curr_mode;
+	/* ALP-SDK PORT FIX: set only by a successful dsi_dw_attach(). */
+	bool attached;
+	/*
+	 * ALP-SDK PORT FIX: tracks DSI_PWR_UP[SHUTDOWNZ], which attach
+	 * deliberately leaves at 0 (see dsi_dw_attach_locked()); the first
+	 * transfer or mode switch powers the host up via dsi_dw_pwr_up_once().
+	 * Distinct from `attached`, which means "configured", not "powered".
+	 */
+	bool powered;
+	/*
+	 * ALP-SDK PORT FIX: serialises attach, transfer and set_mode.  The panel
+	 * driver's DCS traffic and the display's blanking (mode switch) come from
+	 * different callers and must not interleave on the host registers.
+	 */
+	struct k_mutex lock;
 
 	/* null packet config */
 	uint32_t num_chunks;
 	uint32_t null_size;
 	uint32_t pkt_size;
+
+	/*
+	 * Bits per pixel of the attached format.  Kept because
+	 * dsi_dw_video_mode_config() needs the on-the-wire length of one video
+	 * line to work out whether the horizontal FRONT PORCH is long enough
+	 * for an HS->LP->HS turnaround, and mdev is long gone by then.
+	 */
+	uint8_t bpp;
 
 	uint32_t mode_flags;
 };
