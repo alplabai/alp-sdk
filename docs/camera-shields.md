@@ -5,7 +5,7 @@
 | Module | Sensor | Shield | Interface / lanes | Modes | Status |
 |---|---|---|---|---|---|
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. |
-| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P | Build-only / not run on hardware. |
+| RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P | **Bench-attempted, BLOCKED**: `alp_camera_open` fails at D-PHY Stop-state (see the driver section below). NOT bench-verified. Needs the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md). |
 | RPi Camera Module 2 | IMX219 | `raspberry_pi_camera_module_2` (upstream) | MIPI CSI-2 D-PHY, 2 lanes | 640x480 RAW10 (this repo's first-light example) | Build-only / not run on hardware. |
 | RPi Global Shutter Camera | IMX296LQR-C (1.58 Mpx colour global-shutter) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, 1 lane | 1456x1088 SRGGB10P (all-pixel scan) | Build-only / not run on hardware. |
 
@@ -61,6 +61,29 @@ auto/manual gain, auto/manual exposure, H/V flip, test pattern, pixel rate.
 PWDN GPIO line to wire it to — the shield overlay omits the property rather
 than faking a GPIO, and the driver compiles the PWDN code path out entirely
 when no instance declares it.
+
+**Bench-attempted, BLOCKED at D-PHY Stop-state (2026-09-22, an
+E1M-AEN803 serial 2026W36-0001 on an E1M-EVK hw_rev 2626-r2).** This is
+NOT bench-verified. The InnoMaker CAM-OV5647 module has no pull-up of
+its own on J5 pin 11 and needs the pull-up rework described in
+[`docs/boards/e1m-evk.md`](boards/e1m-evk.md) before it answers on I2C
+at all. With the module powered and answering I2C, `alp_camera_open`
+fails at `ALP_ERR_TIMEOUT` with `E: D-PHY not locked to Stop-state. PHY
+status - 0x00010000 DPHY ID: 0`. `CSI_PHY_STOPSTATE` (`0x4903304c`)
+reaches only bit0 (`STOPSTATEDATA_0`), and only after the receiver is
+configured; bit1 (`DATA_1`) and bit16 (`CLK`) never assert, and
+`CSI_PHY_RX` bit17 (`RXCLKACTIVEHS`) never sets. For contrast, the
+OV9281 path below reaches `0x00010003` on the same receiver.
+
+Ruled out by control-validated bench runs: module power, the sensor's
+own MIPI PHY being disabled (register `0x3018` = `0x44` decodes to
+`PHY_PD_MIPI` 0 / `PHY_PD_LPRX` 0 / `MIPI_EN` 1), the mainline
+"coax lanes into LP-11" park sequence, sensor-before-receiver ordering,
+and the receiver's D-PHY frequency bin (identical behaviour at
+`hsfreqrange 0x16` and at `0x09`, the bin the OV9281 streams in). Open
+candidates: the physical clock/data-1 pairs through the P/N-crossing
+adapter, a module-level fault, and `0x4837 PCLK_PERIOD`, which the
+driver never programs and which sits at its reset value `0x15`.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 
@@ -166,5 +189,7 @@ shield also builds against it) and captures one frame with a timeout, on the
 E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
 README for what each printed line means and the expected result per module
 -- the OV9281 path is now bench-verified (2026-09-21, an E1M-AEN803 on the
-E1M-EVK); the IMX219, OV5647 and IMX296 paths compile and link against the
-real board target but have not yet been run on real silicon.
+E1M-EVK); the IMX219 and IMX296 paths compile and link against the real
+board target but have not yet been run on real silicon. The OV5647 path
+has been bench-attempted but is BLOCKED at D-PHY Stop-state (see the
+OV5647 driver section above) -- it is not bench-verified.
