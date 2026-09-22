@@ -196,11 +196,11 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 
 struct imx296_inck_regs {
 	uint32_t hz;
-	uint8_t incksel0;
-	uint8_t incksel1;
-	uint8_t incksel2;
-	uint8_t incksel3;
-	uint8_t csi_timing;
+	uint8_t  incksel0;
+	uint8_t  incksel1;
+	uint8_t  incksel2;
+	uint8_t  incksel3;
+	uint8_t  csi_timing;
 };
 
 /*
@@ -212,24 +212,24 @@ struct imx296_inck_regs {
  * code path covers all three INCKs uniformly.
  */
 static const struct imx296_inck_regs imx296_inck_table[] = {
-	{.hz = 37125000,
-	 .incksel0 = 0x80,
-	 .incksel1 = 0x0B,
-	 .incksel2 = 0x80,
-	 .incksel3 = 0x08,
-	 .csi_timing = 0x74},
-	{.hz = 54000000,
-	 .incksel0 = 0xB0,
-	 .incksel1 = 0x0F,
-	 .incksel2 = 0xB0,
-	 .incksel3 = 0x0C,
-	 .csi_timing = 0xA8},
-	{.hz = 74250000,
-	 .incksel0 = 0x80,
-	 .incksel1 = 0x0F,
-	 .incksel2 = 0x80,
-	 .incksel3 = 0x0C,
-	 .csi_timing = 0xE8},
+	{ .hz         = 37125000,
+	  .incksel0   = 0x80,
+	  .incksel1   = 0x0B,
+	  .incksel2   = 0x80,
+	  .incksel3   = 0x08,
+	  .csi_timing = 0x74 },
+	{ .hz         = 54000000,
+	  .incksel0   = 0xB0,
+	  .incksel1   = 0x0F,
+	  .incksel2   = 0xB0,
+	  .incksel3   = 0x0C,
+	  .csi_timing = 0xA8 },
+	{ .hz         = 74250000,
+	  .incksel0   = 0x80,
+	  .incksel1   = 0x0F,
+	  .incksel2   = 0x80,
+	  .incksel3   = 0x0C,
+	  .csi_timing = 0xE8 },
 };
 
 /*
@@ -253,15 +253,15 @@ static const struct imx296_inck_regs imx296_inck_table[] = {
  */
 static const struct video_format_cap imx296_fmts[] = {
 	{
-		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
-		.width_min = IMX296_WIDTH,
-		.width_max = IMX296_WIDTH,
-		.width_step = 1,
-		.height_min = IMX296_HEIGHT,
-		.height_max = IMX296_HEIGHT,
-		.height_step = 1,
+	    .pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+	    .width_min   = IMX296_WIDTH,
+	    .width_max   = IMX296_WIDTH,
+	    .width_step  = 1,
+	    .height_min  = IMX296_HEIGHT,
+	    .height_max  = IMX296_HEIGHT,
+	    .height_step = 1,
 	},
-	{0},
+	{ 0 },
 };
 
 static const int64_t imx296_link_frequencies[] = {
@@ -284,7 +284,7 @@ struct imx296_data {
 
 struct imx296_config {
 	struct i2c_dt_spec i2c;
-	uint32_t input_clk_hz;
+	uint32_t           input_clk_hz;
 };
 
 static const struct imx296_inck_regs *imx296_find_inck(uint32_t input_clk_hz)
@@ -301,13 +301,15 @@ static const struct imx296_inck_regs *imx296_find_inck(uint32_t input_clk_hz)
 static int imx296_set_fmt(const struct device *dev, struct video_format *fmt)
 {
 	struct imx296_data *data = dev->data;
-	size_t idx;
-	int ret;
+	size_t              idx;
+	int                 ret;
 
 	ret = video_format_caps_index(imx296_fmts, fmt, &idx);
 	if (ret < 0) {
-		LOG_ERR("Format '%s' %ux%u not supported", VIDEO_FOURCC_TO_STR(fmt->pixelformat),
-			fmt->width, fmt->height);
+		LOG_ERR("Format '%s' %ux%u not supported",
+		        VIDEO_FOURCC_TO_STR(fmt->pixelformat),
+		        fmt->width,
+		        fmt->height);
 		return -ENOTSUP;
 	}
 
@@ -340,15 +342,15 @@ static int imx296_get_caps(const struct device *dev, struct video_caps *caps)
 static int imx296_enum_frmival(const struct device *dev, struct video_frmival_enum *fie)
 {
 	size_t idx;
-	int ret;
+	int    ret;
 
 	ret = video_format_caps_index(imx296_fmts, fie->format, &idx);
 	if (ret < 0 || fie->index != 0) {
 		return -EINVAL;
 	}
 
-	fie->type = VIDEO_FRMIVAL_TYPE_DISCRETE;
-	fie->discrete.numerator = IMX296_FRMIVAL_NUMERATOR;
+	fie->type                 = VIDEO_FRMIVAL_TYPE_DISCRETE;
+	fie->discrete.numerator   = IMX296_FRMIVAL_NUMERATOR;
 	fie->discrete.denominator = IMX296_FRMIVAL_DENOMINATOR;
 
 	return 0;
@@ -357,7 +359,7 @@ static int imx296_enum_frmival(const struct device *dev, struct video_frmival_en
 static int imx296_set_frmival(const struct device *dev, struct video_frmival *frmival)
 {
 	/* All-pixel scan mode has exactly one fixed frame rate (60.3 frame/s) */
-	frmival->numerator = IMX296_FRMIVAL_NUMERATOR;
+	frmival->numerator   = IMX296_FRMIVAL_NUMERATOR;
 	frmival->denominator = IMX296_FRMIVAL_DENOMINATOR;
 
 	return 0;
@@ -365,7 +367,7 @@ static int imx296_set_frmival(const struct device *dev, struct video_frmival *fr
 
 static int imx296_get_frmival(const struct device *dev, struct video_frmival *frmival)
 {
-	frmival->numerator = IMX296_FRMIVAL_NUMERATOR;
+	frmival->numerator   = IMX296_FRMIVAL_NUMERATOR;
 	frmival->denominator = IMX296_FRMIVAL_DENOMINATOR;
 
 	return 0;
@@ -374,7 +376,7 @@ static int imx296_get_frmival(const struct device *dev, struct video_frmival *fr
 static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_type type)
 {
 	const struct imx296_config *cfg = dev->config;
-	int ret;
+	int                         ret;
 
 	if (type != VIDEO_BUF_TYPE_OUTPUT) {
 		LOG_ERR("Only output buffers supported");
@@ -404,10 +406,10 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 
 static int imx296_set_ctrl(const struct device *dev, uint32_t cid)
 {
-	const struct imx296_config *cfg = dev->config;
-	struct imx296_data *data = dev->data;
-	struct imx296_ctrls *ctrls = &data->ctrls;
-	uint32_t shs;
+	const struct imx296_config *cfg   = dev->config;
+	struct imx296_data         *data  = dev->data;
+	struct imx296_ctrls        *ctrls = &data->ctrls;
+	uint32_t                    shs;
 
 	switch (cid) {
 	case VIDEO_CID_EXPOSURE:
@@ -421,74 +423,91 @@ static int imx296_set_ctrl(const struct device *dev, uint32_t cid)
 	case VIDEO_CID_ANALOGUE_GAIN:
 		return video_write_cci_reg(&cfg->i2c, IMX296_REG_GAIN, ctrls->analogue_gain.val);
 	case VIDEO_CID_HFLIP:
-		return video_modify_cci_reg(&cfg->i2c, IMX296_REG_REVERSE, IMX296_REVERSE_HREVERSE,
-					    ctrls->hflip.val != 0 ? IMX296_REVERSE_HREVERSE : 0);
+		return video_modify_cci_reg(&cfg->i2c,
+		                            IMX296_REG_REVERSE,
+		                            IMX296_REVERSE_HREVERSE,
+		                            ctrls->hflip.val != 0 ? IMX296_REVERSE_HREVERSE : 0);
 	case VIDEO_CID_VFLIP:
-		return video_modify_cci_reg(&cfg->i2c, IMX296_REG_REVERSE, IMX296_REVERSE_VREVERSE,
-					    ctrls->vflip.val != 0 ? IMX296_REVERSE_VREVERSE : 0);
+		return video_modify_cci_reg(&cfg->i2c,
+		                            IMX296_REG_REVERSE,
+		                            IMX296_REVERSE_VREVERSE,
+		                            ctrls->vflip.val != 0 ? IMX296_REVERSE_VREVERSE : 0);
 	default:
 		return -ENOTSUP;
 	}
 }
 
 static DEVICE_API(video, imx296_driver_api) = {
-	.set_format = imx296_set_fmt,
-	.get_format = imx296_get_fmt,
-	.get_caps = imx296_get_caps,
-	.set_stream = imx296_set_stream,
-	.set_ctrl = imx296_set_ctrl,
-	.set_frmival = imx296_set_frmival,
-	.get_frmival = imx296_get_frmival,
+	.set_format   = imx296_set_fmt,
+	.get_format   = imx296_get_fmt,
+	.get_caps     = imx296_get_caps,
+	.set_stream   = imx296_set_stream,
+	.set_ctrl     = imx296_set_ctrl,
+	.set_frmival  = imx296_set_frmival,
+	.get_frmival  = imx296_get_frmival,
 	.enum_frmival = imx296_enum_frmival,
 };
 
 static int imx296_init_ctrls(const struct device *dev)
 {
-	struct imx296_data *data = dev->data;
+	struct imx296_data  *data  = dev->data;
 	struct imx296_ctrls *ctrls = &data->ctrls;
-	int ret;
+	int                  ret;
 
-	ret = video_init_ctrl(&ctrls->exposure, dev, VIDEO_CID_EXPOSURE,
-			      (struct video_ctrl_range){.min = 1,
-							.max = IMX296_VMAX - IMX296_SHS_MIN,
-							.step = 1,
-							.def = IMX296_VMAX - IMX296_SHS_DEFAULT});
+	ret = video_init_ctrl(&ctrls->exposure,
+	                      dev,
+	                      VIDEO_CID_EXPOSURE,
+	                      (struct video_ctrl_range){ .min  = 1,
+	                                                 .max  = IMX296_VMAX - IMX296_SHS_MIN,
+	                                                 .step = 1,
+	                                                 .def  = IMX296_VMAX - IMX296_SHS_DEFAULT });
 	if (ret < 0) {
 		return ret;
 	}
 
 	ret = video_init_ctrl(
-		&ctrls->analogue_gain, dev, VIDEO_CID_ANALOGUE_GAIN,
-		(struct video_ctrl_range){.min = 0, .max = IMX296_GAIN_MAX, .step = 1, .def = 0});
+	    &ctrls->analogue_gain,
+	    dev,
+	    VIDEO_CID_ANALOGUE_GAIN,
+	    (struct video_ctrl_range){ .min = 0, .max = IMX296_GAIN_MAX, .step = 1, .def = 0 });
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = video_init_ctrl(&ctrls->hflip, dev, VIDEO_CID_HFLIP,
-			      (struct video_ctrl_range){.min = 0, .max = 1, .step = 1, .def = 0});
+	ret = video_init_ctrl(&ctrls->hflip,
+	                      dev,
+	                      VIDEO_CID_HFLIP,
+	                      (struct video_ctrl_range){ .min = 0, .max = 1, .step = 1, .def = 0 });
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = video_init_ctrl(&ctrls->vflip, dev, VIDEO_CID_VFLIP,
-			      (struct video_ctrl_range){.min = 0, .max = 1, .step = 1, .def = 0});
+	ret = video_init_ctrl(&ctrls->vflip,
+	                      dev,
+	                      VIDEO_CID_VFLIP,
+	                      (struct video_ctrl_range){ .min = 0, .max = 1, .step = 1, .def = 0 });
 	if (ret < 0) {
 		return ret;
 	}
 
-	ret = video_init_ctrl(&ctrls->pixel_rate, dev, VIDEO_CID_PIXEL_RATE,
-			      (struct video_ctrl_range){.min64 = IMX296_PIXEL_RATE_HZ,
-							.max64 = IMX296_PIXEL_RATE_HZ,
-							.step64 = 1,
-							.def64 = IMX296_PIXEL_RATE_HZ});
+	ret = video_init_ctrl(&ctrls->pixel_rate,
+	                      dev,
+	                      VIDEO_CID_PIXEL_RATE,
+	                      (struct video_ctrl_range){ .min64  = IMX296_PIXEL_RATE_HZ,
+	                                                 .max64  = IMX296_PIXEL_RATE_HZ,
+	                                                 .step64 = 1,
+	                                                 .def64  = IMX296_PIXEL_RATE_HZ });
 	if (ret < 0) {
 		return ret;
 	}
 	ctrls->pixel_rate.flags |= VIDEO_CTRL_FLAG_READ_ONLY;
 
-	ret = video_init_int_menu_ctrl(&ctrls->link_freq, dev, VIDEO_CID_LINK_FREQ, 0,
-				       imx296_link_frequencies,
-				       ARRAY_SIZE(imx296_link_frequencies));
+	ret = video_init_int_menu_ctrl(&ctrls->link_freq,
+	                               dev,
+	                               VIDEO_CID_LINK_FREQ,
+	                               0,
+	                               imx296_link_frequencies,
+	                               ARRAY_SIZE(imx296_link_frequencies));
 	if (ret < 0) {
 		return ret;
 	}
@@ -499,15 +518,15 @@ static int imx296_init_ctrls(const struct device *dev)
 
 static int imx296_init(const struct device *dev)
 {
-	const struct imx296_config *cfg = dev->config;
+	const struct imx296_config    *cfg = dev->config;
 	const struct imx296_inck_regs *inck;
-	struct video_format fmt = {
+	struct video_format            fmt = {
 		.pixelformat = VIDEO_PIX_FMT_SRGGB10P,
-		.width = IMX296_WIDTH,
-		.height = IMX296_HEIGHT,
+		.width       = IMX296_WIDTH,
+		.height      = IMX296_HEIGHT,
 	};
 	uint32_t standby;
-	int ret;
+	int      ret;
 
 	if (!device_is_ready(cfg->i2c.bus)) {
 		LOG_ERR("I2C device %s is not ready", cfg->i2c.bus->name);
@@ -532,13 +551,14 @@ static int imx296_init(const struct device *dev)
 		return ret;
 	}
 
-	LOG_DBG("STANDBY read back 0x%02x (%s boot)", standby,
-		(standby & IMX296_STANDBY_STANDBY) != 0 ? "cold" : "warm");
+	LOG_DBG("STANDBY read back 0x%02x (%s boot)",
+	        standby,
+	        (standby & IMX296_STANDBY_STANDBY) != 0 ? "cold" : "warm");
 
 	inck = imx296_find_inck(cfg->input_clk_hz);
 	if (inck == NULL) {
 		LOG_ERR("Unsupported INCK frequency %u Hz (must be 37.125/54/74.25 MHz)",
-			cfg->input_clk_hz);
+		        cfg->input_clk_hz);
 		return -ENOTSUP;
 	}
 
@@ -605,23 +625,29 @@ static int imx296_init(const struct device *dev)
 #define IMX296_EP(n)        DT_CHILD(DT_INST_CHILD(n, port), endpoint)
 #define IMX296_INPUT_CLK(n) DT_INST_PROP_BY_PHANDLE(n, clocks, clock_frequency)
 
-#define IMX296_INIT(n)                                                                             \
-	BUILD_ASSERT(DT_PROP_OR(IMX296_EP(n), bus_type, VIDEO_BUS_TYPE_CSI2_DPHY) ==               \
-			     VIDEO_BUS_TYPE_CSI2_DPHY,                                             \
-		     "Only the MIPI CSI-2 D-PHY interface is supported");                          \
-	BUILD_ASSERT(DT_PROP_LEN_OR(IMX296_EP(n), data_lanes, 1) == 1,                             \
-		     "IMX296 has a single MIPI CSI-2 data lane");                                  \
-                                                                                                   \
-	static struct imx296_data imx296_data_##n;                                                 \
-                                                                                                   \
-	static const struct imx296_config imx296_cfg_##n = {                                       \
-		.i2c = I2C_DT_SPEC_INST_GET(n),                                                    \
-		.input_clk_hz = IMX296_INPUT_CLK(n),                                               \
-	};                                                                                         \
-                                                                                                   \
-	DEVICE_DT_INST_DEFINE(n, &imx296_init, NULL, &imx296_data_##n, &imx296_cfg_##n,            \
-			      POST_KERNEL, CONFIG_VIDEO_INIT_PRIORITY, &imx296_driver_api);        \
-                                                                                                   \
+#define IMX296_INIT(n) \
+	BUILD_ASSERT(DT_PROP_OR(IMX296_EP(n), bus_type, VIDEO_BUS_TYPE_CSI2_DPHY) == \
+	                 VIDEO_BUS_TYPE_CSI2_DPHY, \
+	             "Only the MIPI CSI-2 D-PHY interface is supported"); \
+	BUILD_ASSERT(DT_PROP_LEN_OR(IMX296_EP(n), data_lanes, 1) == 1, \
+	             "IMX296 has a single MIPI CSI-2 data lane"); \
+\
+	static struct imx296_data imx296_data_##n; \
+\
+	static const struct imx296_config imx296_cfg_##n = { \
+		.i2c          = I2C_DT_SPEC_INST_GET(n), \
+		.input_clk_hz = IMX296_INPUT_CLK(n), \
+	}; \
+\
+	DEVICE_DT_INST_DEFINE(n, \
+	                      &imx296_init, \
+	                      NULL, \
+	                      &imx296_data_##n, \
+	                      &imx296_cfg_##n, \
+	                      POST_KERNEL, \
+	                      CONFIG_VIDEO_INIT_PRIORITY, \
+	                      &imx296_driver_api); \
+\
 	VIDEO_DEVICE_DEFINE(imx296_##n, DEVICE_DT_INST_GET(n), NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(IMX296_INIT)
