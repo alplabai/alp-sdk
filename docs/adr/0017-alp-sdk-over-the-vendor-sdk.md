@@ -277,17 +277,21 @@ already contains that PR AND all THREE AUTHORIZED LOCAL DIVERGENCES the
 driver's file header records are confirmed present there too: #1 (issue
 #2248, the CSI-2 lane-park sequence the upstream PR never drove), #2 (the
 PLL + MIPI-TX pad-drive init the upstream PR never programs), and #3 (the
-full-FOV binned 640x480 mode, its per-mode line length/AEC band step, the
-matching common init taken from the RPi/OmniVision reference driver, the
-corrected exposure default, and the default-frame-rate fix — all bench-driven
+full-FOV binned 640x480 mode, its per-mode line length/AEC band step
+(including the mode-correct mainline band-step values, not a VGA
+placeholder reused on the crop path), the matching common init taken from
+the RPi/OmniVision reference driver, the corrected exposure default, the
+frame rate re-requesting the user's own setting rather than a prior mode's
+clamped one on every format change, and the flip controls surviving a
+format change instead of being silently wiped by it — all bench-driven
 corrections the upstream PR does not have). Retirement is therefore
 conditional on more than the version bump; see the driver's file header
 RETIREMENT note for the exact checklist. At that point the upstream driver
-and our vendored
-copy would define the same Kconfig symbol (`VIDEO_OV5647`) and the same DT
-`compatible` (`"ovti,ov5647"`); keeping both would be a silent build
-collision, not a safety net, so retirement is a straight deletion of the
-`.c`/`Kconfig.*`/binding files and their build hookup, never a merge.
+and our vendored copy would define the same Kconfig symbol
+(`VIDEO_OV5647`) and the same DT `compatible` (`"ovti,ov5647"`); keeping
+both would be a silent build collision, not a safety net, so retirement is
+a straight deletion of the `.c`/`Kconfig.*`/binding files and their build
+hookup, never a merge.
 
 **Collision safety before consuming it this way:** checked that no other
 in-flight or landed Zephyr driver claims `VIDEO_OV5647` / `"ovti,ov5647"` —

@@ -1,4 +1,4 @@
-### Fixed — OV5647: 640x480 now matches the RPi/OmniVision reference driver's own values, not an Alif-derived mix; default frame rate was silently 10 fps, not 15 (#2248)
+### Fixed — OV5647: 640x480 now matches the RPi/OmniVision reference driver's own values, not an Alif-derived mix; three pre-merge behaviour bugs caught and fixed before merge (#2248)
 
 `zephyr/drivers/video/ov5647.c`'s 640x480 was a 648x488 1:1 centre crop -- a heavy telephoto
 crop over roughly 25% of the array width -- not the full-array subsampled+binned 640x480 mode.
@@ -14,10 +14,12 @@ was left to the app's own exposure control rather than the table's `0x03`; and `
 this driver's park/stream-on sequence value (`0x04`), not the table's `0x34`. Run 61 streamed
 clean: "[stg] 75 regs 0 failed", MFR start `ALP_OK`, zero `E:` lines / CSI fatals, frame
 CRC-matched against a real scene (E1M-AEN803 serial 2026W36-0001 / E1M-EVK hw_rev 2626-r2,
-DesignWare CSI-2 RX, RAW10), at the CSI-2 receiver's matched hsfrequency bin 20 (`{300, 0x14}`)
-for the corrected PLL -- that bin match, not any receiver-side clock readback, is the PLL-lock
-evidence; a receiver register that merely echoes our own declared `VIDEO_CID_PIXEL_RATE` back
-through `video_get_csi_link_freq()` is not independent confirmation and is not cited as one.
+DesignWare CSI-2 RX, RAW10). The CSI-2 receiver's hsfrequency bin 20 (`{300, 0x14}`) is
+CONFIGURATION, not evidence: it is computed from our own declared `VIDEO_CID_PIXEL_RATE` via
+`video_get_csi_link_freq()`, so it follows from what we declared regardless of what the silicon's
+real PLL is doing. The actual evidence is that runs 61/62/63 (below) streamed with ZERO CSI
+fatals while the receiver was configured for that bin -- a genuine PLL/bin mismatch shows up as
+`ERRSOTSYNCHS` or `PHY_FATAL`, not silent success.
 
 **Run 62 bench-verified the COMMITTED driver itself**, not a modified bench app: the test app
 wrote no mode registers and read back 77 registers against the reference, 0 mismatches; it
@@ -26,13 +28,16 @@ streamed with zero `E:` lines; column fixed-pattern noise matched run 61 plane b
 render of the run-62 frame and **confirmed it is the correct image**: orientation
 `0x3821 = 0x01` / `0x3820 = 0x41` is unmirrored and correct, Bayer order BGGR, green channels
 diagonal and equal (107.2 / 106.8) -- maintainer-confirmed on run 62's actual rendered frame, not
-inferred from register semantics alone.
+inferred from register semantics alone. **Run 63 re-verified the committed fix** (VTS `0x0833`,
+`fps_x100=1501`, 77/0 register mismatches, column FPN unchanged from run 62) and its review
+mutation-tested the fix-up, finding two further real behaviour bugs (both below) plus the
+accuracy corrections this entry folds in.
 
 An earlier pass (bench runs 56/58/60) reached the same shape -- a full-FOV binned 640x480 mode
 plus a common analog/BLC/AEC init -- but sourced its register values from Alif's own OV5647 table
 for this exact silicon (Alif Ensemble CMSIS-DFP package "AlifSemiconductor.Ensemble", package
-v2.1.0, `components/Source/OV5647_camera_sensor.c` around lines 118-136), which is a **variant** of
-the RPi/OmniVision reference, not an independent source: it shares most analog/BLC/AEC values
+v2.1.0, `components/Source/OV5647_camera_sensor.c` around lines 118-136), which is a **variant**
+of the RPi/OmniVision reference, not an independent source: it shares most analog/BLC/AEC values
 with the reference but diverges at `0x3821` (Alif `0x07` vs the reference's `0x01` -- bits[2:1]
 of `0x3821` are this driver's horizontal-mirror mask, NOT "analog timing") and writes a
 DIFFERENT ISP-enable set (`0x5000=0x06, 0x5001=0x01, 0x5002=0x41, 0x5003=0x08, 0x5a00=0x08` --
@@ -45,12 +50,12 @@ bench-proved as "clean" is NOT ESTABLISHED** -- run 61 changed all of them toget
 reference, not one at a time. Runs 56/58/60 ran Alif's `0x3821 = 0x07` on `OV5647_PLL_MULT =
 105`, the SAME PLL run 52 originally fixed -- not run 61's corrected 70 -- so the stripes cannot
 be attributed to a PLL/`0x3821` interaction specifically without more bisection than this
-investigation did. What runs 61/62 DO establish is the outcome: the reference register set,
+investigation did. What runs 61/62/63 DO establish is the outcome: the reference register set,
 applied together, streams clean with the column-FPN numbers below; column fixed-pattern noise
-fell from 6-8 LSB (3.7-5.9% of full scale) per Bayer plane with the runs 56/58/60 mix to 1.0-1.5
-LSB (~1.1%) with the reference set, same dark lab, same 0.51 s x15.5 gain exposure -- the
-visible stripes are gone, but that is the basis for shipping the reference set, not a claim
-about which single register mattered most.
+fell from 6-8 LSB (3.7-5.9% of signal) per Bayer plane with the runs 56/58/60 mix to 1.0-1.5 LSB
+(~1.1% of signal, plane mean ~107) with the reference set, same dark lab, same 0.51 s x15.5 gain
+exposure -- the visible stripes are gone, but that is the basis for shipping the reference set,
+not a claim about which single register mattered most.
 
 **PLL**: `OV5647_PLL_MULT` moves from 105 (run 52's fix, matched to mainline's declared constants
 for its FULL-RESOLUTION mode) to 70 (`0x46`, run 61, matched to the reference's own 640x480 10bpp
@@ -69,65 +74,99 @@ here. `ov5647_frmrate_to_vts()`, `ov5647_enum_frmival()` and `ov5647_set_frmival
 HTS from the active mode via a new `ov5647_hts_for()` helper instead of a single `OV5647_HTS`
 constant.
 
-**MAJOR BUG, fixed by bench run 62: the default frame rate at 640x480 was silently 10 fps, not
-15.** `ov5647_init()` used to boot into the full-resolution crop (`OV5647_FULL_WIDTH`/`HEIGHT`);
-at that height and the crop-path HTS (2700), the driver's own default 15 fps needs VTS 1440,
-below `1944 + 24 = 1968`, so it was unreachable. Zephyr's `video_closest_frmival()` stops
-enumerating at the first unreachable (sorted-ascending) rate, so it never even looked past 10
-fps -- and that 10 fps then stuck in `data->frmrate` for every LATER `ov5647_set_fmt()` call,
-including the 640x480 mode this driver actually ships, since nothing in `src/backends/camera` or
-`examples/aen/aen-camera-firstlight` ever calls `set_frmival` to override it. `ov5647_init()` now
-boots directly into 640x480 (the mode this driver actually ships, and the mode issue #2248 has
-bench evidence for), where 15 fps IS reachable (VTS 2099/`0x0833` >= `480 + 24`), so the shipped
-default is correctly 15. A caller that explicitly switches to a full-resolution crop still gets a
-valid, if lower, rate -- HTS 2700 genuinely cannot sustain 15 fps at 1944 lines; that is a real
-PLL/line-time limit, not a bug, and `video_closest_frmival()` correctly falls back to the next
-reachable entry in that case.
+**PRE-MERGE REGRESSION, caught before merge, never shipped: the default frame rate at 640x480
+was 10 fps, not 15.** The PLL retarget above lowered `cfg->pixel_rate` from 87500000 to 58333333
+within this same unreleased PR chain, which silently broke `ov5647_init()`'s (then)
+full-resolution-crop boot format: the driver's own default 15 fps became unreachable at that
+height -- HTS 2700 needs VTS 1440, below `1944 + 24 = 1968`, where the pre-PLL-retarget
+`pixel_rate` had made it reachable. Zephyr's `video_closest_frmival()` stops enumerating at the
+first unreachable (sorted-ascending) rate, so it never even looked past 10 fps. Bench run 62
+caught this before merge, in the same fix-up pass that also moved the boot format to 640x480 (a
+genuine, independent improvement -- 640x480 is this driver's real, bench-proven default mode),
+where 15 fps IS reachable (VTS 2099/`0x0833` >= `480 + 24`). A caller that explicitly switches to
+a full-resolution crop still gets a valid, if lower, rate -- HTS 2700 genuinely cannot sustain 15
+fps at 1944 lines; that is a real PLL/line-time limit, not a bug, and `video_closest_frmival()`
+correctly falls back to the next reachable entry in that case.
+
+**MAJOR BUG, fixed by run 63's review, before merge, never shipped: the frame rate could still
+stick after a LATER format change**, distinct from the boot-time issue above.
+`ov5647_set_fmt()` fed `data->frmrate` (the last EFFECTIVE, possibly clamped, rate) back in as
+the new request on every format change: `set_format(2592x1944)` clamps to 10 fps (HTS 2700 can't
+sustain 15 fps at that height), and a LATER `set_format(640x480)` inherited that clamped 10
+rather than re-requesting 15, even though 640x480 can reach it fine. Fixed with a new
+`data->requested_frmrate` field, set only by `ov5647_set_frmival()` (default 15) to the value the
+caller actually asked for; `ov5647_set_fmt()` now re-requests `requested_frmrate` on every format
+change instead of the clamped `frmrate`.
+
+**MAJOR BUG, fixed by run 63's review, before merge, never shipped: format changes silently
+undid the flip controls.** `ov5647_set_mode_regs()` writes `0x3820`/`0x3821` as whole bytes,
+which wiped `OV5647_TC_REG20_VFLIP`/`OV5647_TC_REG21_MIRROR` bits a caller had set via
+`VIDEO_CID_VFLIP`/`VIDEO_CID_HFLIP`, while the ctrl itself kept reporting the value the caller
+set -- ctrl and hardware silently diverged. Fixed by re-applying both ctrls (via new
+`ov5647_set_ctrl_hflip()`/`ov5647_set_ctrl_vflip()` helpers, also used by `ov5647_set_ctrl()`
+itself) right after `ov5647_set_mode_regs()` inside `ov5647_set_fmt()`. With both ctrls at their
+defaults (unset), the mode bytes are unaffected: `TC_REG20_BINNED`/`TC_REG21_BINNED`
+(`0x41`/`0x01`) already equal exactly the maintainer-confirmed orientation with bits[2:1] clear,
+so the fix merges in zero extra bits in the common case -- verified by a dedicated test, not just
+asserted.
 
 **Orientation (maintainer-confirmed, run 62)**: `0x3821` bits[2:1] are this driver's existing
 `OV5647_TC_REG21_MIRROR` mask (horizontal mirror). `0x01` (this fix, bits[2:1] clear) vs `0x07`
 (runs 56/58/60, Alif's variant, bits[2:1] set) produced a LEFT-RIGHT-MIRRORED scene on the bench
 at `0x07` -- `0x01` is correct and unmirrored, as confirmed by the maintainer's review of a
 host-demosaiced run-62 frame (BGGR, greens diagonal and equal). Per the RPi driver,
-`0x3821 = 0x01` with `0x3820 = 0x41` is its hflip=1/vflip=0 configuration, paired with
-`MEDIA_BUS_FMT_SBGGR10_1X10` -- matching this driver's advertised SBGGR10P/SBGGR8 formats.
+`0x3821 = 0x01` with `0x3820 = 0x41` is its hflip=1/vflip=0 configuration -- RPi's own `hflip`
+ctrl sense is INVERTED relative to what "unmirrored" suggests here: their driver reports
+`hflip=1` for the register state that is, on this silicon, the CORRECT unmirrored orientation,
+not literally flipped. `0x3821 = 0x01` is paired with `MEDIA_BUS_FMT_SBGGR10_1X10` -- matching
+this driver's advertised SBGGR10P/SBGGR8 formats.
 
 `ov5647_set_mode_regs()` picks the full-FOV binned register set (window, output size, subsample
 `0x3814`/`0x3815` = `0x35`, binning `0x3820`/`0x3821` = `0x41`/`0x01`, binned-mode analog
 `0x3612`/`0x3618`/`0x3708`/`0x3709` = `0x59`/`0x00`/`0x64`/`0x52`, HTS `0x073c`, and the 50/60 Hz
-AEC band step `0x3a09`/`0x3a0a`/`0x3a0b`/`0x3a0d`/`0x3a0e` and `0x4004` -- **moved here from the
-common init**, since the band step is in LINES, which depends on line time/HTS, and a value
-correct for this mode's HTS is wrong for the crop path's) for exactly 640x480; every other size
-keeps the existing centred crop, but the crop path now also explicitly re-asserts the 1:1
+AEC band step `0x3a08`/`0x3a09`/`0x3a0a`/`0x3a0b`/`0x3a0d`/`0x3a0e` and `0x4004` -- **moved here
+from the common init**, since the band step is in LINES, which depends on line time/HTS, and a
+value correct for this mode's HTS is wrong for the crop path's; `0x3a08` moved for the same
+reason even though its value happens to be `0x01` either way) for exactly 640x480; every other
+size keeps the existing centred crop, but the crop path now also explicitly re-asserts the 1:1
 subsample/binning/analog/HTS/band-step values (`0x3814`/`0x3815` = `0x11`, `0x3820`/`0x3821` =
 `0x40`/`0x00`, HTS `2700`, mainline's full-resolution analog values
 `0x3612`/`0x3618`/`0x3708`/`0x3709` = `0x5b`/`0x04`/`0x64`/`0x12`, cited from mainline and
-BENCH-UNVERIFIED on this module, and the SAME AEC band-step values as the binned mode -- no
-mainline full-resolution citation is available, so reused rather than left unwritten, which
-would silently retain a prior mode's stale line counts; BENCH-UNVERIFIED at this HTS) -- so a
-prior 640x480 selection can never leave binning (or its HTS/band step) armed on a later crop
-window. This closes the ordering trap bench run 54 hit: applying the binning registers and then
-letting `ov5647_set_window()` rewrite the window to the crop made the sensor emit short lines
-against a 640-pixel frame declaration, and the CSI host raised "Fatal Interrupt due to mismatch
-of Frame Start and Frame End" on VC0 44 times in 2 s with no image delivered. The window, output
-size, subsample, binning, HTS and AEC-band-step registers are now always written as one coherent
-set per mode.
+BENCH-UNVERIFIED on this module) **and mainline's OWN full-resolution AEC band step**
+(`0x3a08`/`0x3a09`/`0x3a0a`/`0x3a0b`/`0x3a0d`/`0x3a0e`/`0x4004` =
+`0x01`/`0x28`/`0x00`/`0xf6`/`0x08`/`0x06`/`0x04`, cited from mainline's
+`ov5647_2592x1944_10bpp[]`, still BENCH-UNVERIFIED on this module since mainline validates these
+at HTS 2844 and this driver runs 2700 on the run-61-corrected PLL) --
+
+**MAJOR BUG, fixed by run 63's review, before merge, never shipped: the crop-path AEC band step
+was wrong.** A previous version of this fix reused the VGA band-step numbers
+(`0x3a0d=0x02`/`0x3a0e=0x01`, max bands per frame) on the crop path with the claim "no mainline
+full-resolution citation is available" -- that claim was false. Reusing the VGA numbers on a
+1944-line crop capped banding-mode AEC around 502 lines, roughly 4x underexposed. Fixed with
+mainline's own full-resolution values above -- so a prior 640x480 selection can never leave
+binning (or its HTS/band step) armed on a later crop window, and the crop path's AEC is no longer
+silently under-exposed. This closes the ordering trap bench run 54 hit: applying the binning
+registers and then letting `ov5647_set_window()` rewrite the window to the crop made the sensor
+emit short lines against a 640-pixel frame declaration, and the CSI host raised "Fatal Interrupt
+due to mismatch of Frame Start and Frame End" on VC0 44 times in 2 s with no image delivered. The
+window, output size, subsample, binning, HTS and AEC-band-step registers are now always written
+as one coherent set per mode.
 
 **Common init** register VALUES match runs 56/58/60's Alif-derived block for most addresses, but
 the SOURCE is now the reference's `ov5647_common_regs[]`, minus `0x0100`/`0x0103` (park/reset),
 minus `0x3017` (kept at OUR `0xf0` -- AUTHORIZED LOCAL DIVERGENCE #1/#2, a deliberate divergence
 from both mainline's `0xe0` and the reference driver's table value, which this driver's re-park
 overwrites before streaming regardless), minus `0x3503` (left to this driver's existing
-exposure-control logic), and minus the mode-specific AEC band-step registers (moved to
-`ov5647_set_mode_regs()`, see above). UNLIKE runs 56/58/60, it **includes** the reference's ISP
-block enables `0x5000 = 0x06`, `0x5003 = 0x08`, `0x5a00 = 0x08` -- run 61 streamed clean with
-them. Run 58's CSI "incorrect frame sequence" fatals, previously blamed on ISP enables as a
-category, actually came from Alif's DIFFERENT ISP set specifically, which additionally writes
-`0x5001`/`0x5002` and (in runs 56/58/60's now-superseded BLC section) `0x4050`/`0x4051` -- none
-of those four are in the reference table and none are written here; do not add them back.
-`0x3000`/`0x3001`/`0x3002` = `0x00` and `0x3018` (MIPI PHY/route control) are now literal
-reference bytes (`0x00`/`0x00`/`0x00`, `0x44`) written as part of this block, the latter
-superseding the previous targeted `PHY_PD_MIPI`/`PHY_PD_LPRX`/`MIPI_EN` bitfield modify.
+exposure-control logic), and minus the mode-specific AEC band-step registers, including `0x3a08`
+(moved to `ov5647_set_mode_regs()`, see above). UNLIKE runs 56/58/60, it **includes** the
+reference's ISP block enables `0x5000 = 0x06`, `0x5003 = 0x08`, `0x5a00 = 0x08` -- run 61
+streamed clean with them. Run 58's CSI "incorrect frame sequence" fatals, previously blamed on
+ISP enables as a category, actually came from Alif's DIFFERENT ISP set specifically, which
+additionally writes `0x5001`/`0x5002` and (in runs 56/58/60's now-superseded BLC section)
+`0x4050`/`0x4051` -- none of those four are in the reference table and none are written here; do
+not add them back. `0x3000`/`0x3001`/`0x3002` = `0x00` and `0x3018` (MIPI PHY/route control) are
+now literal reference bytes (`0x00`/`0x00`/`0x00`, `0x44`) written as part of this block, the
+latter superseding the previous targeted `PHY_PD_MIPI`/`PHY_PD_LPRX`/`MIPI_EN` bitfield modify.
 
 `OV5647_EXPOSURE_DEFAULT` (unchanged by run 61) still moves from `0x20` (2 lines -- effectively a
 closed shutter for a manual-exposure user) to `0x0FFF` (~256 lines), matching the order of
@@ -137,6 +176,10 @@ registers themselves are left unchanged. The existing `VIDEO_CID_ANALOGUE_GAIN` 
 value only takes effect once a caller explicitly disables auto-gain, the same gating
 `VIDEO_CID_EXPOSURE_AUTO` already applies to `OV5647_EXPOSURE_DEFAULT`.
 
+The default format before any `set_format()` call is now 640x480 SBGGR10P, not 2592x1944 --
+`ov5647_init()`'s own boot format. The non-negotiated camera backend path allocates buffers from
+this default, so this is user-visible for a caller that never calls `set_format()` itself.
+
 **Low light**: at the default 15 fps VTS in a dark lab the AEC railed at both its limits (502
 lines = 2x the `0x3a0b` band step; gain at the `0x3a19` ceiling) and a real image needed ~16000
 lines (0.49 s) -- a scene limitation, not a driver bug; the AEC limit registers are unchanged.
@@ -145,20 +188,29 @@ reconstruction is a downstream ISP job (see run 62's maintainer-confirmed colour
 raw frames viewed as grey show the Bayer mosaic as fine stripes, which is expected and not the
 same phenomenon as the column fixed-pattern noise discussed above.
 
-The vendored driver's RETIREMENT note at `zephyr/drivers/video/ov5647.c:195`
+The vendored driver's RETIREMENT note at `zephyr/drivers/video/ov5647.c:199`
 ("DIVERGENCE #1 (the LP-11 lane park), DIVERGENCE #2 (the") now requires all three fixes -- lane
 park, PLL + MIPI-TX pad-drive init, and this full-FOV/per-mode-HTS/AEC-band-step/common-init/
-exposure-default/default-frame-rate change -- to be confirmed present upstream before the
+exposure-default/frame-rate/flip-ctrl change -- to be confirmed present upstream before the
 vendored copy can be deleted.
 
 New `tests/zephyr/video_sensors/src/ov5647_test.c` coverage: the full 640x480 binned register
 block (window, output size, subsample, binning enable, reference orientation `0x01`, per-mode
 HTS `0x073c`, binned-mode analog, and the AEC band step) landing after the `0x3034` bit-mode
-write and before the lane park, the default-frame-rate regression (640x480's default VTS is the
-15 fps value, not the 10 fps one), `ov5647_enum_frmival()` accepting 60 fps and rejecting 90 fps
-at 640x480, the run-54 ordering trap (640x480 -> another size -> back never leaves binning, its
-HTS or its AEC band step armed on a crop window; the crop path computes VTS with HTS 2700), an
-EXHAUSTIVE table-driven check of every common-init register (not a 3-register sample), and a
-guard that `0x5001`, `0x5002`, `0x4050` and `0x4051` are never written. Each assertion was proven
-to fail against a deliberately broken driver before being confirmed against the fix.
-`docs/camera-shields.md`'s OV5647 row and driver section are updated to match.
+write and before the lane park; the default-frame-rate regression (640x480's default VTS is the
+15 fps value, not the 10 fps one); `ov5647_enum_frmival()` accepting 60 fps and rejecting 90 fps
+at 640x480; the run-54 ordering trap (640x480 -> another size -> back never leaves binning, its
+HTS or its AEC band step armed on a crop window; the crop path computes VTS with HTS 2700 and now
+mainline's full-resolution AEC band step); the frame rate not sticking at a prior mode's clamped
+value after a later format change; `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` surviving a format change
+(and producing exactly `0x41`/`0x01` at their defaults); and an EXHAUSTIVE table-driven check of
+every `ov5647_init_regs[]` common-init entry -- an earlier version of that table checked only a
+subset and missed `0x303c`/`0x3106`/`0x301c` entirely (a mutation test deleting all three from
+the driver still passed every test in the suite); the table now also covers `0x3016`/`0x301d`/
+`0x3017`, none of which `test_pll_init_written_before_first_running_mode_select` checks (that
+test covers only the three PLL divider values). A guard that `0x5001`, `0x5002`, `0x4050` and
+`0x4051` are never written, at any value. Every new and changed assertion in this round was
+proven to fail against a deliberately broken driver before being confirmed against the fix --
+the earlier non-exhaustive common-init table is the counter-example that motivated saying this
+precisely rather than as a blanket claim. `docs/camera-shields.md`'s OV5647 row and driver
+section are updated to match.
