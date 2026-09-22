@@ -81,12 +81,41 @@ contrast, the OV9281 path below reaches `CSI_PHY_STOPSTATE` =
 Ruled out by control-validated bench runs: module power, the sensor's
 own MIPI PHY being disabled (register `0x3018` = `0x44` decodes to
 `PHY_PD_MIPI` 0 / `PHY_PD_LPRX` 0 / `MIPI_EN` 1), the mainline
-"coax lanes into LP-11" park sequence, sensor-before-receiver ordering,
-and the receiver's D-PHY frequency bin (identical behaviour at
-`hsfreqrange 0x16` and at `0x09`, the bin the OV9281 streams in). Open
-candidates: the physical clock/data-1 pairs through the P/N-crossing
-adapter, a module-level fault, and `0x4837 PCLK_PERIOD`, which the
-driver never programs and which sits at its reset value `0x15`.
+"coax lanes into LP-11" park sequence applied in the correct running
+state, sensor-before-receiver ordering, and the receiver's D-PHY
+frequency bin (identical behaviour at `hsfreqrange 0x16` and at `0x09`,
+the bin the OV9281 streams in).
+
+**Root cause: a fault in the module under test, on `DATA_1` and `CLK`.**
+Put the sensor in mainline's running-parked state (`0x0100` = `0x01`,
+then `0x4800` = `0x25`, `0x4202` = `0x0f`, `0x300d` = `0x01`), in which
+all three lanes should idle at LP-11, and sample `CSI_PHY_STOPSTATE` 50
+times at 20 ms with the receiver configured: `DATA_0` reads 50/50 while
+`DATA_1` and `CLK` read 0/50. A marginal LP swing or a module supply
+problem would have made `DATA_0` flicker too, so that is excluded. The
+wiring is exonerated by interleaving: the same cable, P/N-crossing
+adapter and connector gave OV5647 `DATA_0`-only, then an OV9281 reaching
+`0x00010003` with a CRC-verified frame, then OV5647 `DATA_0`-only again.
+
+Two driver defects were found along the way and are real regardless of
+this module, both tracked in issue #2248 and both belonging upstream in
+zephyrproject-rtos/zephyr#119301 rather than in a local patch (see the
+retirement note at the top of `zephyr/drivers/video/ov5647.c`):
+
+1. The backport never performs mainline's LP-11 park. Mainline's
+   `ov5647_power_on()` calls `ov5647_stream_stop()` under the comment
+   "Stream off to coax lanes into LP-11 state"; the vendored driver only
+   ever writes `0x0100`. In software standby this part presents no LP-11
+   at all (`CSI_PHY_STOPSTATE` = `0x00000000`), so on a receiver that
+   gates on Stop-state before stream start — as this one does — even a
+   healthy OV5647 would fail to open.
+2. The declared pixel rate is off by 2.1x. `PIXEL_RATE = XVCLK * 10 / 3`
+   = 83333333 comes from a datasheet fps figure, but the default PLL the
+   driver leaves in place (`0x3034` = `0x1a`, `0x3035` = `0x11`,
+   `0x3036` = `0x69`, `0x3037` = `0x03`) gives VCO = 875 MHz, i.e. 875
+   Mbps per lane and a 175 MHz pixel rate. The receiver therefore picks
+   `hsfreqrange 0x16` (450 Mbps) where `0x29` (900) is correct. This
+   does not affect Stop-state but will matter once Stop-state passes.
 
 ## Driver: OV9281 (`zephyr/drivers/video/ov9281.c`)
 
