@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for aen-tilt-arcade -- an original tilt-steered
+# arcade game ("Riftrunner") on the RK055HDMIPI4MA0 panel, for the
+# E1M-AEN801 and E1M-AEN803 (Ensemble E8, M55-HE), through the
+# e1m_evk_rk055hdmipi4ma0 shield. Uses the portable <alp/display.h> +
+# <alp/chips/bmi323.h> surfaces only.
+#
+# Compile-checks the game against the real E8 board target; filtered OUT of
+# the native_sim PR gate (platform_allow = the AEN801/AEN803 M55-HE board
+# targets).
+
+sample:
+  name: aen-tilt-arcade
+  description: |
+    Bench RAM-run original arcade game on the RK055HDMIPI4MA0 (720x1280
+    portrait) panel: a tilt-steered craft dodges falling hazards and
+    collects pickups, rendered via alp_display_blit() dirty rects (never a
+    full-frame redraw) and steered from the on-module BMI323 accelerometer
+    over portable I2C. Falls back to a self-steering attract mode when the
+    IMU is absent or fails to init.
+
+tests:
+  alp_sdk.examples.aen.tilt_arcade.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - display
+      - dsi
+      - imu
+      - game
+    build_only: true   # the on-glass game is a bench flash, not a CI run.

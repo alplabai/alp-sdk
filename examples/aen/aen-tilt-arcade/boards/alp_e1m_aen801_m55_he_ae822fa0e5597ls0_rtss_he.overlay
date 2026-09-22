@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-tilt-arcade overlay for the E1M-AEN801 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * The display chain, the panel, the carrier expander and the framebuffer
+ * region all come from the e1m_evk_rk055hdmipi4ma0 shield (CMakeLists.txt) --
+ * identical to aen-dsi-display's overlay of the same name. This overlay only
+ * retargets the image for the bench RAM-run: ROM to ITCM (path-reference form
+ * &itcm; the phandle-array form makes FLASH_SIZE=0 and overflows the link),
+ * with no MCUboot code partition. The 720x1280 RGB565 framebuffer is not in
+ * ITCM -- it is the shield's region at the top of SRAM0, used by address, so
+ * it adds nothing to the RAM-run .bin.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
