@@ -709,11 +709,13 @@ endif # I2S_DW
 # the v4.4 API by Alp Lab AB (each API-shim change is marked at its call site;
 # see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
 # is RETIRED and the driver TUs build in directly when their DT node is enabled.
-# J5 camera shields are now described and build-tested, but no live frame
-# capture has completed on this path.  vendor-ext, BENCH-UNVERIFIED.
+# The J5 innomaker_cam_ov9281 shield is bench-verified (live GREY8 capture,
+# an E1M-AEN803 on the E1M-EVK, 2026-09-21).  The other J5 camera shields
+# (IMX219/OV5647/IMX296) are described and build-tested, but no live frame
+# capture has completed on those paths yet.  vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
-	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
+	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM)"
 	default y
 	depends on VIDEO
 	depends on DT_HAS_ALIF_CAM_ENABLED

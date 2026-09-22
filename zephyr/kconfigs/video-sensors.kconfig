@@ -6,8 +6,8 @@
 # holds sensors reached via a generic 15-pin camera shield on top of
 # whichever CSI-2 host the board provides.
 
-# Both Kconfig.ov5647 (vendored verbatim) and Kconfig.ov9281 (written fresh)
-# only add DT_HAS_..._ENABLED-gated leaf options -- neither declares its own
+# Kconfig.ov5647, Kconfig.ov9281, and Kconfig.imx296 only add
+# DT_HAS_..._ENABLED-gated leaf options -- none declares its own
 # `depends on VIDEO` (Kconfig.ov5647 doesn't because upstream's own
 # drivers/video/Kconfig wraps the whole sensor list in `if VIDEO`, which our
 # rsource is outside of). Wrap here instead of hand-editing the vendored file.

@@ -10,11 +10,12 @@
  * calls whichever sensor shield is stacked underneath.  Nothing here talks
  * to Zephyr's drivers/video/ class directly.
  *
- * The whole CSI-2 -> CPI pipe this app exercises has never run on real
- * silicon (see the branch this example ships on).  That makes a FAILED
- * open() or a capture TIMEOUT just as informative a bench result as a
- * clean frame -- this app prints enough detail on every path (including
- * failure) that a bench engineer can tell which stage broke.
+ * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
+ * GREY8 frames land in memory in all three of the driver's modes.  The
+ * IMX219, OV5647 and IMX296 paths have not yet run on real silicon.  This
+ * app still prints enough detail on every path (including a failed open()
+ * or a capture TIMEOUT) that a bench engineer can tell which stage broke if
+ * the sensor isn't seated or the shield stack is wrong.
  *
  * Build one image per camera shield (stack the sensor shield on top of the
  * carrier connector shield, `e1m_evk_rpi_csi`):
@@ -28,11 +29,12 @@
  *
  * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
  * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
- * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 and upstream
- * Zephyr's Kconfig.imx219), so this app picks its capture format the same
- * way: a compile-time #if ladder on those same four Kconfig symbols below,
- * not a runtime probe.  A new shield is one more #elif here plus one more
- * testcase.yaml scenario -- nothing else in this file changes.
+ * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 / Kconfig.imx296
+ * and upstream Zephyr's Kconfig.imx219), so this app picks its capture
+ * format the same way: a compile-time #if ladder on those same four Kconfig
+ * symbols below, not a runtime probe.  A new shield is one more #elif here
+ * plus one more testcase.yaml scenario -- nothing else in this file
+ * changes.
  *
  * See README.md for what each printed line means and the expected result
  * per module.
@@ -51,8 +53,8 @@
 #if defined(CONFIG_VIDEO_OV9281)
 /* InnoMaker CAM-OV9281: global-shutter mono, RAW8 mono only (GREY8 in the
  * portable enum).  640x400 is one of three modes the ported driver offers
- * (zephyr/drivers/video/ov9281.c: 640x400@100 bench-verified, 1280x720@50
- * and 1280x800@100 bench-pending) -- no crop, this IS the sensor's native
+ * (zephyr/drivers/video/ov9281.c: 640x400@100, 1280x720@50 and
+ * 1280x800@100, all bench-verified) -- no crop, this IS the sensor's native
  * small mode. */
 #define CAM_FORMAT          ALP_PIXFMT_GREY8
 #define CAM_WIDTH           640

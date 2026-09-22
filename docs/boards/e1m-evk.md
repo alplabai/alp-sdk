@@ -206,9 +206,12 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
-  Zephyr's Raspberry Pi camera contract, e.g. the Camera Module 2
-  (IMX219):
+  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
+  (bench-verified, see below) or the upstream Camera Module 2 (IMX219):
 
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
+      # ... or:
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
 
@@ -245,11 +248,12 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   Compiled against the upstream IMX219 driver; not yet run on hardware (the
   OV9281 path is bench-verified, see below).
 
-  The CSI-2 pixel clock tops out at 200 MHz (400 MHz source / 2), and
-  one pixel moves per clock.  A 2-lane IMX219 at its 456 MHz link
-  therefore needs RAW10 (`VIDEO_PIX_FMT_SBGGR10P`, 182.4 Mpixel/s):
-  RAW8 would need 228 Mpixel/s and `video_set_format()` refuses it
-  with `-ERANGE`.  The divider is programmed by the Alif clock-control
+  The CSI-2 pixel clock ceiling this board's D-PHY divider programs is
+  200 MHz (400 MHz source / 2), and one pixel moves per clock.  A 2-lane
+  IMX219 at its 456 MHz link therefore needs RAW10
+  (`VIDEO_PIX_FMT_SBGGR10P`, 182.4 Mpixel/s): RAW8 would need
+  228 Mpixel/s and `video_set_format()` refuses it with `-ERANGE`.  The
+  divider is programmed by the Alif clock-control
   patch in `zephyr/patches.yml`, so the workspace must be patched
   (`scripts/bootstrap.sh` does it).
 

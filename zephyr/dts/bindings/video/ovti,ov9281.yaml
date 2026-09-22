@@ -7,10 +7,10 @@
 # esp_cam_sensor/sensors/ov9281 driver onto the upstream Zephyr v4.4 video
 # API), BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK. Shaped after
 # upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml + a
-# video-interfaces.yaml endpoint child)
-# plus zephyr/drivers/video/ov5647.c's explicit `clocks: required: true`
-# (Espressif ships no Zephyr binding of its own to mirror). See
-# zephyr/drivers/video/ov9281.c for the source commit + retirement note.
+# video-interfaces.yaml endpoint child), with an explicit
+# `clocks: required: true` (Espressif ships no Zephyr binding of its own to
+# mirror). See zephyr/drivers/video/ov9281.c for the source commit +
+# retirement note.
 
 description: |
   OV9281 1 MP global-shutter monochrome image sensor

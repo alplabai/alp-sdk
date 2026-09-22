@@ -7,7 +7,7 @@
  * a sensor shield that consumes the four labels below, e.g.
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
- *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
+ *     -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
  *
  *   csi_interface     the CSI-2 receiver -- the sensor shield sets status = "okay"
  *   csi_ep_in         the receiver's input endpoint -- the sensor shield fills it
