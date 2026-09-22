@@ -1200,6 +1200,25 @@ static int csi2_dw_init(const struct device *dev)
 		return -ENODEV;
 	}
 
+	/*
+	 * Alp Lab AB: valid_sensor_map() only confirms the DT graph wires a
+	 * sensor pointer here -- it says nothing about whether that sensor's
+	 * own init succeeded. A sensor driver that detects its chip is absent
+	 * (e.g. ov9281.c's chip-ID read at 0x300A/0x300B) fails ITS init and
+	 * marks itself not-ready, but nobody upstream was checking that
+	 * before this fix: an absent sensor sailed through here, through the
+	 * CPI's own init, past alp_camera_open()'s device_is_ready() gate,
+	 * and only surfaced later as an I2C NACK (-EIO) on the first
+	 * video_set_format() -- ALP_ERR_IO, indistinguishable from a genuine
+	 * bus fault. Propagate the selected sensor's readiness so an absent
+	 * sensor fails HERE, at init, and the portable API reports
+	 * ALP_ERR_NOT_READY instead.
+	 */
+	if (!device_is_ready(config->sensor[data->current_sensor])) {
+		LOG_ERR("Sensor device is not ready");
+		return -ENODEV;
+	}
+
 	LOG_DBG("MMIO Address: 0x%08x", (uint32_t)DEVICE_MMIO_GET(dev));
 
 	return 0;

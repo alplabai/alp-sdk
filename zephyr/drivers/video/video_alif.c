@@ -1769,6 +1769,26 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 		return -ENODEV;
 	}
 
+	/*
+	 * Alp Lab AB: config->endpoint_dev being non-NULL only proves the DT
+	 * graph WIRES an upstream device (the CSI-2 host, or -- parallel
+	 * interface -- the sensor directly); it says nothing about whether
+	 * that device's own init actually succeeded. A sensor that fails its
+	 * chip-ID check at init (e.g. ov9281.c reading 0x300A/0x300B) marks
+	 * ITSELF not-ready, but nobody upstream was checking that before this
+	 * fix: an absent sensor sailed through the CSI-2 host's init, through
+	 * this CPI's own init, past alp_camera_open()'s device_is_ready()
+	 * gate (alp-camera0 resolves to THIS device), and only surfaced later
+	 * as an I2C NACK on the first video_set_format() -- ALP_ERR_IO,
+	 * indistinguishable from a genuine bus fault. Refuse to come up ready
+	 * ourselves when what we're wired to isn't, so absence is caught at
+	 * open() and reported as ALP_ERR_NOT_READY.
+	 */
+	if (!device_is_ready(config->endpoint_dev)) {
+		LOG_ERR("Endpoint device is not ready");
+		return -ENODEV;
+	}
+
 	if ((config->interface == CAM_INTERFACE_SERIAL) && config->is_lpcam) {
 		LOG_ERR("LP-CAM does not support Serial interface!");
 		return -EINVAL;
