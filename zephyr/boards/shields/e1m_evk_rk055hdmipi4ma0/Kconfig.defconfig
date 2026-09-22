@@ -2,16 +2,23 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Everything the RK055HDMIPI4MA0 display chain needs on an E1M-AEN SoM, so an
-# app only adds the shield: the display class, the DSI host + D-PHY, the panel
-# driver, and the carrier's I2C GPIO expander + fixed regulator that power and
-# reset the panel.
+# app only adds the shield: ALP_SDK itself, the display class, the DSI host +
+# D-PHY, the panel driver, and the carrier's I2C GPIO expander + fixed
+# regulator that power and reset the panel.
 #
-# The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
-# CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
-# whose symbols are defined under `if ALP_SDK`.  The shield does not default
-# ALP_SDK itself -- turning the SDK on is the app's decision.
+# The Alif CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2
+# copies whose Kconfig symbols are defined under `if ALP_SDK`
+# (zephyr/Kconfig) -- without ALP_SDK on, those symbols do not exist at all
+# and the chain fails at LINK time (undefined __device_dts_ord_N for the
+# cdc200 / mipi_dsi nodes), not at configure time, which is what made this
+# easy to miss.  default y here so `-DSHIELD=e1m_evk_rk055hdmipi4ma0` alone
+# gets a working display; an app that wants ALP_SDK off can still set
+# CONFIG_ALP_SDK=n itself.
 
 if SHIELD_E1M_EVK_RK055HDMIPI4MA0
+
+config ALP_SDK
+	default y
 
 config DISPLAY
 	default y
