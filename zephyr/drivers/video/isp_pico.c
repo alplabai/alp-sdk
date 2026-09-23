@@ -370,10 +370,18 @@ static void isp_bottom_half(const struct device *dev)
 
 	int ret;
 
+	/* A frame-end with no stream running (latched before this boot, or
+	 * landing after a stop) has no buffer to complete and must not reach
+	 * the VSI lib, which may not even be configured yet.
+	 */
+	if (!data->is_streaming) {
+		return;
+	}
+
 	/* Do bottom half processing of all the modules at the end of frame.
 	 * Same lib_lock isp_apply_wb()/isp_apply_ae() take -- this runs on
-	 * isp_cb_workq, isp_set_ctrl() runs on the caller's (app) thread; see
-	 * struct isp_data's lib_lock comment (isp_pico.h). */
+	 * isp_cb_workq, those run from isp_stream_start() on the caller's
+	 * thread; see struct isp_data's lib_lock comment (isp_pico.h). */
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
 	isp_vsi_bottom_half(dev, &data->init_cfg, data->mi_mis);
 	k_mutex_unlock(&data->lib_lock);
@@ -2065,11 +2073,6 @@ int video_isp_init(const struct device *dev)
 	k_thread_name_set(&data->cb_workq.thread, "isp_work_helper");
 
 	/*
-	 * Setup interrupts.
-	 */
-	config->irq_config_func(dev);
-
-	/*
 	 * Setup FIFO for ISP driver.
 	 */
 	k_fifo_init(&data->fifo_in);
@@ -2077,6 +2080,15 @@ int video_isp_init(const struct device *dev)
 	data->dev = dev;
 
 	k_mutex_init(&data->lib_lock);
+
+	/*
+	 * Setup interrupts -- only now that everything the ISR's bottom half
+	 * touches exists. A core reset does not reset the ISP: an MI
+	 * frame-end latched by the previous image fires the moment the IRQ
+	 * is enabled, and with the IRQs enabled first it ran the bottom half
+	 * on an uninitialised lib_lock (HardFault, bench run 165).
+	 */
+	config->irq_config_func(dev);
 
 	ret = isp_init_controls(dev);
 	if (ret) {
