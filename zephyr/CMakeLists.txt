@@ -342,13 +342,87 @@ endif()
 # (compatible alif,ethernet); driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,
 # binding: zephyr/dts/bindings/ethernet/alif,ethernet.yaml.  The clock id it
 # enables (ALIF_ETHERNET_CLK) is re-encoded for the upstream alif,clockctrl in
-# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.  bench-unverified.
+# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.
+# BENCH-VERIFIED E8 2026-06-17 (real DHCP lease, server-side REACHABLE).
 zephyr_library_sources_ifdef(CONFIG_ETH_DWMAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c)
 # The glue uses the eth_dwmac core's private header (struct dwmac_priv); upstream
 # keeps it co-located in drivers/ethernet/, so expose that dir on the include path.
 if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
+# Silicon-verified on E1M-AEN803 (bench run 202: DHCP lease + ping, rings/pools
+# in SRAM0, main RAM on DTCM, aen-ethernet-link). E1M-AEN801 is build-verified
+# only (same E8 memory map, not itself benched); aen-evk-demo's use of this
+# same mechanism -- sharing its 64 KiB SRAM0 window between the relocated
+# rings/pools and separate JPEG buffers -- is build-verified only, not
+# benched. The GMAC DMA cannot reach the M55 DTCM, so
+# subsys/net/ip/net_pkt.c's net_buf pools (__noinit) must land in the same
+# SRAM region as the descriptor rings the driver places via the ethernet
+# node's `memory-region` (zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c) --
+# rather than moving ALL of main RAM there with `chosen { zephyr,sram =
+# &sram0; }`, which is slower and intermittently breaks the ISP.  Resolve the
+# region name from DT at configure time, the same way the driver resolves the
+# node (DT_INST_PHANDLE(0, memory_region) on the sole `alif,ethernet`
+# instance): the ethernet node's memory-region phandle (exported as that
+# node's path, single phandle props per gen_dts_cmake.py), then that node's
+# zephyr,memory-region string (e.g. "SRAM0").  LIMIT: only net_pkt.c's own
+# pools are relocated -- an application's own net_buf pool (e.g.
+# NET_PKT_DATA_POOL_DEFINE via net_context_setup_pools) still lands on DTCM
+# and the DMA would silently fail against it.  With
+# CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION unset this whole block is
+# skipped (net_pkt.c keeps its default placement); with it set but no usable
+# memory-region resolving, this prints a CMake WARNING -- not a silent no-op.
+if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
+    dt_comp_path(alif_eth_node_path COMPATIBLE "alif,ethernet" INDEX 0)
+    if(alif_eth_node_path)
+        dt_prop(alif_eth_dma_region_path PATH "${alif_eth_node_path}" PROPERTY "memory-region")
+    endif()
+
+    # HAZARD GUARD. The SoC dtsi now sets `memory-region = <&sram0>;`
+    # unconditionally on this node. If a board/app overlay ALSO points
+    # `chosen { zephyr,sram = ...; }` at that SAME node (e.g. the old
+    # whole-RAM-move `&sram0`), the linker allocates BOTH the whole
+    # system-RAM region AND the separately-named memory-region linker
+    # region into the identical address window, independently, with NO
+    # link-time warning -- main RAM's .data/.bss/.noinit/stacks silently
+    # alias on top of the DMA-relocated net_buf pools and the descriptor
+    # rings. This is the exact class of corruption
+    # examples/aen/aen-evk-demo's overlay documents and works around by
+    # giving the two consumers disjoint windows; catch the unguarded case
+    # at configure time instead of at a garbled bench run.
+    if(alif_eth_dma_region_path)
+        dt_chosen(alif_chosen_sram_path PROPERTY "zephyr,sram")
+        if(DEFINED alif_chosen_sram_path AND alif_chosen_sram_path STREQUAL alif_eth_dma_region_path)
+            message(FATAL_ERROR
+                "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION is set and the ethernet "
+                "node's memory-region resolves to the SAME node as chosen "
+                "zephyr,sram (${alif_chosen_sram_path}). The linker would place main "
+                "RAM (.data/.bss/.noinit, stacks) and the DMA-region-relocated "
+                "net_buf pools/descriptor rings in the SAME address window with NO "
+                "warning. Fix ONE of: (1) drop the `chosen { zephyr,sram = ...; }` "
+                "override so main RAM stays on its generated default (DTCM), or "
+                "(2) `/delete-property/ memory-region;` on the ethernet node AND set "
+                "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION=n to fall back to the "
+                "whole-RAM-move mechanism cleanly.")
+        endif()
+    endif()
+
+    if(alif_eth_dma_region_path)
+        dt_prop(alif_eth_dma_region_name PATH "${alif_eth_dma_region_path}"
+            PROPERTY "zephyr,memory-region")
+    endif()
+    if(alif_eth_dma_region_name)
+        foreach(alif_eth_dma_region_loc DATA BSS NOINIT)
+            zephyr_code_relocate(FILES ${ZEPHYR_BASE}/subsys/net/ip/net_pkt.c
+                LOCATION ${alif_eth_dma_region_name}_${alif_eth_dma_region_loc})
+        endforeach()
+    else()
+        message(WARNING "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION is set but the "
+            "ethernet node has no usable memory-region -- net_pkt.c's net_buf pools "
+            "stay on DTCM, unreachable by the GMAC DMA.")
+    endif()
 endif()
 
 # Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);

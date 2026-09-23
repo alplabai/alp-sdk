@@ -119,32 +119,55 @@ pointer -- no address translation. The M55 DTCM is tightly-coupled and **not**
 on the GMAC's AXI path, so descriptor rings and `net_buf`s left there are
 invisible to it and **zero frames move in either direction even with the wire
 link up** (bench-observed on both sides at once by `aen-ethernet-link`, which
-calls this its decisive fix). No narrower fix is available to an application:
-the rings are file-static in the Ethernet driver and the pool is file-static in
-the net subsystem, so neither can be section-tagged the way phase 13's JPEG
-buffers are -- and the driver's own header says the requirement is enforced
-"at the board/SoC layer, not in this glue".
+calls this its decisive fix; the narrower mechanism below is itself
+**silicon-verified on E1M-AEN803**, bench run 202 -- see that example's
+README -- but this app's own SRAM0-window-sharing layout is build-verified
+only, not benched).
 
-But this app, unlike `aen-ethernet-link`, **already** puts buffers in the
-`SRAM0` linker region. The SoC's `sram0` node is both a `zephyr,memory-region`
-(emitting the linker region phase 13's buffers land in) and, if chosen, the
-source of the main RAM region. Choosing it plainly makes both start at
-`0x02000000`; the linker then allocates into them independently **and does not
-warn**. Measured on this tree, `.data`/`.bss`/`.noinit` landed on top of
-`jpeg_out` and `jpeg_src` -- phase 13 writing its gradient would have scribbled
-over the whole image's static state, silently.
+A narrower fix now exists at the board/SoC layer: the SoC dtsi's `ethernet`
+node carries `memory-region = <&sram0>;`, and
+`CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (default y) relocates
+`net_pkt.c`'s `net_buf` pools alongside it -- so the descriptor rings and the
+`net_buf` pool land in the `SRAM0` linker region below, the same way phase
+13's JPEG buffers already do, with this overlay doing nothing extra for them.
+That narrower fix is unrelated to this overlay's own reason to move system
+RAM, though: main RAM (`.data`/`.bss`/`.noinit`, every stack) has nothing to
+do with the GMAC and still needs a home, so the overlay's
+`zephyr,sram = &sram0_sys` is unchanged. Whether the whole-RAM move could now
+be dropped in favour of the generated default (`zephyr,sram = &dtcm`) is an
+open question -- not measured here.
+
+**Why not just `zephyr,sram = &sram0`** (the mechanism `aen-ethernet-link`'s
+first cut used, since superseded there by the `memory-region`-scoped
+placement)? Because the SoC's `sram0` node is both a `zephyr,memory-region`
+(emitting the linker region the relocated Ethernet buffers *and* phase 13's
+JPEG buffers land in) and, if chosen, the source of the main RAM region.
+Choosing it plainly makes both start at `0x02000000`; the linker then
+allocates into them independently **and does not warn** -- exactly the
+hazard `zephyr/CMakeLists.txt` now FATAL_ERRORs on at configure time when
+`memory-region` is left set. Measured on an earlier version of this tree
+(before that guard existed), `.data`/`.bss`/`.noinit` landed on top of
+`jpeg_out` and `jpeg_src` -- phase 13 writing its gradient would have
+scribbled over the whole image's static state, silently.
 
 So the overlay gives the two consumers disjoint windows of the same bank:
 
 | Window | Contents |
 |---|---|
-| `0x0200_0000` + 64 KiB | The `SRAM0` linker region: phase 13's two JPEG buffers, at the same addresses they had before phase 10 existed. |
-| `0x0201_0000` + 512 KiB | System RAM: `.data`/`.bss`/`.noinit`, every stack, the GMAC descriptor rings and the `net_buf` pool. |
+| `0x0200_0000` + 64 KiB | The `SRAM0` linker region: `net_pkt.c`'s relocated `net_buf` pools + mem_slab bufs (`CODE_DATA_RELOCATION` NOINIT, ~19.3 KiB at `CONFIG_NET_BUF_DATA_SIZE=1536` with this app's own trimmed `CONFIG_NET_BUF_RX/TX_COUNT=6`, see `prj.conf`), the GMAC descriptor rings (512 B), and phase 13's two JPEG buffers (~14 KiB) -- measured 34576/65536 B (52.8%) used; `jpeg_out` now starts at `0x0200_4f10`, no longer at `0x0200_0000`, now that the Ethernet buffers precede it. |
+| `0x0201_0000` + 512 KiB | System RAM: `.data`/`.bss`/`.noinit`, every stack (the GMAC descriptor rings and the `net_buf` pool no longer live here -- see above). |
 | above that | Unused remainder of the 4 MiB bank. |
 
 Shrinking `&sram0`'s `reg` to that 64 KiB window is the safety property, not a
 tidy-up: it turns a future oversized `SRAM0`-tagged buffer into a **link error**
-instead of a silent walk into system RAM.
+instead of a silent walk into system RAM. It already caught one: bench runs
+203/204 (E1M-AEN803) found the Zephyr default `CONFIG_NET_BUF_DATA_SIZE=128`
+silently drops any Ethernet frame needing more than 7 fragments (see
+`aen-ethernet-link`'s README); the fix, `CONFIG_NET_BUF_DATA_SIZE=1536` for
+every `ETH_DWMAC_ALIF` build, applies here too and, at this app's original
+`CONFIG_NET_BUF_RX/TX_COUNT=16`, overflowed this window by 320 B -- caught at
+link time, not silently. `prj.conf` trims the count to 6 instead: phase 10
+only needs a DHCP lease, not sustained payload throughput.
 
 **What it costs the other phases**, stated plainly because it cannot be checked
 off the bench: `CONFIG_DCACHE` is off on this silicon, so there is no cache to
