@@ -403,9 +403,37 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	struct video_buffer *done       = NULL;
 	err                             = video_dequeue(st->dev, &done, K_MSEC(timeout_ms));
 	if (err != 0) {
-		/* Timeout/error: the driver may still reference data->current_buf
-		 * (dequeue only clears it on a clean return), so the pool slot is
-		 * left held here too -- same single-encode-validated caveat. */
+		/*
+		 * Ownership map for a dequeue failure (jpeg_hantro_vc9000e.c's
+		 * jpeg_hantro_vc9000e_dequeue()):
+		 *
+		 * - err == -EAGAIN (k_sem_take() timeout): the driver returns
+		 *   BEFORE touching data->current_buf -- it may still be mid-DMA
+		 *   into out_buf, or simply wedged. Ownership is ambiguous, so
+		 *   the pool slot must NOT be released here (a live DMA writing
+		 *   into a slot we handed back to the pool would corrupt
+		 *   whatever reuses it). Force the encoder off instead --
+		 *   video_stream_stop() clears ENC_ENABLE/IRQ_EN and (as of the
+		 *   companion driver fix) data->current_buf, so a FUTURE encode
+		 *   on this handle is not permanently wedged with -EBUSY. This
+		 *   one slot stays parked (bounded, one-time cost per timeout,
+		 *   not accumulating) because HW quiescence on ENC_ENABLE=0
+		 *   is not datasheet/bench-confirmed instantaneous.
+		 *   ponytail: parks one slot per timeout rather than risking a
+		 *   live-DMA release; upgrade path is a bench-proven abort
+		 *   sequence (or a DFP-documented "encoder idle" poll) that
+		 *   makes reclaiming it provably safe.
+		 * - any other err (-ENOSPC JPEG_BUFFER_FULL, -EIO bus error):
+		 *   the driver's dequeue() sets data->current_buf = NULL BEFORE
+		 *   returning these -- ownership is back with us, so the pool
+		 *   slot must be released or it leaks permanently.
+		 */
+		if (err != -EAGAIN) {
+			(void)video_buffer_release(&vbuf);
+		} else {
+			(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+			st->streaming = false;
+		}
 		return _errno_to_alp(err);
 	}
 	if (done == NULL) {

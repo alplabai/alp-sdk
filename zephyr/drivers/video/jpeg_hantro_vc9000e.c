@@ -89,6 +89,7 @@
 
 #include <jpeg_hantro_vc9000e_sw.h>
 #include "jpeg_hantro_vc9000e_regs.h"
+#include "jpeg_hantro_vc9000e_limit.h"
 
 /*
  * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt JPEG SW helper
@@ -105,10 +106,10 @@
  */
 #if defined(CONFIG_USE_ALIF_JPEG_SW_LIB)
 BUILD_ASSERT(IS_ENABLED(CONFIG_FP_HARDABI),
-	     "CONFIG_VIDEO_JPEG_HANTRO_VC9000E + CONFIG_USE_ALIF_JPEG_SW_LIB link the "
-	     "hal_alif prebuilt libjpeg_hantro_sw_gcc.a, which is hard-float (VFP "
-	     "register arguments). Set CONFIG_FP_HARDABI=y (the \"Floating point ABI\" "
-	     "choice, under FPU) or the final link fails.");
+             "CONFIG_VIDEO_JPEG_HANTRO_VC9000E + CONFIG_USE_ALIF_JPEG_SW_LIB link the "
+             "hal_alif prebuilt libjpeg_hantro_sw_gcc.a, which is hard-float (VFP "
+             "register arguments). Set CONFIG_FP_HARDABI=y (the \"Floating point ABI\" "
+             "choice, under FPU) or the final link fails.");
 #endif
 
 LOG_MODULE_REGISTER(jpeg_hantro_vc9000e, CONFIG_VIDEO_LOG_LEVEL);
@@ -116,7 +117,7 @@ LOG_MODULE_REGISTER(jpeg_hantro_vc9000e, CONFIG_VIDEO_LOG_LEVEL);
 #define DT_DRV_COMPAT verisilicon_hantro_vc9000e_jpeg
 
 /* JPEG encoder alignment = 16 pixels */
-#define JPEG_ENC_ALIGNMENT      16
+#define JPEG_ENC_ALIGNMENT 16
 
 /* Device configuration structure */
 struct jpeg_hantro_vc9000e_config {
@@ -133,17 +134,17 @@ struct jpeg_hantro_vc9000e_config {
 /* Device runtime data */
 struct jpeg_hantro_vc9000e_data {
 	DEVICE_MMIO_RAM;
-	struct   k_mutex lock;
-	struct   k_sem encode_sem;
-	struct   video_format fmt;
-	struct   video_buffer *current_buf;
-	void     *input_buffer;
-	bool     streaming;
-	uint32_t encoding_width;
-	uint32_t encoding_height;
-	uint32_t encoding_size;
-	int      encoding_error;
-	uint32_t header_size;
+	struct k_mutex          lock;
+	struct k_sem            encode_sem;
+	struct video_format     fmt;
+	struct video_buffer    *current_buf;
+	void                   *input_buffer;
+	bool                    streaming;
+	uint32_t                encoding_width;
+	uint32_t                encoding_height;
+	uint32_t                encoding_size;
+	int                     encoding_error;
+	uint32_t                header_size;
 	struct jpeg_header_info header_info;
 
 	/* v4.4 video-API shim (Alp Lab AB): the driver's two ctrl-API controls,
@@ -161,8 +162,7 @@ struct jpeg_hantro_vc9000e_data {
  * @param offset Register offset from the base address.
  * @param value Value to write.
  */
-static inline void jpeg_write_reg(const struct device *dev, uint32_t offset,
-				   uint32_t value)
+static inline void jpeg_write_reg(const struct device *dev, uint32_t offset, uint32_t value)
 {
 	uintptr_t base = DEVICE_MMIO_GET(dev);
 
@@ -192,8 +192,8 @@ static inline uint32_t jpeg_read_reg(const struct device *dev, uint32_t offset)
  * @param clear_mask Bits to clear before setting.
  * @param set_mask Bits to set after clearing.
  */
-static inline void jpeg_modify_reg(const struct device *dev, uint32_t offset,
-				    uint32_t clear_mask, uint32_t set_mask)
+static inline void
+jpeg_modify_reg(const struct device *dev, uint32_t offset, uint32_t clear_mask, uint32_t set_mask)
 {
 	uint32_t val = jpeg_read_reg(dev, offset);
 
@@ -214,8 +214,8 @@ static inline void jpeg_modify_reg(const struct device *dev, uint32_t offset,
  */
 static int jpeg_quality_config(const struct device *dev, uint16_t quality)
 {
-	int scale_factor = jpeg_qf_scaling(quality);
-	uintptr_t base = DEVICE_MMIO_GET(dev);
+	int       scale_factor = jpeg_qf_scaling(quality);
+	uintptr_t base         = DEVICE_MMIO_GET(dev);
 
 	jpeg_calc_q_table(scale_factor);
 	jpeg_set_q_table(base);
@@ -236,7 +236,7 @@ static int jpeg_quality_config(const struct device *dev, uint16_t quality)
 static int jpeg_hw_init(const struct device *dev)
 {
 	const struct jpeg_hantro_vc9000e_config *config = dev->config;
-	uint32_t hw_id, hw_ver;
+	uint32_t                                 hw_id, hw_ver;
 
 	hw_id = jpeg_read_reg(dev, JPEG_SWREG0_OFFSET);
 	if (hw_id != JPEG_HW_ID) {
@@ -253,20 +253,28 @@ static int jpeg_hw_init(const struct device *dev)
 	jpeg_write_reg(dev, JPEG_SWREG1_OFFSET, JPEG_IRQ_TYPE_SW_RESET);
 	k_sleep(K_MSEC(1));
 
-	jpeg_modify_reg(dev, JPEG_SWREG4_OFFSET, JPEG_SW_ENC_MODE_MASK,
-			JPEG_SW_ENC_MODE_JPEG << JPEG_SW_ENC_MODE_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG4_OFFSET,
+	                JPEG_SW_ENC_MODE_MASK,
+	                JPEG_SW_ENC_MODE_JPEG << JPEG_SW_ENC_MODE_POS);
 
-	jpeg_modify_reg(dev, JPEG_SWREG81_OFFSET, JPEG_MAX_BURST_MASK,
-			config->max_burst_length << JPEG_MAX_BURST_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG81_OFFSET,
+	                JPEG_MAX_BURST_MASK,
+	                config->max_burst_length << JPEG_MAX_BURST_POS);
 
-	jpeg_modify_reg(dev, JPEG_SWREG246_OFFSET, JPEG_AXI_WR_OUTSTANDING_MASK,
-			config->axi_wr_outstanding << JPEG_AXI_WR_OUTSTANDING_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG246_OFFSET,
+	                JPEG_AXI_WR_OUTSTANDING_MASK,
+	                config->axi_wr_outstanding << JPEG_AXI_WR_OUTSTANDING_POS);
 
-	jpeg_modify_reg(dev, JPEG_SWREG261_OFFSET, JPEG_AXI_RD_OUTSTANDING_MASK,
-			config->axi_rd_outstanding << JPEG_AXI_RD_OUTSTANDING_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG261_OFFSET,
+	                JPEG_AXI_RD_OUTSTANDING_MASK,
+	                config->axi_rd_outstanding << JPEG_AXI_RD_OUTSTANDING_POS);
 
-	jpeg_modify_reg(dev, JPEG_SWREG349_OFFSET, JPEG_SBI_WAIT_FRAME_START,
-			JPEG_SBI_WAIT_FRAME_START);
+	jpeg_modify_reg(
+	    dev, JPEG_SWREG349_OFFSET, JPEG_SBI_WAIT_FRAME_START, JPEG_SBI_WAIT_FRAME_START);
 
 	LOG_DBG("JPEG encoder initialized (ID: 0x%08x, Ver: 0x%08x)", hw_id, hw_ver);
 	return 0;
@@ -283,8 +291,7 @@ static int jpeg_hw_init(const struct device *dev)
  *
  * @return 0 on success, negative errno on failure.
  */
-static int jpeg_hantro_vc9000e_set_format(const struct device *dev,
-					   struct video_format *fmt)
+static int jpeg_hantro_vc9000e_set_format(const struct device *dev, struct video_format *fmt)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
 
@@ -297,22 +304,24 @@ static int jpeg_hantro_vc9000e_set_format(const struct device *dev,
 	if (!fmt) {
 		LOG_ERR("Invalid frame format");
 		return -EINVAL;
-
 	}
 
 	if (fmt->width < CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE ||
 	    fmt->height < CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE) {
 		LOG_ERR("Image too small: %ux%u (min: %u)",
-			fmt->width, fmt->height, CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE);
+		        fmt->width,
+		        fmt->height,
+		        CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE);
 		return -EINVAL;
 	}
 
 	if (fmt->width > CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH ||
 	    fmt->height > CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT) {
 		LOG_ERR("Image too large: %ux%u (max: %ux%u)",
-			fmt->width, fmt->height,
-			CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
-			CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT);
+		        fmt->width,
+		        fmt->height,
+		        CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
+		        CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT);
 		return -EINVAL;
 	}
 
@@ -320,14 +329,12 @@ static int jpeg_hantro_vc9000e_set_format(const struct device *dev,
 
 	switch (fmt->pixelformat) {
 	case VIDEO_PIX_FMT_NV12:
-		 /* Disable chroma swap (CbCr) in semiplanar input format*/
-		jpeg_modify_reg(dev, JPEG_SWREG45_OFFSET,
-				JPEG_CHROMA_SWAP_MASK, ~JPEG_CHROMA_SWAP);
+		/* Disable chroma swap (CbCr) in semiplanar input format*/
+		jpeg_modify_reg(dev, JPEG_SWREG45_OFFSET, JPEG_CHROMA_SWAP_MASK, ~JPEG_CHROMA_SWAP);
 		break;
 	case VIDEO_PIX_FMT_NV21:
 		/* Enable chroma swap (CrCb) in semiplanar input format*/
-		jpeg_modify_reg(dev, JPEG_SWREG45_OFFSET,
-				JPEG_CHROMA_SWAP_MASK, JPEG_CHROMA_SWAP);
+		jpeg_modify_reg(dev, JPEG_SWREG45_OFFSET, JPEG_CHROMA_SWAP_MASK, JPEG_CHROMA_SWAP);
 		break;
 	default:
 		LOG_ERR("Unsupported pixel format: 0x%x", fmt->pixelformat);
@@ -343,36 +350,55 @@ static int jpeg_hantro_vc9000e_set_format(const struct device *dev,
 	uint16_t width  = data->encoding_width >> JPEG_PIC_WH_PIXEL_SHIFT;
 	uint16_t height = data->encoding_height >> JPEG_PIC_WH_PIXEL_SHIFT;
 
-	jpeg_modify_reg(dev, JPEG_SWREG5_OFFSET, JPEG_PIC_WIDTH_MASK,
-			(width & JPEG_PIC_WH_MASK) << JPEG_PIC_WIDTH_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG249_OFFSET, JPEG_PIC_WIDTH_MSB_MASK,
-			(width >> JPEG_PIC_WH_FIELD_WIDTH) << JPEG_PIC_WIDTH_MSB_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG5_OFFSET, JPEG_PIC_HEIGHT_MASK,
-			(height & JPEG_PIC_WH_MASK) << JPEG_PIC_HEIGHT_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG249_OFFSET, JPEG_PIC_HEIGHT_MSB_MASK,
-			(height >> JPEG_PIC_WH_FIELD_WIDTH) << JPEG_PIC_HEIGHT_MSB_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG5_OFFSET,
+	                JPEG_PIC_WIDTH_MASK,
+	                (width & JPEG_PIC_WH_MASK) << JPEG_PIC_WIDTH_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG249_OFFSET,
+	                JPEG_PIC_WIDTH_MSB_MASK,
+	                (width >> JPEG_PIC_WH_FIELD_WIDTH) << JPEG_PIC_WIDTH_MSB_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG5_OFFSET,
+	                JPEG_PIC_HEIGHT_MASK,
+	                (height & JPEG_PIC_WH_MASK) << JPEG_PIC_HEIGHT_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG249_OFFSET,
+	                JPEG_PIC_HEIGHT_MSB_MASK,
+	                (height >> JPEG_PIC_WH_FIELD_WIDTH) << JPEG_PIC_HEIGHT_MSB_POS);
 
-	uint8_t xfill = (fmt->width % JPEG_ENC_ALIGNMENT) ?
-			(JPEG_ENC_ALIGNMENT - fmt->width % JPEG_ENC_ALIGNMENT) /
-			JPEG_YUV420_CHROMA_DIV : 0;
-	uint8_t yfill = (fmt->height % JPEG_ENC_ALIGNMENT) ?
-			(JPEG_ENC_ALIGNMENT - fmt->height % JPEG_ENC_ALIGNMENT) : 0;
+	uint8_t xfill =
+	    (fmt->width % JPEG_ENC_ALIGNMENT)
+	        ? (JPEG_ENC_ALIGNMENT - fmt->width % JPEG_ENC_ALIGNMENT) / JPEG_YUV420_CHROMA_DIV
+	        : 0;
+	uint8_t yfill = (fmt->height % JPEG_ENC_ALIGNMENT)
+	                    ? (JPEG_ENC_ALIGNMENT - fmt->height % JPEG_ENC_ALIGNMENT)
+	                    : 0;
 
-	jpeg_modify_reg(dev, JPEG_SWREG38_OFFSET, JPEG_XFILL_MASK,
-			(xfill & JPEG_XFILL_FIELD_MASK) << JPEG_XFILL_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG38_OFFSET, JPEG_YFILL_MASK,
-			(yfill & JPEG_YFILL_FIELD_MASK) << JPEG_YFILL_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG193_OFFSET, JPEG_XFILL_MSB_MASK,
-			(xfill >> JPEG_XFILL_FIELD_WIDTH) << JPEG_XFILL_MSB_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG193_OFFSET, JPEG_YFILL_MSB_MASK,
-			(yfill >> JPEG_YFILL_FIELD_WIDTH) << JPEG_YFILL_MSB_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG38_OFFSET,
+	                JPEG_XFILL_MASK,
+	                (xfill & JPEG_XFILL_FIELD_MASK) << JPEG_XFILL_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG38_OFFSET,
+	                JPEG_YFILL_MASK,
+	                (yfill & JPEG_YFILL_FIELD_MASK) << JPEG_YFILL_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG193_OFFSET,
+	                JPEG_XFILL_MSB_MASK,
+	                (xfill >> JPEG_XFILL_FIELD_WIDTH) << JPEG_XFILL_MSB_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG193_OFFSET,
+	                JPEG_YFILL_MSB_MASK,
+	                (yfill >> JPEG_YFILL_FIELD_WIDTH) << JPEG_YFILL_MSB_POS);
 
 	/* Set mode to 4:2:0 */
 	jpeg_modify_reg(dev, JPEG_SWREG18_OFFSET, JPEG_MODE_MASK, JPEG_MODE_420);
-	jpeg_modify_reg(dev, JPEG_SWREG20_OFFSET, JPEG_CODING_MODE_MASK,
-			JPEG_CODING_MODE_420);
-	jpeg_modify_reg(dev, JPEG_SWREG38_OFFSET, JPEG_INPUT_FORMAT_MASK,
-			JPEG_INPUT_FORMAT_YUV420SP << JPEG_INPUT_FORMAT_POS);
+	jpeg_modify_reg(dev, JPEG_SWREG20_OFFSET, JPEG_CODING_MODE_MASK, JPEG_CODING_MODE_420);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG38_OFFSET,
+	                JPEG_INPUT_FORMAT_MASK,
+	                JPEG_INPUT_FORMAT_YUV420SP << JPEG_INPUT_FORMAT_POS);
 
 	k_mutex_unlock(&data->lock);
 
@@ -391,8 +417,7 @@ static int jpeg_hantro_vc9000e_set_format(const struct device *dev,
  *
  * @return 0 on success, negative errno on failure.
  */
-static int jpeg_hantro_vc9000e_get_format(const struct device *dev,
-					   struct video_format *fmt)
+static int jpeg_hantro_vc9000e_get_format(const struct device *dev, struct video_format *fmt)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
 
@@ -419,12 +444,28 @@ static int jpeg_hantro_vc9000e_get_format(const struct device *dev,
  */
 static void jpeg_start_encode(const struct device *dev)
 {
-	struct jpeg_hantro_vc9000e_data *data = dev->data;
-	struct video_buffer *buf = data->current_buf;
-	void *input_ptr = data->input_buffer;
-	uint32_t stride;
-	uint32_t chroma_offset;
-	uint32_t input_size;
+	struct jpeg_hantro_vc9000e_data *data      = dev->data;
+	struct video_buffer             *buf       = data->current_buf;
+	void                            *input_ptr = data->input_buffer;
+	uint32_t                         stride;
+	uint32_t                         chroma_offset;
+	uint32_t                         input_size;
+	uint32_t                         output_limit;
+	int                              limit_err;
+
+	/*
+	 * Compute the SWREG9 output-size limit (and reject a buffer too
+	 * small to hold the JPEG header) via the pure, host-unit-tested
+	 * helper in jpeg_hantro_vc9000e_limit.h -- see its doc comment and
+	 * tests/unit/jpeg_hantro_output_limit.
+	 */
+	limit_err = jpeg_hantro_vc9000e_output_limit(buf->size, data->header_size, &output_limit);
+	if (limit_err != 0) {
+		LOG_ERR("Output buffer too small for JPEG header (%u <= %u)", buf->size, data->header_size);
+		data->encoding_error = limit_err;
+		k_sem_give(&data->encode_sem);
+		return;
+	}
 
 	/* Output buffer: JPEG header + compressed data */
 	uint8_t *output_ptr = (uint8_t *)buf->buffer + data->header_size;
@@ -440,8 +481,7 @@ static void jpeg_start_encode(const struct device *dev)
 	chroma_offset = stride * data->fmt.height;
 
 	/* Cb offset for YUV420 */
-	jpeg_write_reg(dev, JPEG_SWREG13_OFFSET,
-			(uint32_t)input_ptr + chroma_offset);
+	jpeg_write_reg(dev, JPEG_SWREG13_OFFSET, (uint32_t)input_ptr + chroma_offset);
 	/* Cr offset is zero for YUV420 */
 	jpeg_write_reg(dev, JPEG_SWREG14_OFFSET, 0);
 
@@ -450,20 +490,24 @@ static void jpeg_start_encode(const struct device *dev)
 	(void)sys_cache_data_flush_and_invd_range(input_ptr, input_size);
 
 	/* Set stride configuration */
-	jpeg_modify_reg(dev, JPEG_SWREG20_OFFSET, JPEG_ROWLENGTH_MASK,
-			(stride & JPEG_ROWLENGTH_FIELD_MASK) << JPEG_ROWLENGTH_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG249_OFFSET, JPEG_ROWLENGTH_MSB_MASK,
-			(stride >> JPEG_ROWLENGTH_FIELD_WIDTH) << JPEG_ROWLENGTH_MSB_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG20_OFFSET,
+	                JPEG_ROWLENGTH_MASK,
+	                (stride & JPEG_ROWLENGTH_FIELD_MASK) << JPEG_ROWLENGTH_POS);
+	jpeg_modify_reg(dev,
+	                JPEG_SWREG249_OFFSET,
+	                JPEG_ROWLENGTH_MSB_MASK,
+	                (stride >> JPEG_ROWLENGTH_FIELD_WIDTH) << JPEG_ROWLENGTH_MSB_POS);
 
-	jpeg_modify_reg(dev, JPEG_SWREG210_OFFSET, JPEG_LUMA_STRIDE_MASK,
-			stride << JPEG_LUMA_STRIDE_POS);
-	jpeg_modify_reg(dev, JPEG_SWREG211_OFFSET, JPEG_CHROMA_STRIDE_MASK,
-			stride << JPEG_CHROMA_STRIDE_POS);
+	jpeg_modify_reg(
+	    dev, JPEG_SWREG210_OFFSET, JPEG_LUMA_STRIDE_MASK, stride << JPEG_LUMA_STRIDE_POS);
+	jpeg_modify_reg(
+	    dev, JPEG_SWREG211_OFFSET, JPEG_CHROMA_STRIDE_MASK, stride << JPEG_CHROMA_STRIDE_POS);
 
 	/* Generate JPEG header in output buffer */
-	data->header_info.buffer = buf->buffer;
-	data->header_info.width  = data->fmt.width;
-	data->header_info.height = data->fmt.height;
+	data->header_info.buffer         = buf->buffer;
+	data->header_info.width          = data->fmt.width;
+	data->header_info.height         = data->fmt.height;
 	data->header_info.num_components = JPEG_YUV420_NUM_COMPONENTS;
 
 	jpeg_header_generation(data->header_info);
@@ -496,11 +540,20 @@ static void jpeg_start_encode(const struct device *dev)
 	 * capacity and RESETS .bytesused to 0, so bytesused is 0 here pre-encode
 	 * -- writing it would program a 0-byte limit and the encoder would trip
 	 * JPEG_BUFFER_FULL on the first output byte.  Use .size (the capacity),
-	 * which is the register's true meaning ("output buffer size").  The HW
-	 * overwrites SWREG9 with the produced payload size during the encode,
-	 * which the completion path reads back below.
+	 * which is the register's true meaning ("output buffer size"), BUT
+	 * SWREG9 is a limit on writes starting at the SWREG8 base address we
+	 * just programmed above (output_ptr = buf->buffer + header_size), not
+	 * on buf->buffer itself -- see the file-header ADR 0017 note and
+	 * jpeg_start_encode()'s output_ptr computation. Programming the full
+	 * buf->size here lets the HW write up to header_size bytes past the
+	 * end of the buf->buffer allocation before it trips JPEG_BUFFER_FULL.
+	 * Program the space actually remaining after the header --
+	 * output_limit, already computed above by
+	 * jpeg_hantro_vc9000e_output_limit(). The HW overwrites SWREG9 with
+	 * the produced payload size during the encode, which the completion
+	 * path reads back below.
 	 */
-	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, buf->size);
+	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, output_limit);
 
 	/* Reset error state and trigger encoding */
 	data->encoding_error = 0;
@@ -521,8 +574,7 @@ static void jpeg_start_encode(const struct device *dev)
  *
  * @return 0 on success, negative errno on failure.
  */
-static int jpeg_hantro_vc9000e_enqueue(const struct device *dev,
-					struct video_buffer *buf)
+static int jpeg_hantro_vc9000e_enqueue(const struct device *dev, struct video_buffer *buf)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
 
@@ -572,12 +624,12 @@ static int jpeg_hantro_vc9000e_enqueue(const struct device *dev,
  *
  * @return 0 on success, -EAGAIN on timeout, or negative errno on encode error.
  */
-static int jpeg_hantro_vc9000e_dequeue(const struct device *dev,
-					struct video_buffer **buf,
-					k_timeout_t timeout)
+static int jpeg_hantro_vc9000e_dequeue(const struct device  *dev,
+                                       struct video_buffer **buf,
+                                       k_timeout_t           timeout)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
-	int ret;
+	int                              ret;
 
 	ret = k_sem_take(&data->encode_sem, timeout);
 	if (ret != 0) {
@@ -598,9 +650,8 @@ static int jpeg_hantro_vc9000e_dequeue(const struct device *dev,
 	}
 
 	/* Invalidate CPU cache for DMA-written compressed data */
-	(void)sys_cache_data_invd_range(
-		(uint8_t *)(*buf)->buffer + data->header_size,
-		data->encoding_size - data->header_size);
+	(void)sys_cache_data_invd_range((uint8_t *)(*buf)->buffer + data->header_size,
+	                                data->encoding_size - data->header_size);
 
 	(*buf)->bytesused = data->encoding_size;
 	(*buf)->timestamp = k_uptime_get_32();
@@ -630,8 +681,8 @@ static int jpeg_hantro_vc9000e_dequeue(const struct device *dev,
  *
  * @return 0 on success, -EALREADY if already in the requested state.
  */
-static int jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable,
-					   enum video_buf_type type)
+static int
+jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable, enum video_buf_type type)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
 
@@ -644,8 +695,7 @@ static int jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable,
 			k_mutex_unlock(&data->lock);
 			return -EALREADY;
 		}
-		jpeg_modify_reg(dev, JPEG_SWREG1_OFFSET,
-		JPEG_IRQ_STATUS_MASK, JPEG_IRQ_EN_MASK);
+		jpeg_modify_reg(dev, JPEG_SWREG1_OFFSET, JPEG_IRQ_STATUS_MASK, JPEG_IRQ_EN_MASK);
 		data->streaming = true;
 
 		/* If a buffer was already enqueued, trigger encoding now */
@@ -661,6 +711,19 @@ static int jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable,
 		jpeg_modify_reg(dev, JPEG_SWREG1_OFFSET, JPEG_IRQ_EN_MASK, 0);
 		jpeg_write_reg(dev, JPEG_SWREG5_OFFSET, 0);
 		data->streaming = false;
+
+		/*
+		 * V4L2 STREAMOFF-style abort (Alp Lab AB): clear the in-flight
+		 * buffer reference. Without this, a caller that recovers from a
+		 * dequeue timeout by stopping the stream (src/backends/jpeg/
+		 * alif_hantro.c's hantro_encode()) still finds data->current_buf
+		 * non-NULL on its next encode -- jpeg_hantro_vc9000e_enqueue()
+		 * would then reject every future buffer with -EBUSY forever,
+		 * permanently wedging the encoder on one stuck request. Cleared
+		 * only here, not in the enable branch, so a normal (non-abort)
+		 * disable/re-enable cycle with no pending buffer is unaffected.
+		 */
+		data->current_buf = NULL;
 	}
 
 	k_mutex_unlock(&data->lock);
@@ -694,7 +757,7 @@ static int jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable,
 static int jpeg_hantro_vc9000e_set_ctrl(const struct device *dev, uint32_t cid)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
-	int ret = 0;
+	int                              ret  = 0;
 
 	k_mutex_lock(&data->lock, K_FOREVER);
 
@@ -719,22 +782,22 @@ static int jpeg_hantro_vc9000e_set_ctrl(const struct device *dev, uint32_t cid)
 
 static const struct video_format_cap jpeg_hantro_vc9000e_format_caps[] = {
 	{
-		.pixelformat = VIDEO_PIX_FMT_NV12,
-		.width_min   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
-		.width_max   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
-		.height_min  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
-		.height_max  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT,
-		.width_step  = JPEG_ENC_ALIGNMENT,
-		.height_step = JPEG_ENC_ALIGNMENT,
+	    .pixelformat = VIDEO_PIX_FMT_NV12,
+	    .width_min   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
+	    .width_max   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
+	    .height_min  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
+	    .height_max  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT,
+	    .width_step  = JPEG_ENC_ALIGNMENT,
+	    .height_step = JPEG_ENC_ALIGNMENT,
 	},
 	{
-		.pixelformat = VIDEO_PIX_FMT_NV21,
-		.width_min   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
-		.width_max   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
-		.height_min  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
-		.height_max  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT,
-		.width_step  = JPEG_ENC_ALIGNMENT,
-		.height_step = JPEG_ENC_ALIGNMENT,
+	    .pixelformat = VIDEO_PIX_FMT_NV21,
+	    .width_min   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
+	    .width_max   = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_WIDTH,
+	    .height_min  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MIN_SIZE,
+	    .height_max  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_MAX_HEIGHT,
+	    .width_step  = JPEG_ENC_ALIGNMENT,
+	    .height_step = JPEG_ENC_ALIGNMENT,
 	},
 	{ 0 }
 };
@@ -753,8 +816,7 @@ static const struct video_format_cap jpeg_hantro_vc9000e_format_caps[] = {
  *
  * @return 0 on success.
  */
-static int jpeg_hantro_vc9000e_get_caps(const struct device *dev,
-					 struct video_caps *caps)
+static int jpeg_hantro_vc9000e_get_caps(const struct device *dev, struct video_caps *caps)
 {
 	ARG_UNUSED(dev);
 
@@ -774,7 +836,7 @@ static int jpeg_hantro_vc9000e_get_caps(const struct device *dev,
 static void jpeg_hantro_vc9000e_isr(const struct device *dev)
 {
 	struct jpeg_hantro_vc9000e_data *data = dev->data;
-	uint32_t status;
+	uint32_t                         status;
 
 	status = jpeg_read_reg(dev, JPEG_SWREG1_OFFSET);
 
@@ -786,8 +848,7 @@ static void jpeg_hantro_vc9000e_isr(const struct device *dev)
 	}
 
 	if (status & JPEG_FRAME_RDY_STATUS) {
-		data->encoding_size = jpeg_read_reg(dev, JPEG_SWREG9_OFFSET) +
-				      data->header_size;
+		data->encoding_size  = jpeg_read_reg(dev, JPEG_SWREG9_OFFSET) + data->header_size;
 		data->encoding_error = 0;
 		k_sem_give(&data->encode_sem);
 	}
@@ -819,11 +880,11 @@ static void jpeg_hantro_vc9000e_isr(const struct device *dev)
 static DEVICE_API(video, jpeg_hantro_vc9000e_driver_api) = {
 	.set_format = jpeg_hantro_vc9000e_set_format,
 	.get_format = jpeg_hantro_vc9000e_get_format,
-	.enqueue = jpeg_hantro_vc9000e_enqueue,
-	.dequeue = jpeg_hantro_vc9000e_dequeue,
+	.enqueue    = jpeg_hantro_vc9000e_enqueue,
+	.dequeue    = jpeg_hantro_vc9000e_dequeue,
 	.set_stream = jpeg_hantro_vc9000e_set_stream,
-	.set_ctrl = jpeg_hantro_vc9000e_set_ctrl,
-	.get_caps = jpeg_hantro_vc9000e_get_caps,
+	.set_ctrl   = jpeg_hantro_vc9000e_set_ctrl,
+	.get_caps   = jpeg_hantro_vc9000e_get_caps,
 };
 
 /**
@@ -840,8 +901,8 @@ static DEVICE_API(video, jpeg_hantro_vc9000e_driver_api) = {
 static int jpeg_hantro_vc9000e_init(const struct device *dev)
 {
 	const struct jpeg_hantro_vc9000e_config *config = dev->config;
-	struct jpeg_hantro_vc9000e_data *data = dev->data;
-	int ret;
+	struct jpeg_hantro_vc9000e_data         *data   = dev->data;
+	int                                      ret;
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
 
@@ -850,8 +911,7 @@ static int jpeg_hantro_vc9000e_init(const struct device *dev)
 			LOG_ERR("Clock controller not ready");
 			return -ENODEV;
 		}
-		ret = clock_control_on(config->clock_dev,
-				       config->clock_subsys);
+		ret = clock_control_on(config->clock_dev, config->clock_subsys);
 		if (ret < 0) {
 			LOG_ERR("Failed to enable JPEG clock: %d", ret);
 			return ret;
@@ -861,10 +921,10 @@ static int jpeg_hantro_vc9000e_init(const struct device *dev)
 	k_sem_init(&data->encode_sem, 0, 1);
 	k_mutex_init(&data->lock);
 
-	data->streaming = false;
-	data->current_buf = NULL;
+	data->streaming    = false;
+	data->current_buf  = NULL;
 	data->input_buffer = NULL;
-	data->header_size = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE;
+	data->header_size  = CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE;
 
 	ret = jpeg_hw_init(dev);
 	if (ret != 0) {
@@ -884,20 +944,29 @@ static int jpeg_hantro_vc9000e_init(const struct device *dev)
 	 * the video subsystem already (video_init_ctrl() looks it up via
 	 * video_find_vdev()).
 	 */
-	ret = video_init_ctrl(&data->quality_ctrl, dev, VIDEO_CID_JPEG_COMPRESSION_QUALITY,
-			      (struct video_ctrl_range){
-				      .min = 1, .max = 100, .step = 1,
-				      .def = config->default_quality,
-			      });
+	ret = video_init_ctrl(&data->quality_ctrl,
+	                      dev,
+	                      VIDEO_CID_JPEG_COMPRESSION_QUALITY,
+	                      (struct video_ctrl_range){
+	                          .min  = 1,
+	                          .max  = 100,
+	                          .step = 1,
+	                          .def  = config->default_quality,
+	                      });
 	if (ret < 0) {
 		LOG_ERR("Failed to register quality ctrl: %d", ret);
 		return ret;
 	}
 
-	ret = video_init_ctrl(&data->input_buffer_ctrl, dev, VIDEO_CID_JPEG_INPUT_BUFFER,
-			      (struct video_ctrl_range){
-				      .min = INT32_MIN, .max = INT32_MAX, .step = 1, .def = 0,
-			      });
+	ret = video_init_ctrl(&data->input_buffer_ctrl,
+	                      dev,
+	                      VIDEO_CID_JPEG_INPUT_BUFFER,
+	                      (struct video_ctrl_range){
+	                          .min  = INT32_MIN,
+	                          .max  = INT32_MAX,
+	                          .step = 1,
+	                          .def  = 0,
+	                      });
 	if (ret < 0) {
 		LOG_ERR("Failed to register input-buffer ctrl: %d", ret);
 		return ret;
@@ -910,46 +979,46 @@ static int jpeg_hantro_vc9000e_init(const struct device *dev)
 }
 
 /* Device instantiation macro */
-#define JPEG_HANTRO_VC9000E_INIT(inst)							\
-	static void jpeg_hantro_vc9000e_irq_config_##inst(const struct device *dev)	\
-	{										\
-		IRQ_CONNECT(DT_INST_IRQN(inst),						\
-			    DT_INST_IRQ(inst, priority),				\
-			    jpeg_hantro_vc9000e_isr,					\
-			    DEVICE_DT_INST_GET(inst),					\
-			    0);								\
-		irq_enable(DT_INST_IRQN(inst));						\
-	}										\
-											\
-	static struct jpeg_hantro_vc9000e_data jpeg_hantro_vc9000e_data_##inst;	\
-											\
-	static const struct jpeg_hantro_vc9000e_config					\
-		jpeg_hantro_vc9000e_config_##inst = {					\
-		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(inst)),				\
-		.irq_config_func = jpeg_hantro_vc9000e_irq_config_##inst,		\
-		.clock_dev = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, clocks),		\
-			(DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst))), (NULL)),		\
-		.clock_subsys = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, clocks),	\
-			((clock_control_subsys_t)DT_INST_CLOCKS_CELL(inst, clkid)),	\
-			((clock_control_subsys_t)0)),					\
-		.max_burst_length = DT_INST_PROP(inst, max_burst_length),		\
-		.axi_wr_outstanding = DT_INST_PROP(inst, axi_wr_outstanding),		\
-		.axi_rd_outstanding = DT_INST_PROP(inst, axi_rd_outstanding),		\
-		.default_quality = DT_INST_PROP(inst, quality_factor),			\
-	};										\
-											\
-	DEVICE_DT_INST_DEFINE(inst,							\
-				jpeg_hantro_vc9000e_init,				\
-				NULL,							\
-				&jpeg_hantro_vc9000e_data_##inst,			\
-				&jpeg_hantro_vc9000e_config_##inst,			\
-				POST_KERNEL,						\
-				CONFIG_VIDEO_INIT_PRIORITY,				\
-				&jpeg_hantro_vc9000e_driver_api);			\
-											\
+#define JPEG_HANTRO_VC9000E_INIT(inst) \
+	static void jpeg_hantro_vc9000e_irq_config_##inst(const struct device *dev) \
+	{ \
+		IRQ_CONNECT(DT_INST_IRQN(inst), \
+		            DT_INST_IRQ(inst, priority), \
+		            jpeg_hantro_vc9000e_isr, \
+		            DEVICE_DT_INST_GET(inst), \
+		            0); \
+		irq_enable(DT_INST_IRQN(inst)); \
+	} \
+\
+	static struct jpeg_hantro_vc9000e_data jpeg_hantro_vc9000e_data_##inst; \
+\
+	static const struct jpeg_hantro_vc9000e_config jpeg_hantro_vc9000e_config_##inst = { \
+		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(inst)), \
+		.irq_config_func  = jpeg_hantro_vc9000e_irq_config_##inst, \
+		.clock_dev        = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, clocks), \
+		                                (DEVICE_DT_GET(DT_INST_CLOCKS_CTLR(inst))), \
+		                                (NULL)), \
+		.clock_subsys     = COND_CODE_1(DT_INST_NODE_HAS_PROP(inst, clocks), \
+		                                ((clock_control_subsys_t)DT_INST_CLOCKS_CELL(inst, clkid)), \
+		                                ((clock_control_subsys_t)0)), \
+		.max_burst_length = DT_INST_PROP(inst, max_burst_length), \
+		.axi_wr_outstanding = DT_INST_PROP(inst, axi_wr_outstanding), \
+		.axi_rd_outstanding = DT_INST_PROP(inst, axi_rd_outstanding), \
+		.default_quality    = DT_INST_PROP(inst, quality_factor), \
+	}; \
+\
+	DEVICE_DT_INST_DEFINE(inst, \
+	                      jpeg_hantro_vc9000e_init, \
+	                      NULL, \
+	                      &jpeg_hantro_vc9000e_data_##inst, \
+	                      &jpeg_hantro_vc9000e_config_##inst, \
+	                      POST_KERNEL, \
+	                      CONFIG_VIDEO_INIT_PRIORITY, \
+	                      &jpeg_hantro_vc9000e_driver_api); \
+\
 	/* v4.4 video-API shim (Alp Lab AB): register with the video ctrl	\
 	 * registry -- see jpeg_hantro_vc9000e_init().				\
-	 */										\
+	 */ \
 	VIDEO_DEVICE_DEFINE(jpeg_hantro_vc9000e_##inst, DEVICE_DT_INST_GET(inst), NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(JPEG_HANTRO_VC9000E_INIT)
