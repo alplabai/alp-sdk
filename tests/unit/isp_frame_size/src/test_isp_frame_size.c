@@ -124,3 +124,68 @@ ZTEST(isp_frame_size, test_pitch_rgb888_planar_private_is_bpp_derived)
 
 	zassert_equal(got, 1920u, "RGB888_PLANAR_PRIVATE pitch: got %u, want 1920 (24 bpp)", got);
 }
+
+/* --- alp_isp_mrsz_scale_vc(): MRSZ 2:1 vertical-chroma downscale ratio --- */
+
+/* Silicon-proven bug (E1M-AEN803, bench runs 205/201): a plain
+ * floor(((out-1)<<16)/(in-1)) gives 0x7FBB for 480 -> 240, one short of the
+ * 0x7FBC the resizer needs to emit all 240 chroma lines -- the last row
+ * (239) was never written, so every 4:2:0 JPEG/raw frame shipped a
+ * stale/garbage last U/V row.
+ */
+ZTEST(isp_frame_size, test_mrsz_scale_vc_480_to_240_rounds_up)
+{
+	uint32_t got = alp_isp_mrsz_scale_vc(480u, 240u);
+
+	zassert_equal(got, 0x7FBCu, "480->240 SCALE_VC: got 0x%X, want 0x7FBC", got);
+	zassert_not_equal(got, 0x7FBBu, "SCALE_VC must not be the truncated (one-line-short) value");
+}
+
+ZTEST(isp_frame_size, test_mrsz_scale_vc_reproduces_out_height)
+{
+	/* floor(((in - 1) * scale_vc) / 65536) + 1 must equal out_lines exactly
+	 * -- the property the +1 rounding exists to guarantee. */
+	uint32_t in_h           = 480u;
+	uint32_t out_h          = 240u;
+	uint32_t scale_vc       = alp_isp_mrsz_scale_vc(in_h, out_h);
+	uint32_t produced_lines = (((in_h - 1u) * scale_vc) / 65536u) + 1u;
+
+	zassert_equal(produced_lines,
+	              out_h,
+	              "SCALE_VC 0x%X produces %u chroma lines, want %u",
+	              scale_vc,
+	              produced_lines,
+	              out_h);
+}
+
+ZTEST(isp_frame_size, test_mrsz_scale_vc_640x360_downscale)
+{
+	/* 640x360 (16:9), a common non-VGA capture size: 360 -> 180 chroma. */
+	uint32_t in_h           = 360u;
+	uint32_t out_h          = 180u;
+	uint32_t scale_vc       = alp_isp_mrsz_scale_vc(in_h, out_h);
+	uint32_t produced_lines = (((in_h - 1u) * scale_vc) / 65536u) + 1u;
+
+	zassert_equal(produced_lines,
+	              out_h,
+	              "SCALE_VC 0x%X produces %u chroma lines, want %u",
+	              scale_vc,
+	              produced_lines,
+	              out_h);
+}
+
+ZTEST(isp_frame_size, test_mrsz_scale_vc_1080_downscale)
+{
+	/* 1920x1080: 1080 -> 540 chroma, non-power-of-two height. */
+	uint32_t in_h           = 1080u;
+	uint32_t out_h          = 540u;
+	uint32_t scale_vc       = alp_isp_mrsz_scale_vc(in_h, out_h);
+	uint32_t produced_lines = (((in_h - 1u) * scale_vc) / 65536u) + 1u;
+
+	zassert_equal(produced_lines,
+	              out_h,
+	              "SCALE_VC 0x%X produces %u chroma lines, want %u",
+	              scale_vc,
+	              produced_lines,
+	              out_h);
+}

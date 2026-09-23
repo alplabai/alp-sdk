@@ -2,13 +2,14 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright (c) 2026 Alp Lab AB
  *
- * Byte geometry (default pitch, full frame size) for an ISP-Pico output
- * video_format. The ONE place zephyr/drivers/video/isp_pico.c (isp_set_fmt()'s
- * pitch fill-in, isp_dequeue()'s bytesused) AND
+ * Byte geometry (default pitch, full frame size) and MRSZ scaler-ratio math
+ * for an ISP-Pico output video_format. The ONE place
+ * zephyr/drivers/video/isp_pico.c (isp_set_fmt()'s pitch fill-in,
+ * isp_dequeue()'s bytesused, isp_apply_mrsz()'s ISP_MRSZ_SCALE_VC) AND
  * src/backends/camera/alif_isp_pico.c (its buffer-pool allocation size)
- * derive a format's size from -- so a future edit can only get this right or
- * wrong once, not drift into two independently-wrong copies of the same
- * formula. Also included directly by tests/unit/isp_frame_size on
+ * derive a format's size/scale from -- so a future edit can only get this
+ * right or wrong once, not drift into two independently-wrong copies of the
+ * same formula. Also included directly by tests/unit/isp_frame_size on
  * native_sim: needs only video_bits_per_pixel() and the VIDEO_PIX_FMT_*
  * FOURCCs from video_alif.h, no DT/MMIO/real ISP.
  *
@@ -119,6 +120,38 @@ static inline uint32_t alp_isp_frame_size(uint32_t pixelformat, uint16_t width, 
 	}
 
 	return ((uint32_t)width * height * bpp) / 8u;
+}
+
+/**
+ * @brief ISP_MRSZ_SCALE_VC ratio for the main resizer's 2:1 vertical-chroma
+ * downscale (4:2:2 internal -> 4:2:0 output).
+ *
+ * HWRM §17.3.4.3.169 (ISP_MRSZ_SCALE_VC) gives only the register's meaning
+ * ("the vertical chrominance downscale factor, or the reciprocal of the
+ * vertical chrominance upscale factor" -- a 16.16 fixed-point ratio) and no
+ * formula; neither the Alif DFP nor hal_alif programs this register. The
+ * ISP main resizer is rkisp1-lineage silicon (VSI/rkisp1 IP); its downscale
+ * ratio is RKISP1_CIF_RSZ_SCALER_FACTOR-scaled and takes a +1 that a naive
+ * floor(((out-1)<<16)/(in-1)) misses:
+ *   ((len_out - 1) * RKISP1_CIF_RSZ_SCALER_FACTOR) / (len_in - 1) + 1
+ *
+ * Silicon-proven bug this exists to fix (E1M-AEN803, bench run 205/201):
+ * without the +1, 480 -> 240 downscale gives 0x7FBB (32699), one short of
+ * the 0x7FBC (32700) the scaler needs to actually emit 240 chroma lines --
+ * floor(((in_lines - 1) * 0x7FBB) / 65536) + 1 == 239, so the last chroma
+ * row (line 239) is never written by the resizer and every 4:2:0 JPEG/raw
+ * frame ships a stale/garbage final U/V row.
+ *
+ * @param in_lines Chroma line count into the resizer (== the ISP core's
+ *                 4:2:2 luma/chroma line count, i.e. the output frame's
+ *                 full height). Must be >= 2.
+ * @param out_lines Target chroma line count after the 2:1 downscale
+ *                  (in_lines / 2). Must be >= 1 and < in_lines.
+ * @return The 16.16 fixed-point ISP_MRSZ_SCALE_VC value.
+ */
+static inline uint32_t alp_isp_mrsz_scale_vc(uint16_t in_lines, uint16_t out_lines)
+{
+	return (((uint32_t)(out_lines - 1) * 65536U) / (uint32_t)(in_lines - 1)) + 1U;
 }
 
 #ifdef __cplusplus

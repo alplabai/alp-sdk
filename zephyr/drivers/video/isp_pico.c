@@ -1446,9 +1446,15 @@ static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint1
 		return;
 	}
 
-	uint32_t in_h = out_height;
-	uint32_t out_h = out_height / 2;
-	uint32_t scale_vc = ((out_h - 1) * 65536U) / (in_h - 1);
+	/*
+	 * alp_isp_mrsz_scale_vc() (isp_frame_size.h) rounds this ratio UP by
+	 * one (rkisp1-lineage formula) so the resizer emits exactly
+	 * out_height/2 chroma lines, not one short -- a plain
+	 * floor(((out_height/2 - 1) << 16) / (out_height - 1)) truncates the
+	 * last line (E1M-AEN803 bench runs 205/201: silent green last chroma
+	 * row / stale last U row).
+	 */
+	uint32_t scale_vc = alp_isp_mrsz_scale_vc(out_height, out_height / 2);
 
 	sys_write32(scale_vc, regs + ISP_MRSZ_SCALE_VC);
 	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
