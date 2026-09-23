@@ -28,10 +28,16 @@
  *     100): same real sensor pipeline, plus the E8 VeriSilicon
  *     ISP-Pico's `configure_isp` (same latch-and-ALP_OK posture).
  *     OPT-IN (`CONFIG_ALP_SDK_CAMERA_ALIF_ISP`, default n) --
- *     depends on `VIDEO_ISP_VSI`, whose vendored `hal_alif` libisp
- *     wrapper is older than this backend's driver needs, so it
- *     FAILS TO COMPILE today; bump the wrapper before enabling.
- *     BENCH-UNVERIFIED.
+ *     depends on `VIDEO_ISP_VSI`.  Negotiates a YUV ISP MI output
+ *     (converting to RGB565 on the CPU when the caller asked for
+ *     RGB565; passing a native YUV format through unmodified
+ *     otherwise), drives AWB/AE through the standard Zephyr video
+ *     ctrl registry, and keeps the driver's incoming-buffer fifo fed
+ *     -- see that backend's file header for the full sequence.
+ *     Runtime capture is proven end to end on isp_pico.c's own bench
+ *     app (examples/aen/aen-isp-ov5647-capture, runs 69-145); this
+ *     PORTABLE backend compiles and links (examples/aen/aen-isp-
+ *     ov5647-viewfinder) but is still BENCH-UNVERIFIED end to end.
  *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
  *     fallback for silicon none of the above cover -- every op
  *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).

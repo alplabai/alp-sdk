@@ -1,0 +1,24 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Run 83, decisive test image D: does toggling AWB off/on WHILE STREAMING
+# (isp_set_ctrl()'s own live-apply path, isp_pico.c -- distinct from the
+# stream-start apply every other image in this directory exercises) still
+# reach the library, and does it move DGAIN once AE is stable? Off by
+# default -- src/main.c's toggle only compiles in when this is on, via
+# overlay-awb-toggle-test.conf.
+
+config AEN_ISP_AWB_LIVE_TOGGLE_TEST
+	bool "Toggle AWB off/on live, mid-stream, at fixed frame numbers"
+	default n
+	help
+	  src/main.c calls video_set_ctrl(isp_dev, VIDEO_CID_AUTO_WHITE_
+	  BALANCE, 0) right after frame 3's dequeue, and =1 right after
+	  frame 6's -- both while isp_dev is already streaming, exercising
+	  isp_pico.c's isp_set_ctrl() mid-stream recording path. Neither SET
+	  takes effect live: isp_pico.c only ever calls isp_apply_wb()/
+	  isp_apply_ae() from isp_stream_start(), so a mid-stream change is
+	  just recorded (wb_dirty/ae_dirty) and picked up at the NEXT stream
+	  start, not this one.
+
+source "Kconfig.zephyr"

@@ -62,6 +62,12 @@
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
+/* Upstream's private drivers/video/video_device.h (put on the include path by
+ * zephyr/CMakeLists.txt's ${ZEPHYR_BASE}/drivers/video dir) -- needed for
+ * VIDEO_DEVICE_DEFINE, below, so v4.4's control-registry walk
+ * (video_find_ctrl(), drivers/video/video_ctrls.c) can chain from this
+ * device to its upstream source (CSI bridge or parallel sensor). */
+#include "video_device.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(CPI, CONFIG_VIDEO_LOG_LEVEL);
@@ -647,11 +653,15 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		return -EINVAL;
 	}
 
-	/* An unpacked request (SBGGR10..) goes out on the link as its packed twin. */
+	/* An unpacked request (SBGGR10..) goes out on the link as its packed
+	 * twin. Each .mem value is unique in cpi_unpacked_fmts[], so this
+	 * forward lookup was already unambiguous without a break; added
+	 * anyway for symmetry with the reverse lookup below. */
 	for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
 		if ((config->interface == CAM_INTERFACE_SERIAL) &&
 		    (fmt->pixelformat == cpi_unpacked_fmts[i].mem)) {
 			link.pixelformat = cpi_unpacked_fmts[i].link;
+			break;
 		}
 	}
 
@@ -685,6 +695,7 @@ static int alif_cam_set_fmt(const struct device *dev, struct video_format *fmt)
 		for (size_t i = 0; i < ARRAY_SIZE(cpi_unpacked_fmts); i++) {
 			if (link.pixelformat == cpi_unpacked_fmts[i].link) {
 				fmt->pixelformat = cpi_unpacked_fmts[i].mem;
+				break;
 			}
 		}
 	}
@@ -742,6 +753,22 @@ static int alif_cam_get_fmt(const struct device *dev, struct video_format *fmt)
 	fmt->pitch = data->current_format.pitch;
 
 	return 0;
+}
+
+/*
+ * Bench run 76 (stage 5): same forwarding shape as alif_cam_get_fmt() above,
+ * extended to frame interval -- see video_csi_dw.c's csi2_dw_get_frmival()
+ * for why. Alp Lab AB.
+ */
+static int alif_cam_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct video_cam_config *config = dev->config;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	return video_get_frmival(config->endpoint_dev, frmival);
 }
 
 static int alif_cam_stream_start(const struct device *dev)
@@ -1185,6 +1212,7 @@ static int alif_cam_set_signal(const struct device *dev,
 static DEVICE_API(video, cam_driver_api) = {
 	.set_format = alif_cam_set_fmt,
 	.get_format = alif_cam_get_fmt,
+	.get_frmival = alif_cam_get_frmival,
 	.set_stream = alif_cam_set_stream,
 	.flush = alif_cam_flush,
 	.enqueue = alif_cam_enqueue,
@@ -1539,6 +1567,15 @@ static int __maybe_unused alif_video_cam_init(const struct device *dev)
 	static struct video_cam_data data_##i;                                                     \
 	DEVICE_DT_INST_DEFINE(i, &alif_video_cam_init, NULL, &data_##i, &config_##i,               \
 			      POST_KERNEL, CONFIG_VIDEO_ALIF_CAM_INIT_PRIORITY, &cam_driver_api);  \
+                                                                                                   \
+	/* Chains this device onto v4.4's control-registry walk (video_find_ctrl(),               \
+	 * drivers/video/video_ctrls.c): the CPI owns no controls of its own (see the             \
+	 * .set_ctrl/.get_ctrl drop note above), so a control request against it                  \
+	 * falls straight through to .src_dev, the port@0 endpoint device (CSI                    \
+	 * bridge, or a directly-wired parallel sensor) -- same device already                    \
+	 * resolved into config_##i.endpoint_dev, above. */                                       \
+	VIDEO_DEVICE_DEFINE(cam_vdev_##i, DEVICE_DT_INST_GET(i),                                   \
+			     DEVICE_DT_GET(REMOTE_DEVICE(i, 0)));                                  \
                                                                                                    \
 	static void cam_config_func_##i(const struct device *dev)                                  \
 	{                                                                                          \

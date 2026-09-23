@@ -43,6 +43,12 @@
 #include "video_csi_dw.h"
 #include <zephyr/drivers/mipi_dphy/dphy_dw.h>
 #include <zephyr/drivers/video/video_alif.h>
+/* Upstream's private drivers/video/video_device.h (put on the include path by
+ * zephyr/CMakeLists.txt's ${ZEPHYR_BASE}/drivers/video dir) -- needed for
+ * VIDEO_DEVICE_DEFINE, below, so v4.4's control-registry walk
+ * (video_find_ctrl(), drivers/video/video_ctrls.c) can chain from this
+ * device to its upstream sensor. */
+#include "video_device.h"
 
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(csi2_dw, CONFIG_VIDEO_LOG_LEVEL);
@@ -115,8 +121,77 @@ static void reg_write_part(uintptr_t reg, uint32_t data, uint32_t mask, uint8_t 
 	sys_write32(tmp, reg);
 }
 
+/*
+ * v4.4 video-API shim (Alp Lab AB): mask every CSI_INT_MSK_* source to 0
+ * (all-disabled). Called from csi2_dw_init() BEFORE config->irq_config_func()
+ * arms the NVIC line, so the interrupt cannot fire from a stale/reset
+ * register state while the sensor is still unparked.
+ *
+ * Root cause (bench run 72, E1M-AEN803 2026W36-0001, confirmed against a
+ * zeroed ram_console_buf): the pre-banner "Fatal Interrupt caused by PHY due
+ * to TX errors" / "PHY Packet discard" lines are genuine POST_KERNEL boot
+ * output, not stale RAM. init priorities: MIPI-DPHY 39, this CSI-2 host 41
+ * (CONFIG_VIDEO_MIPI_CSI2_DW_INIT_PRIORITY, zephyr/kconfigs/
+ * vendor-alif-peripherals.kconfig:855) -- both run before I2C
+ * (I2C_INIT_PRIORITY default KERNEL_INIT_PRIORITY_DEVICE=50,
+ * <zephyr>/kernel/Kconfig.device:70-72) and well before OV5647's
+ * own init, which performs the LP-11 lane park (CONFIG_VIDEO_INIT_PRIORITY
+ * default 60, <zephyr>/drivers/video/Kconfig:20-22; the park
+ * itself is ov5647.c's documented "DIVERGENCE #1", see ov5647_init()'s
+ * header comment). Previously csi2_dw_init() left every CSI_INT_MSK_*
+ * register at its power-on-reset value and only unmasked sources later, from
+ * csi2_dw_configure() (via csi2_dw_irq_on() below) -- i.e. well after
+ * main() starts. In between, the NVIC line was already live (priority 41)
+ * while the D-PHY (39) was watching an OV5647 whose lanes were not yet
+ * parked to LP-11 (60): any transient/reset-state PHY event in that window
+ * could propagate straight to the ISR. Masking explicitly here removes the
+ * dependency on the IP's reset-default mask state entirely -- correct
+ * regardless of what that default turns out to be. csi2_dw_irq_on() re-masks
+ * (unmasks) the real set once the app actually configures the stream, so
+ * this changes nothing about steady-state behavior.
+ */
+static void csi2_dw_irq_off(uintptr_t regs)
+{
+	sys_write32(0, regs + CSI_INT_MSK_PHY_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_PKT_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_PHY);
+	sys_write32(0, regs + CSI_INT_MSK_LINE);
+	sys_write32(0, regs + CSI_INT_MSK_IPI_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_BNDRY_FRAME_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_SEQ_FRAME_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_CRC_FRAME_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_PLD_CRC_FATAL);
+	sys_write32(0, regs + CSI_INT_MSK_DATA_ID);
+	sys_write32(0, regs + CSI_INT_MSK_ECC_CORRECT);
+}
+
 static void csi2_dw_irq_on(uintptr_t regs)
 {
+	/*
+	 * Review round (post-3511cd180): the CSI_INT_ST_* registers are
+	 * read-to-clear (csi2_dw_irq() reads each one to decode which event
+	 * fired, same as CSI_INT_ST_MAIN itself). Between csi2_dw_init()'s
+	 * mask-before-arm (csi2_dw_irq_off(), above -- fixed for the
+	 * pre-sensor-park spurious-event window) and this function actually
+	 * unmasking the real sources, ANY transient event the D-PHY/CSI-2
+	 * host saw would still be sitting latched here, ready to fire the
+	 * instant the corresponding mask bit goes live below. Read (and
+	 * discard) every status register first so unmasking starts from a
+	 * clean slate.
+	 */
+	(void)sys_read32(regs + CSI_INT_ST_MAIN);
+	(void)sys_read32(regs + CSI_INT_ST_PHY_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_PKT_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_PHY);
+	(void)sys_read32(regs + CSI_INT_ST_LINE);
+	(void)sys_read32(regs + CSI_INT_ST_IPI_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_BNDRY_FRAME_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_SEQ_FRAME_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_CRC_FRAME_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_PLD_CRC_FATAL);
+	(void)sys_read32(regs + CSI_INT_ST_DATA_ID);
+	(void)sys_read32(regs + CSI_INT_ST_ECC_CORRECT);
+
 	sys_write32(INT_PHY_FATAL_MASK, regs + CSI_INT_MSK_PHY_FATAL);
 	sys_write32(INT_PKT_FATAL_MASK, regs + CSI_INT_MSK_PKT_FATAL);
 	sys_write32(INT_PHY_MASK, regs + CSI_INT_MSK_PHY);
@@ -670,6 +745,31 @@ static int csi2_dw_get_format(const struct device *dev, struct video_format *fmt
 	return ret;
 }
 
+/*
+ * Bench run 76 (stage 5, task "derive int_time_max from the sensor's
+ * CURRENT frame interval"): same forwarding shape as csi2_dw_get_format()
+ * above, extended to frame interval -- neither this driver nor video_alif.c
+ * implemented .get_frmival before now, so isp_pico.c's isp_apply_ae() had
+ * no way to learn the sensor's actual configured rate and fell back to a
+ * hardcoded 15 fps assumption. Alp Lab AB.
+ */
+static int csi2_dw_get_frmival(const struct device *dev, struct video_frmival *frmival)
+{
+	const struct csi2_dw_config *config = dev->config;
+	struct csi2_dw_data *data = dev->data;
+
+	if (!frmival) {
+		return -EINVAL;
+	}
+
+	if (!config->sensor[data->current_sensor]) {
+		LOG_ERR("Invalid sensor selected!");
+		return -ENODEV;
+	}
+
+	return video_get_frmival(config->sensor[data->current_sensor], frmival);
+}
+
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param + its validation; the caps forwarder loses its `ep` arg.
  */
@@ -708,6 +808,7 @@ static int csi2_dw_get_caps(const struct device *dev, struct video_caps *caps)
 static DEVICE_API(video, csi2_dw_driver_api) = {
 	.set_format = csi2_dw_set_format,
 	.get_format = csi2_dw_get_format,
+	.get_frmival = csi2_dw_get_frmival,
 	.set_stream = csi2_dw_set_stream,
 	.get_caps = csi2_dw_get_caps,
 };
@@ -766,6 +867,7 @@ static int csi2_dw_init(const struct device *dev)
 		return ret;
 	}
 
+	csi2_dw_irq_off(DEVICE_MMIO_GET(dev));
 	config->irq_config_func(dev);
 
 	data->current_sensor = config->rx_dphy_ids[0];
@@ -910,6 +1012,15 @@ static int csi2_dw_init(const struct device *dev)
                                                                                                    \
 	DEVICE_DT_INST_DEFINE(i, &csi2_dw_init, NULL, &data_##i, &config_##i, POST_KERNEL,         \
 			      CONFIG_VIDEO_MIPI_CSI2_DW_INIT_PRIORITY, &csi2_dw_driver_api);       \
+                                                                                                   \
+	/* Chains this device onto v4.4's control-registry walk (video_find_ctrl(),               \
+	 * drivers/video/video_ctrls.c): a control request against the CSI bridge                 \
+	 * falls through to .src_dev, sensor[0] -- the primary of the two muxed                    \
+	 * sensor ports this instance can host (config_##i.sensor[]).  Dual-sensor                 \
+	 * boards get correct resolution only for whichever sensor is on port 0;                   \
+	 * a src_dev that tracks the ACTIVE mux leg is future work, not needed by                  \
+	 * any board this SDK ships today (single-sensor per CSI instance). */                     \
+	VIDEO_DEVICE_DEFINE(csi_vdev_##i, DEVICE_DT_INST_GET(i), CSI2_GET_SENSOR(i, 0));           \
                                                                                                    \
 	static void csi2_dw_config_func_##i(const struct device *dev)                              \
 	{                                                                                          \

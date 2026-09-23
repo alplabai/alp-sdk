@@ -1,0 +1,76 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-isp-ov5647-capture overlay for the E1M-AEN803 (Ensemble E8, M55-HE)
+ * RAM-run: stage 3 of the ISP-Pico bring-up, a REAL sensor frame through
+ * the ISP.
+ *
+ * The sensor -> csi -> cam graph (dphy / csi / cam, all status="okay", plus
+ * the OV5647 node itself) comes from the two shields stacked at build time
+ * (`-DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"` -- see
+ * zephyr/boards/shields/e1m_evk_rpi_csi/ and
+ * zephyr/boards/shields/raspberry_pi_camera_module_1/).  This file adds the
+ * ISP-specific half of the graph on top, mirroring Alif's own sdk-alif
+ * samples/drivers/viewfinder/boards/ov5675_mipi_isp_viewfinder.overlay
+ * EXACTLY:
+ *   - &cam gets capture-mode = "snapshot" (Alif's choice; our advisor
+ *     worried snapshot mode stops the CPI after every frame, but Alif's own
+ *     working recipe uses it and stage 1's TPG work already showed
+ *     guessing against undocumented library internals wastes runs -- follow
+ *     Alif first, verify on the bench, revisit only if snapshot mode proves
+ *     wrong) and data-mode = "16-bit" (matches what the DW CSI-2 RX outputs
+ *     for RAW10 -- see video_alif.c's data-mask/data-mode register program
+ *     in alif_video_cam_setup(), gated on CPI_DATA_MODE_16_BIT).
+ *   - cam port@1 (the direct AXI/memory capture endpoint that
+ *     e1m_evk_rpi_csi's shared e1m_aen.dtsi declares for the sensor-only
+ *     aen-camera-firstlight path) is DELETED here: the ISP is the CPI's
+ *     ONLY consumer on this path, exactly like Alif's overlay (no cam
+ *     port@1 at all).  video_alif.c's `.axi_bus_ep =
+ *     DT_NODE_EXISTS(DT_INST_PORT_BY_ID(i, 1))` checks structural
+ *     existence, not connection -- leaving the base shield's port@1 node in
+ *     place would wrongly report an AXI consumer that isn't there.
+ *   - cam port@2 -> isp, and &isp's own port, complete the graph
+ *     (sensor -> csi -> cam port@0; cam port@2 -> isp).
+ *
+ * See src/main.c for the ISP INPUT format (VIDEO_PIX_FMT_SBGGR10P 640x480) and
+ * why it needs the video_alif.c CPI translation fix (this branch's
+ * isp-ov5647 commit) to actually reach our SBGGR10P-only OV5647 driver.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};
+
+&cam {
+	capture-mode = "snapshot";
+	data-mode = "16-bit";
+
+	ports {
+		/delete-node/ port@1;
+
+		port@2 {
+			reg = <2>;
+			cam_isp_ep_out: endpoint {
+				remote-endpoint-label = "isp_ep_in";
+			};
+		};
+	};
+};
+
+&isp {
+	status = "okay";
+
+	port {
+		isp_ep_in: endpoint {
+			remote-endpoint-label = "cam_isp_ep_out";
+		};
+	};
+};

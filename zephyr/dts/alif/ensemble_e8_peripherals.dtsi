@@ -1778,10 +1778,11 @@
 	 * from the fork e4_e6_e8.dtsi (isp@49046000, IRQs 367 "isp" / 368
 	 * "mi-isp").  Tier-2 OPT-IN -- the driver links the hal_alif libisp
 	 * (Vivante) blob (CONFIG_VIDEO_ISP_VSI -> USE_ALIF_ISP_LIB) and is
-	 * default n.  Left status="disabled": enabling it needs the libisp
-	 * wrapper bumped (FLAGGED hal_alif version mismatch -- see the Kconfig)
-	 * + a camera -> isp -> sink media-controller graph (bench-unknown).
-	 * BENCH-UNVERIFIED.
+	 * default n.  Left status="disabled" here: COMPILES + LINKS clean
+	 * against the pinned hal_alif v2.3.0 wrapper (see the Kconfig), enabled
+	 * per-board by an overlay (examples/aen/aen-isp-regcheck).  Live capture
+	 * still needs a camera -> isp -> sink media-controller graph.
+	 * BENCH-UNVERIFIED (no camera sensor wired on this hardware batch).
 	 */
 	isp: isp@49046000 {
 		compatible = "vsi,isp-pico";
