@@ -345,6 +345,35 @@ responder to 0 and back with `CAM_EN`.
   (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
   capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`) and is not driven yet.
+- **Display (alternative, LVDS panel via bridge adapter):** the same
+  40-pin DSI connector (J6) can instead drive a **Riverdi
+  RVT121HVDFWCA0-B** 12.1" 1280x800 native-LVDS panel through a
+  maintainer-built adapter PCB carrying a **TI SN65DSI83** MIPI DSI-to-
+  FlatLink(LVDS) bridge (I2C `0x2c` assumed -- ADDR-strap-selectable
+  between `0x2c`/`0x2d`, unconfirmed against the adapter).  With an
+  E1M-AEN SoM, add the `e1m_evk_rvt121hvdfwca0` Zephyr shield
+  (`zephyr/boards/shields/`) -- see `examples/aen/aen-lvds-display`,
+  which renders at ~30.06 Hz (2 DSI data lanes, **RGB888**,
+  non-burst-sync-events, 36.363636 MHz pixel clock -- deliberately under
+  the panel's own ~66.3 MHz native-60 Hz minimum for this bring-up; see
+  the shield overlay's header comment for the clock math and a fallback
+  ladder).  RGB888 + non-burst, not RGB666-packed + burst: the panel is
+  VESA-24, so an 18 bpp link would show every colour at roughly 1/4
+  intensity, and burst RGB888 at this pixel clock (581.8 Mbps/lane)
+  exceeds the Ensemble E8's two-lane 500 Mbps application-note ceiling.
+  BENCH-UNVERIFIED end to end: no adapter-PCB hardware was available for
+  this change, and every GPIO-expander role the shield assumes (bridge
+  EN, the touch controller's reset) is carried over from the RK055
+  shield's role map and marked UNVERIFIED in the overlay.  The panel's
+  own **ILI2511** capacitive-touch controller (I2C `0x41`, same
+  `EVK_I2C_BUS_DSI_CSI` bus as above) is bound by the shield
+  (`ilitek,ili251x` Zephyr input driver) and POLLED: the carrier's touch
+  INT lands on a CC3501E-owned pad.  HARDWARE CAVEAT: the panel's
+  backlight draws ~1 A from the E1M-EVK's own +5V rail (via J6 pins
+  39/40) as soon as the shield's `bl_en_hog` runs at boot, even if the
+  bridge or DSI link never comes up -- check the adapter PCB's and the
+  DSI FFC's current rating before powering it for any length of time on
+  the unverified adapter.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
