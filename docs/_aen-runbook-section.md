@@ -122,6 +122,18 @@ Two host prerequisites:
   as a faster SWD-only alternative that skips the SE-UART reset race, not a
   requirement.
 
+**The ATOC-replace guard (#2262).** `app-write-mram -p` REPLACES the whole
+resident ATOC — it is not a merge — so before burning, `west flash` now reads
+the resident ATOC back over the SE-UART (`maintenance -opt getbanner`/`gettoc`,
+the same non-destructive query the bench scripts use) and refuses to burn if
+that would silently delist a resident app entry outside this build's own
+`ALP-HE`/`ALP-HP` section, or if the read could not be verified. Pass
+`--replace-atoc` once you have confirmed losing the other entry is intended —
+same flag spelling as `flash-run.sh`'s Flow A guard, and distinct from Flow D's
+`--atoc-unqueryable`. Every run leaves `<build_dir>/alif_flash/atoc-before.txt`
+(the raw transcript) and `<build_dir>/alif_flash/atoc-guard.json` (the
+machine-readable verdict).
+
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and `west flash`
 > works day-1 with no manual SETOOLS step. You only need the manual path above

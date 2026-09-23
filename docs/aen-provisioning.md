@@ -34,7 +34,12 @@ runs `app-gen-toc` locally, with no SE-UART involved in that step):
   This is also what plain `west flash` runs: the board's default flash
   runner is `alif_flash` (`scripts/west_commands/runners/alif_flash.py`),
   which drives `app-gen-toc` + `app-write-mram` over the **SE-UART** — `west
-  flash` does **not** go over SWD.
+  flash` does **not** go over SWD. Before burning, the runner reads the
+  resident ATOC back over the SE-UART and refuses the write if it would
+  silently delist a resident app entry belonging to a different flash (e.g.
+  the other M55 core, or an A32 Linux boot chain) or if that read could not
+  be verified — pass `--replace-atoc` once you've confirmed the loss is
+  intended (#2262).
 - **Flow D — J-Link DIRECT MRAM flash over SWD** (the bench's SWD
   alternative to Flow A; not what `west flash` uses by default). J-Link's
   built-in Alif MRAM loader activates when you select the **part-number

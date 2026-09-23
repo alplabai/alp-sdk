@@ -128,6 +128,16 @@ J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
 the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
 §0.5 for the exact sequence.
 
+**ATOC-replace guard (#2262).** Both `app-write-mram -p` above and the
+`alif_flash` west runner REPLACE the whole resident ATOC, not merge it —
+before burning, the runner now reads the resident ATOC back over the SE-UART
+(`maintenance -opt getbanner`/`gettoc`, the same non-destructive query
+`bench_atoc_replace_guard` in `scripts/bench/aen/bench-env.sh` uses for Flow
+A/D's shell helpers) and refuses the write if it would silently delist a
+resident entry outside this build's own `ALP-HE`/`ALP-HP` section, or if the
+read could not be verified. `--replace-atoc` is the explicit override (same
+spelling as `flash-run.sh`'s own flag).
+
 ### Flow A — Dual-core deferred-TOC boot
 
 Booting a **second, dependent** M55 image (a peer the master releases at

@@ -223,3 +223,167 @@ def test_cli_main_rejects_and_exits_nonzero(tmp_path, aen_atoc):
         ' "ALP-HP": {"cpu_id": "M55_HP", "mramAddress": "0x80010000", "flags": ["boot"]}}',
         encoding="utf-8")
     assert aen_atoc.main([str(cfg)]) == 1
+
+
+# ---------------------------------------------------------------------
+# #2262 ATOC-replace guard -- the Python port of bench-env.sh's
+# bench_atoc_replace_guard. See tests/scripts/test_atoc_guard_parity.py
+# for the bash<->Python parity checks against the same real fixtures;
+# these tests exercise the Python side's own unit behaviour, including a
+# few shapes the bash side's own test suite doesn't carry (CRLF, a
+# leading-tab row).
+# ---------------------------------------------------------------------
+
+
+def test_strip_csi_removes_colour_and_cursor_sequences(aen_atoc):
+    text = "\x1b[94m |    DEVICE|   CM0+ |\x1b[0m\x1b[?25h\n"
+    assert aen_atoc.strip_csi(text) == " |    DEVICE|   CM0+ |\n"
+
+
+def test_is_valid_ses_banner_tolerates_leading_space_and_ansi(aen_atoc):
+    # Real capture (2026-09-07): SETOOLS pads the banner with a LEADING
+    # SPACE -- a bare ^SES anchor rejects every real banner.
+    banner = "\x1b[94m SES A1 v1.110.0 Mar  4 2026 19:06:23 \x1b[0m\n"
+    assert aen_atoc.is_valid_ses_banner(banner)
+
+
+def test_is_valid_ses_banner_rejects_garbled_text(aen_atoc):
+    assert not aen_atoc.is_valid_ses_banner("garbage, no banner here\n")
+
+
+def test_is_no_atoc_found_matches_exact_line_case_insensitively(aen_atoc):
+    assert aen_atoc.is_no_atoc_found("no atoc found on target device.\n")
+    assert aen_atoc.is_no_atoc_found("No ATOC Found On Target Device.\n")
+
+
+def test_is_no_atoc_found_rejects_substring_match(aen_atoc):
+    # An error line that merely CONTAINS "no atoc" must not decode as a
+    # genuinely empty board (alp-sdk#2026 review finding).
+    assert not aen_atoc.is_no_atoc_found("no ATOC response from target\n")
+
+
+def test_parse_resident_atoc_table_skips_header_and_separator_rows(aen_atoc):
+    table = (
+        "+----------+--------+\n"
+        "|   Name   |  CPU   |\n"
+        "+----------+--------+\n"
+        "|   DEVICE |  CM0+  |\n"
+        "+----------+--------+\n"
+    )
+    assert aen_atoc.parse_resident_atoc_table(table) == [("DEVICE", "CM0+")]
+
+
+def test_parse_resident_atoc_table_tolerates_leading_tab_before_pipe(aen_atoc):
+    table = "\t|   DEVICE |  CM0+  |\n"
+    assert aen_atoc.parse_resident_atoc_table(table) == [("DEVICE", "CM0+")]
+
+
+def test_parse_resident_atoc_table_strips_crlf(aen_atoc):
+    table = "|   DEVICE |  CM0+  |\r\n|   ALP-HE | M55-HE |\r\n"
+    assert aen_atoc.parse_resident_atoc_table(table) == [
+        ("DEVICE", "CM0+"), ("ALP-HE", "M55-HE")]
+
+
+def test_parse_resident_atoc_table_keeps_current_bank_marker_in_name(aen_atoc):
+    # The exemption strips "* " only for the baseline check
+    # (foreign_resident_entries); the raw parse keeps it, matching
+    # bench-env.sh's awk parse exactly.
+    table = "|  * SERAM0|   CM0+ |\n"
+    assert aen_atoc.parse_resident_atoc_table(table) == [("* SERAM0", "CM0+")]
+
+
+def test_compute_query_status_ok_when_rows_present(aen_atoc):
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "ok"
+
+
+def test_compute_query_status_empty_on_no_atoc_line(aen_atoc):
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, "No ATOC found on target device.\n", 0) == "empty"
+
+
+def test_compute_query_status_unverified_when_maintenance_missing(aen_atoc):
+    assert aen_atoc.compute_query_status(False, None, None, None, None) == "unverified"
+
+
+def test_compute_query_status_unverified_on_bad_banner_even_if_gettoc_ok(aen_atoc):
+    # A gettoc read off the wrong serial device is not a safe verdict --
+    # a bad/missing banner forces unverified regardless of gettoc's own rc.
+    assert aen_atoc.compute_query_status(
+        True, "not a banner\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "unverified"
+
+
+def test_compute_query_status_unverified_on_nonzero_banner_exit(aen_atoc):
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 3, "|   DEVICE |  CM0+  |\n", 0) == "unverified"
+
+
+def test_compute_query_status_unverified_on_nonzero_gettoc_exit(aen_atoc):
+    # Partial rows plus a non-zero exit must never decode as "ok".
+    assert aen_atoc.compute_query_status(
+        True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\nERROR\n", 1) == "unverified"
+
+
+def test_compute_query_status_unverified_when_rc_zero_but_nothing_parses(aen_atoc):
+    assert aen_atoc.compute_query_status(True, "SES A1 v1.0\n", 0, "", 0) == "unverified"
+
+
+def test_foreign_resident_entries_exempts_device_and_seram_on_cm0(aen_atoc):
+    resident = [("DEVICE", "CM0+"), ("* SERAM0", "CM0+"), ("SERAM1", "CM0+"),
+                ("ALP-HE", "M55-HE")]
+    assert aen_atoc.foreign_resident_entries(resident, ["ALP-HE"]) == []
+
+
+def test_foreign_resident_entries_flags_baseline_name_on_wrong_cpu(aen_atoc):
+    # A row that merely SHARES a baseline name on a different core is a
+    # colliding app entry, not SE firmware -- must still trip the guard.
+    resident = [("SERAM1", "M55-HE")]
+    assert aen_atoc.foreign_resident_entries(resident, ["ALP-HE"]) == ["SERAM1"]
+
+
+def test_foreign_resident_entries_names_every_non_allowed_entry(aen_atoc):
+    resident = [("DEVICE", "CM0+"), ("BOOTLOAD", "A32_0"), ("A32_APP", "A32_0"),
+                ("HP_APP", "M55-HP"), ("HE_APP", "M55-HE")]
+    assert aen_atoc.foreign_resident_entries(resident, ["ALP-HE"]) == \
+        ["BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"]
+
+
+def test_decide_atoc_guard_unverified_checked_before_foreign(aen_atoc):
+    verdict = aen_atoc.decide_atoc_guard("unverified", ["SOMETHING"], False)
+    assert verdict.status == "refused-unverified"
+    assert verdict.refused
+    assert verdict.foreign == []
+
+
+def test_decide_atoc_guard_replace_atoc_on_clean_board_stays_clear(aen_atoc):
+    # --replace-atoc on an already-clean, verified board must not report
+    # "replaced" -- there is nothing to override.
+    verdict = aen_atoc.decide_atoc_guard("ok", [], True)
+    assert verdict.status == "clear"
+    assert not verdict.refused
+
+
+def test_decide_atoc_guard_replace_atoc_on_clean_empty_board_stays_empty(aen_atoc):
+    verdict = aen_atoc.decide_atoc_guard("empty", [], True)
+    assert verdict.status == "empty"
+    assert not verdict.refused
+
+
+def test_decide_atoc_guard_replace_atoc_overrides_unverified(aen_atoc):
+    verdict = aen_atoc.decide_atoc_guard("unverified", [], True)
+    assert verdict.status == "replaced"
+    assert not verdict.refused
+
+
+def test_decide_atoc_guard_replace_atoc_overrides_foreign(aen_atoc):
+    verdict = aen_atoc.decide_atoc_guard("ok", ["BOOTLOAD"], True)
+    assert verdict.status == "replaced"
+    assert verdict.foreign == ["BOOTLOAD"]
+    assert not verdict.refused
+
+
+def test_decide_atoc_guard_foreign_without_override_refuses(aen_atoc):
+    verdict = aen_atoc.decide_atoc_guard("ok", ["BOOTLOAD"], False)
+    assert verdict.status == "refused-foreign"
+    assert verdict.refused
+    assert verdict.foreign == ["BOOTLOAD"]

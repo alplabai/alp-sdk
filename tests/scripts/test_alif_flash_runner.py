@@ -21,6 +21,8 @@ Run locally:
 
 from __future__ import annotations
 
+import json
+import logging
 import sys
 import types
 from pathlib import Path
@@ -42,6 +44,16 @@ if "runners.core" not in sys.modules:
     class _ZephyrBinaryRunner:
         def __init__(self, cfg):
             self.cfg = cfg
+            # do_run integration tests (below) exercise the #2262 ATOC
+            # guard end to end; they need a check_call that records
+            # rather than actually executing (so a real app-gen-toc /
+            # app-write-mram is never required) and a logger the real
+            # do_run/`_run_atoc_guard` can call unconditionally.
+            self.calls = []
+            self.logger = logging.getLogger("test_alif_flash_runner")
+
+        def check_call(self, cmd, cwd=None):
+            self.calls.append((list(cmd), cwd))
 
     _fake_core.RunnerCaps = _RunnerCaps
     _fake_core.ZephyrBinaryRunner = _ZephyrBinaryRunner
@@ -251,3 +263,189 @@ def test_build_atoc_config_hp_uses_alp_hp_section() -> None:
     cfg = alif_flash._build_atoc_config("myapp", shape)
     assert '"ALP-HP"' in cfg
     assert '"cpu_id": "M55_HP"' in cfg
+
+
+# ---------------------------------------------------------------------
+# do_run's #2262 pre-burn ATOC guard -- end-to-end against the real
+# do_run/_run_atoc_guard, with only the SE-UART subprocess boundary
+# (alif_flash._run_maintenance) and check_call (see the fake
+# ZephyrBinaryRunner above) stubbed. This exercises the actual wiring:
+# _atoc_section_name -> allowed set, the guard running strictly before
+# app-write-mram, the verdict JSON, and --replace-atoc.
+# ---------------------------------------------------------------------
+
+_CLEAN_HE_GETTOC = (
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
+_FOREIGN_GETTOC = (
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "| BOOTLOAD | A32_0  | 0x80002000 | 0x8057A8F0 | ---------- | 0x80002000 |"
+    "    28813 |  0.4.3| u VB |\n"
+    "|   A32_APP | A32_0  | 0x80020000 | 0x8057B2F0 | ---------- | ---------- |"
+    "  2290048 |  1.0.0| u V  |\n"
+    "|   HP_APP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+    "|   HE_APP | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
+_NO_ATOC_TEXT = "No ATOC found on target device.\n"
+_COMPLIANT_BANNER = "SES A1 v1.110.0 Mar  4 2026 19:06:23\n"
+
+
+class _FakeCfg:
+    def __init__(self, bin_file, build_dir):
+        self.bin_file = bin_file
+        self.build_dir = build_dir
+
+
+def _bin_with_reset_vector_bytes(rv: int, sp: int = 0x20080000) -> bytes:
+    return sp.to_bytes(4, "little") + rv.to_bytes(4, "little") + b"\x00" * 8
+
+
+def _make_runner(tmp_path, device="AE822FA0E5597LS0_HE", reset_vector=0x58000401,
+                  maintenance_available=True, replace_atoc=False):
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    (setools / "app-gen-toc").write_bytes(b"")
+    (setools / "app-write-mram").write_bytes(b"")
+    if maintenance_available:
+        (setools / "maintenance").write_bytes(b"")
+
+    build_dir = tmp_path / "build"
+    (build_dir / "zephyr").mkdir(parents=True)
+    bin_file = build_dir / "zephyr" / "zephyr.bin"
+    bin_file.write_bytes(_bin_with_reset_vector_bytes(reset_vector))
+
+    cfg = _FakeCfg(bin_file=str(bin_file), build_dir=str(build_dir))
+    runner = alif_flash.AlifFlashBinaryRunner(
+        cfg, device, setools_dir=str(setools), se_uart="fake-uart",
+        se_uart_baud="57600", replace_atoc=replace_atoc)
+    return runner
+
+
+def _stub_maintenance(monkeypatch, banner=(_COMPLIANT_BANNER, 0), gettoc=("", 0)):
+    def _fake(maintenance_path, se_uart, baud, opt):
+        return banner if opt == "getbanner" else gettoc
+    monkeypatch.setattr(alif_flash, "_run_maintenance", _fake)
+
+
+def _write_mram_was_called(runner) -> bool:
+    return any("app-write-mram" in cmd[0] for cmd, _cwd in runner.calls)
+
+
+def _verdict(runner) -> dict:
+    path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-guard.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_do_run_refuses_on_foreign_entry_and_never_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_FOREIGN_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "refused-foreign"
+    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
+        assert entry in verdict["foreign"]
+
+
+def test_do_run_clean_board_proceeds_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "clear"
+
+
+def test_do_run_no_atoc_found_proceeds_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_NO_ATOC_TEXT, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "empty"
+
+
+def test_do_run_refuses_when_maintenance_binary_missing(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, maintenance_available=False)
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "refused-unverified"
+
+
+def test_do_run_refuses_when_banner_is_missing_or_malformed(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, banner=("not a banner\n", 0), gettoc=(_CLEAN_HE_GETTOC, 0))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+
+
+def test_do_run_refuses_when_gettoc_exits_nonzero(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 1))
+    with pytest.raises(RuntimeError, match="Confirm by hand what is resident"):
+        runner.do_run("flash")
+    assert not _write_mram_was_called(runner)
+
+
+def test_do_run_replace_atoc_overrides_foreign_entry_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, replace_atoc=True)
+    _stub_maintenance(monkeypatch, gettoc=(_FOREIGN_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "replaced"
+
+
+def test_do_run_replace_atoc_overrides_unverified_read_and_burns(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, maintenance_available=False, replace_atoc=True)
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    assert _verdict(runner)["status"] == "replaced"
+
+
+def test_do_run_allowed_entry_is_alp_he_for_an_he_build(tmp_path, monkeypatch) -> None:
+    # A resident ALP-HP entry is foreign to an HE build's own write -- the
+    # allowed set must be exactly {'ALP-HE'}, derived from the build's own
+    # shape (_atoc_section_name), not a hardcoded/union set.
+    runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HE",
+                           reset_vector=0x58000401)
+    hp_only = (
+        "|   ALP-HP | M55-HP | 0x8057D230 | 0x8057C830 | 0x50000000 | 0x50000000 |"
+        "     4480 |  1.0.0| uLVB |\n"
+    )
+    _stub_maintenance(monkeypatch, gettoc=(hp_only, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert _verdict(runner)["foreign"] == ["ALP-HP"]
+    assert _verdict(runner)["allowed"] == ["ALP-HE"]
+
+
+def test_do_run_allowed_entry_is_alp_hp_for_an_hp_build(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path, device="AE822FA0E5597LS0_HP",
+                           reset_vector=0x50000401)
+    he_only = (
+        "|   ALP-HE | M55-HE | 0x8057EDB0 | 0x8057E3B0 | 0x58000000 | 0x58000000 |"
+        "     4480 |  1.0.0| uLVB |\n"
+    )
+    _stub_maintenance(monkeypatch, gettoc=(he_only, 0))
+    with pytest.raises(RuntimeError, match="REPLACES every app ATOC entry"):
+        runner.do_run("flash")
+    assert _verdict(runner)["foreign"] == ["ALP-HE"]
+    assert _verdict(runner)["allowed"] == ["ALP-HP"]
+
+
+def test_do_run_writes_transcript_before_the_burn_step(tmp_path, monkeypatch) -> None:
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    transcript = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt"
+    assert transcript.is_file()
+    assert "ALP-HE" in transcript.read_text(encoding="utf-8")

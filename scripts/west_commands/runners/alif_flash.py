@@ -42,6 +42,36 @@ slot0 provisioning; the two-blob bench Flow D helper
 (``scripts/bench/aen/flash-jlink-mramxip.sh``) remains available as an
 alternative, not a prerequisite.
 
+Pre-burn ATOC-replace guard (#2262)
+------------------------------------
+``app-write-mram -c <uart> -p`` REPLACES the device's entire ATOC with
+exactly the entries staged above (``DEVICE`` + this build's own
+``ALP-HE``/``ALP-HP``) -- it is not a merge. Any OTHER resident app
+entry (the other M55 core's own entry, an A32 Linux boot chain
+``BOOTLOAD``/``A32_APP``, ...) is silently delisted the instant the
+write lands, with no error and no SES warning (``[SES] ATOC ok`` prints
+either way). This is the exact loss #2025 recorded on an AEN EVK bench
+unit (2026-09-07), reached through this ``west flash`` door instead of
+the bench scripts' door that #2025 already closed.
+
+Before burning, ``do_run`` now reads the resident ATOC back over the
+SE-UART with the same two documented, non-destructive SETOOLS queries
+the bench guard uses (``maintenance -opt getbanner`` then ``-opt
+gettoc``), and refuses the burn -- before anything is written -- when a
+resident entry outside this run's own section would be delisted, or
+when that read could not be verified (missing ``maintenance``, a
+malformed/absent SES banner, or a non-zero query exit). ``--replace-atoc``
+is the explicit override, spelled identically to
+``scripts/bench/aen/flash-run.sh``'s own Flow A flag -- it is NOT Flow
+D's ``--atoc-unqueryable`` (#2027) and the two are never merged or
+aliased. The parse/decision logic is the single shared implementation in
+``scripts/aen_atoc.py`` (``compute_query_status`` /
+``foreign_resident_entries`` / ``decide_atoc_guard``), ported from (and
+parity-tested against) ``bench_atoc_replace_guard`` in
+``scripts/bench/aen/bench-env.sh`` so the two never drift apart. Every
+run leaves a transcript + a machine-readable verdict under
+``<build_dir>/alif_flash/`` (see ``_run_atoc_guard`` below).
+
 Why this lives in alp-sdk and not upstream Zephyr
 -------------------------------------------------
 Upstream Zephyr's ``runners`` package has no ``alif_flash`` runner, and
@@ -63,8 +93,11 @@ Setup (one-off, per host)
 '''
 
 import importlib.util
+import json
 import os
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 from runners.core import RunnerCaps, ZephyrBinaryRunner
@@ -79,6 +112,16 @@ def _load_aen_atoc():
     path = Path(__file__).resolve().parents[2] / 'aen_atoc.py'
     spec = importlib.util.spec_from_file_location('aen_atoc', path)
     mod = importlib.util.module_from_spec(spec)
+    # Register in sys.modules BEFORE exec_module: aen_atoc.py's
+    # AtocGuardVerdict (#2262) is a `dataclass`, and on Python 3.14
+    # `dataclasses` resolves `cls.__module__` back through `sys.modules`
+    # while processing the class body -- an unregistered module (the
+    # bare module_from_spec()+exec_module() pair used here before #2262)
+    # makes that lookup return None and crash with `AttributeError:
+    # 'NoneType' object has no attribute '__dict__'` the moment a
+    # dataclass appears in this file. Harmless for every symbol that
+    # existed before #2262; required now.
+    sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -115,6 +158,11 @@ _CPU_PROFILES = {
     'HP': ('M55_HP', '0x50000000'),
 }
 _DEFAULT_CPU_SUFFIX = 'HE'  # boards that omit --device were always HE-only
+
+# Same fallback as bench-env.sh's `${SE_UART_BAUD:-57600}` -- keep the two
+# baud defaults identical so a host set up for the bench scripts needs no
+# extra flag here either (#2262).
+_DEFAULT_SE_UART_BAUD = '57600'
 
 
 def _cpu_suffix(device):
@@ -224,6 +272,16 @@ def _select_app_shape(reset_vector, cpu_suffix):
         'Refusing to burn a mismatched image (see docs/aen-provisioning.md).')
 
 
+def _atoc_section_name(app_shape):
+    '''The ATOC entry name this build's write owns -- 'ALP-HE' or
+    'ALP-HP', derived from app_shape['cpu_id'] ('M55_HE'/'M55_HP'). The
+    ONE place this string is built: both _build_atoc_config (what gets
+    staged) and the pre-burn guard's `allowed` set (#2262 -- what the
+    guard permits this run to (re)write) call this, so the two can never
+    drift apart into staging one section while guarding another.'''
+    return f'ALP-{app_shape["cpu_id"].split("_")[1]}'
+
+
 def _build_atoc_config(name, app_shape):
     '''Return the signed-ATOC JSON for a build. DEVICE keeps the
     factory device config (signed); the app entry is signed + shaped per
@@ -238,7 +296,7 @@ def _build_atoc_config(name, app_shape):
         f'                 "cpu_id": "{app_shape["cpu_id"]}", '
         f'{addr_field}, '
         f'"flags": [{flags}] }}')
-    section = f'ALP-{app_shape["cpu_id"].split("_")[1]}'
+    section = _atoc_section_name(app_shape)
     return (
         '{\n'
         '    "DEVICE":  { "disabled": false, '
@@ -250,11 +308,53 @@ def _build_atoc_config(name, app_shape):
         '}\n')
 
 
+def _run_maintenance(maintenance_path, se_uart, baud, opt):
+    '''Run `maintenance -b <baud> -c <se_uart> -opt <opt>` from
+    maintenance_path's own directory (mirrors bench-env.sh's `( cd
+    "$SETOOLS_DIR" && ./maintenance ... )`), combining stdout+stderr into
+    one transcript (mirrors its `2>&1`). Returns (output_text, returncode)
+    and never raises on a non-zero exit -- a gettoc that fails after
+    emitting partial table rows (a serial timeout mid-read) is a signal
+    the #2262 guard must see, not an exception to swallow.'''
+    try:
+        proc = subprocess.run(
+            [str(maintenance_path), '-b', str(baud), '-c', se_uart,
+             '-opt', opt],
+            cwd=str(maintenance_path.parent), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
+            errors='replace')
+    except OSError as exc:
+        return f'{exc}\n', 1
+    return proc.stdout, proc.returncode
+
+
+def _format_atoc_transcript(se_uart, baud, maintenance_available,
+                             banner_text, banner_rc, gettoc_text,
+                             gettoc_rc):
+    '''Render the #2262 pre-burn transcript kept at
+    <build_dir>/alif_flash/atoc-before.txt -- always the record of what
+    was resident (or why it could not be read) immediately before the
+    burn step, whether or not the run went on to burn.'''
+    if not maintenance_available:
+        return (
+            f"GUARD: SETOOLS 'maintenance' tool not found next to "
+            f"app-write-mram -- cannot query the resident ATOC over "
+            f"{se_uart}\n")
+    return (
+        f'$ maintenance -b {baud} -c {se_uart} -opt getbanner  '
+        f'(exit {banner_rc})\n'
+        f'{banner_text or ""}\n'
+        f'$ maintenance -b {baud} -c {se_uart} -opt gettoc  '
+        f'(exit {gettoc_rc})\n'
+        f'{gettoc_text or ""}\n')
+
+
 class AlifFlashBinaryRunner(ZephyrBinaryRunner):
     '''Flash an AEN801 image to MRAM with the Alif SETOOLS (Flow A).'''
 
     def __init__(self, cfg, device, setools_dir=None, se_uart=None,
-                 gen_toc='app-gen-toc', write_mram='app-write-mram'):
+                 gen_toc='app-gen-toc', write_mram='app-write-mram',
+                 se_uart_baud=None, replace_atoc=False):
         super().__init__(cfg)
         # --device first 5 chars must match the SETOOLS global-cfg.db
         # Part# ("AE822..."); the runner forwards it for the staged
@@ -265,6 +365,10 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         self.se_uart = se_uart
         self.gen_toc = gen_toc
         self.write_mram = write_mram
+        # Pre-burn ATOC guard (#2262) -- see the module docstring section
+        # of the same name.
+        self.se_uart_baud = se_uart_baud or _DEFAULT_SE_UART_BAUD
+        self.replace_atoc = replace_atoc
 
     @classmethod
     def name(cls):
@@ -305,6 +409,21 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
             '--app-write-mram', dest='write_mram', default='app-write-mram',
             help='app-write-mram executable name/path '
                  '(default: app-write-mram).')
+        parser.add_argument(
+            '--se-uart-baud', dest='se_uart_baud',
+            help='Baud rate for the pre-burn ATOC guard\'s (#2262) '
+                 '`maintenance -opt getbanner`/`gettoc` queries. Defaults '
+                 'to $SE_UART_BAUD, else 57600 -- matches '
+                 'scripts/bench/aen/bench-env.sh.')
+        parser.add_argument(
+            '--replace-atoc', dest='replace_atoc', action='store_true',
+            help='Override the pre-burn ATOC guard (#2262) and burn even '
+                 'when a resident app entry outside this build\'s own '
+                 'ALP-HE/ALP-HP section would be silently delisted, or '
+                 'when the resident ATOC could not be verified. Same '
+                 'spelling as flash-run.sh\'s Flow A flag -- distinct '
+                 'from, and never aliased with, Flow D\'s '
+                 '--atoc-unqueryable (#2027).')
 
     @classmethod
     def do_create(cls, cfg, args):
@@ -316,9 +435,12 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         # flash-run.sh needs no extra flags.
         setools_dir = args.setools_dir or os.environ.get('SETOOLS_DIR')
         se_uart = args.se_uart or os.environ.get('SE_UART')
+        se_uart_baud = (args.se_uart_baud or os.environ.get('SE_UART_BAUD')
+                        or _DEFAULT_SE_UART_BAUD)
         return AlifFlashBinaryRunner(
             cfg, device, setools_dir=setools_dir, se_uart=se_uart,
-            gen_toc=args.gen_toc, write_mram=args.write_mram)
+            gen_toc=args.gen_toc, write_mram=args.write_mram,
+            se_uart_baud=se_uart_baud, replace_atoc=args.replace_atoc)
 
     def do_run(self, command, **kwargs):
         if command != 'flash':
@@ -396,6 +518,12 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         rel_cfg = os.path.join('build', 'config', cfg_name)
         self.check_call([str(gen_toc), '-f', rel_cfg], cwd=str(setools))
 
+        # 2b. Pre-burn ATOC-replace guard (#2262) -- see the module
+        # docstring section of the same name. Raises RuntimeError (before
+        # step 3 burns anything) on a foreign resident entry or an
+        # unverified read, unless --replace-atoc was passed.
+        self._run_atoc_guard(setools, {_atoc_section_name(app_shape)})
+
         # 3. Burn the ATOC (and, for a slot0-XIP build, the standalone app
         #    blob at its mramAddress) to MRAM over the SE-UART in one pass.
         #    -p programs; the SES auto-enters maintenance, writes, resets,
@@ -415,6 +543,99 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         self.logger.info(
             f"flashed '{name}' to MRAM via SETOOLS ({shape_desc} ATOC); "
             'the SES has booted the image.')
+
+    def _run_atoc_guard(self, setools, allowed):
+        '''Pre-burn ATOC-replace guard (#2262) -- read what SETOOLS
+        reports is actually resident on the SE, over the SAME SE-UART
+        `self.se_uart` this run is about to burn over, BEFORE
+        `app-write-mram -p` replaces the whole ATOC. `allowed` is the
+        single section this run itself is about to (re)write ('ALP-HE'
+        or 'ALP-HP', see _atoc_section_name) -- the guard fires only on a
+        GENUINELY foreign resident entry.
+
+        The parse/decision logic (compute_query_status,
+        foreign_resident_entries, decide_atoc_guard) lives in
+        scripts/aen_atoc.py as the single shared implementation, ported
+        from and parity-tested against bench_atoc_replace_guard in
+        scripts/bench/aen/bench-env.sh (see tests/scripts/test_aen_atoc.py)
+        -- this method does only the SE-UART IO + build-dir bookkeeping,
+        mirroring the "pure parser vs. IO-doing caller" split that module
+        docstring's #2262 note describes.'''
+        atoc_dir = Path(self.cfg.build_dir) / 'alif_flash'
+        atoc_dir.mkdir(parents=True, exist_ok=True)
+        transcript_path = atoc_dir / 'atoc-before.txt'
+        verdict_path = atoc_dir / 'atoc-guard.json'
+
+        maintenance = setools / 'maintenance'
+        maintenance_available = maintenance.is_file()
+        banner_text = banner_rc = gettoc_text = gettoc_rc = None
+        if maintenance_available:
+            banner_text, banner_rc = _run_maintenance(
+                maintenance, self.se_uart, self.se_uart_baud, 'getbanner')
+            gettoc_text, gettoc_rc = _run_maintenance(
+                maintenance, self.se_uart, self.se_uart_baud, 'gettoc')
+
+        # Overwrite per run is fine here, unlike bench-env.sh's own
+        # ${TMPDIR:-/tmp}/<tag>-atoc-before.<random> (alp-sdk#2026 round-2:
+        # a SHARED fixed path let one bench run's write land between
+        # another concurrent run's redirect and read, on a DIFFERENT
+        # board). `self.cfg.build_dir` is west's own per-board build
+        # directory, so two concurrent `west flash` invocations never
+        # share one -- there is no analogous cross-run collision to guard
+        # against here.
+        # write-text-newline-exempt: scratch per-run transcript in the build dir
+        transcript_path.write_text(
+            _format_atoc_transcript(
+                self.se_uart, self.se_uart_baud, maintenance_available,
+                banner_text, banner_rc, gettoc_text, gettoc_rc),
+            encoding='utf-8')
+
+        query_status = _aen_atoc.compute_query_status(
+            maintenance_available, banner_text, banner_rc, gettoc_text,
+            gettoc_rc)
+        resident = _aen_atoc.parse_resident_atoc_table(gettoc_text or '')
+        foreign = _aen_atoc.foreign_resident_entries(resident, allowed)
+        verdict = _aen_atoc.decide_atoc_guard(
+            query_status, foreign, self.replace_atoc)
+
+        # Written BEFORE any raise below -- a refused run must still leave
+        # a machine-readable verdict a caller (e.g. tan-cli's
+        # zephyr_west_flash backend) can tell apart from any other `west
+        # flash` failure without parsing stderr.
+        # write-text-newline-exempt: scratch per-run verdict in the build dir
+        verdict_path.write_text(
+            json.dumps({
+                'schema': 'alp-sdk.alif-flash-atoc-guard.v1',
+                'status': verdict.status,
+                'foreign': verdict.foreign,
+                'transcript': str(transcript_path),
+                'allowed': sorted(allowed),
+                'query_status': query_status,
+            }, indent=2) + '\n',
+            encoding='utf-8')
+
+        if verdict.status == 'refused-unverified':
+            raise RuntimeError(
+                "could not read the resident ATOC via 'maintenance -c "
+                f"{self.se_uart} -opt gettoc' (see {transcript_path}). A "
+                'fresh ATOC write REPLACES every app entry not in it, so '
+                'writing blind risks silently delisting anything already '
+                'on this board -- that is exactly how an AEN EVK bench '
+                'unit lost its A32 Linux boot chain on 2026-09-07. '
+                'Confirm by hand what is resident, then re-run with '
+                '--replace-atoc.')
+        if verdict.status == 'refused-foreign':
+            names = ', '.join(verdict.foreign)
+            raise RuntimeError(
+                'this write REPLACES every app ATOC entry not in it -- it '
+                f'does NOT merge. This board also carries: {names}. '
+                f'Writing now would SILENTLY DELIST {names} -- no error, '
+                'no SES warning (this destroyed the A32 Linux boot chain '
+                'on an AEN EVK bench unit, 2026-09-07). Re-run with '
+                f'--replace-atoc only once you can restore {names}, or if '
+                'losing them is genuinely intended.')
+        self.logger.info(
+            f'ATOC guard: {verdict.status} (transcript: {transcript_path})')
 
 
 def _has_fdt():
