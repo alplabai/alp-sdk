@@ -73,10 +73,10 @@ So out of the box your module:
   just work.
 
 That means your day-1 path needs **no hand-run SETOOLS and no SE-UART
-wiring of your own** — two proven ways to get your app into MCUboot's
-slot0:
+wiring of your own**.
 
-**Option A — `west flash` (alif_flash runner).**  Builds + signs your
+**Option A — `west flash` (alif_flash runner) — NOT the day-1 path on a
+pre-provisioned module, see the warning below.**  Builds + signs your
 app, then writes it into slot0 for you over the SE-UART via SETOOLS:
 
 ```bash
@@ -86,7 +86,21 @@ west flash    # alif_flash runner: signs + writes your MCUboot-signed image
               # into slot0 via SETOOLS over the SE-UART (not SWD)
 ```
 
-**Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART.**  Proven
+> **On a pre-provisioned module, the `west flash` above now REFUSES
+> (#2262).** The `alif_flash` runner reads the resident ATOC back before
+> burning, finds the factory `MCUBOOT-` entry
+> (`zephyr/sysbuild/aen/README.md`'s provisioning section) foreign to the
+> `ALP-HE`/`ALP-HP` section your own build stages, and refuses rather than
+> silently delisting it the way a pre-#2262 `west flash` did — burning
+> `DEVICE + ALP-HE` only replaces the WHOLE ATOC, so the factory MCUboot
+> bootloader would vanish with no error and no SES warning, leaving the
+> module unable to boot MCUboot at all. `--replace-atoc` overrides the
+> refusal, but it does exactly that deletion — it is NOT the remedy for a
+> pre-provisioned module. **Use Option B below instead**, which never
+> touches the ATOC.
+
+**Option B — plain J-Link, no SETOOLS, no ATOC, no SE-UART (the
+day-1 path for a pre-provisioned module).**  Proven
 on the bench: an `imgtool`-signed image `loadbin`'d straight to slot0
 is verified by MCUboot and chainloaded, and survived three cold
 power-cycles (`80010000 = 96F3B83D 00000000 00000800 000041B8`,

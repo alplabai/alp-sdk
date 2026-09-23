@@ -4,17 +4,31 @@ functions (`compute_query_status`, `foreign_resident_entries`,
 `decide_atoc_guard`) are a PORT of `bench_atoc_replace_guard` in
 `scripts/bench/aen/bench-env.sh` (alp-sdk#2025), not an independent
 reimplementation -- bench-env.sh itself is untouched by #2262 (still bash,
-still what runs on the bench today). This file feeds the SAME fixture
-transcripts (the real, bench-verified 2026-09-07 AEN EVK captures already
-pinned by tests/scripts/test_bench_jlink_connect_guard.py) through BOTH
-implementations and asserts identical verdicts, so the two copies cannot
-silently drift apart.
+still what runs on the bench today). This file feeds fixture transcripts
+through BOTH implementations and asserts identical verdicts, so the two
+copies cannot silently drift apart.
+
+Fixture provenance (MEDIUM-5 review, alp-sdk#2262 -- be precise about
+which of these are real captures vs. hand-written test vectors):
+  REAL, bench-verified 2026-09-07 AEN EVK captures (byte-identical to
+  tests/scripts/test_bench_jlink_connect_guard.py's own pinned copies):
+    `_REAL_MULTI_ENTRY_ATOC`, `_REAL_GETBANNER`, `_REAL_GETTOC_9ROW`,
+    `_REAL_GETTOC_CLEAN`.
+  SYNTHETIC (hand-written to exercise one specific parser rule; never
+  captured off real hardware): `_NO_ATOC`, `_ANSI_COMPLIANT_TABLE`,
+  `_CRLF_ONLY_ALLOWED_ATOC`, the short-row/NBSP-only-name/empty-name/
+  cross-CPU fixtures below, and the partial-row-then-error text in
+  `test_parity_gettoc_failure_after_partial_output_is_unverified`.
 
 The bash side only ever returns 0 (proceed) or 5 (abort) -- the Python side
 is more granular (clear/empty/refused-foreign/refused-unverified/replaced).
 Parity here means: bash exit 0 <=> a non-refused Python verdict, bash exit 5
 <=> a refused Python verdict, and (where bash names foreign entries in its
-abort message) the identical entry-name set.
+abort message, `"This board also carries: ${extra[*]}"` -- SPACE-joined,
+not comma-joined, since bash's `[*]` expansion uses `$IFS`) the identical
+entry-name SET (`_bash_foreign_names` below parses that line; earlier
+versions of this file only checked substring membership, which cannot
+catch an extra/missing name or a name split differently on either side).
 
 Reuses the exact stub-`maintenance`-script technique and skip guard from
 test_bench_jlink_connect_guard.py's `_call_atoc_guard` (see that module for
@@ -29,6 +43,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -227,6 +242,28 @@ _CRLF_ONLY_ALLOWED_ATOC = (
     "     4480 |  1.0.0| uLVB |\r\n"
 )
 
+# HIGH-1 review shapes (alp-sdk#2262) -- SYNTHETIC, added specifically to
+# prove the fail-open fix in parse_resident_atoc_table on BOTH legs (a
+# real awk run confirmed these exact outputs: see the docstrings on
+# tests/scripts/test_aen_atoc.py's matching unit tests).
+_SHORT_ROW_FOREIGN = " |  A32_APP\n"
+_NBSP_ONLY_NAME_ROW = "|      | CM0+ |\n"
+_EMPTY_NAME_ROW = "|    |  CM0+  |\n"
+# ALP-HE resident under a foreign-looking CPU column ("A32_0" instead of
+# "M55-HE") -- LOW-10 review: the allowed-set membership check is
+# NAME-ONLY on both sides (bash: `[ "$name" = "$a" ]`; Python:
+# `name not in allowed_set`), so this must NOT be foreign on either leg.
+# Documenting/parity-testing this deliberately-unchanged behaviour, not
+# altering it (LOW-10 is explicitly out of scope for this PR).
+_ALLOWED_NAME_WRONG_CPU_ROW = "|   ALP-HE | A32_0  | 0x0 | 0x0 |\n"
+# SERAM1 on a non-CM0+ CPU: the baseline exemption is cross-checked
+# against the CPU column, so a same-named row on a different core is a
+# genuine (if oddly-named) app entry, not SE firmware -- must be foreign
+# on both legs.
+_SERAM1_WRONG_CPU_ROW = "|   SERAM1 | M55-HE | 0x0 | 0x0 |\n"
+
+_GARBLED_BANNER = "garbage, no SES banner here\n"
+
 
 def _python_verdict(aen_atoc, banner_text, banner_rc, gettoc_text, gettoc_rc,
                      allowed, replace_atoc, maintenance_available=True):
@@ -235,6 +272,24 @@ def _python_verdict(aen_atoc, banner_text, banner_rc, gettoc_text, gettoc_rc,
     resident = aen_atoc.parse_resident_atoc_table(gettoc_text or "")
     foreign = aen_atoc.foreign_resident_entries(resident, allowed)
     return aen_atoc.decide_atoc_guard(query_status, foreign, replace_atoc == "1")
+
+
+def _bash_foreign_names(stderr: str) -> "set[str] | None":
+    """Parse bash's `"   This board also carries: ${extra[*]}"` line
+    (bench-env.sh) into the SET of names it names -- `${extra[*]}` joins
+    with (the first character of) `$IFS`, i.e. a single literal ASCII
+    space. Returns None if the line is not present (e.g. bash proceeded,
+    or aborted for the unverified reason instead).
+
+    Split on a literal `' '`, NOT `str.split()`'s bare (no-arg) form: the
+    latter treats every Unicode whitespace codepoint as a separator
+    (`'\\xa0'.isspace()` is True), which would silently drop an NBSP-only
+    resident name to an empty token list -- measured while adding the
+    HIGH-1 NBSP parity case, alp-sdk#2262."""
+    m = re.search(r"This board also carries: (.+)", stderr)
+    if not m:
+        return None
+    return set(m.group(1).split(' '))
 
 
 @_NEEDS_BASH
@@ -252,12 +307,16 @@ def test_parity_foreign_entries_abort(tmp_path, aen_atoc):
     py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, _REAL_GETTOC_9ROW, 0, ["ALP-HE"], "0")
     assert bash.returncode == 5, bash.stderr
     assert py.refused and py.status == "refused-foreign"
-    for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
-        assert entry in bash.stderr
-        assert entry in py.foreign
+    bash_foreign = _bash_foreign_names(bash.stderr)
+    assert bash_foreign == {"BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"}, bash.stderr
+    # SET equality, not substring membership (MEDIUM-5 review): a substring
+    # check cannot catch an extra or missing name, or a name tokenized
+    # differently on either side.
+    assert set(py.foreign) == bash_foreign
     # baseline SE state must never appear in either side's foreign set
     for baseline in ("DEVICE", "SERAM0", "SERAM1", "* SERAM0"):
         assert baseline not in py.foreign
+        assert baseline not in bash_foreign
 
 
 @_NEEDS_BASH
@@ -328,7 +387,107 @@ def test_parity_dualcore_own_write_allows_both_entries(tmp_path, aen_atoc):
     py = _python_verdict(
         aen_atoc, _REAL_GETBANNER, 0, _REAL_MULTI_ENTRY_ATOC, 0, ["ALP-HP", "ALP-HE"], "0")
     # HP_APP/HE_APP are resident under different names than the ALP-HP/ALP-HE
-    # this run would write -- still genuinely foreign on both sides.
+    # this run would write -- still genuinely foreign on both sides. So are
+    # BOOTLOAD/A32_APP (the A32 Linux boot chain): neither is in the
+    # allowed set either, and this fixture's whole POINT is that the A32
+    # chain is resident alongside the dual-core write -- MEDIUM-5 review:
+    # an earlier version of this test asserted only a substring check
+    # against {"HP_APP", "HE_APP"}, which never noticed BOOTLOAD/A32_APP
+    # were ALSO foreign here.
     assert bash.returncode == 5, bash.stderr
     assert py.refused and py.status == "refused-foreign"
-    assert "HP_APP" in py.foreign and "HE_APP" in py.foreign
+    bash_foreign = _bash_foreign_names(bash.stderr)
+    assert bash_foreign == {"BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"}, bash.stderr
+    assert set(py.foreign) == bash_foreign
+
+
+@_NEEDS_BASH
+def test_parity_short_row_still_yields_a_foreign_entry(tmp_path, aen_atoc):
+    # HIGH-1 review (alp-sdk#2262): a truncated row (only one `|`) must
+    # still be seen as a resident (and here, foreign) entry on BOTH legs
+    # -- an earlier Python version silently dropped it (fail-open).
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _SHORT_ROW_FOREIGN)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, _SHORT_ROW_FOREIGN, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-foreign"
+    bash_foreign = _bash_foreign_names(bash.stderr)
+    assert bash_foreign == {"A32_APP"}, bash.stderr
+    assert set(py.foreign) == bash_foreign
+
+
+@_NEEDS_BASH
+def test_parity_nbsp_only_name_still_yields_a_foreign_entry(tmp_path, aen_atoc):
+    # HIGH-1 review (alp-sdk#2262): awk's trim only strips ASCII space/tab
+    # -- a name cell of bare NBSP is non-empty (and therefore foreign,
+    # since it can never equal an allowed entry name) on both legs.
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _NBSP_ONLY_NAME_ROW)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, _NBSP_ONLY_NAME_ROW, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-foreign"
+    bash_foreign = _bash_foreign_names(bash.stderr)
+    assert bash_foreign is not None and len(bash_foreign) == 1
+    assert len(py.foreign) == 1 and py.foreign[0] != ""
+
+
+@_NEEDS_BASH
+def test_parity_empty_name_row_is_not_a_resident_entry(tmp_path, aen_atoc):
+    # A row whose Name column trims to "" is not a real entry on either
+    # leg (`name != ""` in awk; `if name and ...` in Python) -- a clean
+    # ALP-HE-only board plus one such row must still proceed.
+    table = _EMPTY_NAME_ROW + (
+        "|   ALP-HE | M55-HE | 0x0 | 0x0 |\n"
+    )
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], table)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 0, table, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 0, bash.stderr
+    assert not py.refused and py.status == "clear"
+
+
+@_NEEDS_BASH
+def test_parity_allowed_name_on_a_different_cpu_is_not_foreign(tmp_path, aen_atoc):
+    # LOW-10 review: allowed-set membership is NAME-ONLY on both legs
+    # (unlike the DEVICE/SERAM0/SERAM1 baseline exemption, which IS
+    # CPU-cross-checked) -- deliberately unchanged behaviour, parity-tested
+    # here rather than altered.
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _ALLOWED_NAME_WRONG_CPU_ROW)
+    py = _python_verdict(
+        aen_atoc, _REAL_GETBANNER, 0, _ALLOWED_NAME_WRONG_CPU_ROW, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 0, bash.stderr
+    assert not py.refused and py.status == "clear"
+
+
+@_NEEDS_BASH
+def test_parity_seram1_on_wrong_cpu_is_foreign(tmp_path, aen_atoc):
+    # The baseline exemption IS CPU-cross-checked: a SERAM1-named row on
+    # M55-HE (not CM0+) is a coincidentally-named app entry, not SE
+    # firmware, and must trip the guard on both legs.
+    bash = _run_bash_guard(tmp_path, "0", ["ALP-HE"], _SERAM1_WRONG_CPU_ROW)
+    py = _python_verdict(
+        aen_atoc, _REAL_GETBANNER, 0, _SERAM1_WRONG_CPU_ROW, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-foreign"
+    bash_foreign = _bash_foreign_names(bash.stderr)
+    assert bash_foreign == {"SERAM1"}, bash.stderr
+    assert set(py.foreign) == bash_foreign
+
+
+@_NEEDS_BASH
+def test_parity_garbled_banner_is_unverified(tmp_path, aen_atoc):
+    bash = _run_bash_guard(
+        tmp_path, "0", ["ALP-HE"], _REAL_GETTOC_CLEAN, banner_output=_GARBLED_BANNER)
+    py = _python_verdict(aen_atoc, _GARBLED_BANNER, 0, _REAL_GETTOC_CLEAN, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_banner_nonzero_exit_is_unverified_even_with_valid_text(tmp_path, aen_atoc):
+    # A well-formed banner LINE with a non-zero exit must still force
+    # unverified on both legs (getbanner failing after printing a valid
+    # line is the same class of trap as gettoc's own non-zero-exit case).
+    bash = _run_bash_guard(
+        tmp_path, "0", ["ALP-HE"], _REAL_GETTOC_CLEAN,
+        banner_output=_REAL_GETBANNER, banner_exit=3)
+    py = _python_verdict(aen_atoc, _REAL_GETBANNER, 3, _REAL_GETTOC_CLEAN, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"

@@ -292,6 +292,35 @@ def test_parse_resident_atoc_table_keeps_current_bank_marker_in_name(aen_atoc):
     assert aen_atoc.parse_resident_atoc_table(table) == [("* SERAM0", "CM0+")]
 
 
+def test_parse_resident_atoc_table_short_row_still_yields_a_name(aen_atoc):
+    # HIGH-1 review (alp-sdk#2262): a row with only ONE `|` (no closing
+    # pipe at all -- e.g. a truncated serial read) still gives awk a
+    # non-empty $2 and an empty $3 (verified against real awk: `printf '
+    # |  A32_APP' | awk -F'|' '{...}'` -> `NAME=[A32_APP] CPU=[]`), NOT a
+    # skipped row. An earlier version of this function `continue`d on
+    # `len(fields) < 3`, silently dropping this row -- fail-OPEN relative
+    # to bash, since the entry it named never reached
+    # `foreign_resident_entries` at all.
+    assert aen_atoc.parse_resident_atoc_table(" |  A32_APP\n") == [("A32_APP", "")]
+
+
+def test_parse_resident_atoc_table_nbsp_only_name_is_not_dropped(aen_atoc):
+    # HIGH-1 review (alp-sdk#2262): awk's own trim
+    # (`gsub(/^[ \t]+|[ \t]+$/, "", name)`) strips only ASCII space/tab --
+    # a name cell of bare NBSP (U+00A0) is non-empty to awk (verified: a
+    # real `awk` run on `"|  \xc2\xa0\xc2\xa0\xc2\xa0 | CM0+ |"` prints a
+    # non-empty NAME). Python's bare `str.strip()` treats NBSP as
+    # whitespace and would fold it to `""`, silently DROPPING the row
+    # (`if name and ...` is false) -- fail-open the same direction as the
+    # short-row case above. `.strip(' \t')` (this function's actual trim)
+    # must leave it non-empty.
+    table = "|      | CM0+ |\n"
+    resident = aen_atoc.parse_resident_atoc_table(table)
+    assert len(resident) == 1
+    assert resident[0][0] != ""
+    assert resident[0][1] == "CM0+"
+
+
 def test_compute_query_status_ok_when_rows_present(aen_atoc):
     assert aen_atoc.compute_query_status(
         True, "SES A1 v1.0\n", 0, "|   DEVICE |  CM0+  |\n", 0) == "ok"

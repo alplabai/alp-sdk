@@ -108,9 +108,16 @@ cd "$SETOOLS_DIR"
 `flags ["load","boot"]`, `signed true`.  The SES banner then shows
 `| MCUBOOT- | M55-HE | ... | uLVB |` -- slot0 is no longer an SES boot
 entry; MCUboot owns it from here.)  Shipped modules then boot
-out-of-box, and customers load apps into slot0 via `west flash` **or**
-a plain J-Link with no SETOOLS/SE-UART of their own (see
-[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5).
+out-of-box, and customers load apps into slot0 with a plain J-Link (no
+SETOOLS/SE-UART of their own -- see
+[`docs/aen-provisioning.md`](../../../docs/aen-provisioning.md) §0.5,
+Option B). **Not `west flash`'s `alif_flash` runner**: since alp-sdk#2262
+it reads this resident `MCUBOOT-` entry back before burning and REFUSES
+(it is foreign to whatever `ALP-HE`/`ALP-HP` section the customer's own
+build stages), because burning would otherwise silently delist this
+factory bootloader -- see `docs/aen-provisioning.md` §0.5's Option A
+warning before pointing a customer at `west flash` on a pre-provisioned
+module.
 
 ## Usage
 

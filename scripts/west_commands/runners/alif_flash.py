@@ -113,11 +113,16 @@ def _load_aen_atoc():
     spec = importlib.util.spec_from_file_location('aen_atoc', path)
     mod = importlib.util.module_from_spec(spec)
     # Register in sys.modules BEFORE exec_module: aen_atoc.py's
-    # AtocGuardVerdict (#2262) is a `dataclass`, and on Python 3.14
-    # `dataclasses` resolves `cls.__module__` back through `sys.modules`
-    # while processing the class body -- an unregistered module (the
-    # bare module_from_spec()+exec_module() pair used here before #2262)
-    # makes that lookup return None and crash with `AttributeError:
+    # AtocGuardVerdict (#2262) is a `dataclass`, and aen_atoc.py itself has
+    # `from __future__ import annotations` -- so every field annotation is
+    # stored as a STRING, and `dataclasses` resolves those strings (its
+    # `_is_type` check against `KW_ONLY`/`ClassVar`/`InitVar`, present
+    # since `KW_ONLY` landed in 3.10) by looking `cls.__module__` back up
+    # through `sys.modules`. This is `dataclasses`' own standing behaviour
+    # on every Python this repo targets (>=3.10, see pyproject.toml), not
+    # a version-specific quirk -- an unregistered module (the bare
+    # `module_from_spec()`+`exec_module()` pair used here before #2262)
+    # makes that lookup return `None` and crash with `AttributeError:
     # 'NoneType' object has no attribute '__dict__'` the moment a
     # dataclass appears in this file. Harmless for every symbol that
     # existed before #2262; required now.
@@ -163,6 +168,17 @@ _DEFAULT_CPU_SUFFIX = 'HE'  # boards that omit --device were always HE-only
 # baud defaults identical so a host set up for the bench scripts needs no
 # extra flag here either (#2262).
 _DEFAULT_SE_UART_BAUD = '57600'
+
+# The exact ATOC entry name Alp Lab's factory provisioning stages for the
+# MCUboot bootloader on a pre-provisioned module (HIGH-2 review, #2262):
+# `zephyr/sysbuild/aen/README.md`'s "SoM-maker provisioning model" --
+# `cpu_id M55_HE`, `loadAddress 0x58000000`, and the SES banner then shows
+# `| MCUBOOT- | M55-HE | ... | uLVB |`. A resident entry with this exact
+# name is never a plain "some other app was here" foreign entry: it is
+# THE bootloader every pre-provisioned module needs to boot at all, so the
+# refusal message below steers away from `--replace-atoc` instead of
+# toward it (see docs/aen-provisioning.md section 0.5's Option A warning).
+_FACTORY_MCUBOOT_ATOC_NAME = 'MCUBOOT-'
 
 
 def _cpu_suffix(device):
@@ -308,6 +324,14 @@ def _build_atoc_config(name, app_shape):
         '}\n')
 
 
+# MEDIUM-6 review (#2262): a wedged SE-UART (the maintenance session
+# never returns) must not hang `west flash` forever -- 120s comfortably
+# covers a real `getbanner`/`gettoc` round trip (bench captures complete
+# in well under 1s) while still failing well before an operator gives up
+# and kills the process by hand, which would leave no transcript at all.
+_MAINTENANCE_TIMEOUT_S = 120
+
+
 def _run_maintenance(maintenance_path, se_uart, baud, opt):
     '''Run `maintenance -b <baud> -c <se_uart> -opt <opt>` from
     maintenance_path's own directory (mirrors bench-env.sh's `( cd
@@ -315,14 +339,28 @@ def _run_maintenance(maintenance_path, se_uart, baud, opt):
     one transcript (mirrors its `2>&1`). Returns (output_text, returncode)
     and never raises on a non-zero exit -- a gettoc that fails after
     emitting partial table rows (a serial timeout mid-read) is a signal
-    the #2262 guard must see, not an exception to swallow.'''
+    the #2262 guard must see, not an exception to swallow. A timeout
+    (`_MAINTENANCE_TIMEOUT_S`) is the SAME fail-closed shape: whatever
+    partial output the process produced before being killed, rc=1 --
+    `compute_query_status` already treats any non-zero rc as
+    `unverified`, never "ok" from partial text.'''
     try:
         proc = subprocess.run(
             [str(maintenance_path), '-b', str(baud), '-c', se_uart,
              '-opt', opt],
             cwd=str(maintenance_path.parent), stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-            errors='replace')
+            errors='replace', timeout=_MAINTENANCE_TIMEOUT_S)
+    except subprocess.TimeoutExpired as exc:
+        # subprocess's own partial-output-on-timeout attribute is not
+        # reliably `str` even under `text=True` (measured: CPython can
+        # hand back the raw `bytes` captured before the kill instead of
+        # the text-decoded form) -- decode defensively rather than let an
+        # f-string embed a `b'...'` literal into the transcript.
+        partial = exc.stdout
+        if isinstance(partial, bytes):
+            partial = partial.decode('utf-8', errors='replace')
+        return f'{partial or ""}\nTIMEOUT after {_MAINTENANCE_TIMEOUT_S}s: {exc}\n', 1
     except OSError as exc:
         return f'{exc}\n', 1
     return proc.stdout, proc.returncode
@@ -447,6 +485,22 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
             raise ValueError(f'{self.name()} only supports flash, not '
                              f'{command}')
 
+        # MEDIUM-3 review (#2262): clear any verdict a PREVIOUS run left
+        # behind before this attempt reaches (or fails before reaching)
+        # the guard step. Without this, a run that fails early -- no
+        # SETOOLS, no zephyr.bin, a rejected ATOC window, any of the
+        # RuntimeErrors below -- would leave the LAST run's
+        # atoc-guard.json in place, and a caller reading it (tan-cli's
+        # zephyr_west_flash backend, alplabai/tan-cli#1267) could mistake
+        # a stale "clear"/"replaced" verdict for THIS run's own outcome.
+        # `unlink(missing_ok=True)` rather than writing a "pending" status:
+        # the file's mere ABSENCE is then the unambiguous signal "the
+        # guard never reached a verdict for this attempt", with no schema
+        # change needed to distinguish it from a real one.
+        if self.cfg.build_dir:
+            (Path(self.cfg.build_dir) / 'alif_flash' / 'atoc-guard.json').unlink(
+                missing_ok=True)
+
         if not self.setools_dir:
             raise RuntimeError(
                 'The Alif Security Toolkit (SETOOLS) is required to flash '
@@ -557,8 +611,9 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         foreign_resident_entries, decide_atoc_guard) lives in
         scripts/aen_atoc.py as the single shared implementation, ported
         from and parity-tested against bench_atoc_replace_guard in
-        scripts/bench/aen/bench-env.sh (see tests/scripts/test_aen_atoc.py)
-        -- this method does only the SE-UART IO + build-dir bookkeeping,
+        scripts/bench/aen/bench-env.sh (see
+        tests/scripts/test_atoc_guard_parity.py) -- this method does only
+        the SE-UART IO + build-dir bookkeeping,
         mirroring the "pure parser vs. IO-doing caller" split that module
         docstring's #2262 note describes.'''
         atoc_dir = Path(self.cfg.build_dir) / 'alif_flash'
@@ -626,6 +681,32 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
                 '--replace-atoc.')
         if verdict.status == 'refused-foreign':
             names = ', '.join(verdict.foreign)
+            if _FACTORY_MCUBOOT_ATOC_NAME in verdict.foreign:
+                # HIGH-2 review (#2262): a factory MCUBOOT- entry is not
+                # an ordinary foreign app you might restore later -- it is
+                # the bootloader that makes this module boot at all.
+                # Steer away from --replace-atoc as the "just do it"
+                # remedy the generic message below invites; name the
+                # supported path instead.
+                raise RuntimeError(
+                    'this write REPLACES every app ATOC entry not in it '
+                    f'-- it does NOT merge. This board also carries: '
+                    f'{names}, including the factory-provisioned '
+                    f"{_FACTORY_MCUBOOT_ATOC_NAME!r} MCUboot bootloader "
+                    '(zephyr/sysbuild/aen/README.md). Burning now would '
+                    f'SILENTLY DELIST {_FACTORY_MCUBOOT_ATOC_NAME!r}, '
+                    'leaving the module unable to boot at all until '
+                    'MCUboot is reprovisioned -- this is the same class '
+                    'of loss that destroyed the A32 Linux boot chain on '
+                    'an AEN EVK bench unit, 2026-09-07. Load your app '
+                    'WITHOUT disturbing the factory MCUboot ATOC entry '
+                    'instead: a plain J-Link loadbin of your '
+                    'imgtool-signed image straight to slot0, no '
+                    'SETOOLS/ATOC/SE-UART at all (docs/aen-provisioning.md '
+                    'section 0.5, Option B). --replace-atoc still '
+                    f'overrides this refusal if you are certain -- but it '
+                    f'deletes {_FACTORY_MCUBOOT_ATOC_NAME!r} and the '
+                    'module will not boot until MCUboot is reprovisioned.')
             raise RuntimeError(
                 'this write REPLACES every app ATOC entry not in it -- it '
                 f'does NOT merge. This board also carries: {names}. '

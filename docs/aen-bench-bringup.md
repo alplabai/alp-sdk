@@ -120,12 +120,14 @@ A clean write ends `100% ... Done`; on reset the SES loads + boots the ATOC
 **`alif_flash`** runner — it does **not** use J-Link, and auto-detects this
 ITCM-load shape vs. the slot0-XIP shape (§ Flow D) from the app's own reset
 vector, so both provision over the SE-UART with no flag. Pre-provisioned Alp
-Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so
-`west flash` works day-1; the manual path above is only for re-keying or
-recovering a bare module. A pre-provisioned module also takes a plain
-J-Link `loadbin` straight to slot0 at `0x80010000` **only** (ATOC region
-/ erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART at all — see
-the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
+Lab modules ship a dev-signed MCUboot + self-test in slot0 (LCS=DM), so SWD
+attach works day-1 — but plain `west flash` on such a module now REFUSES
+(#2262, see below) rather than silently delisting the factory MCUboot ATOC
+entry; use the plain J-Link `loadbin` path instead. The manual SETOOLS path
+above is for re-keying or recovering a bare module. A pre-provisioned module
+also takes a plain J-Link `loadbin` straight to slot0 at `0x80010000`
+**only** (ATOC region / erasing MCUboot untested) with no SETOOLS/ATOC/SE-UART
+at all — see the **Secure boot** row in §1 above and `docs/aen-provisioning.md`
 §0.5 for the exact sequence.
 
 **ATOC-replace guard (#2262).** Both `app-write-mram -p` above and the
@@ -136,7 +138,10 @@ before burning, the runner now reads the resident ATOC back over the SE-UART
 A/D's shell helpers) and refuses the write if it would silently delist a
 resident entry outside this build's own `ALP-HE`/`ALP-HP` section, or if the
 read could not be verified. `--replace-atoc` is the explicit override (same
-spelling as `flash-run.sh`'s own flag).
+spelling as `flash-run.sh`'s own flag) — on a pre-provisioned module the
+foreign entry is the factory `MCUBOOT-` bootloader itself, so
+`--replace-atoc` there deletes it rather than being a safe workaround; see
+`docs/aen-provisioning.md` §0.5's Option A warning.
 
 ### Flow A — Dual-core deferred-TOC boot
 

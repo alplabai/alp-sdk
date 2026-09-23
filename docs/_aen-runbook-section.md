@@ -132,13 +132,30 @@ that would silently delist a resident app entry outside this build's own
 same flag spelling as `flash-run.sh`'s Flow A guard, and distinct from Flow D's
 `--atoc-unqueryable`. Every run leaves `<build_dir>/alif_flash/atoc-before.txt`
 (the raw transcript) and `<build_dir>/alif_flash/atoc-guard.json` (the
-machine-readable verdict).
+machine-readable verdict written BEFORE any refusal is raised; a run that
+fails EARLIER than the guard step — e.g. no SETOOLS, no `zephyr.bin` —
+removes any verdict left by a previous run instead, so its mere absence
+means "the guard did not reach a verdict this attempt", never a stale
+success read as this run's own).
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
-> self-test in slot0 (LCS=DM), so the core is already released and `west flash`
-> works day-1 with no manual SETOOLS step. You only need the manual path above
-> to re-key to your own production key or to recover a wiped/bare module. See
-> [`aen-provisioning.md`](aen-provisioning.md) §0.5.
+> self-test in slot0 (LCS=DM), so the core is already released and SWD/`west
+> debug` attach just works day-1. **`west flash`'s `alif_flash` runner is NOT
+> the day-1 path for these modules, though** — since #2262 it reads the
+> factory ATOC back first and finds the resident `MCUBOOT-` entry (the
+> factory-provisioned bootloader — `zephyr/sysbuild/aen/README.md`'s
+> provisioning section) foreign to whatever `ALP-HE`/`ALP-HP` section your
+> own build stages, and REFUSES rather than silently delisting it. This is
+> the guard doing its job, not a regression to work around with
+> `--replace-atoc`: that flag deletes the factory MCUboot ATOC entry and
+> leaves the module unable to boot until MCUboot is reprovisioned. Load your
+> app onto a pre-provisioned module via **Option B** instead — a plain
+> J-Link `loadbin` of your `imgtool`-signed image straight to slot0, no
+> SETOOLS/ATOC/SE-UART at all, verified and chainloaded by the resident
+> MCUboot — see [`aen-provisioning.md`](aen-provisioning.md) §0.5. The manual
+> SETOOLS path above (or `alif_flash` with `--replace-atoc`) is for
+> re-keying to your own production key or recovering a wiped/bare module,
+> where losing/replacing the factory ATOC is the intended outcome.
 
 ---
 

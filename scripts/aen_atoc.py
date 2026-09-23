@@ -226,11 +226,12 @@ def validate_atoc_config_file(path: "str | Path") -> None:
 # in that function, bench-verified on real AEN EVK captures (2026-09-07).
 # `bench-env.sh` itself is NOT touched by this port (still bash, still the
 # thing that runs on the bench today); a parity test
-# (`tests/scripts/test_aen_atoc.py`) feeds the SAME fixture transcripts
-# through both implementations and asserts identical verdicts, so the two
-# copies cannot silently drift apart. All functions here are pure (no
-# subprocess, no file IO) -- the runner does the SE-UART query and handles
-# these results.
+# (`tests/scripts/test_atoc_guard_parity.py`) feeds the SAME fixture
+# transcripts through both implementations and asserts identical verdicts,
+# so the two copies cannot silently drift apart. Unit tests for these
+# functions on their own live in `tests/scripts/test_aen_atoc.py`. All
+# functions here are pure (no subprocess, no file IO) -- the runner does
+# the SE-UART query and handles these results.
 # ---------------------------------------------------------------------------
 
 # Strip any CSI (ANSI escape) sequence -- not just SGR colour (`...m`): a
@@ -245,8 +246,12 @@ _CSI_RE = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]')
 # " SES A1 v1.110.0 Mar  4 2026 19:06:23" after ANSI stripping -- SETOOLS'
 # own padding puts a LEADING SPACE on the line (not a terminal artifact), so
 # a bare `^SES` anchor rejects every real banner. Tolerate leading
-# whitespace, same as bench-env.sh's `^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+`.
-_SES_BANNER_RE = re.compile(r'^[ \t]*SES \S+ v\S+', re.MULTILINE)
+# whitespace, same as bench-env.sh's `^[[:space:]]*SES [^[:space:]]+ v[^[:space:]]+`
+# -- POSIX `[[:space:]]` is space/tab/newline/CR/FF/VT; `\n` never appears
+# mid-match here (this pattern is applied per already-split line via
+# `re.MULTILINE`'s `^` anchor), so `[ \t\r\v\f]` covers the same set that
+# can actually occur before `SES` on one line.
+_SES_BANNER_RE = re.compile(r'^[ \t\r\v\f]*SES \S+ v\S+', re.MULTILINE)
 
 # SETOOLS' exact "board is blank" message (`app-write-mram`'s own gettoc
 # reply) -- matched case-insensitively as a WHOLE LINE, mirroring
@@ -254,6 +259,18 @@ _SES_BANNER_RE = re.compile(r'^[ \t]*SES \S+ v\S+', re.MULTILINE)
 # this exact text (not a bare substring) keeps an error line that merely
 # CONTAINS "no atoc" (e.g. "no ATOC response from target") from decoding as
 # a genuinely empty board.
+#
+# Deliberate deviation from the bash guard: bash's `grep` (POSIX BRE, no
+# `-E`/`-F`) treats the trailing `.` as "any character", not a literal
+# period, so bash would ALSO read e.g. "no atoc found on target deviceX"
+# (any char in that position) as the empty-board line. Python's `==`
+# below requires the literal `.` SETOOLS actually emits. This is a
+# narrowing, fail-CLOSED divergence, not a bug to fix: the only way it can
+# disagree with bash is a transcript bash would call "empty" that Python
+# instead sends into the table parse (worst case, `unverified` or a
+# legitimate-looking table with no rows -> still `unverified`, never a
+# false "clear"). LOW-8 review (alp-sdk#2262): kept as-is, documented here
+# rather than widened to match bash's wildcard.
 _NO_ATOC_LINE = 'no atoc found on target device.'
 
 # Table rows look like "|   DEVICE |  CM0+  | 0x... | ... |" -- SETOOLS
@@ -293,22 +310,40 @@ def is_no_atoc_found(gettoc_text: str) -> bool:
     return any(line.casefold() == _NO_ATOC_LINE for line in stripped.split('\n'))
 
 
+def _awk_field(fields: "list[str]", index: int) -> str:
+    """awk's own semantics for a field past `NF`: `$n` for `n > NF` is the
+    empty string, never an error/exception -- `fields` here is a 0-indexed
+    Python `str.split('|')` result, so awk's `$2`/`$3` are `fields[1]`/
+    `fields[2]`. A row with only ONE `|` (e.g. `" |  A32_APP"`, no closing
+    `|` at all -- a real truncated-serial-read shape) still gives awk a
+    non-empty `$2` ("A32_APP") and an empty `$3` ("") rather than being
+    skipped outright; HIGH-1 review (alp-sdk#2262): an earlier version of
+    this function `continue`d on `len(fields) < 3`, which SKIPPED that row
+    entirely -- fail-OPEN relative to bash, since the resident entry it
+    named then never reached `foreign_resident_entries` at all."""
+    return fields[index] if index < len(fields) else ''
+
+
 def parse_resident_atoc_table(gettoc_text: str) -> "list[tuple[str, str]]":
     """Parse *gettoc_text* (raw `maintenance -opt gettoc` stdout) into a
     list of `(name, cpu)` tuples, one per resident ATOC entry -- Name is
     field 2, CPU is field 3, both trimmed; the header ("Name") and the
     `+---+` separator rows are skipped. Mirrors bench-env.sh's awk table
-    parse exactly, including its ANSI + CR handling."""
+    parse exactly, including its ANSI + CR handling, a short row (see
+    `_awk_field`), and awk's OWN trim -- `gsub(/^[ \\t]+|[ \\t]+$/, "", ...)`
+    strips only ASCII space/tab, never Python `str.strip()`'s full Unicode
+    whitespace set (HIGH-1 review: a name cell of e.g. bare NBSP chars is
+    non-empty, and thus a real -- if oddly named -- resident entry, to
+    awk's gsub; `str.strip()` would fold it to `""` and DROP the row,
+    again fail-open relative to bash)."""
     stripped = strip_csi(gettoc_text).replace('\r', '')
     resident: "list[tuple[str, str]]" = []
     for line in stripped.split('\n'):
         if not _ROW_RE.match(line):
             continue
         fields = line.split('|')
-        if len(fields) < 3:
-            continue
-        name = fields[1].strip()
-        cpu = fields[2].strip()
+        name = _awk_field(fields, 1).strip(' \t')
+        cpu = _awk_field(fields, 2).strip(' \t')
         if name and name != 'Name' and not _DASH_ONLY_RE.match(name):
             resident.append((name, cpu))
     return resident

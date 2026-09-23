@@ -297,6 +297,16 @@ _FOREIGN_GETTOC = (
 _NO_ATOC_TEXT = "No ATOC found on target device.\n"
 _COMPLIANT_BANNER = "SES A1 v1.110.0 Mar  4 2026 19:06:23\n"
 
+# A pre-provisioned module's factory ATOC (HIGH-2 review, #2262):
+# `zephyr/sysbuild/aen/README.md`'s "SoM-maker provisioning model" --
+# `| MCUBOOT- | M55-HE | ... | uLVB |`.
+_FACTORY_MCUBOOT_GETTOC = (
+    "|   DEVICE |  CM0+  | 0x8057C6F0 | 0x8057BCF0 | ---------- | ---------- |"
+    "      312 |  0.5.0| u V  |\n"
+    "| MCUBOOT- | M55-HE | 0x8057D230 | 0x8057C830 | 0x58000000 | 0x58000000 |"
+    "     4480 |  1.0.0| uLVB |\n"
+)
+
 
 class _FakeCfg:
     def __init__(self, bin_file, build_dir):
@@ -326,6 +336,24 @@ def _make_runner(tmp_path, device="AE822FA0E5597LS0_HE", reset_vector=0x58000401
     runner = alif_flash.AlifFlashBinaryRunner(
         cfg, device, setools_dir=str(setools), se_uart="fake-uart",
         se_uart_baud="57600", replace_atoc=replace_atoc)
+    # MEDIUM-4 review (#2262): set these on the INSTANCE, not just relying
+    # on whatever `runners.core` stub happened to install them via
+    # `__init__` above -- `test_rzv2n_mtd_flash_runner.py` installs its
+    # OWN minimal `runners.core` stub (cfg only, no calls/logger/
+    # check_call) guarded by the SAME `if "runners.core" not in
+    # sys.modules` pattern this file uses, so whichever test module
+    # imports first WINS the module-level stub for the whole pytest
+    # session. Measured: `pytest tests/scripts/test_rzv2n_mtd_flash_runner.py
+    # tests/scripts/test_alif_flash_runner.py` (that file first) gave 11
+    # AttributeErrors here (`'AlifFlashBinaryRunner' object has no
+    # attribute 'logger'/'calls'`) before this fix, since do_run's own
+    # `self.logger.warning(...)` a few lines into every real run hit the
+    # rzv2n stub's bare `self.cfg = cfg`. Setting these directly here
+    # makes every runner this helper builds self-sufficient regardless of
+    # import order.
+    runner.calls = []
+    runner.logger = logging.getLogger("test_alif_flash_runner")
+    runner.check_call = lambda cmd, cwd=None: runner.calls.append((list(cmd), cwd))
     return runner
 
 
@@ -354,6 +382,40 @@ def test_do_run_refuses_on_foreign_entry_and_never_burns(tmp_path, monkeypatch) 
     assert verdict["status"] == "refused-foreign"
     for entry in ("BOOTLOAD", "A32_APP", "HP_APP", "HE_APP"):
         assert entry in verdict["foreign"]
+
+
+def test_do_run_refuses_on_factory_mcuboot_with_a_distinct_message(tmp_path, monkeypatch) -> None:
+    # HIGH-2 review (#2262): a resident factory `MCUBOOT-` entry (a
+    # pre-provisioned module) must NOT get the generic "re-run with
+    # --replace-atoc" refusal text -- that steers an operator straight at
+    # deleting the bootloader that makes the module boot at all. It must
+    # instead name the entry, say what breaks, and point at the supported
+    # Option B (plain J-Link, no ATOC) path.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_FACTORY_MCUBOOT_GETTOC, 0))
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "MCUBOOT-" in message
+    assert "unable to boot" in message
+    assert "Option B" in message
+    assert not _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "refused-foreign"
+    assert "MCUBOOT-" in verdict["foreign"]
+
+
+def test_do_run_replace_atoc_still_overrides_the_factory_mcuboot_refusal(
+        tmp_path, monkeypatch) -> None:
+    # --replace-atoc remains the explicit override even for a factory
+    # MCUBOOT- entry -- the guard warns, it does not hard-block.
+    runner = _make_runner(tmp_path, replace_atoc=True)
+    _stub_maintenance(monkeypatch, gettoc=(_FACTORY_MCUBOOT_GETTOC, 0))
+    runner.do_run("flash")
+    assert _write_mram_was_called(runner)
+    verdict = _verdict(runner)
+    assert verdict["status"] == "replaced"
+    assert "MCUBOOT-" in verdict["foreign"]
 
 
 def test_do_run_clean_board_proceeds_and_burns(tmp_path, monkeypatch) -> None:
@@ -449,3 +511,140 @@ def test_do_run_writes_transcript_before_the_burn_step(tmp_path, monkeypatch) ->
     transcript = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt"
     assert transcript.is_file()
     assert "ALP-HE" in transcript.read_text(encoding="utf-8")
+
+
+def test_do_run_removes_a_stale_verdict_file_when_it_fails_before_the_guard(
+        tmp_path, monkeypatch) -> None:
+    # MEDIUM-3 review (#2262): a run that fails BEFORE reaching the guard
+    # (here: SETOOLS_DIR missing app-write-mram) must not leave a PREVIOUS
+    # run's verdict.json behind for a caller to misread as this run's own
+    # outcome.
+    runner = _make_runner(tmp_path)
+    _stub_maintenance(monkeypatch, gettoc=(_CLEAN_HE_GETTOC, 0))
+    runner.do_run("flash")
+    verdict_path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-guard.json"
+    assert verdict_path.is_file()  # first run's own clean verdict
+
+    # Second run: remove app-write-mram so do_run fails AFTER the guard has
+    # already run once successfully -- but BEFORE this attempt reaches the
+    # guard again is not reachable here (the guard runs before the burn),
+    # so instead simulate a failure that happens before do_run even gets
+    # to stage a config: delete app-gen-toc.
+    (Path(runner.setools_dir) / "app-gen-toc").unlink()
+    with pytest.raises(RuntimeError, match="does not look like a SETOOLS"):
+        runner.do_run("flash")
+    assert not verdict_path.exists(), (
+        "a run that fails before the guard step must not leave a stale "
+        "verdict.json from a PREVIOUS run behind"
+    )
+
+
+# ---------------------------------------------------------------------
+# _run_maintenance -- the SE-UART subprocess boundary (real executable,
+# no monkeypatching of subprocess itself)
+# ---------------------------------------------------------------------
+
+_SKIP_ON_WINDOWS = pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="a shebang script is not directly executable on Windows",
+)
+
+
+def _write_stub_script(path: Path, body: str) -> None:
+    path.write_text(f"#!/usr/bin/env python3\n{body}", encoding="utf-8")
+    path.chmod(0o755)
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_passes_argv_and_cwd_and_merges_stderr(tmp_path) -> None:
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, (
+        "import os, sys\n"
+        "print('cwd=' + os.getcwd())\n"
+        "print('argv=' + repr(sys.argv[1:]))\n"
+        "print('stderr line', file=sys.stderr)\n"
+    ))
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "gettoc")
+    assert rc == 0
+    assert f"cwd={setools}" in text or f"cwd={setools.resolve()}" in text
+    assert "argv=['-b', '57600', '-c', 'fake-uart', '-opt', 'gettoc']" in text
+    assert "stderr line" in text  # stderr merged into the same transcript
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_nonzero_exit_is_reported_verbatim(tmp_path) -> None:
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, "import sys\nprint('partial')\nsys.exit(3)\n")
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "getbanner")
+    assert rc == 3
+    assert "partial" in text
+
+
+def test_run_maintenance_missing_binary_returns_rc1_via_oserror(tmp_path) -> None:
+    missing = tmp_path / "setools" / "maintenance"
+    missing.parent.mkdir()
+    text, rc = alif_flash._run_maintenance(missing, "fake-uart", "57600", "gettoc")
+    assert rc == 1
+    assert text  # some diagnostic text, not a bare empty string
+
+
+@_SKIP_ON_WINDOWS
+def test_run_maintenance_timeout_returns_rc1_with_partial_output(tmp_path, monkeypatch) -> None:
+    # Fail-closed shape (MEDIUM-6 review, #2262): a wedged SE-UART must
+    # not hang `west flash` forever. Monkeypatch the timeout constant down
+    # so this test doesn't itself take 120s -- 1.5s (not e.g. 0.3s) to
+    # leave headroom for `#!/usr/bin/env python3` interpreter startup on a
+    # loaded CI host; measured flaky at 0.3s (the child's own flush never
+    # lands before the kill).
+    monkeypatch.setattr(alif_flash, "_MAINTENANCE_TIMEOUT_S", 1.5)
+    setools = tmp_path / "setools"
+    setools.mkdir()
+    maint = setools / "maintenance"
+    _write_stub_script(maint, (
+        "import sys, time\n"
+        "print('partial-before-hang')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    ))
+    text, rc = alif_flash._run_maintenance(maint, "fake-uart", "57600", "gettoc")
+    assert rc == 1
+    assert "partial-before-hang" in text
+    assert "TIMEOUT" in text
+
+
+# ---------------------------------------------------------------------
+# do_create -- --se-uart-baud > $SE_UART_BAUD > 57600 precedence
+# ---------------------------------------------------------------------
+
+
+def _args_namespace(**overrides):
+    base = dict(
+        device=None, dev_id=None, setools_dir=None, se_uart=None,
+        gen_toc="app-gen-toc", write_mram="app-write-mram",
+        se_uart_baud=None, replace_atoc=False,
+    )
+    base.update(overrides)
+    return types.SimpleNamespace(**base)
+
+
+def test_do_create_se_uart_baud_defaults_to_57600(monkeypatch) -> None:
+    monkeypatch.delenv("SE_UART_BAUD", raising=False)
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(object(), _args_namespace())
+    assert runner.se_uart_baud == "57600"
+
+
+def test_do_create_se_uart_baud_env_overrides_default(monkeypatch) -> None:
+    monkeypatch.setenv("SE_UART_BAUD", "115200")
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(object(), _args_namespace())
+    assert runner.se_uart_baud == "115200"
+
+
+def test_do_create_se_uart_baud_flag_overrides_env(monkeypatch) -> None:
+    monkeypatch.setenv("SE_UART_BAUD", "115200")
+    runner = alif_flash.AlifFlashBinaryRunner.do_create(
+        object(), _args_namespace(se_uart_baud="9600"))
+    assert runner.se_uart_baud == "9600"
