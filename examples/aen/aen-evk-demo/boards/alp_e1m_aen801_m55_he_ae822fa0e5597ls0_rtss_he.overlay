@@ -74,8 +74,10 @@
  * 13's JPEG buffers are, and the driver's own header states the requirement is
  * enforced "at the board/SoC layer, not in this glue". So system RAM moves.
  *
- * WHY NOT JUST `zephyr,sram = &sram0` LIKE aen-ethernet-link DOES. Because
- * this app, unlike that one, already puts buffers in the SRAM0 LINKER REGION.
+ * WHY NOT JUST `zephyr,sram = &sram0` (aen-ethernet-link's original
+ * whole-RAM-move fix, since superseded there by a `memory-region`-scoped
+ * placement -- see that example's README). Because this app already puts
+ * buffers in the SRAM0 LINKER REGION.
  * The SoC dtsi's sram0 node is BOTH a `zephyr,memory-region` (which emits a
  * linker MEMORY region named SRAM0, the one phase 13's
  * __attribute__((section("SRAM0"))) buffers land in) AND, if chosen, the

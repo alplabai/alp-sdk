@@ -75,13 +75,24 @@ and the server NIC RX counter moved off 0 — the SOM is discoverable on the wir
    tightly-coupled and **not on the GMAC DMA's AXI path** — so the DMA fetched
    garbage descriptors and wrote received frames nowhere. The MAC, MDIO, PHY power,
    clock and even the media link all came up, but **no frame moved in either
-   direction** (`rx_bytes=0` on the SOM *and* `RX=0` on the server NIC). The overlay
-   now sets **`zephyr,sram = &sram0`** (the global on-chip SRAM @ `0x02000000`, the
-   same bank the NPU uses): globally addressed so CPU addr == DMA addr, which is what
-   the upstream DWMAC core needs (it hands the raw CPU pointer to the DMA, no
-   `local_to_global`). With `CONFIG_DCACHE=n` the CPU and DMA share a coherent view.
-   This closes the eth_dwmac glue's documented Tier-1.5 placement gap
+   direction** (`rx_bytes=0` on the SOM *and* `RX=0` on the server NIC). Both
+   ends need to land in the global on-chip SRAM0 (`0x02000000`, the same bank
+   the NPU uses): globally addressed so CPU addr == DMA addr, which is what the
+   upstream DWMAC core needs (it hands the raw CPU pointer to the DMA, no
+   `local_to_global`). With `CONFIG_DCACHE=n` the CPU and DMA share a coherent
+   view. This closes the eth_dwmac glue's documented Tier-1.5 placement gap
    (`eth_dwmac_alif_ensemble.c` header).
+
+   The first working overlay moved **all** of main RAM to SRAM0
+   (`chosen { zephyr,sram = &sram0; }`) — simple, but slower than DTCM for
+   everything else, and it intermittently broke the ISP. Silicon-proven
+   prototype (bench run 200): main RAM stays on DTCM (`zephyr,sram = &dtcm`,
+   the generated default — this overlay no longer overrides it), and only the
+   Ethernet-owned buffers move to SRAM0 — the descriptor rings via the
+   ethernet node's `memory-region = <&sram0>;` (SoC dtsi) and the net_buf pool
+   via `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (default y, relocates
+   `subsys/net/ip/net_pkt.c`'s DATA/BSS/NOINIT into SRAM0 via
+   `zephyr_code_relocate`, see `zephyr/CMakeLists.txt`).
 
 > The earlier PARTIAL write-up blamed the "PHY RX data path / REF_CLK" and the
 > `ANLPAR=0` symptom. That was a red herring caused by (a) a bad cable masking the

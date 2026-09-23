@@ -557,6 +557,12 @@
 		reg = <0x48100000 0x1000>;
 		interrupts = <148 3>;
 		clocks = <&clockctrl ALIF_ETHERNET_CLK>;
+		/* GMAC DMA cannot reach the M55 DTCM: pin the descriptor rings
+		 * (and, via CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION, the
+		 * net_buf pools) into global on-chip SRAM0 while main RAM stays
+		 * on DTCM -- silicon-proven prototype, bench run 200. See the
+		 * `memory-region` property in alif,ethernet.yaml. */
+		memory-region = <&sram0>;
 		/* Station MAC: per-boot RANDOM locally-administered address (the
 		 * standard Zephyr ethernet-controller mechanism; the glue prefixes
 		 * it 02:01:56, this repo's LAA convention).  A hard-coded

@@ -54,9 +54,13 @@
 # Register offsets used by the glue (MAC_CONF, DMA_SYSBUS_MODE, MAC_MDIO_*) are
 # transcribed verbatim from eth_dwmac_priv.h; the node geometry (reg, IRQ,
 # clock id) is from the alifsemi/zephyr_alif fork DTS. Validated on E8 silicon
-# (2026-06-17): the E1M-AEN801 (M55-HE) pulled a real DHCP lease end-to-end with
-# the descriptor rings + net_buf pool placed in global SRAM0 (zephyr,sram =
-# &sram0) and CONFIG_DCACHE=n.
+# (2026-06-17): the E1M-AEN801 (M55-HE) pulled a real DHCP lease end-to-end.
+# Silicon-proven prototype (bench run 200): rather than moving ALL of RAM off
+# the M55 DTCM to global SRAM0 (`chosen { zephyr,sram = &sram0; }`, which is
+# slower and intermittently breaks the ISP), pin ONLY the descriptor rings
+# (via this node's `memory-region`) and the net_buf pools (via
+# CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION relocating subsys/net/ip/net_pkt.c)
+# into SRAM0, while main RAM stays on DTCM. CONFIG_DCACHE=n throughout.
 
 description: |
   Alif Ensemble Synopsys DesignWare Ethernet MAC (RMII).
@@ -108,3 +112,19 @@ properties:
     description: |
       MAC<->PHY interface. The Ensemble MAC is wired RMII on this SoM; kept for
       DT documentation parity with the generic ethernet-controller binding.
+
+  memory-region:
+    type: phandle
+    description: |
+      Memory node (e.g. `&sram0`) the GMAC DMA can actually reach. Optional --
+      when absent the glue falls back to placing the descriptor rings in
+      whatever `zephyr,sram` resolves to (the previous, whole-RAM-move
+      behaviour). When present, the glue places dwmac_tx_descs/dwmac_rx_descs
+      in this node's linker region (via
+      `Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(...))`) and
+      CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION relocates the net_buf DATA/
+      BSS/NOINIT sections of subsys/net/ip/net_pkt.c into the same region --
+      so only the Ethernet-owned buffers move off the M55 DTCM (CPU-local,
+      not on the GMAC DMA's AXI path) instead of all of main RAM. Point it at
+      the global on-chip SRAM0 (`&sram0`, `zephyr,memory-region = "SRAM0"`),
+      NEVER at a DTCM node.

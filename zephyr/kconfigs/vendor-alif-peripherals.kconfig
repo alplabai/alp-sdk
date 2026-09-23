@@ -65,7 +65,6 @@ config ETH_DWMAC_ALIF
 	depends on DT_HAS_ALIF_ETHERNET_ENABLED
 	select ETH_DWMAC
 	select PINCTRL
-	select NOCACHE_MEMORY if ARCH_HAS_NOCACHE_MEMORY_SUPPORT
 	help
 	  Alif Ensemble platform glue (compatible "alif,ethernet") backing the
 	  UPSTREAM eth_dwmac (Synopsys DesignWare GMAC) core.  Enables the
@@ -81,10 +80,16 @@ config ETH_DWMAC_ALIF
 	  translation), so the descriptor rings AND the net_buf packet pool MUST
 	  live in the global on-chip SRAM0 (sram@2000000, @0x02000000, CPU addr ==
 	  DMA addr), NEVER in the M55 DTCM (CPU-local, not on the GMAC AXI path --
-	  buffers there are invisible to the DMA and no frame moves).  Pin this in
-	  the board overlay via `chosen { zephyr,sram = &sram0; }` and keep
-	  CONFIG_DCACHE=n (or a nocache region) so CPU and DMA share a coherent
-	  view; the driver BUILD_ASSERTs the cache-coherency half of this.
+	  buffers there are invisible to the DMA and no frame moves).  Silicon-proven
+	  prototype (bench run 200): give the ethernet node a `memory-region` (e.g.
+	  `&sram0`) and enable ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only
+	  the Ethernet-owned buffers move to SRAM0 while main RAM stays on DTCM --
+	  moving ALL of RAM there (`chosen { zephyr,sram = &sram0; }`) is slower
+	  and intermittently breaks the ISP.  Deliberately does NOT
+	  `select NOCACHE_MEMORY`: its nocache section lands in the DTCM, which
+	  the GMAC DMA cannot see -- keep CONFIG_DCACHE=n instead (the driver
+	  BUILD_ASSERTs it; the E8 D-cache maintenance loop hangs on this
+	  silicon, see scripts/bench/aen/aen-bench-shared.conf).
 
 	  ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core): kept
 	  in-tree, NOT retired onto the fork -- the sdk-alif fork forked the
@@ -92,6 +97,22 @@ config ETH_DWMAC_ALIF
 	  Kconfig.dwmac offers no Ensemble path (STM32-only / MMU-gated; the M55
 	  has an MPU).  Retiring would be an unconditional silent Ethernet loss.
 	  See docs/adr/0017.
+
+config ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
+	bool "Relocate net_pkt.c's net_buf pools into the ethernet node's DMA region"
+	default y
+	depends on ETH_DWMAC_ALIF
+	depends on NETWORKING
+	select CODE_DATA_RELOCATION
+	help
+	  Silicon-proven prototype (bench run 200): the GMAC DMA cannot reach the
+	  M55 DTCM, so the net_buf pools in subsys/net/ip/net_pkt.c (__noinit)
+	  must live in the same region as the descriptor rings.  zephyr/CMakeLists.txt
+	  resolves that region from the ethernet node's `memory-region` DT property
+	  (e.g. SRAM0) and relocates net_pkt.c's DATA/BSS/NOINIT sections into it
+	  via zephyr_code_relocate(), instead of moving all of main RAM there with
+	  `chosen { zephyr,sram = &sram0; }`.  No-op when the ethernet node has no
+	  `memory-region`.
 
 choice ETH_DWMAC_ALIF_RMII_REFCLK
 	prompt "Alif GMAC RMII 50 MHz reference-clock source"

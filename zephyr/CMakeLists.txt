@@ -342,13 +342,46 @@ endif()
 # (compatible alif,ethernet); driver: zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c,
 # binding: zephyr/dts/bindings/ethernet/alif,ethernet.yaml.  The clock id it
 # enables (ALIF_ETHERNET_CLK) is re-encoded for the upstream alif,clockctrl in
-# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.  bench-unverified.
+# zephyr/include/zephyr/dt-bindings/clock/alif-ensemble-clocks-ext.h.
+# BENCH-VERIFIED E8 2026-06-17 (real DHCP lease, server-side REACHABLE).
 zephyr_library_sources_ifdef(CONFIG_ETH_DWMAC_ALIF
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c)
 # The glue uses the eth_dwmac core's private header (struct dwmac_priv); upstream
 # keeps it co-located in drivers/ethernet/, so expose that dir on the include path.
 if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
+endif()
+
+# Silicon-proven prototype (bench run 200): the GMAC DMA cannot reach the M55
+# DTCM, so subsys/net/ip/net_pkt.c's net_buf pools (__noinit) must land in the
+# same SRAM region as the descriptor rings the driver places via the ethernet
+# node's `memory-region` (zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c) --
+# rather than moving ALL of main RAM there with `chosen { zephyr,sram =
+# &sram0; }`, which is slower and intermittently breaks the ISP.  Resolve the
+# region name from DT at configure time: the ethernet node's memory-region
+# phandle (exported as that node's path, single phandle props per
+# gen_dts_cmake.py), then that node's zephyr,memory-region string (e.g.
+# "SRAM0").  A node without memory-region, or CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
+# unset, is a silent no-op -- net_pkt.c keeps its default placement.
+if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
+    dt_nodelabel(alif_eth_node_path NODELABEL "ethernet")
+    if(alif_eth_node_path)
+        dt_prop(alif_eth_dma_region_path PATH "${alif_eth_node_path}" PROPERTY "memory-region")
+    endif()
+    if(alif_eth_dma_region_path)
+        dt_prop(alif_eth_dma_region_name PATH "${alif_eth_dma_region_path}"
+            PROPERTY "zephyr,memory-region")
+    endif()
+    if(alif_eth_dma_region_name)
+        foreach(alif_eth_dma_region_loc DATA BSS NOINIT)
+            zephyr_code_relocate(FILES ${ZEPHYR_BASE}/subsys/net/ip/net_pkt.c
+                LOCATION ${alif_eth_dma_region_name}_${alif_eth_dma_region_loc})
+        endforeach()
+    else()
+        message(WARNING "CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION is set but the "
+            "ethernet node has no usable memory-region -- net_pkt.c's net_buf pools "
+            "stay on DTCM, unreachable by the GMAC DMA.")
+    endif()
 endif()
 
 # Alif Ensemble GMAC embedded Clause-22 MDIO (compatible snps,designware-mdio);

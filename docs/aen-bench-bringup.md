@@ -21,7 +21,7 @@ and [`aen-provisioning.md`](aen-provisioning.md).
 | **I2C2 + 24C128 EEPROM** (`i2c_dw`, Tier-1) | ✅ PASS | EEPROM ACKs at 0x50 and returns a **populated Alp manifest** (not blank) — magic `ALPH`, SKU, serial, mfg date, CRC-32 all decode; one of 12 devices on the bus (the same N24S128 part also answers its `1011` second device-select header at 0x58 — see §3) — once the pinctrl carries the **pad config** Alif's reference uses — `input-enable` (REN) + `bias-pull-down` (DSC=2). See §3. |
 | **PWM** (Tier-1.5) | ✅ PASS | pwm_set_cycles reg readback matches (CNTR_PTR/COMPARE/CTRL), shares the hal_alif UTIMER start-path the counter fix validated. |
 | **SPI** (`alif,dwc-ssi-spi`, Tier-2) | ✅ PASS *after a fix* | DWC-SSI stayed in slave mode → `spi_transceive` -116 (TX FIFO full, no SCLK). The Alif SoC gates master mode behind `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`), which upstream never sets. **PR #162** sets it in the driver. Re-validated: `rc=0`, internal-loopback `rx==tx`, CTRLR0=`0x80002007`. See §3. |
-| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. Fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). See §3. |
+| **Ethernet** (`alif,ethernet` / `eth_dwmac`, Tier-1.5) | ✅ PASS *after a fix* | Real cause of the long no-link: the GMAC DMA descriptor rings + net_buf pool sat in the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** on the GMAC DMA bus. First fix: `zephyr,sram = &sram0` (global on-chip SRAM `0x02000000`, CPU addr == DMA addr) + `CONFIG_DCACHE=n` -- moved ALL of main RAM to SRAM0. Silicon-proven prototype (bench run 200): only the Ethernet-owned buffers move now -- the ethernet node's `memory-region = <&sram0>;` (descriptor rings) + `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (net_buf pool, `subsys/net/ip/net_pkt.c`) -- while main RAM stays on DTCM (faster, and no longer the intermittent ISP breakage the whole-RAM move caused). The PHY power (`E_PHY_PWRDWN` = P15_4), reset (`E_PHY_RESET` = P11_6), and RCSR bit7 `REF_CLK_SEL=1` were already correct. Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease + ARP `REACHABLE`). See §3. |
 | **UART3** (`ns16550`, Tier-1) | ✅ PASS | Internal loopback. |
 | **Counter** (`utimer0`, Tier-1.5) | ✅ PASS | UTIMER0 counter advances. |
 | **Counter alarm** (`utimer0` COMPARE-A, Tier-1.5) | ✅ PASS *after a fix* (RAM-run, 2026-06-17) | The COMPARE-A one-shot **alarm** fires + re-arms (`fired=2`). Two bring-up bugs fixed in `counter_alif_utimer.c`: (1) the match interrupt compares the `COMPARE_A_BUF1` **shadow** register (`0xD4`), not the `COMPARE_A` reg (`0xD0`) the driver wrote — so the shadow stayed 0 and bit2 only matched at the start `CNTR==0` tick; (2) the alarm's NVIC line is `comp_a_buf1` (the bit2 event), not `comp_capt_a` (bit0/CAPTURE_A) — so even once bit2 latched its line was never enabled. Regression: `examples/aen/aen-counter-alarm-regcheck`. |
@@ -567,12 +567,18 @@ secure-boot verification — always write both consistent blobs.
 - **Ethernet DMA buffers must live in global SRAM0, not the M55 DTCM.** The long
   no-link was traced to the GMAC DMA descriptor rings + net_buf pool sitting in
   the M55 **DTCM** (`zephyr,sram = &dtcm`), which is **not** reachable on the GMAC
-  DMA bus — so the MAC never saw valid descriptors. Fix: `zephyr,sram = &sram0`
-  (global on-chip SRAM `0x02000000`, where the CPU address equals the DMA address)
-  + `CONFIG_DCACHE=n`. The PHY power (`E_PHY_PWRDWN` = P15_4 lpgpio), PHY reset
-  (`E_PHY_RESET` = P11_6 gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock
-  select were all already correct — the earlier "PHY RX path / `ANLPAR=0` / scope
-  the REF_CLK" diagnosis was a red herring (a bad cable plus the DTCM starvation).
+  DMA bus — so the MAC never saw valid descriptors. First fix: `zephyr,sram =
+  &sram0` (global on-chip SRAM `0x02000000`, where the CPU address equals the
+  DMA address) + `CONFIG_DCACHE=n` — moved ALL of main RAM to SRAM0, which is
+  slower and intermittently broke the ISP. Silicon-proven prototype (bench run
+  200): pin only the Ethernet-owned buffers into SRAM0 instead — the
+  descriptor rings via the ethernet node's `memory-region` DT property, and
+  the net_buf pool via `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION`
+  relocating `subsys/net/ip/net_pkt.c` — while main RAM stays on DTCM. The PHY
+  power (`E_PHY_PWRDWN` = P15_4 lpgpio), PHY reset (`E_PHY_RESET` = P11_6
+  gpio11), and the RCSR bit7 `REF_CLK_SEL=1` ref-clock select were all already
+  correct — the earlier "PHY RX path / `ANLPAR=0` / scope the REF_CLK"
+  diagnosis was a red herring (a bad cable plus the DTCM starvation).
   Re-validated end-to-end: DHCP lease `192.168.10.137` (server-side dnsmasq lease
   + ARP `REACHABLE`).
 - **Generalizable: any DMA-master block needs its buffers in global SRAM.** On the
@@ -614,7 +620,7 @@ secure-boot verification — always write both consistent blobs.
 | I2C2 clean NACKs but no device ACKs | The pinctrl is missing **`input-enable`** (REN) so the controller can't sense SDA, or it used `bias-pull-up` (DSC=1) instead of `bias-pull-down` (DSC=2). Match Alif's reference (§3) — then the EEPROM ACKs at 0x50 (and its second device-select header at 0x58 — same part, not a second device). |
 | `spi_transceive` returns `-116` (TX FIFO full, no SCLK) | SoC master-mode not set — `CLKCTRL_PER_SLV.SSI_CTRL` (`0x4902F028`) per-instance master bit. The alp-sdk driver sets it in init (PR #162); if you forked the driver, replicate it. |
 | `spi_transceive` returns `-EINVAL` with no register programming | No `clock-frequency` for the BAUDR divider and the alif clock controller has no `get_rate`. Set `clock-frequency` on the SPI node (§3). |
-| Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Move them to global SRAM0: `zephyr,sram = &sram0` + `CONFIG_DCACHE=n` (§3). Applies to any DMA-master block (GMAC/NPU/SDHC). |
+| Ethernet links but never gets a lease / no traffic | GMAC DMA descriptor rings + net_buf pool are in the M55 **DTCM** (`zephyr,sram = &dtcm`), off the DMA bus. Move only the Ethernet-owned buffers to global SRAM0: give the ethernet node a `memory-region` + enable `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` + `CONFIG_DCACHE=n` (§3) — main RAM can stay on DTCM; whole-RAM `zephyr,sram = &sram0` also works but is slower. Applies to any DMA-master block (GMAC/NPU/SDHC). |
 | I2S TX never clocks out / PDM `dmic_read` → `-EAGAIN` (FIFO=0) | The CGU master **76.8 MHz** source and (for the HP PDM) the `EXPMST0_CTRL` IPCLK/PCLK force bits are not set. These are now enabled by the Tier-1.5 clockctrl west-patch (`west patch apply`; §3) on `clock_control_on()` — confirm the patch is applied. The 76.8 MHz oscillator itself is SE-managed, so the PDM may also need the `se_services`/MHU clock request even with the CGU bit set. |
 | I2S sample rate looks wrong (pitch off) | The `I2Sx_CTRL` `CKDIV` divider the clockctrl `.set_rate` programs is **BENCH-UNVERIFIED** (field layout from the Alif `i2s_sync` reference, not the DFP/TRM). Confirm the divider width/position + N-vs-(N-1) convention against the Alif DFP/TRM; the hunk is separable in the patch so it can be held. |
 | **LPRTC** (`snps,dw-apb-rtc`, Tier-2) | ✅ PASS (RAM-run, 2026-06-17) | The always-on `lprtc@42000000` free-running 32-bit counter advances (delta 3467 ticks / ~100 ms at 32768 Hz) via the portable Zephyr counter API over the vendored `counter_dw_rtc` driver. `counter_start` returns `-EALREADY` → the **VBAT clock-gate is already on** (no `VBAT_LPRTC0_CLK_EN` write needed on the upstream-Zephyr build path). Fixed two driver bugs the link-only check missed: the missing `.get_top_value` (faulted PC=0x0) + `max_top_value`. It is a **counter**, not a calendar RTC — the `alp_rtc_*` calendar shim is still TBD. Example: `examples/aen/aen-rtc-regcheck`. |
