@@ -26,11 +26,16 @@
  * DMA's AXI path) and in the global on-chip SRAM0 @0x02000000 (CPU addr == DMA
  * addr) instead, with CONFIG_DCACHE=n so the CPU and the DMA master share a
  * coherent view -- see the descriptor-ring placement note + BUILD_ASSERT below.
+ * That bench run used the whole-RAM-move mechanism, `chosen { zephyr,sram =
+ * &sram0; }` -- moving ALL of main RAM to SRAM0, which is slower than DTCM for
+ * everything that is not Ethernet-DMA traffic and intermittently broke the ISP.
  *
- * Silicon-proven prototype (bench run 200): rather than moving ALL of main RAM
- * to SRAM0 (`chosen { zephyr,sram = &sram0; }`, which is slower and
- * intermittently broke the ISP), only the Ethernet-owned buffers move -- the
- * descriptor rings via this node's `memory-region` DT property (see
+ * `memory-region` (below) is a narrower alternative: build-verified; the same
+ * placement idea -- only the Ethernet-owned buffers move -- was prototyped on
+ * silicon in scratch bench run 200 (a different app-level relocation of
+ * net_pkt.c + this glue file, CONFIG_NOCACHE_MEMORY=y, and different ring
+ * addresses than this mechanism uses; it has not itself run on silicon yet).
+ * The descriptor rings move via this node's `memory-region` DT property (see
  * alif,ethernet.yaml) and the net_buf pools via
  * CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION (zephyr/CMakeLists.txt relocates
  * subsys/net/ip/net_pkt.c's DATA/BSS/NOINIT into the same region), while main
@@ -256,7 +261,10 @@ int dwmac_bus_init(struct dwmac_priv *p)
  * must land in shared SRAM via its global alias, NEVER the M55 DTCM
  * (CPU-local alias 0x20000000, not on the GMAC DMA's AXI path).
  *
- * PLACEMENT (silicon-proven prototype, bench run 200): when the DT node
+ * PLACEMENT (build-verified; the same idea was prototyped on silicon in
+ * scratch bench run 200, with a different app-level relocation of net_pkt.c +
+ * this glue file, CONFIG_NOCACHE_MEMORY=y, and different ring addresses --
+ * this exact mechanism has not itself run on silicon yet): when the DT node
  * carries a `memory-region` (see alif,ethernet.yaml), the rings are placed
  * directly in that region's linker section -- e.g. SRAM0_NOINIT -- via
  * Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(...)), independent of wherever
@@ -264,32 +272,33 @@ int dwmac_bus_init(struct dwmac_priv *p)
  * CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION so the net_buf pools
  * (subsys/net/ip/net_pkt.c, __noinit) land in the same region: only the
  * Ethernet-owned buffers move off DTCM, the rest of main RAM stays there
- * (faster, and no longer trips the intermittent ISP breakage the whole-RAM
- * move caused). Without `memory-region` the rings fall back to inheriting
- * whatever `zephyr,sram` resolves to -- the original whole-RAM-move behaviour
- * (`chosen { zephyr,sram = &sram0; }` in the board overlay).
+ * (faster, and would no longer trip the intermittent ISP breakage the
+ * whole-RAM move caused). Without `memory-region` the rings fall back to
+ * inheriting whatever `zephyr,sram` resolves to -- the original whole-RAM-move
+ * behaviour (`chosen { zephyr,sram = &sram0; }` in the board overlay).
  *
- * Bench-proven (E8 2026-06-17, refined by bench run 200): these rings AND the
- * net_buf packet pool MUST live in the global on-chip SRAM0 (sram@2000000,
- * @0x02000000), NEVER in the M55 DTCM -- buffers left there are invisible to
- * the DMA and no frame moves in either direction (the original no-link,
- * root-caused on the bench). This is the upstream-core placement gap (the
- * core hands the raw CPU pointer to the DMA, no local_to_global
- * translation), so correct placement is enforced at the DT/board layer, not
- * computed in this glue.
+ * These rings AND the net_buf packet pool MUST live in the global on-chip
+ * SRAM0 (sram@2000000, @0x02000000), NEVER in the M55 DTCM -- buffers left
+ * there are invisible to the DMA and no frame moves in either direction (the
+ * original no-link, root-caused on the bench, E8 2026-06-17). This is the
+ * upstream-core placement gap (the core hands the raw CPU pointer to the DMA,
+ * no local_to_global translation), so correct placement is enforced at the
+ * DT/board layer, not computed in this glue.
+ *
+ * No `__nocache` arm: the driver's BUILD_ASSERT below requires CONFIG_DCACHE=n
+ * unconditionally (the E8 D-cache maintenance loop hangs -- there is no
+ * nocache-region escape hatch on this silicon), so a nocache attribute here
+ * would be redundant at best -- and, combined with a `memory-region`'s
+ * explicit linker section, `__nocache`'s own section placement conflicts with
+ * it and fails to build when CONFIG_NOCACHE_MEMORY=y. `memory-region` gives
+ * the SRAM0 section; otherwise the rings get plain default placement.
  */
-#if defined(CONFIG_NOCACHE_MEMORY)
-#define __desc_cache_attr __nocache
-#else
-#define __desc_cache_attr
-#endif
-
 #if DT_INST_NODE_HAS_PROP(0, memory_region)
 #define __desc_mem \
 	Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(DT_INST_PHANDLE(0, memory_region))) \
-	__desc_cache_attr __aligned(4)
+	__aligned(4)
 #else
-#define __desc_mem __desc_cache_attr __aligned(4)
+#define __desc_mem __aligned(4)
 #endif
 
 /*

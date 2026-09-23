@@ -352,19 +352,28 @@ if(CONFIG_ETH_DWMAC_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/ethernet)
 endif()
 
-# Silicon-proven prototype (bench run 200): the GMAC DMA cannot reach the M55
-# DTCM, so subsys/net/ip/net_pkt.c's net_buf pools (__noinit) must land in the
-# same SRAM region as the descriptor rings the driver places via the ethernet
+# Build-verified; the same placement idea was prototyped on silicon in
+# scratch bench run 200 (a different app-level relocation, CONFIG_NOCACHE_MEMORY=y,
+# and different ring addresses than this mechanism uses -- this mechanism has
+# not itself run on silicon yet). The GMAC DMA cannot reach the M55 DTCM, so
+# subsys/net/ip/net_pkt.c's net_buf pools (__noinit) must land in the same
+# SRAM region as the descriptor rings the driver places via the ethernet
 # node's `memory-region` (zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c) --
 # rather than moving ALL of main RAM there with `chosen { zephyr,sram =
 # &sram0; }`, which is slower and intermittently breaks the ISP.  Resolve the
-# region name from DT at configure time: the ethernet node's memory-region
-# phandle (exported as that node's path, single phandle props per
-# gen_dts_cmake.py), then that node's zephyr,memory-region string (e.g.
-# "SRAM0").  A node without memory-region, or CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
-# unset, is a silent no-op -- net_pkt.c keeps its default placement.
+# region name from DT at configure time, the same way the driver resolves the
+# node (DT_INST_PHANDLE(0, memory_region) on the sole `alif,ethernet`
+# instance): the ethernet node's memory-region phandle (exported as that
+# node's path, single phandle props per gen_dts_cmake.py), then that node's
+# zephyr,memory-region string (e.g. "SRAM0").  LIMIT: only net_pkt.c's own
+# pools are relocated -- an application's own net_buf pool (e.g.
+# NET_PKT_DATA_POOL_DEFINE via net_context_setup_pools) still lands on DTCM
+# and the DMA would silently fail against it.  With
+# CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION unset this whole block is
+# skipped (net_pkt.c keeps its default placement); with it set but no usable
+# memory-region resolving, this prints a CMake WARNING -- not a silent no-op.
 if(CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION)
-    dt_nodelabel(alif_eth_node_path NODELABEL "ethernet")
+    dt_comp_path(alif_eth_node_path COMPATIBLE "alif,ethernet" INDEX 0)
     if(alif_eth_node_path)
         dt_prop(alif_eth_dma_region_path PATH "${alif_eth_node_path}" PROPERTY "memory-region")
     endif()

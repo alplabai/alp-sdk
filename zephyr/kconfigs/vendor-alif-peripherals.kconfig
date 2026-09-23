@@ -80,16 +80,30 @@ config ETH_DWMAC_ALIF
 	  translation), so the descriptor rings AND the net_buf packet pool MUST
 	  live in the global on-chip SRAM0 (sram@2000000, @0x02000000, CPU addr ==
 	  DMA addr), NEVER in the M55 DTCM (CPU-local, not on the GMAC AXI path --
-	  buffers there are invisible to the DMA and no frame moves).  Silicon-proven
-	  prototype (bench run 200): give the ethernet node a `memory-region` (e.g.
-	  `&sram0`) and enable ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only
-	  the Ethernet-owned buffers move to SRAM0 while main RAM stays on DTCM --
-	  moving ALL of RAM there (`chosen { zephyr,sram = &sram0; }`) is slower
-	  and intermittently breaks the ISP.  Deliberately does NOT
-	  `select NOCACHE_MEMORY`: its nocache section lands in the DTCM, which
-	  the GMAC DMA cannot see -- keep CONFIG_DCACHE=n instead (the driver
-	  BUILD_ASSERTs it; the E8 D-cache maintenance loop hangs on this
-	  silicon, see scripts/bench/aen/aen-bench-shared.conf).
+	  buffers there are invisible to the DMA and no frame moves).  The
+	  2026-06-17 bench run above used the whole-RAM-move mechanism,
+	  `chosen { zephyr,sram = &sram0; }`, which is slower than DTCM for
+	  everything that is not Ethernet-DMA traffic and intermittently breaks
+	  the ISP.
+
+	  A narrower alternative: build-verified; the same placement idea was
+	  prototyped on silicon in scratch bench run 200 (a different app-level
+	  relocation, CONFIG_NOCACHE_MEMORY=y, and different ring addresses than
+	  this mechanism uses -- this mechanism has not itself run on silicon
+	  yet). Give the ethernet node a `memory-region` (e.g. `&sram0`) and
+	  enable ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only the
+	  Ethernet-owned buffers move to SRAM0 while main RAM stays on DTCM.
+	  Deliberately does NOT `select NOCACHE_MEMORY`: its nocache section
+	  lands in the DTCM, which the GMAC DMA cannot see -- keep
+	  CONFIG_DCACHE=n instead (the driver BUILD_ASSERTs it unconditionally;
+	  the E8 D-cache maintenance loop hangs on this silicon, see
+	  scripts/bench/aen/aen-bench-shared.conf).
+
+	  LIMIT: ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION only relocates
+	  subsys/net/ip/net_pkt.c's own net_buf pools. A net_buf pool an
+	  application declares itself (e.g. NET_PKT_DATA_POOL_DEFINE via
+	  net_context_setup_pools) still lands wherever `zephyr,sram` puts it --
+	  DTCM by default -- and the DMA would silently fail against it.
 
 	  ADR 0017 Tier-1.5 (in-tree thin glue over an UPSTREAM core): kept
 	  in-tree, NOT retired onto the fork -- the sdk-alif fork forked the
@@ -105,14 +119,20 @@ config ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
 	depends on NETWORKING
 	select CODE_DATA_RELOCATION
 	help
-	  Silicon-proven prototype (bench run 200): the GMAC DMA cannot reach the
-	  M55 DTCM, so the net_buf pools in subsys/net/ip/net_pkt.c (__noinit)
-	  must live in the same region as the descriptor rings.  zephyr/CMakeLists.txt
-	  resolves that region from the ethernet node's `memory-region` DT property
+	  Build-verified; the same placement idea was prototyped on silicon in
+	  scratch bench run 200. The GMAC DMA cannot reach the M55 DTCM, so the
+	  net_buf pools in subsys/net/ip/net_pkt.c (__noinit) must live in the
+	  same region as the descriptor rings.  zephyr/CMakeLists.txt resolves
+	  that region from the ethernet node's `memory-region` DT property
 	  (e.g. SRAM0) and relocates net_pkt.c's DATA/BSS/NOINIT sections into it
 	  via zephyr_code_relocate(), instead of moving all of main RAM there with
-	  `chosen { zephyr,sram = &sram0; }`.  No-op when the ethernet node has no
-	  `memory-region`.
+	  `chosen { zephyr,sram = &sram0; }`.  Prints a CMake WARNING (does not
+	  fail the build) when the ethernet node has no usable `memory-region`.
+
+	  LIMIT: only relocates subsys/net/ip/net_pkt.c's own net_buf pools. A
+	  pool an application declares itself (e.g. NET_PKT_DATA_POOL_DEFINE via
+	  net_context_setup_pools) still lands wherever `zephyr,sram` puts it --
+	  DTCM by default -- and the DMA would silently fail against it.
 
 choice ETH_DWMAC_ALIF_RMII_REFCLK
 	prompt "Alif GMAC RMII 50 MHz reference-clock source"

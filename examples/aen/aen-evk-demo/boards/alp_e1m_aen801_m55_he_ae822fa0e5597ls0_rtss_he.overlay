@@ -68,11 +68,18 @@
  * rx_bytes=0 AND the server NIC RX=0). examples/aen/aen-ethernet-link
  * root-caused that and calls the fix its DECISIVE one.
  *
- * There is no narrower fix available to an application. The descriptor rings
- * are file-static in the Ethernet driver and the net_buf pool is file-static
- * in the net subsystem; neither can be section-tagged from here the way phase
- * 13's JPEG buffers are, and the driver's own header states the requirement is
- * enforced "at the board/SoC layer, not in this glue". So system RAM moves.
+ * A narrower fix now exists at the board/SoC layer: the SoC dtsi's `ethernet`
+ * node carries `memory-region = <&sram0>;`, and
+ * CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION (default y) relocates
+ * net_pkt.c's net_buf pools alongside it -- so the descriptor rings and the
+ * net_buf pool now land in the SRAM0 LINKER REGION below (see the address
+ * map), the same way phase 13's JPEG buffers already do, with this overlay
+ * doing nothing extra for them. That narrower fix is unrelated to THIS
+ * overlay's own reason to move system RAM, though: main RAM
+ * (.data/.bss/.noinit, all stacks) has nothing to do with the GMAC and still
+ * needs a home, so `zephyr,sram = &sram0_sys` below is unchanged. Whether the
+ * whole-RAM move could now be dropped in favour of the generated default
+ * (`zephyr,sram = &dtcm`) is an open question -- not measured here.
  *
  * WHY NOT JUST `zephyr,sram = &sram0` (aen-ethernet-link's original
  * whole-RAM-move fix, since superseded there by a `memory-region`-scoped
@@ -94,13 +101,24 @@
  * already proven to reach -- so both windows inherit that reachability; only
  * the offsets differ.
  *
- *     0x0200_0000 +64 KiB   SRAM0 linker region  -- phase 13's JPEG buffers
- *                                                   (~14 KiB of it used), at
- *                                                   the same addresses as
- *                                                   before this phase existed
+ *     0x0200_0000 +64 KiB   SRAM0 linker region  -- net_pkt.c's relocated
+ *                                                   net_buf pools + mem_slab
+ *                                                   bufs (CODE_DATA_RELOCATION
+ *                                                   NOINIT, ~5.8 KiB), the GMAC
+ *                                                   descriptor rings
+ *                                                   (dwmac_tx/rx_descs,
+ *                                                   512 B), and phase 13's
+ *                                                   JPEG buffers (jpeg_out +
+ *                                                   jpeg_src, ~14 KiB) --
+ *                                                   measured 20800/65536 B
+ *                                                   (31.7%) used; jpeg_out no
+ *                                                   longer starts at
+ *                                                   0x02000000 now that the
+ *                                                   Ethernet buffers precede it
  *     0x0201_0000 +512 KiB  system RAM           -- .data/.bss/.noinit, all
- *                                                   stacks, the GMAC rings and
- *                                                   the net_buf pool
+ *                                                   stacks (the GMAC rings and
+ *                                                   the net_buf pool no longer
+ *                                                   live here -- see above)
  *     0x0209_0000 ..        unused remainder of the bank
  *
  * Shrinking &sram0's reg to the 64 KiB window is deliberate and is the safety
