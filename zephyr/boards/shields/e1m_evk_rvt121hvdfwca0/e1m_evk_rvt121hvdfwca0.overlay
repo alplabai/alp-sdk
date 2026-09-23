@@ -5,18 +5,19 @@
  * e1m_evk_rvt121hvdfwca0 -- the Riverdi RVT121HVDFWCA0-B 12.1" 1280x800 LVDS
  * panel on the E1M-EVK's display connector (J6), via a maintainer-built
  * adapter PCB carrying a TI SN65DSI83 MIPI-DSI-to-FlatLink(LVDS) bridge
- * (I2C 0x2c).  Driven by an E1M-AEN SoM (Alif Ensemble E8) through:
+ * (I2C 0x2c, assumed -- ADDR-strap-selectable, see bridge@2c's comment
+ * below).  Driven by an E1M-AEN SoM (Alif Ensemble E8) through:
  *
  *   cdc200   (tes,cdc-2.1)          -- DPI pixel pump, framebuffer in SRAM0
  *       |  DPI
  *   mipi_dsi (snps,designware-dsi)  -- MIPI-DSI host
  *       |  phy-if <&dphy 1>
  *   dphy     (snps,designware-dphy) -- the shared D-PHY, TX role
- *       |  2 data lanes, RGB666 packed (18 bpp)
+ *       |  2 data lanes, RGB888, non-burst
  *   bridge@2c (ti,sn65dsi83)        -- on the adapter PCB, I2C1 (J6's DSI-
  *                                      connector I2C, not the SoC nodes'
  *                                      own DSI wire)
- *       |  FlatLink single-link LVDS, VESA-24, 4 data pairs
+ *       |  FlatLink single-link LVDS, VESA-24 (Format 2), 4 data pairs
  *   Riverdi RVT121HVDFWCA0-B panel  -- off-shield, on the adapter's LVDS
  *                                      connector
  *
@@ -43,28 +44,59 @@
  * adapter before trusting a dark panel vs. a wiring mismatch.
  *
  * ------------------------- Lane-rate / clock math -------------------------
- * 2 DSI data lanes, RGB666 packed (18 bpp), the Ensemble E8's two-lane
- * application-note ceiling of 500 Mbps/lane (same limit the
+ * 2 DSI data lanes, RGB888 (24 bpp), non-burst-sync-events, the Ensemble
+ * E8's two-lane application-note ceiling of 500 Mbps/lane (same limit the
  * e1m_evk_rk055hdmipi4ma0 shield cites, panel-max-lane-bandwidth below).
+ *
+ * WHY RGB888 + non-burst, not RGB666-packed + burst (this shield's original
+ * choice): the panel is VESA-24 -- Format 2 on the FlatLink LVDS output
+ * (Figure 7-5: the 2 MSB per colour ride the Y3 lane).  An 18 bpp DSI link
+ * (Figure 7-4) only ever gives the bridge 6 bits per colour to forward, so
+ * every colour on this panel would show at roughly 1/4 intensity -- 18 bpp
+ * is only correct into an 18-bit-native panel, not a VESA-24 one driven at
+ * reduced depth.  RGB888 is therefore not optional here.  Burst mode is
+ * also not an option AT this pixel clock and bpp: the burst formula (see
+ * display_sn65dsi83.c's SN65_BURST_HS_CLK_HZ) is pclk * bpp / lanes * 4/3 =
+ * 36.363636e6 * 24 / 2 * 4/3 = 581,818,182 bps, over the 500 Mbps two-lane
+ * ceiling -- non-burst is the only mode that fits RGB888 at this rate.
  *
  * cdc-if (CDC200) pixel clock: 400 MHz / 11 = 36.363636 MHz (the SoC's
  * mipi_display_e8.c divides SYST_ACLK by an integer divider; 11 is the
  * divider that lands closest to the panel's headline pixel clock while
- * keeping the DSI clock-lane math below on a clean integer boundary).
+ * keeping the DSI clock-lane math below on a clean integer boundary) --
+ * unchanged by the RGB666->RGB888 switch; only the bpp in the formulas
+ * below changed.
  *
- * Burst-mode DSI bit rate (dsi_dw.c's dw_calc_clocks(), the DSI host's own
- * formula): pclk * bpp / lanes * (4/3) = 36.363636e6 * 18 / 2 * 4/3 =
- * 436,363,636 bps -- exactly the panel-max-lane-bandwidth clamp below, so
- * the host's clamp is exact, not a ceiling with slack.  The DSI clock LANE
- * (what the bridge's HS_CLK_SRC=1 actually measures) runs at half that, DDR:
- * 218,181,818 Hz (~218.4 MHz, the driver's DSI_CLK_DIVIDER/CHA_DSI_CLK_RANGE
- * comments round to).  PLL_M=546 in the datasheet's own worked-example
- * language for this kind of divide (an equivalent way of saying "divide the
- * DSI clock lane by 6 to reach the panel's ~36.4 MHz LVDS clock" --
- * SN65_DSI_CLK_DIV_FIELD in display_sn65dsi83.c computes the actual register
- * value from these same two DT facts).  LVDS output clock reached: 218.4 /
- * 6 = 36.40 MHz, +0.1% off the CDC's 36.363636 MHz -- within the PLL's own
- * ~0.4 MHz step (the driver's BUILD_ASSERT tolerance).
+ * Non-burst DSI bit rate (dsi_dw.c's dw_calc_clocks() non-burst formula, see
+ * display_sn65dsi83.c's SN65_NONBURST_HS_CLK_HZ for the same arithmetic in
+ * the driver): with vid-pkt-size = hactive = 1280 (below), no sync pulse
+ * (dpi-video-mode = "non-burst-sync-events"),
+ *   (1280*24/8 + 12) * pclk * 8 / (1280*2) + 32 * pclk / (2*1280)
+ *   = 3852 * 36.363636e6 * 8 / 2560 + 16 * 36.363636e6 / 1280
+ *   = 437,727,273 + 454,545 = 438,181,818 bps (~438.18 Mbps).
+ * panel-max-lane-bandwidth below (440,000,000) sits just ABOVE this, as a
+ * guard the DSI host clamps to if it is ever exceeded -- NOT the source of
+ * the rate: dsi_dw.c applies that clamp after computing hs_bit_clk
+ * regardless of burst/non-burst, so setting it BELOW 438.18 Mbps would
+ * silently slow the link and starve the DPI FIFO every line (see the
+ * driver's BUILD_ASSERT on this).  Still comfortably under the 500 Mbps
+ * app-note cap.
+ *
+ * The DSI clock LANE (what the bridge's HS_CLK_SRC=1 measures) runs at half
+ * the bit rate, DDR: 219,090,909 Hz (~219.09 MHz).  The Alif D-PHY PLL only
+ * resolves in 38.4 MHz / 3 / 16 = 0.4 MHz steps (PLL_M counts those steps),
+ * so the achieved rate rounds UP to the next step: PLL_M = ceil(219.09 /
+ * 0.4) = 548, giving 219.2 MHz actual (438.4 Mbps actual HS bit rate) --
+ * both well inside the BUILD_ASSERTs' ~0.4 MHz / CSR-bin tolerance of the
+ * driver's own (pre-rounding) 219.09 MHz target, so no driver change is
+ * needed to account for the rounding.  SN65_DSI_CLK_DIV_FIELD divides that
+ * DSI clock lane by 6 to reach the panel's LVDS clock: 219.2 / 6 = 36.53 MHz
+ * actual (+0.47% vs the CDC's 36.363636 MHz -- the SN65 re-times each line
+ * from its own HSYNC anyway, and CHA_SYNC_DELAY below covers the margin).
+ * Resulting CSR values: 0x0A = 0x01 (LVDS_CLK_RANGE=0, HS_CLK_SRC=1),
+ * 0x0B = 0x28 (DSI_CLK_DIVIDER field 5 = divide-by-6, REFCLK_MULTIPLIER=0),
+ * 0x12 = 0x2B (CHA_DSI_CLK_RANGE, 219.09 MHz / 5 MHz truncated), 0x18 = 0x78
+ * (RGB888, VESA-24 Format 2 -- see display_sn65dsi83.c's CSR 0x18 comment).
  *
  * 36.363636 MHz is ~45% under the panel's own datasheet-headline minimum
  * pixel clock (66.3 MHz, the panel's native 60 Hz timing) -- the maintainer
@@ -73,18 +105,15 @@
  * (1440 * 840) = 30.06 Hz (htotal 1440 = 1280 + 24 + 64 + 72; vtotal 840 =
  * 800 + 8 + 24 + 8).
  *
- * FALLBACK LADDER, if 36.363636 MHz does not bring up a stable image:
- *   1. 40 MHz (400 MHz / 10): 33.1 Hz, DSI bit rate 480 Mbps (still inside
- *      the 500 Mbps ceiling), CSR 0x0A LVDS_CLK_RANGE=0b001 (37.5<=f<62.5
- *      MHz bin, was 0b000 at 36.36 MHz), CSR 0x12 CHA_DSI_CLK_RANGE=0x30
- *      (240 MHz DSI clock lane / 5 MHz).  The driver's DT-derived BUILD_ASSERTs
- *      recompute both automatically from an updated clock-frequency /
- *      panel-max-lane-bandwidth pair -- no driver-code change needed to try
- *      this, only the two properties below.
- *   2. Plan B: RGB888 (24 bpp) non-burst instead of RGB666-packed burst --
- *      CSR 0x18 becomes 0x7A (24BPP_MODE + 24BPP_FORMAT1, the driver's
- *      SN65_LVDS_FMT_BPP_BITS #if branch) at the cost of a higher DSI bit
- *      rate for the same pixel clock (bpp 24 instead of 18).
+ * FALLBACK, if 36.363636 MHz does not bring up a stable image: 40 MHz
+ * (400 MHz / 10) -- 33.1 Hz, non-burst DSI bit rate 482.0 Mbps (still inside
+ * the 500 Mbps ceiling, and above it the driver's BUILD_ASSERT would catch
+ * a too-low panel-max-lane-bandwidth), CSR 0x0A LVDS_CLK_RANGE=0b001
+ * (37.5<=f<62.5 MHz bin, DSI clock lane / 6 = 40.17 MHz vs 36.53 MHz above),
+ * CSR 0x12 CHA_DSI_CLK_RANGE=0x30 (241 MHz DSI clock lane / 5 MHz).  The
+ * driver's DT-derived BUILD_ASSERTs recompute both automatically from an
+ * updated clock-frequency / panel-max-lane-bandwidth pair -- no driver-code
+ * change needed to try this, only the two properties below.
  *
  * HARDWARE CAVEAT (not a firmware knob): the Riverdi panel's backlight draws
  * ~195 mA at ~22 V (~1 A drawn from the E1M-EVK's own +5V rail feeding the
@@ -93,11 +122,9 @@
  * ---------------------------------------------------------------------------
  *
  * DPI colour coding: baked into dsi_dw_dpi_color_code() (zephyr/drivers/
- * mipi_dsi/dsi_dw.c), not a devicetree choice -- RGB666_PACKED always
- * selects DPI_COLOR_CODE_18B_CONFIG_2 (0x4) on this host, whichever panel is
- * attached.  Config 2 vs Config 1 is a DW-databook distinction in how the 18
- * bits are packed into the 24-bit DPI bus; Config 2 is what every other
- * 18bpp user of this host already exercises.  Never bench-tested against
+ * mipi_dsi/dsi_dw.c), not a devicetree choice -- RGB888 always selects the
+ * single DPI_COLOR_CODE_24B code on this host (unlike 16/18 bpp, 24 bpp has
+ * no Config 1/Config 2 packing choice to make).  Never bench-tested against
  * this specific bridge.
  */
 
@@ -199,13 +226,12 @@
  * The panel-side I2C: the SN65DSI83 bridge (on the adapter PCB) and, per the
  * maintainer, the panel's own ILI2511 capacitive-touch controller (I2C 0x41)
  * share this bus.  touch@41 below is POLLED: J6's CTP_INT lands on a
- * CC3501E-owned pad (E1M AH8), so the Alif core has no touch interrupt.
- * See that
- * shield's overlay for the full pinout/route derivation (J6 pin 26/27 ->
- * level translator -> E1M pads AH17/AG17 -> Alif P7_2/P3_7); it is a carrier
- * fact independent of which panel is fitted, so it is repeated verbatim
- * here rather than shared, the same way the two shields do not share a
- * common include.
+ * CC3501E-owned pad (E1M AH8), so the Alif core has no touch interrupt.  See
+ * e1m_evk_rk055hdmipi4ma0's overlay for the full pinout/route derivation
+ * (J6 pin 26/27 -> level translator -> E1M pads AH17/AG17 -> Alif P7_2/
+ * P3_7); it is a carrier fact independent of which panel is fitted, so it
+ * is repeated verbatim here rather than shared, the same way the two
+ * shields do not share a common include.
  */
 &pinctrl {
 	pinctrl_i2c1_dsi: pinctrl_i2c1_dsi {
@@ -223,18 +249,22 @@
 	pinctrl-names = "default";
 
 	/*
-	 * UNVERIFIED -- adapter PCB mapping assumed: I2C address 0x2c per the
-	 * TI SN65DSI83 datasheet (fixed, not strap-selectable) and per the
-	 * Goal's part placement.  No adapter schematic was available to confirm
-	 * the adapter actually routes J6's DSI-connector I2C straight through
-	 * to the bridge with no address translation/mux in between.
+	 * UNVERIFIED -- adapter PCB mapping assumed: 0x2c.  The SN65DSI83's I2C
+	 * address is ADDR-pin STRAP-SELECTABLE, not fixed (datasheet Table 7-3):
+	 * ADDR low -> 0x2c, ADDR high -> 0x2d.  No adapter schematic was
+	 * available to confirm which way the adapter straps ADDR, or that it
+	 * routes J6's DSI-connector I2C straight through to the bridge with no
+	 * address translation/mux in between.  BENCH TIP: if the ID read in
+	 * sn65dsi83_check_id() fails, probe BOTH 0x2c and 0x2d before assuming
+	 * an EN-pin or clock-lane sequencing fault -- a wrong-address guess
+	 * looks identical to "the bridge never answered" from this driver.
 	 */
 	bridge: bridge@2c {
 		compatible = "ti,sn65dsi83";
 		reg = <0x2c>;
 		mipi-dsi = <&mipi_dsi>;
 		data-lanes = <2>;
-		pixel-format = <MIPI_DSI_PIXFMT_RGB666_PACKED>;
+		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
 		/* UNVERIFIED: P0 on lcd_exp -- see that node's comment above. */
 		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
 		status = "okay";
@@ -279,7 +309,7 @@
 	memory-region = <&lcd_fb>;
 
 	/* L1 only: a single full-screen RGB565 layer, same shape as
-	 * e1m_evk_rk055hdmipi4ma0's -- the DSI LINK format (RGB666_PACKED,
+	 * e1m_evk_rk055hdmipi4ma0's -- the DSI LINK format (RGB888,
 	 * bridge@2c's pixel-format above) is independent of the framebuffer's
 	 * pixel-fmt-l1; only the framebuffer's bytes-per-pixel changes. */
 	enable-l1 = <1>;
@@ -299,17 +329,28 @@
 	vid-pkt-size = <1280>;
 
 	/*
-	 * Burst mode, unlike e1m_evk_rk055hdmipi4ma0's non-burst: the SN65DSI83
-	 * needs a continuous HS clock lane it can lock its own LVDS PLL to
-	 * (HS_CLK_SRC=1 in the driver), and burst is what the lane-rate math
-	 * above is built around.  Never bench-compared against non-burst on
-	 * this bridge.
+	 * Non-burst-sync-events, the SAME mode e1m_evk_rk055hdmipi4ma0 is proven
+	 * with (#2199) -- see the "Lane-rate / clock math" header comment for
+	 * why burst does not fit RGB888 at this pixel clock at all (581.8 Mbps,
+	 * over the two-lane 500 Mbps ceiling).  This bridge still gets a
+	 * continuous HS clock lane to lock its own LVDS PLL to (HS_CLK_SRC=1 in
+	 * the driver) either way -- non-burst does not stop the clock lane
+	 * between packets, only non-continuous-clock mode would (not used
+	 * here).  display_sn65dsi83.c reads this property (via SN65_MIPI_NODE)
+	 * to compute the CSR bank honestly for whichever mode is set here; it
+	 * does not hardcode burst.
 	 */
-	dpi-video-mode = "burst";
+	dpi-video-mode = "non-burst-sync-events";
 
-	/* The DSI host's own clamp -- see the lane-rate math above; this is the
-	 * exact rate the burst-mode formula reaches, not a ceiling with slack. */
-	panel-max-lane-bandwidth = <436363636>;
+	/*
+	 * The DSI host's own clamp, applied AFTER computing the real rate
+	 * regardless of mode -- see the "Lane-rate / clock math" header comment
+	 * for why this must be >= the non-burst formula's ~438.18 Mbps (a
+	 * guard, not the rate source) and why display_sn65dsi83.c's own
+	 * BUILD_ASSERT catches a value set too low here.  440 Mbps: comfortable
+	 * margin over 438.18 Mbps, still under the 500 Mbps app-note cap.
+	 */
+	panel-max-lane-bandwidth = <440000000>;
 
 	/* bl-gpios: see the &gpio5 comment above. */
 	bl-gpios = <&gpio5 5 GPIO_ACTIVE_HIGH>;

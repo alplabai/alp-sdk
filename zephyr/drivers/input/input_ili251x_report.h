@@ -11,8 +11,8 @@
  * precedent: zephyr/drivers/sdhc/sdhc_dwc.h's sdhc_dwc_realign_r2_response()
  * does the same split for the same reason).
  *
- * Byte layout (see the protocol facts this driver was clean-room authored
- * from -- ADR-0017-ADJACENT header block in input_ili251x.c):
+ * Byte layout (see the protocol facts this driver was authored from --
+ * ADR-0017-ADJACENT header block in input_ili251x.c):
  *   byte 0: 0 or 1 for a normal report, 2 if a 20-byte continuation packet
  *           follows (contacts 6-9; not read by this v1 single-touch parser).
  *   contact i's 5-byte record starts at offset (1 + 5*i):
@@ -43,10 +43,10 @@
 
 /** Parsed state of touch contact 0. */
 struct ili251x_touch_report {
-	uint16_t x;       /**< Raw controller X, controller-resolution units. */
-	uint16_t y;       /**< Raw controller Y, controller-resolution units. */
-	uint8_t pressure; /**< Contact pressure, 0..0x0A. */
-	bool pressed;     /**< Contact 0 touching (bit 15 of the X word). */
+	uint16_t x;        /**< Raw controller X, controller-resolution units. */
+	uint16_t y;        /**< Raw controller Y, controller-resolution units. */
+	uint8_t  pressure; /**< Contact pressure, 0..0x0A. */
+	bool     pressed;  /**< Contact 0 touching (bit 15 of the X word). */
 };
 
 /**
@@ -59,20 +59,20 @@ struct ili251x_touch_report {
  * @param out Parsed result. Zeroed (not pressed) if @p len is too short to
  *            contain contact 0's record.
  */
-static inline void ili251x_parse_contact0(const uint8_t *buf, size_t len,
-					  struct ili251x_touch_report *out)
+static inline void
+ili251x_parse_contact0(const uint8_t *buf, size_t len, struct ili251x_touch_report *out)
 {
 	uint16_t x_word;
 
 	if (len < ILI251X_CONTACT0_OFFSET + ILI251X_CONTACT0_LEN) {
-		*out = (struct ili251x_touch_report){0};
+		*out = (struct ili251x_touch_report){ 0 };
 		return;
 	}
 
-	x_word = sys_get_be16(&buf[ILI251X_CONTACT0_OFFSET]);
-	out->pressed = (x_word & ILI251X_TOUCHING_BIT) != 0U;
-	out->x = x_word & ILI251X_X_MASK;
-	out->y = sys_get_be16(&buf[ILI251X_CONTACT0_OFFSET + 2]);
+	x_word        = sys_get_be16(&buf[ILI251X_CONTACT0_OFFSET]);
+	out->pressed  = (x_word & ILI251X_TOUCHING_BIT) != 0U;
+	out->x        = x_word & ILI251X_X_MASK;
+	out->y        = sys_get_be16(&buf[ILI251X_CONTACT0_OFFSET + 2]);
 	out->pressure = buf[ILI251X_CONTACT0_OFFSET + 4];
 }
 

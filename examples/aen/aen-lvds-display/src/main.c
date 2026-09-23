@@ -25,7 +25,7 @@
  *                        v
  *                        dphy@49033000    (snps,designware-dphy)
  *                            -- the shared DesignWare D-PHY (TX role).
- *                        |  2 data lanes, RGB666 packed (18 bpp), burst
+ *                        |  2 data lanes, RGB888, non-burst
  *                        v
  *                        bridge@2c        (ti,sn65dsi83, I2C1, on the
  *                                          adapter PCB)
@@ -65,9 +65,12 @@
  * PANEL POWER / EN SEQUENCING: unlike aen-dsi-display's HX8394 panel driver
  * (reset pulse, then DCS init), this bridge's own driver owns the entire
  * power-up: EN low, attach + clock-lane HS, EN high, ID check, CSR program,
- * PLL lock, soft reset.  All of it runs inside device_is_ready(bridge) --
- * there is no separate "step 2" for this app to narrate the way
- * aen-dsi-display narrates the HX8394's reset/backlight sequence.
+ * PLL lock, soft reset.  All of it already ran at boot, inside
+ * sn65dsi83_init() (POST_KERNEL/APPLICATION priority); device_is_ready(bridge)
+ * below only REPORTS whether that already-finished sequence succeeded, it
+ * does not run any of it -- there is no separate "step 2" for this app to
+ * narrate the way aen-dsi-display narrates the HX8394's reset/backlight
+ * sequence.
  *
  * FRAMEBUFFER PLACEMENT (RAM-run critical) and the PASS gate follow the same
  * shape as aen-dsi-display -- see that example if either needs more detail
@@ -107,7 +110,7 @@
  * Unlike aen-dsi-display, this shield has exactly one supported framebuffer
  * format (pixel-fmt-l1 = "rgb-565" in the shield overlay, not selectable),
  * so there is no BUILD_ASSERT-guarded #if here for a second format -- the
- * DSI LINK format (RGB666 packed, bridge@2c's pixel-format) is a separate
+ * DSI LINK format (RGB888, bridge@2c's pixel-format) is a separate
  * decision from the framebuffer's bytes-per-pixel and does not change this.
  */
 static uint8_t row_buf[PANEL_W * 2U];

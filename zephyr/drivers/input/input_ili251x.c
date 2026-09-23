@@ -3,7 +3,7 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  *
- * ====== ADR-0017-ADJACENT — BENCH-UNVERIFIED, clean-room ======
+ * ====== ADR-0017-ADJACENT — BENCH-UNVERIFIED ======
  * Ilitek ILI251x capacitive touch controller (ILI2511 on the Riverdi
  * RVT121HVDFWCA0-B panel). No upstream Zephyr driver, hal_alif library, or
  * opt-in vendor-fork driver exists for this part -- input_gt911.c and
@@ -11,12 +11,13 @@
  * only as the STRUCTURAL template (k_work-deferred I2C read, reset/int
  * gpio handling, CONFIG_INPUT_*_INTERRUPT knob); no code, names, or
  * comments are copied from either. The register map and report layout
- * below are protocol FACTS derived from the mainline Linux
- * `ilitek,ili251x` driver's documented/observed behaviour (GPL-2.0) --
- * authored clean-room from those facts alone, per ADR 0017's "author from
- * spec" tier for a novel-to-alp-sdk IC with no consumable driver. Not yet
- * run against real silicon; verify on an E1M-EVK + Riverdi panel before
- * relying on it.
+ * below are protocol facts derived from the BEHAVIOUR of the mainline
+ * Linux `ilitek,ili251x` driver (GPL-2.0) -- authored from observed
+ * protocol behaviour, not from a public datasheet (none is available for
+ * this part), per ADR 0017's "author from spec" tier for a novel-to-alp-sdk
+ * IC with no consumable driver; no code or comments were copied from it.
+ * Not yet run against real silicon; verify on an E1M-EVK + Riverdi panel
+ * before relying on it.
  */
 
 #define DT_DRV_COMPAT ilitek_ili251x
@@ -33,7 +34,7 @@ LOG_MODULE_REGISTER(ili251x, CONFIG_INPUT_LOG_LEVEL);
 
 #include "input_ili251x_report.h"
 
-/* Registers (ili251x_protocol_facts.md). */
+/* Registers (protocol facts -- see the file header comment). */
 #define ILI251X_REG_TOUCH_DATA 0x10
 #define ILI251X_REG_PANEL_INFO 0x20
 #define ILI251X_REG_FW_VERSION 0x40
@@ -57,22 +58,29 @@ LOG_MODULE_REGISTER(ili251x, CONFIG_INPUT_LOG_LEVEL);
 #define ILI251X_RESET_RELEASE_MS 300
 #define ILI251X_POST_PROBE_MS    200
 
+/* Polling-mode backoff while the touch-data I2C read keeps failing (a wedged
+ * bus, or no controller at all) -- see ili251x_work_handler()'s comment.
+ */
+#define ILI251X_ERROR_POLL_MS 1000
+
 struct ili251x_config {
 	/* Must be first: input_touchscreen_report_pos()/INPUT_TOUCH_STRUCT_CHECK
 	 * require the common touchscreen config at offset 0.
 	 */
 	struct input_touchscreen_common_config common;
-	struct i2c_dt_spec bus;
-	struct gpio_dt_spec reset_gpio; /* optional: {0} if reset-gpios absent */
-	struct gpio_dt_spec int_gpio;   /* optional: {0} if int-gpios absent */
+	struct i2c_dt_spec                     bus;
+	struct gpio_dt_spec                    reset_gpio; /* optional: {0} if reset-gpios absent */
+	struct gpio_dt_spec                    int_gpio;   /* optional: {0} if int-gpios absent */
 };
 
 struct ili251x_data {
-	const struct device *dev;
+	const struct device    *dev;
 	struct k_work_delayable work;
-	uint16_t ctrl_width;  /* controller-native X resolution, from reg 0x20 */
-	uint16_t ctrl_height; /* controller-native Y resolution, from reg 0x20 */
-	bool was_pressed;
+	uint16_t                ctrl_width;  /* controller-native X resolution, from reg 0x20 */
+	uint16_t                ctrl_height; /* controller-native Y resolution, from reg 0x20 */
+	bool                    was_pressed;
+	bool                    probed; /* ili251x_probe() has run once (first work item). */
+	bool i2c_error;                 /* touch-data read is currently failing (log-once + backoff). */
 #ifdef CONFIG_INPUT_ILI251X_INTERRUPT
 	struct gpio_callback int_gpio_cb;
 #endif
@@ -86,11 +94,11 @@ INPUT_TOUCH_STRUCT_CHECK(struct ili251x_config);
  * config registers want a short settle delay between the two transfers;
  * the touch-data register does not (pass K_NO_WAIT).
  */
-static int ili251x_reg_read(const struct device *dev, uint8_t reg, uint8_t *buf, size_t len,
-			    k_timeout_t delay)
+static int
+ili251x_reg_read(const struct device *dev, uint8_t reg, uint8_t *buf, size_t len, k_timeout_t delay)
 {
 	const struct ili251x_config *cfg = dev->config;
-	int ret;
+	int                          ret;
 
 	ret = i2c_write_dt(&cfg->bus, &reg, sizeof(reg));
 	if (ret < 0) {
@@ -119,10 +127,10 @@ static int ili251x_reg_read(const struct device *dev, uint8_t reg, uint8_t *buf,
  */
 static void ili251x_report_touch(const struct device *dev, const struct ili251x_touch_report *r)
 {
-	const struct ili251x_config *cfg = dev->config;
-	struct ili251x_data *data = dev->data;
-	uint32_t x = r->x;
-	uint32_t y = r->y;
+	const struct ili251x_config *cfg  = dev->config;
+	struct ili251x_data         *data = dev->data;
+	uint32_t                     x    = r->x;
+	uint32_t                     y    = r->y;
 
 	if (data->ctrl_width > 0 && cfg->common.screen_width > 0) {
 		x = (uint32_t)r->x * cfg->common.screen_width / data->ctrl_width;
@@ -153,17 +161,34 @@ static void ili251x_report_touch(const struct device *dev, const struct ili251x_
  */
 static int ili251x_process(const struct device *dev, bool *pressed)
 {
-	const struct ili251x_config *cfg = dev->config;
-	struct ili251x_data *data = dev->data;
-	uint8_t buf[ILI251X_TOUCH_REPORT_LEN];
-	uint8_t continuation[ILI251X_TOUCH_CONTINUATION_LEN];
-	struct ili251x_touch_report report;
-	int ret;
+	const struct ili251x_config *cfg  = dev->config;
+	struct ili251x_data         *data = dev->data;
+	uint8_t                      buf[ILI251X_TOUCH_REPORT_LEN];
+	uint8_t                      continuation[ILI251X_TOUCH_CONTINUATION_LEN];
+	struct ili251x_touch_report  report;
+	int                          ret;
 
 	ret = ili251x_reg_read(dev, ILI251X_REG_TOUCH_DATA, buf, sizeof(buf), K_NO_WAIT);
 	if (ret < 0) {
-		LOG_ERR("touch-data read failed: %d", ret);
+		/*
+		 * A wedged bus (or no controller at all) fails every poll forever;
+		 * logging LOG_ERR on every one of them at CONFIG_INPUT_ILI251X_PERIOD_MS
+		 * (15 ms default) floods the log for no new information after the
+		 * first occurrence.  Log once on the failing transition, then drop
+		 * to LOG_DBG; ili251x_work_handler() also backs the poll period off
+		 * while this is true.
+		 */
+		if (!data->i2c_error) {
+			LOG_ERR("touch-data read failed: %d", ret);
+			data->i2c_error = true;
+		} else {
+			LOG_DBG("touch-data read still failing: %d", ret);
+		}
 		return ret;
+	}
+	if (data->i2c_error) {
+		LOG_INF("touch-data read recovered");
+		data->i2c_error = false;
 	}
 
 	/*
@@ -184,24 +209,111 @@ static int ili251x_process(const struct device *dev, bool *pressed)
 
 	ili251x_parse_contact0(buf, sizeof(buf), &report);
 
+	/*
+	 * gt911 pattern: on EVERY pressed sample, report ABS_X/ABS_Y (sync=false,
+	 * inside ili251x_report_touch()) then BTN_TOUCH=1 with sync=true -- not
+	 * just on the press transition.  A drag holds `pressed` true across many
+	 * samples; if BTN_TOUCH only went out on a state CHANGE, only the first
+	 * sample of a drag would ever carry sync=true and every ABS update after
+	 * it would sit unsynced, which LVGL (and the Zephyr input subsystem in
+	 * general) never commits.  On release, BTN_TOUCH=0 goes out exactly once
+	 * (guarded by the state check) -- there is no ABS position to repeat.
+	 */
 	if (report.pressed) {
 		ili251x_report_touch(dev, &report);
-	}
-	if (report.pressed != data->was_pressed) {
-		input_report_key(dev, INPUT_BTN_TOUCH, report.pressed, true, K_FOREVER);
+		input_report_key(dev, INPUT_BTN_TOUCH, 1, true, K_FOREVER);
+	} else if (data->was_pressed) {
+		input_report_key(dev, INPUT_BTN_TOUCH, 0, true, K_FOREVER);
 	}
 	data->was_pressed = report.pressed;
-	*pressed = report.pressed;
+	*pressed          = report.pressed;
 
 	return 0;
 }
 
+/*
+ * The reset-release settle wait and the three info-register reads used to
+ * run inline in ili251x_init(), blocking boot for ~530 ms (15 ms assert +
+ * 300 ms release settle + 200 ms post-probe + 3x 5 ms register-read
+ * delays).  They run here instead, on the system workqueue's own thread, so
+ * init() only pays the much shorter 15 ms assert-hold cost and returns
+ * immediately -- see ili251x_init()'s comment.  Called exactly once, from
+ * the first ili251x_work_handler() invocation.  A failure here is logged
+ * and otherwise non-fatal: the device is already "ready" by the time this
+ * runs (init() already returned 0), and ili251x_process()'s own I2C-error
+ * handling covers a controller that never answers.
+ */
+static void ili251x_probe(const struct device *dev)
+{
+	const struct ili251x_config *cfg  = dev->config;
+	struct ili251x_data         *data = dev->data;
+	uint8_t                      mode;
+	uint8_t                      fw_version;
+	uint8_t                      panel_info[ILI251X_PANEL_INFO_LEN];
+	int                          ret;
+
+	if (cfg->reset_gpio.port != NULL) {
+		/* Release the reset asserted in ili251x_init(), then wait the
+		 * controller's post-reset settle time before talking on the bus.
+		 */
+		ret = gpio_pin_set_dt(&cfg->reset_gpio, 0);
+		if (ret < 0) {
+			LOG_ERR("could not release reset gpio: %d", ret);
+		}
+		k_sleep(K_MSEC(ILI251X_RESET_RELEASE_MS));
+	}
+
+	/* Wanted even without a reset line: the controller needs ~200 ms
+	 * after probe before its info registers are readable.
+	 */
+	k_sleep(K_MSEC(ILI251X_POST_PROBE_MS));
+
+	ret = ili251x_reg_read(dev, ILI251X_REG_GET_MODE, &mode, sizeof(mode), ILI251X_INFO_REG_DELAY);
+	if (ret < 0) {
+		LOG_ERR("mode read failed: %d", ret);
+		return;
+	}
+	if (mode == ILI251X_MODE_BOOTLOADER) {
+		LOG_WRN("controller is in bootloader mode (0x%02x)", mode);
+	} else if (mode != ILI251X_MODE_APPLICATION) {
+		LOG_WRN("unexpected mode register value 0x%02x", mode);
+	}
+
+	ret = ili251x_reg_read(
+	    dev, ILI251X_REG_PANEL_INFO, panel_info, sizeof(panel_info), ILI251X_INFO_REG_DELAY);
+	if (ret < 0) {
+		LOG_ERR("panel-info read failed: %d", ret);
+		return;
+	}
+	data->ctrl_width  = sys_get_le16(&panel_info[0]);
+	data->ctrl_height = sys_get_le16(&panel_info[2]);
+	if (data->ctrl_width == 0 || data->ctrl_width == ILI251X_PANEL_INFO_INVALID) {
+		LOG_WRN("invalid panel X resolution from controller, using configured size");
+		data->ctrl_width = cfg->common.screen_width;
+	}
+	if (data->ctrl_height == 0 || data->ctrl_height == ILI251X_PANEL_INFO_INVALID) {
+		LOG_WRN("invalid panel Y resolution from controller, using configured size");
+		data->ctrl_height = cfg->common.screen_height;
+	}
+
+	ret = ili251x_reg_read(
+	    dev, ILI251X_REG_FW_VERSION, &fw_version, sizeof(fw_version), ILI251X_INFO_REG_DELAY);
+	if (ret == 0) {
+		LOG_INF("firmware version 0x%02x", fw_version);
+	}
+}
+
 static void ili251x_work_handler(struct k_work *work)
 {
-	struct k_work_delayable *dwork = k_work_delayable_from_work(work);
-	struct ili251x_data *data = CONTAINER_OF(dwork, struct ili251x_data, work);
-	bool pressed = false;
-	int ret;
+	struct k_work_delayable *dwork   = k_work_delayable_from_work(work);
+	struct ili251x_data     *data    = CONTAINER_OF(dwork, struct ili251x_data, work);
+	bool                     pressed = false;
+	int                      ret;
+
+	if (!data->probed) {
+		ili251x_probe(data->dev);
+		data->probed = true;
+	}
 
 	ret = ili251x_process(data->dev, &pressed);
 
@@ -217,13 +329,19 @@ static void ili251x_work_handler(struct k_work *work)
 		k_work_reschedule(dwork, K_MSEC(CONFIG_INPUT_ILI251X_PERIOD_MS));
 	}
 #else
-	ARG_UNUSED(ret);
 	ARG_UNUSED(pressed);
-	/* Polling mode: fixed period forever, there is no INT line to tell
+	/*
+	 * Polling mode: fixed period forever, there is no INT line to tell
 	 * us when to stop (this is the E1M-EVK's mode -- the touch INT pad
-	 * is owned by the CC3501E co-processor, not the Alif core).
+	 * is owned by the CC3501E co-processor, not the Alif core).  Back off
+	 * to ILI251X_ERROR_POLL_MS while the I2C read keeps failing instead
+	 * of spinning a wedged bus every CONFIG_INPUT_ILI251X_PERIOD_MS (15 ms
+	 * default) forever; ili251x_process() itself throttles the repeated
+	 * LOG_ERR down to LOG_DBG for the same reason and restores the normal
+	 * period as soon as a read succeeds again.
 	 */
-	k_work_reschedule(dwork, K_MSEC(CONFIG_INPUT_ILI251X_PERIOD_MS));
+	k_work_reschedule(
+	    dwork, ret == 0 ? K_MSEC(CONFIG_INPUT_ILI251X_PERIOD_MS) : K_MSEC(ILI251X_ERROR_POLL_MS));
 #endif
 }
 
@@ -239,12 +357,9 @@ static void ili251x_isr_handler(const struct device *dev, struct gpio_callback *
 
 static int ili251x_init(const struct device *dev)
 {
-	const struct ili251x_config *cfg = dev->config;
-	struct ili251x_data *data = dev->data;
-	uint8_t mode;
-	uint8_t fw_version;
-	uint8_t panel_info[ILI251X_PANEL_INFO_LEN];
-	int ret;
+	const struct ili251x_config *cfg  = dev->config;
+	struct ili251x_data         *data = dev->data;
+	int                          ret;
 
 	if (!i2c_is_ready_dt(&cfg->bus)) {
 		LOG_ERR("I2C bus not ready");
@@ -259,8 +374,14 @@ static int ili251x_init(const struct device *dev)
 			return -ENODEV;
 		}
 
-		/* Active-low reset: assert (drive low) 12-15 ms, release,
-		 * then wait 300 ms before talking on the bus.
+		/*
+		 * Active-low reset: assert (drive low) here, synchronously -- the
+		 * 12-15 ms hold is short enough not to matter for boot time.
+		 * Releasing it, the much longer 300 ms post-reset settle, and the
+		 * three info-register reads (another ~200+ ms) run in
+		 * ili251x_probe() instead, off the init thread, so this function
+		 * does not block boot for the ~530 ms the whole sequence used to
+		 * take -- see that function's comment.
 		 */
 		ret = gpio_pin_configure_dt(&cfg->reset_gpio, GPIO_OUTPUT_ACTIVE);
 		if (ret < 0) {
@@ -268,48 +389,6 @@ static int ili251x_init(const struct device *dev)
 			return ret;
 		}
 		k_sleep(K_MSEC(ILI251X_RESET_ASSERT_MS));
-		gpio_pin_set_dt(&cfg->reset_gpio, 0);
-		k_sleep(K_MSEC(ILI251X_RESET_RELEASE_MS));
-	}
-
-	/* Wanted even without a reset line: the controller needs ~200 ms
-	 * after probe before its info registers are readable.
-	 */
-	k_sleep(K_MSEC(ILI251X_POST_PROBE_MS));
-
-	ret = ili251x_reg_read(dev, ILI251X_REG_GET_MODE, &mode, sizeof(mode),
-			       ILI251X_INFO_REG_DELAY);
-	if (ret < 0) {
-		LOG_ERR("mode read failed: %d", ret);
-		return ret;
-	}
-	if (mode == ILI251X_MODE_BOOTLOADER) {
-		LOG_WRN("controller is in bootloader mode (0x%02x)", mode);
-	} else if (mode != ILI251X_MODE_APPLICATION) {
-		LOG_WRN("unexpected mode register value 0x%02x", mode);
-	}
-
-	ret = ili251x_reg_read(dev, ILI251X_REG_PANEL_INFO, panel_info, sizeof(panel_info),
-			       ILI251X_INFO_REG_DELAY);
-	if (ret < 0) {
-		LOG_ERR("panel-info read failed: %d", ret);
-		return ret;
-	}
-	data->ctrl_width = sys_get_le16(&panel_info[0]);
-	data->ctrl_height = sys_get_le16(&panel_info[2]);
-	if (data->ctrl_width == 0 || data->ctrl_width == ILI251X_PANEL_INFO_INVALID) {
-		LOG_WRN("invalid panel X resolution from controller, using configured size");
-		data->ctrl_width = cfg->common.screen_width;
-	}
-	if (data->ctrl_height == 0 || data->ctrl_height == ILI251X_PANEL_INFO_INVALID) {
-		LOG_WRN("invalid panel Y resolution from controller, using configured size");
-		data->ctrl_height = cfg->common.screen_height;
-	}
-
-	ret = ili251x_reg_read(dev, ILI251X_REG_FW_VERSION, &fw_version, sizeof(fw_version),
-			       ILI251X_INFO_REG_DELAY);
-	if (ret == 0) {
-		LOG_INF("firmware version 0x%02x", fw_version);
 	}
 
 	k_work_init_delayable(&data->work, ili251x_work_handler);
@@ -343,23 +422,32 @@ static int ili251x_init(const struct device *dev)
 		LOG_ERR("could not configure interrupt: %d", ret);
 		return ret;
 	}
-#else
-	k_work_reschedule(&data->work, K_MSEC(CONFIG_INPUT_ILI251X_PERIOD_MS));
 #endif
+	/* Kick the first work item (ili251x_probe(), then the first poll/
+	 * re-poll) onto the system workqueue right away rather than waiting
+	 * for the first IRQ -- interrupt mode still needs the controller
+	 * probed once even if no touch has happened yet.
+	 */
+	k_work_reschedule(&data->work, K_NO_WAIT);
 
 	return 0;
 }
 
-#define ILI251X_INIT(index)                                                                        \
-	static const struct ili251x_config ili251x_config_##index = {                              \
-		.common = INPUT_TOUCH_DT_INST_COMMON_CONFIG_INIT(index),                           \
-		.bus = I2C_DT_SPEC_INST_GET(index),                                                \
-		.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(index, reset_gpios, {0}),                   \
-		.int_gpio = GPIO_DT_SPEC_INST_GET_OR(index, int_gpios, {0}),                       \
-	};                                                                                         \
-	static struct ili251x_data ili251x_data_##index;                                           \
-	DEVICE_DT_INST_DEFINE(index, ili251x_init, NULL, &ili251x_data_##index,                    \
-			      &ili251x_config_##index, POST_KERNEL, CONFIG_INPUT_INIT_PRIORITY,    \
-			      NULL);
+#define ILI251X_INIT(index) \
+	static const struct ili251x_config ili251x_config_##index = { \
+		.common     = INPUT_TOUCH_DT_INST_COMMON_CONFIG_INIT(index), \
+		.bus        = I2C_DT_SPEC_INST_GET(index), \
+		.reset_gpio = GPIO_DT_SPEC_INST_GET_OR(index, reset_gpios, { 0 }), \
+		.int_gpio   = GPIO_DT_SPEC_INST_GET_OR(index, int_gpios, { 0 }), \
+	}; \
+	static struct ili251x_data ili251x_data_##index; \
+	DEVICE_DT_INST_DEFINE(index, \
+	                      ili251x_init, \
+	                      NULL, \
+	                      &ili251x_data_##index, \
+	                      &ili251x_config_##index, \
+	                      POST_KERNEL, \
+	                      CONFIG_INPUT_INIT_PRIORITY, \
+	                      NULL);
 
 DT_INST_FOREACH_STATUS_OKAY(ILI251X_INIT)

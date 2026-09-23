@@ -20,18 +20,26 @@ video path.
 New shield `e1m_evk_rvt121hvdfwca0` (cloned in shape from
 `e1m_evk_rk055hdmipi4ma0`) wires the bridge on `E1M_I2C1`
 (`EVK_I2C_BUS_DSI_CSI`) behind a maintainer-built adapter PCB, at 2 DSI
-data lanes / RGB666 packed / ~30.06 Hz (36.363636 MHz pixel clock,
-deliberately under the panel's own ~66.3 MHz native-60 Hz minimum for
-this bring-up — see the shield overlay's header comment for the full
-clock-rate derivation and a fallback ladder to 40 MHz or plan-B RGB888).
-Every GPIO-expander role the shield assumes (the bridge's EN pin, the
+data lanes / RGB888 / non-burst-sync-events / ~30.06 Hz (36.363636 MHz
+pixel clock, deliberately under the panel's own ~66.3 MHz native-60 Hz
+minimum for this bring-up — see the shield overlay's header comment for
+the full clock-rate derivation and a fallback ladder to 40 MHz). RGB888
+is required, not a choice: the panel is VESA-24 (Figure 7-5 in the TI
+datasheet), and an 18 bpp link only gives the bridge 6 of each colour's
+8 bits to forward, so it would show every colour at roughly 1/4
+intensity. Non-burst is required alongside it — burst RGB888 at this
+pixel clock needs 581.8 Mbps/lane, over the Ensemble E8's two-lane
+500 Mbps application-note ceiling. Every GPIO-expander role the shield
+assumes (the bridge's EN pin, the
 touch controller's reset) is carried over from the RK055
 shield's role map with no adapter schematic to confirm it against, and
 is marked UNVERIFIED in the overlay accordingly. The panel's own
 ILI2511 capacitive-touch controller (I2C `0x41`, same bus) is bound
-through a new clean-room `ilitek,ili251x` Zephyr input driver
-(`zephyr/drivers/input/input_ili251x.c`), polled because the carrier
-routes the touch INT line to a CC3501E-owned pad.
+through a new `ilitek,ili251x` Zephyr input driver
+(`zephyr/drivers/input/input_ili251x.c`, protocol facts authored from
+observed mainline Linux driver behaviour — no code or comments copied),
+polled because the carrier routes the touch INT line to a CC3501E-owned
+pad.
 
 New example `examples/aen/aen-lvds-display` renders colour bars through
 the chain and reads the bridge's own link-error register (CSR `0xE5`)
@@ -49,5 +57,4 @@ with the RK055 shield (which never sets it there).
 
 Entirely BENCH-UNVERIFIED: no adapter-PCB hardware was available for this
 change. `docs/boards/e1m-evk.md`'s display section documents the new
-shield, the assumed adapter roles, the out-of-spec 30 Hz pixel clock, and
-the unbound touch controller as a follow-up.
+shield, the assumed adapter roles, and the out-of-spec 30 Hz pixel clock.

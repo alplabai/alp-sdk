@@ -1,7 +1,7 @@
 # Ilitek ILI251x capacitive touch controller (ILI2511 on the Riverdi
 # RVT121HVDFWCA0-B panel). ADR-0017-ADJACENT: no upstream Zephyr, hal_alif,
-# or opt-in vendor-fork driver exists for this part -- see the STATUS block
-# in input_ili251x.c.
+# or opt-in vendor-fork driver exists for this part -- see the header
+# comment in input_ili251x.c.
 #
 # Copyright (c) 2026 Alp Lab AB
 # SPDX-License-Identifier: Apache-2.0

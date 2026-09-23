@@ -8,8 +8,8 @@
 # e1m_evk_rk055hdmipi4ma0, DISPLAY_CDC200 is what actually renders here (the
 # bridge is init-only, no display API of its own) and there is no panel
 # driver or fixed regulator -- the bridge's EN sequencing IS the panel-power
-# sequencing (see display_sn65dsi83.c's header comment for why the regulator
-# pattern the RK055 shield uses cannot be reused here).
+# sequencing (see this shield's own overlay header comment for why the
+# regulator pattern the RK055 shield uses cannot be reused here).
 #
 # The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
 # CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
