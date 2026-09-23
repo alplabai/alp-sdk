@@ -73,14 +73,27 @@ struct ili251x_config {
 	struct gpio_dt_spec                    int_gpio;   /* optional: {0} if int-gpios absent */
 };
 
+/*
+ * Probe runs as a sequence of short work items instead of one long one, so
+ * no single item blocks the system workqueue for the controller's ~500 ms
+ * combined settle time -- see ili251x_probe_step()'s comment.
+ */
+enum ili251x_probe_stage {
+	ILI251X_PROBE_RELEASE_RESET, /* release reset-gpios, wait RESET_RELEASE_MS */
+	ILI251X_PROBE_SETTLE,        /* wait POST_PROBE_MS before touching the bus */
+	ILI251X_PROBE_READ,          /* read mode/panel-info/fw-version; retried on failure */
+};
+
 struct ili251x_data {
-	const struct device    *dev;
-	struct k_work_delayable work;
-	uint16_t                ctrl_width;  /* controller-native X resolution, from reg 0x20 */
-	uint16_t                ctrl_height; /* controller-native Y resolution, from reg 0x20 */
-	bool                    was_pressed;
-	bool                    probed; /* ili251x_probe() has run once (first work item). */
-	bool i2c_error;                 /* touch-data read is currently failing (log-once + backoff). */
+	const struct device     *dev;
+	struct k_work_delayable  work;
+	uint16_t                 ctrl_width;  /* controller-native X resolution, from reg 0x20 */
+	uint16_t                 ctrl_height; /* controller-native Y resolution, from reg 0x20 */
+	bool                     was_pressed;
+	bool                     probed; /* ili251x_probe_step() has reached ILI251X_PROBE_READ and
+	                                    * succeeded; ctrl_width/ctrl_height are valid. */
+	enum ili251x_probe_stage probe_stage;
+	bool i2c_error; /* touch-data read is currently failing (log-once + backoff). */
 #ifdef CONFIG_INPUT_ILI251X_INTERRUPT
 	struct gpio_callback int_gpio_cb;
 #endif
@@ -232,18 +245,25 @@ static int ili251x_process(const struct device *dev, bool *pressed)
 }
 
 /*
- * The reset-release settle wait and the three info-register reads used to
- * run inline in ili251x_init(), blocking boot for ~530 ms (15 ms assert +
- * 300 ms release settle + 200 ms post-probe + 3x 5 ms register-read
- * delays).  They run here instead, on the system workqueue's own thread, so
- * init() only pays the much shorter 15 ms assert-hold cost and returns
- * immediately -- see ili251x_init()'s comment.  Called exactly once, from
- * the first ili251x_work_handler() invocation.  A failure here is logged
- * and otherwise non-fatal: the device is already "ready" by the time this
- * runs (init() already returned 0), and ili251x_process()'s own I2C-error
- * handling covers a controller that never answers.
+ * The reset-release settle wait, the post-probe settle wait, and the mode/
+ * panel-info/fw-version reads used to run inline in ili251x_init(),
+ * blocking boot for ~530 ms (15 ms assert + 300 ms release settle + 200 ms
+ * post-probe + 3x 5 ms register-read delays).  They run here instead, as a
+ * short ILI251X_PROBE_* stage per ili251x_work_handler() invocation, each
+ * ending in a k_work_reschedule() rather than a k_sleep() -- so no single
+ * work item blocks the system workqueue's cooperative thread for more than
+ * one register access at a time, and init() only pays the much shorter
+ * 15 ms assert-hold cost before returning -- see ili251x_init()'s comment.
+ *
+ * ILI251X_PROBE_READ is the only stage that can fail (an I2C read error).
+ * On failure this leaves data->probed false -- ctrl_width/ctrl_height stay
+ * at their zero reset value, so ili251x_report_touch()'s scaling is skipped
+ * rather than dividing by a resolution that was never read -- and reschedules
+ * itself at ILI251X_ERROR_POLL_MS to retry the reads (reset stays released
+ * and the settle waits are not repeated). Only a successful mode + panel-info
+ * read sets data->probed = true and hands off to the normal poll loop.
  */
-static void ili251x_probe(const struct device *dev)
+static void ili251x_probe_step(const struct device *dev)
 {
 	const struct ili251x_config *cfg  = dev->config;
 	struct ili251x_data         *data = dev->data;
@@ -252,54 +272,70 @@ static void ili251x_probe(const struct device *dev)
 	uint8_t                      panel_info[ILI251X_PANEL_INFO_LEN];
 	int                          ret;
 
-	if (cfg->reset_gpio.port != NULL) {
-		/* Release the reset asserted in ili251x_init(), then wait the
-		 * controller's post-reset settle time before talking on the bus.
-		 */
-		ret = gpio_pin_set_dt(&cfg->reset_gpio, 0);
-		if (ret < 0) {
-			LOG_ERR("could not release reset gpio: %d", ret);
+	switch (data->probe_stage) {
+	case ILI251X_PROBE_RELEASE_RESET:
+		if (cfg->reset_gpio.port != NULL) {
+			/* Release the reset asserted in ili251x_init(), then wait the
+			 * controller's post-reset settle time before talking on the bus.
+			 */
+			ret = gpio_pin_set_dt(&cfg->reset_gpio, 0);
+			if (ret < 0) {
+				LOG_ERR("could not release reset gpio: %d", ret);
+			}
+			data->probe_stage = ILI251X_PROBE_SETTLE;
+			k_work_reschedule(&data->work, K_MSEC(ILI251X_RESET_RELEASE_MS));
+			return;
 		}
-		k_sleep(K_MSEC(ILI251X_RESET_RELEASE_MS));
-	}
-
-	/* Wanted even without a reset line: the controller needs ~200 ms
-	 * after probe before its info registers are readable.
-	 */
-	k_sleep(K_MSEC(ILI251X_POST_PROBE_MS));
-
-	ret = ili251x_reg_read(dev, ILI251X_REG_GET_MODE, &mode, sizeof(mode), ILI251X_INFO_REG_DELAY);
-	if (ret < 0) {
-		LOG_ERR("mode read failed: %d", ret);
+		data->probe_stage = ILI251X_PROBE_SETTLE;
+		__fallthrough;
+	case ILI251X_PROBE_SETTLE:
+		/* Wanted even without a reset line: the controller needs ~200 ms
+		 * after probe before its info registers are readable.
+		 */
+		data->probe_stage = ILI251X_PROBE_READ;
+		k_work_reschedule(&data->work, K_MSEC(ILI251X_POST_PROBE_MS));
 		return;
-	}
-	if (mode == ILI251X_MODE_BOOTLOADER) {
-		LOG_WRN("controller is in bootloader mode (0x%02x)", mode);
-	} else if (mode != ILI251X_MODE_APPLICATION) {
-		LOG_WRN("unexpected mode register value 0x%02x", mode);
-	}
+	case ILI251X_PROBE_READ:
+		ret = ili251x_reg_read(
+		    dev, ILI251X_REG_GET_MODE, &mode, sizeof(mode), ILI251X_INFO_REG_DELAY);
+		if (ret < 0) {
+			LOG_ERR("mode read failed: %d", ret);
+			k_work_reschedule(&data->work, K_MSEC(ILI251X_ERROR_POLL_MS));
+			return;
+		}
+		if (mode == ILI251X_MODE_BOOTLOADER) {
+			LOG_WRN("controller is in bootloader mode (0x%02x)", mode);
+		} else if (mode != ILI251X_MODE_APPLICATION) {
+			LOG_WRN("unexpected mode register value 0x%02x", mode);
+		}
 
-	ret = ili251x_reg_read(
-	    dev, ILI251X_REG_PANEL_INFO, panel_info, sizeof(panel_info), ILI251X_INFO_REG_DELAY);
-	if (ret < 0) {
-		LOG_ERR("panel-info read failed: %d", ret);
+		ret = ili251x_reg_read(
+		    dev, ILI251X_REG_PANEL_INFO, panel_info, sizeof(panel_info), ILI251X_INFO_REG_DELAY);
+		if (ret < 0) {
+			LOG_ERR("panel-info read failed: %d", ret);
+			k_work_reschedule(&data->work, K_MSEC(ILI251X_ERROR_POLL_MS));
+			return;
+		}
+		data->ctrl_width  = sys_get_le16(&panel_info[0]);
+		data->ctrl_height = sys_get_le16(&panel_info[2]);
+		if (data->ctrl_width == 0 || data->ctrl_width == ILI251X_PANEL_INFO_INVALID) {
+			LOG_WRN("invalid panel X resolution from controller, using configured size");
+			data->ctrl_width = cfg->common.screen_width;
+		}
+		if (data->ctrl_height == 0 || data->ctrl_height == ILI251X_PANEL_INFO_INVALID) {
+			LOG_WRN("invalid panel Y resolution from controller, using configured size");
+			data->ctrl_height = cfg->common.screen_height;
+		}
+
+		ret = ili251x_reg_read(
+		    dev, ILI251X_REG_FW_VERSION, &fw_version, sizeof(fw_version), ILI251X_INFO_REG_DELAY);
+		if (ret == 0) {
+			LOG_INF("firmware version 0x%02x", fw_version);
+		}
+
+		data->probed = true;
+		k_work_reschedule(&data->work, K_NO_WAIT);
 		return;
-	}
-	data->ctrl_width  = sys_get_le16(&panel_info[0]);
-	data->ctrl_height = sys_get_le16(&panel_info[2]);
-	if (data->ctrl_width == 0 || data->ctrl_width == ILI251X_PANEL_INFO_INVALID) {
-		LOG_WRN("invalid panel X resolution from controller, using configured size");
-		data->ctrl_width = cfg->common.screen_width;
-	}
-	if (data->ctrl_height == 0 || data->ctrl_height == ILI251X_PANEL_INFO_INVALID) {
-		LOG_WRN("invalid panel Y resolution from controller, using configured size");
-		data->ctrl_height = cfg->common.screen_height;
-	}
-
-	ret = ili251x_reg_read(
-	    dev, ILI251X_REG_FW_VERSION, &fw_version, sizeof(fw_version), ILI251X_INFO_REG_DELAY);
-	if (ret == 0) {
-		LOG_INF("firmware version 0x%02x", fw_version);
 	}
 }
 
@@ -311,8 +347,8 @@ static void ili251x_work_handler(struct k_work *work)
 	int                      ret;
 
 	if (!data->probed) {
-		ili251x_probe(data->dev);
-		data->probed = true;
+		ili251x_probe_step(data->dev);
+		return;
 	}
 
 	ret = ili251x_process(data->dev, &pressed);
@@ -378,10 +414,10 @@ static int ili251x_init(const struct device *dev)
 		 * Active-low reset: assert (drive low) here, synchronously -- the
 		 * 12-15 ms hold is short enough not to matter for boot time.
 		 * Releasing it, the much longer 300 ms post-reset settle, and the
-		 * three info-register reads (another ~200+ ms) run in
-		 * ili251x_probe() instead, off the init thread, so this function
-		 * does not block boot for the ~530 ms the whole sequence used to
-		 * take -- see that function's comment.
+		 * three info-register reads (another ~200+ ms) run as staged work
+		 * items in ili251x_probe_step() instead, off the init thread, so
+		 * this function does not block boot for the whole ~530 ms sequence
+		 * -- see that function's comment.
 		 */
 		ret = gpio_pin_configure_dt(&cfg->reset_gpio, GPIO_OUTPUT_ACTIVE);
 		if (ret < 0) {
@@ -423,10 +459,11 @@ static int ili251x_init(const struct device *dev)
 		return ret;
 	}
 #endif
-	/* Kick the first work item (ili251x_probe(), then the first poll/
-	 * re-poll) onto the system workqueue right away rather than waiting
-	 * for the first IRQ -- interrupt mode still needs the controller
-	 * probed once even if no touch has happened yet.
+	/* Kick the first work item (the first ili251x_probe_step() stage,
+	 * eventually followed by the first poll/re-poll) onto the system
+	 * workqueue right away rather than waiting for the first IRQ --
+	 * interrupt mode still needs the controller probed once even if no
+	 * touch has happened yet.
 	 */
 	k_work_reschedule(&data->work, K_NO_WAIT);
 

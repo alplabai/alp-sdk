@@ -48,9 +48,9 @@
  * E8's two-lane application-note ceiling of 500 Mbps/lane (same limit the
  * e1m_evk_rk055hdmipi4ma0 shield cites, panel-max-lane-bandwidth below).
  *
- * WHY RGB888 + non-burst, not RGB666-packed + burst (this shield's original
- * choice): the panel is VESA-24 -- Format 2 on the FlatLink LVDS output
- * (Figure 7-5: the 2 MSB per colour ride the Y3 lane).  An 18 bpp DSI link
+ * WHY RGB888 + non-burst, not RGB666-packed + burst: the panel is VESA-24
+ * -- Format 2 on the FlatLink LVDS output (Figure 7-5: the 2 MSB per colour
+ * ride the Y3 lane).  An 18 bpp DSI link
  * (Figure 7-4) only ever gives the bridge 6 bits per colour to forward, so
  * every colour on this panel would show at roughly 1/4 intensity -- 18 bpp
  * is only correct into an 18-bit-native panel, not a VESA-24 one driven at
@@ -64,8 +64,7 @@
  * mipi_display_e8.c divides SYST_ACLK by an integer divider; 11 is the
  * divider that lands closest to the panel's headline pixel clock while
  * keeping the DSI clock-lane math below on a clean integer boundary) --
- * unchanged by the RGB666->RGB888 switch; only the bpp in the formulas
- * below changed.
+ * a property of the pixel clock alone, independent of the DSI link's bpp.
  *
  * Non-burst DSI bit rate (dsi_dw.c's dw_calc_clocks() non-burst formula, see
  * display_sn65dsi83.c's SN65_NONBURST_HS_CLK_HZ for the same arithmetic in
@@ -84,7 +83,7 @@
  *
  * The DSI clock LANE (what the bridge's HS_CLK_SRC=1 measures) runs at half
  * the bit rate, DDR: 219,090,909 Hz (~219.09 MHz).  The Alif D-PHY PLL only
- * resolves in 38.4 MHz / 3 / 16 = 0.4 MHz steps (PLL_M counts those steps),
+ * resolves in 38.4 MHz / (3 * 2 * 16) = 0.4 MHz steps (PLL_M counts those steps),
  * so the achieved rate rounds UP to the next step: PLL_M = ceil(219.09 /
  * 0.4) = 548, giving 219.2 MHz actual (438.4 Mbps actual HS bit rate) --
  * both well inside the BUILD_ASSERTs' ~0.4 MHz / CSR-bin tolerance of the

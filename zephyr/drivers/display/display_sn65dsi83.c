@@ -81,11 +81,11 @@
  * CSR 0x0A.0 below) -- if the host ever stopped that clock between packets
  * (the non-continuous-clock mode some panels use to save power), the
  * bridge's LVDS clock would stop with it and the panel would lose sync every
- * time.  Non-burst-sync-events is requested (not burst) because it is what
- * the cdc200/dsi_dw pairing on this SoC is PROVEN with (the
- * e1m_evk_rk055hdmipi4ma0 shield, #2199) -- and because this shield's panel
- * is VESA-24 (RGB888, see the CSR 0x18 derivation below), whose lane rate
- * leaves less burst headroom than RK055's RGB888-on-18bpp-link case did.
+ * time.  Non-burst-sync-events is requested (not burst) because burst does
+ * not fit this shield's link at all: burst RGB888 at this shield's 36.36 MHz
+ * pixel clock needs 36.36e6 * 24 / 2 * 4 / 3 = 581.8 Mbps/lane (see
+ * SN65_BURST_HS_CLK_HZ below), over the Ensemble E8 two-lane application-
+ * note ceiling of 500 Mbps/lane -- non-burst is the only mode that fits.
  * This driver does not hardcode the choice: it requests plain
  * MIPI_DSI_MODE_VIDEO and lets the DSI host's own DT-declared
  * `dpi-video-mode` (see snps,designware-dsi.yaml) OR the burst/sync-pulse
@@ -101,11 +101,12 @@
  * (HS_CLK_SRC=1) -- so a blanking_on/blanking_off cycle after this driver's
  * one-shot init almost certainly drops the bridge's PLL lock, and nothing
  * here re-runs PLL_EN/SOFT_RESET on the way back to video mode.  Not
- * implemented: no re-init hook is wired to cdc200's blanking_off.  Upgrade
- * path if a real app needs blanking: have it call
- * sn65dsi83's own re-lock helper (CSR 0x0D=0x01, poll 0x0A.7, CSR
- * 0x09=0x01, 3 ms) itself before display_blanking_off(), or wire a
- * blanking-aware hook once this is bench-verified.
+ * implemented: no re-lock helper exists in this driver, and no re-init hook
+ * is wired to cdc200's blanking_off.  Upgrade path if a real app needs
+ * blanking: add one, following the datasheet's Section 8.1.1 video STOP/
+ * restart sequence (PLL_EN 0 -> 1, wait >= 3 ms, then SOFT_RESET), and call
+ * it before display_blanking_off(), or wire a blanking-aware hook once this
+ * is bench-verified.
  */
 
 #define DT_DRV_COMPAT ti_sn65dsi83
@@ -170,7 +171,9 @@ BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(ti_sn65dsi83) <= 1,
 #define SN65_REG_IRQ_EN        0xE0U
 #define SN65_REG_ERR_STAT      0xE5U
 
-/* CSR 0x0A: PLL_EN_STAT (datasheet calls it "PLL locked" once set + 3 ms). */
+/* CSR 0x0A.7: PLL_EN_STAT (not itself named "PLL locked" -- Table 7-2's own
+ * init sequence wants >= 10 ms after PLL_EN regardless, see
+ * sn65dsi83_pll_start()). */
 #define SN65_CLK_SRC_PLL_EN_STAT BIT(7)
 
 /* CSR 0x0D / 0x09. */
@@ -195,8 +198,8 @@ BUILD_ASSERT(DT_NUM_INST_STATUS_OKAY(ti_sn65dsi83) <= 1,
  * 24BPP_MODE=1. 0 (Format 2, the default) = the 2 MSB per colour on Y3 --
  * this is VESA-24 (datasheet Figure 7-5), what a VESA-24 panel expects.
  * 1 (Format 1) = the 2 LSB per colour on Y3 -- JEIDA, a DIFFERENT wire
- * format; using it against a VESA-24 panel puts the wrong 2 bits on Y3 and
- * was this driver's original RGB888 bug (CSR 0x18 = 0x7A instead of 0x78).
+ * format; using it against a VESA-24 panel puts the wrong 2 bits on Y3
+ * (CSR 0x18 = 0x7A instead of the correct 0x78 for this panel).
  * Not used for this shield's panel (Format 1 stays 0 below); kept named for
  * the day a JEIDA panel needs it.
  */
@@ -293,14 +296,14 @@ BUILD_ASSERT(SN65_VFRONT_PORCH <= 0xFFU, "sn65dsi83: CHA_VERTICAL_FRONT_PORCH is
  * CSR 0x0A.0) the CSR bank below is tuned against.  dsi_dw.c's
  * dw_calc_clocks() computes the D-PHY bit rate two DIFFERENT ways depending
  * on the shield's dpi-video-mode, then clamps the result to
- * panel-max-lane-bandwidth either way -- this file used to assume
- * panel-max-lane-bandwidth/2 WAS the rate unconditionally, which only held
- * for a burst config deliberately tuned to land exactly on that clamp.  For
- * non-burst (this shield -- see &mipi_dsi's dpi-video-mode in the overlay)
- * the real rate is whatever the non-burst formula computes; the clamp is a
- * ceiling that must sit ABOVE it, not the rate source -- a clamp below the
- * non-burst need starves the DPI payload FIFO every line (dsi_dw.c's own
- * comment: INT_ST1 DPI_PLD_WR_ERR), it does not just fail to reach a target.
+ * panel-max-lane-bandwidth either way -- panel-max-lane-bandwidth/2 equals
+ * the actual rate ONLY for a burst config deliberately tuned to land exactly
+ * on that clamp; it is not the rate source in general.  For non-burst (this
+ * shield -- see &mipi_dsi's dpi-video-mode in the overlay) the real rate is
+ * whatever the non-burst formula computes; the clamp is a ceiling that must
+ * sit ABOVE it, not the rate source -- a clamp below the non-burst need
+ * starves the DPI payload FIFO every line (dsi_dw.c's own comment: INT_ST1
+ * DPI_PLD_WR_ERR), it does not just fail to reach a target.
  *
  * Both formulas are dsi_dw.c's own (dw_calc_clocks()), replicated here in
  * integer arithmetic -- the driver's own math is double-precision float, at
@@ -315,7 +318,11 @@ BUILD_ASSERT(SN65_VFRONT_PORCH <= 0xFFU, "sn65dsi83: CHA_VERTICAL_FRONT_PORCH is
  * dpi-video-mode's enum order matches dsi_dw.c's own DSI_DW_MODE_FLAGS_OR:
  * 0 non-burst-sync-events, 1 non-burst-sync-pulses, 2 burst.
  */
-#define SN65_VID_PKT_SIZE   DT_PROP(SN65_MIPI_NODE, vid_pkt_size)
+/* vid-pkt-size defaults to hactive when unset in DT, matching dsi_dw.c's own
+ * COND_CODE_1(DT_INST_NODE_HAS_PROP(i, vid_pkt_size), ...) fallback to the
+ * cdc-if node's width property (dsi_dw.c ~1751) -- SN65_HACTIVE below is that
+ * same width property. */
+#define SN65_VID_PKT_SIZE   DT_PROP_OR(SN65_MIPI_NODE, vid_pkt_size, SN65_HACTIVE)
 #define SN65_DSI_MODE_IDX   DT_ENUM_IDX(SN65_MIPI_NODE, dpi_video_mode)
 #define SN65_DSI_BURST      (SN65_DSI_MODE_IDX == 2)
 #define SN65_DSI_SYNC_PULSE (SN65_DSI_MODE_IDX == 1)
@@ -331,7 +338,11 @@ BUILD_ASSERT(SN65_VFRONT_PORCH <= 0xFFU, "sn65dsi83: CHA_VERTICAL_FRONT_PORCH is
 
 #define SN65_HS_BIT_CLK_HZ (SN65_DSI_BURST ? SN65_BURST_HS_CLK_HZ : SN65_NONBURST_HS_CLK_HZ)
 
-BUILD_ASSERT(SN65_LANE_BW_BPS >= SN65_NONBURST_HS_CLK_HZ,
+/* Guarded by !SN65_DSI_BURST: in burst mode SN65_NONBURST_HS_CLK_HZ is not
+ * the rate this link actually uses (SN65_HS_BIT_CLK_HZ picks the burst
+ * formula instead), so it must not gate a burst config that never needs it
+ * to hold. */
+BUILD_ASSERT(!SN65_DSI_BURST || SN65_LANE_BW_BPS >= SN65_NONBURST_HS_CLK_HZ,
              "sn65dsi83: panel-max-lane-bandwidth must be >= the non-burst formula's actual bit "
              "rate, or the DSI host's own clamp (applied regardless of mode) silently slows the "
              "link below what this CSR bank is tuned for");
