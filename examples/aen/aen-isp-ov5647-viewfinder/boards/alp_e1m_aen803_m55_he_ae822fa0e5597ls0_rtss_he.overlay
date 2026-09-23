@@ -1,0 +1,65 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-isp-ov5647-viewfinder overlay for the E1M-AEN803 (Ensemble E8,
+ * M55-HE) RAM-run: the portable <alp/camera.h> counterpart to
+ * aen-isp-ov5647-capture's board overlay, which this file mirrors for the
+ * DT graph (cam port@2 -> isp, port@1 deleted, &isp status="okay" -- see
+ * that file's comment for why: Alif's own sdk-alif samples/drivers/
+ * viewfinder recipe, snapshot capture-mode, 16-bit CPI data-mode).
+ *
+ * The one addition: this app's camera_id 0 must resolve to the ISP, not
+ * the raw sensor-only capture port.  e1m_evk_rpi_csi's own aliases node
+ * sets `alp-camera0 = &csi_capture_port` (the &cam node) for the RAW path
+ * aen-camera-firstlight's OV5647 scenario uses -- src/backends/camera/
+ * alif_isp_pico.c's DT_ALIAS(alp_camera0) lookup needs &isp instead.  A
+ * later-applied overlay's /aliases property for the SAME key overrides an
+ * earlier one (devicetree overlay merge semantics), so redeclaring it here
+ * -- in THIS example's own board overlay, applied after the shields --
+ * overrides it locally without touching e1m_evk_rpi_csi itself.  Every
+ * other board/example that includes that shield (aen-camera-firstlight,
+ * any future raw-path user) keeps the shield's original &csi_capture_port
+ * binding untouched.
+ */
+
+/*
+ * RAM-run: retarget ROM to ITCM (path-reference form &itcm; the phandle-array
+ * form makes FLASH_SIZE=0 and overflows the link).
+ */
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+
+	aliases {
+		alp-camera0 = &isp;
+	};
+};
+
+&cam {
+	capture-mode = "snapshot";
+	data-mode = "16-bit";
+
+	ports {
+		/delete-node/ port@1;
+
+		port@2 {
+			reg = <2>;
+			cam_isp_ep_out: endpoint {
+				remote-endpoint-label = "isp_ep_in";
+			};
+		};
+	};
+};
+
+&isp {
+	status = "okay";
+
+	port {
+		isp_ep_in: endpoint {
+			remote-endpoint-label = "cam_isp_ep_out";
+		};
+	};
+};
