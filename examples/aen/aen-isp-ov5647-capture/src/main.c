@@ -57,12 +57,19 @@
  * reference onto the untouched ARX3A0 table's own internal gain relation,
  * then bench-checked on ONE scene (runs 159/162). Provisional: a grey-card
  * calibration under two illuminants is the intended replacement. CCM is ON
- * (CONFIG_ISP_LIB_CCM_MODULE=y in this example's prj.conf) -- run 171's
- * colour-bar test pattern proves the ISP pipeline, CCM included, is
- * colour-correct (all 8 bars at the correct hue, full saturation); the
- * residual blue tint on the ceiling (runs 163/164) is AWB balancing a
- * yellow-wall-dominated frame, amplified but not caused by CCM, and will
- * be fixed by that grey-card calibration rather than by turning CCM off.
+ * (CONFIG_ISP_LIB_CCM_MODULE=y in this example's prj.conf) -- runs
+ * 171/172 (colour-bar test pattern, all 8 bars at correct hue and full
+ * saturation, CCM on -- run 172 through <alp/camera.h>) and run 178
+ * (faded and dark bars land exactly where expected, e.g. pure red at raw
+ * 110 gives V +50 = BT.601) show the ISP pipeline, CCM included, is
+ * colour-correct. Run 176 (a same-frame CPI raw-vs-ISP comparison) shows
+ * the ISP matches the raw scene to 1.5%, and the raw scene itself varies
+ * only ~4% (white ceiling raw R/G 0.98, B/G 0.97) -- so the muted colour
+ * and the residual cast on the ceiling (runs 163/164) come from the
+ * sensor/lens (likely an IR leak) plus this provisional calibration, not
+ * from the ISP: CCM amplifies an existing low-saturation cast rather than
+ * causing it, and will be retuned by that grey-card calibration rather
+ * than by turning CCM off.
  */
 
 #include <stdbool.h>
