@@ -88,6 +88,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/kernel.h>
 #include <zephyr/sys/util.h>
 
@@ -100,7 +101,6 @@
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
-#include "isp_frame_size.h"
 #include "yuv_to_rgb565.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
@@ -366,8 +366,9 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	}
 
 	/* Per-buffer size: full frame size, not st->fmt.pitch * height -- see
-	 * isp_frame_size.h for why (pitch is the LUMA-only stride for 4:2:0
-	 * planar/semi-planar YUV since isp_pico.c's isp_set_fmt() fix). */
+	 * <zephyr/drivers/video/isp_frame_size.h> for why (pitch is the
+	 * LUMA-only stride for planar/semi-planar YUV since isp_pico.c's
+	 * isp_set_fmt() fix; the same helper sizes bytesused there). */
 	uint32_t bytes_per_buf = alp_isp_frame_size(st->fmt.pixelformat, st->fmt.width, st->fmt.height);
 	if (bytes_per_buf == 0u) {
 		/* Real dimensions but a fourcc Zephyr's table can't size:

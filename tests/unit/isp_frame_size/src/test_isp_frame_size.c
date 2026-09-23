@@ -10,16 +10,20 @@
  * request (ALP_PIXFMT_YUV420_PLANAR / ALP_PIXFMT_NV12) the negotiated
  * pitch is the LUMA-only line stride, so pitch * height covered only the Y
  * plane -- 0 bytes when pitch was left at its uninitialized 0, or
- * width*height (missing the U/V planes) once a caller filled it in. Fixed
- * by keying off video_bits_per_pixel() directly (isp_frame_size.h), which
- * reports the true average bits/pixel INCLUDING chroma.
+ * width*height (missing the U/V planes) once a caller filled it in.
+ *
+ * Includes the SAME header isp_pico.c's isp_set_fmt()/isp_dequeue() and
+ * alif_isp_pico.c's buffer sizing call -- not a stand-in copy of the
+ * formula -- so reverting either helper's body here is what a reverted
+ * driver/backend call site would actually run.
  */
 #include <zephyr/drivers/video.h>
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/ztest.h>
 
-#include "isp_frame_size.h"
-
 ZTEST_SUITE(isp_frame_size, NULL, NULL, NULL, NULL, NULL);
+
+/* --- alp_isp_frame_size(): full frame size, chroma included -------------- */
 
 ZTEST(isp_frame_size, test_yuv420_full_planar_covers_chroma)
 {
@@ -49,4 +53,67 @@ ZTEST(isp_frame_size, test_rgb565_packed_unaffected)
 
 	zassert_equal(
 	    got, 640u * 480u * 2u, "RGB565 640x480 bytesused: got %u, want %u", got, 640u * 480u * 2u);
+}
+
+/* video_bits_per_pixel() reports 0 for these two Alp Lab-private fourccs
+ * (video_alif.h) -- alp_isp_pixel_bpp()'s fallback must size them the way
+ * fourcc_to_plane_size() (video_alif.c) splits their planes: YUV422P is
+ * 1/2 + 1/4 + 1/4 of the buffer (16 bpp average), RGB888_PLANAR_PRIVATE is
+ * three equal 1/3 planes (24 bpp). Without the fallback these fell through
+ * to bytesused/pitch == 0, same class of bug as the YUV420/NV12 case. */
+ZTEST(isp_frame_size, test_yuv422p_uses_plane_split_bpp)
+{
+	uint32_t got = alp_isp_frame_size(VIDEO_PIX_FMT_YUV422P, 640u, 480u);
+
+	zassert_equal(
+	    got, 640u * 480u * 2u, "YUV422P 640x480 bytesused: got %u, want %u", got, 640u * 480u * 2u);
+	zassert_not_equal(got, 0u, "YUV422P bytesused must never be 0");
+}
+
+ZTEST(isp_frame_size, test_rgb888_planar_private_uses_plane_split_bpp)
+{
+	uint32_t got = alp_isp_frame_size(VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE, 640u, 480u);
+
+	zassert_equal(got,
+	              640u * 480u * 3u,
+	              "RGB888_PLANAR_PRIVATE 640x480 bytesused: got %u, want %u",
+	              got,
+	              640u * 480u * 3u);
+	zassert_not_equal(got, 0u, "RGB888_PLANAR_PRIVATE bytesused must never be 0");
+}
+
+/* --- alp_isp_default_pitch(): isp_set_fmt()'s pitch fill-in -------------- */
+
+ZTEST(isp_frame_size, test_pitch_yuv420_is_luma_stride)
+{
+	uint32_t got = alp_isp_default_pitch(VIDEO_PIX_FMT_YUV420, 640u);
+
+	/* Luma-only: one byte per pixel, NOT video_bits_per_pixel()'s 12-bpp
+	 * chroma-subsampled average (which would give a non-integral
+	 * 640*1.5 if it were ever (wrongly) applied per-line). */
+	zassert_equal(got, 640u, "YUV420 pitch: got %u, want 640 (luma stride)", got);
+}
+
+ZTEST(isp_frame_size, test_pitch_nv12_is_luma_stride)
+{
+	uint32_t got = alp_isp_default_pitch(VIDEO_PIX_FMT_NV12, 640u);
+
+	zassert_equal(got, 640u, "NV12 pitch: got %u, want 640 (luma stride)", got);
+}
+
+ZTEST(isp_frame_size, test_pitch_rgb565_is_bpp_derived)
+{
+	uint32_t got = alp_isp_default_pitch(VIDEO_PIX_FMT_RGB565, 640u);
+
+	zassert_equal(got, 1280u, "RGB565 pitch: got %u, want 1280 (2 B/px)", got);
+}
+
+ZTEST(isp_frame_size, test_pitch_yuv422p_and_rgb888_planar_private_nonzero)
+{
+	uint32_t yuv422p = alp_isp_default_pitch(VIDEO_PIX_FMT_YUV422P, 640u);
+	uint32_t rgb888p = alp_isp_default_pitch(VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE, 640u);
+
+	zassert_equal(yuv422p, 1280u, "YUV422P pitch: got %u, want 1280 (16 bpp)", yuv422p);
+	zassert_equal(
+	    rgb888p, 1920u, "RGB888_PLANAR_PRIVATE pitch: got %u, want 1920 (24 bpp)", rgb888p);
 }

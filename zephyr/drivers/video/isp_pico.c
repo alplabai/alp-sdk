@@ -87,6 +87,7 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
 #include <zephyr/drivers/pinctrl.h>
 
 #include "isp_pico.h"
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
@@ -274,7 +275,7 @@ static const struct video_format_cap supported_output_fmts[] = {
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV21, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV16, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV61, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 19200, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV420, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUYV, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_VYUY, 1920, 1080),
@@ -666,26 +667,18 @@ int isp_set_fmt(const struct device *dev,
 		 * expects this driver to fill it in -- video_set_format()'s
 		 * fmt is in/out for exactly this reason (see
 		 * video_stm32_venc.c's stm32_venc_set_fmt() for the same
-		 * convention upstream).  For 4:2:0 planar/semi-planar YUV
-		 * (YUV420/YVU420/NV12/NV21) the pitch is the LUMA line stride
-		 * only -- one byte per pixel -- never
-		 * video_bits_per_pixel()'s chroma-subsampled AVERAGE (12 bpp,
-		 * i.e. width*1.5), which isn't a whole number of bytes per
-		 * pixel and isn't what any consumer strides by.  Leaving
-		 * pitch at that average is what isp_dequeue() used to key
-		 * bytesused off of pitch*height and silently drop the chroma
-		 * planes (0 bytes for every YUV frame when pitch was left at
-		 * its uninitialized 0, or the luma-only size once a caller
-		 * filled it in) -- see isp_dequeue(), below, which now sizes
-		 * bytesused off video_bits_per_pixel() directly instead of
-		 * derived from this pitch.
+		 * convention upstream). alp_isp_default_pitch()
+		 * (isp_frame_size.h) is the single place this driver AND
+		 * src/backends/camera/alif_isp_pico.c's buffer-pool sizing
+		 * derive a format's byte geometry from -- see that header for
+		 * why planar/semi-planar YUV gets the LUMA-only line stride,
+		 * not an average-bpp-derived one.
 		 */
 		if (fmt->pitch == 0u) {
-			if (VIDEO_FMT_IS_FULL_PLANAR(fmt->pixelformat) ||
-			    VIDEO_FMT_IS_SEMI_PLANAR(fmt->pixelformat)) {
-				fmt->pitch = fmt->width;
-			} else {
-				fmt->pitch = (video_bits_per_pixel(fmt->pixelformat) * fmt->width) >> 3;
+			fmt->pitch = alp_isp_default_pitch(fmt->pixelformat, fmt->width);
+			if (fmt->pitch == 0u) {
+				LOG_ERR("Cannot derive a pitch for this output fourcc!");
+				return -EINVAL;
 			}
 		}
 
@@ -1314,9 +1307,10 @@ int isp_get_fmt(const struct device *dev,
 				supported_output_fmts[i].height_max;
 			channel->output_fmt.width =
 				supported_output_fmts[i].width_max;
-			channel->output_fmt.pitch =
-				(video_bits_per_pixel(tmp_fmt) *
-				 channel->output_fmt.width) >> 3;
+			/* video_bits_per_pixel() returns 0 for this private
+			 * fourcc -- alp_isp_default_pitch() (isp_frame_size.h)
+			 * knows it (24 bpp, 3 equal 8-bit planes). */
+			channel->output_fmt.pitch = alp_isp_default_pitch(tmp_fmt, channel->output_fmt.width);
 		}
 
 		*fmt = channel->output_fmt;
@@ -2006,18 +2000,30 @@ static int isp_dequeue(const struct device *dev,
 
 	/*
 	 * Full frame size, not pitch*height: pitch (isp_set_fmt(), above) is
-	 * the LUMA line stride for 4:2:0 planar/semi-planar YUV, so
+	 * the LUMA-only line stride for planar/semi-planar YUV, so
 	 * pitch*height covers only the Y plane and drops the U/V planes --
 	 * bench-proven on E1M-AEN803 (run 200): every dequeued YUV420/NV12
 	 * buffer reported bytesused 0 (pitch was 0 before the isp_set_fmt()
-	 * fix, above) and callers copied nothing.  video_bits_per_pixel()
-	 * already reports the format's true average bits/pixel INCLUDING
-	 * chroma (12 for 4:2:0), so this is correct for every output fourcc
-	 * this driver negotiates, planar or packed.
+	 * fix, above) and callers copied nothing.  alp_isp_frame_size()
+	 * (isp_frame_size.h) -- the same helper
+	 * src/backends/camera/alif_isp_pico.c sizes its buffer pool with --
+	 * reports the format's true average bits/pixel INCLUDING chroma, so
+	 * this is correct for every output fourcc this driver's
+	 * supported_output_fmts[] advertises.
+	 *
+	 * Capped at buf->size: alp_isp_frame_size() sizes the FORMAT, not
+	 * this particular buffer, so a caller that enqueued something
+	 * smaller than the negotiated frame (a pool-sizing bug, or a format
+	 * this helper doesn't yet know) would otherwise hand
+	 * sys_cache_data_invd_range(), below, a length that invalidates past
+	 * the buffer's end. video_buffer_aligned_alloc() rounds every real
+	 * allocation UP to CONFIG_VIDEO_BUFFER_POOL_ALIGN, so this cap is a
+	 * last-line-of-defense, not the expected path.
 	 */
-	(*buf)->bytesused = (video_bits_per_pixel(channel->output_fmt.pixelformat) *
-	                     channel->output_fmt.width * channel->output_fmt.height) /
-	                    BITS_PER_BYTE;
+	(*buf)->bytesused = MIN(alp_isp_frame_size(channel->output_fmt.pixelformat,
+	                                           channel->output_fmt.width,
+	                                           channel->output_fmt.height),
+	                        (*buf)->size);
 
 	/*
 	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The
