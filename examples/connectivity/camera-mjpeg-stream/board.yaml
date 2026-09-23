@@ -1,0 +1,37 @@
+# board.yaml -- per-app project configuration for the
+# camera-mjpeg-stream reference application.
+#
+# Customer workflow: `tan init --from-example connectivity/camera-mjpeg-stream`,
+# change `som.sku` to your AEN MPN, edit `preset:` if you fork the EVK, and
+# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py at configure
+# time and layers the generated alp.conf over prj.conf via EXTRA_CONF_FILE.
+#
+# Ring 1 (see check_example_portability.py): no `chips:` list.  The app
+# talks to the camera + JPEG encoder purely through <alp/camera.h> +
+# <alp/jpeg.h>, gated on alp_has() rather than a chip driver, and reaches
+# the network purely through the plain Zephyr BSD socket API -- nothing
+# here is SoM- or board-unique, so the same src/main.c builds unchanged
+# on any family that eventually grows a MIPI-CSI camera + JPEG encoder.
+
+som:
+  sku: E1M-AEN803          # Alif Ensemble E8 -- VeriSilicon ISP-Pico +
+                            # Hantro VC9000E JPEG hardware encoder.  A SoM
+                            # swap to a family with no camera/JPEG backend
+                            # still builds and runs: alp_has() steers this
+                            # app onto the synthetic-frame fallback path.
+
+preset: e1m-evk
+
+# Single-OS app on the M55-HE: the camera-capture + JPEG-encode loop is
+# latency-sensitive (a blocked capture thread starves the ISP AE loop --
+# proven on silicon), so it owns a dedicated core rather than sharing the
+# M55-HP's inference workload. A32 cluster unused -- default is Linux on
+# for A-cores, so opt out explicitly.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+
+diagnostics:
+  log_level: info
