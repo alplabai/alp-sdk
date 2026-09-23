@@ -34,6 +34,7 @@
  * to know this file exists.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
@@ -41,8 +42,14 @@
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
 
-#define SNAPSHOT_RESP_CAP 51200
-#define STREAM_RESP_CAP   131072
+#include "mjpeg_http.h"
+
+/* Derived from the server's own cap, not a second hand-picked number that
+ * could silently fall behind it: the biggest body either endpoint can
+ * possibly send is one MJPEG_HTTP_MAX_JPEG frame, plus room for the HTTP
+ * headers/boundary lines around it. */
+#define SNAPSHOT_RESP_CAP (MJPEG_HTTP_MAX_JPEG + 256u)
+#define STREAM_RESP_CAP   (MJPEG_HTTP_MAX_JPEG + 1024u) /* preamble + 2 part headers, generously */
 #define CLIENT_TIMEOUT_S  5 /* a broken build must fail this test, not hang twister */
 
 static uint8_t snapshot_resp[SNAPSHOT_RESP_CAP];
@@ -66,6 +73,27 @@ static ssize_t find_from(const uint8_t *buf, size_t len, size_t from, const char
 	return -1;
 }
 
+/* Parse the decimal number right after `needle` (e.g. "Content-Length: ").
+ * Returns -1 if `needle` isn't found or is followed by no digit. */
+static ssize_t parse_uint_after(const uint8_t *buf, size_t len, size_t from, const char *needle)
+{
+	ssize_t at = find_from(buf, len, from, needle);
+
+	if (at < 0) {
+		return -1;
+	}
+	size_t i         = (size_t)at + strlen(needle);
+	long   val       = 0;
+	bool   any_digit = false;
+
+	while (i < len && buf[i] >= '0' && buf[i] <= '9') {
+		val       = val * 10 + (buf[i] - '0');
+		any_digit = true;
+		i++;
+	}
+	return any_digit ? (ssize_t)val : -1;
+}
+
 static int connect_loopback(void)
 {
 	int                sock = zsock_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -76,8 +104,14 @@ static int connect_loopback(void)
 	};
 	struct zsock_timeval tv = { .tv_sec = CLIENT_TIMEOUT_S, .tv_usec = 0 };
 
-	zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv));
-	zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv));
+	if (zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv)) < 0 ||
+	    zsock_setsockopt(sock, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv)) < 0) {
+		printf("[camera-mjpeg-stream] SELFTEST-FAILED: setsockopt(SO_RCVTIMEO/SNDTIMEO) "
+		       "errno=%d\n",
+		       errno);
+		zsock_close(sock);
+		return -1;
+	}
 	if (zsock_connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
 		zsock_close(sock);
 		return -1;
@@ -120,8 +154,18 @@ static bool check_snapshot(void)
 
 	const uint8_t *body     = snapshot_resp + sep + 4;
 	size_t         body_len = total - (size_t)(sep + 4);
-	bool           ok       = (body_len >= 4) && (body[0] == 0xFFu) && (body[1] == 0xD8u) &&
-	                          (body[body_len - 2] == 0xFFu) && (body[body_len - 1] == 0xD9u);
+	ssize_t        clen     = parse_uint_after(snapshot_resp, total, 0, "Content-Length: ");
+
+	if (clen < 0 || (size_t)clen != body_len) {
+		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /snapshot.jpg Content-Length=%ld "
+		       "!= actual body length=%u\n",
+		       (long)clen,
+		       (unsigned)body_len);
+		return false;
+	}
+
+	bool ok = (body_len >= 4) && (body[0] == 0xFFu) && (body[1] == 0xD8u) &&
+	          (body[body_len - 2] == 0xFFu) && (body[body_len - 1] == 0xD9u);
 
 	if (!ok) {
 		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /snapshot.jpg body is not a JPEG "
@@ -193,19 +237,39 @@ static bool check_stream(void)
 
 	ssize_t part1    = find_from(stream_resp, total, 0, "--alpframe\r\n");
 	ssize_t ctype    = find_from(stream_resp, total, (size_t)part1, "Content-Type: image/jpeg\r\n");
-	ssize_t clen     = find_from(stream_resp, total, (size_t)part1, "Content-Length: ");
+	ssize_t clen_at  = find_from(stream_resp, total, (size_t)part1, "Content-Length: ");
 	ssize_t hdrs_end = find_from(stream_resp, total, (size_t)part1, "\r\n\r\n");
 
-	if (ctype < 0 || clen < 0 || hdrs_end < 0 || hdrs_end >= boundary2) {
+	if (ctype < 0 || clen_at < 0 || hdrs_end < 0 || hdrs_end >= boundary2) {
 		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /stream part 1 missing "
 		       "Content-Type/Content-Length/blank-line before the next boundary\n");
 		return false;
 	}
+	/* Body runs from just after the blank line to 2 bytes (the trailing
+	 * CRLF) before the next boundary -- guard against boundary2 being too
+	 * close to hdrs_end for that span to make sense (a malformed/short
+	 * response) BEFORE the size_t subtraction below, which would
+	 * otherwise underflow to a huge value and read far out of bounds. */
+	if ((size_t)boundary2 < (size_t)hdrs_end + 4 + 2) {
+		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /stream part 1 body span is "
+		       "negative (malformed framing)\n");
+		return false;
+	}
 
 	const uint8_t *body_start = stream_resp + hdrs_end + 4;
-	size_t body_len = (size_t)boundary2 - (size_t)(hdrs_end + 4) - 2; /* -2: trailing CRLF */
-	bool   jpeg_ok  = (body_len >= 4) && (body_start[0] == 0xFFu) && (body_start[1] == 0xD8u) &&
-	                  (body_start[body_len - 2] == 0xFFu) && (body_start[body_len - 1] == 0xD9u);
+	size_t         body_len   = (size_t)boundary2 - (size_t)(hdrs_end + 4) - 2; /* -2: CRLF */
+	ssize_t        clen = parse_uint_after(stream_resp, total, (size_t)part1, "Content-Length: ");
+
+	if (clen < 0 || (size_t)clen != body_len) {
+		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /stream part 1 Content-Length=%ld "
+		       "!= actual body length=%u\n",
+		       (long)clen,
+		       (unsigned)body_len);
+		return false;
+	}
+
+	bool jpeg_ok = (body_len >= 4) && (body_start[0] == 0xFFu) && (body_start[1] == 0xD8u) &&
+	               (body_start[body_len - 2] == 0xFFu) && (body_start[body_len - 1] == 0xD9u);
 
 	if (!jpeg_ok) {
 		printf("[camera-mjpeg-stream] SELFTEST-FAILED: /stream part 1 body is not a JPEG "

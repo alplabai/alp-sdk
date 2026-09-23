@@ -47,13 +47,17 @@ your DHCP server):
 
 ## Measured on silicon
 
-Bench run 204 (E1M-AEN803 + OV5647): `/snapshot.jpg` returned a valid
-15571 B JPEG; `/stream` ran at 17 fps, ~12.8 KB/frame, 255 parts served
-in 15 s with no error. Measured with a 1536 B Ethernet net_buf data size
+Bench run 204 (E1M-AEN803 + OV5647, **320×240**, before this example's
+resolution was raised to its intended 640×480): `/snapshot.jpg` returned
+a valid 15571 B JPEG; `/stream` ran at 17 fps, ~12.8 KB/frame, 255 parts
+served in 15 s with no error, with a 1536 B Ethernet net_buf data size
 (run 203, at the smaller 128 B default, frames over 896 B were dropped
-and no JPEG body arrived at all -- the alp-sdk Alif Ethernet glue is
-gaining a 1536 B default on its own branch, not something this example
-sets). Rerun the ffmpeg command above for a current figure at 640×480.
+and no JPEG body arrived at all -- both AEN board confs now set
+`CONFIG_NET_BUF_DATA_SIZE=1536` explicitly, ahead of the alp-sdk Alif
+Ethernet glue's own matching default landing separately).
+
+Bench run 205 (E1M-AEN803 + OV5647, **640×480**, dark scene): 10 fps,
+~37 KB/frame. Rerun the ffmpeg command above for a current figure.
 
 ## Limits
 
@@ -66,19 +70,29 @@ This is a teaching example, not a production camera server:
   8080 on the LAN sees the stream.
 - **LAN-only by design** -- there is no port-forwarding/NAT guidance
   because this is not meant to be exposed past your local network.
+- **fps is bounded by encode + send time, not just camera fps.**
+  `mjpeg_http_publish_frame()` drops the newly-encoded frame outright if
+  a `/stream` client is still mid-send of the previous one (see
+  `src/mjpeg_http.c`'s file header) -- so the achievable rate is roughly
+  `1 / (t_encode + t_send)`, not the camera's requested 15 fps. Run
+  205's 10 fps at 640×480 (~37 KB/frame) is a real measurement of that,
+  not a target this example tries to hit.
 
 **Unverified on silicon:**
 
-- **ISP NV12 output content.** Bench run 204 *did* produce frames through
-  this path end to end (camera → ISP → JPEG → HTTP, no pipeline errors),
-  but the frame content itself was dark/near-black (AWB `noWhitePixel`
-  flagged on every channel, gains read back 0x0) -- under separate
-  investigation (scene/lens vs. AE), not a defect in this example's own
-  code. Treat the *pipeline* as bench-proven and the *image quality* as
-  not yet.
-- **Hantro repeat-encode stability**: run 204 repeat-encoded 255+ frames
-  back-to-back with no encoder error, so this is not unverified -- it was
-  directly observed in that run.
+- **ISP NV12 output content.** Runs 204 and 205 *did* produce frames
+  through this path end to end (camera → ISP → JPEG → HTTP, no pipeline
+  errors), but the frame content itself was dark/near-black (AWB
+  `noWhitePixel` flagged on every channel, gains read back 0x0) with the
+  bottom two rows rendering solid green -- both under separate
+  investigation (the darkness: scene/lens vs. AE; the green rows: a
+  known ISP resizer off-by-one being fixed separately), neither a defect
+  in this example's own code. Treat the *pipeline* as bench-proven and
+  the *image quality* as not yet.
+
+Hantro repeat-encode stability is **not** on the unverified list: runs
+204 and 205 repeat-encoded 255+ and 300+ frames respectively, back-to-back,
+with no encoder error.
 
 ## Native_sim (CI)
 
@@ -111,7 +125,7 @@ the body):
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
-| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, `CONFIG_NET_BUF_DATA_SIZE=1536`, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability

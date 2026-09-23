@@ -88,6 +88,12 @@ SYS_INIT(phy_power_init, POST_KERNEL, 50);
 #define GMAC_MDIO_DATA  0x48100204U
 #define MDIO_POLL_ITERS 100000 /* ~100ms at the 1us busy_wait below -- never spin forever */
 
+/* Set once any mdio_wait_idle() call times out -- phy_find() checks this
+ * to abort its whole scan on the first timeout rather than repeating a
+ * ~100ms wait against a genuinely wedged/unclocked bus for the other 31
+ * addresses too. */
+static bool mdio_bus_dead;
+
 /* Poll GB (bit0, "transaction in flight") down to 0, bounded. Returns
  * false on timeout -- a genuinely wedged MDIO bus (e.g. no PHY answering,
  * or the GMAC itself unclocked) must not hang this SYS_INIT hook, which
@@ -100,6 +106,7 @@ static bool mdio_wait_idle(void)
 		}
 		k_busy_wait(1);
 	}
+	mdio_bus_dead = true;
 	return false;
 }
 
@@ -111,7 +118,11 @@ static uint16_t mdio_read(uint8_t phy, uint8_t reg)
 	uint32_t a =
 	    ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) | BIT(0);
 	sys_write32(a, GMAC_MDIO_ADDR);
-	mdio_wait_idle();
+	if (!mdio_wait_idle()) {
+		/* The transaction never completed -- MAC_MDIO_DATA may hold a
+		 * stale or partial value, not the PHY's real answer. */
+		return 0xFFFF;
+	}
 	return (uint16_t)(sys_read32(GMAC_MDIO_DATA) & 0xFFFFU);
 }
 
@@ -132,6 +143,12 @@ static int phy_find(void)
 	for (uint8_t phy = 0; phy < 32; phy++) {
 		uint16_t id1 = mdio_read(phy, 2);
 
+		if (mdio_bus_dead) {
+			/* A wedged/unclocked bus won't un-wedge by trying the
+			 * other 31 addresses -- stop paying the ~100ms timeout
+			 * per address. */
+			return -1;
+		}
 		if (id1 != 0xFFFF && id1 != 0x0000) {
 			return phy;
 		}

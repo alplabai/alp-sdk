@@ -396,7 +396,14 @@ jobs:
       # board target for it, so a regression in that pipeline would only
       # surface on the next real bench flash. Same shape as the roots
       # above: one example, bounded, build_only, not widened to any other
-      # directory.
+      # directory. `--dry-run` against this job's full root list, before
+      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
+      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
+      # with a two-entry platform_allow. NOT reconciled against the two
+      # older total counts above/below this step (153/144) -- both
+      # already predate this addition by an amount this change did not
+      # introduce (neither matches this measurement's own 83+78=161
+      # baseline either, so the drift is pre-existing, not new here).
       - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream
         working-directory: ${{ github.workspace }}
         env:

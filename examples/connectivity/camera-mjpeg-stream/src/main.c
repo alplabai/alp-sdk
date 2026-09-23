@@ -59,12 +59,34 @@
 #define HTTP_PORT 8080
 
 /* 640x480: the resolution both the real-camera path and the synthetic
- * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG (64 KiB) is the
- * shared cap on the encoded output either path produces at quality 80 --
- * see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the AEN video
+ * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG (128 KiB) is the
+ * physical size of the two SRAM0 buffers that output lands in -- see
+ * boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the AEN video
  * buffer pool is sized for this resolution. */
 #define FRAME_W 640
 #define FRAME_H 480
+
+/*
+ * The Hantro VC9000E driver has a known bug (tracked separately, not
+ * fixed here): SWREG9 is programmed with the full destination buffer
+ * size, but the compressed stream itself starts
+ * CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE bytes into that buffer
+ * (the header is written in software first, ahead of the hardware's own
+ * output) -- so the hardware can write up to that many bytes past the
+ * end of a buffer sized exactly to what the caller asked for. Until
+ * that lands, reserve the same margin in what THIS app tells
+ * alp_jpeg_encode() it may use: the physical buffer
+ * (mjpeg_http_claim_write_buffer(), MJPEG_HTTP_MAX_JPEG bytes) stays
+ * full-size real memory, so the reserved tail is mapped SRAM0, not past
+ * the allocation -- only the encoder's belief about its own capacity
+ * shrinks. Portable: everywhere this Kconfig doesn't exist (off the
+ * E1M-AEN family, including native_sim), the full buffer is offered.
+ */
+#if defined(CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE)
+#define JPEG_OUT_CAP (MJPEG_HTTP_MAX_JPEG - CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE)
+#else
+#define JPEG_OUT_CAP MJPEG_HTTP_MAX_JPEG
+#endif
 
 /*
  * The Hantro VC9000E JPEG encoder is an external AXI bus master: it DMAs
@@ -170,7 +192,12 @@ static bool rate_limited(int64_t *last_log_ms, uint32_t *count)
 	(*count)++;
 	int64_t now = k_uptime_get();
 
-	if (now - *last_log_ms < 1000) {
+	/* *count == 1 (the very first call) always prints, regardless of
+	 * `now`: *last_log_ms starts at 0, and a failure inside the first
+	 * second of boot (now < 1000) would otherwise satisfy
+	 * `now - 0 < 1000` and silently suppress the FIRST failure ever
+	 * seen -- exactly the one a reader most wants to know about. */
+	if (*count != 1 && now - *last_log_ms < 1000) {
 		return false;
 	}
 	*last_log_ms = now;
@@ -331,7 +358,7 @@ int main(void)
 		if (have_frame) {
 			size_t       out_len = 0;
 			alp_status_t erc     = alp_jpeg_encode(
-			    jpeg, &req, mjpeg_http_claim_write_buffer(), MJPEG_HTTP_MAX_JPEG, &out_len);
+			    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
 
 			if (erc == ALP_OK) {
 				mjpeg_http_publish_frame(out_len);

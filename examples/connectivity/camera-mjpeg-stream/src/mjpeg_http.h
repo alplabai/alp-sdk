@@ -16,8 +16,13 @@
 
 /** Capacity of each of the two ping-pong JPEG buffers this file owns --
  *  the one shared bound main.c's alp_jpeg_encode() call and this file's
- *  own allocation both use, so the two can never silently disagree. */
-#define MJPEG_HTTP_MAX_JPEG 65536u
+ *  own allocation both use, so the two can never silently disagree.
+ *  128 KiB: bench run 205 measured ~37 KB/frame at 640x480 on a DARK
+ *  scene (a lit scene compresses worse); main.c additionally reserves
+ *  CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE bytes of this capacity
+ *  as margin against a known Hantro driver overrun -- see main.c's
+ *  JPEG_OUT_CAP. */
+#define MJPEG_HTTP_MAX_JPEG 131072u
 
 /**
  * @brief Start the MJPEG HTTP server thread.

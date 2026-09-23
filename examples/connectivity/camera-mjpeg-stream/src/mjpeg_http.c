@@ -63,10 +63,12 @@
 #define JPEG_DMA_MEM
 #endif
 
-#define BOUNDARY       "alpframe"
-#define STACK_SIZE     4096
-#define REQUEST_LINE   128
-#define IDLE_TIMEOUT_S 2 /* SO_RCVTIMEO / SO_SNDTIMEO -- bounds a wedged client */
+#define BOUNDARY     "alpframe"
+#define STACK_SIZE   4096
+#define REQUEST_LINE 128
+/* SO_RCVTIMEO/SO_SNDTIMEO + wait_and_claim() -- bounds a wedged client AND a
+ * stalled capture loop; the server thread must never wedge on either. */
+#define IDLE_TIMEOUT_S 2
 
 /* The two ping-pong buffers -- see the file header for the state machine.
  * __aligned(32): the Hantro AXI master and the CPU's D-cache maintenance
@@ -130,18 +132,25 @@ static bool try_claim(uint8_t **out_buf, size_t *out_len)
 	return true;
 }
 
-/* Blocks until a frame newer than `*last_seq` exists, then claims it. */
-static void wait_and_claim(uint32_t *last_seq, uint8_t **out_buf, size_t *out_len)
+/* Waits up to IDLE_TIMEOUT_S for a frame newer than `*last_seq`, then
+ * claims it. Returns false on timeout (no new frame in time -- a stalled
+ * capture loop must not wedge the server thread's /stream client
+ * forever); the caller drops the client in that case. */
+static bool wait_and_claim(uint32_t *last_seq, uint8_t **out_buf, size_t *out_len)
 {
 	k_mutex_lock(&frame_lock, K_FOREVER);
 	while (front < 0 || seq == *last_seq) {
-		k_condvar_wait(&frame_ready, &frame_lock, K_FOREVER);
+		if (k_condvar_wait(&frame_ready, &frame_lock, K_SECONDS(IDLE_TIMEOUT_S)) != 0) {
+			k_mutex_unlock(&frame_lock);
+			return false;
+		}
 	}
 	reading   = true;
 	*out_buf  = jpeg_buf[front];
 	*out_len  = jpeg_len[front];
 	*last_seq = seq;
 	k_mutex_unlock(&frame_lock);
+	return true;
 }
 
 static void release_claim(void)
@@ -207,17 +216,20 @@ static void handle_stream(int sock)
 
 	uint32_t last_seq = 0; /* 0 never equals a real seq (first publish makes it 1) */
 
-	/* One part per NEWLY PUBLISHED frame -- wait_and_claim() blocks until
-	 * seq advances, so a slow camera loop paces this loop too; it never
-	 * resends a frame the client has already seen. Runs until the client
-	 * goes away (send_all fails, e.g. SO_SNDTIMEO expires or it closed
-	 * the connection) -- never a fixed frame count, so VLC/ffmpeg/a
-	 * browser can watch indefinitely. */
+	/* One part per NEWLY PUBLISHED frame -- wait_and_claim() blocks (up to
+	 * IDLE_TIMEOUT_S) until seq advances, so a slow camera loop paces this
+	 * loop too; it never resends a frame the client has already seen.
+	 * Runs until the client goes away (send_all fails, e.g. SO_SNDTIMEO
+	 * expires or it closed the connection) or the capture loop stalls for
+	 * IDLE_TIMEOUT_S -- never a fixed frame count, so VLC/ffmpeg/a browser
+	 * can watch indefinitely as long as frames keep arriving. */
 	for (;;) {
 		uint8_t *buf;
 		size_t   len;
 
-		wait_and_claim(&last_seq, &buf, &len);
+		if (!wait_and_claim(&last_seq, &buf, &len)) {
+			return; /* no new frame in time -- drop the client, don't wedge */
+		}
 
 		char part[96];
 		int  plen = snprintf(part,
@@ -271,14 +283,25 @@ static void server_main(void *p1, void *p2, void *p3)
 		 * deliberately-stalled peer must not wedge the single server
 		 * thread forever. */
 		struct zsock_timeval tv = { .tv_sec = IDLE_TIMEOUT_S, .tv_usec = 0 };
+		bool                 timeouts_armed =
+		    zsock_setsockopt(client, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv)) == 0 &&
+		    zsock_setsockopt(client, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv)) == 0;
 
-		zsock_setsockopt(client, ZSOCK_SOL_SOCKET, ZSOCK_SO_RCVTIMEO, &tv, sizeof(tv));
-		zsock_setsockopt(client, ZSOCK_SOL_SOCKET, ZSOCK_SO_SNDTIMEO, &tv, sizeof(tv));
+		if (!timeouts_armed) {
+			/* Can't bound this client's blocking ops -- refuse it rather
+			 * than risk wedging the one server thread on a peer that
+			 * never sends a request line. */
+			zsock_close(client);
+			continue;
+		}
 
-		char req[REQUEST_LINE] = { 0 };
+		char    req[REQUEST_LINE] = { 0 };
+		ssize_t n                 = zsock_recv(client, req, sizeof(req) - 1, 0);
 
-		zsock_recv(client, req, sizeof(req) - 1, 0);
-		if (request_is(req, "/stream")) {
+		if (n <= 0) {
+			/* Idle client: SO_RCVTIMEO expired (or it closed without
+			 * sending anything) -- nothing to answer, just close. */
+		} else if (request_is(req, "/stream")) {
 			handle_stream(client);
 		} else if (request_is(req, "/snapshot.jpg")) {
 			handle_snapshot(client);
