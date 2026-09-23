@@ -154,13 +154,20 @@ So the overlay gives the two consumers disjoint windows of the same bank:
 
 | Window | Contents |
 |---|---|
-| `0x0200_0000` + 64 KiB | The `SRAM0` linker region: `net_pkt.c`'s relocated `net_buf` pools + mem_slab bufs (`CODE_DATA_RELOCATION` NOINIT, ~5.8 KiB), the GMAC descriptor rings (512 B), and phase 13's two JPEG buffers (~14 KiB) -- measured 20800/65536 B (31.7%) used; `jpeg_out` now starts at `0x0200_1940`, no longer at `0x0200_0000`, now that the Ethernet buffers precede it. |
+| `0x0200_0000` + 64 KiB | The `SRAM0` linker region: `net_pkt.c`'s relocated `net_buf` pools + mem_slab bufs (`CODE_DATA_RELOCATION` NOINIT, ~19.3 KiB at `CONFIG_NET_BUF_DATA_SIZE=1536` with this app's own trimmed `CONFIG_NET_BUF_RX/TX_COUNT=6`, see `prj.conf`), the GMAC descriptor rings (512 B), and phase 13's two JPEG buffers (~14 KiB) -- measured 34576/65536 B (52.8%) used; `jpeg_out` now starts at `0x0200_4f10`, no longer at `0x0200_0000`, now that the Ethernet buffers precede it. |
 | `0x0201_0000` + 512 KiB | System RAM: `.data`/`.bss`/`.noinit`, every stack (the GMAC descriptor rings and the `net_buf` pool no longer live here -- see above). |
 | above that | Unused remainder of the 4 MiB bank. |
 
 Shrinking `&sram0`'s `reg` to that 64 KiB window is the safety property, not a
 tidy-up: it turns a future oversized `SRAM0`-tagged buffer into a **link error**
-instead of a silent walk into system RAM.
+instead of a silent walk into system RAM. It already caught one: bench runs
+203/204 (E1M-AEN803) found the Zephyr default `CONFIG_NET_BUF_DATA_SIZE=128`
+silently drops any Ethernet frame needing more than 7 fragments (see
+`aen-ethernet-link`'s README); the fix, `CONFIG_NET_BUF_DATA_SIZE=1536` for
+every `ETH_DWMAC_ALIF` build, applies here too and, at this app's original
+`CONFIG_NET_BUF_RX/TX_COUNT=16`, overflowed this window by 320 B -- caught at
+link time, not silently. `prj.conf` trims the count to 6 instead: phase 10
+only needs a DHCP lease, not sustained payload throughput.
 
 **What it costs the other phases**, stated plainly because it cannot be checked
 off the bench: `CONFIG_DCACHE` is off on this silicon, so there is no cache to

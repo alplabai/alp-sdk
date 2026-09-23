@@ -154,6 +154,46 @@ config ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
 	  net_context_setup_pools) still lands wherever `zephyr,sram` puts it --
 	  DTCM by default -- and the DMA would silently fail against it.
 
+# Standard Zephyr pattern: redefine a subsys symbol's default from a module
+# Kconfig (upstream subsys/net/ip/Kconfig's `config NET_BUF_DATA_SIZE`
+# otherwise defaults to 128). This works because Kconfig's rule for multiple
+# `default` lines on one symbol is "first matching condition, in the order
+# the Kconfig files were parsed, wins" -- and zephyr/Kconfig `rsource`s this
+# file, which Kconfig.zephyr sources via `source "modules/Kconfig"` (line 42)
+# BEFORE `source "subsys/Kconfig"` (line 52), which is what eventually pulls
+# in subsys/net/ip/Kconfig's `default 128`. Confirmed in a built
+# aen-ethernet-link .config: CONFIG_NET_BUF_DATA_SIZE=1536.
+#
+# Silicon-verified on E1M-AEN803 (bench runs 203/204, ETH_DWMAC_ALIF): with
+# the Zephyr-default CONFIG_NET_BUF_DATA_SIZE=128, every Ethernet frame
+# needing more than 7 fixed 128-byte net_bufs was silently dropped -- ICMP
+# payloads of 56 and 868 B passed, 869/1000/1400/1472 B lost 100%, and any
+# TCP body segment was lost too (HTTP headers arrived over a 13737-byte JPEG
+# body that never did). Changing ONLY this default to 1536 made every one of
+# those ping sizes pass at 0% loss, and a TCP MJPEG stream then ran at
+# 17 fps, ~12.8 KB/frame. DWMAC_NB_TX_DESCS/DWMAC_NB_RX_DESCS were 16 (the
+# Kconfig.dwmac default) in both builds -- upstream's own help text for those
+# says "there must be enough descriptors to hold all fragments of a full-size
+# packet ... or the packet will be dropped" (Kconfig.dwmac), which is
+# consistent with SOME per-fragment limit mattering, but the bench's failure
+# point (>7 fragments at 128 B/fragment) is well under the 16-descriptor
+# ring capacity, so descriptor-count exhaustion alone does not explain it.
+# The upstream core's fragment handling, read (not bisected against
+# silicon): RX allocates exactly one CONFIG_NET_BUF_DATA_SIZE-sized fragment
+# per descriptor on refill (`RX_FRAG_SIZE CONFIG_NET_BUF_DATA_SIZE`,
+# `net_pkt_get_reserve_rx_data(RX_FRAG_SIZE, ...)` in
+# dwmac_rx_refill_thread(), eth_dwmac.c) and chains fragments across
+# descriptors via the RDES3_FD/RDES3_LD first/last-descriptor bits
+# (dwmac_receive()); TX consumes exactly one descriptor per net_buf fragment
+# of the outgoing packet (`k_sem_take(&p->free_tx_descs, ...)` once per loop
+# iteration in dwmac_send(), eth_dwmac.c) and aborts the whole packet
+# (-ENOMEM) if it runs out mid-frame. Neither of those, on their own,
+# accounts for a failure specifically above 7 fragments rather than above 16
+# -- the exact root cause, in the upstream dwmac chaining versus the
+# descriptor count, is NOT bisected here.
+config NET_BUF_DATA_SIZE
+	default 1536 if ETH_DWMAC_ALIF
+
 choice ETH_DWMAC_ALIF_RMII_REFCLK
 	prompt "Alif GMAC RMII 50 MHz reference-clock source"
 	depends on ETH_DWMAC_ALIF
