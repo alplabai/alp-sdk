@@ -1605,6 +1605,16 @@ if(CONFIG_UHC_XHCI_ALIF)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/usb/uhc)
 endif()
 
+# Ilitek ILI251x capacitive touch controller (compatible "ilitek,ili251x"),
+# ILI2511 on the Riverdi RVT121HVDFWCA0-B panel -- ADR-0017-ADJACENT, no
+# upstream/fork/HAL driver to consume, clean-room from protocol facts, see
+# zephyr/drivers/input/input_ili251x.c for the full STATUS block. Board-unique
+# carrier driver, not part of the portable <alp/*> surface. The report parser
+# lives in a sibling header (input_ili251x_report.h) so it is host-testable
+# without a devicetree-instantiated device -- see tests/unit/input_ili251x_report.
+zephyr_library_sources_ifdef(CONFIG_INPUT_ILI251X
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/input/input_ili251x.c)
+
 # Weak-RNG refusal for mbedTLS' PSA crypto core (issues #2173, #2192).
 # CONFIG_ALP_SDK_MBEDTLS_WEAK_RNG is y when this build compiles the PSA core
 # against a generator Zephyr itself documents as not random -- no entropy

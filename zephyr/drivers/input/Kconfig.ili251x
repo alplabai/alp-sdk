@@ -1,0 +1,43 @@
+# Ilitek ILI251x capacitive touch controller (ILI2511 on the Riverdi
+# RVT121HVDFWCA0-B panel). ADR-0017-ADJACENT: no upstream Zephyr, hal_alif,
+# or opt-in vendor-fork driver exists for this part -- see the STATUS block
+# in input_ili251x.c.
+#
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig INPUT_ILI251X
+	bool "Ilitek ILI251x capacitive touch controller"
+	default y
+	depends on DT_HAS_ILITEK_ILI251X_ENABLED
+	depends on INPUT
+	select I2C
+	select GPIO
+	select INPUT_TOUCH
+	help
+	  Enable the Ilitek ILI251x capacitive touch controller driver
+	  (compatible "ilitek,ili251x"; ILI2511 on the Riverdi
+	  RVT121HVDFWCA0-B 12.1" panel). Single-touch (contact 0) only.
+
+if INPUT_ILI251X
+
+config INPUT_ILI251X_INTERRUPT
+	bool "Interrupt mode"
+	help
+	  Use the int-gpios line to trigger a read instead of polling.
+	  Requires int-gpios in the devicetree node -- leave this off
+	  (the default) for polling mode, e.g. on a board where the
+	  touch INT pad is not routed to this core (the E1M-EVK's INT
+	  line lands on the CC3501E co-processor, not the Alif core, so
+	  it always runs in polling mode).
+
+config INPUT_ILI251X_PERIOD_MS
+	int "Poll period (ms)"
+	default 15
+	help
+	  Sample period in milliseconds. Used as the polling-mode period
+	  when INPUT_ILI251X_INTERRUPT is off, and as the re-poll period
+	  while a contact stays down when it is on (the controller does
+	  not re-interrupt for an unchanged, still-touching contact).
+
+endif # INPUT_ILI251X
