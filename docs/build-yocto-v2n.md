@@ -237,9 +237,10 @@ When off (the default) the build is unchanged. When on, the kernel deploys
   `meta-alp-sdk/recipes-bsp/u-boot/u-boot/gigadevice-xspi.cfg`
   (`CONFIG_SPI_FLASH_GIGADEVICE`); U-Boot's `sf probe` then detects it
   and reports the correct capacity (bench-proven). **Known
-  limit:** this U-Boot's Renesas xSPI driver fails reads/writes that
-  cross the 16 MiB boundary (bench-proven `Read: ERROR 1` at
-  `0xFFFF00+0x200`) — boot content must stay below 16 MiB.
+  limit:** this U-Boot's Renesas xSPI driver fails reads that cross the
+  16 MiB boundary (bench-observed `Read: ERROR 1` at `0xFFFF00+0x200`)
+  — boot content must stay below 16 MiB. Writes above 16 MiB are
+  untested.
 - Audio is currently **disabled** in the DT (no DA7212 on the carrier);
   it returns once the TAS2563 routing lands (see the integration doc,
   gap 3).
