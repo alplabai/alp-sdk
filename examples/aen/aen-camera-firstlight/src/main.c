@@ -2,33 +2,40 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-camera-firstlight -- first-light bench proof for the InnoMaker
- * CAM-OV9281 Raspberry-Pi-style MIPI CSI-2 camera module on the E1M-EVK's
- * J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8, M55-HE).
- * Every camera call below goes through the PORTABLE <alp/camera.h> API --
- * open / start / capture-with-timeout / release / stop / close.  Nothing
- * here talks to Zephyr's drivers/video/ class directly.
+ * aen-camera-firstlight -- first-light bench proof for Raspberry-Pi-style
+ * MIPI CSI-2 camera modules on the E1M-EVK's J5 connector, on an
+ * E1M-AEN801/AEN803 SoM (Alif Ensemble E8, M55-HE).  Every camera call
+ * below goes through the PORTABLE <alp/camera.h> API -- open / start /
+ * capture-with-timeout / release / stop / close -- exactly the same four
+ * calls whichever sensor shield is stacked underneath.  Nothing here talks
+ * to Zephyr's drivers/video/ class directly.
  *
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
- * GREY8 frames land in memory in all three of the driver's modes.  This app
- * still prints enough detail on every path (including a failed open() or a
- * capture TIMEOUT) that a bench engineer can tell which stage broke if the
- * sensor isn't seated or the shield stack is wrong.
+ * GREY8 frames land in memory in all three of the driver's modes.  The
+ * OV5647 path is bench-verified too (runs 52/61/62, issue #2248) -- see
+ * docs/camera-shields.md for the full write-up.  This app still prints
+ * enough detail on every path (including a failed open() or a capture
+ * TIMEOUT) that a bench engineer can tell which stage broke if the sensor
+ * isn't seated or the shield stack is wrong.
  *
- * Build (stack the sensor shield on top of the carrier connector shield,
- * `e1m_evk_rpi_csi`):
+ * Build one image per camera shield (stack the sensor shield on top of the
+ * carrier connector shield, `e1m_evk_rpi_csi`):
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
  *     examples/aen/aen-camera-firstlight -- \
- *     -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
+ *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
+ *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
  *
- * Which shield is stacked is a BUILD-TIME fact (the OV9281 driver's Kconfig
- * auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` -- see
- * zephyr/drivers/video/Kconfig.ov9281), so this app picks its capture
- * format the same way: a compile-time #if on that Kconfig symbol below, not
- * a runtime probe.
+ * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
+ * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
+ * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281), so this app
+ * picks its capture format the same way: a compile-time #if ladder on
+ * those same Kconfig symbols below, not a runtime probe.  A new shield is
+ * one more #elif here plus one more testcase.yaml scenario -- nothing else
+ * in this file changes.
  *
- * See README.md for what each printed line means and the expected result.
+ * See README.md for what each printed line means and the expected result
+ * per module.
  */
 
 #include <stdbool.h>
@@ -52,16 +59,29 @@
 #define CAM_HEIGHT          400
 #define CAM_BYTES_PER_PIXEL 1
 #define CAM_SHIELD_NAME     "innomaker_cam_ov9281 (OV9281, GREY8 640x400)"
+#elif defined(CONFIG_VIDEO_OV5647)
+/* OV5647: a Bayer RAW sensor advertising SBGGR8 and SBGGR10P at any
+ * 4-pixel-aligned size up to its full 2592x1944 resolution.  RAW10, not
+ * RAW8 (issue #2248, AUTHORIZED LOCAL DIVERGENCE #3): RAW8 (SBGGR8) is
+ * unverified.  640x480 is the sensor's own real full-array
+ * subsampled+binned mode -- see the vendored driver's file header and
+ * docs/camera-shields.md -- not a crop. */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           640
+#define CAM_HEIGHT          480
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)"
 #else
-#error \
-    "aen-camera-firstlight needs the innomaker_cam_ov9281 shield stacked on e1m_evk_rpi_csi -- see README.md"
+#error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif
 
-/* GREY8 is always 1 byte/pixel, no packing -- so a frame's row stride is
- * this caller-computable constant; no runtime pitch query needed, and none
- * exists in this API version (see alp_pixfmt_t's Doxygen in
- * <alp/peripheral.h> for why: the portable surface doesn't expose
- * negotiated format back to the caller yet). */
+/* ALP_PIXFMT_RAW10 is always delivered UNPACKED (one 16-bit little-endian
+ * sample per pixel, high 6 bits zero -- see alp_pixfmt_t's Doxygen in
+ * <alp/peripheral.h>), so a frame's row stride is this caller-computable
+ * constant for every sensor we request it from -- no runtime pitch query
+ * needed, and none exists in this API version (see the same Doxygen for
+ * why: the portable surface doesn't expose negotiated format back to the
+ * caller yet). GREY8 is always 1 byte/pixel, no packing to begin with. */
 #define CAM_PITCH (CAM_WIDTH * CAM_BYTES_PER_PIXEL)
 
 #define CAM_CAPTURE_TIMEOUT_MS 2000u
@@ -171,15 +191,25 @@ int main(void)
 		printk("[camfl]   CRC32 = 0x%08x\n", crc);
 
 		/* 16-bin histogram of the top 4 significant bits of each
-		 * sample.  GREY8 is one byte per pixel, so its top 4 bits
-		 * are bits 7..4 of the byte -- the histogram bins the
-		 * darkest (0) to brightest (15) quarter of the sensor's
-		 * dynamic range, a quick sanity check that the frame isn't
-		 * all-zero or all-saturated garbage. */
+		 * sample.  RAW10 is unpacked 16-bit little-endian with the
+		 * high 6 bits zero, so its 4 top SIGNIFICANT bits are bits
+		 * 9..6 of the 10-bit sample; GREY8 is one byte per pixel, so
+		 * its top 4 bits are bits 7..4 of the byte. Either way the
+		 * histogram bins the darkest (0) to brightest (15) quarter
+		 * of the sensor's dynamic range -- a quick sanity check that
+		 * the frame isn't all-zero or all-saturated garbage. */
 		uint32_t hist[16] = { 0 };
+#if CAM_BYTES_PER_PIXEL == 2
+		size_t n_samples = frame.size / 2u;
+		for (size_t i = 0; i < n_samples; ++i) {
+			uint16_t sample = (uint16_t)bytes[2u * i] | ((uint16_t)bytes[2u * i + 1u] << 8);
+			hist[(sample >> 6) & 0xFu]++;
+		}
+#else
 		for (size_t i = 0; i < frame.size; ++i) {
 			hist[(bytes[i] >> 4) & 0xFu]++;
 		}
+#endif
 		printk("[camfl]   histogram (bin:count), darkest..brightest quarter:\n");
 		for (int b = 0; b < 16; ++b) {
 			printk("[camfl]     [%2d] %u\n", b, hist[b]);

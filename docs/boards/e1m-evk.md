@@ -122,7 +122,7 @@ The TCAL9538 IO expander (U35) drives:
 | `LCD_PWR_EN`  | output        | Display 1V8 / 3V3 enable                            |
 | `LCD_RST`     | output        | Display panel reset                                 |
 | `CTP_RST`     | output        | Capacitive touch reset                              |
-| `CAM_EN`      | output        | Camera-module enable line, NOT the camera power rails. On the RPi connector (J5) it acts on pin 11 through an inverting open-drain stage: `0` (reset default) leaves pin 11 floating so the module self-enables on its own pull-up; `1` pulls pin 11 low and powers the module down. Leave it at `0` for RPi modules. |
+| `CAM_EN`      | output        | Camera-module enable line, NOT the camera power rails. On the RPi connector (J5), the `CAM_EN_#` net has exactly three nodes: J5 pin 11, `Q1` pin 3 (drain), and `D45` pin 2. `Q1` is a `BSS138PW,115` N-channel MOSFET with its gate on `CAM_EN` and its source on `0V`; `R2` is a 10k gate pull-down; `D45` is a `D5V0L1B2S9-7` bidirectional 5V TVS -- an ESD clamp, not a pull-up. Nothing on this EVK can source current into pin 11: `0` (reset default, R2 holds the gate low) leaves pin 11 floating; `1` turns `Q1` on and pulls pin 11 to `0V`. **Driving pin 11 HIGH from firmware is not reachable on this carrier.** Leave `CAM_EN` at `0` so a module with its own pull-up self-enables; a module with no pull-up of its own (e.g. the InnoMaker CAM-OV5647) needs the [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) below, and must still see `CAM_EN = 0` afterward. |
 | `S_42670.INT1`| input         | ICM-42670-P interrupt 1                             |
 | `S_42670.INT2`| input         | ICM-42670-P interrupt 2                             |
 | `S_42670.FSYNC`| input        | ICM-42670-P FSYNC                                   |
@@ -130,6 +130,39 @@ The TCAL9538 IO expander (U35) drives:
 
 The expander itself signals back via `IO_EXP.INT` (interrupt out)
 and is reset via `IO_EXP.RST`.  Both are routed to the module.
+
+### J5 pin 11 pull-up rework {#j5-pin-11-pull-up-rework}
+
+Bench-proven 2026-09-22 on an E1M-AEN803 (serial 2026W36-0001) on an
+E1M-EVK (hw_rev 2626-r2). Some RPi-style camera modules carry their
+own pull-up on pin 11 and self-enable as soon as `CAM_EN` leaves it
+floating; others do not, and stay in power-down with pin 11 floating.
+Because nothing on this EVK can drive pin 11 high (see the `CAM_EN`
+row above), a module without its own pull-up needs one fitted
+externally, from J5 pin 11 to J5 pin 15 (`+3V3`).
+
+Measured effect on the InnoMaker CAM-OV5647, which has no pull-up of
+its own: before the rework, a full `0x08`..`0x77` sweep of the camera
+I2C bus found zero devices and `alp_camera_open` returned
+`ALP_ERR_IO`. With the pull-up fitted, the sensor answers at `0x36`
+with chip ID `0x5647` (registers `0x300a`/`0x300b` read `56 47`), and
+the board's draw rises from 0.065-0.067 A to 0.074-0.080 A at 16.0 V.
+The InnoMaker CAM-OV9281 self-enables and needs no rework.
+
+Two cautions:
+
+- **Size the pull-up against the module's own pull-down.** Measure
+  pin 11 to GND with the board off and the cable seated. Size the
+  added resistor to roughly a quarter of that measured value -- a 10k
+  pull-up against a 10k pull-down divides to 1.65 V, below VIH, and
+  looks like a failed rework rather than a wrong ratio.
+- **Use a resistor, never a bare wire to `+3V3`.** With pin 11
+  hard-tied, any firmware that asserts `CAM_EN` turns `Q1` on and
+  shorts `+3V3` to ground through it.
+
+`CAM_EN` must stay `0` after the rework too: asserting it powers the
+module back down -- bench-confirmed, the I2C sweep went from 1
+responder to 0 and back with `CAM_EN`.
 
 ## User interface
 
@@ -188,7 +221,10 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   = SoC I2C1, SCL `P3_7` / SDA `P7_2`), level-shifted to 3.3 V on the
   carrier and shared with the DSI connector's touch controller.  Pin
   11 (module enable) is driven by `CAM_EN` (see the expander table
-  above): keep `CAM_EN = 0` so the module self-enables.
+  above): keep `CAM_EN = 0` so a module with its own pull-up
+  self-enables. A module with no pull-up of its own needs the
+  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above fitted
+  first, and must still see `CAM_EN = 0` afterward.
 
   > **A P/N-crossing adapter is required on E1M-AEN hw_rev r2 (2626-R2).**
   > The E1M-AEN SoM's camera connector wiring swaps the P and N wires of all
@@ -206,10 +242,14 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
-  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281:
+  Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
+  or the RPi Camera Module 1 (OV5647) -- both bench-verified, see below:
 
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
+      # ... or:
+      west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
 
   `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
   D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
@@ -238,22 +278,27 @@ and is reset via `IO_EXP.RST`.  Both are routed to the module.
   The E8's CPI also needs `CONFIG_VIDEO_ALIF_CAM_EXTENDED=y` (default on for
   `SOC_SERIES_E8`) to set `CAM_CFG.AXI_PORT_EN`: without it the CPI still
   raises STOP per frame but never writes one to memory, so a capture
-  reports success over an untouched buffer instead of failing. The CSI-2
-  pixel clock ceiling this board's D-PHY divider programs is 200 MHz
-  (400 MHz source / 2); the divider is programmed by the Alif clock-control
-  patch in `zephyr/patches.yml`, so the workspace must be patched
-  (`scripts/bootstrap.sh` does it).
+  reports success over an untouched buffer instead of failing. RAW10
+  sensors (e.g. OV5647) are delivered to memory as unpacked 16-bit samples
+  (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2), not the packed wire format.
+  The CSI-2 pixel clock ceiling this board's D-PHY divider programs is
+  200 MHz (400 MHz source / 2); the divider is programmed by the Alif
+  clock-control patch in `zephyr/patches.yml`, so the workspace must be
+  patched (`scripts/bootstrap.sh` does it).
 
   [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
-  is the bench first-light app for this connector: it opens the
-  InnoMaker CAM-OV9281 shield through `<alp/camera.h>`, starts the
+  is the bench first-light app for this connector: it opens the OV9281 or
+  the OV5647 shield through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
-  otherwise. See its README for what each printed line means. The shield
-  is bench-verified (2026-09-21, an E1M-AEN803 on the E1M-EVK): live
-  GREY8 frames land in memory in all three modes (640x400, 1280x720,
+  otherwise. See its README for what each printed line means. Both shields
+  are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK):
+  live GREY8 frames land in memory in all three modes (640x400, 1280x720,
   1280x800), each at its configured frame rate, with the sensor test
-  pattern also verified in all three.
+  pattern also verified in all three; OV5647 (2026-09-22, needing the
+  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
+  640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
+  OV5647 driver section.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK

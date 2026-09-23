@@ -710,7 +710,9 @@ endif # I2S_DW
 # see the per-driver provenance headers); the former ALP_VIDEO_ALIF_BROKEN gate
 # is RETIRED and the driver TUs build in directly when their DT node is enabled.
 # The J5 innomaker_cam_ov9281 shield is bench-verified (live GREY8 capture,
-# an E1M-AEN803 on the E1M-EVK, 2026-09-21).  vendor-ext.
+# an E1M-AEN803 on the E1M-EVK, 2026-09-21).  The J5
+# raspberry_pi_camera_module_1 (OV5647) shield is bench-verified too (live
+# RAW10 capture, 2026-09-22, issue #2248).  vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ALIF_CAM
 	bool "Alif Ensemble CPI camera-capture controller (ADR 0017 Tier-2 INTERIM)"

@@ -6,9 +6,22 @@
 # holds sensors reached via a generic 15-pin camera shield on top of
 # whichever CSI-2 host the board provides.
 
-# Kconfig.ov9281 only adds DT_HAS_..._ENABLED-gated leaf options -- it does not
-# declare its own `depends on VIDEO`. Wrap here instead of hand-editing it.
+# Kconfig.ov5647 and Kconfig.ov9281 only add DT_HAS_..._ENABLED-gated leaf
+# options -- neither declares its own `depends on VIDEO` (Kconfig.ov5647
+# doesn't because upstream's own drivers/video/Kconfig wraps the whole
+# sensor list in `if VIDEO`, which our rsource is outside of). Wrap here
+# instead of hand-editing the vendored file.
 if VIDEO
+
+# ADR 0017 Tier-1 (upstream-PENDING backport of zephyrproject-rtos/zephyr#119301
+# "drivers: video: add a driver for the OmniVision OV5647" @
+# d81b1f630ee0f5078de6e3a47e7bc1b3613424c2), INTERIM. Vendored VERBATIM
+# (Apache-2.0) because it is not yet in the pinned Zephyr v4.4.1 base. Delete
+# this rsource line + zephyr/drivers/video/{ov5647.c,Kconfig.ov5647} + the
+# ovti,ov5647.yaml binding the moment the Zephyr pin advances past a revision
+# containing that PR -- see zephyr/drivers/video/ov5647.c and
+# docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
+rsource "../drivers/video/Kconfig.ov5647"
 
 # ADR 0017 Tier-1.5 (port of the Apache-2.0 Espressif esp-video-components
 # esp_cam_sensor/sensors/ov9281 driver onto the upstream v4.4 video API),
