@@ -134,8 +134,8 @@ arrives over the in-system OTA path above.  Direct SWD flashing exists
 for one customer case only: **recovering a bricked bridge**, with Alp
 Lab-supplied binaries.
 
-The four V2N / V2M SoM presets state exactly that, but as **two** keys,
-not three -- `flash_method` and `flash_args` are absent from all four
+The six V2N / V2M SoM presets state exactly that, but as **two** keys,
+not three -- `flash_method` and `flash_args` are absent from all six
 entries, on purpose:
 
 ```yaml

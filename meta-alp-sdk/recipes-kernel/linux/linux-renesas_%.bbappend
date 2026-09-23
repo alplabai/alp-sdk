@@ -152,7 +152,7 @@ ALP_DRPAI_LAYER[vardepvalue] = "${ALP_DRPAI_LAYER}"
 # an opt-in feature.
 #
 # So require an explicit ALP_ENABLE_DRPAI too, defaulting to 0.  It is
-# DECLARED in all four V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
+# DECLARED in all six V2N/V2M machine confs (`ALP_ENABLE_DRPAI ?= "0"`)
 # next to ALP_ENABLE_DEEPX_DXM1, so a builder reading the conf for their
 # MACHINE finds it -- the `??=` here is only the fallback for a consumer
 # that uses this bbappend without one of those confs.  Turning the SDK backend on

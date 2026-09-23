@@ -11,7 +11,7 @@ deep-link of whatever you're doing.
 | SKU            | Memory                                | Status     |
 |----------------|---------------------------------------|------------|
 | `E1M-V2N101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC        | production |
-| `E1M-V2N102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC        | production |
+| `E1M-V2N102`   | 64 Gbit LPDDR4X + 128 Gbit eMMC       | production |
 | `E1M-V2N103`   | 32 Gbit LPDDR4X + 128 Gbit eMMC       | production |
 
 All three SKUs share the same silicon + PCB.  Pick by memory budget.
