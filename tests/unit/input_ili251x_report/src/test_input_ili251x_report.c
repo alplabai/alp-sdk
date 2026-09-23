@@ -43,8 +43,7 @@ ZTEST(input_ili251x_report, test_contact0_touching_x_masked_to_14_bits)
 	ili251x_parse_contact0(buf, sizeof(buf), &report);
 
 	zassert_true(report.pressed, "bit15 set must decode to pressed");
-	zassert_equal(report.x, 0x3FFF, "X must be masked to the low 14 bits, got 0x%04x",
-		      report.x);
+	zassert_equal(report.x, 0x3FFF, "X must be masked to the low 14 bits, got 0x%04x", report.x);
 }
 
 /* Big-endian decoding: X/Y/pressure at known offsets, values chosen so a
@@ -73,8 +72,8 @@ ZTEST(input_ili251x_report, test_be_decoding)
  */
 ZTEST(input_ili251x_report, test_short_buffer_is_zeroed)
 {
-	uint8_t buf[3] = {0, 0xFF, 0xFF};
-	struct ili251x_touch_report report = {.x = 1, .y = 1, .pressure = 1, .pressed = true};
+	uint8_t                     buf[3] = { 0, 0xFF, 0xFF };
+	struct ili251x_touch_report report = { .x = 1, .y = 1, .pressure = 1, .pressed = true };
 
 	ili251x_parse_contact0(buf, sizeof(buf), &report);
 
