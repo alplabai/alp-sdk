@@ -1,0 +1,67 @@
+# Copyright (c) 2026 Alp Lab AB
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything the Riverdi RVT121HVDFWCA0-B (via a TI SN65DSI83 DSI-to-LVDS
+# adapter) display chain needs on an E1M-AEN SoM, so an app only adds the
+# shield: the DSI host + D-PHY, the SN65DSI83 bridge driver, and the
+# carrier's I2C GPIO expander that carries the bridge's EN pin.  Unlike
+# e1m_evk_rk055hdmipi4ma0, DISPLAY_CDC200 is what actually renders here (the
+# bridge is init-only, no display API of its own) and there is no panel
+# driver or fixed regulator -- the bridge's EN sequencing IS the panel-power
+# sequencing (see display_sn65dsi83.c's header comment for why the regulator
+# pattern the RK055 shield uses cannot be reused here).
+#
+# The app must set CONFIG_ALP_SDK=y, as every alp-sdk AEN app does: the Alif
+# CDC200 / DesignWare DSI / D-PHY drivers are alp-sdk ADR 0017 Tier-2 copies
+# whose symbols are defined under `if ALP_SDK`.  The shield does not default
+# ALP_SDK itself -- turning the SDK on is the app's decision.
+
+if SHIELD_E1M_EVK_RVT121HVDFWCA0
+
+config DISPLAY
+	default y
+
+config MIPI_DSI
+	default y
+
+config I2C
+	default y
+
+config GPIO
+	default y
+
+config GPIO_PCA_SERIES
+	default y
+
+# The overlay's touch-reset hog (P3, unbound touch controller, out of scope
+# for this shield) needs the expander up first, same ordering constraint as
+# e1m_evk_rk055hdmipi4ma0's RESX hog:
+#
+#   GPIO_PCA_SERIES_INIT_PRIORITY (50, = I2C_INIT_PRIORITY)  the expander exists
+#   ---> GPIO_HOGS_INIT_PRIORITY (60)                        touch-reset driven low
+#
+# Upstream's default of 41 is below the expander, so gpio_hogs_init() would find
+# the port not ready, log an error and configure nothing.
+config GPIO_HOGS_INIT_PRIORITY
+	default 60
+
+if ALP_SDK
+
+config MIPI_DPHY
+	default y
+
+config MIPI_DPHY_DW
+	default y
+
+config MIPI_DSI_DW
+	default y
+
+config DISPLAY_CDC200
+	default y
+
+config SN65DSI83
+	default y
+
+endif # ALP_SDK
+
+endif # SHIELD_E1M_EVK_RVT121HVDFWCA0

@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression for the Alif Ensemble E8 MIPI-DSI-plus-SN65DSI83-bridge
+# LVDS display chain (cdc200 -> mipi_dsi -> the shared D-PHY -> the
+# maintainer-built adapter's TI SN65DSI83 bridge -> the Riverdi
+# RVT121HVDFWCA0-B panel) on the E1M-AEN801 and E1M-AEN803 (Ensemble E8,
+# M55-HE), through the e1m_evk_rvt121hvdfwca0 shield.
+#
+# Compile-checks the driver chain + DT nodes on the real E8 board target;
+# filtered OUT of the native_sim PR gate (platform_allow = the AEN801/AEN803
+# M55-HE board targets).
+
+sample:
+  name: aen-lvds-display
+  description: |
+    Bench RAM-run LVDS display-chain proof for the E1M-AEN801/803 (Alif
+    Ensemble E8, Cortex-M55-HE): drives the Riverdi RVT121HVDFWCA0-B panel
+    through cdc200 -> mipi_dsi -> the shared D-PHY -> a TI SN65DSI83
+    DSI-to-LVDS bridge on a maintainer-built adapter PCB, with the L1
+    framebuffer pinned in global SRAM0.
+
+tests:
+  alp_sdk.examples.aen.lvds_display.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - display
+      - dsi
+      - lvds
+      - video
+    build_only: true   # the pixels-on-glass proof is a bench flash, not a CI run.

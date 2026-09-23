@@ -837,6 +837,38 @@ config MIPI_DSI_DW
 	  sdk-alif fork once the dsi node is repointed AND bench-verified.  Task #21.
 	  Driver: zephyr/drivers/mipi_dsi/dsi_dw.c.
 
+config SN65DSI83
+	bool "TI SN65DSI83 DSI-to-LVDS bridge (ADR-0017-ADJACENT, BENCH-UNVERIFIED)"
+	default y
+	depends on MIPI_DSI_DW
+	depends on DT_HAS_TI_SN65DSI83_ENABLED
+	select I2C
+	help
+	  TI SN65DSI83 single-channel MIPI DSI receiver to single-link FlatLink
+	  LVDS bridge (datasheet SLLSEC1) -- a maintainer-built adapter-PCB bridge
+	  chip that lets an E1M-EVK DSI connector drive a native-LVDS panel (the
+	  Riverdi RVT121HVDFWCA0-B).  Authored clean-room from the public TI
+	  datasheet: no upstream Zephyr driver, no hal_alif library, and no
+	  sdk-alif fork driver exists for this part class.
+
+	  ADR-0017-ADJACENT (authored from spec, not consumed from a vendor SDK).
+	  BENCH-UNVERIFIED: no adapter-PCB hardware was on hand for this change.
+	  Driver: zephyr/drivers/display/display_sn65dsi83.c.
+
+config SN65DSI83_TEST_PATTERN
+	bool "SN65DSI83: force the built-in LVDS test-pattern generator"
+	depends on SN65DSI83
+	default n
+	help
+	  Sets CHA_TEST_PATTERN (CSR 0x3C.4): the bridge drives its own internal
+	  colour-bar test pattern onto LVDS instead of forwarding DSI video, using
+	  the same timing registers the driver already programs from the panel's
+	  DT timings.  For bench isolation of the PLL + LVDS link + panel from the
+	  DSI video path -- if the panel shows the pattern with this on but stays
+	  dark with it off, the fault is upstream of the bridge (CDC200/DSI/D-PHY),
+	  not the bridge-to-panel link.  No DSI data is received while the pattern
+	  generator runs (datasheet Section 7.4.5).
+
 config VIDEO_MIPI_CSI2_DW
 	bool "DesignWare MIPI CSI-2 host bridge for Alif (ADR 0017 Tier-2 INTERIM, BENCH-UNVERIFIED)"
 	default y

@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * aen-lvds-display overlay for the E1M-AEN803 (Ensemble E8, M55-HE) RAM-run.
+ *
+ * The display chain, the SN65DSI83 bridge, the carrier expander and the
+ * framebuffer region all come from the e1m_evk_rvt121hvdfwca0 shield
+ * (CMakeLists.txt).  This overlay only retargets the image for the bench
+ * RAM-run: ROM to ITCM (path-reference form &itcm; the phandle-array form
+ * makes FLASH_SIZE=0 and overflows the link), with no MCUboot code
+ * partition.  The 1280x800 RGB565 framebuffer is not in ITCM -- it is the
+ * shield's region at the top of SRAM0, used by address, so it adds nothing
+ * to the RAM-run .bin.
+ */
+
+/ {
+	chosen {
+		zephyr,flash = &itcm;
+		/delete-property/ zephyr,code-partition;
+	};
+};

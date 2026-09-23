@@ -345,6 +345,23 @@ responder to 0 and back with `CAM_EN`.
   (roughly 1 in 8-10 boots, #2199, no recovery once it happens).  The
   capacitive-touch controller sits on `EVK_I2C_BUS_DSI_CSI`
   (`ALP_E1M_I2C1`) and is not driven yet.
+- **Display (alternative, LVDS panel via bridge adapter):** the same
+  40-pin DSI connector (J6) can instead drive a **Riverdi
+  RVT121HVDFWCA0-B** 12.1" 1280x800 native-LVDS panel through a
+  maintainer-built adapter PCB carrying a **TI SN65DSI83** MIPI DSI-to-
+  FlatLink(LVDS) bridge (I2C `0x2c`).  With an E1M-AEN SoM, add the
+  `e1m_evk_rvt121hvdfwca0` Zephyr shield (`zephyr/boards/shields/`) --
+  see `examples/aen/aen-lvds-display`, which renders at ~30.06 Hz (2 DSI
+  data lanes, RGB666 packed, 36.363636 MHz pixel clock -- deliberately
+  under the panel's own ~66.3 MHz native-60 Hz minimum for this
+  bring-up; see the shield overlay's header comment for the clock math
+  and a fallback ladder).  BENCH-UNVERIFIED end to end: no adapter-PCB
+  hardware was available for this change, and every GPIO-expander role
+  the shield assumes (bridge EN, the unbound touch controller's reset)
+  is carried over from the RK055 shield's role map and marked
+  UNVERIFIED in the overlay.  The panel's own **ILI2511** capacitive-
+  touch controller (I2C `0x41`, same `EVK_I2C_BUS_DSI_CSI` bus as
+  above) is out of scope for this shield and not driven.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.
