@@ -1,20 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build-only regression for the Alif ISP-Pico (Verisilicon ISP Nano "Pico",
-# zephyr/drivers/video/isp_pico.c, "vsi,isp-pico") staging on the E1M-AEN801
-# (Ensemble E8, M55-HE).  Build-only proof: runtime stays bench-blocked
-# (no camera sensor wired this hardware batch).
+# Build-only regression (in CI) for the Alif ISP-Pico (Verisilicon ISP Nano
+# "Pico", zephyr/drivers/video/isp_pico.c, "vsi,isp-pico") on the
+# E1M-AEN801/AEN803 (Ensemble E8, M55-HE).  CI only compile-checks the
+# driver + DT node -- there is no silicon in the runner -- but this image is
+# a real bench capture on the actual hardware: the board overlays enable the
+# ISP's Test-Pattern Generator (no camera sensor is wired on this hardware
+# batch; the TPG needs none), and src/main.c drives one real frame through
+# the ISP's MI DMA.
 #
-# Compile-checks the driver + DT node on the real E8 board target; filtered OUT
-# of the native_sim PR gate (platform_allow = the AEN801 + AEN803 HE boards).
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 +
+# AEN803 HE boards).
 
 sample:
   name: aen-isp-regcheck
   description: |
-    Bench RAM-run ISP-Pico (vsi,isp-pico) build proof for the E1M-AEN801/803
+    Bench RAM-run ISP-Pico (vsi,isp-pico) TPG capture for the E1M-AEN801/803
     (Alif Ensemble E8, Cortex-M55-HE): compiles + links isp_pico.c against
-    hal_alif's vendored ISP headers.  Runtime bench-blocked (no camera
-    sensor wired).
+    hal_alif's vendored ISP headers, and on real hardware streams one
+    TPG-sourced frame through the ISP's MI DMA (IRQ 368) to a CRC32'd SRAM0
+    buffer.  CI only proves the build; no camera sensor is wired.
 
 tests:
   alp_sdk.examples.aen.isp_regcheck.aen:

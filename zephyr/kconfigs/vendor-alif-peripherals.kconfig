@@ -922,14 +922,15 @@ config VIDEO_ARX3A0
 # The header itself was never published by hal_alif -- closed by vendoring
 # isp-vsi.h + its isp_ctrl_params.h dependency VERBATIM (Apache-2.0) from
 # alifsemi/zephyr_alif @ v2.3.0 into zephyr/include/zephyr/drivers/video/.  The
-# wrapper does not export isp_vsi_set_param / isp_vsi_get_param, but the v4.4
-# port dropped their only callers, so that is not a compile blocker.
-# COMPILE + LINK now PROVEN (examples/aen/aen-isp-regcheck,
-# CONFIG_VIDEO_ISP_VSI=y, links against libisp_gcc.a).  Stays default n /
-# OPT-IN here: RUNTIME is still BENCH-BLOCKED -- no camera sensor is wired on
-# this hardware batch, so the m2m capture graph never runs; enabling it is a
-# build-only proof until a sensor is available.
-# vendor-ext, BENCH-BLOCKED (runtime only).
+# wrapper DOES export isp_vsi_set_param / isp_vsi_get_param
+# (isp_api_wrapper.c:880, :1242); the v4.4 port just dropped their only
+# callers porting the ctrl API, so there is no compile blocker either way.
+# COMPILE + LINK + RUNTIME now PROVEN on real silicon
+# (examples/aen/aen-isp-ov5647-capture, CONFIG_VIDEO_ISP_VSI=y, a real
+# OV5647 sensor through the full camera->csi->isp->memory graph with
+# AE/AWB running). Stays default n / OPT-IN here regardless -- links the
+# proprietary Vivante blob.
+# vendor-ext.
 # ---------------------------------------------------------------------------
 config VIDEO_ISP_VSI
 	bool "Alif Ensemble ISP-Pico (Verisilicon, ADR 0017 Tier-2 INTERIM, OPT-IN)"
@@ -945,10 +946,10 @@ config VIDEO_ISP_VSI
 
 	  OPT-IN, default n.  Compiles + links against hal_alif v2.3.0 (isp-vsi.h +
 	  isp_ctrl_params.h vendored VERBATIM from zephyr_alif v2.3.0 into
-	  zephyr/include/zephyr/drivers/video/) -- proven by
-	  examples/aen/aen-isp-regcheck.  RUNTIME stays BENCH-BLOCKED: no camera
-	  sensor is wired on this hardware batch, so the m2m capture graph never
-	  runs.
+	  zephyr/include/zephyr/drivers/video/) and runs end to end on real
+	  silicon (examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor
+	  through the full camera->csi->isp->memory graph, AE/AWB via the
+	  standard Zephyr video ctrl registry).
 	  Driver: zephyr/drivers/video/isp_pico.c.
 
 config VIDEO_ISP_VSI_INIT_PRIORITY
@@ -957,6 +958,138 @@ config VIDEO_ISP_VSI_INIT_PRIORITY
 	depends on VIDEO_ISP_VSI
 	help
 	  System initialization priority for the Alif ISP-Pico driver.
+
+config VIDEO_ISP_VSI_FRAME_STATS
+	bool "ISP-Pico frame-end diagnostic counter"
+	default n
+	depends on VIDEO_ISP_VSI
+	help
+	  Compiles in isp_mi_frame_end_count, a global volatile counter of
+	  MI_INTR_MP_FRAME_END events (i.e. the ISP's own "frame complete"
+	  interrupt actually firing, not just any interrupt bit) -- readable
+	  by a bench app via `extern`, or by a debugger directly over SWD
+	  post-mortem, independent of whatever the app's own dequeue loop
+	  believes happened. Off by default: debug-only bench instrumentation,
+	  not something every build of this driver needs.
+
+config VIDEO_ISP_VSI_CALIB_OV5647
+	bool "ISP-Pico AWB/CCM calibration: use OV5647's own tables, not ARX3A0's"
+	default y if VIDEO_OV5647
+	depends on VIDEO_ISP_VSI
+	help
+	  hal_alif's isp_param_conf.h compiles in ONE static AWB/CCM calibration
+	  blob per build (.wb.autoAttr.calibParam's centLine/rgMin/rgMax/
+	  wpRange0/wpRange1/illuminant[] gains, and .ccm.autoAttr.illuminantCCM[]),
+	  loaded once by patch 0007's SetCalib guard. Alif's stock table (kept as
+	  the #else arm, patch 0008) is ARX3A0's -- a different sensor's silicon
+	  than the OV5647 this branch runs, and bench run 140 (E1M-AEN803, AE+AWB
+	  running after 1c3d8ccc9) showed the mismatch as a strong magenta cast on
+	  a ceiling-white target (RGB mean [195, 109, 247], AWB converging to
+	  rGain 0x19e bGain 0x26a). Selecting this symbol switches
+	  isp_param_conf.h's #if/#else to an OV5647-derived calibration instead.
+
+	  Source data (manufacturer-side tuning, BSD-2-Clause): Raspberry Pi
+	  libcamera's src/ipa/rpi/vc4/data/ov5647.json
+	  (github.com/raspberrypi/libcamera). This library works in
+	  white-balance GAIN space (gain = 1/(R/G), 1/(B/G)), so every
+	  wbGain/centLine/wpRange value is the RPi ct_curve's (R/G, B/G) ratios
+	  inverted, not a direct transcription -- cross-checked against
+	  ARX3A0's own internal relation (rgParam*gR + bgParam*gB =
+	  distParam*1e6, verified holding for its A/D50/D65 illuminant gains)
+	  before applying the same derivation to OV5647's. illuminantCCM is the
+	  RPi CCMs interpolated by colour temperature onto this struct's
+	  fixed-point scale (128 = 1.0, rows sum to 128). See patch 0008's own
+	  comment for the wpRange dist-width caveat (a starting heuristic, not
+	  a direct derivation like the rest of the table).
+
+	  default y whenever CONFIG_VIDEO_OV5647 (the sensor driver this
+	  calibration matches) is enabled -- ARX3A0's table is never the right
+	  default on a board running this sensor.
+
+config VIDEO_ISP_VSI_AE_TARGET
+	int "ISP-Pico AE target luminance [0, 255]"
+	default 90
+	depends on VIDEO_ISP_VSI
+	help
+	  isp_apply_ae()'s struct isp_ae_param.ae_target (isp_pico.c) AND
+	  hal_alif's own sensor_attributes.h reference table's .aeTarget both
+	  read this ONE Kconfig value (Zephyr's Kconfig namespace is global,
+	  so a hal_alif-side compiled patch can read a symbol declared here
+	  without any extra plumbing) -- kept as a single source of truth so
+	  the two never drift the way isp_pico.c's own ae_target=50 literal
+	  and sensor_attributes.h's separate .aeTarget=50 literal did before
+	  this Kconfig existed.
+
+	  UPDATED (bench run 85): the library's meanLum statistic is an 8-bit
+	  mean scaled by 1000 (VSI_ISP_EXPM_STATIC_BLOCK_NUM blocks averaged,
+	  library INFO log), and ae_target is compared on that SAME 8-bit
+	  scale internally -- 20 and 50 (runs 81/83/84's diagnostic values)
+	  are both below the bench's ACTUAL black level of ~16 (run 85:
+	  meanLum=16000, i.e. mean8=16), so AE was correctly satisfied at the
+	  sensor's exposure/gain floor -- "AE never stabilises" in those runs
+	  was AE doing exactly what it was told, not a bug.
+
+	  UPDATED (bench run 140, daylight): meanLum tracks ae_target * 1000
+	  fairly linearly -- target 80 -> lib meanLum 82120, frame Y mean 122,
+	  0% clipped; target 120 -> meanLum ~123000, Y mean 145; target 255
+	  (this symbol's OLD default) saturated the frame (Y mean 230-233,
+	  clipped highlights). 90 sits just above the 80 data point -- close to
+	  a Y mean of ~130, comfortably mid-range and unclipped -- and replaces
+	  255 as the default: asking AE to drive for the scale's brightest
+	  reachable point was correct back when meanLum read near-zero (run 85,
+	  before the AEM/WBM window fix made it a real measurement); with a
+	  working measurement it just saturates the frame.
+
+config VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	bool "ISP-Pico: force manual WB gains instead of AWB's calib value"
+	default n
+	depends on VIDEO_ISP_VSI
+	help
+	  Diagnostic-only escape hatch: when set, isp_apply_wb() (isp_pico.c)
+	  forces ISP_OP_MANUAL and writes the four VIDEO_ISP_VSI_WB_GAIN_*
+	  values below via isp_vsi_set_param() instead of round-tripping
+	  whatever gain isp_vsi_update_cfg()'s SetCalib() last loaded. Run 84:
+	  used to prove the downstream colour pipeline (CCM/gamma/output)
+	  works correctly once WB gains are right, independent of whether AWB
+	  itself has converged -- NOT a production auto-white-balance
+	  replacement, and NOT sensor-agnostic (the correct gains are a
+	  lighting-condition fact, not a driver fact); off by default.
+
+config VIDEO_ISP_VSI_WB_GAIN_R
+	int "Manual WB red channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.r_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is set.
+	  Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_GR
+	int "Manual WB green-in-red-lines channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.gr_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is
+	  set. Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_GB
+	int "Manual WB green-in-blue-lines channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.gb_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is
+	  set. Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
+
+config VIDEO_ISP_VSI_WB_GAIN_B
+	int "Manual WB blue channel gain (256 = 1.0x)"
+	default 256
+	range 256 1023
+	depends on VIDEO_ISP_VSI_WB_MANUAL_GAIN
+	help
+	  struct isp_wb_param.b_gain when VIDEO_ISP_VSI_WB_MANUAL_GAIN is set.
+	  Range per vsi_comm_awb.h's ISP_WB_GAIN_S ("Range [256, 1023]").
 
 # ---------------------------------------------------------------------------
 # Alif Ensemble VeriSilicon Hantro VC9000E JPEG hardware encoder (compatible

@@ -140,11 +140,10 @@ config ALP_SDK_CAMERA_ALIF_ISP
 	  the requested config).
 
 	  OPT-IN, default n -- it depends on CONFIG_VIDEO_ISP_VSI, which
-	  links the hal_alif libisp Vivante blob.  See the FLAGGED hal_alif
-	  version mismatch under VIDEO_ISP_VSI: the vendored 2026 isp_pico.c
-	  needs a newer hal_alif wrapper than the locally vendored 2025 one,
-	  so the ISP driver FAILS TO COMPILE against the local wrapper -- it
-	  never reaches the linker.  Bump the hal_alif wrapper before enabling.
+	  links the hal_alif libisp Vivante blob.  COMPILES + LINKS + RUNS
+	  clean against the pinned hal_alif v2.3.0 wrapper on real silicon
+	  (examples/aen/aen-isp-ov5647-capture) -- the former hal_alif
+	  version mismatch is resolved.
 
 config ALP_SDK_DISPLAY_ZEPHYR_DRV
 	bool "Compile the real Zephyr display driver-class backend"
