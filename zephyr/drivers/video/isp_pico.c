@@ -643,6 +643,23 @@ int isp_set_fmt(const struct device *dev,
 			return ret;
 		}
 
+		/*
+		 * isp_apply_mrsz() divides by (height - 1) to scale 4:2:0
+		 * chroma; find_format() above ignores height_step (ISP_VIDEO_
+		 * FORMAT_CAP sets .height_step = 4), so it lets a height < 4
+		 * or odd height through: height 1 traps DIV_0_TRP, height 2
+		 * gives a degenerate SCALE_VC=0, and an odd height gives a
+		 * non-integer 2:1 chroma downscale. Reject here, at the
+		 * fail-fast point this switch already uses for output-format
+		 * errors.
+		 */
+		if ((fmt->pixelformat == VIDEO_PIX_FMT_YUV420 || fmt->pixelformat == VIDEO_PIX_FMT_NV12 ||
+		     fmt->pixelformat == VIDEO_PIX_FMT_NV21) &&
+		    (fmt->height < 4 || (fmt->height % 2) != 0)) {
+			LOG_ERR("4:2:0 output height %u must be even and >= 4!", fmt->height);
+			return -EINVAL;
+		}
+
 		channel->output_fmt = *fmt;
 		break;
 	default:
@@ -1371,6 +1388,52 @@ static unsigned int bayer_sample_depth(uint32_t fourcc)
  * survives a `west update` and stays submittable upstream.
  */
 
+/*
+ * The ISP core always produces 4:2:2 chroma internally; for a 4:2:0 MI
+ * output (YUV420/NV12/NV21) the main resizer must downscale chroma
+ * vertically 2:1, or the MI writes a full-height chroma plane into a
+ * half-height buffer and wraps ("Main picture Cb/Cr address wrap"),
+ * losing/misplacing colour on real scenes. Neither the closed VSI lib nor
+ * this wrapper ever programs MRSZ (bench runs 186/187) -- do it directly.
+ */
+static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint16_t out_height)
+{
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	bool      is_420 = pixelformat == VIDEO_PIX_FMT_YUV420 || pixelformat == VIDEO_PIX_FMT_NV12 ||
+	                   pixelformat == VIDEO_PIX_FMT_NV21;
+
+	/*
+	 * Defensive: (in_h - 1) divides SCALE_VC below, so a height < 4 must
+	 * bypass here instead of a DIV_0_TRP UsageFault. Only heights below 4
+	 * are bypassed; odd 4:2:0 heights are rejected earlier by
+	 * isp_set_fmt(), which is the real gate -- this is belt-and-braces.
+	 */
+	if (!is_420 || out_height < 4) {
+		/*
+		 * Bypass, and clear any 4:2:0 config a previous stream left
+		 * armed -- FORMAT_CONV_CTRL takes effect immediately (it is
+		 * not shadowed by CFG_UPD), so a stale 0x4 (4:2:0) from a
+		 * prior stream must be cleared here too, not just SCALE_VC/
+		 * PHASE_VC.
+		 */
+		sys_write32(0, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+		sys_write32(0, regs + ISP_MRSZ_SCALE_VC);
+		sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
+		sys_write32(MRSZ_CTRL_CFG_UPD, regs + ISP_MRSZ_CTRL);
+		return;
+	}
+
+	uint32_t in_h = out_height;
+	uint32_t out_h = out_height / 2;
+	uint32_t scale_vc = ((out_h - 1) * 65536U) / (in_h - 1);
+
+	sys_write32(scale_vc, regs + ISP_MRSZ_SCALE_VC);
+	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
+	sys_write32(MRSZ_FORMAT_CONV_CTRL_FORMAT_420, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+	sys_write32(MRSZ_CTRL_SCALE_VC_ENABLE | MRSZ_CTRL_CFG_UPD | MRSZ_CTRL_AUTO_UPD,
+		    regs + ISP_MRSZ_CTRL);
+}
+
 static int isp_stream_start(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
@@ -1379,6 +1442,7 @@ static int isp_stream_start(const struct device *dev)
 	struct video_buffer *vbuf;
 	struct video_buffer vbuf2;
 
+	struct channel_parameters *channel = &data->init_cfg.channel;
 	struct port_parameters *port = &data->init_cfg.port;
 	uint32_t tmp;
 	int ret;
@@ -1505,6 +1569,22 @@ static int isp_stream_start(const struct device *dev)
 		err = ret;
 		goto dequeue_buf;
 	}
+
+	/*
+	 * Placement: after isp_vsi_start() (above), before the camera path's
+	 * video_stream_start(config->controller) (below). FORMAT_CONV_CTRL is
+	 * not CFG_UPD-shadowed, so this write takes effect the instant it
+	 * lands -- safe here on the camera path because no pixel data flows
+	 * until video_stream_start(config->controller), which runs after
+	 * this call. Do not move this below video_stream_start().
+	 *
+	 * In TPG mode (config->controller == NULL) the TPG is the ISP's own
+	 * internal pattern source, so it may already be producing frames
+	 * right after isp_vsi_start() returns -- this write can then land
+	 * mid-frame. TPG colour output is tracked separately (#2256); no fix
+	 * here.
+	 */
+	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
 
 	/*
 	 * Runs for any ctrl the app changed (isp_set_ctrl()), plus AE once at

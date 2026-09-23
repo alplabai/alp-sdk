@@ -246,6 +246,18 @@
 #define ACQ_PROP_PIN_MAPPING_MASK	GENMASK(2, 0)
 #define ACQ_PROP_PIN_MAPPING_SHIFT	17
 
+/*
+ * Main resizer (MRSZ) -- neither VSI_MPI_ISP_SetScaleAttr() nor the vendored
+ * isp_api_wrapper.c ever program these (bench runs 186/187); see
+ * isp_apply_mrsz() in isp_pico.c. HWRM AHRM0012 v0.3 SS 17.3.4.3.164
+ * (ISP_MRSZ_CTRL), SS 17.3.4.3.186 (ISP_MRSZ_FORMAT_CONV_CTRL).
+ */
+#define MRSZ_CTRL_SCALE_VC_ENABLE		BIT(3)
+#define MRSZ_CTRL_CFG_UPD			BIT(8)
+#define MRSZ_CTRL_AUTO_UPD			BIT(9)
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT	2
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_420	(1 << MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT)
+
 /* ISP Interrupts */
 #define INTR_EXP_END	BIT(18)
 #define INTR_H_START	BIT(7)
