@@ -131,7 +131,7 @@ The TCAL9538 IO expander (U35) drives:
 The expander itself signals back via `IO_EXP.INT` (interrupt out)
 and is reset via `IO_EXP.RST`.  Both are routed to the module.
 
-### J5 pin 11 pull-up rework
+### J5 pin 11 pull-up rework {#j5-pin-11-pull-up-rework}
 
 Bench-proven 2026-09-22 on an E1M-AEN803 (serial 2026W36-0001) on an
 E1M-EVK (hw_rev 2626-r2). Some RPi-style camera modules carry their
