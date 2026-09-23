@@ -162,25 +162,6 @@
 		ngpios = <8>;
 		status = "okay";
 
-		/*
-		 * Touch is OUT OF SCOPE for this shield (the ILI2511 controller at
-		 * I2C1 0x41 is never bound -- see the &i2c1 comment below).  Hold
-		 * its reset asserted rather than leaving it floating for the same
-		 * reason e1m_evk_rk055hdmipi4ma0 hogs its panel RESX low before
-		 * power: an unconfigured expander pin defaults to a
-		 * high-impedance INPUT (gpio_pca_series_init() only restores POR
-		 * state), which lets carrier termination pull an unbound reset
-		 * line to whatever level it settles at.  UNVERIFIED: P3 -> CTP_RST
-		 * on the real adapter.  Follow-up: bind an actual touch driver
-		 * and release this hog (#TODO -- open a tracking issue when the
-		 * adapter's touch wiring is confirmed on the bench).
-		 */
-		touch_reset_hog: touch-reset-hog {
-			gpio-hog;
-			gpios = <3 GPIO_ACTIVE_HIGH>;
-			output-low;
-			line-name = "ctp-rst";
-		};
 	};
 };
 
@@ -217,10 +198,9 @@
 /*
  * The panel-side I2C: the SN65DSI83 bridge (on the adapter PCB) and, per the
  * maintainer, the panel's own ILI2511 capacitive-touch controller (I2C 0x41)
- * share this bus.  Touch is OUT OF SCOPE for this shield -- no touch driver
- * is bound here (#TODO follow-up once the adapter's touch wiring is
- * confirmed), matching e1m_evk_rk055hdmipi4ma0's own GT911 precedent (that
- * shield also only brings the bus up, binds no touch device).  See that
+ * share this bus.  touch@41 below is POLLED: J6's CTP_INT lands on a
+ * CC3501E-owned pad (E1M AH8), so the Alif core has no touch interrupt.
+ * See that
  * shield's overlay for the full pinout/route derivation (J6 pin 26/27 ->
  * level translator -> E1M pads AH17/AG17 -> Alif P7_2/P3_7); it is a carrier
  * fact independent of which panel is fitted, so it is repeated verbatim
@@ -257,6 +237,20 @@
 		pixel-format = <MIPI_DSI_PIXFMT_RGB666_PACKED>;
 		/* UNVERIFIED: P0 on lcd_exp -- see that node's comment above. */
 		enable-gpios = <&lcd_exp 0 GPIO_ACTIVE_HIGH>;
+		status = "okay";
+	};
+
+	/*
+	 * ILI2511 touch (Riverdi J1 pin 22 RESET, active low).  UNVERIFIED --
+	 * adapter mapping assumed: CTP_RST on lcd_exp P3 (EVK_IOEXP_CTP_RST).
+	 * No int-gpios: the driver polls (CONFIG_INPUT_ILI251X_PERIOD_MS).
+	 */
+	touch: touch@41 {
+		compatible = "ilitek,ili251x";
+		reg = <0x41>;
+		reset-gpios = <&lcd_exp 3 GPIO_ACTIVE_LOW>;
+		screen-width = <1280>;
+		screen-height = <800>;
 		status = "okay";
 	};
 };

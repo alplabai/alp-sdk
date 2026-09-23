@@ -25,13 +25,13 @@ deliberately under the panel's own ~66.3 MHz native-60 Hz minimum for
 this bring-up — see the shield overlay's header comment for the full
 clock-rate derivation and a fallback ladder to 40 MHz or plan-B RGB888).
 Every GPIO-expander role the shield assumes (the bridge's EN pin, the
-unbound touch controller's reset) is carried over from the RK055
+touch controller's reset) is carried over from the RK055
 shield's role map with no adapter schematic to confirm it against, and
 is marked UNVERIFIED in the overlay accordingly. The panel's own
-ILI2511 capacitive-touch controller (I2C `0x41`, same bus) is out of
-scope for this change and not driven — the shield only brings the bus
-up, matching the RK055 shield's own precedent for its GT911 touch
-controller.
+ILI2511 capacitive-touch controller (I2C `0x41`, same bus) is bound
+through a new clean-room `ilitek,ili251x` Zephyr input driver
+(`zephyr/drivers/input/input_ili251x.c`), polled because the carrier
+routes the touch INT line to a CC3501E-owned pad.
 
 New example `examples/aen/aen-lvds-display` renders colour bars through
 the chain and reads the bridge's own link-error register (CSR `0xE5`)

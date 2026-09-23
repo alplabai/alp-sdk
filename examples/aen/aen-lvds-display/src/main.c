@@ -84,6 +84,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/drivers/display/sn65dsi83.h>
+#include <zephyr/input/input.h>
 #include <zephyr/sys/printk.h>
 
 /* The display device (the cdc200 pixel pump) is the chosen render target. */
@@ -91,6 +92,7 @@
 #define DSI_NODE     DT_NODELABEL(mipi_dsi)
 #define BRIDGE_NODE  DT_NODELABEL(bridge)
 #define EXP_NODE     DT_NODELABEL(lcd_exp)
+#define TOUCH_NODE   DT_NODELABEL(touch)
 
 /* Panel geometry (must match the shield's cdc200 node). */
 #define PANEL_W 1280
@@ -132,6 +134,41 @@ static void fill_row_bar(enum bar_colour colour)
 		row_buf[i * 2U + 1U] = (uint8_t)(rgb565[colour] >> 8U);
 	}
 }
+
+/*
+ * Touch: the ILI2511 input driver polls the controller and emits Zephyr input
+ * events (INPUT_ABS_X/Y + INPUT_BTN_TOUCH).  An app never reads the
+ * controller itself -- it registers a callback on the touch device and gets
+ * one event per axis, with `sync` set on the last event of a report.  So
+ * collect X and Y, and print once per report.  Touch the glass on the bench
+ * and watch 'ram_console_buf' for "touch:" lines.
+ */
+static void on_touch(struct input_event *evt, void *user_data)
+{
+	static uint16_t x;
+	static uint16_t y;
+	static bool     down;
+
+	ARG_UNUSED(user_data);
+
+	switch (evt->code) {
+	case INPUT_ABS_X:
+		x = (uint16_t)evt->value;
+		break;
+	case INPUT_ABS_Y:
+		y = (uint16_t)evt->value;
+		break;
+	case INPUT_BTN_TOUCH:
+		down = (evt->value != 0);
+		break;
+	default:
+		break;
+	}
+	if (evt->sync) {
+		printk("touch: %s x=%u y=%u\n", down ? "down" : "up  ", x, y);
+	}
+}
+INPUT_CALLBACK_DEFINE(DEVICE_DT_GET(TOUCH_NODE), on_touch, NULL);
 
 static bool dev_ready(const char *name, const struct device *dev)
 {
@@ -252,6 +289,10 @@ int main(void)
 		                                       "IRQ/error table for the bit meaning"
 		                                     : "");
 	}
+
+	/* Touch is reported, not gated: a dead touch controller must not hide a
+	 * working display (the RK055 bring-up used a silent touch as the tell). */
+	(void)dev_ready("touch", DEVICE_DT_GET(TOUCH_NODE));
 
 	/* Confirm the driver's reported capabilities match the panel. */
 	if (disp_ok) {

@@ -357,11 +357,12 @@ responder to 0 and back with `CAM_EN`.
   bring-up; see the shield overlay's header comment for the clock math
   and a fallback ladder).  BENCH-UNVERIFIED end to end: no adapter-PCB
   hardware was available for this change, and every GPIO-expander role
-  the shield assumes (bridge EN, the unbound touch controller's reset)
+  the shield assumes (bridge EN, the touch controller's reset)
   is carried over from the RK055 shield's role map and marked
   UNVERIFIED in the overlay.  The panel's own **ILI2511** capacitive-
   touch controller (I2C `0x41`, same `EVK_I2C_BUS_DSI_CSI` bus as
-  above) is out of scope for this shield and not driven.
+  above) is bound by the shield (`ilitek,ili251x` Zephyr input driver)
+  and POLLED: the carrier's touch INT lands on a CC3501E-owned pad.
 - **Rotary encoder phase pads:** `ENC0_X` (A) and `ENC0_Y` (B) for
   the PEC11R-4215K-S0024 quadrature signals.  The push-switch
   (SW) is on E1M `IO4` -- `EVK_PIN_ENCODER_SW`.

@@ -33,17 +33,10 @@ config GPIO
 config GPIO_PCA_SERIES
 	default y
 
-# The overlay's touch-reset hog (P3, unbound touch controller, out of scope
-# for this shield) needs the expander up first, same ordering constraint as
-# e1m_evk_rk055hdmipi4ma0's RESX hog:
-#
-#   GPIO_PCA_SERIES_INIT_PRIORITY (50, = I2C_INIT_PRIORITY)  the expander exists
-#   ---> GPIO_HOGS_INIT_PRIORITY (60)                        touch-reset driven low
-#
-# Upstream's default of 41 is below the expander, so gpio_hogs_init() would find
-# the port not ready, log an error and configure nothing.
-config GPIO_HOGS_INIT_PRIORITY
-	default 60
+# The panel's ILI2511 touch controller (touch@41 on &i2c1).  Polled: the
+# carrier routes the touch INT line to a CC3501E-owned pad, not to the Alif.
+config INPUT
+	default y
 
 if ALP_SDK
 
