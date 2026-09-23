@@ -18,6 +18,13 @@ extern "C" {
 #define VIDEO_CID_ALIF_CSI_DPHY_FREQ         (VIDEO_CID_PRIVATE_BASE + 0)
 #define VIDEO_CID_ALIF_CSI_CURR_CAM          (VIDEO_CID_PRIVATE_BASE + 1)
 #define VIDEO_CID_JPEG_INPUT_BUFFER          (VIDEO_CID_JPEG_CLASS_BASE + 4)
+/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
+ * has ENC_ENABLE (SWREG5 bit 0) asserted, 0 once it has cleared. Added for
+ * the bounded post-timeout quiesce poll in
+ * src/backends/jpeg/alif_hantro.c's hantro_encode() -- see
+ * jpeg_hantro_vc9000e_get_volatile_ctrl() in jpeg_hantro_vc9000e.c.
+ */
+#define VIDEO_CID_JPEG_ENC_BUSY               (VIDEO_CID_JPEG_CLASS_BASE + 5)
 
 /* ISP aggregate parameter controls — value is a pointer to struct isp_params
  * (defined in isp_ctrl_params.h).  Set valid_mask to the ISP_PARAM_MASK_*
