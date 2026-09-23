@@ -12,8 +12,9 @@ deep-link of whatever you're doing.
 |----------------|---------------------------------------|------------|
 | `E1M-V2N101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC        | production |
 | `E1M-V2N102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC        | production |
+| `E1M-V2N103`   | 32 Gbit LPDDR4X + 128 Gbit eMMC       | production |
 
-Both SKUs share the same silicon + PCB.  Pick by memory budget.
+All three SKUs share the same silicon + PCB.  Pick by memory budget.
 
 ## What's on the module
 
@@ -37,7 +38,7 @@ Both SKUs share the same silicon + PCB.  Pick by memory budget.
 
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
-Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2}.yaml`](../../metadata/e1m_modules/).
+Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
 
 ## Reach the GD32 supervisor
 

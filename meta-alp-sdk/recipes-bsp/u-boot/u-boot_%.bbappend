@@ -91,6 +91,7 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # (KERNEL_DEVICETREE), not a family one.
 SRC_URI:append:e1m-v2m101-a55 = " file://fdtfile-v2m.cfg"
 SRC_URI:append:e1m-v2m102-a55 = " file://fdtfile-v2m.cfg"
+SRC_URI:append:e1m-v2m103-a55 = " file://fdtfile-v2m.cfg"
 
 # Build U-Boot with the rzv2n-dev config, not the machine's stock rzv2n-evk.
 # The DEEPX bring-up patched above lives in board/renesas/rzv2n-dev/rzv2n-dev.c,

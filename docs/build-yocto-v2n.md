@@ -1,7 +1,7 @@
 # Building & deploying the V2N Linux image (Yocto)
 
 How a customer builds and deploys the **kernel + root filesystem** for
-the E1M-V2N101 / E1M-V2N102 SoM on the E1M-X-EVK (or a pin-compatible
+the E1M-V2N101 / E1M-V2N102 / E1M-V2N103 SoM on the E1M-X-EVK (or a pin-compatible
 custom carrier).  The build itself is the `bitbake-layers` flow in
 [`../meta-alp-sdk/README.md`](../meta-alp-sdk/README.md); this page adds
 the V2N-specific BSP, deploy, and on-board verification detail.
@@ -37,7 +37,8 @@ from the extracted BSP, not a public clone.
 
 ```bash
 MACHINE=e1m-v2n101-a55 bitbake alp-image-edge
-# (V2N102: MACHINE=e1m-v2n102-a55;  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55)
+# (V2N102: MACHINE=e1m-v2n102-a55;  V2N103: e1m-v2n103-a55;
+#  V2N-M1: e1m-v2m101-a55 / e1m-v2m102-a55 / e1m-v2m103-a55)
 ```
 
 Output (under `build/tmp/deploy/images/e1m-v2n101-a55/`):

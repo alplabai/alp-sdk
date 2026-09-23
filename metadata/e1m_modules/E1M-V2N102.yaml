@@ -70,7 +70,7 @@ on_module:
 
 memory:
   dram_mbit:            65536                  # 64 Gbit LPDDR4X
-  flash_mbit:           65536                  # 64 Gbit eMMC 5.1
+  flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
   preferred_backend:    drpai

@@ -972,7 +972,7 @@
         ],
         "path": "examples/connectivity/iot-connected-camera",
         "som": "E1M-V2N101",
-        "summary": "Connected-camera reference application for the **E1M EVK** populated with an **E1M-V2N101 / E1M-V2N102** SoM (Renesas RZ/V2N)."
+        "summary": "Connected-camera reference application for the **E1M EVK** populated with an **E1M-V2N101 / E1M-V2N102 / E1M-V2N103** SoM (Renesas RZ/V2N)."
       },
       {
         "board": "e1m-evk",
@@ -4689,6 +4689,66 @@
         "emmc_dma": true,
         "neon": true
       },
+      "family": "renesas-rzv2n-deepx",
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2M103",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": false,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": true,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": false,
+        "rtc": true,
+        "sd1": true,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a55_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-v2m103-a55",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m33_sm": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_v2m103_m33_sm",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
+      "capabilities": {
+        "drp_ai": true,
+        "emmc_dma": true,
+        "neon": true
+      },
       "family": "renesas-rzv2n",
       "silicon": "renesas:rzv2n:n44",
       "sku": "E1M-V2N101",
@@ -4789,6 +4849,66 @@
         "m33_sm": {
           "app": "alp-stock-shim",
           "board": "alp_e1m_v2n102_m33_sm",
+          "os": "zephyr",
+          "toolchain": "arm-zephyr-eabi"
+        }
+      }
+    },
+    {
+      "boot": {
+        "allowed_swap_algorithms": [
+          "scratch",
+          "move",
+          "overwrite"
+        ],
+        "default_swap_algorithm": "scratch",
+        "single_slot": false
+      },
+      "capabilities": {
+        "drp_ai": true,
+        "emmc_dma": true,
+        "neon": true
+      },
+      "family": "renesas-rzv2n",
+      "silicon": "renesas:rzv2n:n44",
+      "sku": "E1M-V2N103",
+      "soc_part": "R9A09G056N44GBG",
+      "soc_peripherals": {
+        "adc": true,
+        "can": true,
+        "dac": false,
+        "ethernet": true,
+        "i2c": true,
+        "i2s": true,
+        "i3c": true,
+        "mipi_csi": true,
+        "mipi_dsi": true,
+        "npu": true,
+        "pcie": true,
+        "pdm": true,
+        "pwm": false,
+        "quadrature_encoder": false,
+        "rtc": true,
+        "sd1": true,
+        "sdio_emmc": true,
+        "spi": true,
+        "timer": true,
+        "uart": true,
+        "usb": true,
+        "watchdog": true,
+        "wifi_sdio": true,
+        "xspi_ospi": true
+      },
+      "topology": {
+        "a55_cluster": {
+          "app": "alp-image-edge",
+          "machine": "e1m-v2n103-a55",
+          "os": "yocto",
+          "toolchain": "poky-glibc"
+        },
+        "m33_sm": {
+          "app": "alp-stock-shim",
+          "board": "alp_e1m_v2n103_m33_sm",
           "os": "zephyr",
           "toolchain": "arm-zephyr-eabi"
         }

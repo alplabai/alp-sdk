@@ -1,13 +1,18 @@
-# Stock preset for E1M-V2M102 (V2N-M1 + DEEPX, larger memory).
+# Stock preset for E1M-V2M103 (4 GB RAM / 16 GB eMMC memory tier of
+# the V2M101 PCB -- V2N-M1 with DEEPX DX-M1).
+#
+# Lists the chip drivers, I2C device addresses, memory capacity,
+# and default board for this SKU; `scripts/alp_project.py` and
+# the alp-studio pin allocator read it at build time.
 
 schema_version: 1
 
-sku: E1M-V2M102
+sku: E1M-V2M103
 family: renesas-rzv2n-deepx
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
-display_name: "E1M-V2M102 (Renesas RZ/V2N + DEEPX DX-M1, larger memory)"
+display_name: "E1M-V2M103 (Renesas RZ/V2N + DEEPX DX-M1, 4 GB / 16 GB)"
 
 on_module:
   silicon:              renesas:rzv2n:n44
@@ -32,8 +37,8 @@ on_module:
   nor_flash_driver_status: none
   emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
   emmc_driver_status:      none
-  npu:                  deepx_dxm1
-  pcie_mux:             pi3dbs12212
+  npu:                  deepx_dxm1                # V2N-M1 delta
+  pcie_mux:             pi3dbs12212                # V2N-M1 delta (two instances)
 
   i2c_devices:
     brd_i2c:
@@ -75,11 +80,11 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
-  dram_mbit:            65536                  # 64 Gbit LPDDR4X
+  dram_mbit:            32768                  # 32 Gbit LPDDR4X
   flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
-  preferred_backend:    deepx_dxm1
+  preferred_backend:    deepx_dxm1             # DX-M1 NPU on-module
 
 capabilities:
   deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
@@ -93,11 +98,16 @@ capabilities:
 topology:
   a55_cluster:
     app: alp-image-edge
-    machine: e1m-v2m102-a55           # Yocto MACHINE
+    machine: e1m-v2m103-a55           # Yocto MACHINE
     toolchain: poky-glibc
   m33_sm:
     app: alp-stock-shim
-    board: alp_e1m_v2m102_m33_sm      # Zephyr board target
+    # Bare (unqualified) board target: no zephyr/boards/alp/ tree has
+    # been generated for this SKU yet -- a qualified <board>/<soc>/<cpucluster>
+    # target requires the tree to exist (#720). V2M103 is a memory-tier
+    # BOM variant of the shipped V2M101 PCB; its own board bring-up has
+    # not happened yet, same state as V2N102/V2M102.
+    board: alp_e1m_v2m103_m33_sm      # Zephyr board target
     toolchain: arm-zephyr-eabi
     # Headless M33 system-manager (A55 owns the debug UART); see #686.
     hw_console: false

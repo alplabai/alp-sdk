@@ -1,16 +1,21 @@
-# Stock preset for E1M-V2M102 (V2N-M1 + DEEPX, larger memory).
+# Stock preset for E1M-V2N103 (4 GB RAM / 16 GB eMMC memory tier of
+# the V2N101 PCB -- the SoM, not the board).
+#
+# Lists the chip drivers, I2C device addresses, memory capacity,
+# and default board for this SKU; `scripts/alp_project.py` and
+# the alp-studio pin allocator read it at build time.
 
 schema_version: 1
 
-sku: E1M-V2M102
-family: renesas-rzv2n-deepx
+sku: E1M-V2N103
+family: renesas-rzv2n
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
-display_name: "E1M-V2M102 (Renesas RZ/V2N + DEEPX DX-M1, larger memory)"
+display_name: "E1M-V2N103 (Renesas RZ/V2N, 4 GB / 16 GB)"
 
 on_module:
-  silicon:              renesas:rzv2n:n44
+  silicon:              renesas:rzv2n:n44      # quad Cortex-A55 + Cortex-M33 + DRP-AI3
   pmic_main:            act8760
   pmic_secondary:       da9292
   clock_generator:      clk_5l35023b
@@ -32,8 +37,6 @@ on_module:
   nor_flash_driver_status: none
   emmc:                    sd0                 # on-module via Renesas SD0; no alp-sdk driver yet
   emmc_driver_status:      none
-  npu:                  deepx_dxm1
-  pcie_mux:             pi3dbs12212
 
   i2c_devices:
     brd_i2c:
@@ -41,23 +44,15 @@ on_module:
       devices:
         - { chip: rv3028c7,         role: rtc,                       address_7bit: "0x52" }
         - { chip: optiga_trust_m,   role: secure_element,            address_7bit: "0x30" }
+        # 0x48 = ADD0 strapped to GND (chip default) per metadata/chips/tmp112.yaml;
+        # 0x40 was outside the physically possible 0x48..0x4B strap range.
+        # Bench verification on real silicon still pending.
         - { chip: tmp112,           role: temp_sensor,               address_7bit: "0x48" }
         - { chip: clk_5l35023b,     role: clock_generator,           address_7bit: "0x68" }
         - { chip: gd32g553,         role: supervisor_mcu_i2c_slave,  address_7bit: "0x70" }
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
-        # Address UNRESOLVED (#1163, #1845).  The chip-default 0x48 collides
-        # with the on-module tmp112 on this bus.  The unknown is recorded HERE,
-        # on the DEEPX buck, because that part is V2M-only: E1M-V2N101/102
-        # declare the same tmp112 at 0x48 on the same bus, and all four SKUs
-        # share one PCB, so the tmp112 ADD0 strap is a single physical net --
-        # blanking it on the V2M pair alone would make the tree answer the same
-        # hardware question two different ways.  Which part is re-strapped on
-        # the real V2M schematic, and to what, is not known here: do not guess.
-        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "TBD" }
-        - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
-        - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }
         - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }
     e1m_i2c0:
       bus_master: renesas-rzv2n
@@ -75,16 +70,15 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
-  dram_mbit:            65536                  # 64 Gbit LPDDR4X
+  dram_mbit:            32768                  # 32 Gbit LPDDR4X
   flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
-  preferred_backend:    deepx_dxm1
+  preferred_backend:    drpai                  # DRP-AI3 on-die
 
 capabilities:
-  deepx_dxm1:           true       # DEEPX DX-M1 NPU on-module via PCIe.
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
-  optiga_trust_m:       true
+  optiga_trust_m:       true       # Populated on the V2N SoM.
   quadspi_dma:          true       # GD32-side QuadSPI accessible via bridge.
   tmu_cordic:           true       # GD32 bridge TMU CORDIC.
   tmu_fft:              true       # GD32 bridge TMU FFT.
@@ -93,11 +87,16 @@ capabilities:
 topology:
   a55_cluster:
     app: alp-image-edge
-    machine: e1m-v2m102-a55           # Yocto MACHINE
+    machine: e1m-v2n103-a55           # Yocto MACHINE
     toolchain: poky-glibc
   m33_sm:
     app: alp-stock-shim
-    board: alp_e1m_v2m102_m33_sm      # Zephyr board target
+    # Bare (unqualified) board target: no zephyr/boards/alp/ tree has
+    # been generated for this SKU yet -- a qualified <board>/<soc>/<cpucluster>
+    # target requires the tree to exist (#720). V2N103 is a memory-tier
+    # BOM variant of the shipped V2N101 PCB; its own board bring-up has
+    # not happened yet, same state as V2N102/V2M102.
+    board: alp_e1m_v2n103_m33_sm      # Zephyr board target
     toolchain: arm-zephyr-eabi
     # Headless M33 system-manager (A55 owns the debug UART); see #686.
     hw_console: false
@@ -263,6 +262,18 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO34, dispatch: gd32_bridge, dispatch_pin: PD8  }
   - { e1m: E1M_X_GPIO_IO35, dispatch: gd32_bridge, dispatch_pin: PD1  }
 
+# On-module helper MCUs whose firmware images the orchestrator
+# registers into the system manifest for Alp Lab's factory/production
+# flash flow -- NOT the customer's routine one.  gd32_bridge below is
+# programmed by Alp Lab at the factory; customers get the bridge's
+# command-frame API (SPI + I2C, docs/gd32-bridge.md) for normal
+# operation and update_channel: alp_ota_spi_bridge for field updates.
+# Local reflashing is recovery_only -- an out-of-tan SWD procedure with
+# Alp Lab-supplied binaries, for a bricked device only (see
+# docs/gd32-bridge.md's "Who flashes it, and when" section), not a
+# routine customer flash path.
+# These are NOT heterogeneous-compute peers (they don't appear in
+# `topology:`); they're independently-flashed supervisor MCUs.
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553
