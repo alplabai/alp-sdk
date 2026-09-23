@@ -12,31 +12,27 @@
  *
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
- * IMX219 and IMX296 paths have not yet run on real silicon (no module
- * seated).  The OV5647 path is bench-verified too (runs 52/61/62, issue
- * #2248) -- see docs/camera-shields.md for the full write-up.  This
- * app still prints enough detail on every path (including a failed open()
- * or a capture TIMEOUT) that a bench engineer can tell which stage broke if
- * the sensor isn't seated or the shield stack is wrong.
+ * OV5647 path is bench-verified too (runs 52/61/62, issue #2248) -- see
+ * docs/camera-shields.md for the full write-up.  This app still prints
+ * enough detail on every path (including a failed open() or a capture
+ * TIMEOUT) that a bench engineer can tell which stage broke if the sensor
+ * isn't seated or the shield stack is wrong.
  *
  * Build one image per camera shield (stack the sensor shield on top of the
  * carrier connector shield, `e1m_evk_rpi_csi`):
  *
  *   west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he \
  *     examples/aen/aen-camera-firstlight -- \
- *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"   # IMX219, RAW10
- *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
+ *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
- *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
  *
  * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
  * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
- * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 / Kconfig.imx296
- * and upstream Zephyr's Kconfig.imx219), so this app picks its capture
- * format the same way: a compile-time #if ladder on those same four Kconfig
- * symbols below, not a runtime probe.  A new shield is one more #elif here
- * plus one more testcase.yaml scenario -- nothing else in this file
- * changes.
+ * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281), so this app
+ * picks its capture format the same way: a compile-time #if ladder on
+ * those same Kconfig symbols below, not a runtime probe.  A new shield is
+ * one more #elif here plus one more testcase.yaml scenario -- nothing else
+ * in this file changes.
  *
  * See README.md for what each printed line means and the expected result
  * per module.
@@ -63,39 +59,18 @@
 #define CAM_HEIGHT          400
 #define CAM_BYTES_PER_PIXEL 1
 #define CAM_SHIELD_NAME     "innomaker_cam_ov9281 (OV9281, GREY8 640x400)"
-#elif defined(CONFIG_VIDEO_IMX219) || defined(CONFIG_VIDEO_OV5647)
-/* IMX219 / OV5647: both are Bayer RAW sensors advertising SBGGR8 and
- * SBGGR10P at any 4-pixel-aligned size up to their full resolution.  RAW10,
- * not RAW8: the CSI-2 pixel-clock ceiling this board's D-PHY divider
- * programs is 200 MHz (see docs/boards/e1m-evk.md), and IMX219's fixed
- * 456 MHz 2-lane link needs RAW10's 182.4 Mpixel/s -- RAW8 would need
- * 228 Mpixel/s and video_set_format() refuses it with -ERANGE by design.
- * 640x480 means something DIFFERENT per sensor: for IMX219 it is still a
- * small centred crop of the full array, chosen to keep the frame small for
- * a quick bench capture, not a hardware limit.  For OV5647 (issue #2248,
- * AUTHORIZED LOCAL DIVERGENCE #3) 640x480 is the sensor's own real
- * full-array subsampled+binned mode -- see the vendored driver's file
- * header and docs/camera-shields.md -- not a crop at all. */
+#elif defined(CONFIG_VIDEO_OV5647)
+/* OV5647: a Bayer RAW sensor advertising SBGGR8 and SBGGR10P at any
+ * 4-pixel-aligned size up to its full 2592x1944 resolution.  RAW10, not
+ * RAW8 (issue #2248, AUTHORIZED LOCAL DIVERGENCE #3): RAW8 (SBGGR8) is
+ * unverified.  640x480 is the sensor's own real full-array
+ * subsampled+binned mode -- see the vendored driver's file header and
+ * docs/camera-shields.md -- not a crop. */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
 #define CAM_WIDTH           640
 #define CAM_HEIGHT          480
 #define CAM_BYTES_PER_PIXEL 2
-#define CAM_SHIELD_NAME \
-	(IS_ENABLED(CONFIG_VIDEO_IMX219) ? "raspberry_pi_camera_module_2 (IMX219, RAW10 640x480)" \
-	                                 : "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)")
-#elif defined(CONFIG_VIDEO_IMX296)
-/* RPi Global Shutter Camera (IMX296LQR-C): one fixed all-pixel mode, so no
- * crop -- 1456x1088 RAW10 over a single CSI-2 lane.  That is what the sensor
- * transmits: the datasheet's 1440x1080 "recording" area plus the 8-column /
- * 4-row colour-processing margin on every side, which is sent, not cropped.
- * Unpacked that is 1456 x 1088 x 2 = 3,168,256 bytes, so this example's
- * Kconfig drops the backend to ONE frame buffer and grows the SRAM0 pool to
- * fit it. */
-#define CAM_FORMAT          ALP_PIXFMT_RAW10
-#define CAM_WIDTH           1456
-#define CAM_HEIGHT          1088
-#define CAM_BYTES_PER_PIXEL 2
-#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1456x1088)"
+#define CAM_SHIELD_NAME     "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif

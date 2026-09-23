@@ -9,8 +9,6 @@
  * "zephyr,i2c-emul-controller" -- see boards/native/native_sim/native_sim.dts), where
  * ov9281_emul.c's EMUL_DT_INST_DEFINE(ovti_ov9281) and ov5647_emul.c's
  * EMUL_DT_INST_DEFINE(ovti_ov5647) answer them at runtime -- see ov9281_test.c / ov5647_test.c.
- * IMX296 has no emulator and stays build-only, on the driverless `test_i2c` ("vnd,i2c") bus
- * below, which exists only to make it compile.
  */
 
 / {
@@ -24,39 +22,6 @@
 		compatible = "fixed-clock";
 		clock-frequency = <24000000>;
 		#clock-cells = <0>;
-	};
-
-	imx296_input_clock: imx296-input-clock {
-		compatible = "fixed-clock";
-		clock-frequency = <54000000>;
-		#clock-cells = <0>;
-	};
-
-	test {
-		#address-cells = <1>;
-		#size-cells = <1>;
-
-		test_i2c: i2c@10002000 {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			compatible = "vnd,i2c";
-			reg = <0x10002000 0x1000>;
-			status = "okay";
-			clock-frequency = <100000>;
-
-			test_i2c_imx296: imx296@1a {
-				compatible = "sony,imx296";
-				reg = <0x1a>;
-				clocks = <&imx296_input_clock>;
-
-				port {
-					test_imx296_ep: endpoint {
-						remote-endpoint-label = "";
-						data-lanes = <1>;
-					};
-				};
-			};
-		};
 	};
 };
 

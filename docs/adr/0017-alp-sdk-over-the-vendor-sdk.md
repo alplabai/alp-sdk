@@ -325,8 +325,8 @@ rather than the silicon vendor (Alif), which Tier-1.5's own rationale ("no
 upstream + a ready register-level implementation exists to wrap") already
 tolerates in spirit. It is **not** `ADR-0017-ADJACENT`: that label is
 reserved for a driver authored fresh from a datasheet with nothing to
-consume (e.g. `hwsem_alif.c`, and `imx296.c` above it in this same batch) —
-ov9281.c is the opposite case, an asset genuinely consumed from elsewhere.
+consume (e.g. `hwsem_alif.c`) — ov9281.c is the opposite case, an asset
+genuinely consumed from elsewhere.
 
 Retirement for this shape follows Tier-1.5's own rule, not the
 upstream-PENDING one above: it stays interim indefinitely (no fork to retire

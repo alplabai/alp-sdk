@@ -122,8 +122,8 @@ config ALP_SDK_CAMERA_ZEPHYR_VIDEO_VBUF_COUNT
 	  buffer pool, so keep VBUF_COUNT x ALIGN-padded frame size <=
 	  CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE.
 	  Drop to 1 for full-frame sensors whose single frame already
-	  fills most of the pool (e.g. the IMX296's 1456x1088 RAW10 frame
-	  is 3,168,256 bytes unpacked).
+	  fills most of the pool (e.g. the OV9281's 1280x800 GREY8 frame
+	  is 1,024,000 bytes).
 
 config ALP_SDK_CAMERA_ALIF_ISP
 	bool "Compile the Alif Ensemble ISP-Pico camera backend (OPT-IN)"

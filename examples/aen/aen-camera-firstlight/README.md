@@ -4,14 +4,13 @@ First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera modules on
 the E1M-EVK's J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8,
 M55-HE). Exercises the portable `<alp/camera.h>` API only — open, start,
 capture-with-timeout, release, stop, close — the same four calls whichever
-sensor shield is stacked underneath. The OV9281 path is **bench-verified**
+sensor shield is stacked underneath. **Both paths are bench-verified**: OV9281
 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real GREY8 frames land in
 memory in all three modes -- 640x400, 1280x720, 1280x800 -- each at its
 configured frame rate, with the sensor test pattern also verified in all
-three); the IMX219 and IMX296 paths have not yet run on real silicon (no
-module seated). The OV5647 path is bench-attempted and BLOCKED at D-PHY
-Stop-state (issue #2248) -- see `docs/boards/e1m-evk.md`'s Camera section
-and `docs/camera-shields.md`.
+three) and OV5647 (2026-09-22, an E1M-AEN803 on the E1M-EVK, issue #2248,
+RAW10 640x480) -- see `docs/boards/e1m-evk.md`'s Camera section and
+`docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
 connector.** Without one, the sensor answers its I2C probe but no frame
@@ -24,29 +23,22 @@ for what to build.
 ZEPHYR_BASE=<zephyr> west build \
   -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he examples/aen/aen-camera-firstlight -- \
   "-DEXTRA_ZEPHYR_MODULES=<alp-sdk>;<hal_alif>" \
-  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"   # IMX219, RAW10 640x480
+  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"   # OV5647, RAW10 640x480
 
 # ... or:
-  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"   # OV5647, RAW10 640x480
   -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"            # OV9281, GREY8 640x400
-  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10 1456x1088
 ```
 
 Which shield is stacked selects the capture format at **compile time**: exactly
-one of `CONFIG_VIDEO_IMX219` / `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281` /
-`CONFIG_VIDEO_IMX296` auto-enables (each `default y` under its sensor's
-devicetree node), and `src/main.c`'s `#if` ladder on those same four symbols
-picks the matching width/height/format. IMX296 has a single full-frame mode
-(1456x1088 RAW10, 3,168,256 bytes unpacked -- the sensor transmits its
-colour-processing margin around the 1440x1080 recording area), so this
-example's `Kconfig` drops the backend to one frame buffer and grows the SRAM0
-pool to 3.5 MiB for that shield only. A new shield is one more `#elif` plus
-one more `testcase.yaml` scenario.
+one of `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281` auto-enables (each
+`default y` under its sensor's devicetree node), and `src/main.c`'s `#if`
+ladder on those same symbols picks the matching width/height/format. A new
+shield is one more `#elif` plus one more `testcase.yaml` scenario.
 
 ## What each printed line means
 
 ```
-=== aen-camera-firstlight: raspberry_pi_camera_module_2 (IMX219, RAW10 640x480) ===
+=== aen-camera-firstlight: raspberry_pi_camera_module_1 (OV5647, RAW10 640x480) ===
 [camfl] alp_camera_open(id=0, 640x480) ...
 [camfl] alp_camera_open OK
 [camfl] alp_camera_start -> ALP_OK
@@ -76,10 +68,8 @@ RESULT: capture ok
 
 | Shield | Sensor | Format | Expected on this batch |
 |---|---|---|---|
-| `raspberry_pi_camera_module_2` | IMX219 | RAW10 640x480 | Upstream driver, compiled against but **not yet run on hardware** (`docs/boards/e1m-evk.md`) — bench result unknown; a clean `open` failing `NOT_READY` most likely means the module isn't seated/self-enabling, not a driver bug. |
-| `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`). Bench-attempted, BLOCKED: `alp_camera_open` fails at D-PHY Stop-state (issue #2248), needs the J5 pin-11 pull-up rework (`docs/boards/e1m-evk.md`). NOT bench-verified. |
+| `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`). **BENCH-VERIFIED** (2026-09-22, an E1M-AEN803 on the E1M-EVK, issue #2248), needs the J5 pin-11 pull-up rework (`docs/boards/e1m-evk.md`). |
 | `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on an E1M-AEN803 on the E1M-EVK, in all three modes: 640x400 (Espressif's), 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) all captured live frames -- a `0xA5`-prefilled pool overwritten plus the sensor test pattern appearing, verified in all three -- each at its configured frame rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps). |
-| `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet, BENCH-UNVERIFIED. Probe reads back STANDBY's power-on default (the part has no chip-ID register). |
 
 ## Frame buffers live in SRAM0, not DTCM
 
@@ -106,10 +96,11 @@ buffers, then `ALP_ERR_NOMEM` on the second frame).
 
 ## Compile proof in CI; real results on the bench
 
-The four `testcase.yaml` scenarios are `build_only: true` regardless of bench
+Both `testcase.yaml` scenarios are `build_only: true` regardless of bench
 status — twister has no bench access, so a green build only proves the image
 compiles and links against the real board target. The OV9281 shield's real
 result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same flow
 as the sibling `*-regcheck` apps) is real GREY8 frames landing in memory in
-all three modes, each at its configured frame rate; the other three shields
-still need that same bench pass.
+all three modes, each at its configured frame rate; the OV5647 shield's real
+result (2026-09-22, issue #2248) is a live RAW10 640x480 capture on the same
+board.

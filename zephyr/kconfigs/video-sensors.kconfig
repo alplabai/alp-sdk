@@ -6,11 +6,11 @@
 # holds sensors reached via a generic 15-pin camera shield on top of
 # whichever CSI-2 host the board provides.
 
-# Kconfig.ov5647, Kconfig.ov9281, and Kconfig.imx296 only add
-# DT_HAS_..._ENABLED-gated leaf options -- none declares its own
-# `depends on VIDEO` (Kconfig.ov5647 doesn't because upstream's own
-# drivers/video/Kconfig wraps the whole sensor list in `if VIDEO`, which our
-# rsource is outside of). Wrap here instead of hand-editing the vendored file.
+# Kconfig.ov5647 and Kconfig.ov9281 only add DT_HAS_..._ENABLED-gated leaf
+# options -- neither declares its own `depends on VIDEO` (Kconfig.ov5647
+# doesn't because upstream's own drivers/video/Kconfig wraps the whole
+# sensor list in `if VIDEO`, which our rsource is outside of). Wrap here
+# instead of hand-editing the vendored file.
 if VIDEO
 
 # ADR 0017 Tier-1 (upstream-PENDING backport of zephyrproject-rtos/zephyr#119301
@@ -28,11 +28,5 @@ rsource "../drivers/video/Kconfig.ov5647"
 # BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK. See
 # zephyr/drivers/video/ov9281.c for the source commit and retirement note.
 rsource "../drivers/video/Kconfig.ov9281"
-
-# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet -- no
-# permissive-licence IMX296 driver exists to consume), BENCH-UNVERIFIED. See
-# zephyr/drivers/video/imx296.c for the datasheet-section citations and
-# retirement note.
-rsource "../drivers/video/Kconfig.imx296"
 
 endif # VIDEO

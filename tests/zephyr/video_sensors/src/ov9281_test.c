@@ -3,7 +3,7 @@
  *
  * Runtime ztest for the OV9281 streaming driver (zephyr/drivers/video/ov9281.c), against the
  * I2C emulator in ov9281_emul.c on native_sim's real "zephyr,i2c-emul-controller" (&i2c0 --
- * see app.overlay). OV5647 and IMX296 stay build-only (no emulator): see testcase.yaml.
+ * see app.overlay).
  */
 #include <zephyr/device.h>
 #include <zephyr/devicetree.h>

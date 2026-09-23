@@ -243,13 +243,13 @@ responder to 0 and back with `CAM_EN`.
   On an E1M-AEN SoM, build a camera app with the board-side shield
   `e1m_evk_rpi_csi` paired with a sensor shield that follows
   Zephyr's Raspberry Pi camera contract, e.g. the InnoMaker CAM-OV9281
-  (bench-verified, see below) or the upstream Camera Module 2 (IMX219):
+  or the RPi Camera Module 1 (OV5647) -- both bench-verified, see below:
 
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
         -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"
       # ... or:
       west build -b alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he <app> -- \
-        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_2"
+        -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
 
   `e1m_evk_rpi_csi` wires J5 to the E8's dedicated CSI-2 receive
   D-PHY, hogs `IO2` low (input A), enables SoC I2C1 as the sensor
@@ -279,37 +279,26 @@ responder to 0 and back with `CAM_EN`.
   `SOC_SERIES_E8`) to set `CAM_CFG.AXI_PORT_EN`: without it the CPI still
   raises STOP per frame but never writes one to memory, so a capture
   reports success over an untouched buffer instead of failing. RAW10
-  sensors are delivered to memory as unpacked 16-bit samples
+  sensors (e.g. OV5647) are delivered to memory as unpacked 16-bit samples
   (`VIDEO_PIX_FMT_SBGGR10`, pitch = width x 2), not the packed wire format.
-  Compiled against the upstream IMX219 driver; not yet run on hardware (the
-  OV9281 path is bench-verified, see below).
-
   The CSI-2 pixel clock ceiling this board's D-PHY divider programs is
-  200 MHz (400 MHz source / 2), and one pixel moves per clock.  A 2-lane
-  IMX219 at its 456 MHz link therefore needs RAW10
-  (`VIDEO_PIX_FMT_SBGGR10P`, 182.4 Mpixel/s): RAW8 would need
-  228 Mpixel/s and `video_set_format()` refuses it with `-ERANGE`.  The
-  divider is programmed by the Alif clock-control
-  patch in `zephyr/patches.yml`, so the workspace must be patched
-  (`scripts/bootstrap.sh` does it).
+  200 MHz (400 MHz source / 2); the divider is programmed by the Alif
+  clock-control patch in `zephyr/patches.yml`, so the workspace must be
+  patched (`scripts/bootstrap.sh` does it).
 
   [`examples/aen/aen-camera-firstlight`](../../examples/aen/aen-camera-firstlight/)
-  is the bench first-light app for this connector: it opens each of
-  the four shipped camera shields (IMX219 / OV5647 / OV9281 / IMX296)
-  through `<alp/camera.h>`, starts the
+  is the bench first-light app for this connector: it opens the OV9281 or
+  the OV5647 shield through `<alp/camera.h>`, starts the
   stream, and waits for one frame with a 2 s timeout, printing a CRC32
   + histogram + sample row bytes on success or a diagnosed failure
-  otherwise. See its README for what each printed line means. The OV9281
-  shield is bench-verified (2026-09-21, an E1M-AEN803 on the E1M-EVK): live
-  GREY8 frames land in memory in all three modes (640x400, 1280x720,
+  otherwise. See its README for what each printed line means. Both shields
+  are bench-verified: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK):
+  live GREY8 frames land in memory in all three modes (640x400, 1280x720,
   1280x800), each at its configured frame rate, with the sensor test
-  pattern also verified in all three. The IMX219 and IMX296 shields
-  still only compile and link against the real board target. The
-  OV5647 shield has been bench-attempted (needing the
-  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above) and is
-  currently BLOCKED at D-PHY Stop-state -- see
-  [`docs/camera-shields.md`](../camera-shields.md)'s OV5647 driver
-  section. It is not bench-verified.
+  pattern also verified in all three; OV5647 (2026-09-22, needing the
+  [J5 pin 11 pull-up rework](#j5-pin-11-pull-up-rework) above), RAW10
+  640x480 -- see [`docs/camera-shields.md`](../camera-shields.md)'s
+  OV5647 driver section.
 
   > **Important.**  E1M `IO2` was previously documented as the RGB
   > LED-blue channel.  That was a placeholder guess; the EVK
