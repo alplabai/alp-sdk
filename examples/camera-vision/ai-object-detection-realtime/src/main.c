@@ -12,9 +12,9 @@
  *     | (V2N + DX-M1)  |   (RGB565 240x)  | on E1M-EVK     |
  *     +-------+--------+                  +----------------+
  *             |  <alp/camera.h> hands the frame off to the
- *             |  inference pipeline (DEEPX backend resolved
- *             |  from the SKU's preferred_backend by the
- *             |  S-D.lib loader; no vendor symbols in app code).
+ *             |  inference pipeline (backend resolved from
+ *             |  the SKU's preferred_backend by the
+ *             |  §D.lib.loader; no vendor symbols in app code).
  *             v
  *     +----------------------+
  *     | <alp/inference.h>    |  YOLOv8-tiny.dxnn on DX-M1

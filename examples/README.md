@@ -116,8 +116,8 @@ The portable bus + GPIO + analog surfaces.  Start here.
 
 | Directory                       | What it shows                                                                 |
 |---------------------------------|-------------------------------------------------------------------------------|
-| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×240 LVGL display. **(AEN)** |
-| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny on the DEEPX NPU -- camera → inference → bbox overlay + live FPS. **(V2N-M1)** |
+| `ai-camera-viewer`              | Capture frames → person-detect on the Ethos-U NPU → preview + boxes on a 240×320 ST7789 LVGL display. **(AEN)** |
+| `ai-object-detection-realtime`  | Realtime YOLOv8-tiny skeleton -- camera → inference → bbox overlay + live FPS; the checked-in project runs TFLM on the M33 slice, the DX-M1 NPU needs an A55/Yocto app + compiled model (see its README). **(V2N-M1)** |
 
 ### AI / Inference
 
@@ -249,9 +249,9 @@ SoM EEPROM manifest).
 These live under `examples/aen/` and target the E1M-AEN (Alif
 Ensemble) family on the E1M-EVK board (lead part: E8).
 
-`examples/aen/` has 66 directories total; the 9 below are the
+`examples/aen/` has 82 directories total; the 10 below are the
 customer-facing catalog (the ones carrying a `board.yaml`).  The
-remaining 57 are internal bring-up/regression apps (per-driver
+remaining 72 are internal bring-up/regression apps (per-driver
 regcheck, bench smoke tests, dual-core internal validation) --
 `board.yaml` presence is the reliable way to tell them apart, not
 their filename (some of those internal dirs don't follow a
@@ -267,6 +267,7 @@ their filename (some of those internal dirs don't follow a
 | `aen/aen-cc3501e-gatt-register` | Bench PASS/FAIL gate for `alp_ble_gatt_register_service()` (#480/#892) -- registers a service on the CC3501E's NimBLE host over the inter-chip bridge; peer-free, no central-side discovery. |
 | `aen/aen-cc3501e-gpio`          | CC3501E GPIO proxy + camera-enable demo over the inter-chip SPI bridge. |
 | `aen/aen-eeprom-manifest`       | Read + decode the 128-byte Alp hardware-info manifest from the on-module 24C128 EEPROM over the portable `<alp/*>` API. |
+| `aen/aen-eeprom-provision`      | Write (and lock down) the 128-byte Alp hardware-info manifest into the on-module 24C128 EEPROM -- the production sibling of `aen-eeprom-manifest`. |
 | `aen/aen-secure-element-sign`   | OPTIGA Trust M I2C_STATE probe over BRD_I2C (M55-HE); product-info/raw-APDU return `ALP_ERR_NOSUPPORT`. |
 
 ## Anatomy of a single-OS example

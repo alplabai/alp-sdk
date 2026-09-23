@@ -65,7 +65,7 @@ west build -b ensemble_e8_dk/ae822fa0e5597ls0/rtss_hp \
 
 The AEN fallback dispatches inference to Ethos-U instead of
 DEEPX DX-M1 -- same app source, different NPU shim wired in by
-the `S-D.lib` loader based on the SKU's `capabilities:` block.
+the `§D.lib.loader` loader based on the SKU's `capabilities:` block.
 
 **native_sim (build smoke-test, no hardware):**
 

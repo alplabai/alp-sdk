@@ -164,8 +164,8 @@ See [ADR 0001](docs/adr/0001-wrapper-on-top-of-zephyr.md) and
 ## Portability
 
 Swap-and-run is measured **within** a SoM family, against the generated
-swap-test matrix: the 6 released E1M-AEN SKUs pass all three canonical
-examples (18 / 21 E1M cells — the remaining 3 are `E1M-NX9101`, a
+swap-test matrix: the 7 released E1M-AEN SKUs pass all three canonical
+examples (21 / 24 E1M cells — the remaining 3 are `E1M-NX9101`, a
 placeholder MPN whose only hw_rev is `status: tbd`, refused by the
 hw_rev-buildable gate and so not yet buildable at all), and the 4 E1M-X
 SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on all
@@ -180,7 +180,7 @@ examples: [`docs/portability.md`](docs/portability.md).
 
 | Family | Form factor | SKUs | Primary silicon | AI throughput | OS targets |
 |---|---|---|---|---|---|
-| **E1M-AEN** | E1M (35×35 mm) | `E1M-AEN301/401/501/601/701/801` | Alif Ensemble E3–E8 (Cortex-M55 + optional A32 + Ethos-U55, U85 on E4/E6/E8) | up to ~1024 GOPS | Zephyr · bare-metal |
+| **E1M-AEN** | E1M (35×35 mm) | `E1M-AEN301/401/501/601/701/801` + `E1M-AEN803` | Alif Ensemble E3–E8 (Cortex-M55 + optional A32 + Ethos-U55, U85 on E4/E6/E8) | up to ~1024 GOPS | Zephyr · bare-metal |
 | **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N101` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
 | **E1M-X V2N** | E1M-X (45×65 mm) | `E1M-V2N102` | Renesas RZ/V2N (4× A55 + M33 + DRP-AI3) | 4 TOPS | Yocto (A55); Zephyr M33 tree not yet built |
 | **E1M-X V2N-M1** | E1M-X (45×65 mm) | `E1M-V2M101` | Renesas RZ/V2N + DEEPX DX-M1 | 4 + 25 TOPS | Yocto (A55) · Zephyr (M33 system manager) |
@@ -189,7 +189,7 @@ examples: [`docs/portability.md`](docs/portability.md).
 
 All modules share the **E1M open-standard form factor** — pinout + mechanical
 spec in [`alplabai/e1m-spec`](https://github.com/alplabai/e1m-spec) (pinned
-v1.1). Evaluation kits: **E1M EVK** and **E1M-X EVK**, per-EVK detail in
+v1.0). Evaluation kits: **E1M EVK** and **E1M-X EVK**, per-EVK detail in
 [`docs/boards/`](docs/boards/).
 
 ## Firmware engineers, start here

@@ -134,7 +134,8 @@ families ship in this size.
 **EVK** -- Evaluation Kit.  The reference board Alp Lab ships for
 bring-up.  Two flavours: E1M-EVK (35 × 35) and E1M-X-EVK (45 × 65).
 
-**Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55;
+**Ethos-U** -- Arm's micro-NPU IP.  AEN modules carry Ethos-U55 on
+every SKU plus Ethos-U85 on the E4/E6/E8 silicon (AEN401/601/801/803);
 N93 modules carry Ethos-U65.
 
 **GPU2D** -- 2D compositing accelerator (alpha blending, rotation,

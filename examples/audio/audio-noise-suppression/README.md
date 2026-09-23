@@ -26,9 +26,13 @@ The spectral work routes through whichever backend the SoM has:
 - **V2H**: same shape as V2N once the V2H DSP path lands.
 - **native_sim**: portable C reference kernels; framing only.
 
-Inference dispatches via `<alp/inference.h>` AUTO:
+Inference dispatches via `<alp/inference.h>` AUTO, scoped to the
+slice (this project is M33-only -- `a55_cluster: os: "off"` in its
+`board.yaml`, so neither DRP-AI3 nor DEEPX is reachable here):
 
-- **V2N-M1** (E1M-V2M101) -> DEEPX DX-M1 NPU, ~3 ms invoke.
+- **V2N-M1** (E1M-V2M101) -> CPU TFLM reference kernels on the M33
+  slice; a real DEEPX DX-M1 deployment needs an A55/Yocto app
+  with a compiled model.
 - **V2N** (E1M-V2N101)    -> CPU TFLM reference kernels.
 - **native_sim**           -> CPU TFLM reference kernels.
 
@@ -38,8 +42,8 @@ Inference dispatches via `<alp/inference.h>` AUTO:
 |-------------------------------------|----------|
 | Mic -> I2S RX DMA                   | ~2.0 ms  |
 | `<alp/dsp.h>` FFT pipe (GD32 bridge)| ~1.5 ms  |
-| `<alp/inference.h>` invoke (DX-M1)  | ~3.0 ms  |
-| Mask apply + IFFT (TODO v0.6)       | ~1.5 ms  |
+| `<alp/inference.h>` invoke (TFLM)   | ~3.0 ms  |
+| Mask apply + IFFT                   | ~1.5 ms  |
 | I2S TX DMA push                     | ~2.0 ms  |
 | **total**                           | ~10.0 ms |
 
@@ -47,12 +51,12 @@ The block period **is** the latency budget -- DMA ping-pong lets
 each step touch the previous block while the I2S peripheral
 grabs the next one.
 
-## What's stubbed in v0.5
+## What's still stubbed
 
 - Real RNNoise-style model bytes (`s_model[]` is a 1-byte stub).
 - DSP-chain weights / FFT bin-count / hop length / mask-apply
-  weights -- all TODO(v0.6).
-- IFFT + overlap-add synthesis path -- v0.5 passthroughs the
+  weights -- all still TODO.
+- IFFT + overlap-add synthesis path -- passthroughs the
   mic block to the speaker so HiL still hears the loop.
 
 ## Reference

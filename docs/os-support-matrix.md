@@ -26,8 +26,9 @@ HAL, so a single backend covers the whole family.  See
 [`README.md` § Supported hardware](../README.md#supported-hardware)
 for the SKU breakdown:
 
-- **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` (Alif Ensemble
-  E3–E8).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
+- **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` and
+  `E1M-AEN803` (Alif Ensemble E3–E8; same E8 silicon as
+  AEN801).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
   A32 cluster alongside the M55 pair.
 - **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
   A55 cluster + M33-SM.

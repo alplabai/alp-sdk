@@ -181,15 +181,16 @@ ship in production builds.
 
 If a library you want isn't in the Tier-1 list above, see the
 deferred / considered tiers below or open an issue.  Adding a
-library is a matter of writing a profile header at
-`metadata/library-profiles/<lib>/` + a `libraries:` enum entry
-in `metadata/schemas/board.schema.json` -- low friction
+library is a matter of writing a manifest at
+`metadata/libraries/<name>.yaml` (shape per ADR 0018 and
+`metadata/schemas/library-v1.schema.json`; `board.yaml`'s
+`libraries:` references manifests by name) -- low friction
 once the case is made.
 
 ## HW-backend profiles (per-library accelerator binding)
 
 Alongside the compile-time profile header (`etl_profile.h`,
-`fmt_config.h`, ...), 23 of the 35 library manifests under
+`fmt_config.h`, ...), 22 of the 35 library manifests under
 `metadata/libraries/*.yaml` also declare an
 `integration.zephyr.hw_backends:` block -- an inline table inside
 that library's own manifest, not a separate `hw-backends.yaml` file.
@@ -214,31 +215,29 @@ symbol.  This keeps generated `alp.conf` files from claiming
 hardware acceleration that would still run through the library's
 software path.
 
-**Coverage (v0.6).**  23 of the 35 manifests declare an
-`integration.zephyr.hw_backends:` block; the libraries below are
-grouped by accelerator class:
+**Coverage (v0.6).**  22 of the 35 manifests declare an
+`integration.zephyr.hw_backends:` block; the libraries with
+non-empty accelerator bindings below are grouped by accelerator
+class:
 
 | Class                   | Libraries                                                   |
 |-------------------------|-------------------------------------------------------------|
 | Crypto / TLS            | `mbedtls`, `bearssl`                                        |
-| ML inference            | `tflite_micro`, `onnxruntime`                               |
-| DSP / math              | `cmsis_dsp`                                                 |
+| ML inference            | `tflite-micro`                                              |
+| DSP / math              | `cmsis-dsp`                                                 |
 | Filesystem              | `littlefs`                                                  |
-| Graphics / vision       | `lvgl`, `u8g2`, `gfx_compat`, `arm-2d`, `cmsis-cv`          |
-| Dataflow / scheduling   | `cmsis-stream`                                              |
-| Sensor fusion / control | `madgwick_ahrs`, `pid`                                      |
+| Graphics / vision       | `lvgl`, `u8g2`, `gfx-compat`                                |
+| Sensor fusion / control | `madgwick-ahrs`, `pid`                                      |
 | Industrial bus          | `modbus`                                                    |
-| IoT / networking        | `libcoap`, `libwebsockets`, `nanopb`, `jsmn` |
+| IoT / networking        | `coap`, `libwebsockets`                                     |
 | Audio codecs            | `minimp3`, `opus`                                           |
-| Header-only utility     | `etl`, `fmt`, `nlohmann_json`, `doctest`                    |
-| Test framework          | `catch2`                                                    |
 
 Seven libraries declare an empty `accelerators:` list -- the four
-header-only utility libraries (`etl`, `fmt`, `nlohmann_json`,
+header-only utility libraries (`etl`, `fmt`, `nlohmann-json`,
 `doctest`) plus `catch2` (test framework, host-side), `jsmn`
 (parser, pure-SW only), and `nanopb` (serialisation, pure-SW only)
 -- their value lives in the pure-SW path with no accelerator class
-to bind.  The other 18 libraries each carry at least one
+to bind.  The other 15 libraries each carry at least one
 `requires_cap:`-gated backend entry.
 
 Regression-tested by
@@ -280,8 +279,9 @@ it's parked.  v0.5 cycle revisits.
 
 ## Tier 4 — alternative inference backends (considered, deferred)
 
-Already wired: TFLM (Cortex-M, Zephyr), Ethos-U (AEN), DRP-AI (V2N, Zephyr
-dispatch stub), and DEEPX DX-M1 (V2N-M1, Yocto dispatch stub).  The
+Already wired: TFLM (Cortex-M, Zephyr), Ethos-U (AEN), DRP-AI
+(V2N, A55/Yocto only -- the former M-class dispatch stubs are
+removed), and DEEPX DX-M1 (V2N-M1, A55/Yocto).  The
 libraries below are smaller / different in scope:
 
 | Library     | Niche                                                                  | Why we haven't integrated                                          |
