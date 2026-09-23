@@ -14,6 +14,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/** Capacity of each of the two ping-pong JPEG buffers this file owns --
+ *  the one shared bound main.c's alp_jpeg_encode() call and this file's
+ *  own allocation both use, so the two can never silently disagree. */
+#define MJPEG_HTTP_MAX_JPEG 65536u
+
 /**
  * @brief Start the MJPEG HTTP server thread.
  *
@@ -23,17 +28,32 @@
 int mjpeg_http_server_start(uint16_t port);
 
 /**
- * @brief Publish the latest encoded JPEG frame for the server to serve.
+ * @brief Claim the buffer to encode the NEXT frame into.
  *
- * Non-blocking (a short mutex hold, no I/O) -- safe to call from the
- * camera-capture loop.  Overwrites whatever frame was published before;
- * a client mid-read of the previous frame keeps reading its own copy
- * (see mjpeg_http.c), so this never blocks on a slow client.
+ * Zero-copy hand-off: the camera-capture loop encodes directly into this
+ * buffer (capacity @ref MJPEG_HTTP_MAX_JPEG bytes), then calls
+ * @ref mjpeg_http_publish_frame with the encoded length -- no memcpy on
+ * either side.  The returned pointer stays valid to write into until that
+ * call; call this again for the frame after that.
  *
- * @param jpeg  Encoded JPEG bytes (SOI...EOI).
- * @param len   Length in bytes; frames larger than the server's internal
- *              buffer are dropped (silently -- see mjpeg_http.c).
+ * @return Pointer to a @ref MJPEG_HTTP_MAX_JPEG-byte write buffer, backed
+ *         by SRAM0 on the AEN hardware-JPEG path (DMA-reachable by the
+ *         Hantro encoder).
  */
-void mjpeg_http_publish_frame(const uint8_t *jpeg, size_t len);
+uint8_t *mjpeg_http_claim_write_buffer(void);
+
+/**
+ * @brief Publish the frame just encoded into the buffer
+ *        @ref mjpeg_http_claim_write_buffer last returned.
+ *
+ * Non-blocking (a short mutex hold, no I/O, no copy) -- safe to call from
+ * the camera-capture loop.  If a client is mid-read of the previous frame,
+ * this drops the new one instead of overwriting a buffer still in flight
+ * (see mjpeg_http.c) -- the two buffers ping-pong once the client releases
+ * it, so the capture loop never blocks on a slow client.
+ *
+ * @param len  Encoded length in bytes; must be <= @ref MJPEG_HTTP_MAX_JPEG.
+ */
+void mjpeg_http_publish_frame(size_t len);
 
 #endif /* MJPEG_HTTP_H */

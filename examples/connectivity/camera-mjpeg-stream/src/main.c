@@ -11,18 +11,22 @@
  * HTTP over a Zephyr BSD socket, its own thread).  On the E1M-AEN family
  * this rides the VeriSilicon ISP-Pico + Hantro VC9000E JPEG hardware
  * encoder; on any other target (including native_sim, which has no
- * camera at all) it falls back to a software JPEG encoder and a
- * synthetic test-pattern frame, so the same binary always has something
- * to stream.
+ * camera backend that links) it falls back to a software JPEG encoder
+ * and a synthetic test-pattern frame, so the same binary always has
+ * something to stream.
  *
  * Threading, and why it matters: THIS file's main() is the camera-capture
  * loop, and it must never block on the network -- a blocked capture loop
  * starves the ISP's auto-exposure convergence and has reset AE on real
  * silicon.  The HTTP server (mjpeg_http.c) runs in its own thread and
  * only ever touches the LATEST published frame; a slow client (or none at
- * all) never backs up into this loop.  DHCP runs concurrently too: it is
- * started once, up front, and negotiates in Zephyr's own net-stack
- * thread while the capture loop below is already running.
+ * all) never backs up into this loop.  It must also never SPIN on a
+ * capture/encode error without yielding: main() runs at the default main
+ * thread priority, numerically HIGHER priority than the HTTP server
+ * thread (K_PRIO_PREEMPT(8)) -- an error loop with no sleep would starve
+ * that thread outright, not just slow it down.  DHCP runs concurrently
+ * too: it is started once, up front, and negotiates in Zephyr's own
+ * net-stack thread while the capture loop below is already running.
  *
  * Format selection: this app opens the JPEG encoder FIRST and reads back
  * which source pixel-format layout it accepts (alp_jpeg_caps_t::
@@ -54,27 +58,26 @@
 
 #define HTTP_PORT 8080
 
-/* A modest resolution shared by both the real-camera path and the
- * synthetic fallback: big enough to be a real MJPEG demo, small enough
- * that the encoded frame comfortably fits JPEG_OUT_CAP below at quality
- * 80 with margin to spare (real photographic content compresses worse
- * than this file's flat test pattern -- see README.md's TBD-from-bench
- * note on the real bytes-per-frame figure). */
-#define FRAME_W 320
-#define FRAME_H 240
-#define JPEG_OUT_CAP 49152u /* matches mjpeg_http.c's MAX_JPEG */
+/* 640x480: the resolution both the real-camera path and the synthetic
+ * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG (64 KiB) is the
+ * shared cap on the encoded output either path produces at quality 80 --
+ * see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the AEN video
+ * buffer pool is sized for this resolution. */
+#define FRAME_W 640
+#define FRAME_H 480
 
 /*
  * The Hantro VC9000E JPEG encoder is an external AXI bus master: it DMAs
- * its source frame and writes its output stream over its OWN AXI master,
- * not through the CPU, so both must sit in memory that master can reach
- * -- the global on-chip SRAM0 bank (@0x02000000), never the M55's local
- * TCM (see alp/jpeg.h's alp_jpeg_encode() @note, and
- * src/backends/jpeg/alif_hantro.c's _is_dma_reachable()). CONFIG_ALP_SDK_
- * JPEG_ALIF_HANTRO only exists on the AEN board target (board-scoped
- * Kconfig, boards/alp_e1m_aen80{1,3}_...conf) -- everywhere else,
- * including native_sim, the software backend has no such placement
- * restriction and this attribute is a no-op.
+ * its source frame over its OWN AXI master, not through the CPU, so the
+ * source buffer must sit in memory that master can reach -- the global
+ * on-chip SRAM0 bank (@0x02000000), never the M55's local TCM (see
+ * alp/jpeg.h's alp_jpeg_encode() @note, and src/backends/jpeg/
+ * alif_hantro.c's _is_dma_reachable()). mjpeg_http.c carries the matching
+ * attribute for its own (output) buffers. CONFIG_ALP_SDK_JPEG_ALIF_HANTRO
+ * only exists on the AEN board target (board-scoped Kconfig) --
+ * everywhere else, including native_sim, the software backend has no
+ * such placement restriction and both the section attribute and the
+ * alignment below are inert.
  */
 #if defined(CONFIG_ALP_SDK_JPEG_ALIF_HANTRO)
 #define JPEG_DMA_MEM __attribute__((section("SRAM0")))
@@ -86,16 +89,20 @@
  * NV12 (Y plane then interleaved UV) or fully-planar I420 (Y, then U,
  * then V) -- both are the same W*H*3/2 byte count, and this app only
  * ever fills it with a luma gradient plus NEUTRAL (grey, memset 128)
- * chroma, so the exact sub-layout of that neutral fill never matters. */
-static uint8_t synth_frame[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2] JPEG_DMA_MEM;
-static uint8_t jpeg_out[JPEG_OUT_CAP] JPEG_DMA_MEM;
+ * chroma, so the exact sub-layout of that neutral fill never matters.
+ * __aligned(32): matches the Hantro AXI master's/D-cache maintenance's
+ * cache-line granularity, same reasoning as mjpeg_http.c's buffers. */
+static uint8_t synth_frame[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2] JPEG_DMA_MEM __aligned(32);
 
 /* Build one alp_jpeg_encode_req_t against a single contiguous W*H*3/2
  * buffer, in whichever layout `fmt` names.  Used both for the synthetic
  * frame above and for a real camera frame (alp_camera_frame_t::data),
  * since camera/video backends pack a frame the same contiguous way. */
-static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req, alp_pixfmt_t fmt, void *base,
-                                  uint16_t w, uint16_t h)
+static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
+                                 alp_pixfmt_t           fmt,
+                                 void                  *base,
+                                 uint16_t               w,
+                                 uint16_t               h)
 {
 	uint8_t *y     = base;
 	size_t   y_len = (size_t)w * h;
@@ -138,8 +145,8 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
  * this never adds network latency to a capture iteration. */
 static struct net_mgmt_event_callback dhcp_cb;
 
-static void on_net_event(struct net_mgmt_event_callback *cb, uint64_t mgmt_event,
-                          struct net_if *iface)
+static void
+on_net_event(struct net_mgmt_event_callback *cb, uint64_t mgmt_event, struct net_if *iface)
 {
 	ARG_UNUSED(cb);
 	if (mgmt_event != NET_EVENT_IPV4_ADDR_ADD) {
@@ -154,6 +161,29 @@ static void on_net_event(struct net_mgmt_event_callback *cb, uint64_t mgmt_event
 	printf("[camera-mjpeg-stream]   stream:   http://%s:%u/stream\n", ip, HTTP_PORT);
 	printf("[camera-mjpeg-stream]   snapshot: http://%s:%u/snapshot.jpg\n", ip, HTTP_PORT);
 }
+
+/* Rate-limit a diagnostic to once per second so a fast error loop (e.g. a
+ * wedged sensor returning immediate failures) can't flood the console --
+ * `*count` still tracks the true total for the eventual printed line. */
+static bool rate_limited(int64_t *last_log_ms, uint32_t *count)
+{
+	(*count)++;
+	int64_t now = k_uptime_get();
+
+	if (now - *last_log_ms < 1000) {
+		return false;
+	}
+	*last_log_ms = now;
+	return true;
+}
+
+/* After this many CONSECUTIVE capture failures, stop trying the camera
+ * for the rest of the run and fall back to the synthetic frame -- a
+ * sensor that has wedged is not coming back without a power-cycle this
+ * app cannot perform, and retrying forever at CAPTURE_FAIL_BACKOFF_MS
+ * just wastes the capture loop's time slice. */
+#define CAPTURE_FAIL_LIMIT      10
+#define CAPTURE_FAIL_BACKOFF_MS 50
 
 int main(void)
 {
@@ -173,21 +203,30 @@ int main(void)
 
 	alp_jpeg_caps_t jcaps;
 
-	alp_jpeg_capabilities(jpeg, &jcaps);
-	alp_pixfmt_t pixfmt = (jcaps.pixfmt_mask & (1u << ALP_PIXFMT_NV12))
-	                          ? ALP_PIXFMT_NV12
-	                          : ALP_PIXFMT_YUV420_PLANAR;
+	if (alp_jpeg_capabilities(jpeg, &jcaps) != ALP_OK) {
+		printf("[camera-mjpeg-stream] alp_jpeg_capabilities failed (err=%d); nothing to "
+		       "serve\n",
+		       (int)alp_last_error());
+		alp_jpeg_close(jpeg);
+		return 0;
+	}
+	alp_pixfmt_t pixfmt =
+	    (jcaps.pixfmt_mask & (1u << ALP_PIXFMT_NV12)) ? ALP_PIXFMT_NV12 : ALP_PIXFMT_YUV420_PLANAR;
 
 	printf("[camera-mjpeg-stream] jpeg backend: hw_accelerated=%d pixfmt=%s\n",
-	       (int)jcaps.hw_accelerated, (pixfmt == ALP_PIXFMT_NV12) ? "NV12" : "YUV420_PLANAR");
+	       (int)jcaps.hw_accelerated,
+	       (pixfmt == ALP_PIXFMT_NV12) ? "NV12" : "YUV420_PLANAR");
 
 	/* Camera path is capability-gated, not chip- or SoC-gated (see
 	 * deciding-the-portability-contract): alp_has() reads this SoC's
-	 * generated capability table, so the same binary tries the real
-	 * camera wherever one is wired up and falls straight through to
-	 * the synthetic frame everywhere else -- including native_sim, and
-	 * including an AEN board with no sensor actually attached (open()
-	 * itself fails in that case, same fallback). */
+	 * generated capability table, which reflects the SoM board.yaml
+	 * configures -- E1M-AEN803, which HAS a MIPI-CSI controller -- even
+	 * when the actual build target is native_sim, so this branch is
+	 * always taken there too.  The synthetic-frame fallback on
+	 * native_sim therefore comes from alp_camera_open() failing (no
+	 * real camera backend links there), NOT from alp_has() being
+	 * false; alp_has() only steers the fallback on a SoC that
+	 * genuinely has no MIPI-CSI controller at all. */
 	alp_camera_t *camera = NULL;
 
 	if (alp_has(ALP_CAP_ID_HW_MIPI_CSI)) {
@@ -199,14 +238,13 @@ int main(void)
 		ccfg.format = pixfmt;
 		camera      = alp_camera_open(&ccfg);
 		if (camera == NULL || alp_camera_start(camera) != ALP_OK) {
-			printf("[camera-mjpeg-stream] no usable camera (err=%d); "
+			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); "
 			       "serving a synthetic frame instead\n",
 			       (int)alp_last_error());
 			alp_camera_close(camera);
 			camera = NULL;
 		} else {
-			printf("[camera-mjpeg-stream] camera open + streaming, %ux%u\n", FRAME_W,
-			       FRAME_H);
+			printf("[camera-mjpeg-stream] camera open + streaming, %ux%u\n", FRAME_W, FRAME_H);
 		}
 	} else {
 		printf("[camera-mjpeg-stream] no MIPI-CSI on this SoC; serving a synthetic frame\n");
@@ -214,8 +252,9 @@ int main(void)
 
 	/* HTTP server thread -- serves whatever mjpeg_http_publish_frame()
 	 * last handed it; nothing has been published yet, so an early
-	 * client sees a zero-length frame until the first capture below
-	 * completes. */
+	 * client sees 503 Service Unavailable (handle_snapshot) or waits
+	 * for the first frame (handle_stream) until the first capture below
+	 * completes -- see mjpeg_http.c. */
 	int http_rc = mjpeg_http_server_start(HTTP_PORT);
 
 	if (http_rc != 0) {
@@ -233,20 +272,55 @@ int main(void)
 		net_dhcpv4_start(iface);
 	}
 
+	uint32_t capture_fail_count    = 0;
+	uint32_t capture_fail_consec   = 0;
+	int64_t  capture_fail_last_log = 0;
+	uint32_t encode_fail_count     = 0;
+	int64_t  encode_fail_last_log  = 0;
+
 	/* The camera-capture loop.  Every iteration either captures a real
 	 * frame (bounded timeout -- never wait forever on a wedged sensor)
-	 * or rebuilds the synthetic one, encodes it, and publishes it; it
-	 * never opens a socket, never blocks on mjpeg_http_publish_frame()
-	 * (a short mutex hold, no I/O), and never waits on the network. */
+	 * or rebuilds the synthetic one, encodes it directly into the HTTP
+	 * server's write buffer (mjpeg_http_claim_write_buffer() --
+	 * zero-copy, no memcpy on either side of the hand-off) and
+	 * publishes it; it never opens a socket, never blocks on
+	 * mjpeg_http_publish_frame() (a short mutex hold, no I/O), and
+	 * never waits on the network. A capture or encode failure is
+	 * logged (rate-limited) and counted rather than silently skipped;
+	 * a capture failure also backs off (k_msleep) so an error loop
+	 * can't spin and starve the lower-priority HTTP thread, and falls
+	 * back to the synthetic frame after CAPTURE_FAIL_LIMIT consecutive
+	 * failures (a wedged sensor is not coming back on its own). */
 	for (;;) {
 		alp_jpeg_encode_req_t req;
-		alp_camera_frame_t     frame;
-		bool                    have_frame = false;
+		alp_camera_frame_t    frame;
+		bool                  have_frame = false;
 
 		if (camera != NULL) {
-			if (alp_camera_capture(camera, &frame, 200) == ALP_OK) {
+			alp_status_t rc = alp_camera_capture(camera, &frame, 200);
+
+			if (rc == ALP_OK) {
+				capture_fail_consec = 0;
 				jpeg_req_from_packed(&req, pixfmt, frame.data, FRAME_W, FRAME_H);
 				have_frame = true;
+			} else {
+				if (rate_limited(&capture_fail_last_log, &capture_fail_count)) {
+					printf("[camera-mjpeg-stream] alp_camera_capture failed "
+					       "(rc=%d, total=%u)\n",
+					       (int)rc,
+					       capture_fail_count);
+				}
+				capture_fail_consec++;
+				k_msleep(CAPTURE_FAIL_BACKOFF_MS);
+				if (capture_fail_consec >= CAPTURE_FAIL_LIMIT) {
+					printf("[camera-mjpeg-stream] camera stalled (%u "
+					       "consecutive failures); falling back to the "
+					       "synthetic frame\n",
+					       capture_fail_consec);
+					alp_camera_stop(camera);
+					alp_camera_close(camera);
+					camera = NULL;
+				}
 			}
 		} else {
 			build_synthetic_frame(pixfmt, &req);
@@ -255,11 +329,17 @@ int main(void)
 		}
 
 		if (have_frame) {
-			size_t out_len = 0;
+			size_t       out_len = 0;
+			alp_status_t erc     = alp_jpeg_encode(
+			    jpeg, &req, mjpeg_http_claim_write_buffer(), MJPEG_HTTP_MAX_JPEG, &out_len);
 
-			if (alp_jpeg_encode(jpeg, &req, jpeg_out, sizeof(jpeg_out), &out_len) ==
-			    ALP_OK) {
-				mjpeg_http_publish_frame(jpeg_out, out_len);
+			if (erc == ALP_OK) {
+				mjpeg_http_publish_frame(out_len);
+			} else if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
+				printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "
+				       "total=%u)\n",
+				       (int)erc,
+				       encode_fail_count);
 			}
 			if (camera != NULL) {
 				alp_camera_release(camera, &frame);

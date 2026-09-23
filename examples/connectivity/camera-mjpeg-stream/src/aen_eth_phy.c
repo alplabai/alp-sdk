@@ -3,17 +3,23 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * INTERIM AEN-only Ethernet PHY bring-up: power + reset the on-module TI
- * DP83825 PHY and put it in 50 MHz-reference RMII mode, copied from
- * examples/aen/aen-ethernet-link's main.c (that example's file header has
- * the full silicon story -- bench-verified E1M-AEN803, PASS: real DHCP
- * lease + server-side REACHABLE).  There is no portable alp-sdk PHY
- * header yet (see check_example_portability.py's
- * `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST` entry for this example), so this file
- * reaches straight into the raw Zephyr GPIO/pinctrl driver API and the
- * GMAC's own MMIO MDIO registers.  It is compiled in ONLY for AEN board
- * targets (CMakeLists.txt's `BOARD MATCHES "^alp_e1m_aen"` guard) -- drop
- * this whole file once board generation grows a real Ethernet PHY surface
- * of its own; main.c and mjpeg_http.c never reference it.
+ * DP83825 PHY and put it in 50 MHz-reference RMII mode. There is no
+ * portable alp-sdk PHY header yet (see check_example_portability.py's
+ * `_ZEPHYR_DRIVER_INCLUDE_ALLOWLIST` entry for this example), so this
+ * file reaches straight into the raw Zephyr GPIO/pinctrl driver API and
+ * the GMAC's own MMIO MDIO registers -- the pads it drives are SoC-
+ * internal PHY control lines, not the E1M portable pin namespace. It is
+ * compiled in ONLY for AEN board targets (CMakeLists.txt's
+ * `BOARD MATCHES "^alp_e1m_aen"` guard) -- drop this whole file once
+ * board generation grows a real Ethernet PHY surface of its own; main.c
+ * and mjpeg_http.c never reference it.
+ *
+ * A sibling of this bring-up sequence already exists in
+ * examples/aen/aen-ethernet-link's main.c; consolidating both into one
+ * shared board-support source is real follow-up work, not done here --
+ * that file lives in a different example and touching it is outside this
+ * change's scope. Duplication is the known, accepted cost of INTERIM
+ * until board generation removes the need for either copy.
  *
  * Both steps below are plain SYS_INIT hooks: they run themselves, in
  * priority order, before main() -- main.c's camera-capture loop and the
@@ -78,32 +84,46 @@ SYS_INIT(phy_power_init, POST_KERNEL, 50);
  * so this pokes the PHY directly. MAC_MDIO_ADDRESS=0x200 (PA[25:21],
  * RDA[20:16], CR[11:8], GOC read=bit3+bit2, GB=bit0),
  * MAC_MDIO_DATA=0x204 (data[15:0]). CR=4 -> slow, safe MDC. */
-#define GMAC_MDIO_ADDR 0x48100200U
-#define GMAC_MDIO_DATA 0x48100204U
+#define GMAC_MDIO_ADDR  0x48100200U
+#define GMAC_MDIO_DATA  0x48100204U
+#define MDIO_POLL_ITERS 100000 /* ~100ms at the 1us busy_wait below -- never spin forever */
+
+/* Poll GB (bit0, "transaction in flight") down to 0, bounded. Returns
+ * false on timeout -- a genuinely wedged MDIO bus (e.g. no PHY answering,
+ * or the GMAC itself unclocked) must not hang this SYS_INIT hook, which
+ * would hang the whole boot behind it. */
+static bool mdio_wait_idle(void)
+{
+	for (int i = 0; i < MDIO_POLL_ITERS; i++) {
+		if (!(sys_read32(GMAC_MDIO_ADDR) & BIT(0))) {
+			return true;
+		}
+		k_busy_wait(1);
+	}
+	return false;
+}
 
 static uint16_t mdio_read(uint8_t phy, uint8_t reg)
 {
-	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	if (!mdio_wait_idle()) {
+		return 0xFFFF; /* matches phy_find()'s own "nothing here" sentinel */
 	}
 	uint32_t a =
 	    ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(3) | BIT(2) | BIT(0);
 	sys_write32(a, GMAC_MDIO_ADDR);
-	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
-		k_busy_wait(1);
-	}
+	mdio_wait_idle();
 	return (uint16_t)(sys_read32(GMAC_MDIO_DATA) & 0xFFFFU);
 }
 
 static void mdio_write(uint8_t phy, uint8_t reg, uint16_t val)
 {
-	while (sys_read32(GMAC_MDIO_ADDR) & BIT(0)) {
+	if (!mdio_wait_idle()) {
+		return;
 	}
 	sys_write32(val, GMAC_MDIO_DATA);
 	uint32_t a = ((uint32_t)phy << 21) | ((uint32_t)reg << 16) | (0x4U << 8) | BIT(2) | BIT(0);
 	sys_write32(a, GMAC_MDIO_ADDR);
-	for (int i = 0; i < 100000 && (sys_read32(GMAC_MDIO_ADDR) & BIT(0)); i++) {
-		k_busy_wait(1);
-	}
+	mdio_wait_idle();
 }
 
 /* Find the PHY (returns addr 0-31, or -1). DP83825 OUI = 0x2000a140. */
@@ -128,6 +148,15 @@ static int phy_find(void)
  * the camera-capture loop is never held hostage by it. */
 static int phy_refclk_init(void)
 {
+	const struct device *eth = DEVICE_DT_GET(DT_NODELABEL(ethernet));
+
+	if (!device_is_ready(eth)) {
+		/* The eth_dwmac driver's own init (priority 60, before this
+		 * hook at 70) failed or never ran -- the GMAC's MDIO
+		 * registers are not safely accessible. */
+		return -ENODEV;
+	}
+
 	int phy = phy_find();
 
 	if (phy < 0) {

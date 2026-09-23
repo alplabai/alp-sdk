@@ -98,6 +98,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
@@ -123,6 +124,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
@@ -386,7 +388,16 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota
+      # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
+      # (issue #2265): before this, its AEN801/AEN803 build-only scenario
+      # (real camera + Hantro JPEG + interim Ethernet, needing both the
+      # e1m_evk_rpi_csi carrier shield and raspberry_pi_camera_module_1)
+      # never ran in CI at all -- nothing in this repo's CI selected an AEN
+      # board target for it, so a regression in that pipeline would only
+      # surface on the next real bench flash. Same shape as the roots
+      # above: one example, bounded, build_only, not widened to any other
+      # directory.
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -410,6 +421,7 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
             --inline-logs \
             --no-detailed-test-id
 

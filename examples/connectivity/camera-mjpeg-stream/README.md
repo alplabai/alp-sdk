@@ -21,12 +21,14 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
-Console prints the DHCP lease and the two URLs once bound:
+Console prints the DHCP lease and the two URLs once bound (illustrative
+address below, RFC 5737 documentation range — the real lease depends on
+your DHCP server):
 
 ```
-[camera-mjpeg-stream] DHCP lease = 192.168.10.137
-[camera-mjpeg-stream]   stream:   http://192.168.10.137:8080/stream
-[camera-mjpeg-stream]   snapshot: http://192.168.10.137:8080/snapshot.jpg
+[camera-mjpeg-stream] DHCP lease = 192.0.2.10
+[camera-mjpeg-stream]   stream:   http://192.0.2.10:8080/stream
+[camera-mjpeg-stream]   snapshot: http://192.0.2.10:8080/snapshot.jpg
 ```
 
 ## Watch it
@@ -45,17 +47,55 @@ Console prints the DHCP lease and the two URLs once bound:
 
 ## Measured on silicon
 
-TBD (bench) — fps (ffmpeg command above) and bytes per frame (quality 80,
-320×240) once run against a real E1M-AEN803 + OV5647.
+Bench run 204 (E1M-AEN803 + OV5647): `/snapshot.jpg` returned a valid
+15571 B JPEG; `/stream` ran at 17 fps, ~12.8 KB/frame, 255 parts served
+in 15 s with no error. Measured with a 1536 B Ethernet net_buf data size
+(run 203, at the smaller 128 B default, frames over 896 B were dropped
+and no JPEG body arrived at all -- the alp-sdk Alif Ethernet glue is
+gaining a 1536 B default on its own branch, not something this example
+sets). Rerun the ffmpeg command above for a current figure at 640×480.
+
+## Limits
+
+This is a teaching example, not a production camera server:
+
+- **One client at a time.** `zsock_listen(..., 1)` and a single server
+  thread -- a second concurrent client is queued behind the first (or
+  refused once the one-deep backlog is full), not served in parallel.
+- **No authentication, no TLS.** Plain HTTP; anyone who can reach port
+  8080 on the LAN sees the stream.
+- **LAN-only by design** -- there is no port-forwarding/NAT guidance
+  because this is not meant to be exposed past your local network.
+
+**Unverified on silicon:**
+
+- **ISP NV12 output content.** Bench run 204 *did* produce frames through
+  this path end to end (camera → ISP → JPEG → HTTP, no pipeline errors),
+  but the frame content itself was dark/near-black (AWB `noWhitePixel`
+  flagged on every channel, gains read back 0x0) -- under separate
+  investigation (scene/lens vs. AE), not a defect in this example's own
+  code. Treat the *pipeline* as bench-proven and the *image quality* as
+  not yet.
+- **Hantro repeat-encode stability**: run 204 repeat-encoded 255+ frames
+  back-to-back with no encoder error, so this is not unverified -- it was
+  directly observed in that run.
 
 ## Native_sim (CI)
 
-No camera, no Ethernet: `boards/native_sim_native_64.conf` turns on
-`CONFIG_NET_LOOPBACK`, the capture loop streams the synthetic frame through
-the software JPEG encoder, and `src/selftest.c` (compiled in only for
-`native_sim`) loopback-connects to the app's own server on `127.0.0.1:8080`,
-fetches `GET /snapshot.jpg`, and checks the response body starts with the
-JPEG SOI marker (`FF D8`) and ends with EOI (`FF D9`):
+No real camera, no Ethernet: `board.yaml` still declares `som.sku:
+E1M-AEN803`, so `alp_has(ALP_CAP_ID_HW_MIPI_CSI)` reads true even under
+native_sim (capability comes from the configured SoM, not the host
+running the binary) -- the synthetic-frame fallback fires because
+`alp_camera_open()` (no real camera backend links on native_sim) fails,
+not because `alp_has()` is false. `boards/native_sim.conf` turns on
+`CONFIG_NET_LOOPBACK`, the capture loop streams the synthetic frame
+through the software JPEG encoder, and `src/selftest.c` (compiled in
+only for `native_sim`) loopback-connects to the app's own server on
+`127.0.0.1:8080`: it checks `GET /snapshot.jpg` (body starts with the
+JPEG SOI marker `FF D8`, ends with EOI `FF D9`) and `GET /stream`'s
+multipart framing (the `--alpframe` boundary line, a `Content-Type` +
+`Content-Length` header pair, the blank line, and the trailing CRLF after
+the body):
 
 ```
 [camera-mjpeg-stream] selftest ok
@@ -66,20 +106,16 @@ JPEG SOI marker (`FF D8`) and ends with EOI (`FF D9`):
 | File | What |
 |---|---|
 | `src/main.c` | Camera-capture + JPEG-encode loop (the app's main thread); pixfmt selection from `alp_jpeg_caps_t::pixfmt_mask`; DHCP kick-off + lease/URL printing. |
-| `src/mjpeg_http.c` | The HTTP server: `GET /stream` + `GET /snapshot.jpg`, its own thread, `zsock_*` sockets. |
-| `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up (mirrors `examples/aen/aen-ethernet-link`); not linked on other targets. |
-| `src/selftest.c` | native_sim-only CI selftest (loopback `GET /snapshot.jpg`, JPEG marker check). |
+| `src/mjpeg_http.c` | The HTTP server: `GET /stream` + `GET /snapshot.jpg`, its own thread, `zsock_*` sockets, zero-copy ping-pong frame hand-off (two SRAM0 buffers, `mjpeg_http_claim_write_buffer()`/`mjpeg_http_publish_frame()`), `SO_RCVTIMEO`/`SO_SNDTIMEO` on every accepted socket. |
+| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use. |
+| `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
+| `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
-| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline, Hantro JPEG encoder, Ethernet DMA-region glue) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability
 
-Ring 1 by design: no `chips:` in `board.yaml`, camera path gated on
-`alp_has(ALP_CAP_ID_HW_MIPI_CSI)` rather than SoC identity — the same
-`src/main.c` and `src/mjpeg_http.c` build and run on any family, falling
-back to the synthetic frame wherever there's no camera. `board.yaml` pins
-`som.sku: E1M-AEN803` because the camera + JPEG hardware pipeline this
-example demonstrates end to end is only populated on that family today
-(`check_example_portability.py` classifies it Ring 3, SoM-bound, on that
-basis — an accepted category, not a portability gap: see
-`docs/portability.md` §4.4).
+See `board.yaml`'s header comment for why this example is Ring 3
+(SoM-bound) despite having no `chips:` list and a fully capability-gated
+`src/main.c`.

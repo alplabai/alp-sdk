@@ -7,10 +7,16 @@ sample:
     (multipart/x-mixed-replace) from a plain Zephyr BSD TCP socket.
     native_sim has no camera and no Ethernet: it streams a synthetic
     test-pattern frame through the portable software JPEG encoder and
-    proves the server end to end with an in-app loopback selftest
-    (GET /snapshot.jpg over 127.0.0.1, checks the JPEG SOI/EOI markers).
-    The E1M-AEN target is a build-only scenario -- see the AEN803
-    entry below and README.md for the real bench numbers.
+    proves the server end to end with an in-app loopback selftest over
+    127.0.0.1 (GET /snapshot.jpg's JPEG SOI/EOI markers, and GET
+    /stream's multipart boundary/header/CRLF framing).  Both
+    boards/native_sim.conf AND boards/native_sim_native_64.conf are
+    needed (content-identical) for the two platform_allow entries below
+    -- Zephyr's board-conf auto-apply resolves a different filename per
+    qualifier string, so no single file covers both `native_sim` and
+    `native_sim/native/64`.  The E1M-AEN target is a build-only scenario
+    -- see the AEN803 entry below and README.md for the real bench
+    numbers.
 
 tests:
   alp_sdk.examples.camera_mjpeg_stream.native_sim:

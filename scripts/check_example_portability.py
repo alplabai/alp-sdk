@@ -226,14 +226,15 @@ _ZEPHYR_DRIVER_INCLUDE_ALLOWLIST: dict[str, dict[str, str]] = {
     },
     "connectivity/camera-mjpeg-stream": {
         "gpio": (
-            "src/aen_eth_phy.c, INTERIM AEN-only PHY power/reset GPIOs "
-            "copied from aen-ethernet-link; no portable <alp/*.h> "
-            "Ethernet-PHY surface exists yet -- drop once board "
-            "generation grows one."
+            "src/aen_eth_phy.c, INTERIM AEN-only PHY power/reset -- the "
+            "gpio11/lpgpio pins it drives are SoC-internal PHY control "
+            "lines (E_PHY_RESET/E_PHY_PWRDWN), not E1M portable pins; no "
+            "portable <alp/*.h> Ethernet-PHY surface exists yet -- drop "
+            "once board generation grows one."
         ),
         "pinctrl": (
             "src/aen_eth_phy.c, same INTERIM PHY bring-up -- pad-mux "
-            "selection for the two PHY-control GPIOs."
+            "selection for the same two SoC-internal PHY-control GPIOs."
         ),
     },
     "v2n/v2n-xspi-flash-readwrite": {
