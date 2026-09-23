@@ -47,6 +47,15 @@ rsource "Kconfig.alp-libraries"
 # ---------------------------------------------------------------------------
 rsource "drivers/usb/uhc/Kconfig"
 
+# ---------------------------------------------------------------------------
+# Ilitek ILI251x capacitive touch controller (ADR-0017-ADJACENT, board-unique
+# -- ILI2511 on the Riverdi RVT121HVDFWCA0-B panel). Sourced inside if
+# ALP_SDK for the same reason as the UHC skeleton above: it is an alp-sdk
+# module driver (wired from zephyr/CMakeLists.txt), not an upstream Zephyr
+# driver. See zephyr/drivers/input/input_ili251x.c for the STATUS block.
+# ---------------------------------------------------------------------------
+rsource "drivers/input/Kconfig.ili251x"
+
 endif # ALP_SDK
 
 # ---------------------------------------------------------------------------
