@@ -643,6 +643,24 @@ int isp_set_fmt(const struct device *dev,
 			return ret;
 		}
 
+		/*
+		 * isp_apply_mrsz() divides by (height / 2 - 1) to scale 4:2:0
+		 * chroma; find_format() above has no height_step for this
+		 * (height_min is 0, see ISP_VIDEO_FORMAT_CAP), so it lets a
+		 * height < 4 or odd height through, which would DIV_0_TRP
+		 * fault (height 2) or hand MRSZ a degenerate SCALE_VC=0
+		 * (height also 2) or a non-integer chroma downscale (odd).
+		 * Reject here, at the fail-fast point this switch already
+		 * uses for output-format errors.
+		 */
+		if ((fmt->pixelformat == VIDEO_PIX_FMT_YUV420 ||
+		     fmt->pixelformat == VIDEO_PIX_FMT_NV12 ||
+		     fmt->pixelformat == VIDEO_PIX_FMT_NV21) &&
+		    (fmt->height < 4 || (fmt->height % 2) != 0)) {
+			LOG_ERR("4:2:0 output height %u must be even and >= 4!", fmt->height);
+			return -EINVAL;
+		}
+
 		channel->output_fmt = *fmt;
 		break;
 	default:
@@ -1382,10 +1400,26 @@ static unsigned int bayer_sample_depth(uint32_t fourcc)
 static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint16_t out_height)
 {
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	bool is_420 = pixelformat == VIDEO_PIX_FMT_YUV420 || pixelformat == VIDEO_PIX_FMT_NV12 ||
+		      pixelformat == VIDEO_PIX_FMT_NV21;
 
-	if (pixelformat != VIDEO_PIX_FMT_YUV420 && pixelformat != VIDEO_PIX_FMT_NV12 &&
-	    pixelformat != VIDEO_PIX_FMT_NV21) {
-		/* Bypass, and clear any 4:2:0 config a previous stream left armed. */
+	/*
+	 * Defensive: out_height/2 - 1 divides SCALE_VC below, so a height < 4
+	 * (or the isp_set_fmt() -EINVAL for odd 4:2:0 heights slipping through
+	 * some other call path) must bypass instead of a DIV_0_TRP UsageFault.
+	 * isp_set_fmt() is the real gate; this is belt-and-braces.
+	 */
+	if (!is_420 || out_height < 4) {
+		/*
+		 * Bypass, and clear any 4:2:0 config a previous stream left
+		 * armed -- FORMAT_CONV_CTRL takes effect immediately (it is
+		 * not shadowed by CFG_UPD), so a stale 0x4 (4:2:0) from a
+		 * prior stream must be cleared here too, not just SCALE_VC/
+		 * PHASE_VC.
+		 */
+		sys_write32(0, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+		sys_write32(0, regs + ISP_MRSZ_SCALE_VC);
+		sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
 		sys_write32(MRSZ_CTRL_CFG_UPD, regs + ISP_MRSZ_CTRL);
 		return;
 	}
@@ -1537,6 +1571,20 @@ static int isp_stream_start(const struct device *dev)
 		goto dequeue_buf;
 	}
 
+	/*
+	 * Placement: after isp_vsi_start() (above), before the camera path's
+	 * video_stream_start(config->controller) (below). FORMAT_CONV_CTRL is
+	 * not CFG_UPD-shadowed, so this write takes effect the instant it
+	 * lands -- safe here on the camera path because no pixel data flows
+	 * until video_stream_start(config->controller) runs, still ahead of
+	 * this call. Do not move this below video_stream_start().
+	 *
+	 * In TPG mode (config->controller == NULL) the TPG is the ISP's own
+	 * internal pattern source, so it may already be producing frames
+	 * right after isp_vsi_start() returns -- this write can then land
+	 * mid-frame. TPG colour output is tracked separately (#2256); no fix
+	 * here.
+	 */
 	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
 
 	/*
