@@ -29,10 +29,10 @@ for the SKU breakdown:
 - **E1M-AEN family** — `E1M-AEN301` … `E1M-AEN801` (Alif Ensemble
   E3–E8).  E3 / E4 are RTOS-only (no A-class); E5..E8 carry an
   A32 cluster alongside the M55 pair.
-- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102` (Renesas RZ/V2N):
-  A55 cluster + M33-SM.
-- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102` (RZ/V2N +
-  DEEPX DX-M1): same topology as V2N.
+- **E1M-X V2N family** — `E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`
+  (Renesas RZ/V2N): A55 cluster + M33-SM.
+- **E1M-X V2N-M1 family** — `E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`
+  (RZ/V2N + DEEPX DX-M1): same topology as V2N.
 - **E1M-N93 family** — iMX93: A55 cluster + M33.
 
 Because the per-core matrix is 11 columns wide, the per-version

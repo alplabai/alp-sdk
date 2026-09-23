@@ -1,8 +1,8 @@
 # E1M-X Development Board — SDK reference
 
 Board for the **E1M-X** form factor (45 × 65 mm) — hosts
-the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`,
-`E1M-V2M101`, `E1M-V2M102`) and any future E1M-X conformant SoM.
+the Renesas RZ/V2N family (`E1M-V2N101`, `E1M-V2N102`, `E1M-V2N103`,
+`E1M-V2M101`, `E1M-V2M102`, `E1M-V2M103`) and any future E1M-X conformant SoM.
 
 > Source: vendor datasheet
 > — Altium project (multi-sheet schematic).  No standalone user
@@ -63,8 +63,10 @@ deltas (verify when the HW config writeup lands):
 |---------------|----------------------------------------------------------|---------------------------|
 | `E1M-V2N101`  | Renesas `R9A09G056N44GBG#AC0`                            | `renesas:rzv2n:n44`       |
 | `E1M-V2N102`  | Renesas `R9A09G056N44GBG#AC0` (different memory tier)    | `renesas:rzv2n:n44`       |
+| `E1M-V2N103`  | Same, alt memory tier (4 GB / 16 GB)                     | `renesas:rzv2n:n44`       |
 | `E1M-V2M101`  | Renesas `R9A09G056N44GBG#AC0` + DEEPX `DX-M1`            | `renesas:rzv2n:n44` (+ `npu: deepx_dxm1`) |
 | `E1M-V2M102`  | Same, alt memory tier                                    | same                      |
+| `E1M-V2M103`  | Same, alt memory tier (4 GB / 16 GB)                     | same                      |
 
 ## What this means for the SDK
 

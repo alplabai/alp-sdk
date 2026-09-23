@@ -436,8 +436,10 @@ metadata/
 │   ├── E1M-AEN803.yaml      # AEN E8, dual external memory BOM; preliminary
 │   ├── E1M-V2N101.yaml      # v0.3 fully-populated worked example
 │   ├── E1M-V2N102.yaml      # partial_hw_config: true
+│   ├── E1M-V2N103.yaml      # 4 GB / 16 GB memory tier
 │   ├── E1M-V2M101.yaml      # V2N-M1 SKU (DEEPX-DXM1 populated)
 │   ├── E1M-V2M102.yaml      # V2N-M1 SKU
+│   ├── E1M-V2M103.yaml      # V2N-M1 SKU, 4 GB / 16 GB memory tier
 │   └── E1M-NX9101.yaml      # i.MX 93 placeholder MPN (production E1M-NX9xxx TBD)
 └── boards/
     ├── e1m-evk.yaml            # 35x35 EVK (AEN / N93)

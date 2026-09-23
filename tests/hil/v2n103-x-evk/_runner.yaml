@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Runner defaults for E1M-V2N103 (V2N101 silicon, 4 GB RAM / 16 GB
+# eMMC memory tier) + E1M-X-EVK.  Inherits the portable spec set
+# from tests/hil/_common/.  No SoM-specific specs exist in this dir
+# yet.
+
+schema_version: 1
+board: alp_e1m_v2n103_m33_sm
+flash_method: westflash
+defaults:
+  serial:
+    baud:       115200
+    duration_s: 20

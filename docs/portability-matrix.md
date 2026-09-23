@@ -77,10 +77,12 @@ prose and survives regeneration.
 | --- | --- | :---: | :---: | :---: | --- |
 | E1M-V2M101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2M102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
+| E1M-V2M103 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM · NPU `deepx_dxm1` · PCIe mux `pi3dbs12212` |
 | E1M-V2N101 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
 | E1M-V2N102 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 64 Gbit DRAM |
+| E1M-V2N103 | `renesas:rzv2n:n44` | ❌ | ✅ | ✅ | 32 Gbit DRAM |
 
-**8 / 12 cells generate cleanly (4 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
+**12 / 18 cells generate cleanly (6 FAILING — see the ❌ cells; run `python3 scripts/gen_portability_matrix.py` locally for the per-cell diagnostics).**
 
 Legend: ✅ `--emit zephyr-conf` succeeds for every app-carrying core · ❌ it does not.
 <!-- END GENERATED: gen_portability_matrix -->
@@ -166,45 +168,45 @@ reports before a build.
 
 ### E1M-X family (Cortex-A55 + Cortex-M33)
 
-| Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2N101 | E1M-V2N102 |
-| --- | :---: | --- | --- | :---: | :---: | :---: | :---: |
-| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
-| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ |
-| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ |
-| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ |
-| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ |
-| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
-| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ |
-| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ |
+| Library | Tier | Version | License | E1M-V2M101 | E1M-V2M102 | E1M-V2M103 | E1M-V2N101 | E1M-V2N102 | E1M-V2N103 |
+| --- | :---: | --- | --- | :---: | :---: | :---: | :---: | :---: | :---: |
+| `arm-2d` | B | `v1.2.6` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `aws-iot` | B | `v3.1.5` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `azure-iot` | B | `1.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `bearssl` | B | `7bea48e5e850ab4cafbe68d3765cdaba13a86d6f` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `canopennode` | B | `dec12fa3f0d790cafa8414a4c2930ea71ab72ffd` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `catch2` | B | `3.7.1` | BSL-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-cv` | B | `25c6c111ee04dcfb0ae9093fd6dee4586872982c` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-dsp` | A | `97512610ec92058f0119450b9e743eeb7e95b5c8` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-nn` | A | `d20117c9e88cf9018d6fa06744dddac700c3e3a1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `cmsis-stream` | B | `v3.2.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `coap` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `doctest` | B | `2.4.11` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `etl` | B | `20.39.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `fmt` | B | `11.0.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `gfx-compat` | B | `1a7b16034ec123e92c25e9ec13fb3508e7041a23` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `jsmn` | B | `1.1.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `libwebsockets` | B | `v4.3.4` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `littlefs` | B | `2.11` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lvgl` | A | `9.5.0` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `lwm2m` | B | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `madgwick-ahrs` | B | `v1.3.2` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `mbedtls` | B | `4.1.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micro-ros` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `micropython` | B | `v1.24.1` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `minimp3` | B | `ea99364f61c14656440e8d77e9c233ccf3124633` | CC0-1.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `modbus` | A | `4.4.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nanopb` | A | `0.4.9.1` | Zlib | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nlohmann-json` | B | `3.11.3` | MIT | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `onnxruntime` | B | `1.28.0` | MIT & Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `opus` | B | `v1.5.2` | BSD-3-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `pid` | B | `0.9.0` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `ros2` | B | `humble` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `tflite-micro` | B | `fcc760af130f3a595b5802cdebcc77461e54f382` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `u8g2` | B | `2.36.5` | BSD-2-Clause | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `zcbor` | A | `0.9.1` | Apache-2.0 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-**140 / 140 (library × SKU) cells compatible.**
+**210 / 210 (library × SKU) cells compatible.**
 
 Legend: ✅ `requires:` satisfied and wireable on the SoM · ❌ incompatible (the named `requires:` constraint fails) · — not applicable (no `integration:` for any OS this SoM runs).
 <!-- END GENERATED: gen_portability_matrix_libraries -->
