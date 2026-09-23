@@ -56,10 +56,13 @@
  * INNO-MAKER module -- scaled from Raspberry Pi libcamera's ov5647.json
  * reference onto the untouched ARX3A0 table's own internal gain relation,
  * then bench-checked on ONE scene (runs 159/162). Provisional: a grey-card
- * calibration under two illuminants is the intended replacement. CCM is
- * OFF (CONFIG_ISP_LIB_CCM_MODULE=n in this example's prj.conf) -- patch
- * 0008's RPi-derived CCM added a blue cast on this module (runs 163/164);
- * it stays off until that grey-card calibration exists too.
+ * calibration under two illuminants is the intended replacement. CCM is ON
+ * (CONFIG_ISP_LIB_CCM_MODULE=y in this example's prj.conf) -- run 171's
+ * colour-bar test pattern proves the ISP pipeline, CCM included, is
+ * colour-correct (all 8 bars at the correct hue, full saturation); the
+ * residual blue tint on the ceiling (runs 163/164) is AWB balancing a
+ * yellow-wall-dominated frame, amplified but not caused by CCM, and will
+ * be fixed by that grey-card calibration rather than by turning CCM off.
  */
 
 #include <stdbool.h>
