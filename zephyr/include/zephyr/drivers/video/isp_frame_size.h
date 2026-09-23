@@ -66,12 +66,15 @@ static inline unsigned int alp_isp_pixel_bpp(uint32_t pixelformat)
  * hasn't negotiated one of its own.
  *
  * For planar/semi-planar YUV (video.h's VIDEO_FMT_IS_FULL_PLANAR /
- * VIDEO_FMT_IS_SEMI_PLANAR -- YUV420/YVU420/NV12/NV21/NV16/NV61/NV24/NV42)
- * the pitch is the LUMA-only line stride: one byte per pixel, never
- * alp_isp_pixel_bpp()'s chroma-subsampled AVERAGE (e.g. 12 for 4:2:0),
- * which isn't a whole number of bytes per pixel and isn't what any
- * consumer strides the Y plane by. Every other fourcc (packed YUV,
- * YUV422P, RGB888_PLANAR_PRIVATE, ...) uses bpp * width / 8.
+ * VIDEO_FMT_IS_SEMI_PLANAR -- YUV420/YVU420/NV12/NV21/NV16/NV61/NV24/NV42 --
+ * plus the Alp Lab-private VIDEO_PIX_FMT_YUV422P, which video.h's macros
+ * don't know) the pitch is the LUMA-only line stride: one byte per pixel,
+ * never alp_isp_pixel_bpp()'s chroma-subsampled AVERAGE (e.g. 12 for
+ * 4:2:0, 16 for YUV422P), which isn't a whole number of bytes per pixel
+ * and isn't what any consumer strides the Y plane by --
+ * fourcc_to_plane_size() (video_alif.c) gives YUV422P's plane 0 exactly
+ * `width` bytes/line too. Every other fourcc (packed YUV,
+ * RGB888_PLANAR_PRIVATE, ...) uses bpp * width / 8.
  *
  * @param pixelformat FourCC pixel format value.
  * @param width Frame width in pixels.
@@ -79,7 +82,8 @@ static inline unsigned int alp_isp_pixel_bpp(uint32_t pixelformat)
  */
 static inline uint32_t alp_isp_default_pitch(uint32_t pixelformat, uint16_t width)
 {
-	if (VIDEO_FMT_IS_FULL_PLANAR(pixelformat) || VIDEO_FMT_IS_SEMI_PLANAR(pixelformat)) {
+	if (VIDEO_FMT_IS_FULL_PLANAR(pixelformat) || VIDEO_FMT_IS_SEMI_PLANAR(pixelformat) ||
+	    pixelformat == VIDEO_PIX_FMT_YUV422P) {
 		return width;
 	}
 

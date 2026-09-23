@@ -108,12 +108,19 @@ ZTEST(isp_frame_size, test_pitch_rgb565_is_bpp_derived)
 	zassert_equal(got, 1280u, "RGB565 pitch: got %u, want 1280 (2 B/px)", got);
 }
 
-ZTEST(isp_frame_size, test_pitch_yuv422p_and_rgb888_planar_private_nonzero)
+ZTEST(isp_frame_size, test_pitch_yuv422p_is_luma_stride)
 {
-	uint32_t yuv422p = alp_isp_default_pitch(VIDEO_PIX_FMT_YUV422P, 640u);
-	uint32_t rgb888p = alp_isp_default_pitch(VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE, 640u);
+	/* YUV422P is planar too (fourcc_to_plane_size(), video_alif.c, gives
+	 * its plane 0 exactly `width` bytes/line) -- luma-only, like
+	 * YUV420/NV12 above, not the 16-bpp average. */
+	uint32_t got = alp_isp_default_pitch(VIDEO_PIX_FMT_YUV422P, 640u);
 
-	zassert_equal(yuv422p, 1280u, "YUV422P pitch: got %u, want 1280 (16 bpp)", yuv422p);
-	zassert_equal(
-	    rgb888p, 1920u, "RGB888_PLANAR_PRIVATE pitch: got %u, want 1920 (24 bpp)", rgb888p);
+	zassert_equal(got, 640u, "YUV422P pitch: got %u, want 640 (luma stride)", got);
+}
+
+ZTEST(isp_frame_size, test_pitch_rgb888_planar_private_is_bpp_derived)
+{
+	uint32_t got = alp_isp_default_pitch(VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE, 640u);
+
+	zassert_equal(got, 1920u, "RGB888_PLANAR_PRIVATE pitch: got %u, want 1920 (24 bpp)", got);
 }

@@ -2020,10 +2020,16 @@ static int isp_dequeue(const struct device *dev,
 	 * allocation UP to CONFIG_VIDEO_BUFFER_POOL_ALIGN, so this cap is a
 	 * last-line-of-defense, not the expected path.
 	 */
-	(*buf)->bytesused = MIN(alp_isp_frame_size(channel->output_fmt.pixelformat,
-	                                           channel->output_fmt.width,
-	                                           channel->output_fmt.height),
-	                        (*buf)->size);
+	uint32_t frame_size = alp_isp_frame_size(
+	    channel->output_fmt.pixelformat, channel->output_fmt.width, channel->output_fmt.height);
+
+	if (frame_size > (*buf)->size) {
+		LOG_WRN("Dequeued buffer (%u B) is smaller than the negotiated frame (%u B); "
+		        "bytesused capped, dequeued frame will be truncated",
+		        (*buf)->size,
+		        frame_size);
+	}
+	(*buf)->bytesused = MIN(frame_size, (*buf)->size);
 
 	/*
 	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The
