@@ -25,7 +25,7 @@
  * -> isp, port@1 deleted) and overrides the `alp-camera0` alias from
  * e1m_evk_rpi_csi's default (&csi_capture_port, the RAW sensor-only path
  * aen-camera-firstlight's OV5647 scenario uses) to &isp -- see
- * boards/*.overlay for why that override is local to this example and
+ * the boards/ overlays for why that override is local to this example and
  * doesn't touch the raw path.
  *
  * LOOP: N_FRAMES captures, not a single shot -- exercises the same

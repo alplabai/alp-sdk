@@ -166,12 +166,13 @@ extern volatile uint32_t isp_mi_frame_end_count;
  * supports (isp_pico.c:176-189).  Output format is YUYV (run 66 -- see the
  * file header): this needs the demosaic + colour pipeline actually enabled,
  * see prj.conf's CONFIG_ISP_LIB_*_MODULE set. */
-#define FRAME_WIDTH             1280
-#define FRAME_HEIGHT            720
-#define FRAME_BYTES_PER_SAMPLE  2 /* VIDEO_PIX_FMT_YUYV is packed 4:2:2: 4
+#define FRAME_WIDTH  1280
+#define FRAME_HEIGHT 720
+#define FRAME_BYTES_PER_SAMPLE \
+	2 /* VIDEO_PIX_FMT_YUYV is packed 4:2:2: 4
 				    * bytes (Y0 U Y1 V) per 2 pixels -- 2
 				    * bytes/pixel on average. */
-#define FRAME_SIZE              (FRAME_WIDTH * FRAME_HEIGHT * FRAME_BYTES_PER_SAMPLE)
+#define FRAME_SIZE (FRAME_WIDTH * FRAME_HEIGHT * FRAME_BYTES_PER_SAMPLE)
 
 /*
  * Second, separate static buffer in the same global SRAM0 bank (4 MiB @
@@ -222,7 +223,7 @@ int main(void)
 	       ISP_IRQ1_EXPECTED);
 
 	bool node_ok = ISP_BOUND && (isp_base == ISP_BASE_EXPECTED) &&
-		       (isp_irq0 == ISP_IRQ0_EXPECTED) && (isp_irq1 == ISP_IRQ1_EXPECTED);
+	               (isp_irq0 == ISP_IRQ0_EXPECTED) && (isp_irq1 == ISP_IRQ1_EXPECTED);
 
 	/*
 	 * Step 3: ISP ID registers -- a plain read off the bound node's physical
@@ -230,8 +231,8 @@ int main(void)
 	 * above).
 	 */
 	uint32_t product_id = *(volatile uint32_t *)(uintptr_t)(isp_base + ISP_ID_PRODUCT_ID_OFF);
-	uint32_t chip_id     = *(volatile uint32_t *)(uintptr_t)(isp_base + ISP_ID_CHIP_ID_OFF);
-	uint32_t chip_rev    = *(volatile uint32_t *)(uintptr_t)(isp_base + ISP_ID_CHIP_REVISION_OFF);
+	uint32_t chip_id    = *(volatile uint32_t *)(uintptr_t)(isp_base + ISP_ID_CHIP_ID_OFF);
+	uint32_t chip_rev   = *(volatile uint32_t *)(uintptr_t)(isp_base + ISP_ID_CHIP_REVISION_OFF);
 
 	printk("isp ID: product=0x%08x chip=0x%08x rev=0x%08x\n", product_id, chip_id, chip_rev);
 
@@ -248,13 +249,11 @@ int main(void)
 		printk("driver: isp_pico.c linked but device NOT ready (init needs a camera\n");
 		printk("        controller or TPG; the overlay wires the TPG -- unexpected)\n");
 	} else {
-		struct video_caps caps    = {.type = VIDEO_BUF_TYPE_OUTPUT};
+		struct video_caps caps    = { .type = VIDEO_BUF_TYPE_OUTPUT };
 		int               rc_caps = video_get_caps(isp_dev, &caps);
 
 		printk("driver: isp_pico.c linked, device READY (v4.4 video API)\n");
-		printk("        video_get_caps rc=%d (min_vbuf_count=%u)\n",
-		       rc_caps,
-		       caps.min_vbuf_count);
+		printk("        video_get_caps rc=%d (min_vbuf_count=%u)\n", rc_caps, caps.min_vbuf_count);
 
 		/* YUYV output format at the TPG's minimum "3x3-Color-Block" size
 		 * (1280x720) -- run 66: the wrapper rejects Bayer as an OUTPUT
@@ -280,7 +279,7 @@ int main(void)
 			       "(SRAM0 pool exhausted?)\n",
 			       (unsigned int)FRAME_SIZE);
 		} else {
-			int rc_enq, rc_start, rc_deq;
+			int                  rc_enq, rc_start, rc_deq;
 			struct video_buffer *deq = NULL;
 
 			printk("buffer: addr=%p size=%u\n", (void *)vbuf->buffer, vbuf->size);
@@ -291,7 +290,7 @@ int main(void)
 			 * -ENOBUFS, MI never armed). OUTPUT = the ISP's MI capture side.
 			 */
 			vbuf->type = VIDEO_BUF_TYPE_OUTPUT;
-			rc_enq = video_enqueue(isp_dev, vbuf);
+			rc_enq     = video_enqueue(isp_dev, vbuf);
 			printk("video_enqueue rc=%d\n", rc_enq);
 
 			rc_start = video_stream_start(isp_dev, VIDEO_BUF_TYPE_OUTPUT);
@@ -318,14 +317,14 @@ int main(void)
 				 * macropixel [Y0 U Y1 V] covers 2 horizontal pixels and
 				 * carries ONE shared chroma (U,V) pair for both -- so Y
 				 * is averaged per PIXEL, U/V per MACROPIXEL. */
-				uint32_t region_y_sum[9]  = {0};
-				uint32_t region_y_cnt[9]  = {0};
-				uint32_t region_u_sum[9]  = {0};
-				uint32_t region_v_sum[9]  = {0};
-				uint32_t region_uv_cnt[9] = {0};
-				const uint8_t *px = (const uint8_t *)deq->buffer;
-				size_t n_macropixels     = bytesused / 4;
-				size_t macropixels_per_row = FRAME_WIDTH / 2;
+				uint32_t       region_y_sum[9]     = { 0 };
+				uint32_t       region_y_cnt[9]     = { 0 };
+				uint32_t       region_u_sum[9]     = { 0 };
+				uint32_t       region_v_sum[9]     = { 0 };
+				uint32_t       region_uv_cnt[9]    = { 0 };
+				const uint8_t *px                  = (const uint8_t *)deq->buffer;
+				size_t         n_macropixels       = bytesused / 4;
+				size_t         macropixels_per_row = FRAME_WIDTH / 2;
 
 				for (size_t idx = 0; idx < n_macropixels; idx++) {
 					size_t row  = idx / macropixels_per_row;
@@ -336,8 +335,8 @@ int main(void)
 						break;
 					}
 
-					int region = (int)((row * 3) / FRAME_HEIGHT) * 3 +
-						     (int)((col * 3) / FRAME_WIDTH);
+					int region =
+					    (int)((row * 3) / FRAME_HEIGHT) * 3 + (int)((col * 3) / FRAME_WIDTH);
 					uint8_t y0 = px[idx * 4 + 0];
 					uint8_t u  = px[idx * 4 + 1];
 					uint8_t y1 = px[idx * 4 + 2];
@@ -351,25 +350,14 @@ int main(void)
 				}
 
 				for (int region = 0; region < 9; region++) {
-					uint32_t my = region_y_cnt[region]
-							      ? region_y_sum[region] /
-									region_y_cnt[region]
-							      : 0;
-					uint32_t mu = region_uv_cnt[region]
-							      ? region_u_sum[region] /
-									region_uv_cnt[region]
-							      : 0;
-					uint32_t mv = region_uv_cnt[region]
-							      ? region_v_sum[region] /
-									region_uv_cnt[region]
-							      : 0;
+					uint32_t my =
+					    region_y_cnt[region] ? region_y_sum[region] / region_y_cnt[region] : 0;
+					uint32_t mu =
+					    region_uv_cnt[region] ? region_u_sum[region] / region_uv_cnt[region] : 0;
+					uint32_t mv =
+					    region_uv_cnt[region] ? region_v_sum[region] / region_uv_cnt[region] : 0;
 
-					printk("block[%d,%d] Y=%u U=%u V=%u\n",
-					       region / 3,
-					       region % 3,
-					       my,
-					       mu,
-					       mv);
+					printk("block[%d,%d] Y=%u U=%u V=%u\n", region / 3, region % 3, my, mu, mv);
 				}
 
 				/* Copy out of the video pool to the static snapshot
