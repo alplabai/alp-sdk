@@ -319,15 +319,13 @@ struct sn65dsi83_config {
 
 /*
  * Datasheet Table 7-4: "Addresses 0x08 - 0x00 = {0x01, 0x20, 0x20, 0x20,
- * 0x44, 0x53, 0x49, 0x38, 0x35}" -- worded high-address-first.  Read as a
- * 9-byte burst starting at 0x00 (ascending), the expected buffer is this
- * array.  BENCH-UNVERIFIED: the datasheet's descending phrasing versus an
- * ascending I2C burst read is exactly the kind of off-by-reversal that only
- * a real read-back settles -- treat a byte-reversed match on the bench as
- * "found the bridge, fix the constant" rather than "wrong bridge".
+ * 0x44, 0x53, 0x49, 0x38, 0x35}" -- the list is high-address-first, so 0x08
+ * holds 0x01 and 0x00 holds 0x35.  A 9-byte burst read ascending from 0x00
+ * therefore returns the list REVERSED: "58ISD   " + 0x01, i.e. "DSI85" read
+ * backwards.  BENCH-UNVERIFIED -- the first real read-back settles it.
  */
 static const uint8_t sn65dsi83_expected_id[SN65_REG_ID_LEN] = {
-	0x01U, 0x20U, 0x20U, 0x20U, 0x44U, 0x53U, 0x49U, 0x38U, 0x35U,
+	0x35U, 0x38U, 0x49U, 0x53U, 0x44U, 0x20U, 0x20U, 0x20U, 0x01U,
 };
 
 static int sn65dsi83_check_id(const struct device *dev)
