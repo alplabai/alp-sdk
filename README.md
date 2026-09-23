@@ -167,9 +167,9 @@ Swap-and-run is measured **within** a SoM family, against the generated
 swap-test matrix: the 6 released E1M-AEN SKUs pass all three canonical
 examples (18 / 21 E1M cells — the remaining 3 are `E1M-NX9101`, a
 placeholder MPN whose only hw_rev is `status: tbd`, refused by the
-hw_rev-buildable gate and so not yet buildable at all), and the 4 E1M-X
-SKUs pass two of three (8 / 12 cells — `adc-voltmeter` fails on all
-four). Matrix at
+hw_rev-buildable gate and so not yet buildable at all), and the 6 E1M-X
+SKUs pass two of three (12 / 18 cells — `adc-voltmeter` fails on all
+six). Matrix at
 [`docs/portability-matrix.md`](docs/portability-matrix.md). Crossing
 between E1M and E1M-X is intentionally out of scope: they're separate
 product lines with separate pinout namespaces

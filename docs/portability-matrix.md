@@ -318,7 +318,7 @@ population, as designed.
 
 ### E1M-X family
 
-All four SKUs share one PCB and one silicon part, RZ/V2N
+All six SKUs share one PCB and one silicon part, RZ/V2N
 R9A09G056N44GBG (rendered as `renesas:rzv2n:n44` in the generated
 Silicon column).  E1M-V2N101 is the swap-test baseline.  Within each
 example, `alp.conf` differs only by:
@@ -330,20 +330,21 @@ example, `alp.conf` differs only by:
    - `CONFIG_ALP_SDK_CHIP_TPS628640=y` (DEEPX rail buck;
      `assembled: optional` on V2N so the orchestrator omits it there)
 
-V2N101 vs V2N102, and V2M101 vs V2M102, are byte-identical save
-the identity comments — the DRAM density delta (32 vs 64 Gbit in the
-generated Notes column) lives at the metadata level and intentionally
-does NOT leak into application-facing CONFIG.
+V2N101 vs V2N102 vs V2N103, and V2M101 vs V2M102 vs V2M103, are
+byte-identical save the identity comments — the DRAM/eMMC density
+delta (32 vs 64 Gbit DRAM in the generated Notes column) lives at
+the metadata level and intentionally does NOT leak into
+application-facing CONFIG.
 
 Expected diffs (legitimate):
 
 | Line family                                       | Differs how                                         |
 | ------------------------------------------------- | --------------------------------------------------- |
-| `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all four (same silicon)                |
-| `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all four (every E1M-X has the GD32 bridge) |
+| `CONFIG_ALP_SOC_RENESAS_RZV2N_N44=y`              | identical on all six (same silicon)                 |
+| `CONFIG_ALP_SDK_CHIP_GD32G553=y`                  | identical on all six (every E1M-X has the GD32 bridge) |
 | `CONFIG_ALP_SDK_CHIP_DEEPX_DXM1=y`                | V2M only                                            |
 | `CONFIG_ALP_SDK_CHIP_PI3DBS12212=y`               | V2M only                                            |
-| `-DALP_SDK_USE_DRPAI_V2N=ON` (`--emit cmake-args`)  | identical on all four (silicon-determined) — DRP-AI3 lives on the Linux/A55 path, not Zephyr |
+| `-DALP_SDK_USE_DRPAI_V2N=ON` (`--emit cmake-args`)  | identical on all six (silicon-determined) — DRP-AI3 lives on the Linux/A55 path, not Zephyr |
 | `-DALP_SDK_USE_DEEPX_DXM1=ON` (`--emit cmake-args`) | V2M only — DEEPX lives on the Linux PCIe path, not Zephyr |
 
 ## Gaps surfaced by Phase A (tracked in Phase B)

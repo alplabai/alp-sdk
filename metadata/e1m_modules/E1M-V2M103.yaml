@@ -54,8 +54,8 @@ on_module:
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
         # Address UNRESOLVED (#1163, #1845).  The chip-default 0x48 collides
         # with the on-module tmp112 on this bus.  The unknown is recorded HERE,
-        # on the DEEPX buck, because that part is V2M-only: E1M-V2N101/102
-        # declare the same tmp112 at 0x48 on the same bus, and all four SKUs
+        # on the DEEPX buck, because that part is V2M-only: E1M-V2N101/102/103
+        # declare the same tmp112 at 0x48 on the same bus, and all six SKUs
         # share one PCB, so the tmp112 ADD0 strap is a single physical net --
         # blanking it on the V2M pair alone would make the tree answer the same
         # hardware question two different ways.  Which part is re-strapped on

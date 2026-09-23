@@ -193,7 +193,7 @@ To raise the cap to 1.8 GHz, flip one line in the SoM dtsi
 ```
 
 …or pass it to the kernel dtb build without editing the file
-(`-DALP_CA55_1P8GHZ=1`). The change is SoM-level, so it applies to all four
+(`-DALP_CA55_1P8GHZ=1`). The change is SoM-level, so it applies to all six
 V2N-family SKUs. Validate your own silicon + thermals before enabling it
 fleet-wide.
 
