@@ -46,6 +46,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,28 @@ import pytest
 REPO = Path(__file__).resolve().parents[2]
 BENCH = REPO / "scripts" / "bench" / "aen"
 ENV = BENCH / "bench-env.sh"
+
+# --- stub the one external dependency (Zephyr's runners.core), same shape
+# as test_alif_flash_runner.py -- needed here too for the NEW-1 parity
+# cases that drive the Python side THROUGH the real `_run_maintenance`
+# (a subprocess boundary), not just through the pure parser functions.
+sys.path.insert(0, str(REPO / "scripts" / "west_commands"))
+if "runners.core" not in sys.modules:
+    _fake_core = types.ModuleType("runners.core")
+
+    class _RunnerCaps:
+        def __init__(self, **kw):
+            self.__dict__.update(kw)
+
+    class _ZephyrBinaryRunner:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+    _fake_core.RunnerCaps = _RunnerCaps
+    _fake_core.ZephyrBinaryRunner = _ZephyrBinaryRunner
+    sys.modules["runners.core"] = _fake_core
+
+from runners import alif_flash  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -247,7 +270,7 @@ _CRLF_ONLY_ALLOWED_ATOC = (
 # real awk run confirmed these exact outputs: see the docstrings on
 # tests/scripts/test_aen_atoc.py's matching unit tests).
 _SHORT_ROW_FOREIGN = " |  A32_APP\n"
-_NBSP_ONLY_NAME_ROW = "|      | CM0+ |\n"
+_NBSP_ONLY_NAME_ROW = "|  \xa0\xa0\xa0 | CM0+ |\n"
 _EMPTY_NAME_ROW = "|    |  CM0+  |\n"
 # ALP-HE resident under a foreign-looking CPU column ("A32_0" instead of
 # "M55-HE") -- LOW-10 review: the allowed-set membership check is
@@ -285,7 +308,21 @@ def _bash_foreign_names(stderr: str) -> "set[str] | None":
     latter treats every Unicode whitespace codepoint as a separator
     (`'\\xa0'.isspace()` is True), which would silently drop an NBSP-only
     resident name to an empty token list -- measured while adding the
-    HIGH-1 NBSP parity case, alp-sdk#2262."""
+    HIGH-1 NBSP parity case, alp-sdk#2262.
+
+    Known limitation, documented rather than engineered around (nit review,
+    #2262): a literal space-splitting join cannot losslessly represent a
+    FOREIGN entry name that itself contains a space -- in practice, only a
+    `"* "` current-bank marker (`* SERAM0`/`* ALP-HE`/...), and only ever
+    on the two baseline SE-firmware names, which `foreign_resident_entries`
+    exempts before a name ever reaches `extra`/`foreign` at all UNLESS it
+    is on the wrong CPU (a real, if exotic, "coincidentally-named app
+    entry" case -- see `test_parity_seram1_on_wrong_cpu_is_foreign`, which
+    does not carry the marker itself). A `"* <name>"` foreign entry would
+    parse here as two separate tokens (`"*"`, `"<name>"`) instead of one --
+    no fixture in this file constructs that shape, so it has never been
+    exercised; do not read a green suite as proof this helper handles it.
+    """
     m = re.search(r"This board also carries: (.+)", stderr)
     if not m:
         return None
@@ -491,3 +528,149 @@ def test_parity_banner_nonzero_exit_is_unverified_even_with_valid_text(tmp_path,
     py = _python_verdict(aen_atoc, _REAL_GETBANNER, 3, _REAL_GETTOC_CLEAN, 0, ["ALP-HE"], "0")
     assert bash.returncode == 5, bash.stderr
     assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+def test_parity_empty_banner_is_unverified(tmp_path, aen_atoc):
+    # A commit message earlier in this PR's history claimed a "bad/absent
+    # banner" parity case, but no genuinely EMPTY/absent banner (rc 0,
+    # zero-byte output -- e.g. a `maintenance` build that answers
+    # `getbanner` with nothing) was actually covered. `is_valid_ses_banner`
+    # of `""` must be False on both legs.
+    bash = _run_bash_guard(
+        tmp_path, "0", ["ALP-HE"], _REAL_GETTOC_CLEAN, banner_output="")
+    py = _python_verdict(aen_atoc, "", 0, _REAL_GETTOC_CLEAN, 0, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+# ---------------------------------------------------------------------------
+# NEW-1 review (#2262): `_run_maintenance`'s subprocess call must NOT pass
+# `text=True` -- Python's universal-newline translation turns every BARE
+# `\r` in the child's raw stdout into `\n`, splitting one line into two.
+# bash's own reading of `maintenance`'s output either DELETES a bare `\r`
+# (`tr -d '\r'`, for the gettoc table) or treats it as an ordinary
+# mid-line character (`grep`'s own line splitting is `\n`-only, for the
+# banner) -- `text=True` recreates neither behaviour. The three cases
+# below were measured (by hand, against a real stub) to disagree with
+# bash before the fix; a fourth (plain CRLF) is a negative control that
+# already agreed before the fix (universal newlines maps `\r\n` -> `\n`
+# as ONE substitution, same net effect as `tr -d '\r'` there) and must
+# keep agreeing after it.
+#
+# These drive the Python side THROUGH the real `_run_maintenance` (a
+# real subprocess, a real executable stub) rather than through the
+# fixture-string helpers above, which never exercise the subprocess
+# boundary this bug lived in at all.
+# ---------------------------------------------------------------------------
+
+
+def _write_byte_stub_maintenance(path: Path, banner_bytes: bytes, banner_rc: int,
+                                  gettoc_bytes: bytes, gettoc_rc: int) -> None:
+    """A real, executable `maintenance` stub that writes EXACT bytes to
+    stdout -- `sys.stdout.buffer.write(...)`, never `print()`, so nothing
+    on the CHILD's own writing side can normalize a bare `\\r` either."""
+    script = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "argv = sys.argv[1:]\n"
+        "opt = None\n"
+        "prev = None\n"
+        "for a in argv:\n"
+        "    if prev == '-opt':\n"
+        "        opt = a\n"
+        "    prev = a\n"
+        "if opt == 'getbanner':\n"
+        f"    sys.stdout.buffer.write({banner_bytes!r})\n"
+        f"    sys.exit({banner_rc})\n"
+        f"sys.stdout.buffer.write({gettoc_bytes!r})\n"
+        f"sys.exit({gettoc_rc})\n"
+    )
+    path.write_text(script, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _python_verdict_through_run_maintenance(aen_atoc, maint_path, allowed, replace_atoc):
+    banner_text, banner_rc = alif_flash._run_maintenance(maint_path, "fake-uart", "57600",
+                                                           "getbanner")
+    gettoc_text, gettoc_rc = alif_flash._run_maintenance(maint_path, "fake-uart", "57600",
+                                                           "gettoc")
+    return _python_verdict(
+        aen_atoc, banner_text, banner_rc, gettoc_text, gettoc_rc, allowed, replace_atoc)
+
+
+_NEEDS_REAL_SUBPROCESS = pytest.mark.skipif(
+    sys.platform.startswith("win"),
+    reason="a shebang script is not directly executable on Windows",
+)
+
+
+@_NEEDS_BASH
+@_NEEDS_REAL_SUBPROCESS
+def test_parity_bare_cr_inside_a_row_name_via_run_maintenance(tmp_path, aen_atoc):
+    # bash: `tr -d '\r'` DELETES the bare CR, joining "ALP-HE" and "Z"
+    # into one foreign name "ALP-HEZ" on a single row -> refused-foreign.
+    gettoc_bytes = b"| ALP-HE\rZ | M55-HE | x |\n"
+    maint = tmp_path / "maintenance"
+    _write_byte_stub_maintenance(maint, _REAL_GETBANNER.encode("utf-8"), 0, gettoc_bytes, 0)
+    (tmp_path / "bash").mkdir()
+    bash = _run_bash_guard(tmp_path / "bash", "0", ["ALP-HE"], gettoc_bytes.decode("utf-8"))
+    py = _python_verdict_through_run_maintenance(aen_atoc, maint, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-foreign"
+    assert py.foreign == ["ALP-HEZ"]
+
+
+@_NEEDS_BASH
+@_NEEDS_REAL_SUBPROCESS
+def test_parity_bare_cr_before_a_row_via_run_maintenance(tmp_path, aen_atoc):
+    # bash: `tr -d '\r'` joins "junk" onto the front of the row, so the
+    # merged line no longer starts with `|` and never parses as a row at
+    # all -> resident stays empty -> unverified (rc=0, no rows, not the
+    # "No ATOC" line).
+    gettoc_bytes = b"junk\r| ALP-HE | M55-HE | x |\n"
+    maint = tmp_path / "maintenance"
+    _write_byte_stub_maintenance(maint, _REAL_GETBANNER.encode("utf-8"), 0, gettoc_bytes, 0)
+    (tmp_path / "bash").mkdir()
+    bash = _run_bash_guard(tmp_path / "bash", "0", ["ALP-HE"], gettoc_bytes.decode("utf-8"))
+    py = _python_verdict_through_run_maintenance(aen_atoc, maint, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+@_NEEDS_REAL_SUBPROCESS
+def test_parity_bare_cr_inside_the_banner_via_run_maintenance(tmp_path, aen_atoc):
+    # bash: the banner check does no CR handling at all -- `grep` splits
+    # only on `\n`, so "junk\rSES ..." (no real newline before "SES") is
+    # ONE line that does not start with "SES" -> banner invalid ->
+    # unverified.
+    banner_bytes = b"junk\rSES A1 v1.110.0 x\n"
+    maint = tmp_path / "maintenance"
+    _write_byte_stub_maintenance(maint, banner_bytes, 0, _REAL_GETTOC_CLEAN.encode("utf-8"), 0)
+    (tmp_path / "bash").mkdir()
+    bash = _run_bash_guard(
+        tmp_path / "bash", "0", ["ALP-HE"], _REAL_GETTOC_CLEAN,
+        banner_output=banner_bytes.decode("utf-8"))
+    py = _python_verdict_through_run_maintenance(aen_atoc, maint, ["ALP-HE"], "0")
+    assert bash.returncode == 5, bash.stderr
+    assert py.refused and py.status == "refused-unverified"
+
+
+@_NEEDS_BASH
+@_NEEDS_REAL_SUBPROCESS
+def test_parity_crlf_via_run_maintenance_is_a_negative_control(tmp_path, aen_atoc):
+    # A genuine CRLF line ending: universal-newline translation maps
+    # `\r\n` -> `\n` as ONE substitution (not a split into two lines),
+    # the same net effect as bash's `tr -d '\r'` here -- this shape must
+    # agree on both legs REGARDLESS of the `text=True` bug, so it does
+    # not by itself prove the fix (see the three tests above for that);
+    # it documents that CRLF specifically was never the broken case.
+    gettoc_bytes = b"| ALP-HE | M55-HE | x |\r\n"
+    maint = tmp_path / "maintenance"
+    _write_byte_stub_maintenance(maint, _REAL_GETBANNER.encode("utf-8"), 0, gettoc_bytes, 0)
+    (tmp_path / "bash").mkdir()
+    bash = _run_bash_guard(tmp_path / "bash", "0", ["ALP-HE"], gettoc_bytes.decode("utf-8"))
+    py = _python_verdict_through_run_maintenance(aen_atoc, maint, ["ALP-HE"], "0")
+    assert bash.returncode == 0, bash.stderr
+    assert not py.refused and py.status == "clear"

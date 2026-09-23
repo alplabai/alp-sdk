@@ -314,7 +314,7 @@ def test_parse_resident_atoc_table_nbsp_only_name_is_not_dropped(aen_atoc):
     # (`if name and ...` is false) -- fail-open the same direction as the
     # short-row case above. `.strip(' \t')` (this function's actual trim)
     # must leave it non-empty.
-    table = "|      | CM0+ |\n"
+    table = "|  \xa0\xa0\xa0 | CM0+ |\n"
     resident = aen_atoc.parse_resident_atoc_table(table)
     assert len(resident) == 1
     assert resident[0][0] != ""

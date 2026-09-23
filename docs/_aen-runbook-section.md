@@ -136,7 +136,10 @@ machine-readable verdict written BEFORE any refusal is raised; a run that
 fails EARLIER than the guard step — e.g. no SETOOLS, no `zephyr.bin` —
 removes any verdict left by a previous run instead, so its mere absence
 means "the guard did not reach a verdict this attempt", never a stale
-success read as this run's own).
+success read as this run's own). The transcript is NOT removed the same
+way: its value is being the last successfully-read resident ATOC, whether
+or not the current attempt got far enough to read a new one, so a stale
+transcript from an earlier successful run is kept rather than deleted.
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and SWD/`west

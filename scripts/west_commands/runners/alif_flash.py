@@ -142,7 +142,7 @@ _aen_atoc = _load_aen_atoc()
 # global alias; the SE copies it there before booting.
 #   loadAddress 0x58000000 (M55-HE) / 0x50000000 (M55-HP).
 #       cite: scripts/bench/aen/flash-run.sh:46  ("loadAddress": "0x58000000")
-#       cite: docs/aen-provisioning.md:166        ("loadAddress": "0x58000000")
+#       cite: docs/aen-provisioning.md:317        ("loadAddress": "0x58000000")
 #   flags ["load", "boot"], signed:true.
 #       cite: scripts/bench/aen/flash-run.sh:45-46
 #
@@ -343,27 +343,44 @@ def _run_maintenance(maintenance_path, se_uart, baud, opt):
     (`_MAINTENANCE_TIMEOUT_S`) is the SAME fail-closed shape: whatever
     partial output the process produced before being killed, rc=1 --
     `compute_query_status` already treats any non-zero rc as
-    `unverified`, never "ok" from partial text.'''
+    `unverified`, never "ok" from partial text.
+
+    NEW-1 review (#2262): deliberately does NOT pass `text=True` (nor
+    `encoding=`/`errors=` to `subprocess.run`, which imply it). `text=True`
+    turns on Python's universal-newline translation, which rewrites every
+    BARE `\\r` in the child's stdout to `\\n` -- splitting one line into
+    two. bash's own `maintenance`-reading code (bench-env.sh) does the
+    OPPOSITE: `tr -d '\\r'` DELETES a bare `\\r`, keeping the rest of the
+    line intact, and the banner check does not even do that (a `\\r`
+    embedded mid-banner is just an ordinary character to `grep`, which
+    only ever splits on `\\n`). Under `text=True`, a real capture like
+    `"junk\\rSES A1 v1.110.0 ..."` (embedded `\\r`, no real `\\n`) was
+    measured to SPLIT into two lines, the second of which parses as a
+    valid SES banner on its OWN line -- accepting a banner bash's `grep`
+    correctly rejects as one non-matching line. Capturing raw `bytes` and
+    decoding by hand below leaves every `\\r` exactly where the SE-UART
+    put it, so `parse_resident_atoc_table`'s own `.replace('\\r', '')`
+    (this module's mirror of `tr -d '\\r'`) and `is_valid_ses_banner`'s
+    lack of any CR handling both see the SAME bytes bash's `grep`/`tr` do.
+    See tests/scripts/test_alif_flash_runner.py's
+    `test_run_maintenance_*_bare_cr_*` tests and
+    tests/scripts/test_atoc_guard_parity.py's `..._through_run_maintenance`
+    parity cases for the exact shapes this closes.'''
     try:
         proc = subprocess.run(
             [str(maintenance_path), '-b', str(baud), '-c', se_uart,
              '-opt', opt],
             cwd=str(maintenance_path.parent), stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT, text=True, encoding='utf-8',
-            errors='replace', timeout=_MAINTENANCE_TIMEOUT_S)
+            stderr=subprocess.STDOUT, timeout=_MAINTENANCE_TIMEOUT_S)
     except subprocess.TimeoutExpired as exc:
-        # subprocess's own partial-output-on-timeout attribute is not
-        # reliably `str` even under `text=True` (measured: CPython can
-        # hand back the raw `bytes` captured before the kill instead of
-        # the text-decoded form) -- decode defensively rather than let an
-        # f-string embed a `b'...'` literal into the transcript.
-        partial = exc.stdout
-        if isinstance(partial, bytes):
-            partial = partial.decode('utf-8', errors='replace')
-        return f'{partial or ""}\nTIMEOUT after {_MAINTENANCE_TIMEOUT_S}s: {exc}\n', 1
+        # No `text=True` above, so `exc.stdout` (whatever the child wrote
+        # before the kill) is always `bytes` here -- still guard against
+        # `None` (nothing captured yet).
+        partial = exc.stdout.decode('utf-8', errors='replace') if exc.stdout else ''
+        return f'{partial}\nTIMEOUT after {_MAINTENANCE_TIMEOUT_S}s: {exc}\n', 1
     except OSError as exc:
         return f'{exc}\n', 1
-    return proc.stdout, proc.returncode
+    return proc.stdout.decode('utf-8', errors='replace'), proc.returncode
 
 
 def _format_atoc_transcript(se_uart, baud, maintenance_available,
@@ -500,6 +517,18 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
         if self.cfg.build_dir:
             (Path(self.cfg.build_dir) / 'alif_flash' / 'atoc-guard.json').unlink(
                 missing_ok=True)
+        # `atoc-before.txt` is deliberately NOT removed here (nit review,
+        # #2262 -- considered and decided against, not an oversight): its
+        # whole audit-trail value is being the LAST successfully-read
+        # resident-ATOC transcript, whether or not THIS run's guard ever
+        # attempts a new read (see `_run_atoc_guard`'s own module-docstring
+        # note on why bench-env.sh's transcript retention is deliberate,
+        # not a leak). A run that fails before the guard step captured
+        # nothing new to report, so the stale-but-real transcript from the
+        # last run that DID read the board is still useful evidence and
+        # actively worth keeping -- unlike `atoc-guard.json`, whose only
+        # job is a per-ATTEMPT yes/no signal with no standalone value once
+        # stale.
 
         if not self.setools_dir:
             raise RuntimeError(
@@ -670,15 +699,30 @@ class AlifFlashBinaryRunner(ZephyrBinaryRunner):
             encoding='utf-8')
 
         if verdict.status == 'refused-unverified':
+            # Minor review fix (#2262): this message's own "re-run with
+            # --replace-atoc" advice is exactly the wrong instinct on a
+            # pre-provisioned Alp Lab module with a stale/misconfigured
+            # SE_UART -- an unverified read there is disproportionately
+            # likely to be "this is a factory-provisioned module and I
+            # haven't actually confirmed what's on it" rather than "SETOOLS
+            # is broken", and --replace-atoc on such a module deletes the
+            # factory MCUBOOT- entry (see the refused-foreign branch below)
+            # with NO opportunity to see it named first, since the read
+            # never succeeded.
             raise RuntimeError(
                 "could not read the resident ATOC via 'maintenance -c "
                 f"{self.se_uart} -opt gettoc' (see {transcript_path}). A "
                 'fresh ATOC write REPLACES every app entry not in it, so '
                 'writing blind risks silently delisting anything already '
                 'on this board -- that is exactly how an AEN EVK bench '
-                'unit lost its A32 Linux boot chain on 2026-09-07. '
-                'Confirm by hand what is resident, then re-run with '
-                '--replace-atoc.')
+                'unit lost its A32 Linux boot chain on 2026-09-07. On a '
+                'pre-provisioned Alp Lab module this includes the factory '
+                f"{_FACTORY_MCUBOOT_ATOC_NAME!r} MCUboot bootloader -- "
+                '--replace-atoc here could delist it BLIND, with no chance '
+                'to see it named first (see docs/aen-provisioning.md '
+                '"0.5 If your module came from Alp Lab"). Confirm by hand '
+                'what is resident, then re-run with --replace-atoc only '
+                'once you know it is safe to lose.')
         if verdict.status == 'refused-foreign':
             names = ', '.join(verdict.foreign)
             if _FACTORY_MCUBOOT_ATOC_NAME in verdict.foreign:

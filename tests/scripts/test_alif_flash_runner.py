@@ -442,6 +442,21 @@ def test_do_run_refuses_when_maintenance_binary_missing(tmp_path, monkeypatch) -
     assert _verdict(runner)["status"] == "refused-unverified"
 
 
+def test_do_run_unverified_refusal_warns_about_factory_mcuboot(tmp_path, monkeypatch) -> None:
+    # Minor review fix (#2262): the unverified-read refusal must not
+    # blindly steer an operator at --replace-atoc without first warning
+    # that, on a pre-provisioned module, that flag can delist the factory
+    # MCUBOOT- entry with no chance to see it named (the read never
+    # succeeded, so refused-foreign's own naming never gets a chance to
+    # run).
+    runner = _make_runner(tmp_path, maintenance_available=False)
+    with pytest.raises(RuntimeError) as excinfo:
+        runner.do_run("flash")
+    message = str(excinfo.value)
+    assert "MCUBOOT-" in message
+    assert "aen-provisioning.md" in message
+
+
 def test_do_run_refuses_when_banner_is_missing_or_malformed(tmp_path, monkeypatch) -> None:
     runner = _make_runner(tmp_path)
     _stub_maintenance(monkeypatch, banner=("not a banner\n", 0), gettoc=(_CLEAN_HE_GETTOC, 0))
@@ -525,17 +540,28 @@ def test_do_run_removes_a_stale_verdict_file_when_it_fails_before_the_guard(
     verdict_path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-guard.json"
     assert verdict_path.is_file()  # first run's own clean verdict
 
-    # Second run: remove app-write-mram so do_run fails AFTER the guard has
-    # already run once successfully -- but BEFORE this attempt reaches the
-    # guard again is not reachable here (the guard runs before the burn),
-    # so instead simulate a failure that happens before do_run even gets
-    # to stage a config: delete app-gen-toc.
+    # Second run: a failure AFTER the guard has already run once
+    # successfully but BEFORE this attempt reaches the guard again is not
+    # reachable here (the guard runs immediately before the burn, so
+    # nothing sits between a repeat guard run and the previous one) --
+    # simulate a failure that happens before do_run even gets to stage a
+    # config instead: delete app-gen-toc, so the very first SETOOLS-dir
+    # sanity check fails.
     (Path(runner.setools_dir) / "app-gen-toc").unlink()
     with pytest.raises(RuntimeError, match="does not look like a SETOOLS"):
         runner.do_run("flash")
     assert not verdict_path.exists(), (
         "a run that fails before the guard step must not leave a stale "
         "verdict.json from a PREVIOUS run behind"
+    )
+    # Deliberate contrast (nit review, #2262): the TRANSCRIPT is not
+    # removed the same way -- its audit-trail value is being the last
+    # successfully-read resident ATOC, whether or not this attempt got
+    # far enough to read a new one.
+    transcript_path = Path(runner.cfg.build_dir) / "alif_flash" / "atoc-before.txt"
+    assert transcript_path.is_file(), (
+        "atoc-before.txt from the previous successful read must survive "
+        "a later run that fails before reaching the guard"
     )
 
 
