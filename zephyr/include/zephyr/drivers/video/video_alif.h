@@ -18,13 +18,6 @@ extern "C" {
 #define VIDEO_CID_ALIF_CSI_DPHY_FREQ         (VIDEO_CID_PRIVATE_BASE + 0)
 #define VIDEO_CID_ALIF_CSI_CURR_CAM          (VIDEO_CID_PRIVATE_BASE + 1)
 #define VIDEO_CID_JPEG_INPUT_BUFFER          (VIDEO_CID_JPEG_CLASS_BASE + 4)
-/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
- * has ENC_ENABLE (SWREG5 bit 0) asserted, 0 once it has cleared. Added for
- * the bounded post-timeout quiesce poll in
- * src/backends/jpeg/alif_hantro.c's hantro_encode() -- see
- * jpeg_hantro_vc9000e_get_volatile_ctrl() in jpeg_hantro_vc9000e.c.
- */
-#define VIDEO_CID_JPEG_ENC_BUSY               (VIDEO_CID_JPEG_CLASS_BASE + 5)
 
 /* ISP aggregate parameter controls — value is a pointer to struct isp_params
  * (defined in isp_ctrl_params.h).  Set valid_mask to the ISP_PARAM_MASK_*
@@ -32,6 +25,18 @@ extern "C" {
  */
 #define VIDEO_CID_ALIF_ISP_SET               (VIDEO_CID_PRIVATE_BASE + 2)
 #define VIDEO_CID_ALIF_ISP_GET               (VIDEO_CID_PRIVATE_BASE + 3)
+
+/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
+ * has SW_ENC_E (JPEG_SWREG5 bit 0, per AE822FA0E5597BS0_CM55_HE_View.svd)
+ * asserted, 0 once hardware has cleared it. This is a driver-private status
+ * bit, not a JPEG-class control (V4L2's JPEG class defines no such CID), so
+ * it belongs in the VIDEO_CID_PRIVATE_BASE range alongside the CSI/ISP
+ * controls above, not VIDEO_CID_JPEG_CLASS_BASE. Added for the bounded
+ * pre-stop quiesce poll in src/backends/jpeg/alif_hantro.c's
+ * hantro_encode() -- see jpeg_hantro_vc9000e_get_volatile_ctrl() in
+ * jpeg_hantro_vc9000e.c.
+ */
+#define VIDEO_CID_JPEG_ENC_BUSY              (VIDEO_CID_PRIVATE_BASE + 4)
 
 /*
  * v4.4 video-API shim (Alp Lab AB): legacy Bayer + greyscale pixel-format

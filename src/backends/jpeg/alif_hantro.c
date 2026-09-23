@@ -81,12 +81,12 @@ LOG_MODULE_REGISTER(alp_jpeg_alif_hantro, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /*
- * dev-review addition (Alp Lab AB): bound on the post-timeout quiesce poll
- * in hantro_encode()'s -EAGAIN path below. VIDEO_CID_JPEG_ENC_BUSY reflects
- * ENC_ENABLE, not proof of a drained in-flight AXI write -- see the
- * ownership-map comment at that call site and
- * jpeg_hantro_vc9000e_get_volatile_ctrl()'s doc comment for the full
- * caveat. A few milliseconds, not a datasheet number.
+ * dev-review addition (Alp Lab AB): bound on the pre-stop SW_ENC_E quiesce
+ * poll in hantro_encode()'s -EAGAIN path below, run BEFORE video_stream_
+ * stop() touches anything -- see the ownership-map comment at that call
+ * site and jpeg_hantro_vc9000e_get_volatile_ctrl()'s doc comment for the
+ * full caveat (a cleared SW_ENC_E is not proof any in-flight AXI write has
+ * drained). A few milliseconds, not tied to any datasheet number.
  */
 #define HANTRO_QUIESCE_POLL_TIMEOUT_MS 5
 
@@ -439,38 +439,55 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		 * the unsafe half of this decision -- it always happens, on
 		 * every error path, below.
 		 *
-		 * What -EAGAIN actually needs is the encoder stopped so it is
-		 * no longer targeting out_buf at all, which is a genuine
-		 * ownership question the slot's release can't answer by
-		 * itself: video_stream_stop() clears ENC_ENABLE/IRQ_EN and (as
-		 * of the companion driver fix) data->current_buf immediately,
-		 * unwedging future encodes, but a cleared ENC_ENABLE bit is not
-		 * proof any AXI write already in flight has drained -- there is
-		 * no datasheet in this tree to confirm that is instantaneous.
-		 * Bound the uncertainty instead of ignoring it: poll the
-		 * driver's one live status bit
-		 * (VIDEO_CID_JPEG_ENC_BUSY -- jpeg_hantro_vc9000e_get_volatile_
-		 * ctrl()) for up to HANTRO_QUIESCE_POLL_TIMEOUT_MS before
-		 * reclaiming the slot regardless of how that poll ends. This
-		 * narrows the window a stray late write could land in; it does
-		 * not close it, which is exactly why <alp/jpeg.h>'s
-		 * alp_jpeg_encode() documents out_buf as undefined after
-		 * ALP_ERR_TIMEOUT until a later successful encode or close().
+		 * What -EAGAIN actually needs is the encoder genuinely done with
+		 * out_buf, which is a real ownership question the slot's release
+		 * can't answer by itself. Per the AE822FA0E5597BS0_CM55_HE_View.svd
+		 * JPEG_SWREG5.SW_ENC_E field description ("encoder enable ...
+		 * HW will reset this when picture is processed or bus error or
+		 * timeout interrupt is given"), software SETS this bit to start an
+		 * encode and HARDWARE clears it on completion -- so a live read of
+		 * it, taken BEFORE anything here forces the encoder off, is the one
+		 * genuine signal available that the job finished (or errored/timed
+		 * out internally) on its own. Poll it first, via a new read-only
+		 * volatile control (VIDEO_CID_JPEG_ENC_BUSY --
+		 * jpeg_hantro_vc9000e_get_volatile_ctrl() reads SW_ENC_E live),
+		 * for up to HANTRO_QUIESCE_POLL_TIMEOUT_MS. That bound (a few ms,
+		 * not tied to the per-request timeout_ms formula above) is a
+		 * deliberate choice: by the time we're here that budget is already
+		 * exhausted -- that's what -EAGAIN means -- so there is no
+		 * "remaining" fraction of it to poll against; a few ms is a small,
+		 * fixed, additional allowance instead. ONLY THEN is
+		 * video_stream_stop() called to force SW_ENC_E off if the poll
+		 * never saw it clear -- calling stop FIRST (the earlier version of
+		 * this fix) would make the poll read a bit software itself had
+		 * just cleared, always observing "not busy" and proving nothing.
+		 * A poll that times out with SW_ENC_E still set is logged (still
+		 * genuinely uncertain whether the encoder has released out_buf);
+		 * the slot is released unconditionally regardless, since parking
+		 * it protects nothing (see above) -- which is exactly why
+		 * <alp/jpeg.h>'s alp_jpeg_encode() documents out_buf as undefined
+		 * after ALP_ERR_TIMEOUT until a later successful encode or
+		 * close().
 		 */
 		if (err == -EAGAIN) {
-			struct video_control busy = { .id = VIDEO_CID_JPEG_ENC_BUSY };
-			int64_t              deadline;
+			struct video_control busy     = { .id = VIDEO_CID_JPEG_ENC_BUSY };
+			int64_t              deadline = k_uptime_get() + HANTRO_QUIESCE_POLL_TIMEOUT_MS;
 
-			(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
-			st->streaming = false;
-
-			deadline = k_uptime_get() + HANTRO_QUIESCE_POLL_TIMEOUT_MS;
-			while (k_uptime_get() < deadline) {
+			for (;;) {
 				if (video_get_ctrl(st->dev, &busy) != 0 || busy.val == 0) {
+					break;
+				}
+				if (k_uptime_get() >= deadline) {
+					LOG_WRN("hantro jpeg: SW_ENC_E still set after "
+					        "%d ms quiesce poll; forcing stop",
+					        HANTRO_QUIESCE_POLL_TIMEOUT_MS);
 					break;
 				}
 				k_sleep(K_MSEC(1));
 			}
+
+			(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+			st->streaming = false;
 		}
 		(void)video_buffer_release(&vbuf);
 		return _errno_to_alp(err); /* -EAGAIN -> ALP_ERR_TIMEOUT, see alp_errno.h. */

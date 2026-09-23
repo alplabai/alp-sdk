@@ -21,7 +21,10 @@ extern "C" {
 /**
  * @brief Compute the SWREG9 output-buffer size limit.
  *
- * SWREG9 bounds HW writes starting at the SWREG8 base address, which
+ * Per AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG9 field description
+ * ("Stream buffer0 limit / Output stream size (bytes). If buffer0 limit is
+ * reached ... buffer_full_IRQ will be generated"), SWREG9 bounds HW writes
+ * starting at the JPEG_SWREG8 base address ("buffer0"), which
  * jpeg_start_encode() programs as buf->buffer + header_size -- NOT at
  * buf->buffer itself. Programming the raw buffer capacity (buf_size)
  * unchanged lets the HW write up to header_size bytes past the end of the

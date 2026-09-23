@@ -444,7 +444,8 @@ static void jpeg_start_encode(const struct device *dev)
 	 * satisfied by a completion the ISR already gave for a PREVIOUS job
 	 * (one whose caller gave up waiting and moved on, e.g. via
 	 * jpeg_hantro_vc9000e_set_stream(dev, false, ...)), or by a status
-	 * bit latched in hardware before the IRQ enable was last toggled --
+	 * bit latched in hardware before jpeg_hantro_vc9000e_set_stream()'s
+	 * enable branch last wrote JPEG_SWREG1's IRQ_TYPE_* select bits --
 	 * either way reporting a stale size/error as if it belonged to this
 	 * request.
 	 *
@@ -454,6 +455,17 @@ static void jpeg_start_encode(const struct device *dev)
 	 * sequence -- clearing SWREG1 and resetting the semaphore must be
 	 * atomic with respect to the ISR reading/writing that same register
 	 * and giving that same semaphore.
+	 *
+	 * dev-review finding 2 (a status bit latched before re-arm surfacing
+	 * as this job's result): closed by making this clear UNCONDITIONAL,
+	 * every single call, rather than gated behind a flag sampled only in
+	 * the disable branch. A flag can only catch the specific case its
+	 * sampling point checked for; an unconditional clear right before
+	 * every arm is strictly stronger -- it discards a stale status bit
+	 * or semaphore count regardless of which prior path (a clean
+	 * dequeue, a stream stop, or anything else) left it set, so there is
+	 * no path into this function that can still see a completion latched
+	 * before this point leak into the job about to start.
 	 */
 	key = irq_lock();
 	jpeg_write_reg(dev, JPEG_SWREG1_OFFSET, jpeg_read_reg(dev, JPEG_SWREG1_OFFSET));
@@ -549,22 +561,22 @@ static void jpeg_start_encode(const struct device *dev)
 	 * JPEG_BUFFER_FULL on the first output byte.  Use .size (the capacity),
 	 * which is the register's true meaning ("output buffer size"), BUT
 	 * SWREG9 bounds writes starting at the SWREG8 base programmed above
-	 * (output_ptr = buf->buffer + header_size), NOT at buf->buffer itself
-	 * -- there is no datasheet in this tree to quote for that, but
-	 * jpeg_hantro_vc9000e_isr()'s completion path below computes
-	 * `data->encoding_size = jpeg_read_reg(dev, JPEG_SWREG9_OFFSET) +
-	 * data->header_size`, i.e. it treats the HW-overwritten SWREG9 value
-	 * as the PAYLOAD size (excluding the header) rather than the total
-	 * buffer offset -- consistent only with SWREG9 being relative to
-	 * SWREG8, not to buf->buffer.  Programming the full buf->size here
-	 * (the pre-fix behaviour) let the HW write up to header_size bytes
-	 * past the end of the buf->buffer allocation before tripping
-	 * JPEG_BUFFER_FULL.  output_limit (buf->size - header_size, computed
-	 * above by jpeg_hantro_vc9000e_output_limit()) is the space actually
-	 * remaining after the header; if this reading of SWREG9 is wrong,
-	 * the failure mode of using the smaller value is conservative -- at
-	 * worst a spurious -ENOSPC/JPEG_BUFFER_FULL on a tightly-sized
-	 * buffer, never an overrun. The HW overwrites SWREG9 with the
+	 * (output_ptr = buf->buffer + header_size), NOT at buf->buffer itself.
+	 * Per AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG9 field
+	 * description ("Stream buffer0 limit / Output stream size (bytes). If
+	 * buffer0 limit is reached ... buffer_full_IRQ will be generated"),
+	 * "buffer0" is JPEG_SWREG8's SW_ENC_OUTPUT_STRM_BASE -- SWREG9 is
+	 * authoritatively relative to that base, not to buf->buffer. This
+	 * matches jpeg_hantro_vc9000e_isr()'s completion path below, which
+	 * computes `data->encoding_size = jpeg_read_reg(dev,
+	 * JPEG_SWREG9_OFFSET) + data->header_size` -- treating the
+	 * HW-overwritten SWREG9 value as the PAYLOAD size excluding the
+	 * header. Programming the full buf->size here (the pre-fix
+	 * behaviour) let the HW write up to header_size bytes past the end
+	 * of the buf->buffer allocation before tripping JPEG_BUFFER_FULL.
+	 * output_limit (buf->size - header_size, computed above by
+	 * jpeg_hantro_vc9000e_output_limit()) is the space actually
+	 * remaining after the header. The HW overwrites SWREG9 with the
 	 * produced payload size during the encode, which the completion path
 	 * reads back below.
 	 */
@@ -820,17 +832,24 @@ static int jpeg_hantro_vc9000e_set_ctrl(const struct device *dev, uint32_t cid)
  * Alp Lab AB).
  *
  * Supported controls:
- * - VIDEO_CID_JPEG_ENC_BUSY: read SWREG5's JPEG_ENC_ENABLE bit straight from
- *   hardware into busy_ctrl.val (1 = encoder still has ENC_ENABLE asserted,
- *   0 = cleared). Registered VIDEO_CTRL_FLAG_VOLATILE in
- *   jpeg_hantro_vc9000e_init() specifically so video_get_ctrl() always
- *   reaches this callback instead of serving a cached `.val` -- unlike the
- *   two non-volatile controls in jpeg_hantro_vc9000e_set_ctrl(), a caller
- *   needs the CURRENT bit, not the value at some earlier write. Backing the
- *   bounded post-timeout quiesce poll in src/backends/jpeg/alif_hantro.c's
- *   hantro_encode(): ENC_ENABLE clearing does not by itself prove any
- *   in-flight AXI write has drained, but it is the only encoder-state bit
- *   this driver can read back at all, so it is what that poll has.
+ * - VIDEO_CID_JPEG_ENC_BUSY: read JPEG_SWREG5's SW_ENC_E bit straight from
+ *   hardware into busy_ctrl.val (1 = still set, 0 = hardware has cleared
+ *   it). Per AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG5.SW_ENC_E field
+ *   description, software sets this bit to start an encode and hardware
+ *   resets it "when picture is processed or bus error or timeout interrupt
+ *   is given" -- so a live read is a genuine HW-owned completion signal,
+ *   not something software's own writes can spoof. Registered
+ *   VIDEO_CTRL_FLAG_VOLATILE in jpeg_hantro_vc9000e_init() specifically so
+ *   video_get_ctrl() always reaches this callback instead of serving a
+ *   cached `.val` -- unlike the two non-volatile controls in
+ *   jpeg_hantro_vc9000e_set_ctrl(), a caller needs the CURRENT bit, not
+ *   the value at some earlier write. Backing the bounded pre-stop quiesce
+ *   poll in src/backends/jpeg/alif_hantro.c's hantro_encode(): that poll
+ *   must run BEFORE anything writes JPEG_SWREG5, or it would just observe
+ *   software's own clear. Even read at the right time, SW_ENC_E clearing
+ *   does not by itself prove any in-flight AXI write has drained -- but it
+ *   is the only encoder-state bit this driver can read back at all, so it
+ *   is what that poll has.
  *
  * @param dev Pointer to the device structure.
  * @param cid Control identifier.
