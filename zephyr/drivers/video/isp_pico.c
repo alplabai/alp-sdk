@@ -660,6 +660,35 @@ int isp_set_fmt(const struct device *dev,
 			return -EINVAL;
 		}
 
+		/*
+		 * A caller that doesn't already know its own stride (every
+		 * backend negotiating a fresh format) passes pitch == 0 and
+		 * expects this driver to fill it in -- video_set_format()'s
+		 * fmt is in/out for exactly this reason (see
+		 * video_stm32_venc.c's stm32_venc_set_fmt() for the same
+		 * convention upstream).  For 4:2:0 planar/semi-planar YUV
+		 * (YUV420/YVU420/NV12/NV21) the pitch is the LUMA line stride
+		 * only -- one byte per pixel -- never
+		 * video_bits_per_pixel()'s chroma-subsampled AVERAGE (12 bpp,
+		 * i.e. width*1.5), which isn't a whole number of bytes per
+		 * pixel and isn't what any consumer strides by.  Leaving
+		 * pitch at that average is what isp_dequeue() used to key
+		 * bytesused off of pitch*height and silently drop the chroma
+		 * planes (0 bytes for every YUV frame when pitch was left at
+		 * its uninitialized 0, or the luma-only size once a caller
+		 * filled it in) -- see isp_dequeue(), below, which now sizes
+		 * bytesused off video_bits_per_pixel() directly instead of
+		 * derived from this pitch.
+		 */
+		if (fmt->pitch == 0u) {
+			if (VIDEO_FMT_IS_FULL_PLANAR(fmt->pixelformat) ||
+			    VIDEO_FMT_IS_SEMI_PLANAR(fmt->pixelformat)) {
+				fmt->pitch = fmt->width;
+			} else {
+				fmt->pitch = (video_bits_per_pixel(fmt->pixelformat) * fmt->width) >> 3;
+			}
+		}
+
 		channel->output_fmt = *fmt;
 		break;
 	default:
@@ -1975,7 +2004,20 @@ static int isp_dequeue(const struct device *dev,
 		return -EAGAIN;
 	}
 
-	(*buf)->bytesused = channel->output_fmt.pitch * channel->output_fmt.height;
+	/*
+	 * Full frame size, not pitch*height: pitch (isp_set_fmt(), above) is
+	 * the LUMA line stride for 4:2:0 planar/semi-planar YUV, so
+	 * pitch*height covers only the Y plane and drops the U/V planes --
+	 * bench-proven on E1M-AEN803 (run 200): every dequeued YUV420/NV12
+	 * buffer reported bytesused 0 (pitch was 0 before the isp_set_fmt()
+	 * fix, above) and callers copied nothing.  video_bits_per_pixel()
+	 * already reports the format's true average bits/pixel INCLUDING
+	 * chroma (12 for 4:2:0), so this is correct for every output fourcc
+	 * this driver negotiates, planar or packed.
+	 */
+	(*buf)->bytesused = (video_bits_per_pixel(channel->output_fmt.pixelformat) *
+	                     channel->output_fmt.width * channel->output_fmt.height) /
+	                    BITS_PER_BYTE;
 
 	/*
 	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The

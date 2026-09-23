@@ -100,6 +100,7 @@
 #include "camera_ops.h"
 #include "alif_isp_pico.h"
 #include "alp_slot_claim.h"
+#include "isp_frame_size.h"
 #include "yuv_to_rgb565.h"
 
 #ifndef CONFIG_ALP_SDK_MAX_CAMERA_HANDLES
@@ -364,13 +365,10 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 		return ALP_ERR_OUT_OF_RANGE;
 	}
 
-	/* Per-buffer size: prefer the driver-negotiated pitch; when the driver
-	 * reports none, derive bytes-per-pixel from the negotiated fourcc via
-	 * Zephyr's own format table (video_bits_per_pixel). */
-	uint32_t bytes_per_buf = (st->fmt.pitch != 0u) ? (st->fmt.pitch * st->fmt.height)
-	                                               : (((uint32_t)st->fmt.width * st->fmt.height *
-	                                                   video_bits_per_pixel(st->fmt.pixelformat)) /
-	                                                  BITS_PER_BYTE);
+	/* Per-buffer size: full frame size, not st->fmt.pitch * height -- see
+	 * isp_frame_size.h for why (pitch is the LUMA-only stride for 4:2:0
+	 * planar/semi-planar YUV since isp_pico.c's isp_set_fmt() fix). */
+	uint32_t bytes_per_buf = alp_isp_frame_size(st->fmt.pixelformat, st->fmt.width, st->fmt.height);
 	if (bytes_per_buf == 0u) {
 		/* Real dimensions but a fourcc Zephyr's table can't size:
 		 * refuse rather than under-allocate and let the ISP DMA past
