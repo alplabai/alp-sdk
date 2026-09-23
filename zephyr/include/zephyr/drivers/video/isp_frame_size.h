@@ -126,7 +126,7 @@ static inline uint32_t alp_isp_frame_size(uint32_t pixelformat, uint16_t width, 
  * @brief ISP_MRSZ_SCALE_VC ratio for the main resizer's 2:1 vertical-chroma
  * downscale (4:2:2 internal -> 4:2:0 output).
  *
- * HWRM SS17.3.4.3.169 (ISP_MRSZ_SCALE_VC) gives only the register's meaning
+ * HWRM §17.3.4.3.169 (ISP_MRSZ_SCALE_VC) gives only the register's meaning
  * ("the vertical chrominance downscale factor, or the reciprocal of the
  * vertical chrominance upscale factor" -- a 16.16 fixed-point ratio) and no
  * formula; neither the Alif DFP nor hal_alif programs this register. The
