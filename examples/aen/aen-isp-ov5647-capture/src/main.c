@@ -22,7 +22,10 @@
  * Bayer phase, unlike the VIDEO_PIX_FMT_Y10P this example used to request
  * (which the wrapper only maps to PIXEL_FORMAT_GRBG10, wrong for a BGGR
  * sensor -- swapped colour channels). ISP OUTPUT is VIDEO_PIX_FMT_YUV420
- * 640x480, pitch = width*3/2.
+ * 640x480, pitch = width (the LUMA-only line stride isp_pico.c's
+ * isp_set_fmt() itself fills in for planar/semi-planar YUV -- see
+ * zephyr/include/zephyr/drivers/video/isp_frame_size.h -- not the
+ * chroma-subsampled 1.5 B/px average FRAME_SIZE below is sized with).
  *
  * AE + AWB: both are controlled through the SAME chain every other video
  * ctrl on this device uses (isp -> cam -> csi -> sensor, each declaring a
@@ -406,7 +409,9 @@ int main(void)
 		.pixelformat = VIDEO_PIX_FMT_YUV420,
 		.width       = FRAME_WIDTH,
 		.height      = FRAME_HEIGHT,
-		.pitch       = FRAME_WIDTH * 3 / 2,
+		/* Luma-only line stride, not FRAME_SIZE's chroma-subsampled
+		 * 1.5 B/px average -- see the file header. */
+		.pitch = FRAME_WIDTH,
 	};
 	int rc_out = video_set_format(isp_dev, &out_fmt);
 

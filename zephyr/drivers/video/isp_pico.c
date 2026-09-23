@@ -87,6 +87,7 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
 #include <zephyr/drivers/pinctrl.h>
 
 #include "isp_pico.h"
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
@@ -274,7 +275,7 @@ static const struct video_format_cap supported_output_fmts[] = {
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV21, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV16, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV61, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 19200, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV420, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUYV, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_VYUY, 1920, 1080),
@@ -658,6 +659,27 @@ int isp_set_fmt(const struct device *dev,
 		    (fmt->height < 4 || (fmt->height % 2) != 0)) {
 			LOG_ERR("4:2:0 output height %u must be even and >= 4!", fmt->height);
 			return -EINVAL;
+		}
+
+		/*
+		 * A caller that doesn't already know its own stride (every
+		 * backend negotiating a fresh format) passes pitch == 0 and
+		 * expects this driver to fill it in -- video_set_format()'s
+		 * fmt is in/out for exactly this reason (see
+		 * video_stm32_venc.c's stm32_venc_set_fmt() for the same
+		 * convention upstream). alp_isp_default_pitch()
+		 * (isp_frame_size.h) is the single place this driver AND
+		 * src/backends/camera/alif_isp_pico.c's buffer-pool sizing
+		 * derive a format's byte geometry from -- see that header for
+		 * why planar/semi-planar YUV gets the LUMA-only line stride,
+		 * not an average-bpp-derived one.
+		 */
+		if (fmt->pitch == 0u) {
+			fmt->pitch = alp_isp_default_pitch(fmt->pixelformat, fmt->width);
+			if (fmt->pitch == 0u) {
+				LOG_ERR("Cannot derive a pitch for this output fourcc!");
+				return -EINVAL;
+			}
 		}
 
 		channel->output_fmt = *fmt;
@@ -1285,9 +1307,10 @@ int isp_get_fmt(const struct device *dev,
 				supported_output_fmts[i].height_max;
 			channel->output_fmt.width =
 				supported_output_fmts[i].width_max;
-			channel->output_fmt.pitch =
-				(video_bits_per_pixel(tmp_fmt) *
-				 channel->output_fmt.width) >> 3;
+			/* video_bits_per_pixel() returns 0 for this private
+			 * fourcc -- alp_isp_default_pitch() (isp_frame_size.h)
+			 * knows it (24 bpp, 3 equal 8-bit planes). */
+			channel->output_fmt.pitch = alp_isp_default_pitch(tmp_fmt, channel->output_fmt.width);
 		}
 
 		*fmt = channel->output_fmt;
@@ -1975,7 +1998,38 @@ static int isp_dequeue(const struct device *dev,
 		return -EAGAIN;
 	}
 
-	(*buf)->bytesused = channel->output_fmt.pitch * channel->output_fmt.height;
+	/*
+	 * Full frame size, not pitch*height: pitch (isp_set_fmt(), above) is
+	 * the LUMA-only line stride for planar/semi-planar YUV, so
+	 * pitch*height covers only the Y plane and drops the U/V planes --
+	 * bench-proven on E1M-AEN803 (run 200): every dequeued YUV420/NV12
+	 * buffer reported bytesused 0 (pitch was 0 before the isp_set_fmt()
+	 * fix, above) and callers copied nothing.  alp_isp_frame_size()
+	 * (isp_frame_size.h) -- the same helper
+	 * src/backends/camera/alif_isp_pico.c sizes its buffer pool with --
+	 * reports the format's true average bits/pixel INCLUDING chroma, so
+	 * this is correct for every output fourcc this driver's
+	 * supported_output_fmts[] advertises.
+	 *
+	 * Capped at buf->size: alp_isp_frame_size() sizes the FORMAT, not
+	 * this particular buffer, so a caller that enqueued something
+	 * smaller than the negotiated frame (a pool-sizing bug, or a format
+	 * this helper doesn't yet know) would otherwise hand
+	 * sys_cache_data_invd_range(), below, a length that invalidates past
+	 * the buffer's end. video_buffer_aligned_alloc() rounds every real
+	 * allocation UP to CONFIG_VIDEO_BUFFER_POOL_ALIGN, so this cap is a
+	 * last-line-of-defense, not the expected path.
+	 */
+	uint32_t frame_size = alp_isp_frame_size(
+	    channel->output_fmt.pixelformat, channel->output_fmt.width, channel->output_fmt.height);
+
+	if (frame_size > (*buf)->size) {
+		LOG_WRN("Dequeued buffer (%u B) is smaller than the negotiated frame (%u B); "
+		        "bytesused capped, dequeued frame will be truncated",
+		        (*buf)->size,
+		        frame_size);
+	}
+	(*buf)->bytesused = MIN(frame_size, (*buf)->size);
 
 	/*
 	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The
