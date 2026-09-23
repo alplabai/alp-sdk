@@ -86,18 +86,30 @@ config ETH_DWMAC_ALIF
 	  everything that is not Ethernet-DMA traffic and intermittently breaks
 	  the ISP.
 
-	  A narrower alternative: build-verified; the same placement idea was
-	  prototyped on silicon in scratch bench run 200 (a different app-level
-	  relocation, CONFIG_NOCACHE_MEMORY=y, and different ring addresses than
-	  this mechanism uses -- this mechanism has not itself run on silicon
-	  yet). Give the ethernet node a `memory-region` (e.g. `&sram0`) and
-	  enable ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only the
-	  Ethernet-owned buffers move to SRAM0 while main RAM stays on DTCM.
+	  A narrower alternative: give the ethernet node a `memory-region` (e.g.
+	  `&sram0`, the SoC dtsi default) and enable
+	  ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION below so only the Ethernet-owned
+	  buffers move to SRAM0 while main RAM stays on DTCM. Silicon-verified on
+	  E1M-AEN803 (bench run 202: DHCP lease + ping, rings/pools in SRAM0, main
+	  RAM on DTCM, aen-ethernet-link). E1M-AEN801 is build-verified only (same
+	  E8 memory map, not itself benched); aen-evk-demo's use of this same
+	  mechanism (sharing its 64 KiB SRAM0 window with separate JPEG buffers)
+	  is build-verified only, not benched. An earlier, different prototype of
+	  this same idea ran on silicon in scratch bench run 200 (a different
+	  app-level relocation, CONFIG_NOCACHE_MEMORY=y, and different ring
+	  addresses than this mechanism uses).
 	  Deliberately does NOT `select NOCACHE_MEMORY`: its nocache section
 	  lands in the DTCM, which the GMAC DMA cannot see -- keep
 	  CONFIG_DCACHE=n instead (the driver BUILD_ASSERTs it unconditionally;
 	  the E8 D-cache maintenance loop hangs on this silicon, see
 	  scripts/bench/aen/aen-bench-shared.conf).
+
+	  HAZARD: do NOT leave the ethernet node's `memory-region` set AND ALSO
+	  point `chosen { zephyr,sram = ...; }` at that same node -- the linker
+	  would place main RAM and the DMA-relocated buffers in the identical
+	  address window with no warning. zephyr/CMakeLists.txt FATAL_ERRORs at
+	  configure time if it detects that combination while
+	  ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION=y.
 
 	  LIMIT: ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION only relocates
 	  subsys/net/ip/net_pkt.c's own net_buf pools. A net_buf pool an
@@ -119,15 +131,23 @@ config ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
 	depends on NETWORKING
 	select CODE_DATA_RELOCATION
 	help
-	  Build-verified; the same placement idea was prototyped on silicon in
-	  scratch bench run 200. The GMAC DMA cannot reach the M55 DTCM, so the
-	  net_buf pools in subsys/net/ip/net_pkt.c (__noinit) must live in the
-	  same region as the descriptor rings.  zephyr/CMakeLists.txt resolves
-	  that region from the ethernet node's `memory-region` DT property
-	  (e.g. SRAM0) and relocates net_pkt.c's DATA/BSS/NOINIT sections into it
-	  via zephyr_code_relocate(), instead of moving all of main RAM there with
+	  Silicon-verified on E1M-AEN803 (bench run 202: DHCP lease + ping,
+	  rings/pools in SRAM0, main RAM on DTCM, aen-ethernet-link). E1M-AEN801
+	  is build-verified only (same E8 memory map, not itself benched); the
+	  same relocation applied to aen-evk-demo's SRAM0-window-sharing layout
+	  is build-verified only, not benched. An earlier, different prototype of
+	  this same idea ran on silicon in scratch bench run 200. The GMAC DMA
+	  cannot reach the M55 DTCM, so the net_buf pools in
+	  subsys/net/ip/net_pkt.c (__noinit) must live in the same region as the
+	  descriptor rings.  zephyr/CMakeLists.txt resolves that region from the
+	  ethernet node's `memory-region` DT property (e.g. SRAM0) and relocates
+	  net_pkt.c's DATA/BSS/NOINIT sections into it via zephyr_code_relocate(),
+	  instead of moving all of main RAM there with
 	  `chosen { zephyr,sram = &sram0; }`.  Prints a CMake WARNING (does not
-	  fail the build) when the ethernet node has no usable `memory-region`.
+	  fail the build) when the ethernet node has no usable `memory-region`;
+	  FATAL_ERRORs at configure time instead if `memory-region` AND chosen
+	  `zephyr,sram` resolve to the SAME node (see ETH_DWMAC_ALIF's HAZARD
+	  note above).
 
 	  LIMIT: only relocates subsys/net/ip/net_pkt.c's own net_buf pools. A
 	  pool an application declares itself (e.g. NET_PKT_DATA_POOL_DEFINE via

@@ -30,11 +30,16 @@
  * &sram0; }` -- moving ALL of main RAM to SRAM0, which is slower than DTCM for
  * everything that is not Ethernet-DMA traffic and intermittently broke the ISP.
  *
- * `memory-region` (below) is a narrower alternative: build-verified; the same
- * placement idea -- only the Ethernet-owned buffers move -- was prototyped on
- * silicon in scratch bench run 200 (a different app-level relocation of
- * net_pkt.c + this glue file, CONFIG_NOCACHE_MEMORY=y, and different ring
- * addresses than this mechanism uses; it has not itself run on silicon yet).
+ * `memory-region` (below) is a narrower alternative -- only the
+ * Ethernet-owned buffers move. Silicon-verified on E1M-AEN803 (bench run 202:
+ * DHCP lease + ping, rings/pools in SRAM0, main RAM on DTCM, aen-ethernet-link
+ * built from this exact mechanism). E1M-AEN801 is build-verified only (same E8
+ * memory map, not itself benched); aen-evk-demo's use of this same mechanism
+ * (sharing its 64 KiB SRAM0 window with separate JPEG buffers) is
+ * build-verified only, not benched. An earlier, different prototype of this
+ * same idea ran on silicon in scratch bench run 200 (a different app-level
+ * relocation of net_pkt.c + this glue file, CONFIG_NOCACHE_MEMORY=y, and
+ * different ring addresses than this mechanism uses).
  * The descriptor rings move via this node's `memory-region` DT property (see
  * alif,ethernet.yaml) and the net_buf pools via
  * CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION (zephyr/CMakeLists.txt relocates
@@ -98,8 +103,10 @@
  *      descriptor rings AND the net_buf packet pool MUST live in memory whose
  *      CPU-virtual address EQUALS its DMA-global address -- i.e. in shared
  *      SRAM accessed through its global alias, NOT in TCM. We place the
- *      descriptor rings in a non-cached section below, in the DT node's
- *      `memory-region` when one is given; CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
+ *      descriptor rings below, in the DT node's `memory-region` when one is
+ *      given -- uncached only because CONFIG_DCACHE=n is required
+ *      unconditionally on this silicon (BUILD_ASSERT below), not because the
+ *      section itself is tagged nocache. CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION
  *      (zephyr/CMakeLists.txt) relocates the net_buf pool (subsys/net/ip/net_pkt.c)
  *      into the same region -- the DT/Kconfig layer owns that placement, not
  *      this driver. This is the one behavioural gap vs. the fork and is
@@ -250,7 +257,9 @@ int dwmac_bus_init(struct dwmac_priv *p)
 }
 
 /*
- * Descriptor rings in non-cached SRAM the GMAC DMA can actually reach. The
+ * Descriptor rings in SRAM the GMAC DMA can actually reach, uncached because
+ * CONFIG_DCACHE=n is required unconditionally on this silicon (BUILD_ASSERT
+ * below) -- NOT because the section below is itself tagged nocache. The
  * Ensemble M55 cores have a data cache; the DWMAC DMA is not cache-coherent,
  * so the descriptor rings (and the packet buffers, owned by the net_buf pool
  * placement) must be uncached. We follow the upstream STM32 glue convention
@@ -261,12 +270,15 @@ int dwmac_bus_init(struct dwmac_priv *p)
  * must land in shared SRAM via its global alias, NEVER the M55 DTCM
  * (CPU-local alias 0x20000000, not on the GMAC DMA's AXI path).
  *
- * PLACEMENT (build-verified; the same idea was prototyped on silicon in
- * scratch bench run 200, with a different app-level relocation of net_pkt.c +
- * this glue file, CONFIG_NOCACHE_MEMORY=y, and different ring addresses --
- * this exact mechanism has not itself run on silicon yet): when the DT node
- * carries a `memory-region` (see alif,ethernet.yaml), the rings are placed
- * directly in that region's linker section -- e.g. SRAM0_NOINIT -- via
+ * PLACEMENT (silicon-verified on E1M-AEN803, bench run 202: DHCP lease +
+ * ping, rings/pools in SRAM0, main RAM on DTCM; E1M-AEN801 is build-verified
+ * only -- the same E8 memory map, not itself benched. A different, earlier
+ * prototype of this same idea ran on silicon in scratch bench run 200, with a
+ * different app-level relocation of net_pkt.c + this glue file,
+ * CONFIG_NOCACHE_MEMORY=y, and different ring addresses than this mechanism):
+ * when the DT node carries a `memory-region` (see alif,ethernet.yaml), the
+ * rings are placed directly in that region's linker section -- e.g.
+ * SRAM0_NOINIT -- via
  * Z_GENERIC_SECTION(LINKER_DT_NODE_REGION_NAME(...)), independent of wherever
  * `zephyr,sram` points main RAM. Pair this with
  * CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION so the net_buf pools
@@ -315,8 +327,10 @@ int dwmac_bus_init(struct dwmac_priv *p)
 BUILD_ASSERT(!IS_ENABLED(CONFIG_DCACHE),
              "eth_dwmac_alif: the E8 D-cache maintenance loop hangs on this "
              "silicon (scripts/bench/aen/aen-bench-shared.conf) -- set "
-             "CONFIG_DCACHE=n, and give the ethernet node a memory-region (or pin "
-             "zephyr,sram=&sram0) so the GMAC DMA can reach its buffers");
+             "CONFIG_DCACHE=n, and either keep the ethernet node's memory-region "
+             "(default: &sram0) or, if you've deleted it, pin zephyr,sram=&sram0 "
+             "instead -- NEVER both (zephyr/CMakeLists.txt FATAL_ERRORs on that "
+             "combination) -- so the GMAC DMA can reach its buffers");
 
 static struct dwmac_dma_desc dwmac_tx_descs[NB_TX_DESCS] __desc_mem;
 static struct dwmac_dma_desc dwmac_rx_descs[NB_RX_DESCS] __desc_mem;

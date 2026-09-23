@@ -85,21 +85,35 @@ and the server NIC RX counter moved off 0 — the SOM is discoverable on the wir
 
    The first working overlay moved **all** of main RAM to SRAM0
    (`chosen { zephyr,sram = &sram0; }`) — simple, but slower than DTCM for
-   everything else, and it intermittently broke the ISP. Build-verified
-   narrower follow-up: main RAM stays on DTCM (`zephyr,sram = &dtcm`,
-   the generated default — this overlay no longer overrides it), and only the
-   Ethernet-owned buffers move to SRAM0 — the descriptor rings via the
-   ethernet node's `memory-region = <&sram0>;` (SoC dtsi) and the net_buf pool
-   via `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION` (default y, relocates
-   `subsys/net/ip/net_pkt.c`'s DATA/BSS/NOINIT into SRAM0 via
-   `zephyr_code_relocate`, see `zephyr/CMakeLists.txt`). The same placement
-   idea was prototyped on silicon in scratch bench run 200, but that scratch
-   used a different app-level relocation of net_pkt.c + the glue file,
+   everything else, and it intermittently broke the ISP. **Silicon-verified
+   narrower follow-up (bench run 202, E1M-AEN803):** main RAM stays on DTCM
+   (`zephyr,sram = &dtcm`, the generated default — this overlay no longer
+   overrides it), and only the Ethernet-owned buffers move to SRAM0 — the
+   descriptor rings via the ethernet node's `memory-region = <&sram0>;` (SoC
+   dtsi) and the net_buf pool via `CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION`
+   (default y, relocates `subsys/net/ip/net_pkt.c`'s DATA/BSS/NOINIT into
+   SRAM0 via `zephyr_code_relocate`, see `zephyr/CMakeLists.txt`). Bench run
+   202 re-ran this exact mechanism on E1M-AEN803 (`b240f01cb`): DHCP lease
+   `192.168.10.123`, `PHY link UP after 2000 ms`, host ping 5/5 (avg
+   0.271 ms), and the live descriptor rings resolved into
+   `net_buf_data_rx/tx_bufs`, both in SRAM0, while `_kernel` and main RAM
+   stayed on DTCM. E1M-AEN801 is build-verified only (same E8 memory map, not
+   itself benched). An earlier, different prototype of the same placement
+   idea ran on silicon in scratch bench run 200, but that scratch used a
+   different app-level relocation of net_pkt.c + the glue file,
    `CONFIG_NOCACHE_MEMORY=y`, and different ring addresses than this
-   mechanism uses — this exact mechanism has not itself run on silicon yet.
+   mechanism uses.
+
    LIMIT: only `net_pkt.c`'s own net_buf pools are relocated; an app-declared
    pool (e.g. `NET_PKT_DATA_POOL_DEFINE` via `net_context_setup_pools`) would
    still land on DTCM and the DMA would silently fail against it.
+
+   HAZARD: do NOT leave the ethernet node's `memory-region` set AND ALSO
+   point `chosen { zephyr,sram = ...; }` at that same node (e.g. by copying
+   the first-cut overlay's line back in) — the linker would place main RAM
+   and the DMA-relocated buffers in the identical address window with no
+   warning. `zephyr/CMakeLists.txt` FATAL_ERRORs at configure time if it
+   detects that combination.
 
 > The earlier PARTIAL write-up blamed the "PHY RX data path / REF_CLK" and the
 > `ANLPAR=0` symptom. That was a red herring caused by (a) a bad cable masking the
