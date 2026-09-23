@@ -35,9 +35,10 @@
  *     ctrl registry, and keeps the driver's incoming-buffer fifo fed
  *     -- see that backend's file header for the full sequence.
  *     Runtime capture is proven end to end on isp_pico.c's own bench
- *     app (examples/aen/aen-isp-ov5647-capture, runs 69-145); this
- *     PORTABLE backend compiles and links (examples/aen/aen-isp-
- *     ov5647-viewfinder) but is still BENCH-UNVERIFIED end to end.
+ *     app (examples/aen/aen-isp-ov5647-capture, runs 69-145) and, through
+ *     this PORTABLE header, on examples/aen/aen-isp-ov5647-viewfinder --
+ *     30/30 colour frames captured with AE+AWB on E1M-AEN803 + OV5647
+ *     (runs 156-166).
  *   - **zephyr_stub** (silicon_ref `"*"`, priority 0): tracked
  *     fallback for silicon none of the above cover -- every op
  *     returns ALP_ERR_NOT_IMPLEMENTED (issue #223).

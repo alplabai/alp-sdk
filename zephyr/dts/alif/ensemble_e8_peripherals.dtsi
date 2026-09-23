@@ -1781,8 +1781,8 @@
 	 * default n.  Left status="disabled" here: COMPILES + LINKS clean
 	 * against the pinned hal_alif v2.3.0 wrapper (see the Kconfig), enabled
 	 * per-board by an overlay (examples/aen/aen-isp-regcheck).  Live capture
-	 * still needs a camera -> isp -> sink media-controller graph.
-	 * BENCH-UNVERIFIED (no camera sensor wired on this hardware batch).
+	 * (OV5647 -> CSI -> CPI -> ISP inline) is bench-verified on
+	 * E1M-AEN803 (examples/aen/aen-isp-ov5647-viewfinder).
 	 */
 	isp: isp@49046000 {
 		compatible = "vsi,isp-pico";

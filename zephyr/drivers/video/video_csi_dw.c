@@ -132,7 +132,7 @@ static void reg_write_part(uintptr_t reg, uint32_t data, uint32_t mask, uint8_t 
  * to TX errors" / "PHY Packet discard" lines are genuine POST_KERNEL boot
  * output, not stale RAM. init priorities: MIPI-DPHY 39, this CSI-2 host 41
  * (CONFIG_VIDEO_MIPI_CSI2_DW_INIT_PRIORITY, zephyr/kconfigs/
- * vendor-alif-peripherals.kconfig:855) -- both run before I2C
+ * vendor-alif-peripherals.kconfig:856) -- both run before I2C
  * (I2C_INIT_PRIORITY default KERNEL_INIT_PRIORITY_DEVICE=50,
  * <zephyr>/kernel/Kconfig.device:70-72) and well before OV5647's
  * own init, which performs the LP-11 lane park (CONFIG_VIDEO_INIT_PRIORITY
