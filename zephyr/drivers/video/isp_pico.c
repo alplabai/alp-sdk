@@ -1371,6 +1371,36 @@ static unsigned int bayer_sample_depth(uint32_t fourcc)
  * survives a `west update` and stays submittable upstream.
  */
 
+/*
+ * The ISP core always produces 4:2:2 chroma internally; for a 4:2:0 MI
+ * output (YUV420/NV12/NV21) the main resizer must downscale chroma
+ * vertically 2:1, or the MI writes a full-height chroma plane into a
+ * half-height buffer and wraps ("Main picture Cb/Cr address wrap"),
+ * losing/misplacing colour on real scenes. Neither the closed VSI lib nor
+ * this wrapper ever programs MRSZ (bench runs 186/187) -- do it directly.
+ */
+static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint16_t out_height)
+{
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+
+	if (pixelformat != VIDEO_PIX_FMT_YUV420 && pixelformat != VIDEO_PIX_FMT_NV12 &&
+	    pixelformat != VIDEO_PIX_FMT_NV21) {
+		/* Bypass, and clear any 4:2:0 config a previous stream left armed. */
+		sys_write32(MRSZ_CTRL_CFG_UPD, regs + ISP_MRSZ_CTRL);
+		return;
+	}
+
+	uint32_t in_h = out_height;
+	uint32_t out_h = out_height / 2;
+	uint32_t scale_vc = ((out_h - 1) * 65536U) / (in_h - 1);
+
+	sys_write32(scale_vc, regs + ISP_MRSZ_SCALE_VC);
+	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
+	sys_write32(MRSZ_FORMAT_CONV_CTRL_FORMAT_420, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
+	sys_write32(MRSZ_CTRL_SCALE_VC_ENABLE | MRSZ_CTRL_CFG_UPD | MRSZ_CTRL_AUTO_UPD,
+		    regs + ISP_MRSZ_CTRL);
+}
+
 static int isp_stream_start(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
@@ -1379,6 +1409,7 @@ static int isp_stream_start(const struct device *dev)
 	struct video_buffer *vbuf;
 	struct video_buffer vbuf2;
 
+	struct channel_parameters *channel = &data->init_cfg.channel;
 	struct port_parameters *port = &data->init_cfg.port;
 	uint32_t tmp;
 	int ret;
@@ -1505,6 +1536,8 @@ static int isp_stream_start(const struct device *dev)
 		err = ret;
 		goto dequeue_buf;
 	}
+
+	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
 
 	/*
 	 * Runs for any ctrl the app changed (isp_set_ctrl()), plus AE once at
