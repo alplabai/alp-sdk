@@ -136,6 +136,8 @@ into the topic-specific docs.
   the V2N Linux kernel + rootfs (Yocto) for E1M-V2N101/102.
 - [provisioning.md](provisioning.md) — provisioning a SoM from a
   versioned release bundle (the `provision_som.py` orchestrator + runbook).
+- [provisioning-v2n.md](provisioning-v2n.md) — the V2N / V2N-M1
+  step machine (`provision_som.py plan|run|status`): flow, gates, hazards.
 - [os-support-matrix.md](os-support-matrix.md) — which OS runs
   on which core, per SoM.
 - [recommended-libraries.md](recommended-libraries.md) — curated

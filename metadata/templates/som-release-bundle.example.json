@@ -6,8 +6,10 @@
   "release_version": "som-0.2.0",
   "created": "2026-06-08",
   "status": "complete",
+  "memory_tier": { "dram_mbit": 32768, "label": "D16S32" },
   "components": [
     { "role": "bl2", "file": "artifacts/bl2_bp_spi-rzv2n-evk.bin", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "size_bytes": 131072, "flash_target": "xspi:mtd0" },
+    { "role": "bl2_mmc", "file": "artifacts/bl2_bp_mmc-rzv2n-evk.bin", "sha256": "3333333333333333333333333333333333333333333333333333333333333333", "size_bytes": 131072, "flash_target": "emmc:boot1" },
     { "role": "fip", "file": "artifacts/fip-rzv2n-evk.bin", "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "size_bytes": 1048576, "flash_target": "xspi:mtd1" },
     { "role": "system_image", "file": "artifacts/core-image-weston-rzv2n-evk.wic.gz", "sha256": "2222222222222222222222222222222222222222222222222222222222222222", "size_bytes": 905969664, "flash_target": "emmc" }
   ],
