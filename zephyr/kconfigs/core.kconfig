@@ -98,6 +98,39 @@ config ALP_SDK_WERROR
 	  Adds -Werror on top of CONFIG_ALP_SDK_STRICT_WARNINGS's flag set,
 	  for this module's own zephyr_library only.
 
+config ALP_SDK_FAST_MEMCPY
+	bool "Override memcpy() with a word-copy loop (issue #2285)"
+	default y
+	depends on SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
+	depends on SIZE_OPTIMIZATIONS
+	depends on PICOLIBC_USE_TOOLCHAIN
+	help
+	  On an Alif Ensemble (AEN) image built at -Os,
+	  CONFIG_SIZE_OPTIMIZATIONS links picolibc's "space" multilib, whose
+	  memcpy() copies one byte at a time -- the dominant cost in a
+	  throughput-sensitive copy path (bench run 223, camera-mjpeg-stream:
+	  24-30 ms HTTP send time per 32-41 KB frame, 45-51% of frames
+	  dropped against a 60 fps camera). The full
+	  CONFIG_SPEED_OPTIMIZATIONS build copies faster but is not always an
+	  option: it overflowed that same app's ITCM budget by about 41 KB.
+
+	  This overrides memcpy()/__aeabi_memcpy*() with a word-at-a-time
+	  loop (src/common/alp_fast_memcpy_core.c) that keeps -Os code size
+	  while closing most of the gap to the speed-optimised build.
+	  Combined with the Ethernet buffer sizing in
+	  examples/connectivity/camera-mjpeg-stream's board confs, bench
+	  runs 224-228 reached 60.1 fps end to end, the sensor's own rate.
+
+	  Default y whenever the three conditions above hold (Ensemble
+	  family, -Os, picolibc from the toolchain) -- this is a strict
+	  improvement over the byte-loop it replaces, not a tradeoff to opt
+	  into per board. The core loop carries
+	  __attribute__((optimize("no-tree-loop-distribute-patterns"))):
+	  without it, GCC's loop-idiom pass recognises the byte-copy shape
+	  and rewrites it back into a call to memcpy() -- which, since this
+	  function IS memcpy(), recurses forever and hangs the board before
+	  the network comes up (seen on the bench, run 227).
+
 config ALP_STATUS_DESCRIPTIONS
 	bool "Compile alp_status_description() string table"
 	default y
