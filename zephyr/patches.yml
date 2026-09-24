@@ -646,7 +646,7 @@ patches:
       change to the one fix bench run 153 needed; a candidate to drop in
       a follow-up.
   - path: hal_alif/0010-isp-clamp-ae-writeback-to-ctrl-range.patch
-    sha256sum: ad8395919067e1b4d0bf708dce6ee46ff2047bc9b94de29e781f52e73e5fbd59
+    sha256sum: 03ff9ac0eeb95ae636a2040a8ea2f609f5da155a1bdca2003bf9d3cca75c5572
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -669,8 +669,17 @@ patches:
       video_query_ctrl() for the same id before each write, saturating
       ctrl.val into [range.min, range.max]; a failed query leaves the value
       unclamped (video_set_ctrl() then rejects it exactly as before this
-      patch -- no new failure mode). Pure additive; upstream to hal_alif
-      then drop.
+      patch -- no new failure mode). This clamp is a DEFENSIVE layer, not a
+      fix for why AE drives outside its configured ceiling in the first
+      place -- isp_pico.c's isp_apply_ae() sets again_max 65472 and dgain
+      1024..1024, yet the bench still saw an out-of-range write; that root
+      cause is tracked in #2271 and unresolved. Latched LOG_WRN (once per
+      episode, like the existing gain/exposure write-error latches) prints
+      the raw library terms (sns_config.aGain/dGain or intLine), the
+      computed ctrl value and the clamped value plus range.max whenever a
+      clamp actually changes the write, so the bench can see which library
+      term breached its ceiling. Pure additive; upstream to hal_alif then
+      drop.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

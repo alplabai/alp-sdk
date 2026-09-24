@@ -12,9 +12,12 @@
  * ISP library, which exists only for the real target. isp_clamp_ctrl_val()
  * is a dependency-free 3-branch int32_t clamp with no such dependency, so
  * this file mirrors it VERBATIM (see the copy below) and tests the copy.
- * Keep the two in sync by eye if either changes; there is no #include path
- * from this alp-sdk-owned test to the vendored patch to enforce it
- * mechanically without inverting the vendor/alp-sdk layering direction.
+ * Keep the two in sync if either changes -- there is no #include path from
+ * this alp-sdk-owned test to the vendored patch to enforce it mechanically
+ * without inverting the vendor/alp-sdk layering direction, so
+ * tests/scripts/test_isp_ae_ctrl_clamp_patch_mirror.py does it from outside
+ * instead: it extracts both copies' function bodies and fails the moment
+ * they stop matching (whitespace aside).
  *
  * Without the clamp, E1M-AEN803 + OV5647 bench traffic showed AE settle on
  * a gain writeback of 0x2000 (8192) against OV5647's registered
