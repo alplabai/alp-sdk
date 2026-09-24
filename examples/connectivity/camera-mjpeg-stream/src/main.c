@@ -58,21 +58,31 @@
 
 #define HTTP_PORT 8080
 
-/* 640x480: the resolution both the real-camera path and the synthetic
- * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG (128 KiB) is the
- * physical size of the two SRAM0 buffers that output lands in -- see
- * boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the AEN video
- * buffer pool is sized for this resolution. */
-#define FRAME_W 640
-#define FRAME_H 480
-
-/* Requested camera frame rate. The OV5647 backend (alif_isp_pico.c) honors
- * this via cfg->fps and settles on the closest rate it can actually reach
- * (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120, VTS-clamped) --
- * confirmed end to end at FRAME_W x FRAME_H (bench run 220, E1M-AEN803 +
- * OV5647, module 2026W36-0001, bright daylight): 901 complete JPEGs streamed in each of
- * three 30 s captures = 30.03 fps. See README.md's Limits section. */
+/* Resolution + frame rate, CONFIG_CAMERA_MJPEG_STREAM_1280X960-selected
+ * (Kconfig, this directory) -- see issue #2286 Stage A.  Default: 640x480
+ * @ 30 fps, the bench-proven path both the real camera and the synthetic
+ * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG scales with this
+ * same symbol; see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the
+ * AEN video buffer pool is sized for 640x480, and
+ * boards/overlay-1280x960-aen803.conf for the 1280x960 sizing.
+ *
+ * 1280x960 @ 15 fps is the OV5647's EXISTING centre-crop mode (no sensor
+ * register-table change, ov5647.c) -- the field of view is the centre crop,
+ * not a full-sensor 2x2-binned mode (that is Stage B, tracked separately).
+ * 15 fps, not 30: two 1,843,200 B NV12 frames already consume most of the
+ * AEN's 4 MiB SRAM0 bank alongside the JPEG output buffers (see
+ * boards/overlay-1280x960-aen803.conf), leaving no SRAM0 budget for the
+ * synthetic-frame fallback below -- CAMERA_MJPEG_STREAM_1280X960 compiles
+ * that fallback path out entirely, not just moves it. */
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+#define FRAME_W   1280
+#define FRAME_H   960
+#define FRAME_FPS 15
+#else
+#define FRAME_W   640
+#define FRAME_H   480
 #define FRAME_FPS 30
+#endif
 
 /*
  * The full physical output buffer (mjpeg_http_claim_write_buffer(),
@@ -109,8 +119,17 @@
  * ever fills it with a luma gradient plus NEUTRAL (grey, memset 128)
  * chroma, so the exact sub-layout of that neutral fill never matters.
  * __aligned(32): matches the Hantro AXI master's/D-cache maintenance's
- * cache-line granularity, same reasoning as mjpeg_http.c's buffers. */
+ * cache-line granularity, same reasoning as mjpeg_http.c's buffers.
+ *
+ * DROPPED ENTIRELY at 1280x960 (issue #2286 Stage A): a second
+ * JPEG_DMA_MEM buffer at this size (1,843,200 B) has no SRAM0 budget left
+ * once the two real ISP buffers and the two ~160 KiB JPEG output buffers
+ * are paid for -- see boards/overlay-1280x960-aen803.conf. A real camera
+ * that stalls at this resolution therefore has no fallback frame to serve;
+ * the capture loop just keeps retrying instead (see the main loop below). */
+#if !defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 static uint8_t synth_frame[FRAME_W * FRAME_H + (FRAME_W * FRAME_H) / 2] JPEG_DMA_MEM __aligned(32);
+#endif
 
 /* Build one alp_jpeg_encode_req_t against a single contiguous W*H*3/2
  * buffer, in whichever layout `fmt` names.  Used both for the synthetic
@@ -144,6 +163,7 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
 	}
 }
 
+#if !defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 {
 	static uint8_t phase; /* advances each call so the stream visibly moves */
@@ -157,6 +177,7 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 	phase += 4;
 	jpeg_req_from_packed(req, fmt, synth_frame, FRAME_W, FRAME_H);
 }
+#endif
 
 /* Print the DHCP lease + the stream/snapshot URLs once bound -- runs on
  * the net-mgmt callback's own context, never inside the capture loop, so
@@ -261,16 +282,27 @@ int main(void)
 		ccfg.format = pixfmt;
 		camera      = alp_camera_open(&ccfg);
 		if (camera == NULL || alp_camera_start(camera) != ALP_OK) {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); no "
+			       "synthetic fallback at this resolution, will keep retrying\n",
+			       (int)alp_last_error());
+#else
 			printf("[camera-mjpeg-stream] alp_camera_open/start failed (err=%d); "
 			       "serving a synthetic frame instead\n",
 			       (int)alp_last_error());
+#endif
 			alp_camera_close(camera);
 			camera = NULL;
 		} else {
 			printf("[camera-mjpeg-stream] camera open + streaming, %ux%u\n", FRAME_W, FRAME_H);
 		}
 	} else {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+		printf("[camera-mjpeg-stream] no MIPI-CSI on this SoC; nothing to stream at this "
+		       "resolution\n");
+#else
 		printf("[camera-mjpeg-stream] no MIPI-CSI on this SoC; serving a synthetic frame\n");
+#endif
 	}
 
 	/* HTTP server thread -- serves whatever mjpeg_http_publish_frame()
@@ -303,17 +335,22 @@ int main(void)
 
 	/* The camera-capture loop.  Every iteration either captures a real
 	 * frame (bounded timeout -- never wait forever on a wedged sensor)
-	 * or rebuilds the synthetic one, encodes it directly into the HTTP
-	 * server's write buffer (mjpeg_http_claim_write_buffer() --
-	 * zero-copy, no memcpy on either side of the hand-off) and
-	 * publishes it; it never opens a socket, never blocks on
-	 * mjpeg_http_publish_frame() (a short mutex hold, no I/O), and
-	 * never waits on the network. A capture or encode failure is
-	 * logged (rate-limited) and counted rather than silently skipped;
+	 * or, at 640x480 only, rebuilds the synthetic one; either way the
+	 * frame is encoded directly into the HTTP server's write buffer
+	 * (mjpeg_http_claim_write_buffer() -- zero-copy, no memcpy on either
+	 * side of the hand-off) and published; it never opens a socket,
+	 * never blocks on mjpeg_http_publish_frame() (a short mutex hold, no
+	 * I/O), and never waits on the network. A capture or encode failure
+	 * is logged (rate-limited) and counted rather than silently skipped;
 	 * a capture failure also backs off (k_msleep) so an error loop
-	 * can't spin and starve the lower-priority HTTP thread, and falls
-	 * back to the synthetic frame after CAPTURE_FAIL_LIMIT consecutive
-	 * failures (a wedged sensor is not coming back on its own). */
+	 * can't spin and starve the lower-priority HTTP thread. After
+	 * CAPTURE_FAIL_LIMIT consecutive failures (a wedged sensor is not
+	 * coming back on its own) the camera handle is closed and, at
+	 * 640x480, the loop falls back to the synthetic frame; at 1280x960
+	 * there is no fallback buffer (see synth_frame's comment above) --
+	 * the loop just keeps skipping frames, `camera` stays NULL, and
+	 * nothing new is published until an operator power-cycles the
+	 * sensor. */
 	for (;;) {
 		alp_jpeg_encode_req_t req;
 		alp_camera_frame_t    frame;
@@ -336,19 +373,30 @@ int main(void)
 				capture_fail_consec++;
 				k_msleep(CAPTURE_FAIL_BACKOFF_MS);
 				if (capture_fail_consec >= CAPTURE_FAIL_LIMIT) {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+					printf("[camera-mjpeg-stream] camera stalled (%u "
+					       "consecutive failures); no synthetic fallback at "
+					       "this resolution, giving up on the camera\n",
+					       capture_fail_consec);
+#else
 					printf("[camera-mjpeg-stream] camera stalled (%u "
 					       "consecutive failures); falling back to the "
 					       "synthetic frame\n",
 					       capture_fail_consec);
+#endif
 					alp_camera_stop(camera);
 					alp_camera_close(camera);
 					camera = NULL;
 				}
 			}
 		} else {
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+			k_msleep(CAPTURE_FAIL_BACKOFF_MS); /* nothing to publish; don't spin */
+#else
 			build_synthetic_frame(pixfmt, &req);
 			have_frame = true;
 			k_msleep(1000 / FRAME_FPS); /* matches the requested camera fps above */
+#endif
 		}
 
 		if (have_frame) {

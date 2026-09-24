@@ -22,11 +22,12 @@
 
 #include <alp/camera.h>
 
+/* Normally set by the ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT Kconfig (default
+ * 3, range 2-8 -- see zephyr/kconfigs/power-camera-display.kconfig for the
+ * full rationale, including when an app may safely drop to 2). This
+ * fallback only fires for a non-Kconfig build of this file (e.g. a host
+ * unit test) where CONFIG_* is never defined. */
 #ifndef CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT
-/* 3, not 2: isp_capture() holds one dequeued raw buffer for the length of
- * the RGB565 conversion, so at least 2 buffers must stay queued to the ISP
- * MI while that happens or the driver's fifo starves and auto-stops
- * mid-stream (see alif_isp_pico.c's file header, "AE-convergence fix"). */
 #define CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT 3
 #endif
 

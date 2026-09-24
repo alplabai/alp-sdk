@@ -145,6 +145,30 @@ config ALP_SDK_CAMERA_ALIF_ISP
 	  (examples/aen/aen-isp-ov5647-capture) -- the former hal_alif
 	  version mismatch is resolved.
 
+config ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT
+	int "Raw ISP frame buffers the Alif ISP-Pico camera backend queues per open"
+	depends on ALP_SDK_CAMERA_ALIF_ISP
+	default 3
+	range 2 8
+	help
+	  Number of struct video_buffer slots src/backends/camera/
+	  alif_isp_pico.c queues to the ISP MI at alp_camera_open() (was a
+	  fixed #define 3 -- see the AE-convergence fix in that file's
+	  header for why 3 is the default: with only 2, the buffer an app
+	  holds between alp_camera_capture() and alp_camera_release() (or
+	  the one this backend holds during an internal RGB565 conversion)
+	  leaves just ONE buffer queued to the MI, which starves and
+	  auto-stops the stream every frame.  Each buffer is width x
+	  height x 1.5 bytes (NV12/YUV420) or x2 (RGB565) from the Zephyr
+	  video buffer pool (CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE) -- at a
+	  large enough frame size (e.g. 1280x960 NV12, 1,843,200 B/buffer)
+	  3 buffers no longer fit the 4 MiB AEN SRAM0 bank alongside the
+	  JPEG output buffers, so a board/app config that (a) never holds a
+	  raw buffer for a slow CPU conversion (NV12/YUV420 passthrough,
+	  not the RGB565 path) and (b) budgets the pool accordingly may
+	  drop this to 2.  Below 2 the MI has nothing queued at all the
+	  instant one buffer is held -- range enforces that floor.
+
 config ALP_SDK_DISPLAY_ZEPHYR_DRV
 	bool "Compile the real Zephyr display driver-class backend"
 	depends on DISPLAY
