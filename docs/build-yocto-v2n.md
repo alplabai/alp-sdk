@@ -23,6 +23,14 @@ the V2N-specific BSP, deploy, and on-board verification detail.
 > only matters if you rebuild the bootloader yourself (`alp-sdk-internal`
 > flow above); the on-module xSPI you receive already carries the right one
 > for your SoM.
+>
+> **OPEN: production `E1M-V2N101`/`E1M-V2M101` DRAM part/tier undecided.**
+> Their catalogue entry (`metadata/e1m_modules/E1M-V2N101.yaml`,
+> `E1M-V2M101.yaml`: `dram_mbit: 32768` = 4 GB) states the same 4 GB the
+> x103 tier above targets, yet their firmware still ships the family-default
+> 8 GB D16S32 config — a production blocker, not resolved by this doc or by
+> the x103 firmware-pack work. Firmware stays D16S32 for V2N101/V2M101 until
+> this resolves.
 
 ## 1. Prerequisites
 

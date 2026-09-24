@@ -11,24 +11,38 @@
 # below via ALP_TFA_DDR_SRC, keyed on the exact x103 MACHINE names so it can
 # never be picked up by e1m-v2n101-a55/e1m-v2m101-a55.
 #
-# OPEN QUESTION (HELD for the maintainer, not decided by this bbappend):
-# e1m-v2n101-a55/e1m-v2m101-a55's OWN catalogue entry (metadata/e1m_modules/
-# E1M-V2N101.yaml, E1M-V2M101.yaml: dram_mbit: 32768 = 4 GB) states the same
-# 4 GB this D8S32 config targets, yet those MACHINEs still ship the
-# D16S32/8 GB default above, unchanged by this commit. Whether V2N101/V2M101
-# should move to D8S32 (matching their catalogue) or the catalogue should be
-# corrected to 8 GB is undecided -- do not read "8 GB" anywhere in this file
-# as a settled fact about V2N101/V2M101, only as the config those MACHINEs
-# currently, historically build with.
+# OPEN (maintainer decision 2026-09-24): e1m-v2n101-a55/e1m-v2m101-a55's OWN
+# catalogue entry (metadata/e1m_modules/E1M-V2N101.yaml, E1M-V2M101.yaml:
+# dram_mbit: 32768 = 4 GB) states the same 4 GB this D8S32 config targets,
+# yet those MACHINEs still ship the D16S32/8 GB default above. The
+# maintainer's call: firmware STAYS D16S32 for V2N101/V2M101 -- this is
+# DECIDED, not a placeholder -- but which of the two (catalogue or firmware)
+# reflects the real production DRAM part/tier remains undecided and is a
+# PRODUCTION BLOCKER (see the OPEN comment in e1m-v2n101-a55.conf /
+# e1m-v2m101-a55.conf). Do not read "8 GB" anywhere in this file as a
+# settled fact about V2N101/V2M101's true DRAM size, only as the config
+# those MACHINEs build with today.
 #
-# Also HELD: whether meta-rz-drpai's DDR MC-arbitration register patch
-# (0000-ddr_param_def_lpddr4-rzv2n_1.patch: param_setup_mc 0x0134/0x0135/
-# 0x0178/0x017f/0x0181/0x02cd/0x02cf/0x02d0 + param_phyinit_2d_dat1[15]),
-# which the ALP gen_tool files below do NOT carry, needs folding into
-# ddr_param_def_lpddr4-alp*.c -- our do_compile:prepend below replaces the
-# WHOLE file after do_patch has applied that vendor patch, so on any
-# DRP-AI-enabled build our file silently discards those arbitration tweaks.
-# See alp-sdk-internal docs/bootloader-equivalence-verdict.md.
+# DECIDED (maintainer, 2026-09-24): fold meta-rz-drpai's DDR MC-arbitration
+# register patch (0000-ddr_param_def_lpddr4-rzv2n_1.patch: param_setup_mc
+# 0x0134/0x0135/0x0178/0x017f/0x0181/0x02cd/0x02cf/0x02d0) into BOTH
+# ddr_param_def_lpddr4-alp*.c files below -- our do_compile:prepend replaces
+# the WHOLE file after do_patch has applied that vendor patch, so on any
+# DRP-AI-enabled build our file was silently discarding those arbitration
+# tweaks. The 8 target values were derived and verified against a clean
+# rzg_trusted-firmware-a checkout at the pinned SRCREV (4092464) with the
+# drpai patch applied (alplab-gw, 2026-09-24) -- they are density-independent
+# (identical across D16S32/D8S32, confirmed) and don't collide with the D8
+# range regs (0x012f-0x0133) or tRFC rows (0x0046-0x0060). param_phyinit_2d_dat1[15]
+# is untouched by the drpai patch (confirmed: that patch has no hunk on
+# param_phyinit_2d_dat1 at all) -- left at the ALP value (0x0100) per the
+# maintainer's call. AS OF THIS COMMIT THE VALUES ARE NOT YET APPLIED to
+# alp-sdk-internal's ddr_param_def_lpddr4-alp.c / -alp-d8s32.c -- editing
+# those private register-table files was blocked by the local permission
+# classifier this session; see alp-sdk-internal
+# docs/bootloader-equivalence-verdict.md and the DRP-AI-ARBITRATION-FOLD-IN
+# note there for the exact target values pending application. NOT YET
+# silicon-verified either way.
 #
 # Everything else (BL31 + U-Boot/FIP, PLAT=v2n BOARD=evk_1, the PMIC-removal +
 # ether-setting U-Boot patches) is STOCK Renesas BSP.
