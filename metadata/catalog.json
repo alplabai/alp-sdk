@@ -2814,10 +2814,15 @@
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -2830,11 +2835,12 @@
         },
         "name": "v2n-brd-i2c-bringup",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-brd-i2c-bringup",
         "som": "E1M-V2N101",
-        "summary": "Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8). Scans the bus, distinguishes a bus-level electrical fault (line held low / missing pull-ups / wrong pinmux) from per-device failures, then probes every populated IC read-only and prints a PASS/FAIL/SKIP table."
+        "summary": "Patch-day diagnostic for the V2N SoM's BRD_I2C management bus (Renesas RIIC8), run from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Scans the bus, distinguishes a bus-level electrical fault (line held low / missing pull-ups / wrong pinmux) from per-device failures, then probes every populated IC read-only and prints a PASS/FAIL/SKIP table."
       },
       {
         "board": "e1m-x-evk",
@@ -3138,34 +3144,15 @@
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
-            "id": "m33_sm",
-            "os": "zephyr"
-          }
-        ],
-        "declares": {
-          "chips": true,
-          "ipc": false,
-          "models": false,
-          "peripherals": true
-        },
-        "name": "v2n-rtc-multi-alarm",
-        "osSet": [
-          "zephyr"
-        ],
-        "path": "examples/v2n/v2n-rtc-multi-alarm",
-        "som": "E1M-V2N101",
-        "summary": "Exercises the RV-3028-C7's **multi-source event dispatcher**: the RTC has seven distinct interrupt sources (PORF, EXT_EVENT, ALARM, COUNTDOWN, PERIODIC, BSF, CLKF) that all latch into a single STATUS register and route to one physical INT pin. The driver fans the single IRQ out into per-source callbacks so the application's state-machine cleanly separates concerns."
-      },
-      {
-        "board": "e1m-x-evk",
-        "coreCount": 1,
-        "cores": [
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
           {
-            "app": "./src",
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -3178,18 +3165,24 @@
         },
         "name": "v2n-secure-element-sign",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-secure-element-sign",
         "som": "E1M-V2N101",
-        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
+        "summary": "Probe the OPTIGA Trust M on V2N's BRD_I2C and confirm the current probe-only driver contract, from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. The driver reads I2C_STATE to prove the part is reachable; product-info and raw-APDU helpers return `ALP_ERR_NOSUPPORT` until the Infineon host-library transport is integrated."
       },
       {
         "board": "e1m-x-evk",
-        "coreCount": 1,
+        "coreCount": 2,
         "cores": [
           {
             "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
             "id": "m33_sm",
             "os": "zephyr"
           }
@@ -3202,11 +3195,12 @@
         },
         "name": "v2n-temp-sensor",
         "osSet": [
+          "yocto",
           "zephyr"
         ],
         "path": "examples/v2n/v2n-temp-sensor",
         "som": "E1M-V2N101",
-        "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution). Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
+        "summary": "Reads the on-module TMP112 once per second and prints the temperature in degrees Celsius (with 0.001 °C resolution), from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. Classic V2N starter app -- one I²C bus open, one chip init, a ten-sample loop."
       },
       {
         "board": "e1m-x-evk",

@@ -24,9 +24,16 @@
 # cross-checks every (silicon_peripheral, silicon_pad) pair below
 # against metadata/pinmux/v2n.yaml: it must resolve to exactly one
 # `owner: "renesas"` row, and where that row carries a `core:` key, the
-# value must be "m33" -- console rows legitimately carry no `core:` key
-# there (see metadata/e1m_modules/v2n/core-ownership.yaml) and this file
-# does not require one either.
+# value must match the link's OWNING core -- "m33" for gd32_spi (the
+# CM33's only transport to the GD32), "a55" for brd_i2c (RIIC8/BRD_I2C
+# is Cortex-A55/Linux-exclusive; the CM33 must never master it -- see
+# metadata/e1m_modules/v2n/core-ownership.yaml).  console rows
+# legitimately carry no `core:` key and neither check requires one.
+# brd_i2c's own `status:` stays `disabled` (below) for exactly the same
+# reason: its pin/electrical facts are still real and still generated
+# into the Zephyr board's pinctrl.dtsi for reference, but nothing on
+# the CM33 board enables or aliases the node -- see
+# scripts/gen_zephyr_board.py's `_v2n_dts()`.
 schemaVersion: supervisor-links-v1
 families:
   - v2n
@@ -90,7 +97,14 @@ supervisor_links:
         slave-select, so P97 stays GPIO for per-transaction framing of
         the GD32's PA8 CS-EXTI
 
-  # RIIC8 / BRD_I2C management path to the on-module GD32G553.
+  # RIIC8 / BRD_I2C -- Cortex-A55/Linux-exclusive (maintainer decision,
+  # metadata/e1m_modules/v2n/core-ownership.yaml); the CM33 must never
+  # master it.  `status: disabled` below: this link's pin/electrical
+  # facts are real (they still generate into the CM33 board's
+  # -pinctrl.dtsi for reference), but scripts/gen_zephyr_board.py's
+  # `_v2n_dts()` leaves the `&i2c8` node disabled and drops the
+  # `alp-i2c0` alias, so the CM33 board file neither claims RIIC8 nor
+  # gives application code a bus_id to open it through.
   brd_i2c:
     peripheral: "RIIC8"
     dt_label: i2c8
@@ -98,7 +112,7 @@ supervisor_links:
     pinctrl_group_label: i2c8_pins
     pinctrl_node: i2c8
     pinctrl_child_node: i2c8-pinmux
-    status: enabled
+    status: disabled
     # CROSS-CHECKED against metadata/chips/gd32g553.yaml
     # i2c.default_address_7bit -- not an independent authority; see
     # scripts/validate_metadata.py's supervisor-links cross-check.
@@ -111,11 +125,8 @@ supervisor_links:
         pfc_func: 1
         evidence: >-
           metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda
-          P06, plus
-          meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch
-          (silicon-validated 2026-06-03 on E1M-V2M101: Linux
-          clk_disable_unused gating RIIC8 bus-faults the CM33 until
-          power-cycle)
+          P06.  Core ownership (a55, not m33): maintainer decision
+          2026-09-24, metadata/e1m_modules/v2n/core-ownership.yaml.
       - silicon_peripheral: "RIIC8_SCL8"
         silicon_pad: "P07"
         pfc_port: "PORT_00"
@@ -123,11 +134,11 @@ supervisor_links:
         pfc_func: 1
         evidence: >-
           metadata/chips/gd32g553.yaml i2c.renesas_pads scl P07 / sda
-          P06, plus
-          meta-alp-sdk/recipes-kernel/linux/linux-renesas/0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch
-          (silicon-validated 2026-06-03 on E1M-V2M101: Linux
-          clk_disable_unused gating RIIC8 bus-faults the CM33 until
-          power-cycle)
+          P06.  Core ownership (a55, not m33): maintainer decision
+          2026-09-24, metadata/e1m_modules/v2n/core-ownership.yaml.
+          Linux is RIIC8's real owner and keeps its own riic_8_ckm
+          clock on for its own consumers (rv3028 RTC + the rest of
+          BRD_I2C).
 
   # SCI_UART0 -- the EVK "Pmod USB-UART", left disabled on this board.
   console:
