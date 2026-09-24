@@ -192,33 +192,48 @@ SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-rea
 #       U-Boot left the register at POR (no pull-up) until now.
 #   (b) rzg2l_riic.c riic_set_clock(): R9A09G056/057 (RZ/V2N, RZ/V2H)
 #       run RIIC off a 100 MHz input, not the 50 MHz this shared
-#       CKS/ICBRH/ICBRL table assumes -- CKS(4)/CKS(2) (was CKS(3)/
-#       CKS(1)) for 100 kHz/400 kHz restores the nominal rate.
+#       CKS/ICBRH/ICBRL table assumes -- CKS(5)/CKS(3) (was CKS(3)/
+#       CKS(1) unmodified) for 100 kHz/400 kHz: one step restores the
+#       nominal rate, a second step is deliberate margin for the
+#       loaded BRD_I2C bus -- see the bench matrix below and the
+#       fSCL derivation in riic_set_clock()'s own comment.
 # Plus two smaller, unconditional hardening fixes in the same file
 # targeting the same AL failure: riic_read_common() polls ICCR1 SDAI=1
-# (bounded ~100 us) before the repeated START, and riic_check_busy()
-# clears stale ICSR2 AL|STOP|NACKF|START and runs the existing IICRST
-# recovery on AL instead of leaving it sticky. Disjoint files from
-# 0001-0004 (rzv2n-dev.c's own hunk lands after 0004's I2C0 addition,
-# which it does not touch) and additive-only to 0005's rzg2l_riic.c
-# hunks, so ordering after 0005 is not order-sensitive, only readable.
-# BENCH-VERIFIED (E1M-V2M103, 2026-09-24): (a)/(b) above passed on
-# silicon -- the DEEPX rail programmed and the DA9292 register readback
-# matched (see changelog.d/2045). PCIe itself was not exercised (blank
-# EEPROM manifest).
+# (bounded ~1 ms, printf on expiry) before the repeated START, and
+# riic_check_busy() clears stale ICSR2 AL|STOP|NACKF|START and runs
+# the existing IICRST recovery on AL instead of leaving it sticky.
+# riic_wait_for_icsr2()'s timeout printf also gained ICCR1 alongside
+# ICSR2/ICCR2. Disjoint files from 0001-0004 (rzv2n-dev.c's own hunk
+# lands after 0004's I2C0 addition, which it does not touch) and
+# additive-only to 0005's rzg2l_riic.c hunks, so ordering after 0005
+# is not order-sensitive, only readable.
+# BENCH-VERIFIED (E1M-V2M103, 2026-09-24): (a) above and a CKS-only
+# clock fix passed on silicon -- the DEEPX rail programmed and the
+# DA9292 register readback matched (see changelog.d/2045). PCIe itself
+# was not exercised (blank EEPROM manifest).
 #
-# Also folds in a fix for a longer-read tail-byte corruption found on
-# a follow-up bench pass (16-byte DA9292 dump: 2 of the last 3 bytes
-# came back with bit 7 stuck clear, reproducible). riic_i2c_raw_read()
-# was setting ICMR3.ACKBT (NACK) and ICCR2.SP (stop request) AFTER
-# reading ICDRR for the final byte instead of before -- with ICMR3.WAIT
-# held for the RIIC instance's whole life, that read is what commits
-# whatever ACKBT/SP state is current onto the bus, so setting them
-# afterward is one byte-time too late. Reordered to set-then-read,
-# matching drivers/i2c/rz_riic.c riic_receive_data() (a separate,
-# already-correct RIIC driver in the same tree) and the RIIC
-# master-receive flowchart. Source-derived, not re-verified on silicon
-# this session (see changelog.d/2045).
+# Also folds in a bit-7 burst-read corruption fix, source-derived then
+# BENCH-MATRIXED (E1M-V2M103, 2026-09-24, RIIC8/BRD_I2C, DA9292 0x1E):
+# a follow-up bench pass first found long reads losing bit 7 on bytes
+# from roughly position 13 onward (position-dependent, not register-
+# dependent; short reads stayed clean) and this patch originally
+# carried only a protocol-ordering reorder in riic_i2c_raw_read() --
+# ICMR3.ACKBT (NACK) and ICCR2.SP (stop request) now set BEFORE the
+# ICDRR read that consumes the final byte instead of after, matching
+# drivers/i2c/rz_riic.c riic_receive_data() and the RIIC master-receive
+# flowchart. That reorder is a real, independently-correct protocol fix
+# kept on its own merits, but a follow-up bench matrix (CKS=3/4/5, WAIT
+# off, ICBRL=0xff) REFUTED it as the cause of the bit-7 loss: v4
+# (without the reorder) and v5 (with it) behaved identically on the
+# same burst read. The actual cause is a bus-speed margin issue on the
+# heavily loaded BRD_I2C (~13 populated branches): CKS(4) (the value
+# 0006 shipped with through v5) still loses bit 7 above ~12 bytes;
+# CKS(5) (this version) is clean on both a 16-byte and a single 32-byte
+# burst; CKS(3) fails outright (STOP detected, -110). Root mechanism is
+# still unconfirmed -- Linux drives the same bus at 400 kHz IRQ-driven
+# with clean reads -- a scope capture is pending; CKS(5) is carried on
+# bench evidence, not a proven timing model. See changelog.d/2045 for
+# the full matrix.
 SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

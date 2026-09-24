@@ -366,3 +366,105 @@ code size), crc32 `0xc61d6328`. BENCH-PENDING: unverified on silicon
 later, longer read); the next bench pass should retry the 16-byte
 `i2c md 0x1e 0x00.1 0x10` and confirm bytes `0x0D`/`0x0E` come back
 `0x96`/`0xFF`.
+
+**Bench matrix, 2026-09-24 (E1M-V2M103, RIIC8/BRD_I2C, DA9292 `0x1E`):
+the `0005`-reorder fix above was REFUTED as the cause of the bit-7
+loss; the real mechanism is a bus-speed margin issue, not a protocol-
+ordering one.** A v4 build (without the `riic_i2c_raw_read()` reorder)
+and the v5 build (with it) produced IDENTICAL corruption on the same
+long read -- the reorder is a real, independently-correct protocol fix
+kept on its own merits (it matches the RIIC master-receive flowchart
+and the proven-correct `drivers/i2c/rz_riic.c riic_receive_data()`),
+but it does not explain or fix the bit-7 loss. A systematic sweep at
+`CKS=3/4/5` (plus `ICMR3.WAIT` held off and `ICBRL` forced to `0xff`,
+both still corrupt) found:
+
+- `CKS=4` (the value `0006` shipped with through v5, this changelog's
+  own "restored nominal rate"): single bursts longer than ~12 bytes
+  lose bit 7 on bytes with bit 7 set from about position 13 onward --
+  position-dependent, not register-dependent (a 21-byte burst: offset
+  `0x0d` `0x96`->`0x16`, `0x0e` `0xff`->`0x7f`, `0x12`/`0x13`
+  `0xff`->`0x7f`, `0x14` `0xac`->`0x0c`). 8-byte reads are clean even
+  at `CKS=4`.
+- `CKS=5`: a 16-byte AND a single 32-byte `i2c read` burst are both
+  completely clean.
+- `CKS=3`: fails outright (STOP detected, `-110`) -- recovery kicks
+  in, not a usable fallback.
+- `ICMR3.WAIT` off (`0x30`) and `ICBRL` forced to `0xff`: still
+  corrupt -- rules out `WAIT`/`ICBRL` as the mechanism.
+
+Hardware context for the matrix: `BRD_I2C` carries roughly 13
+populated branches; external pull-ups R287/R288 (2.2 kOhm to
+`VDD1G_1P8`) ARE fitted per the netlist, in addition to the SoC-
+internal pull-up `0006` already adds. Root mechanism of the bit-7 loss
+at `CKS=4` is still NOT confirmed -- Linux drives the same physical
+bus at 400 kHz, IRQ-driven, with clean reads, which does not obviously
+square with "just needs a slower clock" -- a scope capture of the
+affected bytes is still pending. `CKS=5` is carried on this bench
+matrix (clean on every length tried; `CKS=4` is not), not on a proven
+timing model.
+
+**`0006` recut to `CKS(5)`/`CKS(3)` (STANDARD/FAST, was `CKS(4)`/
+`CKS(2)`) plus two smaller diagnostics, 2026-09-24, same source tree
+(`bcf29d98` + PMIC-I2C-removal + `0001`-`0005` applied, prior `0006`
+re-applied and amended in place, regenerated via `git format-patch`,
+not hand-edited).** `riic_set_clock()`'s R9A09G056/057 branch now
+takes CKS one step past the doubled-clock correction as deliberate
+margin for the loaded bus (see the matrix above), not a second clock-
+doubling fix. Per the driver's own bit-rate formula, `fSCL = (P0phi /
+2^CKS) / (m + n + 2)` with `m`/`n` = `ICBRH`/`ICBRL` bits `[4:0]` (the
+`0xE0` upper bits are a fixed must-write-1 pattern, not part of `m`/
+`n`), ignoring `tr`/`tf` (bus-loading-dependent, not computable here):
+at 100 MHz input with `m = n = 23` (STANDARD, register write value
+`ICBRH = ICBRL = 0xE0 | 23 = 0xF7`), `CKS(4)` computes to
+`(100e6/16)/48 ~= 130.2 kHz` (the value that still loses bit 7 on this
+bus) and `CKS(5)` to `(100e6/32)/48 ~= 65.1 kHz` (this patch's value,
+bench-clean). For FAST rate (`m = 20`, `n = 19`), `CKS(2)` computes to
+`(100e6/4)/41 ~= 609.8 kHz` and `CKS(3)` (this patch's value) to
+`(100e6/8)/41 ~= 304.9 kHz`; FAST rate is not itself part of the bench
+matrix (only STANDARD/RIIC8 was exercised on the bench), carried by
+the same margin reasoning only. Two further diagnostics in the same
+file: the `riic_read_common()` SDAI poll before the repeated START is
+raised from its initial ~100 us bound to ~1 ms and now prints elapsed
+time + `ICCR1` on expiry (the original bound was too tight to observe
+anything useful on the matrix runs above); `riic_wait_for_icsr2()`'s
+existing unconditional timeout printf gains `ICCR1` alongside `ICSR2`/
+`ICCR2`, so any wait timeout also shows SDAI (bit 0), not only the
+repeated-START path. New `0006` patch file md5:
+`bcfa876cdbfe4fde5fdb000bba235ca5`.
+
+The `meta-alp-sdk/recipes-bsp/u-boot/u-boot_%.bbappend` comment for
+`0006` and this changelog entry are rewritten to match: the `0005`-
+style reorder is described as a real but bench-refuted-as-root-cause
+protocol fix, the actual fix is the `CKS(5)`/`CKS(3)` bus-speed
+margin, and the root mechanism is flagged unconfirmed pending a scope
+capture. The DT comment in
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi`
+(`&pinctrl`, `i2c0_pins`/`i2c8_pins` block) is also corrected: it
+previously left RIIC8/BRD_I2C's external pull-up population as TBD
+alongside RIIC0/RIIC1's; RIIC8 specifically is now confirmed
+populated (R287/R288, 2.2 kOhm to `VDD1G_1P8`, per the netlist) --
+RIIC0/RIIC1 stay TBD. The SoC-internal pull-up `0006` adds on RIIC8 is
+still bench-confirmed required in addition to those external ones, not
+instead of them.
+
+**v6 rebuilt with the recut `0006`, 2026-09-24** (fresh `bcf29d98`
+worktree, independent of v4/v5: PMIC-I2C-removal + `0001` + `0002` +
+`0003` (4 GB tier) + `0004` + `0005` + the recut `0006`, each applied
+via `git apply --check` then `git apply`, in that order, all seven
+succeeding cleanly with zero fuzz; same config fragments as v4/v5 --
+`rzv2n-dev_defconfig` + `no-dirty-version.cfg` + `gigadevice-xspi.cfg`
++ `deepx-rail.cfg` + `fdtfile-v2m.cfg`; WSL Ubuntu-22.04,
+`aarch64-linux-gnu` gcc 11.4.0): build `rc=0`. `strings | grep -c
+'^ALP:'` = `26`, unchanged from v4/v5 -- the SDAI-timeout and
+`ICCR1`-in-timeout diagnostics added this pass use the same `%s:`-
+prefixed format the existing `riic_wait_for_icsr2()` timeout message
+already used, not the `ALP:`-prefixed style this count tracks, so they
+add no new matches. `CONFIG_SYS_SDRAM_SIZE` = `(0x100000000u -
+DRAM_RSV_SIZE)` and the built DT's `memory@48000000` still reflects
+the 4 GB tier, unchanged from v4/v5. `u-boot.bin`: md5
+`314ff00766eec301cd5e25fe4b9f1a3e`, size 764408 bytes (`0xBA9F8`),
+crc32 `0xaee82e39`. BENCH-PENDING: unverified on silicon -- the next
+bench pass should retry the 21-byte and 32-byte `i2c md`/`i2c read`
+bursts on RIIC8 that motivated `CKS(5)` and confirm both come back
+byte-for-byte clean.
