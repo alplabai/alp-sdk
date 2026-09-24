@@ -1,9 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Runner defaults for E1M-V2N103 (V2N101 silicon, 4 GB RAM / 16 GB
-# eMMC memory tier) + E1M-X-EVK.  Inherits the portable spec set
-# from tests/hil/_common/.  No SoM-specific specs exist in this dir
-# yet.
+# Runner defaults for E1M-V2N103 (V2N101 silicon; catalogued 4 GB RAM /
+# 16 GB eMMC memory tier, metadata/e1m_modules/E1M-V2N103.yaml) +
+# E1M-X-EVK.  Inherits the portable spec set from tests/hil/_common/.
+# No SoM-specific specs exist in this dir yet.
+#
+# NOTE: E1M-V2N101's OWN catalogue entry declares the same 4 GB
+# dram_mbit as this SKU, yet V2N101 currently ships the family-default
+# 8 GB (D16S32) bootloader DDR config, unchanged by the x103 firmware
+# pack work. DECIDED (maintainer, 2026-09-24): firmware stays D16S32 for
+# V2N101. Whether the catalogue or the firmware reflects V2N101's real
+# production DRAM part/tier remains undecided and is a PRODUCTION
+# BLOCKER (see the OPEN comment in meta-alp-sdk's e1m-v2n101-a55.conf and
+# trusted-firmware-a_%.bbappend). Don't read this comment as settling it.
 
 schema_version: 1
 board: alp_e1m_v2n103_m33_sm
