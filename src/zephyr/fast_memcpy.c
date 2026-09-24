@@ -13,11 +13,17 @@
  * also defining memcpy() itself, which would collide with native_sim's
  * own host libc.
  *
- * No multiple-definition risk against picolibc's own memcpy: this TU's
- * object file is linked into the alp_sdk zephyr_library ahead of the
- * picolibc archive, so by the time the linker reaches picolibc's
- * archive member defining memcpy, the symbol is already resolved and
- * that member is never pulled in.
+ * No multiple-definition risk against picolibc's own memcpy: Zephyr's
+ * top-level link step wraps every zephyr_library() target -- including
+ * this module's alp_sdk library -- in `-Wl,--whole-archive
+ * ... -Wl,--no-whole-archive` (CMakeLists.txt's WHOLE_ARCHIVE_LIBS),
+ * unconditionally pulling in every object from those libraries
+ * (including this one) before the linker ever reaches picolibc's own
+ * archive, which stays a normal (not whole-archive) archive. This TU's
+ * memcpy() is therefore always present and already resolved by the
+ * time the linker gets to picolibc's archive member that also defines
+ * memcpy, so that member is never pulled in and there's no
+ * multiple-definition error.
  */
 
 #include "alp_fast_memcpy_core.h"

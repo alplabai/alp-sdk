@@ -6,27 +6,43 @@
  *
  * WHY THIS EXISTS: on an Alif Ensemble (AEN) -Os Zephyr image,
  * CONFIG_SIZE_OPTIMIZATIONS links picolibc's "space" multilib, whose
- * memcpy() copies one byte at a time -- the dominant cost in the
- * camera-mjpeg-stream JPEG-encode/HTTP-send loop (bench run 223:
- * 24-30 ms send time per 32-41 KB frame, 45-51% of frames dropped
- * against a 60 fps camera). The full CONFIG_SPEED_OPTIMIZATIONS build
- * copies faster but overflows this app's ITCM by about 41 KB, so it is
- * not an option here. This word-at-a-time loop is the middle ground:
- * near-speed-build throughput at -Os code size.
+ * memcpy() copies one byte at a time. Bench run 223 (camera-mjpeg-stream)
+ * measured a 24-30 ms HTTP send per 32-41 KB frame with 45-51% of frames
+ * dropped; the buffer-starvation fix in this same change (Ethernet TX/RX
+ * buffer sizing) alone took those drops to 0%, so byte-wise memcpy()'s
+ * own contribution to run 223's drops was never isolated -- treat it as
+ * unmeasured pending a same-scene A/B (see this example's README). The
+ * full CONFIG_SPEED_OPTIMIZATIONS build copies faster but overflows this
+ * app's ITCM budget by about 41 KB even when RAM-run, so it is not an
+ * option here. This word-at-a-time loop is the middle ground: better
+ * throughput than the byte loop at -Os code size, without that overflow.
  *
- * THE SELF-RECURSION TRAP: GCC's -ftree-loop-distribute-patterns pass
- * (on by default from -O2, and pulled in by -Os with -ftree-vectorize)
- * recognises a byte-copying loop shape and rewrites it into a call to
- * memcpy(). That is fine in ordinary code, but this file's whole
- * purpose is faster loop bodies with no help from the same pass -- if
- * the loop below got rewritten, it would call memcpy() again, which
- * calls into this same loop again, forever. The alp_fast_memcpy_core()
- * function below carries "no-tree-loop-distribute-patterns" for exactly
- * this reason. Seen for real on the bench (run 227): the board hung
- * before the network came up, hard-faulting silently on the recursive
- * blowing of the stack. "O2" is paired with it (rather than leaving the
- * surrounding TU's own -Os) so the word/loop body itself still gets
- * decent codegen despite the whole image building at -Os.
+ * THE SELF-RECURSION TRAP: GCC's -ftree-loop-distribute-patterns pass is
+ * enabled by default at -Os (not only -O2/-O3, and independent of
+ * -ftree-vectorize) and recognises a byte-copying loop shape, rewriting
+ * it into a call to memcpy(). That is fine in ordinary code, but this
+ * file's whole purpose is a loop body that runs as a loop -- if the loop
+ * below got rewritten, it would call memcpy() again, which calls into
+ * this same loop again, forever. The alp_fast_memcpy_core() function
+ * below carries "no-tree-loop-distribute-patterns" for exactly this
+ * reason, and needs it even at the TU's own plain -Os. Seen for real on
+ * the bench (run 227): the board hung before the network came up,
+ * hard-faulting silently on the recursive blowing of the stack.
+ *
+ * GCC ONLY: this file no longer pairs the guard with a local
+ * optimize("O2") -- an earlier version did, and that "O2" (not -Os
+ * itself, and not the recursion guard above) is what let GCC
+ * auto-vectorize the loop to Arm MVE Cortex-M55 Q-register
+ * vldrw/vstrw, putting memcpy() on FPU/MVE state everywhere it runs:
+ * an ISR built with FPU_SHARING=n could clobber it, and a call before
+ * the CPACR coprocessor-access enable (e.g. on the SRAM_VECTOR_TABLE
+ * relocate path) NOCP UsageFaults. Dropped; this function now compiles
+ * at the surrounding TU's own -Os, plain word ldr/str, no MVE. Clang's
+ * -Os loop-idiom pass would still rewrite this loop into a memcpy()
+ * call regardless of the GCC-specific guard above, recursing the same
+ * way run 227 did -- so this file refuses to build under Clang outright
+ * (belt-and-suspenders alongside CONFIG_ALP_SDK_FAST_MEMCPY's Kconfig
+ * `depends on` on the GCC toolchain variant).
  *
  * NOT a memmove(): like the C standard memcpy(), overlapping @p dst /
  * @p src is undefined behaviour here -- this function does not detect
@@ -37,7 +53,33 @@
 
 #include <stdint.h>
 
-__attribute__((optimize("O2", "no-tree-loop-distribute-patterns"))) void *
+#if defined(__clang__)
+#error "alp_fast_memcpy_core.c is GCC-only -- see the self-recursion trap in this file's header"
+#endif
+
+/* Test-only alignment guard, compiled in only by the native_sim host
+ * unit test (tests/unit/fast_memcpy/CMakeLists.txt defines
+ * ALP_FAST_MEMCPY_CORE_ASSERT_ALIGN on that target alone -- never on a
+ * real Ensemble image). A mutated prologue below (e.g. masking with 2
+ * instead of 3, or checking @p s instead of @p d) can still copy every
+ * BYTE to the right place on a host that tolerates unaligned word
+ * accesses, so the exhaustive value comparison in the test wouldn't
+ * catch it; this aborts the moment the word loop would run against an
+ * unaligned pointer, independent of whether the resulting bytes happen
+ * to come out right. */
+#ifdef ALP_FAST_MEMCPY_CORE_ASSERT_ALIGN
+#include <stdlib.h>
+#define ALP_FAST_MEMCPY_ASSERT_WORD_ALIGNED(p) \
+	do { \
+		if ((((uintptr_t)(p)) & 3U) != 0U) { \
+			abort(); \
+		} \
+	} while (0)
+#else
+#define ALP_FAST_MEMCPY_ASSERT_WORD_ALIGNED(p) ((void)0)
+#endif
+
+__attribute__((optimize("no-tree-loop-distribute-patterns"))) void *
 alp_fast_memcpy_core(void *restrict dst, const void *restrict src, size_t n)
 {
 	uint8_t       *d = dst;
@@ -59,6 +101,17 @@ alp_fast_memcpy_core(void *restrict dst, const void *restrict src, size_t n)
 
 		uint32_t       *dw = (uint32_t *)d;
 		const uint32_t *sw = (const uint32_t *)s;
+
+		/* Only assert here when the word loops below are actually
+		 * about to dereference dw/sw (n >= 4) -- the prologue above
+		 * can also exit with n exhausted (0-3 bytes left) before d
+		 * ever reaches word alignment, in which case dw/sw are
+		 * computed but never read, and asserting unconditionally
+		 * would fire on that legitimate short-buffer case. */
+		if (n >= 4U) {
+			ALP_FAST_MEMCPY_ASSERT_WORD_ALIGNED(dw);
+			ALP_FAST_MEMCPY_ASSERT_WORD_ALIGNED(sw);
+		}
 
 		/* Four words per iteration -- cuts loop-branch overhead
 		 * fourfold over a plain word-at-a-time loop for the frame

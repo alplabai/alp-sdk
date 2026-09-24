@@ -104,32 +104,43 @@ config ALP_SDK_FAST_MEMCPY
 	depends on SOC_FAMILY_ENSEMBLE || SOC_FAMILY_ENSEMBLE_RTSS
 	depends on SIZE_OPTIMIZATIONS
 	depends on PICOLIBC_USE_TOOLCHAIN
+	depends on "$(TOOLCHAIN_VARIANT_COMPILER)" = "gnu"
 	help
 	  On an Alif Ensemble (AEN) image built at -Os,
 	  CONFIG_SIZE_OPTIMIZATIONS links picolibc's "space" multilib, whose
-	  memcpy() copies one byte at a time -- the dominant cost in a
-	  throughput-sensitive copy path (bench run 223, camera-mjpeg-stream:
-	  24-30 ms HTTP send time per 32-41 KB frame, 45-51% of frames
-	  dropped against a 60 fps camera). The full
-	  CONFIG_SPEED_OPTIMIZATIONS build copies faster but is not always an
-	  option: it overflowed that same app's ITCM budget by about 41 KB.
+	  memcpy() copies one byte at a time -- a throughput-sensitive copy
+	  path (bench run 223, camera-mjpeg-stream: 24-30 ms HTTP send time
+	  per 32-41 KB frame, 45-51% of frames dropped against a 60 fps
+	  camera; that run's drops were traced to Ethernet buffer
+	  starvation and taken to 0% by buffer sizing alone -- see this
+	  example's README -- so byte-wise memcpy()'s own share of run
+	  223's drops is unmeasured, pending a same-scene A/B). The full
+	  CONFIG_SPEED_OPTIMIZATIONS build copies faster but is not always
+	  an option: it overflowed that same app's ITCM budget by about
+	  41 KB running from ITCM RAM.
 
 	  This overrides memcpy()/__aeabi_memcpy*() with a word-at-a-time
-	  loop (src/common/alp_fast_memcpy_core.c) that keeps -Os code size
-	  while closing most of the gap to the speed-optimised build.
-	  Combined with the Ethernet buffer sizing in
+	  loop (src/common/alp_fast_memcpy_core.c) that keeps -Os code
+	  size. Combined with the Ethernet buffer sizing in
 	  examples/connectivity/camera-mjpeg-stream's board confs, bench
 	  runs 224-228 reached 60.1 fps end to end, the sensor's own rate.
 
-	  Default y whenever the three conditions above hold (Ensemble
-	  family, -Os, picolibc from the toolchain) -- this is a strict
-	  improvement over the byte-loop it replaces, not a tradeoff to opt
-	  into per board. The core loop carries
+	  Default y whenever the four conditions above hold (Ensemble
+	  family, -Os, picolibc from the toolchain, GCC). GCC-only: the
+	  core loop's self-recursion guard (next paragraph) is a GCC
+	  attribute, and Clang's own -Os loop-idiom pass would still
+	  rewrite the loop into a memcpy() call regardless -- Clang builds
+	  fall back to picolibc's byte loop instead of failing to build;
+	  src/common/alp_fast_memcpy_core.c also #errors if compiled under
+	  Clang, as a belt-and-suspenders check on this depends.
+
+	  The core loop carries
 	  __attribute__((optimize("no-tree-loop-distribute-patterns"))):
-	  without it, GCC's loop-idiom pass recognises the byte-copy shape
-	  and rewrites it back into a call to memcpy() -- which, since this
-	  function IS memcpy(), recurses forever and hangs the board before
-	  the network comes up (seen on the bench, run 227).
+	  without it, GCC's loop-idiom pass (on by default at -Os, not only
+	  -O2/-O3) recognises the byte-copy shape and rewrites it back into
+	  a call to memcpy() -- which, since this function IS memcpy(),
+	  recurses forever and hangs the board before the network comes up
+	  (seen on the bench, run 227).
 
 config ALP_STATUS_DESCRIPTIONS
 	bool "Compile alp_status_description() string table"

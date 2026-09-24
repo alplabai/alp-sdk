@@ -14,3 +14,9 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/common/alp_fast_memcpy_core.c
 )
 target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../src/common)
+
+# Activate the core's test-only word-alignment guard (see
+# alp_fast_memcpy_core.c) -- this target only, never a real Ensemble
+# image, so a mutated alignment prologue aborts here instead of
+# silently passing on a host that tolerates unaligned word accesses.
+target_compile_definitions(app PRIVATE ALP_FAST_MEMCPY_CORE_ASSERT_ALIGN)
