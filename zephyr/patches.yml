@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 603a88e20f20cc3516ec073aa693bdd625e6c5f767d6b9826ec33bea1c02b6cc
+    sha256sum: 912be7b39243bf980677071c1c5d576b173d0e8b177999a7df745771e047f3a6
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB

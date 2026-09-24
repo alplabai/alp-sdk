@@ -750,9 +750,9 @@ int isp_set_fmt(const struct device *dev,
  * 156) -- so isp_stream_start() (the call site, below) only calls
  * isp_apply_wb()/isp_apply_ae() when wb_dirty/ae_dirty is set
  * (isp_set_ctrl()'s dirty flags, isp_pico.h): any ctrl change sets the
- * flag, and ae_dirty additionally starts true (isp_init_controls()) so the
- * AE limits this sensor's calibration doesn't carry still get pushed at
- * the first stream start too. Patch 0009 also adds its OWN unconditional
+ * flag, and ae_dirty additionally starts true (isp_init_controls()) so
+ * the first stream start pushes the live, sensor-queried frame-period/
+ * gain ceilings too. Patch 0009 also adds its OWN unconditional
  * SetCalib call at isp_vsi_init() (init time), so SetCalib now runs at most
  * TWICE per boot -- once from patch 0009 at init, once from patch 0007's
  * once-guard at the first isp_vsi_update_cfg() -- never on a later restart.
@@ -941,8 +941,8 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	 * pixel_rate, bench run 61) = 66514155 ns.
 	 */
 	uint32_t int_time_max_us = 66514;
-	uint32_t again_min = 1024;   /* library units, 1x = 1024 */
-	uint32_t again_max = 65472;  /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
+	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
@@ -1310,12 +1310,12 @@ static int isp_init_controls(const struct device *dev)
 		if (ret) {
 			return ret;
 		}
-		/* The calibration carries no AE target, integration-time or
-		 * gain range for this sensor: isp_apply_ae() derives them from
-		 * CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's own ctrls, so
-		 * the first stream start must push them even at the default.
-		 * Without it AE drives the OV5647 past its exposure limit and
-		 * saturates the frame (bench run 157).
+		/* ae_dirty starts true so the first stream start pushes the
+		 * live, sensor-queried frame-period/gain ceilings isp_apply_ae()
+		 * derives from CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's
+		 * own ctrls, even at the default. Without it AE drives the
+		 * OV5647 past its exposure limit and saturates the frame
+		 * (bench run 157).
 		 */
 		data->ctrls.ae_dirty = true;
 	}
@@ -1710,7 +1710,8 @@ static int isp_stream_start(const struct device *dev)
 	 * only ever runs while stopped (guarded at the top of this
 	 * function), so this is also exactly "the next stream start while
 	 * the ISP is stopped" a mid-stream ctrl change waits for (see
-	 * isp_set_ctrl()'s ponytail comment).
+	 * isp_set_ctrl()'s ponytail comment). AE below applies the same way,
+	 * gated on ae_dirty, which starts true (isp_init_controls()).
 	 */
 	if (data->ctrls.wb_dirty) {
 		bool wb_enable = (data->ctrls.awb.val != 0);

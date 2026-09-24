@@ -1,4 +1,4 @@
-### Fixed — ISP AE writeback clamps to the sensor's registered control range, and the calibration block driving it out of range in the first place (#2271)
+### Fixed — ISP AE writeback clamps to the sensor's registered control range, and the OV5647 AE calibration envelope brought in line with the sensor (#2271)
 
 **Defensive clamp.** hal_alif's per-frame AE writeback called `video_set_ctrl()` for `VIDEO_CID_ANALOGUE_GAIN`/`VIDEO_CID_EXPOSURE` with no bound check, so on E1M-AEN803 + OV5647 an out-of-range EXPOSURE writeback (`intLine` 94470, `ctrl.val` = `intLine * 16` = `1511520`, against OV5647's registered range `[0, 0xFFFFF]`) was rejected with `-EINVAL` every frame forever; new patch `zephyr/patches/hal_alif/0010-isp-clamp-ae-writeback-to-ctrl-range.patch` saturates into the sensor's `video_query_ctrl()`-reported range before each write and logs (latched, once per episode) whenever a clamp actually changes the value.
 

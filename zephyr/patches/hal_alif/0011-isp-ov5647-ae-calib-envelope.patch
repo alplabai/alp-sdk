@@ -10,8 +10,8 @@
 + * sensor_attributes.h's AE_SNS_DEFAULT_S via that header's OV5647_AE_*
 + * macros -- see sensor_attributes.h's own comment for why (SetCalib() loads
 + * THIS file's calibration into the library before isp_apply_ae() (isp_pico.c)
-+ * ever runs; the two tables describing different envelopes is how runs
-+ * 211/212's out-of-range writeback happened in the first place). vsi_comm_
++ * ever runs; runs 211/212's writeback values decode exactly against the
++ * stale calibration block). vsi_comm_
 + * calib.h's own #include chain (mpi_isp.h -> vsi_comm_isp.h) already pulls
 + * in vsios_type.h before this line, so sensor_attributes.h's vsi_u32_t/
 + * vsi_u64_t typedef uses below resolve regardless of which TU includes
@@ -22,7 +22,7 @@
  #ifdef __cplusplus
  extern "C"{
  #endif
-@@ -66,6 +95,50 @@
+@@ -66,6 +81,48 @@
  #if defined(CONFIG_ISP_LIB_AE_MODULE)
  		.ae = {
  			.opType = OP_TYPE_AUTO,
@@ -39,9 +39,7 @@
 +			 * runs, and bench runs 211/212's out-of-range EXPOSURE
 +			 * writeback (intLine 94470) decodes exactly against
 +			 * this block's ARX3A0 expTimeRange.max converted to
-+			 * lines -- not hal_alif patch 0010's original diagnosis
-+			 * of the gain writeback (see patch 0010's corrected
-+			 * comment). With this arm applied (bench run 213), AE
++			 * lines. With this arm applied (bench run 213), AE
 +			 * held within the sensor's real envelope with 0
 +			 * rejected writes; sourced from sensor_attributes.h's
 +			 * OV5647_AE_* macros (see that header's comment) so
@@ -73,7 +71,7 @@
  			.manualAttr = {
  				.intTime = 100000,
  				.again = 75000,
-@@ -87,6 +204,7 @@
+@@ -87,6 +144,7 @@
  				.aeRunInterval = 1,
  				.aeTarget = 255,
  				.dampOver = 0x40,
