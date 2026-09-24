@@ -18,10 +18,9 @@
  *  the one shared bound main.c's alp_jpeg_encode() call and this file's
  *  own allocation both use, so the two can never silently disagree.
  *  128 KiB: bench run 205 measured ~37 KB/frame at 640x480 on a DARK
- *  scene (a lit scene compresses worse); main.c additionally reserves
- *  CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE bytes of this capacity
- *  as margin against a known Hantro driver overrun -- see main.c's
- *  JPEG_OUT_CAP. */
+ *  scene (a lit scene compresses worse). main.c passes this full capacity
+ *  to alp_jpeg_encode() as-is -- the Hantro driver derives its own HW
+ *  output-size-limit register internally (issue #2268). */
 #define MJPEG_HTTP_MAX_JPEG 131072u
 
 /**

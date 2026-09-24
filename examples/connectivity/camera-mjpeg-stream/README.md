@@ -52,12 +52,15 @@ resolution was raised to its intended 640×480): `/snapshot.jpg` returned
 a valid 15571 B JPEG; `/stream` ran at 17 fps, ~12.8 KB/frame, 255 parts
 served in 15 s with no error, with a 1536 B Ethernet net_buf data size
 (run 203, at the smaller 128 B default, frames over 896 B were dropped
-and no JPEG body arrived at all -- both AEN board confs now set
-`CONFIG_NET_BUF_DATA_SIZE=1536` explicitly, ahead of the alp-sdk Alif
-Ethernet glue's own matching default landing separately).
+and no JPEG body arrived at all -- `CONFIG_ETH_DWMAC_ALIF` now defaults
+`CONFIG_NET_BUF_DATA_SIZE` to 1536 itself, #2260).
 
 Bench run 205 (E1M-AEN803 + OV5647, **640×480**, dark scene): 10 fps,
-~37 KB/frame. Rerun the ffmpeg command above for a current figure.
+~37 KB/frame. **Taken before** the ISP `bytesused` fix (#2263), the MRSZ
+chroma-row fix (#2267/#2269) and the Hantro output-buffer-overrun fix
+(#2268) landed -- treat these numbers as a pre-fix baseline, not a
+measurement of the current code; rerun the ffmpeg command above for a
+current figure.
 
 ## Limits
 
@@ -78,16 +81,24 @@ This is a teaching example, not a production camera server:
   205's 10 fps at 640×480 (~37 KB/frame) is a real measurement of that,
   not a target this example tries to hit.
 
+**Fixed since run 205:** the bottom two rows of every frame rendered solid
+green -- an ISP main-resizer chroma-row rounding bug (`ISP_MRSZ_SCALE_VC`
+truncation dropping the last 4:2:0 chroma row), now fixed at the driver
+level (#2267/#2269). YUV/NV12 frames dequeued from the ISP also used to
+report `bytesused` 0 (a pitch/size bug that sized buffers off the luma
+plane alone), which this example's camera path never hit directly but
+which sat upstream of it in the same pipeline; also fixed at the driver
+level (#2263).
+
 **Unverified on silicon:**
 
-- **ISP NV12 output content.** Runs 204 and 205 *did* produce frames
-  through this path end to end (camera → ISP → JPEG → HTTP, no pipeline
-  errors), but the frame content itself was dark/near-black (AWB
-  `noWhitePixel` flagged on every channel, gains read back 0x0) with the
-  bottom two rows rendering solid green -- both under separate
-  investigation (the darkness: scene/lens vs. AE; the green rows: a
-  known ISP resizer off-by-one being fixed separately), neither a defect
-  in this example's own code. Treat the *pipeline* as bench-proven and
+- **ISP NV12 output content (exposure/color).** Runs 204 and 205 *did*
+  produce frames through this path end to end (camera → ISP → JPEG →
+  HTTP, no pipeline errors), but the frame content itself was
+  dark/near-black (AWB `noWhitePixel` flagged on every channel, gains
+  read back 0x0) -- under separate investigation (scene/lens vs. AE),
+  not a defect in this example's own code, and not yet re-benched since
+  the driver fixes above landed. Treat the *pipeline* as bench-proven and
   the *image quality* as not yet.
 
 Hantro repeat-encode stability is **not** on the unverified list: runs
@@ -125,7 +136,7 @@ the body):
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
-| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, `CONFIG_NET_BUF_DATA_SIZE=1536`, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability

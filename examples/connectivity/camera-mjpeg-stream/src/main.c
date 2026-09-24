@@ -67,26 +67,14 @@
 #define FRAME_H 480
 
 /*
- * The Hantro VC9000E driver has a known bug (tracked separately, not
- * fixed here): SWREG9 is programmed with the full destination buffer
- * size, but the compressed stream itself starts
- * CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE bytes into that buffer
- * (the header is written in software first, ahead of the hardware's own
- * output) -- so the hardware can write up to that many bytes past the
- * end of a buffer sized exactly to what the caller asked for. Until
- * that lands, reserve the same margin in what THIS app tells
- * alp_jpeg_encode() it may use: the physical buffer
- * (mjpeg_http_claim_write_buffer(), MJPEG_HTTP_MAX_JPEG bytes) stays
- * full-size real memory, so the reserved tail is mapped SRAM0, not past
- * the allocation -- only the encoder's belief about its own capacity
- * shrinks. Portable: everywhere this Kconfig doesn't exist (off the
- * E1M-AEN family, including native_sim), the full buffer is offered.
+ * The full physical output buffer (mjpeg_http_claim_write_buffer(),
+ * MJPEG_HTTP_MAX_JPEG bytes) is what this app offers alp_jpeg_encode() --
+ * the Hantro VC9000E driver derives its own HW output-size-limit register
+ * (JPEG_SWREG9) from the buffer capacity minus the JPEG header size
+ * internally (issue #2268), so the caller doesn't need to reserve any
+ * margin here itself.
  */
-#if defined(CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE)
-#define JPEG_OUT_CAP (MJPEG_HTTP_MAX_JPEG - CONFIG_VIDEO_JPEG_HANTRO_VC9000E_HEADER_SIZE)
-#else
 #define JPEG_OUT_CAP MJPEG_HTTP_MAX_JPEG
-#endif
 
 /*
  * The Hantro VC9000E JPEG encoder is an external AXI bus master: it DMAs
