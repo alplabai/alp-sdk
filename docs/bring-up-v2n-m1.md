@@ -46,7 +46,17 @@ EN line) or address-strapped wrong.
 
 ### 2. DA9292 DEEPX rail (CH2) -- owned by U-Boot, nothing to do here
 
-**U-Boot performs this step; no firmware you write needs to.**
+**U-Boot performs this step; no firmware you write needs to.** Before
+this, the same `board_late_init()` also runs the on-module
+clock-generator fixup, unconditionally on every boot of any V2N/V2M
+SKU (not just V2N-M1) --
+`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`,
+logged as `ALP: 5L35023B clock: ...` ahead of the `ALP: DA9292 ...` /
+`ALP: DEEPX rail ...` lines below. See [`docs/soms/v2n.md`'s "On-module
+clock-generator fixup"](soms/v2n.md#on-module-clock-generator-fixup)
+for what it does; it is unrelated to the DEEPX sequencing and does not
+gate it.
+
 U-Boot's `board_late_init()`
 (`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch`)
 sequences CH2 to 0.75 V and confirms power-good over RIIC8/BRD_I2C

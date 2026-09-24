@@ -236,6 +236,30 @@ SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-rea
 # the full matrix.
 SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch"
 
+# 0007 (on-module 5L35023B clock-generator OTP fixup): the on-module
+# Renesas 5L35023B programmable clock generator (RIIC8/BRD_I2C, 7-bit
+# 0x69) ships an OTP image whose single-ended routing is wrong for this
+# SoM -- SE1 (feeds the SoC RTXIN and the Wi-Fi module's 32k LPO) comes
+# up at 24.576 MHz instead of 32.768 kHz, and SE3 (audio clock) comes up
+# at 22.5792 MHz instead of 24.576 MHz. Bench-confirmed (E1M-V2M103
+# board #1, 2026-09-24): with the OTP defaults the SoC RTC (RTCA-3)
+# fails to start ("Failed to setup the RTC!", -ETIMEDOUT); two volatile
+# register writes (reg 0x24: 0x9c->0x8e, reg 0x21: 0x80->0xc0) fix it,
+# after which the RTC counts at 32.768 kHz. Both are OTP-shadow
+# registers and REVERT ON POWER-CYCLE (the OTP itself cannot be
+# re-burned in-system), so alp_clk5l_fixup() runs unconditionally,
+# on every boot, first in board_late_init() -- ahead of and independent
+# of the 0004 DEEPX rail step -- for the whole rzv2n-family (this clock
+# generator is present on every V2N/V2M SoM, not just DEEPX-populated
+# V2M units). Guarded to single-byte reads only (see 0005/0006 above)
+# and to writing only these two registers, and only when reg 0x00 reads
+# the expected OTP-burned/addr-0x69 value (0xa0) and 0x24/0x21 read the
+# exact as-shipped OTP pair -- any other readback is left untouched and
+# only reported. Disjoint from every patch above (adds a new function
+# ahead of board_late_init(), which 0004 already edits at its tail), so
+# ordering after 0006 is not order-sensitive, only readable.
+SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;

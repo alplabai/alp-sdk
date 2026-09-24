@@ -269,9 +269,15 @@
  * issues short GPIO frames here.
  *
  * On-module real-time clock: Micro Crystal RV-3028-C7 at 0x52, also on
- * BRD_I2C -- the RTC of record for the whole SoM family (bench-proven
- * 2026-09-24: the SoC's own RTXIN/RTXOUT 32.768 kHz crystal is DNP on
- * the E1M V2N-family SoM schematic, so &rtc below is disabled outright).
+ * BRD_I2C -- the RTC of record for the whole SoM family (rtc0 alias
+ * below). The SoC's own RTXIN has no discrete 32.768 kHz crystal; it is
+ * instead fed by SE1 of the on-module 5L35023B clock generator, which
+ * U-Boot corrects from its as-shipped 24.576 MHz to 32.768 kHz on every
+ * boot before Linux starts (board_late_init() -> alp_clk5l_fixup(),
+ * meta-alp-sdk u-boot 0007 patch) -- bench-confirmed 2026-09-24
+ * (E1M-V2M103 board #1): with the fix applied, the SoC RTC (&rtc below)
+ * starts and counts at 32.768 kHz. See &rtc's own comment below -- do
+ * NOT re-disable it without also reverting that U-Boot fix.
  * No trickle-resistor-ohms is set: whether the RV-3028-C7's VBACKUP net
  * carries a backup cap/coin cell on this SoM is not confirmed on the
  * schematic -- add the property once that's known, don't guess it.
@@ -309,13 +315,31 @@
 	};
 };
 
-/* SoC RTC (RTCA-3, RTXIN/RTXOUT): no 32.768 kHz crystal is fitted on the
- * E1M V2N-family SoM (schematic crystal DNP) -- probing it just times
- * out ("Failed to setup the RTC!", probe error -110). The on-module
- * RV-3028-C7 above is the real RTC. It is disabled here, at the SoM
- * layer, so no carrier dtsi can enable it. */
+/* SoC RTC (RTCA-3, RTXIN/RTXOUT). RTXIN has no discrete 32.768 kHz
+ * crystal -- it is fed by SE1 of the on-module 5L35023B clock
+ * generator, whose as-shipped OTP image outputs 24.576 MHz on SE1
+ * instead of 32.768 kHz. U-Boot corrects this on every boot, before
+ * Linux starts (board_late_init() -> alp_clk5l_fixup(),
+ * meta-alp-sdk u-boot 0007 patch): a volatile register write that
+ * takes effect immediately but REVERTS ON POWER-CYCLE (the OTP itself
+ * cannot be re-burned in-system), so it must run every boot -- this DT
+ * enablement depends on that fix having already run. rtc_clk below is
+ * fixed at the corrected 32.768 kHz.
+ *
+ * Bench-confirmed 2026-09-24 (E1M-V2M103 board #1): before the fix,
+ * probing &rtc timed out ("Failed to setup the RTC!", -ETIMEDOUT);
+ * after it, the SoC RTC starts and counts at 32.768 kHz (~+/-100 ppm
+ * vs an NTP-slewed reference). The on-module RV-3028-C7 above remains
+ * the RTC of record (rtc0 alias) -- this is a second, SoC-internal
+ * timebase, not a replacement; production should use a Renesas factory
+ * dash code on the clock generator that carries the corrected OTP
+ * image instead of relying on this runtime fixup. */
+&rtc_clk {
+	clock-frequency = <32768>;
+};
+
 &rtc {
-	status = "disabled";
+	status = "okay";
 };
 
 /* On-module xSPI NOR. */
