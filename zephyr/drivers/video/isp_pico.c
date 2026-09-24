@@ -748,20 +748,14 @@ int isp_set_fmt(const struct device *dev,
  * calibration's own OP_TYPE_AUTO AE+AWB converge from the FIRST stream with
  * no runtime isp_vsi_set_param() and no restart at all (bench runs 153,
  * 156) -- so isp_stream_start() (the call site, below) only calls
- * isp_apply_wb() when wb_dirty is set (isp_set_ctrl()'s dirty flag,
- * isp_pico.h): any ctrl change sets the flag. Patch 0009 also adds its OWN
- * unconditional SetCalib call at isp_vsi_init() (init time), so SetCalib
- * now runs at most TWICE per boot -- once from patch 0009 at init, once
- * from patch 0007's once-guard at the first isp_vsi_update_cfg() -- never
- * on a later restart.
- *
- * #2271 update: isp_apply_ae() is no longer gated on ae_dirty the way
- * isp_apply_wb() is gated on wb_dirty above -- see isp_stream_start()'s own
- * comment at its AE call site for why (H2, EnableDev possibly re-seeding
- * AE state from the calibration on every restart). ae_dirty is still
- * tracked (isp_set_ctrl()/isp_init_controls() still set it, and it is
- * still cleared on a successful apply) but no longer decides whether the
- * call happens.
+ * isp_apply_wb()/isp_apply_ae() when wb_dirty/ae_dirty is set
+ * (isp_set_ctrl()'s dirty flags, isp_pico.h): any ctrl change sets the
+ * flag, and ae_dirty additionally starts true (isp_init_controls()) so the
+ * AE limits this sensor's calibration doesn't carry still get pushed at
+ * the first stream start too. Patch 0009 also adds its OWN unconditional
+ * SetCalib call at isp_vsi_init() (init time), so SetCalib now runs at most
+ * TWICE per boot -- once from patch 0009 at init, once from patch 0007's
+ * once-guard at the first isp_vsi_update_cfg() -- never on a later restart.
  */
 static int isp_apply_wb(const struct device *dev, bool enable)
 {
@@ -1064,22 +1058,32 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 
 	/*
 	 * #2271 proof-of-effect: read back what the library is ACTUALLY
-	 * holding, not just what this call pushed -- bench evidence was
-	 * isp_apply_ae() computing a correct ceiling while a per-frame
-	 * writeback (hal_alif patch 0010's clamp) still saturated against a
-	 * DIFFERENT, mismatched ceiling (isp_calib_param.ae,
+	 * holding, not just what this call pushed -- bench evidence (runs
+	 * 211/212) was isp_apply_ae() computing a correct ceiling while a
+	 * per-frame writeback (hal_alif patch 0010's clamp) still saturated
+	 * against a DIFFERENT, mismatched ceiling (isp_calib_param.ae,
 	 * isp_param_conf.h, loaded by SetCalib() before this function ever
-	 * ran -- root cause fixed in hal_alif patch 0011). Same valid_mask-
-	 * before-get pattern isp_apply_wb() uses above: ISP_PARAM_MASK_AE
-	 * must be set BEFORE the get, or isp_vsi_get_param()'s wrapper
-	 * (isp_api_wrapper.c) silently leaves every field zeroed. Only
-	 * attempted when the push itself succeeded -- a failed set already
-	 * logged above, and a readback under a not-yet-applied push would
-	 * just report the library's PRIOR state, not a new mismatch.
+	 * ran). Those two runs' values decode exactly against the
+	 * calibration's AE block; with hal_alif patch 0011 (OV5647 calib
+	 * envelope) applied, bench run 213 held within the sensor's real
+	 * envelope (int_time_max=98000 again_max=65472, intLine settling at
+	 * 3145/again 0xffc0 in a dark room) with 0 clamp-triggered
+	 * `E: Control value is invalid` lines -- but which ceiling the
+	 * library actually applies (this push, the calibration block, or
+	 * something else) is NOT established by this readback: the library
+	 * likely just echoes back the struct it was handed, so a "matches"
+	 * result here proves this driver's push round-trips, not that the
+	 * library is ENFORCING it. Same valid_mask-before-get pattern
+	 * isp_apply_wb() uses above: ISP_PARAM_MASK_AE must be set BEFORE
+	 * the get, or isp_vsi_get_param()'s wrapper (isp_api_wrapper.c)
+	 * silently leaves every field zeroed. Only attempted when the push
+	 * itself succeeded -- a failed set already logged above, and a
+	 * readback under a not-yet-applied push would just report the
+	 * library's PRIOR state, not a new mismatch.
 	 */
 	if (ret == 0) {
-		struct isp_params rb = {.valid_mask = ISP_PARAM_MASK_AE};
-		int rb_ret;
+		struct isp_params rb = { .valid_mask = ISP_PARAM_MASK_AE };
+		int               rb_ret;
 
 		k_mutex_lock(&data->lib_lock, K_FOREVER);
 		rb_ret = isp_vsi_get_param(&data->init_cfg, &rb);
@@ -1089,26 +1093,34 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 			LOG_WRN("AE attr readback failed: %d", rb_ret);
 		} else {
 			bool matches = (rb.ae.int_time_max == params.ae.int_time_max) &&
-				       (rb.ae.again_max == params.ae.again_max) &&
-				       (rb.ae.dgain_min == params.ae.dgain_min) &&
-				       (rb.ae.dgain_max == params.ae.dgain_max) &&
-				       (rb.ae.ae_target == params.ae.ae_target);
+			               (rb.ae.again_max == params.ae.again_max) &&
+			               (rb.ae.dgain_min == params.ae.dgain_min) &&
+			               (rb.ae.dgain_max == params.ae.dgain_max) &&
+			               (rb.ae.ae_target == params.ae.ae_target);
 
 			LOG_INF("AE readback: int_time_max=%u again_max=%u dgain_min=%u "
-				"dgain_max=%u ae_target=%u",
-				rb.ae.int_time_max, rb.ae.again_max, rb.ae.dgain_min,
-				rb.ae.dgain_max, rb.ae.ae_target);
+			        "dgain_max=%u ae_target=%u",
+			        rb.ae.int_time_max,
+			        rb.ae.again_max,
+			        rb.ae.dgain_min,
+			        rb.ae.dgain_max,
+			        rb.ae.ae_target);
 
 			if (!matches && !ae_readback_mismatch_logged) {
 				LOG_ERR("AE attr mismatch after set: pushed int_time_max=%u "
-					"again_max=%u dgain_min=%u dgain_max=%u ae_target=%u, "
-					"library holds int_time_max=%u again_max=%u "
-					"dgain_min=%u dgain_max=%u ae_target=%u",
-					params.ae.int_time_max, params.ae.again_max,
-					params.ae.dgain_min, params.ae.dgain_max,
-					params.ae.ae_target, rb.ae.int_time_max,
-					rb.ae.again_max, rb.ae.dgain_min, rb.ae.dgain_max,
-					rb.ae.ae_target);
+				        "again_max=%u dgain_min=%u dgain_max=%u ae_target=%u, "
+				        "library holds int_time_max=%u again_max=%u "
+				        "dgain_min=%u dgain_max=%u ae_target=%u",
+				        params.ae.int_time_max,
+				        params.ae.again_max,
+				        params.ae.dgain_min,
+				        params.ae.dgain_max,
+				        params.ae.ae_target,
+				        rb.ae.int_time_max,
+				        rb.ae.again_max,
+				        rb.ae.dgain_min,
+				        rb.ae.dgain_max,
+				        rb.ae.ae_target);
 				ae_readback_mismatch_logged = true;
 			} else if (matches) {
 				ae_readback_mismatch_logged = false;
@@ -1613,11 +1625,9 @@ static int isp_stream_start(const struct device *dev)
 
 	/* Run 84: unconditional, every restart -- see isp_apply_aem_wbm()'s
 	 * own comment for why this does NOT wait for isp_vsi_start() or gate
-	 * on wb_dirty the way isp_apply_wb() does (isp_apply_ae(), below, is
-	 * ALSO unconditional every restart since #2271 -- see its own call
-	 * site comment). Logged, not fatal: a stale (but non-zero)
-	 * measurement window is still better than aborting the whole stream
-	 * start over it.
+	 * on wb_dirty/ae_dirty the way isp_apply_wb()/isp_apply_ae() do.
+	 * Logged, not fatal: a stale (but non-zero) measurement window is
+	 * still better than aborting the whole stream start over it.
 	 */
 	ret = isp_apply_aem_wbm(dev, port->port_fmt.width, port->port_fmt.height);
 	if (ret) {
@@ -1710,35 +1720,13 @@ static int isp_stream_start(const struct device *dev)
 			data->ctrls.wb_dirty = false;
 		}
 	}
+	if (data->ctrls.ae_dirty) {
+		bool ae_enable = (data->ctrls.exposure_auto.val == VIDEO_EXPOSURE_AUTO);
+		int ret_ae = isp_apply_ae(dev, ae_enable);
 
-	/*
-	 * AE: #2271 -- pushed on EVERY stream (re)start, unlike WB above.
-	 * isp_apply_ae() was already correct at the very first start
-	 * (isp_init_controls() starts ae_dirty true, same reasoning WB
-	 * doesn't need), but bench evidence (runs 211/212) showed a LATER
-	 * restart's per-frame AE writeback (hal_alif patch 0010's clamp)
-	 * still saturating against isp_calib_param.ae's compiled-in ceiling
-	 * (isp_param_conf.h) -- as if this driver's own correct push from
-	 * the first start had stopped applying. H2 (unconfirmed against the
-	 * closed VSI_MPI_ISP library): VSI_MPI_ISP_EnableDev()
-	 * (isp_vsi_start(), above -- isp_api_wrapper.c) may re-seed the
-	 * library's live AE state from the calibration block on every
-	 * restart, undoing a push that, gated on ae_dirty, only ran once.
-	 * isp_apply_ae() is idempotent (always recomputes the same
-	 * sensor-derived ceiling from live queries, accumulates no state of
-	 * its own), so re-running it every restart is cheap insurance
-	 * against H2 whether or not it is the actual mechanism; hal_alif
-	 * patch 0011 additionally fixes the calibration's own AE block to
-	 * the sensor's real envelope, so even an unconfirmed re-seed can no
-	 * longer reintroduce an out-of-range ceiling either way. ae_dirty is
-	 * still tracked and cleared below (isp_set_ctrl()/isp_init_controls()
-	 * still set it) but no longer gates whether this call happens.
-	 */
-	bool ae_enable = (data->ctrls.exposure_auto.val == VIDEO_EXPOSURE_AUTO);
-	int ret_ae = isp_apply_ae(dev, ae_enable);
-
-	if (ret_ae == 0) {
-		data->ctrls.ae_dirty = false;
+		if (ret_ae == 0) {
+			data->ctrls.ae_dirty = false;
+		}
 	}
 
 	/*

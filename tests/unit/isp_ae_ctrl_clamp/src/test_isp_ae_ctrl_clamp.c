@@ -28,11 +28,11 @@
  * success, so it kept retrying the same rejected value). The GAIN writeback
  * that same bench run (aGain 0x2000, dGain 0x9cd) computed ctrl.val = 313 --
  * inside OV5647's registered VIDEO_CID_ANALOGUE_GAIN range of [0, 1023], not
- * the violator; an earlier revision of this file mis-cited the gain value as
- * the out-of-range one (#2271's actual root cause: the ISP library's own
- * compiled-in AE calibration block, isp_param_conf.h, not this clamp's own
- * target range -- see hal_alif patch 0011). test_clamp_regresses_the_bench_
- * value below pins the real (exposure) case.
+ * the violator. test_clamp_regresses_the_bench_value below pins the real
+ * (exposure) case. This clamp is a defensive layer, not the whole story:
+ * isp_param_conf.h's compiled-in OV5647 AE calibration block also decoded
+ * exactly against the same 94470-line ceiling (hal_alif patch 0011 brings
+ * it in line with the sensor's real envelope, #2271).
  */
 #include <stdint.h>
 

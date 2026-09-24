@@ -1042,20 +1042,24 @@ config VIDEO_ISP_VSI_FRAME_STATS
 	  not something every build of this driver needs.
 
 config VIDEO_ISP_VSI_CALIB_OV5647
-	bool "ISP-Pico AWB/CCM calibration: use OV5647's own tables, not ARX3A0's"
+	bool "ISP-Pico AWB/CCM/AE calibration: use OV5647's own tables, not ARX3A0's"
 	default y if VIDEO_OV5647
 	depends on VIDEO_ISP_VSI
 	help
-	  hal_alif's isp_param_conf.h compiles in ONE static AWB/CCM calibration
-	  blob per build (.wb.autoAttr.calibParam's centLine/rgMin/rgMax/
-	  wpRange0/wpRange1/illuminant[] gains, and .ccm.autoAttr.illuminantCCM[]),
-	  loaded once by patch 0007's SetCalib guard. Alif's stock table (kept as
-	  the #else arm, patch 0008) is ARX3A0's -- a different sensor's silicon
-	  than the OV5647 this branch runs, and bench run 140 (E1M-AEN803, AE+AWB
-	  running after 1c3d8ccc9) showed the mismatch as a strong magenta cast on
-	  a ceiling-white target (RGB mean [195, 109, 247], AWB converging to
-	  rGain 0x19e bGain 0x26a). Selecting this symbol switches
-	  isp_param_conf.h's #if/#else to an OV5647-derived calibration instead.
+	  hal_alif's isp_param_conf.h compiles in ONE static AWB/CCM/AE
+	  calibration blob per build (.wb.autoAttr.calibParam's centLine/rgMin/
+	  rgMax/wpRange0/wpRange1/illuminant[] gains, .ccm.autoAttr.illuminantCCM[],
+	  and -- as of patch 0011 -- .ae's manualAttr/autoAttr ranges), loaded
+	  once by patch 0007's SetCalib guard. Alif's stock table (kept as the
+	  #else arm, patches 0008/0011) is ARX3A0's -- a different sensor's
+	  silicon than the OV5647 this branch runs, and bench run 140
+	  (E1M-AEN803, AE+AWB running after 1c3d8ccc9) showed the WB/CCM
+	  mismatch as a strong magenta cast on a ceiling-white target (RGB mean
+	  [195, 109, 247], AWB converging to rGain 0x19e bGain 0x26a); the AE
+	  mismatch (ARX3A0's expTimeRange.max 3000000 us, #2271) showed up as
+	  the per-frame AE writeback saturating against a ceiling far past
+	  OV5647's real one. Selecting this symbol switches isp_param_conf.h's
+	  #if/#else to OV5647-derived AWB/CCM/AE calibration instead.
 
 	  Source data (manufacturer-side tuning, BSD-2-Clause): Raspberry Pi
 	  libcamera's src/ipa/rpi/vc4/data/ov5647.json
@@ -1080,14 +1084,15 @@ config VIDEO_ISP_VSI_AE_TARGET
 	default 90
 	depends on VIDEO_ISP_VSI
 	help
-	  isp_apply_ae()'s struct isp_ae_param.ae_target (isp_pico.c) AND
-	  hal_alif's own sensor_attributes.h reference table's .aeTarget both
-	  read this ONE Kconfig value (Zephyr's Kconfig namespace is global,
-	  so a hal_alif-side compiled patch can read a symbol declared here
-	  without any extra plumbing) -- kept as a single source of truth so
-	  the two never drift the way isp_pico.c's own ae_target=50 literal
-	  and sensor_attributes.h's separate .aeTarget=50 literal did before
-	  this Kconfig existed.
+	  isp_apply_ae()'s struct isp_ae_param.ae_target (isp_pico.c),
+	  hal_alif's own sensor_attributes.h reference table's .aeTarget, and
+	  -- as of patch 0011 -- isp_param_conf.h's OV5647 .ae.autoAttr.aeTarget
+	  all read this ONE Kconfig value (Zephyr's Kconfig namespace is
+	  global, so a hal_alif-side compiled patch can read a symbol declared
+	  here without any extra plumbing) -- kept as a single source of truth
+	  so the readers never drift the way isp_pico.c's own ae_target=50
+	  literal and sensor_attributes.h's separate .aeTarget=50 literal did
+	  before this Kconfig existed.
 
 	  UPDATED (bench run 85): the library's meanLum statistic is an 8-bit
 	  mean scaled by 1000 (VSI_ISP_EXPM_STATIC_BLOCK_NUM blocks averaged,
