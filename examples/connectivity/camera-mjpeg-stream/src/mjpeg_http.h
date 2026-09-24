@@ -17,11 +17,26 @@
 /** Capacity of each of the two ping-pong JPEG buffers this file owns --
  *  the one shared bound main.c's alp_jpeg_encode() call and this file's
  *  own allocation both use, so the two can never silently disagree.
- *  128 KiB: bench run 205 measured ~37 KB/frame at 640x480 on a DARK
- *  scene (a lit scene compresses worse). main.c passes this full capacity
- *  to alp_jpeg_encode() as-is -- the Hantro driver derives its own HW
- *  output-size-limit register internally (issue #2268). */
+ *  main.c passes this full capacity to alp_jpeg_encode() as-is -- the
+ *  Hantro driver derives its own HW output-size-limit register internally
+ *  (issue #2268).
+ *
+ *  128 KiB at 640x480: bench run 205 measured ~37 KB/frame on a DARK scene
+ *  (a lit scene compresses worse).
+ *
+ *  160 KiB at 1280x960 (CONFIG_CAMERA_MJPEG_STREAM_1280X960, issue #2286
+ *  Stage A): four times the pixel count scales worst-case JPEG size
+ *  roughly with it, and 160 KiB keeps 2x this buffer inside the SRAM0
+ *  budget boards/overlay-1280x960.conf works out alongside the
+ *  (also larger) raw ISP buffer pool -- see that file for the full
+ *  SRAM0 accounting. Bench run 243 (E1M-AEN803 2026W36-0001) measured
+ *  131-135 KB JPEGs at quality 60 -- comfortably under this cap, 0
+ *  buffer-full. */
+#if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
+#define MJPEG_HTTP_MAX_JPEG 163840u
+#else
 #define MJPEG_HTTP_MAX_JPEG 131072u
+#endif
 
 /**
  * @brief Start the MJPEG HTTP server thread.
@@ -45,6 +60,23 @@ int mjpeg_http_server_start(uint16_t port);
  *         Hantro encoder).
  */
 uint8_t *mjpeg_http_claim_write_buffer(void);
+
+/** Diagnostics mjpeg_http.c itself owns -- read once a second by main.c's
+ *  stats line (issue #2286 bench run 242); main.c never touches a socket
+ *  itself, so send timing has to come from here. */
+typedef struct {
+	/** Wall time of the most recent JPEG-body send (handle_stream's part
+	 *  body or handle_snapshot's whole body), milliseconds. 0 before the
+	 *  first send. */
+	uint32_t send_ms;
+} mjpeg_http_stats_t;
+
+/**
+ * @brief Read the latest send-timing diagnostics.
+ *
+ * @param[out] out  Must be non-NULL.
+ */
+void mjpeg_http_get_stats(mjpeg_http_stats_t *out);
 
 /**
  * @brief Publish the frame just encoded into the buffer

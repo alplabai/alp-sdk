@@ -1,31 +1,18 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The #2277 runtime-sync fix must stay in sync between its two real sources
-and their host-buildable test mirror.
+"""The #2277 runtime-sync fix must stay in sync between its real sources and
+their host-buildable test mirror.
 
 `tests/unit/isp_ae_calib_envelope_sync/src/test_isp_ae_calib_envelope_sync.c`
-mirrors TWO pieces of the real fix, from two different kinds of source (see
-that file's own comment for the full rationale):
-
-  1. `isp_ae_int_time_max_us_from_frmival()` -- alp-sdk-owned, in
-     `zephyr/drivers/video/isp_pico.c` directly (not a vendored patch).
-     Checked the same way `test_isp_ae_ctrl_clamp_patch_mirror.py` checks a
-     vendored patch's function: brace-matched extraction, byte-for-byte
-     (whitespace aside).
-
-  2. `isp_calib_ae_envelope_sync()` -- a conceptual mirror of three field-
-     copy lines `zephyr/patches/hal_alif/0011-isp-ov5647-ae-calib-envelope
-     .patch` adds to vendored, non-host-buildable `isp_api_wrapper.c` (it
-     calls into the closed VSI_MPI_ISP library and needs vendor struct
-     types the test cannot include). Unlike case 1, this cannot be a
-     byte-for-byte match: the real code assigns through
-     `isp_calib_param.modules.ae.autoAttr.X = exp_attr.autoAttr.X` inline
-     inside a much larger vendor-typed function, the mirror is its own
-     small function over a local POD struct. What must NOT drift is the
-     SET of fields mirrored (`autoAttr.{expTimeRange,againRange,
-     dgainRange}`) -- an edit that adds/drops a field on one side without
-     the other silently changes what #2277 actually keeps in sync, green
-     the whole time. This test extracts that field-name set from each
-     source's assignment statements and fails if they differ.
+mirrors alp-sdk-owned pure helpers directly from `zephyr/drivers/video/
+isp_pico.c` (not a vendored patch) -- brace-matched extraction, byte-for-byte
+(whitespace aside) -- plus one field-set check against the vendored
+`zephyr/patches/hal_alif/0011-isp-ov5647-ae-calib-envelope.patch`'s
+`isp_vsi_sync_ae_sns_default()` (see that file's own comment for the full
+rationale). An earlier field-set check against a since-removed
+`isp_calib_param.modules.ae.autoAttr` mirror, and a presence check for a
+since-removed AE-reinit cycle in `isp_vsi_sync_ae_sns_default()`, were
+deleted alongside the dead code they covered (bench run 251 -- see the
+patch's own comment).
 """
 
 from __future__ import annotations
@@ -137,31 +124,6 @@ def _patch_added_lines() -> list[str]:
     return lines
 
 
-def test_calib_sync_mirrors_the_same_fields_as_the_patch() -> None:
-    patch_fields = _assigned_fields(
-        line for line in _patch_added_lines() if "isp_calib_param.modules.ae." in line
-    )
-    mirror_body = _extract_function_body(
-        MIRROR.read_text(encoding="utf-8").splitlines(),
-        re.compile(r"^static void isp_calib_ae_envelope_sync\("),
-    )
-    mirror_fields = _assigned_fields(mirror_body.splitlines())
-
-    assert patch_fields, (
-        f"found no isp_calib_param.modules.ae.* assignment in {CALIB_PATCH.relative_to(REPO)} "
-        "-- did the #2277 sync mechanism move or get renamed?"
-    )
-    assert patch_fields == mirror_fields, (
-        "The #2277 calibration-envelope sync mirrors a DIFFERENT set of fields than "
-        f"{CALIB_PATCH.relative_to(REPO)} actually assigns.\n"
-        f"patch fields:  {sorted(patch_fields)}\n"
-        f"mirror fields: {sorted(mirror_fields)}\n"
-        "Update BOTH copies together -- this test only compares WHICH fields are kept "
-        "in sync, not the exact vendor-typed vs. POD-typed assignment syntax (see this "
-        "file's own comment for why)."
-    )
-
-
 def test_sns_full_lines_helper_matches_isp_pico_verbatim() -> None:
     """#2277 (third cut): isp_ae_sns_full_lines_from_frmival() is alp-sdk
     source (isp_pico.c), same status as isp_ae_int_time_max_us_from_frmival()
@@ -183,12 +145,11 @@ def test_sns_full_lines_helper_matches_isp_pico_verbatim() -> None:
 
 
 def test_sns_default_sync_mirrors_the_same_fields_as_the_patch() -> None:
-    """#2277 (third cut): hal_alif patch 0011's new isp_vsi_sync_ae_sns_
-    default() assigns sensor_attributes.{fullLinesStd,fullLines,maxIntLine}
-    -- the struct actually registered with the library at
-    VSI_MPI_ISP_InitAeSnsFunc() (bench run 244's root cause). Same
-    field-path-SET check as test_calib_sync_mirrors_the_same_fields_as_the_
-    patch() above, against the mirror's isp_sns_default_sync()."""
+    """hal_alif patch 0011's isp_vsi_sync_ae_sns_default() assigns
+    sensor_attributes.{fullLinesStd,fullLines,maxIntLine} -- the struct
+    vsi_int_time_update()'s write-back clamp reads from (bench run 251:
+    the actual enforcement point). Field-path-SET check against the
+    mirror's isp_sns_default_sync()."""
     patch_fields = _assigned_fields(
         line for line in _patch_added_lines() if "sensor_attributes." in line
     )
@@ -274,52 +235,40 @@ def _patch_function_body(func_signature_substr: str) -> str:
     return "\n".join(lines[start : end + 1])
 
 
-def test_sns_default_sync_forces_ae_reinit_on_change() -> None:
-    """#2277 (bench run 245, fourth cut): re-registering aeSnsFunc via
-    VSI_MPI_ISP_InitAeSnsFunc() alone (0a7ee9679's isp_vsi_sync_ae_sns_
-    default()) does NOT make the library re-pull sensor_attributes -- bench
-    run 245 measured intLine still pinning at the stale 10 fps default at
-    30 fps. The fix cycles VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack() to
-    force the AE algorithm's own init path to re-run, guarded on full_lines
-    actually changing (so a same-fps restart doesn't reset AE convergence
-    for nothing). This fails against 0a7ee9679, whose patch body has
-    neither call at all."""
+def test_sns_default_sync_does_not_reach_into_the_library() -> None:
+    """Bench run 251: re-registering aeSnsFunc with the library
+    (VSI_MPI_ISP_InitAeSnsFunc()) and cycling VSI_MPI_ISP_AeUnRegCallBack()/
+    AeRegCallBack() were both tried and both proven to have no effect on
+    the library's own internal AE request (it stays pinned at the
+    compiled-in boot default regardless) -- isp_vsi_sync_ae_sns_default()
+    was simplified back to the plain sensor_attributes field sync
+    vsi_int_time_update()'s write-back clamp actually reads from. This
+    fails if any of those vendor callback-registration calls reappear
+    without new bench evidence that they do something after all."""
     body = _patch_function_body("int isp_vsi_sync_ae_sns_default(")
 
-    assert "VSI_MPI_ISP_AeUnRegCallBack" in body, (
-        "isp_vsi_sync_ae_sns_default() no longer force-reinitialises the AE algorithm "
-        "(VSI_MPI_ISP_AeUnRegCallBack) -- this is the bench-run-245 fix for the "
-        "re-registration-alone-does-nothing bug. Don't drop it without new bench "
-        "evidence that InitAeSnsFunc() alone works after all."
-    )
-    assert "VSI_MPI_ISP_AeRegCallBack" in body, (
-        "isp_vsi_sync_ae_sns_default() unregisters AE but never re-registers it "
-        "(VSI_MPI_ISP_AeRegCallBack) -- AE would stay permanently torn down."
-    )
-    assert "last_synced_full_lines" in body and "!=" in body, (
-        "the AE re-init cycle must be guarded on full_lines actually CHANGING -- an "
-        "unconditional Un/Reg cycle on every isp_apply_ae() call (this driver's own "
-        "restart-per-frame pattern) would reset AE convergence state for no reason "
-        "on every same-fps restart."
-    )
+    for call in ("VSI_MPI_ISP_InitAeSnsFunc", "VSI_MPI_ISP_AeUnRegCallBack",
+                 "VSI_MPI_ISP_AeRegCallBack"):
+        assert call not in body, (
+            f"isp_vsi_sync_ae_sns_default() calls {call} again -- bench run 251 proved "
+            "this registration dance has no effect on the library's own internal AE "
+            "request (it stays pinned at the compiled-in boot default regardless); "
+            "don't re-add it without new bench evidence."
+        )
 
 
 def test_int_time_write_clamps_to_active_max_int_line() -> None:
-    """#2277 (bench run 245, fourth cut): defensive root-level guard,
-    independent of whether the AE-reinit fix above actually makes the
-    library honour the ceiling. vsi_int_time_update() (aeSnsFunc.
-    pfnIntTimeUpdate, the closed library's own per-frame intLine
-    write-back callback -- the LAST touchpoint before the value reaches
-    the sensor) must clamp against sensor_attributes.maxIntLine, the same
-    ceiling isp_vsi_sync_ae_sns_default() just wrote. Fails against
-    0a7ee9679, whose vsi_int_time_update() only stores and logs *pIntLine,
-    with no clamp at all."""
+    """Bench run 251: vsi_int_time_update() (aeSnsFunc.pfnIntTimeUpdate,
+    the closed library's own per-frame intLine write-back callback -- the
+    LAST touchpoint before the value reaches the sensor) is THE mechanism
+    bench-proven to hold the sensor within the active-mode ceiling -- it
+    must clamp against sensor_attributes.maxIntLine, the same ceiling
+    isp_vsi_sync_ae_sns_default() writes."""
     body = _patch_function_body("static int vsi_int_time_update(")
 
     assert "sensor_attributes.maxIntLine" in body, (
         "vsi_int_time_update() no longer references sensor_attributes.maxIntLine -- "
-        "the bench-run-245 defensive clamp (the library's real per-frame intLine "
-        "output ignored every other lever this driver tried) is gone."
+        "the bench-proven enforcement point (bench run 251) is gone."
     )
     assert re.search(r"\*pIntLine\s*=", body), (
         "vsi_int_time_update() must write the CLAMPED value back through *pIntLine "

@@ -379,19 +379,17 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 *
 	 * FIXED (issue #2277): the OV5647 calibration AE block's compiled-in
 	 * exposure ceiling used to be hard-pinned to the 10 fps VTS
-	 * regardless of the rate requested here -- a first attempt made that
-	 * pin a function of a Kconfig-selected fps instead, but a single
-	 * compile-time value can only ever match ONE app's choice, and this
-	 * backend's own fallback just below is 10, not whatever the Kconfig
-	 * happened to default to. hal_alif patch 0011 now keeps the
-	 * calibration's exposure-time RANGE in sync with the ACTIVE fps at
-	 * RUNTIME instead: isp_apply_ae() (isp_pico.c) already derives its
-	 * own ceiling from video_get_frmival() (the chain this comment block
-	 * describes) on every stream (re)start, and isp_api_wrapper.c's
-	 * isp_vsi_set_param() now mirrors that same push into
-	 * isp_calib_param.modules.ae.autoAttr -- the struct SetCalib() itself
-	 * reprograms the library from -- so the compiled-in value only
-	 * matters for the brief window before the first stream start. */
+	 * regardless of the rate requested here. isp_apply_ae() (isp_pico.c)
+	 * derives its own ceiling from video_get_frmival() (the chain this
+	 * comment block describes) on every stream (re)start and keeps
+	 * sensor_attributes.maxIntLine -- hal_alif patch 0011's
+	 * isp_vsi_sync_ae_sns_default() -- current for the active fps; the
+	 * library's own internal AE request still stays pinned at the boot
+	 * default regardless (bench run 251), but that same patch's
+	 * write-back clamp (vsi_int_time_update(), the last touchpoint
+	 * before a value reaches the sensor) enforces the active-mode
+	 * ceiling anyway, so the compiled-in default only matters for the
+	 * brief window before the first stream start. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;

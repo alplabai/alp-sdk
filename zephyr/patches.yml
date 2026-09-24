@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 44c495dc6d552ca9b6a46a076b7b227d6add832f102c5b71fb394849689fcde4
+    sha256sum: 2a4877993c3ac5a7f11c8ec0ba7778e9729de81a76ec09f08c0988b11ce63424
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -740,168 +740,46 @@ patches:
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
 
-      UPDATED (#2277, first cut, REVERTED): OV5647_AE_MAX_INT_LINE was a
-      single #define pinned to the sensor's 10 fps VTS (3145 lines)
-      regardless of the ACTIVE requested rate. A first attempt made it a
-      function of a Kconfig-selected fps (VIDEO_ISP_VSI_CALIB_OV5647_FPS,
-      default 30, matching ALP_CAMERA_CONFIG_DEFAULT) -- still one
-      compile-time value, and every app in this repo that actually runs
-      the OV5647 (this backend's own 10 fps fallback,
-      src/backends/camera/alif_isp_pico.c, plus both examples/aen/aen-isp-
-      ov5647-* apps) pins cfg.fps = 10, not 30, so that Kconfig's 30 fps
-      default left a REAL 10 fps app's compiled-in ceiling at roughly a
-      third of its actual entitlement. Reverted for the fix below.
-
-      UPDATED (#2277, real fix): a compile-time constant cannot serve
-      every app's fps choice, so isp_param_conf.h's OV5647_AE_* macros
-      (ov5647_ae_envelope.h) go back to being a fixed 10 fps BOOT-TIME
-      default only (the sensor's own floor rate, the most exposure
-      headroom of any mode, so never worse than what a real 10 fps app
-      needs). isp_api_wrapper.c's isp_vsi_set_param() now mirrors the
-      exposure/gain RANGE isp_apply_ae() (isp_pico.c) pushes at runtime --
-      already correctly derived from video_get_frmival(), the sensor's
-      OWN reported ACTIVE frame period, on every stream (re)start -- into
-      isp_calib_param.modules.ae.autoAttr directly, the SAME struct
-      SetCalib() reprograms the library from on any later reload (PM
-      resume, a second isp_open() after a full close/reopen). So the
-      compiled-in default only governs the brief window before the first
-      stream start, and the calibration block stays correct for whatever
-      fps the app actually negotiates, not a rate guessed at compile
-      time.
-
-      UPDATED (#2277, third cut -- the REAL bound): the "real fix" above
-      shipped, then bench run 244 (E1M-AEN803 + OV5647, camera-mjpeg-
-      stream, 30 fps requested) measured it did NOT change the observed
-      behaviour -- diag globals confirmed isp_apply_ae() pushed the
-      correct 30 fps ceiling (int_time_max_us=32667) into isp_calib_
-      param.modules.ae.autoAttr, but the library's own "VSI AE INFO"
-      console trace showed intLine ramping straight past that push's
-      line-equivalent (~1029) and PINNING at exactly 3145 -- sensor_
-      attributes.h's AE_SNS_DEFAULT_S.maxIntLine, the fixed 10 fps boot
-      default (patch 0006), completely untouched by either #2277 cut
-      above. Root cause: VSI_MPI_ISP_InitAeSnsFunc() (isp_vsi_init())
-      registers aeSnsFunc -- whose pfnGetAeDefault callback
-      (vsi_get_ae_default()) hands the library sensor_attributes
-      verbatim -- exactly ONCE, at device boot (isp_configure(),
-      isp_pico.c's isp_init()), well before any app has negotiated a
-      frame rate; isp_calib_param.modules.ae.autoAttr (this patch's own
-      mirror, above) is a DIFFERENT struct the library does not appear
-      to enforce its per-frame intLine ceiling from. Real fix: a new
-      isp_vsi_sync_ae_sns_default(init_cfg, full_lines, max_int_line)
-      updates sensor_attributes.fullLines/fullLinesStd/maxIntLine and
-      re-registers aeSnsFunc via VSI_MPI_ISP_InitAeSnsFunc() so the
-      library re-pulls it -- the only lever found that actually reaches
-      the ceiling bench run 244 observed. full_lines/max_int_line are
-      computed by a new pure function in isp_pico.c,
-      isp_ae_sns_full_lines_from_frmival() (VTS = pixel_rate *
-      frame_period / HTS, OV5647's own facts, same as this file's
-      existing int_time_max_us fallback constant), called from
-      isp_apply_ae() on every stream (re)start alongside the existing
-      #2277-first-cut mirror -- kept, not proven dead: no bench evidence
-      isolates whether isp_calib_param.modules.ae.autoAttr affects
-      anything else (AE convergence search bounds, say) even though it
-      does not set the hard per-frame ceiling. Two new diagnostics:
-      isp_ae_diag_sns_int_line (this file, vsi_int_time_update(), 1 Hz
-      LOG_INF) mirrors the LAST intLine the library actually pushed to
-      the sensor -- exactly the value bench run 244's console trace
-      showed pinning; isp_pico.c's isp_ae_diag_sns_full_lines/
-      isp_ae_diag_sns_max_int_line mirror the ceiling this sync call
-      last pushed. Bench re-run not yet performed as part of this
-      change -- see tests/unit/isp_ae_calib_envelope_sync for the
-      host-side regression proving the OLD (4990322ee) code path stays
-      pinned to the stale default while the new sync call tracks a
-      30->10->30 fps switch.
-
-      UPDATED (#2277, bench run 245 -- the fourth cut): the third cut
-      above shipped (0a7ee9679), then bench run 245 (same setup, 30 fps
-      requested) measured it STILL did not change the observed
-      behaviour: diag globals confirmed isp_vsi_sync_ae_sns_default()
-      ran and pushed sns_full_lines=1049/sns_max_int_line=1045 (the
-      correct 30 fps ceiling), yet the library's "VSI AE INFO" trace
-      again showed intLine ramping 4->17->75->334->1491->3145 and
-      PINNING at exactly 3145 -- proving VSI_MPI_ISP_InitAeSnsFunc()'s
-      re-registration, by itself, does not make the library re-pull
-      sensor_attributes via pfnGetAeDefault. Root cause (this cut):
-      pfnGetAeDefault is evidently only consulted from the AE
-      algorithm's OWN init path (ISP_AE_FUNC_S.pfnAeInit), which
-      VSI_MPI_ISP_AeRegCallBack(&vsiAeAlgo) drives (patch 0009's
-      registration) -- re-registering the SENSOR function table alone
-      never triggers that init to re-run. Real fix, two parts:
-
-      1. isp_vsi_sync_ae_sns_default() now cycles
-         VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack(&vsiAeAlgo) right
-         after the InitAeSnsFunc() re-registration, forcing pfnAeInit to
-         re-run and re-read the just-updated sensor_attributes. Guarded
-         on full_lines actually CHANGING since the last sync (a static
-         last_synced_full_lines) -- isp_apply_ae() calls this on every
-         stream (re)start, most of them at the SAME fps, and tearing the
-         AE algorithm down/rebuilding it every time would reset its
-         damping/converged state for no reason when the ceiling has not
-         moved.
-
-      2. Defensive root-level guard, independent of whether the library
-         actually honours the re-init above: vsi_int_time_update()
-         (aeSnsFunc.pfnIntTimeUpdate, the closed library's own per-frame
-         intLine write-back callback) now clamps *pIntLine to
-         sensor_attributes.maxIntLine -- the SAME ceiling the sync call
-         above just wrote -- before it reaches sns_config.intLine and
-         the *16'd VIDEO_CID_EXPOSURE write further down this file.
-         maxIntLine == 0 (no sync has run yet) skips the clamp. New 1 Hz
-         LOG_INF diagnostics: isp_ae_diag_sns_int_line_clamped (the
-         value actually written) and isp_ae_diag_sns_max_int_line_active
-         (the active ceiling the clamp used), alongside the existing
-         isp_ae_diag_sns_int_line (the library's raw, unclamped
-         request) -- so a bench readback can tell whether the library
-         honoured the re-init or the clamp caught it.
-
-      Bench re-run not yet performed as part of this change.
-
-      UPDATED (#2277, fifth cut -- exposure write-back diagnostics): bench
-      run 246 (bb97a5336 applied) found the FOURTH cut's own clamp
-      working correctly (requested intLine=3145 clamped=1045, logged at
-      1 Hz, stable for the whole 12 s session) but the sensor's
-      0x3500..0x3502 exposure registers reading back OV5647_EXPOSURE_
-      DEFAULT (0x0fff) at every sample -- the clamped intLine, *16'd,
-      never actually landed. A new native_sim ztest
-      (test_ae_writeback_exposure_auto_then_exposure_lands_in_registers,
-      tests/zephyr/video_sensors/src/ov5647_test.c) reproduces
-      isp_apply_ae_sensor_gate()'s + isp_vsi_bottom_half()'s own control
-      sequence (VIDEO_CID_EXPOSURE_AUTO=MANUAL, VIDEO_CID_AUTOGAIN=0,
-      then VIDEO_CID_EXPOSURE=1045*16) against ov5647.c + Zephyr's own
-      drivers/video/video_ctrls.c and PASSES on bb97a5336 unmodified --
-      proving the alp-sdk-side control routing (advisor candidates (a)
-      "the bottom-half write-back never runs"/chain-walk, and (c) ov5647's
-      MANUAL/AUTO early return or EXPOSURE/EXPOSURE_AUTO cluster routing)
-      is NOT the defect: the same sequence, exercised directly, lands the
-      value correctly. This narrows the standing hypothesis to advisor
-      candidate (b) -- video_set_ctrl() failing at the ACTUAL isp->cam->
-      csi->sensor chain-walk depth or under real ISP/library timing this
-      unit test cannot reproduce (no ISP hardware or closed VSI_MPI_ISP
-      library in native_sim) -- which needs a live bench read to confirm.
-      Added diagnostics for that next bench pass, all 1 Hz LOG_INF +
-      `volatile` globals for an SWD read: isp_api_wrapper.c's
-      isp_ae_diag_exposure_{last_ret,last_ctrl_val,cached_int_line,
-      sns_int_line} (isp_ae_diag_exposure_log(), called right after every
-      exposure video_set_ctrl() attempt in isp_vsi_bottom_half()) capture
-      exactly what the wrapper believes it just did; ov5647.c's
-      ov5647_ae_diag_log() moved to the TOP of ov5647_set_ctrl_exposure()
-      (was only reached after a successful MANUAL-mode write, so a
-      candidate-(c)-class session stuck in AUTO would have frozen this
-      diag at its last successful sample instead of showing the live
-      AUTO/manual_ctrl state) and now also reads the RAW 0x3500..0x3502
-      value (ov5647_ae_diag_exp_reg_raw) and raw 0x3503
-      (ov5647_ae_diag_manual_ctrl_raw), plus ov5647_ae_diag_last_ret/
-      last_ctrl_val for what THIS driver's own last write attempt
-      returned -- a three-way cross-check (wrapper's belief vs. driver's
-      belief vs. the sensor's actual register) a future bench run can
-      read to pin down (b)'s exact failure mode. isp_pico.c also gained
-      an isp_bottom_half() call to isp_ae_diag_log() (that file's own
-      per-frame fps diagnostic) on every real frame-end instead of only
-      from isp_apply_ae()'s ae_dirty-gated readback, which only ran once
-      per session (ae_dirty goes false after the first successful apply)
-      and froze isp_ae_diag_isp_fps_x100 from then on.
-
-      Bench re-run not yet performed as part of this change.
+      UPDATED (#2277, final -- bench run 251): the calibration-block
+      approach above (isp_param_conf.h's compiled-in expTimeRange) was
+      superseded once bench evidence (runs 244/245) showed the closed
+      library does not enforce its per-frame intLine ceiling from that
+      struct at all: it pins to sensor_attributes.h's AE_SNS_DEFAULT_S
+      compiled-in 10 fps default (3145 lines) regardless. Two mechanisms
+      were tried to make the library re-pull an updated sensor default
+      (re-registering aeSnsFunc via VSI_MPI_ISP_InitAeSnsFunc(), then
+      additionally cycling VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack())
+      and bench run 251 (E1M-AEN803 2026W36-0001, OV5647, 640x480, 30 fps
+      requested, dim scene) confirms neither changes the library's own
+      internal AE request: it stays pinned at 3145 the whole session
+      regardless. What bench run 251 also confirms: isp_api_wrapper.c's
+      vsi_int_time_update() write-back clamp -- the LAST touchpoint
+      before a value reaches the sensor, clamping against
+      sensor_attributes.maxIntLine -- is what actually holds the sensor
+      within the active-mode ceiling by itself (0x3503 read 0x07 at
+      stream start and every ~1 s poll during streaming; sensor exposure
+      0x3500..02 = 0x4150 = 1045 lines = VTS(1049)-4, equal to the value
+      written, held throughout; ISP 30.00 fps, host 30.03 fps). Removed
+      as dead weight accordingly: the isp_calib_param.modules.ae.autoAttr
+      mirror in isp_vsi_set_param() (the calibration-block push, proven
+      to reach a struct the library does not enforce from), and the
+      VSI_MPI_ISP_InitAeSnsFunc()/AeUnRegCallBack()/AeRegCallBack()
+      re-registration cycle in isp_vsi_sync_ae_sns_default() (proven to
+      have no effect on the library's internal request). Kept:
+      isp_vsi_sync_ae_sns_default() itself, simplified to the plain
+      sensor_attributes.fullLinesStd/fullLines/maxIntLine field sync the
+      clamp reads from (still needed -- without it the clamp would hold
+      the sensor at the stale 10 fps ceiling instead of the active one);
+      the write-back clamp; isp_pico.c's isp_ae_sns_full_lines_from_
+      frmival()/isp_ae_int_time_max_us_from_frmival() pure helpers (still
+      exercised by tests/unit/isp_ae_calib_envelope_sync); the OV5647
+      stream-start AEC/AGC-manual-bit re-assert (a separate fix, ov5647.c
+      -- see that patch's own history). All per-write bench-only
+      diagnostics (readback globals/counters added across the bench
+      runs above, the ov5647.c every-30-frame ISP-side poll hook) were
+      removed once bench run 251 closed out the investigation; isp_pico.c
+      keeps only its lightweight per-second ISP frame-rate counter
+      (isp_ae_diag_isp_fps_x100, CONFIG_VIDEO_ISP_VSI_FRAME_STATS).
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr
