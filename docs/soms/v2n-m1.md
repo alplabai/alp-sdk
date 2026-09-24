@@ -7,7 +7,8 @@
 | SKU            | Memory                                | Status     |
 |----------------|---------------------------------------|------------|
 | `E1M-V2M101`   | 32 Gbit LPDDR4X + 32 Gbit eMMC + DX-M1| production |
-| `E1M-V2M102`   | 64 Gbit LPDDR4X + 64 Gbit eMMC + DX-M1| production |
+| `E1M-V2M102`   | 64 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1| production |
+| `E1M-V2M103`   | 32 Gbit LPDDR4X + 128 Gbit eMMC + DX-M1| production |
 
 ## What's different from V2N base
 
@@ -41,12 +42,13 @@ PCIe device:
 
 The third DEEPX buck (`tps628640`, role `deepx_lpddr_0v85`) has no
 settled I2C address on the V2M pair --
-`metadata/e1m_modules/E1M-V2M101.yaml` / `E1M-V2M102.yaml` record it
+`metadata/e1m_modules/E1M-V2M101.yaml` / `E1M-V2M102.yaml` /
+`E1M-V2M103.yaml` record it
 as `address_7bit: "TBD"`, not `0x48`.  The chip's own default strap
 *is* `0x48`, but that collides with the on-module `tmp112`
 temperature sensor, which is confirmed at `0x48` on the same bus on
-all four V2N-family SKUs (V2N101/102 declare the same `tmp112` at
-`0x48`, and all four SKUs share one PCB, so it's a single physical
+all six V2N-family SKUs (V2N101/102/103 declare the same `tmp112` at
+`0x48`, and all six SKUs share one PCB, so it's a single physical
 net) -- see [#1163](https://github.com/alplabai/alp-sdk/issues/1163)
 and [#1845](https://github.com/alplabai/alp-sdk/issues/1845). Which
 part is re-strapped on the real V2M schematic, and to what, is not

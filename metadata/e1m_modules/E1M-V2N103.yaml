@@ -1,4 +1,5 @@
-# Stock preset for E1M-V2N102 (memory variant of V2N101).
+# Stock preset for E1M-V2N103 (4 GB RAM / 16 GB eMMC memory tier of
+# the V2N101 PCB -- the SoM, not the board).
 #
 # Lists the chip drivers, I2C device addresses, memory capacity,
 # and default board for this SKU; `scripts/alp_project.py` and
@@ -6,15 +7,15 @@
 
 schema_version: 1
 
-sku: E1M-V2N102
+sku: E1M-V2N103
 family: renesas-rzv2n
 silicon: renesas:rzv2n:n44
 silicon_variant: R9A09G056N44GBG         # see metadata/socs/renesas/rzv2n/n44.json variants[]
 
-display_name: "E1M-V2N102 (Renesas RZ/V2N, larger memory)"
+display_name: "E1M-V2N103 (Renesas RZ/V2N, 4 GB / 16 GB)"
 
 on_module:
-  silicon:              renesas:rzv2n:n44
+  silicon:              renesas:rzv2n:n44      # quad Cortex-A55 + Cortex-M33 + DRP-AI3
   pmic_main:            act8760
   pmic_secondary:       da9292
   clock_generator:      clk_5l35023b
@@ -69,11 +70,11 @@ on_module:
         - { chip: eeprom_24c128,    role: eeprom_identity,           address_7bit: "0x58" }
 
 memory:
-  dram_mbit:            65536                  # 64 Gbit LPDDR4X
+  dram_mbit:            32768                  # 32 Gbit LPDDR4X
   flash_mbit:           131072                 # 128 Gbit eMMC 5.1 (16 GB)
 
 inference:
-  preferred_backend:    drpai
+  preferred_backend:    drpai                  # DRP-AI3 on-die
 
 capabilities:
   cau:                  true       # GD32G553 supervisor's CAU accessible via bridge.
@@ -86,11 +87,16 @@ capabilities:
 topology:
   a55_cluster:
     app: alp-image-edge
-    machine: e1m-v2n102-a55           # Yocto MACHINE
+    machine: e1m-v2n103-a55           # Yocto MACHINE
     toolchain: poky-glibc
   m33_sm:
     app: alp-stock-shim
-    board: alp_e1m_v2n102_m33_sm      # Zephyr board target
+    # Bare (unqualified) board target: no zephyr/boards/alp/ tree has
+    # been generated for this SKU yet -- a qualified <board>/<soc>/<cpucluster>
+    # target requires the tree to exist (#720). V2N103 is a memory-tier
+    # BOM variant of the shipped V2N101 PCB; its own board bring-up has
+    # not happened yet, same state as V2N102/V2M102.
+    board: alp_e1m_v2n103_m33_sm      # Zephyr board target
     toolchain: arm-zephyr-eabi
     # Headless M33 system-manager (A55 owns the debug UART); see #686.
     hw_console: false
@@ -256,6 +262,18 @@ pad_routes:
   - { e1m: E1M_X_GPIO_IO34, dispatch: gd32_bridge, dispatch_pin: PD8  }
   - { e1m: E1M_X_GPIO_IO35, dispatch: gd32_bridge, dispatch_pin: PD1  }
 
+# On-module helper MCUs whose firmware images the orchestrator
+# registers into the system manifest for Alp Lab's factory/production
+# flash flow -- NOT the customer's routine one.  gd32_bridge below is
+# programmed by Alp Lab at the factory; customers get the bridge's
+# command-frame API (SPI + I2C, docs/gd32-bridge.md) for normal
+# operation and update_channel: alp_ota_spi_bridge for field updates.
+# Local reflashing is recovery_only -- an out-of-tan SWD procedure with
+# Alp Lab-supplied binaries, for a bricked device only (see
+# docs/gd32-bridge.md's "Who flashes it, and when" section), not a
+# routine customer flash path.
+# These are NOT heterogeneous-compute peers (they don't appear in
+# `topology:`); they're independently-flashed supervisor MCUs.
 helper_firmware:
   - name:          gd32_bridge
     chip:          gd32g553

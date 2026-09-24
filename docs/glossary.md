@@ -396,7 +396,7 @@ defaults in their project's `board.yaml cores:` block.
 E1M-X form factor.  See [`docs/soms/v2n.md`](soms/v2n.md).
 
 **V2N-M1** -- V2N variant with the DEEPX DX-M1 NPU on-module.
-SKUs `E1M-V2M101` / `E1M-V2M102`.  See
+SKUs `E1M-V2M101` / `E1M-V2M102` / `E1M-V2M103`.  See
 [`docs/soms/v2n-m1.md`](soms/v2n-m1.md).
 
 **west** -- Zephyr's meta-tool for workspace management + sub-commands. Python
