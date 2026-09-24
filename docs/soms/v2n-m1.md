@@ -56,8 +56,8 @@ The third DEEPX buck (`tps628640`, role `deepx_lpddr_0v85`) is
 `metadata/e1m_modules/E1M-V2M101.yaml` / `E1M-V2M102.yaml` /
 `E1M-V2M103.yaml`.  **Bench-measured 2026-09-24 on E1M-V2M103:**
 `0x48` ACKs on `BRD_I2C` only once `P64` (`DEEPX_CORE_0P75_EN`) is
-driven high (step 1 above), and its VOUT register (`0x5A`) reads
-0.85 V -- matching the role.  This is the same address the chip's
+driven high (step 1 above), and its VOUT reads `0x5A` (= 0.85 V:
+0.4 V + 90 x 5 mV) -- matching the role.  This is the same address the chip's
 own default strap gives, but that was NOT sufficient on its own to
 resolve the strap (see the now-superseded collision history below);
 the bench measurement is what confirms it.

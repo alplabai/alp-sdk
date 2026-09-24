@@ -171,10 +171,10 @@ SRC_URI:append:e1m-v2m103-a55 = " file://deepx-rail.cfg"
 # chasing a bench failure on E1M-V2M103 2026-09-24 (0004's first DA9292
 # read timing out with -ETIMEDOUT, and a separate console session where
 # an "i2c probe" found the DA9292 and the next "i2c md" then failed
-# -EBUSY), but fixing it is NOT proven to resolve either symptom -- see
-# this patch's own commit message for why "i2c probe"'s own code path
-# (riic_set_addr(), untouched here) is the more likely wedge source.
-# BENCH-PENDING: unverified on silicon.
+# -EBUSY). It runs on silicon in the bench-passing chain (v4..v6, see
+# changelog.d/2045): not isolated to prove it alone fixes either
+# symptom on its own, but every build that brought the DEEPX rail up on
+# silicon included it.
 #
 # Disjoint file from every patch above (drivers/i2c/rzg2l_riic.c vs
 # board/renesas/rzv2n-dev/*), so its position relative to them is not

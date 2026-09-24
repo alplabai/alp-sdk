@@ -400,16 +400,18 @@
 	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), external
 	 * pull-up population on this ALP module for RIIC0 (on-module EEPROM
 	 * bus) or RIIC1 is TBD -- not yet confirmed against the
-	 * schematic/BOM. RIIC8 (BRD_I2C) IS populated: R287/R288 (2.2 kOhm
-	 * to VDD1G_1P8) are fitted per the netlist, confirmed on the same
+	 * schematic/BOM. RIIC8 (BRD_I2C) IS populated: external 2.2 kOhm
+	 * pull-ups to the 1.8 V rail are fitted, confirmed on the same
 	 * bench pass that root-caused the arbitration-lost failure below.
 	 * Enable the SoC internal pull-ups on all three regardless, so
 	 * SCL/SDA idle high even where population is unconfirmed.
-	 * For RIIC8/BRD_I2C the internal pull-up is not just a safety
-	 * margin on top of the external ones: bench-confirmed REQUIRED
-	 * (E1M-V2M103, U-Boot bcf29d98) -- without it RIIC8 reads fail with
-	 * arbitration-lost (ICSR2 AL) on the very first read, external
-	 * pull-ups notwithstanding. A slower RIIC8 SCL is separately
+	 * For RIIC8/BRD_I2C the internal pull-up was bench-confirmed
+	 * required at the unpatched (faster) RIIC8 clock (E1M-V2M103,
+	 * U-Boot bcf29d98) -- without it, reads failed with
+	 * arbitration-lost (ICSR2 AL) on the very first read, the external
+	 * pull-ups above notwithstanding. It is carried alongside the
+	 * slower CKS(5) clock now shipped for RIIC8 rather than re-tested
+	 * for necessity at that clock. A slower RIIC8 SCL is separately
 	 * required for burst reads on this same bus (loaded with ~13
 	 * populated branches): see the matching U-Boot fix,
 	 * meta-alp-sdk/recipes-bsp/u-boot/u-boot/
