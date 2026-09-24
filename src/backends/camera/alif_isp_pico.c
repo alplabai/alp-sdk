@@ -37,8 +37,10 @@
  *     capture proves on real silicon (runs 69-145): ISP INPUT format
  *     SBGGR10P at the requested size, AWB (VIDEO_CID_AUTO_WHITE_BALANCE) and
  *     AE (VIDEO_CID_EXPOSURE_AUTO) turned on via the standard Zephyr video
- *     ctrl registry before the first video_stream_start(), the OV5647's own
- *     10 fps floor frame interval, then the ISP OUTPUT format.  The ISP MI
+ *     ctrl registry before the first video_stream_start(), the caller's
+ *     requested frame interval (cfg->fps, falling back to a 10 fps default
+ *     -- a choice, not a hardware limit -- when unset; see the DT_NODE_EXISTS
+ *     block below), then the ISP OUTPUT format.  The ISP MI
  *     never produces RGB565 (isp_pico.c's supported_output_fmts is
  *     YUV/mono/Bayer only) -- a caller requesting ALP_PIXFMT_RGB565 gets a
  *     negotiated YUV output (YUV420 planar preferred, YUYV fallback -- see
@@ -64,7 +66,9 @@
  * the naive alp_yuv_to_rgb565() reference converter costs on the order of a
  * second per 640x480 frame at this bench's -Os + CONFIG_DCACHE=n config
  * (scripts/bench/aen/aen-bench-shared.conf) -- far longer than one frame
- * period at the OV5647's 10 fps floor. With only
+ * period at the 10 fps this backend requested by default at the time (a
+ * choice made for AE headroom in a dim scene, not a sensor limit -- see the
+ * open()-time frmival request below). With only
  * CONFIG_ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT=2 raw buffers, holding one
  * buffer that long during conversion left just one buffer queued to the
  * ISP MI, which starved, auto-stopped, and forced a full stream restart
@@ -90,12 +94,15 @@
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/kernel.h>
+#include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
 #include <alp/backend.h>
 #include <alp/camera.h>
 #include <alp/cap_instance.h>
 #include <alp/peripheral.h>
+
+LOG_MODULE_REGISTER(alp_camera_alif_isp_pico, CONFIG_LOG_DEFAULT_LEVEL);
 
 #include "alp_errno.h"
 #include "camera_ops.h"
@@ -348,14 +355,75 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	(void)video_set_ctrl(dev, &ae_ctrl);
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
-	/* OV5647's floor rate (ov5647_framerates[] in ov5647.c) gives AE the
-	 * most exposure headroom for a dim scene -- same reasoning as the
-	 * capture example's file header.  Scoped to the OV5647 shield only:
-	 * a future sensor on this ISP path needs its own branch here. */
+	/* Request the caller's fps (issue #2276: this used to hard-code 10 fps
+	 * here, silently ignoring cfg->fps).  cfg->fps == 0 means "backend
+	 * default" (see <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT
+	 * the same convention width/height use just above (those are a
+	 * "you must choose" sentinel that alp_camera_open() rejects outright;
+	 * an unset fps is not an error, it just falls back to this backend's
+	 * own default of 10 fps, the OV5647's lowest supported rate
+	 * (ov5647_framerates[] in ov5647.c) -- a *choice* that buys AE the
+	 * most exposure headroom in a dim scene, not a hardware floor.
+	 * ov5647_set_frmival() then picks the closest of {10, 15, 30, 45, 60,
+	 * 90, 120} it can actually reach at this mode (VTS-clamped), so read
+	 * the result back rather than assume the request landed exactly.
+	 *
+	 * isp_pico.c can't be asked generically here: it derives its own AE
+	 * envelope from video_get_frmival(config->controller, ...) (isp ->
+	 * cam -> csi -> sensor chain, sensor-agnostic -- see that file's AE
+	 * comment), but `controller` is private to its driver config, not
+	 * reachable from this backend, and isp_pico's video_driver_api
+	 * doesn't implement .set_frmival/.get_frmival itself. So this stays
+	 * scoped to the OV5647 shield's own DT node; a future sensor on this
+	 * ISP path needs its own branch here.
+	 *
+	 * NOTE (issue #2277): the OV5647 calibration AE block's own exposure
+	 * ceiling is still hard-pinned to the 10 fps VTS regardless of the
+	 * rate requested here -- unverified interaction in a dim scene at a
+	 * faster rate. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
-		struct video_frmival frmival = { .numerator = 1, .denominator = 10 };
-		(void)video_set_frmival(sensor_dev, &frmival);
+		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
+		struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
+		int                  rc            = video_set_frmival(sensor_dev, &frmival);
+
+		if (rc != 0) {
+			LOG_WRN("camera%u: video_set_frmival(%u fps) failed: rc=%d",
+			        cfg->camera_id,
+			        requested_fps,
+			        rc);
+		}
+
+		struct video_frmival actual = { 0 };
+		if (video_get_frmival(sensor_dev, &actual) == 0 && actual.denominator > 0) {
+			/* Print the settled interval as num/den rather than a
+			 * truncating denominator/numerator division -- a
+			 * non-integer or sub-1-fps settled rate would otherwise
+			 * print a misleading rounded (or zero) fps. The request
+			 * was always {.numerator = 1, .denominator =
+			 * requested_fps}, so compare against that rather than
+			 * requested_fps alone. */
+			bool settled_as_requested =
+			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
+
+			if (settled_as_requested) {
+				LOG_DBG("camera%u: requested %u fps, sensor settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			} else {
+				LOG_INF("camera%u: requested %u fps, sensor settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			}
+		}
+	} else {
+		LOG_WRN("camera%u: OV5647 device not ready; fps request (%u) not applied",
+		        cfg->camera_id,
+		        cfg->fps);
 	}
 #endif
 
@@ -526,8 +594,10 @@ isp_capture(alp_camera_backend_state_t *state, alp_camera_frame_t *out, uint32_t
 		 * queued to the ISP MI (this one dequeued, held here through
 		 * the conversion), the fifo can absorb one held buffer for
 		 * roughly (VBUF_COUNT-1) frame periods before it starves and
-		 * the driver auto-stops -- at the OV5647's 10 fps floor that's
-		 * ~100 ms of headroom per spare buffer, nowhere near enough for
+		 * the driver auto-stops -- at this backend's 10 fps default
+		 * (see the frmival request in open()) that's ~100 ms of
+		 * headroom per spare buffer (less at a higher requested fps),
+		 * nowhere near enough for
 		 * the naive per-pixel path (~1 s/frame at -Os, see this file's
 		 * header) but comfortably inside this fast path's budget. */
 		if (st->isp_out_fourcc == VIDEO_PIX_FMT_YUYV) {

@@ -66,6 +66,14 @@
 #define FRAME_W 640
 #define FRAME_H 480
 
+/* Requested camera frame rate. The OV5647 backend (alif_isp_pico.c) honors
+ * this via cfg->fps and settles on the closest rate it can actually reach
+ * (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120, VTS-clamped) --
+ * confirmed end to end at FRAME_W x FRAME_H (bench run 220, E1M-AEN803 +
+ * OV5647, module 2026W36-0001, bright daylight): 901 complete JPEGs streamed in each of
+ * three 30 s captures = 30.03 fps. See README.md's Limits section. */
+#define FRAME_FPS 30
+
 /*
  * The full physical output buffer (mjpeg_http_claim_write_buffer(),
  * MJPEG_HTTP_MAX_JPEG bytes) is what this app offers alp_jpeg_encode() --
@@ -249,7 +257,7 @@ int main(void)
 
 		ccfg.width  = FRAME_W;
 		ccfg.height = FRAME_H;
-		ccfg.fps    = 15;
+		ccfg.fps    = FRAME_FPS;
 		ccfg.format = pixfmt;
 		camera      = alp_camera_open(&ccfg);
 		if (camera == NULL || alp_camera_start(camera) != ALP_OK) {
@@ -340,7 +348,7 @@ int main(void)
 		} else {
 			build_synthetic_frame(pixfmt, &req);
 			have_frame = true;
-			k_msleep(66); /* ~15 fps -- matches the requested camera fps above */
+			k_msleep(1000 / FRAME_FPS); /* matches the requested camera fps above */
 		}
 
 		if (have_frame) {
