@@ -1,66 +1,141 @@
-From e22133bb76980bef5509e255b401214598ec5d80 Mon Sep 17 00:00:00 2001
+From 4b150df48ed88c97969ee8fb13550c989b3e92a2 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 24 Sep 2026 16:10:19 +0200
-Subject: i2c: rzg2l_riic: don't split a register read into two bus
- transactions
+Subject: [PATCH] i2c: rzg2l_riic: fix combined-register-read desync and
+ busy-bus wedge
 
 riic_xfer() ran every struct i2c_msg in a multi-message transfer as its
 own independent START..STOP bus transaction.  dm_i2c_read() always
 builds a register read as exactly two messages: msg[0] is a plain
-write carrying only the register offset, msg[1] is the paired read.
-riic_xfer() therefore ran msg[0] through riic_write_common() as a full
-transaction (START, ADDR+W, offset byte, TEND wait, STOP) and then ran
-msg[1] through riic_read_common(), which independently performs the
-WHOLE combined operation itself (START, ADDR+W, offset byte again from
+write carrying only the register offset (1-4 bytes), msg[1] is the
+paired read.  riic_xfer() therefore ran msg[0] through
+riic_write_common() as a full transaction (START, ADDR+W, offset
+byte(s), TEND wait, STOP) and then ran msg[1] through
+riic_read_common(), which independently performs the WHOLE combined
+operation itself (START, ADDR+W, offset byte(s) again from
 priv->offset, TEND wait, repeated START, ADDR+R, data, STOP).  Net
-result: every register read sent the offset byte twice, as two
+result: every register read sent the offset byte(s) twice, as two
 separate transactions with a spurious STOP between them, instead of
-the single repeated-START transaction dm_i2c_read() intends.
+the single repeated-START transaction dm_i2c_read() intends.  This is
+a generic RIIC(rzg2l)/R9A09G056 driver defect, not specific to any one
+instance: every register read on any of the SoC's nine RIIC instances
+goes through this same riic_xfer() path.
 
-On the ALP E1M-V2M DEEPX-rail bring-up patch's DA9292 PMIC accesses
-(RIIC8 / BRD_I2C, board/renesas/rzv2n-dev/rzv2n-dev.c
-alp_deepx_rail_bringup()) this desyncs the device badly enough that
-the very first cold-boot register read (PMC_DEV_ID) times out
-(riic_wait_for_icsr2() -> -ETIMEDOUT), and once this RIIC instance's
-ICCR2 BBSY flag is left stuck set by an incompletely-recovered
-transaction, every later transaction fails immediately with -EBUSY.
-riic_ops only implements .xfer/.probe_chip (no bus-recovery op), so
-"i2c reset" cannot clear the wedge either -- only a power cycle does,
-by resetting the DA9292's own I2C engine.  Writes are unaffected:
-dm_i2c_write() always builds a single combined message (offset + data
-in one buffer), so riic_write_common() alone already does the right
-single transaction for every DA9292 write in the rail sequence.
+This is a real, independently-reasoned protocol defect regardless of
+any particular board's symptoms -- fix it on its own merits:
 
-Recognise the standard write-offset-then-read message pair and skip
-the redundant first transaction: stash the offset directly and let
-riic_read_common() run the one genuine combined transaction.  Any
-other message pattern (a lone write, or a bare read with no offset
-message) falls through to the original per-message loop unchanged.
+- Generalise the fast path: recognise the standard write-offset-then-
+  read message pair (nmsgs == 2, msg[0] a write of 1-4 bytes, msg[1]
+  the paired read, both messages targeting the same device address)
+  and skip the redundant first transaction. Pack the offset bytes
+  big-endian into priv->offset and let riic_read_common() run the one
+  genuine transaction with the real offset width -- riic_send_mem_addr()
+  already supports 1-4 bytes, the previous fast path hardcoded 1 and
+  silently truncated anything wider. This also fixes the on-module
+  24C128 EEPROM path on RIIC0, which addresses with 2 bytes and was
+  previously left on the original, double-transaction loop.
 
-Restricted to a ONE-BYTE offset (msg[0].len == 1): riic_read_common()
-itself only ever resends a single byte from priv->offset before the
-restart (alen is hardcoded to 1, matching the pre-existing code's own
-limitation there), so fast-pathing a genuinely multi-byte offset would
-silently drop its trailing byte(s).  The on-module 24C128 EEPROM on
-RIIC0 addresses with 2 bytes and is the only other dm_i2c_read() user
-board_late_init() has -- it is deliberately left on the original,
-unmodified per-message loop, so this change carries no behaviour
-change for it either way.
+- Fix a second, previously-uncaught bug in that same fallback loop: a
+  bare read (a lone read message with no preceding offset write in
+  the same transfer) was still calling riic_read_common() with alen=1,
+  resending whatever priv->offset happened to be left over from an
+  unrelated earlier transaction instead of performing a plain
+  offset-less read. It now calls riic_read_common() with alen=0.
 
-This is a generic RIIC(rzg2l)/R9A09G056 driver defect, not specific to
-RIIC8: every ONE-BYTE-offset register read on any of the SoC's nine
-RIIC instances goes through this same riic_xfer() path.
+- riic_check_busy(): on a BBSY timeout, attempt recovery once instead
+  of failing immediately -- clock SDA free via ICCR1.CLO if a slave is
+  holding it low, then run the same ICE=0+IICRST full reset/re-init
+  riic_probe() performs on cold init, and retry the busy check. Still
+  returns -EBUSY if the bus stays wedged after the retry. riic_ops
+  implements no dm_i2c bus-recovery op, so "i2c reset" cannot reach
+  this driver at all today ("Not supported by the driver").
+
+- riic_wait_for_icsr2(): print its timeout diagnostics (which bit was
+  awaited, ICSR2, ICCR2) unconditionally instead of only in DEBUG
+  builds, so a bench run shows which wait timed out without needing a
+  debug rebuild.
+
+Bench context (E1M-V2M103, 2026-09-24): this defect was found while
+chasing a cold-boot DA9292 (RIIC8/BRD_I2C) register read that returned
+-ETIMEDOUT (-110), and a separate bench console session where an
+initial "i2c probe" found the DA9292 at 0x1E, but the very next "i2c
+md" on it failed with -EBUSY (-16) and every later probe found
+nothing. The double-transaction defect fixed here is a real,
+independently-confirmed bug and plausibly contributes to both
+symptoms, but it is NOT proven to be their root cause: "i2c probe"
+does not go through riic_xfer() at all -- it calls riic_probe_chip() /
+riic_set_addr() directly, a third code path (also START..STOP, but it
+writes the probed device's own address byte as a junk "offset" before
+STOP, and its NACK handling is untouched by this patch). The -16 wedge
+appeared right after that probe, so riic_set_addr()'s own transaction
+shape, not the combined-read path this patch fixes, is the more likely
+wedge source -- unverified, stated here as a hypothesis for the next
+bench session, not a diagnosis.
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/i2c/rzg2l_riic.c | 38 ++++++++++++++++++++++++++++++++++++++
- 1 file changed, 38 insertions(+)
+ drivers/i2c/rzg2l_riic.c | 91 +++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 89 insertions(+), 2 deletions(-)
 
 diff --git a/drivers/i2c/rzg2l_riic.c b/drivers/i2c/rzg2l_riic.c
-index d84f1419..13e85635 100644
+index d84f1419..dc223fa0 100644
 --- a/drivers/i2c/rzg2l_riic.c
 +++ b/drivers/i2c/rzg2l_riic.c
-@@ -598,8 +598,46 @@ force_exit:
+@@ -235,6 +235,8 @@ static int riic_set_clock(struct udevice *dev, int clock)
+ 	return 0;
+ }
+ 
++static int riic_init_setting(struct udevice *dev, int clock);
++
+ static int riic_check_busy(struct udevice *dev)
+ {
+ 	struct riic_priv *priv = dev_get_priv(dev);
+@@ -252,6 +254,30 @@ static int riic_check_busy(struct udevice *dev)
+ 
+ 	} while (get_timer(start) < timeout);
+ 
++	/*
++	 * ALP: BBSY stuck set wedges every later transaction on this RIIC
++	 * instance and riic_ops implements no dm_i2c bus-recovery op ("i2c
++	 * reset" -> "Not supported by the driver"), so recover right here:
++	 * clock SDA free if a slave is holding it low, then run the same
++	 * ICE=0+IICRST full reset riic_probe() does on cold init, and retry
++	 * the busy check once before giving up.
++	 */
++	printf("ALP: riic bus busy (BBSY stuck), resetting controller\n");
++	if (!(riic_read(priv, RIIC_ICCR1) & ICCR1_SDAI)) {
++		int i;
++
++		for (i = 0; i < 9 && !(riic_read(priv, RIIC_ICCR1) & ICCR1_SDAI); i++)
++			riic_set_bit(priv, ICCR1_CLO, RIIC_ICCR1);
++	}
++	riic_init_setting(dev, I2C_SPEED_STANDARD_RATE);
++
++	start = get_timer(0);
++	do {
++		if (!(riic_read(priv, RIIC_ICCR2) & ICCR2_BBSY))
++			return 0;
++
++	} while (get_timer(start) < timeout);
++
+ 	debug("%s: i2c bus is busy.\n", __func__);
+ 	return -EBUSY;
+ }
+@@ -303,7 +329,12 @@ static int riic_wait_for_icsr2(struct udevice *dev, unsigned short bit)
+ 
+ 	} while (get_timer(start) < timeout);
+ 
+-	debug("%s: timeout!(bit = %x icsr2 = %x, iccr2 = %x)\n", __func__,
++	/*
++	 * ALP: always visible on the bench, not gated behind a DEBUG build
++	 * -- shows which wait timed out. Failure path only, so the rate is
++	 * fine.
++	 */
++	printf("%s: timeout!(bit = %x icsr2 = %x, iccr2 = %x)\n", __func__,
+ 		bit, riic_read(priv, RIIC_ICSR2), riic_read(priv, RIIC_ICCR2));
+ 
+ 	return -ETIMEDOUT;
+@@ -598,12 +629,68 @@ force_exit:
  
  static int riic_xfer(struct udevice *dev, struct i2c_msg *msg, int nmsgs)
  {
@@ -70,43 +145,66 @@ index d84f1419..13e85635 100644
 +	/*
 +	 * ALP: dm_i2c_read() always issues a combined transfer for a
 +	 * register read -- msg[0] is a plain write carrying only the
-+	 * register offset, msg[1] is the paired read.  riic_read_common()
-+	 * below already performs that ENTIRE combined operation itself
-+	 * (write the offset, repeated START, read) using priv->offset, so
-+	 * running msg[0] through riic_write_common() first (as the generic
-+	 * loop below does) sends the offset byte TWICE, as two independent
-+	 * START..STOP bus transactions with a spurious STOP in between --
-+	 * not the single repeated-START transaction dm_i2c_read() intends.
++	 * register offset (1-4 bytes), msg[1] is the paired read.
++	 * riic_read_common() below already performs that ENTIRE combined
++	 * operation itself (write the offset, repeated START, read) using
++	 * priv->offset, so running msg[0] through riic_write_common() first
++	 * (as the generic loop below does) sends the offset byte(s) TWICE,
++	 * as two independent START..STOP bus transactions with a spurious
++	 * STOP in between -- not the single repeated-START transaction
++	 * dm_i2c_read() intends.
 +	 *
 +	 * On the DA9292 PMIC on RIIC8/BRD_I2C (E1M-V2M DEEPX rail, see the
 +	 * DEEPX-rail-bringup patch) this desyncs the device's I2C engine
 +	 * badly enough that the read either times out (-ETIMEDOUT) or
 +	 * leaves this RIIC instance's ICCR2 BBSY flag stuck set, wedging
-+	 * the bus for every later transaction (-EBUSY) until power-cycled
-+	 * -- this driver implements no bus-recovery op, so "i2c reset"
-+	 * cannot clear it either ("Not supported by the driver").
++	 * the bus for every later transaction (-EBUSY) -- see the recovery
++	 * added to riic_check_busy() below; this driver implements no
++	 * dm_i2c bus-recovery op, so "i2c reset" cannot reach it directly
++	 * ("Not supported by the driver").
 +	 *
 +	 * Recognise the write-offset+read pattern and skip the redundant
-+	 * first transaction: just stash the offset and let
-+	 * riic_read_common() run the one genuine transaction.  Restricted to
-+	 * a ONE-BYTE offset (msg[0].len == 1): riic_read_common() itself only
-+	 * ever resends a single byte from priv->offset before the restart
-+	 * (alen is hardcoded to 1 below, matching the original code's own
-+	 * limitation), so a genuinely multi-byte offset -- e.g. the 24C128
-+	 * EEPROM on RIIC0, which addresses with 2 bytes -- would lose its
-+	 * second byte if fast-pathed here. Leave that case, and any other
-+	 * message pattern (plain single write, e.g. dm_i2c_write(), or a
-+	 * bare read), on the original per-message loop unchanged.
++	 * first transaction: pack the offset bytes big-endian into
++	 * priv->offset and let riic_read_common() run the one genuine
++	 * transaction with the real offset width. riic_send_mem_addr()
++	 * already supports 1-4 bytes, so this covers every register read on
++	 * the SoC's RIIC instances, including the on-module 24C128 EEPROM on
++	 * RIIC0, which addresses with 2 bytes (previously stuck on the
++	 * original per-message loop below with its hardcoded 1-byte alen --
++	 * silently truncating the offset). Any other message pattern (a lone
++	 * write, a bare read with no offset, more than two messages, or the
++	 * two messages targeting different device addresses) falls through
++	 * to the original per-message loop unchanged.
 +	 */
 +	if (nmsgs == 2 && !(msg[0].flags & I2C_M_RD) &&
-+	    (msg[1].flags & I2C_M_RD) && msg[0].len == 1) {
-+		priv->offset = msg[0].buf[0];
-+		return riic_read_common(dev, &msg[1], 0, 1);
++	    (msg[1].flags & I2C_M_RD) && msg[0].addr == msg[1].addr &&
++	    msg[0].len >= 1 && msg[0].len <= 4) {
++		u32 offset = 0;
++		int i;
++
++		for (i = 0; i < msg[0].len; i++)
++			offset = (offset << 8) | msg[0].buf[i];
++		priv->offset = offset;
++		return riic_read_common(dev, &msg[1], 0, msg[0].len);
 +	}
 +
  	for (; nmsgs > 0; nmsgs--, msg++) {
  
  		if (msg->flags & I2C_M_RD)
+-			ret = riic_read_common(dev, msg, 0, 1);
++			/*
++			 * ALP: a read reaching this generic, per-message
++			 * loop is never the second half of a write-offset+
++			 * read pair -- that pair is always caught by the
++			 * fast path above. It is a bare read with no offset
++			 * to send, so alen=0: don't resend a stale
++			 * priv->offset left over from an unrelated earlier
++			 * transaction.
++			 */
++			ret = riic_read_common(dev, msg, 0, 0);
+ 		else
+ 			ret = riic_write_common(dev, msg, 0, 1);
+ 
 -- 
 2.34.1
 

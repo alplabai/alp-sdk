@@ -29,7 +29,8 @@ tps628640_t t44, tlpddr, t4f;
 tps628640_init(&t44, brd_i2c, 0x44, 1050);       /* DDR5_VDD       */
 /* deepx_lpddr_0v85 is bench-confirmed at 0x48 (#1163, #1845) -- see
  * docs/soms/v2n-m1.md's "deepx_lpddr_0v85 strap is resolved" section.
- * Only ACKs after step 1 drives P64 (DEEPX_CORE_0P75_EN) high. */
+ * Only ACKs after U-Boot's step 2 drives P64 (DEEPX_CORE_0P75_EN)
+ * high. */
 tps628640_init(&tlpddr, brd_i2c, 0x48, 850);      /* VDD0V85_LPDDR  */
 tps628640_init(&t4f, brd_i2c, 0x4F, 500);        /* DDR5_VDDQ_0V5  */
 ```

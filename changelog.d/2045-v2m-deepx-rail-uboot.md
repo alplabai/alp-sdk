@@ -126,12 +126,12 @@ register map, the 0.75 V programming values, and the physical wiring
 in `0004`'s sequence are all correct -- the failure below is
 U-Boot-side only.
 
-**U-Boot-side RIIC8 driver bug found and fixed, same session.** The
+**U-Boot-side RIIC driver bug found, and fixed on its own merits.** The
 first on-silicon run of `0004` (chain-loaded) failed at the very
 first DA9292 read: `ALP: DA9292 DEV_ID=0x00 (want 0xea) REV_ID=0x00
-CFG_REV=0x00 ret=-110 -- abort`. Root cause is a genuine
-RIIC(rzg2l)/R9A09G056 U-Boot driver defect, not a rail-sequence or
-wiring problem (the Linux-side proof above rules those out):
+CFG_REV=0x00 ret=-110 -- abort`. While chasing that, a genuine
+RIIC(rzg2l)/R9A09G056 U-Boot driver defect was found (the Linux-side
+proof above already rules out a rail-sequence or wiring problem):
 `drivers/i2c/rzg2l_riic.c`'s `riic_xfer()` ran every `struct i2c_msg`
 of a multi-message transfer as its own independent START..STOP bus
 transaction. `dm_i2c_read()` always builds a register read as two
@@ -144,46 +144,67 @@ own full START..STOP transaction, and then `riic_read_common()` sent
 it AGAIN as part of its own transaction -- the offset went out twice,
 as two separate bus transactions with a spurious STOP between them,
 never the single repeated-START transaction `dm_i2c_read()` intends.
-On the DA9292 this desyncs the device badly enough that the very
-first cold read times out, and once this RIIC instance's `ICCR2`
-`BBSY` flag is left stuck set by the incompletely-recovered
-transaction, every later transaction fails immediately with `-EBUSY`
--- matching the bench log exactly (`i2c probe` on bus 8 found `1E 25
-26` once; the next `i2c md 0x1e 0x19 1` then failed `-16`, and every
-subsequent probe found nothing; `i2c reset` -> `Not supported by the
-driver`, since `riic_ops` implements only `.xfer`/`.probe_chip`, no
-bus-recovery op). Writes are unaffected -- `dm_i2c_write()` always
-builds one combined message, so `0004`'s own DA9292 writes already
-ran correctly; only its reads (`PMC_DEV_ID`, `STATUS_01`, `CTRL_01`,
-`VOUT_CH2`, `EVENT_00`/`01`, the `STATUS_00` poll) hit this bug.
+This is a real, independently-confirmed protocol defect (every
+register read on any of the SoC's nine RIIC instances goes through
+the same `riic_xfer()` path) and plausibly contributes to a desync
+severe enough to time out a cold read and leave `ICCR2` `BBSY` stuck
+set, wedging every later transaction with `-EBUSY`. It is **not
+proven** to be the cause of the bench failures, though: a separate
+console session on the same bus saw `i2c probe` find the DA9292 at
+`1E 25 26` once, then the very next `i2c md 0x1e 0x19 1` fail `-16`
+and every later probe find nothing -- but `i2c probe` doesn't go
+through `riic_xfer()` at all, it calls `riic_probe_chip()` /
+`riic_set_addr()` directly, a third code path this patch leaves
+untouched (it writes the probed device's own address byte as a junk
+"offset" before STOP). That path's own transaction shape is at least
+as likely a wedge source as the combined-read bug fixed here --
+stated as a hypothesis for the next bench session, not a diagnosis.
+Writes are unaffected either way -- `dm_i2c_write()` always builds one
+combined message, so `0004`'s own DA9292 writes already ran correctly;
+only its reads (`PMC_DEV_ID`, `STATUS_01`, `CTRL_01`, `VOUT_CH2`,
+`EVENT_00`/`01`, the `STATUS_00` poll) could hit this bug.
 
-New focused patch
-`0005-i2c-rzg2l_riic-combined-register-read.patch` fixes `riic_xfer()`
-to recognise the standard write-offset-then-read message pair and
-skip the redundant first transaction -- it stashes the offset
-directly and lets `riic_read_common()` run the one genuine
-transaction; any other message pattern (a lone write, or a bare read)
-falls through unchanged. This is a generic RIIC driver fix (every one
-of the SoC's nine RIIC instances routes register reads through the
-same `riic_xfer()`), not specific to RIIC8, so it is added
+Patch `0005-i2c-rzg2l_riic-combined-register-read.patch` (regenerated
+via `git format-patch` after a maintainer review, not hand-edited)
+fixes `riic_xfer()` on its own merits, beyond the original narrow
+fix: the fast path now recognises the write-offset-then-read message
+pair for any 1-4 byte offset (packed big-endian into `priv->offset`,
+matching what `riic_send_mem_addr()` already supports), not just one
+byte -- this also fixes the on-module 24C128 EEPROM's 2-byte-offset
+reads on RIIC0, previously left on the original double-transaction
+loop. The fallback per-message loop's bare-read case (a lone read
+message with no preceding offset write) now passes `alen=0` to
+`riic_read_common()` instead of resending a stale `priv->offset` left
+over from an unrelated earlier transaction. `riic_check_busy()` gains
+a one-shot recovery on a BBSY timeout -- clock SDA free via
+`ICCR1.CLO` if a slave is holding it low, then run the same
+`ICE=0+IICRST` full reset/re-init `riic_probe()` performs on cold
+init, and retry once (still returns `-EBUSY` if the bus stays wedged)
+-- since `riic_ops` implements no `dm_i2c` bus-recovery op today
+(`"i2c reset"` -> `"Not supported by the driver"`). And
+`riic_wait_for_icsr2()`'s timeout diagnostic (which bit was awaited,
+`ICSR2`, `ICCR2`) now prints unconditionally instead of only in DEBUG
+builds, so a bench run shows which wait timed out without a debug
+rebuild. This is a generic RIIC driver fix (every one of the SoC's
+nine RIIC instances routes register reads through the same
+`riic_xfer()`), not specific to RIIC8, so it stays added
 unconditionally for `rzv2n-family` rather than gated the way `0004`'s
 Kconfig knob is.
 
-**Rebuilt and link-verified with the fix, 2026-09-24** (fresh
+**Rebuilt and link-verified with the reworked fix, 2026-09-24** (fresh
 `bcf29d98` + PMIC-I2C-removal + `0001` + `0002` (md5
 `c546f00cabca346e335febd21ecbc440`) + `0003` (4 GB tier) + `0004`
-(md5 `269fc80793f33514871704d3c1f4fc73`) + `0005`, all via `git
-apply`; `rzv2n-dev_defconfig` + `no-dirty-version.cfg` +
-`gigadevice-xspi.cfg` + `deepx-rail.cfg` + `fdtfile-v2m.cfg`; WSL
-Ubuntu-22.04, `aarch64-linux-gnu` gcc 11.4.0): build `rc=0`, every
-`ALP:` DA9292/DEEPX string still linked (LTO did not drop any of
-them), `CONFIG_SYS_SDRAM_SIZE` = `(0x100000000u - DRAM_RSV_SIZE)` and
-the control DT's `memory@48000000` = `<0x0 0x48000000 0x0
-0xF8000000>` -- both correct for the 4 GB tier (an earlier bench
-run's `DRAM: 7.9 GiB` banner, which showed the 4 GB tier was NOT
-effective, used a different, since-superseded `0003` draft; this
-build uses the branch's committed, verified-correct `0003`).
-`u-boot.bin`: md5 `d41165c2ae6fa7c65a1192fcb3ad345e`, size 764120
-bytes (`0xBA8D8`), crc32 `0x95570da2`. Still BENCH-PENDING: the fix
-is unverified on-silicon -- no board access this session; the
-orchestrator benches this image next.
+(md5 `269fc80793f33514871704d3c1f4fc73`) + reworked `0005`, `0001`
+through `0004` applied to the working tree, `0005` verified via `git
+apply --check` then `git apply` against a separate, fresh `bcf29d98`
+worktree and confirmed byte-identical to the working tree's copy;
+`rzv2n-dev_defconfig` + `no-dirty-version.cfg` + `gigadevice-xspi.cfg`
++ `deepx-rail.cfg` + `fdtfile-v2m.cfg`; WSL Ubuntu-22.04,
+`aarch64-linux-gnu` gcc 11.4.0): build `rc=0`, `strings | grep '^ALP:'`
+still finds all 25 DA9292/DEEPX/riic-recovery strings linked (LTO did
+not drop any of them), `CONFIG_SYS_SDRAM_SIZE` = `(0x100000000u -
+DRAM_RSV_SIZE)` and the control DT's `memory@48000000` = `<0x0
+0x48000000 0x0 0xF8000000>` -- both correct for the 4 GB tier.
+`u-boot.bin`: md5 `9c05679f0f9bc108164f68bef4435b95`, size 764240
+bytes (`0xBA950`), crc32 `0xde3a8bdd`. BENCH-PENDING: unverified on
+silicon.
