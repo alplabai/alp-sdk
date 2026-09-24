@@ -371,6 +371,17 @@ static void hw_disable_mi_interrupts(uintptr_t regs, uint32_t mask)
  */
 static void isp_ae_diag_log(void);
 
+/*
+ * #2277 (bench run 249): tiny cross-driver hook, gated on CONFIG_VIDEO_OV5647 (the sensor
+ * driver's own enable symbol -- a bench-only diag, not a portable API, so it rides on whichever
+ * Kconfig already scopes this build to a board with that sensor, rather than inventing a new
+ * option). Reads 0x3503/0x3500-3502 straight off the sensor, independent of any write this
+ * driver or the AE library makes -- see ov5647.c's own comment on the globals it fills.
+ */
+#if defined(CONFIG_VIDEO_OV5647)
+void ov5647_ae_diag_readback_poll(const struct device *dev);
+#endif
+
 static void isp_bottom_half(const struct device *dev)
 {
 	enum video_signal_result signal_status = VIDEO_BUF_DONE;
@@ -407,6 +418,22 @@ static void isp_bottom_half(const struct device *dev)
 	 * gives a live, continuously-updating fps reading for the whole session.
 	 */
 	isp_ae_diag_log();
+
+	/*
+	 * #2277 (bench run 249): stream-time sensor readback, independent of writes -- every 30th
+	 * frame-end, not rate-limited by wall-clock like isp_ae_diag_log() above, so it tracks
+	 * actual frame cadence at any fps. config->controller is the sensor device (same one
+	 * video_set_ctrl(config->controller, ...) above already targets); NULL in TPG mode.
+	 */
+#if defined(CONFIG_VIDEO_OV5647)
+	{
+		static uint32_t poll_frame_count;
+
+		if (config->controller && (++poll_frame_count % 30) == 0) {
+			ov5647_ae_diag_readback_poll(config->controller);
+		}
+	}
+#endif
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
@@ -1044,13 +1071,10 @@ static void isp_ae_diag_log(void)
 	last_frame_count = frame_count;
 	last_log_ms      = now;
 
-	LOG_INF("AE diag: applied int_time_max_us=%u frame_period_us=%u "
-	        "sns_full_lines=%u sns_max_int_line=%u isp_fps_x100=%u",
-	        isp_ae_diag_applied_int_time_max_us,
-	        isp_ae_diag_frame_period_us,
-	        isp_ae_diag_sns_full_lines,
-	        isp_ae_diag_sns_max_int_line,
-	        isp_ae_diag_isp_fps_x100);
+	/* #2277 (bench run 249): LOG_INF dropped -- ITCM had no room left once the ov5647.c
+	 * unconditional-readback diag landed (see that file's own comment). Globals above are
+	 * still live; read them over SWD/J-Link instead of the console.
+	 */
 }
 
 /*

@@ -1337,6 +1337,69 @@ static int ov5647_lane_park(const struct device *dev)
 static int ov5647_set_ctrl_gain(const struct device *dev);
 static int ov5647_set_ctrl_exposure(const struct device *dev);
 
+/*
+ * #2277 (bench run 249): bench run 249 found every diag global IDENTICAL at 3s/6s/12s and the
+ * old 1Hz-rate-limited ov5647_ae_diag_log() LOG_INF firing exactly once at stream start -- a
+ * stale snapshot, not proof of what the sensor holds. Replaces that rate-limited scheme:
+ * unconditional readback after EVERY write (no LOG_INF -- ITCM is full, see ov5647_set_ctrl_gain/
+ * exposure()'s own comments; read these globals over SWD instead), a per-call-site counter so a
+ * frozen counter proves a site stopped being called (not just a frozen value), and readback
+ * split per call-site (gain-setter, exposure-setter, stream-start, and the independent
+ * during-streaming poll below) so a stale one can't be confused with a live one.
+ */
+volatile uint32_t ov5647_ae_diag_manual_ctrl_raw; /* 0x3503, last write-triggered readback */
+volatile uint32_t ov5647_ae_diag_exp_reg_raw;     /* 0x3500-3502, last write-triggered readback */
+volatile uint32_t ov5647_ae_diag_gain_reg_raw;    /* 0x350a-350b, last write-triggered readback */
+
+volatile uint32_t ov5647_ae_diag_gain_calls;
+volatile int32_t  ov5647_ae_diag_gain_last_ret;
+volatile int32_t  ov5647_ae_diag_gain_last_val;
+
+volatile uint32_t ov5647_ae_diag_exp_calls;
+volatile int32_t  ov5647_ae_diag_exp_last_ret;
+volatile int32_t  ov5647_ae_diag_exp_last_val;
+
+volatile uint32_t ov5647_ae_diag_stream_calls;
+volatile uint32_t ov5647_ae_diag_stream_manual_ctrl_raw; /* 0x3503 at set_stream(true) completion */
+
+/* Independent, write-free readback: exported so isp_pico.c's frame-end bottom half can sample
+ * what the sensor holds DURING streaming, every Nth frame, even when the AE library issues no
+ * writes -- distinguishing "sensor genuinely never changes" from "we just never looked".
+ */
+volatile uint32_t ov5647_ae_diag_poll_calls;
+volatile uint32_t ov5647_ae_diag_poll_manual_ctrl_raw;
+volatile uint32_t ov5647_ae_diag_poll_exp_reg_raw;
+
+static void ov5647_ae_diag_readback(const struct device *dev)
+{
+	const struct ov5647_config *cfg = dev->config;
+	uint32_t                    v;
+
+	if (video_read_cci_reg(&cfg->i2c, OV5647_MANUAL_CTRL, &v) == 0) {
+		ov5647_ae_diag_manual_ctrl_raw = v;
+	}
+	if (video_read_cci_reg(&cfg->i2c, OV5647_EXPOSURE, &v) == 0) {
+		ov5647_ae_diag_exp_reg_raw = v;
+	}
+	if (video_read_cci_reg(&cfg->i2c, OV5647_AGC_GAIN, &v) == 0) {
+		ov5647_ae_diag_gain_reg_raw = v;
+	}
+}
+
+void ov5647_ae_diag_readback_poll(const struct device *dev)
+{
+	const struct ov5647_config *cfg = dev->config;
+	uint32_t                    v;
+
+	ov5647_ae_diag_poll_calls++;
+	if (video_read_cci_reg(&cfg->i2c, OV5647_MANUAL_CTRL, &v) == 0) {
+		ov5647_ae_diag_poll_manual_ctrl_raw = v;
+	}
+	if (video_read_cci_reg(&cfg->i2c, OV5647_EXPOSURE, &v) == 0) {
+		ov5647_ae_diag_poll_exp_reg_raw = v;
+	}
+}
+
 static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_type type)
 {
 	const struct ov5647_config *cfg  = dev->config;
@@ -1422,9 +1485,29 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 
 	data->streaming = true;
 
+	/* #2277 (bench run 249): counter + 0x3503 readback at the moment streaming actually starts,
+	 * kept separate from ov5647_ae_diag_manual_ctrl_raw (the setters' own last-write readback,
+	 * above) -- this is what the sensor holds right as MODE_SELECT_STREAMING lands, after the
+	 * re-assert above, independent of whichever setter last ran.
+	 */
+	ov5647_ae_diag_stream_calls++;
+	{
+		uint32_t v;
+
+		if (video_read_cci_reg(&cfg->i2c, OV5647_MANUAL_CTRL, &v) == 0) {
+			ov5647_ae_diag_stream_manual_ctrl_raw = v;
+		}
+	}
+
 	return 0;
 }
 
+/*
+ * #2277 (bench run 249): unconditional readback after EVERY write -- see the diag globals'
+ * own comment above (near the forward declarations). No LOG_INF here: ITCM was 262108/262144 B
+ * before this change, and a format string + printf call per invocation does not fit at this
+ * call frequency (every setter call, not rate-limited); read the globals over SWD instead.
+ */
 static int ov5647_set_ctrl_gain(const struct device *dev)
 {
 	const struct ov5647_config *cfg   = dev->config;
@@ -1432,93 +1515,22 @@ static int ov5647_set_ctrl_gain(const struct device *dev)
 	struct ov5647_ctrls        *ctrls = &data->ctrls;
 	int                         ret;
 
+	ov5647_ae_diag_gain_calls++;
+
 	ret = video_modify_cci_reg(&cfg->i2c,
 	                           OV5647_MANUAL_CTRL,
 	                           OV5647_MANUAL_CTRL_AGC,
 	                           ctrls->auto_gain.val != 0 ? 0 : OV5647_MANUAL_CTRL_AGC);
-	if (ret < 0) {
-		return ret;
+
+	if (ret == 0 && ctrls->auto_gain.val == 0) {
+		ret                          = video_write_cci_reg(&cfg->i2c, OV5647_AGC_GAIN, ctrls->gain.val);
+		ov5647_ae_diag_gain_last_val = ctrls->gain.val;
 	}
 
-	if (ctrls->auto_gain.val != 0) {
-		return 0;
-	}
+	ov5647_ae_diag_gain_last_ret = ret;
+	ov5647_ae_diag_readback(dev);
 
-	return video_write_cci_reg(&cfg->i2c, OV5647_AGC_GAIN, ctrls->gain.val);
-}
-
-/*
- * #2277 (bench run 245): verbatim, sensor-side proof of what the ISP
- * library actually landed in hardware -- independent of every hal_alif
- * diag global (isp_api_wrapper.c/isp_pico.c), which only mirror what the
- * DRIVER pushed or the library claims to hold, not what the SENSOR itself
- * reports back over I2C. Read back at most once per second (this function
- * runs at the AE library's own write-back cadence, which can be far
- * faster) from the SAME two register groups OV5647_EXPOSURE/
- * OV5647_TIMING_VTS_REG above already write/derive from:
- *   - 0x3500..0x3502 (OV5647_EXPOSURE, 24-bit): exposure lines = value >> 4
- *     (the sensor's own 1/16-line fixed-point format, matching this file's
- *     existing *16'd write-back convention, e.g. hal_alif's
- *     isp_api_wrapper.c sns_config.intLine * 16 comment).
- *   - 0x380e/0x380f (OV5647_TIMING_VTS_REG): the frame length the sensor
- *     itself is running, independent of what any driver-side cache
- *     believes was last written (ov5647_set_frmival()'s own write).
- * `volatile`: read via SWD/log from outside this translation unit's normal
- * control flow, the same bench technique isp_pico.c's isp_ae_diag_*
- * globals use (see that file's own comment).
- *
- * #2277 (candidate (c) hardening): ov5647_ae_diag_exp_reg_raw/manual_ctrl_raw (below) are the
- * UNSHIFTED 0x3500..0x3502 value and the raw 0x3503 byte -- exp_lines alone cannot distinguish
- * "AEC bit never went MANUAL" (0x3503 bit0 == 0, the ctrls->exposure_auto.val early-return path
- * below never even reaches the OV5647_EXPOSURE write) from "AEC bit is MANUAL but the write
- * itself is rejected/never attempted" (0x3503 bit0 == 1, exp_lines stuck at the sensor's
- * power-on/OV5647_EXPOSURE_DEFAULT value) -- the two would otherwise look identical from
- * exp_lines/vts_reg alone. ov5647_set_ctrl_exposure()'s own last_ret/last_ctrl_val (below) pin
- * down what THIS driver believes it just did, for the same "wrapper thinks it succeeded vs. what
- * the sensor register actually holds" cross-check isp_api_wrapper.c's isp_ae_diag_exposure_*
- * globals give on the ISP side.
- */
-volatile uint32_t ov5647_ae_diag_exp_lines;
-volatile uint32_t ov5647_ae_diag_vts_reg;
-volatile uint32_t ov5647_ae_diag_exp_reg_raw;
-volatile uint32_t ov5647_ae_diag_manual_ctrl_raw;
-volatile int32_t  ov5647_ae_diag_last_ret;
-volatile int32_t  ov5647_ae_diag_last_ctrl_val;
-
-static void ov5647_ae_diag_log(const struct device *dev)
-{
-	const struct ov5647_config *cfg = dev->config;
-	static int64_t              last_log_ms;
-	int64_t                     now = k_uptime_get();
-	uint32_t                    exp_reg;
-	uint32_t                    vts_reg;
-	uint32_t                    manual_ctrl_reg;
-
-	if (last_log_ms != 0 && now - last_log_ms < 1000) {
-		return;
-	}
-
-	if (video_read_cci_reg(&cfg->i2c, OV5647_EXPOSURE, &exp_reg) < 0) {
-		return;
-	}
-	if (video_read_cci_reg(&cfg->i2c, OV5647_TIMING_VTS_REG, &vts_reg) < 0) {
-		return;
-	}
-	if (video_read_cci_reg(&cfg->i2c, OV5647_MANUAL_CTRL, &manual_ctrl_reg) < 0) {
-		return;
-	}
-
-	last_log_ms                    = now;
-	ov5647_ae_diag_exp_lines       = exp_reg >> 4;
-	ov5647_ae_diag_vts_reg         = vts_reg;
-	ov5647_ae_diag_exp_reg_raw     = exp_reg;
-	ov5647_ae_diag_manual_ctrl_raw = manual_ctrl_reg;
-
-	LOG_INF("AE sns reg diag: exp_lines=%u (reg=0x%06x) vts=%u manual_ctrl=0x%02x",
-	        ov5647_ae_diag_exp_lines,
-	        exp_reg,
-	        vts_reg,
-	        manual_ctrl_reg);
+	return ret;
 }
 
 static int ov5647_set_ctrl_exposure(const struct device *dev)
@@ -1528,38 +1540,23 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 	struct ov5647_ctrls        *ctrls = &data->ctrls;
 	int                         ret;
 
-	/*
-	 * #2277: moved ABOVE the AEC-bit write and the AUTO/MANUAL early return below (was only
-	 * called after a successful MANUAL-mode write) -- so a session where exposure_auto.val
-	 * never actually reaches MANUAL (candidate (c)) still gets a live 1 Hz register readback
-	 * instead of freezing at whatever the last successful write happened to leave. Cheap: the
-	 * function self-rate-limits to >=1s internally.
-	 */
-	ov5647_ae_diag_log(dev);
+	ov5647_ae_diag_exp_calls++;
 
 	ret = video_modify_cci_reg(
 	    &cfg->i2c,
 	    OV5647_MANUAL_CTRL,
 	    OV5647_MANUAL_CTRL_AEC,
 	    ctrls->exposure_auto.val == VIDEO_EXPOSURE_MANUAL ? OV5647_MANUAL_CTRL_AEC : 0);
-	if (ret < 0) {
-		ov5647_ae_diag_last_ret = ret;
-		return ret;
+
+	if (ret == 0 && ctrls->exposure_auto.val == VIDEO_EXPOSURE_MANUAL) {
+		ret                         = video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+		ov5647_ae_diag_exp_last_val = ctrls->exposure.val;
 	}
 
-	if (ctrls->exposure_auto.val != VIDEO_EXPOSURE_MANUAL) {
-		ov5647_ae_diag_last_ret = 0;
-		return 0;
-	}
+	ov5647_ae_diag_exp_last_ret = ret;
+	ov5647_ae_diag_readback(dev);
 
-	ret                     = video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
-	ov5647_ae_diag_last_ret = ret;
-	ov5647_ae_diag_last_ctrl_val = ctrls->exposure.val;
-	if (ret < 0) {
-		return ret;
-	}
-
-	return 0;
+	return ret;
 }
 
 static int ov5647_set_ctrl_test_pattern(const struct device *dev)
