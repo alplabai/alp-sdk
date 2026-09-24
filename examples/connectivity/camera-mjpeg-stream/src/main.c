@@ -70,7 +70,7 @@
  * this via cfg->fps and settles on the closest rate it can actually reach
  * (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120, VTS-clamped) --
  * confirmed end to end at FRAME_W x FRAME_H (bench run 220, E1M-AEN803 +
- * OV5647, evk-02, bright daylight): 901 complete JPEGs streamed in each of
+ * OV5647, module 2026W36-0001, bright daylight): 901 complete JPEGs streamed in each of
  * three 30 s captures = 30.03 fps. See README.md's Limits section. */
 #define FRAME_FPS 30
 
