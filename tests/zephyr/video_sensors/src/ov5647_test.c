@@ -39,6 +39,13 @@
 #define REG_MIPI_CTRL00   0x4800
 #define REG_FRAME_OFF_NUM 0x4202
 #define REG_PAD_OUT       0x300d
+/* OV5647_MANUAL_CTRL (ov5647.c) -- kept local like the quartet above. AEC/AGC-manual are
+ * BIT(0)/BIT(1); VTS-manual (the only bit ov5647_init_regs[] sets, #2277) is BIT(2).
+ */
+#define REG_MANUAL_CTRL 0x3503
+#define MANUAL_CTRL_VTS 0x04
+#define MANUAL_CTRL_AEC 0x01
+#define MANUAL_CTRL_AGC 0x02
 
 /* The three PLL registers of AUTHORIZED LOCAL DIVERGENCE #2's eight-register init set (issue
  * #2248, bench run 52) -- kept local for the same reason as the quartet above. */
@@ -1123,6 +1130,15 @@ ZTEST(ov5647, test_stream_start_unparks)
 		{ REG_MIPI_CTRL00, MIPI_CTRL00_STREAMING },
 		{ REG_FRAME_OFF_NUM, FRAME_OFF_NUM_STREAMING },
 		{ REG_PAD_OUT, PAD_OUT_STREAMING },
+		/* #2277: ov5647_set_stream(true) re-asserts both AEC/AGC-manual bits from the
+		 * ctrls cache (ov5647_set_ctrl_gain() then ov5647_set_ctrl_exposure(), each an
+		 * unconditional read-modify-write) right before MODE_SELECT below -- two writes
+		 * to the SAME register, both landing on MANUAL_CTRL_VTS alone (0x04) here because
+		 * ov5647_test_before() resets both ctrls to their AUTO/AUTO defaults, and VTS-manual
+		 * is already set from boot.
+		 */
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
+		{ REG_MANUAL_CTRL, MANUAL_CTRL_VTS },
 		{ REG_MODE_SELECT, MODE_SELECT_RUNNING },
 	};
 
@@ -1779,6 +1795,73 @@ ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
 }
 
 /*
+ * #2277 (bench run 247): extends the test above with the ONE step it didn't cover -- a stream
+ * start AFTER the AE gate + write-back, with something (bench: "the sensor's own on-chip
+ * AEC/AGC" once the manual bits went inactive; exact external source not pinned down --
+ * ov5647_emul_set_reg() stands in for whatever it is, see that function's own comment) having
+ * clobbered 0x3503 back to VTS-manual-only and driven 0x3500..0x3502 to its own value in the
+ * meantime. Bench evidence: last_ret=0/last_ctrl_val=0x4150 (both sides agreed the write
+ * succeeded) yet a live readback found 0x3503=0x04 (BIT(0)/BIT(1) clear) and 0x3500..0x3502=
+ * 0x000200 (32 lines, not the 1045 lines*16 the ISP believed it had set) -- i.e. the AE gate's
+ * effect did not survive to when frames actually started flowing. This test must FAIL on
+ * 6779e9d8d: that commit's ov5647_set_stream(true) writes nothing to 0x3503, so the injected
+ * clobber below is still exactly what video_stream_start() leaves behind.
+ */
+ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246/247's own clamped intLine (1045), *16'd like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order (isp_pico.c), then
+	 * isp_vsi_bottom_half()'s own exposure write-back (isp_api_wrapper.c) -- both already
+	 * covered by the test above, repeated here as the setup for the NEW step below.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	/* THE NEW STEP: something clobbers 0x3503 back to VTS-manual-only and drives the sensor's
+	 * own exposure registers to a value the ISP never asked for, sometime between the gate/
+	 * write-back above and the stream actually going live -- bench run 247's own readback
+	 * (32 lines, 0x000200). ov5647_set_stream(true) (video_stream_start(), below) is the ISP's
+	 * own next call after the gate (isp_pico.c's isp_stream_start(): isp_apply_ae_sensor_gate()
+	 * then video_stream_start(config->controller)), so it is the LAST point this driver gets a
+	 * chance to notice and correct this before frames flow.
+	 */
+	zassert_ok(ov5647_emul_set_reg(emul, REG_MANUAL_CTRL, MANUAL_CTRL_VTS));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3500, 0x00));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3501, 0x02));
+	zassert_ok(ov5647_emul_set_reg(emul, 0x3502, 0x00));
+
+	zassert_ok(video_stream_start(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_ok(ov5647_emul_get_reg(emul, REG_MANUAL_CTRL, &manual_ctrl));
+	zassert_equal((manual_ctrl & (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC)),
+	              (MANUAL_CTRL_AEC | MANUAL_CTRL_AGC),
+	              "0x3503 = 0x%02x after video_stream_start() -- AEC/AGC-manual did not "
+	              "survive to stream start, the sensor's own on-chip AEC/AGC will run and "
+	              "override every exposure/gain write for the whole session",
+	              manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after video_stream_start(), want 0x%06x -- the "
+	              "exposure the ISP already sent did not survive to stream start either",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
@@ -1802,8 +1885,19 @@ static void ov5647_test_before(void *fixture)
 {
 	struct video_control hflip_off = { .id = VIDEO_CID_HFLIP, .val = 0 };
 	struct video_control vflip_off = { .id = VIDEO_CID_VFLIP, .val = 0 };
-	struct video_frmival frmival   = { .numerator = 1, .denominator = 15 };
-	struct video_format  fmt       = {
+	/* #2277: reset to the same AUTO/AUTO defaults ov5647_init_ctrls() seeds (VIDEO_EXPOSURE_AUTO,
+	 * autogain=1) -- without this, test_ae_writeback_exposure_auto_then_exposure_lands_in_
+	 * registers()'s own MANUAL/off writes (name-sorted to run before every test whose name
+	 * follows "ae_..." alphabetically) leaked into every later test's starting ctrl state, making
+	 * ov5647_set_stream(true)'s new AEC/AGC re-assert (below) write a DIFFERENT register sequence
+	 * depending on execution order -- exactly the ordering hazard this hook exists to close for
+	 * hflip/vflip/frmival/format already.
+	 */
+	struct video_control exposure_auto_auto = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                        .val = VIDEO_EXPOSURE_AUTO };
+	struct video_control autogain_on        = { .id = VIDEO_CID_AUTOGAIN, .val = 1 };
+	struct video_frmival frmival            = { .numerator = 1, .denominator = 15 };
+	struct video_format  fmt                = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
 		.width       = 640,
@@ -1826,6 +1920,8 @@ static void ov5647_test_before(void *fixture)
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &hflip_off));
 	zassert_ok(video_set_ctrl(ov5647_dev(), &vflip_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_auto));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_on));
 	zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
 	zassert_ok(video_set_format(ov5647_dev(), &fmt));
 }

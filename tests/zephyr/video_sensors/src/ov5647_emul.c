@@ -69,6 +69,19 @@ int ov5647_emul_get_reg(const struct emul *target, uint16_t reg, uint8_t *value)
 	return 0;
 }
 
+int ov5647_emul_set_reg(const struct emul *target, uint16_t reg, uint8_t value)
+{
+	struct ov5647_emul_data *data = target->data;
+
+	if (reg >= OV5647_EMUL_REG_MAP_SIZE) {
+		return -EINVAL;
+	}
+
+	data->regs[reg] = value;
+
+	return 0;
+}
+
 void ov5647_emul_clear_log(const struct emul *target)
 {
 	struct ov5647_emul_data *data = target->data;
