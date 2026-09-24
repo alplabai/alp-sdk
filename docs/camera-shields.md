@@ -233,7 +233,9 @@ silently reintroduces one or both bugs.
    `0x3821` are this driver's horizontal-mirror mask, NOT "analog
    timing") and writes a DIFFERENT ISP-enable set (`0x5000=0x06,
    0x5001=0x01, 0x5002=0x41, 0x5003=0x08, 0x5a00=0x08` -- the reference
-   and this driver write only `0x5000`/`0x5003`/`0x5a00`).
+   writes only `0x5000`/`0x5003`/`0x5a00`, and this driver adds its own
+   `0x5001=0x00` on top of those three, see item 4 below and issue
+   #2255).
    **WHICH of runs 56/58/60's several changes vs runs 61/62 (PLL, HTS,
    `0x3821`, the ISP-enable set, and `0x3000..0x3002`) actually caused
    the visible vertical stripes runs 56/58/60 bench-proved as "clean"
@@ -331,10 +333,16 @@ silently reintroduces one or both bugs.
    `0x5003 = 0x08`, `0x5a00 = 0x08` -- run 61 streamed clean with them.
    Run 58's CSI "incorrect frame sequence" fatals, previously blamed on
    ISP enables as a category, actually came from Alif's DIFFERENT ISP
-   set specifically, which additionally writes `0x5001`/`0x5002` and
-   (in runs 56/58/60's now-superseded BLC section) `0x4050`/`0x4051` --
-   none of those four are in the reference table and none are written
-   here; do not add them back.
+   set specifically, which additionally wrote `0x5001 = 0x01`/`0x5002`
+   and (in runs 56/58/60's now-superseded BLC section) `0x4050`/`0x4051`
+   -- none of those three (`0x5002`/`0x4050`/`0x4051`) are in the
+   reference table and none are written here; do not add them back.
+   **AWB off (issue #2255, bench run 217):** this driver now also
+   writes `0x5001 = 0x00` -- distinct from Alif's `0x01` above -- to
+   turn the sensor's own auto-white-balance off, matching mainline
+   `drivers/media/i2c/ov5647.c`'s `OV5647_REG_AWB` default, so only the
+   E8 ISP white-balances. Run 217 wrote `0x5001 = 0x00` mid-stream,
+   read back `0x00`, zero CSI errors, all dequeues OK.
    `OV5647_EXPOSURE_DEFAULT` (unchanged by run 61) still moves from
    `0x20` (2 lines -- effectively a closed shutter for a
    manual-exposure user) to `0x0FFF` (~256 lines), matching the order
@@ -537,7 +545,8 @@ a sample -- an earlier version of this table missed `0x303c`/`0x3106`/
 `0x301c`, and a round-4 review found it ALSO missed `0x3503`/`0x350c`/
 `0x350d`; a mutation test deleting any of the six from the driver left
 every test in the suite passing before each was added), a guard that
-`0x5001`/`0x5002`/`0x4050`/`0x4051` are never written, that switching
+`0x5002`/`0x4050`/`0x4051` are never written and that `0x5001` is
+always `0x00` (AWB off, issue #2255) never Alif's `0x01`, that switching
 640x480 -> another size -> back never leaves binning/HTS/AEC-band-step
 armed on a crop window (the run-54 ordering trap, checked via the WRITE
 LOG on the crop side too since round 4, not just a final-value readback

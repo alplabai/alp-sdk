@@ -99,11 +99,18 @@
 
 /* Registers that must NEVER be written by this driver -- Alif's ISP/BLC additions that run 58
  * traced its CSI "incorrect frame sequence" fatals to (AUTHORIZED LOCAL DIVERGENCE #3, see
- * ov5647.c's common-init block comment). Not in the reference driver's tables either. */
-#define REG_ISP_RSVD_5001 0x5001
+ * ov5647.c's common-init block comment). Not in the reference driver's tables either. 0x5001
+ * itself is now an exception -- see REG_ISP_CTRL01_AWB / OV5647_ISP_CTRL01 below: issue #2255
+ * (bench run 217) has this driver write it as 0x00 (AWB off), never 0x01. */
 #define REG_ISP_RSVD_5002 0x5002
 #define REG_BLC_RSVD_4050 0x4050
 #define REG_BLC_RSVD_4051 0x4051
+
+/* Sensor-side AWB enable (issue #2255, bench run 217) -- OV5647_ISP_CTRL01 in ov5647.c. Must be
+ * 0x00 (off) so only the E8 ISP white-balances; matches mainline drivers/media/i2c/ov5647.c's
+ * OV5647_REG_AWB default. */
+#define REG_ISP_CTRL01_AWB     0x5001
+#define ISP_CTRL01_AWB_DISABLE 0x00
 
 #define FULLFOV_X_ADDR_START 16
 #define FULLFOV_Y_ADDR_START 0
@@ -216,6 +223,10 @@
  * (OV5647_VTS_DIFF = 0, a REG16 -- two CCI byte transactions, high then low). Round 3's version of
  * this table omitted both even though ov5647_init_regs[] already wrote them; a mutation deleting
  * either from the driver left every test in this suite passing.
+ *
+ * ALSO INCLUDES (issue #2255): 0x5001 = 0x00 (OV5647_ISP_CTRL01, sensor AWB off -- see
+ * REG_ISP_CTRL01_AWB above and ov5647.c's OV5647_ISP_CTRL01 comment). Without this entry the
+ * table stops being exhaustive and a regression dropping the AWB-off write would pass silently.
  */
 static const struct ov5647_emul_write common_init_regs[] = {
 	{ 0x3503, 0x04 }, { 0x350c, 0x00 }, { 0x350d, 0x00 }, { 0x303c, 0x11 }, { 0x3017, 0xf0 },
@@ -227,7 +238,7 @@ static const struct ov5647_emul_write common_init_regs[] = {
 	{ 0x3f01, 0x0a }, { 0x3c01, 0x80 }, { 0x3b07, 0x0c }, { 0x3636, 0x06 }, { 0x3827, 0xec },
 	{ 0x4001, 0x02 }, { 0x4000, 0x09 }, { 0x3a18, 0x00 }, { 0x3a19, 0xf8 }, { 0x3a0f, 0x58 },
 	{ 0x3a10, 0x50 }, { 0x3a1b, 0x58 }, { 0x3a1e, 0x50 }, { 0x3a11, 0x60 }, { 0x3a1f, 0x28 },
-	{ 0x5000, 0x06 }, { 0x5003, 0x08 }, { 0x5a00, 0x08 },
+	{ 0x5000, 0x06 }, { 0x5003, 0x08 }, { 0x5a00, 0x08 }, { 0x5001, 0x00 },
 };
 
 static const struct device *ov5647_dev(void)
@@ -458,6 +469,7 @@ ZTEST(ov5647, test_common_analog_blc_aec_before_first_running_mode_select)
 {
 	const struct emul *emul = ov5647_emul();
 	size_t             running_idx;
+	size_t             awb_on_idx;
 
 	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
 	             "no write ever set MODE_SELECT (0x0100) running (0x01) during ov5647_init()");
@@ -485,13 +497,16 @@ ZTEST(ov5647, test_common_analog_blc_aec_before_first_running_mode_select)
 		             running_idx);
 	}
 
-	/* Guard against the four Alif-only additions that run 58 traced its CSI "incorrect frame
+	/* Guard against the three Alif-only additions that run 58 traced its CSI "incorrect frame
 	 * sequence" fatals to -- see ov5647.c's common-init block comment. Checked at ANY value,
 	 * not just the specific bench-observed one, and over the WHOLE boot log, not just its
-	 * running-write-ordered prefix.
+	 * running-write-ordered prefix. 0x5001 itself is no longer in this "never written" group --
+	 * issue #2255 (bench run 217) has this driver write it as 0x00, checked above in the
+	 * common_init_regs[] loop; guarded here instead against a regression to Alif's 0x01.
 	 */
-	zassert_false(reg_was_ever_written(emul, REG_ISP_RSVD_5001),
-	              "0x5001 (Alif's ISP-enable addition) must never be written");
+	zassert_false(find_write_index(emul, REG_ISP_CTRL01_AWB, 0x01, &awb_on_idx),
+	              "0x5001 written as 0x01 (Alif's AWB-on value, run 58's CSI fatals) -- must "
+	              "stay 0x00 (AWB off)");
 	zassert_false(reg_was_ever_written(emul, REG_ISP_RSVD_5002),
 	              "0x5002 (Alif's ISP-enable addition) must never be written");
 	zassert_false(reg_was_ever_written(emul, REG_BLC_RSVD_4050),
@@ -1125,6 +1140,7 @@ ZTEST(ov5647, test_stream_start_unparks)
 		{ REG_PAD_OUT, PAD_OUT_STREAMING },
 		{ REG_MODE_SELECT, MODE_SELECT_RUNNING },
 	};
+	uint8_t awb;
 
 	ov5647_emul_clear_log(emul);
 
@@ -1132,6 +1148,14 @@ ZTEST(ov5647, test_stream_start_unparks)
 	           "video_stream_start() failed against a freshly parked sensor");
 
 	assert_write_sequence_tail(expect, ARRAY_SIZE(expect), "unpark on stream start");
+
+	/* Issue #2255: stream start touches none of the park quartet's registers at 0x5001, so the
+	 * init-time AWB-off write must still hold once streaming is actually running. */
+	zassert_ok(ov5647_emul_get_reg(emul, REG_ISP_CTRL01_AWB, &awb));
+	zassert_equal(awb,
+	              ISP_CTRL01_AWB_DISABLE,
+	              "0x5001 read 0x%02x after stream start, expected 0x00 (AWB off)",
+	              awb);
 }
 
 ZTEST(ov5647, test_stream_stop_reparks)

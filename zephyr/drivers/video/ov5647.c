@@ -112,8 +112,10 @@
  * most analog/BLC/AEC values with the reference but diverges at 0x3821 (Alif 0x07 vs the
  * reference's 0x01 -- bits[2:1] of 0x3821 are this driver's OV5647_TC_REG21_MIRROR mask, NOT
  * "analog timing") and writes a DIFFERENT ISP-enable set (0x5000=0x06, 0x5001=0x01, 0x5002=0x41,
- * 0x5003=0x08, 0x5a00=0x08 -- the reference and this driver write only 0x5000/0x5003/0x5a00; see
- * the common-init block comment below for why 0x5001/0x5002 are deliberately excluded here).
+ * 0x5003=0x08, 0x5a00=0x08 -- the reference writes only 0x5000/0x5003/0x5a00, and this driver adds
+ * its OWN 0x5001=0x00 (issue #2255, AWB off, mainline drivers/media/i2c/ov5647.c's
+ * OV5647_REG_AWB default) on top of the reference's three; see the common-init block comment
+ * below for why 0x5002 (and 0x4050/0x4051) stay excluded while 0x5001 is now driven to 0x00).
  * WHICH of runs 56/58/60's several changes vs runs 61/62 (PLL, HTS, 0x3821, the ISP-enable set,
  * and 0x3000..0x3002) actually caused the visible vertical stripes runs 56/58/60 bench-proved as
  * "clean" is NOT ESTABLISHED -- run 61 changed all of them together against the reference, not
@@ -168,9 +170,13 @@
  * see above). UNLIKE runs 56/58/60, it INCLUDES the reference's ISP block enables 0x5000 = 0x06,
  * 0x5003 = 0x08, 0x5a00 = 0x08 -- run 61 streamed clean with them. The run-58 CSI "incorrect
  * frame sequence" fatals that runs 56/58/60 blamed on "the ISP block enables" generically came
- * from Alif's DIFFERENT ISP set specifically, which additionally writes 0x5001/0x5002 (and, in
- * runs 56/58/60's now-superseded BLC section, 0x4050/0x4051) -- none of those four are in the
- * reference table and none are written here. Do NOT add 0x5001, 0x5002, 0x4050 or 0x4051.
+ * from Alif's DIFFERENT ISP set specifically, which additionally wrote 0x5001 = 0x01 / 0x5002 =
+ * 0x41 (and, in runs 56/58/60's now-superseded BLC section, 0x4050/0x4051) -- none of those three
+ * (0x5002/0x4050/0x4051) are in the reference table and none are written here; do NOT add them
+ * back. 0x5001 IS now written here (issue #2255, bench run 217), but as 0x00, not run 58's 0x01
+ * -- see OV5647_ISP_CTRL01 below: this turns the sensor's own AWB OFF (mainline
+ * drivers/media/i2c/ov5647.c's OV5647_REG_AWB default) so only the E8 ISP white-balances, and run
+ * 217 held it at 0x00 with zero CSI errors, unlike run 58's larger enable set.
  *
  * OV5647_EXPOSURE_DEFAULT (unchanged by run 61): was 0x20 (2 lines in 1/16-line units) --
  * effectively a closed shutter for any manual-exposure user. Now 0x0FFF (~256 lines), matching
@@ -574,10 +580,12 @@ struct ov5647_data {
  * the file header's orientation note) and at the ISP block enables, which Alif's table does NOT
  * omit -- it writes a DIFFERENT, larger set (0x5000=0x06, 0x5001=0x01, 0x5002=0x41, 0x5003=0x08,
  * 0x5a00=0x08) than the reference (0x5000/0x5003/0x5a00 only). Run 58's CSI "incorrect frame
- * sequence" fatals came from that larger set specifically (0x5001/0x5002, and separately
+ * sequence" fatals came from that larger set specifically (0x5001=0x01/0x5002, and separately
  * 0x4050/0x4051 in runs 56/58/60's now-superseded BLC section), not from ISP enables as a
- * category. This block INCLUDES the reference's three (0x5000/0x5003/0x5a00) and OMITS the four
- * Alif-only additions (0x5001/0x5002/0x4050/0x4051) -- do not add those four back.
+ * category. This block INCLUDES the reference's three (0x5000/0x5003/0x5a00) plus this driver's
+ * OWN 0x5001=0x00 (issue #2255, sensor AWB off -- see OV5647_ISP_CTRL01 below) and OMITS the
+ * three Alif-only additions that actually caused run 58's fatals (0x5002/0x4050/0x4051) -- do not
+ * add those three back, and do not raise 0x5001 above 0x00.
  */
 #define OV5647_SYSTEM_RSVD_3000 OV5647_REG8(0x3000)
 #define OV5647_SYSTEM_RSVD_3001 OV5647_REG8(0x3001)
@@ -633,11 +641,23 @@ struct ov5647_data {
 #define OV5647_AEC_RSVD_3A11      OV5647_REG8(0x3a11)
 #define OV5647_AEC_RSVD_3A1F      OV5647_REG8(0x3a1f)
 /* ISP block enables -- run 61, part of RPi's ov5647_common_regs[]; see the block comment above
- * for why 0x5001/0x5002 (Alif-only, run-58 CSI fatals) are deliberately NOT declared here.
+ * for why 0x5002 (and 0x4050/0x4051) are Alif-only, run-58 CSI fatals, and stay NOT declared here.
  */
 #define OV5647_ISP_RSVD_5000 OV5647_REG8(0x5000)
 #define OV5647_ISP_RSVD_5003 OV5647_REG8(0x5003)
 #define OV5647_ISP_RSVD_5A00 OV5647_REG8(0x5a00)
+
+/*
+ * Sensor-side AWB enable (issue #2255, bench run 217). Mainline drivers/media/i2c/ov5647.c names
+ * this OV5647_REG_AWB and drives it from V4L2_CID_AUTO_WHITE_BALANCE, default OFF (0). This
+ * driver declares no such control, so it just pins the register at mainline's default -- AWB off
+ * -- so the sensor's own AWB never fights the E8 ISP's own white-balance stage. Distinct from
+ * Alif's 0x5001=0x01 in the block comment above (part of the set that caused run 58's CSI
+ * fatals): run 217 wrote 0x00 mid-stream, held (read back 0x00), zero CSI errors, all dequeues
+ * ALP_OK.
+ */
+#define OV5647_ISP_CTRL01        OV5647_REG8(0x5001)
+#define OV5647_ISP_CTRL01_AWB_EN BIT(0)
 
 static const struct video_reg ov5647_init_regs[] = {
 	/* PLL + MIPI-TX pad-drive init -- see the block comment above OV5647_SC_PLL_CTRL1 for why
@@ -727,11 +747,13 @@ static const struct video_reg ov5647_init_regs[] = {
 	{ OV5647_AEC_RSVD_3A11, 0x60 },
 	{ OV5647_AEC_RSVD_3A1F, 0x28 },
 	/* ISP block enables (run 61) -- see the block comment above OV5647_ISP_RSVD_5000 for why
-	 * 0x5001/0x5002 are deliberately NOT here.
+	 * 0x5002 is deliberately NOT here.
 	 */
 	{ OV5647_ISP_RSVD_5000, 0x06 },
 	{ OV5647_ISP_RSVD_5003, 0x08 },
 	{ OV5647_ISP_RSVD_5A00, 0x08 },
+	/* Sensor AWB off (issue #2255) -- see the block comment above OV5647_ISP_CTRL01. */
+	{ OV5647_ISP_CTRL01, 0x00 },
 };
 
 enum ov5647_fmt_id {
