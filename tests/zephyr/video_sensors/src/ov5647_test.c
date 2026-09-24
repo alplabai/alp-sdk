@@ -99,9 +99,10 @@
 
 /* Registers that must NEVER be written by this driver -- Alif's ISP/BLC additions that run 58
  * traced its CSI "incorrect frame sequence" fatals to (AUTHORIZED LOCAL DIVERGENCE #3, see
- * ov5647.c's common-init block comment). Not in the reference driver's tables either. 0x5001
- * itself is now an exception -- see REG_ISP_CTRL01_AWB / OV5647_ISP_CTRL01 below: issue #2255
- * (bench run 217) has this driver write it as 0x00 (AWB off), never 0x01. */
+ * ov5647.c's common-init block comment). Not in the reference driver's tables either. 0x5001 is
+ * a separate register (AUTHORIZED LOCAL DIVERGENCE #4, issue #2255) -- see REG_ISP_CTRL01_AWB /
+ * OV5647_ISP_CTRL01 below: this driver writes it 0x00 (AWB off), never 0x01, so it is guarded
+ * separately rather than in this never-written group. */
 #define REG_ISP_RSVD_5002 0x5002
 #define REG_BLC_RSVD_4050 0x4050
 #define REG_BLC_RSVD_4051 0x4051
@@ -224,21 +225,61 @@
  * this table omitted both even though ov5647_init_regs[] already wrote them; a mutation deleting
  * either from the driver left every test in this suite passing.
  *
- * ALSO INCLUDES (issue #2255): 0x5001 = 0x00 (OV5647_ISP_CTRL01, sensor AWB off -- see
- * REG_ISP_CTRL01_AWB above and ov5647.c's OV5647_ISP_CTRL01 comment). Without this entry the
- * table stops being exhaustive and a regression dropping the AWB-off write would pass silently.
+ * ALSO INCLUDES (AUTHORIZED LOCAL DIVERGENCE #4, issue #2255): 0x5001 = 0x00 (OV5647_ISP_CTRL01,
+ * sensor AWB off -- see REG_ISP_CTRL01_AWB above and ov5647.c's OV5647_ISP_CTRL01 comment).
+ * Without this entry the table stops being exhaustive and a regression dropping the AWB-off
+ * write would pass silently.
  */
 static const struct ov5647_emul_write common_init_regs[] = {
-	{ 0x3503, 0x04 }, { 0x350c, 0x00 }, { 0x350d, 0x00 }, { 0x303c, 0x11 }, { 0x3017, 0xf0 },
-	{ 0x301c, 0xf8 }, { 0x301d, 0xf0 }, { 0x3106, 0xf5 }, { 0x3016, 0x08 }, { 0x3000, 0x00 },
-	{ 0x3001, 0x00 }, { 0x3002, 0x00 }, { 0x3018, 0x44 }, { 0x370c, 0x03 }, { 0x3630, 0x2e },
-	{ 0x3632, 0xe2 }, { 0x3633, 0x23 }, { 0x3634, 0x44 }, { 0x3620, 0x64 }, { 0x3621, 0xe0 },
-	{ 0x3600, 0x37 }, { 0x3704, 0xa0 }, { 0x3703, 0x5a }, { 0x3715, 0x78 }, { 0x3717, 0x01 },
-	{ 0x3731, 0x02 }, { 0x370b, 0x60 }, { 0x3705, 0x1a }, { 0x3f05, 0x02 }, { 0x3f06, 0x10 },
-	{ 0x3f01, 0x0a }, { 0x3c01, 0x80 }, { 0x3b07, 0x0c }, { 0x3636, 0x06 }, { 0x3827, 0xec },
-	{ 0x4001, 0x02 }, { 0x4000, 0x09 }, { 0x3a18, 0x00 }, { 0x3a19, 0xf8 }, { 0x3a0f, 0x58 },
-	{ 0x3a10, 0x50 }, { 0x3a1b, 0x58 }, { 0x3a1e, 0x50 }, { 0x3a11, 0x60 }, { 0x3a1f, 0x28 },
-	{ 0x5000, 0x06 }, { 0x5003, 0x08 }, { 0x5a00, 0x08 }, { 0x5001, 0x00 },
+	{ 0x3503, 0x04 },
+	{ 0x350c, 0x00 },
+	{ 0x350d, 0x00 },
+	{ 0x303c, 0x11 },
+	{ 0x3017, 0xf0 },
+	{ 0x301c, 0xf8 },
+	{ 0x301d, 0xf0 },
+	{ 0x3106, 0xf5 },
+	{ 0x3016, 0x08 },
+	{ 0x3000, 0x00 },
+	{ 0x3001, 0x00 },
+	{ 0x3002, 0x00 },
+	{ 0x3018, 0x44 },
+	{ 0x370c, 0x03 },
+	{ 0x3630, 0x2e },
+	{ 0x3632, 0xe2 },
+	{ 0x3633, 0x23 },
+	{ 0x3634, 0x44 },
+	{ 0x3620, 0x64 },
+	{ 0x3621, 0xe0 },
+	{ 0x3600, 0x37 },
+	{ 0x3704, 0xa0 },
+	{ 0x3703, 0x5a },
+	{ 0x3715, 0x78 },
+	{ 0x3717, 0x01 },
+	{ 0x3731, 0x02 },
+	{ 0x370b, 0x60 },
+	{ 0x3705, 0x1a },
+	{ 0x3f05, 0x02 },
+	{ 0x3f06, 0x10 },
+	{ 0x3f01, 0x0a },
+	{ 0x3c01, 0x80 },
+	{ 0x3b07, 0x0c },
+	{ 0x3636, 0x06 },
+	{ 0x3827, 0xec },
+	{ 0x4001, 0x02 },
+	{ 0x4000, 0x09 },
+	{ 0x3a18, 0x00 },
+	{ 0x3a19, 0xf8 },
+	{ 0x3a0f, 0x58 },
+	{ 0x3a10, 0x50 },
+	{ 0x3a1b, 0x58 },
+	{ 0x3a1e, 0x50 },
+	{ 0x3a11, 0x60 },
+	{ 0x3a1f, 0x28 },
+	{ 0x5000, 0x06 },
+	{ 0x5003, 0x08 },
+	{ 0x5a00, 0x08 },
+	{ REG_ISP_CTRL01_AWB, ISP_CTRL01_AWB_DISABLE },
 };
 
 static const struct device *ov5647_dev(void)
@@ -411,6 +452,33 @@ static bool reg_was_ever_written(const struct emul *emul, uint16_t reg)
 	return false;
 }
 
+/* Like reg_was_ever_written(), but for a register expected to be pinned at a SINGLE fixed value
+ * on every write, not just never written -- walks the WHOLE log and fails on the first write
+ * that does not match @p value, not just on a write that happens to equal some other specific
+ * bad value (e.g. a stray write != 0x00 and != Alif's known-bad 0x01 would pass a not-equal-0x01
+ * check but must still fail this one). */
+static void
+assert_reg_always_written_as(const struct emul *emul, uint16_t reg, uint8_t value, const char *why)
+{
+	size_t count = ov5647_emul_log_count(emul);
+
+	for (size_t i = 0; i < count; i++) {
+		struct ov5647_emul_write w;
+
+		zassert_ok(ov5647_emul_log_get(emul, i, &w), "log entry %zu unreadable", i);
+		if (w.reg == reg) {
+			zassert_equal(w.value,
+			              value,
+			              "0x%04x written 0x%02x at log index %zu, want 0x%02x -- %s",
+			              reg,
+			              w.value,
+			              i,
+			              value,
+			              why);
+		}
+	}
+}
+
 ZTEST(ov5647, test_pll_init_written_before_first_running_mode_select)
 {
 	const struct emul *emul = ov5647_emul();
@@ -469,7 +537,6 @@ ZTEST(ov5647, test_common_analog_blc_aec_before_first_running_mode_select)
 {
 	const struct emul *emul = ov5647_emul();
 	size_t             running_idx;
-	size_t             awb_on_idx;
 
 	zassert_true(find_write_index(emul, REG_MODE_SELECT, MODE_SELECT_RUNNING, &running_idx),
 	             "no write ever set MODE_SELECT (0x0100) running (0x01) during ov5647_init()");
@@ -500,13 +567,16 @@ ZTEST(ov5647, test_common_analog_blc_aec_before_first_running_mode_select)
 	/* Guard against the three Alif-only additions that run 58 traced its CSI "incorrect frame
 	 * sequence" fatals to -- see ov5647.c's common-init block comment. Checked at ANY value,
 	 * not just the specific bench-observed one, and over the WHOLE boot log, not just its
-	 * running-write-ordered prefix. 0x5001 itself is no longer in this "never written" group --
-	 * issue #2255 (bench run 217) has this driver write it as 0x00, checked above in the
-	 * common_init_regs[] loop; guarded here instead against a regression to Alif's 0x01.
+	 * running-write-ordered prefix. 0x5001 is a separate register (AUTHORIZED LOCAL DIVERGENCE
+	 * #4, issue #2255): this driver writes it 0x00, checked above in the common_init_regs[]
+	 * loop; guarded here over EVERY write in the whole log, not just a not-Alif's-0x01 check, so
+	 * a stray write to any other value also fails this test.
 	 */
-	zassert_false(find_write_index(emul, REG_ISP_CTRL01_AWB, 0x01, &awb_on_idx),
-	              "0x5001 written as 0x01 (Alif's AWB-on value, run 58's CSI fatals) -- must "
-	              "stay 0x00 (AWB off)");
+	assert_reg_always_written_as(emul,
+	                             REG_ISP_CTRL01_AWB,
+	                             ISP_CTRL01_AWB_DISABLE,
+	                             "0x5001 must stay 0x00 (AWB off) on every write, not just avoid "
+	                             "Alif's 0x01");
 	zassert_false(reg_was_ever_written(emul, REG_ISP_RSVD_5002),
 	              "0x5002 (Alif's ISP-enable addition) must never be written");
 	zassert_false(reg_was_ever_written(emul, REG_BLC_RSVD_4050),

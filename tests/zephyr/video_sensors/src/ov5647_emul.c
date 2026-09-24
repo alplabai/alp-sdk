@@ -169,6 +169,14 @@ static int ov5647_emul_init(const struct emul *target, const struct device *pare
 	data->regs[0x300a] = 0x56;
 	data->regs[0x300b] = 0x47;
 
+	/* 0x5001 (OV5647_ISP_CTRL01, sensor AWB enable) power-on value on real silicon: bench-read
+	 * 0x01 (AWB on) on E1M-AEN803, matching mainline drivers/media/i2c/ov5647.c's own
+	 * OV5647_REG_AWB power-on-enabled assumption -- see ov5647.c's AUTHORIZED LOCAL DIVERGENCE
+	 * #4 (issue #2255). Seeded non-zero, unlike the rest of this zero-filled map, so a test that
+	 * reads 0x5001 back after init/stream-start actually exercises the driver's 0x00 write
+	 * instead of trivially matching the emulator's own zero-fill default. */
+	data->regs[0x5001] = 0x01;
+
 	return 0;
 }
 

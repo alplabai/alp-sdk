@@ -106,12 +106,13 @@ above measured as "`DATA_0` reads 50/50 while `DATA_1` and `CLK` read
 power-on value, not the silicon.
 
 Fixing this in-tree is an AUTHORIZED divergence from the verbatim-backport
-rule in `zephyr/drivers/video/ov5647.c`'s header (a second one, alongside
-the earlier lane-park fix) -- which is why that header now carries a
-retirement warning covering BOTH fixes: when the Zephyr pin advances to a
-revision containing zephyrproject-rtos/zephyr#119301, confirm both are
-present upstream BEFORE deleting the vendored copy, or the deletion
-silently reintroduces one or both bugs.
+rule in `zephyr/drivers/video/ov5647.c`'s header (the second of what are
+now four, alongside the lane-park fix, the full-FOV binned 640x480 mode,
+and the sensor AWB-off write) -- which is why that header now carries a
+retirement warning covering all four fixes: when the Zephyr pin advances
+to a revision containing zephyrproject-rtos/zephyr#119301, confirm each
+is present upstream BEFORE deleting the vendored copy, or the deletion
+silently reintroduces one or more of them.
 
 1. **FIXED (issue #2248) -- the driver never performed mainline's LP-11
    park.** Mainline's `ov5647_power_on()` calls `ov5647_stream_stop()`
@@ -337,8 +338,8 @@ silently reintroduces one or both bugs.
    and (in runs 56/58/60's now-superseded BLC section) `0x4050`/`0x4051`
    -- none of those three (`0x5002`/`0x4050`/`0x4051`) are in the
    reference table and none are written here; do not add them back.
-   **AWB off (issue #2255, bench run 217):** this driver now also
-   writes `0x5001 = 0x00` -- distinct from Alif's `0x01` above -- to
+   **AWB off (issue #2255, bench run 217):** this driver writes
+   `0x5001 = 0x00` -- distinct from Alif's `0x01` above -- to
    turn the sensor's own auto-white-balance off, matching mainline
    `drivers/media/i2c/ov5647.c`'s `OV5647_REG_AWB` default, so only the
    E8 ISP white-balances. Run 217 wrote `0x5001 = 0x00` mid-stream,

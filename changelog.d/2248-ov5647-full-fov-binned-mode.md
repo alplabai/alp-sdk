@@ -279,7 +279,7 @@ reconstruction is a downstream ISP job (see run 62's maintainer-confirmed colour
 raw frames viewed as grey show the Bayer mosaic as fine stripes, which is expected and not the
 same phenomenon as the column fixed-pattern noise discussed above.
 
-The vendored driver's RETIREMENT note at `zephyr/drivers/video/ov5647.c:199`
+The vendored driver's RETIREMENT note at `zephyr/drivers/video/ov5647.c:214`
 ("DIVERGENCE #1 (the LP-11 lane park), DIVERGENCE #2 (the") now requires all three fixes -- lane
 park, PLL + MIPI-TX pad-drive init, and this full-FOV/per-mode-HTS/AEC-band-step/common-init/
 exposure-default/frame-rate/flip-ctrl change -- to be confirmed present upstream before the

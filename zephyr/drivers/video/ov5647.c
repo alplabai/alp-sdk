@@ -17,7 +17,7 @@
  * "video_common.h" but the pinned Zephyr v4.4.1 here does not --
  * struct video_ctrl_range / video_ctrl / VIDEO_DEVICE_DEFINE live in
  * those headers on this pin, see zephyr/drivers/video/imx219.c, which
- * includes all three explicitly) and apart from the three AUTHORIZED LOCAL
+ * includes all three explicitly) and apart from the four AUTHORIZED LOCAL
  * DIVERGENCES below. See zephyr/CMakeLists.txt / zephyr/kconfigs/ for the
  * build hookup, mirroring how arx3a0.c is wired. The upstream
  * symbol VIDEO_OV5647 and compatible "ovti,ov5647" are used as-is (not
@@ -97,6 +97,14 @@
  * PHY_FATAL, the same failure signature DIVERGENCE #2 above bisected. Clean streaming at a
  * configuration is the evidence, not the configuration itself.
  *
+ * AUTHORIZED LOCAL DIVERGENCE #4 (issue #2255, bench run 217): the reference's
+ * ov5647_common_regs[] never writes 0x5001 at all; this driver adds its own 0x5001 = 0x00
+ * (OV5647_ISP_CTRL01 below), turning the sensor's own auto-white-balance off (mainline
+ * drivers/media/i2c/ov5647.c's OV5647_REG_AWB, default OFF) so only the E8 ISP white-balances.
+ * This is NOT Alif's 0x5001 = 0x01 addition (see the ISP-enable-set comparison two paragraphs
+ * below) -- run 217 held 0x5001 at 0x00 mid-stream, read back 0x00, with zero CSI errors and
+ * every dequeue ALP_OK. 0x5002/0x4050/0x4051 stay excluded, unaffected by this divergence.
+ *
  * Run 62 BENCH-VERIFIED THE COMMITTED DRIVER (this file, as shipped) on its own, not a modified
  * bench app: the test app wrote no mode registers itself and read back 77 registers against the
  * reference, 0 mismatches; it streamed with zero E: lines; column fixed-pattern noise matched run
@@ -113,9 +121,10 @@
  * reference's 0x01 -- bits[2:1] of 0x3821 are this driver's OV5647_TC_REG21_MIRROR mask, NOT
  * "analog timing") and writes a DIFFERENT ISP-enable set (0x5000=0x06, 0x5001=0x01, 0x5002=0x41,
  * 0x5003=0x08, 0x5a00=0x08 -- the reference writes only 0x5000/0x5003/0x5a00, and this driver adds
- * its OWN 0x5001=0x00 (issue #2255, AWB off, mainline drivers/media/i2c/ov5647.c's
- * OV5647_REG_AWB default) on top of the reference's three; see the common-init block comment
- * below for why 0x5002 (and 0x4050/0x4051) stay excluded while 0x5001 is now driven to 0x00).
+ * its OWN 0x5001=0x00 (AUTHORIZED LOCAL DIVERGENCE #4, issue #2255, AWB off, mainline
+ * drivers/media/i2c/ov5647.c's OV5647_REG_AWB default) on top of the reference's three; see the
+ * common-init block comment below for why 0x5002 (and 0x4050/0x4051) stay excluded while
+ * 0x5001 is written 0x00).
  * WHICH of runs 56/58/60's several changes vs runs 61/62 (PLL, HTS, 0x3821, the ISP-enable set,
  * and 0x3000..0x3002) actually caused the visible vertical stripes runs 56/58/60 bench-proved as
  * "clean" is NOT ESTABLISHED -- run 61 changed all of them together against the reference, not
@@ -173,8 +182,8 @@
  * from Alif's DIFFERENT ISP set specifically, which additionally wrote 0x5001 = 0x01 / 0x5002 =
  * 0x41 (and, in runs 56/58/60's now-superseded BLC section, 0x4050/0x4051) -- none of those three
  * (0x5002/0x4050/0x4051) are in the reference table and none are written here; do NOT add them
- * back. 0x5001 IS now written here (issue #2255, bench run 217), but as 0x00, not run 58's 0x01
- * -- see OV5647_ISP_CTRL01 below: this turns the sensor's own AWB OFF (mainline
+ * back. 0x5001 is written here (AUTHORIZED LOCAL DIVERGENCE #4, bench run 217), as 0x00, not
+ * run 58's 0x01 -- see OV5647_ISP_CTRL01 below: this turns the sensor's own AWB OFF (mainline
  * drivers/media/i2c/ov5647.c's OV5647_REG_AWB default) so only the E8 ISP white-balances, and run
  * 217 held it at 0x00 with zero CSI errors, unlike run 58's larger enable set.
  *
@@ -200,15 +209,15 @@
  * binding, and drop the CMake/Kconfig hookup, the moment the alp-sdk Zephyr
  * pin advances to a revision that contains #119301 (i.e. the vendored copy
  * and the upstream driver would otherwise both define VIDEO_OV5647 /
- * "ovti,ov5647" and collide) -- BUT NOT BEFORE ALL THREE fixes above are
+ * "ovti,ov5647" and collide) -- BUT NOT BEFORE ALL FOUR fixes above are
  * either re-applied to the upstream-derived driver or confirmed already
  * present in it: DIVERGENCE #1 (the LP-11 lane park), DIVERGENCE #2 (the
  * PLL + MIPI-TX pad-drive init, including the corrected OV5647_PIXEL_RATE
- * derivation), AND DIVERGENCE #3 (the RPi/OmniVision-reference full-FOV binned 640x480 mode with
+ * derivation), DIVERGENCE #3 (the RPi/OmniVision-reference full-FOV binned 640x480 mode with
  * its per-mode HTS and AEC band step, the run-61 PLL correction, the matching common init, the
- * corrected OV5647_EXPOSURE_DEFAULT, and the run-62 default-frame-rate fix in ov5647_init()) --
- * deleting this file without checking all three silently
- * reintroduces one or more bugs. Do NOT otherwise maintain divergent local
+ * corrected OV5647_EXPOSURE_DEFAULT, and the run-62 default-frame-rate fix in ov5647_init()),
+ * AND DIVERGENCE #4 (0x5001 = 0x00, sensor AWB off) -- deleting this file without checking all
+ * four silently reintroduces one or more bugs. Do NOT otherwise maintain divergent local
  * patches on this file -- open a new PR against upstream instead and
  * re-backport. See docs/adr/0017-alp-sdk-over-the-vendor-sdk.md.
  * ====================================================================
@@ -656,8 +665,7 @@ struct ov5647_data {
  * fatals): run 217 wrote 0x00 mid-stream, held (read back 0x00), zero CSI errors, all dequeues
  * ALP_OK.
  */
-#define OV5647_ISP_CTRL01        OV5647_REG8(0x5001)
-#define OV5647_ISP_CTRL01_AWB_EN BIT(0)
+#define OV5647_ISP_CTRL01 OV5647_REG8(0x5001)
 
 static const struct video_reg ov5647_init_regs[] = {
 	/* PLL + MIPI-TX pad-drive init -- see the block comment above OV5647_SC_PLL_CTRL1 for why

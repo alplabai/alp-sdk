@@ -33,7 +33,7 @@ records every register WRITE in issue order at
 ("static void ov5647_emul_log_write(struct ov5647_emul_data *data, uint16_t reg, uint8_t value)"),
 and `ov5647_test.c` walks the tail of that log against an expected
 register/value sequence at
-`tests/zephyr/video_sensors/src/ov5647_test.c:251`
+`tests/zephyr/video_sensors/src/ov5647_test.c:303`
 ("assert_write_sequence_tail(const struct ov5647_emul_write *expect, size_t n, const char *why)")
 rather than only reading back final register contents.
 
