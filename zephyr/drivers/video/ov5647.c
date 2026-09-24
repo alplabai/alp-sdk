@@ -964,6 +964,14 @@ static int ov5647_enum_frmival(const struct device *dev, struct video_frmival_en
 	return 0;
 }
 
+/* Forward declaration: ov5647_set_frmival() below re-applies the exposure clamp (defined further
+ * down, alongside the other per-ctrl setters) after writing the new TIMING_VTS -- a frame-rate
+ * increase shrinks VTS, and ov5647_set_ctrl_exposure()'s own clamp is keyed off data->frmrate/
+ * data->fmt, so a value that was in range at the OLD rate can be out of range at the new one
+ * until this re-applies it.
+ */
+static int ov5647_set_ctrl_exposure(const struct device *dev);
+
 static int ov5647_set_frmival(const struct device *dev, struct video_frmival *frmival)
 {
 	const struct ov5647_config *cfg  = dev->config;
@@ -1024,7 +1032,13 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 	data->frmrate = ov5647_framerates[fie.index];
 	*frmival      = (struct video_frmival){ .numerator = 1, .denominator = data->frmrate };
 
-	return 0;
+	/* A frame-rate increase just shrank TIMING_VTS above -- re-run the exposure clamp against
+	 * the NEW vts (data->frmrate/data->fmt are both current now) so a value that fit the OLD,
+	 * larger VTS cannot be left sitting above the new VTS - 4 ceiling. No-op when
+	 * exposure_auto isn't VIDEO_EXPOSURE_MANUAL (ov5647_set_ctrl_exposure()'s own early
+	 * return).
+	 */
+	return ov5647_set_ctrl_exposure(dev);
 }
 
 static int ov5647_get_frmival(const struct device *dev, struct video_frmival *frmival)
@@ -1491,6 +1505,9 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 
 	if (vts > 4 && exposure > (vts - 4) * 16) {
 		exposure = (vts - 4) * 16;
+		/* Store the clamped value back so video_get_ctrl(VIDEO_CID_EXPOSURE) reports what
+		 * the hardware actually holds, not the caller's unclamped request. */
+		ctrls->exposure.val = (int32_t)exposure;
 	}
 
 	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, exposure);

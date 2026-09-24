@@ -29,7 +29,7 @@ PLL bit-mode field.
 The ordering assertion is the point of the new emulator: past the register
 map it already shares with `ov9281_emul.c`'s I2C-transaction model, it also
 records every register WRITE in issue order at
-`tests/zephyr/video_sensors/src/ov5647_emul.c:112`
+`tests/zephyr/video_sensors/src/ov5647_emul.c:116`
 ("static void ov5647_emul_log_write(struct ov5647_emul_data *data, uint16_t reg, uint8_t value)"),
 and `ov5647_test.c` walks the tail of that log against an expected
 register/value sequence at

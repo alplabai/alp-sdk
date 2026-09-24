@@ -362,12 +362,6 @@ static void hw_disable_mi_interrupts(uintptr_t regs, uint32_t mask)
 	sys_clear_bits(regs + ISP_MI_IMSC, mask);
 }
 
-/* Forward declaration: isp_ae_diag_log() (below, next to isp_fps_x100 it updates) is defined well
- * after isp_bottom_half() in this file. It samples isp_mi_frame_end_count at real frame-end
- * cadence rather than only when isp_apply_ae() happens to run.
- */
-static void isp_ae_diag_log(void);
-
 static void isp_bottom_half(const struct device *dev)
 {
 	enum video_signal_result signal_status = VIDEO_BUF_DONE;
@@ -392,12 +386,6 @@ static void isp_bottom_half(const struct device *dev)
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
 	isp_vsi_bottom_half(dev, &data->init_cfg, data->mi_mis);
 	k_mutex_unlock(&data->lib_lock);
-
-	/* Sample the fps reading at REAL frame-end cadence, every frame this bottom-half runs --
-	 * isp_ae_diag_log() self-rate-limits its own update to >=1s (see its own comment), so
-	 * calling it unconditionally here is cheap and gives a live fps reading for the session.
-	 */
-	isp_ae_diag_log();
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
@@ -493,52 +481,6 @@ static void isp_cb_work(struct k_work *work)
 #ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
 volatile uint32_t isp_mi_frame_end_count;
 #endif
-
-/*
- * #2277: the ISP's OWN frame rate, independent of AE -- host-side throughput measurements (e.g.
- * JPEG send rate) can undercount the pipeline's real rate for reasons unrelated to AE (a
- * downstream send ceiling), so this reads the MI_INTR_MP_FRAME_END events actually firing
- * (isp_mi_frame_end_count, CONFIG_VIDEO_ISP_VSI_FRAME_STATS, above) instead of whatever the app's
- * own dequeue loop believes happened. fps*100 (avoids float in a global), delta over
- * isp_ae_diag_log()'s own >=1 s rate-limit window. Stays 0 when CONFIG_VIDEO_ISP_VSI_FRAME_STATS
- * is off (the counter this derives from doesn't exist in that build). Non-static so `nm
- * zephyr.elf | grep isp_ae_diag` gives an address a J-Link `mem32` read can sample without
- * halting the core, the same technique ram_console_buf bench sessions use; `volatile`: read from
- * outside this translation unit's normal control flow.
- */
-volatile uint32_t isp_ae_diag_isp_fps_x100;
-
-/* Rate-limits isp_ae_diag_isp_fps_x100's update to at most once per second -- isp_bottom_half()
- * calls this every frame, and computing a rate over a too-short window is noisy. No LOG_INF here
- * (ITCM budget); read the global over SWD/J-Link instead of the console.
- */
-static void isp_ae_diag_log(void)
-{
-	static int64_t last_log_ms;
-	static uint32_t last_frame_count;
-	int64_t now = k_uptime_get();
-	uint32_t frame_count = 0;
-
-	if (last_log_ms != 0 && now - last_log_ms < 1000) {
-		return;
-	}
-
-	/* isp_mi_frame_end_count (above) only exists when this Kconfig is on -- frame_count stays
-	 * 0 otherwise, so the delta below is always 0 and isp_ae_diag_isp_fps_x100 stays 0 too
-	 * (see that global's own comment).
-	 */
-#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
-	frame_count = isp_mi_frame_end_count;
-#endif
-	if (last_log_ms != 0) {
-		uint32_t elapsed_ms = (uint32_t)(now - last_log_ms);
-		uint32_t frame_delta = frame_count - last_frame_count;
-
-		isp_ae_diag_isp_fps_x100 = (uint32_t)(((uint64_t)frame_delta * 100000ULL) / elapsed_ms);
-	}
-	last_frame_count = frame_count;
-	last_log_ms = now;
-}
 
 static void isp_isr_handler(const struct device *dev)
 {

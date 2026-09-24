@@ -1746,11 +1746,9 @@ ZTEST(ov5647, test_set_fmt_unsupported_restores_callers_pixelformat)
  * sets VIDEO_CID_EXPOSURE_AUTO=VIDEO_EXPOSURE_MANUAL once at stream start, then hal_alif's
  * isp_vsi_bottom_half() (isp_api_wrapper.c) drives VIDEO_CID_EXPOSURE = intLine*16 every time the
  * library's AE algorithm moves the clamped line count -- 1045*16 = 0x4150 is bench run 246's own
- * clamped intLine. Bench evidence: the sensor's 0x3500..0x3502 stayed pinned at
- * OV5647_EXPOSURE_DEFAULT (0x0fff) for the whole session even though the wrapper logged this exact
- * clamped value every AE update. This test must FAIL on bb97a5336 if the defect is in this
- * driver's/the video subsystem's control-routing rather than purely in the vendored hal_alif
- * caller this suite cannot reach.
+ * clamped intLine. Regression test for the AE write-back path: VIDEO_CID_EXPOSURE must reach the
+ * sensor's 0x3500..0x3502 registers rather than staying pinned at OV5647_EXPOSURE_DEFAULT
+ * (0x0fff), the failure bench observed before this driver applied the write-back.
  */
 ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
 {
@@ -1803,9 +1801,7 @@ ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
  * meantime. Bench evidence: last_ret=0/last_ctrl_val=0x4150 (both sides agreed the write
  * succeeded) yet a live readback found 0x3503=0x04 (BIT(0)/BIT(1) clear) and 0x3500..0x3502=
  * 0x000200 (32 lines, not the 1045 lines*16 the ISP believed it had set) -- i.e. the AE gate's
- * effect did not survive to when frames actually started flowing. This test must FAIL on
- * 6779e9d8d: that commit's ov5647_set_stream(true) writes nothing to 0x3503, so the injected
- * clobber below is still exactly what video_stream_start() leaves behind.
+ * effect did not survive to when frames actually started flowing.
  */
 ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else)
 {
@@ -1970,6 +1966,52 @@ ZTEST(ov5647, test_exposure_below_vts_margin_lands_unchanged)
 	              "already within the active mode's ceiling must not be altered",
 	              got,
 	              (uint32_t)exposure.val);
+}
+
+/*
+ * #2277: a frame-rate INCREASE shrinks the active mode's VTS, so an exposure value that was legal
+ * at the OLD (looser) rate can end up above the NEW, tighter VTS - 4 ceiling unless
+ * ov5647_set_frmival() re-applies the clamp after writing the new TIMING_VTS. Sets exposure to
+ * the 10 fps ceiling ((3149 - 4) * 16, the same 640x480/10 fps VTS
+ * test_exposure_clamps_to_active_vts_margin's own table uses), then switches to 30 fps
+ * (VTS 1049). Must FAIL without ov5647_set_frmival()'s re-clamp call: the stale 10 fps value
+ * (50320) is well above the 30 fps ceiling ((1049 - 4) * 16 = 16720).
+ */
+ZTEST(ov5647, test_frmival_increase_reclamps_stale_exposure)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_frmival req10                = { .numerator = 1, .denominator = 10 };
+	struct video_frmival req30                = { .numerator = 1, .denominator = 30 };
+	/* The 10 fps ceiling itself (640x480 binned HTS, VTS 3149) -- the FIRST clamp is a no-op
+	 * at this value, so the value that actually reaches the registers is the stale one this
+	 * test is trying to trip up on the SECOND (30 fps) set_frmival().
+	 */
+	struct video_control exposure  = { .id = VIDEO_CID_EXPOSURE, .val = (3149 - 4) * 16 };
+	uint32_t             max_30fps = (1049 - 4) * 16;
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req10));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(video_set_frmival(ov5647_dev(), &req30));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_true(got <= max_30fps,
+	             "0x3500..0x3502 = 0x%06x after switching to 30 fps, want <= 0x%06x "
+	             "((1049 - 4) * 16) -- the stale 10 fps exposure value was not re-clamped to "
+	             "the new, tighter VTS ceiling",
+	             got,
+	             max_30fps);
 }
 
 /*

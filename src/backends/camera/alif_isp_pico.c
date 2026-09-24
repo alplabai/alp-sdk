@@ -377,18 +377,9 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * scoped to the OV5647 shield's own DT node; a future sensor on this
 	 * ISP path needs its own branch here.
 	 *
-	 * FIXED (issue #2277): the OV5647 calibration AE block's compiled-in
-	 * exposure ceiling used to be hard-pinned to the 10 fps VTS
-	 * regardless of the rate requested here -- worse, isp_pico.c's own
-	 * attempt to fix it up derived VTS from a hard-coded HTS that was
-	 * only correct for the 640x480 binned mode, silently ~1.46x too
-	 * loose at 1280x960/full-res. The ceiling now lives where the VTS
-	 * facts already do: ov5647_set_ctrl_exposure() (ov5647.c) clamps
-	 * every VIDEO_CID_EXPOSURE write to the sensor's own ACTIVE mode's
-	 * VTS - 4 lines, using the same ov5647_hts_for()/ov5647_frmrate_
-	 * to_vts() this driver already uses to program TIMING_VTS -- correct
-	 * for every mode/fps this call sets, not just the one the ISP's old
-	 * hard-coded constant happened to match. */
+	 * The sensor driver owns the exposure ceiling: ov5647_set_ctrl_exposure()
+	 * (ov5647.c) clamps every VIDEO_CID_EXPOSURE write to the active mode's
+	 * VTS - 4 lines. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
