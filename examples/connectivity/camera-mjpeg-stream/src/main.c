@@ -41,6 +41,7 @@
  */
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -54,6 +55,7 @@
 #include "alp/camera.h"
 #include "alp/cap.h"
 #include "alp/jpeg.h"
+#include "jpeg_quality_ladder.h"
 #include "mjpeg_http.h"
 
 #define HTTP_PORT 8080
@@ -78,10 +80,24 @@
 #define FRAME_W   1280
 #define FRAME_H   960
 #define FRAME_FPS 15
+/*
+ * Starting quality for this resolution -- bench run 242 (issue #2286):
+ * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG
+ * (mjpeg_http.h, 160 KiB) on every frame once AE converged past the
+ * first ~12 dark ones, and 160 KiB has no SRAM0 headroom left to grow
+ * (98.5% bank usage, see boards/overlay-1280x960-aen803.conf). 60 keeps
+ * a typical frame well under the cap; a frame that still overflows at
+ * 60 retries once at JPEG_QUALITY_FLOOR (jpeg_quality_ladder.h) rather
+ * than being dropped outright.
+ */
+#define JPEG_QUALITY_DEFAULT 60u
 #else
-#define FRAME_W   640
-#define FRAME_H   480
-#define FRAME_FPS 30
+#define FRAME_W              640
+#define FRAME_H              480
+#define FRAME_FPS            30
+/* Unchanged from before #2286 -- bench run 220 measured this comfortably
+ * under the 640x480 128 KiB cap (mjpeg_http.h) even in bright daylight. */
+#define JPEG_QUALITY_DEFAULT 80u
 #endif
 
 /*
@@ -139,7 +155,8 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
                                  alp_pixfmt_t           fmt,
                                  void                  *base,
                                  uint16_t               w,
-                                 uint16_t               h)
+                                 uint16_t               h,
+                                 uint8_t                quality)
 {
 	uint8_t *y     = base;
 	size_t   y_len = (size_t)w * h;
@@ -149,7 +166,7 @@ static void jpeg_req_from_packed(alp_jpeg_encode_req_t *req,
 	req->height    = h;
 	req->format    = fmt;
 	req->subsample = ALP_JPEG_SUBSAMPLE_420;
-	req->quality   = 80;
+	req->quality   = quality;
 	req->y_plane   = y;
 	req->y_stride  = w;
 	if (fmt == ALP_PIXFMT_NV12) {
@@ -175,7 +192,7 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
 	}
 	memset(synth_frame + (FRAME_W * FRAME_H), 128, (FRAME_W * FRAME_H) / 2);
 	phase += 4;
-	jpeg_req_from_packed(req, fmt, synth_frame, FRAME_W, FRAME_H);
+	jpeg_req_from_packed(req, fmt, synth_frame, FRAME_W, FRAME_H, JPEG_QUALITY_DEFAULT);
 }
 #endif
 
@@ -219,6 +236,56 @@ static bool rate_limited(int64_t *last_log_ms, uint32_t *count)
 	}
 	*last_log_ms = now;
 	return true;
+}
+
+/* Once-a-second diagnostic line (issue #2286 bench run 242): fps and
+ * per-window JPEG-size/encode-time stats reset every print (so a
+ * regression shows up in the NEXT line, not diluted into a lifetime
+ * average); encoded/fail/retry stay cumulative for the whole run, same as
+ * capture_fail_count/encode_fail_count already are above. send_ms comes
+ * from mjpeg_http.c's own last-send timer (mjpeg_http_get_stats()) -- this
+ * loop never touches a socket itself, see the file header. */
+static void print_stats_if_due(int64_t  *last_print_ms,
+                               uint32_t  total_encoded,
+                               uint32_t  encode_fail_count,
+                               uint32_t  encode_retry_count,
+                               uint32_t *win_frames,
+                               uint32_t *win_size_min,
+                               uint32_t *win_size_max,
+                               uint64_t *win_size_sum,
+                               uint64_t *win_encode_ms_sum)
+{
+	int64_t now = k_uptime_get();
+
+	if (now - *last_print_ms < 1000) {
+		return;
+	}
+
+	mjpeg_http_stats_t hstats;
+
+	mjpeg_http_get_stats(&hstats);
+
+	uint32_t avg_size      = *win_frames ? (uint32_t)(*win_size_sum / *win_frames) : 0;
+	uint32_t avg_encode_ms = *win_frames ? (uint32_t)(*win_encode_ms_sum / *win_frames) : 0;
+
+	printf("[camera-mjpeg-stream] stats: fps=%u encoded=%u fail=%u retry=%u "
+	       "jpeg_size_min=%u avg=%u max=%u B encode_ms=%u send_ms=%u\n",
+	       *win_frames,
+	       total_encoded,
+	       encode_fail_count,
+	       encode_retry_count,
+	       *win_frames ? *win_size_min : 0,
+	       avg_size,
+	       *win_size_max,
+	       avg_encode_ms,
+	       hstats.send_ms);
+
+	*last_print_ms     = now;
+	*win_frames        = 0;
+	*win_size_min      = UINT32_MAX;
+	*win_size_max      = 0;
+	*win_size_sum      = 0;
+	*win_encode_ms_sum = 0;
 }
 
 /* After this many CONSECUTIVE capture failures, stop trying the camera
@@ -332,6 +399,20 @@ int main(void)
 	int64_t  capture_fail_last_log = 0;
 	uint32_t encode_fail_count     = 0;
 	int64_t  encode_fail_last_log  = 0;
+	uint32_t encode_retry_count    = 0;
+
+	/* Once-a-second stats line (issue #2286 bench run 242): win_* reset
+	 * every print, so fps/size/encode_ms report THIS window, not a
+	 * lifetime average that would hide a regression under a long-running
+	 * good stretch; encoded/fail/retry stay cumulative -- see the printf
+	 * below. */
+	int64_t  stats_last_print_ms = 0;
+	uint32_t total_encoded       = 0;
+	uint32_t win_frames          = 0;
+	uint32_t win_size_min        = UINT32_MAX;
+	uint32_t win_size_max        = 0;
+	uint64_t win_size_sum        = 0;
+	uint64_t win_encode_ms_sum   = 0;
 
 	/* The camera-capture loop.  Every iteration either captures a real
 	 * frame (bounded timeout -- never wait forever on a wedged sensor)
@@ -361,7 +442,8 @@ int main(void)
 
 			if (rc == ALP_OK) {
 				capture_fail_consec = 0;
-				jpeg_req_from_packed(&req, pixfmt, frame.data, FRAME_W, FRAME_H);
+				jpeg_req_from_packed(
+				    &req, pixfmt, frame.data, FRAME_W, FRAME_H, JPEG_QUALITY_DEFAULT);
 				have_frame = true;
 			} else {
 				if (rate_limited(&capture_fail_last_log, &capture_fail_count)) {
@@ -400,21 +482,55 @@ int main(void)
 		}
 
 		if (have_frame) {
-			size_t       out_len = 0;
-			alp_status_t erc     = alp_jpeg_encode(
+			size_t       out_len   = 0;
+			int64_t      encode_t0 = k_uptime_get();
+			alp_status_t erc       = alp_jpeg_encode(
 			    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
+
+			/* Bounded ladder, ONE retry: the Hantro backend's output-buffer
+			 * overrun (-ENOSPC JPEG_BUFFER_FULL) maps to ALP_ERR_NOMEM
+			 * (src/common/alp_errno.h) -- re-encode the SAME frame at a
+			 * lower quality rather than drop it outright (issue #2286
+			 * bench run 242). req.quality > JPEG_QUALITY_FLOOR guards
+			 * against retrying with the exact quality that just failed,
+			 * which jpeg_quality_step_down()'s floor would otherwise do. */
+			if (erc == ALP_ERR_NOMEM && req.quality > JPEG_QUALITY_FLOOR) {
+				encode_retry_count++;
+				req.quality = jpeg_quality_step_down(req.quality);
+				erc         = alp_jpeg_encode(
+				    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
+			}
+
+			uint32_t encode_ms = (uint32_t)(k_uptime_get() - encode_t0);
 
 			if (erc == ALP_OK) {
 				mjpeg_http_publish_frame(out_len);
+				total_encoded++;
+				win_frames++;
+				win_size_min = (uint32_t)out_len < win_size_min ? (uint32_t)out_len : win_size_min;
+				win_size_max = (uint32_t)out_len > win_size_max ? (uint32_t)out_len : win_size_max;
+				win_size_sum += out_len;
+				win_encode_ms_sum += encode_ms;
 			} else if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
 				printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "
-				       "total=%u)\n",
+				       "total=%u, retries=%u)\n",
 				       (int)erc,
-				       encode_fail_count);
+				       encode_fail_count,
+				       encode_retry_count);
 			}
 			if (camera != NULL) {
 				alp_camera_release(camera, &frame);
 			}
 		}
+
+		print_stats_if_due(&stats_last_print_ms,
+		                   total_encoded,
+		                   encode_fail_count,
+		                   encode_retry_count,
+		                   &win_frames,
+		                   &win_size_min,
+		                   &win_size_max,
+		                   &win_size_sum,
+		                   &win_encode_ms_sum);
 	}
 }

@@ -60,6 +60,23 @@ int mjpeg_http_server_start(uint16_t port);
  */
 uint8_t *mjpeg_http_claim_write_buffer(void);
 
+/** Diagnostics mjpeg_http.c itself owns -- read once a second by main.c's
+ *  stats line (issue #2286 bench run 242); main.c never touches a socket
+ *  itself, so send timing has to come from here. */
+typedef struct {
+	/** Wall time of the most recent JPEG-body send (handle_stream's part
+	 *  body or handle_snapshot's whole body), milliseconds. 0 before the
+	 *  first send. */
+	uint32_t send_ms;
+} mjpeg_http_stats_t;
+
+/**
+ * @brief Read the latest send-timing diagnostics.
+ *
+ * @param[out] out  Must be non-NULL.
+ */
+void mjpeg_http_get_stats(mjpeg_http_stats_t *out);
+
 /**
  * @brief Publish the frame just encoded into the buffer
  *        @ref mjpeg_http_claim_write_buffer last returned.

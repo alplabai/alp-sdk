@@ -39,6 +39,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/net/socket.h>
+#include <zephyr/sys/atomic.h>
 
 #include "mjpeg_http.h"
 
@@ -66,9 +67,18 @@
 #define BOUNDARY     "alpframe"
 #define STACK_SIZE   4096
 #define REQUEST_LINE 128
-/* SO_RCVTIMEO/SO_SNDTIMEO + wait_and_claim() -- bounds a wedged client AND a
- * stalled capture loop; the server thread must never wedge on either. */
+/* SO_RCVTIMEO/SO_SNDTIMEO -- bounds a wedged/idle client's blocking socket
+ * ops; the server thread must never wedge on either. */
 #define IDLE_TIMEOUT_S 2
+
+/* Total patience wait_and_claim() gives a /stream client for the NEXT
+ * published frame before giving up and freeing the single server thread --
+ * separate from IDLE_TIMEOUT_S above (issue #2286 bench run 242): a burst
+ * of alp_jpeg_encode() ENOSPC retries (main.c's quality ladder) can outlast
+ * one IDLE_TIMEOUT_S wait without the capture pipeline actually being
+ * dead, and the old code dropped the client the moment a single 2 s wait
+ * came up empty -- see wait_and_claim()'s own comment. */
+#define STREAM_STALL_TIMEOUT_S 30
 
 /* The two ping-pong buffers -- see the file header for the state machine.
  * __aligned(32): the Hantro AXI master and the CPU's D-cache maintenance
@@ -83,6 +93,17 @@ static bool     reading;    /* a reader currently holds a raw pointer into jpeg_
 static uint32_t seq;        /* bumps on every successful publish -- lets /stream wait for NEW */
 static K_MUTEX_DEFINE(frame_lock);
 static K_CONDVAR_DEFINE(frame_ready);
+
+/* Last JPEG-body send duration -- atomic_t, not frame_lock, since the only
+ * writer is this file's own server thread and the only reader is main.c's
+ * once-a-second stats line (issue #2286 bench run 242); neither needs to
+ * serialize against the frame hand-off itself. */
+static atomic_t send_ms_last;
+
+void mjpeg_http_get_stats(mjpeg_http_stats_t *out)
+{
+	out->send_ms = (uint32_t)atomic_get(&send_ms_last);
+}
 
 K_THREAD_STACK_DEFINE(server_stack, STACK_SIZE);
 static struct k_thread server_thread;
@@ -132,15 +153,30 @@ static bool try_claim(uint8_t **out_buf, size_t *out_len)
 	return true;
 }
 
-/* Waits up to IDLE_TIMEOUT_S for a frame newer than `*last_seq`, then
- * claims it. Returns false on timeout (no new frame in time -- a stalled
- * capture loop must not wedge the server thread's /stream client
- * forever); the caller drops the client in that case. */
+/* Waits up to STREAM_STALL_TIMEOUT_S for a frame newer than `*last_seq`,
+ * then claims it. Returns false on timeout (no new frame in that whole
+ * window -- a genuinely stalled/dead capture pipeline must not wedge the
+ * server thread's /stream client forever); the caller drops the client in
+ * that case.
+ *
+ * Loops on each condvar wake rather than giving up after the first
+ * k_condvar_wait() timeout: that single-wait version (pre-#2286 bench run
+ * 242) bounded the wait at IDLE_TIMEOUT_S (2 s), which is the right bound
+ * for socket I/O but was also disconnecting every /stream client the
+ * moment a transient encode-failure burst (main.c's quality-ladder retry)
+ * happened to outlast one 2 s window, even though frames kept arriving
+ * moments later. The deadline below still bounds the total wait -- it
+ * just spends it across possibly-several shorter waits instead of one. */
 static bool wait_and_claim(uint32_t *last_seq, uint8_t **out_buf, size_t *out_len)
 {
+	int64_t deadline = k_uptime_get() + (int64_t)STREAM_STALL_TIMEOUT_S * 1000;
+
 	k_mutex_lock(&frame_lock, K_FOREVER);
 	while (front < 0 || seq == *last_seq) {
-		if (k_condvar_wait(&frame_ready, &frame_lock, K_SECONDS(IDLE_TIMEOUT_S)) != 0) {
+		int64_t remaining_ms = deadline - k_uptime_get();
+
+		if (remaining_ms <= 0 ||
+		    k_condvar_wait(&frame_ready, &frame_lock, K_MSEC((uint32_t)remaining_ms)) != 0) {
 			k_mutex_unlock(&frame_lock);
 			return false;
 		}
@@ -199,7 +235,10 @@ static void handle_snapshot(int sock)
 	                     (unsigned)len);
 
 	if (send_all(sock, hdr, (size_t)hlen) == 0) {
+		int64_t t0 = k_uptime_get();
+
 		send_all(sock, buf, len);
+		atomic_set(&send_ms_last, (atomic_val_t)(k_uptime_get() - t0));
 	}
 	release_claim();
 }
@@ -239,8 +278,11 @@ static void handle_stream(int sock)
 		                     "Content-Length: %u\r\n\r\n",
 		                     (unsigned)len);
 
-		bool failed = send_all(sock, part, (size_t)plen) != 0 || send_all(sock, buf, len) != 0 ||
-		              send_all(sock, "\r\n", 2) != 0;
+		int64_t t0     = k_uptime_get();
+		bool    failed = send_all(sock, part, (size_t)plen) != 0 || send_all(sock, buf, len) != 0 ||
+		                 send_all(sock, "\r\n", 2) != 0;
+
+		atomic_set(&send_ms_last, (atomic_val_t)(k_uptime_get() - t0));
 		release_claim();
 		if (failed) {
 			return;

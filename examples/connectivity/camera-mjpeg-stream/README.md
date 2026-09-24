@@ -52,10 +52,35 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
-**Unverified on silicon:** this variant builds clean (CI's
-`camera_mjpeg_stream.aen_1280x960` twister scenario is build-only) but has
-not yet been bench-run — no fps/JPEG-size/CSI-fatal numbers exist for it
-yet. Treat it as compile-proven only until a bench run adds one.
+Bench run 242 (E1M-AEN803 + OV5647, **1280x960**, 15 fps request): capture
+path clean (0 CSI/IPI fatals, 0 ISP auto-stop), frames 0-11 encoded (~130 KB
+JPEG, dark scene while AE converged) — then every later encode failed with
+`alp_jpeg_encode failed (rc=-7 ...)` (`ALP_ERR_NOMEM`) as the scene
+brightened: quality 80 (the 640x480 default) routinely exceeded
+`MJPEG_HTTP_MAX_JPEG` (160 KiB) at this pixel count, and 160 KiB has no
+SRAM0 headroom left to grow (98.5% bank usage). Every `GET /stream` client
+also got re-served one stale frame and disconnected after ~2.1 s —
+`wait_and_claim()`'s single 2 s wait for a new frame gave up and dropped
+the client the moment one encode-failure burst outlasted it, even with the
+capture pipeline still alive.
+
+Both fixed: `src/main.c` now starts 1280x960 encodes at quality 60 (still
+comfortably under the cap for a typical frame) and retries a failing encode
+once at a lower quality (`src/jpeg_quality_ladder.h`, floor 40) instead of
+dropping the frame outright; `src/mjpeg_http.c`'s `wait_and_claim()` now
+gives a `/stream` client up to `STREAM_STALL_TIMEOUT_S` (30 s) total, spent
+across multiple shorter waits, instead of disconnecting after one
+`IDLE_TIMEOUT_S` (2 s) miss — a transient encode-retry burst no longer
+looks like a dead client. `src/main.c` also prints a once-a-second stats
+line (fps, encoded/failed/retried counts, JPEG size min/avg/max, encode
++ send ms) to make the next bench run's numbers easy to read off the
+console.
+
+**Unverified on silicon:** the fixes above build clean (CI's
+`camera_mjpeg_stream.aen_1280x960` twister scenario is build-only) but have
+not themselves been bench-run yet — bench run 242 above proved the FAILURE
+mode, not the fix. Treat the retry ladder and the longer `/stream` patience
+as compile-proven only until a bench run confirms them.
 
 ## Watch it
 
@@ -169,7 +194,8 @@ the body):
 |---|---|
 | `src/main.c` | Camera-capture + JPEG-encode loop (the app's main thread); pixfmt selection from `alp_jpeg_caps_t::pixfmt_mask`; DHCP kick-off + lease/URL printing. |
 | `src/mjpeg_http.c` | The HTTP server: `GET /stream` + `GET /snapshot.jpg`, its own thread, `zsock_*` sockets, zero-copy ping-pong frame hand-off (two SRAM0 buffers, `mjpeg_http_claim_write_buffer()`/`mjpeg_http_publish_frame()`), `SO_RCVTIMEO`/`SO_SNDTIMEO` on every accepted socket. |
-| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use. |
+| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use — plus `mjpeg_http_get_stats()`, main.c's window into `mjpeg_http.c`'s own last-send timing. |
+| `src/jpeg_quality_ladder.h` | `jpeg_quality_step_down()` — the pure, native_sim-testable retry-ladder step `src/main.c` uses on an `ALP_ERR_NOMEM` encode failure (`tests/unit/mjpeg_quality_ladder`). |
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
