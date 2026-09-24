@@ -69,9 +69,9 @@
 /* Requested camera frame rate. The OV5647 backend (alif_isp_pico.c) honors
  * this via cfg->fps and settles on the closest rate it can actually reach
  * (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120, VTS-clamped) --
- * bench pending on whether 30 fps is achievable end to end at FRAME_W x
- * FRAME_H with this pipeline's encode+HTTP-publish cost per frame; see
- * README.md's Limits section. */
+ * confirmed end to end at FRAME_W x FRAME_H (bench run 220, E1M-AEN803 +
+ * OV5647, evk-02, bright daylight): 901 complete JPEGs streamed in each of
+ * three 30 s captures = 30.03 fps. See README.md's Limits section. */
 #define FRAME_FPS 30
 
 /*

@@ -42,8 +42,22 @@
  * reason a slow first cut of this backend couldn't keep AE converging
  * (isp_pico.c's fifo starved while a frame converted -- see
  * src/backends/camera/alif_isp_pico.c's "AE-convergence fix"): a duration
- * far past the ~100 ms 10 fps frame period says the conversion (or the
- * dequeue wait behind it) is still the bottleneck.
+ * far past the ~100 ms frame period this app's own cfg.fps = 10 request
+ * (below) targets says the conversion (or the dequeue wait behind it) is
+ * still the bottleneck.
+ *
+ * FPS: this app pins cfg.fps = 10 explicitly (issue #2276 changed
+ * ALP_CAMERA_CONFIG_DEFAULT's fps from 10 to 30, so this app must now ask
+ * for 10 itself to keep the behaviour this file's comments above describe)
+ * -- it has never been re-benched at 30 fps, and 10 fps buys two things
+ * this app still needs at that rate: (1) CPU conversion headroom, since
+ * the ~100 ms 10 fps frame period is what let the fix above keep two
+ * buffers queued to the ISP MI while the third converts (a 30 fps ~33 ms
+ * period gives the same conversion far less slack to land in before the
+ * fifo starves again); and (2) AE exposure headroom in a dim scene (see
+ * issue #2277: the OV5647 calibration AE block's exposure ceiling is
+ * still pinned to the 10 fps VTS, so running faster than 10 fps narrows
+ * how much exposure AE can command before it hits that ceiling).
  */
 
 #include <stdbool.h>
@@ -99,6 +113,12 @@ int main(void)
 	cfg.width               = CAM_WIDTH;
 	cfg.height              = CAM_HEIGHT;
 	cfg.format              = ALP_PIXFMT_RGB565;
+	/* Pin 10 fps explicitly -- see the file header's FPS note.  This app's
+	 * CPU YUV->RGB565 conversion and dim-scene AE headroom are only
+	 * bench-proven at 10 fps (runs 147/154); ALP_CAMERA_CONFIG_DEFAULT's
+	 * fps default moved to 30 with issue #2276, but this app was never
+	 * re-benched there. */
+	cfg.fps = 10;
 
 	/* --- 1. open -------------------------------------------------- */
 	printk("[ispvf] alp_camera_open(id=0, %ux%u, RGB565) ...\n", cfg.width, cfg.height);

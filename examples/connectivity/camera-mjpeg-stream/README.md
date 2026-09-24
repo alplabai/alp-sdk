@@ -62,6 +62,13 @@ chroma-row fix (#2267/#2269) and the Hantro output-buffer-overrun fix
 measurement of the current code; rerun the ffmpeg command above for a
 current figure.
 
+Bench run 220 (E1M-AEN803 + OV5647, **640×480**, bright daylight, 30 fps
+request, #2276): 901 complete JPEGs streamed in each of three 30 s
+captures = **30.03 fps** -- confirms the requested 30 fps is achievable
+end to end through this pipeline. AE settled around intLine ~331-351
+(boot readback `AE readback: int_time_max=32667 ...`, matching the 30 fps
+frame period), no `E:`/`W:` log lines.
+
 ## Limits
 
 This is a teaching example, not a production camera server:
@@ -77,11 +84,13 @@ This is a teaching example, not a production camera server:
   `mjpeg_http_publish_frame()` drops the newly-encoded frame outright if
   a `/stream` client is still mid-send of the previous one (see
   `src/mjpeg_http.c`'s file header) -- so the achievable rate is roughly
-  `1 / (t_encode + t_send)`, not the camera's requested 30 fps (raised
-  from 15 fps; unmeasured at 30 -- bench pending, no run yet covers this
-  request). Run 205's 10 fps at 640×480 (~37 KB/frame) is a real
-  measurement of that at the OLD 15 fps request, not a target this
-  example tries to hit.
+  `1 / (t_encode + t_send)`. Run 220 measured this at 30.03 fps (bright
+  daylight), confirming the requested 30 fps is reachable end to end at
+  640×480 with this pipeline's encode+send cost. Run 205's 10 fps at
+  640×480 (~37 KB/frame, dark scene, pre-#2276) is an older measurement
+  at the 15 fps request this example used before #2276 raised the
+  default, and predates the ISP/Hantro fixes noted above -- not a target
+  this example tries to hit.
 
 **Fixed since run 205:** the bottom two rows of every frame rendered solid
 green -- an ISP main-resizer chroma-row rounding bug (`ISP_MRSZ_SCALE_VC`

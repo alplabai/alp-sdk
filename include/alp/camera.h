@@ -68,7 +68,14 @@ typedef struct {
 	uint32_t     camera_id;
 	uint16_t     width;
 	uint16_t     height;
-	uint8_t      fps;
+	uint8_t      fps; /**< Requested frame rate, in frames/second. 0 = let the
+	                   *   backend pick its own default; nonzero is a
+	                   *   REQUEST, not a guarantee -- the backend settles on
+	                   *   the nearest rate its sensor/mode actually supports
+	                   *   (e.g. the OV5647 only reaches one of a fixed rate
+	                   *   table). The settled rate is not reported back to
+	                   *   the caller yet (issue #2279). Not every backend
+	                   *   honors this field at all yet -- see issue #2278. */
 	alp_pixfmt_t format;
 } alp_camera_config_t;
 

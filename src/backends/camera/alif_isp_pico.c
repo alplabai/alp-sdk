@@ -356,15 +356,17 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 
 #if DT_NODE_EXISTS(DT_NODELABEL(ov5647))
 	/* Request the caller's fps (issue #2276: this used to hard-code 10 fps
-	 * here, silently ignoring cfg->fps).  cfg->fps == 0 is the same
-	 * "unspecified" convention width/height use (see
-	 * ALP_CAMERA_CONFIG_DEFAULT's comment) -- fall back to 10 fps, the
-	 * OV5647's lowest supported rate (ov5647_framerates[] in ov5647.c),
-	 * a *choice* that buys AE the most exposure headroom in a dim scene,
-	 * not a hardware floor. ov5647_set_frmival() then picks the closest
-	 * of {10, 15, 30, 45, 60, 90, 120} it can actually reach at this mode
-	 * (VTS-clamped), so read the result back rather than assume the
-	 * request landed exactly.
+	 * here, silently ignoring cfg->fps).  cfg->fps == 0 means "backend
+	 * default" (see <alp/camera.h>'s alp_camera_config_t::fps doc) -- NOT
+	 * the same convention width/height use just above (those are a
+	 * "you must choose" sentinel that alp_camera_open() rejects outright;
+	 * an unset fps is not an error, it just falls back to this backend's
+	 * own default of 10 fps, the OV5647's lowest supported rate
+	 * (ov5647_framerates[] in ov5647.c) -- a *choice* that buys AE the
+	 * most exposure headroom in a dim scene, not a hardware floor.
+	 * ov5647_set_frmival() then picks the closest of {10, 15, 30, 45, 60,
+	 * 90, 120} it can actually reach at this mode (VTS-clamped), so read
+	 * the result back rather than assume the request landed exactly.
 	 *
 	 * isp_pico.c can't be asked generically here: it derives its own AE
 	 * envelope from video_get_frmival(config->controller, ...) (isp ->
@@ -373,20 +375,55 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * reachable from this backend, and isp_pico's video_driver_api
 	 * doesn't implement .set_frmival/.get_frmival itself. So this stays
 	 * scoped to the OV5647 shield's own DT node; a future sensor on this
-	 * ISP path needs its own branch here. */
+	 * ISP path needs its own branch here.
+	 *
+	 * NOTE (issue #2277): the OV5647 calibration AE block's own exposure
+	 * ceiling is still hard-pinned to the 10 fps VTS regardless of the
+	 * rate requested here -- unverified interaction in a dim scene at a
+	 * faster rate. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;
 		struct video_frmival frmival       = { .numerator = 1, .denominator = requested_fps };
-		(void)video_set_frmival(sensor_dev, &frmival);
+		int                  rc            = video_set_frmival(sensor_dev, &frmival);
+
+		if (rc != 0) {
+			LOG_WRN("camera%u: video_set_frmival(%u fps) failed: rc=%d",
+			        cfg->camera_id,
+			        requested_fps,
+			        rc);
+		}
 
 		struct video_frmival actual = { 0 };
 		if (video_get_frmival(sensor_dev, &actual) == 0 && actual.denominator > 0) {
-			LOG_DBG("camera%u: requested %u fps, sensor settled on %u fps",
-			        cfg->camera_id,
-			        requested_fps,
-			        actual.denominator / MAX(actual.numerator, 1u));
+			/* Print the settled interval as num/den rather than a
+			 * truncating denominator/numerator division -- a
+			 * non-integer or sub-1-fps settled rate would otherwise
+			 * print a misleading rounded (or zero) fps. The request
+			 * was always {.numerator = 1, .denominator =
+			 * requested_fps}, so compare against that rather than
+			 * requested_fps alone. */
+			bool settled_as_requested =
+			    (actual.numerator == 1u) && (actual.denominator == requested_fps);
+
+			if (settled_as_requested) {
+				LOG_DBG("camera%u: requested %u fps, sensor settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			} else {
+				LOG_INF("camera%u: requested %u fps, sensor settled on %u/%u",
+				        cfg->camera_id,
+				        requested_fps,
+				        actual.denominator,
+				        actual.numerator);
+			}
 		}
+	} else {
+		LOG_WRN("camera%u: OV5647 device not ready; fps request (%u) not applied",
+		        cfg->camera_id,
+		        cfg->fps);
 	}
 #endif
 
