@@ -1,0 +1,155 @@
+--- a/drivers/isp/isp_wrapper/inc/isp_param_conf.h
++++ b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+@@ -4,6 +4,20 @@
+  */
+ #include "vsi_comm_calib.h"
+ 
++/*
++ * alp-sdk fix (Alp Lab AB, #2271): the OV5647 .ae block below shares its
++ * expTimeRange/againRange/dgainRange/manualAttr facts with
++ * sensor_attributes.h's AE_SNS_DEFAULT_S via that header's OV5647_AE_*
++ * macros -- see sensor_attributes.h's own comment for why (SetCalib() loads
++ * THIS file's calibration into the library before isp_apply_ae() (isp_pico.c)
++ * ever runs; the two tables must describe the same envelope or the library
++ * enforces whichever one it loaded last). vsi_comm_calib.h's own #include
++ * chain (mpi_isp.h -> vsi_comm_isp.h) already pulls in vsios_type.h before
++ * this line, so sensor_attributes.h's vsi_u32_t/vsi_u64_t macro uses below
++ * resolve regardless of which TU includes this header first.
++ */
++#include "sensor_attributes.h"
++
+ #ifdef __cplusplus
+ extern "C"{
+ #endif
+@@ -66,6 +80,51 @@
+ #if defined(CONFIG_ISP_LIB_AE_MODULE)
+ 		.ae = {
+ 			.opType = OP_TYPE_AUTO,
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647)
++			/*
++			 * alp-sdk fix (Alp Lab AB, #2271): the stock ARX3A0
++			 * envelope below (expTimeRange.max 3000000 us ->
++			 * 94470 lines via vsi_get_ae_default()'s
++			 * linesPer500ms) is nowhere near OV5647's real
++			 * ceiling (sensor_attributes.h's OV5647_AE_MAX_INT_LINE
++			 * = 3145 lines) -- SetCalib() (isp_vsi_init(),
++			 * isp_api_wrapper.c) loads THIS block into the
++			 * library before isp_apply_ae() (isp_pico.c) ever
++			 * runs, so the library enforced the calibration's
++			 * oversized ceiling regardless of what isp_apply_ae()
++			 * pushed afterwards -- the per-frame AE writeback
++			 * (hal_alif patch 0010's clamp) kept saturating
++			 * exposure against it (bench runs 211/212: intLine
++			 * 94470 = expTimeRange.max converted to lines, not
++			 * hal_alif patch 0010's diagnosis of the gain
++			 * writeback -- see patch 0010's corrected comment).
++			 * Sourced from sensor_attributes.h's OV5647_AE_*
++			 * macros (see that header's comment) so this block
++			 * and the runtime AE_SNS_DEFAULT_S table cannot
++			 * drift apart again.
++			 */
++			.manualAttr = {
++				.intTime = OV5647_AE_EXP_TIME_MAX_US / 2,
++				.again = OV5647_AE_MIN_AGAIN,
++				.dgain = OV5647_AE_MIN_DGAIN,
++			},
++			.autoAttr = {
++				.expTimeRange = {
++					.min =  32,
++					.max =  OV5647_AE_EXP_TIME_MAX_US,
++				},
++				.againRange = {
++					.min = OV5647_AE_MIN_AGAIN,
++					.max = OV5647_AE_MAX_AGAIN,
++				},
++				.dgainRange = {
++					.min = OV5647_AE_MIN_DGAIN,
++					.max = OV5647_AE_MAX_DGAIN,
++				},
++				.aeRunInterval = 1,
++				.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
++				.dampOver = 0x40,
++#else /* ARX3A0 (Alif's stock calibration, unchanged) */
+ 			.manualAttr = {
+ 				.intTime = 100000,
+ 				.again = 75000,
+@@ -87,6 +146,7 @@
+ 				.aeRunInterval = 1,
+ 				.aeTarget = 255,
+ 				.dampOver = 0x40,
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647) */
+ 				.dampUnder = 0x40,
+ 				.tolerance = 1,
+ 				.antiflicker = {
+--- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
++++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+@@ -105,6 +105,69 @@
+ 	.gainThreshold = 1024,
+ };
+ 
++/*
++ * alp-sdk fix (Alp Lab AB, #2271): isp_param_conf.h's OV5647 .ae calibration
++ * block (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 arm) needs these SAME facts --
++ * SetCalib() (isp_vsi_init(), isp_api_wrapper.c) loads that compiled-in
++ * calibration into the ISP library BEFORE isp_apply_ae() (isp_pico.c) ever
++ * runs, and the library enforces the CALIBRATION's own AE ranges, not
++ * whatever isp_apply_ae() pushes afterwards -- two independent literal
++ * copies of "OV5647's real AE envelope" is exactly how patch 0010's clamp
++ * ended up fighting a stale ARX3A0-derived ceiling here (#2271's root
++ * cause). This struct's own fields above stay hand-written literals (a
++ * patch that edited them to reference these macros directly would no
++ * longer reverse-apply independently of this one -- both patches would
++ * always have to move together, defeating the point of separate patches);
++ * the _Static_assert block below is the mechanical tripwire instead: it
++ * fails the BUILD the moment these macros and the struct's own literals
++ * above stop agreeing, rather than only a bench run noticing.
++ */
++#define OV5647_AE_FULL_LINES   3149  /* VTS at 10 fps -- see the derivation above */
++#define OV5647_AE_FPS          10    /* real fps, NOT *ISP_SNS_FPS_ACCU-scaled */
++#define OV5647_AE_MAX_INT_LINE 3145  /* VTS - 4 */
++#define OV5647_AE_MIN_AGAIN    1024  /* 1x floor, library units (1x = 1024) */
++#define OV5647_AE_MAX_AGAIN    65472 /* 1023 (OV5647 AGC_GAIN max) * 1024 / 16 */
++#define OV5647_AE_MIN_DGAIN    1024  /* unity -- all headroom flows through again */
++#define OV5647_AE_MAX_DGAIN    1024  /* (see the maxDgain bench-run-83 note above) */
++
++_Static_assert(OV5647_AE_FULL_LINES == 3149, "drifted from sensor_attributes.fullLines above");
++_Static_assert(OV5647_AE_MAX_INT_LINE == 3145, "drifted from sensor_attributes.maxIntLine above");
++_Static_assert(OV5647_AE_MAX_AGAIN == 65472, "drifted from sensor_attributes.maxAgain above");
++_Static_assert(OV5647_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain above");
++_Static_assert(OV5647_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain above");
++_Static_assert(OV5647_AE_MIN_DGAIN == 1024, "drifted from sensor_attributes.minDgain above");
++
++/*
++ * Exposure ceiling in MICROSECONDS -- isp_param_conf.h's calib block wants
++ * its ceiling in ISP_AE_RANGE_S.expTimeRange (microseconds), OV5647_AE_MAX_
++ * INT_LINE above is in lines; both must describe the SAME ceiling, so this
++ * converts lines -> microseconds via the sensor's own lines-per-second rate
++ * (fullLines lines every 1/fps seconds) -- the inverse of
++ * vsi_get_ae_default()'s own linesPer500ms conversion (isp_api_wrapper.c)
++ * that turns a microsecond exposure request back into lines.
++ *
++ * Round-trip guard: convert this back to lines through the SAME formula
++ * vsi_get_ae_default() uses (linesPer500ms = fullLines * fps_scaled /
++ * (2 * ISP_SNS_FPS_ACCU), fps_scaled = OV5647_AE_FPS * ISP_SNS_FPS_ACCU --
++ * the ISP_SNS_FPS_ACCU cancels, leaving fullLines * OV5647_AE_FPS / 2) and
++ * confirm the two ceilings still agree once the library's own integer
++ * truncation is applied both ways; a future edit to any macro above that
++ * breaks this relationship fails the BUILD, not a bench run. BUILD_ASSERT
++ * isn't visible in this header's include chain (no <zephyr/...> here),
++ * hence _Static_assert (C11, no header needed).
++ */
++#define OV5647_AE_EXP_TIME_MAX_US                                                                \
++	((vsi_u32_t)((vsi_u64_t)OV5647_AE_MAX_INT_LINE * 1000000 /                               \
++		      ((vsi_u64_t)OV5647_AE_FULL_LINES * OV5647_AE_FPS)))
++
++_Static_assert(((vsi_u64_t)OV5647_AE_EXP_TIME_MAX_US *
++		 ((vsi_u64_t)OV5647_AE_FULL_LINES * OV5647_AE_FPS / 2) / 500000) <=
++		       OV5647_AE_MAX_INT_LINE,
++	       "OV5647_AE_EXP_TIME_MAX_US round-trips to more lines than OV5647_AE_MAX_INT_LINE");
++_Static_assert((vsi_u64_t)OV5647_AE_MAX_INT_LINE * 16 <= 0xFFFFF,
++	       "OV5647_AE_MAX_INT_LINE * 16 (isp_api_wrapper.c's VIDEO_CID_EXPOSURE writeback "
++	       "scale) overflows the 20-bit video-ctrl exposure field");
++
+ #ifdef __cplusplus
+ }
+ #endif

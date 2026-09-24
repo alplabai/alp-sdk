@@ -646,7 +646,7 @@ patches:
       change to the one fix bench run 153 needed; a candidate to drop in
       a follow-up.
   - path: hal_alif/0010-isp-clamp-ae-writeback-to-ctrl-range.patch
-    sha256sum: 03ff9ac0eeb95ae636a2040a8ea2f609f5da155a1bdca2003bf9d3cca75c5572
+    sha256sum: f504e9fe90be88c5a1c8ee4fd9a7adff006d112bf9d5f63394334feb90f34cca
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -658,28 +658,74 @@ patches:
       per-frame AE writeback) computes ctrl.val for VIDEO_CID_ANALOGUE_GAIN
       and VIDEO_CID_EXPOSURE from the ISP library's own AE algorithm output
       and calls video_set_ctrl() with no clamp to the sensor's registered
-      control range. E1M-AEN803 + OV5647 bench: AE drove the gain writeback
-      to 0x2000, outside OV5647's registered VIDEO_CID_ANALOGUE_GAIN range
-      of [0, 1023] (zephyr/drivers/video/ov5647.c) -- video_set_ctrl()
+      control range. E1M-AEN803 + OV5647 bench (runs 211/212): AE drove the
+      EXPOSURE writeback to intLine 94470 (ctrl.val = intLine * 16 =
+      1511520), outside OV5647's registered VIDEO_CID_EXPOSURE range of
+      [0, 0xFFFFF] (zephyr/drivers/video/ov5647.c) -- video_set_ctrl()
       rejected every write with -EINVAL (Zephyr drivers/video/video_ctrls.c
       video_set_ctrl()'s IN_RANGE check), logging "Control value is
       invalid" once per frame. cached_sns_config only updates on a
       successful write, so the rejected value was retried every frame
-      forever, never just once. Add isp_clamp_ctrl_val() and call
+      forever, never just once. (The GAIN writeback that same run, aGain
+      0x2000 / dGain 0x9cd, computed ctrl.val = 313 -- inside OV5647's
+      registered VIDEO_CID_ANALOGUE_GAIN range [0, 1023] the whole time; an
+      earlier revision of this entry mis-cited that gain value as the
+      out-of-range one.) Add isp_clamp_ctrl_val() and call
       video_query_ctrl() for the same id before each write, saturating
       ctrl.val into [range.min, range.max]; a failed query leaves the value
       unclamped (video_set_ctrl() then rejects it exactly as before this
       patch -- no new failure mode). This clamp is a DEFENSIVE layer, not a
-      fix for why AE drives outside its configured ceiling in the first
-      place -- isp_pico.c's isp_apply_ae() sets again_max 65472 and dgain
-      1024..1024, yet the bench still saw an out-of-range write; that root
-      cause is tracked in #2271 and unresolved. Latched LOG_WRN (once per
-      episode, like the existing gain/exposure write-error latches) prints
-      the raw library terms (sns_config.aGain/dGain or intLine), the
-      computed ctrl value and the clamped value plus range.max whenever a
-      clamp actually changes the write, so the bench can see which library
-      term breached its ceiling. Pure additive; upstream to hal_alif then
-      drop.
+      fix for why AE drove outside its configured ceiling in the first
+      place: isp_pico.c's isp_apply_ae() DOES push a correct, sensor-queried
+      int_time_max, but SetCalib() (isp_vsi_init()) loads isp_param_conf.h's
+      compiled-in AE calibration block into the library FIRST, and the
+      library enforced THAT block's ceiling (expTimeRange.max 3000000 us ->
+      94470 lines) regardless of what isp_apply_ae() pushed afterwards.
+      Root cause now fixed by patch 0011 (isp_param_conf.h's OV5647
+      calibration arm matches the sensor's real envelope, #2271); this
+      clamp stays as defense in depth. Latched LOG_WRN (once per episode,
+      like the existing gain/exposure write-error latches) prints the raw
+      library terms (sns_config.aGain/dGain or intLine), the computed ctrl
+      value and the clamped value plus range.max whenever a clamp actually
+      changes the write, so the bench can see which library term breached
+      its ceiling. Pure additive; upstream to hal_alif then drop.
+  - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
+    sha256sum: 3b0914512c025d7ebe36ba7d8eab0b953fb733d2c4b9643639281ad022ac6f3f
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-24
+    upstreamable: true
+    comments: |
+      Root cause of #2271 (patch 0010's clamp is only the defensive layer):
+      isp_param_conf.h's compiled-in ISP_CALIB_DATA_S.modules.ae block is
+      loaded into the library by SetCalib() (isp_vsi_init(),
+      isp_api_wrapper.c) BEFORE isp_apply_ae() (isp_pico.c) ever runs its
+      own sensor-queried exposure/gain ceilings, and the library enforces
+      the CALIBRATION's ranges, not whatever gets pushed afterwards. The
+      .ae block had never been updated off Alif's stock ARX3A0 reference
+      envelope (expTimeRange.max 3000000 us, converting to 94470 lines via
+      vsi_get_ae_default()'s own linesPer500ms formula -- exactly the
+      exposure value patch 0010's clamp was catching). Add an OV5647 arm to
+      the .ae block, gated the same way patch 0008 already gates the
+      WB/CCM calibration (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647, #else keeps
+      the ARX3A0 literals unchanged), with expTimeRange/againRange/
+      dgainRange/aeTarget/manualAttr set from sensor_attributes.h's new
+      OV5647_AE_* macros -- the SAME facts sensor_attributes.h's own
+      AE_SNS_DEFAULT_S table already carried (patch 0006), now named
+      instead of duplicated as independent literals, with _Static_assert
+      guards tying the macros to that struct's existing values and to the
+      library's own microseconds<->lines round-trip and the 20-bit
+      VIDEO_CID_EXPOSURE field width so a future edit that breaks either
+      relationship fails the BUILD, not a bench run. Also makes
+      zephyr/drivers/video/isp_pico.c's isp_stream_start() re-apply AE on
+      EVERY stream (re)start, not only when a control changed since the
+      last one -- unconfirmed against the closed VSI_MPI_ISP library, but
+      consistent with EnableDev() re-seeding AE state from the calibration
+      on each restart (H2), and idempotent either way. Pure additive
+      (isp_param_conf.h's ARX3A0 arm is untouched); upstream to hal_alif
+      then drop.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

@@ -19,13 +19,20 @@
  * instead: it extracts both copies' function bodies and fails the moment
  * they stop matching (whitespace aside).
  *
- * Without the clamp, E1M-AEN803 + OV5647 bench traffic showed AE settle on
- * a gain writeback of 0x2000 (8192) against OV5647's registered
- * VIDEO_CID_ANALOGUE_GAIN range of [0, 1023] -- video_set_ctrl() rejected
- * every write with -EINVAL, logging "Control value is invalid" once per
- * frame forever (cached_sns_config only updates on success, so it kept
- * retrying the same rejected value). test_clamp_regresses_the_bench_value
- * below pins exactly that case.
+ * Without the clamp, E1M-AEN803 + OV5647 bench traffic (runs 211/212) showed
+ * AE settle on an EXPOSURE writeback of intLine 94470 (0x171E6) -- ctrl.val =
+ * intLine * 16 = 1511520 -- against OV5647's registered VIDEO_CID_EXPOSURE
+ * range of [0, 0xFFFFF] (1048575, GENMASK(19,0) in ov5647.c):
+ * video_set_ctrl() rejected every write with -EINVAL, logging "Control value
+ * is invalid" once per frame forever (cached_sns_config only updates on
+ * success, so it kept retrying the same rejected value). The GAIN writeback
+ * that same bench run (aGain 0x2000, dGain 0x9cd) computed ctrl.val = 313 --
+ * inside OV5647's registered VIDEO_CID_ANALOGUE_GAIN range of [0, 1023], not
+ * the violator; an earlier revision of this file mis-cited the gain value as
+ * the out-of-range one (#2271's actual root cause: the ISP library's own
+ * compiled-in AE calibration block, isp_param_conf.h, not this clamp's own
+ * target range -- see hal_alif patch 0011). test_clamp_regresses_the_bench_
+ * value below pins the real (exposure) case.
  */
 #include <stdint.h>
 
@@ -61,13 +68,15 @@ ZTEST(isp_ae_ctrl_clamp, test_exact_boundaries_pass_through)
 	zassert_equal(isp_clamp_ctrl_val(1023, 0, 1023), 1023, "max boundary is inclusive");
 }
 
-/* The regression case: bench run computed a gain writeback of 0x2000 against
- * OV5647's registered [0, 1023] -- without the clamp this reaches
- * video_set_ctrl() out of range and gets rejected with -EINVAL every frame.
+/* The regression case: bench run 211/212 computed an EXPOSURE writeback of
+ * 1511520 (intLine 94470 * 16) against OV5647's registered [0, 0xFFFFF] --
+ * without the clamp this reaches video_set_ctrl() out of range and gets
+ * rejected with -EINVAL every frame.
  */
 ZTEST(isp_ae_ctrl_clamp, test_clamp_regresses_the_bench_value)
 {
-	zassert_equal(isp_clamp_ctrl_val(0x2000, 0, 1023),
-	              1023,
-	              "0x2000 must saturate to OV5647's registered max, not pass through");
+	zassert_equal(isp_clamp_ctrl_val(1511520, 0, 0xFFFFF),
+	              0xFFFFF,
+	              "1511520 must saturate to OV5647's registered exposure max, not pass "
+	              "through");
 }

@@ -337,12 +337,18 @@ struct isp_ctrls {
 	 * the calibration carries no AE target, integration-time or gain
 	 * range for this sensor, so those limits must be pushed at the very
 	 * first stream start even though exposure_auto is already at its
-	 * default. isp_stream_start() is the sole caller of isp_apply_wb()/
-	 * isp_apply_ae() to act on either flag, and only while the ISP is
-	 * stopped (isp_stream_start() never runs otherwise) -- clearing the
-	 * flag on success. A change made while already streaming is picked
-	 * up at the NEXT stream start; see the ponytail comment on
-	 * isp_set_ctrl() (isp_pico.c).
+	 * default. isp_stream_start() is the sole caller of isp_apply_wb(),
+	 * gated on wb_dirty and only while the ISP is stopped
+	 * (isp_stream_start() never runs otherwise) -- clearing the flag on
+	 * success. A WB change made while already streaming is picked up at
+	 * the NEXT stream start; see the ponytail comment on isp_set_ctrl()
+	 * (isp_pico.c).
+	 *
+	 * #2271: isp_apply_ae() is called EVERY stream start regardless of
+	 * ae_dirty (see isp_stream_start()'s own comment at its AE call site,
+	 * isp_pico.c, for why) -- ae_dirty is still set by isp_set_ctrl()/
+	 * isp_init_controls() and cleared on a successful apply, but no
+	 * longer gates the call.
 	 */
 	bool wb_dirty;
 	bool ae_dirty;

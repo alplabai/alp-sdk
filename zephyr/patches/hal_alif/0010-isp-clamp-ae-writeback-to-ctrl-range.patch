@@ -1,6 +1,6 @@
 --- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
 +++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
-@@ -106,6 +106,46 @@
+@@ -106,6 +106,54 @@
   */
  static bool gain_write_err_logged;
  static bool exposure_write_err_logged;
@@ -9,19 +9,27 @@
 + * alp-sdk fix (Alp Lab AB): the ISP library's own AE algorithm
 + * computes gain/exposure targets in its own fixed-point scale, and nothing
 + * upstream of isp_vsi_bottom_half() clamps the result to what the sensor's
-+ * registered video control actually accepts. On E1M-AEN803 + OV5647, AE
-+ * settled on a gain writeback out of OV5647's registered
-+ * VIDEO_CID_ANALOGUE_GAIN range [0, 1023] -- video_set_ctrl() rejected it
++ * registered video control actually accepts. On E1M-AEN803 + OV5647 (bench
++ * runs 211/212), AE settled on an EXPOSURE writeback (intLine 94470, so
++ * ctrl.val = intLine * 16 = 1511520) out of OV5647's registered
++ * VIDEO_CID_EXPOSURE range [0, 0xFFFFF] -- video_set_ctrl() rejected it
 + * with -EINVAL every single frame (Zephyr drivers/video/video_ctrls.c's
 + * IN_RANGE check), and cached_sns_config only updates on a successful write,
 + * so it never stopped retrying. Saturate into [min, max] before the write.
++ * (The GAIN writeback that same run, aGain 0x2000 / dGain 0x9cd, computed
++ * ctrl.val = 313 -- inside OV5647's registered VIDEO_CID_ANALOGUE_GAIN
++ * range [0, 1023] the whole time; an earlier revision of this comment
++ * mis-cited that gain value as the out-of-range one.)
 + *
-+ * This clamp is a DEFENSIVE layer, not the fix for why AE drives outside
-+ * its configured ceiling in the first place -- isp_pico.c's isp_apply_ae()
-+ * sets again_max = 65472 and dgain to a fixed 1024..1024, yet the bench
-+ * still saw an out-of-range write. That root cause is tracked in #2271;
-+ * this clamp only keeps a single wrong value from being retried forever
-+ * while it's chased down.
++ * This clamp is a DEFENSIVE layer, not the fix for why AE drove outside
++ * its configured ceiling in the first place: isp_pico.c's isp_apply_ae()
++ * DOES push a correct, sensor-queried int_time_max -- but SetCalib()
++ * (isp_vsi_init(), below) loads isp_param_conf.h's compiled-in AE
++ * calibration block into the library FIRST, and the library enforced THAT
++ * block's ceiling (expTimeRange.max 3000000 us -> 94470 lines) regardless
++ * of what isp_apply_ae() pushed afterwards. Root cause fixed in hal_alif
++ * patch 0011 (isp_param_conf.h's OV5647 calibration arm now matches the
++ * sensor's real envelope, #2271); this clamp stays as defense in depth.
 + */
 +static inline int32_t isp_clamp_ctrl_val(int32_t val, int32_t min, int32_t max)
 +{
@@ -47,7 +55,7 @@
  #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
  
  extern int log_level(void);
-@@ -732,12 +772,39 @@
+@@ -732,12 +780,39 @@
  		 * (0x350a) uses register value 0x10 = 1x -- scale by 16/1024.
  		 */
  		struct video_control ctrl;
@@ -87,7 +95,7 @@
  		ret = video_set_ctrl(dev, &ctrl);
  		if (ret) {
  			if (!gain_write_err_logged) {
-@@ -759,9 +826,30 @@
+@@ -759,9 +834,30 @@
  		 * exposure convention) -- scale by 16.
  		 */
  		struct video_control ctrl;
