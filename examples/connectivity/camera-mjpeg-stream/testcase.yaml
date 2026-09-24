@@ -59,3 +59,26 @@ tests:
       - ethernet
       - connectivity
     build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # Stage-A 1280x960 variant (issue #2286): 15 fps capture/encode,
+  # ~7.5 fps delivered (send-bound) -- see run 243 in README.md. AEN801
+  # and AEN803 are the same PCB/SoC (see overlay-1280x960.conf's own
+  # header), same build-only regression rationale as the scenario above:
+  # no camera/Ethernet HW in the CI runner, this compile-checks the
+  # resized ISP buffer pool + the raised JPEG cap.
+  alp_sdk.examples.camera_mjpeg_stream.aen_1280x960:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
