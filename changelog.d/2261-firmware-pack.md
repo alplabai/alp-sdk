@@ -48,21 +48,21 @@ what bitbake shipped before).
   D16S32 for V2N101/V2M101; which of the two facts is actually right
   remains open — see the `# OPEN` note added to both machine confs and
   `docs/build-yocto-v2n.md`.
-- **Fold meta-rz-drpai's DDR MC-arbitration register values in: YES.**
-  `param_setup_mc` `0x0134`/`0x0135`/`0x0178`/`0x017f`/`0x0181`/`0x02cd`/
-  `0x02cf`/`0x02d0` — which the ALP gen_tool files don't carry, and which
-  `do_compile:prepend`'s whole-file replacement discards on any
-  DRP-AI-enabled build — get folded into both `ddr_param_def_lpddr4-alp.c`
-  and `-alp-d8s32.c`. Confirmed density-independent (identical current
-  baseline in both files) and non-colliding with the D8 range regs/tRFC
-  rows; `param_phyinit_2d_dat1[15]` stays at the ALP value (the drpai
-  patch doesn't touch it). **Not yet applied** — the target values are
-  derived, verified, and recorded in `alp-sdk-internal
-  docs/bootloader-equivalence-verdict.md`, but editing those two private
-  register-table files was blocked by a permission classifier this
-  session on every attempt. Still needs: applying the 8 values, a
-  provenance note in each file's header, a rebuild + bl2-binary proof on
-  e1m-v2m103-a55, and it is **not silicon-verified either way**.
+- **Fold meta-rz-drpai's DDR MC-arbitration register values in: YES,
+  applied.** `param_setup_mc` `0x0134`/`0x0135`/`0x0178`/`0x017f`/`0x0181`/
+  `0x02cd`/`0x02cf`/`0x02d0` — which the ALP gen_tool files didn't carry,
+  and which `do_compile:prepend`'s whole-file replacement was discarding
+  on any DRP-AI-enabled build — are now folded into both
+  `ddr_param_def_lpddr4-alp.c` and `-alp-d8s32.c`
+  (`alp-sdk-internal@9f88a4d`, 16 lines, CRLF preserved). Density-independent
+  (identical baseline in both files) and non-colliding with the D8 range
+  regs/tRFC rows; `param_phyinit_2d_dat1[15]` stays at the ALP value (the
+  drpai patch doesn't touch it). Rebuilt from the committed SHA on
+  alplab-gw (`e1m-v2m103-a55` BL2, `e1m-v2n101-a55` TF-A) and confirmed
+  via the built `bl2.bin` that all 8 entries carry the folded-in values
+  and the prior values are gone, for both D8S32 and D16S32. **Not yet
+  silicon-verified** — needs a cold-boot DDR training pass, memtester,
+  and a DRP-AI inference run on the bench.
 
 See `alp-sdk-internal docs/bootloader-equivalence-verdict.md` (corrected the
 same day) for the discovery trail and exact target values.
