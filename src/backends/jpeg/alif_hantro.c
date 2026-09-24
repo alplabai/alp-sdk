@@ -81,6 +81,16 @@ LOG_MODULE_REGISTER(alp_jpeg_alif_hantro, CONFIG_LOG_DEFAULT_LEVEL);
 #endif
 
 /*
+ * dev-review addition (Alp Lab AB): bound on the pre-stop SW_ENC_E quiesce
+ * poll in hantro_encode()'s -EAGAIN path below, run BEFORE video_stream_
+ * stop() touches anything -- see the ownership-map comment at that call
+ * site and jpeg_hantro_vc9000e_get_volatile_ctrl()'s doc comment for the
+ * full caveat (a cleared SW_ENC_E is not proof any in-flight AXI write has
+ * drained). A few milliseconds, not tied to any datasheet number.
+ */
+#define HANTRO_QUIESCE_POLL_TIMEOUT_MS 5
+
+/*
  * DMA-reachable-buffer contract (DFP-confirmed, see the @note on
  * alp_jpeg_encode() in <alp/jpeg.h>): both Alif's own Driver_JPEG.c and this
  * driver's Zephyr port (jpeg_hantro_vc9000e.c) write the RAW caller pointer
@@ -368,9 +378,12 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	}
 
 	/* video_import_buffer() sets the pool slot's .size = out_cap and resets
-	 * .bytesused to 0.  The driver programs the HW output-size-limit register
-	 * (JPEG_SWREG9) from .size (fixed in jpeg_hantro_vc9000e.c), so the
-	 * capacity reaches the HW correctly -- no bytesused priming needed here. */
+	 * .bytesused to 0.  The driver derives the HW output-size-limit
+	 * register (JPEG_SWREG9) from .size minus the JPEG header size --
+	 * see jpeg_hantro_vc9000e_output_limit() in
+	 * jpeg_hantro_vc9000e_limit.h -- so the capacity reaches the HW
+	 * correctly (issue #2268 fixed this from a straight .size, which
+	 * overran the buffer); no bytesused priming needed here. */
 	struct video_buffer vbuf = {
 		.type  = VIDEO_BUF_TYPE_OUTPUT,
 		.index = out_idx,
@@ -403,10 +416,81 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 	struct video_buffer *done       = NULL;
 	err                             = video_dequeue(st->dev, &done, K_MSEC(timeout_ms));
 	if (err != 0) {
-		/* Timeout/error: the driver may still reference data->current_buf
-		 * (dequeue only clears it on a clean return), so the pool slot is
-		 * left held here too -- same single-encode-validated caveat. */
-		return _errno_to_alp(err);
+		/*
+		 * Ownership map for a dequeue failure (jpeg_hantro_vc9000e.c's
+		 * jpeg_hantro_vc9000e_dequeue()):
+		 *
+		 * - err == -EAGAIN (k_sem_take() timeout): the driver returns
+		 *   BEFORE touching data->current_buf -- it may still be
+		 *   mid-DMA into out_buf, or simply wedged.
+		 * - any other err (-ENOSPC JPEG_BUFFER_FULL, -EIO bus error):
+		 *   the driver's dequeue() sets data->current_buf = NULL BEFORE
+		 *   returning these -- ownership is unambiguously back with us.
+		 *
+		 * The pool slot is VIDEO_MEMORY_EXTERNAL bookkeeping only --
+		 * video_buffer_release() never frees/touches out_buf itself for
+		 * an imported buffer (see video_buffer_release() in
+		 * drivers/video/video_common.c: it frees memory only for
+		 * VIDEO_MEMORY_INTERNAL) -- so "park the slot forever" was never
+		 * protecting the caller's out_buf from a live DMA; it only
+		 * starved the POOL, one slot per timeout, until every later
+		 * video_import_buffer() failed -ENOBUFS regardless of what the
+		 * hardware was actually doing. Releasing it here can never be
+		 * the unsafe half of this decision -- it always happens, on
+		 * every error path, below.
+		 *
+		 * What -EAGAIN actually needs is the encoder genuinely done with
+		 * out_buf, which is a real ownership question the slot's release
+		 * can't answer by itself. Per the AE822FA0E5597BS0_CM55_HE_View.svd
+		 * JPEG_SWREG5.SW_ENC_E field description ("encoder enable ...
+		 * HW will reset this when picture is processed or bus error or
+		 * timeout interrupt is given"), software SETS this bit to start an
+		 * encode and HARDWARE clears it on completion -- so a live read of
+		 * it, taken BEFORE anything here forces the encoder off, is the one
+		 * genuine signal available that the job finished (or errored/timed
+		 * out internally) on its own. Poll it first, via a new read-only
+		 * volatile control (VIDEO_CID_JPEG_ENC_BUSY --
+		 * jpeg_hantro_vc9000e_get_volatile_ctrl() reads SW_ENC_E live),
+		 * for up to HANTRO_QUIESCE_POLL_TIMEOUT_MS. That bound (a few ms,
+		 * not tied to the per-request timeout_ms formula above) is a
+		 * deliberate choice: by the time we're here that budget is already
+		 * exhausted -- that's what -EAGAIN means -- so there is no
+		 * "remaining" fraction of it to poll against; a few ms is a small,
+		 * fixed, additional allowance instead. ONLY THEN is
+		 * video_stream_stop() called to force SW_ENC_E off if the poll
+		 * never saw it clear -- calling stop FIRST (the earlier version of
+		 * this fix) would make the poll read a bit software itself had
+		 * just cleared, always observing "not busy" and proving nothing.
+		 * A poll that times out with SW_ENC_E still set is logged (still
+		 * genuinely uncertain whether the encoder has released out_buf);
+		 * the slot is released unconditionally regardless, since parking
+		 * it protects nothing (see above) -- which is exactly why
+		 * <alp/jpeg.h>'s alp_jpeg_encode() documents out_buf as undefined
+		 * after ALP_ERR_TIMEOUT until a later successful encode or
+		 * close().
+		 */
+		if (err == -EAGAIN) {
+			struct video_control busy     = { .id = VIDEO_CID_JPEG_ENC_BUSY };
+			int64_t              deadline = k_uptime_get() + HANTRO_QUIESCE_POLL_TIMEOUT_MS;
+
+			for (;;) {
+				if (video_get_ctrl(st->dev, &busy) != 0 || busy.val == 0) {
+					break;
+				}
+				if (k_uptime_get() >= deadline) {
+					LOG_WRN("hantro jpeg: SW_ENC_E still set after "
+					        "%d ms quiesce poll; forcing stop",
+					        HANTRO_QUIESCE_POLL_TIMEOUT_MS);
+					break;
+				}
+				k_sleep(K_MSEC(1));
+			}
+
+			(void)video_stream_stop(st->dev, VIDEO_BUF_TYPE_OUTPUT);
+			st->streaming = false;
+		}
+		(void)video_buffer_release(&vbuf);
+		return _errno_to_alp(err); /* -EAGAIN -> ALP_ERR_TIMEOUT, see alp_errno.h. */
 	}
 	if (done == NULL) {
 		return ALP_ERR_NOMEM;
@@ -425,15 +509,18 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 
 /*
  * ponytail: repeat-encode caveat.  st->streaming is latched true on the
- * FIRST successful call and never reset, so a second alp_jpeg_encode()
- * on this handle skips video_stream_start() and goes straight to
- * video_enqueue() -- untested (this backend is single-encode-validated
- * on real silicon so far).  If the driver ever rejects a mid-stream
- * video_set_format() with -EBUSY (format change between two encodes on
- * an already-streaming device), that surfaces as ALP_ERR_BUSY from this
- * function rather than a silent misencode -- a caller doing repeat
- * encodes at a FIXED width/height/format is unaffected.  Upgrade path:
- * stop+restart streaming per encode (or per format change) if a real
+ * FIRST successful call, and (issue #2268) is now actively set back to
+ * false on the -EAGAIN timeout path, which stops the encoder itself --
+ * but a CLEAN success leaves it true, so a second alp_jpeg_encode() on an
+ * otherwise-idle handle skips video_stream_start() and goes straight to
+ * video_enqueue() -- untested (this backend is single-encode-validated on
+ * real silicon so far).  If the driver ever rejects a mid-stream
+ * video_set_format() with
+ * -EBUSY (format change between two encodes on an already-streaming
+ * device), that surfaces as ALP_ERR_BUSY from this function rather than a
+ * silent misencode -- a caller doing repeat encodes at a FIXED
+ * width/height/format is unaffected.  Upgrade path: stop+restart
+ * streaming per encode (or per format change) if a real
  * multi-encode workload needs it; not done here to avoid guessing at
  * the driver's actual re-arm behaviour without a bench to check it against.
  */

@@ -89,6 +89,7 @@
 
 #include <jpeg_hantro_vc9000e_sw.h>
 #include "jpeg_hantro_vc9000e_regs.h"
+#include "jpeg_hantro_vc9000e_limit.h"
 
 /*
  * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt JPEG SW helper
@@ -146,12 +147,18 @@ struct jpeg_hantro_vc9000e_data {
 	uint32_t header_size;
 	struct jpeg_header_info header_info;
 
-	/* v4.4 video-API shim (Alp Lab AB): the driver's two ctrl-API controls,
-	 * registered via video_init_ctrl() at init -- see the ctrl re-arch note
-	 * in the file header.
+	/* v4.4 video-API shim (Alp Lab AB): the driver's three ctrl-API
+	 * controls, registered via video_init_ctrl() at init -- see the ctrl
+	 * re-arch note in the file header.
 	 */
 	struct video_ctrl quality_ctrl;
 	struct video_ctrl input_buffer_ctrl;
+	/* VIDEO_CID_JPEG_ENC_BUSY (Alp Lab AB, dev-review): read-only,
+	 * volatile -- see jpeg_hantro_vc9000e_get_volatile_ctrl() and its
+	 * caller, hantro_encode()'s -EAGAIN bounded quiesce poll
+	 * (src/backends/jpeg/alif_hantro.c).
+	 */
+	struct video_ctrl busy_ctrl;
 };
 
 /**
@@ -425,6 +432,62 @@ static void jpeg_start_encode(const struct device *dev)
 	uint32_t stride;
 	uint32_t chroma_offset;
 	uint32_t input_size;
+	uint32_t output_limit;
+	int limit_err;
+	unsigned int key;
+
+	/*
+	 * Stale-completion guard (Alp Lab AB): discard any encode-completion
+	 * semaphore count and latched SWREG1 status bits left over from an
+	 * earlier, uncollected request before arming THIS one. Without this,
+	 * jpeg_hantro_vc9000e_dequeue()'s k_sem_take() for this job could be
+	 * satisfied by a completion the ISR already gave for a PREVIOUS job
+	 * (one whose caller gave up waiting and moved on, e.g. via
+	 * jpeg_hantro_vc9000e_set_stream(dev, false, ...)), or by a status
+	 * bit latched in hardware before jpeg_hantro_vc9000e_set_stream()'s
+	 * enable branch last wrote JPEG_SWREG1's IRQ_TYPE_* select bits --
+	 * either way reporting a stale size/error as if it belonged to this
+	 * request.
+	 *
+	 * irq_lock() brackets this against jpeg_hantro_vc9000e_isr(): a
+	 * completion IRQ already latched in hardware, or executing
+	 * concurrently on this core, must not race the clear-and-arm
+	 * sequence -- clearing SWREG1 and resetting the semaphore must be
+	 * atomic with respect to the ISR reading/writing that same register
+	 * and giving that same semaphore.
+	 *
+	 * dev-review finding 2 (a status bit latched before re-arm surfacing
+	 * as this job's result): closed by making this clear UNCONDITIONAL,
+	 * every single call, rather than gated behind a flag sampled only in
+	 * the disable branch. A flag can only catch the specific case its
+	 * sampling point checked for; an unconditional clear right before
+	 * every arm is strictly stronger -- it discards a stale status bit
+	 * or semaphore count regardless of which prior path (a clean
+	 * dequeue, a stream stop, or anything else) left it set, so there is
+	 * no path into this function that can still see a completion latched
+	 * before this point leak into the job about to start.
+	 */
+	key = irq_lock();
+	jpeg_write_reg(dev, JPEG_SWREG1_OFFSET, jpeg_read_reg(dev, JPEG_SWREG1_OFFSET));
+	k_sem_reset(&data->encode_sem);
+	irq_unlock(key);
+
+	/*
+	 * Reject a buffer too small to hold the JPEG header, and compute the
+	 * SWREG9 output-size limit relative to the SWREG8 base programmed
+	 * below (output_ptr = buf->buffer + header_size, NOT buf->buffer
+	 * itself) via the pure, host-unit-tested helper in
+	 * jpeg_hantro_vc9000e_limit.h -- see its doc comment and
+	 * tests/unit/jpeg_hantro_output_limit.
+	 */
+	limit_err = jpeg_hantro_vc9000e_output_limit(buf->size, data->header_size, &output_limit);
+	if (limit_err != 0) {
+		LOG_ERR("Output buffer too small for JPEG header (%u <= %u)",
+			buf->size, data->header_size);
+		data->encoding_error = limit_err;
+		k_sem_give(&data->encode_sem);
+		return;
+	}
 
 	/* Output buffer: JPEG header + compressed data */
 	uint8_t *output_ptr = (uint8_t *)buf->buffer + data->header_size;
@@ -496,11 +559,28 @@ static void jpeg_start_encode(const struct device *dev)
 	 * capacity and RESETS .bytesused to 0, so bytesused is 0 here pre-encode
 	 * -- writing it would program a 0-byte limit and the encoder would trip
 	 * JPEG_BUFFER_FULL on the first output byte.  Use .size (the capacity),
-	 * which is the register's true meaning ("output buffer size").  The HW
-	 * overwrites SWREG9 with the produced payload size during the encode,
-	 * which the completion path reads back below.
+	 * which is the register's true meaning ("output buffer size"), BUT
+	 * SWREG9 bounds writes starting at the SWREG8 base programmed above
+	 * (output_ptr = buf->buffer + header_size), NOT at buf->buffer itself.
+	 * Per AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG9 field
+	 * description ("Stream buffer0 limit / Output stream size (bytes). If
+	 * buffer0 limit is reached ... buffer_full_IRQ will be generated"),
+	 * "buffer0" is JPEG_SWREG8's SW_ENC_OUTPUT_STRM_BASE -- SWREG9 is
+	 * authoritatively relative to that base, not to buf->buffer. This
+	 * matches jpeg_hantro_vc9000e_isr()'s completion path below, which
+	 * computes `data->encoding_size = jpeg_read_reg(dev,
+	 * JPEG_SWREG9_OFFSET) + data->header_size` -- treating the
+	 * HW-overwritten SWREG9 value as the PAYLOAD size excluding the
+	 * header. Programming the full buf->size here (the pre-fix
+	 * behaviour) let the HW write up to header_size bytes past the end
+	 * of the buf->buffer allocation before tripping JPEG_BUFFER_FULL.
+	 * output_limit (buf->size - header_size, computed above by
+	 * jpeg_hantro_vc9000e_output_limit()) is the space actually
+	 * remaining after the header. The HW overwrites SWREG9 with the
+	 * produced payload size during the encode, which the completion path
+	 * reads back below.
 	 */
-	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, buf->size);
+	jpeg_write_reg(dev, JPEG_SWREG9_OFFSET, output_limit);
 
 	/* Reset error state and trigger encoding */
 	data->encoding_error = 0;
@@ -654,13 +734,43 @@ static int jpeg_hantro_vc9000e_set_stream(const struct device *dev, bool enable,
 		}
 
 	} else {
+		unsigned int key;
+
 		if (!data->streaming) {
 			k_mutex_unlock(&data->lock);
 			return -EALREADY;
 		}
+
+		/*
+		 * Stale-completion guard (Alp Lab AB), same rationale as the
+		 * one in jpeg_start_encode(): stopping the stream must
+		 * discard any encode-completion signal already latched for
+		 * the buffer being abandoned. Without this, jpeg_hantro_
+		 * vc9000e_dequeue()'s k_sem_take() for a LATER request can
+		 * return immediately on a semaphore count (or read a SWREG9
+		 * value) left over from THIS abandoned one -- attributing a
+		 * stale completion to a new job. irq_lock() brackets the
+		 * whole disable-and-clear sequence against
+		 * jpeg_hantro_vc9000e_isr(): a completion IRQ already
+		 * latched in hardware, or executing concurrently on this
+		 * core, must not race it.
+		 *
+		 * data->current_buf is cleared here too (V4L2 STREAMOFF-style
+		 * abort semantics): left set, a later jpeg_hantro_vc9000e_
+		 * enqueue() would reject every future buffer with -EBUSY
+		 * forever, permanently wedging the encoder on one stopped
+		 * request. Cleared only in this branch, not the enable one,
+		 * so a normal disable/re-enable cycle with no pending buffer
+		 * is unaffected.
+		 */
+		key = irq_lock();
 		jpeg_modify_reg(dev, JPEG_SWREG1_OFFSET, JPEG_IRQ_EN_MASK, 0);
 		jpeg_write_reg(dev, JPEG_SWREG5_OFFSET, 0);
+		jpeg_write_reg(dev, JPEG_SWREG1_OFFSET, jpeg_read_reg(dev, JPEG_SWREG1_OFFSET));
+		k_sem_reset(&data->encode_sem);
 		data->streaming = false;
+		data->current_buf = NULL;
+		irq_unlock(key);
 	}
 
 	k_mutex_unlock(&data->lock);
@@ -715,6 +825,49 @@ static int jpeg_hantro_vc9000e_set_ctrl(const struct device *dev, uint32_t cid)
 
 	k_mutex_unlock(&data->lock);
 	return ret;
+}
+
+/**
+ * @brief Read a live, HW-current volatile control (dev-review addition,
+ * Alp Lab AB).
+ *
+ * Supported controls:
+ * - VIDEO_CID_JPEG_ENC_BUSY: read JPEG_SWREG5's SW_ENC_E bit straight from
+ *   hardware into busy_ctrl.val (1 = still set, 0 = hardware has cleared
+ *   it). Per AE822FA0E5597BS0_CM55_HE_View.svd's JPEG_SWREG5.SW_ENC_E field
+ *   description, software sets this bit to start an encode and hardware
+ *   resets it "when picture is processed or bus error or timeout interrupt
+ *   is given" -- so a live read is a genuine HW-owned completion signal,
+ *   not something software's own writes can spoof. Registered
+ *   VIDEO_CTRL_FLAG_VOLATILE in jpeg_hantro_vc9000e_init() specifically so
+ *   video_get_ctrl() always reaches this callback instead of serving a
+ *   cached `.val` -- unlike the two non-volatile controls in
+ *   jpeg_hantro_vc9000e_set_ctrl(), a caller needs the CURRENT bit, not
+ *   the value at some earlier write. Backing the bounded pre-stop quiesce
+ *   poll in src/backends/jpeg/alif_hantro.c's hantro_encode(): that poll
+ *   must run BEFORE anything writes JPEG_SWREG5, or it would just observe
+ *   software's own clear. Even read at the right time, SW_ENC_E clearing
+ *   does not by itself prove any in-flight AXI write has drained -- but it
+ *   is the only encoder-state bit this driver can read back at all, so it
+ *   is what that poll has.
+ *
+ * @param dev Pointer to the device structure.
+ * @param cid Control identifier.
+ *
+ * @return 0 on success, -ENOTSUP for unsupported controls.
+ */
+static int jpeg_hantro_vc9000e_get_volatile_ctrl(const struct device *dev, uint32_t cid)
+{
+	struct jpeg_hantro_vc9000e_data *data = dev->data;
+
+	switch (cid) {
+	case VIDEO_CID_JPEG_ENC_BUSY:
+		data->busy_ctrl.val =
+			(jpeg_read_reg(dev, JPEG_SWREG5_OFFSET) & JPEG_ENC_ENABLE) ? 1 : 0;
+		return 0;
+	default:
+		return -ENOTSUP;
+	}
 }
 
 static const struct video_format_cap jpeg_hantro_vc9000e_format_caps[] = {
@@ -813,8 +966,12 @@ static void jpeg_hantro_vc9000e_isr(const struct device *dev)
 
 /* Video driver API.
  *
- * v4.4 video-API shim (Alp Lab AB): no .get_ctrl / .get_volatile_ctrl slot --
- * see the ctrl re-architecture note above jpeg_hantro_vc9000e_set_ctrl().
+ * v4.4 video-API shim (Alp Lab AB): no .get_ctrl slot -- video_get_ctrl()
+ * serves the two non-volatile controls straight out of their cached `.val`
+ * without calling the driver; see the ctrl re-architecture note above
+ * jpeg_hantro_vc9000e_set_ctrl(). .get_volatile_ctrl (dev-review addition)
+ * IS wired, for the one control (VIDEO_CID_JPEG_ENC_BUSY) that must read
+ * live HW state instead -- see jpeg_hantro_vc9000e_get_volatile_ctrl().
  */
 static DEVICE_API(video, jpeg_hantro_vc9000e_driver_api) = {
 	.set_format = jpeg_hantro_vc9000e_set_format,
@@ -823,6 +980,7 @@ static DEVICE_API(video, jpeg_hantro_vc9000e_driver_api) = {
 	.dequeue = jpeg_hantro_vc9000e_dequeue,
 	.set_stream = jpeg_hantro_vc9000e_set_stream,
 	.set_ctrl = jpeg_hantro_vc9000e_set_ctrl,
+	.get_volatile_ctrl = jpeg_hantro_vc9000e_get_volatile_ctrl,
 	.get_caps = jpeg_hantro_vc9000e_get_caps,
 };
 
@@ -902,6 +1060,23 @@ static int jpeg_hantro_vc9000e_init(const struct device *dev)
 		LOG_ERR("Failed to register input-buffer ctrl: %d", ret);
 		return ret;
 	}
+
+	/* Dev-review addition (Alp Lab AB): VIDEO_CID_JPEG_ENC_BUSY, read-only
+	 * and VOLATILE so video_get_ctrl() always calls
+	 * jpeg_hantro_vc9000e_get_volatile_ctrl() for the live SWREG5 bit
+	 * instead of serving a cached `.val` -- video_init_ctrl() has no flags
+	 * parameter (see video_ctrls.h), so the two flags are ORed in directly
+	 * on the struct video_ctrl this driver owns.
+	 */
+	ret = video_init_ctrl(&data->busy_ctrl, dev, VIDEO_CID_JPEG_ENC_BUSY,
+			      (struct video_ctrl_range){
+				      .min = 0, .max = 1, .step = 1, .def = 0,
+			      });
+	if (ret < 0) {
+		LOG_ERR("Failed to register enc-busy ctrl: %d", ret);
+		return ret;
+	}
+	data->busy_ctrl.flags |= VIDEO_CTRL_FLAG_VOLATILE | VIDEO_CTRL_FLAG_READ_ONLY;
 
 	config->irq_config_func(dev);
 
