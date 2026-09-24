@@ -1386,9 +1386,17 @@ static void ov5647_ae_diag_readback(const struct device *dev)
 	}
 }
 
-void ov5647_ae_diag_readback_poll(const struct device *dev)
+static const struct device *ov5647_ae_diag_dev;
+
+void ov5647_ae_diag_readback_poll(void)
 {
-	const struct ov5647_config *cfg = dev->config;
+	const struct device *dev = ov5647_ae_diag_dev;
+	const struct ov5647_config *cfg;
+
+	if (dev == NULL) {
+		return;
+	}
+	cfg = dev->config;
 	uint32_t                    v;
 
 	ov5647_ae_diag_poll_calls++;
@@ -1491,6 +1499,7 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 	 * re-assert above, independent of whichever setter last ran.
 	 */
 	ov5647_ae_diag_stream_calls++;
+	ov5647_ae_diag_dev = dev;
 	{
 		uint32_t v;
 

@@ -379,7 +379,7 @@ static void isp_ae_diag_log(void);
  * driver or the AE library makes -- see ov5647.c's own comment on the globals it fills.
  */
 #if defined(CONFIG_VIDEO_OV5647)
-void ov5647_ae_diag_readback_poll(const struct device *dev);
+void ov5647_ae_diag_readback_poll(void);
 #endif
 
 static void isp_bottom_half(const struct device *dev)
@@ -429,8 +429,8 @@ static void isp_bottom_half(const struct device *dev)
 	{
 		static uint32_t poll_frame_count;
 
-		if (config->controller && (++poll_frame_count % 30) == 0) {
-			ov5647_ae_diag_readback_poll(config->controller);
+		if ((++poll_frame_count % 30) == 0) {
+			ov5647_ae_diag_readback_poll();
 		}
 	}
 #endif
