@@ -123,6 +123,37 @@ all — that closes the write-into-INA236's-CONFIG-register hazard (the
 broadcast addressing to the TAS2563 amps.  Only a respin re-strapping
 U32's A0 off `0x48` does that.
 
+## MicroSD (SDHI1)
+
+Carrier microSD slot, `mmc@15c10000` in the kernel DT (`&sdhi1`,
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi`). The
+bench dev image roots from this card (`root=/dev/mmcblk1p2`);
+on-module eMMC (SDHI0) is the production boot.
+
+| Signal | Pin | Behaviour |
+|---|---|---|
+| Card detect `SD1_SD1CD` | `PA1` | Socket switch to GND, pulled up to the switched card rail; active-low (`cd-gpios`) |
+| IO voltage `µSD1_V_SEL` | `PA2` | SoM selector: low = 3.3 V, high = 1.8 V (`vqmmc_sdhi1`, `e1m-v2n-som.dtsi`) |
+| Card power `SD1_SD1PWEN` | `PA3` | Always-on hog; the card-detect pull-up lives on this rail |
+| `SDCARD_RST` | `PA4` | M.2 Wi-Fi SDIO reset through the carrier mux, not a microSD signal; undriven |
+
+The carrier SDIO mux (`MUX_SEL.SDIO` / `SD_MUX_EN`, driven by the GD32
+IO-MCU on E1M `IO27`/`IO29`) switches SD1 between the microSD socket
+and the M.2 E-key Wi-Fi SDIO. Its undriven default selects the microSD
+socket, so the slot works with a blank GD32.
+
+Fastest mode is **SDR104** (1.8 V, 200 MHz). The SD1 pads use
+`renesas,output-impedance = <2>`, one step weaker than the eMMC's `<3>`:
+at `<3>` SDR104 through the mux fails the data phase with `error -84`
+(CRC). Bench-verified 2026-09-24 on E1M-V2M103 with a 32 GB SDHC card:
+`mmc1: new ultra high speed SDR104 SDHC card`, about 78 MB/s reads, two
+1.5 GiB reads with identical md5, 10/10 re-enumerations, no errors.
+
+**U-Boot numbering differs from Linux.** In U-Boot, `mmc 1` is
+`mmc@15c20000` (SDHI2, the Wi-Fi SDIO controller), not this slot;
+U-Boot's device tree needs the same SD1 node before it can reach the
+microSD.
+
 ## Pending from the user
 
 - Authoritative pad-by-pad routing (which E1M-X pad maps to which
