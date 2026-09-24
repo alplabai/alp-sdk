@@ -917,6 +917,35 @@
     "connectivity": [
       {
         "board": "e1m-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m55_he",
+            "os": "zephyr"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m55_hp",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": false,
+          "ipc": false,
+          "models": false,
+          "peripherals": false
+        },
+        "name": "camera-mjpeg-stream",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/connectivity/camera-mjpeg-stream",
+        "som": "E1M-AEN803",
+        "summary": "Capture, JPEG-encode, and serve an MJPEG stream from the board over a plain Zephyr BSD TCP socket — `<alp/camera.h>` → `<alp/jpeg.h>` → HTTP `multipart/x-mixed-replace`, no host tool required."
+      },
+      {
+        "board": "e1m-evk",
         "coreCount": 3,
         "cores": [
           {

@@ -87,6 +87,7 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
 #include <zephyr/drivers/pinctrl.h>
 
 #include "isp_pico.h"
+#include <zephyr/drivers/video/isp_frame_size.h>
 #include <zephyr/drivers/video/video_alif.h>
 #include <soc_memory_map.h>
 #include <zephyr/cache.h>
@@ -274,7 +275,7 @@ static const struct video_format_cap supported_output_fmts[] = {
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV21, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV16, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_NV61, 1920, 1080),
-	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 19200, 1080),
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV422P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUV420, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_YUYV, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_VYUY, 1920, 1080),
@@ -660,6 +661,27 @@ int isp_set_fmt(const struct device *dev,
 			return -EINVAL;
 		}
 
+		/*
+		 * A caller that doesn't already know its own stride (every
+		 * backend negotiating a fresh format) passes pitch == 0 and
+		 * expects this driver to fill it in -- video_set_format()'s
+		 * fmt is in/out for exactly this reason (see
+		 * video_stm32_venc.c's stm32_venc_set_fmt() for the same
+		 * convention upstream). alp_isp_default_pitch()
+		 * (isp_frame_size.h) is the single place this driver AND
+		 * src/backends/camera/alif_isp_pico.c's buffer-pool sizing
+		 * derive a format's byte geometry from -- see that header for
+		 * why planar/semi-planar YUV gets the LUMA-only line stride,
+		 * not an average-bpp-derived one.
+		 */
+		if (fmt->pitch == 0u) {
+			fmt->pitch = alp_isp_default_pitch(fmt->pixelformat, fmt->width);
+			if (fmt->pitch == 0u) {
+				LOG_ERR("Cannot derive a pitch for this output fourcc!");
+				return -EINVAL;
+			}
+		}
+
 		channel->output_fmt = *fmt;
 		break;
 	default:
@@ -728,9 +750,9 @@ int isp_set_fmt(const struct device *dev,
  * 156) -- so isp_stream_start() (the call site, below) only calls
  * isp_apply_wb()/isp_apply_ae() when wb_dirty/ae_dirty is set
  * (isp_set_ctrl()'s dirty flags, isp_pico.h): any ctrl change sets the
- * flag, and ae_dirty additionally starts true (isp_init_controls()) so the
- * AE limits this sensor's calibration doesn't carry still get pushed at
- * the first stream start too. Patch 0009 also adds its OWN unconditional
+ * flag, and ae_dirty additionally starts true (isp_init_controls()) so
+ * the first stream start pushes the live, sensor-queried frame-period/
+ * gain ceilings too. Patch 0009 also adds its OWN unconditional
  * SetCalib call at isp_vsi_init() (init time), so SetCalib now runs at most
  * TWICE per boot -- once from patch 0009 at init, once from patch 0007's
  * once-guard at the first isp_vsi_update_cfg() -- never on a later restart.
@@ -899,6 +921,14 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
 	}
 }
 
+/*
+ * #2271: latched like isp_apply_wb()'s own LOG_ERR-worthy conditions --
+ * log the AE-attr readback mismatch once per episode (not every apply),
+ * re-arm once a later readback agrees again. See isp_apply_ae()'s own
+ * readback block, below, for what this actually catches.
+ */
+static bool ae_readback_mismatch_logged;
+
 static int isp_apply_ae(const struct device *dev, bool enable)
 {
 	const struct isp_config *config = dev->config;
@@ -911,8 +941,8 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	 * pixel_rate, bench run 61) = 66514155 ns.
 	 */
 	uint32_t int_time_max_us = 66514;
-	uint32_t again_min = 1024;   /* library units, 1x = 1024 */
-	uint32_t again_max = 16368;  /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
+	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
@@ -1024,6 +1054,78 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 
 	if (ret) {
 		LOG_ERR("Failed to %s AE: %d", enable ? "enable" : "disable", ret);
+	}
+
+	/*
+	 * #2271 proof-of-effect: read back what the library is ACTUALLY
+	 * holding, not just what this call pushed -- bench evidence (runs
+	 * 211/212) was isp_apply_ae() computing a correct ceiling while a
+	 * per-frame writeback (hal_alif patch 0010's clamp) still saturated
+	 * against a DIFFERENT, mismatched ceiling (isp_calib_param.ae,
+	 * isp_param_conf.h, loaded by SetCalib() before this function ever
+	 * ran). Those two runs' values decode exactly against the
+	 * calibration's AE block; with hal_alif patch 0011 (OV5647 calib
+	 * envelope) applied, bench run 213 held within the sensor's real
+	 * envelope (int_time_max=98000 again_max=65472, intLine settling at
+	 * 3145/again 0xffc0 in a dark room) with 0 clamp-triggered
+	 * `E: Control value is invalid` lines -- but which ceiling the
+	 * library actually applies (this push, the calibration block, or
+	 * something else) is NOT established by this readback: the library
+	 * likely just echoes back the struct it was handed, so a "matches"
+	 * result here proves this driver's push round-trips, not that the
+	 * library is ENFORCING it. Same valid_mask-before-get pattern
+	 * isp_apply_wb() uses above: ISP_PARAM_MASK_AE must be set BEFORE
+	 * the get, or isp_vsi_get_param()'s wrapper (isp_api_wrapper.c)
+	 * silently leaves every field zeroed. Only attempted when the push
+	 * itself succeeded -- a failed set already logged above, and a
+	 * readback under a not-yet-applied push would just report the
+	 * library's PRIOR state, not a new mismatch.
+	 */
+	if (ret == 0) {
+		struct isp_params rb = { .valid_mask = ISP_PARAM_MASK_AE };
+		int               rb_ret;
+
+		k_mutex_lock(&data->lib_lock, K_FOREVER);
+		rb_ret = isp_vsi_get_param(&data->init_cfg, &rb);
+		k_mutex_unlock(&data->lib_lock);
+
+		if (rb_ret) {
+			LOG_WRN("AE attr readback failed: %d", rb_ret);
+		} else {
+			bool matches = (rb.ae.int_time_max == params.ae.int_time_max) &&
+			               (rb.ae.again_max == params.ae.again_max) &&
+			               (rb.ae.dgain_min == params.ae.dgain_min) &&
+			               (rb.ae.dgain_max == params.ae.dgain_max) &&
+			               (rb.ae.ae_target == params.ae.ae_target);
+
+			LOG_INF("AE readback: int_time_max=%u again_max=%u dgain_min=%u "
+			        "dgain_max=%u ae_target=%u",
+			        rb.ae.int_time_max,
+			        rb.ae.again_max,
+			        rb.ae.dgain_min,
+			        rb.ae.dgain_max,
+			        rb.ae.ae_target);
+
+			if (!matches && !ae_readback_mismatch_logged) {
+				LOG_ERR("AE attr mismatch after set: pushed int_time_max=%u "
+				        "again_max=%u dgain_min=%u dgain_max=%u ae_target=%u, "
+				        "library holds int_time_max=%u again_max=%u "
+				        "dgain_min=%u dgain_max=%u ae_target=%u",
+				        params.ae.int_time_max,
+				        params.ae.again_max,
+				        params.ae.dgain_min,
+				        params.ae.dgain_max,
+				        params.ae.ae_target,
+				        rb.ae.int_time_max,
+				        rb.ae.again_max,
+				        rb.ae.dgain_min,
+				        rb.ae.dgain_max,
+				        rb.ae.ae_target);
+				ae_readback_mismatch_logged = true;
+			} else if (matches) {
+				ae_readback_mismatch_logged = false;
+			}
+		}
 	}
 
 	return ret;
@@ -1208,12 +1310,12 @@ static int isp_init_controls(const struct device *dev)
 		if (ret) {
 			return ret;
 		}
-		/* The calibration carries no AE target, integration-time or
-		 * gain range for this sensor: isp_apply_ae() derives them from
-		 * CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's own ctrls, so
-		 * the first stream start must push them even at the default.
-		 * Without it AE drives the OV5647 past its exposure limit and
-		 * saturates the frame (bench run 157).
+		/* ae_dirty starts true so the first stream start pushes the
+		 * live, sensor-queried frame-period/gain ceilings isp_apply_ae()
+		 * derives from CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's
+		 * own ctrls, even at the default. Without it AE drives the
+		 * OV5647 past its exposure limit and saturates the frame
+		 * (bench run 157).
 		 */
 		data->ctrls.ae_dirty = true;
 	}
@@ -1285,9 +1387,10 @@ int isp_get_fmt(const struct device *dev,
 				supported_output_fmts[i].height_max;
 			channel->output_fmt.width =
 				supported_output_fmts[i].width_max;
-			channel->output_fmt.pitch =
-				(video_bits_per_pixel(tmp_fmt) *
-				 channel->output_fmt.width) >> 3;
+			/* video_bits_per_pixel() returns 0 for this private
+			 * fourcc -- alp_isp_default_pitch() (isp_frame_size.h)
+			 * knows it (24 bpp, 3 equal 8-bit planes). */
+			channel->output_fmt.pitch = alp_isp_default_pitch(tmp_fmt, channel->output_fmt.width);
 		}
 
 		*fmt = channel->output_fmt;
@@ -1423,9 +1526,15 @@ static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint1
 		return;
 	}
 
-	uint32_t in_h = out_height;
-	uint32_t out_h = out_height / 2;
-	uint32_t scale_vc = ((out_h - 1) * 65536U) / (in_h - 1);
+	/*
+	 * alp_isp_mrsz_scale_vc() (isp_frame_size.h) rounds this ratio UP by
+	 * one (rkisp1-lineage formula) so the resizer emits exactly
+	 * out_height/2 chroma lines, not one short -- a plain
+	 * floor(((out_height/2 - 1) << 16) / (out_height - 1)) truncates the
+	 * last line (E1M-AEN803 bench runs 205/201: silent green last chroma
+	 * row / stale last U row).
+	 */
+	uint32_t scale_vc = alp_isp_mrsz_scale_vc(out_height, out_height / 2);
 
 	sys_write32(scale_vc, regs + ISP_MRSZ_SCALE_VC);
 	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
@@ -1587,22 +1696,22 @@ static int isp_stream_start(const struct device *dev)
 	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
 
 	/*
-	 * Runs for any ctrl the app changed (isp_set_ctrl()), plus AE once at
-	 * the first start (isp_init_controls(): the calibration has no AE
-	 * limits for this sensor). Default AWB needs no call at all -- the
-	 * calibration already runs it (patch 0009, runs 153/156). Right
-	 * here, synchronously, after isp_vsi_start()'s Enable* above, is the
-	 * one proven-working order (run 74): the AWB/AE callbacks aren't live
+	 * WB: runs only for a ctrl the app actually changed (isp_set_ctrl()'s
+	 * wb_dirty) -- default AWB needs no call at all, the calibration
+	 * already runs it (patch 0009, runs 153/156). Right here,
+	 * synchronously, after isp_vsi_start()'s Enable* above, is the one
+	 * proven-working order (run 74): the AWB/AE callbacks aren't live
 	 * until Enable* runs, so an apply issued before it would just be
 	 * dropped. SetCalib (isp_vsi_update_cfg(), above) itself now runs at
 	 * most twice per boot -- once at init (patch 0009), once at the
 	 * first isp_vsi_update_cfg() (patch 0007's once-guard) -- never on a
 	 * later restart, so this apply doesn't need to fight a reload; it
 	 * just needs Enable* to have already happened. isp_stream_start()
-	 * only ever runs while stopped
-	 * (guarded at the top of this function), so this is also exactly
-	 * "the next stream start while the ISP is stopped" a mid-stream ctrl
-	 * change waits for (see isp_set_ctrl()'s ponytail comment).
+	 * only ever runs while stopped (guarded at the top of this
+	 * function), so this is also exactly "the next stream start while
+	 * the ISP is stopped" a mid-stream ctrl change waits for (see
+	 * isp_set_ctrl()'s ponytail comment). AE below applies the same way,
+	 * gated on ae_dirty, which starts true (isp_init_controls()).
 	 */
 	if (data->ctrls.wb_dirty) {
 		bool wb_enable = (data->ctrls.awb.val != 0);
@@ -1975,7 +2084,38 @@ static int isp_dequeue(const struct device *dev,
 		return -EAGAIN;
 	}
 
-	(*buf)->bytesused = channel->output_fmt.pitch * channel->output_fmt.height;
+	/*
+	 * Full frame size, not pitch*height: pitch (isp_set_fmt(), above) is
+	 * the LUMA-only line stride for planar/semi-planar YUV, so
+	 * pitch*height covers only the Y plane and drops the U/V planes --
+	 * bench-proven on E1M-AEN803 (run 200): every dequeued YUV420/NV12
+	 * buffer reported bytesused 0 (pitch was 0 before the isp_set_fmt()
+	 * fix, above) and callers copied nothing.  alp_isp_frame_size()
+	 * (isp_frame_size.h) -- the same helper
+	 * src/backends/camera/alif_isp_pico.c sizes its buffer pool with --
+	 * reports the format's true average bits/pixel INCLUDING chroma, so
+	 * this is correct for every output fourcc this driver's
+	 * supported_output_fmts[] advertises.
+	 *
+	 * Capped at buf->size: alp_isp_frame_size() sizes the FORMAT, not
+	 * this particular buffer, so a caller that enqueued something
+	 * smaller than the negotiated frame (a pool-sizing bug, or a format
+	 * this helper doesn't yet know) would otherwise hand
+	 * sys_cache_data_invd_range(), below, a length that invalidates past
+	 * the buffer's end. video_buffer_aligned_alloc() rounds every real
+	 * allocation UP to CONFIG_VIDEO_BUFFER_POOL_ALIGN, so this cap is a
+	 * last-line-of-defense, not the expected path.
+	 */
+	uint32_t frame_size = alp_isp_frame_size(
+	    channel->output_fmt.pixelformat, channel->output_fmt.width, channel->output_fmt.height);
+
+	if (frame_size > (*buf)->size) {
+		LOG_WRN("Dequeued buffer (%u B) is smaller than the negotiated frame (%u B); "
+		        "bytesused capped, dequeued frame will be truncated",
+		        (*buf)->size,
+		        frame_size);
+	}
+	(*buf)->bytesused = MIN(frame_size, (*buf)->size);
 
 	/*
 	 * Invalidate what the ISP's MI (memory interface) DMA just wrote.  The

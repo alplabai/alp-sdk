@@ -139,6 +139,7 @@ The portable bus + GPIO + analog surfaces.  Start here.
 | Directory                | What it shows                                                                     |
 |--------------------------|-----------------------------------------------------------------------------------|
 | `iot-connected-camera`   | End-to-end IoT -- capture a frame, publish it to MQTT.                             |
+| `camera-mjpeg-stream`    | Capture, JPEG-encode, and serve an MJPEG stream over a plain BSD TCP socket -- browser/VLC/ffmpeg client, no host tool. **(AEN)** |
 | `iot-dashboard`          | BME280 env samples → MQTT-over-TLS publish + a live LVGL dashboard. **(AEN)**      |
 | `iot-fleet-ota`          | Secure OTA firmware update with rollback; the v0.6 declarative `boot:` + `ota:` reference. |
 | `firmware-update-log`    | Portable update audit log -- software tamper-evident tier everywhere, TF-M secure-owner hardware tier where the secure backend is wired. |

@@ -28,10 +28,16 @@
  *   3. THE DECISIVE FIX -- DMA buffers off the DTCM. The board defaults
  *      `zephyr,sram = &dtcm`, so the GMAC descriptor rings + net_buf pool sat in
  *      the M55 DTCM, which is NOT on the GMAC DMA's bus -> zero frames moved
- *      either way (SOM rx_bytes=0 AND server NIC RX=0) even with the link up. The
- *      overlay moves system RAM to the global SRAM0 (`zephyr,sram = &sram0`,
- *      @0x02000000, CPU addr == DMA addr) + CONFIG_DCACHE=n. See the overlay and
- *      the eth_dwmac_alif_ensemble.c header (its documented Tier-1.5 gap).
+ *      either way (SOM rx_bytes=0 AND server NIC RX=0) even with the link up.
+ *      Main RAM stays on DTCM (`zephyr,sram = &dtcm`, unchanged by this
+ *      overlay) -- only the Ethernet-owned buffers move, via the SoC dtsi's
+ *      ethernet node `memory-region = <&sram0>;` (descriptor rings) and
+ *      CONFIG_ETH_DWMAC_ALIF_NET_BUF_IN_DMA_REGION (net_buf pool,
+ *      subsys/net/ip/net_pkt.c), @0x02000000, CPU addr == DMA addr,
+ *      + CONFIG_DCACHE=n. Silicon-verified on E1M-AEN803 (bench run 202:
+ *      DHCP lease + ping, rings/pools in SRAM0, main RAM on DTCM);
+ *      E1M-AEN801 is build-verified only. See the overlay and the
+ *      eth_dwmac_alif_ensemble.c header (its documented Tier-1.5 gap).
  *
  * PASS gate: a DHCP lease is acquired (full bidirectional link). carrier_ok is
  * fixed-link synthetic (no managed PHY) and is NOT a link proof; the lease is.

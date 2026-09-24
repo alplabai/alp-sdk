@@ -1,0 +1,117 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * camera-mjpeg-stream overlay for the E1M-AEN803 (Ensemble E8, M55-HE).
+ * Two unrelated pieces of DT graph wiring, each carried over verbatim from
+ * the example it mirrors:
+ *
+ *   1. ISP graph rewiring (examples/aen/aen-isp-ov5647-viewfinder): routes
+ *      the camera shield's sensor port through the ISP-Pico instead of the
+ *      raw sensor-only capture port, and re-aliases `alp-camera0` to match
+ *      -- see that example's overlay for the full port@1/port@2 rationale.
+ *      Build with `-DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"`
+ *      (same shield pair the viewfinder uses); this overlay only rewires
+ *      what the shields wire up, it carries no sensor DT of its own.
+ *
+ *   2. Ethernet bring-up (examples/aen/aen-ethernet-link): the RMII pin
+ *      group, the PHY power/reset GPIO controllers, and the `&ethernet`
+ *      node itself. INTERIM: board generation does not yet grow Ethernet
+ *      routing of its own (metadata/e1m_modules/aen/alif-ethernet-phy.tsv
+ *      is the source of truth this overlay hand-transcribes) -- drop this
+ *      block once it does. The PHY-side MDIO/refclk/power sequence this
+ *      DT enables is driven from src/aen_eth_phy.c, not from here.
+ *
+ * Both pieces are BENCH-VERIFIED individually (aen-isp-ov5647-viewfinder:
+ * 30/30 colour frames on E1M-AEN803+OV5647; aen-ethernet-link: real DHCP
+ * lease + server-side REACHABLE on E1M-AEN803) but not yet verified
+ * together on this app -- see README.md's TBD (bench) fps/bytes-per-frame
+ * note.
+ */
+
+#include <zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h>
+
+/ {
+	aliases {
+		alp-camera0 = &isp;
+	};
+};
+
+&cam {
+	capture-mode = "snapshot";
+	data-mode = "16-bit";
+
+	ports {
+		/delete-node/ port@1;
+
+		port@2 {
+			reg = <2>;
+			cam_isp_ep_out: endpoint {
+				remote-endpoint-label = "isp_ep_in";
+			};
+		};
+	};
+};
+
+&isp {
+	status = "okay";
+
+	port {
+		isp_ep_in: endpoint {
+			remote-endpoint-label = "cam_isp_ep_out";
+		};
+	};
+};
+
+&jpeg0 {
+	status = "okay";
+};
+
+&pinctrl {
+	pinctrl_eth: pinctrl_eth {
+		/* RMII inputs (REFCLK + RX) + MDIO (bidirectional, read during MDIO
+		 * transactions) -- input-enable sets the pad REN bit so they sense.
+		 * MDC/MDIO = P11_2/P11_1 (SoM TSV) let src/aen_eth_phy.c read the PHY
+		 * status registers. */
+		group0 {
+			pinmux = <PIN_P11_0__ETH_REFCLK_B>, <PIN_P11_3__ETH_RXD0_B>,
+				 <PIN_P1_1__ETH_RXD1_C>, <PIN_P6_7__ETH_CRS_DV_A>,
+				 <PIN_P11_1__ETH_MDIO_B>;
+			input-enable;
+		};
+		/* RMII outputs (TX) + MDC (MDIO clock). */
+		group1 {
+			pinmux = <PIN_P10_4__ETH_TXD0_B>, <PIN_P10_5__ETH_TXD1_B>,
+				 <PIN_P1_5__ETH_TXEN_C>, <PIN_P11_2__ETH_MDC_B>;
+		};
+	};
+};
+
+/* PHY reset line E_PHY_RESET = P11_6 (gpio11 pin 6). gpio11@4900b000, same
+ * node aen-ethernet-link's overlay creates. */
+&{/soc} {
+	gpio11: gpio@4900b000 {
+		compatible = "snps,designware-gpio";
+		reg = <0x4900B000 0x1000>;
+		ngpios = <8>;
+		gpio-controller;
+		#gpio-cells = <2>;
+		status = "okay";
+	};
+};
+
+/* PHY power-down line E_PHY_PWRDWN = P15_4 (lpgpio pin 4). lpgpio@42002000
+ * (AON/LP domain) already exists in the alp-sdk E8 dtsi; just enable it. */
+&lpgpio {
+	status = "okay";
+};
+
+&ethernet {
+	pinctrl-0 = <&pinctrl_eth>;
+	pinctrl-names = "default";
+	/* Station MAC: inherits zephyr,random-mac-address from the SoC dtsi
+	 * (per-boot random locally-administered 02:01:56:xx:xx:xx) -- DHCP
+	 * doesn't care which MAC asks, and a random one means two boards on
+	 * the same network never collide. */
+	status = "okay";
+};

@@ -304,7 +304,7 @@ with one `#define <MACRO> ALP_E1M_<…>` line per entry.
 #### Preset mode (SDK-internal shortcut)
 
 Most example projects under `examples/` target the EVK or X-EVK
-(100 do today — 75 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
+(101 do today — 76 on `e1m-evk`, 25 on `e1m-x-evk`), so they share a
 single board definition each via the `preset:` field:
 
 ```yaml
