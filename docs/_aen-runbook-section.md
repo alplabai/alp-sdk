@@ -131,15 +131,42 @@ that would silently delist a resident app entry outside this build's own
 `--replace-atoc` once you have confirmed losing the other entry is intended —
 same flag spelling as `flash-run.sh`'s Flow A guard, and distinct from Flow D's
 `--atoc-unqueryable`. Every run leaves `<build_dir>/alif_flash/atoc-before.txt`
-(the raw transcript) and `<build_dir>/alif_flash/atoc-guard.json` (the
-machine-readable verdict written BEFORE any refusal is raised; a run that
+(the raw transcript, NOT removed between runs — its value is being the last
+successfully-read resident ATOC, whether or not the current attempt got far
+enough to read a new one) and `<build_dir>/alif_flash/atoc-guard.json` (the
+machine-readable verdict, written BEFORE any refusal is raised; a run that
 fails EARLIER than the guard step — e.g. no SETOOLS, no `zephyr.bin` —
 removes any verdict left by a previous run instead, so its mere absence
 means "the guard did not reach a verdict this attempt", never a stale
-success read as this run's own). The transcript is NOT removed the same
-way: its value is being the last successfully-read resident ATOC, whether
-or not the current attempt got far enough to read a new one, so a stale
-transcript from an earlier successful run is kept rather than deleted.
+success read as this run's own).
+
+**The verdict contract, frozen as `alp-sdk.alif-flash-atoc-guard.v1`** (this
+is the canonical description; `changelog.d/2262.md` points back here rather
+than duplicating it — any field change bumps the schema string):
+
+| Field | Type | Value |
+|---|---|---|
+| `schema` | string | the literal `alp-sdk.alif-flash-atoc-guard.v1` |
+| `status` | string | one of `clear`, `empty`, `refused-foreign`, `refused-unverified`, `replaced` |
+| `foreign` | array of strings | the resident entry names foreign to this run's own section; `[]` when none |
+| `transcript` | string | absolute path to the paired `atoc-before.txt`, always present |
+| `allowed` | array of strings, sorted | the section name(s) this run is itself about to (re)write (today always exactly one) |
+| `query_status` | string | one of `unverified`, `empty`, `ok` — the raw pre-decision read outcome, BEFORE `--replace-atoc` is applied |
+
+`status == "replaced"` alone doesn't say what `--replace-atoc` overrode:
+`query_status == "unverified"` (with `foreign == []`) means it overrode an
+unverified read; any other `query_status` with a non-empty `foreign` means
+it overrode a genuinely foreign entry.
+
+> **Sysbuild multi-domain caveat (alp-sdk#2274).** `alif_flash` runs once
+> PER DOMAIN, not once per `west flash` invocation, so a sysbuild build
+> (MCUboot domain + app domain) runs this guard twice. MCUboot and the HE
+> app both map to the same ATOC section name `ALP-HE`, so the guard cannot
+> tell the second invocation's own resident `ALP-HE` (written by the
+> first) from a legitimate re-write of its own entry — it reports `clear`
+> and silently replaces it. Not a regression (the pre-`#2262` runner did
+> the same unconditionally); see `zephyr/sysbuild/aen/README.md`'s own
+> warning next to its two-domain flash example.
 
 > **Pre-provisioned modules from Alp Lab** already carry a dev-signed MCUboot +
 > self-test in slot0 (LCS=DM), so the core is already released and SWD/`west

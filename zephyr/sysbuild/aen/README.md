@@ -138,6 +138,24 @@ west flash --bin-file build/mcuboot/zephyr/zephyr.bin --domain mcuboot
 west flash --bin-file build/zephyr/zephyr.signed.bin
 ```
 
+> **Not the `alif_flash` runner (SETOOLS/SE-UART) for BOTH of the above --
+> see alp-sdk#2274.** `alif_flash` runs once per domain (Zephyr's own
+> `flash.py`/`run_common.py` resolve one runner invocation per
+> `--domain`, or per entry in `domains.yaml` in flash order for a plain
+> multi-domain `west flash`). The `#2262` ATOC guard identifies a
+> resident entry by NAME ONLY, and both the MCUboot domain (ITCM
+> `0x58000000`) and the HE app domain map to the SAME ATOC section name
+> `ALP-HE` (`_atoc_section_name`) -- so the SECOND `alif_flash` invocation
+> sees the first's own `ALP-HE` entry as already-allowed, not foreign, and
+> reports `clear`. It still burns a fresh single-entry ATOC, silently
+> replacing whatever the first invocation wrote. This is not a regression
+> (the pre-`#2262` runner did the same with no check at all): the guard
+> only ever detects a FOREIGN name, never a same-name overwrite. Two
+> `alif_flash` invocations at ATOC-writing SETOOLS/SE-UART targets are
+> unsupported for this reason until alp-sdk#2274 lands; the plain J-Link
+> path above (Option B, `docs/aen-provisioning.md` §0.5) never touches
+> the ATOC and is unaffected.
+
 ## Key management
 
 The reference config points at
