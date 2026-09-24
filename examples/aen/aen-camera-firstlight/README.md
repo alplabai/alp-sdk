@@ -4,13 +4,15 @@ First-light bench proof for Raspberry-Pi-style MIPI CSI-2 camera modules on
 the E1M-EVK's J5 connector, on an E1M-AEN801/AEN803 SoM (Alif Ensemble E8,
 M55-HE). Exercises the portable `<alp/camera.h>` API only — open, start,
 capture-with-timeout, release, stop, close — the same four calls whichever
-sensor shield is stacked underneath. **Both paths are bench-verified**: OV9281
-(2026-09-21, an E1M-AEN803 on the E1M-EVK: real GREY8 frames land in
-memory in all three modes -- 640x400, 1280x720, 1280x800 -- each at its
-configured frame rate, with the sensor test pattern also verified in all
-three) and OV5647 (2026-09-22, an E1M-AEN803 on the E1M-EVK, issue #2248,
-RAW10 640x480) -- see `docs/boards/e1m-evk.md`'s Camera section and
-`docs/camera-shields.md`.
+sensor shield is stacked underneath. **OV9281 and OV5647 are fully
+bench-verified**: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real
+GREY8 frames land in memory in all three modes -- 640x400, 1280x720,
+1280x800 -- each at its configured frame rate, with the sensor test pattern
+also verified in all three) and OV5647 (2026-09-22, an E1M-AEN803 on the
+E1M-EVK, issue #2248, RAW10 640x480). **IMX296 is bench-verified for I2C
+identity only** (issue #2287, bench run 229) -- this app's IMX296 path
+builds and links but has not captured a frame on real silicon yet. See
+`docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
 connector.** Without one, the sensor answers its I2C probe but no frame
@@ -27,13 +29,19 @@ ZEPHYR_BASE=<zephyr> west build \
 
 # ... or:
   -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"            # OV9281, GREY8 640x400
+  -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10 1456x1088
 ```
 
 Which shield is stacked selects the capture format at **compile time**: exactly
-one of `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281` auto-enables (each
-`default y` under its sensor's devicetree node), and `src/main.c`'s `#if`
-ladder on those same symbols picks the matching width/height/format. A new
-shield is one more `#elif` plus one more `testcase.yaml` scenario.
+one of `CONFIG_VIDEO_OV5647` / `CONFIG_VIDEO_OV9281` / `CONFIG_VIDEO_IMX296`
+auto-enables (each `default y` under its sensor's devicetree node), and
+`src/main.c`'s `#if` ladder on those same symbols picks the matching
+width/height/format. IMX296 has a single full-frame mode (1456x1088 RAW10,
+3,168,256 bytes unpacked -- the sensor transmits its colour-processing
+margin around the 1440x1080 recording area), so this example's `Kconfig`
+drops the backend to one frame buffer and grows the SRAM0 pool to 3.5 MiB
+for that shield only. A new shield is one more `#elif` plus one more
+`testcase.yaml` scenario.
 
 ## What each printed line means
 
@@ -70,6 +78,7 @@ RESULT: capture ok
 |---|---|---|---|
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`). **BENCH-VERIFIED** (2026-09-22, an E1M-AEN803 on the E1M-EVK, issue #2248), needs the J5 pin-11 pull-up rework (`docs/boards/e1m-evk.md`). |
 | `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on an E1M-AEN803 on the E1M-EVK, in all three modes: 640x400 (Espressif's), 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) all captured live frames -- a `0xA5`-prefilled pool overwritten plus the sensor test pattern appearing, verified in all three -- each at its configured frame rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps). |
+| `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet (issue #2287). **I2C identity bench-verified only** (bench run 229, 2026-09-24): the module answers at CCI 0x1A and the undocumented SENSOR_INFO signature (0x3148/0x3149 = 0x4A00) matches the colour IMX296LQR-C variant this driver targets. CSI-2 streaming through this app has not run on real silicon -- see `docs/camera-shields.md`'s IMX296 driver section. |
 
 ## Frame buffers live in SRAM0, not DTCM
 
@@ -96,11 +105,13 @@ buffers, then `ALP_ERR_NOMEM` on the second frame).
 
 ## Compile proof in CI; real results on the bench
 
-Both `testcase.yaml` scenarios are `build_only: true` regardless of bench
-status — twister has no bench access, so a green build only proves the image
-compiles and links against the real board target. The OV9281 shield's real
-result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same flow
-as the sibling `*-regcheck` apps) is real GREY8 frames landing in memory in
-all three modes, each at its configured frame rate; the OV5647 shield's real
-result (2026-09-22, issue #2248) is a live RAW10 640x480 capture on the same
-board.
+All three `testcase.yaml` scenarios are `build_only: true` regardless of
+bench status — twister has no bench access, so a green build only proves the
+image compiles and links against the real board target. The OV9281 shield's
+real result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same
+flow as the sibling `*-regcheck` apps) is real GREY8 frames landing in memory
+in all three modes, each at its configured frame rate; the OV5647 shield's
+real result (2026-09-22, issue #2248) is a live RAW10 640x480 capture on the
+same board. The IMX296 shield's real result so far (issue #2287, bench run
+229) is I2C identity only -- the module answers its probe and the SENSOR_INFO
+signature matches -- CSI-2 streaming through this app has not been bench-run.

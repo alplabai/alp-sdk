@@ -12,11 +12,13 @@
  *
  * OV9281 is bench-verified (an E1M-AEN803 on the E1M-EVK, 2026-09-21): real
  * GREY8 frames land in memory in all three of the driver's modes.  The
- * OV5647 path is bench-verified too (runs 52/61/62, issue #2248) -- see
- * docs/camera-shields.md for the full write-up.  This app still prints
- * enough detail on every path (including a failed open() or a capture
- * TIMEOUT) that a bench engineer can tell which stage broke if the sensor
- * isn't seated or the shield stack is wrong.
+ * OV5647 path is bench-verified too (runs 52/61/62, issue #2248).  The
+ * IMX296 path (issue #2287, bench run 229) is bench-verified for I2C
+ * identity only -- streaming through this app has not run on real silicon
+ * yet -- see docs/camera-shields.md for the full write-up on all three.
+ * This app still prints enough detail on every path (including a failed
+ * open() or a capture TIMEOUT) that a bench engineer can tell which stage
+ * broke if the sensor isn't seated or the shield stack is wrong.
  *
  * Build one image per camera shield (stack the sensor shield on top of the
  * carrier connector shield, `e1m_evk_rpi_csi`):
@@ -25,14 +27,15 @@
  *     examples/aen/aen-camera-firstlight -- \
  *     -DSHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1" # OV5647, RAW10
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
+ *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
  *
  * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
  * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
- * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281), so this app
- * picks its capture format the same way: a compile-time #if ladder on
- * those same Kconfig symbols below, not a runtime probe.  A new shield is
- * one more #elif here plus one more testcase.yaml scenario -- nothing else
- * in this file changes.
+ * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 / Kconfig.imx296),
+ * so this app picks its capture format the same way: a compile-time #if
+ * ladder on those same Kconfig symbols below, not a runtime probe.  A new
+ * shield is one more #elif here plus one more testcase.yaml scenario --
+ * nothing else in this file changes.
  *
  * See README.md for what each printed line means and the expected result
  * per module.
@@ -71,6 +74,19 @@
 #define CAM_HEIGHT          480
 #define CAM_BYTES_PER_PIXEL 2
 #define CAM_SHIELD_NAME     "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)"
+#elif defined(CONFIG_VIDEO_IMX296)
+/* RPi Global Shutter Camera (IMX296LQR-C colour, issue #2287): one fixed all-pixel mode, so no
+ * crop -- 1456x1088 RAW10 over a single CSI-2 lane. That is what the sensor transmits: the
+ * datasheet's 1440x1080 "recording" area plus the 8-column/4-row colour-processing margin on
+ * every side, which is sent, not cropped. Unpacked that is 1456 x 1088 x 2 = 3,168,256 bytes, so
+ * this example's Kconfig drops the backend to ONE frame buffer and grows the SRAM0 pool to fit
+ * it. Bench run 229 confirmed this sensor's I2C identity only (see docs/camera-shields.md) --
+ * CSI-2 streaming through this app has not run on real silicon yet. */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           1456
+#define CAM_HEIGHT          1088
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, RAW10 1456x1088)"
 #else
 #error "aen-camera-firstlight needs a camera shield stacked on e1m_evk_rpi_csi -- see README.md"
 #endif
