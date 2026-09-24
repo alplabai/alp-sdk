@@ -13,8 +13,8 @@
 + * (isp_pico.c) ever runs; runs 211/212's writeback values decode exactly
 + * against the stale calibration block). This pulls in ov5647_ae_envelope.h
 + * directly rather than the whole of sensor_attributes.h: this file doesn't
-+ * need that header's AE_SNS_DEFAULT_S struct, and an earlier revision that
-+ * included sensor_attributes.h here landed that struct, unused, in every
++ * need that header's AE_SNS_DEFAULT_S struct, and including
++ * sensor_attributes.h here would land that struct, unused, in every
 + * isp_param_conf.h includer's translation unit whenever
 + * CONFIG_ISP_LIB_AE_MODULE is off -- an -Werror=unused-variable trip.
 + * ov5647_ae_envelope.h includes vsios_type.h itself, so its vsi_u32_t/
@@ -112,8 +112,8 @@
 + * AE_SNS_DEFAULT_S struct (patch 0006's table stays hand-written literals --
 + * see that file's own comment for why): isp_param_conf.h doesn't otherwise
 + * need that struct, and folding the whole struct into isp_param_conf.h's
-+ * include chain (an earlier revision of this patch did that by including
-+ * sensor_attributes.h directly) landed it in isp_api_wrapper.c's translation
++ * include chain (by including sensor_attributes.h directly) would land
++ * it in isp_api_wrapper.c's translation
 + * unit even when CONFIG_ISP_LIB_AE_MODULE is off -- that config guards the
 + * struct's only use site (vsi_get_ae_default()'s memcpy), so with the
 + * config off the struct was defined but never referenced, tripping

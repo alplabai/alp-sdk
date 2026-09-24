@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: bafbbf77ad7af03862bf1fc43a2b2d24d79c886acba7ddfed948ad00c1a95fb5
+    sha256sum: eb51ee34836346f2c314cf0204d35ecf06fdae52e3fbbcee55c2aab19b7b41ad
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -723,9 +723,9 @@ patches:
       truncation direction) and the 20-bit VIDEO_CID_EXPOSURE field width.
       The macros live in their OWN header (included by both
       isp_param_conf.h and sensor_attributes.h) rather than in
-      sensor_attributes.h directly: an earlier revision had
-      isp_param_conf.h include the whole of sensor_attributes.h, which
-      pulled its AE_SNS_DEFAULT_S static table into isp_api_wrapper.c's
+      sensor_attributes.h directly: including the whole of
+      sensor_attributes.h from isp_param_conf.h would pull its
+      AE_SNS_DEFAULT_S static table into isp_api_wrapper.c's
       translation unit even when CONFIG_ISP_LIB_AE_MODULE is off (the
       config that guards the table's only use site) -- defined but never
       referenced, tripping -Werror=unused-variable in the
