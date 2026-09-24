@@ -645,6 +645,32 @@ patches:
       Left in place here rather than pulled into this patch, to keep this
       change to the one fix bench run 153 needed; a candidate to drop in
       a follow-up.
+  - path: hal_alif/0010-isp-clamp-ae-writeback-to-ctrl-range.patch
+    sha256sum: ad8395919067e1b4d0bf708dce6ee46ff2047bc9b94de29e781f52e73e5fbd59
+    # See the module-name note on the 0001 patch above.
+    module: alif
+    author: Alp Lab AB
+    email: contact@alplab.ai
+    date: 2026-09-24
+    upstreamable: true
+    comments: |
+      isp_vsi_bottom_half() (patch 0005's v4.4 video-ctrl port of the
+      per-frame AE writeback) computes ctrl.val for VIDEO_CID_ANALOGUE_GAIN
+      and VIDEO_CID_EXPOSURE from the ISP library's own AE algorithm output
+      and calls video_set_ctrl() with no clamp to the sensor's registered
+      control range. E1M-AEN803 + OV5647 bench: AE drove the gain writeback
+      to 0x2000, outside OV5647's registered VIDEO_CID_ANALOGUE_GAIN range
+      of [0, 1023] (zephyr/drivers/video/ov5647.c) -- video_set_ctrl()
+      rejected every write with -EINVAL (Zephyr drivers/video/video_ctrls.c
+      video_set_ctrl()'s IN_RANGE check), logging "Control value is
+      invalid" once per frame. cached_sns_config only updates on a
+      successful write, so the rejected value was retried every frame
+      forever, never just once. Add isp_clamp_ctrl_val() and call
+      video_query_ctrl() for the same id before each write, saturating
+      ctrl.val into [range.min, range.max]; a failed query leaves the value
+      unclamped (video_set_ctrl() then rejects it exactly as before this
+      patch -- no new failure mode). Pure additive; upstream to hal_alif
+      then drop.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

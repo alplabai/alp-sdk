@@ -934,7 +934,7 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	 */
 	uint32_t int_time_max_us = 66514;
 	uint32_t again_min = 1024;   /* library units, 1x = 1024 */
-	uint32_t again_max = 16368;  /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+	uint32_t again_max = 65472;  /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
