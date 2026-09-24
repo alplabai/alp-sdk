@@ -131,18 +131,29 @@ probe in run 223 found the camera loop itself keeping up with 60 fps
 while `/stream`'s HTTP send took 24-30 ms per 32-41 KB frame, dropping
 45-51% of frames -- so the bottleneck was the send path, not the camera
 or JPEG encode. `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf`'s Ethernet
-TX/RX buffer sizing alone took drops to 0%; adding
+TX/RX buffer sizing alone took drops to 0%; combined with
 `CONFIG_ALP_SDK_FAST_MEMCPY` (the word-copy `memcpy()` override for -Os
-images, `zephyr/kconfigs/core.kconfig`) on top reached **60.1 fps**, the
-OV5647 sensor's own rate -- 1803 frames in 30 s, interval stdev 0.1 ms.
-The PHY was confirmed at 100 Mbit full duplex; disabling TCP congestion
-avoidance had no effect.
+images, `zephyr/kconfigs/core.kconfig`) on top, that configuration
+reached **60.1 fps**, the OV5647 sensor's own rate -- 1803 frames in
+30 s, interval stdev 0.1 ms. The PHY was confirmed at 100 Mbit full
+duplex; disabling TCP congestion avoidance had no effect. That 60.1 fps
+figure is not attributable to the `memcpy()` override on its own --
+see the follow-up A/B below.
 
 **Not a clean A/B against runs 205/220/223 above**: the 60.1 fps run
 used a simpler scene with a smaller mean frame (14.7 KB) than those
-runs. A same-scene A/B against the buffer-sizing-only and
-memcpy-and-buffer-sizing configurations is open follow-up work, not
-covered by this change.
+runs.
+
+**`CONFIG_ALP_SDK_FAST_MEMCPY` same-scene A/B** (E1M-AEN803, module
+2026W36-0001, **640×480 @ 30 fps**, camera-bound, against the
+buffer-sizing-only baseline): A1 (memcpy ON) 30.03 fps / 1,089,750 B/s,
+B1 (memcpy OFF) 30.03 fps / 1,092,219 B/s, A2 (memcpy ON) 30.03 fps /
+1,088,302 B/s, 0 drops in every leg -- **no measurable memcpy gain** in
+this camera-bound scene. `CONFIG_ALP_SDK_FAST_MEMCPY` defaults to `n`
+for this reason; this example's AEN801/AEN803 board confs enable it
+explicitly, on the strength of the combined 60.1 fps figure above, not
+this A/B. The send-bound case (the one run 223 actually hit, with its
+24-30 ms sends) is still unmeasured -- open follow-up work.
 
 ## Limits
 
@@ -167,9 +178,11 @@ This is a teaching example, not a production camera server:
   default, and predates the ISP/Hantro fixes noted above -- not a target
   this example tries to hit. Runs 224-228 (#2285) show the "send"
   side of that bound is itself movable: the AEN board confs' Ethernet
-  buffer sizing plus `CONFIG_ALP_SDK_FAST_MEMCPY` took the achievable
-  rate to 60.1 fps, the sensor's own cap -- see the Measured section
-  above for the non-A/B caveat on that number.
+  buffer sizing alone (bench-proven) plus `CONFIG_ALP_SDK_FAST_MEMCPY`
+  reached 60.1 fps combined, the sensor's own cap -- see the Measured
+  section above for both the non-A/B caveat on that number and the
+  separate `CONFIG_ALP_SDK_FAST_MEMCPY` same-scene A/B, which found no
+  measurable memcpy gain in this camera-bound scene.
 
 **Fixed since run 205:** the bottom two rows of every frame rendered solid
 green -- an ISP main-resizer chroma-row rounding bug (`ISP_MRSZ_SCALE_VC`

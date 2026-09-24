@@ -15,6 +15,19 @@ SDK) and checks the resulting object:
     catches a future edit that drops or weakens the
     "no-tree-loop-distribute-patterns" guard before it ever reaches the
     bench and hangs a board before the network comes up (bench run 227).
+    These two checks compile against _RECURSION_CHECK_FLAGS (-O2,
+    WITHOUT -ffreestanding), not the real firmware's own -Os/-ffreestanding
+    _COMPILE_FLAGS below: -ffreestanding suppresses GCC's
+    -ftree-loop-distribute-patterns memcpy-pattern rewrite outright, and
+    confirmed against GCC 14.3, this pass does not rewrite this exact
+    loop shape at plain -Os either -- compiling these two checks at
+    -Os/-ffreestanding would make them pass vacuously forever, guard
+    present or not. Confirmed by hand against a scratch copy of
+    src/common/alp_fast_memcpy_core.c with the
+    no-tree-loop-distribute-patterns attribute removed: at
+    _RECURSION_CHECK_FLAGS the scratch copy DOES recurse into `bl
+    memcpy` (these two tests fail), and the real file (attribute
+    present) stays clean (these two tests pass).
   - no MVE/FP register instruction: no v-prefixed mnemonic (vldrb,
     vstrb, vldrh, vstrh, vldrw, vstrw, vldrd, vstrd, vldm, vstm, vmov,
     ...) and no ldc/stc coprocessor-form load/store -- this SDK's
@@ -29,18 +42,21 @@ SDK) and checks the resulting object:
     is present, so the test can't pass by the compiler having thrown the
     whole function away.
 
-WHY -mfloat-abi=hard -mfpu=auto (NOT the soft-float default every
-current AEN example ships with): CONFIG_ALP_SDK_FAST_MEMCPY's `depends
-on` list (SOC_FAMILY_ENSEMBLE, SIZE_OPTIMIZATIONS, picolibc, GCC) does
-not exclude CONFIG_FPU=y -- this file is shared code, compiled for
-*any* AEN app that satisfies those four conditions, including a future
-one that enables the FPU. Every current example is soft-float, and
-under -mfloat-abi=soft GCC cannot emit an MVE/FP instruction at any
-optimization level -- compiling this guard at soft-float only would
-make its MVE assertion vacuously true forever and never catch the
-regression it exists to catch. Hard-float + auto FPU is the worst case
-within this file's own declared Kconfig support envelope, and is the
-only envelope in which the MVE assertion is a live, testable invariant.
+WHY -mfloat-abi=hard -mfpu=auto (not just any one current example's own
+flags): CONFIG_ALP_SDK_FAST_MEMCPY's `depends on` list
+(SOC_FAMILY_ENSEMBLE, SIZE_OPTIMIZATIONS, picolibc, GCC) does not
+exclude CONFIG_FPU=y -- this file is shared code, compiled for *any*
+AEN app that satisfies those four conditions. Not every current example
+is soft-float either: examples/aen/aen-evk-demo already builds hard
+float (-mfpu=fpv5-sp-d16 -mfloat-abi=hard), so this guard can't lean on
+"soft-float is the only real case" -- but that concrete flag pair is
+scalar-only VFP, not MVE-capable, so compiling this guard against it
+alone would still make its MVE assertion vacuously true. -mfpu=auto
+lets GCC pick this SoC's full MVE-capable FPU variant instead, which is
+why hard-float + auto FPU (not aen-evk-demo's own -mfpu=fpv5-sp-d16) is
+the worst case within this file's declared Kconfig support envelope,
+and the only envelope in which the MVE assertion is a live, testable
+invariant.
 Confirmed locally: compiling the pre-fix code (the reverted
 optimize("O2", "no-tree-loop-distribute-patterns") attribute) at
 -Os/hard-float/auto-FPU produces `ldc 15, cr7, [r4], #16` /
@@ -67,8 +83,9 @@ CORE_C = REPO_ROOT / "src" / "common" / "alp_fast_memcpy_core.c"
 
 # The real AEN803 M55_HE arch/opt flags (captured from a real `west
 # build` compile_commands.json), plus -mfloat-abi=hard -mfpu=auto -- see
-# this file's header for why the FPU pair is added on top of the
-# soft-float default every current example actually ships.
+# this file's header for why the FPU pair is the worst case within this
+# option's declared Kconfig support envelope, not just aen-evk-demo's
+# own hard-float flags.
 _COMPILE_FLAGS = [
     "-std=c17",
     "-mcpu=cortex-m55",
@@ -92,6 +109,19 @@ _COMPILE_FLAGS = [
     "-specs=picolibc.specs",
     "-ffreestanding",
 ]
+
+# For the two self-recursion checks only: -O2 instead of -Os, and no
+# -ffreestanding. -ffreestanding suppresses GCC's
+# -ftree-loop-distribute-patterns memcpy-pattern rewrite outright, and
+# GCC 14.3 doesn't rewrite this exact loop shape at plain -Os either --
+# compiling the recursion checks at the real firmware's own
+# _COMPILE_FLAGS would make them pass vacuously forever, guard present
+# or not. See this file's header for the by-hand confirmation (scratch
+# copy, attribute removed) that this flag pair actually reproduces the
+# rewrite.
+_RECURSION_CHECK_FLAGS = [
+    flag for flag in _COMPILE_FLAGS if flag not in ("-Os", "-ffreestanding")
+] + ["-O2"]
 
 # MVE/FP instruction: any v-prefixed mnemonic (vldrb/vstrb/vldrh/vstrh/
 # vldrw/vstrw/vldrd/vstrd/vldm/vstm/vmov/...) or the ldc/stc
@@ -157,20 +187,19 @@ def _find_tool(gcc_path: str, tool_suffix: str) -> str:
     pytest.skip(f"arm-zephyr-eabi-{tool_suffix} not found next to {gcc_path}")
 
 
-@pytest.fixture(scope="module")
-def compiled_object(tmp_path_factory) -> Path:
+def _compile_core(tmp_path_factory, tag: str, flags: list[str]) -> Path:
     gcc = _find_arm_zephyr_eabi_gcc()
     if gcc is None:
         pytest.skip("arm-zephyr-eabi-gcc (Zephyr SDK) not found on this host")
 
-    out_dir = tmp_path_factory.mktemp("fast_memcpy_core_build_guard")
+    out_dir = tmp_path_factory.mktemp(tag)
     obj_path = out_dir / "alp_fast_memcpy_core.o"
 
     result = subprocess.run(
         [
             gcc,
             "-c",
-            *_COMPILE_FLAGS,
+            *flags,
             "-I",
             str(CORE_C.parent),
             str(CORE_C),
@@ -179,6 +208,7 @@ def compiled_object(tmp_path_factory) -> Path:
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, (
         f"arm-zephyr-eabi-gcc failed to compile {CORE_C}:\n"
@@ -187,14 +217,36 @@ def compiled_object(tmp_path_factory) -> Path:
     return obj_path
 
 
-def test_no_undefined_memcpy(compiled_object):
+@pytest.fixture(scope="module")
+def compiled_object(tmp_path_factory) -> Path:
+    return _compile_core(tmp_path_factory, "fast_memcpy_core_build_guard", _COMPILE_FLAGS)
+
+
+@pytest.fixture(scope="module")
+def compiled_object_recursion_check(tmp_path_factory) -> Path:
+    """-O2, no -ffreestanding -- see _RECURSION_CHECK_FLAGS: the only flag
+    pair (of the two compiled in this file) in which GCC's
+    -ftree-loop-distribute-patterns memcpy-pattern rewrite is live against
+    this exact loop shape under GCC 14.3."""
+    return _compile_core(
+        tmp_path_factory, "fast_memcpy_core_recursion_check", _RECURSION_CHECK_FLAGS
+    )
+
+
+def test_no_undefined_memcpy(compiled_object_recursion_check):
     """The self-recursion trap: a rewritten loop calls memcpy(), which the
     linker would need to resolve from somewhere -- catch that as an
     undefined `memcpy` symbol in the object, before it ever reaches a
-    linked image."""
+    linked image. Compiled at _RECURSION_CHECK_FLAGS, not the real
+    firmware's own -Os/-ffreestanding flags -- see this file's header."""
     gcc = _find_arm_zephyr_eabi_gcc()
     nm = _find_tool(gcc, "nm")
-    result = subprocess.run([nm, "-u", str(compiled_object)], capture_output=True, text=True)
+    result = subprocess.run(
+        [nm, "-u", str(compiled_object_recursion_check)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     assert result.returncode == 0, result.stderr
     undefined = [line for line in result.stdout.splitlines() if "memcpy" in line]
     assert not undefined, (
@@ -203,14 +255,18 @@ def test_no_undefined_memcpy(compiled_object):
     )
 
 
-def test_no_memcpy_self_call(compiled_object):
+def test_no_memcpy_self_call(compiled_object_recursion_check):
     """Belt-and-suspenders on the same self-recursion trap: no `bl memcpy`
     or tail-call `b memcpy` in the disassembly, independent of whether
-    nm reports it as an undefined symbol."""
+    nm reports it as an undefined symbol. Compiled at
+    _RECURSION_CHECK_FLAGS -- see this file's header."""
     gcc = _find_arm_zephyr_eabi_gcc()
     objdump = _find_tool(gcc, "objdump")
     result = subprocess.run(
-        [objdump, "-d", str(compiled_object)], capture_output=True, text=True
+        [objdump, "-d", str(compiled_object_recursion_check)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
 
@@ -226,7 +282,10 @@ def test_no_mve_vector_instructions(compiled_object):
     gcc = _find_arm_zephyr_eabi_gcc()
     objdump = _find_tool(gcc, "objdump")
     result = subprocess.run(
-        [objdump, "-d", str(compiled_object)], capture_output=True, text=True
+        [objdump, "-d", str(compiled_object)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     assert result.returncode == 0, result.stderr
     disasm = result.stdout
