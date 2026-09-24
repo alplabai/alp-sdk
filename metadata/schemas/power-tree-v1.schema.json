@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/alplabai/alp-sdk/metadata/schemas/power-tree-v1.schema.json",
+  "title": "ALP SoM-family on-module power tree (metadata/e1m_modules/<family>/power-tree.yaml) v1",
+  "description": "Alp Lab hand-authored runtime guard policy for the on-module PMICs/regulators of one SoM family: per-rail net, target, guard window, criticality, control class and sequence owner per boot mode, plus the PMIC GPIO roles. Projected into include/alp/chips/<family>_power_tree.h by scripts/gen_power_tree.py. Cross-referenced against metadata/chips/<chip>.yaml and the family's SoM presets by scripts/validate_metadata.py -- shape only is validated by this schema.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "families",
+    "bus",
+    "boot_modes",
+    "window_policy",
+    "chips",
+    "rails",
+    "gpios"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "family": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "owner": {
+      "enum": [
+        "pmic_cmi",
+        "hardware",
+        "u-boot",
+        "cm33",
+        "none"
+      ]
+    },
+    "addr7": {
+      "type": "integer",
+      "minimum": 8,
+      "maximum": 119
+    },
+    "boot_mode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bus_master",
+        "deepx_sequence_owner"
+      ],
+      "properties": {
+        "bus_master": {
+          "enum": [
+            "a55",
+            "cm33"
+          ]
+        },
+        "deepx_sequence_owner": {
+          "$ref": "#/$defs/owner"
+        },
+        "status": {
+          "enum": [
+            "supported",
+            "blocked"
+          ],
+          "description": "blocked = this boot mode has no DEEPX sequence owner yet; deepx_sequence_owner must be none and no rail may name cm33 for it"
+        },
+        "blocked_by": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "properties": {
+    "schemaVersion": {
+      "const": "power-tree-v1"
+    },
+    "families": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/family"
+      }
+    },
+    "bus": {
+      "type": "string",
+      "minLength": 1
+    },
+    "boot_modes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "a55_boot",
+        "cm33_boot"
+      ],
+      "properties": {
+        "a55_boot": {
+          "$ref": "#/$defs/boot_mode"
+        },
+        "cm33_boot": {
+          "$ref": "#/$defs/boot_mode"
+        }
+      }
+    },
+    "window_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_tolerance_pct",
+        "rounding"
+      ],
+      "properties": {
+        "default_tolerance_pct": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 20
+        },
+        "rounding": {
+          "const": "inward"
+        }
+      }
+    },
+    "chips": {
+      "type": "object"
+    },
+    "rails": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "chip",
+          "channel",
+          "i2c_addr",
+          "net",
+          "role",
+          "target_mv",
+          "range",
+          "window_mv",
+          "critical",
+          "control",
+          "owner",
+          "populated_on",
+          "evidence"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "chip": {
+            "enum": [
+              "act8760",
+              "da9292",
+              "tps628640"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "minLength": 1
+          },
+          "i2c_addr": {
+            "$ref": "#/$defs/addr7"
+          },
+          "net": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target_mv": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "range": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "enum": [
+              0,
+              1,
+              null
+            ]
+          },
+          "window_mv": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            ]
+          },
+          "critical": {
+            "type": "boolean"
+          },
+          "control": {
+            "enum": [
+              "voltage",
+              "enable",
+              "sequence",
+              "none"
+            ]
+          },
+          "owner": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "a55_boot",
+              "cm33_boot"
+            ],
+            "properties": {
+              "a55_boot": {
+                "$ref": "#/$defs/owner"
+              },
+              "cm33_boot": {
+                "$ref": "#/$defs/owner"
+              }
+            }
+          },
+          "populated_on": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "$ref": "#/$defs/family"
+            }
+          },
+          "assembled": {
+            "const": "optional"
+          },
+          "evidence": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "gpios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gpio",
+          "net",
+          "role",
+          "direction",
+          "writable"
+        ],
+        "properties": {
+          "gpio": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 11
+          },
+          "net": {
+            "type": "string",
+            "minLength": 1
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1
+          },
+          "direction": {
+            "enum": [
+              "input",
+              "output_od",
+              "output_pp"
+            ]
+          },
+          "expected_mode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "writable": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "const": "polarity"
+            }
+          },
+          "quirk": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  }
+}

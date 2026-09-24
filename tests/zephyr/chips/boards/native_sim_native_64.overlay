@@ -93,6 +93,35 @@
                 compatible = "alp,fake-tas2563";
                 reg = <0x4d>;
             };
+            /* V2N power tree (BRD_I2C on silicon): ACT88760 ADD1/ADD2
+             * share one register image; DA9292 at its OTP address; the
+             * V2N-M1 TPS628640 bucks except 0x4D (fake_tas2563 above
+             * holds it).  0x25 is also PCA9451A_I2C_ADDR, so the
+             * pca9451a probe smoke now ACKs and takes its skip branch. */
+            fake_act8760_add1: fake_act8760@25 {
+                compatible = "alp,fake-act8760";
+                reg = <0x25>;
+            };
+            fake_act8760_add2: fake_act8760@26 {
+                compatible = "alp,fake-act8760";
+                reg = <0x26>;
+            };
+            fake_da9292: fake_da9292@1e {
+                compatible = "alp,fake-da9292";
+                reg = <0x1e>;
+            };
+            fake_tps628640_44: fake_tps628640@44 {
+                compatible = "alp,fake-tps628640";
+                reg = <0x44>;
+            };
+            fake_tps628640_48: fake_tps628640@48 {
+                compatible = "alp,fake-tps628640";
+                reg = <0x48>;
+            };
+            fake_tps628640_4f: fake_tps628640@4f {
+                compatible = "alp,fake-tps628640";
+                reg = <0x4f>;
+            };
         };
     };
 
@@ -112,12 +141,16 @@
      * test drives raw levels and the DRIVER owns the active-low
      * interpretation of IRQ_N -- inverting in the overlay instead
      * would hide exactly the polarity bug the test is there to
-     * catch. */
+     * catch.  Pins 4..6 = the DA9292 CH2 sequence's DEEPX_PWR_EN_REQ
+     * (P65, input), DEEPX_CORE_0P75_EN (P64) and M1_RESET (PA6). */
     alp_pins: alp-pins {
         compatible = "alp,pin-array";
         gpios = <&gpio_emul0 0 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
                 <&gpio_emul0 1 GPIO_ACTIVE_HIGH>,
                 <&gpio_emul0 2 GPIO_ACTIVE_HIGH>,
-                <&gpio_emul0 3 GPIO_ACTIVE_HIGH>;
+                <&gpio_emul0 3 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 4 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 5 GPIO_ACTIVE_HIGH>,
+                <&gpio_emul0 6 GPIO_ACTIVE_HIGH>;
     };
 };

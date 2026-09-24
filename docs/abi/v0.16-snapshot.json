@@ -1976,6 +1976,22 @@
           "hash": "b67390b2b9131f8f",
           "signature": "alp_status_t act8760_get_status(act8760_t *ctx, act8760_status_t *out);"
         },
+        "act8760_gpio_get": {
+          "hash": "138c50b450e9ba07",
+          "signature": "alp_status_t act8760_gpio_get(act8760_t *ctx, uint8_t gpio, act8760_gpio_state_t *out);"
+        },
+        "act8760_gpio_set_polarity": {
+          "hash": "3612b4aee624df1c",
+          "signature": "alp_status_t act8760_gpio_set_polarity(act8760_t *ctx, uint8_t gpio, bool inverted);"
+        },
+        "act8760_gpio_toggles_clear": {
+          "hash": "2f89f218050f5d40",
+          "signature": "alp_status_t act8760_gpio_toggles_clear(act8760_t *ctx, uint16_t *mask);"
+        },
+        "act8760_gpio_toggles_peek": {
+          "hash": "4f336a26f76d8aff",
+          "signature": "alp_status_t act8760_gpio_toggles_peek(act8760_t *ctx, uint16_t *mask);"
+        },
         "act8760_init": {
           "hash": "46d310ca2ade5005",
           "signature": "alp_status_t act8760_init(act8760_t *ctx, alp_i2c_t *bus);"
@@ -1984,17 +2000,33 @@
           "hash": "41df97c74c7b69cc",
           "signature": "alp_status_t act8760_init_at(act8760_t *ctx, alp_i2c_t *bus, uint8_t addr_page0);"
         },
+        "act8760_rail_get_state": {
+          "hash": "53134e2f3b37c89e",
+          "signature": "alp_status_t act8760_rail_get_state(act8760_t *ctx, act8760_rail_t rail, act8760_rail_state_t *out);"
+        },
+        "act8760_rail_get_voltage_mv": {
+          "hash": "2d8f79813d2570d7",
+          "signature": "alp_status_t act8760_rail_get_voltage_mv(act8760_t *ctx, act8760_rail_t rail, uint16_t *mv);"
+        },
         "act8760_rail_get_vset": {
           "hash": "0b337c60ed921814",
           "signature": "alp_status_t act8760_rail_get_vset(act8760_t *ctx, act8760_rail_t rail, uint8_t *vset_raw);"
         },
-        "act8760_rail_set_vset": {
-          "hash": "d5fd5ef29bae34b4",
-          "signature": "alp_status_t act8760_rail_set_vset(act8760_t *ctx, act8760_rail_t rail, uint8_t vset_raw);"
+        "act8760_rail_set_enable": {
+          "hash": "61e7be8b20851431",
+          "signature": "alp_status_t act8760_rail_set_enable(act8760_t *ctx, act8760_rail_t rail, bool enable);"
+        },
+        "act8760_rail_set_voltage_mv": {
+          "hash": "9bfbd7847984aabb",
+          "signature": "alp_status_t act8760_rail_set_voltage_mv(act8760_t *ctx, act8760_rail_t rail, uint16_t mv);"
         },
         "act8760_read_reg": {
           "hash": "c1419785a23efd71",
           "signature": "alp_status_t act8760_read_reg(act8760_t *ctx, act8760_page_t page, uint8_t reg, uint8_t *out);"
+        },
+        "act8760_set_limits": {
+          "hash": "5fa50f73ce089271",
+          "signature": "alp_status_t act8760_set_limits(act8760_t *ctx, const pmic_rail_limit_t *rails, uint16_t gpio_polarity_writable);"
         },
         "act8760_write_reg": {
           "hash": "81e5ae89c7e8e574",
@@ -2002,6 +2034,10 @@
         }
       },
       "macros": {
+        "ACT8760_GPIO_COUNT": {
+          "hash": "8888364b1c95be91",
+          "value": "11u"
+        },
         "ACT8760_I2C_ADDR_PAGE0": {
           "hash": "5c32d5af50ff52c1",
           "value": "0x25u"
@@ -2012,6 +2048,19 @@
         }
       },
       "typedefs": {
+        "act8760_gpio_state_t": {
+          "definition": "typedef struct { bool level; bool inverted; uint8_t mux; uint8_t mode_raw; bool push_pull; bool irq_masked; } act8760_gpio_state_t;",
+          "fields": [
+            "bool level",
+            "bool inverted",
+            "uint8_t mux",
+            "uint8_t mode_raw",
+            "bool push_pull",
+            "bool irq_masked"
+          ],
+          "hash": "760fabbf2134d1af",
+          "kind": "struct"
+        },
         "act8760_page_t": {
           "definition": "typedef enum { ACT8760_PAGE_SYSTEM = 0, ACT8760_PAGE_AUX = 1, } act8760_page_t;",
           "enumerators": [
@@ -2020,6 +2069,22 @@
           ],
           "hash": "bbe3ed0a480f13a3",
           "kind": "enum"
+        },
+        "act8760_rail_state_t": {
+          "definition": "typedef struct { bool enabled; uint8_t vset_raw; uint8_t range; uint16_t voltage_mv; bool pok; bool ov; bool ilim; bool ilim_warn; uint8_t status_raw; } act8760_rail_state_t;",
+          "fields": [
+            "bool enabled",
+            "uint8_t vset_raw",
+            "uint8_t range",
+            "uint16_t voltage_mv",
+            "bool pok",
+            "bool ov",
+            "bool ilim",
+            "bool ilim_warn",
+            "uint8_t status_raw"
+          ],
+          "hash": "12ea2e3a2a7dd841",
+          "kind": "struct"
         },
         "act8760_rail_t": {
           "definition": "typedef enum { ACT8760_RAIL_BUCK1 = 0, ACT8760_RAIL_BUCK2, ACT8760_RAIL_BUCK3, ACT8760_RAIL_BUCK4, ACT8760_RAIL_BUCK5, ACT8760_RAIL_BUCK6, ACT8760_RAIL_BUCK7, ACT8760_RAIL_LDO1, ACT8760_RAIL_LDO2, ACT8760_RAIL_LDO3, ACT8760_RAIL_LDO4, ACT8760_RAIL_LDO5, ACT8760_RAIL_LDO6, ACT8760_RAIL_COUNT } act8760_rail_t;",
@@ -2059,14 +2124,17 @@
           "kind": "struct"
         },
         "act8760_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr_page0; uint8_t addr_page1; } act8760_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr_page0; uint8_t addr_page1; const pmic_rail_limit_t *limits; uint16_t gpio_polarity_ok; uint16_t gpio_toggles; } act8760_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr_page0",
-            "uint8_t addr_page1"
+            "uint8_t addr_page1",
+            "const pmic_rail_limit_t *limits",
+            "uint16_t gpio_polarity_ok",
+            "uint16_t gpio_toggles"
           ],
-          "hash": "9c905edb3537b129",
+          "hash": "fa00c984b6590adb",
           "kind": "struct"
         }
       },
@@ -3577,13 +3645,25 @@
     },
     "alp/chips/da9292.h": {
       "functions": {
+        "da9292_ch2_sequence": {
+          "hash": "bd93e3265d948a55",
+          "signature": "alp_status_t da9292_ch2_sequence(da9292_t *ctx, const struct da9292_ch2_seq_cfg *cfg, struct da9292_ch2_seq_result *res);"
+        },
         "da9292_deinit": {
           "hash": "c29fba951238345c",
           "signature": "void da9292_deinit(da9292_t *ctx);"
         },
+        "da9292_get_channel_state": {
+          "hash": "d7489a52939c5ef5",
+          "signature": "alp_status_t da9292_get_channel_state(da9292_t *ctx, da9292_channel_t ch, da9292_channel_state_t *out);"
+        },
         "da9292_get_fault_pins": {
           "hash": "be47e8e3fc1afd73",
           "signature": "alp_status_t da9292_get_fault_pins(alp_gpio_t *int_n, alp_gpio_t *tw_n, uint8_t *flags);"
+        },
+        "da9292_get_identity": {
+          "hash": "f2335eb192c1c10f",
+          "signature": "alp_status_t da9292_get_identity(da9292_t *ctx, da9292_identity_t *out);"
         },
         "da9292_get_status": {
           "hash": "49e12c5ab4ce3658",
@@ -3597,6 +3677,10 @@
           "hash": "075efff367b4dc66",
           "signature": "alp_status_t da9292_init(da9292_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit);"
         },
+        "da9292_peek_events": {
+          "hash": "a768b651fca2d4e6",
+          "signature": "alp_status_t da9292_peek_events(da9292_t *ctx, da9292_events_t *out);"
+        },
         "da9292_read_and_clear_events": {
           "hash": "a19d2fd9764f4ac8",
           "signature": "alp_status_t da9292_read_and_clear_events(da9292_t *ctx, da9292_events_t *out);"
@@ -3609,17 +3693,13 @@
           "hash": "3493290ed01b7324",
           "signature": "alp_status_t da9292_set_enable(da9292_t *ctx, da9292_channel_t ch, bool enable);"
         },
+        "da9292_set_limits": {
+          "hash": "ccad257eee85e5ea",
+          "signature": "alp_status_t da9292_set_limits(da9292_t *ctx, const pmic_rail_limit_t *ch_limits);"
+        },
         "da9292_set_voltage_mv": {
           "hash": "ba4e2a34c49c05a3",
           "signature": "alp_status_t da9292_set_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t mv);"
-        },
-        "da9292_v2n_base_init": {
-          "hash": "c6c3b2dc440215a9",
-          "signature": "alp_status_t da9292_v2n_base_init(da9292_t *ctx);"
-        },
-        "da9292_v2n_m1_enable_deepx_rail": {
-          "hash": "55bcdce78aabe01d",
-          "signature": "alp_status_t da9292_v2n_m1_enable_deepx_rail(da9292_t *ctx, uint32_t timeout_us);"
         },
         "da9292_write_reg": {
           "hash": "118e9295dc5932ab",
@@ -3627,12 +3707,53 @@
         }
       },
       "macros": {
+        "DA9292_CH_COUNT": {
+          "hash": "7136a5a20e7a3c7b",
+          "value": "2u"
+        },
         "DA9292_I2C_ADDR_V2N": {
           "hash": "4bb2f56b17edf391",
           "value": "0x1Eu"
         }
       },
       "typedefs": {
+        "da9292_ch2_seq_step_t": {
+          "definition": "typedef enum { DA9292_SEQ_OK = 0, DA9292_SEQ_ERR_ARGS, DA9292_SEQ_ERR_IDENTITY, DA9292_SEQ_ERR_STATUS01, DA9292_SEQ_ERR_PREREAD, DA9292_SEQ_ERR_CLEAR_VSTEP, DA9292_SEQ_ERR_PROGRAM_VOUT, DA9292_SEQ_ERR_CH1_DISTURBED, DA9292_SEQ_ERR_EVENTS, DA9292_SEQ_ERR_NO_REQUEST, DA9292_SEQ_ERR_VSTEP_AT_ENABLE, DA9292_SEQ_ERR_ENABLE, DA9292_SEQ_ERR_PG_TIMEOUT, DA9292_SEQ_ERR_PG_DROPPED, } da9292_ch2_seq_step_t;",
+          "enumerators": [
+            "DA9292_SEQ_OK = 0",
+            "DA9292_SEQ_ERR_ARGS",
+            "DA9292_SEQ_ERR_IDENTITY",
+            "DA9292_SEQ_ERR_STATUS01",
+            "DA9292_SEQ_ERR_PREREAD",
+            "DA9292_SEQ_ERR_CLEAR_VSTEP",
+            "DA9292_SEQ_ERR_PROGRAM_VOUT",
+            "DA9292_SEQ_ERR_CH1_DISTURBED",
+            "DA9292_SEQ_ERR_EVENTS",
+            "DA9292_SEQ_ERR_NO_REQUEST",
+            "DA9292_SEQ_ERR_VSTEP_AT_ENABLE",
+            "DA9292_SEQ_ERR_ENABLE",
+            "DA9292_SEQ_ERR_PG_TIMEOUT",
+            "DA9292_SEQ_ERR_PG_DROPPED"
+          ],
+          "hash": "7d9540fb2fb0fdc2",
+          "kind": "enum"
+        },
+        "da9292_channel_state_t": {
+          "definition": "typedef struct { bool enabled; bool vstep; bool vsel_hi; uint16_t vsel_lo_mv; uint16_t vsel_hi_mv; bool pg; bool uv; bool ov; bool oc; } da9292_channel_state_t;",
+          "fields": [
+            "bool enabled",
+            "bool vstep",
+            "bool vsel_hi",
+            "uint16_t vsel_lo_mv",
+            "uint16_t vsel_hi_mv",
+            "bool pg",
+            "bool uv",
+            "bool ov",
+            "bool oc"
+          ],
+          "hash": "c83134db658b7130",
+          "kind": "struct"
+        },
         "da9292_channel_t": {
           "definition": "typedef enum { DA9292_CH1 = 0, DA9292_CH2 = 1, } da9292_channel_t;",
           "enumerators": [
@@ -3642,8 +3763,13 @@
           "hash": "17c90edb5c1e3a31",
           "kind": "enum"
         },
+        "da9292_delay_fn": {
+          "definition": "typedef void (*da9292_delay_fn)(void *user, uint32_t us);",
+          "hash": "5a9da9b1ef0fc73f",
+          "kind": "fnptr"
+        },
         "da9292_events_t": {
-          "definition": "typedef struct { bool e_ch1_pg; bool e_ch2_pg; bool e_ch1_uv; bool e_ch2_uv; bool e_ch1_ov; bool e_ch2_ov; bool e_ch1_oc; bool e_ch2_oc; bool e_temp_warn; bool e_temp_crit; bool e_vin_uvlo; } da9292_events_t;",
+          "definition": "typedef struct { bool e_ch1_pg; bool e_ch2_pg; bool e_ch1_uv; bool e_ch2_uv; bool e_ch1_ov; bool e_ch2_ov; bool e_ch1_oc; bool e_ch2_oc; bool e_temp_warn; bool e_temp_crit; bool e_vin_uvlo; uint8_t raw_00; uint8_t raw_01; } da9292_events_t;",
           "fields": [
             "bool e_ch1_pg",
             "bool e_ch2_pg",
@@ -3655,9 +3781,21 @@
             "bool e_ch2_oc",
             "bool e_temp_warn",
             "bool e_temp_crit",
-            "bool e_vin_uvlo"
+            "bool e_vin_uvlo",
+            "uint8_t raw_00",
+            "uint8_t raw_01"
           ],
-          "hash": "227950719b4c13d6",
+          "hash": "4d9a549611602cdf",
+          "kind": "struct"
+        },
+        "da9292_identity_t": {
+          "definition": "typedef struct { uint8_t dev_id; uint8_t rev_id; uint8_t cfg_rev; } da9292_identity_t;",
+          "fields": [
+            "uint8_t dev_id",
+            "uint8_t rev_id",
+            "uint8_t cfg_rev"
+          ],
+          "hash": "64ae4ed9d26dffc2",
           "kind": "struct"
         },
         "da9292_status_t": {
@@ -3681,15 +3819,52 @@
           "kind": "struct"
         },
         "da9292_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t dev_id; uint8_t rev_id; } da9292_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint8_t dev_id; uint8_t rev_id; const pmic_rail_limit_t *limits; } da9292_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
             "uint8_t dev_id",
-            "uint8_t rev_id"
+            "uint8_t rev_id",
+            "const pmic_rail_limit_t *limits"
           ],
-          "hash": "b8efcb9ad0a5697a",
+          "hash": "1bf473caa1f7f34c",
+          "kind": "struct"
+        },
+        "struct da9292_ch2_seq_cfg": {
+          "definition": "typedef struct da9292_ch2_seq_cfg { uint16_t target_mv; uint8_t expected_dev_id; alp_gpio_t *pwr_en_req; alp_gpio_t *core_en; alp_gpio_t *m1_reset; uint32_t req_timeout_ms; uint32_t pg_timeout_ms; uint32_t pg_settle_ms; da9292_delay_fn delay; void *delay_user; } struct da9292_ch2_seq_cfg;",
+          "fields": [
+            "uint16_t target_mv",
+            "uint8_t expected_dev_id",
+            "alp_gpio_t *pwr_en_req",
+            "alp_gpio_t *core_en",
+            "alp_gpio_t *m1_reset",
+            "uint32_t req_timeout_ms",
+            "uint32_t pg_timeout_ms",
+            "uint32_t pg_settle_ms",
+            "da9292_delay_fn delay",
+            "void *delay_user"
+          ],
+          "hash": "7a0a81904c5bf8cc",
+          "kind": "struct"
+        },
+        "struct da9292_ch2_seq_result": {
+          "definition": "typedef struct da9292_ch2_seq_result { da9292_ch2_seq_step_t step; bool already_programmed; bool rail_up; da9292_identity_t identity; uint8_t ctrl_01; uint8_t vout_ch2_00; uint8_t vout_ch2_01; uint8_t status_00; uint8_t status_01; uint8_t event_00; uint8_t event_01; uint8_t pmc_cfg_00; } struct da9292_ch2_seq_result;",
+          "fields": [
+            "da9292_ch2_seq_step_t step",
+            "bool already_programmed",
+            "bool rail_up",
+            "da9292_identity_t identity",
+            "uint8_t ctrl_01",
+            "uint8_t vout_ch2_00",
+            "uint8_t vout_ch2_01",
+            "uint8_t status_00",
+            "uint8_t status_01",
+            "uint8_t event_00",
+            "uint8_t event_01",
+            "uint8_t pmc_cfg_00"
+          ],
+          "hash": "bf8f8dda4286732a",
           "kind": "struct"
         }
       },
@@ -6738,6 +6913,25 @@
       },
       "variables": {}
     },
+    "alp/chips/pmic_rail_limit.h": {
+      "functions": {},
+      "macros": {},
+      "typedefs": {
+        "pmic_rail_limit_t": {
+          "definition": "typedef struct { uint16_t min_mv; uint16_t max_mv; bool critical; bool voltage_writable; bool enable_writable; } pmic_rail_limit_t;",
+          "fields": [
+            "uint16_t min_mv",
+            "uint16_t max_mv",
+            "bool critical",
+            "bool voltage_writable",
+            "bool enable_writable"
+          ],
+          "hash": "2364d5a1d4c07ea2",
+          "kind": "struct"
+        }
+      },
+      "variables": {}
+    },
     "alp/chips/qmc5883l.h": {
       "functions": {
         "qmc5883l_deinit": {
@@ -8226,6 +8420,10 @@
           "hash": "806c0bb5a237bdff",
           "signature": "alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm);"
         },
+        "tps628640_set_limits": {
+          "hash": "a7e4b321ee3072d0",
+          "signature": "alp_status_t tps628640_set_limits(tps628640_t *ctx, const pmic_rail_limit_t *limit);"
+        },
         "tps628640_set_ramp_speed": {
           "hash": "af61df614f92af56",
           "signature": "alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t speed);"
@@ -8241,10 +8439,6 @@
         "tps628640_software_enable": {
           "hash": "3ced24ee8bd4cfb7",
           "signature": "alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);"
-        },
-        "tps628640_write_reg": {
-          "hash": "30151540f76eb2da",
-          "signature": "alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val);"
         }
       },
       "macros": {
@@ -8334,15 +8528,16 @@
           "kind": "enum"
         },
         "tps628640_t": {
-          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint16_t default_voltage_mv; uint8_t control_shadow; } tps628640_t;",
+          "definition": "typedef struct { bool initialised; alp_i2c_t *bus; uint8_t addr; uint16_t default_voltage_mv; uint8_t control_shadow; const pmic_rail_limit_t *limit; } tps628640_t;",
           "fields": [
             "bool initialised",
             "alp_i2c_t *bus",
             "uint8_t addr",
             "uint16_t default_voltage_mv",
-            "uint8_t control_shadow"
+            "uint8_t control_shadow",
+            "const pmic_rail_limit_t *limit"
           ],
-          "hash": "8b9c4b8341754e5e",
+          "hash": "38c776f1f533e58c",
           "kind": "struct"
         }
       },
@@ -8506,6 +8701,129 @@
           "kind": "struct"
         }
       },
+      "variables": {}
+    },
+    "alp/chips/v2n_power_tree.h": {
+      "functions": {},
+      "macros": {
+        "V2N_M1_POWER_ACT8760_RAIL_LIMITS_INIT": {
+          "hash": "46abb1998b5c0aa7",
+          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK5] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK6] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = true }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = true }, }"
+        },
+        "V2N_M1_POWER_ACT8760_RAIL_NETS_INIT": {
+          "hash": "9ff542a3703516cf",
+          "value": "{ [ACT8760_RAIL_BUCK1] = \"VDD_3V3\", [ACT8760_RAIL_BUCK2] = \"VDD1G_1P8\", [ACT8760_RAIL_BUCK3] = \"LPD4x_1V1\", [ACT8760_RAIL_BUCK4] = \"LPDDR_1V8\", [ACT8760_RAIL_BUCK5] = \"VDD_CORE_0P75\", [ACT8760_RAIL_BUCK6] = \"VDD08_DDR\", [ACT8760_RAIL_BUCK7] = \"VDD09_CA55\", [ACT8760_RAIL_LDO1] = \"VDD1G_0P8\", [ACT8760_RAIL_LDO2] = \"LDO_1V2\", [ACT8760_RAIL_LDO3] = \"VDD_eMMC_3V3\", [ACT8760_RAIL_LDO4] = \"VDD_1V8\", [ACT8760_RAIL_LDO5] = \"VDD5G_1P8\", [ACT8760_RAIL_LDO6] = \"VDD6G_1P2\", }"
+        },
+        "V2N_M1_POWER_DA9292_CH_LIMITS_INIT": {
+          "hash": "f56d2e4c5d48c96b",
+          "value": "{ [DA9292_CH1] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [DA9292_CH2] = { .min_mv = 715u, .max_mv = 785u, .critical = false, .voltage_writable = true, .enable_writable = true }, }"
+        },
+        "V2N_M1_POWER_DA9292_CH_NETS_INIT": {
+          "hash": "d5853154a6b928c7",
+          "value": "{ [DA9292_CH1] = \"TBD\", [DA9292_CH2] = \"VDD_0P75\", }"
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_ADDR": {
+          "hash": "b771cc7501a38d29",
+          "value": "0x44u"
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_LIMIT_INIT": {
+          "hash": "8622464ac40a944a",
+          "value": "{ .min_mv = 1000u, .max_mv = 1100u, .critical = false, .voltage_writable = true, .enable_writable = true }"
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_NET": {
+          "hash": "de6fdb13820b26a4",
+          "value": "\"DDR5_VDD2H_1V05\""
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDDQ_0V5_ADDR": {
+          "hash": "b913387b034b5d23",
+          "value": "0x4Fu"
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDDQ_0V5_LIMIT_INIT": {
+          "hash": "b47ac80746b983ca",
+          "value": "{ .min_mv = 475u, .max_mv = 525u, .critical = false, .voltage_writable = true, .enable_writable = true }"
+        },
+        "V2N_M1_POWER_TPS628640_DDR5_VDDQ_0V5_NET": {
+          "hash": "54bab596410f9a00",
+          "value": "\"DDR5_VDDQ_0V5\""
+        },
+        "V2N_M1_POWER_TPS628640_LPD4X_0V6_ADDR": {
+          "hash": "ceb80199d19aa763",
+          "value": "0x4Du"
+        },
+        "V2N_M1_POWER_TPS628640_LPD4X_0V6_LIMIT_INIT": {
+          "hash": "6a585e505126fc47",
+          "value": "{ .min_mv = 570u, .max_mv = 630u, .critical = true, .voltage_writable = true, .enable_writable = true }"
+        },
+        "V2N_M1_POWER_TPS628640_LPD4X_0V6_NET": {
+          "hash": "c6964bbd74a9e3af",
+          "value": "\"LPD4x_0V6\""
+        },
+        "V2N_M1_POWER_TPS628640_VDD0V85_LPDDR_ADDR": {
+          "hash": "2dd997be3dea6ca7",
+          "value": "0x48u"
+        },
+        "V2N_M1_POWER_TPS628640_VDD0V85_LPDDR_LIMIT_INIT": {
+          "hash": "a716e08c4346f9d7",
+          "value": "{ .min_mv = 810u, .max_mv = 890u, .critical = false, .voltage_writable = true, .enable_writable = true }"
+        },
+        "V2N_M1_POWER_TPS628640_VDD0V85_LPDDR_NET": {
+          "hash": "edcddbb8d0f20c5e",
+          "value": "\"VDD0V85_LPDDR\""
+        },
+        "V2N_POWER_ACT8760_GPIO4_EXPECTED_MODE": {
+          "hash": "66eaaf773ef24483",
+          "value": "0x08u"
+        },
+        "V2N_POWER_ACT8760_GPIO_NETS_INIT": {
+          "hash": "5bde4df6b143c2c7",
+          "value": "{ \"PMIC_RSTOUT\", \"PMIC_nINT\", \"DDR4_VDDQ_EN\", \"GD32_NRST\", \"V2N_BOOT_CPU_SEL\", \"MODULE_EN\", \"DEEPX_PWR_EN_REQ\", \"SD1_EN\", \"PWEN1\", \"PWEN2\", \"MODULE_STBY\", }"
+        },
+        "V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK": {
+          "hash": "2dd046995eb470d8",
+          "value": "0x0008u"
+        },
+        "V2N_POWER_ACT8760_RAIL_LIMITS_INIT": {
+          "hash": "ded87de291af5002",
+          "value": "{ [ACT8760_RAIL_BUCK1] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK2] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK3] = { .min_mv = 1050u, .max_mv = 1150u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK4] = { .min_mv = 1725u, .max_mv = 1875u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK5] = { .min_mv = 725u, .max_mv = 775u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK6] = { .min_mv = 775u, .max_mv = 825u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_BUCK7] = { .min_mv = 855u, .max_mv = 945u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO1] = { .min_mv = 763u, .max_mv = 837u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO2] = { .min_mv = 1150u, .max_mv = 1250u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO3] = { .min_mv = 3150u, .max_mv = 3450u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO4] = { .min_mv = 1750u, .max_mv = 1850u, .critical = true, .voltage_writable = true, .enable_writable = true }, [ACT8760_RAIL_LDO5] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = true }, [ACT8760_RAIL_LDO6] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = true }, }"
+        },
+        "V2N_POWER_ACT8760_RAIL_NETS_INIT": {
+          "hash": "83d93d17451b266c",
+          "value": "{ [ACT8760_RAIL_BUCK1] = \"VDD_3V3\", [ACT8760_RAIL_BUCK2] = \"VDD1G_1P8\", [ACT8760_RAIL_BUCK3] = \"LPD4x_1V1\", [ACT8760_RAIL_BUCK4] = \"LPDDR_1V8\", [ACT8760_RAIL_BUCK5] = \"VDD_CORE_0P75\", [ACT8760_RAIL_BUCK6] = \"VDD08_DDR\", [ACT8760_RAIL_BUCK7] = \"VDD09_CA55\", [ACT8760_RAIL_LDO1] = \"VDD1G_0P8\", [ACT8760_RAIL_LDO2] = \"LDO_1V2\", [ACT8760_RAIL_LDO3] = \"VDD_eMMC_3V3\", [ACT8760_RAIL_LDO4] = \"VDD_1V8\", [ACT8760_RAIL_LDO5] = \"VDD5G_1P8\", [ACT8760_RAIL_LDO6] = \"VDD6G_1P2\", }"
+        },
+        "V2N_POWER_DA9292_CFG_REV": {
+          "hash": "d2393b367f5d9b17",
+          "value": "0x11u"
+        },
+        "V2N_POWER_DA9292_CH_LIMITS_INIT": {
+          "hash": "4c0b383d77f6637f",
+          "value": "{ [DA9292_CH1] = { .min_mv = 0u, .max_mv = 0u, .critical = true, .voltage_writable = false, .enable_writable = false }, [DA9292_CH2] = { .min_mv = 0u, .max_mv = 0u, .critical = false, .voltage_writable = false, .enable_writable = false }, }"
+        },
+        "V2N_POWER_DA9292_CH_NETS_INIT": {
+          "hash": "ec96f934fbe2f9c4",
+          "value": "{ [DA9292_CH1] = \"TBD\", [DA9292_CH2] = \"\", }"
+        },
+        "V2N_POWER_DA9292_DEV_ID": {
+          "hash": "2214578a2430e74e",
+          "value": "0xEAu"
+        },
+        "V2N_POWER_DA9292_REV_ID": {
+          "hash": "26665facd01d7787",
+          "value": "0x42u"
+        },
+        "V2N_POWER_TPS628640_LPD4X_0V6_ADDR": {
+          "hash": "cd8fc650dadcaa76",
+          "value": "0x4Du"
+        },
+        "V2N_POWER_TPS628640_LPD4X_0V6_LIMIT_INIT": {
+          "hash": "31ae85d68f61d381",
+          "value": "{ .min_mv = 570u, .max_mv = 630u, .critical = true, .voltage_writable = true, .enable_writable = true }"
+        },
+        "V2N_POWER_TPS628640_LPD4X_0V6_NET": {
+          "hash": "83a55dc6bac66e5e",
+          "value": "\"LPD4x_0V6\""
+        }
+      },
+      "typedefs": {},
       "variables": {}
     },
     "alp/chips/veml7700.h": {

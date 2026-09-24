@@ -39,7 +39,12 @@ remains a bench-diagnostic check, not an automated bring-up step:
    RIIC8/BRD_I2C.  This bus is Cortex-A55/Linux-exclusive
    (`metadata/e1m_modules/v2n/core-ownership.yaml`); U-Boot runs on
    the A55 before Linux starts, so it -- not the CM33 -- is the sole
-   writer.
+   writer.  CM33-boot mode has no sequence owner yet
+   (`cm33_boot: status: blocked` in
+   `metadata/e1m_modules/v2n/power-tree.yaml`); the V2N-M1 guard tables
+   (`V2N_M1_POWER_*` in `<alp/chips/v2n_power_tree.h>`) allow CH2 only in
+   [715, 785] mV and the DEEPX TPS628640 bucks only in their windows (see
+   [`v2n.md`](v2n.md#runtime-readings-and-guarded-control)).
 2. **ACK-probe** the DEEPX TPS628640 instances at `0x44` / `0x4F` /
    `0x48` to confirm population (self-regulating).  `deepx_lpddr_0v85`
    (`0x48`) only ACKs after step 1 drives `P64` high -- see the strap

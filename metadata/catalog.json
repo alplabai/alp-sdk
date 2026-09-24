@@ -3109,6 +3109,36 @@
           "models": false,
           "peripherals": true
         },
+        "name": "v2n-pmic-inspect",
+        "osSet": [
+          "yocto",
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-pmic-inspect",
+        "som": "E1M-V2N101",
+        "summary": "Inspector for the V2N SoM's on-module power chips, run from a Linux/Yocto user-space app on the V2N Cortex-A55 cluster. It is read-only unless you pass `--write` together with one action flag."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 2,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "a55_cluster",
+            "os": "yocto"
+          },
+          {
+            "app": "alp-stock-shim",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-power-monitor",
         "osSet": [
           "yocto",

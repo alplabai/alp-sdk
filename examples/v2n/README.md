@@ -28,6 +28,7 @@ captured in [`docs/bring-up-v2n-m1.md`](../../docs/bring-up-v2n-m1.md).
 | [`v2n-gd32-swd-flash`](v2n-gd32-swd-flash/)            | Host-driven SWD bit-bang on the GD32 supervisor -- connect, halt, mass-erase, program, verify, reset.                                            |
 | [`v2n-m1-deepx-inference`](v2n-m1-deepx-inference/)    | DEEPX DX-M1 NPU bring-up + single inference through `<alp/inference.h>` on a V2N-M1 SoM. native_sim exercises the NOSUPPORT framing; the V2N-M1 target is `build_only: true` until the customer-side DEEPX `dx_rt` runtime integration ships. |
 | [`v2n-m1-ros-perception`](v2n-m1-ros-perception/)      | ROS 2 perception node for V2N + V2N-M1 (DRP-AI3 fallback on V2N, DEEPX DX-M1 over PCIe on V2N-M1). `[UNTESTED]` -- no `testcase.yaml`; not built or gated by CI. |
+| [`v2n-pmic-inspect`](v2n-pmic-inspect/)                | Read-only-by-default inspector for the on-module ACT88760 / DA9292 / TPS628640 from a Linux/Yocto user-space app on the V2N A55; guarded `--write` actions go through the metadata-generated limits tables. No `testcase.yaml`; not built or gated by CI. |
 | [`v2n-power-monitor`](v2n-power-monitor/)              | Live per-rail power table (3V3/1V8/VCAM2/VCAM3 via on-board INA236s) from a Linux/Yocto user-space app on the V2N A55. No `testcase.yaml`; not built or gated by CI. |
 
 ## Why a separate index here

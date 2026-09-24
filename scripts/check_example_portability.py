@@ -183,6 +183,14 @@ _CHIP_INCLUDE_RE = re.compile(r'^\s*#\s*include\s*[<"]alp/chips/([A-Za-z0-9_]+)\
 _ZEPHYR_DRIVER_INCLUDE_RE = re.compile(
     r'^\s*#\s*include\s*[<"]zephyr/drivers/([A-Za-z0-9_./]+)\.h[>"]')
 
+# Headers under include/alp/chips/ that are NOT chip drivers, so they have
+# no metadata/chips/<name>.yaml and no board.yaml `chips:` entry.  Each is
+# a shared type or a generated per-family table the chip drivers consume.
+_NON_CHIP_HEADERS: dict[str, str] = {
+    "pmic_rail_limit": "shared guard-entry type for the PMIC drivers",
+    "v2n_power_tree": "generated from metadata/e1m_modules/v2n/power-tree.yaml",
+}
+
 # Pre-existing examples that #include <zephyr/drivers/...> directly with no
 # portable <alp/*.h> surface to route through today.  Keyed by the example's
 # path relative to examples/ (matches how check_example()/main() identify
@@ -358,7 +366,7 @@ def check_chip_includes_declared(example_dir: pathlib.Path,
             if not match:
                 continue
             chip = match.group(1)
-            if chip in declared or chip in seen:
+            if chip in declared or chip in seen or chip in _NON_CHIP_HEADERS:
                 continue
             seen.add(chip)
             errors.append(

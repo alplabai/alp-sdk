@@ -3,7 +3,8 @@ schema_version:   1
 chip_id:          tps628640
 driver_status:    complete            # init + VOUT1/2 r/w + STATUS read +
                                       # software-enable / FPWM / ramp-speed /
-                                      # reset CONTROL helpers + raw R/W.
+                                      # reset CONTROL helpers + raw read; every
+                                      # write guarded by tps628640_set_limits().
 display_name:     "TI TPS628640 single-channel buck regulator"
 vendor:           texas-instruments
 mpn_population:
@@ -23,20 +24,30 @@ notes: |
   carry wider accuracy tolerance per the datasheet footnote --
   avoid in production firmware that needs the tighter VOS bar.
 
-  CONTROL (0x03) is **write-only**; reading returns 0x00.  The
-  driver maintains a software shadow seeded with the datasheet
-  default (0x6E) so the typed helpers can do read-modify-write
-  semantics without an I2C round-trip.
+  CONTROL (0x03) reads back: bench E1M-V2M103 2026-09-24 read 0x6F
+  (datasheet cross-check still pending).  The driver seeds its
+  CONTROL shadow from that read when SOFTWARE_ENABLE (bit 5) is set,
+  else from TPS628640_CTRL_DEFAULT (0x6F), and updates the shadow
+  only after a successful write.
 
+# Raw-write policy (`write:`): guarded = only via a typed, window/critical-
+# guarded API (the driver has no raw write path at all); deny = never.
 register_table:
-  - { addr: 0x01, name: "VOUT Register 1", type: rw, default: 0x64,
+  - { addr: 0x01, name: "VOUT Register 1", type: rw, default: 0x64, write: guarded,
       summary: "Output-voltage setpoint (selected when VID = low)" }
-  - { addr: 0x02, name: "VOUT Register 2", type: rw, default: 0x64,
+  - { addr: 0x02, name: "VOUT Register 2", type: rw, default: 0x64, write: guarded,
       summary: "Output-voltage setpoint (selected when VID = high)" }
-  - { addr: 0x03, name: "CONTROL",         type: w,  default: 0x6E,
+  - { addr: 0x03, name: "CONTROL",         type: rw, default: 0x6F, write: guarded,
       summary: "Reset / SW-enable / FPWM / discharge / HICCUP / ramp speed" }
-  - { addr: 0x05, name: "STATUS",          type: r,  default: 0x00,
-      summary: "Thermal-warning (bit 4) / HICCUP (bit 3) / UVLO (bit 0) latches" }
+  - { addr: 0x05, name: "STATUS",          type: r,  default: 0x00, write: deny,
+      summary: "Thermal-warning (bit 4) / HICCUP (bit 3) / UVLO (bit 0) latches; read clears" }
+
+# Output channels (VID pin selects which VOUT register is live).  Per-instance
+# nets / targets / guard windows: metadata/e1m_modules/v2n/power-tree.yaml
+# (cross-checked against i2c.addresses[] below by scripts/validate_metadata.py).
+channels:
+  - { id: vout1, vout_reg: 0x01, abs_min_mv: 400, abs_max_mv: 1675, step_mv: 5, base_mv: 400 }
+  - { id: vout2, vout_reg: 0x02, abs_min_mv: 400, abs_max_mv: 1675, step_mv: 5, base_mv: 400 }
 
 slave_address_range: "0x40..0x4F (resistor-strapped via VSET/VID per datasheet Table 8-1)"
 
@@ -46,7 +57,7 @@ i2c:
   # different address straps and different design-target voltages.
   addresses:
     - { addr_7bit: 0x48, voltage_mv: 850, rail: "VDD0V85_LPDDR",  scope: "v2n-m1 only (DEEPX LPDDR + DDR core)" }
-    - { addr_7bit: 0x44, voltage_mv: 1050, rail: "DDR5_VDD",       scope: "v2n-m1 only (DEEPX DDR5 VDD L+H)" }
+    - { addr_7bit: 0x44, voltage_mv: 1050, rail: "DDR5_VDD2H_1V05", scope: "v2n-m1 only (DEEPX DDR5 VDD L+H)" }
     - { addr_7bit: 0x4F, voltage_mv: 500, rail: "DDR5_VDDQ_0V5",   scope: "v2n-m1 only (DEEPX DDR5 IO termination)" }
     - { addr_7bit: 0x4D, voltage_mv: 600, rail: "LPD4x_0V6",       scope: "v2n-common, assembled: optional (Renesas LPDDR4X)" }
   max_clock_hz:   400000              # FM speed -- TBD, conservative default
@@ -54,7 +65,9 @@ i2c:
 kconfig:
   zephyr:         ALP_SDK_CHIP_TPS628640
   baremetal:      ALP_SDK_CHIP_TPS628640
-  yocto:          n/a                  # Linux uses kernel regulator framework
+  yocto:          tps628640            # meta-alp-sdk alp-chips PACKAGECONFIG[tps628640]:
+                                       # the same OS-agnostic driver over <alp/i2c.h>
+                                       # (i2c-dev); no upstream Linux regulator driver
 
 families:
   - v2n           # only the 0x4D Renesas-rail instance, when assembled

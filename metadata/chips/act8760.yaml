@@ -37,25 +37,92 @@ i2c:
     - { slave: add2, addr_7bit: 0x26, scope: "Buck7 + LDO1..LDO6 (ADD2)" }
   max_clock_hz:   1000000       # datasheet: 1 MHz I2C
 
-# Per-rail manifest -- the rail names + intended target voltages live
-# in the V2N power-sequence PDF.  Filling them in fully requires
-# decoding the .iact CMI profile (XML) or reading the Users Guide
-# VSET-to-mV table for each Buck/LDO range setting.  Until then this
-# block lists the rails the V2N CMI populates with TBD voltages.
+# Per-rail register facts (AA82BZ register-map workbook Rev 1.1, verified
+# cell-by-cell).  Each regulator is a 0x20-wide tile; addresses below are
+# absolute register addresses on the rail's slave.  SoM-specific net
+# names, targets, guard windows and criticality live in the SoM family
+# power tree (metadata/e1m_modules/v2n/power-tree.yaml), NOT here.
+#   status_reg: bit7 POK, bit6 OV, bit5 ILIM (bucks: bit4 ILIM_WARN,
+#               bits3:0 fault masks)
+#   enable_reg/enable_bit: the tile's ON bit
+#   vset0_reg:  bucks VSET0[6:0] (bit7 = EN_OutPD; IPD_SET[0] on Buck5/6);
+#               LDO1/2 VSET[5:0] + RANGE bit6; LDO3-6 VSET[5:0] + RANGE bit7
+#   dvs_regs:   VSET1 (and, bank-aliased via MSTR 0x2C BAND_SEL, VSET2/3 on
+#               Buck1/2/7) -- guarded like VSET0, never written by the drivers
+#   range_reg/range_bit: live range selector (null = fixed single range)
+#               (Buck1/2/7: tile +6 bit1; Buck3/4: tile +1 bit3 -- tile +6
+#               bits1:0 are DBSTBY on Buck3/4, workbook BUCK3/BUCK4 sheets)
+#   ranges:     VOUT = base_mv + VSET * step_uv / 1000
 rails:
-  - { id: buck1, slave: add1, role: "TBD per CMI 120.E1 power-on diagram" }
-  - { id: buck2, slave: add1, role: "TBD" }
-  - { id: buck3, slave: add1, role: "TBD" }
-  - { id: buck4, slave: add1, role: "TBD" }
-  - { id: buck5, slave: add1, role: "TBD" }
-  - { id: buck6, slave: add1, role: "TBD" }
-  - { id: buck7, slave: add2, role: "TBD" }
-  - { id: ldo1,  slave: add2, role: "TBD" }
-  - { id: ldo2,  slave: add2, role: "TBD" }
-  - { id: ldo3,  slave: add2, role: "TBD" }
-  - { id: ldo4,  slave: add2, role: "TBD" }
-  - { id: ldo5,  slave: add2, role: "TBD; may be configured as load switch" }
-  - { id: ldo6,  slave: add2, role: "TBD; may be configured as load switch" }
+  - { id: buck1, slave: add1, kind: buck, status_reg: 0x40, vset0_reg: 0x42, vset_mask: 0x7F, dvs_regs: [0x43], enable_reg: 0x44, enable_bit: 7, range_reg: 0x46, range_bit: 1,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 5000 }, { range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck2, slave: add1, kind: buck, status_reg: 0x60, vset0_reg: 0x62, vset_mask: 0x7F, dvs_regs: [0x63], enable_reg: 0x64, enable_bit: 7, range_reg: 0x66, range_bit: 1,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 5000 }, { range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck3, slave: add1, kind: buck, status_reg: 0x80, vset0_reg: 0x82, vset_mask: 0x7F, dvs_regs: [0x83], enable_reg: 0x84, enable_bit: 7, range_reg: 0x81, range_bit: 3,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 5000 }, { range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck4, slave: add1, kind: buck, status_reg: 0xA0, vset0_reg: 0xA2, vset_mask: 0x7F, dvs_regs: [0xA3], enable_reg: 0xA4, enable_bit: 7, range_reg: 0xA1, range_bit: 3,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 5000 }, { range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck5, slave: add1, kind: buck, status_reg: 0xC0, vset0_reg: 0xC2, vset_mask: 0x7F, dvs_regs: [0xC3], enable_reg: 0xC4, enable_bit: 7, range_reg: null, range_bit: null,
+      ranges: [{ range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck6, slave: add1, kind: buck, status_reg: 0xE0, vset0_reg: 0xE2, vset_mask: 0x7F, dvs_regs: [0xE3], enable_reg: 0xE4, enable_bit: 7, range_reg: null, range_bit: null,
+      ranges: [{ range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: buck7, slave: add2, kind: buck, status_reg: 0x00, vset0_reg: 0x02, vset_mask: 0x7F, dvs_regs: [0x03], enable_reg: 0x04, enable_bit: 7, range_reg: 0x06, range_bit: 1,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 5000 }, { range: 1, base_mv: 500, step_uv: 25000 }], abs_min_mv: 500, abs_max_mv: 3675 }
+  - { id: ldo1, slave: add2, kind: ldo, status_reg: 0x20, vset0_reg: 0x21, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x22, enable_bit: 7, range_reg: 0x21, range_bit: 6,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1200, step_uv: 12500 }], abs_min_mv: 500, abs_max_mv: 1987 }
+  - { id: ldo2, slave: add2, kind: ldo, status_reg: 0x26, vset0_reg: 0x27, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x28, enable_bit: 7, range_reg: 0x27, range_bit: 6,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1200, step_uv: 12500 }], abs_min_mv: 500, abs_max_mv: 1987 }
+  - { id: ldo3, slave: add2, kind: ldo, status_reg: 0x46, vset0_reg: 0x47, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x48, enable_bit: 7, range_reg: 0x47, range_bit: 7,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1000, step_uv: 50000 }], abs_min_mv: 500, abs_max_mv: 4150 }
+  - { id: ldo4, slave: add2, kind: ldo, status_reg: 0x66, vset0_reg: 0x67, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x68, enable_bit: 7, range_reg: 0x67, range_bit: 7,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1000, step_uv: 50000 }], abs_min_mv: 500, abs_max_mv: 4150 }
+  - { id: ldo5, slave: add2, kind: ldo, status_reg: 0x40, vset0_reg: 0x41, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x42, enable_bit: 7, range_reg: 0x41, range_bit: 7,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1000, step_uv: 50000 }], abs_min_mv: 500, abs_max_mv: 4150,
+      notes: "may be configured as load switch 5 (NLSW) -- VSET then has no effect" }
+  - { id: ldo6, slave: add2, kind: ldo, status_reg: 0x60, vset0_reg: 0x61, vset_mask: 0x3F, dvs_regs: [], enable_reg: 0x62, enable_bit: 7, range_reg: 0x61, range_bit: 7,
+      ranges: [{ range: 0, base_mv: 500, step_uv: 12500 }, { range: 1, base_mv: 1000, step_uv: 50000 }], abs_min_mv: 500, abs_max_mv: 4150,
+      notes: "may be configured as load switch 6 (NLSW) -- VSET then has no effect" }
+
+# MSTR-tile (ADD1) register map + write policy.  `write:` is what the
+# driver's raw act8760_write_reg() path does with the address:
+#   allow   -- raw write permitted (once a limits table is installed);
+#   guarded -- owned by a typed, window/critical-guarded API; raw write refused;
+#   deny    -- never written by any driver path (power-state / factory / OTP).
+# Every rail tile's status/VSET/DVS/ON/range registers (rails: above) are
+# `guarded`; every tile's factory registers (buck tile +0x08..+0x1F, LDO
+# dual tile +0x0B..+0x1F) are `deny`.  A register not listed is `deny`.
+register_table:
+  - { slave: add1, addr: 0x00, name: "SYS_STATUS", type: r, write: deny, summary: "ROM_STAT/WD_ALERT/TWARN/VSYSSTAT/VIN_POK_OV/PBA/VSYSWARN/PBD; VSYS latches clear on read" }
+  - { slave: add1, addr: 0x01, name: "SYS_MASK", type: rw, write: allow, summary: "interrupt masks for 0x00 (TMSK = bit5)" }
+  - { slave: add1, addr: 0x02, name: "SYS_RAW", type: r, write: deny, summary: "FACTORY_MODE, raw VSYSWARN/VSYSMON, DVS_FROM_I2C_DB[11:9], PBDAT" }
+  - { slave: add1, addr: 0x03, name: "GPIO1_8_STAT", type: r, write: deny, summary: "GPIO8..1 real-time level, bit7..0" }
+  - { slave: add1, addr: 0x04, name: "GPIO1_8_TOGGLE", type: r, write: deny, summary: "GPIO8..1 toggle detect, bit7..0; read clears" }
+  - { slave: add1, addr: 0x05, name: "GPIO1_8_MASK", type: rw, write: allow, summary: "GPIO8..1 input-toggle IRQ mask (1 = masked)" }
+  - { slave: add1, addr: 0x06, name: "INTADR", type: r, write: deny, summary: "tile address of the pending interrupt" }
+  - { slave: add1, addr: 0x07, name: "SYS_CTRL", type: rw, write: deny, summary: "MR / SLEEP / RESET_GPIOs_EDGE / DPSLP / AUTO_CLEAR / POWER OFF / WDPCEN / WDSREN -- power-state control, never written" }
+  - { slave: add1, addr: 0x08, name: "PASSWD", type: w, write: deny, summary: "factory-mode password -- never written" }
+  - { slave: add1, addr: 0x09, name: "RST_PWR_TIMING", type: rw, write: deny, summary: "TRST_DLY / POWERCYCLE_TIME / POWEROFF_TIME / DIS OV UV SHUTDOWN" }
+  - { slave: add1, addr: 0x0A, name: "PB_ROM_VSYSMON", type: rw, write: deny, summary: "EN POWERCYCLE / EN POWEROFF / ROM_EN / VSYSMON[4:0]" }
+  - { slave: add1, addr: 0x0B, name: "IO1_4_DLY", type: rw, write: deny, summary: "IO1..IO4 delay [1:0] each (0/1/2/4 ms) -- retimes PMIC_RSTOUT (IO1); never written" }
+  - { slave: add1, addr: 0x0C, name: "IO5_7_DLY", type: rw, write: deny, summary: "IO5..IO7 delay [1:0], WDTIME bit1, RETRY TIME bit0 -- watchdog class + retimes V2N_BOOT_CPU_SEL / DEEPX_PWR_EN_REQ; never written" }
+  - { slave: add1, addr: 0x0D, name: "MODE1_MUX1", type: rw, write: guarded, summary: "bit7 polarity, bits6:4 factory, bits3:0 MUX -- act8760_gpio_set_polarity() only" }
+  - { slave: add1, addr: 0x0E, name: "MODE2_MUX2", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x0F, name: "MODE3_MUX3", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x10, name: "MODE4_MUX4", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x11, name: "MODE5_MUX5", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x12, name: "MODE6_MUX6", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x13, name: "MODE7_MUX7", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x14, name: "POK_OV_VSYSWARN", type: rw, write: allow, summary: "VIN POK_OV[2:0] / VSYSWARN[4:0]" }
+  - { slave: add1, addr_range: [0x15, 0x26], name: "FACTORY", type: rw, write: deny, summary: "factory (non-)volatile incl. 0x16 ADD1 / 0x23 ADD2 address select" }
+  - { slave: add1, addr: 0x27, name: "MODE8_MUX8", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x28, name: "MODE9_MUX9", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x29, name: "MODE10_MUX10", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x2A, name: "MODE11_MUX11", type: rw, write: guarded, summary: "as MODE1" }
+  - { slave: add1, addr: 0x2B, name: "GPIO9_11", type: rw, write: allow, summary: "bit7 GPIO9 STAT, 6 GPIO9 toggle, 5 GPIO9 MASK, 4 GPIO10 STAT, 3 toggle, 2 MASK, 1 GPIO11 STAT, 0 GPIO11 toggle; toggles read-clear" }
+  - { slave: add1, addr: 0x2C, name: "DVS_SEL", type: rw, write: deny, summary: "BK1/BK2/BK7_DVS_I2C[1:0], GPIO11 MASK bit1, BAND_SEL bit0 -- DVS slot select out of scope" }
+  - { slave: add1, addr_range: [0x2D, 0x32], name: "FACTORY", type: rw, write: deny, summary: "factory non-volatile" }
+  - { slave: add1, addr: 0x33, name: "LED_CURRENT", type: rw, write: allow, summary: "GPIO9 / GPIO10 LED current [3:0]" }
+  - { slave: add1, addr: 0x34, name: "EN_PUSH_PULL", type: rw, write: deny, summary: "bit7 nSAVE_IQ_MSTR; bits6..0 push-pull enable for GPIO8,7,6,4,3,2,1 (no GPIO5 bit) -- read only" }
 
 # Pin-level signals the driver expects the board to route.  TWARN
 # is exposed inside the IC's status register (no dedicated pin); the
@@ -69,8 +136,9 @@ signals:
 kconfig:
   zephyr:         ALP_SDK_CHIP_ACT8760
   baremetal:      ALP_SDK_CHIP_ACT8760    # same symbol; build glue picks the impl
-  yocto:          n/a                      # Linux uses Active-Semi's regulator
-                                           # framework provider, not this driver
+  yocto:          act8760                  # meta-alp-sdk alp-chips PACKAGECONFIG[act8760]:
+                                           # the same OS-agnostic driver over <alp/i2c.h>
+                                           # (i2c-dev); no upstream Linux regulator driver
 
 # Populated on:
 families:

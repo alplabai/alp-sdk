@@ -100,12 +100,28 @@ silicon, confirm with a scope whether CH2 tracks P64 or the I2C
 `CH2_EN` bit, and file a follow-up against #2045 rather than assuming
 a rail fault.
 
-`da9292_v2n_m1_enable_deepx_rail()` and `da9292_init()` still exist in
-`chips/da9292/` and are safe to call from a bench diagnostic app for
-**read-only verification** (`da9292_get_status()`,
-`da9292_read_and_clear_events()`) -- but never to re-run the enable
-sequence from the CM33, which would be a second, uncoordinated writer
-of the same PMIC U-Boot already programmed.
+The same sequence exists as an OS-agnostic driver function,
+`da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
+callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
+masks OV out of PG).  **CM33-boot mode is blocked:** it would need the CM33
+to master RIIC8 and drive P64 / P65, which the 2026-09-24 single-master
+decision forbids (`core-ownership.yaml`).  `boot_modes:` in
+`metadata/e1m_modules/v2n/power-tree.yaml` records
+`cm33_boot: status: blocked`, and `validate_metadata.py` rejects a cm33 owner
+until core-ownership gives RIIC8 and P64 / P65 to the m33.  Unblocking it
+changes, together: core-ownership per boot mode, the pinmux core of P64 / P65
+/ PA6, the CM33 `&i2c8`, the Linux `i2c8` status, the RIIC8 clock-keep hunk,
+a GPIO5 `V2N_BOOT_CPU_SEL` gate in U-Boot 0004, and the GPIO5 level (not yet
+recorded).  Exactly one owner runs the sequence per boot.
+
+The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00
+`0x0E` = `0xFF`; `da9292_ch2_sequence()` reports it in `res.pmc_cfg_00`).
+Anything that drives the EN2 pin before the sequence finishes brings CH2 up
+at the OTP default (VSTEP=1, 1.80 V) on the 0.75 V DEEPX core.  Resolve the
+EN2 / VSEL2 nets before running a bench build that touches them.  A bench diagnostic app may use the read-only
+calls (`da9292_get_status()`, `da9292_get_channel_state()`,
+`da9292_peek_events()`) at any time; every control write is refused unless a
+limits table is installed with `da9292_set_limits()`.
 
 ### 3. Sequence M1_RESET + PCIe muxes
 

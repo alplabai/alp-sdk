@@ -12,12 +12,17 @@
 #include "alp/chips/da9292.h"
 #include "alp/chips/pca9451a.h"
 #include "alp/chips/tps628640.h"
+#include "alp/chips/v2n_power_tree.h"
 #include "alp/e1m_pinout.h"
 #include "alp/peripheral.h"
 
+#include <zephyr/drivers/gpio/gpio_emul.h>
+
+#include "fakes.h"
+
 /* Not part of the public da9292 API -- see chips/da9292/da9292_internal.h
- * for why the CH2_PG poll-budget decision is tested directly here rather
- * than through da9292_v2n_m1_enable_deepx_rail(). */
+ * for why the poll-budget decision is tested directly here rather than
+ * through da9292_ch2_sequence(). */
 #include "da9292_internal.h"
 
 /* ------------------------------------------------------------------ */
@@ -53,6 +58,19 @@ ZTEST(alp_chips, test_act8760_calls_reject_uninitialised)
 	zassert_equal(act8760_read_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, &v), ALP_ERR_NOT_READY);
 	zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, 0u, 0u), ALP_ERR_NOT_READY);
 	zassert_equal(act8760_rail_get_vset(&ctx, ACT8760_RAIL_BUCK1, &v), ALP_ERR_NOT_READY);
+
+	act8760_rail_state_t rs;
+	act8760_gpio_state_t gs;
+	uint16_t             mv, mask;
+	zassert_equal(act8760_set_limits(&ctx, NULL, 0u), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_rail_get_state(&ctx, ACT8760_RAIL_BUCK1, &rs), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_rail_get_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, &mv), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, 3300u), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, true), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_gpio_get(&ctx, 4u, &gs), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_gpio_toggles_peek(&ctx, &mask), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_gpio_toggles_clear(&ctx, &mask), ALP_ERR_NOT_READY);
+	zassert_equal(act8760_gpio_set_polarity(&ctx, 4u, false), ALP_ERR_NOT_READY);
 }
 
 /* ------------------------------------------------------------------ */
@@ -90,23 +108,43 @@ ZTEST(alp_chips, test_da9292_calls_reject_uninitialised)
 	zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 800u), ALP_ERR_NOT_READY);
 	zassert_equal(da9292_get_voltage_mv(&ctx, DA9292_CH1, &mv), ALP_ERR_NOT_READY);
 	zassert_equal(da9292_read_reg(&ctx, 0u, &v), ALP_ERR_NOT_READY);
-	zassert_equal(da9292_v2n_base_init(&ctx), ALP_ERR_NOT_READY);
-	zassert_equal(da9292_v2n_m1_enable_deepx_rail(&ctx, 5000u), ALP_ERR_NOT_READY);
+	zassert_equal(da9292_write_reg(&ctx, 0x02u, 0u), ALP_ERR_NOT_READY);
+	zassert_equal(da9292_set_limits(&ctx, NULL), ALP_ERR_NOT_READY);
+	zassert_equal(da9292_peek_events(&ctx, &events), ALP_ERR_NOT_READY);
+
+	da9292_identity_t      id;
+	da9292_channel_state_t cs;
+	zassert_equal(da9292_get_identity(&ctx, &id), ALP_ERR_NOT_READY);
+	zassert_equal(da9292_get_channel_state(&ctx, DA9292_CH2, &cs), ALP_ERR_NOT_READY);
+	zassert_equal(da9292_ch2_sequence(&ctx, NULL, NULL), ALP_ERR_NOT_READY);
 }
 
-ZTEST(alp_chips, test_da9292_set_voltage_range_validation)
+/* Fail-closed: with no limits table installed every control write is
+ * refused BEFORE any bus access (.initialised forced, no bus). */
+ZTEST(alp_chips, test_da9292_control_writes_fail_closed)
 {
-	/* Force .initialised so the function reaches the range-check
-     * before any bus access. */
-	da9292_t ctx = { .initialised = true };
+	da9292_t                        ctx = { .initialised = true };
+	struct da9292_ch2_seq_result    res;
+	const struct da9292_ch2_seq_cfg cfg = {
+		.target_mv       = 750u,
+		.expected_dev_id = 0xEAu,
+		.pwr_en_req      = (alp_gpio_t *)&ctx, /* never dereferenced */
+		.core_en         = (alp_gpio_t *)&ctx,
+		.delay           = NULL,
+	};
 
-	/* Below the documented range (300..1275 mV). */
-	zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 100u), ALP_ERR_INVAL);
-	/* Above the documented range. */
-	zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH1, 2000u), ALP_ERR_INVAL);
+	zassert_equal(da9292_set_voltage_mv(&ctx, DA9292_CH2, 750u), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_set_enable(&ctx, DA9292_CH2, true), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_set_enable(&ctx, DA9292_CH1, false), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_write_reg(&ctx, 0x02u, 0xFFu), ALP_ERR_NOSUPPORT);
+	/* Missing delay callback is an argument error before the guard. */
+	zassert_equal(da9292_ch2_sequence(&ctx, &cfg, &res), ALP_ERR_INVAL);
+	zassert_equal(res.step, DA9292_SEQ_ERR_ARGS);
+	/* Invalid channel is rejected before the guard. */
+	zassert_equal(da9292_set_voltage_mv(&ctx, (da9292_channel_t)2, 750u), ALP_ERR_INVAL);
 }
 
-/* #757 regression: da9292_v2n_m1_enable_deepx_rail's CH2_PG poll loop
+/* #757 regression: da9292_ch2_sequence()'s DEEPX_PWR_EN_REQ / CH2_PG poll loops
  * must actually time out for a bounded budget, and never infinite-loop
  * (or wrongly succeed) at timeout_us == UINT32_MAX -- the pathological
  * "wait forever" caller value.  The I2C test double can't drive the
@@ -231,13 +269,10 @@ ZTEST(alp_chips, test_pca9451a_init_at_validates_7bit_address_bound)
 ZTEST(alp_chips, test_pca9451a_post_init_calls_reject_uninitialised)
 {
 	/* Drives the real reg_read() path against the native_sim i2c-emul
-     * controller (no fake PCA9451A target attached) -- exercises the
-     * actual init() transfer, not just a NULL guard.  Without a real
-     * chip behind the controller the probe is expected to fail, so
-     * subsequent calls must report NOT_READY; if a future fake target
-     * makes the ACK succeed, the branch below is skipped and the test
-     * still passes (same conditional idiom as the icm42670/lsm6dso/
-     * bme280 cases above). */
+     * controller at 0x2A, where no fake target sits (the default 0x25
+     * is the fake ACT88760) -- exercises the actual init() transfer,
+     * not just a NULL guard.  The probe must fail, so subsequent calls
+     * must report NOT_READY. */
 	pca9451a_t ctx;
 	alp_i2c_t *bus = alp_i2c_open(&(alp_i2c_config_t){
 	    .bus_id     = ALP_E1M_I2C0,
@@ -245,8 +280,8 @@ ZTEST(alp_chips, test_pca9451a_post_init_calls_reject_uninitialised)
 	});
 	zassert_not_null(bus);
 
-	alp_status_t s = pca9451a_init(&ctx, bus);
-	if (s != ALP_OK) {
+	zassert_not_equal(pca9451a_init_at(&ctx, bus, 0x2Au), ALP_OK, "no target at 0x2A");
+	{
 		pca9451a_status_t status;
 		bool              enabled;
 		int32_t           uv;
@@ -329,7 +364,7 @@ ZTEST(alp_chips, test_tps628640_calls_reject_uninitialised)
 	zassert_equal(tps628640_get_voltage_mv(&ctx, &mv), ALP_ERR_NOT_READY);
 	zassert_equal(tps628640_get_status(&ctx, &v), ALP_ERR_NOT_READY);
 	zassert_equal(tps628640_read_reg(&ctx, 0x01u, &v), ALP_ERR_NOT_READY);
-	zassert_equal(tps628640_write_reg(&ctx, 0x01u, 0xA0u), ALP_ERR_NOT_READY);
+	zassert_equal(tps628640_set_limits(&ctx, NULL), ALP_ERR_NOT_READY);
 }
 
 ZTEST(alp_chips, test_tps628640_set_voltage_out_of_range)
@@ -363,4 +398,618 @@ ZTEST(alp_chips, test_tps628640_set_ramp_speed_invalid)
      * Documented range 0..3; 4 is invalid. */
 	tps628640_t ctx = { .initialised = true };
 	zassert_equal(tps628640_set_ramp_speed(&ctx, (tps628640_ramp_speed_t)4u), ALP_ERR_INVAL);
+}
+
+/* ------------------------------------------------------------------ */
+/* PMIC guard + sequence coverage against the fake_act8760 /           */
+/* fake_da9292 / fake_tps628640 i2c-emul targets.  Every expectation   */
+/* is an exact register byte: these paths can drop a live rail.        */
+/* ------------------------------------------------------------------ */
+
+static alp_i2c_t *pmic_bus_open(void)
+{
+	return alp_i2c_open(&(alp_i2c_config_t){
+	    .bus_id     = ALP_E1M_I2C0,
+	    .bitrate_hz = 400000,
+	});
+}
+
+/* ---- ACT88760 ------------------------------------------------------ */
+
+static const pmic_rail_limit_t act_v2n_limits[ACT8760_RAIL_COUNT] =
+    V2N_POWER_ACT8760_RAIL_LIMITS_INIT;
+
+/* Buck1 tile on ADD1 (0x40): status 0x40, VSET0 0x42, ON 0x44, range
+ * 0x46 bit1.  VSET0 bit7 is a foreign field the driver must preserve. */
+static alp_i2c_t *act_setup(act8760_t *ctx)
+{
+	fake_act8760_reset();
+	fake_act8760_set_reg(0u, 0x40u, 0x80u); /* POK */
+	fake_act8760_set_reg(0u, 0x42u, 0xF0u); /* bit7 + VSET 0x70 = 3300 mV at range 1 */
+	fake_act8760_set_reg(0u, 0x44u, 0x80u); /* ON */
+	fake_act8760_set_reg(0u, 0x46u, 0x02u); /* Vout_Range = 1 (25 mV step) */
+	fake_act8760_set_reg(0u, 0x10u, 0x88u); /* MODE4: GPIO4 OTP defect, inverted */
+	fake_act8760_set_reg(0u, 0x11u, 0x05u); /* MODE5 */
+
+	alp_i2c_t *bus = pmic_bus_open();
+	zassert_not_null(bus);
+	zassert_ok(act8760_init(ctx, bus));
+	return bus;
+}
+
+ZTEST(alp_chips, test_act8760_write_reg_deny_and_allow)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+
+	/* No table: even an allow-listed address is refused. */
+	zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, 0x05u, 0xFFu), ALP_ERR_NOSUPPORT);
+	zassert_ok(
+	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
+
+	/* Hard-deny: MSTR 0x07 (MR / SLEEP / DPSLP / POWER OFF / watchdog),
+	 * 0x09, 0x0A, the IO-delay / WDTIME registers 0x0B / 0x0C, factory
+	 * 0x15..0x26 and 0x2D..0x32. */
+	static const uint8_t deny[] = { 0x07u, 0x09u, 0x0Au, 0x0Bu, 0x0Cu };
+	for (size_t i = 0; i < ARRAY_SIZE(deny); i++) {
+		zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, deny[i], 0x00u),
+		              ALP_ERR_NOSUPPORT,
+		              "0x%02x must be denied",
+		              deny[i]);
+	}
+	for (unsigned r = 0x15u; r <= 0x26u; r++) {
+		zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, (uint8_t)r, 0x00u),
+		              ALP_ERR_NOSUPPORT,
+		              "0x%02x must be denied",
+		              r);
+	}
+	for (unsigned r = 0x2Du; r <= 0x32u; r++) {
+		zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, (uint8_t)r, 0x00u),
+		              ALP_ERR_NOSUPPORT,
+		              "0x%02x must be denied",
+		              r);
+	}
+	/* ADD2 (Buck7 + LDOs) is never raw-writable. */
+	zassert_equal(act8760_write_reg(&ctx, ACT8760_PAGE_AUX, 0x05u, 0x00u), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_act8760_log_len(), 0u, "a refused write must never reach the bus");
+
+	/* The allow-list lands, one byte each. */
+	static const uint8_t allow[] = { 0x01u, 0x05u, 0x14u, 0x2Bu, 0x33u };
+	for (size_t i = 0; i < ARRAY_SIZE(allow); i++) {
+		const uint8_t val = (uint8_t)(0x5Au + i);
+		zassert_ok(act8760_write_reg(&ctx, ACT8760_PAGE_SYSTEM, allow[i], val));
+		zassert_equal(fake_act8760_get_reg(0u, allow[i]), val);
+		zassert_equal(fake_act8760_write_count(0u, allow[i]), 1u);
+	}
+	zassert_equal(fake_act8760_log_len(), ARRAY_SIZE(allow));
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* Buck3 (LPD4x_1V1): Vout_Range is tile +1 bit3 (0x81), not +6 (DBSTBY). */
+ZTEST(alp_chips, test_act8760_buck3_range_at_tile_plus1_bit3)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+	uint16_t   mv  = 0;
+
+	fake_act8760_set_reg(0u, 0x82u, 0x18u); /* VSET 24 */
+	fake_act8760_set_reg(0u, 0x86u, 0x03u); /* DBSTBY -- must not read as range */
+	fake_act8760_set_reg(0u, 0x81u, 0x00u); /* range 0: 500 + 24 x 5 = 620 mV */
+	zassert_ok(act8760_rail_get_voltage_mv(&ctx, ACT8760_RAIL_BUCK3, &mv));
+	zassert_equal(mv, 620u);
+	fake_act8760_set_reg(0u, 0x81u, 0x08u); /* range 1: 500 + 24 x 25 = 1100 mV */
+	zassert_ok(act8760_rail_get_voltage_mv(&ctx, ACT8760_RAIL_BUCK3, &mv));
+	zassert_equal(mv, 1100u);
+
+	zassert_ok(
+	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
+	zassert_equal(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK3, 1175u),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_ok(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK3, 1125u));
+	zassert_equal(fake_act8760_get_reg(0u, 0x82u), 0x19u);
+	zassert_equal(fake_act8760_write_count(0u, 0x81u), 0u, "range bit never written");
+	zassert_equal(fake_act8760_write_count(0u, 0x86u), 0u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_act8760_gpio_polarity_bit7_only)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+
+	zassert_equal(act8760_gpio_set_polarity(&ctx, 4u, false), ALP_ERR_NOSUPPORT, "no table");
+	zassert_equal(fake_act8760_log_len(), 0u);
+	zassert_ok(
+	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
+
+	/* GPIO4 GD32_NRST: MODE4 0x88 -> 0x08, bit7 only, MUX 0x08 kept. */
+	zassert_ok(act8760_gpio_set_polarity(&ctx, 4u, false));
+	zassert_equal(fake_act8760_get_reg(0u, 0x10u), V2N_POWER_ACT8760_GPIO4_EXPECTED_MODE);
+	zassert_equal(fake_act8760_log_len(), 1u, "exactly one write: MODE4");
+	zassert_equal(fake_act8760_log(0)->page, 0u);
+	zassert_equal(fake_act8760_log(0)->reg, 0x10u);
+	zassert_equal(fake_act8760_log(0)->val, 0x08u);
+
+	/* Already there: no second write. */
+	zassert_ok(act8760_gpio_set_polarity(&ctx, 4u, false));
+	zassert_equal(fake_act8760_log_len(), 1u);
+
+	/* GPIO5 V2N_BOOT_CPU_SEL is outside the writable mask. */
+	zassert_equal(act8760_gpio_set_polarity(&ctx, 5u, true), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_act8760_get_reg(0u, 0x11u), 0x05u);
+	zassert_equal(fake_act8760_log_len(), 1u);
+
+	act8760_gpio_state_t gs;
+	zassert_ok(act8760_gpio_get(&ctx, 4u, &gs));
+	zassert_false(gs.inverted);
+	zassert_equal(gs.mux, 0x08u);
+	zassert_equal(gs.mode_raw, 0x08u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_act8760_rail_writes_are_limit_gated)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+	uint16_t   mv  = 0;
+
+	zassert_ok(act8760_rail_get_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, &mv));
+	zassert_equal(mv, 3300u);
+
+	/* No table: refused, nothing on the bus. */
+	zassert_equal(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, 3400u), ALP_ERR_NOSUPPORT);
+	zassert_equal(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, true), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_act8760_log_len(), 0u);
+
+	zassert_ok(
+	    act8760_set_limits(&ctx, act_v2n_limits, V2N_POWER_ACT8760_GPIO_POLARITY_WRITABLE_MASK));
+
+	/* VDD_3V3 window [3150, 3450]. */
+	zassert_equal(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, 3500u),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, 3100u),
+	              ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_act8760_log_len(), 0u);
+
+	zassert_ok(act8760_rail_set_voltage_mv(&ctx, ACT8760_RAIL_BUCK1, 3400u));
+	zassert_equal(fake_act8760_get_reg(0u, 0x42u), 0xF4u, "VSET 0x74, bit7 preserved");
+	zassert_equal(fake_act8760_get_reg(0u, 0x46u), 0x02u, "range bit never flipped");
+	zassert_equal(fake_act8760_write_count(0u, 0x46u), 0u);
+
+	/* Critical rail: disable refused, ON bit untouched. */
+	zassert_equal(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, false), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_act8760_get_reg(0u, 0x44u), 0x80u);
+	zassert_equal(fake_act8760_write_count(0u, 0x44u), 0u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* A non-critical enable-only entry disables, and the write lands on ADD2
+ * (LDO5 tile slot 0x40: ON at 0x42) -- not on the same offset of ADD1. */
+ZTEST(alp_chips, test_act8760_noncritical_disable_hits_add2)
+{
+	act8760_t  ctx;
+	alp_i2c_t *bus = act_setup(&ctx);
+	fake_act8760_set_reg(1u, 0x42u, 0x80u);
+
+	static const pmic_rail_limit_t only_ldo5[ACT8760_RAIL_COUNT] = {
+		[ACT8760_RAIL_LDO5] = { .enable_writable = true },
+	};
+	zassert_ok(act8760_set_limits(&ctx, only_ldo5, 0u));
+
+	zassert_equal(act8760_rail_set_enable(&ctx, ACT8760_RAIL_BUCK1, true),
+	              ALP_ERR_NOSUPPORT,
+	              "an all-zero entry grants no control");
+	zassert_ok(act8760_rail_set_enable(&ctx, ACT8760_RAIL_LDO5, false));
+	zassert_equal(fake_act8760_get_reg(1u, 0x42u), 0x00u);
+	zassert_equal(fake_act8760_get_reg(0u, 0x42u), 0xF0u, "ADD1 0x42 untouched");
+	zassert_equal(fake_act8760_log_len(), 1u);
+	zassert_equal(fake_act8760_log(0)->page, 1u);
+
+	act8760_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+/* ---- TPS628640 ----------------------------------------------------- */
+
+static const pmic_rail_limit_t tps_l44  = V2N_M1_POWER_TPS628640_DDR5_VDD2H_1V05_LIMIT_INIT;
+static const pmic_rail_limit_t tps_l48  = V2N_M1_POWER_TPS628640_VDD0V85_LPDDR_LIMIT_INIT;
+static const pmic_rail_limit_t tps_l4f  = V2N_M1_POWER_TPS628640_DDR5_VDDQ_0V5_LIMIT_INIT;
+static const pmic_rail_limit_t tps_crit = V2N_M1_POWER_TPS628640_LPD4X_0V6_LIMIT_INIT;
+
+static alp_i2c_t *tps_setup(tps628640_t *b44, tps628640_t *b48, tps628640_t *b4f)
+{
+	fake_tps628640_reset(0x44u);
+	fake_tps628640_reset(0x48u);
+	fake_tps628640_reset(0x4Fu);
+	alp_i2c_t *bus = pmic_bus_open();
+	zassert_not_null(bus);
+	zassert_ok(tps628640_init(b44, bus, 0x44u, 1050u));
+	zassert_ok(tps628640_init(b48, bus, 0x48u, 850u));
+	zassert_ok(tps628640_init(b4f, bus, 0x4Fu, 500u));
+	return bus;
+}
+
+ZTEST(alp_chips, test_tps628640_per_instance_windows)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	/* No entry: every control write refused, bus untouched. */
+	zassert_equal(tps628640_set_voltage_mv(&b48, 850u), ALP_ERR_NOSUPPORT);
+	zassert_equal(tps628640_software_enable(&b4f, false), ALP_ERR_NOSUPPORT);
+	zassert_equal(tps628640_set_fpwm_mode(&b4f, true), ALP_ERR_NOSUPPORT);
+	zassert_equal(tps628640_set_ramp_speed(&b4f, TPS628640_RAMP_1_MV_PER_US), ALP_ERR_NOSUPPORT);
+	zassert_equal(tps628640_reset_to_defaults(&b4f), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_tps628640_write_count(0x48u, TPS628640_REG_VOUT1), 0u);
+	zassert_equal(fake_tps628640_write_count(0x4Fu, TPS628640_REG_CONTROL), 0u);
+
+	zassert_ok(tps628640_set_limits(&b44, &tps_l44));
+	zassert_ok(tps628640_set_limits(&b48, &tps_l48));
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+
+	/* 850 mV is inside 0x48's [810, 890] but not 0x44's [1000, 1100]. */
+	zassert_equal(tps628640_set_voltage_mv(&b44, 850u), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_tps628640_write_count(0x44u, TPS628640_REG_VOUT1), 0u);
+	zassert_ok(tps628640_set_voltage_mv(&b48, 850u));
+	zassert_equal(fake_tps628640_get_reg(0x48u, TPS628640_REG_VOUT1), 0x5Au);
+	zassert_ok(tps628640_set_voltage_mv(&b44, 1050u));
+	zassert_equal(fake_tps628640_get_reg(0x44u, TPS628640_REG_VOUT1), 0x82u);
+
+	/* 0x4F [475, 525]: 530 refused; 524 rounds down to 0x18 = 520 mV. */
+	zassert_equal(tps628640_set_voltage_mv(&b4f, 530u), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(tps628640_set_voltage2_mv(&b4f, 470u), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_tps628640_write_count(0x4Fu, TPS628640_REG_VOUT1), 0u);
+	zassert_ok(tps628640_set_voltage_mv(&b4f, 524u));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_VOUT1), 0x18u);
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_tps628640_software_enable_gating)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	/* Non-critical DDR5_VDDQ_0V5: off then on, SOFTWARE_ENABLE only. */
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_software_enable(&b4f, false));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL), 0x4Fu);
+	zassert_ok(tps628640_software_enable(&b4f, true));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL), 0x6Fu);
+
+	/* A critical entry (LPD4x_0V6's) is never switched off, and a reset
+	 * counts as a switch-off. */
+	zassert_ok(tps628640_set_limits(&b44, &tps_crit));
+	zassert_equal(tps628640_software_enable(&b44, false), ALP_ERR_NOSUPPORT);
+	zassert_equal(tps628640_reset_to_defaults(&b44), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_tps628640_write_count(0x44u, TPS628640_REG_CONTROL), 0u);
+	zassert_equal(fake_tps628640_get_reg(0x44u, TPS628640_REG_CONTROL), 0x6Fu);
+	zassert_ok(tps628640_software_enable(&b44, true));
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* ---- DA9292 CH2 sequence ------------------------------------------- */
+
+/* alp_gpio_open() ids from the overlay's alp,pin-array. */
+#define DX_PIN_REQ      4u /* DEEPX_PWR_EN_REQ (P65), input */
+#define DX_PIN_CORE_EN  5u /* DEEPX_CORE_0P75_EN (P64), output */
+#define DX_PIN_M1_RESET 6u /* M1_RESET (PA6), output, low = asserted */
+
+#define DX_REG_CTRL_01 0x07u
+#define DX_CH1_EN      0x01u
+#define DX_CH2_EN      0x02u
+
+static const pmic_rail_limit_t dx_m1_limits[DA9292_CH_COUNT]  = V2N_M1_POWER_DA9292_CH_LIMITS_INIT;
+static const pmic_rail_limit_t dx_v2n_limits[DA9292_CH_COUNT] = V2N_POWER_DA9292_CH_LIMITS_INIT;
+
+struct dx_rig {
+	alp_i2c_t  *bus;
+	alp_gpio_t *req, *en, *rst;
+	da9292_t    ctx;
+};
+
+struct dx_delay {
+	uint32_t calls;
+	bool     vstep_glitch; /* first delay: CH2 flips to VSTEP=1 + EN=1, request rises */
+};
+
+static const struct device *dx_gpio(void)
+{
+	return DEVICE_DT_GET(DT_NODELABEL(gpio_emul0));
+}
+
+static void dx_delay_fn(void *user, uint32_t us)
+{
+	(void)us;
+	struct dx_delay *d = user;
+	d->calls++;
+	if (d->vstep_glitch && d->calls == 1u) {
+		fake_da9292_force_reg(DX_REG_CTRL_01,
+		                      (uint8_t)(fake_da9292_get_reg(DX_REG_CTRL_01) | 0x80u | DX_CH2_EN));
+		(void)gpio_emul_input_set(dx_gpio(), DX_PIN_REQ, 1);
+	}
+}
+
+/* Caller resets / seeds the fake first; init only reads. */
+static void dx_open(struct dx_rig *r, bool req_level)
+{
+	r->bus = pmic_bus_open();
+	r->req = alp_gpio_open(DX_PIN_REQ);
+	r->en  = alp_gpio_open(DX_PIN_CORE_EN);
+	r->rst = alp_gpio_open(DX_PIN_M1_RESET);
+	zassert_not_null(r->bus);
+	zassert_not_null(r->req);
+	zassert_not_null(r->en);
+	zassert_not_null(r->rst);
+	zassert_ok(alp_gpio_configure(r->req, ALP_GPIO_INPUT, ALP_GPIO_PULL_NONE));
+	zassert_ok(alp_gpio_configure(r->en, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE));
+	zassert_ok(alp_gpio_configure(r->rst, ALP_GPIO_OUTPUT, ALP_GPIO_PULL_NONE));
+	zassert_ok(alp_gpio_write(r->en, false));
+	zassert_ok(alp_gpio_write(r->rst, false));
+	zassert_ok(gpio_emul_input_set(dx_gpio(), DX_PIN_REQ, req_level ? 1 : 0));
+	zassert_ok(da9292_init(&r->ctx, r->bus, DA9292_I2C_ADDR_V2N));
+	zassert_ok(da9292_set_limits(&r->ctx, dx_m1_limits));
+	fake_da9292_log_reset();
+}
+
+static void dx_close(struct dx_rig *r)
+{
+	da9292_deinit(&r->ctx);
+	alp_gpio_close(r->req);
+	alp_gpio_close(r->en);
+	alp_gpio_close(r->rst);
+	alp_i2c_close(r->bus);
+}
+
+static struct da9292_ch2_seq_cfg dx_cfg(const struct dx_rig *r, struct dx_delay *d)
+{
+	return (struct da9292_ch2_seq_cfg){
+		.target_mv       = 750u,
+		.expected_dev_id = V2N_POWER_DA9292_DEV_ID,
+		.pwr_en_req      = r->req,
+		.core_en         = r->en,
+		.m1_reset        = r->rst,
+		.req_timeout_ms  = 500u,
+		.pg_timeout_ms   = 20u,
+		.pg_settle_ms    = 5u,
+		.delay           = dx_delay_fn,
+		.delay_user      = d,
+	};
+}
+
+/* Number of logged CTRL_01 writes whose (val & mask) == want. */
+static size_t dx_ctrl_writes(uint8_t mask, uint8_t want)
+{
+	size_t n = 0;
+	for (size_t i = 0; i < fake_da9292_log_len(); i++) {
+		const struct fake_da9292_write *w = fake_da9292_log(i);
+		if (w->reg == DX_REG_CTRL_01 && (w->val & mask) == want) n++;
+	}
+	return n;
+}
+
+static int dx_pin(uint32_t pin)
+{
+	return gpio_emul_output_get(dx_gpio(), pin);
+}
+
+ZTEST(alp_chips, test_da9292_ch2_sequence_cold_start)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset(); /* OTP image: CTRL_01 0x81, CH2 0xB4/0x9A at VSTEP=1 */
+	dx_open(&r, true);
+	const struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_ok(da9292_ch2_sequence(&r.ctx, &cfg, &res));
+	zassert_equal(res.step, DA9292_SEQ_OK);
+	zassert_false(res.already_programmed);
+	zassert_true(res.rail_up);
+
+	zassert_equal(fake_da9292_get_reg(0x0Cu), 0x96u);
+	zassert_equal(fake_da9292_get_reg(0x0Du), 0x96u);
+	zassert_equal(fake_da9292_write_count(0x0Au), 0u, "CH1 setpoint untouched");
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x03u);
+
+	/* RMW: clear VSTEP+EN keeping CH1_EN (0x01), then enable (0x03). */
+	zassert_equal(dx_ctrl_writes(0x00u, 0x00u), 2u);
+	zassert_equal(dx_ctrl_writes(DX_CH1_EN, 0x00u), 0u, "every CTRL_01 write keeps CH1_EN");
+	zassert_equal(dx_ctrl_writes(0xFFu, 0x01u), 1u);
+	zassert_equal(dx_ctrl_writes(0xFFu, 0x03u), 1u);
+
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 1, "DEEPX_CORE_0P75_EN driven high on success");
+	zassert_equal(dx_pin(DX_PIN_M1_RESET), 0, "the sequence never releases M1_RESET");
+	dx_close(&r);
+}
+
+/* Warm reboot: CH2 already 0x96/0x96 at VSTEP=0 and LIVE.  The sequence
+ * must not reprogram it and must never clear CH2_EN -- the DEEPX may be
+ * drawing off it. */
+ZTEST(alp_chips, test_da9292_ch2_sequence_warm_keeps_rail_live)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	fake_da9292_force_reg(DX_REG_CTRL_01, DX_CH1_EN | DX_CH2_EN);
+	fake_da9292_force_reg(0x0Cu, 0x96u);
+	fake_da9292_force_reg(0x0Du, 0x96u);
+	fake_da9292_force_reg(0x00u, 0x03u); /* CH1_PG | CH2_PG */
+	dx_open(&r, true);
+	const struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_ok(da9292_ch2_sequence(&r.ctx, &cfg, &res));
+	zassert_true(res.already_programmed);
+	zassert_true(res.rail_up);
+	zassert_equal(fake_da9292_write_count(0x0Cu), 0u);
+	zassert_equal(fake_da9292_write_count(0x0Du), 0u);
+	zassert_equal(dx_ctrl_writes(DX_CH2_EN, 0x00u), 0u, "no CTRL_01 write may clear CH2_EN");
+	zassert_equal(dx_ctrl_writes(0x00u, 0x00u), 0u, "CH2_EN already set: zero CTRL_01 writes");
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x03u);
+	dx_close(&r);
+}
+
+/* Warm reboot, CH2 live, DEEPX_PWR_EN_REQ never rises: the rail and its
+ * enable pin must be left exactly as found (no CTRL_01 write, P64 held). */
+ZTEST(alp_chips, test_da9292_ch2_sequence_warm_no_request_leaves_rail)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	fake_da9292_force_reg(DX_REG_CTRL_01, DX_CH1_EN | DX_CH2_EN);
+	fake_da9292_force_reg(0x0Cu, 0x96u);
+	fake_da9292_force_reg(0x0Du, 0x96u);
+	fake_da9292_force_reg(0x00u, 0x03u);
+	dx_open(&r, false);
+	zassert_ok(alp_gpio_write(r.en, true)); /* live P64 from the previous boot */
+	const struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_NOT_READY);
+	zassert_equal(res.step, DA9292_SEQ_ERR_NO_REQUEST);
+	zassert_equal(dx_ctrl_writes(0x00u, 0x00u), 0u);
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x03u);
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 1, "P64 not dropped under a live rail");
+	dx_close(&r);
+}
+
+ZTEST(alp_chips, test_da9292_ch2_sequence_pg_fail_clears_en)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	fake_da9292_set_pg_delay(UINT32_MAX);
+	dx_open(&r, true);
+	const struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_TIMEOUT);
+	zassert_equal(res.step, DA9292_SEQ_ERR_PG_TIMEOUT);
+	zassert_false(res.rail_up);
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x01u, "CH2_EN cleared, CH1_EN kept");
+	const struct fake_da9292_write *last = fake_da9292_log(fake_da9292_log_len() - 1u);
+	zassert_equal(last->reg, DX_REG_CTRL_01);
+	zassert_equal(last->val & DX_CH2_EN, 0u, "last word on the bus disables CH2");
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 0);
+	zassert_equal(dx_pin(DX_PIN_M1_RESET), 0);
+	dx_close(&r);
+}
+
+ZTEST(alp_chips, test_da9292_ch2_sequence_vstep_at_enable_aborts)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { .vstep_glitch = true };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	dx_open(&r, false); /* request rises inside the first delay, with the glitch */
+	const struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_IO);
+	zassert_equal(res.step, DA9292_SEQ_ERR_VSTEP_AT_ENABLE);
+	zassert_equal(dx_ctrl_writes(DX_CH2_EN, DX_CH2_EN), 0u, "never enables into VSTEP=1");
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01) & DX_CH2_EN, 0u, "glitched CH2_EN cleared");
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 0);
+	zassert_equal(dx_pin(DX_PIN_M1_RESET), 0);
+	dx_close(&r);
+}
+
+ZTEST(alp_chips, test_da9292_ch2_sequence_no_request_never_enables)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	dx_open(&r, false);
+	struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+	cfg.req_timeout_ms            = 3u;
+
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_NOT_READY);
+	zassert_equal(res.step, DA9292_SEQ_ERR_NO_REQUEST);
+	zassert_equal(dx_ctrl_writes(DX_CH2_EN, DX_CH2_EN), 0u);
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 0);
+	dx_close(&r);
+}
+
+ZTEST(alp_chips, test_da9292_ch2_sequence_refuses_without_grant)
+{
+	struct dx_rig                r;
+	struct dx_delay              d = { 0 };
+	struct da9292_ch2_seq_result res;
+	fake_da9292_reset();
+	dx_open(&r, true);
+	struct da9292_ch2_seq_cfg cfg = dx_cfg(&r, &d);
+
+	zassert_ok(da9292_set_limits(&r.ctx, NULL));
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_NOSUPPORT);
+	/* v2n base: CH2 grants nothing (no DEEPX populated). */
+	zassert_ok(da9292_set_limits(&r.ctx, dx_v2n_limits));
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_da9292_log_len(), 0u);
+
+	/* Wrong OTP variant: abort at identity, nothing written. */
+	zassert_ok(da9292_set_limits(&r.ctx, dx_m1_limits));
+	cfg.expected_dev_id = 0xEBu;
+	zassert_equal(da9292_ch2_sequence(&r.ctx, &cfg, &res), ALP_ERR_NOSUPPORT);
+	zassert_equal(res.step, DA9292_SEQ_ERR_IDENTITY);
+	zassert_equal(fake_da9292_log_len(), 0u);
+	zassert_equal(dx_pin(DX_PIN_CORE_EN), 0);
+	dx_close(&r);
+}
+
+ZTEST(alp_chips, test_da9292_control_writes_are_limit_gated)
+{
+	struct dx_rig   r;
+	da9292_events_t ev;
+	fake_da9292_reset();
+	fake_da9292_force_reg(DX_REG_CTRL_01, DX_CH1_EN); /* CH2 off, VSTEP=0 */
+	fake_da9292_force_reg(0x02u, 0x02u);              /* latched CH2_PG event */
+	dx_open(&r, false);
+
+	zassert_ok(da9292_set_limits(&r.ctx, NULL));
+	zassert_equal(da9292_set_voltage_mv(&r.ctx, DA9292_CH2, 750u), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_set_enable(&r.ctx, DA9292_CH2, true), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_read_and_clear_events(&r.ctx, &ev), ALP_ERR_NOSUPPORT);
+	zassert_equal(ev.raw_00, 0x02u, "events reported even when not cleared");
+	zassert_equal(fake_da9292_get_reg(0x02u), 0x02u);
+	zassert_equal(fake_da9292_log_len(), 0u);
+
+	zassert_ok(da9292_set_limits(&r.ctx, dx_m1_limits));
+	/* CH2 window [715, 785]. */
+	zassert_equal(da9292_set_voltage_mv(&r.ctx, DA9292_CH2, 800u), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(da9292_set_voltage_mv(&r.ctx, DA9292_CH2, 700u), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(fake_da9292_log_len(), 0u);
+	zassert_ok(da9292_set_voltage_mv(&r.ctx, DA9292_CH2, 780u));
+	zassert_equal(fake_da9292_get_reg(0x0Cu), 0x9Cu);
+	zassert_equal(fake_da9292_get_reg(0x0Du), 0x9Cu);
+
+	/* CH1 (RZ/V2N 0.8 V, critical) grants nothing. */
+	zassert_equal(da9292_set_voltage_mv(&r.ctx, DA9292_CH1, 800u), ALP_ERR_NOSUPPORT);
+	zassert_equal(da9292_set_enable(&r.ctx, DA9292_CH1, false), ALP_ERR_NOSUPPORT);
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01) & DX_CH1_EN, DX_CH1_EN);
+
+	/* CH2 (non-critical DEEPX core) switches both ways. */
+	zassert_ok(da9292_set_enable(&r.ctx, DA9292_CH2, true));
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x03u);
+	zassert_ok(da9292_set_enable(&r.ctx, DA9292_CH2, false));
+	zassert_equal(fake_da9292_get_reg(DX_REG_CTRL_01), 0x01u);
+
+	zassert_ok(da9292_read_and_clear_events(&r.ctx, &ev));
+	zassert_equal(fake_da9292_get_reg(0x02u), 0x00u, "W1C cleared the event");
+	dx_close(&r);
 }

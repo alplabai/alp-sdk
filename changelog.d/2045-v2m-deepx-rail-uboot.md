@@ -37,15 +37,24 @@ names a possible EN2-gates-CH2 hardware-wiring question (see
 sole master of RIIC8/BRD_I2C; the CM33 must never master it or claim
 P64/P65.
 
-- `src/zephyr/v2n_power_mgmt.c`/`.h`, `CONFIG_ALP_SDK_V2N_POWER_MGMT`, and
-  the V2N supervisor's BRD_I2C transport are deleted outright -- the
-  CM33's only GD32 transport is SPI now.
-- `chips/da9292`'s driver stays, but `da9292_v2n_m1_enable_deepx_rail()`/
-  `da9292_v2n_base_init()` are documented diagnostic/read-only-only.
-- The generated CM33 Zephyr board files no longer claim RIIC8 (`&i2c8`
-  `status = "disabled"`, `alp-i2c0` alias removed;
-  `metadata/e1m_modules/v2n/supervisor-links.yaml`'s `brd_i2c` link
-  flips to `status: disabled`).
+- `src/zephyr/v2n_power_mgmt.c` / `.h`, `CONFIG_ALP_SDK_V2N_POWER_MGMT`, and
+  the V2N supervisor's BRD_I2C transport
+  (`CONFIG_ALP_SDK_V2N_SUPERVISOR_I2C_BUS_ID`/`_I2C_ADDR`/`_I2C_BITRATE_HZ`,
+  `alp_z_v2n_supervisor_brd_i2c_acquire`/`_release`) are deleted outright —
+  the CM33's only GD32 transport is SPI now.
+- (#1165) `da9292_v2n_m1_enable_deepx_rail()` and `da9292_v2n_base_init()`
+  are deleted: both could drop a live CH2 rail. `da9292_ch2_sequence()`
+  replaces them, following the same register sequence as U-Boot's
+  `alp_deepx_rail_bringup()` with one deliberate mechanical difference:
+  the patch clears `CH2_VSTEP`+`CH2_EN` in one combined read-modify-write,
+  while the driver clears them as two separate read-modify-writes (`CH2_EN`
+  first, then `CH2_VSTEP`, each read back) so a partial failure can never
+  leave `CH2_VSTEP` cleared while `CH2_EN` is still set.
+- The generated CM33 Zephyr board files (`e1m_v2n101_m33_sm`,
+  `e1m_v2m101_m33_sm`) no longer claim RIIC8: `&i2c8` is `status =
+  "disabled"` and the `alp-i2c0` alias is gone
+  (`metadata/e1m_modules/v2n/supervisor-links.yaml`'s `brd_i2c` link flips
+  to `status: disabled`).
 - `metadata/pinmux/v2n.yaml` attributes `DEEPX_CORE_0P75_EN` (P64) and
   `DEEPX_PWR_EN_REQ` (P65) to `core: "a55"`.
 - `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2m-deepx.dtsi`

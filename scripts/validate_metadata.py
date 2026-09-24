@@ -111,6 +111,11 @@ CHIPS = REPO / "metadata" / "chips"
 # load-bearing, not decorative.
 SUPERVISOR_LINKS_SCHEMA = REPO / "metadata" / "schemas" / "supervisor-links-v1.schema.json"
 SUPERVISOR_LINKS_DATA = REPO / "metadata" / "e1m_modules" / "v2n" / "supervisor-links.yaml"
+# SoM-family on-module power trees (runtime PMIC guard policy), projected
+# into include/alp/chips/<family>_power_tree.h by scripts/gen_power_tree.py.
+# Discovered by glob -- every metadata/e1m_modules/<family>/power-tree.yaml
+# is schema-checked AND cross-checked (gen_power_tree.cross_check()).
+POWER_TREE_SCHEMA = REPO / "metadata" / "schemas" / "power-tree-v1.schema.json"
 BLOCK_SCHEMA = REPO / "metadata" / "schemas" / "block-v1.schema.json"
 BLOCKS = REPO / "metadata" / "blocks"
 MODEL_PERF_SCHEMA = REPO / "metadata" / "schemas" / "model-perf-v1.schema.json"
@@ -2540,6 +2545,43 @@ def main() -> int:
             # address) -- neither is expressible in the schema alone.
             supervisor_links_failures += _check_supervisor_links_cross_refs(supervisor_links_files)
 
+    # SoM-family power trees (YAML) against power-tree-v1, then the
+    # cross-file checks the schema can't express: every rail resolves to a
+    # chip rail/channel, addresses match the chip manifests AND every SoM
+    # preset of each populated family, every writable rail's window is the
+    # default +/-N % inward-rounded window and inside chip-absolute limits,
+    # write: deny registers are disjoint from rail-owned registers.
+    power_tree_failures: list = []
+    power_tree_files: list = []
+    if POWER_TREE_SCHEMA.is_file():
+        import gen_power_tree  # noqa: E402 -- scripts/ is on sys.path (above)
+        pt_validator = jsonschema.Draft202012Validator(
+            json.loads(POWER_TREE_SCHEMA.read_text(encoding="utf-8")))
+        power_tree_files = gen_power_tree.tree_paths()
+        if power_tree_files:
+            print()
+            power_tree_failures = _check_files(
+                "YAML", power_tree_files, pt_validator,
+                lambda p: strict_yaml_load(p.read_text(encoding="utf-8"), source=p),
+                "schemaVersion",
+            )
+            if not power_tree_failures:
+                pt_chips = gen_power_tree.load_chips(CHIPS)
+                pt_presets = {
+                    p.stem: strict_yaml_load(p.read_text(encoding="utf-8"), source=p)
+                    for p in som_files
+                }
+                for pt in power_tree_files:
+                    rel = pt.relative_to(REPO).as_posix()
+                    errs = gen_power_tree.cross_check(
+                        gen_power_tree.load_tree(pt), pt_chips, pt_presets,
+                        gen_power_tree.load_ownership(pt))
+                    if errs:
+                        print(f"FAIL {rel}")
+                        for e in errs:
+                            print(f"  · {e}")
+                        power_tree_failures.append((rel, errs))
+
     # Block manifests (YAML) against block-v1 schema.
     block_failures: list = []
     block_files: list = []
@@ -2658,7 +2700,8 @@ def main() -> int:
                       + len(silicon_kconfig_failures)
                       + len(peripheral_kconfig_failures)
                       + len(tier_a_library_ci_failures)
-                      + len(supervisor_links_failures))
+                      + len(supervisor_links_failures)
+                      + len(power_tree_failures))
     print(f"{len(soc_files)} SoC file(s) + {len(som_files)} SoM preset(s) + "
           f"{len(hwrev_files)} hw-revisions file(s) + "
           f"{len(board_files)} board preset(s) + {len(chip_files)} chip file(s) + "
@@ -2666,7 +2709,8 @@ def main() -> int:
           f"{len(model_perf_files)} model-perf point(s) + "
           f"{len(library_files)} library manifest(s) + Kconfig registries + "
           f"tier-a-library-ci registry + "
-          f"{len(supervisor_links_files)} supervisor-links file(s) "
+          f"{len(supervisor_links_files)} supervisor-links file(s) + "
+          f"{len(power_tree_files)} power-tree file(s) "
           f"checked, {total_failures} failure(s)")
     return 0 if total_failures == 0 else 1
 

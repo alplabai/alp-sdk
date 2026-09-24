@@ -26,9 +26,20 @@
  *   | Address | Voltage  | Rail name           | Population scope          |
  *   |---------|----------|---------------------|---------------------------|
  *   | `0x48`  | 0.85 V   | `VDD0V85_LPDDR`     | DEEPX LPDDR + DDR core    |
- *   | `0x44`  | 1.05 V   | `DDR5_VDD` (L+H)    | DEEPX DDR5 VDD bank       |
+ *   | `0x44`  | 1.05 V   | `DDR5_VDD2H_1V05`   | DEEPX DDR5 VDD bank       |
  *   | `0x4F`  | 0.50 V   | `DDR5_VDDQ_0V5`     | DEEPX DDR5 IO termination |
  *   | `0x4D`  | 0.60 V   | `LPD4x_0V6`         | **Renesas** LPDDR4X       |
+ *
+ * The three DEEPX instances only answer on BRD_I2C once
+ * `DEEPX_CORE_0P75_EN` (V2N P64) is high.  Guard windows / criticality per
+ * instance: `metadata/e1m_modules/v2n/power-tree.yaml`, installed with
+ * tps628640_set_limits() from the generated `<alp/chips/v2n_power_tree.h>`.
+ *
+ * @par Guarded control (fail-closed)
+ * Without a limits entry installed every write (VOUT1/VOUT2, software
+ * enable, FPWM, ramp speed, reset) returns ::ALP_ERR_NOSUPPORT.  VOUT
+ * writes must land inside the instance window; a `critical` instance is
+ * never software-disabled or reset.  There is no raw register write.
  *
  * `0x4D` is `assembled: optional` on the V2N base SoM (when
  * unpopulated, the Renesas LPDDR4X 0.6 V supply comes from ACT8760
@@ -41,7 +52,7 @@
  * |--------|-------------------|--------|---------|-----------------------------------------------|
  * | `0x01` | VOUT Register 1   | R/W    | 0x64    | Output-voltage setpoint (VID = 0 selects it)  |
  * | `0x02` | VOUT Register 2   | R/W    | 0x64    | Output-voltage setpoint (VID = 1 selects it)  |
- * | `0x03` | CONTROL           | W      | 0x6E    | Reset / enable / FPWM / discharge / ramp speed |
+ * | `0x03` | CONTROL           | R/W    | 0x6F    | Reset / enable / FPWM / discharge / ramp speed |
  * | `0x05` | STATUS            | R      | 0x00    | UVLO / HICCUP / thermal warning latches       |
  *
  * VOUT byte encoding: `mv = byte * 5 + 400`.  Range
@@ -50,13 +61,12 @@
  * tolerance per the datasheet's table-8-4 footnote -- avoid in
  * production firmware that needs the tighter VOS accuracy bar.
  *
- * @par CONTROL register bit layout (write-only)
+ * @par CONTROL register bit layout
  *
- * Reading 0x03 returns 0x00 per the datasheet ("attempting to read
- * data from register addresses not listed in this section results
- * in 00h being read out", §8.6.1).  Driver maintains a software
- * shadow (@c control_shadow) so the typed helpers below can do
- * read-modify-write semantics without an I2C round-trip.
+ * Bench (E1M-V2M103) reads 0x03 back as 0x6F.  tps628640_init() seeds
+ * the software shadow (@c control_shadow) from that read when it has
+ * SOFTWARE_ENABLE set, otherwise from @ref TPS628640_CTRL_DEFAULT, and
+ * the typed helpers read-modify-write the shadow.
  *
  * | Bit   | Field                                  | Default | Notes                                      |
  * |-------|----------------------------------------|---------|--------------------------------------------|
@@ -87,6 +97,7 @@
 #include <stdbool.h>
 
 #include "alp/peripheral.h"
+#include "alp/chips/pmic_rail_limit.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -133,25 +144,23 @@ typedef enum {
 } tps628640_ramp_speed_t;
 
 /** Driver context.  Instantiate one per populated TPS628640 on the
- *  bus -- the V2N-M1 populates four (0x44, 0x48, 0x4D, 0x4F). */
+ *  bus -- the V2N-M1 populates up to four (0x44, 0x48, 0x4D, 0x4F). */
 typedef struct {
-	bool       initialised;
-	alp_i2c_t *bus;
-	uint8_t    addr;               /**< 7-bit I2C slave address.   */
-	uint16_t   default_voltage_mv; /**< Design target for this rail
-                                         per `metadata/chips/tps628640.yaml`. */
-	uint8_t    control_shadow;     /**< Last CONTROL byte written.
-                                         Maintained because the chip's
-                                         CONTROL reg is write-only. */
+	bool       initialised;        /**< Set by tps628640_init(). */
+	alp_i2c_t *bus;                /**< BRD_I2C handle. */
+	uint8_t    addr;               /**< 7-bit I2C slave address. */
+	uint16_t   default_voltage_mv; /**< Design target (informational). */
+	uint8_t    control_shadow; /**< CONTROL byte the driver believes is live (seeded at init). */
+	const pmic_rail_limit_t *limit; /**< This instance's guard entry, or NULL = fail-closed. */
 } tps628640_t;
 
 /**
  * @brief Probe the chip at @p addr and record its design-target voltage.
  *
- * Caches the datasheet's default CONTROL byte (`TPS628640_CTRL_DEFAULT`)
- * in @c control_shadow so the typed helpers below can do
- * read-modify-write semantics against the chip's actual reset
- * state.
+ * Seeds @c control_shadow from a live CONTROL read (falling back to
+ * `TPS628640_CTRL_DEFAULT`) so the typed helpers read-modify-write
+ * against the chip's actual state.  Clears the guard entry: call
+ * tps628640_set_limits() afterwards.
  *
  * @param ctx                 Driver context.
  * @param bus                 BRD_I2C handle.
@@ -168,43 +177,66 @@ alp_status_t
 tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t default_voltage_mv);
 
 /**
- * @brief Set the chip's VOUT1 setpoint in millivolts.
+ * @brief Install this instance's guard entry (unlocks every write).
  *
- * Range: 400..1675 mV (5 mV step).  Non-multiple-of-5 inputs round
- * down; read back via @ref tps628640_get_voltage_mv to see what
- * actually landed.
+ * Stores the pointer only; @p limit must outlive @p ctx (static storage
+ * initialised from the generated `V2N_POWER_TPS628640_<NET>_LIMIT_INIT`).
+ * Call after tps628640_init() -- init clears it.  NULL uninstalls.
  *
- * @warning  Board-side firmware MUST enforce the rail's design-
- *           safe operating window before calling this -- e.g. the
- *           V2N-M1 `DDR5_VDDQ` instance at I²C `0x4F` targets
- *           0.5 V and a write to 1 V would damage downstream
- *           silicon.  The window lives in
- *           `metadata/chips/tps628640.yaml` per instance plus the
- *           design-target voltage cached in `ctx`.
+ * @param ctx    TPS628640 context handle (initialised).
+ * @param limit  Guard entry for this instance, or NULL.
+ * @return ALP_OK; ALP_ERR_NOT_READY if not initialised; ALP_ERR_INVAL if a
+ *         voltage-writable entry has min_mv > max_mv or a window outside
+ *         400..1675 mV.
+ */
+alp_status_t tps628640_set_limits(tps628640_t *ctx, const pmic_rail_limit_t *limit);
+
+/**
+ * @brief Set the chip's VOUT1 setpoint in millivolts -- window-guarded.
  *
- * @return ALP_OK / ALP_ERR_OUT_OF_RANGE (mv outside 400..1675) /
- *         ALP_ERR_NOT_READY (uninitialised) / ALP_ERR_IO.
+ * Rounds down to the 5 mV grid, refuses unless the encoded value lies in
+ * the installed window, writes VOUT1 and reads it back.
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @param mv   Requested setpoint.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
+ *         no entry is installed or the instance is not voltage-writable;
+ *         ALP_ERR_OUT_OF_RANGE if outside the window or 400..1675 mV;
+ *         ALP_ERR_IO on a read-back mismatch or bus failure.
  */
 alp_status_t tps628640_set_voltage_mv(tps628640_t *ctx, uint16_t mv);
 
 /**
  * @brief Read the live VOUT1 setpoint in millivolts.
  *
- * Decodes the register byte through the same `mv = byte * 5 + 400`
- * formula `_set_voltage_mv` uses.
+ * Decodes the register byte through `mv = byte * 5 + 400`.
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @param mv   Receives the setpoint.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL on
+ *         NULL @p mv; the bus status on I2C failure.
  */
 alp_status_t tps628640_get_voltage_mv(tps628640_t *ctx, uint16_t *mv);
 
 /**
- * @brief Write VOUT2 (selected when the VID pin is high) in millivolts.
+ * @brief Write VOUT2 (selected when the VID pin is high) -- window-guarded.
  *
- * Same encoding + safe-window expectations as
- * @ref tps628640_set_voltage_mv.
+ * Same encoding, window guard and return codes as
+ * tps628640_set_voltage_mv().
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @param mv   Requested setpoint.
+ * @return As tps628640_set_voltage_mv().
  */
 alp_status_t tps628640_set_voltage2_mv(tps628640_t *ctx, uint16_t mv);
 
 /**
  * @brief Read VOUT2's currently-programmed setpoint in millivolts.
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @param mv   Receives the setpoint.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL on
+ *         NULL @p mv; the bus status on I2C failure.
  */
 alp_status_t tps628640_get_voltage2_mv(tps628640_t *ctx, uint16_t *mv);
 
@@ -216,18 +248,31 @@ alp_status_t tps628640_get_voltage2_mv(tps628640_t *ctx, uint16_t *mv);
  *   - bit 3 = HICCUP entered at least once since last read.
  *   - bit 0 = UVLO active (VIN below falling threshold).
  *
- * STATUS bits latch on event + reset to 0 after this read.
+ * STATUS bits latch on event + reset to 0 after this read -- the chip
+ * offers no non-destructive peek.
+ *
+ * @param ctx          TPS628640 context handle (must be initialised first).
+ * @param status_byte  Receives the raw STATUS byte.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL on
+ *         NULL @p status_byte; the bus status on I2C failure.
  */
 alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);
 
 /**
  * @brief Toggle the Software Enable bit (CONTROL[5]).
  *
- * Read-modify-write against @c control_shadow because the chip's
- * CONTROL register is write-only.  Setting @p enable to false stops
+ * Read-modify-write against @c control_shadow (seeded from CONTROL at
+ * init).  Setting @p enable to false stops
  * the converter but preserves every register (per datasheet
  * §8.4.10); setting it back to true re-runs soft-start without the
  * usual tDelay.
+ *
+ * @param ctx     TPS628640 context handle (must be initialised first).
+ * @param enable  true = converter on.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
+ *         no entry is installed, the instance is not enable-writable, or
+ *         @p enable is false on a `critical` instance; the bus status on
+ *         I2C failure.
  */
 alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);
 
@@ -237,6 +282,11 @@ alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);
  * @c true forces continuous PWM (lower output ripple, higher Iq);
  * @c false reverts to PFM at light loads (lower Iq, higher ripple).
  * Read-modify-write against @c control_shadow.
+ *
+ * @param ctx   TPS628640 context handle (must be initialised first).
+ * @param fpwm  true = forced PWM.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
+ *         no entry is installed; the bus status on I2C failure.
  */
 alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm);
 
@@ -246,6 +296,12 @@ alp_status_t tps628640_set_fpwm_mode(tps628640_t *ctx, bool fpwm);
  * Faster ramp = larger di/dt transient.  Slower ramp = smoother
  * transition but longer settling.  Datasheet default is 1 mV/us
  * (the slowest), which is also the driver's reset shadow.
+ *
+ * @param ctx    TPS628640 context handle (must be initialised first).
+ * @param speed  Ramp speed.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL on an
+ *         invalid @p speed; ALP_ERR_NOSUPPORT if no entry is installed;
+ *         the bus status on I2C failure.
  */
 alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t speed);
 
@@ -255,16 +311,33 @@ alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t s
  * Equivalent to a power cycle from the I2C interface's perspective.
  * The chip restarts with a tDelay startup, R2D-selected output
  * voltage, default CONTROL byte; the driver shadow re-initialises
- * to @ref TPS628640_CTRL_DEFAULT.
+ * to @ref TPS628640_CTRL_DEFAULT.  The restart is a momentary rail
+ * interruption, so it is guarded like a disable.
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
+ *         no entry is installed, the instance is not enable-writable, or it
+ *         is `critical`; the bus status on I2C failure.
  */
 alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx);
 
-/** @brief Raw register read.  Always available; no register-layout dependency. */
+/**
+ * @brief Raw register read (any address).  There is no raw write: every
+ *        documented register is owned by a guarded typed API.
+ *
+ * @param ctx  TPS628640 context handle (must be initialised first).
+ * @param reg  Register address.
+ * @param val  Receives the byte.
+ * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_INVAL on
+ *         NULL @p val; the bus status on I2C failure.
+ */
 alp_status_t tps628640_read_reg(tps628640_t *ctx, uint8_t reg, uint8_t *val);
-/** @brief Raw register write.  Always available; no register-layout dependency. */
-alp_status_t tps628640_write_reg(tps628640_t *ctx, uint8_t reg, uint8_t val);
 
-/** @brief Release resources.  Idempotent. */
+/**
+ * @brief Release resources.  Idempotent.
+ *
+ * @param ctx  TPS628640 context handle (may be NULL).
+ */
 void tps628640_deinit(tps628640_t *ctx);
 
 #ifdef __cplusplus
