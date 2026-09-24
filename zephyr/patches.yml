@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: eb51ee34836346f2c314cf0204d35ecf06fdae52e3fbbcee55c2aab19b7b41ad
+    sha256sum: 3582044daa88ae8e83f3c6e5dced612fb93d96ca3d46105a6b66a48c2e6328db
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -739,6 +739,20 @@ patches:
       same as 0006/0008 -- retire this patch, not upstream it, once/if
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
+
+      UPDATED (#2277): OV5647_AE_MAX_INT_LINE was a single #define pinned
+      to the sensor's 10 fps VTS (3145 lines) regardless of the ACTIVE
+      requested rate -- at 30 fps (<alp/camera.h>'s
+      ALP_CAMERA_CONFIG_DEFAULT, VTS 1050 lines) AE was free to command an
+      exposure far past that mode's own frame period, stretching the
+      frame and dropping the effective capture rate in a dim scene.
+      ov5647_ae_envelope.h now derives the ceiling from a formula
+      (OV5647_AE_MAX_INT_LINE_AT_FPS(fps), matching ov5647.c's own
+      ov5647_frmrate_to_vts()) instead of one fixed constant; this
+      compile-time calibration block can still only carry one ceiling per
+      build, so its own OV5647_AE_FPS now reads a new Kconfig
+      (VIDEO_ISP_VSI_CALIB_OV5647_FPS, default 30, matching the SDK's own
+      default) instead of a hardcoded 10.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

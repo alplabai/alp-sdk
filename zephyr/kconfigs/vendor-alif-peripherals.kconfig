@@ -1114,6 +1114,46 @@ config VIDEO_ISP_VSI_AE_TARGET
 	  before the AEM/WBM window fix made it a real measurement); with a
 	  working measurement it just saturates the frame.
 
+config VIDEO_ISP_VSI_CALIB_OV5647_FPS
+	int "ISP-Pico OV5647 calibration: frame rate the compiled-in AE envelope targets"
+	default 30
+	range 10 120
+	depends on VIDEO_ISP_VSI
+	help
+	  ov5647_ae_envelope.h is #included unconditionally by both
+	  isp_param_conf.h and sensor_attributes.h whenever VIDEO_ISP_VSI is
+	  on (not just when VIDEO_ISP_VSI_CALIB_OV5647 selects the OV5647 arm
+	  of isp_param_conf.h's .ae block that actually READS the macros this
+	  symbol feeds) -- so this must stay defined for every VIDEO_ISP_VSI
+	  build, the same dependency VIDEO_ISP_VSI_AE_TARGET above uses, or a
+	  non-OV5647-calib build fails with an undeclared-identifier error on
+	  the header's own file-scope _Static_assert lines.
+
+	  isp_param_conf.h's OV5647 .ae calibration block (patch 0011,
+	  CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 arm) is a compile-time-only static
+	  initializer, so it can carry only ONE exposure-time ceiling per
+	  build -- ov5647_ae_envelope.h's OV5647_AE_FPS now reads this symbol
+	  instead of a hardcoded 10 (issue #2277: that 10 fps pin left the
+	  compiled-in ceiling (3145 lines, the 10 fps VTS) far looser than a
+	  faster mode's real frame period -- at 30 fps AE could command an
+	  exposure well past that mode's own 1050-line VTS, stretching the
+	  frame and dropping the effective capture rate in a dim scene
+	  instead of holding it). Default 30 matches
+	  ALP_CAMERA_CONFIG_DEFAULT's own default fps (<alp/camera.h>) -- set
+	  it to whatever fixed rate a board's default camera config actually
+	  requests. Only bounds the OV5647's supported discrete rates
+	  (ov5647_framerates[] in ov5647.c: 10/15/30/45/60/90/120) that this
+	  driver's 640x480 binned mode HTS/pixel_rate can resolve to a valid
+	  VTS for; picking a rate the sensor cannot actually reach in that
+	  mode is a build-time misconfiguration, not something this range
+	  catches.
+
+	  isp_apply_ae() (isp_pico.c) separately re-derives and pushes a
+	  sensor-agnostic ceiling from video_get_frmival() on every stream
+	  (re)start, generic across whatever rate the app negotiates at
+	  runtime -- this Kconfig only governs the calibration's compiled-in
+	  initial/fallback value before that first push lands.
+
 config VIDEO_ISP_VSI_WB_MANUAL_GAIN
 	bool "ISP-Pico: force manual WB gains instead of AWB's calib value"
 	default n

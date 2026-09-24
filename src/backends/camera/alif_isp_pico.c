@@ -377,10 +377,16 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 * scoped to the OV5647 shield's own DT node; a future sensor on this
 	 * ISP path needs its own branch here.
 	 *
-	 * NOTE (issue #2277): the OV5647 calibration AE block's own exposure
-	 * ceiling is still hard-pinned to the 10 fps VTS regardless of the
-	 * rate requested here -- unverified interaction in a dim scene at a
-	 * faster rate. */
+	 * FIXED (issue #2277): the OV5647 calibration AE block's compiled-in
+	 * exposure ceiling used to be hard-pinned to the 10 fps VTS
+	 * regardless of the rate requested here. hal_alif patch 0011
+	 * (ov5647_ae_envelope.h) now derives that ceiling from
+	 * CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS (default 30, matching this
+	 * backend's own fallback below) instead of a hardcoded 10 -- still a
+	 * single compile-time value, not a per-request one, since
+	 * isp_param_conf.h's calibration is a static initializer; set that
+	 * Kconfig to match whatever fixed rate a board's default camera
+	 * config actually requests. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;

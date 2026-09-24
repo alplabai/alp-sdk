@@ -26,7 +26,7 @@
  #ifdef __cplusplus
  extern "C"{
  #endif
-@@ -66,6 +85,48 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+@@ -66,6 +85,50 @@ static ISP_CALIB_DATA_S isp_calib_param = {
  #if defined(CONFIG_ISP_LIB_AE_MODULE)
  		.ae = {
  			.opType = OP_TYPE_AUTO,
@@ -36,8 +36,10 @@
 +			 * envelope below (expTimeRange.max 3000000 us ->
 +			 * 94470 lines via vsi_get_ae_default()'s
 +			 * linesPer500ms) is nowhere near OV5647's real
-+			 * ceiling (ov5647_ae_envelope.h's OV5647_AE_MAX_INT_LINE
-+			 * = 3145 lines) -- SetCalib() (isp_vsi_init(),
++			 * ceiling (ov5647_ae_envelope.h's
++			 * OV5647_AE_MAX_INT_LINE_AT_FPS(), #2277 -- follows
++			 * the ACTIVE mode's fps, not one fixed line count)
++			 * -- SetCalib() (isp_vsi_init(),
 +			 * isp_api_wrapper.c) loads THIS block into the
 +			 * library before isp_apply_ae() (isp_pico.c) ever
 +			 * runs, and bench runs 211/212's out-of-range EXPOSURE
@@ -75,7 +77,7 @@
  			.manualAttr = {
  				.intTime = 100000,
  				.again = 75000,
-@@ -87,6 +148,7 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+@@ -87,6 +150,7 @@ static ISP_CALIB_DATA_S isp_calib_param = {
  				.aeRunInterval = 1,
  				.aeTarget = 255,
  				.dampOver = 0x40,
@@ -85,7 +87,7 @@
  				.antiflicker = {
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/ov5647_ae_envelope.h
-@@ -0,0 +1,93 @@
+@@ -0,0 +1,133 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -119,17 +121,59 @@
 + * config off the struct was defined but never referenced, tripping
 + * -Werror=unused-variable. Splitting the macros out here means
 + * isp_param_conf.h only pulls in what its .ae block actually reads.
++ *
++ * #2277: OV5647_AE_MAX_INT_LINE below used to be a single #define pinned to
++ * the sensor's 10 fps VTS (3145 lines) regardless of which frame rate the
++ * app actually requested -- at a faster mode (e.g. 30 fps, VTS 1050 lines,
++ * <alp/camera.h>'s ALP_CAMERA_CONFIG_DEFAULT) AE was free to command an
++ * exposure far longer than that mode's own frame period, stretching the
++ * frame and dropping the effective capture rate in a dim scene instead of
++ * holding it. OV5647_AE_MAX_INT_LINE_AT_FPS(fps) below now derives the
++ * ceiling from whichever rate it is asked about, using the SAME formula
++ * ov5647.c's own ov5647_frmrate_to_vts() uses (VTS = pixel_rate / (hts *
++ * fps)) -- this header cannot #include that driver's own constants (no
++ * include path from the ISP wrapper's inc/ dir to zephyr/drivers/video/),
++ * so OV5647_AE_PIXEL_RATE_HZ/OV5647_AE_HTS_640X480 restate its 640x480
++ * binned-mode values (bench-matched, ov5647.c run 63) here. The compile-
++ * time calibration block below (isp_param_conf.h) can still only carry ONE
++ * ceiling per build, so OV5647_AE_FPS now comes from
++ * CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS (default 30, matching
++ * ALP_CAMERA_CONFIG_DEFAULT) instead of a hardcoded 10 -- isp_apply_ae()
++ * (isp_pico.c) separately re-derives and pushes a sensor-agnostic ceiling
++ * from video_get_frmival() on every stream (re)start, generic across
++ * whatever rate the app negotiates at runtime; this Kconfig default only
++ * governs the calibration's compiled-in initial value, so it should track
++ * the SDK's own default fps rather than a rate the SDK no longer requests
++ * by default.
 + */
-+#define OV5647_AE_FULL_LINES   3149  /* VTS at 10 fps -- see sensor_attributes.h's derivation */
-+#define OV5647_AE_FPS          10    /* real fps, NOT *ISP_SNS_FPS_ACCU-scaled */
-+#define OV5647_AE_MAX_INT_LINE 3145  /* VTS - 4 */
++#define OV5647_AE_PIXEL_RATE_HZ 58333333u /* ov5647.c's OV5647_PIXEL_RATE() at 25 MHz XVCLK */
++#define OV5647_AE_HTS_640X480   1852u     /* ov5647.c's OV5647_HTS_640X480_BINNED (0x073c) */
++
++/*
++ * VTS (frame length, in lines) at @p fps -- ov5647_frmrate_to_vts()'s own
++ * formula (ov5647.c), integer-truncating the same direction it does, so
++ * this can only UNDER-report VTS, never claim more exposure headroom than
++ * the sensor's own frame-length register actually holds.
++ */
++#define OV5647_AE_VTS_AT_FPS(fps) \
++	(OV5647_AE_PIXEL_RATE_HZ / (OV5647_AE_HTS_640X480 * (vsi_u32_t)(fps)))
++
++/* AE integration-time ceiling, in LINES, at @p fps -- VTS - 4 lines margin
++ * (matches the fixed 3149 - 4 = 3145 this formula replaces at the sensor's
++ * 10 fps mode).
++ */
++#define OV5647_AE_MAX_INT_LINE_AT_FPS(fps) (OV5647_AE_VTS_AT_FPS(fps) - 4)
++
++#define OV5647_AE_FPS          CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS
++#define OV5647_AE_FULL_LINES   OV5647_AE_VTS_AT_FPS(OV5647_AE_FPS)
++#define OV5647_AE_MAX_INT_LINE OV5647_AE_MAX_INT_LINE_AT_FPS(OV5647_AE_FPS)
 +#define OV5647_AE_MIN_AGAIN    1024  /* 1x floor, library units (1x = 1024) */
 +#define OV5647_AE_MAX_AGAIN    65472 /* 1023 (OV5647 AGC_GAIN max) * 1024 / 16 */
 +#define OV5647_AE_MIN_DGAIN    1024  /* unity -- all headroom flows through again */
 +#define OV5647_AE_MAX_DGAIN    1024  /* (see sensor_attributes.h's bench-run-83 note) */
 +
-+_Static_assert(OV5647_AE_FULL_LINES == 3149, "drifted from sensor_attributes.fullLines");
-+_Static_assert(OV5647_AE_MAX_INT_LINE == 3145, "drifted from sensor_attributes.maxIntLine");
++_Static_assert(OV5647_AE_MAX_INT_LINE < OV5647_AE_FULL_LINES,
++	       "OV5647_AE_MAX_INT_LINE must stay under its own mode's VTS");
 +_Static_assert(OV5647_AE_MAX_AGAIN == 65472, "drifted from sensor_attributes.maxAgain");
 +_Static_assert(OV5647_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
 +_Static_assert(OV5647_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain");
@@ -149,17 +193,15 @@
 + * (2 * ISP_SNS_FPS_ACCU), fps_scaled = OV5647_AE_FPS * ISP_SNS_FPS_ACCU --
 + * the ISP_SNS_FPS_ACCU cancels, leaving fullLines * OV5647_AE_FPS / 2) and
 + * confirm the two ceilings still land within ONE line of each other once
-+ * the library's own integer truncation is applied both ways -- the actual
-+ * round-trip truncates to 3144, one line UNDER OV5647_AE_MAX_INT_LINE's
-+ * 3145, not an exact match, so the guard is a [ceiling-1, ceiling] band,
-+ * not equality. An upper-only check (round-trip <= ceiling) can never fail
-+ * here: this same truncation direction always rounds the result DOWN, so
-+ * a lower bound is the one that actually catches a unit/order slip (e.g.
-+ * dividing instead of multiplying by OV5647_AE_FPS) landing far below
-+ * 3144. A future edit to any macro above that breaks this relationship
-+ * fails the BUILD, not a bench run. BUILD_ASSERT isn't visible in this
-+ * header's include chain (no <zephyr/...> here), hence _Static_assert
-+ * (C11, no header needed).
++ * the library's own integer truncation is applied both ways -- an
++ * upper-only check (round-trip <= ceiling) can never fail here: this same
++ * truncation direction always rounds the result DOWN, so a lower bound is
++ * the one that actually catches a unit/order slip (e.g. dividing instead
++ * of multiplying by OV5647_AE_FPS) landing far below the ceiling. A future
++ * edit to any macro above that breaks this relationship fails the BUILD,
++ * not a bench run. BUILD_ASSERT isn't visible in this header's include
++ * chain (no <zephyr/...> here), hence _Static_assert (C11, no header
++ * needed).
 + */
 +#define OV5647_AE_EXP_TIME_MAX_US                                                                \
 +	((vsi_u32_t)((vsi_u64_t)OV5647_AE_MAX_INT_LINE * 1000000 /                               \
