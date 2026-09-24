@@ -695,10 +695,74 @@ ZTEST(alp_chips, test_tps628640_software_enable_gating)
 	zassert_equal(tps628640_reset_to_defaults(&b44), ALP_ERR_NOSUPPORT);
 	zassert_equal(fake_tps628640_write_count(0x44u, TPS628640_REG_CONTROL), 0u);
 	zassert_equal(fake_tps628640_get_reg(0x44u, TPS628640_REG_CONTROL), 0x6Fu);
+	/* b44 (addr 0x44) is on-the-bench at 1050 mV, outside tps_crit's
+	 * [570, 630] LPD4x_0V6 window borrowed here for the critical-flag
+	 * check -- program a live setpoint inside that window first, since
+	 * enabling now validates VOUT1 against the installed window. */
+	zassert_ok(tps628640_set_voltage_mv(&b44, 600u));
 	zassert_ok(tps628640_software_enable(&b44, true));
 
 	tps628640_deinit(&b44);
 	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* Enabling refuses a live VOUT1 outside the installed window instead of
+ * blindly energizing it -- exercised on 0x4F/DDR5_VDDQ_0V5, whose VOUT1
+ * (0x14 = 500 mV) is always present once the chip answers at all, so there
+ * is no "not populated yet" excuse for the check to skip it. */
+ZTEST(alp_chips, test_tps628640_enable_refuses_vout_outside_window)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+
+	/* POR VOUT1 (0x14 = 500 mV) is inside [475, 525]: enabling succeeds. */
+	zassert_ok(tps628640_software_enable(&b4f, true));
+	zassert_ok(tps628640_software_enable(&b4f, false));
+
+	/* Move VOUT1 out of the window via a direct fake write (as if a
+	 * stale/POR value never went through the guarded setter) and confirm
+	 * enabling now refuses without ever touching CONTROL. */
+	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_VOUT1, 0x00u /* 400 mV */);
+	zassert_equal(tps628640_software_enable(&b4f, true), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(
+	    fake_tps628640_write_count(0x4Fu, TPS628640_REG_CONTROL),
+	    2u,
+	    "the earlier enable+disable wrote CONTROL twice; the refused re-enable adds none");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* A reset re-enables the converter at the datasheet-default CONTROL byte
+ * (FPWM off, slowest ramp) -- confirm the driver restores a previously
+ * configured FPWM/ramp instead of silently leaving the rail in PFM mode
+ * at the slow ramp once it comes back online. */
+ZTEST(alp_chips, test_tps628640_reset_preserves_fpwm_and_ramp)
+{
+	tps628640_t b4f;
+	tps628640_t unused_a, unused_b;
+	alp_i2c_t  *bus = tps_setup(&unused_a, &unused_b, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_set_fpwm_mode(&b4f, true));
+	zassert_ok(tps628640_set_ramp_speed(&b4f, TPS628640_RAMP_20_MV_PER_US));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL),
+	              0x7Cu,
+	              "FPWM set (bit4), ramp 00 (bits1:0), rest at CTRL_DEFAULT");
+
+	zassert_ok(tps628640_reset_to_defaults(&b4f));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL),
+	              0x7Cu,
+	              "FPWM + ramp restored after the reset, not left at chip default 0x6F");
+
+	tps628640_deinit(&unused_a);
+	tps628640_deinit(&unused_b);
 	tps628640_deinit(&b4f);
 	alp_i2c_close(bus);
 }

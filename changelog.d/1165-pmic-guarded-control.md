@@ -50,11 +50,17 @@ The three drivers now read everything and control only through that table:
   read-only unless you pass `--write`, and it refuses single-rail disables
   of DEEPX rails.
 
-**CM33-boot mode is blocked.** The 2026-09-24 decision makes CA55/Linux the
-only RIIC8 / BRD_I2C master and gives P64 / P65 to the A55, so no CM33 image
-may run the DEEPX sequence. The power tree records
-`cm33_boot: status: blocked`, and `validate_metadata.py` rejects a cm33
-owner until `core-ownership.yaml` changes.
+**CM33-boot mode is no longer blocked (#2045).** CA55/Linux is the sole
+RIIC8 / BRD_I2C master in steady state, but ownership is TIME-SLICED, not
+concurrent: `examples/v2n/v2n-cm33-deepx-rail` runs `da9292_ch2_sequence()`
+on the CM33 during its pre-handoff window (RZ/V2N HW manual R01UH1071EJ0110
+Rev.1.10 S1.9 Table 1.9-1, BOOTSELCPU low), then hands RIIC8 and the DEEPX
+sequence to the CA55/Linux before releasing the CA55 core itself. The power
+tree's `boot_modes.cm33_boot` no longer carries `status: blocked`;
+`core-ownership.yaml`'s `boot_mode_core` field backs the CM33 window, and
+`validate_metadata.py` / `gen_power_tree.py`'s `cross_check()` still reject
+a cm33 owner not backed there, so a real dual-master claim hard-fails.
+BENCH-PENDING on the CM33 path itself (build-only Twister so far).
 
 **ABI.** Removed: `da9292_v2n_base_init()`, `da9292_v2n_m1_enable_deepx_rail()`,
 `act8760_rail_set_vset()`, `tps628640_write_reg()`. Added: the three
@@ -66,4 +72,12 @@ owner until `core-ownership.yaml` changes.
 `<alp/chips/v2n_power_tree.h>`. Changed: `da9292_set_voltage_mv()` encodes
 for the live VSTEP and writes both VSEL registers; `da9292_get_voltage_mv()`
 decodes the active VSEL; `da9292_read_and_clear_events()` does not clear
-without a table. Nothing has run on silicon yet.
+without a table; `tps628640_software_enable(true)` now refuses
+(`ALP_ERR_OUT_OF_RANGE`) unless the live VOUT1 setpoint lies inside the
+installed window, instead of blindly energizing whatever is currently
+programmed; `tps628640_reset_to_defaults()` now preserves the caller's
+FPWM-mode and ramp-speed bits across the chip's own factory reset instead of
+silently dropping them to the datasheet default. The DEEPX rail sequence
+itself (U-Boot `board_late_init()` in a55_boot mode) is bench-PASSED on
+E1M-V2M103 (#2288); the v2n-pmic-inspect / v2n-cm33-deepx-rail example apps
+and the CM33-boot sequencing path have not run on silicon yet.

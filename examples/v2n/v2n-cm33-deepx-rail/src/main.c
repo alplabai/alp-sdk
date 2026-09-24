@@ -106,10 +106,15 @@ int main(void)
 	       "as cm33_boot -- see the file header if you are not sure\n");
 
 	/* BRD_I2C / RIIC8: this app's board overlay is the ONLY thing that
-	 * enables &i2c8 for a CM33 build on this SoM -- see its header. */
+	 * enables &i2c8 for a CM33 build on this SoM -- see its header.
+	 * ALP_I2C_CONFIG_DEFAULT's 100 kHz standard-mode bitrate is kept
+	 * as-is (not raised to Fast): alp_i2c_open() calls i2c_configure()
+	 * at runtime, which would otherwise override the overlay's
+	 * I2C_BITRATE_STANDARD and undo the slower RIIC8 clock this bus
+	 * bench-needs (see the overlay header, mirrors U-Boot 0006's
+	 * CKS(5)). */
 	alp_i2c_config_t i2c_cfg = ALP_I2C_CONFIG_DEFAULT(0);
-	i2c_cfg.bitrate_hz       = 400000u; /* matches the overlay's I2C_BITRATE_FAST */
-	alp_i2c_t *i2c           = alp_i2c_open(&i2c_cfg);
+	alp_i2c_t       *i2c     = alp_i2c_open(&i2c_cfg);
 	if (i2c == NULL) {
 		printf("[cm33-deepx-rail] alp_i2c_open failed: err=%d -- check the board "
 		       "overlay enables &i2c8\n",

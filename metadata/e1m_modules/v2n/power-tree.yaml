@@ -156,8 +156,8 @@ rails:
     chip: act8760
     channel: buck5
     i2c_addr: 0x25
-    net: VDD_CORE_0P75
-    role: "0.75 V core supply in the PWEN2 (RZ/V2N PMU) domain; its POK drives GPIO7"
+    net: TBD
+    role: "0.75 V core supply in the PWEN2 (RZ/V2N PMU) domain; its POK drives GPIO7 -- LIKELY VDD_CORE_0P75, net attribution TBD-verify"
     target_mv: 750
     range: 1
     window_mv: [725, 775]
@@ -165,13 +165,18 @@ rails:
     control: voltage
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
-    evidence: "CMI Buck5 0.75 V (25 mV-only tile), trigger PWEN2 (GPIO10) +4 ms == report VDD_CORE_0P75"
+    evidence: >-
+      CMI Buck5 0.75 V (25 mV-only tile) is bench-confirmed; trigger PWEN2
+      (GPIO10) +4 ms == report VDD_CORE_0P75 is a timing correlation, not an
+      independent per-net measurement (no continuity/scope trace pinning
+      this specific channel to that specific net) -- TBD-verify, do not
+      treat the buck5<->VDD_CORE_0P75 attribution as settled until it is.
   - id: vdd08_ddr
     chip: act8760
     channel: buck6
     i2c_addr: 0x25
-    net: VDD08_DDR
-    role: "RZ/V2N DDR PHY 0.8 V"
+    net: TBD
+    role: "RZ/V2N DDR PHY 0.8 V -- LIKELY VDD08_DDR, net attribution TBD-verify"
     target_mv: 800
     range: 1
     window_mv: [775, 825]
@@ -179,7 +184,12 @@ rails:
     control: voltage
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
-    evidence: "CMI Buck6 0.8 V (25 mV-only tile), trigger Buck7 +1 ms == report VDD08_DDR"
+    evidence: >-
+      CMI Buck6 0.8 V (25 mV-only tile) is bench-confirmed; trigger Buck7 +1
+      ms == report VDD08_DDR is a timing correlation, not an independent
+      per-net measurement (no continuity/scope trace pinning this specific
+      channel to that specific net) -- TBD-verify, do not treat the
+      buck6<->VDD08_DDR attribution as settled until it is.
   - id: vdd09_ca55
     chip: act8760
     channel: buck7
@@ -390,7 +400,17 @@ gpios:
       OTP defect on some units: MODE4 (0x10) reads 0x88 -- polarity inverted,
       open-drain output holding the GD32 in reset.  Volatile fix: write 0x08
       (polarity bit cleared) -- reverts at the next power cycle.
-  - { gpio: 5,  net: V2N_BOOT_CPU_SEL, role: "boot-CPU select strap (A55 vs CM33); CMI sequencing trigger for Buck1/Buck7/LDO4", direction: input, writable: [] }
+  - gpio: 5
+    net: V2N_BOOT_CPU_SEL
+    role: "boot-CPU select strap (A55 vs CM33); CMI sequencing trigger for Buck1/Buck7/LDO4"
+    # Output of the PMIC, not an input to it: the CMI DRIVES this net (see
+    # the file header, "the CMI drives it HIGH at ~8.6 ms after MODULE_EN").
+    # EN_PUSH_PULL (0x34, metadata/chips/act8760.yaml) lists a push-pull
+    # enable bit for GPIO8,7,6,4,3,2,1 but explicitly has no GPIO5 bit, so
+    # its output stage is not push-pull-configurable -- output_od, same
+    # default as the other CMI-driven pins with no PP-enable bit (GPIO1/2).
+    direction: output_od
+    writable: []
   - { gpio: 6,  net: MODULE_EN,        role: "PWRON input -- starts / stops the power sequence", direction: input, writable: [] }
   - { gpio: 7,  net: DEEPX_PWR_EN_REQ, role: "Buck5 POK -> RZ/V2N P65 (CMI name CORE_0P75_EN)", direction: output_pp, writable: [] }
   - { gpio: 8,  net: SD1_EN,           role: "SD1 supply enable", direction: output_pp, writable: [] }

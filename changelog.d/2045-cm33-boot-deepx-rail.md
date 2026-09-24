@@ -60,14 +60,23 @@ calls `da9292_init()` / `da9292_set_limits()` /
 0004 mirrors — with a delay callback wrapping the portable `alp_delay_us()`.
 Its board overlay
 (`boards/alp_e1m_v2m101_m33_sm_r9a09g056n48gbg_cm33.overlay`) re-enables
-`&i2c8` (pinctrl group + `clock-frequency = <I2C_BITRATE_FAST>`, matching
-the pre-2026-09-24 board file before RIIC8 moved to the CA55) and defines
-the app's own `alp-pins` node — scoped to THIS app only; the generated
-default AMP board files (`alp_e1m_v2n101_m33_sm` /
+`&i2c8` and defines the app's own `alp-pins` node — scoped to THIS app
+only; the generated default AMP board files (`alp_e1m_v2n101_m33_sm` /
 `alp_e1m_v2m101_m33_sm`) are untouched and still leave `&i2c8` disabled
-for every other CM33 app. Twister: `native_sim/native/64`, `build_only:
-true` (same pattern as every other V2N CM33 example — native_sim has no
-RZ/V2N RIIC8 or this app's overlay).
+for every other CM33 app. The overlay does NOT just restore the
+pre-2026-09-24 board file's Fast-mode config verbatim: it also carries the
+two RIIC8/BRD_I2C fixes U-Boot's own `board_late_init()` needed on this
+same bus (`0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch`,
+see `changelog.d/2045-v2m-deepx-rail-uboot.md`) — the SoC-internal pull-up
+on P06/P07 (`bias-pull-up`, on top of the external pull-ups already fitted
+on this heavily-loaded bus) and Standard-mode `clock-frequency`
+(`I2C_BITRATE_STANDARD`, not the pre-move board file's Fast mode) — since
+`alp_i2c_open()` on Zephyr calls `i2c_configure()` at runtime, the app's
+own bitrate config (`ALP_I2C_CONFIG_DEFAULT`'s 100 kHz) is left as-is too,
+so it does not silently override the overlay's Standard-mode default back
+to Fast. Twister: `native_sim/native/64`, `build_only: true` (same pattern
+as every other V2N CM33 example — native_sim has no RZ/V2N RIIC8 or this
+app's overlay).
 
 The example deliberately stops after a successful rail-up without
 releasing the CA55: that needs the actual RZ/V2N CPU-reset-control
@@ -83,9 +92,9 @@ on the warm path's silence (U-Boot itself is not rebuilt in this change).
 
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi`: the
 BRD_I2C pull-up comment now records BOTH pull-up sources — external
-`R287`/`R288` (2.2 kOhm to `VDD1G_1P8`, per the SoM netlist) ARE fitted,
-and the SoC-internal pull-up is additionally enabled because of the
-heavily-loaded bus (13 branches).
+2.2 kOhm pull-ups to `VDD1G_1P8` (per the SoM netlist) ARE fitted, and the
+SoC-internal pull-up is additionally enabled because of the heavily-loaded
+bus (13 branches).
 
 Docs: `docs/bring-up-v2n-m1.md`, `docs/soms/v2n-m1.md`, `docs/soms/v2n.md`
 and `examples/v2n/v2n-pmic-inspect/README.md` no longer say `cm33_boot` is

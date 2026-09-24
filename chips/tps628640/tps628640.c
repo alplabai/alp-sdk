@@ -175,6 +175,24 @@ alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable)
 	if (!ready(ctx)) return ALP_ERR_NOT_READY;
 	alp_status_t s = check_enable(ctx, enable);
 	if (s != ALP_OK) return s;
+
+	if (enable) {
+		/* Enabling energizes the chip's CURRENTLY programmed VOUT1 --
+		 * refuse instead of blindly turning on an unconfirmed setpoint
+		 * (stale POR value, or a window that shrank after the last
+		 * write).  VOUT1 always reads back once the chip answers on the
+		 * bus at all (bench-confirmed on every populated instance,
+		 * including 0x4F/DDR5_VDDQ_0V5 at 0x14 = 500 mV), so there is no
+		 * "not populated yet" excuse to skip this. */
+		const pmic_rail_limit_t *l = ctx->limit;
+		if (l->voltage_writable) {
+			uint16_t mv = 0;
+			s           = get_vout(ctx, TPS628640_REG_VOUT1, &mv);
+			if (s != ALP_OK) return s;
+			if (mv < l->min_mv || mv > l->max_mv) return ALP_ERR_OUT_OF_RANGE;
+		}
+	}
+
 	uint8_t v = enable ? (uint8_t)(ctx->control_shadow | TPS628640_CTRL_SOFTWARE_ENABLE)
 	                   : (uint8_t)(ctx->control_shadow & (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE);
 	return write_control(ctx, v);
@@ -204,10 +222,30 @@ alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx)
 	if (!ready(ctx)) return ALP_ERR_NOT_READY;
 	alp_status_t s = check_enable(ctx, false);
 	if (s != ALP_OK) return s;
+
+	/* The chip's own reset re-enables the converter (CTRL_DEFAULT has
+	 * SOFTWARE_ENABLE=1) at the datasheet-default FPWM/ramp settings
+	 * (FPWM off, slowest ramp) -- silently dropping whatever a prior
+	 * tps628640_set_fpwm_mode()/set_ramp_speed() call configured right
+	 * as the rail re-energizes.  Capture them before the reset and
+	 * restore them after, through the same guard check_enable() already
+	 * cleared (ctx->limit is non-NULL whenever check_enable() succeeds),
+	 * so e.g. a DEEPX buck that needs FPWM for load-transient stability
+	 * doesn't come back up in PFM mode. */
+	const uint8_t fpwm_bit  = (uint8_t)(ctx->control_shadow & TPS628640_CTRL_FPWM_MODE);
+	const uint8_t ramp_bits = (uint8_t)(ctx->control_shadow & TPS628640_CTRL_RAMP_SPEED_MASK);
+
 	/* One-shot reset bit: the chip reverts every register to its
 	 * datasheet default and self-clears the bit. */
 	s = reg_write(ctx, TPS628640_REG_CONTROL, TPS628640_CTRL_DEFAULT | TPS628640_CTRL_RESET);
-	if (s == ALP_OK) ctx->control_shadow = TPS628640_CTRL_DEFAULT;
+	if (s != ALP_OK) return s;
+	ctx->control_shadow = TPS628640_CTRL_DEFAULT;
+
+	const uint8_t want =
+	    (uint8_t)((ctx->control_shadow &
+	               (uint8_t)~(TPS628640_CTRL_FPWM_MODE | TPS628640_CTRL_RAMP_SPEED_MASK)) |
+	              fpwm_bit | ramp_bits);
+	if (want != ctx->control_shadow) s = write_control(ctx, want);
 	return s;
 }
 

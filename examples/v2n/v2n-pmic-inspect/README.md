@@ -31,7 +31,7 @@ Exit status:
 | Code | Meaning |
 |------|---------|
 | 0 | Silicon matches the metadata. |
-| 1 | Silicon and metadata disagree: a DA9292 identity byte differs, ACT88760 MODE4 is not `0x08`, or a power chip is missing. |
+| 1 | Silicon and metadata disagree: a DA9292 identity byte differs, ACT88760 MODE4 is not `0x08`, a power chip is missing, or a present rail's live voltage reads outside its power-tree.yaml window (presence alone is not "matches metadata"). |
 | 2 | Usage error, or `/dev/i2c-8` could not be opened. |
 | 3 | A write action was refused or failed. |
 
@@ -72,7 +72,9 @@ The one exception is the GPIO4 defect, when `--fix-gpio4-polarity` is the action
 | `--deepx-rail-sequence` | V2N-M1 only. Runs `da9292_ch2_sequence()` with P65 `DEEPX_PWR_EN_REQ` as the input and P64 `DEEPX_CORE_0P75_EN` as the output, both through `/dev/gpiochip*`. `M1_RESET` is not touched. |
 
 `<rail>` is an id (`buck1`..`buck7`, `ldo1`..`ldo6`, `da9292.ch1`,
-`da9292.ch2`, a TPS628640 net) or a net name such as `VDD_CORE_0P75`.
+`da9292.ch2`, a TPS628640 net) or a net name such as `VDD09_CA55`. Buck5/
+Buck6's own net is `TBD` (channel<->net attribution not independently
+verified, see `power-tree.yaml`) -- use their `buck5`/`buck6` id instead.
 
 ### `--deepx-rail-sequence` safety rules
 

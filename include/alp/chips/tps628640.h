@@ -265,14 +265,18 @@ alp_status_t tps628640_get_status(tps628640_t *ctx, uint8_t *status_byte);
  * init).  Setting @p enable to false stops
  * the converter but preserves every register (per datasheet
  * §8.4.10); setting it back to true re-runs soft-start without the
- * usual tDelay.
+ * usual tDelay.  Enabling first re-reads VOUT1 and refuses
+ * (::ALP_ERR_OUT_OF_RANGE) unless it lies inside the installed window --
+ * the chip energizes whatever VOUT1 currently holds, so this guards
+ * against turning on a stale or never-validated setpoint.
  *
  * @param ctx     TPS628640 context handle (must be initialised first).
  * @param enable  true = converter on.
  * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
  *         no entry is installed, the instance is not enable-writable, or
- *         @p enable is false on a `critical` instance; the bus status on
- *         I2C failure.
+ *         @p enable is false on a `critical` instance; ALP_ERR_OUT_OF_RANGE
+ *         if @p enable is true and the live VOUT1 setpoint lies outside the
+ *         installed window; the bus status on I2C failure.
  */
 alp_status_t tps628640_software_enable(tps628640_t *ctx, bool enable);
 
@@ -312,7 +316,11 @@ alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t s
  * The chip restarts with a tDelay startup, R2D-selected output
  * voltage, default CONTROL byte; the driver shadow re-initialises
  * to @ref TPS628640_CTRL_DEFAULT.  The restart is a momentary rail
- * interruption, so it is guarded like a disable.
+ * interruption, so it is guarded like a disable.  Unlike a bare
+ * datasheet reset, the caller's FPWM-mode and ramp-speed bits (as last
+ * set by tps628640_set_fpwm_mode() / tps628640_set_ramp_speed()) are
+ * captured beforehand and re-applied once the reset lands, so a rail
+ * needing forced PWM does not silently come back up in PFM mode.
  *
  * @param ctx  TPS628640 context handle (must be initialised first).
  * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if

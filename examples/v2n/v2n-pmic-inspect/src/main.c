@@ -30,7 +30,9 @@
  *                      GPIO, latched DA9292 events.  Text or --json.
  *                      Exit status 1 if silicon disagrees with metadata
  *                      (DA9292 identity, ACT88760 GPIO4 MODE byte, a
- *                      power chip missing).
+ *                      power chip missing, or a present rail's live
+ *                      voltage reading outside its power-tree.yaml
+ *                      window -- presence alone is not "matches metadata").
  *   --write + ONE of   --set-mv <rail> <mV>     window-guarded setpoint
  *                      --enable  <rail>         enable a rail
  *                      --disable <rail>         disable (critical: refused)
@@ -173,7 +175,9 @@ static const struct family families[] = {
 };
 
 /* ACT88760 rail short ids, index = act8760_rail_t.  Accepted on the
- * command line next to the net name ("buck5" or "VDD_CORE_0P75"). */
+ * command line next to the net name ("buck5" or "VDD09_CA55") -- Buck5/
+ * Buck6's own net is "TBD" (channel<->net attribution not independently
+ * verified, see power-tree.yaml), so use their "buck5"/"buck6" id instead. */
 static const char *const act_rail_ids[ACT8760_RAIL_COUNT] = {
 	"buck1", "buck2", "buck3", "buck4", "buck5", "buck6", "buck7",
 	"ldo1",  "ldo2",  "ldo3",  "ldo4",  "ldo5",  "ldo6",
@@ -297,6 +301,17 @@ static void collect_act(alp_i2c_t *bus)
 		return;
 	}
 	if (act8760_init(&g.act, bus) != ALP_OK) {
+		/* act8760_init() collapses every bus error -- including
+		 * -EBUSY -- to ALP_ERR_NOT_READY, so a kernel driver that
+		 * claimed the chip in the narrow window between the ownership
+		 * probe above and this init's own reads looks identical to a
+		 * genuinely absent chip.  Re-probe before reporting a
+		 * hardware-absence mismatch. */
+		if (kernel_owned(bus, ACT8760_I2C_ADDR_PAGE0) ||
+		    kernel_owned(bus, ACT8760_I2C_ADDR_PAGE1)) {
+			g.act_p = P_KERNEL;
+			return;
+		}
 		add_mismatch("%s: ACT88760 does not answer at 0x%02X/0x%02X", "act8760", 0x25u, 0x26u);
 		return;
 	}
@@ -382,6 +397,12 @@ static void collect_da(alp_i2c_t *bus)
 		return;
 	}
 	if (da9292_init(&g.da, bus, DA9292_I2C_ADDR_V2N) != ALP_OK) {
+		/* Same -EBUSY race as collect_act() -- re-probe before
+		 * reporting absence. */
+		if (kernel_owned(bus, DA9292_I2C_ADDR_V2N)) {
+			g.da_p = P_KERNEL;
+			return;
+		}
 		add_mismatch("%s: DA9292 does not answer at 0x%02X%.0u", "da9292", DA9292_I2C_ADDR_V2N, 0u);
 		return;
 	}
@@ -459,7 +480,13 @@ static void collect_tps(alp_i2c_t *bus)
 		}
 		/* Absent is normal: 0x4D is an assembly option, and the DEEPX
 		 * bucks only power up once DEEPX_CORE_0P75_EN is high. */
-		if (tps628640_init(&g.tps[i], bus, d->addr, 0) != ALP_OK) continue;
+		if (tps628640_init(&g.tps[i], bus, d->addr, 0) != ALP_OK) {
+			/* Same -EBUSY race as collect_act() -- re-probe so a
+			 * kernel-claimed chip reports as kernel-owned, not
+			 * silently folded into "absent". */
+			if (kernel_owned(bus, d->addr)) g.tps_p[i] = P_KERNEL;
+			continue;
+		}
 		g.tps_p[i] = P_PRESENT;
 
 		struct rail_row *r    = new_rail(K_TPS, (unsigned)i, d->addr);
@@ -495,6 +522,28 @@ static void collect_tps(alp_i2c_t *bus)
 	}
 }
 
+/* A rail can be PRESENT and read fine while its live voltage sits outside
+ * the window power-tree.yaml declares safe -- presence alone says nothing
+ * about that.  r->mv == 0 is this file's established "not decodable"
+ * sentinel (a load-switch note, a BAND_SEL-aliased buck, or a read
+ * failure); every chip family's real voltage floor is well above 0 mV, so
+ * it never collides with a genuine reading.  Only rails with a real
+ * window (voltage_writable; non-writable rails carry min_mv=max_mv=0) are
+ * checked. */
+static void check_windows(void)
+{
+	for (size_t i = 0; i < g.rail_count; i++) {
+		struct rail_row         *r = &g.rails[i];
+		const pmic_rail_limit_t *l = r->limit;
+
+		if (r->mv == 0u || !l->voltage_writable) continue;
+		if (r->mv < l->min_mv || r->mv > l->max_mv) {
+			add_mismatch(
+			    "%s: reading outside its window (min %u, max %u mV)", r->id, l->min_mv, l->max_mv);
+		}
+	}
+}
+
 static void collect(alp_i2c_t *bus)
 {
 	g.rail_count     = 0;
@@ -502,6 +551,7 @@ static void collect(alp_i2c_t *bus)
 	collect_act(bus);
 	collect_da(bus);
 	collect_tps(bus);
+	check_windows();
 }
 
 /* ------------------------------------------------------------------ */
@@ -705,7 +755,7 @@ static void print_json(void)
 /* Write actions                                                        */
 /* ------------------------------------------------------------------ */
 
-/* Find a rail by id ("buck5", "da9292.ch2") or net ("VDD_CORE_0P75"). */
+/* Find a rail by id ("buck5", "da9292.ch2") or net ("VDD09_CA55"). */
 static struct rail_row *find_rail(const char *name)
 {
 	for (size_t i = 0; i < g.rail_count; i++) {

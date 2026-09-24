@@ -22,12 +22,21 @@
  * hazard core-ownership.yaml's cross_check() exists to catch at the
  * metadata level (see scripts/gen_power_tree.py's _check_boot_modes()).
  *
- * The &i2c8 pinctrl group + clock-frequency below match the CM33 board
- * file's config from BEFORE the 2026-09-24 RIIC8-ownership move to the
- * CA55 (`git log -p` on zephyr/boards/alp/e1m_v2m101_m33_sm/*cm33.dts,
- * commit e8c91c6) -- the electrical facts never changed, only which
- * core is allowed to enable the node, and now only in this one boot
- * mode's pre-handoff window.
+ * The &i2c8 pinctrl group below does NOT just restore the pre-ownership-move
+ * config verbatim: it also carries the two RIIC8/BRD_I2C fixes U-Boot's
+ * board_late_init() needed to talk to this same bus reliably
+ * (meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+ * 0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch;
+ * changelog.d/2045-v2m-deepx-rail-uboot.md).  BRD_I2C is the
+ * most heavily-loaded bus on the module (~13 populated branches):
+ * external 2.2 kOhm pull-ups to the 1.8 V rail are fitted, and the
+ * SoC-internal pull-up (bias-pull-up below) is bench-confirmed
+ * ADDITIONALLY required at the faster (unpatched) clock, so both are
+ * carried here too, same as 0006.  Standard-mode `clock-frequency`
+ * (below) mirrors 0006's slower RIIC8 SCL (CKS(5)), bench-confirmed
+ * needed for clean burst reads over this bus -- Fast mode (the
+ * pre-ownership-move board file's setting) is what 0006 slowed down
+ * FROM, not a value to restore.
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -59,13 +68,26 @@
 /*
  * RIIC8 / BRD_I2C -- P06 SDA / P07 SCL, DA9292 @ 0x1E (also GD32 slave @
  * 0x70, unused here).  Time-sliced to the CM33 in cm33_boot mode ONLY
- * (see the file header) -- pinctrl group + clock-frequency restored
- * verbatim from the pre-ownership-move board file.
+ * (see the file header).  bias-pull-up enables the SoC-internal pull-up
+ * on P06/P07 (matching U-Boot 0006's rzv2n-dev.c s_init() PUPD_H write
+ * and what Linux's own i2c8_pins already sets) -- bench-confirmed
+ * required at this bus's clock, on top of the external 2.2 kOhm
+ * pull-ups already fitted.
  */
+&i2c8_pins {
+	i2c8-pinmux {
+		bias-pull-up;
+	};
+};
+
 &i2c8 {
 	pinctrl-0 = <&i2c8_pins>;
 	pinctrl-names = "default";
-	clock-frequency = <I2C_BITRATE_FAST>;
+	/* Standard mode, not the pre-ownership-move board file's Fast mode:
+	 * mirrors U-Boot 0006's RIIC8 clock slowdown (CKS(5)), bench-needed
+	 * for clean reads over this heavily-loaded bus -- see the file
+	 * header. */
+	clock-frequency = <I2C_BITRATE_STANDARD>;
 	status = "okay";
 };
 
