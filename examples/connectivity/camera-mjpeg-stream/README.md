@@ -31,6 +31,63 @@ your DHCP server):
 [camera-mjpeg-stream]   snapshot: http://192.0.2.10:8080/snapshot.jpg
 ```
 
+### 1280x960 build variant (Stage A, E1M-AEN801/AEN803, 15 fps capture/encode, ~7.5 fps delivered)
+
+`CONFIG_CAMERA_MJPEG_STREAM_1280X960` (this directory's `Kconfig`) switches
+`src/main.c` to the OV5647's existing 1280x960 centre-crop mode at 15 fps
+capture/encode (no sensor register-table change — a full-FOV binned
+1280x960 mode is a separate, not-yet-implemented stage) and raises the
+JPEG output cap to 160 KiB — see `boards/overlay-1280x960.conf` for the
+matching ISP-buffer-count and SRAM0-sizing deltas that resolution needs
+(same on both SKUs — AEN801 and AEN803 are the same PCB/SoC), and
+`src/main.c`'s `FRAME_W`/`FRAME_H` comment for why the synthetic-frame
+fallback is compiled out entirely at this size (no SRAM0 budget left for
+it). Delivered rate is lower than the 15 fps capture/encode rate — see
+bench run 243 below: the HTTP send path is the bottleneck. Not meaningful
+on native_sim.
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_camera_module_1" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+# flash + run per docs/aen-bench-bringup.md.
+```
+
+Bench run 242 (E1M-AEN803 + OV5647, **1280x960**, 15 fps request): capture
+path clean (0 CSI/IPI fatals, 0 ISP auto-stop), frames 0-11 encoded (~130 KB
+JPEG, dark scene while AE converged) — then every later encode failed with
+`alp_jpeg_encode failed (rc=-7 ...)` (`ALP_ERR_NOMEM`) as the scene
+brightened: quality 80 (the 640x480 default) routinely exceeded
+`MJPEG_HTTP_MAX_JPEG` (160 KiB) at this pixel count, and 160 KiB has no
+SRAM0 headroom left to grow (98.5% bank usage). Every `GET /stream` client
+also got re-served one stale frame and disconnected after ~2.1 s —
+`wait_and_claim()`'s single 2 s wait for a new frame gave up and dropped
+the client the moment one encode-failure burst outlasted it, even with the
+capture pipeline still alive.
+
+Both fixed: `src/main.c` now starts 1280x960 encodes at quality 60 (still
+comfortably under the cap for a typical frame) and retries a failing encode
+once at a lower quality (`src/jpeg_quality_ladder.h`, floor 40) instead of
+dropping the frame outright; `src/mjpeg_http.c`'s `wait_and_claim()` now
+gives a `/stream` client up to `STREAM_STALL_TIMEOUT_S` (30 s) total, spent
+across multiple shorter waits, instead of disconnecting after one
+`IDLE_TIMEOUT_S` (2 s) miss — a transient encode-retry burst no longer
+looks like a dead client. `src/main.c` also prints a once-a-second stats
+line (fps, encoded/failed/retried counts, JPEG size min/avg/max, encode
++ send ms) to make the next bench run's numbers easy to read off the
+console.
+
+Bench run 243 (E1M-AEN803 2026W36-0001, re-ran against these fixes): 0
+CSI/IPI fatals, 0 JPEG buffer-full, board encodes ~15 fps capture/encode
+(encode ~2 ms), JPEG 131-135 KB at quality 60 against the 163,840 B cap —
+the encode-retry ladder never triggered (0 retries; every frame encoded
+under cap on the first attempt at quality 60). Delivered rate is lower:
+the host receives ~7.50 fps / 997,544 B/s — the HTTP send path, not
+capture/encode, is the bottleneck (~1 MB/s), and `STREAM_STALL_TIMEOUT_S`
+(30 s) comfortably covers it with 0 dropped `/stream` clients.
+
 ## Watch it
 
 - **Browser** — open the `stream` URL directly; any modern browser renders
@@ -143,11 +200,14 @@ the body):
 |---|---|
 | `src/main.c` | Camera-capture + JPEG-encode loop (the app's main thread); pixfmt selection from `alp_jpeg_caps_t::pixfmt_mask`; DHCP kick-off + lease/URL printing. |
 | `src/mjpeg_http.c` | The HTTP server: `GET /stream` + `GET /snapshot.jpg`, its own thread, `zsock_*` sockets, zero-copy ping-pong frame hand-off (two SRAM0 buffers, `mjpeg_http_claim_write_buffer()`/`mjpeg_http_publish_frame()`), `SO_RCVTIMEO`/`SO_SNDTIMEO` on every accepted socket. |
-| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use. |
+| `src/mjpeg_http.h` | The hand-off API + `MJPEG_HTTP_MAX_JPEG` — the one shared cap both this file's buffers and main.c's `alp_jpeg_encode()` call use — plus `mjpeg_http_get_stats()`, main.c's window into `mjpeg_http.c`'s own last-send timing. |
+| `src/jpeg_quality_ladder.h` | `jpeg_quality_step_down()` — the pure, native_sim-testable retry-ladder step `src/main.c` uses on an `ALP_ERR_NOMEM` encode failure (`tests/unit/mjpeg_quality_ladder`). |
 | `src/aen_eth_phy.c` | AEN-only, interim: PHY power/reset + refclk-mode bring-up; not linked on other targets. |
 | `src/selftest.c` | native_sim-only CI selftest (`GET /snapshot.jpg` JPEG marker check, `GET /stream` multipart-framing check). |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay` | ISP graph rewiring (mirrors `aen-isp-ov5647-viewfinder`) + interim Ethernet RMII/PHY DT wiring (mirrors `aen-ethernet-link`). Content-identical across the two SKUs. |
 | `boards/alp_e1m_aen80{1,3}_..._rtss_he.conf` | AEN hardware-path Kconfig (ISP pipeline sized for 640×480 NV12, Hantro JPEG encoder, Ethernet DMA-region glue, `CONFIG_DCACHE=n`) — board-scoped so native_sim stays clean of undefined-symbol Kconfig warnings. Content-identical across the two SKUs. |
+| `boards/overlay-1280x960.conf` | Stage-A 1280x960 variant (AEN801 or AEN803, same PCB/SoC): sets `CONFIG_CAMERA_MJPEG_STREAM_1280X960`, drops the ISP raw-buffer count to 2, and resizes the video buffer pool for the larger NV12 frame — layered on top of either board conf via `EXTRA_CONF_FILE`. |
+| `Kconfig` | `CONFIG_CAMERA_MJPEG_STREAM_1280X960` — the resolution select `src/main.c` and `src/mjpeg_http.h` both key off. |
 | `boards/native_sim.conf` + `boards/native_sim_native_64.conf` | Content-identical pair (Zephyr resolves a different filename per qualifier string, so one file alone doesn't cover both `native_sim` and `native_sim/native/64`): `CONFIG_NET_LOOPBACK` + a zeroed `CONFIG_NET_TCP_TIME_WAIT_DELAY` so `src/selftest.c`'s two back-to-back loopback connections don't collide on a lingering TIME_WAIT port. |
 
 ## Portability
