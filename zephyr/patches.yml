@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 912be7b39243bf980677071c1c5d576b173d0e8b177999a7df745771e047f3a6
+    sha256sum: bafbbf77ad7af03862bf1fc43a2b2d24d79c886acba7ddfed948ad00c1a95fb5
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -713,14 +713,23 @@ patches:
       the .ae block, gated the same way patch 0008 already gates the
       WB/CCM calibration (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647, #else keeps
       the ARX3A0 literals unchanged), with expTimeRange/againRange/
-      dgainRange/aeTarget/manualAttr set from sensor_attributes.h's new
-      OV5647_AE_* macros -- the SAME facts sensor_attributes.h's own
-      AE_SNS_DEFAULT_S table already carried (patch 0006), now named
-      instead of duplicated as independent literals, with _Static_assert
-      guards pinning the macros' own values and the library's own
-      microseconds<->lines round-trip (both an upper AND a lower bound --
-      an upper-only check can never fail given the truncation direction)
-      and the 20-bit VIDEO_CID_EXPOSURE field width. Bench run 213 (0010+
+      dgainRange/aeTarget/manualAttr set from a new shared header,
+      ov5647_ae_envelope.h's OV5647_AE_* macros -- the SAME facts
+      sensor_attributes.h's own AE_SNS_DEFAULT_S table already carried
+      (patch 0006), now named instead of duplicated as independent
+      literals, with _Static_assert guards pinning the macros' own values
+      and the library's own microseconds<->lines round-trip (both an upper
+      AND a lower bound -- an upper-only check can never fail given the
+      truncation direction) and the 20-bit VIDEO_CID_EXPOSURE field width.
+      The macros live in their OWN header (included by both
+      isp_param_conf.h and sensor_attributes.h) rather than in
+      sensor_attributes.h directly: an earlier revision had
+      isp_param_conf.h include the whole of sensor_attributes.h, which
+      pulled its AE_SNS_DEFAULT_S static table into isp_api_wrapper.c's
+      translation unit even when CONFIG_ISP_LIB_AE_MODULE is off (the
+      config that guards the table's only use site) -- defined but never
+      referenced, tripping -Werror=unused-variable in the
+      aen-isp-regcheck/AEN803/AEN801 twister build. Bench run 213 (0010+
       0011 applied) held within the sensor's real envelope
       (int_time_max=98000, again_max=65472) with 0 rejected writes; the
       exact mechanism by which the calibration block wins over
