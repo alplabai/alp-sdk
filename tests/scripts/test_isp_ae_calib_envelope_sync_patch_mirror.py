@@ -155,7 +155,7 @@ def test_sns_default_sync_mirrors_the_same_fields_as_the_patch() -> None:
     )
     mirror_body = _extract_function_body(
         MIRROR.read_text(encoding="utf-8").splitlines(),
-        re.compile(r"^static void isp_sns_default_sync\("),
+        re.compile(r"^(static void\s+)?isp_sns_default_sync\("),
     )
     mirror_fields = _assigned_fields(mirror_body.splitlines())
 
