@@ -334,10 +334,9 @@ struct isp_ctrls {
 	 * calibration-matching default (val == range.def) -- once a SET has
 	 * moved the lib off its calibration state, only another SET moves
 	 * it back. ae_dirty additionally starts true (isp_init_controls()):
-	 * the calibration carries no AE target, integration-time or gain
-	 * range for this sensor, so those limits must be pushed at the very
-	 * first stream start even though exposure_auto is already at its
-	 * default. isp_stream_start() is the sole caller of isp_apply_wb()/
+	 * the first stream start pushes the live, sensor-queried
+	 * frame-period/gain ceilings even though exposure_auto is already
+	 * at its default. isp_stream_start() is the sole caller of isp_apply_wb()/
 	 * isp_apply_ae() to act on either flag, and only while the ISP is
 	 * stopped (isp_stream_start() never runs otherwise) -- clearing the
 	 * flag on success. A change made while already streaming is picked
