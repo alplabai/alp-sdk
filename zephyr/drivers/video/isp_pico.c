@@ -362,6 +362,15 @@ static void hw_disable_mi_interrupts(uintptr_t regs, uint32_t mask)
 	sys_clear_bits(regs + ISP_MI_IMSC, mask);
 }
 
+/* Forward declaration: isp_ae_diag_log() (below, next to the diag globals it updates) is defined
+ * well after isp_bottom_half() in this file, but #2277's isp_ae_diag_isp_fps_x100 needs to sample
+ * isp_mi_frame_end_count every real frame-end, not only the isp_apply_ae() calls this driver's
+ * restart-per-frame pattern happens to make -- see isp_bottom_half()'s own call, below, and
+ * isp_ae_diag_log()'s comment for why the OLD call site (isp_apply_ae(), gated on ae_dirty) only
+ * ever ran once ae_dirty had gone false again.
+ */
+static void isp_ae_diag_log(void);
+
 static void isp_bottom_half(const struct device *dev)
 {
 	enum video_signal_result signal_status = VIDEO_BUF_DONE;
@@ -386,6 +395,18 @@ static void isp_bottom_half(const struct device *dev)
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
 	isp_vsi_bottom_half(dev, &data->init_cfg, data->mi_mis);
 	k_mutex_unlock(&data->lib_lock);
+
+	/*
+	 * #2277: sample isp_ae_diag_isp_fps_x100 at REAL frame-end cadence, every frame this
+	 * bottom-half runs -- not just when isp_apply_ae() happens to run (ae_dirty starts true
+	 * and goes false after the first successful apply, isp_init_controls()/isp_apply_ae(),
+	 * so the OLD call from inside isp_apply_ae()'s readback block only ever fired ONCE in a
+	 * normal session, freezing the fps counter at whatever isp_mi_frame_end_count's delta was
+	 * over that single window). isp_ae_diag_log() self-rate-limits its own LOG_INF/globals
+	 * update to >=1s (see its own comment), so calling it unconditionally here is cheap and
+	 * gives a live, continuously-updating fps reading for the whole session.
+	 */
+	isp_ae_diag_log();
 
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {

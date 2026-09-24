@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 0c3869ee215ab51110bc90241ca9bec1cce12e97ce318ae03dfa4433d6aa130d
+    sha256sum: 44c495dc6d552ca9b6a46a076b7b227d6add832f102c5b71fb394849689fcde4
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -853,6 +853,53 @@ patches:
          isp_ae_diag_sns_int_line (the library's raw, unclamped
          request) -- so a bench readback can tell whether the library
          honoured the re-init or the clamp caught it.
+
+      Bench re-run not yet performed as part of this change.
+
+      UPDATED (#2277, fifth cut -- exposure write-back diagnostics): bench
+      run 246 (bb97a5336 applied) found the FOURTH cut's own clamp
+      working correctly (requested intLine=3145 clamped=1045, logged at
+      1 Hz, stable for the whole 12 s session) but the sensor's
+      0x3500..0x3502 exposure registers reading back OV5647_EXPOSURE_
+      DEFAULT (0x0fff) at every sample -- the clamped intLine, *16'd,
+      never actually landed. A new native_sim ztest
+      (test_ae_writeback_exposure_auto_then_exposure_lands_in_registers,
+      tests/zephyr/video_sensors/src/ov5647_test.c) reproduces
+      isp_apply_ae_sensor_gate()'s + isp_vsi_bottom_half()'s own control
+      sequence (VIDEO_CID_EXPOSURE_AUTO=MANUAL, VIDEO_CID_AUTOGAIN=0,
+      then VIDEO_CID_EXPOSURE=1045*16) against ov5647.c + Zephyr's own
+      drivers/video/video_ctrls.c and PASSES on bb97a5336 unmodified --
+      proving the alp-sdk-side control routing (advisor candidates (a)
+      "the bottom-half write-back never runs"/chain-walk, and (c) ov5647's
+      MANUAL/AUTO early return or EXPOSURE/EXPOSURE_AUTO cluster routing)
+      is NOT the defect: the same sequence, exercised directly, lands the
+      value correctly. This narrows the standing hypothesis to advisor
+      candidate (b) -- video_set_ctrl() failing at the ACTUAL isp->cam->
+      csi->sensor chain-walk depth or under real ISP/library timing this
+      unit test cannot reproduce (no ISP hardware or closed VSI_MPI_ISP
+      library in native_sim) -- which needs a live bench read to confirm.
+      Added diagnostics for that next bench pass, all 1 Hz LOG_INF +
+      `volatile` globals for an SWD read: isp_api_wrapper.c's
+      isp_ae_diag_exposure_{last_ret,last_ctrl_val,cached_int_line,
+      sns_int_line} (isp_ae_diag_exposure_log(), called right after every
+      exposure video_set_ctrl() attempt in isp_vsi_bottom_half()) capture
+      exactly what the wrapper believes it just did; ov5647.c's
+      ov5647_ae_diag_log() moved to the TOP of ov5647_set_ctrl_exposure()
+      (was only reached after a successful MANUAL-mode write, so a
+      candidate-(c)-class session stuck in AUTO would have frozen this
+      diag at its last successful sample instead of showing the live
+      AUTO/manual_ctrl state) and now also reads the RAW 0x3500..0x3502
+      value (ov5647_ae_diag_exp_reg_raw) and raw 0x3503
+      (ov5647_ae_diag_manual_ctrl_raw), plus ov5647_ae_diag_last_ret/
+      last_ctrl_val for what THIS driver's own last write attempt
+      returned -- a three-way cross-check (wrapper's belief vs. driver's
+      belief vs. the sensor's actual register) a future bench run can
+      read to pin down (b)'s exact failure mode. isp_pico.c also gained
+      an isp_bottom_half() call to isp_ae_diag_log() (that file's own
+      per-frame fps diagnostic) on every real frame-end instead of only
+      from isp_apply_ae()'s ae_dirty-gated readback, which only ran once
+      per session (ae_dirty goes false after the first successful apply)
+      and froze isp_ae_diag_isp_fps_x100 from then on.
 
       Bench re-run not yet performed as part of this change.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch

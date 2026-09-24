@@ -1418,9 +1418,24 @@ static int ov5647_set_ctrl_gain(const struct device *dev)
  * `volatile`: read via SWD/log from outside this translation unit's normal
  * control flow, the same bench technique isp_pico.c's isp_ae_diag_*
  * globals use (see that file's own comment).
+ *
+ * #2277 (candidate (c) hardening): ov5647_ae_diag_exp_reg_raw/manual_ctrl_raw (below) are the
+ * UNSHIFTED 0x3500..0x3502 value and the raw 0x3503 byte -- exp_lines alone cannot distinguish
+ * "AEC bit never went MANUAL" (0x3503 bit0 == 0, the ctrls->exposure_auto.val early-return path
+ * below never even reaches the OV5647_EXPOSURE write) from "AEC bit is MANUAL but the write
+ * itself is rejected/never attempted" (0x3503 bit0 == 1, exp_lines stuck at the sensor's
+ * power-on/OV5647_EXPOSURE_DEFAULT value) -- the two would otherwise look identical from
+ * exp_lines/vts_reg alone. ov5647_set_ctrl_exposure()'s own last_ret/last_ctrl_val (below) pin
+ * down what THIS driver believes it just did, for the same "wrapper thinks it succeeded vs. what
+ * the sensor register actually holds" cross-check isp_api_wrapper.c's isp_ae_diag_exposure_*
+ * globals give on the ISP side.
  */
 volatile uint32_t ov5647_ae_diag_exp_lines;
 volatile uint32_t ov5647_ae_diag_vts_reg;
+volatile uint32_t ov5647_ae_diag_exp_reg_raw;
+volatile uint32_t ov5647_ae_diag_manual_ctrl_raw;
+volatile int32_t  ov5647_ae_diag_last_ret;
+volatile int32_t  ov5647_ae_diag_last_ctrl_val;
 
 static void ov5647_ae_diag_log(const struct device *dev)
 {
@@ -1429,6 +1444,7 @@ static void ov5647_ae_diag_log(const struct device *dev)
 	int64_t                     now = k_uptime_get();
 	uint32_t                    exp_reg;
 	uint32_t                    vts_reg;
+	uint32_t                    manual_ctrl_reg;
 
 	if (last_log_ms != 0 && now - last_log_ms < 1000) {
 		return;
@@ -1440,15 +1456,21 @@ static void ov5647_ae_diag_log(const struct device *dev)
 	if (video_read_cci_reg(&cfg->i2c, OV5647_TIMING_VTS_REG, &vts_reg) < 0) {
 		return;
 	}
+	if (video_read_cci_reg(&cfg->i2c, OV5647_MANUAL_CTRL, &manual_ctrl_reg) < 0) {
+		return;
+	}
 
-	last_log_ms              = now;
-	ov5647_ae_diag_exp_lines = exp_reg >> 4;
-	ov5647_ae_diag_vts_reg   = vts_reg;
+	last_log_ms                    = now;
+	ov5647_ae_diag_exp_lines       = exp_reg >> 4;
+	ov5647_ae_diag_vts_reg         = vts_reg;
+	ov5647_ae_diag_exp_reg_raw     = exp_reg;
+	ov5647_ae_diag_manual_ctrl_raw = manual_ctrl_reg;
 
-	LOG_INF("AE sns reg diag: exp_lines=%u (reg=0x%06x) vts=%u",
+	LOG_INF("AE sns reg diag: exp_lines=%u (reg=0x%06x) vts=%u manual_ctrl=0x%02x",
 	        ov5647_ae_diag_exp_lines,
 	        exp_reg,
-	        vts_reg);
+	        vts_reg,
+	        manual_ctrl_reg);
 }
 
 static int ov5647_set_ctrl_exposure(const struct device *dev)
@@ -1458,25 +1480,36 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 	struct ov5647_ctrls        *ctrls = &data->ctrls;
 	int                         ret;
 
+	/*
+	 * #2277: moved ABOVE the AEC-bit write and the AUTO/MANUAL early return below (was only
+	 * called after a successful MANUAL-mode write) -- so a session where exposure_auto.val
+	 * never actually reaches MANUAL (candidate (c)) still gets a live 1 Hz register readback
+	 * instead of freezing at whatever the last successful write happened to leave. Cheap: the
+	 * function self-rate-limits to >=1s internally.
+	 */
+	ov5647_ae_diag_log(dev);
+
 	ret = video_modify_cci_reg(
 	    &cfg->i2c,
 	    OV5647_MANUAL_CTRL,
 	    OV5647_MANUAL_CTRL_AEC,
 	    ctrls->exposure_auto.val == VIDEO_EXPOSURE_MANUAL ? OV5647_MANUAL_CTRL_AEC : 0);
 	if (ret < 0) {
+		ov5647_ae_diag_last_ret = ret;
 		return ret;
 	}
 
 	if (ctrls->exposure_auto.val != VIDEO_EXPOSURE_MANUAL) {
+		ov5647_ae_diag_last_ret = 0;
 		return 0;
 	}
 
-	ret = video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	ret                     = video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	ov5647_ae_diag_last_ret = ret;
+	ov5647_ae_diag_last_ctrl_val = ctrls->exposure.val;
 	if (ret < 0) {
 		return ret;
 	}
-
-	ov5647_ae_diag_log(dev);
 
 	return 0;
 }

@@ -236,7 +236,50 @@
  #endif
 --- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
 +++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
-@@ -374,9 +374,63 @@
+@@ -108,6 +108,42 @@
+ static bool exposure_write_err_logged;
+ 
+ /*
++ * #2277 bench diagnostic: the exposure write-back attempt's own inputs/outcome, sampled at 1 Hz
++ * (isp_bottom_half()'s per-frame isp_vsi_bottom_half() call runs this far more often) -- proves
++ * or disproves advisor candidates (a)/(b) directly against real hardware: last_ret nonzero on
++ * every sample means video_set_ctrl() itself is rejecting the write (candidate (b), silenced
++ * after the first LOG_ERR by exposure_write_err_logged above); last_ret == 0 with cached_int_line
++ * never catching up to sns_int_line means the write-back block itself is not being reached/
++ * retried (candidate (a)). `volatile` + non-static: read via SWD/log the same way isp_pico.c's
++ * own isp_ae_diag_* globals are (see that file's comment) -- this diag has to live here rather
++ * than isp_pico.c since isp_vsi_bottom_half() is this file's own function.
++ */
++volatile int32_t  isp_ae_diag_exposure_last_ret;
++volatile int32_t  isp_ae_diag_exposure_last_ctrl_val;
++volatile vsi_u32_t isp_ae_diag_exposure_cached_int_line;
++volatile vsi_u32_t isp_ae_diag_exposure_sns_int_line;
++
++static void isp_ae_diag_exposure_log(int ret, int32_t ctrl_val, vsi_u32_t cached_int_line,
++				      vsi_u32_t sns_int_line)
++{
++	static int64_t last_log_ms;
++	int64_t        now = k_uptime_get();
++
++	isp_ae_diag_exposure_last_ret        = ret;
++	isp_ae_diag_exposure_last_ctrl_val   = ctrl_val;
++	isp_ae_diag_exposure_cached_int_line = cached_int_line;
++	isp_ae_diag_exposure_sns_int_line    = sns_int_line;
++
++	if (last_log_ms != 0 && now - last_log_ms < 1000) {
++		return;
++	}
++	last_log_ms = now;
++
++	LOG_INF("AE exposure writeback: ret=%d ctrl.val=%d cached_int_line=%u sns_int_line=%u",
++		ret, ctrl_val, cached_int_line, sns_int_line);
++}
++
++/*
+  * alp-sdk fix (Alp Lab AB): the ISP library's own AE algorithm
+  * computes gain/exposure targets in its own fixed-point scale, and nothing
+  * upstream of isp_vsi_bottom_half() clamps the result to what the sensor's
+@@ -374,9 +410,63 @@
  	return 0;
  }
  
@@ -301,7 +344,7 @@
  
  	return 0;
  }
-@@ -396,6 +450,92 @@
+@@ -396,6 +486,92 @@
  };
  #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
  
@@ -394,7 +437,20 @@
  int isp_vsi_init(struct isp_config_params *init_cfg)
  {
  	struct channel_parameters *channel;
-@@ -1146,6 +1286,45 @@
+@@ -864,6 +1040,12 @@
+ 			}
+ 		}
+ 		ret = video_set_ctrl(dev, &ctrl);
++		/* #2277 diag: the pre-attempt cached value -- captured before the success branch
++		 * below updates it -- so a failing attempt (ret != 0, cached stays behind
++		 * sns_int_line forever) and a converged one (ret == 0, cached catches up and this
++		 * block stops being entered at all) are both visible in isp_ae_diag_exposure_log().
++		 */
++		isp_ae_diag_exposure_log(ret, ctrl.val, cached_sns_config.intLine, sns_config.intLine);
+ 		if (ret) {
+ 			if (!exposure_write_err_logged) {
+ 				LOG_ERR("Failed to write Exposure to the sensor!");
+@@ -1146,6 +1328,45 @@
  			LOG_ERR("Failed to set AE attr");
  			return isp_err_2_errno(ret);
  		}

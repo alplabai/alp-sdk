@@ -1726,6 +1726,59 @@ ZTEST(ov5647, test_set_fmt_unsupported_restores_callers_pixelformat)
 }
 
 /*
+ * #2277: reproduces the ISP AE write-back path verbatim -- isp_pico.c's isp_apply_ae_sensor_gate()
+ * sets VIDEO_CID_EXPOSURE_AUTO=VIDEO_EXPOSURE_MANUAL once at stream start, then hal_alif's
+ * isp_vsi_bottom_half() (isp_api_wrapper.c) drives VIDEO_CID_EXPOSURE = intLine*16 every time the
+ * library's AE algorithm moves the clamped line count -- 1045*16 = 0x4150 is bench run 246's own
+ * clamped intLine. Bench evidence: the sensor's 0x3500..0x3502 stayed pinned at
+ * OV5647_EXPOSURE_DEFAULT (0x0fff) for the whole session even though the wrapper logged this exact
+ * clamped value every AE update. This test must FAIL on bb97a5336 if the defect is in this
+ * driver's/the video subsystem's control-routing rather than purely in the vendored hal_alif
+ * caller this suite cannot reach.
+ */
+ZTEST(ov5647, test_ae_writeback_exposure_auto_then_exposure_lands_in_registers)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	/* Bench run 246's own clamped intLine (1045), *16'd exactly like isp_api_wrapper.c's
+	 * sns_config.intLine * 16 write-back convention (ov5647.c's own 1/16-line format).
+	 */
+	struct video_control exposure = { .id = VIDEO_CID_EXPOSURE, .val = 1045 * 16 };
+	uint8_t              hi, mid, lo, manual_ctrl;
+
+	/* isp_apply_ae_sensor_gate()'s own two calls, in its own order -- see isp_pico.c. */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+
+	/* isp_vsi_bottom_half()'s exposure write-back (isp_api_wrapper.c) -- a NEW value, not a
+	 * no-op against ctrls->exposure's still-default val.
+	 */
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3503, &manual_ctrl));
+	/* OV5647_MANUAL_CTRL_AEC (ov5647.c) = BIT(0) -- kept as a literal here, not the driver's
+	 * private macro, matching this file's own existing convention (see the file header).
+	 */
+	zassert_true(
+	    manual_ctrl & 0x01,
+	    "0x3503 AEC bit not set after VIDEO_CID_EXPOSURE_AUTO=MANUAL -- manual_ctrl=0x%02x",
+	    manual_ctrl);
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	zassert_equal(((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x after VIDEO_CID_EXPOSURE=%d, want 0x%06x -- the "
+	              "AE write-back never reached the sensor's exposure registers",
+	              ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo,
+	              exposure.val,
+	              (uint32_t)exposure.val);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever
