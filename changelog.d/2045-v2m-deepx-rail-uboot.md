@@ -148,18 +148,11 @@ This is a real, independently-confirmed protocol defect (every
 register read on any of the SoC's nine RIIC instances goes through
 the same `riic_xfer()` path) and plausibly contributes to a desync
 severe enough to time out a cold read and leave `ICCR2` `BBSY` stuck
-set, wedging every later transaction with `-EBUSY`. It is **not
-proven** to be the cause of the bench failures, though: a separate
-console session on the same bus saw `i2c probe` find the DA9292 at
-`1E 25 26` once, then the very next `i2c md 0x1e 0x19 1` fail `-16`
-and every later probe find nothing -- but `i2c probe` doesn't go
-through `riic_xfer()` at all, it calls `riic_probe_chip()` /
-`riic_set_addr()` directly, a third code path this patch leaves
-untouched (it writes the probed device's own address byte as a junk
-"offset" before STOP). That path's own transaction shape is at least
-as likely a wedge source as the combined-read bug fixed here --
-stated as a hypothesis for the next bench session, not a diagnosis.
-Writes are unaffected either way -- `dm_i2c_write()` always builds one
+set, wedging every later transaction with `-EBUSY`. It was **not
+proven** to be the *sole* cause of the bench failures when first found
+-- see the measured root cause below, found on the next bench pass
+after `0005` alone did not clear the failure. Writes are unaffected
+either way -- `dm_i2c_write()` always builds one
 combined message, so `0004`'s own DA9292 writes already ran correctly;
 only its reads (`PMC_DEV_ID`, `STATUS_01`, `CTRL_01`, `VOUT_CH2`,
 `EVENT_00`/`01`, the `STATUS_00` poll) could hit this bug.
@@ -191,6 +184,63 @@ nine RIIC instances routes register reads through the same
 unconditionally for `rzv2n-family` rather than gated the way `0004`'s
 Kconfig knob is.
 
+**Measured root cause found, 2026-09-24 (E1M-V2M103, U-Boot
+`bcf29d98`).** `0005` alone did not clear the failure: the next bench
+pass still saw `i2c md 0x1e 0x19 1` on RIIC8 fail, this time with
+`ICSR2=0x0a` (`STOP|AL`, arbitration lost) on the *repeated START*, a
+different failure mode from either symptom `0005` targeted. Two
+fixes, each **individually bench-proven sufficient** from the U-Boot
+prompt:
+
+- **SoC-internal pull-ups on P06/P07.** Linux already programs `PUPD_H`
+  (port 0) `= 0x03030000` (pull-up on P06/P07) while U-Boot leaves the
+  register at its POR value of `0` -- no pull-up at all. Writing
+  `0x03030000` from the U-Boot prompt made the read return reliably.
+- **A slower SCL.** Setting `ICMR1` `CKS=5` (write `0x50`) also made
+  reads work. Root cause: `riic_set_clock()`
+  (`drivers/i2c/rzg2l_riic.c`, one CKS/`ICBRH`/`ICBRL` table shared by
+  every SoC this driver builds for) is tuned for a 50 MHz RIIC input
+  clock, but R9A09G056/057 (RZ/V2N, RZ/V2H) run RIIC off a 100 MHz
+  input instead (Linux uses `ICBRL`/`ICBRH` `0x0d`/`0x07` at `CKS=3`
+  for its own 400 kHz bus on the same clock) -- so U-Boot's "100 kHz"
+  config (`CKS=3`, unmodified) actually runs the bus at roughly double
+  rate, bench-measured `~220 kHz`.
+
+Also measured on the same pass, unrelated to either fix: PFC port0
+(`@0x10410480`) `= 0x11000000` (P06/P07 func1) identically in both
+U-Boot and Linux, and RIIC0 (the on-module EEPROM bus) works -- the
+EEPROM there is simply blank, not a bus fault.
+
+`0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch` carries
+both fixes plus two smaller, unconditional hardening additions in the
+same file targeting the identical AL failure signature: `riic_read_common()`
+now polls `ICCR1` `SDAI=1` (SDA released, bounded `~100 us`) after the
+offset-write `TEND` wait and before the repeated START -- issuing the
+restart while a slave still holds SDA low from its ACK is exactly the
+race that lost arbitration on the bench; and `riic_check_busy()` now
+clears stale `ICSR2` `AL|STOP|NACKF|START` (sticky bits a prior
+transaction's abort can leave set, misread as an immediate event on
+the *next* transaction) before the busy-bus check, running the same
+`IICRST` recovery `0005` added for the `BBSY`-stuck case when `AL`
+specifically is found set, rather than leaving it merely cleared.
+Neither of the two hardening additions was separately bench-validated
+in isolation -- they are defensive, not new proven fixes. The clock
+fix is gated to R9A09G056/057 builds only (`#if defined(CONFIG_R9A09G057)
+|| defined(CONFIG_R9A09G056)`); the other SoCs sharing this driver
+(R9A09G047, R9A08G045S) are untouched, their actual RIIC input clock
+not established here.
+
+The contradicting DT comment in
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-x-evk.dtsi`
+(`&pinctrl`, `i2c0_pins`/`i2c8_pins` block) is corrected to match: it
+previously asserted flatly that the module has no external pull-ups
+on RIIC0/RIIC1/RIIC8; that population is actually **TBD** (not
+confirmed against the schematic/BOM), not a known-absent fact. The
+comment now says so, and states that the SoC-internal pull-up on
+RIIC8/BRD_I2C specifically is bench-confirmed **required** regardless
+of what that population turns out to be -- without it, RIIC8 fails
+with arbitration-lost in U-Boot.
+
 **Rebuilt and link-verified with the reworked fix, 2026-09-24** (fresh
 `bcf29d98` + PMIC-I2C-removal + `0001` + `0002` (md5
 `c546f00cabca346e335febd21ecbc440`) + `0003` (4 GB tier) + `0004`
@@ -208,3 +258,25 @@ DRAM_RSV_SIZE)` and the control DT's `memory@48000000` = `<0x0
 `u-boot.bin`: md5 `9c05679f0f9bc108164f68bef4435b95`, size 764240
 bytes (`0xBA950`), crc32 `0xde3a8bdd`. BENCH-PENDING: unverified on
 silicon.
+
+**v4 rebuilt with `0006` added, 2026-09-24** (fresh `bcf29d98`
+worktree, independent of the working tree above: PMIC-I2C-removal +
+`0001` + `0002` + `0003` (4 GB tier) + `0004` + `0005` + `0006`, each
+applied via `git apply --check` then `git apply`, in that order, all
+seven succeeding cleanly with zero fuzz; `rzv2n-dev_defconfig` +
+`no-dirty-version.cfg` + `gigadevice-xspi.cfg` + `deepx-rail.cfg` +
+`fdtfile-v2m.cfg`; WSL Ubuntu-22.04, `aarch64-linux-gnu` gcc 11.4.0):
+build `rc=0`, both changed files (`board/renesas/rzv2n-dev/rzv2n-dev.c`,
+`drivers/i2c/rzg2l_riic.c`) compiled with no warnings. `strings |
+grep -c '^ALP:'` = `26` (was `25` in the v3 build above; `0006` adds
+exactly one new `printf` -- the stale-AL recovery message -- LTO did
+not drop it; the PUPD write and the SDAI poll have no strings of their
+own). `CONFIG_SYS_SDRAM_SIZE` = `(0x100000000u - DRAM_RSV_SIZE)` and
+the control DT's `memory@48000000` = `<0x0 0x48000000 0x0
+0xF8000000>` -- unchanged from v3, still correct for the 4 GB tier.
+`u-boot.bin`: md5 `c2b3bbb114a2c509678ccfeb21acb57f`, size 764328
+bytes (`0xBA9A8`), crc32 `0xac1df277`. `0006` patch file itself: md5
+`8a739735b7cfcdfa4a16febe0aa5dab4`. BENCH-PENDING: unverified on
+silicon -- the pull-up and clock fixes were bench-proven from the
+U-Boot prompt as interactive register pokes, not yet as this compiled
+patch flashed and booted end to end.

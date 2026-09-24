@@ -397,9 +397,17 @@
 		output-enable;
 	};
 
-	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), the ALP
-	 * board has none on RIIC0 (on-module EEPROM bus), RIIC1, or RIIC8
-	 * (BRD_I2C); enable the SoC internal pull-ups so SCL/SDA idle high. */
+	/* Unlike the Renesas EVK (external pull-ups on RIIC0/1), external
+	 * pull-up population on this ALP module for RIIC0 (on-module EEPROM
+	 * bus), RIIC1, or RIIC8 (BRD_I2C) is TBD -- not yet confirmed
+	 * against the schematic/BOM. Enable the SoC internal pull-ups on
+	 * all three so SCL/SDA idle high regardless of that population.
+	 * For RIIC8/BRD_I2C this is not just a safety margin: bench-
+	 * confirmed REQUIRED (E1M-V2M103, U-Boot bcf29d98) -- without them
+	 * RIIC8 reads fail with arbitration-lost (ICSR2 AL) on the very
+	 * first read. See the matching U-Boot fix,
+	 * meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+	 * 0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch. */
 	i2c0_pins: i2c0 {
 		pinmux = <RZV2N_PORT_PINMUX(3, 0, 1)>, /* I2C0_SDA */
 			 <RZV2N_PORT_PINMUX(3, 1, 1)>; /* I2C0_SCL */

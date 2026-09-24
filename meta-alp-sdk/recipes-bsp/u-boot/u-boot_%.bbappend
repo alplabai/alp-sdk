@@ -183,6 +183,28 @@ SRC_URI:append:e1m-v2m103-a55 = " file://deepx-rail.cfg"
 # builds one combined message), so 0004's own writes needed no change.
 SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-read.patch"
 
+# 0006 (P06/P07 pull-up + RIIC clock/restart fixes): bench root-caused
+# (E1M-V2M103, 2026-09-24) the RIIC8/BRD_I2C arbitration-lost failure
+# (ICSR2=0x0a, STOP|AL) that 0005 alone did not resolve. Two
+# independently-sufficient fixes, both carried:
+#   (a) rzv2n-dev.c s_init(): enable the SoC-internal pull-up on P06/P07
+#       (PUPD_H, port 0) -- Linux already does this on the same net,
+#       U-Boot left the register at POR (no pull-up) until now.
+#   (b) rzg2l_riic.c riic_set_clock(): R9A09G056/057 (RZ/V2N, RZ/V2H)
+#       run RIIC off a 100 MHz input, not the 50 MHz this shared
+#       CKS/ICBRH/ICBRL table assumes -- CKS(4)/CKS(2) (was CKS(3)/
+#       CKS(1)) for 100 kHz/400 kHz restores the nominal rate.
+# Plus two smaller, unconditional hardening fixes in the same file
+# targeting the same AL failure: riic_read_common() polls ICCR1 SDAI=1
+# (bounded ~100 us) before the repeated START, and riic_check_busy()
+# clears stale ICSR2 AL|STOP|NACKF|START and runs the existing IICRST
+# recovery on AL instead of leaving it sticky. Disjoint files from
+# 0001-0004 (rzv2n-dev.c's own hunk lands after 0004's I2C0 addition,
+# which it does not touch) and additive-only to 0005's rzg2l_riic.c
+# hunks, so ordering after 0005 is not order-sensitive, only readable.
+# BENCH-PENDING: unverified on silicon (see changelog.d/2045).
+SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
