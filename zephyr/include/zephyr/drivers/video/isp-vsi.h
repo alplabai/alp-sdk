@@ -178,6 +178,42 @@ int isp_vsi_set_param(struct isp_config_params *init_cfg,
 int isp_vsi_get_param(struct isp_config_params *init_cfg,
 		      struct isp_params *params);
 
+/*
+ * alp-sdk addition (Alp Lab AB, #2277): re-sync the AE library's SENSOR-
+ * DEFAULT envelope (AE_SNS_DEFAULT_S, the struct vsi_get_ae_default()'s
+ * pfnGetAeDefault callback hands the library) to the sensor's ACTIVE frame
+ * period. VSI_MPI_ISP_InitAeSnsFunc() (isp_vsi_init()) registers that
+ * struct with the library exactly ONCE, at device boot, well before any
+ * app has negotiated a frame rate -- isp_vsi_set_param()'s own
+ * isp_calib_param.modules.ae.autoAttr mirror reaches a DIFFERENT struct
+ * the library does not enforce its per-frame intLine ceiling from (bench
+ * run 244, alp-sdk#2277). Not part of the vendored upstream isp-vsi.h
+ * contract (no upstream equivalent exists); implemented alongside
+ * isp_vsi_set_param() in the same hal_alif patch
+ * (0011-isp-ov5647-ae-calib-envelope.patch).
+ */
+
+/**
+ * @brief Sync the AE sensor-default envelope to the active frame period.
+ *
+ * Called by isp_pico.c's isp_apply_ae() on every stream (re)start, the
+ * same cadence as its own video_get_frmival()-derived push. Must be
+ * called after isp_vsi_init(), under the same lib_lock isp_vsi_set_param()
+ * takes.
+ *
+ * @param init_cfg     Pointer to the config used during isp_vsi_init().
+ * @param full_lines   VTS (frame length in lines) at the active frame
+ *                      period.
+ * @param max_int_line Exposure-line ceiling (full_lines minus margin).
+ *
+ * @retval 0        Success.
+ * @retval -EINVAL  init_cfg is NULL, or full_lines/max_int_line invalid.
+ * @retval -ENOTSUP Module not compiled in.
+ * @retval <0       ISP library error mapped to errno.
+ */
+int isp_vsi_sync_ae_sns_default(struct isp_config_params *init_cfg, uint32_t full_lines,
+				 uint32_t max_int_line);
+
 
 /*
  * alp-sdk localization (Alp Lab AB): the upstream fork marks this a

@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 81bb7342fd025dfc4a2385238ea20677dc3793affa8e1b72b55ea54563e11943
+    sha256sum: cb478d4f2a74fd7116370573217820deacbb1723649f88ff8dbee591a18bcdd9
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -768,6 +768,49 @@ patches:
       stream start, and the calibration block stays correct for whatever
       fps the app actually negotiates, not a rate guessed at compile
       time.
+
+      UPDATED (#2277, third cut -- the REAL bound): the "real fix" above
+      shipped, then bench run 244 (E1M-AEN803 + OV5647, camera-mjpeg-
+      stream, 30 fps requested) measured it did NOT change the observed
+      behaviour -- diag globals confirmed isp_apply_ae() pushed the
+      correct 30 fps ceiling (int_time_max_us=32667) into isp_calib_
+      param.modules.ae.autoAttr, but the library's own "VSI AE INFO"
+      console trace showed intLine ramping straight past that push's
+      line-equivalent (~1029) and PINNING at exactly 3145 -- sensor_
+      attributes.h's AE_SNS_DEFAULT_S.maxIntLine, the fixed 10 fps boot
+      default (patch 0006), completely untouched by either #2277 cut
+      above. Root cause: VSI_MPI_ISP_InitAeSnsFunc() (isp_vsi_init())
+      registers aeSnsFunc -- whose pfnGetAeDefault callback
+      (vsi_get_ae_default()) hands the library sensor_attributes
+      verbatim -- exactly ONCE, at device boot (isp_configure(),
+      isp_pico.c's isp_init()), well before any app has negotiated a
+      frame rate; isp_calib_param.modules.ae.autoAttr (this patch's own
+      mirror, above) is a DIFFERENT struct the library does not appear
+      to enforce its per-frame intLine ceiling from. Real fix: a new
+      isp_vsi_sync_ae_sns_default(init_cfg, full_lines, max_int_line)
+      updates sensor_attributes.fullLines/fullLinesStd/maxIntLine and
+      re-registers aeSnsFunc via VSI_MPI_ISP_InitAeSnsFunc() so the
+      library re-pulls it -- the only lever found that actually reaches
+      the ceiling bench run 244 observed. full_lines/max_int_line are
+      computed by a new pure function in isp_pico.c,
+      isp_ae_sns_full_lines_from_frmival() (VTS = pixel_rate *
+      frame_period / HTS, OV5647's own facts, same as this file's
+      existing int_time_max_us fallback constant), called from
+      isp_apply_ae() on every stream (re)start alongside the existing
+      #2277-first-cut mirror -- kept, not proven dead: no bench evidence
+      isolates whether isp_calib_param.modules.ae.autoAttr affects
+      anything else (AE convergence search bounds, say) even though it
+      does not set the hard per-frame ceiling. Two new diagnostics:
+      isp_ae_diag_sns_int_line (this file, vsi_int_time_update(), 1 Hz
+      LOG_INF) mirrors the LAST intLine the library actually pushed to
+      the sensor -- exactly the value bench run 244's console trace
+      showed pinning; isp_pico.c's isp_ae_diag_sns_full_lines/
+      isp_ae_diag_sns_max_int_line mirror the ceiling this sync call
+      last pushed. Bench re-run not yet performed as part of this
+      change -- see tests/unit/isp_ae_calib_envelope_sync for the
+      host-side regression proving the OLD (4990322ee) code path stays
+      pinned to the stale default while the new sync call tracks a
+      30->10->30 fps switch.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

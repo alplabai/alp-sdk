@@ -944,6 +944,18 @@ static bool ae_readback_mismatch_logged;
 volatile uint32_t isp_ae_diag_applied_int_time_max_us;
 volatile uint32_t isp_ae_diag_frame_period_us;
 
+/*
+ * #2277 (third cut): the sensor-default LINE ceiling (hal_alif's
+ * AE_SNS_DEFAULT_S.fullLines/maxIntLine, isp_vsi_sync_ae_sns_default())
+ * actually pushed for the CURRENT active frame period -- bench run 244
+ * found THIS, not isp_ae_diag_applied_int_time_max_us above, is what
+ * bounds the library's real per-frame intLine output. See
+ * isp_ae_sns_full_lines_from_frmival()'s own comment, below, for the
+ * derivation.
+ */
+volatile uint32_t isp_ae_diag_sns_full_lines;
+volatile uint32_t isp_ae_diag_sns_max_int_line;
+
 /* Rate-limits isp_ae_diag_applied_int_time_max_us/isp_ae_diag_frame_period_us
  * LOG_INF output to at most once per second -- isp_apply_ae() (below) can
  * run far more often than that (this driver's restart-per-frame pattern,
@@ -960,9 +972,12 @@ static void isp_ae_diag_log(void)
 	}
 	last_log_ms = now;
 
-	LOG_INF("AE diag: applied int_time_max_us=%u frame_period_us=%u",
+	LOG_INF("AE diag: applied int_time_max_us=%u frame_period_us=%u "
+	        "sns_full_lines=%u sns_max_int_line=%u",
 	        isp_ae_diag_applied_int_time_max_us,
-	        isp_ae_diag_frame_period_us);
+	        isp_ae_diag_frame_period_us,
+	        isp_ae_diag_sns_full_lines,
+	        isp_ae_diag_sns_max_int_line);
 }
 
 /*
@@ -992,6 +1007,45 @@ static uint32_t isp_ae_int_time_max_us_from_frmival(uint32_t frmival_num, uint32
 	return (uint32_t)(frame_period_us > margin_us ? frame_period_us - margin_us : frame_period_us);
 }
 
+/*
+ * #2277 (third cut, the REAL bound): bench run 244 -- int_time_max_us above
+ * applied correctly (32667 us at 30 fps), but the library's own "VSI AE
+ * INFO" console trace showed intLine ramping straight past that ceiling's
+ * line-equivalent and pinning at exactly 3145 -- hal_alif's compiled-in
+ * AE_SNS_DEFAULT_S.maxIntLine (sensor_attributes.h/ov5647_ae_envelope.h's
+ * fixed 10 fps boot default), never touched by this function's own
+ * isp_vsi_set_param() push. VSI_MPI_ISP_InitAeSnsFunc() (isp_vsi_init(),
+ * hal_alif) registers that struct with the library exactly ONCE, at device
+ * boot, before any app has negotiated a frame rate -- isp_calib_param's
+ * autoAttr.expTimeRange mirror (this function, above) reaches a DIFFERENT
+ * struct the library apparently does not enforce its ceiling from.
+ *
+ * Returns VTS (full_lines) in LINES for the sensor's ACTIVE frame period --
+ * OV5647's own pixel_rate/HTS facts, same as int_time_max_us_from_frmival()'s
+ * sibling fallback constant above and hal_alif patch 0011's ov5647_ae_
+ * envelope.h OV5647_AE_PIXEL_RATE_HZ (58333333 Hz)/OV5647_AE_HTS_640X480
+ * (1852) -- duplicated here as documented literals rather than shared
+ * macros, matching this file's own existing OV5647-fact convention (see the
+ * block comment above ISP_AE_GAIN_REG_PER_1X). VTS = pixel_rate *
+ * frame_period / HTS (ov5647.c's own ovt5647_frmrate_to_vts() formula,
+ * sensor_attributes.h's derivation comment): at the 10 fps boot default
+ * (frame_period_us=100000) this returns 3149, matching OV5647_AE_FULL_LINES
+ * exactly. The caller applies the same "VTS - 4" margin ov5647_ae_
+ * envelope.h's OV5647_AE_MAX_INT_LINE already uses to get maxIntLine.
+ * `frmival_den == 0` returns 0, the same "caller keeps its own fallback"
+ * contract as int_time_max_us_from_frmival() above.
+ */
+static uint32_t isp_ae_sns_full_lines_from_frmival(uint32_t frmival_num, uint32_t frmival_den)
+{
+	if (frmival_den == 0) {
+		return 0;
+	}
+
+	uint64_t frame_period_us = (uint64_t)frmival_num * 1000000ULL / frmival_den;
+
+	return (uint32_t)((frame_period_us * 58333333ULL) / ((uint64_t)1852 * 1000000ULL));
+}
+
 static int isp_apply_ae(const struct device *dev, bool enable)
 {
 	const struct isp_config *config = dev->config;
@@ -1006,6 +1060,13 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	uint32_t int_time_max_us = 66514;
 	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
 	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+	/* #2277 (third cut): sensor-default LINE ceiling (see
+	 * isp_ae_sns_full_lines_from_frmival()'s comment) -- 0 means "no active
+	 * frmival queried yet", the signal below to skip the sync call rather
+	 * than push a bogus 0 ceiling into the library.
+	 */
+	uint32_t sns_full_lines   = 0;
+	uint32_t sns_max_int_line = 0;
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
@@ -1037,6 +1098,20 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 				frmival.numerator, frmival.denominator);
 			isp_ae_diag_frame_period_us = (uint32_t)((uint64_t)frmival.numerator *
 								  1000000ULL / frmival.denominator);
+
+			/* #2277 (third cut): the ACTUAL bound (bench run 244)
+			 * -- see isp_ae_sns_full_lines_from_frmival()'s own
+			 * comment. Margin 4 lines matches ov5647_ae_envelope.h's
+			 * OV5647_AE_MAX_INT_LINE ("VTS - 4").
+			 */
+			sns_full_lines = isp_ae_sns_full_lines_from_frmival(
+				frmival.numerator, frmival.denominator);
+			if (sns_full_lines > 4) {
+				sns_max_int_line = sns_full_lines - 4;
+			} else {
+				sns_full_lines   = 0;
+				sns_max_int_line = 0;
+			}
 		}
 
 		/*
@@ -1107,6 +1182,27 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	}
 
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
+
+	/*
+	 * #2277 (third cut): sync the sensor-default LINE ceiling BEFORE
+	 * pushing this apply's own params -- see isp_ae_sns_full_lines_
+	 * from_frmival()'s comment for why this, not the isp_vsi_set_param()
+	 * push below, is the real bound. Skipped (sns_full_lines == 0) when
+	 * the frmival query above failed; -ENOTSUP is expected setup for
+	 * this OV5647-tuned path and not logged.
+	 */
+	if (sns_full_lines != 0) {
+		int sync_ret = isp_vsi_sync_ae_sns_default(&data->init_cfg, sns_full_lines,
+							    sns_max_int_line);
+
+		if (sync_ret == 0) {
+			isp_ae_diag_sns_full_lines   = sns_full_lines;
+			isp_ae_diag_sns_max_int_line = sns_max_int_line;
+		} else if (sync_ret != -ENOTSUP) {
+			LOG_WRN("Failed to sync AE sensor default: %d", sync_ret);
+		}
+	}
+
 	int ret = isp_vsi_set_param(&data->init_cfg, &params);
 
 	k_mutex_unlock(&data->lib_lock);

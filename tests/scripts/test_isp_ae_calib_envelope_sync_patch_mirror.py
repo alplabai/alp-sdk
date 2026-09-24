@@ -49,6 +49,15 @@ FRMIVAL_FUNC_SIGNATURE = re.compile(
     r"^static uint32_t isp_ae_int_time_max_us_from_frmival\("
 )
 
+# #2277 (third cut): isp_pico.c's OTHER pure helper, added alongside
+# isp_ae_int_time_max_us_from_frmival() above but deriving the sensor
+# DEFAULT'S line ceiling (VTS) instead of the microsecond exposure range --
+# see that file's own comment for why this, not the microsecond range, is
+# what bench run 244 found actually bounds the library's intLine output.
+SNS_FULL_LINES_FUNC_SIGNATURE = re.compile(
+    r"^static uint32_t isp_ae_sns_full_lines_from_frmival\("
+)
+
 
 def _extract_function_body(lines: list[str], signature: re.Pattern[str]) -> str:
     """Return signature-through-closing-brace text, brace-depth walked (same
@@ -144,4 +153,53 @@ def test_calib_sync_mirrors_the_same_fields_as_the_patch() -> None:
         "Update BOTH copies together -- this test only compares WHICH fields are kept "
         "in sync, not the exact vendor-typed vs. POD-typed assignment syntax (see this "
         "file's own comment for why)."
+    )
+
+
+def test_sns_full_lines_helper_matches_isp_pico_verbatim() -> None:
+    """#2277 (third cut): isp_ae_sns_full_lines_from_frmival() is alp-sdk
+    source (isp_pico.c), same status as isp_ae_int_time_max_us_from_frmival()
+    above -- read it directly, byte-for-byte (whitespace aside)."""
+    real_body = _extract_function_body(
+        ISP_PICO.read_text(encoding="utf-8").splitlines(), SNS_FULL_LINES_FUNC_SIGNATURE
+    )
+    mirror_body = _extract_function_body(
+        MIRROR.read_text(encoding="utf-8").splitlines(), SNS_FULL_LINES_FUNC_SIGNATURE
+    )
+
+    assert _normalise(real_body) == _normalise(mirror_body), (
+        "isp_ae_sns_full_lines_from_frmival() has drifted between "
+        f"{ISP_PICO.relative_to(REPO)} and its host-buildable test mirror "
+        f"{MIRROR.relative_to(REPO)}.\n\n"
+        f"--- real body ---\n{real_body}\n\n"
+        f"--- mirror body ---\n{mirror_body}"
+    )
+
+
+def test_sns_default_sync_mirrors_the_same_fields_as_the_patch() -> None:
+    """#2277 (third cut): hal_alif patch 0011's new isp_vsi_sync_ae_sns_
+    default() assigns sensor_attributes.{fullLinesStd,fullLines,maxIntLine}
+    -- the struct actually registered with the library at
+    VSI_MPI_ISP_InitAeSnsFunc() (bench run 244's root cause). Same
+    field-path-SET check as test_calib_sync_mirrors_the_same_fields_as_the_
+    patch() above, against the mirror's isp_sns_default_sync()."""
+    patch_fields = _assigned_fields(
+        line for line in _patch_added_lines() if "sensor_attributes." in line
+    )
+    mirror_body = _extract_function_body(
+        MIRROR.read_text(encoding="utf-8").splitlines(),
+        re.compile(r"^static void isp_sns_default_sync\("),
+    )
+    mirror_fields = _assigned_fields(mirror_body.splitlines())
+
+    assert patch_fields, (
+        f"found no sensor_attributes.* assignment in {CALIB_PATCH.relative_to(REPO)} -- "
+        "did the #2277 (third cut) sync mechanism move or get renamed?"
+    )
+    assert patch_fields == mirror_fields, (
+        "The #2277 (third cut) sensor-default sync mirrors a DIFFERENT set of fields "
+        f"than {CALIB_PATCH.relative_to(REPO)} actually assigns.\n"
+        f"patch fields:  {sorted(patch_fields)}\n"
+        f"mirror fields: {sorted(mirror_fields)}\n"
+        "Update BOTH copies together."
     )
