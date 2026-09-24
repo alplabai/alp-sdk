@@ -28,7 +28,16 @@
 # bl2/fip likewise live in alp-sdk-internal (production-flashed onto the SoM
 # xSPI by ALP; the customer's normal flow never rebuilds the bootloader).
 #
-# STATUS: UNVALIDATED through bitbake (the equivalence-to-manual pass is pending).
+# STATUS: the DDR-param file swap is now confirmed through bitbake (2026-09-24,
+# alplab-gw): the installed source is byte-identical to the intended
+# ddr_param_def_lpddr4-alp*.c and BL2/FIP/u-boot compile clean for
+# e1m-v2n103-a55/e1m-v2m103-a55 (D8S32) and e1m-v2m101-a55 (D16S32,
+# regression-checked unchanged). It was NOT actually running before this --
+# do_configure is [noexec] in meta-arm's trusted-firmware-a.inc, so the old
+# do_configure:append hook below was silently skipped by every prior bitbake
+# build; see do_compile:prepend below for the fix. Bench-boot of a
+# bitbake-produced FIP is still pending -- the 7.9 GiB DDR bring-up + boot
+# proof above is from the manual FIP flow, which never went through this task.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
