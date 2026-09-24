@@ -246,6 +246,18 @@
 #define ACQ_PROP_PIN_MAPPING_MASK	GENMASK(2, 0)
 #define ACQ_PROP_PIN_MAPPING_SHIFT	17
 
+/*
+ * Main resizer (MRSZ) -- neither VSI_MPI_ISP_SetScaleAttr() nor the vendored
+ * isp_api_wrapper.c ever program these (bench runs 186/187); see
+ * isp_apply_mrsz() in isp_pico.c. HWRM AHRM0012 v0.3 SS 17.3.4.3.164
+ * (ISP_MRSZ_CTRL), SS 17.3.4.3.186 (ISP_MRSZ_FORMAT_CONV_CTRL).
+ */
+#define MRSZ_CTRL_SCALE_VC_ENABLE		BIT(3)
+#define MRSZ_CTRL_CFG_UPD			BIT(8)
+#define MRSZ_CTRL_AUTO_UPD			BIT(9)
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT	2
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_420	(1 << MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT)
+
 /* ISP Interrupts */
 #define INTR_EXP_END	BIT(18)
 #define INTR_H_START	BIT(7)
@@ -322,10 +334,9 @@ struct isp_ctrls {
 	 * calibration-matching default (val == range.def) -- once a SET has
 	 * moved the lib off its calibration state, only another SET moves
 	 * it back. ae_dirty additionally starts true (isp_init_controls()):
-	 * the calibration carries no AE target, integration-time or gain
-	 * range for this sensor, so those limits must be pushed at the very
-	 * first stream start even though exposure_auto is already at its
-	 * default. isp_stream_start() is the sole caller of isp_apply_wb()/
+	 * the first stream start pushes the live, sensor-queried
+	 * frame-period/gain ceilings even though exposure_auto is already
+	 * at its default. isp_stream_start() is the sole caller of isp_apply_wb()/
 	 * isp_apply_ae() to act on either flag, and only while the ISP is
 	 * stopped (isp_stream_start() never runs otherwise) -- clearing the
 	 * flag on success. A change made while already streaming is picked
