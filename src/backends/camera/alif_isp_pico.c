@@ -379,17 +379,16 @@ static alp_status_t isp_open(const alp_camera_config_t  *cfg,
 	 *
 	 * FIXED (issue #2277): the OV5647 calibration AE block's compiled-in
 	 * exposure ceiling used to be hard-pinned to the 10 fps VTS
-	 * regardless of the rate requested here. isp_apply_ae() (isp_pico.c)
-	 * derives its own ceiling from video_get_frmival() (the chain this
-	 * comment block describes) on every stream (re)start and keeps
-	 * sensor_attributes.maxIntLine -- hal_alif patch 0011's
-	 * isp_vsi_sync_ae_sns_default() -- current for the active fps; the
-	 * library's own internal AE request still stays pinned at the boot
-	 * default regardless (bench run 251), but that same patch's
-	 * write-back clamp (vsi_int_time_update(), the last touchpoint
-	 * before a value reaches the sensor) enforces the active-mode
-	 * ceiling anyway, so the compiled-in default only matters for the
-	 * brief window before the first stream start. */
+	 * regardless of the rate requested here -- worse, isp_pico.c's own
+	 * attempt to fix it up derived VTS from a hard-coded HTS that was
+	 * only correct for the 640x480 binned mode, silently ~1.46x too
+	 * loose at 1280x960/full-res. The ceiling now lives where the VTS
+	 * facts already do: ov5647_set_ctrl_exposure() (ov5647.c) clamps
+	 * every VIDEO_CID_EXPOSURE write to the sensor's own ACTIVE mode's
+	 * VTS - 4 lines, using the same ov5647_hts_for()/ov5647_frmrate_
+	 * to_vts() this driver already uses to program TIMING_VTS -- correct
+	 * for every mode/fps this call sets, not just the one the ISP's old
+	 * hard-coded constant happened to match. */
 	const struct device *sensor_dev = DEVICE_DT_GET(DT_NODELABEL(ov5647));
 	if (device_is_ready(sensor_dev)) {
 		uint8_t              requested_fps = (cfg->fps != 0u) ? cfg->fps : 10u;

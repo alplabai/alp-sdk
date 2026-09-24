@@ -1452,6 +1452,9 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 	const struct ov5647_config *cfg   = dev->config;
 	struct ov5647_data         *data  = dev->data;
 	struct ov5647_ctrls        *ctrls = &data->ctrls;
+	uint32_t                    hts;
+	uint32_t                    vts;
+	uint32_t                    exposure;
 	int                         ret;
 
 	ret = video_modify_cci_reg(
@@ -1467,7 +1470,30 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 		return 0;
 	}
 
-	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	/*
+	 * #2277: clamp to the ACTIVE mode's VTS - 4 lines. 0x3503 bit2 (OV5647_MANUAL_CTRL_VTS,
+	 * set once at ov5647_init()) keeps the sensor's frame length pinned to TIMING_VTS rather
+	 * than letting its own AEC stretch the frame to fit a larger request, so an unclamped
+	 * write here just silently rails against that fixed VTS instead of taking effect; "- 4"
+	 * matches the datasheet's minimum VTS-to-exposure margin (registers 0x3500..0x3502 vs
+	 * 0x380E/0x380F). data->fmt/data->frmrate are the ACTIVE mode/rate (ov5647_set_fmt()/
+	 * ov5647_set_frmival() keep them current), so this tracks whichever mode is actually
+	 * streaming -- ov5647_hts_for() is per-mode (640x480 binned vs every crop-path size use
+	 * different HTS), unlike a single driver-wide constant. This is the sensor driver's own
+	 * VTS math (ov5647_hts_for()/ov5647_frmrate_to_vts(), both already used by
+	 * ov5647_set_frmival() to program TIMING_VTS in the first place), not duplicated
+	 * elsewhere -- an ISP layer clamping exposure needs to stay sensor-agnostic and has no
+	 * business knowing OV5647's own HTS table.
+	 */
+	hts      = ov5647_hts_for(data->fmt.width, data->fmt.height);
+	vts      = ov5647_frmrate_to_vts(dev, hts, data->frmrate);
+	exposure = (uint32_t)ctrls->exposure.val;
+
+	if (vts > 4 && exposure > (vts - 4) * 16) {
+		exposure = (vts - 4) * 16;
+	}
+
+	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, exposure);
 }
 
 static int ov5647_set_ctrl_test_pattern(const struct device *dev)

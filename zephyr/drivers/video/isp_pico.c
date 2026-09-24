@@ -112,10 +112,10 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
  */
 #if defined(CONFIG_USE_ALIF_ISP_LIB)
 BUILD_ASSERT(IS_ENABLED(CONFIG_FP_HARDABI),
-             "CONFIG_VIDEO_ISP_VSI + CONFIG_USE_ALIF_ISP_LIB link the hal_alif prebuilt "
-             "Lib/libisp_gcc.a, which is hard-float (VFP register arguments). Set "
-             "CONFIG_FP_HARDABI=y (the \"Floating point ABI\" choice, under FPU) or the "
-             "final link fails.");
+	     "CONFIG_VIDEO_ISP_VSI + CONFIG_USE_ALIF_ISP_LIB link the hal_alif prebuilt "
+	     "Lib/libisp_gcc.a, which is hard-float (VFP register arguments). Set "
+	     "CONFIG_FP_HARDABI=y (the \"Floating point ABI\" choice, under FPU) or the "
+	     "final link fails.");
 
 /*
  * alp-sdk glue (Alp Lab AB): modules/hal/alif/drivers/isp/isp_wrapper/src/
@@ -146,26 +146,16 @@ int log_level(void)
 #define WORKQ_PRIORITY   7
 K_KERNEL_STACK_DEFINE(isp_cb_workq, WORKQ_STACK_SIZE);
 
-#define ISP_VIDEO_FORMAT_CAP(format, width, height) \
-	{ \
-		.pixelformat = (format), \
-		.width_min   = (0), \
-		.width_max   = (width), \
-		.height_min  = (0), \
-		.height_max  = (height), \
-		.width_step  = 8, \
-		.height_step = 4, \
+#define ISP_VIDEO_FORMAT_CAP(format, width, height)                                             \
+	{                                                                                       \
+		.pixelformat = (format), .width_min = (0), .width_max = (width),                \
+		.height_min = (0), .height_max = (height), .width_step = 8, .height_step = 4,   \
 	}
 
-#define ISP_VIDEO_FIXED_FORMAT_CAP(format, width, height) \
-	{ \
-		.pixelformat = (format), \
-		.width_min   = (width), \
-		.width_max   = (width), \
-		.height_min  = (height), \
-		.height_max  = (height), \
-		.width_step  = 0, \
-		.height_step = 0, \
+#define ISP_VIDEO_FIXED_FORMAT_CAP(format, width, height)                                          \
+	{                                                                                          \
+		.pixelformat = (format), .width_min = (width), .width_max = (width),               \
+		.height_min = (height), .height_max = (height), .width_step = 0, .height_step = 0, \
 	}
 
 static const struct video_format_cap supported_input_fmts[] = {
@@ -296,7 +286,8 @@ static const struct video_format_cap supported_output_fmts[] = {
 	{ 0 },
 };
 
-static int get_format_cap(uint32_t fourcc_fmt, const struct video_format_cap supported_fmts[])
+static int get_format_cap(uint32_t fourcc_fmt,
+		const struct video_format_cap supported_fmts[])
 {
 	for (int i = 0; supported_fmts[i].pixelformat; i++) {
 		if (fourcc_fmt == supported_fmts[i].pixelformat) {
@@ -307,7 +298,8 @@ static int get_format_cap(uint32_t fourcc_fmt, const struct video_format_cap sup
 	return -1;
 }
 
-static int find_format(struct video_format *fmt, const struct video_format_cap supported_fmts[])
+static int find_format(struct video_format *fmt,
+		const struct video_format_cap supported_fmts[])
 {
 	for (int i = 0; supported_fmts[i].pixelformat; i++) {
 		if (fmt->pixelformat == supported_fmts[i].pixelformat &&
@@ -325,12 +317,12 @@ static int find_format(struct video_format *fmt, const struct video_format_cap s
 
 static int isp_attach_buffer_to_hw(const struct device *dev, struct video_buffer *vbuf)
 {
-	uintptr_t        regs      = DEVICE_MMIO_GET(dev);
-	struct isp_data *data      = dev->data;
-	uint32_t         planes[3] = {};
-	size_t           size_plane;
-	int              num_planes;
-	int              i;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	struct isp_data *data = dev->data;
+	uint32_t planes[3] = {};
+	size_t size_plane;
+	int num_planes;
+	int i;
 
 	struct channel_parameters *channel = &data->init_cfg.channel;
 
@@ -344,13 +336,14 @@ static int isp_attach_buffer_to_hw(const struct device *dev, struct video_buffer
 		if (!i) {
 			planes[i] = POINTER_TO_UINT(local_to_global(vbuf->buffer));
 		} else {
-			size_plane = fourcc_to_plane_size(channel->output_fmt.pixelformat, i - 1, vbuf->size);
+			size_plane = fourcc_to_plane_size(channel->output_fmt.pixelformat,
+					i - 1, vbuf->size);
 			if (size_plane == 0 || size_plane > vbuf->size) {
 				LOG_ERR("Unsupported format!");
 				return -ENOTSUP;
 			}
 
-			planes[i] = (planes[i - 1] + size_plane);
+			planes[i] = (planes[i-1] + size_plane);
 		}
 	}
 
@@ -371,18 +364,16 @@ static void hw_disable_mi_interrupts(uintptr_t regs, uint32_t mask)
 
 /* Forward declaration: isp_ae_diag_log() (below, next to isp_fps_x100 it updates) is defined well
  * after isp_bottom_half() in this file. It samples isp_mi_frame_end_count at real frame-end
- * cadence rather than only when isp_apply_ae() happens to run (ae_dirty starts true and goes
- * false after the first successful apply, so a call from inside isp_apply_ae() would only ever
- * fire once per session, freezing the fps reading).
+ * cadence rather than only when isp_apply_ae() happens to run.
  */
 static void isp_ae_diag_log(void);
 
 static void isp_bottom_half(const struct device *dev)
 {
 	enum video_signal_result signal_status = VIDEO_BUF_DONE;
-	const struct isp_config *config        = dev->config;
-	struct isp_data         *data          = dev->data;
-	struct video_buffer     *vbuf          = NULL;
+	const struct isp_config *config = dev->config;
+	struct isp_data *data = dev->data;
+	struct video_buffer *vbuf = NULL;
 
 	int ret;
 
@@ -412,12 +403,12 @@ static void isp_bottom_half(const struct device *dev)
 	if (vbuf == NULL) {
 		LOG_ERR("Unexpected condition! Empty IN-FIFO");
 		data->is_streaming = false;
-		signal_status      = VIDEO_BUF_ERROR;
+		signal_status = VIDEO_BUF_ERROR;
 		goto isp_bottom_done;
 	}
 
 	if (data->curr_vid_buf != (uint32_t)vbuf->buffer) {
-		signal_status      = VIDEO_BUF_ERROR;
+		signal_status = VIDEO_BUF_ERROR;
 		data->is_streaming = false;
 		LOG_ERR("Unknown Video Buffer assigned to ISP.");
 		goto isp_bottom_done;
@@ -426,9 +417,9 @@ static void isp_bottom_half(const struct device *dev)
 	vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT);
 	if (!vbuf) {
 		LOG_ERR("Failed to get video buffer from IN-FIFO, "
-		        "despite IN-FIFO having data");
+			"despite IN-FIFO having data");
 		data->is_streaming = false;
-		signal_status      = VIDEO_BUF_ERROR;
+		signal_status = VIDEO_BUF_ERROR;
 		goto isp_bottom_done;
 	}
 
@@ -439,18 +430,18 @@ static void isp_bottom_half(const struct device *dev)
 	vbuf = k_fifo_peek_head(&data->fifo_in);
 	if (vbuf == NULL) {
 		LOG_DBG("No more empty buffers in the IN-FIFO. "
-		        "Stopping video capture. If re-queued, restart stream.");
+			"Stopping video capture. If re-queued, restart stream.");
 		data->is_streaming = false;
-		signal_status      = VIDEO_BUF_DONE;
+		signal_status = VIDEO_BUF_DONE;
 		goto isp_bottom_done;
 	}
-	data->curr_vid_buf = (uint32_t)vbuf->buffer;
+	data->curr_vid_buf = (uint32_t) vbuf->buffer;
 
 	ret = isp_attach_buffer_to_hw(dev, vbuf);
 	if (ret) {
 		LOG_ERR("Failed to attach buffer to hardware!");
 		data->is_streaming = false;
-		signal_status      = VIDEO_BUF_DONE;
+		signal_status = VIDEO_BUF_DONE;
 		goto isp_bottom_done;
 	}
 
@@ -503,15 +494,61 @@ static void isp_cb_work(struct k_work *work)
 volatile uint32_t isp_mi_frame_end_count;
 #endif
 
+/*
+ * #2277: the ISP's OWN frame rate, independent of AE -- host-side throughput measurements (e.g.
+ * JPEG send rate) can undercount the pipeline's real rate for reasons unrelated to AE (a
+ * downstream send ceiling), so this reads the MI_INTR_MP_FRAME_END events actually firing
+ * (isp_mi_frame_end_count, CONFIG_VIDEO_ISP_VSI_FRAME_STATS, above) instead of whatever the app's
+ * own dequeue loop believes happened. fps*100 (avoids float in a global), delta over
+ * isp_ae_diag_log()'s own >=1 s rate-limit window. Stays 0 when CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+ * is off (the counter this derives from doesn't exist in that build). Non-static so `nm
+ * zephyr.elf | grep isp_ae_diag` gives an address a J-Link `mem32` read can sample without
+ * halting the core, the same technique ram_console_buf bench sessions use; `volatile`: read from
+ * outside this translation unit's normal control flow.
+ */
+volatile uint32_t isp_ae_diag_isp_fps_x100;
+
+/* Rate-limits isp_ae_diag_isp_fps_x100's update to at most once per second -- isp_bottom_half()
+ * calls this every frame, and computing a rate over a too-short window is noisy. No LOG_INF here
+ * (ITCM budget); read the global over SWD/J-Link instead of the console.
+ */
+static void isp_ae_diag_log(void)
+{
+	static int64_t last_log_ms;
+	static uint32_t last_frame_count;
+	int64_t now = k_uptime_get();
+	uint32_t frame_count = 0;
+
+	if (last_log_ms != 0 && now - last_log_ms < 1000) {
+		return;
+	}
+
+	/* isp_mi_frame_end_count (above) only exists when this Kconfig is on -- frame_count stays
+	 * 0 otherwise, so the delta below is always 0 and isp_ae_diag_isp_fps_x100 stays 0 too
+	 * (see that global's own comment).
+	 */
+#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+	frame_count = isp_mi_frame_end_count;
+#endif
+	if (last_log_ms != 0) {
+		uint32_t elapsed_ms = (uint32_t)(now - last_log_ms);
+		uint32_t frame_delta = frame_count - last_frame_count;
+
+		isp_ae_diag_isp_fps_x100 = (uint32_t)(((uint64_t)frame_delta * 100000ULL) / elapsed_ms);
+	}
+	last_frame_count = frame_count;
+	last_log_ms = now;
+}
+
 static void isp_isr_handler(const struct device *dev)
 {
 	struct isp_data *data = dev->data;
 
-	uint32_t    isp_intr_err_mask      = INTR_SIZE_ERR | INTR_DATALOSS;
+	uint32_t isp_intr_err_mask = INTR_SIZE_ERR | INTR_DATALOSS;
 	static bool is_not_corrupted_frame = true;
-	uintptr_t   regs                   = DEVICE_MMIO_GET(dev);
-	uint32_t    mi_int_st;
-	uint32_t    int_st;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	uint32_t mi_int_st;
+	uint32_t int_st;
 
 	int_st = sys_read32(regs + ISP_MIS);
 	sys_write32(int_st, regs + ISP_ICR);
@@ -599,14 +636,15 @@ static void isp_isr_handler(const struct device *dev)
  * set_format once per type -- so it is folded away; the INPUT/OUTPUT branch
  * bodies are otherwise verbatim.
  */
-int isp_set_fmt(const struct device *dev, struct video_format *fmt)
+int isp_set_fmt(const struct device *dev,
+		struct video_format *fmt)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
+	struct isp_data *data = dev->data;
 
 	struct channel_parameters *channel = &data->init_cfg.channel;
-	struct port_parameters    *port    = &data->init_cfg.port;
-	int                        ret     = -ENODEV;
+	struct port_parameters *port = &data->init_cfg.port;
+	int ret = -ENODEV;
 
 	if (!fmt) {
 		LOG_ERR("Illegal format to set!");
@@ -631,7 +669,7 @@ int isp_set_fmt(const struct device *dev, struct video_format *fmt)
 		 * (a capture device) accepts it from its OUTPUT POV.
 		 */
 		fmt->type = VIDEO_BUF_TYPE_OUTPUT;
-		ret       = video_set_format(config->controller, fmt);
+		ret = video_set_format(config->controller, fmt);
 		fmt->type = VIDEO_BUF_TYPE_INPUT;
 		if (ret) {
 			LOG_ERR("Failed to set desired format on camera pipeline!");
@@ -707,6 +745,7 @@ int isp_set_fmt(const struct device *dev, struct video_format *fmt)
 	default:
 		LOG_ERR("Unsupported buffer type!");
 		return -EINVAL;
+
 	}
 
 	return 0;
@@ -778,9 +817,9 @@ int isp_set_fmt(const struct device *dev, struct video_format *fmt)
  */
 static int isp_apply_wb(const struct device *dev, bool enable)
 {
-	struct isp_data  *data   = dev->data;
-	struct isp_params params = { 0 };
-	int               ret;
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
+	int ret;
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_WB_MODULE)) {
 		return 0;
@@ -817,25 +856,25 @@ static int isp_apply_wb(const struct device *dev, bool enable)
 	 * struct used init_color_temp=5000 (D50), the same illuminant this
 	 * logs. */
 	LOG_DBG("WB GET rc=%d enable=%u op_mode=%u run_interval=%u speed=%u "
-	        "tolerance=%u init_color_temp=%u calib.rg_min=%d rg_max=%d "
-	        "illum[D50] temp=%u r=0x%x gr=0x%x gb=0x%x b=0x%x",
-	        ret,
-	        params.wb.enable,
-	        params.wb.op_mode,
-	        params.wb.run_interval,
-	        params.wb.speed,
-	        params.wb.tolerance,
-	        params.wb.init_color_temp,
-	        params.wb.calib.rg_min,
-	        params.wb.calib.rg_max,
-	        params.wb.calib.illuminant[ISP_ILLUMINANT_D50].color_temp,
-	        params.wb.calib.illuminant[ISP_ILLUMINANT_D50].r_gain,
-	        params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gr_gain,
-	        params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gb_gain,
-	        params.wb.calib.illuminant[ISP_ILLUMINANT_D50].b_gain);
+		"tolerance=%u init_color_temp=%u calib.rg_min=%d rg_max=%d "
+		"illum[D50] temp=%u r=0x%x gr=0x%x gb=0x%x b=0x%x",
+		ret,
+		params.wb.enable,
+		params.wb.op_mode,
+		params.wb.run_interval,
+		params.wb.speed,
+		params.wb.tolerance,
+		params.wb.init_color_temp,
+		params.wb.calib.rg_min,
+		params.wb.calib.rg_max,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].color_temp,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].r_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gr_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].gb_gain,
+		params.wb.calib.illuminant[ISP_ILLUMINANT_D50].b_gain);
 
-	params.wb.enable  = enable ? 1 : 0;
-	params.wb.op_mode = ISP_OP_AUTO;
+	params.wb.enable   = enable ? 1 : 0;
+	params.wb.op_mode  = ISP_OP_AUTO;
 
 	/* Run 84: VIDEO_ISP_VSI_WB_MANUAL_GAIN diagnostic escape hatch (see the
 	 * Kconfig help) -- forces specific gains instead of round-tripping
@@ -851,11 +890,11 @@ static int isp_apply_wb(const struct device *dev, bool enable)
 	 * preprocessor #if drops the reference entirely when they don't
 	 * exist.
 	 */
-	params.wb.op_mode = ISP_OP_MANUAL;
-	params.wb.r_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_R;
-	params.wb.gr_gain = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GR;
-	params.wb.gb_gain = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GB;
-	params.wb.b_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_B;
+	params.wb.op_mode  = ISP_OP_MANUAL;
+	params.wb.r_gain   = CONFIG_VIDEO_ISP_VSI_WB_GAIN_R;
+	params.wb.gr_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GR;
+	params.wb.gb_gain  = CONFIG_VIDEO_ISP_VSI_WB_GAIN_GB;
+	params.wb.b_gain   = CONFIG_VIDEO_ISP_VSI_WB_GAIN_B;
 #endif /* defined(CONFIG_VIDEO_ISP_VSI_WB_MANUAL_GAIN) */
 
 	ret = isp_vsi_set_param(&data->init_cfg, &params);
@@ -863,14 +902,14 @@ static int isp_apply_wb(const struct device *dev, bool enable)
 	k_mutex_unlock(&data->lib_lock);
 
 	LOG_DBG("WB SET enable=%u op_mode=%u run_interval=%u speed=%u tolerance=%u "
-	        "init_color_temp=%u rc=%d",
-	        params.wb.enable,
-	        params.wb.op_mode,
-	        params.wb.run_interval,
-	        params.wb.speed,
-	        params.wb.tolerance,
-	        params.wb.init_color_temp,
-	        ret);
+		"init_color_temp=%u rc=%d",
+		params.wb.enable,
+		params.wb.op_mode,
+		params.wb.run_interval,
+		params.wb.speed,
+		params.wb.tolerance,
+		params.wb.init_color_temp,
+		ret);
 
 	if (ret) {
 		LOG_ERR("Failed to %s AWB: %d", enable ? "enable" : "disable", ret);
@@ -948,148 +987,11 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
  */
 static bool ae_readback_mismatch_logged;
 
-/*
- * #2277: the ISP's OWN frame rate, independent of AE -- host-side throughput
- * measurements (e.g. JPEG send rate) can undercount the pipeline's real rate
- * for reasons unrelated to AE (a downstream send ceiling), so this reads the
- * MI_INTR_MP_FRAME_END events actually firing (isp_mi_frame_end_count,
- * CONFIG_VIDEO_ISP_VSI_FRAME_STATS, above) instead of whatever the app's own
- * dequeue loop believes happened. fps*100 (avoids float in a global), delta
- * over isp_ae_diag_log()'s own >=1 s rate-limit window. Stays 0 when
- * CONFIG_VIDEO_ISP_VSI_FRAME_STATS is off (the counter this derives from
- * doesn't exist in that build). Non-static so `nm zephyr.elf | grep
- * isp_ae_diag` gives an address a J-Link `mem32` read can sample without
- * halting the core, the same technique ram_console_buf bench sessions use;
- * `volatile`: read from outside this translation unit's normal control flow.
- */
-volatile uint32_t isp_ae_diag_isp_fps_x100;
-
-/*
- * Pure (no device/global state): frame count delta in, elapsed milliseconds
- * in, fps*100 out -- pulled out so tests/unit/isp_ae_calib_envelope_sync can
- * exercise the arithmetic directly, same pattern as isp_ae_int_time_max_us_
- * from_frmival()/isp_ae_sns_full_lines_from_frmival() above. elapsed_ms == 0
- * (the first call in a run, no prior window to measure) returns 0 rather
- * than dividing by zero.
- */
-static uint32_t isp_ae_fps_x100_from_frame_delta(uint32_t frame_delta, uint32_t elapsed_ms)
-{
-	if (elapsed_ms == 0) {
-		return 0;
-	}
-
-	return (uint32_t)(((uint64_t)frame_delta * 100000ULL) / elapsed_ms);
-}
-
-/* Rate-limits isp_ae_diag_isp_fps_x100's update to at most once per second -- isp_bottom_half()
- * calls this every frame, and computing a rate over a too-short window is noisy. No LOG_INF here
- * (ITCM budget); read the global over SWD/J-Link instead of the console.
- */
-static void isp_ae_diag_log(void)
-{
-	static int64_t  last_log_ms;
-	static uint32_t last_frame_count;
-	int64_t         now         = k_uptime_get();
-	uint32_t        frame_count = 0;
-
-	if (last_log_ms != 0 && now - last_log_ms < 1000) {
-		return;
-	}
-
-	/* isp_mi_frame_end_count (above) only exists when this Kconfig is on
-	 * -- frame_count stays 0 otherwise, so the delta below is always 0
-	 * and isp_ae_diag_isp_fps_x100 stays 0 too (see that global's own
-	 * comment), rather than #ifdef'ing the call below out entirely and
-	 * tripping -Werror=unused-function on isp_ae_fps_x100_from_frame_
-	 * delta() in builds that don't enable frame stats (e.g. this repo's
-	 * own aen-isp-ov5647-viewfinder example).
-	 */
-#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
-	frame_count = isp_mi_frame_end_count;
-#endif
-	if (last_log_ms != 0) {
-		isp_ae_diag_isp_fps_x100 = isp_ae_fps_x100_from_frame_delta(frame_count - last_frame_count,
-		                                                            (uint32_t)(now - last_log_ms));
-	}
-	last_frame_count = frame_count;
-	last_log_ms      = now;
-}
-
-/*
- * #2277: pulled out of isp_apply_ae() (below) as its own pure function --
- * frame_period_us/margin_us were local variables inline in that function,
- * untestable without the whole device/video-subsystem context isp_apply_ae()
- * needs (a bound `dev`, a `config->controller` video device). This is the
- * sensor-agnostic exposure-time-ceiling derivation the review round on
- * #2277 asked to see exercised directly: given the ACTIVE frame interval
- * (whatever video_get_frmival() returned, isp_apply_ae()'s caller), return
- * the exposure ceiling in microseconds -- the frame period minus a generic
- * 2% blanking margin, floored at the raw period if the margin would
- * otherwise invert it. `frmival_den == 0` (an invalid interval, the same
- * guard isp_apply_ae() applies before calling this) returns 0; the caller
- * keeps its own fallback constant in that case rather than this function
- * guessing one.
- */
-static uint32_t isp_ae_int_time_max_us_from_frmival(uint32_t frmival_num, uint32_t frmival_den)
-{
-	if (frmival_den == 0) {
-		return 0;
-	}
-
-	uint64_t frame_period_us = (uint64_t)frmival_num * 1000000ULL / frmival_den;
-	uint64_t margin_us       = frame_period_us / 50; /* 2% */
-
-	return (uint32_t)(frame_period_us > margin_us ? frame_period_us - margin_us : frame_period_us);
-}
-
-/*
- * #2277: bench run 244 -- int_time_max_us above applied correctly (32667 us
- * at 30 fps), but the library's own "VSI AE INFO" console trace showed
- * intLine ramping straight past that ceiling's line-equivalent and pinning
- * at exactly 3145 -- hal_alif's compiled-in AE_SNS_DEFAULT_S.maxIntLine
- * (sensor_attributes.h/ov5647_ae_envelope.h's fixed 10 fps boot default).
- * Bench run 251 (bench-proven, dim scene, 30 fps): the library's own
- * internal AE request still stays pinned at that same 3145 even after
- * re-registering the sensor default with the library (isp_vsi_sync_ae_sns_
- * default() -- the closed library never re-pulls it) -- what actually holds
- * the sensor at the active ceiling is hal_alif patch 0011's write-back
- * clamp in vsi_int_time_update(), the LAST touchpoint before the value
- * reaches the sensor, not anything upstream of it. This function's return
- * value still matters: isp_vsi_sync_ae_sns_default() (below) uses it to
- * keep sensor_attributes.maxIntLine -- what that clamp reads -- current for
- * the ACTIVE frame period instead of the stale boot default.
- *
- * Returns VTS (full_lines) in LINES for the sensor's ACTIVE frame period --
- * OV5647's own pixel_rate/HTS facts, same as int_time_max_us_from_frmival()'s
- * sibling fallback constant above and hal_alif patch 0011's ov5647_ae_
- * envelope.h OV5647_AE_PIXEL_RATE_HZ (58333333 Hz)/OV5647_AE_HTS_640X480
- * (1852) -- duplicated here as documented literals rather than shared
- * macros, matching this file's own existing OV5647-fact convention (see the
- * block comment above ISP_AE_GAIN_REG_PER_1X). VTS = pixel_rate *
- * frame_period / HTS (ov5647.c's own ovt5647_frmrate_to_vts() formula,
- * sensor_attributes.h's derivation comment): at the 10 fps boot default
- * (frame_period_us=100000) this returns 3149, matching OV5647_AE_FULL_LINES
- * exactly. The caller applies the same "VTS - 4" margin ov5647_ae_
- * envelope.h's OV5647_AE_MAX_INT_LINE already uses to get maxIntLine.
- * `frmival_den == 0` returns 0, the same "caller keeps its own fallback"
- * contract as int_time_max_us_from_frmival() above.
- */
-static uint32_t isp_ae_sns_full_lines_from_frmival(uint32_t frmival_num, uint32_t frmival_den)
-{
-	if (frmival_den == 0) {
-		return 0;
-	}
-
-	uint64_t frame_period_us = (uint64_t)frmival_num * 1000000ULL / frmival_den;
-
-	return (uint32_t)((frame_period_us * 58333333ULL) / ((uint64_t)1852 * 1000000ULL));
-}
-
 static int isp_apply_ae(const struct device *dev, bool enable)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
-	struct isp_params        params = { 0 };
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
 	/* 15 fps / OV5647_AGC_GAIN-range fallback -- see the block comment
 	 * above for why this is the one sensor-tuned constant left, and only
 	 * as a fallback for when the live queries below fail. 2095 lines
@@ -1099,13 +1001,6 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	uint32_t int_time_max_us = 66514;
 	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
 	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
-	/* #2277 (third cut): sensor-default LINE ceiling (see
-	 * isp_ae_sns_full_lines_from_frmival()'s comment) -- 0 means "no active
-	 * frmival queried yet", the signal below to skip the sync call rather
-	 * than push a bogus 0 ceiling into the library.
-	 */
-	uint32_t sns_full_lines   = 0;
-	uint32_t sns_max_int_line = 0;
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
@@ -1131,22 +1026,16 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		 */
 		struct video_frmival frmival;
 
-		if (video_get_frmival(config->controller, &frmival) == 0 && frmival.denominator > 0) {
-			int_time_max_us =
-			    isp_ae_int_time_max_us_from_frmival(frmival.numerator, frmival.denominator);
+		if (video_get_frmival(config->controller, &frmival) == 0 &&
+		    frmival.denominator > 0) {
+			uint64_t frame_period_us =
+				(uint64_t)frmival.numerator * 1000000ULL /
+				frmival.denominator;
+			uint64_t margin_us = frame_period_us / 50; /* 2% */
 
-			/* The ACTUAL bound (see isp_ae_sns_full_lines_from_frmival()'s own comment
-			 * and bench run 251) -- margin 4 lines matches ov5647_ae_envelope.h's
-			 * OV5647_AE_MAX_INT_LINE ("VTS - 4").
-			 */
-			sns_full_lines =
-			    isp_ae_sns_full_lines_from_frmival(frmival.numerator, frmival.denominator);
-			if (sns_full_lines > 4) {
-				sns_max_int_line = sns_full_lines - 4;
-			} else {
-				sns_full_lines   = 0;
-				sns_max_int_line = 0;
-			}
+			int_time_max_us = (uint32_t)(frame_period_us > margin_us
+							      ? frame_period_us - margin_us
+							      : frame_period_us);
 		}
 
 		/*
@@ -1170,22 +1059,23 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		};
 
 		if (video_query_ctrl(&cq) == 0 && cq.range.max > 0) {
-			again_max = (uint32_t)cq.range.max * 1024 / ISP_AE_GAIN_REG_PER_1X;
+			again_max = (uint32_t)cq.range.max * 1024 /
+				    ISP_AE_GAIN_REG_PER_1X;
 		}
 	}
 
-	params.valid_mask      = ISP_PARAM_MASK_AE;
-	params.ae.op_mode      = enable ? ISP_OP_AUTO : ISP_OP_MANUAL;
-	params.ae.ae_target    = CONFIG_VIDEO_ISP_VSI_AE_TARGET;
-	params.ae.damp_over    = 0x40;
-	params.ae.damp_under   = 0x40;
-	params.ae.tolerance    = 1;
-	params.ae.run_interval = 1;
-	params.ae.ae_mode      = ISP_AE_MODE_FIX_FRAME_RATE;
-	params.ae.int_time_min = 32;
-	params.ae.int_time_max = int_time_max_us;
-	params.ae.again_min    = again_min;
-	params.ae.again_max    = again_max;
+	params.valid_mask   = ISP_PARAM_MASK_AE;
+	params.ae.op_mode        = enable ? ISP_OP_AUTO : ISP_OP_MANUAL;
+	params.ae.ae_target      = CONFIG_VIDEO_ISP_VSI_AE_TARGET;
+	params.ae.damp_over      = 0x40;
+	params.ae.damp_under     = 0x40;
+	params.ae.tolerance      = 1;
+	params.ae.run_interval   = 1;
+	params.ae.ae_mode        = ISP_AE_MODE_FIX_FRAME_RATE;
+	params.ae.int_time_min   = 32;
+	params.ae.int_time_max   = int_time_max_us;
+	params.ae.again_min      = again_min;
+	params.ae.again_max      = again_max;
 	/*
 	 * dgain is documented "1x = 256" (isp_ctrl_params.h), but the
 	 * write-back's totalGain = aGain * dGain / ISP_SNS_GAIN_ACCU
@@ -1200,8 +1090,8 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	 * appears to be copied from ISP_WB_GAIN_S's (correct, different)
 	 * scale, not verified against this path.
 	 */
-	params.ae.dgain_min = 1024;
-	params.ae.dgain_max = 1024;
+	params.ae.dgain_min      = 1024;
+	params.ae.dgain_max      = 1024;
 
 	if (!enable) {
 		/* Manual mode: sets a fixed, non-zero exposure/gain instead
@@ -1216,23 +1106,6 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	}
 
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
-
-	/*
-	 * #2277 (third cut): sync the sensor-default LINE ceiling BEFORE
-	 * pushing this apply's own params -- see isp_ae_sns_full_lines_
-	 * from_frmival()'s comment for why this, not the isp_vsi_set_param()
-	 * push below, is the real bound. Skipped (sns_full_lines == 0) when
-	 * the frmival query above failed; -ENOTSUP is expected setup for
-	 * this OV5647-tuned path and not logged.
-	 */
-	if (sns_full_lines != 0) {
-		int sync_ret = isp_vsi_sync_ae_sns_default(sns_full_lines, sns_max_int_line);
-
-		if (sync_ret != 0 && sync_ret != -ENOTSUP) {
-			LOG_WRN("Failed to sync AE sensor default: %d", sync_ret);
-		}
-	}
-
 	int ret = isp_vsi_set_param(&data->init_cfg, &params);
 
 	k_mutex_unlock(&data->lib_lock);
@@ -1357,11 +1230,12 @@ static int isp_apply_ae(const struct device *dev, bool enable)
  */
 static int isp_apply_aem_wbm(const struct device *dev, uint16_t width, uint16_t height)
 {
-	struct isp_data  *data   = dev->data;
-	struct isp_params params = { 0 };
-	int               ret;
+	struct isp_data *data = dev->data;
+	struct isp_params params = {0};
+	int ret;
 
-	if (!IS_ENABLED(CONFIG_ISP_LIB_EXPOSUREM_MODULE) && !IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
+	if (!IS_ENABLED(CONFIG_ISP_LIB_EXPOSUREM_MODULE) &&
+	    !IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
 		return 0;
 	}
 
@@ -1402,12 +1276,12 @@ static int isp_apply_aem_wbm(const struct device *dev, uint16_t width, uint16_t 
 	if (IS_ENABLED(CONFIG_ISP_LIB_WBM_MODULE)) {
 		/* valid_mask already has ISP_PARAM_MASK_WBM, set before the
 		 * get above. */
-		params.wbm.enable    = 1;
-		params.wbm.meas_mode = ISP_WBM_MODE_RGB;
-		params.wbm.h_offs    = 0;
-		params.wbm.v_offs    = 0;
-		params.wbm.h_size    = width;
-		params.wbm.v_size    = height;
+		params.wbm.enable      = 1;
+		params.wbm.meas_mode   = ISP_WBM_MODE_RGB;
+		params.wbm.h_offs      = 0;
+		params.wbm.v_offs      = 0;
+		params.wbm.h_size      = width;
+		params.wbm.v_size      = height;
 		/* RGB-mode upper bounds -- see the function comment. maxY/
 		 * maxCSum/minC untouched (YCbCr-mode-only, left as read back).
 		 */
@@ -1471,16 +1345,15 @@ static int isp_set_ctrl(const struct device *dev, uint32_t cid)
 static int isp_init_controls(const struct device *dev)
 {
 	struct isp_data *data = dev->data;
-	int              ret;
+	int ret;
 
 	if (IS_ENABLED(CONFIG_ISP_LIB_WB_MODULE)) {
 		/* Default ON, matching the calibration's own OP_TYPE_AUTO AWB
 		 * (patch 0009, runs 153/156) -- not a driver-invented default.
 		 */
-		ret = video_init_ctrl(&data->ctrls.awb,
-		                      dev,
-		                      VIDEO_CID_AUTO_WHITE_BALANCE,
-		                      (struct video_ctrl_range){ .min = 0, .max = 1, .step = 1, .def = 1 });
+		ret = video_init_ctrl(&data->ctrls.awb, dev, VIDEO_CID_AUTO_WHITE_BALANCE,
+				      (struct video_ctrl_range){.min = 0, .max = 1, .step = 1,
+								 .def = 1});
 		if (ret) {
 			return ret;
 		}
@@ -1490,8 +1363,8 @@ static int isp_init_controls(const struct device *dev)
 		/* Default AUTO, matching the calibration's own OP_TYPE_AUTO AE
 		 * (patch 0009, runs 153/156) -- not a driver-invented default.
 		 */
-		ret = video_init_menu_ctrl(
-		    &data->ctrls.exposure_auto, dev, VIDEO_CID_EXPOSURE_AUTO, VIDEO_EXPOSURE_AUTO, NULL);
+		ret = video_init_menu_ctrl(&data->ctrls.exposure_auto, dev,
+					   VIDEO_CID_EXPOSURE_AUTO, VIDEO_EXPOSURE_AUTO, NULL);
 		if (ret) {
 			return ret;
 		}
@@ -1512,14 +1385,15 @@ static int isp_init_controls(const struct device *dev)
  * param; the m2m dispatch now switches on `fmt->type` (VIDEO_BUF_TYPE_INPUT /
  * VIDEO_BUF_TYPE_OUTPUT).  Unknown buffer types return -ENOTSUP.
  */
-int isp_get_fmt(const struct device *dev, struct video_format *fmt)
+int isp_get_fmt(const struct device *dev,
+		struct video_format *fmt)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
+	struct isp_data *data = dev->data;
 
 	struct channel_parameters *channel = &data->init_cfg.channel;
-	struct port_parameters    *port    = &data->init_cfg.port;
-	int                        ret;
+	struct port_parameters *port = &data->init_cfg.port;
+	int ret;
 
 	if (!fmt) {
 		return -EINVAL;
@@ -1533,7 +1407,7 @@ int isp_get_fmt(const struct device *dev, struct video_format *fmt)
 			 * controller (a capture device) fills its OUTPUT format.
 			 */
 			fmt->type = VIDEO_BUF_TYPE_OUTPUT;
-			ret       = video_get_format(config->controller, fmt);
+			ret = video_get_format(config->controller, fmt);
 			fmt->type = VIDEO_BUF_TYPE_INPUT;
 			if (ret) {
 				return ret;
@@ -1553,7 +1427,7 @@ int isp_get_fmt(const struct device *dev, struct video_format *fmt)
 	case VIDEO_BUF_TYPE_OUTPUT:
 		if (!channel->output_fmt.pixelformat) {
 			uint32_t tmp_fmt = VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE;
-			int      i;
+			int i;
 
 			i = get_format_cap(tmp_fmt, supported_output_fmts);
 			if (i == -1) {
@@ -1565,9 +1439,12 @@ int isp_get_fmt(const struct device *dev, struct video_format *fmt)
 			 * If input format is also not set, use
 			 * RGB888 planar output format.
 			 */
-			channel->output_fmt.pixelformat = supported_output_fmts[i].pixelformat;
-			channel->output_fmt.height      = supported_output_fmts[i].height_max;
-			channel->output_fmt.width       = supported_output_fmts[i].width_max;
+			channel->output_fmt.pixelformat =
+				supported_output_fmts[i].pixelformat;
+			channel->output_fmt.height =
+				supported_output_fmts[i].height_max;
+			channel->output_fmt.width =
+				supported_output_fmts[i].width_max;
 			/* video_bits_per_pixel() returns 0 for this private
 			 * fourcc -- alp_isp_default_pitch() (isp_frame_size.h)
 			 * knows it (24 bpp, 3 equal 8-bit planes). */
@@ -1682,7 +1559,7 @@ static unsigned int bayer_sample_depth(uint32_t fourcc)
  */
 static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint16_t out_height)
 {
-	uintptr_t regs   = DEVICE_MMIO_GET(dev);
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	bool      is_420 = pixelformat == VIDEO_PIX_FMT_YUV420 || pixelformat == VIDEO_PIX_FMT_NV12 ||
 	                   pixelformat == VIDEO_PIX_FMT_NV21;
 
@@ -1721,23 +1598,23 @@ static void isp_apply_mrsz(const struct device *dev, uint32_t pixelformat, uint1
 	sys_write32(0, regs + ISP_MRSZ_PHASE_VC);
 	sys_write32(MRSZ_FORMAT_CONV_CTRL_FORMAT_420, regs + ISP_MRSZ_FORMAT_CONV_CTRL);
 	sys_write32(MRSZ_CTRL_SCALE_VC_ENABLE | MRSZ_CTRL_CFG_UPD | MRSZ_CTRL_AUTO_UPD,
-	            regs + ISP_MRSZ_CTRL);
+		    regs + ISP_MRSZ_CTRL);
 }
 
 static int isp_stream_start(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
-	uintptr_t                regs   = DEVICE_MMIO_GET(dev);
-	struct isp_data         *data   = dev->data;
-	struct video_buffer     *vbuf;
-	struct video_buffer      vbuf2;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+	struct isp_data *data = dev->data;
+	struct video_buffer *vbuf;
+	struct video_buffer vbuf2;
 
 	struct channel_parameters *channel = &data->init_cfg.channel;
-	struct port_parameters    *port    = &data->init_cfg.port;
-	uint32_t                   tmp;
-	int                        ret;
-	int                        err = 0; /* the ORIGINAL failure, preserved across cleanup below */
-	struct k_work_sync         sync;
+	struct port_parameters *port = &data->init_cfg.port;
+	uint32_t tmp;
+	int ret;
+	int err = 0; /* the ORIGINAL failure, preserved across cleanup below */
+	struct k_work_sync sync;
 
 	if (data->is_streaming) {
 		LOG_DBG("Already streaming");
@@ -1781,25 +1658,25 @@ static int isp_stream_start(const struct device *dev)
 		break;
 	}
 
-	port->sns_rect.width  = port->port_fmt.width;
+	port->sns_rect.width = port->port_fmt.width;
 	port->sns_rect.height = port->port_fmt.height;
 
-	port->in_form_rect.width  = port->port_fmt.width;
+	port->in_form_rect.width = port->port_fmt.width;
 	port->in_form_rect.height = port->port_fmt.height;
 
-	port->image_stabilization_rect.top    = port->in_form_rect.top;
-	port->image_stabilization_rect.left   = port->in_form_rect.left;
-	port->image_stabilization_rect.width  = port->in_form_rect.width;
+	port->image_stabilization_rect.top = port->in_form_rect.top;
+	port->image_stabilization_rect.left = port->in_form_rect.left;
+	port->image_stabilization_rect.width = port->in_form_rect.width;
 	port->image_stabilization_rect.height = port->in_form_rect.height;
 
-	port->out_form_rect.width  = port->port_fmt.width - (port->out_form_rect.left << 1);
+	port->out_form_rect.width = port->port_fmt.width - (port->out_form_rect.left << 1);
 	port->out_form_rect.height = port->port_fmt.height - (port->out_form_rect.top << 1);
 
 	ret = isp_vsi_update_cfg(&data->init_cfg);
 	if (ret) {
 		LOG_ERR("Failed to update ISP config to input/output formats and ROI! "
-		        "isp_vsi_update_cfg=%d",
-		        ret);
+			"isp_vsi_update_cfg=%d",
+			ret);
 		data->curr_vid_buf = 0;
 		return ret;
 	}
@@ -1856,7 +1733,7 @@ static int isp_stream_start(const struct device *dev)
 	if (ret) {
 		LOG_ERR("Failed to start stream! isp_vsi_start=%d", ret);
 		data->is_streaming = false;
-		err                = ret;
+		err = ret;
 		goto dequeue_buf;
 	}
 
@@ -1896,7 +1773,7 @@ static int isp_stream_start(const struct device *dev)
 	 */
 	if (data->ctrls.wb_dirty) {
 		bool wb_enable = (data->ctrls.awb.val != 0);
-		int  ret_wb    = isp_apply_wb(dev, wb_enable);
+		int ret_wb = isp_apply_wb(dev, wb_enable);
 
 		if (ret_wb == 0) {
 			data->ctrls.wb_dirty = false;
@@ -1904,7 +1781,7 @@ static int isp_stream_start(const struct device *dev)
 	}
 	if (data->ctrls.ae_dirty) {
 		bool ae_enable = (data->ctrls.exposure_auto.val == VIDEO_EXPOSURE_AUTO);
-		int  ret_ae    = isp_apply_ae(dev, ae_enable);
+		int ret_ae = isp_apply_ae(dev, ae_enable);
 
 		if (ret_ae == 0) {
 			data->ctrls.ae_dirty = false;
@@ -1928,11 +1805,11 @@ static int isp_stream_start(const struct device *dev)
 		ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
 		if (ret) {
 			LOG_ERR("Failed to start stream for Endpoint device: %s! "
-			        "video_stream_start=%d",
-			        config->controller->name,
-			        ret);
+				"video_stream_start=%d",
+				config->controller->name,
+				ret);
 			data->is_streaming = false;
-			err                = ret;
+			err = ret;
 			goto stop_isp_stream;
 		}
 	}
@@ -1960,8 +1837,8 @@ dequeue_buf:
 static int isp_stream_stop(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
-	int                      ret;
+	struct isp_data *data = dev->data;
+	int ret;
 
 	if (!data->is_streaming) {
 		LOG_DBG("Already stopped streaming!");
@@ -1982,7 +1859,8 @@ static int isp_stream_stop(const struct device *dev)
 	if (config->controller) {
 		ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
 		if (ret) {
-			LOG_ERR("Failed to stop streaming in pipeline! video_stream_stop=%d", ret);
+			LOG_ERR("Failed to stop streaming in pipeline! video_stream_stop=%d",
+				ret);
 			return ret;
 		}
 	}
@@ -2020,10 +1898,11 @@ static int isp_set_stream(const struct device *dev, bool enable, enum video_buf_
  * param; the m2m dispatch now switches on the caller-set `caps->type`
  * (VIDEO_BUF_TYPE_INPUT / VIDEO_BUF_TYPE_OUTPUT).
  */
-static int isp_get_caps(const struct device *dev, struct video_caps *caps)
+static int isp_get_caps(const struct device *dev,
+		struct video_caps *caps)
 {
 	const struct isp_config *config = dev->config;
-	int                      err    = -ENODEV;
+	int err = -ENODEV;
 
 	if (caps->type == VIDEO_BUF_TYPE_OUTPUT) {
 		caps->format_caps = supported_output_fmts;
@@ -2038,7 +1917,7 @@ static int isp_get_caps(const struct device *dev, struct video_caps *caps)
 			 * controller fills its output caps, then restore INPUT.
 			 */
 			caps->type = VIDEO_BUF_TYPE_OUTPUT;
-			err        = video_get_caps(config->controller, caps);
+			err = video_get_caps(config->controller, caps);
 			caps->type = VIDEO_BUF_TYPE_INPUT;
 			if (err) {
 				LOG_ERR("Failed to get caps from camera-controller!");
@@ -2071,11 +1950,11 @@ static int isp_get_caps(const struct device *dev, struct video_caps *caps)
 static int isp_flush(const struct device *dev, bool cancel)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
+	struct isp_data *data = dev->data;
 
-	uintptr_t            regs = DEVICE_MMIO_GET(dev);
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	struct video_buffer *vbuf = NULL;
-	struct k_work_sync   sync;
+	struct k_work_sync sync;
 
 	int ret;
 
@@ -2098,7 +1977,8 @@ static int isp_flush(const struct device *dev, bool cancel)
 		 */
 		k_work_cancel_sync(&data->cb_work, &sync);
 
-		for (int i = 0; (i < 20) && (sys_read32(regs + ISP_MI_RIS) & MI_INTR_MP_FRAME_END); i++) {
+		for (int i = 0; (i < 20) &&
+				(sys_read32(regs + ISP_MI_RIS) & MI_INTR_MP_FRAME_END); i++) {
 			k_msleep(10);
 		}
 
@@ -2153,7 +2033,9 @@ static int isp_flush(const struct device *dev, bool cancel)
 		 * correctly hit -ETIMEDOUT below rather than being given an
 		 * unbounded wait.
 		 */
-		for (int i = 0; i < 500 && !k_fifo_is_empty(&data->fifo_in) && data->is_streaming; i++) {
+		for (int i = 0; i < 500 && !k_fifo_is_empty(&data->fifo_in) &&
+				data->is_streaming;
+		     i++) {
 			k_msleep(1);
 		}
 
@@ -2213,13 +2095,13 @@ static int isp_flush(const struct device *dev, bool cancel)
 static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 {
 	struct isp_data *data = dev->data;
-	uint32_t         tmp;
+	uint32_t tmp;
 
 	/* Check if the buffer is 8-byte aligned or not */
 	tmp = (uint32_t)buf->buffer;
 	if (ROUND_UP(tmp, 8) != tmp) {
 		LOG_ERR("Video Buffer is not aligned to 8-byte boundary."
-		        "It can result in corruption of captured image.");
+			"It can result in corruption of captured image.");
 		return -ENOBUFS;
 	}
 
@@ -2240,9 +2122,7 @@ static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 	k_fifo_put(&data->fifo_in, buf);
 
 	LOG_DBG("Enqueued buffer: Addr - 0x%x, size - %d, bytesused - %d",
-	        (uint32_t)buf->buffer,
-	        buf->size,
-	        buf->bytesused);
+		(uint32_t)buf->buffer, buf->size, buf->bytesused);
 
 	return 0;
 }
@@ -2250,7 +2130,8 @@ static int isp_enqueue(const struct device *dev, struct video_buffer *buf)
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param and its VIDEO_EP_OUT/ALL validation branch.
  */
-static int isp_dequeue(const struct device *dev, struct video_buffer **buf, k_timeout_t timeout)
+static int isp_dequeue(const struct device *dev,
+		       struct video_buffer **buf, k_timeout_t timeout)
 {
 	struct isp_data *data = dev->data;
 
@@ -2306,9 +2187,7 @@ static int isp_dequeue(const struct device *dev, struct video_buffer **buf, k_ti
 	(void)sys_cache_data_invd_range((*buf)->buffer, (*buf)->bytesused);
 
 	LOG_DBG("Dequeued buffer: Addr - 0x%08x, size - %d, bytesused - %d",
-	        (uint32_t)(*buf)->buffer,
-	        (*buf)->size,
-	        (*buf)->bytesused);
+		(uint32_t)(*buf)->buffer, (*buf)->size, (*buf)->bytesused);
 	return 0;
 }
 
@@ -2316,7 +2195,8 @@ static int isp_dequeue(const struct device *dev, struct video_buffer **buf, k_ti
 /* v4.4 video-API shim (Alp Lab AB): dropped the `enum video_endpoint_id ep`
  * param.
  */
-static int isp_set_signal(const struct device *dev, struct k_poll_signal *signal)
+static int isp_set_signal(const struct device *dev,
+		struct k_poll_signal *signal)
 {
 	struct isp_data *data = dev->data;
 
@@ -2354,11 +2234,11 @@ static DEVICE_API(video, isp_driver_api) = {
 	.set_format = isp_set_fmt,
 	.get_format = isp_get_fmt,
 	.set_stream = isp_set_stream,
-	.get_caps   = isp_get_caps,
-	.flush      = isp_flush,
-	.enqueue    = isp_enqueue,
-	.dequeue    = isp_dequeue,
-	.set_ctrl   = isp_set_ctrl,
+	.get_caps = isp_get_caps,
+	.flush = isp_flush,
+	.enqueue = isp_enqueue,
+	.dequeue = isp_dequeue,
+	.set_ctrl = isp_set_ctrl,
 #ifdef CONFIG_POLL
 	.set_signal = isp_set_signal,
 #endif /* CONFIG_POLL */
@@ -2373,12 +2253,11 @@ static DEVICE_API(video, isp_driver_api) = {
  * exists for it.
  */
 int isp_vsi_register_ae_status_callback(const struct device *dev,
-                                        isp_ae_status_cb     ae_status_cb,
-                                        void                *user_data)
+		isp_ae_status_cb ae_status_cb, void *user_data)
 {
 	struct isp_data *data = dev->data;
 
-	data->init_cfg.ae_status_cb        = ae_status_cb;
+	data->init_cfg.ae_status_cb = ae_status_cb;
 	data->init_cfg.ae_status_user_data = user_data;
 
 	return 0;
@@ -2387,10 +2266,10 @@ int isp_vsi_register_ae_status_callback(const struct device *dev,
 static int isp_configure(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
+	struct isp_data *data = dev->data;
 
 	struct port_parameters *port = &data->init_cfg.port;
-	int                     ret;
+	int ret;
 
 	ret = isp_vsi_init(&data->init_cfg);
 	if (ret) {
@@ -2451,8 +2330,8 @@ static int isp_configure(const struct device *dev)
 int video_isp_init(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
-	struct isp_data         *data   = dev->data;
-	int                      ret;
+	struct isp_data *data = dev->data;
+	int ret;
 
 	if (!config->controller && config->tpg_img_idx == IMG_DISABLED) {
 		LOG_ERR("Both Camera controller and TPG are not enabled!");
@@ -2460,18 +2339,15 @@ int video_isp_init(const struct device *dev)
 	}
 
 	DEVICE_MMIO_MAP(dev, K_MEM_CACHE_NONE);
-	LOG_DBG("MMIO Address: 0x%x", (uint32_t)DEVICE_MMIO_GET(dev));
+	LOG_DBG("MMIO Address: 0x%x", (uint32_t) DEVICE_MMIO_GET(dev));
 
 	/*
 	 * Setup the ISR callback work.
 	 */
 	k_work_init(&data->cb_work, isp_cb_work);
 	k_work_queue_init(&data->cb_workq);
-	k_work_queue_start(&data->cb_workq,
-	                   isp_cb_workq,
-	                   K_KERNEL_STACK_SIZEOF(isp_cb_workq),
-	                   K_PRIO_COOP(WORKQ_PRIORITY),
-	                   NULL);
+	k_work_queue_start(&data->cb_workq, isp_cb_workq, K_KERNEL_STACK_SIZEOF(isp_cb_workq),
+			   K_PRIO_COOP(WORKQ_PRIORITY), NULL);
 	k_thread_name_set(&data->cb_workq.thread, "isp_work_helper");
 
 	/*
@@ -2535,24 +2411,26 @@ int video_isp_init(const struct device *dev)
 	return 0;
 }
 
-#define REMOTE_DEVICE(i, idx) DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, idx, 0))
+#define REMOTE_DEVICE(i, idx)	                                           \
+	DT_NODE_REMOTE_DEVICE(DT_INST_ENDPOINT_BY_ID(i, idx, 0))
 
-#define REMOTE_EP(n, pid, epid) \
-	DT_NODELABEL(DT_STRING_TOKEN(DT_INST_ENDPOINT_BY_ID(n, pid, epid), remote_endpoint_label))
+#define REMOTE_EP(n, pid, epid)                                            \
+	DT_NODELABEL(DT_STRING_TOKEN(DT_INST_ENDPOINT_BY_ID(n, pid, epid), \
+				remote_endpoint_label))
 
-#define ISP_DEFINE(i) \
-	static void             isp_config_func_##i(const struct device *dev); \
-	const struct isp_config isp_config_##i = { \
-		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)), \
-		.irq_config_func   = isp_config_func_##i, \
-		.controller        = DEVICE_DT_GET_OR_NULL(REMOTE_DEVICE(i, 0)), \
-		.tpg_bayer_pattern = DT_INST_ENUM_IDX(i, tpg_bayer_pattern), \
-		.tpg_img_idx       = DT_INST_ENUM_IDX(i, tpg_image_idx), \
-		.tpg_pix_width     = DT_INST_ENUM_IDX_OR(i, tpg_pix_width, 2), \
-		.irqn              = DT_INST_IRQ_BY_NAME(i, isp, irq), \
-		.mi_irqn           = DT_INST_IRQ_BY_NAME(i, mi_isp, irq), \
-	}; \
-\
+#define ISP_DEFINE(i)                                                                         \
+	static void isp_config_func_##i(const struct device *dev);                            \
+	const struct isp_config isp_config_##i = {                                            \
+		DEVICE_MMIO_ROM_INIT(DT_DRV_INST(i)),                                         \
+		.irq_config_func = isp_config_func_##i,                                       \
+		.controller = DEVICE_DT_GET_OR_NULL(REMOTE_DEVICE(i, 0)),                     \
+		.tpg_bayer_pattern = DT_INST_ENUM_IDX(i, tpg_bayer_pattern),                  \
+		.tpg_img_idx = DT_INST_ENUM_IDX(i, tpg_image_idx),                            \
+		.tpg_pix_width = DT_INST_ENUM_IDX_OR(i, tpg_pix_width, 2),                    \
+		.irqn = DT_INST_IRQ_BY_NAME(i, isp, irq),                                     \
+		.mi_irqn = DT_INST_IRQ_BY_NAME(i, mi_isp, irq),                               \
+	};                                                                                    \
+                                                                                              \
 	struct isp_data isp_data_##i = {                                                      \
 		.is_streaming = false,                                                        \
 		.init_cfg = {                                                                 \
@@ -2575,42 +2453,38 @@ int video_isp_init(const struct device *dev)
 				.channel_idx = 0                                              \
 			},                                                                    \
 		},                                                                            \
-	}; \
-\
-	DEVICE_DT_INST_DEFINE(i, \
-	                      video_isp_init, \
-	                      NULL, \
-	                      &isp_data_##i, \
-	                      &isp_config_##i, \
-	                      POST_KERNEL, \
-	                      CONFIG_VIDEO_ISP_VSI_INIT_PRIORITY, \
-	                      &isp_driver_api); \
-\
+	};                                                                                    \
+                                                                                              \
+	DEVICE_DT_INST_DEFINE(i,                                                              \
+		video_isp_init,                                                               \
+		NULL,                                                                         \
+		&isp_data_##i,                                                                \
+		&isp_config_##i,                                                              \
+		POST_KERNEL,                                                                  \
+		CONFIG_VIDEO_ISP_VSI_INIT_PRIORITY,                                           \
+		&isp_driver_api);                                                             \
+		                                                                              \
 	/* Chains this device onto v4.4's control-registry walk (video_find_ctrl(),         \
 	 * drivers/video/video_ctrls.c): an app calling video_get_ctrl()/                    \
 	 * video_set_ctrl() on the ISP device for a control the ISP itself doesn't          \
 	 * register (e.g. exposure/AWB, owned by the sensor) falls through to               \
 	 * .src_dev and keeps walking upstream.  src_dev mirrors .controller above --       \
 	 * NULL in TPG-only configs (no camera port@0 wired), which the framework           \
-	 * handles by stopping the walk there. */ \
-	VIDEO_DEVICE_DEFINE( \
-	    isp_vdev_##i, DEVICE_DT_INST_GET(i), DEVICE_DT_GET_OR_NULL(REMOTE_DEVICE(i, 0))); \
-\
-	static void isp_config_func_##i(const struct device *dev) \
-	{ \
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(i, isp, irq), \
-		            DT_INST_IRQ_BY_NAME(i, isp, priority), \
-		            isp_isr_handler, \
-		            DEVICE_DT_INST_GET(i), \
-		            0); \
-		irq_enable(DT_INST_IRQ_BY_NAME(i, isp, irq)); \
-\
-		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(i, mi_isp, irq), \
-		            DT_INST_IRQ_BY_NAME(i, mi_isp, priority), \
-		            isp_isr_handler, \
-		            DEVICE_DT_INST_GET(i), \
-		            0); \
-		irq_enable(DT_INST_IRQ_BY_NAME(i, mi_isp, irq)); \
+	 * handles by stopping the walk there. */                                          \
+	VIDEO_DEVICE_DEFINE(isp_vdev_##i, DEVICE_DT_INST_GET(i),                            \
+			     DEVICE_DT_GET_OR_NULL(REMOTE_DEVICE(i, 0)));                    \
+                                                                                              \
+	static void isp_config_func_##i(const struct device *dev)                             \
+	{                                                                                     \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(i, isp, irq),                                 \
+			    DT_INST_IRQ_BY_NAME(i, isp, priority),                            \
+			    isp_isr_handler, DEVICE_DT_INST_GET(i), 0);                       \
+		irq_enable(DT_INST_IRQ_BY_NAME(i, isp, irq));                                 \
+		                                                                              \
+		IRQ_CONNECT(DT_INST_IRQ_BY_NAME(i, mi_isp, irq),                              \
+			    DT_INST_IRQ_BY_NAME(i, mi_isp, priority),                         \
+			    isp_isr_handler, DEVICE_DT_INST_GET(i), 0);                       \
+		irq_enable(DT_INST_IRQ_BY_NAME(i, mi_isp, irq));                              \
 	}
 
 DT_INST_FOREACH_STATUS_OKAY(ISP_DEFINE)

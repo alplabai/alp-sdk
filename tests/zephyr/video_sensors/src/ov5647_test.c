@@ -1862,6 +1862,117 @@ ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else
 }
 
 /*
+ * #2277: ov5647_set_ctrl_exposure() clamps VIDEO_CID_EXPOSURE to the ACTIVE mode's VTS - 4 lines
+ * (register units, so *16) instead of writing an out-of-range request straight through -- an
+ * unclamped write just silently rails against the sensor's own VTS-manual frame length (0x3503
+ * bit2) without taking effect. Table-driven across three VTS-affecting axes: 640x480 binned HTS
+ * vs 1280x960 crop HTS, and three different frame rates -- confirms the clamp tracks the ACTIVE
+ * mode/rate, not a single driver-wide constant (the bug this replaces: an ISP-side ceiling
+ * hard-coded to 640x480's HTS was ~1.46x too loose at 1280x960/full-res). Every VTS below is
+ * pixel_rate(58333333) / (hts * fps), floored -- ov5647_frmrate_to_vts()'s own formula; see this
+ * file's header comment for why 58333333 is the fixed assumption. Must FAIL without the clamp in
+ * ov5647_set_ctrl_exposure(): the request (OV5647_EXPOSURE_MAX) would land in the registers
+ * unchanged instead of at (vts - 4) * 16.
+ */
+ZTEST(ov5647, test_exposure_clamps_to_active_vts_margin)
+{
+	static const struct {
+		uint16_t width;
+		uint16_t height;
+		uint32_t fps;
+		uint32_t vts; /* pixel_rate / (hts * fps), floored */
+	} cases[] = {
+		{ 640, 480, 30, 1049 },  /* binned HTS 1852 */
+		{ 1280, 960, 15, 1440 }, /* crop HTS 2700 */
+		{ 640, 480, 10, 3149 },  /* binned HTS 1852, the driver's boot-default rate */
+	};
+	const struct emul *emul = ov5647_emul();
+
+	for (size_t i = 0; i < ARRAY_SIZE(cases); i++) {
+		struct video_format fmt = {
+			.type        = VIDEO_BUF_TYPE_OUTPUT,
+			.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+			.width       = cases[i].width,
+			.height      = cases[i].height,
+		};
+		struct video_frmival frmival              = { .numerator = 1, .denominator = cases[i].fps };
+		struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+			                                          .val = VIDEO_EXPOSURE_MANUAL };
+		struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+		/* Deliberately above every case's ceiling -- OV5647_EXPOSURE_MAX (ov5647.c) is the
+		 * ctrl's own top of range, so the video-ctrl framework itself does not pre-clamp
+		 * this before ov5647_set_ctrl_exposure() ever runs. Varies per case (- i) so each
+		 * request differs from the last: video_set_ctrl() (video_ctrls.c) no-ops a request
+		 * whose value matches the ctrl's already-cached one, which would leave a later
+		 * case's write never reaching the driver at all.
+		 */
+		struct video_control exposure   = { .id = VIDEO_CID_EXPOSURE, .val = 0xFFFFF - (int32_t)i };
+		uint32_t             want_lines = cases[i].vts - 4;
+		uint32_t             want_reg   = want_lines * 16;
+		uint8_t              hi, mid, lo;
+		uint32_t             got;
+
+		zassert_ok(video_set_format(ov5647_dev(), &fmt));
+		zassert_ok(video_set_frmival(ov5647_dev(), &frmival));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+		zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+		zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+		got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+		zassert_equal(got,
+		              want_reg,
+		              "case %zu (%ux%u@%u fps, VTS %u): 0x3500..0x3502 = 0x%06x, want "
+		              "0x%06x (VTS-4 = %u lines) -- the out-of-range exposure request was "
+		              "not clamped to the active mode's ceiling",
+		              i,
+		              cases[i].width,
+		              cases[i].height,
+		              cases[i].fps,
+		              cases[i].vts,
+		              got,
+		              want_reg,
+		              want_lines);
+	}
+}
+
+/*
+ * #2277: the flip side of the clamp test above -- a request already WITHIN the active mode's VTS
+ * - 4 margin must land in the registers exactly as requested, not floored/rounded to some other
+ * value. Uses the suite's default mode (640x480 @ 15 fps, VTS 2099 -- see ov5647_test_before()),
+ * well under its 2095-line ceiling.
+ */
+ZTEST(ov5647, test_exposure_below_vts_margin_lands_unchanged)
+{
+	const struct emul   *emul                 = ov5647_emul();
+	struct video_control exposure_auto_manual = { .id  = VIDEO_CID_EXPOSURE_AUTO,
+		                                          .val = VIDEO_EXPOSURE_MANUAL };
+	struct video_control autogain_off         = { .id = VIDEO_CID_AUTOGAIN, .val = 0 };
+	struct video_control exposure             = { .id = VIDEO_CID_EXPOSURE, .val = 500 * 16 };
+	uint8_t              hi, mid, lo;
+	uint32_t             got;
+
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure_auto_manual));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &autogain_off));
+	zassert_ok(video_set_ctrl(ov5647_dev(), &exposure));
+
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3500, &hi));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3501, &mid));
+	zassert_ok(ov5647_emul_get_reg(emul, 0x3502, &lo));
+	got = ((uint32_t)hi << 16) | ((uint32_t)mid << 8) | lo;
+
+	zassert_equal(got,
+	              (uint32_t)exposure.val,
+	              "0x3500..0x3502 = 0x%06x, want the unclamped request 0x%06x -- a request "
+	              "already within the active mode's ceiling must not be altered",
+	              got,
+	              (uint32_t)exposure.val);
+}
+
+/*
  * ZTEST_SUITE before-hook (issue #2248 fix-up round 4): resets the state every test in this suite
  * implicitly assumes as its starting point -- both flip ctrls unset, the default {1, 15} frame
  * interval, and 640x480 SBGGR10P -- instead of relying on in-test cleanup at the END of whichever

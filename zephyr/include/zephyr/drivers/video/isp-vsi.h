@@ -86,26 +86,26 @@ struct rect {
 };
 
 struct port_parameters {
-	enum input_type      input;
-	uint8_t              tpg_image_idx;
-	struct video_format  port_fmt;
-	enum hdr_mode        hdr;
-	enum ccir_seq        seq;
+	enum input_type input;
+	uint8_t tpg_image_idx;
+	struct video_format port_fmt;
+	enum hdr_mode hdr;
+	enum ccir_seq seq;
 	enum isp_subsampling mode;
-	enum field_sampling  field;
-	struct rect          sns_rect;
-	uint32_t             snsfps;
-	struct rect          in_form_rect;
-	struct rect          image_stabilization_rect;
-	struct rect          out_form_rect;
-	uint8_t              isp_idx;
-	uint8_t              port_id;
+	enum field_sampling field;
+	struct rect sns_rect;
+	uint32_t snsfps;
+	struct rect in_form_rect;
+	struct rect image_stabilization_rect;
+	struct rect out_form_rect;
+	uint8_t isp_idx;
+	uint8_t port_id;
 };
 
 struct channel_parameters {
 	enum transmission_bus_mode trans_bus;
-	struct video_format        output_fmt;
-	uint8_t                    channel_idx;
+	struct video_format output_fmt;
+	uint8_t channel_idx;
 };
 
 /**
@@ -117,25 +117,27 @@ struct channel_parameters {
  * @param ae_stable  1 if AE has converged, 0 otherwise.
  * @param user_data  Opaque pointer supplied at registration time.
  */
-typedef void (*isp_ae_status_cb)(const struct device *dev, uint8_t ae_stable, void *user_data);
+typedef void (*isp_ae_status_cb)(const struct device *dev, uint8_t ae_stable,
+				  void *user_data);
 
 struct isp_config_params {
-	struct port_parameters    port;
+	struct port_parameters port;
 	struct channel_parameters channel;
-	isp_ae_status_cb          ae_status_cb;
-	void                     *ae_status_user_data;
+	isp_ae_status_cb ae_status_cb;
+	void *ae_status_user_data;
 };
 
-int  isp_vsi_init(struct isp_config_params *init_cfg);
-int  isp_vsi_update_cfg(struct isp_config_params *init_cfg);
-int  isp_vsi_uninit(struct isp_config_params *init_cfg);
-void isp_vsi_bottom_half(const struct device      *dev,
-                         struct isp_config_params *init_cfg,
-                         uint32_t                  mi_mis);
-int  isp_vsi_start(struct isp_config_params *init_cfg);
-int  isp_vsi_stop(struct isp_config_params *init_cfg);
-int  isp_vsi_enqueue(struct isp_config_params *init_cfg, struct video_buffer *buf);
-int  isp_vsi_dequeue(struct isp_config_params *init_cfg, struct video_buffer *buf);
+int isp_vsi_init(struct isp_config_params *init_cfg);
+int isp_vsi_update_cfg(struct isp_config_params *init_cfg);
+int isp_vsi_uninit(struct isp_config_params *init_cfg);
+void isp_vsi_bottom_half(const struct device *dev,
+		struct isp_config_params *init_cfg, uint32_t mi_mis);
+int isp_vsi_start(struct isp_config_params *init_cfg);
+int isp_vsi_stop(struct isp_config_params *init_cfg);
+int isp_vsi_enqueue(struct isp_config_params *init_cfg,
+		struct video_buffer *buf);
+int isp_vsi_dequeue(struct isp_config_params *init_cfg,
+		struct video_buffer *buf);
 
 /**
  * @brief Set ISP module parameters on a live ISP port.
@@ -153,7 +155,8 @@ int  isp_vsi_dequeue(struct isp_config_params *init_cfg, struct video_buffer *bu
  * @retval -ENOTSUP Module not compiled in.
  * @retval <0       ISP library error mapped to errno.
  */
-int isp_vsi_set_param(struct isp_config_params *init_cfg, const struct isp_params *params);
+int isp_vsi_set_param(struct isp_config_params *init_cfg,
+		      const struct isp_params *params);
 
 /**
  * @brief Get ISP module parameters from a live ISP port.
@@ -172,46 +175,9 @@ int isp_vsi_set_param(struct isp_config_params *init_cfg, const struct isp_param
  * @retval -ENOTSUP Module not compiled in.
  * @retval <0       ISP library error mapped to errno.
  */
-int isp_vsi_get_param(struct isp_config_params *init_cfg, struct isp_params *params);
+int isp_vsi_get_param(struct isp_config_params *init_cfg,
+		      struct isp_params *params);
 
-/*
- * alp-sdk addition (Alp Lab AB, #2277): keep sensor_attributes.maxIntLine --
- * the ceiling hal_alif patch 0011's vsi_int_time_update() write-back clamp
- * enforces on every per-frame intLine the AE library computes, the LAST
- * touchpoint before the value reaches the sensor -- current for the
- * sensor's ACTIVE frame period instead of the compiled-in 10 fps boot
- * default. Bench run 251 (E1M-AEN803, OV5647, 30 fps, dim scene): the
- * library's own internal AE request stays pinned at the boot default
- * (3145 lines) regardless of this sync -- re-registering the sensor
- * default with the library (VSI_MPI_ISP_InitAeSnsFunc()) does not make
- * the closed library re-pull it, so an earlier cut of this function also
- * cycled VSI_MPI_ISP_AeUnRegCallBack()/AeRegCallBack() to force that; bench
- * run 251 proved that re-init has no effect either -- the write-back clamp
- * alone is what holds the sensor within the active-mode ceiling (exposure
- * held at VTS-4 the whole session, 0 rejected writes), so this function is
- * now just the plain field sync the clamp reads from. Not part of the
- * vendored upstream isp-vsi.h contract (no upstream equivalent exists);
- * implemented alongside isp_vsi_set_param() in the same hal_alif patch
- * (0011-isp-ov5647-ae-calib-envelope.patch).
- */
-
-/**
- * @brief Sync the AE sensor-default envelope to the active frame period.
- *
- * Called by isp_pico.c's isp_apply_ae() on every stream (re)start, the
- * same cadence as its own video_get_frmival()-derived push. Must be
- * called after isp_vsi_init(), under the same lib_lock isp_vsi_set_param()
- * takes.
- *
- * @param full_lines   VTS (frame length in lines) at the active frame
- *                      period.
- * @param max_int_line Exposure-line ceiling (full_lines minus margin).
- *
- * @retval 0        Success.
- * @retval -EINVAL  full_lines/max_int_line invalid.
- * @retval -ENOTSUP Module not compiled in.
- */
-int isp_vsi_sync_ae_sns_default(uint32_t full_lines, uint32_t max_int_line);
 
 /*
  * alp-sdk localization (Alp Lab AB): the upstream fork marks this a
@@ -227,8 +193,7 @@ int isp_vsi_sync_ae_sns_default(uint32_t full_lines, uint32_t max_int_line);
  * is unmodified/verbatim.
  */
 int isp_vsi_register_ae_status_callback(const struct device *dev,
-                                        isp_ae_status_cb     ae_status_cb,
-                                        void                *user_data);
+		isp_ae_status_cb ae_status_cb, void *user_data);
 
 #ifdef __cplusplus
 }

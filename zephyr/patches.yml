@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 2a4877993c3ac5a7f11c8ec0ba7778e9729de81a76ec09f08c0988b11ce63424
+    sha256sum: eb51ee34836346f2c314cf0204d35ecf06fdae52e3fbbcee55c2aab19b7b41ad
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -739,47 +739,6 @@ patches:
       same as 0006/0008 -- retire this patch, not upstream it, once/if
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
-
-      UPDATED (#2277, final -- bench run 251): the calibration-block
-      approach above (isp_param_conf.h's compiled-in expTimeRange) was
-      superseded once bench evidence (runs 244/245) showed the closed
-      library does not enforce its per-frame intLine ceiling from that
-      struct at all: it pins to sensor_attributes.h's AE_SNS_DEFAULT_S
-      compiled-in 10 fps default (3145 lines) regardless. Two mechanisms
-      were tried to make the library re-pull an updated sensor default
-      (re-registering aeSnsFunc via VSI_MPI_ISP_InitAeSnsFunc(), then
-      additionally cycling VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack())
-      and bench run 251 (E1M-AEN803 2026W36-0001, OV5647, 640x480, 30 fps
-      requested, dim scene) confirms neither changes the library's own
-      internal AE request: it stays pinned at 3145 the whole session
-      regardless. What bench run 251 also confirms: isp_api_wrapper.c's
-      vsi_int_time_update() write-back clamp -- the LAST touchpoint
-      before a value reaches the sensor, clamping against
-      sensor_attributes.maxIntLine -- is what actually holds the sensor
-      within the active-mode ceiling by itself (0x3503 read 0x07 at
-      stream start and every ~1 s poll during streaming; sensor exposure
-      0x3500..02 = 0x4150 = 1045 lines = VTS(1049)-4, equal to the value
-      written, held throughout; ISP 30.00 fps, host 30.03 fps). Removed
-      as dead weight accordingly: the isp_calib_param.modules.ae.autoAttr
-      mirror in isp_vsi_set_param() (the calibration-block push, proven
-      to reach a struct the library does not enforce from), and the
-      VSI_MPI_ISP_InitAeSnsFunc()/AeUnRegCallBack()/AeRegCallBack()
-      re-registration cycle in isp_vsi_sync_ae_sns_default() (proven to
-      have no effect on the library's internal request). Kept:
-      isp_vsi_sync_ae_sns_default() itself, simplified to the plain
-      sensor_attributes.fullLinesStd/fullLines/maxIntLine field sync the
-      clamp reads from (still needed -- without it the clamp would hold
-      the sensor at the stale 10 fps ceiling instead of the active one);
-      the write-back clamp; isp_pico.c's isp_ae_sns_full_lines_from_
-      frmival()/isp_ae_int_time_max_us_from_frmival() pure helpers (still
-      exercised by tests/unit/isp_ae_calib_envelope_sync); the OV5647
-      stream-start AEC/AGC-manual-bit re-assert (a separate fix, ov5647.c
-      -- see that patch's own history). All per-write bench-only
-      diagnostics (readback globals/counters added across the bench
-      runs above, the ov5647.c every-30-frame ISP-side poll hook) were
-      removed once bench run 251 closed out the investigation; isp_pico.c
-      keeps only its lightweight per-second ISP frame-rate counter
-      (isp_ae_diag_isp_fps_x100, CONFIG_VIDEO_ISP_VSI_FRAME_STATS).
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr
