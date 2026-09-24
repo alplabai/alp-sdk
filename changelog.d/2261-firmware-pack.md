@@ -31,14 +31,11 @@ MC-arbitration tweaks where that layer was present — **not** the intended
 ALP gen_tool file. Moved the install to `do_compile:prepend:rzv2n-family()`
 (not noexec) and added a build-time assertion that the two x103 MACHINEs
 actually resolve to the D8S32 file. Confirmed on alplab-gw (2026-09-24):
-`e1m-v2n103-a55`/`e1m-v2m103-a55` compile the correct D8S32 file into BL2
-(byte-identical to the intended source, not merely "unchanged" — the prior
-report of `e1m-v2m101-a55` being "regression-checked unchanged" meant
-unchanged **relative to the intended ALP D16S32 file**, which itself was
-newly-taking-effect through this same fix, not unchanged relative to
-what bitbake shipped before).
+`e1m-v2n103-a55`/`e1m-v2m103-a55` compile the correct D8S32 file into BL2,
+byte-identical to the intended source; `e1m-v2m101-a55` compiles its
+D16S32 file the same way.
 
-**Maintainer decisions on the two items raised in review (2026-09-24):**
+**Also confirmed the same day (2026-09-24):**
 - **V2x101 production DRAM part/tier: still undecided, a production
   blocker.** `E1M-V2N101`/`E1M-V2M101`'s own catalogue entry
   (`metadata/e1m_modules/E1M-V2N101.yaml`, `E1M-V2M101.yaml`:

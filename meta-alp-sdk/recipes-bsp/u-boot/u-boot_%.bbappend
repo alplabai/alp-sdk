@@ -90,8 +90,11 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # rzv2n-dev.h/.dts are shared source compiled identically for every
 # rzv2n-family MACHINE (CONFIG_TARGET_RZV2N_DEV, above). e1m-v2n101-a55/
 # e1m-v2m101-a55 currently build the family-default (unpatched) rzv2n-dev.h/
-# .dts -- whether they should instead be x103-sized is an open question (see
-# the OPEN QUESTION note in trusted-firmware-a_%.bbappend), not decided here.
+# .dts -- DECIDED (maintainer, 2026-09-24): they stay family-default, not
+# x103-sized. Whether that firmware choice or the catalogue's dram_mbit is
+# the one that's wrong is a separate, still-undecided PRODUCTION BLOCKER
+# (see the OPEN comment in e1m-v2n101-a55.conf / e1m-v2m101-a55.conf and
+# trusted-firmware-a_%.bbappend), not decided here.
 #
 # Selected by a MACHINE equality check, not an OVERRIDES suffix, DELIBERATELY:
 # a `SRC_URI:append:e1m-v2n103-a55` form would face the same override-rank
