@@ -44,8 +44,8 @@ SRC_URI:append:rzv2n-family = " file://${ALP_TFA_DDR_SRC}"
 
 # Reproducible / traceable BL2+BL31 version string.  TF-A's Makefile
 # derives BUILD_STRING from `git describe --always --dirty --tags` when
-# it is unset, which on our build is ALWAYS "-dirty": do_configure
-# overwrites the tracked ddr_param_def_lpddr4.c (above), so the TF-A
+# it is unset, which on our build is ALWAYS "-dirty": do_compile:prepend
+# overwrites the tracked ddr_param_def_lpddr4.c (below), so the TF-A
 # source tree is intentionally modified at build time.  The result was
 # a permanently "-dirty" boot banner ("v2.10.5(release):4092464-dirty")
 # that also leaked the upstream short SHA.  Pin BUILD_STRING to a clean,
@@ -62,7 +62,16 @@ EXTRA_OEMAKE:append:rzv2n-family = " BUILD_STRING='${ALP_TFA_BUILD_STRING}'"
 # Path of the stock DDR param file inside the TF-A source tree.
 ALP_TFA_DDR_DST ?= "plat/renesas/rz/soc/v2n/drivers/ddr/ddr_param_def_lpddr4.c"
 
-do_configure:append:rzv2n-family() {
+# Hooked onto do_compile, NOT do_configure: meta-arm's trusted-firmware-a.inc
+# sets `do_configure[noexec] = "1"` (TF-A's build is plain make, no separate
+# configure step), so a `do_configure:append` function body is added but NEVER
+# EXECUTED -- bitbake skips a noexec task's body entirely, satisfying its
+# dependents without running it. That is exactly what "STATUS: UNVALIDATED
+# through bitbake" above was flagging: this file swap has only ever been
+# proven through the manual FIP build flow. do_compile is not noexec (it runs
+# the actual `make`), so prepending here runs before BL2 compiles, same
+# ordering intent as the old do_configure hook.
+do_compile:prepend:rzv2n-family() {
     if [ -f "${WORKDIR}/${ALP_TFA_DDR_SRC}" ]; then
         install -m 0644 "${WORKDIR}/${ALP_TFA_DDR_SRC}" \
             "${S}/${ALP_TFA_DDR_DST}"
