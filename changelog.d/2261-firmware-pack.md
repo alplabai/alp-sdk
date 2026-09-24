@@ -38,18 +38,31 @@ unchanged **relative to the intended ALP D16S32 file**, which itself was
 newly-taking-effect through this same fix, not unchanged relative to
 what bitbake shipped before).
 
-**Two items are HELD for the maintainer, not decided by this change:**
-- `E1M-V2N101`/`E1M-V2M101`'s own catalogue entry
+**Maintainer decisions on the two items raised in review (2026-09-24):**
+- **V2x101 production DRAM part/tier: still undecided, a production
+  blocker.** `E1M-V2N101`/`E1M-V2M101`'s own catalogue entry
   (`metadata/e1m_modules/E1M-V2N101.yaml`, `E1M-V2M101.yaml`:
-  `dram_mbit: 32768` = 4 GB) states the same 4 GB size this x103 firmware
-  targets, yet those MACHINEs continue to ship the family-default D16S32
-  (8 GB) config, unchanged by this PR. Whether V2N101/V2M101 should move
-  to D8S32 or the catalogue should read 8 GB is open.
-- Whether meta-rz-drpai's DDR MC-arbitration register patch (`param_setup_mc`
-  `0x0134`/`0x0135`/`0x0178`/`0x017f`/`0x0181`/`0x02cd`/`0x02cf`/`0x02d0` +
-  `param_phyinit_2d_dat1[15]`) — which the ALP gen_tool files do not carry,
-  and which `do_compile:prepend`'s whole-file replacement discards on any
-  DRP-AI-enabled build — needs folding into `ddr_param_def_lpddr4-alp*.c`.
+  `dram_mbit: 32768` = 4 GB) states the same 4 GB size this x103
+  firmware targets, yet those MACHINEs continue to ship the
+  family-default D16S32 (8 GB) config. Decided: firmware **stays**
+  D16S32 for V2N101/V2M101; which of the two facts is actually right
+  remains open — see the `# OPEN` note added to both machine confs and
+  `docs/build-yocto-v2n.md`.
+- **Fold meta-rz-drpai's DDR MC-arbitration register values in: YES.**
+  `param_setup_mc` `0x0134`/`0x0135`/`0x0178`/`0x017f`/`0x0181`/`0x02cd`/
+  `0x02cf`/`0x02d0` — which the ALP gen_tool files don't carry, and which
+  `do_compile:prepend`'s whole-file replacement discards on any
+  DRP-AI-enabled build — get folded into both `ddr_param_def_lpddr4-alp.c`
+  and `-alp-d8s32.c`. Confirmed density-independent (identical current
+  baseline in both files) and non-colliding with the D8 range regs/tRFC
+  rows; `param_phyinit_2d_dat1[15]` stays at the ALP value (the drpai
+  patch doesn't touch it). **Not yet applied** — the target values are
+  derived, verified, and recorded in `alp-sdk-internal
+  docs/bootloader-equivalence-verdict.md`, but editing those two private
+  register-table files was blocked by a permission classifier this
+  session on every attempt. Still needs: applying the 8 values, a
+  provenance note in each file's header, a rebuild + bl2-binary proof on
+  e1m-v2m103-a55, and it is **not silicon-verified either way**.
 
 See `alp-sdk-internal docs/bootloader-equivalence-verdict.md` (corrected the
-same day) for the discovery trail.
+same day) for the discovery trail and exact target values.
