@@ -1,4 +1,4 @@
-From 233e8362be35dfab6eab88259fbc1ffd1160f8dd Mon Sep 17 00:00:00 2001
+From d905e14ecf5e08f34c25532418aa537c5d1db800 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 24 Sep 2026 17:41:10 +0200
 Subject: [PATCH] rzv2n-dev, i2c: rzg2l_riic: enable P06/P07 pull-up, fix RIIC
@@ -125,9 +125,9 @@ independently-verified 0x96/0xFF, bit 7 cleared on both, reproducible):
   the matrix immediately below), not protocol ordering.
 
 Bench matrix (E1M-V2M103, RIIC8/BRD_I2C, DA9292 0x1E; BRD_I2C carries
-~13 populated branches; external pull-ups R287/R288, 2.2 kOhm to
-VDD1G_1P8, ARE fitted per the netlist, in addition to the SoC-internal
-pull-up this patch also adds):
+~13 populated branches; external 2.2 kOhm pull-ups to the 1.8 V
+rail are fitted, in addition to the SoC-internal pull-up this
+patch also adds):
 
 - CKS=4 (this patch's prior default through v5): single bursts longer
   than ~12 bytes lose bit 7 on bytes with bit7 set from about position
@@ -199,7 +199,7 @@ index 689c30624..dbd6d1d23 100644
  	 * read in board_late_init() to identify the SoM. Func.1 = RIIC0. */
  	*(volatile u32 *)PFC_23  = (*(volatile u32 *)PFC_23 & ~0xFFu) | (0x01 << 4) | (0x01 << 0);
 diff --git a/drivers/i2c/rzg2l_riic.c b/drivers/i2c/rzg2l_riic.c
-index dc223fa09..777a8a190 100644
+index dc223fa09..f8712bf9f 100644
 --- a/drivers/i2c/rzg2l_riic.c
 +++ b/drivers/i2c/rzg2l_riic.c
 @@ -20,6 +20,7 @@
@@ -230,8 +230,8 @@ index dc223fa09..777a8a190 100644
 +		 * CKS(5) here -- one step slower than that restored-nominal
 +		 * value -- is deliberate margin, not a second clock-doubling
 +		 * correction: bench matrix on the loaded BRD_I2C (DA9292 at
-+		 * 0x1E, ~13 populated branches, external R287/R288 2.2 kOhm
-+		 * pull-ups to VDD1G_1P8 plus the SoC-internal pull-up) shows
++		 * 0x1E, ~13 populated branches, external 2.2 kOhm pull-ups
++		 * to the 1.8 V rail plus the SoC-internal pull-up) shows
 +		 * CKS(4) loses bit 7 on bytes at/after roughly byte 13 of a
 +		 * burst read (e.g. a 21-byte burst: offset 0x0d 0x96->0x16,
 +		 * 0x0e 0xff->0x7f, 0x12/0x13 0xff->0x7f, 0x14 0xac->0x0c --

@@ -154,7 +154,7 @@ a programmed EEPROM manifest is available to test against.
 
 **Patch md5s (current):** `0002` `c546f00cabca346e335febd21ecbc440`,
 `0004` `269fc80793f33514871704d3c1f4fc73`, `0006`
-`bcfa876cdbfe4fde5fdb000bba235ca5`. `0004` applies cleanly on top of the
+`79cce6934ecf6b205e5017866634d8bd`. `0004` applies cleanly on top of the
 corrected `0002` and the meta-renesas PMIC-I2C-removal patch, against
 `renesas-u-boot-cip` `bcf29d98`.
 
