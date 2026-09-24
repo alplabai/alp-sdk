@@ -57,11 +57,12 @@ on_module:
         - { chip: act8760,          role: pmic_main_page0,           address_7bit: "0x25" }
         - { chip: act8760,          role: pmic_main_page1,           address_7bit: "0x26" }
         - { chip: da9292,           role: pmic_secondary,            address_7bit: "0x1E" }
-        # Address UNRESOLVED (#1163, #1845): no measurement has confirmed
-        # which address this buck is strapped to. 0x48 is free on this bus
-        # (tmp112 is at 0x40), but that does not make 0x48 its address.
-        # TBD until measured.
-        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "TBD" }
+        # Address RESOLVED (#1163, #1845): bench-measured 2026-09-24 on
+        # E1M-V2M103 -- 0x48 appears on BRD_I2C only after P64
+        # (DEEPX_CORE_0P75_EN) is driven high, and its VOUT register (0x5A)
+        # reads 0.85V, matching this role. 0x44 (deepx_ddr5_vdd) and 0x4F
+        # (deepx_ddr5_vddq) were confirmed present on the same bus scan.
+        - { chip: tps628640,        role: deepx_lpddr_0v85,          address_7bit: "0x48" }
         - { chip: tps628640,        role: deepx_ddr5_vdd,            address_7bit: "0x44" }
         - { chip: tps628640,        role: deepx_ddr5_vddq,           address_7bit: "0x4F" }
         - { chip: tps628640,        role: lpddr4x_0v6,               address_7bit: "0x4D", assembled: optional }

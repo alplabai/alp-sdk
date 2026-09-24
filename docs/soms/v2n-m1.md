@@ -21,7 +21,7 @@ and adds:
 | `M1_RESET`               | Renesas-side GPIO controlling DX-M1 reset (active-low)     |
 | 2 × PI3DBS12212A muxes   | Switch PCIe routing between DEEPX and the E1M edge         |
 | 0.75 V DEEPX rail        | DA9292 CH2 (disabled on V2N base; brought up by U-Boot on M1, over RIIC8/BRD_I2C -- Cortex-A55/Linux-exclusive) |
-| 3 × TPS628640 bucks      | DDR5/LPDDR rails for DEEPX (`0x44` / `0x4F` fixed; third strap **unresolved**, see below) |
+| 3 × TPS628640 bucks      | DDR5/LPDDR rails for DEEPX (`0x44` / `0x4F` / `0x48`, all bench-confirmed, see below) |
 
 ## DEEPX bring-up
 
@@ -40,34 +40,38 @@ remains a bench-diagnostic check, not an automated bring-up step:
    (`metadata/e1m_modules/v2n/core-ownership.yaml`); U-Boot runs on
    the A55 before Linux starts, so it -- not the CM33 -- is the sole
    writer.
-2. **ACK-probe** the DEEPX TPS628640 instances at `0x44` / `0x4F`
-   to confirm population (self-regulating).  The third DEEPX buck
-   (`deepx_lpddr_0v85`) has no confirmed address to probe -- see
-   the strap note below before writing bring-up code against it.
+2. **ACK-probe** the DEEPX TPS628640 instances at `0x44` / `0x4F` /
+   `0x48` to confirm population (self-regulating).  `deepx_lpddr_0v85`
+   (`0x48`) only ACKs after step 1 drives `P64` high -- see the strap
+   note below.
 3. **Route the PCIe muxes** to the DEEPX path with the PI3DBS12212A
    driver (PD pin on Renesas `P80`, SEL pin on `P95`).
 4. **Release `M1_RESET`** (Renesas `PA6`; active-low) -- ONLY once
    step 1 confirms the rail is power-good.
 
-### `deepx_lpddr_0v85` strap is unresolved (#1163)
+### `deepx_lpddr_0v85` strap is resolved: `0x48` (#1163, #1845)
 
-The third DEEPX buck (`tps628640`, role `deepx_lpddr_0v85`) has no
-settled I2C address on the V2M pair --
+The third DEEPX buck (`tps628640`, role `deepx_lpddr_0v85`) is
+`address_7bit: "0x48"` on the V2M pair --
 `metadata/e1m_modules/E1M-V2M101.yaml` / `E1M-V2M102.yaml` /
-`E1M-V2M103.yaml` record it
-as `address_7bit: "TBD"`, not `0x48`.  The chip's own default strap
-*is* `0x48`.  **Updated 2026-09-24:** the original collision premise
-here -- that `0x48` was occupied by the on-module `tmp112` -- no
-longer holds: `tmp112` is maintainer-confirmed at `0x40` (all six
-V2N-family SKUs, one shared PCB, one ADD0 net; see
-`metadata/chips/tmp112.yaml`), not `0x48`.  That does NOT mean the
-DEEPX buck defaults to `0x48` -- no measurement has confirmed what
-this part is actually strapped to on the real V2M schematic, and
-inferring it from the now-resolved non-collision would be a guess --
-see [#1163](https://github.com/alplabai/alp-sdk/issues/1163) and
-[#1845](https://github.com/alplabai/alp-sdk/issues/1845). Treat
-`deepx_lpddr_0v85`'s address as unknown until the schematic confirms
-it, and do not hardcode `0x48` for it in bring-up code.
+`E1M-V2M103.yaml`.  **Bench-measured 2026-09-24 on E1M-V2M103:**
+`0x48` ACKs on `BRD_I2C` only once `P64` (`DEEPX_CORE_0P75_EN`) is
+driven high (step 1 above), and its VOUT register (`0x5A`) reads
+0.85 V -- matching the role.  This is the same address the chip's
+own default strap gives, but that was NOT sufficient on its own to
+resolve the strap (see the now-superseded collision history below);
+the bench measurement is what confirms it.
+
+Superseded history: this address was `TBD` because of an apparent
+collision with `tmp112` (also nominally strappable to `0x48`..`0x4B`)
+-- that premise no longer held once `tmp112` was maintainer-confirmed
+at `0x40` (all six V2N-family SKUs, one shared PCB, one ADD0 net; see
+`metadata/chips/tmp112.yaml`), and the bench measurement above then
+confirmed `0x48` directly rather than inferring it from the
+non-collision. See
+[#1163](https://github.com/alplabai/alp-sdk/issues/1163) and
+[#1845](https://github.com/alplabai/alp-sdk/issues/1845) for the full
+history.
 
 The `chips/deepx_dxm1/` driver wraps steps 3-4 into a single
 [`deepx_dxm1_bring_up(&ctx, DEEPX_DXM1_DEFAULT_BOOT_US)`](../../include/alp/chips/deepx_dxm1.h)

@@ -95,17 +95,95 @@ PMIC-I2C-removal patch, in that order, against `renesas-u-boot-cip`
 `bcf29d98`. It does NOT apply against this branch's own uncorrected
 `0002` -- that patch fails to apply outright on a clean `bcf29d98`
 checkout (its "gigadevice" hunks are genuinely broken, not merely
-conflicting with `0004`), confirming #2280 must land first. Compiled
-and link-verified in WSL Ubuntu-22.04 (fresh `bcf29d98` + the
-PMIC-removal patch + `0001` + corrected `0002` + `0004`, md5
-`269fc80793f33514871704d3c1f4fc73`; `rzv2n-dev_defconfig` +
-`deepx-rail.cfg` + `fdtfile-v2m.cfg` + `no-dirty-version.cfg` +
-`gigadevice-xspi.cfg`; `aarch64-linux-gnu` gcc 11.4.0): build `rc=0`,
-0 warnings, `strings u-boot | grep '^ALP:'` shows every DA9292/DEEPX
-rail string including `ALP: DEEPX rail 0.75V up (PG)` and the new
-EN2/P64 message. Still BENCH-PENDING: no run on a V2M bench unit yet;
-the 4 GB V2M103 bench FIP pack is still pending that session. The md5
+conflicting with `0004`), confirming #2280 must land first. The md5
 changed from the prior `59f81f3f9ea3812d99bd3c476ede2b86` only by a
 present-tense rewrite of the commit-message prose (retired-module and
 bug-history phrasing); the diff hunks are byte-identical, so this
 compile proof still covers the patch content unmodified.
+
+**`deepx_lpddr_0v85` strap resolved: `0x48` (#1163, #1845).**
+Bench-measured 2026-09-24 on E1M-V2M103: `0x48` ACKs on `BRD_I2C`
+only after `P64` (`DEEPX_CORE_0P75_EN`) is driven high, and its VOUT
+register (`0x5A`) reads 0.85 V, matching the role; `0x44`
+(`deepx_ddr5_vdd`) and `0x4F` (`deepx_ddr5_vddq`) were confirmed
+present on the same scan. `metadata/e1m_modules/E1M-V2M101.yaml` /
+`E1M-V2M102.yaml` / `E1M-V2M103.yaml` change `address_7bit: "TBD"` ->
+`"0x48"` for that role; `docs/bring-up-v2n-m1.md` and
+`docs/soms/v2n-m1.md` are updated to match and no longer warn against
+hardcoding `0x48`.
+
+**CH2 sequence independently bench-proven from Linux, 2026-09-24
+(E1M-V2M103).** Before touching U-Boot, the exact register sequence
+`0004` implements was run by hand from Linux userspace over RIIC8
+(`i2cset`/`i2cget` on `/dev/i2c-8`) and produced the expected result
+end to end: `CTRL_01` (`0x07`) `0x81` -> `0x01` (clear `CH2_VSTEP` +
+`CH2_EN` together), `VOUT_CH2` (`0x0C`/`0x0D`) programmed to `0x96`
+and read back, `EVENT_00` cleared, then `CTRL_01 = 0x03` (`CH2_EN`)
+-> `STATUS_00 = 0x03` (`CH2_PG` set, no UV/OV/OC), DMM confirms
+0.75 V on the rail; driving `P64` high then surfaces the DEEPX bucks
+(`0x44`, `0x48`, `0x4F`) on `BRD_I2C`. This confirms the DA9292
+register map, the 0.75 V programming values, and the physical wiring
+in `0004`'s sequence are all correct -- the failure below is
+U-Boot-side only.
+
+**U-Boot-side RIIC8 driver bug found and fixed, same session.** The
+first on-silicon run of `0004` (chain-loaded) failed at the very
+first DA9292 read: `ALP: DA9292 DEV_ID=0x00 (want 0xea) REV_ID=0x00
+CFG_REV=0x00 ret=-110 -- abort`. Root cause is a genuine
+RIIC(rzg2l)/R9A09G056 U-Boot driver defect, not a rail-sequence or
+wiring problem (the Linux-side proof above rules those out):
+`drivers/i2c/rzg2l_riic.c`'s `riic_xfer()` ran every `struct i2c_msg`
+of a multi-message transfer as its own independent START..STOP bus
+transaction. `dm_i2c_read()` always builds a register read as two
+messages -- a write of the register offset, then the paired read --
+and `riic_read_common()` already performs the WHOLE combined
+write-offset + repeated-START + read operation by itself, using
+`priv->offset`. So the un-patched `riic_xfer()` loop ran msg[0]
+through `riic_write_common()` first, sending the offset byte as its
+own full START..STOP transaction, and then `riic_read_common()` sent
+it AGAIN as part of its own transaction -- the offset went out twice,
+as two separate bus transactions with a spurious STOP between them,
+never the single repeated-START transaction `dm_i2c_read()` intends.
+On the DA9292 this desyncs the device badly enough that the very
+first cold read times out, and once this RIIC instance's `ICCR2`
+`BBSY` flag is left stuck set by the incompletely-recovered
+transaction, every later transaction fails immediately with `-EBUSY`
+-- matching the bench log exactly (`i2c probe` on bus 8 found `1E 25
+26` once; the next `i2c md 0x1e 0x19 1` then failed `-16`, and every
+subsequent probe found nothing; `i2c reset` -> `Not supported by the
+driver`, since `riic_ops` implements only `.xfer`/`.probe_chip`, no
+bus-recovery op). Writes are unaffected -- `dm_i2c_write()` always
+builds one combined message, so `0004`'s own DA9292 writes already
+ran correctly; only its reads (`PMC_DEV_ID`, `STATUS_01`, `CTRL_01`,
+`VOUT_CH2`, `EVENT_00`/`01`, the `STATUS_00` poll) hit this bug.
+
+New focused patch
+`0005-i2c-rzg2l_riic-combined-register-read.patch` fixes `riic_xfer()`
+to recognise the standard write-offset-then-read message pair and
+skip the redundant first transaction -- it stashes the offset
+directly and lets `riic_read_common()` run the one genuine
+transaction; any other message pattern (a lone write, or a bare read)
+falls through unchanged. This is a generic RIIC driver fix (every one
+of the SoC's nine RIIC instances routes register reads through the
+same `riic_xfer()`), not specific to RIIC8, so it is added
+unconditionally for `rzv2n-family` rather than gated the way `0004`'s
+Kconfig knob is.
+
+**Rebuilt and link-verified with the fix, 2026-09-24** (fresh
+`bcf29d98` + PMIC-I2C-removal + `0001` + `0002` (md5
+`c546f00cabca346e335febd21ecbc440`) + `0003` (4 GB tier) + `0004`
+(md5 `269fc80793f33514871704d3c1f4fc73`) + `0005`, all via `git
+apply`; `rzv2n-dev_defconfig` + `no-dirty-version.cfg` +
+`gigadevice-xspi.cfg` + `deepx-rail.cfg` + `fdtfile-v2m.cfg`; WSL
+Ubuntu-22.04, `aarch64-linux-gnu` gcc 11.4.0): build `rc=0`, every
+`ALP:` DA9292/DEEPX string still linked (LTO did not drop any of
+them), `CONFIG_SYS_SDRAM_SIZE` = `(0x100000000u - DRAM_RSV_SIZE)` and
+the control DT's `memory@48000000` = `<0x0 0x48000000 0x0
+0xF8000000>` -- both correct for the 4 GB tier (an earlier bench
+run's `DRAM: 7.9 GiB` banner, which showed the 4 GB tier was NOT
+effective, used a different, since-superseded `0003` draft; this
+build uses the branch's committed, verified-correct `0003`).
+`u-boot.bin`: md5 `d41165c2ae6fa7c65a1192fcb3ad345e`, size 764120
+bytes (`0xBA8D8`), crc32 `0x95570da2`. Still BENCH-PENDING: the fix
+is unverified on-silicon -- no board access this session; the
+orchestrator benches this image next.

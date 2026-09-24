@@ -146,6 +146,31 @@ SRC_URI:append:e1m-v2m101-a55 = " file://deepx-rail.cfg"
 SRC_URI:append:e1m-v2m102-a55 = " file://deepx-rail.cfg"
 SRC_URI:append:e1m-v2m103-a55 = " file://deepx-rail.cfg"
 
+# 0005 (RIIC combined-read fix): the vendor rzg2l_riic driver's riic_xfer()
+# ran the two struct i2c_msg's a dm_i2c_read() register read always builds
+# (msg[0] = write-the-register-offset, msg[1] = paired read) as two
+# INDEPENDENT START..STOP bus transactions with a spurious STOP between
+# them, and retransmitted the offset byte in each -- not the single
+# repeated-START transaction dm_i2c_read() intends. Silicon-observed on
+# E1M-V2M103 2026-09-24: the 0004 rail sequence's very first DA9292 read
+# (PMC_DEV_ID) timed out (-ETIMEDOUT) and RIIC8's BBSY flag was then left
+# stuck set, wedging the bus (-EBUSY on every later transaction; "i2c
+# reset" unsupported by this driver) until power-cycled. This is a
+# generic rzg2l_riic/R9A09G056 defect (every ONE-BYTE-offset register read
+# on any of the SoC's nine RIIC instances goes through the same
+# riic_xfer()), not limited to RIIC8, so it is unconditional for the whole
+# family rather than gated to the V2M MACHINEs the way 0004's Kconfig knob
+# is. Fast-path restricted to a 1-byte offset -- the on-module 24C128
+# EEPROM board_late_init() also reads over RIIC0 addresses with 2 bytes,
+# so it is deliberately left on the original per-message loop, unchanged
+# either way. Disjoint
+# file from every patch above (drivers/i2c/rzg2l_riic.c vs
+# board/renesas/rzv2n-dev/*), so its position relative to them is not
+# order-sensitive; placed after 0004 to read in the order these patches
+# were authored. DA9292 writes are unaffected (dm_i2c_write() already
+# builds one combined message), so 0004's own writes needed no change.
+SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-read.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;

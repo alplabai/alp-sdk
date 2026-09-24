@@ -15,7 +15,7 @@ PCIe muxes, and the DEEPX kernel runtime hand-off.
 |------------------------------|-----------------------------------------------|-------------------------------------------------------------------------------------|
 | DEEPX silicon                | absent                                        | populated (DX-M1 BGA, on-module)                                                    |
 | DA9292 CH2                   | disabled (0.75 V DEEPX rail unused)            | sequenced to 0.75 V + confirmed power-good by U-Boot's `board_late_init()` before Linux or the CM33 image ever starts |
-| TPS628640 instances on BRD_I2C | 1 optional (LPD4x_0V6 @ 0x4D)                | 4 total (adds `deepx_lpddr_0v85` [address TBD, #1163] / 0x44 / 0x4F for DEEPX rails) |
+| TPS628640 instances on BRD_I2C | 1 optional (LPD4x_0V6 @ 0x4D)                | 4 total (adds `deepx_lpddr_0v85` @ 0x48 / 0x44 / 0x4F for DEEPX rails, all bench-confirmed) |
 | PCIe muxes                   | not applicable                                | 2 × PI3DBS12212A; PD on Renesas P80, SEL on P95                                     |
 | `M1_RESET` line              | not applicable                                | Renesas PA6 -- driven by host firmware via `chips/deepx_dxm1/`                      |
 | DEEPX kernel runtime         | not applicable                                | `dx_rt_npu_linux_driver` + `libdxrt.so` from upstream `meta-deepx-m1` Yocto layer  |
@@ -27,11 +27,10 @@ PCIe muxes, and the DEEPX kernel runtime hand-off.
 ```c
 tps628640_t t44, tlpddr, t4f;
 tps628640_init(&t44, brd_i2c, 0x44, 1050);       /* DDR5_VDD       */
-/* deepx_lpddr_0v85's real strap is unresolved (#1163) -- do NOT hardcode
- * 0x48 here (tmp112 is confirmed 0x40, not 0x48; see docs/soms/v2n-m1.md's
- * "deepx_lpddr_0v85 strap is unresolved" section).
- * Substitute the address once the schematic confirms it. */
-tps628640_init(&tlpddr, brd_i2c, DEEPX_LPDDR_0V85_ADDR_TBD, 850); /* VDD0V85_LPDDR */
+/* deepx_lpddr_0v85 is bench-confirmed at 0x48 (#1163, #1845) -- see
+ * docs/soms/v2n-m1.md's "deepx_lpddr_0v85 strap is resolved" section.
+ * Only ACKs after step 1 drives P64 (DEEPX_CORE_0P75_EN) high. */
+tps628640_init(&tlpddr, brd_i2c, 0x48, 850);      /* VDD0V85_LPDDR  */
 tps628640_init(&t4f, brd_i2c, 0x4F, 500);        /* DDR5_VDDQ_0V5  */
 ```
 
