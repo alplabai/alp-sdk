@@ -88,13 +88,26 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 
 # 4 GB / 16 GB memory-tier (x103) SDRAM-size + control-DT memory-node patch.
 # rzv2n-dev.h/.dts are shared source compiled identically for every
-# rzv2n-family MACHINE (CONFIG_TARGET_RZV2N_DEV, above) -- this patch is
-# selected by a MACHINE equality check, not an OVERRIDES suffix, so it can
-# never leak onto the 8 GB v2n101/v2m101 SKUs through their MACHINEOVERRIDES
-# inheritance chain (e1m-v2m103-a55 lists e1m-v2m101-a55 in its own
-# MACHINEOVERRIDES). It is a THIRD SRC_URI:append:rzv2n-family statement
-# (same override as 0001/0002 above), so it lands after them in the family's
-# SRC_URI list and do_patch applies it last, on top of both.
+# rzv2n-family MACHINE (CONFIG_TARGET_RZV2N_DEV, above). e1m-v2n101-a55/
+# e1m-v2m101-a55 currently build the family-default (unpatched) rzv2n-dev.h/
+# .dts -- whether they should instead be x103-sized is an open question (see
+# the OPEN QUESTION note in trusted-firmware-a_%.bbappend), not decided here.
+#
+# Selected by a MACHINE equality check, not an OVERRIDES suffix, DELIBERATELY:
+# a `SRC_URI:append:e1m-v2n103-a55` form would face the same override-rank
+# hazard documented on ALP_TFA_DDR_SRC in trusted-firmware-a_%.bbappend
+# (e1m-v2n101-a55/e1m-v2m101-a55 sit to the right of the x103 names in the
+# x103 MACHINEs' own MACHINEOVERRIDES chain); `d.getVar('MACHINE') in (...)`
+# has no such hazard -- it's a plain string compare, immune to OVERRIDES rank.
+#
+# It is a THIRD SRC_URI:append:rzv2n-family statement (same override as
+# 0001/0002 above), so among the meta-alp-sdk entries it lands after 0001 and
+# 0002 and do_patch applies it after both -- verified live via `bitbake -e
+# u-boot` (SRC_URI order), not just reasoned about. It does NOT apply last
+# overall: meta-rz-drpai's add-ether and meta-rz-opencva's OpenCVA/Codec
+# patches (their OWN, separate u-boot bbappends) still land after this one in
+# the full do_patch sequence -- see the patch-fuzz demotion comment below for
+# why those vendor hunks fuzz against ALP's context.
 SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55') else ''}"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
