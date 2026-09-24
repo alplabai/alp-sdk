@@ -48,8 +48,8 @@ LOG_MODULE_REGISTER(ov5647_emul, CONFIG_I2C_LOG_LEVEL);
  * writes partway through the suite once several before-hook invocations had accumulated without
  * an intervening clear, which find_write_index() then read as "never written". Raised to 1024,
  * generously rather than precisely re-budgeted -- but issue #2277's ov5647_set_frmival() re-clamp
- * (ov5647.c: every set_frmival() while VIDEO_CID_EXPOSURE_AUTO=MANUAL now writes an extra
- * OV5647_EXPOSURE register) pushed the WHOLE suite (still one shared, never-fully-reset log) over
+ * (ov5647.c: every set_frmival() now re-runs the exposure setter, which always writes
+ * OV5647_MANUAL_CTRL and, while VIDEO_CID_EXPOSURE_AUTO=MANUAL, OV5647_EXPOSURE) pushed the WHOLE suite (still one shared, never-fully-reset log) over
  * that budget too -- 1024 dropped past ~2050 needed. Raised again, to 4096, with the same
  * generous-not-precise margin. */
 #define OV5647_EMUL_LOG_CAPACITY 4096
