@@ -74,7 +74,9 @@
  * HTS (1852 / 2700) needs both bytes checked since neither fits in one byte. */
 #define REG_TIMING_X_ADDR_START_LO 0x3801
 #define REG_TIMING_Y_ADDR_START_LO 0x3803
+#define REG_TIMING_X_ADDR_END_HI   0x3804
 #define REG_TIMING_X_ADDR_END_LO   0x3805
+#define REG_TIMING_Y_ADDR_END_HI   0x3806
 #define REG_TIMING_Y_ADDR_END_LO   0x3807
 #define REG_TIMING_X_OUTPUT_HI     0x3808
 #define REG_TIMING_X_OUTPUT_LO     0x3809
@@ -210,11 +212,15 @@
  */
 #define BINNED1280_X_ADDR_START 0
 #define BINNED1280_Y_ADDR_START 0
-/* 0x0a3f / 0x07a3, low bytes only -- same reasoning as FULLFOV_X_ADDR_END_LO above (the high
- * byte, 0x0a / 0x07, is never 0, so the low byte alone is enough to distinguish this window
- * from the crop path's or the 640x480 mode's).
+/* 0x0a3f / 0x07a3 -- unlike FULLFOV_X_ADDR_END_LO above, both the high AND low bytes are
+ * checked here (fix-first review, issue #2286): the high byte alone (0x0a / 0x07) is enough to
+ * distinguish this window from the crop path's or 640x480's, so an earlier version of this file
+ * checked only the low byte -- but that leaves a driver bug that writes the WRONG high byte (a
+ * transposed 0x3800-series address, say) invisible to this test.
  */
+#define BINNED1280_X_ADDR_END_HI 0x0a
 #define BINNED1280_X_ADDR_END_LO 0x3f /* 0x0a3f = 2623 */
+#define BINNED1280_Y_ADDR_END_HI 0x07
 #define BINNED1280_Y_ADDR_END_LO 0xa3 /* 0x07a3 = 1955 */
 #define OUTPUT_1280_HI           0x05
 #define OUTPUT_1280_LO           0x00
@@ -224,8 +230,15 @@
 #define REG_TIMING_ISP_Y_OFFSET  0x3813
 #define BINNED1280_X_OFFSET      16
 #define BINNED1280_Y_OFFSET      8
-#define SUBSAMPLE_2X2BINNED      0x31
-#define SENSOR_CTRL09_2X2BINNED  0x12
+/* Datasheet power-on values for 0x3811/0x3813 -- every mode OTHER than 1280x960 must write these
+ * back explicitly now (fix-first review, issue #2286 BLOCKER): a prior 1280x960 selection leaves
+ * BINNED1280_X_OFFSET/BINNED1280_Y_OFFSET (16/8) programmed, and no other mode used to touch
+ * these two registers at all, so its non-default crop stayed armed against the new window.
+ */
+#define ISP_X_OFFSET_DEFAULT    0x04
+#define ISP_Y_OFFSET_DEFAULT    0x02
+#define SUBSAMPLE_2X2BINNED     0x31
+#define SENSOR_CTRL09_2X2BINNED 0x12
 /* HTS 1896 (0x0768) -- the reference's OWN 2x2-binned-mode HTS, used unscaled; see
  * ov5647.c's OV5647_HTS_1280X960_BINNED comment for why that is safe despite the global PLL.
  */
@@ -238,15 +251,18 @@
 #define VTS_1280X960_15FPS_LO 0x03
 #define VTS_1280X960_30FPS_HI 0x04
 #define VTS_1280X960_30FPS_LO 0x01
-/* 50/60 Hz AEC band step -- the reference's own 296/246 lines, unscaled (see
- * ov5647.c's OV5647_HTS_1280X960_BINNED comment). Max bands per frame: min-blanking VTS
- * 960 + 24 = 984 -> floor(984/246) = 4, floor(984/296) = 3.
+/* 50/60 Hz AEC band step -- 308/256 lines, recomputed for this driver's actual 32.503us line
+ * time (fix-first review correction, issue #2286: NOT the reference's own binned-mode 296/246,
+ * the wrong real-time period at this line time -- see ov5647.c's
+ * OV5647_AEC_BAND_50HZ_1280X960BIN comment for the arithmetic). Both now exceed one byte, so
+ * both high bytes are 0x01 (296/246 needed only one). Max bands per frame: min-blanking VTS
+ * 960 + 24 = 984 -> floor(984/256) = 3, floor(984/308) = 3.
  */
 #define AEC_BINNED1280_BANDSTEP_3A08_VAL 0x01
-#define AEC_BINNED1280_BANDSTEP_3A09_VAL 0x28
-#define AEC_BINNED1280_BANDSTEP_3A0A_VAL 0x00
-#define AEC_BINNED1280_BANDSTEP_3A0B_VAL 0xf6
-#define AEC_BINNED1280_BANDSTEP_3A0D_VAL 0x04
+#define AEC_BINNED1280_BANDSTEP_3A09_VAL 0x34
+#define AEC_BINNED1280_BANDSTEP_3A0A_VAL 0x01
+#define AEC_BINNED1280_BANDSTEP_3A0B_VAL 0x00
+#define AEC_BINNED1280_BANDSTEP_3A0D_VAL 0x03
 #define AEC_BINNED1280_BANDSTEP_3A0E_VAL 0x03
 #define BLC_BINNED1280_4004_VAL          0x04
 
@@ -676,7 +692,9 @@ ZTEST(ov5647, test_set_format_640x480_binned_fullfov_before_park)
 static const struct ov5647_emul_write binned1280_mode_regs[] = {
 	{ REG_TIMING_X_ADDR_START_LO, BINNED1280_X_ADDR_START },
 	{ REG_TIMING_Y_ADDR_START_LO, BINNED1280_Y_ADDR_START },
+	{ REG_TIMING_X_ADDR_END_HI, BINNED1280_X_ADDR_END_HI },
 	{ REG_TIMING_X_ADDR_END_LO, BINNED1280_X_ADDR_END_LO },
+	{ REG_TIMING_Y_ADDR_END_HI, BINNED1280_Y_ADDR_END_HI },
 	{ REG_TIMING_Y_ADDR_END_LO, BINNED1280_Y_ADDR_END_LO },
 	{ REG_TIMING_X_OUTPUT_HI, OUTPUT_1280_HI },
 	{ REG_TIMING_X_OUTPUT_LO, OUTPUT_1280_LO },
@@ -842,10 +860,27 @@ ZTEST(ov5647, test_enum_frmival_1280x960_accepts_30_rejects_45)
 	             "45 fps accepted at 1280x960 -- want rejected (VTS 683 < 960 + 24)");
 }
 
-/* Same name-sorting reason as test_set_format_640x480_binned_fullfov_before_park above. */
+/*
+ * Same name-sorting reason as test_set_format_640x480_binned_fullfov_before_park above.
+ *
+ * Extended (fix-first review, issue #2286 BLOCKER): 1280x960 is now the ONLY mode that arms a
+ * non-default 0x3811/0x3813 ISP crop offset (16/8) -- every other mode must write these two back
+ * to their datasheet power-on default (ISP_X_OFFSET_DEFAULT/ISP_Y_OFFSET_DEFAULT, 0x04/0x02)
+ * rather than leave the 1280x960 mode's crop armed, the same "never leaves binning on" discipline
+ * this test already checks for 0x3814/0x3815/0x380c..0x3821. Both the 640x480-binned and the
+ * generic crop paths are checked, from a starting 1280x960 selection, since either path could
+ * independently forget the writeback. This is a BLOCKER FIX regression test: it FAILS against
+ * commit 22a9ecbe6 (0x3811/0x3813 stay at 16/8 after switching away from 1280x960).
+ */
 ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 {
-	const struct emul  *emul    = ov5647_emul();
+	const struct emul  *emul         = ov5647_emul();
+	struct video_format fmt_1280x960 = {
+		.type        = VIDEO_BUF_TYPE_OUTPUT,
+		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.width       = 1280,
+		.height      = 960,
+	};
 	struct video_format fmt_640 = {
 		.type        = VIDEO_BUF_TYPE_OUTPUT,
 		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
@@ -862,6 +897,17 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 
 	zassert_ok(video_stream_stop(ov5647_dev(), VIDEO_BUF_TYPE_OUTPUT));
 
+	/* Arm the 1280x960 mode's non-default ISP crop offset, then switch to 640x480 and confirm
+	 * it is written back to the power-on default, not left at 16/8.
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280x960));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              BINNED1280_X_OFFSET,
+	              "0x3811 = 0x%02x after 1280x960, want the binned offset 0x%02x",
+	              val,
+	              BINNED1280_X_OFFSET);
+
 	zassert_ok(video_set_format(ov5647_dev(), &fmt_640));
 	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_X_INC, &val));
 	zassert_equal(val,
@@ -869,6 +915,22 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	              "0x3814 = 0x%02x after 640x480, want binned 0x%02x",
 	              val,
 	              SUBSAMPLE_BINNED);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_X_OFFSET_DEFAULT,
+	              "0x3811 = 0x%02x after switching 1280x960 -> 640x480, want the power-on "
+	              "default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_X_OFFSET_DEFAULT,
+	              BINNED1280_X_OFFSET);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_Y_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              "0x3813 = 0x%02x after switching 1280x960 -> 640x480, want the power-on "
+	              "default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              BINNED1280_Y_OFFSET);
 
 	/* The run-54 trap: switching to a crop size must not leave binning armed against the
 	 * new crop window -- see ov5647.c's ORDERING TRAP note in the file header.
@@ -1003,6 +1065,31 @@ ZTEST(ov5647, test_set_format_switch_never_leaves_binning_on_crop_window)
 	              "0x4004 = 0x%02x after 1920x1080, want the crop path's own 0x%02x",
 	              val,
 	              BLC_CROP_4004_VAL);
+
+	/* Re-arm from 1280x960 and switch STRAIGHT to the generic crop path -- the block above
+	 * only exercised 640x480 -> 1920x1080, which was ALREADY at the power-on default before
+	 * that switch (this test's earlier 1280x960 -> 640x480 block reset it). This is the
+	 * generic crop path's OWN independent writeback, a separate code path from the 640x480
+	 * block, starting from the armed 16/8 value (fix-first review, issue #2286 BLOCKER).
+	 */
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1280x960));
+	zassert_ok(video_set_format(ov5647_dev(), &fmt_1920x1080));
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_X_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_X_OFFSET_DEFAULT,
+	              "0x3811 = 0x%02x after switching 1280x960 -> 1920x1080 (crop), want the "
+	              "power-on default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_X_OFFSET_DEFAULT,
+	              BINNED1280_X_OFFSET);
+	zassert_ok(ov5647_emul_get_reg(emul, REG_TIMING_ISP_Y_OFFSET, &val));
+	zassert_equal(val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              "0x3813 = 0x%02x after switching 1280x960 -> 1920x1080 (crop), want the "
+	              "power-on default 0x%02x, not the binned mode's 0x%02x left armed",
+	              val,
+	              ISP_Y_OFFSET_DEFAULT,
+	              BINNED1280_Y_OFFSET);
 
 	/* Switching back to 640x480 must re-apply the binned set, not leave the 1:1 crop
 	 * values from the size in between. */

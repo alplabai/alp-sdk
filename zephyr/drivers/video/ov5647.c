@@ -165,7 +165,9 @@
  * 2x2 in analog (0x3814/0x3815 = 0x31 -- 2x2 bin only, NOT the heavier ~/4 decimation
  * OV5647_SUBSAMPLE_BINNED = 0x35 that 640x480 uses), and crops the resulting 1296x972 binned
  * image down to the delivered 1280x960 via the ISP offset registers (0x3811/0x3813, the FIRST
- * mode in this driver to write them explicitly -- see OV5647_BINNED1280_X_OFFSET's comment).
+ * mode in this driver to need a non-default value for them -- every other mode now re-asserts
+ * their power-on default explicitly instead of relying on it unwritten, see
+ * OV5647_BINNED1280_X_OFFSET's comment).
  * Register VALUES are taken as hardware facts from the SAME RPi/OmniVision reference family as
  * DIVERGENCE #3 above, this time its OWN 2x2-binned full-FOV mode (raspberrypi/linux rpi-6.12.y
  * drivers/media/i2c/ov5647.c, the reg_list its ov5647_modes[] names for a 1296x972 output) --
@@ -174,10 +176,12 @@
  * PLL STAYS GLOBAL, deliberately (unlike the reference, which runs this mode at its OWN
  * PLL/pixel_rate, 87500000 -- see OV5647_PLL_PREDIV/MULT/SYS_DIV's own comment): this driver
  * keeps ONE ov5647_init_regs[] PLL write for every mode, run 61's bench-proven 58333333. HTS 1896
- * (OV5647_HTS_1280X960_BINNED) is used UNSCALED from the reference despite that PLL difference
- * because the arithmetic happens to cancel almost exactly -- see that macro's own comment for the
- * derivation and why the AEC band-step line counts below are therefore also the reference's OWN
- * 296/246, not rescaled the way the crop path's band step needs to be.
+ * (OV5647_HTS_1280X960_BINNED) is used UNSCALED from the reference despite that PLL difference,
+ * which makes this mode's real line time 32.503 us (1896 / 58333333) -- 1.5x the reference's OWN
+ * binned-mode line time (1896 / 87500000 = 21.669 us), NOT a match to it; see that macro's own
+ * comment for why 32.503 us instead coincides with an UNRELATED reference number (its
+ * full-resolution line time) and why the AEC band-step line counts below are therefore recomputed
+ * for THIS driver's line time (308/256), not the reference's own binned-mode 296/246.
  *
  * NO BENCH EVIDENCE YET for this mode (issue #2286 Stage B) -- register values are re-derived
  * from the reference and this driver's own established per-mode arithmetic (the same coherent-
@@ -264,7 +268,12 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
  * The read-out window is wider and taller than the output window by this many pixels, which the
- * ISP crops back off using the offsets at 0x3810..0x3813 left at their power-on values.
+ * ISP crops back off using the offsets at 0x3810..0x3813, all four of which stay at their
+ * power-on values here -- 0x3811/0x3813 are the two of those four the driver DOES write, but only
+ * away from this margin's own 640x480/crop-path use: back to their power-on default
+ * (OV5647_TIMING_ISP_X_OFFSET_DEFAULT/OV5647_TIMING_ISP_Y_OFFSET_DEFAULT) in every mode except the
+ * 1280x960 2x2-binned one, which needs a non-default crop (see OV5647_BINNED1280_X_OFFSET's
+ * comment).
  */
 #define OV5647_WINDOW_MARGIN 8
 
@@ -488,18 +497,27 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
  * ISP crop offset (issue #2286 Stage B) -- the FIRST mode in this driver to write 0x3811/0x3813
- * explicitly; every other mode leaves them at their power-on default (see OV5647_WINDOW_MARGIN's
- * comment) because its margin is small (8px at 640x480) or the driver-wide crop path centres its
- * own window before reaching them at all. The 2x2-binned window above reads out as 1312x978
- * after binning; cropped to the delivered 1280x960 that leaves a 32x18 margin -- too large to
- * trust to an unverified power-on default. Offsets are centred (16 of the 32px X margin, 8 of the
- * 18px Y margin) and kept EVEN to preserve the BGGR Bayer phase: an odd crop offset shifts which
- * rows/columns the R/B filters fall on, silently changing the CFA the ISP downstream assumes.
+ * to anything other than their power-on default. The 2x2-binned window above reads out as
+ * 1312x978 after binning; cropped to the delivered 1280x960 that leaves a 32x18 margin -- too
+ * large to trust to an unverified power-on default. Offsets are centred (16 of the 32px X margin,
+ * 8 of the 18px Y margin) and kept EVEN to preserve the BGGR Bayer phase: an odd crop offset
+ * shifts which rows/columns the R/B filters fall on, silently changing the CFA the ISP downstream
+ * assumes. Every OTHER mode now writes these two BACK to their datasheet power-on values
+ * (OV5647_TIMING_ISP_X_OFFSET_DEFAULT/OV5647_TIMING_ISP_Y_OFFSET_DEFAULT below) as part of its own
+ * coherent register block -- this mode is not the driver's only writer of 0x3811/0x3813, only the
+ * first to write a NON-default value to them, so a prior 1280x960 selection can never leave this
+ * mode's offsets armed against a 640x480 or crop-path window (BLOCKER, issue #2286 review).
  */
 #define OV5647_TIMING_ISP_X_OFFSET OV5647_REG8(0x3811)
 #define OV5647_TIMING_ISP_Y_OFFSET OV5647_REG8(0x3813)
 #define OV5647_BINNED1280_X_OFFSET 16
 #define OV5647_BINNED1280_Y_OFFSET 8
+/* Datasheet power-on values for 0x3811/0x3813 -- every mode other than the 1280x960 2x2-binned
+ * one above re-asserts these explicitly rather than trusting the sensor's own reset default,
+ * since a prior 1280x960 selection leaves 16/8 programmed in the register file.
+ */
+#define OV5647_TIMING_ISP_X_OFFSET_DEFAULT 0x04
+#define OV5647_TIMING_ISP_Y_OFFSET_DEFAULT 0x02
 
 /*
  * Subsample/bin increment for the NEW 1280x960 mode (issue #2286 Stage B) -- plain 2x2 binning,
@@ -514,22 +532,30 @@ LOG_MODULE_REGISTER(video_ov5647, CONFIG_VIDEO_LOG_LEVEL);
  * HTS for its 2x2-binned mode, used UNSCALED despite this driver's global PLL differing from the
  * reference's own PLL for that mode (87500000 vs this driver's 58333333, run 61's bench-proven
  * value -- see ov5647_hts_for() and the file header for why the PLL itself stays global, not
- * per-mode). This is safe by construction, not coincidence: 58333333 = 87500000 * 2/3 exactly and
- * 1896 = 2844 * 2/3 exactly (2844 being the reference's OWN full-resolution HTS, the same
- * HTS/pixel_rate pair the crop path's AEC-band comment near ov5647_set_mode_regs() already cites)
- * -- so the ratio cancels and this mode's line time (1896 / 58333333 = 32.503 us) lands within
- * 0.02% of the reference's own (2844 / 87500000 = 32.497 us). That is also why the AEC band-step
- * line counts below are the reference's OWN 296/246 lines, effectively unscaled -- unlike the
- * crop path's band step, whose HTS/pixel_rate pair has no such coincidental ratio and DOES need
- * real rescaling (see that comment for the arithmetic this mode's near-1.0 ratio does not need).
+ * per-mode). Unscaled HTS at a DIFFERENT PLL means a DIFFERENT line time, not the same one: at
+ * the reference's own PLL this HTS gives its OWN binned-mode line time, 1896 / 87500000 = 21.669
+ * us; at this driver's PLL the same HTS gives 1896 / 58333333 = 32.503 us, 1.5x longer. That
+ * 32.503 us figure happens to land within 0.02% of a DIFFERENT reference number -- the
+ * reference's OWN full-resolution line time (HTS 2844 / pixel_rate 87500000 = 32.497 us, the same
+ * pair the crop path's AEC-band comment near ov5647_set_mode_regs() already cites) -- because
+ * 2844 = 1896 * 1.5 exactly and 87500000 / 58333333 = 1.5 (to rounding). That is a numeric
+ * coincidence between two UNRELATED reference modes, not evidence this mode runs at the
+ * reference's own binned timing. Because the real line time here is 32.503 us, not the
+ * reference's own 21.669 us, the AEC band-step line counts below are NOT the reference's own
+ * 296/246 lines -- they are recomputed for this driver's actual line time (see
+ * OV5647_AEC_BAND_50HZ_1280X960BIN's comment), the same real-time-preserving rescale the crop
+ * path's own band step needs (see that comment for the arithmetic).
  */
 #define OV5647_HTS_1280X960_BINNED 1896 /* 0x0768 */
 
-/* 50/60 Hz AEC band step for the NEW 1280x960 mode, in LINES -- see OV5647_HTS_1280X960_BINNED's
- * comment above for why these are the reference's own 296/246, not rescaled.
+/* 50/60 Hz AEC band step for the NEW 1280x960 mode, in LINES -- recomputed for this driver's
+ * actual 32.503 us line time (OV5647_HTS_1280X960_BINNED's comment above), NOT the reference's
+ * own 296/246 (those are the reference's binned-mode line count at ITS 21.669 us line, the wrong
+ * real-time period at this driver's line time): 10 ms / 32.503 us = 307.66 -> 308 (50 Hz
+ * half-period) and 8.333 ms / 32.503 us = 256.36 -> 256 (60 Hz half-period).
  */
-#define OV5647_AEC_BAND_50HZ_1280X960BIN 296U /* 0x3a08/0x3a09 = 0x01/0x28 */
-#define OV5647_AEC_BAND_60HZ_1280X960BIN 246U /* 0x3a0a/0x3a0b = 0x00/0xf6 */
+#define OV5647_AEC_BAND_50HZ_1280X960BIN 308U /* 0x3a08/0x3a09 = 0x01/0x34 */
+#define OV5647_AEC_BAND_60HZ_1280X960BIN 256U /* 0x3a0a/0x3a0b = 0x01/0x00 */
 
 #define OV5647_ISP_CTRL3D          OV5647_REG8(0x503d)
 #define OV5647_TEST_PATTERN_ENABLE BIT(7)
@@ -860,10 +886,10 @@ static const uint32_t ov5647_framerates[] = { 10, 15, 30, 45, 60, 90, 120 };
  * OV5647_HTS_640X480_BINNED for exactly the 640x480 binned mode, OV5647_HTS_1280X960_BINNED for
  * exactly the 1280x960 binned mode (issue #2286 Stage B), OV5647_HTS_CROP for every other
  * (crop-path) size -- see the OV5647_HTS_640X480_BINNED/OV5647_HTS_1280X960_BINNED/OV5647_HTS_CROP
- * comments above for why HTS is per-mode, not one driver-wide constant. ov5647_set_ctrl_exposure()
- * clamps manual exposure to the ACTIVE mode's VTS (once issue #2277 lands) by reading this same
- * HTS back through ov5647_frmrate_to_vts()'s inverse, so a mode missing from this function also
- * mis-clamps exposure, not just the frame-rate math below.
+ * comments above for why HTS is per-mode, not one driver-wide constant. This is the single place
+ * any VTS-derived computation must read this mode's HTS from -- frame timing below, and any
+ * future exposure-limit logic that clamps to VTS -- so a mode missing from this function
+ * mis-derives ALL of those, not just the frame-rate math below.
  */
 static uint32_t ov5647_hts_for(uint32_t width, uint32_t height)
 {
@@ -932,6 +958,12 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 			{ OV5647_TIMING_Y_ADDR_END, OV5647_FULLFOV_Y_ADDR_END },
 			{ OV5647_TIMING_X_OUTPUT_SIZE, width },
 			{ OV5647_TIMING_Y_OUTPUT_SIZE, height },
+			/* Back to the datasheet power-on values -- undoes a prior 1280x960
+			 * 2x2-binned selection, which is the only mode that arms a non-default
+			 * crop here (see OV5647_TIMING_ISP_X_OFFSET_DEFAULT's comment).
+			 */
+			{ OV5647_TIMING_ISP_X_OFFSET, OV5647_TIMING_ISP_X_OFFSET_DEFAULT },
+			{ OV5647_TIMING_ISP_Y_OFFSET, OV5647_TIMING_ISP_Y_OFFSET_DEFAULT },
 			{ OV5647_TIMING_HTS_REG, OV5647_HTS_640X480_BINNED },
 			{ OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_BINNED },
 			{ OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_BINNED },
@@ -982,20 +1014,20 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 			{ OV5647_ANALOG_CTRL18, OV5647_ANALOG_CTRL18_BINNED },
 			{ OV5647_SENSOR_CTRL08, OV5647_SENSOR_CTRL08_BINNED },
 			{ OV5647_SENSOR_CTRL09, OV5647_SENSOR_CTRL09_2X2BINNED },
-			/* 50/60 Hz AEC band step, in LINES -- see OV5647_HTS_1280X960_BINNED's
-			 * comment for why these are the reference's own 296/246 lines, split into
-			 * CCI bytes here (296 does not fit one byte; 246 does, so its high byte is
-			 * 0). Max bands per frame (0x3a0d/0x3a0e) follow the same
-			 * floor(min-blanking-VTS/band) rule as the crop path
-			 * (ov5647_set_mode_regs()'s crop_min_vts computation below), computed from
-			 * this mode's own 960 + OV5647_VBLANK_MIN = 984: floor(984/246) = 4,
-			 * floor(984/296) = 3.
+			/* 50/60 Hz AEC band step, in LINES -- see OV5647_AEC_BAND_50HZ_1280X960BIN's
+			 * comment for why these are 308/256, recomputed for this driver's actual
+			 * line time rather than the reference's own 296/246, split into CCI bytes
+			 * here (both now exceed one byte, so both high bytes are 0x01). Max bands
+			 * per frame (0x3a0d/0x3a0e) follow the same floor(min-blanking-VTS/band)
+			 * rule as the crop path (ov5647_set_mode_regs()'s crop_min_vts computation
+			 * below), computed from this mode's own 960 + OV5647_VBLANK_MIN = 984:
+			 * floor(984/256) = 3, floor(984/308) = 3.
 			 */
 			{ OV5647_AEC_RSVD_3A08, OV5647_AEC_BAND_50HZ_1280X960BIN >> 8 },
 			{ OV5647_AEC_RSVD_3A09, OV5647_AEC_BAND_50HZ_1280X960BIN & 0xFF },
 			{ OV5647_AEC_RSVD_3A0A, OV5647_AEC_BAND_60HZ_1280X960BIN >> 8 },
 			{ OV5647_AEC_RSVD_3A0B, OV5647_AEC_BAND_60HZ_1280X960BIN & 0xFF },
-			{ OV5647_AEC_RSVD_3A0D, 4 },
+			{ OV5647_AEC_RSVD_3A0D, 3 },
 			{ OV5647_AEC_RSVD_3A0E, 3 },
 			/* Reference's own 2x2-binned 0x4004, same as the crop path's 0x04 -- NOT
 			 * 640x480's 0x02.
@@ -1039,6 +1071,12 @@ static int ov5647_set_mode_regs(const struct device *dev, uint32_t width, uint32
 	}
 
 	const struct video_reg regs[] = {
+		/* Back to the datasheet power-on values -- undoes a prior 1280x960 2x2-binned
+		 * selection, which is the only mode that arms a non-default crop here (see
+		 * OV5647_TIMING_ISP_X_OFFSET_DEFAULT's comment).
+		 */
+		{ OV5647_TIMING_ISP_X_OFFSET, OV5647_TIMING_ISP_X_OFFSET_DEFAULT },
+		{ OV5647_TIMING_ISP_Y_OFFSET, OV5647_TIMING_ISP_Y_OFFSET_DEFAULT },
 		{ OV5647_TIMING_HTS_REG, OV5647_HTS_CROP },
 		{ OV5647_TIMING_X_INC, OV5647_SUBSAMPLE_1TO1 },
 		{ OV5647_TIMING_Y_INC, OV5647_SUBSAMPLE_1TO1 },
