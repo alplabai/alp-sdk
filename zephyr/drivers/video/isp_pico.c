@@ -750,9 +750,9 @@ int isp_set_fmt(const struct device *dev,
  * 156) -- so isp_stream_start() (the call site, below) only calls
  * isp_apply_wb()/isp_apply_ae() when wb_dirty/ae_dirty is set
  * (isp_set_ctrl()'s dirty flags, isp_pico.h): any ctrl change sets the
- * flag, and ae_dirty additionally starts true (isp_init_controls()) so the
- * AE limits this sensor's calibration doesn't carry still get pushed at
- * the first stream start too. Patch 0009 also adds its OWN unconditional
+ * flag, and ae_dirty additionally starts true (isp_init_controls()) so
+ * the first stream start pushes the live, sensor-queried frame-period/
+ * gain ceilings too. Patch 0009 also adds its OWN unconditional
  * SetCalib call at isp_vsi_init() (init time), so SetCalib now runs at most
  * TWICE per boot -- once from patch 0009 at init, once from patch 0007's
  * once-guard at the first isp_vsi_update_cfg() -- never on a later restart.
@@ -921,6 +921,14 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
 	}
 }
 
+/*
+ * #2271: latched like isp_apply_wb()'s own LOG_ERR-worthy conditions --
+ * log the AE-attr readback mismatch once per episode (not every apply),
+ * re-arm once a later readback agrees again. See isp_apply_ae()'s own
+ * readback block, below, for what this actually catches.
+ */
+static bool ae_readback_mismatch_logged;
+
 static int isp_apply_ae(const struct device *dev, bool enable)
 {
 	const struct isp_config *config = dev->config;
@@ -933,8 +941,8 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	 * pixel_rate, bench run 61) = 66514155 ns.
 	 */
 	uint32_t int_time_max_us = 66514;
-	uint32_t again_min = 1024;   /* library units, 1x = 1024 */
-	uint32_t again_max = 16368;  /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
+	uint32_t again_min       = 1024;  /* library units, 1x = 1024 */
+	uint32_t again_max       = 65472; /* (1023 OV5647 AGC_GAIN max) * 1024 / 16 */
 
 	if (!IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE)) {
 		return 0;
@@ -1046,6 +1054,78 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 
 	if (ret) {
 		LOG_ERR("Failed to %s AE: %d", enable ? "enable" : "disable", ret);
+	}
+
+	/*
+	 * #2271 proof-of-effect: read back what the library is ACTUALLY
+	 * holding, not just what this call pushed -- bench evidence (runs
+	 * 211/212) was isp_apply_ae() computing a correct ceiling while a
+	 * per-frame writeback (hal_alif patch 0010's clamp) still saturated
+	 * against a DIFFERENT, mismatched ceiling (isp_calib_param.ae,
+	 * isp_param_conf.h, loaded by SetCalib() before this function ever
+	 * ran). Those two runs' values decode exactly against the
+	 * calibration's AE block; with hal_alif patch 0011 (OV5647 calib
+	 * envelope) applied, bench run 213 held within the sensor's real
+	 * envelope (int_time_max=98000 again_max=65472, intLine settling at
+	 * 3145/again 0xffc0 in a dark room) with 0 clamp-triggered
+	 * `E: Control value is invalid` lines -- but which ceiling the
+	 * library actually applies (this push, the calibration block, or
+	 * something else) is NOT established by this readback: the library
+	 * likely just echoes back the struct it was handed, so a "matches"
+	 * result here proves this driver's push round-trips, not that the
+	 * library is ENFORCING it. Same valid_mask-before-get pattern
+	 * isp_apply_wb() uses above: ISP_PARAM_MASK_AE must be set BEFORE
+	 * the get, or isp_vsi_get_param()'s wrapper (isp_api_wrapper.c)
+	 * silently leaves every field zeroed. Only attempted when the push
+	 * itself succeeded -- a failed set already logged above, and a
+	 * readback under a not-yet-applied push would just report the
+	 * library's PRIOR state, not a new mismatch.
+	 */
+	if (ret == 0) {
+		struct isp_params rb = { .valid_mask = ISP_PARAM_MASK_AE };
+		int               rb_ret;
+
+		k_mutex_lock(&data->lib_lock, K_FOREVER);
+		rb_ret = isp_vsi_get_param(&data->init_cfg, &rb);
+		k_mutex_unlock(&data->lib_lock);
+
+		if (rb_ret) {
+			LOG_WRN("AE attr readback failed: %d", rb_ret);
+		} else {
+			bool matches = (rb.ae.int_time_max == params.ae.int_time_max) &&
+			               (rb.ae.again_max == params.ae.again_max) &&
+			               (rb.ae.dgain_min == params.ae.dgain_min) &&
+			               (rb.ae.dgain_max == params.ae.dgain_max) &&
+			               (rb.ae.ae_target == params.ae.ae_target);
+
+			LOG_INF("AE readback: int_time_max=%u again_max=%u dgain_min=%u "
+			        "dgain_max=%u ae_target=%u",
+			        rb.ae.int_time_max,
+			        rb.ae.again_max,
+			        rb.ae.dgain_min,
+			        rb.ae.dgain_max,
+			        rb.ae.ae_target);
+
+			if (!matches && !ae_readback_mismatch_logged) {
+				LOG_ERR("AE attr mismatch after set: pushed int_time_max=%u "
+				        "again_max=%u dgain_min=%u dgain_max=%u ae_target=%u, "
+				        "library holds int_time_max=%u again_max=%u "
+				        "dgain_min=%u dgain_max=%u ae_target=%u",
+				        params.ae.int_time_max,
+				        params.ae.again_max,
+				        params.ae.dgain_min,
+				        params.ae.dgain_max,
+				        params.ae.ae_target,
+				        rb.ae.int_time_max,
+				        rb.ae.again_max,
+				        rb.ae.dgain_min,
+				        rb.ae.dgain_max,
+				        rb.ae.ae_target);
+				ae_readback_mismatch_logged = true;
+			} else if (matches) {
+				ae_readback_mismatch_logged = false;
+			}
+		}
 	}
 
 	return ret;
@@ -1230,12 +1310,12 @@ static int isp_init_controls(const struct device *dev)
 		if (ret) {
 			return ret;
 		}
-		/* The calibration carries no AE target, integration-time or
-		 * gain range for this sensor: isp_apply_ae() derives them from
-		 * CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's own ctrls, so
-		 * the first stream start must push them even at the default.
-		 * Without it AE drives the OV5647 past its exposure limit and
-		 * saturates the frame (bench run 157).
+		/* ae_dirty starts true so the first stream start pushes the
+		 * live, sensor-queried frame-period/gain ceilings isp_apply_ae()
+		 * derives from CONFIG_VIDEO_ISP_VSI_AE_TARGET and the sensor's
+		 * own ctrls, even at the default. Without it AE drives the
+		 * OV5647 past its exposure limit and saturates the frame
+		 * (bench run 157).
 		 */
 		data->ctrls.ae_dirty = true;
 	}
@@ -1616,22 +1696,22 @@ static int isp_stream_start(const struct device *dev)
 	isp_apply_mrsz(dev, channel->output_fmt.pixelformat, channel->output_fmt.height);
 
 	/*
-	 * Runs for any ctrl the app changed (isp_set_ctrl()), plus AE once at
-	 * the first start (isp_init_controls(): the calibration has no AE
-	 * limits for this sensor). Default AWB needs no call at all -- the
-	 * calibration already runs it (patch 0009, runs 153/156). Right
-	 * here, synchronously, after isp_vsi_start()'s Enable* above, is the
-	 * one proven-working order (run 74): the AWB/AE callbacks aren't live
+	 * WB: runs only for a ctrl the app actually changed (isp_set_ctrl()'s
+	 * wb_dirty) -- default AWB needs no call at all, the calibration
+	 * already runs it (patch 0009, runs 153/156). Right here,
+	 * synchronously, after isp_vsi_start()'s Enable* above, is the one
+	 * proven-working order (run 74): the AWB/AE callbacks aren't live
 	 * until Enable* runs, so an apply issued before it would just be
 	 * dropped. SetCalib (isp_vsi_update_cfg(), above) itself now runs at
 	 * most twice per boot -- once at init (patch 0009), once at the
 	 * first isp_vsi_update_cfg() (patch 0007's once-guard) -- never on a
 	 * later restart, so this apply doesn't need to fight a reload; it
 	 * just needs Enable* to have already happened. isp_stream_start()
-	 * only ever runs while stopped
-	 * (guarded at the top of this function), so this is also exactly
-	 * "the next stream start while the ISP is stopped" a mid-stream ctrl
-	 * change waits for (see isp_set_ctrl()'s ponytail comment).
+	 * only ever runs while stopped (guarded at the top of this
+	 * function), so this is also exactly "the next stream start while
+	 * the ISP is stopped" a mid-stream ctrl change waits for (see
+	 * isp_set_ctrl()'s ponytail comment). AE below applies the same way,
+	 * gated on ae_dirty, which starts true (isp_init_controls()).
 	 */
 	if (data->ctrls.wb_dirty) {
 		bool wb_enable = (data->ctrls.awb.val != 0);
