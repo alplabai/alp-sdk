@@ -77,9 +77,11 @@ This is a teaching example, not a production camera server:
   `mjpeg_http_publish_frame()` drops the newly-encoded frame outright if
   a `/stream` client is still mid-send of the previous one (see
   `src/mjpeg_http.c`'s file header) -- so the achievable rate is roughly
-  `1 / (t_encode + t_send)`, not the camera's requested 15 fps. Run
-  205's 10 fps at 640×480 (~37 KB/frame) is a real measurement of that,
-  not a target this example tries to hit.
+  `1 / (t_encode + t_send)`, not the camera's requested 30 fps (raised
+  from 15 fps; unmeasured at 30 -- bench pending, no run yet covers this
+  request). Run 205's 10 fps at 640×480 (~37 KB/frame) is a real
+  measurement of that at the OLD 15 fps request, not a target this
+  example tries to hit.
 
 **Fixed since run 205:** the bottom two rows of every frame rendered solid
 green -- an ISP main-resizer chroma-row rounding bug (`ISP_MRSZ_SCALE_VC`
