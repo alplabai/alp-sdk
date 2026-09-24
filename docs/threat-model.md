@@ -118,8 +118,12 @@ In RF range; can advertise/scan but not pair without consent.
 **Mitigations:**
 
 - BLE adv parser fuzzed (above).
-- Pairing requires user-confirmed bonding; auto-pair disabled
-  by default in the SDK's BLE backend.
+- Pairing/bonding policy is application-owned: the SDK's BLE
+  surface registers no auth callbacks of its own, so a
+  product's pairing posture comes from the Zephyr host stack
+  configuration (or the CC3501E firmware) the application
+  ships. Applications that need user-confirmed bonding must
+  enable it in that stack layer — the SDK does not enforce it.
 
 ### 3.3 Local I²C / I²S / UART attacker
 
@@ -183,8 +187,11 @@ keys, or insert a backdoored vendor library.
 - Release builds emit SLSA L3 provenance attestations per
   Pillar 8 of `docs/v1.0-readiness.md` (L2 landed in Â§C.18, upgraded
   to L3 in Â§C.27).
-- `keys/.gitignore` excludes every `*.pem` file; only the
-  generator script + README live in the keys dir.
+- `keys/.gitignore` excludes every `*.pem` file except
+  `*.pub.pem`; only the generator script, the README, and the
+  release-signing PUBLIC key
+  (`alp_release_signing_ecdsa_p256.pub.pem`) live in the keys
+  dir.
 - Production signing key never leaves the OPTIGA secure NVM;
   the SDK ships only the pub-key bytes compiled into MCUboot.
 

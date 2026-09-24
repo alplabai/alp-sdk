@@ -80,8 +80,9 @@ signatures), if you have one in mind.
    Run the pinned version locally to match CI exactly (`pyenv`/`uv`
    pick it up automatically); `tan doctor`'s `python` check is a
    presence probe only (no pin comparison).
-6. Open a PR; CI runs the AEN-Zephyr, AEN-baremetal, and V2N-Yocto
-   matrices.  CI green is necessary but not sufficient for tagging
+6. Open a PR; CI runs the AEN-Zephyr (`pr-twister-aen`) and
+   V2N-Yocto (`pr-bitbake`) matrices, plus the cross-platform
+   Zephyr build gate.  CI green is necessary but not sufficient for tagging
    a release -- the test-plan row also has to flip to `✅`.
 
 For the full branching topology, merge methods, PR gates,
