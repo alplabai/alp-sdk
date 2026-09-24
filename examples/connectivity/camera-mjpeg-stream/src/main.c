@@ -66,14 +66,14 @@
  * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG scales with this
  * same symbol; see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the
  * AEN video buffer pool is sized for 640x480, and
- * boards/overlay-1280x960-aen803.conf for the 1280x960 sizing.
+ * boards/overlay-1280x960.conf for the 1280x960 sizing.
  *
  * 1280x960 @ 15 fps is the OV5647's EXISTING centre-crop mode (no sensor
  * register-table change, ov5647.c) -- the field of view is the centre crop,
  * not a full-sensor 2x2-binned mode (that is Stage B, tracked separately).
  * 15 fps, not 30: two 1,843,200 B NV12 frames already consume most of the
  * AEN's 4 MiB SRAM0 bank alongside the JPEG output buffers (see
- * boards/overlay-1280x960-aen803.conf), leaving no SRAM0 budget for the
+ * boards/overlay-1280x960.conf), leaving no SRAM0 budget for the
  * synthetic-frame fallback below -- CAMERA_MJPEG_STREAM_1280X960 compiles
  * that fallback path out entirely, not just moves it. */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
@@ -85,7 +85,7 @@
  * quality 80 (the 640x480 default below) blew MJPEG_HTTP_MAX_JPEG
  * (mjpeg_http.h, 160 KiB) on every frame once AE converged past the
  * first ~12 dark ones, and 160 KiB has no SRAM0 headroom left to grow
- * (98.5% bank usage, see boards/overlay-1280x960-aen803.conf). 60 keeps
+ * (98.5% bank usage, see boards/overlay-1280x960.conf). 60 keeps
  * a typical frame well under the cap; a frame that still overflows at
  * 60 retries once at JPEG_QUALITY_FLOOR (jpeg_quality_ladder.h) rather
  * than being dropped outright.
@@ -140,7 +140,7 @@
  * DROPPED ENTIRELY at 1280x960 (issue #2286 Stage A): a second
  * JPEG_DMA_MEM buffer at this size (1,843,200 B) has no SRAM0 budget left
  * once the two real ISP buffers and the two ~160 KiB JPEG output buffers
- * are paid for -- see boards/overlay-1280x960-aen803.conf. A real camera
+ * are paid for -- see boards/overlay-1280x960.conf. A real camera
  * that stalls at this resolution therefore has no fallback frame to serve;
  * the capture loop just keeps retrying instead (see the main loop below). */
 #if !defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
@@ -487,16 +487,27 @@ int main(void)
 			alp_status_t erc       = alp_jpeg_encode(
 			    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
 
-			/* Bounded ladder, ONE retry: the Hantro backend's output-buffer
-			 * overrun (-ENOSPC JPEG_BUFFER_FULL) maps to ALP_ERR_NOMEM
-			 * (src/common/alp_errno.h) -- re-encode the SAME frame at a
-			 * lower quality rather than drop it outright (issue #2286
-			 * bench run 242). req.quality > JPEG_QUALITY_FLOOR guards
-			 * against retrying with the exact quality that just failed,
-			 * which jpeg_quality_step_down()'s floor would otherwise do. */
-			if (erc == ALP_ERR_NOMEM && req.quality > JPEG_QUALITY_FLOOR) {
+			/* Bounded ladder, ONE retry -- gated on out_len, not just the
+			 * error code: alp_jpeg_encode() returns ALP_ERR_NOMEM for
+			 * more than one backend-internal reason (src/backends/jpeg/
+			 * alif_hantro.c) -- the Hantro backend's output-buffer overrun
+			 * (done->bytesused > out_cap) sets *out_len to the REQUIRED
+			 * size on that specific path, but a pool-exhaustion NOMEM
+			 * (video_import_buffer() -ENOBUFS, no free pool slot) leaves
+			 * out_len at its prior value (0 on the first attempt) --
+			 * re-encoding at a lower quality only helps the former, so
+			 * out_len > JPEG_OUT_CAP is the signal this checks, not the
+			 * error code alone (issue #2286 bench run 242). req.quality >
+			 * JPEG_QUALITY_FLOOR guards against retrying with the exact
+			 * quality that just failed, which jpeg_quality_step_down()'s
+			 * floor would otherwise do. Bench run 243 never exercised this
+			 * ladder on real silicon: 0 retries, every frame encoded
+			 * under cap at quality 60 on the first attempt. */
+			if (erc == ALP_ERR_NOMEM && out_len > JPEG_OUT_CAP &&
+			    req.quality > JPEG_QUALITY_FLOOR) {
 				encode_retry_count++;
 				req.quality = jpeg_quality_step_down(req.quality);
+				out_len     = 0;
 				erc         = alp_jpeg_encode(
 				    jpeg, &req, mjpeg_http_claim_write_buffer(), JPEG_OUT_CAP, &out_len);
 			}

@@ -27,10 +27,11 @@
  *  160 KiB at 1280x960 (CONFIG_CAMERA_MJPEG_STREAM_1280X960, issue #2286
  *  Stage A): four times the pixel count scales worst-case JPEG size
  *  roughly with it, and 160 KiB keeps 2x this buffer inside the SRAM0
- *  budget boards/overlay-1280x960-aen803.conf works out alongside the
+ *  budget boards/overlay-1280x960.conf works out alongside the
  *  (also larger) raw ISP buffer pool -- see that file for the full
- *  SRAM0 accounting. Not yet bench-measured at this resolution; revisit
- *  once a real capture run reports actual JPEG sizes. */
+ *  SRAM0 accounting. Bench run 243 (E1M-AEN803 2026W36-0001) measured
+ *  131-135 KB JPEGs at quality 60 -- comfortably under this cap, 0
+ *  buffer-full. */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 #define MJPEG_HTTP_MAX_JPEG 163840u
 #else

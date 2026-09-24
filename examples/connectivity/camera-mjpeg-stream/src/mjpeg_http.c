@@ -256,12 +256,13 @@ static void handle_stream(int sock)
 	uint32_t last_seq = 0; /* 0 never equals a real seq (first publish makes it 1) */
 
 	/* One part per NEWLY PUBLISHED frame -- wait_and_claim() blocks (up to
-	 * IDLE_TIMEOUT_S) until seq advances, so a slow camera loop paces this
-	 * loop too; it never resends a frame the client has already seen.
-	 * Runs until the client goes away (send_all fails, e.g. SO_SNDTIMEO
-	 * expires or it closed the connection) or the capture loop stalls for
-	 * IDLE_TIMEOUT_S -- never a fixed frame count, so VLC/ffmpeg/a browser
-	 * can watch indefinitely as long as frames keep arriving. */
+	 * STREAM_STALL_TIMEOUT_S) until seq advances, so a slow camera loop
+	 * paces this loop too; it never resends a frame the client has
+	 * already seen. Runs until the client goes away (send_all fails, e.g.
+	 * SO_SNDTIMEO expires or it closed the connection) or the capture
+	 * loop stalls for STREAM_STALL_TIMEOUT_S -- never a fixed frame
+	 * count, so VLC/ffmpeg/a browser can watch indefinitely as long as
+	 * frames keep arriving. */
 	for (;;) {
 		uint8_t *buf;
 		size_t   len;

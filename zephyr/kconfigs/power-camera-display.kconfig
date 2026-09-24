@@ -157,9 +157,16 @@ config ALP_SDK_CAMERA_ALIF_ISP_VBUF_COUNT
 	  header for why 3 is the default: with only 2, the buffer an app
 	  holds between alp_camera_capture() and alp_camera_release() (or
 	  the one this backend holds during an internal RGB565 conversion)
-	  leaves just ONE buffer queued to the MI, which starves and
-	  auto-stops the stream every frame.  Each buffer is width x
-	  height x 1.5 bytes (NV12/YUV420) or x2 (RGB565) from the Zephyr
+	  leaves just ONE buffer queued to the MI while it is held -- safe
+	  only as long as that hold time (an NV12-passthrough app's JPEG
+	  encode, plus at most one lower-quality retry -- ~2 ms typical on
+	  the Hantro backend, see examples/connectivity/camera-mjpeg-
+	  stream's bench run 243) stays MUCH SHORTER than the frame period,
+	  so the MI's other queued buffer is refilled and re-queued well
+	  before the next capture is due; a hold time that creeps toward
+	  the frame period starves the MI and auto-stops the stream.  Each
+	  buffer is width x height x 1.5 bytes (NV12/YUV420) or x2
+	  (RGB565) from the Zephyr
 	  video buffer pool (CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE) -- at a
 	  large enough frame size (e.g. 1280x960 NV12, 1,843,200 B/buffer)
 	  3 buffers no longer fit the 4 MiB AEN SRAM0 bank alongside the
