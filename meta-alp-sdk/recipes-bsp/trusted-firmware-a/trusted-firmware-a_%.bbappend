@@ -2,10 +2,14 @@
 # BL2 for the Renesas TF-A (trusted-firmware-a) build.
 #
 # The ONLY ALP-custom bootloader content is the BL2 DDR parameters: the
-# `alp` LPDDR4X config (L4X.R2W32X16D16S32.ADEE) generated from the SoM's
-# memory layout via Renesas gen_tool v3.0.2 / AN R01AN7349. Everything else
-# (BL31 + U-Boot/FIP, PLAT=v2n BOARD=evk_1, the PMIC-removal + ether-setting
-# U-Boot patches) is STOCK Renesas BSP.
+# `alp` LPDDR4X config (L4X.R2W32X16D16S32.ADEE, 8 GB) generated from the SoM's
+# memory layout via Renesas gen_tool v3.0.2 / AN R01AN7349. The E1M-V2N103 and
+# E1M-V2M103 4 GB / 16 GB memory-tier SKUs need the 2-rank/8 Gb-per-channel
+# sibling config (L4X.R2W32X16D8S32.ADEE) instead -- SKU-scoped below via
+# ALP_TFA_DDR_SRC, keyed on the exact x103 MACHINE names so it can never be
+# picked up by the v2n101/v2m101 8 GB SKUs those MACHINEs also override.
+# Everything else (BL31 + U-Boot/FIP, PLAT=v2n BOARD=evk_1, the PMIC-removal +
+# ether-setting U-Boot patches) is STOCK Renesas BSP.
 #
 # This bbappend drops the alp DDR param file over the stock v2n one before
 # compile. Validated artifact: BL2 brings DDR up to 7.9 GiB and boots
@@ -13,21 +17,30 @@
 # recipe already pins for rzv2n-family).
 #
 # PUBLIC / PRIVATE SPLIT: this bbappend (the recipe logic) is PUBLIC -- it is
-# not sensitive. The DDR param SOURCE (ddr_param_def_lpddr4-alp.c) is
-# Renesas-gen_tool-derived, SoM-hardware-specific config and is NOT in this
-# public repo. It is supplied at build time by the private
-# `alp-sdk-internal/meta-alp-sdk` overlay layer (placed at higher BBLAYERS
-# priority), which carries the file in this recipe's ${PN} dir so the SRC_URI
-# below resolves to it via FILESEXTRAPATHS. A public-only build (without the
-# overlay) fails fast in the bbfatal below. The prebuilt bl2/fip likewise live
-# in alp-sdk-internal (production-flashed onto the SoM xSPI by ALP; the
-# customer's normal flow never rebuilds the bootloader).
+# not sensitive. The DDR param SOURCES (ddr_param_def_lpddr4-alp.c and
+# ddr_param_def_lpddr4-alp-d8s32.c) are Renesas-gen_tool-derived,
+# SoM-hardware-specific config and are NOT in this public repo. They are
+# supplied at build time by the private `alp-sdk-internal/meta-alp-sdk`
+# overlay (rsync'd onto this public layer tree -- see that repo's
+# conf/bblayers-overlay.md), which carries both files in this recipe's ${PN}
+# dir so the SRC_URI below resolves them via FILESEXTRAPATHS. A public-only
+# build (without the overlay) fails fast in the bbfatal below. The prebuilt
+# bl2/fip likewise live in alp-sdk-internal (production-flashed onto the SoM
+# xSPI by ALP; the customer's normal flow never rebuilds the bootloader).
 #
 # STATUS: UNVALIDATED through bitbake (the equivalence-to-manual pass is pending).
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
-SRC_URI:append:rzv2n-family = " file://ddr_param_def_lpddr4-alp.c"
+# DDR param source file: 8 GB/D16S32 by default, 4 GB/D8S32 for the two x103
+# memory-tier MACHINEs. Keyed on the exact MACHINE name (not on a shared
+# override like e1m-v2m101-a55/e1m-v2n101-a55) so it can't be pulled in by any
+# other SKU those two MACHINEs' MACHINEOVERRIDES chains also list.
+ALP_TFA_DDR_SRC ?= "ddr_param_def_lpddr4-alp.c"
+ALP_TFA_DDR_SRC:e1m-v2n103-a55 = "ddr_param_def_lpddr4-alp-d8s32.c"
+ALP_TFA_DDR_SRC:e1m-v2m103-a55 = "ddr_param_def_lpddr4-alp-d8s32.c"
+
+SRC_URI:append:rzv2n-family = " file://${ALP_TFA_DDR_SRC}"
 
 # Reproducible / traceable BL2+BL31 version string.  TF-A's Makefile
 # derives BUILD_STRING from `git describe --always --dirty --tags` when
@@ -50,11 +63,11 @@ EXTRA_OEMAKE:append:rzv2n-family = " BUILD_STRING='${ALP_TFA_BUILD_STRING}'"
 ALP_TFA_DDR_DST ?= "plat/renesas/rz/soc/v2n/drivers/ddr/ddr_param_def_lpddr4.c"
 
 do_configure:append:rzv2n-family() {
-    if [ -f "${WORKDIR}/ddr_param_def_lpddr4-alp.c" ]; then
-        install -m 0644 "${WORKDIR}/ddr_param_def_lpddr4-alp.c" \
+    if [ -f "${WORKDIR}/${ALP_TFA_DDR_SRC}" ]; then
+        install -m 0644 "${WORKDIR}/${ALP_TFA_DDR_SRC}" \
             "${S}/${ALP_TFA_DDR_DST}"
-        bbnote "meta-alp-sdk: installed alp LPDDR4X DDR params into BL2"
+        bbnote "meta-alp-sdk: installed alp LPDDR4X DDR params (${ALP_TFA_DDR_SRC}) into BL2"
     else
-        bbfatal "meta-alp-sdk: ddr_param_def_lpddr4-alp.c missing -- supply it via the private alp-sdk-internal/meta-alp-sdk overlay (recipes-bsp/trusted-firmware-a/trusted-firmware-a/)"
+        bbfatal "meta-alp-sdk: ${ALP_TFA_DDR_SRC} missing -- supply it via the private alp-sdk-internal/meta-alp-sdk overlay (recipes-bsp/trusted-firmware-a/trusted-firmware-a/)"
     fi
 }

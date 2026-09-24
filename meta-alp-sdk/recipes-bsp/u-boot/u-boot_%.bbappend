@@ -86,6 +86,17 @@ SRC_URI:append:rzv2n-family = " \
 ALP_PROD_BOOT ?= "0"
 SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean(d.getVar('ALP_PROD_BOOT')) else ''}"
 
+# 4 GB / 16 GB memory-tier (x103) SDRAM-size + control-DT memory-node patch.
+# rzv2n-dev.h/.dts are shared source compiled identically for every
+# rzv2n-family MACHINE (CONFIG_TARGET_RZV2N_DEV, above) -- this patch is
+# selected by a MACHINE equality check, not an OVERRIDES suffix, so it can
+# never leak onto the 8 GB v2n101/v2m101 SKUs through their MACHINEOVERRIDES
+# inheritance chain (e1m-v2m103-a55 lists e1m-v2m101-a55 in its own
+# MACHINEOVERRIDES). It is a THIRD SRC_URI:append:rzv2n-family statement
+# (same override as 0001/0002 above), so it lands after them in the family's
+# SRC_URI list and do_patch applies it last, on top of both.
+SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55') else ''}"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;
