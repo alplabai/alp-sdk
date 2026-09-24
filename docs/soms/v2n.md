@@ -25,9 +25,9 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 | Primary PMIC            | Qorvo ACT88760-120.E1      | I2C `0x25/0x26`  | [`<alp/chips/act8760.h>`](../../include/alp/chips/act8760.h) |
 | Secondary PMIC          | Renesas DA9292             | I2C `0x1E`       | [`<alp/chips/da9292.h>`](../../include/alp/chips/da9292.h) |
 | Optional buck (LPDDR4X) | TI TPS628640 (1×, optional)| I2C `0x4D`       | [`<alp/chips/tps628640.h>`](../../include/alp/chips/tps628640.h) |
-| Clock generator         | Renesas / IDT 5L35023B     | I2C `0x68`       | [`<alp/chips/clk_5l35023b.h>`](../../include/alp/chips/clk_5l35023b.h) |
-| RTC                     | Micro Crystal RV-3028-C7   | I2C `0x52`       | [`<alp/chips/rv3028c7.h>`](../../include/alp/chips/rv3028c7.h) |
-| Temperature sensor      | TI TMP112                  | I2C `0x48`       | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
+| Clock generator         | Renesas / IDT 5L35023B     | I2C `0x69`       | [`<alp/chips/clk_5l35023b.h>`](../../include/alp/chips/clk_5l35023b.h) |
+| RTC                     | Micro Crystal RV-3028-C7   | I2C `0x52`       | Linux `/dev/rtc0` (kernel `rtc-rv3028`) -- see below |
+| Temperature sensor      | TI TMP112                  | I2C `0x40`       | [`<alp/chips/tmp112.h>`](../../include/alp/chips/tmp112.h) |
 | Secure element          | Infineon OPTIGA Trust M    | I2C `0x30`       | [`<alp/chips/optiga_trust_m.h>`](../../include/alp/chips/optiga_trust_m.h) |
 | EEPROM (SoM manifest)   | Onsemi N24S128             | I2C `0x50` (ALP_E1M_I2C0) | [`<alp/chips/eeprom_24c128.h>`](../../include/alp/chips/eeprom_24c128.h) |
 | Wi-Fi 6 + BLE 5.4       | Murata LBEE5HY2FY-922      | SDIO + UART + I2S | [`<alp/chips/murata_lbee5hy2fy.h>`](../../include/alp/chips/murata_lbee5hy2fy.h) |
@@ -39,6 +39,23 @@ All three SKUs share the same silicon + PCB.  Pick by memory budget.
 Full chip catalogue + manifest URLs:
 [`metadata/chips/`](../../metadata/chips/).
 Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../metadata/e1m_modules/).
+
+## Real-time clock
+
+The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is disabled in the SoM
+devicetree (`&rtc { status = "disabled"; };` in
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi`): no
+32.768 kHz crystal is fitted on this SoM (schematic crystal DNP), so
+probing it just times out. The on-module RV-3028-C7 is the RTC of
+record instead, bound as `/dev/rtc0` (kernel `rtc-rv3028`,
+`CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date` from userspace. **CA55
+(Linux) is the sole master of the whole RIIC8/BRD_I2C bus** the RTC and
+every other BRD_I2C device sit on
+(`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
+issue I2C transactions there. No `trickle-resistor-ohms` is configured
+(the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
+SoM's schematic) and the alarm INT line isn't wired to a kernel
+interrupt yet -- both are open follow-ups.
 
 ## Reach the GD32 supervisor
 
@@ -109,7 +126,6 @@ Both files are tab-delimited; consume directly or via
 | `v2n-board-id-readout`           | SoM EEPROM manifest read + SKU assertion.                   |
 | `v2n-ethernet-dual`              | Bring up both RTL8211FDI PHYs (ET0 + ET1); WoL configuration.|
 | `v2n-eeprom-manifest-dump`       | Hexdump + decode the 128-byte EEPROM manifest.              |
-| `v2n-rtc-multi-alarm`            | Multi-source callbacks on the rv3028c7 dispatcher.          |
 | `v2n-temp-sensor`                | TMP112 read loop -- classic starter app.                    |
 | `v2n-pwm-fan-control`            | Ramp a GD32-side PWM channel along a five-stop fan curve.   |
 | `v2n-secure-element-sign`        | OPTIGA Trust M I2C_STATE probe; APDU/product-info paths return `ALP_ERR_NOSUPPORT` today. |

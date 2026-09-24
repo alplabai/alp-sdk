@@ -122,6 +122,21 @@
 		regulator-always-on;
 	};
 
+	/* SD1 (carrier microSD, SDHI1) IO-voltage selector. It sits on the
+	 * SoM and feeds the SoC's SD1 VDDQ pad rail; &sdhi1 (e1m-x-evk.dtsi)
+	 * uses it as vqmmc-supply. Driven by PA2 (µSD1_V_SEL): low = 3.3 V,
+	 * high = 1.8 V; SEL has an internal pull-down, so it defaults to
+	 * 3.3 V. Bench-verified at 1.8 V up to SDR104 (see &sdhi1). */
+	vqmmc_sdhi1: regulator-vqmmc-sdhi1 {
+		compatible = "regulator-gpio";
+		regulator-name = "SDHI1 VqmmC";
+		gpios = <&pinctrl RZV2N_GPIO(A, 2) GPIO_ACTIVE_HIGH>;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <3300000>;
+		gpios-states = <0>;
+		states = <3300000 0>, <1800000 1>;
+	};
+
 	backlight: backlight {
 		compatible = "pwm-backlight";
 		pwms = <&gpt1_2 0 200000>;
@@ -252,6 +267,23 @@
  * line 1 = IO9/CTP1_INT (input only -- the GT911 drives it).
  * Same physical chip as the CM33's SCI7 SPI link peer; Linux only
  * issues short GPIO frames here.
+ *
+ * On-module real-time clock: Micro Crystal RV-3028-C7 at 0x52, also on
+ * BRD_I2C -- the RTC of record for the whole SoM family (bench-proven
+ * 2026-09-24: the SoC's own RTXIN/RTXOUT 32.768 kHz crystal is DNP on
+ * the E1M V2N-family SoM schematic, so &rtc below is disabled outright).
+ * No trickle-resistor-ohms is set: whether the RV-3028-C7's VBACKUP net
+ * carries a backup cap/coin cell on this SoM is not confirmed on the
+ * schematic -- add the property once that's known, don't guess it.
+ *
+ * CA55/Linux is the sole master of the WHOLE RIIC8/BRD_I2C bus -- every
+ * device on it, not just this one (metadata/e1m_modules/v2n/
+ * core-ownership.yaml). The CM33 must never issue I2C transactions here.
+ *
+ * FOLLOW-UP: rv3028c7.yaml's INT/v2n_route (RTC_ALARM) isn't wired to an
+ * `interrupts` property below -- the SoC-side pin/mux isn't confirmed
+ * yet. /dev/rtc0 alarm ioctls still work via poll/select without it; a
+ * wake-capable alarm needs that pin nailed down first.
  */
 &i2c8 {
 	gd32_gpio: gpio@70 {
@@ -260,6 +292,30 @@
 		gpio-controller;
 		#gpio-cells = <2>;
 	};
+
+	rv3028: rtc@52 {
+		compatible = "microcrystal,rv3028";
+		reg = <0x52>;
+	};
+};
+
+/ {
+	aliases {
+		/* BRD_I2C is a SoM-internal bus (RIIC8), not one of the E1M-X-EVK
+		 * carrier's own routed pins -- its Linux adapter alias lives here,
+		 * not in e1m-x-evk.dtsi's carrier-bus aliases block. */
+		i2c8 = &i2c8;
+		rtc0 = &rv3028;
+	};
+};
+
+/* SoC RTC (RTCA-3, RTXIN/RTXOUT): no 32.768 kHz crystal is fitted on the
+ * E1M V2N-family SoM (schematic crystal DNP) -- probing it just times
+ * out ("Failed to setup the RTC!", probe error -110). The on-module
+ * RV-3028-C7 above is the real RTC. It is disabled here, at the SoM
+ * layer, so no carrier dtsi can enable it. */
+&rtc {
+	status = "disabled";
 };
 
 /* On-module xSPI NOR. */

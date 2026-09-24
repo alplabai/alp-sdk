@@ -10,6 +10,13 @@
  * disagrees with the build's expected target -- this catches the
  * "wrong firmware on this board" class of incident before the
  * application code has a chance to mis-configure anything.
+ *
+ * KNOWN GAP: on V2N the EEPROM sits on ALP_E1M_I2C0 (Renesas RIIC0),
+ * a separate bus from BRD_I2C -- but the generated CM33 board files
+ * (scripts/gen_zephyr_board.py's `_v2n_dts()`) currently define no
+ * `alp-i2c0` alias / CONFIG_I2C for that bus, so alp_hw_info_read()
+ * below fails on real silicon until that alias lands (tracked; see
+ * v2n-eeprom-manifest-dump for the same gap).
  */
 
 #include <stdio.h>
