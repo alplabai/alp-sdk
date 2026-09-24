@@ -1399,6 +1399,58 @@ static int ov5647_set_ctrl_gain(const struct device *dev)
 	return video_write_cci_reg(&cfg->i2c, OV5647_AGC_GAIN, ctrls->gain.val);
 }
 
+/*
+ * #2277 (bench run 245): verbatim, sensor-side proof of what the ISP
+ * library actually landed in hardware -- independent of every hal_alif
+ * diag global (isp_api_wrapper.c/isp_pico.c), which only mirror what the
+ * DRIVER pushed or the library claims to hold, not what the SENSOR itself
+ * reports back over I2C. Read back at most once per second (this function
+ * runs at the AE library's own write-back cadence, which can be far
+ * faster) from the SAME two register groups OV5647_EXPOSURE/
+ * OV5647_TIMING_VTS_REG above already write/derive from:
+ *   - 0x3500..0x3502 (OV5647_EXPOSURE, 24-bit): exposure lines = value >> 4
+ *     (the sensor's own 1/16-line fixed-point format, matching this file's
+ *     existing *16'd write-back convention, e.g. hal_alif's
+ *     isp_api_wrapper.c sns_config.intLine * 16 comment).
+ *   - 0x380e/0x380f (OV5647_TIMING_VTS_REG): the frame length the sensor
+ *     itself is running, independent of what any driver-side cache
+ *     believes was last written (ov5647_set_frmival()'s own write).
+ * `volatile`: read via SWD/log from outside this translation unit's normal
+ * control flow, the same bench technique isp_pico.c's isp_ae_diag_*
+ * globals use (see that file's own comment).
+ */
+volatile uint32_t ov5647_ae_diag_exp_lines;
+volatile uint32_t ov5647_ae_diag_vts_reg;
+
+static void ov5647_ae_diag_log(const struct device *dev)
+{
+	const struct ov5647_config *cfg = dev->config;
+	static int64_t              last_log_ms;
+	int64_t                     now = k_uptime_get();
+	uint32_t                    exp_reg;
+	uint32_t                    vts_reg;
+
+	if (last_log_ms != 0 && now - last_log_ms < 1000) {
+		return;
+	}
+
+	if (video_read_cci_reg(&cfg->i2c, OV5647_EXPOSURE, &exp_reg) < 0) {
+		return;
+	}
+	if (video_read_cci_reg(&cfg->i2c, OV5647_TIMING_VTS_REG, &vts_reg) < 0) {
+		return;
+	}
+
+	last_log_ms              = now;
+	ov5647_ae_diag_exp_lines = exp_reg >> 4;
+	ov5647_ae_diag_vts_reg   = vts_reg;
+
+	LOG_INF("AE sns reg diag: exp_lines=%u (reg=0x%06x) vts=%u",
+	        ov5647_ae_diag_exp_lines,
+	        exp_reg,
+	        vts_reg);
+}
+
 static int ov5647_set_ctrl_exposure(const struct device *dev)
 {
 	const struct ov5647_config *cfg   = dev->config;
@@ -1419,7 +1471,14 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 		return 0;
 	}
 
-	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	ret = video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ov5647_ae_diag_log(dev);
+
+	return 0;
 }
 
 static int ov5647_set_ctrl_test_pattern(const struct device *dev)

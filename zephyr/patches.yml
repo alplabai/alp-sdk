@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: cb478d4f2a74fd7116370573217820deacbb1723649f88ff8dbee591a18bcdd9
+    sha256sum: 0c3869ee215ab51110bc90241ca9bec1cce12e97ce318ae03dfa4433d6aa130d
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -811,6 +811,50 @@ patches:
       host-side regression proving the OLD (4990322ee) code path stays
       pinned to the stale default while the new sync call tracks a
       30->10->30 fps switch.
+
+      UPDATED (#2277, bench run 245 -- the fourth cut): the third cut
+      above shipped (0a7ee9679), then bench run 245 (same setup, 30 fps
+      requested) measured it STILL did not change the observed
+      behaviour: diag globals confirmed isp_vsi_sync_ae_sns_default()
+      ran and pushed sns_full_lines=1049/sns_max_int_line=1045 (the
+      correct 30 fps ceiling), yet the library's "VSI AE INFO" trace
+      again showed intLine ramping 4->17->75->334->1491->3145 and
+      PINNING at exactly 3145 -- proving VSI_MPI_ISP_InitAeSnsFunc()'s
+      re-registration, by itself, does not make the library re-pull
+      sensor_attributes via pfnGetAeDefault. Root cause (this cut):
+      pfnGetAeDefault is evidently only consulted from the AE
+      algorithm's OWN init path (ISP_AE_FUNC_S.pfnAeInit), which
+      VSI_MPI_ISP_AeRegCallBack(&vsiAeAlgo) drives (patch 0009's
+      registration) -- re-registering the SENSOR function table alone
+      never triggers that init to re-run. Real fix, two parts:
+
+      1. isp_vsi_sync_ae_sns_default() now cycles
+         VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack(&vsiAeAlgo) right
+         after the InitAeSnsFunc() re-registration, forcing pfnAeInit to
+         re-run and re-read the just-updated sensor_attributes. Guarded
+         on full_lines actually CHANGING since the last sync (a static
+         last_synced_full_lines) -- isp_apply_ae() calls this on every
+         stream (re)start, most of them at the SAME fps, and tearing the
+         AE algorithm down/rebuilding it every time would reset its
+         damping/converged state for no reason when the ceiling has not
+         moved.
+
+      2. Defensive root-level guard, independent of whether the library
+         actually honours the re-init above: vsi_int_time_update()
+         (aeSnsFunc.pfnIntTimeUpdate, the closed library's own per-frame
+         intLine write-back callback) now clamps *pIntLine to
+         sensor_attributes.maxIntLine -- the SAME ceiling the sync call
+         above just wrote -- before it reaches sns_config.intLine and
+         the *16'd VIDEO_CID_EXPOSURE write further down this file.
+         maxIntLine == 0 (no sync has run yet) skips the clamp. New 1 Hz
+         LOG_INF diagnostics: isp_ae_diag_sns_int_line_clamped (the
+         value actually written) and isp_ae_diag_sns_max_int_line_active
+         (the active ceiling the clamp used), alongside the existing
+         isp_ae_diag_sns_int_line (the library's raw, unclamped
+         request) -- so a bench readback can tell whether the library
+         honoured the re-init or the clamp caught it.
+
+      Bench re-run not yet performed as part of this change.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

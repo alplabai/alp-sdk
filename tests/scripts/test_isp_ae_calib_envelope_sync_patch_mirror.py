@@ -58,6 +58,12 @@ SNS_FULL_LINES_FUNC_SIGNATURE = re.compile(
     r"^static uint32_t isp_ae_sns_full_lines_from_frmival\("
 )
 
+# #2277 (bench run 245, fourth cut): isp_pico.c's third pure helper -- the
+# ISP's own frame-rate diagnostic, added alongside the AE-reinit/clamp fix
+# below so a bench readback can tell whether the library honoured the
+# re-init or the clamp caught it.
+FPS_X100_FUNC_SIGNATURE = re.compile(r"^static uint32_t isp_ae_fps_x100_from_frame_delta\(")
+
 
 def _extract_function_body(lines: list[str], signature: re.Pattern[str]) -> str:
     """Return signature-through-closing-brace text, brace-depth walked (same
@@ -202,4 +208,121 @@ def test_sns_default_sync_mirrors_the_same_fields_as_the_patch() -> None:
         f"patch fields:  {sorted(patch_fields)}\n"
         f"mirror fields: {sorted(mirror_fields)}\n"
         "Update BOTH copies together."
+    )
+
+
+def test_fps_helper_matches_isp_pico_verbatim() -> None:
+    """#2277 (bench run 245, fourth cut): isp_pico.c is alp-sdk source, same
+    status as the two frmival helpers above -- read it directly."""
+    real_body = _extract_function_body(
+        ISP_PICO.read_text(encoding="utf-8").splitlines(), FPS_X100_FUNC_SIGNATURE
+    )
+    mirror_body = _extract_function_body(
+        MIRROR.read_text(encoding="utf-8").splitlines(), FPS_X100_FUNC_SIGNATURE
+    )
+
+    assert _normalise(real_body) == _normalise(mirror_body), (
+        "isp_ae_fps_x100_from_frame_delta() has drifted between "
+        f"{ISP_PICO.relative_to(REPO)} and its host-buildable test mirror "
+        f"{MIRROR.relative_to(REPO)}.\n\n"
+        f"--- real body ---\n{real_body}\n\n"
+        f"--- mirror body ---\n{mirror_body}"
+    )
+
+
+def _patch_reconstructed_file_lines(path_suffix: str) -> list[str]:
+    """Reconstruct one file's POST-patch text (context + added lines, diff
+    prefix stripped, removed lines dropped) from the unified diff -- unlike
+    _patch_added_lines(), this keeps UNCHANGED lines a hunk carries as
+    context (e.g. an unchanged function signature/opening brace around a
+    changed body), which a bare '+'-only scan silently drops."""
+    raw = CALIB_PATCH.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(raw) if line == f"+++ b/{path_suffix}") + 1
+
+    lines = []
+    for line in raw[start:]:
+        if line.startswith("--- ") or line.startswith("+++ "):
+            break  # next file section of the patch
+        if line.startswith("@@") or line.startswith("-"):
+            continue
+        if line.startswith("+") or line.startswith(" "):
+            lines.append(line[1:])
+    return lines
+
+
+def _patch_function_body(func_signature_substr: str) -> str:
+    """Brace-matched extraction from isp_api_wrapper.c's POST-patch text --
+    same technique as _extract_function_body(), but over
+    _patch_reconstructed_file_lines() (this file's own diff-hunk text, not
+    a real source file) since 0011 is a unified diff, not a standalone .c
+    file."""
+    lines = _patch_reconstructed_file_lines("drivers/isp/isp_wrapper/src/isp_api_wrapper.c")
+    start = next(i for i, line in enumerate(lines) if func_signature_substr in line)
+
+    depth = 0
+    opened = False
+    end = None
+    for i in range(start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if "{" in lines[i]:
+            opened = True
+        if opened and depth == 0:
+            end = i
+            break
+    assert end is not None, f"unbalanced braces extracting {func_signature_substr!r} from patch"
+
+    return "\n".join(lines[start : end + 1])
+
+
+def test_sns_default_sync_forces_ae_reinit_on_change() -> None:
+    """#2277 (bench run 245, fourth cut): re-registering aeSnsFunc via
+    VSI_MPI_ISP_InitAeSnsFunc() alone (0a7ee9679's isp_vsi_sync_ae_sns_
+    default()) does NOT make the library re-pull sensor_attributes -- bench
+    run 245 measured intLine still pinning at the stale 10 fps default at
+    30 fps. The fix cycles VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack() to
+    force the AE algorithm's own init path to re-run, guarded on full_lines
+    actually changing (so a same-fps restart doesn't reset AE convergence
+    for nothing). This fails against 0a7ee9679, whose patch body has
+    neither call at all."""
+    body = _patch_function_body("int isp_vsi_sync_ae_sns_default(")
+
+    assert "VSI_MPI_ISP_AeUnRegCallBack" in body, (
+        "isp_vsi_sync_ae_sns_default() no longer force-reinitialises the AE algorithm "
+        "(VSI_MPI_ISP_AeUnRegCallBack) -- this is the bench-run-245 fix for the "
+        "re-registration-alone-does-nothing bug. Don't drop it without new bench "
+        "evidence that InitAeSnsFunc() alone works after all."
+    )
+    assert "VSI_MPI_ISP_AeRegCallBack" in body, (
+        "isp_vsi_sync_ae_sns_default() unregisters AE but never re-registers it "
+        "(VSI_MPI_ISP_AeRegCallBack) -- AE would stay permanently torn down."
+    )
+    assert "last_synced_full_lines" in body and "!=" in body, (
+        "the AE re-init cycle must be guarded on full_lines actually CHANGING -- an "
+        "unconditional Un/Reg cycle on every isp_apply_ae() call (this driver's own "
+        "restart-per-frame pattern) would reset AE convergence state for no reason "
+        "on every same-fps restart."
+    )
+
+
+def test_int_time_write_clamps_to_active_max_int_line() -> None:
+    """#2277 (bench run 245, fourth cut): defensive root-level guard,
+    independent of whether the AE-reinit fix above actually makes the
+    library honour the ceiling. vsi_int_time_update() (aeSnsFunc.
+    pfnIntTimeUpdate, the closed library's own per-frame intLine
+    write-back callback -- the LAST touchpoint before the value reaches
+    the sensor) must clamp against sensor_attributes.maxIntLine, the same
+    ceiling isp_vsi_sync_ae_sns_default() just wrote. Fails against
+    0a7ee9679, whose vsi_int_time_update() only stores and logs *pIntLine,
+    with no clamp at all."""
+    body = _patch_function_body("static int vsi_int_time_update(")
+
+    assert "sensor_attributes.maxIntLine" in body, (
+        "vsi_int_time_update() no longer references sensor_attributes.maxIntLine -- "
+        "the bench-run-245 defensive clamp (the library's real per-frame intLine "
+        "output ignored every other lever this driver tried) is gone."
+    )
+    assert re.search(r"\*pIntLine\s*=", body), (
+        "vsi_int_time_update() must write the CLAMPED value back through *pIntLine "
+        "(the library reads this pointer back after the callback returns), not just "
+        "clamp a local copy that never reaches the sensor."
     )

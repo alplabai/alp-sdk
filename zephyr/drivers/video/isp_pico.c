@@ -956,28 +956,80 @@ volatile uint32_t isp_ae_diag_frame_period_us;
 volatile uint32_t isp_ae_diag_sns_full_lines;
 volatile uint32_t isp_ae_diag_sns_max_int_line;
 
+/*
+ * #2277 (bench run 245): the ISP's OWN frame rate, independent of AE --
+ * run 245 found the host-side JPEG throughput (15.02 fps) undercounted the
+ * pipeline's real rate (the known ~1 MB/s HTTP send ceiling, not an AE
+ * symptom), while the ISP's own frame counter showed ~29.9 fps. fps*100
+ * (avoids float in a LOG_INF/diag global), derived from
+ * isp_mi_frame_end_count (CONFIG_VIDEO_ISP_VSI_FRAME_STATS, above) --
+ * MI_INTR_MP_FRAME_END events actually firing, not whatever the app's own
+ * dequeue loop believes happened -- as a delta over isp_ae_diag_log()'s own
+ * >=1 s rate-limit window. Stays 0 when CONFIG_VIDEO_ISP_VSI_FRAME_STATS is
+ * off (the counter this derives from doesn't exist in that build).
+ */
+volatile uint32_t isp_ae_diag_isp_fps_x100;
+
+/*
+ * Pure (no device/global state): frame count delta in, elapsed milliseconds
+ * in, fps*100 out -- pulled out so tests/unit/isp_ae_calib_envelope_sync can
+ * exercise the arithmetic directly, same pattern as isp_ae_int_time_max_us_
+ * from_frmival()/isp_ae_sns_full_lines_from_frmival() above. elapsed_ms == 0
+ * (the first call in a run, no prior window to measure) returns 0 rather
+ * than dividing by zero.
+ */
+static uint32_t isp_ae_fps_x100_from_frame_delta(uint32_t frame_delta, uint32_t elapsed_ms)
+{
+	if (elapsed_ms == 0) {
+		return 0;
+	}
+
+	return (uint32_t)(((uint64_t)frame_delta * 100000ULL) / elapsed_ms);
+}
+
 /* Rate-limits isp_ae_diag_applied_int_time_max_us/isp_ae_diag_frame_period_us
  * LOG_INF output to at most once per second -- isp_apply_ae() (below) can
  * run far more often than that (this driver's restart-per-frame pattern,
  * see the run-74/85 comments above isp_apply_wb()), and a console flooded
- * at frame rate would itself perturb the timing being measured.
+ * at frame rate would itself perturb the timing being measured. Also
+ * updates isp_ae_diag_isp_fps_x100 (above) over the same window.
  */
 static void isp_ae_diag_log(void)
 {
-	static int64_t last_log_ms;
-	int64_t        now = k_uptime_get();
+	static int64_t  last_log_ms;
+	static uint32_t last_frame_count;
+	int64_t         now         = k_uptime_get();
+	uint32_t        frame_count = 0;
 
 	if (last_log_ms != 0 && now - last_log_ms < 1000) {
 		return;
 	}
-	last_log_ms = now;
+
+	/* isp_mi_frame_end_count (above) only exists when this Kconfig is on
+	 * -- frame_count stays 0 otherwise, so the delta below is always 0
+	 * and isp_ae_diag_isp_fps_x100 stays 0 too (see that global's own
+	 * comment), rather than #ifdef'ing the call below out entirely and
+	 * tripping -Werror=unused-function on isp_ae_fps_x100_from_frame_
+	 * delta() in builds that don't enable frame stats (e.g. this repo's
+	 * own aen-isp-ov5647-viewfinder example).
+	 */
+#ifdef CONFIG_VIDEO_ISP_VSI_FRAME_STATS
+	frame_count = isp_mi_frame_end_count;
+#endif
+	if (last_log_ms != 0) {
+		isp_ae_diag_isp_fps_x100 = isp_ae_fps_x100_from_frame_delta(frame_count - last_frame_count,
+		                                                            (uint32_t)(now - last_log_ms));
+	}
+	last_frame_count = frame_count;
+	last_log_ms      = now;
 
 	LOG_INF("AE diag: applied int_time_max_us=%u frame_period_us=%u "
-	        "sns_full_lines=%u sns_max_int_line=%u",
+	        "sns_full_lines=%u sns_max_int_line=%u isp_fps_x100=%u",
 	        isp_ae_diag_applied_int_time_max_us,
 	        isp_ae_diag_frame_period_us,
 	        isp_ae_diag_sns_full_lines,
-	        isp_ae_diag_sns_max_int_line);
+	        isp_ae_diag_sns_max_int_line,
+	        isp_ae_diag_isp_fps_x100);
 }
 
 /*

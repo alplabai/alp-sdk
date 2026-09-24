@@ -236,7 +236,7 @@
  #endif
 --- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
 +++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
-@@ -374,9 +374,34 @@
+@@ -374,9 +374,63 @@
  	return 0;
  }
  
@@ -254,10 +254,39 @@
 + */
 +volatile vsi_u32_t isp_ae_diag_sns_int_line;
 +
++/*
++ * #2277 (bench run 245): isp_vsi_sync_ae_sns_default() (below) updates
++ * sensor_attributes.maxIntLine to the ACTIVE frame period's real ceiling,
++ * but re-registering aeSnsFunc alone did not stop the library pinning
++ * intLine at the STALE 10 fps default (3145) at 30 fps -- the library
++ * never re-pulled the updated struct. This is the defensive backstop:
++ * *pIntLine is whatever the closed AE algorithm computed, unclamped: cap
++ * it here, at the LAST touchpoint before sns_config.intLine feeds the
++ * *16'd VIDEO_CID_EXPOSURE write-back further down this file, to
++ * sensor_attributes.maxIntLine -- the same ceiling isp_vsi_sync_ae_sns_
++ * default() just wrote, so this always reflects the CURRENT active fps
++ * regardless of whether the library itself honours it. maxIntLine == 0
++ * (no sync has run yet, e.g. before the first isp_apply_ae() call) skips
++ * the clamp rather than pinning every intLine to 0.
++ */
++volatile vsi_u32_t isp_ae_diag_sns_int_line_clamped;
++volatile vsi_u32_t isp_ae_diag_sns_max_int_line_active;
++
  static int vsi_int_time_update(ISP_PORT IspPort, vsi_u32_t *pIntLine)
  {
- 	sns_config.intLine = *pIntLine;
-+	isp_ae_diag_sns_int_line = *pIntLine;
+-	sns_config.intLine = *pIntLine;
++	vsi_u32_t requested = *pIntLine;
++	vsi_u32_t clamped   = requested;
++
++	if (sensor_attributes.maxIntLine != 0 && clamped > sensor_attributes.maxIntLine) {
++		clamped = sensor_attributes.maxIntLine;
++	}
++
++	*pIntLine           = clamped;
++	sns_config.intLine  = clamped;
++	isp_ae_diag_sns_int_line         = requested;
++	isp_ae_diag_sns_int_line_clamped = clamped;
++	isp_ae_diag_sns_max_int_line_active = sensor_attributes.maxIntLine;
 +
 +	{
 +		static int64_t last_log_ms;
@@ -265,13 +294,14 @@
 +
 +		if (last_log_ms == 0 || now - last_log_ms >= 1000) {
 +			last_log_ms = now;
-+			LOG_INF("AE sns diag: applied intLine=%u", isp_ae_diag_sns_int_line);
++			LOG_INF("AE sns diag: requested intLine=%u clamped=%u active_max=%u",
++				requested, clamped, sensor_attributes.maxIntLine);
 +		}
 +	}
  
  	return 0;
  }
-@@ -396,6 +421,64 @@
+@@ -396,6 +450,92 @@
  };
  #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
  
@@ -291,12 +321,23 @@
 + * derives full_lines/max_int_line from the sensor's ACTIVE frame period --
 + * isp_pico.c's isp_ae_sns_full_lines_from_frmival(), the OV5647-specific
 + * VTS math, same facts as ov5647_ae_envelope.h's OV5647_AE_PIXEL_RATE_HZ/
-+ * OV5647_AE_HTS_640X480 -- kept there rather than duplicated here) and
-+ * re-registers it with VSI_MPI_ISP_InitAeSnsFunc() so the library re-pulls
-+ * it via vsi_get_ae_default() -- the only lever this driver has found that
-+ * actually reaches the ceiling bench run 244 observed. Called from
-+ * isp_pico.c's isp_apply_ae() on every stream (re)start, the same cadence
-+ * as the video_get_frmival()-derived push above.
++ * OV5647_AE_HTS_640X480 -- kept there rather than duplicated here).
++ *
++ * #2277 (bench run 245): re-registering aeSnsFunc via VSI_MPI_ISP_
++ * InitAeSnsFunc() alone (as this function did before this change) does
++ * NOT make the library re-pull sensor_attributes -- intLine kept pinning
++ * at the STALE 10 fps default (3145) even at 30 fps. pfnGetAeDefault is
++ * evidently only consulted from the AE algorithm's OWN init path
++ * (ISP_AE_FUNC_S.pfnAeInit), which VSI_MPI_ISP_AeRegCallBack(&vsiAeAlgo)
++ * drives (patch 0009's registration, isp_vsi_init(), below) -- so cycling
++ * VSI_MPI_ISP_AeUnRegCallBack()+AeRegCallBack() forces that init to
++ * re-run, and pfnAeInit re-reads sensor_attributes through aeSnsFunc.
++ * pfnGetAeDefault with the values just written above. Guarded on
++ * full_lines actually CHANGING since the last sync (isp_pico.c's own
++ * "restart-per-frame pattern" calls this on every isp_apply_ae(), most of
++ * which are the SAME fps as the previous one) -- tearing the AE algorithm
++ * down and rebuilding it on every restart would reset its damping/
++ * converged state for no reason when the ceiling hasn't moved.
 + */
 +int isp_vsi_sync_ae_sns_default(struct isp_config_params *init_cfg, vsi_u32_t full_lines,
 +				 vsi_u32_t max_int_line)
@@ -305,6 +346,7 @@
 +	struct port_parameters *port;
 +	ISP_PORT                isp_port_id;
 +	int                     ret;
++	static vsi_u32_t        last_synced_full_lines;
 +
 +	if (!init_cfg || full_lines == 0 || max_int_line == 0 || max_int_line >= full_lines) {
 +		return -EINVAL;
@@ -324,6 +366,22 @@
 +		return isp_err_2_errno(ret);
 +	}
 +
++	if (full_lines != last_synced_full_lines) {
++		ret = VSI_MPI_ISP_AeUnRegCallBack(isp_port_id);
++		if (ret) {
++			LOG_ERR("Failed to unregister AE for sensor-default re-init");
++			return isp_err_2_errno(ret);
++		}
++
++		ret = VSI_MPI_ISP_AeRegCallBack(isp_port_id, &vsiAeAlgo);
++		if (ret) {
++			LOG_ERR("Failed to re-register AE after sensor-default sync");
++			return isp_err_2_errno(ret);
++		}
++
++		last_synced_full_lines = full_lines;
++	}
++
 +	return 0;
 +#else
 +	ARG_UNUSED(init_cfg);
@@ -336,7 +394,7 @@
  int isp_vsi_init(struct isp_config_params *init_cfg)
  {
  	struct channel_parameters *channel;
-@@ -1146,6 +1229,45 @@
+@@ -1146,6 +1286,45 @@
  			LOG_ERR("Failed to set AE attr");
  			return isp_err_2_errno(ret);
  		}

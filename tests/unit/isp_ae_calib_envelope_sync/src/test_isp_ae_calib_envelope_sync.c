@@ -391,3 +391,50 @@ ZTEST(isp_ae_calib_envelope_sync, test_sns_default_sync_tracks_active_fps_switch
 	              "switching back to 30 fps must move the ceiling AGAIN -- a one-shot "
 	              "sync would leave this stuck at 3145 from the previous step");
 }
+
+/*
+ * #2277 (bench run 245 -- the fourth cut). The third cut above (isp_sns_
+ * default_sync) shipped as 0a7ee9679 and STILL did not fix the reported
+ * symptom: re-registering aeSnsFunc via VSI_MPI_ISP_InitAeSnsFunc() alone
+ * does not make the closed library re-pull sensor_attributes. The real fix
+ * (hal_alif patch 0011's isp_vsi_sync_ae_sns_default(), and vsi_int_time_
+ * update()) is vendor-typed and calls into VSI_MPI_ISP_AeUnRegCallBack()/
+ * AeRegCallBack() -- not host-buildable, so tests/scripts/
+ * test_isp_ae_calib_envelope_sync_patch_mirror.py checks its PRESENCE in
+ * the patch text directly (the same technique that script already uses
+ * for the sensor_attributes.* field-copy).
+ *
+ * What IS host-buildable and alp-sdk-owned: isp_pico.c's new isp_ae_fps_
+ * x100_from_frame_delta() (the ISP's own frame-rate diagnostic, added
+ * alongside the fix so a bench readback can tell whether the library
+ * honoured the re-init or the clamp caught it) -- mirrored byte-for-byte
+ * below, same technique as the two frmival helpers above.
+ */
+static uint32_t isp_ae_fps_x100_from_frame_delta(uint32_t frame_delta, uint32_t elapsed_ms)
+{
+	if (elapsed_ms == 0) {
+		return 0;
+	}
+
+	return (uint32_t)(((uint64_t)frame_delta * 100000ULL) / elapsed_ms);
+}
+
+ZTEST(isp_ae_calib_envelope_sync, test_fps_x100_matches_bench_value)
+{
+	/* Bench run 245: "ISP frame counter shows ~29.9 fps" -- 30 frames
+	 * over a 1003 ms window (a rate-limit window is never exactly
+	 * 1000 ms) truncates to 2991 (29.91 fps), matching that figure. */
+	zassert_equal(isp_ae_fps_x100_from_frame_delta(30, 1003), 2991u, NULL);
+}
+
+ZTEST(isp_ae_calib_envelope_sync, test_fps_x100_zero_elapsed_ms_returns_zero)
+{
+	/* The first call in a run has no prior window to measure -- must not
+	 * divide by zero. */
+	zassert_equal(isp_ae_fps_x100_from_frame_delta(5, 0), 0u, NULL);
+}
+
+ZTEST(isp_ae_calib_envelope_sync, test_fps_x100_zero_frames_is_zero_fps)
+{
+	zassert_equal(isp_ae_fps_x100_from_frame_delta(0, 1000), 0u, NULL);
+}
