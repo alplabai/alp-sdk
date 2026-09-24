@@ -19,12 +19,18 @@
 # So the same U-Boot is safe on a non-DEEPX V2N SoM (no manifest match ->
 # DEEPX path left untouched). RIIC0 (P30/P31) pinmux is added to s_init and
 # the i2c0 node enabled in rzv2n-dev.dts. (Pair with the kernel dtb's pcie
-# num-lanes=2.) DEEPX rails are always-on (current SoM rev's standalone
-# buck), so no rail sequencing is needed.
+# num-lanes=2.) DEEPX rails are NOT always-on: 0004 below sequences the
+# on-module DA9292 CH2 rail (0.75V) over RIIC8/BRD_I2C and releases P64
+# BEFORE this reset-release step ever runs -- see 0004's own header
+# comment and CONFIG_ALP_E1M_DEEPX_RAIL below.
 #
 # Targets the renesas-u-boot-cip SRCREV this BSP pins for rzv2n-family
 # (2024.07, bcf29d98); applies on top of meta-renesas's rzv2n-dev PMIC-I2C
 # removal patch.
+#
+# 0004 below applies on top of 0002 (md5 c546f00cabca346e335febd21ecbc440):
+# both touch board/renesas/rzv2n-dev/Kconfig and 0004's hunks use 0002's
+# lines as context, so 0002 must stay ahead of it.
 
 FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
 
@@ -112,6 +118,33 @@ SRC_URI:append:rzv2n-family = "${@' file://prod-boot.cfg' if bb.utils.to_boolean
 # the full do_patch sequence -- see the patch-fuzz demotion comment below for
 # why those vendor hunks fuzz against ALP's context.
 SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tier.patch' if d.getVar('MACHINE') in ('e1m-v2n103-a55', 'e1m-v2m103-a55') else ''}"
+
+# 0004 (DEEPX rail bring-up): board_late_init() sequences the on-module
+# DA9292 PMIC's CH2 to 0.75V and confirms power-good BEFORE the 0001 mux/
+# M1_RESET-release step is allowed to run -- U-Boot is the sole writer of
+# the DA9292 and the sole driver of P64 (DEEPX_CORE_0P75_EN) / P65
+# (DEEPX_PWR_EN_REQ); the CM33 must never master RIIC8/BRD_I2C or claim
+# these pads (metadata/pinmux/v2n.yaml, metadata/e1m_modules/v2n/
+# core-ownership.yaml in alp-sdk). CONFIG_ALP_E1M_DEEPX_RAIL (default n)
+# forces the rail step even before a V2M unit's EEPROM manifest is
+# burned; wired below for the V2M MACHINEs only via deepx-rail.cfg -- see
+# that file's own header for why forcing it there is redundant, not a
+# relaxation, once the manifest is valid.
+#
+# Placed AFTER the 0003 append above, not with 0001/0002 at the top: the
+# meta-alp-sdk patch order is PMIC-removal (meta-renesas, ahead of every
+# entry here), 0001, 0002, 0003 (x103 MACHINEs only), 0004 -- 0004 must
+# see whatever 0003 already did to rzv2n-dev.h so a future 0004 hunk
+# touching that file lands on the same context 0003 leaves, not the
+# pre-0003 one. 0003 and this patch currently touch disjoint files
+# (0003: arch/arm/dts/rzv2n-dev.dts + include/configs/rzv2n-dev.h; 0004:
+# board/renesas/rzv2n-dev/Kconfig + rzv2n-dev.c), so do_patch succeeds
+# either order today -- the ordering here is enforced ahead of any such
+# overlap, not reacting to one.
+SRC_URI:append:rzv2n-family = " file://0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch"
+SRC_URI:append:e1m-v2m101-a55 = " file://deepx-rail.cfg"
+SRC_URI:append:e1m-v2m102-a55 = " file://deepx-rail.cfg"
+SRC_URI:append:e1m-v2m103-a55 = " file://deepx-rail.cfg"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string

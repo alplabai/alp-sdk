@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-18",
+  "generated": "2026-09-24",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -3520,8 +3520,8 @@
       },
       "macros": {
         "CLK_5L35023B_I2C_ADDR_DEFAULT": {
-          "hash": "f2899caba50f1b3d",
-          "value": "0x68u"
+          "hash": "383bd31d1f3037de",
+          "value": "0x69u"
         },
         "CLK_5L35023B_REG_DASHCODE_ID": {
           "hash": "4bfaafad69e3b84f",

@@ -20,23 +20,34 @@ and adds:
 | **DEEPX DX-M1 NPU**      | On-module, PCIe                                            |
 | `M1_RESET`               | Renesas-side GPIO controlling DX-M1 reset (active-low)     |
 | 2 × PI3DBS12212A muxes   | Switch PCIe routing between DEEPX and the E1M edge         |
-| 0.75 V DEEPX rail        | DA9292 CH2 (disabled on V2N base; brought up by FW on M1)  |
+| 0.75 V DEEPX rail        | DA9292 CH2 (disabled on V2N base; brought up by U-Boot on M1, over RIIC8/BRD_I2C -- Cortex-A55/Linux-exclusive) |
 | 3 × TPS628640 bucks      | DDR5/LPDDR rails for DEEPX (`0x44` / `0x4F` fixed; third strap **unresolved**, see below) |
 
 ## DEEPX bring-up
 
-Four-step sequence host firmware must run **after** the Renesas
-side boots and **before** the Linux kernel attempts to open the
-PCIe device:
+Four-step sequence, run **after** the Renesas side boots and
+**before** the Linux kernel attempts to open the PCIe device.  Steps
+1, 3, and 4 run in **U-Boot's `board_late_init()`**
+(`meta-alp-sdk/recipes-bsp/u-boot/u-boot/
+0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch` for step 1;
+`0001-rzv2n-dev-EEPROM-gated-DEEPX-DX-M1-PCIe-bring-up.patch` for
+steps 3-4) -- no application firmware (CM33 or Linux) writes or
+re-runs them.  Step 2 (below) is not implemented by either patch; it
+remains a bench-diagnostic check, not an automated bring-up step:
 
-1. **Enable the 0.75 V DEEPX rail** via the secondary PMIC's CH2.
+1. **Enable the 0.75 V DEEPX rail** via the secondary PMIC's CH2, over
+   RIIC8/BRD_I2C.  This bus is Cortex-A55/Linux-exclusive
+   (`metadata/e1m_modules/v2n/core-ownership.yaml`); U-Boot runs on
+   the A55 before Linux starts, so it -- not the CM33 -- is the sole
+   writer.
 2. **ACK-probe** the DEEPX TPS628640 instances at `0x44` / `0x4F`
    to confirm population (self-regulating).  The third DEEPX buck
    (`deepx_lpddr_0v85`) has no confirmed address to probe -- see
    the strap note below before writing bring-up code against it.
 3. **Route the PCIe muxes** to the DEEPX path with the PI3DBS12212A
    driver (PD pin on Renesas `P80`, SEL pin on `P95`).
-4. **Release `M1_RESET`** (Renesas `PA6`; active-low).
+4. **Release `M1_RESET`** (Renesas `PA6`; active-low) -- ONLY once
+   step 1 confirms the rail is power-good.
 
 ### `deepx_lpddr_0v85` strap is unresolved (#1163)
 
@@ -45,22 +56,28 @@ settled I2C address on the V2M pair --
 `metadata/e1m_modules/E1M-V2M101.yaml` / `E1M-V2M102.yaml` /
 `E1M-V2M103.yaml` record it
 as `address_7bit: "TBD"`, not `0x48`.  The chip's own default strap
-*is* `0x48`, but that collides with the on-module `tmp112`
-temperature sensor, which is confirmed at `0x48` on the same bus on
-all six V2N-family SKUs (V2N101/102/103 declare the same `tmp112` at
-`0x48`, and all six SKUs share one PCB, so it's a single physical
-net) -- see [#1163](https://github.com/alplabai/alp-sdk/issues/1163)
-and [#1845](https://github.com/alplabai/alp-sdk/issues/1845). Which
-part is re-strapped on the real V2M schematic, and to what, is not
-known yet. **Do not probe `0x48` expecting the DEEPX buck** -- on
-this bus `0x48` is `tmp112`; treat `deepx_lpddr_0v85`'s address as
-unknown until the schematic confirms it, and do not hardcode `0x48`
-for it in bring-up code.
+*is* `0x48`.  **Updated 2026-09-24:** the original collision premise
+here -- that `0x48` was occupied by the on-module `tmp112` -- no
+longer holds: `tmp112` is maintainer-confirmed at `0x40` (all six
+V2N-family SKUs, one shared PCB, one ADD0 net; see
+`metadata/chips/tmp112.yaml`), not `0x48`.  That does NOT mean the
+DEEPX buck defaults to `0x48` -- no measurement has confirmed what
+this part is actually strapped to on the real V2M schematic, and
+inferring it from the now-resolved non-collision would be a guess --
+see [#1163](https://github.com/alplabai/alp-sdk/issues/1163) and
+[#1845](https://github.com/alplabai/alp-sdk/issues/1845). Treat
+`deepx_lpddr_0v85`'s address as unknown until the schematic confirms
+it, and do not hardcode `0x48` for it in bring-up code.
 
 The `chips/deepx_dxm1/` driver wraps steps 3-4 into a single
 [`deepx_dxm1_bring_up(&ctx, DEEPX_DXM1_DEFAULT_BOOT_US)`](../../include/alp/chips/deepx_dxm1.h)
-call.  Steps 1-2 stay caller-orchestrated because the secondary
-PMIC + DEEPX bucks have their own driver APIs.
+call, for platforms where a portable caller owns `M1_RESET`.  On
+V2N-M1, U-Boot implements steps 3-4 itself with raw register pokes
+(not this driver) so it can gate them on step 1's rail check; nothing
+calls `deepx_dxm1_bring_up()` here.  Step 1 similarly has its own
+driver API (`chips/da9292/`), which U-Boot does not call either (same
+reason: U-Boot builds standalone against upstream sources, not
+alp-sdk) -- see `docs/bring-up-v2n-m1.md` §2.
 
 Walk-through with code: [`docs/bring-up-v2n-m1.md`](../bring-up-v2n-m1.md).
 
@@ -83,7 +100,8 @@ as the NPU integration matures.
 
 | Symptom                                              | Cause + fix                                                            |
 |------------------------------------------------------|------------------------------------------------------------------------|
-| `da9292_v2n_m1_enable_deepx_rail` -> `ALP_ERR_TIMEOUT` | 0.75 V plane shorted; probe the rail directly.                       |
+| U-Boot logs `ALP: DA9292 ...` abort / `DEEPX rail not enabled` / `DEEPX rail disabled` | 0.75 V plane shorted, or another check named in the printed register bytes failed; probe the rail directly.  See `docs/bring-up-v2n-m1.md` §2. |
+| U-Boot logs `... DEEPX rail not enabled (CH2 may require EN2/P64 high before PG -- see bring-up doc)` | CH2_EN was written over I2C but PG never asserted -- possible EN2/P64 hardware gating (P64 only goes high after PG in the current sequence). See `docs/bring-up-v2n-m1.md` §2 and #2045. |
 | DEEPX rails up but PCIe link never trains            | `M1_RESET` polarity wrong -- the driver default is active-low; board may need override via `deepx_dxm1_set_reset_polarity`. |
 | PCIe link trains but kernel driver reports BAR errors| PCIe muxes on the wrong path -- check `PI3DBS_STATE_PATH_0` matches your board's silk-screen. |
 | `dxrt_init()` returns an error                       | Check the DEEPX kernel driver (`dx_rt_npu_linux_driver`) is loaded.    |

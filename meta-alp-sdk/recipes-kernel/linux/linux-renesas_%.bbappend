@@ -65,7 +65,7 @@ SRC_URI:append = " \
     file://e1m-v2m-deepx.dtsi \
     file://e1m-v2n101-x-evk.dts \
     file://e1m-v2m101-x-evk.dts \
-    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-RIIC8-on.patch \
+    file://0001-clk-renesas-r9a09g056-keep-CM33-owned-RSCI7-on.patch \
     file://0002-drm-renesas-rzg2l-mipi-dsi-pm_runtime-guard-host-tra.patch \
     file://0003-usb-ohci-platform-add-spurious-oc-DT-property.patch \
     file://0004-drm-panel-add-himax-hx8394-with-rocktech-rk055hdmipi.patch \
@@ -73,14 +73,20 @@ SRC_URI:append = " \
     file://0006-input-goodix-fall-back-to-polling-without-an-irq.patch \
 "
 
-# AMP clock ownership: RSCI7 + RIIC8 belong to the Cortex-M33 system
-# manager (GD32 supervisor link).  Without this patch, Linux's
-# clk_disable_unused turns their module clocks off AND asserts the coupled
+# AMP clock ownership: RSCI7 belongs to the Cortex-M33 system manager
+# (GD32 supervisor SPI link).  Without this patch, Linux's
+# clk_disable_unused turns its module clocks off AND asserts the coupled
 # CPG BUS_MSTOP bits (the rzv2h-cpg driver ties the two together), which
 # bus-faults the CM33 mid-operation ~15 s into every boot.  The patch
-# marks the six clocks DEF_MOD_CRITICAL so both gates stay held for the
-# remote core.  Silicon-validated 2026-06-03 (two cold cycles + warm
-# reboot, link autonomous from ~2 s after power-on, no intervention).
+# marks the five rsci_7_* clocks DEF_MOD_CRITICAL so both gates stay held
+# for the remote core.  Silicon-validated 2026-06-03 (two cold cycles +
+# warm reboot, link autonomous from ~2 s after power-on, no intervention).
+#
+# RIIC8 (BRD_I2C) is NOT in this patch: the maintainer decision that
+# Cortex-A55/Linux is RIIC8's sole master (metadata/e1m_modules/v2n/
+# core-ownership.yaml) makes Linux the real consumer -- its own
+# clk_disable_unused correctly leaves riic_8_ckm alone.  See the
+# patch's own RETITLED note for the 2026-09-24 history.
 
 # 0002 (DSI shutdown SError): rzg2l_mipi_dsi's host transfer touched DSI
 # registers while the host was runtime-suspended (held in reset).  A panel
@@ -213,6 +219,12 @@ SRC_URI:append = " \
     file://trim-unused-storage-net-fs.cfg \
     file://no-kernel-audit.cfg \
 "
+
+# On-module RTC (all six V2N-family SKUs carry the same RV-3028-C7 --
+# see rtc_external: in each metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml).
+# Unconditional like the two trims above, not per-machine like
+# display.cfg: this is a SoM-level fact, not a carrier one.
+SRC_URI:append = " file://rv3028-rtc.cfg"
 
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
