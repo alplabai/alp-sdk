@@ -26,7 +26,7 @@
  #ifdef __cplusplus
  extern "C"{
  #endif
-@@ -66,6 +85,50 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+@@ -66,6 +85,61 @@
  #if defined(CONFIG_ISP_LIB_AE_MODULE)
  		.ae = {
  			.opType = OP_TYPE_AUTO,
@@ -36,10 +36,8 @@
 +			 * envelope below (expTimeRange.max 3000000 us ->
 +			 * 94470 lines via vsi_get_ae_default()'s
 +			 * linesPer500ms) is nowhere near OV5647's real
-+			 * ceiling (ov5647_ae_envelope.h's
-+			 * OV5647_AE_MAX_INT_LINE_AT_FPS(), #2277 -- follows
-+			 * the ACTIVE mode's fps, not one fixed line count)
-+			 * -- SetCalib() (isp_vsi_init(),
++			 * ceiling (ov5647_ae_envelope.h's OV5647_AE_MAX_
++			 * INT_LINE) -- SetCalib() (isp_vsi_init(),
 +			 * isp_api_wrapper.c) loads THIS block into the
 +			 * library before isp_apply_ae() (isp_pico.c) ever
 +			 * runs, and bench runs 211/212's out-of-range EXPOSURE
@@ -51,6 +49,19 @@
 +			 * OV5647_AE_* macros (see that header's comment) so
 +			 * this block and sensor_attributes.h's runtime
 +			 * AE_SNS_DEFAULT_S table carry the same literal values.
++			 *
++			 * #2277: this compiled-in value is now only the
++			 * BOOT-TIME default (10 fps, the sensor's own floor
++			 * rate) -- isp_api_wrapper.c's isp_vsi_set_param()
++			 * mirrors isp_apply_ae()'s (isp_pico.c) video_get_
++			 * frmival()-derived, ACTIVE-fps exposure range into
++			 * isp_calib_param.modules.ae.autoAttr (this exact
++			 * struct) on every AE apply, so it stays correct for
++			 * whatever fps the app is actually running from the
++			 * first stream start onward. See that function's own
++			 * comment for why a compile-time-only ceiling (a
++			 * single Kconfig-selected fps, tried and reverted)
++			 * cannot serve every app's fps choice.
 +			 */
 +			.manualAttr = {
 +				.intTime = OV5647_AE_EXP_TIME_MAX_US / 2,
@@ -77,7 +88,7 @@
  			.manualAttr = {
  				.intTime = 100000,
  				.again = 75000,
-@@ -87,6 +150,7 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+@@ -87,6 +161,7 @@
  				.aeRunInterval = 1,
  				.aeTarget = 255,
  				.dampOver = 0x40,
@@ -85,9 +96,90 @@
  				.dampUnder = 0x40,
  				.tolerance = 1,
  				.antiflicker = {
+--- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
++++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+@@ -105,6 +105,30 @@
+ 	.gainThreshold = 1024,
+ };
+ 
++/*
++ * alp-sdk fix (Alp Lab AB, #2271): isp_param_conf.h's OV5647 .ae calibration
++ * block (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 arm) needs these SAME facts as
++ * the AE_SNS_DEFAULT_S table above -- see ov5647_ae_envelope.h's own
++ * comment for why that's a separate header rather than this file's struct
++ * being included directly (an unused-variable trap under -Werror when
++ * CONFIG_ISP_LIB_AE_MODULE is off). This struct's own fields above (patch
++ * 0006) stay hand-written literals -- a patch that edited them to
++ * reference these macros directly would no longer reverse-apply
++ * independently of 0011, so the two restate the SAME values as separate
++ * literals; keeping them in sync across patches 0006 and 0011 is a
++ * by-hand invariant, not a build-checked one (the macros' own
++ * _Static_assert equality checks only catch the macros drifting from
++ * THESE literals, not this struct silently drifting from either). This
++ * table's own .fps/.fullLines/.maxIntLine stay fixed at the 10 fps
++ * boot-time default too (#2277) -- unlike isp_calib_param.modules.ae
++ * (isp_param_conf.h), nothing re-syncs THIS struct to the active fps at
++ * runtime; see ov5647_ae_envelope.h's file comment for why that gap is
++ * out of scope here (isp_apply_ae()'s bug report and this fix are both
++ * about isp_calib_param, the block named "calibration" throughout this
++ * driver).
++ */
++#include "ov5647_ae_envelope.h"
++
+ #ifdef __cplusplus
+ }
+ #endif
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -1146,6 +1146,45 @@
+ 			LOG_ERR("Failed to set AE attr");
+ 			return isp_err_2_errno(ret);
+ 		}
++
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647)
++		/*
++		 * alp-sdk fix (Alp Lab AB, #2277): mirror the exposure/gain
++		 * RANGE this call just pushed into isp_calib_param.modules.ae
++		 * -- the SAME struct VSI_MPI_ISP_SetCalib() (isp_vsi_init(),
++		 * above, and isp_vsi_update_cfg()'s once-guarded call)
++		 * reprograms the library from. isp_apply_ae() (isp_pico.c)
++		 * calls this function with `ae` (above) derived from video_
++		 * get_frmival() -- the sensor's OWN reported, ACTIVE frame
++		 * period -- on every stream (re)start, so this mirror is what
++		 * keeps isp_calib_param's compiled-in envelope (ov5647_ae_
++		 * envelope.h's OV5647_AE_* macros, a fixed 10 fps boot-time
++		 * default -- see that header's file comment) from staying
++		 * pinned to a rate the app never actually requested: a LATER
++		 * re-init (PM resume, or a second isp_open() after a full
++		 * alp_camera_close()/re-open, both of which call
++		 * isp_vsi_init() again) unconditionally reloads isp_calib_
++		 * param via SetCalib -- without this mirror, that reload
++		 * would silently reintroduce the stale compiled-in default,
++		 * undoing this very push for however long it takes the next
++		 * isp_apply_ae() call to land.
++		 *
++		 * Deliberately narrow: only the RANGE fields this push owns
++		 * (expTimeRange/againRange/dgainRange). manualAttr is left
++		 * alone -- `ae->int_time/again/dgain` are only meaningful in
++		 * MANUAL mode (isp_pico.c's isp_apply_ae(), `if (!enable)`
++		 * block); in the common AUTO case they are zero, and
++		 * mirroring them here would clobber isp_calib_param's own
++		 * manual fallback with zeros for no benefit. aeTarget/
++		 * damping/tolerance/weight/route/... calibration tuning is
++		 * likewise left to isp_calib_param's own compiled-in values,
++		 * same as isp_apply_wb()'s (isp_pico.c) round-trip preserves
++		 * WB's calib tuning instead of overwriting it.
++		 */
++		isp_calib_param.modules.ae.autoAttr.expTimeRange = exp_attr.autoAttr.expTimeRange;
++		isp_calib_param.modules.ae.autoAttr.againRange   = exp_attr.autoAttr.againRange;
++		isp_calib_param.modules.ae.autoAttr.dgainRange   = exp_attr.autoAttr.dgainRange;
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647) */
+ 	}
+ #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
+ 
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/ov5647_ae_envelope.h
-@@ -0,0 +1,133 @@
+@@ -0,0 +1,102 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -122,58 +214,48 @@
 + * -Werror=unused-variable. Splitting the macros out here means
 + * isp_param_conf.h only pulls in what its .ae block actually reads.
 + *
-+ * #2277: OV5647_AE_MAX_INT_LINE below used to be a single #define pinned to
-+ * the sensor's 10 fps VTS (3145 lines) regardless of which frame rate the
-+ * app actually requested -- at a faster mode (e.g. 30 fps, VTS 1050 lines,
-+ * <alp/camera.h>'s ALP_CAMERA_CONFIG_DEFAULT) AE was free to command an
-+ * exposure far longer than that mode's own frame period, stretching the
-+ * frame and dropping the effective capture rate in a dim scene instead of
-+ * holding it. OV5647_AE_MAX_INT_LINE_AT_FPS(fps) below now derives the
-+ * ceiling from whichever rate it is asked about, using the SAME formula
-+ * ov5647.c's own ov5647_frmrate_to_vts() uses (VTS = pixel_rate / (hts *
-+ * fps)) -- this header cannot #include that driver's own constants (no
-+ * include path from the ISP wrapper's inc/ dir to zephyr/drivers/video/),
-+ * so OV5647_AE_PIXEL_RATE_HZ/OV5647_AE_HTS_640X480 restate its 640x480
-+ * binned-mode values (bench-matched, ov5647.c run 63) here. The compile-
-+ * time calibration block below (isp_param_conf.h) can still only carry ONE
-+ * ceiling per build, so OV5647_AE_FPS now comes from
-+ * CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS (default 30, matching
-+ * ALP_CAMERA_CONFIG_DEFAULT) instead of a hardcoded 10 -- isp_apply_ae()
-+ * (isp_pico.c) separately re-derives and pushes a sensor-agnostic ceiling
-+ * from video_get_frmival() on every stream (re)start, generic across
-+ * whatever rate the app negotiates at runtime; this Kconfig default only
-+ * governs the calibration's compiled-in initial value, so it should track
-+ * the SDK's own default fps rather than a rate the SDK no longer requests
-+ * by default.
++ * #2277 (a rejected first cut): a first cut made OV5647_AE_MAX_INT_
++ * LINE a compile-time function of a Kconfig-selected fps
++ * (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS). That could only ever match ONE
++ * app's fps choice -- with the Kconfig defaulting to 30 (matching <alp/
++ * camera.h>'s ALP_CAMERA_CONFIG_DEFAULT) every app that actually runs at
++ * OV5647's 10 fps floor (this backend's own fallback,
++ * src/backends/camera/alif_isp_pico.c, and both examples/aen/aen-isp-
++ * ov5647-* apps, all of which pin cfg.fps = 10 for AE/CPU headroom, not 30)
++ * lost roughly two thirds of its real 10 fps exposure headroom to a
++ * compile-time ceiling sized for a rate the app never requested. A
++ * compile-time constant fundamentally cannot serve every app's fps choice.
++ *
++ * #2277 (real fix): OV5647_AE_FPS/OV5647_AE_FULL_LINES/OV5647_AE_MAX_INT_
++ * LINE below are now the CONSERVATIVE BOOT-TIME DEFAULT only -- the value
++ * VSI_MPI_ISP_SetCalib() (isp_vsi_init(), isp_api_wrapper.c) loads before
++ * any app has opened the camera and negotiated a real fps. Fixed at the
++ * sensor's 10 fps floor (its slowest supported rate, the most exposure
++ * headroom of any mode) rather than any particular app's rate, so this
++ * default is never WORSE than what any app that actually runs at 10 fps
++ * needs, only possibly stale for one that doesn't. From the first
++ * isp_apply_ae() call onward (isp_pico.c, on every stream (re)start),
++ * isp_vsi_set_param() (isp_api_wrapper.c) mirrors that call's own video_
++ * get_frmival()-derived, sensor-agnostic exposure-time range into isp_calib_
++ * param.modules.ae.autoAttr directly -- the SAME struct SetCalib() was built
++ * from -- so the compiled-in default here only governs the brief window
++ * before the first stream start, and isp_calib_param stays correct for
++ * whatever fps the app is ACTUALLY running even if a later restart/re-init
++ * reloads it from isp_calib_param again. See isp_api_wrapper.c's
++ * isp_vsi_set_param() for that mirror.
 + */
 +#define OV5647_AE_PIXEL_RATE_HZ 58333333u /* ov5647.c's OV5647_PIXEL_RATE() at 25 MHz XVCLK */
 +#define OV5647_AE_HTS_640X480   1852u     /* ov5647.c's OV5647_HTS_640X480_BINNED (0x073c) */
++#define OV5647_AE_FULL_LINES    3149  /* VTS at 10 fps -- see sensor_attributes.h's derivation */
++#define OV5647_AE_FPS           10    /* boot-time default only, see file comment above */
++#define OV5647_AE_MAX_INT_LINE  3145  /* VTS - 4 */
++#define OV5647_AE_MIN_AGAIN     1024  /* 1x floor, library units (1x = 1024) */
++#define OV5647_AE_MAX_AGAIN     65472 /* 1023 (OV5647 AGC_GAIN max) * 1024 / 16 */
++#define OV5647_AE_MIN_DGAIN     1024  /* unity -- all headroom flows through again */
++#define OV5647_AE_MAX_DGAIN     1024  /* (see sensor_attributes.h's bench-run-83 note) */
 +
-+/*
-+ * VTS (frame length, in lines) at @p fps -- ov5647_frmrate_to_vts()'s own
-+ * formula (ov5647.c), integer-truncating the same direction it does, so
-+ * this can only UNDER-report VTS, never claim more exposure headroom than
-+ * the sensor's own frame-length register actually holds.
-+ */
-+#define OV5647_AE_VTS_AT_FPS(fps) \
-+	(OV5647_AE_PIXEL_RATE_HZ / (OV5647_AE_HTS_640X480 * (vsi_u32_t)(fps)))
-+
-+/* AE integration-time ceiling, in LINES, at @p fps -- VTS - 4 lines margin
-+ * (matches the fixed 3149 - 4 = 3145 this formula replaces at the sensor's
-+ * 10 fps mode).
-+ */
-+#define OV5647_AE_MAX_INT_LINE_AT_FPS(fps) (OV5647_AE_VTS_AT_FPS(fps) - 4)
-+
-+#define OV5647_AE_FPS          CONFIG_VIDEO_ISP_VSI_CALIB_OV5647_FPS
-+#define OV5647_AE_FULL_LINES   OV5647_AE_VTS_AT_FPS(OV5647_AE_FPS)
-+#define OV5647_AE_MAX_INT_LINE OV5647_AE_MAX_INT_LINE_AT_FPS(OV5647_AE_FPS)
-+#define OV5647_AE_MIN_AGAIN    1024  /* 1x floor, library units (1x = 1024) */
-+#define OV5647_AE_MAX_AGAIN    65472 /* 1023 (OV5647 AGC_GAIN max) * 1024 / 16 */
-+#define OV5647_AE_MIN_DGAIN    1024  /* unity -- all headroom flows through again */
-+#define OV5647_AE_MAX_DGAIN    1024  /* (see sensor_attributes.h's bench-run-83 note) */
-+
-+_Static_assert(OV5647_AE_MAX_INT_LINE < OV5647_AE_FULL_LINES,
-+	       "OV5647_AE_MAX_INT_LINE must stay under its own mode's VTS");
++_Static_assert(OV5647_AE_FULL_LINES == 3149, "drifted from sensor_attributes.fullLines");
++_Static_assert(OV5647_AE_MAX_INT_LINE == 3145, "drifted from sensor_attributes.maxIntLine");
 +_Static_assert(OV5647_AE_MAX_AGAIN == 65472, "drifted from sensor_attributes.maxAgain");
 +_Static_assert(OV5647_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
 +_Static_assert(OV5647_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain");
@@ -182,68 +264,21 @@
 +/*
 + * Exposure ceiling in MICROSECONDS -- isp_param_conf.h's calib block wants
 + * its ceiling in ISP_AE_RANGE_S.expTimeRange (microseconds), OV5647_AE_MAX_
-+ * INT_LINE above is in lines; both must describe the SAME ceiling, so this
-+ * converts lines -> microseconds via the sensor's own lines-per-second rate
-+ * (fullLines lines every 1/fps seconds) -- the inverse of
++ * INT_LINE above is in lines; both must describe the SAME 10 fps ceiling, so
++ * this converts lines -> microseconds via the sensor's own lines-per-second
++ * rate (fullLines lines every 1/fps seconds) -- the inverse of
 + * vsi_get_ae_default()'s own linesPer500ms conversion (isp_api_wrapper.c)
-+ * that turns a microsecond exposure request back into lines.
-+ *
-+ * Round-trip guard: convert this back to lines through the SAME formula
-+ * vsi_get_ae_default() uses (linesPer500ms = fullLines * fps_scaled /
-+ * (2 * ISP_SNS_FPS_ACCU), fps_scaled = OV5647_AE_FPS * ISP_SNS_FPS_ACCU --
-+ * the ISP_SNS_FPS_ACCU cancels, leaving fullLines * OV5647_AE_FPS / 2) and
-+ * confirm the two ceilings still land within ONE line of each other once
-+ * the library's own integer truncation is applied both ways -- an
-+ * upper-only check (round-trip <= ceiling) can never fail here: this same
-+ * truncation direction always rounds the result DOWN, so a lower bound is
-+ * the one that actually catches a unit/order slip (e.g. dividing instead
-+ * of multiplying by OV5647_AE_FPS) landing far below the ceiling. A future
-+ * edit to any macro above that breaks this relationship fails the BUILD,
-+ * not a bench run. BUILD_ASSERT isn't visible in this header's include
-+ * chain (no <zephyr/...> here), hence _Static_assert (C11, no header
-+ * needed).
++ * that turns a microsecond exposure request back into lines. Confirmed
++ * against the bench-matched 10 fps figures: (3145 * 1000000) / (3149 * 10)
++ * = 99872, i.e. ~100 ms minus the same margin OV5647_AE_MAX_INT_LINE's own
++ * "VTS - 4" leaves.
 + */
 +#define OV5647_AE_EXP_TIME_MAX_US                                                                \
 +	((vsi_u32_t)((vsi_u64_t)OV5647_AE_MAX_INT_LINE * 1000000 /                               \
 +		      ((vsi_u64_t)OV5647_AE_FULL_LINES * OV5647_AE_FPS)))
 +
-+_Static_assert(((vsi_u64_t)OV5647_AE_EXP_TIME_MAX_US *
-+		 ((vsi_u64_t)OV5647_AE_FULL_LINES * OV5647_AE_FPS / 2) / 500000) <=
-+		       OV5647_AE_MAX_INT_LINE,
-+	       "OV5647_AE_EXP_TIME_MAX_US round-trips to more lines than OV5647_AE_MAX_INT_LINE");
-+_Static_assert(((vsi_u64_t)OV5647_AE_EXP_TIME_MAX_US *
-+		 ((vsi_u64_t)OV5647_AE_FULL_LINES * OV5647_AE_FPS / 2) / 500000) >=
-+		       OV5647_AE_MAX_INT_LINE - 1,
-+	       "OV5647_AE_EXP_TIME_MAX_US round-trips to far fewer lines than "
-+	       "OV5647_AE_MAX_INT_LINE -- check for a unit or operand-order slip");
 +_Static_assert((vsi_u64_t)OV5647_AE_MAX_INT_LINE * 16 <= 0xFFFFF,
 +	       "OV5647_AE_MAX_INT_LINE * 16 (isp_api_wrapper.c's VIDEO_CID_EXPOSURE writeback "
 +	       "scale) overflows the 20-bit video-ctrl exposure field");
 +
 +#endif /* DRIVERS_ISP_ISP_WRAPPER_INC_OV5647_AE_ENVELOPE_H */
---- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
-+++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
-@@ -105,6 +105,23 @@ static AE_SNS_DEFAULT_S sensor_attributes = {
- 	.gainThreshold = 1024,
- };
- 
-+/*
-+ * alp-sdk fix (Alp Lab AB, #2271): isp_param_conf.h's OV5647 .ae calibration
-+ * block (CONFIG_VIDEO_ISP_VSI_CALIB_OV5647 arm) needs these SAME facts as
-+ * the AE_SNS_DEFAULT_S table above -- see ov5647_ae_envelope.h's own
-+ * comment for why that's a separate header rather than this file's struct
-+ * being included directly (an unused-variable trap under -Werror when
-+ * CONFIG_ISP_LIB_AE_MODULE is off). This struct's own fields above (patch
-+ * 0006) stay hand-written literals -- a patch that edited them to
-+ * reference these macros directly would no longer reverse-apply
-+ * independently of 0011, so the two restate the SAME values as separate
-+ * literals; keeping them in sync across patches 0006 and 0011 is a
-+ * by-hand invariant, not a build-checked one (the macros' own
-+ * _Static_assert band only catches the macros drifting from THESE
-+ * literals, not this struct silently drifting from either).
-+ */
-+#include "ov5647_ae_envelope.h"
-+
- #ifdef __cplusplus
- }
- #endif

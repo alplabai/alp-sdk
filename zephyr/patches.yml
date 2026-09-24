@@ -692,7 +692,7 @@ patches:
       write, so the bench can see which library term breached its ceiling.
       Pure additive; upstream to hal_alif then drop.
   - path: hal_alif/0011-isp-ov5647-ae-calib-envelope.patch
-    sha256sum: 3582044daa88ae8e83f3c6e5dced612fb93d96ca3d46105a6b66a48c2e6328db
+    sha256sum: 81bb7342fd025dfc4a2385238ea20677dc3793affa8e1b72b55ea54563e11943
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -740,19 +740,34 @@ patches:
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
 
-      UPDATED (#2277): OV5647_AE_MAX_INT_LINE was a single #define pinned
-      to the sensor's 10 fps VTS (3145 lines) regardless of the ACTIVE
-      requested rate -- at 30 fps (<alp/camera.h>'s
-      ALP_CAMERA_CONFIG_DEFAULT, VTS 1050 lines) AE was free to command an
-      exposure far past that mode's own frame period, stretching the
-      frame and dropping the effective capture rate in a dim scene.
-      ov5647_ae_envelope.h now derives the ceiling from a formula
-      (OV5647_AE_MAX_INT_LINE_AT_FPS(fps), matching ov5647.c's own
-      ov5647_frmrate_to_vts()) instead of one fixed constant; this
-      compile-time calibration block can still only carry one ceiling per
-      build, so its own OV5647_AE_FPS now reads a new Kconfig
-      (VIDEO_ISP_VSI_CALIB_OV5647_FPS, default 30, matching the SDK's own
-      default) instead of a hardcoded 10.
+      UPDATED (#2277, first cut, REVERTED): OV5647_AE_MAX_INT_LINE was a
+      single #define pinned to the sensor's 10 fps VTS (3145 lines)
+      regardless of the ACTIVE requested rate. A first attempt made it a
+      function of a Kconfig-selected fps (VIDEO_ISP_VSI_CALIB_OV5647_FPS,
+      default 30, matching ALP_CAMERA_CONFIG_DEFAULT) -- still one
+      compile-time value, and every app in this repo that actually runs
+      the OV5647 (this backend's own 10 fps fallback,
+      src/backends/camera/alif_isp_pico.c, plus both examples/aen/aen-isp-
+      ov5647-* apps) pins cfg.fps = 10, not 30, so that Kconfig's 30 fps
+      default left a REAL 10 fps app's compiled-in ceiling at roughly a
+      third of its actual entitlement. Reverted for the fix below.
+
+      UPDATED (#2277, real fix): a compile-time constant cannot serve
+      every app's fps choice, so isp_param_conf.h's OV5647_AE_* macros
+      (ov5647_ae_envelope.h) go back to being a fixed 10 fps BOOT-TIME
+      default only (the sensor's own floor rate, the most exposure
+      headroom of any mode, so never worse than what a real 10 fps app
+      needs). isp_api_wrapper.c's isp_vsi_set_param() now mirrors the
+      exposure/gain RANGE isp_apply_ae() (isp_pico.c) pushes at runtime --
+      already correctly derived from video_get_frmival(), the sensor's
+      OWN reported ACTIVE frame period, on every stream (re)start -- into
+      isp_calib_param.modules.ae.autoAttr directly, the SAME struct
+      SetCalib() reprograms the library from on any later reload (PM
+      resume, a second isp_open() after a full close/reopen). So the
+      compiled-in default only governs the brief window before the first
+      stream start, and the calibration block stays correct for whatever
+      fps the app actually negotiates, not a rate guessed at compile
+      time.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

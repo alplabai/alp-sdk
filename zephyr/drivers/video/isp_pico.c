@@ -929,6 +929,69 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
  */
 static bool ae_readback_mismatch_logged;
 
+/*
+ * #2277 bench diagnostic: the AE integration ceiling actually pushed (and,
+ * separately, actually held by the library -- see the readback block below)
+ * plus the ACTIVE frame period it was derived from, both in microseconds.
+ * Non-static (not `static`) so they resolve as ordinary global symbols in
+ * the ELF -- `nm zephyr.elf | grep isp_ae_diag` gives an address a J-Link
+ * `mem32` read can sample without halting the core, the same technique
+ * ram_console_buf bench sessions already use. Also LOG_INF'd at most once
+ * per second (isp_ae_diag_log(), below) for a console-only bench setup.
+ * `volatile`: read via SWD/log from outside this translation unit's normal
+ * control flow, not just this file's own threads.
+ */
+volatile uint32_t isp_ae_diag_applied_int_time_max_us;
+volatile uint32_t isp_ae_diag_frame_period_us;
+
+/* Rate-limits isp_ae_diag_applied_int_time_max_us/isp_ae_diag_frame_period_us
+ * LOG_INF output to at most once per second -- isp_apply_ae() (below) can
+ * run far more often than that (this driver's restart-per-frame pattern,
+ * see the run-74/85 comments above isp_apply_wb()), and a console flooded
+ * at frame rate would itself perturb the timing being measured.
+ */
+static void isp_ae_diag_log(void)
+{
+	static int64_t last_log_ms;
+	int64_t        now = k_uptime_get();
+
+	if (last_log_ms != 0 && now - last_log_ms < 1000) {
+		return;
+	}
+	last_log_ms = now;
+
+	LOG_INF("AE diag: applied int_time_max_us=%u frame_period_us=%u",
+	        isp_ae_diag_applied_int_time_max_us,
+	        isp_ae_diag_frame_period_us);
+}
+
+/*
+ * #2277: pulled out of isp_apply_ae() (below) as its own pure function --
+ * frame_period_us/margin_us were local variables inline in that function,
+ * untestable without the whole device/video-subsystem context isp_apply_ae()
+ * needs (a bound `dev`, a `config->controller` video device). This is the
+ * sensor-agnostic exposure-time-ceiling derivation the review round on
+ * #2277 asked to see exercised directly: given the ACTIVE frame interval
+ * (whatever video_get_frmival() returned, isp_apply_ae()'s caller), return
+ * the exposure ceiling in microseconds -- the frame period minus a generic
+ * 2% blanking margin, floored at the raw period if the margin would
+ * otherwise invert it. `frmival_den == 0` (an invalid interval, the same
+ * guard isp_apply_ae() applies before calling this) returns 0; the caller
+ * keeps its own fallback constant in that case rather than this function
+ * guessing one.
+ */
+static uint32_t isp_ae_int_time_max_us_from_frmival(uint32_t frmival_num, uint32_t frmival_den)
+{
+	if (frmival_den == 0) {
+		return 0;
+	}
+
+	uint64_t frame_period_us = (uint64_t)frmival_num * 1000000ULL / frmival_den;
+	uint64_t margin_us       = frame_period_us / 50; /* 2% */
+
+	return (uint32_t)(frame_period_us > margin_us ? frame_period_us - margin_us : frame_period_us);
+}
+
 static int isp_apply_ae(const struct device *dev, bool enable)
 {
 	const struct isp_config *config = dev->config;
@@ -970,14 +1033,10 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 
 		if (video_get_frmival(config->controller, &frmival) == 0 &&
 		    frmival.denominator > 0) {
-			uint64_t frame_period_us =
-				(uint64_t)frmival.numerator * 1000000ULL /
-				frmival.denominator;
-			uint64_t margin_us = frame_period_us / 50; /* 2% */
-
-			int_time_max_us = (uint32_t)(frame_period_us > margin_us
-							      ? frame_period_us - margin_us
-							      : frame_period_us);
+			int_time_max_us = isp_ae_int_time_max_us_from_frmival(
+				frmival.numerator, frmival.denominator);
+			isp_ae_diag_frame_period_us = (uint32_t)((uint64_t)frmival.numerator *
+								  1000000ULL / frmival.denominator);
 		}
 
 		/*
@@ -1092,6 +1151,13 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		if (rb_ret) {
 			LOG_WRN("AE attr readback failed: %d", rb_ret);
 		} else {
+			/* #2277: the LIBRARY's own held value, not just this
+			 * call's push -- the strongest evidence available that
+			 * the runtime-active ceiling (not a stale compile-time
+			 * one) is what the ISP is actually enforcing. */
+			isp_ae_diag_applied_int_time_max_us = rb.ae.int_time_max;
+			isp_ae_diag_log();
+
 			bool matches = (rb.ae.int_time_max == params.ae.int_time_max) &&
 			               (rb.ae.again_max == params.ae.again_max) &&
 			               (rb.ae.dgain_min == params.ae.dgain_min) &&
