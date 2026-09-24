@@ -45,11 +45,15 @@
  *   - **CH2** (phases 3 + 4) -> `VDD_0P75`, the DEEPX DX-M1 0.75 V core
  *     rail (V2N-M1 only).  Disabled at boot; brought up by
  *     da9292_ch2_sequence() -- run by U-Boot `board_late_init()` in
- *     A55-boot mode.  CM33-boot mode (ACT88760 GPIO5 `V2N_BOOT_CPU_SEL`)
- *     has NO owner yet: CA55/Linux is the sole RIIC8 / BRD_I2C master
- *     (`metadata/e1m_modules/v2n/core-ownership.yaml`), so the CM33
- *     cannot run it until that decision changes; see `boot_modes:` in
- *     `metadata/e1m_modules/v2n/power-tree.yaml`.  On V2N base CH2 stays
+ *     A55-boot mode, and by `examples/v2n/v2n-cm33-deepx-rail` in
+ *     CM33-boot mode (RZ/V2N pin `BOOTSELCPU` strapped low -- RZ/V2N HW
+ *     manual R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1).  Ownership is
+ *     time-sliced, not concurrent: CM33-cold-boot always releases the
+ *     CA55 later, so the CM33 masters RIIC8/BRD_I2C only until that
+ *     handoff, after which CA55/Linux is the sole master again, same as
+ *     A55-boot mode (`metadata/e1m_modules/v2n/core-ownership.yaml`'s
+ *     `boot_mode_core`; `boot_modes:` in
+ *     `metadata/e1m_modules/v2n/power-tree.yaml`).  On V2N base CH2 stays
  *     disabled because DEEPX isn't populated.
  *
  * The phase pairs themselves don't surface as separate channels at
@@ -491,7 +495,8 @@ alp_status_t da9292_get_voltage_mv(da9292_t *ctx, da9292_channel_t ch, uint16_t 
  * Builds for Zephyr and Linux / U-Boot; every OS dependency is a
  * caller-opened ::alp_gpio_t or the delay callback.  Only the one owner
  * recorded for the running boot mode may call it (A55-boot: U-Boot;
- * CM33-boot: blocked -- the CM33 must not master RIIC8 today).
+ * CM33-boot: examples/v2n/v2n-cm33-deepx-rail, time-sliced -- the CM33
+ * must not still be mastering RIIC8 after it hands off to the CA55).
  *
  * @warning The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions
  *          (PMC_CFG_00 = 0xFF, read into @p res): driving the EN2 pin

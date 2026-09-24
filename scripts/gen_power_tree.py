@@ -139,13 +139,30 @@ def load_ownership(tree_path: Path) -> dict | None:
     return yaml.safe_load(p.read_text(encoding="utf-8")) if p.is_file() else None
 
 
+def _core_for(rows: dict, peripheral: str, mode: str) -> str | None:
+    """The core that drives `peripheral` DURING boot mode `mode`: its
+    core-ownership.yaml `boot_mode_core[mode]` if that qualifier is
+    present, else its flat `core` (unqualified rows drive the same core in
+    every boot mode -- unchanged behaviour for every row that never adds
+    the qualifier)."""
+    row = rows.get(peripheral)
+    if row is None:
+        return None
+    per_mode = row.get("boot_mode_core") or {}
+    return per_mode.get(mode, row.get("core"))
+
+
 def _check_boot_modes(tree: dict, ownership: dict | None) -> list[str]:
     """Boot-mode owners vs the AMP core-ownership policy: a boot mode may
     only name cm33 as BRD_I2C master / DEEPX sequence owner when
     core-ownership.yaml gives the RIIC8 pads (and, for the sequence, P64 /
-    P65) to the m33 -- otherwise two masters share one RIIC8 block."""
+    P65) to the m33 FOR THAT BOOT MODE (`boot_mode_core`, falling back to
+    the flat `core`) -- otherwise two masters could share one RIIC8 block.
+    A pad whose ownership is genuinely time-sliced (the CM33 masters it
+    only until it releases the CA55, then the A55 takes over) is not
+    "concurrent": `boot_mode_core` names one core per mode, never both."""
     errs: list[str] = []
-    cores = {r["peripheral"]: r.get("core") for r in (ownership or {}).get("core_ownership") or []}
+    rows = {r["peripheral"]: r for r in (ownership or {}).get("core_ownership") or []}
     for mode, bm in tree["boot_modes"].items():
         rail_owners = {r["owner"][mode] for r in tree["rails"]}
         if bm.get("status") == "blocked":
@@ -155,13 +172,15 @@ def _check_boot_modes(tree: dict, ownership: dict | None) -> list[str]:
             continue
         if ownership is None:
             continue
-        if bm["bus_master"] == "cm33" and any(cores.get(k) != "m33" for k in ("RIIC8_SCL8", "RIIC8_SDA8")):
+        if bm["bus_master"] == "cm33" and any(
+                _core_for(rows, k, mode) != "m33" for k in ("RIIC8_SCL8", "RIIC8_SDA8")):
             errs.append(f"boot_modes.{mode}: bus_master cm33 but core-ownership.yaml gives RIIC8 to "
-                        f"{cores.get('RIIC8_SCL8')} (the CM33 must not master RIIC8)")
+                        f"{_core_for(rows, 'RIIC8_SCL8', mode)} for this boot mode "
+                        f"(the CM33 must not master RIIC8)")
         if (bm["deepx_sequence_owner"] == "cm33" or "cm33" in rail_owners) and any(
-                cores.get(k) != "m33" for k in ("DEEPX_CORE_0P75_EN", "DEEPX_PWR_EN_REQ")):
+                _core_for(rows, k, mode) != "m33" for k in ("DEEPX_CORE_0P75_EN", "DEEPX_PWR_EN_REQ")):
             errs.append(f"boot_modes.{mode}: cm33 owns the DEEPX sequence but core-ownership.yaml gives "
-                        f"P64/P65 to {cores.get('DEEPX_CORE_0P75_EN')}")
+                        f"P64/P65 to {_core_for(rows, 'DEEPX_CORE_0P75_EN', mode)} for this boot mode")
     return errs
 
 

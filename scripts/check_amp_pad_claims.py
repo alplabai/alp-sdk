@@ -69,14 +69,21 @@ LINUX_DT_DIR = Path("meta-alp-sdk") / "recipes-kernel" / "linux"
 # error below -- an exemption that quietly stops applying is how a gate
 # rots into decoration.
 #
-# BRD_I2C / RIIC8 is not dual-master: Cortex-A55/Linux is the SOLE
-# master of the whole RIIC8 bus (metadata/e1m_modules/v2n/
-# core-ownership.yaml attributes P06/P07 to `core: "a55"`, not "m33");
-# on the CM33 board `&i2c8` is disabled and has no `alp-i2c0` alias
+# BRD_I2C / RIIC8 is TIME-SLICED, not concurrently dual-master: the flat
+# `core` this gate reads (via metadata/pinmux/v2n.yaml, projected from
+# metadata/e1m_modules/v2n/core-ownership.yaml) stays `"a55"` for P06/P07
+# (and P64/P65) -- core-ownership.yaml's `boot_mode_core` qualifier that
+# lets the CM33 master these pads during its own cm33_boot pre-handoff
+# window (examples/v2n/v2n-cm33-deepx-rail) is consumed only by
+# scripts/gen_power_tree.py's cross_check(), never by this gate or by
+# gen_pinmux_capability.py.  On the DEFAULT (generated) CM33 board
+# `&i2c8` is disabled and has no `alp-i2c0` alias
 # (scripts/gen_zephyr_board.py `_v2n_dts()`), so its unreferenced
-# `i2c8_pins` group never muxes these pads.  No EXEMPT entry is
-# needed: this gate only flags a Linux DT claim on a `core: "m33"` pad,
-# and P06/P07 do not resolve to one.
+# `i2c8_pins` group never muxes these pads; the one app that enables
+# them (v2n-cm33-deepx-rail) does so in its OWN board overlay, which
+# lives under examples/, outside this gate's LINUX_DT_DIR scan.  No
+# EXEMPT entry is needed: this gate only flags a Linux DT claim on a
+# `core: "m33"` pad, and P06/P07/P64/P65 do not resolve to one.
 EXEMPT: dict[tuple[str, str], str] = {}
 
 _GPIO_RE = re.compile(r"RZV2N_GPIO\(\s*([0-9A-Z])\s*,\s*(\d+)\s*\)")

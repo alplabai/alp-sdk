@@ -45,29 +45,39 @@ families:
 bus: brd_i2c   # RIIC8; pads P06 (SDA8) / P07 (SCL8)
 
 # Who masters BRD_I2C and who runs the DEEPX rail sequence, per boot mode.
-# The boot mode is strapped on ACT88760 GPIO5 (V2N_BOOT_CPU_SEL); which
-# GPIO5 level selects which CPU is not yet recorded (TBD).
+# The boot mode is strapped on the RZ/V2N pin BOOTSELCPU: LOW = CM33 cold
+# boot, HIGH = CA55 cold boot, internal pull-down (RZ/V2N HW manual
+# R01UH1071EJ0110 Rev.1.10 S1.9 Table 1.9-1).  BOOTSELCPU is driven by
+# ACT88760 GPIO5 (net V2N_BOOT_CPU_SEL -- the CMI drives it HIGH at
+# ~8.6 ms after MODULE_EN, i.e. CA55 cold boot is the power-on default)
+# and is also routed to the E1 connector as an external override net.
 #
-# cm33_boot is BLOCKED: da9292_ch2_sequence() is OS-agnostic and builds for
-# Zephyr, but the standing maintainer decision of 2026-09-24
-# (core-ownership.yaml RIIC8_SCL8 / RIIC8_SDA8) makes CA55/Linux the sole
-# master of the whole RIIC8 / BRD_I2C bus and gives P64 / P65 to the A55;
-# the CM33 board files disable &i2c8.  Two masters on one RIIC8 block can
-# land a garbled transaction on any PMIC register -- no driver guard can
-# stop that.  Unblocking means changing, in one slice: core-ownership.yaml
-# per boot mode, the pinmux core for P64 / P65 / PA6, the CM33 &i2c8, the
-# Linux i2c8 status per boot mode, the RIIC8 clock-keep hunk, the U-Boot
-# 0004 GPIO5 gate, and the GPIO5 level here.  cross_check() enforces it.
+# Ownership is TIME-SLICED, not concurrent, because CM33-cold-boot mode
+# supports only xSPI or SCIF download boot sources and the CM33 always
+# boots FIRST and releases the CA55 later (same HW-manual table): in
+# cm33_boot the CM33 is RIIC8 master and runs da9292_ch2_sequence()
+# BEFORE it releases the CA55; once released, the A55/Linux takes RIIC8
+# over exclusively, same as a55_boot.  U-Boot 0004
+# (meta-alp-sdk/recipes-bsp/u-boot/u-boot/0004-rzv2n-dev-ALP-E1M-DEEPX-rail-bringup.patch)
+# is already idempotent on its warm path (CH2 already at 0.75 V / VSTEP=0
+# -> skip the program phase, zero CTRL_01 writes), so running it again in
+# cm33_boot mode's a55_boot tail is a verify, not a re-sequence.  The
+# per-boot-mode qualifier that backs `bus_master: cm33` /
+# `deepx_sequence_owner: cm33` below at the pad level lives in
+# metadata/e1m_modules/v2n/core-ownership.yaml's `boot_mode_core` field
+# (RIIC8_SCL8 / RIIC8_SDA8 / DEEPX_CORE_0P75_EN / DEEPX_PWR_EN_REQ);
+# cross_check() rejects any boot mode naming cm33 that isn't backed there,
+# so a real concurrent (non-time-sliced) claim still hard-fails.
 boot_modes:
   a55_boot:
     status: supported
     bus_master: a55          # U-Boot board_late_init(), then Linux
     deepx_sequence_owner: u-boot
   cm33_boot:
-    status: blocked
-    blocked_by: "RIIC8 / BRD_I2C single-master decision 2026-09-24 (core-ownership.yaml)"
-    bus_master: a55          # Linux still binds i2c8; the CM33 must not master it
-    deepx_sequence_owner: none
+    status: supported
+    bus_master: cm33          # CM33 masters RIIC8 until it releases the CA55 -- see handover
+    deepx_sequence_owner: cm33
+    handover: "CM33 releases RIIC8 mastership + the DEEPX sequence to the CA55/Linux before releasing the CA55 core itself (see the comment above); examples/v2n/v2n-cm33-deepx-rail runs this side, U-Boot 0004 verifies (warm/idempotent) once the A55 boots"
 
 window_policy:
   default_tolerance_pct: 5
@@ -295,9 +305,14 @@ rails:
     window_mv: [715, 785]
     critical: false
     control: sequence
-    owner: { a55_boot: u-boot, cm33_boot: none }
+    owner: { a55_boot: u-boot, cm33_boot: cm33 }
     populated_on: [v2n-m1]
-    evidence: "report VDD_0P75 0.75 V after CORE_0P75_EN; U-Boot 0004 patch programs 0x0C/0x0D = 0x96"
+    evidence: >-
+      report VDD_0P75 0.75 V after CORE_0P75_EN; U-Boot 0004 patch programs
+      0x0C/0x0D = 0x96.  cm33_boot owner is da9292_ch2_sequence() called
+      from examples/v2n/v2n-cm33-deepx-rail, BEFORE the CM33 releases the
+      CA55 (see the boot_modes comment above); U-Boot 0004 then runs again
+      on the A55 as a warm/idempotent verify, not a re-sequence.
 
   # ---- TPS628640 bucks (appear on BRD_I2C once DEEPX_CORE_0P75_EN is high) ----
   - id: vdd0v85_lpddr

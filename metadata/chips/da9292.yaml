@@ -49,7 +49,7 @@ channels:
   - id: ch2
     phases:        [phase3, phase4]
     role_v2n:      "unused on V2N base (DEEPX not fitted)"
-    role_v2n_m1:   "0.75 V DEEPX core rail; sequenced by U-Boot in A55-boot mode (same steps as da9292_ch2_sequence()); CM33-boot mode is blocked -- the CM33 must not master RIIC8 (metadata/e1m_modules/v2n/core-ownership.yaml, power-tree.yaml boot_modes). OTP PMC_CFG_00 (0x0E) = 0xFF enables the EN2 / VSEL2 pin functions: driving EN2 before the sequence finishes puts the OTP 1.80 V on the DEEPX core"
+    role_v2n_m1:   "0.75 V DEEPX core rail; sequenced by U-Boot in A55-boot mode and by examples/v2n/v2n-cm33-deepx-rail in CM33-boot mode (same da9292_ch2_sequence(), time-sliced -- the CM33 masters RIIC8 only until it hands off to the CA55; metadata/e1m_modules/v2n/core-ownership.yaml boot_mode_core, power-tree.yaml boot_modes). OTP PMC_CFG_00 (0x0E) = 0xFF enables the EN2 / VSEL2 pin functions: driving EN2 before the sequence finishes puts the OTP 1.80 V on the DEEPX core"
     voltage_range: "0.3..1.275 V (VSTEP=0) or 0.6..1.9 V (VSTEP=1); OTP boots VSTEP=1"
     ctrl_reg:      0x07
     en_bit:        1

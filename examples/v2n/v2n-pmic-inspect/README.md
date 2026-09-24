@@ -81,13 +81,19 @@ The one exception is the GPIO4 defect, when `--fix-gpio4-polarity` is the action
 - **Lines are found by pin controller.** The app uses the pinctrl gpiochip (override it with `--gpiochip N`) and the assumed `pinctrl-rzg2l` numbering `port*8+pin`, so P64 = 52 and P65 = 53. It refuses unless the kernel names those lines `P64`/`P6_4` and `P65`/`P6_5`.
 - **The process stays running while the rail is up.** If the sequence succeeds, it keeps holding the lines, because the RZ pin controller returns a released line to input. SIGINT/SIGTERM/SIGHUP powers the rail down in order: P64 goes low first, then CH2_EN is cleared. Killing the process uncleanly (SIGKILL) releases P64, which then floats under a live CH2.
 
-**Boot mode.** ACT88760 GPIO5 (`V2N_BOOT_CPU_SEL`) straps which CPU
-boots. In A55-boot mode, U-Boot owns the DEEPX sequence and CA55/Linux
-is the sole BRD_I2C (RIIC8) master. CM33-boot mode is blocked: the CM33
-must not master RIIC8 (`metadata/e1m_modules/v2n/core-ownership.yaml`),
-so no CM33 image may run the sequence (`boot_modes:` in
-`metadata/e1m_modules/v2n/power-tree.yaml`). The GPIO5 level for each
-mode is not recorded yet, so the app prints it but cannot gate on it.
+**Boot mode.** The boot CPU is a hardware strap: pin `BOOTSELCPU`
+(RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1) selects
+LOW = CM33 cold boot, HIGH = CA55 cold boot, driven by ACT88760 GPIO5
+(`V2N_BOOT_CPU_SEL` -- the CMI drives it HIGH by default, ~8.6 ms after
+`MODULE_EN`, so A55-boot is the power-on default). In A55-boot mode,
+U-Boot owns the DEEPX sequence and CA55/Linux is the sole BRD_I2C
+(RIIC8) master. In CM33-boot mode the CM33 masters RIIC8 and owns the
+sequence itself, time-sliced BEFORE it releases the CA55 -- see
+`examples/v2n/v2n-cm33-deepx-rail`
+(`boot_modes:` in `metadata/e1m_modules/v2n/power-tree.yaml`,
+`boot_mode_core` in `metadata/e1m_modules/v2n/core-ownership.yaml`).
+This app itself still only reads GPIO5's level for display; it does not
+gate on it.
 
 Nothing here has been run on silicon yet.
 

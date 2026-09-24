@@ -59,21 +59,44 @@ def test_real_power_tree_is_clean(real):
     assert g.cross_check(tree, chips, presets, g.load_ownership(TREE)) == []
 
 
-def test_cm33_bus_master_contradicting_core_ownership_fails(real):
-    """The 2026-09-24 decision gives RIIC8 + P64/P65 to the A55: a boot
-    mode naming cm33 as BRD_I2C master / DEEPX owner must fail."""
+def test_cm33_bus_master_needs_boot_mode_core_backing(real):
+    """cm33_boot really does name cm33 as BRD_I2C master / DEEPX owner now
+    (2026-09-24 time-sliced-ownership follow-up), backed by
+    core-ownership.yaml's `boot_mode_core` qualifier -- but ONLY because
+    that qualifier is there.  Strip it (simulating the pre-qualifier
+    ownership file) and cross_check() must still reject the same
+    real power-tree.yaml as a would-be dual-master config."""
     tree, chips, presets = real
-    tree = copy.deepcopy(tree)
-    tree["boot_modes"]["cm33_boot"] = {"status": "supported", "bus_master": "cm33",
-                                       "deepx_sequence_owner": "cm33"}
-    errs = g.cross_check(tree, chips, presets, g.load_ownership(TREE))
+    ownership = copy.deepcopy(g.load_ownership(TREE))
+    for row in ownership["core_ownership"]:
+        row.pop("boot_mode_core", None)
+    errs = g.cross_check(tree, chips, presets, ownership)
+    assert any("bus_master cm33" in e for e in errs)
+    assert any("owns the DEEPX sequence" in e for e in errs)
+
+
+def test_cm33_bus_master_with_a55_only_boot_mode_core_fails(real):
+    """A `boot_mode_core` that exists but still says a55 for cm33_boot
+    (e.g. a typo'd qualifier) must fail the same way as no qualifier at
+    all -- the check reads the PER-MODE value, not just presence."""
+    tree, chips, presets = real
+    ownership = copy.deepcopy(g.load_ownership(TREE))
+    for row in ownership["core_ownership"]:
+        if "boot_mode_core" in row:
+            row["boot_mode_core"]["cm33_boot"] = "a55"
+    errs = g.cross_check(tree, chips, presets, ownership)
     assert any("bus_master cm33" in e for e in errs)
     assert any("owns the DEEPX sequence" in e for e in errs)
 
 
 def test_blocked_boot_mode_with_runtime_owner_fails(real):
+    """The `status: blocked` mechanism itself (no longer used by the real
+    v2n tree since cm33_boot became time-sliced) still works when a tree
+    sets it -- forced synthetically here since nothing real exercises it
+    any more."""
     tree, chips, presets = real
     tree = copy.deepcopy(tree)
+    tree["boot_modes"]["cm33_boot"]["status"] = "blocked"
     _rail(tree, "vdd_0p75")["owner"]["cm33_boot"] = "cm33"
     assert any("cm33_boot: blocked" in e for e in g.cross_check(tree, chips, presets))
 

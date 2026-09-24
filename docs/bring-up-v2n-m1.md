@@ -103,16 +103,26 @@ a rail fault.
 The same sequence exists as an OS-agnostic driver function,
 `da9292_ch2_sequence()` in `chips/da9292/` (caller-opened GPIOs + a delay
 callback; it also checks CH2 OV / OC after P64 goes high, because the OTP
-masks OV out of PG).  **CM33-boot mode is blocked:** it would need the CM33
-to master RIIC8 and drive P64 / P65, which the 2026-09-24 single-master
-decision forbids (`core-ownership.yaml`).  `boot_modes:` in
-`metadata/e1m_modules/v2n/power-tree.yaml` records
-`cm33_boot: status: blocked`, and `validate_metadata.py` rejects a cm33 owner
-until core-ownership gives RIIC8 and P64 / P65 to the m33.  Unblocking it
-changes, together: core-ownership per boot mode, the pinmux core of P64 / P65
-/ PA6, the CM33 `&i2c8`, the Linux `i2c8` status, the RIIC8 clock-keep hunk,
-a GPIO5 `V2N_BOOT_CPU_SEL` gate in U-Boot 0004, and the GPIO5 level (not yet
-recorded).  Exactly one owner runs the sequence per boot.
+masks OV out of PG).  **CM33-boot mode now runs it too, time-sliced against
+the CA55** (`examples/v2n/v2n-cm33-deepx-rail`): the boot-CPU choice is a
+hardware strap, not a software decision -- RZ/V2N HW manual
+R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1, pin `BOOTSELCPU`
+(LOW = CM33 cold boot, HIGH = CA55 cold boot, driven by ACT88760 GPIO5 net
+`V2N_BOOT_CPU_SEL`, which the CMI drives HIGH by default ~8.6 ms after
+`MODULE_EN`).  CM33-cold-boot supports only xSPI/SCIF download boot
+sources and the CM33 always boots first and releases the CA55 later, so
+ownership is time-sliced, not concurrent: in `cm33_boot` mode the CM33
+masters RIIC8 and drives P64/P65 UNTIL it releases the CA55; the A55/Linux
+takes over exclusively after that (and for the whole of `a55_boot` mode),
+same as before.  `boot_modes:` in `metadata/e1m_modules/v2n/power-tree.yaml`
+records `cm33_boot: bus_master: cm33, deepx_sequence_owner: cm33` plus a
+`handover` note; `core-ownership.yaml`'s new `boot_mode_core` qualifier on
+RIIC8_SCL8/SDA8 and P64/P65 backs it per boot mode, and
+`gen_power_tree.py`'s `cross_check()` (reached from `validate_metadata.py`)
+still rejects any boot mode naming `cm33` that qualifier doesn't back --
+a real dual-master config still hard-fails.  Releasing the CA55 itself is
+NOT yet implemented (no confirmed RZ/V2N CPU-reset-control register) --
+tracked in alp-sdk#2289.
 
 The DA9292-AROVx OTP enables the EN2 / VSEL2 pin functions (PMC_CFG_00
 `0x0E` = `0xFF`; `da9292_ch2_sequence()` reports it in `res.pmc_cfg_00`).

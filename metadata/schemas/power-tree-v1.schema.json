@@ -61,6 +61,11 @@
         "blocked_by": {
           "type": "string",
           "minLength": 1
+        },
+        "handover": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Free-text note for a boot mode whose bus_master/deepx_sequence_owner is not the mode's sole owner for its whole duration -- e.g. cm33_boot: the CM33 masters RIIC8/BRD_I2C and runs the DEEPX sequence ONLY until it releases the CA55 (RZ/V2N BOOTSELCPU low = CM33 cold boot; RZ/V2N HW manual R01UH1071EJ0110 Rev.1.10 S1.9 Table 1.9-1), after which the A55/Linux takes over -- see metadata/e1m_modules/v2n/core-ownership.yaml's boot_mode_core qualifier for the pad-level attribution this implies."
         }
       }
     }

@@ -123,13 +123,28 @@ SRC_URI:append:rzv2n-family = "${@' file://0003-rzv2n-dev-ALP-E1M-4gb-memory-tie
 # DA9292 PMIC's CH2 to 0.75V and confirms power-good BEFORE the 0001 mux/
 # M1_RESET-release step is allowed to run -- U-Boot is the sole writer of
 # the DA9292 and the sole driver of P64 (DEEPX_CORE_0P75_EN) / P65
-# (DEEPX_PWR_EN_REQ); the CM33 must never master RIIC8/BRD_I2C or claim
-# these pads (metadata/pinmux/v2n.yaml, metadata/e1m_modules/v2n/
-# core-ownership.yaml in alp-sdk). CONFIG_ALP_E1M_DEEPX_RAIL (default n)
-# forces the rail step even before a V2M unit's EEPROM manifest is
-# burned; wired below for the V2M MACHINEs only via deepx-rail.cfg -- see
+# (DEEPX_PWR_EN_REQ) WHENEVER U-BOOT RUNS -- which is every A55 boot,
+# including one released by the CM33 (see below). CONFIG_ALP_E1M_DEEPX_RAIL
+# (default n) forces the rail step even before a V2M unit's EEPROM manifest
+# is burned; wired below for the V2M MACHINEs only via deepx-rail.cfg -- see
 # that file's own header for why forcing it there is redundant, not a
 # relaxation, once the manifest is valid.
+#
+# CM33-boot mode (RZ/V2N pin BOOTSELCPU strapped low -- RZ/V2N HW manual
+# R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1, and see
+# metadata/e1m_modules/v2n/core-ownership.yaml's boot_mode_core in
+# alp-sdk): the CM33 masters RIIC8/BRD_I2C and runs the DA9292 CH2
+# sequence itself FIRST (alp-sdk's examples/v2n/v2n-cm33-deepx-rail),
+# then releases the CA55. By the time THIS 0004 code below runs, the
+# CM33 has already handed the bus back -- 0004's program phase is
+# idempotent on a warm rail (VSTEP already 0 and both VOUT_CH2 registers
+# already at the target code -> steps 3-5 skip entirely, zero CTRL_01
+# writes), so re-running it here is a VERIFY, not a re-sequence, and safe
+# without any code change. FOLLOW-UP (not done in this change -- U-Boot
+# is not rebuilt here): 0004 should read the boot-CPU-select state
+# (ACT88760 GPIO5 `V2N_BOOT_CPU_SEL`) and log that it ran in verify-only
+# mode when the rail was already up, instead of relying on the warm
+# path's silence to imply it.
 #
 # Placed AFTER the 0003 append above, not with 0001/0002 at the top: the
 # meta-alp-sdk patch order is PMIC-removal (meta-renesas, ahead of every

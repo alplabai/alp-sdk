@@ -2858,6 +2858,30 @@
           "models": false,
           "peripherals": true
         },
+        "name": "v2n-cm33-deepx-rail",
+        "osSet": [
+          "zephyr"
+        ],
+        "path": "examples/v2n/v2n-cm33-deepx-rail",
+        "som": "E1M-V2M101",
+        "summary": "Sequence the DEEPX DX-M1 core rail (DA9292 CH2, `VDD_0P75`, 0.75 V) from the CM33 system-manager, in **CM33-boot mode only**."
+      },
+      {
+        "board": "e1m-x-evk",
+        "coreCount": 1,
+        "cores": [
+          {
+            "app": "./src",
+            "id": "m33_sm",
+            "os": "zephyr"
+          }
+        ],
+        "declares": {
+          "chips": true,
+          "ipc": false,
+          "models": false,
+          "peripherals": true
+        },
         "name": "v2n-eeprom-manifest-dump",
         "osSet": [
           "zephyr"

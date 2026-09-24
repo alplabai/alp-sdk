@@ -147,9 +147,15 @@ for V2N-M1), and installed with `act8760_set_limits()` /
   `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
   GD32 in reset; the volatile fix is `0x08`).
 
-The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`.  In A55-boot mode
-U-Boot runs it.  CM33-boot mode is **blocked**: the CM33 must not master
-RIIC8 (see above), so no CM33 image may run it until that decision changes.
+The DEEPX DA9292 CH2 sequence is `da9292_ch2_sequence()`.  In `a55_boot` mode
+U-Boot runs it, after which the CM33 must not master RIIC8 (see above).  In
+`cm33_boot` mode (RZ/V2N `BOOTSELCPU` strapped low -- RZ/V2N HW manual
+R01UH1071EJ0110 Rev.1.10 Sec.1.9 Table 1.9-1) the CM33 masters RIIC8 and runs
+the sequence itself, time-sliced BEFORE it releases the CA55 -- see
+`examples/v2n/v2n-cm33-deepx-rail`.  Ownership per boot mode is recorded in
+`metadata/e1m_modules/v2n/power-tree.yaml` (`boot_modes:`) and
+`metadata/e1m_modules/v2n/core-ownership.yaml` (`boot_mode_core`); a real
+dual-master config still hard-fails `gen_power_tree.py`'s `cross_check()`.
 Bench tool: [`examples/v2n/v2n-pmic-inspect/`](../../examples/v2n/v2n-pmic-inspect/).
 
 ## Boot + identification
