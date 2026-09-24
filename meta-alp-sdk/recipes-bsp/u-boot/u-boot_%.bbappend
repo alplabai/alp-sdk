@@ -202,7 +202,23 @@ SRC_URI:append:rzv2n-family = " file://0005-i2c-rzg2l_riic-combined-register-rea
 # 0001-0004 (rzv2n-dev.c's own hunk lands after 0004's I2C0 addition,
 # which it does not touch) and additive-only to 0005's rzg2l_riic.c
 # hunks, so ordering after 0005 is not order-sensitive, only readable.
-# BENCH-PENDING: unverified on silicon (see changelog.d/2045).
+# BENCH-VERIFIED (E1M-V2M103, 2026-09-24): (a)/(b) above passed on
+# silicon -- the DEEPX rail programmed and the DA9292 register readback
+# matched (see changelog.d/2045). PCIe itself was not exercised (blank
+# EEPROM manifest).
+#
+# Also folds in a fix for a longer-read tail-byte corruption found on
+# a follow-up bench pass (16-byte DA9292 dump: 2 of the last 3 bytes
+# came back with bit 7 stuck clear, reproducible). riic_i2c_raw_read()
+# was setting ICMR3.ACKBT (NACK) and ICCR2.SP (stop request) AFTER
+# reading ICDRR for the final byte instead of before -- with ICMR3.WAIT
+# held for the RIIC instance's whole life, that read is what commits
+# whatever ACKBT/SP state is current onto the bus, so setting them
+# afterward is one byte-time too late. Reordered to set-then-read,
+# matching drivers/i2c/rz_riic.c riic_receive_data() (a separate,
+# already-correct RIIC driver in the same tree) and the RIIC
+# master-receive flowchart. Source-derived, not re-verified on silicon
+# this session (see changelog.d/2045).
 SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

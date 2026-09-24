@@ -1,8 +1,8 @@
-From 5505e06f9d2b735fe5fb47a9329fa1aff939004a Mon Sep 17 00:00:00 2001
+From da01699ff91f8fb7fc82c6171506744105cf0fe4 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 24 Sep 2026 17:41:10 +0200
 Subject: [PATCH] rzv2n-dev, i2c: rzg2l_riic: enable P06/P07 pull-up, fix RIIC
- clock and restart races
+ clock and restart races, and fix long-read tail-byte corruption
 
 Bench root cause (E1M-V2M103, U-Boot bcf29d98, RIIC8/BRD_I2C, P06/P07):
 "i2c md 0x1e 0x19 1" on RIIC8 failed with ICSR2=0x0a (STOP|AL,
@@ -69,14 +69,46 @@ are cheap and orthogonal. The SDAI-poll and stale-ICSR2-clear
 additions are defensive hardening for the same failure class, not
 separately bench-validated in isolation.
 
+A third, separate defect in the same function group, found on a
+follow-up bench pass reading more than a few bytes (E1M-V2M103
+RIIC8/BRD_I2C, "i2c md 0x1e 0x00.1 0x10" on the DA9292 -- bytes at
+offset 0x0D and 0x0E came back as 0x16/0x7F instead of the
+independently-verified 0x96/0xFF, bit 7 cleared on both, reproducible):
+
+- drivers/i2c/rzg2l_riic.c riic_i2c_raw_read(): the do-while loop read
+  ICDRR for a byte FIRST and only set ICMR3.ACKBT (NACK) or ICCR2.SP
+  (stop request) AFTER that read, in a separate post-loop code path
+  for the final byte. With ICMR3.WAIT held set for the life of the
+  RIIC instance (riic_init_setting() sets it once and this driver
+  never clears it mid-transfer), the read of ICDRR is what releases
+  the WAIT hold and commits whatever ACKBT/SP state is current at that
+  instant onto the bus for the byte just consumed -- setting them
+  AFTER that same read is one byte-time too late to affect this
+  transfer. Every multi-byte read was therefore ACKing (not NACKing)
+  its true last byte and only requesting STOP after the fact, instead
+  of arming NACK+STOP ahead of the read that consumes the final byte,
+  per the RIIC master-receive flowchart. drivers/i2c/rz_riic.c
+  riic_receive_data(), a separate, independently-correct RIIC driver
+  already carried in-tree for other Renesas parts, does this the right
+  way (set ACKBT/SP, then read ICDRR, on the final-byte iteration) --
+  this patch collapses the buggy split do-while/post-loop shape into
+  one unified loop matching that same ordering, for every read length
+  including the 1-byte case (previously never armed NACK for its
+  single byte either, since the same post-hoc-set bug applied there
+  too). Not proven to be the singular cause of the specific bit-7-clear
+  pattern observed (a scope trace of the affected bytes was not
+  captured this session), but it is an independently real protocol
+  ordering defect matching the manual's documented sequence and the
+  proven-correct sibling driver, fixed on those merits.
+
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- board/renesas/rzv2n-dev/rzv2n-dev.c | 26 +++++++++++++
- drivers/i2c/rzg2l_riic.c            | 59 +++++++++++++++++++++++++++++
- 2 files changed, 85 insertions(+)
+ board/renesas/rzv2n-dev/rzv2n-dev.c |  26 +++++++
+ drivers/i2c/rzg2l_riic.c            | 115 ++++++++++++++++++++++++----
+ 2 files changed, 124 insertions(+), 17 deletions(-)
 
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index 689c3062..dbd6d1d2 100644
+index 689c30624..dbd6d1d23 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
 @@ -57,6 +57,24 @@ DECLARE_GLOBAL_DATA_PTR;
@@ -120,7 +152,7 @@ index 689c3062..dbd6d1d2 100644
  	 * read in board_late_init() to identify the SoM. Func.1 = RIIC0. */
  	*(volatile u32 *)PFC_23  = (*(volatile u32 *)PFC_23 & ~0xFFu) | (0x01 << 4) | (0x01 << 0);
 diff --git a/drivers/i2c/rzg2l_riic.c b/drivers/i2c/rzg2l_riic.c
-index dc223fa0..92ee1f75 100644
+index dc223fa09..395c7cd0f 100644
 --- a/drivers/i2c/rzg2l_riic.c
 +++ b/drivers/i2c/rzg2l_riic.c
 @@ -20,6 +20,7 @@
@@ -193,7 +225,79 @@ index dc223fa0..92ee1f75 100644
  	start = get_timer(0);
  
  	do {
-@@ -566,6 +607,24 @@ static int riic_read_common(struct udevice *dev, struct i2c_msg *msg, u32 addr,
+@@ -412,32 +453,54 @@ static int riic_i2c_raw_read(struct udevice *dev, struct i2c_msg *msg)
+ {
+ 	struct riic_priv *priv = dev_get_priv(dev);
+ 
+-	int dummy_read = 1;
+ 	int ret = 0;
+ 	int index = 0;
+ 
++	/*
++	 * ALP: dummy read -- the first RDRF after ADDR+R is ACKed reflects
++	 * the address phase, not a data byte (matches drivers/i2c/rz_riic.c
++	 * riic_receive_data() and Linux drivers/i2c/busses/i2c-riic.c
++	 * riic_rdrf_isr()'s RIIC_INIT_MSG dummy read). Reading ICDRR here
++	 * only arms the WAIT-held clock for the real first byte.
++	 */
++	ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
++	if (ret < 0)
++		return ret;
++	riic_read(priv, RIIC_ICDRR);
++
++	/*
++	 * ALP: root cause of the tail-byte corruption seen on long reads
++	 * (bench: E1M-V2M103 RIIC8/BRD_I2C, 16-byte DA9292 dump -- 2 of the
++	 * last 3 bytes came back with bit 7 stuck clear). The previous
++	 * split do-while/post-loop shape read ICDRR for the final byte
++	 * FIRST and only set ACKBT (NACK) and ICCR2.SP (stop request)
++	 * AFTER that read -- but WAIT holds SCL until the ICDRR read, and
++	 * that same read is what releases the hold and commits whatever
++	 * ACKBT/SP state is current at that instant onto the bus. Setting
++	 * them after the read is one byte-time too late for this transfer;
++	 * every multi-byte read was acking (not NACKing) its true last byte
++	 * and requesting STOP only after the fact, per the RIIC
++	 * master-receive flowchart and the proven-correct sibling driver
++	 * drivers/i2c/rz_riic.c riic_receive_data(), both of which set
++	 * ACKBT/SP BEFORE the ICDRR read that consumes the final byte. One
++	 * unified loop below does that: arm NACK+STOP request ahead of the
++	 * read on the last iteration, plain ACK (continue) otherwise.
++	 */
+ 	do {
+ 		ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
+ 		if (ret < 0)
+ 			return ret;
+ 
+-		msg->buf[index] = riic_read(priv, RIIC_ICDRR);
+-		if (dummy_read)
+-			dummy_read = 0;
+-		else
+-			index++;
+-		riic_set_receive_ack(priv, 1);
+-	} while (index < (msg->len - 1));
+-
+-	ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
+-	if (ret < 0)
+-		return ret;
++		if (index == msg->len - 1) {
++			riic_clear_bit(priv, ICSR2_STOP, RIIC_ICSR2);
++			riic_set_bit(priv, ICCR2_SP, RIIC_ICCR2);
++			riic_set_receive_ack(priv, 0);
++		} else {
++			riic_set_receive_ack(priv, 1);
++		}
+ 
+-	riic_clear_bit(priv, ICSR2_STOP, RIIC_ICSR2);
+-	riic_set_bit(priv, ICCR2_SP, RIIC_ICCR2);
+-
+-	msg->buf[index++] = riic_read(priv, RIIC_ICDRR);
+-	riic_set_receive_ack(priv, 0);
++		msg->buf[index++] = riic_read(priv, RIIC_ICDRR);
++	} while (index < msg->len);
+ 
+ 	return ret;
+ }
+@@ -566,6 +629,24 @@ static int riic_read_common(struct udevice *dev, struct i2c_msg *msg, u32 addr,
  		if (ret < 0)
  			goto force_exit;
  

@@ -276,7 +276,93 @@ the control DT's `memory@48000000` = `<0x0 0x48000000 0x0
 0xF8000000>` -- unchanged from v3, still correct for the 4 GB tier.
 `u-boot.bin`: md5 `c2b3bbb114a2c509678ccfeb21acb57f`, size 764328
 bytes (`0xBA9A8`), crc32 `0xac1df277`. `0006` patch file itself: md5
-`8a739735b7cfcdfa4a16febe0aa5dab4`. BENCH-PENDING: unverified on
-silicon -- the pull-up and clock fixes were bench-proven from the
-U-Boot prompt as interactive register pokes, not yet as this compiled
-patch flashed and booted end to end.
+`8a739735b7cfcdfa4a16febe0aa5dab4`.
+
+**v4 flashed and booted end to end, 2026-09-24 (E1M-V2M103) -- DEEPX
+rail run PASSED on silicon.** Not just the interactive register pokes
+above: this compiled `u-boot.bin` ran `board_late_init()` for real and
+brought CH2 up on its own. Console: `ALP: DA9292 programmed
+CTRL_01=0x01 VOUT_CH2=0x96/0x96` then `ALP: DEEPX rail 0.75V up
+(PG)`. Read back after boot: `CTRL_01` `0x03`, `VOUT_CH2` `0x96/0x96`,
+`STATUS_00` `0x03` (`CH2_PG` set, no UV/OV/OC), `STATUS_01` `0x00`;
+the DEEPX bucks surfaced on `BRD_I2C` once `P64` went high, all
+present and matching their known roles: `0x44` `0x82`, `0x48` `0x5a`,
+`0x4F` `0x14`. The PCIe step (`alp_deepx_pcie_bringup()`, patch
+`0001`) did not run on this pass -- the on-module EEPROM manifest is
+blank (see `0004`'s Linux-side cross-check above), so the
+EEPROM-manifest gate never opens; `CONFIG_ALP_E1M_DEEPX_RAIL` on its
+own is enough to run the rail step, but the PCIe path still needs a
+programmed manifest, unrelated to this patch. The rail's
+BENCH-PENDING marker is retired; PCIe stays BENCH-PENDING until a
+programmed EEPROM is available to test against.
+
+**Long-read tail-byte corruption found and fixed, 2026-09-24
+(E1M-V2M103, RIIC8/BRD_I2C).** A follow-on read past the single-
+register pokes above -- `i2c md 0x1e 0x00.1 0x10` (16 bytes from the
+DA9292, covering the already-verified `VOUT_CH2` pair) -- came back
+`03 00 02 00 3f 07 01 03 35 aa a0 b8 96 16 7f 22`: byte offsets `0x0D`
+and `0x0E` read `0x16`/`0x7F` instead of the independently-verified
+`0x96`/`0xFF`, bit 7 stuck clear on both, every other byte (including
+offset `0x0C` = `0x96` and the true last byte, offset `0x0F` =
+`0x22`) correct. Reproducible. A 1-byte and a 4-byte read of the same
+registers (`i2c md 0x1e 0x0d.1 1`, `0x0e.1 1`, `0x0c.1 4`) both
+returned correctly, so the defect is specific to longer transfers, not
+the register values or the bus itself.
+
+Root cause: `drivers/i2c/rzg2l_riic.c` `riic_i2c_raw_read()` (the
+receive path both `riic_read_common()`'s offset-then-read and every
+bare read in `riic_xfer()`'s fallback loop go through). `ICMR3.WAIT`
+is set once in `riic_init_setting()` and held for the RIIC instance's
+whole life; with `WAIT` held, the read of `ICDRR` for a byte is what
+releases the wait and commits whatever `ICMR3.ACKBT` (ack/nack) and
+`ICCR2.SP` (stop-request) state is current at that instant onto the
+bus for the byte just consumed. The previous shape read `ICDRR` for
+the final byte in a split do-while-loop-plus-post-loop structure and
+only set `ACKBT`/`SP` for that byte AFTER the read that consumed it --
+one byte-time too late to affect the transfer already in flight, per
+the RIIC master-receive flowchart. Every multi-byte read was therefore
+ACKing (not NACKing) its true final byte and requesting `STOP` only
+after the fact, including the 1-byte case (same post-hoc-set bug,
+same missing NACK, just not visibly harmful there on this bench pass).
+`drivers/i2c/rz_riic.c` `riic_receive_data()` -- a separate,
+already-correct RIIC driver carried in the same tree for other
+Renesas parts -- does this the right way: set `ACKBT`/`SP`, then read
+`ICDRR`, on the iteration that consumes the final byte. Fixed in
+`riic_i2c_raw_read()` by collapsing the buggy split loop into one
+unified loop matching that same set-then-read ordering. Not proven to
+be the singular cause of the specific bit-7-clear pattern above (no
+scope trace of the affected bytes was captured), but it is an
+independently real protocol-ordering defect matching the manual's
+documented sequence and the proven-correct sibling driver in the same
+file, fixed on those merits. Source-derived; not re-verified on
+silicon this session (no board access) -- flagged for the next bench
+pass to confirm the 16-byte read comes back clean.
+
+Folded into `0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pullup-clock-fix.patch`
+in place (same filename, regenerated via `git format-patch` from a
+fresh `bcf29d98` + PMIC-I2C-removal + `0001`-`0005` tree with the
+prior `0006` content re-applied and this fix added on top, byte-copied
+into the tree -- not hand-edited) rather than a new numbered patch,
+since it is the same file, the same failure class (RIIC8/BRD_I2C
+register reads), and the same bench investigation as the rest of
+`0006`. New `0006` patch file: md5 `574ca8c093b17602eadab7a5830d35b0`.
+
+**v5 rebuilt with the tail-byte fix, 2026-09-24** (fresh `bcf29d98`
+worktree, independent of `ub-v4`: PMIC-I2C-removal + `0001` + `0002` +
+`0003` (4 GB tier) + `0004` + `0005` + the new `0006`, each applied
+via `git apply --check` then `git apply`, in that order, all seven
+succeeding cleanly with zero fuzz; same config fragments as v4 --
+`rzv2n-dev_defconfig` + `no-dirty-version.cfg` + `gigadevice-xspi.cfg`
++ `deepx-rail.cfg` + `fdtfile-v2m.cfg`; WSL Ubuntu-22.04,
+`aarch64-linux-gnu` gcc 11.4.0): build `rc=0`. `strings | grep -c
+'^ALP:'` = `26`, unchanged from v4 -- the fix reorders existing
+register-set calls, it adds no new `printf`. `CONFIG_SYS_SDRAM_SIZE` =
+`(0x100000000u - DRAM_RSV_SIZE)` and the built DT's `memory@48000000`
+= `<0x0 0x48000000 0x0 0xF8000000>`, both still correct for the 4 GB
+tier. `u-boot.bin`: md5 `cb1e030f8f39b0d06a55a9255a7a024d`, size
+764328 bytes (`0xBA9A8`, unchanged from v4 -- the fix nets to the same
+code size), crc32 `0xc61d6328`. BENCH-PENDING: unverified on silicon
+-- v4's DEEPX rail pass above did not exercise this fix (found on a
+later, longer read); the next bench pass should retry the 16-byte
+`i2c md 0x1e 0x00.1 0x10` and confirm bytes `0x0D`/`0x0E` come back
+`0x96`/`0xFF`.
