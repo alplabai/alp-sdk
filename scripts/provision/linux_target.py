@@ -566,7 +566,7 @@ def _sysfs_gpio_dir(t: LinuxTarget, label: str, line: int) -> str:
             return False
         chip_dev = t.run(f"readlink -f {chip_entry}/device", check=False).stdout.strip()
         named_dev = t.run(f"readlink -f {named}/device", check=False).stdout.strip()
-        return bool(chip_dev) and named_dev.startswith(chip_dev)
+        return bool(chip_dev) and (named_dev == chip_dev or named_dev.startswith(chip_dev + "/"))
 
     if t.run(f"test -e {numeric}/value", check=False).rc == 0:
         return numeric
