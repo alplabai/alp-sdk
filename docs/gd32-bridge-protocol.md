@@ -349,6 +349,10 @@ CYW55513) Wi-Fi+BT module's two REG_ON enables:
 | 18  | `bt-reg-on` | `PE14`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_BT_REG_ON` |
 | 19  | `wl-reg-on` | `PE15`  | OUTPUT LOW   | `GD32G553_GPIO_LINE_WL_REG_ON` |
 
+Both enables drive their module low-then-high: the host holds
+`GPIO_WRITE` low for >= 10 ms before the rising edge, matching the
+on-module Murata LBEE5HY2FY-922's REG_ON timing requirement.
+
 A bridge below minor 11 never learned these two bits; a host driving
 `GPIO_WRITE` against them on such a bridge silently powers nothing
 while the firmware reports success. The Linux `gpio-gd32-bridge`
@@ -1084,12 +1088,11 @@ high (§3.1). No opcode changed shape; a host below
 `GD32G553_REG_ON_MIN_PROTOCOL_MINOR` (11) simply never learns bits
 18/19 exist. `GET_VERSION`'s SPI reply for `0.11.0` is `A5 00 00 0B 00 C5 C4`
 (`SOF STATUS major minor patch CRClo CRChi`, CRC-16/CCITT-FALSE over
-`SOF..PAYLOAD` per §9) — this corrects a garbled `A50000B00C5C4`
-review-note copy (wrong length, digits transposed); recompute from the
-algorithm rather than hand-copying, and cross-check any other
-hand-copied `GET_VERSION` vector before relying on it (see
-`extending-the-gd32-bridge-protocol`'s note on inlined wire hex going
-stale across a `PROTOCOL_VERSION` bump).
+`SOF..PAYLOAD` per §4.2) -- recompute from the algorithm rather than
+hand-copying, and cross-check any other hand-copied `GET_VERSION`
+vector before relying on it (see `extending-the-gd32-bridge-protocol`'s
+note on inlined wire hex going stale across a `PROTOCOL_VERSION`
+bump).
 
 ## 9. Reference vectors
 

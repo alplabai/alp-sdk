@@ -1,6 +1,6 @@
-From 001a2d3c52344916988a3d42722456757113270d Mon Sep 17 00:00:00 2001
+From 18b87abbb7dcbeb694f75fd0097411f4da5bb30d Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
-Date: Fri, 25 Sep 2026 10:24:17 +0200
+Date: Fri, 25 Sep 2026 11:11:42 +0200
 Subject: [PATCH] mmc: renesas_sdhi: pm_runtime-guard the vqmmc regulator's
  is_enabled/get_voltage reads
 
@@ -23,18 +23,33 @@ case regulator_late_cleanup() itself creates (its own `if (c->always_on)
 return 0;` early-return skips the call before it happens) but does nothing
 for any other is_enabled()/get_voltage() caller -- a sysfs "state" or
 "microvolts" read, or a future regulator consumer that queries status
-during its own probe. Wrap both ops in pm_runtime_resume_and_get() /
-pm_runtime_put() so the read is safe regardless of caller or PM state.
+during its own probe.
+
+Guard on pm_runtime_enabled(), not an unconditional resume/put pair:
+devm_regulator_register() -- called from renesas_sdhi_probe(), further
+down this file -- is itself the FIRST caller of is_enabled()/
+get_voltage() (through machine_constraints_voltage() establishing the
+regulator's initial state), and it runs BEFORE tmio_mmc_host_probe()
+calls pm_runtime_enable() on this device. An unconditional
+pm_runtime_resume_and_get() in that window returns -EACCES ("not
+runtime-PM-enabled yet"), which devm_regulator_register() propagates
+straight out as "regulator register failed err=-13", aborting sdhi2's
+probe on every boot -- a strictly worse regression than the bug being
+fixed. The register is safe to read directly in that window regardless:
+renesas_sdhi_probe() has already called renesas_sdhi_clk_enable() a few
+lines above the registration call. Once pm_runtime_enable() has run (any
+call after probe -- regulator_late_cleanup(), a later sysfs read), guard
+normally.
 
 Upstream-Status: Pending
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
- drivers/mmc/host/renesas_sdhi_core.c | 27 +++++++++++++++++++++++++++
- 1 file changed, 27 insertions(+)
+ drivers/mmc/host/renesas_sdhi_core.c | 52 ++++++++++++++++++++++++++++
+ 1 file changed, 52 insertions(+)
 
 diff --git a/drivers/mmc/host/renesas_sdhi_core.c b/drivers/mmc/host/renesas_sdhi_core.c
-index d787e8ba5..a4239fae2 100644
+index d787e8ba5..83f1d4c78 100644
 --- a/drivers/mmc/host/renesas_sdhi_core.c
 +++ b/drivers/mmc/host/renesas_sdhi_core.c
 @@ -31,6 +31,7 @@
@@ -45,7 +60,7 @@ index d787e8ba5..a4239fae2 100644
  #include <linux/regulator/consumer.h>
  #include <linux/regulator/driver.h>
  #include <linux/regulator/of_regulator.h>
-@@ -950,13 +951,32 @@ static int renesas_sdhi_regulator_enable(struct regulator_dev *rdev)
+@@ -950,23 +951,74 @@ static int renesas_sdhi_regulator_enable(struct regulator_dev *rdev)
  	return 0;
  }
  
@@ -60,37 +75,62 @@ index d787e8ba5..a4239fae2 100644
 + * regulator_late_cleanup's own always_on early-return -- a manual sysfs/
 + * debugfs regulator read is not covered by that early-return and still
 + * needs this).
++ *
++ * devm_regulator_register() itself -- called from renesas_sdhi_probe(),
++ * further down this file -- is the FIRST caller of is_enabled()/
++ * get_voltage() (via machine_constraints_voltage() establishing the
++ * regulator's initial state), and it runs BEFORE tmio_mmc_host_probe()
++ * calls pm_runtime_enable() on this device. A pm_runtime_resume_and_get()
++ * unconditionally here would hit that ordering and return -EACCES ("not
++ * runtime-PM-enabled yet"), which devm_regulator_register() propagates
++ * straight out as a probe failure ("regulator register failed err=-13")
++ * -- turning a suspended-read hazard into an every-boot regression.
++ * Guard on pm_runtime_enabled(): take/release the reference only once
++ * it is meaningful. In the pre-enable window the guard is unnecessary
++ * anyway -- renesas_sdhi_probe() has already called
++ * renesas_sdhi_clk_enable() a few lines above the registration call, so
++ * the register is live without runtime PM's help.
 + */
  static int renesas_sdhi_regulator_is_enabled(struct regulator_dev *rdev)
  {
  	struct tmio_mmc_host *host = rdev_get_drvdata(rdev);
++	struct device *dev = &host->pdev->dev;
++	bool pm = pm_runtime_enabled(dev);
  	u32 sd_status;
 +	int ret;
 +
-+	ret = pm_runtime_resume_and_get(&host->pdev->dev);
-+	if (ret)
-+		return ret;
++	if (pm) {
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return ret;
++	}
  
  	sd_status = sd_ctrl_read32(host, CTL_SD_STATUS);
  
-+	pm_runtime_put(&host->pdev->dev);
++	if (pm)
++		pm_runtime_put(dev);
 +
  	return (sd_status & SD_STATUS_PWEN) ? 1 : 0;
  }
  
-@@ -964,9 +984,16 @@ static int renesas_sdhi_regulator_get_voltage(struct regulator_dev *rdev)
+ static int renesas_sdhi_regulator_get_voltage(struct regulator_dev *rdev)
  {
  	struct tmio_mmc_host *host = rdev_get_drvdata(rdev);
++	struct device *dev = &host->pdev->dev;
++	bool pm = pm_runtime_enabled(dev);
  	u32 sd_status;
 +	int ret;
 +
-+	ret = pm_runtime_resume_and_get(&host->pdev->dev);
-+	if (ret)
-+		return ret;
++	if (pm) {
++		ret = pm_runtime_resume_and_get(dev);
++		if (ret)
++			return ret;
++	}
  
  	sd_status = sd_ctrl_read32(host, CTL_SD_STATUS);
  
-+	pm_runtime_put(&host->pdev->dev);
++	if (pm)
++		pm_runtime_put(dev);
 +
  	return (sd_status & SD_STATUS_IOVS) ? 1800000 : 3300000;
  }

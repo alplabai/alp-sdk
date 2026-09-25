@@ -174,7 +174,7 @@ side has no Wi-Fi role):
 
 **Bench TODO:** the E1M-X-EVK carrier dtsi (`e1m-x-evk.dtsi`) no longer
 parks PB0/PB1 as usb30 VBUS/OVC GPIOs -- those SoC pins are the
-on-module WLAN group's `SD2DAT0`/`SD2CLK`, never routed to the E1M
+on-module WLAN group's `SD2CLK`/`SD2DAT0`, never routed to the E1M
 connector (the old `usb30_pins`/`usb-ovc-disable-hog` pair was copied
 from the Renesas EVK reference dts without checking the ALP module's
 netlist). usb30 OC processing is left at its controller default;

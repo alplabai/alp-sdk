@@ -18,14 +18,17 @@
 #   4) CYW55500A1_...FCC...2FY.2GY.hcd   BT patch, FCC region (cyw-bt-patch)
 #   5) CYW55500A1_...CE.JP...2FY.2GY.hcd BT patch, CE/JP region (cyw-bt-patch)
 #
-# BT firmware naming: the in-tree btbcm.c subver table (6.1) has no
-# CYW55500 entry, so hci_bcm's autobaud load never resolves a hw_name --
-# it requests "brcm/BCM.<board>.hcd" then falls back to plain
-# "brcm/BCM.hcd" (see btbcm_initialize()); hci_bcm.c itself has no
-# firmware-name/DT override to point that lookup at either
-# module-suffixed CYW55500A1_*.hcd file. CYW_BT_REGION picks which
-# regional patch gets installed a second time, under the plain name
-# btbcm actually asks for.
+# BT firmware naming: btbcm_initialize()'s subver-table lookup + firmware
+# request runs on every hci_bcm load path, fixed-baud (this SoM's
+# 115200, uart-has-rtscts) included -- it is not autobaud-specific. The
+# in-tree btbcm.c subver table (6.1) has no CYW55500 entry, so it never
+# resolves a hw_name and falls straight to "brcm/BCM.<board>.hcd" (board
+# name pulled from the root DT node's own "compatible" string, via
+# btbcm_get_board_name() -- not a per-device property) then plain
+# "brcm/BCM.hcd". hci_bcm.c has no firmware-name-style DT property at
+# all to point that lookup directly at either module-suffixed
+# CYW55500A1_*.hcd file. CYW_BT_REGION picks which regional patch gets
+# installed a second time, under the plain name btbcm actually asks for.
 #
 # The WLAN radio firmware (.trxse) is NOT bundled in any murata-wireless
 # repo; it comes from Infineon ifx-linux-firmware, pinned in LOCKSTEP
@@ -104,7 +107,17 @@ HCD_CEJP  = "CYW55500A1_001.002.032.0040.0032.CE.JP.2FY.2GY.hcd"
 # (see the header comment above). Override per-MACHINE/distro if a board
 # ships outside FCC territory: HCD_FCC for FCC, HCD_CEJP for CE/JP.
 CYW_BT_REGION ?= "FCC"
-CYW_HCD_DEFAULT = "${@ d.getVar('HCD_FCC') if d.getVar('CYW_BT_REGION') == 'FCC' else d.getVar('HCD_CEJP')}"
+def cyw_bt_region_hcd(d):
+    region = d.getVar('CYW_BT_REGION')
+    if region == 'FCC':
+        return d.getVar('HCD_FCC')
+    if region == 'CEJP':
+        return d.getVar('HCD_CEJP')
+    bb.fatal("CYW_BT_REGION = '%s' is not a recognised region -- use "
+              "'FCC' or 'CEJP' (a silent fallback here would install the "
+              "wrong regional BT patch as the plain brcm/BCM.hcd name "
+              "btbcm actually loads)." % region)
+CYW_HCD_DEFAULT = "${@cyw_bt_region_hcd(d)}"
 
 do_install() {
     # WLAN: radio firmware + regulatory CLM + NVRAM -> /lib/firmware/cypress/
