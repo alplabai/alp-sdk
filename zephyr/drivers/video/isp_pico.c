@@ -459,9 +459,32 @@ isp_bottom_done:
 		 * v4.4 video-API shim (Alp Lab AB): video_stream_stop gained an
 		 * `enum video_buf_type`; the controller is the capture source ->
 		 * VIDEO_BUF_TYPE_OUTPUT.
+		 *
+		 * #2287 Stage B unit 3 (bench runs 298-300): VIDEO_BUF_DONE here
+		 * means genuine buffer starvation (the ONLY non-error path that
+		 * reaches this label with is_streaming already false, above) --
+		 * NOT a real error. A full video_stream_stop() drives the CSI-2
+		 * endpoint + sensor into STANDBY every time the app doesn't
+		 * re-enqueue an ISP output buffer before the next frame, which
+		 * for IMX296 also restarts its ~9-frame init period (datasheet
+		 * p54) on every resume -- the AE loop then never sees two
+		 * consecutive real frames. alif_cam_cpi_pause() (video_alif.c)
+		 * instead pauses only the CPI capture engine, leaving the
+		 * endpoint + sensor (and the ISP's own AE/AWB library state --
+		 * nothing here touches isp_vsi_stop()) running across the pause.
+		 * A genuine error (VIDEO_BUF_ERROR, the other branches above)
+		 * still gets the full stop: something is actually wrong, not
+		 * just backpressure, and this driver has no evidence a CPI-only
+		 * pause is safe to resume from after one.
 		 */
 		if (config->controller) {
-			video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+			if (signal_status == VIDEO_BUF_DONE) {
+				alif_cam_cpi_pause(config->controller);
+				data->controller_cpi_paused = true;
+			} else {
+				video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+				data->controller_cpi_paused = false;
+			}
 		}
 		data->curr_vid_buf = 0;
 	}
@@ -958,12 +981,29 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
 	};
 	int rc;
 
+	/*
+	 * #2287 Stage B unit 3 (bench runs 299/300): -ENOTSUP here (IMX296 on
+	 * E1M-AEN803) is expected noise, not a real failure -- IMX296 has no
+	 * separate sensor-side auto-exposure/auto-gain MODE to gate; its own
+	 * "AE" is exactly the SHS/GAIN registers this driver's writeback
+	 * (isp_api_wrapper.c) already writes directly, so imx296.c registers
+	 * neither VIDEO_CID_EXPOSURE_AUTO nor VIDEO_CID_AUTOGAIN at all and
+	 * video_find_ctrl() (drivers/video/video_ctrls.c) returns -ENOTSUP
+	 * for a control ID no device in the chain registers. Any OTHER
+	 * error (a sensor that DOES claim the control but rejects this
+	 * specific value) still warns -- that would be a real problem this
+	 * gate is supposed to prevent (see the file comment above).
+	 */
 	rc = video_set_ctrl(config->controller, &sensor_exp_auto);
-	if (rc) {
+	if (rc == -ENOTSUP) {
+		LOG_DBG("Sensor has no EXPOSURE_AUTO control (rc=%d) -- nothing to gate", rc);
+	} else if (rc) {
 		LOG_WRN("Failed to set sensor EXPOSURE_AUTO: %d", rc);
 	}
 	rc = video_set_ctrl(config->controller, &sensor_autogain);
-	if (rc) {
+	if (rc == -ENOTSUP) {
+		LOG_DBG("Sensor has no AUTOGAIN control (rc=%d) -- nothing to gate", rc);
+	} else if (rc) {
 		LOG_WRN("Failed to set sensor AUTOGAIN: %d", rc);
 	}
 }
@@ -1081,17 +1121,23 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 	params.ae.dgain_min      = 1024;
 	params.ae.dgain_max      = 1024;
 
-	if (!enable) {
-		/* Manual mode: sets a fixed, non-zero exposure/gain instead
-		 * of leaving the library at int_time/again/dgain=0 --
-		 * int_time_max/2 (half of the same sensor-derived ceiling
-		 * enable=true would use, not the 66514us fallback unless the
-		 * queries above failed) at the 1x gain floor.
-		 */
-		params.ae.int_time = params.ae.int_time_max / 2;
-		params.ae.again    = again_min;
-		params.ae.dgain    = 1024;
-	}
+	/*
+	 * #2287 Stage B unit 3, Fix B (bench runs 299/300): unconditional now -- this used to be
+	 * gated on `!enable` (manual mode only), leaving int_time/again/dgain at struct isp_params
+	 * params = {0}'s zero-init for AUTO mode. Bench evidence the library reads THESE fields as
+	 * an initial AE seed even in auto mode, not just the manual-mode fixed values: with the
+	 * gate in place, AE ON parked at SHS 0x00045C (2 lines, isp_apply_ae()'s clamp of a 0-line
+	 * seed) and GAIN 0 for all 60 frames of runs 299/300, ae_stable never set, meanLum printed
+	 * only 3 times across 60 frames (frame counter resetting -- AE restarting from scratch on
+	 * every ISP stream restart, see isp_bottom_half()'s starvation-pause fix above). For MANUAL
+	 * mode (enable=false) this is still exactly the fixed value that gets applied and held;
+	 * for AUTO mode it is only the STARTING point the library's own convergence loop then moves
+	 * away from -- int_time_max/2 (half of the same sensor-derived ceiling) at the 1x gain
+	 * floor, not zero.
+	 */
+	params.ae.int_time = params.ae.int_time_max / 2;
+	params.ae.again    = again_min;
+	params.ae.dgain    = 1024;
 
 	k_mutex_lock(&data->lib_lock, K_FOREVER);
 	int ret = isp_vsi_set_param(&data->init_cfg, &params);
@@ -1788,12 +1834,27 @@ static int isp_stream_start(const struct device *dev)
 	 * v4.4 video-API shim (Alp Lab AB): video_stream_start gained an
 	 * `enum video_buf_type`; the controller is the capture source ->
 	 * VIDEO_BUF_TYPE_OUTPUT.
+	 *
+	 * #2287 Stage B unit 3: if isp_bottom_half()'s own starvation handler
+	 * (above) CPI-paused the controller instead of fully stopping it
+	 * (data->controller_cpi_paused), the endpoint + sensor never stopped --
+	 * a plain video_stream_start() here would -EBUSY against
+	 * alif_cam_stream_start()'s own `if (data->is_streaming) return -EBUSY`
+	 * (video_alif.c), since the controller never went through
+	 * alif_cam_stream_stop(). alif_cam_cpi_resume() instead re-arms just
+	 * the CPI capture engine the pause halted -- see video_alif.c's own
+	 * comment on the pair.
 	 */
 	if (config->controller) {
-		ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		if (data->controller_cpi_paused) {
+			ret = alif_cam_cpi_resume(config->controller);
+			data->controller_cpi_paused = false;
+		} else {
+			ret = video_stream_start(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		}
 		if (ret) {
 			LOG_ERR("Failed to start stream for Endpoint device: %s! "
-				"video_stream_start=%d",
+				"ret=%d",
 				config->controller->name,
 				ret);
 			data->is_streaming = false;
@@ -1852,6 +1913,13 @@ static int isp_stream_stop(const struct device *dev)
 			return ret;
 		}
 	}
+	/*
+	 * #2287 Stage B unit 3: a real user stop tears the controller all the way down above
+	 * regardless of any in-flight CPI-only starvation pause -- clear the flag so a LATER
+	 * isp_stream_start() calls a real video_stream_start() instead of mistakenly resuming a
+	 * pause this stop already cleared.
+	 */
+	data->controller_cpi_paused = false;
 
 	ret = isp_vsi_stop(&data->init_cfg);
 	if (ret) {

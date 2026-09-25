@@ -235,6 +235,17 @@ size_t fourcc_to_plane_size(uint32_t fourcc, uint8_t plane_id, size_t buffer_siz
 int fourcc_to_numplanes(uint32_t fourcc);
 unsigned int pix_fmt_bpp(uint32_t fourcc);
 
+/*
+ * #2287 Stage B unit 3: pause/resume ONLY the CPI capture engine, leaving the CSI-2 endpoint and
+ * sensor streaming -- for an ISP consumer's OWN output-buffer starvation (isp_pico.c), as distinct
+ * from a full video_stream_stop()/_start() (which always tears the endpoint + sensor down, by
+ * design, for a real stop()/close()). See video_alif.c's own comment on these two for why this is
+ * a separate pair rather than reusing alif_cam_work_helper()'s `starved` memory-capture-path
+ * bookkeeping. `dev` is this CPI controller device (the ISP's `config->controller`).
+ */
+int alif_cam_cpi_pause(const struct device *dev);
+int alif_cam_cpi_resume(const struct device *dev);
+
 #ifdef __cplusplus
 }
 #endif

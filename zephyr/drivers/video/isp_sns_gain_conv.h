@@ -17,23 +17,29 @@
  *     Its VIDEO_CID_EXPOSURE control is in 1/16-line units (CONFIG_VIDEO_
  *     ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE = 16).
  *
- *   - IMX296's GAIN (0x3204-0x3205, datasheet p.61) is LOGARITHMIC: 0.1 dB
+ *   - IMX296's GAIN (0x3204-0x3205, datasheet p.56) is LOGARITHMIC: 0.1 dB
  *     per register count, 0 = 0 dB (1.0x) up to 480 = 48.0 dB. Converting
  *     that to/from this library's linear 1024=1x scale needs gain_linear =
  *     10^(dB/20) -- gain_linear(reg) = 1024 * 10^(reg/200) (reg is in
- *     TENTHS of a dB, hence /200 not /20). Its SHS exposure register
- *     (0x308D-0x308F) is already in whole LINES (CONFIG_VIDEO_ISP_VSI_SNS_
- *     EXPOSURE_CTRL_PER_LINE = 1).
+ *     TENTHS of a dB, hence /200 not /20). Its VIDEO_CID_EXPOSURE control
+ *     (zephyr/drivers/video/imx296.c's imx296_set_ctrl()) is already in
+ *     whole LINES (CONFIG_VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE = 1) --
+ *     NOT the sensor's own SHS register (0x308D-0x308F) directly: SHS is
+ *     inversely related (SHS = lines_per_frame - lines, imx296.c's own
+ *     IMX296_REG_SHS comment, datasheet p.60); imx296_set_ctrl() does that
+ *     conversion itself once it receives the ctrl's line count, so nothing
+ *     in THIS header or its callers ever computes or writes an SHS value.
  *
  * No floating point and no libm dependency here (this runs from an ISP
  * bottom-half IRQ context, isp_vsi_bottom_half()): isp_gain_db_tenths_table
  * below is a 481-entry (0..480 inclusive) precomputed LOOKUP table for
- * gain_linear(reg) = round(1024 * 10^(reg/200)), generated once offline
- * (see the git history for the generating script) -- both directions use
- * this SAME table: the forward direction (register -> library units) is a
+ * gain_linear(reg) = round(1024 * 10^(reg/200)) -- both directions use this
+ * SAME table: the forward direction (register -> library units) is a
  * direct index, the reverse (library units -> register) is a binary search
- * for the closest entry, which is exactly "round(200*log10(total/1024))"
- * without ever computing a log10.
+ * for the entry closest by linear distance, which lands within 1 count of
+ * round(200*log10(total/1024)) (the two can differ by at most 1 near a
+ * table-entry boundary, since "closest by value" and "closest by log" are
+ * not exactly the same rounding rule) without ever computing a log10.
  *
  * This header is intentionally free of any Zephyr or hal_alif include (only
  * <stdint.h>) so it can be included standalone by a native_sim unit test
@@ -51,10 +57,11 @@ extern "C" {
 #define ISP_SNS_GAIN_LIB_UNITY 1024U /* library's own ISP_SNS_GAIN_ACCU: 1024 = 1.0x */
 
 /*
- * gain_linear(reg) = round(1024 * 10^(reg/200)) for reg = 0..480 (0.0..48.0 dB
- * in 0.1 dB steps) -- IMX296's GAIN register range (datasheet p.61).
- * table[0] = 1024 (0 dB = 1.0x); table[480] = 257217 (48.0 dB), matching the
- * #2287 unit-3 design figure of ~257216 within the rounding of 10^2.4.
+ * Generator formula (each table[n] below): gain_linear(n) = round(1024 * 10^(n/200)) for
+ * n = 0..480 (0.0..48.0 dB in 0.1 dB steps) -- IMX296's GAIN register range (datasheet p.56).
+ * table[0] = 1024 (0 dB = 1.0x); table[480] = 257217 (48.0 dB), matching the #2287 unit-3 design
+ * figure of ~257216 within the rounding of 10^2.4. Generated with a one-off Python loop (not
+ * committed as a script -- 481 entries, regenerate the same way if the formula or range changes).
  */
 static const uint32_t isp_gain_db_tenths_table[481] = {
 	1024, 1036, 1048, 1060, 1072, 1085, 1097, 1110,
@@ -189,9 +196,12 @@ static inline uint32_t isp_sns_gain_lib_to_linear_reg(uint32_t total_1024, uint3
 }
 
 /*
- * Sensor exposure LINES -> the sensor's own exposure control units
- * (ctrl_per_line: 16 for OV5647's 1/16-line VIDEO_CID_EXPOSURE, 1 for
- * IMX296's whole-line SHS register).
+ * Sensor exposure LINES -> the sensor's own VIDEO_CID_EXPOSURE control units
+ * (ctrl_per_line: 16 for OV5647's 1/16-line control, 1 for IMX296's
+ * whole-line control) -- NOT the sensor's own hardware register directly:
+ * for IMX296 the ctrl value is still LINES, and imx296_set_ctrl() converts
+ * that to the inversely-related SHS register itself (see this file's own
+ * header comment).
  */
 static inline uint32_t isp_sns_exposure_lines_to_ctrl(uint32_t lines, uint32_t ctrl_per_line)
 {

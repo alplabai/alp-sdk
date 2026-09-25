@@ -1105,7 +1105,7 @@ config VIDEO_ISP_VSI_CALIB_IMX296
 
 config VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
 	bool "ISP-Pico AE gain writeback: sensor register is 0.1 dB/count, not linear"
-	default y if VIDEO_IMX296
+	default y if VIDEO_ISP_VSI_CALIB_IMX296
 	depends on VIDEO_ISP_VSI
 	help
 	  isp_pico.c's isp_sns_gain_ctrl_from_lib()/isp_sns_gain_lib_from_ctrl()
@@ -1120,9 +1120,12 @@ config VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS
 	  multiply/divide; VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X is ignored while
 	  this is y.
 
-	  default y whenever CONFIG_VIDEO_IMX296 is enabled -- n (linear) is
-	  the correct default for every other sensor this driver currently
-	  supports (OV5647, OV9281).
+	  default y whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is enabled (not
+	  the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- tying this to the
+	  SAME "which AE envelope is active" symbol the calibration block
+	  itself uses keeps every IMX296-AE-specific Kconfig default anchored
+	  to one selector) -- n (linear) is the correct default for every
+	  other sensor this driver currently supports (OV5647, OV9281).
 
 config VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X
 	int "ISP-Pico AE gain writeback: sensor register units per 1.0x (linear sensors only)"
@@ -1147,18 +1150,25 @@ config VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X
 
 config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
 	int "ISP-Pico AE exposure writeback: sensor control units per LINE"
-	default 1 if VIDEO_IMX296
+	default 1 if VIDEO_ISP_VSI_CALIB_IMX296
 	default 16
 	depends on VIDEO_ISP_VSI
 	help
 	  isp_sns_exposure_ctrl_from_lines() (isp_sns_gain_conv.h) and hal_alif
 	  patch 0013's isp_api_wrapper.c writeback both scale a LINE count
 	  (the library's own exposure unit) by this factor before writing the
-	  sensor's exposure control. OV5647's VIDEO_CID_EXPOSURE is in 1/16-
-	  line units (default 16, matching the OV5647 write-back this file's
-	  own isp_api_wrapper.c hunk originally hardcoded); IMX296's SHS
-	  register (0x308D-0x308F, datasheet p.44) is already in whole LINES
-	  (1) -- default 1 whenever CONFIG_VIDEO_IMX296 is enabled.
+	  sensor's VIDEO_CID_EXPOSURE control -- NOT its hardware register
+	  directly. OV5647's VIDEO_CID_EXPOSURE is in 1/16-line units (default
+	  16, matching the OV5647 write-back this file's own isp_api_wrapper.c
+	  hunk originally hardcoded); IMX296's VIDEO_CID_EXPOSURE
+	  (zephyr/drivers/video/imx296.c's imx296_set_ctrl()) is already in
+	  whole LINES (1) -- imx296_set_ctrl() itself then converts that line
+	  count to the inversely-related SHS register (SHS = lines_per_frame -
+	  lines, datasheet p.60) before writing 0x308D-0x308F; this Kconfig
+	  and isp_sns_exposure_ctrl_from_lines() never see or compute an SHS
+	  value. default 1 whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is
+	  enabled (not the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- see
+	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS's own help for why).
 
 config VIDEO_ISP_VSI_AE_TARGET
 	int "ISP-Pico AE target luminance [0, 255]"

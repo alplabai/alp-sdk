@@ -366,6 +366,16 @@ struct isp_data {
 	struct isp_ctrls ctrls;
 
 	/*
+	 * #2287 Stage B unit 3: set when isp_bottom_half()'s own IN-FIFO starvation pauses the
+	 * controller via alif_cam_cpi_pause() (video_alif.c) instead of a full video_stream_stop() --
+	 * the next isp_stream_start() reads this to call alif_cam_cpi_resume() instead of
+	 * video_stream_start(), which would otherwise -EBUSY against a controller that was never
+	 * actually stopped. Cleared by isp_stream_stop() (a real user stop tears the controller all
+	 * the way down regardless of this flag) and by isp_stream_start()'s own resume.
+	 */
+	bool controller_cpi_paused;
+
+	/*
 	 * Review round (post-3511cd180): isp_stream_start() (app thread, via
 	 * isp_set_stream()) calls isp_apply_wb()/isp_apply_ae()
 	 * (isp_vsi_set_param()) to apply a dirty WB/AE ctrl, while

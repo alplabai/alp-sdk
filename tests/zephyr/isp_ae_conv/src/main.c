@@ -27,9 +27,10 @@ ZTEST(isp_ae_conv, test_db_tenths_0db_is_unity)
 	zassert_equal(isp_sns_gain_lib_to_db_tenths(ISP_SNS_GAIN_LIB_UNITY), 0, NULL);
 }
 
-/* 6 dB (60 tenths) doubles linear gain: 1024 * 10^(6/20) ~= 2043 (round(1024 * 2^ * ...), see
- * isp_sns_gain_conv.h's table comment -- not exactly 2048 (a true x2) because 6 dB is only an
- * approximation of a linear doubling, the well-known "6 dB ~= x2" audio/RF rule of thumb.
+/* 6 dB (60 tenths) approximately doubles linear gain: round(1024 * 10^(6/20)) = 2043 -- not
+ * exactly 2048 (a true x2) because 6 dB is only an approximation of a linear doubling, the
+ * well-known "6 dB ~= x2" audio/RF rule of thumb (the EXACT doubling point is 20*log10(2) =
+ * 6.0206 dB, i.e. 60.206 tenths, not the whole number 60 this test checks).
  */
 ZTEST(isp_ae_conv, test_db_tenths_6db_doubles)
 {
@@ -73,10 +74,34 @@ ZTEST(isp_ae_conv, test_linear_reg_ov5647_scale)
 }
 
 /* Exposure-control scaling: OV5647's 1/16-line VIDEO_CID_EXPOSURE (ctrl_per_line = 16, the old
- * hardcoded "intLine * 16") and IMX296's whole-line SHS register (ctrl_per_line = 1).
+ * hardcoded "intLine * 16") and IMX296's whole-line VIDEO_CID_EXPOSURE (ctrl_per_line = 1) -- NOT
+ * IMX296's SHS hardware register, which is inversely related (SHS = lines_per_frame - lines,
+ * imx296_set_ctrl()'s own job, not this helper's -- see isp_sns_gain_conv.h's header comment).
  */
 ZTEST(isp_ae_conv, test_exposure_lines_to_ctrl)
 {
 	zassert_equal(isp_sns_exposure_lines_to_ctrl(100, 16), 1600, "OV5647: 100 lines * 16");
 	zassert_equal(isp_sns_exposure_lines_to_ctrl(100, 1), 100, "IMX296: 100 lines * 1");
+}
+
+/* Whole-table sweep: isp_gain_db_tenths_table[] must be strictly monotonically increasing (the
+ * binary search in isp_sns_gain_lib_to_db_tenths() assumes this) and every entry must round-trip
+ * through both conversion directions back to its own index -- a table[reg] -> lib -> reg round
+ * trip can only fail this way if two adjacent entries are close enough for the "closest by linear
+ * distance" search to prefer the wrong neighbour, which would also mean the table drifted from its
+ * own generator formula (isp_sns_gain_conv.h's comment).
+ */
+ZTEST(isp_ae_conv, test_db_tenths_table_monotonic_and_round_trips)
+{
+	for (uint32_t reg = 0; reg <= 480; reg++) {
+		uint32_t lib = isp_sns_gain_db_tenths_to_lib(reg);
+
+		if (reg > 0) {
+			zassert_true(lib > isp_sns_gain_db_tenths_to_lib(reg - 1),
+				     "table[%u] must be strictly greater than table[%u]", reg,
+				     reg - 1);
+		}
+		zassert_equal(isp_sns_gain_lib_to_db_tenths(lib), reg,
+			      "table[%u] -> lib -> reg round-trip landed on a different reg", reg);
+	}
 }

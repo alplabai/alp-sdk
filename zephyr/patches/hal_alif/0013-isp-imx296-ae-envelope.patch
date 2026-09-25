@@ -1,6 +1,6 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..f616d64
+index 0000000..d73690a
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 @@ -0,0 +1,98 @@
@@ -24,7 +24,7 @@ index 0000000..f616d64
 + * names, same _Static_assert round-trip band) so the two sensors' envelopes
 + * stay easy to compare; it is NOT a copy of OV5647's values -- every figure
 + * below is IMX296-specific, derived from the Sony IMX296LQR-C datasheet
-+ * (pp.44, 49, 56, 60, 61), the ONLY source used (clean-room -- no other
++ * (pp.44, 49, 56, 60), the ONLY source used (clean-room -- no other
 + * IMX296 driver or calibration table was consulted for these numbers).
 + *
 + * Sourcing (all-pixel scan mode, master mode, page references to the
@@ -39,7 +39,7 @@ index 0000000..f616d64
 + *     fractional frame rate OV5647's integer-fps envelope didn't need.
 + *   - minIntLine/maxIntLine (p.49, SHS constraint "1 <= SHS <= VMAX - 4"):
 + *     1 and 1118 - 4 = 1114.
-+ *   - minAgain/maxAgain (p.61, GAIN register 0x3204-0x3205, 0.1 dB/count,
++ *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count,
 + *     0-480 = 0.0-48.0 dB): 1024 (0 dB = 1.0x, library units) and
 + *     round(1024 * 10^(480/200)) = 257217 (48.0 dB) -- computed the SAME
 + *     way zephyr/drivers/video/isp_sns_gain_conv.h's isp_gain_db_tenths_
@@ -49,7 +49,7 @@ index 0000000..f616d64
 + *     own comment documents for ITS struct/macro duplication). ~257216 in
 + *     the #2287 unit-3 design note is the same figure within the rounding
 + *     of 10^2.4.
-+ *   - dgain (p.60-61, no separate digital-gain register documented for
++ *   - dgain (p.56, no separate digital-gain register documented for
 + *     this sensor): pinned to 1024 (unity), same convention as OV5647's
 + *     envelope -- all headroom flows through the analogue GAIN register.
 + */
@@ -237,7 +237,7 @@ index 369cc27..a0b0d9f 100644
  #ifdef __cplusplus
  }
 diff --git a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
-index 0442cea..43e1b8b 100644
+index 0442cea..d193d34 100644
 --- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
 +++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
 @@ -64,6 +64,23 @@
@@ -288,22 +288,24 @@ index 0442cea..43e1b8b 100644
  		computed_val = ctrl.val;
  		/*
  		 * alp-sdk fix (Alp Lab AB): saturate to the sensor's registered
-@@ -846,9 +867,11 @@ void isp_vsi_bottom_half(const struct device *dev,
+@@ -846,9 +867,13 @@ void isp_vsi_bottom_half(const struct device *dev,
  		/*
  		 * alp-sdk v4.4 video-API port (Alp Lab AB): same 3-arg ->
  		 * struct video_control port as above. sns_config.intLine is
 -		 * in raw sensor LINES; ov5647.c's VIDEO_CID_EXPOSURE is in
 -		 * 1/16-line units (see its OV5647_EXPOSURE_DEFAULT / manual
 -		 * exposure convention) -- scale by 16.
-+		 * in raw sensor LINES; the sensor's own exposure-control
-+		 * scale (e.g. OV5647's VIDEO_CID_EXPOSURE, 1/16-line units,
-+		 * or IMX296's SHS register, whole lines) is converted by
++		 * in raw sensor LINES; the sensor's own VIDEO_CID_EXPOSURE
++		 * control scale (e.g. OV5647's, 1/16-line units, or IMX296's,
++		 * whole lines -- NOT its SHS hardware register directly,
++		 * which the sensor driver's own ctrl handler derives from
++		 * this line count) is converted by
 +		 * isp_sns_exposure_ctrl_from_lines() (alp-sdk fix, #2287
 +		 * Stage B unit 3) -- see its own comment above.
  		 */
  		struct video_control ctrl;
  		struct video_ctrl_query cq = {
-@@ -858,7 +881,7 @@ void isp_vsi_bottom_half(const struct device *dev,
+@@ -858,7 +883,7 @@ void isp_vsi_bottom_half(const struct device *dev,
  		int32_t computed_val;
  
  		ctrl.id  = VIDEO_CID_EXPOSURE;

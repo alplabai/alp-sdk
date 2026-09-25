@@ -394,6 +394,57 @@ static inline void hw_cam_cpi_only_stop(uintptr_t regs)
 	sys_write32(sys_read32(regs + CAM_INTR), regs + CAM_INTR);
 }
 
+/*
+ * #2287 Stage B unit 3 (bench runs 298/299/300): hw_cam_cpi_only_stop() above was written for
+ * alif_cam_work_helper()'s OWN starvation pause (the cam port@1/AXI-memory capture path) -- but
+ * isp_pico.c's OWN starvation handler (its output-buffer IN-FIFO running empty, a SEPARATE queue
+ * from this driver's fifo_in) called a full video_stream_stop()/_start() on this controller every
+ * time the app didn't re-enqueue an ISP output buffer before the next frame, cycling the sensor
+ * through STANDBY every restart -- exactly the mechanism hw_cam_cpi_only_stop()'s own comment
+ * already diagnosed and fixed for the OTHER starvation path. These two wrappers expose the SAME
+ * CPI-only pause/resume to isp_pico.c (a different translation unit) instead of it either
+ * duplicating the register sequence or continuing to call the full video_stream_stop()/_start()
+ * API, which always tears down the CSI-2 endpoint + sensor (alif_cam_stream_stop() does this
+ * unconditionally, by design, for a real user stop()/close()).
+ *
+ * Deliberately NOT touching `data->starved`/`data->fifo_in` here: those belong to the memory-
+ * capture path's OWN buffer bookkeeping (alif_cam_enqueue()'s resume check, ~:1153) which the ISP
+ * consumer mode never exercises (ISP never calls video_enqueue() on this controller -- config->
+ * axi_bus_ep is unset/CONFIG_VIDEO_ALIF_CAM_EXTENDED is off on the ISP-consumer boards). Mixing
+ * the two would let a genuine ISP-triggered pause be misread as a memory-capture starvation by
+ * code that path doesn't reach in this configuration anyway, but keeping them independent means
+ * that invariant doesn't have to be proven to stay correct.
+ */
+int alif_cam_cpi_pause(const struct device *dev)
+{
+	struct video_cam_data *data = dev->data;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	hw_cam_cpi_only_stop(regs);
+	k_mutex_unlock(&data->lock);
+
+	return 0;
+}
+
+int alif_cam_cpi_resume(const struct device *dev)
+{
+	struct video_cam_data *data = dev->data;
+	uintptr_t regs = DEVICE_MMIO_GET(dev);
+
+	k_mutex_lock(&data->lock, K_FOREVER);
+	/* Same re-arm sequence alif_cam_enqueue()'s own starved-resume uses (~:1163-1172), minus
+	 * the CAM_FRAME_ADDR reprogram: the ISP consumer mode never changes which buffer the CPI
+	 * writes into (that address is set once, at alif_cam_stream_start()), so nothing here needs
+	 * updating -- only the interrupt-mask + capture-engine restart the pause above undid. */
+	hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
+					   INTR_INFIFO_OVERRUN | INTR_STOP);
+	hw_cam_start_video_capture(dev);
+	k_mutex_unlock(&data->lock);
+
+	return 0;
+}
+
 static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 {
 	/*

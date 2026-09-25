@@ -88,7 +88,8 @@
  *     30-frame AE+AWB runs above. Bench-verified (bench run 297, changelog.d/2287.md): data
  *     path through the ISP confirmed, image quality not (no AWB/CCM calibration for this
  *     sensor yet).
- *   - AE on (this example's default -- no overlay-no-ae.conf, CONFIG_ISP_LIB_AE_MODULE=y,
+ *   - AE on (this example's default, prj.conf's own CONFIG_ISP_LIB_AE_MODULE=y -- AE-off above
+ *     is the opt-in variant, via layering overlay-no-ae.conf; this branch needs nothing extra,
  *     #2287 Stage B unit 3): 60 frames, letting isp_pico.c's isp_apply_ae() writeback settle
  *     against IMX296's real AE envelope (hal_alif patch 0013,
  *     drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h, sourced from the datasheet) before the
