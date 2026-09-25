@@ -44,12 +44,15 @@ bench-gated rather than CI-required elsewhere in this repo.
 `stage_generated_files` DOES still call this script, separately, in
 `--check` (read-only) mode: `_find_vela()` fails fast with exit 2 the
 instant `vela` isn't on PATH, before anything toolchain-heavy runs, so the
-call costs nothing on a host without vela and the stage treats exit 2 as a
-clean SKIP -- not a stage failure, and not a reason to install vela. On a
-host that DOES have vela, `--check` catches metadata/npu_ops/ethos_u/ drift
-the same way every other generator's regen-then-diff does. Regenerating for
-real (writing new files, e.g. after the `ethos-u-vela` pin in
-pyproject.toml's `model-compile` extra moves) is still a by-hand step.
+call costs nothing on a host without vela. Exit 2 is a clean SKIP only when
+the change touches neither `metadata/npu_ops/` nor this script; when it
+touches either, `test-all.sh` treats exit 2 as a hard FAILURE naming the
+files and how to install vela, rather than silently skipping the one gate
+that proves the tables are fresh. On a host that DOES have vela, `--check`
+catches metadata/npu_ops/ethos_u/ drift the same way every other generator's
+regen-then-diff does. Regenerating for real (writing new files, e.g. after
+the `ethos-u-vela` pin in pyproject.toml's `model-compile` extra moves) is
+still a by-hand step.
 
 Usage:
 

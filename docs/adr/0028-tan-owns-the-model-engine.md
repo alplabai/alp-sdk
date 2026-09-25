@@ -101,6 +101,16 @@ at alp-sdk `40bfc917` and tan-cli `57bb2fa1`:
 | of which: `python -c` driver + subprocess plumbing | **129 lines** |
 | unlanded verbs waiting in alp-sdk#933 | **9** (`check`/`list`/`doctor`/`info`/`run`/`ab`/`prep`/`zoo`/`add`) |
 
+**Historical measurement — superseded by #1367/#1368/#1727.** The table above
+is the snapshot this ADR's reasoning was built on and is left as-is for that
+reasoning to stay legible. It no longer describes `dev`: #1727 already
+deleted `scripts/alp_cli/model.py` and the rest of `scripts/alp_cli/` outright
+(tan-cli v0.6.0 carries native ports of every wrapped verb), and
+`scripts/alp_model/` itself has since shrunk to **12 modules, 938 lines**. The
+CLI row and the `_PATH_OPT_KEYS` defect discussed below are both history now;
+the engine-relocation decision this ADR argues for is unaffected — it was
+always about `scripts/alp_model/`, not the wrapper that used to call it.
+
 `model_cmd.py` is neither a port nor a forward. It is a hybrid: it hand-ports
 the *surface* (board.yaml discovery, `som.sku` and `models[]` validation,
 compile-option path resolution, the summary) and forwards the *engine* through
@@ -119,8 +129,9 @@ _PATH_OPT_KEYS = {"config", "calibration", "images", "spec"}
 ```
 
 because resolving every value "corrupted a genuine shape string into a
-filesystem path, which then made the adapter's own shape check misfire"
-(`scripts/alp_cli/model.py:19-21`). tan's hand-ported counterpart
+filesystem path, which then made the adapter's own shape check misfire" (the
+fix lived in `scripts/alp_cli/model.py`, since deleted by #1727 along with
+the rest of `scripts/alp_cli/`). tan's hand-ported counterpart
 (`model_cmd.py:128-140`) never received that fix and still resolves **every**
 string option. So `tan model build` currently path-mangles DRP-AI's
 `input_shape` (`"1,3,224,224"`), `input_name` (`"images"`) and `product`
@@ -211,9 +222,9 @@ departure from it.
    draws for `build-plan-v1`. It needs a version guard on the same terms.
 4. **No parity apparatus is created for this axis.** There is nothing to police
    because there is no second implementation: the engine moves, it is not
-   forked. `scripts/alp_cli/model.py` leaves `HAND_PORT_HASHES` when it is
-   deleted, and `HAND_PORT_PINNED_SDK_COMMIT` loses one of its entries rather
-   than gaining nine.
+   forked. `scripts/alp_cli/model.py` is already gone — #1727 deleted it along
+   with the rest of `scripts/alp_cli/`, taking its `HAND_PORT_HASHES` entry
+   with it — so this decision now only has `scripts/alp_model/` left to move.
 5. The nine unlanded verbs in alp-sdk#933 are written **once**, in tan. #933's
    Python becomes a port source of the same kind tan-cli#58's Rust already is.
 
@@ -227,9 +238,10 @@ departure from it.
    `model_cmd.py` into argparse + envelope over an in-process call. alp-sdk is
    untouched and still works at this point — the two coexist for exactly one
    slice.
-3. **alp-sdk deletes** `scripts/alp_model/` and `scripts/alp_cli/model.py`, with
-   `git grep` evidence, and rehomes the three cross-cutting tests that survive
-   the move.
+3. **alp-sdk deletes** `scripts/alp_model/`, with `git grep` evidence, and
+   rehomes the cross-cutting tests that survive the move.
+   (`scripts/alp_cli/model.py` no longer needs this step — #1727 already
+   deleted it along with the rest of `scripts/alp_cli/`.)
 4. Verbs land in tan, cheapest-and-most-useful first: `check`, then the
    envelope set, then `zoo`/`add`, `prep`, and `run`/`ab`/`measure` last.
 
@@ -249,16 +261,17 @@ matching SDK checkout.
 the planner's equivalent cost, **this one is close to free**: no alp-sdk build
 step imports the Python `alp_model`. Every CMake, Yocto and example reference
 resolves to the C file `src/common/alp_model.c`
-(`zephyr/CMakeLists.txt:1392-1394`, `src/baremetal/CMakeLists.txt:111`,
-`src/yocto/CMakeLists.txt:107,116,169`, `tests/unit/alpmodel_select/`,
+(`zephyr/CMakeLists.txt:1534`, `src/baremetal/CMakeLists.txt`,
+`src/yocto/CMakeLists.txt`, `tests/unit/alpmodel_select/`,
 `tests/yocto/`, `meta-alp-sdk/recipes-devtools/zcbor/zcbor_0.9.1.bb:5`), and
 `examples/aen/aen-npu-inference-alp/CMakeLists.txt:79` drives its own
 `gen_model.py`, which `subprocess`-spawns `vela` directly and never imports
 `alp_model`. What is lost is the *Python test suite*, which moves with the
-engine, plus three cross-cutting tests that must be rehomed:
+engine, plus cross-cutting tests that must be rehomed:
 `tests/scripts/test_silicon_ref_single_source.py:93,106`,
-`tests/scripts/test_alp_cli_new_som.py:335`,
-`tests/scripts/test_resolve_generated_conflicts.py:54`.
+`tests/scripts/test_resolve_generated_conflicts.py:54`. (A third,
+`tests/scripts/test_alp_cli_new_som.py:335`, no longer exists — #1727 removed
+it along with the rest of `scripts/alp_cli/`'s test coverage.)
 
 **Risk.** The two real-model end-to-end tests
 (`tests/scripts/test_deepx_yolo_internal.py`,
@@ -281,10 +294,11 @@ standing "prove capabilities on real models" rule.
   `629aa75f`, no `--format`/envelope/`schemaVersion` on the module invocation,
   and a wheel that omits `alp_model` entirely. Making it reachable means
   building an installable, versioned, envelope-emitting SDK CLI — i.e. building
-  a second product to avoid moving 1,029 lines. It also re-breaks ADR-0020 by
-  keeping `scripts/alp_cli/` permanently undeletable, and reintroduces the
-  subprocess boundary the Python port removed, which 0026 rejected for the
-  planner on the same grounds.
+  a second product to avoid moving 1,029 lines. It would also have re-broken
+  ADR-0020 by keeping `scripts/alp_cli/` permanently undeletable — moot now
+  that #1727 deleted it outright — and reintroduces the subprocess boundary
+  the Python port removed, which 0026 rejected for the planner on the same
+  grounds.
 - **Formalise the `_DRIVER` payload as a versioned contract and keep the split.**
   Worth doing on its merits and cheap, but it does not address this problem: the
   driver seam is not where the drift happened. alp-sdk#1271 drifted in the
