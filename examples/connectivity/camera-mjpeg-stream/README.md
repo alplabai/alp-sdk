@@ -31,18 +31,23 @@ your DHCP server):
 [camera-mjpeg-stream]   snapshot: http://192.0.2.10:8080/snapshot.jpg
 ```
 
-### 1280x960 build variant (E1M-AEN801/AEN803, full-FOV 2x2-binned, 15 fps capture/encode)
+### 1280x960 build variant (E1M-AEN801/AEN803, 15 fps capture/encode request)
 
 `CONFIG_CAMERA_MJPEG_STREAM_1280X960` (this directory's `Kconfig`) switches
 `src/main.c` to 1280x960 at 15 fps capture/encode and raises the JPEG
 output cap to 160 KiB — see `boards/overlay-1280x960.conf` for the
 matching ISP-buffer-count and SRAM0-sizing deltas that resolution needs
-(same on both SKUs — AEN801 and AEN803 are the same PCB/SoC), and
-`src/main.c`'s `FRAME_W`/`FRAME_H` comment for why the synthetic-frame
-fallback is compiled out entirely at this size (no SRAM0 budget left for
-it). Delivered rate is lower than the 15 fps capture/encode rate — see
-bench run 243 below: the HTTP send path is the bottleneck. Not meaningful
-on native_sim.
+(same on both SKUs — AEN801 and AEN803 are the same PCB/SoC; the
+accounting is also sensor-neutral, it depends only on the 1280x960 NV12
+frame size, not which sensor produced it), and `src/main.c`'s
+`FRAME_W`/`FRAME_H` comment for why the synthetic-frame fallback is
+compiled out entirely at this size (no SRAM0 budget left for it).
+Delivered rate is lower than the 15 fps capture/encode rate — see bench
+run 243 below: the HTTP send path is the bottleneck. Not meaningful on
+native_sim. This variant runs behind either of two sensors depending on
+the build's `SHIELD` — OV5647 (`raspberry_pi_camera_module_1`, this
+section) or IMX296 (`raspberry_pi_global_shutter_camera`, see "IMX296
+build variant" below).
 
 Sensor mode (issue #2286): this build now programs the OV5647's real
 full-FOV 2x2-binned mode (`zephyr/drivers/video/ov5647.c`,
@@ -100,6 +105,41 @@ under cap on the first attempt at quality 60). Delivered rate is lower:
 the host receives ~7.50 fps / 997,544 B/s — the HTTP send path, not
 capture/encode, is the bottleneck (~1 MB/s), and `STREAM_STALL_TIMEOUT_S`
 (30 s) comfortably covers it with 0 dropped `/stream` clients.
+
+### IMX296 build variant (E1M-AEN801/AEN803, 1280x960 ROI, issue #2287 Stage B unit 5)
+
+Streams the Sony IMX296 (`zephyr/drivers/video/imx296.c`) through the SAME
+`CONFIG_CAMERA_MJPEG_STREAM_1280X960` path the OV5647 variant above uses —
+IMX296's own 1280x960 ROI crop (`IMX296_ROI_WIDTH`/`IMX296_ROI_HEIGHT`) is
+the identical frame size `boards/overlay-1280x960.conf`'s SRAM0/buffer-pool
+accounting already covers, so no separate Kconfig or overlay was needed,
+only a different `SHIELD`. AE is left ON (this example's own default —
+`src/main.c` never disables it) and AWB stays at the ISP's own default
+(`OP_TYPE_AUTO`, `isp_pico.c`'s `isp_init_controls()`) — there is **no
+IMX296-fitted AWB/CCM calibration yet** (`CONFIG_VIDEO_ISP_VSI_CALIB_OV5647`
+gates the only calibration tables that exist, `hal_alif` patches 0008/0011;
+an IMX296 build falls through to the stock ARX3A0 AWB/CCM defaults,
+`isp_param_conf.h`'s `#else` arm — colour will not be correct, only the
+capture/encode/serve pipeline itself is exercised here).
+
+```bash
+west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
+    examples/connectivity/camera-mjpeg-stream -- \
+    "-DEXTRA_ZEPHYR_MODULES=<path-to-alp-sdk>;<path-to-hal_alif>" \
+    "-DSHIELD=e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" \
+    "-DEXTRA_CONF_FILE=boards/overlay-1280x960.conf"
+# flash + run per docs/aen-bench-bringup.md.
+```
+
+**UNBENCHED**: build-only regression so far (`testcase.yaml`'s
+`aen_imx296` scenario) — no bench run number yet. `examples/aen/
+aen-isp-capture`'s own IMX296 AE-on bench history (#2287 Stage B unit 3,
+bench runs 298-311, `changelog.d/2287.md`) is the closest available
+evidence for how this sensor's AE behaves through the same ISP-Pico
+pipeline this example also drives, but that example's capture path
+(20-60 held frames, no JPEG/HTTP) is not identical to this one's
+(continuous encode+serve) and has not itself been re-run through this
+example's own JPEG/HTTP code paths.
 
 ## Watch it
 
