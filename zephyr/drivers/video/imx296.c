@@ -42,15 +42,19 @@
  * derivation comment) the earlier "Camera" timing mode's complete failure
  * to emit any IPI line is RESOLVED: Controller mode captures full
  * 1456x1088 frames with zero IPI-FIFO-overflow events across a full
- * capture run (csi-hsd 503, see the overlay). Frame content has NOT been
- * visually verified against a real scene, though: every capture so far, at
- * maximum exposure and gain, has shown flat noise around the sensor's
- * black level -- consistent with no light reaching the array (optics/
- * lighting not yet set up on this bench), but also consistent with the
- * data path still being wrong somewhere. Do NOT treat this driver's
- * capture path as producing verified image data; treat it as "captures a
- * frame-shaped buffer, mechanically consistent (correct size, zero FIFO
- * errors), with unverified scene content."
+ * capture run (csi-hsd 503, see the overlay). Frame content took several
+ * more bench passes to verify -- see changelog.d/2287.md for the full
+ * history -- and two unrelated bugs were in the way at this point: the
+ * product build's own SHS init write (fixed by 949f7db5f, see
+ * IMX296_SHS_DEFAULT's comment below) was stuck at a 14-line exposure
+ * regardless of the exposure/gain control values a caller set, and every
+ * capture (product or diag) restarted the sensor first, landing on an
+ * initialization-period frame (fixed by 3e4c09b55/1312b0734, see
+ * hw_cam_cpi_only_stop()/IMX296_INIT_PERIOD_MS). Diag builds that bypassed
+ * the SHS bug by writing SHS/exposure directly still inherited the
+ * restart-per-capture problem, so even those early diag frames were
+ * init-period frames, not a clean read of the data path. See
+ * changelog.d/2287.md for the bench numbers once both were fixed.
  *
  * LANE-PARK / D-PHY BEHAVIOUR: unlike OV5647 (issue #2248,
  * ov5647_lane_park()), this datasheet documents no register that forces the
@@ -431,13 +435,15 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  *
  * FREE-RUN MODE ONLY. imx296_set_stream() applies this same wait
  * unconditionally, including when `trigger` (IMX296_CID_TRIGGER_MODE) is
- * set, but this driver's trigger modes ("Mode Transitions of Global Shutter
- * Operation", page 66) start streaming from an externally-driven XTRIG
- * pulse, not from XMSTA's own free-run timing this constant is derived
- * from -- whether an 8-frame (or any) initialization period still applies,
- * and on what clock, is not established for trigger mode in this
- * datasheet and has not been bench-checked. Trigger-mode init timing is
- * UNHANDLED and UNBENCHED; this wait is a known-good value for free-run
+ * set -- trigger mode is still master mode, started by this same XMSTA
+ * write ("Mode Transitions of Global Shutter Operation", page 66, +
+ * "Slave Mode and Master Mode", page 55); only frame OUTPUT and exposure
+ * timing become XTRIG-driven after that. Whether the 8-frame
+ * initialization period this wait covers still applies unchanged once
+ * XTRIG starts pulsing, or runs on a different clock, is not established
+ * for trigger mode in this datasheet and has not been bench-checked.
+ * Trigger-mode init timing is UNHANDLED and UNBENCHED; this wait is a
+ * known-good value for free-run
  * only.
  */
 #define IMX296_INIT_PERIOD_MS 150
@@ -1040,15 +1046,9 @@ static int imx296_init(const struct device *dev)
 	 * and hardware start in agreement regardless of boot history.
 	 */
 	/*
-	 * SHS is the shutter START line, not exposure lines ("Calculation Formula of
-	 * Exposure Time", page 60: exposure = 1H x (lines_per_frame - SHS) + 14.26 us)
-	 * -- the same VMAX-minus conversion imx296_set_ctrl() applies (shs = VMAX -
-	 * exposure) belongs here too. Writing IMX296_VMAX - IMX296_SHS_DEFAULT (1104)
-	 * directly, as this line used to, put SHS=1104 in the register -- a 14-line
-	 * (~0.2 ms) exposure instead of the intended 1104-line one, and the sensor
-	 * output flat black (mean pixel value 60.15) as a result. IMX296_SHS_DEFAULT
-	 * IS the register value already (see IMX296_REG_SHS's own comment above and
-	 * IMX296_SHS_DEFAULT's POR-default note): no VMAX conversion here.
+	 * SHS is the shutter start line; IMX296_SHS_DEFAULT (14) is already the
+	 * register value, giving the exposure control's default of VMAX - 14 =
+	 * 1104 lines (issue #2287, see changelog.d/2287.md for the bug history).
 	 */
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SHS, IMX296_SHS_DEFAULT);
 	if (ret < 0) {
