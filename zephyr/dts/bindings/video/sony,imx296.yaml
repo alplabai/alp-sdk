@@ -1,0 +1,56 @@
+# Copyright 2026 Alp Lab AB
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+# ADR-0017-ADJACENT (authored from the Sony IMX296 datasheet), PARTIALLY
+# BENCH-VERIFIED (I2C identity only -- issue #2287, bench run 229). Shaped
+# after upstream's dts/bindings/video/sony,imx219.yaml (i2c-device.yaml
+# + a video-interfaces.yaml endpoint child), mirroring
+# zephyr/dts/bindings/video/ovti,ov9281.yaml's `clocks: required: true`. See
+# zephyr/drivers/video/imx296.c for the datasheet-section citations and
+# retirement note.
+
+description: |
+  Sony IMX296 1.58 MP global-shutter image sensor
+
+  A raw Bayer (colour) or mono global-shutter image sensor with a single-lane
+  MIPI CSI-2 image data interface and a CCI (I2C compatible) control bus.
+  Only All-pixel scan mode is supported: 1456x1088 RAW10 (the whole
+  effective array as transmitted; 1440x1080 is the recommended recording
+  crop inside it), 1 data lane, 37.125 / 54 / 74.25 MHz INCK.
+
+compatible: "sony,imx296"
+
+include: i2c-device.yaml
+
+properties:
+  clocks:
+    description: |
+      Reference to the INCK clock, which must be 37.125 MHz, 54 MHz or
+      74.25 MHz -- see zephyr/drivers/video/imx296.c.
+    required: true
+
+child-binding:
+  child-binding:
+    include: video-interfaces.yaml
+    properties:
+      no-lp11-clock-lane-park:
+        type: boolean
+        description: |
+          DATASHEET-INFERRED, NOT BENCH-MEASURED (issue #2287): this
+          driver's imx296_init() leaves the sensor in STANDBY -- no MIPI
+          output at all, so no LP-11 -- and this datasheet documents no
+          register that forces the CLOCK lane to Stop-state (LP-11) short
+          of exiting STANDBY into full master-mode streaming (XMSTA), the
+          same shape as OV5647 issue #2248, which that driver fixes with an
+          explicit lane-park sequence
+          (zephyr/drivers/video/ov5647.c, ov5647_lane_park()) this sensor
+          has no equivalent registers for. Setting this bool on the
+          sensor's OWN CSI-2 endpoint (not the host's `&csi_ep_in`) tells
+          zephyr/drivers/mipi_dphy/dphy_dw.c's dphy_dw_slave_setup() to
+          skip only the CLOCK-lane Stop-state bit
+          (CSI_PHY_STOPSTATE_PHY_STOPSTATECLK) in its bounded wait for this
+          sensor -- the DATA-lane Stop-state bit and the wait's timeout
+          stay fatal, for this sensor and every other. Set only in
+          raspberry_pi_global_shutter_camera.overlay; do not set it on a
+          sensor whose driver already guarantees LP-11 (OV5647, OV9281).
