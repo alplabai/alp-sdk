@@ -219,7 +219,6 @@ static void csi2_dw_irq(const struct device *dev)
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t global_st = 0;
 	uint32_t event_st = 0;
-	bool reset_ipi = false;
 
 	global_st = sys_read32(regs + CSI_INT_ST_MAIN);
 	if (global_st & CSI_INT_ST_MAIN_IPI_FATAL) {
@@ -229,18 +228,17 @@ static void csi2_dw_irq(const struct device *dev)
 
 		/*
 		 * Alp Lab AB: a sensor stuck emitting bad IPI framing fires this once per line --
-		 * uncapped LOG_ERR + IPI soft-reset floods the log and storms the reset line (see
-		 * CSI2_DW_IPI_FATAL_LOG_LIMIT). Log + reset only the first
-		 * CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask window, then mask
-		 * the source and log once that it went quiet. ipi_fatal_count (this window) resets
-		 * on the next csi2_dw_irq_on() -- now called from every csi2_dw_stream_start(), not
-		 * just the first set_format -- so masking from a previous stream no longer hides a
-		 * later stream's own overflow; ipi_fatal_total (video_csi_dw.h) is never reset, so
-		 * a later diagnostic dump can still report the true lifetime total.
+		 * uncapped LOG_ERR floods the log (see CSI2_DW_IPI_FATAL_LOG_LIMIT). Log only the
+		 * first CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask window, then
+		 * mask the source and log once that it went quiet. ipi_fatal_count (this window)
+		 * resets on the next csi2_dw_irq_on() -- now called from every
+		 * csi2_dw_stream_start(), not just the first set_format -- so masking from a
+		 * previous stream no longer hides a later stream's own overflow; ipi_fatal_total
+		 * (video_csi_dw.h) is never reset, so a later diagnostic dump can still report the
+		 * true lifetime total.
 		 */
 		if (data->ipi_fatal_count <= CSI2_DW_IPI_FATAL_LOG_LIMIT) {
 			LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
-			reset_ipi = true;
 		}
 		if (data->ipi_fatal_count == CSI2_DW_IPI_FATAL_LOG_LIMIT) {
 			LOG_ERR("IPI fatal interrupts masked after %d (total %u since driver init)",
@@ -277,50 +275,55 @@ static void csi2_dw_irq(const struct device *dev)
 		LOG_ERR("Fatal Interrupt due to payload checksum error."
 			"status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_CRC) {
 		event_st = sys_read32(regs + CSI_INT_ST_CRC_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to frames with at least one CRC "
 			"error. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_SEQ) {
 		event_st = sys_read32(regs + CSI_INT_ST_SEQ_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to incorrect frame sequence for "
 			"a specific VC. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_FRAME_BNDRY) {
 		event_st = sys_read32(regs + CSI_INT_ST_BNDRY_FRAME_FATAL);
 		LOG_ERR("Fatal Interrupt due to mismatch of Frame Start and "
 			"Frame End for a specific VC. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_PKT) {
 		event_st = sys_read32(regs + CSI_INT_ST_PKT_FATAL);
 		LOG_ERR("Fatal Interrupt related to Packet construction. "
 			"Packet discarded. status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 	if (global_st & CSI_INT_ST_MAIN_PHY_FATAL) {
 		event_st = sys_read32(regs + CSI_INT_ST_PHY_FATAL);
 		LOG_ERR("Fatal Interrupt due to PHY Packet discard. "
 			"status - 0x%x",
 			event_st);
-		reset_ipi = true;
 	}
 
-	if (reset_ipi) {
-		LOG_ERR("Review the Timings programmed to IPI. "
-			"Resetting the IPI for now.");
-		sys_clear_bits(regs + CSI_IPI_SOFTRSTN, CSI_IPI_SOFTRSTN_RSTN);
-		sys_set_bits(regs + CSI_IPI_SOFTRSTN, CSI_IPI_SOFTRSTN_RSTN);
-	}
+	/*
+	 * Alp Lab AB (issue #2287, bench run 271, E1M-AEN803 2026W36-0001): this handler used to
+	 * soft-reset CSI_IPI_SOFTRSTN here on any of the fatal events above. Deleted: toggling
+	 * IPI_SOFTRSTN while the Alif CPI is mid-frame (BUSY) corrupted memory -- the CPI gates
+	 * its write on HSYNC only (VSYNC_EN=0), so a soft reset that cuts a line makes the CPI
+	 * write one row LATE, past the frame buffer's FCFG row count. Bench: CPI DMA wrote ~2744
+	 * bytes (1372 px, just under one 1456-px row) past a 3,168,256-byte buffer's end
+	 * (0x02305880), corrupting the next sys_heap chunk header (panicked in sys_heap_free() at
+	 * buffer release). Diagnostic runs with the reset compiled out (DIAG_NO_IPI_SOFTRST)
+	 * closed clean. The Alif DFP reference (Driver_MIPI_CSI2.c's IPI-fatal handler) matches
+	 * this: it only reads status and reports the event, it never soft-resets IPI at runtime.
+	 * Recovery for a genuinely wedged IPI is now stream-level: csi2_dw_stream_stop() then
+	 * csi2_dw_stream_start() re-arms (see csi2_dw_irq_on()) rather than a mid-frame register
+	 * poke. This hazard is NOT IMX296-specific -- OV5647/OV9281 buffers have zero slack
+	 * either, so they were exposed to the same latent overrun; do not add frame-buffer
+	 * padding as a band-aid, the reset itself was the bug.
+	 */
 }
 
 static int csi2_dw_ipi_advanced_features(const struct device *dev)
