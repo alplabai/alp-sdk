@@ -131,15 +131,25 @@ west build -b alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he \
 # flash + run per docs/aen-bench-bringup.md.
 ```
 
-**UNBENCHED**: build-only regression so far (`testcase.yaml`'s
-`aen_imx296` scenario) — no bench run number yet. `examples/aen/
-aen-isp-capture`'s own IMX296 AE-on bench history (#2287 Stage B unit 3,
-bench runs 298-311, `changelog.d/2287.md`) is the closest available
-evidence for how this sensor's AE behaves through the same ISP-Pico
-pipeline this example also drives, but that example's capture path
-(20-60 held frames, no JPEG/HTTP) is not identical to this one's
-(continuous encode+serve) and has not itself been re-run through this
-example's own JPEG/HTTP code paths.
+Bench run 312 (E1M-AEN803 2026W36-0001, night room) confirmed the pipeline
+end to end — DHCP lease obtained, `/stream` and `/snapshot.jpg` both served
+a valid 1280x960 JPEG — but also found AE running gain to the GAIN
+register's full 48 dB ceiling in the dim scene blew the 160 KiB JPEG
+output-buffer budget on every subsequent frame (`mjpeg_http.h`'s own
+comment has the full accounting). Fixed by two changes now in this build:
+`src/main.c`'s quality ladder actually engages on a buffer-full encode and
+persists/recovers the reduced quality across frames (it previously never
+engaged at all — `out_len` was 0 on that failure path, not the required
+size, so the ladder's own gate was always false), and `hal_alif` patch
+0013 caps the AE library's own gain ceiling at 24 dB (the GAIN register's
+analog-only half, datasheet p.56) instead of the full 48 dB. Re-bench
+after this change is not yet done — no run number for the fixed build yet.
+
+Also from run 312: this build's FLASH usage on the ITCM bench profile
+(`scripts/bench/aen/aen-flowc-itcm.conf`) is 261,872 / 262,144 B — 99.90%,
+272 B of headroom. Any further growth of this example's code on that
+profile risks overflowing FLASH; check the build's own `Memory region`
+summary before adding to `src/main.c` or its Kconfig-selected code paths.
 
 ## Watch it
 

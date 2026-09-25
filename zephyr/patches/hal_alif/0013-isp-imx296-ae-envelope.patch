@@ -1,9 +1,9 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..db4aba3
+index 0000000..166f029
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
-@@ -0,0 +1,115 @@
+@@ -0,0 +1,134 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -56,31 +56,50 @@ index 0000000..db4aba3
 + *     OWN power-on-reset default, independently bench-proven to produce an image) as a
 + *     conservative floor until ROI mode switches to the tabulated VTR: SHS=VMAX-1 (its
 + *     CEILING) gives exposure=1, SHS=14 (this clamp) gives exposure=VMAX-14=1104.
-+ *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count,
-+ *     0-480 = 0.0-48.0 dB): 1024 (0 dB = 1.0x, library units) and
-+ *     round(1024 * 10^(480/200)) = 257217 (48.0 dB) -- computed the SAME
-+ *     way zephyr/drivers/video/isp_sns_gain_conv.h's isp_gain_db_tenths_
-+ *     table[480] is (that table is alp-sdk-side, not reachable from this
-+ *     hal_alif header, hence the separate literal here; the two must stay
-+ *     in sync by hand, same by-hand-invariant status ov5647_ae_envelope.h's
-+ *     own comment documents for ITS struct/macro duplication). ~257216 in
-+ *     the #2287 unit-3 design note is the same figure within the rounding
-+ *     of 10^2.4.
++ *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count):
++ *     1024 (0 dB = 1.0x, library units) and round(1024 * 10^(240/200)) =
++ *     16229 (24.0 dB), NOT the register's full 0-480/0.0-48.0 dB range --
++ *     bench run 312 (E1M-AEN803 2026W36-0001, night room, camera-mjpeg-
++ *     stream) ran AE to the register's full ceiling (48.0 dB, GAIN=0x1e0)
++ *     in a dim scene: the resulting frame was noisy enough to blow the
++ *     encoder's 160 KiB JPEG output-buffer budget on every subsequent
++ *     encode (see examples/connectivity/camera-mjpeg-stream/src/main.c's
++ *     jpeg_quality_ladder use). p.56's own GAIN table splits the register
++ *     at 0-240 (0-24.0 dB) as ANALOG gain and 241-480 (24.1-48.0 dB) as
++ *     DIGITAL gain layered on top -- digital gain multiplies the sensor's
++ *     OWN read noise along with the signal, it does not add photon
++ *     signal the way analog (pre-ADC) gain does, so the top half of the
++ *     register's range makes a dim scene noisier per dB than the bottom
++ *     half, consistent with runs 305/310's own noise observations at
++ *     high gain. Capping the AE library's own ceiling at the analog/
++ *     digital split (240, 24.0 dB) keeps the 3A loop out of the
++ *     digital-gain half entirely; VIDEO_CID_ANALOGUE_GAIN's driver-side
++ *     control range (zephyr/drivers/video/imx296.c) is UNCHANGED at the
++ *     full 0-480 -- a caller setting gain manually (as examples/aen/
++ *     aen-isp-capture's AEN_ISP_IMX296_GAIN option does) can still reach
++ *     the full register range; only the AE library's autonomous ceiling
++ *     is lowered. Computed the SAME way zephyr/drivers/video/
++ *     isp_sns_gain_conv.h's isp_gain_db_tenths_table[240] is (that table
++ *     is alp-sdk-side, not reachable from this hal_alif header, hence the
++ *     separate literal here; the two must stay in sync by hand, same
++ *     by-hand-invariant status ov5647_ae_envelope.h's own comment
++ *     documents for ITS struct/macro duplication).
 + *   - dgain (p.56, no separate digital-gain register documented for
 + *     this sensor): pinned to 1024 (unity), same convention as OV5647's
-+ *     envelope -- all headroom flows through the analogue GAIN register.
++ *     envelope -- all headroom flows through the analogue GAIN register,
++ *     now capped below the digital half of its own range (see above).
 + */
 +#define IMX296_AE_FULL_LINES 1118 /* VMAX, master-mode timing example */
 +#define IMX296_AE_FPS_X10    603  /* 60.3 fps * 10 -- see header comment */
 +#define IMX296_AE_MAX_INT_LINE 1104 /* VMAX - 14 (SHS=14 floor, bench-clamped -- SHS=4 is dark, see header comment) */
-+#define IMX296_AE_MIN_AGAIN     1024   /* 1x floor, library units (1x = 1024) */
-+#define IMX296_AE_MAX_AGAIN     257217 /* 48.0 dB -- see header comment */
++#define IMX296_AE_MIN_AGAIN     1024  /* 1x floor, library units (1x = 1024) */
++#define IMX296_AE_MAX_AGAIN     16229 /* 24.0 dB, analog-only ceiling -- see header comment (bench run 312) */
 +#define IMX296_AE_MIN_DGAIN     1024   /* unity -- no separate digital gain register */
 +#define IMX296_AE_MAX_DGAIN     1024   /* unity, matching MIN (see OV5647 envelope's rationale) */
 +
 +_Static_assert(IMX296_AE_FULL_LINES == 1118, "drifted from sensor_attributes.fullLines");
 +_Static_assert(IMX296_AE_MAX_INT_LINE == 1104, "drifted from sensor_attributes.maxIntLine");
-+_Static_assert(IMX296_AE_MAX_AGAIN == 257217, "drifted from sensor_attributes.maxAgain");
++_Static_assert(IMX296_AE_MAX_AGAIN == 16229, "drifted from sensor_attributes.maxAgain");
 +_Static_assert(IMX296_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
 +_Static_assert(IMX296_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain");
 +_Static_assert(IMX296_AE_MIN_DGAIN == 1024, "drifted from sensor_attributes.minDgain");
@@ -182,7 +201,7 @@ index 525217d..e8f2e8b 100644
  			.manualAttr = {
  				.intTime = 100000,
 diff --git a/drivers/isp/isp_wrapper/inc/sensor_attributes.h b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
-index 369cc27..b77231b 100644
+index 369cc27..e7343f6 100644
 --- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
 +++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
 @@ -79,6 +79,43 @@ extern "C"{
@@ -208,7 +227,7 @@ index 369cc27..b77231b 100644
 +	.maxIntLine = 1104,
 +	.minIntLine = 0x1,
 +	.intLineStep = 1,
-+	.maxAgain = 257217,
++	.maxAgain = 16229, /* 24.0 dB analog-only ceiling, bench run 312 -- see imx296_ae_envelope.h */
 +	.minAgain = 1024,
 +	.againStep = 1,
 +	.maxDgain = 1024,

@@ -767,7 +767,7 @@ patches:
       additive, touches only the two switches' SRGGB10P case; every other
       fourcc's mapping is unchanged. Upstream to hal_alif then drop.
   - path: hal_alif/0013-isp-imx296-ae-envelope.patch
-    sha256sum: d16ae881157112cf42bdcc76f0a8c02e23fd4114d1950451ea1a829d303d1134
+    sha256sum: 540cf3d4d09852e69de881b6f1f679c10d25087e2a0a8af773cd4934db99682c
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -818,6 +818,21 @@ patches:
 
       Board/sensor-specific by construction (same status as patch 0005),
       not upstreamable as-is.
+
+      Bench run 312 (camera-mjpeg-stream, E1M-AEN803 2026W36-0001, night
+      room) update: IMX296_AE_MAX_AGAIN (imx296_ae_envelope.h) and
+      sensor_attributes.h's matching .maxAgain literal are now 16229
+      (24.0 dB), not 257217 (48.0 dB) -- the AE library ran gain to the
+      register's full ceiling in a dim scene, and the resulting frame
+      noise blew the JPEG encoder's output-buffer budget on every
+      subsequent encode. The datasheet (p.56) splits the GAIN register at
+      240/0-24.0 dB (analog) vs 241-480/24.1-48.0 dB (digital); digital
+      gain multiplies sensor read noise along with signal, so the AE
+      library's own ceiling is now pinned to the analog half only.
+      VIDEO_CID_ANALOGUE_GAIN's driver-side control range
+      (zephyr/drivers/video/imx296.c) is unchanged at the full 0-480 --
+      only the 3A library's autonomous ceiling moved; a caller setting
+      gain manually can still reach the full register range.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

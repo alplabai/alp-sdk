@@ -31,7 +31,20 @@
  *  (also larger) raw ISP buffer pool -- see that file for the full
  *  SRAM0 accounting. Bench run 243 (E1M-AEN803 2026W36-0001) measured
  *  131-135 KB JPEGs at quality 60 -- comfortably under this cap, 0
- *  buffer-full. */
+ *  buffer-full.
+ *
+ *  Bench run 312 (E1M-AEN803 2026W36-0001, IMX296, night room, #2287)
+ *  DID overflow this cap repeatedly, once AE ran gain to its full 48 dB
+ *  ceiling in a dim scene -- 160 KiB is still the right budget (SRAM0 is
+ *  already at 98.5% for this resolution, see overlay-1280x960.conf; a
+ *  larger buffer has nowhere to come from), so that run's fix is in two
+ *  OTHER places instead of here: main.c's quality ladder now actually
+ *  engages on a buffer-full encode (src/backends/jpeg/alif_hantro.c's
+ *  -ENOSPC path now reports out_len correctly) and persists/recovers the
+ *  reduced quality across frames, and hal_alif patch 0013 caps the AE
+ *  library's own gain ceiling at 24 dB (the register's analog-only half,
+ *  p.56) instead of the full 48 dB, since the digital half of that
+ *  register only multiplies read noise. */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 #define MJPEG_HTTP_MAX_JPEG 163840u
 #else

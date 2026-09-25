@@ -458,7 +458,13 @@ int alif_cam_cpi_resume(const struct device *dev)
 	 * gets that.
 	 */
 	if (sys_read32(regs + CAM_CTRL) & (CAM_CTRL_BUSY | CAM_CTRL_START)) {
-		LOG_DBG("CPI already armed/in-flight (CAM_CTRL=0x%08x) -- skipping duplicate "
+		/* WRN, not DBG (reviewer fix, bench run 312 round): this skip is the
+		 * idempotency guard's only observable trace -- a caller hitting it
+		 * repeatedly means something IS calling resume() more than once per
+		 * frame (e.g. the stall-recovery error callback firing on errors
+		 * that aren't real stalls), which is worth seeing at default log
+		 * levels, not just when DBG is turned up. */
+		LOG_WRN("CPI already armed/in-flight (CAM_CTRL=0x%08x) -- skipping duplicate "
 			"re-arm",
 			sys_read32(regs + CAM_CTRL));
 	} else {

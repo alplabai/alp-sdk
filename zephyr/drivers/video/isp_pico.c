@@ -2111,6 +2111,7 @@ static int isp_stream_stop(const struct device *dev)
 	struct isp_data *data = dev->data;
 	struct k_work_sync sync;
 	int ret;
+	bool was_streaming = data->is_streaming; /* see the video_stream_stop() failure path below */
 
 	/*
 	 * #2287 Stage B unit 3, reviewer fix (bench run 301, blocker): a starvation pause
@@ -2165,17 +2166,25 @@ static int isp_stream_stop(const struct device *dev)
 			LOG_ERR("Failed to stop streaming in pipeline! video_stream_stop=%d",
 				ret);
 			/*
-			 * #2287 Stage B unit 3, reviewer fix (bench run 311 round): restore
-			 * is_streaming=true -- this function set it false, above, before even
-			 * attempting the controller stop (matching isp_stream_start()'s own
-			 * set-before-hardware-call pattern), but that was premature: the
-			 * controller stop FAILED, so streaming never actually stopped. Leaving
-			 * is_streaming false here would let a caller's retry (another
-			 * isp_stream_stop() call) hit the "Already stopped streaming!" early
-			 * return above and silently skip retrying the controller stop that
-			 * actually needs to happen.
+			 * #2287 Stage B unit 3, reviewer fix (bench run 311 round, corrected
+			 * bench run 312 round): restore is_streaming to its ENTRY value
+			 * (was_streaming), not an unconditional true -- this function set it
+			 * false, above, before even attempting the controller stop (matching
+			 * isp_stream_start()'s own set-before-hardware-call pattern), but that
+			 * was premature: the controller stop FAILED, so streaming never
+			 * actually stopped/changed state. Unconditional true was itself wrong
+			 * for the starvation-pause entry path (guard above): that path enters
+			 * with is_streaming ALREADY false (only controller_cpi_paused was
+			 * true) -- forcing it back to true here would claim a stream that was
+			 * never actually running is now streaming again. was_streaming carries
+			 * whichever of the two entry shapes this call actually had. Leaving
+			 * is_streaming at its post-clear value (false) here, for either entry
+			 * shape, would let a caller's retry (another isp_stream_stop() call)
+			 * hit the "Already stopped streaming!" early return above (since
+			 * controller_cpi_paused is also still true at this point) and silently
+			 * skip retrying the controller stop that actually needs to happen.
 			 */
-			data->is_streaming = true;
+			data->is_streaming = was_streaming;
 			return ret;
 		}
 	}

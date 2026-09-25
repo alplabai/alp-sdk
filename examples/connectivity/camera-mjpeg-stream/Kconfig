@@ -31,9 +31,11 @@ config CAMERA_MJPEG_STREAM_1280X960
 	  either way, so neither depends on which sensor is actually wired.
 	  Still requests 15 fps by default even though OV5647's sensor mode
 	  also reaches 30 fps -- unbenched at 30 fps so far (IMX296 runs at
-	  its own fixed 60.3 frame/s regardless of this request; AE, not this
-	  symbol, is what bounds its delivered rate in a dim scene -- see
-	  changelog.d/2287.md). Bench run 243 (E1M-AEN803 2026W36-0001,
+	  its own fixed 60.3 frame/s regardless of this request; its actual
+	  delivered rate is expected to be send- or encode-bound, the same
+	  shape OV5647's own bench run 243 below found, but this has not yet
+	  been measured for IMX296 -- see changelog.d/2287.md). Bench run 243
+	  (E1M-AEN803 2026W36-0001,
 	  OV5647, Stage A's crop mode) measured 15 fps capture/encode
 	  (encode ~2 ms) but only ~7.5 fps delivered to the HTTP client -- the
 	  send path, not capture/encode, is the bottleneck (~997,544 B/s,
