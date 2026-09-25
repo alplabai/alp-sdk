@@ -73,6 +73,17 @@
  * from the ISP: CCM amplifies an existing low-saturation cast rather than
  * causing it, and will be retuned by that grey-card calibration rather
  * than by turning CCM off.
+ *
+ * IMX296 VARIANT (issue #2287 Stage B, -DAEN_ISP_IMX296=ON, off by default): the same
+ * sensor -> csi -> cam -> isp graph with IMX296's 1280x960 ROI crop (SRGGB10P) in place of
+ * OV5647's 640x480 (SBGGR10P) -- see the FRAME_WIDTH/HEIGHT/N_FRAMES/ISP_INPUT_FOURCC #if
+ * ladder below. AE/AWB are manual/off for this variant (no IMX296-fitted AWB/CCM calibration
+ * exists yet, unlike OV5647's patches 0008/0011) and only ONE frame is captured -- this is a
+ * first-light proof that hal_alif patch 0012 (zephyr/patches/hal_alif/
+ * 0012-isp-srggb10p-input.patch)'s SRGGB10P->PIXEL_FORMAT_RGGB10 mapping and isp_pico.c's
+ * matching input-format cap entry actually let a real IMX296 frame reach the ISP, not a
+ * bench-tuned capture like OV5647's 30-frame AE+AWB runs above. UNBENCHED on real silicon --
+ * see changelog.d/2287.md.
  */
 
 #include <stdbool.h>
@@ -91,6 +102,16 @@
 
 #define ISP_NODE    DT_NODELABEL(isp)
 #define OV5647_NODE DT_NODELABEL(ov5647)
+/* issue #2287 Stage B: IMX296 variant (-DAEN_ISP_IMX296=ON, see CMakeLists.txt) -- a second
+ * real sensor through the SAME sensor -> csi -> cam -> isp graph, in place of OV5647. The
+ * boards/ overlay files are sensor-agnostic (they only reference &cam/&isp, not &ov5647), so
+ * building with SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" instead of
+ * raspberry_pi_camera_module_1 is the only DT-side change needed; see the
+ * FRAME_WIDTH/HEIGHT/N_FRAMES/ISP_INPUT_FOURCC block below for what this file itself
+ * parametrizes. No IMX296_NODE macro here (unlike OV5647_NODE) -- this app has no
+ * IMX296-specific sensor register dump or manual-ctrl block to gate on one; IMX296's own
+ * exposure/gain already default to sane fixed values at imx296_init() (imx296.c), nothing this
+ * app needs to touch. */
 
 /*
  * isp_vsi_register_ae_status_callback() (isp_pico.c, exported via the
@@ -115,11 +136,29 @@ static void ae_status_cb(const struct device *dev, uint8_t ae_stable, void *user
  * isp_pico.c. */
 extern volatile uint32_t isp_mi_frame_end_count;
 
-#define FRAME_WIDTH    640
-#define FRAME_HEIGHT   480
+#if defined(AEN_ISP_IMX296)
+/*
+ * issue #2287 Stage B: IMX296's 1280x960 ROI crop (zephyr/drivers/video/imx296.c's
+ * IMX296_ROI_WIDTH/HEIGHT), not its 1456x1088 full frame -- the ISP INPUT format table
+ * (zephyr/drivers/video/isp_pico.c's supported_input_fmts[], ISP_VIDEO_FORMAT_CAP entries) caps
+ * every format at height 1080, which 1088 exceeds; the ROI crop's 960 fits. ONE frame only (this
+ * is a first-light plumbing proof for the hal_alif 0012 patch + isp_pico.c's SRGGB10P input cap,
+ * not a bench-tuned capture loop like the OV5647 30-frame runs above) -- AE/AWB are manual/off
+ * for the same reason (see the awb_ctrl block below; CONFIG_ISP_LIB_AE_MODULE=n comes from
+ * layering overlay-no-ae.conf, same file OV5647's own image-A diagnostic uses).
+ */
+#define FRAME_WIDTH      1280
+#define FRAME_HEIGHT     960
+#define N_FRAMES         1
+#define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#else
+#define FRAME_WIDTH      640
+#define FRAME_HEIGHT     480
+#define N_FRAMES         30
+#define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
 #define FRAME_SIZE     (FRAME_WIDTH * FRAME_HEIGHT * 3 / 2) /* YUV420 planar */
 #define N_BUFFERS      2
-#define N_FRAMES       30
 #define REG_DUMP_EVERY 5
 
 static uint8_t frame_copy[FRAME_SIZE] __attribute__((section("SRAM0"), aligned(64)));
@@ -162,13 +201,19 @@ static inline uint32_t reg32(uintptr_t addr)
 
 /* Hand-rolled CCI read: OV5647's own exposure/gain registers, independent
  * of the driver's private video_common.h CCI helper (not on this app's
- * include path) -- same wire protocol, the public zephyr/drivers/i2c.h API. */
+ * include path) -- same wire protocol, the public zephyr/drivers/i2c.h API.
+ * issue #2287 Stage B: guarded on OV5647_NODE existing, matching
+ * print_ov5647_ae_regs()'s own #if below -- its only caller -- so an
+ * IMX296 build (OV5647_NODE absent from DT) doesn't trip
+ * -Wunused-function. */
+#if DT_NODE_EXISTS(OV5647_NODE)
 static int ov5647_read_reg8(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *val)
 {
 	uint8_t reg_be[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
 
 	return i2c_write_read_dt(i2c, reg_be, sizeof(reg_be), val, 1);
 }
+#endif
 
 static void print_ov5647_ae_regs(int f)
 {
@@ -270,7 +315,12 @@ static void plane_stats_compute(const uint8_t *plane, size_t n, struct plane_sta
 
 int main(void)
 {
+#if defined(AEN_ISP_IMX296)
+	printk("\n=== aen-isp-ov5647-capture (issue #2287 Stage B: real IMX296 ROI through the "
+	       "ISP, AE+AWB manual/off) ===\n");
+#else
 	printk("\n=== aen-isp-ov5647-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
+#endif
 
 	const struct device *isp_dev = DEVICE_DT_GET_OR_NULL(ISP_NODE);
 
@@ -348,6 +398,18 @@ int main(void)
 	}
 #endif
 
+#if defined(AEN_ISP_IMX296)
+	/*
+	 * issue #2287 Stage B: AWB OFF (manual) for this first IMX296-through-ISP pass -- there is
+	 * no IMX296-fitted AWB/CCM calibration (hal_alif patch 0008/0011's tables are OV5647-only,
+	 * gated on CONFIG_VIDEO_ISP_VSI_CALIB_OV5647), so running the auto loop against the stock
+	 * ARX3A0 calibration would tune against facts that don't describe this sensor, the same
+	 * mismatch #2271's OV5647 AE fix addressed for exposure/gain. The WB module itself stays
+	 * compiled in (prj.conf's CONFIG_ISP_LIB_WB_MODULE=y, unchanged) -- this ctrl only selects
+	 * auto-vs-manual, same as the comment on the OV5647 branch below explains.
+	 */
+	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 0 };
+#else
 	/* AWB is already ON by default at the driver level (matches the
 	 * calibration's own OP_TYPE_AUTO AWB, hal_alif patch 0009) -- this SET
 	 * is explicit intent, not a required enable. It still enables the WB
@@ -358,9 +420,11 @@ int main(void)
 	 * either way, only auto-vs-manual and the gain source change.
 	 */
 	struct video_control awb_ctrl = { .id = VIDEO_CID_AUTO_WHITE_BALANCE, .val = 1 };
-	int                  rc_awb   = video_set_ctrl(isp_dev, &awb_ctrl);
+#endif
+	int rc_awb = video_set_ctrl(isp_dev, &awb_ctrl);
 
-	printk("video_set_ctrl(ISP, AUTO_WHITE_BALANCE=1) rc=%d (manual_gain_override=%d)\n",
+	printk("video_set_ctrl(ISP, AUTO_WHITE_BALANCE=%d) rc=%d (manual_gain_override=%d)\n",
+	       awb_ctrl.val,
 	       rc_awb,
 	       IS_ENABLED(CONFIG_VIDEO_ISP_VSI_WB_MANUAL_GAIN));
 
@@ -393,13 +457,14 @@ int main(void)
 
 	struct video_format in_fmt = {
 		.type        = VIDEO_BUF_TYPE_INPUT,
-		.pixelformat = VIDEO_PIX_FMT_SBGGR10P,
+		.pixelformat = ISP_INPUT_FOURCC,
 		.width       = FRAME_WIDTH,
 		.height      = FRAME_HEIGHT,
 	};
 	int rc_in = video_set_format(isp_dev, &in_fmt);
 
-	printk("video_set_format(INPUT, SBGGR10P, %ux%u) rc=%d\n",
+	printk("video_set_format(INPUT, fourcc=0x%08x, %ux%u) rc=%d\n",
+	       (unsigned int)ISP_INPUT_FOURCC,
 	       (unsigned int)FRAME_WIDTH,
 	       (unsigned int)FRAME_HEIGHT,
 	       rc_in);

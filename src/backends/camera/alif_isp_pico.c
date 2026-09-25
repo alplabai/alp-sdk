@@ -90,6 +90,7 @@
 #include <string.h>
 
 #include <zephyr/device.h>
+#include <zephyr/devicetree.h>
 #include <zephyr/drivers/video.h>
 #include <zephyr/drivers/video-controls.h>
 #include <zephyr/drivers/video/isp_frame_size.h>
@@ -181,11 +182,29 @@ static uint32_t _to_video_fourcc(alp_pixfmt_t fmt)
 	}
 }
 
-/* ISP INPUT is always our sensor's native Bayer layout -- SBGGR10P, the
- * OV5647's, matching examples/aen/aen-isp-ov5647-capture (see that file's
- * header for why SBGGR10P and not the GRBG10 the wrapper otherwise falls
- * back to for an unmapped fourcc). */
+/*
+ * ISP INPUT is always our sensor's native Bayer layout. OV5647 (the shield examples/aen/
+ * aen-isp-ov5647-capture bench-proved this backend against) is SBGGR10P -- see that file's header
+ * for why SBGGR10P and not the GRBG10 the wrapper otherwise falls back to for an unmapped fourcc.
+ * IMX296 (issue #2287 Stage B) is SRGGB10P instead -- a different Bayer PHASE, not just a
+ * different sensor, see zephyr/drivers/video/imx296.c's own Bayer-order comment on
+ * imx296_fmts[] -- so this can't be one fixed fourcc for every board any more.
+ *
+ * DT_HAS_COMPAT_STATUS_OKAY(sony_imx296), not video_get_format() on the ISP input device: this
+ * has to be a COMPILE-TIME choice. Querying the input device's format at runtime instead would
+ * call into alif_cam_set_fmt() (video_alif.c) as a SIDE EFFECT of just reading it back -- and
+ * that call fails outright at IMX296's 1088-tall full-frame height (unrelated to this fourcc
+ * choice), so probing the input device before this backend has even picked a fourcc for it would
+ * break this backend on IMX296 before ALIF_ISP_INPUT_FOURCC even mattered. Every board this SDK
+ * ships today has exactly one Bayer sensor wired to the ISP, so "the one sony,imx296 node exists"
+ * is an unambiguous stand-in for "IMX296 is this board's sensor" -- a board wiring both OV5647 and
+ * IMX296 to the same ISP input at once is not a configuration this SDK supports.
+ */
+#if DT_HAS_COMPAT_STATUS_OKAY(sony_imx296)
+#define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
+#else
 #define ALIF_ISP_INPUT_FOURCC VIDEO_PIX_FMT_SBGGR10P
+#endif
 
 /* Output fourccs this backend converts to RGB565 on the CPU when the
  * caller requests ALP_PIXFMT_RGB565, tried in this order: YUV420 planar

@@ -1,0 +1,31 @@
+diff --git a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+index da65f7a..87cff49 100644
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -253,6 +253,7 @@ static inline int isp_mode_from_fourcc(uint32_t fourcc)
+ 	case VIDEO_PIX_FMT_RGGB12:
+ 	case VIDEO_PIX_FMT_Y10P:
+ 	case VIDEO_PIX_FMT_SBGGR10P:
++	case VIDEO_PIX_FMT_SRGGB10P:
+ 		return ISP_MODE_RAW;
+ 	case VIDEO_PIX_FMT_GREY:
+ 	case VIDEO_PIX_FMT_Y10:
+@@ -293,6 +294,18 @@ static inline int isp_pixelfmt_from_fourcc(uint32_t fourcc)
+ 	case VIDEO_PIX_FMT_GRBG10:
+ 		return PIXEL_FORMAT_GRBG10;
+ 	case VIDEO_PIX_FMT_RGGB10:
++	/*
++	 * VIDEO_PIX_FMT_SRGGB10P (packed) added alongside the pre-existing VIDEO_PIX_FMT_RGGB10
++	 * (== VIDEO_PIX_FMT_SRGGB10, unpacked) case above -- same shape as the
++	 * VIDEO_PIX_FMT_SBGGR10P / VIDEO_PIX_FMT_BGGR10 pairing already handled below (alp-sdk
++	 * issue #2287 Stage A, patch 0003): an RGGB sensor that only advertises the PACKED
++	 * fourcc on its CSI/parallel wire (Sony IMX296, alp-sdk issue #2287 Stage B -- see
++	 * zephyr/drivers/video/imx296.c in the alp-sdk tree) previously had no case here at all
++	 * and fell through to the 12-bit default, mis-mapping every IMX296 frame through the
++	 * ISP. Maps to the SAME PIXEL_FORMAT_RGGB10 the existing unpacked case already uses --
++	 * the packed/unpacked distinction only affects memory layout, not Bayer phase.
++	 */
++	case VIDEO_PIX_FMT_SRGGB10P:
+ 		return PIXEL_FORMAT_RGGB10;
+ 	case VIDEO_PIX_FMT_BGGR12:
+ 		return PIXEL_FORMAT_BGGR12;

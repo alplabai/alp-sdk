@@ -181,6 +181,16 @@ static const struct video_format_cap supported_input_fmts[] = {
 	 * same fourcc.
 	 */
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_SBGGR10P, 1920, 1080),
+	/*
+	 * VIDEO_PIX_FMT_SRGGB10P (packed) -- issue #2287 Stage B: IMX296's one fixed format
+	 * (zephyr/drivers/video/imx296.c). Same shape as the VIDEO_PIX_FMT_SBGGR10P entry just
+	 * above (this table is the ISP driver's own INPUT format gate, separate from the hal_alif
+	 * wrapper's own fourcc->PIXEL_FORMAT_RGGB10 mapping -- see
+	 * zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch); bayer_sample_depth() below
+	 * already keys the correct PIN_MAPPING=1 (10-bit) off this fourcc (its SRGGB10P case
+	 * predates this cap entry -- only the input-format gate was missing it).
+	 */
+	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_SRGGB10P, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_BGGR12, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GBRG12, 1920, 1080),
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_GRBG12, 1920, 1080),
