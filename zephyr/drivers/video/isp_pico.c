@@ -2164,6 +2164,18 @@ static int isp_stream_stop(const struct device *dev)
 		if (ret) {
 			LOG_ERR("Failed to stop streaming in pipeline! video_stream_stop=%d",
 				ret);
+			/*
+			 * #2287 Stage B unit 3, reviewer fix (bench run 311 round): restore
+			 * is_streaming=true -- this function set it false, above, before even
+			 * attempting the controller stop (matching isp_stream_start()'s own
+			 * set-before-hardware-call pattern), but that was premature: the
+			 * controller stop FAILED, so streaming never actually stopped. Leaving
+			 * is_streaming false here would let a caller's retry (another
+			 * isp_stream_stop() call) hit the "Already stopped streaming!" early
+			 * return above and silently skip retrying the controller stop that
+			 * actually needs to happen.
+			 */
+			data->is_streaming = true;
 			return ret;
 		}
 	}

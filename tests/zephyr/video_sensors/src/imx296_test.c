@@ -224,12 +224,13 @@ ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
 	/*
 	 * #2287 (bench runs 304-306, decode corrected bench round after 309/310): GAINDLY's own
 	 * POR default (00h) is datasheet-prohibited (page 41/56) -- imx296_init() must write the
-	 * one legal value this driver uses, unconditionally, same as SHS/GAIN/REVERSE above. 09h
-	 * ("Delay 1 Frame") is used, NOT 08h ("Reflect at the frame") -- 09h matches SHS's own
-	 * next-frame latch timing (page 60), so GAIN and SHS land together on the same frame.
+	 * one legal value this driver uses, unconditionally, same as SHS/GAIN/REVERSE above. Page
+	 * 41 verbatim: "08h: Gain reflect at the frame" / "09h: Gain reflect at the next frame
+	 * (Same timing as SHS reflecting output.)" -- 09h is used, NOT 08h, so GAIN and SHS land
+	 * together on the same frame.
 	 */
 	zassert_true(imx296_test_first_write(emul, REG_GAINDLY, &val), "no write to GAINDLY logged");
-	zassert_equal(val, 0x09, "GAINDLY default (Delay 1 Frame, page 41/56)");
+	zassert_equal(val, 0x09, "GAINDLY default (Gain reflect at the next frame, page 41)");
 
 	zassert_true(imx296_test_first_write(emul, REG_REVERSE, &val), "no write to REVERSE logged");
 	zassert_equal(val, 0x00, "REVERSE default (no flip)");

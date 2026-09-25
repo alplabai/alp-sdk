@@ -444,7 +444,26 @@ int alif_cam_cpi_resume(const struct device *dev)
 	 */
 	hw_enable_interrupts(regs, INTR_VSYNC | INTR_BRESP_ERR | INTR_OUTFIFO_OVERRUN |
 					   INTR_INFIFO_OVERRUN | INTR_STOP);
-	hw_cam_start_video_capture(dev);
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 311 round, robustness): idempotent re-arm
+	 * -- if CAM_CTRL shows BUSY (a snapshot is still physically in progress) or START (already
+	 * armed, waiting for its snapshot to begin/complete), this call is a duplicate: two
+	 * callers both deciding to re-arm the same, already-armed/in-flight capture (e.g. the
+	 * stall-recovery error callback firing for an error that turns out not to have actually
+	 * stalled anything). hw_cam_start_video_capture()'s own soft reset would otherwise ABORT
+	 * that in-flight snapshot mid-capture -- exactly the mid-frame-cut bug this whole CPI
+	 * re-arm redesign exists to avoid (see this function's own header comment). Skipped, not
+	 * an error: the interrupt-enable write above still runs unconditionally (idempotent,
+	 * harmless) so a caller that only needed interrupts re-armed (not a fresh START) still
+	 * gets that.
+	 */
+	if (sys_read32(regs + CAM_CTRL) & (CAM_CTRL_BUSY | CAM_CTRL_START)) {
+		LOG_DBG("CPI already armed/in-flight (CAM_CTRL=0x%08x) -- skipping duplicate "
+			"re-arm",
+			sys_read32(regs + CAM_CTRL));
+	} else {
+		hw_cam_start_video_capture(dev);
+	}
 	k_mutex_unlock(&data->lock);
 
 	return 0;
@@ -1406,16 +1425,26 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 		}
 #endif /* defined(CONFIG_POLL) */
 		/*
-		 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): this error never
-		 * reaches the ISP's own frame-end interrupt (the CPI/CSI side failed before a
-		 * frame -- corrupted or otherwise -- got that far), so in ISP-consumer mode
-		 * nothing else would ever re-arm the CPI after it. Notify the registered
-		 * callback (isp_pico.c's, via alif_cam_register_error_cb()) if one is set -- the
-		 * memory-capture path (config->axi_bus_ep set) never registers one, so this is a
-		 * no-op there, matching its own existing "wait for user to handle" recovery
-		 * model (the INTR_STOP branch below, unchanged).
+		 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap; robustness fix,
+		 * bench run 311 round): this error never reaches the ISP's own frame-end
+		 * interrupt (the CPI/CSI side failed before a frame -- corrupted or otherwise --
+		 * got that far), so in ISP-consumer mode nothing else would ever re-arm the CPI
+		 * after it. Notify the registered callback (isp_pico.c's, via
+		 * alif_cam_register_error_cb()) if one is set -- the memory-capture path
+		 * (config->axi_bus_ep set) never registers one, so this is a no-op there,
+		 * matching its own existing "wait for user to handle" recovery model.
+		 *
+		 * Gated on `int_st & INTR_STOP` ALSO being set in this SAME readout (below, not
+		 * just eventually) -- an error alone does not mean the snapshot has actually
+		 * ended; firing the callback (and so alif_cam_cpi_resume(), isp_pico.c's
+		 * isp_cpi_rearm_error_cb()) while the CPI might still be mid-snapshot would
+		 * either race a legitimate in-flight capture or simply be redundant once it
+		 * does stop -- alif_cam_cpi_resume() is now idempotent against that (its own
+		 * CAM_CTRL BUSY/START check, above) as a second line of defence, but requiring
+		 * STOP here avoids relying on that defence being the only thing standing between
+		 * this callback and a mid-capture abort.
 		 */
-		if (!config->axi_bus_ep && data->error_cb) {
+		if (!config->axi_bus_ep && data->error_cb && (int_st & INTR_STOP)) {
 			data->error_cb(data->error_cb_user_data);
 		}
 	}

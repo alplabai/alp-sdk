@@ -367,20 +367,20 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 /*
  * "Gain Adjustment Function" (page 41 + page 56): GAINDLY[3:0] at 0x3212, an 8-bit register
  * this driver treats as a single control byte (no sub-bit-field split needed -- only ONE value
- * is ever legal, see below). Per page 41/56's own register table, every value OTHER than 08h
- * ("Reflect at the frame", i.e. the WRITE takes effect immediately, on the frame it lands in)
- * and 09h ("Delay 1 Frame", i.e. the write takes effect on the NEXT frame) is explicitly listed
- * "Setting prohibited" -- including this register's OWN power-on-reset default, 00h. #2287
- * (bench runs 304-306, E1M-AEN803 2026W36-0001): this driver never wrote GAINDLY at all before,
- * leaving it at the prohibited POR value the whole time gain has ever been written on this
- * board -- not independently proven to be a cause of any bench symptom (bench runs 307/308
- * isolated it against the horizontal-band symptom and found no effect -- see
- * changelog.d/2287.md), but a real datasheet violation regardless. 09h ("Delay 1 Frame") is the
- * value used, NOT 08h ("Reflect at the frame") an earlier revision of this comment had
- * backwards: SHS (IMX296_REG_SHS's own comment, "Calculation Formula of Exposure Time", page
- * 60) already latches on the SAME "next frame" timing -- 09h keeps GAIN and SHS landing
- * together, on the same frame, instead of GAIN taking effect one frame earlier than the
- * exposure it was paired with by isp_api_wrapper.c's AE writeback.
+ * is ever legal, see below). Per page 41's own register table (verbatim): "08h: Gain reflect
+ * at the frame" and "09h: Gain reflect at the next frame (Same timing as SHS reflecting
+ * output.)" -- every OTHER value is explicitly listed "Setting prohibited", including this
+ * register's OWN power-on-reset default, 00h. #2287 (bench runs 304-306, E1M-AEN803
+ * 2026W36-0001): this driver never wrote GAINDLY at all before, leaving it at the prohibited
+ * POR value the whole time gain has ever been written on this board -- not independently
+ * proven to be a cause of any bench symptom (bench runs 307/308 isolated it against the
+ * horizontal-band symptom and found no effect -- see changelog.d/2287.md), but a real
+ * datasheet violation regardless. 09h is the value used, NOT 08h (an earlier revision of this
+ * comment had the two backwards): the datasheet's own "(Same timing as SHS reflecting
+ * output.)" parenthetical says so directly -- SHS (IMX296_REG_SHS's own comment, "Calculation
+ * Formula of Exposure Time", page 60) already latches on next-frame timing, so 09h keeps GAIN
+ * and SHS landing together, on the same frame, instead of GAIN taking effect one frame earlier
+ * than the exposure it was paired with by isp_api_wrapper.c's AE writeback.
  */
 #define IMX296_REG_GAINDLY    IMX296_REG8(0x3212)
 #define IMX296_GAINDLY_DELAY1 0x09
@@ -1231,8 +1231,8 @@ static int imx296_init(const struct device *dev)
 	/*
 	 * #2287 (bench runs 304-306): GAINDLY's own POR default (00h) is a datasheet-prohibited
 	 * value (see IMX296_REG_GAINDLY's own comment) -- write the one legal value this driver
-	 * uses (09h, "Delay 1 Frame" -- matches SHS's own next-frame latch timing, so GAIN and
-	 * SHS land together) unconditionally at init, same "hardware and control cache start in
+	 * uses (09h, "Gain reflect at the next frame (Same timing as SHS reflecting output.)",
+	 * page 41 verbatim) unconditionally at init, same "hardware and control cache start in
 	 * agreement" reasoning as SHS/GAIN/REVERSE above (GAINDLY has no v4.4 video-control-
 	 * registry entry of its own -- it's a fixed hardware setting, not something an app ever
 	 * changes via video_set_ctrl() -- so there is no separate "warm reset disagreement" case

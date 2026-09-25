@@ -259,6 +259,14 @@ int alif_cam_cpi_resume(const struct device *dev);
  * k_work_submit_to_queue(), which is ISR-safe); `user_data` is passed back to `cb` verbatim
  * (isp_pico.c passes its own `const struct device *` ISP device). `dev` is this CPI controller
  * device (the ISP's `config->controller`), same as alif_cam_cpi_resume()'s own `dev` param.
+ *
+ * ONE callback per controller device: a later call REPLACES whatever was registered before, it
+ * does not chain or append. `cb == NULL` unregisters (the error path then simply does nothing,
+ * same as if this had never been called). MUST be called before streaming starts -- there is no
+ * lock around the two fields this sets (`error_cb`/`error_cb_user_data`, video_alif.h): the ISR
+ * reads them directly, so registering (or re-registering) while a stream is already running
+ * races that read with no ordering guarantee. isp_pico.c's own video_isp_init() is the only
+ * caller today, and it runs well before any stream starts.
  */
 void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
 				 void *user_data);
