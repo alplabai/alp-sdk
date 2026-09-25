@@ -556,9 +556,33 @@ def _memory_population_msgs(
         ]
 
     if optional:
-        # BOM-variant dependent: the capacity of the variant that DOES
-        # fit the part is a maintainer call, so only the `0` contradiction
-        # above is decidable here.
+        if not fitted:
+            # No always-fitted part at all -- the figure is entirely
+            # BOM-variant dependent, with no floor to bind it to.
+            return []
+        # An always-fitted part sets a FLOOR even with an optional
+        # sibling in the mix: whatever the optional variant adds, the
+        # figure can never read below what is soldered down for
+        # certain.  `TBD` stays a legitimate "not written down yet";
+        # a stated figure must be at least that floor.
+        caps = [e.get("capacity_mbit") for _, e in fitted]
+        if not all(isinstance(c, int) and not isinstance(c, bool)
+                   for c in caps):
+            # A fitted part whose own capacity is TBD leaves no floor
+            # to check the figure against either.
+            return []
+        floor = sum(int(c) for c in caps)
+        if isinstance(figure, str) and figure == "TBD":
+            return []
+        if not (is_int and figure >= floor):
+            return [
+                f"memory.{figure_key}={figure!r} is below the floor set "
+                f"by its always-fitted parts: {populating_names} "
+                f"{'sum to' if len(fitted) > 1 else 'declares'} "
+                f"capacity_mbit={floor}, and an optional sibling can "
+                f"only ADD to that, never subtract -- the figure must "
+                f"be `TBD` or >= {floor}"
+            ]
         return []
 
     caps = [e.get("capacity_mbit") for _, e in fitted]
@@ -629,8 +653,15 @@ def _check_som_memory_population(som_files) -> list:
         absent -- the schema's own default) => the figure MUST NOT be
         `0`, and when every fitted part declares an integer
         `capacity_mbit` it must equal their sum.
-      - `assembled: "optional"` is BOM-variant dependent, so only the `0`
-        contradiction is decidable; the exact capacity is not.
+      - `assembled: "optional"` is BOM-variant dependent, so the exact
+        capacity is not fully decidable. But when an always-fitted part
+        sits alongside it, that fitted part still sets a FLOOR: the
+        figure must be `TBD` or >= the always-fitted parts' summed
+        `capacity_mbit` (an optional sibling can only ADD memory, never
+        subtract it). With no always-fitted part in the mix, or a
+        fitted part whose own `capacity_mbit` is `TBD`, there is no
+        floor to check and only the `0` contradiction above is
+        decidable.
 
     JSON Schema cannot reach across `on_module` into `memory:` (nor sum
     a sibling object's values), so this is the only layer that can hold

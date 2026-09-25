@@ -198,6 +198,44 @@ def test_flash_derives_from_the_sum_of_every_fitted_ospi_memory():
     assert "capacity_mbit=384" in failures[0][1][0]
 
 
+def _ospi_floor(flash: str) -> str:
+    # AEN803-shaped: ospi0 always-fitted with a real capacity, ospi1 an
+    # optional placeholder whose own capacity is genuinely TBD -- the
+    # real E1M-AEN803.yaml BOM shape (hyperram+ospi0 fitted 512/256,
+    # ospi1 placeholder optional/TBD).
+    return (
+        "on_module:\n"
+        "  ospi_memories:\n"
+        "    ospi0:\n"
+        "      chip:           MX25UM25645GXDI00\n"
+        "      assembled:      true\n"
+        "      capacity_mbit:  256\n"
+        "      role:           app_storage\n"
+        "    ospi1:\n"
+        "      chip:           TBD\n"
+        "      assembled:      optional\n"
+        "      capacity_mbit:  TBD\n"
+        "      role:           data_log\n"
+        "memory:\n"
+        "  dram_mbit:            0\n"
+        f"  flash_mbit:           {flash}\n"
+    )
+
+
+def test_an_optional_sibling_does_not_lower_the_always_fitted_floor():
+    """An always-fitted part alongside an optional sibling still sets a
+    FLOOR: the optional sibling can only ADD memory on the BOM variants
+    that carry it, never subtract from what is soldered down for
+    certain. A figure below the always-fitted sum is rejected; `TBD` and
+    the exact fitted sum are both accepted."""
+    failures = _check("mem-ospi-floor-under", _ospi_floor("1"))
+    assert failures
+    assert "capacity_mbit=256" in failures[0][1][0]
+
+    assert not _check("mem-ospi-floor-exact", _ospi_floor("256"))
+    assert not _check("mem-ospi-floor-tbd", _ospi_floor("TBD"))
+
+
 def test_missing_assembled_key_reads_as_populated():
     """The schema's own default is `true` ("Population status: true
     (default)"), so an entry with no `assembled:` describes a FITTED part
