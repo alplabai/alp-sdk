@@ -49,10 +49,14 @@ the change touches neither `metadata/npu_ops/` nor this script; when it
 touches either, `test-all.sh` treats exit 2 as a hard FAILURE naming the
 files and how to install vela, rather than silently skipping the one gate
 that proves the tables are fresh. On a host that DOES have vela, `--check`
-catches metadata/npu_ops/ethos_u/ drift the same way every other generator's
-regen-then-diff does. Regenerating for real (writing new files, e.g. after
-the `ethos-u-vela` pin in pyproject.toml's `model-compile` extra moves) is
-still a by-hand step.
+verifies metadata/npu_ops/ethos_u/ against the vela version currently on
+PATH, the same way every other generator's regen-then-diff does -- it does
+NOT prove freshness against any/every installed vela version; a different
+installed version is a legitimate reason for a caller to compare against
+the committed tables' own pin (each table's `toolchain_version`) rather
+than treat it as drift. Regenerating for real (writing new files, e.g.
+after the `ethos-u-vela` pin in pyproject.toml's `model-compile` extra
+moves) is still a by-hand step.
 
 Usage:
 

@@ -182,11 +182,39 @@ def test_regenerate_check_and_version_bump_cycle(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 # Detect-and-skip smoke test against the real committed files, using the
 # real vela only if it happens to be on PATH (a heavy optional toolchain,
-# never a hard requirement -- see the module docstring).
+# never a hard requirement -- see the module docstring). Only proves
+# freshness when the installed vela is the SAME version the committed
+# tables are pinned to -- any other installed version is a legitimate
+# reason to skip, not a failure (a newer/older vela can add/drop ops,
+# e.g. ASSIGN_VARIABLE/READ_VARIABLE landing in 5.2.0), and re-pinning is a
+# deliberate, by-hand `python3 scripts/gen_npu_ops.py` + commit, not
+# something this test should force.
 # ---------------------------------------------------------------------------
 
+def _committed_ethos_u_pin() -> str | None:
+    """The vela version the committed u85/u55-u65 tables are keyed on (from
+    their filename, `<variant>@vela-<version>.json`), or None if absent."""
+    for f in gno.OUT_DIR.glob("u85@vela-*.json"):
+        return f.stem.split("@vela-", 1)[1]
+    return None
+
+
 def test_check_mode_passes_on_committed_files_with_real_vela(monkeypatch):
-    if shutil.which("vela") is None:
+    vela = shutil.which("vela")
+    if vela is None:
         pytest.skip("vela not on PATH (model-compile extra not installed)")
+    installed = gno._vela_version(vela)
+    pinned = _committed_ethos_u_pin()
+    if pinned is not None and installed != pinned:
+        pytest.skip(f"committed tables pinned to vela {pinned}; installed "
+                    f"{installed} -- regenerate deliberately to move the pin")
     monkeypatch.setattr(sys, "argv", ["gen_npu_ops.py", "--check"])
     assert gno.main() == 0
+
+
+def test_committed_ethos_u_pin_reads_the_version_from_the_filename(monkeypatch, tmp_path):
+    monkeypatch.setattr(gno, "OUT_DIR", tmp_path)
+    assert _committed_ethos_u_pin() is None  # no files yet
+
+    (tmp_path / "u85@vela-5.1.0.json").write_text("{}\n", encoding="utf-8")
+    assert _committed_ethos_u_pin() == "5.1.0"
