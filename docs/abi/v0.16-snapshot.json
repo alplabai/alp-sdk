@@ -1,5 +1,5 @@
 {
-  "generated": "2026-09-24",
+  "generated": "2026-09-25",
   "headers": {
     "alp/adc.h": {
       "functions": {
@@ -7600,6 +7600,10 @@
     },
     "alp/chips/tas2563.h": {
       "functions": {
+        "tas2563_arm_fault_irq": {
+          "hash": "666de3139285e936",
+          "signature": "alp_status_t tas2563_arm_fault_irq(tas2563_t *ctx, bool chip_internal_pullup);"
+        },
         "tas2563_clear_faults": {
           "hash": "4107d72fd135ed12",
           "signature": "alp_status_t tas2563_clear_faults(tas2563_t *ctx);"

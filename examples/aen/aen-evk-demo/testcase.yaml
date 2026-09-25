@@ -114,3 +114,22 @@ tests:
       - dwmac
       - net
     build_only: true   # verdicts need the real bench; not a CI behavioural run.
+
+  alp_sdk.examples.aen.evk_demo.probe_fault_pin.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - ALP_AEN_EVK_DEMO_PROBE_FAULT_PIN=1
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - i2c
+      - sound
+    # #2182's seeded-RMW discriminator + TDM-clock-fault stimulus never
+    # builds in the scenario above (the default is OFF), so a regression in
+    # this compile-time-gated block was invisible to CI. Mirrors
+    # firmware-update-log's he_client.firewall_probe.aen scenario. Build-only:
+    # the probe is a bench discriminator, not a CI-console assertion.
+    build_only: true
