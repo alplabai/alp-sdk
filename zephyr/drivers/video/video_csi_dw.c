@@ -668,12 +668,19 @@ static int csi2_dw_stream_start(const struct device *dev)
 	 * silent -- no LOG_ERR at all, this is log-only reporting (csi2_dw_irq() does not
 	 * soft-reset IPI). Re-arming on every stream (re)start bounds the blind window to "at
 	 * most LOG_LIMIT events since THIS start", which is the guarantee the masking scheme is
-	 * supposed to give. csi2_dw_irq_on() also discards every latched CSI_INT_ST_* status
-	 * register (see its own comment) before unmasking, which is controller-wide, not
-	 * per-sensor -- today only one sensor is ever wired to a given &csi controller
-	 * (CSI2_NUM_SENSORS is 2 in the struct, but this shield uses one), so that breadth is
-	 * currently a non-issue; a second sensor sharing this controller would need this
-	 * re-arm's scope reconsidered.
+	 * supposed to give. This function only runs from a USER stream start
+	 * (alif_cam_stream_start(), video_alif.c) -- a starvation-pause resume
+	 * (alif_cam_enqueue()'s starved path) no longer calls video_stream_start() on this
+	 * endpoint at all (issue #2287: it now only restarts the CPI, leaving this device's
+	 * `streaming_map` set and this function unentered), so the window this re-arm bounds
+	 * spans one whole user stream, including the sensor's own post-start initialization
+	 * period (IMX296_INIT_PERIOD_MS, imx296.c) -- LOG_LIMIT budget is not replenished by a
+	 * starvation pause/resume within that stream. csi2_dw_irq_on() also discards every
+	 * latched CSI_INT_ST_* status register (see its own comment) before unmasking, which is
+	 * controller-wide, not per-sensor -- today only one sensor is ever wired to a given &csi
+	 * controller (CSI2_NUM_SENSORS is 2 in the struct, but this shield uses one), so that
+	 * breadth is currently a non-issue; a second sensor sharing this controller would need
+	 * this re-arm's scope reconsidered.
 	 */
 	csi2_dw_irq_on(regs, data);
 

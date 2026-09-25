@@ -187,11 +187,19 @@ ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
 	const struct emul *emul = imx296_emul();
 	uint8_t            val;
 
-	/* SHS default = VMAX - IMX296_SHS_DEFAULT = 1118 - 14 = 1104 = 0x000450, 24-bit LE */
+	/*
+	 * SHS is the shutter START line, not exposure lines (page 60): the register
+	 * value IS IMX296_SHS_DEFAULT (14 = 0x00000E, 24-bit LE), not VMAX -
+	 * IMX296_SHS_DEFAULT. An earlier version of this init write put VMAX -
+	 * IMX296_SHS_DEFAULT (1104 = 0x000450) in the register instead -- a 14-line
+	 * (~0.2 ms) exposure instead of the intended 1104-line one -- and this
+	 * assertion locked that wrong value in rather than catching it; it now
+	 * asserts the correct one.
+	 */
 	zassert_true(imx296_test_first_write(emul, REG_SHS_LSB, &val), "no write to SHS LSB logged");
-	zassert_equal(val, 0x50, "SHS LSB default");
+	zassert_equal(val, 0x0e, "SHS LSB default");
 	zassert_true(imx296_test_first_write(emul, REG_SHS_MID, &val), "no write to SHS mid logged");
-	zassert_equal(val, 0x04, "SHS mid byte default");
+	zassert_equal(val, 0x00, "SHS mid byte default");
 	zassert_true(imx296_test_first_write(emul, REG_SHS_MSB, &val), "no write to SHS MSB logged");
 	zassert_equal(val, 0x00, "SHS MSB default");
 

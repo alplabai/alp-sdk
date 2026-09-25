@@ -428,6 +428,17 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * so this wait's caller-blocking is what excludes the init-period frames
  * from ever reaching a buffer. Rounded up from 8 to 9 frames of margin
  * (9 x 1118 x 14.81us ~= 149 ms, ceiling to whole milliseconds).
+ *
+ * FREE-RUN MODE ONLY. imx296_set_stream() applies this same wait
+ * unconditionally, including when `trigger` (IMX296_CID_TRIGGER_MODE) is
+ * set, but this driver's trigger modes ("Mode Transitions of Global Shutter
+ * Operation", page 66) start streaming from an externally-driven XTRIG
+ * pulse, not from XMSTA's own free-run timing this constant is derived
+ * from -- whether an 8-frame (or any) initialization period still applies,
+ * and on what clock, is not established for trigger mode in this
+ * datasheet and has not been bench-checked. Trigger-mode init timing is
+ * UNHANDLED and UNBENCHED; this wait is a known-good value for free-run
+ * only.
  */
 #define IMX296_INIT_PERIOD_MS 150
 
@@ -1028,7 +1039,18 @@ static int imx296_init(const struct device *dev)
 	 * explicit video_set_ctrl() call. Write all three here so control cache
 	 * and hardware start in agreement regardless of boot history.
 	 */
-	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SHS, IMX296_VMAX - IMX296_SHS_DEFAULT);
+	/*
+	 * SHS is the shutter START line, not exposure lines ("Calculation Formula of
+	 * Exposure Time", page 60: exposure = 1H x (lines_per_frame - SHS) + 14.26 us)
+	 * -- the same VMAX-minus conversion imx296_set_ctrl() applies (shs = VMAX -
+	 * exposure) belongs here too. Writing IMX296_VMAX - IMX296_SHS_DEFAULT (1104)
+	 * directly, as this line used to, put SHS=1104 in the register -- a 14-line
+	 * (~0.2 ms) exposure instead of the intended 1104-line one, and the sensor
+	 * output flat black (mean pixel value 60.15) as a result. IMX296_SHS_DEFAULT
+	 * IS the register value already (see IMX296_REG_SHS's own comment above and
+	 * IMX296_SHS_DEFAULT's POR-default note): no VMAX conversion here.
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SHS, IMX296_SHS_DEFAULT);
 	if (ret < 0) {
 		return ret;
 	}
