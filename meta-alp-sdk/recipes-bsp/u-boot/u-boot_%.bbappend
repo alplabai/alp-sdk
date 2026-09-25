@@ -264,6 +264,13 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 # after those two is not order-sensitive, only readable.
 SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
 
+# Publish the SKU from the validated identity-EEPROM manifest to the kernel
+# as /chosen/alp,sku (EVT_FT_FIXUP spy; ft_board_setup() is already taken by
+# rcar-common's v2-common.c). recipes-core/alp-hostname turns it into the
+# hostname. Applies on top of 0001's alp_som_is_v2n_m1() and 0007's
+# board_late_init() context.
+SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
+
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
 # binary serves both families, so the dtb basename is a Kconfig string
 # (CONFIG_ALP_E1M_FDTFILE, patch 0002) whose default suits the V2N SKUs;

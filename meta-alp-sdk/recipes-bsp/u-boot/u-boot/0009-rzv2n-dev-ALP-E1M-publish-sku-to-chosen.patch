@@ -1,0 +1,84 @@
+From 20ee15fefe895a5a886b6cc2a2ba8ef69d20464f Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Fri, 25 Sep 2026 22:20:00 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M publish the SoM SKU to /chosen/alp,sku
+
+board_late_init() already reads and validates the on-module identity
+EEPROM manifest (magic, schema, CRC32) and prints the SKU, but the value
+never left U-Boot, so Linux had no way to tell which module it runs on.
+The Yocto image hard-coded its hostname from MACHINE, and an E1M-V2M103
+running an image built for e1m-v2n101-a55 came up as "e1m-v2n101-a55".
+
+Keep the SKU string from a validated manifest in board-static storage
+and publish it to the kernel device tree as /chosen/alp,sku from an
+EVT_FT_FIXUP event spy. ft_board_setup() is not used: rcar-common's
+v2-common.c, linked into this board, already defines it for the memory
+node scrub, and CONFIG_EVENT is enabled in this configuration.
+
+Nothing is published when the manifest is missing or fails validation,
+so a module without a burned EEPROM boots exactly as before and Linux
+keeps the distro default hostname.
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index fd4e8e1f..3cc75b18 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -27,6 +27,8 @@
+ #include <linux/delay.h>
+ #include <u-boot/crc.h>
+ #include <asm/unaligned.h>
++#include <event.h>
++#include <dm/ofnode.h>
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
+@@ -337,6 +339,14 @@ static void alp_gpio_output(unsigned int bank, unsigned int pin, int value)
+ #define ALP_HW_INFO_MAGIC	0x414C5048	/* "ALPH" little-endian */
+ #define ALP_HW_INFO_SCHEMA	1
+ 
++/*
++ * SKU string from a validated SoM manifest, published to the kernel as
++ * /chosen/alp,sku by alp_ft_fixup() so Linux can derive its hostname from
++ * the module actually fitted. Empty unless the manifest passed the magic,
++ * schema and CRC checks -- never guessed.
++ */
++static char alp_sku[25];
++
+ static bool alp_som_is_v2n_m1(void)
+ {
+ 	struct udevice *dev;
+@@ -370,6 +380,8 @@ static bool alp_som_is_v2n_m1(void)
+ 
+ 	memcpy(family, &buf[0x08], 16);
+ 	family[16] = '\0';
++	memcpy(alp_sku, &buf[0x18], 24);
++	alp_sku[24] = '\0';
+ 	printf("ALP: SoM family \"%s\" sku \"%.24s\"\n", family, &buf[0x18]);
+ 
+ 	return strcmp(family, "v2n-m1") == 0;
+@@ -879,6 +891,22 @@ done:
+ 	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
+ }
+ 
++static int alp_ft_fixup(void *ctx, struct event *event)
++{
++	oftree tree = event->data.ft_fixup.tree;
++	ofnode chosen;
++
++	if (!alp_sku[0])
++		return 0;
++
++	chosen = oftree_path(tree, "/chosen");
++	if (!ofnode_valid(chosen))
++		return 0;
++
++	return ofnode_write_string(chosen, "alp,sku", alp_sku);
++}
++EVENT_SPY_FULL(EVT_FT_FIXUP, alp_ft_fixup);
++
+ int board_late_init(void)
+ {
+ 	bool v2n_m1;
