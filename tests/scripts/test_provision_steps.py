@@ -333,7 +333,7 @@ def test_refuses_tier_and_override_is_recorded(tmp_path):
     d16 = b"\x00" * 64 + bytes.fromhex(MARKERS["markers"][1]["hex"])
     res = steps.run_steps(_ctx(tmp_path / "a", bundle=_bundle(tmp_path / "a", bl2=d16)))
     assert "DDR tier mismatch" in _failed(res).detail
-    ctx = _ctx(tmp_path / "b", bundle=_bundle(tmp_path / "b", bl2=d16), allow_tier_mismatch="bench rework")
+    ctx = _ctx(tmp_path / "b", bundle=_bundle(tmp_path / "b", bl2=d16), allow_tier_mismatch="bench fix")
     res = steps.run_steps(ctx, only=["preflight"])
     assert res[0].status == "done"
     assert ctx.state["overrides"][0]["gate"] == "tier_triangle"
@@ -560,8 +560,8 @@ def test_build_dir_unit_defaults_to_bench_only(tmp_path):
 
 def test_override_reaches_the_ledger_fact(tmp_path):
     ctx = _ctx(tmp_path)
-    steps._record_override(ctx, "tier_triangle", "bench rework")
-    assert ctx.facts["provision_overrides"] == "tier_triangle: bench rework"
+    steps._record_override(ctx, "tier_triangle", "bench fix")
+    assert ctx.facts["provision_overrides"] == "tier_triangle: bench fix"
 
 
 def test_lock_refused_when_secure_page_differs_from_staged(tmp_path):
