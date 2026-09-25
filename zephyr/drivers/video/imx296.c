@@ -505,8 +505,11 @@ struct imx296_ctrls {
 struct imx296_data {
 	struct imx296_ctrls ctrls;
 	struct video_format fmt;
-	/* Set by imx296_set_stream(dev, true, ...), cleared by ...(dev, false, ...) and by
-	 * imx296_init() -- see IMX296_CID_TRIGGER_MODE's set_ctrl case for why this gates it. */
+	/* Set by imx296_set_stream(dev, true, ...) once STANDBY is cancelled, cleared by
+	 * ...(dev, false, ...) once STANDBY is re-armed. Zero-initialised to false at boot (this
+	 * struct is a static DEVICE_DT_INST_DEFINE instance, never heap-allocated) -- imx296_init()
+	 * itself never touches this field, it just never leaves the sensor other than parked in
+	 * STANDBY. See IMX296_CID_TRIGGER_MODE's set_ctrl case for why this gates it. */
 	bool streaming;
 };
 
@@ -649,6 +652,17 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 			return ret;
 		}
 
+		/*
+		 * Mark streaming (i.e. "no longer in standby, TRIGEN/LOWLAGTRG can no longer be
+		 * changed") the moment STANDBY is actually cancelled above, NOT after the XMSTA
+		 * write below succeeds. If XMSTA's write itself failed here (e.g. I2C NAK), the
+		 * sensor would already be out of standby with no clean way back into it from this
+		 * function's own error return -- leaving data->streaming false in that case would
+		 * let IMX296_CID_TRIGGER_MODE's set_ctrl case accept a mode change that then has
+		 * no standby window left to land in when a caller next tries to stream.
+		 */
+		data->streaming = true;
+
 		k_sleep(K_MSEC(IMX296_STANDBY_SETTLE_MS));
 
 		/*
@@ -657,14 +671,7 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 		 * start applies to both trigger and free-run streaming, only TRIGEN/LOWLAGTRG
 		 * above change which one XTRIG then drives.
 		 */
-		ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, 0);
-		if (ret < 0) {
-			return ret;
-		}
-
-		data->streaming = true;
-
-		return 0;
+		return video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, 0);
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, IMX296_XMSTA_STOP);

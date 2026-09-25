@@ -22,11 +22,9 @@
  * hard-codes exactly that one path (alongside "/cpus") in
  * `infer_binding_for_paths`, so edtlib types a `*-gpios`/`pinctrl-N`
  * property there from its raw DT form with no `compatible`/binding needed
- * at all -- the officially-supported ad hoc-properties idiom, and simpler
- * than carrying a one-off `alp,gpio-output.yaml` binding for a single pin
- * (an earlier version of this overlay did exactly that; dropped after
- * review). See examples/aen/aen-analog-validate's board overlay for the
- * same reasoning written out for `io-channels` instead of `gpios`.
+ * at all -- the officially-supported ad hoc-properties idiom. See
+ * examples/aen/aen-analog-validate's board overlay for the same reasoning
+ * written out for `io-channels` instead of `gpios`.
  *
  * PINMUX IS EXPLICIT, not left to the pad's reset-default alt function:
  * `pinctrl_imx296_trigger` below selects `PIN_P5_1__GPIO` regardless of
@@ -36,22 +34,39 @@
  * runtime with `pinctrl_apply_state()` before the GPIO is ever touched (see
  * PINCTRL_DT_DEV_CONFIG_DECLARE's own doc comment in
  * <zephyr/drivers/pinctrl.h> for this being the sanctioned pattern for
- * exactly this "runtime pin control from an app" case).
+ * exactly this "runtime pin control from an app" case). `PIN_P5_1__GPIO`
+ * is defined in the vendored
+ * zephyr/include/zephyr/dt-bindings/pinctrl/alif-ensemble-pinctrl.h (the
+ * hal_alif Zephyr module), following the same `PIN_P<port>_<pin>__GPIO`
+ * convention as `PIN_P12_7__GPIO` / `PIN_P12_5__GPIO`, both used elsewhere
+ * in this tree.
  *
  * !!! ELECTRICAL POLARITY IS UNVERIFIED -- DO NOT WIRE J3 YET !!!
- * The INNO-MAKER module's J3 Trig+/Trig- input circuit (opto-isolated?
- * logic-level XTRIG pad? which voltage rail? current-limiting on the E1M
- * side?) has NOT been checked against that module's own documentation --
- * only the Sony IMX296 datasheet's SENSOR-SIDE XTRIG behaviour is cited
- * anywhere in this change (see main.c). Driving P5_1 from the E1M SoC
- * straight into an unknown input circuit risks the wrong voltage, the
- * wrong polarity, or no current limiting at all. GPIO_ACTIVE_HIGH below is
- * a PLACEHOLDER, not a confirmed fact, and is the ONE place to flip if/when
- * the module's documentation (or a bench measurement) says otherwise --
- * main.c's trigger_pulse() only ever asserts/deasserts the logical GPIO
- * state, never hardcodes a physical level, so this DT flag is the single
- * point of truth for idle-vs-pulse polarity. Confirm J3's input circuit
- * from the module's own documentation before wiring anything to it.
+ * The Sony IMX296 datasheet's XTRIG is ACTIVE-LOW at the sensor pin:
+ * "Fast trigger mode ... starts exposure at fall of XTRIG immediately"
+ * and exposure time is the XTRIG LOW-level pulse width ("Global Shutter
+ * (Fast Trigger Mode) Operation", page 64) -- XTRIG idles HIGH, pulses
+ * LOW. But that is the SENSOR pin's behaviour, not necessarily this GPIO's:
+ * the INNO-MAKER module's J3 Trig+/Trig- input circuit sits between them
+ * (opto-isolated? logic-level pass-through? which voltage rail?
+ * current-limiting on the E1M side?) and has NOT been checked against that
+ * module's own documentation. Two cases, both plausible, not distinguished
+ * here:
+ *   - J3 INVERTS (e.g. an opto-isolator that pulls XTRIG low when its
+ *     input LED is driven/lit): this GPIO must idle LOW and pulse HIGH to
+ *     produce an idle-HIGH/pulse-LOW XTRIG -- i.e. `GPIO_ACTIVE_HIGH`, the
+ *     current setting below.
+ *   - J3 passes the level straight through (no inversion): this GPIO must
+ *     idle HIGH and pulse LOW to match XTRIG directly -- i.e.
+ *     `GPIO_ACTIVE_LOW`, NOT the current setting.
+ * `GPIO_ACTIVE_HIGH` below is therefore a PLACEHOLDER (current default:
+ * this GPIO idles LOW, pulses HIGH), not a confirmed fact, and is the ONE
+ * place to flip if/when the module's documentation (or a bench
+ * measurement) says J3 does not invert -- main.c's trigger_pulse() only
+ * ever asserts/deasserts the logical GPIO state, never hardcodes a
+ * physical level, so this DT flag is the single point of truth for
+ * idle-vs-pulse polarity. Confirm J3's input circuit from the module's own
+ * documentation before wiring anything to it.
  *
  * P5_1's default (POR) pad function is GPIO (alt-0 is GPIO on every pad on
  * this SoC -- see examples/peripheral-io/blink's board overlay comment for
@@ -60,10 +75,7 @@
  * that a stated fact of this build rather than an assumption about what the
  * pad happens to reset to. UNVERIFIED ON SILICON (issue #2287 benches this
  * later, with a GPIO trigger) -- this overlay has not been flashed or
- * scoped, and PIN_P5_1__GPIO has not been confirmed to exist under that
- * exact name in the vendored alif-ensemble-pinctrl.h (it follows the same
- * `PIN_P<port>_<pin>__GPIO` convention as PIN_P12_7__GPIO /
- * PIN_P12_5__GPIO, both used elsewhere in this tree).
+ * scoped.
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
@@ -88,8 +100,13 @@
 
 		/*
 		 * !!! POLARITY UNVERIFIED, PLACEHOLDER -- see this file's header
-		 * comment. Flip GPIO_ACTIVE_HIGH <-> GPIO_ACTIVE_LOW here, and
-		 * nowhere else, once the module's J3 input circuit is confirmed.
+		 * comment. XTRIG itself is active-low at the sensor (idles high,
+		 * pulses low, datasheet page 64); GPIO_ACTIVE_HIGH here means THIS
+		 * GPIO idles low and pulses high, which is only correct if J3
+		 * inverts (e.g. an opto-isolator). If J3 passes the level straight
+		 * through instead, this must be GPIO_ACTIVE_LOW (idle high, pulse
+		 * low) to match XTRIG directly. Flip it here, and nowhere else,
+		 * once the module's J3 input circuit is confirmed.
 		 */
 		imx296-trigger-gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
 	};

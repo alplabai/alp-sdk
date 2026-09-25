@@ -154,8 +154,13 @@ static int trigger_arm(void)
  * immediately" (IMX296 datasheet page 64) -- assert the line (logical
  * active, whatever GPIO_ACTIVE_HIGH/_LOW in the overlay makes that
  * physically) for TRIGGER_PULSE_MS, then deassert it back to idle. Returns
- * the k_uptime_get() timestamp (us) the pulse was asserted at, so the
- * caller can compare it against the frame's own arrival timestamp.
+ * the k_uptime_get() timestamp the pulse was asserted at, scaled to us so
+ * it prints and subtracts directly against frame.timestamp_us below --
+ * NOTE both are only ms-RESOLUTION in practice: k_uptime_get() itself
+ * returns whole milliseconds, and zephyr_video.c's frame.timestamp_us is
+ * likewise a Zephyr video buffer's millisecond `timestamp` field times
+ * 1000, not a genuine microsecond capture. A delta under ~1 ms is noise,
+ * not evidence either way.
  */
 static uint64_t trigger_pulse(void)
 {
@@ -377,6 +382,8 @@ int main(void)
 		printk("[camfl] alp_camera_capture FAILED: %s\n", alp_status_name(s));
 		printk("RESULT: capture failed\n");
 	} else {
+		/* frame.timestamp_us is ms-RESOLUTION only (zephyr_video.c scales the Zephyr
+		 * video buffer's millisecond timestamp field by 1000), despite the "us" unit. */
 		printk("[camfl] alp_camera_capture OK: %u bytes @ %llu us\n",
 		       (unsigned)frame.size,
 		       (unsigned long long)frame.timestamp_us);

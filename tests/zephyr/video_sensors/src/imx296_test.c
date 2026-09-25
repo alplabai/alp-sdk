@@ -578,4 +578,22 @@ ZTEST(imx296, test_hflip_vflip_set_the_reverse_bits_independently)
 	zassert_true(val & REVERSE_VREVERSE, "VREVERSE should survive HFLIP clear: 0x%02x", val);
 }
 
-ZTEST_SUITE(imx296, NULL, NULL, NULL, NULL, NULL);
+/*
+ * ZTEST_SUITE after-hook: stops the stream once every test in this suite finishes. Several tests
+ * above (test_stream_start_..., the trigger-mode tests) leave the emulated sensor streaming;
+ * without this, ztest's NAME-SORTED (not declaration) execution order would let whichever test
+ * happens to run last before another leak its streaming state into it -- most concretely,
+ * IMX296_CID_TRIGGER_MODE's -EBUSY-while-streaming rejection (test_trigger_mode_ctrl_rejects_
+ * while_streaming) would otherwise depend on whichever streaming state the PREVIOUS test left
+ * behind, rather than the state it itself sets up. Not asserted: a stream that was never started
+ * this test still stops cleanly (imx296_set_stream(dev, false, ...) is unconditional), so this
+ * exists purely to leave a known state for the next test, not to check anything about this one.
+ */
+static void imx296_test_after(void *fixture)
+{
+	ARG_UNUSED(fixture);
+
+	(void)video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT);
+}
+
+ZTEST_SUITE(imx296, NULL, NULL, NULL, imx296_test_after, NULL);
