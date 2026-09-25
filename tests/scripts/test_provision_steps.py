@@ -438,7 +438,8 @@ def test_select_steps_rules():
     names = [s.name for s in steps.select_steps(only=["census"])]
     assert names == ["preflight", "census"]
     names = [s.name for s in steps.select_steps(start="secure_page", skip=["hil_smoke"])]
-    assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test", "record"]
+    assert names == ["preflight", "secure_page", "dsw1_xspi_remove_sd", "cold_boot_test",
+                     "clkgen_verify", "record"]
     with pytest.raises(ValueError):
         steps.select_steps(only=["nope"])
 
@@ -577,3 +578,73 @@ def test_gd32_probe_reads_nothing_from_a_wrong_debug_port(tmp_path):
     ctx = _ctx(tmp_path, bench=_bench(probe=probe), gd32_fw=_gd32_fw(tmp_path))
     assert isinstance(steps.Gd32Flash().probe(ctx), steps.Unknown)
     assert [c[0] for c in probe.calls] == ["dp_id"]
+
+
+# --- clkgen_verify ---------------------------------------------------------------------
+
+def test_clkgen_verify_pass(tmp_path):
+    board = Board()
+    image = bytearray(lt.CLKGEN_OTP_IMAGE)
+    image[0x21], image[0x24] = 0xC0, 0x8E
+    for reg, val in enumerate(image):
+        board.regs[(8, 0x69, reg)] = val
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    ctx.boot_text = "NOTICE:  BL2: v2.10\nALP: 5L35023B clock: success\n\ne1m login: "
+    res = steps.run_steps(ctx, only=["clkgen_verify"])
+    r = res[-1]
+    assert r.name == "clkgen_verify" and r.status == "done", r.detail
+    assert r.evidence["clkgen_dash_code"] == "0x00"
+    assert r.evidence["clkgen_fixup_applied"] == "true"
+    assert r.evidence["clkgen_otp_sha256"] == hashlib.sha256(lt.CLKGEN_OTP_IMAGE).hexdigest()
+
+
+def test_clkgen_verify_fails_on_mismatch_and_missing_boot_line(tmp_path):
+    board = Board()
+    for reg, val in enumerate(lt.CLKGEN_OTP_IMAGE):   # factory OTP: fixup not applied
+        board.regs[(8, 0x69, reg)] = val
+    ctx = _ctx(tmp_path, bench=_bench(), linux=board, execute=True)
+    ctx.boot_text = "no clkgen line here\n"
+    res = steps.run_steps(ctx, only=["clkgen_verify"])
+    r = res[-1]
+    assert r.status == "failed"
+    assert "reg 0x21" in r.detail and "5L35023B clock" in r.detail
+
+
+# --- dxm1_npu_flash (BENCH-PENDING) ------------------------------------------------------
+
+def test_dxm1_npu_flash_skipped_for_v2n(tmp_path):
+    bdir, b = _bundle(tmp_path, family="v2n")
+    ctx = _ctx(tmp_path, bundle=(bdir, b), bench=_bench(), dxm1_flash=True)
+    r = steps.Dxm1NpuFlash().run(ctx)
+    assert r.status == "skipped" and "not a V2M" in r.detail
+
+
+def test_dxm1_npu_flash_skipped_by_default(tmp_path):
+    ctx = _ctx(tmp_path, bench=_bench())  # bundle family defaults to v2n-m1
+    r = steps.Dxm1NpuFlash().run(ctx)
+    assert r.status == "skipped" and "BENCH-PENDING" in r.detail
+
+
+def test_dxm1_npu_flash_refuses_tbd_bench_key(tmp_path):
+    bench = _bench()
+    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 5, "reset_line": 6,
+                         "uart_device": "/dev/ttySC1", "uart_boot": "uart_boot",
+                         "fw_uart_boot": "fw_uart_boot.bin", "fw": None}
+    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
+    with pytest.raises(steps.Refused, match="dxm1.fw is TBD"):
+        steps.Dxm1NpuFlash().run(ctx)
+
+
+def test_dxm1_npu_flash_refuses_wrong_firmware_md5(tmp_path):
+    fw_dir = tmp_path / "dxm1fw"
+    fw_dir.mkdir()
+    (fw_dir / "fw_uart_boot.bin").write_bytes(b"not the real bootloader")
+    (fw_dir / "fw.bin").write_bytes(b"not the real firmware")
+    bench = _bench()
+    bench.raw["dxm1"] = {"gpio_chip": "chip0", "uart_mux_line": 5, "reset_line": 6,
+                         "uart_device": "/dev/ttySC1", "uart_boot": str(fw_dir / "uart_boot"),
+                         "fw_uart_boot": str(fw_dir / "fw_uart_boot.bin"),
+                         "fw": str(fw_dir / "fw.bin")}
+    ctx = _ctx(tmp_path, bench=bench, dxm1_flash=True, execute=True)
+    with pytest.raises(steps.Refused, match="md5"):
+        steps.Dxm1NpuFlash().run(ctx)

@@ -107,10 +107,12 @@ state recorded against a **different bundle or tool revision** is moved to
 | `census` | read-only: every auto ledger key the unit can provide |
 | `eeprom_manifest` | preconditions, 128-byte manifest in 8 × 16-byte page writes at `0x50`, readback, cold cycle, re-read; only then the staged blob is promoted to `<serial>.manifest.bin` |
 | `gd32_flash` | DP-ID gate (`0x0BE12477` only), `loadbin` × 3, verify with `savebin` in fresh probe sessions, bridge ACK at `0x70` |
+| `dxm1_npu_flash` | `v2n-m1` only, **skipped by default** (`--enable-dxm1-flash`): DX-M1 SPI-NAND over the UART recovery path. **BENCH-PENDING** -- see below |
 | `pmic_verify` | compare registers against `--pmic-expect` |
 | `secure_page` | write the 64-byte Secure Data Page, read back, compare. Never locks |
 | `dsw1_xspi_remove_sd` | operator: boot switch to xSPI, remove the microSD |
 | `cold_boot_test` | `--cold-cycles N`: clean BL2, DRAM tier, rail line (`v2n-m1`), login, `SYS_LSI_MODE`, I2C scans |
+| `clkgen_verify` | the on-SoM 5L35023B (`BRD_I2C`, `0x69`) OTP image against U-Boot's fixup |
 | `hil_smoke` | optional `tests/hil/run_smoke.py` |
 | `record` | merge auto keys into `<serial>.unit.yaml` (manual keys never touched), append `<serial>.md`, logs, xlsx, ship check |
 
@@ -148,6 +150,45 @@ transfer:
 Selector `0x06` (device configuration) is only ever read, as one combined
 `0x06 0x00` + read-1 transfer; a unit test asserts no frame writes it.
 
+### `clkgen_verify`: the 5L35023B clock generator (`0x69`)
+
+The on-SoM Renesas 5L35023B (`BRD_I2C` / Linux `i2c-8` on the reference
+bench, 7-bit `0x69`) ships with a fixed factory OTP image that cannot be
+re-burned in-system. U-Boot's `fix/v2n-u25-lpo-clock` patch rewrites reg
+`0x21` and `0x24` every boot (a volatile fixup, not an OTP change); the step
+reads reg `0x00..0x24` **one byte at a time** (`i2cget`, never a combined
+`i2ctransfer` read -- this part bit-slips on those) and compares against the
+OTP image with `0x21`/`0x24` expected at their post-fixup values, and
+confirms the boot console showed U-Boot's own `ALP: 5L35023B clock:` line.
+Ledger facts: `clkgen_otp_sha256` (the 37 bytes with `0x21`/`0x24`
+normalized back to their OTP values, so the hash is the same on every unit
+regardless of the fixup), `clkgen_dash_code` (reg `0x01`), `clkgen_i2c_addr`,
+`clkgen_fixup_applied`.
+
+### `dxm1_npu_flash`: the DX-M1 NPU (V2M only) -- BENCH-PENDING
+
+The DX-M1 boots from an on-module SPI-NAND; the boot-mode straps
+(`{GPIO00_02,01,00}`) must read `0`. The reference EVK currently pulls them
+to `7` (QSPI NOR) -- a pending hardware rework -- so this step is **skipped
+by default** and needs `--enable-dxm1-flash` once that lands. When enabled,
+from Linux it drives V2N `P75` high (UART mux to the DX-M1 UART0, default
+low), pulses `PA6` (DX-M1 reset: low 100 ms, high), and -- with the NAND
+empty, the ROM's XMODEM fallback ('C' prompt @115200) -- runs the vendor
+`uart_boot` (aarch64) twice: the bootloader stage
+(`-d <dev> -f fw_uart_boot.bin -b 115200`), then the application firmware
+(`-F fw.bin -U -b 115200`); `P75` is driven low again afterward. Verification
+is a cold boot followed by a non-empty `/sys/bus/pci/devices` (the DEEPX
+device enumerates). **Never runs `sf_erase`** (vendor docs disagree on its
+size) and **never touches V2N `P64`/`P65`** (the DEEPX 0.75 V rail --
+`gpiolib` reconfigures a pin on read and would kill it; see
+`e8c91c616`/`ff2467142`). The vendor `uart_boot` tool and firmware binaries
+are DEEPX files and are never committed here: their paths come from
+`bench.yaml` `dxm1.{uart_boot,fw_uart_boot,fw}` (alongside
+`dxm1.{gpio_chip,uart_mux_line,reset_line,uart_device}`), each `TBD (null)`
+until a bench has them. The step verifies both files' md5 against the pinned
+release before touching hardware and records `dxm1_fw_uart_boot_md5`,
+`dxm1_fw_md5`, `dxm1_fw_version` in the ledger.
+
 ### Lock preconditions (`run --lock`)
 
 All must hold: `secure_page` and `cold_boot_test` done for this bundle;
@@ -173,6 +214,12 @@ serial. After the lock frame, only a re-read with bit 1 set counts.
   `boot_sd_linux` refuses because the root is not on the SD.
 - **The EEPROM array is written only when blank** or equal to
   `--reprovision-from`, and never while the identity header is locked.
+- **The 5L35023B cannot be re-burned in-system.** `clkgen_verify` only reads;
+  a bad OTP image means a bad unit, not a fixable one.
+- **`dxm1_npu_flash` is bench-pending and defaults off.** Do not pass
+  `--enable-dxm1-flash` until the boot-strap rework lands and the mechanism
+  is bench-verified; the DX-M1 UART mux and reset lines are otherwise
+  untested on real hardware.
 
 ## Testing
 

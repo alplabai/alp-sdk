@@ -326,6 +326,74 @@ def test_expected_i2c_and_check():
     assert lt.i2c_check(t, exp) == ["i2c-8: missing 0x1e"]
 
 
+# --- clock generator (5L35023B) -------------------------------------------------------
+
+def _clkgen_i2cget(image: bytes):
+    def resp(cmd):
+        m = re.search(r"i2cget -y -f \d+ 0x69 (0x[0-9a-fA-F]+)", cmd)
+        return f"0x{image[int(m[1], 16)]:02x}"
+    return resp
+
+
+def test_clkgen_read_image_matches_fixed_up_otp():
+    image = bytearray(lt.CLKGEN_OTP_IMAGE)
+    image[0x21], image[0x24] = 0xC0, 0x8E
+    t, _ = target([(r"i2cget -y -f \d+ 0x69 0x\w+", _clkgen_i2cget(bytes(image)))])
+    got = lt.clkgen_read_image(t, 8)
+    assert got == bytes(image)
+    assert lt.clkgen_diff(got) == []
+    assert lt.clkgen_fixup_applied(got)
+    assert lt.clkgen_otp_sha256(got) == hashlib.sha256(lt.CLKGEN_OTP_IMAGE).hexdigest()
+
+
+def test_clkgen_diff_reports_mismatch_and_missing_fixup():
+    factory = bytes(lt.CLKGEN_OTP_IMAGE)  # OTP image with the U-Boot fixup NOT applied
+    bad = lt.clkgen_diff(factory)
+    assert any("reg 0x21" in b for b in bad) and any("reg 0x24" in b for b in bad)
+    assert not lt.clkgen_fixup_applied(factory)
+
+
+def test_clkgen_diff_rejects_wrong_length():
+    with pytest.raises(ValueError, match="37 bytes"):
+        lt.clkgen_diff(b"\x00" * 10)
+
+
+# --- DX-M1 NPU (V2M-only) --------------------------------------------------------------
+
+def test_dxm1_uart_boot_sequence_and_gpio_cleanup():
+    t, fake = target([
+        ("gpioset chip0 5=1", ""),
+        ("gpioset chip0 6=0; sleep 0.1; gpioset chip0 6=1", ""),
+        (r"uart_boot -d /dev/ttySC1 -f fw_uart_boot.bin -b 115200", "bootloader ok\n"),
+        (r"uart_boot -F fw.bin -U -b 115200", "app ok\n"),
+        ("gpioset chip0 5=0", ""),
+    ])
+    out = lt.dxm1_uart_boot(t, "chip0", 5, 6, "/dev/ttySC1", "uart_boot",
+                            "fw_uart_boot.bin", "fw.bin")
+    assert out == "bootloader ok\napp ok\n"
+    assert fake.commands[-1] == "gpioset chip0 5=0"
+
+
+def test_dxm1_uart_boot_drives_the_mux_low_even_on_failure():
+    t, fake = target([
+        ("gpioset chip0 5=1", ""),
+        ("gpioset chip0 6=0; sleep 0.1; gpioset chip0 6=1", ""),
+        (r"uart_boot -d", (1, "no ROM response")),
+        ("gpioset chip0 5=0", ""),
+    ])
+    with pytest.raises(BenchError):
+        lt.dxm1_uart_boot(t, "chip0", 5, 6, "/dev/ttySC1", "uart_boot",
+                          "fw_uart_boot.bin", "fw.bin")
+    assert fake.commands[-1] == "gpioset chip0 5=0"
+
+
+def test_dxm1_pcie_present():
+    t, _ = target([("ls /sys/bus/pci/devices", "0000:00:00.0\n")])
+    assert lt.dxm1_pcie_present(t)
+    t, _ = target([("ls /sys/bus/pci/devices", "")])
+    assert not lt.dxm1_pcie_present(t)
+
+
 # --- census --------------------------------------------------------------------------
 
 CID = "d6" + "01" + "00" + "454d4d433031" + "10" + "12345678" + "9a" + "01"

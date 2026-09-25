@@ -52,6 +52,21 @@ TPS628640_ADDRS = (0x44, 0x48, 0x4D, 0x4F)
 TPS628640_VOUT1 = 0x01
 RV3028_ADDR = 0x52
 CLKGEN_5L35023B_ADDR = 0x69
+# Bench-proven (2026-09-24/25) factory OTP image, reg 0x00..0x24 (37 bytes),
+# read ONE BYTE AT A TIME (i2cget): a combined i2ctransfer read bit-slips on
+# this part. 0x30..0x35 are live status, excluded from this table.
+CLKGEN_OTP_IMAGE = bytes.fromhex(
+    "a0 00 bb 04 32 08 cc 21 19 4c f2 16 5f 22 f0 3e 00 80 00 00 00 00 00 00 "
+    "0e 0c 19 12 3f f0 90 46 a0 80 b0 b0 9c")
+CLKGEN_REG_COUNT = len(CLKGEN_OTP_IMAGE)  # 0x25 (37): reg 0x00..0x24 inclusive
+# U-Boot's 5L35023B fixup (fix/v2n-u25-lpo-clock) rewrites these two OTP
+# registers every boot; a post-boot read must expect the fixed-up values, not
+# the factory ones.
+CLKGEN_FIXUP_REGS = {0x21: 0xC0, 0x24: 0x8E}
+# DX-M1 (V2M-only) vendor firmware, pinned by md5 -- see docs/provisioning-v2n.md.
+DXM1_FW_UART_BOOT_MD5 = "ae449610ca72f4ebd431e4e2f7ebe0ab"
+DXM1_FW_MD5 = "88641281169f35de5ed7e33c072c93a9"
+DXM1_FW_VERSION = "2.4.0"
 
 # preset i2c_devices bus name -> bench.yaml i2c_bus key
 PRESET_BUS_TO_BENCH = {"e1m_i2c0": "eeprom", "brd_i2c": "brd"}
@@ -456,6 +471,73 @@ def i2c_check(t: LinuxTarget, expected: dict[int, set[int]]) -> list[str]:
         if missing:
             problems.append(f"i2c-{bus}: missing " + " ".join(f"{a:#04x}" for a in sorted(missing)))
     return problems
+
+
+# --- clock generator (5L35023B) ---------------------------------------------------------
+
+def clkgen_read_image(t: LinuxTarget, bus: int) -> bytes:
+    """Read reg 0x00..0x24 ONE BYTE AT A TIME (i2cget): a combined
+    i2ctransfer read bit-slips on this part."""
+    return bytes(i2c_get(t, bus, CLKGEN_5L35023B_ADDR, reg) for reg in range(CLKGEN_REG_COUNT))
+
+
+def _clkgen_expected() -> bytes:
+    img = bytearray(CLKGEN_OTP_IMAGE)
+    for reg, val in CLKGEN_FIXUP_REGS.items():
+        img[reg] = val
+    return bytes(img)
+
+
+def clkgen_diff(image: bytes) -> list[str]:
+    """Mismatches of `image` against the OTP image with the U-Boot fixup
+    applied. [] means the image is exactly what a provisioned unit should read."""
+    if len(image) != CLKGEN_REG_COUNT:
+        raise ValueError(f"clkgen image must be {CLKGEN_REG_COUNT} bytes, got {len(image)}")
+    want = _clkgen_expected()
+    return [f"reg {i:#04x}: {image[i]:#04x} != {want[i]:#04x}"
+            for i in range(CLKGEN_REG_COUNT) if image[i] != want[i]]
+
+
+def clkgen_fixup_applied(image: bytes) -> bool:
+    return all(image[reg] == val for reg, val in CLKGEN_FIXUP_REGS.items())
+
+
+def clkgen_otp_sha256(image: bytes) -> str:
+    """sha256 of the 37-byte image with reg 0x21/0x24 normalized back to
+    their factory OTP values (the U-Boot fixup rewrites both every boot, so
+    the raw post-boot bytes would otherwise hash differently unit to unit)."""
+    img = bytearray(image)
+    for reg in CLKGEN_FIXUP_REGS:
+        img[reg] = CLKGEN_OTP_IMAGE[reg]
+    return hashlib.sha256(bytes(img)).hexdigest()
+
+
+# --- DX-M1 NPU (V2M-only): SPI-NAND recovery boot over UART -------------------------------
+
+def dxm1_uart_boot(t: LinuxTarget, chip: str, uart_line: int, reset_line: int,
+                   uart_device: str, tool: str, fw_uart_boot: str, fw: str) -> str:
+    """Mux V2N P75 to the DX-M1 UART0, pulse the PA6 reset (low 100 ms, high),
+    then run the vendor `uart_boot` twice against the ROM's XMODEM fallback
+    ('C' prompt on an empty NAND): once for the bootloader stage, once for
+    the application firmware. Drives P75 low again before returning (even on
+    failure). Never touches V2N P64/P65 (the DEEPX 0.75 V rail): this
+    mechanism is a UART mux line and a reset line only."""
+    t.run(f"gpioset {shlex.quote(chip)} {uart_line}=1")
+    try:
+        t.run(f"gpioset {shlex.quote(chip)} {reset_line}=0; sleep 0.1; "
+              f"gpioset {shlex.quote(chip)} {reset_line}=1")
+        out1 = t.run(f"{shlex.quote(tool)} -d {shlex.quote(uart_device)} "
+                     f"-f {shlex.quote(fw_uart_boot)} -b 115200", timeout=120.0).stdout
+        out2 = t.run(f"{shlex.quote(tool)} -F {shlex.quote(fw)} -U -b 115200",
+                     timeout=300.0).stdout
+    finally:
+        t.run(f"gpioset {shlex.quote(chip)} {uart_line}=0", check=False)
+    return out1 + out2
+
+
+def dxm1_pcie_present(t: LinuxTarget) -> bool:
+    """Non-empty /sys/bus/pci/devices after a cold boot: the DEEPX PCIe link is up."""
+    return bool(t.run("ls /sys/bus/pci/devices", check=False).stdout.split())
 
 
 # --- census ----------------------------------------------------------------------------

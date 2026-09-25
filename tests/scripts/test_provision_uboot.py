@@ -53,6 +53,13 @@ def test_cold_to_prompt_golden_transcript():
     assert uboot.bl2_errors(text) == []  # "Error: ethernet..." is after U-Boot, not BL2
 
 
+def test_parse_clkgen_line():
+    assert uboot.parse_clkgen_line("ALP: 5L35023B clock: success\n") == "ALP: 5L35023B clock: success"
+    assert uboot.parse_clkgen_line("ALP: 5L35023B clock: skip (already fixed up)\n") == \
+        "ALP: 5L35023B clock: skip (already fixed up)"
+    assert uboot.parse_clkgen_line("ALP: no valid SoM manifest in EEPROM\n") is None
+
+
 def test_rail_pg_golden_transcript():
     text = CHAIN_RAIL.decode()
     assert uboot.has_rail_pg(text)

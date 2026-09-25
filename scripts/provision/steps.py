@@ -118,6 +118,7 @@ class Ctx:
     mfg_date_override: date | None = None
     flash_writer: Path | None = None
     gd32_fw: Path | None = None
+    dxm1_flash: bool = False              # BENCH-PENDING: default skip, see Dxm1NpuFlash
     transfer: str = "sd"                  # "sd" | "xmodem"
     station: str | None = None
     by: str = "provision_som"
@@ -866,6 +867,60 @@ class Gd32Flash(Step):
         return self.result(ctx, "GD32 flashed and verified" if ctx.execute else "would flash the GD32", ev)
 
 
+class Dxm1NpuFlash(Step):
+    """BENCH-PENDING: the E1M-X V2N EVK's DX-M1 boot-mode straps currently
+    pull QSPI NOR (mode 7), not the on-module SPI-NAND (mode 0) this step
+    programs -- a pending hardware rework. Skipped unless the caller passes
+    --enable-dxm1-flash, and only for a v2n-m1 (DEEPX) family bundle."""
+    name = "dxm1_npu_flash"
+    always_run = True
+
+    def run(self, ctx):
+        if ctx.family != "v2n-m1":
+            return self.result(ctx, "not a V2M/DEEPX SKU: no DX-M1 to flash", status="skipped")
+        if not ctx.dxm1_flash:
+            return self.result(
+                ctx, "BENCH-PENDING: the EVK's DX-M1 boot straps pull QSPI NOR, not SPI-NAND "
+                "(hardware rework not yet done); pass --enable-dxm1-flash once validated",
+                status="skipped")
+        b = ctx.need_bench()
+        d = b.raw.get("dxm1") or {}
+        for key in ("gpio_chip", "uart_mux_line", "reset_line", "uart_device",
+                    "uart_boot", "fw_uart_boot", "fw"):
+            if d.get(key) is None:
+                raise Refused(f"bench.yaml dxm1.{key} is TBD (null)")
+        fw_boot_local, fw_local = Path(d["fw_uart_boot"]), Path(d["fw"])
+        for path, want, label in ((fw_boot_local, lt.DXM1_FW_UART_BOOT_MD5, "fw_uart_boot"),
+                                  (fw_local, lt.DXM1_FW_MD5, "fw")):
+            got = _md5(path.read_bytes())
+            if got != want:
+                raise Refused(f"{label} {path.name}: md5 {got} != pinned {want} "
+                              f"(want DEEPX release {lt.DXM1_FW_VERSION})")
+        t = ctx.need_linux()
+        remote_tool, remote_boot, remote_fw = "/tmp/uart_boot", "/tmp/fw_uart_boot.bin", "/tmp/fw.bin"
+
+        def flash():
+            t.put(Path(d["uart_boot"]), remote_tool)
+            t.put(fw_boot_local, remote_boot)
+            t.put(fw_local, remote_fw)
+            t.run(f"chmod +x {remote_tool}")
+            return lt.dxm1_uart_boot(t, d["gpio_chip"], d["uart_mux_line"], d["reset_line"],
+                                     d["uart_device"], remote_tool, remote_boot, remote_fw)
+        ctx.mutate(f"drive P75 high, pulse PA6, run vendor uart_boot (bootloader then "
+                   f"firmware {lt.DXM1_FW_VERSION}), drive P75 low", flash)
+
+        def verify():
+            boot_to_linux(ctx)
+            if not lt.dxm1_pcie_present(ctx.linux):
+                raise Refused("cold boot: /sys/bus/pci/devices is empty; no DEEPX PCIe link")
+        ctx.mutate("cold boot; verify /sys/bus/pci/devices is non-empty (DEEPX link up)", verify)
+        ev = {"dxm1_fw_uart_boot_md5": lt.DXM1_FW_UART_BOOT_MD5, "dxm1_fw_md5": lt.DXM1_FW_MD5,
+              "dxm1_fw_version": lt.DXM1_FW_VERSION}
+        return self.result(ctx, "DX-M1 SPI-NAND programmed over UART recovery and verified "
+                           "(PCIe link up)" if ctx.execute
+                           else "would program the DX-M1 over UART recovery", ev)
+
+
 class PmicVerify(Step):
     name = "pmic_verify"
     always_run = True
@@ -998,6 +1053,36 @@ class ColdBootTest(Step):
         return self.result(ctx, f"{n}/{n} cold boots clean", ev)
 
 
+class ClkgenVerify(Step):
+    """The on-SoM 5L35023B (BRD_I2C, 0x69) OTP image against U-Boot's
+    fixup (fix/v2n-u25-lpo-clock). Read after the provisioned unit has
+    booted: the fixup runs every boot, so a unit shipped without it (or with
+    a wrong OTP image) is caught here rather than downstream."""
+    name = "clkgen_verify"
+    always_run = True
+
+    def run(self, ctx):
+        t = ctx.need_linux()
+        if t is None:
+            return self.result(ctx, "no Linux target: clock-generator verification deferred",
+                               status="skipped")
+        bus = ctx.i2c("brd")
+        image = lt.clkgen_read_image(t, bus)
+        bad = lt.clkgen_diff(image)
+        line = uboot.parse_clkgen_line(ctx.boot_text)
+        if line is None:
+            bad.append(f"no {uboot.CLKGEN_LINE_PREFIX!r} line in the last boot console capture")
+        ctx.step_logs[self.name] = "\n".join(bad) if bad else f"OTP image ok; boot line: {line!r}"
+        if bad:
+            raise Refused("5L35023B verification failed: " + "; ".join(bad))
+        ev = {"clkgen_otp_sha256": lt.clkgen_otp_sha256(image),
+              "clkgen_dash_code": f"{image[0x01]:#04x}",
+              "clkgen_i2c_addr": f"{lt.CLKGEN_5L35023B_ADDR:#04x}",
+              "clkgen_fixup_applied": "true" if lt.clkgen_fixup_applied(image) else "false"}
+        return self.result(ctx, f"5L35023B OTP image matches (dash code {image[0x01]:#04x}); "
+                           f"boot line: {line!r}", ev, status="done")
+
+
 class HilSmoke(Step):
     name = "hil_smoke"
     trust_run = True
@@ -1123,8 +1208,8 @@ class SecurePageLock(Step):
 
 STEP_ORDER: list[type[Step]] = [
     Preflight, Detect, OpDsw1Scif, Bootstrap, OpDsw1EmmcInsertSd, BootSdLinux, WriteXspi,
-    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Gd32Flash, PmicVerify, SecurePage,
-    OpDsw1XspiRemoveSd, ColdBootTest, HilSmoke, Record,
+    WriteEmmcBoot, WriteRootfs, Census, EepromManifest, Gd32Flash, Dxm1NpuFlash, PmicVerify,
+    SecurePage, OpDsw1XspiRemoveSd, ColdBootTest, ClkgenVerify, HilSmoke, Record,
 ]
 STEP_NAMES = [s.name for s in STEP_ORDER]
 

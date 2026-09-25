@@ -384,6 +384,10 @@ def _v2n_parser() -> argparse.ArgumentParser:
     work.add_argument("--flash-writer", type=Path, help="Flash Writer .mot (overrides bench.yaml)")
     work.add_argument("--gd32-fw", type=Path,
                       help="dir with bootloader.bin, ota-meta.bin, slot-a.bin")
+    work.add_argument("--enable-dxm1-flash", action="store_true",
+                      help="BENCH-PENDING: program the DX-M1 NPU's SPI-NAND over the UART "
+                           "recovery path (v2n-m1 only); needs bench.yaml dxm1.* and a strap "
+                           "rework not yet on the EVK -- default skip until validated")
     work.add_argument("--mfg-date", type=date.fromisoformat,
                       help="default: Monday of the serial's ISO week (a different date is "
                            "recorded as an override)")
@@ -535,7 +539,8 @@ def v2n_main(argv: list[str]) -> int:
                     bench=bench, tier_markers=markers, expected_registers=regs,
                     allow_tier_mismatch=a.allow_tier_mismatch, reprovision_from=a.reprovision_from,
                     cold_cycles=a.cold_cycles, hil_spec=hil, flash_writer=a.flash_writer,
-                    gd32_fw=a.gd32_fw, transfer=a.transfer, station=a.station, by=a.by,
+                    gd32_fw=a.gd32_fw, dxm1_flash=a.enable_dxm1_flash,
+                    transfer=a.transfer, station=a.station, by=a.by,
                     ledger_xlsx=a.ledger_xlsx,
                     mfg_date_override=a.mfg_date if a.mfg_date and a.mfg_date != derived else None)
     ctx.state = steps.load_state(ctx.state_path)
