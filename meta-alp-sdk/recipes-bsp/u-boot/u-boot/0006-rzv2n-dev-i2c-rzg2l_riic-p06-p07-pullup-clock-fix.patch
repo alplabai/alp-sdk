@@ -1,0 +1,442 @@
+From d905e14ecf5e08f34c25532418aa537c5d1db800 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Thu, 24 Sep 2026 17:41:10 +0200
+Subject: [PATCH] rzv2n-dev, i2c: rzg2l_riic: enable P06/P07 pull-up, fix RIIC
+ clock and restart races, and fix long-read tail-byte corruption
+
+Bench root cause (E1M-V2M103, U-Boot bcf29d98, RIIC8/BRD_I2C, P06/P07):
+"i2c md 0x1e 0x19 1" on RIIC8 failed with ICSR2=0x0a (STOP|AL,
+arbitration lost) on the repeated START. Two independent, each
+individually-sufficient fixes were bench-proven from the U-Boot prompt:
+
+(a) SoC-internal pull-up bias on P06/P07. Linux already programs
+    PUPD_H (port 0) = 0x03030000 (byte2=P06, byte3=P07, pull-up)
+    while U-Boot left the register at its POR value of 0 -- no
+    pull-up at all. Writing 0x03030000 from the U-Boot prompt made
+    the read return reliably.
+(b) A slower SCL. Setting ICMR1 CKS=5 (write 0x50) also made reads
+    work.
+
+Root cause of (b): riic_set_clock() (drivers/i2c/rzg2l_riic.c) is one
+CKS/ICBRH/ICBRL table shared by every SoC this driver builds for,
+tuned for a 50 MHz RIIC input clock. R9A09G056/057 (RZ/V2N, RZ/V2H)
+run RIIC off a 100 MHz input instead (Linux uses ICBRL/ICBRH 0x0d/0x07
+at CKS=3 for its own 400 kHz bus on the same clock), so U-Boot's
+"100 kHz" config (CKS=3, unmodified) actually runs the bus at roughly
+double rate -- bench-measured ~220 kHz.
+
+- board/renesas/rzv2n-dev/rzv2n-dev.c: next to the existing P06/P07
+  PFC_20/PMC_20 function-select write in s_init(), RMW PUPD_H (port 0,
+  PFC_BASE+0x1D04) to set bytes 2/3 (P06/P07) to 0x03 (pull-up),
+  preserving bytes 0/1 (P04/P05) as-is.
+
+- drivers/i2c/rzg2l_riic.c riic_set_clock(): for R9A09G056/057 builds
+  only, STANDARD rate uses CKS(5) and FAST rate uses CKS(3) (was
+  CKS(3)/CKS(1) unmodified). fSCL is proportional to (input clock /
+  2^CKS) for fixed ICBRH/ICBRL, so one CKS step (3->4, 1->2) cancels
+  the doubled input clock and restores the same nominal rate this
+  table already hits elsewhere in the family at 50 MHz -- a SECOND
+  step (4->5, 2->3) is then taken as deliberate margin for the loaded
+  BRD_I2C bus, per the bench matrix below (not a second clock-doubling
+  correction). Per the driver's own bit-rate formula, fSCL = (P0phi /
+  2^CKS) / (m + n + 2), m/n = ICBRH/ICBRL bits[4:0] (the 0xE0 upper
+  bits are a fixed must-write-1 pattern, not part of m/n), ignoring
+  tr/tf (bus-loading-dependent, not computable here): at 100 MHz input
+  with m=n=23 (STANDARD, register write value 0xE0|23 = 0xF7 for both
+  ICBRH/ICBRL), CKS(4) computes to (100e6/16)/48 ~= 130.2 kHz (the
+  restored-nominal rate, still loses bit 7 on this bus -- see the
+  matrix below) and CKS(5) computes to (100e6/32)/48 ~= 65.1 kHz (this
+  patch's value, bench-clean). For FAST rate (m=20, n=19), CKS(2)
+  computes to (100e6/4)/41 ~= 609.8 kHz (restored-nominal) and CKS(3)
+  to (100e6/8)/41 ~= 304.9 kHz (this patch's value); FAST rate is not
+  itself part of the bench matrix (only STANDARD/RIIC8 was exercised
+  on the bench), carried by the same margin reasoning only. Other
+  SoCs sharing this driver (R9A09G047, R9A08G045S) are untouched --
+  their actual RIIC input clock is not established here.
+
+Two further, smaller robustness fixes in the same file, generic to
+every RIIC instance in the family (not gated to RIIC8), targeting the
+exact AL failure signature above:
+
+- riic_read_common(): after the offset-write TEND wait and before the
+  repeated START, poll ICCR1 SDAI=1 (SDA released), bounded ~1 ms
+  (raised from an initial ~100 us bound -- too tight to observe
+  anything useful on the bench matrix runs below; a genuinely stuck
+  slave still falls through to riic_send_start_cond()'s own
+  RIIC_TIMEOUT rather than hanging here). Issuing the repeated START
+  while a slave still holds SDA low from its offset-write ACK races
+  the controller and can lose arbitration -- exactly the ICSR2=0x0a
+  (STOP|AL) failure seen on the bench. Prints elapsed time + ICCR1 if
+  the poll itself times out, so a bench run shows whether a failure
+  coincided with SDA held low.
+
+- riic_wait_for_icsr2(): its existing unconditional timeout printf
+  (bit awaited, ICSR2, ICCR2) now also prints ICCR1, so a timeout here
+  shows SDAI (bit 0) too -- the same signature the SDAI poll above
+  guards against, now visible on every wait timeout, not only the
+  repeated-START path.
+
+- riic_check_busy(): ICSR2 AL/STOP/NACKF/START are sticky (cleared
+  only by explicit software write, never by hardware on the next
+  START), so a prior transaction's abort can leave one set and
+  riic_wait_for_icsr2() on the NEXT transaction reads it as an
+  immediate false event. Clear all four unconditionally before the
+  busy-bus check. AL specifically also means the controller's internal
+  state machine may itself be out of sync with the bus, so on AL run
+  the same ICE=0+IICRST full reset/re-init already used for the
+  BBSY-stuck recovery (0005) instead of leaving AL merely cleared.
+
+Neither of (a)/(b) individually proven necessary AND sufficient beyond
+the single bench pass each was validated on -- both are carried
+together since each alone was independently sufficient there and they
+are cheap and orthogonal. The SDAI-poll and stale-ICSR2-clear
+additions are defensive hardening for the same failure class, not
+separately bench-validated in isolation.
+
+A third, separate defect in the same function group, found on a
+follow-up bench pass reading more than a few bytes (E1M-V2M103
+RIIC8/BRD_I2C, "i2c md 0x1e 0x00.1 0x10" on the DA9292 -- bytes at
+offset 0x0D and 0x0E came back as 0x16/0x7F instead of the
+independently-verified 0x96/0xFF, bit 7 cleared on both, reproducible):
+
+- drivers/i2c/rzg2l_riic.c riic_i2c_raw_read(): the do-while loop read
+  ICDRR for a byte FIRST and only set ICMR3.ACKBT (NACK) or ICCR2.SP
+  (stop request) AFTER that read, in a separate post-loop code path
+  for the final byte. With ICMR3.WAIT held set for the life of the
+  RIIC instance (riic_init_setting() sets it once and this driver
+  never clears it mid-transfer), the read of ICDRR is what releases
+  the WAIT hold and commits whatever ACKBT/SP state is current at that
+  instant onto the bus for the byte just consumed -- setting them
+  AFTER that same read is one byte-time too late to affect this
+  transfer. drivers/i2c/rz_riic.c riic_receive_data(), a separate,
+  independently-correct RIIC driver already carried in-tree for other
+  Renesas parts, does this the right way (set ACKBT/SP, then read
+  ICDRR, on the final-byte iteration) -- this patch collapses the
+  buggy split do-while/post-loop shape into one unified loop matching
+  that same ordering, for every read length including the 1-byte case.
+
+  This reorder is a REAL, independently-correct protocol fix, kept on
+  its own merits and matching the manual's documented master-receive
+  sequence -- but a follow-up bench matrix (E1M-V2M103, RIIC8/BRD_I2C,
+  DA9292 0x1E) REFUTES it as the cause of the bit-7 loss above: a v4
+  build without this reorder and a v5 build with it produced IDENTICAL
+  results on the same burst read -- both still lose bit 7 on this bus.
+  The actual mechanism is bus-speed margin (see the CKS fix above and
+  the matrix immediately below), not protocol ordering.
+
+Bench matrix (E1M-V2M103, RIIC8/BRD_I2C, DA9292 0x1E; BRD_I2C carries
+~13 populated branches; external 2.2 kOhm pull-ups to the 1.8 V
+rail are fitted, in addition to the SoC-internal pull-up this
+patch also adds):
+
+- CKS=4 (this patch's prior default through v5): single bursts longer
+  than ~12 bytes lose bit 7 on bytes with bit7 set from about position
+  13 onward -- position-dependent, not register-dependent (a 21-byte
+  burst: offset 0x0d 0x96->0x16, 0x0e 0xff->0x7f, 0x12/0x13 0xff->0x7f,
+  0x14 0xac->0x0c). 8-byte reads are clean at CKS=4.
+- CKS=5 (this patch): a 16-byte AND a single 32-byte i2c-read burst are
+  both completely clean.
+- CKS=3: fails outright (STOP detected, -110) -- recovery kicks in,
+  not a usable fallback.
+- WAIT held off (ICMR3 0x30) and ICBRL forced to 0xff: still corrupt
+  at the faster rates -- rules out WAIT/ICBRL as the mechanism.
+
+Root mechanism of the bit-7 loss at CKS=4 is NOT confirmed -- Linux
+drives the same physical bus at 400 kHz, IRQ-driven, with clean reads,
+which does not obviously square with "just needs a slower clock". A
+scope capture of the affected bytes is still pending; CKS(5) is
+carried here on bench evidence (it is clean on every burst length
+tried, CKS=4 is not), not on a proven timing model.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c |  26 +++++
+ drivers/i2c/rzg2l_riic.c            | 175 ++++++++++++++++++++++++----
+ 2 files changed, 180 insertions(+), 21 deletions(-)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index 689c30624..dbd6d1d23 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -57,6 +57,24 @@ DECLARE_GLOBAL_DATA_PTR;
+ #define	PFC_23				(PFC_BASE + 0x048C)
+ #define PFC_PWPR                        (PFC_BASE + 0x3C04)
+ 
++/*
++ * ALP: P06/P07 (RIIC8 / BRD_I2C) internal pull-up bias. PUPD_H is a
++ * per-port, byte-per-pin register distinct from the PMC/PFC function-
++ * select block above -- pins 4-7 of a port live in its high word
++ * (PUPD_H), one byte each (0=off, 3=pull-up; matches the encoding Linux
++ * already uses on this same net). Bench-confirmed value for port 0
++ * (E1M-V2M103, U-Boot bcf29d98): Linux programs PUPD_H = 0x03030000
++ * (byte2=P06, byte3=P07, both pull-up; bytes 0/1 = P04/P05, left 0)
++ * while U-Boot leaves this register at its POR value of 0 -- i.e. NO
++ * pull-up on P06/P07 in U-Boot today. Without it, "i2c md 0x1e 0x19 1"
++ * on RIIC8 fails with ICSR2=0x0a (STOP|AL, arbitration lost) on the
++ * repeated START; writing this same 0x03030000 from the U-Boot prompt
++ * made the read return reliably. Only port 0 is needed here (RIIC8 is
++ * the only bus U-Boot masters before Linux takes over BRD_I2C), so this
++ * is a fixed address, not a per-port macro.
++ */
++#define	PFC_P0_PUPD_H			(PFC_BASE + 0x1D04)
++
+ #define ICU_IPTSR_REG			0x10400060
+ 
+ /* CPG */
+@@ -117,6 +135,14 @@ void s_init(void)
+ 	*(volatile u32 *)PFC_20  = (*(volatile u32 *)PFC_20 & 0x00FFFFFF) | (0x01 << 28) | (0x01 << 24);
+ 	*(volatile u8 *)PMC_20   |= (0x03) << 6;	/* P07,P06 multiplexed function	*/
+ 
++	/* ALP: enable internal pull-up on P06/P07 (RIIC8/BRD_I2C), matching
++	 * what Linux already does on the same net -- see PFC_P0_PUPD_H
++	 * above for why U-Boot needs this too (bench: arbitration-lost
++	 * reads without it). RMW: only bytes 2/3 (P06/P07), bytes 0/1
++	 * (P04/P05) preserved as-is. */
++	*(volatile u32 *)PFC_P0_PUPD_H =
++		(*(volatile u32 *)PFC_P0_PUPD_H & 0x0000FFFFu) | (0x03u << 16) | (0x03u << 24);
++
+ 	/* I2C0 (RIIC0) on P30/P31 -- ALP on-module EEPROM bus (E1M_I2C0),
+ 	 * read in board_late_init() to identify the SoM. Func.1 = RIIC0. */
+ 	*(volatile u32 *)PFC_23  = (*(volatile u32 *)PFC_23 & ~0xFFu) | (0x01 << 4) | (0x01 << 0);
+diff --git a/drivers/i2c/rzg2l_riic.c b/drivers/i2c/rzg2l_riic.c
+index dc223fa09..f8712bf9f 100644
+--- a/drivers/i2c/rzg2l_riic.c
++++ b/drivers/i2c/rzg2l_riic.c
+@@ -20,6 +20,7 @@
+ #include <dm/device_compat.h>
+ #include <linux/bitops.h>
+ #include <linux/delay.h>
++#include <time.h>
+ 
+ #if defined(CONFIG_R9A09G057) || defined(CONFIG_R9A09G056) || defined(CONFIG_R9A09G047) || defined(CONFIG_R9A08G045S)
+ #define RIIC_ICCR1	0x00
+@@ -208,14 +209,77 @@ static int riic_set_clock(struct udevice *dev, int clock)
+ 	case 100000:
+ 		riic_clear_bit(priv, ICFER_FMPE, RIIC_ICFER);
+ 		riic_clear_bit(priv, ICMR1_CKS_MASK, RIIC_ICMR1);
++#if defined(CONFIG_R9A09G057) || defined(CONFIG_R9A09G056)
++		/*
++		 * ALP: this CKS/ICBRH/ICBRL table is shared by every SoC that
++		 * compiles this driver, tuned for a 50 MHz RIIC input clock.
++		 * R9A09G056/057 (RZ/V2N, RZ/V2H) run RIIC off a 100 MHz input
++		 * instead -- bench-confirmed on E1M-V2M103 by leaving CKS(3)
++		 * unmodified and measuring the "100 kHz" bus at ~220 kHz.
++		 * fSCL is proportional to (input clock / 2^CKS) for fixed
++		 * ICBRH/ICBRL, so incrementing CKS by one from the unmodified
++		 * table (3->4) exactly cancels a doubled input clock in that
++		 * dominant term, restoring the same nominal rate this table
++		 * already hits elsewhere in the family at 50 MHz.
++		 *
++		 * CKS(5) here -- one step slower than that restored-nominal
++		 * value -- is deliberate margin, not a second clock-doubling
++		 * correction: bench matrix on the loaded BRD_I2C (DA9292 at
++		 * 0x1E, ~13 populated branches, external 2.2 kOhm pull-ups
++		 * to the 1.8 V rail plus the SoC-internal pull-up) shows
++		 * CKS(4) loses bit 7 on bytes at/after roughly byte 13 of a
++		 * burst read (e.g. a 21-byte burst: offset 0x0d 0x96->0x16,
++		 * 0x0e 0xff->0x7f, 0x12/0x13 0xff->0x7f, 0x14 0xac->0x0c --
++		 * position-dependent, not register-dependent; short reads of
++		 * <=8 bytes are clean even at CKS(4)), while a 16-byte AND a
++		 * single 32-byte burst are both clean at CKS(5). CKS(3) fails
++		 * outright (STOP detected, -110, recovery kicks in) -- not a
++		 * usable fallback.
++		 *
++		 * Per the driver's own bit-rate formula, fSCL = (P0phi /
++		 * 2^CKS) / (m + n + 2) where m/n are ICBRH/ICBRL bits[4:0]
++		 * (the 0xE0 upper bits below are a fixed must-write-1 pattern,
++		 * not part of m/n) -- ignoring tr/tf, which are bus-loading-
++		 * dependent and not computable here. At 100 MHz input with
++		 * m = n = 23 (register write value ICBRH = ICBRL = 0xE0 | 23
++		 * = 0xF7): CKS(4) computes to (100e6/16)/48 ~= 130.2 kHz (the
++		 * restored-nominal value that still loses bit 7 on this bus);
++		 * CKS(5) computes to (100e6/32)/48 ~= 65.1 kHz, the bench-
++		 * clean value used below. Root mechanism of the bit-7 loss at
++		 * the faster rate is not confirmed (Linux drives the same bus
++		 * at 400 kHz IRQ-driven with clean reads) -- scope capture is
++		 * pending; CKS(5) is carried on bench evidence, not a proven
++		 * timing model.
++		 */
++		riic_set_bit(priv, ICMR1_CKS(5), RIIC_ICMR1);
++#else
+ 		riic_set_bit(priv, ICMR1_CKS(3), RIIC_ICMR1);
++#endif
+ 		riic_write(priv, ICBRH_RESERVED | 23, RIIC_ICBRH);
+ 		riic_write(priv, ICBRL_RESERVED | 23, RIIC_ICBRL);
+ 		break;
+ 	case 400000:
+ 		riic_clear_bit(priv, ICFER_FMPE, RIIC_ICFER);
+ 		riic_clear_bit(priv, ICMR1_CKS_MASK, RIIC_ICMR1);
++#if defined(CONFIG_R9A09G057) || defined(CONFIG_R9A09G056)
++		/*
++		 * ALP: same 100 MHz-input doubled-clock correction as the
++		 * 100 kHz case above (CKS 1->2 restores nominal), plus the
++		 * same one-step margin (2->3) for the loaded BRD_I2C bus --
++		 * see the 100 kHz case for the bench matrix and the fSCL
++		 * formula this is derived from. With m = 20, n = 19
++		 * (ICBRH = 0xE0 | 20 = 0xF4, ICBRL = 0xE0 | 19 = 0xF3):
++		 * CKS(2) computes to (100e6/4)/41 ~= 609.8 kHz (restored-
++		 * nominal); CKS(3) computes to (100e6/8)/41 ~= 304.9 kHz,
++		 * this patch's value. FAST rate is not part of the bench
++		 * matrix above (only STANDARD/100 kHz RIIC8 was exercised on
++		 * the bench) -- carried by the same margin reasoning, not
++		 * independently bench-validated.
++		 */
++		riic_set_bit(priv, ICMR1_CKS(3), RIIC_ICMR1);
++#else
+ 		riic_set_bit(priv, ICMR1_CKS(1), RIIC_ICMR1);
++#endif
+ 		riic_write(priv, ICBRH_RESERVED | 20, RIIC_ICBRH);
+ 		riic_write(priv, ICBRL_RESERVED | 19, RIIC_ICBRL);
+ 		break;
+@@ -246,6 +310,25 @@ static int riic_check_busy(struct udevice *dev)
+ 		4.7 us(Sm) and 1.3 us(Fm). */
+ 
+ 	ulong start, timeout = (ulong)RIIC_TIMEOUT;
++
++	/*
++	 * ALP: ICSR2 AL/STOP/NACKF/START are sticky -- only cleared by an
++	 * explicit write, never by hardware on the next START -- so a prior
++	 * transaction's abort can leave one set here and riic_wait_for_icsr2()
++	 * on the transaction we are about to start reads it as an immediate
++	 * (false) event. AL is worse than stale: "arbitration lost" means the
++	 * controller's internal state machine may itself be out of sync with
++	 * the bus, so clearing the bit alone would leave that state behind --
++	 * run the same ICE=0+IICRST full reset/re-init used for the BBSY-stuck
++	 * recovery below instead of leaving AL sticky. STOP/NACKF/START get
++	 * the cheap clear unconditionally either way.
++	 */
++	if (riic_read(priv, RIIC_ICSR2) & ICSR2_AL) {
++		printf("ALP: riic stale AL (arbitration lost) from a prior transfer, resetting controller\n");
++		riic_init_setting(dev, I2C_SPEED_STANDARD_RATE);
++	}
++	riic_clear_bit(priv, ICSR2_AL | ICSR2_STOP | ICSR2_NACKF | ICSR2_START, RIIC_ICSR2);
++
+ 	start = get_timer(0);
+ 
+ 	do {
+@@ -331,11 +414,15 @@ static int riic_wait_for_icsr2(struct udevice *dev, unsigned short bit)
+ 
+ 	/*
+ 	 * ALP: always visible on the bench, not gated behind a DEBUG build
+-	 * -- shows which wait timed out. Failure path only, so the rate is
+-	 * fine.
++	 * -- shows which wait timed out. ICCR1 added alongside ICSR2/ICCR2
++	 * so a timeout here also shows SDAI (bit 0) -- whether the failure
++	 * coincides with the slave still holding SDA low, the same signature
++	 * the SDAI poll below guards against on the repeated-START path.
++	 * Failure path only, so the rate is fine.
+ 	 */
+-	printf("%s: timeout!(bit = %x icsr2 = %x, iccr2 = %x)\n", __func__,
+-		bit, riic_read(priv, RIIC_ICSR2), riic_read(priv, RIIC_ICCR2));
++	printf("%s: timeout!(bit = %x icsr2 = %x, iccr2 = %x, iccr1 = %x)\n", __func__,
++		bit, riic_read(priv, RIIC_ICSR2), riic_read(priv, RIIC_ICCR2),
++		riic_read(priv, RIIC_ICCR1));
+ 
+ 	return -ETIMEDOUT;
+ }
+@@ -412,32 +499,54 @@ static int riic_i2c_raw_read(struct udevice *dev, struct i2c_msg *msg)
+ {
+ 	struct riic_priv *priv = dev_get_priv(dev);
+ 
+-	int dummy_read = 1;
+ 	int ret = 0;
+ 	int index = 0;
+ 
++	/*
++	 * ALP: dummy read -- the first RDRF after ADDR+R is ACKed reflects
++	 * the address phase, not a data byte (matches drivers/i2c/rz_riic.c
++	 * riic_receive_data() and Linux drivers/i2c/busses/i2c-riic.c
++	 * riic_rdrf_isr()'s RIIC_INIT_MSG dummy read). Reading ICDRR here
++	 * only arms the WAIT-held clock for the real first byte.
++	 */
++	ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
++	if (ret < 0)
++		return ret;
++	riic_read(priv, RIIC_ICDRR);
++
++	/*
++	 * ALP: root cause of the tail-byte corruption seen on long reads
++	 * (bench: E1M-V2M103 RIIC8/BRD_I2C, 16-byte DA9292 dump -- 2 of the
++	 * last 3 bytes came back with bit 7 stuck clear). The previous
++	 * split do-while/post-loop shape read ICDRR for the final byte
++	 * FIRST and only set ACKBT (NACK) and ICCR2.SP (stop request)
++	 * AFTER that read -- but WAIT holds SCL until the ICDRR read, and
++	 * that same read is what releases the hold and commits whatever
++	 * ACKBT/SP state is current at that instant onto the bus. Setting
++	 * them after the read is one byte-time too late for this transfer;
++	 * every multi-byte read was acking (not NACKing) its true last byte
++	 * and requesting STOP only after the fact, per the RIIC
++	 * master-receive flowchart and the proven-correct sibling driver
++	 * drivers/i2c/rz_riic.c riic_receive_data(), both of which set
++	 * ACKBT/SP BEFORE the ICDRR read that consumes the final byte. One
++	 * unified loop below does that: arm NACK+STOP request ahead of the
++	 * read on the last iteration, plain ACK (continue) otherwise.
++	 */
+ 	do {
+ 		ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
+ 		if (ret < 0)
+ 			return ret;
+ 
+-		msg->buf[index] = riic_read(priv, RIIC_ICDRR);
+-		if (dummy_read)
+-			dummy_read = 0;
+-		else
+-			index++;
+-		riic_set_receive_ack(priv, 1);
+-	} while (index < (msg->len - 1));
++		if (index == msg->len - 1) {
++			riic_clear_bit(priv, ICSR2_STOP, RIIC_ICSR2);
++			riic_set_bit(priv, ICCR2_SP, RIIC_ICCR2);
++			riic_set_receive_ack(priv, 0);
++		} else {
++			riic_set_receive_ack(priv, 1);
++		}
+ 
+-	ret = riic_wait_for_icsr2(dev, ICSR2_RDRF);
+-	if (ret < 0)
+-		return ret;
+-
+-	riic_clear_bit(priv, ICSR2_STOP, RIIC_ICSR2);
+-	riic_set_bit(priv, ICCR2_SP, RIIC_ICCR2);
+-
+-	msg->buf[index++] = riic_read(priv, RIIC_ICDRR);
+-	riic_set_receive_ack(priv, 0);
++		msg->buf[index++] = riic_read(priv, RIIC_ICDRR);
++	} while (index < msg->len);
+ 
+ 	return ret;
+ }
+@@ -566,6 +675,30 @@ static int riic_read_common(struct udevice *dev, struct i2c_msg *msg, u32 addr,
+ 		if (ret < 0)
+ 			goto force_exit;
+ 
++		/*
++		 * ALP: a repeated START issued while the slave still holds SDA
++		 * low from the offset-write ACK races the controller and can
++		 * lose arbitration (bench: E1M-V2M103 RIIC8/BRD_I2C, ICSR2 =
++		 * 0x0a = STOP|AL on this exact restart). Wait for SDA to be
++		 * released first; bounded so a genuinely stuck slave still
++		 * falls through to riic_send_start_cond()'s own RIIC_TIMEOUT
++		 * rather than hanging here.
++		 */
++		{
++			ulong t0 = timer_get_us();
++			ulong elapsed;
++
++			while (!(riic_read(priv, RIIC_ICCR1) & ICCR1_SDAI) &&
++			       (ulong)(timer_get_us() - t0) < 1000) {
++				/* busy-poll -- 1 ms bound, no sleep granularity to spare */
++			}
++
++			elapsed = (ulong)(timer_get_us() - t0);
++			if (!(riic_read(priv, RIIC_ICCR1) & ICCR1_SDAI))
++				printf("%s: SDAI poll timed out after %lu us (iccr1 = %x)\n",
++					__func__, elapsed, riic_read(priv, RIIC_ICCR1));
++		}
++
+ 		/* restart */
+ 		ret = riic_send_start_cond(dev, 1);
+ 		if (ret < 0)
+-- 
+2.34.1
+

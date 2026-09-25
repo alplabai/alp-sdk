@@ -8,6 +8,8 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/video/isp-vsi.h>
 
+#include "video_ctrls.h"
+
 /* Registers */
 #define ISP_VI_CCL			0x000
 #define ISP_ID_CUSTOM_ID		0x004
@@ -244,6 +246,18 @@
 #define ACQ_PROP_PIN_MAPPING_MASK	GENMASK(2, 0)
 #define ACQ_PROP_PIN_MAPPING_SHIFT	17
 
+/*
+ * Main resizer (MRSZ) -- neither VSI_MPI_ISP_SetScaleAttr() nor the vendored
+ * isp_api_wrapper.c ever program these (bench runs 186/187); see
+ * isp_apply_mrsz() in isp_pico.c. HWRM AHRM0012 v0.3 SS 17.3.4.3.164
+ * (ISP_MRSZ_CTRL), SS 17.3.4.3.186 (ISP_MRSZ_FORMAT_CONV_CTRL).
+ */
+#define MRSZ_CTRL_SCALE_VC_ENABLE		BIT(3)
+#define MRSZ_CTRL_CFG_UPD			BIT(8)
+#define MRSZ_CTRL_AUTO_UPD			BIT(9)
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT	2
+#define MRSZ_FORMAT_CONV_CTRL_FORMAT_420	(1 << MRSZ_FORMAT_CONV_CTRL_FORMAT_SHIFT)
+
 /* ISP Interrupts */
 #define INTR_EXP_END	BIT(18)
 #define INTR_H_START	BIT(7)
@@ -289,6 +303,50 @@ struct isp_config {
 	uint32_t tpg_pix_width: 2;
 };
 
+/*
+ * Bench run 74 (stage 5, "restore the ISP control path"): the standard Zephyr
+ * video ctrl registry (video_init_ctrl(), video_ctrls.h) rather than Alif's
+ * old opaque VIDEO_CID_ALIF_ISP_SET/_GET passthrough (alifsemi/zephyr_alif
+ * drivers/video/isp_pico.c @ fefd514, the pre-v4.4 fork driver this file was
+ * vendored from) -- so an app drives the ISP library's AWB/AE modules
+ * through the same portable CIDs (VIDEO_CID_AUTO_WHITE_BALANCE,
+ * VIDEO_CID_EXPOSURE_AUTO) it would use on any other video device, and the
+ * v4.4 control-registry walk (video_find_ctrl(), video_ctrls.c) forwards
+ * anything the ISP does NOT register -- VIDEO_CID_EXPOSURE,
+ * VIDEO_CID_ANALOGUE_GAIN, VIDEO_CID_HFLIP/VFLIP, ... -- down the existing
+ * isp -> cam -> csi -> sensor VIDEO_DEVICE_DEFINE chain (isp_pico.c,
+ * video_alif.c, video_csi_dw.c, ov5647.c each already declare one) to
+ * whichever device actually implements it (ov5647.c, ov5647_set_ctrl()).
+ */
+struct isp_ctrls {
+	struct video_ctrl awb;
+	struct video_ctrl exposure_auto;
+
+	/*
+	 * Patch 0009 (zephyr/patches/hal_alif/
+	 * 0009-isp-setcalib-before-3a-callbacks.patch) fixed the real cause
+	 * of "AWB/AE never move": the pinned hal_alif registered the AWB/AE
+	 * callbacks BEFORE SetCalib. With it, the calibration's own
+	 * OP_TYPE_AUTO AE+AWB converge from the FIRST stream with NO
+	 * runtime isp_vsi_set_param() and no restart at all (bench runs
+	 * 153, 156). isp_set_ctrl() (isp_pico.c) sets the matching dirty
+	 * flag on EVERY call, including one that returns a ctrl to its
+	 * calibration-matching default (val == range.def) -- once a SET has
+	 * moved the lib off its calibration state, only another SET moves
+	 * it back. ae_dirty additionally starts true (isp_init_controls()):
+	 * the first stream start pushes the live, sensor-queried
+	 * frame-period/gain ceilings even though exposure_auto is already
+	 * at its default. isp_stream_start() is the sole caller of isp_apply_wb()/
+	 * isp_apply_ae() to act on either flag, and only while the ISP is
+	 * stopped (isp_stream_start() never runs otherwise) -- clearing the
+	 * flag on success. A change made while already streaming is picked
+	 * up at the NEXT stream start; see the ponytail comment on
+	 * isp_set_ctrl() (isp_pico.c).
+	 */
+	bool wb_dirty;
+	bool ae_dirty;
+};
+
 struct isp_data {
 	DEVICE_MMIO_RAM;
 	bool is_streaming;
@@ -305,6 +363,19 @@ struct isp_data {
 	struct k_poll_signal *signal;
 
 	struct isp_config_params init_cfg;
+	struct isp_ctrls ctrls;
+
+	/*
+	 * Review round (post-3511cd180): isp_stream_start() (app thread, via
+	 * isp_set_stream()) calls isp_apply_wb()/isp_apply_ae()
+	 * (isp_vsi_set_param()) to apply a dirty WB/AE ctrl, while
+	 * isp_bottom_half() (this device's own workqueue, isp_cb_workq) calls
+	 * isp_vsi_bottom_half() -- both ultimately touch the same ISP_PORT's
+	 * library-internal state, and nothing in isp_api_wrapper.c serializes
+	 * that internally. Held around every isp_vsi_* call in isp_pico.c so
+	 * the two never race.
+	 */
+	struct k_mutex lib_lock;
 };
 
 #endif /* _VIDEO_ALIF_ISP_H_ */

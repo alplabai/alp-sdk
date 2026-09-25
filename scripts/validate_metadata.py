@@ -1392,13 +1392,17 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
     the `gd32_spi.gpio_chip_select` entry -- must resolve to EXACTLY one
     `owner: "renesas"` row in metadata/pinmux/v2n.yaml.  Zero matches or
     more than one is a hard error naming the offending pair.  Where that
-    matched row itself carries a `core:` key, the value MUST be "m33" --
-    but a matched row with NO `core:` key is not an error: the console's
-    UART0_TXD0/UART0_RXD0 rows legitimately carry no `core:` attribution
-    in metadata/pinmux/v2n.yaml (see
+    matched row itself carries a `core:` key, the value MUST match the
+    link's owning core -- "m33" for gd32_spi and console (both CM33-
+    side), "a55" for brd_i2c (RIIC8/BRD_I2C is Cortex-A55/Linux-
+    exclusive; the CM33 must never master it -- maintainer decision,
+    metadata/e1m_modules/v2n/core-ownership.yaml).  A matched row with
+    NO `core:` key is not an error: the console's UART0_TXD0/UART0_RXD0
+    rows legitimately carry no `core:` attribution in
+    metadata/pinmux/v2n.yaml (see
     metadata/e1m_modules/v2n/core-ownership.yaml's own note on why
-    absence is never treated as "a55 by elimination"), so requiring
-    `core: "m33"` unconditionally would fail the console link.
+    absence is never treated as "a55 by elimination"), so requiring a
+    `core:` value unconditionally would fail the console link.
 
     Also cross-checks `brd_i2c.peer_address_7bit` against
     metadata/chips/gd32g553.yaml `i2c.default_address_7bit` -- the value
@@ -1457,7 +1461,8 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
                 if isinstance(sp, str) and isinstance(pad, str):
                     pads_by_pair.setdefault((sp, pad), []).append(row)
 
-    def _check_pair(sp: object, pad: object, where: str) -> None:
+    def _check_pair(sp: object, pad: object, where: str,
+                     expected_core: str = "m33") -> None:
         if not isinstance(sp, str) or not isinstance(pad, str):
             return  # already a schema-shape violation reported elsewhere
         matches = [r for r in pads_by_pair.get((sp, pad), [])
@@ -1469,11 +1474,11 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
                 f"metadata/pinmux/v2n.yaml (need exactly 1)")
             return
         core = matches[0].get("core")
-        if core is not None and core != "m33":
+        if core is not None and core != expected_core:
             msgs.append(
                 f"{where}: (silicon_peripheral={sp!r}, silicon_pad={pad!r}) "
                 f"resolves to a metadata/pinmux/v2n.yaml row with "
-                f"core={core!r}, expected \"m33\"")
+                f"core={core!r}, expected \"{expected_core}\"")
 
     _PAD_SHAPE = re.compile(r"^P([0-9])([0-9])$")
 
@@ -1501,15 +1506,26 @@ def _check_supervisor_links_cross_refs(supervisor_links_files) -> list:
     for link_name, link in sorted(links.items()):
         if not isinstance(link, dict):
             continue
+        # brd_i2c is Cortex-A55/Linux-exclusive (maintainer decision,
+        # metadata/e1m_modules/v2n/core-ownership.yaml) -- every other
+        # link here (gd32_spi, console) is CM33-side, hence "m33".
+        # Left as a name check, not derived from metadata/pinmux/v2n.yaml's
+        # own `core:` field per pin: this check's whole POINT is to catch
+        # supervisor-links.yaml drifting out of sync with that file, so
+        # deriving "expected" from the same file being cross-checked would
+        # make it tautological.  The link-name set is closed (this file's
+        # schema only ever defines gd32_spi / brd_i2c / console), so the
+        # hardcode is stable, not a maintenance trap.
+        expected_core = "a55" if link_name == "brd_i2c" else "m33"
         for pin in _dict_entries(link.get("pins")):
             sp, pad = pin.get("silicon_peripheral"), pin.get("silicon_pad")
-            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins")
+            _check_pair(sp, pad, f"supervisor_links.{link_name}.pins", expected_core)
             _check_pad_derivation(pad, pin.get("pfc_port"), pin.get("pfc_pin"),
                                    f"supervisor_links.{link_name}.pins")
         gcs = link.get("gpio_chip_select")
         if isinstance(gcs, dict):
             _check_pair(gcs.get("silicon_peripheral"), gcs.get("silicon_pad"),
-                        f"supervisor_links.{link_name}.gpio_chip_select")
+                        f"supervisor_links.{link_name}.gpio_chip_select", expected_core)
 
     brd_i2c = links.get("brd_i2c")
     if isinstance(brd_i2c, dict) and "peer_address_7bit" in brd_i2c:

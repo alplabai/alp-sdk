@@ -116,21 +116,22 @@ for a in "${APPS[@]}"; do
   if [ ! -f "$BD/zephyr/zephyr.bin" ]; then echo "SKIP: no zephyr.bin"; echo "$a : SKIP (no build)" >>"$SUM"; continue; fi
   # Flow D flash. `frc=0; ... || frc=$?` (NOT a bare `flog=$(...)`) so this
   # command substitution's exit status can never trip `set -e` (line 18):
-  # flash-jlink.sh now hard-exits 3 on a failed/missing verifybin (#1488),
-  # and under errexit a bare assignment would abort this whole strictly-
-  # serial batch at the FIRST bad verify -- muting the very diagnostic that
-  # was just captured into $flog (the echo below would never run) and never
-  # reaching the "BATCH SUMMARY" cat at the bottom. Reset frc every iteration.
+  # flash-jlink.sh hard-exits 3 on a failed read-back proof (#2233, replacing
+  # the old #1488 verifybin gate), and under errexit a bare assignment would
+  # abort this whole strictly-serial batch at the FIRST bad proof -- muting
+  # the very diagnostic that was just captured into $flog (the echo below
+  # would never run) and never reaching the "BATCH SUMMARY" cat at the
+  # bottom. Reset frc every iteration.
   frc=0
   flog=$(timeout 120 bash "$HERE/flash-jlink.sh" "${ATOC_UNQUERYABLE[@]}" "$BD" "$SIZE" 2>&1) || frc=$?
-  echo "$flog" | grep -iE "package:|Connecting to J-Link|Verify|FAILED|Could not connect|Programming flash" | head -6
+  echo "$flog" | grep -iE "package:|Connecting to J-Link|Verify|FAILED|Could not connect|Programming flash|PASS 0x|FAIL 0x|RACE DETECTED|DRY RUN" | head -6
   # The grep|head -6 above is a summary, and on a failure it is the WRONG six
   # lines: flash-jlink.sh displays up to 30 transcript lines of its own before
-  # it ever reaches the verify gate, so the gate's terminal diagnostic
-  # ("!! VERIFY FAILED ..." / "!! no verifybin success reported ...") is past
-  # the head cut and the operator sees a bare FLASH-UNVERIFIED label with none
-  # of the evidence. Dump the tail of the captured log whenever the child
-  # failed, before the summary line below.
+  # it ever reaches the proof gate, so the gate's terminal diagnostic
+  # ("!! READ-BACK PROOF FAILED ...") is past the head cut and the operator
+  # sees a bare FLASH-UNVERIFIED label with none of the evidence. Dump the
+  # tail of the captured log whenever the child failed, before the summary
+  # line below.
   if [ "$frc" -ne 0 ]; then
     echo "----- flash-jlink.sh tail (exit $frc) -----"
     printf '%s\n' "$flog" | tail -20
@@ -151,12 +152,37 @@ for a in "${APPS[@]}"; do
     echo ">> $a : FLASH-OK-READBACK-FAILED (flash+verify succeeded, post-boot console read did not)"
     echo "$a : FLASH-OK-READBACK-FAILED" >>"$SUM"; continue
     ;;
+  9)
+    echo ">> $a : FLASH-ABORTED (sector-pad prepare step failed -- alp-sdk#2233 plan/pre-read/build; nothing written)"
+    echo "$a : FLASH-ABORTED (sector-pad prepare failed)" >>"$SUM"; continue
+    ;;
+  10)
+    # FLOWD_DRY_RUN is a run-level setting (like exit 8's guard refusal
+    # below), not a per-app one -- if it's set, every remaining app would
+    # print the same "nothing written" result identically. Break, same
+    # reasoning as exit 8.
+    # alp-sdk#2233 review round 3, finding 4: "no probe opened" was false --
+    # each child's own DPIDR preflight already opened one (read-only) before
+    # its dry-run exit; only the write session is skipped.
+    echo ">> $a : FLASH-DRY-RUN (FLOWD_DRY_RUN is set -- nothing written, no write session run)"
+    echo "$a : FLASH-DRY-RUN (nothing written)" >>"$SUM"
+    echo "!! ABORTING BATCH: FLOWD_DRY_RUN is set for this run -- unset it to actually flash."
+    break
+    ;;
+  11)
+    echo ">> $a : FLASH-RACE-DETECTED (aborted, but the board HAS already been written and booted --"
+    echo "   restore from the paths flash-jlink.sh printed before trusting it)"
+    echo "$a : FLASH-RACE-DETECTED (restore before trusting)" >>"$SUM"; continue
+    ;;
   8)
     # bench_flowd_atoc_guard's refusal: no SE_UART and no --atoc-unqueryable
-    # (bench-env.sh). Unlike every other arm here this is a BATCH-level
-    # configuration refusal, not a per-app failure -- it is decided before
-    # any probe or target access, so it cannot differ between apps and every
-    # remaining entry would abort identically. Breaking out says so once
+    # (bench-env.sh). Like exit 10 above (alp-sdk#2233 review round 3,
+    # finding 10 -- an earlier version of this comment said "unlike every
+    # other arm here", which stopped being true the moment exit 10 also
+    # started breaking the batch), this is a BATCH-level configuration
+    # refusal, not a per-app failure -- it is decided before any probe or
+    # target access, so it cannot differ between apps and every remaining
+    # entry would abort identically. Breaking out says so once
     # instead of printing the same guard text N times and handing back a
     # summary that is 100% FLASH-REFUSED with no board ever written
     # (alp-sdk#2189). The already-processed entries keep their real verdicts

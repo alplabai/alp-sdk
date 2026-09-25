@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+
+sample:
+  name: camera-mjpeg-stream
+  description: |
+    Capture, JPEG-encode, and serve an MJPEG stream over HTTP
+    (multipart/x-mixed-replace) from a plain Zephyr BSD TCP socket.
+    native_sim has no camera and no Ethernet: it streams a synthetic
+    test-pattern frame through the portable software JPEG encoder and
+    proves the server end to end with an in-app loopback selftest over
+    127.0.0.1 (GET /snapshot.jpg's JPEG SOI/EOI markers, and GET
+    /stream's multipart boundary/header/CRLF framing).  Both
+    boards/native_sim.conf AND boards/native_sim_native_64.conf are
+    needed (content-identical) for the two platform_allow entries below
+    -- Zephyr's board-conf auto-apply resolves a different filename per
+    qualifier string, so no single file covers both `native_sim` and
+    `native_sim/native/64`.  The E1M-AEN target is a build-only scenario
+    -- see the AEN803 entry below and README.md for the real bench
+    numbers.
+
+tests:
+  alp_sdk.examples.camera_mjpeg_stream.native_sim:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    tags:
+      - alp-sdk
+      - example
+      - camera
+      - jpeg
+      - connectivity
+    build_only: false
+    harness: console
+    harness_config:
+      type: one_line
+      regex:
+        - "\\[camera-mjpeg-stream\\] selftest ok"
+
+  # Build-only regression for the real camera/JPEG/Ethernet pipeline on
+  # the E1M-AEN801/AEN803 (Ensemble E8, M55-HE) -- no camera or Ethernet
+  # HW in the CI runner, so this compile-checks the ISP + Hantro JPEG +
+  # interim Ethernet wiring the same way examples/aen/aen-ethernet-link's
+  # own scenario does. Needs both shields, same as
+  # examples/aen/aen-isp-ov5647-viewfinder's scenario.
+  alp_sdk.examples.camera_mjpeg_stream.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.
+
+  # Stage-A 1280x960 variant (issue #2286): 15 fps capture/encode,
+  # ~7.5 fps delivered (send-bound) -- see run 243 in README.md. AEN801
+  # and AEN803 are the same PCB/SoC (see overlay-1280x960.conf's own
+  # header), same build-only regression rationale as the scenario above:
+  # no camera/Ethernet HW in the CI runner, this compile-checks the
+  # resized ISP buffer pool + the raised JPEG cap.
+  alp_sdk.examples.camera_mjpeg_stream.aen_1280x960:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+      - EXTRA_CONF_FILE="boards/overlay-1280x960.conf"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - jpeg
+      - ethernet
+      - connectivity
+    build_only: true   # camera + Ethernet HW proof is a bench flash, not a CI run.

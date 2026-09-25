@@ -10,6 +10,24 @@ mpn_population:
 datasheet:
   primary:        "OV9281 datasheet Rev 1.06 (Oct 2017)"
 
+notes: |
+  This manifest describes the portable chip-ID stub (chips/ov9281/ov9281.c,
+  driver_status: stub above) used by the SDK's chip-manifest/backend
+  scaffolding -- it does not stream frames. The streaming Zephyr video
+  driver is zephyr/drivers/video/ov9281.c (ADR 0017 Tier-1.5, a port of the
+  Apache-2.0 Espressif esp-video-components esp_cam_sensor/sensors/ov9281
+  driver); see docs/camera-shields.md for its modes/controls.
+
+  That streaming driver supports exactly three modes, all GREY (RAW8 mono),
+  2 MIPI data lanes only (the sensor supports 1-2 lanes -- see
+  mipi.lanes_supported's [1, 2] below -- the driver uses 2):
+  640x400 @100 fps and 1280x720 @50 fps (Espressif's own tables), and
+  1280x800 @~100 fps (this manifest's resolutions.max -- the sensor's full
+  array; Alp-authored, derived from the 1280x720 table). All three are
+  bench-verified per verification.hil_silicon below, each running at its
+  configured rate. resolutions/mipi below describe the sensor's silicon
+  capability, not a driver-mode enumeration.
+
 bus:              i2c
 i2c:
   addresses:
@@ -60,7 +78,17 @@ families:
   - imx93
 
 verification:
-  hil_silicon:    untested        # paper-correct only until v1.0 verification sweep.
+  hil_silicon:    verified          # BENCH-VERIFIED 2026-09-21 on E1M-AEN803
+                                    # (E1M-EVK J5, innomaker_cam_ov9281 shield,
+                                    # via a P/N-crossing adapter): all three
+                                    # GREY8 modes (640x400, 1280x720,
+                                    # 1280x800) stream real frames over
+                                    # zephyr/drivers/video/ov9281.c, not this
+                                    # manifest's chip-ID stub (driver_status
+                                    # above), each at its configured frame
+                                    # rate (measured 60-frame bursts: ~100,
+                                    # ~50, ~100 fps); the sensor test pattern
+                                    # is also verified in all three modes.
   smoke_tests:    null_arg_guard
 
 physical:

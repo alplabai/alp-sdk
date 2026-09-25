@@ -185,7 +185,10 @@ Expected: PHYID1 reads `0x001C` (Realtek OUI).  After ~3-5 s with a
 
 ## 6. Sanity-check the rest of the on-module fleet
 
-* **RV-3028-C7** (RTC): set wall-clock, read back, confirm tick.
+* **RV-3028-C7** (RTC): `/dev/rtc0` on Linux (`hwclock -r`), not the CM33
+  -- CA55/Linux is now the sole master of RIIC8/BRD_I2C end to end; see
+  [`docs/soms/v2n.md`](soms/v2n.md#real-time-clock). Set wall-clock, read
+  back, confirm tick.
 * **OPTIGA Trust M**: issue an I2C connectivity-probe (full APDU
   command set is v0.3.x follow-up).
 * **TMP112**: read the temperature; should be within

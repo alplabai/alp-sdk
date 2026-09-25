@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# twister coverage for the two Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers
+# (ov5647.c, ov9281.c) on native_sim. OV9281 and OV5647 each get a real runtime ztest
+# (ov9281_test.c / ov5647_test.c) against their own I2C emulator (ov9281_emul.c /
+# ov5647_emul.c) on native_sim's actual "zephyr,i2c-emul-controller" bus. The OV5647 suite
+# locks in the lane-park fix from issue #2248. Mirrors upstream's
+# tests/drivers/sensor/ina237 for the emulator/ztest shape.
+
+common:
+  tags:
+    - alp-sdk
+    - video
+    - camera
+
+tests:
+  alp_sdk.video.rpi_csi2_sensors:
+    platform_allow:
+      - native_sim
+      - native_sim/native/64
+    integration_platforms:
+      - native_sim/native/64
+    min_ram: 32

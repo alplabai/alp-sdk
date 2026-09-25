@@ -14,7 +14,7 @@ aen-adc-regcheck
 aen-dac-regcheck
 aen-qenc-readout
 aen-sdhc-probe
-aen-camera-regcheck
+aen-camera-firstlight
 aen-isp-regcheck
 aen-npu-ethosu-regcheck
 aen-npu-ethosu55-regcheck

@@ -1,0 +1,221 @@
+diff --git a/drivers/isp/isp_wrapper/inc/isp_param_conf.h b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+index db9a09f..17260ca 100644
+--- a/drivers/isp/isp_wrapper/inc/isp_param_conf.h
++++ b/drivers/isp/isp_wrapper/inc/isp_param_conf.h
+@@ -147,6 +147,127 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 				.tolerance = 1,
+ 				.initColorTemp = 5000,
+ 				.calibParam = {
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647)
++					/*
++					 * alp-sdk (Alp Lab AB): OV5647 AWB calibration,
++					 * derived from Raspberry Pi libcamera's own
++					 * manufacturer-side tuning file
++					 * (src/ipa/rpi/vc4/data/ov5647.json, BSD-2-Clause,
++					 * github.com/raspberrypi/libcamera) -- Alif's stock
++					 * table above is ARX3A0's, a different sensor's
++					 * silicon, and produces the magenta cast bench run
++					 * 140 measured (ceiling white -> RGB mean
++					 * [195, 109, 247], AWB converged to rGain 0x19e
++					 * bGain 0x26a). This library works in white-balance
++					 * GAIN space (gain = 1/(R/G), 1/(B/G)), so every
++					 * value below is the RPi ct_curve's (R/G, B/G) ratio
++					 * inverted, not transcribed directly. Cross-checked
++					 * against the untouched ARX3A0 table above: its own
++					 * rgParam*gR + bgParam*gB = distParam * 1e6 relation
++					 * holds for ARX3A0's A/D50/D65 illuminant gains, so
++					 * the same derivation was applied to OV5647's.
++					 * wpRange0/wpRange1's dist widths (+-100000 /
++					 * +-200000, both curves sharing rg) are a starting
++					 * heuristic carried over from RPi's own
++					 * transverse_pos/transverse_neg shape (that JSON has
++					 * no direct equivalent of this library's two-curve
++					 * wpRange encoding) -- a bench WB pass may want to
++					 * retune these two widths specifically.
++					 *
++					 * Module fit (bench runs 159/162, INNO-MAKER
++					 * CAM-OV5647 on an E1M-AEN803): with the RPi curve
++					 * AWB settled on the curve's own 4540 K point
++					 * (rGain 0x15a, bGain 0x15c) while the post-gain WBM
++					 * means (R 100, G 77, B 99) showed this module's raw
++					 * R/G and B/G ~1.3x the RPi reference (a neutral
++					 * ceiling came out magenta). Every gain below is the
++					 * RPi-derived one scaled by kR = 0.770, kB = 0.778
++					 * (illuminant gains, rgMin/rgMax and the rg grid by
++					 * kR; centLine re-derived for the scaled axes and
++					 * renormalised). Run 162: WBM post-gain R 88 G 86
++					 * B 85, centre of a neutral ceiling RGB [121 126
++					 * 140]. PROVISIONAL: fitted to one scene under one
++					 * illuminant; replace with a grey-card calibration
++					 * under at least two illuminants.
++					 */
++					.centLine = {-881824, -471580, -1441613},
++					.rgMin = 710953,
++					.rgMax = 1329551,
++					.wpRange0 = {
++						.wpLCurve = {
++							.rg = { 710953, 752193, 793433, 834673,
++								875913, 917153, 958393, 999632,
++								1040872, 1082112, 1123352, 1164592,
++								1205832, 1247072, 1288311,
++								1329551 },
++							.dist = { 100000, 100000, 100000, 100000,
++								100000, 100000, 100000, 100000,
++								100000, 100000, 100000, 100000,
++								100000, 100000, 100000, 100000 },
++						},
++						.wpRCurve = {
++							.rg = { 710953, 752193, 793433, 834673,
++								875913, 917153, 958393, 999632,
++								1040872, 1082112, 1123352, 1164592,
++								1205832, 1247072, 1288311,
++								1329551 },
++							.dist = { -100000, -100000, -100000, -100000,
++								-100000, -100000, -100000, -100000,
++								-100000, -100000, -100000, -100000,
++								-100000, -100000, -100000, -100000 },
++						},
++					},
++					.wpRange1 = {
++						.wpLCurve = {
++							.rg = { 710953, 752193, 793433, 834673,
++								875913, 917153, 958393, 999632,
++								1040872, 1082112, 1123352, 1164592,
++								1205832, 1247072, 1288311,
++								1329551 },
++							.dist = { 200000, 200000, 200000, 200000,
++								200000, 200000, 200000, 200000,
++								200000, 200000, 200000, 200000,
++								200000, 200000, 200000, 200000 },
++						},
++
++						.wpRCurve = {
++							.rg = { 710953, 752193, 793433, 834673,
++								875913, 917153, 958393, 999632,
++								1040872, 1082112, 1123352, 1164592,
++								1205832, 1247072, 1288311,
++								1329551 },
++							.dist = { -200000, -200000, -200000, -200000,
++								-200000, -200000, -200000, -200000,
++								-200000, -200000, -200000, -200000,
++								-200000, -200000, -200000, -200000 },
++						},
++					},
++					.illuminant[ILLUMINANT_A] = {
++						.illuType = ILLUMINANT_A,
++						.colorTemp = 2856,
++						.wbGain = { 0xd1, 0x100, 0x100, 0x185 },
++					},
++					.illuminant[ILLUMINANT_TL84] = {
++						.illuType = ILLUMINANT_TL84,
++						.colorTemp = 4000,
++						.wbGain = { 0xfb, 0x100, 0x100, 0x128 },
++					},
++					.illuminant[ILLUMINANT_CWF] = {
++						.illuType = ILLUMINANT_CWF,
++						.colorTemp = 4100,
++						.wbGain = { 0xff, 0x100, 0x100, 0x122 },
++					},
++					.illuminant[ILLUMINANT_D50] = {
++						.illuType = ILLUMINANT_D50,
++						.colorTemp = 5000,
++						.wbGain = { 0x117, 0x100, 0x100, 0xfb },
++					},
++					.illuminant[ILLUMINANT_D65] = {
++						.illuType = ILLUMINANT_D65,
++						.colorTemp = 6500,
++						.wbGain = { 0x12e, 0x100, 0x100, 0xde },
++					},
++#else /* ARX3A0 (Alif's stock calibration, unchanged) */
+ 					.centLine = {-766376, -642393, -2921800},
+ 					.rgMin = 1086700,
+ 					.rgMax = 3050800,
+@@ -225,6 +346,7 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 						.colorTemp = 6500,
+ 						.wbGain = { 0x286, 0x100, 0x100, 0x15E },
+ 					},
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647) */
+ 				},
+ 			},
+ 		},
+@@ -283,6 +405,72 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 				.bOffset = 0,
+ 			},
+ 			.autoAttr = {
++#if defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647)
++				/*
++				 * alp-sdk (Alp Lab AB): OV5647 CCMs, interpolated by
++				 * colour temperature from Raspberry Pi libcamera's
++				 * own ov5647.json (src/ipa/rpi/vc4/data/ov5647.json,
++				 * BSD-2-Clause) at this table's five illuminants.
++				 * Fixed-point 128 = 1.0 (matches this struct's own
++				 * scale, see the ARX3A0 rows this replaces); every row
++				 * sums to 128 by construction.
++				 */
++				.illuminantCCM[ILLUMINANT_A] = {
++					.colorTemp = 2856,
++					.colorMatrix = {
++						241, -34, -79,
++						-82, 271, -61,
++						-17, -128, 273
++					},
++					.rOffset = 0,
++					.gOffset = 0,
++					.bOffset = 0,
++				},
++				.illuminantCCM[ILLUMINANT_TL84] = {
++					.colorTemp = 4000,
++					.colorMatrix = {
++						255, -60, -67,
++						-70, 256, -58,
++						-15, -94, 237
++					},
++					.rOffset = 0,
++					.gOffset = 0,
++					.bOffset = 0,
++				},
++				.illuminantCCM[ILLUMINANT_CWF] = {
++					.colorTemp = 4100,
++					.colorMatrix = {
++						255, -61, -66,
++						-70, 257, -59,
++						-14, -93, 235
++					},
++					.rOffset = 0,
++					.gOffset = 0,
++					.bOffset = 0,
++				},
++				.illuminantCCM[ILLUMINANT_D50] = {
++					.colorTemp = 5000,
++					.colorMatrix = {
++						261, -70, -63,
++						-65, 254, -61,
++						-13, -82, 223
++					},
++					.rOffset = 0,
++					.gOffset = 0,
++					.bOffset = 0,
++				},
++				.illuminantCCM[ILLUMINANT_D65] = {
++					.colorTemp = 6500,
++					.colorMatrix = {
++						271, -72, -71,
++						-63, 263, -72,
++						-17, -75, 220
++					},
++					.rOffset = 0,
++					.gOffset = 0,
++					.bOffset = 0,
++				},
++#else /* ARX3A0 (Alif's stock calibration, unchanged) */
+ 				.illuminantCCM[ILLUMINANT_A] = {
+ 					.colorTemp = 2856,
+ 					.colorMatrix = {
+@@ -338,6 +526,7 @@ static ISP_CALIB_DATA_S isp_calib_param = {
+ 					.gOffset = 0,
+ 					.bOffset = 0,
+ 				},
++#endif /* defined(CONFIG_VIDEO_ISP_VSI_CALIB_OV5647) */
+ 			},
+ 		},
+ #endif /* defined(CONFIG_ISP_LIB_CCM_MODULE) */

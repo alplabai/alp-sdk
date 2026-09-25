@@ -1,0 +1,39 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Build-only regression (in CI) for the real-sensor ISP-Pico capture path
+# (sensor -> csi -> cam -> isp -> memory) on the E1M-AEN801/AEN803 (Ensemble
+# E8, M55-HE).  CI only compile-checks the driver + DT graph -- there is no
+# silicon in the runner -- but this image is a real bench capture on the
+# actual hardware with a real OV5647 sensor through the ISP: see src/main.c.
+#
+# Filtered OUT of the native_sim PR gate (platform_allow = the AEN801 +
+# AEN803 HE boards).  Needs BOTH shields, same as
+# aen-camera-firstlight's raspberry_pi_camera_module_1 scenario.
+
+sample:
+  name: aen-isp-ov5647-capture
+  description: |
+    Bench RAM-run real-sensor ISP-Pico capture for the E1M-AEN801/803 (Alif
+    Ensemble E8, Cortex-M55-HE): OV5647 -> CSI-2 -> CPI -> ISP-Pico ->
+    memory, mirroring Alif's own sdk-alif samples/drivers/viewfinder recipe
+    (SBGGR10P INPUT, YUV420 OUTPUT, DMSC+CSM+SCALAR+WB+WBM+AE+EXPOSUREM+
+    GAMMAOUT+CCM), with AE + AWB driven through the standard Zephyr video
+    ctrl registry.  CI only proves the build; on real hardware it streams
+    30 real sensor frames through the ISP's MI DMA (IRQ 368) to a CRC32'd
+    SRAM0 buffer.
+
+tests:
+  alp_sdk.examples.aen.isp_ov5647_capture.aen:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_camera_module_1"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - isp
+      - video
+      - camera
+    build_only: true   # the ISP-Pico+sensor build check is a bench flash, not a CI run.

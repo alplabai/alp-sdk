@@ -56,12 +56,6 @@ config ALP_TFLM_ETHOS_U65
 	  N93-specific driver shim that complements this kernel-level
 	  knob.
 
-config ALP_TFLM_DRP_AI
-	bool "TFLite-Micro on Renesas DRP-AI NPU"
-	depends on ALP_SOC_RENESAS_RZV2N_N44
-	help
-	  Compile TFLite-Micro kernels against the Renesas DRP-AI3 NPU.
-
 config ALP_TFLM_HELIUM
 	bool "TFLite-Micro CMSIS-NN with Helium MVE (Cortex-M55)"
 	depends on ALP_SOC_ALIF_ENSEMBLE_E3 || ALP_SOC_ALIF_ENSEMBLE_E4 || \

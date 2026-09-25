@@ -98,6 +98,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
@@ -126,6 +127,7 @@ on:
     branches: [main, dev]
     paths:
       - 'examples/aen/**'
+      - 'examples/connectivity/camera-mjpeg-stream/**'
       - 'examples/connectivity/firmware-update-log/**'
       - 'examples/connectivity/iot-fleet-ota/**'
       - 'examples/connectivity/mqtt-telemetry/**'
@@ -170,7 +172,7 @@ jobs:
     # and the 41min job ceiling below, so neither was tightened; a
     # job-level timeout tighter than the shared 41min ceiling would need
     # its own re-derivation per SKU for a margin that headroom does not
-    # need yet. The current scenario count across all eight testsuite
+    # need yet. The current scenario count across all nine testsuite
     # roots this job now spans is measured in the twister step's own
     # comment below.
     strategy:
@@ -358,7 +360,7 @@ jobs:
       # here. The --testsuite-root list below is scoped to examples/aen --
       # plus the bounded roots enumerated below; the testcase.yaml files
       # whose platform_allow names an AEN target are the entire point;
-      # nothing outside these eight roots is in scope for this job.
+      # nothing outside these nine roots is in scope for this job.
       # examples/connectivity/firmware-update-log is a second,
       # bounded root (issue #1101): at #1101 it was the one non-examples/aen
       # example with AEN801 platform_allow entries, kept as its own
@@ -397,8 +399,24 @@ jobs:
       # matrix leg and select nothing on the AEN803 one -- these two apps
       # have no AEN803 coverage, and #2209's per-SKU declaration sweep did
       # not reach them (they sit outside examples/aen).
+      # examples/connectivity/camera-mjpeg-stream is the sixth bounded root
+      # (issue #2265): before this, its AEN801/AEN803 build-only scenario
+      # (real camera + Hantro JPEG + interim Ethernet, needing both the
+      # e1m_evk_rpi_csi carrier shield and raspberry_pi_camera_module_1)
+      # never ran in CI at all -- nothing in this repo's CI selected an AEN
+      # board target for it, so a regression in that pipeline would only
+      # surface on the next real bench flash. Same shape as the roots
+      # above: one example, bounded, build_only, not widened to any other
+      # directory. `--dry-run` against this job's full root list, before
+      # vs. after adding this root: +1 AEN801 configuration (83 -> 84),
+      # +1 AEN803 configuration (78 -> 79) -- one testcase.yaml scenario
+      # with a two-entry platform_allow. NOT reconciled against the two
+      # older total counts above/below this step (153/144) -- both
+      # already predate this addition by an amount this change did not
+      # introduce (neither matches this measurement's own 83+78=161
+      # baseline either, so the drift is pre-existing, not new here).
       # examples/peripheral-io/alp-console, .../blink and .../pwm-led-fade
-      # are the sixth, seventh and eighth bounded roots (issue #2235, the
+      # are the seventh, eighth and ninth bounded roots (issue #2235, the
       # unlanded remainder of closed PR #2232). None of the three shipped
       # an AEN803 boards/ overlay on dev -- each had only its AEN801
       # boards/ files (blink and pwm-led-fade shipped HE + HP AEN801
@@ -414,7 +432,7 @@ jobs:
       # four examples (this trio plus drone-autopilot above), not widened to
       # all of examples/peripheral-io/ -- every OTHER example there stays
       # native_sim-only (see #2106).
-      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + alp-console + blink + pwm-led-fade
+      - name: twister · ${{ matrix.label }} on examples/aen + firmware-update-log + drone-autopilot + mqtt-telemetry + iot-fleet-ota + camera-mjpeg-stream + alp-console + blink + pwm-led-fade
         working-directory: ${{ github.workspace }}
         env:
           ZEPHYR_BASE: ${{ github.workspace }}/zephyr
@@ -425,20 +443,27 @@ jobs:
         # 41min ceiling (see that job-level comment). Before #2235, dev
         # built 80 AEN801 + 75 AEN803 configurations across the five
         # testsuite roots dev's workflow ran (CI run 35436368459; the
-        # AEN801 leg took 1179.76s for those 80 builds; an eight-root
-        # --dry-run on dev gives the same 80/75, because the three new
-        # roots had no AEN scenario). #2235 adds 5 AEN801 and 6 AEN803
-        # configurations -- the sixth AEN803 one is drone-autopilot's new
-        # AEN803 M55-HP target (see that root's own paragraph above) --
-        # bringing the count to 85 AEN801 + 81 AEN803 (166 total), measured
-        # at #2235 with `twister --dry-run` over all eight roots. Scaling
-        # the AEN801 leg's measured 1179.76s/80-build rate linearly
-        # projects to about 1250s for 85 builds, still comfortably under
-        # this 30min cap; the AEN803 leg's own measured rate (693.43s/75
-        # builds, CI run 35436368459) projects to about 750s for 81
-        # builds, also comfortably under this cap, but revisit with a
-        # fresh `--dry-run` if a future scenario count pushes either leg
-        # close to it.
+        # AEN801 leg took 1179.76s for those 80 builds). #2235 (this PR)
+        # added the alp-console/blink/pwm-led-fade trio, and #2265
+        # (already on dev) separately added camera-mjpeg-stream, bringing
+        # the testsuite-root list to the nine above. A fresh `twister
+        # --dry-run` over this MERGED nine-root list (Zephyr v4.4.1, this
+        # repo's pin) measures 90 AEN801 + 86 AEN803 (176 total)
+        # configurations -- higher than a naive 85+81 (#2235 alone) or
+        # 86+82 (#2235 plus #2265's own +1/+1 dry-run delta) arithmetic
+        # would suggest, because further scenarios landed on dev between
+        # those two PRs and this merge. 90/86 is a real measurement of the
+        # merged tree, not a sum of the two PRs' individually-claimed
+        # deltas -- do not re-derive it by addition again without rerunning
+        # `--dry-run`. Scaling the AEN801 leg's last CI-measured rate
+        # (1179.76s/80 builds, CI run 35436368459) linearly projects to
+        # about 1330s/22.2min for 90 builds, still comfortably under this
+        # 30min cap; the AEN803 leg's own last-measured rate (693.43s/75
+        # builds, same CI run) projects to about 795s/13.3min for 86
+        # builds, also comfortably under this cap -- both projections are
+        # arithmetic off an OLDER CI timing sample, not a fresh timed run,
+        # so revisit with a real in-CI run if a future scenario count
+        # pushes either leg close to the cap.
         timeout-minutes: 30
         run: |
           python3 zephyr/scripts/twister \
@@ -448,6 +473,7 @@ jobs:
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/drone-autopilot" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/mqtt-telemetry" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/iot-fleet-ota" \
+            --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/connectivity/camera-mjpeg-stream" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/alp-console" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/blink" \
             --testsuite-root "$GITHUB_WORKSPACE/alp-sdk/examples/peripheral-io/pwm-led-fade" \
