@@ -42,20 +42,55 @@ Per-SKU populated parts: [`metadata/e1m_modules/E1M-V2N10{1,2,3}.yaml`](../../me
 
 ## Real-time clock
 
-The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is disabled in the SoM
-devicetree (`&rtc { status = "disabled"; };` in
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi`): no
-32.768 kHz crystal is fitted on this SoM (schematic crystal DNP), so
-probing it just times out. The on-module RV-3028-C7 is the RTC of
-record instead, bound as `/dev/rtc0` (kernel `rtc-rv3028`,
-`CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date` from userspace. **CA55
-(Linux) is the sole master of the whole RIIC8/BRD_I2C bus** the RTC and
-every other BRD_I2C device sit on
+The on-module RV-3028-C7 is the RTC of record, bound as `/dev/rtc0`
+(kernel `rtc-rv3028`, `CONFIG_RTC_DRV_RV3028=y`) -- use `hwclock`/`date`
+from userspace. **CA55 (Linux) is the sole master of the whole
+RIIC8/BRD_I2C bus** the RTC and every other BRD_I2C device sit on
 (`metadata/e1m_modules/v2n/core-ownership.yaml`); the CM33 must never
 issue I2C transactions there. No `trickle-resistor-ohms` is configured
 (the RV-3028-C7's VBACKUP/backup-cap wiring isn't confirmed on this
 SoM's schematic) and the alarm INT line isn't wired to a kernel
 interrupt yet -- both are open follow-ups.
+
+The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is a second, SoC-internal
+timebase and is enabled in the SoM devicetree (`&rtc` in
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi`).
+RTXIN has no discrete 32.768 kHz crystal -- it is fed by the SE1 output
+of the clock generator, and U-Boot must correct that output to
+32.768 kHz on every boot before Linux probes `&rtc`; see the
+clock-generator fixup section below for the mechanism and why a stale
+build would see this RTC time out instead. `&rtc` probes before
+`rv3028` and is pinned to `/dev/rtc1` (`rtc1` alias) so `rv3028` keeps
+`/dev/rtc0` -- see `e1m-v2n-som.dtsi`'s `aliases` block.
+
+## On-module clock-generator fixup {#on-module-clock-generator-fixup}
+
+The on-module 5L35023B programmable clock generator (RIIC8/BRD_I2C,
+`0x69`) ships an OTP image whose single-ended output routing is wrong
+for this SoM:
+
+| Output | Feeds                                    | As-shipped (wrong) | Corrected |
+|--------|-------------------------------------------|---------------------|-----------|
+| SE1    | SoC RTXIN (RTCA-3) + the Wi-Fi module's 32k LPO input | 24.576 MHz | 32.768 kHz |
+| SE3    | On-module audio clock                      | 22.5792 MHz         | 24.576 MHz |
+
+Bench-confirmed (2026-09-24): with the as-shipped OTP values, the SoC
+RTC fails to start (`error -ETIMEDOUT: Failed to setup the RTC!`). Two
+volatile register writes fix it (register `0x24`: SE1 DCO select;
+register `0x21`: SE3 source select); after them the SoC RTC counts at
+32.768 kHz. Both registers are OTP-shadow registers -- the writes take
+effect immediately but **revert on power-cycle** (the OTP itself cannot
+be re-burned in-system) -- so U-Boot applies them on **every** boot,
+early in `board_late_init()`, before the DEEPX rail sequencing step and
+before Linux starts
+(`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch`).
+The fixup only writes when both registers read the exact as-shipped
+values; any other readback (already fixed, a differently configured
+part, or a communication error) is left untouched and only logged.
+
+This is a runtime workaround. **Production builds should instead use a
+Renesas factory dash code that carries the corrected OTP image**,
+removing the need for the U-Boot fixup entirely.
 
 ## Reach the GD32 supervisor
 
@@ -146,6 +181,7 @@ See [`examples/README.md`](../../examples/README.md).
 | `gd32g553_init` returns `ALP_ERR_NOSUPPORT`   | Firmware major version mismatch; reflash bridge firmware from matching commit.               |
 | `da9292_v2n_m1_enable_deepx_rail` -> TIMEOUT  | This call is V2N-M1 only -- the V2N base SoM doesn't have a DEEPX load.                       |
 | Ethernet PHY ID reads `0x0000`                | Wrong PHY address; check strap on schematic (default `0x00` after reset).                     |
+| SoC RTC (`&rtc`) fails to probe, `-ETIMEDOUT` | The on-module clock-generator fixup didn't apply (old/bypassed U-Boot). See [On-module clock-generator fixup](#on-module-clock-generator-fixup) above. |
 
 Full list: [`docs/troubleshooting.md`](../troubleshooting.md).
 

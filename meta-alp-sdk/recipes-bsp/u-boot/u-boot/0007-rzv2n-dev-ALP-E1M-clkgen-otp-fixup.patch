@@ -1,0 +1,259 @@
+From 49a63df988ca56b6f1e13fb814902589e6d03cf4 Mon Sep 17 00:00:00 2001
+From: Alp Lab AB <contact@alplab.ai>
+Date: Thu, 24 Sep 2026 21:40:00 +0200
+Subject: [PATCH] rzv2n-dev: ALP E1M fix the on-module 5L35023B clock
+ generator's SE1/SE3 OTP routing
+
+The on-module Renesas 5L35023B programmable clock generator (RIIC8 /
+BRD_I2C, 7-bit 0x69) ships an OTP image whose single-ended output
+routing is wrong for this SoM: SE1 (feeds the SoC RTXIN and the Wi-Fi
+module's 32k LPO input) comes up at 24.576 MHz instead of 32.768 kHz,
+and SE3 (audio clock) comes up at 22.5792 MHz instead of 24.576 MHz.
+
+Bench-confirmed (E1M-V2M103 board #1, 2026-09-24): with the OTP
+defaults, the SoC RTC (RTCA-3) fails to start --
+"error -ETIMEDOUT: Failed to setup the RTC!" -- because it is fed
+24.576 MHz where it expects 32.768 kHz. Two volatile register writes
+fix it (5L35023B datasheet register map, "Byte 36: SE1 and DIV4
+control" = reg 0x24, "Byte 33: SE3 and DIFF1 Control Register" = reg
+0x21):
+
+  reg 0x24: 0x9c -> 0x8e   clears bit4 SE1_Freerun_32K (0 = SE1 from
+                            the 32.768 kHz DCO, was free-running) and
+                            sets bit1 DIV4_CH3_EN (DIV4 channel 3
+                            output enabled); bit7 I2C_PDB, bit3
+                            SE1_CLKSEL1, bit2 REF_EN and bit0
+                            DIV4_CH2_EN are unchanged.
+  reg 0x21: 0x80 -> 0xc0   sets bit6 SE3_CLKSEL1 (SE3 from DIV4 =
+                            PLL2 122.88/5 = 24.576 MHz, was DIV2);
+                            every other bit, including both
+                            DIFF1_CMOS2_FLIP/DIFF2_CMOS2_FLIP bits, is
+                            unchanged. Neither write touches the
+                            separate DIFF1/DIFF2 registers (0x22/0x23).
+
+With them the SoC RTC counts at 32.768 kHz (bench-verified against an
+NTP-slewed reference, ~+/-100 ppm). Both registers are OTP-shadow
+registers: the writes take effect immediately but REVERT ON POWER
+CYCLE (the OTP itself cannot be re-burned in-system), so this must run
+on every boot, not once -- production should instead use a Renesas
+factory dash code that carries the corrected OTP image.
+
+alp_clk5l_fixup() runs first in board_late_init(), ahead of and
+independent of alp_deepx_rail_bringup() -- the clock generator is
+present on every V2N/V2M SoM (not gated to DEEPX-populated V2M units),
+and the SoC RTC / Wi-Fi LPO it restores have nothing to do with DEEPX
+sequencing, so there is no reason to make one wait on the other.
+
+Guarded to single-byte reads only, matching the constraint the
+meta-alp-sdk 0005/0006 patches document for this RIIC family (a
+multi-byte read from 0x69 loses bits from the vendor rzg2l_riic
+driver). Before writing anything, reg 0x00 (General Control) must read
+0xa0 -- OTP-burned, I2C_addr[1:0]=01 (7-bit 0x69). reg 0x24 and reg
+0x21 are then each handled independently, in that order: OTP value ->
+write the fix and read it back; already the fixed value -> skip;
+anything else -> warn and stop without writing. Handling them
+independently (instead of requiring both to read the as-shipped pair
+before either is touched) means a previously half-applied run -- 0x24
+already fixed, 0x21 still OTP, e.g. from an interrupted boot -- is
+recognised and completed instead of being reported as "unexpected" and
+left stuck half-applied. If 0x24's write/readback fails, 0x21 is never
+touched. Each write is read back before the next register is touched;
+no other register is ever written.
+
+Signed-off-by: Alp Lab AB <contact@alplab.ai>
+---
+ board/renesas/rzv2n-dev/rzv2n-dev.c | 177 +++++++++++++++++++++++++++-
+ 1 file changed, 176 insertions(+), 1 deletion(-)
+
+diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
+index dbd6d1d23..fd4e8e1f7 100644
+--- a/board/renesas/rzv2n-dev/rzv2n-dev.c
++++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
+@@ -708,11 +708,186 @@ static bool alp_deepx_rail_bringup(void)
+ 	return true;
+ }
+ 
++/*
++ * ALP V2N-family: fix up the on-module Renesas 5L35023B programmable clock
++ * generator's single-ended output routing.  The OTP image these parts
++ * ship with is wrong for this SoM: SE1 (feeds the SoC RTXIN and the
++ * Wi-Fi module's 32k LPO input) comes up at 24.576 MHz instead of
++ * 32.768 kHz, and SE3 (audio clock) comes up at 22.5792 MHz instead of
++ * 24.576 MHz -- bench-confirmed on E1M-V2M103 board #1, 2026-09-24: the
++ * SoC RTC (RTCA-3) failed to start ("Failed to setup the RTC!",
++ * -ETIMEDOUT) until the two writes below were applied, after which it
++ * counted at 32.768 kHz.  Two volatile register writes fix it (reg 0x24:
++ * SE1 DCO select, reg 0x21: SE3 source select); both take effect
++ * immediately and REVERT ON POWER-CYCLE -- the OTP itself cannot be
++ * re-burned in-system -- so this must run on every boot, not once.
++ *
++ * The clock generator is present on every V2N/V2M SoM (not gated to
++ * DEEPX-populated V2M units the way alp_deepx_rail_bringup() is), so
++ * this runs unconditionally for the whole rzv2n-family. Called first in
++ * board_late_init(), ahead of and independent of the DEEPX rail step
++ * below -- the SoC RTC and the Wi-Fi LPO this restores have nothing to
++ * do with DEEPX sequencing.
++ *
++ * Guarded to single-byte reads only (multi-byte RIIC reads on this family
++ * lose bits -- see the meta-alp-sdk 0005/0006 patches) and to writing
++ * ONLY these two registers, and ONLY when both currently hold the exact
++ * as-shipped OTP values -- General Control (reg 0x00) must also read the
++ * expected OTP-burned/addr-0x69 value first.  Any other readback (already
++ * fixed, a differently configured dash code, or a communication error)
++ * is left untouched and only reported -- never written.
++ */
++
++#define ALP_CLK5L_I2C_BUS  8		/* DM I2C bus number for RIIC8 / BRD_I2C */
++#define ALP_CLK5L_I2C_ADDR 0x69	/* 7-bit; matches CLK_5L35023B_I2C_ADDR_DEFAULT in alp-sdk */
++
++#define CLK5L_REG_GENERAL_CTRL   0x00
++#define CLK5L_REG_SE3_CTRL       0x21
++#define CLK5L_REG_SE1_DIV4_CTRL  0x24
++
++/* General Control: OTP-burned + I2C_addr[1:0]=01 (7-bit 0x69). */
++#define CLK5L_GENERAL_CTRL_WANT 0xA0
++
++/*
++ * Per-bit meaning of the two writes below (5L35023B datasheet register
++ * map, "Byte 36: SE1 and DIV4 control" = reg 0x24, "Byte 33: SE3 and
++ * DIFF1 Control Register" = reg 0x21):
++ *
++ *   reg 0x24  0x9c (1001_1100) -> 0x8e (1000_1110)
++ *     bit 7 I2C_PDB        1 -> 1  unchanged (chip powered, not down)
++ *     bit 6 Ref_free_run   0 -> 0  unchanged
++ *     bit 5 free_run_output_config
++ *                          0 -> 0  unchanged
++ *     bit 4 SE1_Freerun_32K
++ *                          1 -> 0  CHANGED: 0 = SE1 sourced from the
++ *                                  32.768 kHz DCO (was free-running)
++ *     bit 3 SE1_CLKSEL1    1 -> 1  unchanged
++ *     bit 2 REF_EN         1 -> 1  unchanged
++ *     bit 1 DIV4_CH3_EN    0 -> 1  CHANGED: DIV4 channel 3 output enabled
++ *     bit 0 DIV4_CH2_EN    0 -> 0  unchanged
++ *
++ *   reg 0x21  0x80 (1000_0000) -> 0xc0 (1100_0000)
++ *     bit 7 SE3_Freerun_32K
++ *                          1 -> 1  unchanged
++ *     bit 6 SE3_CLKSEL1    0 -> 1  CHANGED: SE3 sourced from DIV4
++ *                                  (was DIV2) -- DIV4 = PLL2/5 = 24.576 MHz
++ *     bit 5 VDD3_SEL[1]    0 -> 0  unchanged
++ *     bit 4 VDD3_SEL[0]    0 -> 0  unchanged
++ *     bit 3 SE3_SLEW       0 -> 0  unchanged
++ *     bit 2 DIFF_PDBHiZEN  0 -> 0  unchanged
++ *     bit 1 DIFF1_CMOS2_FLIP
++ *                          0 -> 0  unchanged
++ *     bit 0 DIFF2_CMOS2_FLIP
++ *                          0 -> 0  unchanged
++ *
++ * Neither write touches a DIFF1 or DIFF2 register (those are the
++ * SEPARATE Byte 34/35 registers, reg 0x22/0x23 -- untouched here); reg
++ * 0x21's own DIFF1_CMOS2_FLIP/DIFF2_CMOS2_FLIP bits (1/0) are also
++ * unchanged.
++ */
++#define CLK5L_SE1_DIV4_CTRL_OTP  0x9C	/* as-shipped: SE1 = 24.576 MHz (wrong) */
++#define CLK5L_SE1_DIV4_CTRL_WANT 0x8E	/* fixed: SE1 = 32.768 kHz DCO */
++#define CLK5L_SE3_CTRL_OTP       0x80	/* as-shipped: SE3 = 22.5792 MHz (wrong) */
++#define CLK5L_SE3_CTRL_WANT      0xC0	/* fixed: SE3 = DIV4 = PLL2/5 = 24.576 MHz */
++
++static int alp_clk5l_reg_read(struct udevice *dev, u8 reg, u8 *val)
++{
++	return dm_i2c_read(dev, reg, val, 1);
++}
++
++static int alp_clk5l_reg_write(struct udevice *dev, u8 reg, u8 val)
++{
++	return dm_i2c_write(dev, reg, &val, 1);
++}
++
++static void alp_clk5l_fixup(void)
++{
++	struct udevice *dev;
++	u8 general_ctrl = 0, se1_div4 = 0, se3_ctrl = 0, val = 0;
++	int ret;
++
++	ret = i2c_get_chip_for_busnum(ALP_CLK5L_I2C_BUS, ALP_CLK5L_I2C_ADDR, 1, &dev);
++	if (ret) {
++		printf("ALP: 5L35023B clock: not reachable on RIIC8/BRD_I2C (%d) -- not touching\n", ret);
++		return;
++	}
++
++	ret = alp_clk5l_reg_read(dev, CLK5L_REG_GENERAL_CTRL, &general_ctrl);
++	if (ret || general_ctrl != CLK5L_GENERAL_CTRL_WANT) {
++		printf("ALP: 5L35023B clock: General Control=0x%02x ret=%d (want 0x%02x) -- not touching\n",
++		       general_ctrl, ret, CLK5L_GENERAL_CTRL_WANT);
++		return;
++	}
++
++	/*
++	 * reg 0x24 first, then reg 0x21 -- each register is handled
++	 * independently (OTP -> write the fix, already-fixed -> skip,
++	 * anything else -> warn and stop) so a partial prior run (0x24
++	 * already fixed, 0x21 still OTP) is recognised and completed
++	 * instead of being reported as "unexpected" and left half-applied.
++	 * If 0x24's write/readback fails, 0x21 is never touched.
++	 */
++	ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE1_DIV4_CTRL, &se1_div4);
++	if (ret) {
++		printf("ALP: 5L35023B clock: reg 0x24 read failed (%d) -- not touching\n", ret);
++		return;
++	}
++
++	if (se1_div4 == CLK5L_SE1_DIV4_CTRL_WANT) {
++		printf("ALP: 5L35023B clock: reg 0x24 already 0x%02x (SE1 32.768 kHz) -- skip\n", se1_div4);
++	} else if (se1_div4 == CLK5L_SE1_DIV4_CTRL_OTP) {
++		ret = alp_clk5l_reg_write(dev, CLK5L_REG_SE1_DIV4_CTRL, CLK5L_SE1_DIV4_CTRL_WANT);
++		if (!ret)
++			ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE1_DIV4_CTRL, &val);
++		if (ret || val != CLK5L_SE1_DIV4_CTRL_WANT) {
++			printf("ALP: 5L35023B clock: reg 0x24 write/readback failed (wrote 0x%02x read 0x%02x ret=%d) -- not touching 0x21\n",
++			       CLK5L_SE1_DIV4_CTRL_WANT, val, ret);
++			return;
++		}
++	} else {
++		printf("ALP: 5L35023B clock: reg 0x24=0x%02x is neither the as-shipped OTP value (0x%02x) nor the fixed value (0x%02x) -- not touching\n",
++		       se1_div4, CLK5L_SE1_DIV4_CTRL_OTP, CLK5L_SE1_DIV4_CTRL_WANT);
++		return;
++	}
++
++	ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE3_CTRL, &se3_ctrl);
++	if (ret) {
++		printf("ALP: 5L35023B clock: reg 0x21 read failed (%d) -- not touching\n", ret);
++		return;
++	}
++
++	if (se3_ctrl == CLK5L_SE3_CTRL_WANT) {
++		printf("ALP: 5L35023B clock: reg 0x21 already 0x%02x (SE3 24.576 MHz) -- skip\n", se3_ctrl);
++		goto done;
++	} else if (se3_ctrl != CLK5L_SE3_CTRL_OTP) {
++		printf("ALP: 5L35023B clock: reg 0x21=0x%02x is neither the as-shipped OTP value (0x%02x) nor the fixed value (0x%02x) -- not touching\n",
++		       se3_ctrl, CLK5L_SE3_CTRL_OTP, CLK5L_SE3_CTRL_WANT);
++		return;
++	}
++
++	ret = alp_clk5l_reg_write(dev, CLK5L_REG_SE3_CTRL, CLK5L_SE3_CTRL_WANT);
++	if (!ret)
++		ret = alp_clk5l_reg_read(dev, CLK5L_REG_SE3_CTRL, &val);
++	if (ret || val != CLK5L_SE3_CTRL_WANT) {
++		printf("ALP: 5L35023B clock: reg 0x21 write/readback failed (wrote 0x%02x read 0x%02x ret=%d)\n",
++		       CLK5L_SE3_CTRL_WANT, val, ret);
++		return;
++	}
++
++done:
++	printf("ALP: 5L35023B clock: SE1 32.768 kHz, SE3 24.576 MHz (0x24=0x%02x 0x21=0x%02x)\n",
++	       CLK5L_SE1_DIV4_CTRL_WANT, CLK5L_SE3_CTRL_WANT);
++}
++
+ int board_late_init(void)
+ {
+-	bool v2n_m1 = alp_som_is_v2n_m1();
++	bool v2n_m1;
+ 	bool rail_ok = true;
+ 
++	alp_clk5l_fixup();
++
++	v2n_m1 = alp_som_is_v2n_m1();
++
+ 	if (IS_ENABLED(CONFIG_ALP_E1M_DEEPX_RAIL) || v2n_m1)
+ 		rail_ok = alp_deepx_rail_bringup();
+ 
