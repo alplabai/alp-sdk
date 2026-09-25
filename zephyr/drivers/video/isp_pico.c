@@ -1203,6 +1203,35 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		if (video_query_ctrl(&cq) == 0 && cq.range.max > 0) {
 			again_max = isp_sns_gain_lib_from_ctrl((uint32_t)cq.range.max);
 		}
+
+		/*
+		 * #2287 bench run 313: the sensor's own manual control range
+		 * (queried just above) is deliberately WIDER than the AE
+		 * library's calibrated ceiling on IMX296 -- a caller setting
+		 * gain manually can still reach the full register range
+		 * (VIDEO_CID_ANALOGUE_GAIN's driver-side max stays 0-480,
+		 * zephyr/drivers/video/imx296.c), but hal_alif patch 0013's
+		 * calibration caps the library's OWN autonomous ceiling lower
+		 * (IMX296_AE_MAX_AGAIN, 24.0 dB, the analog-only half of the
+		 * register -- imx296_ae_envelope.h's own comment). Pushing
+		 * the wider sensor range here OVERWROTE that lower calibrated
+		 * ceiling every isp_stream_start() -- the library's own
+		 * compiled-in clamp still held (bench-confirmed: run 313's
+		 * `again` converged to 0x3f65 = 16229, not higher), but the
+		 * push itself disagreed with what SetCalib() had already
+		 * loaded, logged as "AE attr mismatch after set" on every
+		 * readback below. CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
+		 * (0 = no cap, every non-IMX296 sensor) clamps the PUSHED
+		 * value to agree with the calibration instead.
+		 */
+		if (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS > 0) {
+			uint32_t calib_again_max = isp_sns_gain_db_tenths_to_lib(
+				CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS);
+
+			if (again_max > calib_again_max) {
+				again_max = calib_again_max;
+			}
+		}
 	}
 
 	params.valid_mask   = ISP_PARAM_MASK_AE;

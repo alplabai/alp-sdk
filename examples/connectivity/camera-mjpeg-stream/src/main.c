@@ -211,16 +211,23 @@ static void build_synthetic_frame(alp_pixfmt_t fmt, alp_jpeg_encode_req_t *req)
  * path, the event registration order (net_mgmt_add_event_callback() runs
  * BEFORE net_dhcpv4_start() below, so the callback can't miss the event),
  * or CONFIG_LOG_DEFAULT_LEVEL (this is a plain printf(), not a log call).
- * The real cause: this line prints ONCE, near boot, into a 16 KiB
- * CONFIG_RAM_CONSOLE_BUFFER_SIZE circular buffer -- and that same run's
- * JPEG-buffer-full failure (alif_hantro.c's driver-side LOG_ERR, once per
- * failed encode, unthrottled) fired ~14x/second for 40 seconds, wrapping
- * that ring buffer many times over long before anyone read it back and
- * evicting the early DHCP line entirely. Fixed indirectly, not here: the
- * quality-ladder fix (this file's capture loop) and the AE gain-ceiling
- * cap (hal_alif patch 0013) both stop that failure flood from happening
- * in the first place, so there is nothing left to wrap the DHCP line out.
- */
+ * Prime suspect at the time: this line prints ONCE, near boot, into a
+ * 16 KiB CONFIG_RAM_CONSOLE_BUFFER_SIZE circular buffer -- and that
+ * run's JPEG-buffer-full failure (alif_hantro.c's driver-side LOG_ERR,
+ * once per failed encode, unthrottled) fired ~14x/second for 40 seconds,
+ * wrapping that ring buffer many times over before anyone read it back.
+ *
+ * Bench run 313 (same fixes applied, 0 encode failures this run) STILL
+ * never saw these lines -- ruling that theory out as the WHOLE story:
+ * something else is also capable of wrapping this same 16 KiB buffer.
+ * The VSI AE/AWB library's own diagnostic prints (hal_alif's
+ * isp_api_wrapper.c, routed through LOG_INF at CONFIG_VIDEO_LOG_LEVEL)
+ * run continuously, every frame, for the life of the stream -- up to
+ * ~13 KB/s -- which alone is enough to wrap this buffer inside two
+ * seconds, with no JPEG failure needed at all. prj.conf now lowers
+ * CONFIG_VIDEO_LOG_LEVEL to WRN for this app (see its own comment) to
+ * stop that chatter. Re-bench needed to confirm the DHCP lines survive
+ * with THIS fix in place -- not yet done. */
 static struct net_mgmt_event_callback dhcp_cb;
 
 static void
@@ -589,10 +596,22 @@ int main(void)
 					}
 				}
 			} else {
-				/* Both attempts failed -- stay at (or drop to) the
-				 * floor and reset the recovery streak; never wedges,
-				 * the next frame just tries again from here. */
-				current_quality      = JPEG_QUALITY_FLOOR;
+				/*
+				 * Both attempts failed -- reset the recovery streak (a
+				 * failure breaks any run of clean encodes), but do NOT
+				 * force current_quality down here (bench run 313, #2287
+				 * reviewer fix): a pool-exhaustion NOMEM
+				 * (video_import_buffer() -ENOBUFS, no free pool slot --
+				 * see jpeg_quality_should_retry()'s own comment) is not
+				 * fixed by a lower quality at all, and unconditionally
+				 * dropping to the floor here would permanently lower
+				 * quality for every LATER frame too, for a cause a lower
+				 * quality can never address. current_quality is only
+				 * ever lowered in the ALP_OK branch above, i.e. only
+				 * when a lower-quality retry (or the current rung
+				 * itself) actually SUCCEEDED -- never wedges either
+				 * way, the next frame just tries again at whatever rung
+				 * last succeeded. */
 				quality_clean_streak = 0;
 				if (rate_limited(&encode_fail_last_log, &encode_fail_count)) {
 					printf("[camera-mjpeg-stream] alp_jpeg_encode failed (rc=%d, "

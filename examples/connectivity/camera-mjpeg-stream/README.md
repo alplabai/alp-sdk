@@ -136,20 +136,36 @@ end to end — DHCP lease obtained, `/stream` and `/snapshot.jpg` both served
 a valid 1280x960 JPEG — but also found AE running gain to the GAIN
 register's full 48 dB ceiling in the dim scene blew the 160 KiB JPEG
 output-buffer budget on every subsequent frame (`mjpeg_http.h`'s own
-comment has the full accounting). Fixed by two changes now in this build:
-`src/main.c`'s quality ladder actually engages on a buffer-full encode and
-persists/recovers the reduced quality across frames (it previously never
-engaged at all — `out_len` was 0 on that failure path, not the required
-size, so the ladder's own gate was always false), and `hal_alif` patch
-0013 caps the AE library's own gain ceiling at 24 dB (the GAIN register's
-analog-only half, datasheet p.56) instead of the full 48 dB. Re-bench
-after this change is not yet done — no run number for the fixed build yet.
+comment has the full accounting). Fixed by two changes: `src/main.c`'s
+quality ladder now actually engages on a buffer-full encode and persists/
+recovers the reduced quality across frames (it previously never engaged at
+all), and `hal_alif` patch 0013 caps the AE library's own gain ceiling at
+24 dB (the GAIN register's analog-only side of the gain-vs-code bend,
+datasheet p.56) instead of the full 48 dB.
 
-Also from run 312: this build's FLASH usage on the ITCM bench profile
-(`scripts/bench/aen/aen-flowc-itcm.conf`) is 261,872 / 262,144 B — 99.90%,
-272 B of headroom. Any further growth of this example's code on that
-profile risks overflowing FLASH; check the build's own `Memory region`
-summary before adding to `src/main.c` or its Kconfig-selected code paths.
+Bench run 313 (same board, that fix) confirmed the fix: encode 61 fps,
+0 fails, 0 retries, ~31 KB JPEGs (no more buffer-full at all with AE
+capped at 24 dB — `again` converged to 0x3f65 = 16229, the new ceiling).
+One HTTP client measured 17.6 fps / 552 KB/s delivered (encode-bound
+headroom exists; the send path is where run 313's ~3.5x gap between
+encode and delivered rate sits, same shape as OV5647's own run 243
+above) with a 0.116 s worst-case frame gap. Also found and fixed:
+`isp_pico.c`'s `isp_apply_ae()` was pushing the sensor's full 0-480
+manual gain range as the AE library's ceiling on every
+`isp_stream_start()`, silently overwriting patch 0013's lower 16229
+calibration ceiling and logging "AE attr mismatch after set" (the
+library's own compiled-in clamp held the real ceiling throughout, so
+this was a spurious log, not a functional bug) — now clamped to agree
+(`CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS`). Re-bench after THIS
+round's fixes is not yet done — no run number for this build yet.
+
+Also from run 312/313: this variant's FLASH usage on the ITCM bench
+profile (`scripts/bench/aen/aen-flowc-itcm.conf`) has been running under
+~300 B of headroom on a 256 KiB region — check the build's own `Memory
+region` summary (`west build` prints it after linking) before adding to
+`src/main.c` or its Kconfig-selected code paths; do not assume a fixed
+byte count still applies, it moves with every change to this file or its
+dependencies.
 
 ## Watch it
 

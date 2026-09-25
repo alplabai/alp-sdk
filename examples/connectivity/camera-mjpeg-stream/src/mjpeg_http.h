@@ -39,12 +39,20 @@
  *  already at 98.5% for this resolution, see overlay-1280x960.conf; a
  *  larger buffer has nowhere to come from), so that run's fix is in two
  *  OTHER places instead of here: main.c's quality ladder now actually
- *  engages on a buffer-full encode (src/backends/jpeg/alif_hantro.c's
- *  -ENOSPC path now reports out_len correctly) and persists/recovers the
- *  reduced quality across frames, and hal_alif patch 0013 caps the AE
- *  library's own gain ceiling at 24 dB (the register's analog-only half,
- *  p.56) instead of the full 48 dB, since the digital half of that
- *  register only multiplies read noise. */
+ *  engages on a buffer-full encode (its retry gate keys off the error
+ *  code alone now, jpeg_quality_should_retry(), not the encoder's
+ *  reported size) and persists/recovers the reduced quality across
+ *  frames, and hal_alif patch 0013 caps the AE library's own gain
+ *  ceiling at 24 dB (the register's analog-only side of its gain-vs-
+ *  code bend, p.56) instead of the full 48 dB -- plausibly because the
+ *  digital side only multiplies read noise, though bench run 313 (0
+ *  overflow at the new 24 dB cap, different scene) is consistent with
+ *  that but not a controlled proof of it (see hal_alif patch 0013's own
+ *  header comment). Run 313 also found isp_apply_ae() had been pushing
+ *  the sensor's wider manual gain range over this calibration's ceiling
+ *  every isp_stream_start() -- the library's own clamp held regardless
+ *  (bench-confirmed), but the push is now corrected too
+ *  (CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS, isp_pico.c). */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 #define MJPEG_HTTP_MAX_JPEG 163840u
 #else

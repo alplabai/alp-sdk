@@ -767,7 +767,7 @@ patches:
       additive, touches only the two switches' SRGGB10P case; every other
       fourcc's mapping is unchanged. Upstream to hal_alif then drop.
   - path: hal_alif/0013-isp-imx296-ae-envelope.patch
-    sha256sum: 540cf3d4d09852e69de881b6f1f679c10d25087e2a0a8af773cd4934db99682c
+    sha256sum: d9fdb37170ebe23c2725a82fea78d3294ba173f4196a1a49409c03c781de83a2
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -825,14 +825,35 @@ patches:
       (24.0 dB), not 257217 (48.0 dB) -- the AE library ran gain to the
       register's full ceiling in a dim scene, and the resulting frame
       noise blew the JPEG encoder's output-buffer budget on every
-      subsequent encode. The datasheet (p.56) splits the GAIN register at
-      240/0-24.0 dB (analog) vs 241-480/24.1-48.0 dB (digital); digital
-      gain multiplies sensor read noise along with signal, so the AE
-      library's own ceiling is now pinned to the analog half only.
-      VIDEO_CID_ANALOGUE_GAIN's driver-side control range
+      subsequent encode. The datasheet's GAIN-vs-code PLOT on p.56 (read
+      off the graph, not a labelled table) bends at code 240/24.0 dB:
+      analog gain below that code, digital layered on top above it;
+      digital gain multiplies sensor read noise along with signal, so
+      the AE library's own ceiling is now pinned to the analog side of
+      that bend. VIDEO_CID_ANALOGUE_GAIN's driver-side control range
       (zephyr/drivers/video/imx296.c) is unchanged at the full 0-480 --
       only the 3A library's autonomous ceiling moved; a caller setting
       gain manually can still reach the full register range.
+
+      Bench run 313 (camera-mjpeg-stream, same board, same scene class)
+      update: no overflow at the new 24.0 dB cap -- consistent with, but
+      not proof of, the digital-gain-is-noisier explanation above (run
+      313's scene was also not a controlled brightness match against
+      runs 305/310/312, so a brighter scene remains an equally plausible
+      explanation on the evidence gathered so far). Also confirmed
+      isp_pico.c's isp_apply_ae() was PUSHING the sensor's full 0-480
+      manual control range as the library's again_max ceiling every
+      isp_stream_start(), overwriting this calibration's lower 16229
+      ceiling and logging "AE attr mismatch after set" (the library's
+      own compiled-in clamp still held the real ceiling at 16229
+      throughout -- bench-confirmed, run 313's `again` converged to
+      0x3f65 = 16229, not higher -- so this was a spurious error log,
+      not a functional regression). Fixed on the alp-sdk side only
+      (isp_pico.c's isp_apply_ae(), new Kconfig
+      VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS, default 240 when
+      CONFIG_VIDEO_ISP_VSI_CALIB_IMX296) -- no further hal_alif change
+      needed for that fix; it clamps the push to agree with this
+      patch's own 16229, kept in sync by hand.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

@@ -1170,6 +1170,43 @@ config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
 	  enabled (not the raw CONFIG_VIDEO_IMX296 sensor-driver symbol -- see
 	  VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS's own help for why).
 
+config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
+	int "ISP-Pico AE gain ceiling PUSH cap, in 0.1 dB units (0 = no cap)"
+	default 240 if VIDEO_ISP_VSI_CALIB_IMX296
+	default 0
+	depends on VIDEO_ISP_VSI
+	help
+	  Bench run 313 (#2287): isp_apply_ae() queries the SENSOR's own
+	  registered VIDEO_CID_ANALOGUE_GAIN control range (video_query_ctrl(),
+	  above) and pushes THAT as the library's again_max ceiling every
+	  isp_stream_start() -- correct in general (a sensor-agnostic ceiling,
+	  not a hardcoded ARX3A0/OV5647 constant), but IMX296's manual control
+	  range is deliberately left at the full register range (0-480, 0-48.0
+	  dB -- VIDEO_CID_ANALOGUE_GAIN's driver-side max, zephyr/drivers/
+	  video/imx296.c) so a caller SETTING gain manually can still reach
+	  it, while hal_alif patch 0013's calibration caps the AE LIBRARY's
+	  OWN ceiling lower, at 24.0 dB (IMX296_AE_MAX_AGAIN, the register's
+	  analog-only half -- see that header's own comment). Without this
+	  cap, isp_apply_ae()'s push OVERWRITES the calibration's lower
+	  ceiling with the sensor's wider manual one every time -- the
+	  library's own clamp still holds the ceiling at its compiled-in
+	  16229 (confirmed bench-side: run 313's `again` converged to
+	  0x3f65 = 16229, not higher), but the push itself is wrong and logs
+	  "AE attr mismatch after set" every isp_stream_start() (readback
+	  disagreeing with what was just pushed). This symbol, when nonzero,
+	  clamps the PUSHED again_max to
+	  isp_sns_gain_db_tenths_to_lib(this value) -- so the push and the
+	  library's own compiled-in ceiling agree and the mismatch log stops.
+	  0 (every sensor except IMX296) means "trust the sensor's control
+	  range as-is", unchanged behaviour.
+
+	  default 240 (24.0 dB) whenever CONFIG_VIDEO_ISP_VSI_CALIB_IMX296 is
+	  enabled -- matches hal_alif patch 0013's IMX296_AE_MAX_AGAIN by
+	  hand (same by-hand-invariant status that header's own comment
+	  documents for its OTHER hand-synced figures); a future change to
+	  one without the other reintroduces the same mismatch this symbol
+	  exists to silence.
+
 config VIDEO_ISP_VSI_AE_TARGET
 	int "ISP-Pico AE target luminance [0, 255]"
 	default 90

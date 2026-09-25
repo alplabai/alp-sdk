@@ -497,20 +497,16 @@ static alp_status_t hantro_encode(alp_jpeg_backend_state_t    *state,
 		 * data->current_buf = NULL and returns -ENOSPC BEFORE ever writing
 		 * done->bytesused, so unlike the done->bytesused > out_cap path below,
 		 * *out_len is never touched here -- it stays at the caller's own
-		 * pre-call value (0 on a first attempt). main.c's retry gate keys off
-		 * out_len > out_cap to tell "buffer too small, a lower quality might
-		 * help" apart from a pool-exhaustion NOMEM a lower quality can't fix;
-		 * leaving *out_len at 0 silently answered that question wrong and the
-		 * ladder never engaged. The real required size isn't known on this
-		 * path (the driver never reports it for -ENOSPC), so signal "too big,
-		 * amount unknown" the same way any other unknown-size overrun would:
-		 * one byte over out_cap is enough to satisfy the caller's own
-		 * out_len > out_cap check without asserting a size this path can't
-		 * actually measure.
+		 * pre-call value. A bench run 312 fix briefly had this path fabricate
+		 * *out_len = out_cap + 1 ("too big, amount unknown") so a caller's
+		 * out_len > out_cap gate would fire -- reverted, bench run 313: the
+		 * caller no longer needs it (main.c's retry gate now keys off the
+		 * error code alone, jpeg_quality_should_retry(), not out_len -- see
+		 * jpeg_quality_ladder.h), and <alp/jpeg.h>'s alp_jpeg_encode() only
+		 * documents *out_len as "the required size, WHEN KNOWN" -- it is
+		 * genuinely not known on this path, so leaving it untouched is the
+		 * honest answer, not a fabricated one.
 		 */
-		if (err == -ENOSPC) {
-			*out_len = out_cap + 1;
-		}
 		return _errno_to_alp(err); /* -EAGAIN -> ALP_ERR_TIMEOUT, see alp_errno.h. */
 	}
 	if (done == NULL) {

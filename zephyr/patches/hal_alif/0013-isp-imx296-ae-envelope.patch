@@ -1,9 +1,9 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..166f029
+index 0000000..e1ad509
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
-@@ -0,0 +1,134 @@
+@@ -0,0 +1,147 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -64,21 +64,34 @@ index 0000000..166f029
 + *     in a dim scene: the resulting frame was noisy enough to blow the
 + *     encoder's 160 KiB JPEG output-buffer budget on every subsequent
 + *     encode (see examples/connectivity/camera-mjpeg-stream/src/main.c's
-+ *     jpeg_quality_ladder use). p.56's own GAIN table splits the register
-+ *     at 0-240 (0-24.0 dB) as ANALOG gain and 241-480 (24.1-48.0 dB) as
-+ *     DIGITAL gain layered on top -- digital gain multiplies the sensor's
-+ *     OWN read noise along with the signal, it does not add photon
-+ *     signal the way analog (pre-ADC) gain does, so the top half of the
-+ *     register's range makes a dim scene noisier per dB than the bottom
-+ *     half, consistent with runs 305/310's own noise observations at
-+ *     high gain. Capping the AE library's own ceiling at the analog/
-+ *     digital split (240, 24.0 dB) keeps the 3A loop out of the
-+ *     digital-gain half entirely; VIDEO_CID_ANALOGUE_GAIN's driver-side
-+ *     control range (zephyr/drivers/video/imx296.c) is UNCHANGED at the
-+ *     full 0-480 -- a caller setting gain manually (as examples/aen/
-+ *     aen-isp-capture's AEN_ISP_IMX296_GAIN option does) can still reach
-+ *     the full register range; only the AE library's autonomous ceiling
-+ *     is lowered. Computed the SAME way zephyr/drivers/video/
++ *     jpeg_quality_ladder use). p.56's gain-vs-code plot (not a numeric
++ *     table -- read off the graph, not quoted from labelled rows) shows
++ *     the response bending at 240 (24.0 dB): ANALOG gain below that code,
++ *     DIGITAL gain layered on top above it -- digital gain multiplies the
++ *     sensor's OWN read noise along with the signal, it does not add
++ *     photon signal the way analog (pre-ADC) gain does, so the top half
++ *     of the register's range is PLAUSIBLY noisier per dB than the
++ *     bottom half for a dim scene, consistent with runs 305/310's own
++ *     noise observations at high gain -- but bench run 313 (same board,
++ *     same scene class, this cap now in effect) shows no overflow AT the
++ *     24.0 dB cap with no digital gain reached at all, which is not the
++ *     same evidence as a controlled comparison AT the higher gains (a
++ *     different, brighter scene in run 313 could equally explain it).
++ *     The digital-gain-is-noisier explanation is plausible, not proven.
++ *     Capping the AE library's own ceiling at the analog/digital bend
++ *     (240, 24.0 dB) keeps the 3A loop out of the digital-gain half
++ *     entirely regardless of which explanation is right; VIDEO_CID_
++ *     ANALOGUE_GAIN's driver-side control range (zephyr/drivers/video/
++ *     imx296.c) is UNCHANGED at the full 0-480 -- a caller setting gain
++ *     manually (as examples/aen/aen-isp-capture's AEN_ISP_IMX296_GAIN
++ *     option does) can still reach the full register range; only the AE
++ *     library's autonomous ceiling is lowered -- isp_pico.c's
++ *     isp_apply_ae() also now clamps the ceiling it PUSHES from that
++ *     wider sensor range to match this same 240 (Kconfig
++ *     VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS), so the two agree instead of
++ *     the push silently overwriting this calibration's lower ceiling
++ *     every isp_stream_start() (bench run 313's "AE attr mismatch after
++ *     set" log). Computed the SAME way zephyr/drivers/video/
 + *     isp_sns_gain_conv.h's isp_gain_db_tenths_table[240] is (that table
 + *     is alp-sdk-side, not reachable from this hal_alif header, hence the
 + *     separate literal here; the two must stay in sync by hand, same
