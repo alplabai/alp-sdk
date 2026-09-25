@@ -3,10 +3,13 @@
 # Build-only regressions for the RPi-style CSI-2 camera first-light bench
 # app, one scenario per camera shield stacked on e1m_evk_rpi_csi.  These are
 # compile proofs, not bench runs -- twister has no bench access, so the
-# PASS/FAIL/TIMEOUT verdict only means something on real hardware.  Both
+# PASS/FAIL/TIMEOUT verdict only means something on real hardware.  All three
 # scenarios' real-silicon results are bench-verified separately: OV9281
-# (2026-09-21, an E1M-AEN803 on the E1M-EVK) and OV5647 (2026-09-22, an
-# E1M-AEN803 on the E1M-EVK, issue #2248).
+# (2026-09-21, an E1M-AEN803 on the E1M-EVK), OV5647 (2026-09-22, an
+# E1M-AEN803 on the E1M-EVK, issue #2248) and IMX296 (issue #2287, Stage A --
+# I2C identity, CSI-2 streaming, and a captured+correlated frame, bench run
+# 292; ISP-Pico/AE/fast-trigger not yet bench-verified, see docs/camera-
+# shields.md).
 #
 # Twister's extra_args SHIELD value carries BOTH shields as one
 # space-separated string (the carrier connector shield first, the camera
@@ -57,3 +60,34 @@ tests:
       - video
       - csi
     build_only: true # the CSI-2 -> CPI pipe is a bench flash, not a CI run.
+
+  alp_sdk.examples.aen.camera_firstlight.imx296:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true # Stage A bench-verified on real silicon (issue #2287, run 292); build-only here because twister has no bench access.
+
+  alp_sdk.examples.aen.camera_firstlight.imx296_trigger:
+    platform_allow:
+      - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
+      - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
+    extra_args:
+      - SHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera"
+      - AEN_CAMERA_TRIGGER=ON
+    tags:
+      - alp-sdk
+      - example
+      - aen
+      - camera
+      - video
+      - csi
+    build_only: true # opt-in external-trigger build mode; UNTESTED ON SILICON, see docs/camera-shields.md.
