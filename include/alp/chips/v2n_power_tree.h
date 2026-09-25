@@ -70,13 +70,13 @@
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
-		[ACT8760_RAIL_BUCK5] = { .min_mv           = 725u, \
-		                         .max_mv           = 775u, \
+		[ACT8760_RAIL_BUCK5] = { .min_mv           = 775u, \
+		                         .max_mv           = 825u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
-		[ACT8760_RAIL_BUCK6] = { .min_mv           = 775u, \
-		                         .max_mv           = 825u, \
+		[ACT8760_RAIL_BUCK6] = { .min_mv           = 725u, \
+		                         .max_mv           = 775u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
@@ -122,7 +122,7 @@
 	{ \
 		[ACT8760_RAIL_BUCK1] = "VDD_3V3",    [ACT8760_RAIL_BUCK2] = "VDD1G_1P8", \
 		[ACT8760_RAIL_BUCK3] = "LPD4x_1V1",  [ACT8760_RAIL_BUCK4] = "LPDDR_1V8", \
-		[ACT8760_RAIL_BUCK5] = "TBD",        [ACT8760_RAIL_BUCK6] = "TBD", \
+		[ACT8760_RAIL_BUCK5] = "VDD08_DDR",  [ACT8760_RAIL_BUCK6] = "VDD_CORE_0P75", \
 		[ACT8760_RAIL_BUCK7] = "VDD09_CA55", [ACT8760_RAIL_LDO1] = "VDD1G_0P8", \
 		[ACT8760_RAIL_LDO2] = "LDO_1V2",     [ACT8760_RAIL_LDO3] = "VDD_eMMC_3V3", \
 		[ACT8760_RAIL_LDO4] = "VDD_1V8",     [ACT8760_RAIL_LDO5] = "VDD5G_1P8", \
@@ -186,13 +186,13 @@
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
-		[ACT8760_RAIL_BUCK5] = { .min_mv           = 725u, \
-		                         .max_mv           = 775u, \
+		[ACT8760_RAIL_BUCK5] = { .min_mv           = 775u, \
+		                         .max_mv           = 825u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
-		[ACT8760_RAIL_BUCK6] = { .min_mv           = 775u, \
-		                         .max_mv           = 825u, \
+		[ACT8760_RAIL_BUCK6] = { .min_mv           = 725u, \
+		                         .max_mv           = 775u, \
 		                         .critical         = true, \
 		                         .voltage_writable = true, \
 		                         .enable_writable  = false }, \
@@ -238,7 +238,7 @@
 	{ \
 		[ACT8760_RAIL_BUCK1] = "VDD_3V3",    [ACT8760_RAIL_BUCK2] = "VDD1G_1P8", \
 		[ACT8760_RAIL_BUCK3] = "LPD4x_1V1",  [ACT8760_RAIL_BUCK4] = "LPDDR_1V8", \
-		[ACT8760_RAIL_BUCK5] = "TBD",        [ACT8760_RAIL_BUCK6] = "TBD", \
+		[ACT8760_RAIL_BUCK5] = "VDD08_DDR",  [ACT8760_RAIL_BUCK6] = "VDD_CORE_0P75", \
 		[ACT8760_RAIL_BUCK7] = "VDD09_CA55", [ACT8760_RAIL_LDO1] = "VDD1G_0P8", \
 		[ACT8760_RAIL_LDO2] = "LDO_1V2",     [ACT8760_RAIL_LDO3] = "VDD_eMMC_3V3", \
 		[ACT8760_RAIL_LDO4] = "VDD_1V8",     [ACT8760_RAIL_LDO5] = "VDD5G_1P8", \

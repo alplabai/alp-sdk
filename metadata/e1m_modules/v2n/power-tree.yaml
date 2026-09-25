@@ -160,10 +160,10 @@ rails:
     evidence: "CMI Buck4 1.8 V range 1, trigger Buck7 +2 ms == report LPDDR_1V8 (+2 ms after VDD09_CA55)"
   - id: vdd_core_0p75
     chip: act8760
-    channel: buck5
+    channel: buck6
     i2c_addr: 0x25
-    net: TBD
-    role: "0.75 V core supply in the PWEN2 (RZ/V2N PMU) domain; its POK drives GPIO7 -- LIKELY VDD_CORE_0P75, net attribution TBD-verify"
+    net: VDD_CORE_0P75
+    role: "0.75 V DEEPX DX-M1 core-domain supply in the PWEN2 (RZ/V2N PMU) domain; its POK drives GPIO7"
     target_mv: 750
     range: 1
     window_mv: [725, 775]
@@ -172,17 +172,19 @@ rails:
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
     evidence: >-
-      CMI Buck5 0.75 V (25 mV-only tile) is bench-confirmed; trigger PWEN2
-      (GPIO10) +4 ms == report VDD_CORE_0P75 is a timing correlation, not an
-      independent per-net measurement (no continuity/scope trace pinning
-      this specific channel to that specific net) -- TBD-verify, do not
-      treat the buck5<->VDD_CORE_0P75 attribution as settled until it is.
+      Settled 2026-09-25: confirmed against the module design data, and the
+      ACT88760 register map puts BUCK6 at tile 0xE0..0xE7 on 0x25; a live
+      read of 0xE2 = 0x0A (750 mV, 25 mV range) with 0xE0 POK set. Tile 0xE4 = 0x3E (ON bit 0,
+      AUXIN_EN 1): the rail is held up by the PWEN2 sequencer trigger, not
+      the ON bit. The CMI report labels this rail "Buck5"; that CMI numbering
+      is one off from the pin/register numbering for Buck5/Buck6, so the
+      earlier buck5 attribution here was wrong.
   - id: vdd08_ddr
     chip: act8760
-    channel: buck6
+    channel: buck5
     i2c_addr: 0x25
-    net: TBD
-    role: "RZ/V2N DDR PHY 0.8 V -- LIKELY VDD08_DDR, net attribution TBD-verify"
+    net: VDD08_DDR
+    role: "RZ/V2N DDR PHY 0.8 V"
     target_mv: 800
     range: 1
     window_mv: [775, 825]
@@ -191,11 +193,9 @@ rails:
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
     evidence: >-
-      CMI Buck6 0.8 V (25 mV-only tile) is bench-confirmed; trigger Buck7 +1
-      ms == report VDD08_DDR is a timing correlation, not an independent
-      per-net measurement (no continuity/scope trace pinning this specific
-      channel to that specific net) -- TBD-verify, do not treat the
-      buck6<->VDD08_DDR attribution as settled until it is.
+      Settled 2026-09-25: confirmed against the module design data, and a live read of tile 0xC2 = 0x0C (800 mV, 25 mV range)
+      with 0xC0 POK set and 0xC4 ON bit 1. The CMI report labels this rail
+      "Buck6" (one off from pin/register numbering, see vdd_core_0p75).
   - id: vdd09_ca55
     chip: act8760
     channel: buck7
@@ -420,8 +420,8 @@ gpios:
     direction: output_od # TBD-verify -- see comment above, not schematic-confirmed
     writable: []
   - { gpio: 6,  net: MODULE_EN,        role: "PWRON input -- starts / stops the power sequence", direction: input, writable: [] }
-  - { gpio: 7,  net: DEEPX_PWR_EN_REQ, role: "Buck5 POK -> RZ/V2N P65 (CMI name CORE_0P75_EN)", direction: output_pp, writable: [] }
+  - { gpio: 7,  net: DEEPX_PWR_EN_REQ, role: "Buck6 (VDD_CORE_0P75) POK -> RZ/V2N P65 (CMI name CORE_0P75_EN)", direction: output_pp, writable: [] }
   - { gpio: 8,  net: SD1_EN,           role: "SD1 supply enable", direction: output_pp, writable: [] }
   - { gpio: 9,  net: PWEN1,            role: "RZ/V2N PWEN1 -> LSW5 (VDD5G_1P8)", direction: input, writable: [] }
-  - { gpio: 10, net: PWEN2,            role: "RZ/V2N PWEN2 -> LSW6 + Buck5", direction: input, writable: [] }
+  - { gpio: 10, net: PWEN2,            role: "RZ/V2N PWEN2 -> LSW6 + Buck6 (VDD_CORE_0P75)", direction: input, writable: [] }
   - { gpio: 11, net: MODULE_STBY,      role: "SLEEP input (standby)", direction: input, writable: [] }
