@@ -328,20 +328,27 @@ alp_status_t tps628640_set_ramp_speed(tps628640_t *ctx, tps628640_ramp_speed_t s
  * needing forced PWM does not silently come back up in PFM mode.
  *
  * The chip's own reset always re-enables the converter (CTRL_DEFAULT has
- * SOFTWARE_ENABLE=1) at whatever VOUT1 it restarts with -- neither of
+ * SOFTWARE_ENABLE=1) at whatever VOUT1/VOUT2 it restarts with -- neither of
  * which this driver controls.  After the reset lands, this call re-reads
- * VOUT1 and switches SOFTWARE_ENABLE back off (leaving CONTROL otherwise
- * as just written) when either the rail was disabled going in, or the
- * post-reset VOUT1 falls outside the installed window; the latter case
- * additionally reports ::ALP_ERR_OUT_OF_RANGE so the caller knows the
- * rail did not come back up clean, not just that it was switched off.
+ * VOUT1 *and* VOUT2 (the VID strap picks which one is live and this driver
+ * can't read it, same as tps628640_software_enable()) and switches
+ * SOFTWARE_ENABLE back off (leaving CONTROL otherwise as just written) when
+ * either the rail was disabled going in, or either post-reset setpoint
+ * falls outside the installed window; the latter case additionally reports
+ * ::ALP_ERR_OUT_OF_RANGE so the caller knows the rail did not come back up
+ * clean, not just that it was switched off.  A failure reading either
+ * setpoint, or restoring the FPWM/ramp bits, is treated the same way (the
+ * window is then unconfirmed): SOFTWARE_ENABLE is cleared best-effort
+ * before the original error is returned, rather than leaving the rail
+ * energized with its state unknown.
  *
  * @param ctx  TPS628640 context handle (must be initialised first).
  * @return ALP_OK; ALP_ERR_NOT_READY if uninitialised; ALP_ERR_NOSUPPORT if
  *         no entry is installed, the instance is not enable-writable, or it
- *         is `critical`; ALP_ERR_OUT_OF_RANGE if the post-reset VOUT1 falls
- *         outside the installed window (the rail is left disabled); the
- *         bus status on I2C failure.
+ *         is `critical`; ALP_ERR_OUT_OF_RANGE if the post-reset VOUT1 or
+ *         VOUT2 falls outside the installed window (the rail is left
+ *         disabled); the bus status on I2C failure (the rail is also left
+ *         disabled best-effort in that case).
  */
 alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx);
 

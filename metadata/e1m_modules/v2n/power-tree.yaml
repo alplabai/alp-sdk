@@ -276,7 +276,7 @@ rails:
     range: null
     window_mv: null
     critical: true
-    control: enable
+    control: none              # PWEN1-triggered CMI hardware sequence, not a software switch
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI LDO5 = NLSW, trigger PWEN1 (GPIO9) == report VDD5G_1P8"
@@ -290,7 +290,7 @@ rails:
     range: null
     window_mv: null
     critical: true
-    control: enable
+    control: none              # PWEN2-triggered CMI hardware sequence, not a software switch
     owner: { a55_boot: pmic_cmi, cm33_boot: pmic_cmi }
     populated_on: [v2n, v2n-m1]
     evidence: "CMI LDO6 = NLSW, trigger PWEN2 (GPIO10) == report VDD6G_1P2"

@@ -22,12 +22,20 @@ The three drivers now read everything and control only through that table:
   grid cannot truncate into the window.
 - **Critical rails are never disabled.** That covers every ACT88760 rail,
   DA9292 CH1 and TPS628640 `0x4D`. A TPS628640 reset counts as a disable.
-- **ACT88760 raw writes** reach only MSTR `0x01`, `0x05`, `0x14`, `0x2B`,
+- **ACT88760 raw writes** reach only MSTR `0x01`, `0x05`, `0x2B`,
   `0x33`. Everything else is refused: `0x07` (MR / SLEEP / DPSLP / POWER
   OFF / watchdog), `0x09`, `0x0A`, `0x0B` / `0x0C` (IO delays; `0x0C`
-  bits1:0 are WDTIME / RETRY TIME), `0x15`-`0x26`, `0x2D`-`0x32`, every
-  MODEx, every tile register and all of ADD2. The DA9292 raw path reaches
-  only `0x02`-`0x05`. The TPS628640 has no raw write path.
+  bits1:0 are WDTIME / RETRY TIME), `0x14` (POK_OV / VSYSWARN thresholds --
+  a bad value can trip PMIC shutdown, deny until a typed API needs it),
+  `0x15`-`0x26`, `0x2D`-`0x32`, every MODEx, every tile register and all
+  of ADD2. The DA9292 raw path reaches only `0x02`-`0x05`. The TPS628640
+  has no raw write path. No ACT88760 VSET (voltage-controlled) rail is
+  enable-writable either: every one of them is the PMIC's own CMI
+  hardware sequence, not a software on/off switch -- only an
+  enable-only entry (no VSET at all) can be enable_writable, and
+  `act8760_rail_set_enable(true)` still refuses
+  (`ALP_ERR_OUT_OF_RANGE`) whenever such an entry has a window and its
+  live VSET reads outside it, the same rule DA9292 / TPS628640 apply.
 - **ACT88760 Buck3 / Buck4 range** is decoded from tile +1 bit3 (`0x81` /
   `0xA1`), per the AA82BZ register-map workbook. `metadata/chips/act8760.yaml`
   said `0x86` / `0xA6` bit1, which is DBSTBY: decoding that as the range is
@@ -73,11 +81,19 @@ BENCH-PENDING on the CM33 path itself (build-only Twister so far).
 for the live VSTEP and writes both VSEL registers; `da9292_get_voltage_mv()`
 decodes the active VSEL; `da9292_read_and_clear_events()` does not clear
 without a table; `tps628640_software_enable(true)` now refuses
-(`ALP_ERR_OUT_OF_RANGE`) unless the live VOUT1 setpoint lies inside the
-installed window, instead of blindly energizing whatever is currently
-programmed; `tps628640_reset_to_defaults()` now preserves the caller's
-FPWM-mode and ramp-speed bits across the chip's own factory reset instead of
-silently dropping them to the datasheet default. The DEEPX rail sequence
+(`ALP_ERR_OUT_OF_RANGE`) unless the live VOUT1 *and* VOUT2 setpoints both
+lie inside the installed window (the VID strap picks which one is live and
+the driver can't read it), instead of blindly energizing whatever is
+currently programmed; `tps628640_reset_to_defaults()` now preserves the
+caller's FPWM-mode and ramp-speed bits across the chip's own factory reset
+instead of silently dropping them to the datasheet default, and -- since
+the chip's own reset always re-enables the converter regardless of what
+this driver wants -- re-checks VOUT1/VOUT2 against the window and the
+rail's prior enable state once the reset lands: it clears SOFTWARE_ENABLE
+again and reports `ALP_ERR_OUT_OF_RANGE` when the post-reset setpoint is
+out of window, and it also clears SOFTWARE_ENABLE (no error) when the rail
+was simply off before the call, so a reset can never spring a
+previously-disabled rail back to life. The DEEPX rail sequence
 itself (U-Boot `board_late_init()` in a55_boot mode) is bench-PASSED on
 E1M-V2M103 (#2288); the v2n-pmic-inspect / v2n-cm33-deepx-rail example apps
 and the CM33-boot sequencing path have not run on silicon yet.

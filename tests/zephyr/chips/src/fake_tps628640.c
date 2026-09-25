@@ -13,6 +13,7 @@
 #define DT_DRV_COMPAT alp_fake_tps628640
 
 #include <errno.h>
+#include <stdbool.h>
 #include <string.h>
 
 #include <zephyr/device.h>
@@ -39,6 +40,9 @@ struct fake_tps628640_data {
 	uint8_t  addr;
 	uint8_t  regs[256];
 	uint32_t write_count[256];
+	bool     fail_next_read_armed;
+	uint8_t  fail_next_read_reg;
+	bool     vout2_por_independent; /* test hook, see the setter below */
 };
 
 #define FAKE_TPS628640_MAX_SLOTS 4
@@ -67,8 +71,12 @@ static void regs_revert_to_por(struct fake_tps628640_data *d)
 	 * instance plausibly sets VOUT2 the same way.  TBD-verify on real
 	 * silicon; tps628640_software_enable() checks both registers
 	 * because the driver cannot read the VID strap that picks which one
-	 * is live. */
-	d->regs[REG_VOUT2]   = por_vout;
+	 * is live.  fake_tps628640_set_vout2_por_independent() turns this
+	 * mirroring off for one instance -- a testing knob only, so a ztest
+	 * can prove that check is real by making VOUT2 genuinely diverge
+	 * from VOUT1 across a reset, something the mirrored default can
+	 * never do. */
+	if (!d->vout2_por_independent) d->regs[REG_VOUT2] = por_vout;
 	d->regs[REG_CONTROL] = 0x6Fu;
 }
 
@@ -76,6 +84,8 @@ static void slot_reset_state(struct fake_tps628640_data *d)
 {
 	memset(d->regs, 0, sizeof d->regs);
 	memset(d->write_count, 0, sizeof d->write_count);
+	d->fail_next_read_armed  = false;
+	d->vout2_por_independent = false;
 	regs_revert_to_por(d);
 }
 
@@ -101,7 +111,11 @@ fake_tps628640_transfer(const struct emul *target, struct i2c_msg *msgs, int num
 	    (msgs[1].flags & I2C_MSG_READ) != 0) {
 		if (msgs[0].len < 1 || msgs[1].len != 1) return -EIO;
 		const uint8_t reg = msgs[0].buf[0];
-		msgs[1].buf[0]    = d->regs[reg];
+		if (d->fail_next_read_armed && reg == d->fail_next_read_reg) {
+			d->fail_next_read_armed = false;
+			return -EIO;
+		}
+		msgs[1].buf[0] = d->regs[reg];
 		if (reg == REG_STATUS) d->regs[reg] = 0u;
 		return 0;
 	}
@@ -158,4 +172,18 @@ void fake_tps628640_reset(uint8_t addr)
 {
 	struct fake_tps628640_data *d = slot_find(addr);
 	if (d) slot_reset_state(d);
+}
+
+void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg)
+{
+	struct fake_tps628640_data *d = slot_find(addr);
+	if (d == NULL) return;
+	d->fail_next_read_armed = true;
+	d->fail_next_read_reg   = reg;
+}
+
+void fake_tps628640_set_vout2_por_independent(uint8_t addr, bool independent)
+{
+	struct fake_tps628640_data *d = slot_find(addr);
+	if (d) d->vout2_por_independent = independent;
 }

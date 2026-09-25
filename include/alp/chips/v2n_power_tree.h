@@ -109,12 +109,12 @@
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \
 		                         .voltage_writable = false, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO6]  = { .min_mv           = 0u, \
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \
 		                         .voltage_writable = false, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 	}
 
 /** v2n: ACT88760 rail net names, indexed by act8760_rail_t. */
@@ -225,12 +225,12 @@
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \
 		                         .voltage_writable = false, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 		[ACT8760_RAIL_LDO6]  = { .min_mv           = 0u, \
 		                         .max_mv           = 0u, \
 		                         .critical         = true, \
 		                         .voltage_writable = false, \
-		                         .enable_writable  = true }, \
+		                         .enable_writable  = false }, \
 	}
 
 /** v2n-m1: ACT88760 rail net names, indexed by act8760_rail_t. */

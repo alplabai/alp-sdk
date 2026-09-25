@@ -151,7 +151,7 @@ ZTEST(alp_chips, test_clk_5l35023b_register_dump_rejects_invalid)
 	              "0xFF + 2 = 0x101 overruns the register space");
 }
 
-/* #<PMIC review>: clk_5l35023b_register_dump() must issue one single-byte
+/* #1165: clk_5l35023b_register_dump() must issue one single-byte
  * read transaction per register (see the driver's file-level comment on
  * the i2c-riic multi-byte-read corruption this works around), not a single
  * combined burst -- prove it against the fake's per-transaction log rather

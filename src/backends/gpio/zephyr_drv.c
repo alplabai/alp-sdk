@@ -116,15 +116,12 @@ static gpio_flags_t _to_gpio_flags(alp_gpio_dir_t dir, alp_gpio_pull_t pull)
 	 * long comment above tas2563_init()'s `if (sd_n != NULL)` block)
 	 * exists BECAUSE forcing a level at configure time reintroduces the
 	 * exact glitch that sequence closes, on a net shared with another
-	 * device on the AEN801 EVK.  A previous version of this function
-	 * used GPIO_OUTPUT_INACTIVE tree-wide to close a *different* glitch
-	 * window (DA9292 CH2's DEEPX_CORE_0P75_EN/P64, which must start low)
-	 * and broke that ztest
-	 * (test_tas2563_init_writes_sd_n_before_configuring_it) -- a P64-
-	 * specific glitch needs a P64-specific fix, not a backend-wide
-	 * default: see examples/v2n/v2n-cm33-deepx-rail/src/main.c, which
-	 * applies tas2563's same write-before-configure-then-write-after
-	 * pattern to P64 instead. */
+	 * device on the AEN801 EVK.  A pin needing a specific initial level
+	 * (e.g. DA9292 CH2's DEEPX_CORE_0P75_EN/P64, which must start low)
+	 * gets a pin-specific fix at its own call site instead of a
+	 * backend-wide default: see examples/v2n/v2n-cm33-deepx-rail/src/
+	 * main.c, which applies tas2563's same write-before-configure-then-
+	 * write-after pattern to P64. */
 	gpio_flags_t f = (dir == ALP_GPIO_OUTPUT) ? GPIO_OUTPUT : GPIO_INPUT;
 	if (pull == ALP_GPIO_PULL_UP) f |= GPIO_PULL_UP;
 	if (pull == ALP_GPIO_PULL_DOWN) f |= GPIO_PULL_DOWN;

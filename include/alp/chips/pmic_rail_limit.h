@@ -50,6 +50,17 @@
  * check them against the window before energizing anything -- never skip
  * this check on the theory that the rail "isn't voltage-writable so
  * there's nothing to validate".
+ *
+ * One driver-specific exception to note when reading any of the three:
+ * ACT88760 and TPS628640 treat "no window" (`max_mv == 0`) as "nothing to
+ * check", so enabling a windowless entry proceeds once `enable_writable`
+ * allows it at all.  DA9292's da9292_set_enable() is stricter -- it
+ * refuses (::ALP_ERR_NOSUPPORT) enabling a windowless entry outright,
+ * since CH2 has no OTP-safe default worth energizing blind to.  Both are
+ * "fail-closed when the window can't be checked", just at different
+ * points: DA9292 closes at the missing-window case itself, ACT88760 /
+ * TPS628640 close only once a window exists and the live reading
+ * disagrees with it.
  */
 
 #ifndef ALP_CHIPS_PMIC_RAIL_LIMIT_H

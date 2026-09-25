@@ -120,26 +120,26 @@ tps628640_init(tps628640_t *ctx, alp_i2c_t *bus, uint8_t addr_7bit, uint16_t def
 	ctx->bus                = bus;
 	ctx->addr               = addr_7bit;
 	ctx->default_voltage_mv = default_voltage_mv;
-	ctx->control_shadow     = TPS628640_CTRL_DEFAULT;
 
 	/* ACK-probe via VOUT1 (the family has no ID register). */
 	uint8_t v = 0;
 	if (reg_read(ctx, TPS628640_REG_VOUT1, &v) != ALP_OK) return ALP_ERR_NOT_READY;
 
-	/* Seed the shadow from the live CONTROL byte whenever the read
-	 * actually lands something (bench V2M103 reads 0x6F).  Shadow ANY
-	 * readable non-0x00 byte -- including one with SOFTWARE_ENABLE
-	 * clear.  The earlier version only trusted a byte with
-	 * SOFTWARE_ENABLE set, on the theory that a byte without it means
-	 * CONTROL did not really read back; that is wrong for a rail that
-	 * is genuinely disabled (SOFTWARE_ENABLE cleared, other bits
-	 * non-zero) -- it left the shadow at CTRL_DEFAULT (SOFTWARE_ENABLE
-	 * set), so the very next set_fpwm_mode()/set_ramp_speed() call
-	 * would silently re-enable a rail init found off. */
+	/* Seed the shadow from the live CONTROL byte.  Any SUCCESSFUL read is
+	 * trusted verbatim (mask off RESET, which self-clears and must never
+	 * be shadowed as sticky) -- including a genuine 0x00 readback, which
+	 * is a real CONTROL state (every bit clear), not evidence the read
+	 * failed.  An earlier version treated 0x00 as "didn't really read
+	 * back" and kept CTRL_DEFAULT (SOFTWARE_ENABLE set) instead; before
+	 * that, it trusted only a byte with SOFTWARE_ENABLE set.  Both
+	 * versions could silently shadow a disabled rail as enabled.  A
+	 * FAILED read now fails init() outright rather than silently
+	 * guessing CTRL_DEFAULT: the driver has no live CONTROL state to
+	 * reason from, and shipping a guessed shadow risks the same
+	 * silent-re-enable class of bug. */
 	uint8_t ctrl = 0;
-	if (reg_read(ctx, TPS628640_REG_CONTROL, &ctrl) == ALP_OK && ctrl != 0x00u) {
-		ctx->control_shadow = (uint8_t)(ctrl & (uint8_t)~TPS628640_CTRL_RESET);
-	}
+	if (reg_read(ctx, TPS628640_REG_CONTROL, &ctrl) != ALP_OK) return ALP_ERR_NOT_READY;
+	ctx->control_shadow = (uint8_t)(ctrl & (uint8_t)~TPS628640_CTRL_RESET);
 
 	ctx->initialised = true;
 	return ALP_OK;
@@ -269,25 +269,44 @@ alp_status_t tps628640_reset_to_defaults(tps628640_t *ctx)
 	if (s != ALP_OK) return s;
 	ctx->control_shadow = TPS628640_CTRL_DEFAULT;
 
+	/* From here on the chip has ALREADY re-enabled the converter
+	 * (CTRL_DEFAULT has SOFTWARE_ENABLE=1) -- any error below leaves it
+	 * energized with the window unconfirmed unless this function does
+	 * something about it.  Fail-open (just propagating the error) would
+	 * do exactly that, so every error path from here disables the rail
+	 * best-effort before returning the ORIGINAL error: a rail this
+	 * driver cannot confirm the state of is worse than a rail this
+	 * driver switched off. */
 	const uint8_t want =
 	    (uint8_t)((ctx->control_shadow &
 	               (uint8_t)~(TPS628640_CTRL_FPWM_MODE | TPS628640_CTRL_RAMP_SPEED_MASK)) |
 	              fpwm_bit | ramp_bits);
 	if (want != ctx->control_shadow) {
 		s = write_control(ctx, want);
-		if (s != ALP_OK) return s;
+		if (s != ALP_OK) {
+			(void)write_control(
+			    ctx, (uint8_t)(ctx->control_shadow & (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE));
+			return s;
+		}
 	}
 
-	/* The reset can also revert VOUT1 to its POR default, which may no
-	 * longer sit inside a window installed after that POR value was
-	 * read -- re-check it exactly like software_enable() would, and
-	 * disable the rail again (fail-closed) when either the window
-	 * disagrees or the rail was off before this call, rather than
-	 * leaving it energized against the window or the caller's intent. */
-	uint16_t     mv = 0;
-	alp_status_t vs = get_vout(ctx, TPS628640_REG_VOUT1, &mv);
-	if (vs != ALP_OK) return vs;
-	const bool out_of_window = l->max_mv != 0u && !in_window(l, mv);
+	/* The reset can also revert VOUT1 *and* VOUT2 to their POR defaults,
+	 * which may no longer sit inside a window installed after those POR
+	 * values were read -- re-check both exactly like software_enable()
+	 * would (the VID strap picks which one is live and this driver can't
+	 * read it), and disable the rail again (fail-closed) when either
+	 * setpoint disagrees with the window or the rail was off before this
+	 * call, rather than leaving it energized against the window or the
+	 * caller's intent. */
+	uint16_t     mv1 = 0, mv2 = 0;
+	alp_status_t vs = get_vout(ctx, TPS628640_REG_VOUT1, &mv1);
+	if (vs == ALP_OK) vs = get_vout(ctx, TPS628640_REG_VOUT2, &mv2);
+	if (vs != ALP_OK) {
+		(void)write_control(
+		    ctx, (uint8_t)(ctx->control_shadow & (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE));
+		return vs;
+	}
+	const bool out_of_window = l->max_mv != 0u && (!in_window(l, mv1) || !in_window(l, mv2));
 	if (out_of_window || !was_enabled) {
 		alp_status_t ds = write_control(
 		    ctx, (uint8_t)(ctx->control_shadow & (uint8_t)~TPS628640_CTRL_SOFTWARE_ENABLE));

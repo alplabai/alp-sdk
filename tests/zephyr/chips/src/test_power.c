@@ -802,7 +802,7 @@ ZTEST(alp_chips, test_tps628640_enable_refuses_vout2_outside_window)
 	alp_i2c_close(bus);
 }
 
-/* #<PMIC review> init(): a rail found DISABLED (CONTROL reads back non-zero
+/* #1165: init() a rail found DISABLED (CONTROL reads back non-zero
  * with SOFTWARE_ENABLE clear) must shadow that state, not silently seed
  * CTRL_DEFAULT (SOFTWARE_ENABLE=1) -- otherwise the next set_fpwm_mode()
  * (a call that has nothing to do with enable) writes the shadow back and
@@ -814,8 +814,7 @@ ZTEST(alp_chips, test_tps628640_init_shadows_disabled_control)
 	fake_tps628640_reset(0x48u);
 	fake_tps628640_reset(0x4Fu);
 	/* A disabled rail: SOFTWARE_ENABLE (bit5) clear, everything else at
-	 * its datasheet default -- readable, non-zero, not the "no answer"
-	 * 0x00 case. */
+	 * its datasheet default -- readable and non-zero. */
 	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_CONTROL, 0x4Fu);
 
 	alp_i2c_t *bus = pmic_bus_open();
@@ -834,6 +833,48 @@ ZTEST(alp_chips, test_tps628640_init_shadows_disabled_control)
 	tps628640_deinit(&b44);
 	tps628640_deinit(&b48);
 	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* #7 (verify-review follow-up): a genuine CONTROL == 0x00 read is a real
+ * chip state (every bit clear -- SOFTWARE_ENABLE included), not evidence
+ * the read secretly failed; init() must shadow it verbatim rather than
+ * falling back to CTRL_DEFAULT (SOFTWARE_ENABLE=1). */
+ZTEST(alp_chips, test_tps628640_init_shadows_genuine_zero_control)
+{
+	tps628640_t b4f;
+	fake_tps628640_reset(0x4Fu);
+	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_CONTROL, 0x00u);
+
+	alp_i2c_t *bus = pmic_bus_open();
+	zassert_not_null(bus);
+	zassert_ok(tps628640_init(&b4f, bus, 0x4Fu, 500u));
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	zassert_ok(tps628640_set_fpwm_mode(&b4f, true));
+	zassert_equal(fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL),
+	              TPS628640_CTRL_FPWM_MODE,
+	              "only the FPWM bit added to a genuinely-zero shadow; "
+	              "SOFTWARE_ENABLE must stay clear, not seed CTRL_DEFAULT");
+
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* #7: a FAILED CONTROL read must fail init() outright -- with no live
+ * CONTROL state to shadow, guessing CTRL_DEFAULT risks the same
+ * silent-re-enable class of bug the disabled-shadow fix above closes. */
+ZTEST(alp_chips, test_tps628640_init_fails_when_control_read_fails)
+{
+	tps628640_t b4f;
+	fake_tps628640_reset(0x4Fu);
+	fake_tps628640_fail_next_read(0x4Fu, TPS628640_REG_CONTROL);
+
+	alp_i2c_t *bus = pmic_bus_open();
+	zassert_not_null(bus);
+	/* The VOUT1 ACK-probe still succeeds; only the CONTROL read fails. */
+	zassert_equal(tps628640_init(&b4f, bus, 0x4Fu, 500u), ALP_ERR_NOT_READY);
+
 	alp_i2c_close(bus);
 }
 
@@ -879,6 +920,64 @@ ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout)
 	    (fake_tps628640_get_reg(0x48u, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
 	    0u,
 	    "reset must disable a rail it cannot confirm is in-window");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* Same as above, but VOUT1 alone reverts in-window and ONLY VOUT2
+ * disagrees -- the VID strap picks which one is live and this driver
+ * can't read it, so reset_to_defaults() must check both, not just VOUT1.
+ * The fake normally mirrors VOUT2 to VOUT1's POR byte on every reset
+ * (documented TBD-verify -- no bench reading of VOUT2 exists), which
+ * makes the two registers byte-identical and so never independently
+ * out-of-window after a real reset; fake_tps628640_set_vout2_por_independent()
+ * is a test-only hook that turns that mirroring off for one instance, so
+ * a pre-armed VOUT2 value survives the reset unmirrored and this test can
+ * prove the VOUT2 check is real, not just VOUT1 read twice. */
+ZTEST(alp_chips, test_tps628640_reset_disables_out_of_window_vout2)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	fake_tps628640_set_vout2_por_independent(0x4Fu, true);
+	fake_tps628640_set_reg(0x4Fu, TPS628640_REG_VOUT2, 0x00u /* 400 mV, outside [475, 525] */);
+
+	/* VOUT1 still reverts to its in-window POR (0x14 = 500 mV); only the
+	 * pre-armed VOUT2 (400 mV) is out of range. */
+	zassert_equal(tps628640_reset_to_defaults(&b4f), ALP_ERR_OUT_OF_RANGE);
+	zassert_equal(
+	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
+	    0u,
+	    "reset must disable when VOUT2 alone is out of window");
+
+	tps628640_deinit(&b44);
+	tps628640_deinit(&b48);
+	tps628640_deinit(&b4f);
+	alp_i2c_close(bus);
+}
+
+/* #2 (verify-review follow-up): a later error after the reset write has
+ * already landed (a failed post-reset VOUT1 read here) must not leave the
+ * rail fail-open -- the chip already re-enabled it at CTRL_DEFAULT before
+ * this point.  reset_to_defaults() must attempt the SOFTWARE_ENABLE-clear
+ * write best-effort and return the ORIGINAL error, not silently propagate
+ * it with the rail still energized and unconfirmed. */
+ZTEST(alp_chips, test_tps628640_reset_disables_on_post_reset_read_failure)
+{
+	tps628640_t b44, b48, b4f;
+	alp_i2c_t  *bus = tps_setup(&b44, &b48, &b4f);
+
+	zassert_ok(tps628640_set_limits(&b4f, &tps_l4f));
+	fake_tps628640_fail_next_read(0x4Fu, TPS628640_REG_VOUT1);
+	zassert_not_equal(tps628640_reset_to_defaults(&b4f), ALP_OK);
+	zassert_equal(
+	    (fake_tps628640_get_reg(0x4Fu, TPS628640_REG_CONTROL) & TPS628640_CTRL_SOFTWARE_ENABLE),
+	    0u,
+	    "a failed post-reset VOUT1 read must not leave the rail fail-open");
 
 	tps628640_deinit(&b44);
 	tps628640_deinit(&b48);

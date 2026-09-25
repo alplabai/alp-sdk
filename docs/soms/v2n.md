@@ -140,11 +140,12 @@ for V2N-M1), and installed with `act8760_set_limits()` /
   +/-5 %, rounded inward to the chip's step) and is read back;
 - a `critical` rail (every ACT88760 rail, DA9292 CH1, TPS628640 `0x4D`)
   can never be disabled by software;
-- the ACT88760 raw write path reaches only MSTR `0x01`, `0x05`, `0x14`,
+- the ACT88760 raw write path reaches only MSTR `0x01`, `0x05`,
   `0x2B`, `0x33`; `0x07` (MR / SLEEP / DPSLP / POWER OFF / watchdog),
-  `0x09`, `0x0A`, the IO-delay / WDTIME registers `0x0B` / `0x0C`, the
-  factory ranges `0x15`-`0x26` and `0x2D`-`0x32`, every MODEx, every tile
-  register and all of ADD2 are refused;
+  `0x09`, `0x0A`, the IO-delay / WDTIME registers `0x0B` / `0x0C`, `0x14`
+  (POK_OV / VSYSWARN thresholds -- a bad value can trip PMIC shutdown),
+  the factory ranges `0x15`-`0x26` and `0x2D`-`0x32`, every MODEx, every
+  tile register and all of ADD2 are refused;
 - the only ACT88760 GPIO polarity that may be written is GPIO4
   `GD32_NRST` (MODE4 `0x10`: some units' OTP reads `0x88`, holding the
   GD32 in reset; the volatile fix is `0x08`).

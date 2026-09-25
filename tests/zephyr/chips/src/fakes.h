@@ -10,6 +10,7 @@
 #ifndef ALP_TEST_FAKES_H
 #define ALP_TEST_FAKES_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -262,6 +263,16 @@ uint8_t  fake_tps628640_get_reg(uint8_t addr, uint8_t reg);
 void     fake_tps628640_set_reg(uint8_t addr, uint8_t reg, uint8_t val);
 uint32_t fake_tps628640_write_count(uint8_t addr, uint8_t reg);
 void     fake_tps628640_reset(uint8_t addr);
+/** Arm a one-shot NACK for the next READ of @p reg on the instance at
+ *  @p addr (writes are unaffected). Self-disarms after firing once. */
+void fake_tps628640_fail_next_read(uint8_t addr, uint8_t reg);
+/** Testing-only knob: when @p independent is true, a RESET-bit write no
+ *  longer mirrors VOUT1's POR value into VOUT2 for the instance at
+ *  @p addr, so a value set on VOUT2 with fake_tps628640_set_reg()
+ *  beforehand survives the reset -- lets a ztest prove a VOUT2 check is
+ *  real by making it diverge from VOUT1, which the normal mirrored
+ *  default can never do. Cleared back to false by fake_tps628640_reset(). */
+void fake_tps628640_set_vout2_por_independent(uint8_t addr, bool independent);
 
 /* ------------------------------------------------------------------ */
 /* fake clk_5l35023b                                                    */
