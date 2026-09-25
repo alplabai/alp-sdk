@@ -14,7 +14,9 @@ SRC_URI = "file://alp-hostname.service file://alp-hostname-set.sh"
 
 S = "${WORKDIR}"
 
-inherit systemd
+inherit allarch systemd
+
+RDEPENDS:${PN} = "systemd"
 
 SYSTEMD_SERVICE:${PN} = "alp-hostname.service"
 

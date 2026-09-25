@@ -18,9 +18,13 @@ name=$(tr -d '\0' <"$prop" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' |
 	sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
 [ -n "$name" ] || exit 0
 
-hostname "$name"
-# Persist too, so tools that read /etc/hostname agree; best effort on a
-# read-only rootfs.
-echo "$name" >/etc/hostname 2>/dev/null || true
-echo "alp-hostname: $name (from /chosen/alp,sku)"
+hostname "$name" && echo "alp-hostname: $name (from /chosen/alp,sku)"
+
+# Persist so tools reading /etc/hostname agree. Only when it changed (no
+# flash write every boot) and via rename, so a power cut never leaves an
+# empty file. Best effort on a read-only rootfs.
+if [ "$(cat /etc/hostname 2>/dev/null)" != "$name" ]; then
+	echo "$name" >/etc/hostname.alp-new 2>/dev/null &&
+		mv -f /etc/hostname.alp-new /etc/hostname 2>/dev/null
+fi
 exit 0

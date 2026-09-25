@@ -265,10 +265,13 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
 
 # Publish the SKU from the validated identity-EEPROM manifest to the kernel
-# as /chosen/alp,sku (EVT_FT_FIXUP spy; ft_board_setup() is already taken by
-# rcar-common's v2-common.c). recipes-core/alp-hostname turns it into the
-# hostname. Applies on top of 0001's alp_som_is_v2n_m1() and 0007's
-# board_late_init() context.
+# as /chosen/alp,sku from ft_system_setup() (the patch enables
+# CONFIG_OF_SYSTEM_SETUP; ft_board_setup() is already taken by rcar-common's
+# v2-common.c). recipes-core/alp-hostname turns it into the hostname.
+# Context: 0001's alp_som_is_v2n_m1() and the tail of 0007's
+# alp_clk5l_fixup(). 0008 is reserved for the SDHI1 microSD patch on the
+# provisioning branch; its hunks are disjoint from this one's, so keep its
+# SRC_URI line ahead of this one when both land.
 SRC_URI:append:rzv2n-family = " file://0009-rzv2n-dev-ALP-E1M-publish-sku-to-chosen.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot
