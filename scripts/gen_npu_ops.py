@@ -21,8 +21,9 @@ WORKING DIRECTORY (it has no --output-dir of its own), so this script runs
 it inside a scratch tempdir.
 
 The TOSA tables in the same report are ignored -- the Vela adapter
-(`tan.model.adapters.ethos_u`, tan-cli; formerly `scripts/alp_model/adapters/
-ethos_u.py` here before ADR-0028) accepts only `src_format == "tflite"`.
+(`scripts/alp_model/adapters/ethos_u.py`; ADR-0028 proposes relocating it to
+tan-cli's `tan.model.adapters.ethos_u`, Status: Proposed, not yet enacted)
+accepts only `src_format == "tflite"`.
 
 This script does NOT touch metadata/npu_ops/drpai/ -- the DRP-AI Translator
 publishes no machine-readable report, only a vendor PDF manual, so that
@@ -182,7 +183,7 @@ def build_tables(vela: str) -> dict[str, dict]:
         "regenerating at ethos-u55-32, ethos-u55-256, ethos-u65-512, "
         "ethos-u85-128 and ethos-u85-2048: identical report). Only the "
         "TFLite table is used -- the TOSA tables in the same report are out "
-        "of scope (tan.model.adapters.ethos_u accepts only "
+        "of scope (scripts/alp_model/adapters/ethos_u.py accepts only "
         "src_format == \"tflite\")."
     )
 

@@ -34,9 +34,9 @@ Ethos-U55/U65 (53). U55/U65 is a strict subset; exactly 17 are U85-only —
 `CAST`, `DIV`, `EQUAL`, `GATHER`, `GREATER`, `GREATER_EQUAL`, `LESS`,
 `LESS_EQUAL`, `LOGICAL_AND`, `LOGICAL_NOT`, `LOGICAL_OR`, `NOT_EQUAL`,
 `REDUCE_ALL`, `REDUCE_ANY`, `SCATTER_ND`, `SELECT`, `SELECT_V2`. alp-sdk ships
-all three variants (u85: E1M-AEN401/601/801; u55: E1M-AEN301/501/701; u65:
-E1M-NX9101), so one flat `ethos_u.json` carrying 70 would report 17 false
-capabilities on four of the seven Ethos-U SKUs. The tables are invariant to
+all three variants (u85: E1M-AEN401/601/801/803; u55: E1M-AEN301/501/701;
+u65: E1M-NX9101), so one flat `ethos_u.json` carrying 70 would report 17
+false capabilities on four of the eight Ethos-U SKUs. The tables are invariant to
 `--accelerator-config` — five regenerations across `ethos-u55-32`,
 `ethos-u55-256`, `ethos-u65-512`, `ethos-u85-128` and `ethos-u85-2048` produced
 byte-identical output — so the architecture family, not the MAC count, is the

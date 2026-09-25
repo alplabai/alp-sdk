@@ -494,13 +494,6 @@
           "pattern": "^[A-Za-z0-9_-]+$",
           "description": "HyperRAM MPN (e.g. `W958D8NBYA5I`), or the literal `TBD`."
         },
-        "assembled": {
-          "oneOf": [
-            { "type": "boolean" },
-            { "type": "string", "enum": ["optional"] }
-          ],
-          "description": "Population status: true (default), false (DNI), or \"optional\" (assembled per BOM variant).  Without this key the block could only ever describe a HyperRAM that IS fitted, so a designed-in but unpopulated part had no way to say so and `memory.dram_mbit` inherited a capacity the module does not carry."
-        },
         "capacity_mbit": {
           "oneOf": [
             {

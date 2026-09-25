@@ -62,8 +62,7 @@
  *   by value, exactly the way the DEEPX path passes its raw .dxnn buffer --
  *   CreateSessionFromArray takes them as-is, so the generic loader
  *   (src/common/alp_model_loader.c) stays format-agnostic.  See the
- *   VALID_BLOB_FORMATS "onnx" entry in tan.model.manifest (tan-cli;
- *   formerly scripts/alp_model/manifest.py here before ADR-0028).
+ *   VALID_BLOB_FORMATS "onnx" entry in scripts/alp_model/manifest.py.
  *
  * Tensor shape / dynamic dims
  *   ORT reports a symbolic/dynamic dimension (e.g. a batch axis) as <= 0.

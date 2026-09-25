@@ -3,7 +3,7 @@
 Pins the confidential-vendor-filename leak class fixed for the Alif E4/E6/E8
 Hardware Reference Manual `hwrm.source` fields (see metadata/socs/alif/ensemble/
 e4.json, e6.json, e8.json): an NDA-bound vendor PDF's own filename (e.g.
-"Confidential-Alif_E4_HWRM_v0.3.pdf") is itself confidential -- publishing it
+"Confidential-Vendor_XX_HWRM_vN.pdf") is itself confidential -- publishing it
 in this public repo discloses both the classification and the exact document
 identity, even though the PDF bytes never land in git. `check_public_private.py`
 has no rule for this class today (`grep -ni confidential
@@ -26,8 +26,8 @@ The walk, deliberately chosen:
 
 Deliberately NOT walked:
   - `tests/scripts/` -- this file's own docstring above and the mutation
-    fixture used to prove this test (a synthetic "Confidential-Alif_E5_HWRM_
-    v9.9.pdf"-shaped string injected into a real file, then reverted) would
+    fixture used to prove this test (a synthetic "Confidential-Vendor_XX_HWRM_
+    vN.pdf"-shaped string injected into a real file, then reverted) would
     trip over a self-referential scan, exactly as already documented in
     `test_soc_npu_pairing.py`'s HG-subsystem / A32-reach pins.
   - `doxygen-out/` -- a generated (and, independently of this change,
@@ -60,7 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 import validate_metadata as V  # noqa: E402
 
 # A vendor PDF's own confidential-marked filename, e.g.
-# "Confidential-Alif_E4_HWRM_v0.3.pdf". Anchored on the literal "Confidential-"
+# "Confidential-Vendor_XX_HWRM_vN.pdf". Anchored on the literal "Confidential-"
 # prefix immediately followed by a contiguous filename-shaped run ending in
 # ".pdf", so ordinary prose about the naming convention ("the Confidential-
 # source rule") cannot match -- there, "source" is followed by a space, not

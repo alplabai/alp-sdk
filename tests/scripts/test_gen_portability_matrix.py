@@ -170,7 +170,7 @@ def test_notes_derive_from_metadata(generated):
                                    "Notes (from metadata)")
     assert "64 Gbit DRAM" in _cell(generated, "E1M-V2N102",
                                    "Notes (from metadata)")
-    # No AEN SKU populates the OSPI0 HyperRAM (memory.dram_mbit: 0), so the
+    # E1M-AEN801 populates neither OSPI0 memory (memory.dram_mbit: 0), so the
     # cell must say so outright -- it used to claim "256 Mbit DRAM", a
     # capacity the module never carried.
     aen = _cell(generated, "E1M-AEN801", "Notes (from metadata)")

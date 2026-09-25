@@ -27,8 +27,18 @@ REPO = Path(__file__).resolve().parents[2]
 
 AEN_PRESETS = [
     "E1M-AEN301", "E1M-AEN401", "E1M-AEN501",
-    "E1M-AEN601", "E1M-AEN701", "E1M-AEN801",
+    "E1M-AEN601", "E1M-AEN701", "E1M-AEN801", "E1M-AEN803",
 ]
+
+# Per-SKU population state (`on_module.hyperram`/`.ospi_memories.assembled`)
+# is NOT uniform across this family: only `E1M-AEN801` resolves to a fully
+# populated-none `0`/`0`.  `E1M-AEN301/401/501/601/701` are `assembled:
+# optional` (per-BOM-variant, capacity genuinely `TBD`) and `E1M-AEN803`
+# fits both parts (`assembled: true`/`optional`, `512`/`256`).  A test that
+# asserted `== 0` across the whole family would itself be the #915-class
+# overclaim this fragment exists to prevent.
+_RESOLVED_ZERO = {"E1M-AEN801"}
+_RESOLVED_FITTED = {"E1M-AEN803": (512, 256)}
 
 
 def _load_vm():
@@ -361,6 +371,32 @@ def test_an_empty_ospi_memories_block_does_not_satisfy_the_requirement():
     assert "on_module.ospi_memories" in failures[0][1][0]
 
 
+def test_an_ospi_memories_block_of_only_empty_entries_does_not_satisfy_the_requirement():
+    """`ospi_memories: {ospi0: {}}` -- a non-empty OUTER dict whose only
+    entry is itself empty -- must not read as a declaration either.  An
+    empty per-entry dict has no `assembled`/`capacity_mbit` to bind against,
+    so it slipped past both the outer "block missing or empty" check (the
+    dict itself is non-empty) and `_memory_population_msgs` (no int capacity
+    to compare, so it silently returned no failure) before this was fixed."""
+    body = (
+        "sku: E1M-AEN801\n"
+        "silicon: alif:ensemble:e8\n"
+        "on_module:\n"
+        "  hyperram:\n"
+        "    chip:           W958D8NBYA5I\n"
+        "    assembled:      false\n"
+        "    capacity_mbit:  256\n"
+        "  ospi_memories:\n"
+        "    ospi0:          {}\n"
+        "memory:\n"
+        "  dram_mbit:            0\n"
+        "  flash_mbit:           TBD\n"
+    )
+    failures = _check("mem-alif-empty-ospi-entry", body)
+    assert failures
+    assert "on_module.ospi_memories" in failures[0][1][0]
+
+
 def test_the_requirement_is_derived_from_the_silicon_ref_not_a_sku_list():
     """An E1M-AEN901 that does not exist yet is covered the day it lands:
     the trigger is `silicon: alif:ensemble:*`, never the SKU string."""
@@ -390,7 +426,7 @@ def test_a_non_ensemble_preset_may_still_omit_the_blocks(silicon):
 
 def test_every_real_alif_ensemble_preset_is_in_scope_of_the_requirement():
     """Guards the derivation itself: were the `silicon:` spelling to drift,
-    all six AEN presets would silently fall OUT of the requirement.  This
+    all seven AEN presets would silently fall OUT of the requirement.  This
     goes red instead of the requirement quietly covering nothing."""
     import yaml
 
@@ -419,7 +455,10 @@ def test_real_aen_preset_derivation_holds(sku):
 @pytest.mark.parametrize("sku", AEN_PRESETS)
 def test_real_aen_preset_is_actually_bound(sku):
     """A check that silently skips every real preset is not a check.  Assert
-    both figures are genuinely under the rule on all six AEN SKUs."""
+    both figures are genuinely under the rule on all seven AEN SKUs -- but
+    "bound" does not mean "resolved to 0" everywhere: only `E1M-AEN801` is.
+    `E1M-AEN301/401/501/601/701` are `assembled: optional` / `TBD` (open,
+    per-BOM-variant) and `E1M-AEN803` is fully fitted at 512/256."""
     import yaml
 
     doc = yaml.safe_load(
@@ -428,8 +467,23 @@ def test_real_aen_preset_is_actually_bound(sku):
     assert isinstance(on_module.get("hyperram"), dict)
     assert isinstance(on_module.get("ospi_memories"), dict)
     assert on_module["ospi_memories"]
-    assert doc["memory"]["dram_mbit"] == 0
-    assert doc["memory"]["flash_mbit"] == 0
+
+    dram = doc["memory"]["dram_mbit"]
+    flash = doc["memory"]["flash_mbit"]
+    if sku in _RESOLVED_ZERO:
+        assert dram == 0
+        assert flash == 0
+    elif sku in _RESOLVED_FITTED:
+        want_dram, want_flash = _RESOLVED_FITTED[sku]
+        assert dram == want_dram
+        assert flash == want_flash
+    else:
+        # Open, per-BOM-variant SKUs: the check binds them (both blocks
+        # present, `assembled: optional`) but does not resolve a figure --
+        # that is the `0`-vs-`TBD` distinction #915 is about.
+        assert on_module["hyperram"].get("assembled") == "optional"
+        assert dram == "TBD"
+        assert flash == "TBD"
 
 
 def test_every_som_preset_passes_the_check():

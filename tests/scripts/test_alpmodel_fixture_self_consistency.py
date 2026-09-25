@@ -1,29 +1,26 @@
 # tests/scripts/test_alpmodel_fixture_self_consistency.py
 """Self-consistency guard for the three committed `.alpmodel` C-test fixtures.
 
-ADR-0028 moved the `.alpmodel` WRITER (`tan.model.package` / `_gen_fixture`)
-out of this repo into tan-cli. Before that move, a single generator produced
+The `.alpmodel` WRITER (`scripts/alp_model/package.py` / `_gen_fixture.py`)
+is still IN this repo today -- ADR-0028 (`docs/adr/0028-tan-owns-the-model-
+engine.md`, Status: Proposed) proposes moving it to tan-cli's `tan.model`,
+but that migration has not been enacted. One generator produces
 `tests/fixtures/alpmodel/minimal.alpmodel`,
 `tests/unit/alpmodel_reader/src/fixture.h` and
-`tests/yocto/onnx_cpu_fixture.h` together, so the three could never drift from
-each other by construction. Nothing in *this* repo enforces that any more --
-the only cross-repo check is tan-cli's `python/tests/model/test_package.py`,
-which needs `ALP_SDK_ROOT` bound to a checkout of the very PR being tested to
-be meaningful, and tan-cli CI's `parity.yml` binds it to a frozen
-`PINNED_SDK_TAG` instead. A PR here that edits these fixtures (by hand, by a
-partial regen, by a bad merge) can pass every alp-sdk gate while silently
-breaking that cross-repo contract.
+`tests/yocto/onnx_cpu_fixture.h` together (`python -m alp_model._gen_fixture`),
+so the three should never drift from each other by construction -- but
+nothing runs that generator as part of this repo's own gates, so a fixture
+edited by hand, by a partial regen, or by a bad merge can still pass every
+other alp-sdk gate while silently disagreeing with itself.
 
-This test is the cheap half of the mitigation: it does NOT reimplement tan's
-writer (that would be exactly the drift ADR-0028 exists to kill) -- it only
-decodes the container using the wire layout `src/common/alp_model.c`'s
+This test is that missing check. It does NOT reimplement the generator --
+it only decodes the container using the wire layout `src/common/alp_model.c`'s
 `alp_model_parse()` already implements (24-byte header, CBOR manifest, 8-byte
-blob-table entries -- all alp-sdk-owned, since the on-device *reader* stayed
-here per ADR-0028 Decision-3), and checks:
+blob-table entries), and checks:
 
   1. `fixture.h`'s C byte array and `minimal.alpmodel`'s raw bytes are the
      SAME bytes -- these are two committed encodings of one logical object
-     and must never disagree with each other, independent of what tan's
+     and must never disagree with each other, independent of what the
      generator currently emits.
   2. Both fixtures are structurally well-formed containers (`ALPM` magic,
      `container_v` matching `include/alp/model.h`'s `ALP_MODEL_CONTAINER_V`,
@@ -32,12 +29,9 @@ here per ADR-0028 Decision-3), and checks:
 
 What this does NOT catch: two fixtures edited consistently with each other,
 by hand or by a stale/buggy generator invocation, into bytes that no longer
-match what tan's CANONICAL `tan.model.package.write_package()` /
-`to_c_header()` would actually produce for the same manifest. That residual
-gap needs a real cross-repo run (`ALP_SDK_ROOT` bound to THIS PR, not a
-frozen tag) -- see changelog.d/1471.md for the current mitigation
-(a documented `PINNED_SDK_TAG` bump as a tan-cli release step) until/unless
-tan-cli's parity workflow binds `ALP_SDK_ROOT` to the PR under test instead.
+match what `scripts/alp_model/package.py`'s `write_package()` / `to_c_header()`
+would actually produce for the same manifest. Running the real generator and
+diffing its output is the only thing that closes that residual gap.
 """
 from __future__ import annotations
 
@@ -85,8 +79,7 @@ def _decode_container(data: bytes) -> dict:
     want_v = _container_version()
     assert container_v == want_v, (
         f"container_v {container_v} != ALP_MODEL_CONTAINER_V {want_v} -- "
-        "regenerate with `python -m tan.model._gen_fixture --root <this checkout>` "
-        "(a tan-cli checkout)"
+        "regenerate with `python -m alp_model._gen_fixture`"
     )
     assert mft_off <= len(data) and mft_len <= len(data) - mft_off, "manifest offset/length out of bounds"
     manifest = cbor2.loads(data[mft_off:mft_off + mft_len])
@@ -105,8 +98,7 @@ def test_fixture_h_matches_committed_binary():
     assert header_bytes == binary_bytes, (
         "tests/unit/alpmodel_reader/src/fixture.h and "
         "tests/fixtures/alpmodel/minimal.alpmodel have drifted apart -- "
-        "regenerate both together with "
-        "`python -m tan.model._gen_fixture --root <this checkout>` (a tan-cli checkout)"
+        "regenerate both together with `python -m alp_model._gen_fixture`"
     )
 
 

@@ -997,12 +997,17 @@ stage_generated_files() {
     # what to install; otherwise it still skips, loudly.
     if [ -f scripts/gen_npu_ops.py ]; then
         local gen_npu_ops_out npu_ops_touched npu_ops_base
-        # Same DIFF_BASE convention as the clang-format stage above.  Two
-        # sources, because either alone has a blind spot: `git diff <commit>`
-        # cannot see uncommitted work (which is what a local run usually IS),
-        # and the working tree cannot see what an earlier commit on the branch
-        # already changed.
-        npu_ops_base="${DIFF_BASE:-HEAD~1}"
+        # DIFF_BASE overrides, same as the clang-format stage above, but the
+        # default here is merge-base(origin/dev, HEAD), not HEAD~1: a
+        # multi-commit branch (the normal case for a metadata change like
+        # this) has npu_ops-touching commits older than HEAD~1, and HEAD~1
+        # would miss them entirely.  If `origin/dev` is unreachable (no such
+        # remote-tracking ref locally), `git merge-base` fails and this falls
+        # back to HEAD~1.  Two sources, because either alone has a blind
+        # spot: `git diff <base>` cannot see uncommitted work (which is what
+        # a local run usually IS), and the working tree cannot see what an
+        # earlier commit on the branch already changed.
+        npu_ops_base="${DIFF_BASE:-$(git merge-base origin/dev HEAD 2>/dev/null || echo HEAD~1)}"
         npu_ops_touched=""
         if git rev-parse "${npu_ops_base}" >/dev/null 2>&1; then
             npu_ops_touched=$(git diff --name-only "${npu_ops_base}" -- \

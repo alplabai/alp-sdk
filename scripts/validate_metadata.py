@@ -667,7 +667,18 @@ def _check_som_memory_population(som_files) -> list:
             for key, block, figure in (
                     ("hyperram", hyperram, "dram_mbit"),
                     ("ospi_memories", ospi, "flash_mbit")):
-                if not isinstance(block, dict) or not block:
+                # An `ospi_memories` dict carrying only empty entries
+                # (`{ospi0: {}}`) is not a declared block either -- an empty
+                # per-entry dict has no `assembled`/`capacity_mbit` to bind
+                # against, so it would otherwise slip past both this check
+                # (the outer dict is non-empty) and _memory_population_msgs
+                # (no int capacity to compare, so it returns no failure).
+                block_is_effectively_empty = (
+                    not isinstance(block, dict) or not block or
+                    (key == "ospi_memories" and
+                     not any(isinstance(v, dict) and v
+                             for v in block.values())))
+                if block_is_effectively_empty:
                     msgs.append(
                         f"silicon={silicon!r} is an Alif Ensemble part, whose "
                         f"only external memory sits on the OSPI/HexSPI octal "
@@ -687,7 +698,8 @@ def _check_som_memory_population(som_files) -> list:
 
         if isinstance(ospi, dict) and ospi:
             entries = [(f"on_module.ospi_memories.{k}", v)
-                       for k, v in sorted(ospi.items()) if isinstance(v, dict)]
+                       for k, v in sorted(ospi.items())
+                       if isinstance(v, dict) and v]
             if entries:
                 bound.append("flash_mbit <- on_module.ospi_memories")
                 msgs += _memory_population_msgs(
@@ -1219,13 +1231,11 @@ def _check_soc_vela_memory_profile(soc_files) -> list:
 
     Reading the `source` citations back -- proving the cited lines still state
     the declared `memory_mode` -- deliberately does NOT live here. Those
-    citations point into `examples/` and `vendors/`, and this script is run
-    against a metadata-ONLY scratch clone by
-    tests/scripts/test_alp_cli_new_som.py's
-    `_clone_metadata_gates`, where those trees do not exist. Making the check
-    tolerate their absence would turn it into a silent skip; it lives in
-    tests/scripts/test_vela_profile_metadata.py instead, which always runs
-    against the real checkout.
+    citations point into `examples/` and `vendors/`, which are not guaranteed
+    present in every context this script runs in (e.g. a metadata-only
+    scratch clone). Making the check tolerate their absence would turn it
+    into a silent skip; it lives in tests/scripts/test_vela_profile_metadata.py
+    instead, which always runs against the real checkout.
 
     Returns a failure list shaped like `_check_files()`.
     """
