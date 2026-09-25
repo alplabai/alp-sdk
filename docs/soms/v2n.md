@@ -63,7 +63,7 @@ build would see this RTC time out instead. `&rtc` probes before
 `rv3028` and is pinned to `/dev/rtc1` (`rtc1` alias) so `rv3028` keeps
 `/dev/rtc0` -- see `e1m-v2n-som.dtsi`'s `aliases` block.
 
-## On-module clock-generator fixup
+## On-module clock-generator fixup {#on-module-clock-generator-fixup}
 
 The on-module 5L35023B programmable clock generator (RIIC8/BRD_I2C,
 `0x69`) ships an OTP image whose single-ended output routing is wrong
