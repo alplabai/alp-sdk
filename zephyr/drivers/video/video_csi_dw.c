@@ -322,10 +322,13 @@ static void csi2_dw_irq(const struct device *dev)
 
 static int csi2_dw_ipi_advanced_features(const struct device *dev)
 {
+	const struct csi2_dw_config *config = dev->config;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 
 	/*
-	 * 1. Disable Frame start to trigger any sync event.
+	 * 1. Frame start triggers a sync event only if ipi_fs_sync is set (#2287 Stage B, bench
+	 *    runs 304-306 -- see struct csi2_dw_config's and the ipi-fs-sync DT property's own
+	 *    comments); default (unset) behaviour is UNCHANGED from before this option existed.
 	 * 2. Enable Manual selection of packets for Line Delimiters.
 	 * 3. Disable use of embedded packets for IPI sync events.
 	 * 4. Disable use of blanking packets for IPI sync events.
@@ -341,7 +344,8 @@ static int csi2_dw_ipi_advanced_features(const struct device *dev)
 			       CSI_IPI_ADV_FEATURES_DT_OVERWRITE);
 
 	sys_set_bits(regs + CSI_IPI_ADV_FEATURES,
-		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO);
+		     CSI_IPI_ADV_FEATURES_SEL_LINE_EVENT | CSI_IPI_ADV_FEATURES_EN_VIDEO |
+			     (config->ipi_fs_sync ? CSI_IPI_ADV_FEATURES_SYNC_EVENT : 0));
 
 	return 0;
 }
@@ -1108,6 +1112,7 @@ static int csi2_dw_init(const struct device *dev)
 		/* issue #2287 Stage B: see struct csi2_dw_config's own comment on these two. */    \
 		.hline = DT_INST_PROP_OR(i, csi_hline, 0),                                         \
 		.vtotal = DT_INST_PROP_OR(i, csi_vtotal, 0),                                       \
+		.ipi_fs_sync = DT_INST_PROP(i, ipi_fs_sync),                                       \
 	};                                                                                         \
                                                                                                    \
 	static struct csi2_dw_data data_##i = {                                                    \

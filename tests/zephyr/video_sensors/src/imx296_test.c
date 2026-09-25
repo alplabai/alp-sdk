@@ -33,6 +33,7 @@
 #define REG_SHS_MSB  0x308f
 #define REG_GAIN_LSB 0x3204
 #define REG_GAIN_MSB 0x3205
+#define REG_GAINDLY  0x3212
 
 /* VMAX (24-bit LE), HMAX (16-bit LE), INCKSEL0..3 and CSI_TIMING -- see imx296.c's
  * IMX296_REG_VMAX / IMX296_REG_HMAX / IMX296_REG_INCKSEL0..3 / IMX296_REG_CSI_TIMING and
@@ -88,10 +89,15 @@
 #define IMX296_TRIGGER_MODE_EXTERNAL 1
 
 /* Sony IMX296 datasheet "Register List of All-pixel scan mode" (page 49): VMAX = 1118 lines/frame
- * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); SHS_MIN = 4
- * ("Register List of Shutter setting", page 60) gives the exposure ceiling VMAX - 4 = 1114. */
+ * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); the
+ * datasheet's own legal SHS floor is 4 ("Register List of Shutter setting", page 60, exposure
+ * ceiling VMAX - 4 = 1114) -- but imx296.c's own VIDEO_CID_EXPOSURE range clamps to
+ * IMX296_SHS_DEFAULT (14) instead, bench-proven (#2287 runs 304-306, E1M-AEN803 2026W36-0001):
+ * SHS=4 produced a completely flat, black frame with no scene content on real silicon, SHS=14
+ * (same ROI/timing) a real scene -- see imx296.c's own comment on this clamp for why 4 stays the
+ * datasheet-legal SHS floor everywhere else even though this driver won't drive the sensor to it. */
 #define IMX296_VMAX  1118
-#define EXPOSURE_MAX (IMX296_VMAX - 4)
+#define EXPOSURE_MAX (IMX296_VMAX - 14)
 #define GAIN_MAX     480
 
 static const struct device *imx296_dev(void)
@@ -214,6 +220,14 @@ ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
 	zassert_equal(val, 0x00, "GAIN LSB default (0 dB)");
 	zassert_true(imx296_test_first_write(emul, REG_GAIN_MSB, &val), "no write to GAIN MSB logged");
 	zassert_equal(val, 0x00, "GAIN MSB default (0 dB)");
+
+	/*
+	 * #2287 (bench runs 304-306): GAINDLY's own POR default (00h) is datasheet-prohibited
+	 * (page 41/56) -- imx296_init() must write the one legal value (08h, "Delay 1 Frame")
+	 * this driver uses, unconditionally, same as SHS/GAIN/REVERSE above.
+	 */
+	zassert_true(imx296_test_first_write(emul, REG_GAINDLY, &val), "no write to GAINDLY logged");
+	zassert_equal(val, 0x08, "GAINDLY default (Delay 1 Frame, page 41/56)");
 
 	zassert_true(imx296_test_first_write(emul, REG_REVERSE, &val), "no write to REVERSE logged");
 	zassert_equal(val, 0x00, "REVERSE default (no flip)");
@@ -642,12 +656,12 @@ ZTEST(imx296, test_exposure_ctrl_programs_shs_inverted)
 	uint8_t              val;
 
 	/* "Calculation Formula of Exposure Time" (page 60): exposure ascends with more
-	 * integration time, which is the INVERSE of SHS -- shs = VMAX - exposure. At the
-	 * ceiling (VMAX - 4), shs should be exactly 4. */
+	 * integration time, which is the INVERSE of SHS -- shs = VMAX - exposure. At this
+	 * driver's clamped ceiling (VMAX - 14, #2287 runs 304-306), shs should be exactly 14. */
 	zassert_ok(video_set_ctrl(imx296_dev(), &ctrl));
 
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_LSB, &val));
-	zassert_equal(val, 4, "SHS LSB");
+	zassert_equal(val, 14, "SHS LSB");
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_MID, &val));
 	zassert_equal(val, 0, "SHS mid byte");
 	zassert_ok(imx296_emul_get_reg(emul, REG_SHS_MSB, &val));
@@ -661,9 +675,10 @@ ZTEST(imx296, test_exposure_above_ceiling_is_rejected)
 
 	zassert_equal(video_set_ctrl(imx296_dev(), &over),
 	              -EINVAL,
-	              "exposure 1 line past the SHS_MIN=4 ceiling should be rejected");
+	              "exposure 1 line past this driver's bench-clamped SHS=14 ceiling should be "
+	              "rejected");
 	zassert_ok(video_set_ctrl(imx296_dev(), &at_ceiling),
-	           "exposure at the ceiling should be accepted");
+	           "exposure at the (clamped) ceiling should be accepted");
 }
 
 ZTEST(imx296, test_gain_ctrl_programs_the_register_le)

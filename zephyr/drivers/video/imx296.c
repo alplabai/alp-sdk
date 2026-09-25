@@ -365,6 +365,26 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 #define IMX296_GAIN_MAX 480
 
 /*
+ * "Gain Adjustment Function" (page 41 + page 56): GAINDLY[3:0] at 0x3212, an 8-bit register
+ * this driver treats as a single control byte (no sub-bit-field split needed -- only ONE value
+ * is ever legal, see below). Per page 41/56's own register table, every value OTHER than 08h
+ * ("Delay 1 Frame") and 09h ("Reflect at the frame") is explicitly listed "Setting prohibited"
+ * -- including this register's OWN power-on-reset default, 00h. #2287 (bench runs 304-306,
+ * E1M-AEN803 2026W36-0001): this driver never wrote GAINDLY at all before, leaving it at the
+ * prohibited POR value the whole time gain has ever been written on this board -- not
+ * independently proven to be THE cause of the noise-frame symptom those runs found (SHS is a
+ * separate, also-unexplained factor, see IMX296_REG_SHS's exposure-ctrl-range comment), but a
+ * real datasheet violation regardless of whether it explains the symptom. 08h ("Delay 1 Frame")
+ * chosen over 09h ("Reflect at the frame"): pending clarification on 09h's frame-boundary
+ * semantics, 08h is the more conservative of the two documented-legal choices (matches the
+ * pipeline's own existing 1-frame-latency assumptions elsewhere in this driver, e.g. IMX296_
+ * INIT_PERIOD_MS's STANDBY-cancel wait) -- 09h is a candidate to try if 08h doesn't resolve the
+ * symptom.
+ */
+#define IMX296_REG_GAINDLY   IMX296_REG8(0x3212)
+#define IMX296_GAINDLY_DELAY 0x08
+
+/*
  * "Drive Timing Chart for Serial Output in All-pixel Scan Mode" (page 50):
  * the TRANSMITTED RAW10 (DT 0x2B) frame is the whole 1456x1088 effective
  * array, not the 1440x1080 "recommended recording pixels" of the "Readout
@@ -935,11 +955,27 @@ static int imx296_init_ctrls(const struct device *dev)
 	struct imx296_ctrls *ctrls = &data->ctrls;
 	int                  ret;
 
+	/*
+	 * #2287 Stage B unit 3 (bench runs 304-306, E1M-AEN803 2026W36-0001): .max is
+	 * IMX296_VMAX - IMX296_SHS_DEFAULT (VMAX - 14 = 1104), NOT IMX296_VMAX - IMX296_SHS_MIN
+	 * (VMAX - 4 = 1114) -- the datasheet's own legal SHS floor (p.60's "Register List of
+	 * Shutter setting", 4 <= SHS <= VMAX - 1) says SHS=4 is valid, but bench evidence is it
+	 * isn't usable: run 304 (SHS=4, gain 0) produced a completely flat, black frame with NO
+	 * scene content, while run 306 (SHS=14, same ROI/timing) produced a real (if still
+	 * imperfect) scene. Cause UNKNOWN -- nothing in the datasheet explains the difference,
+	 * and gain is ruled out separately (run 304 held gain at 0, so it isn't a gain artefact
+	 * leaking into the SHS=4 case). Clamped to the conservative, independently bench-proven
+	 * IMX296_SHS_DEFAULT (14, this driver's own POR default) floor until SHS=4's failure is
+	 * understood -- IMX296_SHS_MIN itself is UNCHANGED (still 4, the datasheet's own legal
+	 * floor for other purposes, e.g. isp_wrapper's AE envelope round-trip math) so a future
+	 * fix that explains SHS=4 only needs to widen this .max back to
+	 * IMX296_VMAX - IMX296_SHS_MIN, not touch the constant itself.
+	 */
 	ret = video_init_ctrl(&ctrls->exposure,
 	                      dev,
 	                      VIDEO_CID_EXPOSURE,
 	                      (struct video_ctrl_range){ .min  = 1,
-	                                                 .max  = IMX296_VMAX - IMX296_SHS_MIN,
+	                                                 .max  = IMX296_VMAX - IMX296_SHS_DEFAULT,
 	                                                 .step = 1,
 	                                                 .def  = IMX296_VMAX - IMX296_SHS_DEFAULT });
 	if (ret < 0) {
@@ -1182,6 +1218,20 @@ static int imx296_init(const struct device *dev)
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_GAIN, 0);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/*
+	 * #2287 (bench runs 304-306): GAINDLY's own POR default (00h) is a datasheet-prohibited
+	 * value (see IMX296_REG_GAINDLY's own comment) -- write the one legal value this driver
+	 * uses unconditionally at init, same "hardware and control cache start in agreement"
+	 * reasoning as SHS/GAIN/REVERSE above (GAINDLY has no v4.4 video-control-registry entry
+	 * of its own -- it's a fixed hardware setting, not something an app ever changes via
+	 * video_set_ctrl() -- so there is no separate "warm reset disagreement" case to cover,
+	 * only ensuring it is never left at the prohibited POR value).
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_GAINDLY, IMX296_GAINDLY_DELAY);
 	if (ret < 0) {
 		return ret;
 	}

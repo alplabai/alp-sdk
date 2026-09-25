@@ -1799,7 +1799,20 @@ static int isp_stream_start(const struct device *dev)
 		 * call video_stream_start() and isp_vsi_start() against a genuinely stopped stack.
 		 */
 		if (config->controller) {
-			video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+			/*
+			 * #2287 Stage B unit 3, reviewer fix (bench run 303 round): this return
+			 * used to be discarded -- log it, and bail out early rather than
+			 * proceeding to isp_vsi_stop() and the full start sequence below against a
+			 * controller that may still be only partially unwound.
+			 */
+			ret = video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+			if (ret) {
+				LOG_ERR("Failed to stop controller unwinding CPI-only pause "
+					"before a dirty-ctrl restart! video_stream_stop=%d",
+					ret);
+				data->curr_vid_buf = 0;
+				return ret;
+			}
 		}
 		ret = isp_vsi_stop(&data->init_cfg);
 		if (ret) {

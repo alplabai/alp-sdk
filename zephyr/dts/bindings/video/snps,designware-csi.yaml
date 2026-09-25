@@ -131,6 +131,26 @@ properties:
       for why deriving from a format-independent total (rather than a
       per-format fixed value) is what this property exists for.
 
+  ipi-fs-sync:
+    type: boolean
+    description: |
+      Issue #2287 Stage B (bench runs 304-306, E1M-AEN803 2026W36-0001): sets
+      CSI_IPI_ADV_FEATURES_SYNC_EVENT (bit 24, csi2_dw_ipi_advanced_features()
+      in video_csi_dw.c) instead of clearing it -- re-locks the IPI's frame
+      boundary to the CSI-2 protocol's own Frame Start short packet on every
+      frame, instead of the controller inferring frame boundaries purely from
+      the video-packet stream (this bit's default, cleared, state). Runs
+      304-306's multi-frame ROI capture through the ISP (the first workload to
+      stream continuously in DW CSI-2 Controller-timing mode, derived hsd 679/
+      vfp 153) showed a captured frame straddling what looks like two sensor
+      frames -- a scene visible only in one horizontal band, the rest
+      horizontally-streaky texture not matching the scene, differing per run
+      -- consistent with (not proven to be caused by) the IPI's frame-boundary
+      tracking drifting out of sync with the sensor under this timing mode.
+      NOT enabled on any shield yet -- this property only adds the capability;
+      isolating it as bench run C5's own variable is the next step. Optional,
+      default false (unchanged controller behaviour).
+
   rx-ddr-clk1:
     type: int
     required: false

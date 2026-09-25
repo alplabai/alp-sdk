@@ -342,6 +342,13 @@ struct csi2_dw_config {
 
 	const struct device *rx_dphy;
 	uint32_t ipi_mode: 1;
+	/*
+	 * Alp Lab AB (issue #2287 Stage B, bench runs 304-306): optional DT property
+	 * ipi-fs-sync (snps,designware-csi.yaml) -- when true, csi2_dw_ipi_advanced_features()
+	 * SETS CSI_IPI_ADV_FEATURES_SYNC_EVENT instead of clearing it. Default false: byte-
+	 * identical to before this field existed (SYNC_EVENT stays cleared).
+	 */
+	uint32_t ipi_fs_sync: 1;
 
 	uint32_t irq;
 	void (*irq_config_func)(const struct device *dev);

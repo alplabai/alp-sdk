@@ -1,9 +1,9 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..44f9a56
+index 0000000..72f1542
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
-@@ -0,0 +1,102 @@
+@@ -0,0 +1,110 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -38,11 +38,19 @@ index 0000000..44f9a56
 + *     microsecond conversion below stays integer-only without losing the
 + *     fractional frame rate OV5647's integer-fps envelope didn't need.
 + *   - minIntLine/maxIntLine: exposure LINES (this library's own unit, VIDEO_CID_EXPOSURE),
-+ *     1 and VMAX - 4 = 1114, NOT the sensor's SHS register directly -- SHS is inversely
-+ *     related (exposure_lines = VMAX - SHS, p.60) and has its OWN, DIFFERENT legal range,
-+ *     4 <= SHS <= VMAX - 1 (p.60's "Register List of Shutter setting"), which inverts to
-+ *     exactly this 1..VMAX-4 exposure-lines range: SHS=VMAX-1 (its CEILING) gives exposure=1,
-+ *     SHS=4 (its FLOOR, p.60) gives exposure=VMAX-4=1114.
++ *     1 and VMAX - 14 = 1104, NOT the sensor's SHS register directly -- SHS is inversely
++ *     related (exposure_lines = VMAX - SHS, p.60) and has its OWN, DIFFERENT legal range;
++ *     the datasheet's own legal floor is SHS=4 (p.60's "Register List of Shutter setting",
++ *     4 <= SHS <= VMAX - 1), which would invert to a 1114-line ceiling -- but bench evidence
++ *     (E1M-AEN803 2026W36-0001, runs 304 vs 306) is SHS=4 produces a completely flat, black
++ *     frame with NO scene content at all (gain held at 0, ruling gain out as the cause),
++ *     while SHS=14 with the SAME ROI/timing produces a real (if still imperfect -- runs
++ *     304-306's own open finding, see isp_apply_ae()'s comment) scene. Cause UNKNOWN --
++ *     the datasheet lists SHS=4 as valid and nothing in it explains the difference. Clamped
++ *     to SHS=14 (IMX296_SHS_DEFAULT, imx296.c -- the sensor's OWN power-on-reset default,
++ *     independently bench-proven to produce an image) as a conservative floor until the
++ *     SHS=4 failure is understood: SHS=VMAX-1 (its CEILING) gives exposure=1, SHS=14 (this
++ *     clamp) gives exposure=VMAX-14=1104.
 + *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count,
 + *     0-480 = 0.0-48.0 dB): 1024 (0 dB = 1.0x, library units) and
 + *     round(1024 * 10^(480/200)) = 257217 (48.0 dB) -- computed the SAME
@@ -59,14 +67,14 @@ index 0000000..44f9a56
 + */
 +#define IMX296_AE_FULL_LINES 1118 /* VMAX, master-mode timing example */
 +#define IMX296_AE_FPS_X10    603  /* 60.3 fps * 10 -- see header comment */
-+#define IMX296_AE_MAX_INT_LINE 1114 /* VMAX - 4, exposure LINES (inverts SHS's own 4..VMAX-1 range, p.60) */
++#define IMX296_AE_MAX_INT_LINE 1104 /* VMAX - 14 (SHS=14 floor, bench-clamped -- SHS=4 is dark, see header comment) */
 +#define IMX296_AE_MIN_AGAIN     1024   /* 1x floor, library units (1x = 1024) */
 +#define IMX296_AE_MAX_AGAIN     257217 /* 48.0 dB -- see header comment */
 +#define IMX296_AE_MIN_DGAIN     1024   /* unity -- no separate digital gain register */
 +#define IMX296_AE_MAX_DGAIN     1024   /* unity, matching MIN (see OV5647 envelope's rationale) */
 +
 +_Static_assert(IMX296_AE_FULL_LINES == 1118, "drifted from sensor_attributes.fullLines");
-+_Static_assert(IMX296_AE_MAX_INT_LINE == 1114, "drifted from sensor_attributes.maxIntLine");
++_Static_assert(IMX296_AE_MAX_INT_LINE == 1104, "drifted from sensor_attributes.maxIntLine");
 +_Static_assert(IMX296_AE_MAX_AGAIN == 257217, "drifted from sensor_attributes.maxAgain");
 +_Static_assert(IMX296_AE_MIN_AGAIN == 1024, "drifted from sensor_attributes.minAgain");
 +_Static_assert(IMX296_AE_MAX_DGAIN == 1024, "drifted from sensor_attributes.maxDgain");
@@ -169,7 +177,7 @@ index 525217d..e8f2e8b 100644
  			.manualAttr = {
  				.intTime = 100000,
 diff --git a/drivers/isp/isp_wrapper/inc/sensor_attributes.h b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
-index 369cc27..a0b0d9f 100644
+index 369cc27..b77231b 100644
 --- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
 +++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
 @@ -79,6 +79,43 @@ extern "C"{
@@ -192,7 +200,7 @@ index 369cc27..a0b0d9f 100644
 +	.fullLinesStd = 1118,
 +	.fullLines = 1118,
 +	.fps = 60 * ISP_SNS_FPS_ACCU + 30, /* 60.3 fps -- see imx296_ae_envelope.h */
-+	.maxIntLine = 1114,
++	.maxIntLine = 1104,
 +	.minIntLine = 0x1,
 +	.intLineStep = 1,
 +	.maxAgain = 257217,
