@@ -97,6 +97,7 @@ LOG_MODULE_REGISTER(ISP, CONFIG_VIDEO_LOG_LEVEL);
  * (video_find_ctrl(), drivers/video/video_ctrls.c) can chain from this
  * device to its upstream controller. */
 #include "video_device.h"
+#include "isp_sns_gain_conv.h"
 
 /*
  * alp-sdk ABI enforcement (Alp Lab AB): the hal_alif prebuilt ISP middleware
@@ -729,16 +730,50 @@ int isp_set_fmt(const struct device *dev,
  * sensor-agnostic, no register facts needed. again_min/max are derived from
  * video_query_ctrl(VIDEO_CID_ANALOGUE_GAIN) (the sensor's OWN registered
  * gain-control range) converted to this library's fixed-point scale via
- * ISP_AE_GAIN_REG_PER_1X, below -- that ONE conversion factor (a sensor's
- * analogue-gain register isn't standardized to any particular "1x" value by
- * Zephyr's video API) is the one piece of this file that stays sensor-
- * specific by construction, same status as hal_alif patch 0005's matching
- * write-back scaling (isp_api_wrapper.c) -- both cite OV5647_AGC_GAIN
- * (0x350a) register value 0x10 = 1.0x and are marked upstreamable: false in
- * patches.yml for exactly this reason. If a future sensor's "1x" register
- * value differs, THIS constant (and 0005's matching one) are what to change.
+ * isp_sns_gain_lib_from_ctrl(), below -- that ONE conversion (a sensor's
+ * analogue-gain register isn't standardized to any particular "1x" value or
+ * scale -- linear or logarithmic -- by Zephyr's video API) is the one piece
+ * of this file that stays sensor-specific by construction, same status as
+ * hal_alif patch 0005/0013's matching write-back scaling (isp_api_wrapper.c).
+ *
+ * #2287 Stage B unit 3: this used to be a single hardcoded
+ * ISP_AE_GAIN_REG_PER_1X = 16 constant (OV5647_AGC_GAIN reg 0x10 = 1.0x,
+ * linear). IMX296's GAIN register (0x3204-0x3205) is 0.1 dB/count instead
+ * (logarithmic) -- isp_sns_gain_conv.h now holds BOTH conversions, and
+ * CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS (zephyr/kconfigs/vendor-alif-
+ * peripherals.kconfig) picks which one isp_sns_gain_ctrl_from_lib()/
+ * isp_sns_gain_lib_from_ctrl() below use -- upstreamable: false in
+ * patches.yml for the matching isp_api_wrapper.c hunk, same reason as
+ * before: this is board/sensor-specific, not a hal_alif-generic fix.
  */
-#define ISP_AE_GAIN_REG_PER_1X 16 /* OV5647 AGC_GAIN (0x350a): reg 0x10 = 1.0x */
+
+/*
+ * Kconfig-dispatched wrappers around isp_sns_gain_conv.h's pure conversion
+ * functions -- non-static: hal_alif patch 0013's isp_api_wrapper.c
+ * (a DIFFERENT translation unit, in the hal_alif module) extern-declares
+ * and calls these directly instead of re-deriving the OV5647-linear-only
+ * scaling patch 0005 used to hardcode there.
+ */
+uint32_t isp_sns_gain_ctrl_from_lib(uint32_t total_1024)
+{
+	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
+		return isp_sns_gain_lib_to_db_tenths(total_1024);
+	}
+	return isp_sns_gain_lib_to_linear_reg(total_1024, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
+}
+
+uint32_t isp_sns_gain_lib_from_ctrl(uint32_t ctrl_reg)
+{
+	if (IS_ENABLED(CONFIG_VIDEO_ISP_VSI_SNS_GAIN_DB_TENTHS)) {
+		return isp_sns_gain_db_tenths_to_lib(ctrl_reg);
+	}
+	return isp_sns_gain_linear_reg_to_lib(ctrl_reg, CONFIG_VIDEO_ISP_VSI_SNS_GAIN_REG_PER_1X);
+}
+
+uint32_t isp_sns_exposure_ctrl_from_lines(uint32_t lines)
+{
+	return isp_sns_exposure_lines_to_ctrl(lines, CONFIG_VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE);
+}
 
 /*
  * Run 74 established the proven-working order: apply AFTER isp_vsi_start()'s
@@ -996,14 +1031,14 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		 * Sensor-agnostic gain CEILING only: query the
 		 * sensor's OWN registered VIDEO_CID_ANALOGUE_GAIN
 		 * range instead of assuming OV5647_AGC_GAIN_MAX -- the
-		 * register-to-library-units conversion factor is
-		 * still sensor-specific (ISP_AE_GAIN_REG_PER_1X, block
+		 * register-to-library-units conversion is still
+		 * sensor-specific (isp_sns_gain_lib_from_ctrl(), block
 		 * comment above); the range ENDPOINT (max) is not.
 		 * again_min is NOT derived from cq.range.min (run 81:
 		 * that range's own minimum is the register's absolute
 		 * floor, e.g. 0, not a meaningful "1x" reference) --
-		 * always the literal 1024 = 1x floor (register
-		 * 1024 * ISP_AE_GAIN_REG_PER_1X / 1024 = 16 = 0x10),
+		 * always the literal 1024 = 1x floor (isp_sns_gain_
+		 * lib_from_ctrl() of the linear/dB "1x" register value,
 		 * declared above, unconditionally: AE should never be
 		 * told to command sub-1x gain.
 		 */
@@ -1013,8 +1048,7 @@ static int isp_apply_ae(const struct device *dev, bool enable)
 		};
 
 		if (video_query_ctrl(&cq) == 0 && cq.range.max > 0) {
-			again_max = (uint32_t)cq.range.max * 1024 /
-				    ISP_AE_GAIN_REG_PER_1X;
+			again_max = isp_sns_gain_lib_from_ctrl((uint32_t)cq.range.max);
 		}
 	}
 

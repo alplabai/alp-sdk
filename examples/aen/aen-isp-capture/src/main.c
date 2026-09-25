@@ -77,13 +77,25 @@
  * IMX296 VARIANT (issue #2287 Stage B, -DAEN_ISP_IMX296=ON, off by default): the same
  * sensor -> csi -> cam -> isp graph with IMX296's 1280x960 ROI crop (SRGGB10P) in place of
  * OV5647's 640x480 (SBGGR10P) -- see the FRAME_WIDTH/HEIGHT/N_FRAMES/ISP_INPUT_FOURCC #if
- * ladder below. AE/AWB are manual/off for this variant (no IMX296-fitted AWB/CCM calibration
- * exists yet, unlike OV5647's patches 0008/0011) and only ONE frame is captured -- this is a
- * first-light proof that hal_alif patch 0012 (zephyr/patches/hal_alif/
- * 0012-isp-srggb10p-input.patch)'s SRGGB10P->PIXEL_FORMAT_RGGB10 mapping and isp_pico.c's
- * matching input-format cap entry actually let a real IMX296 frame reach the ISP, not a
- * bench-tuned capture like OV5647's 30-frame AE+AWB runs above. UNBENCHED on real silicon --
- * see changelog.d/2287.md.
+ * ladder below. AWB stays manual/off for this variant regardless of AE mode (no IMX296-fitted
+ * AWB/CCM calibration exists yet, unlike OV5647's patches 0008/0011, #2287 unit 4).
+ *
+ *   - AE off (default -- layer overlay-no-ae.conf, CONFIG_ISP_LIB_AE_MODULE=n): ONE frame
+ *     captured, this driver's original first-light proof that hal_alif patch 0012
+ *     (zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch)'s
+ *     SRGGB10P->PIXEL_FORMAT_RGGB10 mapping and isp_pico.c's matching input-format cap entry
+ *     actually let a real IMX296 frame reach the ISP, not a bench-tuned capture like OV5647's
+ *     30-frame AE+AWB runs above. Bench-verified (bench run 297, changelog.d/2287.md): data
+ *     path through the ISP confirmed, image quality not (no AWB/CCM calibration for this
+ *     sensor yet).
+ *   - AE on (this example's default -- no overlay-no-ae.conf, CONFIG_ISP_LIB_AE_MODULE=y,
+ *     #2287 Stage B unit 3): 60 frames, letting isp_pico.c's isp_apply_ae() writeback settle
+ *     against IMX296's real AE envelope (hal_alif patch 0013,
+ *     drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h, sourced from the datasheet) before the
+ *     last frame is kept. print_imx296_ae_regs() (below) reads the sensor's own SHS
+ *     (0x308D-0x308F) and GAIN (0x3204-0x3205) registers directly over I2C every printed
+ *     frame -- proof of what the writeback actually landed in the sensor, not just what the
+ *     library computed as a target.
  */
 
 #include <stdbool.h>
@@ -102,6 +114,7 @@
 
 #define ISP_NODE    DT_NODELABEL(isp)
 #define OV5647_NODE DT_NODELABEL(ov5647)
+#define IMX296_NODE DT_NODELABEL(imx296)
 /* issue #2287 Stage B: IMX296 variant (-DAEN_ISP_IMX296=ON, see CMakeLists.txt) -- a second
  * real sensor through the SAME sensor -> csi -> cam -> isp graph, in place of OV5647. The
  * boards/ overlay files are sensor-agnostic (they only reference &cam/&isp, not &ov5647), so
@@ -141,15 +154,19 @@ extern volatile uint32_t isp_mi_frame_end_count;
  * issue #2287 Stage B: IMX296's 1280x960 ROI crop (zephyr/drivers/video/imx296.c's
  * IMX296_ROI_WIDTH/HEIGHT), not its 1456x1088 full frame -- the ISP INPUT format table
  * (zephyr/drivers/video/isp_pico.c's supported_input_fmts[], ISP_VIDEO_FORMAT_CAP entries) caps
- * every format at height 1080, which 1088 exceeds; the ROI crop's 960 fits. ONE frame only (this
- * is a first-light plumbing proof for the hal_alif 0012 patch + isp_pico.c's SRGGB10P input cap,
- * not a bench-tuned capture loop like the OV5647 30-frame runs above) -- AE/AWB are manual/off
- * for the same reason (see the awb_ctrl block below; CONFIG_ISP_LIB_AE_MODULE=n comes from
- * layering overlay-no-ae.conf, same file OV5647's own image-A diagnostic uses).
+ * every format at height 1080, which 1088 exceeds; the ROI crop's 960 fits.
+ *
+ * #2287 Stage B unit 3: N_FRAMES depends on whether AE is compiled in. With
+ * CONFIG_ISP_LIB_AE_MODULE=n (overlay-no-ae.conf layered in, the original first-light plumbing
+ * proof for hal_alif patch 0012 + isp_pico.c's SRGGB10P input cap): ONE frame, AE/AWB manual/off,
+ * unchanged from before this unit. With CONFIG_ISP_LIB_AE_MODULE=y (this example's own default,
+ * no overlay-no-ae.conf -- unit 3's AE-on scenario, hal_alif patch 0013's IMX296 AE envelope):
+ * 60 frames, letting the AE loop settle against real IMX296 SHS/GAIN register writeback before
+ * the last frame is kept -- AWB stays manual (no IMX296 AWB/CCM calibration yet, #2287 unit 4).
  */
 #define FRAME_WIDTH      1280
 #define FRAME_HEIGHT     960
-#define N_FRAMES         1
+#define N_FRAMES         (IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? 60 : 1)
 #define ISP_INPUT_FOURCC VIDEO_PIX_FMT_SRGGB10P
 #else
 #define FRAME_WIDTH      640
@@ -165,11 +182,12 @@ extern volatile uint32_t isp_mi_frame_end_count;
 /*
  * OV5647 only: a separate SRAM0 copy of the last frame, taken so the bench hold below can
  * savebin a fixed, known address regardless of which of the N_BUFFERS video_enqueue() cycles
- * back through the driver next. The IMX296 variant (N_FRAMES == 1, no further frames ever
- * dequeued this run) instead holds the DEQUEUED buffer itself before re-enqueueing it -- see the
- * f == N_FRAMES block below -- so it needs no second copy, and no extra ~1.8 MB of SRAM0 on top
- * of the pool already sized to hold 2 buffers that size (see the AEN_ISP_IMX296 CONFIG_VIDEO_
- * BUFFER_POOL_HEAP_SIZE note in prj.conf/overlay-imx296.conf).
+ * back through the driver next. The IMX296 variant (no further frames ever dequeued once the
+ * loop reaches f == N_FRAMES, whether that's 1 or the AE-on scenario's 60) instead holds the
+ * DEQUEUED buffer itself before re-enqueueing it -- see the f == N_FRAMES block below -- so it
+ * needs no second copy, and no extra ~1.8 MB of SRAM0 on top of the pool already sized to hold 2
+ * buffers that size (see the AEN_ISP_IMX296 CONFIG_VIDEO_BUFFER_POOL_HEAP_SIZE note in
+ * prj.conf/overlay-imx296.conf).
  */
 static uint8_t frame_copy[FRAME_SIZE] __attribute__((section("SRAM0"), aligned(64)));
 #endif
@@ -226,6 +244,26 @@ static int ov5647_read_reg8(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t
 }
 #endif
 
+/* #2287 Stage B unit 3: same hand-rolled CCI read as ov5647_read_reg8() above, generalised to a
+ * multi-byte little-endian read (imx296.c's IMX296_REG24/REG16 registers are LSB-first, per the
+ * datasheet's "Register List" tables) -- guarded on IMX296_NODE existing, matching
+ * print_imx296_ae_regs()'s own #if below, its only caller. */
+#if DT_NODE_EXISTS(IMX296_NODE)
+static int imx296_read_reg_le(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t *vals,
+			       size_t n)
+{
+	uint8_t reg_be[2] = { (uint8_t)(reg >> 8), (uint8_t)(reg & 0xFF) };
+
+	return i2c_write_read_dt(i2c, reg_be, sizeof(reg_be), vals, n);
+}
+#endif
+
+/*
+ * #2287 Stage B unit 3: guarded so an IMX296 build (which calls print_imx296_ae_regs() instead,
+ * below) doesn't trip -Wunused-function -- this function is otherwise called unconditionally in
+ * the per-frame print block.
+ */
+#if !(defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE))
 static void print_ov5647_ae_regs(int f)
 {
 #if DT_NODE_EXISTS(OV5647_NODE)
@@ -299,6 +337,48 @@ static void print_ov5647_ae_regs(int f)
 	       reg32(ISP_AWB_V_SIZE),
 	       reg32(ISP_AWB_FRAMES));
 }
+#endif /* !(defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE)) */
+
+/*
+ * #2287 Stage B unit 3, AE-on IMX296 scenario: reads back the SENSOR's own AE registers directly
+ * over I2C every printed frame, same purpose as print_ov5647_ae_regs()'s 0x3500-02/0x350a-0b dump
+ * above -- proof of what hal_alif patch 0013's writeback (isp_api_wrapper.c's
+ * isp_sns_gain_ctrl_from_lib()/isp_sns_exposure_ctrl_from_lines() calls, dB-tenths gain scale for
+ * this sensor) actually landed in the sensor, not just what isp_pico.c's isp_apply_ae() computed
+ * as a target. SHS (0x308D-0x308F, 24-bit LSB-first, imx296.c's IMX296_REG_SHS) is in LINES
+ * counted DOWN from lines_per_frame (exposure = lines_per_frame - SHS, imx296.c's own comment);
+ * GAIN (0x3204-0x3205, 16-bit LSB-first, imx296.c's IMX296_REG_GAIN) is in 0.1 dB/count, 0-480
+ * (IMX296_GAIN_MAX) -- the SAME register range zephyr/drivers/video/isp_sns_gain_conv.h's
+ * isp_gain_db_tenths_table[] and imx296_ae_envelope.h's IMX296_AE_MAX_AGAIN were derived to cover.
+ */
+#if DT_NODE_EXISTS(IMX296_NODE)
+static void print_imx296_ae_regs(int f)
+{
+	const struct i2c_dt_spec i2c = I2C_DT_SPEC_GET(IMX296_NODE);
+	uint8_t                  shs_le[3] = { 0 };
+	uint8_t                  gain_le[2] = { 0 };
+	int                      rc_shs  = imx296_read_reg_le(&i2c, 0x308D, shs_le, sizeof(shs_le));
+	int                      rc_gain = imx296_read_reg_le(&i2c, 0x3204, gain_le, sizeof(gain_le));
+	uint32_t shs  = (uint32_t)shs_le[0] | ((uint32_t)shs_le[1] << 8) |
+			((uint32_t)shs_le[2] << 16);
+	uint32_t gain = (uint32_t)gain_le[0] | ((uint32_t)gain_le[1] << 8);
+	/* lines_per_frame == IMX296_VMAX (1118, imx296.c) at this driver's one fixed frame rate --
+	 * see imx296_ae_envelope.h's IMX296_AE_FULL_LINES for the same figure. exposure(lines) =
+	 * lines_per_frame - SHS, imx296.c's own IMX296_REG_SHS comment. */
+	uint32_t exposure_lines = (shs < 1118) ? (1118 - shs) : 0;
+
+	printk("f%d imx296 SHS(0x308d-f)=0x%06x (rc=%d, exposure=%u lines) "
+	       "GAIN(0x3204-5)=0x%04x (rc=%d, =%u.%01u dB)\n",
+	       f,
+	       shs,
+	       rc_shs,
+	       exposure_lines,
+	       gain,
+	       rc_gain,
+	       gain / 10,
+	       gain % 10);
+}
+#endif
 
 struct plane_stats {
 	uint32_t mean;
@@ -327,8 +407,9 @@ static void plane_stats_compute(const uint8_t *plane, size_t n, struct plane_sta
 int main(void)
 {
 #if defined(AEN_ISP_IMX296)
-	printk("\n=== aen-isp-capture (issue #2287 Stage B: real IMX296 ROI through the "
-	       "ISP, AE+AWB manual/off) ===\n");
+	printk("\n=== aen-isp-capture (issue #2287 Stage B: real IMX296 ROI through the ISP, "
+	       "AE=%s AWB=manual/off) ===\n",
+	       IS_ENABLED(CONFIG_ISP_LIB_AE_MODULE) ? "auto (unit 3)" : "manual/off");
 #else
 	printk("\n=== aen-isp-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
 #endif
@@ -587,7 +668,11 @@ int main(void)
 			printk("f%d Y mean=%u min=%u max=%u\n", f, sy.mean, sy.min, sy.max);
 			printk("f%d U mean=%u min=%u max=%u\n", f, su.mean, su.min, su.max);
 			printk("f%d V mean=%u min=%u max=%u\n", f, sv.mean, sv.min, sv.max);
+#if defined(AEN_ISP_IMX296) && DT_NODE_EXISTS(IMX296_NODE)
+			print_imx296_ae_regs(f);
+#else
 			print_ov5647_ae_regs(f);
+#endif
 		}
 
 #if defined(AEN_ISP_IMX296)
