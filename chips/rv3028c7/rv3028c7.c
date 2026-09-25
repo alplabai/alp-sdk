@@ -117,12 +117,13 @@
  * rv3028c7_set_int_enable() and rv3028c7_route_clkout() below skip
  * the EEPROM commit when the target byte already matches what's
  * committed there -- do NOT "simplify" that guard away.  It reduces
- * the wear, it does not remove it: examples/v2n/v2n-rtc-multi-alarm
- * toggles BSIE true then false every run, so 2 of its 3 EEPROM-
- * touching calls change the byte every time and are never skipped
- * (only its route_clkout() call is idempotent after the first run).
- * That takes the part from ~33 runs to the 100-cycle floor down to
- * ~50 runs, not to "never". */
+ * the wear, it does not remove it: a caller that toggles the same
+ * interrupt-enable bit on and off every run (rather than settling on
+ * one steady-state value) still changes the committed byte on every
+ * such toggle and is never skipped by this guard -- only a call whose
+ * target value has gone idempotent (unchanged since the last commit)
+ * benefits.  A toggling caller can still burn through the 100-cycle
+ * hot-corner floor in well under 100 runs, not "never". */
 
 /* CONTROL_1 bit for EEPROM auto-refresh (EERD); the chip pauses
  * automatic refresh when EERD=1 so firmware can do a clean

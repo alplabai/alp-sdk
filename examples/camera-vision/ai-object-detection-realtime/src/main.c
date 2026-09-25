@@ -45,8 +45,9 @@
  *      (29 TOPS) vs V2M201 (113 TOPS) by flipping `som.sku` in
  *      board.yaml.
  *   3. "Is the pipeline portable?"  Same C source compiles for
- *      AEN (Ethos-U), V2N (DRP-AI3), V2N-M1 (DEEPX DX-M1).  The
- *      board.yaml resolves the NPU; the application is unaware.
+ *      AEN (Ethos-U) and V2N/V2M M33 (TFLM CPU).  DRP-AI3 and
+ *      DEEPX DX-M1 remain A55/Linux-side runtimes; the application
+ *      source stays vendor-clean across the supported slices.
  *
  *
  * == What's still a placeholder ==
@@ -106,12 +107,12 @@ typedef struct {
 	float    score;
 } bbox_t;
 
-/* Placeholder model bytes.  Customers replace with the actual
- * Vela-/DXNN-compiled `yolov8n.tflite` (Ethos-U / DRPAI) or
- * `yolov8n.dxnn` (DEEPX) -- see README "Adding the model" for
- * the convert-and-include workflow.  Sized to one byte so the
- * inference_open path returns NOSUPPORT cleanly on skeleton
- * builds instead of segfaulting on an empty pointer. */
+/* Placeholder model bytes.  Customers replace this with a model
+ * compiled for the runtime that owns their target slice: TFLite/Vela
+ * for TFLM/Ethos-U, DRP-AI output for an A55 DRP-AI app, or DXNN for
+ * an A55 DEEPX app.  See README "Adding the model" for the workflow.
+ * Sized to one byte so inference_open returns NOSUPPORT cleanly on
+ * skeleton builds instead of dereferencing an empty pointer. */
 static const uint8_t s_model[] = { 0x00 };
 
 /* Tensor arena for the on-chip backend.  Real YOLOv8-tiny needs
@@ -164,16 +165,16 @@ int main(void)
 		(void)alp_camera_start(cam);
 	}
 
-	/* Inference bring-up.  AUTO routes to the SoM's preferred
-     * NPU -- DEEPX DX-M1 on V2M101, Ethos-U on AEN, DRPAI on
-     * stock V2N, CPU fallback on native_sim. */
+	/* Inference bring-up.  AUTO routes to the best backend available
+     * to this slice -- Ethos-U on AEN, TFLM CPU on V2N/V2M M33 and
+     * native_sim.  DRP-AI3 and DEEPX are A55/Linux-side runtimes. */
 	alp_inference_t *inf          = alp_inference_open(&(alp_inference_config_t){
 	    .backend = ALP_INFERENCE_BACKEND_AUTO,
 	    /* TODO: once a real per-backend model is checked in,
-         * switch `.format` based on the active backend (DXNN
-         * for DEEPX, VELA for Ethos-U/DRP-AI).  This skeleton
-         * leaves DXNN as the placeholder default since the
-         * demo's flagship target is the DEEPX path on V2M101. */
+         * switch `.format` based on the active backend (DXNN for
+         * DEEPX, VELA for Ethos-U, DRPAI for DRP-AI, or TFLITE for
+         * the V2N/V2M M33 CPU path).  This skeleton leaves DXNN as
+         * the placeholder for its eventual A55 DEEPX deployment. */
 	    .format      = ALP_INFERENCE_MODEL_DXNN,
 	    .model_data  = s_model,
 	    .model_size  = sizeof(s_model),

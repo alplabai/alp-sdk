@@ -26,13 +26,27 @@ extern "C" {
 #define VIDEO_CID_ALIF_ISP_SET               (VIDEO_CID_PRIVATE_BASE + 2)
 #define VIDEO_CID_ALIF_ISP_GET               (VIDEO_CID_PRIVATE_BASE + 3)
 
+/* Read-only, volatile (VIDEO_CTRL_FLAG_VOLATILE): 1 while the encoder still
+ * has SW_ENC_E (JPEG_SWREG5 bit 0, per AE822FA0E5597BS0_CM55_HE_View.svd)
+ * asserted, 0 once hardware has cleared it. This is a driver-private status
+ * bit, not a JPEG-class control (V4L2's JPEG class defines no such CID), so
+ * it belongs in the VIDEO_CID_PRIVATE_BASE range alongside the CSI/ISP
+ * controls above, not VIDEO_CID_JPEG_CLASS_BASE. Added for the bounded
+ * pre-stop quiesce poll in src/backends/jpeg/alif_hantro.c's
+ * hantro_encode() -- see jpeg_hantro_vc9000e_get_volatile_ctrl() in
+ * jpeg_hantro_vc9000e.c.
+ */
+#define VIDEO_CID_JPEG_ENC_BUSY              (VIDEO_CID_PRIVATE_BASE + 4)
+
 /*
  * v4.4 video-API shim (Alp Lab AB): legacy Bayer + greyscale pixel-format
  * aliases the fork driver bodies reference by their PRE-v4.4 names.  Upstream
  * Zephyr v4.4 renamed the 8/10/12/14/16-bit Bayer FOURCCs to the `S`-prefixed
  * `VIDEO_PIX_FMT_SBGGR8` etc.; the FOURCC byte values are UNCHANGED, so we alias
- * the fork's `BGGR8`/`GBRG8`/`GRBG8`/`RGGB8` names to the v4.4 `S`-prefixed
- * macros to keep the vendored driver bodies verbatim.  `Y6P`/`Y7P` (RAW6/RAW7
+ * the fork's `BGGR8`/`GBRG8`/`GRBG8`/`RGGB8` (and 10-bit unpacked `BGGR10`..)
+ * names to the v4.4 `S`-prefixed macros to keep the vendored driver bodies
+ * verbatim.  The 10-bit MIPI-packed Bayer formats have no alias: callers use
+ * upstream's `VIDEO_PIX_FMT_SBGGR10P`.. directly.  `Y6P`/`Y7P` (RAW6/RAW7
  * MIPI-packed greyscale) were DROPPED entirely by v4.4 with no replacement, so
  * we re-declare them here with the fork's original FOURCC values (the only
  * consumers are the fork CPI/CSI data-type tables, gated under the
@@ -42,15 +56,15 @@ extern "C" {
 #define VIDEO_PIX_FMT_GBRG8                  VIDEO_PIX_FMT_SGBRG8
 #define VIDEO_PIX_FMT_GRBG8                  VIDEO_PIX_FMT_SGRBG8
 #define VIDEO_PIX_FMT_RGGB8                  VIDEO_PIX_FMT_SRGGB8
+#define VIDEO_PIX_FMT_BGGR10                 VIDEO_PIX_FMT_SBGGR10
+#define VIDEO_PIX_FMT_GBRG10                 VIDEO_PIX_FMT_SGBRG10
+#define VIDEO_PIX_FMT_GRBG10                 VIDEO_PIX_FMT_SGRBG10
+#define VIDEO_PIX_FMT_RGGB10                 VIDEO_PIX_FMT_SRGGB10
 #define VIDEO_PIX_FMT_Y6P                    (VIDEO_FOURCC('Y', '0', '6', 'P'))
 #define VIDEO_PIX_FMT_Y7P                    (VIDEO_FOURCC('Y', '0', '7', 'P'))
 
 /* Additional supported formats */
 #define VIDEO_PIX_FMT_RGB888_PLANAR_PRIVATE  (VIDEO_FOURCC('P', 'R', 'G', 'B'))
-#define VIDEO_PIX_FMT_BGGR10P                (VIDEO_FOURCC('p', 'B', 'A', 'A'))
-#define VIDEO_PIX_FMT_GBRG10P                (VIDEO_FOURCC('p', 'G', 'A', 'A'))
-#define VIDEO_PIX_FMT_GRBG10P                (VIDEO_FOURCC('p', 'g', 'A', 'A'))
-#define VIDEO_PIX_FMT_RGGB10P                (VIDEO_FOURCC('p', 'R', 'A', 'A'))
 #define VIDEO_PIX_FMT_BGGR12P                (VIDEO_FOURCC('p', 'B', 'C', 'C'))
 #define VIDEO_PIX_FMT_GBRG12P                (VIDEO_FOURCC('p', 'G', 'C', 'C'))
 #define VIDEO_PIX_FMT_GRBG12P                (VIDEO_FOURCC('p', 'g', 'C', 'C'))
@@ -59,10 +73,6 @@ extern "C" {
 #define VIDEO_PIX_FMT_GBRG14P                (VIDEO_FOURCC('p', 'G', 'E', 'E'))
 #define VIDEO_PIX_FMT_GRBG14P                (VIDEO_FOURCC('p', 'g', 'E', 'E'))
 #define VIDEO_PIX_FMT_RGGB14P                (VIDEO_FOURCC('p', 'R', 'E', 'E'))
-#define VIDEO_PIX_FMT_BGGR10                 (VIDEO_FOURCC('B', 'G', '1', '0'))
-#define VIDEO_PIX_FMT_GBRG10                 (VIDEO_FOURCC('G', 'B', '1', '0'))
-#define VIDEO_PIX_FMT_GRBG10                 (VIDEO_FOURCC('B', 'A', '1', '0'))
-#define VIDEO_PIX_FMT_RGGB10                 (VIDEO_FOURCC('R', 'G', '1', '0'))
 #define VIDEO_PIX_FMT_BGGR12                 (VIDEO_FOURCC('B', 'G', '1', '2'))
 #define VIDEO_PIX_FMT_GBRG12                 (VIDEO_FOURCC('G', 'B', '1', '2'))
 #define VIDEO_PIX_FMT_GRBG12                 (VIDEO_FOURCC('B', 'A', '1', '2'))

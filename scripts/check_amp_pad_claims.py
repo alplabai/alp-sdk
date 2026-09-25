@@ -69,34 +69,15 @@ LINUX_DT_DIR = Path("meta-alp-sdk") / "recipes-kernel" / "linux"
 # error below -- an exemption that quietly stops applying is how a gate
 # rots into decoration.
 #
-# BRD_I2C / RIIC8 is genuinely dual-master in this tree, and both masters
-# are deliberate and shipped:
-#   * CM33: zephyr/boards/alp/e1m_v2n101_m33_sm/
-#     alp_e1m_v2n101_m33_sm-pinctrl.dtsi:37-42 muxes P06/P07, and
-#     ..._r9a09g056n48gbg_cm33.dts:114-118 enables &i2c8 (the DA9292 PMIC
-#     at 0x1E and the GD32 supervisor both answer there).
-#   * A55: meta-alp-sdk/recipes-kernel/linux/linux-renesas/
-#     e1m-x-evk.dtsi's `i2c8_pins` node muxes the same two pads and its
-#     `&i2c8` node enables the controller; e1m-v2n-som.dtsi:256-264 puts
-#     the `gd32_gpio` bridge expander on it, driven by the purpose-built
-#     kernel driver in 0005-gpio-add-gd32-bridge-expander-driver.patch,
-#     and e1m-x-evk.dtsi's panel `reset-gpios = <&gd32_gpio 5 ...>` makes
-#     the Display-1 panel reset a real consumer.
-#     (Nodes named rather than line-cited on purpose: this file shifts
-#     whenever the carrier dtsi gains a node, and a stale pointer in the
-#     one comment a maintainer reads to adjudicate a contested pad is
-#     worse than no pointer.)
-# `metadata/pinmux/v2n.yaml` says `core: "m33"` for both pads because the
-# `core` field has no value for "both cores drive this" -- and its own
-# documentation forbids reading an ABSENT `core` as "shared" too.  So the
-# metadata cannot currently state the truth about these two pads either
-# way.  Widening that vocabulary is a schema decision (#1157), not this
-# gate's call; until it lands, the pair is exempt HERE, in one place, with
-# the contradiction written down rather than silently tolerated.
-EXEMPT: dict[tuple[str, str], str] = {
-    ("RIIC8_SDA8", "P06"): "BRD_I2C is dual-master by design; see #1142/#1157",
-    ("RIIC8_SCL8", "P07"): "BRD_I2C is dual-master by design; see #1142/#1157",
-}
+# BRD_I2C / RIIC8 is not dual-master: Cortex-A55/Linux is the SOLE
+# master of the whole RIIC8 bus (metadata/e1m_modules/v2n/
+# core-ownership.yaml attributes P06/P07 to `core: "a55"`, not "m33");
+# on the CM33 board `&i2c8` is disabled and has no `alp-i2c0` alias
+# (scripts/gen_zephyr_board.py `_v2n_dts()`), so its unreferenced
+# `i2c8_pins` group never muxes these pads.  No EXEMPT entry is
+# needed: this gate only flags a Linux DT claim on a `core: "m33"` pad,
+# and P06/P07 do not resolve to one.
+EXEMPT: dict[tuple[str, str], str] = {}
 
 _GPIO_RE = re.compile(r"RZV2N_GPIO\(\s*([0-9A-Z])\s*,\s*(\d+)\s*\)")
 _PINMUX_RE = re.compile(r"RZV2N_PORT_PINMUX\(\s*([0-9A-Z])\s*,\s*(\d+)\s*,\s*\d+\s*\)")

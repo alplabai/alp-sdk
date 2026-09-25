@@ -1,7 +1,7 @@
 # iot-connected-camera
 
 Connected-camera reference application for the **E1M EVK** populated
-with an **E1M-V2N101 / E1M-V2N102** SoM (Renesas RZ/V2N).
+with an **E1M-V2N101 / E1M-V2N102 / E1M-V2N103** SoM (Renesas RZ/V2N).
 
 ```
         ┌──────────────────┐    ┌──────────────┐    ┌────────────────┐

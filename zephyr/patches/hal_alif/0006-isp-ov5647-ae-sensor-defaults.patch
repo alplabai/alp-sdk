@@ -1,0 +1,104 @@
+diff --git a/drivers/isp/isp_wrapper/inc/sensor_attributes.h b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+index 92e73dc..d42ddf2 100644
+--- a/drivers/isp/isp_wrapper/inc/sensor_attributes.h
++++ b/drivers/isp/isp_wrapper/inc/sensor_attributes.h
+@@ -11,22 +11,90 @@
+ extern "C"{
+ #endif
+ 
++/*
++ * alp-sdk (Alp Lab AB): fullLinesStd/fullLines/fps/maxIntLine/minAgain/
++ * maxAgain below are OV5647 facts, not this reference table's generic
++ * placeholders -- see alp-sdk's isp_pico.c (isp_apply_ae()'s header
++ * comment) for the exact derivation (pixel_rate 58333333 Hz, HTS(640x480
++ * binned) 1852; AGC_GAIN 0x350a is 10-bit, register 0x10 = 1x).
++ *
++ * UPDATED (bench run 81): fps, fullLinesStd/fullLines and maxIntLine now
++ * target 10 fps, not 15 -- the library's own microseconds-to-lines
++ * conversion for isp_ae_param.int_time_max evidently uses THIS static
++ * table internally,
++ * independent of whatever int_time_max (microseconds) isp_apply_ae()
++ * supplies at runtime: run 81 measured the AE loop capped at exactly 2095
++ * lines (this table's OLD 15 fps maxIntLine) even after isp_apply_ae()
++ * derived a 10-fps-based ceiling from video_get_frmival(). VTS at 10 fps =
++ * pixel_rate / (hts * frmrate) = 58333333 / (1852 * 10) = 3149
++ * (ov5647_frmrate_to_vts()'s own integer-truncating formula, ov5647.c);
++ * maxIntLine = VTS - 4 = 3145. alp-sdk's examples/aen/aen-isp-ov5647-
++ * capture now runs the sensor at 10 fps (OV5647's floor rate) by design,
++ * so this table tracks that, not the sensor's power-on-default 15 fps.
++ * If int_time_max ever needs to vary at RUNTIME with an app-chosen frame
++ * rate beyond what this static table encodes, that is a real library-
++ * level gap this patch does not close -- documented, not fixed here.
++ *
++ * UPDATED (bench run 83): maxDgain was 0x1FF (511). dgain shares aGain's
++ * scale (1024 = 1x -- see isp_api_wrapper.c's totalGain = aGain * dGain /
++ * ISP_SNS_GAIN_ACCU, ISP_SNS_GAIN_ACCU = 1024), so a maxDgain of 511 is a
++ * ceiling of ~0.5x -- HALF of unity gain, not a generous headroom figure.
++ * Advisor root cause, arithmetic-confirmed: with maxAgain 65472 (its own
++ * correct ceiling) and dgain capped under 1x, isp_apply_ae()'s own
++ * dgain_min/dgain_max = 1024 (unity, isp_pico.c) get silently clamped
++ * DOWN to this table's lower maxDgain by the library's own attribute
++ * validation, capping the ACHIEVABLE total gain (aGain * dGain / 1024)
++ * at roughly half of aGain alone -- bench run 83's gain register 0x1fd
++ * (509, ~31.8x) sitting well under aGain's own ceiling equivalent
++ * (65472 * 16 / 1024 = 1023 = the sensor's full register range) matches
++ * this exactly (509 =~ 1023 * 511 / 1024). Set to 1024 (unity, matching
++ * isp_apply_ae()'s own intent: all headroom flows through again, dgain
++ * pinned) so the library's floor no longer silently overrides what the
++ * app-facing struct isp_ae_param asked for.
++ *
++ * UPDATED (bench run 85): minDgain was 64 (~0.0625x) -- NOT the binding
++ * constraint for run 83's bug (that was maxDgain, above), but at the AE
++ * floor (dark scene, gain driven all the way down) the library was free to
++ * pick anywhere in [minDgain, maxDgain], and it picked near the floor:
++ * sensor gain register read back 0x01 (~1/16x) even with isp_apply_ae()'s
++ * own dgain_min/dgain_max = 1024 (unity, isp_pico.c) -- the SAME "app asked
++ * for unity, library's own attribute table let it go lower" pattern as run
++ * 83's maxDgain bug, just at the other end of the range. Pinned to 1024
++ * (== maxDgain) so dgain is unity always, matching isp_apply_ae()'s intent:
++ * all headroom flows through again alone.
++ *
++ * aeTarget now reads CONFIG_VIDEO_ISP_VSI_AE_TARGET (zephyr/kconfigs/
++ * vendor-alif-peripherals.kconfig) -- the SAME Kconfig isp_apply_ae()
++ * (isp_pico.c) reads for its own struct isp_ae_param.ae_target, so the
++ * two literals (this file's compile-time default and isp_pico.c's
++ * runtime-applied value) cannot drift out of sync the way two independent
++ * `= 50` literals could. Bench run 81/83: an ae_target of 50 (mid-grey)
++ * was unreachable in the bench's dark lab even at the AE loop's own
++ * exposure/gain ceiling; the Kconfig's own default stays 50 (a sane
++ * production starting point) -- lower it via a build-time overlay to
++ * diagnose reachability, not by editing this literal.
++ *
++ * maxDgain/minDgain/dgainStep/aeRunInterval/dampOver/dampUnder/tolerance/
++ * initExposure/aeMode/gainThreshold (aeTarget now excepted, above) are
++ * left at this file's own defaults -- algorithm tuning constants, not
++ * sensor register facts, expect a bench pass.
++ */
+ static AE_SNS_DEFAULT_S sensor_attributes = {
+ 	.fullLinesMax = 0xFFFF,
+-	.fullLinesStd = 0xA47B,
+-	.fullLines = 0xA47B,
+-	.fps = 5 * ISP_SNS_FPS_ACCU,
+-	.maxIntLine = 0xA478,
++	.fullLinesStd = 3149,
++	.fullLines = 3149,
++	.fps = 10 * ISP_SNS_FPS_ACCU,
++	.maxIntLine = 3145,
+ 	.minIntLine = 0x1,
+ 	.intLineStep = 1,
+-	.maxAgain = 0x80000,
+-	.minAgain = 0x10000,
++	.maxAgain = 65472,
++	.minAgain = 1024,
+ 	.againStep = 1,
+-	.maxDgain = 0x1FF,
+-	.minDgain = 64,
++	.maxDgain = 1024,
++	.minDgain = 1024,
+ 	.dgainStep = 1,
+ 	.aeRunInterval = 1,
+-	.aeTarget = 50,
++	.aeTarget = CONFIG_VIDEO_ISP_VSI_AE_TARGET,
+ 
+ 	.dampOver = 0x40,
+ 	.dampUnder = 0x40,

@@ -89,6 +89,11 @@ _NOT_YET_SUPPORTED: frozenset[tuple[str, str, str]] = frozenset(
         # not happened yet.
         ("E1M-V2M102", "m33_sm", "alp_e1m_v2m102_m33_sm"),
         ("E1M-V2N102", "m33_sm", "alp_e1m_v2n102_m33_sm"),
+        # E1M-V2M103 / E1M-V2N103: same story as V2M102/V2N102 above --
+        # a memory-tier BOM variant (4 GB RAM / 16 GB eMMC) of the same
+        # shipped V2N-family PCB, board bring-up not done yet.
+        ("E1M-V2M103", "m33_sm", "alp_e1m_v2m103_m33_sm"),
+        ("E1M-V2N103", "m33_sm", "alp_e1m_v2n103_m33_sm"),
         # E1M-AEN803's tree shipped under #2084 -- no longer listed here.
     }
 )

@@ -1,0 +1,87 @@
+diff --git a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+index 7e2ae21..cffd1b1 100644
+--- a/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
++++ b/drivers/isp/isp_wrapper/src/isp_api_wrapper.c
+@@ -93,6 +93,19 @@ static struct sensor_config {
+ 	vsi_u32_t dGain;
+ 	vsi_u32_t intLine;
+ } sns_config = {0}, cached_sns_config = {0};
++
++/*
++ * alp-sdk v4.4 video-API port (Alp Lab AB): the write-back below runs every
++ * frame end while the two configured values keep differing (e.g. the
++ * sensor rejects a write -- bench run 76 found VIDEO_CID_ANALOGUE_GAIN
++ * INACTIVE every frame until the alp-sdk driver also disabled the
++ * sensor's AUTOGAIN cluster, isp_pico.c's isp_apply_ae()). A persistent
++ * failure would otherwise LOG_ERR on every single frame; latch each error
++ * to log once instead of spamming the console for however long the
++ * condition lasts.
++ */
++static bool gain_write_err_logged;
++static bool exposure_write_err_logged;
+ #endif /* defined(CONFIG_ISP_LIB_AE_MODULE) */
+ 
+ extern int log_level(void);
+@@ -666,24 +679,57 @@ void isp_vsi_bottom_half(const struct device *dev,
+ #if defined(CONFIG_ISP_LIB_AE_MODULE)
+ 	if ((cached_sns_config.aGain != sns_config.aGain) ||
+ 	    (cached_sns_config.dGain != sns_config.dGain)) {
++		/*
++		 * alp-sdk v4.4 video-API port (Alp Lab AB): the pre-v4.4
++		 * video_set_ctrl(dev, cid, void *value) 3-arg form does not
++		 * exist in v4.4 (int video_set_ctrl(const struct device *dev,
++		 * struct video_control *control)) -- also retargeted from the
++		 * generic VIDEO_CID_GAIN (no alp-sdk sensor driver registers
++		 * it) to VIDEO_CID_ANALOGUE_GAIN, which ov5647.c does.
++		 * totalGain is in this library's own fixed-point scale
++		 * (ISP_SNS_GAIN_ACCU = 1024 = 1x); OV5647's AGC_GAIN register
++		 * (0x350a) uses register value 0x10 = 1x -- scale by 16/1024.
++		 */
++		struct video_control ctrl;
++
+ 		totalGain = ((vsi_u64_t)sns_config.aGain *
+ 				sns_config.dGain) / ISP_SNS_GAIN_ACCU;
+ 
+-		ret = video_set_ctrl(dev, VIDEO_CID_GAIN, (void *)&totalGain);
++		ctrl.id  = VIDEO_CID_ANALOGUE_GAIN;
++		ctrl.val = (int32_t)((vsi_u64_t)totalGain * 16 / ISP_SNS_GAIN_ACCU);
++		ret = video_set_ctrl(dev, &ctrl);
+ 		if (ret) {
+-			LOG_ERR("Failed to write Total Gain to the sensor!");
++			if (!gain_write_err_logged) {
++				LOG_ERR("Failed to write Total Gain to the sensor!");
++				gain_write_err_logged = true;
++			}
+ 		} else {
+ 			cached_sns_config.aGain = sns_config.aGain;
+ 			cached_sns_config.dGain = sns_config.dGain;
++			gain_write_err_logged = false;
+ 		}
+ 	}
+ 	if (cached_sns_config.intLine != sns_config.intLine) {
+-		ret = video_set_ctrl(dev, VIDEO_CID_EXPOSURE,
+-				(void *)&sns_config.intLine);
++		/*
++		 * alp-sdk v4.4 video-API port (Alp Lab AB): same 3-arg ->
++		 * struct video_control port as above. sns_config.intLine is
++		 * in raw sensor LINES; ov5647.c's VIDEO_CID_EXPOSURE is in
++		 * 1/16-line units (see its OV5647_EXPOSURE_DEFAULT / manual
++		 * exposure convention) -- scale by 16.
++		 */
++		struct video_control ctrl;
++
++		ctrl.id  = VIDEO_CID_EXPOSURE;
++		ctrl.val = (int32_t)(sns_config.intLine * 16);
++		ret = video_set_ctrl(dev, &ctrl);
+ 		if (ret) {
+-			LOG_ERR("Failed to write Exposure to the sensor!");
++			if (!exposure_write_err_logged) {
++				LOG_ERR("Failed to write Exposure to the sensor!");
++				exposure_write_err_logged = true;
++			}
+ 		} else {
+ 			cached_sns_config.intLine = sns_config.intLine;
++			exposure_write_err_logged = false;
+ 		}
+ 	}
+ 

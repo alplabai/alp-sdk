@@ -2,16 +2,17 @@
 
 > **`[UNTESTED]` on hardware -- v0.9 paper-correct.** Builds clean on
 > `native_sim/native/64` + the AEN fallback target against the full
-> `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces,
-> which all ship today -- DEEPX DX-M1 dispatch runs through
-> `alp_inference_open(...)` same as any other backend.  What's still
-> missing is a real Vela-/DXNN-compiled YOLOv8-tiny model (see "Adding
-> the model" below) and V2N-M1 HiL bench validation.
+> `<alp/camera.h>` / `<alp/inference.h>` / `<alp/display.h>` surfaces.
+> The checked-in V2M101 project enables only its M33/Zephyr slice, so TFLM
+> CPU is its only inference backend; the placeholder DXNN request remains
+> an intentional NOSUPPORT skeleton.  A real DX-M1 run still needs an
+> A55/Yocto app, a compiled YOLOv8-tiny model, and V2N-M1 HiL validation.
 
-Realtime YOLOv8-tiny object detection on a DEEPX NPU.  Camera
-frames flow through `<alp/camera.h>`, the model runs on the
-on-module NPU via `<alp/inference.h>`, and the bounding-box
-overlay + live FPS counter render through `<alp/display.h>`.
+Portable realtime YOLOv8-tiny object-detection skeleton.  Camera
+frames flow through `<alp/camera.h>`, inference is requested via
+`<alp/inference.h>`, and the bounding-box overlay + live FPS counter
+render through `<alp/display.h>`.  The current M33 project offers only
+TFLM; the intended DX-M1 deployment moves inference to an A55/Yocto app.
 
 ## What it shows end-to-end
 
@@ -24,9 +25,10 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
 - **OV5640** SCCB + MIPI CSI-2 capture via the portable
   `<alp/camera.h>` surface.
 - **Inference** dispatched by `alp_inference_open(...,
-  backend=ALP_INFERENCE_BACKEND_AUTO)`.  The SoM's preferred NPU
-  comes from `metadata/e1m_modules/<SKU>.yaml`:
-  - **V2M101 (V2N-M1)** -> DEEPX DX-M1 (29 TOPS)
+  backend=ALP_INFERENCE_BACKEND_AUTO)`.  Backend availability is
+  slice-scoped, not merely SoM-scoped:
+  - **V2M101 M33/Zephyr** -> TFLM CPU
+  - **V2M101 A55/Yocto** -> DEEPX DX-M1 (29 TOPS), once an A55 app is added
   - **V2M201 (V2H-M1)** -> DEEPX DX-M2 (113 TOPS) -- planned SKU,
     not yet in `metadata/e1m_modules/`
   - AEN801 -> Ethos-U85 (lead target for this skeleton)
@@ -42,14 +44,17 @@ OV5640 --> <alp/camera.h> --> <alp/inference.h> --> <alp/display.h>
 
 ## Build
 
-**V2N-M1 (real target, v0.6+):**
+**V2N-M1 M33 skeleton:**
 
 The Renesas RZ/V2N Zephyr board file currently lives in a private
-Renesas Zephyr fork; once the public board lands the build will be:
+Renesas Zephyr fork; once the public board lands the M33 build will be:
 
 ```
 west build -b rzv2n_evk examples/camera-vision/ai-object-detection-realtime
 ```
+
+That build does not run the A55-owned DX-M1 runtime.  Add an A55/Yocto
+app to the project for real DEEPX inference.
 
 **AEN fallback (works today on the public stack):**
 

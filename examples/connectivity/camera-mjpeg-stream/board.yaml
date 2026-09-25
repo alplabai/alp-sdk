@@ -1,0 +1,43 @@
+# board.yaml -- per-app project configuration for the
+# camera-mjpeg-stream reference application.
+#
+# Customer workflow: `tan init --from-example connectivity/camera-mjpeg-stream`,
+# change `som.sku` to your AEN MPN, edit `preset:` if you fork the EVK, and
+# `tan build`.  CMakeLists.txt invokes scripts/alp_project.py at configure
+# time and layers the generated alp.conf over prj.conf via EXTRA_CONF_FILE.
+#
+# No `chips:` list: the app talks to the camera + JPEG encoder purely
+# through <alp/camera.h> + <alp/jpeg.h>, gated on alp_has() rather than a
+# chip driver, and reaches the network purely through the plain Zephyr BSD
+# socket API -- nothing here is SoM- or board-unique, and the same
+# src/main.c would build unchanged on any family that grows a MIPI-CSI
+# camera + JPEG encoder. check_example_portability.py nonetheless
+# classifies this example Ring 3 (SoM-bound), not Ring 1: its ring test
+# keys off `som.sku` resolving to >=2 SoM families via `supported_boards:`,
+# and this `som.sku` (below) resolves to exactly one (aen) because AEN is
+# the only family with both a camera ISP and a JPEG hardware encoder
+# today -- an accepted category per that check's own docs (see
+# docs/portability.md §4.4), not a portability gap.
+
+som:
+  sku: E1M-AEN803          # Alif Ensemble E8 -- VeriSilicon ISP-Pico +
+                            # Hantro VC9000E JPEG hardware encoder.  A SoM
+                            # swap to a family with no camera/JPEG backend
+                            # still builds and runs: alp_has() steers this
+                            # app onto the synthetic-frame fallback path.
+
+preset: e1m-evk
+
+# Single-OS app on the M55-HE: the camera-capture + JPEG-encode loop is
+# latency-sensitive (a blocked capture thread starves the ISP AE loop --
+# proven on silicon), so it owns a dedicated core rather than sharing the
+# M55-HP's inference workload. A32 cluster unused -- default is Linux on
+# for A-cores, so opt out explicitly.
+cores:
+  a32_cluster:
+    os: "off"
+  m55_he:
+    app: ./src
+
+diagnostics:
+  log_level: info
