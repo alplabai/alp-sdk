@@ -290,6 +290,18 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 #define IMX296_HMAX 1100
 
 /*
+ * issue #2287: the shield overlay's DW CSI-2 IPI controller-timing values
+ * (csi-hsa/hbp/hsd/vsa/vbp/vfp on &csi,
+ * zephyr/boards/shields/raspberry_pi_global_shutter_camera/
+ * raspberry_pi_global_shutter_camera.overlay) are derived FROM these two
+ * constants (sensor line time = IMX296_HMAX / INCK; IPI VTOTAL must equal
+ * IMX296_VMAX) and from the CSI IPI pixel clock. Changing either constant
+ * here, or the IPI pixel clock the DW CSI-2 host programs
+ * (csi2_dw_validate_data(), zephyr/drivers/video/video_csi_dw.c), invalidates
+ * that overlay's derivation comment -- recompute and re-bench it too.
+ */
+
+/*
  * "Readout Drive Modes" (page 44): All-pixel drive mode, 1 CSI-2 lane,
  * 10-bit A/D, 60.3 frame/s, 1.188 Gbps on the single lane. Per the V4L2
  * MIPI CSI-2 link-frequency convention (the D-PHY clock lane runs at half

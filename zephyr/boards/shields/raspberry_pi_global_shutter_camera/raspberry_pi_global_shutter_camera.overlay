@@ -42,6 +42,44 @@
 	status = "okay";
 };
 
+/*
+ * issue #2287: IPI controller-timing mode, bench-proven on E1M-AEN803
+ * 2026W36-0001. The DW CSI-2 host's default "Camera" IPI mode (see
+ * zephyr/dts/bindings/video/snps,designware-csi.yaml's ipi-mode enum, and
+ * csi2_dw_validate_data()'s CSI2_IPI_MODE_TIMINGS_CAM branch in
+ * zephyr/drivers/video/video_csi_dw.c) derives HSA/HBP/HSD from the D-PHY
+ * clock -- and emitted NO lines at all for this 1-lane sensor on silicon.
+ * "Controller" mode instead uses these fixed csi-h* / csi-v* timings
+ * (CSI2_IPI_MODE_TIMINGS_CTRL, same file, skips the derivation and
+ * programs the values below verbatim into CSI_IPI_H*_TIME /
+ * CSI_IPI_V*_LINES -- csi2_dw_ipi_set_timings()).
+ *
+ * Derivation (must be recomputed if IMX296_HMAX/VMAX or the CSI IPI pixel
+ * clock change -- see the matching comment next to those constants in
+ * zephyr/drivers/video/imx296.c):
+ *   sensor line time = HMAX 1100 / INCK 74.25 MHz         = 14.815 us
+ *   IPI line time     = (hsa+hbp+hsd+hact) / IPI pixclk
+ *                      = (3+10+503+1456) / 133.33 MHz      = 14.79  us
+ * The IPI line is slightly FASTER than the sensor line, so the 8 KiB IPI
+ * FIFO drains a line before the next one lands and never overflows.
+ *   VTOTAL = vsa+vbp+vfp+vact = 1+4+25+1088 = 1118 = IMX296_VMAX (exact).
+ *
+ * HSD was swept on the bench to find this margin: HSD 531 (line time
+ * 15.000 us, slower than the sensor) overflowed the FIFO and banded the
+ * frame every ~80 rows (14.815 us / 0.185 us-per-row-drift predicts 80);
+ * HSD 520 gave ~139-row bands; HSD 503 (below) gave zero IPI-FIFO overflow
+ * events over a full capture run.
+ */
+&csi {
+	ipi-mode = "Controller";
+	csi-hsa = <3>;
+	csi-hbp = <10>;
+	csi-hsd = <503>;
+	csi-vsa = <1>;
+	csi-vbp = <4>;
+	csi-vfp = <25>;
+};
+
 &csi_ep_in {
 	remote-endpoint-label = "imx296_ep_out";
 	bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
