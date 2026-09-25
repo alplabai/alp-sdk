@@ -1,4 +1,4 @@
-From 18b87abbb7dcbeb694f75fd0097411f4da5bb30d Mon Sep 17 00:00:00 2001
+From 68408d9aea6676e78a91f1fbe569fa97e9d0e22d Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 25 Sep 2026 11:11:42 +0200
 Subject: [PATCH] mmc: renesas_sdhi: pm_runtime-guard the vqmmc regulator's
@@ -136,5 +136,5 @@ index d787e8ba5..83f1d4c78 100644
  }
  
 -- 
-2.38.1.windows.1
+2.55.0
 

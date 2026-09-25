@@ -1,4 +1,4 @@
-From 1699e5e4a29bc8849e312e5d0f5e826c70f5170a Mon Sep 17 00:00:00 2001
+From 2823bc96eff4423a8b07b71ce4369447b4a3b50d Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Fri, 25 Sep 2026 11:08:37 +0200
 Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
@@ -49,8 +49,8 @@ Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 +
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 427 ++++++++++++++++++++++++++++++++
- 3 files changed, 437 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 412 ++++++++++++++++++++++++++++++++
+ 3 files changed, 422 insertions(+)
  create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
@@ -87,10 +87,10 @@ index e331e951e..3ba5cc2f2 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000..2e19e8cf0
+index 000000000..712d5c3d8
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,427 @@
+@@ -0,0 +1,412 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -100,7 +100,7 @@ index 000000000..2e19e8cf0
 + * Linux gpiochip over the bridge's I2C slave (BRD_I2C @ 0x70) using the
 + * bridge wire protocol CMD_GPIO_READ/CMD_GPIO_WRITE.
 + *
-+ * Wire notes (bridge protocol v0.6):
++ * Wire notes:
 + *  - write:  [reg 0x00][cmd][payload][crc16 lo][crc16 hi]
 + *  - read:   [status][payload][crc16 lo][crc16 hi]   (no SOF on I2C)
 + *  - CRC-16/CCITT-FALSE over cmd|payload (write) / status|payload (read).
@@ -331,23 +331,6 @@ index 000000000..2e19e8cf0
 +	 * surface the transfer error instead of always reporting success. */
 +	ret = gd32_bridge_gpio_do_set(gd32, offset, value);
 +
-+	/*
-+	 * gpiolib always calls .request() (which resolves lines 18/19 via
-+	 * gd32_bridge_resolve_wifi_bt()) before .direction_output(), so by
-+	 * the time we get here offset>=18 should already read as supported.
-+	 * If a transient I/O error still lands on one of those two lines
-+	 * while resolution is somehow not yet confirmed (status_lock still
-+	 * -EPROBE_DEFER -- e.g. the bridge dropped again between request()
-+	 * and this call), report -EPROBE_DEFER so the consumer's own
-+	 * probe-retry path handles it exactly like .request() would have,
-+	 * instead of a bare -EIO the caller has no standard way to retry.
-+	 * Once the bridge is confirmed either way, an -EIO here is a real
-+	 * runtime error and is passed through unchanged.
-+	 */
-+	if (ret == -EIO && offset >= GD32_NGPIO_BASE &&
-+	    gd32_bridge_wifi_bt_status(gd32) == -EPROBE_DEFER)
-+		return -EPROBE_DEFER;
-+
 +	return ret;
 +}
 +
@@ -432,6 +415,8 @@ index 000000000..2e19e8cf0
 +	if (offset < GD32_NGPIO_BASE)
 +		return 0;
 +
++	/* -EPROBE_DEFER has no request()-time retry path like probe() gets;
++	 * it surfaces straight to the gpio chardev caller as plain errno 517. */
 +	return gd32_bridge_resolve_wifi_bt(gd32);
 +}
 +
@@ -519,5 +504,5 @@ index 000000000..2e19e8cf0
 +MODULE_DESCRIPTION("GPIO driver for the Alp Lab GD32 IO-MCU bridge");
 +MODULE_LICENSE("GPL");
 -- 
-2.38.1.windows.1
+2.55.0
 
