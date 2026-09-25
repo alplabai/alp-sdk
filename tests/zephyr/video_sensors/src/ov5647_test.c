@@ -213,9 +213,9 @@
 #define BINNED1280_X_ADDR_START 0
 #define BINNED1280_Y_ADDR_START 0
 /* 0x0a3f / 0x07a3 -- unlike FULLFOV_X_ADDR_END_LO above, both the high AND low bytes are
- * checked here (fix-first review, issue #2286): the high byte alone (0x0a / 0x07) is enough to
- * distinguish this window from the crop path's or 640x480's, so an earlier version of this file
- * checked only the low byte -- but that leaves a driver bug that writes the WRONG high byte (a
+ * checked here (issue #2286): the low byte alone (0x3f / 0xa3) is enough to distinguish this
+ * window from the crop path's or 640x480's, so an earlier version of this file checked only the
+ * low byte -- but that leaves a driver bug that writes the WRONG high byte (a
  * transposed 0x3800-series address, say) invisible to this test.
  */
 #define BINNED1280_X_ADDR_END_HI 0x0a
@@ -240,7 +240,8 @@
 #define SUBSAMPLE_2X2BINNED     0x31
 #define SENSOR_CTRL09_2X2BINNED 0x12
 /* HTS 1896 (0x0768) -- the reference's OWN 2x2-binned-mode HTS, used unscaled; see
- * ov5647.c's OV5647_HTS_1280X960_BINNED comment for why that is safe despite the global PLL.
+ * ov5647.c's OV5647_HTS_1280X960_BINNED comment for the resulting line time at this driver's
+ * global pixel rate.
  */
 #define HTS_1280X960_BINNED_HI 0x07
 #define HTS_1280X960_BINNED_LO 0x68

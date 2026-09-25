@@ -61,8 +61,13 @@ board encodes 15-16 fps (~109 KB JPEG frames, dark scene); the host receives 7.5
 (send-bound, ~0.82 MB/s); frames show a real scene with no banding (even/odd row and column
 means equal within 0.02). This run predates the fix-first review's two register fixes
 above (the power-on ISP-offset writeback and the 296/246 → 308/256 AEC band-step
-correction) — it measured the mode BEFORE those two fixes, so it does not itself verify
-them; the mode still needs a re-run to confirm the corrected registers and to cover 30 fps.
+correction) — it measured the mode BEFORE those two fixes.
+
+Bench with the corrected registers (same unit, daylight scene): 1280x960 at 15 fps delivers
+15.00 fps to the host over 60 s (900 frames, ~35 KB JPEG, max gap 68 ms) with 0 CSI/IPI
+fatals, 0 picture-size violations, 0 encode failures and no row/column banding, and AE/AWB
+settle on the scene; the 640x480 mode on the same branch still delivers 30.03 fps with no
+errors. 30 fps at 1280x960 is not benched yet.
 
 `tests/zephyr/video_sensors/src/ov5647_test.c` gains `test_set_format_1280x960_binned_
 fullfov_before_park` (the coherent register block, ordered before the lane park, mirroring
@@ -79,9 +84,7 @@ All three new tests fail against the pre-Stage-B driver (native_sim twister,
 binned mode in place of Stage A's centre-crop description — output size and the 15 fps
 default request are unchanged; only the field of view and the per-mode register table
 changed. Existing bench runs 242/243 in the README were measured under Stage A's crop mode
-and are labelled as such; the first bench run of this driver-mode change itself is the
-"First bench result" paragraph above (unit E1M-AEN803 2026W36-0001), predating this
-changelog's own fix-first register corrections.
+and are labelled as such; the bench runs of this driver-mode change are the two paragraphs above.
 
 Builds 0 warnings under `-DCONFIG_COMPILER_WARNINGS_AS_ERRORS=y` for
 `camera-mjpeg-stream` (640x480 and the 1280x960 overlay), `aen-isp-ov5647-viewfinder` and

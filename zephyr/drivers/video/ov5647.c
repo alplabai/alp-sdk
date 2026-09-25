@@ -183,10 +183,10 @@
  * full-resolution line time) and why the AEC band-step line counts below are therefore recomputed
  * for THIS driver's line time (308/256), not the reference's own binned-mode 296/246.
  *
- * NO BENCH EVIDENCE YET for this mode (issue #2286 Stage B) -- register values are re-derived
- * from the reference and this driver's own established per-mode arithmetic (the same coherent-
- * block-per-mode discipline the ORDERING TRAP note above requires), not measured on silicon.
- * Update this note once a bench run streams it.
+ * Register values are re-derived from the reference and this driver's own per-mode arithmetic
+ * (the same coherent-block-per-mode discipline the ORDERING TRAP note above requires). Bench
+ * (issue #2286 Stage B, E1M-AEN803 2026W36-0001): the mode streams at 15 fps with no CSI/IPI
+ * errors and no row/column banding; see changelog.d/2286-stage-b.md for the numbers.
  *
  * Common init (bench run 61, verified as shipped by run 62): the register VALUES match the
  * reference's ov5647_common_regs[] (same source as above), minus 0x0100/0x0103 (owned by this
