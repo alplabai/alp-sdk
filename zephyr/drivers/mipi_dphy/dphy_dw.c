@@ -799,11 +799,22 @@ int dphy_dw_slave_setup(const struct device *dev, struct dphy_csi2_settings *phy
 		k_busy_wait(1);
 	}
 
+	/*
+	 * Some sensors (e.g. IMX296, 1-lane continuous clock) never park their
+	 * lanes in LP-11 before streaming, so STOPSTATE never latches all bits
+	 * here. The vendor reference (DPHY_CSI2.c) polls this same way and has
+	 * no lenient path either -- it hard-fails here too, which is why a
+	 * continuous-clock sensor cannot bring up capture through it. The CSI-2
+	 * host re-synchronises on the first Start-of-Transmission regardless of
+	 * STOPSTATE, so a timeout here is only ever a diagnostic; log it once
+	 * and let start-up continue instead of failing capture outright.
+	 */
 	if ((sys_read32(csi_regs + CSI_PHY_STOPSTATE) & tmp) != tmp) {
-		LOG_ERR("D-PHY not locked to Stop-state. PHY status - 0x%08x "
-			"DPHY ID: %d",
+		LOG_WRN("D-PHY did not reach Stop-state before timeout: STOPSTATE=0x%08x "
+			"want=0x%08x PHY status=0x%08x DPHY ID: %d -- continuing (sensor may "
+			"not park lanes in LP-11)",
+			sys_read32(csi_regs + CSI_PHY_STOPSTATE), tmp,
 			sys_read32(csi_regs + CSI_PHY_RX), dphy_id);
-		return -ETIMEDOUT;
 	}
 
 	LOG_DBG("PHY RX status: 0x%08x, STOPSTATE: 0x%08x, RX DPHY state: 0x%x, DPHY ID: %d",
