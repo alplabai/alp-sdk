@@ -700,11 +700,12 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # Raspberry-Pi-style MIPI CSI-2 camera-module sensor drivers -- board-agnostic
 # (no Alif/EVK specifics), consumed via a camera shield
 # (zephyr/boards/shields/raspberry_pi_camera_module_1,
-# zephyr/boards/shields/innomaker_cam_ov9281) on top of whatever CSI-2 host
-# is on the board (e.g. the Alif video_csi_dw.c bridge above).  Both use the
-# upstream video_common.c CCI helpers (video_read_cci_reg /
-# video_write_cci_multiregs*), so the private drivers/video include dir is
-# needed here too.
+# zephyr/boards/shields/innomaker_cam_ov9281,
+# zephyr/boards/shields/raspberry_pi_global_shutter_camera) on top of
+# whatever CSI-2 host is on the board (e.g. the Alif video_csi_dw.c bridge
+# above).  All three use the upstream video_common.c CCI helpers
+# (video_read_cci_reg / video_write_cci_multiregs*), so the private
+# drivers/video include dir is needed here too.
 #
 # OV5647 (compatible "ovti,ov5647"): ADR 0017 Tier-1 (upstream-PENDING
 # backport of zephyrproject-rtos/zephyr#119301, INTERIM) -- see
@@ -714,13 +715,20 @@ zephyr_library_sources_ifdef(CONFIG_VIDEO_ISP_VSI
 # Espressif esp-video-components esp_cam_sensor ov9281 driver onto the v4.4
 # video API), BENCH-VERIFIED 2026-09-21 on an E1M-AEN803 on the E1M-EVK --
 # see zephyr/drivers/video/ov9281.c.
-if(CONFIG_VIDEO_OV5647 OR CONFIG_VIDEO_OV9281)
+#
+# IMX296 (compatible "sony,imx296"): ADR-0017-ADJACENT (authored from the
+# Sony IMX296 datasheet -- no permissive-licence IMX296 driver exists to
+# consume), PARTIALLY BENCH-VERIFIED (I2C identity only -- issue #2287,
+# bench run 229) -- see zephyr/drivers/video/imx296.c.
+if(CONFIG_VIDEO_OV5647 OR CONFIG_VIDEO_OV9281 OR CONFIG_VIDEO_IMX296)
     zephyr_include_directories(${ZEPHYR_BASE}/drivers/video)
 endif()
 zephyr_library_sources_ifdef(CONFIG_VIDEO_OV5647
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov5647.c)
 zephyr_library_sources_ifdef(CONFIG_VIDEO_OV9281
     ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/ov9281.c)
+zephyr_library_sources_ifdef(CONFIG_VIDEO_IMX296
+    ${ZEPHYR_CURRENT_MODULE_DIR}/zephyr/drivers/video/imx296.c)
 
 # Alif Ensemble DISPLAY path -- TES CDC-2.1 (CDC200) DPI/RGB display controller
 # (compatible "tes,cdc-2.1"), vendored from the Apache-2.0 zephyr_alif fork
