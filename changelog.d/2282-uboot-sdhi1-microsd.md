@@ -9,7 +9,7 @@ SD path: the unit boots the release image from microSD, and Linux then does
 every production write.
 
 The new
-`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0007-rzv2n-dev-ALP-E1M-sdhi1-microsd.patch`
+`meta-alp-sdk/recipes-bsp/u-boot/u-boot/0008-rzv2n-dev-ALP-E1M-sdhi1-microsd.patch`
 has five parts:
 
 - **Device numbering.** SDHI1 becomes `mmc1` and SDHI2 moves to `mmc2`. The

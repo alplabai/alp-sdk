@@ -21,7 +21,7 @@ the private repository.
    SoC. The flow is: SCIF download mode → the Flash Writer's `EM_W` puts a
    *transient* eMMC-boot BL2 (`bl2_mmc`) and the FIP into eMMC **boot1** →
    the unit boots U-Boot from eMMC → U-Boot boots the release wic from the
-   microSD (U-Boot patch 0007 enables SDHI1 as `mmc1`) → **Linux performs
+   microSD (U-Boot patch 0008 enables SDHI1 as `mmc1`) → **Linux performs
    every production write** (xSPI, eMMC boot1, eMMC user area, EEPROM, GD32,
    secure page).
 2. **`mfg_date` is the Monday of the serial's ISO week**
@@ -206,7 +206,7 @@ serial. After the lock frame, only a re-read with bit 1 set counts.
   into it.
 - **The eMMC user-area write destroys the running root** if Linux booted from
   eMMC; `write_rootfs` refuses that case.
-- **SD boot is not verified on silicon yet.** With U-Boot patch 0007 any
+- **SD boot is not verified on silicon yet.** With U-Boot patch 0008 any
   inserted card passes `mmc dev 1`; the boot command takes the SD branch only
   when the card also has `boot/Image` on partition 2, else it boots the eMMC.
   If the carrier SDIO mux is driven by a blank GD32 the card may be

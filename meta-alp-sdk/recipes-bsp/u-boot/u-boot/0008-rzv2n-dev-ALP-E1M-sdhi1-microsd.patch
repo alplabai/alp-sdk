@@ -119,10 +119,10 @@ index f1807399c..9751e049c 100644
 +	  Do NOT enable on a carrier where PA2/PA3 are not the SD1
 +	  IO-voltage select and card power enable.
 diff --git a/board/renesas/rzv2n-dev/rzv2n-dev.c b/board/renesas/rzv2n-dev/rzv2n-dev.c
-index dbd6d1d23..4289ea34a 100644
+index a4dd5ce0f..4d5a315af 100644
 --- a/board/renesas/rzv2n-dev/rzv2n-dev.c
 +++ b/board/renesas/rzv2n-dev/rzv2n-dev.c
-@@ -727,6 +727,60 @@ int board_early_init_f(void)
+@@ -845,6 +845,60 @@ int board_early_init_f(void)
  	return 0;
  }
  
@@ -183,7 +183,7 @@ index dbd6d1d23..4289ea34a 100644
  int board_init(void)
  {
  	/* address of boot parameters */
-@@ -743,6 +797,10 @@ int board_init(void)
+@@ -861,6 +915,10 @@ int board_init(void)
  	alp_gpio_output(10, 0, 1);
  #endif
  
