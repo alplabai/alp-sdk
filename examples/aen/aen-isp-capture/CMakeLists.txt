@@ -79,8 +79,18 @@ endif()
 # src/main.c's existing behaviour untouched. Only meaningful with AE off (overlay-no-ae.conf) --
 # with AE on, isp_apply_ae()'s own per-frame writeback would immediately overwrite whatever these
 # set.
-#   -DAEN_ISP_IMX296_EXPOSURE_LINES=<n>  (VIDEO_CID_EXPOSURE lines, 1..1114; sentinel 0 = unset --
-#                                         0 is never a legal exposure, isp_pico.h's minIntLine=1)
+#   -DAEN_ISP_IMX296_EXPOSURE_LINES=<n>  (VIDEO_CID_EXPOSURE lines, 1..1104 -- NOT 1..1114:
+#                                         imx296.c's own control range now clamps to 1104
+#                                         (SHS=14) since bench run 304 found SHS=4 (the
+#                                         1114-line ceiling) produces a flat black frame in
+#                                         this driver's ROI timing -- a value above 1104 is
+#                                         REJECTED by video_set_ctrl() itself (-EINVAL) before
+#                                         this app's own printk even runs. Isolating SHS=4
+#                                         itself (if ever needed again) requires a raw I2C
+#                                         register write, bypassing VIDEO_CID_EXPOSURE's own
+#                                         clamped range entirely -- this option cannot reach
+#                                         it. Sentinel 0 = unset (0 is never a legal exposure,
+#                                         isp_pico.h's minIntLine=1).
 #   -DAEN_ISP_IMX296_GAIN=<n>            (VIDEO_CID_ANALOGUE_GAIN, 0.1 dB tenths, 0..480;
 #                                         sentinel -1 = unset -- 0 dB IS a legal, meaningful gain
 #                                         value this bench round explicitly wants to hold (build

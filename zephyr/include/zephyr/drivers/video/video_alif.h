@@ -249,6 +249,20 @@ unsigned int pix_fmt_bpp(uint32_t fourcc);
  */
 int alif_cam_cpi_resume(const struct device *dev);
 
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): registers a callback
+ * alif_video_cam_isr() (video_alif.c) invokes from ISR context whenever it detects a CPI/CSI
+ * error (INTR_OUTFIFO_OVERRUN/INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) in ISP-consumer mode -- the
+ * ISP's own frame-end interrupt never fires for a frame that failed before reaching the ISP at
+ * all, so without this, nothing would ever re-arm the CPI after this class of error. `cb` MUST
+ * be ISR-safe (no k_mutex, no blocking calls -- isp_pico.c's own implementation only calls
+ * k_work_submit_to_queue(), which is ISR-safe); `user_data` is passed back to `cb` verbatim
+ * (isp_pico.c passes its own `const struct device *` ISP device). `dev` is this CPI controller
+ * device (the ISP's `config->controller`), same as alif_cam_cpi_resume()'s own `dev` param.
+ */
+void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
+				 void *user_data);
+
 #ifdef __cplusplus
 }
 #endif

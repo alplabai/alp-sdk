@@ -379,12 +379,15 @@ struct isp_data {
 	struct isp_ctrls ctrls;
 
 	/*
-	 * #2287 Stage B unit 3: set when isp_bottom_half()'s own IN-FIFO starvation pauses the
-	 * controller via alif_cam_cpi_pause() (video_alif.c) instead of a full video_stream_stop() --
-	 * the next isp_stream_start() reads this to call alif_cam_cpi_resume() instead of
-	 * video_stream_start(), which would otherwise -EBUSY against a controller that was never
-	 * actually stopped. Cleared by isp_stream_stop() (a real user stop tears the controller all
-	 * the way down regardless of this flag) and by isp_stream_start()'s own resume.
+	 * #2287 Stage B unit 3 (advisor code analysis after bench runs 307/308: alif_cam_cpi_pause()
+	 * no longer exists -- see video_alif.c's own comment on alif_cam_cpi_resume() for why):
+	 * set directly by isp_bottom_half() on its own IN-FIFO starvation, WITHOUT any call into
+	 * video_alif.c -- a starvation pause is now simply this driver choosing not to call
+	 * alif_cam_cpi_resume(), no active register action at all. The next isp_stream_start()
+	 * reads this to call alif_cam_cpi_resume() instead of video_stream_start(), which would
+	 * otherwise -EBUSY against a controller that was never actually stopped. Cleared by
+	 * isp_stream_stop() (a real user stop tears the controller all the way down regardless of
+	 * this flag) and by isp_stream_start()'s own resume.
 	 */
 	bool controller_cpi_paused;
 

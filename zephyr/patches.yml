@@ -767,7 +767,7 @@ patches:
       additive, touches only the two switches' SRGGB10P case; every other
       fourcc's mapping is unchanged. Upstream to hal_alif then drop.
   - path: hal_alif/0013-isp-imx296-ae-envelope.patch
-    sha256sum: 8086a2964c6a2eae79f17454491a097293a8ef164b0f437013158e3297da3767
+    sha256sum: d16ae881157112cf42bdcc76f0a8c02e23fd4114d1950451ea1a829d303d1134
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB

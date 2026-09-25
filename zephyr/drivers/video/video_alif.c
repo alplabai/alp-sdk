@@ -450,6 +450,22 @@ int alif_cam_cpi_resume(const struct device *dev)
 	return 0;
 }
 
+/*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): see this function's own public
+ * header comment (video_alif.h) for the full rationale. Plain field assignment, no lock -- this
+ * is expected to run once, at ISP driver init, well before streaming starts (the ISR that reads
+ * these two fields can't be racing a call that hasn't happened yet); nothing here is ISR-unsafe
+ * either way.
+ */
+void alif_cam_register_error_cb(const struct device *dev, void (*cb)(void *user_data),
+				 void *user_data)
+{
+	struct video_cam_data *data = dev->data;
+
+	data->error_cb = cb;
+	data->error_cb_user_data = user_data;
+}
+
 static int32_t fourcc_to_csi_data_type(uint32_t fourcc)
 {
 	/*
@@ -1355,6 +1371,7 @@ static DEVICE_API(video, cam_driver_api) = {
 static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 {
 	static bool is_not_corrupted_frame = true;
+	const struct video_cam_config *config = dev->config;
 	struct video_cam_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t err_mask = INTR_OUTFIFO_OVERRUN | INTR_INFIFO_OVERRUN | INTR_BRESP_ERR;
@@ -1388,6 +1405,19 @@ static void __maybe_unused alif_video_cam_isr(const struct device *dev)
 			k_poll_signal_raise(data->signal, VIDEO_BUF_ERROR);
 		}
 #endif /* defined(CONFIG_POLL) */
+		/*
+		 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): this error never
+		 * reaches the ISP's own frame-end interrupt (the CPI/CSI side failed before a
+		 * frame -- corrupted or otherwise -- got that far), so in ISP-consumer mode
+		 * nothing else would ever re-arm the CPI after it. Notify the registered
+		 * callback (isp_pico.c's, via alif_cam_register_error_cb()) if one is set -- the
+		 * memory-capture path (config->axi_bus_ep set) never registers one, so this is a
+		 * no-op there, matching its own existing "wait for user to handle" recovery
+		 * model (the INTR_STOP branch below, unchanged).
+		 */
+		if (!config->axi_bus_ep && data->error_cb) {
+			data->error_cb(data->error_cb_user_data);
+		}
 	}
 
 	if (int_st & INTR_STOP) {

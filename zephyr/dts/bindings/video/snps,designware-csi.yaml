@@ -143,13 +143,20 @@ properties:
       304-306's multi-frame ROI capture through the ISP (the first workload to
       stream continuously in DW CSI-2 Controller-timing mode, derived hsd 679/
       vfp 153) showed a captured frame straddling what looks like two sensor
-      frames -- a scene visible only in one horizontal band, the rest
-      horizontally-streaky texture not matching the scene, differing per run
-      -- consistent with (not proven to be caused by) the IPI's frame-boundary
-      tracking drifting out of sync with the sensor under this timing mode.
-      NOT enabled on any shield yet -- this property only adds the capability;
-      isolating it as bench run C5's own variable is the next step. Optional,
-      default false (unchanged controller behaviour).
+      frames -- a real scene visible only in one horizontal band, the rest
+      horizontally-streaky texture not matching the scene, the band's row
+      range differing per run (run 307: rows 0-255 plus a thin strip at the
+      bottom; run 308: rows 832-895 -- the band MOVED between runs, not a
+      fixed offset). Bench run C5 isolated this property against the
+      symptom (build with it enabled, run 308) and found NO effect --
+      GAINDLY (build C4) was isolated the same way, also no effect. The
+      ACTUAL cause (bench runs 309/310, see changelog.d/2287.md) was a race
+      in alif_cam_work_helper()'s own CPI re-arm timing (video_alif.c),
+      fixed by moving CPI re-arm responsibility to the ISP -- this property
+      is NOT implicated. Kept as a real, working, still-untested-against-any-
+      symptom capability (isolating one variable at a time was the right
+      call even though this one came back negative) -- NOT enabled on any
+      shield. Optional, default false (unchanged controller behaviour).
 
   rx-ddr-clk1:
     type: int

@@ -569,6 +569,24 @@ static void isp_cpi_rearm_work(struct k_work *work)
 }
 
 /*
+ * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): registered with the controller
+ * via alif_cam_register_error_cb() (video_isp_init(), below) -- called from
+ * alif_video_cam_isr()'s (video_alif.c) OWN ISR context whenever it sees a CPI/CSI-level error
+ * (INTR_OUTFIFO_OVERRUN/INTR_INFIFO_OVERRUN/INTR_BRESP_ERR) that never reaches the ISP's own
+ * frame-end interrupt at all (the frame failed before it got that far). MUST be ISR-safe:
+ * k_work_submit_to_queue() is (unlike alif_cam_cpi_resume() itself, which takes a k_mutex --
+ * exactly why this reuses cpi_rearm_work, isp_cpi_rearm_work() above, instead of calling resume
+ * directly here).
+ */
+static void isp_cpi_rearm_error_cb(void *user_data)
+{
+	const struct device *dev = user_data;
+	struct isp_data *data = dev->data;
+
+	k_work_submit_to_queue(&data->cb_workq, &data->cpi_rearm_work);
+}
+
+/*
  * Bench instrumentation (Alp Lab AB), CONFIG_VIDEO_ISP_VSI_FRAME_STATS
  * (default n -- review round, post-3511cd180): counts MI_INTR_MP_FRAME_END
  * events -- i.e. IRQ 368 ("mi-isp") actually firing a completed-frame
@@ -2091,6 +2109,7 @@ static int isp_stream_stop(const struct device *dev)
 {
 	const struct isp_config *config = dev->config;
 	struct isp_data *data = dev->data;
+	struct k_work_sync sync;
 	int ret;
 
 	/*
@@ -2109,6 +2128,22 @@ static int isp_stream_stop(const struct device *dev)
 		LOG_DBG("Already stopped streaming!");
 		return 0;
 	}
+
+	/*
+	 * #2287 Stage B unit 3, reviewer fix: is_streaming=false FIRST -- both isp_bottom_half()
+	 * (cb_work) and isp_cpi_rearm_work() already check it and return early, so clearing it
+	 * before cancel-syncing either work item (next) means a concurrent bottom-half/re-arm that
+	 * is ALREADY running when the cancel calls block on it sees a stop in progress and doesn't
+	 * do anything that would race the teardown below (e.g. re-arm the CPI, or retire a frame,
+	 * moments before this function stops the controller out from under it). Cancel-sync both
+	 * work items next, mirroring isp_stream_start()'s/isp_flush()'s own placement of this same
+	 * pair BEFORE any of the state-changing calls that follow -- not nested inside lib_lock
+	 * (neither work item's own processing needs it held by ITS caller; isp_bottom_half() and
+	 * isp_cpi_rearm_work() each take lib_lock/the controller's own lock internally, as needed).
+	 */
+	data->is_streaming = false;
+	k_work_cancel_sync(&data->cb_work, &sync);
+	k_work_cancel_sync(&data->cpi_rearm_work, &sync);
 
 	/*
 	 * In TPG mode config->controller is a legitimate NULL (see
@@ -2153,7 +2188,6 @@ static int isp_stream_stop(const struct device *dev)
 	}
 
 	data->curr_vid_buf = 0;
-	data->is_streaming = false;
 
 	return 0;
 }
@@ -2644,6 +2678,18 @@ int video_isp_init(const struct device *dev)
 	k_fifo_init(&data->fifo_in);
 	k_fifo_init(&data->fifo_out);
 	data->dev = dev;
+
+	/*
+	 * #2287 Stage B unit 3 (bench runs 307-310, stall-recovery gap): register this driver's
+	 * own CPI-rearm callback with the controller so alif_video_cam_isr()'s error path
+	 * (video_alif.c -- an error the ISP's own frame-end interrupt never sees, because the
+	 * CPI/CSI side failed before a frame got that far) can still re-arm the CPI. TPG mode
+	 * (config->controller == NULL) has no controller to register with -- the TPG is this
+	 * device's own internal pattern source, this whole class of CPI/CSI error doesn't apply.
+	 */
+	if (config->controller) {
+		alif_cam_register_error_cb(config->controller, isp_cpi_rearm_error_cb, (void *)dev);
+	}
 
 	k_mutex_init(&data->lib_lock);
 

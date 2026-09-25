@@ -1,9 +1,9 @@
 diff --git a/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
 new file mode 100644
-index 0000000..72f1542
+index 0000000..db4aba3
 --- /dev/null
 +++ b/drivers/isp/isp_wrapper/inc/imx296_ae_envelope.h
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,115 @@
 +/*
 + * Copyright (C) 2026 Alif Semiconductor.
 + * SPDX-License-Identifier: Apache-2.0
@@ -45,12 +45,17 @@ index 0000000..72f1542
 + *     (E1M-AEN803 2026W36-0001, runs 304 vs 306) is SHS=4 produces a completely flat, black
 + *     frame with NO scene content at all (gain held at 0, ruling gain out as the cause),
 + *     while SHS=14 with the SAME ROI/timing produces a real (if still imperfect -- runs
-+ *     304-306's own open finding, see isp_apply_ae()'s comment) scene. Cause UNKNOWN --
-+ *     the datasheet lists SHS=4 as valid and nothing in it explains the difference. Clamped
-+ *     to SHS=14 (IMX296_SHS_DEFAULT, imx296.c -- the sensor's OWN power-on-reset default,
-+ *     independently bench-proven to produce an image) as a conservative floor until the
-+ *     SHS=4 failure is understood: SHS=VMAX-1 (its CEILING) gives exposure=1, SHS=14 (this
-+ *     clamp) gives exposure=VMAX-14=1104.
++ *     304-306's own open finding, see isp_apply_ae()'s comment) scene. NOT unexplained: the
++ *     ROI mode's own frame-rate table (p.53/p.61) tabulates lines-per-frame as
++ *     VTR = ROIWV1 + 30 = 990 (this driver's ROIWV1 = 960) -- but zephyr/drivers/video/
++ *     imx296.c deliberately keeps VMAX at its all-pixel-scan-mode value, 1118, in ROI mode
++ *     too (see that file's own ROI-mode comment), so run 304's SHS=4 failure was observed in
++ *     a lines-per-frame configuration the datasheet never itself tabulates SHS=4 against.
++ *     1104 is a bench-proven WORKAROUND for THIS untabulated VMAX=1118 ROI configuration, not
++ *     an isolated root cause. Clamped to SHS=14 (IMX296_SHS_DEFAULT, imx296.c -- the sensor's
++ *     OWN power-on-reset default, independently bench-proven to produce an image) as a
++ *     conservative floor until ROI mode switches to the tabulated VTR: SHS=VMAX-1 (its
++ *     CEILING) gives exposure=1, SHS=14 (this clamp) gives exposure=VMAX-14=1104.
 + *   - minAgain/maxAgain (p.56, GAIN register 0x3204-0x3205, 0.1 dB/count,
 + *     0-480 = 0.0-48.0 dB): 1024 (0 dB = 1.0x, library units) and
 + *     round(1024 * 10^(480/200)) = 257217 (48.0 dB) -- computed the SAME
