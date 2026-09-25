@@ -284,10 +284,12 @@ same SWD link.
 > keeps going — so an app with a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE` reads
 > back empty on the first try and looks like it crashed. `ram-run.sh` and
 > `reread.sh` do **not** currently split a read across the `0x10000` boundary
-> (checked against this repo's scripts, not assumed) — an app like
-> `examples/aen/aen-inference-energy`, whose 80 KB `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
-> exceeds it, needs a manual multi-`mem8` session, or the helpers extended to
-> chunk, until that lands.
+> (checked against this repo's scripts, not assumed), so `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
+> is a real design constraint, not just a link-time number — an app that
+> needs more than one `mem8`'s worth of console (`examples/aen/aen-inference-energy`
+> sizes its buffer to exactly `0x10000` to stay inside a single read at its
+> documented default knobs) needs a manual multi-`mem8` session, or the
+> helpers extended to chunk, if a future config pushes it past the cap.
 >
 > **Also note a J-Link `qc` leaves the core HALTED.** Every read here ends in
 > `qc`, so reading a still-running app freezes it part-way and truncates its

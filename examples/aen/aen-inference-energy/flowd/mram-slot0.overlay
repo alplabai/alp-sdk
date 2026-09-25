@@ -29,11 +29,9 @@
  * commit with a COLD-CYCLE read of the reset vector -- a J-Link verifybin alone
  * has been seen to pass without committing).
  */
-/
-{
-	chosen
-	{
-		zephyr, flash            = &mram_storage;
-		zephyr, code - partition = &slot0_partition;
+/ {
+	chosen {
+		zephyr,flash = &mram_storage;
+		zephyr,code-partition = &slot0_partition;
 	};
 };

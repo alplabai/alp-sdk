@@ -240,8 +240,9 @@ alp_status_t ina236_init(ina236_t         *ctx,
 
 	/* Apply ADCRANGE to the configuration register; leave
      * conversion-time / averaging at reset defaults (continuous
-     * mode, 1.1 ms conversion, no averaging) -- callers that
-     * need lower-noise averaging can extend the API later. */
+     * mode, 1.1 ms conversion, no averaging) -- a caller that needs
+     * lower-noise averaging or a faster/slower sample rate calls
+     * ina236_configure() afterwards to set AVG/VBUSCT/VSHCT/MODE. */
 	s = reg_read16(ctx, INA236_REG_CONFIG, &ctx->cfg_cache);
 	if (s != ALP_OK) return s;
 	if (adcrange == INA236_ADCRANGE_20MV)
@@ -314,8 +315,11 @@ alp_status_t ina236_read_power_uw(ina236_t *ctx, uint32_t *uw_out)
      * 625x; that was the shipped behaviour until this was checked
      * against eq. 4 (and against upstream Zephyr's
      * drivers/sensor/ti/ina2xx INA236_POWER_SCALING = 32, applied as
-     * raw x current_lsb_uA x 32 -> uW). */
-	float power_w = (float)raw * 32.0f * ctx->current_lsb_a;
+     * raw x current_lsb_uA x 32 -> uW).  Routed through
+     * ina236_power_lsb_w() rather than restating "32.0f *
+     * current_lsb_a" here, so there is exactly one place that scale
+     * can drift out of sync with eq. 4. */
+	float power_w = (float)raw * ina236_power_lsb_w(ctx);
 	if (power_w < 0.0f) power_w = 0.0f;
 	*uw_out = (uint32_t)(power_w * 1000000.0f);
 	return ALP_OK;
@@ -405,12 +409,14 @@ ina236_sample_period_us(ina236_avg_t avg, ina236_ct_t vbusct, ina236_ct_t vshct,
 
 alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out)
 {
-	if (ctx == NULL || !ctx->initialised || ready_out == NULL) return ALP_ERR_NOT_READY;
+	if (ctx == NULL || !ctx->initialised) return ALP_ERR_NOT_READY;
+	if (ready_out == NULL) return ALP_ERR_INVAL;
 	uint16_t     msken;
 	alp_status_t s = reg_read16(ctx, INA236_REG_MASK_ENABLE, &msken);
 	if (s != ALP_OK) return s;
 	/* This read itself clears CVRF (SBOSA81D table 7-10, bit 3), which is
-     * what makes the flag a one-shot consume-once handshake. */
+     * what makes the flag a one-shot consume-once handshake -- see the
+     * clear-on-read warning on this function's Doxygen in the header. */
 	*ready_out = (msken & INA236_MSKEN_CVRF) != 0u;
 	return ALP_OK;
 }

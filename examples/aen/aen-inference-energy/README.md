@@ -2,14 +2,17 @@
 
 Runs a Vela-compiled model on the Ethos-U85 while sampling one of the EVK's
 INA236 rail monitors, and reports the **incremental energy per inference** as a
-carrier-rail delta. Board target
-`alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`.
+carrier-rail delta. Board target `alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he`
+(same silicon variant + PCB as `alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he`,
+also supported — `boards/`).
 
 The measured result, the full method, the whole-board cross-check and the error
 budget live in [`docs/measuring-inference-energy.md`](../../../docs/measuring-inference-energy.md).
 Read the "What this is NOT" section there before quoting any number this app
 prints: it is **not** NPU energy, **not** silicon energy, and **not** comparable
-to a vendor datasheet figure.
+to a vendor datasheet figure. **Hardware fact:** the EVK's default rail, U30 @
+I2C `0x4A`, measures the WHOLE +5V rail — SoM + LCD + carrier together — not
+module-isolated power.
 
 ## What it does
 
@@ -42,7 +45,10 @@ That is the correct outcome, not a bug: 8 MACs of NPU work is far below the
 resolution of every shunt on the board, and the idle baseline (CPU spinning, NPU
 quiet) correctly cancels the CPU work that dominates such a call. Measuring
 energy needs a model that does real work — `person_detect` is 7,077,252 MACs,
-100 % NPU, and produces a clean 190 uV step on the +5V rail.
+100 % NPU, and produces a clean, several-hundred-microvolt step on the +5V
+rail (190 uV in an earlier bench pass; 172.5 uV in the primary run recorded in
+[`docs/measuring-inference-energy.md`](../../../docs/measuring-inference-energy.md)
+— different runs, not a contradiction).
 
 `person_detect` Vela's to ~237 KiB, which does not fit the 256 KiB ITCM, so the
 real-model build is MRAM-resident (Flow D). The tiny-model ITCM build (Flow C)
@@ -52,7 +58,8 @@ remains useful as a fast, non-destructive check that the pipeline is intact.
 
 ```sh
 export PATH="$ZEPHYR_SDK_INSTALL_DIR/gnu/arm-zephyr-eabi/bin:$PATH"
-export JLINK_SN=603000869          # REQUIRED on a multi-probe host; AEN E8 answers SW-DP 0x4C013477
+export LG_PLACE=<your-bench-place>       # you must already hold this place's reservation
+export LG_COORDINATOR=<host>:<port>
 export SETOOLS_DIR=<...>/app-release-exec-linux
 A=$PWD/examples/aen/aen-inference-energy
 
@@ -68,25 +75,42 @@ scripts/bench/aen/flash-jlink-mramxip.sh "$BENCH_ROOT/build/aen-inference-energy
 **Then let it run undisturbed and read afterwards.** The flash helper ends with a
 console read, and a J-Link `qc` leaves the core HALTED — so that read freezes the
 app part-way through, and the truncated console looks exactly like a crash. Reset
-it and wait out the whole run before reading:
+it and wait out the whole run before reading — routed through the SAME
+`LG_PLACE`-resolved `bench_jlink_run()` every other helper in this directory uses
+(never a raw `JLinkExe -SelectEmuBySN <serial>`: a hardcoded probe serial in a
+public doc can reset whichever OTHER bench place happens to share that cloned
+serial, not just this one — see `scripts/bench/aen/bench-env.sh`'s DP-ID safety
+gate comment):
 
 ```sh
-printf 'connect\nRSetType 2\nr\ng\nqc\n' > /tmp/rst.jlink
-JLinkExe -device Cortex-M55 -if SWD -speed 4000 -nogui 1 \
-         -SelectEmuBySN "$JLINK_SN" -CommanderScript /tmp/rst.jlink
+source scripts/bench/aen/bench-env.sh
+cat > /tmp/rst.jlink <<'EOF'
+connect
+RSetType 2
+r
+g
+qc
+EOF
+bench_jlink_run -device Cortex-M55 -if SWD -speed 4000 -nogui 1 -CommanderScript /tmp/rst.jlink
 sleep 45                                                  # default build runs ~8 s; 45 s is ample
-scripts/bench/aen/reread.sh "$BENCH_ROOT/build/aen-inference-energy" 0x14000
+scripts/bench/aen/reread.sh "$BENCH_ROOT/build/aen-inference-energy" 0x10000
 ```
 
-The `0x14000` read size matters: this app's console buffer is 80 KB because it
-prints one line per conversion, and the default read size would truncate the
-capture mid-window.
+The `0x10000` read size matters: this app's `CONFIG_RAM_CONSOLE_BUFFER_SIZE` is
+sized to exactly the JLinkExe single-`mem8` cap (see
+`docs/aen-bench-bringup.md`) with headroom for the default knobs; the default
+`reread.sh` read size would truncate the capture mid-window. Raise
+`AEN_ENERGY_SAMPLES_PER_WINDOW` or `AEN_ENERGY_WINDOW_PAIRS` past the documented
+default and the capture can exceed both the buffer AND the single-read cap —
+read it back in two `mem8` calls at that point (halve the buffer address range
+across two `reread.sh`-style sessions), not by passing a size above `0x10000`
+(JLinkExe rejects `NumBytes > 0x10000` outright).
 
 ## Fast iteration — tiny model, Flow C (no MRAM write)
 
 ```sh
 scripts/bench/aen/build.sh "$A"
-scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-inference-energy" 20000 0x14000
+scripts/bench/aen/ram-run.sh "$BENCH_ROOT/build/aen-inference-energy" 20000 0x10000
 ```
 
 Expect `RESULT FAIL: delta not resolvable` — see "Model choice". This build
@@ -105,7 +129,7 @@ byte-identical while measuring something else):
 | `AEN_ENERGY_SAMPLES_PER_WINDOW` | 250 | Window length = this x 4.48 ms. Raise for a slow external instrument to resolve each phase. |
 | `AEN_ENERGY_WINDOW_PAIRS` | 3 | Fewer than 2 yields no spread; the app then reports the spread as negative to mark "not measured". |
 | `AEN_ENERGY_EMIT_SAMPLES` | 1 | Set 0 for long windows: energy is integrated in flight, so window length stops being bounded by the console buffer. That build is summary-only and NOT parseable by the host re-integrator. |
-| `AEN_ENERGY_RAIL_ADDR` | auto | Pin a monitor by 7-bit address (e.g. `0x4A`) when you know which rail feeds the module and the workload does not move it measurably. |
+| `AEN_ENERGY_RAIL_ADDR` | auto | Pin a monitor by 7-bit address (e.g. `0x4A`, the EVK's whole +5V rail — SoM + LCD + carrier, not module-isolated) when you know which rail actually carries the workload's current and it does not move measurably. |
 | `AEN_NPU_MODEL` / `AEN_NPU_MODEL_NAME` | tiny_int8 fixture | Swap the model. |
 | `AEN_NPU_VELA_CONFIG` | unset | The Alif proprietary `ensemble_vela.ini` (from `alp-sdk-internal`). Unset still runs on the NPU — this app pins every region to the SRAM AXI port — but the command stream is not the bench-matched one. |
 
@@ -119,8 +143,8 @@ under the 26.8 s cycle-counter wrap, above which `span_cycles` is meaningless):
 
 ## Console protocol
 
-Machine-readable, consumed by a host-side runner (per ADR-0028 that runner
-lives in `tan-cli`, not in this repo):
+Machine-readable, consumed by a host-side runner. That runner lives in
+`tan-cli` (see alp-sdk#1470 / ADR-0028), not in this repo:
 
 | Line | Meaning |
 |---|---|
@@ -146,5 +170,5 @@ silicon scope by any consumer.
 - `chips/ina236` — the driver, with its SBOSA81D citations
 - This app ships only the on-device firmware and the console protocol above;
   the host-side runner that parses it (formerly `scripts/alp_model/ondevice.py`
-  and `measure.py`) belongs to `tan-cli` per ADR-0028 and is not part of
-  alp-sdk
+  and `measure.py`) lives in `tan-cli` (see alp-sdk#1470 / ADR-0028) and is
+  not part of alp-sdk

@@ -535,6 +535,118 @@ ZTEST(alp_chips, test_fake_ina236_conversion_ready_issues_a_fresh_read_each_call
 	alp_i2c_close(bus);
 }
 
+/* Regression: a NULL ready_out is a caller-error (ALP_ERR_INVAL), distinct
+ * from an uninitialised/NULL ctx (ALP_ERR_NOT_READY) -- these two return
+ * codes were briefly folded into one ALP_ERR_NOT_READY while merging in the
+ * energy-sampler additions; keep them apart. */
+ZTEST(alp_chips, test_ina236_conversion_ready_null_args)
+{
+	ina236_t ctx_uninit = { 0 };
+	bool     ready      = false;
+
+	zassert_equal(ina236_conversion_ready(NULL, &ready), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_conversion_ready(&ctx_uninit, &ready), ALP_ERR_NOT_READY);
+
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_81MV), ALP_OK);
+
+	zassert_equal(ina236_conversion_ready(&ctx, NULL), ALP_ERR_INVAL);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_ina236_read_power_raw_and_uw_match_power_lsb)
+{
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* E1M EVK +5V rail on the FINE range: 20 mOhm, 4.0 A request clamps
+	 * to the 1.024 A ceiling, giving the ADC-matched 31.25 uA CURRENT_LSB
+	 * and, per eq. 4, exactly 1.0 mW per POWER count (see
+	 * test_ina236_calibration_matches_datasheet_and_survives_clamp). */
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.020f, 4.0f, INA236_ADCRANGE_20MV), ALP_OK);
+	zassert_within(ina236_power_lsb_w(&ctx), 0.001f, 1e-9f, "1.0 mW per POWER count");
+
+	fake_ina236_set_reg(0x03u, 1000u);
+
+	uint16_t raw = 0;
+	zassert_equal(ina236_read_power_raw(&ctx, &raw), ALP_OK);
+	zassert_equal(raw, 1000u);
+
+	/* ina236_read_power_uw() is routed through ina236_power_lsb_w() (no
+	 * inline "32.0f * current_lsb_a" restatement) -- this pins that the
+	 * two agree: 1000 counts x 1.0 mW/count = 1000 mW = 1,000,000 uW. */
+	uint32_t uw = 0;
+	zassert_equal(ina236_read_power_uw(&ctx, &uw), ALP_OK);
+	zassert_equal(uw, 1000000u, "1000 x 1.0 mW/count = 1,000,000 uW, got %u", uw);
+
+	/* NULL / uninitialised guards on both. */
+	ina236_t ctx_uninit = { 0 };
+	zassert_equal(ina236_read_power_raw(&ctx_uninit, &raw), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_raw(&ctx, NULL), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_uw(&ctx_uninit, &uw), ALP_ERR_NOT_READY);
+	zassert_equal(ina236_read_power_uw(&ctx, NULL), ALP_ERR_NOT_READY);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
+ZTEST(alp_chips, test_fake_ina236_configure_writes_avg_ct_mode_preserving_adcrange)
+{
+	fake_ina236_reset();
+	alp_i2c_t *bus =
+	    alp_i2c_open(&(alp_i2c_config_t){ .bus_id = ALP_E1M_I2C0, .bitrate_hz = 400000 });
+	zassert_not_null(bus);
+
+	/* Init on the FINE range so ADCRANGE (CONFIG bit 12) is SET, and prove
+	 * ina236_configure() preserves it -- the field it must read-modify-write
+	 * around, per its Doxygen. */
+	ina236_t ctx;
+	zassert_equal(ina236_init(&ctx, bus, 0x40u, 0.010f, 1.0f, INA236_ADCRANGE_20MV), ALP_OK);
+	zassert_equal(fake_ina236_get_reg(0x00u) & 0x1000u, 0x1000u, "ADCRANGE bit must be set");
+
+	zassert_equal(
+	    ina236_configure(
+	        &ctx, INA236_AVG_16, INA236_CT_204US, INA236_CT_332US, INA236_MODE_SHUNT_BUS_CONT),
+	    ALP_OK);
+
+	/* AVG=16(code 2)<<9 | VBUSCT=204us(code 1)<<6 | VSHCT=332us(code 2)<<3 |
+	 * MODE=shunt+bus-cont(code 7), ADCRANGE (bit 12) preserved from init. */
+	uint16_t expect = 0x1000u | (2u << 9) | (1u << 6) | (2u << 3) | 7u;
+	zassert_equal(fake_ina236_get_reg(0x00u),
+	              expect,
+	              "CONFIG = 0x%04x, expected 0x%04x",
+	              fake_ina236_get_reg(0x00u),
+	              expect);
+
+	/* Out-of-range fields are rejected before any bus write. */
+	uint32_t writes_before = fake_ina236_read_count(0x00u); /* unrelated counter, just a marker */
+	(void)writes_before;
+	zassert_equal(
+	    ina236_configure(
+	        &ctx, (ina236_avg_t)8, INA236_CT_204US, INA236_CT_332US, INA236_MODE_SHUNT_BUS_CONT),
+	    ALP_ERR_INVAL);
+
+	ina236_t ctx_uninit = { 0 };
+	zassert_equal(ina236_configure(&ctx_uninit,
+	                               INA236_AVG_16,
+	                               INA236_CT_204US,
+	                               INA236_CT_332US,
+	                               INA236_MODE_SHUNT_BUS_CONT),
+	              ALP_ERR_NOT_READY);
+
+	ina236_deinit(&ctx);
+	alp_i2c_close(bus);
+}
+
 /* ------------------------------------------------------------------ */
 /* ina236 -- energy-sampler helpers (pure functions, no bus traffic)  */
 /* ------------------------------------------------------------------ */
@@ -585,6 +697,35 @@ ZTEST(alp_chips, test_ina236_full_scale_is_range_over_shunt)
 	/* Non-positive / non-finite shunt must not divide by zero. */
 	zassert_equal(ina236_full_scale_a(0.0f, INA236_ADCRANGE_81MV), 0.0f);
 	zassert_equal(ina236_full_scale_a(NAN, INA236_ADCRANGE_81MV), 0.0f);
+}
+
+/* ina236_sample_period_us() (tested below) is derived from these two lookup
+ * tables -- pin them directly too, so a table typo shows up at the smallest
+ * possible unit rather than only as an already-multiplied period. */
+ZTEST(alp_chips, test_ina236_avg_count_and_conversion_time_us_match_datasheet_tables)
+{
+	/* SBOSA81D table 7-4 AVG field: 1, 4, 16, 64, 128, 256, 512, 1024. */
+	zassert_equal(ina236_avg_count(INA236_AVG_1), 1u);
+	zassert_equal(ina236_avg_count(INA236_AVG_4), 4u);
+	zassert_equal(ina236_avg_count(INA236_AVG_16), 16u);
+	zassert_equal(ina236_avg_count(INA236_AVG_64), 64u);
+	zassert_equal(ina236_avg_count(INA236_AVG_128), 128u);
+	zassert_equal(ina236_avg_count(INA236_AVG_256), 256u);
+	zassert_equal(ina236_avg_count(INA236_AVG_512), 512u);
+	zassert_equal(ina236_avg_count(INA236_AVG_1024), 1024u);
+	zassert_equal(ina236_avg_count((ina236_avg_t)8), 0u, "out-of-range code must report 0");
+
+	/* SBOSA81D table 7-4 VBUSCT/VSHCT field (shared encoding): 140, 204,
+	 * 332, 588, 1100, 2116, 4156, 8244 us. */
+	zassert_equal(ina236_conversion_time_us(INA236_CT_140US), 140u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_204US), 204u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_332US), 332u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_588US), 588u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_1100US), 1100u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_2116US), 2116u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_4156US), 4156u);
+	zassert_equal(ina236_conversion_time_us(INA236_CT_8244US), 8244u);
+	zassert_equal(ina236_conversion_time_us((ina236_ct_t)8), 0u, "out-of-range code must report 0");
 }
 
 /* The calibration arithmetic is where BOTH shipped scaling bugs lived (power

@@ -47,8 +47,12 @@
  *   accepts the rail's shunt resistance (Ohms) and the maximum
  *   expected current (Amps) at init time and programs the
  *   calibration register so the CURRENT register reads in
- *   microamps and the POWER register reads in microwatts (using
- *   the datasheet's CURRENT_LSB = max_current / 32768 formula).
+ *   microamps and the POWER register reads in microwatts, using the
+ *   datasheet's CURRENT_LSB = scale_a / 32768 formula (eq. 1), where
+ *   `scale_a` is the requested max_current_a CLAMPED to what the
+ *   shunt + ADCRANGE can actually measure (see ina236_full_scale_a()
+ *   / ina236_calibration_for()) -- asking for more than that ceiling
+ *   does not widen CURRENT_LSB past it.
  *
  * Register map (INA236, datasheet SBOSA81D section 7.6.1):
  *   0x00  Configuration   (RW)  Reset bit, ADCRANGE, averaging, conv-time, mode.
@@ -305,21 +309,44 @@ uint32_t ina236_sample_period_us(ina236_avg_t  avg,
  * @brief Poll the conversion-ready flag (CVRF, Mask/Enable bit 3).
  *
  * CVRF is set after all conversions, averaging and multiplications
- * complete, and — per SBOSA81D table 7-10 — is cleared by *reading the
- * Mask/Enable register*.  This call performs that read, so it is
- * self-clearing: a caller that reads a measurement register only when
- * this returns `true` consumes each conversion exactly once instead of
- * blind-rate polling (which double-counts or misses samples).
+ * complete (SBOSA81D §7.6.1.7, p.22); at the CONFIG reset defaults
+ * (VBUSCT=VSHCT=100b=1100 us each) a full bus+shunt cycle is ~2.2 ms.
+ * CURRENT (and POWER, which derives from it) is only meaningful once
+ * CVRF has been observed set at least once after the CALIBRATION
+ * write -- current is *"calculated following a shunt voltage
+ * measurement"* (SBOSA81D §8.1.2, p.25, eq. 3), so a read before the
+ * first completed conversion returns stale power-on-reset zeros, not
+ * an error.
+ *
+ * Per SBOSA81D table 7-10, CVRF is cleared by *reading the Mask/Enable
+ * register*.  This call performs that read, so it is self-clearing: a
+ * caller that reads a measurement register only when this returns
+ * `true` consumes each conversion exactly once instead of blind-rate
+ * polling (which double-counts or misses samples).
  *
  * CVRF is set regardless of the CNVR enable bit (bit 10); CNVR only
  * routes the flag to the external ALERT pin, which this polling path
  * does not use, so the driver leaves Mask/Enable's alert bits alone.
  *
- * @param[in,out] ctx        Initialised driver context.
- * @param[out]    ready_out  true if a fresh conversion was pending.
+ * @warning **Clear-on-read hazard.** SBOSA81D §7.6.1.7 (p.22): CVRF
+ *   clears on (1) any write to CONFIG (except selecting Power-Down --
+ *   this includes ina236_configure(), so a caller that reconfigures
+ *   AVG/VBUSCT/VSHCT/MODE mid-run resets the flag it may have been
+ *   polling), and (2) *any read of MASK_ENABLE itself* -- including
+ *   this call.  A second caller that polls CVRF (directly, or
+ *   indirectly by also calling this function) after this one already
+ *   observed it set will see it cleared and read a false "not ready"
+ *   -- MASK_ENABLE does not stay latched for multiple readers.  Have
+ *   exactly one owner poll this predicate per conversion, or cache the
+ *   result.
  *
- * @return ALP_OK on success, ALP_ERR_NOT_READY if ctx is null/uninitialised
- *         or ready_out is null.
+ * @param[in,out] ctx        Initialised driver context.
+ * @param[out]    ready_out  Set to true if CVRF was set (and has now
+ *                           been cleared by this read), false
+ *                           otherwise.
+ *
+ * @return ALP_OK on success, ALP_ERR_NOT_READY if @p ctx is
+ *         null/uninitialised, ALP_ERR_INVAL if @p ready_out is NULL.
  */
 alp_status_t ina236_conversion_ready(ina236_t *ctx, bool *ready_out);
 
@@ -383,8 +410,19 @@ alp_status_t ina236_calibration_for(float             shunt_ohms,
                                     uint16_t         *shunt_cal_out,
                                     float            *current_lsb_a_out);
 
-/** @brief Soft-reset the chip and rerun the calibration step.
- *  Useful after a brown-out or detected bus-voltage glitch. */
+/**
+ * @brief Soft-reset the chip and rerun the calibration step.
+ *
+ * Useful after a brown-out or detected bus-voltage glitch.  The RST bit
+ * (SBOSA81D table 7-4) returns the WHOLE CONFIG register to its reset
+ * defaults, not just ADCRANGE: AVG/VBUSCT/VSHCT go back to AVG=1,
+ * VBUSCT=VSHCT=1100 us, MODE=continuous shunt+bus.  This function
+ * re-applies only ADCRANGE (from @p ctx) and calibration -- if a prior
+ * ina236_configure() call set a non-default AVG/conversion-time/mode
+ * for an energy-sampler's timing budget, the caller must call
+ * ina236_configure() again after ina236_reset() to restore it; it is
+ * not remembered or replayed automatically.
+ */
 alp_status_t ina236_reset(ina236_t *ctx);
 
 /** @brief Release the driver context.  Idempotent. */

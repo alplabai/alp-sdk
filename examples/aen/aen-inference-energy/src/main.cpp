@@ -9,19 +9,22 @@
  * runs, minus the energy that same rail draws over an identical window with no
  * inference running, divided by how many inferences fitted in the window.
  * That is a *carrier-rail delta*.  It is NOT the NPU's energy, NOT the
- * silicon's energy, and NOT comparable to a vendor datasheet figure: the rail
- * is upstream of the module regulators, so it overstates the die by 1/efficiency
- * (roughly 10-20 %), and the idle subtraction removes the static draw of
- * everything else on the board.  The host-side contract (a tan-cli runner,
- * per ADR-0028 -- not part of this repo) encodes exactly that scope and
- * validates the labels, which is why they must never be relabelled
- * downstream.
+ * silicon's energy, and NOT comparable to a vendor datasheet figure: the
+ * default rail this app selects, the EVK's +5V rail (INA236B U30 @ 0x4A),
+ * measures the WHOLE +5V rail -- SoM + LCD + carrier together, not the
+ * module alone -- so this overstates the die by an unquantified amount on
+ * top of the idle subtraction, which removes the static draw of everything
+ * else on the board but not the other loads sharing this same rail.  The
+ * host-side contract for the `source`/`scope` labels this app emits is
+ * future work for the model runner that lives in `tan-cli` (see
+ * alp-sdk#1470 / ADR-0028), which is why they must never be relabelled
+ * downstream in the meantime.
  *
  * HOW IT MEASURES
  *   1. Rail scan.  All six EVK INA236 monitors are probed, and each is watched
  *      through a short inferring window and a short quiet one -- the board is
- *      the authority on which rail feeds the compute, not a guess baked into
- *      this file.  A rail only qualifies if its step clears three standard
+ *      the authority on which rail steps with the compute load, not a guess
+ *      baked into this file.  A rail only qualifies if its step clears three standard
  *      errors, and rails are ranked in MILLIAMPS, never in shunt microvolts --
  *      this board mixes 20 mOhm and 50 mOhm shunts, so microvolts are not
  *      comparable between rails.  If NOTHING qualifies, the app falls back to
@@ -825,7 +828,9 @@ int main(void)
 	/* Operator override: pin a specific monitor by 7-bit address, e.g.
 	 * -DAEN_ENERGY_RAIL_ADDR=0x4A.  The automatic pick is right when a
 	 * workload moves a rail measurably; when it does not, the person who
-	 * knows which rail feeds the module should be able to say so without
+	 * knows which EVK rail actually carries this workload's current
+	 * (e.g. 0x4A is the EVK's whole +5V rail -- SoM + LCD + carrier
+	 * together, not module-isolated) should be able to say so without
 	 * editing this file. */
 #ifdef AEN_ENERGY_RAIL_ADDR
 	for (size_t i = 0; i < ARRAY_SIZE(RAILS); i++) {

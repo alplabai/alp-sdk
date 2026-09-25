@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-inference-energy overlay for the E1M-AEN801 (Ensemble E8, M55-HE)
+ * aen-inference-energy overlay for the E1M-AEN803 (Ensemble E8, M55-HE)
  * bench RAM-run.  This app needs BOTH subsystems wired at once, so the
  * overlay is the union of two already-bench-validated overlays:
  *

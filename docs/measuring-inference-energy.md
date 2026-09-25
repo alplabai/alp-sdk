@@ -25,7 +25,7 @@ model. Nothing here is estimated or scaled from a datasheet.
   spread     +/-0.000200 mJ across the 3 window pairs  (1.2 % of the value)
   per pair   0.017285 / 0.017019 / 0.017409 mJ
   windows    active ~545.3 mJ, idle ~495.6 mJ -> delta ~49.7 mJ per 1.10 s
-  latency    383 us per inference (derived: 1101 ms / 2886)
+  latency    381.5 us per inference (derived: 1101 ms / 2886)
 ```
 
 **Two significant figures is the supportable precision** — see the error budget.
@@ -159,9 +159,10 @@ the exact build and flash commands.
    cycle counter at 160 MHz. The reported figure is
    `(E_active - E_idle) / n_inferences`, repeated over three window pairs for a
    spread. The device integrates on-target AND emits every raw sample so the
-   host re-integrates independently with its own unit-tested trapezoidal
-   integrator (a `tan-cli` runner, per ADR-0028, not part of alp-sdk); two implementations agreeing is
-   evidence, one number is a claim.
+   host can re-integrate independently, for cross-checking against a second
+   trapezoidal integrator — the host-side model runner lives in `tan-cli`
+   (see alp-sdk#1470 / ADR-0028), not this repo; two implementations
+   agreeing is evidence, one number is a claim.
 
 5. **Windows must match.** `windowed_delta()` subtracts two integrals, so
    mismatched durations bias the baseline — a short idle window subtracts too
@@ -276,7 +277,7 @@ built only from quantities that were actually measured.
 | Baseline-loop composition | ~7 % | Adding one clock read per iteration of the shared sampling loop raised the idle floor 491.4 -> 496.5 mJ and moved the result 0.018406 -> 0.017177 mJ |
 | Baseline **definition** | +38 % | Spin-idle (76 mA) vs WFI (75 mA) at the board input; a WFI baseline would report ~38 % more per inference |
 | Whole-board agreement | within 9 %, bound NOT testable | 44.0 mW single-rail vs 40.5 mW total board input — different measurement points; the input figure carries +/-40 % from 1 mA quantisation, so it bounds nothing at this scale |
-| Rail-vs-die | +10-20 %, NOT measured | The rail is upstream of the module regulators, so it overstates die energy by 1/efficiency. No efficiency measurement was made; this term is an unquantified upward bias |
+| Rail-vs-die | +10-20 %, NOT measured | U30 @ 0x4A measures the WHOLE +5V rail (SoM + LCD + carrier together), which sits ahead of the module's own regulators, so it overstates die energy by 1/efficiency. No efficiency measurement was made; this term is an unquantified upward bias |
 | Analyser-verified accuracy | **unavailable** | No power analyser on this bench |
 
 The dominant term is not instrumental. It is the **definitional** choice of
@@ -292,9 +293,11 @@ one blocks a specific wrong reading.
   inference — the TFLM interpreter, the Ethos-U driver, the command-stream
   setup, the interrupt wait — not just the NPU. There is no separate NPU rail
   on this board to isolate.
-- **NOT silicon energy.** The measurement is taken at a carrier rail that is
-  upstream of the module's own regulators, so it includes their conversion loss
-  and overstates what the die consumes by roughly 1/efficiency.
+- **NOT silicon energy.** The measurement is taken on the EVK's +5V rail (U30 @
+  0x4A), which measures the WHOLE board's +5V draw — SoM + LCD + carrier
+  together, not module-isolated power — and sits ahead of the module's own
+  regulators, so it includes their conversion loss and overstates what the die
+  consumes by roughly 1/efficiency.
 - **NOT total board energy.** The idle baseline is subtracted, which removes the
   static draw of the rest of the board. This is an *incremental* figure.
 - **NOT comparable to a vendor datasheet figure.** Vendor energy-per-inference
@@ -302,7 +305,7 @@ one blocks a specific wrong reading.
   different model. Comparing them to this number compares two different
   quantities.
 - **NOT a per-model constant.** It is this model, at this Vela configuration, on
-  this silicon, at this clock. 7,077,252 MACs at 383 us per inference.
+  this silicon, at this clock. 7,077,252 MACs at 381.5 us per inference.
 
 ## What it CAN claim
 
@@ -313,10 +316,12 @@ of +/-1.2 % and an error budget dominated by a +38 % baseline-definition choice:
 
 **0.017 mJ/inference (+/-0.0002 measured spread), carrier-rail-delta scope.**
 
-The `source: "measured"` / `scope: "carrier-rail-delta"` labels are validated in
-code in the `tan-cli` host-side runner (per ADR-0028, not part of alp-sdk) and
-must never be relabelled downstream — that guard exists so this number cannot be
-reported as NPU or silicon energy by a later consumer.
+The `source: "measured"` / `scope: "carrier-rail-delta"` labels are emitted
+verbatim in `ENERGY-RESULT` and must never be relabelled downstream, so this
+number cannot be reported as NPU or silicon energy by a later consumer.
+Validating that contract in code is future work for the host-side model
+runner that lives in `tan-cli` (see alp-sdk#1470 / ADR-0028), tracked by
+`alplabai/tan-cli#674` — nothing in this repo enforces it today.
 
 ## Bench notes that cost time
 
@@ -327,11 +332,20 @@ reported as NPU or silicon energy by a later consumer.
   reset with `RSetType 2; r; g` and wait, before reading.
 - **`JLinkExe mem8` refuses a read larger than 0x10000** ("NumBytes should be
   <= 0x10000") and returns nothing, so a large `CONFIG_RAM_CONSOLE_BUFFER_SIZE`
-  reads back empty. `scripts/bench/aen/bench-env.sh` now chunks the read.
-- **`JLinkExe` selects a probe only by serial.** With more than one J-Link
-  attached, no selector means every command fails with "Cannot connect to the
-  probe/programmer" — which again presents as an empty console. Export
-  `JLINK_SN`; the AEN E8 answers SW-DP ID `0x4C013477`.
+  reads back empty. This app's `CONFIG_RAM_CONSOLE_BUFFER_SIZE` (65536 bytes,
+  `examples/aen/aen-inference-energy/prj.conf`) is sized to sit exactly at that
+  cap with headroom for the documented default knobs, so the default
+  configuration needs only one read; raising the sample/window knobs past the
+  default can require reading the buffer back in two `mem8` calls instead.
+- **`JLinkExe` selects a probe only by serial**, and this bench has more than
+  one J-Link sharing a cloned serial across different boards (see
+  `scripts/bench/aen/bench-env.sh`'s DP-ID safety-gate comment) — a bare
+  `-SelectEmuBySN` cannot tell them apart and can reset the WRONG board. Every
+  helper in `scripts/bench/aen/` instead resolves the probe from `LG_PLACE`
+  (a held labgrid reservation) via `bench_jlink_run()`, which masks every
+  other probe out of a private namespace first. Do not export a raw
+  `JLINK_SN` and call `JLinkExe` directly; route through `LG_PLACE` +
+  `bench_jlink_run()` as this doc's and the example's README's commands do.
 - **A `-D` on the west command line is a CMake cache variable, not a compiler
   define.** Without explicit forwarding, measurement knobs are accepted silently
   and the build is byte-identical, so the run appears to honour them while
