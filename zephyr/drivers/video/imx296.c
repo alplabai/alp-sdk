@@ -403,13 +403,33 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 /*
  * "Standby mode" (page 54): after STANDBY is cleared, a normal image is
  * output from the 9th frame after "internal regulator stabilization (1 ms
- * or more)". This driver only waits out the mandatory 1 ms regulator
- * settling time here (both for entering the streaming state and for the
- * momentary standby-exit the SENSOR_INFO probe below needs); the remaining
- * per-frame ramp-up is a capture-quality concern left to the consumer, not
- * a register-timing requirement.
+ * or more)". This driver waits out the mandatory 1 ms regulator settling
+ * time here -- both for entering the streaming state (imx296_set_stream(),
+ * before IMX296_INIT_PERIOD_MS below) and for the momentary standby-exit
+ * the SENSOR_INFO probe in imx296_init() needs, which never starts XMSTA
+ * and so has no initialization period to wait out.
  */
 #define IMX296_STANDBY_SETTLE_MS 1
+
+/*
+ * "Standby mode" (page 54): "a normal image is output from the 9 frames
+ * after [STANDBY cancel]" -- i.e. an 8-frame initialization period, during
+ * which the sensor is still ramping up and every frame is invalid. One
+ * frame period is IMX296_VMAX x 1H, and this driver's fixed 60.3 frame/s
+ * mode has 1H = 14.81 us ("List of Exposure Setting" / HMAX-derived line
+ * time, page 44 + page 53): 8 x IMX296_VMAX x 14.81us ~= 132 ms. Waited out
+ * here in imx296_set_stream(dev, true, ...), AFTER the XMSTA write starts
+ * master-mode free-run and BEFORE that function returns, so the capture
+ * pipeline above it never sees an initialization-period frame: the CSI-2
+ * DW host's csi2_dw_stream_start() (video_csi_dw.c) calls this driver's
+ * set_stream synchronously before returning to alif_cam_stream_start()
+ * (video_alif.c), which only arms the CPI's own capture snapshot
+ * (hw_cam_start_video_capture()) once that whole chain has returned --
+ * so this wait's caller-blocking is what excludes the init-period frames
+ * from ever reaching a buffer. Rounded up from 8 to 9 frames of margin
+ * (9 x 1118 x 14.81us ~= 149 ms, ceiling to whole milliseconds).
+ */
+#define IMX296_INIT_PERIOD_MS 150
 
 struct imx296_inck_regs {
 	uint32_t hz;
@@ -671,7 +691,20 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 		 * start applies to both trigger and free-run streaming, only TRIGEN/LOWLAGTRG
 		 * above change which one XTRIG then drives.
 		 */
-		return video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, 0);
+		ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, 0);
+		if (ret < 0) {
+			return ret;
+		}
+
+		/*
+		 * "Standby mode" (page 54): wait out the 8-frame initialization period
+		 * before returning -- see IMX296_INIT_PERIOD_MS's comment above for why
+		 * this blocking wait, not a caller-side delay, is what keeps the CPI from
+		 * ever capturing one of these invalid frames.
+		 */
+		k_sleep(K_MSEC(IMX296_INIT_PERIOD_MS));
+
+		return 0;
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, IMX296_XMSTA_STOP);

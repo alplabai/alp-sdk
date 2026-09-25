@@ -350,7 +350,10 @@ ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
 	 * the master-mode clock generator while the analog block is still in standby. The
 	 * TRIGEN/LOWLAGTRG/SYNCSEL writes (issue #2287, see imx296.c's imx296_set_stream())
 	 * land first, before STANDBY, since "Mode Transitions of Global Shutter Operation"
-	 * (page 66) requires them to be set "via sensor standby". */
+	 * (page 66) requires them to be set "via sensor standby". video_stream_start() above also
+	 * blocks for IMX296_INIT_PERIOD_MS (issue #2287) after the XMSTA write -- likewise no
+	 * register write, so likewise invisible to this log, but native_sim's simulated clock
+	 * fast-forwards k_sleep() so it costs no real wall-clock time in this test. */
 	zassert_equal(imx296_emul_log_count(emul), 5, "expected exactly 5 writes to start streaming");
 
 	zassert_ok(imx296_emul_log_get(emul, 0, &w));
