@@ -2176,9 +2176,9 @@ ZTEST(ov5647, test_stream_start_heals_ae_sensor_gate_clobbered_by_something_else
  * #2277: ov5647_set_ctrl_exposure() clamps VIDEO_CID_EXPOSURE to the ACTIVE mode's VTS - 4 lines
  * (register units, so *16) instead of writing an out-of-range request straight through -- an
  * unclamped write just silently rails against the sensor's own VTS-manual frame length (0x3503
- * bit2) without taking effect. Table-driven across three VTS-affecting axes: 640x480 binned HTS
- * vs 1280x960 crop HTS, and three different frame rates -- confirms the clamp tracks the ACTIVE
- * mode/rate, not a single driver-wide constant (the bug this replaces: an ISP-side ceiling
+ * bit2) without taking effect. Table-driven across the three HTS values (640x480 binned, 1280x960
+ * binned, crop size) and three frame rates -- confirms the clamp tracks the ACTIVE mode/rate,
+ * not a single driver-wide constant (the bug this replaces: an ISP-side ceiling
  * hard-coded to 640x480's HTS was ~1.46x too loose at 1280x960/full-res). Every VTS below is
  * pixel_rate(58333333) / (hts * fps), floored -- ov5647_frmrate_to_vts()'s own formula; see this
  * file's header comment for why 58333333 is the fixed assumption. Must FAIL without the clamp in
@@ -2194,7 +2194,8 @@ ZTEST(ov5647, test_exposure_clamps_to_active_vts_margin)
 		uint32_t vts; /* pixel_rate / (hts * fps), floored */
 	} cases[] = {
 		{ 640, 480, 30, 1049 },  /* binned HTS 1852 */
-		{ 1280, 960, 15, 1440 }, /* crop HTS 2700 */
+		{ 1280, 960, 15, 2051 }, /* 2x2-binned full-FOV HTS 1896 */
+		{ 1920, 1080, 15, 1440 }, /* crop HTS 2700 */
 		{ 640, 480, 10, 3149 },  /* binned HTS 1852, the driver's boot-default rate */
 	};
 	const struct emul *emul = ov5647_emul();

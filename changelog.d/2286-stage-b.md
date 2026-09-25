@@ -43,11 +43,8 @@ line time (HTS 2700 vs 1896), so the binned mode strictly dominates it at this e
 The generic crop path stays available, unchanged, at every other size.
 
 The mode also reaches 30 fps (VTS 1025 at HTS 1896, vs 15 fps's VTS 2051) — 45 fps is
-rejected (VTS 683 < the 984-line minimum blanking). This is not yet a guarantee of usable
-30 fps in dim scenes: until the exposure clamp in #2277 (branch
-`fix/ov5647-ae-envelope-fps`, not yet on `dev`) lands, the ISP AE library's own 3145-line
-exposure ceiling exceeds this mode's VTS at both rates (2051 at 15 fps, 1025 at 30 fps), so
-the AE can request more exposure than either mode's frame actually has room for.
+rejected (VTS 683 < the 984-line minimum blanking). The driver's exposure clamp (#2277)
+follows this mode's VTS, so exposure is capped at 2047 lines at 15 fps and 1021 at 30 fps.
 `examples/connectivity/camera-mjpeg-stream`
 still requests 15 fps by default; raising it needs its own bench pass. `SENSOR_CTRL09` for
 this mode (0x3709, undocumented) is not in the reference's own reg_list at all; it reuses
