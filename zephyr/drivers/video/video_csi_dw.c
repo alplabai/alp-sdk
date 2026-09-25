@@ -568,6 +568,38 @@ static int csi2_dw_validate_data(const struct device *dev)
 		pixclock = tmp;
 	}
 
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && config->hline != 0 &&
+	    config->vtotal != 0) {
+		/*
+		 * Alp Lab AB (issue #2287 Stage B): csi-hline/csi-vtotal present (0 means "DT
+		 * doesn't set them", see struct csi2_dw_config's own comment) -- derive hsd/vfp
+		 * from them and the CURRENT format's hact/vact instead of using a fixed csi-hsd/
+		 * csi-vfp DT value. A single fixed csi-hsd (the pre-Stage-B behaviour, still used
+		 * when these two properties are absent) is only ever correct for the ONE hact it
+		 * was bench-swept against -- a sensor with more than one selectable resolution
+		 * (e.g. imx296.c's issue #2287 Stage B ROI mode, 1280 wide vs. the sensor's
+		 * 1456-wide full frame) would otherwise silently mistime the IPI line for every
+		 * format but that one: a narrower hact under the SAME fixed hsd shortens the
+		 * derived HLINE (hsa+hbp+hsd+hact) below the sensor's own unchanged line time,
+		 * starving the IPI rather than over- or under-running it by a margin any FIFO
+		 * headroom could absorb.
+		 */
+		int32_t hsd = (int32_t)config->hline - timing->hsa - timing->hbp - timing->hact;
+		int32_t vfp = (int32_t)config->vtotal - timing->vsa - timing->vbp - timing->vact;
+
+		if (hsd < 0 || vfp < 0) {
+			LOG_ERR("csi-hline %u / csi-vtotal %u too small for this format "
+				"(hact %u, vact %u, hsa %u, hbp %u, vsa %u, vbp %u): "
+				"derived hsd %d, vfp %d",
+				config->hline, config->vtotal, timing->hact, timing->vact,
+				timing->hsa, timing->hbp, timing->vsa, timing->vbp, hsd, vfp);
+			return -EINVAL;
+		}
+
+		timing->hsd = (uint16_t)hsd;
+		timing->vfp = (uint16_t)vfp;
+	}
+
 	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && ret == 0) {
 		/*
 		 * Alp Lab AB (issue #2287): log the IPI line time this ACTUAL
@@ -1034,6 +1066,10 @@ static int csi2_dw_init(const struct device *dev)
 		.irq_config_func = csi2_dw_config_func_##i,                                        \
                                                                                                    \
 		.ipi_mode = DT_INST_ENUM_IDX(i, ipi_mode),                                         \
+                                                                                                   \
+		/* issue #2287 Stage B: see struct csi2_dw_config's own comment on these two. */    \
+		.hline = DT_INST_PROP_OR(i, csi_hline, 0),                                         \
+		.vtotal = DT_INST_PROP_OR(i, csi_vtotal, 0),                                       \
 	};                                                                                         \
                                                                                                    \
 	static struct csi2_dw_data data_##i = {                                                    \

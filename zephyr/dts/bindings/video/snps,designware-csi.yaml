@@ -89,6 +89,44 @@ properties:
     description: |
       The Horizontal active time in PIXCLK.
 
+  csi-hline:
+    type: int
+    required: false
+    description: |
+      Issue #2287 Stage B. Optional, Controller-mode only ("csi-ipi-mode" =
+      "Controller"): total IPI line length in PIXCLK, i.e. what the sensor's
+      own line time (its HMAX-derived 1H period) works out to once
+      re-expressed in this controller's pixel clock -- csi-hsa + csi-hbp +
+      csi-hsd + csi-hact. When present, csi-hsd is DERIVED from it at
+      configure time (hsd = csi-hline - csi-hsa - csi-hbp - hact, where hact
+      is the format's own active width, not a fixed DT value) instead of
+      read as a fixed csi-hsd property -- csi-hsd is then unused (and must
+      not also be set; the derived value would silently override it) and
+      may be omitted. This is what keeps the derived Controller-mode timing
+      correct across every format a sensor can select (e.g. a sensor with a
+      cropped ROI mode alongside its full-frame mode -- see
+      raspberry_pi_global_shutter_camera.overlay's own comment) where a
+      single fixed csi-hsd, swept for only one of those formats, would
+      otherwise silently mistime every other one. Requires csi-vtotal to
+      also be set (the two are configured as a pair); leaving one but not
+      the other set is a devicetree authoring mistake this binding does not
+      itself reject.
+
+  csi-vtotal:
+    type: int
+    required: false
+    description: |
+      Issue #2287 Stage B. Optional, Controller-mode only, pairs with
+      csi-hline above: total number of lines per frame in the sensor's own
+      timing (its VMAX in master mode) -- csi-vsa + csi-vbp + csi-vfp +
+      csi-vact. When present, csi-vfp is DERIVED from it at configure time
+      (vfp = csi-vtotal - csi-vsa - csi-vbp - vact, where vact is the
+      format's own active height) instead of read as a fixed csi-vfp
+      property -- csi-vfp is then unused and may be omitted. See csi-hline's
+      description above for why deriving from a format-independent total
+      (rather than a per-format fixed value) is what this property exists
+      for.
+
   rx-ddr-clk1:
     type: int
     required: false

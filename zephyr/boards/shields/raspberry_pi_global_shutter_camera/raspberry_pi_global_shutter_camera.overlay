@@ -79,25 +79,59 @@
  * HSD was swept on the bench to find this margin: HSD 531 (line time
  * 15.000 us, slower than the sensor) overflowed the FIFO and banded the
  * frame every ~80 rows (14.815 us / 0.185 us-per-row-drift predicts 80);
- * HSD 520 gave ~139-row bands; HSD 503 (below) gave zero IPI-FIFO overflow
- * events over a full capture run.
+ * HSD 520 gave ~139-row bands; HSD 503 gave zero IPI-FIFO overflow events
+ * over a full capture run -- this is the bench-verified full-frame result
+ * csi-hline/csi-vtotal below must still reproduce (they do, see below).
  *
- * SCOPE: these properties (ipi-mode, csi-h* / csi-v*) live on the shared &csi
- * CONTROLLER node, not on the imx296 sensor node -- they are IMX296-specific
- * derivations applied to a controller-wide register set. A second sensor
- * wired to the same &csi controller (this Alif CSI-2 host has two PHY/sensor
- * slots, CSI2_NUM_SENSORS in video_csi_dw.h) would INHERIT these Controller-
- * mode timings too, which is almost certainly wrong for a different sensor's
- * HMAX/VMAX/pixel-clock. Revisit if/when a second sensor is ever wired here.
+ * issue #2287 Stage B: csi-hline / csi-vtotal REPLACE the fixed csi-hsd /
+ * csi-vfp this overlay used to carry (zephyr/dts/bindings/video/
+ * snps,designware-csi.yaml's own doc comment on the two). A single fixed
+ * csi-hsd is only ever correct for the ONE hact (active width) it was
+ * bench-swept against -- imx296.c now also offers a 1280x960 ROI mode
+ * alongside the 1456x1088 full frame, and a narrower hact under the SAME
+ * fixed hsd shortens the derived HLINE below the sensor's own unchanged
+ * line time, starving the IPI. csi-hline/csi-vtotal instead give
+ * csi2_dw_validate_data() (video_csi_dw.c) the sensor's TOTAL line/frame
+ * length, INCK-independent (both are just IMX296_HMAX/VMAX re-expressed in
+ * IPI pixclk cycles, and HMAX/VMAX are the SAME across the sensor's three
+ * INCK options, imx296.c's own comment on IMX296_VMAX/HMAX), so it can
+ * re-derive hsd/vfp from whatever hact/vact the CURRENTLY selected format
+ * sets -- timing now follows any format the sensor advertises, including
+ * this ROI mode, instead of being pinned to whichever one was bench-swept.
+ *
+ *   csi-hline  = hsa+hbp+hsd+hact  = 3+10+503+1456   = 1972
+ *   csi-vtotal = vsa+vbp+vfp+vact  = 1+4+25+1088      = 1118 (= IMX296_VMAX)
+ *
+ * Full-frame arithmetic check (hact 1456, vact 1088 -- csi2_dw_validate_data()
+ * derives these at configure time, not hardcoded here):
+ *   hsd = csi-hline - hsa - hbp - hact   = 1972 - 3 - 10 - 1456  = 503
+ *   vfp = csi-vtotal - vsa - vbp - vact  = 1118 - 1 - 4 - 1088   = 25
+ * Both match the bench-swept fixed values above EXACTLY -- csi-hline/
+ * csi-vtotal reproduce the bench-verified full-frame timing bit-for-bit, not
+ * just approximately. ROI mode (hact 1280, vact 960, imx296.c's
+ * IMX296_ROI_WIDTH/HEIGHT) is UNBENCHED: hsd = 1972-3-10-1280 = 679,
+ * vfp = 1118-1-4-960 = 153, both non-negative (csi2_dw_validate_data()
+ * rejects a negative derivation with -EINVAL), but whether 679/153 keep the
+ * IPI line/frame time ahead of the sensor's the same way 503/25 do has not
+ * been measured on silicon.
+ *
+ * SCOPE: these properties (ipi-mode, csi-h* / csi-v* / csi-hline / csi-vtotal)
+ * live on the shared &csi CONTROLLER node, not on the imx296 sensor node --
+ * they are IMX296-specific derivations applied to a controller-wide register
+ * set. A second sensor wired to the same &csi controller (this Alif CSI-2
+ * host has two PHY/sensor slots, CSI2_NUM_SENSORS in video_csi_dw.h) would
+ * INHERIT these Controller-mode timings too, which is almost certainly wrong
+ * for a different sensor's HMAX/VMAX/pixel-clock. Revisit if/when a second
+ * sensor is ever wired here.
  */
 &csi {
 	ipi-mode = "Controller";
 	csi-hsa = <3>;
 	csi-hbp = <10>;
-	csi-hsd = <503>;
+	csi-hline = <1972>;
 	csi-vsa = <1>;
 	csi-vbp = <4>;
-	csi-vfp = <25>;
+	csi-vtotal = <1118>;
 };
 
 &csi_ep_in {

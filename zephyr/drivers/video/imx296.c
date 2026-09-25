@@ -261,23 +261,48 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
  * Register Map, Chip ID = 05h (page 42) + "Register List of ROI mode" /
- * "Restrictions on ROI mode" (pages 51-52): FID0_ROIH1ON bit0, FID0_ROIV1ON
- * bit1 at CCI address 0x3300, POR default 0 (both disabled) -- this is the
- * datasheet's actual all-pixel-scan-mode-vs-windowed-ROI-mode switch ("ROI
- * mode" is entered by ENABLING these bits and programming FID0_ROIPH1/
- * ROIPV1/ROIWH1/ROIWV1; "Please set All-pixel scan mode to the settings
- * other than the following" for everything else). This datasheet does not
- * separately document a 0x300D "window mode" register -- 0x300C/0x300D also
- * fall in the same undocumented gap as IMX296_REG_CSI_LANE_HS above (Chip ID
- * = 02h's map jumps 0x300B -> 0x300E, page 34-35). Writing this register's
- * disable value explicitly (rather than assuming POR) is what keeps a
- * previous ROI-mode session's cropping window from leaking into this
- * driver's fixed All-pixel-scan-mode output on a warm SoC reset, since the
- * sensor module stays powered across one (see the STANDBY comment on
- * imx296_init() below).
+ * "Restrictions on ROI mode" (pages 51-53): FID0_ROIH1ON bit0 (reflect "V"),
+ * FID0_ROIV1ON bit1 (reflect "I") at CCI address 0x3300, POR default 0 (both
+ * disabled) -- this is the datasheet's actual all-pixel-scan-mode-vs-
+ * windowed-ROI-mode switch ("ROI mode" is entered by ENABLING both bits and
+ * programming FID0_ROIPH1/ROIPV1/ROIWH1/ROIWV1 below; "Please set All-pixel
+ * scan mode to the settings other than the following" for everything else).
+ * This datasheet does not separately document a 0x300D "window mode"
+ * register -- 0x300C/0x300D also fall in the same undocumented gap as
+ * IMX296_REG_CSI_LANE_HS above (Chip ID = 02h's map jumps 0x300B -> 0x300E,
+ * page 34-35). imx296_init() writes this register's disable value
+ * explicitly (rather than assuming POR) so a previous ROI-mode session's
+ * cropping window cannot leak into a cold boot's default full-frame output,
+ * since the sensor module stays powered across a warm SoC reset (see the
+ * STANDBY comment on imx296_init() below); imx296_set_stream() (issue
+ * #2287 Stage B) then re-drives it to the value matching the format
+ * video_set_format() last selected, every stream start -- see the ROI-mode
+ * write block there.
  */
 #define IMX296_REG_ROI_ENABLE     IMX296_REG8(0x3300)
 #define IMX296_ROI_ENABLE_DISABLE 0x00u
+#define IMX296_ROI_ENABLE_ENABLE  (BIT(0) | BIT(1)) /* FID0_ROIH1ON | FID0_ROIV1ON */
+
+/*
+ * Register Map, Chip ID = 05h (page 42): FID0_ROIPH1[12:0] at CCI 0x3310
+ * (LSB)/0x3311 (upper 5 bits), reflect "V"; FID0_ROIPV1[11:0] at 0x3312/
+ * 0x3313, reflect "I"; FID0_ROIWH1[12:0] at 0x3314/0x3315, reflect "V";
+ * FID0_ROIWV1[11:0] at 0x3316/0x3317, reflect "I" -- all four are 2-byte
+ * fields with the unused high bits fixed to 0 (same "16-bit LE register,
+ * fewer bits actually wired" shape as IMX296_REG_HMAX above), so
+ * IMX296_REG16() covers them exactly like the driver's other multi-byte
+ * registers. "Restrictions on ROI mode" (page 53): all four values must be
+ * a multiple of 4; ROIWH1 >= 80, ROIWV1 >= 4; ROIPH1+ROIWH1 <= 1456d;
+ * ROIPV1+ROIWV1 <= 1088d. imx296_set_stream()'s ROI-mode write block below
+ * programs these unconditionally to the one supported 1280x960 crop
+ * whenever that is the format video_set_format() selected; a mismatch
+ * against these limits would be a bug in that fixed geometry, not a runtime
+ * input to validate.
+ */
+#define IMX296_REG_ROI_POS_H  IMX296_REG16(0x3310)
+#define IMX296_REG_ROI_POS_V  IMX296_REG16(0x3312)
+#define IMX296_REG_ROI_SIZE_H IMX296_REG16(0x3314)
+#define IMX296_REG_ROI_SIZE_V IMX296_REG16(0x3316)
 
 /*
  * Register Map, Chip ID = 02h (page 35) + "Horizontal / Vertical Normal
@@ -354,6 +379,27 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  */
 #define IMX296_WIDTH  1456
 #define IMX296_HEIGHT 1088
+
+/*
+ * "ROI mode" / "Register List of ROI mode" / "Restrictions on ROI mode"
+ * (pages 51-53), issue #2287 Stage B: a second, centred crop window within
+ * the same 1456x1088 full-pixel array above. 1280 and 960 are each a
+ * multiple of 4 (page 53's requirement); ROIWH1 = 1280 >= the 80-pixel
+ * minimum and ROIWV1 = 960 >= the 4-line minimum. IMX296_ROI_POS_H/V below
+ * centre it: (IMX296_WIDTH - IMX296_ROI_WIDTH) / 2 = (1456-1280)/2 = 88,
+ * (IMX296_HEIGHT - IMX296_ROI_HEIGHT) / 2 = (1088-960)/2 = 64 -- both
+ * already multiples of 4, so no rounding was needed. Frame rate on page 53
+ * is "1 / ((lines-per-frame or VMAX) x 1H period)" -- in this driver's
+ * always-master-mode operation "lines per frame" IS the VMAX register
+ * (IMX296_VMAX, unchanged by ROI mode -- see its own comment below), so
+ * this crop keeps the same 60.3 frame/s as the full-frame mode as long as
+ * VMAX stays >= ROIWV1 + 30 (page 53's ROI-mode floor): 1118 >= 960 + 30 =
+ * 990, satisfied with margin.
+ */
+#define IMX296_ROI_WIDTH  1280
+#define IMX296_ROI_HEIGHT 960
+#define IMX296_ROI_POS_H  88
+#define IMX296_ROI_POS_V  64
 
 /*
  * "Register List of All-pixel scan mode" (page 49), AD = 10 bit / 60.3
@@ -517,6 +563,22 @@ static const struct video_format_cap imx296_fmts[] = {
 	    .height_max  = IMX296_HEIGHT,
 	    .height_step = 1,
 	},
+	/*
+	 * Centred ROI crop (issue #2287 Stage B, IMX296_ROI_WIDTH/HEIGHT's own comment above).
+	 * IMX296_ROI_POS_H/V (88, 64) are both even, so the crop's top-left pixel sits on the
+	 * same RGGB phase as the full-frame mode above -- the Bayer-order comment's "even
+	 * margins keep the same phase" reasoning applies to this offset too, not just the
+	 * sensor's own fixed colour-processing margin.
+	 */
+	{
+	    .pixelformat = VIDEO_PIX_FMT_SRGGB10P,
+	    .width_min   = IMX296_ROI_WIDTH,
+	    .width_max   = IMX296_ROI_WIDTH,
+	    .width_step  = 1,
+	    .height_min  = IMX296_ROI_HEIGHT,
+	    .height_max  = IMX296_ROI_HEIGHT,
+	    .height_step = 1,
+	},
 	{ 0 },
 };
 
@@ -659,21 +721,62 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 		 * parked in STANDBY at this point: imx296_init() leaves it there, and the stop
 		 * path at the end of this function re-arms it.
 		 */
-		ret = video_write_cci_reg(&cfg->i2c,
-		                          IMX296_REG_TRIGEN,
-		                          trigger ? IMX296_TRIGEN_TRIGGER : 0);
+		ret =
+		    video_write_cci_reg(&cfg->i2c, IMX296_REG_TRIGEN, trigger ? IMX296_TRIGEN_TRIGGER : 0);
 		if (ret < 0) {
 			return ret;
 		}
 
-		ret = video_write_cci_reg(&cfg->i2c,
-		                          IMX296_REG_LOWLAGTRG,
-		                          trigger ? IMX296_LOWLAGTRG_FAST : 0);
+		ret = video_write_cci_reg(
+		    &cfg->i2c, IMX296_REG_LOWLAGTRG, trigger ? IMX296_LOWLAGTRG_FAST : 0);
 		if (ret < 0) {
 			return ret;
 		}
 
 		ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SYNCSEL, IMX296_SYNCSEL_NORMAL);
+		if (ret < 0) {
+			return ret;
+		}
+
+		/*
+		 * ROI mode (issue #2287 Stage B, IMX296_REG_ROI_ENABLE's own comment above):
+		 * `data->fmt` is whatever video_set_format() last accepted from imx296_fmts[]
+		 * (imx296_set_fmt() only lets the two entries there through), so this reads it
+		 * back rather than tracking a separate "ROI requested" flag. Like TRIGEN/
+		 * LOWLAGTRG/SYNCSEL just above, these land here -- while still in standby, before
+		 * STANDBY is cancelled below -- for the same reason: whatever their own reflect
+		 * timing ("V"/"I", not "S" -- see IMX296_REG_ROI_POS_H's comment above), a value
+		 * written while the sensor's clocks are still halted in standby cannot land
+		 * mid-frame, so this is a safe common write window regardless of reflect type.
+		 * The position/size registers are written UNCONDITIONALLY to the one supported
+		 * crop whenever ROI mode is selected -- there is no second ROI geometry to choose
+		 * between, so nothing here needs to persist across a full-frame stream start.
+		 */
+		if (data->fmt.width == IMX296_ROI_WIDTH && data->fmt.height == IMX296_ROI_HEIGHT) {
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_POS_H, IMX296_ROI_POS_H);
+			if (ret < 0) {
+				return ret;
+			}
+
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_POS_V, IMX296_ROI_POS_V);
+			if (ret < 0) {
+				return ret;
+			}
+
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_SIZE_H, IMX296_ROI_WIDTH);
+			if (ret < 0) {
+				return ret;
+			}
+
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_SIZE_V, IMX296_ROI_HEIGHT);
+			if (ret < 0) {
+				return ret;
+			}
+
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_ENABLE, IMX296_ROI_ENABLE_ENABLE);
+		} else {
+			ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_ENABLE, IMX296_ROI_ENABLE_DISABLE);
+		}
 		if (ret < 0) {
 			return ret;
 		}

@@ -353,6 +353,21 @@ struct csi2_dw_config {
 	const struct device *sensor[CSI2_NUM_SENSORS];
 
 	uint32_t num_dphys;
+
+	/*
+	 * Alp Lab AB (issue #2287 Stage B): optional Controller-mode DT properties csi-hline /
+	 * csi-vtotal (snps,designware-csi.yaml) -- when non-zero, csi2_dw_validate_data()
+	 * derives timing->hsd / timing->vfp from these at configure time instead of reading
+	 * them as fixed csi-hsd / csi-vfp DT values, so the IPI controller timing tracks
+	 * whatever hact/vact the CURRENTLY selected format sets, not just whichever format a
+	 * single fixed csi-hsd happened to be bench-swept against. 0 means "not set" (neither
+	 * property is a meaningful 0 in practice -- a zero-length line/frame is nonsensical),
+	 * so board DTS that doesn't set them gets byte-identical behaviour to before this
+	 * field existed: the fixed csi-hsd/csi-vfp path.
+	 */
+	uint32_t hline;
+	uint32_t vtotal;
+
 	uint8_t rx_dphy_ids[];
 };
 

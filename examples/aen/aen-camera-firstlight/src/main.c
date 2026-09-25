@@ -32,6 +32,12 @@
  *   ... -DSHIELD="e1m_evk_rpi_csi innomaker_cam_ov9281"         # OV9281, GREY8
  *   ... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" # IMX296, RAW10
  *
+ * IMX296 also has a second, opt-in mode (issue #2287 Stage B): its 1280x960
+ * centred ROI crop, alongside the default full 1456x1088 frame above -- add
+ * `-DAEN_CAMERA_IMX296_ROI=ON` to any IMX296 build line to select it (see
+ * CMakeLists.txt and the CAM_WIDTH/CAM_HEIGHT #elif ladder below). UNBENCHED
+ * on real silicon -- see that #elif's own comment.
+ *
  * Which shield is stacked is a BUILD-TIME fact (exactly one sensor driver's
  * Kconfig auto-selects, `default y` under its `DT_HAS_<compat>_ENABLED` --
  * see zephyr/drivers/video/Kconfig.ov5647 / Kconfig.ov9281 / Kconfig.imx296),
@@ -273,14 +279,31 @@ static bool trigger_capture_loop(alp_camera_t *cam)
 #define CAM_HEIGHT          480
 #define CAM_BYTES_PER_PIXEL 2
 #define CAM_SHIELD_NAME     "raspberry_pi_camera_module_1 (OV5647, RAW10 640x480)"
+#elif defined(CONFIG_VIDEO_IMX296) && defined(AEN_CAMERA_IMX296_ROI)
+/* RPi Global Shutter Camera, ROI mode (issue #2287 Stage B, -DAEN_CAMERA_IMX296_ROI=ON, see
+ * CMakeLists.txt): the sensor's second, centred 1280x960 crop within the same 1456x1088
+ * full-pixel array -- zephyr/drivers/video/imx296.c's IMX296_ROI_WIDTH/HEIGHT and the ROI-mode
+ * register writes in imx296_set_stream(). OFF by default (the #elif just below stays the
+ * driver's original, more bench-tested full-frame mode) -- opt in explicitly to exercise this
+ * one. UNBENCHED: only the register-level logic is covered, by
+ * tests/zephyr/video_sensors/src/imx296_test.c's emulator suite -- no capture has run this crop
+ * on real silicon. The DW CSI-2 host side of this mode (csi-hline/csi-vtotal deriving hsd/vfp for
+ * this crop's hact/vact) is likewise unbenched -- see
+ * boards/shields/raspberry_pi_global_shutter_camera/raspberry_pi_global_shutter_camera.overlay's
+ * own comment on that arithmetic. */
+#define CAM_FORMAT          ALP_PIXFMT_RAW10
+#define CAM_WIDTH           1280
+#define CAM_HEIGHT          960
+#define CAM_BYTES_PER_PIXEL 2
+#define CAM_SHIELD_NAME     "raspberry_pi_global_shutter_camera (IMX296, ROI RAW10 1280x960)"
 #elif defined(CONFIG_VIDEO_IMX296)
-/* RPi Global Shutter Camera (IMX296LQR-C colour, issue #2287): one fixed all-pixel mode, so no
- * crop -- 1456x1088 RAW10 over a single CSI-2 lane. That is what the sensor transmits: the
+/* RPi Global Shutter Camera (IMX296LQR-C colour, issue #2287): the sensor's default all-pixel
+ * mode -- 1456x1088 RAW10 over a single CSI-2 lane. That is what the sensor transmits: the
  * datasheet's 1440x1080 "recording" area plus the 8-column/4-row colour-processing margin on
  * every side, which is sent, not cropped. Unpacked that is 1456 x 1088 x 2 = 3,168,256 bytes, so
  * this example's Kconfig drops the backend to ONE frame buffer and grows the SRAM0 pool to fit
  * it. Bench status (single-frame raw capture through this app, issue #2287) is in
- * docs/camera-shields.md. */
+ * docs/camera-shields.md. See the ROI #elif above for this sensor's other, opt-in mode. */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
 #define CAM_WIDTH           1456
 #define CAM_HEIGHT          1088
