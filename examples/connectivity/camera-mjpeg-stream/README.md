@@ -156,8 +156,28 @@ manual gain range as the AE library's ceiling on every
 calibration ceiling and logging "AE attr mismatch after set" (the
 library's own compiled-in clamp held the real ceiling throughout, so
 this was a spurious log, not a functional bug) — now clamped to agree
-(`CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS`). Re-bench after THIS
-round's fixes is not yet done — no run number for this build yet.
+(`CONFIG_VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS`).
+
+Bench run 314 (same board, this round's fixes) confirmed BOTH: no more
+"AE attr mismatch after set" log line, and — the thing run 312/313 could
+not explain — the DHCP lease/URL lines now print. Encode 61 fps, 0 fails,
+0 retries, ~31.2 KB JPEGs; one HTTP client measured 28.3 fps / 885 KB/s
+delivered (up from run 313's 17.6 fps / 552 KB/s at the same encode rate
+— the VSI AE/AWB LOG_INF chatter this round's `prj.conf` fix silenced was
+apparently also competing with the HTTP send thread for CPU/UART-DMA
+time, not just wrapping the RAM console), 0.057 s worst-case frame gap.
+The board's Ethernet MAC address also changed again between runs
+(02:01:56:95:c4:a8 → ...:86; earlier boots saw ...:62 and ...:102) — see
+this app's own investigation note below.
+
+This example's `prj.conf` sets `CONFIG_VIDEO_LOG_LEVEL_WRN=y` (see that
+file's own comment) specifically to stop the VSI AE/AWB library's
+continuous per-frame `LOG_INF` chatter from wrapping the RAM console
+ring buffer — a side effect is that `isp_pico.c`'s own `AE readback: ...`
+line (below) and `video_csi_dw.c`'s `CSI IPI Controller-mode: ... line
+time ...` line are ALSO `LOG_INF` and will NOT print in this example's
+builds. Rebuild with `CONFIG_VIDEO_LOG_LEVEL_INF=y` (overriding this
+file's `_WRN` choice) to see them again for diagnostics.
 
 Also from run 312/313: this variant's FLASH usage on the ITCM bench
 profile (`scripts/bench/aen/aen-flowc-itcm.conf`) has been running under
@@ -166,6 +186,34 @@ region` summary (`west build` prints it after linking) before adding to
 `src/main.c` or its Kconfig-selected code paths; do not assume a fixed
 byte count still applies, it moves with every change to this file or its
 dependencies.
+
+### Ethernet MAC address changes every boot (investigated, not fixed)
+
+Bench runs 312-314 each logged a DIFFERENT MAC address
+(`02:01:56:95:c4:a8`, then `...:86`, and two earlier boots at `...:62`
+and `...:102`) for the SAME physical board. NOT a bug and NOT specific
+to this example: `boards/alp_e1m_aen80{1,3}_..._rtss_he.overlay`'s
+`&ethernet` node has its own comment saying exactly this is expected —
+"inherits `zephyr,random-mac-address` from the SoC dtsi (per-boot random
+locally-administered `02:01:56:xx:xx:xx`) -- DHCP doesn't care which MAC
+asks, and a random one means two boards on the same network never
+collide." `zephyr/drivers/ethernet/eth_dwmac_alif_ensemble.c`'s own
+header comment documents the SAME mechanism as standard upstream Zephyr
+ethernet-controller semantics: `zephyr,random-mac-address` set (the
+SoC-dtsi default) generates a fresh address via `gen_random_mac()` every
+boot; the ONLY alternative the binding offers is deleting that DT flag
+and supplying a real, per-unit `local-mac-address` instead (`local-mac-
+address` is otherwise IGNORED while the random flag is set) — that
+requires an actual assigned address per physical board, which a shared
+generic example has no way to carry. `examples/aen/aen-ethernet-link`
+and `examples/aen/aen-evk-demo` both inherit the identical SoC-dtsi
+default for the same reason (searched: no `local-mac-address` override
+in either). No EEPROM/OTP-sourced fixed-MAC mechanism was found in
+`zephyr/drivers/ethernet/` or the SoC devicetree for this board family —
+if alp-sdk gains one later (e.g. from the SoM's own identity/provisioning
+EEPROM), this example and its two AEN siblings above would all want the
+same change together, not this one alone. Not changed here per your
+instruction (report only).
 
 ## Watch it
 
@@ -203,7 +251,10 @@ request, #2276): 901 complete JPEGs streamed in each of three 30 s
 captures = **30.03 fps** -- confirms the requested 30 fps is achievable
 end to end through this pipeline. AE settled around intLine ~331-351
 (boot readback `AE readback: int_time_max=32667 ...`, matching the 30 fps
-frame period), no `E:`/`W:` log lines.
+frame period — that line is `LOG_INF`, so it prints at this run's log
+level but NOT in a build with this file's own `CONFIG_VIDEO_LOG_LEVEL_WRN=y`
+(added later, for the IMX296 variant above; see that entry's own note)),
+no `E:`/`W:` log lines.
 
 Bench runs 224-228 (E1M-AEN803 + OV5647, **640×480**, #2285): a timing
 probe in run 223 found the camera loop itself keeping up with 60 fps

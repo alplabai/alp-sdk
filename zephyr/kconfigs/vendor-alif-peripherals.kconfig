@@ -1172,6 +1172,7 @@ config VIDEO_ISP_VSI_SNS_EXPOSURE_CTRL_PER_LINE
 
 config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
 	int "ISP-Pico AE gain ceiling PUSH cap, in 0.1 dB units (0 = no cap)"
+	range 0 480
 	default 240 if VIDEO_ISP_VSI_CALIB_IMX296
 	default 0
 	depends on VIDEO_ISP_VSI
@@ -1206,6 +1207,12 @@ config VIDEO_ISP_VSI_AE_AGAIN_MAX_DB_TENTHS
 	  documents for its OTHER hand-synced figures); a future change to
 	  one without the other reintroduces the same mismatch this symbol
 	  exists to silence.
+
+	  `range 0 480`: 480 is IMX296's own GAIN register's full legal
+	  range (0.0-48.0 dB, 0.1 dB/count) -- a value above that has no
+	  register encoding for isp_sns_gain_db_tenths_to_lib() to clamp
+	  toward, so it can never be a meaningful cap on any sensor this
+	  symbol could apply to.
 
 config VIDEO_ISP_VSI_AE_TARGET
 	int "ISP-Pico AE target luminance [0, 255]"
