@@ -155,5 +155,8 @@ in all three modes, each at its configured frame rate; the OV5647 shield's
 real result (2026-09-22, issue #2248) is a live RAW10 640x480 capture on the
 same board. The IMX296 shield's real result (issue #2287, bench run 292) is
 a live RAW10 1456x1088 capture on the same board -- mean pixel value 61.19,
-max 108, clean close, no IPI errors, no mod-4-column pattern, 0.98
-correlation against a diag control capture (run 293).
+max 108, clean close, no `INT_IPI_PIXEL_IF_HLINE_ERR` lines in the console
+(the earlier HLINE_ERR counts cited elsewhere in this repo are from pre-fix
+diag runs, not this capture -- continuous streaming on the product build is
+still open), no mod-4-column pattern, 0.98 correlation against a diag
+control capture (run 293).

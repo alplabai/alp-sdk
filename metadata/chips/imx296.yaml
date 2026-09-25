@@ -30,18 +30,23 @@ notes: |
   16-bit little-endian, reads 0x4A00, the signature the driver checks for
   this colour LQR variant), CSI-2 streaming, and a full 1456x1088 RAW10
   frame captured through <alp/camera.h> and correlated against a diag
-  control capture: bench run 292 (single capture, evening light, gain 0)
-  reads mean pixel value 61.19, max 108, clean close, no IPI errors, no
-  mod-4-column byte-slip pattern; 0.98 8x8-block correlation against diag
-  control run 293 (SHS=14 written directly, same light). Both runs are
-  still dim (~1 code above black); exposure/lighting tuning is a follow-up.
+  control capture: bench run 292 (a SINGLE capture, evening light, gain 0)
+  reads mean pixel value 61.19, max 108, clean close, no
+  INT_IPI_PIXEL_IF_HLINE_ERR lines in the console (the shipped ISR would
+  log them; earlier HLINE_ERR counts are from pre-fix diag runs, not this
+  capture), no mod-4-column byte-slip pattern; 0.98 8x8-block correlation
+  against diag control run 293 (SHS=14 written directly, same light). Both
+  runs are still dim (~1 code above black); exposure/lighting tuning is a
+  follow-up. This is a single-capture proof only: frame rate was not
+  measured, and CONTINUOUS streaming has not been bench-run on the product
+  build, so whether HLINE_ERR (or anything else) shows up there is open.
 
-  NOT yet bench-verified, tracked for a later stage: the ISP-Pico colour
-  path, auto-exposure, camera-mjpeg-stream-style continuous streaming, and
-  the driver's fast-trigger exposure mode (IMX296_CID_TRIGGER_MODE) --
-  compiles clean but has not run with a trigger pulse; its GPIO wiring's
-  electrical polarity is also unconfirmed against the module's own
-  documentation, so do not wire its trigger header yet.
+  NOT yet bench-verified, tracked for a later stage: continuous streaming,
+  the ISP-Pico colour path, auto-exposure, and the driver's fast-trigger
+  exposure mode (IMX296_CID_TRIGGER_MODE) -- compiles clean but has not run
+  with a trigger pulse; its GPIO wiring's electrical polarity is also
+  unconfirmed against the module's own documentation, so do not wire its
+  trigger header yet.
 
 bus:              i2c
 i2c:
@@ -67,10 +72,12 @@ families:
   - aen
 
 verification:
-  hil_silicon:    verified          # Stage A: I2C identity, CSI-2 streaming, and a captured
+  hil_silicon:    partial           # Stage A: I2C identity, CSI-2 streaming, and ONE captured
                                      # 1456x1088 RAW10 frame (bench run 292) -- see notes above.
-                                     # ISP-Pico, AE, continuous streaming and fast-trigger mode
-                                     # are separate, later-stage surfaces and remain unverified.
+                                     # Partial, not verified: frame rate was not measured,
+                                     # continuous streaming has not been bench-run on the product
+                                     # build, and ISP-Pico, AE and fast-trigger mode are separate,
+                                     # later-stage surfaces that remain unverified.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
                                      # the streaming driver's coverage is
                                      # tests/zephyr/video_sensors/src/imx296_test.c.

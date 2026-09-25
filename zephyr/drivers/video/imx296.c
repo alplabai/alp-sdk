@@ -42,19 +42,12 @@
  * derivation comment) the earlier "Camera" timing mode's complete failure
  * to emit any IPI line is RESOLVED: Controller mode captures full
  * 1456x1088 frames with zero IPI-FIFO-overflow events across a full
- * capture run (csi-hsd 503, see the overlay). Frame content took several
- * more bench passes to verify -- see changelog.d/2287.md for the full
- * history -- and two unrelated bugs were in the way at this point: the
- * product build's own SHS init write (fixed by 949f7db5f, see
- * IMX296_SHS_DEFAULT's comment below) was stuck at a 14-line exposure
- * regardless of the exposure/gain control values a caller set, and every
- * capture (product or diag) restarted the sensor first, landing on an
- * initialization-period frame (fixed by 3e4c09b55/1312b0734, see
- * hw_cam_cpi_only_stop()/IMX296_INIT_PERIOD_MS). Diag builds that bypassed
- * the SHS bug by writing SHS/exposure directly still inherited the
- * restart-per-capture problem, so even those early diag frames were
- * init-period frames, not a clean read of the data path. See
- * changelog.d/2287.md for the bench numbers once both were fixed.
+ * capture run (csi-hsd 503, see the overlay). Current state (Stage A, bench
+ * run 292): a single free-run capture reads a clean, faint but real image
+ * (mean pixel value 61.19, no HLINE_ERR in the console, no RAW10
+ * byte-phase-slip pattern). Continuous streaming, ISP-Pico, AE and
+ * fast-trigger mode are not yet bench-verified. See changelog.d/2287.md
+ * (issue #2287) for the full bring-up history and every bench number.
  *
  * LANE-PARK / D-PHY BEHAVIOUR: unlike OV5647 (issue #2248,
  * ov5647_lane_park()), this datasheet documents no register that forces the
