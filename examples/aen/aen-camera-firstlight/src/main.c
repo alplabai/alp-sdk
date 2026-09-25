@@ -42,6 +42,7 @@
  * per module.
  */
 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -51,6 +52,118 @@
 
 #include <alp/camera.h>
 #include <alp/peripheral.h>
+
+#define CAM_CAPTURE_TIMEOUT_MS 2000u
+
+#if defined(AEN_CAMERA_TRIGGER) && defined(CONFIG_VIDEO_IMX296)
+/*
+ * Opt-in bench mode (issue #2287, `-DAEN_CAMERA_TRIGGER=ON`, see
+ * CMakeLists.txt + boards/trigger_gpio.overlay): drives IMX296's fast
+ * trigger mode and pulses the carrier's J3 Trig+ line instead of free-run
+ * capture. UNVERIFIED ON SILICON -- not benched by this change; issue #2287
+ * benches it later.
+ *
+ * This is the one place in this file that steps outside the portable
+ * <alp/camera.h> surface: neither <alp/camera.h> nor src/backends/camera/
+ * has any concept of "trigger mode" today (checked before writing this --
+ * see the driver-level comment in zephyr/drivers/video/imx296.c on
+ * IMX296_CID_TRIGGER_MODE for why it rides Zephyr's driver-private-CID
+ * convention instead of a new portable control). Reaching the sensor's
+ * Zephyr device directly, by the same DT alias src/backends/camera/
+ * zephyr_video.c itself resolves (`alp-camera0`), is the smallest way to
+ * reach a control the portable API does not carry -- see this file's
+ * header comment for the portable-<alp/camera.h>-trigger-API shape this
+ * change's report proposes instead of inventing one here.
+ */
+#include <zephyr/device.h>
+#include <zephyr/devicetree.h>
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/video-controls.h>
+#include <zephyr/drivers/video.h>
+
+#define AEN_CAMERA_TRIGGER_ACTIVE 1
+
+/* Mirrors zephyr/drivers/video/imx296.c's IMX296_CID_TRIGGER_MODE -- not a
+ * public header (driver-private CID), so redefined here from the same
+ * VIDEO_CID_PRIVATE_BASE convention; see that macro's comment in imx296.c. */
+#define TRIGGER_CID           (VIDEO_CID_PRIVATE_BASE + 0x01)
+#define TRIGGER_MODE_EXTERNAL 1
+
+#define TRIGGER_GPIO_NODE    DT_NODELABEL(imx296_trigger)
+#define TRIGGER_PULSE_LOW_MS 5u
+#define TRIGGER_FRAME_COUNT  3u
+
+static const struct gpio_dt_spec trigger_gpio = GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, gpios);
+
+/* Sets fast-trigger mode on the sensor (must land before alp_camera_start(),
+ * see imx296.c's IMX296_CID_TRIGGER_MODE comment) and readies the XTRIG
+ * pulse line, idling high. */
+static int trigger_arm(void)
+{
+	const struct device *sensor = DEVICE_DT_GET(DT_ALIAS(alp_camera0));
+	struct video_control ctrl   = { .id = TRIGGER_CID, .val = TRIGGER_MODE_EXTERNAL };
+	int                  ret;
+
+	if (!gpio_is_ready_dt(&trigger_gpio)) {
+		printk("[camfl]   trigger GPIO not ready\n");
+		return -ENODEV;
+	}
+
+	ret = gpio_pin_configure_dt(&trigger_gpio, GPIO_OUTPUT_ACTIVE);
+	if (ret < 0) {
+		printk("[camfl]   trigger GPIO configure failed: %d\n", ret);
+		return ret;
+	}
+
+	ret = video_set_ctrl(sensor, &ctrl);
+	if (ret < 0) {
+		printk("[camfl]   IMX296_CID_TRIGGER_MODE set failed: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+/* One XTRIG pulse: "Fast trigger mode ... starts exposure at fall of XTRIG
+ * immediately" (IMX296 datasheet page 64) -- drive the (idle-high) line low
+ * for TRIGGER_PULSE_LOW_MS, then release it. */
+static void trigger_pulse(void)
+{
+	gpio_pin_set_dt(&trigger_gpio, 0);
+	k_msleep(TRIGGER_PULSE_LOW_MS);
+	gpio_pin_set_dt(&trigger_gpio, 1);
+}
+
+/* Pulses XTRIG TRIGGER_FRAME_COUNT times, capturing and timestamping one
+ * frame per pulse. Returns true iff every frame arrived before its own
+ * CAM_CAPTURE_TIMEOUT_MS window. */
+static bool trigger_capture_loop(alp_camera_t *cam)
+{
+	bool all_ok = true;
+
+	for (unsigned i = 0; i < TRIGGER_FRAME_COUNT; i++) {
+		alp_camera_frame_t frame;
+		alp_status_t       s;
+
+		trigger_pulse();
+
+		s = alp_camera_capture(cam, &frame, CAM_CAPTURE_TIMEOUT_MS);
+		if (s != ALP_OK) {
+			printk("[camfl]   trigger frame %u: alp_camera_capture -> %s\n", i, alp_status_name(s));
+			all_ok = false;
+			continue;
+		}
+
+		printk("[camfl]   trigger frame %u: %u bytes @ %llu us\n",
+		       i,
+		       (unsigned)frame.size,
+		       (unsigned long long)frame.timestamp_us);
+		alp_camera_release(cam, &frame);
+	}
+
+	return all_ok;
+}
+#endif
 
 #if defined(CONFIG_VIDEO_OV9281)
 /* InnoMaker CAM-OV9281: global-shutter mono, RAW8 mono only (GREY8 in the
@@ -101,8 +214,6 @@
  * caller yet). GREY8 is always 1 byte/pixel, no packing to begin with. */
 #define CAM_PITCH (CAM_WIDTH * CAM_BYTES_PER_PIXEL)
 
-#define CAM_CAPTURE_TIMEOUT_MS 2000u
-
 int main(void)
 {
 	printk("\n=== aen-camera-firstlight: %s ===\n", CAM_SHIELD_NAME);
@@ -142,6 +253,15 @@ int main(void)
 	}
 	printk("[camfl] alp_camera_open OK\n");
 
+#if defined(AEN_CAMERA_TRIGGER_ACTIVE)
+	printk("[camfl] AEN_CAMERA_TRIGGER: arming fast-trigger mode + XTRIG GPIO ...\n");
+	if (trigger_arm() != 0) {
+		printk("RESULT: trigger arm failed\n");
+		alp_camera_close(cam);
+		return 0;
+	}
+#endif
+
 	/* --- 2. start stream -------------------------------------------- */
 	alp_status_t s = alp_camera_start(cam);
 	printk("[camfl] alp_camera_start -> %s\n", alp_status_name(s));
@@ -151,6 +271,12 @@ int main(void)
 		return 0;
 	}
 
+#if defined(AEN_CAMERA_TRIGGER_ACTIVE)
+	/* --- 3. pulse XTRIG TRIGGER_FRAME_COUNT times, one capture each -- */
+	printk("[camfl] AEN_CAMERA_TRIGGER: pulsing XTRIG for %u frames ...\n", TRIGGER_FRAME_COUNT);
+	bool triggered_ok = trigger_capture_loop(cam);
+	printk("RESULT: %s\n", triggered_ok ? "capture ok" : "capture failed");
+#else
 	/* --- 3. wait for one frame, with a timeout ----------------------- */
 	alp_camera_frame_t frame;
 	printk("[camfl] alp_camera_capture: waiting up to %u ms for one frame ...\n",
@@ -255,6 +381,8 @@ int main(void)
 			printk("RESULT: capture ok\n");
 		}
 	}
+
+#endif /* !defined(AEN_CAMERA_TRIGGER_ACTIVE) */
 
 	/* --- 4. stop + close ---------------------------------------------- */
 	s = alp_camera_stop(cam);

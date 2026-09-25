@@ -1,0 +1,52 @@
+/*
+ * Copyright (c) 2026 Alp Lab AB
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Opt-in overlay for the AEN_CAMERA_TRIGGER build mode (see CMakeLists.txt
+ * -- only merged in when `-DAEN_CAMERA_TRIGGER=ON` is passed). Adds the GPIO
+ * this app drives to pulse IMX296's XTRIG line, per issue #2287's bench
+ * wiring: carrier J3 Trig+ -> Arduino D4 (EVK_PIN_CK_DIO4,
+ * metadata/boards/e1m-evk.yaml) -> E1M pad M2 -> Alif pad P5_1
+ * (metadata/e1m_modules/aen/from-alif.tsv: `M2 SPI0_MOSI SPI0_MOSI_B P5_1`).
+ * No existing DT alias/label names this pin -- EVK_PIN_CK_DIO4 is a
+ * portable-GPIO-API pin id (include/alp/boards/alp_e1m_evk_routes.h), not a
+ * devicetree label, and no shield/board file in this tree declares an
+ * "arduino_header" nexus or per-pin label for it. Rather than hand-writing
+ * the ~58-entry `alp,pin-array` alp_gpio_open() would need to reach index
+ * EVK_PIN_CK_DIO4 (ALP_E1M_GPIO_COUNT + 5), this ad hoc node + raw
+ * GPIO_DT_SPEC_GET() mirrors examples/aen/aen-dsi-display/src/main.c's
+ * bl_gpios precedent: a board-specific signal the portable <alp/*> surface
+ * has no concept of gets a direct DT property, not a fabricated pin id.
+ *
+ * P5_1's default (POR) pad function is GPIO (alt-0 is GPIO on every pad on
+ * this SoC -- see examples/peripheral-io/blink's board overlay comment for
+ * the general rule) even though from-alif.tsv lists SPI0_MOSI_B as the
+ * pad's assigned peripheral function; no &pinctrl group is needed to claim
+ * it as GPIO, matching blink's P12_7 case. UNVERIFIED ON SILICON (issue
+ * #2287 benches this later, with a GPIO trigger) -- this overlay has not
+ * been flashed or scoped.
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+&gpio5 {
+	status = "okay";
+};
+
+/ {
+	/*
+	 * compatible = "alp,gpio-output" (zephyr/dts/bindings/gpio/
+	 * alp,gpio-output.yaml) -- required for edtlib to type `gpios` as a
+	 * phandle-array at all; see that binding's own comment.
+	 */
+	imx296_trigger: imx296-trigger {
+		compatible = "alp,gpio-output";
+		/* GPIO_ACTIVE_HIGH: the line idles high (matching XTRIG's
+		 * documented idle level in the Fast Trigger Mode timing
+		 * diagram, "Image Drawing of Global Shutter (Fast Trigger
+		 * Mode)", IMX296 datasheet page 64) and main.c pulses it LOW
+		 * to trigger -- "Fast trigger mode is the trigger mode that
+		 * starts exposure at fall of XTRIG immediately" (page 64). */
+		gpios = <&gpio5 1 GPIO_ACTIVE_HIGH>;
+	};
+};

@@ -612,10 +612,22 @@ at `0x308D`, range cited to the datasheet's "Register List of Shutter
 setting", page 60), analogue+digital gain (`VIDEO_CID_ANALOGUE_GAIN`, `GAIN`
 at `0x3204`, 0.1 dB step, 0-48.0 dB, range cited to "Gain Adjustment
 Function"/"Register List of Gain setting", page 56), H/V flip, pixel rate
-(118.8 Mpix/s), link frequency (594 MHz). No trigger mode is wired yet
-(issue #2287's own scope note); the sensor's opto-isolated external-trigger
-header (J3, separate from the 15-pin CSI FFC) is out of scope for this
-driver pass.
+(118.8 Mpix/s), link frequency (594 MHz), and a driver-private control,
+`IMX296_CID_TRIGGER_MODE` (`VIDEO_CID_PRIVATE_BASE + 0x01`, default free-run,
+unchanged behaviour) that switches the sensor into the datasheet's Global
+Shutter **Fast Trigger Mode** (`TRIGEN` at `0x300B` + `LOWLAGTRG` at `0x30AE`,
+"Global Shutter (Fast Trigger Mode) Operation", page 64) -- the only one of
+the datasheet's two trigger sub-modes this hardware can reach, since
+Sequential Trigger Mode is "slave mode only" (page 61) and this sensor, like
+every part on the RPi-style 15-pin CSI connector, has no XVS/XHS lines wired.
+The mode switch only takes effect on the next `video_stream_start()`, per
+"Mode Transitions of Global Shutter Operation" (page 65): "In case of Fast
+Trigger mode, the mode transition must be done via sensor standby." UNTESTED
+ON SILICON -- issue #2287 benches it later with a GPIO pulse on the carrier's
+opto-isolated J3 Trig+ header (separate from the 15-pin CSI FFC), routed to
+Arduino D4 / `EVK_PIN_CK_DIO4` (E1M pad M2, Alif P5_1); see
+`examples/aen/aen-camera-firstlight`'s `AEN_CAMERA_TRIGGER` CMake option and
+`boards/trigger_gpio.overlay` for the (also unbenched) bench-app wiring.
 
 No portable `chips/imx296/` chip-ID stub exists (unlike OV9281's
 `chips/ov9281/ov9281.c`) -- streaming lives entirely in this Zephyr driver,
@@ -667,10 +679,17 @@ other value), the `STANDBY`/`XMSTA` idempotent-quiesce write sequence
 happen before the `VMAX`/`HMAX`/`INCKSEL`/CSI-timing "S" registers), the one
 `1456x1088 SRGGB10P` format via `get_caps`/`set_format`, and the exposure
 (`SHS`, lines-of-integration-to-register-value inversion) and gain
-(`GAIN`, 0-480 range) control paths. Since this driver's CSI-2 streaming is
-BENCH-UNVERIFIED (see the driver section above), this test suite is the
-only executable proof its register-level logic behaves as written; it does
-not substitute for a real capture.
+(`GAIN`, 0-480 range) control paths, and (issue #2287's trigger-mode
+addition) `IMX296_CID_TRIGGER_MODE`: the free-run default's `TRIGEN`/
+`LOWLAGTRG`/`SYNCSEL` writes land unchanged on `video_stream_start()`, setting
+the ctrl writes nothing to the emulator until the NEXT stream start (proving
+the deferred-write contract "Mode Transitions ... must be done via sensor
+standby" requires), fast-trigger mode's `TRIGEN`/`LOWLAGTRG` values land on
+that next start, and switching back to free-run and restarting restores both
+registers to 0. Since this driver's CSI-2 streaming is BENCH-UNVERIFIED (see
+the driver section above), this test suite is the only executable proof its
+register-level logic behaves as written; it does not substitute for a real
+capture.
 
 ## First-light example
 
@@ -683,3 +702,10 @@ sections above); the IMX296 `#elif` (`raspberry_pi_global_shutter_camera`
 shield) builds, links, and (on a later bench pass) streams on real silicon,
 but has not captured a frame -- see the IMX296 driver section above for
 what has and has not run.
+
+The example also has an opt-in `-DAEN_CAMERA_TRIGGER=ON` CMake build mode
+(issue #2287): arms `IMX296_CID_TRIGGER_MODE`, then pulses a GPIO
+(`boards/trigger_gpio.overlay`, Alif P5_1 / EVK_PIN_CK_DIO4) to capture and
+timestamp a few frames off the carrier's J3 Trig+ header, instead of one
+free-run capture. Compiles clean with 0 warnings against both variants; it
+has not been benched -- see the IMX296 driver section above.

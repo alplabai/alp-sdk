@@ -55,10 +55,25 @@
 #define REG_BLKLEVEL_MSB 0x3255
 #define REG_ROI_ENABLE   0x3300
 
+/* IMX296_REG_TRIGEN / IMX296_REG_LOWLAGTRG / IMX296_REG_SYNCSEL -- see imx296.c's own comments
+ * above those macros (issue #2287's external-trigger addition). */
+#define REG_TRIGEN    0x300b
+#define REG_LOWLAGTRG 0x30ae
+#define REG_SYNCSEL   0x3036
+
 #define STANDBY_STANDBY  BIT(0)
 #define XMSTA_STOP       BIT(0)
 #define REVERSE_VREVERSE BIT(0)
 #define REVERSE_HREVERSE BIT(1)
+#define TRIGEN_TRIGGER   BIT(0)
+#define LOWLAGTRG_FAST   BIT(0)
+#define SYNCSEL_NORMAL   0xc0
+
+/* Mirrors imx296.c's IMX296_CID_TRIGGER_MODE -- not a public header, so redefined here from the
+ * same VIDEO_CID_PRIVATE_BASE convention (see that macro's comment in imx296.c). */
+#define IMX296_CID_TRIGGER_MODE     (VIDEO_CID_PRIVATE_BASE + 0x01)
+#define IMX296_TRIGGER_MODE_FREE_RUN 0
+#define IMX296_TRIGGER_MODE_EXTERNAL 1
 
 /* Sony IMX296 datasheet "Register List of All-pixel scan mode" (page 49): VMAX = 1118 lines/frame
  * -- see IMX296_VMAX in imx296.c. Exposure is in lines of integration (VMAX - SHS); SHS_MIN = 4
@@ -332,16 +347,103 @@ ZTEST(imx296, test_stream_start_cancels_standby_then_starts_master_mode)
 	/* "Standby mode" (page 54) + "Slave Mode and Master Mode" (page 55): cancel STANDBY
 	 * first (and wait out the regulator-settle time -- not observable via the register log),
 	 * THEN start master-mode free-run by clearing XMSTA. Reversing this order would start
-	 * the master-mode clock generator while the analog block is still in standby. */
-	zassert_equal(imx296_emul_log_count(emul), 2, "expected exactly 2 writes to start streaming");
+	 * the master-mode clock generator while the analog block is still in standby. The
+	 * TRIGEN/LOWLAGTRG/SYNCSEL writes (issue #2287, see imx296.c's imx296_set_stream())
+	 * land first, before STANDBY, since "Mode Transitions of Global Shutter Operation"
+	 * (page 65) requires them to be set "via sensor standby". */
+	zassert_equal(imx296_emul_log_count(emul), 5, "expected exactly 5 writes to start streaming");
 
 	zassert_ok(imx296_emul_log_get(emul, 0, &w));
-	zassert_equal(w.reg, REG_STANDBY, "write 0 should be STANDBY");
-	zassert_equal(w.value, 0, "STANDBY should be cancelled (0) to start streaming");
+	zassert_equal(w.reg, REG_TRIGEN, "write 0 should be TRIGEN");
+	zassert_equal(w.value, 0, "TRIGEN should stay 0 (normal mode) at the free-run default");
 
 	zassert_ok(imx296_emul_log_get(emul, 1, &w));
-	zassert_equal(w.reg, REG_XMSTA, "write 1 should be XMSTA");
+	zassert_equal(w.reg, REG_LOWLAGTRG, "write 1 should be LOWLAGTRG");
+	zassert_equal(w.value, 0, "LOWLAGTRG should stay 0 at the free-run default");
+
+	zassert_ok(imx296_emul_log_get(emul, 2, &w));
+	zassert_equal(w.reg, REG_SYNCSEL, "write 2 should be SYNCSEL");
+	zassert_equal(w.value, SYNCSEL_NORMAL, "SYNCSEL should be 0xC0 (Normal Output)");
+
+	zassert_ok(imx296_emul_log_get(emul, 3, &w));
+	zassert_equal(w.reg, REG_STANDBY, "write 3 should be STANDBY");
+	zassert_equal(w.value, 0, "STANDBY should be cancelled (0) to start streaming");
+
+	zassert_ok(imx296_emul_log_get(emul, 4, &w));
+	zassert_equal(w.reg, REG_XMSTA, "write 4 should be XMSTA");
 	zassert_equal(w.value, 0, "XMSTA should be cleared (master-mode start) to start streaming");
+}
+
+ZTEST(imx296, test_trigger_mode_ctrl_default_is_free_run)
+{
+	/* IMX296_CID_TRIGGER_MODE's control-registry default (video_init_ctrl(), imx296.c) must
+	 * be free-run, matching "default = free-run (current behaviour unchanged)". */
+	struct video_control ctrl = { .id = IMX296_CID_TRIGGER_MODE, .val = -1 };
+
+	zassert_ok(video_get_ctrl(imx296_dev(), &ctrl));
+	zassert_equal(ctrl.val, IMX296_TRIGGER_MODE_FREE_RUN, "trigger-mode ctrl should default off");
+}
+
+ZTEST(imx296, test_trigger_mode_ctrl_rejects_out_of_range)
+{
+	struct video_control over = { .id = IMX296_CID_TRIGGER_MODE, .val = 2 };
+
+	zassert_equal(video_set_ctrl(imx296_dev(), &over),
+	              -EINVAL,
+	              "trigger-mode ctrl only has two valid values, 0 and 1");
+}
+
+ZTEST(imx296, test_trigger_mode_writes_trigen_and_lowlagtrg_on_next_stream_start)
+{
+	/*
+	 * "Global Shutter (Fast Trigger Mode) Operation" -> "Register List of shutter setting"
+	 * (page 64): TRIGEN=1 (0x300B) + LOWLAGTRG=1 (0x30AE) select fast trigger mode. Setting
+	 * the ctrl alone (video_set_ctrl()) must NOT touch hardware yet -- imx296.c's
+	 * IMX296_CID_TRIGGER_MODE case is a deferred no-op, since the datasheet requires the
+	 * switch to happen "via sensor standby" (page 65), i.e. only from imx296_set_stream().
+	 * This also exercises "switching back": stopping and restarting with the ctrl reset to
+	 * free-run must restore TRIGEN=0/LOWLAGTRG=0.
+	 */
+	const struct emul       *emul = imx296_emul();
+	struct video_control     trigger_on  = { .id  = IMX296_CID_TRIGGER_MODE,
+	                                         .val = IMX296_TRIGGER_MODE_EXTERNAL };
+	struct video_control     trigger_off = { .id  = IMX296_CID_TRIGGER_MODE,
+	                                         .val = IMX296_TRIGGER_MODE_FREE_RUN };
+	struct imx296_emul_write w;
+	uint8_t                  val;
+
+	zassert_ok(video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	imx296_emul_clear_log(emul);
+	zassert_ok(video_set_ctrl(imx296_dev(), &trigger_on));
+	zassert_equal(imx296_emul_log_count(emul),
+	              0,
+	              "video_set_ctrl() alone must not write TRIGEN/LOWLAGTRG yet");
+
+	zassert_ok(video_stream_start(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_ok(imx296_emul_get_reg(emul, REG_TRIGEN, &val));
+	zassert_equal(val, TRIGEN_TRIGGER, "TRIGEN should be set for fast trigger mode");
+	zassert_ok(imx296_emul_get_reg(emul, REG_LOWLAGTRG, &val));
+	zassert_equal(val, LOWLAGTRG_FAST, "LOWLAGTRG should select fast trigger mode");
+	zassert_ok(imx296_emul_get_reg(emul, REG_SYNCSEL, &val));
+	zassert_equal(val, SYNCSEL_NORMAL, "SYNCSEL should still be 0xC0 in trigger mode");
+
+	/* Switch back: stop, reset the ctrl to free-run, restart -- TRIGEN/LOWLAGTRG must be
+	 * restored to their free-run values, not left armed from the previous stream-start. */
+	zassert_ok(video_stream_stop(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+	zassert_ok(video_set_ctrl(imx296_dev(), &trigger_off));
+	imx296_emul_clear_log(emul);
+	zassert_ok(video_stream_start(imx296_dev(), VIDEO_BUF_TYPE_OUTPUT));
+
+	zassert_true(imx296_test_first_write(emul, REG_TRIGEN, &val), "no write to TRIGEN logged");
+	zassert_equal(val, 0, "TRIGEN should be restored to 0 (normal mode) switching back");
+	zassert_true(imx296_test_first_write(emul, REG_LOWLAGTRG, &val),
+	             "no write to LOWLAGTRG logged");
+	zassert_equal(val, 0, "LOWLAGTRG should be restored to 0 switching back");
+
+	zassert_ok(imx296_emul_log_get(emul, 0, &w));
+	zassert_equal(w.reg, REG_TRIGEN, "TRIGEN write should still land first on switch-back");
 }
 
 ZTEST(imx296, test_stream_stop_stops_master_mode_then_re_arms_standby)

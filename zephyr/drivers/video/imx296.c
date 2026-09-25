@@ -94,6 +94,23 @@
 LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
 
 /*
+ * Driver-private control, V4L2/Zephyr vendor-CID convention (VIDEO_CID_PRIVATE_BASE, see
+ * video-controls.h) -- precedent: zephyr/drivers/video/video_emul_imager.c's
+ * EMUL_IMAGER_CID_CUSTOM. No standard Zephyr video CID exists for "external trigger vs free-run
+ * exposure", so this rides the vendor-private range rather than inventing a cross-sensor standard
+ * one driver's worth of evidence cannot justify. Selects between this sensor's two Global Shutter
+ * sub-modes -- see IMX296_REG_TRIGEN's comment below for why only fast trigger mode is reachable
+ * on this hardware. 0 (default) = free-run (current, unchanged behaviour); 1 = fast trigger mode
+ * (issue #2287): exposure is then controlled by the width of an external low pulse on the XTRIG
+ * pin rather than by VIDEO_CID_EXPOSURE/SHS. The mode only takes effect on the next
+ * video_stream_start() -- "Mode Transitions of Global Shutter Operation" (page 65) requires the
+ * TRIGEN/LOWLAGTRG switch to happen "via sensor standby", so it cannot be applied while streaming.
+ */
+#define IMX296_CID_TRIGGER_MODE      (VIDEO_CID_PRIVATE_BASE + 0x01)
+#define IMX296_TRIGGER_MODE_FREE_RUN 0
+#define IMX296_TRIGGER_MODE_EXTERNAL 1
+
+/*
  * Datasheet "Setting Registers Using Serial Communication" -> "Description
  * of Setting Registers (I2C)": the sensor answers on one of three 7-bit CCI
  * addresses depending on the SLAMODE pin strap (0x36 / 0x37), or 0x1A
@@ -202,6 +219,44 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  */
 #define IMX296_REG_BLKLEVEL IMX296_REG16(0x3254)
 #define IMX296_BLKLEVEL     0x03Cu
+
+/*
+ * Register Map, Chip ID = 02h (page 34): TRIGEN bit0, reflect "S" (standby-set, applied on
+ * standby cancel). "Global shutter mode setting", 0: Normal mode 1: Trigger mode. Also listed in
+ * "Global Shutter (Sequential Trigger Mode) Operation" -> "Register List of shutter setting"
+ * (page 62) and "Global Shutter (Fast Trigger Mode) Operation" -> "Register List of shutter
+ * setting" (page 64) -- same register, same address, in both trigger sub-modes.
+ *
+ * Only FAST trigger mode is wired by this driver (see IMX296_REG_LOWLAGTRG below): "Global
+ * Shutter (Sequential Trigger Mode) Operation" (page 61) states "This function is slave mode
+ * only", and this driver -- like every sensor on the RPi-style 15-pin CSI connector it sits
+ * behind -- has no XVS/XHS lines wired (see IMX296_REG_XMSTA's comment above) and so can never
+ * reach slave mode. Fast trigger mode's own section (page 64) states "This mode supports Master
+ * mode only", which is the only mode this hardware can ever be in.
+ */
+#define IMX296_REG_TRIGEN     IMX296_REG8(0x300B)
+#define IMX296_TRIGEN_TRIGGER BIT(0)
+
+/*
+ * Register Map, Chip ID = 02h (page 40): LOWLAGTRG bit0, reflect "S". "Selection of trigger
+ * mode", 0: Except for Fast trigger mode, 1: Fast trigger mode. Set alongside IMX296_REG_TRIGEN
+ * (=1) to select FAST trigger mode specifically, per "Global Shutter (Fast Trigger Mode)
+ * Operation" -> "Register List of shutter setting" (page 64).
+ */
+#define IMX296_REG_LOWLAGTRG  IMX296_REG8(0x30AE)
+#define IMX296_LOWLAGTRG_FAST BIT(0)
+
+/*
+ * Register Map, Chip ID = 02h (page 36): SYNCSEL, bits[5:4], reflect "S". "XHS, XVS pin setting",
+ * 0h: Normal Output, 3h: Hi-Z; bits[7:6] are datasheet-fixed to 1, all other bits fixed to 0 --
+ * POR default for the whole byte is 0xC0 (= bits[7:6]=1, bits[5:4]=0h Normal Output), which is
+ * also the value "Global Shutter (Fast Trigger Mode) Operation" -> "Register List of shutter
+ * setting" (page 64) lists for entering fast trigger mode. Written explicitly (rather than relied
+ * on as POR) for the same warm-boot-state reason BLKLEVEL/SHS/GAIN/REVERSE are below -- a module
+ * left running from a prior session could carry a different value here.
+ */
+#define IMX296_REG_SYNCSEL    IMX296_REG8(0x3036)
+#define IMX296_SYNCSEL_NORMAL 0xC0u
 
 /*
  * Register Map, Chip ID = 05h (page 42) + "Register List of ROI mode" /
@@ -442,6 +497,7 @@ struct imx296_ctrls {
 	struct video_ctrl vflip;
 	struct video_ctrl pixel_rate;
 	struct video_ctrl link_freq;
+	struct video_ctrl trigger_mode;
 };
 
 struct imx296_data {
@@ -542,7 +598,8 @@ static int imx296_get_frmival(const struct device *dev, struct video_frmival *fr
 
 static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_type type)
 {
-	const struct imx296_config *cfg = dev->config;
+	const struct imx296_config *cfg  = dev->config;
+	struct imx296_data         *data = dev->data;
 	int                         ret;
 
 	if (type != VIDEO_BUF_TYPE_OUTPUT) {
@@ -551,6 +608,36 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 	}
 
 	if (on) {
+		bool trigger = data->ctrls.trigger_mode.val != IMX296_TRIGGER_MODE_FREE_RUN;
+
+		/*
+		 * "Mode Transitions of Global Shutter Operation" (page 65): "In case of Fast
+		 * Trigger mode, the mode transition must be done via sensor standby." Both
+		 * TRIGEN and LOWLAGTRG (and SYNCSEL) reflect "S" (standby-set, see their own
+		 * comments above), so writing them here -- before STANDBY is cancelled below --
+		 * is what makes the mode take effect on this stream-start. The sensor is always
+		 * parked in STANDBY at this point: imx296_init() leaves it there, and the stop
+		 * path at the end of this function re-arms it.
+		 */
+		ret = video_write_cci_reg(&cfg->i2c,
+		                          IMX296_REG_TRIGEN,
+		                          trigger ? IMX296_TRIGEN_TRIGGER : 0);
+		if (ret < 0) {
+			return ret;
+		}
+
+		ret = video_write_cci_reg(&cfg->i2c,
+		                          IMX296_REG_LOWLAGTRG,
+		                          trigger ? IMX296_LOWLAGTRG_FAST : 0);
+		if (ret < 0) {
+			return ret;
+		}
+
+		ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_SYNCSEL, IMX296_SYNCSEL_NORMAL);
+		if (ret < 0) {
+			return ret;
+		}
+
 		/* "Standby mode" (page 54): cancel standby, then wait for regulator settling */
 		ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_STANDBY, 0);
 		if (ret < 0) {
@@ -559,7 +646,12 @@ static int imx296_set_stream(const struct device *dev, bool on, enum video_buf_t
 
 		k_sleep(K_MSEC(IMX296_STANDBY_SETTLE_MS));
 
-		/* "Slave Mode and Master Mode" (page 55): start master-mode free-run */
+		/*
+		 * "Slave Mode and Master Mode" (page 55): start master-mode free-run. Fast
+		 * trigger mode also "supports Master mode only" (page 64) -- the same XMSTA
+		 * start applies to both trigger and free-run streaming, only TRIGEN/LOWLAGTRG
+		 * above change which one XTRIG then drives.
+		 */
 		return video_write_cci_reg(&cfg->i2c, IMX296_REG_XMSTA, 0);
 	}
 
@@ -599,6 +691,14 @@ static int imx296_set_ctrl(const struct device *dev, uint32_t cid)
 		                            IMX296_REG_REVERSE,
 		                            IMX296_REVERSE_VREVERSE,
 		                            ctrls->vflip.val != 0 ? IMX296_REVERSE_VREVERSE : 0);
+	case IMX296_CID_TRIGGER_MODE:
+		/*
+		 * No immediate register write: TRIGEN/LOWLAGTRG can only be changed "via sensor
+		 * standby" (see IMX296_REG_TRIGEN's comment), so ctrls->trigger_mode.val (already
+		 * updated by the video control core before this callback runs) is only acted on
+		 * by imx296_set_stream() the next time streaming starts.
+		 */
+		return 0;
 	default:
 		return -ENOTSUP;
 	}
@@ -679,6 +779,18 @@ static int imx296_init_ctrls(const struct device *dev)
 		return ret;
 	}
 	ctrls->link_freq.flags |= VIDEO_CTRL_FLAG_READ_ONLY;
+
+	/* IMX296_CID_TRIGGER_MODE's comment above: default free-run, unchanged behaviour. */
+	ret = video_init_ctrl(&ctrls->trigger_mode,
+	                      dev,
+	                      IMX296_CID_TRIGGER_MODE,
+	                      (struct video_ctrl_range){ .min  = IMX296_TRIGGER_MODE_FREE_RUN,
+	                                                 .max  = IMX296_TRIGGER_MODE_EXTERNAL,
+	                                                 .step = 1,
+	                                                 .def  = IMX296_TRIGGER_MODE_FREE_RUN });
+	if (ret < 0) {
+		return ret;
+	}
 
 	return 0;
 }

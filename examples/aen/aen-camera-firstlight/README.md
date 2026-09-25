@@ -72,6 +72,21 @@ RESULT: capture ok
 | 3. capture | `alp_camera_capture OK: N bytes ...` | A frame arrived. CRC32 + the histogram + three sample rows follow. A non-zero CRC alone is weak evidence — a warm RAM-run can leave a previous frame in SRAM0, so a non-zero buffer does not by itself prove a *new* frame arrived. The real proof (see the OV9281 bench pass below) is a buffer pre-filled with a known sentinel (`0xA5`) coming back overwritten, plus the sensor's own test pattern appearing in the data when enabled. |
 | 4. stop/close | `alp_camera_stop` / `alp_camera_close done` | Always run, even after a failure above (except a failed `open`, which has nothing to stop/close). |
 
+## Opt-in: external trigger (IMX296 only, UNBENCHED)
+
+`-DAEN_CAMERA_TRIGGER=ON` (issue #2287) puts IMX296 in its datasheet Fast
+Trigger Mode instead of free-run, and pulses a GPIO (Alif P5_1 / Arduino D4 /
+`EVK_PIN_CK_DIO4`, see `boards/trigger_gpio.overlay`) that must be wired to
+the carrier's J3 Trig+ header to capture and timestamp `TRIGGER_FRAME_COUNT`
+(3) frames instead of one free-run capture. Only meaningful with the IMX296
+shield; compiles clean (0 warnings) with any other shield, since
+`CONFIG_VIDEO_IMX296` gates the trigger code path too. **Not benched by this
+change** -- see `docs/camera-shields.md`'s IMX296 driver section.
+
+```bash
+... -DSHIELD="e1m_evk_rpi_csi raspberry_pi_global_shutter_camera" -DAEN_CAMERA_TRIGGER=ON
+```
+
 ## Expected results per module
 
 | Shield | Sensor | Format | Expected on this batch |
