@@ -760,17 +760,15 @@ def test_dxm1_npu_flash_execute_fails_when_pcie_endpoint_absent(tmp_path):
                 return 0, "gpioset (libgpiod) v2.1\n"
             if re.search(r"gpioset -c chip0 61=1 >/dev/null 2>&1 & echo \$!", cmd):
                 return 0, "4242\n"
-            if re.search(r"gpioset -c chip0 86=0 >/dev/null 2>&1 & echo \$!", cmd):
-                return 0, "5001\n"
-            if re.search(r"gpioset -c chip0 86=1 >/dev/null 2>&1 & echo \$!", cmd):
-                return 0, "5002\n"
+            if re.search(r"gpioset -c chip0 -t 100ms,0 86=0", cmd):
+                return 0, ""
             if cmd.startswith("sleep "):
                 return 0, ""
             if re.search(r"uart_boot -d /dev/ttySC1 -f", cmd):
                 return 0, "bootloader ok\n"
             if re.search(r"uart_boot -d /dev/ttySC1 -F", cmd):
                 return 0, "app ok\n"
-            if cmd in ("kill 4242", "kill 5001", "kill 5002"):
+            if cmd == "kill 4242":
                 return 0, ""
             if cmd == "ls /sys/bus/pci/devices":
                 return 0, "0000:00:00.0\n"       # root port only: no DEEPX endpoint

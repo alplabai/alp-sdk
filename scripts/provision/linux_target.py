@@ -526,20 +526,28 @@ def _gpioset_hold_start(t: LinuxTarget, chip: str, assignment: str, is_v2: bool)
     via the shell, and return its real PID. v2 holds by default (no flag
     needed, and NEVER `-z` -- see `_gpioset_is_v2`); v1 needs `--mode=signal`
     to hold instead of setting-then-exiting. `is_v2` is resolved once by the
-    caller (not re-queried per call) to keep this to one ssh round trip."""
+    caller (not re-queried per call) to keep this to one ssh round trip.
+    Verifies the backgrounded process is actually still alive before handing
+    the PID back -- a `gpioset` that dies immediately (bad chip/line, busy
+    line) would otherwise look identical to a live hold until the caller's
+    much-later `kill` fails."""
     cmd = (f"gpioset -c {shlex.quote(chip)} {assignment}" if is_v2 else
            f"gpioset --mode=signal {shlex.quote(chip)} {assignment}")
+    line = assignment.split("=", 1)[0]
     try:
         pid = t.run(f"{cmd} >/dev/null 2>&1 & echo $!").stdout.strip()
     except BenchError:
         # the ssh call itself failed (e.g. timed out) after gpioset may
         # already have started remotely -- scope the cleanup to this exact
         # chip + line assignment so we don't kill an unrelated hold.
-        line = assignment.split("=", 1)[0]
-        t.run(f"pkill -f {shlex.quote(f'gpioset.*{chip}.*{line}=')}", check=False)
+        t.run(f"pkill -f {shlex.quote(f'gpioset.*{chip}.* {line}=')}", check=False)
         raise
     if not pid.isdigit():
         raise BenchError(f"could not start the gpioset hold ({cmd!r}): got {pid!r}")
+    r = t.run(f"sleep 0.05; kill -0 {shlex.quote(pid)}", check=False)
+    if r.rc != 0:
+        raise BenchError(f"gpioset hold ({cmd!r}) pid {pid} was already dead "
+                          f"right after starting (rc={r.rc})")
     return pid
 
 
@@ -554,18 +562,15 @@ def dxm1_reset_pulse(t: LinuxTarget, chip: str, reset_line: int, is_v2: bool) ->
     """Pulse PA6 (active-low M1_RESET) low for 100 ms then release it high.
     v1: `--mode=time --usec=100000` holds the low level for exactly that
     duration on its own, then a plain (set-then-exit) `gpioset` asserts high.
-    v2 has no per-call duration flag that holds-then-auto-releases, so both
-    edges use the same background-then-kill pattern as the P75 UART-mux hold
-    (`_gpioset_hold_start`/`_gpioset_hold_stop`) -- background, sleep for the
-    pulse width, kill to release."""
+    v2's `-t, --toggle=PERIOD[,PERIOD]...` does the whole pulse in one call:
+    `-t 100ms,0` sets the line low, toggles it high after 100 ms, and the
+    trailing 0-length period ends the command immediately instead of holding
+    the final level -- no background/sleep/kill needed. The final high level
+    is the pin being released: DX-M1 PORES_N has an internal pull-up, so
+    released == reset deasserted."""
     low, high = f"{reset_line}=0", f"{reset_line}=1"
     if is_v2:
-        pid = _gpioset_hold_start(t, chip, low, is_v2)
-        t.run("sleep 0.1")
-        _gpioset_hold_stop(t, pid)
-        pid = _gpioset_hold_start(t, chip, high, is_v2)
-        t.run("sleep 0.05")
-        _gpioset_hold_stop(t, pid)
+        t.run(f"gpioset -c {shlex.quote(chip)} -t 100ms,0 {low}")
     else:
         t.run(f"gpioset --mode=time --usec=100000 {shlex.quote(chip)} {low}; "
               f"gpioset {shlex.quote(chip)} {high}")

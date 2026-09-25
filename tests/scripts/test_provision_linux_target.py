@@ -370,6 +370,7 @@ def test_dxm1_uart_boot_v1_holds_p75_via_mode_signal_and_pulses_reset_via_mode_t
     t, fake = target([
         ("gpioset --version", "gpioset (libgpiod) v1.6.3\n"),
         (r"^gpioset --mode=signal chip0 5=1 >/dev/null 2>&1 & echo \$!$", "4242\n"),
+        ("sleep 0.05; kill -0 4242", ""),
         (r"^gpioset --mode=time --usec=100000 chip0 6=0; gpioset chip0 6=1$", ""),
         (r"uart_boot -d /dev/ttySC1 -f fw_uart_boot.bin -b 115200", "bootloader ok\n"),
         (r"uart_boot -d /dev/ttySC1 -F fw.bin -U -b 115200", "app ok\n"),
@@ -390,12 +391,8 @@ def test_dxm1_uart_boot_v2_never_passes_dash_z_and_kills_on_failure():
     t, fake = target([
         ("gpioset --version", "gpioset (libgpiod) v2.1\n"),
         (r"^gpioset -c chip0 5=1 >/dev/null 2>&1 & echo \$!$", "9001\n"),
-        (r"^gpioset -c chip0 6=0 >/dev/null 2>&1 & echo \$!$", "8001\n"),
-        ("sleep 0.1", ""),
-        ("kill 8001", ""),
-        (r"^gpioset -c chip0 6=1 >/dev/null 2>&1 & echo \$!$", "8002\n"),
-        ("sleep 0.05", ""),
-        ("kill 8002", ""),
+        ("sleep 0.05; kill -0 9001", ""),
+        (r"^gpioset -c chip0 -t 100ms,0 6=0$", ""),
         (r"uart_boot -d", (1, "no ROM response")),
         ("kill 9001", ""),
     ])
@@ -417,10 +414,21 @@ def test_gpioset_hold_start_pkills_the_scoped_line_when_the_launch_ssh_call_rais
         cmd = argv[-1]
         if "echo $!" in cmd:
             raise subprocess.TimeoutExpired(argv, 1)
-        assert "pkill -f" in cmd and "gpioset.*chip0.*5=" in cmd
+        # anchored with a leading space so line 5's pkill can't also match
+        # a live hold on line 15 or 25.
+        assert "pkill -f" in cmd and "gpioset.*chip0.* 5=" in cmd
         return subprocess.CompletedProcess(argv, 0, "", "")
     t = lt.LinuxTarget("unit", runner=runner)
     with pytest.raises(BenchError, match="timed out"):
+        lt._gpioset_hold_start(t, "chip0", "5=1", is_v2=True)
+
+
+def test_gpioset_hold_start_raises_when_the_process_is_dead_on_arrival():
+    t, fake = target([
+        (r"^gpioset -c chip0 5=1 >/dev/null 2>&1 & echo \$!$", "9001\n"),
+        ("sleep 0.05; kill -0 9001", (1, "")),
+    ])
+    with pytest.raises(BenchError, match="already dead"):
         lt._gpioset_hold_start(t, "chip0", "5=1", is_v2=True)
 
 
