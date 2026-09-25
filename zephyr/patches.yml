@@ -498,7 +498,7 @@ patches:
       int_time_max from video_get_frmival() at runtime -- the library's
       own microseconds-to-lines conversion evidently reads THIS static
       table, not the microsecond value isp_ae_param.int_time_max carries.
-      alp-sdk's examples/aen/aen-isp-ov5647-capture now runs the sensor at
+      alp-sdk's examples/aen/aen-isp-capture now runs the sensor at
       10 fps (OV5647's floor rate) by design, so this table tracks that. A
       library-level way to vary this at runtime with an arbitrary
       app-chosen frame rate, if one exists, was not found and is not what
@@ -740,7 +740,7 @@ patches:
       isp_param_conf.h gains a real per-sensor calibration mechanism
       instead of one compiled-in global table.
   - path: hal_alif/0012-isp-srggb10p-input.patch
-    sha256sum: a19a821d64c816431a75bf973d5c2217edc02814e70ed17a5fea0ff837a35aea
+    sha256sum: 7b2ecf646be430d4b0b81ffcf00f9116fcc7130688474c66f98d7e3b7a283a3e
     # See the module-name note on the 0001 patch above.
     module: alif
     author: Alp Lab AB
@@ -751,18 +751,21 @@ patches:
       Issue #2287 Stage B: isp_api_wrapper.c's isp_mode_from_fourcc()/
       isp_pixelfmt_from_fourcc() had no case for VIDEO_PIX_FMT_SRGGB10P --
       the fourcc alp-sdk's IMX296 driver (zephyr/drivers/video/imx296.c)
-      advertises for its one fixed all-pixel mode -- so any attempt to run
-      IMX296 through the ISP fell through isp_mode_from_fourcc() to
-      ISP_MODE_BT656 (wrong: this is RAW Bayer, not BT.656 YUV) and
-      isp_pixelfmt_from_fourcc() to the 12-bit PIXEL_FORMAT_RGGB12 default
-      (wrong: IMX296 samples at 10 bits), mis-mapping every frame. Same
-      shape as patch 0003's VIDEO_PIX_FMT_SBGGR10P addition for OV5647:
-      maps to the SAME PIXEL_FORMAT_RGGB10 the pre-existing unpacked
-      VIDEO_PIX_FMT_RGGB10 case already uses (the packed/unpacked split
-      only changes memory layout, not Bayer phase) and adds ISP_MODE_RAW
-      alongside VIDEO_PIX_FMT_SBGGR10P in the mode switch. Pure additive,
-      touches only the two switches' SRGGB10P case; every other fourcc's
-      mapping is unchanged. Upstream to hal_alif then drop.
+      advertises for BOTH of its modes (its fixed full-frame mode and its
+      ROI crop) -- so any attempt to run IMX296 through the ISP fell
+      through isp_mode_from_fourcc() to ISP_MODE_BT656 (wrong: this is RAW
+      Bayer, not BT.656 YUV) and isp_pixelfmt_from_fourcc() to the 12-bit
+      PIXEL_FORMAT_RGGB12 default (wrong: IMX296 samples at 10 bits),
+      mis-mapping every frame. Same shape as patch 0003's
+      VIDEO_PIX_FMT_SBGGR10P addition (maps to the SAME
+      PIXEL_FORMAT_RGGB10 the pre-existing unpacked VIDEO_PIX_FMT_RGGB10
+      case already uses -- the packed/unpacked split only changes memory
+      layout, not Bayer phase -- and adds ISP_MODE_RAW alongside
+      VIDEO_PIX_FMT_SBGGR10P in the mode switch); patch 0003 itself is
+      sensor-neutral (any BGGR sensor advertising the packed fourcc), this
+      one is the RGGB counterpart, not specific to IMX296 either. Pure
+      additive, touches only the two switches' SRGGB10P case; every other
+      fourcc's mapping is unchanged. Upstream to hal_alif then drop.
   - path: zephyr/0003-kconfig-serialize-missing-deps.patch
     sha256sum: 873ed5171298271804ba89cba22fd2c286fdb749cec2856a7ea7c2e1d7c3c7c5
     module: zephyr

@@ -396,20 +396,19 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * VMAX stays >= ROIWV1 + 30 (page 53's ROI-mode floor): 1118 >= 960 + 30 =
  * 990, satisfied with margin.
  *
- * Page 53's formula gives "ROIWV1 + 30" as the MINIMUM VMAX for this
- * ROIWV1 -- the floor of a range, not a value this driver is required to
- * use. Keeping VMAX at the driver's existing fixed 1118 rather than
- * dropping it to the ROI-mode floor (990, which the datasheet's formula
- * would make the FASTER end of that range -- a smaller VMAX is fewer
- * lines per frame, hence a higher frame rate) was originally an
- * INFERENCE from that formula, not a bench measurement: reusing the same
- * VMAX both modes already shared was the smaller, more conservative
+ * Page 53's "ROIWV1 + 30" is the MAX-RATE setting for a given ROIWV1 --
+ * the smallest legal VMAX, hence the fewest lines per frame and the
+ * fastest frame rate this ROIWV1 can reach. Keeping VMAX at the driver's
+ * existing fixed 1118 instead of dropping to that max-rate floor (990)
+ * is an INFERENCE from the formula, not a bench measurement: reusing the
+ * same VMAX both modes already shared was the smaller, more conservative
  * change. Bench runs 294 (full-frame)/295 (ROI, E1M-AEN803
- * 2026W36-0001) confirm the inference in practice -- run 295 captured a
- * clean 1280x960 frame (no mod-4-column RAW10 byte-phase-slip) at this
- * unchanged VMAX, so 60.3 frame/s ROI capture is now bench-observed, not
- * just datasheet-derived; see changelog.d/2287.md's Stage B section for
- * the full run 294/295 write-up.
+ * 2026W36-0001) confirm the crop itself is correct at this VMAX -- run
+ * 295 captured a clean 1280x960 frame (no mod-4-column RAW10
+ * byte-phase-slip) -- but neither run measured frame RATE; the 60.3
+ * frame/s figure above is still the datasheet-derived value, not a bench
+ * measurement. See changelog.d/2287.md's Stage B section for the full
+ * run 294/295 write-up.
  */
 #define IMX296_ROI_WIDTH  1280
 #define IMX296_ROI_HEIGHT 960

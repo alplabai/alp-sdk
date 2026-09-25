@@ -100,9 +100,12 @@ properties:
       csi-hsd + csi-hact. When present, csi-hsd is DERIVED from it at
       configure time (hsd = csi-hline - csi-hsa - csi-hbp - hact, where hact
       is the format's own active width, not a fixed DT value) instead of
-      read as a fixed csi-hsd property -- csi-hsd is then unused (and must
-      not also be set; the derived value would silently override it) and
-      may be omitted. This is what keeps the derived Controller-mode timing
+      read as a fixed csi-hsd property -- csi-hsd is IGNORED (overridden by
+      the derivation) whenever csi-hline is set, whether or not csi-hsd
+      itself is also present in DT (a shared base dtsi may set csi-hsd
+      unconditionally for every board on this controller, in which case
+      there is no "unset" state to omit it into -- the override still
+      applies). This is what keeps the derived Controller-mode timing
       correct across every format a sensor can select (e.g. a sensor with a
       cropped ROI mode alongside its full-frame mode -- see
       raspberry_pi_global_shutter_camera.overlay's own comment) where a
@@ -122,10 +125,11 @@ properties:
       csi-vact. When present, csi-vfp is DERIVED from it at configure time
       (vfp = csi-vtotal - csi-vsa - csi-vbp - vact, where vact is the
       format's own active height) instead of read as a fixed csi-vfp
-      property -- csi-vfp is then unused and may be omitted. See csi-hline's
-      description above for why deriving from a format-independent total
-      (rather than a per-format fixed value) is what this property exists
-      for.
+      property -- csi-vfp is IGNORED (overridden) the same way csi-hsd is,
+      see csi-hline's description above (including for a shared base dtsi
+      that sets csi-vfp unconditionally). See csi-hline's description above
+      for why deriving from a format-independent total (rather than a
+      per-format fixed value) is what this property exists for.
 
   rx-ddr-clk1:
     type: int

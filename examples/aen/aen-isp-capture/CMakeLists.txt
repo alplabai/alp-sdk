@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# aen-isp-ov5647-capture -- a real OV5647 sensor frame through the ISP
+# aen-isp-capture -- a real OV5647 sensor frame through the ISP
 # (sensor -> csi -> cam -> isp -> memory), mirroring Alif's own sdk-alif
 # samples/drivers/viewfinder recipe, with AE + AWB running through
 # isp_pico.c's standard Zephyr video ctrl path. Build with the SAME two
@@ -34,9 +34,17 @@ endif()
 # (zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch) for the ISP wrapper's SRGGB10P mapping.
 #   -DAEN_ISP_IMX296=ON
 option(AEN_ISP_IMX296 "Run IMX296's ROI crop through the ISP instead of OV5647" OFF)
+if(AEN_ISP_IMX296)
+    # overlay-imx296.conf: pool sizing for IMX296's larger (1280x960 vs. OV5647's 640x480)
+    # buffers -- see that file's own comment and bench run 296 (a NULL video_buffer_aligned_
+    # alloc() for the second buffer under the unchanged, OV5647-sized default pool). Appended,
+    # not set, so it composes with any EXTRA_CONF_FILE the build command also passes (e.g.
+    # overlay-no-ae.conf, testcase.yaml's imx296 scenario).
+    list(APPEND EXTRA_CONF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/overlay-imx296.conf")
+endif()
 
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(aen_isp_ov5647_capture LANGUAGES C)
+project(aen_isp_capture LANGUAGES C)
 
 target_sources(app PRIVATE src/main.c)
 

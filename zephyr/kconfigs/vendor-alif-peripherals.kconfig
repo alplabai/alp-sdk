@@ -995,7 +995,7 @@ config VIDEO_ARX3A0
 # (isp_api_wrapper.c:880, :1242); the v4.4 port just dropped their only
 # callers porting the ctrl API, so there is no compile blocker either way.
 # COMPILE + LINK + RUNTIME now PROVEN on real silicon
-# (examples/aen/aen-isp-ov5647-capture, CONFIG_VIDEO_ISP_VSI=y, a real
+# (examples/aen/aen-isp-capture, CONFIG_VIDEO_ISP_VSI=y, a real
 # OV5647 sensor through the full camera->csi->isp->memory graph with
 # AE/AWB running). Stays default n / OPT-IN here regardless -- links the
 # proprietary Vivante blob.
@@ -1016,7 +1016,7 @@ config VIDEO_ISP_VSI
 	  OPT-IN, default n.  Compiles + links against hal_alif v2.3.0 (isp-vsi.h +
 	  isp_ctrl_params.h vendored VERBATIM from zephyr_alif v2.3.0 into
 	  zephyr/include/zephyr/drivers/video/) and runs end to end on real
-	  silicon (examples/aen/aen-isp-ov5647-capture: a real OV5647 sensor
+	  silicon (examples/aen/aen-isp-capture: a real OV5647 sensor
 	  through the full camera->csi->isp->memory graph, AE/AWB via the
 	  standard Zephyr video ctrl registry).
 	  Driver: zephyr/drivers/video/isp_pico.c.

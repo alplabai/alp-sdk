@@ -11,7 +11,7 @@
 # aen-camera-firstlight's raspberry_pi_camera_module_1 scenario.
 
 sample:
-  name: aen-isp-ov5647-capture
+  name: aen-isp-capture
   description: |
     Bench RAM-run real-sensor ISP-Pico capture for the E1M-AEN801/803 (Alif
     Ensemble E8, Cortex-M55-HE): OV5647 -> CSI-2 -> CPI -> ISP-Pico ->
@@ -23,7 +23,7 @@ sample:
     SRAM0 buffer.
 
 tests:
-  alp_sdk.examples.aen.isp_ov5647_capture.aen:
+  alp_sdk.examples.aen.isp_capture.aen:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he
@@ -38,7 +38,7 @@ tests:
       - camera
     build_only: true   # the ISP-Pico+sensor build check is a bench flash, not a CI run.
 
-  alp_sdk.examples.aen.isp_ov5647_capture.imx296:
+  alp_sdk.examples.aen.isp_capture.imx296:
     platform_allow:
       - alp_e1m_aen801_m55_he/ae822fa0e5597ls0/rtss_he
       - alp_e1m_aen803_m55_he/ae822fa0e5597ls0/rtss_he

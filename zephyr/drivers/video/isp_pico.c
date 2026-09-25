@@ -23,7 +23,7 @@
  * Build-only proof: examples/aen/aen-isp-regcheck (AEN801/E8).  RUNTIME:
  * PROVEN on real silicon through a full camera->csi->isp->memory
  * media-controller graph, a real OV5647 sensor over CSI-2, with AE/AWB
- * running -- see examples/aen/aen-isp-ov5647-capture.
+ * running -- see examples/aen/aen-isp-capture.
  * ==========================================================================
  *
  * Vendored from the fork, then PORTED to the upstream Zephyr v4.4 video API by
@@ -71,7 +71,7 @@
  * isp_set_ctrl()'s VIDEO_CID_AUTO_WHITE_BALANCE/VIDEO_CID_EXPOSURE_AUTO
  * cases, below.  Do NOT fabricate any hal_alif API.
  * COMPILE + LINK + RUNTIME: PROVEN on real silicon (examples/aen/
- * aen-isp-ov5647-capture, CONFIG_VIDEO_ISP_VSI=y).
+ * aen-isp-capture, CONFIG_VIDEO_ISP_VSI=y).
  * vendor-ext, ISP=Vivante blob (opt-in).
  */
 #define DT_DRV_COMPAT vsi_isp_pico
@@ -169,7 +169,7 @@ static const struct video_format_cap supported_input_fmts[] = {
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_RGGB10, 1920, 1080),
 	/*
 	 * VIDEO_PIX_FMT_SBGGR10P (packed) -- run 72: examples/aen/
-	 * aen-isp-ov5647-capture's stage 3d/4 diagnostic requests this
+	 * aen-isp-capture's stage 3d/4 diagnostic requests this
 	 * exactly (mirroring what the OV5647 driver advertises and the CPI
 	 * negotiates on the CSI wire), matching the hal_alif
 	 * 0003-isp-add-sbggr10p-bggr10-input-mapping.patch wrapper mapping
@@ -182,10 +182,12 @@ static const struct video_format_cap supported_input_fmts[] = {
 	 */
 	ISP_VIDEO_FORMAT_CAP(VIDEO_PIX_FMT_SBGGR10P, 1920, 1080),
 	/*
-	 * VIDEO_PIX_FMT_SRGGB10P (packed) -- issue #2287 Stage B: IMX296's one fixed format
-	 * (zephyr/drivers/video/imx296.c). Same shape as the VIDEO_PIX_FMT_SBGGR10P entry just
-	 * above (this table is the ISP driver's own INPUT format gate, separate from the hal_alif
-	 * wrapper's own fourcc->PIXEL_FORMAT_RGGB10 mapping -- see
+	 * VIDEO_PIX_FMT_SRGGB10P (packed) -- issue #2287 Stage B: the fourcc IMX296
+	 * (zephyr/drivers/video/imx296.c) advertises for BOTH its modes, the fixed full-frame
+	 * mode and its ROI crop (same pixel format, different size -- imx296_fmts[] lists both
+	 * as SRGGB10P). Same shape as the VIDEO_PIX_FMT_SBGGR10P entry just above (this table is
+	 * the ISP driver's own INPUT format gate, separate from the hal_alif wrapper's own
+	 * fourcc->PIXEL_FORMAT_RGGB10 mapping -- see
 	 * zephyr/patches/hal_alif/0012-isp-srggb10p-input.patch); bayer_sample_depth() below
 	 * already keys the correct PIN_MAPPING=1 (10-bit) off this fourcc (its SRGGB10P case
 	 * predates this cap entry -- only the input-format gate was missing it).
@@ -1427,7 +1429,7 @@ int isp_get_fmt(const struct device *dev,
  * (supported_input_fmts[], below) -- isp_pico.c's own isp_set_fmt(INPUT)
  * stores whatever fourcc the caller requests verbatim into
  * port->port_fmt.pixelformat, and the OV5647 real-sensor path (stage 3,
- * examples/aen/aen-isp-ov5647-capture) requests exactly VIDEO_PIX_FMT_Y10P
+ * examples/aen/aen-isp-capture) requests exactly VIDEO_PIX_FMT_Y10P
  * (mirroring Alif's own sdk-alif viewfinder recipe).  Neither fourcc
  * matched any case here, so bayer_sample_depth() silently fell through to
  * the 12-bit default for every real-sensor capture -- confirmed on silicon
@@ -1836,7 +1838,7 @@ static int isp_stream_stop(const struct device *dev)
  * runs dry (isp_bottom_half()'s "No more empty buffers" branch) and only
  * restarts the next time a caller calls video_stream_start() again --
  * src/backends/camera/alif_isp_pico.c's isp_capture() re-issues it before
- * every dequeue, examples/aen/aen-isp-ov5647-capture's per-frame loop does
+ * every dequeue, examples/aen/aen-isp-capture's per-frame loop does
  * the same. No driver-driven restart of its own.
  */
 static int isp_set_stream(const struct device *dev, bool enable, enum video_buf_type type)

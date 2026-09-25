@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Alp Lab AB
  * SPDX-License-Identifier: Apache-2.0
  *
- * aen-isp-ov5647-capture -- the Alif ISP-Pico (VeriSilicon ISP Nano,
+ * aen-isp-capture -- the Alif ISP-Pico (VeriSilicon ISP Nano,
  * compatible "vsi,isp-pico") bring-up on the E1M-AEN801/AEN803 (Ensemble
  * E8, M55-HE): a REAL OV5647 sensor frame through the ISP
  * (sensor -> csi -> cam -> isp -> memory), with AE (auto exposure/gain) and
@@ -161,7 +161,18 @@ extern volatile uint32_t isp_mi_frame_end_count;
 #define N_BUFFERS      2
 #define REG_DUMP_EVERY 5
 
+#if !defined(AEN_ISP_IMX296)
+/*
+ * OV5647 only: a separate SRAM0 copy of the last frame, taken so the bench hold below can
+ * savebin a fixed, known address regardless of which of the N_BUFFERS video_enqueue() cycles
+ * back through the driver next. The IMX296 variant (N_FRAMES == 1, no further frames ever
+ * dequeued this run) instead holds the DEQUEUED buffer itself before re-enqueueing it -- see the
+ * f == N_FRAMES block below -- so it needs no second copy, and no extra ~1.8 MB of SRAM0 on top
+ * of the pool already sized to hold 2 buffers that size (see the AEN_ISP_IMX296 CONFIG_VIDEO_
+ * BUFFER_POOL_HEAP_SIZE note in prj.conf/overlay-imx296.conf).
+ */
 static uint8_t frame_copy[FRAME_SIZE] __attribute__((section("SRAM0"), aligned(64)));
+#endif
 
 #define ISP_BASE          (0x49046000UL)
 #define ISP_DGAIN_RB      (ISP_BASE + 0x800) /* isp_pico.h:95 */
@@ -316,10 +327,10 @@ static void plane_stats_compute(const uint8_t *plane, size_t n, struct plane_sta
 int main(void)
 {
 #if defined(AEN_ISP_IMX296)
-	printk("\n=== aen-isp-ov5647-capture (issue #2287 Stage B: real IMX296 ROI through the "
+	printk("\n=== aen-isp-capture (issue #2287 Stage B: real IMX296 ROI through the "
 	       "ISP, AE+AWB manual/off) ===\n");
 #else
-	printk("\n=== aen-isp-ov5647-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
+	printk("\n=== aen-isp-capture (real OV5647 through the ISP, AE+AWB on) ===\n");
 #endif
 
 	const struct device *isp_dev = DEVICE_DT_GET_OR_NULL(ISP_NODE);
@@ -515,7 +526,9 @@ int main(void)
 
 	printk("video_stream_start rc=%d\n", rc_start);
 
+#if !defined(AEN_ISP_IMX296)
 	bool have_last_frame = false;
+#endif
 
 	for (int f = 1; f <= N_FRAMES; f++) {
 		/* isp_pico.c auto-stops once its IN-FIFO empties and only
@@ -577,10 +590,39 @@ int main(void)
 			print_ov5647_ae_regs(f);
 		}
 
+#if defined(AEN_ISP_IMX296)
+		if (f == N_FRAMES) {
+			/*
+			 * IMX296 variant: hold and savebin the DEQUEUED buffer itself -- N_FRAMES
+			 * == 1, so nothing else in this run will ever touch it again -- instead of
+			 * copying it into a second static buffer first (see the frame_copy
+			 * #if !defined(AEN_ISP_IMX296) comment above for why: the pool is already
+			 * sized for 2 buffers this size, and a second copy that size would not
+			 * fit alongside it in SRAM0). Held BEFORE video_enqueue() below, not
+			 * after: enqueue hands the buffer straight back to the driver, which is
+			 * free to overwrite it the moment the next stream_start() runs -- a hold
+			 * placed after enqueue (matching the OV5647 branch's own post-loop hold,
+			 * which is safe there only because frame_copy is a separate copy) would
+			 * risk the bench's savebin racing that overwrite.
+			 */
+			uint32_t crc = crc32_ieee(deq->buffer, deq->bytesused);
+
+			printk("snapshot(frame %d): addr=%p size=%u crc32=0x%08x\n",
+			       f,
+			       (void *)deq->buffer,
+			       deq->bytesused,
+			       crc);
+			printk("RESULT PASS: %d frame(s) captured (see per-frame stats above)\n", N_FRAMES);
+			printk("Holding 20 s for a bench `savebin` of the snapshot buffer "
+			       "BEFORE re-queueing it...\n");
+			k_sleep(K_SECONDS(20));
+		}
+#else
 		if (f == N_FRAMES) {
 			memcpy(frame_copy, deq->buffer, deq->bytesused);
 			have_last_frame = true;
 		}
+#endif
 
 		int rc_enq = video_enqueue(isp_dev, deq);
 
@@ -589,6 +631,7 @@ int main(void)
 
 	video_stream_stop(isp_dev, VIDEO_BUF_TYPE_OUTPUT);
 
+#if !defined(AEN_ISP_IMX296)
 	if (have_last_frame) {
 		uint32_t crc = crc32_ieee(frame_copy, FRAME_SIZE);
 
@@ -604,6 +647,13 @@ int main(void)
 
 	printk("Holding 20 s for a bench `savebin` of the snapshot buffer...\n");
 	k_sleep(K_SECONDS(20));
+#endif
+	/*
+	 * IMX296 variant: no separate post-loop RESULT/hold block -- the f == N_FRAMES block
+	 * inside the loop above already printed RESULT PASS and held 20 s on success; a dequeue
+	 * failure is already reported inline by the loop's own "RESULT FAIL (no buffer)" break,
+	 * so there is nothing left to report here either way.
+	 */
 
 	return 0;
 }
