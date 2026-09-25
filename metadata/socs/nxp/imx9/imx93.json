@@ -45,6 +45,13 @@
       "supports": ["CNN", "RNN"]
     }
   ],
+  "npu_toolchain": {
+    "vela": {
+      "memory_mode": "Shared_Sram",
+      "system_config_requires_vendor_config": false,
+      "source": "vendors/nxp-imx93/README.md:106"
+    }
+  },
   "soc_ram_kb": 256,
   "inference_arena_sram_kib": 0,
   "always_on_sram_kb": 0,
@@ -95,6 +102,7 @@
     "Per-peripheral counts are still almost entirely pending -- ingestion against IMX93RM.pdf (5593 pages) is a separate dedicated pass and has not yet run.  The populated entries are `mipi_dsi: 1` and `lcdif: 1`, transcribed ahead of that pass from the pinned Zephyr v4.4.0 device tree (`dts/arm64/nxp/nxp_mimx93_a55.dtsi`, single `mipi_dsi: dsi@4ae10000` node compatible `nxp,mipi-dsi-dwc`, plus the LCDIF display-controller node -- see the next note), so HW_MIPI_DSI and HW_LCDIF report truthfully for the display path; every other count still defaults to zero and must not be inferred from its absence.",
     "i.MX 93 has *no GPU* -- that's a deliberate split with i.MX 95.  Display path is LCDIF (1x `nxp,imx-lcdifv3` display-controller@4ae30000 in the same pinned Zephyr dtsi) driving MIPI-DSI (no 2D GPU acceleration).  Both the MIPI-DSI and LCDIF instances are structured as `peripherals` counts (`mipi_dsi: 1`, `lcdif: 1`): gen_soc_caps.py consumes `lcdif` into ALP_SOC_LCDIF_COUNT / ALP_CAP_HW_LCDIF (issue #379), distinct from mipi_dsi. E8 models its parallel display path as `dpi_parallel`, an unrelated interface, so the LCDIF key stays imx-lcdifv3-specific.",
     "Companion silicon on the Alp Lab E1M-i.MX93 SoM (per the vendor datasheet): NXP PCA9451A PMIC; Murata Type 2DL / 2EL / 2KL / 2LL Wi-Fi 6 + BLE 5.x combo (variant TBD); IW610 Wi-Fi 6 module -- confirm which combo ships on which SKU when the user writes the exact HW config.",
-    "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).  All cross-referenced in the `datasheet.source` field above."
+    "Reference docs available locally: IMX93HDG.pdf (Hardware Design Guide, 42 p), IMX93RM.pdf (Reference Manual Rev. 6, 5593 p), AN14413.pdf (PCA9451A PMIC application note).  All cross-referenced in the `datasheet.source` field above.",
+    "Ethos-U65 host-core pairing is DOCUMENTED ABSENCE, not an unexamined gap: sourced against IMX93RM Rev. 7 (2026-02-10, 5601 p, https://www.nxp.com/docs/en/reference-manual/IMX93RM.pdf), a newer printing than this file's general `datasheet` provenance block above (Rev. 6, 5593 p, 2025-07-01) -- ONLY this note draws on Rev. 7; every other fact in this spec was ingested against Rev. 6 and this note does not re-verify them at the newer revision. Rev. 7 names no host core for the NPU. §2.2 'System memory map used by all initiators' Table 4 lists the NPU Controller (4A90_0000 (NS) / 5A90_0000 (S), 4 KB) among ALL initiators, not one; Table 5 'System memory map (Cortex-M33)' repeats the identical row in the Cortex-M33's OWN memory map too, so the block sits in both, not exclusively in either. §17.2.8 'Interrupt signals' says only 'See Arm's General Interrupt Controller (GIC) documentation for NPU block interrupts' -- the GIC is the Cortex-A55's controller, not the M33's NVIC. Chapter 17 never names a host core, using only Arm's generic Ethos-U wording 'the external host application processor' (§17.2, §17.2.9). This is weaker-in-kind evidence than the Alif E8 HWRM's Table 10-2 per-master A32/M55-HP/M55-HE access matrix (see `paired_core`'s schema description and `_check_soc_npu_pairing`'s docstring in scripts/validate_metadata.py for the full contrast): an all-initiators memory map plus a GIC pointer, not a per-master permission table -- actual masters are TRDC-governed and undocumented here. `npus[0]` above correctly omits `paired_core` on that basis; this note records why, it does not add one. This is a claim about what the reference manual documents, not about what runs today: NXP's own shipped Yocto/Linux driver stack (`nxp-imx/ethos-u-driver-stack-imx`) does run the Ethos-U driver on the Cortex-M33, with Linux on the Cortex-A55 dispatching to it over shared memory and mailbox IRQs -- a separate, sourced, software-stack fact (see `vendors/nxp-imx93/README.md`) that this documentation gap does not contradict."
   ]
 }

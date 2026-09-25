@@ -67,9 +67,10 @@ def test_single_mac_variant_may_omit_paired_core(tmp_path, monkeypatch):
 
 
 def test_shared_u85_may_omit_paired_core(tmp_path, monkeypatch):
-    # E8-like: the U85 on the HG subsystem is legitimately unpaired; the two
-    # U55s are paired.  Distinct-MAC rule is per-type, so U85 (single 256) and
-    # the paired U55s all pass.
+    # E8-like: the U85 is a shared, SoC-level NPU (Alif block name NPU_HG,
+    # not wired to one core) and is legitimately unpaired; the two U55s are
+    # paired.  Distinct-MAC rule is per-type, so U85 (single 256) and the
+    # paired U55s all pass.
     doc = {
         "cores": [{"id": "m55_hp"}, {"id": "m55_he"}],
         "npus": [
@@ -178,3 +179,86 @@ def test_non_int_mac_per_cycle_does_not_crash_the_gate(tmp_path, monkeypatch):
         ],
     }
     assert _run(tmp_path, monkeypatch, doc) == 0  # must not raise
+
+
+def test_no_shipped_metadata_or_schema_claims_an_hg_subsystem():
+    """The Alif Ensemble E8 has exactly three subsystems -- RTSS-HE, RTSS-HP,
+    and the A32 APSS.  "HG" is the Ethos-U85 NPU block's OWN instance name
+    (`NPU_HG`, Alif's internal codename ZAPHOD -- see `ZAPHOD_CKOR` in
+    `SHMEM_CLK_CTRL`), not a fourth subsystem: `NPU_HG_BASE 0x49042000` is
+    byte-identical in both M55 cores' generated CMSIS headers, unlike the two
+    U55s, which alias one local address (0x400E1000) under per-core names
+    (NPU_HP_BASE / NPU_HE_BASE).  This pins the fix to THREE code surfaces:
+    every shipped document under `metadata/**` (schema descriptions,
+    including `paired_core`'s, and every SoC spec), every Python source
+    under `scripts/**` (which is where `_check_soc_npu_pairing`'s own
+    docstring lives, in `scripts/validate_metadata.py` -- a walk scoped to
+    `metadata/**` alone cannot see that file), and every Zephyr devicetree
+    source under `zephyr/dts/**` -- `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`
+    carries hand-written prose comments about this exact block (the
+    `ethosu85@49042000` node) and is exactly the kind of shipped text this
+    invented-subsystem claim could resurface in, yet neither of the other
+    two globs would ever see it. `tests/scripts/` is deliberately NOT
+    walked: it is where this very assertion message quotes the phrase it
+    forbids, so scanning it would make the gate fail on itself. Stops any
+    of the three surfaces from reintroducing the invented subsystem."""
+    hits = []
+    needles = ("HG subsystem", "HG-subsystem", "HG_subsystem")
+    for pattern in ("metadata/**/*", "scripts/**/*.py", "zephyr/dts/**/*"):
+        for p in sorted(V.REPO.glob(pattern)):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for needle in needles:
+                if needle in text:
+                    hits.append(f"{p.relative_to(V.REPO)}: {needle!r}")
+    assert hits == [], (
+        "shipped metadata/schema/zephyr-dts text or scripts/ source must not "
+        "claim an 'HG subsystem' -- the E8 has exactly three subsystems "
+        "(RTSS-HE, RTSS-HP, A32 APSS); NPU_HG is the U85 NPU block's own "
+        "instance name, not a fourth subsystem: " + "; ".join(hits)
+    )
+
+
+def test_no_shipped_metadata_or_schema_claims_a32_npu_reach_is_unverified():
+    """Whether the A32 cluster can reach the E8's Ethos-U85 (NPU_HG,
+    0x49042000) used to be hedged as unverified in both `paired_core`'s
+    schema description and `_check_soc_npu_pairing`'s own docstring -- "there
+    is no A32 SVD view or board devicetree NPU node to confirm either way".
+    It is now class-1 vendor-sourced: the Alif E8 Hardware Reference Manual
+    (AHRM0012NDA v0.3) Table 10-2 places NPU_HG's 0x49042000 inside the
+    Shared Peripherals region (A32/M55-HP/M55-HE all Y, unlike the
+    M55-local-peripherals row above it), Table 10-6 lists NPU-HG there by
+    address, and Table 4-13 fans its interrupt to all three cores
+    (GIC400_IRQS[355] on the A32). Same three-surface walk as the
+    HG-subsystem pin above (`metadata/**`, `scripts/**/*.py`,
+    `zephyr/dts/**`), and for the same reasons: `metadata/**` alone cannot
+    see `_check_soc_npu_pairing`'s docstring in
+    `scripts/validate_metadata.py`, and neither of those two globs can see
+    `zephyr/dts/alif/ensemble_e8_peripherals.dtsi`'s own prose comments
+    about this exact NPU_HG node -- the retired hedge phrase names "a board
+    devicetree NPU node" directly, making that dtsi's comment block a
+    plausible place for the hedge to resurface. `tests/scripts/` is
+    deliberately NOT walked -- this docstring itself quotes the forbidden
+    phrase. Stops any of the three surfaces from reintroducing the
+    now-superseded hedge."""
+    hits = []
+    needle = "unverified -- there is no A32 SVD view or board devicetree NPU node"
+    for pattern in ("metadata/**/*", "scripts/**/*.py", "zephyr/dts/**/*"):
+        for p in sorted(V.REPO.glob(pattern)):
+            if not p.is_file():
+                continue
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if needle in text:
+                hits.append(f"{p.relative_to(V.REPO)}")
+    assert hits == [], (
+        "shipped metadata/schema/zephyr-dts text or scripts/ source must "
+        "not reassert A32-vs-U85 reachability as unverified -- the Alif E8 "
+        "HWRM (AHRM0012NDA v0.3) Tables 10-2/10-6/4-13 settle it: " + "; ".join(hits)
+    )
