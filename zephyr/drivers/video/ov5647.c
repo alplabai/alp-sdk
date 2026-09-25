@@ -660,8 +660,16 @@ static const struct video_reg ov5647_init_regs[] = {
 	/* Drive the frame length from TIMING_VTS instead of letting the AEC stretch it. HTS is now
 	 * PER MODE (AUTHORIZED LOCAL DIVERGENCE #3, run 61) -- ov5647_set_mode_regs() writes
 	 * OV5647_TIMING_HTS_REG as part of each mode's coherent register block, not here.
+	 *
+	 * #2277: the VTS-manual bit itself (OV5647_MANUAL_CTRL_VTS, OV5647_MANUAL_CTRL = 0x3503)
+	 * is deliberately NOT a table entry here -- a flat {reg, value} table entry is a WHOLE-BYTE
+	 * overwrite (video_write_cci_multiregs()), which would silently also clear the AEC/AGC-
+	 * manual bits this same register holds, the moment anything ever needed to re-run this
+	 * table after ctrls exist. ov5647_init() below sets just this one bit with an explicit
+	 * video_modify_cci_reg() read-modify-write instead, right after this table -- same net
+	 * effect at boot (the register reads 0 post-reset either way) but safe if this table is
+	 * ever re-applied later.
 	 */
-	{ OV5647_MANUAL_CTRL, OV5647_MANUAL_CTRL_VTS },
 	{ OV5647_VTS_DIFF, 0 },
 	/* Common init (AUTHORIZED LOCAL DIVERGENCE #3, run 61) -- see the block comment above
 	 * OV5647_SYSTEM_RSVD_3000 for the source and what was deliberately left out.
@@ -956,6 +964,14 @@ static int ov5647_enum_frmival(const struct device *dev, struct video_frmival_en
 	return 0;
 }
 
+/* Forward declaration: ov5647_set_frmival() below re-applies the exposure clamp (defined further
+ * down, alongside the other per-ctrl setters) after writing the new TIMING_VTS -- a frame-rate
+ * increase shrinks VTS, and ov5647_set_ctrl_exposure()'s own clamp is keyed off data->frmrate/
+ * data->fmt, so a value that was in range at the OLD rate can be out of range at the new one
+ * until this re-applies it.
+ */
+static int ov5647_set_ctrl_exposure(const struct device *dev);
+
 static int ov5647_set_frmival(const struct device *dev, struct video_frmival *frmival)
 {
 	const struct ov5647_config *cfg  = dev->config;
@@ -1016,7 +1032,13 @@ static int ov5647_set_frmival(const struct device *dev, struct video_frmival *fr
 	data->frmrate = ov5647_framerates[fie.index];
 	*frmival      = (struct video_frmival){ .numerator = 1, .denominator = data->frmrate };
 
-	return 0;
+	/* A frame-rate increase just shrank TIMING_VTS above -- re-run the exposure clamp against
+	 * the NEW vts (data->frmrate/data->fmt are both current now) so a value that fit the OLD,
+	 * larger VTS cannot be left sitting above the new VTS - 4 ceiling. No-op when
+	 * exposure_auto isn't VIDEO_EXPOSURE_MANUAL (ov5647_set_ctrl_exposure()'s own early
+	 * return).
+	 */
+	return ov5647_set_ctrl_exposure(dev);
 }
 
 static int ov5647_get_frmival(const struct device *dev, struct video_frmival *frmival)
@@ -1321,6 +1343,14 @@ static int ov5647_lane_park(const struct device *dev)
 	return 0;
 }
 
+/* Forward declarations: ov5647_set_stream(true) below re-asserts both AEC/AGC-manual bits
+ * (0x3503, OV5647_MANUAL_CTRL) from the ctrls cache immediately before the sensor is allowed to
+ * stream -- #2277 (bench run 247), see that call site's own comment. Both setters are defined
+ * further down, next to ov5647_set_ctrl() which normally dispatches to them.
+ */
+static int ov5647_set_ctrl_gain(const struct device *dev);
+static int ov5647_set_ctrl_exposure(const struct device *dev);
+
 static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_type type)
 {
 	const struct ov5647_config *cfg  = dev->config;
@@ -1367,6 +1397,38 @@ static int ov5647_set_stream(const struct device *dev, bool on, enum video_buf_t
 		return ret;
 	}
 
+	/*
+	 * #2277 (bench run 247): re-assert both AEC/AGC-manual bits (0x3503, OV5647_MANUAL_CTRL)
+	 * from the ctrls cache right here -- the LAST write this driver makes before
+	 * MODE_SELECT_STREAMING below lets pixels flow. Bench evidence: isp_pico.c's
+	 * isp_apply_ae_sensor_gate() correctly sets ctrls->exposure_auto/auto_gain to
+	 * MANUAL/off and RMWs the bits into 0x3503 well before this point, yet a live
+	 * readback during streaming found 0x3503 = 0x04 (VTS-manual only, AEC/AGC-manual
+	 * both clear) with the sensor's own on-chip AEC pinning exposure at 32 lines --
+	 * something between the gate and streaming clobbers those two bits. WHAT clobbers
+	 * them is not pinned down (every write this driver itself makes to 0x3503 is
+	 * already a read-modify-write of a single bit, never a whole-byte overwrite, once
+	 * ov5647_init_regs[]'s own one-time boot write is past -- see that table's own
+	 * comment); this re-assert is the defensive fix regardless of the exact source,
+	 * matching the same "reapply right before streaming" shape as ov5647_set_fmt()'s
+	 * own flip-ctrl re-apply after ov5647_set_mode_regs() above.
+	 *
+	 * Both setters are ctrls-cache-driven RMWs (video_modify_cci_reg(), see their own
+	 * definitions below), so this is a safe no-op on the dev-default raw-capture path
+	 * (e.g. aen-camera-firstlight) where exposure_auto/auto_gain are never moved off
+	 * their AUTO defaults: it just re-writes the AUTO bits the sensor's own on-chip
+	 * AEC/AGC is already supposed to have.
+	 */
+	ret = ov5647_set_ctrl_gain(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = ov5647_set_ctrl_exposure(dev);
+	if (ret < 0) {
+		return ret;
+	}
+
 	ret = video_write_cci_reg(&cfg->i2c, OV5647_MODE_SELECT, OV5647_MODE_SELECT_STREAMING);
 	if (ret < 0) {
 		return ret;
@@ -1404,6 +1466,9 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 	const struct ov5647_config *cfg   = dev->config;
 	struct ov5647_data         *data  = dev->data;
 	struct ov5647_ctrls        *ctrls = &data->ctrls;
+	uint32_t                    hts;
+	uint32_t                    vts;
+	uint32_t                    exposure;
 	int                         ret;
 
 	ret = video_modify_cci_reg(
@@ -1419,7 +1484,33 @@ static int ov5647_set_ctrl_exposure(const struct device *dev)
 		return 0;
 	}
 
-	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, ctrls->exposure.val);
+	/*
+	 * #2277: clamp to the ACTIVE mode's VTS - 4 lines. 0x3503 bit2 (OV5647_MANUAL_CTRL_VTS,
+	 * set once at ov5647_init()) keeps the sensor's frame length pinned to TIMING_VTS rather
+	 * than letting its own AEC stretch the frame to fit a larger request, so an unclamped
+	 * write here just silently rails against that fixed VTS instead of taking effect; "- 4"
+	 * matches the datasheet's minimum VTS-to-exposure margin (registers 0x3500..0x3502 vs
+	 * 0x380E/0x380F). data->fmt/data->frmrate are the ACTIVE mode/rate (ov5647_set_fmt()/
+	 * ov5647_set_frmival() keep them current), so this tracks whichever mode is actually
+	 * streaming -- ov5647_hts_for() is per-mode (640x480 binned vs every crop-path size use
+	 * different HTS), unlike a single driver-wide constant. This is the sensor driver's own
+	 * VTS math (ov5647_hts_for()/ov5647_frmrate_to_vts(), both already used by
+	 * ov5647_set_frmival() to program TIMING_VTS in the first place), not duplicated
+	 * elsewhere -- an ISP layer clamping exposure needs to stay sensor-agnostic and has no
+	 * business knowing OV5647's own HTS table.
+	 */
+	hts      = ov5647_hts_for(data->fmt.width, data->fmt.height);
+	vts      = ov5647_frmrate_to_vts(dev, hts, data->frmrate);
+	exposure = (uint32_t)ctrls->exposure.val;
+
+	if (vts > 4 && exposure > (vts - 4) * 16) {
+		exposure = (vts - 4) * 16;
+		/* Store the clamped value back so video_get_ctrl(VIDEO_CID_EXPOSURE) reports what
+		 * the hardware actually holds, not the caller's unclamped request. */
+		ctrls->exposure.val = (int32_t)exposure;
+	}
+
+	return video_write_cci_reg(&cfg->i2c, OV5647_EXPOSURE, exposure);
 }
 
 static int ov5647_set_ctrl_test_pattern(const struct device *dev)
@@ -1681,6 +1772,18 @@ static int ov5647_init(const struct device *dev)
 	 * targeted PHY_PD_MIPI/PHY_PD_LPRX/MIPI_EN bitfield modify this call used to make here.
 	 */
 	ret = video_write_cci_multiregs(&cfg->i2c, ov5647_init_regs, ARRAY_SIZE(ov5647_init_regs));
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* #2277: set the VTS-manual bit as its own read-modify-write, not a table entry -- see
+	 * ov5647_init_regs[]'s own comment just above OV5647_VTS_DIFF for why. The register is
+	 * still at its post-reset 0 here (ov5647_init_ctrls(), below, hasn't run yet -- nothing
+	 * has touched the AEC/AGC-manual bits this early), so this is a same-result RMW, not a
+	 * behaviour change at boot.
+	 */
+	ret = video_modify_cci_reg(
+	    &cfg->i2c, OV5647_MANUAL_CTRL, OV5647_MANUAL_CTRL_VTS, OV5647_MANUAL_CTRL_VTS);
 	if (ret < 0) {
 		return ret;
 	}

@@ -54,10 +54,13 @@
  * the ~100 ms 10 fps frame period is what let the fix above keep two
  * buffers queued to the ISP MI while the third converts (a 30 fps ~33 ms
  * period gives the same conversion far less slack to land in before the
- * fifo starves again); and (2) AE exposure headroom in a dim scene (see
- * issue #2277: the OV5647 calibration AE block's exposure ceiling is
- * still pinned to the 10 fps VTS, so running faster than 10 fps narrows
- * how much exposure AE can command before it hits that ceiling).
+ * fifo starves again); and (2) AE exposure headroom in a dim scene -- a
+ * faster fps means a shorter frame period, so a shorter exposure ceiling
+ * no matter what (issue #2277 fixed a BUG where that ceiling used to stay
+ * pinned to the 10 fps VTS even when this app itself ran faster; it now
+ * tracks whichever fps is actually requested, so this app's choice of 10
+ * fps here is purely the CPU/AE headroom trade-off above, not a workaround
+ * for that bug).
  */
 
 #include <stdbool.h>
