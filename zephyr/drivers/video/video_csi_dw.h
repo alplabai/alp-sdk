@@ -320,11 +320,13 @@
 
 /*
  * Alp Lab AB: a sensor stuck emitting bad IPI framing can fire
- * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs and
- * IPI-soft-resets on every one of those uncapped, which floods the log and
- * storms the reset line. Cap the LOG_ERR + reset to the first this many
- * occurrences, then mask CSI_INT_MSK_IPI_FATAL so the source goes quiet
- * (see csi2_dw_data.ipi_fatal_count / ipi_fatal_total).
+ * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs
+ * uncapped on every one of those, which floods the log. Cap the LOG_ERR to
+ * the first this many occurrences, then mask CSI_INT_MSK_IPI_FATAL so the
+ * source goes quiet (see csi2_dw_data.ipi_fatal_count / ipi_fatal_total).
+ * This is log-only bookkeeping -- csi2_dw_irq() no longer soft-resets IPI
+ * on this or any other fatal event (issue #2287; see the comment at the
+ * end of csi2_dw_irq() in video_csi_dw.c for why that reset was removed).
  */
 #define CSI2_DW_IPI_FATAL_LOG_LIMIT 16
 
@@ -383,17 +385,20 @@ struct csi2_dw_data {
 	 * csi2_dw_configure() (set_format time) AND from csi2_dw_stream_start() (every stream
 	 * (re)start), so a stream restart always gets a fresh cap window instead of inheriting
 	 * a mask a previous, unrelated stream left set. A misprogrammed/misbehaving sensor can
-	 * fire this once per line (a per-fatal LOG_ERR + IPI soft-reset storm) -- csi2_dw_irq()
-	 * stops logging and masks CSI_INT_MSK_IPI_FATAL once this reaches
-	 * CSI2_DW_IPI_FATAL_LOG_LIMIT.
+	 * fire this once per line (a per-fatal LOG_ERR storm, log-only -- csi2_dw_irq() does NOT
+	 * soft-reset IPI, issue #2287) -- csi2_dw_irq() stops logging and masks
+	 * CSI_INT_MSK_IPI_FATAL once this reaches CSI2_DW_IPI_FATAL_LOG_LIMIT.
 	 */
 	uint32_t ipi_fatal_count;
 
 	/*
 	 * Alp Lab AB: lifetime count of CSI_INT_ST_MAIN_IPI_FATAL events, NEVER reset (unlike
-	 * ipi_fatal_count above) -- so a diagnostic dump after several stream restarts still
-	 * reports how many fatals happened in total, even though each restart's own window only
-	 * ever logs the first CSI2_DW_IPI_FATAL_LOG_LIMIT of its own.
+	 * ipi_fatal_count above), incremented alongside it in csi2_dw_irq(). Reporting is
+	 * LOG-ONLY: this field is read back once, into the "masked after N (total M since driver
+	 * init)" LOG_ERR line csi2_dw_irq() prints when ipi_fatal_count hits
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT -- there is no separate diagnostic dump API that surfaces
+	 * it; a caller wanting the running total has to read csi2_dw_data directly (internal to
+	 * this driver) or grep the log.
 	 */
 	uint32_t ipi_fatal_total;
 };

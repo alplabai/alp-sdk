@@ -228,14 +228,16 @@ static void csi2_dw_irq(const struct device *dev)
 
 		/*
 		 * Alp Lab AB: a sensor stuck emitting bad IPI framing fires this once per line --
-		 * uncapped LOG_ERR floods the log (see CSI2_DW_IPI_FATAL_LOG_LIMIT). Log only the
-		 * first CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask window, then
-		 * mask the source and log once that it went quiet. ipi_fatal_count (this window)
-		 * resets on the next csi2_dw_irq_on() -- now called from every
+		 * uncapped LOG_ERR floods the log (see CSI2_DW_IPI_FATAL_LOG_LIMIT). This is
+		 * LOG-ONLY reporting (issue #2287: csi2_dw_irq() no longer soft-resets IPI here).
+		 * Log only the first CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences of the CURRENT unmask
+		 * window, then mask the source and log once that it went quiet. ipi_fatal_count
+		 * (this window) resets on the next csi2_dw_irq_on() -- now called from every
 		 * csi2_dw_stream_start(), not just the first set_format -- so masking from a
 		 * previous stream no longer hides a later stream's own overflow; ipi_fatal_total
-		 * (video_csi_dw.h) is never reset, so a later diagnostic dump can still report the
-		 * true lifetime total.
+		 * (video_csi_dw.h) is never reset, and is read back into the "masked after N" line
+		 * below -- that LOG_ERR is the only place it is surfaced, there is no separate
+		 * diagnostic dump.
 		 */
 		if (data->ipi_fatal_count <= CSI2_DW_IPI_FATAL_LOG_LIMIT) {
 			LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
@@ -308,21 +310,34 @@ static void csi2_dw_irq(const struct device *dev)
 	}
 
 	/*
-	 * Alp Lab AB (issue #2287, bench run 271, E1M-AEN803 2026W36-0001): this handler used to
-	 * soft-reset CSI_IPI_SOFTRSTN here on any of the fatal events above. Deleted: toggling
-	 * IPI_SOFTRSTN while the Alif CPI is mid-frame (BUSY) corrupted memory -- the CPI gates
-	 * its write on HSYNC only (VSYNC_EN=0), so a soft reset that cuts a line makes the CPI
-	 * write one row LATE, past the frame buffer's FCFG row count. Bench: CPI DMA wrote ~2744
-	 * bytes (1372 px, just under one 1456-px row) past a 3,168,256-byte buffer's end
-	 * (0x02305880), corrupting the next sys_heap chunk header (panicked in sys_heap_free() at
-	 * buffer release). Diagnostic runs with the reset compiled out (DIAG_NO_IPI_SOFTRST)
-	 * closed clean. The Alif DFP reference (Driver_MIPI_CSI2.c's IPI-fatal handler) matches
-	 * this: it only reads status and reports the event, it never soft-resets IPI at runtime.
-	 * Recovery for a genuinely wedged IPI is now stream-level: csi2_dw_stream_stop() then
-	 * csi2_dw_stream_start() re-arms (see csi2_dw_irq_on()) rather than a mid-frame register
-	 * poke. This hazard is NOT IMX296-specific -- OV5647/OV9281 buffers have zero slack
-	 * either, so they were exposed to the same latent overrun; do not add frame-buffer
-	 * padding as a band-aid, the reset itself was the bug.
+	 * Alp Lab AB (issue #2287, E1M-AEN803 2026W36-0001): this handler used to soft-reset
+	 * CSI_IPI_SOFTRSTN here on any of the fatal events above. Deleted, on a CORRELATION, not
+	 * a confirmed mechanism: bench run 271, WITH this reset, panicked at buffer close -- the
+	 * CPI DMA wrote ~2744 bytes (measured; less than one 2912-byte frame row) past a
+	 * 3,168,256-byte buffer's end (0x02305880), corrupting the next sys_heap chunk header
+	 * (sys_heap_free() hardening caught it at release). Bench runs 272-276, WITHOUT this
+	 * reset (same HSD 503 timing), all 5 completed capture+close with no panic; a 4 KiB 0xA5
+	 * guard fill placed past the buffer end showed only 16 bytes changed, identical every
+	 * run -- consistent with ordinary heap bookkeeping, not a pixel-data overrun. That is 1
+	 * overrun in 1 run with the reset present vs. 0 overruns in 5 runs without it: suggestive,
+	 * not proof. The SUSPECTED mechanism (the Alif CPI gates its write on HSYNC only,
+	 * VSYNC_EN=0, so a soft reset that cuts a line mid-frame makes the CPI write one row LATE,
+	 * past the buffer's FCFG row count) is NOT independently confirmed -- run 271's own
+	 * logging was disabled, so which specific IPI-fatal event fired that run is unknown.
+	 * Earlier diagnostic runs at the same HSD 503 timing (logging enabled) recorded IPI
+	 * status 0x10 (bit 4, HLINE error) 37-80 times per capture and a separate frame-sync
+	 * error, but ZERO FIFO-overflow (bit 1) events -- i.e. the failure mode this reset was
+	 * originally meant to recover from was not observed firing in those runs either. The Alif
+	 * DFP reference (Driver_MIPI_CSI2.c's IPI-fatal handler) only reads status and reports
+	 * the event; it never soft-resets IPI at runtime, which is the practice this change
+	 * matches regardless of the exact mechanism. Recovery for a genuinely wedged IPI is now
+	 * stream-level -- csi2_dw_stream_stop() then csi2_dw_stream_start() re-arms (see
+	 * csi2_dw_irq_on()) -- but that this actually un-wedges a stuck IPI is NOT itself
+	 * bench-verified; it is simply the only recovery path left once the runtime reset is
+	 * gone. This hazard is not IMX296-specific in principle -- OV5647/OV9281 use the same
+	 * zero-slack frame buffers and are LIKELY exposed to the same latent overrun -- but that
+	 * has not been bench-reproduced on either sensor. Do not add frame-buffer padding as a
+	 * band-aid; if the mechanism above turns out wrong, padding would hide the real bug.
 	 */
 }
 
@@ -569,11 +584,12 @@ static int csi2_dw_validate_data(const struct device *dev)
 	}
 
 	/* Use the rate actually programmed (a divider rounds up) for the timings. */
-	if (clock_control_get_rate(config->clk_dev, config->pixclk, &tmp) == 0) {
+	ret = clock_control_get_rate(config->clk_dev, config->pixclk, &tmp);
+	if (ret == 0) {
 		pixclock = tmp;
 	}
 
-	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL) {
+	if (config->ipi_mode == CSI2_IPI_MODE_TIMINGS_CTRL && ret == 0) {
 		/*
 		 * Alp Lab AB (issue #2287): log the IPI line time this ACTUAL
 		 * programmed clock produces (not the pixclock this branch
@@ -581,7 +597,15 @@ static int csi2_dw_validate_data(const struct device *dev)
 		 * clock-control divisor-policy change that lands on a different
 		 * divisor -- silently invalidating the overlay's HSD derivation,
 		 * see raspberry_pi_global_shutter_camera.overlay -- shows up in
-		 * the boot log instead of only as a re-appeared FIFO overflow.
+		 * the log instead of only as a re-appeared FIFO overflow. This
+		 * function runs from csi2_dw_configure(), called from
+		 * set_format -- i.e. every time the app (re)configures the
+		 * stream, NOT once at boot -- so expect one line per
+		 * set_format call, not a single boot-time line. Gated on the
+		 * clock_control_get_rate() readback actually succeeding (tmp
+		 * is only the ACTUAL divided rate in that case; on failure
+		 * tmp still holds the earlier REQUESTED rate, which would be
+		 * a misleading thing to log as "the" line time).
 		 */
 		uint32_t hline = timing->hsa + timing->hbp + timing->hsd + timing->hact;
 
@@ -661,10 +685,16 @@ static int csi2_dw_stream_start(const struct device *dev)
 	 * Alp Lab AB (issue #2287): re-arm the IPI-fatal mask/count here, not just once from
 	 * csi2_dw_configure() (set_format time). csi2_dw_irq_on() used to run ONLY from
 	 * set_format, so once CSI2_DW_IPI_FATAL_LOG_LIMIT startup transients masked
-	 * CSI_INT_MSK_IPI_FATAL, every later real overflow on this same configured stream went
-	 * silent -- no LOG_ERR, no soft-reset, and the frame just corrupts quietly. Re-arming on
-	 * every stream (re)start bounds the blind window to "at most LOG_LIMIT events since THIS
-	 * start", which is the guarantee the masking scheme is supposed to give.
+	 * CSI_INT_MSK_IPI_FATAL, every later real fatal on this same configured stream went
+	 * silent -- no LOG_ERR at all, this is log-only reporting (csi2_dw_irq() does not
+	 * soft-reset IPI). Re-arming on every stream (re)start bounds the blind window to "at
+	 * most LOG_LIMIT events since THIS start", which is the guarantee the masking scheme is
+	 * supposed to give. csi2_dw_irq_on() also discards every latched CSI_INT_ST_* status
+	 * register (see its own comment) before unmasking, which is controller-wide, not
+	 * per-sensor -- today only one sensor is ever wired to a given &csi controller
+	 * (CSI2_NUM_SENSORS is 2 in the struct, but this shield uses one), so that breadth is
+	 * currently a non-issue; a second sensor sharing this controller would need this
+	 * re-arm's scope reconsidered.
 	 */
 	csi2_dw_irq_on(regs, data);
 
