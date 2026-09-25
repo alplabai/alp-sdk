@@ -358,12 +358,23 @@ class TestBuildShBoardQualifiedGuard:
         # Act
         result = _run(tmp_path, app, shape.fq_board)
         # Assert: refused, and both accepted stems are named so an
-        # operator knows exactly what to add.
+        # operator knows exactly what to add. build.sh's stderr keeps
+        # whatever separators its own $APP_DIR carries (backslashes on
+        # Windows, since build.sh appends a literal "/boards/..." suffix
+        # to that prefix), while pathlib always renders `app / ...` with
+        # the host's native separator -- normalize both sides to forward
+        # slashes before comparing so this assertion is host-portable
+        # rather than asserting a Windows path against a POSIX one.
+        stderr = result.stderr.replace("\\", "/")
+        expected_stem_conf = (app / "boards" / (shape.stem + ".conf")).as_posix()
+        expected_short_stem_conf = (
+            app / "boards" / (shape.short_stem + ".conf")
+        ).as_posix()
         assert result.returncode == 2, result.stderr
-        assert "ships AEN board .conf files, but none for" in result.stderr
-        assert f"expected either: {app / 'boards' / (shape.stem + '.conf')}" in result.stderr
-        assert f"or:   {app / 'boards' / (shape.short_stem + '.conf')}" in result.stderr
-        assert "BUILD FAILED" not in result.stderr
+        assert "ships AEN board .conf files, but none for" in stderr
+        assert f"expected either: {expected_stem_conf}" in stderr
+        assert f"or:   {expected_short_stem_conf}" in stderr
+        assert "BUILD FAILED" not in stderr
 
     @pytest.mark.parametrize("shape", GLOB_SCOPED_SHAPES, ids=GLOB_SCOPED_IDS)
     def test_overlay_for_a_different_board_is_refused(
