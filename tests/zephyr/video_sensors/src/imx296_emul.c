@@ -46,9 +46,10 @@ LOG_MODULE_REGISTER(imx296_emul, CONFIG_I2C_LOG_LEVEL);
 
 /* imx296_init()'s boot sequence is short (no per-mode table, one fixed format): XMSTA + STANDBY
  * quiesce, a standby-cancel/SENSOR_INFO-read/standby-re-arm round trip, then VMAX (3 bytes) +
- * HMAX (2 bytes) + INCKSEL0..3 (4 bytes) + CSI_TIMING (1 byte) -- under 15 writes total. Sized
- * generously (matching ov5647_emul.c's rationale) so accumulated writes across a whole ZTEST
- * suite run cannot silently overflow and drop entries partway through. */
+ * HMAX (2 bytes) + INCKSEL0..3 (4 bytes) + CSI_TIMING (1 byte) + CSI_LANE_HS (1 byte) +
+ * BLKLEVEL (2 bytes) + ROI_ENABLE (1 byte) -- under 20 writes total. Sized generously (matching
+ * ov5647_emul.c's rationale) so accumulated writes across a whole ZTEST suite run cannot silently
+ * overflow and drop entries partway through. */
 #define IMX296_EMUL_LOG_CAPACITY 256
 
 struct imx296_emul_data {

@@ -48,6 +48,13 @@
 #define REG_INCKSEL3   0x308c
 #define REG_CSI_TIMING 0x418c
 
+/* IMX296_REG_CSI_LANE_HS / IMX296_REG_BLKLEVEL / IMX296_REG_ROI_ENABLE -- see imx296.c's own
+ * comments above those macros. */
+#define REG_CSI_LANE_HS  0x3005
+#define REG_BLKLEVEL_LSB 0x3254
+#define REG_BLKLEVEL_MSB 0x3255
+#define REG_ROI_ENABLE   0x3300
+
 #define STANDBY_STANDBY  BIT(0)
 #define XMSTA_STOP       BIT(0)
 #define REVERSE_VREVERSE BIT(0)
@@ -121,6 +128,18 @@ ZTEST(imx296, test_init_register_values)
 
 	zassert_ok(imx296_emul_get_reg(emul, REG_CSI_TIMING, &val));
 	zassert_equal(val, 0xa8, "CSI_TIMING (54 MHz row)");
+
+	/* Bench-derived (issue #2287, E1M-AEN803 2026W36-0001): without this write the CSI-2 data
+	 * lane never leaves LP-11. Not datasheet-documented -- see IMX296_REG_CSI_LANE_HS's
+	 * comment in imx296.c. */
+	zassert_ok(imx296_emul_get_reg(emul, REG_CSI_LANE_HS, &val));
+	zassert_equal(val, 0xf0, "CSI_LANE_HS");
+
+	/* "Register List of All-pixel scan mode" (page 49): BLKLEVEL, 12-bit LE, 0x03C. */
+	zassert_ok(imx296_emul_get_reg(emul, REG_BLKLEVEL_LSB, &val));
+	zassert_equal(val, 0x3c, "BLKLEVEL LSB");
+	zassert_ok(imx296_emul_get_reg(emul, REG_BLKLEVEL_MSB, &val));
+	zassert_equal(val, 0x00, "BLKLEVEL MSB");
 }
 
 /* Find the FIRST recorded write to @p reg since boot (or the last imx296_emul_clear_log()) --
@@ -170,6 +189,20 @@ ZTEST(imx296, test_shs_gain_reverse_defaults_written_at_init)
 	zassert_equal(val, 0x00, "REVERSE default (no flip)");
 }
 
+ZTEST(imx296, test_roi_mode_explicitly_disabled_at_init)
+{
+	/* FID0_ROIH1ON/FID0_ROIV1ON's POR default is already 0 (disabled), so a final-value read
+	 * of REG_ROI_ENABLE cannot tell "imx296_init() wrote 0" from "imx296_init() never touched
+	 * this register" -- checked via the write LOG instead (see imx296_test_first_write()
+	 * above), which only has an entry if imx296_init() actually issued the write. */
+	const struct emul *emul = imx296_emul();
+	uint8_t            val;
+
+	zassert_true(imx296_test_first_write(emul, REG_ROI_ENABLE, &val),
+	             "imx296_init() did not write REG_ROI_ENABLE to force All-pixel scan mode");
+	zassert_equal(val, 0x00, "ROI_ENABLE (All-pixel scan mode, ROI disabled)");
+}
+
 ZTEST(imx296, test_init_quiesce_order)
 {
 	/* "Slave Mode and Master Mode" (page 55) + "Standby mode" (page 54): imx296_init() must
@@ -207,13 +240,14 @@ ZTEST(imx296, test_init_quiesce_order)
 	              "registers)");
 	zassert_equal(w.value, STANDBY_STANDBY, "write 3: STANDBY should be re-armed");
 
-	/* Every VMAX/HMAX/INCKSEL/CSI_TIMING write must come AFTER the re-arm at index 3 --
-	 * writing an "S" register while standby is still cancelled would not be what the
-	 * datasheet's "S" (set during standby) annotation documents. */
+	/* Every VMAX/HMAX/INCKSEL/CSI_TIMING/CSI_LANE_HS/BLKLEVEL/ROI_ENABLE write must come AFTER
+	 * the re-arm at index 3 -- writing an "S" register while standby is still cancelled would
+	 * not be what the datasheet's "S" (set during standby) annotation documents. */
 	for (size_t i = 0; i < imx296_emul_log_count(emul); i++) {
 		zassert_ok(imx296_emul_log_get(emul, i, &w));
 		if (w.reg == REG_VMAX_LSB || w.reg == REG_HMAX_LSB || w.reg == REG_INCKSEL0 ||
-		    w.reg == REG_CSI_TIMING) {
+		    w.reg == REG_CSI_TIMING || w.reg == REG_CSI_LANE_HS || w.reg == REG_BLKLEVEL_LSB ||
+		    w.reg == REG_ROI_ENABLE) {
 			zassert_true(i > 3,
 			             "write %zu (reg 0x%04x) is an 'S' register but landed before "
 			             "the standby re-arm at index 3",

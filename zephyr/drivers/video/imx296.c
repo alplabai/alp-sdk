@@ -24,13 +24,17 @@
  * SENSOR_INFO reads 0x4A00, the colour-IMX296LQR signature this driver
  * expects). On a later bench pass, on the same silicon, the sensor also
  * streams -- the CSI-2 host's frame counter advances once XMSTA starts
- * master-mode free-run. No frame has been captured yet: the Alif IPI emits
- * no line. Whether the clock-lane LP-11 workaround below
- * (`no-lp11-clock-lane-park`, see zephyr/drivers/mipi_dphy/dphy_dw.c) is
- * what let streaming start, versus some other factor, is NOT independently
- * isolated on this silicon -- treat every register value below the
- * SENSOR_INFO check, and the capture path end to end, as unproven past
- * "the frame counter moves".
+ * master-mode free-run. A further bench pass isolated the data lane
+ * specifically: WITHOUT IMX296_REG_CSI_LANE_HS (0x3005 = 0xF0, see that
+ * macro's comment above) the data lane never leaves LP-11 at all -- no HS
+ * output whatsoever; WITH it written (bench runs #263/#264, a diagnostic
+ * test-image mode), HS data does arrive at the CSI-2 host. Even so, the Alif
+ * IPI still emits no line with that HS data flowing -- so either the
+ * sensor's frame/line framing or timing is wrong (this driver writes almost
+ * none of the ~50 registers Linux's imx296.c programs at stream start,
+ * 0x3005 being the first of those), or a separate IPI-side issue exists.
+ * Treat every register value below the SENSOR_INFO check, and the capture
+ * path end to end, as unproven past "HS data arrives at the host".
  *
  * LANE-PARK / D-PHY BEHAVIOUR: unlike OV5647 (issue #2248,
  * ov5647_lane_park()), this datasheet documents no register that forces the
@@ -146,6 +150,57 @@ LOG_MODULE_REGISTER(imx296, CONFIG_VIDEO_LOG_LEVEL);
  * rather than inventing a name for it.
  */
 #define IMX296_REG_CSI_TIMING IMX296_REG8(0x418C)
+
+/*
+ * BENCH-DERIVED, NOT DATASHEET-DOCUMENTED (issue #2287, E1M-AEN803
+ * 2026W36-0001, colour IMX296LQR-C module): Chip ID = 02h's own register map
+ * (page 34) documents 0x3000 (STANDBY) then jumps straight to 0x3008
+ * (REGHOLD) -- 0x3001-0x3007, including this byte, fall in the "please
+ * refer to the other register map file for the register that has not been
+ * described" gap, the same category as SENSOR_INFO (0x3148) above. The
+ * datasheet says nothing about this address's bits, name or reset value.
+ * On the bench: with this byte left at its POR value the CSI-2 data lane
+ * never leaves LP-11 (no HS output on the data lane at all, confirmed with
+ * a J-Link CSI-2 D-PHY probe); writing 0xF0 here (a diagnostic-image test
+ * run, #263/#264 in the issue's bench log) is what makes HS data start
+ * arriving. Written unconditionally in imx296_init() below on that basis --
+ * a silicon fact, not a documented register write.
+ */
+#define IMX296_REG_CSI_LANE_HS IMX296_REG8(0x3005)
+#define IMX296_CSI_LANE_HS_VAL 0xF0u
+
+/*
+ * Register Map, Chip ID = 04h (page 41) + "Register List of All-pixel scan
+ * mode" (page 49): BLKLEVEL[11:0] at 0x3254 (LSB), reflect "V". Black-level
+ * offset; the datasheet marks its own POR default (0x03C) "Recommended
+ * value" and lists it explicitly in the All-pixel-scan-mode register table
+ * alongside VMAX/HMAX/INCKSEL/CSI_TIMING. Written here (even though it
+ * equals the POR default) for the same warm-boot-state reason SHS/GAIN/
+ * REVERSE are written explicitly below: a module that stayed powered across
+ * a prior session could carry a different BLKLEVEL than POR.
+ */
+#define IMX296_REG_BLKLEVEL IMX296_REG16(0x3254)
+#define IMX296_BLKLEVEL     0x03Cu
+
+/*
+ * Register Map, Chip ID = 05h (page 42) + "Register List of ROI mode" /
+ * "Restrictions on ROI mode" (pages 51-52): FID0_ROIH1ON bit0, FID0_ROIV1ON
+ * bit1 at CCI address 0x3300, POR default 0 (both disabled) -- this is the
+ * datasheet's actual all-pixel-scan-mode-vs-windowed-ROI-mode switch ("ROI
+ * mode" is entered by ENABLING these bits and programming FID0_ROIPH1/
+ * ROIPV1/ROIWH1/ROIWV1; "Please set All-pixel scan mode to the settings
+ * other than the following" for everything else). This datasheet does not
+ * separately document a 0x300D "window mode" register -- 0x300C/0x300D also
+ * fall in the same undocumented gap as IMX296_REG_CSI_LANE_HS above (Chip ID
+ * = 02h's map jumps 0x300B -> 0x300E, page 34-35). Writing this register's
+ * disable value explicitly (rather than assuming POR) is what keeps a
+ * previous ROI-mode session's cropping window from leaking into this
+ * driver's fixed All-pixel-scan-mode output on a warm SoC reset, since the
+ * sensor module stays powered across one (see the STANDBY comment on
+ * imx296_init() below).
+ */
+#define IMX296_REG_ROI_ENABLE     IMX296_REG8(0x3300)
+#define IMX296_ROI_ENABLE_DISABLE 0x00u
 
 /*
  * Register Map, Chip ID = 02h (page 35) + "Horizontal / Vertical Normal
@@ -720,6 +775,26 @@ static int imx296_init(const struct device *dev)
 	}
 
 	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_CSI_TIMING, inck->csi_timing);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/* See IMX296_REG_CSI_LANE_HS's own comment above: bench-derived, no datasheet coverage. */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_CSI_LANE_HS, IMX296_CSI_LANE_HS_VAL);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_BLKLEVEL, IMX296_BLKLEVEL);
+	if (ret < 0) {
+		return ret;
+	}
+
+	/*
+	 * Force All-pixel scan mode (not ROI mode) regardless of what a prior session left this
+	 * register -- see IMX296_REG_ROI_ENABLE's own comment above.
+	 */
+	ret = video_write_cci_reg(&cfg->i2c, IMX296_REG_ROI_ENABLE, IMX296_ROI_ENABLE_DISABLE);
 	if (ret < 0) {
 		return ret;
 	}

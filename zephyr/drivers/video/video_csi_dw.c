@@ -165,8 +165,12 @@ static void csi2_dw_irq_off(uintptr_t regs)
 	sys_write32(0, regs + CSI_INT_MSK_ECC_CORRECT);
 }
 
-static void csi2_dw_irq_on(uintptr_t regs)
+static void csi2_dw_irq_on(uintptr_t regs, struct csi2_dw_data *data)
 {
+	/* Alp Lab AB: fresh unmask, fresh IPI-fatal count -- see CSI2_DW_IPI_FATAL_LOG_LIMIT. */
+	data->ipi_fatal_count = 0;
+
+
 	/*
 	 * Review round (post-3511cd180): the CSI_INT_ST_* registers are
 	 * read-to-clear (csi2_dw_irq() reads each one to decode which event
@@ -207,6 +211,7 @@ static void csi2_dw_irq_on(uintptr_t regs)
 
 static void csi2_dw_irq(const struct device *dev)
 {
+	struct csi2_dw_data *data = dev->data;
 	uintptr_t regs = DEVICE_MMIO_GET(dev);
 	uint32_t global_st = 0;
 	uint32_t event_st = 0;
@@ -215,8 +220,26 @@ static void csi2_dw_irq(const struct device *dev)
 	global_st = sys_read32(regs + CSI_INT_ST_MAIN);
 	if (global_st & CSI_INT_ST_MAIN_IPI_FATAL) {
 		event_st = sys_read32(regs + CSI_INT_ST_IPI_FATAL);
-		LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
-		reset_ipi = true;
+		data->ipi_fatal_count++;
+
+		/*
+		 * Alp Lab AB: a sensor stuck emitting bad IPI framing fires this once per line --
+		 * uncapped LOG_ERR + IPI soft-reset floods the log and storms the reset line (see
+		 * CSI2_DW_IPI_FATAL_LOG_LIMIT). Log + reset only the first
+		 * CSI2_DW_IPI_FATAL_LOG_LIMIT occurrences, then mask the source and log once that
+		 * it went quiet. The count itself is NOT capped, so a later diagnostic dump can
+		 * still report the true total; it resets on the next csi2_dw_irq_on() (fresh
+		 * unmask, e.g. a subsequent stream (re)start).
+		 */
+		if (data->ipi_fatal_count <= CSI2_DW_IPI_FATAL_LOG_LIMIT) {
+			LOG_ERR("Fatal Interrupt at IPI interface. status - 0x%x", event_st);
+			reset_ipi = true;
+		}
+		if (data->ipi_fatal_count == CSI2_DW_IPI_FATAL_LOG_LIMIT) {
+			LOG_ERR("IPI fatal interrupts masked after %d",
+				CSI2_DW_IPI_FATAL_LOG_LIMIT);
+			sys_write32(0, regs + CSI_INT_MSK_IPI_FATAL);
+		}
 	}
 	if (global_st & CSI_INT_ST_MAIN_LINE) {
 		event_st = sys_read32(regs + CSI_INT_ST_LINE);
@@ -382,7 +405,7 @@ static int csi2_dw_config_host(const struct device *dev)
 	sys_write32(phy->num_lanes - 1, regs + CSI_N_LANES);
 
 	/* Enable Interrupts. */
-	csi2_dw_irq_on(regs);
+	csi2_dw_irq_on(regs, data);
 
 	/*
 	 * Configuring IPI.

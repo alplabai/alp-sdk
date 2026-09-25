@@ -57,6 +57,16 @@
 #define CSI_INT_ST_IPI_FATAL            0x140 /* IPI ifx INT-Status */
 #define CSI_INT_MSK_IPI_FATAL           0x144 /* IPI ifx INT-Mask */
 #define CSI_INT_FORCE_IPI_FATAL         0x148 /* IPI ifx INT-Force */
+
+/*
+ * Alp Lab AB: a sensor stuck emitting bad IPI framing can fire
+ * CSI_INT_ST_MAIN_IPI_FATAL once per line -- csi2_dw_irq() LOG_ERRs and
+ * IPI-soft-resets on every one of those uncapped, which floods the log and
+ * storms the reset line. Cap the LOG_ERR + reset to the first this many
+ * occurrences, then mask CSI_INT_MSK_IPI_FATAL so the source goes quiet
+ * (see csi2_dw_data.ipi_fatal_count).
+ */
+#define CSI2_DW_IPI_FATAL_LOG_LIMIT 16
 #define CSI_INT_ST_BNDRY_FRAME_FATAL    0x280 /* Frame Boundary ERR INT-Status */
 #define CSI_INT_MSK_BNDRY_FRAME_FATAL   0x284 /* Frame Boundary ERR INT-Mask */
 #define CSI_INT_FORCE_BNDRY_FRAME_FATAL 0x288 /* Frame Boundary ERR INT-Force */
@@ -366,6 +376,16 @@ struct csi2_dw_data {
 
 	const struct cpi_csi2_mode_settings *csi_cpi_settings[CSI2_NUM_SENSORS];
 	struct dphy_csi2_settings phy[CSI2_NUM_SENSORS];
+
+	/*
+	 * Alp Lab AB: count of CSI_INT_ST_MAIN_IPI_FATAL events seen by csi2_dw_irq() since the
+	 * interrupt was last unmasked (csi2_dw_irq_on()). A misprogrammed/misbehaving sensor can
+	 * fire this once per line (a per-fatal LOG_ERR + IPI soft-reset storm) -- csi2_dw_irq()
+	 * stops logging and masks CSI_INT_MSK_IPI_FATAL once this reaches
+	 * CSI2_DW_IPI_FATAL_LOG_LIMIT. Kept (not reset on mask) so the eventual "masked" line and
+	 * any future diagnostics can report the true total.
+	 */
+	uint32_t ipi_fatal_count;
 };
 
 #endif /* _CSI_DW_H_ */
