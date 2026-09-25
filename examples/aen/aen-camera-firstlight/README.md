@@ -78,7 +78,7 @@ RESULT: capture ok
 
 `-DAEN_CAMERA_TRIGGER=ON` (issue #2287) puts IMX296 in its datasheet Fast
 Trigger Mode instead of free-run, and pulses a GPIO (Alif P5_1 / Arduino D4 /
-`EVK_PIN_CK_DIO4`, see `boards/trigger_gpio.overlay`) that must be wired to
+`EVK_PIN_CK_DIO4`, see `trigger_gpio.overlay`) that must be wired to
 the **sensor module's own** J3 Trig+ header (on the INNO-MAKER module itself,
 not the E1M-EVK carrier) to capture, timestamp (pulse time vs. frame arrival
 time) and content-check `TRIGGER_FRAME_COUNT` (3) frames instead of one
@@ -91,7 +91,7 @@ trigger code path too. **Not benched by this change** -- see
 > polarity is unverified: the INNO-MAKER module's J3 Trig+/Trig- input
 > circuit (opto-isolated? logic-level? which voltage? current-limited on the
 > E1M side?) has not been checked against that module's own documentation.
-> `boards/trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
+> `trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
 > `imx296-trigger-gpios` is a placeholder, not a confirmed fact, and is the
 > one place to flip if the module's documentation (or a bench measurement)
 > says the polarity is inverted. Confirm the module's own J3 documentation

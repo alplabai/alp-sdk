@@ -60,12 +60,12 @@
 #if defined(AEN_CAMERA_TRIGGER) && defined(CONFIG_VIDEO_IMX296)
 /*
  * Opt-in bench mode (issue #2287, `-DAEN_CAMERA_TRIGGER=ON`, see
- * CMakeLists.txt + boards/trigger_gpio.overlay): drives IMX296's fast
+ * CMakeLists.txt + trigger_gpio.overlay): drives IMX296's fast
  * trigger mode and pulses the sensor module's own J3 Trig+ line (on the
  * INNO-MAKER module itself, not the E1M-EVK carrier) instead of free-run
  * capture. UNVERIFIED ON SILICON -- not benched by this change; issue #2287
  * benches it later. **Electrical polarity is UNVERIFIED too -- see
- * boards/trigger_gpio.overlay's header comment. Do not wire J3 until that
+ * trigger_gpio.overlay's header comment. Do not wire J3 until that
  * module's input circuit is confirmed from its own documentation.**
  *
  * This is the one place in this file that steps outside the portable
@@ -94,7 +94,7 @@
 #define TRIGGER_CID           (VIDEO_CID_PRIVATE_BASE + 0x01)
 #define TRIGGER_MODE_EXTERNAL 1
 
-/* boards/trigger_gpio.overlay puts the pin + its pinctrl state on the
+/* trigger_gpio.overlay puts the pin + its pinctrl state on the
  * special `/zephyr,user` node (see that overlay's header comment for why:
  * no binding/compatible needed for edtlib to type its phandle-array
  * properties, unlike any other devicetree path). */
@@ -106,7 +106,7 @@ static const struct gpio_dt_spec trigger_gpio =
     GPIO_DT_SPEC_GET(TRIGGER_GPIO_NODE, imx296_trigger_gpios);
 
 /* Defines the pin control config for TRIGGER_GPIO_NODE's `pinctrl-0`
- * (PIN_P5_1__GPIO, boards/trigger_gpio.overlay) -- `/zephyr,user` is not a
+ * (PIN_P5_1__GPIO, trigger_gpio.overlay) -- `/zephyr,user` is not a
  * real device with an init hook to apply it automatically, so trigger_arm()
  * applies it explicitly below; see PINCTRL_DT_DEV_CONFIG_DECLARE's own doc
  * comment in <zephyr/drivers/pinctrl.h> for this being the intended use of
@@ -117,7 +117,7 @@ PINCTRL_DT_DEFINE(TRIGGER_GPIO_NODE);
  * see imx296.c's IMX296_CID_TRIGGER_MODE comment), muxes P5_1 to GPIO
  * explicitly (not relying on its reset-default alt function), and readies
  * the XTRIG pulse line in its logical-inactive (idle) state -- see
- * boards/trigger_gpio.overlay for why GPIO_ACTIVE_HIGH/_LOW there, not a
+ * trigger_gpio.overlay for why GPIO_ACTIVE_HIGH/_LOW there, not a
  * hardcoded level here, is the single polarity flip point. */
 static int trigger_arm(void)
 {

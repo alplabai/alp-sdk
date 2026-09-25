@@ -635,14 +635,14 @@ the INNO-MAKER camera module itself, separate from both the E1M-EVK carrier
 and the 15-pin CSI FFC that connects them), routed to Arduino D4 /
 `EVK_PIN_CK_DIO4` (E1M pad M2, Alif P5_1); see
 `examples/aen/aen-camera-firstlight`'s `AEN_CAMERA_TRIGGER` CMake option and
-`boards/trigger_gpio.overlay` for the (also unbenched) bench-app wiring.
+`trigger_gpio.overlay` for the (also unbenched) bench-app wiring.
 
 **HARDWARE CAUTION, do not wire J3 yet:** the electrical polarity of this
 trigger path is unverified -- the INNO-MAKER module's J3 input circuit
 (opto-isolation? logic level? which voltage rail? current limiting on the
 E1M side?) has not been checked against that module's own documentation,
 only the Sony datasheet's SENSOR-side XTRIG behaviour is cited anywhere in
-this change. `boards/trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
+this change. `trigger_gpio.overlay`'s `GPIO_ACTIVE_HIGH` flag on
 `imx296-trigger-gpios` is a placeholder pending that check, and is the
 single point to flip if the real polarity turns out to be inverted.
 
@@ -723,7 +723,7 @@ the bench numbers and what remains unverified (ISP-Pico, AE, fast-trigger).
 
 The example also has an opt-in `-DAEN_CAMERA_TRIGGER=ON` CMake build mode
 (issue #2287): arms `IMX296_CID_TRIGGER_MODE`, then pulses a GPIO
-(`boards/trigger_gpio.overlay`, Alif P5_1 / EVK_PIN_CK_DIO4) to capture and
+(`trigger_gpio.overlay`, Alif P5_1 / EVK_PIN_CK_DIO4) to capture and
 timestamp a few frames off the sensor module's J3 Trig+ header, instead of one
 free-run capture. Compiles clean with 0 warnings against both variants; this
 build mode has not been benched -- see the IMX296 driver section above.
