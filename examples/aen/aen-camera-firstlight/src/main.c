@@ -279,8 +279,8 @@ static bool trigger_capture_loop(alp_camera_t *cam)
  * datasheet's 1440x1080 "recording" area plus the 8-column/4-row colour-processing margin on
  * every side, which is sent, not cropped. Unpacked that is 1456 x 1088 x 2 = 3,168,256 bytes, so
  * this example's Kconfig drops the backend to ONE frame buffer and grows the SRAM0 pool to fit
- * it. Bench run 229 confirmed this sensor's I2C identity only (see docs/camera-shields.md) --
- * CSI-2 streaming through this app has not run on real silicon yet. */
+ * it. Bench status (single-frame raw capture through this app, issue #2287) is in
+ * docs/camera-shields.md. */
 #define CAM_FORMAT          ALP_PIXFMT_RAW10
 #define CAM_WIDTH           1456
 #define CAM_HEIGHT          1088
