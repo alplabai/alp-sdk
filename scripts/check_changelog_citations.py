@@ -241,8 +241,19 @@ REPO = _repo_root()
 FRAGMENT_DIR = REPO / "changelog.d"
 
 #: `path/to/file.ext:123` or `path/to/file.ext:123-456`, inside backticks.
+#:
+#: An extension missing from this set is not "not checked yet" -- it is a
+#: citation this gate CANNOT SEE, which is worse than an un-anchored one
+#: because it does not even show up in the "N range-checked only" tail.
+#: `kconfig` is here because it was exactly that: a changelog fragment cited a
+#: `.kconfig` line as proof the tree "already documented MRAM-only", the cited
+#: text said something weaker, and the gate reported neither -- the citation
+#: matched no pattern at all. Add the extension when you add the first
+#: citation that uses it. (changelog.d/ fragments are deleted once assembled
+#: into CHANGELOG.md, so this comment deliberately doesn't pin a fragment
+#: number/line that won't outlive the release.)
 _CITATION = re.compile(
-    r"`(?P<path>\.?[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|conf))"
+    r"`(?P<path>\.?[A-Za-z0-9_][A-Za-z0-9_/.+-]*\.(?:c|h|cpp|hpp|py|sh|ya?ml|md|json|bb|bbappend|cmake|txt|dts|dtsi|overlay|kconfig|conf))"
     r":(?P<start>\d+)(?:-(?P<end>\d+))?`"
 )
 

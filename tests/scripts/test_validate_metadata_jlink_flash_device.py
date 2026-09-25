@@ -98,6 +98,23 @@ def test_ignores_non_alif_ensemble_socs(tmp_path, monkeypatch):
     assert not failures
 
 
+def test_non_object_variant_entry_does_not_crash_the_gate(tmp_path, monkeypatch):
+    """`variants[]` entries are schema-typed objects, but the schema pass
+    that would reject a non-object entry runs separately and is not
+    guaranteed to have run first. A bare string used to reach a bare
+    `v.get("debug")` and raise `AttributeError` here, hiding the schema FAIL
+    line that already explains the real problem. Filtered to dicts, this doc
+    must return cleanly -- no real variant survives the filter, so there is
+    nothing left to check for the key."""
+    vm = _load_vm(tmp_path, monkeypatch)
+    p = _write_fixture(
+        tmp_path, "non-object-variant",
+        _ALIF_ENSEMBLE_HEADER + '"variants": [ "not-a-dict" ] }',
+    )
+    failures = vm._check_soc_jlink_flash_device_declared([p])
+    assert not failures  # must not raise
+
+
 def test_real_alif_ensemble_socs_resolve_clean():
     """The eight real shipped Alif Ensemble variants this rule actually
     guards -- must stay clean against the live checkout, not just a

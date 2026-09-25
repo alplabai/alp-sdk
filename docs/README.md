@@ -76,7 +76,7 @@ into the topic-specific docs.
   modes.
 - [glossary.md](glossary.md) — terms.
 - [adr/README.md](adr/README.md) — Architecture Decision Records
-  index (33 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
+  index (34 ADRs; recount with `ls docs/adr/[0-9]*.md | wc -l`).
 
 ## Per-SoM bring-up
 
