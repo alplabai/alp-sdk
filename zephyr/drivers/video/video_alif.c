@@ -976,6 +976,17 @@ static int alif_cam_stream_start(const struct device *dev)
 
 	data->is_streaming = true;
 	data->starved = false;
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 303, blocker): `cpi_paused` used to be
+	 * cleared ONLY in alif_cam_cpi_resume() -- a REAL stop/start cycle (pause -> user stop ->
+	 * user start) never went through that function, so a stale `cpi_paused = true` from before
+	 * the stop survived into this fresh start. alif_cam_work_helper()'s own paused check (its
+	 * non-AXI branch, added the same reviewer round) then wrongly skipped re-arming the CPI on
+	 * this fresh stream's very first STOP interrupt -- one frame captured, then a permanent
+	 * stall (nothing else ever calls hw_cam_start_video_capture() again on this path). Cleared
+	 * here too so a genuine fresh start always starts with a clean slate.
+	 */
+	data->cpi_paused = false;
 
 	k_mutex_unlock(&data->lock);
 
@@ -1044,6 +1055,14 @@ static int alif_cam_stream_stop(const struct device *dev)
 
 	data->is_streaming = false;
 	data->starved = false;
+	/* #2287 Stage B unit 3, reviewer fix (bench run 303, blocker): same reasoning as
+	 * alif_cam_stream_start()'s own clear -- a real stop tears the endpoint + sensor down for
+	 * real regardless of any in-flight CPI-only pause (see the comment above, "stop the
+	 * endpoint even while starved"), so any pause this stop is unwinding is now moot; clearing
+	 * here (not just in alif_cam_cpi_resume()) stops a stale `cpi_paused = true` from surviving
+	 * into whatever stream starts next.
+	 */
+	data->cpi_paused = false;
 
 	k_mutex_unlock(&data->lock);
 

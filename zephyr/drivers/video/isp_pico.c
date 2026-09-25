@@ -646,6 +646,27 @@ int isp_set_fmt(const struct device *dev,
 		return -EINVAL;
 	}
 
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 303, major): a format change while
+	 * data->controller_cpi_paused has no dirty-flag equivalent to wb_dirty/ae_dirty (a real
+	 * format change here writes port->port_fmt/channel->output_fmt AND config->controller's own
+	 * format IMMEDIATELY, synchronously -- there is nothing to defer or re-check at the next
+	 * isp_stream_start()) -- Fix D's light resume path (isp_stream_start()) has no way to know
+	 * a format changed since the pause and would resume with the OLD isp_vsi_update_cfg() state
+	 * still in the VSI library. Rejecting outright (-EBUSY) is the safer of the two options the
+	 * review round raised (vs. silently clearing controller_cpi_paused here, which would let a
+	 * LATER isp_stream_start() reach video_stream_start(config->controller, ...) against a
+	 * controller alif_cam_stream_start() still sees as is_streaming=true -- since only a REAL
+	 * stop, not a forgotten flag, actually unwinds that -- -EBUSY there too, just deferred and
+	 * harder to diagnose): a caller changing the format while paused gets an explicit, correct
+	 * error immediately, and can stop()/start() first if a fresh format really is needed.
+	 */
+	if (data->controller_cpi_paused) {
+		LOG_ERR("Cannot set format while resuming from a CPI-only starvation pause -- "
+			"stop the stream first!");
+		return -EBUSY;
+	}
+
 	switch (fmt->type) {
 	case VIDEO_BUF_TYPE_INPUT:
 		if (!memcmp(fmt, &port->port_fmt, sizeof(*fmt))) {
@@ -999,12 +1020,13 @@ static void isp_apply_ae_sensor_gate(const struct device *dev)
 	int rc;
 
 	/*
-	 * #2287 Stage B unit 3 (bench runs 299/300): -ENOTSUP here (IMX296 on
-	 * E1M-AEN803) is expected noise, not a real failure -- IMX296 has no
-	 * separate sensor-side auto-exposure/auto-gain MODE to gate; its own
-	 * "AE" is exactly the SHS/GAIN registers this driver's writeback
-	 * (isp_api_wrapper.c) already writes directly, so imx296.c registers
-	 * neither VIDEO_CID_EXPOSURE_AUTO nor VIDEO_CID_AUTOGAIN at all and
+	 * #2287 Stage B unit 3 (bench runs 299/300, wording fixed bench run 303): -ENOTSUP here
+	 * (IMX296 on E1M-AEN803) is expected noise, not a real failure -- IMX296 has no separate
+	 * sensor-side auto-exposure/auto-gain MODE to gate; its exposure/gain are set through
+	 * VIDEO_CID_EXPOSURE/VIDEO_CID_ANALOGUE_GAIN, which this driver's writeback
+	 * (isp_api_wrapper.c) already writes -- and which imx296_set_ctrl() (imx296.c) in turn
+	 * writes as SHS/GAIN, its own inversely-related hardware registers, not the same units --
+	 * so imx296.c registers neither VIDEO_CID_EXPOSURE_AUTO nor VIDEO_CID_AUTOGAIN at all and
 	 * video_find_ctrl() (drivers/video/video_ctrls.c) returns -ENOTSUP
 	 * for a control ID no device in the chain registers. Any OTHER
 	 * error (a sensor that DOES claim the control but rejects this
@@ -1729,7 +1751,17 @@ static int isp_stream_start(const struct device *dev)
 	 * video_stream_start() or any restart after a REAL video_stream_stop()) is untouched --
 	 * falls through to the existing full sequence below.
 	 */
-	if (data->controller_cpi_paused) {
+	/*
+	 * #2287 Stage B unit 3, reviewer fix (bench run 303, major): the light path above is only
+	 * safe if there is nothing else this restart would otherwise have applied. isp_set_ctrl()
+	 * (its own comment) stores an AWB/AE ctrl change in wb_dirty/ae_dirty and documents that
+	 * ONLY the next isp_stream_start() actually pushes it (isp_apply_wb()/isp_apply_ae(),
+	 * below, in the full path) -- the light path skips both calls entirely, so a ctrl change
+	 * made while paused would be silently dropped forever (the dirty flag never gets cleared,
+	 * but it also never gets APPLIED, since no later isp_stream_start() would go through the
+	 * full path either once controller_cpi_paused was already cleared by a light resume).
+	 */
+	if (data->controller_cpi_paused && !data->ctrls.wb_dirty && !data->ctrls.ae_dirty) {
 		ret = isp_attach_buffer_to_hw(dev, vbuf);
 		if (ret) {
 			LOG_ERR("Fix D resume: failed to attach buffer to hardware! ret=%d", ret);
@@ -1753,6 +1785,29 @@ static int isp_stream_start(const struct device *dev)
 		}
 
 		return 0;
+	}
+
+	if (data->controller_cpi_paused) {
+		/*
+		 * A ctrl change is pending (wb_dirty/ae_dirty) -- the light path above was skipped
+		 * on purpose. The controller is still only CPI-paused (alif_cam_stream_stop() was
+		 * never called, so its OWN is_streaming stays true) -- falling straight through to
+		 * the full sequence below would call video_stream_start(config->controller, ...) on
+		 * a controller alif_cam_stream_start() sees as ALREADY streaming, -EBUSY. Unwind the
+		 * pause into a real, clean stop first (mirrors isp_stream_stop()'s own was-paused
+		 * handling), then fall through to the full start sequence, which will then correctly
+		 * call video_stream_start() and isp_vsi_start() against a genuinely stopped stack.
+		 */
+		if (config->controller) {
+			video_stream_stop(config->controller, VIDEO_BUF_TYPE_OUTPUT);
+		}
+		ret = isp_vsi_stop(&data->init_cfg);
+		if (ret) {
+			LOG_ERR("Failed to unwind CPI-only pause before a dirty-ctrl restart! "
+				"isp_vsi_stop=%d",
+				ret);
+		}
+		data->controller_cpi_paused = false;
 	}
 
 	/* Update ISP configuration to the middleware */
