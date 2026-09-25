@@ -23,14 +23,25 @@ notes: |
   zephyr/boards/shields/raspberry_pi_global_shutter_camera/. See
   docs/camera-shields.md for the full driver/shield/control reference.
 
-  Issue #2287, bench run 229 (E1M-AEN803 2026W36-0001, csi_i2c = I2C1 @
-  0x49011000): the module answers at CCI 0x1A; STANDBY (0x3000) and XMSTA
-  (0x300A) match datasheet POR defaults; after cancelling standby, the
-  undocumented SENSOR_INFO register (0x3148/0x3149, 16-bit little-endian)
-  reads 0x4A00, the signature the driver checks for this colour LQR variant.
-  This is I2C identity verification only -- CSI-2 streaming (a captured
-  frame) has NOT run on this silicon; `verification.hil_silicon` below
-  reflects that split, not a full bring-up.
+  Issue #2287, Stage A (E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @
+  0x49011000), bench-verified: I2C identity (bench run 229 -- the module
+  answers at CCI 0x1A; STANDBY (0x3000) and XMSTA (0x300A) match datasheet
+  POR defaults; the undocumented SENSOR_INFO register, 0x3148/0x3149,
+  16-bit little-endian, reads 0x4A00, the signature the driver checks for
+  this colour LQR variant), CSI-2 streaming, and a full 1456x1088 RAW10
+  frame captured through <alp/camera.h> and correlated against a diag
+  control capture: bench run 292 (single capture, evening light, gain 0)
+  reads mean pixel value 61.19, max 108, clean close, no IPI errors, no
+  mod-4-column byte-slip pattern; 0.98 8x8-block correlation against diag
+  control run 293 (SHS=14 written directly, same light). Both runs are
+  still dim (~1 code above black); exposure/lighting tuning is a follow-up.
+
+  NOT yet bench-verified, tracked for a later stage: the ISP-Pico colour
+  path, auto-exposure, camera-mjpeg-stream-style continuous streaming, and
+  the driver's fast-trigger exposure mode (IMX296_CID_TRIGGER_MODE) --
+  compiles clean but has not run with a trigger pulse; its GPIO wiring's
+  electrical polarity is also unconfirmed against the module's own
+  documentation, so do not wire its trigger header yet.
 
 bus:              i2c
 i2c:
@@ -56,8 +67,10 @@ families:
   - aen
 
 verification:
-  hil_silicon:    partial           # I2C identity only (bench run 229) -- see notes above.
-                                     # CSI-2 streaming is unverified.
+  hil_silicon:    verified          # Stage A: I2C identity, CSI-2 streaming, and a captured
+                                     # 1456x1088 RAW10 frame (bench run 292) -- see notes above.
+                                     # ISP-Pico, AE, continuous streaming and fast-trigger mode
+                                     # are separate, later-stage surfaces and remain unverified.
   smoke_tests:    none               # no chips/ portable driver surface exists to unit-test;
                                      # the streaming driver's coverage is
                                      # tests/zephyr/video_sensors/src/imx296_test.c.

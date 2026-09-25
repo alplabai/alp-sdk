@@ -1,9 +1,11 @@
 # Raspberry-Pi-style CSI-2 camera shields
 
 Three sensors ship here: OV5647 and OV9281 are fully bench-verified; IMX296
-is bench-verified for I2C identity, and (on a later pass) the CSI-2 host
-streaming (its frame counter advances) -- no frame has been captured yet
-(see below).
+is Stage A bench-verified -- I2C identity, CSI-2 streaming, and a full
+1456x1088 RAW10 frame captured through `<alp/camera.h>` and correlated
+against a diag control capture (see below). Its ISP-Pico colour path,
+auto-exposure, continuous streaming and fast-trigger mode are not yet
+bench-verified (later stage).
 
 ## Supported camera modules
 
@@ -11,7 +13,7 @@ streaming (its frame counter advances) -- no frame has been captured yet
 |---|---|---|---|---|---|
 | InnoMaker CAM-OV9281 | OV9281 (1 Mpx global-shutter mono) | `innomaker_cam_ov9281` | MIPI CSI-2 D-PHY, 2 lanes | 640x400 GREY8 @100 fps; 1280x720 GREY8 @50 fps; 1280x800 GREY8 @~100 fps | **Bench-verified** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-21: all three modes stream live frames, each at its configured rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps); the sensor test pattern is verified in all three modes. |
 | RPi Camera Module 1 | OV5647 (5 Mpx raw Bayer) | `raspberry_pi_camera_module_1` | MIPI CSI-2 D-PHY, 2 lanes | up to 2592x1944 SBGGR8/SBGGR10P; 640x480 is a full-array subsampled+binned mode at 15 fps by default, not a crop (default format before any `set_format()` is now 640x480 SBGGR10P, not 2592x1944) | **Bench-verified (run 52, RAW10 640x480)** on an E1M-AEN803 on the E1M-EVK (J5), 2026-09-22: `PHY_FATAL` 7712 -> 0, `capture ALP_OK`, 60 frames at 15.96 fps (see the driver section below). Needed the J5 pin-11 pull-up rework -- [`docs/boards/e1m-evk.md`](boards/e1m-evk.md) -- to answer on I2C at all, and a PLL + MIPI-TX pad-drive divergence in the driver the earlier BLOCKED finding misdiagnosed as a module hardware fault. **Run 61 (2026-09-22, current)** replaced runs 56/58/60's Alif-derived 640x480/common-init mix with register values taken as hardware facts from the RPi/OmniVision reference driver (raspberrypi/linux branch rpi-6.6.y, `drivers/media/i2c/ov5647.c`): column fixed-pattern noise fell from 6-8 LSB (3.7-5.9% of signal) with the runs 56/58/60 mix to 1.0-1.5 LSB (~1.1% of signal) with the reference set, in the same dark lab at the same 0.51 s x15.5 gain exposure -- the visible vertical stripes runs 56/58/60 left in are gone; which specific register difference caused that is NOT ESTABLISHED (see the driver section). **Run 62 bench-verified the COMMITTED driver itself** (77/77 registers matched, zero CSI errors) and the maintainer confirmed a host-demosaiced render of the captured frame is the correct image (BGGR, unmirrored). **Run 62 also caught a pre-merge regression**, introduced earlier in this same unreleased PR chain by the run-61 PLL retarget and fixed before merge (never shipped): booting into the full-resolution crop had made the driver's own default 15 fps unreachable at boot, silently settling on 10 fps for every later 640x480 open too; `ov5647_init()` now boots straight into 640x480, where 15 fps is reachable. **Run 63 re-verified the committed fix** (VTS `0x0833`, `fps_x100=1501`, 77/0 register mismatches, column FPN unchanged) and its review, by mutation-testing the fix-up, found three further real behaviour bugs in this same PR (all fixed, all pre-merge, none shipped): the frame rate could still stick at a prior mode's clamped value after a LATER format change (distinct from the boot-time issue above); `ov5647_set_mode_regs()`'s whole-byte writes to `0x3820`/`0x3821` silently undid `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` on every format change; and the crop path's AEC band step reused the binned mode's line counts, capping banding-mode AEC at roughly 502 lines on a 1944-line crop (a calculation, not a bench measurement of actual under-exposure). **A round-4 review then found the fix for the first of those three had its own regression** (fixed, pre-merge, never shipped): the fix stored only the requested frame rate's denominator, silently turning a numerator-!=-1 request (e.g. the shape Zephyr's own `video frmival` shell command sends) into a different rate on the next format change; fixed by storing the whole requested `struct video_frmival`, written only after the rate is actually applied. The SAME round also replaced the crop path's byte-for-byte-copied mainline band-step values with values scaled to this driver's own (different) line time -- still BENCH-UNVERIFIED, not run on hardware -- and made `get_format()` report that `VIDEO_CID_HFLIP`/`VIDEO_CID_VFLIP` shift the Bayer colour order (no NEW register writes, but an API contract change: only the default (unflipped) SBGGR order is bench/maintainer-verified; the three flipped orders `get_format()` now reports are derived from the RPi/OmniVision reference's own flip-to-code mapping, not bench-checked on this module). **A round-5 review of that fix then found `set_format()` could not accept back what `get_format()` had just reported** (a `get_format()` -> `set_format()` round trip failed with `-ENOTSUP`, since `set_format()` still only matched the two base fourccs): fixed by mapping a flip-shifted request back to its base fourcc before validating, and reporting the flip-shifted fourcc back on success; also fixed the same round: `set_frmival()` could echo a request it never applied when no candidate rate was within reach, and the crop path's max-bands registers (`0x3a0d`/`0x3a0e`) were pinned to the 2592x1944 crop's own VTS for every crop size (see the driver section below for both). RAW10 only; RAW8 (SBGGR8) is unverified. |
-| INNO-MAKER CAM-IMX296RAW-TRIGGER | IMX296LQR-C (1.58 Mpx global-shutter colour) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, **1 lane** | 1456x1088 SRGGB10P, one fixed mode, 60.3 fps | **I2C identity bench-verified (issue #2287, bench run 229, an E1M-AEN803 2026W36-0001 on the E1M-EVK, csi_i2c = I2C1 @ 0x49011000)**: the module answers at CCI 0x1A, and after exiting standby the undocumented SENSOR_INFO register (0x3148/0x3149) reads back `0x4A00`, the signature this driver checks for the colour LQR variant. **On a later bench pass, on the same silicon**, the sensor also streams -- the CSI-2 host's frame counter advances once master-mode free-run starts, using a new per-sensor D-PHY Stop-state opt-out (`no-lp11-clock-lane-park`, see the driver section below). **No frame has been captured yet: the Alif IPI emits no line.** The Bayer order (SRGGB) remains a datasheet-derived claim, not yet confirmed against a rendered frame the way OV5647's was (run 62). |
+| INNO-MAKER CAM-IMX296RAW-TRIGGER | IMX296LQR-C (1.58 Mpx global-shutter colour) | `raspberry_pi_global_shutter_camera` | MIPI CSI-2 D-PHY, **1 lane** | 1456x1088 SRGGB10P, one fixed mode, 60.3 fps | **Stage A bench-verified (issue #2287, E1M-AEN803 2026W36-0001, E1M-EVK, csi_i2c = I2C1 @ 0x49011000)**: I2C identity (bench run 229 -- CCI 0x1A, undocumented SENSOR_INFO register 0x3148/0x3149 reads back `0x4A00`, the signature this driver checks for the colour LQR variant), CSI-2 streaming (per-sensor D-PHY Stop-state opt-out, `no-lp11-clock-lane-park`, see the driver section below), and a full 1456x1088 RAW10 frame captured through `<alp/camera.h>`: bench run 292 (single capture, evening light, gain 0) reads mean 61.19, max 108, clean close, no IPI errors, no mod-4-column byte-slip pattern, 0.98 8x8-block correlation against diag control run 293 (`SHS`=14 written directly, same light). Both runs are dim (~1 code above black); exposure/lighting tuning is a follow-up. The Bayer order (SRGGB) remains a datasheet-derived claim, not independently confirmed against a rendered colour image the way OV5647's was (run 62) -- run 292/293's correlation confirms the two capture paths agree with each other, not that SRGGB is the correct colour-plane assignment. ISP-Pico, AE, continuous streaming and fast-trigger mode are NOT yet bench-verified for this sensor (later stage). |
 E1M-AEN hw_rev r2 (2626-R2)'s camera-connector revision needs a P/N-crossing
 adapter regardless of which module is used: each differential pair's N and P
 pins are swapped -- 2↔3 (D0), 5↔6 (D1), 8↔9 (CLK); everything else —
@@ -536,10 +538,9 @@ table in the driver is independently cited to a datasheet section/table in
 the comment above it. See the file header for the retirement note and
 [ADR 0017](adr/0017-alp-sdk-over-the-vendor-sdk.md).
 
-**PARTIALLY BENCH-VERIFIED (issue #2287, bench run 229, an E1M-AEN803
-2026W36-0001 on the E1M-EVK, `csi_i2c` = I2C1 @ `0x49011000`).** What run
-229 established on real silicon (an INNO-MAKER CAM-IMX296RAW-TRIGGER
-module, the colour IMX296LQR-C variant):
+**STAGE A BENCH-VERIFIED (issue #2287, E1M-AEN803 2026W36-0001, E1M-EVK,
+`csi_i2c` = I2C1 @ `0x49011000`).** I2C identity (bench run 229, an
+INNO-MAKER CAM-IMX296RAW-TRIGGER module, the colour IMX296LQR-C variant):
 - The module answers its I2C probe at CCI address `0x1A`.
 - At reset, `STANDBY` (`0x3000`) = `0x01` and `XMSTA` (`0x300A`) = `0x01`
   -- both match the datasheet's documented POR defaults exactly.
@@ -549,27 +550,34 @@ module, the colour IMX296LQR-C variant):
   datasheet as "Chip ID = 03h") has every register in that bank replaced
   with "Please refer to the other register map file for the register that
   has not been described" -- no name, bit map or description is given
-  anywhere in the datasheet for `0x3148`/`0x3149`. The driver (added by
-  this bench pass) therefore treats the whole 16-bit value as an opaque
-  identity signature rather than a documented, bit-decoded chip-ID
-  register, and gates `imx296_init()` on it reading back exactly `0x4A00`
-  (`IMX296_SENSOR_INFO_LQR_COLOUR`) -- see the register's comment in
-  `imx296.c` for why the individual "model"/"mono" bit positions are NOT
-  claimed: 0x4A00 is the only silicon sample this driver has ever seen, and
-  a second bench pass against a mono IMX296LLR module would be needed to
-  isolate which bit(s) actually vary between the two variants.
+  anywhere in the datasheet for `0x3148`/`0x3149`. The driver treats the
+  whole 16-bit value as an opaque identity signature rather than a
+  documented, bit-decoded chip-ID register, and gates `imx296_init()` on it
+  reading back exactly `0x4A00` (`IMX296_SENSOR_INFO_LQR_COLOUR`) -- see
+  the register's comment in `imx296.c` for why the individual "model"/
+  "mono" bit positions are NOT claimed: 0x4A00 is the only silicon sample
+  this driver has ever seen, and a second bench pass against a mono
+  IMX296LLR module would be needed to isolate which bit(s) actually vary
+  between the two variants.
 - The module's on-board EEPROM (address `0x50`) ACKs but reads back blank
   (`0xFF`). A second responder at `0x37` also ACKs and is unidentified --
   neither is used by this driver.
 
-**What run 229 did NOT establish.** The CSI-2 streaming path -- programming
-`VMAX`/`HMAX`/`INCKSEL0..3`/the CSI-timing byte, cancelling standby into
-master-mode free-run, and a D-PHY lock/captured frame -- had not run on
-this silicon as of run 229.
+CSI-2 streaming and capture (later bench passes, same silicon): the sensor
+streams once `XMSTA` starts master-mode free-run, and the DW CSI-2 host
+captures full 1456x1088 frames -- see below for the D-PHY, data-lane and
+IPI-timing work that took the pipeline from "no IPI line at all" to a
+captured frame, and the buffer-starvation/init-period/SHS-init-write fixes
+that took a captured-but-corrupted/flat-black frame to a real one. **Bench
+run 292** (single capture, evening light, gain 0) is the current
+bench-of-record: mean pixel value 61.19, max 108, a clean close with no IPI
+errors in the console and no mod-4-column RAW10 byte-phase-slip pattern;
+its 8x8-block correlation against diag control run 293 (`SHS`=14 written
+directly, same light) is 0.98. Both runs are still dim -- about 1 code
+above black (60) under this bench's evening light -- confirming the
+register writes and capture pipeline now agree and produce a real (if
+faint) image, not yet a well-exposed one.
 
-**On a later bench pass, on the same silicon:** the sensor streams -- the
-CSI-2 host's frame counter advances once `XMSTA` starts master-mode
-free-run. **No frame has been captured yet: the Alif IPI emits no line.**
 This is why the D-PHY opt-out below exists in the first place: unlike
 OV5647 (issue #2248, `ov5647_lane_park()`), this datasheet documents no
 register that forces the CSI-2 CLOCK lane to Stop-state (LP-11) short of
@@ -589,16 +597,13 @@ every other, including OV5647 -- that fatality is what caught OV5647's own
 silicon defect (#2248) and must not be weakened globally to accommodate
 one sensor.
 
-Every register value in `imx296.c` below the `SENSOR_INFO` check remains
-otherwise paper-correct-from-datasheet only. Whether the opt-out above is
-what let streaming start, versus some other factor, is NOT independently
-isolated on this silicon. In particular the advertised Bayer order
-(`SRGGB10P`, derived from the datasheet's "Drive Timing Chart for Serial
-Output in All-pixel Scan Mode", page 50 -- see the driver's format-table
-comment) has **not** been confirmed against a captured/demosaiced frame the
-way OV5647's was (run 62 above); treat it, and the capture path end to
-end, as a claim, not a bench fact, until a frame is actually captured and
-rendered.
+The advertised Bayer order (`SRGGB10P`, derived from the datasheet's "Drive
+Timing Chart for Serial Output in All-pixel Scan Mode", page 50 -- see the
+driver's format-table comment) is confirmed to the extent that run 292's
+captured frame correlates 0.98 with a diag control capture using the same
+assumed order; it has **not** been independently confirmed against a
+rendered colour image the way OV5647's was (run 62 above) -- the ISP-Pico
+colour path (which would demosaic and render it) is a later-stage item.
 
 Mode: one, fixed -- `1456x1088` `SRGGB10P` (RAW10), MIPI CSI-2 D-PHY,
 **1 data lane** (the sibling OV5647/OV9281 shields are both 2-lane parts),
@@ -699,10 +704,10 @@ the deferred-write contract "Mode Transitions ... must be done via sensor
 standby" requires), setting the ctrl while already streaming is rejected
 `-EBUSY`, fast-trigger mode's `TRIGEN`/`LOWLAGTRG` values land on that next
 start, and switching back to free-run and restarting restores both registers
-to 0. Since this driver's CSI-2 streaming is BENCH-UNVERIFIED (see
-the driver section above), this test suite is the only executable proof its
-register-level logic behaves as written; it does not substitute for a real
-capture.
+to 0. Free-run CSI-2 streaming and capture ARE bench-verified (see the driver
+section above); fast-trigger mode itself is not -- this test suite is the
+only executable proof its register-level logic behaves as written; it does
+not substitute for a real trigger-mode capture.
 
 ## First-light example
 
@@ -710,15 +715,15 @@ capture.
 `<alp/camera.h>` API and captures one frame with a timeout, on the
 E1M-EVK's `e1m_evk_rpi_csi` carrier connector shield. See that example's
 README for what each printed line means and the expected result per module
--- the OV9281 and OV5647 paths are bench-verified (see their driver
-sections above); the IMX296 `#elif` (`raspberry_pi_global_shutter_camera`
-shield) builds, links, and (on a later bench pass) streams on real silicon,
-but has not captured a frame -- see the IMX296 driver section above for
-what has and has not run.
+-- the OV9281, OV5647 and IMX296 (free-run) paths are all bench-verified
+(see their driver sections above); the IMX296 `#elif`
+(`raspberry_pi_global_shutter_camera` shield) captures a real frame off
+real silicon in this build mode -- see the IMX296 driver section above for
+the bench numbers and what remains unverified (ISP-Pico, AE, fast-trigger).
 
 The example also has an opt-in `-DAEN_CAMERA_TRIGGER=ON` CMake build mode
 (issue #2287): arms `IMX296_CID_TRIGGER_MODE`, then pulses a GPIO
 (`boards/trigger_gpio.overlay`, Alif P5_1 / EVK_PIN_CK_DIO4) to capture and
 timestamp a few frames off the sensor module's J3 Trig+ header, instead of one
-free-run capture. Compiles clean with 0 warnings against both variants; it
-has not been benched -- see the IMX296 driver section above.
+free-run capture. Compiles clean with 0 warnings against both variants; this
+build mode has not been benched -- see the IMX296 driver section above.

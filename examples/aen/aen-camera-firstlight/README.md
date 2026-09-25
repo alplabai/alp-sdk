@@ -9,9 +9,11 @@ bench-verified**: OV9281 (2026-09-21, an E1M-AEN803 on the E1M-EVK: real
 GREY8 frames land in memory in all three modes -- 640x400, 1280x720,
 1280x800 -- each at its configured frame rate, with the sensor test pattern
 also verified in all three) and OV5647 (2026-09-22, an E1M-AEN803 on the
-E1M-EVK, issue #2248, RAW10 640x480). **IMX296 is bench-verified for I2C
-identity only** (issue #2287, bench run 229) -- this app's IMX296 path
-builds and links but has not captured a frame on real silicon yet. See
+E1M-EVK, issue #2248, RAW10 640x480). **IMX296 is Stage A bench-verified**
+(issue #2287) -- I2C identity (bench run 229), CSI-2 streaming, and a real
+1456x1088 RAW10 frame captured through this app (bench run 292; 0.98
+correlation against a diag control capture). ISP-Pico, AE, continuous
+streaming and fast-trigger mode are not yet bench-verified. See
 `docs/boards/e1m-evk.md`'s Camera section and `docs/camera-shields.md`.
 
 **This SoM/EVK combination needs a P/N-crossing adapter on the camera
@@ -117,7 +119,7 @@ failure modes before trusting the capture.
 |---|---|---|---|
 | `raspberry_pi_camera_module_1` | OV5647 | RAW10 640x480 | ADR 0017 Tier-1 upstream-pending backport (see `docs/camera-shields.md`). **BENCH-VERIFIED** (2026-09-22, an E1M-AEN803 on the E1M-EVK, issue #2248), needs the J5 pin-11 pull-up rework (`docs/boards/e1m-evk.md`). |
 | `innomaker_cam_ov9281` | OV9281 | GREY8 640x400 (this example); driver also offers 1280x720 and 1280x800 GREY8 | ADR 0017 Tier-1.5 port of the Espressif driver. **BENCH-VERIFIED 2026-09-21** on an E1M-AEN803 on the E1M-EVK, in all three modes: 640x400 (Espressif's), 1280x720 (Espressif's) and 1280x800 (Alp-authored, derived from the 1280x720 table) all captured live frames -- a `0xA5`-prefilled pool overwritten plus the sensor test pattern appearing, verified in all three -- each at its configured frame rate (measured 60-frame bursts: 640x400 ~100 fps, 1280x720 ~50 fps, 1280x800 ~100 fps). |
-| `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet (issue #2287). **I2C identity bench-verified only** (bench run 229, 2026-09-24): the module answers at CCI 0x1A and the undocumented SENSOR_INFO signature (0x3148/0x3149 = 0x4A00) matches the colour IMX296LQR-C variant this driver targets. CSI-2 streaming through this app has not run on real silicon -- see `docs/camera-shields.md`'s IMX296 driver section. |
+| `raspberry_pi_global_shutter_camera` | IMX296 | RAW10 1456x1088, 1 lane | ADR-0017-ADJACENT, written from the Sony datasheet (issue #2287). **Stage A bench-verified**: I2C identity (bench run 229, 2026-09-24 -- the module answers at CCI 0x1A and the undocumented SENSOR_INFO signature 0x3148/0x3149 = 0x4A00 matches the colour IMX296LQR-C variant this driver targets) and a real captured frame (bench run 292 -- mean 61.19, max 108, clean close, 0.98 correlation against a diag control capture) -- see `docs/camera-shields.md`'s IMX296 driver section for the full bench numbers and what's still unverified (ISP-Pico, AE, fast-trigger). |
 
 ## Frame buffers live in SRAM0, not DTCM
 
@@ -151,6 +153,7 @@ real result (2026-09-21, an E1M-AEN803 on the E1M-EVK, J-Link RAM-run, same
 flow as the sibling `*-regcheck` apps) is real GREY8 frames landing in memory
 in all three modes, each at its configured frame rate; the OV5647 shield's
 real result (2026-09-22, issue #2248) is a live RAW10 640x480 capture on the
-same board. The IMX296 shield's real result so far (issue #2287, bench run
-229) is I2C identity only -- the module answers its probe and the SENSOR_INFO
-signature matches -- CSI-2 streaming through this app has not been bench-run.
+same board. The IMX296 shield's real result (issue #2287, bench run 292) is
+a live RAW10 1456x1088 capture on the same board -- mean pixel value 61.19,
+max 108, clean close, no IPI errors, no mod-4-column pattern, 0.98
+correlation against a diag control capture (run 293).
