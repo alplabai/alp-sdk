@@ -255,9 +255,13 @@ SRC_URI:append:rzv2n-family = " file://0006-rzv2n-dev-i2c-rzg2l_riic-p06-p07-pul
 # and to writing only these two registers, and only when reg 0x00 reads
 # the expected OTP-burned/addr-0x69 value (0xa0) and 0x24/0x21 read the
 # exact as-shipped OTP pair -- any other readback is left untouched and
-# only reported. Disjoint from every patch above (adds a new function
-# ahead of board_late_init(), which 0004 already edits at its tail), so
-# ordering after 0006 is not order-sensitive, only readable.
+# only reported. NOT disjoint from 0004: this patch's board_late_init()
+# hunk rewrites the `bool v2n_m1 = alp_som_is_v2n_m1();` declaration
+# 0004 adds (splitting it into a bare declaration plus a later
+# assignment, so alp_clk5l_fixup() can run first) -- it must apply on
+# top of 0004's context, not merely after it for readability. It is
+# disjoint from 0005/0006 (drivers/i2c/rzg2l_riic.c), so its position
+# after those two is not order-sensitive, only readable.
 SRC_URI:append:rzv2n-family = " file://0007-rzv2n-dev-ALP-E1M-clkgen-otp-fixup.patch"
 
 # Per-SKU board dtb for CONFIG_BOOTCOMMAND (alp-sdk#1252).  One u-boot

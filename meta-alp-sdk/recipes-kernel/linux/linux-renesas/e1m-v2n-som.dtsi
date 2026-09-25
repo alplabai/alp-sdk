@@ -312,6 +312,14 @@
 		 * not in e1m-x-evk.dtsi's carrier-bus aliases block. */
 		i2c8 = &i2c8;
 		rtc0 = &rv3028;
+		/* &rtc (SoC RTCA-3) below is enabled and probes before rtc0
+		 * above -- Linux's rtc class allocates ids in probe order
+		 * (drivers/rtc/class.c ida_alloc), and drivers/Makefile links
+		 * rtc/ before i2c/, so without a fixed id here &rtc would grab
+		 * /dev/rtc0 and rv3028 would land on /dev/rtc1, breaking
+		 * RTC_HCTOSYS and every alias above that assumes rv3028 = rtc0.
+		 * Pin &rtc to rtc1 explicitly so rv3028 keeps rtc0. */
+		rtc1 = &rtc;
 	};
 };
 

@@ -56,10 +56,12 @@ The RZ/V2N's own RTC (RTCA-3, RTXIN/RTXOUT) is a second, SoC-internal
 timebase and is enabled in the SoM devicetree (`&rtc` in
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi`).
 RTXIN has no discrete 32.768 kHz crystal -- it is fed by the SE1 output
-of the on-module clock-generator fixup below, and U-Boot must correct
-that output to 32.768 kHz on every boot before Linux probes `&rtc`; see
-that section for the mechanism and why a stale build would see this
-RTC time out instead.
+of the clock generator, and U-Boot must correct that output to
+32.768 kHz on every boot before Linux probes `&rtc`; see the
+clock-generator fixup section below for the mechanism and why a stale
+build would see this RTC time out instead. `&rtc` probes before
+`rv3028` and is pinned to `/dev/rtc1` (`rtc1` alias) so `rv3028` keeps
+`/dev/rtc0` -- see `e1m-v2n-som.dtsi`'s `aliases` block.
 
 ## On-module clock-generator fixup
 

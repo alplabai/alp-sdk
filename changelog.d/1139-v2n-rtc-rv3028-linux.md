@@ -19,11 +19,12 @@ A55".
 
 Fixed at the SoM layer, not the carrier: `` &rtc { status = "disabled";
 }; `` now lives in
-`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:342`
-("status = "disabled";"), with the carrier's conflicting override
-removed (SoM dtsi composes before the carrier dtsi, so leaving the
-carrier's `"okay"` in place would have silently won). A new `rtc@52`
-node under the existing `&i2c8` block,
+`meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi` (that
+line's own state is superseded a few hours later, see the note below --
+no line-number citation here since it no longer says "disabled"), with
+the carrier's conflicting override removed (SoM dtsi composes before the
+carrier dtsi, so leaving the carrier's `"okay"` in place would have
+silently won). A new `rtc@52` node under the existing `&i2c8` block,
 `meta-alp-sdk/recipes-kernel/linux/linux-renesas/e1m-v2n-som.dtsi:302`
 ("rv3028: rtc@52 {"), binds `compatible = "microcrystal,rv3028"`, and a
 new `aliases { rtc0 = &rv3028; };` makes it `/dev/rtc0`.
