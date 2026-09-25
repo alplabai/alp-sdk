@@ -61,21 +61,27 @@
 #define HTTP_PORT 8080
 
 /* Resolution + frame rate, CONFIG_CAMERA_MJPEG_STREAM_1280X960-selected
- * (Kconfig, this directory) -- see issue #2286 Stage A.  Default: 640x480
+ * (Kconfig, this directory) -- see issue #2286.  Default: 640x480
  * @ 30 fps, the bench-proven path both the real camera and the synthetic
  * fallback request. mjpeg_http.h's MJPEG_HTTP_MAX_JPEG scales with this
  * same symbol; see boards/alp_e1m_aen80{1,3}_..._rtss_he.conf for how the
  * AEN video buffer pool is sized for 640x480, and
  * boards/overlay-1280x960.conf for the 1280x960 sizing.
  *
- * 1280x960 @ 15 fps is the OV5647's EXISTING centre-crop mode (no sensor
- * register-table change, ov5647.c) -- the field of view is the centre crop,
- * not a full-sensor 2x2-binned mode (that is Stage B, tracked separately).
- * 15 fps, not 30: two 1,843,200 B NV12 frames already consume most of the
- * AEN's 4 MiB SRAM0 bank alongside the JPEG output buffers (see
+ * 1280x960 @ 15 fps is the OV5647's full-sensor 2x2-binned mode (issue
+ * #2286 Stage B, ov5647.c's ov5647_set_mode_regs()) -- the field of view
+ * is the WHOLE sensor array, not Stage A's narrower centre crop at this
+ * same output size (retired: the binned mode delivers identical output
+ * pixels from a wider FOV and a faster per-mode line time, so there is no
+ * remaining reason to request the crop at exactly 1280x960). Still
+ * requested at 15 fps here, not the sensor mode's now-reachable 30 fps:
+ * two 1,843,200 B NV12 frames already consume most of the AEN's 4 MiB
+ * SRAM0 bank alongside the JPEG output buffers (see
  * boards/overlay-1280x960.conf), leaving no SRAM0 budget for the
  * synthetic-frame fallback below -- CAMERA_MJPEG_STREAM_1280X960 compiles
- * that fallback path out entirely, not just moves it. */
+ * that fallback path out entirely, not just moves it. Raising the request
+ * to 30 fps would also need a fresh bench pass (encode time, send-path
+ * bandwidth) not done yet. */
 #if defined(CONFIG_CAMERA_MJPEG_STREAM_1280X960)
 #define FRAME_W   1280
 #define FRAME_H   960

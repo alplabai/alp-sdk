@@ -160,15 +160,19 @@
 	clock-frequency = <24000000>;
 };
 
-/* RTXIN/rtc_clk/&rtc are intentionally left untouched here: the E1M
- * V2N-family SoM has no 32.768 kHz crystal fitted on RTXIN/RTXOUT
- * (schematic DNP), so there is nothing to enable. The SoC RTC is
- * disabled at the SoM layer (e1m-v2n-som.dtsi), which composes before
- * this carrier dtsi -- do not add `&rtc { status = "okay"; }` here, it
- * would silently override that disable. The on-module RV-3028-C7 is
- * the real RTC. Per this file's own convention ("only ENABLE what the
- * carrier populates"), a carrier with no crystal has nothing to enable
- * here. */
+/* RTXIN/rtc_clk/&rtc are intentionally left untouched here: the SoC
+ * RTC is enabled and rtc_clk fixed at 32.768 kHz at the SoM layer
+ * (e1m-v2n-som.dtsi, which composes before this carrier dtsi) -- do not
+ * add an &rtc/&rtc_clk override here, it would silently fight that
+ * setting. RTXIN has no discrete 32.768 kHz crystal; it is fed by SE1
+ * of the on-module 5L35023B clock generator instead, corrected from
+ * its as-shipped 24.576 MHz by U-Boot on every boot (see
+ * e1m-v2n-som.dtsi's own comment and the meta-alp-sdk u-boot 0007
+ * patch). The on-module RV-3028-C7 remains the RTC of record (rtc0
+ * alias) -- the SoC RTC is a second, SoC-internal timebase, not a
+ * replacement. Per this file's own convention ("only ENABLE what the
+ * carrier populates"), a carrier has nothing to enable here either
+ * way. */
 
 /* Carrier microSD slot (SDHI1). The bench dev image roots from this card
  * (root=/dev/mmcblk1p2); on-module eMMC (SDHI0) is the production boot.
