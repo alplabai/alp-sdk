@@ -507,6 +507,22 @@
 	 * PMC9/PM9 byte-RMW that can race the CM33 (the SD1_CD/P94 lesson
 	 * above).  The one deliberate exception is the V2M deepx mux-sel
 	 * hog on P9.5 (e1m-v2m-deepx.dtsi) -- see the race note there. */
+	/* CONFLICT, NOT YET RECONCILED (flagged during the 2026-09 WLAN/BT
+	 * productization pass): PB1 is claimed HERE as a plain GPIO input
+	 * (usb30 OVC parking), and is ALSO claimed by the on-module WLAN
+	 * SDIO group as SD2DAT0 func1 (e1m-v2n-som.dtsi's sd2_wlan_pins,
+	 * &sdhi2). A SoC pin cannot be both a muxed SDIO data line and a
+	 * bare GPIO input at once -- whichever pinctrl group applies last
+	 * wins and silently breaks the other (usb30 OVC parking, or WLAN
+	 * DAT0 -- one of the two boot-strap-sampled SD2 lines, so breaking
+	 * it is the worse failure). On-module WLAN is populated on every
+	 * V2N/V2M SKU; this carrier-level hog predates that work. NOT
+	 * resolved here: doing so needs either bench confirmation that
+	 * usb30 OVC parking is safe to drop (its own header comment above
+	 * only says it keeps the xHCI OVC input from reading a floating
+	 * fault, not that the signal does anything real) or a carrier
+	 * schematic re-route -- neither is available in this change. See
+	 * docs/soms/v2n.md's Wi-Fi/BT section. */
 	usb-ovc-disable-hog {
 		gpio-hog;
 		gpios = <RZV2N_GPIO(B, 1) GPIO_ACTIVE_HIGH>;

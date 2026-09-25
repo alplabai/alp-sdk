@@ -1,3 +1,4 @@
+From a51393f7aa4b86d9a68e88020b7ba2b39bb3b6a9 Mon Sep 17 00:00:00 2001
 From: Alp Lab AB <contact@alplab.ai>
 Date: Thu, 4 Jun 2026 14:33:20 +0200
 Subject: [PATCH] gpio: add Alp Lab GD32 bridge expander driver
@@ -28,17 +29,25 @@ lines -- notably the Display-1 panel reset -- holding the entire DSI/DU
 pipeline hostage to the bridge's liveness. Individual GPIO ops instead
 fail gracefully (dev_warn) and begin working once the bridge answers.
 
+RETITLED (2026-09): the bridge pad map grew two more lines at firmware
+0.2.12 (bt-reg-on/wl-reg-on, PROTOCOL_VERSION_MINOR 11) for the
+on-module Murata LBEE5HY2FY-922 Wi-Fi+BT REG_ON pair. The chip now
+exposes 18 or 20 lines depending on the GET_VERSION reply at probe, so
+older/unflashed bridges keep working with the original 18-line map
+instead of getting two GPIO lines whose writes the firmware ignores.
+
 Upstream-Status: Inappropriate [Alp Lab SoM-specific supervisor MCU protocol]
 
 Signed-off-by: Alp Lab AB <contact@alplab.ai>
 ---
  drivers/gpio/Kconfig            |   9 ++
  drivers/gpio/Makefile           |   1 +
- drivers/gpio/gpio-gd32-bridge.c | 245 ++++++++++++++++++++++++++++++++++++++++
- 3 files changed, 255 insertions(+)
+ drivers/gpio/gpio-gd32-bridge.c | 273 ++++++++++++++++++++++++++++++++
+ 3 files changed, 283 insertions(+)
+ create mode 100644 drivers/gpio/gpio-gd32-bridge.c
 
 diff --git a/drivers/gpio/Kconfig b/drivers/gpio/Kconfig
-index 74d8b949ce36..eefc447b2148 100644
+index 74d8b949c..eefc447b2 100644
 --- a/drivers/gpio/Kconfig
 +++ b/drivers/gpio/Kconfig
 @@ -1009,6 +1009,15 @@ config GPIO_ADNP
@@ -58,7 +67,7 @@ index 74d8b949ce36..eefc447b2148 100644
  	tristate "Gateworks PLD GPIO Expander"
  	depends on OF_GPIO
 diff --git a/drivers/gpio/Makefile b/drivers/gpio/Makefile
-index e331e951ef2e..3ba5cc2f2193 100644
+index e331e951e..3ba5cc2f2 100644
 --- a/drivers/gpio/Makefile
 +++ b/drivers/gpio/Makefile
 @@ -59,6 +59,7 @@ obj-$(CONFIG_GPIO_EP93XX)		+= gpio-ep93xx.o
@@ -71,10 +80,10 @@ index e331e951ef2e..3ba5cc2f2193 100644
  obj-$(CONFIG_GPIO_GRGPIO)		+= gpio-grgpio.o
 diff --git a/drivers/gpio/gpio-gd32-bridge.c b/drivers/gpio/gpio-gd32-bridge.c
 new file mode 100644
-index 000000000000..acc6ca9c7966
+index 000000000..2df6d6dda
 --- /dev/null
 +++ b/drivers/gpio/gpio-gd32-bridge.c
-@@ -0,0 +1,244 @@
+@@ -0,0 +1,273 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * GPIO driver for the Alp Lab GD32 IO-MCU bridge (I2C transport).
@@ -92,6 +101,19 @@ index 000000000000..acc6ca9c7966
 + *  - GPIO_WRITE auto-promotes a pad to push-pull output, sticky until the
 + *    GD32 resets; there is no demote-to-input. direction_input() is
 + *    therefore only honoured for never-written lines.
++ *
++ * Lines 18/19 (bt-reg-on / wl-reg-on): the Murata LBEE5HY2FY-922
++ * (Infineon CYW55513) Wi-Fi+BT module's two REG_ON enables, added to
++ * the bridge pad map at firmware 0.2.12 / PROTOCOL_VERSION_MINOR 11
++ * (pad count 18 -> 20; GD32 boots them OUTPUT LOW). Gated on the
++ * GET_VERSION reply at probe: a bridge reporting minor < 11 (or not
++ * answering at all) still gets the classic 18-line chip -- its
++ * firmware never learned these two pads, so exposing them would let a
++ * consumer (mmc-pwrseq-simple, a bluetooth shutdown-gpios) issue
++ * GPIO_WRITE against pad bits the firmware silently ignores, powering
++ * nothing and reporting success. Older/unflashed bridges are common in
++ * the field (see the probe-liveness comment below) so this must be a
++ * runtime check, not a compile-time one.
 + *
 + * Copyright (c) 2026 Alp Lab AB
 + */
@@ -111,12 +133,18 @@ index 000000000000..acc6ca9c7966
 +#define GD32_CMD_GPIO_WRITE	0x11
 +#define GD32_STATUS_OK		0x00
 +
-+#define GD32_NGPIO		18
++#define GD32_NGPIO_BASE		18
++#define GD32_NGPIO_WIFI_BT	20
 +
-+static const char * const gd32_bridge_gpio_names[GD32_NGPIO] = {
++/* Bridge protocol minor at which lines 18/19 (bt-reg-on/wl-reg-on) first
++ * exist. A bridge below this minor has no notion of them. */
++#define GD32_PROTO_MINOR_WIFI_BT	11
++
++static const char * const gd32_bridge_gpio_names[GD32_NGPIO_WIFI_BT] = {
 +	"IO8",  "IO9",  "IO10", "IO11", "IO12", "IO13",
 +	"IO14", "IO16", "IO24", "IO25", "IO27", "IO28",
 +	"IO29", "IO30", "IO31", "IO32", "IO34", "IO35",
++	"bt-reg-on", "wl-reg-on",
 +};
 +
 +struct gd32_bridge_gpio {
@@ -132,6 +160,7 @@ index 000000000000..acc6ca9c7966
 +	 */
 +	u32 output_mask;
 +	u32 output_vals;
++	bool has_wifi_bt_reg_on;	/* bridge minor >= 11: lines 18/19 valid */
 +};
 +
 +static int gd32_bridge_xfer(struct gd32_bridge_gpio *gd32, u8 cmd,
@@ -272,23 +301,32 @@ index 000000000000..acc6ca9c7966
 +	 * gd32_bridge_gpio_get/_set) and start working once the bridge is up.
 +	 */
 +	ret = gd32_bridge_xfer(gd32, GD32_CMD_GET_VERSION, NULL, 0, ver, 3);
-+	if (ret)
++	if (ret) {
 +		dev_warn(&client->dev,
 +			 "bridge not answering (%d); registering gpiochip anyway -- GPIO ops will error until it is up\n",
 +			 ret);
-+	else if (ver[0] != 0)
++	} else if (ver[0] != 0) {
 +		dev_warn(&client->dev,
 +			 "unsupported bridge protocol %u.%u.%u; registering anyway\n",
 +			 ver[0], ver[1], ver[2]);
-+	else
++	} else {
 +		dev_info(&client->dev, "GD32 bridge protocol %u.%u.%u\n",
 +			 ver[0], ver[1], ver[2]);
++		if (ver[1] >= GD32_PROTO_MINOR_WIFI_BT)
++			gd32->has_wifi_bt_reg_on = true;
++	}
 +
 +	gd32->chip.label	  = "gd32-bridge-gpio";
 +	gd32->chip.parent	  = &client->dev;
 +	gd32->chip.owner	  = THIS_MODULE;
 +	gd32->chip.base		  = -1;
-+	gd32->chip.ngpio	  = GD32_NGPIO;
++	/*
++	 * A failed handshake (ret != 0) is treated the same as an old
++	 * bridge: no confirmed minor >= 11, so stay at the 18-line chip
++	 * rather than gambling that lines 18/19 exist.
++	 */
++	gd32->chip.ngpio	  = gd32->has_wifi_bt_reg_on ? GD32_NGPIO_WIFI_BT
++							     : GD32_NGPIO_BASE;
 +	gd32->chip.names	  = gd32_bridge_gpio_names;
 +	gd32->chip.get		  = gd32_bridge_gpio_get;
 +	gd32->chip.set		  = gd32_bridge_gpio_set;
@@ -319,3 +357,6 @@ index 000000000000..acc6ca9c7966
 +MODULE_AUTHOR("Alp Lab AB");
 +MODULE_DESCRIPTION("GPIO driver for the Alp Lab GD32 IO-MCU bridge");
 +MODULE_LICENSE("GPL");
+-- 
+2.38.1.windows.1
+

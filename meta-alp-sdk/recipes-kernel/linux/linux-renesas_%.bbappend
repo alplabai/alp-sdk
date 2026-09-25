@@ -226,6 +226,15 @@ SRC_URI:append = " \
 # display.cfg: this is a SoM-level fact, not a carrier one.
 SRC_URI:append = " file://rv3028-rtc.cfg"
 
+# On-module Murata LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi + BT -- all
+# six V2N-family SKUs carry the same module (see wifi_ble: in each
+# metadata/e1m_modules/E1M-V2{N,M}10{1,2,3}.yaml). Unconditional like
+# rv3028-rtc.cfg above: a SoM-level fact, not a per-machine one. See
+# e1m-v2n-som.dtsi for the &sdhi2 WLAN node + &sci4 BT node, and
+# meta-alp-sdk/recipes-kernel/cyw-fmac{,-firmware}/ for the out-of-tree
+# driver + blobs this fragment's CFG80211=m / BRCMFMAC=n pairs with.
+SRC_URI:append = " file://wifi-bt.cfg"
+
 # Display stack: RK055HDMIPI4MA0 panel on Display 1 (DSI + PWM backlight + GPT
 # + GD32-bridge GPIO for panel reset).
 SRC_URI:append:e1m-v2n101 = " file://display.cfg"

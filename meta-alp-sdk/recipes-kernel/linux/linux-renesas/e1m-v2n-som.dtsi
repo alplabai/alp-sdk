@@ -321,6 +321,23 @@
 		 * Pin &rtc to rtc1 explicitly so rv3028 keeps rtc0. */
 		rtc1 = &rtc;
 	};
+
+	/* On-module Wi-Fi power sequencing for the Murata LBEE5HY2FY-922
+	 * (Infineon CYW55513): WL_REG_ON is GD32 bridge line 19 (PE15,
+	 * boots OUTPUT LOW at bridge firmware >= 0.2.12 / protocol minor
+	 * 11 -- see gpio-gd32-bridge.c). mmc-pwrseq-simple's reset-gpios
+	 * is asserted (driven to its ACTIVE level) in .pre_power_on and
+	 * deasserted in .post_power_on, so ACTIVE_LOW here reproduces the
+	 * required sequence: REG_ON low through card power-up, then high.
+	 * post-power-on-delay-ms mirrors the >=10 ms REG_ON-low hold the
+	 * bring-up notes call for before the rising edge; NOT bench-tuned
+	 * against real silicon yet (module has never enumerated on this
+	 * board -- see docs/soms/v2n.md's Wi-Fi/BT section). */
+	wlan_pwrseq: wlan-pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gd32_gpio 19 GPIO_ACTIVE_LOW>;
+		post-power-on-delay-ms = <10>;
+	};
 };
 
 /* SoC RTC (RTCA-3, RTXIN/RTXOUT). RTXIN has no discrete 32.768 kHz
@@ -348,6 +365,103 @@
 
 &rtc {
 	status = "okay";
+};
+
+/* On-module Wi-Fi: Murata LBEE5HY2FY-922 (Infineon CYW55513) on SDHI2,
+ * 4-bit SDIO, non-removable (it is a soldered-down module, not a card
+ * slot). Ground truth (bench-derived 2026-06, see [[project-v2n-wifi-
+ * ble-lbee5hy2fy]]): PB0=CLK, PB1-PB4=DAT0-3, PB5=CMD (RZ/V2N datasheet
+ * Table 2.2-2, Func1 -- the ONLY SD2 routing).
+ *
+ * IOVS (SD_STATUS pad-voltage-mode bit) MUST be set for a 1.8 V-only
+ * part like this one: the SoC SDHI2 pads reset into 3.3 V receiver
+ * mode, which cannot read the module's 1.8 V SDIO responses at all
+ * (CMDTIMEOUT on every CMD5). IOVS is set ONLY when the SDHI's own
+ * internal vqmmc-regulator child (sdhi2_vqmmc, from the SoC dtsi) is
+ * enabled -- but enabling it NAIVELY re-triggers a real bench-observed
+ * boot oops: regulator_late_cleanup -> renesas_sdhi_regulator_
+ * is_enabled -> a raw SD_STATUS register read while the controller is
+ * runtime-suspended takes a synchronous external abort, which killed
+ * the console-input IRQ and put the eMMC rootfs at risk on the exact
+ * board this was found on. `regulator-always-on` is the proven-safe
+ * fix: it makes regulator_late_cleanup's own early-return trigger
+ * (`if (c->always_on) return 0;`) fire BEFORE the crashing read. Do
+ * NOT drop regulator-always-on from sdhi2_vqmmc below -- see the
+ * bench facts file for the exact oops signature if this needs
+ * revisiting.
+ *
+ * mmc-pwrseq drives WL_REG_ON (GD32 bridge line 19) through the
+ * required low-then-high sequence (wlan_pwrseq, above). The `wifi@1`
+ * child node is the standard brcmfmac SDIO binding; brcmfmac itself
+ * matches on the SDIO vendor/device ID the module reports, this node
+ * only gives it a DT anchor for future properties (e.g. a host-wake
+ * IRQ, not yet routed on this SoM).
+ *
+ * STATUS: UNVALIDATED on real silicon through this exact node shape --
+ * the WLAN blocker chased through 2026-06 bench sessions turned out to
+ * be the module's 32.768 kHz LPO (from U25, the 5L35023B clock
+ * generator), not anything IOVS/pinctrl/strap-side; see
+ * fix/v2n-u25-lpo-clock for that fix (owned there, NOT touched here).
+ * This node assumes that fix lands; SDIO enumeration itself has not
+ * been re-run against it.
+ */
+&sdhi2 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	pinctrl-0 = <&sd2_wlan_pins>;
+	pinctrl-1 = <&sd2_wlan_pins>;
+	pinctrl-names = "default", "state_uhs";
+	vqmmc-supply = <&sdhi2_vqmmc>;
+	mmc-pwrseq = <&wlan_pwrseq>;
+	bus-width = <4>;
+	non-removable;
+	cap-power-off-card;
+	keep-power-in-suspend;
+	status = "okay";
+
+	sdhi2_vqmmc: vqmmc-regulator {
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+	};
+
+	wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+	};
+};
+
+/* On-module Bluetooth: the same CYW55513's BT core, on RSCI4 (UART),
+ * P40-P43 -- BT_REG_ON is GD32 bridge line 18 (PE14). shutdown-gpios
+ * on the `bluetooth` child node is the standard brcm,bcm43438-bt
+ * binding: hci_uart's Broadcom vendor extension drives it through the
+ * same low-then-high sequence as WL_REG_ON before the .hcd firmware
+ * patch load and baud-rate ramp (default baud 115200, bench-confirmed
+ * 2026-06 -- see the ground-truth memory note). uart-has-rtscts
+ * matches the 4-wire P40-43 wiring (TXD/RXD/CTS/RTS).
+ *
+ * PFC funcs per the e2 studio PinMux tool (authoritative over the
+ * EVK reference dts, which does not populate RSCI4 at all): P40=f2
+ * (TXD4), P41=f2 (RXD4), P42=f4 (CTS4), P43=f2 (RTS4) -- note CTS4 is
+ * NOT the same function number as the other three; do not "correct"
+ * it to f2, that was checked against pin_data.c directly.
+ *
+ * STATUS: raw HCI (no shutdown-gpios, manual REG_ON) was bench-proven
+ * on /dev/ttySC4 in 2026-06; this serdev-based node (in-kernel REG_ON
+ * sequencing through the bridge, replacing the manual toggle) has not
+ * itself been re-run on silicon.
+ */
+&sci4 {
+	pinctrl-0 = <&sci4_bt_pins>;
+	pinctrl-names = "default";
+	uart-has-rtscts;
+	status = "okay";
+
+	bluetooth {
+		compatible = "brcm,bcm43438-bt";
+		shutdown-gpios = <&gd32_gpio 18 GPIO_ACTIVE_HIGH>;
+		max-speed = <115200>;
+	};
 };
 
 /* On-module xSPI NOR. */
@@ -515,5 +629,42 @@
 
 	backlight_pwm_pins: backlight-pwm {
 		pinmux = <RZV2N_PORT_PINMUX(A, 5, 9)>; /* PA5 func 9 = GTIOC10B -> on-SoM backlight boost CNTRL */
+	};
+
+	/* On-module Wi-Fi SDIO (SDHI2), func1 -- see &sdhi2 above for the
+	 * full ground-truth writeup. Split CLK vs CMD/DAT exactly like
+	 * sdhi0_emmc_pins above: PB0 (SD2CLK) has NO PIN_CFG_IEN capability
+	 * in the pinctrl-rzg2l RZV2H_PB table (a group-wide input-enable
+	 * spanning it fails pinctrl_ops.set_mux with -EINVAL, taking the
+	 * WHOLE group down, clk included) while PB1-PB5 (SD2DAT0-3, SD2CMD)
+	 * all have it and need it enabled for the host to sample the
+	 * module's responses at all. */
+	sd2_wlan_pins: sd2-wlan {
+		sd2-clk {
+			pinmux = <RZV2N_PORT_PINMUX(B, 0, 1)>; /* PB0 = SD2CLK */
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
+
+		sd2-cmd-dat {
+			pinmux = <RZV2N_PORT_PINMUX(B, 1, 1)>, /* PB1 = SD2DAT0 */
+				 <RZV2N_PORT_PINMUX(B, 2, 1)>, /* PB2 = SD2DAT1 */
+				 <RZV2N_PORT_PINMUX(B, 3, 1)>, /* PB3 = SD2DAT2 (SDIO/gSPI boot strap) */
+				 <RZV2N_PORT_PINMUX(B, 4, 1)>, /* PB4 = SD2DAT3 */
+				 <RZV2N_PORT_PINMUX(B, 5, 1)>; /* PB5 = SD2CMD */
+			input-enable;
+			renesas,output-impedance = <2>;
+			slew-rate = <0>;
+		};
+	};
+
+	/* On-module Bluetooth UART (RSCI4), P40-P43. Func numbers per the
+	 * e2 studio PinMux tool (pin_data.c) -- NOT uniform (CTS4 is f4,
+	 * the other three are f2); see the &sci4 comment above. */
+	sci4_bt_pins: sci4-bt {
+		pinmux = <RZV2N_PORT_PINMUX(4, 0, 2)>, /* P40 = TXD4 */
+			 <RZV2N_PORT_PINMUX(4, 1, 2)>, /* P41 = RXD4 */
+			 <RZV2N_PORT_PINMUX(4, 2, 4)>, /* P42 = CTS4 */
+			 <RZV2N_PORT_PINMUX(4, 3, 2)>; /* P43 = RTS4 */
 	};
 };
