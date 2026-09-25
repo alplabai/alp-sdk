@@ -331,8 +331,9 @@ indefinitely; host code SHOULD NOT call it.
 
 `mask` selects which GD32 pads the host wants to read or write.  The
 mask is a **logical** index space owned by the GD32 firmware — the
-bit-to-pad mapping is documented in `gd32-bridge-firmware:README.md` and
-mirrored in the host driver header.  The host MUST NOT assume that
+bit-to-pad mapping (bits 0..19) is documented in
+`gd32-bridge-firmware:README.md`; the host header names only bits 18/19
+(below).  The host MUST NOT assume that
 bit `n` corresponds to GD32 pad `Pxn`.
 
 `GPIO_WRITE` is atomic in the firmware: read-modify-write of the
@@ -361,6 +362,12 @@ once at `probe()` (a single best-effort `GET_VERSION` at boot
 consistently races the bridge's own startup) -- see
 `GD32G553_REG_ON_MIN_PROTOCOL_MINOR` in
 [`include/alp/chips/gd32g553.h`](../include/alp/chips/gd32g553.h).
+
+**Any GD32 reset drops both lines low again** (WDT, fault, OTA A/B
+swap, SE reset -- the boot-time OUTPUT LOW default applies on every
+reset), which power-cycles the module. The host must re-assert them
+after a bridge reset, not only at first bring-up; `CMD_RESET_REASON`
+is how it detects one. No host code does that yet (#2297).
 
 ### 3.2 PWM channels
 
@@ -1063,8 +1070,10 @@ image data), the host driver **gates the OTA session on `minor`**: an
 OTA cannot start against a peer below `GD32G553_OTA_MIN_PROTOCOL_MINOR`
 (6). `gd32g553_ota_begin` / `gd32g553_ota_write_chunk` return
 `ALP_ERR_NOSUPPORT` **before any erase or program**, and
-`gd32g553_ota_supported()` lets a host check up front (#751). Other
-opcodes remain governed by the exact-lockstep rule above.
+`gd32g553_ota_supported()` lets a host check up front (#751). The
+REG_ON lines 18/19 of `GPIO_WRITE` are the second minor-gated surface
+(`GD32G553_REG_ON_MIN_PROTOCOL_MINOR`, §3.1). Other opcodes remain
+governed by the exact-lockstep rule above.
 
 Version history (pre-1.0): **v0.7** adds `LINK_FEATURES` (0x81) +
 the negotiated `STATUS_SEQ` reply stamp (§3.14, §4.1.1) and the
@@ -1078,8 +1087,13 @@ the ADC-stream DSP pipeline's already-existing `chain_open` /
 actually filters or spectralizes the stream instead of the chain
 sitting unbound — and adds the new opcode `CMD_ADC_SPECTRUM_READ`
 (`0x3A`, §3.x) to pull the FFT terminal's spectrum; a v0.8 host that
-never binds a chain sees no behaviour change.  **v0.11** (firmware
-`0.2.12`, `gd32-bridge-firmware` commit `d555cfa`) grows the GPIO
+never binds a chain sees no behaviour change.  **v0.10**
+(`gd32-bridge-firmware` PR #121) makes the ADC-stream DSP chain bind
+refuse, up front, a chain the FAC/FFT runtime cannot realise and a
+second FFT bind against the single FFT block; before it, both were
+accepted and failed only at stream time (`STATUS_OK` with zero
+samples forever, or `STATUS_BUSY` forever on both streams).
+**v0.11** (firmware `0.2.12`, `gd32-bridge-firmware` PR #244) grows the GPIO
 expander pad map from 18 to 20 lines, adding `bt-reg-on` (bit 18,
 `PE14`) and `wl-reg-on` (bit 19, `PE15`) for the on-module Murata
 LBEE5HY2FY-922 (Infineon CYW55513) Wi-Fi+BT module's REG_ON enables —
